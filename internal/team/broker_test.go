@@ -4599,6 +4599,269 @@ func TestBrokerGetRequestsScopeAllSeesCrossChannelBlocker(t *testing.T) {
 	}
 }
 
+func TestBrokerCancelBlockingApprovalUnblocksMessages(t *testing.T) {
+	b := NewBrokerAt(leakedBrokerStatePath(t))
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("failed to start broker: %v", err)
+	}
+	defer b.Stop()
+
+	base := fmt.Sprintf("http://%s", b.Addr())
+	createBody, _ := json.Marshal(map[string]any{
+		"kind":     "approval",
+		"from":     "ceo",
+		"channel":  "general",
+		"title":    "Approval needed",
+		"question": "Ship it?",
+		"blocking": true,
+		"required": true,
+	})
+	req, _ := http.NewRequest(http.MethodPost, base+"/requests", bytes.NewReader(createBody))
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("create approval failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 200 creating approval, got %d: %s", resp.StatusCode, raw)
+	}
+	var created struct {
+		Request humanInterview `json:"request"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		t.Fatalf("decode created request: %v", err)
+	}
+	if !b.HasBlockingRequest() {
+		t.Fatal("approval should block before it is canceled")
+	}
+
+	messageBody, _ := json.Marshal(map[string]any{
+		"from":    "you",
+		"channel": "general",
+		"content": "This should still be blocked.",
+	})
+	req, _ = http.NewRequest(http.MethodPost, base+"/messages", bytes.NewReader(messageBody))
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	req.Header.Set("Content-Type", "application/json")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("post message before cancel failed: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("expected approval to block message before cancel, got %d", resp.StatusCode)
+	}
+
+	cancelBody, _ := json.Marshal(map[string]any{
+		"action": "cancel",
+		"id":     created.Request.ID,
+	})
+	req, _ = http.NewRequest(http.MethodPost, base+"/requests", bytes.NewReader(cancelBody))
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	req.Header.Set("Content-Type", "application/json")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("cancel approval failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 200 canceling approval, got %d: %s", resp.StatusCode, raw)
+	}
+	if b.HasBlockingRequest() {
+		t.Fatal("canceled approval should not block")
+	}
+
+	req, _ = http.NewRequest(http.MethodPost, base+"/messages", bytes.NewReader(messageBody))
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	req.Header.Set("Content-Type", "application/json")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("post message after cancel failed: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected message after canceled approval to succeed, got %d", resp.StatusCode)
+	}
+}
+
+func TestBrokerHumanInterviewDoesNotBlockAndCancelsOnHumanMessage(t *testing.T) {
+	b := NewBrokerAt(leakedBrokerStatePath(t))
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("failed to start broker: %v", err)
+	}
+	defer b.Stop()
+
+	base := fmt.Sprintf("http://%s", b.Addr())
+	createBody, _ := json.Marshal(map[string]any{
+		"kind":     "interview",
+		"from":     "ceo",
+		"channel":  "general",
+		"title":    "Human interview",
+		"question": "Which customer segment should we prioritize?",
+		"blocking": true,
+		"required": true,
+		"reply_to": "msg-thread-1",
+	})
+	req, _ := http.NewRequest(http.MethodPost, base+"/requests", bytes.NewReader(createBody))
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("create interview failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 200 creating interview, got %d: %s", resp.StatusCode, raw)
+	}
+	var created struct {
+		Request humanInterview `json:"request"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		t.Fatalf("decode created interview: %v", err)
+	}
+	if created.Request.Blocking || created.Request.Required {
+		t.Fatalf("human interviews must be non-blocking, got %+v", created.Request)
+	}
+	if b.HasBlockingRequest() {
+		t.Fatal("human interview should not count as a blocking request")
+	}
+
+	createFollowUpBody, _ := json.Marshal(map[string]any{
+		"kind":     "interview",
+		"from":     "ceo",
+		"channel":  "general",
+		"title":    "Follow-up interview",
+		"question": "Which launch channel should we test next?",
+		"blocking": true,
+		"required": true,
+		"reply_to": "msg-thread-2",
+	})
+	req, _ = http.NewRequest(http.MethodPost, base+"/requests", bytes.NewReader(createFollowUpBody))
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	req.Header.Set("Content-Type", "application/json")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("create follow-up interview failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		t.Fatalf("expected 200 creating follow-up interview, got %d: %s", resp.StatusCode, raw)
+	}
+	var createdFollowUp struct {
+		Request humanInterview `json:"request"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&createdFollowUp); err != nil {
+		resp.Body.Close()
+		t.Fatalf("decode created follow-up interview: %v", err)
+	}
+	resp.Body.Close()
+
+	invalidMessageBody, _ := json.Marshal(map[string]any{
+		"from":    "",
+		"channel": "general",
+		"content": "This send should fail validation.",
+		"tagged":  []string{"unknown-agent"},
+	})
+	req, _ = http.NewRequest(http.MethodPost, base+"/messages", bytes.NewReader(invalidMessageBody))
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	req.Header.Set("Content-Type", "application/json")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("post invalid message after interview failed: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected invalid message to fail before canceling interview, got %d", resp.StatusCode)
+	}
+
+	req, _ = http.NewRequest(http.MethodGet, base+"/interview/answer?id="+created.Request.ID, nil)
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("get interview answer after invalid send failed: %v", err)
+	}
+	var pendingAnswer struct {
+		Answered *interviewAnswer `json:"answered"`
+		Status   string           `json:"status"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&pendingAnswer); err != nil {
+		t.Fatalf("decode pending interview answer: %v", err)
+	}
+	resp.Body.Close()
+	if pendingAnswer.Answered != nil || pendingAnswer.Status != "pending" {
+		t.Fatalf("expected invalid send to leave interview pending, got %+v", pendingAnswer)
+	}
+
+	messageBody, _ := json.Marshal(map[string]any{
+		"from":     "",
+		"channel":  "general",
+		"content":  "Let's keep moving in this thread.",
+		"reply_to": "msg-thread-1",
+	})
+	req, _ = http.NewRequest(http.MethodPost, base+"/messages", bytes.NewReader(messageBody))
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	req.Header.Set("Content-Type", "application/json")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("post message after interview failed: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected message send after interview to succeed, got %d", resp.StatusCode)
+	}
+
+	req, _ = http.NewRequest(http.MethodGet, base+"/requests?scope=all&viewer_slug=human&include_resolved=true", nil)
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("list requests failed: %v", err)
+	}
+	defer resp.Body.Close()
+	var listing struct {
+		Requests []humanInterview `json:"requests"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&listing); err != nil {
+		t.Fatalf("decode requests: %v", err)
+	}
+	if len(listing.Requests) != 2 {
+		t.Fatalf("expected two interviews, got %+v", listing.Requests)
+	}
+	byID := map[string]humanInterview{}
+	for _, listed := range listing.Requests {
+		byID[listed.ID] = listed
+	}
+	if byID[created.Request.ID].Status != "canceled" {
+		t.Fatalf("expected replied-to interview to be canceled after human message, got %+v", byID[created.Request.ID])
+	}
+	if byID[createdFollowUp.Request.ID].Status != "pending" {
+		t.Fatalf("expected queued follow-up interview to remain pending, got %+v", byID[createdFollowUp.Request.ID])
+	}
+
+	req, _ = http.NewRequest(http.MethodGet, base+"/interview/answer?id="+created.Request.ID, nil)
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("get interview answer failed: %v", err)
+	}
+	defer resp.Body.Close()
+	var answer struct {
+		Answered *interviewAnswer `json:"answered"`
+		Status   string           `json:"status"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&answer); err != nil {
+		t.Fatalf("decode interview answer: %v", err)
+	}
+	if answer.Answered != nil || answer.Status != "canceled" {
+		t.Fatalf("expected canceled interview answer state, got %+v", answer)
+	}
+}
+
 func TestBrokerRequestAnswerUnblocksDependentTask(t *testing.T) {
 	b := newTestBroker(t)
 	ensureTestMemberAccess(b, "general", "ceo", "CEO")

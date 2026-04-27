@@ -205,7 +205,11 @@ func buildRequestLines(requests []channelInterview, contentWidth int) []rendered
 		if req.RecommendedID != "" {
 			lines = append(lines, renderedLine{Text: "  " + highlight.Render("Recommended: "+req.RecommendedID), RequestID: req.ID})
 		}
-		lines = append(lines, renderedLine{Text: "  " + muted.Render("Click to focus, answer, or snooze. Esc hides it locally — the team still waits. Unlike Toby's requests, these are worth your time."), RequestID: req.ID})
+		dismissHint := "Click to focus, answer, or dismiss. Dismiss cancels the request."
+		if req.Blocking {
+			dismissHint = "Click to focus, answer, or dismiss. Dismiss cancels the request and unblocks the team."
+		}
+		lines = append(lines, renderedLine{Text: "  " + muted.Render(dismissHint), RequestID: req.ID})
 	}
 	return lines
 }

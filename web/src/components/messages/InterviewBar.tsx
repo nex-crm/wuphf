@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { NavArrowLeft, NavArrowRight, Xmark } from "iconoir-react";
 
-import { answerRequest, type InterviewOption, post } from "../../api/client";
+import { answerRequest, cancelRequest, type InterviewOption } from "../../api/client";
 import { useRequests } from "../../hooks/useRequests";
 import { showNotice } from "../ui/Toast";
 
@@ -12,7 +12,7 @@ import { showNotice } from "../ui/Toast";
  * - Allows cycling through queued requests with prev/next
  * - Renders option buttons; if the picked option requires custom text,
  *   switches to a text input mode using the option's hint as placeholder
- * - Skip / close pauses the office (POST /signals kind=pause) and dismisses
+ * - Skip / close cancels the unanswered interview
  */
 export function InterviewBar() {
   const { pending } = useRequests();
@@ -88,24 +88,26 @@ export function InterviewBar() {
     submit(option);
   };
 
-  const handlePause = async () => {
-    // Skip = pause the office. Matches the TUI Esc behavior.
-    setDismissedIds((prev) => {
-      const next = new Set(prev);
-      next.add(current.id);
-      return next;
-    });
+  const handleDismiss = async () => {
+    if (submitting) return;
+    setSubmitting(true);
     setTextMode(null);
     try {
-      await post("/signals", {
-        kind: "pause",
-        summary: "Human skipped a blocking interview",
+      await cancelRequest(current.id);
+      setDismissedIds((prev) => {
+        const next = new Set(prev);
+        next.add(current.id);
+        return next;
       });
-      showNotice("Office paused. Use /resume when ready.", "info");
+      await queryClient.invalidateQueries({ queryKey: ["requests"] });
+      await queryClient.invalidateQueries({ queryKey: ["requests-badge"] });
+      showNotice("Request canceled.", "info");
     } catch (err: unknown) {
       const message =
-        err instanceof Error ? err.message : "Failed to pause office";
+        err instanceof Error ? err.message : "Failed to cancel request";
       showNotice(message, "error");
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -117,10 +119,12 @@ export function InterviewBar() {
     <div
       className="interview-bar"
       role="region"
-      aria-label="Pending agent interview"
+      aria-label="Pending agent request"
     >
       <div className="interview-bar-head">
-        <span className="badge badge-yellow">BLOCKING</span>
+        <span className="badge badge-yellow">
+          {current.blocking ? "BLOCKING" : "INTERVIEW"}
+        </span>
         <span className="interview-bar-from">
           @{current.from || "agent"} asks
         </span>
@@ -155,9 +159,10 @@ export function InterviewBar() {
         <button
           type="button"
           className="interview-bar-close"
-          onClick={handlePause}
-          aria-label="Skip and pause office"
-          title="Skip — pause office"
+          onClick={handleDismiss}
+          disabled={submitting}
+          aria-label="Dismiss request"
+          title="Dismiss"
         >
           <Xmark width={20} height={20} />
         </button>

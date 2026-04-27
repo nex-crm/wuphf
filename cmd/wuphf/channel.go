@@ -365,6 +365,10 @@ type channelPostDoneMsg struct {
 	slug   string
 }
 type channelInterviewAnswerDoneMsg struct{ err error }
+type channelCancelDoneMsg struct {
+	requestID string
+	err       error
+}
 type channelInterruptDoneMsg struct{ err error }
 type channelResetDoneMsg struct {
 	err           error
@@ -646,7 +650,6 @@ type channelModel struct {
 	selectedOption       int
 	notice               string
 	noticeExpireAt       time.Time
-	snoozedInterview     string
 	confirm              *channelConfirm
 	doctor               *channelDoctorReport
 	memberDraft          *channelMemberDraft
@@ -1082,13 +1085,14 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.notice = "Health check closed. The doctor says you're fine — or at least healthy enough to ship."
 				return m, nil
 			case contextInterview:
-				if m.pending.Blocking || m.pending.Required {
-					m.notice = "Human decision required. Answer it before the team can continue."
-					return m, nil
-				}
-				m.snoozedInterview = m.pending.ID
-				m.notice = "Request snoozed. Team remains paused until it is answered."
-				return m, nil
+				req := *m.pending
+				m.pending = nil
+				m.input = nil
+				m.inputPos = 0
+				m.updateInputOverlays()
+				m.posting = true
+				m.notice = "Request canceled."
+				return m, cancelRequest(req)
 			case contextThread:
 				m.threadPanelOpen = false
 				m.threadPanelID = ""
@@ -1437,6 +1441,21 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(pollBroker("", m.activeChannel), pollRequests(m.activeChannel), pollTasks(m.activeChannel), pollOfficeLedger())
 		}
 
+	case channelCancelDoneMsg:
+		m.posting = false
+		if msg.err != nil {
+			m.notice = "Request cancel failed: " + msg.err.Error()
+			return m, tea.Batch(pollRequests(m.activeChannel), pollBroker(m.lastID, m.activeChannel))
+		} else {
+			if m.pending != nil && m.pending.ID == msg.requestID {
+				m.pending = nil
+				m.input = nil
+				m.inputPos = 0
+				m.updateInputOverlays()
+			}
+			return m, tea.Batch(pollBroker("", m.activeChannel), pollRequests(m.activeChannel), pollTasks(m.activeChannel), pollOfficeLedger())
+		}
+
 	case channelInterruptDoneMsg:
 		m.posting = false
 		if msg.err != nil {
@@ -1477,7 +1496,6 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.threadScroll = 0
 			m.focus = focusMain
 			m.pickerMode = channelPickerNone
-			m.snoozedInterview = ""
 			m.doctor = nil
 			m.tasks = nil
 			m.actions = nil
@@ -2213,13 +2231,18 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if req, ok := m.findRequestByID(reqID); ok {
 					return m.answerRequest(req)
 				}
-			case "snooze":
-				if req, ok := m.findRequestByID(reqID); ok && (req.Blocking || req.Required) {
-					m.notice = "This decision cannot be snoozed. Answer it before the team continues."
-					return m, nil
+			case "dismiss", "snooze", "cancel":
+				if req, ok := m.findRequestByID(reqID); ok {
+					if m.pending != nil && m.pending.ID == req.ID {
+						m.pending = nil
+						m.input = nil
+						m.inputPos = 0
+						m.updateInputOverlays()
+					}
+					m.notice = "Request canceled."
+					m.posting = true
+					return m, cancelRequest(req)
 				}
-				m.snoozedInterview = reqID
-				m.notice = "Request snoozed."
 				return m, nil
 			case "open":
 				if req, ok := m.findRequestByID(reqID); ok && req.ReplyTo != "" {
@@ -2305,13 +2328,11 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.requests = msg.requests
 		m.pending = msg.pending
 		if m.pending == nil {
-			m.snoozedInterview = ""
 		}
 		if m.pending != nil && m.pending.ID != prevID {
 			m.selectedOption = m.recommendedOptionIndex()
 			m.input = nil
 			m.inputPos = 0
-			m.snoozedInterview = ""
 			if m.pending.Blocking || m.pending.Required {
 				m.activeApp = officeAppMessages
 				m.syncSidebarCursorToActive()
@@ -2544,9 +2565,6 @@ func (m channelModel) View() string {
 	var statusBar string
 	if m.pending != nil {
 		statusText := m.interviewStatusLine()
-		if m.pending.ID == m.snoozedInterview {
-			statusText = " Request paused │ Esc snoozed it │ team remains blocked until answered"
-		}
 		statusBar = statusBarStyle(m.width).Render(
 			lipgloss.NewStyle().Foreground(lipgloss.Color("#FBBF24")).Render(statusText),
 		)
@@ -3100,9 +3118,6 @@ func (m channelModel) mainPanelGeometry(mainW, contentH int) (headerH, msgH int,
 
 func (m channelModel) visiblePendingRequest() *channelInterview {
 	if m.pending == nil {
-		return nil
-	}
-	if m.pending.ID == m.snoozedInterview {
 		return nil
 	}
 	if m.pending.Channel != "" && m.pending.Channel != m.activeChannel {
@@ -3813,7 +3828,7 @@ func (m channelModel) buildRequestActionPickerOptions(req channelInterview) []tu
 	options := []tui.PickerOption{
 		{Label: "Focus request", Value: "focus:" + req.ID, Description: "Open this request in the app"},
 		{Label: "Answer request", Value: "answer:" + req.ID, Description: "Bring it into the composer"},
-		{Label: "Snooze request", Value: "snooze:" + req.ID, Description: "Hide it locally until you revisit it"},
+		{Label: "Dismiss request", Value: "dismiss:" + req.ID, Description: "Cancel this request and unblock the team"},
 	}
 	if req.ReplyTo != "" {
 		options = append(options, tui.PickerOption{Label: "Open thread", Value: "open:" + req.ID, Description: "Jump to the related thread"})
@@ -3847,7 +3862,6 @@ func (m channelModel) focusRequest(req channelInterview, notice string) (tea.Mod
 	}
 	m.syncSidebarCursorToActive()
 	m.pending = &req
-	m.snoozedInterview = ""
 	m.selectedOption = m.recommendedOptionIndex()
 	m.notice = notice
 	if req.ReplyTo != "" {
@@ -3865,7 +3879,6 @@ func (m channelModel) answerRequest(req channelInterview) (tea.Model, tea.Cmd) {
 	}
 	m.syncSidebarCursorToActive()
 	m.pending = &req
-	m.snoozedInterview = ""
 	m.selectedOption = m.recommendedOptionIndex()
 	m.notice = "Answering request " + req.ID + ". Type your answer and press Enter."
 	if req.ReplyTo != "" {
@@ -4926,7 +4939,7 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 		clearCurrent()
 		parts := strings.Fields(trimmed)
 		if len(parts) < 3 {
-			m.notice = "Usage: /request <focus|answer|snooze> <request-id>"
+			m.notice = "Usage: /request <focus|answer|dismiss> <request-id>"
 			return m, nil
 		}
 		action, reqID := parts[1], parts[2]
@@ -4940,16 +4953,18 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 			return m.focusRequest(req, "Focused request "+req.ID)
 		case "answer":
 			return m.answerRequest(req)
-		case "snooze":
-			if req.Blocking || req.Required {
-				m.notice = "This decision cannot be snoozed. Answer it before the team continues."
-				return m, nil
+		case "dismiss", "snooze", "cancel":
+			if m.pending != nil && m.pending.ID == req.ID {
+				m.pending = nil
+				m.input = nil
+				m.inputPos = 0
+				m.updateInputOverlays()
 			}
-			m.snoozedInterview = req.ID
-			m.notice = "Request snoozed."
-			return m, nil
+			m.notice = "Request canceled."
+			m.posting = true
+			return m, cancelRequest(req)
 		default:
-			m.notice = "Usage: /request <focus|answer|snooze> <request-id>"
+			m.notice = "Usage: /request <focus|answer|dismiss> <request-id>"
 			return m, nil
 		}
 	case trimmed == "/policies":
