@@ -215,15 +215,19 @@ export function UpgradeBanner() {
   }, [latest]);
 
   // Memoise the grouped commits so a render that doesn't change the
-  // commit list (e.g. expand/collapse toggling) doesn't re-bucket. The
-  // null-guard `if (!(current && latest)) return null;` previously sat
-  // here as well — removed because upgradeNeeded already requires both.
+  // commit list (e.g. expand/collapse toggling) doesn't re-bucket.
   const grouped = useMemo(
     () => groupCommits(changelog.commits),
     [changelog.commits],
   );
 
   if (!(enabled && upgradeNeeded) || dismissed) return null;
+  // upgradeNeeded already requires both current AND latest at runtime,
+  // but the useMemo body isn't visible to TS's narrowing pass — keep
+  // this guard so `current` / `latest` narrow from `string | null` to
+  // `string` for the JSX below. (CodeRabbit's suggestion to drop it
+  // ignored the TS narrowing dependency.)
+  if (!(current && latest)) return null;
 
   return (
     <div className="upgrade-banner" role="status">
