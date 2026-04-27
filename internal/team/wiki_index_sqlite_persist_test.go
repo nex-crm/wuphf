@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 	"testing"
+	"time"
 )
 
 // TestSQLiteFactStore_PersistAcrossClose writes facts + entity + edge +
@@ -31,6 +32,15 @@ func TestSQLiteFactStore_PersistAcrossClose(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open 1: %v", err)
 	}
+	// Register cleanup before any t.Fatalf path could leak the handle.
+	// Idempotent: explicit s1.Close() below short-circuits this on the
+	// happy path; on early-fatal it actually fires.
+	s1Closed := false
+	t.Cleanup(func() {
+		if !s1Closed {
+			_ = s1.Close()
+		}
+	})
 
 	const factCount = 5
 	for i := 0; i < factCount; i++ {
@@ -41,12 +51,23 @@ func TestSQLiteFactStore_PersistAcrossClose(t *testing.T) {
 	}
 	// Two entities so IterateEntities crosses a row boundary AND we can
 	// assert the slug-ASC ordering the contract guarantees.
+	//
+	// slug-00 carries non-zero CreatedAt + LastSynthesizedAt so the
+	// time.Parse(RFC3339) branches in IterateEntities and CanonicalHashAll
+	// are exercised on reopen — those would otherwise be dead code in this
+	// test, and a TZ/precision regression in modernc.org/sqlite's TEXT
+	// column round-trip would silently false-pass.
+	createdAt := time.Date(2026, 4, 22, 12, 0, 0, 0, time.UTC)
+	lastSynthAt := time.Date(2026, 4, 23, 9, 30, 0, 0, time.UTC)
+	mergedAt := time.Date(2026, 4, 24, 15, 45, 0, 0, time.UTC)
 	entities := []IndexEntity{
 		{
-			Slug:          "slug-00",
-			CanonicalSlug: "slug-00",
-			Kind:          "person",
-			Aliases:       []string{"alias-a", "alias-b"},
+			Slug:              "slug-00",
+			CanonicalSlug:     "slug-00",
+			Kind:              "person",
+			Aliases:           []string{"alias-a", "alias-b"},
+			CreatedAt:         createdAt,
+			LastSynthesizedAt: lastSynthAt,
 		},
 		{
 			Slug:          "slug-01",
@@ -67,9 +88,13 @@ func TestSQLiteFactStore_PersistAcrossClose(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("UpsertEdge: %v", err)
 	}
+	// Non-zero MergedAt so the redirect's time.Parse branch in
+	// CanonicalHashAll is exercised on reopen — same dead-code-coverage
+	// motivation as the entity timestamps above.
 	if err := s1.UpsertRedirect(ctx, Redirect{
 		From:      "old-slug-00",
 		To:        "slug-00",
+		MergedAt:  mergedAt,
 		MergedBy:  "tester",
 		CommitSHA: "def456",
 	}); err != nil {
@@ -83,6 +108,7 @@ func TestSQLiteFactStore_PersistAcrossClose(t *testing.T) {
 	if err := s1.Close(); err != nil {
 		t.Fatalf("close 1: %v", err)
 	}
+	s1Closed = true
 
 	// --- session 2: reopen at the same path, verify reads ------------------
 
@@ -149,18 +175,19 @@ func TestSQLiteFactStore_PersistAcrossClose(t *testing.T) {
 	var iteratedSlugs []string
 	var iteratedKinds []string
 	var iteratedAliases [][]string
+	var iteratedCreatedAt []time.Time
+	var iteratedLastSynth []time.Time
 	if err := s2.IterateEntities(ctx, func(e IndexEntity) error {
 		iteratedSlugs = append(iteratedSlugs, e.Slug)
 		iteratedKinds = append(iteratedKinds, e.Kind)
 		iteratedAliases = append(iteratedAliases, e.Aliases)
+		iteratedCreatedAt = append(iteratedCreatedAt, e.CreatedAt)
+		iteratedLastSynth = append(iteratedLastSynth, e.LastSynthesizedAt)
 		return nil
 	}); err != nil {
 		t.Fatalf("IterateEntities: %v", err)
 	}
 	wantSlugs := []string{"slug-00", "slug-01"}
-	if !sort.StringsAreSorted(iteratedSlugs) {
-		t.Errorf("IterateEntities not slug-ASC sorted: %v", iteratedSlugs)
-	}
 	if len(iteratedSlugs) != len(wantSlugs) {
 		t.Fatalf("IterateEntities yielded %d entities, want %d (got=%v)", len(iteratedSlugs), len(wantSlugs), iteratedSlugs)
 	}
@@ -175,6 +202,34 @@ func TestSQLiteFactStore_PersistAcrossClose(t *testing.T) {
 	if len(iteratedAliases[0]) != 2 || iteratedAliases[0][0] != "alias-a" || iteratedAliases[0][1] != "alias-b" {
 		t.Errorf("IterateEntities Aliases[0] = %v, want [alias-a alias-b]", iteratedAliases[0])
 	}
+	// slug-01 had no aliases — verify the iterator did not leak slug-00's
+	// aliases into the next row's IndexEntity.
+	if len(iteratedAliases[1]) != 0 {
+		t.Errorf("IterateEntities Aliases[1] = %v, want empty (alias leak across iteration)", iteratedAliases[1])
+	}
+	// Time fields on slug-00 must round-trip through the TEXT/RFC3339 path.
+	if !iteratedCreatedAt[0].Equal(createdAt) {
+		t.Errorf("IterateEntities CreatedAt[0] = %v, want %v", iteratedCreatedAt[0], createdAt)
+	}
+	if !iteratedLastSynth[0].Equal(lastSynthAt) {
+		t.Errorf("IterateEntities LastSynthesizedAt[0] = %v, want %v", iteratedLastSynth[0], lastSynthAt)
+	}
+
+	// Edge round-trip across reopen. Sibling tests cover ListEdgesForEntity
+	// in-process; this is the only after-reopen check for that path.
+	edges, err := s2.ListEdgesForEntity(ctx, "slug-00")
+	if err != nil {
+		t.Fatalf("ListEdgesForEntity: %v", err)
+	}
+	if len(edges) != 1 {
+		t.Fatalf("ListEdgesForEntity len = %d, want 1 (got=%+v)", len(edges), edges)
+	}
+	if edges[0].Subject != "slug-00" || edges[0].Predicate != "knows" || edges[0].Object != "slug-01" {
+		t.Errorf("ListEdgesForEntity edge = %+v, want {slug-00 knows slug-01}", edges[0])
+	}
+	if edges[0].SourceSHA != "abc123" {
+		t.Errorf("ListEdgesForEntity SourceSHA = %q, want abc123", edges[0].SourceSHA)
+	}
 
 	// Redirect must survive close/reopen.
 	to, ok, err := s2.ResolveRedirect(ctx, "old-slug-00")
@@ -185,7 +240,11 @@ func TestSQLiteFactStore_PersistAcrossClose(t *testing.T) {
 		t.Errorf("ResolveRedirect after reopen = (%q, %v), want (slug-00, true)", to, ok)
 	}
 
-	// CanonicalHashAll must be byte-identical across close/reopen.
+	// CanonicalHashAll must be byte-identical across close/reopen. With
+	// non-zero MergedAt / CreatedAt / LastSynthesizedAt above, this also
+	// catches drift in the redirect + entity time-decode paths (zero values
+	// would round-trip as NULL → skipped time.Parse on both sides, leaving
+	// the assertion meaningful only for the fact columns sampleFact populates).
 	hashAfter, err := s2.CanonicalHashAll(ctx)
 	if err != nil {
 		t.Fatalf("CanonicalHashAll after reopen: %v", err)
