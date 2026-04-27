@@ -1,5 +1,5 @@
 > /tmp/wuphf-vhs --help
-WUPHF v0.0.7.1 — the terminal office Ryan Howard always wanted.
+WUPHF vdev — the terminal office Ryan Howard always wanted.
 
 Usage:
   wuphf              Launch multi-agent team (web UI on :7891)
