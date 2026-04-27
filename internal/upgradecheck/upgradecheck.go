@@ -21,6 +21,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/nex-crm/wuphf/internal/buildinfo"
 )
@@ -52,11 +53,12 @@ type Result struct {
 // when the registry call fails.
 func Check(ctx context.Context, client *http.Client) (Result, error) {
 	if client == nil {
-		// No client.Timeout — let the caller's context govern the
-		// deadline. http.Client.Timeout caps the entire request and is
-		// NOT extended by ctx, so a hard timeout here would silently
-		// overrule the broker's 5s and the CLI's 8s budgets.
-		client = &http.Client{}
+		// Generous outer cap so a future caller passing
+		// context.Background() can't hang forever on a half-open
+		// socket. The 30s ceiling is well above any realistic caller
+		// budget (broker 5s, CLI 8s) so it never overrules the
+		// caller-supplied context.
+		client = &http.Client{Timeout: 30 * time.Second}
 	}
 	current := currentVersion()
 	res := Result{
@@ -141,14 +143,17 @@ func fetchLatestVersion(ctx context.Context, client *http.Client) (string, error
 // ── GitHub compare ────────────────────────────────────────────────────────
 
 // CommitEntry is one parsed conventional-commit entry from a GitHub compare
-// response.
+// response. JSON tags MUST stay lowercase to match the TS shape consumed by
+// web/src/components/layout/UpgradeBanner.tsx — without them, the broker
+// would ship "Type"/"Scope"/etc. and the banner's c.type lookup would
+// silently return undefined for every entry.
 type CommitEntry struct {
-	Type        string
-	Scope       string
-	Description string
-	PR          string
-	SHA         string
-	Breaking    bool
+	Type        string `json:"type"`
+	Scope       string `json:"scope"`
+	Description string `json:"description"`
+	PR          string `json:"pr"`
+	SHA         string `json:"sha"`
+	Breaking    bool   `json:"breaking"`
 }
 
 type githubCompareCommit struct {
@@ -166,8 +171,9 @@ type githubCompareResponse struct {
 // conventional-commit entries.
 func FetchChangelog(ctx context.Context, client *http.Client, from, to string) ([]CommitEntry, error) {
 	if client == nil {
-		// See note in Check: rely on the caller's context deadline.
-		client = &http.Client{}
+		// See note in Check: same generous outer cap as a safety net
+		// for callers that forget to set a context deadline.
+		client = &http.Client{Timeout: 30 * time.Second}
 	}
 	url := fmt.Sprintf(
 		"https://api.github.com/repos/%s/compare/v%s...v%s",

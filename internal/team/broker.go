@@ -24,6 +24,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"golang.org/x/sync/singleflight"
+
 	wuphf "github.com/nex-crm/wuphf"
 	"github.com/nex-crm/wuphf/internal/action"
 	"github.com/nex-crm/wuphf/internal/agent"
@@ -4635,19 +4637,32 @@ func (b *Broker) handleVersion(w http.ResponseWriter, r *http.Request) {
 
 // handleUpgradeCheck proxies the npm-registry comparison through the broker
 // instead of letting the browser hit registry.npmjs.org directly. The web
-// banner uses this so that (a) we have one server-side place to add caching
-// in front of the registry, (b) a corporate-NAT'd workstation doesn't burn
-// every user's anonymous npm/GitHub quota.
+// banner uses this so that (a) we have one server-side place to cache the
+// result, (b) a corporate-NAT'd workstation doesn't burn every user's
+// anonymous npm/GitHub quota on every page load.
 func (b *Broker) handleUpgradeCheck(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-	defer cancel()
-	res, err := upgradecheck.Check(ctx, nil)
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", "GET")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	res, err := upgradeCheckCached(r.Context())
 	w.Header().Set("Content-Type", "application/json")
+	if err != nil && res.Current == "" {
+		// Hard transport failure on a cold cache — surface 502 so
+		// observability tools see the upstream outage. Banner's
+		// .catch() already swallows non-2xx silently.
+		w.WriteHeader(http.StatusBadGateway)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"error": err.Error(),
+		})
+		return
+	}
 	if err != nil {
-		// Status 200 with the partial Result + an error field — the
-		// banner UI degrades gracefully (renders nothing) when Latest
-		// is empty, which is preferable to a noisy 5xx in the browser
-		// console for a non-critical check.
+		// Partial result (Current populated, Latest empty) — degrade
+		// gracefully with 200 + error field so the banner can render
+		// nothing without a console-spamming 5xx for a non-critical
+		// check.
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"current":           res.Current,
 			"latest":            res.Latest,
@@ -4665,18 +4680,30 @@ func (b *Broker) handleUpgradeCheck(w http.ResponseWriter, r *http.Request) {
 // handleUpgradeChangelog proxies the GitHub compare API for the same reasons
 // as handleUpgradeCheck. The `from` and `to` query params are validated
 // against a strict version regex so a crafted call cannot inject path
-// segments into the upstream compare URL.
+// segments into the upstream compare URL. Mirrors VERSION_RE in
+// web/src/components/layout/upgradeBanner.utils.ts — keep both regexes in
+// sync so a future tightening doesn't drift.
 func (b *Broker) handleUpgradeChangelog(w http.ResponseWriter, r *http.Request) {
-	from := strings.TrimSpace(r.URL.Query().Get("from"))
-	to := strings.TrimSpace(r.URL.Query().Get("to"))
-	if !upgradeVersionParam.MatchString(from) || !upgradeVersionParam.MatchString(to) {
-		http.Error(w, "from/to must look like v0.79.10 (or 0.79.10)", http.StatusBadRequest)
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", "GET")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
-	defer cancel()
-	entries, err := upgradecheck.FetchChangelog(ctx, nil, from, to)
+	from := strings.TrimSpace(r.URL.Query().Get("from"))
+	to := strings.TrimSpace(r.URL.Query().Get("to"))
 	w.Header().Set("Content-Type", "application/json")
+	if !upgradeVersionParam.MatchString(from) || !upgradeVersionParam.MatchString(to) {
+		// Match the upstream-failure shape so the banner's .catch
+		// path renders one error message instead of branching on
+		// HTTP status.
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"commits": []any{},
+			"error":   "from/to must look like v0.79.10 (or 0.79.10)",
+		})
+		return
+	}
+	entries, err := upgradeChangelogCached(r.Context(), from, to)
 	if err != nil {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"commits": []any{},
@@ -4691,7 +4718,90 @@ func (b *Broker) handleUpgradeChangelog(w http.ResponseWriter, r *http.Request) 
 // segments, an optional pre-release after `-` (e.g. `-rc.1`, `-beta-2`), and
 // an optional build-metadata after `+` (e.g. `+build.5`). Hyphen is allowed
 // inside the suffix character class so `-beta-1` validates.
+//
+// MIRRORED in web/src/components/layout/upgradeBanner.utils.ts as
+// VERSION_RE — keep them in sync so a future tightening doesn't drift.
 var upgradeVersionParam = regexp.MustCompile(`^v?\d+(\.\d+){1,3}(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$`)
+
+// ── Upgrade-check caching ─────────────────────────────────────────────────
+//
+// Memoise the npm registry result for 30 minutes and the GitHub compare
+// result for 1 hour so N tabs / page reloads / shell remounts on one
+// machine result in at most one upstream hit per TTL window. Coalesces
+// concurrent requests via singleflight so a parallel page-load burst still
+// only sends one upstream call. Without this, an office full of users on
+// the same NAT could exhaust npm/GitHub's anonymous quota in normal use.
+
+const (
+	upgradeCheckTTL     = 30 * time.Minute
+	upgradeChangelogTTL = time.Hour
+	upgradeUpstreamTime = 5 * time.Second
+)
+
+type upgradeCheckCacheEntry struct {
+	res     upgradecheck.Result
+	err     error
+	storeAt time.Time
+}
+
+type upgradeChangelogCacheEntry struct {
+	entries []upgradecheck.CommitEntry
+	err     error
+	storeAt time.Time
+}
+
+var (
+	upgradeCheckCache   atomic.Pointer[upgradeCheckCacheEntry]
+	upgradeChangelog    sync.Map // key "from→to" → *upgradeChangelogCacheEntry
+	upgradeCheckGroup   singleflight.Group
+	upgradeChangelogFlt singleflight.Group
+)
+
+func upgradeCheckCached(ctx context.Context) (upgradecheck.Result, error) {
+	if e := upgradeCheckCache.Load(); e != nil && time.Since(e.storeAt) < upgradeCheckTTL {
+		return e.res, e.err
+	}
+	v, err, _ := upgradeCheckGroup.Do("check", func() (any, error) {
+		fctx, cancel := context.WithTimeout(ctx, upgradeUpstreamTime)
+		defer cancel()
+		res, err := upgradecheck.Check(fctx, nil)
+		// Cache successes only — a transient registry outage shouldn't
+		// pin the failure for 30 minutes.
+		if err == nil {
+			upgradeCheckCache.Store(&upgradeCheckCacheEntry{res: res, storeAt: time.Now()})
+		}
+		return upgradeCheckCacheEntry{res: res, err: err}, nil
+	})
+	entry := v.(upgradeCheckCacheEntry)
+	if err != nil {
+		return entry.res, err
+	}
+	return entry.res, entry.err
+}
+
+func upgradeChangelogCached(ctx context.Context, from, to string) ([]upgradecheck.CommitEntry, error) {
+	key := from + "→" + to
+	if v, ok := upgradeChangelog.Load(key); ok {
+		e := v.(*upgradeChangelogCacheEntry)
+		if time.Since(e.storeAt) < upgradeChangelogTTL {
+			return e.entries, e.err
+		}
+	}
+	v, err, _ := upgradeChangelogFlt.Do(key, func() (any, error) {
+		fctx, cancel := context.WithTimeout(ctx, upgradeUpstreamTime+3*time.Second)
+		defer cancel()
+		entries, err := upgradecheck.FetchChangelog(fctx, nil, from, to)
+		if err == nil {
+			upgradeChangelog.Store(key, &upgradeChangelogCacheEntry{entries: entries, storeAt: time.Now()})
+		}
+		return upgradeChangelogCacheEntry{entries: entries, err: err}, nil
+	})
+	entry := v.(upgradeChangelogCacheEntry)
+	if err != nil {
+		return entry.entries, err
+	}
+	return entry.entries, entry.err
+}
 
 func (b *Broker) handleSessionMode(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {

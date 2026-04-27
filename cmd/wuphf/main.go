@@ -350,11 +350,13 @@ func runUpgradeCheck(args []string) {
 		os.Exit(2)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
-	defer cancel()
 	// Always do a fresh fetch — the user typed `wuphf upgrade` because they
-	// want ground truth.
-	res, err := upgradecheck.Check(ctx, nil)
+	// want ground truth. Each upstream call gets its own deadline so a slow
+	// npm response doesn't eat the GitHub-compare budget and trigger a
+	// misleading "could not fetch changelog" warning.
+	checkCtx, cancelCheck := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelCheck()
+	res, err := upgradecheck.Check(checkCtx, nil)
 
 	// JSON output: emit the full Result (including IsDevBuild and an
 	// `error` field for scripted callers) and exit non-zero on failure
@@ -371,7 +373,12 @@ func runUpgradeCheck(args []string) {
 			out.Error = err.Error()
 		}
 		_ = json.NewEncoder(os.Stdout).Encode(out)
-		if err != nil && !res.IsDevBuild {
+		// Exit non-zero when we couldn't actually compare — distinguishes
+		// "no upgrade" from "couldn't reach npm" for `wuphf upgrade --json | jq …`
+		// pipelines. Dev builds are exempt: they don't depend on npm
+		// reachability so a network blip on a contributor box shouldn't
+		// trip exit-code-aware scripts.
+		if !res.IsDevBuild && (err != nil || res.Latest == "") {
 			os.Exit(1)
 		}
 		return
@@ -400,7 +407,11 @@ func runUpgradeCheck(args []string) {
 	fmt.Printf("Run: %s\n", res.UpgradeCommand)
 	fmt.Printf("Diff: %s\n\n", res.CompareURL)
 
-	entries, cerr := upgradecheck.FetchChangelog(ctx, nil, res.Current, res.Latest)
+	// Fresh deadline for the GitHub call so a slow npm earlier doesn't
+	// shrink the budget here.
+	clCtx, cancelCL := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancelCL()
+	entries, cerr := upgradecheck.FetchChangelog(clCtx, nil, res.Current, res.Latest)
 	if cerr != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not fetch changelog (%v)\n", cerr)
 		return
