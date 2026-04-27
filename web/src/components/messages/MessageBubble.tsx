@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import ReactMarkdown from "react-markdown";
 
 import type { Message } from "../../api/client";
 import { toggleReaction } from "../../api/client";
@@ -6,8 +7,11 @@ import { useDefaultHarness } from "../../hooks/useConfig";
 import { useOfficeMembers } from "../../hooks/useMembers";
 import { formatTime, formatTokens } from "../../lib/format";
 import { resolveHarness } from "../../lib/harness";
-import { formatMarkdown } from "../../lib/markdown";
 import { renderMentions } from "../../lib/mentions";
+import {
+  messageMarkdownComponents,
+  messageRemarkPlugins,
+} from "../../lib/messageMarkdown";
 import { useAppStore } from "../../stores/app";
 import { HarnessBadge } from "../ui/HarnessBadge";
 import { PixelAvatar } from "../ui/PixelAvatar";
@@ -69,15 +73,18 @@ export function MessageBubble({
         }))
     : [];
 
-  // SECURITY: formatMarkdown escapes all HTML via escapeHtml() and gates link
-  // hrefs through isSafeUrl() before building the output, so the agent path
-  // here cannot inject script tags or javascript:/data: URLs even when the
-  // model emits attacker-controlled markdown. Local-LLM updates added new
-  // sources of agent content (mlx-lm, ollama, exo) — those go through the
-  // same formatMarkdown path so the same XSS posture applies. Human input
-  // takes the safe ReactNode path via renderMentions; tests live in
-  // src/lib/markdown.test.ts (XSS regression sweep).
-  const renderedHtml = !isHuman ? formatMarkdown(message.content || "") : "";
+  // SECURITY: agent messages render through ReactMarkdown with a remark and
+  // components pipeline (../../lib/messageMarkdown). ReactMarkdown's default
+  // urlTransform strips javascript:/vbscript:/data: URIs; the anchor renderer
+  // adds a second-layer scheme allowlist. The legacy regex-based formatMarkdown
+  // path that used the React unsafe-HTML prop has been removed (it had been
+  // independently hardened on main via isSafeUrl(), but the lib swap is more
+  // durable: react-markdown is a battle-tested mdast pipeline, and the
+  // dedicated XSS test file web/src/lib/messageMarkdown.test.tsx (23 tests)
+  // covers javascript:/data:/vbscript:, image src, GFM autolinks, and raw
+  // HTML. Local-LLM agent content (mlx-lm, ollama, exo) flows through the
+  // same path so the XSS posture applies uniformly. Human input takes the
+  // safe ReactNode path via renderMentions.
 
   // Turn human text like "@pm when are you free?" into mention chips for
   // registered agent slugs. Non-agent @-references stay plain text. The
@@ -151,15 +158,19 @@ export function MessageBubble({
         </div>
 
         {/* Text — humans render mention chips via safe ReactNode children;
-            agent messages use the formatMarkdown path. */}
+            agent messages render through ReactMarkdown (no raw HTML). */}
         {isHuman ? (
           <div className="message-text">{humanRendered}</div>
         ) : (
-          <div
-            className="message-text"
-            // biome-ignore lint/security/noDangerouslySetInnerHtml: renderedHtml comes from formatMarkdown() in src/lib/markdown.ts which escapes all user content via escapeHtml() before building the output. Only trusted broker/agent messages reach this branch — humans go through the React ReactNode path above.
-            dangerouslySetInnerHTML={{ __html: renderedHtml }}
-          />
+          <div className="message-text">
+            <ReactMarkdown
+              remarkPlugins={messageRemarkPlugins}
+              components={messageMarkdownComponents}
+              skipHtml={true}
+            >
+              {message.content || ""}
+            </ReactMarkdown>
+          </div>
         )}
 
         {/* Reactions */}
