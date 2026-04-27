@@ -26,14 +26,20 @@ concurrency:
 jobs:
   release:
     runs-on: ubuntu-latest
-    # Env gate sits on the FIRST job that ships anything (goreleaser uploads
-    # GitHub Release artifacts). Putting it on `publish-npm` instead would
-    # leave a published GitHub Release with no corresponding npm package on
-    # rejection, requiring manual cleanup. Pausing here means the human
-    # approves once and both surfaces ship together — or nothing ships.
-    environment:
-      name: npm-publish
-      url: https://www.npmjs.com/package/wuphf
+    # No environment gate: tags pushed to this repo are intended releases,
+    # full stop. The previous `npm-publish` env gate paused every run
+    # waiting on a human approval and the queue stalled for ~13 tags
+    # (#350) before anyone noticed the banner was advertising stale
+    # versions. The defensive value of the gate (preventing an accidental
+    # npm publish from a malicious tag push) is already covered by:
+    #   - branch-protected `main`, so tags on main are reviewed in PRs
+    #   - the smoke-test-npx job below failing the run if the published
+    #     binary self-reports the wrong version
+    #   - .github/workflows/release-drift.yml screaming if any of the
+    #     four distribution surfaces ever drift apart
+    # If we ever need a humans-in-the-loop step again, prefer a tag-name
+    # convention (e.g. `vX.Y.Z-rc.N` skips publish-to-latest) over a
+    # silent env gate that nobody monitors.
     permissions:
       contents: write
     outputs:
