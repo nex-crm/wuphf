@@ -511,10 +511,14 @@
   transition: background 0.1s;
 }
 .upgrade-banner-dismiss:hover {
-  /* Theme-tinted accent — matches the copy button so the hover affordance
-     survives dark mode where a literal `rgba(0,0,0,…)` overlay would be
-     invisible against `var(--bg-card)`. */
-  background: var(--blue-bg);
+  /* Translucent overlay of the icon colour (var(--blue) = #069de4). Mirrors
+     `.disconnect-banner-dismiss:hover`. The dismiss button is transparent
+     at rest, so it inherits the banner's `var(--blue-bg)` — using
+     `var(--blue-bg)` here would paint the same colour and produce no
+     visible hover. The 12% blue overlay lands a real contrast step against
+     `--blue-bg` in both light and dark themes (the cyan palette is
+     constant across themes, see web/public/themes/nex-dark.css). */
+  background: rgba(6, 157, 228, 0.12);
 }
 
 .upgrade-banner-changelog {

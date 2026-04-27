@@ -337,77 +337,93 @@ export function UpgradeBanner() {
           </button>
         </div>
       </div>
-      {expanded && (
-        <div id={changelogId} className="upgrade-banner-changelog">
-          {changelog.loading && (
-            <div className="upgrade-banner-changelog-status">
-              Loading changes…
-            </div>
-          )}
-          {changelog.error && (
-            <div className="upgrade-banner-changelog-status">
-              Could not load changelog ({changelog.error}).{" "}
-              <a href={compareUrl} target="_blank" rel="noopener noreferrer">
-                View on GitHub
-              </a>
-              .
-            </div>
-          )}
-          {!(changelog.loading || changelog.error) &&
-            changelog.commits.length === 0 && (
+      {/*
+        Mounted unconditionally so the toggle's `aria-controls={changelogId}`
+        always resolves to a real element — collapsed visibility is gated by
+        the `hidden` attribute. The previous `{expanded && …}` form left
+        aria-controls pointing at a missing node when collapsed, which the
+        ARIA APG disclosure pattern warns AT support is inconsistent for.
+        Children stay gated on `expanded` so the changelog fetch effect
+        (line 122) keeps its fetch-on-expand semantics — nothing renders or
+        triggers state subscriptions while collapsed.
+      */}
+      <div
+        id={changelogId}
+        className="upgrade-banner-changelog"
+        hidden={!expanded}
+      >
+        {expanded && (
+          <>
+            {changelog.loading && (
               <div className="upgrade-banner-changelog-status">
-                No commits found.
+                Loading changes…
               </div>
             )}
-          {grouped.map((group) => (
-            <div key={group.label} className="upgrade-banner-changelog-group">
-              <div className="upgrade-banner-changelog-label">
-                {group.label}
+            {changelog.error && (
+              <div className="upgrade-banner-changelog-status">
+                Could not load changelog ({changelog.error}).{" "}
+                <a href={compareUrl} target="_blank" rel="noopener noreferrer">
+                  View on GitHub
+                </a>
+                .
               </div>
-              <ul className="upgrade-banner-changelog-list">
-                {group.entries.map((entry) => (
-                  <li key={entry.sha}>
-                    {entry.scope ? (
-                      <>
-                        <span className="upgrade-banner-scope">
-                          {entry.scope}
-                        </span>{" "}
-                      </>
-                    ) : null}
-                    {entry.description}
-                    {entry.pr
-                      ? (() => {
-                          // Anchor only when prGitHubURL accepts the token —
-                          // a non-numeric ref renders as muted plain text so
-                          // it doesn't masquerade as a broken link.
-                          const prURL = prGitHubURL(REPO, entry.pr);
-                          return prURL ? (
-                            <>
-                              {" "}
-                              <a
-                                href={prURL}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="upgrade-banner-pr"
-                              >
+            )}
+            {!(changelog.loading || changelog.error) &&
+              changelog.commits.length === 0 && (
+                <div className="upgrade-banner-changelog-status">
+                  No commits found.
+                </div>
+              )}
+            {grouped.map((group) => (
+              <div key={group.label} className="upgrade-banner-changelog-group">
+                <div className="upgrade-banner-changelog-label">
+                  {group.label}
+                </div>
+                <ul className="upgrade-banner-changelog-list">
+                  {group.entries.map((entry) => (
+                    <li key={entry.sha}>
+                      {entry.scope ? (
+                        <>
+                          <span className="upgrade-banner-scope">
+                            {entry.scope}
+                          </span>{" "}
+                        </>
+                      ) : null}
+                      {entry.description}
+                      {entry.pr
+                        ? (() => {
+                            // Anchor only when prGitHubURL accepts the token —
+                            // a non-numeric ref renders as muted plain text so
+                            // it doesn't masquerade as a broken link.
+                            const prURL = prGitHubURL(REPO, entry.pr);
+                            return prURL ? (
+                              <>
+                                {" "}
+                                <a
+                                  href={prURL}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="upgrade-banner-pr"
+                                >
+                                  #{entry.pr}
+                                </a>
+                              </>
+                            ) : (
+                              <span className="upgrade-banner-pr-text">
+                                {" "}
                                 #{entry.pr}
-                              </a>
-                            </>
-                          ) : (
-                            <span className="upgrade-banner-pr-text">
-                              {" "}
-                              #{entry.pr}
-                            </span>
-                          );
-                        })()
-                      : null}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
-        </div>
-      )}
+                              </span>
+                            );
+                          })()
+                        : null}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </>
+        )}
+      </div>
     </div>
   );
 }
