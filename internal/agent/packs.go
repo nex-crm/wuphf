@@ -45,7 +45,7 @@ This skill acts on real company data. Never fabricate deals, contacts, pipeline 
    d. If **team_action_guide** reports that no configured backend supports the tool, offer three options via **human_interview**:
       1. Pick a supported tool instead — list what the guide surfaces for common categories.
       2. Ask you to propose a dedicated skill for the tool. Draft an instruction-based skill that wraps its public API and save it for review.
-      3. Provide an API key and base URL for the tool. Save it via ` + "`/config set <tool>_api_key <value>`" + ` and make direct HTTP calls. Gate every write on **human_interview**.
+      3. Provide an API key and base URL for the tool. Save it via ` + "`/config set <tool>_api_key <value>`" + ` and make direct HTTP calls. Gate every write on **team_request** with kind ` + "`approval`" + `.
 4. Once connected, use **team_action_search** to discover the action slug and **team_action_execute** to run it.
 
 If the user explicitly says "skip" or "work from context only", proceed using Nex and the thread alone. Flag "Data source: thread + Nex only, no live data" at the top of your output so the gap is visible.
@@ -179,7 +179,7 @@ var legacyPacks = []PackDefinition{
 
 5. **For each issue**, include: what is missing, how many records, and a recommended fix action.
 
-6. **Propose fixes** where you can automate them. Gate destructive changes (bulk delete, stage resets) on human approval via **human_interview** with the exact change count.
+6. **Propose fixes** where you can automate them. Gate destructive changes (bulk delete, stage resets) on human approval via **team_request** with kind ` + "`approval`" + ` and the exact change count.
 
 ## Output format
 
@@ -254,7 +254,7 @@ Post the brief to #general tagged with the rep's name and meeting time.`,
    - Lead with what has changed on your side
    - One clear ask: 20-minute catch-up, not a full demo
 
-5. **Gate sending** on human approval via **human_interview**. Present the draft list with scores and messages. Never send outbound email without approval.
+5. **Gate sending** on human approval via **team_request** with kind ` + "`approval`" + `. Present the draft list with scores and messages. Never send outbound email without approval.
 
 Output a re-engagement queue: company, deal size, lost reason, trigger event, score, draft message, and which channel will send it. Post to #general.`,
 			},
@@ -299,7 +299,7 @@ Output a re-engagement queue: company, deal size, lost reason, trigger event, sc
    - Amber (needs attention this week): same format
    - Green (healthy): summary count only
 
-Gate any CRM stage updates on human review via human_interview.`,
+Gate any CRM stage updates on human review via team_request with kind ` + "`approval`" + `.`,
 			},
 			{
 				Name:        "Lead Scoring",
@@ -342,7 +342,7 @@ Gate any CRM stage updates on human review via human_interview.`,
 
 6. **Post the scored lead list** to #general with: lead name, company, fit score, intent score, tier, and suggested action. Flag any Tier 1 leads that have been sitting more than 24 hours without contact.
 
-Gate any CRM field updates (score, tier, owner assignment) on human approval via human_interview.`,
+Gate any CRM field updates (score, tier, owner assignment) on human approval via team_request with kind ` + "`approval`" + `.`,
 			},
 		},
 	},

@@ -2615,39 +2615,43 @@ func TestInterviewPhaseTracksChooseDraftAndReview(t *testing.T) {
 	}
 }
 
-func TestEscSnoozesPendingInterviewWithoutAnswering(t *testing.T) {
+func TestEscCancelsPendingInterviewWithoutAnswering(t *testing.T) {
 	m := newChannelModel(false)
 	m.width = 120
 	m.height = 30
 	m.pending = &channelInterview{
 		ID:       "interview-1",
+		Kind:     "interview",
 		From:     "ceo",
 		Question: "Which segment should we prioritize?",
 	}
+	m.input = []rune("draft answer")
+	m.inputPos = len(m.input)
 
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	got := next.(channelModel)
-
-	if got.snoozedInterview != "interview-1" {
-		t.Fatalf("expected interview to be snoozed, got %q", got.snoozedInterview)
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if cmd == nil {
+		t.Fatal("expected Esc cancel to dispatch a broker cancel command")
 	}
-	if !strings.Contains(got.notice, "Request snoozed") {
-		t.Fatalf("expected snooze notice, got %q", got.notice)
+	got := next.(channelModel)
+	if got.pending != nil {
+		t.Fatalf("expected pending interview to clear after cancel, got %+v", got.pending)
+	}
+	if len(got.input) != 0 || got.inputPos != 0 {
+		t.Fatalf("expected cancel to clear composer draft, got input %q pos %d", string(got.input), got.inputPos)
+	}
+	if !strings.Contains(got.notice, "Request canceled") {
+		t.Fatalf("expected cancel notice, got %q", got.notice)
 	}
 	view := stripANSI(got.View())
 	if strings.Contains(view, "Human Interview") {
-		t.Fatalf("expected interview card to be hidden after snooze, got %q", view)
-	}
-	if !strings.Contains(view, "Request paused") {
-		t.Fatalf("expected paused status bar after snooze, got %q", view)
+		t.Fatalf("expected interview card to be hidden after cancel, got %q", view)
 	}
 }
 
-func TestNewInterviewUnsnoozesCard(t *testing.T) {
+func TestNewInterviewShowsCard(t *testing.T) {
 	m := newChannelModel(false)
 	m.width = 120
 	m.height = 30
-	m.snoozedInterview = "interview-1"
 	m.pending = &channelInterview{
 		ID:       "interview-1",
 		From:     "ceo",
@@ -2664,10 +2668,6 @@ func TestNewInterviewUnsnoozesCard(t *testing.T) {
 		Question: "New question",
 	}})
 	got := next.(channelModel)
-
-	if got.snoozedInterview != "" {
-		t.Fatalf("expected new interview to clear snoozed state, got %q", got.snoozedInterview)
-	}
 	view := stripANSI(got.View())
 	if !strings.Contains(view, "Open Question") && !strings.Contains(view, "Human Interview") && !strings.Contains(view, "Request") {
 		t.Fatalf("expected new interview card to be visible, got %q", view)
@@ -2709,7 +2709,7 @@ func TestBlockingRequestSwitchesBackToMessages(t *testing.T) {
 	}
 }
 
-func TestBlockingRequestCannotBeSnoozedWithEsc(t *testing.T) {
+func TestBlockingRequestEscCancelsRequest(t *testing.T) {
 	m := newChannelModel(false)
 	m.pending = &channelInterview{
 		ID:       "request-1",
@@ -2720,17 +2720,26 @@ func TestBlockingRequestCannotBeSnoozedWithEsc(t *testing.T) {
 		Blocking: true,
 		Required: true,
 	}
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	got := next.(channelModel)
-	if got.snoozedInterview != "" {
-		t.Fatalf("expected blocking request not to snooze, got %q", got.snoozedInterview)
+	m.input = []rune("draft answer")
+	m.inputPos = len(m.input)
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if cmd == nil {
+		t.Fatal("expected Esc dismiss to dispatch a broker cancel command")
 	}
-	if !strings.Contains(got.notice, "cannot continue") && !strings.Contains(got.notice, "required") {
-		t.Fatalf("expected blocking decision notice, got %q", got.notice)
+	got := next.(channelModel)
+	if got.pending != nil {
+		t.Fatalf("expected blocking request to clear after dismiss, got %+v", got.pending)
+	}
+	if len(got.input) != 0 || got.inputPos != 0 {
+		t.Fatalf("expected dismiss to clear composer draft, got input %q pos %d", string(got.input), got.inputPos)
+	}
+	if !strings.Contains(got.notice, "Request canceled") {
+		t.Fatalf("expected cancel notice, got %q", got.notice)
 	}
 }
 
-func TestBlockingRequestCannotBeSnoozedByCommand(t *testing.T) {
+func TestBlockingRequestDismissCommandCancelsRequest(t *testing.T) {
 	t.Skip("skipped: pre-existing CI environment issue")
 	m := newChannelModel(false)
 	m.requests = []channelInterview{{
@@ -2742,15 +2751,12 @@ func TestBlockingRequestCannotBeSnoozedByCommand(t *testing.T) {
 		Blocking: true,
 		Required: true,
 	}}
-	m.input = []rune("/request snooze request-1")
+	m.input = []rune("/request dismiss request-1")
 	m.inputPos = len(m.input)
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	got := next.(channelModel)
-	if got.snoozedInterview != "" {
-		t.Fatalf("expected blocking request not to snooze, got %q", got.snoozedInterview)
-	}
-	if !strings.Contains(got.notice, "cannot be snoozed") {
-		t.Fatalf("expected cannot-be-snoozed notice, got %q", got.notice)
+	if !strings.Contains(got.notice, "Request canceled") {
+		t.Fatalf("expected cancel notice, got %q", got.notice)
 	}
 }
 

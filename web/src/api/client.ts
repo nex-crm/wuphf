@@ -400,6 +400,10 @@ export function answerRequest(
   return post("/requests/answer", body);
 }
 
+export function cancelRequest(id: string) {
+  return post("/requests", { action: "cancel", id });
+}
+
 // ── Health ──
 
 export function getHealth() {
