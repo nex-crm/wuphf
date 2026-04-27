@@ -9,5 +9,5 @@
     "@secretlint/secretlint-rule-preset-recommend": "^12.2.0",
     "secretlint": "^12.2.0"
   },
-  "version": "0.0.7.1"
+  "version": "0.0.0"
 }
