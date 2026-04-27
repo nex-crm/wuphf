@@ -511,7 +511,14 @@
   transition: background 0.1s;
 }
 .upgrade-banner-dismiss:hover {
-  background: rgba(0, 0, 0, 0.06);
+  /* Translucent overlay of the icon colour (var(--blue) = #069de4). Mirrors
+     `.disconnect-banner-dismiss:hover`. The dismiss button is transparent
+     at rest, so it inherits the banner's `var(--blue-bg)` — using
+     `var(--blue-bg)` here would paint the same colour and produce no
+     visible hover. The 12% blue overlay lands a real contrast step against
+     `--blue-bg` in both light and dark themes (the cyan palette is
+     constant across themes, see web/public/themes/nex-dark.css). */
+  background: rgba(6, 157, 228, 0.12);
 }
 
 .upgrade-banner-changelog {
@@ -566,6 +573,15 @@
 }
 .upgrade-banner-pr:hover {
   text-decoration: underline;
+}
+
+/* Non-clickable PR token — same monospace shape as .upgrade-banner-pr but
+   muted, no hover affordance, so a defensive non-numeric fallback in
+   UpgradeBanner.tsx doesn't masquerade as a broken link. */
+.upgrade-banner-pr-text {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-secondary);
 }
 
 /* ─── Responsive ─── */
