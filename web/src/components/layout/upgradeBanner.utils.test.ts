@@ -49,6 +49,17 @@ describe("isDevVersion", () => {
     ["v0.79.10", false],
     [null, true],
     [undefined, true],
+    // Sub-0.1.0 sentinels — see #350. Stale VERSION file shipped 0.0.7.1
+    // and the banner mistreated it as a real semver "current" against npm
+    // latest, producing a downgrade prompt.
+    ["0.0.7.1", true],
+    ["0.0.0", true],
+    ["v0.0.1", true],
+    ["0.1.0", false],
+    // Garbage / partial strings classify as dev.
+    ["not-a-version", true],
+    ["v", true],
+    ["1", true],
   ] as const)("isDevVersion(%j) === %s", (v, want) => {
     expect(isDevVersion(v)).toBe(want);
   });

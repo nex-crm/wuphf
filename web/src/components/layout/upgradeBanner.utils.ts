@@ -31,12 +31,26 @@ const KNOWN_TYPES = new Set(TYPE_LABELS.map((t) => t.type));
 export const VERSION_RE =
   /^v?\d+(\.\d+){1,3}(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$/;
 
-// Buildinfo's "dev" sentinel — keep in sync with buildinfo.IsDev in
-// internal/buildinfo/buildinfo.go (the canonical Go-side helper).
+// Buildinfo's "dev" sentinel — keep in sync with the Go twins:
+// buildinfo.IsDev (canonical literal sentinel) and upgradecheck.IsDevVersion
+// (extended check that also rejects garbage and sub-0.1.0 versions). This
+// helper applies the full extended logic so the URL-override preview path
+// classifies stale-VERSION builds as dev too.
+//
+// Note: on the production banner path, UpgradeBanner.tsx trusts the
+// server-authoritative `is_dev_build` flag from /upgrade-check first, so
+// this local check is dead code in the #350 reproducer. It only fires on
+// the URL-override (?upgrade-from=…&upgrade-to=…) preview path used by QA
+// and screenshots — keeping the twin in sync with the Go side prevents a
+// future preview pair from rendering a downgrade-shaped banner during
+// pre-launch sweeps.
 export function isDevVersion(v: string | null | undefined): boolean {
   if (!v) return true;
   const t = v.trim();
-  return t === "" || t === "dev";
+  if (t === "" || t === "dev") return true;
+  if (!VERSION_RE.test(t)) return true;
+  if (compareVersions(t, "0.1.0") < 0) return true;
+  return false;
 }
 
 // Trim FIRST then strip leading `v` so " v0.79.10" parses correctly. Mirror

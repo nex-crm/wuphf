@@ -73,7 +73,7 @@ func Check(ctx context.Context, client *http.Client) (Result, error) {
 	current := currentVersion()
 	res := Result{
 		Current:        current,
-		IsDevBuild:     buildinfo.IsDev(current),
+		IsDevBuild:     IsDevVersion(current),
 		UpgradeCommand: "npm install -g " + NPMPackage + "@latest",
 	}
 
@@ -100,6 +100,38 @@ func Check(ctx context.Context, client *http.Client) (Result, error) {
 		)
 	}
 	return res, nil
+}
+
+// IsDevVersion reports whether v should be treated as a non-released
+// ("dev") wuphf build. The literal sentinel set ("" / "dev") lives in
+// internal/buildinfo as IsDev — this is the single source of truth.
+// IsDevVersion layers two domain-specific guards on top, both motivated
+// by issue #350:
+//
+//  1. Anything that doesn't match VersionParamRE (garbage, partial
+//     sentinels) — a malformed `current` shouldn't be compared against
+//     npm `latest` as if it were semver.
+//  2. Any version below 0.1.0 — a stale `internal/buildinfo/VERSION` of
+//     "0.0.7.1" parsed fine as semver and the banner told every
+//     contributor / source build to "upgrade" to an older release.
+//
+// One-way ratchet: this permanently retires the 0.0.x namespace as a
+// published wuphf version. wuphf is at v0.83.x as of this change, so
+// loosening the threshold for an actual 0.0.x release would regress to
+// the bug shape this guard exists to prevent. If we ever need a sub-0.1
+// pre-release (don't), explicitly bump this and update the test cases.
+func IsDevVersion(v string) bool {
+	if buildinfo.IsDev(v) {
+		return true
+	}
+	v = strings.TrimSpace(v)
+	if !VersionParamRE.MatchString(v) {
+		return true
+	}
+	if compareVersions(v, "0.1.0") < 0 {
+		return true
+	}
+	return false
 }
 
 // currentVersion is a seam so tests can pin the running version without
