@@ -708,7 +708,7 @@ func TestResumeInFlightWorkRoutesPerAgentProviderBinding(t *testing.T) {
 		paneNotifications = append(paneNotifications, paneTarget+"\n"+notification)
 	})
 
-	b := NewBrokerAt(filepath.Join(t.TempDir(), "broker-state.json"))
+	b := newTestBroker(t)
 	b.mu.Lock()
 	b.members = []officeMember{
 		{Slug: "ceo", Name: "CEO", Provider: provider.ProviderBinding{Kind: provider.KindClaudeCode}},
@@ -742,7 +742,7 @@ func TestResumeInFlightWorkRoutesPerAgentProviderBinding(t *testing.T) {
 		headlessActive: make(map[string]*headlessCodexActiveTurn),
 		headlessQueues: make(map[string][]headlessCodexTurn),
 	}
-	t.Cleanup(func() { l.waitForHeadlessIdle(t) })
+	t.Cleanup(l.stopHeadlessWorkers)
 
 	l.resumeInFlightWork()
 
