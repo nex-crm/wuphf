@@ -117,6 +117,18 @@
         <PathAndCredentials wcm:action="add" wcm:keyValue="e-netkvm"><Path>E:\Drivers\NetKVM\w11\ARM64</Path></PathAndCredentials>
         <PathAndCredentials wcm:action="add" wcm:keyValue="e-balloon"><Path>E:\Drivers\Balloon\w11\ARM64</Path></PathAndCredentials>
         <PathAndCredentials wcm:action="add" wcm:keyValue="e-vioinput"><Path>E:\Drivers\vioinput\w11\ARM64</Path></PathAndCredentials>
+        <PathAndCredentials wcm:action="add" wcm:keyValue="f-viostor"><Path>F:\Drivers\viostor\w11\ARM64</Path></PathAndCredentials>
+        <PathAndCredentials wcm:action="add" wcm:keyValue="f-vioscsi"><Path>F:\Drivers\vioscsi\w11\ARM64</Path></PathAndCredentials>
+        <PathAndCredentials wcm:action="add" wcm:keyValue="f-vioserial"><Path>F:\Drivers\vioserial\w11\ARM64</Path></PathAndCredentials>
+        <PathAndCredentials wcm:action="add" wcm:keyValue="f-netkvm"><Path>F:\Drivers\NetKVM\w11\ARM64</Path></PathAndCredentials>
+        <PathAndCredentials wcm:action="add" wcm:keyValue="f-balloon"><Path>F:\Drivers\Balloon\w11\ARM64</Path></PathAndCredentials>
+        <PathAndCredentials wcm:action="add" wcm:keyValue="f-vioinput"><Path>F:\Drivers\vioinput\w11\ARM64</Path></PathAndCredentials>
+        <PathAndCredentials wcm:action="add" wcm:keyValue="g-viostor"><Path>G:\Drivers\viostor\w11\ARM64</Path></PathAndCredentials>
+        <PathAndCredentials wcm:action="add" wcm:keyValue="g-vioscsi"><Path>G:\Drivers\vioscsi\w11\ARM64</Path></PathAndCredentials>
+        <PathAndCredentials wcm:action="add" wcm:keyValue="g-vioserial"><Path>G:\Drivers\vioserial\w11\ARM64</Path></PathAndCredentials>
+        <PathAndCredentials wcm:action="add" wcm:keyValue="g-netkvm"><Path>G:\Drivers\NetKVM\w11\ARM64</Path></PathAndCredentials>
+        <PathAndCredentials wcm:action="add" wcm:keyValue="g-balloon"><Path>G:\Drivers\Balloon\w11\ARM64</Path></PathAndCredentials>
+        <PathAndCredentials wcm:action="add" wcm:keyValue="g-vioinput"><Path>G:\Drivers\vioinput\w11\ARM64</Path></PathAndCredentials>
       </DriverPaths>
     </component>
   </settings>

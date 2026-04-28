@@ -27,7 +27,10 @@ machine) and Linux (CI) we can verify directly; Windows needs a VM.
 - UTM VM name: `Wuphf-Win11-ARM`
 - UTM UUID: `BD57713D-0B79-4B87-AD08-88A9BF7922CC`
 - Hostname inside the VM: `WUPHF-DEV`
-- Local account: `wuphf` / `office`
+- Local account: `wuphf` (blank password — `autounattend.xml` ships an empty
+  `<Password>` so the auto-logon fires unattended; if you cut a VM by hand
+  via the UTM wizard you'll need to set a password manually and update
+  `setup-ssh.sh` to match)
 - SSH listens on `:22` over the QEMU shared NAT — reachable from the host
   via the VM's allocated IP (use `utmctl ip-address <UUID>`).
 
