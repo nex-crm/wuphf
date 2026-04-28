@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -100,7 +101,11 @@ func Load() (*State, error) {
 	}
 	var s State
 	if err := json.Unmarshal(data, &s); err != nil {
-		return nil, fmt.Errorf("onboarding: parse state: %w", err)
+		log.Printf("onboarding: corrupt state file, resetting to fresh state: %v", err)
+		return &State{
+			Version:   currentStateVersion,
+			Checklist: DefaultChecklist(),
+		}, nil
 	}
 	// If the file was written by an older schema version, return a fresh state
 	// so the user re-runs onboarding rather than hitting subtle bugs.

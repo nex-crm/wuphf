@@ -4765,7 +4765,9 @@ func (l *Launcher) LaunchWeb(webPort int) error {
 
 	l.broker.SetGenerateMemberFn(l.GenerateMemberTemplateFromPrompt)
 	l.broker.SetGenerateChannelFn(l.GenerateChannelTemplateFromPrompt)
-	l.broker.ServeWebUI(webPort)
+	if err := l.broker.ServeWebUI(webPort); err != nil {
+		return fmt.Errorf("web UI failed to start: %w\n\nIs port %d already in use? Try: wuphf --web-port %d", err, webPort, webPort+1)
+	}
 
 	// Default path: headless `claude --print` per turn. Anthropic re-sanctioned
 	// this invocation (OpenClaw policy note, 2026-04), so it runs on the user's
