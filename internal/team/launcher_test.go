@@ -2418,7 +2418,7 @@ done:
 }
 
 func TestProcessDueTaskJobResumesRateLimitedBlockedTask(t *testing.T) {
-	b := newTestBroker(t)
+	b := NewBrokerAt(leakedBrokerStatePath(t))
 	b.mu.Lock()
 	b.members = []officeMember{
 		{Slug: "ceo", Name: "CEO"},
