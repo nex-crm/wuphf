@@ -48,15 +48,6 @@ func (s *stub) Generate(_ context.Context, _ Request) (Result, error) {
 
 func init() {
 	Register(&stub{
-		kind:         KindHiggsfield,
-		label:        "Higgsfield",
-		blurb:        "Higgsfield AI — image + cinematic video generation. Stub: paste API key in Settings, then ask the maintainer to wire the upstream endpoint.",
-		defaultModel: "soul",
-		supportsVid:  true,
-		needsKey:     true,
-		setupHint:    "Add HIGGSFIELD_API_KEY in Settings → Image generation → Higgsfield. Endpoint wiring pending.",
-	})
-	Register(&stub{
 		kind:         KindGPTImage,
 		label:        "ChatGPT Image",
 		blurb:        "OpenAI gpt-image-1 — high-quality image generation via the OpenAI Images API.",
