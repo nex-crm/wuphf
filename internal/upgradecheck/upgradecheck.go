@@ -300,6 +300,39 @@ func extractTrailingPR(s string) string {
 	return m[1]
 }
 
+// Notable reports whether entries contain at least one commit worth nagging
+// the user about. The banner uses this to gate the show-decision so a release
+// that's purely docs/chore/refactor/test/ci/style/build doesn't trigger a
+// banner. Failure-open: if the changelog couldn't be fetched at all, the
+// caller should default to showing the banner rather than swallowing an
+// upgrade silently.
+//
+// "Notable" = any commit with type ∈ {feat, fix, perf} OR Breaking=true.
+// Mirrored in web/src/components/layout/upgradeBanner.utils.ts (hasNotable).
+func Notable(entries []CommitEntry) bool {
+	for _, e := range entries {
+		if e.Breaking {
+			return true
+		}
+		switch e.Type {
+		case "feat", "fix", "perf":
+			return true
+		}
+	}
+	return false
+}
+
+// IsMajorBump reports whether the first dotted-numeric segment of `to` is
+// strictly greater than that of `from`. Used by the banner to force-show
+// across a major version line — a rule we apply manually since auto-release
+// only knows feat-vs-not (no major bump on conventional-commit `!` markers
+// today). Mirrored in web/src/components/layout/upgradeBanner.utils.ts.
+func IsMajorBump(from, to string) bool {
+	pf := splitVersion(from)
+	pt := splitVersion(to)
+	return segAt(pt, 0) > segAt(pf, 0)
+}
+
 // FormatChangelog renders entries grouped by conventional-commit type. Useful
 // for the `wuphf upgrade` subcommand. Breaking-change commits are surfaced
 // in their own group at the top regardless of their underlying type.

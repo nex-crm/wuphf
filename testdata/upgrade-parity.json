@@ -1,0 +1,43 @@
+{
+  "_about": "Cross-language parity fixture for the upgrade-banner show-gate rules. Both internal/upgradecheck.Notable / IsMajorBump (Go) and web/src/components/layout/upgradeBanner.utils.ts hasNotable / isMajorBump (TS) read this file in tests. The three implementations of these rules (this fixture, the Go pair, and the TS pair) must agree — if you change one side's implementation, BOTH tests fail until the fixture and the other side catch up. This is the whole point of the parity gate.",
+
+  "notable": [
+    { "name": "empty list", "input": [], "want": false },
+    { "name": "feat alone", "input": [{ "type": "feat", "breaking": false }], "want": true },
+    { "name": "fix alone", "input": [{ "type": "fix", "breaking": false }], "want": true },
+    { "name": "perf alone", "input": [{ "type": "perf", "breaking": false }], "want": true },
+    { "name": "breaking refactor (marker overrides type)", "input": [{ "type": "refactor", "breaking": true }], "want": true },
+    { "name": "breaking docs (marker overrides type)", "input": [{ "type": "docs", "breaking": true }], "want": true },
+    { "name": "docs alone", "input": [{ "type": "docs", "breaking": false }], "want": false },
+    { "name": "chore alone", "input": [{ "type": "chore", "breaking": false }], "want": false },
+    { "name": "refactor without breaking", "input": [{ "type": "refactor", "breaking": false }], "want": false },
+    { "name": "test alone", "input": [{ "type": "test", "breaking": false }], "want": false },
+    { "name": "ci alone", "input": [{ "type": "ci", "breaking": false }], "want": false },
+    { "name": "style alone", "input": [{ "type": "style", "breaking": false }], "want": false },
+    { "name": "build alone", "input": [{ "type": "build", "breaking": false }], "want": false },
+    { "name": "all-quiet mix", "input": [
+      { "type": "docs", "breaking": false },
+      { "type": "chore", "breaking": false },
+      { "type": "refactor", "breaking": false }
+    ], "want": false },
+    { "name": "any-notable wins (notable in middle)", "input": [
+      { "type": "chore", "breaking": false },
+      { "type": "fix", "breaking": false },
+      { "type": "docs", "breaking": false }
+    ], "want": true },
+    { "name": "unknown type does not count as notable", "input": [{ "type": "totally-made-up", "breaking": false }], "want": false }
+  ],
+
+  "isMajorBump": [
+    { "name": "patch within 0.x", "from": "0.83.7", "to": "0.83.10", "want": false },
+    { "name": "minor within 0.x is not major", "from": "0.83.7", "to": "0.84.0", "want": false },
+    { "name": "0.x to 1.0", "from": "0.83.7", "to": "1.0.0", "want": true },
+    { "name": "1.x to 2.x", "from": "1.5.10", "to": "2.0.0", "want": true },
+    { "name": "downgrade is not a bump", "from": "2.0.0", "to": "1.5.10", "want": false },
+    { "name": "patch within 1.x", "from": "1.0.0", "to": "1.5.10", "want": false },
+    { "name": "v-prefix major bump", "from": "v1.0.0", "to": "v2.0.0", "want": true },
+    { "name": "pre-release across major", "from": "0.83.7-rc.1", "to": "1.0.0", "want": true },
+    { "name": "build metadata patch", "from": "1.0.0", "to": "1.0.1+build.5", "want": false },
+    { "name": "rc to release within same major", "from": "1.0.0-rc.1", "to": "1.0.0", "want": false }
+  ]
+}
