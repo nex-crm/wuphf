@@ -1,0 +1,290 @@
+/* ═══════════════════════════════════════════════════════════════
+   BoardRoom Theme: Noir Gold
+   Hanger8200 brand theme — deep noir backgrounds, oxidized → polished
+   gold accents, gold-tinted off-white text. Self-contained: does not
+   inherit nex.css. Scoped to [data-theme="noir-gold"].
+   ═══════════════════════════════════════════════════════════════ */
+
+html[data-theme="noir-gold"] {
+  /* ── Neutral ramp (warm noir, dark → light) ── */
+  --neutral-950: #060606;
+  --neutral-900: #0a0a0b;
+  --neutral-800: #111113;
+  --neutral-700: #16171a;
+  --neutral-600: #1f2024;
+  --neutral-500: #2a2c30;
+  --neutral-400: #3c3e43;
+  --neutral-300: #5a5d62;
+  --neutral-200: #8a8d92;
+  --neutral-100: #b39e6b;
+  --neutral-50:  #d9c897;
+  --neutral-10:  #f5e9c8;
+
+  /* ── Gold ramp (oxidized → patina → polished → champagne) ── */
+  --gold-950: #1a1206;
+  --gold-900: #2a1c0a;
+  --gold-800: #3d2e0a;
+  --gold-700: #5c4413;
+  --gold-600: #8a6817;
+  --gold-500: #b8881e;
+  --gold-400: #c9a227;
+  --gold-300: #d9b84a;
+  --gold-200: #f0c75e;
+  --gold-100: #fce8a8;
+  --gold-50:  #fff5d4;
+
+  /* ── Accent stand-ins so any code referencing tertiary/cyan/olive still works ── */
+  --tertiary-500: var(--gold-700);
+  --tertiary-400: var(--gold-400);
+  --tertiary-300: var(--gold-300);
+  --tertiary-200: var(--gold-200);
+  --tertiary-100: var(--gold-100);
+
+  --olive-500: #3d2e0a;
+  --olive-400: var(--gold-500);
+  --olive-300: var(--gold-300);
+  --olive-200: var(--gold-200);
+  --olive-100: var(--gold-100);
+
+  --cyan-500: #b8881e;
+  --cyan-400: var(--gold-400);
+  --cyan-300: var(--gold-300);
+  --cyan-200: var(--gold-200);
+  --cyan-100: var(--gold-100);
+
+  /* ── Status colors (warmed for noir surface) ── */
+  --success-500: #1c5b34;
+  --success-400: #2faa64;
+  --success-300: #54c984;
+  --success-200: #9adcb6;
+  --success-100: #1a2b21;
+
+  --error-500: #6e1018;
+  --error-400: #d6443c;
+  --error-300: #ff7e6e;
+  --error-200: #2a1416;
+  --error-100: #1f0f10;
+
+  --warning-500: #5a3a07;
+  --warning-400: #c98e1e;
+  --warning-300: #f0b14a;
+  --warning-200: #2a1f0d;
+  --warning-100: #1f160a;
+
+  /* ── Overlays ── */
+  --overlay-soft:         rgba(255, 232, 168, 0.04);
+  --overlay:              rgba(255, 232, 168, 0.08);
+  --overlay-strong:       rgba(255, 232, 168, 0.16);
+  --scrim:                rgba(0, 0, 0, 0.72);
+  --overlay-white-soft:   rgba(245, 233, 200, 0.06);
+  --overlay-white:        rgba(245, 233, 200, 0.12);
+  --overlay-white-strong: rgba(245, 233, 200, 0.32);
+
+  /* ── Semantic aliases ── */
+  --bg:             #0a0a0b;
+  --bg-warm:        #111113;
+  --bg-subtle:      #060606;
+  --bg-card:        #111113;
+  --text:           #f5e9c8;
+  --text-secondary: #b39e6b;
+  --text-tertiary:  #7a6a45;
+  --text-disabled:  #4a4234;
+
+  --accent:      var(--gold-400);
+  --accent-warm: var(--gold-500);
+  --accent-bg:   rgba(201, 162, 39, 0.10);
+
+  --border:        #1a1a1c;
+  --border-light:  #141416;
+  --border-dark:   #2a261d;
+  --border-strong: #3c3528;
+
+  --green:      var(--success-400);
+  --green-dark: var(--success-500);
+  --green-bg:   var(--success-100);
+  --red:        var(--error-400);
+  --red-dark:   var(--error-500);
+  --red-bg:     var(--error-100);
+  --yellow:     var(--warning-400);
+  --yellow-dark:var(--warning-500);
+  --yellow-bg:  var(--warning-100);
+  --blue:       var(--gold-400);
+  --blue-bg:    var(--accent-bg);
+
+  --font-sans: "Source Serif 4", "IBM Plex Serif", Georgia, "Times New Roman", serif;
+  --font-serif: "Fraunces", Georgia, "Times New Roman", serif;
+  --font-logo: "Fraunces", Georgia, "Times New Roman", serif;
+  --font-mono: "Geist Mono", "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+
+  /* ── Sidebar tokens (no purple anywhere) ── */
+  --nex-sidebar:             #0a0a0b;
+  --nex-sidebar-hover:       rgba(201, 162, 39, 0.12);
+  --nex-sidebar-active:      var(--gold-400);
+  --nex-sidebar-text:        rgba(245, 233, 200, 0.78);
+  --nex-sidebar-text-active: var(--gold-200);
+
+  /* purple aliases redirected to gold so any stale rule is harmless */
+  --purple:    var(--gold-400);
+  --purple-bg: var(--accent-bg);
+
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --radius-full: 9999px;
+}
+
+html[data-theme="noir-gold"] body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+}
+
+/* ─── Sidebar — flat noir, gold accents, no purple, no glow ─── */
+html[data-theme="noir-gold"] .sidebar {
+  background: var(--nex-sidebar);
+  color: var(--nex-sidebar-text);
+  border-right: 1px solid var(--border);
+}
+html[data-theme="noir-gold"] .sidebar .sidebar-logo {
+  color: var(--gold-200);
+  letter-spacing: 0.08em;
+}
+html[data-theme="noir-gold"] .sidebar .sidebar-section-title {
+  color: rgba(245, 233, 200, 0.45);
+}
+html[data-theme="noir-gold"] .sidebar .sidebar-section-toggle {
+  color: rgba(245, 233, 200, 0.62);
+}
+html[data-theme="noir-gold"] .sidebar .sidebar-section-toggle:hover {
+  color: var(--gold-200);
+}
+html[data-theme="noir-gold"] .sidebar .sidebar-icon-btn {
+  color: rgba(245, 233, 200, 0.75);
+}
+html[data-theme="noir-gold"] .sidebar .sidebar-icon-btn:hover {
+  background: var(--nex-sidebar-hover);
+  color: var(--gold-200);
+}
+html[data-theme="noir-gold"] .sidebar .sidebar-icon-btn.active {
+  background: rgba(201, 162, 39, 0.18);
+  color: var(--gold-100);
+}
+html[data-theme="noir-gold"] .sidebar .sidebar-icon-btn.active:hover {
+  background: rgba(201, 162, 39, 0.26);
+}
+html[data-theme="noir-gold"] .sidebar .sidebar-header {
+  border-bottom-color: var(--border);
+}
+html[data-theme="noir-gold"] .sidebar .sidebar-scroll-wrap.is-agents {
+  border-bottom-color: var(--border);
+}
+html[data-theme="noir-gold"] .sidebar .sidebar-section + .sidebar-section,
+html[data-theme="noir-gold"] .sidebar .sidebar-agents + .sidebar-section,
+html[data-theme="noir-gold"] .sidebar .sidebar-channels + .sidebar-section,
+html[data-theme="noir-gold"] .sidebar .sidebar-apps + .sidebar-section {
+  border-top-color: var(--border);
+}
+html[data-theme="noir-gold"] .sidebar .sidebar-agent-task,
+html[data-theme="noir-gold"] .sidebar .sidebar-agent-activity {
+  color: rgba(245, 233, 200, 0.42);
+}
+
+html[data-theme="noir-gold"] .sidebar-item,
+html[data-theme="noir-gold"] .sidebar-channel,
+html[data-theme="noir-gold"] .sidebar-agent {
+  color: var(--nex-sidebar-text);
+}
+html[data-theme="noir-gold"] .sidebar-item:hover,
+html[data-theme="noir-gold"] .sidebar-channel:hover,
+html[data-theme="noir-gold"] .sidebar-agent:hover {
+  background: var(--nex-sidebar-hover);
+  color: var(--gold-100);
+}
+html[data-theme="noir-gold"] .sidebar-item.active,
+html[data-theme="noir-gold"] .sidebar-channel.active,
+html[data-theme="noir-gold"] .sidebar-agent.active {
+  background: rgba(201, 162, 39, 0.18);
+  color: var(--gold-100);
+}
+html[data-theme="noir-gold"] .sidebar-item.active:hover,
+html[data-theme="noir-gold"] .sidebar-channel.active:hover,
+html[data-theme="noir-gold"] .sidebar-agent.active:hover {
+  background: rgba(201, 162, 39, 0.24);
+}
+
+html[data-theme="noir-gold"] .sidebar .usage-toggle {
+  color: rgba(245, 233, 200, 0.72);
+  border-top-color: var(--border);
+}
+html[data-theme="noir-gold"] .sidebar .usage-toggle:hover {
+  color: var(--gold-100);
+  background: var(--nex-sidebar-hover);
+}
+html[data-theme="noir-gold"] .sidebar .usage-toggle.open {
+  background: rgba(201, 162, 39, 0.18);
+  color: var(--gold-100);
+}
+html[data-theme="noir-gold"] .sidebar-summary,
+html[data-theme="noir-gold"] .sidebar-hint {
+  color: rgba(245, 233, 200, 0.42);
+  border-top-color: var(--border);
+}
+
+/* ─── Channel header ─── */
+html[data-theme="noir-gold"] .channel-header {
+  background: var(--bg-warm);
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+}
+html[data-theme="noir-gold"] .channel-title {
+  color: var(--gold-100);
+}
+html[data-theme="noir-gold"] .channel-desc {
+  color: var(--text-secondary);
+}
+html[data-theme="noir-gold"] .sidebar-btn {
+  color: var(--text-secondary);
+}
+html[data-theme="noir-gold"] .sidebar-btn:hover {
+  background: var(--overlay);
+  color: var(--gold-100);
+}
+
+/* ─── Composer / messages ─── */
+html[data-theme="noir-gold"] .composer-inner {
+  background: var(--bg-warm);
+  border-color: var(--border-dark);
+}
+html[data-theme="noir-gold"] .message-text { color: var(--text); }
+html[data-theme="noir-gold"] .message:hover { background: var(--bg-warm); }
+
+/* ─── Buttons ─── */
+html[data-theme="noir-gold"] .btn-primary,
+html[data-theme="noir-gold"] button.btn-primary {
+  background: var(--gold-400);
+  color: var(--gold-950);
+  border: 1px solid var(--gold-500);
+}
+html[data-theme="noir-gold"] .btn-primary:hover {
+  background: var(--gold-300);
+  color: #000;
+}
+html[data-theme="noir-gold"] .btn-secondary {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+}
+html[data-theme="noir-gold"] .btn-secondary:hover {
+  border-color: var(--gold-500);
+  color: var(--gold-100);
+}
+
+/* ─── Cards / panels ─── */
+html[data-theme="noir-gold"] .card,
+html[data-theme="noir-gold"] .panel,
+html[data-theme="noir-gold"] .modal-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text);
+}

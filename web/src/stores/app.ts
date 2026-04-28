@@ -1,11 +1,11 @@
 import { create } from "zustand";
 
-export type Theme = "nex" | "nex-dark";
+export type Theme = "nex" | "nex-dark" | "noir-gold";
 
 const _storedTheme = ((): Theme => {
   try {
     const v = localStorage.getItem("wuphf-theme");
-    if (v === "nex-dark") return "nex-dark";
+    if (v === "nex" || v === "nex-dark" || v === "noir-gold") return v;
   } catch {}
   return "nex";
 })();
