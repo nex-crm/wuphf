@@ -692,17 +692,20 @@ jobs:
     needs: web
     runs-on: windows-latest
     steps:
+      - name: Disable git's NTFS path protection
+        # The .windsurf/workflows/ directory contains files with colons in
+        # their names (nex:ask.md, etc — Windsurf's slash-command namespace
+        # separator). On NTFS, the colon is reserved, so by default git's
+        # core.protectNTFS=true rejects the checkout with "invalid path"
+        # before any job step can run. Sparse-checkout doesn't help: git
+        # validates paths from the fetched tree regardless of which paths
+        # would actually be materialized. Disabling protectNTFS lets git
+        # write the rest of the worktree; the colon files themselves end
+        # up as untracked — fine, we don't need them to build wuphf.exe.
+        # Tracked separately in CONTRIBUTING / repo hygiene if we want to
+        # rename the source files later.
+        run: git config --global core.protectNTFS false
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
-        with:
-          # Sparse-checkout skips .windsurf/, which contains files with
-          # colons in their names (nex:ask.md, etc — Windsurf's slash-
-          # command namespace separator). NTFS reserves colons, so a
-          # default checkout fails with "invalid path" before any test
-          # can run. We don't need that directory to build wuphf.exe.
-          sparse-checkout: |
-            /*
-            !.windsurf
-          sparse-checkout-cone-mode: false
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # ratchet:actions/setup-go@v6
         with:
           go-version-file: go.mod
