@@ -121,6 +121,33 @@ interface PrereqResult {
   install_url?: string;
 }
 
+// runtimeIsReady centralizes the "should this runtime label count as a
+// configured LLM?" predicate used at the SetupStep gate, the keyboard
+// gate, and the ReadyStep summary. Three call sites had drifted apart
+// once already (see PR #367 review) — keeping the rule in one place
+// stops the next drift in its tracks.
+//
+// Rules:
+//   - Unknown labels (not in RUNTIMES) never count.
+//   - When prereqs detection succeeded, the runtime's binary must be on
+//     PATH (detection.found).
+//   - When prereqs detection FAILED (prereqsError truthy), trust the
+//     user's selection — but only for runtimes that carry a non-null
+//     provider id. Cursor/Windsurf are provider:null and
+//     finishOnboarding silently drops them from the llm_provider
+//     payload, so letting them count would let the user finish with no
+//     LLM provider configured.
+function runtimeIsReady(
+  label: string,
+  prereqs: PrereqResult[],
+  prereqsError: string,
+): boolean {
+  const spec = RUNTIMES.find((r) => r.label === label);
+  if (!spec) return false;
+  if (prereqsError) return spec.provider !== null;
+  return Boolean(detectedBinary(prereqs, spec.binary)?.found);
+}
+
 // "Start from scratch" starter roster. Mirrors scratchFoundingTeamBlueprint
 // in internal/team/broker_onboarding.go — the broker seeds these exact slugs
 // when the wizard POSTs blueprint:null. Kept in sync manually; backend is the
@@ -1156,19 +1183,10 @@ function SetupStep({
   // off clears localProvider via onSelectLocalProvider("").
   const [localModeOn, setLocalModeOn] = useState<boolean>(localProvider !== "");
 
-  // A runtime is usable only when its binary is actually present on PATH.
-  // When detection failed (prereqsError), trust the user's selection — but
-  // only for runtimes that actually carry a provider id. Cursor/Windsurf
-  // have provider:null and get dropped in finishOnboarding(), so letting
-  // them satisfy the gate would let the user finish onboarding with no
-  // configured llm_provider.
-  const hasInstalledSelection = runtimePriority.some((label) => {
-    const spec = RUNTIMES.find((r) => r.label === label);
-    if (!spec) return false;
-    if (prereqsError) return spec.provider !== null;
-    const detection = detectedBinary(prereqs, spec.binary);
-    return Boolean(detection?.found);
-  });
+  // Any priority slot that satisfies runtimeIsReady satisfies the gate.
+  const hasInstalledSelection = runtimePriority.some((label) =>
+    runtimeIsReady(label, prereqs, prereqsError),
+  );
   const hasAnyApiKey = Object.values(apiKeys).some((v) => v.trim().length > 0);
   // GBrain requires an OpenAI key to function — the TUI gates on this in
   // InitGBrainOpenAIKey (see internal/tui/init_flow.go:215). Mirror the
@@ -1213,6 +1231,7 @@ function SetupStep({
         ) : prereqsError ? (
           <div
             data-testid="prereqs-error-banner"
+            role="alert"
             style={{
               fontSize: 12,
               color: "var(--danger-500, #c33)",
@@ -2144,7 +2163,17 @@ export function Wizard({ onComplete }: WizardProps) {
       detail: "Web session. No tmux required in the browser.",
     });
 
-    // 3. LLM runtime — whatever CLI the user picked as primary, if installed.
+    // 3. LLM runtime — whatever CLI the user picked as primary, if
+    //    installed (or trusted under prereqsError). Skip provider:null
+    //    runtimes (Cursor/Windsurf) under prereqsError because
+    //    finishOnboarding drops them from the llm_provider payload —
+    //    crediting them as "ready" would tell the user the office is
+    //    configured for an LLM that's silently absent on launch.
+    // ReadyStep inspects only runtimePriority[0] — the active provider —
+    // not the full priority list. The gate sites use .some(...) because
+    // any installed entry satisfies the install gate; the readiness
+    // summary should reflect what's actually about to be persisted as
+    // llm_provider, which is the head of the list.
     const primaryLabel = runtimePriority[0];
     const primarySpec = primaryLabel
       ? RUNTIMES.find((r) => r.label === primaryLabel)
@@ -2152,7 +2181,9 @@ export function Wizard({ onComplete }: WizardProps) {
     const primaryDetection = primarySpec
       ? detectedBinary(prereqs, primarySpec.binary)
       : undefined;
-    if (primarySpec && (primaryDetection?.found || prereqsError)) {
+    const primaryReady =
+      !!primaryLabel && runtimeIsReady(primaryLabel, prereqs, prereqsError);
+    if (primarySpec && primaryReady) {
       checks.push({
         label: "LLM runtime",
         status: "ready",
@@ -2408,12 +2439,9 @@ export function Wizard({ onComplete }: WizardProps) {
 
       const canIdentityContinue =
         company.trim().length > 0 && description.trim().length > 0;
-      const hasInstalledSelection = runtimePriority.some((label) => {
-        const spec = RUNTIMES.find((r) => r.label === label);
-        if (!spec) return false;
-        if (prereqsError) return spec.provider !== null;
-        return Boolean(detectedBinary(prereqs, spec.binary)?.found);
-      });
+      const hasInstalledSelection = runtimePriority.some((label) =>
+        runtimeIsReady(label, prereqs, prereqsError),
+      );
       const hasAnyApiKey = Object.values(apiKeys).some(
         (v) => v.trim().length > 0,
       );

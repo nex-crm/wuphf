@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -27,6 +28,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"golang.org/x/term"
 
 	"github.com/nex-crm/wuphf/internal/action"
 	"github.com/nex-crm/wuphf/internal/agent"
@@ -4863,7 +4866,23 @@ func (l *Launcher) maybeOfferNex() {
 	fmt.Println()
 	fmt.Print("  Connect Nex for memory and context? [Y/n] ")
 	var answer string
-	_, _ = fmt.Scanln(&answer)
+	if _, err := fmt.Scanln(&answer); err != nil {
+		// fmt.Scanln has two distinct error shapes here:
+		//   - io.EOF: stdin was closed underneath us. By the time we
+		//     reach this branch stdinIsTTY() already returned true, so
+		//     EOF means the user explicitly hit Ctrl-D rather than
+		//     answering. Treat as a deliberate skip.
+		//   - any other error (most commonly "unexpected newline" from
+		//     a bare Enter): the prompt label says [Y/n], so capital-Y
+		//     is the visible default. Accept Enter as "yes" so the UX
+		//     contract matches the prompt.
+		if errors.Is(err, io.EOF) {
+			fmt.Println("  Skipping Nex. Agents will work without organizational memory.")
+			fmt.Println()
+			return
+		}
+		answer = ""
+	}
 	answer = strings.TrimSpace(strings.ToLower(answer))
 	if answer != "" && answer != "y" && answer != "yes" {
 		fmt.Println("  Skipping Nex. Agents will work without organizational memory.")
@@ -4915,16 +4934,13 @@ func waitForWebReady(addr string, timeout time.Duration) bool {
 	}
 }
 
-// stdinIsTTY reports whether os.Stdin is connected to a real terminal. We use
-// the stat-mode test instead of pulling in a TTY library: it's accurate enough
-// for the launcher's "is the user able to answer prompts?" question and avoids
-// touching go.mod for a launch-day fix.
+// stdinIsTTY reports whether os.Stdin is connected to a real terminal.
+// Uses golang.org/x/term so /dev/null (a char device but not a TTY) is
+// classified correctly — the original os.ModeCharDevice check let
+// `npx ... </dev/null` fall back to the auto-yes install path, which
+// is the cold-start bug this whole helper exists to prevent.
 func stdinIsTTY() bool {
-	stat, err := os.Stdin.Stat()
-	if err != nil {
-		return false
-	}
-	return (stat.Mode() & os.ModeCharDevice) != 0
+	return term.IsTerminal(int(os.Stdin.Fd()))
 }
 
 func openBrowser(url string) {

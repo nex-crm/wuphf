@@ -725,12 +725,22 @@ var localRuntimeCandidates = []struct {
 	{kind: "exo", base: "http://127.0.0.1:52415/v1"},
 }
 
-// probeLocalRuntime checks a single OpenAI-compatible /v1/models endpoint and
-// returns true iff the response is a 2xx with an OpenAI-shaped body
-// (`{"object":"list", ...}`). This second check is load-bearing: port 8080 is
-// shared with countless dev servers, so a 200 OK on a path-permissive server
-// (devserver index, Spring Boot, Tomcat, Docker images) would otherwise
-// produce a bad "--provider mlx-lm" suggestion that fails opaquely on use.
+// probeLocalRuntime checks a single OpenAI-compatible /v1/models endpoint
+// and returns true iff the response is a 2xx with an OpenAI-shaped body —
+// `{"object":"list", "data":<array>}`. The shape check is load-bearing
+// because port 8080 is shared with countless dev servers, so a 200 OK on
+// a path-permissive server (Spring Boot, Tomcat, Docker images) would
+// otherwise produce a bad "--provider mlx-lm" suggestion that fails
+// opaquely on use.
+//
+// The `data` key must be present (not missing, not null) but MAY be an
+// empty array. Freshly-installed ollama (`ollama serve` before any
+// `ollama pull`) returns `{"object":"list","data":[]}` and is a real
+// runtime — rejecting it would silently break the most common ollama
+// state and is worse than the exotic case of an unrelated server that
+// happens to return `data:[]`. We use a pointer to []RawMessage so we
+// can distinguish "key missing or null" (Data == nil) from "key
+// present, empty array" (*Data has length 0).
 func probeLocalRuntime(ctx context.Context, client *http.Client, base string) bool {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/models", nil)
 	if err != nil {
@@ -745,7 +755,8 @@ func probeLocalRuntime(ctx context.Context, client *http.Client, base string) bo
 		return false
 	}
 	var probe struct {
-		Object string `json:"object"`
+		Object string             `json:"object"`
+		Data   *[]json.RawMessage `json:"data"`
 	}
 	// Cap the read so a misconfigured server can't stream us megabytes of
 	// HTML. Real /v1/models bodies are < 4KB even with dozens of models.
@@ -756,7 +767,7 @@ func probeLocalRuntime(ctx context.Context, client *http.Client, base string) bo
 	if err := json.Unmarshal(body, &probe); err != nil {
 		return false
 	}
-	return probe.Object == "list"
+	return probe.Object == "list" && probe.Data != nil
 }
 
 // detectReachableLocalRuntime probes the canonical loopback endpoints for the

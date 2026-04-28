@@ -100,6 +100,18 @@ test.describe("Wizard error states", () => {
   test("submitError alert + Retry button appear when /onboarding/complete fails, then succeed on retry", async ({
     page,
   }) => {
+    // Stub /config to a fixed 200 so the only varying surface in this
+    // test is /onboarding/complete. finishOnboarding posts /config
+    // first, and a future regression there would otherwise fail this
+    // test for the wrong reason.
+    page.route("**/config*", (route: Route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ ok: true }),
+      }),
+    );
+
     // Fail /onboarding/complete on the FIRST POST, succeed on the second.
     // This exercises the full retry round-trip — banner appears, button
     // text flips to "Retry", clicking Retry re-issues the POST and

@@ -8,16 +8,33 @@ import (
 	"time"
 )
 
-// TestProbeLocalRuntimeAcceptsOpenAIShape asserts the happy path: a 200 OK
-// with `{"object":"list", "data":[…]}` is treated as a real runtime.
+// TestProbeLocalRuntimeAcceptsOpenAIShape asserts the happy path: a 200
+// OK with `{"object":"list", "data":[…]}` is treated as a real runtime.
 func TestProbeLocalRuntimeAcceptsOpenAIShape(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"qwen2.5-coder:7b","object":"model"}]}`))
+	}))
+	defer srv.Close()
+
+	if !probeLocalRuntime(context.Background(), &http.Client{Timeout: time.Second}, srv.URL) {
+		t.Fatal("expected probeLocalRuntime to accept OpenAI-shaped 200 OK")
+	}
+}
+
+// TestProbeLocalRuntimeAcceptsEmptyData covers the "freshly installed
+// ollama with no models pulled yet" case. The daemon is up, /v1/models
+// returns `{"object":"list","data":[]}`, and we MUST treat it as a real
+// runtime — rejecting it would silently break the most common ollama
+// first-run state. The flip side (an unrelated server happening to
+// return `data:[]` is exotic enough to accept the false positive risk).
+func TestProbeLocalRuntimeAcceptsEmptyData(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"object":"list","data":[]}`))
 	}))
 	defer srv.Close()
 
 	if !probeLocalRuntime(context.Background(), &http.Client{Timeout: time.Second}, srv.URL) {
-		t.Fatal("expected probeLocalRuntime to accept OpenAI-shaped 200 OK")
+		t.Fatal("freshly-installed ollama (data:[]) must be treated as a real runtime")
 	}
 }
 
@@ -29,9 +46,15 @@ func TestProbeLocalRuntimeRejectsArbitrary200(t *testing.T) {
 	cases := map[string]string{
 		"html":               `<!doctype html><html><body>Hello</body></html>`,
 		"unrelated_json":     `{"status":"ok"}`,
-		"object_not_list":    `{"object":"chat.completion","data":[]}`,
-		"missing_object_key": `{"data":[]}`,
+		"object_not_list":    `{"object":"chat.completion","data":[{"id":"x"}]}`,
+		"missing_object_key": `{"data":[{"id":"x"}]}`,
 		"empty":              ``,
+		// `data` key missing entirely — distinguishes a real OpenAI-shaped
+		// response (which always includes the key, even if the array is
+		// empty) from an unrelated server returning a partial JSON shape.
+		"object_list_no_data_key": `{"object":"list"}`,
+		// Explicit null — same intent: not a real /v1/models response.
+		"object_list_data_null": `{"object":"list","data":null}`,
 	}
 	for name, body := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -68,14 +91,14 @@ func TestProbeLocalRuntimeRejectsNon2xx(t *testing.T) {
 // TestProbeLocalRuntimeBoundedReadSize asserts the LimitReader cap so a
 // misbehaving server can't stream megabytes into the wizard's hot path.
 func TestProbeLocalRuntimeBoundedReadSize(t *testing.T) {
-	// 2 MB body that nominally starts with the OpenAI shape but never
-	// terminates the JSON object — we want to confirm the limit kicks in
-	// and the probe fails gracefully (returns false) instead of hanging
-	// or buffering.
+	// 256KB body that nominally starts with the OpenAI shape but never
+	// terminates the JSON object — we want to confirm the LimitReader
+	// 64KB cap kicks in and the probe fails gracefully (returns false)
+	// instead of hanging or buffering megabytes.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		const chunk = `{"object":"list","data":[`
+		const chunk = `{"object":"list","data":[{"id":"x"`
 		_, _ = w.Write([]byte(chunk))
 		// Pad with garbage past the 64KB cap.
 		blob := make([]byte, 256*1024)
