@@ -559,6 +559,23 @@ type Broker struct {
 	stopCh   chan struct{} // closed by Stop(); signals background goroutines to exit
 	stopOnce sync.Once
 
+	// Skill compile (Stage A) plumbing. The scanner is lazily constructed on
+	// first compile; metrics + flags coordinate concurrent triggers. All four
+	// fields are guarded by b.mu except where the metric body uses sync/atomic.
+	skillCompileMetrics   SkillCompileMetrics
+	skillCompileInflight  bool
+	skillCompileCoalesced bool
+	skillScanner          *SkillScanner
+	// Skill synthesizer (Stage B) plumbing. Same coalesce semantics as
+	// Stage A; metrics + counters live on skillCompileMetrics.StageBProposalsTotal.
+	skillSynthesizer    *SkillSynthesizer
+	skillSynthInflight  bool
+	skillSynthCoalesced bool
+	// recentlyRejectedSkills holds in-memory snapshots of skills rejected in
+	// the last 60s so /skills/reject/undo can restore them. Keyed by undo
+	// token. Guarded by b.mu. See skill_crud_endpoints.go for GC semantics.
+	recentlyRejectedSkills map[string]rejectedSkillSnapshot
+
 	// statePath is the on-disk broker-state.json path bound at construction.
 	// NewBrokerAt(path) sets this directly; NewBroker() resolves
 	// defaultBrokerStatePath() once and pins the result. A later-arriving
@@ -1504,6 +1521,18 @@ func (b *Broker) ensureWikiWorker() {
 	// The goroutine is cancelled by the background context when the broker
 	// shuts down.
 	b.startLintCron(context.Background(), idx, worker)
+
+	// Stage A skill-compile cron. Walks the wiki and asks the LLM to extract
+	// candidate skills. Cron runs at WUPHF_SKILL_COMPILE_INTERVAL (default
+	// 30m); cooldown gates back-to-back ticks via WUPHF_SKILL_COMPILE_COOLDOWN
+	// (default 25m). Set the interval to "0" or "disabled" to silence the cron.
+	b.startSkillCompileCron(context.Background())
+	b.startSkillCompileEventListener(context.Background())
+
+	// Stage B synthesizer: lazily constructed alongside the Stage A scanner so
+	// the compile cron drives both passes from a single trigger. Tests can
+	// inject a fake via SetSkillSynthesizer.
+	b.ensureSkillSynthesizer()
 }
 
 // StartOnPort launches the broker on the given port. Use 0 for an OS-assigned port.
@@ -1587,6 +1616,10 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/actions", b.requireAuth(b.handleActions))
 	mux.HandleFunc("/scheduler", b.requireAuth(b.handleScheduler))
 	mux.HandleFunc("/skills", b.requireAuth(b.handleSkills))
+	// /skills/compile lives ABOVE the wildcard subpath route so the
+	// ServeMux longest-match wins for the compile endpoints.
+	mux.HandleFunc("/skills/compile", b.requireAuth(b.handlePostSkillCompile))
+	mux.HandleFunc("/skills/compile/stats", b.requireAuth(b.handleGetSkillCompileStats))
 	mux.HandleFunc("/skills/", b.requireAuth(b.handleSkillsSubpath))
 	// GET /commands — slash-command registry mirror so the web composer
 	// renders the same command set as the TUI. See broker_commands.go.
@@ -10844,6 +10877,14 @@ func (b *Broker) handleSkillsSubpath(w http.ResponseWriter, r *http.Request) {
 		b.handleInvokeSkill(w, r)
 		return
 	}
+	// PR 1b CRUD verbs: patch / archive / files / approve / reject + reject/undo.
+	if b.handleSkillsCRUDSubpath(w, r) {
+		return
+	}
+	// PR 1b PUT /skills/{name} — full SKILL.md replacement.
+	if b.handleSkillEditOnName(w, r) {
+		return
+	}
 	http.Error(w, "not found", http.StatusNotFound)
 }
 
@@ -11224,6 +11265,14 @@ func (b *Broker) handleInvokeSkill(w http.ResponseWriter, r *http.Request) {
 	sk := b.findSkillByNameLocked(skillName)
 	if sk == nil {
 		http.Error(w, "skill not found", http.StatusNotFound)
+		return
+	}
+
+	// Security fix (Codex T3): only active skills may be invoked. Proposed or
+	// archived skills must not be executable — proposed means unapproved,
+	// archived means intentionally retired.
+	if sk.Status != "active" {
+		http.Error(w, "skill not active (status="+sk.Status+")", http.StatusForbidden)
 		return
 	}
 
