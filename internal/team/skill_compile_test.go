@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -94,9 +95,7 @@ func TestCompileWikiSkills_CooldownBlocksCronTickWithinWindow(t *testing.T) {
 
 	b := withScannedTestBroker(t, &instantProvider{})
 	// Stamp a recent successful pass (within the 5m cooldown window).
-	b.mu.Lock()
-	b.skillCompileMetrics.LastSkillCompilePassAt = time.Now().UTC().Add(-1 * time.Minute)
-	b.mu.Unlock()
+	atomic.StoreInt64(&b.skillCompileMetrics.LastSkillCompilePassAtNano, time.Now().UTC().Add(-1*time.Minute).UnixNano())
 
 	_, err := b.compileWikiSkills(context.Background(), "", true, "cron")
 	if !errors.Is(err, ErrCompileCooldown) {
@@ -108,9 +107,7 @@ func TestCompileWikiSkills_CooldownDoesNotBlockManualClick(t *testing.T) {
 	t.Setenv("WUPHF_SKILL_COMPILE_COOLDOWN", "5m")
 
 	b := withScannedTestBroker(t, &instantProvider{})
-	b.mu.Lock()
-	b.skillCompileMetrics.LastSkillCompilePassAt = time.Now().UTC().Add(-1 * time.Minute)
-	b.mu.Unlock()
+	atomic.StoreInt64(&b.skillCompileMetrics.LastSkillCompilePassAtNano, time.Now().UTC().Add(-1*time.Minute).UnixNano())
 
 	res, err := b.compileWikiSkills(context.Background(), "", true, "manual")
 	if err != nil {
@@ -132,9 +129,7 @@ func TestCompileWikiSkills_CooldownExpiresAllowsCronTick(t *testing.T) {
 	t.Setenv("WUPHF_SKILL_COMPILE_COOLDOWN", "1ms")
 
 	b := withScannedTestBroker(t, &instantProvider{})
-	b.mu.Lock()
-	b.skillCompileMetrics.LastSkillCompilePassAt = time.Now().UTC().Add(-10 * time.Millisecond)
-	b.mu.Unlock()
+	atomic.StoreInt64(&b.skillCompileMetrics.LastSkillCompilePassAtNano, time.Now().UTC().Add(-10*time.Millisecond).UnixNano())
 
 	res, err := b.compileWikiSkills(context.Background(), "", true, "cron")
 	if err != nil {
@@ -160,11 +155,10 @@ func TestCompileWikiSkills_UpdatesLastPassAtOnSuccess(t *testing.T) {
 		t.Fatalf("compile: %v", err)
 	}
 
-	b.mu.Lock()
-	last := b.skillCompileMetrics.LastSkillCompilePassAt
-	b.mu.Unlock()
+	lastNano := atomic.LoadInt64(&b.skillCompileMetrics.LastSkillCompilePassAtNano)
+	last := time.Unix(0, lastNano)
 	if last.Before(before) {
-		t.Fatalf("LastSkillCompilePassAt not updated: got %s, expected >= %s", last, before)
+		t.Fatalf("LastSkillCompilePassAtNano not updated: got %s, expected >= %s", last, before)
 	}
 }
 

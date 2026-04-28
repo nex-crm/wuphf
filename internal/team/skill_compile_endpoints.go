@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // skillCompileRequest is the JSON shape POST /skills/compile accepts. Both
@@ -103,8 +104,8 @@ func (b *Broker) handleGetSkillCompileStats(w http.ResponseWriter, r *http.Reque
 		LastTickDurationMs:            snap.LastTickDurationMs,
 		StageBProposalsTotal:          snap.StageBProposalsTotal,
 	}
-	if !snap.LastSkillCompilePassAt.IsZero() {
-		resp.LastSkillCompilePassAt = snap.LastSkillCompilePassAt.UTC().Format(timeRFC3339)
+	if snap.LastSkillCompilePassAtNano != 0 {
+		resp.LastSkillCompilePassAt = time.Unix(0, snap.LastSkillCompilePassAtNano).UTC().Format(timeRFC3339)
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
