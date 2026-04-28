@@ -519,12 +519,41 @@ func (p *defaultLLMProvider) SystemPrompt() (string, error) {
 	return p.prompt, nil
 }
 
-// AskIsSkill is the stub implementation. It loads the prompt to surface any
-// errors early but does not perform an LLM round-trip. Real wiring is a
-// follow-up — see the package-level TODO above.
+// AskIsSkill classifies an article as a skill or not. It implements two
+// strategies in order:
+//
+//  1. Explicit-frontmatter fast path: if the article already carries Anthropic
+//     Agent Skills frontmatter (top-level `name:` and `description:`), the
+//     author has explicitly opted in. We promote without an LLM round-trip.
+//     This is the demo-friendly path: seed wiki articles with explicit
+//     frontmatter and the scanner picks them up deterministically.
+//
+//  2. Fallback (today a stub): if no explicit frontmatter is present, the
+//     scanner has nothing to act on. The plumbing for a live LLM round-trip
+//     is built (system prompt + user prompt assembly), but no provider client
+//     is wired today. Returns is_skill=false to match the previous behavior.
+//
+// The system prompt is loaded eagerly to surface any wiki-config errors at
+// the first call rather than silently no-op'ing.
 func (p *defaultLLMProvider) AskIsSkill(ctx context.Context, articlePath, articleContent string) (bool, SkillFrontmatter, string, error) {
 	if _, err := p.SystemPrompt(); err != nil {
 		return false, SkillFrontmatter{}, "", err
+	}
+	// Fast path: the article already declares itself as a skill via
+	// frontmatter. ParseSkillMarkdown only succeeds when both name and
+	// description are non-empty, which is the same opt-in contract the
+	// Anthropic spec enforces.
+	if fm, body, err := ParseSkillMarkdown([]byte(articleContent)); err == nil {
+		// Backfill version + license if the author omitted them — keeps the
+		// emitted skill markdown hub-publishable without forcing the wiki
+		// author to know the spec details.
+		if strings.TrimSpace(fm.Version) == "" {
+			fm.Version = "1.0.0"
+		}
+		if strings.TrimSpace(fm.License) == "" {
+			fm.License = "MIT"
+		}
+		return true, fm, body, nil
 	}
 	// Build the user prompt so it's ready when the live wiring lands. We
 	// intentionally throw it away today.
