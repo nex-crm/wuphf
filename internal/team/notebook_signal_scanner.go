@@ -123,11 +123,13 @@ func (s *NotebookSignalScanner) collectNotebookEntries(wikiRoot string) ([]noteb
 	var out []notebookEntry
 	walkErr := filepath.Walk(root, func(p string, info os.FileInfo, err error) error {
 		if err != nil {
-			return nil //nolint:nilerr // best-effort walk: skip unreadable entries
+			slog.Warn("notebook_signal_scanner: skipping path due to walk error", "path", p, "err", err)
+			return nil
 		}
 		rel, relErr := filepath.Rel(wikiRoot, p)
 		if relErr != nil {
-			return nil //nolint:nilerr // best-effort walk: skip unresolvable paths
+			slog.Warn("notebook_signal_scanner: skipping path with unresolvable relative", "path", p, "wiki_root", wikiRoot, "err", relErr)
+			return nil
 		}
 		rel = filepath.ToSlash(rel)
 
@@ -153,6 +155,7 @@ func (s *NotebookSignalScanner) collectNotebookEntries(wikiRoot string) ([]noteb
 
 		raw, readErr := os.ReadFile(p)
 		if readErr != nil {
+			slog.Warn("notebook_signal_scanner: skipping unreadable notebook file", "path", p, "err", readErr)
 			return nil
 		}
 
