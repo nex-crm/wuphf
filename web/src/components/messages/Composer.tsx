@@ -385,12 +385,11 @@ export function Composer() {
     onError: (err: unknown) => {
       const message =
         err instanceof Error ? err.message : "Failed to send message";
-      // The broker blocks chat with 409 + "request pending; answer required" when
-      // an agent is waiting on the human. The InterviewBar above the composer
-      // already shows the question, so the user has somewhere to act. Never yank
-      // them away from the textbox they are typing in.
+      // The broker blocks chat with 409 + "request pending; answer required"
+      // for approval-style requests. The request UI above the composer lets
+      // the user answer or dismiss/cancel it without leaving the textbox.
       if (/request pending|answer required/i.test(message)) {
-        showNotice("Answer the interview above to send messages.", "info");
+        showNotice("Answer or dismiss the request above to send messages.", "info");
         return;
       }
       showNotice(message, "error");

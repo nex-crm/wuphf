@@ -61,6 +61,33 @@ jobs:
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # ratchet:actions/setup-go@v6
         with:
           go-version-file: go.mod
+      - name: Check VERSION sentinel
+        # internal/buildinfo/VERSION is the embedded fallback when no release
+        # ldflag is set. It MUST stay literally "dev" so contributor / source
+        # builds resolve to a dev sentinel and IsDevVersion suppresses the
+        # upgrade banner. Issue #350: a hand-edited "0.0.7.1" passed as a
+        # real semver and produced a downgrade prompt against npm latest.
+        #
+        # The two private package.json files (root + web/) must stay at
+        # "0.0.0" — they are not published, but the same hand-edit pattern
+        # that staled the VERSION file also staled both of these. Pinning
+        # to "0.0.0" matches npm/package.json's release-overwritten default
+        # and makes "anything else" a clear lint failure.
+        run: |
+          contents=$(tr -d '[:space:]' < internal/buildinfo/VERSION)
+          if [ "$contents" != "dev" ]; then
+            echo "internal/buildinfo/VERSION must be the literal 'dev', got: $contents" >&2
+            echo "Real release versions are injected via goreleaser's ldflag at build time." >&2
+            exit 1
+          fi
+          for pkg in package.json web/package.json; do
+            v=$(node -p "require('./$pkg').version")
+            if [ "$v" != "0.0.0" ]; then
+              echo "$pkg version must be \"0.0.0\" (private package, no published version), got: $v" >&2
+              echo "Hand-edited semver here was the source of issue #350; keep it as a sentinel." >&2
+              exit 1
+            fi
+          done
       - name: Check gofmt
         # Belt-and-braces net against the golangci-lint `gofmt` formatter (see
         # .golangci.yml). `-s` matches that linter's simplify=true default so
@@ -566,7 +593,7 @@ jobs:
         with:
           name: web-dist
           path: web/dist
-      - uses: goreleaser/goreleaser-action@e24998b8b67b290c2fa8b7c14fcfa7de2c5c9b8c # ratchet:goreleaser/goreleaser-action@v7
+      - uses: goreleaser/goreleaser-action@1a80836c5c9d9e5755a25cb59ec6f45a3b5f41a8 # ratchet:goreleaser/goreleaser-action@v7
         with:
           version: latest
           args: release --snapshot --clean --skip=publish

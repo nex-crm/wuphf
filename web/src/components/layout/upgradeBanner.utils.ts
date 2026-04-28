@@ -31,12 +31,26 @@ const KNOWN_TYPES = new Set(TYPE_LABELS.map((t) => t.type));
 export const VERSION_RE =
   /^v?\d+(\.\d+){1,3}(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$/;
 
-// Buildinfo's "dev" sentinel — see internal/buildinfo/buildinfo.go. Keep
-// in sync with upgradecheck.IsDevVersion.
+// Buildinfo's "dev" sentinel — keep in sync with the Go twins:
+// buildinfo.IsDev (canonical literal sentinel) and upgradecheck.IsDevVersion
+// (extended check that also rejects garbage and sub-0.1.0 versions). This
+// helper applies the full extended logic so the URL-override preview path
+// classifies stale-VERSION builds as dev too.
+//
+// Note: on the production banner path, UpgradeBanner.tsx trusts the
+// server-authoritative `is_dev_build` flag from /upgrade-check first, so
+// this local check is dead code in the #350 reproducer. It only fires on
+// the URL-override (?upgrade-from=…&upgrade-to=…) preview path used by QA
+// and screenshots — keeping the twin in sync with the Go side prevents a
+// future preview pair from rendering a downgrade-shaped banner during
+// pre-launch sweeps.
 export function isDevVersion(v: string | null | undefined): boolean {
   if (!v) return true;
   const t = v.trim();
-  return t === "" || t === "dev";
+  if (t === "" || t === "dev") return true;
+  if (!VERSION_RE.test(t)) return true;
+  if (compareVersions(t, "0.1.0") < 0) return true;
+  return false;
 }
 
 // Trim FIRST then strip leading `v` so " v0.79.10" parses correctly. Mirror
@@ -79,6 +93,14 @@ const TRAILING_PR_RE = /\s*\(#(\d+)\)\s*$/;
 export function extractPR(s: string): string | null {
   const m = s.match(TRAILING_PR_RE);
   return m ? m[1] : null;
+}
+
+// Build a GitHub /pull/<n> URL only when the PR token is a clean number.
+// Returns null for anything else so a future broker change emitting a
+// non-numeric ref (or a parser bug) can't produce a malformed URL the
+// banner would still render as a clickable link.
+export function prGitHubURL(repo: string, pr: string): string | null {
+  return /^\d+$/.test(pr) ? `https://github.com/${repo}/pull/${pr}` : null;
 }
 
 // Conventional-commit parser. Mirrors internal/upgradecheck.parseCommit so

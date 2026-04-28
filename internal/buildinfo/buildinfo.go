@@ -40,3 +40,13 @@ func Current() Info {
 		BuildTimestamp: buildTimestamp,
 	}
 }
+
+// IsDev reports whether v is one of the sentinels Current() falls back to
+// when no release ldflag was set. Defined here so other packages (e.g.
+// upgradecheck) can ask the question without re-encoding the sentinel set
+// — a future addition like "snapshot" or "unreleased" then flows through
+// every caller automatically.
+func IsDev(v string) bool {
+	v = strings.TrimSpace(v)
+	return v == "" || v == "dev"
+}

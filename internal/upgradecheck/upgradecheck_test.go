@@ -48,11 +48,46 @@ func TestIsDevVersion(t *testing.T) {
 		"  dev  ":  true,
 		"0.79.10":  false,
 		"v0.79.10": false,
+		// Sub-0.1.0 versions are sentinel-classified — see #350. The stale
+		// VERSION file shipped "0.0.7.1" and the banner treated it as a
+		// real semver "current" against npm latest.
+		"0.0.7.1": true,
+		"0.0.0":   true,
+		"v0.0.1":  true,
+		"0.1.0":   false,
+		// Garbage / partial strings classify as dev rather than crashing
+		// the comparator downstream.
+		"not-a-version": true,
+		"v":             true,
+		"1":             true, // VersionParamRE requires ≥2 segments
 	}
 	for in, want := range cases {
 		if got := IsDevVersion(in); got != want {
 			t.Errorf("IsDevVersion(%q)=%v want %v", in, got, want)
 		}
+	}
+}
+
+// TestCheckShortCircuitsForStaleVersionFile pins the exact regression from
+// issue #350: the embedded VERSION file held "0.0.7.1" while npm latest was
+// "0.79.2", and the banner happily told every contributor build to
+// "upgrade" — actually a downgrade. With IsDevVersion's sub-0.1.0 guard,
+// this path now classifies as a dev build and short-circuits.
+func TestCheckShortCircuitsForStaleVersionFile(t *testing.T) {
+	pinCurrentVersion(t, "0.0.7.1")
+	mockNPMRegistry(t, "0.79.2")
+	res, err := Check(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if !res.IsDevBuild {
+		t.Errorf("expected IsDevBuild=true for stale VERSION %q", res.Current)
+	}
+	if res.UpgradeAvailable {
+		t.Errorf("stale VERSION must not surface as UpgradeAvailable=true")
+	}
+	if res.CompareURL != "" {
+		t.Errorf("CompareURL should be empty for sentinel current, got %q", res.CompareURL)
 	}
 }
 
@@ -138,25 +173,13 @@ func TestFormatChangelogPromotesBreakingChanges(t *testing.T) {
 }
 
 func TestCheckHitsRegistry(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.HasSuffix(r.URL.Path, "/wuphf/latest") {
-			t.Errorf("unexpected path %q", r.URL.Path)
-		}
-		_ = json.NewEncoder(w).Encode(map[string]string{"version": "99.0.0"})
-	}))
-	defer srv.Close()
-
-	// Inject a per-test client whose Transport rewrites the npm registry URL
-	// to our httptest server. Avoids mutating http.DefaultTransport, which
-	// would leak between concurrent tests in this package.
-	host := strings.TrimPrefix(srv.URL, "http://")
-	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		req.URL.Scheme = "http"
-		req.URL.Host = host
-		return http.DefaultTransport.RoundTrip(req)
-	})}
-
-	res, err := Check(context.Background(), client)
+	// Pin a non-dev current so this test exercises the registry path
+	// regardless of what buildinfo.Current() resolves to. With the embedded
+	// VERSION file now `dev` (#350), an unpinned test would short-circuit
+	// at IsDevBuild and never assert UpgradeAvailable.
+	pinCurrentVersion(t, "1.2.3")
+	mockNPMRegistry(t, "99.0.0")
+	res, err := Check(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("Check: %v", err)
 	}
@@ -181,21 +204,32 @@ func pinCurrentVersion(t *testing.T, v string) {
 	t.Cleanup(func() { currentVersion = prev })
 }
 
-// mockNPMRegistry returns an http.Client whose Transport rewrites the npm
-// registry URL to a httptest server that always responds with the given
-// version. Cleans up the server on test end.
-func mockNPMRegistry(t *testing.T, latest string) *http.Client {
+// pinNPMRegistryURL swaps npmRegistryURL for the test duration so callers
+// can point it at a httptest server without injecting a custom RoundTripper
+// on every Check call. Restores on cleanup.
+func pinNPMRegistryURL(t *testing.T, url string) {
+	t.Helper()
+	prev := npmRegistryURL
+	npmRegistryURL = url
+	t.Cleanup(func() { npmRegistryURL = prev })
+}
+
+// mockNPMRegistry stands up a httptest server that always responds with the
+// given version and points npmRegistryURL at it for the duration of the
+// test. Callers can then call Check(ctx, nil) and the default client will
+// hit the fake.
+//
+// t.Cleanup ordering matters here: srv.Close is registered BEFORE
+// pinNPMRegistryURL, and t.Cleanup runs LIFO — so the URL pin restores
+// first, THEN the server closes. Reordering would leave a window where
+// npmRegistryURL points at a closed server.
+func mockNPMRegistry(t *testing.T, latest string) {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]string{"version": latest})
 	}))
 	t.Cleanup(srv.Close)
-	host := strings.TrimPrefix(srv.URL, "http://")
-	return &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		req.URL.Scheme = "http"
-		req.URL.Host = host
-		return http.DefaultTransport.RoundTrip(req)
-	})}
+	pinNPMRegistryURL(t, srv.URL)
 }
 
 func TestCheckShortCircuitsForDevBuild(t *testing.T) {
@@ -204,7 +238,8 @@ func TestCheckShortCircuitsForDevBuild(t *testing.T) {
 	// `dev < anything` would always tell the user to npm-install over
 	// their source build.
 	pinCurrentVersion(t, "dev")
-	res, err := Check(context.Background(), mockNPMRegistry(t, "99.0.0"))
+	mockNPMRegistry(t, "99.0.0")
+	res, err := Check(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("Check: %v", err)
 	}
@@ -224,7 +259,8 @@ func TestCheckOmitsCompareURLWhenVersionsEqual(t *testing.T) {
 	// must be empty so JSON consumers don't surface a degenerate
 	// `compare/vX...vX` link.
 	pinCurrentVersion(t, "1.2.3")
-	res, err := Check(context.Background(), mockNPMRegistry(t, "1.2.3"))
+	mockNPMRegistry(t, "1.2.3")
+	res, err := Check(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("Check: %v", err)
 	}
@@ -238,7 +274,3 @@ func TestCheckOmitsCompareURLWhenVersionsEqual(t *testing.T) {
 		t.Errorf("CompareURL should be empty when up-to-date, got %q", res.CompareURL)
 	}
 }
-
-type roundTripFunc func(*http.Request) (*http.Response, error)
-
-func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }

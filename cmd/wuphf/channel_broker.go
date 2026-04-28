@@ -645,6 +645,33 @@ func postHumanInterrupt(channel string) tea.Cmd {
 	}
 }
 
+func cancelRequest(interview channelInterview) tea.Cmd {
+	return func() tea.Msg {
+		body, _ := json.Marshal(map[string]any{
+			"action": "cancel",
+			"id":     interview.ID,
+		})
+		req, err := newBrokerRequest(context.Background(), http.MethodPost, "http://127.0.0.1:7890/requests", bytes.NewReader(body))
+		if err != nil {
+			return channelCancelDoneMsg{requestID: interview.ID, err: err}
+		}
+		client := &http.Client{Timeout: 2 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			return channelCancelDoneMsg{requestID: interview.ID, err: err}
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			body, _ := io.ReadAll(resp.Body)
+			if len(body) == 0 {
+				return channelCancelDoneMsg{requestID: interview.ID, err: fmt.Errorf("broker returned %s", resp.Status)}
+			}
+			return channelCancelDoneMsg{requestID: interview.ID, err: fmt.Errorf("%s", strings.TrimSpace(string(body)))}
+		}
+		return channelCancelDoneMsg{requestID: interview.ID}
+	}
+}
+
 func postInterviewAnswer(interview channelInterview, choiceID, choiceText, customText string) tea.Cmd {
 	return func() tea.Msg {
 		body, _ := json.Marshal(map[string]any{

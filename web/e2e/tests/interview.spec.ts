@@ -7,15 +7,15 @@ import {
   waitForShellReady,
 } from "./_helpers";
 
-// Human-Interview parity with tests/e2e/session-full-e2e.sh (which exercises
-// blocking signals + the TUI's Esc-to-pause flow).
+// Human request parity with tests/e2e/session-full-e2e.sh (which exercises
+// blocking signals + the TUI's Esc-to-cancel flow).
 //
 // Wuphf's signature differentiator: agents can BLOCK on a human answer. The
 // broker holds a request, the web client polls /requests, and InterviewBar +
 // HumanInterviewOverlay render an actionable prompt above the composer. While
 // any blocking request is pending, /api/messages returns 409 (broker.go —
-// handlePostMessage), and Composer maps that to the "Answer the interview
-// above to send messages." toast. Zero web coverage of this loop today —
+// handlePostMessage), and Composer maps that to the "Answer or dismiss the
+// request above to send messages." toast. Zero web coverage of this loop today —
 // which is exactly the moment that wins in demos and breaks silently when
 // useRequests / answerRequest plumbing rots.
 //
@@ -81,7 +81,7 @@ test.describe("wuphf web human interview", () => {
     await expect(bar).toContainText(question);
 
     // While blocking, the broker rejects new messages with 409 → composer
-    // surfaces "Answer the interview above..." (Composer.tsx:336). Send
+    // surfaces "Answer or dismiss the request above..." (Composer.tsx:336). Send
     // through the UI and assert the toast — this is the contract the TUI
     // exercises under session-full-e2e.sh's Esc/blocking path.
     const composer = page.locator(".composer-input");
@@ -90,11 +90,11 @@ test.describe("wuphf web human interview", () => {
     await expect(
       page
         .locator(".animate-fade")
-        .filter({ hasText: /answer the interview above/i })
+        .filter({ hasText: /answer or dismiss the request above/i })
         .first(),
     ).toBeVisible({ timeout: 5_000 });
 
-    // Answer the interview by clicking the recommended option.
+    // Answer the request by clicking the recommended option.
     await bar.getByRole("button", { name: /Yes — ship it/ }).click();
 
     // The bar dismisses once the answer resolves and useRequests invalidates.

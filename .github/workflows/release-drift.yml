@@ -1,0 +1,133 @@
+name: Release drift check
+
+# Catches the #350 class of bug: a release ships across some distribution
+# surfaces but stalls on others (the original incident was every Release
+# workflow run since v0.79.3 stuck on the `npm-publish` GitHub Environment
+# gate, leaving npm `latest` 13 tags behind git). Without this monitor the
+# divergence is invisible until a user reports a downgrade prompt.
+#
+# Surfaces compared:
+#   1. Latest semver tag on origin/main      (git source of truth)
+#   2. Latest GitHub Release `tag_name`      (goreleaser shipped tarballs)
+#   3. npm registry `wuphf@latest` version   (npm publish step ran)
+#   4. `npx --yes wuphf@latest --version`    (postinstall pulled the right
+#                                             binary AND the binary's
+#                                             ldflag-injected version
+#                                             matches what npm advertises)
+#
+# Any divergence between these four is a bug — either a workflow stalled,
+# an env gate is unapproved, or goreleaser shipped without the version
+# ldflag. Fail loud, link to the divergent surface, let the team triage.
+
+on:
+  schedule:
+    # Daily at 14:00 UTC — well after the typical release window so a
+    # fresh release has time to propagate through all four surfaces
+    # before the check runs. Cron is approximate; allow ~15min jitter.
+    - cron: "0 14 * * *"
+  workflow_dispatch:
+  # Also run after every Release workflow run (success or failure) so a
+  # stuck env gate or partial publish surfaces in minutes, not 24 hours.
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-drift
+  cancel-in-progress: false
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
+        with:
+          # Need full tag history to resolve the latest semver tag locally.
+          # `gh api ... /git/refs/tags` would work too but pulls the whole
+          # ref list over the network and depends on pagination — checkout
+          # with fetch-depth:0 is simpler and the tag list is bounded.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # ratchet:actions/setup-node@v6
+        with:
+          node-version: "20"
+
+      - name: Compare distribution surfaces
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          # --- 1. Latest git tag on the default branch ---
+          # `--merged origin/main` filters out stray tags on side branches
+          # so a partial release tag pushed to a feature branch doesn't
+          # mask drift on the real release line.
+          git_tag=$(git tag --merged origin/main --sort=-v:refname | grep -E '^v[0-9]' | head -n1)
+          if [ -z "$git_tag" ]; then
+            echo "::error::no v* tags found on origin/main"
+            exit 1
+          fi
+          git_version=${git_tag#v}
+          echo "git tag        = $git_tag"
+
+          # --- 2. Latest GitHub Release ---
+          # Use the `releases/latest` endpoint (not `releases?per_page=1`):
+          # `latest` filters out drafts and pre-releases, which is what
+          # users actually install. A drafted-but-never-published release
+          # SHOULD show as drift here.
+          gh_tag=$(gh api repos/${{ github.repository }}/releases/latest --jq .tag_name)
+          gh_version=${gh_tag#v}
+          echo "GitHub release = $gh_tag"
+
+          # --- 3. npm registry `latest` dist-tag ---
+          # `latest` is what `npm install -g wuphf` and `npx wuphf` both
+          # resolve to. If npm publish is stuck on an env gate, this
+          # falls behind git/GitHub immediately.
+          npm_version=$(curl -fsSL https://registry.npmjs.org/wuphf/latest | jq -r .version)
+          echo "npm latest     = v$npm_version"
+
+          # --- 4. npx-installed binary's self-reported version ---
+          # Pulls the npm package, runs postinstall (which downloads the
+          # GitHub Release binary), then asks the binary what version it
+          # thinks it is. This catches a class of bug the registry
+          # version alone misses: postinstall could be downloading a
+          # mismatched binary, or goreleaser could have shipped without
+          # the ldflag so the binary self-reports `dev` despite being
+          # tagged. The `vdev` regression from #350 would fail here.
+          npx_out=$(npx --yes "wuphf@$npm_version" --version 2>&1 || true)
+          echo "npx output     = $npx_out"
+          # Match the same pattern release.yml's smoke-test uses:
+          # ` v<version>` with optional trailing whitespace/EOL.
+          if ! echo "$npx_out" | grep -E -q " v${npm_version}(\s|$)"; then
+            echo "::error::npx wuphf@${npm_version} --version did not self-report v${npm_version}"
+            echo "::error::output was: ${npx_out}"
+            echo "::error::either postinstall pulled a wrong binary, or goreleaser shipped without the version ldflag"
+            exit 1
+          fi
+
+          # --- Divergence checks ---
+          # Order matters for the error message: the surface that's
+          # FURTHEST behind names the stuck step. git ahead of GitHub →
+          # goreleaser/release.yml didn't run for the latest tag. GitHub
+          # ahead of npm → npm publish step failed or NPM_TOKEN expired.
+          fail=0
+          if [ "$git_version" != "$gh_version" ]; then
+            echo "::error::git tag ($git_tag) is ahead of GitHub Release ($gh_tag)"
+            echo "::error::release.yml may be stuck or never ran for this tag"
+            echo "::error::check: gh run list --workflow=release.yml --limit=5"
+            fail=1
+          fi
+          if [ "$gh_version" != "$npm_version" ]; then
+            echo "::error::GitHub Release ($gh_tag) is ahead of npm latest (v$npm_version)"
+            echo "::error::npm publish step likely failed; common causes: expired NPM_TOKEN,"
+            echo "::error::npm registry outage, or version-already-published"
+            echo "::error::check: gh run list --workflow=release.yml --limit=5 (look for status=failure)"
+            fail=1
+          fi
+          if [ "$fail" -ne 0 ]; then
+            exit 1
+          fi
+          echo "All four surfaces agree at v$git_version. ✓"

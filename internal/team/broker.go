@@ -2498,14 +2498,21 @@ func (b *Broker) Messages() []channelMessage {
 }
 
 func (b *Broker) HasPendingInterview() bool {
-	return b.HasBlockingRequest()
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, req := range b.requests {
+		if requestIsHumanInterview(req) && requestIsActive(req) {
+			return true
+		}
+	}
+	return false
 }
 
 func (b *Broker) HasBlockingRequest() bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	for _, req := range b.requests {
-		if requestIsActive(req) && req.Blocking {
+		if requestBlocksMessages(req) {
 			return true
 		}
 	}
@@ -3539,7 +3546,10 @@ func (b *Broker) normalizeLoadedStateLocked() {
 				b.requests[i].Status = "pending"
 			}
 		}
-		if b.requests[i].Blocking || strings.TrimSpace(b.requests[i].Kind) == "interview" {
+		if requestIsHumanInterview(b.requests[i]) {
+			b.requests[i].Blocking = false
+			b.requests[i].Required = false
+		} else if b.requests[i].Blocking {
 			b.requests[i].Blocking = true
 		}
 		if strings.TrimSpace(b.requests[i].UpdatedAt) == "" {
@@ -3829,9 +3839,20 @@ func requestIsActive(req humanInterview) bool {
 	return status == "" || status == "pending" || status == "open"
 }
 
+func requestBlocksMessages(req humanInterview) bool {
+	if !requestIsActive(req) || !req.Blocking {
+		return false
+	}
+	return normalizeRequestKind(req.Kind) != "interview"
+}
+
+func requestIsHumanInterview(req humanInterview) bool {
+	return normalizeRequestKind(req.Kind) == "interview"
+}
+
 func requestNeedsHumanDecision(req humanInterview) bool {
 	switch strings.TrimSpace(req.Kind) {
-	case "interview", "approval", "confirm", "choice":
+	case "approval", "confirm", "choice":
 		return true
 	default:
 		return req.Required
@@ -4028,12 +4049,71 @@ func activeRequests(requests []humanInterview) []humanInterview {
 
 func firstBlockingRequest(requests []humanInterview) *humanInterview {
 	for i := range requests {
-		if requestIsActive(requests[i]) && requests[i].Blocking {
+		if requestBlocksMessages(requests[i]) {
 			req := requests[i]
 			return &req
 		}
 	}
 	return nil
+}
+
+func firstActiveHumanInterview(requests []humanInterview) *humanInterview {
+	for i := range requests {
+		if requestIsHumanInterview(requests[i]) && requestIsActive(requests[i]) {
+			req := requests[i]
+			return &req
+		}
+	}
+	return nil
+}
+
+func humanSenderMayCancelInterviews(sender string) bool {
+	switch normalizeActorSlug(sender) {
+	case "", "you", "human":
+		return true
+	default:
+		return false
+	}
+}
+
+func (b *Broker) cancelRequestLocked(req *humanInterview, actor, reason string) {
+	if req == nil || !requestIsActive(*req) {
+		return
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	req.Status = "canceled"
+	req.UpdatedAt = now
+	req.ReminderAt = ""
+	req.FollowUpAt = ""
+	req.RecheckAt = ""
+	req.DueAt = ""
+	b.completeSchedulerJobsLocked("request", req.ID, req.Channel)
+	b.resolveWatchdogAlertsLocked("request", req.ID, req.Channel)
+	summary := truncateSummary(strings.TrimSpace(reason+" "+req.Title+" "+req.Question), 140)
+	b.appendActionLocked("request_canceled", "office", req.Channel, actor, summary, req.ID)
+	b.pendingInterview = firstBlockingRequest(b.requests)
+}
+
+func (b *Broker) cancelActiveHumanInterviewsLocked(actor, reason, channel, replyTo string) int {
+	count := 0
+	targetChannel := normalizeChannelSlug(channel)
+	targetReplyTo := strings.TrimSpace(replyTo)
+	for i := range b.requests {
+		if !requestIsHumanInterview(b.requests[i]) || !requestIsActive(b.requests[i]) {
+			continue
+		}
+		reqChannel := normalizeChannelSlug(b.requests[i].Channel)
+		if targetChannel != "" && reqChannel != targetChannel {
+			continue
+		}
+		if targetReplyTo != "" && strings.TrimSpace(b.requests[i].ReplyTo) != targetReplyTo {
+			continue
+		}
+		b.cancelRequestLocked(&b.requests[i], actor, reason)
+		count++
+		break
+	}
+	return count
 }
 
 func normalizeRequestKind(kind string) string {
@@ -7951,7 +8031,7 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	// routing (specialist → lead only) already handles that path, and
 	// auto-tagging agent replies causes broadcast loops.
 	replyTo := strings.TrimSpace(body.ReplyTo)
-	isHumanSender := body.From == "you" || body.From == "human"
+	isHumanSender := sender == "" || sender == "you" || sender == "human"
 	if replyTo != "" && isHumanSender {
 		threadRoot := replyTo
 		threadParticipants := []string{}
@@ -7988,6 +8068,10 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
+	}
+
+	if humanSenderMayCancelInterviews(body.From) {
+		b.cancelActiveHumanInterviewsLocked(body.From, "Human sent a new message; unanswered interview canceled.", channel, replyTo)
 	}
 
 	msg := channelMessage{
@@ -8172,6 +8256,9 @@ func (b *Broker) PostMessage(from, channel, content string, tagged []string, rep
 	if !b.canAccessChannelLocked(from, channel) {
 		return channelMessage{}, fmt.Errorf("channel access denied")
 	}
+	if humanSenderMayCancelInterviews(from) {
+		b.cancelActiveHumanInterviewsLocked(from, "Human sent a new message; unanswered interview canceled.", channel, replyTo)
+	}
 	b.counter++
 	msg := channelMessage{
 		ID:        fmt.Sprintf("msg-%d", b.counter),
@@ -8262,6 +8349,10 @@ func (b *Broker) CreateRequest(req humanInterview) (humanInterview, error) {
 	req.UpdatedAt = now
 	req.Kind = normalizeRequestKind(req.Kind)
 	req.Options, req.RecommendedID = normalizeRequestOptions(req.Kind, req.RecommendedID, req.Options)
+	if requestIsHumanInterview(req) {
+		req.Blocking = false
+		req.Required = false
+	}
 	if strings.TrimSpace(req.Status) == "" {
 		req.Status = "pending"
 	}
@@ -10338,6 +10429,10 @@ func (b *Broker) handlePostRequest(w http.ResponseWriter, r *http.Request) {
 			req.Blocking = true
 			req.Required = true
 		}
+		if requestIsHumanInterview(req) {
+			req.Blocking = false
+			req.Required = false
+		}
 		if req.Title == "" {
 			req.Title = "Request"
 		}
@@ -10361,15 +10456,7 @@ func (b *Broker) handlePostRequest(w http.ResponseWriter, r *http.Request) {
 			if b.requests[i].ID != id {
 				continue
 			}
-			b.requests[i].Status = "canceled"
-			b.requests[i].UpdatedAt = time.Now().UTC().Format(time.RFC3339)
-			b.requests[i].ReminderAt = ""
-			b.requests[i].FollowUpAt = ""
-			b.requests[i].RecheckAt = ""
-			b.requests[i].DueAt = ""
-			b.completeSchedulerJobsLocked("request", b.requests[i].ID, b.requests[i].Channel)
-			b.pendingInterview = firstBlockingRequest(b.requests)
-			b.appendActionLocked("request_canceled", "office", b.requests[i].Channel, b.requests[i].From, truncateSummary(b.requests[i].Title+" "+b.requests[i].Question, 140), b.requests[i].ID)
+			b.cancelRequestLocked(&b.requests[i], body.From, "")
 			if err := b.saveLocked(); err != nil {
 				http.Error(w, "failed to persist broker state", http.StatusInternalServerError)
 				return
@@ -10401,12 +10488,17 @@ func (b *Broker) handleGetRequestAnswer(w http.ResponseWriter, r *http.Request) 
 	defer b.mu.Unlock()
 	w.Header().Set("Content-Type", "application/json")
 	for _, req := range b.requests {
-		if req.ID == id && req.Answered != nil {
-			_ = json.NewEncoder(w).Encode(map[string]any{"answered": req.Answered})
+		if req.ID != id {
+			continue
+		}
+		if req.Answered != nil {
+			_ = json.NewEncoder(w).Encode(map[string]any{"answered": req.Answered, "status": req.Status})
 			return
 		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"answered": nil, "status": req.Status})
+		return
 	}
-	_ = json.NewEncoder(w).Encode(map[string]any{"answered": nil})
+	_ = json.NewEncoder(w).Encode(map[string]any{"answered": nil, "status": "not_found"})
 }
 
 func (b *Broker) handlePostRequestAnswer(w http.ResponseWriter, r *http.Request) {
@@ -10622,8 +10714,8 @@ func (b *Broker) handlePostInterview(w http.ResponseWriter, r *http.Request) {
 		"context":        body.Context,
 		"options":        body.Options,
 		"recommended_id": body.RecommendedID,
-		"blocking":       true,
-		"required":       true,
+		"blocking":       false,
+		"required":       false,
 	})
 	r2 := r.Clone(r.Context())
 	r2.Body = io.NopCloser(bytes.NewReader(reqBody))
@@ -10634,7 +10726,7 @@ func (b *Broker) handleGetInterview(w http.ResponseWriter, r *http.Request) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	w.Header().Set("Content-Type", "application/json")
-	pending := firstBlockingRequest(b.requests)
+	pending := firstActiveHumanInterview(b.requests)
 	if pending == nil {
 		_ = json.NewEncoder(w).Encode(map[string]any{"pending": nil})
 		return
