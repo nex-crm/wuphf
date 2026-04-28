@@ -215,6 +215,12 @@ func (s *SkillSynthesizer) runPass(ctx context.Context, trigger string, start ti
 		scan := ScanSkill(fm, body, TrustAgentCreated)
 		if scan.Verdict != VerdictSafe {
 			res.RejectedByGuard++
+			slog.Warn("stage_b_synth_guard_rejected",
+				"source", string(cand.Source),
+				"name", fm.Name,
+				"verdict", string(scan.Verdict),
+				"summary", scan.Summary,
+			)
 			res.Errors = append(res.Errors, SynthError{
 				CandidateName: fm.Name,
 				Reason:        "guard: " + scan.Summary,
