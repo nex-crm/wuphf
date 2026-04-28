@@ -356,6 +356,17 @@ func (b *Broker) handleSkillArchive(w http.ResponseWriter, r *http.Request, name
 		}
 	}
 
+	// Persist the updated status to broker-state.json immediately so a
+	// broker restart does not revert the skill to its pre-archive state.
+	// Without this save the status lives only in b.skills (in-memory) until
+	// the next naturally-occurring saveLocked call, creating a race window
+	// where a crash or clean restart reverts to the stale JSON snapshot.
+	b.mu.Lock()
+	if saveErr := b.saveLocked(); saveErr != nil {
+		slog.Warn("handleSkillArchive: saveLocked failed", "name", skCopy.Name, "err", saveErr)
+	}
+	b.mu.Unlock()
+
 	writeJSON(w, http.StatusOK, map[string]any{"skill": skCopy})
 }
 
@@ -679,6 +690,60 @@ func validateSkillFilePath(p string) error {
 		return fmt.Errorf("file_path must be under one of: %s", strings.Join(skillFileAllowedDirs, ", "))
 	}
 	return nil
+}
+
+// reconcileSkillStatusFromDisk updates b.skills in-memory statuses to match
+// the on-disk SKILL.md frontmatter values. It is called once after the wiki
+// worker is wired during broker startup so a restart after an archive (or
+// approve) that did not persist saveLocked does not silently revert the
+// skill's status to its stale broker-state.json value.
+//
+// Only skills that have a SKILL.md on disk AND whose in-memory status differs
+// from the frontmatter status are updated. Missing or unparseable files are
+// silently skipped so reconciliation cannot break startup.
+func (b *Broker) reconcileSkillStatusFromDisk() {
+	b.mu.Lock()
+	worker := b.wikiWorker
+	b.mu.Unlock()
+	if worker == nil {
+		return
+	}
+	repo := worker.Repo()
+	if repo == nil {
+		return
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	updated := false
+	for i := range b.skills {
+		skillPath := filepath.Join(repo.Root(), filepath.FromSlash(skillWikiPath(b.skills[i].Name)))
+		raw, err := os.ReadFile(skillPath)
+		if err != nil {
+			continue
+		}
+		fm, _, parseErr := ParseSkillMarkdown(raw)
+		if parseErr != nil {
+			continue
+		}
+		diskStatus := strings.TrimSpace(fm.Metadata.Wuphf.Status)
+		if diskStatus == "" {
+			continue
+		}
+		if b.skills[i].Status != diskStatus {
+			slog.Info("skill_crud: reconcile status from disk",
+				"name", b.skills[i].Name,
+				"was", b.skills[i].Status,
+				"now", diskStatus)
+			b.skills[i].Status = diskStatus
+			updated = true
+		}
+	}
+	if updated {
+		if saveErr := b.saveLocked(); saveErr != nil {
+			slog.Warn("skill_crud: reconcileSkillStatusFromDisk saveLocked failed", "err", saveErr)
+		}
+	}
 }
 
 // resolveSkillSourceArticle reads the on-disk SKILL.md for name and extracts

@@ -323,6 +323,89 @@ func TestSkillPatchEndpoint_FindReplace(t *testing.T) {
 	t.Error("skill not found after patch")
 }
 
+// TestSkillArchiveStatusSurvivesRestart is a regression test for the state
+// replay quirk: archiving a skill must survive a broker restart. Previously,
+// if saveLocked was not called after the archive wiki-enqueue, broker-state.json
+// still held status=proposed/active, and a fresh broker loading from that file
+// would revert the skill to the stale status.
+func TestSkillArchiveStatusSurvivesRestart(t *testing.T) {
+	// Use a named temp dir so the state path is in scope for both brokers.
+	statePath := leakedBrokerStatePath(t)
+
+	b1 := NewBrokerAt(statePath)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/skills", b1.requireAuth(b1.handleSkills))
+	mux.HandleFunc("/skills/", b1.requireAuth(b1.handleSkillsSubpath))
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	do := func(method, path string, body any) (*http.Response, []byte) {
+		t.Helper()
+		var buf io.Reader
+		if body != nil {
+			raw, _ := json.Marshal(body)
+			buf = bytes.NewReader(raw)
+		}
+		req, _ := http.NewRequest(method, srv.URL+path, buf)
+		req.Header.Set("Authorization", "Bearer "+b1.Token())
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("%s %s: %v", method, path, err)
+		}
+		defer resp.Body.Close()
+		out, _ := io.ReadAll(resp.Body)
+		return resp, out
+	}
+
+	// Seed a skill as active (not proposed) so the archive endpoint accepts it.
+	b1.mu.Lock()
+	b1.skills = append(b1.skills, teamSkill{
+		ID:          "skill-state-replay",
+		Name:        "state-replay",
+		Title:       "State Replay Test",
+		Description: "Regression test skill.",
+		Content:     "Step 1: verify.",
+		CreatedBy:   "archivist",
+		Channel:     "general",
+		Status:      "active",
+		CreatedAt:   "2026-04-28T00:00:00Z",
+		UpdatedAt:   "2026-04-28T00:00:00Z",
+	})
+	b1.mu.Unlock()
+
+	// Archive via the HTTP handler. The fix ensures saveLocked is called
+	// inside the handler so the status is flushed to broker-state.json.
+	resp, body := do(http.MethodPost, "/skills/state-replay/archive", map[string]any{
+		"reason": "regression test",
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("archive: status %d, body %s", resp.StatusCode, body)
+	}
+
+	// Simulate a broker restart by constructing a fresh broker on the same
+	// state path and loading the state from disk. The reloaded broker must
+	// see status=archived, not the stale "active" value from before the
+	// archive call.
+	b2 := reloadedBroker(t, b1)
+	b2.mu.Lock()
+	var found *teamSkill
+	for i := range b2.skills {
+		if skillSlug(b2.skills[i].Name) == "state-replay" {
+			found = &b2.skills[i]
+			break
+		}
+	}
+	b2.mu.Unlock()
+
+	if found == nil {
+		t.Fatal("state-replay skill missing from reloaded broker")
+	}
+	if found.Status != "archived" {
+		t.Errorf("state replay: status after restart = %q, want %q", found.Status, "archived")
+	}
+}
+
 // TestSkillPatchEndpoint_ConflictOnMultipleMatches verifies the 409 path when
 // the old_string matches more than once and replace_all is false.
 func TestSkillPatchEndpoint_ConflictOnMultipleMatches(t *testing.T) {
