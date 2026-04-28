@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -330,7 +331,7 @@ func TestSkillPatchEndpoint_FindReplace(t *testing.T) {
 // would revert the skill to the stale status.
 func TestSkillArchiveStatusSurvivesRestart(t *testing.T) {
 	// Use a named temp dir so the state path is in scope for both brokers.
-	statePath := leakedBrokerStatePath(t)
+	statePath := filepath.Join(t.TempDir(), "broker-state.json")
 
 	b1 := NewBrokerAt(statePath)
 	mux := http.NewServeMux()

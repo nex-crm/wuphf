@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -30,13 +31,7 @@ import (
 
 func newBrokerWithPackChannels(t *testing.T, packAgents []agent.AgentConfig) *Broker {
 	t.Helper()
-	// Use leakedBrokerStatePath (not t.TempDir) because these tests go
-	// through saveLocked() — both via POST /office-members action=create
-	// and the /messages POST in the end-to-end test. Goroutines leaked by
-	// prior tests in this package can fire a late saveLocked and race
-	// t.TempDir cleanup. Same fix as the launcher_test.go pair; see
-	// broker_test.go for the helper docstring.
-	b := NewBrokerAt(leakedBrokerStatePath(t))
+	b := NewBrokerAt(filepath.Join(t.TempDir(), "broker-state.json"))
 	b.mu.Lock()
 	// Seed pack-like roster.
 	members := make([]officeMember, 0, len(packAgents))

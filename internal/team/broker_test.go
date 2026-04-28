@@ -51,26 +51,24 @@ func TestMain(m *testing.M) {
 	brokerTokenFilePath = filepath.Join(dir, "broker-token")
 	cleanups = append(cleanups, func() { _ = os.RemoveAll(dir) })
 
-	// 2) Headless log dir: leaked headless-worker goroutines open append
-	//    files under wuphfLogDir(). WUPHF_LOG_DIR is the env hook; honored
-	//    by wuphfLogDir() in headless_codex.go. Append-only writes are
-	//    safe to share across tests (nothing reads them). Fail fast on
-	//    mktemp error for the same reason as above — and run any cleanups
-	//    already registered so the token dir doesn't leak on the error path.
+	// 2) Headless log dir: pin headless-worker log writes to a process-
+	//    stable temp dir so they don't pollute the real ~/.wuphf/logs and
+	//    so per-test t.TempDir cleanups don't race appender writes. Set
+	//    via the in-process wuphfLogDirOverride hook (the WUPHF_LOG_DIR
+	//    env var was retired — env leaks into spawned codex/claude
+	//    subprocesses, which is not what tests want).
 	logDir, err := os.MkdirTemp("", "wuphf-team-test-logs-*")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "TestMain: mktemp headless log dir: %v\n", err)
 		cleanup()
 		os.Exit(1)
 	}
-	if err := os.Setenv("WUPHF_LOG_DIR", logDir); err != nil {
-		// Silent fallback to the default log dir would reintroduce the
-		// cross-test cleanup race this setup exists to prevent.
-		fmt.Fprintf(os.Stderr, "TestMain: setenv WUPHF_LOG_DIR: %v\n", err)
-		_ = os.RemoveAll(logDir)
-		cleanup()
-		os.Exit(1)
-	}
+	wuphfLogDirOverride.Store(&logDir)
+	// Intentionally do NOT clear wuphfLogDirOverride on cleanup: the process
+	// is about to exit and any goroutine that escaped a test's lifecycle
+	// (race-detector edge cases, headless workers caught mid-flush) should
+	// keep writing into the isolated temp dir, never the real ~/.wuphf/logs.
+	// The dir removal below makes those writes a no-op rather than pollution.
 	cleanups = append(cleanups, func() { _ = os.RemoveAll(logDir) })
 
 	// 3) Stale-unanswered threshold: resume tests pre-seed broker state with
@@ -110,21 +108,14 @@ func reloadedBroker(t *testing.T, b *Broker) *Broker {
 	return fresh
 }
 
-// leakedBrokerStatePath returns a per-test-unique filesystem path for a
-// broker-state.json, rooted in a temp dir OUTSIDE t.TempDir(). Callers
-// pass it to NewBrokerAt so late-arriving writes from goroutines leaked
-// by prior tests don't race t.TempDir cleanup with "unlinkat: directory
-// not empty". The returned dir is intentionally NOT registered for
-// cleanup: a handful of KB per test run leaks to /tmp, which the OS
-// reclaims on reboot or tmpfs eviction. Cheap fix for a cross-test
-// goroutine-leak hazard that a larger refactor will eventually retire.
-func leakedBrokerStatePath(t *testing.T) string {
+// waitForHeadlessIdle is a test-only join point: it stops every headless
+// worker spawned through the Launcher and blocks until each goroutine has
+// exited. Register it via t.Cleanup so no headless worker outlives the test
+// that started it (which would race t.TempDir cleanup with "unlinkat:
+// directory not empty"). Idempotent — safe to call multiple times.
+func (l *Launcher) waitForHeadlessIdle(t *testing.T) {
 	t.Helper()
-	dir, err := os.MkdirTemp("", "wuphf-test-state-*")
-	if err != nil {
-		t.Fatalf("mktemp broker state dir: %v", err)
-	}
-	return filepath.Join(dir, "broker-state.json")
+	l.stopHeadlessWorkers()
 }
 
 // setHeadlessWakeLeadFn swaps headlessWakeLeadFn under its mutex and restores
@@ -1177,7 +1168,14 @@ func TestBrokerAuthRejectsUnauthenticated(t *testing.T) {
 func TestBrokerRateLimitsRequestsPerIP(t *testing.T) {
 	b := newTestBroker(t)
 	b.rateLimitRequests = 100
-	b.rateLimitWindow = 1100 * time.Millisecond
+	b.rateLimitWindow = time.Second
+
+	// Synthetic clock: starts at a fixed point; advance() jumps it past the window
+	// so the test never sleeps for real.
+	fakeClock := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	b.nowFn = func() time.Time { return fakeClock }
+	advance := func(d time.Duration) { fakeClock = fakeClock.Add(d) }
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/messages", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -1216,7 +1214,8 @@ func TestBrokerRateLimitsRequestsPerIP(t *testing.T) {
 		t.Fatalf("expected sane Retry-After seconds, got %q", retryAfter)
 	}
 
-	time.Sleep(b.rateLimitWindow + 50*time.Millisecond)
+	// Advance the synthetic clock past the window — no real sleep needed.
+	advance(b.rateLimitWindow + time.Millisecond)
 
 	resp = doRequest("")
 	resp.Body.Close()
@@ -4600,7 +4599,7 @@ func TestBrokerGetRequestsScopeAllSeesCrossChannelBlocker(t *testing.T) {
 }
 
 func TestBrokerCancelBlockingApprovalUnblocksMessages(t *testing.T) {
-	b := NewBrokerAt(leakedBrokerStatePath(t))
+	b := newTestBroker(t)
 	if err := b.StartOnPort(0); err != nil {
 		t.Fatalf("failed to start broker: %v", err)
 	}
@@ -4689,7 +4688,7 @@ func TestBrokerCancelBlockingApprovalUnblocksMessages(t *testing.T) {
 }
 
 func TestBrokerHumanInterviewDoesNotBlockAndCancelsOnHumanMessage(t *testing.T) {
-	b := NewBrokerAt(leakedBrokerStatePath(t))
+	b := newTestBroker(t)
 	if err := b.StartOnPort(0); err != nil {
 		t.Fatalf("failed to start broker: %v", err)
 	}
@@ -6279,8 +6278,8 @@ func TestHeadlessQueue_PopulatedAfterEnqueue(t *testing.T) {
 		headlessActive:  make(map[string]*headlessCodexActiveTurn),
 		headlessQueues:  make(map[string][]headlessCodexTurn),
 	}
-	l.headlessCtx, l.headlessCancel = context.WithCancel(context.Background())
-	defer l.headlessCancel()
+	l.headlessCtx, l.headlessCancel = context.WithCancel(t.Context())
+	t.Cleanup(func() { l.waitForHeadlessIdle(t) })
 
 	l.enqueueHeadlessCodexTurn("eng", "review the diff")
 

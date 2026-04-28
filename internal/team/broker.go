@@ -556,6 +556,10 @@ type Broker struct {
 	lastAgentRateLimitPrune time.Time
 	agentLogRoot            string // override for tests; empty means agent.DefaultTaskLogRoot()
 
+	// nowFn is the clock used by rate-limit logic. nil means time.Now.
+	// Inject a fake clock in tests to avoid real-time sleeps.
+	nowFn func() time.Time
+
 	stopCh   chan struct{} // closed by Stop(); signals background goroutines to exit
 	stopOnce sync.Once
 
@@ -1789,6 +1793,15 @@ func writeRateLimitedResponse(w http.ResponseWriter, retryAfter time.Duration) {
 	_, _ = io.WriteString(w, `{"error":"rate_limited"}`)
 }
 
+// rateLimitNow returns the current time for rate-limit calculations.
+// Tests may override b.nowFn to advance a synthetic clock without sleeping.
+func (b *Broker) rateLimitNow() time.Time {
+	if b.nowFn != nil {
+		return b.nowFn()
+	}
+	return time.Now()
+}
+
 func (b *Broker) consumeRateLimit(clientIP string) (time.Duration, bool) {
 	limit := b.rateLimitRequests
 	if limit <= 0 {
@@ -1799,7 +1812,7 @@ func (b *Broker) consumeRateLimit(clientIP string) (time.Duration, bool) {
 		window = defaultRateLimitWindow
 	}
 
-	now := time.Now()
+	now := b.rateLimitNow()
 	key := rateLimitKey(clientIP)
 	cutoff := now.Add(-window)
 
@@ -1856,7 +1869,7 @@ func (b *Broker) consumeAgentRateLimit(agentSlug string) (time.Duration, bool) {
 		window = defaultAgentRateLimitWindow
 	}
 
-	now := time.Now()
+	now := b.rateLimitNow()
 	cutoff := now.Add(-window)
 
 	b.mu.Lock()

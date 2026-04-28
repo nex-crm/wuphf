@@ -1,6 +1,8 @@
 package team
 
 import (
+	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -528,6 +530,13 @@ func TestResumeInFlightWorkHeadlessEnqueuesLeadEvenWhenSpecialistsPresent(t *tes
 	}
 	b.mu.Unlock()
 
+	// Stub the per-turn runner so spawned workers don't shell out to a real
+	// codex binary while the test asserts queue state.
+	setHeadlessCodexRunTurnForTest(t, func(_ *Launcher, ctx context.Context, _, _ string, _ ...string) error {
+		<-ctx.Done()
+		return ctx.Err()
+	})
+
 	l := &Launcher{
 		provider: "codex", // headless path
 		broker:   b,
@@ -543,6 +552,7 @@ func TestResumeInFlightWorkHeadlessEnqueuesLeadEvenWhenSpecialistsPresent(t *tes
 		headlessActive:  make(map[string]*headlessCodexActiveTurn),
 		headlessQueues:  make(map[string][]headlessCodexTurn),
 	}
+	t.Cleanup(func() { l.waitForHeadlessIdle(t) })
 
 	l.resumeInFlightWork()
 
@@ -630,12 +640,15 @@ func TestBuildResumePacketSpecSectionMessagesLabel(t *testing.T) {
 // verifying they exist, and the resulting tmux send-keys commands silently
 // failed. Users restarting `wuphf --tui` with in-flight work lost resumption.
 func TestResumeInFlightWorkTUIClaudeRoutesHeadless(t *testing.T) {
-	// Leaked path (not t.TempDir) so a headless worker goroutine that
-	// outlives the test can keep writing without racing the dir cleanup
-	// and failing the test with an `unlinkat ... directory not empty`.
 	setHeadlessWakeLeadFn(t, func(_ *Launcher, _ string) {})
+	// Stub the per-turn runner so spawned workers don't shell out to a real
+	// codex binary while the test asserts queue state.
+	setHeadlessCodexRunTurnForTest(t, func(_ *Launcher, ctx context.Context, _, _ string, _ ...string) error {
+		<-ctx.Done()
+		return ctx.Err()
+	})
 
-	b := NewBrokerAt(leakedBrokerStatePath(t))
+	b := NewBrokerAt(filepath.Join(t.TempDir(), "broker-state.json"))
 	b.mu.Lock()
 	b.tasks = []teamTask{
 		{ID: "t1", Title: "Build login form", Owner: "fe", Status: "in_progress"},
@@ -663,6 +676,7 @@ func TestResumeInFlightWorkTUIClaudeRoutesHeadless(t *testing.T) {
 		headlessActive:  make(map[string]*headlessCodexActiveTurn),
 		headlessQueues:  make(map[string][]headlessCodexTurn),
 	}
+	t.Cleanup(func() { l.waitForHeadlessIdle(t) })
 
 	l.resumeInFlightWork()
 
@@ -681,17 +695,20 @@ func TestResumeInFlightWorkTUIClaudeRoutesHeadless(t *testing.T) {
 }
 
 func TestResumeInFlightWorkRoutesPerAgentProviderBinding(t *testing.T) {
-	// Leaked path (not t.TempDir) so a headless worker goroutine that
-	// outlives the test can keep writing without racing the dir cleanup
-	// and failing the test with an `unlinkat ... directory not empty`.
 	setHeadlessWakeLeadFn(t, func(_ *Launcher, _ string) {})
+	// Stub the per-turn runner so spawned workers don't shell out to a real
+	// codex binary while the test asserts queue state.
+	setHeadlessCodexRunTurnForTest(t, func(_ *Launcher, ctx context.Context, _, _ string, _ ...string) error {
+		<-ctx.Done()
+		return ctx.Err()
+	})
 
 	var paneNotifications []string
 	setLauncherSendNotificationToPaneForTest(t, func(_ *Launcher, paneTarget, notification string) {
 		paneNotifications = append(paneNotifications, paneTarget+"\n"+notification)
 	})
 
-	b := NewBrokerAt(leakedBrokerStatePath(t))
+	b := NewBrokerAt(filepath.Join(t.TempDir(), "broker-state.json"))
 	b.mu.Lock()
 	b.members = []officeMember{
 		{Slug: "ceo", Name: "CEO", Provider: provider.ProviderBinding{Kind: provider.KindClaudeCode}},
@@ -725,6 +742,7 @@ func TestResumeInFlightWorkRoutesPerAgentProviderBinding(t *testing.T) {
 		headlessActive: make(map[string]*headlessCodexActiveTurn),
 		headlessQueues: make(map[string][]headlessCodexTurn),
 	}
+	t.Cleanup(func() { l.waitForHeadlessIdle(t) })
 
 	l.resumeInFlightWork()
 
