@@ -11307,13 +11307,75 @@ func (b *Broker) handleInvokeSkill(w http.ResponseWriter, r *http.Request) {
 	})
 	b.appendActionLocked("skill_invocation", "office", channel, invoker, truncateSummary(sk.Title+" [invoked]", 140), sk.ID)
 
+	// Dispatch a real task so an agent picks up and executes the skill.
+	// This is best-effort: if task creation fails we log and carry on —
+	// the skill_invocation message + action are already recorded.
+	taskID, taskErr := b.createSkillRunTaskLocked(sk, channel, invoker, now)
+	if taskErr != nil {
+		log.Printf("handleInvokeSkill: createSkillRunTaskLocked failed (non-fatal): %v", taskErr)
+	}
+
 	if err := b.saveLocked(); err != nil {
 		http.Error(w, "failed to persist broker state", http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{"skill": *sk, "channel": channel})
+	resp := map[string]any{"skill": *sk, "channel": channel}
+	if taskID != "" {
+		resp["task_id"] = taskID
+	}
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// createSkillRunTaskLocked dispatches a task so the office lead picks up and
+// executes the skill. Caller must hold b.mu. Returns the new task ID.
+func (b *Broker) createSkillRunTaskLocked(sk *teamSkill, channel, invoker, now string) (string, error) {
+	owner := strings.TrimSpace(officeLeadSlugFrom(b.members))
+	if owner == "" {
+		owner = strings.TrimSpace(invoker)
+	}
+	if owner == "" {
+		owner = "ceo"
+	}
+
+	title := strings.TrimSpace(sk.Title)
+	if title == "" {
+		title = strings.TrimSpace(sk.Name)
+	}
+	taskTitle := "Run skill: " + title
+
+	header := fmt.Sprintf("Invoked by @%s on %s. Follow the steps below.\n\n", invoker, now)
+	details := header + strings.TrimSpace(sk.Content)
+
+	b.counter++
+	task := teamTask{
+		ID:            fmt.Sprintf("task-skill-%d", b.counter),
+		Channel:       channel,
+		Title:         taskTitle,
+		Details:       details,
+		Owner:         owner,
+		Status:        "in_progress",
+		CreatedBy:     invoker,
+		TaskType:      "skill_run",
+		PipelineID:    "skill_invocation",
+		ExecutionMode: "office",
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+
+	b.ensureTaskOwnerChannelMembershipLocked(channel, task.Owner)
+	b.queueTaskBehindActiveOwnerLaneLocked(&task)
+	if err := rejectTheaterTaskForLiveBusiness(&task); err != nil {
+		return "", fmt.Errorf("rejectTheaterTask: %w", err)
+	}
+	b.scheduleTaskLifecycleLocked(&task)
+	if err := b.syncTaskWorktreeLocked(&task); err != nil {
+		return "", fmt.Errorf("syncTaskWorktree: %w", err)
+	}
+	b.tasks = append(b.tasks, task)
+	b.appendActionLocked("task_created", "office", channel, invoker, truncateSummary(task.Title, 140), task.ID)
+	return task.ID, nil
 }
 
 func (b *Broker) appendSkillProposalRequestLocked(skill teamSkill, channel, now string) {
