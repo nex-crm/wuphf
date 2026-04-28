@@ -17,7 +17,10 @@
   display: flex;
   flex-direction: column;
   height: 100vh;
-  overflow: hidden;
+  /* Each section sizes to its content (no inner scrollbars) — the
+     whole sidebar scrolls only if total content exceeds viewport. */
+  overflow-y: auto;
+  overflow-x: hidden;
   transition: width 0.22s ease;
 }
 
@@ -767,8 +770,8 @@ html[data-theme="nex"]
   min-height: 0;
 }
 .sidebar-scroll-wrap.is-agents {
-  flex: 0 1 auto;
-  max-height: 40vh;
+  flex: 0 0 auto;
+  max-height: none;
   border-bottom: 1px solid var(--border);
 }
 .sidebar-collapsible {
@@ -786,10 +789,11 @@ html[data-theme="nex"]
 }
 .sidebar-scroll-wrap.is-channels {
   flex: 0 0 auto;
-  max-height: 200px;
+  max-height: none;
 }
 .sidebar-scroll-wrap.is-apps {
-  flex: 1 1 auto;
+  flex: 0 0 auto;
+  max-height: none;
 }
 .sidebar-scroll-wrap::after {
   content: "";
@@ -816,9 +820,9 @@ html[data-theme="nex"]
 
 .sidebar-agents {
   padding: 4px var(--sidebar-pad-x) 16px;
-  flex: 1 1 auto;
+  flex: 0 0 auto;
   min-height: 0;
-  overflow-y: auto;
+  overflow-y: visible;
   overflow-x: visible;
 }
 .sidebar-agents .sidebar-add-btn,
@@ -889,15 +893,15 @@ html[data-theme="nex"]
 
 .sidebar-channels {
   padding: 4px var(--sidebar-pad-x) 16px;
-  flex: 1 1 auto;
+  flex: 0 0 auto;
   min-height: 0;
-  overflow-y: auto;
+  overflow-y: visible;
 }
 .sidebar-apps {
   padding: 4px var(--sidebar-pad-x) 16px;
-  flex: 1 1 auto;
+  flex: 0 0 auto;
   min-height: 0;
-  overflow-y: auto;
+  overflow-y: visible;
 }
 
 /* Minimal hover-reveal scrollbars for sidebar scroll regions. */
