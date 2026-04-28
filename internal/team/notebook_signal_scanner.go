@@ -123,11 +123,11 @@ func (s *NotebookSignalScanner) collectNotebookEntries(wikiRoot string) ([]noteb
 	var out []notebookEntry
 	walkErr := filepath.Walk(root, func(p string, info os.FileInfo, err error) error {
 		if err != nil {
-			return nil // best-effort walk
+			return nil //nolint:nilerr // best-effort walk: skip unreadable entries
 		}
 		rel, relErr := filepath.Rel(wikiRoot, p)
 		if relErr != nil {
-			return nil
+			return nil //nolint:nilerr // best-effort walk: skip unresolvable paths
 		}
 		rel = filepath.ToSlash(rel)
 

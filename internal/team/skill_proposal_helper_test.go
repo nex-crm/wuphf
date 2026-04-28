@@ -338,7 +338,7 @@ func TestWriteSkillProposalLocked_ValidSlugVariants(t *testing.T) {
 		{"abc123", "abc123"},
 		{"a", "a"},
 		{"send-digest-v2", "send-digest-v2"},
-		{"Send-Digest", "send-digest"},  // uppercase normalised by skillSlug
+		{"Send-Digest", "send-digest"}, // uppercase normalised by skillSlug
 	}
 
 	for _, tc := range validNames {

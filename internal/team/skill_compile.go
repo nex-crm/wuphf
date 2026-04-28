@@ -36,8 +36,8 @@ const (
 )
 
 // SkillCompileMetrics captures cumulative + last-run telemetry for the Stage
-// A compile loop. Fields use atomic-safe types where readers/writers can
-// race; LastSkillCompilePassAt is read/written under broker.mu.
+// A compile loop. All fields are updated and read atomically so callers need
+// not hold broker.mu.
 type SkillCompileMetrics struct {
 	ManualClicksTotal             int64
 	CronTicksTotal                int64
@@ -45,7 +45,10 @@ type SkillCompileMetrics struct {
 	ProposalsApprovedTotal        int64
 	ProposalsRejectedByGuardTotal int64
 	LastTickDurationMs            int64
-	LastSkillCompilePassAt        time.Time
+	// LastSkillCompilePassAtNano stores unix nanoseconds of the last successful
+	// compile pass (0 = never). Updated and read via atomic.StoreInt64 /
+	// atomic.LoadInt64 so reads are safe without broker.mu.
+	LastSkillCompilePassAtNano int64
 	// StageBProposalsTotal counts proposals written by the Stage B
 	// synthesizer (LLM-synth from candidate signals). Incremented atomically
 	// once the unified write helper accepts the proposal.
@@ -53,7 +56,7 @@ type SkillCompileMetrics struct {
 }
 
 // snapshotSkillCompileMetrics returns a copy of m suitable for serialization.
-// Atomic fields are loaded with atomic.LoadInt64 to avoid torn reads.
+// All fields are loaded atomically; no lock is required by the caller.
 func snapshotSkillCompileMetrics(m *SkillCompileMetrics) SkillCompileMetrics {
 	if m == nil {
 		return SkillCompileMetrics{}
@@ -65,7 +68,7 @@ func snapshotSkillCompileMetrics(m *SkillCompileMetrics) SkillCompileMetrics {
 		ProposalsApprovedTotal:        atomic.LoadInt64(&m.ProposalsApprovedTotal),
 		ProposalsRejectedByGuardTotal: atomic.LoadInt64(&m.ProposalsRejectedByGuardTotal),
 		LastTickDurationMs:            atomic.LoadInt64(&m.LastTickDurationMs),
-		LastSkillCompilePassAt:        m.LastSkillCompilePassAt,
+		LastSkillCompilePassAtNano:    atomic.LoadInt64(&m.LastSkillCompilePassAtNano),
 		StageBProposalsTotal:          atomic.LoadInt64(&m.StageBProposalsTotal),
 	}
 }
@@ -163,8 +166,8 @@ func (b *Broker) compileWikiSkills(ctx context.Context, scopePath string, dryRun
 	}
 	if trigger == "cron" {
 		cooldown := skillCompileCooldownFromEnv()
-		last := b.skillCompileMetrics.LastSkillCompilePassAt
-		if !last.IsZero() && time.Since(last) < cooldown {
+		lastNano := atomic.LoadInt64(&b.skillCompileMetrics.LastSkillCompilePassAtNano)
+		if lastNano != 0 && time.Since(time.Unix(0, lastNano)) < cooldown {
 			b.mu.Unlock()
 			return ScanResult{Trigger: trigger}, ErrCompileCooldown
 		}
@@ -199,9 +202,9 @@ func (b *Broker) compileWikiSkills(ctx context.Context, scopePath string, dryRun
 		}
 	}
 
-	b.mu.Lock()
-	b.skillCompileMetrics.LastSkillCompilePassAt = time.Now().UTC()
+	atomic.StoreInt64(&b.skillCompileMetrics.LastSkillCompilePassAtNano, time.Now().UTC().UnixNano())
 	atomic.StoreInt64(&b.skillCompileMetrics.LastTickDurationMs, res.DurationMs)
+	b.mu.Lock()
 	switch trigger {
 	case "manual":
 		atomic.AddInt64(&b.skillCompileMetrics.ManualClicksTotal, 1)
