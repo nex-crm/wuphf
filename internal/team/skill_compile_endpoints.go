@@ -87,6 +87,11 @@ type skillCompileStatsResponse struct {
 	SelfHealCandidatesScanned     int64                          `json:"self_heal_candidates_scanned"`
 	SelfHealSkillsSynthesized     int64                          `json:"self_heal_skills_synthesized"`
 	SelfHealLLMRejections         int64                          `json:"self_heal_llm_rejections"`
+	// Embedding pipeline telemetry (Stage B semantic clustering).
+	EmbeddingCallsTotal       int64   `json:"embedding_calls_total"`
+	EmbeddingCacheHitsTotal   int64   `json:"embedding_cache_hits_total"`
+	EmbeddingCacheMissesTotal int64   `json:"embedding_cache_misses_total"`
+	EmbeddingCostUsd          float64 `json:"embedding_cost_usd"`
 }
 
 // handleGetSkillCompileStats returns a snapshot of the compile metrics.
@@ -113,6 +118,10 @@ func (b *Broker) handleGetSkillCompileStats(w http.ResponseWriter, r *http.Reque
 		SelfHealCandidatesScanned:     snap.SelfHealCandidatesScanned,
 		SelfHealSkillsSynthesized:     snap.SelfHealSkillsSynthesized,
 		SelfHealLLMRejections:         snap.SelfHealLLMRejections,
+		EmbeddingCallsTotal:           snap.EmbeddingCallsTotal,
+		EmbeddingCacheHitsTotal:       snap.EmbeddingCacheHitsTotal,
+		EmbeddingCacheMissesTotal:     snap.EmbeddingCacheMissesTotal,
+		EmbeddingCostUsd:              loadFloatBits(&snap.EmbeddingCostUsdBits),
 	}
 	if counter != nil {
 		resp.CounterPerAgent = counter.Stats()
