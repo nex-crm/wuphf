@@ -622,24 +622,38 @@ export function getUsage() {
 }
 
 // ── Agent Logs ──
+// Mirrors internal/agent/task_log_reader.go. The broker's /agent-logs
+// returns task summaries by default and tool-call entries when `task` is set.
 
-export interface AgentLog {
-  id: string;
-  agent: string;
-  task?: string;
-  action?: string;
-  content?: string;
-  timestamp?: string;
-  usage?: TokenUsage;
+export interface TaskLogSummary {
+  taskId: string;
+  agentSlug: string;
+  toolCallCount: number;
+  firstToolAt?: number;
+  lastToolAt?: number;
+  hasError?: boolean;
+  sizeBytes: number;
 }
 
-export function getAgentLogs(opts?: { limit?: number; task?: string }) {
-  if (opts?.task) {
-    return get<{ logs: AgentLog[] }>("/agent-logs", { task: opts.task });
-  }
+export interface TaskLogEntry {
+  task_id: string;
+  agent_slug: string;
+  tool_name: string;
+  params?: Record<string, unknown>;
+  result?: string;
+  error?: string;
+  started_at?: number;
+  completed_at?: number;
+}
+
+export function listAgentLogTasks(opts?: { limit?: number }) {
   const params: Record<string, string> = {};
   if (opts?.limit) params.limit = String(opts.limit);
-  return get<{ logs: AgentLog[] }>("/agent-logs", params);
+  return get<{ tasks: TaskLogSummary[] }>("/agent-logs", params);
+}
+
+export function getAgentLogEntries(taskId: string) {
+  return get<{ task: string; entries: TaskLogEntry[] }>("/agent-logs", { task: taskId });
 }
 
 // ── Memory ──

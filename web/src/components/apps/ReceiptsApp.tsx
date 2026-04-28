@@ -1,8 +1,12 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
-import { type AgentLog, getAgentLogs } from "../../api/client";
-import { formatRelativeTime, formatTokens, formatUSD } from "../../lib/format";
+import {
+  type TaskLogEntry,
+  type TaskLogSummary,
+  getAgentLogEntries,
+  listAgentLogTasks,
+} from "../../api/client";
 
 export function ReceiptsApp() {
   const [selectedTask, setSelectedTask] = useState<string | null>(null);
@@ -26,7 +30,7 @@ function ReceiptList({
 }) {
   const { data, isLoading, error } = useQuery({
     queryKey: ["agent-logs"],
-    queryFn: () => getAgentLogs({ limit: 100 }),
+    queryFn: () => listAgentLogTasks({ limit: 100 }),
     refetchInterval: 10_000,
   });
 
@@ -42,7 +46,7 @@ function ReceiptList({
         <div
           style={{ fontSize: 12, color: "var(--text-tertiary)", marginTop: 4 }}
         >
-          What each agent actually did, tool by tool. No claims {"\u2014"} just
+          What each agent actually did, tool by tool. No claims {"—"} just
           the log.
         </div>
       </div>
@@ -67,20 +71,20 @@ function ReceiptList({
       )}
 
       {!(isLoading || error) && (
-        <LogTable logs={data?.logs ?? []} onSelectTask={onSelectTask} />
+        <TaskTable tasks={data?.tasks ?? []} onSelectTask={onSelectTask} />
       )}
     </>
   );
 }
 
-function LogTable({
-  logs,
+function TaskTable({
+  tasks,
   onSelectTask,
 }: {
-  logs: AgentLog[];
+  tasks: TaskLogSummary[];
   onSelectTask: (taskId: string) => void;
 }) {
-  if (logs.length === 0) {
+  if (tasks.length === 0) {
     return (
       <div
         style={{
@@ -110,67 +114,81 @@ function LogTable({
             }}
           >
             <th style={{ padding: "8px 20px" }}>Agent</th>
-            <th style={{ padding: "8px 12px" }}>Action</th>
-            <th style={{ padding: "8px 12px" }}>Time</th>
-            <th style={{ padding: "8px 12px", textAlign: "right" }}>Tokens</th>
-            <th style={{ padding: "8px 12px", textAlign: "right" }}>Cost</th>
+            <th style={{ padding: "8px 12px" }}>Task</th>
+            <th style={{ padding: "8px 12px", textAlign: "right" }}>Tools</th>
+            <th style={{ padding: "8px 12px" }}>Last activity</th>
+            <th style={{ padding: "8px 12px", textAlign: "right" }}>Size</th>
           </tr>
         </thead>
         <tbody>
-          {logs.map((log) => {
-            const totalTokens = log.usage?.total_tokens ?? 0;
-            const cost = log.usage?.cost_usd ?? 0;
-            return (
-              <tr
-                key={log.id}
+          {tasks.map((t) => (
+            <tr
+              key={t.taskId}
+              style={{
+                borderTop: "1px solid var(--border-light)",
+                cursor: "pointer",
+                background: t.hasError
+                  ? "color-mix(in srgb, var(--danger, #c0392b) 6%, transparent)"
+                  : undefined,
+              }}
+              onClick={() => onSelectTask(t.taskId)}
+            >
+              <td style={{ padding: "10px 20px", fontWeight: 500 }}>
+                {t.agentSlug || "—"}
+              </td>
+              <td
                 style={{
-                  borderTop: "1px solid var(--border-light)",
-                  cursor: log.task ? "pointer" : "default",
+                  padding: "10px 12px",
+                  color: "var(--text-secondary)",
+                  fontFamily: "var(--font-mono)",
+                  fontSize: 12,
                 }}
-                onClick={() => log.task && onSelectTask(log.task)}
               >
-                <td style={{ padding: "10px 20px", fontWeight: 500 }}>
-                  {log.agent || "\u2014"}
-                </td>
-                <td
-                  style={{
-                    padding: "10px 12px",
-                    color: "var(--text-secondary)",
-                  }}
-                >
-                  {log.action || log.content?.slice(0, 60) || "\u2014"}
-                </td>
-                <td
-                  style={{
-                    padding: "10px 12px",
-                    color: "var(--text-secondary)",
-                  }}
-                >
-                  {log.timestamp ? formatRelativeTime(log.timestamp) : "\u2014"}
-                </td>
-                <td
-                  style={{
-                    padding: "10px 12px",
-                    textAlign: "right",
-                    fontFamily: "var(--font-mono)",
-                    fontSize: 12,
-                  }}
-                >
-                  {totalTokens > 0 ? formatTokens(totalTokens) : "\u2014"}
-                </td>
-                <td
-                  style={{
-                    padding: "10px 12px",
-                    textAlign: "right",
-                    fontFamily: "var(--font-mono)",
-                    fontSize: 12,
-                  }}
-                >
-                  {cost > 0 ? formatUSD(cost) : "\u2014"}
-                </td>
-              </tr>
-            );
-          })}
+                {t.taskId}
+                {t.hasError && (
+                  <span
+                    title="Contains a tool error"
+                    style={{
+                      marginLeft: 6,
+                      fontSize: 11,
+                      color: "var(--danger, #c0392b)",
+                    }}
+                  >
+                    {"⚠"}
+                  </span>
+                )}
+              </td>
+              <td
+                style={{
+                  padding: "10px 12px",
+                  textAlign: "right",
+                  fontFamily: "var(--font-mono)",
+                  fontSize: 12,
+                }}
+              >
+                {t.toolCallCount}
+              </td>
+              <td
+                style={{
+                  padding: "10px 12px",
+                  color: "var(--text-secondary)",
+                }}
+              >
+                {formatEpochMs(t.lastToolAt)}
+              </td>
+              <td
+                style={{
+                  padding: "10px 12px",
+                  textAlign: "right",
+                  fontFamily: "var(--font-mono)",
+                  fontSize: 12,
+                  color: "var(--text-tertiary)",
+                }}
+              >
+                {formatBytes(t.sizeBytes)}
+              </td>
+            </tr>
+          ))}
         </tbody>
       </table>
     </div>
@@ -186,19 +204,20 @@ function ReceiptDetail({
 }) {
   const { data, isLoading, error } = useQuery({
     queryKey: ["agent-logs", taskId],
-    queryFn: () => getAgentLogs({ task: taskId }),
+    queryFn: () => getAgentLogEntries(taskId),
   });
 
-  const logs = data?.logs ?? [];
+  const entries = data?.entries ?? [];
 
   return (
     <>
       <button
+        type="button"
         className="btn btn-secondary btn-sm"
         style={{ margin: "12px 20px 0" }}
         onClick={onBack}
       >
-        {"\u2190"} Back to receipts
+        {"←"} Back to receipts
       </button>
 
       <div style={{ padding: "12px 20px 8px" }}>
@@ -237,7 +256,7 @@ function ReceiptDetail({
         </div>
       )}
 
-      {!(isLoading || error) && logs.length === 0 && (
+      {!(isLoading || error) && entries.length === 0 && (
         <div
           style={{
             padding: "40px 20px",
@@ -250,61 +269,110 @@ function ReceiptDetail({
         </div>
       )}
 
-      {!(isLoading || error) && logs.length > 0 && (
+      {!(isLoading || error) && entries.length > 0 && (
         <div style={{ overflow: "auto", flex: 1, padding: "0 20px 20px" }}>
-          {logs.map((entry, i) => (
-            <div
-              key={entry.id}
-              style={{
-                padding: "10px 0",
-                borderBottom: "1px solid var(--border-light)",
-                fontSize: 13,
-                display: "flex",
-                flexDirection: "column",
-                gap: 4,
-              }}
-            >
-              <div style={{ display: "flex", gap: 12, alignItems: "baseline" }}>
-                <span
-                  style={{
-                    color: "var(--text-tertiary)",
-                    fontSize: 11,
-                    minWidth: 64,
-                  }}
-                >
-                  #{i + 1}{" "}
-                  {entry.timestamp
-                    ? new Date(entry.timestamp).toLocaleTimeString()
-                    : "\u2014"}
-                </span>
-                <span
-                  style={{ fontWeight: 600, fontFamily: "var(--font-mono)" }}
-                >
-                  {entry.action || "(unknown)"}
-                </span>
-                {entry.agent && (
-                  <span
-                    style={{ fontSize: 11, color: "var(--text-secondary)" }}
-                  >
-                    @{entry.agent}
-                  </span>
-                )}
-              </div>
-              {entry.content && (
-                <div
-                  style={{
-                    fontSize: 12,
-                    color: "var(--text-secondary)",
-                    paddingLeft: 76,
-                  }}
-                >
-                  {entry.content.slice(0, 200)}
-                </div>
-              )}
-            </div>
+          {entries.map((entry, i) => (
+            <EntryRow key={`${entry.started_at ?? 0}-${i}`} index={i} entry={entry} />
           ))}
         </div>
       )}
     </>
   );
+}
+
+function EntryRow({ index, entry }: { index: number; entry: TaskLogEntry }) {
+  const isError = Boolean(entry.error);
+  const snippet = entry.error || entry.result || "";
+  return (
+    <div
+      style={{
+        padding: "10px 0",
+        borderBottom: "1px solid var(--border-light)",
+        fontSize: 13,
+        display: "flex",
+        flexDirection: "column",
+        gap: 4,
+      }}
+    >
+      <div style={{ display: "flex", gap: 12, alignItems: "baseline" }}>
+        <span
+          style={{
+            color: "var(--text-tertiary)",
+            fontSize: 11,
+            minWidth: 96,
+            fontFamily: "var(--font-mono)",
+          }}
+        >
+          #{index + 1} {formatEpochMsTime(entry.started_at)}
+        </span>
+        <span
+          style={{
+            fontWeight: 600,
+            fontFamily: "var(--font-mono)",
+            color: isError ? "var(--danger, #c0392b)" : undefined,
+          }}
+        >
+          {entry.tool_name || "(unknown)"}
+        </span>
+        {entry.agent_slug && (
+          <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>
+            @{entry.agent_slug}
+          </span>
+        )}
+        {typeof entry.completed_at === "number" &&
+          typeof entry.started_at === "number" && (
+            <span
+              style={{
+                fontSize: 11,
+                color: "var(--text-tertiary)",
+                marginLeft: "auto",
+                fontFamily: "var(--font-mono)",
+              }}
+            >
+              {entry.completed_at - entry.started_at}ms
+            </span>
+          )}
+      </div>
+      {snippet && (
+        <div
+          style={{
+            fontSize: 12,
+            color: isError ? "var(--danger, #c0392b)" : "var(--text-secondary)",
+            paddingLeft: 108,
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-word",
+          }}
+        >
+          {snippet.length > 400 ? `${snippet.slice(0, 400)}…` : snippet}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function formatEpochMs(ms?: number): string {
+  if (!ms) return "—";
+  const diff = Date.now() - ms;
+  if (diff < 0) return new Date(ms).toLocaleString();
+  const sec = Math.floor(diff / 1000);
+  if (sec < 60) return `${sec}s ago`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const day = Math.floor(hr / 24);
+  if (day < 30) return `${day}d ago`;
+  return new Date(ms).toLocaleDateString();
+}
+
+function formatEpochMsTime(ms?: number): string {
+  if (!ms) return "—";
+  return new Date(ms).toLocaleTimeString();
+}
+
+function formatBytes(n: number): string {
+  if (!n) return "—";
+  if (n < 1024) return `${n}B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)}K`;
+  return `${(n / (1024 * 1024)).toFixed(1)}M`;
 }
