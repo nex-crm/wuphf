@@ -2376,9 +2376,15 @@ func (l *Launcher) buildNotificationContext(channel, triggerMsgID, threadRootID 
 		return ""
 	}
 
-	// baseFilter excludes system messages, STATUS messages, and the trigger itself.
+	// baseFilter excludes system messages, STATUS messages, demo_seed posts,
+	// and the trigger itself. demo_seed lines are cosmetic onboarding-paint
+	// content (e.g. the lead presence line) and replaying them as prompt
+	// context would let agents treat fake activity as real history.
 	baseFilter := func(m channelMessage) bool {
 		if m.From == "system" {
+			return false
+		}
+		if m.Kind == "demo_seed" {
 			return false
 		}
 		if strings.TrimSpace(triggerMsgID) != "" && strings.TrimSpace(m.ID) == strings.TrimSpace(triggerMsgID) {
@@ -4795,7 +4801,13 @@ func (l *Launcher) LaunchWeb(webPort int) error {
 		go l.primeVisibleAgents()
 	}
 
-	webURL := fmt.Sprintf("http://localhost:%d", webPort)
+	// Use 127.0.0.1 in both the printed URL and the readiness probe so the
+	// dial target matches what the browser will request. localhost can
+	// resolve to ::1 first on IPv6-preferring setups, while ServeWebUI binds
+	// only to 127.0.0.1 — that mismatch reproduces ERR_CONNECTION_REFUSED
+	// even after the probe succeeds.
+	webAddr := fmt.Sprintf("127.0.0.1:%d", webPort)
+	webURL := fmt.Sprintf("http://%s", webAddr)
 	fmt.Printf("\n  Web UI:  %s\n", webURL)
 	fmt.Printf("  Broker:  %s\n", l.BrokerBaseURL())
 	fmt.Printf("  Press Ctrl+C to stop.\n\n")
@@ -4806,8 +4818,13 @@ func (l *Launcher) LaunchWeb(webPort int) error {
 		// visitors clicking through `npx wuphf` for the first time) hit
 		// ERR_CONNECTION_REFUSED before the listener is ready. 5s is a
 		// generous ceiling: in practice the listener is up in milliseconds.
-		waitForWebReady(fmt.Sprintf("127.0.0.1:%d", webPort), 5*time.Second)
-		openBrowser(webURL)
+		// Skip the open if the listener never came up — opening a dead URL
+		// just produces a confusing error page in the user's first second.
+		if waitForWebReady(webAddr, 5*time.Second) {
+			openBrowser(webURL)
+		} else {
+			fmt.Printf("  Web UI did not become reachable at %s within 5s; skipping browser auto-open.\n", webURL)
+		}
 	}
 
 	// Broker, web UI, and background goroutines own the process lifetime;

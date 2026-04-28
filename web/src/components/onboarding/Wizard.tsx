@@ -1157,11 +1157,15 @@ function SetupStep({
   const [localModeOn, setLocalModeOn] = useState<boolean>(localProvider !== "");
 
   // A runtime is usable only when its binary is actually present on PATH.
-  // When detection failed (prereqsError), trust the user's selection.
+  // When detection failed (prereqsError), trust the user's selection — but
+  // only for runtimes that actually carry a provider id. Cursor/Windsurf
+  // have provider:null and get dropped in finishOnboarding(), so letting
+  // them satisfy the gate would let the user finish onboarding with no
+  // configured llm_provider.
   const hasInstalledSelection = runtimePriority.some((label) => {
     const spec = RUNTIMES.find((r) => r.label === label);
     if (!spec) return false;
-    if (prereqsError) return true;
+    if (prereqsError) return spec.provider !== null;
     const detection = detectedBinary(prereqs, spec.binary);
     return Boolean(detection?.found);
   });
@@ -2403,7 +2407,7 @@ export function Wizard({ onComplete }: WizardProps) {
       const hasInstalledSelection = runtimePriority.some((label) => {
         const spec = RUNTIMES.find((r) => r.label === label);
         if (!spec) return false;
-        if (prereqsError) return true;
+        if (prereqsError) return spec.provider !== null;
         return Boolean(detectedBinary(prereqs, spec.binary)?.found);
       });
       const hasAnyApiKey = Object.values(apiKeys).some(

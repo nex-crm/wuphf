@@ -732,7 +732,11 @@ func detectReachableLocalRuntime() (kind, addr string) {
 				return
 			}
 			_ = resp.Body.Close()
-			if resp.StatusCode >= 200 && resp.StatusCode < 500 {
+			// Require an explicit 2xx — a 404 from some other server on the
+			// same loopback port (or a 4xx auth wall that isn't actually the
+			// runtime we expect) shouldn't be advertised as a reachable
+			// runtime. The supported runtimes all return 200 on /v1/models.
+			if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 				hits <- hit{kind: c.kind, addr: c.base}
 				return
 			}

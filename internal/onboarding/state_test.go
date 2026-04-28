@@ -197,7 +197,8 @@ func TestCorruptStateFileRecovers(t *testing.T) {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			t.Fatalf("MkdirAll: %v", err)
 		}
-		if err := os.WriteFile(filepath.Join(dir, "onboarded.json"), []byte("{corrupt json!!!"), 0o600); err != nil {
+		path := filepath.Join(dir, "onboarded.json")
+		if err := os.WriteFile(path, []byte("{corrupt json!!!"), 0o600); err != nil {
 			t.Fatalf("WriteFile: %v", err)
 		}
 
@@ -213,6 +214,24 @@ func TestCorruptStateFileRecovers(t *testing.T) {
 		}
 		if len(s.Checklist) == 0 {
 			t.Fatal("corrupt file recovery should have default checklist")
+		}
+
+		// The corrupt file must be replaced with valid JSON so the next
+		// Load doesn't re-trigger the recovery branch on every call.
+		s2, err := Load()
+		if err != nil {
+			t.Fatalf("second Load after recovery should succeed cleanly, got: %v", err)
+		}
+		if s2.Version != currentStateVersion {
+			t.Errorf("post-recovery Version: got %d, want %d", s2.Version, currentStateVersion)
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("ReadFile post-recovery: %v", err)
+		}
+		var probe State
+		if err := json.Unmarshal(raw, &probe); err != nil {
+			t.Fatalf("post-recovery file should be valid JSON, got: %v", err)
 		}
 	})
 }
