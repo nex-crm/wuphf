@@ -287,10 +287,19 @@ func (m onboardingModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Replace the placeholder "Detecting…" message with either the
 		// concrete --provider suggestion or the generic "paste a key"
 		// fallback, depending on what the probe found.
-		if msg.kind != "" {
-			m.err = fmt.Sprintf("Detected %s running on %s. Exit with Ctrl+C and re-run: `wuphf --provider %s`. Or paste an Anthropic key below.", msg.kind, msg.addr, msg.kind)
-		} else {
-			m.err = "Paste an Anthropic API key (https://console.anthropic.com/settings/keys), or install Claude Code (https://claude.com/claude-code) and rerun — no key needed."
+		//
+		// Guard against stale probe results: the user may have advanced
+		// past the setup step, started typing a key, or already had a
+		// validated key by the time this lands — overwriting m.err in
+		// any of those states would clobber a real error or undo the
+		// user's progress signal. Only apply when the model is still on
+		// stepSetup AND the placeholder is still the active error.
+		if m.step == stepSetup && m.err == "Checking for a local LLM runtime…" {
+			if msg.kind != "" {
+				m.err = fmt.Sprintf("Detected %s running on %s. Exit with Ctrl+C and re-run: `wuphf --provider %s`. Or paste an Anthropic key below.", msg.kind, msg.addr, msg.kind)
+			} else {
+				m.err = "Paste an Anthropic API key (https://console.anthropic.com/settings/keys), or install Claude Code (https://claude.com/claude-code) and rerun — no key needed."
+			}
 		}
 		return m, nil
 

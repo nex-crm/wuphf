@@ -129,22 +129,22 @@ interface PrereqResult {
 //
 // Rules:
 //   - Unknown labels (not in RUNTIMES) never count.
-//   - When prereqs detection succeeded, the runtime's binary must be on
-//     PATH (detection.found).
-//   - When prereqs detection FAILED (prereqsError truthy), trust the
-//     user's selection — but only for runtimes that carry a non-null
-//     provider id. Cursor/Windsurf are provider:null and
-//     finishOnboarding silently drops them from the llm_provider
-//     payload, so letting them count would let the user finish with no
-//     LLM provider configured.
+//   - Runtimes with provider:null (Cursor/Windsurf) NEVER count, in
+//     either branch. finishOnboarding silently drops them from
+//     providerPriority, so a Cursor-only selection would let the gate
+//     pass and /config would persist no llm_provider.
+//   - With a non-null provider AND prereqs detection succeeded, the
+//     runtime's binary must be on PATH (detection.found).
+//   - With a non-null provider AND prereqs detection FAILED
+//     (prereqsError truthy), trust the user's selection.
 function runtimeIsReady(
   label: string,
   prereqs: PrereqResult[],
   prereqsError: string,
 ): boolean {
   const spec = RUNTIMES.find((r) => r.label === label);
-  if (!spec) return false;
-  if (prereqsError) return spec.provider !== null;
+  if (!spec || spec.provider === null) return false;
+  if (prereqsError) return true;
   return Boolean(detectedBinary(prereqs, spec.binary)?.found);
 }
 
@@ -2174,7 +2174,17 @@ export function Wizard({ onComplete }: WizardProps) {
     // any installed entry satisfies the install gate; the readiness
     // summary should reflect what's actually about to be persisted as
     // llm_provider, which is the head of the list.
+    //
+    // The primary label can resolve to either a cloud-CLI RUNTIMES
+    // entry or a local-provider LOCAL_PROVIDER_LABELS entry; the
+    // checks below cover both. Pre-fix this block only looked at
+    // RUNTIMES, so picking MLX-LM/Ollama/Exo as primary made the
+    // summary report a missing LLM right before /config persisted a
+    // perfectly valid local provider.
     const primaryLabel = runtimePriority[0];
+    const primaryLocal = primaryLabel
+      ? LOCAL_PROVIDER_LABELS.find((m) => m.label === primaryLabel)
+      : undefined;
     const primarySpec = primaryLabel
       ? RUNTIMES.find((r) => r.label === primaryLabel)
       : undefined;
@@ -2183,7 +2193,13 @@ export function Wizard({ onComplete }: WizardProps) {
       : undefined;
     const primaryReady =
       !!primaryLabel && runtimeIsReady(primaryLabel, prereqs, prereqsError);
-    if (primarySpec && primaryReady) {
+    if (primaryLocal) {
+      checks.push({
+        label: "LLM runtime",
+        status: "ready",
+        detail: `${primaryLocal.label} selected (${primaryLocal.blurb}).`,
+      });
+    } else if (primarySpec && primaryReady) {
       checks.push({
         label: "LLM runtime",
         status: "ready",

@@ -41,8 +41,11 @@ async function advanceToSetupStep(page: Page) {
   await page.locator("#wiz-company").fill("E2E Error States");
   await page.locator("#wiz-description").fill("Wizard error path test");
   await page.locator(".wizard-step button.btn-primary").first().click();
-  // templates → team
-  const templateTile = page.locator(".blueprint-card, .template-tile").first();
+  // templates → team. Wizard.tsx renders one .template-card per
+  // blueprint plus a separate "From scratch" button; click the first
+  // real card so we exercise the seeded path, not the from-scratch
+  // fallback.
+  const templateTile = page.locator(".template-card").first();
   if (await templateTile.count()) {
     await templateTile.click();
   }
@@ -60,10 +63,11 @@ test.describe("Wizard error states", () => {
   test("prereqsError banner appears + provider:null tiles stay disabled when /onboarding/prereqs fails", async ({
     page,
   }) => {
-    // Fail the prereqs endpoint BEFORE navigation. Wizard.tsx fires the
-    // fetch on mount; if we route after navigation the request might
-    // already be in flight.
-    page.route("**/onboarding/prereqs*", (route: Route) =>
+    // Fail the prereqs endpoint BEFORE navigation. Wizard.tsx fires
+    // the fetch on mount, and page.route() returns a Promise — without
+    // await the interceptor can register after the navigation request
+    // is already in flight, producing a flaky pass.
+    await page.route("**/onboarding/prereqs*", (route: Route) =>
       route.fulfill({
         status: 500,
         contentType: "application/json",
@@ -104,7 +108,7 @@ test.describe("Wizard error states", () => {
     // test is /onboarding/complete. finishOnboarding posts /config
     // first, and a future regression there would otherwise fail this
     // test for the wrong reason.
-    page.route("**/config*", (route: Route) =>
+    await page.route("**/config*", (route: Route) =>
       route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -117,7 +121,7 @@ test.describe("Wizard error states", () => {
     // text flips to "Retry", clicking Retry re-issues the POST and
     // finishes onboarding.
     let firstAttempt = true;
-    page.route("**/onboarding/complete*", (route: Route) => {
+    await page.route("**/onboarding/complete*", (route: Route) => {
       if (firstAttempt) {
         firstAttempt = false;
         return route.fulfill({
