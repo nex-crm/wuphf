@@ -17,6 +17,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"path"
 	"path/filepath"
 	"strings"
@@ -519,12 +520,13 @@ func (b *Broker) handleSkillReject(w http.ResponseWriter, r *http.Request, name 
 	}
 	b.appendActionLocked("skill_rejected", "office", channel, actor, truncateSummary(skCopy.Title+" [rejected]", 140), skCopy.ID)
 
+	// Resolve the source article from the on-disk SKILL.md. The scanner
+	// stamps source_articles[0] into the frontmatter when it promotes an
+	// article; reading it back here ensures future scan passes that
+	// re-encounter the same article will be gated by the tombstone.
+	srcArticle := resolveSkillSourceArticle(b, skCopy.Name)
+
 	// Append to tombstone (release/reacquire b.mu inside).
-	srcArticle := ""
-	// We don't have direct access to source_articles on teamSkill; the
-	// scanner stamps it on the wiki copy via fm.Metadata.Wuphf, so the
-	// tombstone source field stays empty here. Future revision: thread the
-	// source through teamSkill.
 	tombstoneErr := b.appendSkillTombstoneLocked(SkillTombstoneEntry{
 		Slug:          skillSlug(skCopy.Name),
 		SourceArticle: srcArticle,
@@ -677,6 +679,41 @@ func validateSkillFilePath(p string) error {
 		return fmt.Errorf("file_path must be under one of: %s", strings.Join(skillFileAllowedDirs, ", "))
 	}
 	return nil
+}
+
+// resolveSkillSourceArticle reads the on-disk SKILL.md for name and extracts
+// the first source article path from its frontmatter. Returns "" when the
+// wiki worker is absent, the file is missing, or the frontmatter carries no
+// source information. Caller holds b.mu.
+func resolveSkillSourceArticle(b *Broker, name string) string {
+	wikiWorker := b.wikiWorker
+	if wikiWorker == nil {
+		return ""
+	}
+	repo := wikiWorker.Repo()
+	if repo == nil {
+		return ""
+	}
+	skillPath := filepath.Join(repo.Root(), filepath.FromSlash(skillWikiPath(name)))
+	raw, err := os.ReadFile(skillPath)
+	if err != nil {
+		return ""
+	}
+	fm, _, parseErr := ParseSkillMarkdown(raw)
+	if parseErr != nil {
+		return ""
+	}
+	if len(fm.Metadata.Wuphf.SourceArticles) > 0 {
+		if s := strings.TrimSpace(fm.Metadata.Wuphf.SourceArticles[0]); s != "" {
+			return s
+		}
+	}
+	if len(fm.Metadata.Wuphf.SourceSignals) > 0 {
+		if s := strings.TrimSpace(fm.Metadata.Wuphf.SourceSignals[0]); s != "" {
+			return s
+		}
+	}
+	return ""
 }
 
 // skillTrustForCreator maps a creator slug onto a default trust level.
