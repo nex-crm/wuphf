@@ -463,6 +463,11 @@ func (l *Launcher) notifyAgentsLoop() {
 		if msg.From == "system" {
 			continue
 		}
+		// demo_seed messages exist purely to make #general feel staffed on
+		// first paint; they must never wake an agent or burn an LLM call.
+		if msg.Kind == "demo_seed" {
+			continue
+		}
 		l.safeDeliverMessage(msg)
 	}
 }
