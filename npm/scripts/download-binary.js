@@ -45,12 +45,12 @@ function detectPlatform() {
   const platform = process.platform;
   const arch = process.arch;
 
-  const osMap = { darwin: "darwin", linux: "linux" };
+  const osMap = { darwin: "darwin", linux: "linux", win32: "windows" };
   const archMap = { x64: "amd64", arm64: "arm64" };
 
   if (!osMap[platform]) {
     throw new Error(
-      `Unsupported platform: ${platform}. wuphf supports darwin and linux.`,
+      `Unsupported platform: ${platform}. wuphf supports darwin, linux, and windows.`,
     );
   }
   if (!archMap[arch]) {
@@ -68,9 +68,21 @@ function packageVersion() {
   return pkg.version;
 }
 
+// goreleaser packages Windows builds as .zip and everything else as
+// .tar.gz (see .goreleaser.yml format_overrides). Stay consistent with
+// what's actually published.
+function archiveExtension() {
+  return process.platform === "win32" ? "zip" : "tar.gz";
+}
+
 function archiveName(version) {
   const { os: goOs, arch: goArch } = detectPlatform();
-  return `wuphf_${version}_${goOs}_${goArch}.tar.gz`;
+  return `wuphf_${version}_${goOs}_${goArch}.${archiveExtension()}`;
+}
+
+// Go names Windows binaries with a .exe suffix; the rest get the bare name.
+function binaryFilename() {
+  return process.platform === "win32" ? "wuphf.exe" : "wuphf";
 }
 
 function releaseAssetUrl(version, filename) {
@@ -171,11 +183,34 @@ async function verifyArchive({ version, archivePath, archiveBasename, silent }) 
 //   targetPath  — where to place the extracted binary. Defaults to
 //                 bin/wuphf inside this package. The out-of-tree cache uses
 //                 a version-keyed path so multiple versions can coexist.
+// Extract a goreleaser archive into tmpDir. Picks the right tool by
+// extension: tar for .tar.gz (built into macOS + Linux), and PowerShell
+// Expand-Archive on Windows because Node has no built-in unzip and we
+// don't want to drag in a dependency. Windows 10 1803+ ships with
+// `tar.exe` (bsdtar) which can also extract .zip — we prefer that on
+// Windows because it doesn't need PowerShell's slower startup.
+function extractArchive(archivePath, tmpDir, silent) {
+  const stdio = silent ? "ignore" : "inherit";
+  if (archivePath.endsWith(".zip")) {
+    if (process.platform === "win32") {
+      // Windows 10 1803+ has tar.exe (bsdtar). It accepts .zip natively.
+      execFileSync("tar", ["-xf", archivePath, "-C", tmpDir], { stdio });
+      return;
+    }
+    // macOS / Linux fallback: use unzip if available.
+    execFileSync("unzip", ["-q", "-o", archivePath, "-d", tmpDir], { stdio });
+    return;
+  }
+  // Default: gzipped tar. Works on darwin + linux.
+  execFileSync("tar", ["-xzf", archivePath, "-C", tmpDir], { stdio });
+}
+
 async function downloadBinary({ silent = false, version, targetPath } = {}) {
   const resolvedVersion = version ?? packageVersion();
   const archiveBasename = archiveName(resolvedVersion);
   const url = releaseAssetUrl(resolvedVersion, archiveBasename);
-  const binaryPath = targetPath ?? path.join(__dirname, "..", "bin", "wuphf");
+  const binaryName = binaryFilename();
+  const binaryPath = targetPath ?? path.join(__dirname, "..", "bin", binaryName);
   const binDir = path.dirname(binaryPath);
 
   await fsp.mkdir(binDir, { recursive: true });
@@ -197,14 +232,16 @@ async function downloadBinary({ silent = false, version, targetPath } = {}) {
       silent,
     });
 
-    // Extract using system tar (available on darwin + linux).
-    execFileSync("tar", ["-xzf", archivePath, "-C", tmpDir], {
-      stdio: silent ? "ignore" : "inherit",
-    });
+    extractArchive(archivePath, tmpDir, silent);
 
-    const extractedBinary = path.join(tmpDir, "wuphf");
+    const extractedBinary = path.join(tmpDir, binaryName);
     await fsp.copyFile(extractedBinary, binaryPath);
-    await fsp.chmod(binaryPath, 0o755);
+
+    if (process.platform !== "win32") {
+      // chmod is a no-op on Windows (NTFS doesn't track the +x bit) and
+      // calling it just emits a warning on some Node versions.
+      await fsp.chmod(binaryPath, 0o755);
+    }
 
     // macOS 15+ invalidates GoReleaser's embedded ad-hoc signature after
     // copy+chmod. Re-sign so the kernel does not SIGKILL on exec.

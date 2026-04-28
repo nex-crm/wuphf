@@ -19,7 +19,7 @@ import (
 	"github.com/nex-crm/wuphf/internal/team"
 )
 
-const defaultBrokerTokenFile = brokeraddr.DefaultTokenFile
+var defaultBrokerTokenFile = brokeraddr.DefaultTokenFile
 
 var reconfigureOfficeSessionFn = reconfigureLiveOffice
 

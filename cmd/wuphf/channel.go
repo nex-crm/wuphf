@@ -24,6 +24,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/nex-crm/wuphf/internal/brokeraddr"
 	"github.com/nex-crm/wuphf/internal/company"
 	"github.com/nex-crm/wuphf/internal/config"
 	"github.com/nex-crm/wuphf/internal/setup"
@@ -445,7 +446,7 @@ type channelMemberDraft struct {
 
 var mentionPattern = regexp.MustCompile(`@([A-Za-z0-9_-]+)`)
 
-var brokerTokenPath = "/tmp/wuphf-broker-token"
+var brokerTokenPath = brokeraddr.DefaultTokenFile
 var officeDirectory = map[string]officeMemberInfo{}
 
 var channelSlashCommands = []tui.SlashCommand{

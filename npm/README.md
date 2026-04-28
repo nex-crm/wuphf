@@ -35,7 +35,7 @@ Prefer a global install?
 npm install -g wuphf && wuphf
 ```
 
-Supported platforms: macOS and Linux on x64 or arm64. The native binary is lazy-downloaded from [GitHub releases](https://github.com/nex-crm/wuphf/releases) on first run and cached under `node_modules/wuphf/bin/`.
+Supported platforms: macOS, Linux, and Windows 10+ on x64 or arm64. The native binary is lazy-downloaded from [GitHub releases](https://github.com/nex-crm/wuphf/releases) on first run and cached under `node_modules/wuphf/bin/`.
 
 > **Stability:** pre-1.0. `main` moves daily. Pin to a release tag, not `main`.
 
