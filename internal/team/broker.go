@@ -1501,6 +1501,13 @@ func (b *Broker) ensureWikiWorker() {
 	b.wikiDLQ = dlq
 	b.mu.Unlock()
 
+	// Skill status reconciliation: now that the wiki worker is wired,
+	// prefer the on-disk SKILL.md frontmatter status over the potentially
+	// stale broker-state.json snapshot. This closes the race window where a
+	// restart after an archive (or approve) call that missed saveLocked would
+	// silently revert the in-memory status.
+	b.reconcileSkillStatusFromDisk()
+
 	// Boot reconcile: walk the full wiki tree and populate the index from
 	// existing markdown + jsonl. Runs async so it does not delay broker
 	// startup. The per-commit ReconcilePath calls keep the index live once
