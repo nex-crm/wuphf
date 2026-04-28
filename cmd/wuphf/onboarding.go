@@ -366,6 +366,14 @@ func (m onboardingModel) handleSetupKey(msg tea.KeyMsg) (onboardingModel, tea.Cm
 		}
 		key := strings.TrimSpace(m.anthropicKey.Value())
 		if key == "" {
+			// Self-hosters often have ollama / mlx-lm / exo already running
+			// locally. Detect that and tell them how to use it instead of
+			// nagging for a cloud API key — saves the most-engaged segment of
+			// PH visitors from a frustrating dead-end.
+			if kind, addr := detectReachableLocalRuntime(); kind != "" {
+				m.err = fmt.Sprintf("Detected %s running on %s. Exit with Ctrl+C and re-run: `wuphf --provider %s`. Or paste an Anthropic key below.", kind, addr, kind)
+				return m, nil
+			}
 			m.err = "Paste an Anthropic API key (https://console.anthropic.com/settings/keys), or install Claude Code (https://claude.com/claude-code) and rerun — no key needed."
 			return m, nil
 		}
@@ -679,6 +687,69 @@ func allRequiredPrereqsOk(prereqs []prereqResult) bool {
 		}
 	}
 	return true
+}
+
+// detectReachableLocalRuntime probes the canonical loopback endpoints for the
+// supported local OpenAI-compatible runtimes (ollama, mlx-lm, exo) and returns
+// the first one that answers. Used by the onboarding wizard to suggest a
+// concrete --provider flag when the user has no Anthropic key and no runtime
+// CLI installed but does have a local LLM running.
+//
+// Probes are parallel with a tight 400ms-per-endpoint timeout and a 600ms
+// overall ceiling so the wizard doesn't visibly stall when nothing is
+// reachable. We hit /v1/models because both ollama and mlx-lm expose it as a
+// cheap, always-on endpoint and the OpenAI-compatible shape guarantees a 200
+// response when the server is alive.
+func detectReachableLocalRuntime() (kind, addr string) {
+	type candidate struct {
+		kind string
+		base string
+	}
+	candidates := []candidate{
+		{kind: "ollama", base: "http://127.0.0.1:11434/v1"},
+		{kind: "mlx-lm", base: "http://127.0.0.1:8080/v1"},
+		{kind: "exo", base: "http://127.0.0.1:52415/v1"},
+	}
+	type hit struct {
+		kind string
+		addr string
+	}
+	hits := make(chan hit, len(candidates))
+	ctx, cancel := context.WithTimeout(context.Background(), 600*time.Millisecond)
+	defer cancel()
+	client := &http.Client{Timeout: 400 * time.Millisecond}
+	for _, c := range candidates {
+		c := c
+		go func() {
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+"/models", nil)
+			if err != nil {
+				hits <- hit{}
+				return
+			}
+			resp, err := client.Do(req)
+			if err != nil {
+				hits <- hit{}
+				return
+			}
+			_ = resp.Body.Close()
+			if resp.StatusCode >= 200 && resp.StatusCode < 500 {
+				hits <- hit{kind: c.kind, addr: c.base}
+				return
+			}
+			hits <- hit{}
+		}()
+	}
+	for range candidates {
+		select {
+		case h := <-hits:
+			if h.kind != "" {
+				return h.kind, h.addr
+			}
+		case <-ctx.Done():
+			return "", ""
+		}
+	}
+	return "", ""
 }
 
 // hasInstalledRuntimeCLI reports whether at least one runtime CLI (claude,

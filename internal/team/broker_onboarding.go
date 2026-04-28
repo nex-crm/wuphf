@@ -290,9 +290,11 @@ func (b *Broker) postKickoffLocked(bp operations.Blueprint, selectedAgents []str
 	if skipTask {
 		// Without a seeded task, #general would otherwise be empty (or hold
 		// only the lead-only warning) and the office looks broken on first
-		// open. Post a system welcome that names the lead and tells the user
-		// where to type so the channel always has an affordance for what to
-		// do next.
+		// open. Post a system welcome plus a presence line from the lead so
+		// the channel always has an affordance for what to do next AND feels
+		// staffed rather than abstract. The presence line is marked Kind=
+		// "demo_seed" so the launcher's notification path treats it as inert
+		// — it must not trigger an LLM dispatch.
 		b.counter++
 		b.appendMessageLocked(channelMessage{
 			ID:        fmt.Sprintf("msg-%d", b.counter),
@@ -302,6 +304,18 @@ func (b *Broker) postKickoffLocked(bp operations.Blueprint, selectedAgents []str
 			Content:   welcomeMessageForMembers(b.members),
 			Timestamp: now,
 		})
+		if leadSlug, leadName := leadSlugAndName(b.members); leadSlug != "" {
+			b.counter++
+			b.appendMessageLocked(channelMessage{
+				ID:        fmt.Sprintf("msg-%d", b.counter),
+				From:      leadSlug,
+				Channel:   "general",
+				Kind:      "demo_seed",
+				Content:   fmt.Sprintf("%s online. Drop a directive in the composer and I'll break it down and dispatch the team.", leadName),
+				Tagged:    []string{},
+				Timestamp: now,
+			})
+		}
 		// seedFromBlueprintLocked mutated b.members/channels/tasks above; we
 		// must persist that even when the user skipped the kickoff task.
 		// Returning early without saveLocked() silently loses the seeded team
@@ -370,14 +384,7 @@ func (b *Broker) postKickoffLocked(bp operations.Blueprint, selectedAgents []str
 // the user finishes onboarding without seeding a task. Names the lead so the
 // office feels staffed (not abstract) and points the user at the composer.
 func welcomeMessageForMembers(members []officeMember) string {
-	leadSlug := officeLeadSlugFromMembers(members)
-	leadName := ""
-	for _, m := range members {
-		if strings.TrimSpace(m.Slug) == leadSlug {
-			leadName = strings.TrimSpace(m.Name)
-			break
-		}
-	}
+	_, leadName := leadSlugAndName(members)
 	if leadName == "" {
 		leadName = "your lead"
 	}
@@ -385,6 +392,22 @@ func welcomeMessageForMembers(members []officeMember) string {
 		"Welcome to your office. %s and the team are online and ready. Type a directive in the composer below — they'll claim work, argue, and ship.",
 		leadName,
 	)
+}
+
+// leadSlugAndName returns the slug+display-name of the office lead. Empty
+// strings are returned when the roster has no identifiable lead — callers
+// should treat that as "skip lead-specific messaging" rather than crash.
+func leadSlugAndName(members []officeMember) (string, string) {
+	slug := officeLeadSlugFromMembers(members)
+	if slug == "" {
+		return "", ""
+	}
+	for _, m := range members {
+		if strings.TrimSpace(m.Slug) == slug {
+			return slug, strings.TrimSpace(m.Name)
+		}
+	}
+	return slug, ""
 }
 
 func onboardingPartialString(partial *onboarding.PartialProgress, step, key string) string {
