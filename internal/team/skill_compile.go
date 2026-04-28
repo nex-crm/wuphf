@@ -53,6 +53,10 @@ type SkillCompileMetrics struct {
 	// synthesizer (LLM-synth from candidate signals). Incremented atomically
 	// once the unified write helper accepts the proposal.
 	StageBProposalsTotal int64
+	// CounterNudgesFiredTotal counts skill_review_nudge tasks fired by the
+	// Hermes-style per-agent counter (Stage B'). Incremented atomically by
+	// the tool-event hot path each time a nudge task is appended.
+	CounterNudgesFiredTotal int64
 }
 
 // snapshotSkillCompileMetrics returns a copy of m suitable for serialization.
@@ -70,6 +74,7 @@ func snapshotSkillCompileMetrics(m *SkillCompileMetrics) SkillCompileMetrics {
 		LastTickDurationMs:            atomic.LoadInt64(&m.LastTickDurationMs),
 		LastSkillCompilePassAtNano:    atomic.LoadInt64(&m.LastSkillCompilePassAtNano),
 		StageBProposalsTotal:          atomic.LoadInt64(&m.StageBProposalsTotal),
+		CounterNudgesFiredTotal:       atomic.LoadInt64(&m.CounterNudgesFiredTotal),
 	}
 }
 
