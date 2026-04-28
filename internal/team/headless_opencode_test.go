@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -104,5 +105,49 @@ func TestWriteHeadlessOpencodeMCPConfigConcurrent(t *testing.T) {
 		if env["WUPHF_AGENT_SLUG"] != slug {
 			t.Fatalf("%s config has WUPHF_AGENT_SLUG=%#v", slug, env["WUPHF_AGENT_SLUG"])
 		}
+	}
+}
+
+// TestWriteHeadlessOpencodeMCPConfigLogsBaseConfigParseFailure verifies that a
+// malformed base ~/.config/opencode/opencode.json (e.g. trailing comma) causes
+// writeHeadlessOpencodeMCPConfig to surface the parse error via the agent
+// log instead of silently dropping the user's `model`/`provider` blocks. (#313)
+func TestWriteHeadlessOpencodeMCPConfigLogsBaseConfigParseFailure(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	logDir := t.TempDir()
+	t.Setenv("WUPHF_LOG_DIR", logDir)
+
+	configDir := filepath.Join(home, ".config", "opencode")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Trailing comma — valid Opencode-side JSON5 in some hand-edited configs,
+	// but encoding/json rejects it. The legacy code silently swallowed this.
+	malformed := `{"theme":"dark","model":"openrouter/foo",}`
+	configPath := filepath.Join(configDir, "opencode.json")
+	if err := os.WriteFile(configPath, []byte(malformed), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	orig := headlessOpencodeExecutablePath
+	headlessOpencodeExecutablePath = func() (string, error) { return "/usr/local/bin/wuphf", nil }
+	defer func() { headlessOpencodeExecutablePath = orig }()
+
+	l := &Launcher{}
+	if _, err := l.writeHeadlessOpencodeMCPConfig("ceo"); err != nil {
+		t.Fatalf("writeHeadlessOpencodeMCPConfig: %v", err)
+	}
+
+	logBytes, err := os.ReadFile(filepath.Join(logDir, "headless-codex-ceo.log"))
+	if err != nil {
+		t.Fatalf("read agent log: %v", err)
+	}
+	logStr := string(logBytes)
+	if !strings.Contains(logStr, "opencode_base-config-parse-failed") {
+		t.Fatalf("expected opencode_base-config-parse-failed in agent log, got:\n%s", logStr)
+	}
+	if !strings.Contains(logStr, configPath) {
+		t.Fatalf("expected base config path %q in agent log, got:\n%s", configPath, logStr)
 	}
 }
