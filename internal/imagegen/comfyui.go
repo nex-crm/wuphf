@@ -30,7 +30,7 @@ import (
 // rigs without code changes.
 
 const (
-	defaultComfyUIBase  = "http://192.168.88.14:8188"
+	defaultComfyUIBase  = "http://127.0.0.1:8188"
 	defaultComfyUIModel = "sd_xl_base_1.0.safetensors"
 	envComfyUIBaseURL   = "WUPHF_COMFYUI_BASE_URL"
 	envComfyUIAPIKey    = "COMFY_ORG_API_KEY"
@@ -51,7 +51,7 @@ func (c *comfyUI) Status(ctx context.Context) Status {
 	st := Status{
 		Kind:             KindComfyUI,
 		Label:            "ComfyUI",
-		Blurb:            "Self-hosted ComfyUI — node-based image gen, full workflow control, runs on your own GPU. Default points at .14:8188.",
+		Blurb:            "Self-hosted ComfyUI — node-based image gen, full workflow control, runs on your own GPU. Defaults to 127.0.0.1:8188.",
 		BaseURL:          base,
 		DefaultModel:     comfyUIModel(),
 		SupportedModels:  []string{"sd_xl_base_1.0.safetensors", "flux1-dev.safetensors", "flux1-schnell.safetensors"},
@@ -66,7 +66,7 @@ func (c *comfyUI) Status(ctx context.Context) Status {
 	st.Reachable = comfyUIPing(ctx, base)
 	st.Configured = st.Reachable
 	if !st.Reachable {
-		st.SetupHint = "Install ComfyUI on .14 (RTX 5080): `git clone https://github.com/comfyanonymous/ComfyUI && pip install -r requirements.txt && python main.py --listen 0.0.0.0`. Then set base_url in Settings → Image generation → ComfyUI to http://192.168.88.14:8188 (default)."
+		st.SetupHint = "Install ComfyUI locally: `git clone https://github.com/comfyanonymous/ComfyUI && cd ComfyUI && pip install -r requirements.txt && python main.py`. Default base_url is http://127.0.0.1:8188 — override in Settings → Image generation → ComfyUI if it runs elsewhere."
 	}
 	return st
 }
