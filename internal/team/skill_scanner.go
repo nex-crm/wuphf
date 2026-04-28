@@ -17,9 +17,12 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/nex-crm/wuphf/internal/provider"
 )
 
 // defaultSkillCreatorPromptEmbedded is the fallback skill-creator system prompt
@@ -460,16 +463,34 @@ func isDuplicateSkillError(err error) bool {
 
 // ── default LLM provider ──────────────────────────────────────────────────
 
-// defaultLLMProvider is a stub implementation that always classifies articles
-// as not-a-skill. It loads the system prompt from disk on first use so an
-// operator can see the prompt in `team/skills/.system/skill-creator.md`, but
-// the actual LLM round-trip is intentionally deferred — the scanner plumbing
-// ships first; the live model wiring lands in a follow-up.
+// defaultSkillLLMTimeout is the default per-call deadline for the skill LLM
+// classification. Override via WUPHF_SKILL_LLM_TIMEOUT (seconds).
+const defaultSkillLLMTimeout = 30 * time.Second
+
+// skillLLMTimeout resolves the per-call LLM timeout from the environment.
+func skillLLMTimeout() time.Duration {
+	if v := strings.TrimSpace(os.Getenv("WUPHF_SKILL_LLM_TIMEOUT")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return time.Duration(n) * time.Second
+		}
+	}
+	return defaultSkillLLMTimeout
+}
+
+// defaultLLMProvider classifies wiki articles using the configured LLM
+// provider (via provider.RunConfiguredOneShot). It implements two strategies
+// in order:
 //
-// TODO(skill-compile): wire this to the real broker LLM provider abstraction
-// (see internal/team/headless_*.go for patterns) so the scanner actually
-// generates proposals from articles. Until then the scanner runs end-to-end
-// but produces zero matches in production.
+//  1. Explicit-frontmatter fast path: articles already carrying valid Anthropic
+//     Agent Skills frontmatter are promoted immediately without an LLM call.
+//     This is the demo-friendly path and is never removed.
+//
+//  2. Live LLM round-trip: for articles without explicit frontmatter the
+//     provider calls provider.RunConfiguredOneShot with the skill-creator.md
+//     system prompt and a structured JSON request. If no API key is available
+//     or the call fails the article is silently skipped (is_skill=false with
+//     no error propagation) so the scan degrades gracefully rather than
+//     aborting.
 type defaultLLMProvider struct {
 	systemPromptPath string
 
@@ -479,17 +500,18 @@ type defaultLLMProvider struct {
 	loadErr error
 }
 
-// NewDefaultLLMProvider returns a stub provider that loads the system prompt
-// from systemPromptPath (typically <wikiRoot>/team/skills/.system/skill-creator.md)
-// and otherwise classifies every article as not-a-skill. If the path is empty
-// the embedded default prompt is used.
+// NewDefaultLLMProvider returns a provider that classifies articles via the
+// configured LLM CLI. systemPromptPath is the on-disk path of the
+// skill-creator.md system prompt (typically
+// <wikiRoot>/team/skills/.system/skill-creator.md). When empty or missing the
+// embedded default prompt is used.
 func NewDefaultLLMProvider(systemPromptPath string) *defaultLLMProvider {
 	return &defaultLLMProvider{systemPromptPath: systemPromptPath}
 }
 
-// SystemPrompt returns the system prompt that will be sent to the LLM. It
-// reads the file from disk on first use, falling back to the embedded
-// default if the file is missing or unreadable.
+// SystemPrompt returns the system prompt sent to the LLM. Reads from disk on
+// first use, falling back to the embedded default when the file is absent or
+// empty.
 func (p *defaultLLMProvider) SystemPrompt() (string, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -519,34 +541,24 @@ func (p *defaultLLMProvider) SystemPrompt() (string, error) {
 	return p.prompt, nil
 }
 
-// AskIsSkill classifies an article as a skill or not. It implements two
-// strategies in order:
+// AskIsSkill classifies an article as a skill or not.
 //
-//  1. Explicit-frontmatter fast path: if the article already carries Anthropic
-//     Agent Skills frontmatter (top-level `name:` and `description:`), the
-//     author has explicitly opted in. We promote without an LLM round-trip.
-//     This is the demo-friendly path: seed wiki articles with explicit
-//     frontmatter and the scanner picks them up deterministically.
+//  1. Explicit-frontmatter fast path: if the article already carries valid
+//     Anthropic Agent Skills frontmatter (name + description), the author has
+//     opted in explicitly. We promote without an LLM call.
 //
-//  2. Fallback (today a stub): if no explicit frontmatter is present, the
-//     scanner has nothing to act on. The plumbing for a live LLM round-trip
-//     is built (system prompt + user prompt assembly), but no provider client
-//     is wired today. Returns is_skill=false to match the previous behavior.
-//
-// The system prompt is loaded eagerly to surface any wiki-config errors at
-// the first call rather than silently no-op'ing.
+//  2. Live LLM round-trip: for articles without explicit frontmatter we call
+//     provider.RunConfiguredOneShot with the skill-creator.md system prompt.
+//     If the API key is missing or the call fails we log the reason and return
+//     is_skill=false so the scan continues uninterrupted.
 func (p *defaultLLMProvider) AskIsSkill(ctx context.Context, articlePath, articleContent string) (bool, SkillFrontmatter, string, error) {
-	if _, err := p.SystemPrompt(); err != nil {
+	sysPrompt, err := p.SystemPrompt()
+	if err != nil {
 		return false, SkillFrontmatter{}, "", err
 	}
-	// Fast path: the article already declares itself as a skill via
-	// frontmatter. ParseSkillMarkdown only succeeds when both name and
-	// description are non-empty, which is the same opt-in contract the
-	// Anthropic spec enforces.
-	if fm, body, err := ParseSkillMarkdown([]byte(articleContent)); err == nil {
-		// Backfill version + license if the author omitted them — keeps the
-		// emitted skill markdown hub-publishable without forcing the wiki
-		// author to know the spec details.
+
+	// Fast path: explicit frontmatter opt-in.
+	if fm, body, parseErr := ParseSkillMarkdown([]byte(articleContent)); parseErr == nil {
 		if strings.TrimSpace(fm.Version) == "" {
 			fm.Version = "1.0.0"
 		}
@@ -555,10 +567,43 @@ func (p *defaultLLMProvider) AskIsSkill(ctx context.Context, articlePath, articl
 		}
 		return true, fm, body, nil
 	}
-	// Build the user prompt so it's ready when the live wiring lands. We
-	// intentionally throw it away today.
-	_ = buildSkillUserPrompt(articlePath, articleContent)
-	return false, SkillFrontmatter{}, "", nil
+
+	// LLM path: wrap the caller's context with a per-call deadline so a slow
+	// provider doesn't block the whole scan pass.
+	timeout := skillLLMTimeout()
+	callCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	// RunConfiguredOneShot does not accept a context; we honour the deadline
+	// by selecting on ctx.Done after launching the call in a goroutine.
+	type result struct {
+		out string
+		err error
+	}
+	ch := make(chan result, 1)
+	userPrompt := buildSkillUserPrompt(articlePath, articleContent)
+	go func() {
+		out, callErr := provider.RunConfiguredOneShot(sysPrompt, userPrompt, "")
+		ch <- result{out, callErr}
+	}()
+
+	select {
+	case <-callCtx.Done():
+		slog.Warn("skill_scanner: LLM call timed out", "path", articlePath, "timeout", timeout)
+		return false, SkillFrontmatter{}, "", nil
+	case r := <-ch:
+		if r.err != nil {
+			slog.Warn("skill_scanner: LLM call failed, skipping article",
+				"path", articlePath, "err", r.err)
+			return false, SkillFrontmatter{}, "", nil
+		}
+		isSkill, fm, body, parseErr := parseSkillJSON(r.out)
+		if parseErr != nil {
+			slog.Warn("skill_scanner: LLM JSON parse failed, treating as not-a-skill",
+				"path", articlePath, "err", parseErr)
+			return false, SkillFrontmatter{}, "", nil
+		}
+		return isSkill, fm, body, nil
+	}
 }
 
 // buildSkillUserPrompt assembles the user-message body sent to the LLM.
