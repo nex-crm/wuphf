@@ -4960,6 +4960,14 @@ func runUpgradeCmd(ctx context.Context, plan upgradeInstallPlan) ([]byte, error)
 // some exotic Volta/nvm setup would have us run `npm install wuphf@latest`
 // in `$HOME` — visibly mutating the user's home directory. The guards make
 // the detection refuse to misfire instead of mis-installing.
+//
+// Assumption: the broker process's cwd equals the user's cwd. Holds today
+// because the wuphf CLI starts the broker and inherits cwd. A future
+// long-lived daemon entry point (launchctl, systemd, sidecar container)
+// would put the broker at "/", and this detection would silently fall
+// back to "unknown" for everyone. If we add a daemon mode, plumb a
+// per-request `working_dir` from the client and prefer it over os.Getwd()
+// here, or move detection out of the broker entirely.
 func detectUpgradeInstall(ctx context.Context) upgradeInstallPlan {
 	if _, err := exec.LookPath("npm"); err != nil {
 		return upgradeInstallPlan{Method: "unknown"}
@@ -5007,9 +5015,19 @@ func detectUpgradeInstall(ctx context.Context) upgradeInstallPlan {
 						}
 					}
 				}
-				// Found a project root but it doesn't declare wuphf —
-				// stop walking. Continuing into a grandparent project
-				// would mis-attribute the install.
+				// Stop walking. Two paths land here, both intentional:
+				//   (a) the project root doesn't declare wuphf — running
+				//       npm install here would silently add wuphf as a
+				//       new dep instead of upgrading an existing one.
+				//   (b) the project DOES declare wuphf but
+				//       node_modules/wuphf/package.json is missing — the
+				//       declared dep was never installed (fresh clone,
+				//       skipped npm install). Suggesting an install in
+				//       this state is correct, but our "local install"
+				//       contract requires both signals; bail to "unknown"
+				//       so the click-to-run UI surfaces the explicit
+				//       fallback message rather than silently running
+				//       npm install with potentially wrong context.
 				break
 			}
 			parent := filepath.Dir(dir)
@@ -5059,14 +5077,20 @@ func (b *Broker) handleUpgradeRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Body is required to be JSON {} by the client, but we don't read
-	// any fields from it. Still bound it so a misbehaving (authenticated)
-	// caller can't inflate broker memory by streaming a large body —
-	// MaxBytesReader trips the read at 1 KiB and returns an error to
-	// any subsequent Read. We don't actually consume the body here; the
-	// limit just caps what the HTTP server has to buffer before we
-	// respond.
+	// any fields from it. Bound it AND actually read it so a
+	// misbehaving (authenticated) caller can't inflate broker memory
+	// by streaming a large body — net/http buffers headers but reads
+	// bodies on demand, so MaxBytesReader without a read attempt is a
+	// no-op (the wrapped Read is never called). io.Copy here forces
+	// MaxBytesReader to enforce the cap; if exceeded it short-circuits
+	// the connection and we surface a 413 so the client gets a clear
+	// error rather than a cryptic decode failure.
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<10)
 	defer r.Body.Close()
+	if _, err := io.Copy(io.Discard, r.Body); err != nil {
+		http.Error(w, "request body exceeds 1 KiB cap", http.StatusRequestEntityTooLarge)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 
 	// Single-flight gate. CompareAndSwap returns false if a run is
@@ -5075,8 +5099,14 @@ func (b *Broker) handleUpgradeRun(w http.ResponseWriter, r *http.Request) {
 	// without breaking the .catch / non-2xx path.
 	if !b.upgradeRunInFlight.CompareAndSwap(false, true) {
 		_ = json.NewEncoder(w).Encode(upgradeRunResult{
-			OK:    false,
-			Error: "an upgrade is already running on this broker — wait for it to finish",
+			OK: false,
+			// Set InstallMethod explicitly so the wire shape stays
+			// inside the "global"|"local"|"unknown" union the client
+			// types as. The single-flight rejection happens before we
+			// run detection, so we don't have a real method to report
+			// — "unknown" is the documented fallback for "we can't say".
+			InstallMethod: "unknown",
+			Error:         "an upgrade is already running on this broker — wait for it to finish",
 		})
 		return
 	}
@@ -5105,6 +5135,21 @@ func (b *Broker) handleUpgradeRun(w http.ResponseWriter, r *http.Request) {
 	// short it trips on a typical 5-30s install.
 	runCtx, cancel := context.WithTimeout(context.Background(), upgradeRunTimeout)
 	defer cancel()
+	// Couple to b.stopCh so a graceful broker shutdown (Stop()) cancels
+	// an in-flight install. Without this, `wuphf restart` clicked right
+	// after install-click would leave the OLD broker's npm running for
+	// up to 120s while the NEW broker spawns its own npm against the
+	// same prefix — exactly the half-extract race that the single-flight
+	// in this handler is meant to prevent. The defer-cancel above closes
+	// runCtx on normal return, which races the goroutine to the same
+	// cancel(); cancel() is documented as safe to call multiple times.
+	go func() {
+		select {
+		case <-b.stopCh:
+			cancel()
+		case <-runCtx.Done():
+		}
+	}()
 
 	// runUpgradeCmdFn merges stdout+stderr in invocation order — npm
 	// progress hits stderr, the final `+ wuphf@x.y.z` line hits stdout,
@@ -5137,17 +5182,34 @@ func (b *Broker) handleUpgradeRun(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(res)
 }
 
-// truncateForJSON keeps the trailing `cap` bytes of `s` (the most useful
+// truncateForJSON keeps the trailing `tailBytes` of `s` (the most useful
 // diagnostic — npm puts the error line and the final `+ wuphf@x.y.z`
 // line at the bottom) and prepends a sentinel marking the truncation.
 // Rounds the cut point forward to the next valid UTF-8 sequence start so
 // we don't ship a leading orphan continuation byte that would render as
 // U+FFFD on the client.
-func truncateForJSON(s string, cap int) string {
-	if len(s) <= cap {
+//
+// Note: the parameter is the SUFFIX size, not a hard ceiling on the
+// returned string. The sentinel ("…[truncated]…\n", 18 bytes UTF-8) is
+// added on top, so the result can be up to tailBytes+18 bytes. Safe at
+// the production cap of 64 KiB; callers picking a tight log-line budget
+// or a fixed-size ring buffer must subtract the sentinel themselves.
+func truncateForJSON(s string, tailBytes int) string {
+	// Defensive: a non-positive cap produces a negative slice index and
+	// panics. Treat it as "keep nothing" — empty input passes through
+	// (the sentinel would itself be longer than the request), otherwise
+	// emit just the sentinel so the caller still sees that truncation
+	// happened. No production caller passes <= 0 today.
+	if tailBytes <= 0 {
+		if s == "" {
+			return ""
+		}
+		return "…[truncated]…\n"
+	}
+	if len(s) <= tailBytes {
 		return s
 	}
-	start := len(s) - cap
+	start := len(s) - tailBytes
 	for start < len(s) && s[start]&0xC0 == 0x80 {
 		// 10xxxxxx: continuation byte. Skip until we land on a
 		// leading byte (0xxxxxxx, 110xxxxx, 1110xxxx, 11110xxx).

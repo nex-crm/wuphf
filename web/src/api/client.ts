@@ -916,10 +916,13 @@ export function shredWorkspace() {
 
 // UpgradeRunResult mirrors broker.upgradeRunResult — keep field names in
 // sync with internal/team/broker.go so a future rename here surfaces a TS
-// error against the canonical wire shape.
+// error against the canonical wire shape. install_method is optional
+// because the UI also synthesises a result on transport failure (network
+// error / timeout before reaching the broker), where no real method has
+// been observed; the broker itself always sets one of the union members.
 export interface UpgradeRunResult {
   ok: boolean;
-  install_method: "global" | "local" | "unknown";
+  install_method?: "global" | "local" | "unknown";
   command?: string;
   working_dir?: string;
   output?: string;

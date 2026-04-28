@@ -353,17 +353,21 @@ export function UpgradeBanner() {
       setRun({ phase: "done", result });
     } catch (e: unknown) {
       // Network/timeout from the client side. Synthesise a result so the
-      // UI has one shape to render against.
+      // UI has one shape to render against. Don't claim install_method
+      // is "unknown" here — that would make UpgradeRunOutcome render the
+      // broker-side "couldn't detect install" guidance, which is wrong
+      // for a transport failure. Pass `command` so the user still has
+      // a copyable fallback to paste into a terminal.
       setRun({
         phase: "done",
         result: {
           ok: false,
-          install_method: "unknown",
+          command: installCommand,
           error: e instanceof Error ? e.message : String(e),
         },
       });
     }
-  }, [run.phase]);
+  }, [run.phase, installCommand]);
 
   const reload = useCallback(() => {
     window.location.reload();
@@ -480,8 +484,14 @@ export function UpgradeBanner() {
             className="upgrade-banner-dismiss"
             onClick={dismiss}
             aria-label="Dismiss"
-            disabled={forceMajor}
-            title={forceMajor ? "Major updates can't be dismissed" : "Dismiss"}
+            disabled={forceMajor || run.phase === "running"}
+            title={
+              forceMajor
+                ? "Major updates can't be dismissed"
+                : run.phase === "running"
+                  ? "Wait for install to finish"
+                  : "Dismiss"
+            }
           >
             <svg
               width="14"
@@ -607,11 +617,17 @@ function UpgradeRunOutcome({
 }) {
   const [showOutput, setShowOutput] = useState(false);
   if (result.ok) {
+    // The button only reloads the browser page — it does NOT restart
+    // the wuphf service. The user has to do that themselves (Ctrl+C in
+    // their terminal, then `wuphf` again). Promise only what the click
+    // actually does so the success state doesn't lie about behavior.
     return (
       <div className="upgrade-banner-outcome upgrade-banner-outcome--ok">
-        <span>Installed v{latest}. Restart to apply.</span>
+        <span>
+          Installed v{latest}. Reload this page after restarting wuphf.
+        </span>
         <button type="button" className="upgrade-banner-run" onClick={onReload}>
-          <code>Restart wuphf</code>
+          <code>Reload page</code>
         </button>
       </div>
     );

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -419,9 +420,24 @@ func TestHandleUpgradeRun_ConcurrentRunsSinglefligted(t *testing.T) {
 		Command: "npm install -g wuphf@latest",
 	})
 	release := make(chan struct{})
+	// Buffered so a (failing) double-entry can't deadlock the producer
+	// goroutine — the test shouldn't observe that, but a bug in the
+	// single-flight gate would otherwise hang here instead of failing.
+	entered := make(chan struct{}, 2)
+	var runCalls atomic.Int32
 	pinRunCmd(t, func(_ context.Context, _ upgradeInstallPlan) ([]byte, error) {
-		<-release // hold the leader inside the handler
-		return []byte("done"), nil
+		// Only the first invocation parks on `release`. If the
+		// single-flight gate regresses and a second request reaches
+		// runUpgradeCmdFn, return immediately rather than parking —
+		// otherwise the test deadlocks on `<-results` and CI hangs
+		// instead of reporting the bug.
+		if runCalls.Add(1) == 1 {
+			entered <- struct{}{}
+			<-release
+			return []byte("done"), nil
+		}
+		entered <- struct{}{}
+		return []byte("unexpected second spawn"), nil
 	})
 
 	b := newTestBroker(t)
@@ -448,15 +464,15 @@ func TestHandleUpgradeRun_ConcurrentRunsSinglefligted(t *testing.T) {
 	}
 
 	go send()
-	// Tiny synchronisation gap: let the first request reach the
-	// runUpgradeCmdFn (where it blocks) before firing the second. We
-	// avoid time.Sleep — instead, poll the in-flight flag the handler
-	// flips on entry. This is the only deterministic signal we have
-	// short of intercepting the handler itself.
-	for !b.upgradeRunInFlight.Load() {
-		// Yield without sleeping. If the leader never sets the flag
-		// the test times out at the channel receive below — that's
-		// the right failure mode.
+	// Wait for the leader to reach runUpgradeCmdFn (where it blocks on
+	// `release`) before firing the second request. The fake handler
+	// signals on `entered` as its first action. If the first send
+	// errored before reaching the handler, we'd otherwise spin forever
+	// — fail fast with an explicit timeout instead.
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatalf("leader never reached runUpgradeCmdFn within 5s")
 	}
 	go send()
 
