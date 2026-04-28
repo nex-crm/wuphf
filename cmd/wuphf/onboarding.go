@@ -366,7 +366,7 @@ func (m onboardingModel) handleSetupKey(msg tea.KeyMsg) (onboardingModel, tea.Cm
 		}
 		key := strings.TrimSpace(m.anthropicKey.Value())
 		if key == "" {
-			m.err = "Anthropic API key is required (or install a runtime CLI like Claude Code or Codex)."
+			m.err = "Paste an Anthropic API key (https://console.anthropic.com/settings/keys), or install Claude Code (https://claude.com/claude-code) and rerun — no key needed."
 			return m, nil
 		}
 		// If key not yet validated, validate now.

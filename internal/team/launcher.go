@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -4714,37 +4715,7 @@ func (l *Launcher) LaunchWeb(webPort int) error {
 	// Offer to wire Nex when the user hasn't opted out and nex-cli isn't yet
 	// installed. `nex setup` handles detection and wiring for us — we just
 	// surface the prompt.
-	if !config.ResolveNoNex() && !nex.IsInstalled() {
-		fmt.Println()
-		fmt.Print("  Connect Nex for memory and context? [Y/n] ")
-		var answer string
-		_, _ = fmt.Scanln(&answer)
-		answer = strings.TrimSpace(strings.ToLower(answer))
-		if answer == "" || answer == "y" || answer == "yes" {
-			fmt.Println()
-			fmt.Println("  Nex CLI not found. Installing...")
-			if _, installErr := setup.InstallLatestCLI(context.Background()); installErr != nil {
-				fmt.Printf("  Could not install: %v\n", installErr)
-				fmt.Println("  Continuing without Nex.")
-			}
-			if nexBin := nex.BinaryPath(); nexBin != "" {
-				cmd := exec.CommandContext(context.Background(), nexBin, "setup")
-				cmd.Stdin = os.Stdin
-				cmd.Stdout = os.Stdout
-				cmd.Stderr = os.Stderr
-				if err := cmd.Run(); err != nil {
-					fmt.Printf("  Setup did not complete: %v\n", err)
-					fmt.Println("  Continuing without Nex.")
-				} else {
-					fmt.Println("  Nex connected.")
-				}
-			}
-			fmt.Println()
-		} else {
-			fmt.Println("  Skipping Nex. Agents will work without organizational memory.")
-			fmt.Println()
-		}
-	}
+	l.maybeOfferNex()
 
 	mcpConfig, err := l.ensureMCPConfig()
 	if err != nil {
@@ -4823,12 +4794,100 @@ func (l *Launcher) LaunchWeb(webPort int) error {
 	fmt.Printf("  Press Ctrl+C to stop.\n\n")
 
 	if !l.noOpen {
+		// Wait for the web server to actually accept connections before
+		// triggering the browser. Otherwise users on cold starts (and PH
+		// visitors clicking through `npx wuphf` for the first time) hit
+		// ERR_CONNECTION_REFUSED before the listener is ready. 5s is a
+		// generous ceiling: in practice the listener is up in milliseconds.
+		waitForWebReady(fmt.Sprintf("127.0.0.1:%d", webPort), 5*time.Second)
 		openBrowser(webURL)
 	}
 
 	// Broker, web UI, and background goroutines own the process lifetime;
 	// Ctrl+C (default SIGINT) is the only exit path.
 	select {}
+}
+
+// maybeOfferNex offers to wire up Nex for memory/context when nex-cli isn't
+// already installed. Skipped silently when stdin isn't a TTY (npx, pipes, CI,
+// containers) — fmt.Scanln returns empty in that case, which the prompt would
+// have silently accepted as "yes" and tried to install. Users can rerun
+// `nex setup` later or set WUPHF_NO_NEX=1 to suppress the offer.
+func (l *Launcher) maybeOfferNex() {
+	if config.ResolveNoNex() || nex.IsInstalled() {
+		return
+	}
+	if !stdinIsTTY() {
+		fmt.Println()
+		fmt.Println("  Skipping Nex (no interactive terminal). Run `nex setup` later to add memory.")
+		fmt.Println()
+		return
+	}
+	fmt.Println()
+	fmt.Print("  Connect Nex for memory and context? [Y/n] ")
+	var answer string
+	_, _ = fmt.Scanln(&answer)
+	answer = strings.TrimSpace(strings.ToLower(answer))
+	if answer != "" && answer != "y" && answer != "yes" {
+		fmt.Println("  Skipping Nex. Agents will work without organizational memory.")
+		fmt.Println()
+		return
+	}
+	fmt.Println()
+	fmt.Println("  Nex CLI not found. Installing...")
+	if _, installErr := setup.InstallLatestCLI(context.Background()); installErr != nil {
+		fmt.Printf("  Could not install: %v\n", installErr)
+		fmt.Println("  Continuing without Nex.")
+	}
+	if nexBin := nex.BinaryPath(); nexBin != "" {
+		cmd := exec.CommandContext(context.Background(), nexBin, "setup")
+		cmd.Stdin = os.Stdin
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			fmt.Printf("  Setup did not complete: %v\n", err)
+			fmt.Println("  Continuing without Nex.")
+		} else {
+			fmt.Println("  Nex connected.")
+		}
+	}
+	fmt.Println()
+}
+
+// waitForWebReady polls addr until a TCP dial succeeds or the timeout
+// elapses. It exists because ServeWebUI returns immediately and the listener
+// can take a few hundred ms to come up — opening the browser before then
+// produces ERR_CONNECTION_REFUSED in the user's first second of the product.
+// Returns whether the listener became reachable; the caller currently opens
+// the browser regardless so a slow listener still surfaces a real page.
+func waitForWebReady(addr string, timeout time.Duration) bool {
+	dialer := &net.Dialer{Timeout: 250 * time.Millisecond}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	for {
+		conn, err := dialer.DialContext(ctx, "tcp", addr)
+		if err == nil {
+			_ = conn.Close()
+			return true
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+}
+
+// stdinIsTTY reports whether os.Stdin is connected to a real terminal. We use
+// the stat-mode test instead of pulling in a TTY library: it's accurate enough
+// for the launcher's "is the user able to answer prompts?" question and avoids
+// touching go.mod for a launch-day fix.
+func stdinIsTTY() bool {
+	stat, err := os.Stdin.Stat()
+	if err != nil {
+		return false
+	}
+	return (stat.Mode() & os.ModeCharDevice) != 0
 }
 
 func openBrowser(url string) {

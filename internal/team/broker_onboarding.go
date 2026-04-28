@@ -288,6 +288,20 @@ func (b *Broker) postKickoffLocked(bp operations.Blueprint, selectedAgents []str
 	}
 
 	if skipTask {
+		// Without a seeded task, #general would otherwise be empty (or hold
+		// only the lead-only warning) and the office looks broken on first
+		// open. Post a system welcome that names the lead and tells the user
+		// where to type so the channel always has an affordance for what to
+		// do next.
+		b.counter++
+		b.appendMessageLocked(channelMessage{
+			ID:        fmt.Sprintf("msg-%d", b.counter),
+			From:      "system",
+			Channel:   "general",
+			Kind:      "system",
+			Content:   welcomeMessageForMembers(b.members),
+			Timestamp: now,
+		})
 		// seedFromBlueprintLocked mutated b.members/channels/tasks above; we
 		// must persist that even when the user skipped the kickoff task.
 		// Returning early without saveLocked() silently loses the seeded team
@@ -350,6 +364,27 @@ func (b *Broker) postKickoffLocked(bp operations.Blueprint, selectedAgents []str
 	}
 
 	return b.saveLocked()
+}
+
+// welcomeMessageForMembers builds the system welcome posted to #general when
+// the user finishes onboarding without seeding a task. Names the lead so the
+// office feels staffed (not abstract) and points the user at the composer.
+func welcomeMessageForMembers(members []officeMember) string {
+	leadSlug := officeLeadSlugFromMembers(members)
+	leadName := ""
+	for _, m := range members {
+		if strings.TrimSpace(m.Slug) == leadSlug {
+			leadName = strings.TrimSpace(m.Name)
+			break
+		}
+	}
+	if leadName == "" {
+		leadName = "your lead"
+	}
+	return fmt.Sprintf(
+		"Welcome to your office. %s and the team are online and ready. Type a directive in the composer below — they'll claim work, argue, and ship.",
+		leadName,
+	)
 }
 
 func onboardingPartialString(partial *onboarding.PartialProgress, step, key string) string {
