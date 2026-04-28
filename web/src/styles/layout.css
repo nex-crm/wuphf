@@ -388,7 +388,7 @@ html[data-theme="nex"]
 }
 
 .sidebar-section {
-  padding: 14px var(--sidebar-pad-x) 2px;
+  padding: 8px var(--sidebar-pad-x) 0;
 }
 .sidebar-section + .sidebar-section,
 .sidebar-agents + .sidebar-section,
@@ -397,7 +397,7 @@ html[data-theme="nex"]
   border-top: 1px solid var(--border);
 }
 .sidebar-section.is-collapsed {
-  padding-bottom: 12px;
+  padding-bottom: 0;
 }
 .sidebar-section.is-collapsed + .sidebar-section {
   border-top: none;
@@ -819,7 +819,7 @@ html[data-theme="nex"]
 }
 
 .sidebar-agents {
-  padding: 4px var(--sidebar-pad-x) 16px;
+  padding: 4px var(--sidebar-pad-x) 4px;
   flex: 0 0 auto;
   min-height: 0;
   overflow-y: visible;
@@ -892,13 +892,13 @@ html[data-theme="nex"]
 }
 
 .sidebar-channels {
-  padding: 4px var(--sidebar-pad-x) 16px;
+  padding: 4px var(--sidebar-pad-x) 4px;
   flex: 0 0 auto;
   min-height: 0;
   overflow-y: visible;
 }
 .sidebar-apps {
-  padding: 4px var(--sidebar-pad-x) 16px;
+  padding: 4px var(--sidebar-pad-x) 4px;
   flex: 0 0 auto;
   min-height: 0;
   overflow-y: visible;

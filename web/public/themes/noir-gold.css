@@ -303,8 +303,8 @@ html[data-theme="noir-gold"] .sidebar .sidebar-apps + .sidebar-section,
 html[data-theme="noir-gold"] .sidebar .sidebar-collapsible + .sidebar-section {
   border-top: none;
   position: relative;
-  padding-top: 24px;
-  margin-top: 6px;
+  padding-top: 16px;
+  margin-top: 0;
 }
 
 /* Gold gradient hairline that runs the width of the divider */
@@ -315,7 +315,7 @@ html[data-theme="noir-gold"] .sidebar .sidebar-apps + .sidebar-section::after,
 html[data-theme="noir-gold"] .sidebar .sidebar-collapsible + .sidebar-section::after {
   content: "";
   position: absolute;
-  top: 10px;
+  top: 7px;
   left: 14px;
   right: 14px;
   height: 1px;
@@ -339,14 +339,14 @@ html[data-theme="noir-gold"] .sidebar .sidebar-apps + .sidebar-section::before,
 html[data-theme="noir-gold"] .sidebar .sidebar-collapsible + .sidebar-section::before {
   content: "◆";
   position: absolute;
-  top: 1px;
+  top: -1px;
   left: 50%;
   transform: translateX(-50%);
   font-size: 9px;
   line-height: 1;
   color: var(--gold-300);
   background: var(--nex-sidebar);
-  padding: 4px 10px;
+  padding: 3px 10px;
   text-shadow:
     0 0 4px rgba(240, 199, 94, 0.55),
     0 0 8px rgba(201, 162, 39, 0.35);
