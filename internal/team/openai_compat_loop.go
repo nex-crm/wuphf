@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -44,6 +46,38 @@ type openAICompatToolLoop struct {
 	onFirstEvent func()
 	onFirstText  func()
 	onFirstTool  func()
+
+	// Receipts logging — when taskLogRoot and taskID are both non-empty,
+	// every tool execution in this loop appends an agent.TaskLogEntry
+	// JSONL record to <taskLogRoot>/<taskID>/output.log so the BoardRoom
+	// Receipts panel (GET /agent-logs) sees this turn's tool calls.
+	// Both empty disables logging entirely (zero overhead, used by tests).
+	taskLogRoot string
+	taskID      string
+	agentSlug   string
+}
+
+// appendTaskLogEntry writes one TaskLogEntry to the receipts log.
+// Best-effort: any error (mkdir, marshal, write) is swallowed so a wedged
+// disk can't break the agent's turn. Mirrors AgentLoop.logToolExecution.
+func (lp *openAICompatToolLoop) appendTaskLogEntry(entry agent.TaskLogEntry) {
+	if lp.taskLogRoot == "" || lp.taskID == "" {
+		return
+	}
+	dir := filepath.Join(lp.taskLogRoot, lp.taskID)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return
+	}
+	line, err := json.Marshal(entry)
+	if err != nil {
+		return
+	}
+	f, err := os.OpenFile(filepath.Join(dir, "output.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return
+	}
+	defer func() { _ = f.Close() }()
+	_, _ = f.Write(append(line, '\n'))
 }
 
 // run executes the loop and returns:
@@ -190,28 +224,57 @@ func (lp *openAICompatToolLoop) run(ctx context.Context, msgs []agent.Message) (
 		var resultBlocks []string
 		for _, tc := range turnToolUses {
 			tool, ok := lp.toolByName[tc.ToolName]
+			startedAt := time.Now().UnixMilli()
 			if !ok || tool.Execute == nil {
 				resultBlocks = append(resultBlocks, fmt.Sprintf(
 					"Tool %q is not available — only call tools listed in the function schema.", tc.ToolName))
 				if lp.onToolResult != nil {
 					lp.onToolResult(tc.ToolName, "", fmt.Errorf("not available"))
 				}
+				lp.appendTaskLogEntry(agent.TaskLogEntry{
+					TaskID:      lp.taskID,
+					AgentSlug:   lp.agentSlug,
+					ToolName:    tc.ToolName,
+					Params:      tc.ToolParams,
+					Error:       "tool not available",
+					StartedAt:   startedAt,
+					CompletedAt: time.Now().UnixMilli(),
+				})
 				continue
 			}
 			execCtx, execCancel := context.WithTimeout(ctx, lp.toolTimeout)
 			out, execErr := tool.Execute(tc.ToolParams, execCtx, nil)
 			execCancel()
+			completedAt := time.Now().UnixMilli()
 			if execErr != nil {
 				resultBlocks = append(resultBlocks, fmt.Sprintf("Tool %q failed: %v", tc.ToolName, execErr))
 				if lp.onToolResult != nil {
 					lp.onToolResult(tc.ToolName, "", execErr)
 				}
+				lp.appendTaskLogEntry(agent.TaskLogEntry{
+					TaskID:      lp.taskID,
+					AgentSlug:   lp.agentSlug,
+					ToolName:    tc.ToolName,
+					Params:      tc.ToolParams,
+					Error:       execErr.Error(),
+					StartedAt:   startedAt,
+					CompletedAt: completedAt,
+				})
 				continue
 			}
 			resultBlocks = append(resultBlocks, fmt.Sprintf("Tool %q returned:\n%s", tc.ToolName, strings.TrimSpace(out)))
 			if lp.onToolResult != nil {
 				lp.onToolResult(tc.ToolName, out, nil)
 			}
+			lp.appendTaskLogEntry(agent.TaskLogEntry{
+				TaskID:      lp.taskID,
+				AgentSlug:   lp.agentSlug,
+				ToolName:    tc.ToolName,
+				Params:      tc.ToolParams,
+				Result:      out,
+				StartedAt:   startedAt,
+				CompletedAt: completedAt,
+			})
 		}
 		// TODO: localize the trailer — non-English-speaking deployments may
 		// want this hook configurable. Hardcoded English for v1 because all

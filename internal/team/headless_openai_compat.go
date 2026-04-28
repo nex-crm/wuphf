@@ -122,12 +122,19 @@ func (l *Launcher) runHeadlessOpenAICompatTurn(ctx context.Context, slug string,
 		metrics: &metrics,
 	})
 
+	// taskID is unique per turn so the Receipts panel groups each
+	// agent's turn into its own row. Format mirrors agent.nextTaskID.
+	taskID := fmt.Sprintf("%s-%d", slug, time.Now().UnixMilli())
+
 	loop := openAICompatToolLoop{
 		streamFn:    streamFn,
 		tools:       tools,
 		toolByName:  toolByName,
 		maxIters:    maxOpenAICompatToolIterations,
 		toolTimeout: 90 * time.Second,
+		taskLogRoot: agent.DefaultTaskLogRoot(),
+		taskID:      taskID,
+		agentSlug:   slug,
 		onText:      state.onText,
 		onToolUse: func(name, rawInput string) {
 			state.onToolUseChunk(name, rawInput)
