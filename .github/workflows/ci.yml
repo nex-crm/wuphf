@@ -134,6 +134,63 @@ jobs:
         run: |
           export PATH="${{ env.GOBIN }}:$PATH"
           govulncheck ./...
+      - name: Reject /tmp/ hardcodes in production Go
+        # Windows guard: /tmp doesn't exist there, so anything bound to a
+        # literal /tmp path silently writes to C:\tmp at the drive root (or
+        # fails outright). Production code must use os.TempDir() — see the
+        # runtime-aware helpers in internal/brokeraddr/addr.go for the
+        # pattern. _test.go files are exempt (testdata fixtures often live
+        # at known paths).
+        run: |
+          set -euo pipefail
+          # The grep below excludes test files via :(exclude). The remaining
+          # `internal/brokeraddr/addr.go` hits are the runtime-gated /tmp
+          # branches that are only taken on non-Windows; those are correct.
+          bad=$(git grep -nE '"/tmp/' -- '*.go' \
+                 ':(exclude)*_test.go' \
+                 ':(exclude)internal/brokeraddr/addr.go' || true)
+          if [ -n "$bad" ]; then
+            echo "$bad" >&2
+            echo "" >&2
+            echo "Found /tmp hardcodes in production Go. Use os.TempDir()." >&2
+            echo "See internal/brokeraddr/addr.go for the runtime.GOOS pattern." >&2
+            exit 1
+          fi
+      - name: Reject unix-only exec.Command shapes outside tmux/tui paths
+        # Windows guard: bash/sh/chmod/ln/mkfifo/killall don't exist there.
+        # Code that needs them must be in a _unix.go file with a build tag,
+        # or guarded with runtime.GOOS at the call site. tmux is allowed
+        # because UsesTmuxRuntime() gates it; if you're calling tmux from a
+        # web-mode path, the regression is real and this should fail.
+        #
+        # Uses ripgrep with -U (multiline) + -P (PCRE) so call shapes split
+        # across lines — exec.Command(\n    "bash",\n    "-c", ...) — are
+        # caught. A previous line-oriented grep missed those. ripgrep is
+        # preinstalled on ubuntu-latest.
+        #
+        # The pattern matches both bare names ("sh", "bash", ...) AND the
+        # absolute-path variants ("/bin/sh", "/usr/bin/sh", ...). A bare-
+        # name-only pattern missed `exec.CommandContext(ctx, "/bin/sh", ...)`
+        # in internal/agent/tools.go, which compiles fine but fails at
+        # CreateProcess on Windows.
+        run: |
+          set -euo pipefail
+          bad=$(rg -nUP \
+                  --type-add='go:*.go' --type=go \
+                  --glob='!*_test.go' \
+                  'exec\.(Command|LookPath|CommandContext)\([^,)]*,?\s*"(/(?:usr/)?(?:local/)?(?:s)?bin/)?(bash|sh|chmod|ln|mkfifo|killall|pkill)"' \
+                  internal/ cmd/ || true)
+          # Allow _unix.go / _darwin.go / _linux.go files (compiled only on
+          # those platforms by Go's build constraints).
+          bad=$(echo "$bad" | grep -vE '_(unix|linux|darwin)\.go:' || true)
+          if [ -n "$bad" ]; then
+            echo "$bad" >&2
+            echo "" >&2
+            echo "Found unix-only exec.Command in cross-platform Go. Either:" >&2
+            echo "  1. Move the code into a _unix.go file with //go:build !windows, or" >&2
+            echo "  2. Guard the call site with runtime.GOOS." >&2
+            exit 1
+          fi
 
   # Single test job. We previously fanned out one matrix leg per Go package
   # (28 legs at peak) for nicer per-package red x's, but each leg paid
@@ -219,6 +276,40 @@ jobs:
             go-test-teammcp.log
           retention-days: 7
           if-no-files-found: ignore
+
+  # Cross-platform compile gate. Catches the class of regression where a
+  # `golang.org/x/sys/unix` import or a stray `//go:build !windows` constraint
+  # slips into the main path and breaks Windows/macOS without anyone noticing
+  # until release time. `release-build` exists but only verifies what
+  # goreleaser's `goos:` happens to enumerate; if a future PR drops `windows`
+  # from .goreleaser.yml, this is the gate that catches it independently.
+  go-cross-build:
+    needs: web
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {goos: windows, goarch: amd64}
+          - {goos: windows, goarch: arm64}
+          - {goos: darwin, goarch: arm64}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # ratchet:actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # ratchet:actions/download-artifact@v8
+        with:
+          name: web-dist
+          path: web/dist
+      - name: Cross-compile ${{ matrix.goos }}/${{ matrix.goarch }}
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        # `./...` (not just ./cmd/wuphf) so an internal/ package picking up a
+        # unix-only import blocks the merge before someone hits it on Windows.
+        run: go build ./...
 
   # Keep a standalone vet job so config drift (a new vet check landing in
   # a Go minor bump, or an unknown //go:build tag) surfaces with its own
@@ -506,6 +597,33 @@ jobs:
         with:
           version: latest
           args: release --snapshot --clean --skip=publish
+      - name: Verify Windows artifacts shipped
+        # Belt-and-braces against a future .goreleaser.yml edit that drops
+        # `windows` from goos: or removes the format_overrides .zip block.
+        # goreleaser would silently produce only Unix tarballs and CI would
+        # still pass the install.sh smoke (which targets linux/amd64).
+        run: |
+          set -euo pipefail
+          for arch in amd64 arm64; do
+            zip=$(ls dist/wuphf_*_windows_${arch}.zip 2>/dev/null || true)
+            if [ -z "$zip" ]; then
+              echo "missing windows/${arch} .zip artifact in dist/" >&2
+              echo "did .goreleaser.yml lose 'windows' from goos: or drop the format_overrides .zip block?" >&2
+              exit 1
+            fi
+          done
+          # Confirm both archives actually contain wuphf.exe (catches a
+          # goreleaser binary `name` regression that would ship `wuphf`
+          # without the .exe suffix on Windows). Both arches are checked
+          # because a per-arch override could regress one without the other.
+          for arch in amd64 arm64; do
+            zip=$(ls dist/wuphf_*_windows_${arch}.zip | head -1)
+            unzip -l "$zip" | grep -q 'wuphf\.exe' || {
+              echo "windows/${arch} zip does not contain wuphf.exe — goreleaser binary name regressed?" >&2
+              unzip -l "$zip" >&2
+              exit 1
+            }
+          done
       - name: Smoke-test install.sh against snapshot (URL override)
         # Cheap sanity path: feed install.sh a file:// tarball directly so
         # download/extract/chmod/--version all run against the fresh snapshot.
@@ -591,3 +709,127 @@ jobs:
           WUPHF_INSTALL_REPO_BASE_URL="http://127.0.0.1:7457" bash scripts/install.sh
           command -v wuphf
           wuphf --version
+
+  # Pure-function tests for the npm wrapper's `process.platform === "win32"`
+  # branches (archiveExtension, binaryFilename, archiveName, etc). These
+  # branches are only exercised in the wild on actual Windows machines, so
+  # without a unit test a refactor that drops `.zip`/`.exe` handling regresses
+  # silently. Runs in <2s; no real network or filesystem.
+  npm-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # ratchet:oven-sh/setup-bun@v2.2.0
+        with:
+          bun-version: "1.1.38"
+      - name: Run npm wrapper tests
+        working-directory: npm
+        run: bun test
+
+  # Real Windows runner smoke. Catches behavioral regressions that compile
+  # cleanly but exit silently on first launch — the class of bug the
+  # isPiped() fall-through fix (commit 9efaa3b3) addresses. windows-latest
+  # bills at 2x Linux minutes; ~3 min wall clock = ~$0.008/PR. Worth it
+  # because the regression vectors here are invisible to Linux/Mac CI.
+  windows-smoke:
+    needs: web
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # ratchet:actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # ratchet:actions/download-artifact@v8
+        with:
+          name: web-dist
+          path: web/dist
+      - name: Build wuphf.exe
+        env:
+          CGO_ENABLED: "0"
+        run: go build -o wuphf.exe ./cmd/wuphf
+      - name: Help/version smoke
+        shell: pwsh
+        run: |
+          ./wuphf.exe --version
+          ./wuphf.exe --help | Out-Null
+          ./wuphf.exe --help-all | Out-Null
+      - name: Empty-pipe-stdin must reach the web UI (regression guard for 9efaa3b3)
+        shell: pwsh
+        # Reproduces the SSH/Start-Process/scheduled-task case where stdin is
+        # a closed pipe with no data. Before the fix, isPiped() returned true,
+        # the dispatch loop drained zero lines, and wuphf exited silently with
+        # no output and no listener. We assert that the web UI binds within
+        # 30s — if it doesn't, the regression is back.
+        run: |
+          $port = 17891
+          # Use a fresh port so we don't collide with anything on the runner.
+          $logPath = "$env:RUNNER_TEMP\wuphf-smoke.log"
+          $proc = Start-Process -FilePath ./wuphf.exe `
+            -ArgumentList "--no-open","--no-nex","--web-port",$port,"--broker-port","17890" `
+            -RedirectStandardOutput $logPath `
+            -RedirectStandardError "$env:RUNNER_TEMP\wuphf-smoke.err" `
+            -PassThru -NoNewWindow
+          try {
+            $ok = $false
+            for ($i = 0; $i -lt 30; $i++) {
+              Start-Sleep -Seconds 1
+              try {
+                $r = Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:$port/onboarding/state" -TimeoutSec 2
+                if ($r.StatusCode -eq 200) { $ok = $true; break }
+              } catch {}
+            }
+            if (-not $ok) {
+              Write-Host "wuphf.exe never bound :$port — isPiped() regression?"
+              if (Test-Path $logPath) { Write-Host "--- stdout ---"; Get-Content $logPath }
+              if (Test-Path "$env:RUNNER_TEMP\wuphf-smoke.err") { Write-Host "--- stderr ---"; Get-Content "$env:RUNNER_TEMP\wuphf-smoke.err" }
+              exit 1
+            }
+            Write-Host "OK: wuphf.exe bound :$port within $i seconds"
+          } finally {
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+          }
+      - name: Token file lives under TEMP (regression guard for brokeraddr Windows path)
+        shell: pwsh
+        # If anyone reverts internal/brokeraddr/addr.go to a const "/tmp/..."
+        # this smoke catches it: the broker writes its token file on first
+        # boot, and that file MUST be under %TEMP%, not under a literal
+        # C:\tmp\ path that Windows would silently create at the drive root.
+        run: |
+          # Boot wuphf briefly so it writes the token file.
+          $port = 17892
+          $proc = Start-Process -FilePath ./wuphf.exe `
+            -ArgumentList "--no-open","--no-nex","--web-port",$port,"--broker-port","17893" `
+            -PassThru -NoNewWindow `
+            -RedirectStandardOutput "$env:RUNNER_TEMP\wuphf-tok.log" `
+            -RedirectStandardError "$env:RUNNER_TEMP\wuphf-tok.err"
+          try {
+            for ($i = 0; $i -lt 30; $i++) {
+              Start-Sleep -Seconds 1
+              try {
+                Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:$port/onboarding/state" -TimeoutSec 2 | Out-Null
+                break
+              } catch {}
+            }
+            $tempToken = Join-Path $env:TEMP "wuphf-broker-token-17893"
+            $tmpToken  = "C:\tmp\wuphf-broker-token-17893"
+            if (Test-Path $tmpToken) {
+              Write-Error "regression: token file written to C:\tmp\ on Windows — internal/brokeraddr/addr.go reverted to a /tmp hardcode?"
+              exit 1
+            }
+            # Retry briefly: the broker writes its token file shortly after
+            # ServeWebUI returns, so a tight loop is enough. If it never lands
+            # under %TEMP% the regression guard must hard-fail — passing on
+            # absence would let a /tmp regression sneak through.
+            $found = $false
+            for ($j = 0; $j -lt 10; $j++) {
+              if (Test-Path $tempToken) { $found = $true; break }
+              Start-Sleep -Seconds 1
+            }
+            if (-not $found) {
+              Write-Error "token file missing at expected TEMP path: $tempToken — internal/brokeraddr/addr.go regression?"
+              exit 1
+            }
+            Write-Host "OK: token file at $tempToken"
+          } finally {
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+          }

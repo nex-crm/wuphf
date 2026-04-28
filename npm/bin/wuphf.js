@@ -29,15 +29,18 @@ const { spawn } = require("node:child_process");
 const { downloadBinary, packageVersion } = require("../scripts/download-binary");
 const { getLatestVersion, compareVersions } = require("../scripts/version-check");
 
-const installedBinary = path.join(__dirname, "wuphf");
+const binaryName = process.platform === "win32" ? "wuphf.exe" : "wuphf";
+const installedBinary = path.join(__dirname, binaryName);
 
 function cachedBinaryPath(version) {
+  // Windows requires the .exe suffix or CreateProcess refuses to launch.
+  const suffix = process.platform === "win32" ? ".exe" : "";
   return path.join(
     os.homedir(),
     ".wuphf",
     "cache",
     "binaries",
-    `wuphf-${version}`,
+    `wuphf-${version}${suffix}`,
   );
 }
 
