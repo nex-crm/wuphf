@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -575,6 +576,13 @@ type Broker struct {
 	skillSynthesizer    *SkillSynthesizer
 	skillSynthInflight  bool
 	skillSynthCoalesced bool
+	// Hermes-style per-agent activity counter (Stage B'). Increments on
+	// every agent MCP tool call; resets on team_skill_create / team_skill_patch;
+	// fires a "skill_review_nudge" task when the threshold is crossed. Owns
+	// its own mutex so it can be hit from the tool-event hot path without
+	// blocking on b.mu. Lazily constructed by ensureSkillCounter so tests
+	// that never spawn a real agent pay no cost.
+	skillCounter *SkillCounter
 	// recentlyRejectedSkills holds in-memory snapshots of skills rejected in
 	// the last 60s so /skills/reject/undo can restore them. Keyed by undo
 	// token. Guarded by b.mu. See skill_crud_endpoints.go for GC semantics.
@@ -2279,15 +2287,116 @@ func (b *Broker) handleAgentToolEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	stream := b.AgentStream(slug)
-	if stream == nil {
-		w.WriteHeader(http.StatusOK)
+	if stream != nil {
+		line := formatAgentToolEvent(body.Phase, body.Tool, body.Args, body.Result, body.Error)
+		if line != "" {
+			stream.Push(line)
+		}
+	}
+
+	// Drive the Hermes counter. We only count once per tool call so we
+	// branch on phase=="call" — the call/result/error fan-out from a
+	// single tool invocation must NOT triple-count. team_skill_create /
+	// team_skill_patch reset the tally; everything else increments and
+	// may fire a skill_review_nudge task.
+	b.recordAgentToolEvent(slug, body.Phase, body.Tool, body.Args)
+
+	w.WriteHeader(http.StatusOK)
+}
+
+// recordAgentToolEvent updates the broker's SkillCounter for one
+// tool-event payload. It is split out from handleAgentToolEvent so tests
+// can drive the counter directly without going through HTTP, and so the
+// b.mu acquisition for the nudge task creation is centralized in one
+// place.
+//
+// We only act on phase=="call" — the call/result/error fan-out per tool
+// invocation must not triple-count. Empty phase is treated as "call" for
+// backward compatibility; older agents that didn't tag the phase still
+// only post one event per call.
+func (b *Broker) recordAgentToolEvent(slug, phase, tool, args string) {
+	slug = strings.TrimSpace(slug)
+	tool = strings.TrimSpace(tool)
+	if slug == "" || tool == "" {
 		return
 	}
-	line := formatAgentToolEvent(body.Phase, body.Tool, body.Args, body.Result, body.Error)
-	if line != "" {
-		stream.Push(line)
+	phase = strings.TrimSpace(phase)
+	if phase != "" && phase != "call" {
+		// result / error events from the same call — already counted.
+		return
 	}
-	w.WriteHeader(http.StatusOK)
+	counter := b.ensureSkillCounter()
+	if counter == nil {
+		return
+	}
+
+	// Skill-authoring tools reset the counter (the agent just codified
+	// something). Everything else increments.
+	if IsSkillAuthoringTool(tool) {
+		counter.Reset(slug)
+		return
+	}
+
+	summary := skillCounterSummaryFromArgs(tool, args)
+	shouldNudge, _ := counter.Increment(slug, tool, summary)
+	if !shouldNudge {
+		return
+	}
+
+	b.mu.Lock()
+	taskID, err := b.fireSkillReviewNudgeLocked(slug)
+	if err == nil {
+		atomic.AddInt64(&b.skillCompileMetrics.CounterNudgesFiredTotal, 1)
+		if saveErr := b.saveLocked(); saveErr != nil {
+			slog.Warn("skill_counter_nudge_persist_failed",
+				"agent", slug, "task_id", taskID, "err", saveErr)
+		}
+	}
+	b.mu.Unlock()
+	if err != nil {
+		slog.Warn("skill_counter_nudge_create_failed",
+			"agent", slug, "err", err)
+	}
+}
+
+// ensureSkillCounter lazily constructs the SkillCounter. Like the other
+// skill-* singletons, the counter is built on first use so tests that
+// never trigger an agent tool call pay no cost.
+func (b *Broker) ensureSkillCounter() *SkillCounter {
+	b.mu.Lock()
+	if b.skillCounter != nil {
+		c := b.skillCounter
+		b.mu.Unlock()
+		return c
+	}
+	c := NewSkillCounter()
+	b.skillCounter = c
+	b.mu.Unlock()
+	return c
+}
+
+// SetSkillCounter replaces the broker's counter — used by tests to inject
+// a counter with a specific threshold / cooldown / clock without going
+// through env vars.
+func (b *Broker) SetSkillCounter(c *SkillCounter) {
+	b.mu.Lock()
+	b.skillCounter = c
+	b.mu.Unlock()
+}
+
+// skillCounterSummaryFromArgs renders a one-line summary of a tool call
+// for the per-agent ring buffer. The args field is a JSON-encoded
+// string (as posted by the MCP client), so we don't try to parse it —
+// we just trim and truncate. Real human review of the nudge task uses
+// the agent's own activity stream for full detail.
+func skillCounterSummaryFromArgs(tool, args string) string {
+	args = strings.TrimSpace(args)
+	if args == "" {
+		return tool
+	}
+	// Collapse whitespace runs so the summary stays single-line.
+	args = strings.Join(strings.Fields(args), " ")
+	return truncateSummary(args, 120)
 }
 
 // formatAgentToolEvent renders one structured audit record for the per-agent
