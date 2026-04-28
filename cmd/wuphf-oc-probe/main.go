@@ -30,7 +30,11 @@ func main() {
 		}
 		token = strings.TrimSpace(string(data))
 	}
-	identity, err := openclaw.LoadOrCreateDeviceIdentity(os.ExpandEnv("$HOME/.wuphf/openclaw/identity.json"))
+	home, err := os.UserHomeDir()
+	if err != nil {
+		die("user home dir: %v", err)
+	}
+	identity, err := openclaw.LoadOrCreateDeviceIdentity(filepath.Join(home, ".wuphf", "openclaw", "identity.json"))
 	if err != nil {
 		die("identity: %v", err)
 	}

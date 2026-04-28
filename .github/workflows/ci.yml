@@ -140,12 +140,18 @@ jobs:
         # across lines — exec.Command(\n    "bash",\n    "-c", ...) — are
         # caught. A previous line-oriented grep missed those. ripgrep is
         # preinstalled on ubuntu-latest.
+        #
+        # The pattern matches both bare names ("sh", "bash", ...) AND the
+        # absolute-path variants ("/bin/sh", "/usr/bin/sh", ...). A bare-
+        # name-only pattern missed `exec.CommandContext(ctx, "/bin/sh", ...)`
+        # in internal/agent/tools.go, which compiles fine but fails at
+        # CreateProcess on Windows.
         run: |
           set -euo pipefail
           bad=$(rg -nUP \
                   --type-add='go:*.go' --type=go \
                   --glob='!*_test.go' \
-                  'exec\.(Command|LookPath|CommandContext)\(\s*"(bash|sh|chmod|ln|mkfifo|killall)"' \
+                  'exec\.(Command|LookPath|CommandContext)\([^,)]*,?\s*"(/(?:usr/)?(?:local/)?(?:s)?bin/)?(bash|sh|chmod|ln|mkfifo|killall|pkill)"' \
                   internal/ cmd/ || true)
           # Allow _unix.go / _darwin.go / _linux.go files (compiled only on
           # those platforms by Go's build constraints).
@@ -702,19 +708,6 @@ jobs:
     needs: web
     runs-on: windows-latest
     steps:
-      - name: Disable git's NTFS path protection
-        # The .windsurf/workflows/ directory contains files with colons in
-        # their names (nex:ask.md, etc — Windsurf's slash-command namespace
-        # separator). On NTFS, the colon is reserved, so by default git's
-        # core.protectNTFS=true rejects the checkout with "invalid path"
-        # before any job step can run. Sparse-checkout doesn't help: git
-        # validates paths from the fetched tree regardless of which paths
-        # would actually be materialized. Disabling protectNTFS lets git
-        # write the rest of the worktree; the colon files themselves end
-        # up as untracked — fine, we don't need them to build wuphf.exe.
-        # Tracked separately in CONTRIBUTING / repo hygiene if we want to
-        # rename the source files later.
-        run: git config --global core.protectNTFS false
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # ratchet:actions/setup-go@v6
         with:

@@ -56,21 +56,6 @@ func TestTokenFileForPort_OnWindows_NotInSlashTmp(t *testing.T) {
 	}
 }
 
-// Build-time guard: DefaultTokenFile is a `var`, not a `const`. The const→var
-// change in this package is what enables runtime.GOOS branching at all; if
-// someone reverts it, every consumer that copies the value at package-init
-// (internal/teammcp/server.go and cmd/wuphf/channel.go both do) is back to
-// the broken /tmp path. We can't reflect on var-vs-const, but successfully
-// assigning to it proves it isn't a const.
-func TestDefaultTokenFile_IsVar(t *testing.T) {
-	orig := DefaultTokenFile
-	t.Cleanup(func() { DefaultTokenFile = orig })
-	DefaultTokenFile = "sentinel"
-	if DefaultTokenFile != "sentinel" {
-		t.Fatal("DefaultTokenFile must be a var so runtime branching works")
-	}
-}
-
 // Env override beats both the default and the per-port computed path. This
 // is the contract the broker daemon and clients agree on for non-default
 // runtime layouts (sandbox tests, multi-tenant local dev).

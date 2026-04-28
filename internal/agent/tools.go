@@ -368,7 +368,7 @@ func localToolDefinitions() []AgentTool {
 				if wd == "" {
 					wd, _ = os.Getwd()
 				}
-				cmd := exec.CommandContext(ctx, "/bin/sh", "-lc", command)
+				cmd := newShellCommand(ctx, command)
 				cmd.Dir = wd
 				var stdout bytes.Buffer
 				var stderr bytes.Buffer

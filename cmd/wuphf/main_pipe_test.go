@@ -72,6 +72,46 @@ func TestConsumePipedStdin_SingleLineNoTrailingNewline_Handled(t *testing.T) {
 	}
 }
 
+// Whitespace-only lines must NOT mark the pipe as handled — otherwise
+// `printf "\n" | wuphf` falls into the dispatch path with an empty command,
+// which exits with a useless error. The fix is to treat a whitespace-only
+// pipe the same as an empty pipe and fall through to the web UI launch.
+func TestConsumePipedStdin_BlankLineOnly_NotHandled(t *testing.T) {
+	for _, in := range []string{"\n", "  \n", "\n\n", "\t\n  \n"} {
+		var dispatched []string
+		handled, err := consumePipedStdin(strings.NewReader(in), func(line string) {
+			dispatched = append(dispatched, line)
+		})
+		if err != nil {
+			t.Fatalf("input %q: unexpected err: %v", in, err)
+		}
+		if handled {
+			t.Fatalf("input %q: blank-only pipe must not be reported as handled", in)
+		}
+		if len(dispatched) != 0 {
+			t.Fatalf("input %q: dispatch must not be called for blank lines, got %v", in, dispatched)
+		}
+	}
+}
+
+// Mixed input: a real command surrounded by blank lines must dispatch the
+// command exactly once and report handled.
+func TestConsumePipedStdin_BlankLinesAroundCommand_Handled(t *testing.T) {
+	var dispatched []string
+	handled, err := consumePipedStdin(strings.NewReader("\n\n/init\n\n"), func(line string) {
+		dispatched = append(dispatched, line)
+	})
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if !handled {
+		t.Fatal("a real command on a non-blank line must be reported as handled")
+	}
+	if !reflect.DeepEqual(dispatched, []string{"/init"}) {
+		t.Fatalf("dispatched=%v; want [/init]", dispatched)
+	}
+}
+
 // Real I/O failure on the pipe must propagate. We rely on this so we can
 // log the cause and exit with a non-zero status — silently dropping the
 // error would mask broken pipes and other I/O issues.

@@ -646,8 +646,17 @@ func consumePipedStdin(r io.Reader, dispatch func(line string)) (handled bool, e
 	const maxLineBytes = 1 << 20
 	scanner.Buffer(make([]byte, 0, 64*1024), maxLineBytes)
 	for scanner.Scan() {
+		// Skip blank/whitespace-only lines without setting handled. Otherwise
+		// `printf "\n" | wuphf` would dispatch the empty string (which fails
+		// with a useless error) AND mark the input as handled — preventing
+		// the fall-through to the web UI launch. A pipe that contains only
+		// whitespace is morally equivalent to an empty pipe.
+		line := scanner.Text()
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
 		handled = true
-		dispatch(scanner.Text())
+		dispatch(line)
 	}
 	if scanErr := scanner.Err(); scanErr != nil {
 		return handled, scanErr

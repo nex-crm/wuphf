@@ -15,6 +15,14 @@ const DefaultPort = 7890
 // DefaultTokenFile is the path the broker writes its session token to and
 // clients read from. On Unix we keep the historical /tmp location; on Windows
 // /tmp doesn't exist, so fall back to os.TempDir() (typically %LOCALAPPDATA%\Temp).
+//
+// It's a `var` rather than a `const` so the runtime.GOOS branch above can
+// take effect at package init. Once init is done the value is effectively
+// frozen — downstream packages (internal/team, internal/teammcp, cmd/wuphf)
+// copy this string into their own package-level vars at *their* init time
+// for direct test stubbing. Mutating DefaultTokenFile at runtime will NOT
+// propagate to those caches; if you need to redirect token reads in a test,
+// stub the consumer-side var directly (e.g. team.brokerTokenFilePath).
 var DefaultTokenFile = defaultTokenFile()
 
 func defaultTokenFile() string {
