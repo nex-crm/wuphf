@@ -14,7 +14,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -26,6 +28,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"golang.org/x/term"
 
 	"github.com/nex-crm/wuphf/internal/action"
 	"github.com/nex-crm/wuphf/internal/agent"
@@ -70,19 +74,6 @@ var (
 
 func nameWithPortSuffix(base string) string {
 	return nameWithPortSuffixForPort(base, brokeraddr.ResolvePort())
-}
-
-// isStdinInteractive reports whether stdin is connected to a real terminal.
-// Used to gate interactive prompts (e.g. the Nex install Y/n in LaunchWeb)
-// so non-interactive launches — SSH without -tt, scheduled tasks, PowerShell
-// Start-Process — don't take the empty-answer-as-yes branch and silently
-// shell out to global package installs the user never authorized.
-func isStdinInteractive() bool {
-	info, err := os.Stdin.Stat()
-	if err != nil {
-		return false
-	}
-	return info.Mode()&os.ModeCharDevice != 0
 }
 
 func nameWithPortSuffixForPort(base string, port int) string {
@@ -695,6 +686,17 @@ const (
 )
 
 func (l *Launcher) deliverMessageNotification(msg channelMessage) {
+	// demo_seed messages exist purely to make #general feel staffed on first
+	// paint; they must never wake an agent or burn an LLM call. Filter at
+	// the central delivery point (not just notifyAgentsLoop) so other
+	// callers — primeVisibleAgents, replays, future routes — can't bypass
+	// it. Today these don't actually route demo_seed targets because the
+	// lead is the From and Tagged is empty, but a future @all-default
+	// change would silently turn the demo seed into an LLM-burning
+	// broadcast. One filter, one place.
+	if msg.Kind == "demo_seed" {
+		return
+	}
 	immediate, delayed := l.notificationTargetsForMessage(msg)
 
 	// Debounce: use shorter cooldown for human/CEO messages, longer for agent-originated
@@ -2383,9 +2385,15 @@ func (l *Launcher) buildNotificationContext(channel, triggerMsgID, threadRootID 
 		return ""
 	}
 
-	// baseFilter excludes system messages, STATUS messages, and the trigger itself.
+	// baseFilter excludes system messages, STATUS messages, demo_seed posts,
+	// and the trigger itself. demo_seed lines are cosmetic onboarding-paint
+	// content (e.g. the lead presence line) and replaying them as prompt
+	// context would let agents treat fake activity as real history.
 	baseFilter := func(m channelMessage) bool {
 		if m.From == "system" {
+			return false
+		}
+		if m.Kind == "demo_seed" {
 			return false
 		}
 		if strings.TrimSpace(triggerMsgID) != "" && strings.TrimSpace(m.ID) == strings.TrimSpace(triggerMsgID) {
@@ -4727,50 +4735,7 @@ func (l *Launcher) LaunchWeb(webPort int) error {
 	// Offer to wire Nex when the user hasn't opted out and nex-cli isn't yet
 	// installed. `nex setup` handles detection and wiring for us — we just
 	// surface the prompt.
-	//
-	// When stdin is non-interactive (SSH without -tt, PowerShell Start-Process,
-	// scheduled tasks — common on Windows), Scanln returns EOF immediately
-	// with an empty answer. The Y/n default would treat that as "yes" and
-	// silently shell out to `npm install -g @nex-ai/nex@latest`, which is a
-	// global side-effect the user never authorized. Skip the prompt entirely
-	// in that case and default to "no" (matches the explicit --no-nex path).
-	if !config.ResolveNoNex() && !nex.IsInstalled() {
-		if !isStdinInteractive() {
-			fmt.Println()
-			fmt.Println("  Skipping Nex (non-interactive stdin). Pass --nex or run interactively to opt in.")
-			fmt.Println()
-		} else {
-			fmt.Println()
-			fmt.Print("  Connect Nex for memory and context? [Y/n] ")
-			var answer string
-			_, _ = fmt.Scanln(&answer)
-			answer = strings.TrimSpace(strings.ToLower(answer))
-			if answer == "" || answer == "y" || answer == "yes" {
-				fmt.Println()
-				fmt.Println("  Nex CLI not found. Installing...")
-				if _, installErr := setup.InstallLatestCLI(context.Background()); installErr != nil {
-					fmt.Printf("  Could not install: %v\n", installErr)
-					fmt.Println("  Continuing without Nex.")
-				}
-				if nexBin := nex.BinaryPath(); nexBin != "" {
-					cmd := exec.CommandContext(context.Background(), nexBin, "setup")
-					cmd.Stdin = os.Stdin
-					cmd.Stdout = os.Stdout
-					cmd.Stderr = os.Stderr
-					if err := cmd.Run(); err != nil {
-						fmt.Printf("  Setup did not complete: %v\n", err)
-						fmt.Println("  Continuing without Nex.")
-					} else {
-						fmt.Println("  Nex connected.")
-					}
-				}
-				fmt.Println()
-			} else {
-				fmt.Println("  Skipping Nex. Agents will work without organizational memory.")
-				fmt.Println()
-			}
-		}
-	}
+	l.maybeOfferNex()
 
 	mcpConfig, err := l.ensureMCPConfig()
 	if err != nil {
@@ -4815,7 +4780,16 @@ func (l *Launcher) LaunchWeb(webPort int) error {
 
 	l.broker.SetGenerateMemberFn(l.GenerateMemberTemplateFromPrompt)
 	l.broker.SetGenerateChannelFn(l.GenerateChannelTemplateFromPrompt)
-	l.broker.ServeWebUI(webPort)
+	if err := l.broker.ServeWebUI(webPort); err != nil {
+		// The broker is already running and the office PID file is on
+		// disk (above). On a port-bind failure we exit, so tear both
+		// down — leaving the broker accepting requests on a "wuphf has
+		// failed to start" path is worse than a clean exit, and a stale
+		// PID file would block the next launch attempt's writeOfficePID.
+		l.broker.Stop()
+		_ = clearOfficePIDFile()
+		return fmt.Errorf("web UI failed to start: %w\n\nIs port %d already in use? Try: wuphf --web-port %d", err, webPort, webPort+1)
+	}
 
 	// Default path: headless `claude --print` per turn. Anthropic re-sanctioned
 	// this invocation (OpenClaw policy note, 2026-04), so it runs on the user's
@@ -4843,18 +4817,133 @@ func (l *Launcher) LaunchWeb(webPort int) error {
 		go l.primeVisibleAgents()
 	}
 
-	webURL := fmt.Sprintf("http://localhost:%d", webPort)
+	// Use 127.0.0.1 in both the printed URL and the readiness probe so the
+	// dial target matches what the browser will request. localhost can
+	// resolve to ::1 first on IPv6-preferring setups, while ServeWebUI binds
+	// only to 127.0.0.1 — that mismatch reproduces ERR_CONNECTION_REFUSED
+	// even after the probe succeeds.
+	webAddr := fmt.Sprintf("127.0.0.1:%d", webPort)
+	webURL := fmt.Sprintf("http://%s", webAddr)
 	fmt.Printf("\n  Web UI:  %s\n", webURL)
 	fmt.Printf("  Broker:  %s\n", l.BrokerBaseURL())
 	fmt.Printf("  Press Ctrl+C to stop.\n\n")
 
 	if !l.noOpen {
-		openBrowser(webURL)
+		// Wait for the web server to actually accept connections before
+		// triggering the browser. Otherwise users on cold starts (and PH
+		// visitors clicking through `npx wuphf` for the first time) hit
+		// ERR_CONNECTION_REFUSED before the listener is ready. 5s is a
+		// generous ceiling: in practice the listener is up in milliseconds.
+		// Skip the open if the listener never came up — opening a dead URL
+		// just produces a confusing error page in the user's first second.
+		if waitForWebReady(webAddr, 5*time.Second) {
+			openBrowser(webURL)
+		} else {
+			fmt.Printf("  Web UI did not become reachable at %s within 5s; skipping browser auto-open.\n", webURL)
+		}
 	}
 
 	// Broker, web UI, and background goroutines own the process lifetime;
 	// Ctrl+C (default SIGINT) is the only exit path.
 	select {}
+}
+
+// maybeOfferNex offers to wire up Nex for memory/context when nex-cli
+// isn't already installed. Prints an explicit "skipping Nex" line when
+// stdin isn't a TTY (npx, pipes, CI, containers) — fmt.Scanln returns
+// empty in that case, which the prompt would have silently accepted as
+// "yes" and tried to install. Users can rerun `nex setup` later or set
+// WUPHF_NO_NEX=1 to suppress the offer.
+func (l *Launcher) maybeOfferNex() {
+	if config.ResolveNoNex() || nex.IsInstalled() {
+		return
+	}
+	if !stdinIsTTY() {
+		fmt.Println()
+		fmt.Println("  Skipping Nex (no interactive terminal). Run `nex setup` later to add memory.")
+		fmt.Println()
+		return
+	}
+	fmt.Println()
+	fmt.Print("  Connect Nex for memory and context? [Y/n] ")
+	var answer string
+	if _, err := fmt.Scanln(&answer); err != nil {
+		// fmt.Scanln has two distinct error shapes here:
+		//   - io.EOF: stdin was closed underneath us. By the time we
+		//     reach this branch stdinIsTTY() already returned true, so
+		//     EOF means the user explicitly hit Ctrl-D rather than
+		//     answering. Treat as a deliberate skip.
+		//   - any other error (most commonly "unexpected newline" from
+		//     a bare Enter): the prompt label says [Y/n], so capital-Y
+		//     is the visible default. Accept Enter as "yes" so the UX
+		//     contract matches the prompt.
+		if errors.Is(err, io.EOF) {
+			fmt.Println("  Skipping Nex. Agents will work without organizational memory.")
+			fmt.Println()
+			return
+		}
+		answer = ""
+	}
+	answer = strings.TrimSpace(strings.ToLower(answer))
+	if answer != "" && answer != "y" && answer != "yes" {
+		fmt.Println("  Skipping Nex. Agents will work without organizational memory.")
+		fmt.Println()
+		return
+	}
+	fmt.Println()
+	fmt.Println("  Nex CLI not found. Installing...")
+	if _, installErr := setup.InstallLatestCLI(context.Background()); installErr != nil {
+		fmt.Printf("  Could not install: %v\n", installErr)
+		fmt.Println("  Continuing without Nex.")
+	}
+	if nexBin := nex.BinaryPath(); nexBin != "" {
+		cmd := exec.CommandContext(context.Background(), nexBin, "setup")
+		cmd.Stdin = os.Stdin
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			fmt.Printf("  Setup did not complete: %v\n", err)
+			fmt.Println("  Continuing without Nex.")
+		} else {
+			fmt.Println("  Nex connected.")
+		}
+	}
+	fmt.Println()
+}
+
+// waitForWebReady polls addr until a TCP dial succeeds or the timeout
+// elapses. It exists because ServeWebUI returns immediately and the
+// listener can take a few hundred ms to come up — opening the browser
+// before then produces ERR_CONNECTION_REFUSED in the user's first
+// second of the product. Returns true when the listener accepted a
+// connection within the timeout, false otherwise. LaunchWeb gates
+// openBrowser on this return value, so a never-up listener results in
+// a printed "skipping browser auto-open" line rather than a dead URL.
+func waitForWebReady(addr string, timeout time.Duration) bool {
+	dialer := &net.Dialer{Timeout: 250 * time.Millisecond}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	for {
+		conn, err := dialer.DialContext(ctx, "tcp", addr)
+		if err == nil {
+			_ = conn.Close()
+			return true
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+}
+
+// stdinIsTTY reports whether os.Stdin is connected to a real terminal.
+// Uses golang.org/x/term so /dev/null (a char device but not a TTY) is
+// classified correctly — the original os.ModeCharDevice check let
+// `npx ... </dev/null` fall back to the auto-yes install path, which
+// is the cold-start bug this whole helper exists to prevent.
+func stdinIsTTY() bool {
+	return term.IsTerminal(int(os.Stdin.Fd()))
 }
 
 func openBrowser(url string) {

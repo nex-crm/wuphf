@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -100,7 +101,19 @@ func Load() (*State, error) {
 	}
 	var s State
 	if err := json.Unmarshal(data, &s); err != nil {
-		return nil, fmt.Errorf("onboarding: parse state: %w", err)
+		log.Printf("onboarding: corrupt state file, resetting to fresh state: %v", err)
+		fresh := &State{
+			Version:   currentStateVersion,
+			Checklist: DefaultChecklist(),
+		}
+		// Persist the recovered state so the next Load reads valid JSON
+		// instead of triggering this branch again on every call. Best-
+		// effort: a write failure here just means we'll log+recover again
+		// next time, which is the same as the pre-fix behavior.
+		if writeErr := Save(fresh); writeErr != nil {
+			log.Printf("onboarding: failed to overwrite corrupt state file: %v", writeErr)
+		}
+		return fresh, nil
 	}
 	// If the file was written by an older schema version, return a fresh state
 	// so the user re-runs onboarding rather than hitting subtle bugs.

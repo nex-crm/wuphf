@@ -513,7 +513,7 @@ jobs:
         working-directory: web/e2e
         env:
           WUPHF_E2E_BASE_URL: http://localhost:7891
-        run: bunx playwright test tests/wizard.spec.ts
+        run: bunx playwright test tests/wizard.spec.ts tests/wizard-error-states.spec.ts
       - name: Stop wuphf (wizard phase)
         if: always()
         run: |

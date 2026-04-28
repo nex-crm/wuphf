@@ -10,6 +10,8 @@
 !/docs/specs/**
 !/docs/evals/
 !/docs/evals/**
+!/docs/experiments/
+!/docs/experiments/**
 !/docs/REVOPS_TEST_PLAN.md
 /termwright-artifacts/
 .worktrees/
