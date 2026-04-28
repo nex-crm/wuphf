@@ -725,6 +725,13 @@ func allRequiredPrereqsOk(prereqs []prereqResult) bool {
 // in priority order. The order is the user-facing tiebreak when more than one
 // is reachable: ollama wins because it's the most common install, mlx-lm
 // second because it's Apple-Silicon-only, exo last because it's niche.
+//
+// These URLs intentionally duplicate the unexported defaultXxxBaseURL constants
+// in internal/provider/{ollama,mlx_lm,exo}.go. Importing the provider package
+// for a single string per runtime would balloon the cold-start dependency graph
+// for `wuphf` first-run, which has to feel snappy on a fresh `npx` install.
+// The provider defaults change rarely (last touched when the providers were
+// added); if they do change, update both call sites.
 var localRuntimeCandidates = []struct {
 	kind string
 	base string
