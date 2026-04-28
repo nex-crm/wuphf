@@ -1,12 +1,15 @@
 package team
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/nex-crm/wuphf/internal/upgradecheck"
 )
@@ -153,6 +156,474 @@ func TestUpgradeEndpoints_RejectNonGetMethods(t *testing.T) {
 			}
 			if got := resp.Header.Get("Allow"); got != "GET" {
 				t.Errorf("expected Allow: GET, got %q", got)
+			}
+		})
+	}
+}
+
+// pinDetectInstall swaps detectUpgradeInstallFn for the duration of the
+// test. Restores the original on cleanup so concurrent tests don't observe
+// each other's pin.
+func pinDetectInstall(t *testing.T, plan upgradeInstallPlan) {
+	t.Helper()
+	prev := detectUpgradeInstallFn
+	detectUpgradeInstallFn = func(_ context.Context) upgradeInstallPlan { return plan }
+	t.Cleanup(func() { detectUpgradeInstallFn = prev })
+}
+
+func TestHandleUpgradeRun_RequiresAuth(t *testing.T) {
+	b := newTestBroker(t)
+	srv := httptest.NewServer(b.requireAuth(b.handleUpgradeRun))
+	defer srv.Close()
+	req, _ := http.NewRequest(http.MethodPost, srv.URL, nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("expected 401 without token, got %d", resp.StatusCode)
+	}
+}
+
+func TestHandleUpgradeRun_RejectsGet(t *testing.T) {
+	// Mirrors the read-only endpoints' method gate: /upgrade/run is
+	// state-changing and must reject GET. Without this, a proxy that
+	// re-issues a GET on a 30x could trigger an unintended install.
+	b := newTestBroker(t)
+	srv := httptest.NewServer(b.requireAuth(b.handleUpgradeRun))
+	defer srv.Close()
+	req, _ := http.NewRequest(http.MethodGet, srv.URL, nil)
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Errorf("GET: expected 405, got %d", resp.StatusCode)
+	}
+	if got := resp.Header.Get("Allow"); got != "POST" {
+		t.Errorf("expected Allow: POST, got %q", got)
+	}
+}
+
+func TestHandleUpgradeRun_UnknownInstallMethodReturns200WithGuidance(t *testing.T) {
+	// When detection can't find a global or local install (source build,
+	// standalone download, broken npm), return 200 + install_method=
+	// "unknown" + a human error message so the banner can render the
+	// fallback path inline. We deliberately do NOT 4xx this — the
+	// frontend's .catch path treats non-2xx as "broker unreachable" and
+	// hides the banner, which would swallow the user-visible reason.
+	pinDetectInstall(t, upgradeInstallPlan{Method: "unknown"})
+	b := newTestBroker(t)
+	srv := httptest.NewServer(b.requireAuth(b.handleUpgradeRun))
+	defer srv.Close()
+	req, _ := http.NewRequest(http.MethodPost, srv.URL, nil)
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 200, got %d body=%s", resp.StatusCode, string(body))
+	}
+	var body upgradeRunResult
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.OK {
+		t.Errorf("expected ok=false on unknown install method, got %+v", body)
+	}
+	if body.InstallMethod != "unknown" {
+		t.Errorf("expected install_method=unknown, got %q", body.InstallMethod)
+	}
+	if !strings.Contains(body.Error, "npm install") {
+		// Lock the documented contract: the unknown-method response
+		// MUST include a copy-pasteable command in the error message
+		// so a user without an automated path still has the manual
+		// recipe one click away.
+		t.Errorf("unknown-method error should reference npm install, got %q", body.Error)
+	}
+}
+
+// pinRunCmd swaps runUpgradeCmdFn for the duration of the test. The fake
+// receives the install plan so assertions can verify the handler passes
+// through Args/WorkingDir correctly, and returns whatever (output, err)
+// pair the test wants the handler to observe.
+func pinRunCmd(t *testing.T, fake func(ctx context.Context, plan upgradeInstallPlan) ([]byte, error)) {
+	t.Helper()
+	prev := runUpgradeCmdFn
+	runUpgradeCmdFn = fake
+	t.Cleanup(func() { runUpgradeCmdFn = prev })
+}
+
+func TestHandleUpgradeRun_SuccessReturnsOKWithOutput(t *testing.T) {
+	// Happy path: the fake npm exits 0 with characteristic + wuphf@…
+	// output. Handler must surface ok=true, the install_method/command
+	// from detection, and the trimmed output.
+	pinDetectInstall(t, upgradeInstallPlan{
+		Method:  "global",
+		Args:    []string{"install", "-g", "wuphf@latest"},
+		Command: "npm install -g wuphf@latest",
+	})
+	pinRunCmd(t, func(_ context.Context, _ upgradeInstallPlan) ([]byte, error) {
+		return []byte("added 1 package in 2s\n+ wuphf@99.0.0\n"), nil
+	})
+	b := newTestBroker(t)
+	srv := httptest.NewServer(b.requireAuth(b.handleUpgradeRun))
+	defer srv.Close()
+	req, _ := http.NewRequest(http.MethodPost, srv.URL, nil)
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	var body upgradeRunResult
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !body.OK {
+		t.Errorf("expected ok=true, got %+v", body)
+	}
+	if body.InstallMethod != "global" {
+		t.Errorf("install_method=%q want global", body.InstallMethod)
+	}
+	if body.Command != "npm install -g wuphf@latest" {
+		t.Errorf("command=%q drift", body.Command)
+	}
+	if !strings.Contains(body.Output, "wuphf@99.0.0") {
+		t.Errorf("output should pass through unchanged on success, got %q", body.Output)
+	}
+	if body.Error != "" {
+		t.Errorf("expected empty error on success, got %q", body.Error)
+	}
+}
+
+func TestHandleUpgradeRun_FailureSurfacesError(t *testing.T) {
+	// Failure path: exec returns a real error (e.g. EACCES, ENOENT, or
+	// a non-zero npm exit). Handler must set ok=false and populate
+	// `error` with the underlying message so the banner can render the
+	// "needs sudo" / "npm not installed" copy distinctively.
+	pinDetectInstall(t, upgradeInstallPlan{
+		Method:  "global",
+		Args:    []string{"install", "-g", "wuphf@latest"},
+		Command: "npm install -g wuphf@latest",
+	})
+	pinRunCmd(t, func(_ context.Context, _ upgradeInstallPlan) ([]byte, error) {
+		return []byte("npm ERR! EACCES: permission denied\n"), &execError{msg: "exit status 243"}
+	})
+	b := newTestBroker(t)
+	srv := httptest.NewServer(b.requireAuth(b.handleUpgradeRun))
+	defer srv.Close()
+	req, _ := http.NewRequest(http.MethodPost, srv.URL, nil)
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	var body upgradeRunResult
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.OK {
+		t.Errorf("expected ok=false on exec error, got %+v", body)
+	}
+	if !strings.Contains(body.Output, "EACCES") {
+		t.Errorf("output should include npm stderr on failure, got %q", body.Output)
+	}
+	if !strings.Contains(body.Error, "exit status 243") {
+		t.Errorf("error should surface underlying exec error, got %q", body.Error)
+	}
+	if body.TimedOut {
+		t.Errorf("non-timeout failure must NOT set timed_out=true, got %+v", body)
+	}
+}
+
+func TestHandleUpgradeRun_TimeoutSetsTimedOutFlag(t *testing.T) {
+	// Timeout path: drive the broker-side runCtx to actually expire by
+	// shrinking upgradeRunTimeout to 1ms and having the fake block on
+	// the ctx until it cancels. The handler's
+	// errors.Is(runCtx.Err(), context.DeadlineExceeded) branch must
+	// then set timed_out=true and surface the timeout-specific message
+	// — distinct from a generic exec failure so the banner copy can
+	// distinguish "still running, just slow" from "outright failed."
+	prev := upgradeRunTimeout
+	upgradeRunTimeout = 1 * time.Millisecond
+	t.Cleanup(func() { upgradeRunTimeout = prev })
+
+	pinDetectInstall(t, upgradeInstallPlan{
+		Method:  "global",
+		Args:    []string{"install", "-g", "wuphf@latest"},
+		Command: "npm install -g wuphf@latest",
+	})
+	pinRunCmd(t, func(ctx context.Context, _ upgradeInstallPlan) ([]byte, error) {
+		<-ctx.Done() // honour the broker-owned ctx so runCtx.Err() trips
+		return nil, ctx.Err()
+	})
+	b := newTestBroker(t)
+	srv := httptest.NewServer(b.requireAuth(b.handleUpgradeRun))
+	defer srv.Close()
+	req, _ := http.NewRequest(http.MethodPost, srv.URL, nil)
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	defer resp.Body.Close()
+	var body upgradeRunResult
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.OK {
+		t.Errorf("expected ok=false on timeout, got %+v", body)
+	}
+	if !body.TimedOut {
+		t.Errorf("expected timed_out=true, got %+v", body)
+	}
+	if !strings.Contains(body.Error, "timed out") {
+		t.Errorf("expected timeout message, got %q", body.Error)
+	}
+}
+
+// execError is a lightweight stand-in for *exec.ExitError that satisfies the
+// `error` interface. We use it instead of running a real process so tests
+// don't depend on /usr/bin/false (or its absence) on the build host. The
+// handler treats this opaquely (only calls .Error()), so the
+// non-*exec.ExitError type is fine — locks the contract that future
+// changes must NOT type-assert on *exec.ExitError without updating tests.
+type execError struct{ msg string }
+
+func (e *execError) Error() string { return e.msg }
+
+func TestHandleUpgradeRun_ConcurrentRunsSinglefligted(t *testing.T) {
+	// Two parallel POSTs to /upgrade/run must NOT both spawn npm — the
+	// first wins, the second gets an "already running" error. Without
+	// this guard, two browser tabs hammering install simultaneously
+	// could leave node_modules in a partial-extract state. Drives a
+	// fake `runUpgradeCmdFn` that blocks on a channel so the second
+	// arrival lands while the first is still in flight.
+	pinDetectInstall(t, upgradeInstallPlan{
+		Method:  "global",
+		Args:    []string{"install", "-g", "wuphf@latest"},
+		Command: "npm install -g wuphf@latest",
+	})
+	release := make(chan struct{})
+	pinRunCmd(t, func(_ context.Context, _ upgradeInstallPlan) ([]byte, error) {
+		<-release // hold the leader inside the handler
+		return []byte("done"), nil
+	})
+
+	b := newTestBroker(t)
+	srv := httptest.NewServer(b.requireAuth(b.handleUpgradeRun))
+	defer srv.Close()
+
+	type result struct {
+		body upgradeRunResult
+		err  error
+	}
+	results := make(chan result, 2)
+	send := func() {
+		req, _ := http.NewRequest(http.MethodPost, srv.URL, strings.NewReader("{}"))
+		req.Header.Set("Authorization", "Bearer "+b.Token())
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			results <- result{err: err}
+			return
+		}
+		defer resp.Body.Close()
+		var body upgradeRunResult
+		_ = json.NewDecoder(resp.Body).Decode(&body)
+		results <- result{body: body}
+	}
+
+	go send()
+	// Tiny synchronisation gap: let the first request reach the
+	// runUpgradeCmdFn (where it blocks) before firing the second. We
+	// avoid time.Sleep — instead, poll the in-flight flag the handler
+	// flips on entry. This is the only deterministic signal we have
+	// short of intercepting the handler itself.
+	for !b.upgradeRunInFlight.Load() {
+		// Yield without sleeping. If the leader never sets the flag
+		// the test times out at the channel receive below — that's
+		// the right failure mode.
+	}
+	go send()
+
+	// Collect the loser first — it returns immediately. The leader
+	// stays blocked until we close `release`.
+	first := <-results
+	if first.err != nil {
+		t.Fatalf("loser: %v", first.err)
+	}
+	if first.body.OK {
+		t.Errorf("loser must be ok=false (got %+v)", first.body)
+	}
+	if !strings.Contains(first.body.Error, "already running") {
+		t.Errorf("loser error should mention 'already running', got %q", first.body.Error)
+	}
+	close(release) // unblock the leader
+	second := <-results
+	if second.err != nil {
+		t.Fatalf("leader: %v", second.err)
+	}
+	if !second.body.OK {
+		t.Errorf("leader must be ok=true (got %+v)", second.body)
+	}
+}
+
+func TestHandleUpgradeCheck_IncludesInstallMethod(t *testing.T) {
+	// The chip's text is set from /upgrade-check's install_command so
+	// the click target's label matches what /upgrade/run would actually
+	// execute. This test pins detection to "local" and asserts the
+	// served JSON forwards both fields. Without this, the chip silently
+	// reverts to the hard-coded `npm install -g …` fallback even when
+	// the broker would run the local-install variant.
+	resetUpgradeCaches(t)
+	pinDetectInstall(t, upgradeInstallPlan{
+		Method:     "local",
+		Command:    "npm install wuphf@latest",
+		WorkingDir: "/workspace/some-app",
+	})
+	// Pre-seed upgradecheck cache with a happy result so the handler
+	// doesn't try to hit npm during the test.
+	upgradeCheckCache.Store(&upgradeCheckCacheEntry{
+		res: upgradecheck.Result{
+			Current:          "0.83.7",
+			Latest:           "0.83.10",
+			UpgradeAvailable: true,
+			UpgradeCommand:   "npm install -g wuphf@latest",
+		},
+		storeAt: time.Now(),
+	})
+
+	b := newTestBroker(t)
+	srv := httptest.NewServer(b.requireAuth(b.handleUpgradeCheck))
+	defer srv.Close()
+	req, _ := http.NewRequest(http.MethodGet, srv.URL, nil)
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	defer resp.Body.Close()
+	var body struct {
+		Current        string `json:"current"`
+		Latest         string `json:"latest"`
+		InstallMethod  string `json:"install_method"`
+		InstallCommand string `json:"install_command"`
+		UpgradeCommand string `json:"upgrade_command"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.InstallMethod != "local" {
+		t.Errorf("install_method=%q want local", body.InstallMethod)
+	}
+	if body.InstallCommand != "npm install wuphf@latest" {
+		t.Errorf("install_command=%q want local-install variant", body.InstallCommand)
+	}
+	// upgrade_command stays as the canonical doc-string variant —
+	// install_command is the per-host truthful one. They MAY differ.
+	if body.UpgradeCommand != "npm install -g wuphf@latest" {
+		t.Errorf("upgrade_command should keep its canonical value, got %q", body.UpgradeCommand)
+	}
+}
+
+func TestPkgDeclaresWuphf(t *testing.T) {
+	cases := []struct {
+		name string
+		json string
+		want bool
+	}{
+		{
+			name: "declared in dependencies",
+			json: `{"name":"app","dependencies":{"wuphf":"^0.83.0","react":"19"}}`,
+			want: true,
+		},
+		{
+			name: "declared in devDependencies",
+			json: `{"name":"app","devDependencies":{"wuphf":"^0.83.0"}}`,
+			want: true,
+		},
+		{
+			name: "absent — must NOT misfire as local install (the $HOME risk)",
+			json: `{"name":"app","dependencies":{"react":"19"}}`,
+			want: false,
+		},
+		{
+			name: "peerDependencies do NOT count (npm install <pkg>@latest only updates real deps)",
+			json: `{"name":"app","peerDependencies":{"wuphf":"^0.83.0"}}`,
+			want: false,
+		},
+		{
+			name: "malformed package.json — refuse rather than crash",
+			json: `{not valid json`,
+			want: false,
+		},
+		{
+			name: "empty object",
+			json: `{}`,
+			want: false,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := pkgDeclaresWuphf([]byte(c.json)); got != c.want {
+				t.Errorf("pkgDeclaresWuphf(%q)=%v want %v", c.json, got, c.want)
+			}
+		})
+	}
+}
+
+func TestTruncateForJSON(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		cap  int
+		want string
+	}{
+		{"shorter than cap untouched", "hello", 100, "hello"},
+		{"exact cap untouched", "hello", 5, "hello"},
+		{
+			name: "longer than cap keeps tail with sentinel",
+			in:   "abcdefghij",
+			cap:  5,
+			want: "…[truncated]…\nfghij",
+		},
+		{
+			// UTF-8 boundary: "é" is 0xC3 0xA9 (two bytes). With cap=4,
+			// naive byte-slicing of "ééééé" (10 bytes) would start at
+			// byte 6 — which is the 0xA9 continuation of the second
+			// "é", producing "\xa9éé" (invalid UTF-8 leading byte).
+			// truncateForJSON must round forward to the next valid
+			// leading byte so the output starts on a complete rune.
+			name: "rounds forward past UTF-8 continuation byte",
+			in:   "ééééé", // 10 bytes
+			cap:  4,
+			want: "…[truncated]…\néé", // starts at the third "é" (byte 6→6 is start, but byte 6 is leading 0xC3 → no skip needed) — actually picks 4 trailing bytes = "éé"
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := truncateForJSON(c.in, c.cap)
+			if got != c.want {
+				t.Errorf("truncateForJSON(%q,%d)=%q want %q", c.in, c.cap, got, c.want)
+			}
+			// Round-trip: the result must always be valid UTF-8 so
+			// the JSON encoder doesn't replace bytes with U+FFFD.
+			if !utf8.ValidString(got) {
+				t.Errorf("output is not valid UTF-8: %q", got)
 			}
 		})
 	}

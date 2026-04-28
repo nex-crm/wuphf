@@ -913,3 +913,25 @@ export function resetWorkspace() {
 export function shredWorkspace() {
   return postWithTimeout<WorkspaceWipeResult>("/workspace/shred", {}, 20_000);
 }
+
+// UpgradeRunResult mirrors broker.upgradeRunResult — keep field names in
+// sync with internal/team/broker.go so a future rename here surfaces a TS
+// error against the canonical wire shape.
+export interface UpgradeRunResult {
+  ok: boolean;
+  install_method: "global" | "local" | "unknown";
+  command?: string;
+  working_dir?: string;
+  output?: string;
+  error?: string;
+  timed_out?: boolean;
+}
+
+// runUpgrade triggers `npm install [-g] wuphf@latest` on the host that the
+// broker is running on. The 130s timeout is just above the broker-side
+// upgradeRunTimeout (120s) so the client gives the server enough room to
+// surface its own deadline error instead of failing first with a generic
+// "fetch timed out".
+export function runUpgrade() {
+  return postWithTimeout<UpgradeRunResult>("/upgrade/run", {}, 130_000);
+}

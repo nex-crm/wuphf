@@ -580,6 +580,14 @@ type Broker struct {
 	// token. Guarded by b.mu. See skill_crud_endpoints.go for GC semantics.
 	recentlyRejectedSkills map[string]rejectedSkillSnapshot
 
+	// upgradeRunInFlight serialises POST /upgrade/run so two parallel
+	// clicks (or two browser tabs racing) cannot launch concurrent
+	// `npm install` against the same node_modules. npm's own lockfile
+	// usually recovers, but we've seen partial-extract corruption when
+	// two installs target the same prefix simultaneously — this guard
+	// is the cheap belt to npm's suspenders.
+	upgradeRunInFlight atomic.Bool
+
 	// statePath is the on-disk broker-state.json path bound at construction.
 	// NewBrokerAt(path) sets this directly; NewBroker() resolves
 	// defaultBrokerStatePath() once and pins the result. A later-arriving
@@ -1553,6 +1561,7 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/version", b.handleVersion)
 	mux.HandleFunc("/upgrade-check", b.requireAuth(b.handleUpgradeCheck))
 	mux.HandleFunc("/upgrade-changelog", b.requireAuth(b.handleUpgradeChangelog))
+	mux.HandleFunc("/upgrade/run", b.requireAuth(b.handleUpgradeRun))
 	mux.HandleFunc("/session-mode", b.requireAuth(b.handleSessionMode))
 	mux.HandleFunc("/focus-mode", b.requireAuth(b.handleFocusMode))
 	mux.HandleFunc("/messages", b.requireAuth(b.handleMessages))
@@ -4796,23 +4805,37 @@ func (b *Broker) handleUpgradeCheck(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	// Run install detection so the banner can render the EXACT command
+	// that POST /upgrade/run would execute (global vs local). Without
+	// this, the chip showed "npm install -g wuphf@latest" universally
+	// even when the broker would actually run `npm install wuphf@latest`
+	// in a project dir — a misleading click target. Detection is
+	// filesystem-bound (one Stat for global, walk-up for local), capped
+	// in detectUpgradeInstall by upgradeRunDetectTime.
+	plan := detectUpgradeInstallFn(r.Context())
+	payload := map[string]any{
+		"current":           res.Current,
+		"latest":            res.Latest,
+		"upgrade_available": res.UpgradeAvailable,
+		"is_dev_build":      res.IsDevBuild,
+		"compare_url":       res.CompareURL,
+		// upgrade_command stays as the canonical "what we'd recommend
+		// in docs" string; install_command is what the click ACTUALLY
+		// runs on this host, so the banner can render the truthful
+		// label. They MAY differ — local installs prefer
+		// `npm install wuphf@latest`.
+		"upgrade_command": res.UpgradeCommand,
+		"install_method":  plan.Method,
+		"install_command": plan.Command,
+	}
 	if err != nil {
 		// Partial result (Current AND Latest populated, but something
 		// else failed) — degrade gracefully with 200 + error field
 		// so the banner can render nothing without a console-spamming
 		// 5xx for a non-critical check.
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"current":           res.Current,
-			"latest":            res.Latest,
-			"upgrade_available": res.UpgradeAvailable,
-			"is_dev_build":      res.IsDevBuild,
-			"compare_url":       res.CompareURL,
-			"upgrade_command":   res.UpgradeCommand,
-			"error":             err.Error(),
-		})
-		return
+		payload["error"] = err.Error()
 	}
-	_ = json.NewEncoder(w).Encode(res)
+	_ = json.NewEncoder(w).Encode(payload)
 }
 
 // handleUpgradeChangelog proxies the GitHub compare API for the same reasons
@@ -4860,6 +4883,278 @@ func (b *Broker) handleUpgradeChangelog(w http.ResponseWriter, r *http.Request) 
 // MIRRORED in web/src/components/layout/upgradeBanner.utils.ts as
 // VERSION_RE — keep them in sync so a future tightening doesn't drift.
 var upgradeVersionParam = regexp.MustCompile(`^v?\d+(\.\d+){1,3}(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$`)
+
+// ── Upgrade-run ──────────────────────────────────────────────────────────
+//
+// POST /upgrade/run executes whichever `npm install` flavour matches how the
+// running wuphf was installed:
+//
+//   • global (npm install -g wuphf)  → `npm install -g wuphf@latest`
+//   • local  (project devDep)        → `npm install wuphf@latest` in that dir
+//   • source build / standalone      → 400 with install_method="unknown"
+//
+// The detection runs `npm root -g` and walks up from the caller's cwd
+// looking for `node_modules/wuphf/package.json`, so we never lie about which
+// command we'd run. The label rendered by the banner is whatever this
+// detection picks — banner cannot drift from server reality.
+
+const (
+	upgradeRunOutputCap  = 64 << 10 // truncate captured npm output at 64 KiB to bound response size
+	upgradeRunDetectTime = 5 * time.Second
+)
+
+// upgradeRunTimeout caps the npm install at 120s. Declared as a var so
+// tests can reduce it to a few milliseconds and exercise the timed-out
+// branch deterministically; production never mutates it.
+var upgradeRunTimeout = 120 * time.Second
+
+type upgradeRunResult struct {
+	OK            bool   `json:"ok"`
+	InstallMethod string `json:"install_method"`        // "global", "local", or "unknown"
+	Command       string `json:"command,omitempty"`     // human-readable rendered cmd (e.g. "npm install -g wuphf@latest")
+	WorkingDir    string `json:"working_dir,omitempty"` // for local installs, the project dir we ran in
+	Output        string `json:"output,omitempty"`      // combined stdout+stderr, truncated
+	Error         string `json:"error,omitempty"`       // surfaces non-zero exit / spawn failure / detection failure
+	TimedOut      bool   `json:"timed_out,omitempty"`
+}
+
+// upgradeInstallPlan is what `detectUpgradeInstall` returns: the args we'd
+// hand to exec.Command and the human-readable rendering for the banner.
+type upgradeInstallPlan struct {
+	Method     string   // "global" | "local" | "unknown"
+	Args       []string // e.g. ["install", "-g", "wuphf@latest"]; empty when Method=="unknown"
+	WorkingDir string   // cwd to run npm in (project root for local installs; empty for global)
+	Command    string   // human rendering (so the banner can show exactly what runs)
+}
+
+// detectUpgradeInstallFn is the seam tests use to pin a synthetic install
+// plan without shelling out to `npm root -g`. Production points at the real
+// implementation; broker_upgrade_test.go can swap it via t.Cleanup-restored
+// assignment to drive the unknown / global / local handler paths
+// deterministically.
+var detectUpgradeInstallFn = detectUpgradeInstall
+
+// runUpgradeCmdFn is the seam tests use to drive npm-success / npm-failure /
+// npm-timeout paths without shelling out. Returns the combined stdout+stderr
+// and the underlying exec error (if any). Tests swap this to assert the
+// handler maps results to the wire shape correctly. Production runs npm.
+var runUpgradeCmdFn = runUpgradeCmd
+
+func runUpgradeCmd(ctx context.Context, plan upgradeInstallPlan) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, "npm", plan.Args...)
+	if plan.WorkingDir != "" {
+		cmd.Dir = plan.WorkingDir
+	}
+	return cmd.CombinedOutput()
+}
+
+// detectUpgradeInstall figures out how wuphf is installed on this machine.
+// Order: global wins over local (most users `npm install -g`); local fallback
+// catches the project-scoped install case.
+//
+// Local-install detection is bounded: we walk up from cwd looking for the
+// FIRST ancestor with a `package.json`, treat that as the project root, and
+// only accept it as a local install if (a) it declares wuphf in
+// dependencies/devDependencies AND (b) `node_modules/wuphf/package.json`
+// exists there. Without these guards, a stray `~/node_modules/wuphf` from
+// some exotic Volta/nvm setup would have us run `npm install wuphf@latest`
+// in `$HOME` — visibly mutating the user's home directory. The guards make
+// the detection refuse to misfire instead of mis-installing.
+func detectUpgradeInstall(ctx context.Context) upgradeInstallPlan {
+	if _, err := exec.LookPath("npm"); err != nil {
+		return upgradeInstallPlan{Method: "unknown"}
+	}
+	// `npm root -g` prints the global node_modules path. Short timeout so a
+	// borked npm config can't block the whole detect for the upstream budget.
+	rootCtx, cancel := context.WithTimeout(ctx, upgradeRunDetectTime)
+	defer cancel()
+	if out, err := exec.CommandContext(rootCtx, "npm", "root", "-g").Output(); err == nil {
+		globalRoot := strings.TrimSpace(string(out))
+		if globalRoot != "" {
+			if _, err := os.Stat(filepath.Join(globalRoot, "wuphf", "package.json")); err == nil {
+				return upgradeInstallPlan{
+					Method:  "global",
+					Args:    []string{"install", "-g", "wuphf@latest"},
+					Command: "npm install -g wuphf@latest",
+				}
+			}
+		}
+	}
+	// Local install: walk up from cwd. The first ancestor that has a
+	// package.json IS the project root (npm convention). Stop there
+	// regardless of whether wuphf is in node_modules — going further
+	// would risk falsely claiming a parent project's package.json
+	// (or worse, $HOME) is the install target. The 32-level cap is a
+	// belt-and-suspenders guard against a runaway symlink loop.
+	cwd, err := os.Getwd()
+	if err == nil {
+		dir := cwd
+		for i := 0; i < 32; i++ {
+			projectPkg := filepath.Join(dir, "package.json")
+			if data, err := os.ReadFile(projectPkg); err == nil {
+				// We're at a project root. Local install only counts
+				// if THIS project declares wuphf — otherwise we'd run
+				// `npm install` in someone else's package.json, which
+				// would silently add wuphf as a new dependency.
+				if pkgDeclaresWuphf(data) {
+					candidate := filepath.Join(dir, "node_modules", "wuphf", "package.json")
+					if _, err := os.Stat(candidate); err == nil {
+						return upgradeInstallPlan{
+							Method:     "local",
+							Args:       []string{"install", "wuphf@latest"},
+							WorkingDir: dir,
+							Command:    "npm install wuphf@latest",
+						}
+					}
+				}
+				// Found a project root but it doesn't declare wuphf —
+				// stop walking. Continuing into a grandparent project
+				// would mis-attribute the install.
+				break
+			}
+			parent := filepath.Dir(dir)
+			if parent == dir {
+				break
+			}
+			dir = parent
+		}
+	}
+	return upgradeInstallPlan{Method: "unknown"}
+}
+
+// pkgDeclaresWuphf reports whether the given package.json bytes declare
+// wuphf in dependencies or devDependencies. Robust to extra unknown fields
+// (peerDependencies, optionalDependencies, etc. — those do NOT count for
+// `npm install <pkg>@latest` semantics, which only updates real deps).
+func pkgDeclaresWuphf(data []byte) bool {
+	var pkg struct {
+		Dependencies    map[string]json.RawMessage `json:"dependencies"`
+		DevDependencies map[string]json.RawMessage `json:"devDependencies"`
+	}
+	if err := json.Unmarshal(data, &pkg); err != nil {
+		return false
+	}
+	if _, ok := pkg.Dependencies["wuphf"]; ok {
+		return true
+	}
+	if _, ok := pkg.DevDependencies["wuphf"]; ok {
+		return true
+	}
+	return false
+}
+
+// handleUpgradeRun executes the matching install command and returns the
+// captured output. Auth-required, POST-only. Output is truncated to
+// upgradeRunOutputCap so a chatty npm log can't bloat the JSON response.
+//
+// Concurrency: a process-wide single-flight (atomic.Bool) refuses overlapping
+// runs. Two browser tabs racing to click "install" would otherwise spawn
+// concurrent `npm install` against the same node_modules and risk a partial-
+// extract corruption. The second arrival gets a JSON error and the first
+// run remains the source of truth.
+func (b *Broker) handleUpgradeRun(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", "POST")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	// Body is required to be JSON {} by the client, but we don't read
+	// any fields from it. Still bound it so a misbehaving (authenticated)
+	// caller can't inflate broker memory by streaming a large body —
+	// MaxBytesReader trips the read at 1 KiB and returns an error to
+	// any subsequent Read. We don't actually consume the body here; the
+	// limit just caps what the HTTP server has to buffer before we
+	// respond.
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<10)
+	defer r.Body.Close()
+	w.Header().Set("Content-Type", "application/json")
+
+	// Single-flight gate. CompareAndSwap returns false if a run is
+	// already underway; the second arrival short-circuits with a 200 +
+	// error so the banner can render "another install is running" copy
+	// without breaking the .catch / non-2xx path.
+	if !b.upgradeRunInFlight.CompareAndSwap(false, true) {
+		_ = json.NewEncoder(w).Encode(upgradeRunResult{
+			OK:    false,
+			Error: "an upgrade is already running on this broker — wait for it to finish",
+		})
+		return
+	}
+	defer b.upgradeRunInFlight.Store(false)
+
+	plan := detectUpgradeInstallFn(r.Context())
+	if plan.Method == "unknown" {
+		// 200 so the banner can render the message inline without
+		// triggering a console-spamming 4xx for what is fundamentally
+		// "we can't help here, here's why."
+		_ = json.NewEncoder(w).Encode(upgradeRunResult{
+			OK:            false,
+			InstallMethod: plan.Method,
+			Error:         "Could not detect how wuphf was installed (no npm, or wuphf isn't under a global/local node_modules). Try `npm install -g wuphf@latest` from a terminal.",
+		})
+		return
+	}
+
+	// Use a broker-owned ctx so a CLIENT cancellation (page nav, tab
+	// close) does not abort npm mid-install — interrupting npm between
+	// download and rename can leave a half-extracted node_modules entry
+	// that the next launch trips over. Process-level termination
+	// (SIGKILL, OS shutdown) can still leave a partial install — npm's
+	// own atomic-rename usually recovers, but this is not a hard
+	// guarantee. The 120s ceiling caps a runaway without being so
+	// short it trips on a typical 5-30s install.
+	runCtx, cancel := context.WithTimeout(context.Background(), upgradeRunTimeout)
+	defer cancel()
+
+	// runUpgradeCmdFn merges stdout+stderr in invocation order — npm
+	// progress hits stderr, the final `+ wuphf@x.y.z` line hits stdout,
+	// and the banner shows them in the order the user would see in a
+	// terminal. Capped via slicing below so a verbose log can't bloat.
+	out, err := runUpgradeCmdFn(runCtx, plan)
+	output := truncateForJSON(string(out), upgradeRunOutputCap)
+
+	res := upgradeRunResult{
+		InstallMethod: plan.Method,
+		Command:       plan.Command,
+		WorkingDir:    plan.WorkingDir,
+		Output:        output,
+	}
+	if err != nil {
+		res.OK = false
+		// runCtx.Err() distinguishes a real timeout from the underlying
+		// process exit error — npm exits non-zero on EACCES too, and we
+		// want the banner to tell those apart so users see "needs sudo"
+		// vs "took too long" with separate copy.
+		if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
+			res.TimedOut = true
+			res.Error = fmt.Sprintf("npm install timed out after %s", upgradeRunTimeout)
+		} else {
+			res.Error = err.Error()
+		}
+	} else {
+		res.OK = true
+	}
+	_ = json.NewEncoder(w).Encode(res)
+}
+
+// truncateForJSON keeps the trailing `cap` bytes of `s` (the most useful
+// diagnostic — npm puts the error line and the final `+ wuphf@x.y.z`
+// line at the bottom) and prepends a sentinel marking the truncation.
+// Rounds the cut point forward to the next valid UTF-8 sequence start so
+// we don't ship a leading orphan continuation byte that would render as
+// U+FFFD on the client.
+func truncateForJSON(s string, cap int) string {
+	if len(s) <= cap {
+		return s
+	}
+	start := len(s) - cap
+	for start < len(s) && s[start]&0xC0 == 0x80 {
+		// 10xxxxxx: continuation byte. Skip until we land on a
+		// leading byte (0xxxxxxx, 110xxxxx, 1110xxxx, 11110xxx).
+		start++
+	}
+	return "…[truncated]…\n" + s[start:]
+}
 
 // ── Upgrade-check caching ─────────────────────────────────────────────────
 //
