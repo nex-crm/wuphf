@@ -1212,6 +1212,7 @@ function SetupStep({
           </div>
         ) : prereqsError ? (
           <div
+            data-testid="prereqs-error-banner"
             style={{
               fontSize: 12,
               color: "var(--danger-500, #c33)",
@@ -1249,6 +1250,7 @@ function SetupStep({
                 <button
                   key={spec.label}
                   className={classes}
+                  data-testid={`setup-runtime-tile-${spec.label}`}
                   onClick={() => {
                     if (!selectable) return;
                     onToggleRuntime(spec.label);
@@ -1759,6 +1761,7 @@ function ReadyStep({
       {submitError && (
         <div
           role="alert"
+          data-testid="onboarding-submit-error"
           style={{
             fontSize: 13,
             color: "var(--danger-500, #c33)",
@@ -1781,6 +1784,7 @@ function ReadyStep({
         <div className="wizard-nav-right">
           <button
             className="btn btn-primary"
+            data-testid="onboarding-submit-button"
             onClick={taskText.trim().length === 0 ? onSkip : onSubmit}
             disabled={submitting}
             type="button"

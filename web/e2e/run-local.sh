@@ -148,7 +148,7 @@ run_wizard_phase() {
   start_wuphf "wizard"
   # Wizard-phase specs: anything that needs the unseeded onboarding flow.
   echo "[run-local] running wizard-phase specs"
-  (cd web/e2e && WUPHF_E2E_BASE_URL="http://localhost:${web_port}" bunx playwright test tests/wizard.spec.ts tests/local-llm-onboarding.spec.ts)
+  (cd web/e2e && WUPHF_E2E_BASE_URL="http://localhost:${web_port}" bunx playwright test tests/wizard.spec.ts tests/wizard-error-states.spec.ts tests/local-llm-onboarding.spec.ts)
   stop_wuphf
 }
 
