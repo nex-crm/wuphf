@@ -289,3 +289,131 @@ html[data-theme="noir-gold"] .modal-card {
   border: 1px solid var(--border);
   color: var(--text);
 }
+
+/* ─── Sidebar section breaks — video-game menu style ───────────────
+   Replaces the flat border-top between sections with a centered gold
+   diamond on a gradient hairline ( ◆ ), and gives each section title
+   a vertical gold "blade" marker on its left edge. Scoped to noir-gold
+   so the nex themes keep their flat dividers. */
+
+html[data-theme="noir-gold"] .sidebar .sidebar-section + .sidebar-section,
+html[data-theme="noir-gold"] .sidebar .sidebar-agents + .sidebar-section,
+html[data-theme="noir-gold"] .sidebar .sidebar-channels + .sidebar-section,
+html[data-theme="noir-gold"] .sidebar .sidebar-apps + .sidebar-section,
+html[data-theme="noir-gold"] .sidebar .sidebar-collapsible + .sidebar-section {
+  border-top: none;
+  position: relative;
+  padding-top: 24px;
+  margin-top: 6px;
+}
+
+/* Gold gradient hairline that runs the width of the divider */
+html[data-theme="noir-gold"] .sidebar .sidebar-section + .sidebar-section::after,
+html[data-theme="noir-gold"] .sidebar .sidebar-agents + .sidebar-section::after,
+html[data-theme="noir-gold"] .sidebar .sidebar-channels + .sidebar-section::after,
+html[data-theme="noir-gold"] .sidebar .sidebar-apps + .sidebar-section::after,
+html[data-theme="noir-gold"] .sidebar .sidebar-collapsible + .sidebar-section::after {
+  content: "";
+  position: absolute;
+  top: 10px;
+  left: 14px;
+  right: 14px;
+  height: 1px;
+  background: linear-gradient(
+    to right,
+    transparent 0%,
+    rgba(92, 68, 19, 0.6) 12%,
+    var(--gold-500) 48%,
+    var(--gold-400) 52%,
+    rgba(92, 68, 19, 0.6) 88%,
+    transparent 100%
+  );
+  pointer-events: none;
+}
+
+/* Centered diamond ornament — sits ON the hairline */
+html[data-theme="noir-gold"] .sidebar .sidebar-section + .sidebar-section::before,
+html[data-theme="noir-gold"] .sidebar .sidebar-agents + .sidebar-section::before,
+html[data-theme="noir-gold"] .sidebar .sidebar-channels + .sidebar-section::before,
+html[data-theme="noir-gold"] .sidebar .sidebar-apps + .sidebar-section::before,
+html[data-theme="noir-gold"] .sidebar .sidebar-collapsible + .sidebar-section::before {
+  content: "◆";
+  position: absolute;
+  top: 1px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 9px;
+  line-height: 1;
+  color: var(--gold-300);
+  background: var(--nex-sidebar);
+  padding: 4px 10px;
+  text-shadow:
+    0 0 4px rgba(240, 199, 94, 0.55),
+    0 0 8px rgba(201, 162, 39, 0.35);
+  z-index: 1;
+  pointer-events: none;
+}
+
+/* Section title — blade marker on the left + JRPG-ish small caps */
+html[data-theme="noir-gold"] .sidebar .sidebar-section-title,
+html[data-theme="noir-gold"] .sidebar .sidebar-section-toggle {
+  position: relative;
+  padding-left: 18px;
+  letter-spacing: 0.14em;
+  font-weight: 700;
+  text-transform: uppercase;
+  font-size: 10px;
+  color: var(--gold-200);
+}
+
+html[data-theme="noir-gold"] .sidebar .sidebar-section-toggle::before,
+html[data-theme="noir-gold"] .sidebar .sidebar-section-title::before {
+  content: "";
+  position: absolute;
+  left: 6px;
+  top: 4px;
+  bottom: 4px;
+  width: 2px;
+  background: linear-gradient(
+    to bottom,
+    var(--gold-200) 0%,
+    var(--gold-400) 50%,
+    var(--gold-700) 100%
+  );
+  border-radius: 1px;
+  box-shadow: 0 0 4px rgba(201, 162, 39, 0.5);
+}
+
+/* Hover: gleam intensifies + title brightens */
+html[data-theme="noir-gold"] .sidebar .sidebar-section-toggle:hover {
+  color: var(--gold-50);
+}
+html[data-theme="noir-gold"] .sidebar .sidebar-section-toggle:hover::before {
+  background: linear-gradient(
+    to bottom,
+    var(--gold-100) 0%,
+    var(--gold-300) 50%,
+    var(--gold-500) 100%
+  );
+  box-shadow: 0 0 6px rgba(240, 199, 94, 0.75);
+}
+
+/* Collapsed section: dim the blade slightly so it reads "closed" */
+html[data-theme="noir-gold"] .sidebar .sidebar-section.is-collapsed .sidebar-section-toggle::before {
+  background: linear-gradient(
+    to bottom,
+    var(--gold-600) 0%,
+    var(--gold-700) 50%,
+    var(--gold-900) 100%
+  );
+  box-shadow: none;
+  opacity: 0.6;
+}
+
+/* Chevron color matches the blade */
+html[data-theme="noir-gold"] .sidebar .sidebar-section-toggle svg {
+  color: var(--gold-400);
+}
+html[data-theme="noir-gold"] .sidebar .sidebar-section-toggle:hover svg {
+  color: var(--gold-200);
+}
