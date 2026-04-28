@@ -13,13 +13,15 @@ package team
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
+
+	"github.com/nex-crm/wuphf/internal/provider"
 )
 
 // stageBLLMProvider is the small interface SkillSynthesizer uses to ask an
@@ -52,26 +54,57 @@ func NewDefaultStageBLLMProvider(b *Broker) *defaultStageBLLMProvider {
 	return &defaultStageBLLMProvider{broker: b}
 }
 
-// SynthesizeSkill is the canonical entry point. It builds the system + user
-// prompts, sends them to the LLM, and decodes the JSON response into a
-// SkillFrontmatter + body. Today it returns ("not-a-skill") so Stage B is a
-// no-op; live wiring lands when the broker LLM provider abstraction is
-// finalised.
+// SynthesizeSkill builds the system + user prompts, calls the configured LLM
+// provider via provider.RunConfiguredOneShot, and decodes the JSON response
+// into a SkillFrontmatter + body pair.
 //
-// TODO(stage-b): wire to the real LLM provider abstraction (see
-// internal/team/headless_*.go for patterns). Until then the provider
-// surfaces the correctly-assembled prompts but performs no round-trip.
+// Graceful fallback: if the LLM call fails (missing API key, network error,
+// parse error) SynthesizeSkill returns a non-nil error so the caller can
+// log the failure and skip this candidate cleanly — no panic, no silent
+// no-op. The timeout is shared with Stage A: WUPHF_SKILL_LLM_TIMEOUT
+// (default 30s).
 func (p *defaultStageBLLMProvider) SynthesizeSkill(ctx context.Context, cand SkillCandidate, wikiContext string) (SkillFrontmatter, string, error) {
-	if _, err := p.systemPrompt(); err != nil {
+	sysPrompt, err := p.systemPrompt()
+	if err != nil {
 		return SkillFrontmatter{}, "", fmt.Errorf("stage_b_synth: load system prompt: %w", err)
 	}
-	// Build the user prompt so any wiring + tests can validate the structure.
-	// Discarded today; the live provider will send it.
-	_ = buildStageBSynthUserPrompt(cand, wikiContext)
-	if ctx.Err() != nil {
-		return SkillFrontmatter{}, "", fmt.Errorf("stage_b_synth: context: %w", ctx.Err())
+	userPrompt := buildStageBSynthUserPrompt(cand, wikiContext)
+
+	timeout := skillLLMTimeout()
+	callCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	type result struct {
+		out string
+		err error
 	}
-	return SkillFrontmatter{}, "", errors.New("synth: candidate rejected by LLM as not-a-skill")
+	ch := make(chan result, 1)
+	go func() {
+		out, callErr := provider.RunConfiguredOneShot(sysPrompt, userPrompt, "")
+		ch <- result{out, callErr}
+	}()
+
+	var raw string
+	select {
+	case <-callCtx.Done():
+		return SkillFrontmatter{}, "", fmt.Errorf("stage_b_synth: LLM call timed out after %s for candidate %q", timeout, cand.SuggestedName)
+	case r := <-ch:
+		if r.err != nil {
+			return SkillFrontmatter{}, "", fmt.Errorf("stage_b_synth: LLM call failed for candidate %q: %w", cand.SuggestedName, r.err)
+		}
+		raw = r.out
+	}
+
+	isSkill, fm, body, parseErr := parseSkillJSON(raw)
+	if parseErr != nil {
+		slog.Warn("stage_b_synth: LLM JSON parse failed",
+			"candidate", cand.SuggestedName, "err", parseErr)
+		return SkillFrontmatter{}, "", fmt.Errorf("stage_b_synth: parse LLM response for %q: %w", cand.SuggestedName, parseErr)
+	}
+	if !isSkill {
+		return SkillFrontmatter{}, "", fmt.Errorf("stage_b_synth: candidate %q rejected by LLM as not-a-skill", cand.SuggestedName)
+	}
+	return fm, body, nil
 }
 
 // systemPrompt returns the synthesizer system prompt, loading it from the
