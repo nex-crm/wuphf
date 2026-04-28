@@ -2319,14 +2319,13 @@ export function Wizard({ onComplete }: WizardProps) {
         if (genericGemini.length > 0) {
           configPayload.gemini_api_key = genericGemini;
         }
-        try {
-          await post("/config", configPayload);
-        } catch (err) {
-          console.warn(
-            "wuphf: config persistence failed — settings may need to be re-entered on next launch",
-            err,
-          );
-        }
+        // /config persistence is fatal: we have to know the user's API keys
+        // are saved to disk before the first headless turn fires, otherwise
+        // agents try to authenticate with empty values and fail with opaque
+        // errors. Letting this through silently was the bug PR #365 set out
+        // to fix; leaving it as a console.warn would re-introduce it. The
+        // outer try/catch hands the error to the submitError + Retry UI.
+        await post("/config", configPayload);
 
         // Primary runtime label for the onboarding payload (best-effort;
         // the broker only acts on {task, skip_task} today, but the extra

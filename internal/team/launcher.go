@@ -463,11 +463,6 @@ func (l *Launcher) notifyAgentsLoop() {
 		if msg.From == "system" {
 			continue
 		}
-		// demo_seed messages exist purely to make #general feel staffed on
-		// first paint; they must never wake an agent or burn an LLM call.
-		if msg.Kind == "demo_seed" {
-			continue
-		}
 		l.safeDeliverMessage(msg)
 	}
 }
@@ -688,6 +683,17 @@ const (
 )
 
 func (l *Launcher) deliverMessageNotification(msg channelMessage) {
+	// demo_seed messages exist purely to make #general feel staffed on first
+	// paint; they must never wake an agent or burn an LLM call. Filter at
+	// the central delivery point (not just notifyAgentsLoop) so other
+	// callers — primeVisibleAgents, replays, future routes — can't bypass
+	// it. Today these don't actually route demo_seed targets because the
+	// lead is the From and Tagged is empty, but a future @all-default
+	// change would silently turn the demo seed into an LLM-burning
+	// broadcast. One filter, one place.
+	if msg.Kind == "demo_seed" {
+		return
+	}
 	immediate, delayed := l.notificationTargetsForMessage(msg)
 
 	// Debounce: use shorter cooldown for human/CEO messages, longer for agent-originated

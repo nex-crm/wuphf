@@ -163,6 +163,14 @@ type templatesLoadedMsg struct{ templates []taskTemplate }
 type completeMsg struct{ err error }
 type onboardingProgressMsg struct{ err error }
 
+// localRuntimeDetectedMsg lands when the off-loop runtime probe finishes.
+// kind is empty when nothing was reachable; non-empty values are
+// "ollama"/"mlx-lm"/"exo" plus their /v1 base URL.
+type localRuntimeDetectedMsg struct {
+	kind string
+	addr string
+}
+
 // ── Model ───────────────────────────────────────────────────────
 
 type onboardingModel struct {
@@ -275,6 +283,17 @@ func (m onboardingModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// progress saved, nothing to do
 		return m, nil
 
+	case localRuntimeDetectedMsg:
+		// Replace the placeholder "Detecting…" message with either the
+		// concrete --provider suggestion or the generic "paste a key"
+		// fallback, depending on what the probe found.
+		if msg.kind != "" {
+			m.err = fmt.Sprintf("Detected %s running on %s. Exit with Ctrl+C and re-run: `wuphf --provider %s`. Or paste an Anthropic key below.", msg.kind, msg.addr, msg.kind)
+		} else {
+			m.err = "Paste an Anthropic API key (https://console.anthropic.com/settings/keys), or install Claude Code (https://claude.com/claude-code) and rerun — no key needed."
+		}
+		return m, nil
+
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	}
@@ -370,12 +389,16 @@ func (m onboardingModel) handleSetupKey(msg tea.KeyMsg) (onboardingModel, tea.Cm
 			// locally. Detect that and tell them how to use it instead of
 			// nagging for a cloud API key — saves the most-engaged segment of
 			// PH visitors from a frustrating dead-end.
-			if kind, addr := detectReachableLocalRuntime(); kind != "" {
-				m.err = fmt.Sprintf("Detected %s running on %s. Exit with Ctrl+C and re-run: `wuphf --provider %s`. Or paste an Anthropic key below.", kind, addr, kind)
-				return m, nil
-			}
-			m.err = "Paste an Anthropic API key (https://console.anthropic.com/settings/keys), or install Claude Code (https://claude.com/claude-code) and rerun — no key needed."
-			return m, nil
+			//
+			// The probe is dispatched as a tea.Cmd so the bubbletea Update
+			// loop stays responsive — TCP-RST-on-firewalled-port can block
+			// for the full per-candidate timeout, and freezing the TUI right
+			// after the user pressed Enter is the worst possible UX moment.
+			// Until the probe lands we show a hold message; the
+			// localRuntimeDetectedMsg case overwrites it with either the
+			// concrete suggestion or the generic fallback.
+			m.err = "Checking for a local LLM runtime…"
+			return m, detectLocalRuntimeCmd()
 		}
 		// If key not yet validated, validate now.
 		if m.keyStatus == "idle" || m.keyStatus == "unverified" {
@@ -689,68 +712,72 @@ func allRequiredPrereqsOk(prereqs []prereqResult) bool {
 	return true
 }
 
+// localRuntimeCandidates lists the supported local OpenAI-compatible runtimes
+// in priority order. The order is the user-facing tiebreak when more than one
+// is reachable: ollama wins because it's the most common install, mlx-lm
+// second because it's Apple-Silicon-only, exo last because it's niche.
+var localRuntimeCandidates = []struct {
+	kind string
+	base string
+}{
+	{kind: "ollama", base: "http://127.0.0.1:11434/v1"},
+	{kind: "mlx-lm", base: "http://127.0.0.1:8080/v1"},
+	{kind: "exo", base: "http://127.0.0.1:52415/v1"},
+}
+
+// probeLocalRuntime checks a single OpenAI-compatible /v1/models endpoint and
+// returns true iff the response is a 2xx with an OpenAI-shaped body
+// (`{"object":"list", ...}`). This second check is load-bearing: port 8080 is
+// shared with countless dev servers, so a 200 OK on a path-permissive server
+// (devserver index, Spring Boot, Tomcat, Docker images) would otherwise
+// produce a bad "--provider mlx-lm" suggestion that fails opaquely on use.
+func probeLocalRuntime(ctx context.Context, client *http.Client, base string) bool {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/models", nil)
+	if err != nil {
+		return false
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return false
+	}
+	var probe struct {
+		Object string `json:"object"`
+	}
+	// Cap the read so a misconfigured server can't stream us megabytes of
+	// HTML. Real /v1/models bodies are < 4KB even with dozens of models.
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+	if err != nil {
+		return false
+	}
+	if err := json.Unmarshal(body, &probe); err != nil {
+		return false
+	}
+	return probe.Object == "list"
+}
+
 // detectReachableLocalRuntime probes the canonical loopback endpoints for the
-// supported local OpenAI-compatible runtimes (ollama, mlx-lm, exo) and returns
-// the first one that answers. Used by the onboarding wizard to suggest a
-// concrete --provider flag when the user has no Anthropic key and no runtime
-// CLI installed but does have a local LLM running.
+// supported local OpenAI-compatible runtimes (ollama, mlx-lm, exo) in priority
+// order and returns the first one that answers with an OpenAI-shaped body.
+// Used by the onboarding wizard to suggest a concrete --provider flag when
+// the user has no Anthropic key and no runtime CLI installed but does have a
+// local LLM running.
 //
-// Probes are parallel with a tight 400ms-per-endpoint timeout and a 600ms
-// overall ceiling so the wizard doesn't visibly stall when nothing is
-// reachable. We hit /v1/models because both ollama and mlx-lm expose it as a
-// cheap, always-on endpoint and the OpenAI-compatible shape guarantees a 200
-// response when the server is alive.
+// Sequential (not parallel) so the suggestion is deterministic when more than
+// one runtime is up. A 250ms-per-candidate timeout keeps the worst case at
+// 750ms total when nothing is reachable; the caller dispatches this off the
+// bubbletea Update loop so the TUI stays responsive.
 func detectReachableLocalRuntime() (kind, addr string) {
-	type candidate struct {
-		kind string
-		base string
-	}
-	candidates := []candidate{
-		{kind: "ollama", base: "http://127.0.0.1:11434/v1"},
-		{kind: "mlx-lm", base: "http://127.0.0.1:8080/v1"},
-		{kind: "exo", base: "http://127.0.0.1:52415/v1"},
-	}
-	type hit struct {
-		kind string
-		addr string
-	}
-	hits := make(chan hit, len(candidates))
-	ctx, cancel := context.WithTimeout(context.Background(), 600*time.Millisecond)
-	defer cancel()
-	client := &http.Client{Timeout: 400 * time.Millisecond}
-	for _, c := range candidates {
-		c := c
-		go func() {
-			req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+"/models", nil)
-			if err != nil {
-				hits <- hit{}
-				return
-			}
-			resp, err := client.Do(req)
-			if err != nil {
-				hits <- hit{}
-				return
-			}
-			_ = resp.Body.Close()
-			// Require an explicit 2xx — a 404 from some other server on the
-			// same loopback port (or a 4xx auth wall that isn't actually the
-			// runtime we expect) shouldn't be advertised as a reachable
-			// runtime. The supported runtimes all return 200 on /v1/models.
-			if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-				hits <- hit{kind: c.kind, addr: c.base}
-				return
-			}
-			hits <- hit{}
-		}()
-	}
-	for range candidates {
-		select {
-		case h := <-hits:
-			if h.kind != "" {
-				return h.kind, h.addr
-			}
-		case <-ctx.Done():
-			return "", ""
+	client := &http.Client{Timeout: 250 * time.Millisecond}
+	for _, c := range localRuntimeCandidates {
+		ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+		ok := probeLocalRuntime(ctx, client, c.base)
+		cancel()
+		if ok {
+			return c.kind, c.base
 		}
 	}
 	return "", ""
@@ -817,6 +844,17 @@ func defaultPrereqs() []prereqResult {
 		{Name: "claude", Required: false, Found: false, InstallURL: "https://claude.ai/code"},
 		{Name: "codex", Required: false, Found: false, InstallURL: "https://github.com/openai/codex"},
 		{Name: "opencode", Required: false, Found: false, InstallURL: "https://opencode.ai"},
+	}
+}
+
+// detectLocalRuntimeCmd runs detectReachableLocalRuntime off the bubbletea
+// Update loop and posts a localRuntimeDetectedMsg back to it. Worst-case
+// runtime is bounded by the loop in detectReachableLocalRuntime (250ms per
+// candidate × 3 candidates = 750ms), so the TUI never blocks.
+func detectLocalRuntimeCmd() tea.Cmd {
+	return func() tea.Msg {
+		kind, addr := detectReachableLocalRuntime()
+		return localRuntimeDetectedMsg{kind: kind, addr: addr}
 	}
 }
 
