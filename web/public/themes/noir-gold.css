@@ -92,7 +92,8 @@ html[data-theme="noir-gold"] {
 
   --accent:      var(--gold-400);
   --accent-warm: var(--gold-500);
-  --accent-bg:   rgba(201, 162, 39, 0.10);
+  --accent-bg:        rgba(201, 162, 39, 0.10);
+  --accent-bg-strong: rgba(201, 162, 39, 0.30);
 
   --border:        #1a1a1c;
   --border-light:  #141416;
