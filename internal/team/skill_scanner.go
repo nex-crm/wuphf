@@ -407,6 +407,10 @@ func (s *SkillScanner) loadTombstone() (slugs, sources map[string]bool) {
 // frontmatter actually carries get set; the helper fills in defaults.
 func specToTeamSkill(fm SkillFrontmatter, body, sourceArticle string) teamSkill {
 	wuphf := fm.Metadata.Wuphf
+	sources := append([]string(nil), wuphf.SourceArticles...)
+	if s := strings.TrimSpace(sourceArticle); s != "" {
+		sources = appendUnique(sources, s)
+	}
 	return teamSkill{
 		Name:               fm.Name,
 		Title:              wuphf.Title,
@@ -423,6 +427,7 @@ func specToTeamSkill(fm SkillFrontmatter, body, sourceArticle string) teamSkill 
 		RelayID:            wuphf.RelayID,
 		RelayPlatform:      wuphf.RelayPlatform,
 		RelayEventTypes:    append([]string(nil), wuphf.RelayEventTypes...),
+		SourceArticles:     sources,
 		Status:             "proposed",
 	}
 }

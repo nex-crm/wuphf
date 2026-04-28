@@ -264,6 +264,7 @@ func TestTeamSkillToFrontmatter(t *testing.T) {
 		RelayID:            "r-001",
 		RelayPlatform:      "slack",
 		RelayEventTypes:    []string{"message"},
+		SourceArticles:     []string{"team/playbooks/digest.md", "team/agents/comms/notebook/learn-digest.md"},
 	}
 
 	fm := teamSkillToFrontmatter(sk)
@@ -304,5 +305,16 @@ func TestTeamSkillToFrontmatter(t *testing.T) {
 	}
 	if len(w.RelayEventTypes) != len(sk.RelayEventTypes) {
 		t.Errorf("Wuphf.RelayEventTypes len: got %d, want %d", len(w.RelayEventTypes), len(sk.RelayEventTypes))
+	}
+	// Regression coverage for D2: SourceArticles must round-trip from
+	// teamSkill into the emitted frontmatter so on-disk SKILL.md retains
+	// provenance back to the wiki article that triggered the proposal.
+	if len(w.SourceArticles) != len(sk.SourceArticles) {
+		t.Fatalf("Wuphf.SourceArticles len: got %d, want %d", len(w.SourceArticles), len(sk.SourceArticles))
+	}
+	for i, want := range sk.SourceArticles {
+		if w.SourceArticles[i] != want {
+			t.Errorf("Wuphf.SourceArticles[%d]: got %q, want %q", i, w.SourceArticles[i], want)
+		}
 	}
 }

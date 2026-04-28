@@ -420,8 +420,13 @@ type teamSkill struct {
 	LastExecutionStatus string   `json:"last_execution_status,omitempty"`
 	UsageCount          int      `json:"usage_count"`
 	Status              string   `json:"status"`
-	CreatedAt           string   `json:"created_at"`
-	UpdatedAt           string   `json:"updated_at"`
+	// SourceArticles records the wiki paths that promoted this skill.
+	// Carried through specToTeamSkill -> writeSkillProposalLocked ->
+	// teamSkillToFrontmatter so the .md frontmatter and the .rejected.md
+	// tombstone both retain provenance.
+	SourceArticles []string `json:"source_articles,omitempty"`
+	CreatedAt      string   `json:"created_at"`
+	UpdatedAt      string   `json:"updated_at"`
 }
 
 type brokerState struct {

@@ -60,9 +60,18 @@ type GuardScanResult struct {
 // Compiled regex patterns. Module-level so the cost is paid once.
 var (
 	// Dangerous body patterns.
-	guardEvalRe   = regexp.MustCompile(`\beval\s*\(`)
-	guardCurlShRe = regexp.MustCompile(`\bcurl\s+[^\n]*\|\s*sh`)
-	guardWgetShRe = regexp.MustCompile(`\bwget\s+[^\n]*\|\s*sh`)
+	// Matches JS-style call syntax AND shell-style invocations such as
+	// `eval "$(...)"`, `eval '...'`, `eval $(...)` , `eval ` + "`" + `...` + "`" + `. The
+	// regex anchors on the keyword followed by an opening paren or any
+	// quoting / command-substitution metacharacter, which catches every
+	// dangerous shape seen in the corpus while still rejecting prose like
+	// "evaluate the result".
+	guardEvalRe = regexp.MustCompile("\\beval\\s*[(\"'$`]")
+	// curl|sh / wget|sh: match a pipe into any common POSIX shell, not just
+	// the literal token "sh". Adds coverage for real-world  patterns piping
+	// directly into bash/zsh that previously slipped past the guard.
+	guardCurlShRe = regexp.MustCompile(`\bcurl\s+[^\n]*\|\s*(?:sh|bash|zsh|ksh|dash|fish)\b`)
+	guardWgetShRe = regexp.MustCompile(`\bwget\s+[^\n]*\|\s*(?:sh|bash|zsh|ksh|dash|fish)\b`)
 	guardRmRfRe   = regexp.MustCompile(`\brm\s+-rf\s+/[^\s]*`)
 	guardExecRe   = regexp.MustCompile(`\bexec\s*\(`)
 
