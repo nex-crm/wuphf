@@ -17,7 +17,7 @@ machine) and Linux (CI) we can verify directly; Windows needs a VM.
 | File | Purpose |
 |---|---|
 | `autounattend.xml` | Win11 ARM64 setup answer file. Zero-prompt install of a `wuphf` local user with OpenSSH listening on :22, hostname `WUPHF-DEV`. |
-| `autounattend.img` | 4 MB FAT12 disk wrapping `autounattend.xml`. Attach as a USB drive before booting Windows setup so it auto-detects the answer file. Regenerate with `make-answer-disk.sh`. |
+| `autounattend.img` | ISO 9660/Joliet image wrapping `autounattend.xml` (plus an optional drivers payload), with the `.img` extension UTM expects for USB media. Attach as a USB drive before booting Windows setup so it auto-detects the answer file. Regenerate with `make-answer-disk.sh`. |
 | `make-answer-disk.sh` | Rebuild `autounattend.img` from `autounattend.xml`. Re-run after editing the XML. |
 | `build.sh` | Cross-compile `wuphf.exe` for windows/{amd64,arm64} on this Mac with the goreleaser ldflags. |
 | `push-and-test.sh` | After `build.sh`, push the binary into the running UTM VM via SSH and run smoke tests. |
@@ -39,8 +39,11 @@ If Windows setup ever asks anything, the answer file failed. Common causes:
    the VM's drive list as a USB *disk* (not CD). Win setup ignores
    `autounattend.xml` on optical media unless it's at the root of the
    install ISO itself.
-2. **Filesystem mismatch.** The XML must be at the root of a FAT12/FAT16/FAT32
-   volume named anything (Win setup scans removable media root).
+2. **Answer-disk image stale.** This harness's `make-answer-disk.sh` builds
+   ISO 9660/Joliet media (FAT broke driver-signature validation in 24H2,
+   producing "Error scanning for drivers" on otherwise-valid INFs). Re-run
+   the script after any edit to `autounattend.xml` so the attached `.img`
+   matches what's on disk.
 3. **Architecture string wrong.** All `processorArchitecture="arm64"` for
    Win11-on-Apple-Silicon. amd64/x86 there will silently fail.
 
@@ -53,8 +56,9 @@ If Windows setup ever asks anything, the answer file failed. Common causes:
 # Get the IP once Windows is up
 /Applications/UTM.app/Contents/MacOS/utmctl ip-address BD57713D-0B79-4B87-AD08-88A9BF7922CC
 
-# Push a file (uses the UTM guest agent — guest tools must be installed)
-/Applications/UTM.app/Contents/MacOS/utmctl file push <UUID> ./wuphf.exe C:\wuphf\wuphf.exe
+# Push a file (uses the UTM guest agent — guest tools must be installed).
+# Quote the destination — POSIX shell would otherwise eat the backslashes.
+/Applications/UTM.app/Contents/MacOS/utmctl file push <UUID> ./wuphf.exe 'C:\wuphf\wuphf.exe'
 
 # Or via SSH (preferred — works without UTM guest agent)
 ssh wuphf@<vm-ip> 'C:\wuphf\wuphf.exe --version'

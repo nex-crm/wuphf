@@ -10,15 +10,15 @@ set -euo pipefail
 
 cd "$(dirname "$0")/../.."
 
-# Build the web UI bundle first if it isn't already populated. Without this,
-# the embedded //go:embed all:web/dist picks up only .gitkeep, which makes
-# the binary's web UI 404 on every route. Skip when WUPHF_SKIP_WEB=1 (set
-# this when iterating only on Go code to keep cycles fast).
+# Always rebuild the web UI bundle so the embedded //go:embed all:web/dist
+# matches the source tree on every cross-compile. A previous version of this
+# script gated on web/dist/index.html existing — that masked stale assets
+# from older builds and silently shipped them to the smoke VM. Skip with
+# WUPHF_SKIP_WEB=1 only when you've just run `bun run build` and want to
+# avoid the second invocation cost during a tight Go-only iteration loop.
 if [[ "${WUPHF_SKIP_WEB:-0}" != "1" ]]; then
-  if [[ ! -f web/dist/index.html ]]; then
-    echo "building web UI bundle..."
-    ( cd web && bun install && bun run build )
-  fi
+  echo "building web UI bundle..."
+  ( cd web && bun install && bun run build )
 fi
 
 VERSION="${WUPHF_VERSION:-dev-$(git rev-parse --short HEAD 2>/dev/null || echo unknown)}"

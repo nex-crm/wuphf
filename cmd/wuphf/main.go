@@ -638,6 +638,13 @@ func isPiped() bool {
 // #380 fixes.
 func consumePipedStdin(r io.Reader, dispatch func(line string)) (handled bool, err error) {
 	scanner := bufio.NewScanner(r)
+	// Allow lines up to 1 MiB. Default bufio.Scanner caps at 64 KiB and
+	// returns bufio.ErrTooLong on overflow, which would surface to the
+	// user as a confusing "error reading stdin" rather than a dispatched
+	// command. Long inline blueprints / pasted JSON are realistic at the
+	// CLI seam.
+	const maxLineBytes = 1 << 20
+	scanner.Buffer(make([]byte, 0, 64*1024), maxLineBytes)
 	for scanner.Scan() {
 		handled = true
 		dispatch(scanner.Text())

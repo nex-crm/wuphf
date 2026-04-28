@@ -135,13 +135,20 @@ jobs:
         # or guarded with runtime.GOOS at the call site. tmux is allowed
         # because UsesTmuxRuntime() gates it; if you're calling tmux from a
         # web-mode path, the regression is real and this should fail.
+        #
+        # Uses ripgrep with -U (multiline) + -P (PCRE) so call shapes split
+        # across lines — exec.Command(\n    "bash",\n    "-c", ...) — are
+        # caught. A previous line-oriented grep missed those. ripgrep is
+        # preinstalled on ubuntu-latest.
         run: |
           set -euo pipefail
-          bad=$(grep -rnE 'exec\.(Command|LookPath|CommandContext)\([^)]*"(bash|sh|chmod|ln|mkfifo|killall)"' \
-                 --include='*.go' --exclude='*_test.go' \
-                 internal/ cmd/ || true)
-          # Allow _unix.go / _darwin.go / _linux.go files (they are compiled
-          # only on those platforms by Go's build constraints).
+          bad=$(rg -nUP \
+                  --type-add='go:*.go' --type=go \
+                  --glob='!*_test.go' \
+                  'exec\.(Command|LookPath|CommandContext)\(\s*"(bash|sh|chmod|ln|mkfifo|killall)"' \
+                  internal/ cmd/ || true)
+          # Allow _unix.go / _darwin.go / _linux.go files (compiled only on
+          # those platforms by Go's build constraints).
           bad=$(echo "$bad" | grep -vE '_(unix|linux|darwin)\.go:' || true)
           if [ -n "$bad" ]; then
             echo "$bad" >&2
@@ -250,9 +257,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { goos: windows, goarch: amd64 }
-          - { goos: windows, goarch: arm64 }
-          - { goos: darwin,  goarch: arm64 }
+          - {goos: windows, goarch: amd64}
+          - {goos: windows, goarch: arm64}
+          - {goos: darwin, goarch: arm64}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # ratchet:actions/setup-go@v6
@@ -572,15 +579,18 @@ jobs:
               exit 1
             fi
           done
-          # Confirm the archive actually contains wuphf.exe (catches a goreleaser
-          # binary `name` regression that would ship `wuphf` without the .exe
-          # suffix on Windows).
-          first=$(ls dist/wuphf_*_windows_amd64.zip | head -1)
-          unzip -l "$first" | grep -q 'wuphf\.exe' || {
-            echo "windows zip does not contain wuphf.exe — goreleaser binary name regressed?" >&2
-            unzip -l "$first" >&2
-            exit 1
-          }
+          # Confirm both archives actually contain wuphf.exe (catches a
+          # goreleaser binary `name` regression that would ship `wuphf`
+          # without the .exe suffix on Windows). Both arches are checked
+          # because a per-arch override could regress one without the other.
+          for arch in amd64 arm64; do
+            zip=$(ls dist/wuphf_*_windows_${arch}.zip | head -1)
+            unzip -l "$zip" | grep -q 'wuphf\.exe' || {
+              echo "windows/${arch} zip does not contain wuphf.exe — goreleaser binary name regressed?" >&2
+              unzip -l "$zip" >&2
+              exit 1
+            }
+          done
       - name: Smoke-test install.sh against snapshot (URL override)
         # Cheap sanity path: feed install.sh a file:// tarball directly so
         # download/extract/chmod/--version all run against the fresh snapshot.
@@ -786,11 +796,20 @@ jobs:
               Write-Error "regression: token file written to C:\tmp\ on Windows — internal/brokeraddr/addr.go reverted to a /tmp hardcode?"
               exit 1
             }
-            if (-not (Test-Path $tempToken)) {
-              Write-Host "warn: token file not found at $tempToken; broker may not have written it yet (non-fatal)"
-            } else {
-              Write-Host "OK: token file at $tempToken"
+            # Retry briefly: the broker writes its token file shortly after
+            # ServeWebUI returns, so a tight loop is enough. If it never lands
+            # under %TEMP% the regression guard must hard-fail — passing on
+            # absence would let a /tmp regression sneak through.
+            $found = $false
+            for ($j = 0; $j -lt 10; $j++) {
+              if (Test-Path $tempToken) { $found = $true; break }
+              Start-Sleep -Seconds 1
             }
+            if (-not $found) {
+              Write-Error "token file missing at expected TEMP path: $tempToken — internal/brokeraddr/addr.go regression?"
+              exit 1
+            }
+            Write-Host "OK: token file at $tempToken"
           } finally {
             Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
           }

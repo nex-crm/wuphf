@@ -152,6 +152,13 @@
 
   <settings pass="oobeSystem">
     <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="arm64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+      <!--
+        SECURITY: blank password + auto-logon below are ONLY appropriate for
+        the ephemeral local UTM dev VM that this harness creates. The VM is
+        QEMU-NAT only (no inbound external access) and gets shredded between
+        runs. Do NOT copy this block into anything that lives on a network
+        or persists state.
+      -->
       <UserAccounts>
         <LocalAccounts>
           <LocalAccount wcm:action="add">
