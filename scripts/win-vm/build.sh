@@ -10,6 +10,17 @@ set -euo pipefail
 
 cd "$(dirname "$0")/../.."
 
+# Build the web UI bundle first if it isn't already populated. Without this,
+# the embedded //go:embed all:web/dist picks up only .gitkeep, which makes
+# the binary's web UI 404 on every route. Skip when WUPHF_SKIP_WEB=1 (set
+# this when iterating only on Go code to keep cycles fast).
+if [[ "${WUPHF_SKIP_WEB:-0}" != "1" ]]; then
+  if [[ ! -f web/dist/index.html ]]; then
+    echo "building web UI bundle..."
+    ( cd web && bun install && bun run build )
+  fi
+fi
+
 VERSION="${WUPHF_VERSION:-dev-$(git rev-parse --short HEAD 2>/dev/null || echo unknown)}"
 TIMESTAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 

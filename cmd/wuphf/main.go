@@ -312,14 +312,23 @@ func main() {
 	// Non-interactive: piped stdin
 	if isPiped() {
 		scanner := bufio.NewScanner(os.Stdin)
+		any := false
 		for scanner.Scan() {
+			any = true
 			dispatch(scanner.Text(), *apiKeyFlag, *format)
 		}
 		if err := scanner.Err(); err != nil {
 			fmt.Fprintf(os.Stderr, "error reading stdin: %v\n", err)
 			os.Exit(1)
 		}
-		return
+		// Fall through to interactive launch when stdin is a non-TTY but has
+		// no actual data — happens routinely on Windows when the binary is
+		// spawned via SSH, scheduled tasks, or PowerShell Start-Process,
+		// where the inherited stdin is a closed pipe rather than a console
+		// handle. Without this, the binary exits silently on first launch.
+		if any {
+			return
+		}
 	}
 
 	// No startup upgrade notice here: the npm shim (npm/bin/wuphf.js, PR
