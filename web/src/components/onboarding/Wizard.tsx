@@ -2321,9 +2321,10 @@ export function Wizard({ onComplete }: WizardProps) {
         }
         try {
           await post("/config", configPayload);
-        } catch {
+        } catch (err) {
           console.warn(
             "wuphf: config persistence failed — settings may need to be re-entered on next launch",
+            err,
           );
         }
 

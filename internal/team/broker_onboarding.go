@@ -386,7 +386,7 @@ func (b *Broker) postKickoffLocked(bp operations.Blueprint, selectedAgents []str
 func welcomeMessageForMembers(members []officeMember) string {
 	_, leadName := leadSlugAndName(members)
 	if leadName == "" {
-		leadName = "your lead"
+		leadName = "Your lead"
 	}
 	return fmt.Sprintf(
 		"Welcome to your office. %s and the team are online and ready. Type a directive in the composer below — they'll claim work, argue, and ship.",

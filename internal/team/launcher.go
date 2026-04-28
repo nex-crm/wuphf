@@ -4772,6 +4772,13 @@ func (l *Launcher) LaunchWeb(webPort int) error {
 	l.broker.SetGenerateMemberFn(l.GenerateMemberTemplateFromPrompt)
 	l.broker.SetGenerateChannelFn(l.GenerateChannelTemplateFromPrompt)
 	if err := l.broker.ServeWebUI(webPort); err != nil {
+		// The broker is already running and the office PID file is on
+		// disk (above). On a port-bind failure we exit, so tear both
+		// down — leaving the broker accepting requests on a "wuphf has
+		// failed to start" path is worse than a clean exit, and a stale
+		// PID file would block the next launch attempt's writeOfficePID.
+		l.broker.Stop()
+		_ = clearOfficePIDFile()
 		return fmt.Errorf("web UI failed to start: %w\n\nIs port %d already in use? Try: wuphf --web-port %d", err, webPort, webPort+1)
 	}
 
