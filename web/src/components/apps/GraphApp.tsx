@@ -470,7 +470,7 @@ export function GraphApp() {
                           height={20}
                           rx={4}
                           fill="var(--bg-card)"
-                          stroke="var(--border)"
+                          stroke="var(--border-strong)"
                           strokeWidth={1}
                           opacity={0.95}
                         />

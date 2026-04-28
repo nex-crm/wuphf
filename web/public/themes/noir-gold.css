@@ -17,8 +17,8 @@ html[data-theme="noir-gold"] {
   --neutral-300: #5a5d62;
   --neutral-200: #8a8d92;
   --neutral-100: #b39e6b;
-  --neutral-50:  #d9c897;
-  --neutral-10:  #f5e9c8;
+  --neutral-50: #d9c897;
+  --neutral-10: #f5e9c8;
 
   /* ── Gold ramp (oxidized → patina → polished → champagne) ── */
   --gold-950: #1a1206;
@@ -31,7 +31,7 @@ html[data-theme="noir-gold"] {
   --gold-300: #d9b84a;
   --gold-200: #f0c75e;
   --gold-100: #fce8a8;
-  --gold-50:  #fff5d4;
+  --gold-50: #fff5d4;
 
   /* ── Accent stand-ins so any code referencing tertiary/cyan/olive still works ── */
   --tertiary-500: var(--gold-700);
@@ -72,60 +72,62 @@ html[data-theme="noir-gold"] {
   --warning-100: #1f160a;
 
   /* ── Overlays ── */
-  --overlay-soft:         rgba(255, 232, 168, 0.04);
-  --overlay:              rgba(255, 232, 168, 0.08);
-  --overlay-strong:       rgba(255, 232, 168, 0.16);
-  --scrim:                rgba(0, 0, 0, 0.72);
-  --overlay-white-soft:   rgba(245, 233, 200, 0.06);
-  --overlay-white:        rgba(245, 233, 200, 0.12);
+  --overlay-soft: rgba(255, 232, 168, 0.04);
+  --overlay: rgba(255, 232, 168, 0.08);
+  --overlay-strong: rgba(255, 232, 168, 0.16);
+  --scrim: rgba(0, 0, 0, 0.72);
+  --overlay-white-soft: rgba(245, 233, 200, 0.06);
+  --overlay-white: rgba(245, 233, 200, 0.12);
   --overlay-white-strong: rgba(245, 233, 200, 0.32);
 
   /* ── Semantic aliases ── */
-  --bg:             #0a0a0b;
-  --bg-warm:        #111113;
-  --bg-subtle:      #060606;
-  --bg-card:        #111113;
-  --text:           #f5e9c8;
+  --bg: #0a0a0b;
+  --bg-warm: #111113;
+  --bg-subtle: #060606;
+  --bg-card: #111113;
+  --text: #f5e9c8;
   --text-secondary: #b39e6b;
-  --text-tertiary:  #7a6a45;
-  --text-disabled:  #4a4234;
+  --text-tertiary: #7a6a45;
+  --text-disabled: #4a4234;
 
-  --accent:      var(--gold-400);
+  --accent: var(--gold-400);
   --accent-warm: var(--gold-500);
-  --accent-bg:        rgba(201, 162, 39, 0.10);
-  --accent-bg-strong: rgba(201, 162, 39, 0.30);
+  --accent-bg: rgba(201, 162, 39, 0.1);
+  --accent-bg-strong: rgba(201, 162, 39, 0.3);
 
-  --border:        #1a1a1c;
-  --border-light:  #141416;
-  --border-dark:   #2a261d;
+  --border: #1a1a1c;
+  --border-light: #141416;
+  --border-dark: #2a261d;
   --border-strong: #3c3528;
 
-  --green:      var(--success-400);
+  --green: var(--success-400);
   --green-dark: var(--success-500);
-  --green-bg:   var(--success-100);
-  --red:        var(--error-400);
-  --red-dark:   var(--error-500);
-  --red-bg:     var(--error-100);
-  --yellow:     var(--warning-400);
-  --yellow-dark:var(--warning-500);
-  --yellow-bg:  var(--warning-100);
-  --blue:       var(--gold-400);
-  --blue-bg:    var(--accent-bg);
+  --green-bg: var(--success-100);
+  --red: var(--error-400);
+  --red-dark: var(--error-500);
+  --red-bg: var(--error-100);
+  --yellow: var(--warning-400);
+  --yellow-dark: var(--warning-500);
+  --yellow-bg: var(--warning-100);
+  --blue: var(--gold-400);
+  --blue-bg: var(--accent-bg);
 
-  --font-sans: "Source Serif 4", "IBM Plex Serif", Georgia, "Times New Roman", serif;
+  --font-sans:
+    "Source Serif 4", "IBM Plex Serif", Georgia, "Times New Roman", serif;
   --font-serif: "Fraunces", Georgia, "Times New Roman", serif;
   --font-logo: "Fraunces", Georgia, "Times New Roman", serif;
-  --font-mono: "Geist Mono", "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+  --font-mono:
+    "Geist Mono", "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
 
   /* ── Sidebar tokens (no purple anywhere) ── */
-  --nex-sidebar:             #0a0a0b;
-  --nex-sidebar-hover:       rgba(201, 162, 39, 0.12);
-  --nex-sidebar-active:      var(--gold-400);
-  --nex-sidebar-text:        rgba(245, 233, 200, 0.78);
+  --nex-sidebar: #0a0a0b;
+  --nex-sidebar-hover: rgba(201, 162, 39, 0.12);
+  --nex-sidebar-active: var(--gold-400);
+  --nex-sidebar-text: rgba(245, 233, 200, 0.78);
   --nex-sidebar-text-active: var(--gold-200);
 
   /* purple aliases redirected to gold so any stale rule is harmless */
-  --purple:    var(--gold-400);
+  --purple: var(--gold-400);
   --purple-bg: var(--accent-bg);
 
   --radius-sm: 8px;
@@ -186,9 +188,12 @@ html[data-theme="noir-gold"] .sidebar .sidebar-channels + .sidebar-section,
 html[data-theme="noir-gold"] .sidebar .sidebar-apps + .sidebar-section {
   border-top-color: var(--border);
 }
+/* Per-agent activity line under each team member ("drafting response",
+   token-burn status, etc.). 42% cream is too dim against the dark
+   sidebar — bump to gold-300 so it actually reads. */
 html[data-theme="noir-gold"] .sidebar .sidebar-agent-task,
 html[data-theme="noir-gold"] .sidebar .sidebar-agent-activity {
-  color: rgba(245, 233, 200, 0.42);
+  color: var(--gold-300);
 }
 
 html[data-theme="noir-gold"] .sidebar-item,
@@ -257,8 +262,12 @@ html[data-theme="noir-gold"] .composer-inner {
   background: var(--bg-warm);
   border-color: var(--border-dark);
 }
-html[data-theme="noir-gold"] .message-text { color: var(--text); }
-html[data-theme="noir-gold"] .message:hover { background: var(--bg-warm); }
+html[data-theme="noir-gold"] .message-text {
+  color: var(--text);
+}
+html[data-theme="noir-gold"] .message:hover {
+  background: var(--bg-warm);
+}
 
 /* ─── Buttons ─── */
 html[data-theme="noir-gold"] .btn-primary,
@@ -308,11 +317,19 @@ html[data-theme="noir-gold"] .sidebar .sidebar-collapsible + .sidebar-section {
 }
 
 /* Gold gradient hairline that runs the width of the divider */
-html[data-theme="noir-gold"] .sidebar .sidebar-section + .sidebar-section::after,
+html[data-theme="noir-gold"] .sidebar
+  .sidebar-section
+  + .sidebar-section::after,
 html[data-theme="noir-gold"] .sidebar .sidebar-agents + .sidebar-section::after,
-html[data-theme="noir-gold"] .sidebar .sidebar-channels + .sidebar-section::after,
+html[data-theme="noir-gold"]
+  .sidebar
+  .sidebar-channels
+  + .sidebar-section::after,
 html[data-theme="noir-gold"] .sidebar .sidebar-apps + .sidebar-section::after,
-html[data-theme="noir-gold"] .sidebar .sidebar-collapsible + .sidebar-section::after {
+html[data-theme="noir-gold"]
+  .sidebar
+  .sidebar-collapsible
+  + .sidebar-section::after {
   content: "";
   position: absolute;
   top: 7px;
@@ -332,11 +349,22 @@ html[data-theme="noir-gold"] .sidebar .sidebar-collapsible + .sidebar-section::a
 }
 
 /* Centered diamond ornament — sits ON the hairline */
-html[data-theme="noir-gold"] .sidebar .sidebar-section + .sidebar-section::before,
-html[data-theme="noir-gold"] .sidebar .sidebar-agents + .sidebar-section::before,
-html[data-theme="noir-gold"] .sidebar .sidebar-channels + .sidebar-section::before,
+html[data-theme="noir-gold"] .sidebar
+  .sidebar-section
+  + .sidebar-section::before,
+html[data-theme="noir-gold"]
+  .sidebar
+  .sidebar-agents
+  + .sidebar-section::before,
+html[data-theme="noir-gold"]
+  .sidebar
+  .sidebar-channels
+  + .sidebar-section::before,
 html[data-theme="noir-gold"] .sidebar .sidebar-apps + .sidebar-section::before,
-html[data-theme="noir-gold"] .sidebar .sidebar-collapsible + .sidebar-section::before {
+html[data-theme="noir-gold"]
+  .sidebar
+  .sidebar-collapsible
+  + .sidebar-section::before {
   content: "◆";
   position: absolute;
   top: -1px;
@@ -399,7 +427,9 @@ html[data-theme="noir-gold"] .sidebar .sidebar-section-toggle:hover::before {
 }
 
 /* Collapsed section: dim the blade slightly so it reads "closed" */
-html[data-theme="noir-gold"] .sidebar .sidebar-section.is-collapsed .sidebar-section-toggle::before {
+html[data-theme="noir-gold"] .sidebar
+  .sidebar-section.is-collapsed
+  .sidebar-section-toggle::before {
   background: linear-gradient(
     to bottom,
     var(--gold-600) 0%,
@@ -426,22 +456,22 @@ html[data-theme="noir-gold"] .sidebar .sidebar-section-toggle:hover svg {
    same tokens and pick up the change automatically. */
 
 html[data-theme="noir-gold"] .notebook-surface {
-  --nb-paper:          #1a160e;
-  --nb-paper-dark:     #14110a;
-  --nb-rule:           rgba(201, 162, 39, 0.07);
-  --nb-surface:        #18140d;
-  --nb-text:           #e8d9a8;
-  --nb-text-muted:     #b39e6b;
-  --nb-text-tertiary:  #7a6a45;
-  --nb-border:         #2a261d;
-  --nb-border-light:   #1f1c14;
-  --nb-ink-blue:       #88a4c2;
-  --nb-stamp-red:      #d6443c;
-  --nb-amber:          var(--gold-400);
-  --nb-amber-bg:       rgba(201, 162, 39, 0.10);
-  --nb-amber-hover:    var(--gold-300);
-  --nb-green-approve:  var(--green);
-  --nb-green-bg:       rgba(47, 170, 100, 0.10);
+  --nb-paper: #1a160e;
+  --nb-paper-dark: #14110a;
+  --nb-rule: rgba(201, 162, 39, 0.07);
+  --nb-surface: #18140d;
+  --nb-text: #e8d9a8;
+  --nb-text-muted: #b39e6b;
+  --nb-text-tertiary: #7a6a45;
+  --nb-border: #2a261d;
+  --nb-border-light: #1f1c14;
+  --nb-ink-blue: #88a4c2;
+  --nb-stamp-red: #d6443c;
+  --nb-amber: var(--gold-400);
+  --nb-amber-bg: rgba(201, 162, 39, 0.1);
+  --nb-amber-hover: var(--gold-300);
+  --nb-green-approve: var(--green);
+  --nb-green-bg: rgba(47, 170, 100, 0.1);
 }
 
 /* The literal rgba(42, 39, 33, X) calls in notebook.css are the dark
@@ -452,10 +482,14 @@ html[data-theme="noir-gold"] .notebook-surface .nb-shelf-item:hover {
   background: rgba(232, 217, 168, 0.06);
 }
 html[data-theme="noir-gold"] .notebook-surface .nb-shelf-item.is-current {
-  background: rgba(232, 217, 168, 0.10);
+  background: rgba(232, 217, 168, 0.1);
 }
 html[data-theme="noir-gold"] .notebook-surface .nb-shelf-item .nb-shelf-meta,
-html[data-theme="noir-gold"] .notebook-surface .nb-shelf-card .nb-shelf-card-meta > span:not([class]) {
+html[data-theme="noir-gold"]
+  .notebook-surface
+  .nb-shelf-card
+  .nb-shelf-card-meta
+  > span:not([class]) {
   color: var(--nb-text-tertiary);
 }
 html[data-theme="noir-gold"] .notebook-surface .nb-tag,
@@ -472,7 +506,7 @@ html[data-theme="noir-gold"] .notebook-surface .nb-shelf-card {
 html[data-theme="noir-gold"] .notebook-surface .nb-shelf-card:hover {
   box-shadow:
     0 1px 2px rgba(0, 0, 0, 0.55),
-    0 2px 4px rgba(201, 162, 39, 0.10);
+    0 2px 4px rgba(201, 162, 39, 0.1);
 }
 /* Sticky-note / draft stamp text colors that hardcoded gray/amber */
 html[data-theme="noir-gold"] .notebook-surface .nb-empty-hint {
@@ -493,18 +527,22 @@ html[data-theme="noir-gold"] .wk-section-new {
 
 /* Playbook synthesis status (success/error border + text) — keep semantic
    green/red but warm them so they read on dark gold parchment */
-html[data-theme="noir-gold"] .wk-playbook-synthesis[data-state='success'] .wk-playbook-synthesis__button {
+html[data-theme="noir-gold"] .wk-playbook-synthesis[data-state="success"]
+  .wk-playbook-synthesis__button {
   color: var(--green);
   border-color: var(--green);
 }
-html[data-theme="noir-gold"] .wk-playbook-synthesis[data-state='error'] .wk-playbook-synthesis__button {
+html[data-theme="noir-gold"]
+  .wk-playbook-synthesis[data-state="error"]
+  .wk-playbook-synthesis__button {
   color: var(--red);
   border-color: var(--red);
 }
 html[data-theme="noir-gold"] .wk-playbook-synthesis__pending {
   color: var(--gold-300);
 }
-html[data-theme="noir-gold"] .wk-playbook-synthesis__button:hover:not([disabled]) {
+html[data-theme="noir-gold"]
+  .wk-playbook-synthesis__button:hover:not([disabled]) {
   background: var(--overlay);
 }
 
@@ -538,7 +576,7 @@ html[data-theme="noir-gold"] .notebook-surface .nb-review-card:hover {
   box-shadow:
     0 1px 1px rgba(0, 0, 0, 0.55),
     0 3px 6px rgba(0, 0, 0, 0.45),
-    0 8px 14px rgba(201, 162, 39, 0.10);
+    0 8px 14px rgba(201, 162, 39, 0.1);
 }
 html[data-theme="noir-gold"] .notebook-surface .nb-review-card.is-active {
   outline: 2px solid var(--gold-400);
@@ -565,12 +603,13 @@ html[data-theme="noir-gold"] .notebook-surface .nb-review-col-empty {
   opacity: 1;
 }
 
-/* ─── Wiki app shell — top tab bar + left nav menu buttons ─────────────
-   wiki-shell.css uses fallback aliases (--surface, --text-muted, --purple)
-   that don't exist in the global theme; in noir-gold those fall back to
-   white/blue/purple, leaving the wiki tabs visually unthemed. Override
-   them inline so the bar reads as gold-on-noir, the active tab uses the
-   gold accent, and the unread badge is gold instead of purple. */
+/* ─── Wiki app shell — top tab bar + unread badge ──────────────────────
+   wiki-shell.css falls back to literal aliases (--surface, --text-muted,
+   --purple) that aren't in the global theme; on noir-gold the badge in
+   particular falls back to purple. The active-tab border and focus
+   outline already pick up --accent (= --gold-400) via the token block,
+   so we only need to override the surface, the resting tab color
+   (cream → muted secondary), the active text, and the badge. */
 
 html[data-theme="noir-gold"] .wiki-tabs {
   background: var(--bg-card);
@@ -582,12 +621,8 @@ html[data-theme="noir-gold"] .wiki-tab {
 html[data-theme="noir-gold"] .wiki-tab:hover {
   color: var(--gold-100);
 }
-html[data-theme="noir-gold"] .wiki-tab:focus-visible {
-  outline-color: var(--gold-400);
-}
 html[data-theme="noir-gold"] .wiki-tab.is-active {
   color: var(--gold-100);
-  border-bottom-color: var(--gold-400);
 }
 html[data-theme="noir-gold"] .wiki-tab-badge {
   background: var(--gold-400);
@@ -595,22 +630,21 @@ html[data-theme="noir-gold"] .wiki-tab-badge {
 }
 
 /* ─── Wiki surface — left nav menu buttons + wikilinks ───────────────
-   --wk-wikilink resolves to --olive-500 which we already redirected to
-   #3d2e0a (deep oxidized) — too dark on dark bg. Re-route the wiki
-   palette to gold tones so links and the active menu button read. */
+   noir-gold's --olive-500 (#3d2e0a, deep oxidized) is too dark for body
+   text on dark bg, but wiki.css inside .wiki-root sets
+   --wk-wikilink: var(--olive-500) — so links and the active menu item
+   render practically invisible. Re-route the wiki palette tokens to
+   gold tones inside .wiki-root for noir-gold only. */
 html[data-theme="noir-gold"] .wiki-root {
-  --wk-wikilink:        var(--gold-300);
+  --wk-wikilink: var(--gold-300);
   --wk-wikilink-broken: var(--red);
-  --wk-amber:           var(--gold-400);
-  --wk-amber-bg:        rgba(201, 162, 39, 0.10);
-  --wk-amber-banner:    rgba(201, 162, 39, 0.05);
-  --wk-code-bg:         var(--bg-warm);
+  --wk-amber: var(--gold-400);
+  --wk-amber-bg: rgba(201, 162, 39, 0.1);
+  --wk-amber-banner: rgba(201, 162, 39, 0.05);
+  --wk-code-bg: var(--bg-warm);
 }
 html[data-theme="noir-gold"] .wk-nav-sidebar h3 {
   color: var(--gold-300);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  font-size: 11px;
 }
 html[data-theme="noir-gold"] .wk-nav-sidebar li.current a {
   background: rgba(201, 162, 39, 0.12);
@@ -625,35 +659,19 @@ html[data-theme="noir-gold"] .wk-nav-sidebar .search:focus {
   border-color: var(--gold-500);
 }
 
-/* Wiki "NEW" pill (was teal #CFF5F5/#0F5C5C — already had a partial
-   override but only for one selector). Cover the wiki-shell tab badge
-   and any other inline pills for completeness. */
-html[data-theme="noir-gold"] .wk-section-new {
-  background: var(--accent-bg);
-  color: var(--gold-200);
-  border: 1px solid rgba(201, 162, 39, 0.4);
-}
-
 /* ─── Entity-graph node palette ────────────────────────────────────
    Default theme uses pastel Tailwind colors (lavender/sky/mint). On
    noir those wash out as bright neon dots; redirect to gold-toned
-   variants tuned for the dark surface. */
+   variants tuned for the dark surface. The companies stroke is a raw
+   steel-blue literal because the noir-gold palette has no neutral
+   blue token — using --green or --gold here would lose the kind cue. */
 html[data-theme="noir-gold"] {
-  --graph-people-fill:       rgba(201, 162, 39, 0.14);
-  --graph-people-stroke:     var(--gold-300);
-  --graph-companies-fill:    rgba(136, 164, 194, 0.16);
-  --graph-companies-stroke:  #88a4c2;
-  --graph-customers-fill:    rgba(47, 170, 100, 0.15);
-  --graph-customers-stroke:  var(--green);
-  --graph-other-fill:        rgba(245, 233, 200, 0.06);
-  --graph-other-stroke:      var(--text-tertiary);
-}
-
-/* ─── Sidebar agent task / activity (the "token burn" line under each
-       team member) — was barely visible on noir at 42% cream opacity.
-       Bump to a clean readable gold so the user can actually see it. */
-html[data-theme="noir-gold"] .sidebar .sidebar-agent-task,
-html[data-theme="noir-gold"] .sidebar .sidebar-agent-activity {
-  color: var(--gold-300);
-  opacity: 1;
+  --graph-people-fill: rgba(201, 162, 39, 0.14);
+  --graph-people-stroke: var(--gold-300);
+  --graph-companies-fill: rgba(136, 164, 194, 0.16);
+  --graph-companies-stroke: #88a4c2;
+  --graph-customers-fill: rgba(47, 170, 100, 0.15);
+  --graph-customers-stroke: var(--green);
+  --graph-other-fill: rgba(245, 233, 200, 0.06);
+  --graph-other-stroke: var(--text-tertiary);
 }
