@@ -64,10 +64,12 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	wuphfLogDirOverride.Store(&logDir)
-	cleanups = append(cleanups, func() {
-		wuphfLogDirOverride.Store(nil)
-		_ = os.RemoveAll(logDir)
-	})
+	// Intentionally do NOT clear wuphfLogDirOverride on cleanup: the process
+	// is about to exit and any goroutine that escaped a test's lifecycle
+	// (race-detector edge cases, headless workers caught mid-flush) should
+	// keep writing into the isolated temp dir, never the real ~/.wuphf/logs.
+	// The dir removal below makes those writes a no-op rather than pollution.
+	cleanups = append(cleanups, func() { _ = os.RemoveAll(logDir) })
 
 	// 3) Stale-unanswered threshold: resume tests pre-seed broker state with
 	//    ancient timestamps (e.g. "2026-04-14T10:00:00Z") to exercise routing
@@ -4597,7 +4599,7 @@ func TestBrokerGetRequestsScopeAllSeesCrossChannelBlocker(t *testing.T) {
 }
 
 func TestBrokerCancelBlockingApprovalUnblocksMessages(t *testing.T) {
-	b := NewBrokerAt(leakedBrokerStatePath(t))
+	b := newTestBroker(t)
 	if err := b.StartOnPort(0); err != nil {
 		t.Fatalf("failed to start broker: %v", err)
 	}
@@ -4686,7 +4688,7 @@ func TestBrokerCancelBlockingApprovalUnblocksMessages(t *testing.T) {
 }
 
 func TestBrokerHumanInterviewDoesNotBlockAndCancelsOnHumanMessage(t *testing.T) {
-	b := NewBrokerAt(leakedBrokerStatePath(t))
+	b := newTestBroker(t)
 	if err := b.StartOnPort(0); err != nil {
 		t.Fatalf("failed to start broker: %v", err)
 	}
