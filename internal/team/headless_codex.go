@@ -406,25 +406,47 @@ func (l *Launcher) stopHeadlessWorkers() {
 		close(l.headlessStopCh)
 	}
 	cancel := l.headlessCancel
-	// Collect per-turn cancels so we can fire them outside the lock.
-	// Needed when l.headlessCtx is nil (bare &Launcher{} in tests): in that
-	// case turnCtx is derived from context.Background() and canceling
-	// l.headlessCancel is a no-op, so the only way to unblock an in-flight
-	// turn is to cancel its own context directly.
-	var turnCancels []context.CancelFunc
-	for _, active := range l.headlessActive {
-		if active != nil && active.Cancel != nil {
-			turnCancels = append(turnCancels, active.Cancel)
-		}
-	}
 	l.headlessMu.Unlock()
 	if cancel != nil {
 		cancel()
 	}
-	for _, c := range turnCancels {
-		c()
+	// Cancel any in-flight turns and keep cancelling until workers drain.
+	// Polling closes a TOCTOU window: a worker that was past its top-of-loop
+	// stop check but had not yet called beginHeadlessCodexTurn at first
+	// snapshot time would otherwise register a fresh active turn after we
+	// scanned, and Wait() would block on a stub that's parked on ctx.Done().
+	// Production launchers cancel via headlessCancel above; this loop is the
+	// safety net for bare &Launcher{} test fixtures that don't seed one.
+	done := make(chan struct{})
+	go func() {
+		l.headlessWorkerWg.Wait()
+		close(done)
+	}()
+	cancelActive := func() {
+		l.headlessMu.Lock()
+		for _, active := range l.headlessActive {
+			if active != nil && active.Cancel != nil {
+				active.Cancel()
+			}
+		}
+		l.headlessMu.Unlock()
 	}
-	l.headlessWorkerWg.Wait()
+	cancelActive()
+	if cancel != nil {
+		// Production path: parent ctx already cancelled; just wait.
+		<-done
+		return
+	}
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-done:
+			return
+		case <-ticker.C:
+			cancelActive()
+		}
+	}
 }
 
 func (l *Launcher) runHeadlessCodexQueue(slug string, stop <-chan struct{}) {

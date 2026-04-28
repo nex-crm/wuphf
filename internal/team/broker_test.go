@@ -5320,7 +5320,6 @@ func TestBrokerSurfaceMetadataPersists(t *testing.T) {
 }
 
 func TestBrokerSurfaceChannelsFilter(t *testing.T) {
-	t.Skip("skipped: manifest interference")
 	b := newTestBroker(t)
 	b.mu.Lock()
 	b.channels = append(b.channels,

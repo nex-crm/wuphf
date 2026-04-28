@@ -2,7 +2,6 @@ package team
 
 import (
 	"context"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -532,9 +531,9 @@ func TestResumeInFlightWorkHeadlessEnqueuesLeadEvenWhenSpecialistsPresent(t *tes
 
 	// Stub the per-turn runner so spawned workers don't shell out to a real
 	// codex binary while the test asserts queue state.
-	setHeadlessCodexRunTurnForTest(t, func(_ *Launcher, ctx context.Context, _, _ string, _ ...string) error {
+	setHeadlessCodexRunTurnForTest(t, func(_ *Launcher, ctx context.Context, _ string, _ string, _ ...string) error {
 		<-ctx.Done()
-		return ctx.Err()
+		return nil
 	})
 
 	l := &Launcher{
@@ -552,7 +551,7 @@ func TestResumeInFlightWorkHeadlessEnqueuesLeadEvenWhenSpecialistsPresent(t *tes
 		headlessActive:  make(map[string]*headlessCodexActiveTurn),
 		headlessQueues:  make(map[string][]headlessCodexTurn),
 	}
-	t.Cleanup(func() { l.waitForHeadlessIdle(t) })
+	t.Cleanup(l.stopHeadlessWorkers)
 
 	l.resumeInFlightWork()
 
@@ -648,7 +647,7 @@ func TestResumeInFlightWorkTUIClaudeRoutesHeadless(t *testing.T) {
 		return ctx.Err()
 	})
 
-	b := NewBrokerAt(filepath.Join(t.TempDir(), "broker-state.json"))
+	b := newTestBroker(t)
 	b.mu.Lock()
 	b.tasks = []teamTask{
 		{ID: "t1", Title: "Build login form", Owner: "fe", Status: "in_progress"},
@@ -676,7 +675,7 @@ func TestResumeInFlightWorkTUIClaudeRoutesHeadless(t *testing.T) {
 		headlessActive:  make(map[string]*headlessCodexActiveTurn),
 		headlessQueues:  make(map[string][]headlessCodexTurn),
 	}
-	t.Cleanup(func() { l.waitForHeadlessIdle(t) })
+	t.Cleanup(l.stopHeadlessWorkers)
 
 	l.resumeInFlightWork()
 
@@ -708,7 +707,7 @@ func TestResumeInFlightWorkRoutesPerAgentProviderBinding(t *testing.T) {
 		paneNotifications = append(paneNotifications, paneTarget+"\n"+notification)
 	})
 
-	b := NewBrokerAt(filepath.Join(t.TempDir(), "broker-state.json"))
+	b := newTestBroker(t)
 	b.mu.Lock()
 	b.members = []officeMember{
 		{Slug: "ceo", Name: "CEO", Provider: provider.ProviderBinding{Kind: provider.KindClaudeCode}},
@@ -742,7 +741,7 @@ func TestResumeInFlightWorkRoutesPerAgentProviderBinding(t *testing.T) {
 		headlessActive: make(map[string]*headlessCodexActiveTurn),
 		headlessQueues: make(map[string][]headlessCodexTurn),
 	}
-	t.Cleanup(func() { l.waitForHeadlessIdle(t) })
+	t.Cleanup(l.stopHeadlessWorkers)
 
 	l.resumeInFlightWork()
 
