@@ -507,3 +507,60 @@ html[data-theme="noir-gold"] .wk-playbook-synthesis__pending {
 html[data-theme="noir-gold"] .wk-playbook-synthesis__button:hover:not([disabled]) {
   background: var(--overlay);
 }
+
+/* ─── Notebook surface — strip the paper-ruled lines + SVG noise ─────
+   The light-mode notebook overlays a repeating-linear-gradient (16px
+   horizontal lines) and a fractal-noise SVG to simulate a ruled paper
+   page. On dark gold both effects read as garbage scanlines and a
+   muddy grain. Flatten the background. */
+
+html[data-theme="noir-gold"] .notebook-surface {
+  background-image: none !important;
+  background-color: var(--nb-paper);
+}
+
+/* ─── Review cards — were yellow sticky-notes (#eef679 / #f5fb95).
+   Reskin to dark gold leather with a thin gold outline + soft glow,
+   so they read as objects on the parchment rather than highlighter blobs. */
+
+html[data-theme="noir-gold"] .notebook-surface .nb-review-card {
+  background: var(--nb-paper-dark);
+  outline: 0.5px solid var(--gold-700);
+  outline-offset: -0.5px;
+  color: var(--nb-text);
+  box-shadow:
+    0 1px 1px rgba(0, 0, 0, 0.45),
+    0 1px 2px rgba(201, 162, 39, 0.05);
+}
+html[data-theme="noir-gold"] .notebook-surface .nb-review-card:hover {
+  background: #1f1a10;
+  outline-color: var(--gold-500);
+  box-shadow:
+    0 1px 1px rgba(0, 0, 0, 0.55),
+    0 3px 6px rgba(0, 0, 0, 0.45),
+    0 8px 14px rgba(201, 162, 39, 0.10);
+}
+html[data-theme="noir-gold"] .notebook-surface .nb-review-card.is-active {
+  outline: 2px solid var(--gold-400);
+  outline-offset: -2px;
+  background: #221c11;
+}
+
+/* Card text — title stays bright cream-gold for readability; excerpt at
+   reduced opacity should still be legible on dark, so bump opacity up
+   from the 0.7/0.55 the original used (which assumed dark-on-cream). */
+html[data-theme="noir-gold"] .notebook-surface .nb-review-card-title {
+  color: var(--gold-100);
+}
+html[data-theme="noir-gold"] .notebook-surface .nb-review-card-excerpt {
+  color: var(--nb-text-muted);
+  opacity: 1;
+}
+html[data-theme="noir-gold"] .notebook-surface .nb-review-card-path {
+  color: var(--nb-text-tertiary);
+  opacity: 1;
+}
+html[data-theme="noir-gold"] .notebook-surface .nb-review-col-empty {
+  color: var(--nb-text-tertiary);
+  opacity: 1;
+}
