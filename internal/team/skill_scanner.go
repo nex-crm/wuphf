@@ -17,6 +17,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -446,6 +447,47 @@ func sha256Hex(s string) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// fastPathSkillHeaders are the section titles that signal "this article is
+// actually a skill" — kept lowercase since matching is done case-insensitively.
+// Mirrors the rubric used by the eval harness so the regression test and
+// production behaviour stay aligned.
+var fastPathSkillHeaders = []string{
+	"## steps",
+	"## how to",
+	"## procedure",
+	"## workflow",
+	"## instructions",
+	"## process",
+	"## recipe",
+	"## runbook",
+	"## when this fires",
+}
+
+// fastPathListRe matches a numbered list line ("1. ", "2. " ...) or a bullet
+// item ("- ", "* ") at column 0. We ignore indented blockquote-style bullets
+// to avoid being fooled by typical decision-log "Pros / Cons" lists.
+var fastPathListRe = regexp.MustCompile(`(?m)^(?:\d+\.\s+|[-*]\s+)`)
+
+// hasSkillBodyShape reports whether body looks like an executable skill: at
+// least one section heading from fastPathSkillHeaders AND at least one list
+// or numbered-step line. Defends the explicit-frontmatter fast path against
+// articles that carry name+description for unrelated reasons (bios, decision
+// logs).
+func hasSkillBodyShape(body string) bool {
+	lower := strings.ToLower(body)
+	hasHeader := false
+	for _, h := range fastPathSkillHeaders {
+		if strings.Contains(lower, h) {
+			hasHeader = true
+			break
+		}
+	}
+	if !hasHeader {
+		return false
+	}
+	return fastPathListRe.MatchString(body)
+}
+
 // stringOr returns s when non-empty, else fallback.
 func stringOr(s, fallback string) string {
 	if strings.TrimSpace(s) == "" {
@@ -562,15 +604,25 @@ func (p *defaultLLMProvider) AskIsSkill(ctx context.Context, articlePath, articl
 		return false, SkillFrontmatter{}, "", err
 	}
 
-	// Fast path: explicit frontmatter opt-in.
+	// Fast path: explicit frontmatter opt-in. Authors who write valid
+	// Anthropic Agent Skills frontmatter (name + description) skip the LLM
+	// classification AS LONG AS the body actually looks like a skill —
+	// otherwise we fall through and let the LLM make the call. This blocks
+	// the FAST_PATH_TRAP failure mode (D9): a bio or decision-log article
+	// that happened to ship name+description fields used to get promoted
+	// unconditionally.
 	if fm, body, parseErr := ParseSkillMarkdown([]byte(articleContent)); parseErr == nil {
-		if strings.TrimSpace(fm.Version) == "" {
-			fm.Version = "1.0.0"
+		if hasSkillBodyShape(body) {
+			if strings.TrimSpace(fm.Version) == "" {
+				fm.Version = "1.0.0"
+			}
+			if strings.TrimSpace(fm.License) == "" {
+				fm.License = "MIT"
+			}
+			return true, fm, body, nil
 		}
-		if strings.TrimSpace(fm.License) == "" {
-			fm.License = "MIT"
-		}
-		return true, fm, body, nil
+		slog.Info("skill_scanner: explicit frontmatter present but body lacks skill shape, falling back to LLM judgment",
+			"path", articlePath)
 	}
 
 	// LLM path: wrap the caller's context with a per-call deadline so a slow
