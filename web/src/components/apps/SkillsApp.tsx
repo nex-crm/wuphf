@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
@@ -6,13 +6,16 @@ import {
   type CompileResponse,
   type CompileResult,
   compileSkills,
+  getOfficeTasks,
   getSkills,
   invokeSkill,
   rejectSkill,
   type Skill,
   type SkillStatus,
+  type Task,
   undoRejectSkill,
 } from "../../api/client";
+import { useAppStore } from "../../stores/app";
 import { showNotice, showUndoToast } from "../ui/Toast";
 
 type CompileState = "idle" | "compiling" | "done";
@@ -400,6 +403,13 @@ function SkillProvenance({ articles }: { articles: string[] }) {
   );
 }
 
+type InvokePhase = "idle" | "invoking" | "running" | "done" | "failed";
+
+function isTerminalTaskStatus(s: string | undefined): boolean {
+  if (!s) return false;
+  return ["done", "completed", "blocked", "cancelled", "canceled"].includes(s);
+}
+
 function SkillActions({
   status,
   skillName,
@@ -407,25 +417,71 @@ function SkillActions({
   status: SkillStatus;
   skillName: string;
 }) {
-  const [invokeState, setInvokeState] = useState<"idle" | "invoking" | "done">(
-    "idle",
-  );
+  const [invokePhase, setInvokePhase] = useState<InvokePhase>("idle");
+  const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [actionPending, setActionPending] = useState(false);
   const queryClient = useQueryClient();
+  const setCurrentApp = useAppStore((s) => s.setCurrentApp);
+
+  // Poll office tasks while a skill_run task is active so we can flip the
+  // badge from "running" → "done" / "failed" without relying on SSE alone.
+  const isPolling = invokePhase === "running";
+  const { data: officeTasks } = useQuery({
+    queryKey: ["office-tasks", "skill-run-watch"],
+    queryFn: () => getOfficeTasks({ includeDone: true }),
+    refetchInterval: isPolling ? 2_500 : false,
+    enabled: isPolling,
+  });
+
+  const activeTask: Task | undefined = useMemo(() => {
+    if (!activeTaskId) return undefined;
+    return officeTasks?.tasks.find((t) => t.id === activeTaskId);
+  }, [officeTasks, activeTaskId]);
+
+  // When the polled task reaches a terminal state, flip the phase.
+  useEffect(() => {
+    if (!isPolling || !activeTask) return;
+    if (isTerminalTaskStatus(activeTask.status)) {
+      const failed =
+        activeTask.status === "blocked" ||
+        activeTask.status === "cancelled" ||
+        activeTask.status === "canceled";
+      setInvokePhase(failed ? "failed" : "done");
+    }
+  }, [isPolling, activeTask]);
 
   const handleInvoke = useCallback(() => {
     if (!skillName) return;
-    setInvokeState("invoking");
+    setInvokePhase("invoking");
+    setActiveTaskId(null);
     invokeSkill(skillName, {})
-      .then(() => {
-        setInvokeState("done");
-        setTimeout(() => setInvokeState("idle"), 1500);
+      .then((res) => {
+        const tid = res?.task_id ?? null;
+        setActiveTaskId(tid);
+        // If the broker didn't return a task_id (older shapes / fast-path),
+        // fall back to the previous "✓ Invoked → idle" flash.
+        if (!tid) {
+          setInvokePhase("done");
+          setTimeout(() => setInvokePhase("idle"), 1500);
+          return;
+        }
+        setInvokePhase("running");
       })
       .catch((e: Error) => {
-        setInvokeState("idle");
+        setInvokePhase("idle");
         showNotice(`Invoke failed: ${e.message}`, "error");
       });
   }, [skillName]);
+
+  const handleViewTask = useCallback(() => {
+    if (!activeTaskId) return;
+    setCurrentApp("tasks");
+  }, [activeTaskId, setCurrentApp]);
+
+  const handleResetInvoke = useCallback(() => {
+    setInvokePhase("idle");
+    setActiveTaskId(null);
+  }, []);
 
   const handleApprove = useCallback(() => {
     if (!skillName) return;
@@ -505,22 +561,131 @@ function SkillActions({
       </>
     );
   }
-  // active
-  const invokeLabel =
-    invokeState === "invoking"
-      ? "Invoking..."
-      : invokeState === "done"
-        ? "✓ Invoked"
-        : "⚡ Invoke";
+  // active — show invoke button + live task chip
   return (
-    <button
-      type="button"
-      className="btn btn-primary btn-sm"
-      disabled={invokeState !== "idle"}
-      onClick={handleInvoke}
+    <div
+      style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}
     >
-      {invokeLabel}
-    </button>
+      <button
+        type="button"
+        className="btn btn-primary btn-sm"
+        disabled={invokePhase === "invoking" || invokePhase === "running"}
+        onClick={handleInvoke}
+      >
+        {invokePhase === "invoking"
+          ? "Invoking..."
+          : invokePhase === "running"
+            ? "Running..."
+            : invokePhase === "done"
+              ? "✓ Invoked"
+              : invokePhase === "failed"
+                ? "Try again"
+                : "⚡ Invoke"}
+      </button>
+
+      {activeTaskId ? (
+        <SkillRunChip
+          phase={invokePhase}
+          taskId={activeTaskId}
+          taskStatus={activeTask?.status}
+          taskTitle={activeTask?.title}
+          onView={handleViewTask}
+          onDismiss={handleResetInvoke}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function SkillRunChip({
+  phase,
+  taskId,
+  taskStatus,
+  taskTitle,
+  onView,
+  onDismiss,
+}: {
+  phase: InvokePhase;
+  taskId: string;
+  taskStatus?: string;
+  taskTitle?: string;
+  onView: () => void;
+  onDismiss: () => void;
+}) {
+  const isRunning = phase === "running";
+  const isDone = phase === "done";
+  const isFailed = phase === "failed";
+  const dotColor = isFailed
+    ? "var(--red, #c43e3e)"
+    : isDone
+      ? "var(--green)"
+      : "var(--yellow)";
+  const label = isRunning
+    ? `Running ${taskId}`
+    : isFailed
+      ? `${taskStatus ?? "failed"} · ${taskId}`
+      : isDone
+        ? `${taskStatus ?? "done"} · ${taskId}`
+        : taskId;
+  return (
+    <span
+      title={taskTitle || taskId}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        padding: "2px 8px",
+        fontSize: 12,
+        background: "var(--bg-warm, var(--neutral-100))",
+        border: "1px solid var(--border-subtle, var(--neutral-200))",
+        borderRadius: 999,
+        color: "var(--text-secondary)",
+      }}
+    >
+      <span
+        aria-hidden="true"
+        style={{
+          width: 6,
+          height: 6,
+          borderRadius: "50%",
+          background: dotColor,
+          animation: isRunning ? "pulse-dot 1.2s ease-in-out infinite" : "none",
+        }}
+      />
+      <span style={{ fontFamily: "var(--font-mono)" }}>{label}</span>
+      <button
+        type="button"
+        onClick={onView}
+        style={{
+          border: "none",
+          background: "transparent",
+          padding: 0,
+          color: "var(--accent, #1264a3)",
+          fontSize: 12,
+          cursor: "pointer",
+        }}
+      >
+        View →
+      </button>
+      {(isDone || isFailed) ? (
+        <button
+          type="button"
+          onClick={onDismiss}
+          aria-label="Dismiss"
+          style={{
+            border: "none",
+            background: "transparent",
+            padding: 0,
+            color: "var(--text-tertiary)",
+            fontSize: 14,
+            cursor: "pointer",
+            lineHeight: 1,
+          }}
+        >
+          ×
+        </button>
+      ) : null}
+    </span>
   );
 }
 

@@ -611,8 +611,20 @@ export function getSkills() {
   return get<{ skills: Skill[] }>("/skills");
 }
 
-export function invokeSkill(name: string, params?: Record<string, unknown>) {
-  return post(`/skills/${encodeURIComponent(name)}/invoke`, params ?? {});
+export interface InvokeSkillResult {
+  channel?: string;
+  skill?: Skill;
+  task_id?: string;
+}
+
+export function invokeSkill(
+  name: string,
+  params?: Record<string, unknown>,
+): Promise<InvokeSkillResult> {
+  return post<InvokeSkillResult>(
+    `/skills/${encodeURIComponent(name)}/invoke`,
+    params ?? {},
+  );
 }
 
 // ── Skill compile (PR 1a wiki-skill-compile) ──
