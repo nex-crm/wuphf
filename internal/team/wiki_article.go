@@ -107,14 +107,23 @@ func (r *Repo) BuildCatalog(ctx context.Context) ([]CatalogEntry, error) {
 		}
 		if d.IsDir() {
 			// team/inbox/ holds raw ingested source material (scanner dumps),
-			// not curated wiki content. Excluding it here keeps the catalog
-			// and UI focused on synthesized briefs/playbooks/decisions; the
-			// raw files are still reachable by direct path via /wiki/read
-			// for agents that want to cite them.
+			// not curated wiki content. team/skills/ holds the SKILL.md output
+			// of the wiki-skill-compile pipeline, surfaced via /skills not the
+			// wiki article tree. Excluding both here keeps the catalog and UI
+			// focused on synthesized briefs/playbooks/decisions; the raw files
+			// are still reachable by direct path via /wiki/read for agents
+			// that want to cite them.
 			rel, relErr := filepath.Rel(r.Root(), path)
-			if relErr == nil && filepath.ToSlash(rel) == "team/inbox" {
-				return filepath.SkipDir
+			if relErr == nil {
+				slash := filepath.ToSlash(rel)
+				if slash == "team/inbox" || slash == "team/skills" {
+					return filepath.SkipDir
+				}
 			}
+			return nil
+		}
+		// Skip dot-prefixed files (system markers, tombstones, sentinels).
+		if strings.HasPrefix(d.Name(), ".") {
 			return nil
 		}
 		if !strings.HasSuffix(path, ".md") {

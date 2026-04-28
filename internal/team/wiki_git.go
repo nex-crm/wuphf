@@ -558,9 +558,17 @@ func (r *Repo) regenerateIndexLocked() error {
 			return walkErr
 		}
 		if info.IsDir() {
+			rel, _ := filepath.Rel(r.root, path)
+			rel = filepath.ToSlash(rel)
+			if rel == "team/skills" || strings.HasPrefix(rel, "team/skills/") {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		if filepath.Base(path) == ".gitkeep" {
+			return nil
+		}
+		if strings.HasPrefix(filepath.Base(path), ".") {
 			return nil
 		}
 		if !strings.HasSuffix(strings.ToLower(path), ".md") {
