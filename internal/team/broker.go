@@ -11421,6 +11421,44 @@ func (b *Broker) appendSkillProposalRequestLocked(skill teamSkill, channel, now 
 	b.requests = append(b.requests, interview)
 }
 
+// drainSkillProposalRequestsLocked marks every pending skill_proposal interview
+// whose ReplyTo matches skillName as answered. Use after a skill is approved /
+// rejected via the direct endpoints (handleSkillApprove / handleSkillReject)
+// so the matching interview-queue entries don't pile up as orphans (D8).
+//
+// Caller must hold b.mu. Returns the number of requests drained.
+func (b *Broker) drainSkillProposalRequestsLocked(skillName, choiceID, now string) int {
+	target := skillSlug(skillName)
+	if target == "" {
+		return 0
+	}
+	count := 0
+	for i := range b.requests {
+		r := &b.requests[i]
+		if r.Kind != "skill_proposal" || r.Status != "pending" {
+			continue
+		}
+		if skillSlug(r.ReplyTo) != target {
+			continue
+		}
+		r.Status = "answered"
+		r.UpdatedAt = now
+		r.Answered = &interviewAnswer{
+			ChoiceID:   choiceID,
+			AnsweredAt: now,
+		}
+		r.ReminderAt = ""
+		r.FollowUpAt = ""
+		r.RecheckAt = ""
+		r.DueAt = ""
+		count++
+	}
+	if count > 0 {
+		b.pendingInterview = firstBlockingRequest(b.requests)
+	}
+	return count
+}
+
 // SeedDefaultSkills pre-populates the broker with the pack's default skills.
 // It is idempotent: skills whose name already exists (by slug) are skipped.
 // Call this after broker.Start() from the Launcher so that the first time a

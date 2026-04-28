@@ -92,6 +92,25 @@ class ScenarioResult:
     detail: str = ""
 
 
+@dataclass
+class VolumeMetrics:
+    """How much noise the pipeline created against the human-interview queue.
+
+    The skill compiler creates one `skill_proposal` request per promotion.
+    A healthy run creates exactly one request per *expected* promotion and
+    drains them on approve / reject. Over-promotion (D8) and duplicate
+    proposals (the same slug appearing in the queue more than once) are
+    both bad outcomes the user feels as "48 things to action".
+    """
+
+    proposals_created: int = 0
+    requests_added: int = 0
+    expected_promotions: int = 0
+    over_promotions: int = 0  # actual_promoted - expected_promotions
+    duplicate_proposals: int = 0  # same slug appearing in queue >1 time
+    orphan_requests: int = 0  # skill_proposal entries with no corresponding skill
+
+
 # ---------- HTTP helpers ----------
 
 
@@ -334,6 +353,20 @@ def list_skills(broker: str, token: str) -> list[dict[str, Any]]:
     return list(body.get("skills") or [])
 
 
+def list_requests(broker: str, token: str) -> list[dict[str, Any]]:
+    code, body = http_request("GET", f"{broker}/requests", token=token)
+    if code != 200 or not isinstance(body, dict):
+        return []
+    return list(body.get("requests") or [])
+
+
+def get_compile_stats(broker: str, token: str) -> dict[str, Any]:
+    code, body = http_request("GET", f"{broker}/skills/compile/stats", token=token)
+    if code != 200 or not isinstance(body, dict):
+        return {}
+    return body
+
+
 def trigger_compile(broker: str, token: str) -> dict[str, Any]:
     # Compile may run a Stage B LLM synthesis pass on top of the fast-path
     # scan, so allow generous time for live LLM round-trips.
@@ -351,7 +384,7 @@ def evaluate(
     home: Path,
     scenarios: list[Scenario],
     keep_artifacts: bool,
-) -> list[ScenarioResult]:
+) -> tuple[list[ScenarioResult], VolumeMetrics]:
     playbooks = home / WIKI_PLAYBOOKS_REL
     skills = home / WIKI_SKILLS_REL
     promoted_slugs: list[str] = []
@@ -389,6 +422,14 @@ def evaluate(
         rejected_md.write_text("".join(kept_lines), encoding="utf-8")
     seed_corpus(playbooks, scenarios, run_id)
 
+    # Snapshot proposal counters + interview queue BEFORE compile so we can
+    # measure how much noise this run added to both surfaces.
+    stats_before = get_compile_stats(broker, token)
+    requests_before = list_requests(broker, token)
+    skill_props_before = sum(
+        1 for r in requests_before if r.get("kind") == "skill_proposal"
+    )
+
     print("[eval] triggering /skills/compile")
     compile_result = trigger_compile(broker, token)
     print(f"[eval] compile response: {json.dumps(compile_result, indent=2)}")
@@ -398,6 +439,8 @@ def evaluate(
 
     skills_after = list_skills(broker, token)
     by_name = {s["name"]: s for s in skills_after}
+    requests_after = list_requests(broker, token)
+    stats_after = get_compile_stats(broker, token)
 
     # Build a slug→error map from the compile response so we can label
     # guard_rejected accurately.
@@ -447,9 +490,51 @@ def evaluate(
             )
         )
 
+    # Volume metrics: skill_proposal requests created in this run, plus
+    # duplicate / orphan detection across the interview queue.
+    expected_promotions = sum(1 for sc in scenarios if sc.expected == "promoted")
+    actual_promoted = sum(1 for r in results if r.actual == "promoted")
+
+    skill_props_after = [r for r in requests_after if r.get("kind") == "skill_proposal"]
+    requests_added = max(0, len(skill_props_after) - skill_props_before)
+    proposals_delta = max(
+        0,
+        int(stats_after.get("proposals_created_total", 0))
+        - int(stats_before.get("proposals_created_total", 0)),
+    )
+
+    # Duplicate detection: how many slugs appear more than once in the
+    # pending interview queue. Each promotion should land exactly one
+    # request; duplicates mean a re-promotion path created an orphan.
+    pending_props = [r for r in skill_props_after if r.get("status") == "pending"]
+    slug_counts: dict[str, int] = {}
+    for r in pending_props:
+        slug = skillSlugFromText(r.get("reply_to") or r.get("title") or "")
+        slug_counts[slug] = slug_counts.get(slug, 0) + 1
+    duplicate_proposals = sum(c - 1 for c in slug_counts.values() if c > 1)
+
+    # Orphan detection: pending skill_proposal requests with reply_to that
+    # doesn't match any current skill. These are the D8-style ghosts.
+    skill_names = {s.get("name") for s in skills_after}
+    orphan_requests = sum(
+        1
+        for r in pending_props
+        if (r.get("reply_to") or "") and r.get("reply_to") not in skill_names
+    )
+
+    metrics = VolumeMetrics(
+        proposals_created=proposals_delta,
+        requests_added=requests_added,
+        expected_promotions=expected_promotions,
+        over_promotions=max(0, actual_promoted - expected_promotions),
+        duplicate_proposals=duplicate_proposals,
+        orphan_requests=orphan_requests,
+    )
+
     if not keep_artifacts:
         # Reject every promoted eval skill so the broker's in-memory state
-        # also forgets about them.
+        # also forgets about them. With the D8 fix in place this also drains
+        # the matching skill_proposal interview requests.
         for slug in promoted_slugs:
             try:
                 reject_skill(broker, token, slug, "skill_eval cleanup")
@@ -458,7 +543,14 @@ def evaluate(
         cleanup_promoted_slugs(skills, promoted_slugs)
         cleanup_corpus(playbooks, skills)
 
-    return results
+    return results, metrics
+
+
+def skillSlugFromText(s: str) -> str:
+    s = s.strip().lower()
+    if s.startswith("approve skill: "):
+        s = s[len("approve skill: ") :]
+    return s.replace(" ", "-").replace("_", "-")
 
 
 # ---------- Reporting ----------
@@ -482,7 +574,7 @@ def confusion_matrix(results: list[ScenarioResult]) -> str:
     return "\n".join(rows)
 
 
-def render_markdown_report(results: list[ScenarioResult]) -> str:
+def render_markdown_report(results: list[ScenarioResult], metrics: VolumeMetrics) -> str:
     total = len(results)
     correct = sum(1 for r in results if r.correct)
     promoted = [r for r in results if r.actual == "promoted" and r.quality]
@@ -499,6 +591,13 @@ def render_markdown_report(results: list[ScenarioResult]) -> str:
         out.append(
             f"- **Promoted-skill quality:** {avg_q:.1f}% mean over {len(promoted)} files"
         )
+    out.append(
+        f"- **Proposal volume:** {metrics.proposals_created} created, "
+        f"{metrics.requests_added} interview requests, "
+        f"{metrics.over_promotions} over-promotions, "
+        f"{metrics.duplicate_proposals} duplicates, "
+        f"{metrics.orphan_requests} orphan requests"
+    )
     out.append("")
     out.append("## Confusion matrix")
     out.append("")
@@ -536,6 +635,36 @@ def render_markdown_report(results: list[ScenarioResult]) -> str:
                 f"| `{ck}` | {passed}/{len(promoted)} ({100.0*passed/len(promoted):.0f}%) |"
             )
     return "\n".join(out) + "\n"
+
+
+def print_volume_report(metrics: VolumeMetrics) -> None:
+    print()
+    print("=" * 78)
+    print("PROPOSAL VOLUME (interview-queue load)")
+    print("=" * 78)
+    print(f"  expected promotions:    {metrics.expected_promotions}")
+    print(f"  proposals created:      {metrics.proposals_created}")
+    print(f"  requests added:         {metrics.requests_added}")
+    print(f"  over-promotion:         {metrics.over_promotions}")
+    print(f"  duplicate proposals:    {metrics.duplicate_proposals}")
+    print(f"  orphan requests:        {metrics.orphan_requests}")
+    issues: list[str] = []
+    if metrics.over_promotions > 0:
+        issues.append(f"  ! over-promoted by {metrics.over_promotions}")
+    if metrics.requests_added > metrics.proposals_created:
+        issues.append(
+            f"  ! requests_added ({metrics.requests_added}) > proposals_created ({metrics.proposals_created})"
+        )
+    if metrics.duplicate_proposals > 0:
+        issues.append(f"  ! {metrics.duplicate_proposals} duplicate proposals in queue")
+    if metrics.orphan_requests > 0:
+        issues.append(f"  ! {metrics.orphan_requests} orphan requests")
+    if issues:
+        print("\nFLAGS:")
+        for issue in issues:
+            print(issue)
+    else:
+        print("\n  no volume flags")
 
 
 def print_report(results: list[ScenarioResult]) -> None:
@@ -644,15 +773,23 @@ def main() -> int:
     home = Path(args.home)
 
     print(f"[eval] broker={args.broker}  home={home}  scenarios={len(scenarios)}")
-    results = evaluate(args.broker, token, home, scenarios, keep_artifacts=args.keep)
+    results, metrics = evaluate(args.broker, token, home, scenarios, keep_artifacts=args.keep)
     print_report(results)
+    print_volume_report(metrics)
 
     if args.report:
-        Path(args.report).write_text(render_markdown_report(results), encoding="utf-8")
+        Path(args.report).write_text(
+            render_markdown_report(results, metrics), encoding="utf-8"
+        )
         print(f"\n[eval] markdown report written to {args.report}")
 
     correct = sum(1 for r in results if r.correct)
-    return 0 if correct == len(results) else 1
+    healthy_volume = (
+        metrics.over_promotions == 0
+        and metrics.duplicate_proposals == 0
+        and metrics.orphan_requests == 0
+    )
+    return 0 if correct == len(results) and healthy_volume else 1
 
 
 if __name__ == "__main__":

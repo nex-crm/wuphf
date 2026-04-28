@@ -458,6 +458,10 @@ func (b *Broker) handleSkillApprove(w http.ResponseWriter, r *http.Request, name
 		actor = "system"
 	}
 	b.appendActionLocked("skill_approved", "office", channel, actor, truncateSummary(skCopy.Title+" [approved]", 140), skCopy.ID)
+	// D8 fix: drain matching skill_proposal interview requests so direct
+	// approve through the /skills/{name}/approve endpoint doesn't leave
+	// orphan entries piling up in the human-interview queue.
+	b.drainSkillProposalRequestsLocked(skCopy.Name, "accept", now)
 
 	// Re-render with status=active so the wiki copy matches in-memory state.
 	fm := teamSkillToFrontmatter(skCopy)
@@ -530,6 +534,9 @@ func (b *Broker) handleSkillReject(w http.ResponseWriter, r *http.Request, name 
 		actor = "system"
 	}
 	b.appendActionLocked("skill_rejected", "office", channel, actor, truncateSummary(skCopy.Title+" [rejected]", 140), skCopy.ID)
+	// D8 fix: drain the matching skill_proposal interview request so we
+	// don't leave orphan entries cluttering the human-interview queue.
+	b.drainSkillProposalRequestsLocked(skCopy.Name, "reject", now.Format(time.RFC3339))
 
 	// Resolve the source article from the on-disk SKILL.md. The scanner
 	// stamps source_articles[0] into the frontmatter when it promotes an

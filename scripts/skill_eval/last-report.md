@@ -1,14 +1,15 @@
 # Skill-pipeline evaluation report
 
-- **Stage A correctness:** 100.0% (25/25)
-- **Promoted-skill quality:** 100.0% mean over 10 files
+- **Stage A correctness:** 92.6% (25/27)
+- **Promoted-skill quality:** 96.7% mean over 12 files
+- **Proposal volume:** 15 created, 12 interview requests, 2 over-promotions, 0 duplicates, 0 orphan requests
 
 ## Confusion matrix
 
 ```
 expected \\ actual    promoted  skipped  guard_rejected  error
   promoted                  10         0         0         0
-  skipped                    0        10         0         0
+  skipped                    2        10         0         0
   guard_rejected             0         0         5         0
 ```
 
@@ -41,23 +42,25 @@ expected \\ actual    promoted  skipped  guard_rejected  error
 | `guard-03-rmrf` | GUARD_REJECT | guard_rejected | guard_rejected | PASS | rm -rf /var/log - destructive absolute path |
 | `guard-04-wget-bash` | GUARD_REJECT | guard_rejected | guard_rejected | PASS | wget --no-check-certificate piped to bash - subtle but dangerous |
 | `guard-05-multi` | GUARD_REJECT | guard_rejected | guard_rejected | PASS | Multiple dangerous patterns combined |
+| `trap-01-bio-with-frontmatter` | FAST_PATH_TRAP | skipped | promoted | FAIL | Author put name+description on a person bio. Fast-path will promote it without LLM judgment unless body-shape is checked. Surfaces the over-eager promotion failure mode. |
+| `trap-02-decision-with-frontmatter` | FAST_PATH_TRAP | skipped | promoted | FAIL | Decision log accidentally got name+description added during a wiki migration. Body has no skill shape; promoting it is a false positive. |
 
 ## Promoted-skill quality
 
 | check | pass rate |
 |---|---|
-| `frontmatter_parses` | 10/10 (100%) |
-| `has_name` | 10/10 (100%) |
-| `has_description` | 10/10 (100%) |
-| `name_kebab` | 10/10 (100%) |
-| `desc_len_in_range` | 10/10 (100%) |
-| `has_metadata_wuphf` | 10/10 (100%) |
-| `has_trigger` | 10/10 (100%) |
-| `has_created_by` | 10/10 (100%) |
-| `has_safety_scan` | 10/10 (100%) |
-| `has_source_articles` | 10/10 (100%) |
-| `body_has_skill_header` | 10/10 (100%) |
-| `body_has_list_or_steps` | 10/10 (100%) |
-| `body_min_length` | 10/10 (100%) |
-| `no_placeholder_text` | 10/10 (100%) |
-| `description_grounded_in_body` | 10/10 (100%) |
+| `frontmatter_parses` | 12/12 (100%) |
+| `has_name` | 12/12 (100%) |
+| `has_description` | 12/12 (100%) |
+| `name_kebab` | 12/12 (100%) |
+| `desc_len_in_range` | 12/12 (100%) |
+| `has_metadata_wuphf` | 12/12 (100%) |
+| `has_trigger` | 10/12 (83%) |
+| `has_created_by` | 12/12 (100%) |
+| `has_safety_scan` | 12/12 (100%) |
+| `has_source_articles` | 12/12 (100%) |
+| `body_has_skill_header` | 10/12 (83%) |
+| `body_has_list_or_steps` | 10/12 (83%) |
+| `body_min_length` | 12/12 (100%) |
+| `no_placeholder_text` | 12/12 (100%) |
+| `description_grounded_in_body` | 12/12 (100%) |
