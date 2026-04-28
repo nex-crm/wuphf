@@ -2399,6 +2399,19 @@ func (b *Broker) ServeWebUI(port int) {
 	// under /assets/ are content-addressed and safe to cache aggressively.
 	// Without this, users stay pinned to a stale bundle for days because
 	// Chrome's heuristic cache revalidates HTML only occasionally.
+	// Serve generated images from ~/.wuphf/office/artist/ so the BoardRoom
+	// can render them inline via standard markdown <img>. Browsers can't
+	// fetch file:// URLs and don't carry the broker's bearer token on
+	// <img> requests, so this mount must live on the web-UI port (no auth)
+	// rather than the API mux. Path traversal is bounded by http.FileServer
+	// + http.Dir; we strip the prefix so requests resolve relative to the
+	// artist root.
+	artistRoot := imagegenArtistRoot()
+	mux.Handle("/artist-files/", http.StripPrefix(
+		"/artist-files/",
+		http.FileServer(http.Dir(artistRoot)),
+	))
+
 	mux.Handle("/", cacheControlMiddleware(fileServer))
 	go func() {
 		if err := http.ListenAndServe(fmt.Sprintf("127.0.0.1:%d", port), mux); err != nil && !errors.Is(err, http.ErrServerClosed) {

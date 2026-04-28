@@ -139,7 +139,7 @@ func (n *nanoBanana) Generate(ctx context.Context, req Request) (Result, error) 
 		if part.InlineData.Data == "" {
 			continue
 		}
-		path, err := SavePNG(req.Prompt, []byte(part.InlineData.Data), true)
+		saved, err := SavePNG(req.Prompt, []byte(part.InlineData.Data), true)
 		if err != nil {
 			return Result{}, err
 		}
@@ -147,7 +147,7 @@ func (n *nanoBanana) Generate(ctx context.Context, req Request) (Result, error) 
 			Provider:   KindNanoBanana,
 			Model:      model,
 			PromptUsed: req.Prompt,
-			ImageURL:   "file://" + path,
+			ImageURL:   saved.HTTPURL,
 			MimeType:   part.InlineData.MimeType,
 			DurationMs: time.Since(startedAt).Milliseconds(),
 		}, nil

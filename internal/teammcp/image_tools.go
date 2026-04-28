@@ -37,7 +37,7 @@ func registerImageTools(server *mcp.Server) {
 	mcp.AddTool(server,
 		officeWriteTool(
 			"image_generate",
-			"Render an image (or video frame) from a text prompt. Pick `provider` deliberately: nano-banana for fast composition + text rendering, higgsfield for cinematic, gpt-image for photoreal hero shots, seedance for video, comfyui for self-hosted control. Returns the saved file path; post it to the channel via team_broadcast so others can see the result. Always state the prompt + provider + model in your post so the iteration is auditable.",
+			"Render an image (or video frame) from a text prompt. Pick `provider` deliberately: nano-banana for fast composition + text rendering, higgsfield for cinematic, gpt-image for photoreal hero shots, seedance for video, comfyui for self-hosted control. Returns {image_url, model, duration_ms}. The image_url is BoardRoom-relative (e.g. /artist-files/2026-04-28/abc123.png) and renders inline as a markdown image. Post the result to the channel via team_broadcast formatted as: `![alt](IMAGE_URL)\n\nPrompt: ...\nProvider: ...\nModel: ...` so the iteration is auditable AND visible.",
 		),
 		handleImageGenerate,
 	)

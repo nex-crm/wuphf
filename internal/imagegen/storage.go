@@ -26,34 +26,44 @@ func outputDir() string {
 	return filepath.Join(home, ".wuphf", "office", "artist")
 }
 
+// SaveResult is the output of SavePNG: both the on-disk path AND the
+// HTTP-relative URL the BoardRoom serves the file at. Callers should set
+// the HTTP URL on Result.ImageURL so the BoardRoom can render <img> inline,
+// and keep the disk path around for the agent's debug log.
+type SaveResult struct {
+	DiskPath string
+	HTTPURL  string // relative — `/artist-files/<date>/<file>.png`
+}
+
 // SavePNG writes a base64-encoded PNG (or raw bytes when b64=false) to disk
-// under outputDir/<date>/<sha-prefix>.png and returns the on-disk path.
-// The caller wraps the path into the URL it surfaces to the agent.
+// under outputDir/<date>/<sha-prefix>.png and returns both the on-disk
+// path and the HTTP-relative URL.
 //
 // Splitting this out here keeps every provider from re-rolling a tempfile
-// dance — they hand us bytes, we hand them a stable path.
-func SavePNG(prompt string, data []byte, b64 bool) (string, error) {
+// dance — they hand us bytes, we hand them a SaveResult.
+func SavePNG(prompt string, data []byte, b64 bool) (SaveResult, error) {
 	if b64 {
 		decoded, err := base64.StdEncoding.DecodeString(string(data))
 		if err != nil {
-			return "", fmt.Errorf("imagegen: decode base64: %w", err)
+			return SaveResult{}, fmt.Errorf("imagegen: decode base64: %w", err)
 		}
 		data = decoded
 	}
 	day := time.Now().UTC().Format("2006-01-02")
 	dir := filepath.Join(outputDir(), day)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return "", fmt.Errorf("imagegen: mkdir %q: %w", dir, err)
+		return SaveResult{}, fmt.Errorf("imagegen: mkdir %q: %w", dir, err)
 	}
 	// Filename: first 12 hex chars of sha256(prompt+timestamp). Stable enough
 	// for dedup, short enough to read in chat.
 	h := sha256.Sum256([]byte(prompt + time.Now().Format(time.RFC3339Nano)))
 	name := hex.EncodeToString(h[:6]) + ".png"
-	path := filepath.Join(dir, name)
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		return "", fmt.Errorf("imagegen: write %q: %w", path, err)
+	diskPath := filepath.Join(dir, name)
+	if err := os.WriteFile(diskPath, data, 0o600); err != nil {
+		return SaveResult{}, fmt.Errorf("imagegen: write %q: %w", diskPath, err)
 	}
-	return path, nil
+	httpURL := "/artist-files/" + day + "/" + name
+	return SaveResult{DiskPath: diskPath, HTTPURL: httpURL}, nil
 }
 
 // HTTPClientWithTimeout returns a shared *http.Client with a generous but
