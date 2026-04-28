@@ -1768,3 +1768,60 @@ html[data-theme="nex"]
     z-index: 10;
   }
 }
+
+/* ─── Sidebar color picker (footer) ─── */
+.sidebar-color-picker {
+  padding: 8px var(--sidebar-pad-x) 10px;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.sidebar-color-picker-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-tertiary);
+  margin-bottom: 6px;
+}
+.sidebar-color-picker-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.sidebar-color-swatch {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  padding: 0;
+  cursor: pointer;
+  position: relative;
+  transition: transform 0.1s, box-shadow 0.1s;
+}
+.sidebar-color-swatch:hover {
+  transform: scale(1.08);
+}
+.sidebar-color-swatch.is-active {
+  box-shadow: 0 0 0 2px var(--accent, var(--text));
+}
+.sidebar-color-swatch-custom {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--text-tertiary);
+  background: transparent;
+  overflow: hidden;
+}
+.sidebar-color-swatch-custom input[type="color"] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+  opacity: 0;
+}
