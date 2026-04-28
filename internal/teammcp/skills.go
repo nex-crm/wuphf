@@ -50,6 +50,8 @@ func registerSkillAuthoringTools(server *mcp.Server) {
 		"team_skill_create",
 		"Create or propose a durable WUPHF skill through structured fields instead of a prose block. Any agent may use action=propose to queue human approval. Only CEO may use action=create to activate immediately when the human explicitly asked to create or activate the skill.",
 	), handleTeamSkillCreate)
+	registerSkillCompileTools(server)
+	registerSkillCRUDTools(server)
 }
 
 // handleTeamSkillCreate creates a skill through the broker's structured API.
