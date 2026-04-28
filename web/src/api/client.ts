@@ -103,6 +103,22 @@ export async function post<T = unknown>(
   return r.json();
 }
 
+export async function put<T = unknown>(
+  path: string,
+  body?: unknown,
+): Promise<T> {
+  const r = await fetch(baseURL() + path, {
+    method: "PUT",
+    headers: authHeaders(),
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) {
+    const text = (await r.text().catch(() => "")).trim();
+    throw new Error(text || `${r.status} ${r.statusText}`);
+  }
+  return r.json();
+}
+
 export async function postWithTimeout<T = unknown>(
   path: string,
   body: unknown,
@@ -670,6 +686,7 @@ export function setMemory(namespace: string, key: string, value: string) {
 
 export type LLMProvider =
   | "claude-code"
+  | "ollama"
   | "codex"
   | "opencode"
   | "mlx-lm"
@@ -796,6 +813,38 @@ export function updateConfig(patch: ConfigUpdate) {
 // triggers outbound traffic.
 export function getLocalProvidersStatus() {
   return get<LocalProviderStatus[]>("/status/local-providers");
+}
+
+// ── Image generation ──
+
+export interface ImageProviderStatus {
+  kind: string;
+  label: string;
+  blurb: string;
+  reachable: boolean;
+  configured: boolean;
+  base_url?: string;
+  default_model?: string;
+  supported_models?: string[];
+  supports_image: boolean;
+  supports_video: boolean;
+  needs_api_key: boolean;
+  api_key_set: boolean;
+  implementation_ok: boolean;
+  setup_hint?: string;
+}
+
+export function getImageProviders() {
+  return get<{ providers: ImageProviderStatus[] }>("/image-providers");
+}
+
+export function setImageProviderConfig(opts: {
+  kind: string;
+  api_key?: string;
+  base_url?: string;
+  model?: string;
+}) {
+  return put<ImageProviderStatus[]>("/image-providers", opts);
 }
 
 // ── Workspace wipes (Danger Zone) ──

@@ -732,6 +732,9 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 		"Create, claim, assign, complete, block, resume, or release a shared task in the office task list.",
 	), handleTeamTask)
 
+	if slug == "artist" {
+		registerImageTools(server)
+	}
 	registerSharedMemoryTools(server)
 
 	mcp.AddTool(server, readOnlyTool(

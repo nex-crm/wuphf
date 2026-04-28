@@ -973,7 +973,7 @@ func NewBrokerAt(statePath string) *Broker {
 	}
 	b.mu.Lock()
 	b.ensureDefaultOfficeMembersLocked()
-	b.ensureDefaultChannelsLocked()
+	// b.ensureDefaultChannelsLocked() // removed — runs at state load only
 	b.normalizeLoadedStateLocked()
 	b.mu.Unlock()
 	b.stopCh = make(chan struct{})
@@ -1597,6 +1597,7 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/company", b.requireAuth(b.handleCompany))
 	mux.HandleFunc("/config", b.requireAuth(b.handleConfig))
 	mux.HandleFunc("/status/local-providers", b.requireAuth(b.handleLocalProvidersStatus))
+	mux.HandleFunc("/image-providers", b.requireAuth(b.handleImageProviders))
 	mux.HandleFunc("/nex/register", b.requireAuth(b.handleNexRegister))
 	mux.HandleFunc("/v1/logs", b.requireAuth(b.handleOTLPLogs))
 	mux.HandleFunc("/events", b.handleEvents)
@@ -2698,7 +2699,7 @@ func (b *Broker) EnsureBridgedMember(slug, name, createdBy string) error {
 	b.members = append(b.members, member)
 	// Make sure the bridged agent shows up in #general so @mentions work.
 	for i := range b.channels {
-		if b.channels[i].Slug == "general" {
+		if b.channels[i].Slug == "hanger8200" {
 			if !containsString(b.channels[i].Members, slug) {
 				b.channels[i].Members = append(b.channels[i].Members, slug)
 			}
@@ -3165,7 +3166,7 @@ func (b *Broker) loadState() error {
 	for i := range b.requests {
 		b.requests[i].Channel = channel.MigrateDMSlugString(b.requests[i].Channel)
 	}
-	b.ensureDefaultChannelsLocked()
+	// b.ensureDefaultChannelsLocked() // channels come from saved state
 	b.ensureDefaultOfficeMembersLocked()
 	b.normalizeLoadedStateLocked()
 	return nil
@@ -3410,7 +3411,7 @@ func (b *Broker) ensureDefaultChannelsLocked() {
 	}
 	hasGeneral := false
 	for _, ch := range b.channels {
-		if ch.Slug == "general" {
+		if ch.Slug == "hanger8200" {
 			hasGeneral = true
 			break
 		}
@@ -3495,7 +3496,7 @@ func (b *Broker) normalizeLoadedStateLocked() {
 		if strings.TrimSpace(b.channels[i].Description) == "" {
 			b.channels[i].Description = defaultTeamChannelDescription(b.channels[i].Slug, b.channels[i].Name)
 		}
-		if b.channels[i].Slug == "general" && len(b.channels[i].Members) < len(b.members) {
+		if b.channels[i].Slug == "hanger8200" && len(b.channels[i].Members) < len(b.members) {
 			// Re-populate general channel with all office members.
 			// This fixes stale state where only CEO survived a previous normalization.
 			allSlugs := make([]string, 0, len(b.members))
