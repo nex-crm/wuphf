@@ -1638,7 +1638,9 @@ func (b *Broker) StartOnPort(port int) error {
 		tokenFile = brokeraddr.ResolveTokenFile()
 	}
 	if tokenFile != "" {
-		_ = os.WriteFile(tokenFile, []byte(b.token), 0o600)
+		if err := os.WriteFile(tokenFile, []byte(b.token), 0o600); err != nil {
+			log.Printf("broker: failed to write token file %s: %v", tokenFile, err)
+		}
 	}
 
 	go func() {
@@ -2344,7 +2346,8 @@ func (b *Broker) handleAgentStream(w http.ResponseWriter, r *http.Request) {
 }
 
 // ServeWebUI starts a static file server for the web UI on the given port.
-func (b *Broker) ServeWebUI(port int) {
+// Returns an error if the port cannot be bound (e.g. already in use).
+func (b *Broker) ServeWebUI(port int) error {
 	b.webUIOrigins = []string{
 		fmt.Sprintf("http://localhost:%d", port),
 		fmt.Sprintf("http://127.0.0.1:%d", port),
@@ -2399,11 +2402,18 @@ func (b *Broker) ServeWebUI(port int) {
 	// Without this, users stay pinned to a stale bundle for days because
 	// Chrome's heuristic cache revalidates HTML only occasionally.
 	mux.Handle("/", cacheControlMiddleware(fileServer))
+	addr := fmt.Sprintf("127.0.0.1:%d", port)
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("web UI: listen on %s: %w", addr, err)
+	}
+	srv := &http.Server{Handler: mux}
 	go func() {
-		if err := http.ListenAndServe(fmt.Sprintf("127.0.0.1:%d", port), mux); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Printf("broker web UI proxy: listen on :%d: %v", port, err)
+		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Printf("broker web UI proxy: serve on :%d: %v", port, err)
 		}
 	}()
+	return nil
 }
 
 // cacheControlMiddleware sets conservative cache headers on the web UI so

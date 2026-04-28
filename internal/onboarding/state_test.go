@@ -191,6 +191,32 @@ func TestSaveProgressMergesCorrectly(t *testing.T) {
 	})
 }
 
+func TestCorruptStateFileRecovers(t *testing.T) {
+	withTempHome(t, func(home string) {
+		dir := filepath.Join(home, ".wuphf")
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatalf("MkdirAll: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "onboarded.json"), []byte("{corrupt json!!!"), 0o600); err != nil {
+			t.Fatalf("WriteFile: %v", err)
+		}
+
+		s, err := Load()
+		if err != nil {
+			t.Fatalf("Load should recover from corrupt file, got error: %v", err)
+		}
+		if s.Onboarded() {
+			t.Fatal("corrupt file should return onboarded=false")
+		}
+		if s.Version != currentStateVersion {
+			t.Errorf("Version: got %d, want %d", s.Version, currentStateVersion)
+		}
+		if len(s.Checklist) == 0 {
+			t.Fatal("corrupt file recovery should have default checklist")
+		}
+	})
+}
+
 func TestVersionBumpReturnsNotOnboarded(t *testing.T) {
 	withTempHome(t, func(home string) {
 		// Write a file that looks complete but with an old schema version.
