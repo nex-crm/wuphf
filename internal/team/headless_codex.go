@@ -71,10 +71,30 @@ func headlessCodexRunTurn(l *Launcher, ctx context.Context, slug, notification s
 	return defaultHeadlessCodexRunTurn(l, ctx, slug, notification, channel...)
 }
 
+// headlessCodexTurnTimeoutEnv reads a duration from env, falling back to the
+// supplied default when the var is unset, empty, non-positive, or unparseable.
+// Accepts any input time.ParseDuration accepts (e.g. "6m", "90s", "1h").
+//
+// The defaults below are intentionally tight (4m / 10m / 12m); operators
+// running slower providers (OpenRouter pooled queues, Kimi via Venice) or
+// tool-heavy turns may need to extend them. See
+// https://github.com/nex-crm/wuphf/issues/313.
+func headlessCodexTurnTimeoutEnv(name string, fallback time.Duration) time.Duration {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return fallback
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		return fallback
+	}
+	return d
+}
+
 var (
-	headlessCodexTurnTimeout              = 4 * time.Minute
-	headlessCodexOfficeLaunchTurnTimeout  = 10 * time.Minute
-	headlessCodexLocalWorktreeTurnTimeout = 12 * time.Minute
+	headlessCodexTurnTimeout              = headlessCodexTurnTimeoutEnv("WUPHF_TURN_TIMEOUT", 4*time.Minute)
+	headlessCodexOfficeLaunchTurnTimeout  = headlessCodexTurnTimeoutEnv("WUPHF_OFFICE_LAUNCH_TIMEOUT", 10*time.Minute)
+	headlessCodexLocalWorktreeTurnTimeout = headlessCodexTurnTimeoutEnv("WUPHF_WORKTREE_TIMEOUT", 12*time.Minute)
 	headlessCodexStaleCancelAfter         = 90 * time.Second
 	// Minimum age an active turn must have before an enqueue can preempt
 	// it via stale-cancel. Floors out tight re-enqueue loops where two
