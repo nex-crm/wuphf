@@ -417,3 +417,93 @@ html[data-theme="noir-gold"] .sidebar .sidebar-section-toggle svg {
 html[data-theme="noir-gold"] .sidebar .sidebar-section-toggle:hover svg {
   color: var(--gold-200);
 }
+
+/* ─── Notebook + Review subsurface — paper → aged gilt manuscript ───────
+   The notebook scopes its design tokens at `.notebook-surface` (per
+   DESIGN-NOTEBOOK.md). Override those tokens for noir-gold so the paper
+   metaphor reads as deep aged parchment / leather inner cover instead of
+   cream paper, with gold ink and gold rules. All review subviews use the
+   same tokens and pick up the change automatically. */
+
+html[data-theme="noir-gold"] .notebook-surface {
+  --nb-paper:          #1a160e;
+  --nb-paper-dark:     #14110a;
+  --nb-rule:           rgba(201, 162, 39, 0.07);
+  --nb-surface:        #18140d;
+  --nb-text:           #e8d9a8;
+  --nb-text-muted:     #b39e6b;
+  --nb-text-tertiary:  #7a6a45;
+  --nb-border:         #2a261d;
+  --nb-border-light:   #1f1c14;
+  --nb-ink-blue:       #88a4c2;
+  --nb-stamp-red:      #d6443c;
+  --nb-amber:          var(--gold-400);
+  --nb-amber-bg:       rgba(201, 162, 39, 0.10);
+  --nb-amber-hover:    var(--gold-300);
+  --nb-green-approve:  var(--green);
+  --nb-green-bg:       rgba(47, 170, 100, 0.10);
+}
+
+/* The literal rgba(42, 39, 33, X) calls in notebook.css are the dark
+   paper-ink color at low opacity — meant to read as a hint of ink on
+   cream paper. On dark parchment that math inverts: we want the gold
+   cream color at low opacity instead. */
+html[data-theme="noir-gold"] .notebook-surface .nb-shelf-item:hover {
+  background: rgba(232, 217, 168, 0.06);
+}
+html[data-theme="noir-gold"] .notebook-surface .nb-shelf-item.is-current {
+  background: rgba(232, 217, 168, 0.10);
+}
+html[data-theme="noir-gold"] .notebook-surface .nb-shelf-item .nb-shelf-meta,
+html[data-theme="noir-gold"] .notebook-surface .nb-shelf-card .nb-shelf-card-meta > span:not([class]) {
+  color: var(--nb-text-tertiary);
+}
+html[data-theme="noir-gold"] .notebook-surface .nb-tag,
+html[data-theme="noir-gold"] .notebook-surface .nb-frontmatter-key {
+  background: rgba(232, 217, 168, 0.08);
+  color: var(--nb-text-muted);
+}
+/* Card / shelf box-shadow — was warm ink on cream; switch to gold soft glow */
+html[data-theme="noir-gold"] .notebook-surface .nb-shelf-card {
+  box-shadow:
+    0 1px 1px rgba(0, 0, 0, 0.4),
+    0 1px 2px rgba(201, 162, 39, 0.06);
+}
+html[data-theme="noir-gold"] .notebook-surface .nb-shelf-card:hover {
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.55),
+    0 2px 4px rgba(201, 162, 39, 0.10);
+}
+/* Sticky-note / draft stamp text colors that hardcoded gray/amber */
+html[data-theme="noir-gold"] .notebook-surface .nb-empty-hint {
+  color: var(--nb-text-tertiary);
+}
+html[data-theme="noir-gold"] .notebook-surface .nb-frontmatter-readonly {
+  color: var(--nb-amber);
+}
+
+/* ─── Wiki shell (around the notebook) ─── */
+
+/* "NEW" / type pill — was teal #CFF5F5/#0F5C5C, jarring on noir-gold */
+html[data-theme="noir-gold"] .wk-section-new {
+  background: var(--accent-bg);
+  color: var(--gold-200);
+  border: 1px solid rgba(201, 162, 39, 0.4);
+}
+
+/* Playbook synthesis status (success/error border + text) — keep semantic
+   green/red but warm them so they read on dark gold parchment */
+html[data-theme="noir-gold"] .wk-playbook-synthesis[data-state='success'] .wk-playbook-synthesis__button {
+  color: var(--green);
+  border-color: var(--green);
+}
+html[data-theme="noir-gold"] .wk-playbook-synthesis[data-state='error'] .wk-playbook-synthesis__button {
+  color: var(--red);
+  border-color: var(--red);
+}
+html[data-theme="noir-gold"] .wk-playbook-synthesis__pending {
+  color: var(--gold-300);
+}
+html[data-theme="noir-gold"] .wk-playbook-synthesis__button:hover:not([disabled]) {
+  background: var(--overlay);
+}

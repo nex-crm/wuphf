@@ -1778,6 +1778,14 @@ html[data-theme="nex"]
   padding: 8px var(--sidebar-pad-x) 10px;
   border-top: 1px solid var(--border);
   flex-shrink: 0;
+  /* Pin to the bottom of the sidebar so it stays visible even when the
+     sidebar content overflows and the user scrolls up. The sidebar root
+     uses overflow-y:auto, which gives sticky a positioned ancestor. */
+  position: sticky;
+  bottom: 0;
+  background: var(--bg-card);
+  z-index: 2;
+  margin-top: auto;
 }
 .sidebar-color-picker-label {
   font-size: 10px;
