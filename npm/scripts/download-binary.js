@@ -267,4 +267,8 @@ module.exports = {
   // Exported for tests.
   expectedHashFor,
   sha256OfFile,
+  detectPlatform,
+  archiveExtension,
+  archiveName,
+  binaryFilename,
 };

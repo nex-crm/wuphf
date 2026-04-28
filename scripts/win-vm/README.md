@@ -4,6 +4,14 @@ Local cross-platform test harness for verifying `wuphf` on Windows ARM64
 without leaving the Mac. Built for the Product Hunt launch — Mac (this
 machine) and Linux (CI) we can verify directly; Windows needs a VM.
 
+> **CI does not use this harness.** Automated Windows coverage runs on
+> GitHub-hosted `windows-latest` runners (see `.github/workflows/ci.yml` —
+> the `windows-smoke`, `go-cross-build`, and `release-build` jobs). This
+> directory is for hands-on local triage on Apple Silicon when CI flags
+> something you want to reproduce interactively. Don't try to wire it into
+> Actions; the VM bring-up steps require macOS host tooling (UTM,
+> AppleScript, hdiutil) that no hosted runner provides.
+
 ## What lives here
 
 | File | Purpose |

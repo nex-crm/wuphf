@@ -7,6 +7,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -311,24 +312,21 @@ func main() {
 
 	// Non-interactive: piped stdin
 	if isPiped() {
-		scanner := bufio.NewScanner(os.Stdin)
-		any := false
-		for scanner.Scan() {
-			any = true
-			dispatch(scanner.Text(), *apiKeyFlag, *format)
-		}
-		if err := scanner.Err(); err != nil {
+		handled, err := consumePipedStdin(os.Stdin, func(line string) {
+			dispatch(line, *apiKeyFlag, *format)
+		})
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "error reading stdin: %v\n", err)
 			os.Exit(1)
 		}
-		// Fall through to interactive launch when stdin is a non-TTY but has
-		// no actual data — happens routinely on Windows when the binary is
-		// spawned via SSH, scheduled tasks, or PowerShell Start-Process,
-		// where the inherited stdin is a closed pipe rather than a console
-		// handle. Without this, the binary exits silently on first launch.
-		if any {
+		if handled {
 			return
 		}
+		// Fall through: stdin was a non-TTY pipe but had no data. This is the
+		// common case on Windows when the binary is spawned via SSH,
+		// scheduled tasks, or PowerShell Start-Process — the inherited stdin
+		// is a closed pipe rather than a console handle. Without falling
+		// through, the binary would exit silently on first launch.
 	}
 
 	// No startup upgrade notice here: the npm shim (npm/bin/wuphf.js, PR
@@ -625,6 +623,29 @@ func isPiped() bool {
 		return false
 	}
 	return info.Mode()&os.ModeCharDevice == 0
+}
+
+// consumePipedStdin reads newline-delimited commands from r and invokes
+// dispatch on each. It returns handled=true only if at least one line was
+// dispatched — the empty-pipe case (handled=false) is the signal that the
+// caller should fall through to the normal interactive launch.
+//
+// This split exists because os.Stdin reads as a non-character-device on
+// Windows whenever the binary is spawned via SSH, scheduled tasks, or
+// PowerShell Start-Process — even when no data is piped in. Treating those
+// closed/empty pipes as "non-interactive command stream" causes wuphf to
+// exit silently on every fresh launch, which is the Windows-launch bug PR
+// #380 fixes.
+func consumePipedStdin(r io.Reader, dispatch func(line string)) (handled bool, err error) {
+	scanner := bufio.NewScanner(r)
+	for scanner.Scan() {
+		handled = true
+		dispatch(scanner.Text())
+	}
+	if scanErr := scanner.Err(); scanErr != nil {
+		return handled, scanErr
+	}
+	return handled, nil
 }
 
 // shredSummary is the human-readable blast-radius blurb printed during the
