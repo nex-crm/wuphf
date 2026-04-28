@@ -5882,6 +5882,72 @@ func TestInvokeSkillTracksInvokerChannelAndExecutionMetadata(t *testing.T) {
 	}
 }
 
+func TestInvokeSkillCreatesSkillRunTask(t *testing.T) {
+	b := newTestBroker(t)
+	b.mu.Lock()
+	b.members = []officeMember{{Slug: "ceo", Name: "CEO", Role: "lead"}}
+	b.skills = append(b.skills, teamSkill{
+		ID:      "skill-deploy",
+		Name:    "deploy",
+		Title:   "Deploy to Production",
+		Status:  "active",
+		Channel: "general",
+		Content: "Step 1: Run tests. Step 2: Push tag.",
+	})
+	b.mu.Unlock()
+
+	body := bytes.NewBufferString(`{"invoked_by":"eng","channel":"general"}`)
+	req := httptest.NewRequest(http.MethodPost, "/skills/deploy/invoke", body)
+	rec := httptest.NewRecorder()
+
+	b.handleInvokeSkill(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// Response must include task_id.
+	var out map[string]any
+	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	taskID, ok := out["task_id"].(string)
+	if !ok || taskID == "" {
+		t.Fatalf("expected task_id in response, got %v", out["task_id"])
+	}
+
+	// A task with TaskType=skill_run must exist in b.tasks.
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	var found *teamTask
+	for i := range b.tasks {
+		if b.tasks[i].ID == taskID {
+			found = &b.tasks[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatalf("task %q not found in b.tasks", taskID)
+	}
+	if found.TaskType != "skill_run" {
+		t.Errorf("expected TaskType=skill_run, got %q", found.TaskType)
+	}
+	if found.PipelineID != "skill_invocation" {
+		t.Errorf("expected PipelineID=skill_invocation, got %q", found.PipelineID)
+	}
+	if found.Owner != "ceo" {
+		t.Errorf("expected owner=ceo (office lead), got %q", found.Owner)
+	}
+	if !strings.Contains(found.Title, "Deploy to Production") {
+		t.Errorf("expected task title to contain skill title, got %q", found.Title)
+	}
+	if !strings.Contains(found.Details, "Invoked by @eng") {
+		t.Errorf("expected details to include invoker header, got %q", found.Details)
+	}
+	if !strings.Contains(found.Details, "Step 1: Run tests") {
+		t.Errorf("expected details to include skill content, got %q", found.Details)
+	}
+}
+
 // Test 10: buildPrompt for the lead includes SKILL & AGENT AWARENESS section.
 func TestBuildPromptLeadIncludesSkillAwareness(t *testing.T) {
 	l := &Launcher{
