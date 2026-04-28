@@ -4935,31 +4935,113 @@ type upgradeInstallPlan struct {
 var detectUpgradeInstallFn = detectUpgradeInstall
 
 // runUpgradeCmdFn is the seam tests use to drive npm-success / npm-failure /
-// npm-timeout paths without shelling out. Returns the combined stdout+stderr
-// and the underlying exec error (if any). Tests swap this to assert the
-// handler maps results to the wire shape correctly. Production runs npm.
+// npm-timeout paths without shelling out. Returns the trailing slice of
+// merged stdout+stderr (capped at upgradeRunOutputCap), a `truncated` flag
+// indicating whether anything was discarded ahead of that tail, and the
+// underlying exec error (if any). Tests swap this to assert the handler
+// maps results to the wire shape correctly. Production runs npm.
 var runUpgradeCmdFn = runUpgradeCmd
 
-func runUpgradeCmd(ctx context.Context, plan upgradeInstallPlan) ([]byte, error) {
+func runUpgradeCmd(ctx context.Context, plan upgradeInstallPlan) ([]byte, bool, error) {
 	cmd := exec.CommandContext(ctx, "npm", plan.Args...)
 	if plan.WorkingDir != "" {
 		cmd.Dir = plan.WorkingDir
 	}
-	return cmd.CombinedOutput()
+	// Bounded capture. CombinedOutput() (which this previously used)
+	// buffers ALL of npm's stdout+stderr in memory before returning —
+	// a verbose install (lots of warnings, integrity errors, progress
+	// frames in some configs) could grow the broker process arbitrarily
+	// even though the JSON response is later trimmed. tailBuffer caps
+	// the in-flight buffer at upgradeRunOutputCap regardless of how
+	// chatty npm gets, while preserving the tail (which is where the
+	// real error / `+ wuphf@x.y.z` line lives). Setting the same
+	// *tailBuffer for Stdout and Stderr also leans on os/exec's
+	// guarantee that "at most one goroutine at a time will call Write"
+	// when the two writers compare equal, so merge ordering matches
+	// what the user would see in a terminal.
+	buf := newTailBuffer(upgradeRunOutputCap)
+	cmd.Stdout = buf
+	cmd.Stderr = buf
+	err := cmd.Run()
+	return buf.Bytes(), buf.Truncated(), err
+}
+
+// tailBuffer is a thread-safe io.Writer that retains only the most
+// recent maxBytes of input and tracks whether anything was discarded
+// ahead of that tail. Used to bound broker memory while running npm
+// (see runUpgradeCmd) without losing the trailing diagnostic the
+// user actually needs.
+type tailBuffer struct {
+	mu        sync.Mutex
+	buf       []byte
+	maxBytes  int
+	truncated bool
+}
+
+func newTailBuffer(maxBytes int) *tailBuffer {
+	return &tailBuffer{maxBytes: maxBytes, buf: make([]byte, 0, maxBytes)}
+}
+
+func (b *tailBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	n := len(p)
+	if n >= b.maxBytes {
+		// p alone fills or exceeds the cap — any prior bytes are
+		// older than the tail of p, so reset and keep p's suffix.
+		b.buf = append(b.buf[:0], p[n-b.maxBytes:]...)
+		if n > b.maxBytes {
+			b.truncated = true
+		}
+		return n, nil
+	}
+	if len(b.buf)+n <= b.maxBytes {
+		b.buf = append(b.buf, p...)
+		return n, nil
+	}
+	// Combined size would exceed cap — drop the oldest bytes to make
+	// room for p. The overlapping copy is safe per Go spec.
+	excess := len(b.buf) + n - b.maxBytes
+	copy(b.buf, b.buf[excess:])
+	b.buf = b.buf[:len(b.buf)-excess]
+	b.buf = append(b.buf, p...)
+	b.truncated = true
+	return n, nil
+}
+
+func (b *tailBuffer) Bytes() []byte {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out := make([]byte, len(b.buf))
+	copy(out, b.buf)
+	return out
+}
+
+func (b *tailBuffer) Truncated() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.truncated
 }
 
 // detectUpgradeInstall figures out how wuphf is installed on this machine.
 // Order: global wins over local (most users `npm install -g`); local fallback
 // catches the project-scoped install case.
 //
-// Local-install detection is bounded: we walk up from cwd looking for the
-// FIRST ancestor with a `package.json`, treat that as the project root, and
-// only accept it as a local install if (a) it declares wuphf in
-// dependencies/devDependencies AND (b) `node_modules/wuphf/package.json`
-// exists there. Without these guards, a stray `~/node_modules/wuphf` from
-// some exotic Volta/nvm setup would have us run `npm install wuphf@latest`
-// in `$HOME` — visibly mutating the user's home directory. The guards make
-// the detection refuse to misfire instead of mis-installing.
+// Local-install detection walks up from cwd looking for the nearest ancestor
+// that BOTH declares wuphf in dependencies/devDependencies AND has
+// `node_modules/wuphf/package.json` materialised. A non-declaring ancestor
+// (e.g. a `packages/sub/package.json` in an npm-workspace monorepo where
+// the dep lives at the workspace root) is skipped, not treated as a hard
+// stop — otherwise detection would silently fail for monorepo users. A
+// declaring ancestor whose dep is NOT yet installed (fresh clone before
+// `npm install`) IS a hard stop: walking past would risk upgrading the
+// wrong project's wuphf, and "unknown" plus the fallback copy is safer.
+//
+// The walk is bounded by:
+//   - 32-iteration cap (belt-and-suspenders for runaway symlink loops),
+//   - filesystem root (parent == dir),
+//   - $HOME — even if a `package.json` at $HOME declared wuphf, running
+//     `npm install` there would visibly mutate the user's home directory.
 //
 // Assumption: the broker process's cwd equals the user's cwd. Holds today
 // because the wuphf CLI starts the broker and inherits cwd. A future
@@ -4988,54 +5070,65 @@ func detectUpgradeInstall(ctx context.Context) upgradeInstallPlan {
 			}
 		}
 	}
-	// Local install: walk up from cwd. The first ancestor that has a
-	// package.json IS the project root (npm convention). Stop there
-	// regardless of whether wuphf is in node_modules — going further
-	// would risk falsely claiming a parent project's package.json
-	// (or worse, $HOME) is the install target. The 32-level cap is a
-	// belt-and-suspenders guard against a runaway symlink loop.
+	// Local install: walk up from cwd, skipping non-declaring ancestors so
+	// monorepos with wuphf at the workspace root still detect cleanly when
+	// cwd is inside a sub-package that doesn't declare it directly.
+	homeDir, _ := os.UserHomeDir()
 	cwd, err := os.Getwd()
-	if err == nil {
-		dir := cwd
-		for i := 0; i < 32; i++ {
-			projectPkg := filepath.Join(dir, "package.json")
-			if data, err := os.ReadFile(projectPkg); err == nil {
-				// We're at a project root. Local install only counts
-				// if THIS project declares wuphf — otherwise we'd run
-				// `npm install` in someone else's package.json, which
-				// would silently add wuphf as a new dependency.
-				if pkgDeclaresWuphf(data) {
-					candidate := filepath.Join(dir, "node_modules", "wuphf", "package.json")
-					if _, err := os.Stat(candidate); err == nil {
-						return upgradeInstallPlan{
-							Method:     "local",
-							Args:       []string{"install", "wuphf@latest"},
-							WorkingDir: dir,
-							Command:    "npm install wuphf@latest",
-						}
+	if err != nil {
+		return upgradeInstallPlan{Method: "unknown"}
+	}
+	return detectLocalInstall(cwd, homeDir)
+}
+
+// detectLocalInstall walks up from `cwd` looking for the nearest ancestor
+// that declares wuphf in package.json AND has node_modules/wuphf installed.
+// Skips ancestors that don't declare wuphf (monorepo sub-packages); stops
+// hard at a declaring-but-not-installed ancestor (fresh clone case),
+// $HOME, the filesystem root, or after 32 hops. Extracted from
+// detectUpgradeInstall so it can be unit-tested without depending on a
+// real `npm` binary or a real user $HOME.
+func detectLocalInstall(cwd, homeDir string) upgradeInstallPlan {
+	dir := cwd
+	for i := 0; i < 32; i++ {
+		// $HOME guard. Stop BEFORE inspecting a package.json at
+		// $HOME so a stray ~/package.json that happens to mention
+		// wuphf can't redirect the install into the user's home.
+		if homeDir != "" && dir == homeDir {
+			break
+		}
+		projectPkg := filepath.Join(dir, "package.json")
+		if data, err := os.ReadFile(projectPkg); err == nil {
+			if pkgDeclaresWuphf(data) {
+				candidate := filepath.Join(dir, "node_modules", "wuphf", "package.json")
+				if _, err := os.Stat(candidate); err == nil {
+					return upgradeInstallPlan{
+						Method:     "local",
+						Args:       []string{"install", "wuphf@latest"},
+						WorkingDir: dir,
+						Command:    "npm install wuphf@latest",
 					}
 				}
-				// Stop walking. Two paths land here, both intentional:
-				//   (a) the project root doesn't declare wuphf — running
-				//       npm install here would silently add wuphf as a
-				//       new dep instead of upgrading an existing one.
-				//   (b) the project DOES declare wuphf but
-				//       node_modules/wuphf/package.json is missing — the
-				//       declared dep was never installed (fresh clone,
-				//       skipped npm install). Suggesting an install in
-				//       this state is correct, but our "local install"
-				//       contract requires both signals; bail to "unknown"
-				//       so the click-to-run UI surfaces the explicit
-				//       fallback message rather than silently running
-				//       npm install with potentially wrong context.
+				// Declares wuphf but the dep isn't materialised
+				// (fresh clone, skipped `npm install`). Don't keep
+				// walking — a parent project's wuphf is NOT this
+				// project's wuphf, and silently upgrading it would
+				// be the wrong fix for "this project hasn't been
+				// installed yet." Surface "unknown" and let the
+				// click-to-run UI render its explicit fallback.
 				break
 			}
-			parent := filepath.Dir(dir)
-			if parent == dir {
-				break
-			}
-			dir = parent
+			// package.json that doesn't declare wuphf: a monorepo
+			// sub-package or an unrelated project at this level.
+			// Keep walking up — the workspace root above might be
+			// the actual install target. The $HOME guard above
+			// and the filesystem-root check below bound this.
 		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
 	}
 	return upgradeInstallPlan{Method: "unknown"}
 }
@@ -5154,9 +5247,15 @@ func (b *Broker) handleUpgradeRun(w http.ResponseWriter, r *http.Request) {
 	// runUpgradeCmdFn merges stdout+stderr in invocation order — npm
 	// progress hits stderr, the final `+ wuphf@x.y.z` line hits stdout,
 	// and the banner shows them in the order the user would see in a
-	// terminal. Capped via slicing below so a verbose log can't bloat.
-	out, err := runUpgradeCmdFn(runCtx, plan)
-	output := truncateForJSON(string(out), upgradeRunOutputCap)
+	// terminal. The capture is bounded inside runUpgradeCmdFn so a
+	// verbose log can't bloat broker memory; `truncated` tells us
+	// whether bytes were dropped ahead of the returned tail so we can
+	// surface a sentinel to the client.
+	out, truncated, err := runUpgradeCmdFn(runCtx, plan)
+	output := string(out)
+	if truncated {
+		output = withTruncationSentinel(output)
+	}
 
 	res := upgradeRunResult{
 		InstallMethod: plan.Method,
@@ -5182,40 +5281,24 @@ func (b *Broker) handleUpgradeRun(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(res)
 }
 
-// truncateForJSON keeps the trailing `tailBytes` of `s` (the most useful
-// diagnostic — npm puts the error line and the final `+ wuphf@x.y.z`
-// line at the bottom) and prepends a sentinel marking the truncation.
-// Rounds the cut point forward to the next valid UTF-8 sequence start so
-// we don't ship a leading orphan continuation byte that would render as
-// U+FFFD on the client.
-//
-// Note: the parameter is the SUFFIX size, not a hard ceiling on the
-// returned string. The sentinel ("…[truncated]…\n", 18 bytes UTF-8) is
-// added on top, so the result can be up to tailBytes+18 bytes. Safe at
-// the production cap of 64 KiB; callers picking a tight log-line budget
-// or a fixed-size ring buffer must subtract the sentinel themselves.
-func truncateForJSON(s string, tailBytes int) string {
-	// Defensive: a non-positive cap produces a negative slice index and
-	// panics. Treat it as "keep nothing" — empty input passes through
-	// (the sentinel would itself be longer than the request), otherwise
-	// emit just the sentinel so the caller still sees that truncation
-	// happened. No production caller passes <= 0 today.
-	if tailBytes <= 0 {
-		if s == "" {
-			return ""
-		}
-		return "…[truncated]…\n"
-	}
-	if len(s) <= tailBytes {
-		return s
-	}
-	start := len(s) - tailBytes
+// truncationSentinel marks the front of an output string that had earlier
+// bytes dropped (because the bounded tailBuffer threw them away). 18 bytes
+// in UTF-8.
+const truncationSentinel = "…[truncated]…\n"
+
+// withTruncationSentinel prepends truncationSentinel to s, first skipping
+// any leading UTF-8 continuation bytes so the returned string starts on a
+// complete rune. The bounded write in tailBuffer can cut mid-rune; this
+// turns that orphan continuation into a clean cut so the JSON encoder
+// doesn't replace the leading byte with U+FFFD on the client.
+func withTruncationSentinel(s string) string {
+	start := 0
 	for start < len(s) && s[start]&0xC0 == 0x80 {
 		// 10xxxxxx: continuation byte. Skip until we land on a
 		// leading byte (0xxxxxxx, 110xxxxx, 1110xxxx, 11110xxx).
 		start++
 	}
-	return "…[truncated]…\n" + s[start:]
+	return truncationSentinel + s[start:]
 }
 
 // ── Upgrade-check caching ─────────────────────────────────────────────────

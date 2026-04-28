@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -252,9 +254,9 @@ func TestHandleUpgradeRun_UnknownInstallMethodReturns200WithGuidance(t *testing.
 
 // pinRunCmd swaps runUpgradeCmdFn for the duration of the test. The fake
 // receives the install plan so assertions can verify the handler passes
-// through Args/WorkingDir correctly, and returns whatever (output, err)
-// pair the test wants the handler to observe.
-func pinRunCmd(t *testing.T, fake func(ctx context.Context, plan upgradeInstallPlan) ([]byte, error)) {
+// through Args/WorkingDir correctly, and returns whatever
+// (output, truncated, err) tuple the test wants the handler to observe.
+func pinRunCmd(t *testing.T, fake func(ctx context.Context, plan upgradeInstallPlan) ([]byte, bool, error)) {
 	t.Helper()
 	prev := runUpgradeCmdFn
 	runUpgradeCmdFn = fake
@@ -270,8 +272,8 @@ func TestHandleUpgradeRun_SuccessReturnsOKWithOutput(t *testing.T) {
 		Args:    []string{"install", "-g", "wuphf@latest"},
 		Command: "npm install -g wuphf@latest",
 	})
-	pinRunCmd(t, func(_ context.Context, _ upgradeInstallPlan) ([]byte, error) {
-		return []byte("added 1 package in 2s\n+ wuphf@99.0.0\n"), nil
+	pinRunCmd(t, func(_ context.Context, _ upgradeInstallPlan) ([]byte, bool, error) {
+		return []byte("added 1 package in 2s\n+ wuphf@99.0.0\n"), false, nil
 	})
 	b := newTestBroker(t)
 	srv := httptest.NewServer(b.requireAuth(b.handleUpgradeRun))
@@ -317,8 +319,8 @@ func TestHandleUpgradeRun_FailureSurfacesError(t *testing.T) {
 		Args:    []string{"install", "-g", "wuphf@latest"},
 		Command: "npm install -g wuphf@latest",
 	})
-	pinRunCmd(t, func(_ context.Context, _ upgradeInstallPlan) ([]byte, error) {
-		return []byte("npm ERR! EACCES: permission denied\n"), &execError{msg: "exit status 243"}
+	pinRunCmd(t, func(_ context.Context, _ upgradeInstallPlan) ([]byte, bool, error) {
+		return []byte("npm ERR! EACCES: permission denied\n"), false, &execError{msg: "exit status 243"}
 	})
 	b := newTestBroker(t)
 	srv := httptest.NewServer(b.requireAuth(b.handleUpgradeRun))
@@ -368,9 +370,9 @@ func TestHandleUpgradeRun_TimeoutSetsTimedOutFlag(t *testing.T) {
 		Args:    []string{"install", "-g", "wuphf@latest"},
 		Command: "npm install -g wuphf@latest",
 	})
-	pinRunCmd(t, func(ctx context.Context, _ upgradeInstallPlan) ([]byte, error) {
+	pinRunCmd(t, func(ctx context.Context, _ upgradeInstallPlan) ([]byte, bool, error) {
 		<-ctx.Done() // honour the broker-owned ctx so runCtx.Err() trips
-		return nil, ctx.Err()
+		return nil, false, ctx.Err()
 	})
 	b := newTestBroker(t)
 	srv := httptest.NewServer(b.requireAuth(b.handleUpgradeRun))
@@ -425,7 +427,7 @@ func TestHandleUpgradeRun_ConcurrentRunsSinglefligted(t *testing.T) {
 	// single-flight gate would otherwise hang here instead of failing.
 	entered := make(chan struct{}, 2)
 	var runCalls atomic.Int32
-	pinRunCmd(t, func(_ context.Context, _ upgradeInstallPlan) ([]byte, error) {
+	pinRunCmd(t, func(_ context.Context, _ upgradeInstallPlan) ([]byte, bool, error) {
 		// Only the first invocation parks on `release`. If the
 		// single-flight gate regresses and a second request reaches
 		// runUpgradeCmdFn, return immediately rather than parking —
@@ -434,10 +436,10 @@ func TestHandleUpgradeRun_ConcurrentRunsSinglefligted(t *testing.T) {
 		if runCalls.Add(1) == 1 {
 			entered <- struct{}{}
 			<-release
-			return []byte("done"), nil
+			return []byte("done"), false, nil
 		}
 		entered <- struct{}{}
-		return []byte("unexpected second spawn"), nil
+		return []byte("unexpected second spawn"), false, nil
 	})
 
 	b := newTestBroker(t)
@@ -602,46 +604,264 @@ func TestPkgDeclaresWuphf(t *testing.T) {
 	}
 }
 
-func TestTruncateForJSON(t *testing.T) {
+func TestTailBuffer(t *testing.T) {
+	t.Run("under cap retains everything, no truncation", func(t *testing.T) {
+		buf := newTailBuffer(64)
+		_, _ = buf.Write([]byte("hello"))
+		_, _ = buf.Write([]byte(" world"))
+		if got := string(buf.Bytes()); got != "hello world" {
+			t.Errorf("Bytes()=%q want %q", got, "hello world")
+		}
+		if buf.Truncated() {
+			t.Error("Truncated()=true on under-cap input")
+		}
+	})
+
+	t.Run("multi-write overflow keeps tail and flips truncated", func(t *testing.T) {
+		buf := newTailBuffer(5)
+		_, _ = buf.Write([]byte("abc"))
+		_, _ = buf.Write([]byte("defg"))
+		// Combined "abcdefg" (7 bytes) > cap (5). Keep last 5 = "cdefg".
+		if got := string(buf.Bytes()); got != "cdefg" {
+			t.Errorf("Bytes()=%q want %q", got, "cdefg")
+		}
+		if !buf.Truncated() {
+			t.Error("Truncated()=false after dropping bytes")
+		}
+	})
+
+	t.Run("single write exceeding cap keeps that tail", func(t *testing.T) {
+		buf := newTailBuffer(4)
+		_, _ = buf.Write([]byte("abcdefgh"))
+		if got := string(buf.Bytes()); got != "efgh" {
+			t.Errorf("Bytes()=%q want %q", got, "efgh")
+		}
+		if !buf.Truncated() {
+			t.Error("Truncated()=false after dropping bytes from a single write")
+		}
+	})
+
+	t.Run("single write exactly equal to cap is not flagged truncated", func(t *testing.T) {
+		// Edge case: an oversize-equal write fills the buffer without
+		// dropping any bytes. The tailBuffer must NOT advertise
+		// truncation in that case, otherwise the wire surface would
+		// claim truncation on a clean fill.
+		buf := newTailBuffer(4)
+		_, _ = buf.Write([]byte("abcd"))
+		if got := string(buf.Bytes()); got != "abcd" {
+			t.Errorf("Bytes()=%q want %q", got, "abcd")
+		}
+		if buf.Truncated() {
+			t.Error("Truncated()=true on exact-cap fill")
+		}
+	})
+
+	t.Run("memory cap is bounded — repeated overflow does not grow the underlying array", func(t *testing.T) {
+		// Pour 100x the cap through the buffer in 1 KiB chunks and
+		// assert the underlying array never exceeds maxBytes. Prevents
+		// regressions where append growth pins old allocations.
+		const maxBytes = 4 * 1024
+		buf := newTailBuffer(maxBytes)
+		chunk := make([]byte, 1024)
+		for i := range chunk {
+			chunk[i] = byte(i)
+		}
+		for i := 0; i < 100*maxBytes/len(chunk); i++ {
+			_, _ = buf.Write(chunk)
+		}
+		if got := cap(buf.buf); got > maxBytes {
+			t.Errorf("underlying cap=%d exceeds maxBytes=%d — memory not bounded", got, maxBytes)
+		}
+		if got := len(buf.Bytes()); got != maxBytes {
+			t.Errorf("Bytes() length=%d want %d", got, maxBytes)
+		}
+	})
+}
+
+func TestWithTruncationSentinel(t *testing.T) {
 	cases := []struct {
 		name string
 		in   string
-		cap  int
 		want string
 	}{
-		{"shorter than cap untouched", "hello", 100, "hello"},
-		{"exact cap untouched", "hello", 5, "hello"},
+		{"empty input", "", "…[truncated]…\n"},
+		{"clean leading byte", "fghij", "…[truncated]…\nfghij"},
 		{
-			name: "longer than cap keeps tail with sentinel",
-			in:   "abcdefghij",
-			cap:  5,
-			want: "…[truncated]…\nfghij",
-		},
-		{
-			// UTF-8 boundary: "é" is 0xC3 0xA9 (two bytes). With cap=4,
-			// naive byte-slicing of "ééééé" (10 bytes) would start at
-			// byte 6 — which is the 0xA9 continuation of the second
-			// "é", producing "\xa9éé" (invalid UTF-8 leading byte).
-			// truncateForJSON must round forward to the next valid
-			// leading byte so the output starts on a complete rune.
-			name: "rounds forward past UTF-8 continuation byte",
-			in:   "ééééé", // 10 bytes
-			cap:  4,
-			want: "…[truncated]…\néé", // starts at the third "é" (byte 6→6 is start, but byte 6 is leading 0xC3 → no skip needed) — actually picks 4 trailing bytes = "éé"
+			// "é" is 0xC3 0xA9. If the bounded write cut between the
+			// leading byte and its continuation, the captured tail
+			// would start with 0xA9 (a stray continuation byte). The
+			// sentinel helper must skip past that so the result is
+			// valid UTF-8 and the JSON encoder doesn't substitute
+			// U+FFFD on the client.
+			name: "skips orphan continuation byte at start",
+			in:   string([]byte{0xA9, 'a', 'b'}),
+			want: "…[truncated]…\nab",
 		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := truncateForJSON(c.in, c.cap)
+			got := withTruncationSentinel(c.in)
 			if got != c.want {
-				t.Errorf("truncateForJSON(%q,%d)=%q want %q", c.in, c.cap, got, c.want)
+				t.Errorf("withTruncationSentinel(%q)=%q want %q", c.in, got, c.want)
 			}
-			// Round-trip: the result must always be valid UTF-8 so
-			// the JSON encoder doesn't replace bytes with U+FFFD.
 			if !utf8.ValidString(got) {
 				t.Errorf("output is not valid UTF-8: %q", got)
 			}
 		})
+	}
+}
+
+func TestDetectLocalInstall(t *testing.T) {
+	// Drives detectLocalInstall against an isolated tmpdir layout so
+	// the walk logic is exercised without depending on a real `npm`,
+	// the developer's actual cwd, or their real $HOME. Exercises the
+	// monorepo-walk fix (don't bail at the first non-declaring
+	// ancestor) plus the safety stops ($HOME, declared-but-not-
+	// installed, no package.json at all).
+	writeFile := func(t *testing.T, path, contents string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	declaresWuphf := `{"dependencies":{"wuphf":"^0.83.0"}}`
+	noWuphf := `{"name":"sub"}`
+	wuphfPkg := `{"name":"wuphf","version":"0.83.0"}`
+
+	t.Run("monorepo: subpackage doesn't declare, root does — walks past sub", func(t *testing.T) {
+		root := t.TempDir()
+		writeFile(t, filepath.Join(root, "package.json"), declaresWuphf)
+		writeFile(t, filepath.Join(root, "node_modules", "wuphf", "package.json"), wuphfPkg)
+		writeFile(t, filepath.Join(root, "packages", "sub", "package.json"), noWuphf)
+		got := detectLocalInstall(filepath.Join(root, "packages", "sub"), "")
+		if got.Method != "local" {
+			t.Fatalf("Method=%q want local", got.Method)
+		}
+		if got.WorkingDir != root {
+			// Crucial: root, not the sub-package. A regression that
+			// returned `packages/sub` would silently run `npm install`
+			// in the wrong directory.
+			t.Errorf("WorkingDir=%q want %q", got.WorkingDir, root)
+		}
+	})
+
+	t.Run("declares + materialised wins immediately — does not keep walking", func(t *testing.T) {
+		// If the cwd's package.json BOTH declares wuphf AND has it
+		// installed, we accept it — even if a parent project also
+		// declares wuphf. The nearest match is the user's intent.
+		root := t.TempDir()
+		writeFile(t, filepath.Join(root, "package.json"), declaresWuphf)
+		writeFile(t, filepath.Join(root, "node_modules", "wuphf", "package.json"), wuphfPkg)
+		sub := filepath.Join(root, "packages", "sub")
+		writeFile(t, filepath.Join(sub, "package.json"), declaresWuphf)
+		writeFile(t, filepath.Join(sub, "node_modules", "wuphf", "package.json"), wuphfPkg)
+		got := detectLocalInstall(sub, "")
+		if got.Method != "local" {
+			t.Fatalf("Method=%q want local", got.Method)
+		}
+		if got.WorkingDir != sub {
+			t.Errorf("WorkingDir=%q want %q (nearest match should win)", got.WorkingDir, sub)
+		}
+	})
+
+	t.Run("declared but not installed — bails to unknown without walking past", func(t *testing.T) {
+		// Fresh-clone case: package.json declares wuphf but
+		// node_modules/wuphf isn't materialised yet. Walking past to
+		// a parent project's wuphf would silently upgrade the WRONG
+		// project. Expect "unknown" so the click-to-run UI surfaces
+		// its explicit fallback copy.
+		root := t.TempDir()
+		// Parent has a fully-installed wuphf — tempting to walk to
+		// it, but we must not, because the sub-package's intent is
+		// clear: install ITS wuphf.
+		writeFile(t, filepath.Join(root, "package.json"), declaresWuphf)
+		writeFile(t, filepath.Join(root, "node_modules", "wuphf", "package.json"), wuphfPkg)
+		sub := filepath.Join(root, "packages", "sub")
+		writeFile(t, filepath.Join(sub, "package.json"), declaresWuphf)
+		got := detectLocalInstall(sub, "")
+		if got.Method != "unknown" {
+			t.Errorf("Method=%q want unknown (declared-but-not-installed must not walk past)", got.Method)
+		}
+	})
+
+	t.Run("no ancestor declares wuphf — unknown", func(t *testing.T) {
+		root := t.TempDir()
+		writeFile(t, filepath.Join(root, "package.json"), noWuphf)
+		writeFile(t, filepath.Join(root, "packages", "sub", "package.json"), noWuphf)
+		got := detectLocalInstall(filepath.Join(root, "packages", "sub"), "")
+		if got.Method != "unknown" {
+			t.Errorf("Method=%q want unknown (no declaring ancestor)", got.Method)
+		}
+	})
+
+	t.Run("$HOME stops the walk before inspecting its package.json", func(t *testing.T) {
+		// Even if a stray ~/package.json declared wuphf and a phantom
+		// ~/node_modules/wuphf existed (some exotic Volta/nvm setup),
+		// running `npm install wuphf@latest` in $HOME would mutate
+		// the user's home directory. The $HOME guard must stop the
+		// walk BEFORE the package.json check.
+		home := t.TempDir()
+		writeFile(t, filepath.Join(home, "package.json"), declaresWuphf)
+		writeFile(t, filepath.Join(home, "node_modules", "wuphf", "package.json"), wuphfPkg)
+		sub := filepath.Join(home, "project", "sub")
+		if err := os.MkdirAll(sub, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		got := detectLocalInstall(sub, home)
+		if got.Method != "unknown" {
+			t.Errorf("Method=%q want unknown ($HOME guard must fire)", got.Method)
+		}
+	})
+
+	t.Run("filesystem-root stop terminates a deep walk cleanly", func(t *testing.T) {
+		// No package.json anywhere up the chain. The walk must reach
+		// the filesystem root (parent == dir) and bail without
+		// looping forever. Use a tmpdir as cwd; no $HOME hint so the
+		// only stop is the root.
+		got := detectLocalInstall(t.TempDir(), "")
+		if got.Method != "unknown" {
+			t.Errorf("Method=%q want unknown (no package.json on path to root)", got.Method)
+		}
+	})
+}
+
+func TestHandleUpgradeRun_BoundedOutputSurfacesTruncationSentinel(t *testing.T) {
+	// End-to-end: when runUpgradeCmdFn reports truncated=true, the
+	// handler must surface a sentinel-prefixed `output` so the banner
+	// can render the "earlier output dropped" indicator. This locks
+	// the wire contract — without it, a verbose npm install would
+	// silently appear as a clean log even though bytes were thrown
+	// away during capture.
+	pinDetectInstall(t, upgradeInstallPlan{
+		Method:  "global",
+		Args:    []string{"install", "-g", "wuphf@latest"},
+		Command: "npm install -g wuphf@latest",
+	})
+	pinRunCmd(t, func(_ context.Context, _ upgradeInstallPlan) ([]byte, bool, error) {
+		return []byte("…final lines…\n+ wuphf@99.0.0\n"), true, nil
+	})
+	b := newTestBroker(t)
+	srv := httptest.NewServer(b.requireAuth(b.handleUpgradeRun))
+	defer srv.Close()
+	req, _ := http.NewRequest(http.MethodPost, srv.URL, nil)
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	defer resp.Body.Close()
+	var body upgradeRunResult
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !strings.HasPrefix(body.Output, "…[truncated]…\n") {
+		t.Errorf("output should start with truncation sentinel, got %q", body.Output)
+	}
+	if !strings.Contains(body.Output, "wuphf@99.0.0") {
+		t.Errorf("output should still surface the trailing tail, got %q", body.Output)
 	}
 }
 
