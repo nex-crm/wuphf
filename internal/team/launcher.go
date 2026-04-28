@@ -348,8 +348,14 @@ func (l *Launcher) Launch() error {
 	}
 
 	// Pre-seed any default skills declared by the pack (idempotent).
-	if l.pack != nil && len(l.pack.DefaultSkills) > 0 {
-		l.broker.SeedDefaultSkills(l.pack.DefaultSkills)
+	// Always seed the cross-cutting productivity skills (grill-me, tdd,
+	// diagnose, etc., adapted from github.com/mattpocock/skills) on top of
+	// whatever the active pack defines. They're useful for every install,
+	// not just packs that explicitly enumerate them.
+	if l.pack != nil {
+		l.broker.SeedDefaultSkills(agent.AppendProductivitySkills(l.pack.DefaultSkills))
+	} else {
+		l.broker.SeedDefaultSkills(agent.AppendProductivitySkills(nil))
 	}
 
 	// Kill any existing session
@@ -4783,8 +4789,14 @@ func (l *Launcher) LaunchWeb(webPort int) error {
 	}
 
 	// Pre-seed any default skills declared by the pack (idempotent).
-	if l.pack != nil && len(l.pack.DefaultSkills) > 0 {
-		l.broker.SeedDefaultSkills(l.pack.DefaultSkills)
+	// Always seed the cross-cutting productivity skills (grill-me, tdd,
+	// diagnose, etc., adapted from github.com/mattpocock/skills) on top of
+	// whatever the active pack defines. They're useful for every install,
+	// not just packs that explicitly enumerate them.
+	if l.pack != nil {
+		l.broker.SeedDefaultSkills(agent.AppendProductivitySkills(l.pack.DefaultSkills))
+	} else {
+		l.broker.SeedDefaultSkills(agent.AppendProductivitySkills(nil))
 	}
 
 	l.broker.SetGenerateMemberFn(l.GenerateMemberTemplateFromPrompt)
