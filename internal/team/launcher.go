@@ -34,7 +34,6 @@ import (
 	"github.com/nex-crm/wuphf/internal/action"
 	"github.com/nex-crm/wuphf/internal/agent"
 	"github.com/nex-crm/wuphf/internal/brokeraddr"
-	"github.com/nex-crm/wuphf/internal/calendar"
 	"github.com/nex-crm/wuphf/internal/channel"
 	"github.com/nex-crm/wuphf/internal/company"
 	"github.com/nex-crm/wuphf/internal/config"
@@ -156,6 +155,11 @@ type Launcher struct {
 	// (PLAN.md §C3). Lazily constructed via notifyCtx() and shares state
 	// with the launcher via callbacks (broker reads, headless queue peek).
 	notify *notificationContextBuilder
+
+	// schedulerWorker owns the watchdog scheduler goroutine
+	// (PLAN.md §C4). Lazily constructed via scheduler(); Launch() calls
+	// Start, Kill() calls Stop. clock is realClock in production.
+	schedulerWorker *watchdogScheduler
 }
 
 // paneDispatchTurn is one queued notification to type into a tmux pane.
@@ -1431,282 +1435,48 @@ func (l *Launcher) fetchAndRecordOneRelayEvents(provider *action.OneCLI) {
 	}
 }
 
+// scheduler returns the watchdog scheduler, lazily constructing it on
+// first access. Constructed nil-safe so tests that build &Launcher{}
+// directly never trip on a missing scheduler. Production wiring
+// (clock=realClock, broker=l.broker) happens here.
+func (l *Launcher) scheduler() *watchdogScheduler {
+	if l == nil {
+		return nil
+	}
+	if l.schedulerWorker != nil {
+		return l.schedulerWorker
+	}
+	l.schedulerWorker = &watchdogScheduler{
+		broker:      l.broker,
+		clock:       realClock{},
+		deliverTask: l.deliverTaskNotification,
+	}
+	return l.schedulerWorker
+}
+
+// updateSchedulerJob and watchdogSchedulerLoop are thin Launcher wrappers
+// around the watchdogScheduler type (PLAN.md §C4). Wrappers kept so the
+// existing callers in headless_codex.go and Launch() don't need a rename
+// sweep in this PR; cleanup is a follow-up.
+
 func (l *Launcher) updateSchedulerJob(slug, label string, interval time.Duration, nextRun time.Time, status string) {
-	if l.broker == nil {
-		return
-	}
-	job := schedulerJob{
-		Slug:            slug,
-		Label:           label,
-		IntervalMinutes: int(interval / time.Minute),
-		NextRun:         nextRun.UTC().Format(time.RFC3339),
-		Status:          status,
-	}
-	if status == "sleeping" {
-		job.LastRun = time.Now().UTC().Format(time.RFC3339)
-	}
-	_ = l.broker.SetSchedulerJob(job)
+	l.scheduler().updateJob(slug, label, interval, nextRun, status)
 }
 
 func (l *Launcher) watchdogSchedulerLoop() {
-	if l.broker == nil {
-		return
-	}
-	time.Sleep(15 * time.Second)
-	for {
-		l.processDueSchedulerJobs()
-		time.Sleep(20 * time.Second)
-	}
+	l.scheduler().Start(context.Background())
 }
 
-func (l *Launcher) processDueSchedulerJobs() {
-	if l.broker == nil {
-		return
-	}
-	jobs := l.broker.DueSchedulerJobs()
-	if len(jobs) == 0 {
-		return
-	}
-	for _, job := range jobs {
-		switch strings.TrimSpace(job.TargetType) {
-		case "task":
-			l.processDueTaskJob(job)
-		case "request":
-			l.processDueRequestJob(job)
-		case "workflow":
-			l.processDueWorkflowJob(job)
-		default:
-			nextRun := time.Now().UTC().Add(time.Duration(config.ResolveTaskReminderInterval()) * time.Minute)
-			_ = l.broker.UpdateSchedulerJobState(job.Slug, nextRun, "scheduled")
-		}
-	}
-}
+func (l *Launcher) processDueSchedulerJobs() { l.scheduler().processOnce() }
 
-func (l *Launcher) processDueTaskJob(job schedulerJob) {
-	task, ok := l.broker.FindTask(job.Channel, job.TargetID)
-	if !ok || strings.EqualFold(strings.TrimSpace(task.Status), "done") {
-		_ = l.broker.UpdateSchedulerJobState(job.Slug, time.Time{}, "done")
-		return
-	}
-	now := time.Now().UTC()
-	// Blocked tasks are legitimately waiting on dependencies — skip the watchdog
-	// reminder entirely. The owner cannot act until their blockers resolve, so a
-	// "still waiting" nudge is both misleading and a wasted token spend. The
-	// task_unblocked mechanism will wake them when deps clear.
-	if task.Blocked {
-		if retryAt, rateLimited := externalWorkflowRetryAfter(errors.New(task.Details), now); rateLimited && !retryAt.After(now) {
-			resumeNote := "Retry window passed; resuming live external lane automatically."
-			resumed, changed, err := l.broker.ResumeTask(task.ID, "watchdog", resumeNote)
-			if err == nil && changed {
-				_ = l.broker.UpdateSchedulerJobState(job.Slug, time.Time{}, "done")
-				l.deliverTaskNotification(officeActionLog{
-					Kind:      "task_unblocked",
-					Source:    "watchdog",
-					Channel:   resumed.Channel,
-					Actor:     "watchdog",
-					RelatedID: resumed.ID,
-				}, resumed)
-				return
-			}
-		}
-		nextRun := time.Now().UTC().Add(time.Duration(config.ResolveTaskReminderInterval()) * time.Minute)
-		_ = l.broker.UpdateSchedulerJobState(job.Slug, nextRun, "scheduled")
-		return
-	}
-	alertKind := "task_stalled"
-	var summary string
-	if strings.TrimSpace(task.Owner) == "" {
-		alertKind = "task_unclaimed"
-		summary = fmt.Sprintf("Task %s in #%s still has no owner.", task.Title, normalizeChannelSlug(task.Channel))
-	} else {
-		summary = fmt.Sprintf("@%s still needs to move %s in #%s.", task.Owner, task.Title, normalizeChannelSlug(task.Channel))
-	}
-	_, _, _ = l.broker.CreateWatchdogAlert(alertKind, task.Channel, "task", task.ID, task.Owner, summary)
-	signalIDs, decisionID := l.recordWatchdogLedger(task.Channel, alertKind, task.ID, task.Owner, summary, task.SourceSignalID)
-	_ = l.broker.RecordAction("watchdog_alert", "watchdog", task.Channel, "watchdog", truncate(summary, 140), task.ID, signalIDs, decisionID)
-	l.deliverTaskNotification(officeActionLog{
-		Kind:      "watchdog_alert",
-		Source:    "watchdog",
-		Channel:   task.Channel,
-		Actor:     "watchdog",
-		RelatedID: task.ID,
-	}, task)
-	nextRun := time.Now().UTC().Add(time.Duration(config.ResolveTaskReminderInterval()) * time.Minute)
-	_ = l.broker.UpdateSchedulerJobState(job.Slug, nextRun, "scheduled")
-}
+func (l *Launcher) processDueTaskJob(job schedulerJob) { l.scheduler().processTaskJob(job) }
 
-func (l *Launcher) processDueRequestJob(job schedulerJob) {
-	req, ok := l.broker.FindRequest(job.Channel, job.TargetID)
-	if !ok || !requestIsActive(req) {
-		_ = l.broker.UpdateSchedulerJobState(job.Slug, time.Time{}, "done")
-		return
-	}
-	summary := fmt.Sprintf("Still waiting on %s in #%s: %s", req.TitleOrDefault(), normalizeChannelSlug(req.Channel), truncate(req.Question, 120))
-	alert, existing, _ := l.broker.CreateWatchdogAlert("request_waiting", req.Channel, "request", req.ID, req.From, summary)
-	signalIDs, decisionID := l.recordWatchdogLedger(req.Channel, "request_waiting", req.ID, req.From, summary, "")
-	_ = l.broker.RecordAction("watchdog_alert", "watchdog", req.Channel, "watchdog", truncate(summary, 140), req.ID, signalIDs, decisionID)
-	if req.Blocking && !existing {
-		_, _, _ = l.broker.PostAutomationMessage(
-			"wuphf",
-			req.Channel,
-			"Waiting on human decision",
-			summary,
-			alert.ID,
-			"watchdog",
-			"Office watchdog",
-			[]string{"ceo"},
-			req.ReplyTo,
-		)
-	}
-	nextRun := time.Now().UTC().Add(time.Duration(config.ResolveTaskReminderInterval()) * time.Minute)
-	_ = l.broker.UpdateSchedulerJobState(job.Slug, nextRun, "scheduled")
-}
+func (l *Launcher) processDueRequestJob(job schedulerJob) { l.scheduler().processRequestJob(job) }
 
-func (l *Launcher) processDueWorkflowJob(job schedulerJob) {
-	if l.broker == nil {
-		return
-	}
-	type workflowSchedulePayload struct {
-		Provider     string         `json:"provider"`
-		WorkflowKey  string         `json:"workflow_key"`
-		Inputs       map[string]any `json:"inputs"`
-		ScheduleExpr string         `json:"schedule_expr"`
-		CreatedBy    string         `json:"created_by"`
-		Channel      string         `json:"channel"`
-		SkillName    string         `json:"skill_name"`
-	}
-	var payload workflowSchedulePayload
-	if strings.TrimSpace(job.Payload) != "" {
-		_ = json.Unmarshal([]byte(job.Payload), &payload)
-	}
-	workflowKey := strings.TrimSpace(payload.WorkflowKey)
-	if workflowKey == "" {
-		workflowKey = strings.TrimSpace(job.WorkflowKey)
-	}
-	if workflowKey == "" {
-		_ = l.broker.UpdateSchedulerJobState(job.Slug, time.Time{}, "done")
-		return
-	}
-	channel := normalizeChannelSlug(payload.Channel)
-	if channel == "" {
-		channel = normalizeChannelSlug(job.Channel)
-	}
-	if channel == "" {
-		channel = "general"
-	}
-	providerName := strings.TrimSpace(payload.Provider)
-	if providerName == "" {
-		providerName = strings.TrimSpace(job.Provider)
-	}
-	registry := action.NewRegistryFromEnv()
-	provider, err := registry.ProviderNamed(providerName, action.CapabilityWorkflowExecute)
-	if err != nil {
-		source := providerName
-		if strings.TrimSpace(source) == "" {
-			source = "workflow"
-		}
-		summary := fmt.Sprintf("Scheduled workflow %s could not start: %v", workflowKey, err)
-		_ = l.broker.RecordAction("external_workflow_failed", source, channel, "scheduler", truncate(summary, 140), workflowKey, nil, "")
-		_ = l.broker.UpdateSkillExecutionByWorkflowKey(workflowKey, "failed", time.Now().UTC())
-		if nextRun, hasNext := nextWorkflowRun(strings.TrimSpace(payload.ScheduleExpr), time.Now().UTC()); hasNext {
-			_ = l.broker.UpdateSchedulerJobState(job.Slug, nextRun, "scheduled")
-		} else {
-			_ = l.broker.UpdateSchedulerJobState(job.Slug, time.Time{}, "done")
-		}
-		return
-	}
-	result, err := provider.ExecuteWorkflow(context.Background(), action.WorkflowExecuteRequest{
-		KeyOrPath: workflowKey,
-		Inputs:    payload.Inputs,
-	})
-	now := time.Now().UTC()
-	nextRun, hasNext := nextWorkflowRun(strings.TrimSpace(payload.ScheduleExpr), now)
-	if err != nil {
-		summary := fmt.Sprintf("Scheduled workflow %s failed via %s", workflowKey, titleCaser.String(provider.Name()))
-		_ = l.broker.RecordAction("external_workflow_failed", provider.Name(), channel, "scheduler", summary, workflowKey, nil, "")
-		_ = l.broker.UpdateSkillExecutionByWorkflowKey(workflowKey, "failed", now)
-		if hasNext {
-			_ = l.broker.UpdateSchedulerJobState(job.Slug, nextRun, "scheduled")
-		} else {
-			_ = l.broker.UpdateSchedulerJobState(job.Slug, time.Time{}, "done")
-		}
-		return
-	}
-	status := strings.TrimSpace(result.Status)
-	if status == "" {
-		status = "completed"
-	}
-	summary := fmt.Sprintf("Scheduled workflow %s ran via %s", workflowKey, titleCaser.String(provider.Name()))
-	_ = l.broker.RecordAction("external_workflow_executed", provider.Name(), channel, "scheduler", summary, workflowKey, nil, "")
-	_ = l.broker.UpdateSkillExecutionByWorkflowKey(workflowKey, status, now)
-	if hasNext {
-		_ = l.broker.UpdateSchedulerJobState(job.Slug, nextRun, "scheduled")
-	} else {
-		_ = l.broker.UpdateSchedulerJobState(job.Slug, time.Time{}, "done")
-	}
-}
-
-func nextWorkflowRun(scheduleExpr string, after time.Time) (time.Time, bool) {
-	scheduleExpr = strings.TrimSpace(scheduleExpr)
-	if scheduleExpr == "" {
-		return time.Time{}, false
-	}
-	sched, err := calendar.ParseCron(scheduleExpr)
-	if err != nil {
-		return time.Time{}, false
-	}
-	next := sched.Next(after)
-	if next.IsZero() {
-		return time.Time{}, false
-	}
-	return next, true
-}
+func (l *Launcher) processDueWorkflowJob(job schedulerJob) { l.scheduler().processWorkflowJob(job) }
 
 func (l *Launcher) recordWatchdogLedger(channel, kind, targetID, owner, summary, sourceSignalID string) ([]string, string) {
-	if l.broker == nil {
-		return nil, ""
-	}
-	signal, err := l.broker.RecordSignals([]officeSignal{{
-		ID:         strings.TrimSpace(kind) + "::" + strings.TrimSpace(targetID),
-		Source:     "watchdog",
-		Kind:       strings.TrimSpace(kind),
-		Title:      "Office watchdog",
-		Content:    strings.TrimSpace(summary),
-		Channel:    channel,
-		Owner:      strings.TrimSpace(owner),
-		Confidence: "high",
-		Urgency:    "high",
-	}})
-	if err != nil || len(signal) == 0 {
-		return compactStringList([]string{sourceSignalID}), ""
-	}
-	signalIDs := make([]string, 0, len(signal)+1)
-	signalIDs = append(signalIDs, compactStringList([]string{sourceSignalID})...)
-	for _, record := range signal {
-		signalIDs = append(signalIDs, record.ID)
-	}
-	decisionKind := "remind_owner"
-	decisionReason := "The watchdog detected owned work with no visible movement, so the office should remind the current owner."
-	decisionOwner := strings.TrimSpace(owner)
-	requiresHuman := false
-	blocking := false
-	if decisionOwner == "" {
-		decisionKind = "escalate_to_ceo"
-		decisionReason = "The watchdog detected work without a live owner, so the CEO should re-triage it."
-		decisionOwner = "ceo"
-	}
-	if kind == "request_waiting" {
-		decisionKind = "ask_human"
-		decisionReason = "The watchdog detected a pending human decision that is still blocking the office."
-		decisionOwner = "ceo"
-		requiresHuman = true
-		blocking = true
-	}
-	decision, err := l.broker.RecordDecision(decisionKind, channel, summary, decisionReason, decisionOwner, signalIDs, requiresHuman, blocking)
-	if err != nil {
-		return signalIDs, ""
-	}
-	return signalIDs, decision.ID
+	return l.scheduler().recordLedger(channel, kind, targetID, owner, summary, sourceSignalID)
 }
 
 func (req humanInterview) TitleOrDefault() string {
