@@ -163,6 +163,16 @@ var (
 	renderThreadReply       = channelui.RenderThreadReply
 	renderThreadMessage     = channelui.RenderThreadMessage
 	summarizeUnreadMessages = channelui.SummarizeUnreadMessages
+
+	filterMessagesForViewerScope        = channelui.FilterMessagesForViewerScope
+	normalizeMailboxScope               = channelui.NormalizeMailboxScope
+	mailboxMessageMatchesViewerScope    = channelui.MailboxMessageMatchesViewerScope
+	mailboxMessageBelongsToViewerOutbox = channelui.MailboxMessageBelongsToViewerOutbox
+	mailboxMessageBelongsToViewerInbox  = channelui.MailboxMessageBelongsToViewerInbox
+	mailboxMessageRepliesToViewerThread = channelui.MailboxMessageRepliesToViewerThread
+	normalizeDraftSlug                  = channelui.NormalizeDraftSlug
+	parseExpertiseInput                 = channelui.ParseExpertiseInput
+	liveActivityFromMembers             = channelui.LiveActivityFromMembers
 )
 
 // Interview-phase typed-string consts.

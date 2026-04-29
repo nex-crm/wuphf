@@ -106,6 +106,15 @@
 //   - unread.go            — SummarizeUnreadMessages renders a
 //     short "N new from <names>" label naming up to three distinct
 //     senders for the away-strip.
+//   - mailbox.go           — viewer-scope mailbox filter cluster:
+//     FilterMessagesForViewerScope (entry), NormalizeMailboxScope
+//     (canonicalize "inbox"/"outbox"/"agent"), the per-message
+//     predicates (MailboxMessageMatchesViewerScope,
+//     MailboxMessageBelongsToViewer{Inbox,Outbox}), and
+//     MailboxMessageRepliesToViewerThread (cycle-safe ReplyTo walk).
+//   - member_draft.go      — member-draft leaf helpers:
+//     NormalizeDraftSlug, ParseExpertiseInput (comma-split + dedup),
+//     LiveActivityFromMembers (slug → live-activity map).
 //
 // Subsequent extraction PRs will land the workspace / recovery / cache
 // cluster, the sidebar / splash, the broker integrations, and finally

@@ -170,16 +170,3 @@ func typingAgentsFromMembers(members []channelMember) []string {
 	}
 	return typing
 }
-
-// liveActivityFromMembers returns a map of agent slug -> live activity text
-// for agents currently working in their Claude Code instances.
-func liveActivityFromMembers(members []channelMember) map[string]string {
-	result := make(map[string]string)
-	for _, m := range members {
-		if m.Slug == "you" || m.LiveActivity == "" {
-			continue
-		}
-		result[m.Slug] = m.LiveActivity
-	}
-	return result
-}

@@ -204,31 +204,6 @@ func renderMemberDraftCard(draft channelMemberDraft, width int) string {
 		Render(strings.Join(lines, "\n"))
 }
 
-func normalizeDraftSlug(raw string) string {
-	raw = strings.ToLower(strings.TrimSpace(raw))
-	raw = strings.ReplaceAll(raw, " ", "-")
-	raw = strings.ReplaceAll(raw, "_", "-")
-	return raw
-}
-
-func parseExpertiseInput(raw string) []string {
-	parts := strings.Split(raw, ",")
-	out := make([]string, 0, len(parts))
-	seen := map[string]struct{}{}
-	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		if part == "" {
-			continue
-		}
-		if _, ok := seen[part]; ok {
-			continue
-		}
-		seen[part] = struct{}{}
-		out = append(out, part)
-	}
-	return out
-}
-
 func mutateOfficeMemberSpec(draft channelMemberDraft, activeChannel string) tea.Cmd {
 	return func() tea.Msg {
 		action := "create"
