@@ -1,4 +1,4 @@
-package main
+package channelui
 
 import (
 	"strings"
@@ -6,8 +6,11 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// layoutDimensions holds the computed panel sizes for the current terminal.
-type layoutDimensions struct {
+// LayoutDimensions describes the computed panel widths and the content
+// height for the current terminal. Returned by ComputeLayout and read by
+// the channel view's render loop, the mouse hit-test, and viewport
+// virtualization.
+type LayoutDimensions struct {
 	SidebarW    int
 	MainW       int
 	ThreadW     int
@@ -16,14 +19,15 @@ type layoutDimensions struct {
 	ShowThread  bool
 }
 
-// computeLayout calculates panel widths based on terminal size and UI state.
+// ComputeLayout calculates panel widths based on terminal size and UI
+// state.
 //
 // Breakpoints:
 //
-//	Wide  (120+) : sidebar 31, thread 40 (when open)
-//	Medium(80-119): sidebar 26, thread overlays main
-//	Narrow(<80)  : no sidebar, thread overlays main
-func computeLayout(width, height int, threadOpen, sidebarCollapsed bool) layoutDimensions {
+//	Wide  (126+)  : sidebar 31, thread 40 (when open)
+//	Medium(88-125): sidebar 26, thread overlays main
+//	Narrow(<88)   : no sidebar, thread overlays main
+func ComputeLayout(width, height int, threadOpen, sidebarCollapsed bool) LayoutDimensions {
 	const (
 		statusBarH  = 1
 		borderW     = 1 // vertical border between panels
@@ -34,7 +38,7 @@ func computeLayout(width, height int, threadOpen, sidebarCollapsed bool) layoutD
 		wideThread  = 40
 	)
 
-	ld := layoutDimensions{
+	ld := LayoutDimensions{
 		ContentH: height - statusBarH,
 	}
 	if ld.ContentH < 1 {
@@ -102,8 +106,9 @@ func computeLayout(width, height int, threadOpen, sidebarCollapsed bool) layoutD
 	return ld
 }
 
-// renderVerticalBorder draws a vertical line of the given height.
-func renderVerticalBorder(height int, color string) string {
+// RenderVerticalBorder draws a single vertical line of the given height
+// in the supplied color. Used between panels in the channel layout.
+func RenderVerticalBorder(height int, color string) string {
 	style := lipgloss.NewStyle().
 		Foreground(lipgloss.Color(color))
 	return style.Render(strings.Repeat("│\n", height-1) + "│")

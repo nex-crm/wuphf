@@ -16,4 +16,16 @@ type (
 	brokerMessage      = channelui.BrokerMessage
 	renderedLine       = channelui.RenderedLine
 	threadedMessage    = channelui.ThreadedMessage
+	layoutDimensions   = channelui.LayoutDimensions
+)
+
+// Function aliases keep the lowercase names callable from package main
+// while the helpers physically live in channelui. Removed in PR 9.
+var (
+	countReplies         = channelui.CountReplies
+	buildReplyChildren   = channelui.BuildReplyChildren
+	parseTimestamp       = channelui.ParseTimestamp
+	formatShortTime      = channelui.FormatShortTime
+	computeLayout        = channelui.ComputeLayout
+	renderVerticalBorder = channelui.RenderVerticalBorder
 )
