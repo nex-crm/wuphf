@@ -416,6 +416,24 @@ func TestWriteSkillProposalLocked_OwnerValidation(t *testing.T) {
 			owners: nil,
 			want:   nil,
 		},
+		{
+			// F5: belt-and-suspenders regex. The "../etc/passwd" shape would
+			// also fail member-existence, but the regex makes path-injection
+			// shapes inert at the string level — defence in depth.
+			name:   "path-traversal shape rejected by slug regex",
+			owners: []string{"../etc/passwd", "deploy-bot"},
+			want:   []string{"deploy-bot"},
+		},
+		{
+			name:   "leading-dash slug rejected by regex",
+			owners: []string{"-bad-leading-dash", "csm"},
+			want:   []string{"csm"},
+		},
+		{
+			name:   "uppercase-letters fold to lowercase before regex check",
+			owners: []string{"DEPLOY-BOT"},
+			want:   []string{"deploy-bot"},
+		},
 	}
 
 	for _, tc := range tests {

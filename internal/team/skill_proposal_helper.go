@@ -230,6 +230,16 @@ func (b *Broker) validateOwnerAgentsLocked(skillName string, owners []string) []
 			continue
 		}
 		seen[slug] = true
+		// Belt-and-suspenders: reject anything that isn't a well-formed Anthropic
+		// Agent Skills slug shape before we hit findMemberLocked. The member
+		// table would also miss `../etc/passwd`, but enforcing the regex here
+		// closes the path-injection vector even if a future code path looks
+		// owners up via something other than the member table.
+		if !skillSlugRegex.MatchString(slug) {
+			slog.Warn("writeSkillProposalLocked: dropping malformed owner slug",
+				"skill", skillName, "owner", slug)
+			continue
+		}
 		if b.findMemberLocked(slug) == nil {
 			slog.Warn("writeSkillProposalLocked: dropping unknown owner slug",
 				"skill", skillName, "owner", slug)

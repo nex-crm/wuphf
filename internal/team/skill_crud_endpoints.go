@@ -903,15 +903,19 @@ func validateSkillFilePath(p string) error {
 	return nil
 }
 
-// reconcileSkillStatusFromDisk updates b.skills in-memory statuses to match
-// the on-disk SKILL.md frontmatter values. It is called once after the wiki
-// worker is wired during broker startup so a restart after an archive (or
-// approve) that did not persist saveLocked does not silently revert the
-// skill's status to its stale broker-state.json value.
+// reconcileSkillStatusFromDisk updates b.skills in-memory statuses and
+// owner_agents to match the on-disk SKILL.md frontmatter values. It is called
+// once after the wiki worker is wired during broker startup so a restart that
+// did not persist saveLocked does not silently revert the skill's status or
+// per-agent scope to a stale broker-state.json value.
 //
-// Only skills that have a SKILL.md on disk AND whose in-memory status differs
-// from the frontmatter status are updated. Missing or unparseable files are
-// silently skipped so reconciliation cannot break startup.
+// PR 7: OwnerAgents reconcile makes scope durable across "edit SKILL.md on
+// disk and restart" — without this, a manual scope edit (or a restored
+// backup) would be silently overwritten by the in-memory snapshot.
+//
+// Only skills that have a SKILL.md on disk are touched. Missing or
+// unparseable files are silently skipped so reconciliation cannot break
+// startup.
 func (b *Broker) reconcileSkillStatusFromDisk() {
 	b.mu.Lock()
 	worker := b.wikiWorker
@@ -938,15 +942,22 @@ func (b *Broker) reconcileSkillStatusFromDisk() {
 			continue
 		}
 		diskStatus := strings.TrimSpace(fm.Metadata.Wuphf.Status)
-		if diskStatus == "" {
-			continue
-		}
-		if b.skills[i].Status != diskStatus {
+		if diskStatus != "" && b.skills[i].Status != diskStatus {
 			slog.Info("skill_crud: reconcile status from disk",
 				"name", b.skills[i].Name,
 				"was", b.skills[i].Status,
 				"now", diskStatus)
 			b.skills[i].Status = diskStatus
+			updated = true
+		}
+
+		diskOwners := fm.Metadata.Wuphf.OwnerAgents
+		if !ownerAgentsEqual(b.skills[i].OwnerAgents, diskOwners) {
+			slog.Info("skill_crud: reconcile owner_agents from disk",
+				"name", b.skills[i].Name,
+				"was", b.skills[i].OwnerAgents,
+				"now", diskOwners)
+			b.skills[i].OwnerAgents = append([]string(nil), diskOwners...)
 			updated = true
 		}
 	}
@@ -955,6 +966,21 @@ func (b *Broker) reconcileSkillStatusFromDisk() {
 			slog.Warn("skill_crud: reconcileSkillStatusFromDisk saveLocked failed", "err", saveErr)
 		}
 	}
+}
+
+// ownerAgentsEqual reports whether two OwnerAgents slices are semantically
+// equal. Order matters because reconcile keeps disk's order as authoritative;
+// a (a,b) → (b,a) reorder on disk should trigger a refresh.
+func ownerAgentsEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // resolveSkillSourceArticle reads the on-disk SKILL.md for name and extracts
