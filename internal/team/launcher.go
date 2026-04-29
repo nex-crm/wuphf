@@ -142,6 +142,14 @@ type Launcher struct {
 	// queuePaneNotification uses this to decide whether to merge a new
 	// notification with a pending one or to start a fresh dispatch.
 	paneDispatchLastSentAt map[string]time.Time
+
+	// targets owns the office-membership-shape and routing-decision logic
+	// (PLAN.md §C2). Lazily constructed via targeter() so tests that build
+	// &Launcher{} directly stay nil-safe. The launcher field stays the
+	// authoritative source for sessionName / pack / failedPaneSlugs /
+	// paneBackedAgents — the targeter holds pointers/callbacks back into
+	// the launcher rather than copies.
+	targets *officeTargeter
 }
 
 // paneDispatchTurn is one queued notification to type into a tmux pane.
@@ -1013,12 +1021,19 @@ func (l *Launcher) sendTaskUpdate(target notificationTarget, action officeAction
 
 // isChannelDM returns true if the channel is a DM (either old dm-* format or new Store type).
 // agentTarget returns the agent slug that should receive the DM notification (non-human side).
+// isChannelDM is the public entry point used by dispatch code; targeter
+// reads the same logic via the isChannelDMRaw callback.
 func (l *Launcher) isChannelDM(channelSlug string) (isDM bool, agentTarget string) {
-	// Legacy format: dm-{agent}
+	return l.isChannelDMRaw(channelSlug)
+}
+
+// isChannelDMRaw resolves whether a channel is a direct-message channel
+// and, if so, which agent it targets. Two formats supported: the legacy
+// "dm-{agent}" slug and the new store format where channel.type == "D".
+func (l *Launcher) isChannelDMRaw(channelSlug string) (isDM bool, agentTarget string) {
 	if IsDMSlug(channelSlug) {
 		return true, DMTargetAgent(channelSlug)
 	}
-	// New store format: channel type == D
 	if l.broker != nil {
 		cs := l.broker.ChannelStore()
 		if cs != nil && cs.IsDirectMessageBySlug(channelSlug) {
@@ -1788,216 +1803,90 @@ func humanizeNotificationType(kind string) string {
 	}
 }
 
-func (l *Launcher) agentPaneSlugs() []string {
-	if l.isOneOnOne() {
-		return []string{l.oneOnOneAgent()}
+// targeter returns the office-targeter, lazily constructing it on first
+// access. PLAN.md trap §5.4: tests build &Launcher{} directly and rely on
+// every sub-type being nil-safe. The targeter shares mutable state with
+// the launcher via pointers/maps (paneBackedFlag, failedPaneSlugs) so
+// later mutations on the launcher are visible to the targeter immediately.
+func (l *Launcher) targeter() *officeTargeter {
+	if l == nil {
+		return nil
 	}
-	members := l.officeMembersSnapshot()
-	lead := l.officeLeadSlug()
-	var slugs []string
-	if lead != "" {
-		slugs = append(slugs, lead)
+	if l.targets != nil {
+		return l.targets
 	}
-	for _, member := range members {
-		if member.Slug == lead {
-			continue
-		}
-		slugs = append(slugs, member.Slug)
+	if l.failedPaneSlugs == nil {
+		l.failedPaneSlugs = map[string]string{}
 	}
-	return slugs
+	l.targets = &officeTargeter{
+		sessionName:        l.sessionName,
+		pack:               l.pack,
+		cwd:                l.cwd,
+		provider:           l.provider,
+		paneBackedFlag:     &l.paneBackedAgents,
+		failedPaneSlugs:    l.failedPaneSlugs,
+		isOneOnOne:         l.isOneOnOne,
+		oneOnOneSlug:       l.oneOnOneAgent,
+		isChannelDM:        l.isChannelDMRaw,
+		snapshotMembers:    l.officeMembersSnapshot,
+		memberProviderKind: l.brokerMemberProviderKind,
+	}
+	return l.targets
 }
 
-const maxVisibleOfficeAgents = 5
-
-func (l *Launcher) officeAgentOrder() []officeMember {
-	var agentOrder []officeMember
-	lead := l.officeLeadSlug()
-	for _, member := range l.officeMembersSnapshot() {
-		if member.Slug == lead {
-			agentOrder = append([]officeMember{member}, agentOrder...)
-		}
+// brokerMemberProviderKind reads the per-member provider override from the
+// broker, or "" when no broker is wired or no override is set.
+func (l *Launcher) brokerMemberProviderKind(slug string) string {
+	if l == nil || l.broker == nil {
+		return ""
 	}
-	for _, member := range l.officeMembersSnapshot() {
-		if member.Slug != lead {
-			agentOrder = append(agentOrder, member)
-		}
-	}
-	return agentOrder
+	return l.broker.MemberProviderKind(slug)
 }
+
+// agentPaneSlugs and friends are thin wrappers that delegate to the
+// targeter. Kept as Launcher methods so the ~110 callers across
+// internal/team don't need a sweep in this PR; consolidation is a
+// follow-up. PLAN.md §6 wants the call sites renamed eventually but the
+// bulk of the diff would be call-site churn rather than logic changes.
+
+func (l *Launcher) agentPaneSlugs() []string { return l.targeter().PaneSlugs() }
+
+func (l *Launcher) officeAgentOrder() []officeMember { return l.targeter().AgentOrder() }
 
 func (l *Launcher) visibleOfficeMembers() []officeMember {
-	if l.isOneOnOne() {
-		member := l.officeMemberBySlug(l.oneOnOneAgent())
-		return []officeMember{member}
-	}
-	ordered := l.paneEligibleOfficeMembers()
-	if len(ordered) <= maxVisibleOfficeAgents {
-		return ordered
-	}
-	return ordered[:maxVisibleOfficeAgents]
+	return l.targeter().VisibleMembers()
 }
 
 func (l *Launcher) overflowOfficeMembers() []officeMember {
-	if l.isOneOnOne() {
-		return nil
-	}
-	ordered := l.paneEligibleOfficeMembers()
-	if len(ordered) <= maxVisibleOfficeAgents {
-		return nil
-	}
-	return ordered[maxVisibleOfficeAgents:]
+	return l.targeter().OverflowMembers()
 }
 
-// paneEligibleOfficeMembers returns officeAgentOrder() minus agents that
-// should never get a tmux/claude pane (e.g. codex-bound agents, which use
-// their own headless pipeline). Filtering upstream keeps visible/overflow
-// slot indices in sync with agentPaneTargets().
 func (l *Launcher) paneEligibleOfficeMembers() []officeMember {
-	ordered := l.officeAgentOrder()
-	filtered := make([]officeMember, 0, len(ordered))
-	for _, m := range ordered {
-		if l.memberUsesHeadlessOneShotRuntime(m.Slug) {
-			continue
-		}
-		filtered = append(filtered, m)
-	}
-	return filtered
+	return l.targeter().PaneEligibleMembers()
 }
 
-func overflowWindowName(slug string) string {
-	return "agent-" + strings.TrimSpace(slug)
-}
-
-// resolvePaneTargetForSlug returns the current pane address for an agent
-// slug, or "" if the agent has no live pane right now. Called by the
-// pane-capture loop when its cached target keeps failing so it can pick
-// up new addresses after office reseeds recreate panes under different
-// ids. Returns ok=false when the agent isn't pane-backed at all (e.g.
-// codex-bound agents that dispatch headlessly).
 func (l *Launcher) resolvePaneTargetForSlug(slug string) (string, bool) {
-	if l == nil || slug == "" {
-		return "", false
-	}
-	targets := l.agentPaneTargets()
-	target, ok := targets[slug]
-	if !ok {
-		return "", false
-	}
-	return target.PaneTarget, true
+	return l.targeter().ResolvePaneTarget(slug)
 }
 
 func (l *Launcher) agentPaneTargets() map[string]notificationTarget {
-	targets := make(map[string]notificationTarget)
-	// Pane targets only make sense when tmux panes actually back the agents.
-	// Otherwise every PaneTarget string we return is a ghost pointing at a
-	// non-existent pane — and downstream code (agentNotificationTargets,
-	// shouldUseHeadlessDispatchForTarget) treats the non-empty PaneTarget as
-	// "pane path", which bypasses the headless dispatcher and types into a
-	// dead tmux session that silently drops every notification.
-	if l == nil || !l.paneBackedAgents {
-		return targets
-	}
-	if l.isOneOnOne() {
-		slug := l.oneOnOneAgent()
-		if slug != "" && !l.skipPaneForSlug(slug) {
-			targets[slug] = notificationTarget{
-				Slug:       slug,
-				PaneTarget: fmt.Sprintf("%s:team.1", l.sessionName),
-			}
-		}
-		return targets
-	}
-	for i, member := range l.visibleOfficeMembers() {
-		if l.skipPaneForSlug(member.Slug) {
-			continue
-		}
-		targets[member.Slug] = notificationTarget{
-			Slug:       member.Slug,
-			PaneTarget: fmt.Sprintf("%s:team.%d", l.sessionName, i+1),
-		}
-	}
-	for _, member := range l.overflowOfficeMembers() {
-		if l.skipPaneForSlug(member.Slug) {
-			continue
-		}
-		targets[member.Slug] = notificationTarget{
-			Slug:       member.Slug,
-			PaneTarget: fmt.Sprintf("%s:%s.0", l.sessionName, overflowWindowName(member.Slug)),
-		}
-	}
-	return targets
+	return l.targeter().PaneTargets()
 }
 
 func (l *Launcher) agentNotificationTargets() map[string]notificationTarget {
-	targets := l.agentPaneTargets()
-	if l == nil {
-		return targets
-	}
-	addHeadless := func(slug string) {
-		slug = strings.TrimSpace(slug)
-		if slug == "" {
-			return
-		}
-		if _, ok := targets[slug]; ok {
-			return
-		}
-		if l.shouldUseHeadlessDispatchForSlug(slug) {
-			targets[slug] = notificationTarget{Slug: slug}
-		}
-	}
-	if l.isOneOnOne() {
-		addHeadless(l.oneOnOneAgent())
-		return targets
-	}
-	addHeadless(l.officeLeadSlug())
-	for _, member := range l.activeSessionMembers() {
-		addHeadless(member.Slug)
-	}
-	return targets
+	return l.targeter().NotificationTargets()
 }
 
 func (l *Launcher) shouldUseHeadlessDispatchForSlug(slug string) bool {
-	if l == nil || strings.TrimSpace(slug) == "" {
-		return false
-	}
-	if l.shouldUseHeadlessDispatch() {
-		return true
-	}
-	if l.memberUsesHeadlessOneShotRuntime(slug) {
-		return true
-	}
-	if _, failed := l.failedPaneSlugs[strings.TrimSpace(slug)]; failed {
-		return true
-	}
-	return false
+	return l.targeter().ShouldUseHeadlessForSlug(slug)
 }
 
 func (l *Launcher) shouldUseHeadlessDispatchForTarget(target notificationTarget) bool {
-	if l == nil {
-		return false
-	}
-	if l.shouldUseHeadlessDispatchForSlug(target.Slug) {
-		return true
-	}
-	return strings.TrimSpace(target.PaneTarget) == ""
+	return l.targeter().ShouldUseHeadlessForTarget(target)
 }
 
-// skipPaneForSlug returns true when the given slug should not have a tmux
-// pane target registered — either because pane spawn failed earlier, or
-// because the agent is bound to a non-pane provider and uses its own headless
-// pipeline. In either case, dispatch falls back to the headless path.
 func (l *Launcher) skipPaneForSlug(slug string) bool {
-	slug = strings.TrimSpace(slug)
-	if slug == "" {
-		return true
-	}
-	if _, bad := l.failedPaneSlugs[slug]; bad {
-		return true
-	}
-	if l.memberUsesHeadlessOneShotRuntime(slug) {
-		return true
-	}
-	return false
+	return l.targeter().SkipPane(slug)
 }
 
 func (l *Launcher) isOneOnOne() bool {
@@ -2038,58 +1927,22 @@ func (l *Launcher) usesOpencodeRuntime() bool {
 	return strings.EqualFold(strings.TrimSpace(l.provider), "opencode")
 }
 
-// usesPaneRuntime reports whether the install-wide provider should run
-// agents in interactive tmux panes. Reads PaneEligible from the provider
-// Registry; an unregistered or non-pane-eligible provider returns false,
-// so dispatch falls through to the headless path.
-func (l *Launcher) usesPaneRuntime() bool {
-	return provider.CapabilitiesFor(normalizeProviderKind(l.provider)).PaneEligible
-}
+// usesPaneRuntime / requiresClaudeSessionReset / memberEffectiveProviderKind /
+// memberUsesHeadlessOneShotRuntime live on officeTargeter (PLAN.md §C2);
+// these wrappers keep ~30 in-package callers compiling without a rename
+// sweep in this PR.
+func (l *Launcher) usesPaneRuntime() bool { return l.targeter().UsesPaneRuntime() }
 
-// requiresClaudeSessionReset reports whether the install-wide provider
-// populates the Claude session store and therefore needs provider.ResetClaudeSessions
-// to run on ResetSession / ReconfigureSession. Today only Claude Code does.
 func (l *Launcher) requiresClaudeSessionReset() bool {
-	return provider.CapabilitiesFor(normalizeProviderKind(l.provider)).RequiresClaudeSessionReset
+	return l.targeter().RequiresClaudeSessionReset()
 }
 
-// memberEffectiveProviderKind returns the provider kind that should run the
-// given agent's next turn. Lookup order: member's per-agent ProviderBinding
-// (set via /agent create --provider=X or the hire-agent modal), then the
-// install-wide l.provider fallback.
 func (l *Launcher) memberEffectiveProviderKind(slug string) string {
-	if l.broker != nil {
-		if kind := l.broker.MemberProviderKind(slug); kind != "" {
-			return normalizeProviderKind(kind)
-		}
-	}
-	return normalizeProviderKind(l.provider)
+	return l.targeter().MemberEffectiveProviderKind(slug)
 }
 
-// memberUsesHeadlessOneShotRuntime reports whether the given agent is bound to
-// a runtime that is not pane-eligible and therefore skips the tmux/claude pane
-// infrastructure in favor of the broker-driven headless queue.
 func (l *Launcher) memberUsesHeadlessOneShotRuntime(slug string) bool {
-	kind := l.memberEffectiveProviderKind(slug)
-	return !provider.CapabilitiesFor(kind).PaneEligible
-}
-
-// normalizeProviderKind trims and canonicalizes provider kinds while
-// preserving unknown values so dispatch code can surface explicit errors.
-func normalizeProviderKind(raw string) string {
-	k := strings.ToLower(strings.TrimSpace(raw))
-	switch k {
-	case "claude", "":
-		return provider.KindClaudeCode
-	case "codex":
-		return provider.KindCodex
-	case "opencode":
-		return provider.KindOpencode
-	case "claude-code", "openclaw":
-		return k
-	default:
-		return k
-	}
+	return l.targeter().MemberUsesHeadlessOneShotRuntime(slug)
 }
 
 // UsesTmuxRuntime reports whether agents run in tmux panes. Equivalent to
@@ -2946,17 +2799,9 @@ func (l *Launcher) sendChannelUpdate(target notificationTarget, msg channelMessa
 	l.queuePaneNotification(target.Slug, target.PaneTarget, notification)
 }
 
-// shouldUseHeadlessDispatch returns true when notifications must be delivered
-// via a queued headless `claude --print` turn rather than typed into a live
-// interactive pane. This is the default path for both web and TUI modes.
-// Codex runtime is always headless. Pane-backed interactive dispatch is only
-// used when the fallback path explicitly brought panes up (paneBackedAgents).
-func (l *Launcher) shouldUseHeadlessDispatch() bool {
-	if !l.usesPaneRuntime() {
-		return true
-	}
-	return !l.paneBackedAgents
-}
+// shouldUseHeadlessDispatch is a thin wrapper around the targeter; see
+// officeTargeter.ShouldUseHeadless for semantics.
+func (l *Launcher) shouldUseHeadlessDispatch() bool { return l.targeter().ShouldUseHeadless() }
 
 // Minimum gap between two consecutive pane `/clear` + type cycles for the
 // same agent. Serves as a safety floor against truly back-to-back sends
@@ -4256,40 +4101,14 @@ func (l *Launcher) BrokerBaseURL() string {
 	return brokerBaseURL()
 }
 
+// officeMemberBySlug / officeLeadSlug / activeSessionMembers / getAgentName
+// live on officeTargeter (PLAN.md §C2); thin wrappers keep current callers
+// working without a rename sweep.
 func (l *Launcher) officeMemberBySlug(slug string) officeMember {
-	for _, member := range l.officeMembersSnapshot() {
-		if member.Slug == slug {
-			return member
-		}
-	}
-	return officeMember{Slug: slug, Name: slug, Role: slug}
+	return l.targeter().MemberBySlug(slug)
 }
 
-func (l *Launcher) officeLeadSlug() string {
-	if l.pack != nil && strings.TrimSpace(l.pack.LeadSlug) != "" {
-		return l.pack.LeadSlug
-	}
-	return officeLeadSlugFrom(l.activeSessionMembers())
-}
-
-// officeLeadSlugFrom derives the lead slug from an already-loaded member
-// snapshot, avoiding a redundant officeMembersSnapshot call.
-func officeLeadSlugFrom(members []officeMember) string {
-	for _, member := range members {
-		if member.Slug == "ceo" {
-			return "ceo"
-		}
-	}
-	for _, member := range members {
-		if member.BuiltIn {
-			return member.Slug
-		}
-	}
-	if len(members) > 0 {
-		return members[0].Slug
-	}
-	return ""
-}
+func (l *Launcher) officeLeadSlug() string { return l.targeter().LeadSlug() }
 
 func agentConfigFromMember(member officeMember) agent.AgentConfig {
 	cfg := agent.AgentConfig{
@@ -4313,50 +4132,7 @@ func agentConfigFromMember(member officeMember) agent.AgentConfig {
 }
 
 func (l *Launcher) activeSessionMembers() []officeMember {
-	members := l.officeMembersSnapshot()
-	if l == nil || l.pack == nil || len(l.pack.Agents) == 0 {
-		return members
-	}
-	bySlug := make(map[string]officeMember, len(members))
-	for _, member := range members {
-		bySlug[member.Slug] = member
-	}
-	// Pack order comes first (stable UI / pane layout), then any broker
-	// members not in the pack (wizard-hired agents post-launch). Dropping
-	// broker-only members here silently excluded wizard-hired specialists
-	// from agentNotificationTargets, making @-tags and DMs route to CEO.
-	filtered := make([]officeMember, 0, len(members))
-	seen := make(map[string]struct{}, len(members))
-	for _, cfg := range l.pack.Agents {
-		if member, ok := bySlug[cfg.Slug]; ok {
-			filtered = append(filtered, member)
-			seen[cfg.Slug] = struct{}{}
-			continue
-		}
-		member := officeMember{
-			Slug:           cfg.Slug,
-			Name:           cfg.Name,
-			Role:           cfg.Name,
-			Expertise:      append([]string(nil), cfg.Expertise...),
-			Personality:    cfg.Personality,
-			PermissionMode: cfg.PermissionMode,
-			AllowedTools:   append([]string(nil), cfg.AllowedTools...),
-			BuiltIn:        cfg.Slug == l.pack.LeadSlug || cfg.Slug == "ceo",
-		}
-		applyOfficeMemberDefaults(&member)
-		filtered = append(filtered, member)
-		seen[cfg.Slug] = struct{}{}
-	}
-	for _, member := range members {
-		if _, ok := seen[member.Slug]; ok {
-			continue
-		}
-		filtered = append(filtered, member)
-	}
-	if len(filtered) > 0 {
-		return filtered
-	}
-	return members
+	return l.targeter().ActiveSessionMembers()
 }
 
 // PackName returns the display name of the pack.
@@ -4387,13 +4163,9 @@ func filterEnv(env []string, key string) []string {
 	return out
 }
 
-// getAgentName returns the display name for an agent slug.
-func (l *Launcher) getAgentName(slug string) string {
-	if member := l.officeMemberBySlug(slug); member.Name != "" {
-		return member.Name
-	}
-	return slug
-}
+// getAgentName returns the display name for an agent slug. Delegates to
+// the targeter (PLAN.md §C2).
+func (l *Launcher) getAgentName(slug string) string { return l.targeter().NameFor(slug) }
 
 // ═══════════════════════════════════════════════════════════════
 // Web View Mode
