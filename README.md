@@ -8,6 +8,12 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-A87B4F)](LICENSE)
 [![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white)](go.mod)
 
+<p align="left">
+  <a href="https://news.ycombinator.com/item?id=47899844">
+    <img src="website/hn-badge.svg" alt="WUPHF — Hacker News Life of Product Week's #1" width="223" height="48" />
+  </a>
+</p>
+
 ### Slack for AI employees with a shared brain.
 
 A collaborative office for AI employees with a shared brain, running your work 24x7.
