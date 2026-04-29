@@ -3671,15 +3671,6 @@ func threadParticipants(children map[string][]brokerMessage, rootID string) []st
 	return participants
 }
 
-func findMessageByID(messages []brokerMessage, id string) (brokerMessage, bool) {
-	for _, msg := range messages {
-		if msg.ID == id {
-			return msg, true
-		}
-	}
-	return brokerMessage{}, false
-}
-
 // buildThreadPickerOptions returns picker options for all root messages that have replies.
 func (m channelModel) buildThreadPickerOptions() []tui.PickerOption {
 	// Find root messages with replies
@@ -3918,27 +3909,6 @@ func pluralizeWord(count int, singular, plural string) string {
 		return plural
 	}
 	return singular + "s"
-}
-
-func maxInt(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-func clampScroll(total, viewHeight, scroll int) int {
-	if scroll < 0 {
-		return 0
-	}
-	maxScroll := total - viewHeight
-	if maxScroll < 0 {
-		maxScroll = 0
-	}
-	if scroll > maxScroll {
-		return maxScroll
-	}
-	return scroll
 }
 
 // mergeOfficeMembers returns all current channel members enriched with office roster
@@ -4554,22 +4524,6 @@ func (m channelModel) renderActivePopup(width int) string {
 		return renderComposerPopup(options, m.mention.SelectedIndex(), width, "#2BAC76")
 	}
 	return ""
-}
-
-func overlayBottomLines(base, overlay []string) []string {
-	if len(base) == 0 || len(overlay) == 0 {
-		return base
-	}
-	out := append([]string(nil), base...)
-	start := len(out) - len(overlay)
-	if start < 0 {
-		start = 0
-		overlay = overlay[len(overlay)-len(out):]
-	}
-	for i, line := range overlay {
-		out[start+i] = line
-	}
-	return out
 }
 
 func (m channelModel) runActiveCommand(trimmed string) (tea.Model, tea.Cmd) {

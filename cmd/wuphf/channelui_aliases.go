@@ -28,4 +28,18 @@ var (
 	formatShortTime      = channelui.FormatShortTime
 	computeLayout        = channelui.ComputeLayout
 	renderVerticalBorder = channelui.RenderVerticalBorder
+
+	maxInt              = channelui.MaxInt
+	clampScroll         = channelui.ClampScroll
+	overlayBottomLines  = channelui.OverlayBottomLines
+	findMessageByID     = channelui.FindMessageByID
+	containsString      = channelui.ContainsString
+	shortClock          = channelui.ShortClock
+	formatMinutes       = channelui.FormatMinutes
+	fallbackString      = channelui.FallbackString
+	parseChannelTime    = channelui.ParseChannelTime
+	sameDay             = channelui.SameDay
+	prettyWhen          = channelui.PrettyWhen
+	prettyRelativeTime  = channelui.PrettyRelativeTime
+	renderTimingSummary = channelui.RenderTimingSummary
 )
