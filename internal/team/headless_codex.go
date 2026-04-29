@@ -45,7 +45,7 @@ var (
 // turn runner. Tests substitute via setHeadlessCodexRunTurnForTest.
 func defaultHeadlessCodexRunTurn(l *Launcher, ctx context.Context, slug, notification string, channel ...string) error {
 	if l != nil {
-		kind := l.memberEffectiveProviderKind(slug)
+		kind := l.targeter().MemberEffectiveProviderKind(slug)
 		switch {
 		case kind == provider.KindCodex:
 			return l.runHeadlessCodexTurn(ctx, slug, notification, channel...)
@@ -248,9 +248,9 @@ func (l *Launcher) enqueueHeadlessCodexTurnRecord(slug string, turn headlessCode
 	urgentLeadTurn := l.headlessLeadTurnNeedsImmediateWakeLocked(slug, turn.Prompt)
 	if turn.TaskID != "" {
 		if active := l.headless.active[slug]; active != nil && strings.TrimSpace(active.Turn.TaskID) == turn.TaskID {
-			if !(slug == l.officeLeadSlug() && urgentLeadTurn) && turn.Attempts <= active.Turn.Attempts {
+			if !(slug == l.targeter().LeadSlug() && urgentLeadTurn) && turn.Attempts <= active.Turn.Attempts {
 				l.headless.mu.Unlock()
-				if slug == l.officeLeadSlug() {
+				if slug == l.targeter().LeadSlug() {
 					appendHeadlessCodexLog(slug, "queue-drop: lead already handling same task")
 				} else {
 					appendHeadlessCodexLog(slug, "queue-drop: agent already handling same task")
@@ -264,7 +264,7 @@ func (l *Launcher) enqueueHeadlessCodexTurnRecord(slug string, turn headlessCode
 				startWorker = true
 			}
 			l.headless.mu.Unlock()
-			if slug == l.officeLeadSlug() {
+			if slug == l.targeter().LeadSlug() {
 				appendHeadlessCodexLog(slug, "queue-replace: refreshed pending lead turn for same task")
 			} else {
 				appendHeadlessCodexLog(slug, "queue-replace: refreshed pending turn for same task")
@@ -280,7 +280,7 @@ func (l *Launcher) enqueueHeadlessCodexTurnRecord(slug string, turn headlessCode
 	// parallel work is done — not when one specialist finishes while others are
 	// still running. This eliminates the race condition where CEO fires after the
 	// first specialist completes and redundantly re-routes to still-running agents.
-	if slug == l.officeLeadSlug() && !urgentLeadTurn {
+	if slug == l.targeter().LeadSlug() && !urgentLeadTurn {
 		for workerSlug, queue := range l.headless.queues {
 			if workerSlug == slug {
 				continue
@@ -309,7 +309,7 @@ func (l *Launcher) enqueueHeadlessCodexTurnRecord(slug string, turn headlessCode
 	// stack up redundant CEO turns that each re-route the same task. One pending
 	// turn is enough to catch the latest state; extras are dropped.
 	const leadMaxPending = 1
-	if slug == l.officeLeadSlug() && len(l.headless.queues[slug]) >= leadMaxPending {
+	if slug == l.targeter().LeadSlug() && len(l.headless.queues[slug]) >= leadMaxPending {
 		if urgentLeadTurn {
 			l.headless.queues[slug][len(l.headless.queues[slug])-1] = turn
 			if !l.headless.workers[slug] {
@@ -363,7 +363,7 @@ func (l *Launcher) replaceDuplicateTaskTurnLocked(slug string, turn headlessCode
 		l.headless.queues[slug][i] = turn
 		return true
 	}
-	if slug == l.officeLeadSlug() && l.headless.deferredLead != nil && strings.TrimSpace(l.headless.deferredLead.TaskID) == turn.TaskID {
+	if slug == l.targeter().LeadSlug() && l.headless.deferredLead != nil && strings.TrimSpace(l.headless.deferredLead.TaskID) == turn.TaskID {
 		cp := turn
 		l.headless.deferredLead = &cp
 		return true
@@ -375,7 +375,7 @@ func (l *Launcher) headlessLeadTurnNeedsImmediateWakeLocked(slug, prompt string)
 	if l == nil || l.broker == nil {
 		return false
 	}
-	if strings.TrimSpace(slug) != l.officeLeadSlug() {
+	if strings.TrimSpace(slug) != l.targeter().LeadSlug() {
 		return false
 	}
 	taskID := strings.TrimSpace(headlessCodexTaskID(prompt))
@@ -672,7 +672,7 @@ func (l *Launcher) finishHeadlessTurn(slug string) {
 		active.Cancel()
 	}
 	delete(l.headless.active, slug)
-	lead := l.officeLeadSlug()
+	lead := l.targeter().LeadSlug()
 	var deferredLead *headlessCodexTurn
 	// Determine if this was a specialist finishing (not the lead), and if so whether
 	// any other specialists are still active or queued. If the slate is clear, we
@@ -739,11 +739,11 @@ func (l *Launcher) wakeLeadAfterSpecialist(specialistSlug string) {
 	if l.broker == nil {
 		return
 	}
-	lead := l.officeLeadSlug()
+	lead := l.targeter().LeadSlug()
 	if lead == "" {
 		return
 	}
-	targets := l.agentNotificationTargets()
+	targets := l.targeter().NotificationTargets()
 	target, ok := targets[lead]
 	if !ok {
 		return

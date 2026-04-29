@@ -444,7 +444,7 @@ func TestLauncher_TargeterWiringMatchesPaneTargets(t *testing.T) {
 		},
 		failedPaneSlugs: map[string]string{},
 	}
-	got := l.agentPaneTargets()
+	got := l.targeter().PaneTargets()
 	if _, ok := got["ceo"]; !ok {
 		t.Fatalf("expected ceo in launcher pane targets, got %v", got)
 	}

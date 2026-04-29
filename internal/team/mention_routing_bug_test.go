@@ -187,9 +187,9 @@ func TestBug_HumanTagsSpecialist_Dispatch_SpecialistReceivesTurn(t *testing.T) {
 
 	immediate, _ := l.notificationTargetsForMessage(msg)
 	t.Logf("notification targets: %+v", immediate)
-	t.Logf("agentNotificationTargets: %+v", l.agentNotificationTargets())
+	t.Logf("agentNotificationTargets: %+v", l.targeter().NotificationTargets())
 	t.Logf("activeSessionMembers: %+v", l.activeSessionMembers())
-	t.Logf("officeLeadSlug: %q", l.officeLeadSlug())
+	t.Logf("officeLeadSlug: %q", l.targeter().LeadSlug())
 
 	l.deliverMessageNotification(msg)
 
@@ -432,7 +432,7 @@ func TestBug_DMToWizardHiredPM_Dispatch(t *testing.T) {
 		},
 	}
 
-	targetMap := l.agentNotificationTargets()
+	targetMap := l.targeter().NotificationTargets()
 	t.Logf("targetMap after hiring pm: %+v", targetMap)
 
 	immediate, _ := l.notificationTargetsForMessage(channelMessage{
@@ -487,7 +487,7 @@ func TestBug_TagWizardHiredPM_InGeneral_Dispatch(t *testing.T) {
 		t.Fatalf(
 			"bug reproduced: @pm in #general did not reach pm. targetMap=%+v immediate=%+v. "+
 				"Wizard-hired agents must be reachable via explicit @-tag.",
-			l.agentNotificationTargets(), immediate,
+			l.targeter().NotificationTargets(), immediate,
 		)
 	}
 }
@@ -524,7 +524,7 @@ func TestBug_RootCause_ChannelMembershipFilterDropsExplicitMention(t *testing.T)
 	}
 
 	// Sanity: fe IS in the target map (pane/headless resolution is correct).
-	targetMap := l.agentNotificationTargets()
+	targetMap := l.targeter().NotificationTargets()
 	if _, ok := targetMap["fe"]; !ok {
 		t.Fatalf("pre-condition failed: fe should be in agentNotificationTargets: %+v", targetMap)
 	}

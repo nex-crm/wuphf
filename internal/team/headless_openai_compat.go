@@ -39,7 +39,7 @@ func (l *Launcher) runHeadlessOpenAICompatTurn(ctx context.Context, slug string,
 		return fmt.Errorf("broker is not running")
 	}
 
-	kind := l.memberEffectiveProviderKind(slug)
+	kind := l.targeter().MemberEffectiveProviderKind(slug)
 	entry := provider.Lookup(kind)
 	if entry == nil || entry.StreamFn == nil {
 		return fmt.Errorf("openai-compat runtime %q is not registered", kind)

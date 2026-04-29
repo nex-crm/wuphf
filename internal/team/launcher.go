@@ -640,7 +640,7 @@ func (l *Launcher) officeChangeTaskNotifications(evt officeChangeEvent) []office
 		return nil
 	}
 
-	targetMap := l.agentPaneTargets()
+	targetMap := l.targeter().PaneTargets()
 	if len(targetMap) == 0 {
 		return nil
 	}
@@ -732,7 +732,7 @@ func (l *Launcher) deliverMessageNotification(msg channelMessage) {
 
 	// Debounce: use shorter cooldown for human/CEO messages, longer for agent-originated
 	// to prevent agent-to-agent feedback loops (devil's advocate finding #3)
-	isHumanOrCEO := msg.From == "you" || msg.From == "human" || msg.From == "nex" || msg.From == l.officeLeadSlug()
+	isHumanOrCEO := msg.From == "you" || msg.From == "human" || msg.From == "nex" || msg.From == l.targeter().LeadSlug()
 	cooldown := agentNotifyCooldownAgent
 	if isHumanOrCEO {
 		cooldown = agentNotifyCooldown
@@ -799,11 +799,11 @@ type notificationTarget struct {
 }
 
 func (l *Launcher) taskNotificationTargets(action officeActionLog, task teamTask) (immediate []notificationTarget, delayed []notificationTarget) {
-	targetMap := l.agentNotificationTargets()
+	targetMap := l.targeter().NotificationTargets()
 	if len(targetMap) == 0 {
 		return nil, nil
 	}
-	lead := l.officeLeadSlug()
+	lead := l.targeter().LeadSlug()
 	enabledMembers := map[string]struct{}{}
 	disabledMembers := map[string]struct{}{}
 	if l.broker != nil {
@@ -942,10 +942,10 @@ func (l *Launcher) shouldDeliverDelayedTaskNotification(targetSlug string, actio
 	if strings.EqualFold(strings.TrimSpace(current.Status), "done") {
 		return false
 	}
-	if strings.TrimSpace(current.Owner) != "" && strings.TrimSpace(current.Owner) != targetSlug && targetSlug != l.officeLeadSlug() {
+	if strings.TrimSpace(current.Owner) != "" && strings.TrimSpace(current.Owner) != targetSlug && targetSlug != l.targeter().LeadSlug() {
 		return false
 	}
-	if strings.TrimSpace(current.Owner) == "" && targetSlug != l.officeLeadSlug() {
+	if strings.TrimSpace(current.Owner) == "" && targetSlug != l.targeter().LeadSlug() {
 		return false
 	}
 	return true
@@ -963,7 +963,7 @@ func (l *Launcher) sendTaskUpdate(target notificationTarget, action officeAction
 		channel = "general"
 	}
 	notification := l.buildTaskExecutionPacket(target.Slug, action, task, content)
-	if l.shouldUseHeadlessDispatchForTarget(target) {
+	if l.targeter().ShouldUseHeadlessForTarget(target) {
 		l.enqueueHeadlessCodexTurn(target.Slug, headlessSandboxNote()+notification, channel)
 		return
 	}
@@ -1003,7 +1003,7 @@ func (l *Launcher) isChannelDMRaw(channelSlug string) (isDM bool, agentTarget st
 }
 
 func (l *Launcher) notificationTargetsForMessage(msg channelMessage) (immediate []notificationTarget, delayed []notificationTarget) {
-	targetMap := l.agentNotificationTargets()
+	targetMap := l.targeter().NotificationTargets()
 	if len(targetMap) == 0 {
 		return nil, nil
 	}
@@ -1041,7 +1041,7 @@ func (l *Launcher) notificationTargetsForMessage(msg channelMessage) (immediate 
 		}
 		return []notificationTarget{target}, nil
 	}
-	lead := l.officeLeadSlug()
+	lead := l.targeter().LeadSlug()
 	owner := ""
 	if l.broker != nil {
 		owner = l.taskOwnerForMessage(msg)
@@ -1439,51 +1439,13 @@ func (l *Launcher) brokerMemberProviderKind(slug string) string {
 	return l.broker.MemberProviderKind(slug)
 }
 
-// agentPaneSlugs and friends are thin wrappers that delegate to the
-// targeter. Kept as Launcher methods so the ~110 callers across
-// internal/team don't need a sweep in this PR; consolidation is a
-// follow-up. PLAN.md §6 wants the call sites renamed eventually but the
-// bulk of the diff would be call-site churn rather than logic changes.
-
-func (l *Launcher) agentPaneSlugs() []string { return l.targeter().PaneSlugs() }
-
-func (l *Launcher) officeAgentOrder() []officeMember { return l.targeter().AgentOrder() }
-
-func (l *Launcher) visibleOfficeMembers() []officeMember {
-	return l.targeter().VisibleMembers()
-}
-
-func (l *Launcher) overflowOfficeMembers() []officeMember {
-	return l.targeter().OverflowMembers()
-}
-
-func (l *Launcher) paneEligibleOfficeMembers() []officeMember {
-	return l.targeter().PaneEligibleMembers()
-}
-
-func (l *Launcher) resolvePaneTargetForSlug(slug string) (string, bool) {
-	return l.targeter().ResolvePaneTarget(slug)
-}
-
-func (l *Launcher) agentPaneTargets() map[string]notificationTarget {
-	return l.targeter().PaneTargets()
-}
-
-func (l *Launcher) agentNotificationTargets() map[string]notificationTarget {
-	return l.targeter().NotificationTargets()
-}
-
-func (l *Launcher) shouldUseHeadlessDispatchForSlug(slug string) bool {
-	return l.targeter().ShouldUseHeadlessForSlug(slug)
-}
-
-func (l *Launcher) shouldUseHeadlessDispatchForTarget(target notificationTarget) bool {
-	return l.targeter().ShouldUseHeadlessForTarget(target)
-}
-
-func (l *Launcher) skipPaneForSlug(slug string) bool {
-	return l.targeter().SkipPane(slug)
-}
+// agentPaneSlugs / officeAgentOrder / visibleOfficeMembers /
+// overflowOfficeMembers / paneEligibleOfficeMembers /
+// resolvePaneTargetForSlug / agentPaneTargets / agentNotificationTargets /
+// shouldUseHeadlessDispatchForSlug / shouldUseHeadlessDispatchForTarget /
+// skipPaneForSlug — historically thin Launcher wrappers around the
+// targeter (PLAN.md §C2). PLAN.md §6 sweep deleted them; in-package
+// call sites now use l.targeter().<Method>() directly.
 
 func (l *Launcher) isOneOnOne() bool {
 	if l.broker != nil {
@@ -1523,28 +1485,17 @@ func (l *Launcher) usesOpencodeRuntime() bool {
 	return strings.EqualFold(strings.TrimSpace(l.provider), "opencode")
 }
 
-// usesPaneRuntime / requiresClaudeSessionReset / memberEffectiveProviderKind /
-// memberUsesHeadlessOneShotRuntime live on officeTargeter (PLAN.md §C2);
-// these wrappers keep ~30 in-package callers compiling without a rename
-// sweep in this PR.
-func (l *Launcher) usesPaneRuntime() bool { return l.targeter().UsesPaneRuntime() }
+// usesPaneRuntime / requiresClaudeSessionReset /
+// memberEffectiveProviderKind / memberUsesHeadlessOneShotRuntime
+// live on officeTargeter (PLAN.md §C2). PLAN.md §6 sweep deleted the
+// transitional wrappers; in-package callers use
+// l.targeter().<Method>() directly. UsesTmuxRuntime stays because
+// cmd/wuphf/main.go imports it.
 
-func (l *Launcher) requiresClaudeSessionReset() bool {
-	return l.targeter().RequiresClaudeSessionReset()
-}
-
-func (l *Launcher) memberEffectiveProviderKind(slug string) string {
-	return l.targeter().MemberEffectiveProviderKind(slug)
-}
-
-func (l *Launcher) memberUsesHeadlessOneShotRuntime(slug string) bool {
-	return l.targeter().MemberUsesHeadlessOneShotRuntime(slug)
-}
-
-// UsesTmuxRuntime reports whether agents run in tmux panes. Equivalent to
-// usesPaneRuntime — exported for cmd/wuphf/main.go and tests.
+// UsesTmuxRuntime reports whether agents run in tmux panes. Exported
+// for cmd/wuphf/main.go and tests; thin delegator over the targeter.
 func (l *Launcher) UsesTmuxRuntime() bool {
-	return l.usesPaneRuntime()
+	return l.targeter().UsesPaneRuntime()
 }
 
 func (l *Launcher) BrokerToken() string {
@@ -1606,7 +1557,7 @@ func (l *Launcher) Kill() error {
 	// still alive to release any open handles (harmless, but principle of
 	// least surprise).
 	l.cleanupAgentTempFiles()
-	if !l.usesPaneRuntime() {
+	if !l.targeter().UsesPaneRuntime() {
 		if err := killPersistedOfficeProcess(); err != nil {
 			return err
 		}
@@ -1627,7 +1578,7 @@ func (l *Launcher) Kill() error {
 }
 
 func (l *Launcher) ResetSession() error {
-	if !l.requiresClaudeSessionReset() {
+	if !l.targeter().RequiresClaudeSessionReset() {
 		if l != nil && l.broker != nil {
 			l.broker.Reset()
 			return nil
@@ -1651,7 +1602,7 @@ func (l *Launcher) ResetSession() error {
 }
 
 func (l *Launcher) ReconfigureSession() error {
-	if !l.usesPaneRuntime() {
+	if !l.targeter().UsesPaneRuntime() {
 		if err := provider.ResetClaudeSessions(); err != nil {
 			return fmt.Errorf("reset Claude sessions: %w", err)
 		}
@@ -1666,7 +1617,7 @@ func (l *Launcher) ReconfigureSession() error {
 
 func (l *Launcher) reconfigureVisibleAgents() error {
 	l.provider = config.ResolveLLMProvider("")
-	if !l.usesPaneRuntime() {
+	if !l.targeter().UsesPaneRuntime() {
 		if l.paneBackedAgents {
 			l.panes().KillSession()
 			l.paneBackedAgents = false
@@ -1696,7 +1647,7 @@ func (l *Launcher) reconfigureVisibleAgents() error {
 
 	// Respawn each agent pane in place, preserving layout.
 	// Never clear+recreate panes — that destroys the channel's layout.
-	visibleMembers := l.visibleOfficeMembers()
+	visibleMembers := l.targeter().VisibleMembers()
 	if len(panes) != len(visibleMembers) {
 		if err := l.clearAgentPanes(); err != nil {
 			return err
@@ -1881,7 +1832,7 @@ func (l *Launcher) sendChannelUpdate(target notificationTarget, msg channelMessa
 		)
 	}
 
-	if l.shouldUseHeadlessDispatchForTarget(target) {
+	if l.targeter().ShouldUseHeadlessForTarget(target) {
 		l.enqueueHeadlessCodexTurn(target.Slug, headlessSandboxNote()+notification, channel)
 		return
 	}
@@ -1890,7 +1841,8 @@ func (l *Launcher) sendChannelUpdate(target notificationTarget, msg channelMessa
 
 // shouldUseHeadlessDispatch is a thin wrapper around the targeter; see
 // officeTargeter.ShouldUseHeadless for semantics.
-func (l *Launcher) shouldUseHeadlessDispatch() bool { return l.targeter().ShouldUseHeadless() }
+// shouldUseHeadlessDispatch wrapper deleted by PLAN.md §6 sweep —
+// callers use l.targeter().ShouldUseHeadless() directly.
 
 // Minimum gap between two consecutive pane `/clear` + type cycles for the
 // same agent. Serves as a safety floor against truly back-to-back sends
@@ -1960,14 +1912,14 @@ func (l *Launcher) panes() *paneLifecycle {
 		cwd:                              l.cwd,
 		isOneOnOne:                       l.isOneOnOne,
 		oneOnOneAgent:                    l.oneOnOneAgent,
-		usesPaneRuntime:                  l.usesPaneRuntime,
-		visibleOfficeMembers:             l.visibleOfficeMembers,
-		overflowOfficeMembers:            l.overflowOfficeMembers,
-		agentPaneTargets:                 l.agentPaneTargets,
-		memberUsesHeadlessOneShotRuntime: l.memberUsesHeadlessOneShotRuntime,
+		usesPaneRuntime:                  l.targeter().UsesPaneRuntime,
+		visibleOfficeMembers:             l.targeter().VisibleMembers,
+		overflowOfficeMembers:            l.targeter().OverflowMembers,
+		agentPaneTargets:                 l.targeter().PaneTargets,
+		memberUsesHeadlessOneShotRuntime: l.targeter().MemberUsesHeadlessOneShotRuntime,
 		claudeCommand:                    l.claudeCommand,
 		buildPrompt:                      l.buildPrompt,
-		agentName:                        l.getAgentName,
+		agentName:                        l.targeter().NameFor,
 		recordFailure:                    l.recordPaneSpawnFailure,
 		paneBackedFlag:                   &l.paneBackedAgents,
 	}
@@ -2132,7 +2084,7 @@ func (l *Launcher) newPromptBuilder() *promptBuilder {
 		isOneOnOne:  l.isOneOnOne,
 		isFocusMode: l.isFocusModeEnabled,
 		packName:    l.PackName,
-		leadSlug:    l.officeLeadSlug,
+		leadSlug:    l.targeter().LeadSlug,
 		members:     l.officeMembersSnapshot,
 		policies: func() []officePolicy {
 			if l == nil || l.broker == nil {
@@ -2144,7 +2096,7 @@ func (l *Launcher) newPromptBuilder() *promptBuilder {
 			sort.Slice(policies, func(i, j int) bool { return policies[i].ID < policies[j].ID })
 			return policies
 		},
-		nameFor:        l.getAgentName,
+		nameFor:        l.targeter().NameFor,
 		markdownMemory: memoryBackend == config.MemoryBackendMarkdown,
 		nexDisabled:    noNex,
 	}
@@ -2178,7 +2130,7 @@ func (l *Launcher) claudeCommand(slug, systemPrompt string) (string, error) {
 	}
 	promptPathQuoted := strings.ReplaceAll(promptPath, "'", "'\\''")
 
-	name := strings.ReplaceAll(l.getAgentName(slug), "'", "'\\''")
+	name := strings.ReplaceAll(l.targeter().NameFor(slug), "'", "'\\''")
 	permFlags := l.resolvePermissionFlags(slug)
 
 	brokerToken := ""
@@ -2630,7 +2582,8 @@ func (l *Launcher) officeMemberBySlug(slug string) officeMember {
 	return l.targeter().MemberBySlug(slug)
 }
 
-func (l *Launcher) officeLeadSlug() string { return l.targeter().LeadSlug() }
+// officeLeadSlug wrapper deleted by PLAN.md §6 sweep — callers use
+// l.targeter().LeadSlug() directly.
 
 func agentConfigFromMember(member officeMember) agent.AgentConfig {
 	cfg := agent.AgentConfig{
@@ -2660,7 +2613,7 @@ func (l *Launcher) activeSessionMembers() []officeMember {
 // PackName returns the display name of the pack.
 func (l *Launcher) PackName() string {
 	if l.isOneOnOne() {
-		return "1:1 with " + l.getAgentName(l.oneOnOneAgent())
+		return "1:1 with " + l.targeter().NameFor(l.oneOnOneAgent())
 	}
 	return "WUPHF Office"
 }
@@ -2685,9 +2638,8 @@ func filterEnv(env []string, key string) []string {
 	return out
 }
 
-// getAgentName returns the display name for an agent slug. Delegates to
-// the targeter (PLAN.md §C2).
-func (l *Launcher) getAgentName(slug string) string { return l.targeter().NameFor(slug) }
+// getAgentName wrapper deleted by PLAN.md §6 sweep — callers use
+// l.targeter().NameFor(slug) directly.
 
 // Web-mode entry points (PreflightWeb, LaunchWeb, maybeOfferNex,
 // waitForWebReady, stdinIsTTY, openBrowser) live in launcher_web.go per

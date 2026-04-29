@@ -81,7 +81,7 @@ func TestAgentPaneSlugsOneOnOneUsesOnlySelectedAgent(t *testing.T) {
 		oneOnOne:    "pm",
 	}
 
-	got := l.agentPaneSlugs()
+	got := l.targeter().PaneSlugs()
 	if len(got) != 1 || got[0] != "pm" {
 		t.Fatalf("expected only pm in 1o1 pane list, got %v", got)
 	}
@@ -144,7 +144,7 @@ func TestAgentPaneSlugsUsesOfficeRosterNotStaticPack(t *testing.T) {
 		},
 	}
 
-	got := l.agentPaneSlugs()
+	got := l.targeter().PaneSlugs()
 	want := []string{"ceo", "pm", "fe", "growthops"}
 	if len(got) != len(want) {
 		t.Fatalf("expected %d pane slugs, got %v", len(want), got)

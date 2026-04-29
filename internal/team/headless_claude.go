@@ -234,7 +234,7 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 }
 
 func (l *Launcher) headlessClaudeModel(slug string) string {
-	if l.opusCEO && slug == l.officeLeadSlug() {
+	if l.opusCEO && slug == l.targeter().LeadSlug() {
 		return "claude-opus-4-6"
 	}
 	return "claude-sonnet-4-6"
@@ -245,7 +245,7 @@ func (l *Launcher) headlessClaudeModel(slug string) string {
 // members, and posting an assignment — easily more than 5 turns. Specialists
 // get a smaller budget since they focus on a single task.
 func (l *Launcher) headlessClaudeMaxTurns(slug string) string {
-	if slug == l.officeLeadSlug() {
+	if slug == l.targeter().LeadSlug() {
 		return "30"
 	}
 	return "15"
