@@ -14,18 +14,11 @@ func (b *Broker) dueSchedulerJobsLocked(now time.Time) []schedulerJob {
 	now = now.UTC()
 	var out []schedulerJob
 	for _, job := range b.scheduler {
-		if strings.EqualFold(strings.TrimSpace(job.Status), "done") || strings.EqualFold(strings.TrimSpace(job.Status), "canceled") {
-			continue
-		}
-		target := strings.TrimSpace(job.NextRun)
-		if target == "" {
-			continue
-		}
-		dueAt, err := time.Parse(time.RFC3339, target)
-		if err != nil {
-			continue
-		}
-		if !dueAt.After(now) {
+		// Delegate to the canonical due predicate so jobs persisted with
+		// only DueAt set (no NextRun) become visible here too. The earlier
+		// inline NextRun-only check silently dropped DueAt-only jobs even
+		// though /scheduler?due_only=true accepted them.
+		if schedulerJobDue(job, now) {
 			out = append(out, job)
 		}
 	}
@@ -247,8 +240,14 @@ func (b *Broker) scheduleTaskLifecycleLocked(task *teamTask) {
 		b.resolveWatchdogAlertsLocked("task", task.ID, taskChannel)
 		return
 	}
+	// Clear any previously-scheduled lifecycle jobs that don't match the
+	// kind we're about to enqueue. The slugs differ between "task_follow_up"
+	// and "recheck", so without this scheduleJobLocked won't find the old
+	// entry to update — it stays around and keeps firing across active-state
+	// transitions like queued → in_progress → blocked.
 	switch strings.ToLower(strings.TrimSpace(task.Status)) {
 	case "in_progress":
+		b.cancelSupersededTaskJobsLocked(task.ID, taskChannel, "task_follow_up")
 		due := now.Add(time.Duration(followUpMinutes) * time.Minute)
 		task.FollowUpAt = due.Format(time.RFC3339)
 		task.ReminderAt = due.Add(time.Duration(reminderMinutes) * time.Minute).Format(time.RFC3339)
@@ -267,6 +266,7 @@ func (b *Broker) scheduleTaskLifecycleLocked(task *teamTask) {
 			Payload:    task.Details,
 		}))
 	default:
+		b.cancelSupersededTaskJobsLocked(task.ID, taskChannel, "recheck")
 		due := now.Add(time.Duration(recheckMinutes) * time.Minute)
 		task.RecheckAt = due.Format(time.RFC3339)
 		task.ReminderAt = due.Add(time.Duration(reminderMinutes) * time.Minute).Format(time.RFC3339)
@@ -284,6 +284,33 @@ func (b *Broker) scheduleTaskLifecycleLocked(task *teamTask) {
 			Status:     "scheduled",
 			Payload:    task.Details,
 		}))
+	}
+}
+
+// cancelSupersededTaskJobsLocked marks any scheduled lifecycle job for the
+// given task whose Kind differs from keepKind as done. Used during state
+// transitions so a stale recheck doesn't keep firing alongside a fresh
+// task_follow_up (or vice versa).
+func (b *Broker) cancelSupersededTaskJobsLocked(taskID, channel, keepKind string) {
+	now := time.Now().UTC().Format(time.RFC3339)
+	for i := range b.scheduler {
+		job := &b.scheduler[i]
+		if job.TargetType != "task" || job.TargetID != taskID {
+			continue
+		}
+		if normalizeChannelSlug(job.Channel) != normalizeChannelSlug(channel) {
+			continue
+		}
+		if job.Kind == keepKind {
+			continue
+		}
+		if strings.EqualFold(job.Status, "done") || strings.EqualFold(job.Status, "canceled") {
+			continue
+		}
+		job.Status = "done"
+		job.DueAt = ""
+		job.NextRun = ""
+		job.LastRun = now
 	}
 }
 

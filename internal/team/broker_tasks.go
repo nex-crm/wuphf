@@ -387,8 +387,29 @@ func (b *Broker) handleGetTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	result := make([]teamTask, 0, len(b.tasks))
+	// allChannels=true must NOT bypass channel authorization. Without this
+	// per-task check, an authenticated viewer could enumerate every task in
+	// every channel — including private ones they aren't a member of —
+	// just by passing all_channels=true. Apply the same access predicate
+	// to each candidate channel before letting the task into the response.
+	allChannelsCache := make(map[string]bool)
+	channelAllowed := func(slug string) bool {
+		if !allChannels {
+			return true
+		}
+		if v, ok := allChannelsCache[slug]; ok {
+			return v
+		}
+		v := b.canAccessChannelLocked(viewerSlug, slug)
+		allChannelsCache[slug] = v
+		return v
+	}
 	for _, task := range b.tasks {
-		if !allChannels && normalizeChannelSlug(task.Channel) != channel {
+		taskChannel := normalizeChannelSlug(task.Channel)
+		if !allChannels && taskChannel != channel {
+			continue
+		}
+		if !channelAllowed(taskChannel) {
 			continue
 		}
 		if task.Status == "done" && !includeDone && statusFilter == "" {
@@ -571,6 +592,16 @@ func (b *Broker) handlePostTask(w http.ResponseWriter, r *http.Request) {
 		}
 		task := &b.tasks[i]
 		taskChannel := normalizeChannelSlug(task.Channel)
+		// Authorize against the task's ACTUAL channel, not the channel the
+		// caller put in the body. Without this, a viewer with access to
+		// any channel could mutate any task ID by spoofing body.Channel
+		// to a channel they're allowed in.
+		if taskChannel != "" && taskChannel != channel {
+			if !b.canAccessChannelLocked(body.CreatedBy, taskChannel) {
+				http.Error(w, "channel access denied", http.StatusForbidden)
+				return
+			}
+		}
 		appendDetails := false
 		reassignPrevOwner := ""
 		reassignTriggered := false
@@ -1082,6 +1113,15 @@ func (b *Broker) handleTaskPlan(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "channel not found", http.StatusNotFound)
 			return
 		}
+		// Authorize on the resolved task channel, not body.Channel — the
+		// body channel is just a default and the planner may route the
+		// task to a different channel where the assignee actually lives.
+		// Without this gate any authenticated caller could plant tasks in
+		// channels they aren't a member of by spoofing the body channel.
+		if !b.canAccessChannelLocked(createdBy, taskChannel) {
+			http.Error(w, "channel access denied", http.StatusForbidden)
+			return
+		}
 
 		// Resolve depends_on: accept both task IDs and titles
 		resolvedDeps := make([]string, 0, len(item.DependsOn))
@@ -1193,12 +1233,21 @@ func (b *Broker) handleMemory(w http.ResponseWriter, r *http.Request) {
 				limit = parsed
 			}
 		}
+		// Snapshot under the lock: `mem := b.sharedMemory` only copies the
+		// map header, leaving readers below racing concurrent POST writes
+		// for the same outer/inner maps. searchPrivateMemory iterates the
+		// entry maps and json.Encoder serializes the whole tree, both of
+		// which can panic with "concurrent map iteration and map write".
 		b.mu.Lock()
-		mem := b.sharedMemory
-		b.mu.Unlock()
-		if mem == nil {
-			mem = make(map[string]map[string]string)
+		mem := make(map[string]map[string]string, len(b.sharedMemory))
+		for ns, entries := range b.sharedMemory {
+			cloned := make(map[string]string, len(entries))
+			for k, v := range entries {
+				cloned[k] = v
+			}
+			mem[ns] = cloned
 		}
+		b.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		if namespace != "" {
 			entries := mem[namespace]

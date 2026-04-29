@@ -529,6 +529,17 @@ func (b *Broker) handlePostRequestAnswer(w http.ResponseWriter, r *http.Request)
 		if b.requests[i].ID != body.ID {
 			continue
 		}
+		// Reject answers for requests that are no longer active. Without
+		// this gate, a second POST against an already-answered or
+		// already-canceled request would mutate terminal state and replay
+		// the answer side effects (scheduler completion, dependent
+		// unblocking, skill activation) for a request that should be
+		// immutable after it lands.
+		if !requestIsActive(b.requests[i]) {
+			b.mu.Unlock()
+			http.Error(w, "request is not active", http.StatusConflict)
+			return
+		}
 		choiceID := strings.TrimSpace(body.ChoiceID)
 		choiceText := strings.TrimSpace(body.ChoiceText)
 		customText := strings.TrimSpace(body.CustomText)
@@ -646,15 +657,24 @@ func (b *Broker) unblockTasksForAnsweredRequestLocked(req humanInterview) {
 		if !strings.Contains(haystack, strings.ToLower(reqID)) {
 			continue
 		}
-		task.Blocked = false
-		if strings.EqualFold(strings.TrimSpace(task.Status), "blocked") {
-			if strings.TrimSpace(task.Owner) != "" {
-				task.Status = "in_progress"
-			} else {
-				task.Status = "open"
+		// Even though the title/details mention the answered request, the
+		// task may have other unresolved dependencies (a different
+		// request, an upstream task). Always record the answer in
+		// Details, but only flip Blocked → false when no other deps
+		// remain — otherwise the task would race ahead of work it still
+		// needs.
+		stillBlocked := b.hasUnresolvedDepsLocked(task)
+		if !stillBlocked {
+			task.Blocked = false
+			if strings.EqualFold(strings.TrimSpace(task.Status), "blocked") {
+				if strings.TrimSpace(task.Owner) != "" {
+					task.Status = "in_progress"
+				} else {
+					task.Status = "open"
+				}
 			}
+			b.queueTaskBehindActiveOwnerLaneLocked(task)
 		}
-		b.queueTaskBehindActiveOwnerLaneLocked(task)
 		if answerText != "" && !strings.Contains(task.Details, answerText) {
 			task.Details = strings.TrimSpace(task.Details)
 			if task.Details != "" {
@@ -663,14 +683,16 @@ func (b *Broker) unblockTasksForAnsweredRequestLocked(req humanInterview) {
 			task.Details += fmt.Sprintf("Human answer for %s: %s", reqID, answerText)
 		}
 		task.UpdatedAt = now
-		b.appendActionLocked(
-			"task_unblocked",
-			"office",
-			task.Channel,
-			req.From,
-			truncateSummary(task.Title+" unblocked by answered "+reqID, 140),
-			task.ID,
-		)
+		if !stillBlocked {
+			b.appendActionLocked(
+				"task_unblocked",
+				"office",
+				task.Channel,
+				req.From,
+				truncateSummary(task.Title+" unblocked by answered "+reqID, 140),
+				task.ID,
+			)
+		}
 	}
 }
 

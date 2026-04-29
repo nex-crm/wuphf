@@ -60,6 +60,32 @@ func (b *Broker) findSkillByNameLocked(name string) *teamSkill {
 	return nil
 }
 
+// allocateSkillIDLocked mints a new skill ID derived from the name's slug.
+// If the bare slug-based ID already exists in the broker (active OR archived),
+// a numeric discriminator is appended so create→archive→create cycles can't
+// collide. Existing IDs are preserved on the common, no-collision path.
+func (b *Broker) allocateSkillIDLocked(name string) string {
+	base := fmt.Sprintf("skill-%s", skillSlug(name))
+	if !b.skillIDExistsLocked(base) {
+		return base
+	}
+	for n := 2; ; n++ {
+		candidate := fmt.Sprintf("%s-%d", base, n)
+		if !b.skillIDExistsLocked(candidate) {
+			return candidate
+		}
+	}
+}
+
+func (b *Broker) skillIDExistsLocked(id string) bool {
+	for i := range b.skills {
+		if b.skills[i].ID == id {
+			return true
+		}
+	}
+	return false
+}
+
 func (b *Broker) findSkillByWorkflowKeyLocked(key string) *teamSkill {
 	key = strings.TrimSpace(key)
 	if key == "" {
@@ -169,7 +195,7 @@ func (b *Broker) handlePostSkill(w http.ResponseWriter, r *http.Request) {
 
 	b.counter++
 	sk := teamSkill{
-		ID:                  fmt.Sprintf("skill-%s", skillSlug(body.Name)),
+		ID:                  b.allocateSkillIDLocked(body.Name),
 		Name:                strings.TrimSpace(body.Name),
 		Title:               title,
 		Description:         strings.TrimSpace(body.Description),
@@ -519,15 +545,18 @@ func (b *Broker) createSkillRunTaskLocked(sk *teamSkill, channel, invoker, now s
 		UpdatedAt:     now,
 	}
 
-	b.ensureTaskOwnerChannelMembershipLocked(channel, task.Owner)
-	b.queueTaskBehindActiveOwnerLaneLocked(&task)
+	// Run fallible setup first so a failure doesn't leave the broker
+	// holding cross-cutting mutations (channel membership, scheduler
+	// jobs) that the caller never sees because we returned an error.
 	if err := rejectTheaterTaskForLiveBusiness(&task); err != nil {
 		return "", fmt.Errorf("rejectTheaterTask: %w", err)
 	}
-	b.scheduleTaskLifecycleLocked(&task)
 	if err := b.syncTaskWorktreeLocked(&task); err != nil {
 		return "", fmt.Errorf("syncTaskWorktree: %w", err)
 	}
+	b.ensureTaskOwnerChannelMembershipLocked(channel, task.Owner)
+	b.queueTaskBehindActiveOwnerLaneLocked(&task)
+	b.scheduleTaskLifecycleLocked(&task)
 	b.tasks = append(b.tasks, task)
 	b.appendActionLocked("task_created", "office", channel, invoker, truncateSummary(task.Title, 140), task.ID)
 	return task.ID, nil
@@ -589,7 +618,7 @@ func (b *Broker) SeedDefaultSkills(specs []agent.PackSkillSpec) {
 		}
 		b.counter++
 		sk := teamSkill{
-			ID:          fmt.Sprintf("skill-%s", skillSlug(name)),
+			ID:          b.allocateSkillIDLocked(name),
 			Name:        name,
 			Title:       title,
 			Description: strings.TrimSpace(spec.Description),

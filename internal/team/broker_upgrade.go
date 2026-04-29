@@ -23,6 +23,11 @@ import (
 )
 
 func (b *Broker) handleVersion(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", "GET")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(buildinfo.Current())
@@ -240,10 +245,13 @@ func (b *tailBuffer) Write(p []byte) (int, error) {
 	if n >= b.maxBytes {
 		// p alone fills or exceeds the cap — any prior bytes are
 		// older than the tail of p, so reset and keep p's suffix.
-		b.buf = append(b.buf[:0], p[n-b.maxBytes:]...)
-		if n > b.maxBytes {
+		// Mark truncated whenever we discard content: either p itself
+		// overflowed (n > maxBytes) OR there were already buffered
+		// bytes that are now being thrown away by the reset.
+		if n > b.maxBytes || len(b.buf) > 0 {
 			b.truncated = true
 		}
+		b.buf = append(b.buf[:0], p[n-b.maxBytes:]...)
 		return n, nil
 	}
 	if len(b.buf)+n <= b.maxBytes {

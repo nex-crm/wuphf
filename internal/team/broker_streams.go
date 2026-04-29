@@ -252,13 +252,19 @@ func (b *Broker) UpdateAgentActivity(update agentActivitySnapshot) {
 	if update.TotalMs > 0 {
 		current.TotalMs = update.TotalMs
 	}
-	if update.FirstEventMs >= 0 {
+	// Latency metrics: only overwrite when the caller actually supplied a
+	// value. The previous `>= 0` guard treated unset zero-value fields the
+	// same as a real "0 ms" measurement and would wipe a previously
+	// recorded latency on every status-only update. A literal 0 ms first
+	// event isn't meaningful in practice (we measure user→first-stream-
+	// chunk latency) so `> 0` is a safe sentinel.
+	if update.FirstEventMs > 0 {
 		current.FirstEventMs = update.FirstEventMs
 	}
-	if update.FirstTextMs >= 0 {
+	if update.FirstTextMs > 0 {
 		current.FirstTextMs = update.FirstTextMs
 	}
-	if update.FirstToolMs >= 0 {
+	if update.FirstToolMs > 0 {
 		current.FirstToolMs = update.FirstToolMs
 	}
 	b.activity[slug] = current

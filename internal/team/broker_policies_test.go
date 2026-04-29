@@ -77,8 +77,14 @@ func TestListPolicies_ReturnsDistinctSlice(t *testing.T) {
 // active officePolicy records. Inactive policies must be filtered.
 func TestHandlePolicies_GETReturnsJSONList(t *testing.T) {
 	b := newTestBroker(t)
-	active, _ := b.RecordPolicy("human_directed", "active rule")
-	inactive, _ := b.RecordPolicy("human_directed", "soon-deactivated rule")
+	active, err := b.RecordPolicy("human_directed", "active rule")
+	if err != nil {
+		t.Fatalf("RecordPolicy active: %v", err)
+	}
+	inactive, err := b.RecordPolicy("human_directed", "soon-deactivated rule")
+	if err != nil {
+		t.Fatalf("RecordPolicy inactive: %v", err)
+	}
 	b.mu.Lock()
 	for i := range b.policies {
 		if b.policies[i].ID == inactive.ID {
@@ -133,10 +139,15 @@ func TestHandlePolicies_POSTPersistsRule(t *testing.T) {
 	getReq := httptest.NewRequest(http.MethodGet, "/policies", nil)
 	getRec := httptest.NewRecorder()
 	b.handlePolicies(getRec, getReq)
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("GET: expected 200, got %d: %s", getRec.Code, getRec.Body.String())
+	}
 	var got struct {
 		Policies []officePolicy `json:"policies"`
 	}
-	_ = json.NewDecoder(getRec.Body).Decode(&got)
+	if err := json.NewDecoder(getRec.Body).Decode(&got); err != nil {
+		t.Fatalf("GET decode: %v", err)
+	}
 	if len(got.Policies) != 1 || got.Policies[0].ID != posted.ID {
 		t.Errorf("expected GET to surface the POSTed rule, got %+v", got.Policies)
 	}
@@ -183,7 +194,10 @@ func TestHandlePolicies_RejectsOversizedBody(t *testing.T) {
 // missing-id requests must 400 instead of silently no-opping.
 func TestHandlePolicies_DELETE_DeactivatesByID(t *testing.T) {
 	b := newTestBroker(t)
-	posted, _ := b.RecordPolicy("human_directed", "soon to be retired")
+	posted, err := b.RecordPolicy("human_directed", "soon to be retired")
+	if err != nil {
+		t.Fatalf("RecordPolicy: %v", err)
+	}
 
 	// id-from-body fallback (path is exactly /policies, no trailing id).
 	delBody := bytes.NewBufferString(fmt.Sprintf(`{"id":%q}`, posted.ID))
@@ -198,7 +212,10 @@ func TestHandlePolicies_DELETE_DeactivatesByID(t *testing.T) {
 	}
 
 	// id-from-URL path (`/policies/<id>`).
-	posted2, _ := b.RecordPolicy("human_directed", "another retiree")
+	posted2, err := b.RecordPolicy("human_directed", "another retiree")
+	if err != nil {
+		t.Fatalf("RecordPolicy second: %v", err)
+	}
 	pathReq := httptest.NewRequest(http.MethodDelete, "/policies/"+posted2.ID, nil)
 	pathRec := httptest.NewRecorder()
 	b.handlePolicies(pathRec, pathReq)

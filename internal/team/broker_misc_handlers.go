@@ -151,9 +151,19 @@ func (b *Broker) handleResetDM(w http.ResponseWriter, r *http.Request) {
 	if channel == "" {
 		channel = "general"
 	}
+	// agent is required: an empty agent would otherwise cause this handler
+	// to wipe every human-authored message in the channel, even ones that
+	// belong to other agents' threads.
+	if agent == "" {
+		http.Error(w, "agent is required", http.StatusBadRequest)
+		return
+	}
 
 	b.mu.Lock()
-	// Keep only messages that are NOT direct exchanges between human and agent
+	// Keep only messages that are NOT direct exchanges between human and the
+	// SPECIFIED agent. Human messages must explicitly tag the agent, and
+	// agent messages must come from that agent — anything else (other
+	// agents' threads, broadcasts, etc.) is preserved.
 	filtered := make([]channelMessage, 0, len(b.messages))
 	removed := 0
 	for _, msg := range b.messages {
@@ -161,24 +171,37 @@ func (b *Broker) handleResetDM(w http.ResponseWriter, r *http.Request) {
 			filtered = append(filtered, msg)
 			continue
 		}
-		// Remove if: human->agent or agent->human (direct messages only)
 		isHuman := msg.From == "you" || msg.From == "human"
 		isAgent := msg.From == agent
-		if isHuman || isAgent {
-			// Check if it's a direct message (not a delegation to others)
-			if isAgent && len(msg.Tagged) > 0 {
-				taggedHuman := false
-				for _, t := range msg.Tagged {
-					if t == "you" || t == "human" {
-						taggedHuman = true
-						break
-					}
+		if isHuman {
+			// Only drop human messages that are part of THIS agent's thread:
+			// either tagged at the agent, or replying inside that thread.
+			taggedAgent := false
+			for _, t := range msg.Tagged {
+				if t == agent {
+					taggedAgent = true
+					break
 				}
-				if !taggedHuman {
-					// Agent message to other agents — keep it
-					filtered = append(filtered, msg)
-					continue
+			}
+			if !taggedAgent {
+				filtered = append(filtered, msg)
+				continue
+			}
+			removed++
+			continue
+		}
+		if isAgent {
+			// Drop agent->human DMs: messages tagged with you/human.
+			taggedHuman := false
+			for _, t := range msg.Tagged {
+				if t == "you" || t == "human" {
+					taggedHuman = true
+					break
 				}
+			}
+			if !taggedHuman && len(msg.Tagged) > 0 {
+				filtered = append(filtered, msg)
+				continue
 			}
 			removed++
 			continue
@@ -186,7 +209,13 @@ func (b *Broker) handleResetDM(w http.ResponseWriter, r *http.Request) {
 		filtered = append(filtered, msg)
 	}
 	b.messages = filtered
-	_ = b.saveLocked()
+	if err := b.saveLocked(); err != nil {
+		// Roll forward: snapshot save failed, but the in-memory mutation
+		// already applied. Surface the error rather than reporting success.
+		b.mu.Unlock()
+		http.Error(w, "failed to persist DM reset", http.StatusInternalServerError)
+		return
+	}
 	b.mu.Unlock()
 
 	// Respawn the agent's Claude Code session to clear its context

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -493,35 +494,38 @@ func TestBrokerGetMessagesAgentScopeKeepsHumanAndCEOContext(t *testing.T) {
 	}
 }
 
+// TestLastTaggedAtSetOnPost drives the actual handlePostMessage HTTP
+// path so the test catches a regression where the production code stops
+// updating lastTaggedAt — earlier this test inlined the same write the
+// handler does and would have kept passing if the handler were broken.
 func TestLastTaggedAtSetOnPost(t *testing.T) {
-	b := &Broker{}
+	b := newTestBroker(t)
+	b.mu.Lock()
 	b.channels = []teamChannel{{Slug: "general", Members: []string{"ceo", "pm"}}}
 	b.members = []officeMember{{Slug: "ceo", Name: "CEO"}, {Slug: "pm", Name: "PM"}}
+	b.rebuildMemberIndexLocked()
+	b.mu.Unlock()
 
-	// Post a message tagging ceo
-	msg := channelMessage{
-		ID:      "msg-1",
-		From:    "you",
-		Channel: "general",
-		Content: "@ceo what should we do?",
-		Tagged:  []string{"ceo"},
+	postBody := strings.NewReader(`{"from":"you","channel":"general","content":"@ceo what should we do?","tagged":["ceo"]}`)
+	req, err := http.NewRequest(http.MethodPost, "/messages", postBody)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	b.handlePostMessage(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("handlePostMessage: expected 200, got %d (body=%s)", rec.Code, rec.Body.String())
 	}
 
-	if b.lastTaggedAt == nil {
-		b.lastTaggedAt = make(map[string]time.Time)
+	b.mu.Lock()
+	_, ceoTagged := b.lastTaggedAt["ceo"]
+	_, pmTagged := b.lastTaggedAt["pm"]
+	b.mu.Unlock()
+	if !ceoTagged {
+		t.Fatal("expected ceo to be in lastTaggedAt after handlePostMessage")
 	}
-
-	// Simulate what handlePostMessage does
-	if len(msg.Tagged) > 0 && (msg.From == "you" || msg.From == "human") {
-		for _, slug := range msg.Tagged {
-			b.lastTaggedAt[slug] = time.Now()
-		}
-	}
-
-	if _, ok := b.lastTaggedAt["ceo"]; !ok {
-		t.Fatal("expected ceo to be in lastTaggedAt")
-	}
-	if _, ok := b.lastTaggedAt["pm"]; ok {
+	if pmTagged {
 		t.Fatal("did not expect pm to be in lastTaggedAt")
 	}
 }
@@ -609,8 +613,18 @@ func TestBrokerSurfaceChannelsFilter(t *testing.T) {
 	if len(tgChannels) < 1 {
 		t.Fatalf("expected at least 1 telegram channel, got %d", len(tgChannels))
 	}
-	if tgChannels[0].Slug != "tg-ch" {
-		t.Fatalf("expected tg-ch, got %q", tgChannels[0].Slug)
+	// Order-independent presence check — SurfaceChannels makes no
+	// promise about iteration order, and additional telegram channels
+	// (e.g. seeded test fixtures) shouldn't break this assertion.
+	foundTG := false
+	for _, ch := range tgChannels {
+		if ch.Slug == "tg-ch" {
+			foundTG = true
+			break
+		}
+	}
+	if !foundTG {
+		t.Fatalf("expected tg-ch in SurfaceChannels(\"telegram\"), got %+v", tgChannels)
 	}
 
 	slackChannels := b.SurfaceChannels("slack")
@@ -635,9 +649,14 @@ func TestBrokerExternalQueueDeduplication(t *testing.T) {
 	})
 	b.mu.Unlock()
 
-	// Post two messages
-	b.PostMessage("ceo", "ext", "msg one", nil, "")
-	b.PostMessage("ceo", "ext", "msg two", nil, "")
+	// Post two messages — surface setup errors as test failures so a
+	// silent PostMessage failure can't masquerade as a dedupe regression.
+	if _, err := b.PostMessage("ceo", "ext", "msg one", nil, ""); err != nil {
+		t.Fatalf("PostMessage one: %v", err)
+	}
+	if _, err := b.PostMessage("ceo", "ext", "msg two", nil, ""); err != nil {
+		t.Fatalf("PostMessage two: %v", err)
+	}
 
 	queue1 := b.ExternalQueue("telegram")
 	if len(queue1) != 2 {
@@ -651,7 +670,9 @@ func TestBrokerExternalQueueDeduplication(t *testing.T) {
 	}
 
 	// Post one more
-	b.PostMessage("ceo", "ext", "msg three", nil, "")
+	if _, err := b.PostMessage("ceo", "ext", "msg three", nil, ""); err != nil {
+		t.Fatalf("PostMessage three: %v", err)
+	}
 	queue3 := b.ExternalQueue("telegram")
 	if len(queue3) != 1 {
 		t.Fatalf("expected 1 new message, got %d", len(queue3))
@@ -991,8 +1012,8 @@ func TestFocusModeRouting_CollaborativeUntaggedWakesAll(t *testing.T) {
 
 	// In collaborative mode, CEO always wakes for human messages.
 	hasCEO := false
-	for _, t := range immediate {
-		if t.Slug == "ceo" {
+	for _, target := range immediate {
+		if target.Slug == "ceo" {
 			hasCEO = true
 		}
 	}

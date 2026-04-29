@@ -428,6 +428,14 @@ func normalizeStudioWorkflowDefinition(raw json.RawMessage) ([]byte, error) {
 	if len(trimmed) == 0 {
 		return nil, nil
 	}
+	// After unwrapping, validate the remainder parses as JSON. Without this
+	// check `{"workflow_definition":"\"not json\""}` would be accepted here
+	// and only fail much later as a 502 from the provider; anything that
+	// isn't a JSON object/array shouldn't have made it past the broker.
+	var probe any
+	if err := json.Unmarshal(trimmed, &probe); err != nil {
+		return nil, fmt.Errorf("workflow_definition is not valid JSON: %w", err)
+	}
 	return trimmed, nil
 }
 

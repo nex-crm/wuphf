@@ -231,14 +231,20 @@ func TestBrokerEventsEndpointStreamsMessages(t *testing.T) {
 	defer b.Stop()
 
 	base := fmt.Sprintf("http://%s", b.Addr())
-	req, _ := http.NewRequest(http.MethodGet, base+"/events?token="+b.Token(), nil)
+	req, err := http.NewRequest(http.MethodGet, base+"/events?token="+b.Token(), nil)
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("open event stream: %v", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		raw, _ := io.ReadAll(resp.Body)
+		raw, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			t.Fatalf("expected 200 opening event stream, got %d (and body read failed: %v)", resp.StatusCode, readErr)
+		}
 		t.Fatalf("expected 200 opening event stream, got %d: %s", resp.StatusCode, raw)
 	}
 

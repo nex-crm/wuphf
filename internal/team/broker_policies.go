@@ -23,13 +23,20 @@ func (b *Broker) RecordPolicy(source, rule string) (officePolicy, error) {
 	for i, p := range b.policies {
 		if strings.EqualFold(p.Rule, rule) {
 			b.policies[i].Active = true
-			_ = b.saveLocked()
+			if err := b.saveLocked(); err != nil {
+				return officePolicy{}, fmt.Errorf("persist policy: %w", err)
+			}
 			return b.policies[i], nil
 		}
 	}
 	p := newOfficePolicy(source, rule)
 	b.policies = append(b.policies, p)
-	_ = b.saveLocked()
+	if err := b.saveLocked(); err != nil {
+		// Roll back the in-memory append so the caller doesn't see a
+		// policy on a subsequent ListPolicies that won't survive restart.
+		b.policies = b.policies[:len(b.policies)-1]
+		return officePolicy{}, fmt.Errorf("persist policy: %w", err)
+	}
 	return p, nil
 }
 
@@ -88,7 +95,13 @@ func (b *Broker) handlePolicies(w http.ResponseWriter, r *http.Request) {
 		}
 		p, err := b.RecordPolicy(body.Source, body.Rule)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			// "rule cannot be empty" is the only validation-class error
+			// from RecordPolicy; anything else is a persistence failure.
+			if strings.Contains(err.Error(), "rule cannot be empty") {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -110,11 +123,19 @@ func (b *Broker) handlePolicies(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		b.mu.Lock()
+		flipped := false
 		for i, p := range b.policies {
 			if p.ID == id {
 				b.policies[i].Active = false
-				_ = b.saveLocked()
+				flipped = true
 				break
+			}
+		}
+		if flipped {
+			if err := b.saveLocked(); err != nil {
+				b.mu.Unlock()
+				http.Error(w, "failed to persist policy delete", http.StatusInternalServerError)
+				return
 			}
 		}
 		b.mu.Unlock()

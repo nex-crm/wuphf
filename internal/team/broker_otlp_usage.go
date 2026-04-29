@@ -18,10 +18,16 @@ func (b *Broker) handleUsage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	b.mu.Lock()
+	// Deep-clone the Agents map: `usage := b.usage` only copies the
+	// teamUsageState header, so the inner map still aliases broker state.
+	// Encoding it after Unlock would race a concurrent recordUsageLocked
+	// and panic with "concurrent map iteration and map write".
 	usage := b.usage
-	if usage.Agents == nil {
-		usage.Agents = make(map[string]usageTotals)
+	cloned := make(map[string]usageTotals, len(b.usage.Agents))
+	for k, v := range b.usage.Agents {
+		cloned[k] = v
 	}
+	usage.Agents = cloned
 	b.mu.Unlock()
 
 	w.Header().Set("Content-Type", "application/json")
@@ -182,7 +188,12 @@ func (b *Broker) attachUsageToRecentMessagesLocked(event usageEvent) {
 }
 
 // RecordAgentUsage records token usage from a provider stream result for a given agent.
+//
+// model is currently unused; it's kept on the signature so callers can pass
+// the model name without a future per-model attribution change rippling
+// through every headless launcher's call site.
 func (b *Broker) RecordAgentUsage(slug, model string, usage provider.ClaudeUsage) {
+	_ = model
 	event := usageEvent{
 		AgentSlug:           slug,
 		InputTokens:         usage.InputTokens,

@@ -98,6 +98,14 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "channel not found", http.StatusNotFound)
 			return
 		}
+		// DM auto-create can fail (returns nil); the channelStore branch
+		// only validates registration, not local presence. Re-check before
+		// proceeding so we never post into a non-existent channel.
+		if b.findChannelLocked(channel) == nil {
+			b.mu.Unlock()
+			http.Error(w, "channel not found", http.StatusNotFound)
+			return
+		}
 	}
 	if !b.canAccessChannelLocked(body.From, channel) {
 		b.mu.Unlock()
@@ -298,7 +306,11 @@ func (b *Broker) handleReactions(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "message not found", http.StatusNotFound)
 		return
 	}
-	_ = b.saveLocked()
+	if err := b.saveLocked(); err != nil {
+		b.mu.Unlock()
+		http.Error(w, "failed to persist reaction", http.StatusInternalServerError)
+		return
+	}
 	b.mu.Unlock()
 
 	w.Header().Set("Content-Type", "application/json")
@@ -590,9 +602,21 @@ func (b *Broker) handleGetMessages(w http.ResponseWriter, r *http.Request) {
 	if len(messages) > limit {
 		messages = messages[len(messages)-limit:]
 	}
-	// Copy to avoid race
+	// Copy to avoid race. Deep-copy the mutable nested slices (Tagged,
+	// Reactions) — `copy` only clones the outer struct so a concurrent
+	// POST /reactions mutating Reactions on the same backing array would
+	// race the JSON encoder running after we drop the lock.
 	result := make([]channelMessage, len(messages))
-	copy(result, messages)
+	for i, m := range messages {
+		clone := m
+		if len(m.Tagged) > 0 {
+			clone.Tagged = append([]string(nil), m.Tagged...)
+		}
+		if len(m.Reactions) > 0 {
+			clone.Reactions = append([]messageReaction(nil), m.Reactions...)
+		}
+		result[i] = clone
+	}
 	b.mu.Unlock()
 
 	taggedCount := 0

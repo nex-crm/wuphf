@@ -18,7 +18,11 @@ import (
 func (b *Broker) handleCompany(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		cfg, _ := config.Load()
+		cfg, err := config.Load()
+		if err != nil {
+			http.Error(w, "config load failed", http.StatusInternalServerError)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"name":        cfg.CompanyName,
@@ -28,6 +32,11 @@ func (b *Broker) handleCompany(w http.ResponseWriter, r *http.Request) {
 			"priority":    cfg.CompanyPriority,
 		})
 	case http.MethodPost:
+		// /company and /config write the same file; share the same lock so
+		// a concurrent /config POST cannot interleave a partial read here
+		// with a Save and lose fields.
+		b.configMu.Lock()
+		defer b.configMu.Unlock()
 		var body struct {
 			Name        string `json:"name"`
 			Description string `json:"description"`
@@ -39,7 +48,14 @@ func (b *Broker) handleCompany(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "bad request", http.StatusBadRequest)
 			return
 		}
-		cfg, _ := config.Load()
+		cfg, err := config.Load()
+		if err != nil {
+			// Refuse to proceed: writing back a zero-value cfg with our
+			// fields layered on would clobber whatever else lived in the
+			// file under a transient read failure.
+			http.Error(w, "config load failed", http.StatusInternalServerError)
+			return
+		}
 		if body.Name != "" {
 			cfg.CompanyName = strings.TrimSpace(body.Name)
 		}
@@ -272,7 +288,15 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		cfg, _ := config.Load()
+		cfg, err := config.Load()
+		if err != nil {
+			// A transient read failure must not turn into a destructive
+			// writeback of a zero-value config plus whichever fields the
+			// client supplied — that would silently clobber any field the
+			// client didn't send (provider keys, custom endpoints, etc.).
+			http.Error(w, "config load failed", http.StatusInternalServerError)
+			return
+		}
 		changed := false
 
 		// Enum/string fields. `llmProviderSet` distinguishes "client
@@ -825,6 +849,19 @@ func (b *Broker) handleOfficeMembers(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 
+				// Attach BEFORE detaching the old session so an attach failure
+				// preserves the previous subscription rather than leaving the
+				// agent silently disconnected. Order matters for openclaw→
+				// openclaw swaps in particular: detach-first plus a failed
+				// attach would return 502 with member.Provider still pointing
+				// at the old binding but no live subscription on the gateway.
+				if toOpenclaw {
+					if err := bridge.AttachSlug(r.Context(), member.Slug, newBinding.Openclaw.SessionKey); err != nil {
+						http.Error(w, fmt.Sprintf("openclaw subscribe: %v", err), http.StatusBadGateway)
+						return
+					}
+				}
+
 				if fromOpenclaw && bridge != nil {
 					// Detach old session from subscriptions. Best-effort; log via
 					// the bridge's own system-message channel on failure. The
@@ -832,13 +869,6 @@ func (b *Broker) handleOfficeMembers(w http.ResponseWriter, r *http.Request) {
 					// can prune via the OpenClaw CLI if they care.
 					if err := bridge.DetachSlug(r.Context(), member.Slug); err != nil {
 						go bridge.postSystemMessage(fmt.Sprintf("agent %q provider-switch: detach warning: %v", member.Slug, err))
-					}
-				}
-
-				if toOpenclaw {
-					if err := bridge.AttachSlug(r.Context(), member.Slug, newBinding.Openclaw.SessionKey); err != nil {
-						http.Error(w, fmt.Sprintf("openclaw subscribe: %v", err), http.StatusBadGateway)
-						return
 					}
 				}
 
@@ -1139,6 +1169,12 @@ func (b *Broker) handleChannels(w http.ResponseWriter, r *http.Request) {
 				}
 				ch.Members = uniqueSlugs(append([]string{"ceo"}, members...))
 				if len(ch.Disabled) > 0 {
+					// Drop any disabled entry whose slug is in the updated
+					// roster. The semantic pinned by
+					// TestChannelUpdateMutatesDescriptionAndMembers is
+					// "re-adding a slug to Members clears the per-channel
+					// disabled flag" — so the filter keeps only entries
+					// that are NOT in the new member list.
 					filtered := make([]string, 0, len(ch.Disabled))
 					for _, disabled := range ch.Disabled {
 						if !containsString(ch.Members, disabled) {
@@ -1315,7 +1351,11 @@ func (b *Broker) handleCreateDM(w http.ResponseWriter, r *http.Request) {
 			UpdatedAt:   now,
 		})
 	}
-	_ = b.saveLocked()
+	if err := b.saveLocked(); err != nil {
+		b.mu.Unlock()
+		http.Error(w, "failed to persist DM channel", http.StatusInternalServerError)
+		return
+	}
 	b.mu.Unlock()
 
 	w.Header().Set("Content-Type", "application/json")
