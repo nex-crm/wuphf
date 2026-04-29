@@ -83,14 +83,19 @@ type ScanError struct {
 // are intentionally additive: callers can sum results across passes for
 // telemetry.
 type ScanResult struct {
-	Scanned         int         `json:"scanned"`
-	Matched         int         `json:"matched"`
-	Proposed        int         `json:"proposed"`
-	Deduped         int         `json:"deduped"`
-	RejectedByGuard int         `json:"rejected_by_guard"`
-	Errors          []ScanError `json:"errors,omitempty"`
-	DurationMs      int64       `json:"duration_ms"`
-	Trigger         string      `json:"trigger"`
+	Scanned         int `json:"scanned"`
+	Matched         int `json:"matched"`
+	Proposed        int `json:"proposed"`
+	Deduped         int `json:"deduped"`
+	RejectedByGuard int `json:"rejected_by_guard"`
+	// EnhancementCandidates counts articles diverted into an
+	// "enhance_skill_proposal" interview by the similarity gate
+	// (writeSkillProposalLocked → errSkillSimilarToExisting). These are
+	// soft-skips, not errors and not new proposals.
+	EnhancementCandidates int         `json:"enhancement_candidates"`
+	Errors                []ScanError `json:"errors,omitempty"`
+	DurationMs            int64       `json:"duration_ms"`
+	Trigger               string      `json:"trigger"`
 }
 
 // SkillScanner walks the wiki under team/, asks the LLM to classify each
@@ -256,6 +261,24 @@ func (s *SkillScanner) Scan(ctx context.Context, scopePath string, dryRun bool, 
 				res.Deduped++
 				continue
 			}
+			// Similarity gate diverted to enhance: emit an
+			// enhance_skill_proposal interview pointing at the existing skill,
+			// then count this article as an enhancement candidate (not an
+			// error, not a new proposal). The article's mtimeCache entry is
+			// retained so we don't re-classify on the next pass.
+			var simErr *errSkillSimilarToExisting
+			if errors.As(writeErr, &simErr) {
+				s.emitEnhancementInterviewFromSentinel(spec, simErr)
+				slog.Info("skill_scanner: similarity gate diverted to enhance",
+					"candidate", spec.Name,
+					"existing", simErr.Slug,
+					"score", simErr.Score,
+					"method", simErr.Method,
+					"path", c.relPath,
+				)
+				res.EnhancementCandidates++
+				continue
+			}
 			res.Errors = append(res.Errors, ScanError{Slug: skillSlug(fm.Name), Reason: "write: " + writeErr.Error()})
 			delete(updatedCache, c.relPath)
 			continue
@@ -406,12 +429,17 @@ func (s *SkillScanner) loadTombstone() (slugs, sources map[string]bool) {
 // specToTeamSkill folds a SkillFrontmatter + body + source article into the
 // teamSkill shape that writeSkillProposalLocked expects. Only the fields the
 // frontmatter actually carries get set; the helper fills in defaults.
+//
+// OwnerAgents resolution: explicit frontmatter owner_agents wins; otherwise
+// inferOwnerAgentsFromPath derives a default from sourceArticle. A nil result
+// means the skill is lead-routable.
 func specToTeamSkill(fm SkillFrontmatter, body, sourceArticle string) teamSkill {
 	wuphf := fm.Metadata.Wuphf
 	sources := append([]string(nil), wuphf.SourceArticles...)
 	if s := strings.TrimSpace(sourceArticle); s != "" {
 		sources = appendUnique(sources, s)
 	}
+	owners := inferOwnerAgentsFromPath(sourceArticle, wuphf.OwnerAgents)
 	return teamSkill{
 		Name:               fm.Name,
 		Title:              wuphf.Title,
@@ -429,9 +457,66 @@ func specToTeamSkill(fm SkillFrontmatter, body, sourceArticle string) teamSkill 
 		RelayPlatform:      wuphf.RelayPlatform,
 		RelayEventTypes:    append([]string(nil), wuphf.RelayEventTypes...),
 		SourceArticles:     sources,
-		OwnerAgents:        append([]string(nil), wuphf.OwnerAgents...),
+		OwnerAgents:        owners,
 		Status:             "proposed",
 	}
+}
+
+// inferOwnerAgentsFromPath returns the owner_agents list a skill should default
+// to based on its wiki source path. Non-empty frontmatterOwners always wins
+// (the human author opted in explicitly) and the inference is logged for
+// audit. The returned slice is nil — never []string{} — for the lead-routable
+// case so it omits cleanly through `omitempty` YAML.
+//
+//   - team/agents/<slug>/notebook/...  -> ["<slug>"]
+//   - team/playbooks/...               -> nil (lead-routable)
+//   - team/customers/...               -> nil (lead-routable)
+//   - anything else                    -> nil (lead-routable)
+//
+// Slug case is normalised to lowercase so a stray `team/agents/CSM/notebook/...`
+// collapses to `csm`, matching the office member registry.
+func inferOwnerAgentsFromPath(relPath string, frontmatterOwners []string) []string {
+	if len(frontmatterOwners) > 0 {
+		// Defensive copy: callers must be free to mutate the result without
+		// touching the parsed frontmatter.
+		out := append([]string(nil), frontmatterOwners...)
+		// Debug only: explicit frontmatter owners is the NORMAL case for
+		// human-authored skills, not an anomaly worth a structured INFO line
+		// on every promote.
+		slog.Debug("skill_scanner: path_inference",
+			"path", relPath,
+			"frontmatter_owners", out,
+			"winner", "frontmatter",
+		)
+		return out
+	}
+	clean := strings.TrimSpace(filepath.ToSlash(relPath))
+	if clean == "" {
+		return nil
+	}
+	if !strings.HasPrefix(clean, agentsDirPrefix) {
+		// Playbooks, customers, or any other team/ path: lead-routable.
+		return nil
+	}
+	rest := strings.TrimPrefix(clean, agentsDirPrefix)
+	parts := strings.SplitN(rest, "/", 2)
+	if len(parts) < 2 {
+		// team/agents/<slug>.md or team/agents/<slug>/ with no further nesting
+		// is not a notebook entry — lead-routable.
+		return nil
+	}
+	slug := strings.ToLower(strings.TrimSpace(parts[0]))
+	tail := parts[1]
+	if slug == "" {
+		return nil
+	}
+	// Only the notebook subtree under team/agents/<slug>/ implies ownership.
+	// Anything else under team/agents/<slug>/ (e.g. profile.md) stays
+	// lead-routable.
+	if !strings.HasPrefix(tail, "notebook/") && tail != "notebook" {
+		return nil
+	}
+	return []string{slug}
 }
 
 // skillSlugFromPath synthesizes a candidate slug from a wiki path. It is a
@@ -495,6 +580,30 @@ func stringOr(s, fallback string) string {
 		return fallback
 	}
 	return s
+}
+
+// emitEnhancementInterviewFromSentinel appends an
+// enhance_skill_proposal interview pointing the human at the existing
+// near-duplicate skill named by simErr.Slug. Mirrors the channel + now
+// defaults that writeSkillProposalLocked applies so the interview entry
+// matches a successful proposal's shape (channel "general" when unset,
+// timestamp = current UTC RFC3339).
+//
+// Acquires b.mu around appendSkillProposalRequestLocked because that
+// helper mutates b.requests + b.counter and its contract requires the
+// caller to hold the lock.
+func (s *SkillScanner) emitEnhancementInterviewFromSentinel(spec teamSkill, simErr *errSkillSimilarToExisting) {
+	if simErr == nil {
+		return
+	}
+	channel := strings.TrimSpace(spec.Channel)
+	if channel == "" {
+		channel = "general"
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	s.broker.mu.Lock()
+	s.broker.appendSkillProposalRequestLocked(spec, channel, now, simErr.Slug)
+	s.broker.mu.Unlock()
 }
 
 // isDuplicateSkillError reports whether the error returned by
