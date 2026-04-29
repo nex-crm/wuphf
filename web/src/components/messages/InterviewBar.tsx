@@ -1,9 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { NavArrowLeft, NavArrowRight, Xmark } from "iconoir-react";
 
-import { answerRequest, cancelRequest, type InterviewOption } from "../../api/client";
+import {
+  type AgentRequest,
+  answerRequest,
+  cancelRequest,
+  getSkillsList,
+  type InterviewOption,
+  patchSkill,
+  type Skill,
+  type SkillSimilarRef,
+} from "../../api/client";
 import { useRequests } from "../../hooks/useRequests";
+import { SkillCompareView } from "../apps/SkillCompareView";
+import { SidePanel } from "../ui/SidePanel";
 import { showNotice } from "../ui/Toast";
 
 /**
@@ -13,13 +24,18 @@ import { showNotice } from "../ui/Toast";
  * - Renders option buttons; if the picked option requires custom text,
  *   switches to a text input mode using the option's hint as placeholder
  * - Skip / close cancels the unanswered interview
+ *
+ * PR 7 task #14 extends this with the enhance-existing flow:
+ * - kind="enhance_skill_proposal" replaces the standard option row with a
+ *   side-by-side preview + three buttons (Enhance / Approve anyway / Reject).
+ * - kind="skill_proposal" with metadata.similar_to_existing renders a
+ *   warning banner with a [Compare] action above the standard options.
  */
 export function InterviewBar() {
   const { pending } = useRequests();
   const queryClient = useQueryClient();
 
   const queue = useMemo(() => {
-    // Sort by created_at ascending so the oldest blocking request is first.
     const sorted = [...pending].sort((a, b) => {
       const ta = a.created_at ?? "";
       const tb = b.created_at ?? "";
@@ -35,19 +51,40 @@ export function InterviewBar() {
   const [customText, setCustomText] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set());
+  const [compareOpen, setCompareOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const visible = queue.filter((r) => !dismissedIds.has(r.id));
   const safeCursor = Math.min(cursor, Math.max(visible.length - 1, 0));
   const current = visible[safeCursor] ?? null;
 
-  // Reset text mode when the active request changes
+  // The Skills catalog feeds the compare view's "existing" pane and
+  // supplies the existing-skill body for the patchSkill call. Cached at
+  // ["skills", "all"] so SkillsApp shares the same query.
+  const enhanceContext = readEnhanceContext(current);
+  const needsCatalog =
+    enhanceContext.kind === "enhance_skill_proposal" ||
+    enhanceContext.kind === "skill_proposal_ambiguous";
+  const { data: catalog } = useQuery({
+    queryKey: ["skills", "all"],
+    queryFn: () => getSkillsList("all"),
+    staleTime: 30_000,
+    enabled: needsCatalog,
+  });
+  const existingSkill = useMemo(() => {
+    if (!enhanceContext.existingSlug) return undefined;
+    return catalog?.skills.find((s) =>
+      skillSlugMatches(s.name, enhanceContext.existingSlug),
+    );
+  }, [catalog, enhanceContext.existingSlug]);
+
+  // Reset transient UI state when the active request changes.
   useEffect(() => {
     setTextMode(null);
     setCustomText("");
+    setCompareOpen(false);
   }, []);
 
-  // Auto-focus the text input when entering text mode
   useEffect(() => {
     if (textMode && textareaRef.current) {
       textareaRef.current.focus();
@@ -67,10 +104,64 @@ export function InterviewBar() {
     if (submitting) return;
     setSubmitting(true);
     try {
+      // Enhance flow: when the user accepts the gate's recommendation we
+      // must apply the candidate body to the existing skill BEFORE we
+      // close the interview. Architect's task #15 deliberately leaves the
+      // patch to the UI so the human can preview the diff before commit.
+      if (
+        option.id === "enhance" &&
+        current.kind === "enhance_skill_proposal"
+      ) {
+        const slug = enhanceContext.existingSlug;
+        if (!slug) {
+          throw new Error("Missing existing slug on enhance interview");
+        }
+        if (!existingSkill?.content) {
+          throw new Error(
+            "Existing skill body not loaded yet — try again in a moment",
+          );
+        }
+        const candidate =
+          (current.enhance_candidate as Skill | undefined) ??
+          enhanceContext.candidate;
+        const newBody = candidate?.content ?? "";
+        if (!newBody) {
+          throw new Error("Candidate body is empty");
+        }
+        await patchSkill(slug, {
+          old_string: existingSkill.content,
+          new_string: newBody,
+          replace_all: false,
+        });
+      }
+
       await answerRequest(current.id, option.id, text);
       await queryClient.invalidateQueries({ queryKey: ["requests"] });
+      await queryClient.invalidateQueries({ queryKey: ["skills"] });
       setTextMode(null);
       setCustomText("");
+
+      // Surface a tailored toast for enhance-flow decisions; legacy
+      // skill_proposal answers stay quiet (the queue empty-state is the
+      // signal).
+      if (current.kind === "enhance_skill_proposal") {
+        if (option.id === "enhance" && enhanceContext.existingSlug) {
+          showNotice(
+            `Updated ${enhanceContext.existingSlug}. Source article still tracked.`,
+            "success",
+          );
+        } else if (option.id === "approve_anyway") {
+          showNotice(
+            "Created as a new skill despite the similarity warning.",
+            "success",
+          );
+        } else if (option.id === "reject") {
+          const target = enhanceContext.existingSlug
+            ? ` (duplicate of ${enhanceContext.existingSlug})`
+            : "";
+          showNotice(`Dropped the candidate${target}.`, "info");
+        }
+      }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Failed to answer";
       showNotice(message, "error");
@@ -114,6 +205,16 @@ export function InterviewBar() {
   const handleNext = () =>
     setCursor((i) => Math.min(i + 1, visible.length - 1));
   const handlePrev = () => setCursor((i) => Math.max(i - 1, 0));
+
+  const isEnhance = enhanceContext.kind === "enhance_skill_proposal";
+  const ambiguousRef =
+    enhanceContext.kind === "skill_proposal_ambiguous"
+      ? enhanceContext.similarRef
+      : undefined;
+  const candidateForCompare =
+    (current.enhance_candidate as Skill | undefined) ??
+    enhanceContext.candidate ??
+    fallbackCandidateFromRequest(current);
 
   return (
     <div
@@ -180,6 +281,24 @@ export function InterviewBar() {
         {current.context && (
           <div className="interview-bar-context">{current.context}</div>
         )}
+
+        {ambiguousRef ? (
+          <SimilarBanner
+            slug={ambiguousRef.slug}
+            score={ambiguousRef.score}
+            onCompare={() => setCompareOpen(true)}
+          />
+        ) : null}
+
+        {isEnhance ? (
+          <EnhancePreview
+            existing={existingSkill}
+            candidate={candidateForCompare}
+            score={enhanceContext.similarRef?.score}
+            method={enhanceContext.similarRef?.method}
+            onOpenFull={() => setCompareOpen(true)}
+          />
+        ) : null}
       </div>
 
       {textMode ? (
@@ -222,6 +341,12 @@ export function InterviewBar() {
             </button>
           </div>
         </div>
+      ) : isEnhance ? (
+        <EnhanceActions
+          options={options}
+          submitting={submitting}
+          onPick={handleOption}
+        />
       ) : options.length > 0 ? (
         <div className="interview-bar-actions">
           {options.map((opt, i) => (
@@ -244,6 +369,257 @@ export function InterviewBar() {
       ) : (
         <div className="interview-bar-empty">No options provided.</div>
       )}
+
+      <SidePanel
+        open={compareOpen}
+        onClose={() => setCompareOpen(false)}
+        title="Compare skills"
+        subtitle={
+          enhanceContext.existingSlug
+            ? `existing: @${enhanceContext.existingSlug}`
+            : undefined
+        }
+      >
+        {candidateForCompare ? (
+          <SkillCompareView
+            existing={existingSkill}
+            candidate={candidateForCompare}
+            score={enhanceContext.similarRef?.score}
+            method={enhanceContext.similarRef?.method}
+          />
+        ) : (
+          <p style={{ color: "var(--text-tertiary)", fontSize: 13 }}>
+            Couldn't load candidate data.
+          </p>
+        )}
+      </SidePanel>
+    </div>
+  );
+}
+
+interface EnhanceContext {
+  kind: "enhance_skill_proposal" | "skill_proposal_ambiguous" | "other";
+  existingSlug?: string;
+  similarRef?: SkillSimilarRef;
+  candidate?: Skill;
+}
+
+/**
+ * Read the structured metadata the broker stamped on the interview
+ * (PR 7 task #15) and classify the interview into one of three buckets:
+ *
+ * - "enhance_skill_proposal" — full enhance UX (3 buttons + side-by-side).
+ * - "skill_proposal_ambiguous" — standard 2-button row, plus banner.
+ * - "other" — rendered as a normal interview.
+ *
+ * Returns flat scalars so the calling component doesn't have to walk
+ * `unknown` shapes inline.
+ */
+function readEnhanceContext(req: AgentRequest | null): EnhanceContext {
+  if (!req) return { kind: "other" };
+  const meta = req.metadata;
+  if (req.kind === "enhance_skill_proposal") {
+    const slug =
+      typeof meta?.enhances_slug === "string" ? meta.enhances_slug : undefined;
+    return {
+      kind: "enhance_skill_proposal",
+      existingSlug: slug,
+      similarRef: readSimilarRef(meta?.similar_to_existing),
+      candidate: req.enhance_candidate as Skill | undefined,
+    };
+  }
+  if (req.kind === "skill_proposal") {
+    const ref = readSimilarRef(meta?.similar_to_existing);
+    if (ref) {
+      return {
+        kind: "skill_proposal_ambiguous",
+        existingSlug: ref.slug,
+        similarRef: ref,
+      };
+    }
+  }
+  return { kind: "other" };
+}
+
+function readSimilarRef(value: unknown): SkillSimilarRef | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const v = value as Record<string, unknown>;
+  if (typeof v.slug !== "string" || typeof v.score !== "number") {
+    return undefined;
+  }
+  return {
+    slug: v.slug,
+    score: v.score,
+    method: typeof v.method === "string" ? v.method : undefined,
+  };
+}
+
+function skillSlugMatches(name: string | undefined, slug: string | undefined) {
+  if (!(name && slug)) return false;
+  const normalize = (s: string) =>
+    s.trim().toLowerCase().replace(/\s+/g, "-").replace(/_/g, "-");
+  return normalize(name) === normalize(slug);
+}
+
+/**
+ * Synthesize a Skill-shaped object from the request's reply_to + question
+ * when the broker doesn't ship `enhance_candidate` (fallback path; the
+ * task #15 contract supplies it directly, but defensive shapes guard
+ * against transitional broker builds in dev environments).
+ */
+function fallbackCandidateFromRequest(
+  req: AgentRequest | null,
+): Skill | undefined {
+  if (!req) return undefined;
+  const name = req.reply_to;
+  if (!name) return undefined;
+  return {
+    name,
+    description: req.question?.split("\n\n")[1] || "",
+    content: req.context || "",
+  };
+}
+
+interface SimilarBannerProps {
+  slug: string;
+  score: number;
+  onCompare: () => void;
+}
+
+function SimilarBanner({ slug, score, onCompare }: SimilarBannerProps) {
+  return (
+    <div
+      role="note"
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        flexWrap: "wrap",
+        marginTop: 8,
+        padding: "8px 12px",
+        background: "var(--yellow-bg, #fff7d6)",
+        border: "1px solid var(--yellow, #d6a700)",
+        borderRadius: 6,
+        fontSize: 12,
+        color: "var(--text)",
+      }}
+    >
+      <span>
+        Similar to <strong>{slug}</strong> (score: {score.toFixed(2)}). Worth
+        merging?
+      </span>
+      <button
+        type="button"
+        className="btn-text"
+        onClick={onCompare}
+        style={{ padding: "2px 6px" }}
+      >
+        Compare
+      </button>
+    </div>
+  );
+}
+
+interface EnhancePreviewProps {
+  existing: Skill | undefined;
+  candidate: Skill | undefined;
+  score?: number;
+  method?: string;
+  onOpenFull: () => void;
+}
+
+function EnhancePreview({
+  existing,
+  candidate,
+  score,
+  method,
+  onOpenFull,
+}: EnhancePreviewProps) {
+  if (!candidate) return null;
+  return (
+    <div style={{ marginTop: 10 }}>
+      <SkillCompareView
+        existing={existing}
+        candidate={candidate}
+        score={score}
+        method={method}
+      />
+      <div style={{ marginTop: 6, textAlign: "right" }}>
+        <button
+          type="button"
+          className="btn-text"
+          onClick={onOpenFull}
+          style={{ padding: "2px 6px", fontSize: 12 }}
+        >
+          Open full comparison →
+        </button>
+      </div>
+    </div>
+  );
+}
+
+interface EnhanceActionsProps {
+  options: InterviewOption[];
+  submitting: boolean;
+  onPick: (option: InterviewOption) => void;
+}
+
+/**
+ * Three-button action row for enhance_skill_proposal interviews. Maps the
+ * server-registered option IDs (enhance / approve_anyway / reject) to the
+ * user-facing layout: primary | secondary | text-destructive.
+ */
+function EnhanceActions({ options, submitting, onPick }: EnhanceActionsProps) {
+  const enhance = options.find((o) => o.id === "enhance");
+  const approve = options.find((o) => o.id === "approve_anyway");
+  const reject = options.find((o) => o.id === "reject");
+
+  return (
+    <div
+      className="interview-bar-actions"
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        flexWrap: "wrap",
+      }}
+    >
+      {enhance ? (
+        <button
+          type="button"
+          className="btn btn-primary btn-sm"
+          onClick={() => onPick(enhance)}
+          disabled={submitting}
+          title={enhance.description}
+          aria-label={enhance.label}
+        >
+          {submitting ? "Working..." : enhance.label}
+        </button>
+      ) : null}
+      {approve ? (
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm"
+          onClick={() => onPick(approve)}
+          disabled={submitting}
+          title={approve.description}
+          aria-label={approve.label}
+        >
+          {approve.label}
+        </button>
+      ) : null}
+      {reject ? (
+        <button
+          type="button"
+          className="btn-text btn-text--danger"
+          onClick={() => onPick(reject)}
+          disabled={submitting}
+          title={reject.description}
+          aria-label={reject.label}
+        >
+          {reject.label}
+        </button>
+      ) : null}
     </div>
   );
 }
