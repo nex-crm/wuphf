@@ -139,7 +139,7 @@ The examples below assume `wuphf` is on your `PATH`. If you just built the binar
 
 ```bash
 wuphf init          # First-time setup
-wuphf shred         # Kill a running session
+wuphf shred         # Delete workspace state and reopen onboarding
 wuphf --1o1         # 1:1 with the CEO
 wuphf --1o1 cro     # 1:1 with a specific agent
 ```

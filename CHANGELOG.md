@@ -7,6 +7,8 @@ All notable changes to WUPHF will be documented in this file.
 ### Fixed
 
 - **Newly created agents now use the office avatar sprite system instead of falling back to the deprecated legacy procedural sprites.** Operation-generated slugs like `planner`, `builder`, `growth`, `reviewer`, and `operator` now resolve to generated office portraits, and arbitrary custom slugs get deterministic office-style procedural portraits in both web and TUI surfaces.
+- **Passing `--pack`/`--blueprint` no longer deletes broker state on launch.** Restarting the same office after a crash can pass the selected blueprint again; the launcher treated that as an authoritative reseed and removed `broker-state.json`, making the office look wiped even though `wuphf shred` was never run.
+- **Fresh wikis no longer warn during Stage B skill synthesis because `team/agents/` does not exist yet.** The notebook signal scanner now treats the missing agents directory as an empty signal source.
 - **Caret no longer drifts when typing past an `@agent` chip in the composer.** The mirror-overlay treatment rendered mention chips with 4–5px horizontal padding and `font-size: 0.9em`, so each chip took more width than the raw text in the textarea behind it. The caret fell behind the typed characters by a few pixels after every chip. Composer chips now inherit the textarea's font metrics exactly (15px, no padding, `display: inline`) and only apply a background highlight — layout-neutral, so character-for-character alignment with the textarea is preserved. Message-bubble chips keep the original styled pill treatment.
 
 ### Changed
@@ -152,7 +154,7 @@ All notable changes to WUPHF will be documented in this file.
 
 ### Added
 - **Shred your workspace from Settings.** New "Danger Zone" section in the web Settings with a `Shred workspace` button that deletes your team, company identity, office task receipts, and workflows, then reopens onboarding on next launch. The card lists exactly what gets deleted vs preserved, and the confirm modal requires typing `i am sure` before firing. Task worktrees, logs, sessions, LLM caches, and `config.json` are always preserved.
-- **`wuphf shred` CLI subcommand.** Full workspace wipe that reopens onboarding. Prompts for the verb to confirm, or takes `-y` for scripted teardown. `wuphf kill` kept as an alias.
+- **`wuphf shred` CLI subcommand.** Full workspace wipe that reopens onboarding. Prompts for the verb to confirm, or takes `-y` for scripted teardown.
 - **`/shred` slash command in the TUI.** Wipes the workspace in-process, then exits the session so your next `wuphf` boots clean. The existing `/reset` (clear transcript and refresh panes) is unchanged.
 
 ## [0.0.3.0] - 2026-04-14
