@@ -662,6 +662,10 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 			"team_skill_run",
 			"Invoke a named team skill. When the human's request matches an available skill, call this BEFORE replying — do not freelance. Bumps the skill's usage, logs a skill_invocation to the channel, and returns the skill's canonical step-by-step content for you to follow.",
 		), handleTeamSkillRun)
+		mcp.AddTool(server, readOnlyTool(
+			"team_skill_list",
+			"List skills you can invoke (scope=own, default), or every active skill's metadata for cross-role discovery (scope=all). Use the metadata to decide whether to invoke directly or delegate to the owner via team_broadcast.",
+		), handleTeamSkillList)
 		registerSkillAuthoringTools(server)
 		if hasActionProvider() {
 			registerActionTools(server)
@@ -761,6 +765,10 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 		"team_skill_run",
 		"Invoke a named team skill. When the request matches an available skill (see the skill list in your prompt), call this BEFORE doing the work — do not freelance. Bumps the skill's usage, logs a skill_invocation in the channel so the office sees you followed the playbook, and returns the skill's canonical step-by-step content for you to execute.",
 	), handleTeamSkillRun)
+	mcp.AddTool(server, readOnlyTool(
+		"team_skill_list",
+		"List skills you can invoke (scope=own, default), or every active skill's metadata for cross-role discovery (scope=all). Use the metadata to decide whether to invoke directly or delegate to the owner via team_broadcast.",
+	), handleTeamSkillList)
 	registerSkillAuthoringTools(server)
 
 	// Gate external-action tools behind a configured provider. Registering 14
