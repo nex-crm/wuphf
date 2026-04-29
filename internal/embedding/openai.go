@@ -199,15 +199,28 @@ func openAIModelFromEnv() string {
 }
 
 func openAIDimensionFromEnv() int {
+	if n, ok := embeddingDimensionOverride(); ok {
+		return n
+	}
+	return defaultOpenAIDim
+}
+
+// embeddingDimensionOverride reads WUPHF_EMBEDDING_DIMENSION and returns
+// (n, true) when the user has explicitly set a positive integer. The
+// `ok` flag lets callers (Voyage especially) distinguish "user set 1536"
+// from "default kicked in" — without it, a Voyage user running
+// voyage-code-2 (1536-dim) cannot opt out of the 1024-dim default
+// because the override and the default are indistinguishable.
+func embeddingDimensionOverride() (int, bool) {
 	raw := strings.TrimSpace(os.Getenv("WUPHF_EMBEDDING_DIMENSION"))
 	if raw == "" {
-		return defaultOpenAIDim
+		return 0, false
 	}
 	var n int
 	if _, err := fmt.Sscanf(raw, "%d", &n); err != nil || n <= 0 {
-		return defaultOpenAIDim
+		return 0, false
 	}
-	return n
+	return n, true
 }
 
 func openAITimeoutFromEnv() time.Duration {

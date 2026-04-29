@@ -1,6 +1,7 @@
 package embedding
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -113,6 +114,49 @@ func TestCache_RotatesOverSizeCap(t *testing.T) {
 	matches, _ := filepath.Glob(c.path + ".old")
 	if len(matches) != 1 {
 		t.Errorf("expected 1 .old file, got %d", len(matches))
+	}
+}
+
+// TestCache_RotatesEvenWhenLoadFails pins the regression: if ensureLoaded
+// fails (corrupt JSONL, partial write from a crashed wuphf), bytesOnDisk
+// must still reflect the actual file size — otherwise the rotation check
+// thinks the file is empty and the cache grows unbounded on disk while
+// the in-memory map stays cold.
+func TestCache_RotatesEvenWhenLoadFails(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "embeddings.jsonl")
+
+	// Write a sentinel file slightly under the cap so a single Set tips
+	// past it. We fill it with non-JSONL garbage so ensureLoaded() can
+	// scan it (the row parser is best-effort) but the file size is what
+	// matters for rotation. Use a content size near the cap to force the
+	// rotation branch.
+	garbage := bytes.Repeat([]byte{'x'}, maxCacheBytes-100)
+	if err := os.WriteFile(path, garbage, 0o600); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	c := NewCache(path)
+
+	// Drive a Set. With the bug, bytesOnDisk would stay at 0 (load saw
+	// no parseable rows) and rotation would NOT trigger. With the fix,
+	// the post-load Stat sets bytesOnDisk to the file size, so the cap
+	// check fires and the file rotates.
+	if err := c.Set("trigger", "m", []float32{1, 2, 3}); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+
+	// .old must exist — proves rotation triggered despite the load failure.
+	if _, err := os.Stat(path + ".old"); err != nil {
+		t.Fatalf("expected .old to exist after rotation, got %v", err)
+	}
+	// And the live file should be small (just the new row).
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat live: %v", err)
+	}
+	if info.Size() >= int64(maxCacheBytes-100) {
+		t.Errorf("live file should have been rotated, got size=%d", info.Size())
 	}
 }
 

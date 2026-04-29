@@ -144,8 +144,21 @@ func (c *Cache) Set(text, model string, vector []float32) error {
 		return errors.New("embedding: cache: empty vector")
 	}
 	// Best-effort load: a failure leaves the in-memory map empty, which
-	// is fine for a Set call (we still write the row to disk).
-	_ = c.ensureLoaded()
+	// is fine for a Set call (we still write the row to disk). When the
+	// load fails we still need bytesOnDisk to reflect the actual file
+	// size — otherwise the rotation check below thinks the file is
+	// empty and the cache grows unbounded on disk while in-memory state
+	// stays cold. Stat the file independently so rotation triggers
+	// regardless of whether the JSONL parse succeeded.
+	if loadErr := c.ensureLoaded(); loadErr != nil {
+		if info, statErr := os.Stat(c.path); statErr == nil {
+			c.mu.Lock()
+			if c.bytesOnDisk == 0 {
+				c.bytesOnDisk = info.Size()
+			}
+			c.mu.Unlock()
+		}
+	}
 
 	key := cacheKey(text, model)
 	row := cacheRow{

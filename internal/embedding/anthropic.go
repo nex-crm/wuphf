@@ -49,10 +49,16 @@ func newVoyageProvider() Provider {
 		model = defaultVoyageModel
 	}
 
-	dim := openAIDimensionFromEnv()
-	if dim == defaultOpenAIDim {
-		// User did not override → use Voyage's default dim, not OpenAI's.
-		dim = defaultVoyageDim
+	// Voyage's voyage-3-large default is 1024 (vs OpenAI's 1536). Honour
+	// an explicit WUPHF_EMBEDDING_DIMENSION when set so users on
+	// voyage-code-2 (1536) or voyage-3-lite (512) can override; otherwise
+	// fall through to the Voyage default. Using
+	// `embeddingDimensionOverride` (which returns ok=false when unset)
+	// avoids the bug where a user explicitly setting 1536 was indistinguishable
+	// from "no override" and got silently clobbered to 1024.
+	dim := defaultVoyageDim
+	if n, ok := embeddingDimensionOverride(); ok {
+		dim = n
 	}
 
 	timeout := openAITimeoutFromEnv()

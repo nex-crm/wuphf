@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -115,7 +116,9 @@ func (b *Broker) handleGetSkillCompileStats(w http.ResponseWriter, r *http.Reque
 		EmbeddingCallsTotal:           snap.EmbeddingCallsTotal,
 		EmbeddingCacheHitsTotal:       snap.EmbeddingCacheHitsTotal,
 		EmbeddingCacheMissesTotal:     snap.EmbeddingCacheMissesTotal,
-		EmbeddingCostUsd:              loadFloatBits(&snap.EmbeddingCostUsdBits),
+		// snap is a value-copy already loaded atomically by snapshotSkillCompileMetrics —
+		// no atomic load needed on the local copy, just convert the bits.
+		EmbeddingCostUsd: math.Float64frombits(snap.EmbeddingCostUsdBits),
 	}
 	if counter != nil {
 		resp.CounterPerAgent = counter.Stats()
