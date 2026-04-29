@@ -247,18 +247,18 @@ func (m splashModel) renderCast() string {
 		switch {
 		case member.Slug == "ceo":
 			if ceoVariant != "normal" {
-				spriteLines = renderCEOVariant(ceoVariant, m.frame)
+				spriteLines = avatar.RenderCEOVariant(ceoVariant, m.frame)
 			} else {
-				spriteLines = avatar.RenderSplashAvatar(member.Name, member.Slug, m.frame, agentColorMap[member.Slug])
+				spriteLines = avatar.RenderSplashAvatar(member.Slug, m.frame)
 			}
 			ceoBlock = &avatarBlock{lines: spriteLines, name: name, slug: member.Slug}
 
 		case member.Slug == "pm":
-			spriteLines = avatar.RenderSplashAvatar(member.Name, member.Slug, m.frame, agentColorMap[member.Slug])
+			spriteLines = avatar.RenderSplashAvatar(member.Slug, m.frame)
 			pmBlock = &avatarBlock{lines: spriteLines, name: name, slug: member.Slug}
 
 		default:
-			spriteLines = avatar.RenderSplashAvatar(member.Name, member.Slug, m.frame, agentColorMap[member.Slug])
+			spriteLines = avatar.RenderSplashAvatar(member.Slug, m.frame)
 			rest = append(rest, avatarBlock{lines: spriteLines, name: name, slug: member.Slug})
 		}
 	}
@@ -493,108 +493,6 @@ func (m splashModel) renderNameLabel(slug, name string, slotW int) string {
 		agentColor = "#64748B"
 	}
 	return lipgloss.NewStyle().Foreground(lipgloss.Color(agentColor)).Bold(true).Render(label)
-}
-
-// ── CEO sprite variants for the collision gag ───────────────────
-
-func renderCEOVariant(variant string, frame int) []string {
-	var sprite avatar.Sprite
-	switch variant {
-	case "spill":
-		sprite = spriteCEOSpill()
-	case "grumpy":
-		sprite = spriteCEOGrumpy()
-	case "fakesmile":
-		if frame%2 == 0 {
-			sprite = spriteCEOFakeSmile()
-		} else {
-			// Alternate: smile twitches back to grumpy briefly
-			sprite = spriteCEOFakeSmileTwitch()
-		}
-	default:
-		sprite = avatar.SpriteCEO()
-	}
-	return avatar.RenderToANSI(sprite, avatar.PaletteForSlug("ceo", agentColorMap["ceo"]))
-}
-
-// CEO shocked — coffee cup flying off to the side, mouth wide open, eyes wide
-func spriteCEOSpill() avatar.Sprite {
-	return avatar.Sprite{
-		{0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 5, 0},
-		{0, 0, 0, 1, 4, 4, 4, 4, 4, 4, 1, 0, 5, 5},
-		{0, 0, 0, 1, 2, 2, 2, 2, 2, 2, 1, 0, 0, 0},
-		{0, 0, 0, 1, 1, 1, 2, 2, 1, 1, 1, 0, 0, 0},
-		{0, 0, 0, 1, 2, 2, 1, 1, 2, 2, 1, 0, 0, 0}, // mouth open (shocked)
-		{0, 0, 0, 0, 1, 2, 2, 2, 2, 1, 0, 0, 0, 0},
-		{0, 0, 1, 3, 3, 3, 3, 3, 3, 3, 3, 1, 0, 0},
-		{0, 1, 2, 3, 3, 3, 3, 3, 3, 3, 3, 2, 1, 0},
-		{0, 0, 2, 2, 3, 5, 3, 3, 3, 3, 2, 2, 0, 0}, // coffee stain on shirt
-		{0, 0, 1, 2, 1, 5, 5, 3, 3, 1, 2, 1, 0, 0},
-		{0, 0, 0, 1, 0, 1, 1, 1, 1, 0, 1, 0, 0, 0},
-		{0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0},
-		{0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0},
-		{0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0},
-	}
-}
-
-// CEO grumpy — angry eyebrows, tight frown, coffee stain still visible
-func spriteCEOGrumpy() avatar.Sprite {
-	return avatar.Sprite{
-		{0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0},
-		{0, 0, 0, 1, 4, 4, 4, 4, 4, 4, 1, 0, 0, 0},
-		{0, 0, 0, 1, 2, 2, 2, 2, 2, 2, 1, 0, 0, 0},
-		{0, 0, 0, 1, 1, 1, 2, 2, 1, 1, 1, 0, 0, 0}, // sunglasses
-		{0, 0, 0, 1, 2, 2, 2, 2, 2, 2, 1, 0, 0, 0},
-		{0, 0, 0, 0, 1, 2, 1, 1, 2, 1, 0, 0, 0, 0}, // tight frown
-		{0, 0, 1, 3, 3, 3, 3, 3, 3, 3, 3, 1, 0, 0},
-		{0, 1, 2, 3, 3, 3, 3, 3, 3, 3, 3, 2, 1, 0},
-		{0, 0, 2, 2, 3, 5, 3, 3, 3, 3, 2, 2, 0, 0}, // stain
-		{0, 0, 1, 2, 1, 5, 5, 3, 3, 1, 2, 1, 0, 0}, // stain
-		{0, 0, 0, 1, 0, 1, 1, 1, 1, 0, 1, 0, 0, 0},
-		{0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0},
-		{0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0},
-		{0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0},
-	}
-}
-
-// CEO fake smile — forced wide grin, eyebrows up, stain still there
-func spriteCEOFakeSmile() avatar.Sprite {
-	return avatar.Sprite{
-		{0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0},
-		{0, 0, 0, 1, 4, 4, 4, 4, 4, 4, 1, 0, 0, 0},
-		{0, 0, 1, 1, 2, 2, 2, 2, 2, 2, 1, 1, 0, 0}, // eyebrows up
-		{0, 0, 0, 1, 1, 1, 2, 2, 1, 1, 1, 0, 0, 0}, // sunglasses
-		{0, 0, 0, 1, 2, 2, 2, 2, 2, 2, 1, 0, 0, 0},
-		{0, 0, 0, 0, 1, 6, 6, 6, 6, 1, 0, 0, 0, 0}, // wide forced grin (white teeth)
-		{0, 0, 1, 3, 3, 3, 3, 3, 3, 3, 3, 1, 0, 0},
-		{0, 1, 2, 3, 3, 3, 3, 3, 3, 3, 3, 2, 1, 0},
-		{0, 0, 2, 2, 3, 5, 3, 3, 3, 3, 2, 2, 0, 0}, // stain still there
-		{0, 0, 1, 2, 1, 5, 5, 3, 3, 1, 2, 1, 0, 0},
-		{0, 0, 0, 1, 0, 1, 1, 1, 1, 0, 1, 0, 0, 0},
-		{0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0},
-		{0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0},
-		{0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0},
-	}
-}
-
-// CEO fake smile twitching — smile flickers, one eyebrow drops
-func spriteCEOFakeSmileTwitch() avatar.Sprite {
-	return avatar.Sprite{
-		{0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0},
-		{0, 0, 0, 1, 4, 4, 4, 4, 4, 4, 1, 0, 0, 0},
-		{0, 0, 0, 1, 2, 2, 2, 2, 2, 2, 1, 1, 0, 0}, // one eyebrow up, one down
-		{0, 0, 0, 1, 1, 1, 2, 2, 1, 1, 1, 0, 0, 0},
-		{0, 0, 0, 1, 2, 2, 2, 2, 2, 2, 1, 0, 0, 0},
-		{0, 0, 0, 0, 1, 6, 6, 6, 2, 1, 0, 0, 0, 0}, // smile twitching (half grin)
-		{0, 0, 1, 3, 3, 3, 3, 3, 3, 3, 3, 1, 0, 0},
-		{0, 1, 2, 3, 3, 3, 3, 3, 3, 3, 3, 2, 1, 0},
-		{0, 0, 2, 2, 3, 5, 3, 3, 3, 3, 2, 2, 0, 0},
-		{0, 0, 1, 2, 1, 5, 5, 3, 3, 1, 2, 1, 0, 0},
-		{0, 0, 0, 1, 0, 1, 1, 1, 1, 0, 1, 0, 0, 0},
-		{0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0},
-		{0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0},
-		{0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0},
-	}
 }
 
 // ── Title card ──────────────────────────────────────────────────
