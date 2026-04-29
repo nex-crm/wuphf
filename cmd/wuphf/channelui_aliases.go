@@ -36,6 +36,8 @@ type (
 	calendarEvent          = channelui.CalendarEvent
 	recoverySurgeryOption  = channelui.RecoverySurgeryOption
 	channelInterviewPhase  = channelui.InterviewPhase
+	memberActivity         = channelui.MemberActivity
+	officeCharacter        = channelui.OfficeCharacter
 )
 
 // Function aliases keep the lowercase names callable from package main
@@ -173,6 +175,33 @@ var (
 	normalizeDraftSlug                  = channelui.NormalizeDraftSlug
 	parseExpertiseInput                 = channelui.ParseExpertiseInput
 	liveActivityFromMembers             = channelui.LiveActivityFromMembers
+
+	truncateLabel         = channelui.TruncateLabel
+	sidebarAgentColors    = channelui.SidebarAgentColors
+	classifyActivity      = channelui.ClassifyActivity
+	defaultSidebarRoster  = channelui.DefaultSidebarRoster
+	renderOfficeCharacter = channelui.RenderOfficeCharacter
+	officeAside           = channelui.OfficeAside
+	activeSidebarTask     = channelui.ActiveSidebarTask
+	applyTaskActivity     = channelui.ApplyTaskActivity
+	taskBubbleText        = channelui.TaskBubbleText
+	renderThoughtBubble   = channelui.RenderThoughtBubble
+	padSidebarContent     = channelui.PadSidebarContent
+	sidebarPlainRow       = channelui.SidebarPlainRow
+	sidebarStyledRow      = channelui.SidebarStyledRow
+)
+
+// Sidebar theme color constants.
+const (
+	sidebarBG      = channelui.SidebarBG
+	sidebarMuted   = channelui.SidebarMuted
+	sidebarDivider = channelui.SidebarDivider
+	sidebarActive  = channelui.SidebarActive
+
+	dotTalking  = channelui.DotTalking
+	dotThinking = channelui.DotThinking
+	dotCoding   = channelui.DotCoding
+	dotIdle     = channelui.DotIdle
 )
 
 // Interview-phase typed-string consts.

@@ -115,6 +115,16 @@
 //   - member_draft.go      — member-draft leaf helpers:
 //     NormalizeDraftSlug, ParseExpertiseInput (comma-split + dedup),
 //     LiveActivityFromMembers (slug → live-activity map).
+//   - sidebar_presence.go  — sidebar member-presence helpers:
+//     TruncateLabel, the SidebarBG/Muted/Divider/Active +
+//     DotTalking/Thinking/Coding/Idle theme consts,
+//     SidebarAgentColors map, MemberActivity / OfficeCharacter
+//     types, ClassifyActivity, DefaultSidebarRoster,
+//     RenderOfficeCharacter (uses internal/avatar),
+//     OfficeAside (per-slug catchphrase), ActiveSidebarTask,
+//     ApplyTaskActivity, TaskBubbleText, RenderThoughtBubble
+//     (▗ … ▖ … ▘ pill), PadSidebarContent, SidebarPlainRow,
+//     SidebarStyledRow.
 //
 // Subsequent extraction PRs will land the workspace / recovery / cache
 // cluster, the sidebar / splash, the broker integrations, and finally
