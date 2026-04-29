@@ -154,41 +154,50 @@ func (b *Broker) writeSkillProposalWithOptsLocked(spec teamSkill, opts proposalO
 	var verdict SimilarityVerdict
 	if !opts.bypassSimilarity {
 		simCtx, simCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer simCancel() // PR 7 /review P1: ensure cancel on every return path
+		// PR 7 /review P1: findSimilarActiveSkillLocked takes b.mu internally
+		// (snapshots candidates, releases for embedding IO, reacquires for
+		// scoring). Release here so it can take the lock cleanly; reacquire
+		// before the rest of the funnel resumes its lock-held invariants.
+		b.mu.Unlock()
 		verdict = b.findSimilarActiveSkillLocked(simCtx, spec)
-		simCancel()
+		b.mu.Lock()
+		// Re-check dedup since b.skills could have grown while the lock was
+		// momentarily dropped (a concurrent writer could have created a slug
+		// match). Mirrors Step 6 in the WikiWorker.Enqueue release-reacquire.
+		if existing := b.findSkillByNameLocked(name); existing != nil {
+			slog.Debug("writeSkillProposalLocked: skill created during similarity gate, returning existing",
+				"name", name, "existing_status", existing.Status)
+			return existing, nil
+		}
 	}
 	switch verdict.Recommendation {
 	case "enhance_existing":
-		// Snapshot the existing skill into a flat sentinel BEFORE we release
-		// the lock anywhere downstream. Never propagate verdict.Existing
-		// (a *teamSkill pointing into b.skills) past the lock.
+		// PR 7 /review P1: SimilarityVerdict now carries flat ExistingSlug /
+		// ExistingTitle / ExistingDescription strings (no pointer back into
+		// b.skills) so this snapshot copy is just struct-field assignment.
 		atomic.AddInt64(&b.skillCompileMetrics.EnhancementCandidatesTotal, 1)
 		err := &errSkillSimilarToExisting{
-			Score:  verdict.Score,
-			Method: verdict.Method,
-		}
-		if verdict.Existing != nil {
-			err.Slug = skillSlug(verdict.Existing.Name)
-			err.Title = strings.TrimSpace(verdict.Existing.Title)
-			err.Description = strings.TrimSpace(verdict.Existing.Description)
+			Slug:        verdict.ExistingSlug,
+			Title:       verdict.ExistingTitle,
+			Description: verdict.ExistingDescription,
+			Score:       verdict.Score,
+			Method:      verdict.Method,
 		}
 		slog.Info("writeSkillProposalLocked: similarity gate diverted to enhance",
 			"candidate", name, "existing", err.Slug, "score", verdict.Score, "method", verdict.Method)
 		return nil, err
 	case "ambiguous":
-		// Capture the closest-match snapshot now while we hold the lock.
-		// Step 4a will read it back to annotate the rendered frontmatter.
-		// Never carry verdict.Existing past the snapshot — the pointer is
-		// only stable while b.mu is held.
-		// (Actual annotation happens after teamSkillToFrontmatter below.)
+		// Annotation happens after teamSkillToFrontmatter below; the verdict
+		// already carries flat slug+score+method strings.
 	}
 
-	// Capture the ambiguous-similarity snapshot before any subsequent lock
-	// release. nil when verdict was create_new or when no Existing was set.
+	// Ambiguous-band annotation. The flat verdict fields are safe to copy
+	// directly — no pointer escape.
 	var ambiguousSimRef *SkillSimilarRef
-	if verdict.Recommendation == "ambiguous" && verdict.Existing != nil {
+	if verdict.Recommendation == "ambiguous" && verdict.ExistingSlug != "" {
 		ambiguousSimRef = &SkillSimilarRef{
-			Slug:   skillSlug(verdict.Existing.Name),
+			Slug:   verdict.ExistingSlug,
 			Score:  verdict.Score,
 			Method: verdict.Method,
 		}

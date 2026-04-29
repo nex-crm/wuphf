@@ -625,14 +625,14 @@ func TestWriteSkillProposalLocked_AmbiguousSimilarity_AnnotatesFrontmatter(t *te
 	// re-running the helper against the original catalog. The candidate was
 	// written into b.skills, so we exclude the just-written entry by name.
 	// (skillSimilarityEligible already self-skips by name.)
-	b.mu.Lock()
+	// PR 7 /review P1: findSimilarActiveSkillLocked now takes b.mu
+	// internally — caller must NOT hold the lock.
 	verdict := b.findSimilarActiveSkillLocked(context.Background(), spec)
-	b.mu.Unlock()
 	if verdict.Recommendation != "ambiguous" {
 		t.Errorf("verdict.Recommendation = %q, want ambiguous (score=%v)", verdict.Recommendation, verdict.Score)
 	}
-	if verdict.Existing == nil || skillSlug(verdict.Existing.Name) != "draft-monthly-report" {
-		t.Errorf("verdict.Existing should point at draft-monthly-report, got %+v", verdict.Existing)
+	if verdict.ExistingSlug != "draft-monthly-report" {
+		t.Errorf("verdict.ExistingSlug should be draft-monthly-report, got %q", verdict.ExistingSlug)
 	}
 }
 

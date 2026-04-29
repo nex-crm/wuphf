@@ -3,6 +3,7 @@ package team
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/nex-crm/wuphf/internal/agent"
 )
@@ -165,4 +166,39 @@ func TestBuildPrompt_SkillCatalog_TruncatesLongDescription(t *testing.T) {
 			}
 		}
 	}
+}
+
+// PR 7 /review P2: renderSkillCatalogSection must truncate by rune count,
+// not byte index, so multi-byte UTF-8 (CJK, emoji) doesn't get sliced
+// mid-codepoint into invalid output.
+func TestRenderSkillCatalogSection_TruncatesByRune(t *testing.T) {
+	// 200 CJK runes, each 3 bytes — 600 bytes total. Byte truncation at
+	// 100 would split a code point at byte 99 (1/3 into the 34th char) and
+	// emit a UTF-8 invalid byte sequence.
+	long := strings.Repeat("漢", 200)
+	visible := []teamSkill{{Name: "kanji-skill", Description: long, Status: "active"}}
+	out := renderSkillCatalogSection(visible)
+
+	// Output must remain valid UTF-8.
+	if !utf8.ValidString(out) {
+		t.Fatalf("renderSkillCatalogSection produced invalid UTF-8")
+	}
+	// Find the bullet line.
+	for _, line := range strings.Split(out, "\n") {
+		if !strings.HasPrefix(line, "- kanji-skill:") {
+			continue
+		}
+		// Strip "- kanji-skill: " prefix to get the description portion.
+		desc := strings.TrimPrefix(line, "- kanji-skill: ")
+		// Truncated form ends with the ASCII ellipsis (3 dots).
+		if !strings.HasSuffix(desc, "...") {
+			t.Errorf("expected '...' suffix on truncation: %q", desc)
+		}
+		descNoSuffix := strings.TrimSuffix(desc, "...")
+		if got := len([]rune(descNoSuffix)); got != 100 {
+			t.Errorf("truncated rune count: got %d, want 100", got)
+		}
+		return
+	}
+	t.Fatalf("catalog missing kanji-skill bullet:\n%s", out)
 }

@@ -9,12 +9,15 @@ package team
 // every active skill and recommends whether the caller should enhance an
 // existing skill instead of creating a new one.
 //
-// The helper is pure data inspection: it never mutates b.skills and never
-// releases b.mu. The integration in writeSkillProposalLocked (Lane A task #5)
-// is responsible for routing the verdict into a different interview kind.
+// PR 7 /review P1: the helper now takes b.mu internally for the snapshot
+// phase, releases it for embedding IO, and operates on the snapshot for
+// scoring. Callers MUST NOT hold b.mu when calling. The integration in
+// writeSkillProposalLocked (Lane A task #5) routes the verdict into the
+// enhance-or-create flow.
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 )
@@ -59,13 +62,25 @@ const (
 )
 
 // SimilarityVerdict is the result of comparing a candidate spec against the
-// active skill catalog. Existing is a pointer into b.skills and is only
-// safe to dereference while the caller holds b.mu.
+// active skill catalog. All fields are flat scalars snapshotted under
+// b.mu so the verdict is safe to propagate after the lock is released.
+//
+// PR 7 /review P1: replaced the prior `Existing *teamSkill` pointer (which
+// was a footgun — only safe under b.mu, easy to misuse). Callers that need
+// more than slug/title/description can re-look up via findSkillByNameLocked
+// while holding the lock.
 type SimilarityVerdict struct {
-	Existing       *teamSkill
-	Score          float64
-	Method         string // "embedding-cosine" | "jaccard-tokens"
-	Recommendation string // "create_new" | "enhance_existing" | "ambiguous"
+	// ExistingSlug is the closest active skill's slug, or "" when no skill
+	// crossed the ambiguous threshold.
+	ExistingSlug string
+	// ExistingTitle is the closest skill's display title at snapshot time.
+	ExistingTitle string
+	// ExistingDescription is the closest skill's one-line description at
+	// snapshot time.
+	ExistingDescription string
+	Score               float64
+	Method              string // "embedding-cosine" | "jaccard-tokens"
+	Recommendation      string // "create_new" | "enhance_existing" | "ambiguous"
 }
 
 // skillSimilarityCache memoises embeddings per (slug, content-sha) so a
@@ -102,7 +117,14 @@ func (c *skillSimilarityCache) put(key string, vec []float32) {
 }
 
 // findSimilarActiveSkillLocked returns the closest active skill if one
-// exceeds the similarity thresholds. The caller MUST hold b.mu.
+// exceeds the similarity thresholds.
+//
+// Lock contract (PR 7 /review P1): the function takes b.mu INTERNALLY.
+// Callers MUST NOT hold b.mu. The function snapshots the candidate set
+// under lock, RELEASES the lock for the embedding IO calls, then walks
+// the snapshot to score (no lock needed — pure-data slice). This prevents
+// a slow / hung embedder from freezing every other broker operation
+// behind a held mutex.
 //
 // Inputs hashed for comparison: name + description + first 1KB of body.
 // Active-only (status == "active"). Skips any skill whose Name matches the
@@ -111,38 +133,71 @@ func (c *skillSimilarityCache) put(key string, vec []float32) {
 // When b.skillEmbedder is set, cosine similarity over normalised embeddings
 // is used (Method = "embedding-cosine"). When the embedder is unavailable
 // or fails — including ctx deadline — the helper falls back to
-// token-Jaccard over the same fields (Method = "jaccard-tokens"). Each
-// method has its own threshold band; see the similarityCosine*/
-// similarityJaccard* constants for the calibration notes.
+// token-Jaccard over the same fields (Method = "jaccard-tokens").
 //
-// IO note (PR 7 task #13): the embedding path calls b.skillEmbedder.Embed
-// while b.mu is held. Callers MUST pass a ctx with a deadline so a slow or
-// hung embedding provider cannot freeze other broker operations
-// indefinitely. writeSkillProposalLocked wires this with
-// context.WithTimeout(5s) and treats timeout as the same fall-through as
-// any other embed error.
+// The verdict carries flat ExistingSlug / ExistingTitle /
+// ExistingDescription strings (no pointer escape).
+//
+// Name kept as "Locked" suffix for back-compat with PR 7's earlier
+// landings that referenced this symbol; the lock contract was rotated in
+// the /review P1 fix without renaming to avoid churn at every call site.
 func (b *Broker) findSimilarActiveSkillLocked(ctx context.Context, spec teamSkill) SimilarityVerdict {
-	// Empty catalog short-circuits before we spend any embedding budget.
-	if len(b.skills) == 0 {
-		return SimilarityVerdict{Recommendation: "create_new", Method: similarityMethodFor(b)}
-	}
-
 	specName := strings.ToLower(strings.TrimSpace(spec.Name))
 	specText := similarityComparable(spec)
-	if specText == "" {
-		return SimilarityVerdict{Recommendation: "create_new", Method: similarityMethodFor(b)}
+
+	// Snapshot the eligible candidate set + the embedder reference under
+	// lock. The slice is a pure-data copy (slug + comparable text), no
+	// pointers back into b.skills, so it stays safe to read after release.
+	b.mu.Lock()
+	method := similarityMethodFor(b)
+	if len(b.skills) == 0 || specText == "" {
+		b.mu.Unlock()
+		return SimilarityVerdict{Recommendation: "create_new", Method: method}
 	}
+	candidates := make([]similarityCandidate, 0, len(b.skills))
+	for i := range b.skills {
+		sk := &b.skills[i]
+		if !skillSimilarityEligible(sk, specName) {
+			continue
+		}
+		text := similarityComparable(*sk)
+		if text == "" {
+			continue
+		}
+		candidates = append(candidates, similarityCandidate{
+			Slug:        skillSlug(sk.Name),
+			Title:       strings.TrimSpace(sk.Title),
+			Description: strings.TrimSpace(sk.Description),
+			Text:        text,
+		})
+	}
+	embedder := b.skillEmbedder
+	cache := b.skillSimCache
+	if cache == nil && embedder != nil {
+		b.skillSimCache = newSkillSimilarityCache()
+		cache = b.skillSimCache
+	}
+	b.mu.Unlock()
 
 	// Try embedding path first when available; fall through to Jaccard on
 	// any error (including ctx deadline) so a flaky or hung provider can't
 	// block proposal writes.
-	if b.skillEmbedder != nil {
-		v, ok := b.findSimilarActiveSkillEmbeddingLocked(ctx, spec, specName, specText)
-		if ok {
+	if embedder != nil {
+		if v, ok := scoreCandidatesByEmbedding(ctx, embedder, cache, specText, candidates); ok {
 			return v
 		}
 	}
-	return b.findSimilarActiveSkillJaccardLocked(spec, specName, specText)
+	return scoreCandidatesByJaccard(specText, candidates)
+}
+
+// similarityCandidate is the per-skill snapshot the embedding path captures
+// under b.mu before releasing for IO. Holds only the fields the comparison
+// needs — never a pointer back into b.skills.
+type similarityCandidate struct {
+	Slug        string
+	Title       string
+	Description string
+	Text        string // similarityComparable output
 }
 
 func similarityMethodFor(b *Broker) string {
@@ -152,53 +207,50 @@ func similarityMethodFor(b *Broker) string {
 	return "jaccard-tokens"
 }
 
-func (b *Broker) findSimilarActiveSkillEmbeddingLocked(ctx context.Context, spec teamSkill, specName, specText string) (SimilarityVerdict, bool) {
-	if b.skillSimCache == nil {
-		b.skillSimCache = newSkillSimilarityCache()
-	}
+// scoreCandidatesByEmbedding embeds the spec + each candidate and returns
+// the best-scoring verdict. Pure function — operates on the snapshot
+// captured under lock by findSimilarActiveSkillLocked, calls the embedder
+// without holding b.mu (PR 7 /review P1).
+func scoreCandidatesByEmbedding(ctx context.Context, embedder SkillEmbedder, cache *skillSimilarityCache, specText string, candidates []similarityCandidate) (SimilarityVerdict, bool) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	specVec, err := b.embedSkillText(ctx, "__candidate__", specText)
+	specVec, err := embedTextWithCache(ctx, embedder, cache, "__candidate__", specText)
 	if err != nil || len(specVec) == 0 {
 		return SimilarityVerdict{}, false
 	}
 
 	var (
-		bestScore float64
-		bestIdx   = -1
+		bestVal float64
+		best    similarityCandidate
 	)
-	for i := range b.skills {
-		sk := &b.skills[i]
-		if !skillSimilarityEligible(sk, specName) {
-			continue
-		}
-		text := similarityComparable(*sk)
-		if text == "" {
-			continue
-		}
-		vec, err := b.embedSkillText(ctx, sk.Name, text)
+	for _, cand := range candidates {
+		vec, err := embedTextWithCache(ctx, embedder, cache, cand.Slug, cand.Text)
 		if err != nil || len(vec) == 0 {
 			// Bail to Jaccard for the whole call rather than silently
 			// scoring the candidate against a partial catalog.
 			return SimilarityVerdict{}, false
 		}
 		score := cosineSimilarity(specVec, vec)
-		if score > bestScore {
-			bestScore = score
-			bestIdx = i
+		if score > bestVal {
+			bestVal = score
+			best = cand
 		}
 	}
 
-	v := SimilarityVerdict{Score: bestScore, Method: "embedding-cosine"}
-	if bestIdx >= 0 && bestScore >= similarityCosineAmbiguousThreshold {
-		v.Existing = &b.skills[bestIdx]
+	v := SimilarityVerdict{Score: bestVal, Method: "embedding-cosine"}
+	if best.Slug != "" && bestVal >= similarityCosineAmbiguousThreshold {
+		v.ExistingSlug = best.Slug
+		v.ExistingTitle = best.Title
+		v.ExistingDescription = best.Description
 	}
-	v.Recommendation = recommendationFor(bestScore, similarityCosineEnhanceThreshold, similarityCosineAmbiguousThreshold)
+	v.Recommendation = recommendationFor(bestVal, similarityCosineEnhanceThreshold, similarityCosineAmbiguousThreshold)
 	return v, true
 }
 
-func (b *Broker) findSimilarActiveSkillJaccardLocked(spec teamSkill, specName, specText string) SimilarityVerdict {
+// scoreCandidatesByJaccard runs token-Jaccard scoring over the snapshot.
+// Pure function — no lock needed.
+func scoreCandidatesByJaccard(specText string, candidates []similarityCandidate) SimilarityVerdict {
 	specTokens := similarityTokenSet(specText)
 	if len(specTokens) == 0 {
 		return SimilarityVerdict{Recommendation: "create_new", Method: "jaccard-tokens"}
@@ -206,27 +258,21 @@ func (b *Broker) findSimilarActiveSkillJaccardLocked(spec teamSkill, specName, s
 
 	var (
 		bestScore float64
-		bestIdx   = -1
+		best      similarityCandidate
 	)
-	for i := range b.skills {
-		sk := &b.skills[i]
-		if !skillSimilarityEligible(sk, specName) {
-			continue
-		}
-		text := similarityComparable(*sk)
-		if text == "" {
-			continue
-		}
-		score := jaccardSets(specTokens, similarityTokenSet(text))
+	for _, cand := range candidates {
+		score := jaccardSets(specTokens, similarityTokenSet(cand.Text))
 		if score > bestScore {
 			bestScore = score
-			bestIdx = i
+			best = cand
 		}
 	}
 
 	v := SimilarityVerdict{Score: bestScore, Method: "jaccard-tokens"}
-	if bestIdx >= 0 && bestScore >= similarityJaccardAmbiguousThreshold {
-		v.Existing = &b.skills[bestIdx]
+	if best.Slug != "" && bestScore >= similarityJaccardAmbiguousThreshold {
+		v.ExistingSlug = best.Slug
+		v.ExistingTitle = best.Title
+		v.ExistingDescription = best.Description
 	}
 	v.Recommendation = recommendationFor(bestScore, similarityJaccardEnhanceThreshold, similarityJaccardAmbiguousThreshold)
 	return v
@@ -276,15 +322,21 @@ func similarityComparable(sk teamSkill) string {
 	return strings.Join(strings.Fields(joined), " ")
 }
 
-func (b *Broker) embedSkillText(ctx context.Context, slug, text string) ([]float32, error) {
-	cache := b.skillSimCache
+// embedTextWithCache memoises the embedder output by (slug, content-sha)
+// so a single compile pass doesn't re-embed every existing skill from
+// scratch. Pure function — caller passes in the embedder and cache so the
+// scoring path can run without holding b.mu (PR 7 /review P1).
+func embedTextWithCache(ctx context.Context, embedder SkillEmbedder, cache *skillSimilarityCache, slug, text string) ([]float32, error) {
+	if embedder == nil {
+		return nil, fmt.Errorf("skill embedder not configured")
+	}
 	key := slug + ":" + sha256Hex(text)
 	if cache != nil {
 		if v, ok := cache.get(key); ok {
 			return v, nil
 		}
 	}
-	vec, err := b.skillEmbedder.Embed(ctx, text)
+	vec, err := embedder.Embed(ctx, text)
 	if err != nil {
 		return nil, err
 	}
