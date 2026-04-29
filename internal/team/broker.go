@@ -11057,6 +11057,11 @@ func (b *Broker) findSkillByWorkflowKeyLocked(key string) *teamSkill {
 
 func (b *Broker) handleGetSkills(w http.ResponseWriter, r *http.Request) {
 	channelFilter := normalizeChannelSlug(r.URL.Query().Get("channel"))
+	// PR 7 Lane C (F6 fold-in): when ?for_agent=<slug> is present, scope the
+	// response to skills that agent can see. Closes the cross-scope leak where
+	// any authenticated agent could read every skill body via GET /skills.
+	// Absent param preserves the existing humans/UI-facing unfiltered view.
+	forAgent := strings.TrimSpace(r.URL.Query().Get("for_agent"))
 	// PR 7 follow-up: opt-in flags so the Skills app can request the full
 	// catalog (proposed + active + disabled + archived) without breaking
 	// older consumers that expect the active+proposed+disabled subset.
@@ -11065,11 +11070,6 @@ func (b *Broker) handleGetSkills(w http.ResponseWriter, r *http.Request) {
 	// has a stable opt-in surface.
 	includeArchived := truthyQuery(r.URL.Query().Get("include_archived"))
 	_ = truthyQuery(r.URL.Query().Get("include_disabled"))
-	// PR 7 Lane C (F6 fold-in): when ?for_agent=<slug> is present, scope the
-	// response to skills that agent can see. Closes the cross-scope leak where
-	// any authenticated agent could read every skill body via GET /skills.
-	// Absent param preserves the existing humans/UI-facing unfiltered view.
-	forAgent := strings.TrimSpace(r.URL.Query().Get("for_agent"))
 
 	b.mu.Lock()
 	var pool []teamSkill
@@ -11093,16 +11093,6 @@ func (b *Broker) handleGetSkills(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"skills": result})
-}
-
-// truthyQuery accepts any of "1", "true", "yes" (case-insensitive) as true.
-// Anything else, including empty, is false.
-func truthyQuery(v string) bool {
-	switch strings.ToLower(strings.TrimSpace(v)) {
-	case "1", "true", "yes":
-		return true
-	}
-	return false
 }
 
 // handleListSkills serves GET /skills/list?scope=own|all&for_agent={slug}&tag={x}.
@@ -11181,6 +11171,16 @@ func skillHasTag(sk teamSkill, tag string) bool {
 		if strings.ToLower(strings.TrimSpace(t)) == tag {
 			return true
 		}
+	}
+	return false
+}
+
+// truthyQuery accepts any of "1", "true", "yes" (case-insensitive) as true.
+// Anything else, including empty, is false.
+func truthyQuery(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "1", "true", "yes":
+		return true
 	}
 	return false
 }

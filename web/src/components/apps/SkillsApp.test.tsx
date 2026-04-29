@@ -11,6 +11,8 @@ vi.mock("../../api/client", async () => {
   return {
     ...actual,
     getSkills: vi.fn().mockResolvedValue({ skills: [] }),
+    getSkillsList: vi.fn().mockResolvedValue({ skills: [] }),
+    getOfficeMembers: vi.fn().mockResolvedValue({ members: [] }),
     compileSkills: vi.fn().mockResolvedValue({
       scanned: 0,
       matched: 0,
@@ -24,7 +26,8 @@ vi.mock("../../api/client", async () => {
   };
 });
 
-import { SkillsApp } from "./SkillsApp";
+import * as clientMod from "../../api/client";
+import { OwnersChip, SkillsApp } from "./SkillsApp";
 
 function wrap(ui: ReactNode) {
   const qc = new QueryClient({
@@ -48,5 +51,60 @@ describe("<SkillsApp> empty state", () => {
       .getAllByRole("button")
       .filter((b) => /Compile/.test(b.textContent ?? ""));
     expect(buttons.length).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe("<SkillsApp> similar_to_existing badge", () => {
+  it("shows a similar-to indicator on proposed skills flagged by the similarity gate", async () => {
+    vi.mocked(clientMod.getSkillsList).mockResolvedValueOnce({
+      skills: [
+        {
+          name: "send-email",
+          status: "proposed",
+          description: "Send emails",
+          similar_to_existing: {
+            slug: "email-ops",
+            score: 0.82,
+            method: "embedding-cosine",
+          },
+        },
+      ],
+    });
+
+    render(wrap(<SkillsApp />));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Similar to:/i)).toBeInTheDocument();
+      expect(screen.getByText("email-ops")).toBeInTheDocument();
+    });
+  });
+
+  it("does not show a similar-to indicator on proposed skills without the flag", async () => {
+    vi.mocked(clientMod.getSkillsList).mockResolvedValueOnce({
+      skills: [{ name: "clean-skill", status: "proposed" }],
+    });
+
+    render(wrap(<SkillsApp />));
+
+    await waitFor(() => {
+      expect(screen.queryByText(/Similar to:/i)).not.toBeInTheDocument();
+    });
+  });
+});
+
+describe("<OwnersChip>", () => {
+  it("renders 'lead-routable' when slugs are missing or empty", () => {
+    render(<OwnersChip />);
+    expect(screen.getByText(/lead-routable/i)).toBeInTheDocument();
+  });
+
+  it("renders comma-separated @-prefixed slugs when provided", () => {
+    render(<OwnersChip slugs={["deploy-bot", "csm"]} />);
+    expect(screen.getByText("@deploy-bot, @csm")).toBeInTheDocument();
+  });
+
+  it("ignores empty/whitespace slugs and falls back to lead-routable", () => {
+    render(<OwnersChip slugs={["", "   "]} />);
+    expect(screen.getByText(/lead-routable/i)).toBeInTheDocument();
   });
 });

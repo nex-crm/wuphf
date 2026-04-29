@@ -215,6 +215,129 @@
       "rationale": "Decision log accidentally got name+description added during a wiki migration. Body has no skill shape; promoting it is a false positive.",
       "filename": "eval-trap-decision-with-frontmatter.md",
       "content": "---\nname: rest-over-graphql\ndescription: Decision to ship the broker public API as REST, not GraphQL\n---\n\nWe evaluated GraphQL vs REST for the broker public API and picked REST.\n\n**Context.** Consumers are mostly internal tooling and CLI clients.\n\n**Decision.** Ship REST with OpenAPI specs.\n\n**Consequences.** Slower iteration on schema-driven clients; faster\niteration on raw HTTP debugging.\n"
+    },
+    {
+      "id": "owner-01-executor-frontmatter",
+      "category": "PROMOTE",
+      "expected": "promoted",
+      "rationale": "Explicit frontmatter owner_agents=[executor] round-trips through writeSkillProposalLocked → SKILL.md → b.skills",
+      "filename": "eval-deploy-canary.md",
+      "seed_subdir": "team/playbooks",
+      "expected_owner_agents": ["executor"],
+      "content": "---\nname: deploy-canary-promote\ndescription: Promote a canary deploy after the soak window passes its SLO targets\nmetadata:\n  wuphf:\n    trigger: when a canary deploy has been live for at least 30 minutes with green metrics\n    tags: [deployment, canary, sre]\n    owner_agents: [executor]\n---\n\n## Steps\n\n1. Confirm the canary has had 30 minutes of green metrics in Grafana.\n2. Run `bash scripts/promote-canary.sh production` from the repo root.\n3. Wait for the promotion job to flip the load-balancer weights to 100%.\n4. Watch the post-promote dashboard for 10 minutes.\n5. Notify `#release-channel` with the promotion timestamp and short release notes.\n"
+    },
+    {
+      "id": "owner-02-planner-frontmatter",
+      "category": "PROMOTE",
+      "expected": "promoted",
+      "rationale": "Explicit frontmatter owner_agents=[planner] persists through proposal write + reconcile",
+      "filename": "eval-quarter-plan.md",
+      "seed_subdir": "team/playbooks",
+      "expected_owner_agents": ["planner"],
+      "content": "---\nname: kick-off-quarterly-plan\ndescription: Kick off the planner agent's quarterly capacity-planning workflow for the team\nmetadata:\n  wuphf:\n    trigger: at the start of each fiscal quarter\n    tags: [planning, quarterly, ops]\n    owner_agents: [planner]\n---\n\n## Procedure\n\n1. Pull last quarter's commit and PR throughput from the analytics dashboard.\n2. Build the per-engineer capacity model in the planner spreadsheet.\n3. Schedule the kickoff offsite with the eng leads.\n4. Send the draft plan to the team channel for async review.\n5. Lock scope on the second Friday of the quarter.\n"
+    },
+    {
+      "id": "owner-03-multi-owner",
+      "category": "PROMOTE",
+      "expected": "promoted",
+      "rationale": "Multi-owner skill: owner_agents=[reviewer, planner] both retain visibility, neither becomes lead-routable",
+      "filename": "eval-pr-checklist.md",
+      "seed_subdir": "team/playbooks",
+      "expected_owner_agents": ["planner", "reviewer"],
+      "content": "---\nname: run-pr-review-checklist\ndescription: Walk through the canonical PR review checklist before requesting changes\nmetadata:\n  wuphf:\n    trigger: when a PR is marked ready for review and assigned to the reviewer agent\n    tags: [review, code-quality, pr]\n    owner_agents: [reviewer, planner]\n---\n\n## Workflow\n\n1. Read the PR description and confirm scope matches what the diff changes.\n2. Check that tests cover the new behaviour.\n3. Run the suite locally with `bash scripts/test-go.sh`.\n4. Skim the diff for SQL injection, XSS, and auth-bypass risks.\n5. Leave inline comments and request changes or approve.\n"
+    },
+    {
+      "id": "owner-04-unknown-owner-stripped",
+      "category": "PROMOTE",
+      "expected": "promoted",
+      "rationale": "Unknown slug in owner_agents is stripped by validateOwnerAgentsLocked; remaining valid owner survives. owner_agents=[fakebot, reviewer] → [reviewer]",
+      "filename": "eval-cross-team-handoff.md",
+      "seed_subdir": "team/playbooks",
+      "expected_owner_agents": ["reviewer"],
+      "content": "---\nname: cross-team-handoff-checklist\ndescription: Hand off in-flight work cleanly between agents at sprint boundaries\nmetadata:\n  wuphf:\n    trigger: end of a sprint when in-flight work spans multiple agents\n    tags: [handoff, sprint, planning]\n    owner_agents: [fakebot-not-real, reviewer]\n---\n\n## Steps\n\n1. List every in-flight task in the sprint board.\n2. For each task, confirm the next-step owner and ETA.\n3. Update the task description with the handoff context.\n4. Post a summary in the team channel tagged to both agents.\n5. Schedule a 15-minute sync if more than three tasks are in flight.\n"
+    },
+    {
+      "id": "owner-05-shared-playbook",
+      "category": "PROMOTE",
+      "expected": "promoted",
+      "rationale": "team/playbooks/ default seed → no path inference → owner_agents stays empty (lead-routable shared skill)",
+      "filename": "eval-shared-onboarding.md",
+      "seed_subdir": "team/playbooks",
+      "expected_owner_agents": [],
+      "content": "---\nname: company-onboarding-day-one\ndescription: First-day workflow for any new full-time hire across all agent roles\nmetadata:\n  wuphf:\n    trigger: when HR confirms a new hire's start date\n    tags: [onboarding, hr, shared]\n---\n\n## Process\n\n1. Provision laptop, GitHub seat, and Slack account 24 hours ahead.\n2. Send the welcome email at 8am on day one.\n3. Run the 30-minute orientation call.\n4. Pair with the buddy at 11am.\n5. Confirm dev environment works at the end of day.\n"
+    },
+    {
+      "id": "vis-01-cross-role-403",
+      "category": "VISIBILITY",
+      "expected": "skipped",
+      "rationale": "PR 7 task #3: planner invokes an executor-only skill → 403 with delegate_to=[executor]",
+      "filename": "",
+      "invoking_slug": "planner",
+      "target_skill_slug": "deploy-canary-promote",
+      "expected_invoke_status": 403,
+      "expected_delegate_to": ["executor"],
+      "expected_owner_agents": [],
+      "content": ""
+    },
+    {
+      "id": "vis-02-lead-bypass-on-shared-200",
+      "category": "VISIBILITY",
+      "expected": "skipped",
+      "rationale": "PR 7 lead-bypass on empty owner_agents: ceo invokes the shared lead-routable skill → 200. Lead-bypass only applies when OwnerAgents is empty (canAgentSeeSkillLocked: empty owners + slug==lead).",
+      "filename": "",
+      "invoking_slug": "ceo",
+      "target_skill_slug": "company-onboarding-day-one",
+      "expected_invoke_status": 200,
+      "expected_delegate_to": [],
+      "expected_owner_agents": [],
+      "content": ""
+    },
+    {
+      "id": "vis-03-lead-only-shared-403",
+      "category": "VISIBILITY",
+      "expected": "skipped",
+      "rationale": "Empty owner_agents = lead-routable shared. Specialist invokes it → 403 delegate_to=[ceo]",
+      "filename": "",
+      "invoking_slug": "planner",
+      "target_skill_slug": "company-onboarding-day-one",
+      "expected_invoke_status": 403,
+      "expected_delegate_to": ["ceo"],
+      "expected_owner_agents": [],
+      "content": ""
+    },
+    {
+      "id": "sim-01-canonical-invoice",
+      "category": "PROMOTE",
+      "expected": "promoted",
+      "rationale": "Canonical invoice-reminder skill seeded so sim-01-near-duplicate can collide with it on a second compile pass",
+      "filename": "eval-sim-canonical-invoice.md",
+      "seed_subdir": "team/playbooks",
+      "expected_owner_agents": [],
+      "expected_similarity_outcome": "create_new",
+      "content": "---\nname: chase-overdue-invoice\ndescription: Send the standard reminder email to a customer whose invoice is past due\nmetadata:\n  wuphf:\n    trigger: when an invoice has been unpaid for 7 days past the net-30 due date\n    tags: [finance, ar, customer]\n---\n\n## Recipe\n\n1. Pull the open invoice list from Stripe filtered to due_date older than seven days.\n2. For each invoice, look up the AR contact in HubSpot.\n3. Send the templated reminder email with the invoice PDF attached.\n4. Log a HubSpot activity tagged ar-reminder-d7.\n5. If still unpaid at d14, escalate to the CSM.\n"
+    },
+    {
+      "id": "sim-04-distinct-deploy",
+      "category": "PROMOTE",
+      "expected": "promoted",
+      "rationale": "Distinct-skills sanity check: orthogonal deploy skill should NOT trip the similarity gate against any existing scenario",
+      "filename": "eval-sim-distinct-deploy.md",
+      "seed_subdir": "team/playbooks",
+      "expected_owner_agents": [],
+      "expected_similarity_outcome": "create_new",
+      "content": "---\nname: rotate-database-encryption-key\ndescription: Rotate the at-rest encryption key on the primary Postgres cluster on schedule\nmetadata:\n  wuphf:\n    trigger: every 90 days as part of compliance hygiene\n    tags: [security, database, ops]\n---\n\n## Steps\n\n1. Open the AWS KMS console and generate a new customer-managed key.\n2. Update the RDS cluster to use the new KMS key.\n3. Force a snapshot of the cluster under the new key.\n4. Update the runbook with the new key ARN.\n5. Schedule the next rotation 90 days out.\n"
+    },
+    {
+      "id": "sim-02-near-duplicate",
+      "category": "PROMOTE",
+      "expected": "skipped",
+      "rationale": "PR 7 task #13: seeded AFTER chase-overdue-invoice landed. High content overlap → similarity gate diverts to enhance_existing, EnhancementCandidatesTotal increments, skill is NOT promoted.",
+      "filename": "eval-sim-near-duplicate-invoice.md",
+      "seed_subdir": "team/playbooks",
+      "expected_owner_agents": [],
+      "expected_similarity_outcome": "enhance_existing",
+      "seed_pass": 2,
+      "content": "---\nname: invoice-d7-reminder\ndescription: Email the d7-overdue reminder to a customer whose invoice is past due\nmetadata:\n  wuphf:\n    trigger: when an invoice has been unpaid for 7 days past the net-30 due date\n    tags: [finance, ar, customer]\n---\n\n## Recipe\n\n1. Pull the open invoice list from Stripe filtered to due_date older than seven days.\n2. For each invoice, look up the AR contact in HubSpot.\n3. Send the templated reminder email with the invoice PDF attached.\n4. Log a HubSpot activity tagged ar-reminder-d7.\n5. If still unpaid at d14, escalate to the CSM.\n"
     }
   ]
 }
