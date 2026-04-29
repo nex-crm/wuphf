@@ -64,8 +64,8 @@ func TestReconcileSkillStatusFromDisk_OwnerAgents(t *testing.T) {
 		ID:          "skill-deploy-frontend",
 		Name:        "deploy-frontend",
 		Title:       "Deploy frontend",
-		Status:      "active",         // stale
-		OwnerAgents: []string{"csm"},  // stale
+		Status:      "active",        // stale
+		OwnerAgents: []string{"csm"}, // stale
 		Content:     "## Steps\n\n1. Ship.",
 	})
 	b.mu.Unlock()

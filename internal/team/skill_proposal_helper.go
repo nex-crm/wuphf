@@ -82,7 +82,7 @@ type proposalOpts struct {
 //  1. Validate Anthropic frontmatter: non-empty Name + Description, slug regex.
 //  2. System-author whitelist: bypass findMemberLocked for archivist/scanner/system.
 //  3. Dedup: return existing skill if findSkillByNameLocked matches.
-//  3b. Similarity gate (skipped when proposalOpts.bypassSimilarity is set).
+//     3b. Similarity gate (skipped when proposalOpts.bypassSimilarity is set).
 //  4. Render skill markdown via RenderSkillMarkdown.
 //  5. Release b.mu → WikiWorker.Enqueue → re-acquire b.mu.
 //  6. Re-check dedup (race window).
