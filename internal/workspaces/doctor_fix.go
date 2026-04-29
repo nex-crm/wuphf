@@ -25,8 +25,6 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-
-	"github.com/nex-crm/wuphf/internal/config"
 )
 
 // ErrManualFixRequired is returned by FixDoctorIssue when the issue cannot be
@@ -345,11 +343,10 @@ func fixCorruptRegistry() error {
 // compatibility symlink. Idempotent: if a correct symlink already exists,
 // returns nil.
 func fixSymlinkMissing() error {
-	home, symlinkPath, expectedTarget, err := symlinkPaths()
+	_, symlinkPath, expectedTarget, err := symlinkPaths()
 	if err != nil {
 		return err
 	}
-	_ = home
 	// If it already exists and points at the right place, nothing to do.
 	if info, lerr := os.Lstat(symlinkPath); lerr == nil && info.Mode()&os.ModeSymlink != 0 {
 		if cur, rerr := os.Readlink(symlinkPath); rerr == nil &&
@@ -398,12 +395,18 @@ func fixSymlinkWrong() error {
 	return nil
 }
 
-// symlinkPaths resolves the user's real home, the ~/.wuphf symlink path, and
-// the expected target ~/.wuphf-spaces/main/.wuphf.
+// symlinkPaths resolves the user's REAL home (NOT WUPHF_RUNTIME_HOME), the
+// ~/.wuphf symlink path, and the expected target ~/.wuphf-spaces/main/.wuphf.
+//
+// user-global; intentionally NOT under WUPHF_RUNTIME_HOME — the compatibility
+// symlink lives at the user's real home alongside ~/.wuphf-spaces/, which is
+// the shared cross-workspace root. Using RuntimeHomeDir here would point at
+// a per-workspace tree and create the symlink in the wrong place when
+// WUPHF_RUNTIME_HOME is set (tests, dev isolation, workspace overrides).
 func symlinkPaths() (home, symlinkPath, expectedTarget string, err error) {
-	home = config.RuntimeHomeDir()
-	if home == "" {
-		return "", "", "", errors.New("workspaces: cannot resolve home directory")
+	home, herr := os.UserHomeDir()
+	if herr != nil || home == "" {
+		return "", "", "", errors.New("workspaces: cannot resolve user home directory")
 	}
 	sd, derr := spacesDir()
 	if derr != nil {

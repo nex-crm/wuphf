@@ -52,8 +52,10 @@ var allowedFiles = map[string]string{
 	// or sibling brokers cannot find each other.
 	"internal/workspaces/registry.go":    "spacesDir — ~/.wuphf-spaces is shared cross-workspace, lives at real HOME",
 	"internal/workspaces/migration.go":   "MigrateToSymmetric operates on legacy ~/.wuphf at real HOME, not WUPHF_RUNTIME_HOME",
+	"internal/workspaces/doctor_fix.go":  "symlinkPaths — ~/.wuphf compatibility symlink lives at real HOME",
 	"internal/team/broker_workspaces.go": "workspaceTokenDir — same shared spaces directory rationale",
 	"cmd/wuphf/workspaces_adapter.go":    "listTrashEntries — ~/.wuphf-spaces/.trash, shared cross-workspace root",
+	"cmd/wuphf/main.go":                  "WUPHF_GLOBAL_HOME captures real HOME before any WUPHF_RUNTIME_HOME override",
 }
 
 // repoRoot returns the absolute path to the repository root by walking up from
@@ -109,32 +111,33 @@ func TestPhase0HomeDirAudit(t *testing.T) {
 		relLine := strings.TrimPrefix(line, root+"/")
 		relLine = strings.TrimPrefix(relLine, root+string(filepath.Separator))
 
-		// Skip _test files (the ledger's grep does `grep -v _test`; replicate here).
-		if strings.Contains(relLine, "_test.") {
-			continue
-		}
-		// Skip carved-out packages — their internal calls are expected.
-		if strings.Contains(relLine, "provider/") ||
-			strings.Contains(relLine, "gbrain/") ||
-			strings.Contains(relLine, "action/one") {
-			continue
-		}
-
-		// Extract the file path (everything before the first colon).
+		// Extract the file path (everything before the first colon) BEFORE
+		// applying file-path filters so the carve-out and _test checks
+		// don't false-positive on source lines that happen to contain
+		// "provider/" or "_test." substrings.
 		parts := strings.SplitN(relLine, ":", 2)
 		if len(parts) < 2 {
 			continue
 		}
 		hitFile := filepath.ToSlash(parts[0])
 
-		// Check against the allowlist.
-		matched := false
-		for allowedFile := range allowedFiles {
-			if strings.HasSuffix(hitFile, allowedFile) || hitFile == allowedFile {
-				matched = true
-				break
-			}
+		// Skip _test files (the ledger's grep does `grep -v _test`; replicate here).
+		if strings.HasSuffix(hitFile, "_test.go") {
+			continue
 		}
+		// Skip carved-out packages — their internal calls are expected.
+		// Match either the package directory (e.g. internal/action/one/foo.go)
+		// or a single sibling file (e.g. internal/action/one.go).
+		if strings.Contains(hitFile, "/provider/") ||
+			strings.Contains(hitFile, "/gbrain/") ||
+			strings.Contains(hitFile, "/action/one/") ||
+			strings.HasSuffix(hitFile, "/action/one.go") {
+			continue
+		}
+
+		// Check against the allowlist using exact-key lookup so unrelated
+		// files with the same trailing path can't sneak past the audit.
+		_, matched := allowedFiles[hitFile]
 		if !matched {
 			t.Errorf("PHASE0 AUDIT FAILURE: unexpected os.UserHomeDir()/os.Getenv(\"HOME\") call in %q\n"+
 				"  Full grep line: %s\n"+

@@ -279,10 +279,14 @@ func main() {
 	startFromScratch := *fromScratchFlag
 	if startFromScratch {
 		_ = os.Setenv("WUPHF_START_FROM_SCRATCH", "1")
-		// WUPHF_GLOBAL_HOME captures the user's real home before any
-		// WUPHF_RUNTIME_HOME override so downstream code can still reach
-		// user-global auth (codex, opencode) at the original location.
-		if home := config.RuntimeHomeDir(); home != "" {
+		// user-global; intentionally NOT under WUPHF_RUNTIME_HOME —
+		// WUPHF_GLOBAL_HOME captures the user's REAL home so downstream
+		// code can still reach user-global auth (codex, opencode) at the
+		// original location even when WUPHF_RUNTIME_HOME is later set
+		// for from-scratch isolation. RuntimeHomeDir() can already be
+		// pointing at a workspace tree at this point (applyWorkspaceOverride
+		// runs above), so consult os.UserHomeDir directly.
+		if home, herr := os.UserHomeDir(); herr == nil && strings.TrimSpace(home) != "" {
 			_ = os.Setenv("WUPHF_GLOBAL_HOME", home)
 		}
 		if runtimeHome := fromScratchRuntimeHome(); runtimeHome != "" {
