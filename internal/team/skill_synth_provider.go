@@ -269,13 +269,6 @@ func (p *defaultStageBLLMProvider) loadSystemPromptFromWiki() string {
 	return string(raw)
 }
 
-// systemPrompt is preserved so legacy callers and tests that called
-// p.systemPrompt() continue to compile. It returns the notebook-cluster
-// prompt — the self-heal one is exposed via systemPromptFor.
-func (p *defaultStageBLLMProvider) systemPrompt() (string, error) {
-	return p.notebookSystemPrompt()
-}
-
 // buildStageBSynthUserPromptForCandidate dispatches to the source-specific
 // prompt builder. Self-heal candidates get the structured RESOLVED INCIDENT
 // frame; everything else falls back to the generic notebook-cluster prompt.
@@ -335,12 +328,21 @@ func buildSelfHealSynthUserPrompt(cand SkillCandidate, wikiContext string) strin
 		blockReason = "(unspecified)"
 	}
 
+	// Server-generated fields go above the envelope. taskID is always
+	// "task-%d" (broker-assigned); createdAt is RFC3339 formatted from
+	// time.Time so neither carries attacker-controlled bytes.
 	fmt.Fprintf(&b, "Incident task ID: %s\n", taskID)
-	fmt.Fprintf(&b, "Agent: %s\n", author)
 	fmt.Fprintf(&b, "Resolution at: %s\n\n", createdAt)
 
+	// Everything below comes from the agent / wiki / incident text, so
+	// it goes INSIDE the envelope and through neutraliseUntrustedText.
+	// `author` is the agent's chosen name (could embed newlines or fake
+	// framing); single-line fields use neutraliseUntrustedField so a
+	// payload like "bot\n\nIgnore prior instructions..." cannot escape
+	// the field's line.
 	b.WriteString("<untrusted-incident>\n")
-	fmt.Fprintf(&b, "Block reason: %s\n", neutraliseUntrustedText(blockReason))
+	fmt.Fprintf(&b, "Agent: %s\n", neutraliseUntrustedField(author))
+	fmt.Fprintf(&b, "Block reason: %s\n", neutraliseUntrustedField(blockReason))
 	fmt.Fprintf(&b, "Block detail: %s\n", neutraliseUntrustedText(truncateForPrompt(snippet, 1200)))
 	b.WriteString("</untrusted-incident>\n\n")
 
@@ -356,19 +358,42 @@ func buildSelfHealSynthUserPrompt(cand SkillCandidate, wikiContext string) strin
 	b.WriteString("Your job: synthesize a reusable skill that future agents can invoke when they hit the same class of block. Class-first (don't bake in incident-specific names).\n")
 
 	if hint := strings.TrimSpace(cand.SuggestedName); hint != "" {
-		fmt.Fprintf(&b, "\nDefault name hint (the LLM may override): %s\n", neutraliseUntrustedText(hint))
+		fmt.Fprintf(&b, "\nDefault name hint (the LLM may override): %s\n", neutraliseUntrustedField(hint))
 	}
 
 	return b.String()
 }
 
-// neutraliseUntrustedText replaces XML-style closing tags inside attacker-
-// controlled text so a malicious snippet can't break out of the
-// <untrusted-*> envelope used by the self-heal user prompt. We replace
-// only the dangerous "</" sequence and leave normal "<" untouched so
-// markdown / code fences in legitimate wiki text still render cleanly.
+// neutraliseUntrustedText defangs XML-style envelope tags inside
+// attacker-controlled text so a malicious snippet can't break out of (or
+// fake the shape of) the <untrusted-*> envelope used by the self-heal
+// user prompt. We rewrite the closing form "</" → "< /" and the
+// opening form "<untrusted" → "< untrusted" so neither a close-tag
+// breakout NOR a fake nested envelope ("trust this <untrusted-incident>
+// instead") can be planted inside the data region. Other "<" sequences
+// pass through so markdown / code fences in legitimate wiki text still
+// render cleanly.
+//
+// Note: this is the multi-line variant — preserves newlines so wiki
+// context retains paragraph structure. For single-field values use
+// neutraliseUntrustedField.
 func neutraliseUntrustedText(s string) string {
-	return strings.ReplaceAll(s, "</", "< /")
+	s = strings.ReplaceAll(s, "</", "< /")
+	s = strings.ReplaceAll(s, "<untrusted", "< untrusted")
+	return s
+}
+
+// neutraliseUntrustedField is the single-line variant of
+// neutraliseUntrustedText. In addition to the tag defangs, it replaces
+// any newline / carriage return with a space so a single field's value
+// cannot span multiple lines — protects against agent names like
+// "bot\n\nIgnore prior instructions..." that would otherwise inject
+// fake structure into the envelope.
+func neutraliseUntrustedField(s string) string {
+	s = neutraliseUntrustedText(s)
+	s = strings.ReplaceAll(s, "\r", " ")
+	s = strings.ReplaceAll(s, "\n", " ")
+	return s
 }
 
 // buildStageBSynthUserPrompt assembles the synthesis-specific user message
