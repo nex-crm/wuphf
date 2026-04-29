@@ -125,16 +125,12 @@ func (cliOrchestratorAdapter) Doctor(ctx context.Context) (DoctorReport, error) 
 }
 
 func (cliOrchestratorAdapter) FixDoctorIssue(ctx context.Context, fixID string) error {
-	// Lane B's Doctor auto-applies the safe reconcile actions (stopping →
-	// paused, missing-symlink recreate). The remaining issues surfaced to
-	// the user are advisory — we do not yet have a typed remediation path
-	// per FixID. Re-run doctor to re-apply the auto-fix step; otherwise
-	// surface a friendly message so the CLI loop continues.
-	_, err := workspaces.Doctor(ctx)
-	if err != nil {
-		return fmt.Errorf("re-run doctor for fix %q: %w", fixID, err)
-	}
-	return nil
+	// Lane B owns typed dispatch per FixID prefix
+	// (orphan_tree, zombie, port, corrupt, symlink, migration). Doctor's
+	// auto-applied fixes (stopping → paused, missing-symlink recreate) still
+	// run on every Doctor call — FixDoctorIssue is the explicit, idempotent
+	// path for the leftover advisory issues that were surfaced to the user.
+	return workspaces.FixDoctorIssue(ctx, fixID)
 }
 
 func (cliOrchestratorAdapter) Resolve(ctx context.Context, name string) (Workspace, error) {
