@@ -58,6 +58,15 @@ type SkillCompileMetrics struct {
 	// Each tick is one redundant skill prevented; eval tracks it as a
 	// quality signal for the proposal funnel.
 	EnhancementCandidatesTotal int64
+	// EnhancementAcceptedTotal counts how many enhance_skill_proposal
+	// interviews were resolved with the "enhance" decision — the human
+	// agreed the candidate should fold into an existing skill (PR 7 task
+	// #15). Bumped from the answer-handler dispatch.
+	EnhancementAcceptedTotal int64
+	// EnhancementOverriddenTotal counts how many enhance_skill_proposal
+	// interviews were resolved with "approve_anyway" — the human bypassed
+	// the gate and created a new skill anyway (PR 7 task #15).
+	EnhancementOverriddenTotal int64
 }
 
 // snapshotSkillCompileMetrics returns a copy of m suitable for serialization.
@@ -76,6 +85,8 @@ func snapshotSkillCompileMetrics(m *SkillCompileMetrics) SkillCompileMetrics {
 		LastSkillCompilePassAtNano:    atomic.LoadInt64(&m.LastSkillCompilePassAtNano),
 		StageBProposalsTotal:          atomic.LoadInt64(&m.StageBProposalsTotal),
 		EnhancementCandidatesTotal:    atomic.LoadInt64(&m.EnhancementCandidatesTotal),
+		EnhancementAcceptedTotal:      atomic.LoadInt64(&m.EnhancementAcceptedTotal),
+		EnhancementOverriddenTotal:    atomic.LoadInt64(&m.EnhancementOverriddenTotal),
 	}
 }
 

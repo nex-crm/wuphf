@@ -87,6 +87,13 @@ type skillCompileStatsResponse struct {
 	// existing skill instead of creating a new one (PR 7 task #13). Eval
 	// asserts on this field as a quality signal for the proposal funnel.
 	EnhancementCandidatesTotal int64 `json:"enhancement_candidates_total"`
+	// EnhancementAcceptedTotal counts enhance_skill_proposal interviews
+	// resolved with "enhance" (PR 7 task #15).
+	EnhancementAcceptedTotal int64 `json:"enhancement_accepted_total"`
+	// EnhancementOverriddenTotal counts enhance_skill_proposal interviews
+	// resolved with "approve_anyway" — the human bypassed the gate (PR 7
+	// task #15).
+	EnhancementOverriddenTotal int64 `json:"enhancement_overridden_total"`
 	// CatalogBytesPerAgentMax is the maximum byte length the prompt catalog
 	// would render to across active office members for the current b.skills
 	// snapshot. PR 7 surfaces it so operators can spot catalog bloat before
@@ -126,6 +133,8 @@ func (b *Broker) handleGetSkillCompileStats(w http.ResponseWriter, r *http.Reque
 		LastTickDurationMs:            snap.LastTickDurationMs,
 		StageBProposalsTotal:          snap.StageBProposalsTotal,
 		EnhancementCandidatesTotal:    snap.EnhancementCandidatesTotal,
+		EnhancementAcceptedTotal:      snap.EnhancementAcceptedTotal,
+		EnhancementOverriddenTotal:    snap.EnhancementOverriddenTotal,
 		CatalogBytesPerAgentMax:       maxBytes,
 	}
 	if snap.LastSkillCompilePassAtNano != 0 {

@@ -60,6 +60,16 @@ func (e *errSkillSimilarToExisting) Error() string {
 		e.Slug, e.Score, e.Method)
 }
 
+// proposalOpts toggles non-default behavior of the unified write funnel
+// (PR 7 task #15). Default zero-value is the legacy contract.
+type proposalOpts struct {
+	// bypassSimilarity skips Step 3b's similarity gate so the candidate
+	// always lands as a normal proposed skill. Set by the answer handler
+	// when the human picks "approve_anyway" on an enhance_skill_proposal
+	// interview — the human has explicitly overridden the gate's verdict.
+	bypassSimilarity bool
+}
+
 // writeSkillProposalLocked is the unified write funnel for all skill proposals.
 //
 // The caller MUST hold b.mu on entry. The function releases b.mu while calling
@@ -72,11 +82,18 @@ func (e *errSkillSimilarToExisting) Error() string {
 //  1. Validate Anthropic frontmatter: non-empty Name + Description, slug regex.
 //  2. System-author whitelist: bypass findMemberLocked for archivist/scanner/system.
 //  3. Dedup: return existing skill if findSkillByNameLocked matches.
+//  3b. Similarity gate (skipped when proposalOpts.bypassSimilarity is set).
 //  4. Render skill markdown via RenderSkillMarkdown.
 //  5. Release b.mu → WikiWorker.Enqueue → re-acquire b.mu.
 //  6. Re-check dedup (race window).
 //  7. Append to b.skills, emit SSE via appendSkillProposalRequestLocked.
 func (b *Broker) writeSkillProposalLocked(spec teamSkill) (*teamSkill, error) {
+	return b.writeSkillProposalWithOptsLocked(spec, proposalOpts{})
+}
+
+// writeSkillProposalWithOptsLocked is the inner implementation that takes
+// the proposalOpts knob. Most callers should use writeSkillProposalLocked.
+func (b *Broker) writeSkillProposalWithOptsLocked(spec teamSkill, opts proposalOpts) (*teamSkill, error) {
 	// --- Step 1: Validate ---
 	name := strings.TrimSpace(spec.Name)
 	if name == "" {
@@ -128,9 +145,18 @@ func (b *Broker) writeSkillProposalLocked(spec teamSkill) (*teamSkill, error) {
 	// while b.mu is held. The 5s timeout ceiling caps the lock-hold even if
 	// the provider hangs; on timeout the helper falls through to Jaccard
 	// inside the same call (Method becomes "jaccard-tokens" automatically).
-	simCtx, simCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	verdict := b.findSimilarActiveSkillLocked(simCtx, spec)
-	simCancel()
+	//
+	// PR 7 task #15: opts.bypassSimilarity skips the gate entirely. The
+	// answer handler sets this when the human picks "approve_anyway" on an
+	// enhance_skill_proposal interview — the gate already fired once and
+	// the human has explicitly overridden it; firing again would deadlock
+	// the override flow.
+	var verdict SimilarityVerdict
+	if !opts.bypassSimilarity {
+		simCtx, simCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		verdict = b.findSimilarActiveSkillLocked(simCtx, spec)
+		simCancel()
+	}
 	switch verdict.Recommendation {
 	case "enhance_existing":
 		// Snapshot the existing skill into a flat sentinel BEFORE we release
@@ -207,6 +233,7 @@ func (b *Broker) writeSkillProposalLocked(spec teamSkill) (*teamSkill, error) {
 		Status:              status,
 		SourceArticles:      append([]string(nil), spec.SourceArticles...),
 		OwnerAgents:         append([]string(nil), spec.OwnerAgents...),
+		SimilarToExisting:   ambiguousSimRef,
 		CreatedAt:           now,
 		UpdatedAt:           now,
 	}
