@@ -24,14 +24,14 @@ import (
 // `{outputs: [url, ...]}` dicts (per the muapi-cli source). We walk both.
 
 const (
-	defaultSeedanceBase           = "https://api.muapi.ai/api/v1"
-	defaultSeedanceModelEndpoint  = "seedance-pro-text-to-video"
-	envSeedanceAPIKey             = "MUAPI_API_KEY"
-	envSeedanceAPIKeyAlt          = "WUPHF_SEEDANCE_API_KEY"
-	envSeedanceBaseURL            = "WUPHF_SEEDANCE_BASE_URL"
-	envSeedanceModel              = "WUPHF_SEEDANCE_MODEL"
-	seedancePollInterval          = 3 * time.Second
-	seedancePollTimeout           = 10 * time.Minute // video can run long
+	defaultSeedanceBase          = "https://api.muapi.ai/api/v1"
+	defaultSeedanceModelEndpoint = "seedance-pro-text-to-video"
+	envSeedanceAPIKey            = "MUAPI_API_KEY"
+	envSeedanceAPIKeyAlt         = "WUPHF_SEEDANCE_API_KEY"
+	envSeedanceBaseURL           = "WUPHF_SEEDANCE_BASE_URL"
+	envSeedanceModel             = "WUPHF_SEEDANCE_MODEL"
+	seedancePollInterval         = 3 * time.Second
+	seedancePollTimeout          = 10 * time.Minute // video can run long
 )
 
 type seedance struct{}
@@ -43,11 +43,11 @@ func (s *seedance) Kind() Kind { return KindSeedance }
 func (s *seedance) Status(_ context.Context) Status {
 	apiKey := seedanceAPIKey()
 	st := Status{
-		Kind:             KindSeedance,
-		Label:            "Seedance 2",
-		Blurb:            "ByteDance Seedance via MuAPI — text-to-video and image-to-video. Async; we poll predictions/<id>/result every 3s up to 10m.",
-		BaseURL:          seedanceBaseURL(),
-		DefaultModel:     seedanceModel(),
+		Kind:         KindSeedance,
+		Label:        "Seedance 2",
+		Blurb:        "ByteDance Seedance via MuAPI — text-to-video and image-to-video. Async; we poll predictions/<id>/result every 3s up to 10m.",
+		BaseURL:      seedanceBaseURL(),
+		DefaultModel: seedanceModel(),
 		SupportedModels: []string{
 			"seedance-pro-text-to-video",
 			"seedance-pro-image-to-video",

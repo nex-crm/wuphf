@@ -20,12 +20,12 @@ import (
 // (base64) under candidates[].content.parts[].inlineData.data.
 
 const (
-	defaultNanoBananaBase   = "https://generativelanguage.googleapis.com/v1beta"
-	defaultNanoBananaModel  = "gemini-2.5-flash-image"
-	envNanoBananaAPIKey     = "GOOGLE_AI_STUDIO_API_KEY"
-	envNanoBananaAPIKeyAlt  = "WUPHF_NANO_BANANA_API_KEY"
-	envNanoBananaBaseURL    = "WUPHF_NANO_BANANA_BASE_URL"
-	envNanoBananaModel      = "WUPHF_NANO_BANANA_MODEL"
+	defaultNanoBananaBase  = "https://generativelanguage.googleapis.com/v1beta"
+	defaultNanoBananaModel = "gemini-2.5-flash-image"
+	envNanoBananaAPIKey    = "GOOGLE_AI_STUDIO_API_KEY"
+	envNanoBananaAPIKeyAlt = "WUPHF_NANO_BANANA_API_KEY"
+	envNanoBananaBaseURL   = "WUPHF_NANO_BANANA_BASE_URL"
+	envNanoBananaModel     = "WUPHF_NANO_BANANA_MODEL"
 )
 
 type nanoBanana struct{}

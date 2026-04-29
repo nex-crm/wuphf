@@ -22,12 +22,12 @@ import (
 // pipe as Nano Banana — no extra HTTP round-trip and no expiring URL.
 
 const (
-	defaultGPTImageBase    = "https://api.openai.com/v1"
-	defaultGPTImageModel   = "gpt-image-1"
-	envGPTImageAPIKey      = "OPENAI_API_KEY"
-	envGPTImageAPIKeyAlt   = "WUPHF_GPT_IMAGE_API_KEY"
-	envGPTImageBaseURL     = "WUPHF_GPT_IMAGE_BASE_URL"
-	envGPTImageModel       = "WUPHF_GPT_IMAGE_MODEL"
+	defaultGPTImageBase  = "https://api.openai.com/v1"
+	defaultGPTImageModel = "gpt-image-1"
+	envGPTImageAPIKey    = "OPENAI_API_KEY"
+	envGPTImageAPIKeyAlt = "WUPHF_GPT_IMAGE_API_KEY"
+	envGPTImageBaseURL   = "WUPHF_GPT_IMAGE_BASE_URL"
+	envGPTImageModel     = "WUPHF_GPT_IMAGE_MODEL"
 )
 
 type gptImage struct{}

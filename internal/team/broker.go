@@ -1010,7 +1010,7 @@ func NewBrokerAt(statePath string) *Broker {
 	}
 	b.mu.Lock()
 	b.ensureDefaultOfficeMembersLocked()
-	// b.ensureDefaultChannelsLocked() // removed — runs at state load only
+	b.ensureDefaultChannelsLocked()
 	b.normalizeLoadedStateLocked()
 	b.mu.Unlock()
 	b.stopCh = make(chan struct{})
@@ -2898,7 +2898,7 @@ func (b *Broker) EnsureBridgedMember(slug, name, createdBy string) error {
 	b.members = append(b.members, member)
 	// Make sure the bridged agent shows up in #general so @mentions work.
 	for i := range b.channels {
-		if b.channels[i].Slug == "hanger8200" {
+		if b.channels[i].Slug == "general" {
 			if !containsString(b.channels[i].Members, slug) {
 				b.channels[i].Members = append(b.channels[i].Members, slug)
 			}
@@ -3610,7 +3610,7 @@ func (b *Broker) ensureDefaultChannelsLocked() {
 	}
 	hasGeneral := false
 	for _, ch := range b.channels {
-		if ch.Slug == "hanger8200" {
+		if ch.Slug == "general" {
 			hasGeneral = true
 			break
 		}
@@ -3695,7 +3695,7 @@ func (b *Broker) normalizeLoadedStateLocked() {
 		if strings.TrimSpace(b.channels[i].Description) == "" {
 			b.channels[i].Description = defaultTeamChannelDescription(b.channels[i].Slug, b.channels[i].Name)
 		}
-		if b.channels[i].Slug == "hanger8200" && len(b.channels[i].Members) < len(b.members) {
+		if b.channels[i].Slug == "general" && len(b.channels[i].Members) < len(b.members) {
 			// Re-populate general channel with all office members.
 			// This fixes stale state where only CEO survived a previous normalization.
 			allSlugs := make([]string, 0, len(b.members))

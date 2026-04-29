@@ -96,4 +96,3 @@ func handleImageGenerate(ctx context.Context, _ *mcp.CallToolRequest, in imageGe
 func toolErrorMsg(msg string) *mcp.CallToolResult {
 	return toolError(fmt.Errorf("%s", msg))
 }
-
