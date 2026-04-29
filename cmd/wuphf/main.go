@@ -22,6 +22,7 @@ import (
 	"github.com/nex-crm/wuphf/internal/teammcp"
 	"github.com/nex-crm/wuphf/internal/upgradecheck"
 	"github.com/nex-crm/wuphf/internal/workspace"
+	"github.com/nex-crm/wuphf/internal/workspaces"
 )
 
 const appName = "wuphf"
@@ -143,6 +144,41 @@ func printVisibleFlags(w *os.File) {
 	})
 }
 
+// initWorkspaces wires the workspaces package into the CLI factory, the
+// broker's cross-broker URL resolver, and runs the migration to the
+// symmetric multi-workspace layout. Idempotent — safe to call on every
+// `wuphf` invocation, including subcommands that never touch workspaces.
+func initWorkspaces() {
+	orchestratorFactory = func() (workspaceOrchestrator, error) {
+		return cliOrchestratorAdapter{}, nil
+	}
+	team.SetTargetBrokerURLResolver(targetBrokerURL)
+
+	if err := workspaces.MigrateToSymmetric(); err != nil {
+		// Non-fatal: existing single-workspace installs keep working
+		// even if the symmetric migration is blocked (e.g. a broker is
+		// running on the legacy port).
+		fmt.Fprintf(os.Stderr, "workspace migration: %v\n", err)
+	}
+}
+
+// wireBrokerWorkspaces is called after a launcher has constructed and
+// started its broker. It hooks the broker's workspace endpoints up to the
+// shared orchestrator and the launcher's drain path. Safe to call when
+// l.Broker() is nil (no broker spawned).
+func wireBrokerWorkspaces(l *team.Launcher) {
+	if l == nil {
+		return
+	}
+	b := l.Broker()
+	if b == nil {
+		return
+	}
+	b.SetWorkspaceOrchestrator(brokerOrchestratorAdapter{})
+	b.SetLauncherDrainer(l)
+	b.SetAdminPauseExitFn(os.Exit)
+}
+
 func main() {
 	cmd := flag.String("cmd", "", "Run a command non-interactively")
 	format := flag.String("format", "text", "Output format (text, json)")
@@ -192,6 +228,12 @@ func main() {
 	}
 
 	flag.Parse()
+
+	// Wire the workspaces orchestrator + run the symmetric-layout migration
+	// before any subcommand dispatch. Both are idempotent: migration no-ops
+	// when registry.json already exists, and the factory swap is safe even
+	// when the user is about to run a non-workspace subcommand.
+	initWorkspaces()
 
 	if *helpAll {
 		fmt.Fprintf(os.Stderr, "WUPHF v%s — all flags (including internal):\n\n", buildinfo.Current().Version)
@@ -519,6 +561,7 @@ func runTeam(args []string, packSlug string, unsafe bool, oneOnOne bool, opusCEO
 		fmt.Fprintf(os.Stderr, "error launching team: %v\n", err)
 		os.Exit(1)
 	}
+	wireBrokerWorkspaces(l)
 	if !l.UsesTmuxRuntime() {
 		if token := strings.TrimSpace(l.BrokerToken()); token != "" {
 			_ = os.Setenv("WUPHF_BROKER_TOKEN", token)
@@ -581,6 +624,7 @@ func runWeb(args []string, packSlug string, unsafe bool, webPort int, opusCEO bo
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
+	wireBrokerWorkspaces(l)
 }
 
 func fromScratchRuntimeHome() string {
