@@ -78,12 +78,15 @@ type paneLifecycleDeps struct {
 }
 
 // paneLifecycle owns the tmux pane lifecycle (PLAN.md §C5). The runner
-// field is the test seam — production gets realTmuxRunner via
-// newTmuxRunner; tests inject a fakeTmuxRunner via setTmuxRunnerForTest.
-// deps wires the spawn orchestration callbacks; they're nil for the
-// nil-safe / read-only paths.
+// field is the test seam for tmux invocations; production gets
+// realTmuxRunner via newTmuxRunner. The clock field is the test seam
+// for time.Sleep — production gets realClock{}, tests inject a
+// manualClock via withClock so the sleep-heavy spawn orchestration
+// methods (DetectDeadPanesAfterSpawn, PrimeVisibleAgents) can be
+// driven without real wall-clock waits.
 type paneLifecycle struct {
 	runner      tmuxRunner
+	clock       clock
 	sessionName string
 	deps        paneLifecycleDeps
 }
@@ -94,21 +97,35 @@ type paneLifecycle struct {
 // setTmuxRunnerForTest before constructing the launcher gets its fake
 // runner installed transparently. deps is empty (nil callbacks);
 // callers that need spawn orchestration use newPaneLifecycleWithDeps.
+// Production clock is realClock; tests override via withClock.
 func newPaneLifecycle(sessionName string) *paneLifecycle {
 	return &paneLifecycle{
 		runner:      newTmuxRunner(),
+		clock:       realClock{},
 		sessionName: sessionName,
 	}
 }
 
 // newPaneLifecycleWithDeps is the spawn-capable constructor used by the
-// Launcher. The runner still routes through the override seam.
+// Launcher. The runner still routes through the override seam, and
+// the clock defaults to realClock so production timing matches the
+// pre-C5f behaviour exactly.
 func newPaneLifecycleWithDeps(sessionName string, deps paneLifecycleDeps) *paneLifecycle {
 	return &paneLifecycle{
 		runner:      newTmuxRunner(),
+		clock:       realClock{},
 		sessionName: sessionName,
 		deps:        deps,
 	}
+}
+
+// withClock swaps the clock used by sleep-heavy orchestration methods.
+// Returns the same paneLifecycle so the call can be chained off a
+// constructor in test setup. Production code never calls this — it's
+// only useful from _test.go files that build a manualClock.
+func (p *paneLifecycle) withClock(c clock) *paneLifecycle {
+	p.clock = c
+	return p
 }
 
 // HasLiveSession returns true when a wuphf-team tmux session is running.
@@ -575,7 +592,7 @@ func (p *paneLifecycle) DetectDeadPanesAfterSpawn(members []officeMember) {
 	if p == nil || p.sessionName == "" {
 		return
 	}
-	time.Sleep(1500 * time.Millisecond)
+	<-p.clock.After(1500 * time.Millisecond)
 	targets := p.deps.agentPaneTargets()
 	for _, m := range members {
 		target, ok := targets[m.Slug]
@@ -655,7 +672,7 @@ func (p *paneLifecycle) TrySpawnWebAgentPanes() {
 // Launcher.primeVisibleAgents because it depends on broker
 // state and the headless-resume path.
 func (p *paneLifecycle) PrimeVisibleAgents() {
-	time.Sleep(1 * time.Second)
+	<-p.clock.After(1 * time.Second)
 
 	targets := p.deps.agentPaneTargets()
 	if len(targets) == 0 {
@@ -678,7 +695,7 @@ func (p *paneLifecycle) PrimeVisibleAgents() {
 		if allReady {
 			break
 		}
-		time.Sleep(1 * time.Second)
+		<-p.clock.After(1 * time.Second)
 	}
 }
 
