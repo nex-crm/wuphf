@@ -330,9 +330,15 @@ func (l *Launcher) writeHeadlessOpencodeMCPConfig(slug string) (string, error) {
 
 	merged := map[string]any{}
 	if raw, err := os.ReadFile(baseConfigPath); err == nil && len(raw) > 0 {
-		// Best-effort: if the existing file isn't valid JSON, overwrite it
-		// rather than silently losing the WUPHF overlay.
-		_ = json.Unmarshal(raw, &merged)
+		// Best-effort: if the existing file isn't valid JSON, fall back to
+		// writing a minimal overlay so wuphf keeps booting — but surface the
+		// parse error in the agent log so the operator can see they have a
+		// malformed base config silently dropping their `model`/`provider`
+		// blocks from every per-agent merge. (#313 bonus #1)
+		if uerr := json.Unmarshal(raw, &merged); uerr != nil {
+			merged = map[string]any{}
+			appendHeadlessCodexLog(slug, fmt.Sprintf("opencode_base-config-parse-failed: %s: %s — per-agent config will not inherit user model/provider/MCP keys until this is fixed", baseConfigPath, uerr.Error()))
+		}
 	}
 
 	mcp, _ := merged["mcp"].(map[string]any)

@@ -2466,13 +2466,7 @@ func TestProcessDueTaskJobResumesRateLimitedBlockedTask(t *testing.T) {
 }
 
 func TestOfficeChangeTaskNotificationsBackfillGeneratedMemberTask(t *testing.T) {
-	// Pin the broker's state file outside t.TempDir(). Goroutines leaked
-	// by prior tests in this package may still be saving via a Broker
-	// whose statePath was captured at construction; targeting a leaked
-	// OS-temp dir prevents races with t.TempDir cleanup ("unlinkat:
-	// directory not empty"). Leaking a few KB in /tmp is the cheap fix;
-	// proper goroutine hygiene across the suite is a separate refactor.
-	b := NewBrokerAt(leakedBrokerStatePath(t))
+	b := NewBrokerAt(filepath.Join(t.TempDir(), "broker-state.json"))
 	b.mu.Lock()
 	b.members = []officeMember{
 		{Slug: "ceo", Name: "CEO"},
@@ -2526,9 +2520,7 @@ func TestOfficeChangeTaskNotificationsBackfillGeneratedMemberTask(t *testing.T) 
 }
 
 func TestOfficeChangeTaskNotificationsBackfillChannelMembershipTask(t *testing.T) {
-	// See TestOfficeChangeTaskNotificationsBackfillGeneratedMemberTask for
-	// why this test uses a leaked state dir instead of t.TempDir().
-	b := NewBrokerAt(leakedBrokerStatePath(t))
+	b := NewBrokerAt(filepath.Join(t.TempDir(), "broker-state.json"))
 	b.mu.Lock()
 	b.members = []officeMember{
 		{Slug: "ceo", Name: "CEO"},

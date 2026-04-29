@@ -19,7 +19,7 @@ import (
 	"github.com/nex-crm/wuphf/internal/team"
 )
 
-const defaultBrokerTokenFile = brokeraddr.DefaultTokenFile
+var defaultBrokerTokenFile = brokeraddr.DefaultTokenFile
 
 var reconfigureOfficeSessionFn = reconfigureLiveOffice
 
@@ -127,6 +127,7 @@ type brokerInterviewAnswerResponse struct {
 		CustomText string `json:"custom_text,omitempty"`
 		AnsweredAt string `json:"answered_at,omitempty"`
 	} `json:"answered"`
+	Status string `json:"status,omitempty"`
 }
 
 type brokerRequestsResponse struct {
@@ -609,7 +610,7 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 
 		mcp.AddTool(server, officeWriteTool(
 			"human_interview",
-			"Ask the human a blocking interview question when you truly cannot proceed responsibly without a decision.",
+			"Ask the human an interview question. If they dismiss it, or send another message in this channel/thread, the interview is canceled.",
 		), handleHumanInterview)
 
 		mcp.AddTool(server, officeWriteTool(
@@ -654,7 +655,7 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 		), handleHumanMessage)
 		mcp.AddTool(server, officeWriteTool(
 			"human_interview",
-			"Ask the human a blocking decision question.",
+			"Ask the human an interview question. If they dismiss it, or send another message in this channel/thread, the interview is canceled.",
 		), handleHumanInterview)
 		registerSharedMemoryTools(server)
 		mcp.AddTool(server, officeWriteTool(
@@ -745,7 +746,7 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 
 	mcp.AddTool(server, officeWriteTool(
 		"human_interview",
-		"Ask the human a blocking interview question when the team cannot proceed responsibly without a decision.",
+		"Ask the human an interview question. If they dismiss it, or send another message in this channel/thread, the interview is canceled.",
 	), handleHumanInterview)
 
 	mcp.AddTool(server, officeWriteTool(
@@ -2098,8 +2099,8 @@ func handleHumanInterview(ctx context.Context, _ *mcp.CallToolRequest, args Huma
 		"context":        args.Context,
 		"options":        options,
 		"recommended_id": recommendedID,
-		"blocking":       true,
-		"required":       true,
+		"blocking":       false,
+		"required":       false,
 		"reply_to":       location.ReplyToID,
 	}, &created); err != nil {
 		return toolError(err), nil, nil
@@ -2123,6 +2124,12 @@ func handleHumanInterview(ctx context.Context, _ *mcp.CallToolRequest, args Huma
 			path := "/interview/answer?id=" + url.QueryEscape(created.ID)
 			if err := brokerGetJSON(ctx, path, &result); err != nil {
 				return toolError(err), nil, nil
+			}
+			switch strings.ToLower(strings.TrimSpace(result.Status)) {
+			case "canceled", "cancelled":
+				return toolError(fmt.Errorf("human interview canceled")), nil, nil
+			case "not_found":
+				return toolError(fmt.Errorf("human interview request not found")), nil, nil
 			}
 			if result.Answered == nil {
 				continue

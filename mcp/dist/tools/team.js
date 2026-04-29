@@ -247,7 +247,7 @@ export function registerTeamTools(server) {
                 }],
         };
     });
-    server.tool("human_interview", "Ask the human a blocking interview question when the team cannot proceed responsibly without a decision. Presents options and optionally marks one as recommended. Pauses the team until answered.", {
+    server.tool("human_interview", "Ask the human a cancelable interview question. It never blocks chat; if the human dismisses it or sends another message, the interview is canceled.", {
         question: z.string().describe("The specific decision or clarification needed from the human"),
         context: z.string().optional().describe("Short context explaining why the team is asking now"),
         my_slug: z.string().optional().describe("Agent slug asking the question. Defaults to NEX_AGENT_SLUG."),
@@ -273,6 +273,9 @@ export function registerTeamTools(server) {
         const timeoutAt = Date.now() + 30 * 60 * 1000;
         while (Date.now() < timeoutAt) {
             const answerResult = await brokerGet(`/interview/answer?id=${encodeURIComponent(interviewId)}`);
+            if (answerResult.status === "canceled") {
+                throw new Error("Human interview canceled.");
+            }
             if (answerResult.answered) {
                 const answer = answerResult.answered;
                 const finalText = answer.custom_text || answer.choice_text || "";

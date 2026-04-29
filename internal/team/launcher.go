@@ -14,7 +14,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -26,6 +28,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"golang.org/x/term"
 
 	"github.com/nex-crm/wuphf/internal/action"
 	"github.com/nex-crm/wuphf/internal/agent"
@@ -682,6 +686,17 @@ const (
 )
 
 func (l *Launcher) deliverMessageNotification(msg channelMessage) {
+	// demo_seed messages exist purely to make #general feel staffed on first
+	// paint; they must never wake an agent or burn an LLM call. Filter at
+	// the central delivery point (not just notifyAgentsLoop) so other
+	// callers — primeVisibleAgents, replays, future routes — can't bypass
+	// it. Today these don't actually route demo_seed targets because the
+	// lead is the From and Tagged is empty, but a future @all-default
+	// change would silently turn the demo seed into an LLM-burning
+	// broadcast. One filter, one place.
+	if msg.Kind == "demo_seed" {
+		return
+	}
 	immediate, delayed := l.notificationTargetsForMessage(msg)
 
 	// Debounce: use shorter cooldown for human/CEO messages, longer for agent-originated
@@ -2370,9 +2385,15 @@ func (l *Launcher) buildNotificationContext(channel, triggerMsgID, threadRootID 
 		return ""
 	}
 
-	// baseFilter excludes system messages, STATUS messages, and the trigger itself.
+	// baseFilter excludes system messages, STATUS messages, demo_seed posts,
+	// and the trigger itself. demo_seed lines are cosmetic onboarding-paint
+	// content (e.g. the lead presence line) and replaying them as prompt
+	// context would let agents treat fake activity as real history.
 	baseFilter := func(m channelMessage) bool {
 		if m.From == "system" {
+			return false
+		}
+		if m.Kind == "demo_seed" {
 			return false
 		}
 		if strings.TrimSpace(triggerMsgID) != "" && strings.TrimSpace(m.ID) == strings.TrimSpace(triggerMsgID) {
@@ -3760,7 +3781,7 @@ func (l *Launcher) buildPrompt(slug string) string {
 		sb.WriteString("- team_poll: LAST RESORT — read recent 1:1 messages only if the pushed notification is missing context you genuinely need. Do NOT call this by default.\n")
 		sb.WriteString("- team_broadcast: Send a normal direct chat reply into the 1:1 conversation\n")
 		sb.WriteString("- human_message: Send an emphasized report, recommendation, or action card directly to the human when you want it to stand out\n")
-		sb.WriteString("- human_interview: Ask a blocking decision question only when you truly cannot proceed responsibly without it\n\n")
+		sb.WriteString("- human_interview: Ask the human a cancelable interview question; it never blocks chat, and dismiss/send cancels it\n\n")
 		if noNex {
 			sb.WriteString("Nex tools are disabled for this run. Base your work on the conversation and direct human answers only.\n\n")
 		} else {
@@ -3774,7 +3795,7 @@ func (l *Launcher) buildPrompt(slug string) string {
 		sb.WriteString("3. Default to direct, useful conversation with the human. Keep it crisp and human.\n")
 		sb.WriteString("4. The pushed notification IS the latest state. Respond directly from it. Do NOT poll before replying.\n")
 		sb.WriteString("5. Use team_broadcast for normal replies. Use human_message only when you are deliberately presenting completion, a recommendation, or a next action.\n")
-		sb.WriteString("6. Use human_interview only for truly blocking decisions.\n")
+		sb.WriteString("6. Use human_interview only for cancelable clarifications you can proceed without. If a decision must block your work, ask the human directly via human_message and wait for the answer.\n")
 		sb.WriteString("7. If Nex is enabled, do not claim something is stored unless add_context actually succeeded.\n")
 		sb.WriteString("8. No fake collaboration language like 'I'll ask the team' or 'let me route this'. It is just you and the human here.\n\n")
 		sb.WriteString("CONVERSATION STYLE:\n")
@@ -3813,7 +3834,7 @@ func (l *Launcher) buildPrompt(slug string) string {
 			sb.WriteString(markdownKnowledgeToolBlock())
 		}
 		sb.WriteString("- human_message: Present output or a recommendation directly to the human.\n")
-		sb.WriteString("- human_interview: Ask the human a blocking decision question — only when the team cannot proceed without it.\n")
+		sb.WriteString("- human_interview: Ask the human a cancelable interview question; it never blocks chat, and dismiss/send cancels it.\n")
 		sb.WriteString("Other tools: team_tasks, team_task_status, team_requests, team_request, team_status, team_members, team_office_members, team_channels, team_channel, team_member, team_channel_member, team_action_guide, team_action_workflow_create, team_action_workflow_schedule, team_action_relays, team_action_relay_event_types, team_action_relay_create, team_action_relay_activate, team_action_relay_events, team_action_relay_event.\n\n")
 		sb.WriteString("== TOOL HYGIENE ==\n")
 		sb.WriteString("All team_*, human_*, and mcp__wuphf-office__* tools listed above are ALREADY registered. Call them directly. Do NOT use ToolSearch/select: to look them up — that wastes a full turn.\n")
@@ -3857,7 +3878,7 @@ func (l *Launcher) buildPrompt(slug string) string {
 		sb.WriteString("4. Tag only the specialists who should weigh in. Unowned background chatter is a bug.\n")
 		sb.WriteString("5. Keep specialists in their lane and mostly offstage. You make the FINAL decision.\n")
 		sb.WriteString("6. Check team_requests before asking the human anything new\n")
-		sb.WriteString("7. Use human_message for direct human-facing output, human_interview for blocking decisions\n")
+		sb.WriteString("7. Use human_message for direct human-facing output, human_interview for cancelable clarifications, and team_request for blocking decisions\n")
 		if markdownMemory {
 			sb.WriteString("8. When you lock a durable decision, write it to your notebook first and submit notebook_promote if it should become canonical wiki knowledge\n")
 		} else if noNex {
@@ -3939,7 +3960,7 @@ func (l *Launcher) buildPrompt(slug string) string {
 			sb.WriteString(markdownKnowledgeToolBlock())
 		}
 		sb.WriteString("- human_message: Present completion or a recommendation directly to the human.\n")
-		sb.WriteString("- human_interview: Ask the human only for blocking clarifications you cannot responsibly guess.\n")
+		sb.WriteString("- human_interview: Ask the human only for cancelable clarifications you cannot responsibly guess.\n")
 		sb.WriteString("Other tools: team_tasks, team_task_status, team_requests, team_request, team_status, team_members, team_office_members, team_channels, team_channel, team_member, team_channel_member, team_action_guide, team_action_workflow_create, team_action_workflow_schedule, team_action_relays, team_action_relay_event_types, team_action_relay_create, team_action_relay_activate, team_action_relay_events, team_action_relay_event.\n\n")
 		sb.WriteString("== TOOL HYGIENE ==\n")
 		sb.WriteString("All team_*, human_*, and mcp__wuphf-office__* tools listed above are ALREADY registered. Call them directly. Do NOT use ToolSearch/select: to look them up — that wastes a full turn.\n")
@@ -3976,7 +3997,7 @@ func (l *Launcher) buildPrompt(slug string) string {
 		sb.WriteString("2. Stay in your lane. Speak only when tagged, owning a task, blocked, or adding real delta that others haven't covered. Don't jump in just because a topic matches your domain.\n")
 		sb.WriteString("3. Push back when you disagree — explain why using your expertise\n")
 		sb.WriteString("4. Check team_requests before asking the human anything new\n")
-		sb.WriteString("5. For completion or recommendations, use human_message. For blocking human decisions, use human_interview with options.\n")
+		sb.WriteString("5. For completion or recommendations, use human_message. For cancelable clarifications, use human_interview with options. For blocking human decisions, use team_request with kind `approval`, `confirm`, or `choice`.\n")
 		sb.WriteString("6. When assigned a task, claim it with team_task first, use team_status to show what you're working on, then mark complete or review-ready and broadcast when done. Final sequence for owned tasks: team_task mutation first, then any completion broadcast or human_message, then stop. A task is NOT finished until team_task marks it complete or review-ready; posting a channel reply alone does not unblock downstream work, and a completion post while the task stays in_progress is a failure. If the CEO delegates a substantial workstream and the packet shows no owned task yet, do one quick team_tasks check before creating a fallback task; if a matching task already exists, claim that instead of duplicating it. Only create a fallback task when the delegated work is substantial and no matching task exists after that single check. If the result is mainly for the human, also send it via human_message.\n")
 		sb.WriteString("7. You can see other channel names and descriptions, but cannot access their content unless you are a member. If context from another channel is needed, ask the CEO to bridge it.\n")
 		sb.WriteString("8. If a task or status line shows a worktree path, use that as working_directory for local file and bash tools.\n")
@@ -4714,37 +4735,7 @@ func (l *Launcher) LaunchWeb(webPort int) error {
 	// Offer to wire Nex when the user hasn't opted out and nex-cli isn't yet
 	// installed. `nex setup` handles detection and wiring for us — we just
 	// surface the prompt.
-	if !config.ResolveNoNex() && !nex.IsInstalled() {
-		fmt.Println()
-		fmt.Print("  Connect Nex for memory and context? [Y/n] ")
-		var answer string
-		_, _ = fmt.Scanln(&answer)
-		answer = strings.TrimSpace(strings.ToLower(answer))
-		if answer == "" || answer == "y" || answer == "yes" {
-			fmt.Println()
-			fmt.Println("  Nex CLI not found. Installing...")
-			if _, installErr := setup.InstallLatestCLI(context.Background()); installErr != nil {
-				fmt.Printf("  Could not install: %v\n", installErr)
-				fmt.Println("  Continuing without Nex.")
-			}
-			if nexBin := nex.BinaryPath(); nexBin != "" {
-				cmd := exec.CommandContext(context.Background(), nexBin, "setup")
-				cmd.Stdin = os.Stdin
-				cmd.Stdout = os.Stdout
-				cmd.Stderr = os.Stderr
-				if err := cmd.Run(); err != nil {
-					fmt.Printf("  Setup did not complete: %v\n", err)
-					fmt.Println("  Continuing without Nex.")
-				} else {
-					fmt.Println("  Nex connected.")
-				}
-			}
-			fmt.Println()
-		} else {
-			fmt.Println("  Skipping Nex. Agents will work without organizational memory.")
-			fmt.Println()
-		}
-	}
+	l.maybeOfferNex()
 
 	mcpConfig, err := l.ensureMCPConfig()
 	if err != nil {
@@ -4789,7 +4780,16 @@ func (l *Launcher) LaunchWeb(webPort int) error {
 
 	l.broker.SetGenerateMemberFn(l.GenerateMemberTemplateFromPrompt)
 	l.broker.SetGenerateChannelFn(l.GenerateChannelTemplateFromPrompt)
-	l.broker.ServeWebUI(webPort)
+	if err := l.broker.ServeWebUI(webPort); err != nil {
+		// The broker is already running and the office PID file is on
+		// disk (above). On a port-bind failure we exit, so tear both
+		// down — leaving the broker accepting requests on a "wuphf has
+		// failed to start" path is worse than a clean exit, and a stale
+		// PID file would block the next launch attempt's writeOfficePID.
+		l.broker.Stop()
+		_ = clearOfficePIDFile()
+		return fmt.Errorf("web UI failed to start: %w\n\nIs port %d already in use? Try: wuphf --web-port %d", err, webPort, webPort+1)
+	}
 
 	// Default path: headless `claude --print` per turn. Anthropic re-sanctioned
 	// this invocation (OpenClaw policy note, 2026-04), so it runs on the user's
@@ -4817,18 +4817,133 @@ func (l *Launcher) LaunchWeb(webPort int) error {
 		go l.primeVisibleAgents()
 	}
 
-	webURL := fmt.Sprintf("http://localhost:%d", webPort)
+	// Use 127.0.0.1 in both the printed URL and the readiness probe so the
+	// dial target matches what the browser will request. localhost can
+	// resolve to ::1 first on IPv6-preferring setups, while ServeWebUI binds
+	// only to 127.0.0.1 — that mismatch reproduces ERR_CONNECTION_REFUSED
+	// even after the probe succeeds.
+	webAddr := fmt.Sprintf("127.0.0.1:%d", webPort)
+	webURL := fmt.Sprintf("http://%s", webAddr)
 	fmt.Printf("\n  Web UI:  %s\n", webURL)
 	fmt.Printf("  Broker:  %s\n", l.BrokerBaseURL())
 	fmt.Printf("  Press Ctrl+C to stop.\n\n")
 
 	if !l.noOpen {
-		openBrowser(webURL)
+		// Wait for the web server to actually accept connections before
+		// triggering the browser. Otherwise users on cold starts (and PH
+		// visitors clicking through `npx wuphf` for the first time) hit
+		// ERR_CONNECTION_REFUSED before the listener is ready. 5s is a
+		// generous ceiling: in practice the listener is up in milliseconds.
+		// Skip the open if the listener never came up — opening a dead URL
+		// just produces a confusing error page in the user's first second.
+		if waitForWebReady(webAddr, 5*time.Second) {
+			openBrowser(webURL)
+		} else {
+			fmt.Printf("  Web UI did not become reachable at %s within 5s; skipping browser auto-open.\n", webURL)
+		}
 	}
 
 	// Broker, web UI, and background goroutines own the process lifetime;
 	// Ctrl+C (default SIGINT) is the only exit path.
 	select {}
+}
+
+// maybeOfferNex offers to wire up Nex for memory/context when nex-cli
+// isn't already installed. Prints an explicit "skipping Nex" line when
+// stdin isn't a TTY (npx, pipes, CI, containers) — fmt.Scanln returns
+// empty in that case, which the prompt would have silently accepted as
+// "yes" and tried to install. Users can rerun `nex setup` later or set
+// WUPHF_NO_NEX=1 to suppress the offer.
+func (l *Launcher) maybeOfferNex() {
+	if config.ResolveNoNex() || nex.IsInstalled() {
+		return
+	}
+	if !stdinIsTTY() {
+		fmt.Println()
+		fmt.Println("  Skipping Nex (no interactive terminal). Run `nex setup` later to add memory.")
+		fmt.Println()
+		return
+	}
+	fmt.Println()
+	fmt.Print("  Connect Nex for memory and context? [Y/n] ")
+	var answer string
+	if _, err := fmt.Scanln(&answer); err != nil {
+		// fmt.Scanln has two distinct error shapes here:
+		//   - io.EOF: stdin was closed underneath us. By the time we
+		//     reach this branch stdinIsTTY() already returned true, so
+		//     EOF means the user explicitly hit Ctrl-D rather than
+		//     answering. Treat as a deliberate skip.
+		//   - any other error (most commonly "unexpected newline" from
+		//     a bare Enter): the prompt label says [Y/n], so capital-Y
+		//     is the visible default. Accept Enter as "yes" so the UX
+		//     contract matches the prompt.
+		if errors.Is(err, io.EOF) {
+			fmt.Println("  Skipping Nex. Agents will work without organizational memory.")
+			fmt.Println()
+			return
+		}
+		answer = ""
+	}
+	answer = strings.TrimSpace(strings.ToLower(answer))
+	if answer != "" && answer != "y" && answer != "yes" {
+		fmt.Println("  Skipping Nex. Agents will work without organizational memory.")
+		fmt.Println()
+		return
+	}
+	fmt.Println()
+	fmt.Println("  Nex CLI not found. Installing...")
+	if _, installErr := setup.InstallLatestCLI(context.Background()); installErr != nil {
+		fmt.Printf("  Could not install: %v\n", installErr)
+		fmt.Println("  Continuing without Nex.")
+	}
+	if nexBin := nex.BinaryPath(); nexBin != "" {
+		cmd := exec.CommandContext(context.Background(), nexBin, "setup")
+		cmd.Stdin = os.Stdin
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			fmt.Printf("  Setup did not complete: %v\n", err)
+			fmt.Println("  Continuing without Nex.")
+		} else {
+			fmt.Println("  Nex connected.")
+		}
+	}
+	fmt.Println()
+}
+
+// waitForWebReady polls addr until a TCP dial succeeds or the timeout
+// elapses. It exists because ServeWebUI returns immediately and the
+// listener can take a few hundred ms to come up — opening the browser
+// before then produces ERR_CONNECTION_REFUSED in the user's first
+// second of the product. Returns true when the listener accepted a
+// connection within the timeout, false otherwise. LaunchWeb gates
+// openBrowser on this return value, so a never-up listener results in
+// a printed "skipping browser auto-open" line rather than a dead URL.
+func waitForWebReady(addr string, timeout time.Duration) bool {
+	dialer := &net.Dialer{Timeout: 250 * time.Millisecond}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	for {
+		conn, err := dialer.DialContext(ctx, "tcp", addr)
+		if err == nil {
+			_ = conn.Close()
+			return true
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+}
+
+// stdinIsTTY reports whether os.Stdin is connected to a real terminal.
+// Uses golang.org/x/term so /dev/null (a char device but not a TTY) is
+// classified correctly — the original os.ModeCharDevice check let
+// `npx ... </dev/null` fall back to the auto-yes install path, which
+// is the cold-start bug this whole helper exists to prevent.
+func stdinIsTTY() bool {
+	return term.IsTerminal(int(os.Stdin.Fd()))
 }
 
 func openBrowser(url string) {

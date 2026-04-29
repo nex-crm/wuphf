@@ -172,6 +172,12 @@ func requireTeamActionApproval(ctx context.Context, slug, channel string, args T
 			if err := brokerGetJSON(ctx, path, &result); err != nil {
 				return fmt.Errorf("poll approval: %w", err)
 			}
+			switch strings.ToLower(strings.TrimSpace(result.Status)) {
+			case "canceled", "cancelled":
+				return fmt.Errorf("human approval canceled for %s on %s", actionID, platform)
+			case "not_found":
+				return fmt.Errorf("human approval request not found for %s on %s", actionID, platform)
+			}
 			if result.Answered == nil {
 				continue
 			}

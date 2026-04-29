@@ -13,6 +13,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -22,13 +23,18 @@ import (
 func main() {
 	token := os.Getenv("OPENCLAW_TOKEN")
 	if token == "" {
-		data, err := os.ReadFile("/tmp/oc-token.txt")
+		fallback := filepath.Join(os.TempDir(), "oc-token.txt")
+		data, err := os.ReadFile(fallback)
 		if err != nil {
-			die("OPENCLAW_TOKEN unset and /tmp/oc-token.txt unreadable: %v", err)
+			die("OPENCLAW_TOKEN unset and %s unreadable: %v", fallback, err)
 		}
 		token = strings.TrimSpace(string(data))
 	}
-	identity, err := openclaw.LoadOrCreateDeviceIdentity(os.ExpandEnv("$HOME/.wuphf/openclaw/identity.json"))
+	home, err := os.UserHomeDir()
+	if err != nil {
+		die("user home dir: %v", err)
+	}
+	identity, err := openclaw.LoadOrCreateDeviceIdentity(filepath.Join(home, ".wuphf", "openclaw", "identity.json"))
 	if err != nil {
 		die("identity: %v", err)
 	}

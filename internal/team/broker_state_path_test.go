@@ -103,7 +103,7 @@ func TestNewBroker_SkipStateLoadGateRespected(t *testing.T) {
 	// tests opt back into disk load via reloadedBroker(t, b). Track A
 	// must preserve this contract: a test-mode constructor must NOT
 	// auto-load.
-	statePath := leakedBrokerStatePath(t)
+	statePath := filepath.Join(t.TempDir(), "broker-state.json")
 
 	// Seed disk with a distinctive message. If the gate is broken,
 	// NewBrokerAt() will pick it up.
@@ -224,7 +224,7 @@ func TestBrokerStop_ClosesStopChannelAndPreservesState(t *testing.T) {
 	// Starts the broker via StartOnPort(0) so the HTTP listener
 	// goroutine is actually present — without that, Stop is a near-noop
 	// and the test wouldn't exercise the drain path at all.
-	statePath := leakedBrokerStatePath(t)
+	statePath := filepath.Join(t.TempDir(), "broker-state.json")
 	b := NewBrokerAt(statePath)
 	if err := b.StartOnPort(0); err != nil {
 		t.Fatalf("StartOnPort: %v", err)

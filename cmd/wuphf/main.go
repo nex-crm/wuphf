@@ -7,6 +7,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -311,15 +312,21 @@ func main() {
 
 	// Non-interactive: piped stdin
 	if isPiped() {
-		scanner := bufio.NewScanner(os.Stdin)
-		for scanner.Scan() {
-			dispatch(scanner.Text(), *apiKeyFlag, *format)
-		}
-		if err := scanner.Err(); err != nil {
+		handled, err := consumePipedStdin(os.Stdin, func(line string) {
+			dispatch(line, *apiKeyFlag, *format)
+		})
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "error reading stdin: %v\n", err)
 			os.Exit(1)
 		}
-		return
+		if handled {
+			return
+		}
+		// Fall through: stdin was a non-TTY pipe but had no data. This is the
+		// common case on Windows when the binary is spawned via SSH,
+		// scheduled tasks, or PowerShell Start-Process — the inherited stdin
+		// is a closed pipe rather than a console handle. Without falling
+		// through, the binary would exit silently on first launch.
 	}
 
 	// No startup upgrade notice here: the npm shim (npm/bin/wuphf.js, PR
@@ -616,6 +623,45 @@ func isPiped() bool {
 		return false
 	}
 	return info.Mode()&os.ModeCharDevice == 0
+}
+
+// consumePipedStdin reads newline-delimited commands from r and invokes
+// dispatch on each. It returns handled=true only if at least one line was
+// dispatched — the empty-pipe case (handled=false) is the signal that the
+// caller should fall through to the normal interactive launch.
+//
+// This split exists because os.Stdin reads as a non-character-device on
+// Windows whenever the binary is spawned via SSH, scheduled tasks, or
+// PowerShell Start-Process — even when no data is piped in. Treating those
+// closed/empty pipes as "non-interactive command stream" causes wuphf to
+// exit silently on every fresh launch, which is the Windows-launch bug PR
+// #380 fixes.
+func consumePipedStdin(r io.Reader, dispatch func(line string)) (handled bool, err error) {
+	scanner := bufio.NewScanner(r)
+	// Allow lines up to 1 MiB. Default bufio.Scanner caps at 64 KiB and
+	// returns bufio.ErrTooLong on overflow, which would surface to the
+	// user as a confusing "error reading stdin" rather than a dispatched
+	// command. Long inline blueprints / pasted JSON are realistic at the
+	// CLI seam.
+	const maxLineBytes = 1 << 20
+	scanner.Buffer(make([]byte, 0, 64*1024), maxLineBytes)
+	for scanner.Scan() {
+		// Skip blank/whitespace-only lines without setting handled. Otherwise
+		// `printf "\n" | wuphf` would dispatch the empty string (which fails
+		// with a useless error) AND mark the input as handled — preventing
+		// the fall-through to the web UI launch. A pipe that contains only
+		// whitespace is morally equivalent to an empty pipe.
+		line := scanner.Text()
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		handled = true
+		dispatch(line)
+	}
+	if scanErr := scanner.Err(); scanErr != nil {
+		return handled, scanErr
+	}
+	return handled, nil
 }
 
 // shredSummary is the human-readable blast-radius blurb printed during the

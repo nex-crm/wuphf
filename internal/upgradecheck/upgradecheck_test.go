@@ -274,3 +274,61 @@ func TestCheckOmitsCompareURLWhenVersionsEqual(t *testing.T) {
 		t.Errorf("CompareURL should be empty when up-to-date, got %q", res.CompareURL)
 	}
 }
+
+func TestNotable(t *testing.T) {
+	cases := []struct {
+		name    string
+		entries []CommitEntry
+		want    bool
+	}{
+		{"feat is notable", []CommitEntry{{Type: "feat"}}, true},
+		{"fix is notable", []CommitEntry{{Type: "fix"}}, true},
+		{"perf is notable", []CommitEntry{{Type: "perf"}}, true},
+		// Breaking marker wins regardless of underlying type — locks the
+		// rule that the marker is the canonical signal, not the label.
+		{"breaking refactor is notable", []CommitEntry{{Type: "refactor", Breaking: true}}, true},
+		{"docs alone is not notable", []CommitEntry{{Type: "docs"}}, false},
+		{"chore alone is not notable", []CommitEntry{{Type: "chore"}}, false},
+		{"refactor without breaking is not notable", []CommitEntry{{Type: "refactor"}}, false},
+		// Mixed list with at least one notable wins — the gate is OR, not AND.
+		{"docs + fix is notable", []CommitEntry{{Type: "docs"}, {Type: "fix"}}, true},
+		// Empty list: the documented contract is `false`. Callers must
+		// failure-open separately when distinguishing "no data" from
+		// "data says nothing notable."
+		{"empty is not notable (caller failure-opens separately)", nil, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := Notable(c.entries); got != c.want {
+				t.Errorf("Notable(%+v)=%v want %v", c.entries, got, c.want)
+			}
+		})
+	}
+}
+
+func TestIsMajorBump(t *testing.T) {
+	cases := []struct {
+		from, to string
+		want     bool
+	}{
+		{"0.83.7", "0.83.10", false},
+		{"0.83.7", "0.84.0", false}, // minor bump in 0.x is NOT major
+		{"0.83.7", "1.0.0", true},   // 0.x → 1.0 IS major
+		{"1.5.10", "2.0.0", true},   // 1.x → 2.x IS major
+		{"2.0.0", "1.5.10", false},  // downgrade isn't a bump
+		{"1.0.0-rc.1", "1.0.0", false},
+		// Pre-release stripped before comparison.
+		{"0.83.7-rc.1", "1.0.0", true},
+		// Build metadata stripped before comparison.
+		{"1.0.0", "1.0.1+build.5", false},
+	}
+	for _, c := range cases {
+		if got := IsMajorBump(c.from, c.to); got != c.want {
+			t.Errorf("IsMajorBump(%q,%q)=%v want %v", c.from, c.to, got, c.want)
+		}
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }

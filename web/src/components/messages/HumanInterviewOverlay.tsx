@@ -1,12 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
-import { type AgentRequest, answerRequest } from "../../api/client";
+import {
+  type AgentRequest,
+  answerRequest,
+  cancelRequest,
+} from "../../api/client";
 import { useRequests } from "../../hooks/useRequests";
 import { showNotice } from "../ui/Toast";
 
 /**
- * Global blocking-interview overlay. Always renders the first blocking pending
+ * Global blocking-request overlay. Always renders the first blocking pending
  * request from the broker, regardless of which app/channel the user is viewing.
  * Non-blocking requests get a one-time toast and stay in the Requests panel.
  */
@@ -34,14 +38,32 @@ export function HumanInterviewOverlay() {
       submitting={submitting}
       onAnswer={async (choiceId) => {
         if (submitting) return;
+        const requestId = blockingPending.id;
         setSubmitting(true);
         try {
-          await answerRequest(blockingPending.id, choiceId);
+          await answerRequest(requestId, choiceId);
           await queryClient.invalidateQueries({ queryKey: ["requests"] });
           await queryClient.invalidateQueries({ queryKey: ["requests-badge"] });
         } catch (err: unknown) {
           const message =
             err instanceof Error ? err.message : "Failed to answer";
+          showNotice(message, "error");
+        } finally {
+          setSubmitting(false);
+        }
+      }}
+      onDismiss={async () => {
+        if (submitting) return;
+        const requestId = blockingPending.id;
+        setSubmitting(true);
+        try {
+          await cancelRequest(requestId);
+          await queryClient.invalidateQueries({ queryKey: ["requests"] });
+          await queryClient.invalidateQueries({ queryKey: ["requests-badge"] });
+          showNotice("Request canceled.", "info");
+        } catch (err: unknown) {
+          const message =
+            err instanceof Error ? err.message : "Failed to cancel request";
           showNotice(message, "error");
         } finally {
           setSubmitting(false);
@@ -55,12 +77,14 @@ interface BlockingInterviewProps {
   request: AgentRequest;
   submitting: boolean;
   onAnswer: (choiceId: string) => void;
+  onDismiss: () => void;
 }
 
 function BlockingInterview({
   request,
   submitting,
   onAnswer,
+  onDismiss,
 }: BlockingInterviewProps) {
   const options = request.options ?? request.choices ?? [];
 
@@ -82,7 +106,7 @@ function BlockingInterview({
         <h2 id="interview-title" className="interview-title">
           {request.title && request.title !== "Request"
             ? request.title
-            : "Human input required"}
+            : "Human decision requested"}
         </h2>
         <p className="interview-question">{request.question}</p>
         {request.context && (
@@ -102,10 +126,26 @@ function BlockingInterview({
                 {opt.label}
               </button>
             ))}
+            <button
+              type="button"
+              className="btn btn-sm btn-ghost"
+              onClick={onDismiss}
+              disabled={submitting}
+            >
+              Dismiss
+            </button>
           </div>
         ) : (
           <div className="interview-empty">
             No choices provided. Open the Requests app to respond.
+            <button
+              type="button"
+              className="btn btn-sm btn-ghost"
+              onClick={onDismiss}
+              disabled={submitting}
+            >
+              Dismiss
+            </button>
           </div>
         )}
       </div>
