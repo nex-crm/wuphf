@@ -9,15 +9,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-type renderedLine struct {
-	Text        string
-	ThreadID    string
-	TaskID      string
-	RequestID   string
-	AgentSlug   string
-	PromptValue string
-}
-
 func buildOfficeMessageLines(messages []brokerMessage, expanded map[string]bool, contentWidth int, threadsDefaultExpand bool, unreadAnchorID string, unreadCount int) []renderedLine {
 	mutedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(slackMuted))
 

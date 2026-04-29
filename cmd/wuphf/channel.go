@@ -151,35 +151,6 @@ type channelHealthMsg struct {
 	OneOnOneAgent string
 }
 
-type brokerReaction struct {
-	Emoji string `json:"emoji"`
-	From  string `json:"from"`
-}
-
-type brokerMessageUsage struct {
-	InputTokens         int `json:"input_tokens,omitempty"`
-	OutputTokens        int `json:"output_tokens,omitempty"`
-	CacheReadTokens     int `json:"cache_read_tokens,omitempty"`
-	CacheCreationTokens int `json:"cache_creation_tokens,omitempty"`
-	TotalTokens         int `json:"total_tokens,omitempty"`
-}
-
-type brokerMessage struct {
-	ID          string              `json:"id"`
-	From        string              `json:"from"`
-	Kind        string              `json:"kind,omitempty"`
-	Source      string              `json:"source,omitempty"`
-	SourceLabel string              `json:"source_label,omitempty"`
-	EventID     string              `json:"event_id,omitempty"`
-	Title       string              `json:"title,omitempty"`
-	Content     string              `json:"content"`
-	Tagged      []string            `json:"tagged"`
-	ReplyTo     string              `json:"reply_to"`
-	Timestamp   string              `json:"timestamp"`
-	Usage       *brokerMessageUsage `json:"usage,omitempty"`
-	Reactions   []brokerReaction    `json:"reactions,omitempty"`
-}
-
 type channelMember struct {
 	Slug         string `json:"slug"`
 	Name         string `json:"name,omitempty"`
@@ -3436,15 +3407,6 @@ func appendWrapped(lines []string, width int, text string) []string {
 	}
 	wrapped := ansi.Wrap(text, width, "")
 	return append(lines, strings.Split(wrapped, "\n")...)
-}
-
-type threadedMessage struct {
-	Message            brokerMessage
-	Depth              int
-	ParentLabel        string
-	Collapsed          bool
-	HiddenReplies      int
-	ThreadParticipants []string
 }
 
 type sidebarItem struct {
