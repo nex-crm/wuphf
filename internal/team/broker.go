@@ -10941,6 +10941,13 @@ func (b *Broker) handleSkills(w http.ResponseWriter, r *http.Request) {
 
 func (b *Broker) handleSkillsSubpath(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/skills/")
+	// PR 7 Lane C: /skills/list returns scope-aware skill metadata for cross-role
+	// discovery. Routed BEFORE the /invoke and CRUD branches so the literal
+	// "list" segment is not interpreted as a skill name.
+	if path == "list" {
+		b.handleListSkills(w, r)
+		return
+	}
 	if strings.HasSuffix(path, "/invoke") {
 		b.handleInvokeSkill(w, r)
 		return
@@ -11058,10 +11065,22 @@ func (b *Broker) handleGetSkills(w http.ResponseWriter, r *http.Request) {
 	// has a stable opt-in surface.
 	includeArchived := truthyQuery(r.URL.Query().Get("include_archived"))
 	_ = truthyQuery(r.URL.Query().Get("include_disabled"))
+	// PR 7 Lane C (F6 fold-in): when ?for_agent=<slug> is present, scope the
+	// response to skills that agent can see. Closes the cross-scope leak where
+	// any authenticated agent could read every skill body via GET /skills.
+	// Absent param preserves the existing humans/UI-facing unfiltered view.
+	forAgent := strings.TrimSpace(r.URL.Query().Get("for_agent"))
 
 	b.mu.Lock()
-	result := make([]teamSkill, 0, len(b.skills))
-	for _, sk := range b.skills {
+	var pool []teamSkill
+	if forAgent != "" {
+		pool = b.listSkillsForAgentLocked(forAgent, listSkillsOpts{activeOnly: false})
+	} else {
+		pool = make([]teamSkill, len(b.skills))
+		copy(pool, b.skills)
+	}
+	result := make([]teamSkill, 0, len(pool))
+	for _, sk := range pool {
 		if sk.Status == "archived" && !includeArchived {
 			continue
 		}
@@ -11082,6 +11101,86 @@ func truthyQuery(v string) bool {
 	switch strings.ToLower(strings.TrimSpace(v)) {
 	case "1", "true", "yes":
 		return true
+	}
+	return false
+}
+
+// handleListSkills serves GET /skills/list?scope=own|all&for_agent={slug}&tag={x}.
+//
+// scope=own (default): returns only skills the agent can see (visibility predicate),
+// active-only, with full payload including Content. Token discipline is left to
+// the agent's catalog injection (see Lane A step 5).
+//
+// scope=all: returns every active skill with Content stripped. The metadata
+// (name, description, trigger, owner_agents, tags) lets agents discover what
+// other roles can do without leaking the playbook bodies.
+//
+// tag filter is applied on top of either scope when present.
+func (b *Broker) handleListSkills(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	scope := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("scope")))
+	if scope == "" {
+		scope = "own"
+	}
+	if scope != "own" && scope != "all" {
+		http.Error(w, "scope must be own or all", http.StatusBadRequest)
+		return
+	}
+	tag := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("tag")))
+	forAgent := strings.TrimSpace(r.URL.Query().Get("for_agent"))
+
+	b.mu.Lock()
+	var collected []teamSkill
+	switch scope {
+	case "own":
+		if forAgent == "" {
+			b.mu.Unlock()
+			http.Error(w, "for_agent is required for scope=own", http.StatusBadRequest)
+			return
+		}
+		collected = b.listSkillsForAgentLocked(forAgent, listSkillsOpts{activeOnly: true})
+	case "all":
+		for i := range b.skills {
+			if b.skills[i].Status != "active" {
+				continue
+			}
+			collected = append(collected, b.skills[i])
+		}
+		sort.Slice(collected, func(i, j int) bool {
+			return collected[i].Name < collected[j].Name
+		})
+	}
+	b.mu.Unlock()
+
+	result := make([]teamSkill, 0, len(collected))
+	for _, sk := range collected {
+		if tag != "" && !skillHasTag(sk, tag) {
+			continue
+		}
+		if scope == "all" {
+			// Privacy + token discipline: cross-role discovery returns metadata
+			// only — no playbook body.
+			sk.Content = ""
+		}
+		result = append(result, sk)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"skills": result,
+		"scope":  scope,
+	})
+}
+
+// skillHasTag reports whether sk carries the given (already lowercased+trimmed) tag.
+func skillHasTag(sk teamSkill, tag string) bool {
+	for _, t := range sk.Tags {
+		if strings.ToLower(strings.TrimSpace(t)) == tag {
+			return true
+		}
 	}
 	return false
 }
@@ -11721,6 +11820,7 @@ func (b *Broker) SeedDefaultSkills(specs []agent.PackSkillSpec) {
 			CreatedBy:   "system",
 			Tags:        append([]string(nil), spec.Tags...),
 			Trigger:     strings.TrimSpace(spec.Trigger),
+			OwnerAgents: append([]string(nil), spec.OwnerAgents...),
 			Status:      "active",
 			CreatedAt:   now,
 			UpdatedAt:   now,

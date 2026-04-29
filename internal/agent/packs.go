@@ -8,6 +8,9 @@ type PackSkillSpec struct {
 	Tags        []string
 	Trigger     string
 	Content     string
+	// OwnerAgents lists agent slugs that may see and invoke this skill. Empty
+	// means the skill is lead-routable (PR 7 Lane A back-compat default).
+	OwnerAgents []string
 }
 
 // PackDefinition defines a team of agents that work together.
