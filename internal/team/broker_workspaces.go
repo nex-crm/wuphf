@@ -33,6 +33,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -276,6 +277,13 @@ func decodeWorkspaceJSON(w http.ResponseWriter, r *http.Request, v any) error {
 	if err := dec.Decode(v); err != nil {
 		writeWorkspaceError(w, http.StatusBadRequest, fmt.Sprintf("decode body: %v", err))
 		return err
+	}
+	// Reject trailing JSON tokens after the first object so a misbehaving
+	// or malicious client cannot smuggle a second payload past strict
+	// DisallowUnknownFields parsing on the first one.
+	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		writeWorkspaceError(w, http.StatusBadRequest, "decode body: unexpected trailing data")
+		return errors.New("workspaces: trailing JSON after object")
 	}
 	return nil
 }

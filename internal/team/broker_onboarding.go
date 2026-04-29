@@ -115,7 +115,7 @@ func (b *Broker) materializeBlueprintWiki(bp operations.Blueprint) {
 	}
 	home := config.RuntimeHomeDir()
 	if home == "" {
-		log.Printf("onboarding: resolve runtime home for wiki materialization: WUPHF_RUNTIME_HOME unset and os.UserHomeDir failed")
+		log.Printf("onboarding: resolve runtime home for wiki materialization: WUPHF_RUNTIME_HOME unset (config.RuntimeHomeDir returned empty)")
 		return
 	}
 	wikiRoot := filepath.Join(home, ".wuphf", "wiki")

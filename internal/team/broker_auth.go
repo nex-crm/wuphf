@@ -34,6 +34,7 @@ package team
 //     handleEvents calls requestHasBrokerAuth at the top.
 
 import (
+	"io"
 	"net/http"
 )
 
@@ -52,6 +53,10 @@ func (b *Broker) withAuth(next http.HandlerFunc) http.HandlerFunc {
 			next(w, r)
 			return
 		}
-		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		// Honor the documented JSON contract: http.Error sets text/plain
+		// and appends a newline, which breaks clients that parse the body.
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = io.WriteString(w, `{"error":"unauthorized"}`)
 	}
 }
