@@ -20,6 +20,7 @@ import {
   type Task,
   undoRejectSkill,
 } from "../../api/client";
+import { useTeamLeadSlug } from "../../hooks/useConfig";
 import { useOfficeMembers } from "../../hooks/useMembers";
 import { useAppStore } from "../../stores/app";
 import { LightningIcon } from "../ui/LightningIcon";
@@ -163,15 +164,26 @@ export function SkillsApp() {
     refetchInterval: 30_000,
   });
   const { data: officeMembers } = useOfficeMembers();
+  const leadSlug = useTeamLeadSlug(officeMembers);
   const [compileState, setCompileState] = useState<CompileState>("idle");
   const [ownerFilter, setOwnerFilter] = useState<OwnerFilterValue>("all");
   const [previewSkill, setPreviewSkill] = useState<Skill | null>(null);
 
-  // Hydrate filter from localStorage on mount (avoids SSR mismatch issues
-  // because the SkillsApp only renders client-side anyway).
+  // Hydrate filter from localStorage on mount, validated against the
+  // current office. If the saved slug no longer maps to a member (agent
+  // removed), drop back to "all" instead of rendering an empty list with
+  // no error message. We wait for officeMembers to resolve so a still-
+  // loading roster doesn't wipe a valid filter.
   useEffect(() => {
-    setOwnerFilter(readOwnerFilter());
-  }, []);
+    if (officeMembers === undefined) return;
+    const stored = readOwnerFilter();
+    const valid =
+      stored === "all" ||
+      stored === "lead-routable" ||
+      officeMembers.some((m) => m.slug === stored);
+    setOwnerFilter(valid ? stored : "all");
+    if (!valid) writeOwnerFilter("all");
+  }, [officeMembers]);
 
   const handleOwnerFilterChange = useCallback((value: OwnerFilterValue) => {
     setOwnerFilter(value);
@@ -352,6 +364,7 @@ export function SkillsApp() {
                   key={skill.name}
                   skill={skill}
                   onPreview={handlePreview}
+                  leadSlug={leadSlug}
                 />
               ))}
             </SkillSection>
@@ -377,14 +390,23 @@ export function SkillsApp() {
                     key={skill.name}
                     skill={skill}
                     onPreview={handlePreview}
+                    leadSlug={leadSlug}
                   />
                 ))
               )}
             </SkillSection>
 
-            <DisabledSection skills={disabled} onPreview={handlePreview} />
+            <DisabledSection
+              skills={disabled}
+              onPreview={handlePreview}
+              leadSlug={leadSlug}
+            />
 
-            <ArchivedSection skills={archived} onPreview={handlePreview} />
+            <ArchivedSection
+              skills={archived}
+              onPreview={handlePreview}
+              leadSlug={leadSlug}
+            />
           </div>
         </>
       )}
@@ -507,9 +529,11 @@ function SkillSection({
 function DisabledSection({
   skills,
   onPreview,
+  leadSlug,
 }: {
   skills: Skill[];
   onPreview: (s: Skill) => void;
+  leadSlug: string;
 }) {
   // Per design review: disabled is recoverable, so default expanded.
   const [expanded, setExpanded] = useState(true);
@@ -562,7 +586,12 @@ function DisabledSection({
           </div>
         ) : (
           skills.map((skill) => (
-            <SkillCard key={skill.name} skill={skill} onPreview={onPreview} />
+            <SkillCard
+              key={skill.name}
+              skill={skill}
+              onPreview={onPreview}
+              leadSlug={leadSlug}
+            />
           ))
         )
       ) : null}
@@ -573,9 +602,11 @@ function DisabledSection({
 function ArchivedSection({
   skills,
   onPreview,
+  leadSlug,
 }: {
   skills: Skill[];
   onPreview: (s: Skill) => void;
+  leadSlug: string;
 }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -627,7 +658,12 @@ function ArchivedSection({
           </div>
         ) : (
           skills.map((skill) => (
-            <SkillCard key={skill.name} skill={skill} onPreview={onPreview} />
+            <SkillCard
+              key={skill.name}
+              skill={skill}
+              onPreview={onPreview}
+              leadSlug={leadSlug}
+            />
           ))
         )
       ) : null}
@@ -856,7 +892,7 @@ function SkillActions({
           () => {
             restoreArchivedSkill(skillName)
               .then(() => {
-                showNotice("Restored", "success");
+                showNotice("Restored — skill is now pending review", "success");
                 queryClient.invalidateQueries({ queryKey: ["skills"] });
               })
               .catch((e: Error) => {
@@ -1116,9 +1152,11 @@ function SkillRunChip({
 
 function SuggestChangesExpander({
   skillName,
+  leadSlug,
   onClose,
 }: {
   skillName: string;
+  leadSlug: string;
   onClose: () => void;
 }) {
   const [text, setText] = useState("");
@@ -1132,21 +1170,24 @@ function SuggestChangesExpander({
       [
         {
           title: `Revise skill: ${skillName}`,
-          assignee: "ceo",
+          assignee: leadSlug,
           details: trimmed,
         },
       ],
       { createdBy: "human" },
     )
       .then(() => {
-        showNotice("Sent to @ceo. They'll revise and re-propose.", "success");
+        showNotice(
+          `Sent to @${leadSlug}. They'll revise and re-propose.`,
+          "success",
+        );
         onClose();
       })
       .catch((e: Error) => {
         showNotice(`Couldn't send: ${e.message}`, "error");
       })
       .finally(() => setSubmitting(false));
-  }, [text, skillName, onClose]);
+  }, [text, skillName, leadSlug, onClose]);
 
   return (
     <div
@@ -1213,7 +1254,7 @@ function SuggestChangesExpander({
           onClick={handleSubmit}
           disabled={submitting || !text.trim()}
         >
-          {submitting ? "Sending..." : "Send to @ceo for revision"}
+          {submitting ? "Sending..." : `Send to @${leadSlug} for revision`}
         </button>
       </div>
     </div>
@@ -1331,9 +1372,11 @@ function ProposedPreviewBody({ skill }: { skill: Skill }) {
 function SkillCard({
   skill,
   onPreview,
+  leadSlug,
 }: {
   skill: Skill;
   onPreview: (s: Skill) => void;
+  leadSlug: string;
 }) {
   const status = deriveStatus(skill);
   const sourceArticles = skill.metadata?.wuphf?.source_articles ?? [];
@@ -1445,6 +1488,7 @@ function SkillCard({
       {isProposed && suggestOpen ? (
         <SuggestChangesExpander
           skillName={skill.name}
+          leadSlug={leadSlug}
           onClose={() => setSuggestOpen(false)}
         />
       ) : null}

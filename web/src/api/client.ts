@@ -353,6 +353,20 @@ export interface InterviewOption {
   text_hint?: string;
 }
 
+export interface SkillSimilarRef {
+  slug: string;
+  score: number;
+  method?: string;
+}
+
+export interface InterviewMetadata {
+  /** Set on enhance_skill_proposal interviews (PR 7 task #15). */
+  enhances_slug?: string;
+  /** Set on ambiguous-band skill_proposal interviews (PR 7 task #15). */
+  similar_to_existing?: SkillSimilarRef;
+  [key: string]: unknown;
+}
+
 export interface AgentRequest {
   id: string;
   from: string;
@@ -371,6 +385,12 @@ export interface AgentRequest {
   recommended_id?: string;
   created_at?: string;
   updated_at?: string;
+  /** Echoes the entity slug the request is about (e.g. a skill name). */
+  reply_to?: string;
+  /** Structured metadata. Used by the enhance-existing UX (PR 7 task #14). */
+  metadata?: InterviewMetadata;
+  /** Full candidate spec on enhance_skill_proposal interviews. */
+  enhance_candidate?: Skill;
 }
 
 export function getRequests(channel: string) {
@@ -640,6 +660,8 @@ export interface Skill {
   updated_at?: string;
   /** Per-agent scoping (PR 7). Empty/missing = lead-routable shared skill. */
   owner_agents?: OwnerAgents;
+  /** Set on ambiguous-band proposals by the similarity gate (PR 7 task #15). */
+  similar_to_existing?: SkillSimilarRef;
   metadata?: SkillMetadata;
 }
 
@@ -807,6 +829,31 @@ export function undoRejectSkill(
   return post<UndoRejectSkillResponse>(`/skills/reject/undo`, {
     undo_token: token,
   });
+}
+
+export interface PatchSkillRequest {
+  old_string: string;
+  new_string: string;
+  replace_all?: boolean;
+}
+
+export interface PatchSkillResponse {
+  skill?: Skill;
+}
+
+/**
+ * Edit-tool style find/replace patch against a skill's body.
+ * Used by the enhance-existing flow (PR 7 task #14) to fold a candidate
+ * proposal into an existing skill without losing provenance.
+ */
+export function patchSkill(
+  name: string,
+  body: PatchSkillRequest,
+): Promise<PatchSkillResponse> {
+  return post<PatchSkillResponse>(
+    `/skills/${encodeURIComponent(name)}/patch`,
+    body,
+  );
 }
 
 // ── Usage ──
