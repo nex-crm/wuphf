@@ -13,6 +13,9 @@
 // In-flight work remains on disk so branches and local changes inside task
 // worktrees survive, and credentials/preferences stay available for the next
 // launch.
+//
+// For managing the set of workspaces (list, create, switch, pause, resume),
+// see internal/workspaces (plural).
 package workspace
 
 import (
@@ -72,6 +75,44 @@ func Shred() (Result, error) {
 	res.removeIfPresent(filepath.Join(home, "wiki"))
 	res.removeIfPresent(filepath.Join(home, "wiki.bak"))
 	res.removeIfPresent(filepath.Join(home, "calendar.json"))
+	return res, nil
+}
+
+// ResetAt performs a narrow reset on an explicit workspace tree rooted at
+// wuphfHome (the .wuphf subdirectory of a workspace's runtime home).
+// The parameterless ClearRuntime delegates here using config.RuntimeHomeDir().
+func ResetAt(wuphfHome string) (Result, error) {
+	var res Result
+	statePath := filepath.Join(wuphfHome, "team", "broker-state.json")
+	snapshotPath := statePath + ".last-good"
+	if p := strings.TrimSpace(os.Getenv("WUPHF_BROKER_STATE_PATH")); p != "" {
+		statePath = p
+		snapshotPath = p + ".last-good"
+	}
+	res.removeIfPresent(statePath)
+	res.removeIfPresent(snapshotPath)
+	return res, nil
+}
+
+// ShredAt performs a full workspace wipe on an explicit workspace tree rooted
+// at wuphfHome (the .wuphf subdirectory of a workspace's runtime home).
+// The parameterless Shred delegates here using config.RuntimeHomeDir().
+func ShredAt(wuphfHome string) (Result, error) {
+	res, err := ResetAt(wuphfHome)
+	if err != nil {
+		return res, err
+	}
+	res.removeIfPresent(filepath.Join(wuphfHome, "onboarded.json"))
+	res.removeIfPresent(filepath.Join(wuphfHome, "company.json"))
+	res.removeIfPresent(filepath.Join(wuphfHome, "office"))
+	res.removeIfPresent(filepath.Join(wuphfHome, "workflows"))
+	res.removeIfPresent(filepath.Join(wuphfHome, "logs"))
+	res.removeIfPresent(filepath.Join(wuphfHome, "sessions"))
+	res.removeIfPresent(filepath.Join(wuphfHome, "providers"))
+	res.removeIfPresent(filepath.Join(wuphfHome, "codex-headless"))
+	res.removeIfPresent(filepath.Join(wuphfHome, "wiki"))
+	res.removeIfPresent(filepath.Join(wuphfHome, "wiki.bak"))
+	res.removeIfPresent(filepath.Join(wuphfHome, "calendar.json"))
 	return res, nil
 }
 
