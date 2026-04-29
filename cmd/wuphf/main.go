@@ -53,7 +53,7 @@ func printSubcommandHelp(sub string) {
 		fmt.Fprintln(os.Stderr, "  wuphf init")
 		fmt.Fprintln(os.Stderr, "")
 		fmt.Fprintln(os.Stderr, "This writes to ~/.wuphf/config.json. Safe to re-run.")
-	case "shred", "kill":
+	case "shred":
 		fmt.Fprintln(os.Stderr, "wuphf shred — burn the whole workspace down")
 		fmt.Fprintln(os.Stderr, "")
 		fmt.Fprintln(os.Stderr, "Stops the running session, clears broker state, and deletes the team")
@@ -66,7 +66,6 @@ func printSubcommandHelp(sub string) {
 		fmt.Fprintln(os.Stderr, "Usage:")
 		fmt.Fprintln(os.Stderr, "  wuphf shred           Prompts before wiping")
 		fmt.Fprintln(os.Stderr, "  wuphf shred -y        Skip the confirmation")
-		fmt.Fprintln(os.Stderr, "  wuphf kill            (alias)")
 	case "import":
 		fmt.Fprintln(os.Stderr, "wuphf import — pull state from another tool")
 		fmt.Fprintln(os.Stderr, "")
@@ -269,12 +268,12 @@ func main() {
 				os.Exit(1)
 			}
 			return
-		case "shred", "kill":
+		case "shred":
 			if !confirmDestructive(args[1:], "shred", shredSummary) {
 				fmt.Println("Cancelled. The office lives to serve another day.")
 				return
 			}
-			if err := killRunningSession(selectedBlueprint); err != nil {
+			if err := stopRunningSession(selectedBlueprint); err != nil {
 				fmt.Fprintf(os.Stderr, "error: %v\n", err)
 				os.Exit(1)
 			}
@@ -514,7 +513,6 @@ func runTeam(args []string, packSlug string, unsafe bool, oneOnOne bool, opusCEO
 	fmt.Println("  Ctrl+B z         zoom a pane full-screen")
 	fmt.Println("  Ctrl+B d         detach (keeps running)")
 	fmt.Println("  /quit            exit everything")
-	fmt.Printf("  %s shred        stop from outside\n", appName)
 	fmt.Println()
 
 	if err := l.Attach(); err != nil {
@@ -697,11 +695,11 @@ func confirmDestructive(rest []string, verb, summary string) bool {
 	return strings.TrimSpace(line) == verb
 }
 
-// killRunningSession stops any running tmux or web-mode WUPHF session.
+// stopRunningSession stops any running tmux or web-mode WUPHF session.
 // Safe to call when nothing is running — Kill is a no-op in that case.
 // Tolerates NewLauncher failing (e.g. invalid blueprint) because we don't
 // want a broken config to block the user from cleaning up.
-func killRunningSession(blueprint string) error {
+func stopRunningSession(blueprint string) error {
 	l, err := team.NewLauncher(blueprint)
 	if err != nil {
 		// Launcher couldn't hydrate — likely no running session anyway.

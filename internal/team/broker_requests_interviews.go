@@ -613,6 +613,7 @@ func (b *Broker) handlePostRequestAnswer(w http.ResponseWriter, r *http.Request)
 				}
 			}
 		}
+		b.maybeCreateApprovedSelfHealTaskLocked(b.requests[i])
 
 		b.counter++
 		msg := channelMessage{

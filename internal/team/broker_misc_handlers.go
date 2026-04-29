@@ -209,6 +209,7 @@ func (b *Broker) handleResetDM(w http.ResponseWriter, r *http.Request) {
 		filtered = append(filtered, msg)
 	}
 	b.messages = filtered
+	b.pruneAgentIssuesByChannelAndAgentLocked(channel, agent)
 	if err := b.saveLocked(); err != nil {
 		// Roll forward: snapshot save failed, but the in-memory mutation
 		// already applied. Surface the error rather than reporting success.

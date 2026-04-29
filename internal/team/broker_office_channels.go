@@ -1231,6 +1231,7 @@ func (b *Broker) handleChannels(w http.ResponseWriter, r *http.Request) {
 			}
 			b.requests = filteredRequests
 			b.pendingInterview = firstBlockingRequest(b.requests)
+			b.pruneAgentIssuesByChannelLocked(slug)
 			if err := b.saveLocked(); err != nil {
 				http.Error(w, "failed to persist broker state", http.StatusInternalServerError)
 				return

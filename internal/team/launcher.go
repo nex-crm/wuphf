@@ -219,8 +219,10 @@ func NewLauncher(packSlug string) (*Launcher, error) {
 		return nil, fmt.Errorf("unknown pack or operation blueprint: %s", packSlug)
 	}
 
-	// --pack is authoritative: when explicitly provided, reset company.json to
-	// match the pack so the broker doesn't silently load stale members.
+	// --pack is authoritative for company.json, but it must not implicitly
+	// delete broker runtime state. A restart after a crash may pass the same
+	// pack/blueprint again; wiping broker-state.json there makes the office
+	// appear to reset even though the user never requested a destructive wipe.
 	if explicitPack {
 		var err error
 		switch {
@@ -232,8 +234,6 @@ func NewLauncher(packSlug string) (*Launcher, error) {
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "warning: save blueprint/pack config: %v\n", err)
 		}
-		// Drop stale broker state so the new pack starts clean.
-		_ = os.Remove(defaultBrokerStatePath())
 	}
 	sessionMode, oneOnOne := loadRunningSessionMode()
 
