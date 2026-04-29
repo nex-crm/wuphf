@@ -11745,6 +11745,7 @@ func (b *Broker) SeedDefaultSkills(specs []agent.PackSkillSpec) {
 			Status:      "active",
 			CreatedAt:   now,
 			UpdatedAt:   now,
+			OwnerAgents: append([]string(nil), spec.OwnerAgents...),
 		}
 		b.skills = append(b.skills, sk)
 	}

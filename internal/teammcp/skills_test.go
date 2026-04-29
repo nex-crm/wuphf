@@ -44,14 +44,17 @@ func TestHandleTeamSkillRunBumpsUsageAndLogsInvocation(t *testing.T) {
 	t.Setenv("WUPHF_TEAM_BROKER_URL", "http://"+b.Addr())
 	t.Setenv("WUPHF_BROKER_TOKEN", b.Token())
 
-	// Seed a skill the agent can invoke.
+	// Seed a skill the agent can invoke. OwnerAgents=["eng"] so the visibility
+	// gate (PR 7 Lane A) lets the eng caller through; without it the empty-
+	// OwnerAgents fallback only allows the office lead.
 	b.SeedDefaultSkills([]agent.PackSkillSpec{{
-		Name:        "investigate",
-		Title:       "Investigate a Bug",
-		Description: "Systematic debugging with root cause analysis.",
-		Trigger:     "When a bug or error is reported",
-		Tags:        []string{"engineering", "debugging"},
-		Content:     "Step 1: Reproduce. Step 2: Isolate. Step 3: Root cause. Step 4: Fix.",
+		Name:         "investigate",
+		Title:        "Investigate a Bug",
+		Description:  "Systematic debugging with root cause analysis.",
+		Trigger:      "When a bug or error is reported",
+		Tags:         []string{"engineering", "debugging"},
+		Content:      "Step 1: Reproduce. Step 2: Isolate. Step 3: Root cause. Step 4: Fix.",
+		OwnerAgents:  []string{"eng"},
 	}})
 
 	// Agent calls team_skill_run.

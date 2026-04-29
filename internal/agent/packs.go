@@ -8,6 +8,10 @@ type PackSkillSpec struct {
 	Tags        []string
 	Trigger     string
 	Content     string
+	// OwnerAgents scopes the skill to the listed agent slugs (PR 7 Lane A).
+	// Empty/nil = lead-routable (legacy default; only the office lead can
+	// invoke).
+	OwnerAgents []string
 }
 
 // PackDefinition defines a team of agents that work together.
