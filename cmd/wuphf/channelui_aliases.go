@@ -48,6 +48,7 @@ type (
 	workspaceReadinessLevel = channelui.WorkspaceReadinessLevel
 	workspaceReadinessState = channelui.WorkspaceReadinessState
 	workspaceUIState        = channelui.WorkspaceUIState
+	memberRuntimeSummary    = channelui.MemberRuntimeSummary
 )
 
 // Function aliases keep the lowercase names callable from package main
@@ -294,6 +295,13 @@ var (
 	buildRecoveryLines        = channelui.BuildRecoveryLines
 	buildRecoveryActionLines  = channelui.BuildRecoveryActionLines
 	buildRecoverySurgeryLines = channelui.BuildRecoverySurgeryLines
+
+	deriveMemberRuntimeSummary = channelui.DeriveMemberRuntimeSummary
+	buildLiveWorkLines         = channelui.BuildLiveWorkLines
+	buildWaitStateLines        = channelui.BuildWaitStateLines
+	buildDirectExecutionLines  = channelui.BuildDirectExecutionLines
+	renderRuntimeStrip         = channelui.RenderRuntimeStrip
+	oneOnOneRuntimeLine        = channelui.OneOnOneRuntimeLine
 )
 
 // Workspace readiness level consts.

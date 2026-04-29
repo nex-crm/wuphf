@@ -251,6 +251,16 @@
 //     terminal statuses), CountIsolatedRuntimeTasks (counts tasks
 //     in a "local_worktree" execution mode or with a non-empty
 //     WorktreePath / WorktreeBranch).
+//   - runtime_builders.go  — runtime-strip + live-work builders:
+//     MemberRuntimeSummary struct, DeriveMemberRuntimeSummary
+//     (per-member activity classification + meta detail + thought
+//     bubble), BuildLiveWorkLines (the "Live work now" + "Recent
+//     external actions" + wait-state cluster),
+//     BuildWaitStateLines (Blocked work or "Nothing is moving"),
+//     BuildDirectExecutionLines (1:1 execution timeline),
+//     RenderRuntimeStrip (two-line summary pill row + detail
+//     line shown above the office feed), OneOnOneRuntimeLine
+//     (compact descriptor for the channel header in 1:1 mode).
 //   - recovery_builders.go — recovery-view section builders:
 //     BuildRecoveryLines (the full recovery view — while-away
 //     card, runtime status card, readiness card, next-step +
