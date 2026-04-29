@@ -224,78 +224,28 @@ func NewLauncher(packSlug string) (*Launcher, error) {
 	}, nil
 }
 
-const (
-	agentNotifyCooldown      = 1 * time.Second
-	agentNotifyCooldownAgent = 2 * time.Second
-)
+// agentNotifyCooldown* moved to notifier_delivery.go (PLAN.md §C19)
+// next to deliverMessageNotification, the only caller.
 
-// updateSchedulerJob and watchdogSchedulerLoop are thin Launcher wrappers
-// around the watchdogScheduler type (PLAN.md §C4). Wrappers kept so the
-// existing callers in headless_codex.go and Launch() don't need a rename
-// sweep in this PR; cleanup is a follow-up.
-
-// processDue* / recordWatchdogLedger thin Launcher wrappers were
-// deleted by the C15 sweep — call sites use l.scheduler().processOnce()
-// / .processTaskJob(...) / .processRequestJob(...) /
-// .processWorkflowJob(...) / .recordLedger(...) directly. PLAN.md §6
-// "no compatibility shims".
-
-// humanInterview.TitleOrDefault moved to broker.go (PLAN.md §C16)
-// next to the type definition.
-
-// agentPaneSlugs / officeAgentOrder / visibleOfficeMembers /
-// overflowOfficeMembers / paneEligibleOfficeMembers /
-// resolvePaneTargetForSlug / agentPaneTargets / agentNotificationTargets /
-// shouldUseHeadlessDispatchForSlug / shouldUseHeadlessDispatchForTarget /
-// skipPaneForSlug — historically thin Launcher wrappers around the
-// targeter (PLAN.md §C2). PLAN.md §6 sweep deleted them; in-package
-// call sites now use l.targeter().<Method>() directly.
-
-// usesPaneRuntime / requiresClaudeSessionReset /
-// memberEffectiveProviderKind / memberUsesHeadlessOneShotRuntime
-// live on officeTargeter (PLAN.md §C2). PLAN.md §6 sweep deleted the
-// transitional wrappers; in-package callers use
-// l.targeter().<Method>() directly. UsesTmuxRuntime stays because
-// cmd/wuphf/main.go imports it.
-
-// killStaleBroker, the office-PID-file helpers, ResetBrokerState,
-// ClearPersistedBrokerState, resetBrokerState, brokerBaseURL, and
-// Launcher.BrokerBaseURL live in broker_lifecycle.go per PLAN.md §C8.
-
-// containsSlug moved to notifier_targets.go (PLAN.md §C16) — its only
-// in-package caller is the notification routing decision tree.
-
-// Notification-context methods on Launcher are thin wrappers; the bodies
-// live in notification_context.go on notificationContextBuilder. Wrappers
-// kept (rather than removed) so the ~50 in-package callers don't need a
-// rename sweep in this PR — that's a follow-up.
-
-// shouldUseHeadlessDispatch is a thin wrapper around the targeter; see
-// officeTargeter.ShouldUseHeadless for semantics.
-// shouldUseHeadlessDispatch wrapper deleted by PLAN.md §6 sweep —
-// callers use l.targeter().ShouldUseHeadless() directly.
-
-// paneDispatchMinGap and paneDispatchCoalesceWindow live in
-// pane_dispatch.go (PLAN.md §C15) — they're dispatcher knobs, not
-// Launcher knobs.
-
-// queuePaneNotification + runPaneDispatchQueue thin wrappers deleted by
-// the C16 sweep — call sites use l.paneDispatch().Enqueue(...) and
-// l.paneDispatch().runQueue(...) directly. PLAN.md §6 "no compatibility
-// shims".
+// Where to find what (post-decomposition):
 //
-// sendNotificationToPane (the actual /clear + send-keys body) and the
-// launcherSendNotificationToPane* seam live in pane_dispatch.go
-// (PLAN.md §C15/§C16) so the dispatcher's send path is co-located.
-
-// capturePaneTargetContent / capturePaneContent / listTeamPanes /
-// channelPaneStatus delegate to paneLifecycle (PLAN.md §C5b). Thin
-// pane-method thin wrappers (capturePaneTargetContent, capturePaneContent,
-// listTeamPanes, clearAgentPanes, clearOverflowAgentWindows,
-// channelPaneStatus, captureDeadChannelPane, spawnVisibleAgents,
-// spawnOverflowAgents, detectDeadPanesAfterSpawn, trySpawnWebAgentPanes,
-// reportPaneFallback) deleted by the C15 sweep — call sites use
-// l.panes().<Method>() directly. PLAN.md §6 "no compatibility shims".
+//   Construction        : NewLauncher (this file)
+//   Sub-type wiring     : launcher_wiring.go
+//   Setters / capability accessors : launcher_options.go
+//   Preflight check     : launcher_preflight.go
+//   Lifecycle           : launcher_lifecycle.go (Launch/Attach/Kill/Reset/Reconfigure)
+//   Long-running loops  : launcher_loops.go
+//   Manifest / blueprint resolution : launcher_manifest.go
+//   Membership snapshot : launcher_membership.go
+//   Web mode entry      : launcher_web.go
+//   Prompt + claude command : prompts.go (and claudeCommand below)
+//   MCP server config   : mcp_config.go
+//   Pane lifecycle      : pane_lifecycle.go + tmux_runner.go
+//   Pane dispatch       : pane_dispatch.go
+//   Notification routing: notifier_loops.go / notifier_targets.go / notifier_delivery.go
+//   Headless dispatch   : headless_codex.go (entry) / headless_codex_queue.go / headless_codex_runner.go / headless_codex_recovery.go
+//   Broker lifecycle    : broker_lifecycle.go
+//   Escalation posts    : escalation.go
 
 // claudeCommand builds the shell command string for spawning a claude session.
 // Sets WUPHF_AGENT_SLUG so the MCP knows which agent this session serves.

@@ -14,6 +14,16 @@ import (
 	"time"
 )
 
+// Notification debounce cooldowns. Prevents agent-to-agent feedback
+// loops where one agent's response triggers another agent which
+// triggers a third, ad infinitum. Human/CEO messages get the shorter
+// cooldown so the user-facing pace stays snappy; agent-originated
+// messages get the longer cooldown to break loops at their source.
+const (
+	agentNotifyCooldown      = 1 * time.Second
+	agentNotifyCooldownAgent = 2 * time.Second
+)
+
 func (l *Launcher) deliverMessageNotification(msg channelMessage) {
 	// demo_seed messages exist purely to make #general feel staffed on first
 	// paint; they must never wake an agent or burn an LLM call. Filter at
