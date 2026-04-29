@@ -245,6 +245,9 @@ var (
 	appendUniqueMessages = channelui.AppendUniqueMessages
 	popupActionIndex     = channelui.PopupActionIndex
 	formatUsd            = channelui.FormatUSD
+
+	inferMood           = channelui.InferMood
+	renderInterviewCard = channelui.RenderInterviewCard
 )
 
 // Channel-confirm action typed-string consts.

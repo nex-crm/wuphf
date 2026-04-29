@@ -184,6 +184,17 @@
 //     added count), PopupActionIndex (parses the numeric token of a
 //     "popup_action_N" value), FormatUSD (two-decimal "$X.YZ"
 //     dollar-cost formatter).
+//   - mood.go              — InferMood classifies a message body
+//     into one of "energized" / "skeptical" / "concerned" / "tense" /
+//     "relieved" / "focused" (or "" on empty / unmatched). Tints
+//     the meta-line on office messages.
+//   - interview_card.go    — RenderInterviewCard renders the
+//     amber rounded interview-request card: header pill row
+//     (kind label + optional phase pill + blocking/private
+//     accents), title, question body, optional context, optional
+//     timing summary, the option list with the selected option
+//     arrowed, the "Something else" custom row, and the
+//     accept/type hint footer.
 //
 // Subsequent extraction PRs will land the workspace / recovery / cache
 // cluster, the sidebar / splash, the broker integrations, and finally
