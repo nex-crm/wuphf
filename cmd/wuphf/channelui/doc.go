@@ -223,6 +223,17 @@
 //     iteration order; "" when no agents tracked or width < 40).
 //     SidebarShortcutLabel returns the "1".."9" digit shortcut
 //     for sidebar item indexes 0..8 (or "" when out of range).
+//   - doctor.go            — DoctorSeverity typed-string + the four
+//     consts, DoctorCheck / DoctorReport types with the counts /
+//     StatusLine / Counts methods, DoctorSeverityForCapability
+//     (capability descriptor → severity), and the rendering
+//     helpers RenderDoctorCard (rounded slate card with status
+//     pill + per-check rows), RenderDoctorLabel (severity pill),
+//     RenderDoctorLifecycle (lifecycle pill). Imports
+//     internal/team for the CapabilityRegistry / Lifecycle types.
+//     The team-coupled tea.Cmd entry runDoctorChecks /
+//     inspectDoctor and the test mock-point detectRuntimeCapabilitiesFn
+//     stay in package main.
 //
 // Subsequent extraction PRs will land the workspace / recovery / cache
 // cluster, the sidebar / splash, the broker integrations, and finally

@@ -145,7 +145,7 @@ func deriveWorkspaceReadiness(state workspaceUIState, doctor *channelDoctorRepor
 		}
 	}
 	if doctor != nil {
-		ok, warn, fail := doctor.counts()
+		ok, warn, fail := doctor.Counts()
 		switch {
 		case fail > 0:
 			return workspaceReadinessState{

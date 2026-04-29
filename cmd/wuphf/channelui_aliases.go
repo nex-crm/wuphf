@@ -42,6 +42,9 @@ type (
 	channelConfirm         = channelui.ChannelConfirm
 	composerPopupOption    = channelui.ComposerPopupOption
 	officeSidebarApp       = channelui.OfficeSidebarApp
+	doctorSeverity         = channelui.DoctorSeverity
+	doctorCheck            = channelui.DoctorCheck
+	channelDoctorReport    = channelui.DoctorReport
 )
 
 // Function aliases keep the lowercase names callable from package main
@@ -264,6 +267,19 @@ var (
 
 	renderUsageStrip     = channelui.RenderUsageStrip
 	sidebarShortcutLabel = channelui.SidebarShortcutLabel
+
+	doctorSeverityForCapability = channelui.DoctorSeverityForCapability
+	renderDoctorCard            = channelui.RenderDoctorCard
+	renderDoctorLabel           = channelui.RenderDoctorLabel
+	renderDoctorLifecycle       = channelui.RenderDoctorLifecycle
+)
+
+// Doctor severity consts mirror channelui's exported names.
+const (
+	doctorOK   = channelui.DoctorOK
+	doctorWarn = channelui.DoctorWarn
+	doctorFail = channelui.DoctorFail
+	doctorInfo = channelui.DoctorInfo
 )
 
 // Channel-confirm action typed-string consts.
