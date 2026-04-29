@@ -33,8 +33,8 @@ func runWorkspaceCreate(args []string) {
 		fmt.Fprintln(os.Stderr, "")
 		fmt.Fprintln(os.Stderr, "Usage:")
 		fmt.Fprintln(os.Stderr, "  wuphf workspace create <name>")
-		fmt.Fprintln(os.Stderr, "  wuphf workspace create demo-launch --blueprint=founding-team")
-		fmt.Fprintln(os.Stderr, "  wuphf workspace create scratchpad --from-scratch")
+		fmt.Fprintln(os.Stderr, "  wuphf workspace create --blueprint=founding-team demo-launch")
+		fmt.Fprintln(os.Stderr, "  wuphf workspace create --from-scratch scratchpad")
 		fmt.Fprintln(os.Stderr, "")
 		fmt.Fprintln(os.Stderr, "Slug rules: lowercase letters, digits, hyphens. Must start with a letter. Max 31 chars.")
 	}
