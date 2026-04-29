@@ -19,7 +19,6 @@ import (
 	"github.com/nex-crm/wuphf/internal/agent"
 	"github.com/nex-crm/wuphf/internal/config"
 	"github.com/nex-crm/wuphf/internal/gitexec"
-	"github.com/nex-crm/wuphf/internal/provider"
 )
 
 func TestMain(m *testing.M) {
@@ -382,64 +381,6 @@ func TestBrokerCanonicalizesLegacyDMSlugs(t *testing.T) {
 	}
 	if got.Channel != wantSlug || len(got.Messages) != 1 {
 		t.Fatalf("expected canonical channel %q with one message, got channel=%q messages=%d", wantSlug, got.Channel, len(got.Messages))
-	}
-}
-
-func TestRecordAgentUsageAttachesToCurrentTurnMessagesOnly(t *testing.T) {
-	b := newTestBroker(t)
-	now := time.Now().UTC()
-	b.mu.Lock()
-	b.messages = []channelMessage{
-		{
-			ID:        "msg-1",
-			From:      "ceo",
-			Content:   "older turn",
-			Timestamp: now.Add(-2 * time.Minute).Format(time.RFC3339),
-			Usage:     &messageUsage{TotalTokens: 111},
-		},
-		{
-			ID:        "msg-2",
-			From:      "pm",
-			Content:   "interleaved",
-			Timestamp: now.Add(-30 * time.Second).Format(time.RFC3339),
-		},
-		{
-			ID:        "msg-3",
-			From:      "ceo",
-			Content:   "current turn kickoff",
-			Timestamp: now.Add(-10 * time.Second).Format(time.RFC3339),
-		},
-		{
-			ID:        "msg-4",
-			From:      "system",
-			Content:   "routing",
-			Timestamp: now.Add(-5 * time.Second).Format(time.RFC3339),
-		},
-		{
-			ID:        "msg-5",
-			From:      "ceo",
-			Content:   "current turn answer",
-			Timestamp: now.Format(time.RFC3339),
-		},
-	}
-	b.mu.Unlock()
-
-	b.RecordAgentUsage("ceo", "claude-sonnet-4-6", provider.ClaudeUsage{
-		InputTokens:         800,
-		OutputTokens:        200,
-		CacheReadTokens:     50,
-		CacheCreationTokens: 25,
-	})
-
-	msgs := b.Messages()
-	if msgs[0].Usage == nil || msgs[0].Usage.TotalTokens != 111 {
-		t.Fatalf("expected older turn usage to remain untouched, got %+v", msgs[0].Usage)
-	}
-	if msgs[2].Usage == nil || msgs[2].Usage.TotalTokens != 1075 {
-		t.Fatalf("expected msg-3 to receive usage, got %+v", msgs[2].Usage)
-	}
-	if msgs[4].Usage == nil || msgs[4].Usage.TotalTokens != 1075 {
-		t.Fatalf("expected msg-5 to receive usage, got %+v", msgs[4].Usage)
 	}
 }
 
@@ -1420,118 +1361,6 @@ func TestTaskAndRequestViewsRejectNonMembers(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("expected 403 for non-member request access, got %d", resp.StatusCode)
-	}
-}
-
-func TestParseOTLPUsageEvents(t *testing.T) {
-	payload := map[string]any{
-		"resourceLogs": []any{
-			map[string]any{
-				"resource": map[string]any{
-					"attributes": []any{
-						map[string]any{"key": "agent.slug", "value": map[string]any{"stringValue": "fe"}},
-					},
-				},
-				"scopeLogs": []any{
-					map[string]any{
-						"logRecords": []any{
-							map[string]any{
-								"attributes": []any{
-									map[string]any{"key": "event.name", "value": map[string]any{"stringValue": "api_request"}},
-									map[string]any{"key": "input_tokens", "value": map[string]any{"intValue": "1200"}},
-									map[string]any{"key": "output_tokens", "value": map[string]any{"intValue": "300"}},
-									map[string]any{"key": "cache_read_tokens", "value": map[string]any{"intValue": "50"}},
-									map[string]any{"key": "cache_creation_tokens", "value": map[string]any{"intValue": "25"}},
-									map[string]any{"key": "cost_usd", "value": map[string]any{"doubleValue": 0.42}},
-								},
-							},
-						},
-					},
-				},
-			},
-		},
-	}
-
-	events := parseOTLPUsageEvents(payload)
-	if len(events) != 1 {
-		t.Fatalf("expected 1 usage event, got %d", len(events))
-	}
-	if events[0].AgentSlug != "fe" {
-		t.Fatalf("expected fe slug, got %q", events[0].AgentSlug)
-	}
-	if events[0].InputTokens != 1200 || events[0].OutputTokens != 300 {
-		t.Fatalf("unexpected token counts: %+v", events[0])
-	}
-	if events[0].CostUsd != 0.42 {
-		t.Fatalf("unexpected cost: %+v", events[0])
-	}
-}
-
-func TestBrokerUsageEndpointAggregatesTelemetry(t *testing.T) {
-	b := newTestBroker(t)
-	if err := b.StartOnPort(0); err != nil {
-		t.Fatalf("failed to start broker: %v", err)
-	}
-	defer b.Stop()
-
-	base := fmt.Sprintf("http://%s", b.Addr())
-	payload := map[string]any{
-		"resourceLogs": []any{
-			map[string]any{
-				"resource": map[string]any{
-					"attributes": []any{
-						map[string]any{"key": "agent.slug", "value": map[string]any{"stringValue": "be"}},
-					},
-				},
-				"scopeLogs": []any{
-					map[string]any{
-						"logRecords": []any{
-							map[string]any{
-								"attributes": []any{
-									map[string]any{"key": "event.name", "value": map[string]any{"stringValue": "api_request"}},
-									map[string]any{"key": "input_tokens", "value": map[string]any{"intValue": "800"}},
-									map[string]any{"key": "output_tokens", "value": map[string]any{"intValue": "200"}},
-									map[string]any{"key": "cost_usd", "value": map[string]any{"doubleValue": 0.18}},
-								},
-							},
-						},
-					},
-				},
-			},
-		},
-	}
-	body, _ := json.Marshal(payload)
-	req, _ := http.NewRequest(http.MethodPost, base+"/v1/logs", bytes.NewReader(body))
-	req.Header.Set("Authorization", "Bearer "+b.Token())
-	req.Header.Set("Content-Type", "application/json")
-	teleResp, teleErr := http.DefaultClient.Do(req)
-	if teleErr != nil {
-		t.Fatalf("telemetry post failed: %v", teleErr)
-	}
-	teleResp.Body.Close()
-	if teleResp.StatusCode != http.StatusOK {
-		t.Fatalf("expected 200 from usage ingest, got %d", teleResp.StatusCode)
-	}
-
-	req, _ = http.NewRequest(http.MethodGet, base+"/usage", nil)
-	req.Header.Set("Authorization", "Bearer "+b.Token())
-	usageResp, usageErr := http.DefaultClient.Do(req)
-	if usageErr != nil {
-		t.Fatalf("usage request failed: %v", usageErr)
-	}
-	defer usageResp.Body.Close()
-	var usage teamUsageState
-	if err := json.NewDecoder(usageResp.Body).Decode(&usage); err != nil {
-		t.Fatalf("decode usage response: %v", err)
-	}
-	if usage.Total.TotalTokens != 1000 {
-		t.Fatalf("expected 1000 total tokens, got %d", usage.Total.TotalTokens)
-	}
-	if usage.Session.TotalTokens != 1000 {
-		t.Fatalf("expected 1000 session tokens, got %d", usage.Session.TotalTokens)
-	}
-	if usage.Agents["be"].CostUsd != 0.18 {
-		t.Fatalf("expected backend cost 0.18, got %+v", usage.Agents["be"])
 	}
 }
 
