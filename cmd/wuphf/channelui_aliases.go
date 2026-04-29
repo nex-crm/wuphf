@@ -78,6 +78,14 @@ var (
 	buildNeedsYouLinesForRequest = channelui.BuildNeedsYouLinesForRequest
 	selectNeedsYouRequest        = channelui.SelectNeedsYouRequest
 	isOpenInterviewStatus        = channelui.IsOpenInterviewStatus
+
+	reverseSignals        = channelui.ReverseSignals
+	reverseDecisions      = channelui.ReverseDecisions
+	activeWatchdogs       = channelui.ActiveWatchdogs
+	reverseWatchdogs      = channelui.ReverseWatchdogs
+	recentExternalActions = channelui.RecentExternalActions
+	agentSlugForDisplay   = channelui.AgentSlugForDisplay
+	displaySignalKind     = channelui.DisplaySignalKind
 )
 
 // Office-app constant aliases. Typed-string consts copy across packages

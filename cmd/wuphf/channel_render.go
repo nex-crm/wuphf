@@ -303,17 +303,6 @@ func buildPolicyLines(signals []channelSignal, decisions []channelDecision, aler
 	return lines
 }
 
-func displaySignalKind(signal channelSignal) string {
-	kind := strings.TrimSpace(signal.Kind)
-	if kind == "" {
-		return ""
-	}
-	if strings.EqualFold(kind, "directive") {
-		return "Human directive"
-	}
-	return kind
-}
-
 func buildTaskLines(tasks []channelTask, contentWidth int) []renderedLine {
 	muted := lipgloss.NewStyle().Foreground(lipgloss.Color(slackMuted))
 	if len(tasks) == 0 {
@@ -1144,70 +1133,12 @@ func schedulerTargetThreadID(job channelSchedulerJob, tasks []channelTask, reque
 	return ""
 }
 
-func agentSlugForDisplay(name string, members []channelMember) string {
-	for _, member := range members {
-		if member.Name == name || displayName(member.Slug) == name {
-			return member.Slug
-		}
-	}
-	return ""
-}
-
-func reverseSignals(signals []channelSignal, limit int) []channelSignal {
-	if limit > 0 && len(signals) > limit {
-		signals = signals[len(signals)-limit:]
-	}
-	out := append([]channelSignal(nil), signals...)
-	reverseAny(out)
-	return out
-}
-
-func reverseDecisions(decisions []channelDecision, limit int) []channelDecision {
-	if limit > 0 && len(decisions) > limit {
-		decisions = decisions[len(decisions)-limit:]
-	}
-	out := append([]channelDecision(nil), decisions...)
-	reverseAny(out)
-	return out
-}
-
-func activeWatchdogs(alerts []channelWatchdog) []channelWatchdog {
-	var out []channelWatchdog
-	for _, alert := range alerts {
-		if strings.TrimSpace(alert.Status) == "resolved" {
-			continue
-		}
-		out = append(out, alert)
-	}
-	return out
-}
-
-func reverseWatchdogs(alerts []channelWatchdog, limit int) []channelWatchdog {
-	if limit > 0 && len(alerts) > limit {
-		alerts = alerts[len(alerts)-limit:]
-	}
-	out := append([]channelWatchdog(nil), alerts...)
-	reverseAny(out)
-	return out
-}
-
-func recentExternalActions(actions []channelAction, limit int) []channelAction {
-	var filtered []channelAction
-	for _, action := range actions {
-		kind := strings.TrimSpace(action.Kind)
-		if !strings.HasPrefix(kind, "external_") && kind != "bridge_channel" {
-			continue
-		}
-		filtered = append(filtered, action)
-	}
-	if limit > 0 && len(filtered) > limit {
-		filtered = filtered[len(filtered)-limit:]
-	}
-	out := append([]channelAction(nil), filtered...)
-	reverseAny(out)
-	return out
-}
-
+// reverseAny reverses items in place. Kept in package main (instead of
+// hoisted alongside the typed Reverse* helpers in channelui) because Go
+// does not allow taking the value of a generic function — so it cannot
+// be aliased through channelui_aliases.go. channel_artifacts.go and
+// channel_activity.go still call it directly. Removed in PR 9 once
+// those callers move into channelui.
 func reverseAny[T any](items []T) {
 	for i, j := 0, len(items)-1; i < j; i, j = i+1, j-1 {
 		items[i], items[j] = items[j], items[i]

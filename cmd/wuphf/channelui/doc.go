@@ -40,6 +40,10 @@
 //     BuildReplyChildren, ParseTimestamp, FormatShortTime).
 //   - needs_you.go         — "needs your attention" strip renderer plus
 //     SelectNeedsYouRequest / IsOpenInterviewStatus selectors.
+//   - list_helpers.go      — pure list filters and reversals
+//     (ReverseSignals, ReverseDecisions, ActiveWatchdogs,
+//     ReverseWatchdogs, RecentExternalActions), plus
+//     AgentSlugForDisplay and DisplaySignalKind.
 //
 // Subsequent extraction PRs will land the workspace / recovery / cache
 // cluster, the sidebar / splash, the broker integrations, and finally
