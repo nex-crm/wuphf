@@ -136,6 +136,13 @@
 //     popup with selection accent + footer hint),
 //     TypingAgentsFromMembers (display names of recently-active
 //     teammates).
+//   - activity.go          — runtime-strip / live-work leaf helpers:
+//     TaskStatusLine, SummarizeLiveActivity / SanitizeActivityLine /
+//     SummarizeSentence (pane-snapshot summarization),
+//     BlockedWorkTasks, RecentDirectExecutionActions,
+//     ExecutionMetaLine, LatestRelevantAction, DescribeActionState,
+//     ActivityPill (member-activity → colored pill),
+//     ActionStatePill (action kind → colored pill).
 //
 // Subsequent extraction PRs will land the workspace / recovery / cache
 // cluster, the sidebar / splash, the broker integrations, and finally

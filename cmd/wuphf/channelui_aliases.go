@@ -198,6 +198,18 @@ var (
 	renderConfirmCard              = channelui.RenderConfirmCard
 	renderComposerPopup            = channelui.RenderComposerPopup
 	typingAgentsFromMembers        = channelui.TypingAgentsFromMembers
+
+	taskStatusLine               = channelui.TaskStatusLine
+	summarizeLiveActivity        = channelui.SummarizeLiveActivity
+	sanitizeActivityLine         = channelui.SanitizeActivityLine
+	summarizeSentence            = channelui.SummarizeSentence
+	blockedWorkTasks             = channelui.BlockedWorkTasks
+	recentDirectExecutionActions = channelui.RecentDirectExecutionActions
+	executionMetaLine            = channelui.ExecutionMetaLine
+	latestRelevantAction         = channelui.LatestRelevantAction
+	describeActionState          = channelui.DescribeActionState
+	activityPill                 = channelui.ActivityPill
+	actionStatePill              = channelui.ActionStatePill
 )
 
 // Channel-confirm action typed-string consts.
