@@ -17,6 +17,7 @@ type (
 	renderedLine       = channelui.RenderedLine
 	threadedMessage    = channelui.ThreadedMessage
 	layoutDimensions   = channelui.LayoutDimensions
+	officeMemberInfo   = channelui.OfficeMember
 )
 
 // Function aliases keep the lowercase names callable from package main
@@ -50,4 +51,7 @@ var (
 	humanMessageLabel      = channelui.HumanMessageLabel
 	renderUnreadDivider    = channelui.RenderUnreadDivider
 	displayDecisionSummary = channelui.DisplayDecisionSummary
+
+	displayName = channelui.DisplayName
+	roleLabel   = channelui.RoleLabel
 )

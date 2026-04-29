@@ -160,15 +160,6 @@ type channelMember struct {
 	LiveActivity string `json:"liveActivity,omitempty"`
 }
 
-type officeMemberInfo struct {
-	Slug        string   `json:"slug"`
-	Name        string   `json:"name"`
-	Role        string   `json:"role"`
-	Expertise   []string `json:"expertise,omitempty"`
-	Personality string   `json:"personality,omitempty"`
-	BuiltIn     bool     `json:"built_in,omitempty"`
-}
-
 type channelInfo struct {
 	Slug        string   `json:"slug"`
 	Name        string   `json:"name"`
@@ -422,7 +413,6 @@ type channelMemberDraft struct {
 var mentionPattern = regexp.MustCompile(`@([A-Za-z0-9_-]+)`)
 
 var brokerTokenPath = brokeraddr.DefaultTokenFile
-var officeDirectory = map[string]officeMemberInfo{}
 
 var channelSlashCommands = []tui.SlashCommand{
 	{Name: "init", Description: "Run setup (Ryan Howard skipped this step — don't be Ryan)", Category: "setup"},
@@ -683,10 +673,7 @@ func newChannelModelWithApp(threadsCollapsed bool, initialApp officeApp) channel
 		}
 		initialApp = officeAppMessages
 	}
-	officeDirectory = make(map[string]officeMemberInfo, len(officeMembers))
-	for _, member := range officeMembers {
-		officeDirectory[member.Slug] = member
-	}
+	channelui.SetOfficeDirectory(officeMembers)
 	m := channelModel{
 		expandedThreads:      make(map[string]bool),
 		threadsDefaultExpand: !threadsCollapsed,
@@ -1764,10 +1751,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			msg.members = officeMembersFallback(m.officeMembers)
 		}
 		m.officeMembers = msg.members
-		officeDirectory = make(map[string]officeMemberInfo, len(msg.members))
-		for _, member := range msg.members {
-			officeDirectory[member.Slug] = member
-		}
+		channelui.SetOfficeDirectory(msg.members)
 		m.updateOverlaysForCurrentInput()
 
 	case channelChannelsMsg:
@@ -3993,66 +3977,6 @@ func channelInfosFallback(existing []channelInfo) []channelInfo {
 		manifest = company.DefaultManifest()
 	}
 	return channelInfosFromManifest(manifest)
-}
-
-func displayName(slug string) string {
-	if member, ok := officeDirectory[slug]; ok && member.Name != "" {
-		return member.Name
-	}
-	switch slug {
-	case "ceo":
-		return "CEO"
-	case "pm":
-		return "Product Manager"
-	case "fe":
-		return "Frontend Engineer"
-	case "be":
-		return "Backend Engineer"
-	case "ai":
-		return "AI Engineer"
-	case "designer":
-		return "Designer"
-	case "cmo":
-		return "CMO"
-	case "cro":
-		return "CRO"
-	case "nex":
-		return "Nex"
-	case "you":
-		return "You"
-	default:
-		return "@" + slug
-	}
-}
-
-func roleLabel(slug string) string {
-	if member, ok := officeDirectory[slug]; ok && member.Role != "" {
-		return member.Role
-	}
-	switch slug {
-	case "ceo":
-		return "strategy"
-	case "pm":
-		return "product"
-	case "fe":
-		return "frontend"
-	case "be":
-		return "backend"
-	case "ai":
-		return "AI Engineer"
-	case "designer":
-		return "design"
-	case "cmo":
-		return "marketing"
-	case "cro":
-		return "revenue"
-	case "nex":
-		return "context graph"
-	case "you":
-		return "human"
-	default:
-		return "teammate"
-	}
 }
 
 func inferMood(text string) string {
