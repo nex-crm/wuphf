@@ -210,6 +210,14 @@ var (
 	describeActionState          = channelui.DescribeActionState
 	activityPill                 = channelui.ActivityPill
 	actionStatePill              = channelui.ActionStatePill
+
+	artifactLifecyclePill          = channelui.ArtifactLifecyclePill
+	artifactAccentColor            = channelui.ArtifactAccentColor
+	parseArtifactTimestamp         = channelui.ParseArtifactTimestamp
+	recentHumanArtifactRequests    = channelui.RecentHumanArtifactRequests
+	recentExecutionArtifactActions = channelui.RecentExecutionArtifactActions
+	artifactClock                  = channelui.ArtifactClock
+	artifactTime                   = channelui.ArtifactTime
 )
 
 // Channel-confirm action typed-string consts.

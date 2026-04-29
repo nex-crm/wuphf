@@ -143,6 +143,14 @@
 //     ExecutionMetaLine, LatestRelevantAction, DescribeActionState,
 //     ActivityPill (member-activity → colored pill),
 //     ActionStatePill (action kind → colored pill).
+//   - artifacts.go         — artifact-card leaf helpers:
+//     ArtifactLifecyclePill, ArtifactAccentColor (state →
+//     border color), ParseArtifactTimestamp,
+//     RecentHumanArtifactRequests (filter+sort decision-kind
+//     interviews), RecentExecutionArtifactActions
+//     (request_/external_/interrupt_/human_ kinds, newest first),
+//     ArtifactClock (HH:MM with fallback), ArtifactTime
+//     (RFC3339 emit string).
 //
 // Subsequent extraction PRs will land the workspace / recovery / cache
 // cluster, the sidebar / splash, the broker integrations, and finally
