@@ -72,3 +72,29 @@ func appendHeadlessCodexLatency(slug string, line string) {
 	defer func() { _ = f.Close() }()
 	_, _ = fmt.Fprintf(f, "[%s] agent=%s %s\n", time.Now().Format(time.RFC3339), strings.TrimSpace(slug), strings.TrimSpace(line))
 }
+
+func appendHeadlessClaudeLog(slug string, line string) {
+	dir := wuphfLogDir()
+	if dir == "" {
+		return
+	}
+	f, err := os.OpenFile(filepath.Join(dir, "headless-claude-"+slug+".log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return
+	}
+	defer func() { _ = f.Close() }()
+	_, _ = fmt.Fprintf(f, "[%s] %s\n", time.Now().Format(time.RFC3339), strings.TrimSpace(line))
+}
+
+func appendHeadlessClaudeLatency(slug string, line string) {
+	dir := wuphfLogDir()
+	if dir == "" {
+		return
+	}
+	f, err := os.OpenFile(filepath.Join(dir, "headless-claude-latency.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return
+	}
+	defer func() { _ = f.Close() }()
+	_, _ = fmt.Fprintf(f, "[%s] agent=%s %s\n", time.Now().Format(time.RFC3339), strings.TrimSpace(slug), strings.TrimSpace(line))
+}
