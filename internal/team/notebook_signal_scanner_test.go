@@ -200,3 +200,42 @@ func TestNotebookAuthorFromPath(t *testing.T) {
 		}
 	}
 }
+
+// TestStageBNotebookCluster_OwnerAgentsUnion locks in the Stage B owner
+// inference rule for notebook clusters: the candidate carries the dedup
+// union of every contributing agent so the synthesized skill defaults to
+// every agent who already wrote on the topic. The list is sorted so test
+// order and rendered SKILL.md stay stable across runs.
+func TestStageBNotebookCluster_OwnerAgentsUnion(t *testing.T) {
+	b, root, teardown := newNotebookScannerHarness(t)
+	defer teardown()
+
+	// Three distinct agents converging on the same topic, with one of them
+	// (alice) writing two entries. We expect the union — alice, bob, carol —
+	// not the per-entry list with alice duplicated.
+	body := "deploy prod pipeline smoke tests toggle flipping deploy prod pipeline smoke tests toggle flipping"
+	writeNotebookEntry(t, root, "alice", "2026-04-22", body)
+	writeNotebookEntry(t, root, "alice", "2026-04-25", body)
+	writeNotebookEntry(t, root, "bob", "2026-04-23", body)
+	writeNotebookEntry(t, root, "carol", "2026-04-24", body)
+
+	scanner := NewNotebookSignalScanner(b)
+	cands, err := scanner.Scan(context.Background())
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if len(cands) != 1 {
+		t.Fatalf("expected 1 candidate, got %d", len(cands))
+	}
+
+	want := []string{"alice", "bob", "carol"}
+	got := cands[0].OwnerAgents
+	if len(got) != len(want) {
+		t.Fatalf("OwnerAgents len: got %d (%v), want %d (%v)", len(got), got, len(want), want)
+	}
+	for i, w := range want {
+		if got[i] != w {
+			t.Errorf("OwnerAgents[%d]: got %q, want %q (full list %v)", i, got[i], w, got)
+		}
+	}
+}

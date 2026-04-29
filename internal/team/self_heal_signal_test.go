@@ -194,3 +194,77 @@ func TestReasonSlug(t *testing.T) {
 		}
 	}
 }
+
+// TestStageBSelfHeal_OwnerAgentsFromIncident locks in the Stage B owner
+// inference rule for resolved self-heal incidents: the candidate inherits
+// [task.Owner] so the synthesized skill defaults to the agent who actually
+// worked through the recovery. Empty owners stay nil (lead-routable) — we
+// must never write a `[""]` slug into the resulting skill record.
+func TestStageBSelfHeal_OwnerAgentsFromIncident(t *testing.T) {
+	cases := []struct {
+		name  string
+		owner string
+		want  []string
+	}{
+		{
+			name:  "owner becomes the single inferred agent",
+			owner: "deploy-bot",
+			want:  []string{"deploy-bot"},
+		},
+		{
+			name:  "whitespace-only owner stays lead-routable",
+			owner: "   ",
+			want:  nil,
+		},
+		{
+			name:  "empty owner stays lead-routable",
+			owner: "",
+			want:  nil,
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			b := newTestBroker(t)
+
+			now := time.Now().UTC()
+			seedSelfHealTask(t, b, teamTask{
+				ID:         "task-77",
+				Title:      selfHealingTaskTitle("deploy-bot", "task-7"),
+				Details:    selfHealingTaskDetails("deploy-bot", "task-7", agent.EscalationCapabilityGap, "missing deploy specialist"),
+				Owner:      tc.owner,
+				Status:     "done",
+				PipelineID: "incident",
+				TaskType:   "incident",
+				CreatedAt:  now.Add(-30 * time.Minute).Format(time.RFC3339),
+				UpdatedAt:  now.Format(time.RFC3339),
+			})
+
+			scanner := NewSelfHealSignalScanner(b)
+			cands, err := scanner.Scan(context.Background())
+			if err != nil {
+				t.Fatalf("scan: %v", err)
+			}
+			if len(cands) != 1 {
+				t.Fatalf("expected 1 candidate, got %d", len(cands))
+			}
+
+			got := cands[0].OwnerAgents
+			if tc.want == nil {
+				if got != nil {
+					t.Fatalf("OwnerAgents: got %v, want nil (lead-routable)", got)
+				}
+				return
+			}
+			if len(got) != len(tc.want) {
+				t.Fatalf("OwnerAgents len: got %d (%v), want %d (%v)", len(got), got, len(tc.want), tc.want)
+			}
+			for i, want := range tc.want {
+				if got[i] != want {
+					t.Errorf("OwnerAgents[%d]: got %q, want %q", i, got[i], want)
+				}
+			}
+		})
+	}
+}

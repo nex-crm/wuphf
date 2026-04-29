@@ -161,6 +161,15 @@ func (s *SelfHealSignalScanner) candidateFromTask(ctx context.Context, task team
 		CreatedAt: updatedAt,
 	}
 
+	// Owner inference: a resolved self-heal incident codifies the recovery
+	// the assigned agent worked through, so default-scope the synthesized
+	// skill to that agent. Empty Owner stays nil (lead-routable) so we
+	// never write a `[""]` slug into the skill record.
+	var owners []string
+	if owner := strings.TrimSpace(task.Owner); owner != "" {
+		owners = []string{owner}
+	}
+
 	return SkillCandidate{
 		Source:               SourceSelfHealResolved,
 		SuggestedName:        skillSlug("handle-" + reasonSlug(reason)),
@@ -168,6 +177,7 @@ func (s *SelfHealSignalScanner) candidateFromTask(ctx context.Context, task team
 		Excerpts:             []SkillCandidateExcerpt{excerpt},
 		RelatedWikiPaths:     s.relatedWikiPaths(ctx, reason, detail),
 		SignalCount:          1,
+		OwnerAgents:          owners,
 		FirstSeenAt:          createdAt,
 		LastSeenAt:           updatedAt,
 	}
