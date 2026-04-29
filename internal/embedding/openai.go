@@ -14,6 +14,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -211,13 +212,17 @@ func openAIDimensionFromEnv() int {
 // from "default kicked in" — without it, a Voyage user running
 // voyage-code-2 (1536-dim) cannot opt out of the 1024-dim default
 // because the override and the default are indistinguishable.
+//
+// strconv.Atoi is stricter than the previous fmt.Sscanf("%d", ...): it
+// rejects "1536  garbage" and "1.5" outright instead of returning the
+// leading digits as a partial parse.
 func embeddingDimensionOverride() (int, bool) {
 	raw := strings.TrimSpace(os.Getenv("WUPHF_EMBEDDING_DIMENSION"))
 	if raw == "" {
 		return 0, false
 	}
-	var n int
-	if _, err := fmt.Sscanf(raw, "%d", &n); err != nil || n <= 0 {
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
 		return 0, false
 	}
 	return n, true
