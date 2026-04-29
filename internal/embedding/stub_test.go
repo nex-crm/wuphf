@@ -120,3 +120,32 @@ func TestNewDefault_FallsBackToStub(t *testing.T) {
 		t.Errorf("default with no keys: got %q want local-stub", got.Name())
 	}
 }
+
+// TestNewDefault_AnthropicOnlyDoesNotLeakToVoyage guards against the
+// security blocker that was caught in PR review: an ANTHROPIC_API_KEY
+// alone must NOT be silently forwarded to api.voyageai.com as a Voyage
+// bearer. Voyage is a separate company and the key is invalid there
+// anyway — but more importantly it would be a cross-provider credential
+// leak. The user must explicitly set VOYAGE_API_KEY (or OPENAI_API_KEY)
+// to enable real embeddings.
+func TestNewDefault_AnthropicOnlyDoesNotLeakToVoyage(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-shouldnotleak")
+	t.Setenv("VOYAGE_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
+	got := NewDefault()
+	if got.Name() != "local-stub" {
+		t.Fatalf("anthropic-only must fall back to stub, got %q", got.Name())
+	}
+}
+
+// TestNewDefault_VoyageKeyEnablesVoyage confirms the explicit opt-in
+// path still works.
+func TestNewDefault_VoyageKeyEnablesVoyage(t *testing.T) {
+	t.Setenv("VOYAGE_API_KEY", "voyage-real-key")
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	got := NewDefault()
+	if got.Name() != "voyage-"+defaultVoyageModel {
+		t.Fatalf("voyage key set: got %q want voyage-%s", got.Name(), defaultVoyageModel)
+	}
+}

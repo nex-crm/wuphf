@@ -117,8 +117,10 @@ func TestCache_RotatesOverSizeCap(t *testing.T) {
 }
 
 func TestCache_HashTextStable(t *testing.T) {
-	if HashText("hello") != HashText("hello") {
-		t.Error("HashText should be deterministic")
+	a := HashText("hello")
+	b := HashText("hello")
+	if a != b {
+		t.Errorf("HashText should be deterministic: got %q vs %q", a, b)
 	}
 	if HashText("hello") == HashText("world") {
 		t.Error("HashText collisions across distinct inputs")

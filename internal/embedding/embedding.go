@@ -7,14 +7,19 @@
 //
 // NewDefault inspects the environment and returns the highest-priority
 // provider that is configured. Order:
-//  1. ANTHROPIC_API_KEY → Voyage AI (Anthropic does not ship a native
-//     embeddings API today; voyage-3-large is the recommended companion).
-//     This currently routes through the OpenAI-compatible Voyage endpoint.
+//  1. VOYAGE_API_KEY → Voyage AI (voyage-3-large, 1024 dims). Anthropic does
+//     not ship a native embeddings API at time of writing; Voyage is the
+//     companion they recommend, but it is a separate company — we only call
+//     it when the user explicitly opts in with VOYAGE_API_KEY. We never
+//     forward ANTHROPIC_API_KEY to api.voyageai.com.
 //  2. OPENAI_API_KEY → OpenAI text-embedding-3-small (1536 dims). Works
 //     against any OpenAI-compatible endpoint via OPENAI_BASE_URL.
 //  3. else → local stub provider (deterministic hash-based pseudo-vectors,
 //     32 dims). Stub vectors are NOT semantically meaningful — they only
 //     guarantee determinism for tests / dev environments without API keys.
+//     If only ANTHROPIC_API_KEY is set, NewDefault logs a one-shot warning
+//     and returns the stub: Anthropic-only users need to also set
+//     VOYAGE_API_KEY or OPENAI_API_KEY to enable real embeddings.
 //
 // # Cost model
 //
@@ -46,9 +51,11 @@ package embedding
 
 import (
 	"context"
+	"log/slog"
 	"math"
 	"os"
 	"strings"
+	"sync"
 )
 
 // Provider returns a vector for a given text. Stateless — embeddings are
@@ -69,7 +76,7 @@ type Provider interface {
 	Dimension() int
 
 	// Name is a stable identifier used for logging and the cache "model"
-	// field. Examples: "anthropic-voyage-3-large", "openai-text-embedding-3-small",
+	// field. Examples: "voyage-voyage-3-large", "openai-text-embedding-3-small",
 	// "local-stub".
 	Name() string
 }
@@ -129,11 +136,31 @@ func L2Normalise(v []float32) []float32 {
 //
 // NewDefault never returns nil — the stub provider is the floor.
 func NewDefault() Provider {
-	if k := strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY")); k != "" {
-		return newAnthropicProvider(k)
+	if k := strings.TrimSpace(os.Getenv("VOYAGE_API_KEY")); k != "" {
+		return newVoyageProvider()
 	}
 	if k := strings.TrimSpace(os.Getenv("OPENAI_API_KEY")); k != "" {
 		return newOpenAIProvider(k)
 	}
+	if k := strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY")); k != "" {
+		warnAnthropicOnly()
+	}
 	return NewStubProvider()
+}
+
+var warnAnthropicOnlyOnce sync.Once
+
+// warnAnthropicOnly logs once when only ANTHROPIC_API_KEY is set. Anthropic
+// does not host embeddings; we deliberately do not forward the key to
+// api.voyageai.com (third-party). The user must opt in explicitly.
+func warnAnthropicOnly() {
+	warnAnthropicOnlyOnce.Do(func() {
+		slog.Warn(
+			"embedding: ANTHROPIC_API_KEY set but no embeddings provider — "+
+				"Anthropic does not ship a native embeddings endpoint. "+
+				"Set VOYAGE_API_KEY (voyage-3-large) or OPENAI_API_KEY to enable; "+
+				"falling back to deterministic stub (NOT semantic).",
+			"hint", "https://docs.voyageai.com",
+		)
+	})
 }
