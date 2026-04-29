@@ -2,10 +2,8 @@ package team
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -177,121 +175,4 @@ func defaultHeadlessCodexWorkspaceStatusSnapshot(path string) string {
 		return ""
 	}
 	return string(out)
-}
-
-func (l *Launcher) launchHeadlessCodex() error {
-	killStaleBroker()
-	killStaleHeadlessTaskRunners()
-	_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "kill-session", "-t", l.sessionName).Run()
-
-	l.broker = NewBroker()
-	l.broker.packSlug = l.packSlug
-	l.broker.blankSlateLaunch = l.blankSlateLaunch
-	if err := l.broker.SetSessionMode(l.sessionMode, l.oneOnOne); err != nil {
-		return fmt.Errorf("set session mode: %w", err)
-	}
-	if err := l.broker.Start(); err != nil {
-		return fmt.Errorf("start broker: %w", err)
-	}
-	if err := writeOfficePIDFile(); err != nil {
-		return fmt.Errorf("write office pid: %w", err)
-	}
-
-	l.headless.ctx, l.headless.cancel = context.WithCancel(context.Background())
-
-	l.resumeInFlightWork()
-	go l.notifyAgentsLoop()
-	if !l.isOneOnOne() {
-		go l.notifyTaskActionsLoop()
-		go l.notifyOfficeChangesLoop()
-		go l.pollNexNotificationsLoop()
-		go l.watchdogSchedulerLoop()
-	}
-
-	return nil
-}
-
-func headlessCodexTaskID(prompt string) string {
-	prefixes := []string{"#task-", "#blank-slate-"}
-	for _, prefix := range prefixes {
-		idx := strings.Index(prompt, prefix)
-		if idx == -1 {
-			continue
-		}
-		start := idx + 1
-		end := start
-		for end < len(prompt) {
-			ch := prompt[end]
-			if (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '-' {
-				end++
-				continue
-			}
-			break
-		}
-		return strings.TrimSpace(prompt[start:end])
-	}
-	return ""
-}
-
-// wuphfLogDirOverride is a test hook for redirecting headless log writes to
-// an isolated path. Stored as atomic.Pointer so reads on the headless write
-// path don't take a lock; nil in production. Tests set this via TestMain so
-// log files don't pollute the user's real ~/.wuphf/logs while the suite
-// runs. The previous WUPHF_LOG_DIR environment variable was retired in
-// favour of this in-process hook — env vars leak into spawned codex/claude
-// subprocesses, which is not what tests want.
-var wuphfLogDirOverride atomic.Pointer[string]
-
-func wuphfLogDir() string {
-	if p := wuphfLogDirOverride.Load(); p != nil {
-		override := strings.TrimSpace(*p)
-		if override == "" {
-			return ""
-		}
-		if err := os.MkdirAll(override, 0o700); err != nil {
-			fmt.Fprintf(os.Stderr, "wuphf: log dir override %q unwritable: %v — headless logging disabled\n", override, err)
-			return ""
-		}
-		return override
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	dir := filepath.Join(home, ".wuphf", "logs")
-	_ = os.MkdirAll(dir, 0o700)
-	return dir
-}
-
-func appendHeadlessCodexLog(slug string, line string) {
-	dir := wuphfLogDir()
-	if dir == "" {
-		return
-	}
-	f, err := os.OpenFile(filepath.Join(dir, "headless-codex-"+slug+".log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
-	if err != nil {
-		return
-	}
-	defer func() { _ = f.Close() }()
-	_, _ = fmt.Fprintf(f, "[%s] %s\n", time.Now().Format(time.RFC3339), strings.TrimSpace(line))
-}
-
-func appendHeadlessCodexLatency(slug string, line string) {
-	dir := wuphfLogDir()
-	if dir == "" {
-		return
-	}
-	f, err := os.OpenFile(filepath.Join(dir, "headless-codex-latency.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
-	if err != nil {
-		return
-	}
-	defer func() { _ = f.Close() }()
-	_, _ = fmt.Fprintf(f, "[%s] agent=%s %s\n", time.Now().Format(time.RFC3339), strings.TrimSpace(slug), strings.TrimSpace(line))
-}
-
-func durationMillis(start, mark time.Time) int64 {
-	if start.IsZero() || mark.IsZero() {
-		return -1
-	}
-	return mark.Sub(start).Milliseconds()
 }

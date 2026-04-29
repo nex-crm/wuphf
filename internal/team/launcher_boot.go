@@ -169,3 +169,35 @@ func (l *Launcher) Launch() error {
 
 	return nil
 }
+
+func (l *Launcher) launchHeadlessCodex() error {
+	killStaleBroker()
+	killStaleHeadlessTaskRunners()
+	_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "kill-session", "-t", l.sessionName).Run()
+
+	l.broker = NewBroker()
+	l.broker.packSlug = l.packSlug
+	l.broker.blankSlateLaunch = l.blankSlateLaunch
+	if err := l.broker.SetSessionMode(l.sessionMode, l.oneOnOne); err != nil {
+		return fmt.Errorf("set session mode: %w", err)
+	}
+	if err := l.broker.Start(); err != nil {
+		return fmt.Errorf("start broker: %w", err)
+	}
+	if err := writeOfficePIDFile(); err != nil {
+		return fmt.Errorf("write office pid: %w", err)
+	}
+
+	l.headless.ctx, l.headless.cancel = context.WithCancel(context.Background())
+
+	l.resumeInFlightWork()
+	go l.notifyAgentsLoop()
+	if !l.isOneOnOne() {
+		go l.notifyTaskActionsLoop()
+		go l.notifyOfficeChangesLoop()
+		go l.pollNexNotificationsLoop()
+		go l.watchdogSchedulerLoop()
+	}
+
+	return nil
+}

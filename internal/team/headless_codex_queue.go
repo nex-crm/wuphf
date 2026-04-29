@@ -579,3 +579,25 @@ func (l *Launcher) headlessCodexStaleCancelAfterForTurn(turn headlessCodexTurn) 
 	}
 	return headlessCodexStaleCancelAfter
 }
+
+func headlessCodexTaskID(prompt string) string {
+	prefixes := []string{"#task-", "#blank-slate-"}
+	for _, prefix := range prefixes {
+		idx := strings.Index(prompt, prefix)
+		if idx == -1 {
+			continue
+		}
+		start := idx + 1
+		end := start
+		for end < len(prompt) {
+			ch := prompt[end]
+			if (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '-' {
+				end++
+				continue
+			}
+			break
+		}
+		return strings.TrimSpace(prompt[start:end])
+	}
+	return ""
+}
