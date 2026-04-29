@@ -1397,13 +1397,22 @@ func (l *Launcher) pollOneRelayEventsLoop() {
 	if _, err := provider.ListRelays(context.Background(), action.ListRelaysOptions{Limit: 1}); err != nil {
 		return
 	}
-	interval := time.Minute
+	const defaultInterval = time.Minute
 	time.Sleep(25 * time.Second)
 	for {
-		l.updateSchedulerJob("one-relay-events", "One relay events", interval, time.Now().UTC(), "running")
+		// PR 8 Lane G: one-relay-events is read-only in v1 (PATCH refuses
+		// to change interval_override). Still honor Enabled so a future
+		// flip-the-switch admin path stays consistent with other crons.
+		enabled, _ := l.broker.SchedulerJobControl("one-relay-events", defaultInterval)
+		if !enabled {
+			l.updateSchedulerJob("one-relay-events", "One relay events", defaultInterval, time.Now().UTC().Add(defaultInterval), "disabled")
+			time.Sleep(defaultInterval)
+			continue
+		}
+		l.updateSchedulerJob("one-relay-events", "One relay events", defaultInterval, time.Now().UTC(), "running")
 		l.fetchAndRecordOneRelayEvents(provider)
-		l.updateSchedulerJob("one-relay-events", "One relay events", interval, time.Now().UTC().Add(interval), "sleeping")
-		time.Sleep(interval)
+		l.updateSchedulerJob("one-relay-events", "One relay events", defaultInterval, time.Now().UTC().Add(defaultInterval), "sleeping")
+		time.Sleep(defaultInterval)
 	}
 }
 
@@ -1459,17 +1468,10 @@ func (l *Launcher) updateSchedulerJob(slug, label string, interval time.Duration
 	if l.broker == nil {
 		return
 	}
-	job := schedulerJob{
-		Slug:            slug,
-		Label:           label,
-		IntervalMinutes: int(interval / time.Minute),
-		NextRun:         nextRun.UTC().Format(time.RFC3339),
-		Status:          status,
-	}
-	if status == "sleeping" {
-		job.LastRun = time.Now().UTC().Format(time.RFC3339)
-	}
-	_ = l.broker.SetSchedulerJob(job)
+	// PR 8 Lane G: route heartbeats through updateSchedulerHeartbeat so the
+	// user-controlled cron-registry fields (Enabled, IntervalOverride,
+	// SystemManaged, LastRunStatus) survive each tick.
+	l.broker.updateSchedulerHeartbeat(slug, label, int(interval/time.Minute), nextRun, status, "")
 }
 
 func (l *Launcher) watchdogSchedulerLoop() {
@@ -1492,6 +1494,19 @@ func (l *Launcher) processDueSchedulerJobs() {
 		return
 	}
 	for _, job := range jobs {
+		// PR 8 Lane G: per-instance jobs (task_follow_up, request_follow_up,
+		// task_reminder, task_recheck) inherit the Enabled state of their
+		// class-level system cron. If a human disables "task_reminder" from
+		// the Calendar app, every existing per-task reminder skips its
+		// dispatch this tick. The job is rescheduled (not killed) so flipping
+		// Enabled back on resumes naturally without orphaning state.
+		if classSlug := strings.TrimSpace(job.Kind); classSlug != "" {
+			if classEnabled, _ := l.broker.SchedulerJobControl(classSlug, time.Duration(job.IntervalMinutes)*time.Minute); !classEnabled {
+				next := time.Now().UTC().Add(5 * time.Minute)
+				_ = l.broker.UpdateSchedulerJobState(job.Slug, next, "disabled")
+				continue
+			}
+		}
 		switch strings.TrimSpace(job.TargetType) {
 		case "task":
 			l.processDueTaskJob(job)
