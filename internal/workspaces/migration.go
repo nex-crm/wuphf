@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"syscall"
 	"time"
 
 	"github.com/nex-crm/wuphf/internal/config"
@@ -147,7 +146,7 @@ func openMigrationLock(path string) (*os.File, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+	if err := lockFileExclusiveNonBlocking(f); err != nil {
 		_ = f.Close()
 		return nil, fmt.Errorf("another migration is in progress (lock %s): %w", path, err)
 	}
@@ -158,6 +157,6 @@ func releaseMigrationLock(f *os.File) {
 	if f == nil {
 		return
 	}
-	_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+	_ = unlockFile(f)
 	_ = f.Close()
 }

@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"syscall"
 	"time"
 
 	"github.com/nex-crm/wuphf/internal/config"
@@ -108,7 +107,7 @@ func acquireLock() (*os.File, error) {
 	if err != nil {
 		return nil, fmt.Errorf("workspaces: open lock %s: %w", lp, err)
 	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+	if err := lockFileExclusive(f); err != nil {
 		_ = f.Close()
 		return nil, fmt.Errorf("workspaces: flock %s: %w", lp, err)
 	}
@@ -120,7 +119,7 @@ func releaseLock(f *os.File) {
 	if f == nil {
 		return
 	}
-	_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+	_ = unlockFile(f)
 	_ = f.Close()
 }
 

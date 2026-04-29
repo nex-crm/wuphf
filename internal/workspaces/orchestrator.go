@@ -13,7 +13,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/nex-crm/wuphf/internal/config"
@@ -246,9 +245,9 @@ func Pause(ctx context.Context, name string) error {
 				goto brokerDown
 			}
 			if pid > 0 && elapsed >= pauseSIGTERMAt && elapsed < pauseSIGKILLAt {
-				_ = syscall.Kill(pid, syscall.SIGTERM)
+				sendSIGTERM(pid)
 			} else if pid > 0 && elapsed >= pauseSIGKILLAt {
-				_ = syscall.Kill(pid, syscall.SIGKILL)
+				sendSIGKILL(pid)
 			}
 		case <-ctx.Done():
 			return ctx.Err()
