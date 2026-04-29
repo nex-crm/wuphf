@@ -234,6 +234,10 @@ var (
 	moveCursorBackwardWord = channelui.MoveCursorBackwardWord
 	moveCursorForwardWord  = channelui.MoveCursorForwardWord
 	moveComposerCursor     = channelui.MoveComposerCursor
+
+	filterInsightMessages    = channelui.FilterInsightMessages
+	latestHumanFacingMessage = channelui.LatestHumanFacingMessage
+	countUniqueAgents        = channelui.CountUniqueAgents
 )
 
 // Channel-confirm action typed-string consts.

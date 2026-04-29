@@ -167,6 +167,11 @@
 //     (alt+b / alt+w word jumps), and MoveComposerCursor (key-string
 //     dispatch for left/right/home/end/word motions, with a recognized
 //     bool so callers can fall through unrecognized keys).
+//   - message_filters.go   — message-walking filters and selectors:
+//     FilterInsightMessages (automation / nex senders for the insight
+//     side panels), LatestHumanFacingMessage (newest human_*-kind
+//     pointer or nil), CountUniqueAgents (distinct senders excluding
+//     "you" / "nex" / kind=="automation").
 //
 // Subsequent extraction PRs will land the workspace / recovery / cache
 // cluster, the sidebar / splash, the broker integrations, and finally

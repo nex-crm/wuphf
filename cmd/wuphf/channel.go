@@ -2570,25 +2570,6 @@ func (m channelModel) currentMainLines(contentWidth int) []renderedLine {
 	return m.cachedMainLines(contentWidth)
 }
 
-func filterInsightMessages(messages []brokerMessage) []brokerMessage {
-	filtered := make([]brokerMessage, 0, len(messages))
-	for _, msg := range messages {
-		if msg.Kind == "automation" || msg.From == "nex" {
-			filtered = append(filtered, msg)
-		}
-	}
-	return filtered
-}
-
-func latestHumanFacingMessage(messages []brokerMessage) *brokerMessage {
-	for i := len(messages) - 1; i >= 0; i-- {
-		if strings.HasPrefix(strings.TrimSpace(messages[i].Kind), "human_") {
-			return &messages[i]
-		}
-	}
-	return nil
-}
-
 type mouseAction struct {
 	Kind  string
 	Value string
@@ -2899,17 +2880,6 @@ func (m channelModel) selectedInterviewOption() *channelInterviewOption {
 		return nil
 	}
 	return &m.pending.Options[m.selectedOption]
-}
-
-func countUniqueAgents(messages []brokerMessage) int {
-	seen := make(map[string]bool)
-	for _, m := range messages {
-		if m.From == "you" || m.From == "nex" || m.Kind == "automation" {
-			continue
-		}
-		seen[m.From] = true
-	}
-	return len(seen)
 }
 
 func formatUsd(cost float64) string {
