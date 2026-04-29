@@ -4580,8 +4580,11 @@ func renderSkillCatalogSection(visible []teamSkill) string {
 	sb.WriteString("When a request matches one of these skills, call team_skill_run(name) BEFORE doing the work. If the request matches a skill not in your catalog, use team_skill_list to find its owner and delegate.\n")
 	for _, sk := range visible {
 		desc := strings.TrimSpace(sk.Description)
-		if len(desc) > 100 {
-			desc = desc[:100] + "..."
+		// PR 7 /review P2: truncate by rune count, not byte index. desc[:100]
+		// would split a multi-byte CJK / emoji code point and emit invalid
+		// UTF-8 into the prompt.
+		if r := []rune(desc); len(r) > 100 {
+			desc = string(r[:100]) + "..."
 		}
 		trigger := strings.TrimSpace(sk.Trigger)
 		if trigger != "" {

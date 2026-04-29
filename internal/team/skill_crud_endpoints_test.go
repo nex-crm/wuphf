@@ -873,3 +873,289 @@ func TestHandleGetSkills_IncludeArchivedFlag(t *testing.T) {
 		}
 	})
 }
+
+// PR 7 /review P1: handleGetSkills with ?for_agent= must strip skill body
+// content from the response so a shared-bearer-token caller can't read
+// another agent's playbook bodies via the metadata-listing endpoint.
+func TestHandleGetSkills_ForAgentStripsContent(t *testing.T) {
+	t.Parallel()
+	_, b, do := crudTestServer(t)
+
+	b.mu.Lock()
+	b.members = []officeMember{
+		{Slug: "ceo", BuiltIn: true},
+		{Slug: "deploy-bot"},
+		{Slug: "csm"},
+	}
+	b.skills = append(b.skills, teamSkill{
+		ID:          "skill-deploy-frontend",
+		Name:        "deploy-frontend",
+		Title:       "Deploy frontend",
+		Description: "Ship a hotfix.",
+		Content:     "## Steps\n\nSECRET BODY OF DEPLOY-BOT'S PLAYBOOK.",
+		Status:      "active",
+		Channel:     "general",
+		OwnerAgents: []string{"deploy-bot"},
+	})
+	b.mu.Unlock()
+
+	resp, body := do(http.MethodGet, "/skills?for_agent=deploy-bot", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d, body %s", resp.StatusCode, body)
+	}
+	var out struct {
+		Skills []teamSkill `json:"skills"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(out.Skills) != 1 {
+		t.Fatalf("expected 1 visible skill for deploy-bot, got %d", len(out.Skills))
+	}
+	if out.Skills[0].Content != "" {
+		t.Errorf("Content must be stripped on for_agent path; got %q", out.Skills[0].Content)
+	}
+	if out.Skills[0].Name != "deploy-frontend" {
+		t.Errorf("Name lost in stripping: got %q", out.Skills[0].Name)
+	}
+
+	// Plain GET (no for_agent) keeps body content for legacy callers.
+	resp, body = do(http.MethodGet, "/skills", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("plain GET status %d", resp.StatusCode)
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	var found bool
+	for _, sk := range out.Skills {
+		if sk.Name == "deploy-frontend" {
+			found = true
+			if sk.Content == "" {
+				t.Error("plain GET must NOT strip content")
+			}
+			break
+		}
+	}
+	if !found {
+		t.Error("plain GET missing deploy-frontend")
+	}
+
+	// Wrong agent gets nothing back (visibility filter excludes).
+	resp, body = do(http.MethodGet, "/skills?for_agent=csm", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d", resp.StatusCode)
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	for _, sk := range out.Skills {
+		if sk.Name == "deploy-frontend" {
+			t.Error("csm must not see deploy-bot's skill")
+		}
+	}
+}
+
+// PR 7 /review P1: handleSkillEdit + handleSkillPatch must reject editors
+// not in the OwnerAgents list (with lead-bypass for the office lead).
+func TestHandleSkillEdit_OwnershipGate(t *testing.T) {
+	t.Parallel()
+
+	type fixture struct {
+		setup func(t *testing.T) (*Broker, func(method, path string, body any) (*http.Response, []byte))
+	}
+	mkFixture := func() fixture {
+		return fixture{
+			setup: func(t *testing.T) (*Broker, func(method, path string, body any) (*http.Response, []byte)) {
+				_, b, do := crudTestServer(t)
+				b.mu.Lock()
+				b.members = []officeMember{
+					{Slug: "ceo", BuiltIn: true},
+					{Slug: "deploy-bot"},
+					{Slug: "csm"},
+				}
+				b.skills = append(b.skills, teamSkill{
+					ID:          "skill-deploy-frontend",
+					Name:        "deploy-frontend",
+					Title:       "Deploy frontend",
+					Description: "Ship.",
+					Content:     "## Steps\n\n1. Ship.",
+					Status:      "active",
+					Channel:     "general",
+					CreatedBy:   "archivist",
+					OwnerAgents: []string{"deploy-bot"},
+				})
+				b.mu.Unlock()
+				return b, do
+			},
+		}
+	}
+
+	t.Run("PUT non-owner rejected with structured 403", func(t *testing.T) {
+		t.Parallel()
+		f := mkFixture()
+		_, do := f.setup(t)
+		// Build a fresh full SKILL.md.
+		fm := SkillFrontmatter{
+			Name:        "deploy-frontend",
+			Description: "Ship.",
+			Metadata: SkillMetadata{
+				Wuphf: SkillWuphfMeta{
+					OwnerAgents: []string{"deploy-bot"},
+				},
+			},
+		}
+		mdBytes, _ := RenderSkillMarkdown(fm, "## Steps\n\n1. Ship harder.")
+		resp, body := do(http.MethodPut, "/skills/deploy-frontend", map[string]any{
+			"content":   string(mdBytes),
+			"edited_by": "csm", // not in OwnerAgents, not lead
+		})
+		if resp.StatusCode != http.StatusForbidden {
+			t.Fatalf("expected 403 for non-owner edit, got %d body=%s", resp.StatusCode, body)
+		}
+		var got struct {
+			Error      string   `json:"error"`
+			DelegateTo []string `json:"delegate_to"`
+		}
+		_ = json.Unmarshal(body, &got)
+		if got.Error != "not_owner" {
+			t.Errorf("error: got %q, want not_owner", got.Error)
+		}
+		if len(got.DelegateTo) != 1 || got.DelegateTo[0] != "deploy-bot" {
+			t.Errorf("delegate_to: got %v, want [deploy-bot]", got.DelegateTo)
+		}
+	})
+
+	t.Run("PUT owner accepted", func(t *testing.T) {
+		t.Parallel()
+		f := mkFixture()
+		_, do := f.setup(t)
+		fm := SkillFrontmatter{
+			Name:        "deploy-frontend",
+			Description: "Ship.",
+			Metadata: SkillMetadata{
+				Wuphf: SkillWuphfMeta{OwnerAgents: []string{"deploy-bot"}},
+			},
+		}
+		mdBytes, _ := RenderSkillMarkdown(fm, "## Steps\n\n1. Ship harder.")
+		resp, body := do(http.MethodPut, "/skills/deploy-frontend", map[string]any{
+			"content":   string(mdBytes),
+			"edited_by": "deploy-bot",
+		})
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("owner edit rejected: status %d body %s", resp.StatusCode, body)
+		}
+	})
+
+	t.Run("PUT lead bypass accepted", func(t *testing.T) {
+		t.Parallel()
+		f := mkFixture()
+		_, do := f.setup(t)
+		fm := SkillFrontmatter{
+			Name:        "deploy-frontend",
+			Description: "Ship.",
+			Metadata: SkillMetadata{
+				Wuphf: SkillWuphfMeta{OwnerAgents: []string{"deploy-bot"}},
+			},
+		}
+		mdBytes, _ := RenderSkillMarkdown(fm, "## Steps\n\n1. Ship harder.")
+		resp, body := do(http.MethodPut, "/skills/deploy-frontend", map[string]any{
+			"content":   string(mdBytes),
+			"edited_by": "ceo", // lead bypass
+		})
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("lead bypass rejected: status %d body %s", resp.StatusCode, body)
+		}
+	})
+
+	t.Run("PATCH non-owner rejected", func(t *testing.T) {
+		t.Parallel()
+		f := mkFixture()
+		_, do := f.setup(t)
+		resp, body := do(http.MethodPost, "/skills/deploy-frontend/patch", map[string]any{
+			"old_string": "Ship.",
+			"new_string": "Ship harder.",
+			"edited_by":  "csm",
+		})
+		if resp.StatusCode != http.StatusForbidden {
+			t.Fatalf("expected 403, got %d body=%s", resp.StatusCode, body)
+		}
+	})
+
+	t.Run("legacy empty OwnerAgents skips ownership gate", func(t *testing.T) {
+		t.Parallel()
+		_, b, do := crudTestServer(t)
+		b.mu.Lock()
+		b.members = []officeMember{{Slug: "ceo", BuiltIn: true}}
+		b.skills = append(b.skills, teamSkill{
+			ID:          "skill-legacy",
+			Name:        "legacy",
+			Title:       "Legacy",
+			Description: "Pre-PR-7.",
+			Content:     "## Steps\n\n1. Old.",
+			Status:      "active",
+			Channel:     "general",
+			CreatedBy:   "archivist",
+			// OwnerAgents intentionally empty (legacy back-compat).
+		})
+		b.mu.Unlock()
+		fm := SkillFrontmatter{Name: "legacy", Description: "Pre-PR-7."}
+		mdBytes, _ := RenderSkillMarkdown(fm, "## Steps\n\n1. New.")
+		resp, body := do(http.MethodPut, "/skills/legacy", map[string]any{
+			"content":   string(mdBytes),
+			"edited_by": "anyone",
+		})
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("legacy edit rejected: status %d body %s", resp.StatusCode, body)
+		}
+	})
+}
+
+// PR 7 /review P2: handleSkillRestore must re-validate OwnerAgents against
+// the current member table — slugs that have since been removed from the
+// office should drop with WARN, never silently survive into a ghost-scoped
+// restored skill.
+func TestHandleSkillRestore_RevalidatesOwnerAgents(t *testing.T) {
+	t.Parallel()
+	_, b, do := crudTestServer(t)
+
+	b.mu.Lock()
+	b.members = []officeMember{
+		{Slug: "ceo", BuiltIn: true},
+		{Slug: "deploy-bot"},
+		// csm intentionally NOT in members — they were removed while the
+		// skill was archived, so the snapshot's csm slug is now defunct.
+	}
+	b.skills = append(b.skills, teamSkill{
+		ID:          "skill-stale",
+		Name:        "stale-skill",
+		Title:       "Stale",
+		Description: "Was scoped to defunct member.",
+		Content:     "## Steps\n\n1. Stale.",
+		Status:      "archived",
+		Channel:     "general",
+		CreatedBy:   "archivist",
+		OwnerAgents: []string{"deploy-bot", "csm"}, // csm is now defunct
+	})
+	b.mu.Unlock()
+
+	resp, body := do(http.MethodPost, "/skills/stale-skill/restore", map[string]any{})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d, body %s", resp.StatusCode, body)
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for i := range b.skills {
+		if b.skills[i].Name == "stale-skill" {
+			if got := b.skills[i].OwnerAgents; len(got) != 1 || got[0] != "deploy-bot" {
+				t.Errorf("OwnerAgents: got %v, want [deploy-bot] (csm should drop)", got)
+			}
+			if b.skills[i].Status != "proposed" {
+				t.Errorf("Status: got %q, want proposed", b.skills[i].Status)
+			}
+			return
+		}
+	}
+	t.Fatal("stale-skill missing after restore")
+}

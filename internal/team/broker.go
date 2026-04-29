@@ -1716,7 +1716,12 @@ func (b *Broker) StartOnPort(port int) error {
 		tokenFile = brokeraddr.ResolveTokenFile()
 	}
 	if tokenFile != "" {
-		_ = os.WriteFile(tokenFile, []byte(b.token), 0o600)
+		// PR 7 /review P1: surface token-write failures so a misconfigured
+		// permissions / disk-full state doesn't fail silently and leave
+		// every CLI client unable to authenticate.
+		if err := os.WriteFile(tokenFile, []byte(b.token), 0o600); err != nil {
+			log.Printf("broker: failed to write token file %s: %v", tokenFile, err)
+		}
 	}
 
 	go func() {
@@ -11057,11 +11062,12 @@ func (b *Broker) findSkillByWorkflowKeyLocked(key string) *teamSkill {
 
 func (b *Broker) handleGetSkills(w http.ResponseWriter, r *http.Request) {
 	channelFilter := normalizeChannelSlug(r.URL.Query().Get("channel"))
-	// PR 7 Lane C (F6 fold-in): when ?for_agent=<slug> is present, scope the
-	// response to skills that agent can see. Closes the cross-scope leak where
-	// any authenticated agent could read every skill body via GET /skills.
-	// Absent param preserves the existing humans/UI-facing unfiltered view.
-	forAgent := strings.TrimSpace(r.URL.Query().Get("for_agent"))
+	// PR 7 Lane C (F6 fold-in) + /review P1: when ?for_agent=<slug> is present,
+	// scope the response to skills that agent can see AND strip skill body
+	// content (broker has no first-class identity verification under the
+	// shared-bearer-token model). Absent param preserves the existing
+	// humans/UI-facing unfiltered view.
+	forAgent := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("for_agent")))
 	// PR 7 follow-up: opt-in flags so the Skills app can request the full
 	// catalog (proposed + active + disabled + archived) without breaking
 	// older consumers that expect the active+proposed+disabled subset.
@@ -11072,20 +11078,23 @@ func (b *Broker) handleGetSkills(w http.ResponseWriter, r *http.Request) {
 	_ = truthyQuery(r.URL.Query().Get("include_disabled"))
 
 	b.mu.Lock()
-	var pool []teamSkill
-	if forAgent != "" {
-		pool = b.listSkillsForAgentLocked(forAgent, listSkillsOpts{activeOnly: false})
-	} else {
-		pool = make([]teamSkill, len(b.skills))
-		copy(pool, b.skills)
-	}
-	result := make([]teamSkill, 0, len(pool))
-	for _, sk := range pool {
+	result := make([]teamSkill, 0, len(b.skills))
+	for i := range b.skills {
+		sk := b.skills[i]
 		if sk.Status == "archived" && !includeArchived {
 			continue
 		}
 		if channelFilter != "" && normalizeChannelSlug(sk.Channel) != channelFilter {
 			continue
+		}
+		if forAgent != "" {
+			if !b.canAgentSeeSkillLocked(forAgent, &b.skills[i]) {
+				continue
+			}
+			// Strip the body so the metadata-listing endpoint never serves
+			// another agent's playbook content. Callers that need the body
+			// hit the per-skill endpoint with explicit identity.
+			sk.Content = ""
 		}
 		result = append(result, sk)
 	}

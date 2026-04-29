@@ -2,8 +2,10 @@ package team
 
 import (
 	"context"
+	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 // stubEmbedder produces deterministic, L2-normalised vectors from a
@@ -84,8 +86,8 @@ func TestFindSimilarActive_NoSkills(t *testing.T) {
 	if v.Recommendation != "create_new" {
 		t.Fatalf("recommendation = %q, want create_new", v.Recommendation)
 	}
-	if v.Existing != nil {
-		t.Fatalf("Existing = %+v, want nil", v.Existing)
+	if v.ExistingSlug != "" {
+		t.Fatalf("ExistingSlug = %q, want empty (no active skills should be eligible)", v.ExistingSlug)
 	}
 	if v.Method != "jaccard-tokens" {
 		t.Fatalf("method = %q, want jaccard-tokens", v.Method)
@@ -117,8 +119,8 @@ func TestFindSimilarActive_ExactDuplicate(t *testing.T) {
 	if v.Recommendation != "enhance_existing" {
 		t.Fatalf("recommendation = %q, want enhance_existing", v.Recommendation)
 	}
-	if v.Existing == nil || v.Existing.Name != "send-invoice-reminder" {
-		t.Fatalf("Existing = %+v, want pointer to send-invoice-reminder", v.Existing)
+	if v.ExistingSlug != "send-invoice-reminder" {
+		t.Fatalf("ExistingSlug = %q, want send-invoice-reminder", v.ExistingSlug)
 	}
 }
 
@@ -146,8 +148,8 @@ func TestFindSimilarActive_NearDuplicateDifferentName(t *testing.T) {
 	if v.Recommendation != "enhance_existing" {
 		t.Fatalf("recommendation = %q (score %.3f), want enhance_existing", v.Recommendation, v.Score)
 	}
-	if v.Existing == nil || v.Existing.Name != "send-invoice-reminder" {
-		t.Fatalf("Existing = %+v, want pointer to send-invoice-reminder", v.Existing)
+	if v.ExistingSlug != "send-invoice-reminder" {
+		t.Fatalf("ExistingSlug = %q, want send-invoice-reminder", v.ExistingSlug)
 	}
 }
 
@@ -175,8 +177,8 @@ func TestFindSimilarActive_DistinctSkills(t *testing.T) {
 	if v.Recommendation != "create_new" {
 		t.Fatalf("recommendation = %q (score %.3f), want create_new", v.Recommendation, v.Score)
 	}
-	if v.Existing != nil {
-		t.Fatalf("Existing = %+v, want nil for distinct skills", v.Existing)
+	if v.ExistingSlug != "" {
+		t.Fatalf("ExistingSlug = %q, want empty for distinct skills", v.ExistingSlug)
 	}
 }
 
@@ -224,8 +226,8 @@ func TestFindSimilarActive_AmbiguousRange(t *testing.T) {
 	if v.Recommendation != "ambiguous" {
 		t.Fatalf("recommendation = %q, want ambiguous", v.Recommendation)
 	}
-	if v.Existing == nil || v.Existing.Name != "draft-monthly-report" {
-		t.Fatalf("Existing = %+v, want pointer to draft-monthly-report", v.Existing)
+	if v.ExistingSlug != "draft-monthly-report" {
+		t.Fatalf("ExistingSlug = %q, want draft-monthly-report", v.ExistingSlug)
 	}
 }
 
@@ -247,8 +249,8 @@ func TestFindSimilarActive_SkipsSelf(t *testing.T) {
 
 	v := b.findSimilarActiveSkillLocked(context.Background(), spec)
 
-	if v.Existing != nil {
-		t.Fatalf("Existing = %+v, want nil (self-match must be skipped)", v.Existing)
+	if v.ExistingSlug != "" {
+		t.Fatalf("ExistingSlug = %q, want empty (self-match must be skipped)", v.ExistingSlug)
 	}
 	if v.Recommendation != "create_new" {
 		t.Fatalf("recommendation = %q, want create_new (catalog has no other skills to match)", v.Recommendation)
@@ -303,8 +305,8 @@ func TestFindSimilarActive_ActiveOnly(t *testing.T) {
 
 	v := b.findSimilarActiveSkillLocked(context.Background(), spec)
 
-	if v.Existing != nil {
-		t.Fatalf("Existing = %+v, want nil (no active skills should be eligible)", v.Existing)
+	if v.ExistingSlug != "" {
+		t.Fatalf("ExistingSlug = %q, want empty (no active skills should be eligible)", v.ExistingSlug)
 	}
 	if v.Recommendation != "create_new" {
 		t.Fatalf("recommendation = %q, want create_new (only inactive skills exist)", v.Recommendation)
@@ -379,5 +381,108 @@ func TestFindSimilarActive_EmbeddingCacheReusesAcrossCalls(t *testing.T) {
 
 	if afterSecond != beforeSecond {
 		t.Fatalf("expected no new embedder calls on second pass; before=%d after=%d", beforeSecond, afterSecond)
+	}
+}
+
+// PR 7 /review P1 verifies the lock-discipline fix: a slow embedder (1s
+// sleep per Embed call) must NOT freeze every other broker operation
+// behind a held b.mu. With the fix, b.mu is released for the embedding IO
+// phase and reacquired only briefly for snapshot + final scoring.
+//
+// Test shape: kick off a writeSkillProposalLocked in a goroutine that
+// blocks 1s in the stub embedder. Concurrently call /health and assert
+// the response lands well under 1s.
+func TestSimilarityHelper_DoesNotHoldLockDuringEmbed(t *testing.T) {
+	b := newTestBroker(t)
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("StartOnPort: %v", err)
+	}
+	defer b.Stop()
+
+	b.mu.Lock()
+	addSkill(b, "existing", "Existing skill.", "## Steps\n\n1. Do it.")
+	b.mu.Unlock()
+
+	// Stub embedder: 500ms sleep per Embed. Two embed calls (spec +
+	// existing) means the IO phase takes ~1s.
+	b.skillEmbedder = &stubEmbedder{vec: func(_ string) []float32 {
+		time.Sleep(500 * time.Millisecond)
+		return l2norm([]float32{1, 0, 0})
+	}}
+
+	// Start writeSkillProposalLocked in a goroutine so the main goroutine
+	// can probe /health while the embed sleeps.
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		spec := teamSkill{
+			Name:        "candidate",
+			Description: "A candidate skill.",
+			Content:     "## Steps\n\n1. Try it.",
+			CreatedBy:   "archivist",
+			Channel:     "general",
+			Status:      "proposed",
+		}
+		_, _ = callWriteSkillProposalLocked(b, spec)
+	}()
+
+	// Wait briefly for the goroutine to enter the embed phase.
+	time.Sleep(100 * time.Millisecond)
+
+	// Probe /health — must respond in well under 1s if b.mu is released
+	// for IO. Allow 300ms ceiling to absorb any test scheduler jitter.
+	healthURL := "http://" + b.Addr() + "/health"
+	probeStart := time.Now()
+	req, _ := http.NewRequest(http.MethodGet, healthURL, nil)
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	resp, err := http.DefaultClient.Do(req)
+	probeDuration := time.Since(probeStart)
+	if err != nil {
+		t.Fatalf("/health probe: %v", err)
+	}
+	resp.Body.Close()
+	if probeDuration > 300*time.Millisecond {
+		t.Errorf("/health blocked %v during embed — lock-discipline fix not working", probeDuration)
+	}
+
+	// Wait for the proposal write to complete so the test cleans up.
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("writeSkillProposalLocked never returned (embed deadlock?)")
+	}
+}
+
+// PR 7 /review P1: SimilarityVerdict carries flat ExistingSlug / Title /
+// Description fields, no pointer escape. This test guards the contract by
+// asserting the verdict is populated correctly without a *teamSkill.
+func TestSimilarityVerdict_FlatFieldsNoPointerEscape(t *testing.T) {
+	b := newTestBroker(t)
+
+	b.mu.Lock()
+	addSkill(b, "send-invoice-reminder", "AR follow-up.", "## Steps\n\n1. Send.")
+	b.mu.Unlock()
+
+	v := l2norm([]float32{1, 0, 0})
+	b.skillEmbedder = &stubEmbedder{vec: func(_ string) []float32 { return v }}
+
+	spec := teamSkill{
+		Name:        "invoice-d7-reminder",
+		Description: "AR reminder.",
+		Content:     "## Steps\n\n1. Send.",
+	}
+	verdict := b.findSimilarActiveSkillLocked(context.Background(), spec)
+
+	if verdict.ExistingSlug != "send-invoice-reminder" {
+		t.Errorf("ExistingSlug: got %q, want send-invoice-reminder", verdict.ExistingSlug)
+	}
+	if verdict.ExistingTitle == "" {
+		t.Error("ExistingTitle: empty (should snapshot from existing skill)")
+	}
+	if verdict.ExistingDescription != "AR follow-up." {
+		t.Errorf("ExistingDescription: got %q", verdict.ExistingDescription)
+	}
+	if verdict.Recommendation != "enhance_existing" {
+		t.Errorf("Recommendation: got %q, want enhance_existing", verdict.Recommendation)
 	}
 }
