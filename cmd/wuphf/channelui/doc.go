@@ -251,6 +251,13 @@
 //     terminal statuses), CountIsolatedRuntimeTasks (counts tasks
 //     in a "local_worktree" execution mode or with a non-empty
 //     WorktreePath / WorktreeBranch).
+//   - artifact_helpers.go  — execution-artifact stdlib leaves:
+//     SummarizeJSONField (TruncateText'd one-line summary of a
+//     json.RawMessage; unquotes JSON strings, compacts objects /
+//     arrays, falls through to trimmed raw on parse errors;
+//     "" for empty / "null"), TaskLogRoot (WUPHF_TASK_LOG_ROOT
+//     env var → ~/.wuphf/office/tasks → ".wuphf/office/tasks"
+//     fallback for the headless task-tool log root).
 //   - artifact_renderers.go — execution-artifacts subsection
 //     renderers: RenderArtifactSection (date separator + per-
 //     artifact card with TaskID / RequestID click-target wiring

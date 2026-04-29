@@ -306,6 +306,9 @@ var (
 	renderArtifactSection = channelui.RenderArtifactSection
 	renderArtifactHeader  = channelui.RenderArtifactHeader
 	artifactExtraLines    = channelui.ArtifactExtraLines
+
+	summarizeJSONField = channelui.SummarizeJSONField
+	taskLogRoot        = channelui.TaskLogRoot
 )
 
 // Workspace readiness level consts.

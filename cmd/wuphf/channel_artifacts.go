@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -207,22 +206,6 @@ func summarizeTaskLogRecord(record taskLogRecord) string {
 	return "Tool execution finished."
 }
 
-func summarizeJSONField(raw json.RawMessage, max int) string {
-	text := strings.TrimSpace(string(raw))
-	if text == "" || text == "null" {
-		return ""
-	}
-	var plain string
-	if err := json.Unmarshal(raw, &plain); err == nil {
-		return truncateText(strings.TrimSpace(plain), max)
-	}
-	var compact bytes.Buffer
-	if err := json.Compact(&compact, raw); err == nil {
-		return truncateText(compact.String(), max)
-	}
-	return truncateText(text, max)
-}
-
 func recentWorkflowRunArtifacts(limit int) []workflowRunArtifact {
 	root := filepath.Join(filepath.Dir(config.ConfigPath()), "workflows")
 	entries := []workflowRunArtifact{}
@@ -291,15 +274,4 @@ func readWorkflowRunArtifact(path string, info fs.FileInfo) (workflowRunArtifact
 	artifact.Path = path
 	artifact.UpdatedAt = info.ModTime()
 	return artifact, true
-}
-
-func taskLogRoot() string {
-	if root := strings.TrimSpace(os.Getenv("WUPHF_TASK_LOG_ROOT")); root != "" {
-		return root
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return filepath.Join(".wuphf", "office", "tasks")
-	}
-	return filepath.Join(home, ".wuphf", "office", "tasks")
 }
