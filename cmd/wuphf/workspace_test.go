@@ -760,3 +760,164 @@ func TestList_ErrorIsSurfaced(t *testing.T) {
 		t.Fatal("sentinel guard")
 	}
 }
+
+// ---------- render edge cases ----------
+
+func TestRenderList_NeverStartedWorkspaceFallsBack(t *testing.T) {
+	// A workspace row with an empty State should render as "never_started"
+	// rather than blank, so the table column doesn't go ragged.
+	ws := []Workspace{{Name: "fresh", BrokerPort: 7910, WebPort: 7911}}
+	var buf bytes.Buffer
+	if err := renderList(&buf, ListResult{Workspaces: ws}, false, false); err != nil {
+		t.Fatalf("renderList: %v", err)
+	}
+	if !strings.Contains(buf.String(), "never_started") {
+		t.Fatalf("expected never_started fallback, got %q", buf.String())
+	}
+}
+
+func TestRenderList_TrashJSON_RoundTrip(t *testing.T) {
+	// JSON shape must round-trip cleanly with both slices populated. Ensures
+	// the encoder doesn't drop fields and that the field tags remain stable
+	// for the consumer contract (registry-dump pipelines).
+	ts := time.Date(2026, 4, 28, 12, 0, 0, 0, time.UTC)
+	in := ListResult{
+		Workspaces: []Workspace{{Name: "main", State: WorkspaceStateRunning, BrokerPort: 7890, WebPort: 7891, CreatedAt: ts, LastUsedAt: ts}},
+		Trash:      []TrashEntry{{TrashID: "demo-1714305600", Name: "demo", ShreddedAt: ts}},
+	}
+	var buf bytes.Buffer
+	if err := renderList(&buf, in, true, false); err != nil {
+		t.Fatalf("renderList: %v", err)
+	}
+	var out ListResult
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(out.Workspaces) != 1 || out.Workspaces[0].Name != "main" {
+		t.Fatalf("workspaces did not round-trip: %+v", out)
+	}
+	if len(out.Trash) != 1 || out.Trash[0].TrashID != "demo-1714305600" {
+		t.Fatalf("trash did not round-trip: %+v", out)
+	}
+}
+
+func TestPrintWorkspaceHelp_DoesNotPanic(t *testing.T) {
+	// Smoke test: help printer writes to stderr without panicking. We don't
+	// pin exact copy because the help text is human-tunable.
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("printWorkspaceHelp panicked: %v", r)
+		}
+	}()
+	printWorkspaceHelp()
+}
+
+// ---------- WorkspaceState constants ----------
+
+func TestWorkspaceStateConstants_AreDistinct(t *testing.T) {
+	// Sanity: the JSON-rendered state strings must be unique. Catches a
+	// copy-paste regression where two states alias to the same string.
+	states := []WorkspaceState{
+		WorkspaceStateRunning,
+		WorkspaceStatePaused,
+		WorkspaceStateStarting,
+		WorkspaceStateStopping,
+		WorkspaceStateNeverStarted,
+		WorkspaceStateError,
+	}
+	seen := map[WorkspaceState]bool{}
+	for _, s := range states {
+		if seen[s] {
+			t.Fatalf("duplicate state value: %q", s)
+		}
+		seen[s] = true
+	}
+}
+
+func TestDoctorIssueKindConstants_AreDistinct(t *testing.T) {
+	// Same property as above for doctor issue kinds — they are user-visible
+	// in dry-run/JSON output.
+	kinds := []DoctorIssueKind{
+		DoctorIssueOrphanTree,
+		DoctorIssueZombieState,
+		DoctorIssuePortConflict,
+		DoctorIssueCorruptRegistry,
+		DoctorIssueOrphanedSymlink,
+		DoctorIssueMissingSymlink,
+		DoctorIssuePartialMigration,
+		DoctorIssueStoppingReconcile,
+		DoctorIssueExpiredTrashSweep,
+		DoctorIssueTokenFilePerm,
+		DoctorIssueOpencodeRaceConfig,
+	}
+	seen := map[DoctorIssueKind]bool{}
+	for _, k := range kinds {
+		if seen[k] {
+			t.Fatalf("duplicate kind value: %q", k)
+		}
+		seen[k] = true
+	}
+}
+
+// ---------- workspaceCtx / workspaceCtxLong ----------
+
+func TestWorkspaceCtx_HasShortDeadline(t *testing.T) {
+	ctx, cancel := workspaceCtx()
+	defer cancel()
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		t.Fatal("expected deadline on workspaceCtx")
+	}
+	if time.Until(deadline) > 11*time.Second {
+		t.Fatalf("expected ≤10s deadline, got %s", time.Until(deadline))
+	}
+}
+
+func TestWorkspaceCtxLong_HasLongDeadline(t *testing.T) {
+	ctx, cancel := workspaceCtxLong()
+	defer cancel()
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		t.Fatal("expected deadline on workspaceCtxLong")
+	}
+	if time.Until(deadline) < 30*time.Second {
+		t.Fatalf("expected ≥30s deadline, got %s", time.Until(deadline))
+	}
+	if time.Until(deadline) > 61*time.Second {
+		t.Fatalf("expected ≤60s deadline, got %s", time.Until(deadline))
+	}
+}
+
+// ---------- doctor: detail line + auto-yes fail handling ----------
+
+func TestDoctor_DetailLineRendered(t *testing.T) {
+	fake := &fakeWorkspaceOrchestrator{}
+	report := DoctorReport{Issues: []DoctorIssue{
+		{Kind: DoctorIssueOrphanTree, Subject: "foo", Detail: "tree at ~/.wuphf-spaces/foo without registry entry", FixID: "x"},
+	}}
+	var out bytes.Buffer
+	if err := runDoctorIssueLoop(context.Background(), fake, report, strings.NewReader(""), &out, doctorModeDryRun); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if !strings.Contains(out.String(), "tree at ~/.wuphf-spaces/foo") {
+		t.Fatalf("expected detail rendered, got %q", out.String())
+	}
+}
+
+func TestDoctor_AutoYes_StopsOnFirstError(t *testing.T) {
+	// Even in --yes mode, the first error stops further fixes (matches
+	// interactive semantics so scripts get the same fail-fast posture).
+	fake := &fakeWorkspaceOrchestrator{fixErr: errors.New("disk full")}
+	report := DoctorReport{Issues: []DoctorIssue{
+		{Kind: DoctorIssueOrphanTree, Subject: "a", FixID: "fix-a"},
+		{Kind: DoctorIssueZombieState, Subject: "b", FixID: "fix-b"},
+	}}
+	var out bytes.Buffer
+	err := runDoctorIssueLoop(context.Background(), fake, report, strings.NewReader(""), &out, doctorModeAutoYes)
+	if err == nil {
+		t.Fatal("expected error from failed fix")
+	}
+	if len(fake.fixCalls) != 1 {
+		t.Fatalf("expected 1 fix attempt before stopping, got %d", len(fake.fixCalls))
+	}
+}
