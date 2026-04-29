@@ -14,8 +14,43 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/nex-crm/wuphf/internal/buildinfo"
 	"github.com/nex-crm/wuphf/internal/upgradecheck"
 )
+
+// TestHandleVersion_ReturnsBuildInfoJSON pins the wire shape for
+// /version: a 200 with Content-Type application/json carrying the
+// fields exposed by buildinfo.Current(). The web app's About panel and
+// the upgrade banner both read this; if the contract drifts they break
+// silently, hence the characterization test.
+func TestHandleVersion_ReturnsBuildInfoJSON(t *testing.T) {
+	b := newTestBroker(t)
+	srv := httptest.NewServer(http.HandlerFunc(b.handleVersion))
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	if got := resp.Header.Get("Content-Type"); got != "application/json" {
+		t.Errorf("Content-Type: want application/json, got %q", got)
+	}
+	var got buildinfo.Info
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	want := buildinfo.Current()
+	if got.Version != want.Version {
+		t.Errorf("Version: want %q, got %q", want.Version, got.Version)
+	}
+	if got.BuildTimestamp != want.BuildTimestamp {
+		t.Errorf("BuildTimestamp: want %q, got %q", want.BuildTimestamp, got.BuildTimestamp)
+	}
+}
 
 // resetUpgradeCaches wipes the package-level upgrade cache state between
 // tests so a stale entry from one test can't satisfy another.
