@@ -15,10 +15,15 @@ import (
 	"github.com/nex-crm/wuphf/internal/config"
 )
 
-// TestHasUnresolvedDepsLocked_OnlyDoneCounts pins the contract: a
-// dependency resolves only when its Status is "done". Cancelled,
+// TestHasUnresolvedDepsLocked_OnlyDoneCounts pins the *current* contract:
+// a dependency resolves only when its Status is "done". Cancelled,
 // blocked, in_progress, and missing IDs all count as unresolved so the
 // dependent task stays blocked until explicit completion.
+//
+// TODO(broker-deps): cancelled is asymmetric vs requestIsResolvedLocked
+// (which treats a cancelled humanInterview as resolved). When that
+// asymmetry is fixed in hasUnresolvedDepsLocked, soften the cancelled
+// case here from `true` to `false` and add a cascade-cancel test.
 func TestHasUnresolvedDepsLocked_OnlyDoneCounts(t *testing.T) {
 	b := newTestBroker(t)
 	b.mu.Lock()

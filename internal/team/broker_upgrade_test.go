@@ -39,9 +39,28 @@ func TestHandleVersion_ReturnsBuildInfoJSON(t *testing.T) {
 	if got := resp.Header.Get("Content-Type"); got != "application/json" {
 		t.Errorf("Content-Type: want application/json, got %q", got)
 	}
-	var got buildinfo.Info
-	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+	// Decode into a generic map first so the JSON keys themselves are pinned.
+	// Decoding straight into buildinfo.Info would silently absorb a future
+	// rename of the struct fields + json tags together — the wire shape is
+	// what the web UI reads, and that's what the test must lock.
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(body, &raw); err != nil {
 		t.Fatalf("decode: %v", err)
+	}
+	for _, key := range []string{"version", "build_timestamp"} {
+		if _, ok := raw[key]; !ok {
+			t.Errorf("missing JSON key %q in body: %s", key, string(body))
+		}
+	}
+	// Also pin the values match buildinfo.Current() so the encoder isn't
+	// silently writing wrong content.
+	var got buildinfo.Info
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("decode into Info: %v", err)
 	}
 	want := buildinfo.Current()
 	if got.Version != want.Version {

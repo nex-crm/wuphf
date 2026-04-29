@@ -7,6 +7,10 @@ import (
 	"strings"
 )
 
+// RecordPolicy adds a new active policy or reactivates an existing one.
+// Deduplicates by case-insensitive rule text — re-recording the same
+// rule (any casing) returns the original record with Active flipped
+// back on rather than minting a duplicate.
 func (b *Broker) RecordPolicy(source, rule string) (officePolicy, error) {
 	rule = strings.TrimSpace(rule)
 	if rule == "" {
@@ -41,6 +45,12 @@ func (b *Broker) ListPolicies() []officePolicy {
 	return out
 }
 
+// policyRequestMaxBodyBytes caps incoming policy rule bodies. A
+// single rule + source string fits in well under 4 KiB; cap higher to
+// allow longer human-typed rationale, but reject anything that's
+// clearly not a policy.
+const policyRequestMaxBodyBytes = 16 << 10
+
 func (b *Broker) handlePolicies(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
@@ -56,6 +66,8 @@ func (b *Broker) handlePolicies(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"policies": out})
 
 	case http.MethodPost:
+		r.Body = http.MaxBytesReader(w, r.Body, policyRequestMaxBodyBytes)
+		defer r.Body.Close()
 		var body struct {
 			Source string `json:"source"`
 			Rule   string `json:"rule"`

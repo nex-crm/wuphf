@@ -247,11 +247,19 @@ func firstStudioString(values ...any) string {
 	return ""
 }
 
+// studioRequestMaxBodyBytes caps Studio HTTP request bodies. 1 MiB
+// comfortably fits a workspace + run + offer payload; anything larger
+// is either a bug, a malformed paste from the UI, or a hostile input.
+const studioRequestMaxBodyBytes = 1 << 20
+
 func (b *Broker) handleStudioGeneratePackage(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, studioRequestMaxBodyBytes)
+	defer r.Body.Close()
+
 	var body struct {
 		Channel   string                    `json:"channel"`
 		Actor     string                    `json:"actor"`
@@ -570,6 +578,9 @@ func (b *Broker) handleStudioRunWorkflow(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, studioRequestMaxBodyBytes)
+	defer r.Body.Close()
+
 	var body struct {
 		Channel            string          `json:"channel"`
 		Actor              string          `json:"actor"`

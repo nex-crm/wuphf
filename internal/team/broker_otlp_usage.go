@@ -27,11 +27,24 @@ func (b *Broker) handleUsage(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(usage)
 }
 
+// otlpLogsMaxBodyBytes caps incoming OTLP-log payloads so an authenticated
+// agent that emits a runaway batch can't grow broker memory unbounded.
+// 4 MiB comfortably fits a normal claude-code turn's telemetry; anything
+// larger is almost certainly a bug or hostile input.
+const otlpLogsMaxBodyBytes = 4 << 20
+
 func (b *Broker) handleOTLPLogs(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	// Bound the body BEFORE decoding so a 1 GiB payload can't tie up
+	// the decoder's read path. MaxBytesReader returns *http.MaxBytesError
+	// which json.Decoder surfaces as a generic decode error; that's
+	// fine — the client gets a 400 either way.
+	r.Body = http.MaxBytesReader(w, r.Body, otlpLogsMaxBodyBytes)
+	defer r.Body.Close()
+
 	var payload map[string]any
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)

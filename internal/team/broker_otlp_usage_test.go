@@ -63,8 +63,45 @@ func TestApplyUsageEvent_AccumulatesAcrossCalls(t *testing.T) {
 	if dst.TotalTokens != 495 {
 		t.Errorf("TotalTokens: want 495 (sum of all four token fields), got %d", dst.TotalTokens)
 	}
-	if diff := dst.CostUsd - 0.30; diff > 1e-9 || diff < -1e-9 {
+	// Tighten tolerance to 1e-12 — sums of two cents-scale floats fit
+	// in ~5e-17 ULP, so a regression that drops to float32 (~1e-7) or
+	// flips to integer rounding will trip immediately.
+	if diff := dst.CostUsd - 0.30; diff > 1e-12 || diff < -1e-12 {
 		t.Errorf("CostUsd: want ~0.30, got %v", dst.CostUsd)
+	}
+}
+
+// TestMessageIsWithinUsageAttachWindow_BoundaryCases pins the four
+// branches: empty timestamp returns true (pre-attach window), parseable
+// RFC3339 < window returns true, parseable RFC3339 >= window returns
+// false, and unparseable timestamps return true (defensive — the helper
+// elsewhere walks backwards stopping at the first out-of-window match,
+// so unparseable means "treat as in-window so the walk continues").
+func TestMessageIsWithinUsageAttachWindow_BoundaryCases(t *testing.T) {
+	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+
+	cases := []struct {
+		name      string
+		timestamp string
+		want      bool
+	}{
+		{"empty", "", true},
+		{"whitespace", "   ", true},
+		{"in-window 1m ago", now.Add(-time.Minute).Format(time.RFC3339), true},
+		{"on-boundary exactly 15m", now.Add(-messageUsageAttachMaxAge).Format(time.RFC3339), true},
+		{"out-of-window 16m ago", now.Add(-16 * time.Minute).Format(time.RFC3339), false},
+		{"future timestamp", now.Add(time.Minute).Format(time.RFC3339), true},
+		{"unparseable", "not-a-time", true},
+		// RFC3339Nano fallback — second strict-RFC3339 parse fails but
+		// the Nano variant succeeds.
+		{"rfc3339nano in-window", now.Add(-30 * time.Second).Format(time.RFC3339Nano), true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := messageIsWithinUsageAttachWindow(tc.timestamp, now); got != tc.want {
+				t.Errorf("messageIsWithinUsageAttachWindow(%q): want %v, got %v", tc.timestamp, tc.want, got)
+			}
+		})
 	}
 }
 

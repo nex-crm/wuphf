@@ -306,6 +306,12 @@ func (b *Broker) handleReactions(w http.ResponseWriter, r *http.Request) {
 }
 
 // RecordTelegramGroup saves a group chat ID and title seen by the transport.
+//
+// TODO(broker-split): RecordTelegramGroup, SeenTelegramGroups, and
+// MarkRoutingTargets below are transport-bridging adjacent rather than
+// pure messaging. They co-locate here for now because the telegram
+// transport flows them through PostInboundSurfaceMessage; a future
+// pass should consider a broker_transport.go.
 func (b *Broker) RecordTelegramGroup(chatID int64, title string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -749,10 +755,6 @@ func (b *Broker) isOneOnOneDMMessage(msg channelMessage) bool {
 	}
 }
 
-// capturePaneActivity captures tmux pane content for each agent and detects
-// activity by comparing with the previous snapshot. If content changed,
-// the agent is active and we return the last 5 non-empty lines as a stream.
-
 func FormatChannelView(messages []channelMessage) string {
 	if len(messages) == 0 {
 		return "  No messages yet. The team is getting set up..."
@@ -804,7 +806,3 @@ func formatMessageUsageSuffix(usage *messageUsage) string {
 	}
 	return fmt.Sprintf(" [%d tok]", total)
 }
-
-// --------------- Skills ---------------
-
-// dirExists returns true if path exists and is a directory.

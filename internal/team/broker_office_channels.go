@@ -108,6 +108,12 @@ func validateProviderEndpointURL(raw string) error {
 // settings page and onboarding wizard. All POST fields are optional; clients
 // can update one without touching the others. Secret fields (API keys, tokens)
 // are returned as boolean flags on GET and accepted as plain values on POST.
+//
+// TODO(broker-split): this 400-line handler is ripe for a parser/applier
+// split — see the broker.go decomposition plan. Currently a faithful
+// monolithic relocation; the validation, secret-mask, and persistence
+// concerns should be isolated in a follow-up pass once the slice series
+// has soaked.
 func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
@@ -553,6 +559,9 @@ func (b *Broker) handleNexRegister(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// TODO(broker-split): this 380-line handler mixes parsing, validation,
+// channel-membership maintenance, and persistence. Faithful monolithic
+// relocation for now — split into parser/applier in a follow-up pass.
 func (b *Broker) handleOfficeMembers(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:

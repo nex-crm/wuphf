@@ -198,9 +198,29 @@ func TestHandleStudioRunWorkflow_RejectsNonPostMethods(t *testing.T) {
 	}
 }
 
-// TestNormalizeStudioWorkflowDefinition_RoundTrip pins the three branches
-// of the normaliser: empty / null → nil, JSON-string-wrapped → unwrapped,
-// raw JSON object → passed through.
+// TestHandleStudioRunWorkflow_RequiresAuth pins that /studio/run-workflow
+// rejects unauthenticated callers. Mirrors the GeneratePackage auth test
+// — the endpoint can spawn external workflow providers and consume budget,
+// so the auth gate must be locked at the relocation boundary.
+func TestHandleStudioRunWorkflow_RequiresAuth(t *testing.T) {
+	b := newTestBroker(t)
+	srv := httptest.NewServer(b.requireAuth(b.handleStudioRunWorkflow))
+	defer srv.Close()
+
+	resp, err := http.Post(srv.URL, "application/json", strings.NewReader("{}"))
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("expected 401, got %d", resp.StatusCode)
+	}
+}
+
+// TestNormalizeStudioWorkflowDefinition_RoundTrip pins all branches of
+// the normaliser: empty / null → nil, JSON-string-wrapped → unwrapped,
+// raw JSON object → passed through, post-unwrap whitespace → nil, and
+// malformed JSON-string-wrapped input → error.
 func TestNormalizeStudioWorkflowDefinition_RoundTrip(t *testing.T) {
 	cases := []struct {
 		name string
@@ -213,6 +233,9 @@ func TestNormalizeStudioWorkflowDefinition_RoundTrip(t *testing.T) {
 		{"json-string wrap", `"{\"steps\":[]}"`, `{"steps":[]}`},
 		{"raw object", `{"steps":[]}`, `{"steps":[]}`},
 		{"trim outer", "  {\"a\":1}  ", `{"a":1}`},
+		// Post-unwrap whitespace must collapse to nil so the workflow
+		// runner sees "no definition" rather than an empty buffer.
+		{"json-string wrap whitespace", `"   "`, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -224,6 +247,13 @@ func TestNormalizeStudioWorkflowDefinition_RoundTrip(t *testing.T) {
 				t.Errorf("want %q, got %q", tc.want, string(got))
 			}
 		})
+	}
+
+	// Error path: a JSON-string opener with no closing quote must
+	// surface the unmarshal error rather than silently returning the
+	// raw bytes.
+	if _, err := normalizeStudioWorkflowDefinition(json.RawMessage(`"unterminated`)); err == nil {
+		t.Error("expected error on unterminated JSON-string wrap, got nil")
 	}
 }
 

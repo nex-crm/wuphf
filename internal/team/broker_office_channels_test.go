@@ -50,14 +50,17 @@ func TestHandleGenerateMember_RejectsNonPostAndUnauth(t *testing.T) {
 
 // TestHandleCreateDM_RequiresPOST locks the method gate. The handler
 // mutates broker state (creates a channel) so drift to allow GET would
-// open it to log-tailing tools and CSRF.
+// open it to log-tailing tools and CSRF. Wrap with b.requireAuth so
+// the auth gate is also pinned — a regression that drops requireAuth
+// from the route registration would otherwise be invisible.
 func TestHandleCreateDM_RequiresPOST(t *testing.T) {
 	b := newTestBroker(t)
-	srv := httptest.NewServer(http.HandlerFunc(b.handleCreateDM))
+	srv := httptest.NewServer(b.requireAuth(b.handleCreateDM))
 	defer srv.Close()
 
 	for _, method := range []string{http.MethodGet, http.MethodPut, http.MethodDelete} {
 		req, _ := http.NewRequest(method, srv.URL, nil)
+		req.Header.Set("Authorization", "Bearer "+b.Token())
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatalf("%s: %v", method, err)
@@ -66,6 +69,16 @@ func TestHandleCreateDM_RequiresPOST(t *testing.T) {
 		if resp.StatusCode != http.StatusMethodNotAllowed {
 			t.Errorf("%s: expected 405, got %d", method, resp.StatusCode)
 		}
+	}
+
+	// Auth gate: unauthenticated POST must 401, not 4xx-from-handler.
+	resp, err := http.Post(srv.URL, "application/json", strings.NewReader("{}"))
+	if err != nil {
+		t.Fatalf("unauth post: %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("unauth POST: expected 401, got %d", resp.StatusCode)
 	}
 }
 

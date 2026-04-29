@@ -1590,6 +1590,16 @@ func appendTaskDetailLocked(task *teamTask, detail string) error {
 }
 
 // hasUnresolvedDepsLocked returns true if any of the task's dependencies are not done.
+//
+// TODO(broker-deps): cancelled task dependencies currently count as
+// "unresolved", so cancelling a parent leaves every dependent task
+// permanently blocked (unblockDependentsLocked only fires on
+// Status="done"). This is asymmetric with requestIsResolvedLocked,
+// which treats a cancelled humanInterview as resolved. Either treat
+// cancelled task-deps as resolved (mirror request-deps) or
+// cascade-cancel dependents when a parent is cancelled. The
+// TestHasUnresolvedDepsLocked_OnlyDoneCounts test pins the current
+// behavior; soften that pin when fixing here.
 func (b *Broker) hasUnresolvedDepsLocked(task *teamTask) bool {
 	for _, depID := range task.DependsOn {
 		if requestIsResolvedLocked(b.requests, depID) {
