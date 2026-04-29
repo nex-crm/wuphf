@@ -55,7 +55,9 @@ type Workspace struct {
 }
 
 // spacesDir returns ~/.wuphf-spaces using config.RuntimeHomeDir() as the
-// user home base. Do NOT call os.UserHomeDir() directly in this package.
+// user home base. Always go through RuntimeHomeDir in this package — the
+// stdlib home-dir helper would bypass WUPHF_RUNTIME_HOME and break workspace
+// isolation. The Phase-0 audit test enforces this.
 func spacesDir() (string, error) {
 	home := config.RuntimeHomeDir()
 	if home == "" {
