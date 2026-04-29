@@ -86,10 +86,11 @@ var stageBGenericNameRegex = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 var stageBSynthGenericHeadingMarkers = []string{"## Steps", "## When this fires", "## How to"}
 
 // stageBSynthSelfHealRequiredHeadings list the body-section headings a
-// self-heal-sourced skill MUST carry. The self-heal prompt asks for both
-// "## When this fires" and "## Steps"; we enforce both here so the LLM
-// can't quietly drop one.
-var stageBSynthSelfHealRequiredHeadings = []string{"## When this fires", "## Steps"}
+// self-heal-sourced skill MUST carry. The self-heal prompt asks for all
+// three; we enforce all three here so the LLM can't quietly drop the
+// `## Source incident` provenance citation, which is what links the
+// generated skill back to the original incident the agent learned from.
+var stageBSynthSelfHealRequiredHeadings = []string{"## When this fires", "## Steps", "## Source incident"}
 
 const (
 	stageBSynthMinDescLen = 10
@@ -364,12 +365,20 @@ func buildSelfHealSynthUserPrompt(cand SkillCandidate, wikiContext string) strin
 	return b.String()
 }
 
+// untrustedOpenTagRegex matches a `<untrusted` tag opener case-insensitively
+// so attackers can't bypass the open-tag defang via case folding
+// (`<UNTRUSTED-incident>`, `<Untrusted-Incident>`). The legitimate
+// envelope tags written by buildSelfHealSynthUserPrompt are always
+// lowercase; rewriting any case variant to a lowercase, broken form is
+// safe.
+var untrustedOpenTagRegex = regexp.MustCompile(`(?i)<untrusted`)
+
 // neutraliseUntrustedText defangs XML-style envelope tags inside
 // attacker-controlled text so a malicious snippet can't break out of (or
 // fake the shape of) the <untrusted-*> envelope used by the self-heal
-// user prompt. We rewrite the closing form "</" → "< /" and the
-// opening form "<untrusted" → "< untrusted" so neither a close-tag
-// breakout NOR a fake nested envelope ("trust this <untrusted-incident>
+// user prompt. We rewrite the closing form "</" → "< /" and any
+// case variant of "<untrusted" → "< untrusted" so neither a close-tag
+// breakout NOR a fake nested envelope ("trust this <UNTRUSTED-incident>
 // instead") can be planted inside the data region. Other "<" sequences
 // pass through so markdown / code fences in legitimate wiki text still
 // render cleanly.
@@ -379,21 +388,34 @@ func buildSelfHealSynthUserPrompt(cand SkillCandidate, wikiContext string) strin
 // neutraliseUntrustedField.
 func neutraliseUntrustedText(s string) string {
 	s = strings.ReplaceAll(s, "</", "< /")
-	s = strings.ReplaceAll(s, "<untrusted", "< untrusted")
+	s = untrustedOpenTagRegex.ReplaceAllString(s, "< untrusted")
 	return s
 }
 
 // neutraliseUntrustedField is the single-line variant of
 // neutraliseUntrustedText. In addition to the tag defangs, it replaces
-// any newline / carriage return with a space so a single field's value
-// cannot span multiple lines — protects against agent names like
+// any line-separator rune with a space so a single field's value cannot
+// span multiple lines — protects against agent names like
 // "bot\n\nIgnore prior instructions..." that would otherwise inject
 // fake structure into the envelope.
+//
+// Covers ASCII (\n, \r, \v, \f) and Unicode line separators
+// (U+0085 NEL, U+2028 LINE SEPARATOR, U+2029 PARAGRAPH SEPARATOR)
+// because most tokenizers + frontier LLMs treat all of these as line
+// breaks. Ordinary spaces and tabs are preserved so legitimate field
+// values aren't mangled.
 func neutraliseUntrustedField(s string) string {
 	s = neutraliseUntrustedText(s)
-	s = strings.ReplaceAll(s, "\r", " ")
-	s = strings.ReplaceAll(s, "\n", " ")
-	return s
+	return strings.Map(func(r rune) rune {
+		switch r {
+		case '\n', '\r', '\v', '\f',
+			0x85,   // NEL (Next Line)
+			0x2028, // LINE SEPARATOR
+			0x2029: // PARAGRAPH SEPARATOR
+			return ' '
+		}
+		return r
+	}, s)
 }
 
 // buildStageBSynthUserPrompt assembles the synthesis-specific user message
