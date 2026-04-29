@@ -258,7 +258,7 @@ func publishViaGH(p publishParams) (string, error) {
 	// 1. Fork (idempotent — re-running a publish reuses the existing fork).
 	//    gh prints to stderr when the fork already exists; we only fail on a
 	//    non-zero exit because that signals a real auth/network problem.
-	if err := runGH(tmpDir, env, "repo", "fork", p.hubRepo, "--clone=false"); err != nil {
+	if err := runGH(p.ctx, tmpDir, env, "repo", "fork", p.hubRepo, "--clone=false"); err != nil {
 		return "", fmt.Errorf("fork %s: %w", p.hubRepo, err)
 	}
 
@@ -267,13 +267,27 @@ func publishViaGH(p publishParams) (string, error) {
 	//    auto-rewrite to the fork). Earlier versions of this code cloned
 	//    p.hubRepo directly, which silently cloned the read-only upstream
 	//    and then failed at `git push`.
-	authUser, err := captureGH(tmpDir, env, "api", "user", "--jq", ".login")
+	//
+	//    A token without `read:user` scope returns either a 4xx error or a
+	//    body without `.login`. Surface enough detail so the user can
+	//    distinguish "token lacks scope" from "not logged in" — the
+	//    previous error message steered all failures toward
+	//    `gh auth login`, which is the wrong fix for token-based auth.
+	authUser, err := captureGH(p.ctx, tmpDir, env, "api", "user", "--jq", ".login // .message // empty")
 	if err != nil {
-		return "", fmt.Errorf("resolve gh auth user: %w", err)
+		return "", fmt.Errorf("resolve gh auth user via `gh api user`: %w (your token may lack `read:user` scope; for fine-grained tokens, ensure the user metadata permission is enabled)", err)
 	}
 	authUser = strings.TrimSpace(authUser)
 	if authUser == "" {
-		return "", fmt.Errorf("gh api user returned empty login (is `gh auth login` complete?)")
+		// `gh api user --jq` returned empty stdout. Re-fetch the raw body
+		// for diagnostics so the caller can see whatever GitHub actually
+		// said (token revoked, scope missing, installation token, etc.).
+		raw, _ := captureGH(p.ctx, tmpDir, env, "api", "user")
+		return "", fmt.Errorf("gh api user did not return a `.login` field — gh response was: %s (likely missing `read:user` scope or an installation/app token)", strings.TrimSpace(raw))
+	}
+	if strings.HasPrefix(authUser, "Bad credentials") || strings.HasPrefix(authUser, "Resource not accessible") || strings.Contains(authUser, "Not Found") {
+		// `.message` came back instead of `.login` — surface verbatim.
+		return "", fmt.Errorf("gh api user failed: %s", authUser)
 	}
 	_, hubName, ok := strings.Cut(p.hubRepo, "/")
 	if !ok || hubName == "" {
@@ -282,30 +296,37 @@ func publishViaGH(p publishParams) (string, error) {
 	forkRepo := authUser + "/" + hubName
 
 	// GitHub's fork API returns before the fork is fully provisioned. Try
-	// the clone up to 3× with a short backoff so a brand-new fork has time
-	// to land. Same backoff we use elsewhere for eventual-consistency calls.
+	// the clone up to 3× with a 2/4/8s backoff so a brand-new fork has
+	// time to land — gh's own retry loop in `gh repo fork --clone` waits
+	// up to ~30s, so 14s of backoff plus the gh request times themselves
+	// is in the right ballpark for new orgs / first-time forks.
 	cloneDir := filepath.Join(tmpDir, "fork")
+	cloneBackoff := []time.Duration{2 * time.Second, 4 * time.Second, 8 * time.Second}
 	var cloneErr error
 	for i := 0; i < 3; i++ {
-		cloneErr = runGH(tmpDir, env, "repo", "clone", forkRepo, cloneDir, "--", "--depth=1", "--branch="+p.baseBranch)
+		cloneErr = runGH(p.ctx, tmpDir, env, "repo", "clone", forkRepo, cloneDir, "--", "--depth=1", "--branch="+p.baseBranch)
 		if cloneErr == nil {
 			break
 		}
 		// Remove any partial clone before retrying so the next attempt
 		// can start fresh.
 		_ = os.RemoveAll(cloneDir)
+		// Last attempt: don't sleep, just fall through.
+		if i == 2 {
+			break
+		}
 		select {
 		case <-p.ctx.Done():
 			return "", fmt.Errorf("clone fork cancelled: %w", p.ctx.Err())
-		case <-time.After(time.Duration(1+i) * time.Second):
+		case <-time.After(cloneBackoff[i]):
 		}
 	}
 	if cloneErr != nil {
-		return "", fmt.Errorf("clone fork %s after 3 attempts: %w", forkRepo, cloneErr)
+		return "", fmt.Errorf("clone fork %s after 3 attempts (~14s of backoff): %w", forkRepo, cloneErr)
 	}
 
 	// 3. Branch from base.
-	if err := runGit(cloneDir, env, "checkout", "-b", p.branch); err != nil {
+	if err := runGit(p.ctx, cloneDir, env, "checkout", "-b", p.branch); err != nil {
 		return "", fmt.Errorf("create branch: %w", err)
 	}
 
@@ -319,17 +340,17 @@ func publishViaGH(p publishParams) (string, error) {
 	}
 
 	// 5. Commit + push + PR.
-	if err := runGit(cloneDir, env, "add", p.hubFile); err != nil {
+	if err := runGit(p.ctx, cloneDir, env, "add", p.hubFile); err != nil {
 		return "", fmt.Errorf("git add: %w", err)
 	}
-	if err := runGit(cloneDir, env, "commit", "-m", p.commitMsg); err != nil {
+	if err := runGit(p.ctx, cloneDir, env, "commit", "-m", p.commitMsg); err != nil {
 		return "", fmt.Errorf("git commit: %w", err)
 	}
-	if err := runGit(cloneDir, env, "push", "-u", "origin", p.branch); err != nil {
+	if err := runGit(p.ctx, cloneDir, env, "push", "-u", "origin", p.branch); err != nil {
 		return "", fmt.Errorf("git push: %w", err)
 	}
 
-	prURL, err := captureGH(cloneDir, env,
+	prURL, err := captureGH(p.ctx, cloneDir, env,
 		"pr", "create",
 		"--repo", p.hubRepo,
 		"--base", p.baseBranch,
@@ -344,9 +365,11 @@ func publishViaGH(p publishParams) (string, error) {
 }
 
 // runGH wraps `gh` with a timeout, dir, env, and stderr passthrough so the
-// user sees gh's own diagnostics inline.
-func runGH(dir string, env []string, args ...string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), ghCommandTimeout)
+// user sees gh's own diagnostics inline. The parent ctx (from
+// signal.NotifyContext) is honoured so a Ctrl-C during a long clone /
+// push / pr-create cancels cleanly.
+func runGH(parent context.Context, dir string, env []string, args ...string) error {
+	ctx, cancel := context.WithTimeout(parent, ghCommandTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "gh", args...)
 	cmd.Dir = dir
@@ -357,9 +380,9 @@ func runGH(dir string, env []string, args ...string) error {
 }
 
 // captureGH is runGH but with stdout captured (used by `gh pr create` so we
-// can echo back the PR URL).
-func captureGH(dir string, env []string, args ...string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), ghCommandTimeout)
+// can echo back the PR URL). Honours the parent ctx for cancellation.
+func captureGH(parent context.Context, dir string, env []string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(parent, ghCommandTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "gh", args...)
 	cmd.Dir = dir
@@ -375,9 +398,10 @@ func captureGH(dir string, env []string, args ...string) (string, error) {
 
 // runGit shells out to git. We rely on the user's git binary rather than
 // importing a pure-Go implementation because it inherits the user's
-// credential helper, gpg signing, etc.
-func runGit(dir string, env []string, args ...string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), ghCommandTimeout)
+// credential helper, gpg signing, etc. Honours the parent ctx for
+// cancellation so push/checkout/commit can be interrupted.
+func runGit(parent context.Context, dir string, env []string, args ...string) error {
+	ctx, cancel := context.WithTimeout(parent, ghCommandTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
@@ -467,6 +491,11 @@ func skillpublishFrontmatterFromTeam(fm team.SkillFrontmatter) skillpublish.Fron
 
 // buildPublishPRBody composes the PR body. Defaults to the skill's
 // description; appends caller-provided extra prose under it.
+//
+// Provenance is captured by m.Source (sanitised to [a-z0-9-]). We do
+// NOT include the local working directory — PRs land in a public hub
+// repo and `Workspace: /Users/<name>/...` would leak the user's home
+// directory layout to anyone reading the PR.
 func buildPublishPRBody(m skillpublish.Manifest, extra string) string {
 	var b strings.Builder
 	b.WriteString(m.Description)
@@ -474,9 +503,6 @@ func buildPublishPRBody(m skillpublish.Manifest, extra string) string {
 	b.WriteString(fmt.Sprintf("Skill: `%s` (v%s, %s)\n", m.Name, m.Version, m.License))
 	b.WriteString(fmt.Sprintf("Source: `%s` (published via WUPHF skills compiler)\n", m.Source))
 	b.WriteString(fmt.Sprintf("Published at: %s\n", m.PublishedAt))
-	if cwd, err := os.Getwd(); err == nil {
-		b.WriteString(fmt.Sprintf("Workspace: `%s`\n", cwd))
-	}
 	if strings.TrimSpace(extra) != "" {
 		b.WriteString("\n")
 		b.WriteString(strings.TrimSpace(extra))
@@ -583,6 +609,11 @@ func runSkillsInstall(args []string) {
 // fetchURL grabs a public raw URL with a bounded timeout and returns the
 // response body. 4 MiB cap is plenty for a SKILL.md and refuses gigantic
 // payloads accidentally hosted at the path.
+//
+// Redirects are restricted to GitHub's raw-content host. Without this
+// guard a malicious `github:` hub could 302 the install fetch to an
+// attacker-controlled host, and the post-install BuildManifest +
+// broker POST would then accept content from anywhere.
 func fetchURL(ctx context.Context, rawURL string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, skillsHTTPTimeout)
 	defer cancel()
@@ -590,13 +621,25 @@ func fetchURL(ctx context.Context, rawURL string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	res, err := http.DefaultClient.Do(req)
+	client := &http.Client{
+		Timeout: skillsHTTPTimeout,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 5 {
+				return fmt.Errorf("too many redirects")
+			}
+			if req.URL.Host != "raw.githubusercontent.com" {
+				return fmt.Errorf("refusing redirect to non-raw-github host %q (a hub redirected the install fetch off-platform)", req.URL.Host)
+			}
+			return nil
+		},
+	}
+	res, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer res.Body.Close()
 	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("HTTP %d", res.StatusCode)
+		return nil, fmt.Errorf("HTTP %d from %s", res.StatusCode, rawURL)
 	}
 	return io.ReadAll(io.LimitReader(res.Body, 4*1024*1024))
 }

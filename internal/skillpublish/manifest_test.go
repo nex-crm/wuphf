@@ -98,21 +98,15 @@ func TestBuildManifest_RejectsPathTraversalName(t *testing.T) {
 	cases := []string{
 		"../../etc/passwd",
 		"web/../research",
-		"web research",  // space
-		"web.research",  // dot
-		"WEB-RESEARCH",  // uppercase
-		"-leading-dash", // leading dash
-		"trailing-",     // trailing dash is fine for the regex actually — but length cap covers absurd inputs
-		strings.Repeat("a", 100),
+		"web research",           // space
+		"web.research",           // dot
+		"WEB-RESEARCH",           // uppercase
+		"-leading-dash",          // leading dash
+		strings.Repeat("a", 100), // exceeds 64-char length cap
 		"name/with/slash",
 		"",
 	}
-	// "trailing-" actually passes the regex above; remove it from the
-	// rejection list so we only assert genuinely malicious shapes.
 	for _, name := range cases {
-		if name == "trailing-" {
-			continue
-		}
 		t.Run("reject_"+name, func(t *testing.T) {
 			fm := FrontmatterLike{Name: name, Description: "x"}
 			_, err := BuildManifest(fm, "body", "repo", time.Time{})

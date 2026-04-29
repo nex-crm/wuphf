@@ -1,6 +1,11 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -171,6 +176,117 @@ func TestSanitizeHubLabel(t *testing.T) {
 		if got != tc.want {
 			t.Fatalf("sanitizeHubLabel(%q): got %q want %q", tc.in, got, tc.want)
 		}
+	}
+}
+
+// TestBuildPublishPRBody_NoCWDLeak guards against the privacy regression:
+// the PR body lands in a public hub repo, so it must not include the
+// user's local working directory ("Workspace: /Users/<name>/...").
+// Source provenance is captured by m.Source which is sanitised to
+// [a-z0-9-].
+func TestBuildPublishPRBody_NoCWDLeak(t *testing.T) {
+	t.Parallel()
+	manifest := skillpublish.Manifest{
+		Name:        "deploy-frontend",
+		Description: "Ship the frontend.",
+		Version:     "1.0.0",
+		License:     "MIT",
+		Source:      "wuphf-team-deploy-frontend",
+		PublishedAt: "2026-04-28T00:00:00Z",
+	}
+	body := buildPublishPRBody(manifest, "")
+	if strings.Contains(body, "Workspace:") {
+		t.Errorf("PR body must not contain Workspace field (privacy: leaks cwd to public hub repo); got:\n%s", body)
+	}
+	cwd, _ := os.Getwd()
+	if cwd != "" && strings.Contains(body, cwd) {
+		t.Errorf("PR body contains the test runner's cwd %q; got:\n%s", cwd, body)
+	}
+}
+
+// TestPostBrokerSkill_RoundTrip pins the broker round-trip the install
+// path uses end-to-end. Without this, a regression like the previous
+// `action: "propose"` 403 would not be caught until manual smoke. We
+// stand up an httptest.Server that mimics the broker's POST /skills
+// endpoint, point WUPHF_BROKER_BASE_URL at it, and assert the request
+// shape the install path emits.
+func TestPostBrokerSkill_RoundTrip(t *testing.T) {
+	var captured struct {
+		method      string
+		contentType string
+		auth        string
+		payload     map[string]any
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/skills" {
+			http.Error(w, "wrong path", http.StatusNotFound)
+			return
+		}
+		captured.method = r.Method
+		captured.contentType = r.Header.Get("Content-Type")
+		captured.auth = r.Header.Get("Authorization")
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &captured.payload)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":"skill-x"}`))
+	}))
+	defer srv.Close()
+
+	t.Setenv("WUPHF_BROKER_BASE_URL", srv.URL)
+	t.Setenv("WUPHF_BROKER_TOKEN", "test-token")
+
+	payload := map[string]any{
+		"action":      "create",
+		"name":        "deploy-frontend",
+		"title":       "deploy-frontend",
+		"description": "Ship it.",
+		"content":     "## Steps\n",
+		"created_by":  "hub:anthropics",
+		"channel":     "skills",
+	}
+	if err := postBrokerSkill(context.Background(), payload); err != nil {
+		t.Fatalf("postBrokerSkill: %v", err)
+	}
+
+	if captured.method != http.MethodPost {
+		t.Errorf("method: got %q want POST", captured.method)
+	}
+	if captured.contentType != "application/json" {
+		t.Errorf("content-type: got %q", captured.contentType)
+	}
+	if captured.auth != "Bearer test-token" {
+		t.Errorf("auth: got %q want Bearer test-token", captured.auth)
+	}
+	if got := captured.payload["action"]; got != "create" {
+		t.Errorf("action: got %v want create (NOT propose — install IS the human approval; see PR review)", got)
+	}
+	if got := captured.payload["name"]; got != "deploy-frontend" {
+		t.Errorf("name: got %v", got)
+	}
+}
+
+// TestPostBrokerSkill_4xxSurfacesBody pins the error-shape: a 4xx from
+// the broker should bubble up with the response body so the user can see
+// the broker's actual rejection reason (e.g. "name already exists" or
+// the propose-path 403 we used to hit).
+func TestPostBrokerSkill_4xxSurfacesBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte(`skill with this name already exists`))
+	}))
+	defer srv.Close()
+
+	t.Setenv("WUPHF_BROKER_BASE_URL", srv.URL)
+	t.Setenv("WUPHF_BROKER_TOKEN", "")
+
+	err := postBrokerSkill(context.Background(), map[string]any{
+		"action": "create", "name": "x", "content": "y", "created_by": "z",
+	})
+	if err == nil {
+		t.Fatal("expected error on 409, got nil")
+	}
+	if !strings.Contains(err.Error(), "skill with this name already exists") {
+		t.Errorf("expected broker body in error, got %q", err.Error())
 	}
 }
 

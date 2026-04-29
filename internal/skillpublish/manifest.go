@@ -267,10 +267,19 @@ func HubRepo(hub string) (string, error) {
 }
 
 // HubBaseBranch returns the base branch the publish PR should target.
-// All known hubs target `main` today; kept as its own helper so a future
-// hub with a non-main default doesn't require touching the CLI.
+// All known hubs target `main` today; switch on hub when that changes.
+// Earlier this was a function-of-hub that ignored its argument, which
+// made the call site look configurable when it wasn't — clearer to
+// switch when a real divergence appears.
 func HubBaseBranch(hub string) string {
-	return "main"
+	switch Hub(hub) {
+	case HubAnthropics, HubClaudeMarketplace, HubLobeHub:
+		return "main"
+	default:
+		// github:owner/repo and any future hub: default to main; switch
+		// per-owner here when a real exception comes up.
+		return "main"
+	}
 }
 
 // PublishBranchName builds a stable branch name used for the publish PR.
