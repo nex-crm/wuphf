@@ -1,0 +1,435 @@
+package team
+
+import (
+	"context"
+	"strings"
+	"sync"
+	"time"
+)
+
+type agentStreamBuffer struct {
+	mu     sync.Mutex
+	lines  []string
+	subs   map[int]chan string
+	nextID int
+}
+
+func (s *agentStreamBuffer) Push(line string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lines = append(s.lines, line)
+	if len(s.lines) > 2000 {
+		s.lines = s.lines[len(s.lines)-2000:]
+	}
+	for _, ch := range s.subs {
+		select {
+		case ch <- line:
+		default:
+		}
+	}
+}
+
+func (s *agentStreamBuffer) subscribe() (<-chan string, func()) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	id := s.nextID
+	s.nextID++
+	ch := make(chan string, 128)
+	s.subs[id] = ch
+	return ch, func() {
+		s.mu.Lock()
+		delete(s.subs, id)
+		s.mu.Unlock()
+	}
+}
+
+func (s *agentStreamBuffer) recent() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]string, len(s.lines))
+	copy(out, s.lines)
+	return out
+}
+
+// AgentStream returns (or lazily creates) the stream buffer for a given agent slug.
+// It is safe to call concurrently.
+func (b *Broker) AgentStream(slug string) *agentStreamBuffer {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.agentStreams == nil {
+		b.agentStreams = make(map[string]*agentStreamBuffer)
+	}
+	s, ok := b.agentStreams[slug]
+	if !ok {
+		s = &agentStreamBuffer{subs: make(map[int]chan string)}
+		b.agentStreams[slug] = s
+	}
+	return s
+}
+
+func (b *Broker) SubscribeMessages(buffer int) (<-chan channelMessage, func()) {
+	if buffer <= 0 {
+		buffer = 1
+	}
+	ch := make(chan channelMessage, buffer)
+
+	b.mu.Lock()
+	id := b.nextSubscriberID
+	b.nextSubscriberID++
+	b.messageSubscribers[id] = ch
+	b.mu.Unlock()
+
+	return ch, func() {
+		b.mu.Lock()
+		if existing, ok := b.messageSubscribers[id]; ok {
+			delete(b.messageSubscribers, id)
+			close(existing)
+		}
+		b.mu.Unlock()
+	}
+}
+
+func (b *Broker) SubscribeActions(buffer int) (<-chan officeActionLog, func()) {
+	if buffer <= 0 {
+		buffer = 1
+	}
+	ch := make(chan officeActionLog, buffer)
+
+	b.mu.Lock()
+	id := b.nextSubscriberID
+	b.nextSubscriberID++
+	b.actionSubscribers[id] = ch
+	b.mu.Unlock()
+
+	return ch, func() {
+		b.mu.Lock()
+		if existing, ok := b.actionSubscribers[id]; ok {
+			delete(b.actionSubscribers, id)
+			close(existing)
+		}
+		b.mu.Unlock()
+	}
+}
+
+func (b *Broker) SubscribeActivity(buffer int) (<-chan agentActivitySnapshot, func()) {
+	if buffer <= 0 {
+		buffer = 1
+	}
+	ch := make(chan agentActivitySnapshot, buffer)
+
+	b.mu.Lock()
+	id := b.nextSubscriberID
+	b.nextSubscriberID++
+	b.activitySubscribers[id] = ch
+	b.mu.Unlock()
+
+	return ch, func() {
+		b.mu.Lock()
+		if existing, ok := b.activitySubscribers[id]; ok {
+			delete(b.activitySubscribers, id)
+			close(existing)
+		}
+		b.mu.Unlock()
+	}
+}
+
+type officeChangeEvent struct {
+	Kind string `json:"kind"` // "member_created", "member_removed", "channel_created", "channel_removed", "channel_updated", "office_reseeded"
+	Slug string `json:"slug"`
+}
+
+func (b *Broker) SubscribeOfficeChanges(buffer int) (<-chan officeChangeEvent, func()) {
+	if buffer <= 0 {
+		buffer = 1
+	}
+	ch := make(chan officeChangeEvent, buffer)
+
+	b.mu.Lock()
+	id := b.nextSubscriberID
+	b.nextSubscriberID++
+	b.officeSubscribers[id] = ch
+	b.mu.Unlock()
+
+	return ch, func() {
+		b.mu.Lock()
+		if existing, ok := b.officeSubscribers[id]; ok {
+			delete(b.officeSubscribers, id)
+			close(existing)
+		}
+		b.mu.Unlock()
+	}
+}
+
+func (b *Broker) publishOfficeChangeLocked(evt officeChangeEvent) {
+	for _, ch := range b.officeSubscribers {
+		select {
+		case ch <- evt:
+		default:
+		}
+	}
+}
+
+// SubscribeWikiEvents returns a channel of wiki commit notifications plus an
+// unsubscribe func. The web UI's SSE loop uses this to push "wiki:write"
+// events to the browser.
+func (b *Broker) SubscribeWikiEvents(buffer int) (<-chan wikiWriteEvent, func()) {
+	if buffer <= 0 {
+		buffer = 1
+	}
+	ch := make(chan wikiWriteEvent, buffer)
+
+	b.mu.Lock()
+	id := b.nextSubscriberID
+	b.nextSubscriberID++
+	b.wikiSubscribers[id] = ch
+	b.mu.Unlock()
+
+	return ch, func() {
+		b.mu.Lock()
+		if existing, ok := b.wikiSubscribers[id]; ok {
+			delete(b.wikiSubscribers, id)
+			close(existing)
+		}
+		b.mu.Unlock()
+	}
+}
+
+// PublishWikiEvent fans out a commit notification to all SSE subscribers.
+// Implements the wikiEventPublisher interface consumed by WikiWorker.
+func (b *Broker) PublishWikiEvent(evt wikiWriteEvent) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, ch := range b.wikiSubscribers {
+		select {
+		case ch <- evt:
+		default:
+		}
+	}
+}
+
+// WikiWorker returns the broker's attached wiki worker, or nil when the
+// active memory backend is not markdown.
+func (b *Broker) WikiWorker() *WikiWorker {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.wikiWorker
+}
+
+// WikiIndex returns the broker's derived wiki index, or nil when the active
+// memory backend is not markdown. HTTP handlers use this to run search queries
+// against the structured fact store without going through the write worker.
+func (b *Broker) WikiIndex() *WikiIndex {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.wikiIndex
+}
+
+func (b *Broker) UpdateAgentActivity(update agentActivitySnapshot) {
+	slug := normalizeChannelSlug(update.Slug)
+	if slug == "" {
+		return
+	}
+	if update.LastTime == "" {
+		update.LastTime = time.Now().UTC().Format(time.RFC3339)
+	}
+	update.Slug = slug
+
+	b.mu.Lock()
+	current := b.activity[slug]
+	current.Slug = slug
+	if update.Status != "" {
+		current.Status = update.Status
+	}
+	if update.Activity != "" {
+		current.Activity = update.Activity
+	}
+	if update.Detail != "" {
+		current.Detail = update.Detail
+	}
+	if update.LastTime != "" {
+		current.LastTime = update.LastTime
+	}
+	if update.TotalMs > 0 {
+		current.TotalMs = update.TotalMs
+	}
+	if update.FirstEventMs >= 0 {
+		current.FirstEventMs = update.FirstEventMs
+	}
+	if update.FirstTextMs >= 0 {
+		current.FirstTextMs = update.FirstTextMs
+	}
+	if update.FirstToolMs >= 0 {
+		current.FirstToolMs = update.FirstToolMs
+	}
+	b.activity[slug] = current
+	b.publishActivityLocked(current)
+	b.mu.Unlock()
+}
+
+// duplicateBroadcastWindow is how recent an earlier broadcast from the same
+// agent in the same channel+thread must be to count as a duplicate. Set tight
+// so legitimate quick follow-ups still land, but tight enough to catch the
+// "same turn, paraphrased again" pattern that agents produce.
+const duplicateBroadcastWindow = 30 * time.Second
+
+// duplicateBroadcastSimilarity is the lower bound at which two messages are
+// considered near-duplicates. 1.0 means "byte-identical"; we pick 0.85 to
+// catch paraphrased restatements while letting actual new content through.
+const duplicateBroadcastSimilarity = 0.85
+
+// isDuplicateAgentBroadcastLocked returns true when the agent has already
+// posted a nearly-identical message to the same (channel, thread) pair within
+// duplicateBroadcastWindow. Must be called with b.mu held.
+func (b *Broker) isDuplicateAgentBroadcastLocked(sender, channel, replyTo, content string) bool {
+	newNorm := normalizeBroadcastContent(content)
+	if newNorm == "" {
+		return false
+	}
+	cutoff := time.Now().UTC().Add(-duplicateBroadcastWindow)
+	// Walk backwards — most recent messages are at the end.
+	for i := len(b.messages) - 1; i >= 0; i-- {
+		prev := b.messages[i]
+		ts, err := time.Parse(time.RFC3339, prev.Timestamp)
+		if err == nil && ts.Before(cutoff) {
+			break
+		}
+		if prev.From != sender {
+			continue
+		}
+		if normalizeChannelSlug(prev.Channel) != channel {
+			continue
+		}
+		if strings.TrimSpace(prev.ReplyTo) != strings.TrimSpace(replyTo) {
+			continue
+		}
+		prevNorm := normalizeBroadcastContent(prev.Content)
+		if prevNorm == "" {
+			continue
+		}
+		if jaccardWordSimilarity(newNorm, prevNorm) >= duplicateBroadcastSimilarity {
+			return true
+		}
+	}
+	return false
+}
+
+// normalizeBroadcastContent lowercases and collapses whitespace so trivial
+// formatting drift does not defeat the dedup check.
+func normalizeBroadcastContent(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	if s == "" {
+		return ""
+	}
+	return strings.Join(strings.Fields(s), " ")
+}
+
+// jaccardWordSimilarity returns the Jaccard similarity of the two strings'
+// whitespace-split word sets. 1.0 = identical word sets; 0.0 = disjoint.
+// Cheap and good enough to catch "ship it" / "ship it 🚀" style paraphrases.
+func jaccardWordSimilarity(a, b string) float64 {
+	wa := uniqueWordSet(a)
+	wb := uniqueWordSet(b)
+	if len(wa) == 0 || len(wb) == 0 {
+		return 0
+	}
+	inter := 0
+	for w := range wa {
+		if _, ok := wb[w]; ok {
+			inter++
+		}
+	}
+	union := len(wa) + len(wb) - inter
+	if union == 0 {
+		return 0
+	}
+	return float64(inter) / float64(union)
+}
+
+func uniqueWordSet(s string) map[string]struct{} {
+	out := make(map[string]struct{})
+	for _, w := range strings.Fields(s) {
+		// Strip leading/trailing ASCII punctuation so "court," and "court"
+		// collapse to the same token for Jaccard. Keeps intra-word characters
+		// like apostrophes inside "reviewer's".
+		w = strings.TrimFunc(w, func(r rune) bool {
+			switch r {
+			case '.', ',', ';', ':', '!', '?', '—', '–', '-', '"', '\'', '(', ')', '[', ']', '`':
+				return true
+			}
+			return false
+		})
+		if w == "" {
+			continue
+		}
+		out[w] = struct{}{}
+	}
+	return out
+}
+
+// activityWatchdogEnabled controls whether NewBroker starts the background
+// activity-watchdog goroutine. Tests that create many short-lived brokers set
+// this to false via TestMain so goroutines don't accumulate and cause
+// goleak/timeout failures. Production always runs with the default (true).
+var activityWatchdogEnabled = true
+
+// staleActivityThreshold is how long an agent can stay in a non-idle/non-error
+// activity state before the watchdog forcibly resets it to idle. Set long
+// enough to cover normal long turns (tool chains, big edits) but short enough
+// that a crashed spawn does not leave the agent looking "active" for hours —
+// which blocks the CEO's "Already active in this thread" re-route guard and
+// prevents the specialist from being dispatched again.
+const staleActivityThreshold = 5 * time.Minute
+
+// reapStaleActivityLocked transitions any agent whose LastTime is older than
+// staleActivityThreshold from "active"/"thinking"/"tool_use" back to "idle".
+// Must be called with b.mu held. Returns the slugs that were reset so the
+// caller can emit activity-change events after releasing the lock.
+func (b *Broker) reapStaleActivityLocked(now time.Time) []agentActivitySnapshot {
+	if len(b.activity) == 0 {
+		return nil
+	}
+	var reset []agentActivitySnapshot
+	for slug, snap := range b.activity {
+		status := strings.ToLower(strings.TrimSpace(snap.Status))
+		if status == "" || status == "idle" || status == "error" {
+			continue
+		}
+		lastTime, err := time.Parse(time.RFC3339, snap.LastTime)
+		if err != nil {
+			// Unparseable LastTime means we cannot age the entry safely; leave it.
+			continue
+		}
+		if now.Sub(lastTime) < staleActivityThreshold {
+			continue
+		}
+		snap.Status = "idle"
+		snap.Activity = "idle"
+		snap.Detail = "stale activity reaped (no progress for " + staleActivityThreshold.String() + ")"
+		snap.LastTime = now.UTC().Format(time.RFC3339)
+		b.activity[slug] = snap
+		reset = append(reset, snap)
+	}
+	return reset
+}
+
+// runActivityWatchdog scans the in-memory activity map every minute and
+// resets agents that have been stuck in a non-terminal state past
+// staleActivityThreshold. Stops when ctx is done so NewBroker can tear it
+// down alongside the rest of the broker's lifecycle.
+func (b *Broker) runActivityWatchdog(ctx context.Context) {
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-ticker.C:
+			b.mu.Lock()
+			reset := b.reapStaleActivityLocked(now)
+			for _, snap := range reset {
+				b.publishActivityLocked(snap)
+			}
+			b.mu.Unlock()
+		}
+	}
+}
