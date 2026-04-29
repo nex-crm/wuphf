@@ -430,6 +430,8 @@ func nexMCPBinaryPath() string {
 
 func gbrainMCPEnv() map[string]string {
 	env := map[string]string{}
+	// user-global; intentionally NOT under WUPHF_RUNTIME_HOME — gbrain is a
+	// user-global MCP subprocess that needs the real HOME for its own auth.
 	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
 		env["HOME"] = home
 	}
@@ -444,6 +446,8 @@ func gbrainMCPEnv() map[string]string {
 
 func gbrainMCPEnvVars() []string {
 	var envVars []string
+	// user-global; intentionally NOT under WUPHF_RUNTIME_HOME — gbrain is a
+	// user-global MCP subprocess; HOME is passed through for subprocess auth.
 	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
 		envVars = append(envVars, "HOME")
 	}

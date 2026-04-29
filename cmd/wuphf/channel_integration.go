@@ -254,7 +254,7 @@ func connectTelegramGroup(token string, group team.TelegramGroup) tea.Cmd {
 		}
 
 		// Clear broker state so next restart picks up the manifest with surfaces
-		_ = os.Remove(filepath.Join(os.Getenv("HOME"), ".wuphf", "team", "broker-state.json"))
+		_ = os.Remove(filepath.Join(config.RuntimeHomeDir(), ".wuphf", "team", "broker-state.json"))
 
 		return telegramConnectDoneMsg{
 			channelSlug: slug,

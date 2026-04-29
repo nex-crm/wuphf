@@ -226,3 +226,78 @@ func readWorkflowRunArtifact(path string, info fs.FileInfo) (channelui.WorkflowR
 	artifact.UpdatedAt = info.ModTime()
 	return artifact, true
 }
+
+func recentHumanArtifactRequests(requests []channelInterview, limit int) []channelInterview {
+	filtered := make([]channelInterview, 0, len(requests))
+	for _, req := range requests {
+		kind := strings.TrimSpace(req.Kind)
+		switch kind {
+		case "approval", "confirm", "choice", "interview":
+			filtered = append(filtered, req)
+		}
+	}
+	sort.Slice(filtered, func(i, j int) bool {
+		left, lok := parseChannelTime(filtered[i].CreatedAt)
+		right, rok := parseChannelTime(filtered[j].CreatedAt)
+		switch {
+		case lok && rok:
+			return left.After(right)
+		case lok:
+			return true
+		case rok:
+			return false
+		default:
+			return filtered[i].ID > filtered[j].ID
+		}
+	})
+	if limit > 0 && len(filtered) > limit {
+		filtered = filtered[:limit]
+	}
+	return filtered
+}
+
+func recentExecutionArtifactActions(actions []channelAction, limit int) []channelAction {
+	filtered := make([]channelAction, 0, len(actions))
+	for _, action := range actions {
+		kind := strings.TrimSpace(action.Kind)
+		if strings.HasPrefix(kind, "request_") || strings.HasPrefix(kind, "external_") || strings.HasPrefix(kind, "interrupt_") || strings.HasPrefix(kind, "human_") {
+			filtered = append(filtered, action)
+		}
+	}
+	if limit > 0 && len(filtered) > limit {
+		filtered = filtered[len(filtered)-limit:]
+	}
+	out := append([]channelAction(nil), filtered...)
+	reverseAny(out)
+	return out
+}
+
+func taskLogRoot() string {
+	if root := strings.TrimSpace(os.Getenv("WUPHF_TASK_LOG_ROOT")); root != "" {
+		return root
+	}
+	if home := config.RuntimeHomeDir(); home != "" {
+		return filepath.Join(home, ".wuphf", "office", "tasks")
+	}
+	return filepath.Join(".wuphf", "office", "tasks")
+}
+
+func artifactClock(timestamp string, fallback time.Time) string {
+	if clock := strings.TrimSpace(shortClock(timestamp)); clock != "" {
+		return clock
+	}
+	if !fallback.IsZero() {
+		return fallback.Local().Format("15:04")
+	}
+	return "artifact"
+}
+
+func artifactTime(timestamp string, fallback time.Time) string {
+	if strings.TrimSpace(timestamp) != "" {
+		return timestamp
+	}
+	if !fallback.IsZero() {
+		return fallback.Format(time.RFC3339)
+	}
+	return ""
+}

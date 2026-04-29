@@ -216,7 +216,10 @@ func main() {
 	startFromScratch := *fromScratchFlag
 	if startFromScratch {
 		_ = os.Setenv("WUPHF_START_FROM_SCRATCH", "1")
-		if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
+		// WUPHF_GLOBAL_HOME captures the user's real home before any
+		// WUPHF_RUNTIME_HOME override so downstream code can still reach
+		// user-global auth (codex, opencode) at the original location.
+		if home := config.RuntimeHomeDir(); home != "" {
 			_ = os.Setenv("WUPHF_GLOBAL_HOME", home)
 		}
 		if runtimeHome := fromScratchRuntimeHome(); runtimeHome != "" {

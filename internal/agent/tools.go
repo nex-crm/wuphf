@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/nex-crm/wuphf/internal/api"
+	"github.com/nex-crm/wuphf/internal/config"
 )
 
 // ToolRegistry manages a set of named AgentTools.
@@ -424,9 +425,9 @@ func localToolDefinitions() []AgentTool {
 				if strings.TrimSpace(message) == "" {
 					return "", fmt.Errorf("message is required")
 				}
-				home, err := os.UserHomeDir()
-				if err != nil {
-					return "", err
+				home := config.RuntimeHomeDir()
+				if home == "" {
+					return "", fmt.Errorf("cannot resolve runtime home directory")
 				}
 				outboxDir := filepath.Join(home, ".wuphf", "office", "messages")
 				if err := os.MkdirAll(outboxDir, 0o755); err != nil {

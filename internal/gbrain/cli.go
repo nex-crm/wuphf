@@ -117,6 +117,8 @@ func Query(ctx context.Context, query string, limit int) ([]SearchResult, error)
 
 func gbrainEnv() []string {
 	env := os.Environ()
+	// user-global; intentionally NOT under WUPHF_RUNTIME_HOME — gbrain HOME
+	// fallback is only set when HOME env is unset entirely; gbrain is user-global.
 	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(os.Getenv("HOME")) == "" {
 		env = append(env, "HOME="+home)
 	}
