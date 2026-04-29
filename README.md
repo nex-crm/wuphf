@@ -144,6 +144,26 @@ wuphf --1o1         # 1:1 with the CEO
 wuphf --1o1 cro     # 1:1 with a specific agent
 ```
 
+## Publishing skills
+
+Once a team-authored skill exists at `team/skills/<slug>.md`, you can publish it to the public agent-skill commons or pull a community skill back into your wiki. Publish opens a real PR via `gh`; install fetches a public raw `SKILL.md` and queues it as a proposal so a human approves before it goes live.
+
+```bash
+# Publish your team's deploy skill to the Anthropic skills marketplace
+wuphf skills publish deploy-frontend --to anthropics
+
+# Dry-run the same publish to inspect the manifest + PR body without opening the PR
+wuphf skills publish deploy-frontend --to anthropics --dry-run
+
+# Publish to a custom GitHub repo (e.g. your org's private fork of anthropics/skills)
+wuphf skills publish deploy-frontend --to github:nex-crm/wuphf-skills
+
+# Pull a community skill into your team's wiki as a proposal
+wuphf skills install web-research --from anthropics
+```
+
+Supported hubs: `anthropics`, `claude-marketplace`, `lobehub`, or any `github:owner/repo`. Publish requires `gh auth login` first; install only needs network access since it fetches public raw URLs.
+
 ## What You Should See
 
 - A browser tab at `localhost:7891` with the office
