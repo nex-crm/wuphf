@@ -564,3 +564,96 @@ html[data-theme="noir-gold"] .notebook-surface .nb-review-col-empty {
   color: var(--nb-text-tertiary);
   opacity: 1;
 }
+
+/* ─── Wiki app shell — top tab bar + left nav menu buttons ─────────────
+   wiki-shell.css uses fallback aliases (--surface, --text-muted, --purple)
+   that don't exist in the global theme; in noir-gold those fall back to
+   white/blue/purple, leaving the wiki tabs visually unthemed. Override
+   them inline so the bar reads as gold-on-noir, the active tab uses the
+   gold accent, and the unread badge is gold instead of purple. */
+
+html[data-theme="noir-gold"] .wiki-tabs {
+  background: var(--bg-card);
+  border-bottom-color: var(--border);
+}
+html[data-theme="noir-gold"] .wiki-tab {
+  color: var(--text-secondary);
+}
+html[data-theme="noir-gold"] .wiki-tab:hover {
+  color: var(--gold-100);
+}
+html[data-theme="noir-gold"] .wiki-tab:focus-visible {
+  outline-color: var(--gold-400);
+}
+html[data-theme="noir-gold"] .wiki-tab.is-active {
+  color: var(--gold-100);
+  border-bottom-color: var(--gold-400);
+}
+html[data-theme="noir-gold"] .wiki-tab-badge {
+  background: var(--gold-400);
+  color: var(--gold-950);
+}
+
+/* ─── Wiki surface — left nav menu buttons + wikilinks ───────────────
+   --wk-wikilink resolves to --olive-500 which we already redirected to
+   #3d2e0a (deep oxidized) — too dark on dark bg. Re-route the wiki
+   palette to gold tones so links and the active menu button read. */
+html[data-theme="noir-gold"] .wiki-root {
+  --wk-wikilink:        var(--gold-300);
+  --wk-wikilink-broken: var(--red);
+  --wk-amber:           var(--gold-400);
+  --wk-amber-bg:        rgba(201, 162, 39, 0.10);
+  --wk-amber-banner:    rgba(201, 162, 39, 0.05);
+  --wk-code-bg:         var(--bg-warm);
+}
+html[data-theme="noir-gold"] .wk-nav-sidebar h3 {
+  color: var(--gold-300);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-size: 11px;
+}
+html[data-theme="noir-gold"] .wk-nav-sidebar li.current a {
+  background: rgba(201, 162, 39, 0.12);
+  color: var(--gold-100);
+}
+html[data-theme="noir-gold"] .wk-nav-sidebar .search {
+  background: var(--bg-warm);
+  border-color: var(--border-dark);
+  color: var(--text);
+}
+html[data-theme="noir-gold"] .wk-nav-sidebar .search:focus {
+  border-color: var(--gold-500);
+}
+
+/* Wiki "NEW" pill (was teal #CFF5F5/#0F5C5C — already had a partial
+   override but only for one selector). Cover the wiki-shell tab badge
+   and any other inline pills for completeness. */
+html[data-theme="noir-gold"] .wk-section-new {
+  background: var(--accent-bg);
+  color: var(--gold-200);
+  border: 1px solid rgba(201, 162, 39, 0.4);
+}
+
+/* ─── Entity-graph node palette ────────────────────────────────────
+   Default theme uses pastel Tailwind colors (lavender/sky/mint). On
+   noir those wash out as bright neon dots; redirect to gold-toned
+   variants tuned for the dark surface. */
+html[data-theme="noir-gold"] {
+  --graph-people-fill:       rgba(201, 162, 39, 0.14);
+  --graph-people-stroke:     var(--gold-300);
+  --graph-companies-fill:    rgba(136, 164, 194, 0.16);
+  --graph-companies-stroke:  #88a4c2;
+  --graph-customers-fill:    rgba(47, 170, 100, 0.15);
+  --graph-customers-stroke:  var(--green);
+  --graph-other-fill:        rgba(245, 233, 200, 0.06);
+  --graph-other-stroke:      var(--text-tertiary);
+}
+
+/* ─── Sidebar agent task / activity (the "token burn" line under each
+       team member) — was barely visible on noir at 42% cream opacity.
+       Bump to a clean readable gold so the user can actually see it. */
+html[data-theme="noir-gold"] .sidebar .sidebar-agent-task,
+html[data-theme="noir-gold"] .sidebar .sidebar-agent-activity {
+  color: var(--gold-300);
+  opacity: 1;
+}
