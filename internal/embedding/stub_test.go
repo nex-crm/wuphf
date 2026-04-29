@@ -149,3 +149,55 @@ func TestNewDefault_VoyageKeyEnablesVoyage(t *testing.T) {
 		t.Fatalf("voyage key set: got %q want voyage-%s", got.Name(), defaultVoyageModel)
 	}
 }
+
+// TestEmbeddingDimensionOverride distinguishes "user explicitly set" from
+// "default kicked in". The Voyage provider relied on this distinction to
+// pick its 1024 default vs. honouring a user-set 1536 (e.g. for
+// voyage-code-2). Earlier code compared
+// `openAIDimensionFromEnv() == defaultOpenAIDim` (1536), which was true for
+// BOTH "unset" and "explicitly 1536", silently clobbering Voyage users on
+// 1536-dim models down to 1024.
+func TestEmbeddingDimensionOverride(t *testing.T) {
+	t.Run("unset", func(t *testing.T) {
+		t.Setenv("WUPHF_EMBEDDING_DIMENSION", "")
+		n, ok := embeddingDimensionOverride()
+		if ok {
+			t.Errorf("unset must return ok=false, got n=%d ok=true", n)
+		}
+	})
+	t.Run("explicit 1536 is honoured", func(t *testing.T) {
+		t.Setenv("WUPHF_EMBEDDING_DIMENSION", "1536")
+		n, ok := embeddingDimensionOverride()
+		if !ok || n != 1536 {
+			t.Errorf("explicit 1536 must return ok=true n=1536, got n=%d ok=%v", n, ok)
+		}
+	})
+	t.Run("explicit 512 is honoured", func(t *testing.T) {
+		t.Setenv("WUPHF_EMBEDDING_DIMENSION", "512")
+		n, ok := embeddingDimensionOverride()
+		if !ok || n != 512 {
+			t.Errorf("explicit 512: got n=%d ok=%v", n, ok)
+		}
+	})
+	t.Run("garbage falls back to default", func(t *testing.T) {
+		t.Setenv("WUPHF_EMBEDDING_DIMENSION", "not-a-number")
+		_, ok := embeddingDimensionOverride()
+		if ok {
+			t.Errorf("garbage must return ok=false")
+		}
+	})
+}
+
+// TestNewVoyageProvider_HonoursExplicitDimension pins the Voyage path: a
+// user on voyage-code-2 with WUPHF_EMBEDDING_DIMENSION=1536 must get a
+// 1536-dim provider, not 1024. We don't make a real HTTP call; the
+// provider's Dimension() reflects what would be sent.
+func TestNewVoyageProvider_HonoursExplicitDimension(t *testing.T) {
+	t.Setenv("VOYAGE_API_KEY", "voyage-real")
+	t.Setenv("WUPHF_EMBEDDING_MODEL", "voyage-code-2")
+	t.Setenv("WUPHF_EMBEDDING_DIMENSION", "1536")
+	got := newVoyageProvider()
+	if got.Dimension() != 1536 {
+		t.Fatalf("voyage with explicit 1536: got dim=%d want 1536", got.Dimension())
+	}
+}
