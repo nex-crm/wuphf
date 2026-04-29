@@ -228,6 +228,12 @@ var (
 	channelExists       = channelui.ChannelExists
 	normalizeCursorPos  = channelui.NormalizeCursorPos
 	insertComposerRunes = channelui.InsertComposerRunes
+
+	replaceMentionInInput  = channelui.ReplaceMentionInInput
+	isComposerWordRune     = channelui.IsComposerWordRune
+	moveCursorBackwardWord = channelui.MoveCursorBackwardWord
+	moveCursorForwardWord  = channelui.MoveCursorForwardWord
+	moveComposerCursor     = channelui.MoveComposerCursor
 )
 
 // Channel-confirm action typed-string consts.

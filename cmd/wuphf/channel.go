@@ -17,7 +17,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -3933,74 +3932,6 @@ func (m *channelModel) restoreThreadSnapshot(snapshot channelui.Snapshot) {
 	m.threadInput = append([]rune(nil), snapshot.Input...)
 	m.threadInputPos = normalizeCursorPos(m.threadInput, snapshot.Pos)
 	m.updateThreadOverlays()
-}
-
-func replaceMentionInInput(input []rune, pos int, mention string) ([]rune, int) {
-	text := string(input)
-	if pos < 0 {
-		pos = 0
-	}
-	if pos > len(input) {
-		pos = len(input)
-	}
-	atIdx := strings.LastIndex(text[:pos], "@")
-	if atIdx < 0 {
-		return input, pos
-	}
-	updated := []rune(text[:atIdx] + mention + " " + text[pos:])
-	return updated, atIdx + len([]rune(mention)) + 1
-}
-
-func isComposerWordRune(r rune) bool {
-	return unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || r == '-'
-}
-
-func moveCursorBackwardWord(input []rune, pos int) int {
-	pos = normalizeCursorPos(input, pos)
-	for pos > 0 && !isComposerWordRune(input[pos-1]) {
-		pos--
-	}
-	for pos > 0 && isComposerWordRune(input[pos-1]) {
-		pos--
-	}
-	return pos
-}
-
-func moveCursorForwardWord(input []rune, pos int) int {
-	pos = normalizeCursorPos(input, pos)
-	for pos < len(input) && isComposerWordRune(input[pos]) {
-		pos++
-	}
-	for pos < len(input) && !isComposerWordRune(input[pos]) {
-		pos++
-	}
-	return pos
-}
-
-func moveComposerCursor(input []rune, pos int, key string) (int, bool) {
-	pos = normalizeCursorPos(input, pos)
-	switch key {
-	case "left", "ctrl+b", "alt+h":
-		if pos > 0 {
-			pos--
-		}
-		return pos, true
-	case "right", "ctrl+f", "alt+l":
-		if pos < len(input) {
-			pos++
-		}
-		return pos, true
-	case "ctrl+a", "alt+0":
-		return 0, true
-	case "ctrl+e", "alt+$":
-		return len(input), true
-	case "alt+b":
-		return moveCursorBackwardWord(input, pos), true
-	case "alt+w":
-		return moveCursorForwardWord(input, pos), true
-	default:
-		return pos, false
-	}
 }
 
 func composerMotionKey(msg tea.KeyMsg) (string, bool) {

@@ -161,6 +161,12 @@
 //   - composer_input.go    — composer cursor/insertion primitives:
 //     NormalizeCursorPos (clamp to [0, len]), InsertComposerRunes
 //     (rune-aware insert at pos returning new pos).
+//   - composer_cursor.go   — composer cursor motion + mention helpers:
+//     ReplaceMentionInInput (substitute the in-progress "@…" token),
+//     IsComposerWordRune, MoveCursorBackwardWord / MoveCursorForwardWord
+//     (alt+b / alt+w word jumps), and MoveComposerCursor (key-string
+//     dispatch for left/right/home/end/word motions, with a recognized
+//     bool so callers can fall through unrecognized keys).
 //
 // Subsequent extraction PRs will land the workspace / recovery / cache
 // cluster, the sidebar / splash, the broker integrations, and finally
