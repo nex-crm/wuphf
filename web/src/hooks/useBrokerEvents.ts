@@ -8,9 +8,11 @@ function messageChannelFromEvent(event: Event): string | null {
   if (!("data" in event) || typeof event.data !== "string") return null;
   try {
     const payload = JSON.parse(event.data) as {
-      message?: { channel?: string };
+      message?: { channel?: unknown };
     };
-    return payload.message?.channel?.trim() || "general";
+    if (typeof payload.message?.channel !== "string") return null;
+    const channel = payload.message.channel.trim();
+    return channel.length > 0 ? channel : null;
   } catch {
     return null;
   }

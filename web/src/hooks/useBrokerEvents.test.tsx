@@ -122,4 +122,51 @@ describe("useBrokerEvents unread counts", () => {
 
     expect(useAppStore.getState().unreadByChannel.general).toBe(1);
   });
+
+  it("ignores message events without a channel", () => {
+    renderHarness();
+    const [source] = FakeEventSource.created;
+
+    act(() => {
+      source.emit("message", {
+        message: {
+          id: "msg-1",
+        },
+      });
+    });
+
+    expect(useAppStore.getState().unreadByChannel).toEqual({});
+  });
+
+  it("ignores message events with a blank channel", () => {
+    renderHarness();
+    const [source] = FakeEventSource.created;
+
+    act(() => {
+      source.emit("message", {
+        message: {
+          id: "msg-1",
+          channel: "   ",
+        },
+      });
+    });
+
+    expect(useAppStore.getState().unreadByChannel).toEqual({});
+  });
+
+  it("ignores message events with a non-string channel", () => {
+    renderHarness();
+    const [source] = FakeEventSource.created;
+
+    act(() => {
+      source.emit("message", {
+        message: {
+          id: "msg-1",
+          channel: 42,
+        },
+      });
+    });
+
+    expect(useAppStore.getState().unreadByChannel).toEqual({});
+  });
 });
