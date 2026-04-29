@@ -662,3 +662,214 @@ func TestHandleSkillDisable_DrainsInterviewRequests(t *testing.T) {
 		}
 	}
 }
+
+// TestHandleSkillEdit_PropagatesOwnerAgents pins down the PR 7 follow-up
+// (E2E P2): PUT /skills/{name} must lift owner_agents from the parsed
+// SKILL.md frontmatter onto the in-memory teamSkill. Without this propagation
+// the multi-owner / single-owner chip rendering in the Skills app stays
+// untestable end-to-end, blocking the merge to feat/wiki-skill-compile.
+func TestHandleSkillEdit_PropagatesOwnerAgents(t *testing.T) {
+	t.Parallel()
+	_, b, do := crudTestServer(t)
+
+	// Seed members so validateOwnerAgentsLocked accepts the slugs.
+	b.mu.Lock()
+	b.members = []officeMember{
+		{Slug: "ceo", BuiltIn: true},
+		{Slug: "finance"},
+		{Slug: "ar-bot"},
+	}
+	b.mu.Unlock()
+	seedActiveSkill(t, b, "send-invoice-reminder")
+
+	// Build a SKILL.md whose frontmatter declares owner_agents=[finance, ar-bot].
+	fm := SkillFrontmatter{
+		Name:        "send-invoice-reminder",
+		Description: "Send the AR follow-up at d7.",
+		Version:     "1.0.0",
+		License:     "MIT",
+		Metadata: SkillMetadata{
+			Wuphf: SkillWuphfMeta{
+				OwnerAgents: []string{"finance", "ar-bot"},
+			},
+		},
+	}
+	mdBytes, err := RenderSkillMarkdown(fm, "## Steps\n\n1. Send it.")
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+
+	resp, body := do(http.MethodPut, "/skills/send-invoice-reminder", map[string]any{
+		"content": string(mdBytes),
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d, body %s", resp.StatusCode, body)
+	}
+
+	// Both the JSON response and the in-memory teamSkill must carry the new
+	// scope. The in-memory check is the load-bearing assertion — that's what
+	// the catalog injector and visibility gate read on every turn.
+	var out struct {
+		Skill teamSkill `json:"skill"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	wantOwners := []string{"finance", "ar-bot"}
+	if len(out.Skill.OwnerAgents) != len(wantOwners) {
+		t.Fatalf("response OwnerAgents: got %v, want %v", out.Skill.OwnerAgents, wantOwners)
+	}
+	for i, want := range wantOwners {
+		if out.Skill.OwnerAgents[i] != want {
+			t.Errorf("response OwnerAgents[%d]: got %q, want %q", i, out.Skill.OwnerAgents[i], want)
+		}
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	sk := b.findSkillByNameLocked("send-invoice-reminder")
+	if sk == nil {
+		t.Fatal("skill missing after PUT")
+	}
+	if len(sk.OwnerAgents) != len(wantOwners) {
+		t.Fatalf("in-memory OwnerAgents: got %v, want %v", sk.OwnerAgents, wantOwners)
+	}
+	for i, want := range wantOwners {
+		if sk.OwnerAgents[i] != want {
+			t.Errorf("in-memory OwnerAgents[%d]: got %q, want %q", i, sk.OwnerAgents[i], want)
+		}
+	}
+}
+
+// TestHandleSkillEdit_OwnerAgentsValidation verifies that the PUT path
+// shares the slug-regex + member-existence guard with the write path —
+// malformed or unknown slugs are dropped, never errored.
+func TestHandleSkillEdit_OwnerAgentsValidation(t *testing.T) {
+	t.Parallel()
+	_, b, do := crudTestServer(t)
+
+	b.mu.Lock()
+	b.members = []officeMember{
+		{Slug: "ceo", BuiltIn: true},
+		{Slug: "finance"},
+	}
+	b.mu.Unlock()
+	seedActiveSkill(t, b, "weekly-retro")
+
+	// Mix of: known-good, unknown member, malformed slug (regex-fail), dup.
+	fm := SkillFrontmatter{
+		Name:        "weekly-retro",
+		Description: "Run the weekly retro.",
+		Version:     "1.0.0",
+		License:     "MIT",
+		Metadata: SkillMetadata{
+			Wuphf: SkillWuphfMeta{
+				OwnerAgents: []string{"finance", "ghost", "../etc/passwd", "FINANCE"},
+			},
+		},
+	}
+	mdBytes, err := RenderSkillMarkdown(fm, "## Steps\n\n1. Reflect.")
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+
+	resp, body := do(http.MethodPut, "/skills/weekly-retro", map[string]any{
+		"content": string(mdBytes),
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d, body %s", resp.StatusCode, body)
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	sk := b.findSkillByNameLocked("weekly-retro")
+	if sk == nil {
+		t.Fatal("skill missing after PUT")
+	}
+	if len(sk.OwnerAgents) != 1 || sk.OwnerAgents[0] != "finance" {
+		t.Errorf("OwnerAgents: got %v, want [finance] (others must be dropped + deduped)", sk.OwnerAgents)
+	}
+}
+
+// TestHandleGetSkills_IncludeArchivedFlag pins down the PR 7 follow-up
+// (E2E P1, broker-side): GET /skills?include_archived=true returns archived
+// skills alongside the rest; default behavior keeps archived hidden so any
+// existing consumer stays unaffected. include_disabled is a no-op today —
+// disabled is already returned — but the flag is wired now so a future
+// filter change has a stable opt-in surface.
+func TestHandleGetSkills_IncludeArchivedFlag(t *testing.T) {
+	t.Parallel()
+	_, b, do := crudTestServer(t)
+	seedActiveSkill(t, b, "live-skill")
+	seedActiveSkill(t, b, "to-archive")
+
+	// Archive one of them.
+	if resp, body := do(http.MethodPost, "/skills/to-archive/archive", map[string]any{}); resp.StatusCode != http.StatusOK {
+		t.Fatalf("archive: status %d, body %s", resp.StatusCode, body)
+	}
+
+	getNames := func(t *testing.T, query string) []string {
+		t.Helper()
+		resp, body := do(http.MethodGet, "/skills"+query, nil)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("GET /skills%s: status %d, body %s", query, resp.StatusCode, body)
+		}
+		var out struct {
+			Skills []teamSkill `json:"skills"`
+		}
+		if err := json.Unmarshal(body, &out); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		names := make([]string, 0, len(out.Skills))
+		for _, sk := range out.Skills {
+			names = append(names, sk.Name)
+		}
+		return names
+	}
+
+	t.Run("default hides archived", func(t *testing.T) {
+		names := getNames(t, "")
+		for _, n := range names {
+			if n == "to-archive" {
+				t.Errorf("default GET /skills should hide archived; got %v", names)
+			}
+		}
+	})
+
+	t.Run("include_archived=true surfaces archived", func(t *testing.T) {
+		names := getNames(t, "?include_archived=true")
+		var found bool
+		for _, n := range names {
+			if n == "to-archive" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("include_archived=true should surface archived; got %v", names)
+		}
+	})
+
+	t.Run("include_archived=1 also accepted", func(t *testing.T) {
+		names := getNames(t, "?include_archived=1")
+		var found bool
+		for _, n := range names {
+			if n == "to-archive" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("include_archived=1 should surface archived; got %v", names)
+		}
+	})
+
+	t.Run("include_disabled flag accepted (currently no-op)", func(t *testing.T) {
+		// Verifies the param parses without error. Disabled skills are
+		// already returned by default; this test is forward-compat plumbing.
+		resp, _ := do(http.MethodGet, "/skills?include_disabled=true", nil)
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("include_disabled=true: got status %d, want 200", resp.StatusCode)
+		}
+	})
+}

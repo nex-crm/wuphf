@@ -11050,11 +11050,19 @@ func (b *Broker) findSkillByWorkflowKeyLocked(key string) *teamSkill {
 
 func (b *Broker) handleGetSkills(w http.ResponseWriter, r *http.Request) {
 	channelFilter := normalizeChannelSlug(r.URL.Query().Get("channel"))
+	// PR 7 follow-up: opt-in flags so the Skills app can request the full
+	// catalog (proposed + active + disabled + archived) without breaking
+	// older consumers that expect the active+proposed+disabled subset.
+	// include_disabled is currently a no-op — disabled skills already pass
+	// through this handler — but it's wired now so a future filter change
+	// has a stable opt-in surface.
+	includeArchived := truthyQuery(r.URL.Query().Get("include_archived"))
+	_ = truthyQuery(r.URL.Query().Get("include_disabled"))
 
 	b.mu.Lock()
 	result := make([]teamSkill, 0, len(b.skills))
 	for _, sk := range b.skills {
-		if sk.Status == "archived" {
+		if sk.Status == "archived" && !includeArchived {
 			continue
 		}
 		if channelFilter != "" && normalizeChannelSlug(sk.Channel) != channelFilter {
@@ -11066,6 +11074,16 @@ func (b *Broker) handleGetSkills(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"skills": result})
+}
+
+// truthyQuery accepts any of "1", "true", "yes" (case-insensitive) as true.
+// Anything else, including empty, is false.
+func truthyQuery(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "1", "true", "yes":
+		return true
+	}
+	return false
 }
 
 func (b *Broker) handlePostSkill(w http.ResponseWriter, r *http.Request) {
