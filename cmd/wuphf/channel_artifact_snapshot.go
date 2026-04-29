@@ -9,10 +9,6 @@ import (
 	"github.com/nex-crm/wuphf/internal/team"
 )
 
-type runtimeArtifactSnapshot struct {
-	Items []team.RuntimeArtifact
-}
-
 func (m channelModel) currentArtifactSnapshot(limit int) runtimeArtifactSnapshot {
 	taskLogs := m.recentTaskLogArtifacts(maxInt(limit, 12))
 	taskLogsByID := make(map[string]taskLogArtifact, len(taskLogs))
@@ -64,55 +60,6 @@ func (m channelModel) currentArtifactSnapshot(limit int) runtimeArtifactSnapshot
 		artifacts = artifacts[:limit]
 	}
 	return runtimeArtifactSnapshot{Items: artifacts}
-}
-
-func (s runtimeArtifactSnapshot) Count(kinds ...team.RuntimeArtifactKind) int {
-	return len(s.Filter(kinds...))
-}
-
-func (s runtimeArtifactSnapshot) Filter(kinds ...team.RuntimeArtifactKind) []team.RuntimeArtifact {
-	if len(kinds) == 0 {
-		return append([]team.RuntimeArtifact(nil), s.Items...)
-	}
-	set := make(map[team.RuntimeArtifactKind]struct{}, len(kinds))
-	for _, kind := range kinds {
-		set[kind] = struct{}{}
-	}
-	out := make([]team.RuntimeArtifact, 0, len(s.Items))
-	for _, artifact := range s.Items {
-		if _, ok := set[artifact.Kind]; ok {
-			out = append(out, artifact)
-		}
-	}
-	return out
-}
-
-func recentArtifactTasks(tasks []channelTask, limit int) []channelTask {
-	filtered := make([]channelTask, 0, len(tasks))
-	for _, task := range tasks {
-		if strings.TrimSpace(task.ID) == "" && strings.TrimSpace(task.Title) == "" {
-			continue
-		}
-		filtered = append(filtered, task)
-	}
-	sort.SliceStable(filtered, func(i, j int) bool {
-		left := parseArtifactTimestamp(filtered[i].UpdatedAt, filtered[i].CreatedAt)
-		right := parseArtifactTimestamp(filtered[j].UpdatedAt, filtered[j].CreatedAt)
-		switch {
-		case !left.IsZero() && !right.IsZero():
-			return left.After(right)
-		case !left.IsZero():
-			return true
-		case !right.IsZero():
-			return false
-		default:
-			return filtered[i].ID > filtered[j].ID
-		}
-	})
-	if limit > 0 && len(filtered) > limit {
-		filtered = filtered[:limit]
-	}
-	return filtered
 }
 
 func buildTaskRuntimeArtifact(task channelTask, logArtifact taskLogArtifact, hasLog bool) team.RuntimeArtifact {
@@ -194,52 +141,6 @@ func buildWorkflowRuntimeArtifact(run workflowRunArtifact) team.RuntimeArtifact 
 		Path:       strings.TrimSpace(run.Path),
 		ResumeHint: resumeHint,
 		ReviewHint: reviewHint,
-	}
-}
-
-func buildRequestRuntimeArtifact(req channelInterview) team.RuntimeArtifact {
-	state := normalizeRequestArtifactState(req.Status)
-	return team.RuntimeArtifact{
-		ID:         strings.TrimSpace(req.ID),
-		Kind:       team.RuntimeArtifactRequest,
-		Title:      req.TitleOrQuestion(),
-		Summary:    fallbackString(strings.TrimSpace(req.Context), strings.TrimSpace(req.Question)),
-		State:      state,
-		Progress:   requestArtifactProgress(req),
-		Owner:      strings.TrimSpace(req.From),
-		Channel:    strings.TrimSpace(req.Channel),
-		RelatedID:  strings.TrimSpace(req.ReplyTo),
-		StartedAt:  strings.TrimSpace(req.CreatedAt),
-		UpdatedAt:  latestArtifactTimestamp(req.FollowUpAt, req.ReminderAt, req.RecheckAt, req.DueAt, req.CreatedAt),
-		ResumeHint: "Answer the request or reopen it from Recovery.",
-		ReviewHint: requestArtifactReviewHint(req),
-		Blocking:   req.Blocking || req.Required,
-	}
-}
-
-func buildActionRuntimeArtifact(action channelAction) team.RuntimeArtifact {
-	kind := team.RuntimeArtifactHumanAction
-	if strings.HasPrefix(strings.TrimSpace(action.Kind), "external_") {
-		kind = team.RuntimeArtifactExternalAction
-	}
-	title := strings.TrimSpace(action.Summary)
-	if title == "" {
-		title = strings.ReplaceAll(strings.TrimSpace(action.Kind), "_", " ")
-	}
-	return team.RuntimeArtifact{
-		ID:         strings.TrimSpace(action.ID),
-		Kind:       kind,
-		Title:      title,
-		Summary:    actionArtifactSummary(action),
-		State:      normalizeActionArtifactState(action.Kind),
-		Progress:   actionArtifactProgress(action),
-		Owner:      strings.TrimSpace(action.Actor),
-		Channel:    strings.TrimSpace(action.Channel),
-		RelatedID:  fallbackString(strings.TrimSpace(action.RelatedID), strings.TrimSpace(action.DecisionID)),
-		StartedAt:  strings.TrimSpace(action.CreatedAt),
-		UpdatedAt:  strings.TrimSpace(action.CreatedAt),
-		ResumeHint: actionArtifactResumeHint(action),
-		ReviewHint: strings.TrimSpace(action.Source),
 	}
 }
 
@@ -351,106 +252,4 @@ func normalizeWorkflowArtifactState(status string) string {
 	default:
 		return strings.TrimSpace(strings.ToLower(status))
 	}
-}
-
-func requestArtifactProgress(req channelInterview) string {
-	parts := make([]string, 0, 3)
-	if choice := strings.TrimSpace(req.RecommendedID); choice != "" {
-		parts = append(parts, "Recommended: "+choice)
-	}
-	if due := strings.TrimSpace(req.DueAt); due != "" {
-		parts = append(parts, "Due "+prettyRelativeTime(due))
-	}
-	if followUp := strings.TrimSpace(req.FollowUpAt); followUp != "" {
-		parts = append(parts, "Follow-up "+prettyRelativeTime(followUp))
-	}
-	return strings.Join(parts, " · ")
-}
-
-func requestArtifactReviewHint(req channelInterview) string {
-	if recommended := strings.TrimSpace(req.RecommendedID); recommended != "" {
-		return "Review recommendation " + recommended + " before answering."
-	}
-	if due := strings.TrimSpace(req.DueAt); due != "" {
-		return "Due " + prettyRelativeTime(due)
-	}
-	return ""
-}
-
-func normalizeRequestArtifactState(status string) string {
-	switch strings.ToLower(strings.TrimSpace(status)) {
-	case "", "pending", "open":
-		return "pending"
-	case "answered", "complete", "completed":
-		return "completed"
-	case "canceled", "cancelled":
-		return "canceled"
-	default:
-		return strings.TrimSpace(strings.ToLower(status))
-	}
-}
-
-func actionArtifactSummary(action channelAction) string {
-	parts := make([]string, 0, 4)
-	if channel := strings.TrimSpace(action.Channel); channel != "" {
-		parts = append(parts, "#"+channel)
-	}
-	if actor := strings.TrimSpace(action.Actor); actor != "" {
-		parts = append(parts, "@"+actor)
-	}
-	if when := strings.TrimSpace(prettyRelativeTime(action.CreatedAt)); when != "" {
-		parts = append(parts, when)
-	}
-	if len(parts) == 0 {
-		return "Retained action trace."
-	}
-	return strings.Join(parts, " · ")
-}
-
-func actionArtifactProgress(action channelAction) string {
-	if source := strings.TrimSpace(action.Source); source != "" {
-		return "Source: " + source
-	}
-	return ""
-}
-
-func actionArtifactResumeHint(action channelAction) string {
-	if related := strings.TrimSpace(action.RelatedID); related != "" {
-		return "Review the related artifact or thread " + related + "."
-	}
-	if decision := strings.TrimSpace(action.DecisionID); decision != "" {
-		return "Review decision " + decision + " or reopen the related thread."
-	}
-	return "Review the related thread or action provider details."
-}
-
-func normalizeActionArtifactState(kind string) string {
-	kind = strings.ToLower(strings.TrimSpace(kind))
-	switch {
-	case strings.Contains(kind, "failed"), strings.Contains(kind, "error"):
-		return "failed"
-	case strings.Contains(kind, "canceled"), strings.Contains(kind, "cancelled"):
-		return "canceled"
-	case strings.Contains(kind, "blocked"), strings.Contains(kind, "waiting"), strings.Contains(kind, "follow_up"):
-		return "blocked"
-	case strings.Contains(kind, "planned"), strings.Contains(kind, "created"), strings.Contains(kind, "received"), strings.Contains(kind, "started"):
-		return "running"
-	case strings.Contains(kind, "answered"), strings.Contains(kind, "executed"), strings.Contains(kind, "completed"), strings.Contains(kind, "sent"):
-		return "completed"
-	default:
-		return fallbackString(kind, "running")
-	}
-}
-
-func latestArtifactTimestamp(candidates ...string) string {
-	var latest time.Time
-	for _, candidate := range candidates {
-		if ts, ok := parseChannelTime(candidate); ok && ts.After(latest) {
-			latest = ts
-		}
-	}
-	if latest.IsZero() {
-		return ""
-	}
-	return latest.Format(time.RFC3339)
 }

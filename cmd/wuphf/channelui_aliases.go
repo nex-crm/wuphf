@@ -49,6 +49,7 @@ type (
 	workspaceReadinessState = channelui.WorkspaceReadinessState
 	workspaceUIState        = channelui.WorkspaceUIState
 	memberRuntimeSummary    = channelui.MemberRuntimeSummary
+	runtimeArtifactSnapshot = channelui.RuntimeArtifactSnapshot
 )
 
 // Function aliases keep the lowercase names callable from package main
@@ -309,6 +310,18 @@ var (
 
 	summarizeJSONField = channelui.SummarizeJSONField
 	taskLogRoot        = channelui.TaskLogRoot
+
+	recentArtifactTasks           = channelui.RecentArtifactTasks
+	buildRequestRuntimeArtifact   = channelui.BuildRequestRuntimeArtifact
+	buildActionRuntimeArtifact    = channelui.BuildActionRuntimeArtifact
+	requestArtifactProgress       = channelui.RequestArtifactProgress
+	requestArtifactReviewHint     = channelui.RequestArtifactReviewHint
+	normalizeRequestArtifactState = channelui.NormalizeRequestArtifactState
+	actionArtifactSummary         = channelui.ActionArtifactSummary
+	actionArtifactProgress        = channelui.ActionArtifactProgress
+	actionArtifactResumeHint      = channelui.ActionArtifactResumeHint
+	normalizeActionArtifactState  = channelui.NormalizeActionArtifactState
+	latestArtifactTimestamp       = channelui.LatestArtifactTimestamp
 )
 
 // Workspace readiness level consts.

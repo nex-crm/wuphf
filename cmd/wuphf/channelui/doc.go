@@ -251,6 +251,19 @@
 //     terminal statuses), CountIsolatedRuntimeTasks (counts tasks
 //     in a "local_worktree" execution mode or with a non-empty
 //     WorktreePath / WorktreeBranch).
+//   - artifact_builders.go — request / action runtime-artifact
+//     projection helpers: RuntimeArtifactSnapshot type + Count /
+//     Filter methods, RecentArtifactTasks (filter + newest-first
+//     sort + limit), BuildRequestRuntimeArtifact and
+//     BuildActionRuntimeArtifact, the Request*/Action* progress /
+//     review / resume / state normalizers (RequestArtifactProgress,
+//     RequestArtifactReviewHint, NormalizeRequestArtifactState,
+//     ActionArtifactSummary, ActionArtifactProgress,
+//     ActionArtifactResumeHint, NormalizeActionArtifactState),
+//     and LatestArtifactTimestamp (newest-parseable RFC3339 or
+//     ""). The package-main task / workflow / orphan-log builders
+//     stay there since they touch package-main types like
+//     taskLogArtifact and workflowRunArtifact.
 //   - artifact_helpers.go  — execution-artifact stdlib leaves:
 //     SummarizeJSONField (TruncateText'd one-line summary of a
 //     json.RawMessage; unquotes JSON strings, compacts objects /
