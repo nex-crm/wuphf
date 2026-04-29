@@ -4,6 +4,18 @@ import { useQueryClient } from "@tanstack/react-query";
 import { sseURL } from "../api/client";
 import { useAppStore } from "../stores/app";
 
+function messageChannelFromEvent(event: Event): string | null {
+  if (!("data" in event) || typeof event.data !== "string") return null;
+  try {
+    const payload = JSON.parse(event.data) as {
+      message?: { channel?: string };
+    };
+    return payload.message?.channel?.trim() || "general";
+  } catch {
+    return null;
+  }
+}
+
 export function useBrokerEvents(enabled: boolean) {
   const queryClient = useQueryClient();
   const setBrokerConnected = useAppStore((s) => s.setBrokerConnected);
@@ -16,7 +28,16 @@ export function useBrokerEvents(enabled: boolean) {
 
     const source = new ES(sseURL("/events"));
     source.addEventListener("ready", () => setBrokerConnected(true));
-    source.addEventListener("message", () => {
+    source.addEventListener("message", (event) => {
+      const channel = messageChannelFromEvent(event);
+      if (channel) {
+        const state = useAppStore.getState();
+        if (state.currentApp === null && state.currentChannel === channel) {
+          state.clearUnread(channel);
+        } else {
+          state.incrementUnread(channel);
+        }
+      }
       void queryClient.invalidateQueries({ queryKey: ["messages"] });
       void queryClient.invalidateQueries({ queryKey: ["thread-messages"] });
       void queryClient.invalidateQueries({ queryKey: ["office-members"] });
