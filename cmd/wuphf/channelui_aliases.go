@@ -314,6 +314,9 @@ var (
 	summarizeJSONField = channelui.SummarizeJSONField
 	taskLogRoot        = channelui.TaskLogRoot
 
+	appendChannelCrashLog = channelui.AppendChannelCrashLog
+	channelCrashLogPath   = channelui.ChannelCrashLogPath
+
 	recentArtifactTasks           = channelui.RecentArtifactTasks
 	buildRequestRuntimeArtifact   = channelui.BuildRequestRuntimeArtifact
 	buildActionRuntimeArtifact    = channelui.BuildActionRuntimeArtifact

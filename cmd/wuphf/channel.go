@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime/debug"
 	"strconv"
 	"strings"
@@ -4805,28 +4804,4 @@ func reportChannelCrash(details string) {
 		fmt.Fprintln(os.Stderr, "then restart WUPHF when ready.")
 	}
 	select {}
-}
-
-func appendChannelCrashLog(details string) error {
-	path := channelCrashLogPath()
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
-	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
-	if err != nil {
-		return err
-	}
-	if _, err := fmt.Fprintf(f, "\n[%s]\n%s\n", time.Now().Format(time.RFC3339), details); err != nil {
-		_ = f.Close()
-		return err
-	}
-	return f.Close()
-}
-
-func channelCrashLogPath() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ".wuphf-channel-crash.log"
-	}
-	return filepath.Join(home, ".wuphf", "logs", "channel-crash.log")
 }

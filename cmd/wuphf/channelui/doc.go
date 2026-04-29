@@ -279,6 +279,10 @@
 //     ""). The package-main task / workflow / orphan-log builders
 //     stay there since they touch package-main types like
 //     taskLogArtifact and workflowRunArtifact.
+//   - crash_log.go         — AppendChannelCrashLog (RFC3339-stamped
+//     append to the crash log; mode 0o700 dir + 0o600 file) and
+//     ChannelCrashLogPath (~/.wuphf/logs/channel-crash.log with
+//     a working-directory fallback).
 //   - artifact_helpers.go  — execution-artifact stdlib leaves:
 //     SummarizeJSONField (TruncateText'd one-line summary of a
 //     json.RawMessage; unquotes JSON strings, compacts objects /
