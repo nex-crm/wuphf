@@ -265,6 +265,26 @@ func TestPostBrokerSkill_RoundTrip(t *testing.T) {
 	}
 }
 
+// TestFetchURL_RejectsRedirectOffGitHub pins the redirect-host guard:
+// a malicious `github:` hub could 302 the raw fetch to an
+// attacker-controlled host, and the post-install BuildManifest +
+// broker POST would then accept content from anywhere. fetchURL must
+// refuse any redirect that lands off raw.githubusercontent.com.
+func TestFetchURL_RejectsRedirectOffGitHub(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "http://evil.example.com/SKILL.md", http.StatusFound)
+	}))
+	defer srv.Close()
+
+	_, err := fetchURL(context.Background(), srv.URL+"/skills/x/SKILL.md")
+	if err == nil {
+		t.Fatal("expected error rejecting redirect to evil.example.com, got nil")
+	}
+	if !strings.Contains(err.Error(), "refusing redirect") {
+		t.Errorf("expected 'refusing redirect' in error, got %q", err.Error())
+	}
+}
+
 // TestPostBrokerSkill_4xxSurfacesBody pins the error-shape: a 4xx from
 // the broker should bubble up with the response body so the user can see
 // the broker's actual rejection reason (e.g. "name already exists" or

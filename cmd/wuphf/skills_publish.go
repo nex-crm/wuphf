@@ -562,7 +562,15 @@ func runSkillsInstall(args []string) {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(2)
 	}
-	body, err := fetchURL(context.Background(), rawURL)
+
+	// One ctx for the whole install so Ctrl-C cancels both the GitHub
+	// raw fetch AND the broker POST. Earlier this was set up only for
+	// the broker post, so a hung github.com fetch had to wait for the
+	// HTTP timeout.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+
+	body, err := fetchURL(ctx, rawURL)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: fetch %s: %v\n", rawURL, err)
 		os.Exit(1)
@@ -597,8 +605,6 @@ func runSkillsInstall(args []string) {
 		"created_by":  createdBy,
 		"channel":     strings.TrimSpace(*channel),
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer stop()
 	if err := postBrokerSkill(ctx, payload); err != nil {
 		fmt.Fprintf(os.Stderr, "error: post to broker: %v\n", err)
 		os.Exit(1)
@@ -627,7 +633,14 @@ func fetchURL(ctx context.Context, rawURL string) ([]byte, error) {
 			if len(via) >= 5 {
 				return fmt.Errorf("too many redirects")
 			}
-			if req.URL.Host != "raw.githubusercontent.com" {
+			// Case-fold the host so "RAW.githubusercontent.com" or any
+			// other case variant from a misconfigured hub redirector
+			// still passes (Go preserves URL host case for non-IDN
+			// hosts). We deliberately do NOT accept *.githubusercontent.com
+			// subdomain shards — if GitHub ever serves raw content from a
+			// new shard, prefer reviewing the change here over silently
+			// trusting any subdomain.
+			if !strings.EqualFold(req.URL.Hostname(), "raw.githubusercontent.com") {
 				return fmt.Errorf("refusing redirect to non-raw-github host %q (a hub redirected the install fetch off-platform)", req.URL.Host)
 			}
 			return nil
