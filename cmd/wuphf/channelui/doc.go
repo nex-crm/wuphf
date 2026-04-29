@@ -151,6 +151,16 @@
 //     (request_/external_/interrupt_/human_ kinds, newest first),
 //     ArtifactClock (HH:MM with fallback), ArtifactTime
 //     (RFC3339 emit string).
+//   - sidebar_apps.go      — sidebar app-stack data:
+//     OfficeSidebarApp struct, OfficeSidebarApps (canonical
+//     8-row stack), VisibleSidebarApps (max-rows fit that always
+//     keeps the active app visible).
+//   - text_misc.go         — small string utilities:
+//     ContainsSlug, PluralizeWord, ExtractTagsFromText (from
+//     "@slug" mentions), ChannelExists.
+//   - composer_input.go    — composer cursor/insertion primitives:
+//     NormalizeCursorPos (clamp to [0, len]), InsertComposerRunes
+//     (rune-aware insert at pos returning new pos).
 //
 // Subsequent extraction PRs will land the workspace / recovery / cache
 // cluster, the sidebar / splash, the broker integrations, and finally

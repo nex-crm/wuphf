@@ -3152,24 +3152,6 @@ type sidebarItem struct {
 	Label string
 }
 
-type officeSidebarApp struct {
-	App   officeApp
-	Label string
-}
-
-func officeSidebarApps() []officeSidebarApp {
-	return []officeSidebarApp{
-		{App: officeAppMessages, Label: "Messages"},
-		{App: officeAppRecovery, Label: "Recovery"},
-		{App: officeAppTasks, Label: "Tasks"},
-		{App: officeAppRequests, Label: "Requests"},
-		{App: officeAppPolicies, Label: "Policies"},
-		{App: officeAppCalendar, Label: "Calendar"},
-		{App: officeAppArtifacts, Label: "Artifacts"},
-		{App: officeAppSkills, Label: "Skills"},
-	}
-}
-
 func (m channelModel) sidebarItems() []sidebarItem {
 	if m.isOneOnOne() {
 		return nil
@@ -3606,25 +3588,6 @@ func (m *channelModel) openRequestActionPicker(req channelInterview) tea.Cmd {
 	return nil
 }
 
-func containsSlug(items []string, want string) bool {
-	for _, item := range items {
-		if item == want {
-			return true
-		}
-	}
-	return false
-}
-
-func pluralizeWord(count int, singular, plural string) string {
-	if count == 1 {
-		return singular
-	}
-	if strings.TrimSpace(plural) != "" {
-		return plural
-	}
-	return singular + "s"
-}
-
 // mergeOfficeMembers returns all current channel members enriched with office roster
 // metadata and broker activity. Members who have not posted yet still appear as idle.
 func mergeOfficeMembers(officeMembers []officeMemberInfo, brokerMembers []channelMember, channel *channelInfo) []channelMember {
@@ -3988,16 +3951,6 @@ func replaceMentionInInput(input []rune, pos int, mention string) ([]rune, int) 
 	return updated, atIdx + len([]rune(mention)) + 1
 }
 
-func normalizeCursorPos(input []rune, pos int) int {
-	if pos < 0 {
-		return 0
-	}
-	if pos > len(input) {
-		return len(input)
-	}
-	return pos
-}
-
 func isComposerWordRune(r rune) bool {
 	return unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || r == '-'
 }
@@ -4086,17 +4039,6 @@ func composerInsertRunes(msg tea.KeyMsg) []rune {
 		return msg.Runes
 	}
 	return nil
-}
-
-func insertComposerRunes(input []rune, pos int, ch []rune) ([]rune, int) {
-	pos = normalizeCursorPos(input, pos)
-	if len(ch) == 0 {
-		return input, pos
-	}
-	tail := make([]rune, len(input[pos:]))
-	copy(tail, input[pos:])
-	input = append(input[:pos], append(ch, tail...)...)
-	return input, pos + len(ch)
 }
 
 func (m *channelModel) maybeActivateChannelPickerFromInput() bool {
@@ -4829,26 +4771,6 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 		}
 		return m, nil
 	}
-}
-
-func extractTagsFromText(text string) []string {
-	var tags []string
-	for _, word := range strings.Fields(text) {
-		if strings.HasPrefix(word, "@") && len(word) > 1 {
-			tag := strings.TrimRight(word[1:], ".,!?;:")
-			tags = append(tags, tag)
-		}
-	}
-	return tags
-}
-
-func channelExists(channels []channelInfo, slug string) bool {
-	for _, ch := range channels {
-		if ch.Slug == slug {
-			return true
-		}
-	}
-	return false
 }
 
 func (m channelModel) currentChannelInfo() *channelInfo {

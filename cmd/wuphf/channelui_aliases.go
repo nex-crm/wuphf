@@ -41,6 +41,7 @@ type (
 	channelConfirmAction   = channelui.ChannelConfirmAction
 	channelConfirm         = channelui.ChannelConfirm
 	composerPopupOption    = channelui.ComposerPopupOption
+	officeSidebarApp       = channelui.OfficeSidebarApp
 )
 
 // Function aliases keep the lowercase names callable from package main
@@ -218,6 +219,15 @@ var (
 	recentExecutionArtifactActions = channelui.RecentExecutionArtifactActions
 	artifactClock                  = channelui.ArtifactClock
 	artifactTime                   = channelui.ArtifactTime
+
+	officeSidebarApps   = channelui.OfficeSidebarApps
+	visibleSidebarApps  = channelui.VisibleSidebarApps
+	containsSlug        = channelui.ContainsSlug
+	pluralizeWord       = channelui.PluralizeWord
+	extractTagsFromText = channelui.ExtractTagsFromText
+	channelExists       = channelui.ChannelExists
+	normalizeCursorPos  = channelui.NormalizeCursorPos
+	insertComposerRunes = channelui.InsertComposerRunes
 )
 
 // Channel-confirm action typed-string consts.

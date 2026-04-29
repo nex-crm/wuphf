@@ -9,28 +9,6 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-func visibleSidebarApps(apps []officeSidebarApp, activeApp officeApp, maxRows int) []officeSidebarApp {
-	if maxRows <= 0 || len(apps) == 0 {
-		return nil
-	}
-	if len(apps) <= maxRows {
-		return apps
-	}
-	visible := append([]officeSidebarApp(nil), apps[:maxRows]...)
-	for _, app := range visible {
-		if app.App == activeApp {
-			return visible
-		}
-	}
-	for _, app := range apps {
-		if app.App == activeApp {
-			visible[len(visible)-1] = app
-			return visible
-		}
-	}
-	return visible
-}
-
 // renderSidebar renders the Slack-style sidebar with channels and team members.
 func renderSidebar(channels []channelInfo, members []channelMember, tasks []channelTask, activeChannel string, activeApp officeApp, cursor int, rosterOffset int, focused bool, quickJump quickJumpTarget, workspace workspaceUIState, width, height int, checklist ...onboardingChecklist) string {
 	if width < 2 {
