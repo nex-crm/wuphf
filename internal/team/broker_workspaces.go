@@ -225,6 +225,14 @@ func readWorkspaceToken(name string) (string, error) {
 // Empty string (the default) means "use the orchestrator's resolution".
 var targetBrokerBaseURLFn func(name string) string
 
+// SetTargetBrokerURLResolver wires the function the broker calls to translate
+// a workspace name into the cross-broker base URL used by the pause proxy.
+// Production wires this in cmd/wuphf to the orchestrator's registry lookup;
+// tests use the package-level test seam directly.
+func SetTargetBrokerURLResolver(fn func(name string) string) {
+	targetBrokerBaseURLFn = fn
+}
+
 // resolveTargetBrokerURL returns the http://127.0.0.1:<port> base URL for
 // the target workspace's broker. Production uses the orchestrator's
 // registry; for now (Lane B not yet merged) we expose a settable function
