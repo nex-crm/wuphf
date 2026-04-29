@@ -70,6 +70,66 @@ func TestHasUnresolvedDepsLocked_TerminalStatusesResolve(t *testing.T) {
 	}
 }
 
+// TestReconcileOrphanedBlockedTasksLocked_UnblocksCancelledParent
+// pins the persisted-state migration that fixes orphaned dependents
+// from before the cancelled-dep fix landed. A task that was Blocked=
+// true while its parent was cancelled now resumes on broker reload —
+// previously it stayed blocked forever because the old
+// unblockDependentsLocked only fired on Status="done". The migration
+// is idempotent: running a second time has no effect.
+func TestReconcileOrphanedBlockedTasksLocked_UnblocksCancelledParent(t *testing.T) {
+	b := newTestBroker(t)
+	b.mu.Lock()
+	b.tasks = []teamTask{
+		{ID: "parent-canceled", Status: "canceled", Channel: "general"},
+		{ID: "parent-done", Status: "done", Channel: "general"},
+		{ID: "parent-active", Status: "in_progress", Channel: "general"},
+		{
+			ID: "orphan-1", Status: "blocked", Blocked: true, Channel: "general",
+			DependsOn: []string{"parent-canceled"},
+		},
+		{
+			ID: "stuck", Status: "blocked", Blocked: true, Channel: "general",
+			DependsOn: []string{"parent-active"},
+		},
+		{
+			ID: "orphan-multi", Status: "blocked", Blocked: true, Channel: "general",
+			DependsOn: []string{"parent-canceled", "parent-done"},
+		},
+	}
+
+	b.reconcileOrphanedBlockedTasksLocked()
+
+	byID := map[string]*teamTask{}
+	for i := range b.tasks {
+		byID[b.tasks[i].ID] = &b.tasks[i]
+	}
+
+	if got := byID["orphan-1"]; got.Blocked || got.Status != "in_progress" {
+		t.Errorf("orphan-1 should be unblocked, got Blocked=%v Status=%q", got.Blocked, got.Status)
+	}
+	if got := byID["orphan-multi"]; got.Blocked || got.Status != "in_progress" {
+		t.Errorf("orphan-multi should be unblocked, got Blocked=%v Status=%q", got.Blocked, got.Status)
+	}
+	if got := byID["stuck"]; !got.Blocked || got.Status != "blocked" {
+		t.Errorf("stuck (parent still active) must remain blocked, got Blocked=%v Status=%q", got.Blocked, got.Status)
+	}
+
+	// Idempotent: running again should be a no-op for previously
+	// reconciled tasks.
+	beforeSecond := make(map[string]string, len(b.tasks))
+	for i := range b.tasks {
+		beforeSecond[b.tasks[i].ID] = b.tasks[i].UpdatedAt
+	}
+	b.reconcileOrphanedBlockedTasksLocked()
+	for i := range b.tasks {
+		if b.tasks[i].UpdatedAt != beforeSecond[b.tasks[i].ID] {
+			t.Errorf("task %s UpdatedAt changed on second reconcile run", b.tasks[i].ID)
+		}
+	}
+	b.mu.Unlock()
+}
+
 // TestTaskReuseMatch_HasScopedIdentity pins the precondition for
 // scoped-identity dedupe in findReusableTaskLocked: a match counts as
 // scoped only when SourceSignalID or SourceDecisionID is non-empty.

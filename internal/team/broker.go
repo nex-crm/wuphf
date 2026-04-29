@@ -2609,7 +2609,35 @@ func (b *Broker) normalizeLoadedStateLocked() {
 		b.scheduleTaskLifecycleLocked(&b.tasks[i])
 		_ = b.syncTaskWorktreeLocked(&b.tasks[i])
 	}
+	b.reconcileOrphanedBlockedTasksLocked()
 	b.pendingInterview = firstBlockingRequest(b.requests)
+}
+
+// reconcileOrphanedBlockedTasksLocked unblocks tasks whose dependencies
+// have all reached a terminal status (done/completed/canceled/cancelled)
+// but who never received the unblock notification because the parent
+// terminated under the pre-fix semantics where only Status="done" fired
+// unblockDependentsLocked. This is a one-shot migration: tasks blocked
+// by a still-active dependency are left alone. Idempotent — running it
+// twice has no effect since the second pass finds nothing blocked.
+//
+// Caller must hold b.mu. Called from normalizeLoadedStateLocked so it
+// runs once per broker boot against persisted state.
+func (b *Broker) reconcileOrphanedBlockedTasksLocked() {
+	for i := range b.tasks {
+		t := &b.tasks[i]
+		if !t.Blocked || t.Status != "blocked" {
+			continue
+		}
+		if b.hasUnresolvedDepsLocked(t) {
+			continue
+		}
+		t.Blocked = false
+		t.Status = "in_progress"
+		t.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+		b.appendActionLocked("task_unblocked", "office", t.Channel, "system",
+			truncateSummary("Reconciled: parent dep terminated while task was blocked", 140), t.ID)
+	}
 }
 
 func (b *Broker) SessionModeState() (string, string) {

@@ -3,6 +3,7 @@ package team
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -301,6 +302,11 @@ func (b *Broker) handleStudioGeneratePackage(w http.ResponseWriter, r *http.Requ
 		Artifacts []operations.ArtifactType `json:"artifacts"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+			return
+		}
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
@@ -627,6 +633,11 @@ func (b *Broker) handleStudioRunWorkflow(w http.ResponseWriter, r *http.Request)
 		Integrations       []string        `json:"integrations"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+			return
+		}
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}

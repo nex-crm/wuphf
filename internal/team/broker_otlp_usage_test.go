@@ -12,6 +12,34 @@ import (
 	"github.com/nex-crm/wuphf/internal/provider"
 )
 
+// TestHandleOTLPLogs_RejectsOversizedBody pins the 4 MiB body cap.
+// Without this an authenticated agent emitting a runaway batch could
+// grow broker memory unbounded; with it the broker rejects before
+// json.Decoder finishes reading. We use a payload that LOOKS like
+// JSON so the decoder reads past the start byte and actually trips
+// the MaxBytesReader cap.
+//
+// Accept either 413 or 400 — same tolerance PAM uses (pam_test.go:691).
+// The cap is enforced either way; the test pins "cap is enforced".
+func TestHandleOTLPLogs_RejectsOversizedBody(t *testing.T) {
+	b := newTestBroker(t)
+	srv := httptest.NewServer(http.HandlerFunc(b.handleOTLPLogs))
+	defer srv.Close()
+
+	// Wrap the bulk inside a JSON string so the decoder doesn't bail at
+	// the very first byte before the cap has a chance to fire.
+	body := append([]byte(`{"x":"`), bytes.Repeat([]byte("a"), otlpLogsMaxBodyBytes+1)...)
+	body = append(body, []byte(`"}`)...)
+	resp, err := http.Post(srv.URL, "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusRequestEntityTooLarge && resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 413 or 400, got %d", resp.StatusCode)
+	}
+}
+
 // TestHandleOTLPLogs_RejectsNonPOST locks the method gate. The endpoint
 // mutates broker state (records usage, persists) so any drift to allow
 // GET/PUT/DELETE could expose it to log-tailing GETs or CSRF.

@@ -2,6 +2,7 @@ package team
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -73,6 +74,11 @@ func (b *Broker) handlePolicies(w http.ResponseWriter, r *http.Request) {
 			Rule   string `json:"rule"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			var maxErr *http.MaxBytesError
+			if errors.As(err, &maxErr) {
+				http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+				return
+			}
 			http.Error(w, "invalid json", http.StatusBadRequest)
 			return
 		}

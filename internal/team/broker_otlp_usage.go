@@ -2,6 +2,7 @@ package team
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -39,14 +40,20 @@ func (b *Broker) handleOTLPLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Bound the body BEFORE decoding so a 1 GiB payload can't tie up
-	// the decoder's read path. MaxBytesReader returns *http.MaxBytesError
-	// which json.Decoder surfaces as a generic decode error; that's
-	// fine — the client gets a 400 either way.
+	// the decoder's read path. Distinguish the cap-overflow case (413,
+	// canonical "request too large") from a generic decode failure
+	// (400, "invalid json") so clients can tell them apart — matches
+	// the broker_pam.go pattern.
 	r.Body = http.MaxBytesReader(w, r.Body, otlpLogsMaxBodyBytes)
 	defer r.Body.Close()
 
 	var payload map[string]any
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+			return
+		}
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}

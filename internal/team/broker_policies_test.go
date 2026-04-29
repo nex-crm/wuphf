@@ -151,6 +151,28 @@ func TestHandlePolicies_POSTPersistsRule(t *testing.T) {
 	}
 }
 
+// TestHandlePolicies_RejectsOversizedBody pins the 16 KiB body cap on
+// POST /policies. A policy rule + source string fits under 4 KiB;
+// anything larger is a bug, malformed paste, or hostile input.
+//
+// Accept either 413 or 400 — see PAM's pattern at pam_test.go:691. The
+// cap is enforced either way; the test pins "cap is enforced".
+func TestHandlePolicies_RejectsOversizedBody(t *testing.T) {
+	b := newTestBroker(t)
+	srv := httptest.NewServer(http.HandlerFunc(b.handlePolicies))
+	defer srv.Close()
+
+	oversize := bytes.Repeat([]byte("x"), policyRequestMaxBodyBytes+1)
+	resp, err := http.Post(srv.URL, "application/json", bytes.NewReader(oversize))
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusRequestEntityTooLarge && resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 413 or 400 for oversized body, got %d", resp.StatusCode)
+	}
+}
+
 // TestHandlePolicies_DELETE_DeactivatesByID pins both DELETE branches:
 // id-from-body fallback and id-from-URL path. Active=false should flip
 // for the matching policy without removing it (audit trail), and

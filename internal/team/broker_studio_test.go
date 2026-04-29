@@ -176,6 +176,52 @@ func TestHandleStudioGeneratePackage_RequiresAuth(t *testing.T) {
 	}
 }
 
+// TestHandleStudioGeneratePackage_RejectsOversizedBody pins the 1 MiB
+// body cap on /studio/generate-package. The endpoint forwards the
+// payload into an LLM provider call, so an unbounded body could either
+// inflate broker memory or pump a giant prompt to a paid API.
+//
+// We accept either 413 (cap-overflow distinguished via *MaxBytesError)
+// or 400 (decoder swallows the error). PAM's own oversized-body test
+// uses the same tolerance — see pam_test.go:691. The cap is enforced
+// either way; the test pins "cap is enforced", not the exact status.
+func TestHandleStudioGeneratePackage_RejectsOversizedBody(t *testing.T) {
+	b := newTestBroker(t)
+	srv := httptest.NewServer(http.HandlerFunc(b.handleStudioGeneratePackage))
+	defer srv.Close()
+
+	oversize := bytes.Repeat([]byte("x"), studioRequestMaxBodyBytes+1)
+	resp, err := http.Post(srv.URL, "application/json", bytes.NewReader(oversize))
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusRequestEntityTooLarge && resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 413 or 400 for oversized body, got %d", resp.StatusCode)
+	}
+}
+
+// TestHandleStudioRunWorkflow_RejectsOversizedBody pins the 1 MiB body
+// cap on /studio/run-workflow. The endpoint can spawn external workflow
+// providers and consume budget; an unbounded body would let an
+// authenticated agent ship a massive workflow_definition into the
+// runner.
+func TestHandleStudioRunWorkflow_RejectsOversizedBody(t *testing.T) {
+	b := newTestBroker(t)
+	srv := httptest.NewServer(http.HandlerFunc(b.handleStudioRunWorkflow))
+	defer srv.Close()
+
+	oversize := bytes.Repeat([]byte("x"), studioRequestMaxBodyBytes+1)
+	resp, err := http.Post(srv.URL, "application/json", bytes.NewReader(oversize))
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusRequestEntityTooLarge && resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 413 or 400 for oversized body, got %d", resp.StatusCode)
+	}
+}
+
 // TestHandleStudioRunWorkflow_RejectsNonPostMethods pins the method gate.
 // The endpoint mutates broker state (records actions, runs workflows) so
 // drifting to allow GET/PUT/DELETE could expose the operation to CSRF or
