@@ -300,4 +300,3 @@ func TestSchedulerHeartbeatPreservesUserFields(t *testing.T) {
 		t.Errorf("Status: got %q, want running", job.Status)
 	}
 }
-
