@@ -24,63 +24,6 @@ func (m channelModel) buildRecoveryLines(contentWidth int) []renderedLine {
 	return buildRecoveryLines(m.currentWorkspaceUIState(), contentWidth, m.tasks, m.requests, m.messages)
 }
 
-func runtimeTasksFromChannel(tasks []channelTask) []team.RuntimeTask {
-	out := make([]team.RuntimeTask, 0, len(tasks))
-	for _, task := range tasks {
-		out = append(out, team.RuntimeTask{
-			ID:             task.ID,
-			Title:          strings.TrimSpace(task.Title),
-			Owner:          strings.TrimSpace(task.Owner),
-			Status:         strings.TrimSpace(task.Status),
-			PipelineStage:  strings.TrimSpace(task.PipelineStage),
-			ReviewState:    strings.TrimSpace(task.ReviewState),
-			ExecutionMode:  strings.TrimSpace(task.ExecutionMode),
-			WorktreePath:   strings.TrimSpace(task.WorktreePath),
-			WorktreeBranch: strings.TrimSpace(task.WorktreeBranch),
-			Blocked:        strings.EqualFold(strings.TrimSpace(task.Status), "blocked"),
-		})
-	}
-	return out
-}
-
-func runtimeRequestsFromChannel(requests []channelInterview) []team.RuntimeRequest {
-	out := make([]team.RuntimeRequest, 0, len(requests))
-	for _, req := range requests {
-		out = append(out, team.RuntimeRequest{
-			ID:       req.ID,
-			Kind:     strings.TrimSpace(req.Kind),
-			Title:    strings.TrimSpace(req.Title),
-			Question: strings.TrimSpace(req.Question),
-			From:     strings.TrimSpace(req.From),
-			Blocking: req.Blocking,
-			Required: req.Required,
-			Status:   strings.TrimSpace(req.Status),
-			Channel:  strings.TrimSpace(req.Channel),
-			Secret:   req.Secret,
-		})
-	}
-	return out
-}
-
-func runtimeMessagesFromChannel(messages []brokerMessage, limit int) []team.RuntimeMessage {
-	if limit <= 0 {
-		limit = 6
-	}
-	out := make([]team.RuntimeMessage, 0, minInt(len(messages), limit))
-	for i := len(messages) - 1; i >= 0 && len(out) < limit; i-- {
-		msg := messages[i]
-		out = append(out, team.RuntimeMessage{
-			ID:        msg.ID,
-			From:      strings.TrimSpace(msg.From),
-			Title:     strings.TrimSpace(msg.Title),
-			Content:   strings.TrimSpace(msg.Content),
-			ReplyTo:   strings.TrimSpace(msg.ReplyTo),
-			Timestamp: strings.TrimSpace(msg.Timestamp),
-		})
-	}
-	return out
-}
-
 func (m channelModel) currentAwaySummary() string {
 	return m.currentWorkspaceUIState().AwaySummary
 }
@@ -239,29 +182,4 @@ func buildRecoverySurgeryLines(contentWidth int, tasks []channelTask, requests [
 	}
 
 	return lines
-}
-
-func countRunningRuntimeTasks(tasks []team.RuntimeTask) int {
-	count := 0
-	for _, task := range tasks {
-		switch strings.ToLower(strings.TrimSpace(task.Status)) {
-		case "", "done", "completed", "canceled", "cancelled":
-			continue
-		default:
-			count++
-		}
-	}
-	return count
-}
-
-func countIsolatedRuntimeTasks(tasks []team.RuntimeTask) int {
-	count := 0
-	for _, task := range tasks {
-		if strings.EqualFold(strings.TrimSpace(task.ExecutionMode), "local_worktree") ||
-			strings.TrimSpace(task.WorktreePath) != "" ||
-			strings.TrimSpace(task.WorktreeBranch) != "" {
-			count++
-		}
-	}
-	return count
 }

@@ -278,6 +278,12 @@ var (
 	firstWorkspaceString  = channelui.FirstWorkspaceString
 	sidebarViewLabel      = channelui.SidebarViewLabel
 	firstDoctorNextStep   = channelui.FirstDoctorNextStep
+
+	runtimeTasksFromChannel    = channelui.RuntimeTasksFromChannel
+	runtimeRequestsFromChannel = channelui.RuntimeRequestsFromChannel
+	runtimeMessagesFromChannel = channelui.RuntimeMessagesFromChannel
+	countRunningRuntimeTasks   = channelui.CountRunningRuntimeTasks
+	countIsolatedRuntimeTasks  = channelui.CountIsolatedRuntimeTasks
 )
 
 // Doctor severity consts mirror channelui's exported names.

@@ -242,6 +242,15 @@
 //     FirstWorkspaceString chain helper, FirstDoctorNextStep
 //     (first non-empty NextStep on a fail/warn check), and
 //     SidebarViewLabel (OfficeApp → short sidebar summary label).
+//   - runtime_projection.go — channel UI ↔ team.Runtime* projection
+//     and tally helpers: RuntimeTasksFromChannel /
+//     RuntimeRequestsFromChannel / RuntimeMessagesFromChannel
+//     (project the channel UI types into the runtime-snapshot
+//     shapes; the messages projection walks newest-first and is
+//     bounded by limit), CountRunningRuntimeTasks (excludes
+//     terminal statuses), CountIsolatedRuntimeTasks (counts tasks
+//     in a "local_worktree" execution mode or with a non-empty
+//     WorktreePath / WorktreeBranch).
 //
 // Subsequent extraction PRs will land the workspace / recovery / cache
 // cluster, the sidebar / splash, the broker integrations, and finally
