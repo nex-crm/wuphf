@@ -350,6 +350,16 @@ type schedulerJob struct {
 	LastRun         string `json:"last_run,omitempty"`
 	Status          string `json:"status,omitempty"`
 	Payload         string `json:"payload,omitempty"`
+	// PR 8 Lane G: cron registry fields. SystemManaged crons are
+	// self-registered at broker startup and surfaced in the Calendar app's
+	// System Schedules panel; humans can disable/throttle them but cannot
+	// delete them. IntervalOverride lets the human dial the cadence without
+	// touching env / config — when non-zero, the run-loop uses it instead
+	// of the env-resolved default.
+	Enabled          bool   `json:"enabled"`
+	IntervalOverride int    `json:"interval_override,omitempty"`
+	LastRunStatus    string `json:"last_run_status,omitempty"`
+	SystemManaged    bool   `json:"system_managed,omitempty"`
 }
 
 type teamSkill struct {
@@ -764,6 +774,11 @@ func (b *Broker) Start() error {
 	b.ensureEntitySynthesizer()
 	b.ensurePlaybookExecutionLog()
 	b.ensurePlaybookSynthesizer()
+	// PR 8 Lane G: register system-managed crons AFTER review log + wiki
+	// worker init so the registry reflects subsystems that are actually up.
+	// Registration is idempotent — pre-existing entries keep their
+	// IntervalOverride and Enabled choices.
+	b.registerSystemCrons()
 	b.startReviewExpiryLoop(context.Background())
 	return b.StartOnPort(brokeraddr.ResolvePort())
 }
@@ -946,6 +961,7 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/watchdogs", b.requireAuth(b.handleWatchdogs))
 	mux.HandleFunc("/actions", b.requireAuth(b.handleActions))
 	mux.HandleFunc("/scheduler", b.requireAuth(b.handleScheduler))
+	mux.HandleFunc("/scheduler/", b.requireAuth(b.handleSchedulerSubpath))
 	mux.HandleFunc("/skills", b.requireAuth(b.handleSkills))
 	// /skills/compile lives ABOVE the wildcard subpath route so the
 	// ServeMux longest-match wins for the compile endpoints.
