@@ -34,6 +34,13 @@ from typing import Any
 EVAL_PREFIX = "eval-"
 WIKI_PLAYBOOKS_REL = "wiki/team/playbooks"
 WIKI_SKILLS_REL = "wiki/team/skills"
+WIKI_REL = "wiki"
+
+# Per-agent catalog ceiling enforced by eval. The broker logs a soft warning
+# at 6KB (skillCatalogSoftWarnBytes); the eval treats >=8KB as a hard fail
+# because that's where prompt-cache eviction risk starts mattering at scale.
+CATALOG_BYTES_HARD_LIMIT = 8 * 1024
+CATALOG_BYTES_SOFT_WARN = 6 * 1024
 SKILL_SHAPE_HEADERS = (
     "## steps",
     "## how to",
@@ -55,6 +62,34 @@ class Scenario:
     rationale: str
     filename: str
     content: str
+    # PR 7: per-agent scoping fields. Default to lead-routable shared so every
+    # pre-existing scenario remains valid without a JSON migration.
+    expected_owner_agents: list[str] = field(default_factory=list)
+    # Where to seed this scenario inside the broker wiki. Defaults to
+    # team/playbooks/, but path-inference scenarios use team/agents/<slug>/notebook.
+    seed_subdir: str = "team/playbooks"
+    # PR 7 task #13: similarity gate outcome the eval expects.
+    #   create_new        — proposal lands as a new active/proposed skill (default).
+    #   enhance_existing  — proposal MUST trigger errSkillSimilarToExisting at the
+    #                       broker layer (not promoted, EnhancementCandidatesTotal
+    #                       increments). Scenario is considered correct when
+    #                       compile reports the skill as errored / not promoted.
+    #   ambiguous         — proposal lands BUT rendered SKILL.md frontmatter
+    #                       carries metadata.wuphf.similar_to_existing.
+    expected_similarity_outcome: str = "create_new"
+    # Visibility scenarios reference an already-promoted skill and simulate a
+    # cross-role invoke. invoking_slug is the agent attempting the call;
+    # target_skill_slug is the skill being invoked. expected_invoke_status
+    # is 200 (lead-bypass / owner) or 403 (cross-role).
+    invoking_slug: str = ""
+    target_skill_slug: str = ""
+    expected_invoke_status: int = 0  # 0 = not a visibility scenario
+    expected_delegate_to: list[str] = field(default_factory=list)
+    # PR 7 task #13 multi-pass seeding for similarity gate. pass=1 (default)
+    # seeds before the first compile; pass=2 seeds after, then a second
+    # compile fires. Lets the near-duplicate scenario collide with a real
+    # canonical that was promoted in the first pass.
+    seed_pass: int = 1
 
     @property
     def slug(self) -> str:
@@ -93,6 +128,22 @@ class ScenarioResult:
 
 
 @dataclass
+class VisibilityResult:
+    """Outcome of a cross-role invoke check (PR 7 task #3).
+
+    The eval simulates a non-owner agent calling /skills/{name}/invoke and
+    asserts the broker returned the structured 403 + delegate_to body.
+    """
+    scenario_id: str
+    invoker: str
+    target: str
+    expected_status: int
+    actual_status: int
+    ok: bool
+    detail: str = ""
+
+
+@dataclass
 class VolumeMetrics:
     """How much noise the pipeline created against the human-interview queue.
 
@@ -109,6 +160,16 @@ class VolumeMetrics:
     over_promotions: int = 0  # actual_promoted - expected_promotions
     duplicate_proposals: int = 0  # same slug appearing in queue >1 time
     orphan_requests: int = 0  # skill_proposal entries with no corresponding skill
+    # PR 7: catalog token-budget metric from /skills/compile/stats.
+    # The broker computes max bytes the per-agent prompt-injected catalog
+    # would render to; eval enforces an 8KB hard ceiling here.
+    catalog_bytes_max: int = 0
+    catalog_bytes_soft_warn: bool = False  # True when ≥6KB
+    catalog_bytes_hard_fail: bool = False  # True when ≥8KB
+    # PR 7 similarity gate: how many enhance_existing diversions happened
+    # during this run vs how many scenarios expected one.
+    enhancement_candidates_delta: int = 0
+    expected_enhancements: int = 0
 
 
 # ---------- HTTP helpers ----------
@@ -141,7 +202,12 @@ def http_request(
             payload = e.read().decode()
         except Exception:
             payload = str(e)
-        return e.code, payload
+        # Try to parse as JSON so callers asserting structured 4xx bodies
+        # (e.g. PR 7 not_owner / disabled) get a dict, not a raw string.
+        try:
+            return e.code, json.loads(payload)
+        except (json.JSONDecodeError, ValueError):
+            return e.code, payload
 
 
 # ---------- Quality rubric ----------
@@ -225,12 +291,20 @@ def _grounding_keywords(text: str) -> set[str]:
     return {w.lower() for w in re.findall(r"[A-Za-z][A-Za-z0-9-]{4,}", text)}
 
 
-def score_skill_file(path: Path, source_text: str) -> QualityScore:
+def score_skill_file(
+    path: Path,
+    source_text: str,
+    expected_owner_agents: list[str] | None = None,
+    expected_similarity_outcome: str = "create_new",
+) -> QualityScore:
     """Score the on-disk SKILL.md against the rubric.
 
     `source_text` is the original wiki article body (pre-promotion). We use
     it to grade hallucination + grounding, since description claims should
-    be supported by the source.
+    be supported by the source. `expected_owner_agents` is the list the
+    scenario declares; the rubric asserts the rendered frontmatter matches.
+    `expected_similarity_outcome` is one of create_new / ambiguous; the
+    eval asserts metadata.wuphf.similar_to_existing is set iff ambiguous.
     """
     q = QualityScore()
     raw = path.read_text(encoding="utf-8")
@@ -261,6 +335,33 @@ def score_skill_file(path: Path, source_text: str) -> QualityScore:
     q.checks["has_created_by"] = bool(wuphf.get("created_by"))
     q.checks["has_safety_scan"] = bool(wuphf.get("safety_scan"))
     q.checks["has_source_articles"] = bool(wuphf.get("source_articles"))
+
+    # PR 7: per-agent scoping metadata. parse_yaml_lite renders YAML lists as
+    # a single-key dict (e.g. {"owner_agents": [...]}) rather than a flat list,
+    # so we unwrap one nested level when present. Same shape as how `tags` and
+    # `source_articles` come back through this parser.
+    expected_owners = sorted([s.strip().lower() for s in (expected_owner_agents or []) if s.strip()])
+    raw_owners = wuphf.get("owner_agents")
+    if isinstance(raw_owners, dict):
+        raw_owners = raw_owners.get("owner_agents") or []
+    if raw_owners is None:
+        raw_owners = []
+    if isinstance(raw_owners, str):
+        raw_owners = [raw_owners]
+    actual_owners = sorted([str(s).strip().lower() for s in raw_owners if str(s).strip()])
+    q.checks["owner_agents_matches_expected"] = actual_owners == expected_owners
+
+    # PR 7 task #13: similarity gate frontmatter shape.
+    similar_to = wuphf.get("similar_to_existing")
+    # Same nested-dict unwrap as owner_agents — parse_yaml_lite renders
+    # `similar_to_existing:\n  slug: ...` as {similar_to_existing: {slug:...}}.
+    if isinstance(similar_to, dict) and set(similar_to.keys()) == {"similar_to_existing"}:
+        similar_to = similar_to.get("similar_to_existing")
+    if expected_similarity_outcome == "ambiguous":
+        ok = isinstance(similar_to, dict) and bool(similar_to.get("slug"))
+        q.checks["similar_to_existing_set_when_ambiguous"] = ok
+    elif expected_similarity_outcome == "create_new":
+        q.checks["similar_to_existing_clean_when_new"] = not similar_to
 
     # Body shape
     body_lower = body.lower()
@@ -295,31 +396,53 @@ def load_scenarios(path: Path) -> list[Scenario]:
     return [Scenario(**s) for s in raw["scenarios"]]
 
 
-def seed_corpus(playbooks_dir: Path, scenarios: list[Scenario], run_id: str) -> None:
-    """Write each scenario into the wiki playbooks/ dir.
+def seed_corpus(
+    wiki_root: Path,
+    scenarios: list[Scenario],
+    run_id: str,
+    seed_pass: int = 1,
+) -> None:
+    """Write each scenario into its target wiki subdir.
+
+    PR 7: scenarios choose their own seed_subdir so path-inference scenarios
+    (team/agents/<slug>/notebook) land where the Stage A scanner expects them.
+    Visibility scenarios reference an already-seeded skill and contribute no
+    fixture file, so we skip them here.
+
+    Only scenarios with sc.seed_pass == seed_pass are written. The runner
+    seeds pass=1 before the first compile, then pass=2 after, so the
+    similarity gate can compare a near-duplicate against a canonical that
+    actually landed in b.skills in the first pass.
 
     The scanner keeps a per-process SHA cache and skips re-classification
     when content hashes match a prior pass. We append a hidden HTML comment
     carrying a unique run id so each invocation hashes to a fresh value and
     the eval is repeatable without restarting the broker.
     """
-    playbooks_dir.mkdir(parents=True, exist_ok=True)
-    nonce = f"\n<!-- eval-run: {run_id} -->\n"
+    nonce = f"\n<!-- eval-run: {run_id}-p{seed_pass} -->\n"
     for sc in scenarios:
+        if sc.category == "VISIBILITY":
+            continue
+        if sc.seed_pass != seed_pass:
+            continue
+        target_dir = wiki_root / sc.seed_subdir
+        target_dir.mkdir(parents=True, exist_ok=True)
         body = sc.content
         if not body.endswith("\n"):
             body += "\n"
-        (playbooks_dir / sc.filename).write_text(body + nonce, encoding="utf-8")
+        (target_dir / sc.filename).write_text(body + nonce, encoding="utf-8")
 
 
-def cleanup_corpus(playbooks_dir: Path, skills_dir: Path) -> None:
-    """Remove every eval-* fixture from playbooks/ and any skills the scanner
-    promoted from this corpus run.
+def cleanup_corpus(wiki_root: Path, skills_dir: Path) -> None:
+    """Remove every eval-* fixture from anywhere under wiki/ and any skills the
+    scanner promoted from this corpus run. We rglob from wiki_root so nested
+    seed_subdirs (team/agents/<slug>/notebook/...) are swept too.
     """
-    for d in (playbooks_dir, skills_dir):
-        if not d.exists():
-            continue
-        for p in d.glob(f"{EVAL_PREFIX}*.md"):
+    if wiki_root.exists():
+        for p in wiki_root.rglob(f"{EVAL_PREFIX}*.md"):
+            p.unlink()
+    if skills_dir.exists():
+        for p in skills_dir.glob(f"{EVAL_PREFIX}*.md"):
             p.unlink()
     # Promoted SKILL.md files use the slug, not the eval- prefix. We track
     # those by name in the runner before invoking cleanup.
@@ -343,6 +466,21 @@ def reject_skill(broker: str, token: str, name: str, reason: str) -> None:
         f"{broker}/skills/{urllib.parse.quote(name)}/reject",
         token=token,
         body={"reason": reason},
+    )
+
+
+def approve_skill(broker: str, token: str, name: str) -> tuple[int, Any]:
+    """POST /skills/{name}/approve to flip status proposed -> active.
+
+    Required before visibility scenarios can exercise the structured 403,
+    since handleInvokeSkill returns a plain text 403 for non-active skills
+    (the structured shape only fires for not_owner / disabled).
+    """
+    return http_request(
+        "POST",
+        f"{broker}/skills/{urllib.parse.quote(name)}/approve",
+        token=token,
+        body={},
     )
 
 
@@ -378,20 +516,153 @@ def trigger_compile(broker: str, token: str) -> dict[str, Any]:
     return {"_status": code, "_raw": body}
 
 
+def trigger_invoke(
+    broker: str, token: str, skill_name: str, my_slug: str
+) -> tuple[int, dict[str, Any] | str]:
+    """POST /skills/{name}/invoke with invoked_by=my_slug.
+
+    Mirrors what the team_skill_run MCP handler sends (internal/teammcp/skills.go).
+    Returns (status_code, body) for the caller to assert against. The broker's
+    visibility gate (handleInvokeSkill) returns the structured 403 documented
+    in the design doc.
+    """
+    return http_request(
+        "POST",
+        f"{broker}/skills/{urllib.parse.quote(skill_name)}/invoke",
+        token=token,
+        body={"invoked_by": my_slug, "channel": "general"},
+    )
+
+
+def assert_403_delegate_to(
+    code: int, body: Any, expected_delegate_to: list[str]
+) -> tuple[bool, str]:
+    """Assert the broker's structured 403 contract (PR 7 task #3).
+
+    Contract (from internal/team/broker_skill_invocation_integration_test.go +
+    internal/teammcp/skills.go::parseStructuredSkillForbidden):
+      { "ok": false, "error": "not_owner", "delegate_to": [...], "hint": "..." }
+    """
+    if code != 403:
+        return False, f"want HTTP 403, got {code}"
+    if not isinstance(body, dict):
+        return False, f"non-dict body: {type(body).__name__}"
+    if body.get("error") != "not_owner":
+        return False, f"want error=not_owner, got {body.get('error')!r}"
+    delegate = body.get("delegate_to")
+    if not isinstance(delegate, list):
+        return False, "delegate_to is not a list"
+    if expected_delegate_to and sorted(delegate) != sorted(expected_delegate_to):
+        return False, f"delegate_to={delegate}, want {expected_delegate_to}"
+    if not body.get("hint"):
+        return False, "hint missing or empty"
+    return True, ""
+
+
+def seed_synthetic_skills_for_budget(
+    skills_dir: Path, members: list[str], n: int = 100
+) -> list[str]:
+    """Write N synthetic SKILL.md files for the token-budget pre-flight.
+
+    Returns the list of slugs created so the runner can clean them up.
+    Files land directly in wiki/team/skills/ — they bypass the proposal
+    pipeline because the broker's reconcileSkillStatusFromDisk path picks
+    them up on next compile / restart. For the eval, we use them only to
+    ask /skills/compile/stats for catalog_bytes_per_agent_max with a
+    realistic skills count; we do not assert that they were "promoted".
+
+    Owner sets cycle through {members[i:i+1]} plus an empty (lead-routable)
+    bucket, giving roughly 5 distinct catalog shapes across N files.
+    """
+    skills_dir.mkdir(parents=True, exist_ok=True)
+    slugs: list[str] = []
+    member_count = max(1, len(members))
+    for i in range(n):
+        slug = f"{EVAL_PREFIX}budget-{i:03d}"
+        # Cycle: members + one empty bucket → ~5 shapes if members ≥ 4.
+        owner_bucket = i % (member_count + 1)
+        if owner_bucket == member_count:
+            owners_yaml = "[]"
+        else:
+            owners_yaml = f"[{members[owner_bucket]}]"
+        content = (
+            "---\n"
+            f"name: {slug}\n"
+            f"description: Synthetic eval skill {i:03d} for catalog-byte budget pre-flight\n"
+            "metadata:\n"
+            "  wuphf:\n"
+            f"    trigger: synthetic eval skill {i} for token budget assertions\n"
+            "    created_by: eval-harness\n"
+            "    safety_scan:\n"
+            "      verdict: clean\n"
+            "      ts: 2026-04-29T00:00:00Z\n"
+            f"    owner_agents: {owners_yaml}\n"
+            "    source_articles: []\n"
+            "    tags: [synthetic, eval]\n"
+            "    status: active\n"
+            "---\n\n"
+            "## Steps\n\n"
+            f"1. Synthetic skill body for budget pre-flight scenario {i}.\n"
+            f"2. Has just enough shape to satisfy reconcile + catalog render.\n"
+            f"3. Exists only to populate b.skills for /skills/compile/stats.\n"
+        )
+        (skills_dir / f"{slug}.md").write_text(content, encoding="utf-8")
+        slugs.append(slug)
+    return slugs
+
+
+def cleanup_synthetic_budget_skills(skills_dir: Path) -> None:
+    if not skills_dir.exists():
+        return
+    for p in skills_dir.glob(f"{EVAL_PREFIX}budget-*.md"):
+        p.unlink()
+
+
+def _wait_for_skill_files(
+    broker: str, token: str, skills_dir: Path, timeout_s: float = 30.0
+) -> None:
+    """Poll until every active/proposed skill the broker reports has its
+    SKILL.md on disk. WikiWorker.Enqueue runs async; reading on-disk SKILL.md
+    immediately after /skills/compile returns is racy. Bounded by timeout_s.
+    """
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        skills = list_skills(broker, token)
+        if not skills:
+            return
+        missing = [
+            s["name"] for s in skills
+            if s.get("status") in ("active", "proposed", "disabled")
+            and not (skills_dir / f"{s['name']}.md").exists()
+        ]
+        if not missing:
+            return
+        time.sleep(0.25)
+    skills = list_skills(broker, token)
+    still_missing = [
+        s["name"] for s in skills
+        if s.get("status") in ("active", "proposed", "disabled")
+        and not (skills_dir / f"{s['name']}.md").exists()
+    ]
+    if still_missing:
+        print(f"[eval] warn: {len(still_missing)} skills missing on disk after {timeout_s}s: {still_missing[:5]}")
+
+
 def evaluate(
     broker: str,
     token: str,
     home: Path,
     scenarios: list[Scenario],
     keep_artifacts: bool,
-) -> tuple[list[ScenarioResult], VolumeMetrics]:
-    playbooks = home / WIKI_PLAYBOOKS_REL
+) -> tuple[list[ScenarioResult], VolumeMetrics, list[VisibilityResult]]:
+    wiki_root = home / WIKI_REL
     skills = home / WIKI_SKILLS_REL
     promoted_slugs: list[str] = []
 
     run_id = f"{int(time.time())}-{os.getpid()}"
-    print(f"[eval] seeding {len(scenarios)} scenarios into {playbooks}  run_id={run_id}")
-    cleanup_corpus(playbooks, skills)  # belt-and-braces
+    fixture_count = sum(1 for sc in scenarios if sc.category != "VISIBILITY")
+    print(f"[eval] seeding {fixture_count} fixture scenarios under {wiki_root}  run_id={run_id}")
+    cleanup_corpus(wiki_root, skills)  # belt-and-braces
     # Tombstones survive prior runs and would mask promotion in repeats.
     # The eval is intended to be idempotent against the corpus, so we drop
     # any eval-* slugs from .rejected.md before each pass.
@@ -420,7 +691,7 @@ def evaluate(
             if not skip_block:
                 kept_lines.append(line)
         rejected_md.write_text("".join(kept_lines), encoding="utf-8")
-    seed_corpus(playbooks, scenarios, run_id)
+    seed_corpus(wiki_root, scenarios, run_id, seed_pass=1)
 
     # Snapshot proposal counters + interview queue BEFORE compile so we can
     # measure how much noise this run added to both surfaces.
@@ -430,54 +701,164 @@ def evaluate(
         1 for r in requests_before if r.get("kind") == "skill_proposal"
     )
 
-    print("[eval] triggering /skills/compile")
+    print("[eval] triggering /skills/compile (pass 1)")
     compile_result = trigger_compile(broker, token)
-    print(f"[eval] compile response: {json.dumps(compile_result, indent=2)}")
+    print(f"[eval] compile pass-1 response: {json.dumps(compile_result, indent=2)}")
 
-    # Give the WikiWorker a moment to flush writes before we read SKILL.md.
-    time.sleep(0.5)
+    # Give the WikiWorker time to flush writes before we read SKILL.md.
+    # WikiWorker.Enqueue is async; with ~17 skills in flight 0.5s is too short.
+    # Poll until every promoted skill's on-disk SKILL.md is materialised.
+    _wait_for_skill_files(broker, token, home / WIKI_SKILLS_REL, timeout_s=30.0)
+
+    # PR 7 task #13: if any scenario seeds in pass=2, run a second compile.
+    # The first pass establishes the canonical skills in b.skills; we then
+    # APPROVE every canonical that has a downstream pass-2 collision target
+    # (the similarity gate only compares against active skills, not proposed),
+    # then seed pass-2 fixtures and recompile.
+    has_pass_2 = any(sc.seed_pass == 2 and sc.category != "VISIBILITY" for sc in scenarios)
+    compile_result_p2: dict[str, Any] = {}
+    if has_pass_2:
+        # Approve ONLY canonicals that downstream pass-2 scenarios collide
+        # with. The similarity gate compares against active skills only, so
+        # the canonical for an enhance_existing scenario must be flipped to
+        # active before pass-2's compile fires. We avoid approving every
+        # promote scenario en-masse (that produces a flurry of git commits
+        # which can race with WikiWorker writes for unrelated skills).
+        pass1_skills = list_skills(broker, token)
+        pass1_by_name = {s["name"]: s for s in pass1_skills}
+        # An enhance_existing scenario in pass 2 implies its canonical lives
+        # in pass 1. We don't have an explicit edge in the scenario JSON, so
+        # we approve every pass-1 PROMOTE that shares a body-keyword with a
+        # pass-2 enhance_existing scenario. In practice: approving the small
+        # set that overlaps any near-duplicate body. For the current corpus
+        # the only colliding canonical is `chase-overdue-invoice`, so we
+        # approve every pass-1 scenario whose slug appears in any pass-2
+        # near-duplicate body. Approximation that keeps the noise low.
+        pass2_bodies = " ".join(
+            sc.content.lower()
+            for sc in scenarios
+            if sc.seed_pass == 2 and sc.expected_similarity_outcome == "enhance_existing"
+        )
+        for sc in scenarios:
+            if sc.category == "VISIBILITY":
+                continue
+            if sc.seed_pass != 1 or sc.expected != "promoted":
+                continue
+            slug = sc.slug
+            if not slug or slug not in pass1_by_name:
+                continue
+            if (pass1_by_name[slug].get("status") or "") == "active":
+                continue
+            # Only approve when the canonical's slug or one of its body
+            # keywords actually appears in a pass-2 scenario's body.
+            if slug not in pass2_bodies and not any(
+                w in pass2_bodies for w in slug.split("-") if len(w) > 4
+            ):
+                continue
+            code, body = approve_skill(broker, token, slug)
+            if code >= 400:
+                print(f"[eval] warn: approve {slug} (canonical) failed: {code} {body}")
+            else:
+                promoted_slugs.append(slug)
+
+        seed_corpus(wiki_root, scenarios, run_id, seed_pass=2)
+        print("[eval] triggering /skills/compile (pass 2 — similarity gate)")
+        compile_result_p2 = trigger_compile(broker, token)
+        print(f"[eval] compile pass-2 response: {json.dumps(compile_result_p2, indent=2)}")
+        _wait_for_skill_files(broker, token, home / WIKI_SKILLS_REL, timeout_s=30.0)
 
     skills_after = list_skills(broker, token)
     by_name = {s["name"]: s for s in skills_after}
     requests_after = list_requests(broker, token)
     stats_after = get_compile_stats(broker, token)
 
-    # Build a slug→error map from the compile response so we can label
-    # guard_rejected accurately.
+    # Build a slug→error map from BOTH compile responses so guard rejections
+    # from either pass are visible to the per-scenario classifier.
     error_slugs: dict[str, str] = {}
-    for err in compile_result.get("errors", []) or []:
-        error_slugs[err.get("slug", "")] = err.get("reason", "")
+    for cr in (compile_result, compile_result_p2):
+        for err in cr.get("errors", []) or []:
+            slug_key = err.get("slug", "")
+            reason = err.get("reason", "")
+            if slug_key:
+                error_slugs[slug_key] = reason
+
+    # PR 7 task #13 (post 24a2fc06 + 23e4d698): the scanner now catches the
+    # similarity sentinel and emits a kind="enhance_skill_proposal" interview
+    # request. Map candidate-slug → enhances-slug so the per-scenario
+    # classifier can mark the diversion as a similarity outcome rather than
+    # an unexplained skip. Both reply_to (candidate) and metadata.enhances_slug
+    # (canonical) live on the request object.
+    enhance_diversions: dict[str, str] = {}
+    for r in requests_after:
+        if r.get("kind") != "enhance_skill_proposal":
+            continue
+        candidate = (r.get("reply_to") or "").strip().lower()
+        if not candidate:
+            continue
+        meta = r.get("metadata") or {}
+        enhances = ""
+        if isinstance(meta, dict):
+            enhances = str(meta.get("enhances_slug") or "").strip().lower()
+        enhance_diversions[candidate] = enhances
 
     results: list[ScenarioResult] = []
     for sc in scenarios:
+        # Visibility scenarios are evaluated separately below.
+        if sc.category == "VISIBILITY":
+            continue
+
         slug = sc.slug
         actual = "skipped"
         detail = ""
         on_disk: Path | None = None
 
-        if slug and slug in by_name:
+        # Check whether THIS scenario hit the similarity gate by looking up
+        # the candidate slug in the enhance_diversions map (built from the
+        # broker's enhance_skill_proposal interview requests).
+        fname_slug = sc.filename.replace(EVAL_PREFIX, "").replace(".md", "")
+        diverted_to = ""
+        if slug and slug.lower() in enhance_diversions:
+            diverted_to = enhance_diversions[slug.lower()]
+        elif fname_slug and fname_slug.lower() in enhance_diversions:
+            diverted_to = enhance_diversions[fname_slug.lower()]
+        diverted = bool(slug and slug.lower() in enhance_diversions) or bool(
+            fname_slug and fname_slug.lower() in enhance_diversions
+        )
+
+        if diverted:
+            actual = "skipped"  # similarity-diverted; treat as a skip-with-reason
+            detail = f"similarity-diverted to: {diverted_to or '<unknown>'}"
+        elif slug and slug in by_name:
             actual = "promoted"
             on_disk = skills / f"{slug}.md"
             promoted_slugs.append(slug)
         elif slug and any(slug in s for s in error_slugs.keys()):
-            # match by exact slug or substring (compile errors use the file slug)
             actual = "guard_rejected"
             for k, reason in error_slugs.items():
                 if slug in k:
                     detail = reason
                     break
         else:
-            # check error_slugs by filename-derived slug (no frontmatter case)
-            fname_slug = sc.filename.replace(EVAL_PREFIX, "").replace(".md", "")
             if fname_slug in error_slugs:
                 actual = "guard_rejected"
                 detail = error_slugs[fname_slug]
 
-        correct = actual == sc.expected
+        # PR 7: enhance-existing scenarios are correct iff a corresponding
+        # enhance_skill_proposal request exists AND the candidate did not
+        # promote. The broker counter increment is asserted globally below.
+        if sc.expected_similarity_outcome == "enhance_existing":
+            correct = diverted and actual == "skipped"
+        else:
+            correct = actual == sc.expected
 
         quality: QualityScore | None = None
         if actual == "promoted" and on_disk and on_disk.exists():
-            quality = score_skill_file(on_disk, sc.content)
+            quality = score_skill_file(
+                on_disk,
+                sc.content,
+                expected_owner_agents=sc.expected_owner_agents,
+                expected_similarity_outcome=sc.expected_similarity_outcome,
+            )
 
         results.append(
             ScenarioResult(
@@ -490,9 +871,73 @@ def evaluate(
             )
         )
 
+    # PR 7: visibility scenarios — invoke a previously-promoted skill as a
+    # different agent and assert the structured 403 + delegate_to contract.
+    # Skills land as `proposed`, but handleInvokeSkill emits the structured
+    # 403 only AFTER the status gate passes — so we approve every visibility
+    # target first to flip it to active. The approve happens through the
+    # same /skills/{name}/approve endpoint humans use from the Skills app.
+    visibility_targets = {
+        sc.target_skill_slug for sc in scenarios
+        if sc.category == "VISIBILITY" and sc.target_skill_slug
+    }
+    for target in visibility_targets:
+        if target not in by_name:
+            continue
+        if (by_name[target].get("status") or "") == "active":
+            continue
+        code, body = approve_skill(broker, token, target)
+        if code >= 400:
+            print(f"[eval] warn: approve {target} failed: {code} {body}")
+        else:
+            promoted_slugs.append(target)  # ensure cleanup phase rejects it
+    # Refresh by_name so quality scoring sees the post-approve state if needed.
+    skills_after = list_skills(broker, token)
+    by_name = {s["name"]: s for s in skills_after}
+
+    visibility_results: list[VisibilityResult] = []
+    for sc in scenarios:
+        if sc.category != "VISIBILITY":
+            continue
+        target = sc.target_skill_slug or ""
+        invoker = sc.invoking_slug or ""
+        if not target or not invoker:
+            visibility_results.append(
+                VisibilityResult(
+                    scenario_id=sc.id,
+                    invoker=invoker,
+                    target=target,
+                    expected_status=sc.expected_invoke_status,
+                    actual_status=0,
+                    ok=False,
+                    detail="visibility scenario missing target_skill_slug or invoking_slug",
+                )
+            )
+            continue
+        code, body = trigger_invoke(broker, token, target, invoker)
+        if sc.expected_invoke_status == 200:
+            ok = code == 200
+            detail = "" if ok else f"want 200, got {code}: {body!r}"
+        else:
+            ok, detail = assert_403_delegate_to(code, body, sc.expected_delegate_to)
+        visibility_results.append(
+            VisibilityResult(
+                scenario_id=sc.id,
+                invoker=invoker,
+                target=target,
+                expected_status=sc.expected_invoke_status,
+                actual_status=code,
+                ok=ok,
+                detail=detail,
+            )
+        )
+
     # Volume metrics: skill_proposal requests created in this run, plus
     # duplicate / orphan detection across the interview queue.
-    expected_promotions = sum(1 for sc in scenarios if sc.expected == "promoted")
+    expected_promotions = sum(
+        1 for sc in scenarios
+        if sc.category != "VISIBILITY" and sc.expected == "promoted"
+    )
     actual_promoted = sum(1 for r in results if r.actual == "promoted")
 
     skill_props_after = [r for r in requests_after if r.get("kind") == "skill_proposal"]
@@ -522,6 +967,17 @@ def evaluate(
         if (r.get("reply_to") or "") and r.get("reply_to") not in skill_names
     )
 
+    # PR 7: catalog token-budget + similarity-counter deltas.
+    catalog_max = int(stats_after.get("catalog_bytes_per_agent_max", 0) or 0)
+    enhancement_delta = max(
+        0,
+        int(stats_after.get("enhancement_candidates_total", 0))
+        - int(stats_before.get("enhancement_candidates_total", 0)),
+    )
+    expected_enhancements = sum(
+        1 for sc in scenarios if sc.expected_similarity_outcome == "enhance_existing"
+    )
+
     metrics = VolumeMetrics(
         proposals_created=proposals_delta,
         requests_added=requests_added,
@@ -529,6 +985,11 @@ def evaluate(
         over_promotions=max(0, actual_promoted - expected_promotions),
         duplicate_proposals=duplicate_proposals,
         orphan_requests=orphan_requests,
+        catalog_bytes_max=catalog_max,
+        catalog_bytes_soft_warn=catalog_max >= CATALOG_BYTES_SOFT_WARN,
+        catalog_bytes_hard_fail=catalog_max >= CATALOG_BYTES_HARD_LIMIT,
+        enhancement_candidates_delta=enhancement_delta,
+        expected_enhancements=expected_enhancements,
     )
 
     if not keep_artifacts:
@@ -541,9 +1002,9 @@ def evaluate(
             except Exception as exc:  # pragma: no cover
                 print(f"[eval] warn: reject {slug} failed: {exc}")
         cleanup_promoted_slugs(skills, promoted_slugs)
-        cleanup_corpus(playbooks, skills)
+        cleanup_corpus(wiki_root, skills)
 
-    return results, metrics
+    return results, metrics, visibility_results
 
 
 def skillSlugFromText(s: str) -> str:
@@ -574,7 +1035,11 @@ def confusion_matrix(results: list[ScenarioResult]) -> str:
     return "\n".join(rows)
 
 
-def render_markdown_report(results: list[ScenarioResult], metrics: VolumeMetrics) -> str:
+def render_markdown_report(
+    results: list[ScenarioResult],
+    metrics: VolumeMetrics,
+    visibility: list[VisibilityResult] | None = None,
+) -> str:
     total = len(results)
     correct = sum(1 for r in results if r.correct)
     promoted = [r for r in results if r.actual == "promoted" and r.quality]
@@ -583,6 +1048,9 @@ def render_markdown_report(results: list[ScenarioResult], metrics: VolumeMetrics
         if promoted
         else 0.0
     )
+    visibility = visibility or []
+    vis_pass = sum(1 for v in visibility if v.ok)
+
     out: list[str] = []
     out.append("# Skill-pipeline evaluation report")
     out.append("")
@@ -591,6 +1059,19 @@ def render_markdown_report(results: list[ScenarioResult], metrics: VolumeMetrics
         out.append(
             f"- **Promoted-skill quality:** {avg_q:.1f}% mean over {len(promoted)} files"
         )
+    if visibility:
+        out.append(
+            f"- **Visibility (403 + delegate_to):** "
+            f"{100.0*vis_pass/len(visibility):.0f}% ({vis_pass}/{len(visibility)})"
+        )
+    out.append(
+        f"- **Catalog bytes max:** {metrics.catalog_bytes_max} "
+        f"(soft warn ≥{CATALOG_BYTES_SOFT_WARN}, hard fail ≥{CATALOG_BYTES_HARD_LIMIT})"
+    )
+    out.append(
+        f"- **Enhance-existing diversions:** {metrics.enhancement_candidates_delta} "
+        f"(expected {metrics.expected_enhancements})"
+    )
     out.append(
         f"- **Proposal volume:** {metrics.proposals_created} created, "
         f"{metrics.requests_added} interview requests, "
@@ -607,15 +1088,29 @@ def render_markdown_report(results: list[ScenarioResult], metrics: VolumeMetrics
     out.append("")
     out.append("## Per-scenario results")
     out.append("")
-    out.append("| id | category | expected | actual | pass | rationale |")
-    out.append("|---|---|---|---|---|---|")
+    out.append("| id | category | expected | actual | sim_outcome | pass | rationale |")
+    out.append("|---|---|---|---|---|---|---|")
     for r in results:
         sign = "PASS" if r.correct else "FAIL"
         out.append(
             f"| `{r.scenario.id}` | {r.scenario.category} | "
-            f"{r.scenario.expected} | {r.actual} | {sign} | "
+            f"{r.scenario.expected} | {r.actual} | "
+            f"{r.scenario.expected_similarity_outcome} | {sign} | "
             f"{r.scenario.rationale.replace('|', '/')} |"
         )
+    if visibility:
+        out.append("")
+        out.append("## Visibility checks (cross-role invoke)")
+        out.append("")
+        out.append("| id | invoker | target | want | got | pass | detail |")
+        out.append("|---|---|---|---|---|---|---|")
+        for v in visibility:
+            sign = "PASS" if v.ok else "FAIL"
+            out.append(
+                f"| `{v.scenario_id}` | `{v.invoker}` | `{v.target}` | "
+                f"{v.expected_status} | {v.actual_status} | {sign} | "
+                f"{v.detail.replace('|', '/') if v.detail else ''} |"
+            )
     if promoted:
         out.append("")
         out.append("## Promoted-skill quality")
@@ -648,6 +1143,10 @@ def print_volume_report(metrics: VolumeMetrics) -> None:
     print(f"  over-promotion:         {metrics.over_promotions}")
     print(f"  duplicate proposals:    {metrics.duplicate_proposals}")
     print(f"  orphan requests:        {metrics.orphan_requests}")
+    print(f"  catalog bytes max:      {metrics.catalog_bytes_max}"
+          f"  (soft warn ≥{CATALOG_BYTES_SOFT_WARN}, hard fail ≥{CATALOG_BYTES_HARD_LIMIT})")
+    print(f"  enhance-existing:       {metrics.enhancement_candidates_delta}/"
+          f"{metrics.expected_enhancements} (delta/expected)")
     issues: list[str] = []
     if metrics.over_promotions > 0:
         issues.append(f"  ! over-promoted by {metrics.over_promotions}")
@@ -659,12 +1158,45 @@ def print_volume_report(metrics: VolumeMetrics) -> None:
         issues.append(f"  ! {metrics.duplicate_proposals} duplicate proposals in queue")
     if metrics.orphan_requests > 0:
         issues.append(f"  ! {metrics.orphan_requests} orphan requests")
+    if metrics.catalog_bytes_hard_fail:
+        issues.append(
+            f"  ! catalog bytes max {metrics.catalog_bytes_max} ≥ hard limit {CATALOG_BYTES_HARD_LIMIT}"
+        )
+    elif metrics.catalog_bytes_soft_warn:
+        issues.append(
+            f"  ~ catalog bytes max {metrics.catalog_bytes_max} ≥ soft warn {CATALOG_BYTES_SOFT_WARN}"
+        )
+    if metrics.enhancement_candidates_delta != metrics.expected_enhancements:
+        issues.append(
+            f"  ! enhance-existing delta {metrics.enhancement_candidates_delta} != "
+            f"expected {metrics.expected_enhancements}"
+        )
     if issues:
         print("\nFLAGS:")
         for issue in issues:
             print(issue)
     else:
         print("\n  no volume flags")
+
+
+def print_visibility_report(visibility: list[VisibilityResult]) -> None:
+    if not visibility:
+        return
+    print()
+    print("=" * 78)
+    print("VISIBILITY (cross-role invoke + 403 contract)")
+    print("=" * 78)
+    passed = sum(1 for v in visibility if v.ok)
+    print(f"  pass rate: {passed}/{len(visibility)} ({100.0*passed/len(visibility):.0f}%)\n")
+    for v in visibility:
+        sign = "PASS" if v.ok else "FAIL"
+        line = (
+            f"  [{sign}] {v.scenario_id:<22}  "
+            f"{v.invoker} -> {v.target}  want={v.expected_status} got={v.actual_status}"
+        )
+        if not v.ok:
+            line += f"  // {v.detail}"
+        print(line)
 
 
 def print_report(results: list[ScenarioResult]) -> None:
@@ -773,23 +1305,58 @@ def main() -> int:
     home = Path(args.home)
 
     print(f"[eval] broker={args.broker}  home={home}  scenarios={len(scenarios)}")
-    results, metrics = evaluate(args.broker, token, home, scenarios, keep_artifacts=args.keep)
+    results, metrics, visibility = evaluate(
+        args.broker, token, home, scenarios, keep_artifacts=args.keep
+    )
     print_report(results)
+    print_visibility_report(visibility)
     print_volume_report(metrics)
+
+    # PR 7 owner_agents accuracy: every promoted scenario must have its
+    # rendered owner_agents match scenario.expected_owner_agents.
+    promoted = [r for r in results if r.actual == "promoted" and r.quality]
+    owner_pass = sum(
+        1 for r in promoted
+        if r.quality and r.quality.checks.get("owner_agents_matches_expected", False)
+    )
+    owner_total = len(promoted)
 
     if args.report:
         Path(args.report).write_text(
-            render_markdown_report(results, metrics), encoding="utf-8"
+            render_markdown_report(results, metrics, visibility), encoding="utf-8"
         )
         print(f"\n[eval] markdown report written to {args.report}")
 
     correct = sum(1 for r in results if r.correct)
+    visibility_pass = all(v.ok for v in visibility) if visibility else True
     healthy_volume = (
         metrics.over_promotions == 0
         and metrics.duplicate_proposals == 0
         and metrics.orphan_requests == 0
     )
-    return 0 if correct == len(results) and healthy_volume else 1
+    catalog_ok = not metrics.catalog_bytes_hard_fail
+    enhance_ok = metrics.enhancement_candidates_delta == metrics.expected_enhancements
+    owner_ok = owner_total == 0 or owner_pass == owner_total
+
+    print()
+    print("=" * 78)
+    print("ACCEPTANCE GATE")
+    print("=" * 78)
+    print(f"  scenario correctness: {correct}/{len(results)}  ({'PASS' if correct == len(results) else 'FAIL'})")
+    print(f"  owner_agents match:   {owner_pass}/{owner_total}  ({'PASS' if owner_ok else 'FAIL'})")
+    print(f"  visibility 403 shape: {sum(1 for v in visibility if v.ok)}/{len(visibility)}  ({'PASS' if visibility_pass else 'FAIL'})")
+    print(f"  catalog bytes < 8KB:  {metrics.catalog_bytes_max}  ({'PASS' if catalog_ok else 'FAIL'})")
+    print(f"  enhance delta match:  {metrics.enhancement_candidates_delta}=={metrics.expected_enhancements}  ({'PASS' if enhance_ok else 'FAIL'})")
+    print(f"  volume healthy:       over={metrics.over_promotions} dup={metrics.duplicate_proposals} orphan={metrics.orphan_requests}  ({'PASS' if healthy_volume else 'FAIL'})")
+
+    return 0 if (
+        correct == len(results)
+        and visibility_pass
+        and healthy_volume
+        and catalog_ok
+        and enhance_ok
+        and owner_ok
+    ) else 1
 
 
 if __name__ == "__main__":
