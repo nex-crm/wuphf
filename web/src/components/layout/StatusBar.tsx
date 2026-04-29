@@ -4,6 +4,7 @@ import { getHealth } from "../../api/client";
 import { useOfficeMembers } from "../../hooks/useMembers";
 import { isDMChannel, useAppStore } from "../../stores/app";
 import { Kbd } from "../ui/Kbd";
+import { StatusPill } from "../workspaces/StatusPill";
 
 interface HealthSnapshot {
   status: string;
@@ -48,6 +49,7 @@ export function StatusBar() {
 
   return (
     <div className="status-bar">
+      <StatusPill />
       <span className="status-bar-item">{channelLabel}</span>
       <span className="status-bar-item">{modeLabel}</span>
       <span className="status-bar-spacer" />
