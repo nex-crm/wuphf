@@ -78,31 +78,6 @@ type channelSchedulerMsg struct {
 	jobs []channelSchedulerJob
 }
 
-type channelSkill struct {
-	ID                  string   `json:"id"`
-	Name                string   `json:"name"`
-	Title               string   `json:"title"`
-	Description         string   `json:"description"`
-	Content             string   `json:"content"`
-	CreatedBy           string   `json:"created_by"`
-	Channel             string   `json:"channel"`
-	Tags                []string `json:"tags"`
-	Trigger             string   `json:"trigger"`
-	WorkflowProvider    string   `json:"workflow_provider"`
-	WorkflowKey         string   `json:"workflow_key"`
-	WorkflowDefinition  string   `json:"workflow_definition"`
-	WorkflowSchedule    string   `json:"workflow_schedule"`
-	RelayID             string   `json:"relay_id"`
-	RelayPlatform       string   `json:"relay_platform"`
-	RelayEventTypes     []string `json:"relay_event_types"`
-	LastExecutionAt     string   `json:"last_execution_at"`
-	LastExecutionStatus string   `json:"last_execution_status"`
-	UsageCount          int      `json:"usage_count"`
-	Status              string   `json:"status"`
-	CreatedAt           string   `json:"created_at"`
-	UpdatedAt           string   `json:"updated_at"`
-}
-
 type channelSkillsMsg struct {
 	skills []channelSkill
 }
@@ -148,176 +123,6 @@ type channelHealthMsg struct {
 	Connected     bool
 	SessionMode   string
 	OneOnOneAgent string
-}
-
-type channelMember struct {
-	Slug         string `json:"slug"`
-	Name         string `json:"name,omitempty"`
-	Role         string `json:"role,omitempty"`
-	Disabled     bool   `json:"disabled,omitempty"`
-	LastMessage  string `json:"lastMessage"`
-	LastTime     string `json:"lastTime"`
-	LiveActivity string `json:"liveActivity,omitempty"`
-}
-
-type channelInfo struct {
-	Slug        string   `json:"slug"`
-	Name        string   `json:"name"`
-	Type        string   `json:"type,omitempty"` // "O", "D", or "G" (channel store types)
-	Description string   `json:"description,omitempty"`
-	Members     []string `json:"members"`
-	Disabled    []string `json:"disabled"`
-}
-
-func (ch channelInfo) isDM() bool {
-	return ch.Type == "D" || ch.Type == "G"
-}
-
-type channelInterviewOption struct {
-	ID           string `json:"id"`
-	Label        string `json:"label"`
-	Description  string `json:"description"`
-	RequiresText bool   `json:"requires_text,omitempty"`
-	TextHint     string `json:"text_hint,omitempty"`
-}
-
-type channelInterview struct {
-	ID            string                   `json:"id"`
-	Kind          string                   `json:"kind,omitempty"`
-	Status        string                   `json:"status,omitempty"`
-	From          string                   `json:"from"`
-	Channel       string                   `json:"channel"`
-	Title         string                   `json:"title,omitempty"`
-	Question      string                   `json:"question"`
-	Context       string                   `json:"context"`
-	Options       []channelInterviewOption `json:"options"`
-	RecommendedID string                   `json:"recommended_id"`
-	Blocking      bool                     `json:"blocking,omitempty"`
-	Required      bool                     `json:"required,omitempty"`
-	Secret        bool                     `json:"secret,omitempty"`
-	ReplyTo       string                   `json:"reply_to,omitempty"`
-	CreatedAt     string                   `json:"created_at"`
-	DueAt         string                   `json:"due_at,omitempty"`
-	FollowUpAt    string                   `json:"follow_up_at,omitempty"`
-	ReminderAt    string                   `json:"reminder_at,omitempty"`
-	RecheckAt     string                   `json:"recheck_at,omitempty"`
-}
-
-type channelUsageTotals struct {
-	InputTokens         int     `json:"input_tokens"`
-	OutputTokens        int     `json:"output_tokens"`
-	CacheReadTokens     int     `json:"cache_read_tokens"`
-	CacheCreationTokens int     `json:"cache_creation_tokens"`
-	TotalTokens         int     `json:"total_tokens"`
-	CostUsd             float64 `json:"cost_usd"`
-	Requests            int     `json:"requests"`
-}
-
-type channelUsageState struct {
-	Session channelUsageTotals            `json:"session,omitempty"`
-	Total   channelUsageTotals            `json:"total"`
-	Agents  map[string]channelUsageTotals `json:"agents"`
-	Since   string                        `json:"since,omitempty"`
-}
-
-type channelTask struct {
-	ID               string `json:"id"`
-	Channel          string `json:"channel,omitempty"`
-	Title            string `json:"title"`
-	Details          string `json:"details,omitempty"`
-	Owner            string `json:"owner,omitempty"`
-	Status           string `json:"status"`
-	CreatedBy        string `json:"created_by"`
-	ThreadID         string `json:"thread_id,omitempty"`
-	TaskType         string `json:"task_type,omitempty"`
-	PipelineID       string `json:"pipeline_id,omitempty"`
-	PipelineStage    string `json:"pipeline_stage,omitempty"`
-	ExecutionMode    string `json:"execution_mode,omitempty"`
-	ReviewState      string `json:"review_state,omitempty"`
-	SourceSignalID   string `json:"source_signal_id,omitempty"`
-	SourceDecisionID string `json:"source_decision_id,omitempty"`
-	WorktreePath     string `json:"worktree_path,omitempty"`
-	WorktreeBranch   string `json:"worktree_branch,omitempty"`
-	CreatedAt        string `json:"created_at"`
-	UpdatedAt        string `json:"updated_at"`
-	DueAt            string `json:"due_at,omitempty"`
-	FollowUpAt       string `json:"follow_up_at,omitempty"`
-	ReminderAt       string `json:"reminder_at,omitempty"`
-	RecheckAt        string `json:"recheck_at,omitempty"`
-}
-
-type channelAction struct {
-	ID         string   `json:"id"`
-	Kind       string   `json:"kind"`
-	Source     string   `json:"source,omitempty"`
-	Channel    string   `json:"channel,omitempty"`
-	Actor      string   `json:"actor,omitempty"`
-	Summary    string   `json:"summary"`
-	RelatedID  string   `json:"related_id,omitempty"`
-	SignalIDs  []string `json:"signal_ids,omitempty"`
-	DecisionID string   `json:"decision_id,omitempty"`
-	CreatedAt  string   `json:"created_at"`
-}
-
-type channelSignal struct {
-	ID            string `json:"id"`
-	Source        string `json:"source"`
-	SourceRef     string `json:"source_ref,omitempty"`
-	Kind          string `json:"kind,omitempty"`
-	Title         string `json:"title,omitempty"`
-	Content       string `json:"content"`
-	Channel       string `json:"channel,omitempty"`
-	Owner         string `json:"owner,omitempty"`
-	Confidence    string `json:"confidence,omitempty"`
-	Urgency       string `json:"urgency,omitempty"`
-	DedupeKey     string `json:"dedupe_key,omitempty"`
-	RequiresHuman bool   `json:"requires_human,omitempty"`
-	Blocking      bool   `json:"blocking,omitempty"`
-	CreatedAt     string `json:"created_at"`
-}
-
-type channelDecision struct {
-	ID            string   `json:"id"`
-	Kind          string   `json:"kind"`
-	Channel       string   `json:"channel,omitempty"`
-	Summary       string   `json:"summary"`
-	Reason        string   `json:"reason,omitempty"`
-	Owner         string   `json:"owner,omitempty"`
-	SignalIDs     []string `json:"signal_ids,omitempty"`
-	RequiresHuman bool     `json:"requires_human,omitempty"`
-	Blocking      bool     `json:"blocking,omitempty"`
-	CreatedAt     string   `json:"created_at"`
-}
-
-type channelWatchdog struct {
-	ID         string `json:"id"`
-	Kind       string `json:"kind"`
-	Channel    string `json:"channel,omitempty"`
-	TargetType string `json:"target_type,omitempty"`
-	TargetID   string `json:"target_id,omitempty"`
-	Owner      string `json:"owner,omitempty"`
-	Status     string `json:"status,omitempty"`
-	Summary    string `json:"summary"`
-	CreatedAt  string `json:"created_at"`
-	UpdatedAt  string `json:"updated_at,omitempty"`
-}
-
-type channelSchedulerJob struct {
-	Slug            string `json:"slug"`
-	Label           string `json:"label"`
-	Kind            string `json:"kind,omitempty"`
-	TargetType      string `json:"target_type,omitempty"`
-	TargetID        string `json:"target_id,omitempty"`
-	Channel         string `json:"channel,omitempty"`
-	Provider        string `json:"provider,omitempty"`
-	ScheduleExpr    string `json:"schedule_expr,omitempty"`
-	WorkflowKey     string `json:"workflow_key,omitempty"`
-	SkillName       string `json:"skill_name,omitempty"`
-	IntervalMinutes int    `json:"interval_minutes"`
-	DueAt           string `json:"due_at,omitempty"`
-	NextRun         string `json:"next_run,omitempty"`
-	LastRun         string `json:"last_run,omitempty"`
-	Status          string `json:"status,omitempty"`
 }
 
 type channelTickMsg time.Time
@@ -971,7 +776,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "ctrl+d":
 			// Return to #general from a DM channel.
-			if chInfo := m.findChannelInfo(m.activeChannel); chInfo != nil && chInfo.isDM() {
+			if chInfo := m.findChannelInfo(m.activeChannel); chInfo != nil && chInfo.IsDM() {
 				m.activeChannel = "general"
 				m.lastID = ""
 				m.messages = nil
@@ -3084,7 +2889,7 @@ func (m channelModel) composerTargetLabel() string {
 	if m.isOneOnOne() {
 		return "1:1 with " + m.oneOnOneAgentName()
 	}
-	if chInfo := m.currentChannelInfo(); chInfo != nil && chInfo.isDM() {
+	if chInfo := m.currentChannelInfo(); chInfo != nil && chInfo.IsDM() {
 		name := chInfo.Name
 		if name == "" {
 			name = chInfo.Slug
@@ -3842,13 +3647,6 @@ func (m *channelModel) openRequestActionPicker(req channelInterview) tea.Cmd {
 	m.pickerMode = channelPickerRequestAction
 	m.notice = "Choose a request action."
 	return nil
-}
-
-func (req channelInterview) TitleOrQuestion() string {
-	if strings.TrimSpace(req.Title) != "" {
-		return req.Title
-	}
-	return req.Question
 }
 
 func hasThreadReplies(messages []brokerMessage, id string) bool {

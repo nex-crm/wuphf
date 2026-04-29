@@ -11,13 +11,26 @@ import "github.com/nex-crm/wuphf/cmd/wuphf/channelui"
 // The aliases will be removed once the channel cluster fully lives in
 // channelui (final cleanup PR).
 type (
-	brokerReaction     = channelui.BrokerReaction
-	brokerMessageUsage = channelui.BrokerMessageUsage
-	brokerMessage      = channelui.BrokerMessage
-	renderedLine       = channelui.RenderedLine
-	threadedMessage    = channelui.ThreadedMessage
-	layoutDimensions   = channelui.LayoutDimensions
-	officeMemberInfo   = channelui.OfficeMember
+	brokerReaction         = channelui.BrokerReaction
+	brokerMessageUsage     = channelui.BrokerMessageUsage
+	brokerMessage          = channelui.BrokerMessage
+	renderedLine           = channelui.RenderedLine
+	threadedMessage        = channelui.ThreadedMessage
+	layoutDimensions       = channelui.LayoutDimensions
+	officeMemberInfo       = channelui.OfficeMember
+	channelMember          = channelui.Member
+	channelInfo            = channelui.ChannelInfo
+	channelInterviewOption = channelui.InterviewOption
+	channelInterview       = channelui.Interview
+	channelUsageTotals     = channelui.UsageTotals
+	channelUsageState      = channelui.UsageState
+	channelTask            = channelui.Task
+	channelAction          = channelui.Action
+	channelSignal          = channelui.Signal
+	channelDecision        = channelui.Decision
+	channelWatchdog        = channelui.Watchdog
+	channelSchedulerJob    = channelui.SchedulerJob
+	channelSkill           = channelui.Skill
 )
 
 // Function aliases keep the lowercase names callable from package main
