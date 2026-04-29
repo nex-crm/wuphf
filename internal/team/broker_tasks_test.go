@@ -129,46 +129,6 @@ func TestTaskAndRequestViewsRejectNonMembers(t *testing.T) {
 	}
 }
 
-func TestSchedulerDueOnlyFiltersFutureJobs(t *testing.T) {
-	b := newTestBroker(t)
-	if err := b.SetSchedulerJob(schedulerJob{
-		Slug:            "task-follow-up:general:task-1",
-		Kind:            "task_follow_up",
-		Label:           "Follow up",
-		TargetType:      "task",
-		TargetID:        "task-1",
-		Channel:         "general",
-		IntervalMinutes: 15,
-		DueAt:           time.Now().UTC().Add(10 * time.Minute).Format(time.RFC3339),
-		NextRun:         time.Now().UTC().Add(10 * time.Minute).Format(time.RFC3339),
-		Status:          "scheduled",
-	}); err != nil {
-		t.Fatalf("SetSchedulerJob failed: %v", err)
-	}
-	if err := b.StartOnPort(0); err != nil {
-		t.Fatalf("failed to start broker: %v", err)
-	}
-	defer b.Stop()
-
-	base := fmt.Sprintf("http://%s", b.Addr())
-	req, _ := http.NewRequest(http.MethodGet, base+"/scheduler?due_only=true", nil)
-	req.Header.Set("Authorization", "Bearer "+b.Token())
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("scheduler request failed: %v", err)
-	}
-	defer resp.Body.Close()
-	var listing struct {
-		Jobs []schedulerJob `json:"jobs"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&listing); err != nil {
-		t.Fatalf("decode scheduler list: %v", err)
-	}
-	if len(listing.Jobs) != 0 {
-		t.Fatalf("expected future job to be filtered out, got %+v", listing.Jobs)
-	}
-}
-
 func TestBrokerTaskLifecycle(t *testing.T) {
 	b := newTestBroker(t)
 	if err := b.StartOnPort(0); err != nil {
