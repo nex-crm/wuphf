@@ -330,13 +330,6 @@ const (
 	quickJumpApps     quickJumpTarget = "apps"
 )
 
-type calendarRange string
-
-const (
-	calendarRangeDay  calendarRange = "day"
-	calendarRangeWeek calendarRange = "week"
-)
-
 type channelIntegrationSpec struct {
 	Label       string
 	Value       string

@@ -49,6 +49,17 @@
 //     BuildSkillLines).
 //   - build_lines_policy_task.go — "build*Lines" rendering helpers for
 //     the policies and tasks apps (BuildPolicyLines, BuildTaskLines).
+//   - calendar.go          — calendar agenda data layer for the
+//     calendar app: CalendarRange / CalendarEvent types,
+//     CollectCalendarEvents and its task/request fan-outs,
+//     DedupeCalendarEvents, FilterCalendarEvents, the calendar-time
+//     formatters (PrettyCalendarWhen, CalendarBucketLabel),
+//     ChooseCalendarChannel, the participant resolvers
+//     (CalendarParticipants*, CalendarParticipantSlugs*,
+//     CalendarParticipantNames, NextCalendarEventByParticipant,
+//     OrderedCalendarParticipants), CalendarEventColors, and the
+//     SchedulerTarget* helpers that map a job to its task / request /
+//     thread.
 //
 // Subsequent extraction PRs will land the workspace / recovery / cache
 // cluster, the sidebar / splash, the broker integrations, and finally

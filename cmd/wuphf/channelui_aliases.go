@@ -32,6 +32,8 @@ type (
 	channelWatchdog        = channelui.Watchdog
 	channelSchedulerJob    = channelui.SchedulerJob
 	channelSkill           = channelui.Skill
+	calendarRange          = channelui.CalendarRange
+	calendarEvent          = channelui.CalendarEvent
 )
 
 // Function aliases keep the lowercase names callable from package main
@@ -91,6 +93,35 @@ var (
 	buildSkillLines   = channelui.BuildSkillLines
 	buildPolicyLines  = channelui.BuildPolicyLines
 	buildTaskLines    = channelui.BuildTaskLines
+
+	calendarEventColors                = channelui.CalendarEventColors
+	collectCalendarEvents              = channelui.CollectCalendarEvents
+	taskCalendarEvents                 = channelui.TaskCalendarEvents
+	requestCalendarEvents              = channelui.RequestCalendarEvents
+	dedupeCalendarEvents               = channelui.DedupeCalendarEvents
+	filterCalendarEvents               = channelui.FilterCalendarEvents
+	prettyCalendarWhen                 = channelui.PrettyCalendarWhen
+	calendarBucketLabel                = channelui.CalendarBucketLabel
+	chooseCalendarChannel              = channelui.ChooseCalendarChannel
+	calendarParticipantsForTask        = channelui.CalendarParticipantsForTask
+	calendarParticipantSlugsForTask    = channelui.CalendarParticipantSlugsForTask
+	calendarParticipantsForRequest     = channelui.CalendarParticipantsForRequest
+	calendarParticipantSlugsForRequest = channelui.CalendarParticipantSlugsForRequest
+	calendarParticipantsForJob         = channelui.CalendarParticipantsForJob
+	calendarParticipantSlugsForJob     = channelui.CalendarParticipantSlugsForJob
+	calendarParticipantNames           = channelui.CalendarParticipantNames
+	calendarParticipantSlugs           = channelui.CalendarParticipantSlugs
+	nextCalendarEventByParticipant     = channelui.NextCalendarEventByParticipant
+	orderedCalendarParticipants        = channelui.OrderedCalendarParticipants
+	schedulerTargetTaskID              = channelui.SchedulerTargetTaskID
+	schedulerTargetRequestID           = channelui.SchedulerTargetRequestID
+	schedulerTargetThreadID            = channelui.SchedulerTargetThreadID
+)
+
+// Calendar-range typed-string consts.
+const (
+	calendarRangeDay  = channelui.CalendarRangeDay
+	calendarRangeWeek = channelui.CalendarRangeWeek
 )
 
 // Office-app constant aliases. Typed-string consts copy across packages
