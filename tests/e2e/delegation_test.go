@@ -2,7 +2,6 @@ package e2e
 
 import (
 	"testing"
-	"time"
 
 	"github.com/nex-crm/wuphf/internal/agent"
 	"github.com/nex-crm/wuphf/internal/orchestration"
@@ -43,6 +42,10 @@ func fakeErrorResolver(errMsg string) agent.StreamFnResolver {
 // newTestAgentService creates an AgentService with fake resolver and temp session store,
 // bootstraps agents from the founding-team pack, and returns the service + pack.
 func newTestAgentService(t *testing.T, resolver agent.StreamFnResolver) (*agent.AgentService, *agent.PackDefinition) {
+	return newTestAgentServiceWithStart(t, resolver, true)
+}
+
+func newTestAgentServiceWithStart(t *testing.T, resolver agent.StreamFnResolver, start bool) (*agent.AgentService, *agent.PackDefinition) {
 	t.Helper()
 	dir := t.TempDir()
 	sessions := agent.NewSessionStoreAt(dir)
@@ -61,8 +64,10 @@ func newTestAgentService(t *testing.T, resolver agent.StreamFnResolver) (*agent.
 		if _, err := svc.Create(cfg); err != nil {
 			t.Fatalf("create agent %s: %v", cfg.Slug, err)
 		}
-		if err := svc.Start(cfg.Slug); err != nil {
-			t.Fatalf("start agent %s: %v", cfg.Slug, err)
+		if start {
+			if err := svc.Start(cfg.Slug); err != nil {
+				t.Fatalf("start agent %s: %v", cfg.Slug, err)
+			}
 		}
 	}
 
@@ -173,7 +178,7 @@ func TestFullDelegationFlow(t *testing.T) {
 }
 
 func TestProviderErrorSurfaces(t *testing.T) {
-	svc, _ := newTestAgentService(t, fakeErrorResolver("provider failed"))
+	svc, _ := newTestAgentServiceWithStart(t, fakeErrorResolver("provider failed"), false)
 
 	// Give the agent something to process.
 	if err := svc.FollowUp("ceo", "do something"); err != nil {
@@ -184,15 +189,20 @@ func TestProviderErrorSurfaces(t *testing.T) {
 	if !ok {
 		t.Fatal("ceo agent not found")
 	}
+	ma.Loop.Start()
 
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		state := ma.Loop.GetState()
-		if state.Phase == agent.PhaseError {
+	var tickErr error
+	for i := 0; i < 10; i++ {
+		tickErr = ma.Loop.Tick()
+		if tickErr != nil {
 			break
 		}
-		_ = ma.Loop.Tick()
-		time.Sleep(5 * time.Millisecond)
+		if state := ma.Loop.GetState(); state.Phase == agent.PhaseError {
+			break
+		}
+	}
+	if tickErr == nil {
+		t.Fatal("expected Tick() to surface provider failure")
 	}
 
 	state := ma.Loop.GetState()
