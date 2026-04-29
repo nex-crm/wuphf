@@ -135,6 +135,9 @@ func (l *Launcher) runHeadlessOpencodeTurn(ctx context.Context, slug string, not
 
 	var firstEventAt, firstTextAt, firstToolAt time.Time
 	textStarted := false
+	liveChat := newHeadlessLiveChatRelay(l, slug, firstNonEmpty(channel...), notification, func(line string) {
+		appendHeadlessCodexLog(slug, line)
+	})
 	var lastError string
 	pushStream := func(line string) {
 		if agentStream != nil && strings.TrimSpace(line) != "" {
@@ -149,6 +152,9 @@ func (l *Launcher) runHeadlessOpencodeTurn(ctx context.Context, slug string, not
 		}
 		switch ev.Type {
 		case "text":
+			if liveChat != nil {
+				liveChat.OnText(ev.Text)
+			}
 			if strings.TrimSpace(ev.Text) == "" {
 				return
 			}
@@ -162,6 +168,9 @@ func (l *Launcher) runHeadlessOpencodeTurn(ctx context.Context, slug string, not
 			}
 			pushStream(ev.Text)
 		case "tool_use":
+			if liveChat != nil {
+				liveChat.Flush()
+			}
 			if firstToolAt.IsZero() {
 				firstToolAt = time.Now()
 				metrics.FirstToolMs = durationMillis(startedAt, firstToolAt)
@@ -175,14 +184,23 @@ func (l *Launcher) runHeadlessOpencodeTurn(ctx context.Context, slug string, not
 		case "tool_result":
 			if d := strings.TrimSpace(ev.Detail); d != "" {
 				pushStream("[tool_result] " + truncate(d, 240))
+				if liveChat != nil {
+					liveChat.ReportIssue(d)
+				}
 			}
 		case "error":
 			if msg := strings.TrimSpace(ev.Detail); msg != "" {
 				lastError = msg
 				pushStream("[error] " + msg)
+				if liveChat != nil {
+					liveChat.ReportIssue(msg)
+				}
 			}
 		}
 	})
+	if liveChat != nil {
+		liveChat.Flush()
+	}
 	if scanErr != nil && errors.Is(scanErr, bufio.ErrTooLong) {
 		// A single >4 MiB line would block cmd.Wait() on pipe backpressure
 		// forever; kill the child so Wait returns promptly.

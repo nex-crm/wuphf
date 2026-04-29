@@ -833,8 +833,7 @@ func (l *Launcher) agentPostedSubstantiveMessageSince(slug string, startedAt tim
 		if msg.From != slug {
 			continue
 		}
-		content := strings.TrimSpace(msg.Content)
-		if content == "" || strings.HasPrefix(content, "[STATUS]") {
+		if !isSubstantiveAgentProgressMessage(msg) {
 			continue
 		}
 		when, err := time.Parse(time.RFC3339, msg.Timestamp)
@@ -865,8 +864,7 @@ func (l *Launcher) agentPostedSubstantiveMessageToChannelSince(slug string, targ
 		if targetChannel != "" && normalizeChannelSlug(msg.Channel) != targetChannel {
 			continue
 		}
-		content := strings.TrimSpace(msg.Content)
-		if content == "" || strings.HasPrefix(content, "[STATUS]") {
+		if !isSubstantiveAgentProgressMessage(msg) {
 			continue
 		}
 		when, err := time.Parse(time.RFC3339, msg.Timestamp)
@@ -905,6 +903,14 @@ func (l *Launcher) postHeadlessFinalMessageIfSilent(slug string, targetChannel s
 		return channelMessage{}, false, err
 	}
 	return msg, true, nil
+}
+
+func isSubstantiveAgentProgressMessage(msg channelMessage) bool {
+	if strings.TrimSpace(msg.Kind) == agentIssueMessageKind {
+		return false
+	}
+	content := strings.TrimSpace(msg.Content)
+	return content != "" && !strings.HasPrefix(content, "[STATUS]")
 }
 
 func headlessReplyToID(notification string) string {
@@ -1289,6 +1295,9 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 	var firstTextAt time.Time
 	var firstToolAt time.Time
 	textStarted := false
+	liveChat := newHeadlessLiveChatRelay(l, slug, firstNonEmpty(channel...), notification, func(line string) {
+		appendHeadlessCodexLog(slug, line)
+	})
 	result, parseErr := provider.ReadCodexJSONStream(teedStdout, func(event provider.CodexStreamEvent) {
 		if firstEventAt.IsZero() {
 			firstEventAt = time.Now()
@@ -1304,7 +1313,9 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 				textStarted = true
 				l.updateHeadlessProgress(slug, "active", "text", "drafting response", metrics)
 			}
+			liveChat.OnText(event.Text)
 		case "tool_use":
+			liveChat.Flush()
 			if firstToolAt.IsZero() {
 				firstToolAt = time.Now()
 				metrics.FirstToolMs = durationMillis(startedAt, firstToolAt)
@@ -1316,11 +1327,14 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 			line := "tool_result: " + truncate(event.Text, 140)
 			appendHeadlessCodexLog(slug, line)
 			l.updateHeadlessProgress(slug, "active", "tool_result", truncate(event.Text, 140), metrics)
+			liveChat.ReportIssue(event.Text)
 		case "error":
 			appendHeadlessCodexLog(slug, "stream_error: "+event.Detail)
 			l.updateHeadlessProgress(slug, "error", "error", truncate(event.Detail, 180), metrics)
+			liveChat.ReportIssue(event.Detail)
 		}
 	})
+	liveChat.Flush()
 	_ = pw.Close() // signal scanner goroutine that stream is done (io.PipeWriter.Close always returns nil)
 	if err := cmd.Wait(); err != nil {
 		detail := firstNonEmpty(result.LastError, strings.TrimSpace(stderr.String()))
