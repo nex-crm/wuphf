@@ -18,8 +18,10 @@ type OfficeMember struct {
 // it via SetOfficeDirectory whenever a fresh roster arrives from the
 // broker.
 //
-// Tests can override the directory by calling SetOfficeDirectory with a
-// fixture and resetting via t.Cleanup.
+// Tests that need to inject a fixture should call WithOfficeDirectoryForTest
+// (which captures the prior state and registers a t.Cleanup that restores
+// it). Tests that mutate the directory through SetOfficeDirectory directly
+// bypass that isolation and will leak fixture state into sibling tests.
 var officeDirectory = map[string]OfficeMember{}
 
 // SetOfficeDirectory replaces the singleton directory. Idempotent;
@@ -30,6 +32,21 @@ func SetOfficeDirectory(members []OfficeMember) {
 		dir[member.Slug] = member
 	}
 	officeDirectory = dir
+}
+
+// WithOfficeDirectoryForTest installs members as the directory for the
+// duration of the test, then restores the previous contents via a
+// t.Cleanup. The helper takes testing.TB rather than *testing.T so it
+// works inside benchmarks and table subtests without changing call
+// shape.
+func WithOfficeDirectoryForTest(t interface {
+	Cleanup(func())
+	Helper()
+}, members []OfficeMember) {
+	t.Helper()
+	prior := officeDirectory
+	SetOfficeDirectory(members)
+	t.Cleanup(func() { officeDirectory = prior })
 }
 
 // LookupMember returns the office member registered under slug, or the
