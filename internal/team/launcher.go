@@ -137,6 +137,15 @@ type Launcher struct {
 	// closure consults the package-global launcherSendNotificationToPaneOverride
 	// seam on every call so existing tests keep working unchanged.
 	dispatcher *paneDispatcher
+
+	// paneLC owns the tmux pane lifecycle (PLAN.md §C5b). Lazily
+	// constructed via panes(); the runner is resolved through the
+	// tmuxRunnerOverride seam at construction time so tests injecting a
+	// fakeTmuxRunner before Launch get their fake transparently. Today
+	// the type covers read-only methods (HasLiveSession, ListTeamPanes,
+	// ChannelPaneStatus, capture*); the spawn/clear methods migrate in
+	// follow-up PRs.
+	paneLC *paneLifecycle
 }
 
 // headlessWorkerPool groups the per-launcher headless-dispatch state
@@ -1255,15 +1264,7 @@ func (l *Launcher) watchChannelPaneLoop(channelCmd string) {
 }
 
 func (l *Launcher) channelPaneStatus() (string, error) {
-	out, err := exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "display-message",
-		"-p",
-		"-t", l.sessionName+":team.0",
-		"#{pane_dead} #{pane_dead_status} #{pane_current_command}",
-	).CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("%s", strings.TrimSpace(string(out)))
-	}
-	return strings.TrimSpace(string(out)), nil
+	return l.panes().ChannelPaneStatus()
 }
 
 func (l *Launcher) captureDeadChannelPane(status string) error {
@@ -1988,6 +1989,26 @@ func (l *Launcher) paneDispatch() *paneDispatcher {
 	return l.dispatcher
 }
 
+// panes returns the per-launcher paneLifecycle (PLAN.md §C5b), lazily
+// constructing it on first access. A nil receiver returns a default
+// paneLifecycle bound to the package-level SessionName so the
+// HasLiveTmuxSession free function can route through the same path
+// without a Launcher.
+func (l *Launcher) panes() *paneLifecycle {
+	if l == nil {
+		return newPaneLifecycle(SessionName)
+	}
+	if l.paneLC != nil {
+		return l.paneLC
+	}
+	name := l.sessionName
+	if name == "" {
+		name = SessionName
+	}
+	l.paneLC = newPaneLifecycle(name)
+	return l.paneLC
+}
+
 // queuePaneNotification is a thin wrapper around paneDispatcher.Enqueue
 // (PLAN.md §C6). Kept as a Launcher method so existing call sites and
 // the pane_dispatch_queue_test.go safety net don't need a rename sweep
@@ -2042,20 +2063,17 @@ func (l *Launcher) sendNotificationToPane(paneTarget, notification string) {
 	).Run()
 }
 
+// capturePaneTargetContent / capturePaneContent / listTeamPanes /
+// channelPaneStatus delegate to paneLifecycle (PLAN.md §C5b). Thin
+// wrappers keep current callers (broker_handlers, watchdog,
+// captureDeadChannelPane, clearAgentPanes) working without a rename
+// sweep in this PR.
 func (l *Launcher) capturePaneTargetContent(target string) (string, error) {
-	out, err := exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "capture-pane",
-		"-p", "-J",
-		"-t", target,
-	).CombinedOutput()
-	if err != nil {
-		return "", err
-	}
-	return string(out), nil
+	return l.panes().CapturePaneTargetContent(target)
 }
 
 func (l *Launcher) capturePaneContent(paneIdx int) (string, error) {
-	target := fmt.Sprintf("%s:team.%d", l.sessionName, paneIdx)
-	return l.capturePaneTargetContent(target)
+	return l.panes().CapturePaneContent(paneIdx)
 }
 
 func (l *Launcher) clearAgentPanes() error {
@@ -2094,24 +2112,14 @@ func (l *Launcher) clearOverflowAgentWindows() {
 }
 
 func (l *Launcher) listTeamPanes() ([]int, error) {
-	out, err := exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "list-panes",
-		"-t", l.sessionName+":team",
-		"-F", "#{pane_index} #{pane_title}",
-	).CombinedOutput()
-	if err != nil {
-		// If the session isn't up, there's nothing to clear.
-		if isMissingTmuxSession(string(out)) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("list panes: %w", err)
-	}
-	return parseAgentPaneIndices(string(out)), nil
+	return l.panes().ListTeamPanes()
 }
 
-// HasLiveTmuxSession returns true if a wuphf-team tmux session is running.
+// HasLiveTmuxSession returns true if a wuphf-team tmux session is
+// running. Routes through paneLifecycle (PLAN.md §C5b) so tests can
+// drive it via setTmuxRunnerForTest without a real tmux server.
 func HasLiveTmuxSession() bool {
-	err := exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "has-session", "-t", SessionName).Run()
-	return err == nil
+	return newPaneLifecycle(SessionName).HasLiveSession()
 }
 
 func (l *Launcher) spawnVisibleAgents() ([]string, error) {

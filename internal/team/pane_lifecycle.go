@@ -1,12 +1,13 @@
 package team
 
-// pane_lifecycle.go owns pure pane-lifecycle helpers extracted from
-// launcher.go (PLAN.md §C5, partial). The shell-out methods (spawn*,
-// trySpawnWebAgentPanes, watchChannelPaneLoop, capturePaneContent, etc.)
-// stay on Launcher pending the tmuxRunner interface — that follow-up
-// extraction (C5b) introduces a fakeable runner so those methods become
-// testable too. Today's file is a "header split" for the helpers that
-// don't shell out and can already be exercised in tests.
+// pane_lifecycle.go owns the pane-lifecycle helpers extracted from
+// launcher.go (PLAN.md §C5). The first wave (C5a) was the pure helpers
+// (parseAgentPaneIndices, shouldPrimeClaudePane, etc.). The second wave
+// (C5b) adds the paneLifecycle type and migrates the read-only tmux
+// methods (HasLiveSession, ListTeamPanes, ChannelPaneStatus, capture*)
+// onto it through the tmuxRunner seam (tmux_runner.go). Spawn/clear/
+// respawn methods stay on Launcher pending follow-up PRs that migrate
+// them onto the same type.
 
 import (
 	"fmt"
@@ -16,6 +17,90 @@ import (
 
 	"github.com/nex-crm/wuphf/internal/config"
 )
+
+// paneLifecycle owns the tmux pane lifecycle (PLAN.md §C5). The runner
+// field is the test seam — production gets realTmuxRunner via
+// newTmuxRunner; tests inject a fakeTmuxRunner via setTmuxRunnerForTest.
+// The type is intentionally tiny in this PR (sessionName + runner) and
+// grows as the spawn/clear methods migrate over.
+type paneLifecycle struct {
+	runner      tmuxRunner
+	sessionName string
+}
+
+// newPaneLifecycle constructs a paneLifecycle bound to a specific tmux
+// session name. The runner is resolved through the package-global
+// override seam at construction time, so a test that calls
+// setTmuxRunnerForTest before constructing the launcher gets its fake
+// runner installed transparently.
+func newPaneLifecycle(sessionName string) *paneLifecycle {
+	return &paneLifecycle{
+		runner:      newTmuxRunner(),
+		sessionName: sessionName,
+	}
+}
+
+// HasLiveSession returns true when a wuphf-team tmux session is running.
+// Mirrors the historical free-function HasLiveTmuxSession but routes
+// through the runner so tests can drive it without a real tmux server.
+func (p *paneLifecycle) HasLiveSession() bool {
+	return p.runner.Run("has-session", "-t", p.sessionName) == nil
+}
+
+// CapturePaneTargetContent captures the visible content of an arbitrary
+// tmux pane target (e.g. "wuphf-team:team.0") with capture-pane's -p -J
+// flags. Returns the raw stdout (no trim) so callers can render the
+// captured pane verbatim into snapshot logs.
+func (p *paneLifecycle) CapturePaneTargetContent(target string) (string, error) {
+	out, err := p.runner.Combined("capture-pane", "-p", "-J", "-t", target)
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
+}
+
+// CapturePaneContent captures the visible content of pane <paneIdx> in
+// the "team" window. Convenience wrapper around CapturePaneTargetContent.
+func (p *paneLifecycle) CapturePaneContent(paneIdx int) (string, error) {
+	target := fmt.Sprintf("%s:team.%d", p.sessionName, paneIdx)
+	return p.CapturePaneTargetContent(target)
+}
+
+// ListTeamPanes returns the agent-pane indices in the "team" window.
+// Pane 0 (the channel observer) and any pane whose title contains
+// "channel" are filtered out by parseAgentPaneIndices. When the session
+// isn't up, returns (nil, nil) — callers treat that as "nothing to
+// clean up" rather than an error.
+func (p *paneLifecycle) ListTeamPanes() ([]int, error) {
+	out, err := p.runner.Combined("list-panes",
+		"-t", p.sessionName+":team",
+		"-F", "#{pane_index} #{pane_title}",
+	)
+	if err != nil {
+		if isMissingTmuxSession(string(out)) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("list panes: %w", err)
+	}
+	return parseAgentPaneIndices(string(out)), nil
+}
+
+// ChannelPaneStatus returns the tmux display-message status for pane 0
+// in the "team" window: "{pane_dead} {pane_dead_status}
+// {pane_current_command}". Used by the channel-pane watcher to decide
+// whether to respawn. tmux failures surface as the trimmed stderr text
+// in the returned error — callers match that text via isNoSessionError.
+func (p *paneLifecycle) ChannelPaneStatus() (string, error) {
+	out, err := p.runner.Combined("display-message",
+		"-p",
+		"-t", p.sessionName+":team.0",
+		"#{pane_dead} #{pane_dead_status} #{pane_current_command}",
+	)
+	if err != nil {
+		return "", fmt.Errorf("%s", strings.TrimSpace(string(out)))
+	}
+	return strings.TrimSpace(string(out)), nil
+}
 
 // channelPaneNeedsRespawn parses a tmux display-message status string of
 // the form "{exit-status} {pane-pid}" and returns true when the pane has
