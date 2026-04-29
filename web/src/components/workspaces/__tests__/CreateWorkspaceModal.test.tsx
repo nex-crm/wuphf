@@ -150,7 +150,10 @@ describe("<CreateWorkspaceModal>", () => {
     expect(mutate).toHaveBeenCalledWith(
       expect.objectContaining({
         name: "side-project",
-        inherit_from_current: true,
+        // Inherit toggle is true → from_scratch must be false. The
+        // legacy `inherit_from_current` key was removed because broker's
+        // strict CreateRequest decoder rejects unknown fields.
+        from_scratch: false,
       }),
     );
   });

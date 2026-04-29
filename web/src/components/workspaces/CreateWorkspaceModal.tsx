@@ -192,10 +192,12 @@ export function CreateWorkspaceModal({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const create = useCreateWorkspace({
-    onSuccess: (data) => {
+    onSuccess: (ws) => {
       setPhase("ready");
       // Full page reload to the new workspace — page-reload-on-switch.
-      window.location.assign(data.url);
+      // Broker returns the Workspace row directly (not {workspace, url}),
+      // so derive the URL from web_port.
+      window.location.assign(`http://localhost:${ws.web_port}/`);
     },
     onError: (err) => {
       setPhase("error");
@@ -515,15 +517,16 @@ export function CreateWorkspaceModal({
             onClick={() => {
               setErrorMsg(null);
               setPhase("spawning");
+              // Broker's CreateRequest only accepts {name, blueprint?,
+              // inherit_from?, company_name?, from_scratch?}. Richer
+              // onboarding fields (company_description, company_priority,
+              // llm_provider, team_lead_slug) are scoped to the subsequent
+              // /onboarding/* calls — see TODOS.md "two-step create+onboard".
               const payload: CreateWorkspaceInput = {
                 name: form.name.trim(),
-                inherit_from_current: form.inherit,
+                from_scratch: !form.inherit,
                 blueprint: form.blueprint || undefined,
                 company_name: form.company_name || undefined,
-                company_description: form.company_description || undefined,
-                company_priority: form.company_priority || undefined,
-                llm_provider: form.llm_provider || undefined,
-                team_lead_slug: form.team_lead_slug || undefined,
               };
               create.mutate(payload);
             }}

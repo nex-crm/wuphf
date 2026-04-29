@@ -375,7 +375,14 @@ export function WorkspaceRail({
   const resumeMutation = useResumeWorkspace({
     onSuccess: (resp) => {
       setResume(null);
-      navigate(resp.url);
+      // Broker returns {ok, name}; resolve the URL from the cached
+      // workspace list (which the mutation just invalidated) by name.
+      const ws = data?.workspaces.find((w) => w.name === resp.name);
+      if (ws?.web_port) {
+        navigate(`http://localhost:${ws.web_port}/`);
+      } else {
+        showNotice(`Workspace '${resp.name}' resumed.`, "info");
+      }
     },
     onError: (err) =>
       showNotice(
@@ -494,6 +501,8 @@ export function WorkspaceRail({
               data-testid={`workspace-icon-${ws.name}`}
               data-state={ws.state}
               data-active={active ? "true" : "false"}
+              aria-label={`Switch to workspace ${ws.name} (${ws.state})`}
+              aria-current={active ? "page" : undefined}
               style={styles.icon(active, paused)}
               title={`${ws.name} · ${ws.state}`}
               onClick={() => handleClick(ws)}

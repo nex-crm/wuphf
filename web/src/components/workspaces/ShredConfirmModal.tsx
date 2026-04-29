@@ -124,13 +124,19 @@ export function ShredConfirmModal({
     ? `Shred main workspace`
     : `Shred '${workspace.name}'?`;
 
+  // Show the workspace's actual runtime path so the user is not misled by
+  // the legacy ~/.wuphf/ location after the symmetric multi-workspace
+  // migration moves the main workspace under ~/.wuphf-spaces/main/.wuphf.
+  const mainPath = workspace.runtime_home
+    ? `${workspace.runtime_home}/.wuphf`
+    : "~/.wuphf-spaces/main/.wuphf";
   const introCopy = isMain ? (
     <>
       You are about to move{" "}
-      <code style={{ fontFamily: "var(--font-mono)" }}>~/.wuphf/</code> (created{" "}
-      {formatCreated(workspace.created_at)}) to trash. This is reversible from
-      the trash for 30 days, but agents stop running and sessions are lost on
-      the active broker.
+      <code style={{ fontFamily: "var(--font-mono)" }}>{mainPath}</code>{" "}
+      (created {formatCreated(workspace.created_at)}) to trash. This is
+      reversible from the trash for 30 days, but agents stop running and
+      sessions are lost on the active broker.
     </>
   ) : (
     <>

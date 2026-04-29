@@ -56,15 +56,15 @@ interface UseRestoreToastReturn {
  */
 export function useRestoreToast(): UseRestoreToastReturn {
   const restore = useRestoreWorkspace({
-    onSuccess: (data) => {
+    onSuccess: (ws) => {
       // Page reload to the restored workspace's web URL — same protocol
-      // as a normal switch. Falls back to a notice if the backend didn't
-      // include a URL (e.g., restore returned ok but the broker isn't
-      // up yet).
-      if (data.url) {
-        window.location.assign(data.url);
+      // as a normal switch. Falls back to a notice if the workspace
+      // didn't surface a port (e.g., restore returned ok but the broker
+      // hasn't bound yet).
+      if (ws.web_port) {
+        window.location.assign(`http://localhost:${ws.web_port}/`);
       } else {
-        showNotice(`Workspace '${data.workspace.name}' restored.`, "success");
+        showNotice(`Workspace '${ws.name}' restored.`, "success");
       }
     },
     onError: (err) => {

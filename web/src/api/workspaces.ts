@@ -99,15 +99,22 @@ export function useWorkspacesList(
   });
 }
 
+/**
+ * NOTE: the broker's `/workspaces/list` does NOT yet emit a `trash` field
+ * on the response payload, and there is no dedicated trash endpoint either
+ * (#3164366654). This hook will return an empty `entries` array until
+ * Lane B / C exposes one — see TODOS.md "trash listing endpoint". Kept
+ * exported so consumers wire against a stable signature once it lands.
+ */
 export function useWorkspaceTrash(
   options?: Partial<UseQueryOptions<TrashListResponse>>,
 ) {
   return useQuery<TrashListResponse>({
     queryKey: workspaceKeys.trash(),
     queryFn: () =>
-      get<TrashListResponse>("/workspaces/list", {}).then((d) => {
-        // Broker exposes trash via `/workspaces/list?include=trash`; tolerate
-        // both shapes (separate endpoint or a `trash` field on the list payload).
+      get<TrashListResponse>("/workspaces/list", {
+        include: "trash",
+      }).then((d) => {
         const entries = (d as unknown as { trash?: TrashEntry[] }).trash ?? [];
         return { entries };
       }),
@@ -118,24 +125,33 @@ export function useWorkspaceTrash(
 
 /* ─── Mutations ─────────────────────────────────────────────── */
 
+/**
+ * Broker accepts: {name, blueprint?, inherit_from?, company_name?, from_scratch?}.
+ * The decoder is strict (DisallowUnknownFields), so any field not on this
+ * list will 400 the request. Richer onboarding fields (company_description,
+ * company_priority, llm_provider*, team_lead_slug) are scoped to the
+ * subsequent /onboarding/* calls per the design's two-step flow; they are
+ * intentionally NOT part of the create payload.
+ *
+ * Wire shape mirrors `internal/team/broker_workspaces.go::CreateRequest`.
+ */
 export interface CreateWorkspaceInput {
   name: string;
-  /** Default true — copy blueprint, company info, LLM config, agents. */
-  inherit_from_current?: boolean;
   blueprint?: string;
+  /** Source workspace for inherited fields (default: cli_current). */
+  inherit_from?: string;
   company_name?: string;
-  company_description?: string;
-  company_priority?: string;
-  llm_provider?: string;
-  llm_provider_priority?: string[];
-  team_lead_slug?: string;
+  /** Skip blueprint inheritance — start blank, run full onboarding. */
+  from_scratch?: boolean;
 }
 
-export interface CreateWorkspaceResponse {
-  workspace: Workspace;
-  /** URL the SPA should navigate to once spawn returns ready. */
-  url: string;
-}
+/**
+ * Broker `handleWorkspacesCreate` returns the freshly created Workspace
+ * row directly (status 201) — there is no envelope object. Lane C's
+ * design opted for this shape so the client can pass the row straight
+ * into the workspace cache without unwrapping.
+ */
+export type CreateWorkspaceResponse = Workspace;
 
 export function useCreateWorkspace(
   options?: UseMutationOptions<
@@ -179,9 +195,15 @@ export interface ResumeWorkspaceInput {
   name: string;
 }
 
+/**
+ * Broker `handleWorkspacesResume` returns {ok, name} after a successful
+ * spawn — the SPA already knows the runtime_home/web_port from the prior
+ * list response, so the resume RPC stays minimal. If a richer payload is
+ * needed later, the broker can add fields without breaking this shape.
+ */
 export interface ResumeWorkspaceResponse {
-  workspace: Workspace;
-  url: string;
+  ok: boolean;
+  name: string;
 }
 
 export function useResumeWorkspace(
@@ -237,10 +259,11 @@ export interface RestoreWorkspaceInput {
   trash_id: string;
 }
 
-export interface RestoreWorkspaceResponse {
-  workspace: Workspace;
-  url: string;
-}
+/**
+ * Broker `handleWorkspacesRestore` returns the restored Workspace row
+ * directly (same shape as Create). Caller computes the URL from web_port.
+ */
+export type RestoreWorkspaceResponse = Workspace;
 
 export function useRestoreWorkspace(
   options?: UseMutationOptions<
