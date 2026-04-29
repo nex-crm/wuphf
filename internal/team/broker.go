@@ -586,6 +586,15 @@ type Broker struct {
 	// token. Guarded by b.mu. See skill_crud_endpoints.go for GC semantics.
 	recentlyRejectedSkills map[string]rejectedSkillSnapshot
 
+	// skillEmbedder powers findSimilarActiveSkillLocked when set. Nil means
+	// the similarity gate falls back to token-Jaccard. Wired by Lane A's
+	// integration step (task #5); see skill_similarity.go for the contract.
+	skillEmbedder SkillEmbedder
+	// skillSimCache memoises embeddings per (slug, content-sha) so a single
+	// compile pass doesn't re-embed every existing skill once per candidate.
+	// Lazily allocated by findSimilarActiveSkillLocked when first needed.
+	skillSimCache *skillSimilarityCache
+
 	// statePath is the on-disk broker-state.json path bound at construction.
 	// NewBrokerAt(path) sets this directly; NewBroker() resolves
 	// defaultBrokerStatePath() once and pins the result. A later-arriving
