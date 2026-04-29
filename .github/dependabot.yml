@@ -1,7 +1,25 @@
 version: 2
+# Grant Dependabot read access to private GitHub repos in the org.
+# Required because workflows under .github/workflows/ consume reusable
+# workflows from the private nex-crm/.github repo (see `uses:
+# nex-crm/.github/...` refs). Without this, every weekly Dependabot
+# run fails closed with `git_dependencies_not_reachable`.
+#
+# `DEPENDABOT_PRIVATE_REPO_TOKEN` is provisioned at the org level —
+# see nex-crm/docs#37 for the original rollout + the gh command to
+# create it.
+registries:
+  nex-crm-github:
+    type: git
+    url: https://github.com
+    username: x-access-token
+    password: ${{secrets.DEPENDABOT_PRIVATE_REPO_TOKEN}}
+
 updates:
   - package-ecosystem: "github-actions"
     directory: "/"
+    registries:
+      - nex-crm-github
     schedule:
       interval: "weekly"
       day: "monday"
