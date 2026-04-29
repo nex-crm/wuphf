@@ -708,7 +708,12 @@ func (b *Broker) handlePostTask(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusConflict)
 			return
 		}
-		if task.Status == "done" {
+		// Any terminal status releases waiting dependents. Previously
+		// only "done" fired this; cancelling a parent silently orphaned
+		// every dependent. isTerminalTeamTaskStatus matches the same
+		// done/completed/canceled/cancelled set hasUnresolvedDepsLocked
+		// treats as resolved, so the two stay symmetric.
+		if isTerminalTeamTaskStatus(task.Status) {
 			b.unblockDependentsLocked(task.ID)
 		}
 		b.scheduleTaskLifecycleLocked(task)
@@ -1589,17 +1594,12 @@ func appendTaskDetailLocked(task *teamTask, detail string) error {
 	return nil
 }
 
-// hasUnresolvedDepsLocked returns true if any of the task's dependencies are not done.
-//
-// TODO(broker-deps): cancelled task dependencies currently count as
-// "unresolved", so cancelling a parent leaves every dependent task
-// permanently blocked (unblockDependentsLocked only fires on
-// Status="done"). This is asymmetric with requestIsResolvedLocked,
-// which treats a cancelled humanInterview as resolved. Either treat
-// cancelled task-deps as resolved (mirror request-deps) or
-// cascade-cancel dependents when a parent is cancelled. The
-// TestHasUnresolvedDepsLocked_OnlyDoneCounts test pins the current
-// behavior; soften that pin when fixing here.
+// hasUnresolvedDepsLocked returns true if any of the task's dependencies
+// are still active. Any terminal status — done, completed, canceled,
+// cancelled — counts as resolved. This mirrors requestIsResolvedLocked's
+// treatment of cancelled humanInterview deps so a parent's cancellation
+// no longer permanently orphans every dependent task. Missing deps still
+// count as unresolved (dependency doesn't exist yet).
 func (b *Broker) hasUnresolvedDepsLocked(task *teamTask) bool {
 	for _, depID := range task.DependsOn {
 		if requestIsResolvedLocked(b.requests, depID) {
@@ -1609,7 +1609,7 @@ func (b *Broker) hasUnresolvedDepsLocked(task *teamTask) bool {
 		for j := range b.tasks {
 			if b.tasks[j].ID == depID {
 				found = true
-				if b.tasks[j].Status != "done" {
+				if !isTerminalTeamTaskStatus(b.tasks[j].Status) {
 					return true
 				}
 				break

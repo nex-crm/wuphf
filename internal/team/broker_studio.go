@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -15,6 +16,37 @@ import (
 	"github.com/nex-crm/wuphf/internal/operations"
 	"github.com/nex-crm/wuphf/internal/provider"
 )
+
+// externalRetryAfterPattern parses RFC3339 timestamps embedded in
+// workflow-provider error strings of the form "retry after <ts>".
+// Workflow runners emit this format when an external action provider
+// (One, Composio, etc.) returns a 429 with a structured deadline; the
+// broker uses it to decide whether to surface a 429 with Retry-After
+// header back to the client. (?i) makes the prefix case-insensitive.
+var externalRetryAfterPattern = regexp.MustCompile(`(?i)retry after ([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.+-]+Z?)`)
+
+// externalWorkflowRetryAfter extracts a retry-at timestamp from an
+// external workflow provider's error message. Returns (zero, false)
+// when err is nil, when the pattern doesn't match, or when the
+// matched timestamp is unparseable. Past timestamps clamp to now so
+// callers get a positive retry duration.
+func externalWorkflowRetryAfter(err error, now time.Time) (time.Time, bool) {
+	if err == nil {
+		return time.Time{}, false
+	}
+	matches := externalRetryAfterPattern.FindStringSubmatch(err.Error())
+	if len(matches) < 2 {
+		return time.Time{}, false
+	}
+	retryAt, parseErr := time.Parse(time.RFC3339Nano, strings.TrimSpace(matches[1]))
+	if parseErr != nil {
+		return time.Time{}, false
+	}
+	if retryAt.Before(now) {
+		return now, true
+	}
+	return retryAt, true
+}
 
 // studioPackageGeneratorFn is the test seam type swapped via
 // setStudioPackageGeneratorForTest.

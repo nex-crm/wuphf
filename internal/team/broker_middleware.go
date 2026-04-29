@@ -199,24 +199,6 @@ func (b *Broker) consumeAgentRateLimit(agentSlug string) (time.Duration, bool) {
 	return 0, false
 }
 
-func externalWorkflowRetryAfter(err error, now time.Time) (time.Time, bool) {
-	if err == nil {
-		return time.Time{}, false
-	}
-	matches := externalRetryAfterPattern.FindStringSubmatch(err.Error())
-	if len(matches) < 2 {
-		return time.Time{}, false
-	}
-	retryAt, parseErr := time.Parse(time.RFC3339Nano, strings.TrimSpace(matches[1]))
-	if parseErr != nil {
-		return time.Time{}, false
-	}
-	if retryAt.Before(now) {
-		return now, true
-	}
-	return retryAt, true
-}
-
 func pruneRateLimitEntries(entries []time.Time, cutoff time.Time) []time.Time {
 	keepIdx := 0
 	for keepIdx < len(entries) && !entries[keepIdx].After(cutoff) {

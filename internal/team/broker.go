@@ -52,8 +52,6 @@ const defaultAgentRateLimitWindow = time.Minute
 // the value set by internal/teammcp/server.go authHeaders().
 const agentRateLimitHeader = "X-WUPHF-Agent"
 
-var externalRetryAfterPattern = regexp.MustCompile(`(?i)retry after ([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.+-]+Z?)`)
-
 // agentStreamBuffer holds recent stdout/stderr lines from a headless agent
 // process and fans them out to SSE subscribers in real time.
 

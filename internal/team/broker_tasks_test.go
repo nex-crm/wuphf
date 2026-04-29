@@ -15,50 +15,58 @@ import (
 	"github.com/nex-crm/wuphf/internal/config"
 )
 
-// TestHasUnresolvedDepsLocked_OnlyDoneCounts pins the *current* contract:
-// a dependency resolves only when its Status is "done". Cancelled,
-// blocked, in_progress, and missing IDs all count as unresolved so the
-// dependent task stays blocked until explicit completion.
-//
-// TODO(broker-deps): cancelled is asymmetric vs requestIsResolvedLocked
-// (which treats a cancelled humanInterview as resolved). When that
-// asymmetry is fixed in hasUnresolvedDepsLocked, soften the cancelled
-// case here from `true` to `false` and add a cascade-cancel test.
-func TestHasUnresolvedDepsLocked_OnlyDoneCounts(t *testing.T) {
+// TestHasUnresolvedDepsLocked_TerminalStatusesResolve pins the contract:
+// any terminal status — done, completed, canceled, cancelled — counts
+// as a resolved dependency. Active statuses (in_progress, blocked) and
+// missing IDs are unresolved. This mirrors requestIsResolvedLocked for
+// humanInterview deps so a parent's cancellation no longer permanently
+// orphans every dependent task.
+func TestHasUnresolvedDepsLocked_TerminalStatusesResolve(t *testing.T) {
 	b := newTestBroker(t)
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
 	b.tasks = []teamTask{
 		{ID: "dep-done", Status: "done"},
+		{ID: "dep-completed", Status: "completed"},
+		{ID: "dep-canceled", Status: "canceled"},
 		{ID: "dep-cancelled", Status: "cancelled"},
 		{ID: "dep-in-progress", Status: "in_progress"},
+		{ID: "dep-blocked", Status: "blocked"},
 	}
 
 	cases := []struct {
-		name    string
-		dep     string
-		want    bool
-		comment string
+		name string
+		dep  string
+		want bool
 	}{
-		{"resolved when done", "dep-done", false, "Status=done is the only resolution"},
-		{"unresolved when cancelled", "dep-cancelled", true, "cancelled doesn't unblock"},
-		{"unresolved when in_progress", "dep-in-progress", true, "still active"},
-		{"unresolved when missing", "ghost-id", true, "missing => treat as unresolved"},
+		{"resolved when done", "dep-done", false},
+		{"resolved when completed", "dep-completed", false},
+		{"resolved when canceled", "dep-canceled", false},
+		{"resolved when cancelled", "dep-cancelled", false},
+		{"unresolved when in_progress", "dep-in-progress", true},
+		{"unresolved when blocked", "dep-blocked", true},
+		{"unresolved when missing", "ghost-id", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			task := &teamTask{DependsOn: []string{tc.dep}}
 			if got := b.hasUnresolvedDepsLocked(task); got != tc.want {
-				t.Errorf("dep=%q: %s — want %v, got %v", tc.dep, tc.comment, tc.want, got)
+				t.Errorf("dep=%q: want %v, got %v", tc.dep, tc.want, got)
 			}
 		})
 	}
 
 	// Mixed: any unresolved among many returns true.
-	mixed := &teamTask{DependsOn: []string{"dep-done", "dep-cancelled"}}
+	mixed := &teamTask{DependsOn: []string{"dep-done", "dep-in-progress"}}
 	if !b.hasUnresolvedDepsLocked(mixed) {
-		t.Error("mixed deps with one cancelled: expected unresolved=true")
+		t.Error("mixed deps with one in_progress: expected unresolved=true")
+	}
+
+	// Mixed terminals only: all resolved.
+	terminals := &teamTask{DependsOn: []string{"dep-done", "dep-cancelled", "dep-completed"}}
+	if b.hasUnresolvedDepsLocked(terminals) {
+		t.Error("all-terminal deps: expected unresolved=false")
 	}
 }
 
