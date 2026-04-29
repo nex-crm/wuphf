@@ -261,6 +261,9 @@ var (
 	isLinux                 = channelui.IsLinux
 	isWindows               = channelui.IsWindows
 	resolveInitialOfficeApp = channelui.ResolveInitialOfficeApp
+
+	renderUsageStrip     = channelui.RenderUsageStrip
+	sidebarShortcutLabel = channelui.SidebarShortcutLabel
 )
 
 // Channel-confirm action typed-string consts.

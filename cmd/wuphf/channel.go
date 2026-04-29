@@ -2846,52 +2846,6 @@ func (m channelModel) selectedInterviewOption() *channelInterviewOption {
 	return &m.pending.Options[m.selectedOption]
 }
 
-func renderUsageStrip(usage channelUsageState, members []channelMember, width int) string {
-	if len(usage.Agents) == 0 || width < 40 {
-		return ""
-	}
-
-	var ordered []string
-	seen := make(map[string]bool)
-	for _, member := range members {
-		if _, ok := usage.Agents[member.Slug]; ok && !seen[member.Slug] {
-			ordered = append(ordered, member.Slug)
-			seen[member.Slug] = true
-		}
-	}
-	for _, slug := range []string{"ceo", "pm", "fe", "be", "ai", "designer", "cmo", "cro"} {
-		if _, ok := usage.Agents[slug]; ok && !seen[slug] {
-			ordered = append(ordered, slug)
-			seen[slug] = true
-		}
-	}
-	for slug := range usage.Agents {
-		if !seen[slug] {
-			ordered = append(ordered, slug)
-		}
-	}
-
-	pillStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#CBD5E1")).
-		Background(lipgloss.Color("#111827")).
-		Padding(0, 1)
-
-	var pills []string
-	for _, slug := range ordered {
-		totals := usage.Agents[slug]
-		if totals.TotalTokens == 0 && totals.CostUsd == 0 {
-			continue
-		}
-		label := fmt.Sprintf("%s %s · %s", agentAvatar(slug), formatTokenCount(totals.TotalTokens), formatUsd(totals.CostUsd))
-		pills = append(pills, pillStyle.Render(label))
-	}
-	if len(pills) == 0 {
-		return ""
-	}
-	prefix := lipgloss.NewStyle().Foreground(lipgloss.Color(slackMuted)).Render("  Spend by teammate")
-	return prefix + "  " + strings.Join(pills, " ")
-}
-
 // nextFocus cycles through visible panels: main → sidebar → thread → main.
 func (m channelModel) nextFocus() focusArea {
 	order := []focusArea{focusMain}
@@ -3110,13 +3064,6 @@ func (m channelModel) appSidebarItems() []sidebarItem {
 		items = append(items, sidebarItem{Kind: "app", Value: string(app.App), Label: app.Label})
 	}
 	return items
-}
-
-func sidebarShortcutLabel(index int) string {
-	if index < 0 || index > 8 {
-		return ""
-	}
-	return fmt.Sprintf("%d", index+1)
 }
 
 func (m channelModel) quickJumpItems() []sidebarItem {

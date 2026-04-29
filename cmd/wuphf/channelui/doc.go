@@ -216,6 +216,13 @@
 //     a CLI-flag string into a known OfficeApp value with the
 //     legacy "insights" alias mapped to OfficeAppPolicies and an
 //     OfficeAppMessages fallback.
+//   - usage_strip.go       — RenderUsageStrip renders the
+//     "Spend by teammate" pill row beneath the office feed
+//     (avatar + token count + dollar cost per agent, ordered by
+//     channel-member appearance, then canonical roster, then map
+//     iteration order; "" when no agents tracked or width < 40).
+//     SidebarShortcutLabel returns the "1".."9" digit shortcut
+//     for sidebar item indexes 0..8 (or "" when out of range).
 //
 // Subsequent extraction PRs will land the workspace / recovery / cache
 // cluster, the sidebar / splash, the broker integrations, and finally
