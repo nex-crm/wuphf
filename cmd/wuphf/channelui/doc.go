@@ -251,6 +251,21 @@
 //     terminal statuses), CountIsolatedRuntimeTasks (counts tasks
 //     in a "local_worktree" execution mode or with a non-empty
 //     WorktreePath / WorktreeBranch).
+//   - task_workflow_builders.go — task / workflow / orphan-log
+//     runtime-artifact projection: TaskLogRecord (on-disk JSON
+//     line shape), TaskLogArtifact (UI projection of the latest
+//     record + log file metadata), WorkflowRunArtifact (on-disk
+//     workflow run row), SummarizeTaskLogRecord (error/result/
+//     params one-liner), BuildTaskRuntimeArtifact /
+//     BuildOrphanTaskLogRuntimeArtifact / BuildWorkflowRuntimeArtifact,
+//     and the BuildTask*/Workflow*/Normalize* helpers
+//     (BuildTaskArtifactSummary / Progress / ReviewHint /
+//     ResumeHint, NormalizeTaskArtifactState,
+//     WorkflowArtifactProgress, NormalizeWorkflowArtifactState).
+//     Disk-IO readers (recentTaskLogArtifacts on channelModel,
+//     recentWorkflowRunArtifacts, readTaskLogArtifact,
+//     readWorkflowRunArtifact) stay in package main since they
+//     are tied to the disk layout and the channelModel state.
 //   - artifact_builders.go — request / action runtime-artifact
 //     projection helpers: RuntimeArtifactSnapshot type + Count /
 //     Filter methods, RecentArtifactTasks (filter + newest-first

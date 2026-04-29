@@ -10,49 +10,12 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/nex-crm/wuphf/internal/config"
 	"github.com/nex-crm/wuphf/internal/team"
 )
-
-type taskLogRecord struct {
-	TaskID      string          `json:"task_id"`
-	AgentSlug   string          `json:"agent_slug"`
-	ToolName    string          `json:"tool_name"`
-	Params      json.RawMessage `json:"params"`
-	Result      json.RawMessage `json:"result"`
-	Error       json.RawMessage `json:"error"`
-	StartedAt   string          `json:"started_at"`
-	CompletedAt string          `json:"completed_at"`
-}
-
-type taskLogArtifact struct {
-	TaskID       string
-	AgentSlug    string
-	ToolName     string
-	Summary      string
-	StartedAt    string
-	CompletedAt  string
-	LogPath      string
-	EntryCount   int
-	UpdatedAt    time.Time
-	WorktreePath string
-	TaskTitle    string
-}
-
-type workflowRunArtifact struct {
-	Provider    string `json:"provider"`
-	WorkflowKey string `json:"workflow_key"`
-	RunID       string `json:"run_id"`
-	Status      string `json:"status"`
-	StartedAt   string `json:"started_at"`
-	FinishedAt  string `json:"finished_at"`
-	Path        string
-	UpdatedAt   time.Time
-}
 
 func (m channelModel) buildArtifactLines(contentWidth int) []renderedLine {
 	lines := []renderedLine{{Text: renderDateSeparator(contentWidth, "Execution artifacts")}}
@@ -191,19 +154,6 @@ func readTaskLogArtifact(path string, info fs.FileInfo) (taskLogArtifact, bool) 
 		EntryCount:  entryCount,
 		UpdatedAt:   info.ModTime(),
 	}, true
-}
-
-func summarizeTaskLogRecord(record taskLogRecord) string {
-	if text := summarizeJSONField(record.Error, 120); text != "" && text != "null" {
-		return "Error: " + text
-	}
-	if text := summarizeJSONField(record.Result, 160); text != "" && text != "null" {
-		return text
-	}
-	if text := summarizeJSONField(record.Params, 120); text != "" && text != "null" {
-		return "Params: " + text
-	}
-	return "Tool execution finished."
 }
 
 func recentWorkflowRunArtifacts(limit int) []workflowRunArtifact {
