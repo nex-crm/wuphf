@@ -92,12 +92,23 @@ type SkillWuphfMeta struct {
 // to enhance-existing would be wrong.
 type SkillSimilarRef struct {
 	// Slug is the existing skill's slug (lowercase, kebab).
-	Slug string `yaml:"slug"`
+	Slug string `yaml:"slug" json:"slug"`
 	// Score is the similarity score in [0,1].
-	Score float64 `yaml:"score"`
+	Score float64 `yaml:"score" json:"score"`
 	// Method is "embedding-cosine" or "jaccard-tokens" so eval can split
 	// metrics by detection path.
-	Method string `yaml:"method,omitempty"`
+	Method string `yaml:"method,omitempty" json:"method,omitempty"`
+}
+
+// cloneSkillSimilarRef returns a deep copy of ref, or nil when ref is nil.
+// Used by teamSkillToFrontmatter so the rendered frontmatter doesn't share
+// a pointer with the in-memory teamSkill.
+func cloneSkillSimilarRef(ref *SkillSimilarRef) *SkillSimilarRef {
+	if ref == nil {
+		return nil
+	}
+	cp := *ref
+	return &cp
 }
 
 // SkillSafetyScan holds the result of a skill_guard scan.
@@ -193,6 +204,7 @@ func teamSkillToFrontmatter(sk teamSkill) SkillFrontmatter {
 				Tags:               append([]string(nil), sk.Tags...),
 				SourceArticles:     append([]string(nil), sk.SourceArticles...),
 				OwnerAgents:        append([]string(nil), sk.OwnerAgents...),
+				SimilarToExisting:  cloneSkillSimilarRef(sk.SimilarToExisting),
 				WorkflowProvider:   sk.WorkflowProvider,
 				WorkflowKey:        sk.WorkflowKey,
 				WorkflowDefinition: sk.WorkflowDefinition,

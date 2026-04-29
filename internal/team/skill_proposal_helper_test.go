@@ -684,3 +684,196 @@ func errorsAs(err error, target **errSkillSimilarToExisting) bool {
 	}
 	return false
 }
+
+// PR 7 task #15: enhance interview contract.
+
+// TestAppendSkillProposalRequestLocked_EnhanceKindHasThreeOptions pins down
+// the interview-options contract: the new enhance_skill_proposal kind ships
+// [enhance, approve_anyway, reject], the legacy skill_proposal stays
+// [accept, reject].
+func TestAppendSkillProposalRequestLocked_EnhanceKindHasThreeOptions(t *testing.T) {
+	t.Parallel()
+
+	t.Run("enhance kind", func(t *testing.T) {
+		t.Parallel()
+		b := newTestBroker(t)
+		candidate := teamSkill{
+			Name:        "invoice-d7-reminder",
+			Title:       "Invoice d7 reminder",
+			Description: "AR follow-up at d7.",
+			CreatedBy:   "archivist",
+			Channel:     "general",
+		}
+		b.mu.Lock()
+		b.appendSkillProposalRequestLocked(candidate, "general", "2026-04-29T00:00:00Z", "send-invoice-reminder")
+		b.mu.Unlock()
+
+		if got := len(b.requests); got != 1 {
+			t.Fatalf("requests: got %d, want 1", got)
+		}
+		req := b.requests[0]
+		if req.Kind != "enhance_skill_proposal" {
+			t.Errorf("Kind: got %q, want enhance_skill_proposal", req.Kind)
+		}
+		if got := len(req.Options); got != 3 {
+			t.Fatalf("Options len: got %d, want 3", got)
+		}
+		want := []string{"enhance", "approve_anyway", "reject"}
+		for i, w := range want {
+			if req.Options[i].ID != w {
+				t.Errorf("Options[%d].ID: got %q, want %q", i, req.Options[i].ID, w)
+			}
+		}
+		if req.RecommendedID != "enhance" {
+			t.Errorf("RecommendedID: got %q, want enhance", req.RecommendedID)
+		}
+		if req.Metadata["enhances_slug"] != "send-invoice-reminder" {
+			t.Errorf("Metadata.enhances_slug: got %v, want send-invoice-reminder", req.Metadata["enhances_slug"])
+		}
+		if req.EnhanceCandidate == nil {
+			t.Fatal("EnhanceCandidate must be set on enhance interviews")
+		}
+		if req.EnhanceCandidate.Name != "invoice-d7-reminder" {
+			t.Errorf("EnhanceCandidate.Name: got %q, want invoice-d7-reminder", req.EnhanceCandidate.Name)
+		}
+	})
+
+	t.Run("legacy skill_proposal kind keeps two options", func(t *testing.T) {
+		t.Parallel()
+		b := newTestBroker(t)
+		candidate := teamSkill{
+			Name:        "send-renewal",
+			Title:       "Send renewal",
+			Description: "Send the renewal email.",
+			CreatedBy:   "archivist",
+			Channel:     "general",
+		}
+		b.mu.Lock()
+		b.appendSkillProposalRequestLocked(candidate, "general", "2026-04-29T00:00:00Z", "")
+		b.mu.Unlock()
+
+		req := b.requests[0]
+		if req.Kind != "skill_proposal" {
+			t.Errorf("Kind: got %q, want skill_proposal", req.Kind)
+		}
+		if got := len(req.Options); got != 2 {
+			t.Fatalf("Options len: got %d, want 2", got)
+		}
+		if req.Options[0].ID != "accept" || req.Options[1].ID != "reject" {
+			t.Errorf("Options: got %s/%s, want accept/reject", req.Options[0].ID, req.Options[1].ID)
+		}
+		if req.EnhanceCandidate != nil {
+			t.Error("EnhanceCandidate must be nil on legacy skill_proposal")
+		}
+	})
+
+	t.Run("ambiguous skill_proposal carries similar_to_existing metadata", func(t *testing.T) {
+		t.Parallel()
+		b := newTestBroker(t)
+		candidate := teamSkill{
+			Name:        "near-dup",
+			Title:       "Near dup",
+			Description: "A near-duplicate skill.",
+			CreatedBy:   "archivist",
+			Channel:     "general",
+			SimilarToExisting: &SkillSimilarRef{
+				Slug:   "original-skill",
+				Score:  0.78,
+				Method: "embedding-cosine",
+			},
+		}
+		b.mu.Lock()
+		b.appendSkillProposalRequestLocked(candidate, "general", "2026-04-29T00:00:00Z", "")
+		b.mu.Unlock()
+
+		req := b.requests[0]
+		if req.Kind != "skill_proposal" {
+			t.Errorf("Kind: got %q, want skill_proposal", req.Kind)
+		}
+		ref, ok := req.Metadata["similar_to_existing"].(SkillSimilarRef)
+		if !ok {
+			t.Fatalf("Metadata.similar_to_existing missing or wrong type: %T %v", req.Metadata["similar_to_existing"], req.Metadata["similar_to_existing"])
+		}
+		if ref.Slug != "original-skill" {
+			t.Errorf("Metadata.similar_to_existing.slug: got %q, want original-skill", ref.Slug)
+		}
+	})
+}
+
+// TestWriteSkillProposalLocked_AmbiguousSimilarity_PopulatesSkillSimilarRef
+// guards Gap 3: after an ambiguous-band write the in-memory teamSkill
+// surfaces SimilarToExisting via JSON. The Skills app reads /skills and
+// expects this field directly, not via a frontmatter round-trip.
+func TestWriteSkillProposalLocked_AmbiguousSimilarity_PopulatesSkillSimilarRef(t *testing.T) {
+	t.Parallel()
+	b := newTestBroker(t)
+	b.mu.Lock()
+	addSkill(b, "draft-monthly-report", "Draft the monthly summary report.", "existing-text drafting workflow.")
+	b.mu.Unlock()
+
+	cand := l2norm([]float32{1, 0, 0})
+	exist := l2norm([]float32{0.75, 0.6614, 0})
+	b.skillEmbedder = staticVecEmbedder(cand, exist)
+
+	spec := similaritySpec("compile-quarterly-summary", "Compile the quarterly summary briefing.")
+	spec.Content = "candidate-text drafting a quarterly summary."
+
+	sk, err := callWriteSkillProposalLocked(b, spec)
+	if err != nil {
+		t.Fatalf("unexpected error on ambiguous: %v", err)
+	}
+	if sk == nil {
+		t.Fatal("expected the candidate to be written")
+	}
+	if sk.SimilarToExisting == nil {
+		t.Fatal("SimilarToExisting must be populated on ambiguous-band writes")
+	}
+	if sk.SimilarToExisting.Slug != "draft-monthly-report" {
+		t.Errorf("SimilarToExisting.Slug: got %q, want draft-monthly-report", sk.SimilarToExisting.Slug)
+	}
+	if sk.SimilarToExisting.Score < 0.70 || sk.SimilarToExisting.Score >= 0.85 {
+		t.Errorf("SimilarToExisting.Score: got %v, want in [0.70, 0.85)", sk.SimilarToExisting.Score)
+	}
+}
+
+// TestWriteSkillProposalLocked_BypassSimilarity_OverridesGate guards the
+// approve_anyway path: with bypassSimilarity=true the gate is skipped and
+// the candidate writes normally even when the embedder would otherwise
+// flag it as enhance_existing.
+func TestWriteSkillProposalLocked_BypassSimilarity_OverridesGate(t *testing.T) {
+	t.Parallel()
+	b := newTestBroker(t)
+	b.mu.Lock()
+	addSkill(b, "send-invoice-reminder", "Send the AR follow-up at d7.", "candidate-text body that the embedder keys off.")
+	b.mu.Unlock()
+
+	v := l2norm([]float32{1, 0, 0})
+	b.skillEmbedder = staticVecEmbedder(v, v)
+
+	spec := similaritySpec("invoice-d7-reminder", "AR reminder for the d7 cohort.")
+	spec.Content = "candidate-text body that the embedder keys off."
+
+	// First call WITHOUT bypass — must return the sentinel.
+	if _, err := callWriteSkillProposalLocked(b, spec); err == nil {
+		t.Fatal("expected sentinel without bypass; got nil")
+	}
+
+	// Second call WITH bypass — must succeed and write the skill.
+	b.mu.Lock()
+	sk, err := b.writeSkillProposalWithOptsLocked(spec, proposalOpts{bypassSimilarity: true})
+	b.mu.Unlock()
+	if err != nil {
+		t.Fatalf("bypass write failed: %v", err)
+	}
+	if sk == nil {
+		t.Fatal("bypass write returned nil")
+	}
+	if sk.Status != "proposed" {
+		t.Errorf("Status: got %q, want proposed", sk.Status)
+	}
+	// Bypass must NOT bump EnhancementCandidatesTotal a second time.
+	// (It was bumped once on the first non-bypass call.)
+	if got := b.skillCompileMetrics.EnhancementCandidatesTotal; got != 1 {
+		t.Errorf("EnhancementCandidatesTotal: got %d, want 1 (bypass must not re-trigger gate)", got)
+	}
+}

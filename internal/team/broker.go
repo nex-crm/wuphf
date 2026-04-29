@@ -198,6 +198,19 @@ type humanInterview struct {
 	CreatedAt     string            `json:"created_at"`
 	UpdatedAt     string            `json:"updated_at,omitempty"`
 	Answered      *interviewAnswer  `json:"answered,omitempty"`
+	// Metadata carries small structured payloads the UI parses to drive
+	// kind-specific affordances (PR 7 task #15). Known keys:
+	//   enhances_slug      string             — set on enhance_skill_proposal
+	//   similar_to_existing *SkillSimilarRef  — set on ambiguous skill_proposal
+	// New keys may be added freely; consumers must tolerate unknown keys.
+	Metadata map[string]any `json:"metadata,omitempty"`
+	// EnhanceCandidate carries the full candidate teamSkill that the
+	// similarity gate diverted to enhance-existing (PR 7 task #15). Only
+	// set on enhance_skill_proposal interviews; nil otherwise. Stored as a
+	// typed pointer rather than via Metadata so the answer handler can
+	// replay the candidate spec through writeSkillProposalLocked when the
+	// human chooses "approve_anyway".
+	EnhanceCandidate *teamSkill `json:"enhance_candidate,omitempty"`
 }
 
 type teamTask struct {
@@ -430,8 +443,14 @@ type teamSkill struct {
 	// route it). Round-trips through the same chain as SourceArticles:
 	// specToTeamSkill -> writeSkillProposalLocked -> teamSkillToFrontmatter.
 	OwnerAgents []string `json:"owner_agents,omitempty"`
-	CreatedAt   string   `json:"created_at"`
-	UpdatedAt   string   `json:"updated_at"`
+	// SimilarToExisting flags ambiguous-band proposals (PR 7 task #15).
+	// Populated by writeSkillProposalLocked when the similarity gate found a
+	// near-match but not close enough to divert to enhance_existing. The
+	// Skills app reads this via /skills JSON to render an "this looks
+	// similar to <existing>" banner without a second round-trip to the wiki.
+	SimilarToExisting *SkillSimilarRef `json:"similar_to_existing,omitempty"`
+	CreatedAt         string           `json:"created_at"`
+	UpdatedAt         string           `json:"updated_at"`
 }
 
 type brokerState struct {
@@ -10651,6 +10670,29 @@ func (b *Broker) handlePostRequestAnswer(w http.ResponseWriter, r *http.Request)
 			}
 		}
 
+		// Enhance interview dispatch (PR 7 task #15). Three decisions:
+		//   enhance         — fold into the existing skill (UI drives edit flow);
+		//                     bump EnhancementAcceptedTotal.
+		//   approve_anyway  — bypass the similarity gate and write the candidate
+		//                     as a normal proposed skill via the unified write
+		//                     funnel; bump EnhancementOverriddenTotal.
+		//   reject          — drop the candidate (no-op at broker level, just log).
+		if b.requests[i].Kind == "enhance_skill_proposal" {
+			switch choiceID {
+			case "enhance":
+				atomic.AddInt64(&b.skillCompileMetrics.EnhancementAcceptedTotal, 1)
+			case "approve_anyway":
+				atomic.AddInt64(&b.skillCompileMetrics.EnhancementOverriddenTotal, 1)
+				if cand := b.requests[i].EnhanceCandidate; cand != nil {
+					if _, writeErr := b.writeSkillProposalWithOptsLocked(*cand, proposalOpts{bypassSimilarity: true}); writeErr != nil {
+						log.Printf("enhance_skill_proposal: approve_anyway write failed for %q: %v", cand.Name, writeErr)
+					}
+				} else {
+					log.Printf("enhance_skill_proposal: approve_anyway with nil EnhanceCandidate for interview %s", b.requests[i].ID)
+				}
+			}
+		}
+
 		b.counter++
 		msg := channelMessage{
 			ID:        fmt.Sprintf("msg-%d", b.counter),
@@ -11651,10 +11693,41 @@ func (b *Broker) appendSkillProposalRequestLocked(skill teamSkill, channel, now 
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
-	interview.Options, interview.RecommendedID = normalizeRequestOptions(interview.Kind, "accept", []interviewOption{
-		{ID: "accept", Label: "Accept"},
-		{ID: "reject", Label: "Reject"},
-	})
+	// Three-option contract for enhance interviews; two-option for the
+	// legacy skill_proposal kind (PR 7 task #15). The recommended action
+	// for an enhance proposal is "enhance" — the gate's whole point is to
+	// nudge the human away from creating a near-duplicate.
+	if enhancesSlug != "" {
+		interview.Options, interview.RecommendedID = normalizeRequestOptions(interview.Kind, "enhance", []interviewOption{
+			{ID: "enhance", Label: "Enhance existing", Description: fmt.Sprintf("Fold this into %s. The candidate is dropped.", enhancesSlug)},
+			{ID: "approve_anyway", Label: "Approve anyway", Description: "Bypass the similarity gate and create a new skill."},
+			{ID: "reject", Label: "Reject", Description: "Drop this draft. The existing skill stays unchanged."},
+		})
+		// Stash the structured metadata + the candidate spec so the answer
+		// handler can replay the candidate through writeSkillProposalLocked
+		// when the human picks "approve_anyway".
+		if interview.Metadata == nil {
+			interview.Metadata = make(map[string]any, 1)
+		}
+		interview.Metadata["enhances_slug"] = enhancesSlug
+		candidate := skill
+		interview.EnhanceCandidate = &candidate
+	} else {
+		interview.Options, interview.RecommendedID = normalizeRequestOptions(interview.Kind, "accept", []interviewOption{
+			{ID: "accept", Label: "Accept"},
+			{ID: "reject", Label: "Reject"},
+		})
+		// For ambiguous-band proposals the candidate WAS written and lands
+		// in b.skills with SimilarToExisting populated. Mirror that ref into
+		// the interview Metadata so the UI doesn't have to walk the skill
+		// list to render the "looks similar to <existing>" banner.
+		if skill.SimilarToExisting != nil {
+			if interview.Metadata == nil {
+				interview.Metadata = make(map[string]any, 1)
+			}
+			interview.Metadata["similar_to_existing"] = *skill.SimilarToExisting
+		}
+	}
 	b.requests = append(b.requests, interview)
 }
 
