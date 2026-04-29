@@ -2,6 +2,20 @@ import { useQuery } from "@tanstack/react-query";
 
 import { getScheduler, type SchedulerJob } from "../../api/client";
 import { formatRelativeTime } from "../../lib/format";
+import { SystemSchedulesPanel } from "./SystemSchedulesPanel";
+
+/**
+ * Decide whether a job belongs in the System Schedules panel (cron-style
+ * cadence) or in the timeline (one-shot due_at). Keep this in sync with
+ * SystemSchedulesPanel.filterSchedulerRows so we don't double-render.
+ */
+function isCadenceJob(job: SchedulerJob): boolean {
+  return (
+    job.system_managed === true ||
+    typeof job.interval_minutes === "number" ||
+    typeof job.schedule_expr === "string"
+  );
+}
 
 function groupJobsByDate(jobs: SchedulerJob[]): Record<string, SchedulerJob[]> {
   const groups: Record<string, SchedulerJob[]> = {};
@@ -67,7 +81,9 @@ export function CalendarApp() {
   }
 
   const jobs = data?.jobs ?? [];
-  const groups = groupJobsByDate(jobs);
+  const cadenceJobs = jobs.filter(isCadenceJob);
+  const timelineJobs = jobs.filter((j) => !isCadenceJob(j));
+  const groups = groupJobsByDate(timelineJobs);
   const groupKeys = Object.keys(groups);
 
   return (
@@ -87,6 +103,8 @@ export function CalendarApp() {
         </p>
       </div>
 
+      <SystemSchedulesPanel jobs={cadenceJobs} />
+
       {jobs.length === 0 ? (
         <div
           style={{
@@ -97,6 +115,17 @@ export function CalendarApp() {
           }}
         >
           No scheduled jobs.
+        </div>
+      ) : timelineJobs.length === 0 ? (
+        <div
+          style={{
+            padding: "20px 0",
+            textAlign: "center",
+            color: "var(--text-tertiary)",
+            fontSize: 13,
+          }}
+        >
+          No upcoming one-off jobs.
         </div>
       ) : (
         groupKeys.map((groupKey) => (
