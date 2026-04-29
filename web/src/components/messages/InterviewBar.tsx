@@ -78,12 +78,16 @@ export function InterviewBar() {
     );
   }, [catalog, enhanceContext.existingSlug]);
 
-  // Reset transient UI state when the active request changes.
+  // Reset transient UI state when the active request changes. Keyed on
+  // current?.id so cycling between queued requests (or replacing the
+  // active one with a fresh broker push) clears textMode / customText /
+  // compareOpen — without this dep, compareOpen=true from one card
+  // leaks into the next.
   useEffect(() => {
     setTextMode(null);
     setCustomText("");
     setCompareOpen(false);
-  }, []);
+  }, [current?.id]);
 
   useEffect(() => {
     if (textMode && textareaRef.current) {
