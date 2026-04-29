@@ -83,6 +83,10 @@ type skillCompileStatsResponse struct {
 	LastTickDurationMs            int64  `json:"last_tick_duration_ms"`
 	LastSkillCompilePassAt        string `json:"last_skill_compile_pass_at,omitempty"`
 	StageBProposalsTotal          int64  `json:"stage_b_proposals_total"`
+	// EnhancementCandidatesTotal counts proposals diverted to enhance an
+	// existing skill instead of creating a new one (PR 7 task #13). Eval
+	// asserts on this field as a quality signal for the proposal funnel.
+	EnhancementCandidatesTotal int64 `json:"enhancement_candidates_total"`
 	// CatalogBytesPerAgentMax is the maximum byte length the prompt catalog
 	// would render to across active office members for the current b.skills
 	// snapshot. PR 7 surfaces it so operators can spot catalog bloat before
@@ -121,6 +125,7 @@ func (b *Broker) handleGetSkillCompileStats(w http.ResponseWriter, r *http.Reque
 		ProposalsRejectedByGuardTotal: snap.ProposalsRejectedByGuardTotal,
 		LastTickDurationMs:            snap.LastTickDurationMs,
 		StageBProposalsTotal:          snap.StageBProposalsTotal,
+		EnhancementCandidatesTotal:    snap.EnhancementCandidatesTotal,
 		CatalogBytesPerAgentMax:       maxBytes,
 	}
 	if snap.LastSkillCompilePassAtNano != 0 {

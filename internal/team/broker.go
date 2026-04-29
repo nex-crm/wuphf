@@ -11138,7 +11138,7 @@ func (b *Broker) handlePostSkill(w http.ResponseWriter, r *http.Request) {
 	})
 	b.appendActionLocked(msgKind, "office", channel, sk.CreatedBy, truncateSummary(sk.Title, 140), sk.ID)
 	if action == "propose" {
-		b.appendSkillProposalRequestLocked(sk, channel, now)
+		b.appendSkillProposalRequestLocked(sk, channel, now, "")
 	}
 
 	if err := b.saveLocked(); err != nil {
@@ -11512,7 +11512,13 @@ func (b *Broker) createSkillRunTaskLocked(sk *teamSkill, channel, invoker, now s
 	return task.ID, nil
 }
 
-func (b *Broker) appendSkillProposalRequestLocked(skill teamSkill, channel, now string) {
+// appendSkillProposalRequestLocked appends a human interview for an
+// incoming skill proposal. When enhancesSlug is non-empty, the interview is
+// emitted with kind="enhance_skill_proposal" and the framing is adapted so
+// the human reviews whether to fold the candidate into the existing skill
+// (PR 7 task #13). Otherwise the legacy kind="skill_proposal" + "Activate
+// it?" framing is preserved.
+func (b *Broker) appendSkillProposalRequestLocked(skill teamSkill, channel, now string, enhancesSlug string) {
 	title := strings.TrimSpace(skill.Title)
 	if title == "" {
 		title = strings.TrimSpace(skill.Name)
@@ -11523,14 +11529,24 @@ func (b *Broker) appendSkillProposalRequestLocked(skill teamSkill, channel, now 
 		createdBy = "system"
 	}
 	b.counter++
+	enhancesSlug = strings.TrimSpace(enhancesSlug)
+	kind := "skill_proposal"
+	titleLine := "Approve skill: " + title
+	question := fmt.Sprintf("@%s proposed skill **%s**: %s\n\nActivate it?", createdBy, title, description)
+	if enhancesSlug != "" {
+		kind = "enhance_skill_proposal"
+		titleLine = fmt.Sprintf("Enhance %q with new content", enhancesSlug)
+		question = fmt.Sprintf("@%s drafted **%s**, but it looks similar to existing skill **%s**.\n\n%s\n\nFold this into %s, or create %s as a separate skill?",
+			createdBy, title, enhancesSlug, description, enhancesSlug, title)
+	}
 	interview := humanInterview{
 		ID:        fmt.Sprintf("request-%d", b.counter),
-		Kind:      "skill_proposal",
+		Kind:      kind,
 		Status:    "pending",
 		From:      createdBy,
 		Channel:   normalizeChannelSlug(channel),
-		Title:     "Approve skill: " + title,
-		Question:  fmt.Sprintf("@%s proposed skill **%s**: %s\n\nActivate it?", createdBy, title, description),
+		Title:     titleLine,
+		Question:  question,
 		ReplyTo:   strings.TrimSpace(skill.Name),
 		Blocking:  false,
 		CreatedAt: now,

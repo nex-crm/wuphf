@@ -29,6 +29,37 @@ var skillSystemAuthors = map[string]bool{
 // skillSlugRegex validates the Anthropic Agent Skills slug format.
 var skillSlugRegex = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
+// errSkillSimilarToExisting is the sentinel error writeSkillProposalLocked
+// returns when the similarity gate (PR 7 task #13) flags the candidate as
+// near-duplicate of an existing active skill. Callers (scanner, synthesizer,
+// MCP handlers) recognise it via errors.As and route the proposal into a
+// new "enhance_skill_proposal" interview instead of treating the failure
+// as a generic write error.
+//
+// All fields are flat scalars (no *teamSkill pointer) so the error stays
+// safe to propagate after b.mu is released. The integration in
+// writeSkillProposalLocked snapshots the existing skill into these fields
+// while still holding b.mu.
+type errSkillSimilarToExisting struct {
+	// Slug is the existing skill's slug (lowercase, kebab).
+	Slug string
+	// Title is the existing skill's display title at the time of detection.
+	Title string
+	// Description is the existing skill's one-line description.
+	Description string
+	// Score is the similarity score in [0,1].
+	Score float64
+	// Method is "embedding-cosine" or "jaccard-tokens".
+	Method string
+}
+
+// Error satisfies the error interface so errors.As callers receive a
+// human-readable message when they don't unwrap the sentinel.
+func (e *errSkillSimilarToExisting) Error() string {
+	return fmt.Sprintf("skill similar to existing %q (score=%.3f via %s); enhance instead of creating new",
+		e.Slug, e.Score, e.Method)
+}
+
 // writeSkillProposalLocked is the unified write funnel for all skill proposals.
 //
 // The caller MUST hold b.mu on entry. The function releases b.mu while calling
@@ -82,6 +113,60 @@ func (b *Broker) writeSkillProposalLocked(spec teamSkill) (*teamSkill, error) {
 	// when the entire list ends up empty). We do NOT reject the skill — that
 	// would block the user's stated intent over a typo.
 	spec.OwnerAgents = b.validateOwnerAgentsLocked(name, spec.OwnerAgents)
+
+	// --- Step 3b: Similarity gate (PR 7 task #13) ---
+	// Compare the candidate against active skills before spending budget on
+	// the safety scan + wiki render. Three branches:
+	//
+	//   create_new        — proceed normally.
+	//   enhance_existing  — return errSkillSimilarToExisting; caller routes
+	//                       to an "enhance_skill_proposal" interview.
+	//   ambiguous         — proceed BUT stash the closest match in the
+	//                       frontmatter so the interview UI can flag it.
+	//
+	// IO discipline: findSimilarActiveSkillLocked may call b.skillEmbedder
+	// while b.mu is held. The 5s timeout ceiling caps the lock-hold even if
+	// the provider hangs; on timeout the helper falls through to Jaccard
+	// inside the same call (Method becomes "jaccard-tokens" automatically).
+	simCtx, simCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	verdict := b.findSimilarActiveSkillLocked(simCtx, spec)
+	simCancel()
+	switch verdict.Recommendation {
+	case "enhance_existing":
+		// Snapshot the existing skill into a flat sentinel BEFORE we release
+		// the lock anywhere downstream. Never propagate verdict.Existing
+		// (a *teamSkill pointing into b.skills) past the lock.
+		atomic.AddInt64(&b.skillCompileMetrics.EnhancementCandidatesTotal, 1)
+		err := &errSkillSimilarToExisting{
+			Score:  verdict.Score,
+			Method: verdict.Method,
+		}
+		if verdict.Existing != nil {
+			err.Slug = skillSlug(verdict.Existing.Name)
+			err.Title = strings.TrimSpace(verdict.Existing.Title)
+			err.Description = strings.TrimSpace(verdict.Existing.Description)
+		}
+		slog.Info("writeSkillProposalLocked: similarity gate diverted to enhance",
+			"candidate", name, "existing", err.Slug, "score", verdict.Score, "method", verdict.Method)
+		return nil, err
+	case "ambiguous":
+		// Capture the closest-match snapshot now while we hold the lock.
+		// Step 4a will read it back to annotate the rendered frontmatter.
+		// Never carry verdict.Existing past the snapshot — the pointer is
+		// only stable while b.mu is held.
+		// (Actual annotation happens after teamSkillToFrontmatter below.)
+	}
+
+	// Capture the ambiguous-similarity snapshot before any subsequent lock
+	// release. nil when verdict was create_new or when no Existing was set.
+	var ambiguousSimRef *SkillSimilarRef
+	if verdict.Recommendation == "ambiguous" && verdict.Existing != nil {
+		ambiguousSimRef = &SkillSimilarRef{
+			Slug:   skillSlug(verdict.Existing.Name),
+			Score:  verdict.Score,
+			Method: verdict.Method,
+		}
+	}
 
 	// --- Step 4: Build in-memory struct + render markdown ---
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -137,6 +222,11 @@ func (b *Broker) writeSkillProposalLocked(spec teamSkill) (*teamSkill, error) {
 		trust = TrustTrusted
 	}
 	fm := teamSkillToFrontmatter(sk)
+	// Annotate ambiguous-similarity verdict captured at Step 3b. The interview
+	// UI flips to a "review-near-duplicate" affordance when this is non-nil.
+	if ambiguousSimRef != nil {
+		fm.Metadata.Wuphf.SimilarToExisting = ambiguousSimRef
+	}
 	scan := ScanSkill(fm, sk.Content, trust)
 	fm.Metadata.Wuphf.SafetyScan = &SkillSafetyScan{
 		Verdict:    string(scan.Verdict),
@@ -204,7 +294,12 @@ func (b *Broker) writeSkillProposalLocked(spec teamSkill) (*teamSkill, error) {
 
 	// --- Step 7: Commit to in-memory index and emit SSE ---
 	b.skills = append(b.skills, sk)
-	b.appendSkillProposalRequestLocked(sk, channel, now)
+	// Note: writeSkillProposalLocked never enters the enhance_skill_proposal
+	// path on its own — that branch returns errSkillSimilarToExisting earlier.
+	// Scanner / synth callers that catch the sentinel produce the
+	// enhance_skill_proposal interview directly via this helper after their
+	// own bookkeeping; pass "" here for the legacy "Activate it?" framing.
+	b.appendSkillProposalRequestLocked(sk, channel, now, "")
 
 	result := &b.skills[len(b.skills)-1]
 	slog.Info("writeSkillProposalLocked: skill proposal created",

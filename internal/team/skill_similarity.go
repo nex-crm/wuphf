@@ -110,12 +110,18 @@ func (c *skillSimilarityCache) put(key string, vec []float32) {
 //
 // When b.skillEmbedder is set, cosine similarity over normalised embeddings
 // is used (Method = "embedding-cosine"). When the embedder is unavailable
-// or fails, the helper falls back to token-Jaccard over the same fields
-// (Method = "jaccard-tokens"). Each method has its own threshold band — see
-// the similarityCosine*/similarityJaccard* constants for the calibration
-// notes. The Recommendation field is "enhance_existing", "ambiguous", or
-// "create_new" regardless of which method produced the score.
-func (b *Broker) findSimilarActiveSkillLocked(spec teamSkill) SimilarityVerdict {
+// or fails — including ctx deadline — the helper falls back to
+// token-Jaccard over the same fields (Method = "jaccard-tokens"). Each
+// method has its own threshold band; see the similarityCosine*/
+// similarityJaccard* constants for the calibration notes.
+//
+// IO note (PR 7 task #13): the embedding path calls b.skillEmbedder.Embed
+// while b.mu is held. Callers MUST pass a ctx with a deadline so a slow or
+// hung embedding provider cannot freeze other broker operations
+// indefinitely. writeSkillProposalLocked wires this with
+// context.WithTimeout(5s) and treats timeout as the same fall-through as
+// any other embed error.
+func (b *Broker) findSimilarActiveSkillLocked(ctx context.Context, spec teamSkill) SimilarityVerdict {
 	// Empty catalog short-circuits before we spend any embedding budget.
 	if len(b.skills) == 0 {
 		return SimilarityVerdict{Recommendation: "create_new", Method: similarityMethodFor(b)}
@@ -128,9 +134,10 @@ func (b *Broker) findSimilarActiveSkillLocked(spec teamSkill) SimilarityVerdict 
 	}
 
 	// Try embedding path first when available; fall through to Jaccard on
-	// any error so a flaky provider can't block proposal writes.
+	// any error (including ctx deadline) so a flaky or hung provider can't
+	// block proposal writes.
 	if b.skillEmbedder != nil {
-		v, ok := b.findSimilarActiveSkillEmbeddingLocked(spec, specName, specText)
+		v, ok := b.findSimilarActiveSkillEmbeddingLocked(ctx, spec, specName, specText)
 		if ok {
 			return v
 		}
@@ -145,11 +152,13 @@ func similarityMethodFor(b *Broker) string {
 	return "jaccard-tokens"
 }
 
-func (b *Broker) findSimilarActiveSkillEmbeddingLocked(spec teamSkill, specName, specText string) (SimilarityVerdict, bool) {
+func (b *Broker) findSimilarActiveSkillEmbeddingLocked(ctx context.Context, spec teamSkill, specName, specText string) (SimilarityVerdict, bool) {
 	if b.skillSimCache == nil {
 		b.skillSimCache = newSkillSimilarityCache()
 	}
-	ctx := context.Background()
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	specVec, err := b.embedSkillText(ctx, "__candidate__", specText)
 	if err != nil || len(specVec) == 0 {
 		return SimilarityVerdict{}, false
