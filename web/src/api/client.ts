@@ -132,6 +132,22 @@ export async function postWithTimeout<T = unknown>(
   }
 }
 
+export async function patch<T = unknown>(
+  path: string,
+  body?: unknown,
+): Promise<T> {
+  const r = await fetch(baseURL() + path, {
+    method: "PATCH",
+    headers: authHeaders(),
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) {
+    const text = (await r.text().catch(() => "")).trim();
+    throw new Error(text || `${r.status} ${r.statusText}`);
+  }
+  return r.json();
+}
+
 export async function del<T = unknown>(
   path: string,
   body?: unknown,
@@ -626,12 +642,54 @@ export interface SchedulerJob {
   last_run?: string;
   due_at?: string;
   status?: string;
+  /** Interval-driven cadence in minutes (system crons + interval workflows). */
+  interval_minutes?: number;
+  /** Cron expression for cron-driven workflow jobs. */
+  schedule_expr?: string;
+  /** Provider that owns this job (e.g. "system", "agent", "workflow"). */
+  provider?: string;
+  /** Target type ("workflow" | "skill" | …) when surfaced by the runtime. */
+  target_type?: string;
+  target_id?: string;
+  // PR 8 Lane G/H — cron registry surface fields.
+  /** Whether the cron is currently enabled. */
+  enabled?: boolean;
+  /** Human override for the cadence in minutes. 0/missing = use default. */
+  interval_override?: number;
+  /** "ok" | "failed" — chip on the row. */
+  last_run_status?: string;
+  /** True for crons that self-register at broker startup. */
+  system_managed?: boolean;
 }
 
 export function getScheduler(opts?: { dueOnly?: boolean }) {
   const params: Record<string, string> = {};
   if (opts?.dueOnly) params.due_only = "true";
   return get<{ jobs: SchedulerJob[] }>("/scheduler", params);
+}
+
+export interface PatchSchedulerJobBody {
+  enabled?: boolean;
+  /** Minutes; 0 clears the override. Must be >= the cron's MinFloor. */
+  interval_override?: number;
+}
+
+export interface PatchSchedulerJobResponse {
+  job: SchedulerJob;
+}
+
+/**
+ * Update the enabled flag and / or interval_override for a scheduler job.
+ * Backed by PATCH /scheduler/{slug} (PR 8 Lane G).
+ */
+export function patchSchedulerJob(
+  slug: string,
+  body: PatchSchedulerJobBody,
+): Promise<PatchSchedulerJobResponse> {
+  return patch<PatchSchedulerJobResponse>(
+    `/scheduler/${encodeURIComponent(slug)}`,
+    body,
+  );
 }
 
 // ── Skills ──
