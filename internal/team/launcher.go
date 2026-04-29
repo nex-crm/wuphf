@@ -1268,22 +1268,6 @@ func (l *Launcher) channelPaneStatus() (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-func channelPaneNeedsRespawn(status string) bool {
-	if strings.TrimSpace(status) == "" {
-		return false
-	}
-	fields := strings.Fields(status)
-	if len(fields) == 0 {
-		return false
-	}
-	return fields[0] == "1"
-}
-
-func isNoSessionError(msg string) bool {
-	msg = strings.ToLower(msg)
-	return strings.Contains(msg, "can't find") || strings.Contains(msg, "no server")
-}
-
 func (l *Launcher) captureDeadChannelPane(status string) error {
 	content, err := l.capturePaneContent(0)
 	if err != nil {
@@ -1302,26 +1286,6 @@ func (l *Launcher) captureDeadChannelPane(status string) error {
 		return err
 	}
 	return f.Close()
-}
-
-func channelStderrLogPath() string {
-	home := config.RuntimeHomeDir()
-	if home == "" {
-		return ".wuphf-channel-stderr.log"
-	}
-	return filepath.Join(home, ".wuphf", "logs", "channel-stderr.log")
-}
-
-func channelPaneSnapshotPath() string {
-	home := config.RuntimeHomeDir()
-	if home == "" {
-		return ".wuphf-channel-pane.log"
-	}
-	return filepath.Join(home, ".wuphf", "logs", "channel-pane.log")
-}
-
-func shellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }
 
 // primeVisibleAgents clears Claude startup interactivity in newly spawned panes and
@@ -2367,53 +2331,6 @@ func HasLiveTmuxSession() bool {
 	return err == nil
 }
 
-func isMissingTmuxSession(output string) bool {
-	normalized := strings.ToLower(strings.TrimSpace(output))
-	if normalized == "" {
-		return false
-	}
-	return strings.Contains(normalized, "no server") ||
-		strings.Contains(normalized, "can't find") ||
-		strings.Contains(normalized, "failed to connect to server") ||
-		strings.Contains(normalized, "error connecting to") ||
-		strings.Contains(normalized, "no such file or directory")
-}
-
-func parseAgentPaneIndices(output string) []int {
-	lines := strings.Split(strings.TrimSpace(output), "\n")
-	var panes []int
-	for _, line := range lines {
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-		parts := strings.SplitN(line, " ", 2)
-		if len(parts) == 0 {
-			continue
-		}
-		idx, err := strconv.Atoi(parts[0])
-		if err != nil {
-			continue
-		}
-		title := ""
-		if len(parts) > 1 {
-			title = parts[1]
-		}
-		if idx == 0 || strings.Contains(title, "channel") {
-			continue
-		}
-		panes = append(panes, idx)
-	}
-	return panes
-}
-
-func shouldPrimeClaudePane(content string) bool {
-	normalized := strings.ToLower(content)
-	return strings.Contains(normalized, "trust this folder") ||
-		strings.Contains(normalized, "security guide") ||
-		strings.Contains(normalized, "enter to confirm") ||
-		strings.Contains(normalized, "claude in chrome")
-}
-
 func (l *Launcher) spawnVisibleAgents() ([]string, error) {
 	if l.isOneOnOne() {
 		slug := l.oneOnOneAgent()
@@ -2710,44 +2627,6 @@ func (l *Launcher) trySpawnWebAgentPanes() {
 	l.paneBackedAgents = true
 	go l.detectDeadPanesAfterSpawn(append(l.visibleOfficeMembers(), l.overflowOfficeMembers()...))
 	fmt.Printf("  Agents:  interactive Claude panes in tmux session %q (pane-backed fallback active)\n", l.sessionName)
-}
-
-// paneFallbackMessages renders the two user-facing messages for a pane-spawn
-// fallback (stderr banner + broker #general post). Headless is the normal
-// default now, so the fallback message is neutral — it only fires when
-// something in the runtime promoted us to panes and the spawn failed.
-// Remediation advice depends on whether tmux is installed:
-//
-//   - tmuxInstalled=false → install tmux if you want panes; otherwise headless
-//     is a fine default and runs on your normal subscription.
-//   - tmuxInstalled=true  → tmux rejected the command; ask the user to file a
-//     bug. Headless continues to work.
-//
-// Pure function so it can be unit-tested without touching os.Stderr or the
-// broker. Keep in sync with reportPaneFallback below.
-func paneFallbackMessages(tmuxInstalled bool, detail string) (stderrMsg, brokerMsg string) {
-	const headlessBlurb = "Continuing with the default headless path (`claude --print` per turn on your normal subscription)."
-	const brokerBlurb = "Running in headless mode (%s). Agent turns dispatch as `claude --print` on your normal subscription."
-	if !tmuxInstalled {
-		stderrMsg = fmt.Sprintf(
-			"  Agents:  pane-backed fallback attempted but tmux not found (%s). %s Install tmux if you want the fallback to be available.\n",
-			detail, headlessBlurb,
-		)
-		brokerMsg = fmt.Sprintf(
-			brokerBlurb+" Install tmux so the pane-backed fallback is available next time.",
-			detail,
-		)
-		return
-	}
-	stderrMsg = fmt.Sprintf(
-		"  Agents:  pane-backed fallback attempted but unavailable (%s). %s tmux IS installed but rejected the launch command; please file a bug with the detail above at https://github.com/nex-crm/wuphf/issues.\n",
-		detail, headlessBlurb,
-	)
-	brokerMsg = fmt.Sprintf(
-		brokerBlurb+" tmux is installed but rejected the pane-spawn command; please file a bug so we can fix the regression.",
-		detail,
-	)
-	return
 }
 
 // reportPaneFallback logs a pane-spawn failure and surfaces the billing
