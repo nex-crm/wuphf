@@ -51,6 +51,7 @@ var allowedFiles = map[string]string{
 	// the user's REAL home, not under any single workspace's WUPHF_RUNTIME_HOME,
 	// or sibling brokers cannot find each other.
 	"internal/workspaces/registry.go":    "spacesDir — ~/.wuphf-spaces is shared cross-workspace, lives at real HOME",
+	"internal/workspaces/migration.go":   "MigrateToSymmetric operates on legacy ~/.wuphf at real HOME, not WUPHF_RUNTIME_HOME",
 	"internal/team/broker_workspaces.go": "workspaceTokenDir — same shared spaces directory rationale",
 	"cmd/wuphf/workspaces_adapter.go":    "listTrashEntries — ~/.wuphf-spaces/.trash, shared cross-workspace root",
 }

@@ -38,9 +38,22 @@ var brokerRunningFn = isBrokerRunning
 // Recovery from a partial rename (power loss / SIGKILL mid-step) is handled
 // by wuphf workspace doctor, not re-entrant migration.
 func MigrateToSymmetric() error {
-	home := config.RuntimeHomeDir()
+	// user-global; intentionally NOT under WUPHF_RUNTIME_HOME — the migration
+	// operates on the legacy ~/.wuphf at the user's REAL home, and the lock
+	// lives next to it. Using RuntimeHomeDir would point at a per-workspace
+	// path that has no legacy tree to migrate.
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		// Fall back to RuntimeHomeDir for tests that explicitly clear HOME.
+		home = config.RuntimeHomeDir()
+	}
 	if home == "" {
 		return errors.New("workspaces: migrate: cannot resolve home directory")
+	}
+
+	// Ensure home exists so lock open doesn't fail on fresh / test setups.
+	if err := os.MkdirAll(home, 0o700); err != nil {
+		return fmt.Errorf("workspaces: migrate: mkdir %s: %w", home, err)
 	}
 
 	lockPath := filepath.Join(home, migrationLockName)
