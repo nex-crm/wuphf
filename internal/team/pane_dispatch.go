@@ -22,6 +22,8 @@ package team
 // the future.
 
 import (
+	"context"
+	"os/exec"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -70,16 +72,36 @@ var launcherSendNotificationToPaneOverride atomic.Pointer[launcherSendNotificati
 
 // launcherSendNotificationToPane is the default production send path.
 // The dispatcher's sendFn closure consults the override on every call
-// so tests can intercept without owning the dispatcher. Production
-// delegates to (l *Launcher).sendNotificationToPane (defined in
-// launcher.go) so the actual /clear + send-keys sequence stays
-// alongside the rest of the Launcher's tmux helpers.
+// so tests can intercept without owning the dispatcher.
 func launcherSendNotificationToPane(l *Launcher, paneTarget, notification string) {
 	if p := launcherSendNotificationToPaneOverride.Load(); p != nil {
 		(*p)(l, paneTarget, notification)
 		return
 	}
 	l.sendNotificationToPane(paneTarget, notification)
+}
+
+// sendNotificationToPane delivers a notification to a persistent
+// interactive Claude session in a tmux pane. It sends /clear first so
+// each turn starts with a fresh context window — the work packet
+// carries all required context, so accumulated history is not needed
+// and only causes drift over time. --append-system-prompt is a CLI
+// flag and survives /clear intact.
+//
+// Callers should prefer paneDispatch().Enqueue — this function runs
+// /clear + type + Enter unconditionally, so rapid direct calls will
+// race each other. The dispatcher serializes per-slug and inserts
+// the minimum gap.
+func (l *Launcher) sendNotificationToPane(paneTarget, notification string) {
+	_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "send-keys",
+		"-t", paneTarget, "/clear", "Enter",
+	).Run()
+	_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "send-keys",
+		"-t", paneTarget, "-l", notification,
+	).Run()
+	_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "send-keys",
+		"-t", paneTarget, "Enter",
+	).Run()
 }
 
 // paneDispatcher serializes notifications per agent slug into tmux Claude

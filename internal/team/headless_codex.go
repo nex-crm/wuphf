@@ -130,6 +130,25 @@ type headlessCodexActiveTurn struct {
 	WorkspaceSnapshot string
 }
 
+// headlessWorkerPool groups the per-launcher headless-dispatch state
+// (PLAN.md §C7). All fields are lowercase package-internal — the pool
+// is never used outside `internal/team` and stays an embedded value
+// on Launcher rather than its own pointer so zero-value &Launcher{}
+// in tests gets a usable pool with sane lazy-allocated maps. PR #320's
+// goroutine-leak fix relies on stopCh being lazily allocated under mu
+// before any worker can read it; that contract is preserved here.
+type headlessWorkerPool struct {
+	mu           sync.Mutex
+	ctx          context.Context
+	cancel       context.CancelFunc
+	workers      map[string]bool
+	active       map[string]*headlessCodexActiveTurn
+	queues       map[string][]headlessCodexTurn
+	deferredLead *headlessCodexTurn
+	stopCh       chan struct{}
+	workerWg     sync.WaitGroup
+}
+
 // headlessCodexWorkspaceStatusSnapshotFn is the seam type swapped by tests
 // via setHeadlessCodexWorkspaceStatusSnapshotForTest. Kept as a named type so
 // the atomic.Pointer below stays readable.

@@ -120,7 +120,7 @@ func (l *Launcher) sendTaskUpdate(target notificationTarget, action officeAction
 		l.enqueueHeadlessCodexTurn(target.Slug, headlessSandboxNote()+notification, channel)
 		return
 	}
-	l.queuePaneNotification(target.Slug, target.PaneTarget, notification)
+	l.paneDispatch().Enqueue(target.Slug, target.PaneTarget, notification)
 }
 
 // activeHeadlessSlugs returns the slugs that have non-empty headless
@@ -208,5 +208,5 @@ func (l *Launcher) sendChannelUpdate(target notificationTarget, msg channelMessa
 		l.enqueueHeadlessCodexTurn(target.Slug, headlessSandboxNote()+notification, channel)
 		return
 	}
-	l.queuePaneNotification(target.Slug, target.PaneTarget, notification)
+	l.paneDispatch().Enqueue(target.Slug, target.PaneTarget, notification)
 }

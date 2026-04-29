@@ -138,24 +138,11 @@ type Launcher struct {
 	paneLC *paneLifecycle
 }
 
-// headlessWorkerPool groups the per-launcher headless-dispatch state
-// (PLAN.md §C7). All fields are lowercase package-internal — the pool is
-// never used outside `internal/team` and stays an embedded value on
-// Launcher rather than its own pointer so zero-value &Launcher{} in
-// tests gets a usable pool with sane lazy-allocated maps. PR #320's
-// goroutine-leak fix relies on stopCh being lazily allocated under mu
-// before any worker can read it; that contract is preserved here.
-type headlessWorkerPool struct {
-	mu           sync.Mutex
-	ctx          context.Context
-	cancel       context.CancelFunc
-	workers      map[string]bool
-	active       map[string]*headlessCodexActiveTurn
-	queues       map[string][]headlessCodexTurn
-	deferredLead *headlessCodexTurn
-	stopCh       chan struct{}
-	workerWg     sync.WaitGroup
-}
+// headlessWorkerPool moved to headless_codex.go (PLAN.md §C16) so the
+// type sits next to the queue methods that operate on its fields.
+// Launcher embeds it by value via the headless field; the embed is
+// declared on the Launcher struct above so zero-value &Launcher{}
+// fixtures still get a usable pool with sane lazy-allocated maps.
 
 // paneDispatchTurn moved to pane_dispatch.go (PLAN.md §C15) so the
 // dispatcher type and its on-the-wire turn shape sit in the same
@@ -351,12 +338,8 @@ func (l *Launcher) watchdogSchedulerLoop() {
 // .processWorkflowJob(...) / .recordLedger(...) directly. PLAN.md §6
 // "no compatibility shims".
 
-func (req humanInterview) TitleOrDefault() string {
-	if strings.TrimSpace(req.Title) != "" {
-		return req.Title
-	}
-	return "Request"
-}
+// humanInterview.TitleOrDefault moved to broker.go (PLAN.md §C16)
+// next to the type definition.
 
 // targeter returns the office-targeter, lazily constructing it on first
 // access. PLAN.md trap §5.4: tests build &Launcher{} directly and rely on
@@ -464,14 +447,8 @@ func (l *Launcher) OneOnOneAgent() string {
 // ClearPersistedBrokerState, resetBrokerState, brokerBaseURL, and
 // Launcher.BrokerBaseURL live in broker_lifecycle.go per PLAN.md §C8.
 
-func containsSlug(items []string, want string) bool {
-	for _, item := range items {
-		if item == want {
-			return true
-		}
-	}
-	return false
-}
+// containsSlug moved to notifier_targets.go (PLAN.md §C16) — its only
+// in-package caller is the notification routing decision tree.
 
 // notifyCtx returns the notification-context builder, lazily constructing
 // it on first access (PLAN.md §C3). The builder shares state with Launcher
@@ -603,49 +580,14 @@ func (l *Launcher) panes() *paneLifecycle {
 	return l.paneLC
 }
 
-// queuePaneNotification is a thin wrapper around paneDispatcher.Enqueue
-// (PLAN.md §C6). Kept as a Launcher method so existing call sites and
-// the pane_dispatch_queue_test.go safety net don't need a rename sweep
-// in this PR.
-func (l *Launcher) queuePaneNotification(slug, paneTarget, notification string) {
-	l.paneDispatch().Enqueue(slug, paneTarget, notification)
-}
-
-// runPaneDispatchQueue is retained as a Launcher method for compatibility
-// with any in-package goroutine spawn that might still reference the
-// historical name. Internally it just invokes the dispatcher's runQueue.
-func (l *Launcher) runPaneDispatchQueue(slug string) {
-	l.paneDispatch().runQueue(slug)
-}
-
-// launcherSendNotificationToPaneFn / launcherSendNotificationToPaneOverride /
-// launcherSendNotificationToPane live in pane_dispatch.go (PLAN.md
-// §C15) so the dispatcher's send seam sits next to the dispatcher.
-// sendNotificationToPane (the unconditional /clear + type + Enter
-// helper) stays here because it's a Launcher method used by the
-// resume path; the dispatcher itself uses launcherSendNotificationToPane
-// instead.
-
-// sendNotificationToPane delivers a notification to a persistent interactive
-// Claude session in a tmux pane. It sends /clear first so each turn starts
-// with a fresh context window — the work packet carries all required context,
-// so accumulated history is not needed and only causes drift over time.
-// --append-system-prompt is a CLI flag and survives /clear intact.
+// queuePaneNotification + runPaneDispatchQueue thin wrappers deleted by
+// the C16 sweep — call sites use l.paneDispatch().Enqueue(...) and
+// l.paneDispatch().runQueue(...) directly. PLAN.md §6 "no compatibility
+// shims".
 //
-// Callers should prefer queuePaneNotification — this function runs /clear +
-// type + Enter unconditionally, so rapid direct calls will race each other.
-// queuePaneNotification serializes per-slug and inserts the minimum gap.
-func (l *Launcher) sendNotificationToPane(paneTarget, notification string) {
-	_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "send-keys",
-		"-t", paneTarget, "/clear", "Enter",
-	).Run()
-	_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "send-keys",
-		"-t", paneTarget, "-l", notification,
-	).Run()
-	_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "send-keys",
-		"-t", paneTarget, "Enter",
-	).Run()
-}
+// sendNotificationToPane (the actual /clear + send-keys body) and the
+// launcherSendNotificationToPane* seam live in pane_dispatch.go
+// (PLAN.md §C15/§C16) so the dispatcher's send path is co-located.
 
 // capturePaneTargetContent / capturePaneContent / listTeamPanes /
 // channelPaneStatus delegate to paneLifecycle (PLAN.md §C5b). Thin

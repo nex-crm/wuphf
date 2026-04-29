@@ -12,6 +12,19 @@ import (
 	"time"
 )
 
+// containsSlug reports whether the slug list contains want. Moved
+// here from launcher.go (PLAN.md §C16) — the routing decision tree
+// is the only in-package caller. teammcp/server.go has its own copy
+// by the same name; the packages don't share helpers.
+func containsSlug(items []string, want string) bool {
+	for _, item := range items {
+		if item == want {
+			return true
+		}
+	}
+	return false
+}
+
 type officeChangeTaskNotification struct {
 	Target  notificationTarget
 	Action  officeActionLog
