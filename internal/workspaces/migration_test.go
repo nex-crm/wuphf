@@ -9,6 +9,10 @@ import (
 func withMigrationHome(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
+	// spacesDir uses real HOME because ~/.wuphf-spaces is shared cross-workspace.
+	// Override HOME alongside WUPHF_RUNTIME_HOME so the migration writes inside
+	// the tempdir instead of leaking into the developer's real ~/.wuphf-spaces.
+	t.Setenv("HOME", dir)
 	t.Setenv("WUPHF_RUNTIME_HOME", dir)
 	// Inject a no-op broker probe so tests don't fail when a real broker
 	// is running on port 7890 in the developer's environment.

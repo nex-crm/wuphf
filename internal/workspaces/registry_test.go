@@ -9,11 +9,15 @@ import (
 	"time"
 )
 
-// withSpacesDir sets WUPHF_RUNTIME_HOME to a temp dir so the registry
-// operations land in an isolated location. Returns the spaces dir path.
+// withSpacesDir sets HOME (and WUPHF_RUNTIME_HOME for any callers that hit
+// other code paths) to a temp dir so registry operations land in an
+// isolated location. spacesDir uses os.UserHomeDir directly because
+// ~/.wuphf-spaces is shared cross-workspace and lives at the real user
+// HOME, not under any single workspace's WUPHF_RUNTIME_HOME.
 func withSpacesDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
+	t.Setenv("HOME", dir)
 	t.Setenv("WUPHF_RUNTIME_HOME", dir)
 	return filepath.Join(dir, ".wuphf-spaces")
 }

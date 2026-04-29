@@ -26,10 +26,14 @@ func startFakeServer(t *testing.T) (port int, shutdown func()) {
 	return ln.Addr().(*net.TCPAddr).Port, func() { _ = srv.Close() }
 }
 
-// withOrchestratorHome sets up WUPHF_RUNTIME_HOME for orchestrator tests.
+// withOrchestratorHome isolates HOME (and WUPHF_RUNTIME_HOME) for orchestrator
+// tests. spacesDir uses real HOME because ~/.wuphf-spaces is shared
+// cross-workspace; overriding only WUPHF_RUNTIME_HOME would leak into the
+// user's real ~/.wuphf-spaces directory.
 func withOrchestratorHome(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
+	t.Setenv("HOME", dir)
 	t.Setenv("WUPHF_RUNTIME_HOME", dir)
 	return dir
 }

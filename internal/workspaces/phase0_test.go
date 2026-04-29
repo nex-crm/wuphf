@@ -45,6 +45,13 @@ var allowedFiles = map[string]string{
 
 	// OpenClaw probe utility — device-bound identity credentials.
 	"cmd/wuphf-oc-probe/main.go": "OpenClaw identity is device-bound credentials, not workspace state",
+
+	// Cross-workspace registry root — ~/.wuphf-spaces/ is the SHARED orchestration
+	// directory (registry.json, tokens/, <name>/.wuphf/, .trash/). It must live at
+	// the user's REAL home, not under any single workspace's WUPHF_RUNTIME_HOME,
+	// or sibling brokers cannot find each other.
+	"internal/workspaces/registry.go":   "spacesDir — ~/.wuphf-spaces is shared cross-workspace, lives at real HOME",
+	"internal/team/broker_workspaces.go": "workspaceTokenDir — same shared spaces directory rationale",
 }
 
 // repoRoot returns the absolute path to the repository root by walking up from

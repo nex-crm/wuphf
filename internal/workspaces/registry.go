@@ -54,12 +54,21 @@ type Workspace struct {
 	PausedAt    time.Time `json:"paused_at,omitempty"`
 }
 
-// spacesDir returns ~/.wuphf-spaces using config.RuntimeHomeDir() as the
-// user home base. Always go through RuntimeHomeDir in this package — the
-// stdlib home-dir helper would bypass WUPHF_RUNTIME_HOME and break workspace
-// isolation. The Phase-0 audit test enforces this.
+// spacesDir returns ~/.wuphf-spaces at the user's REAL home dir. This is the
+// shared cross-workspace registry directory: every workspace's broker
+// reads/writes the same registry.json and the same tokens/. If we used
+// config.RuntimeHomeDir() here, a broker running with WUPHF_RUNTIME_HOME set
+// would resolve spacesDir under its OWN runtime tree and never see siblings.
+//
+// user-global; intentionally NOT under WUPHF_RUNTIME_HOME — the spaces
+// directory is the cross-workspace orchestration root, not per-workspace state.
 func spacesDir() (string, error) {
-	home := config.RuntimeHomeDir()
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		// Fall back to RuntimeHomeDir's resolution if HOME is unset (e.g. in
+		// tests that explicitly clear it).
+		home = config.RuntimeHomeDir()
+	}
 	if home == "" {
 		return "", errors.New("workspaces: cannot resolve home directory")
 	}
