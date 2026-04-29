@@ -23,7 +23,7 @@ func runWorkspacePause(args []string) {
 		fmt.Fprintln(os.Stderr, "")
 		fmt.Fprintln(os.Stderr, "Usage:")
 		fmt.Fprintln(os.Stderr, "  wuphf workspace pause <name>            Graceful drain (90s timeout)")
-		fmt.Fprintln(os.Stderr, "  wuphf workspace pause <name> --force    Hard kill after 5s")
+		fmt.Fprintln(os.Stderr, "  wuphf workspace pause --force <name>    Hard kill after 5s")
 		fmt.Fprintln(os.Stderr, "")
 		fmt.Fprintln(os.Stderr, "Pause stops the broker and halts agent dispatch. The workspace's state stays")
 		fmt.Fprintln(os.Stderr, "intact on disk; resume restarts cleanly. While paused, no LLM tokens burn.")

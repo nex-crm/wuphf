@@ -35,6 +35,11 @@ type CreateOptions struct {
 	CompanyName string
 	// FromScratch disables inheritance from the current workspace when true.
 	FromScratch bool
+	// InheritFrom names the source workspace inheritance should pull from.
+	// Empty falls back to the orchestrator's default ("cli_current"). Stored
+	// on the workspace row so later operations (resume, rebuild) can reproduce
+	// the original inheritance choice.
+	InheritFrom string
 }
 
 // DoctorReport summarises reconciliation findings from Doctor.

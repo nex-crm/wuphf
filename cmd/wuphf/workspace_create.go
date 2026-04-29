@@ -58,11 +58,17 @@ func runWorkspaceCreate(args []string) {
 		printError("invalid workspace name %q — use lowercase letters, digits, and hyphens; must start with a letter; max 31 chars", name)
 	}
 
+	blueprint := strings.TrimSpace(*blueprintFlag)
+	inherit := strings.TrimSpace(*inheritFrom)
+	if *fromScratch && (blueprint != "" || inherit != "") {
+		printError("--from-scratch cannot be combined with --blueprint or --inherit-from")
+	}
+
 	req := CreateRequest{
 		Name:        name,
-		Blueprint:   strings.TrimSpace(*blueprintFlag),
+		Blueprint:   blueprint,
 		FromScratch: *fromScratch,
-		InheritFrom: strings.TrimSpace(*inheritFrom),
+		InheritFrom: inherit,
 	}
 
 	orch := resolveOrchestrator()

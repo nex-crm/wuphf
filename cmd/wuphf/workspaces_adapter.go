@@ -58,6 +58,7 @@ func (cliOrchestratorAdapter) Create(ctx context.Context, req CreateRequest) (Wo
 	opts := workspaces.CreateOptions{
 		Blueprint:   req.Blueprint,
 		FromScratch: req.FromScratch,
+		InheritFrom: req.InheritFrom,
 	}
 	if err := workspaces.Create(ctx, req.Name, req.Blueprint, opts); err != nil {
 		return Workspace{}, err
@@ -164,6 +165,7 @@ func (brokerOrchestratorAdapter) Create(ctx context.Context, req team.CreateRequ
 		Blueprint:   req.Blueprint,
 		CompanyName: req.CompanyName,
 		FromScratch: req.FromScratch,
+		InheritFrom: req.InheritFrom,
 	}
 	if err := workspaces.Create(ctx, req.Name, req.Blueprint, opts); err != nil {
 		return team.Workspace{}, err

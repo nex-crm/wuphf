@@ -30,7 +30,7 @@ func runWorkspaceSwitch(args []string) {
 		fmt.Fprintln(os.Stderr, "")
 		fmt.Fprintln(os.Stderr, "Usage:")
 		fmt.Fprintln(os.Stderr, "  wuphf workspace switch <name>")
-		fmt.Fprintln(os.Stderr, "  wuphf workspace switch <name> --open")
+		fmt.Fprintln(os.Stderr, "  wuphf workspace switch --open <name>")
 		fmt.Fprintln(os.Stderr, "")
 		fmt.Fprintln(os.Stderr, "Updates registry.cli_current. Future unqualified `wuphf` runs target this workspace.")
 		fmt.Fprintln(os.Stderr, "Pass --workspace=<name> on a single command to override without switching.")
