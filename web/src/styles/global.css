@@ -84,6 +84,17 @@
   --accent: var(--tertiary-400);
   --accent-warm: var(--tertiary-500);
   --accent-bg: var(--tertiary-100);
+  --accent-bg-strong: rgba(159, 77, 191, 0.35);
+  /* Entity-graph node palette — Tailwind-ish pastels for the default
+     light theme. Themes can override these in their token block. */
+  --graph-people-fill:       #EDE9FE;
+  --graph-people-stroke:     #7C3AED;
+  --graph-companies-fill:    #DBEAFE;
+  --graph-companies-stroke:  #2563EB;
+  --graph-customers-fill:    #DCFCE7;
+  --graph-customers-stroke:  #059669;
+  --graph-other-fill:        #F3F4F6;
+  --graph-other-stroke:      #6B7280;
   --border: var(--neutral-100);
   --border-light: var(--neutral-50);
   --border-dark: var(--neutral-200);

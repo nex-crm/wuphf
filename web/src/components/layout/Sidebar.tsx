@@ -4,20 +4,68 @@ import { useAppStore } from "../../stores/app";
 import { AgentList } from "../sidebar/AgentList";
 import { AppList } from "../sidebar/AppList";
 import { ChannelList } from "../sidebar/ChannelList";
+import { SidebarColorPicker } from "../sidebar/SidebarColorPicker";
 import { UsagePanel } from "../sidebar/UsagePanel";
 import { WorkspaceSummary } from "../sidebar/WorkspaceSummary";
 import { CollapsedSidebar } from "./CollapsedSidebar";
 
+function SectionToggle({
+  label,
+  open,
+  onToggle,
+}: {
+  label: string;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="sidebar-section-title sidebar-section-toggle"
+      onClick={onToggle}
+      aria-expanded={open}
+    >
+      <span>{label}</span>
+      <svg
+        style={{
+          width: 10,
+          height: 10,
+          transform: open ? "rotate(90deg)" : "rotate(0deg)",
+          transition: "transform 0.15s",
+        }}
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <path d="m9 18 6-6-6-6" />
+      </svg>
+    </button>
+  );
+}
+
 export function Sidebar() {
   const sidebarAgentsOpen = useAppStore((s) => s.sidebarAgentsOpen);
   const toggleSidebarAgents = useAppStore((s) => s.toggleSidebarAgents);
+  const sidebarChannelsOpen = useAppStore((s) => s.sidebarChannelsOpen);
+  const toggleSidebarChannels = useAppStore((s) => s.toggleSidebarChannels);
+  const sidebarAppsOpen = useAppStore((s) => s.sidebarAppsOpen);
+  const toggleSidebarApps = useAppStore((s) => s.toggleSidebarApps);
   const sidebarCollapsed = useAppStore((s) => s.sidebarCollapsed);
   const toggleSidebarCollapsed = useAppStore((s) => s.toggleSidebarCollapsed);
+  const sidebarBg = useAppStore((s) => s.sidebarBg);
   const currentApp = useAppStore((s) => s.currentApp);
   const setCurrentApp = useAppStore((s) => s.setCurrentApp);
 
+  const asideStyle = sidebarBg ? { background: sidebarBg } : undefined;
+
   return (
-    <aside className={`sidebar${sidebarCollapsed ? " sidebar-collapsed" : ""}`}>
+    <aside
+      className={`sidebar${sidebarCollapsed ? " sidebar-collapsed" : ""}`}
+      style={asideStyle}
+    >
       {sidebarCollapsed ? (
         <CollapsedSidebar />
       ) : (
@@ -49,52 +97,51 @@ export function Sidebar() {
           <div
             className={`sidebar-section is-team${sidebarAgentsOpen ? "" : " is-collapsed"}`}
           >
-            <button
-              type="button"
-              className="sidebar-section-title sidebar-section-toggle"
-              onClick={toggleSidebarAgents}
-              aria-expanded={sidebarAgentsOpen}
-            >
-              <span>Team</span>
-              <svg
-                style={{
-                  width: 10,
-                  height: 10,
-                  transform: sidebarAgentsOpen
-                    ? "rotate(90deg)"
-                    : "rotate(0deg)",
-                  transition: "transform 0.15s",
-                }}
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="m9 18 6-6-6-6" />
-              </svg>
-            </button>
+            <SectionToggle
+              label="Team"
+              open={sidebarAgentsOpen}
+              onToggle={toggleSidebarAgents}
+            />
           </div>
-
           <div
             className={`sidebar-collapsible${sidebarAgentsOpen ? " is-open" : ""}`}
           >
             <AgentList />
           </div>
 
-          <div className="sidebar-section">
-            <p className="sidebar-section-title">Channels</p>
+          <div
+            className={`sidebar-section${sidebarChannelsOpen ? "" : " is-collapsed"}`}
+          >
+            <SectionToggle
+              label="Channels"
+              open={sidebarChannelsOpen}
+              onToggle={toggleSidebarChannels}
+            />
           </div>
-          <ChannelList />
+          <div
+            className={`sidebar-collapsible${sidebarChannelsOpen ? " is-open" : ""}`}
+          >
+            <ChannelList />
+          </div>
 
-          <div className="sidebar-section">
-            <p className="sidebar-section-title">Apps</p>
+          <div
+            className={`sidebar-section${sidebarAppsOpen ? "" : " is-collapsed"}`}
+          >
+            <SectionToggle
+              label="Apps"
+              open={sidebarAppsOpen}
+              onToggle={toggleSidebarApps}
+            />
           </div>
-          <AppList />
+          <div
+            className={`sidebar-collapsible${sidebarAppsOpen ? " is-open" : ""}`}
+          >
+            <AppList />
+          </div>
 
           <WorkspaceSummary />
           <UsagePanel />
+          <SidebarColorPicker />
         </>
       )}
     </aside>

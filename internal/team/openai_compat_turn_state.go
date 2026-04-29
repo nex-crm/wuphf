@@ -67,7 +67,8 @@ type openAICompatTurnSinks interface {
 // (the per-turn driver), so no internal locking is needed; if we
 // ever fan-out we'll revisit.
 type openAICompatTurnState struct {
-	sinks openAICompatTurnSinks
+	sinks    openAICompatTurnSinks
+	liveChat *headlessLiveChatRelay
 
 	// Live-output suppression. Open models stream JSON tool calls
 	// chunk-by-chunk; without buffering the user watches raw JSON
@@ -91,8 +92,12 @@ type openAICompatTurnState struct {
 	tpsAnchorChrs int
 }
 
-func newOpenAICompatTurnState(sinks openAICompatTurnSinks) *openAICompatTurnState {
-	return &openAICompatTurnState{sinks: sinks}
+func newOpenAICompatTurnState(sinks openAICompatTurnSinks, liveChat ...*headlessLiveChatRelay) *openAICompatTurnState {
+	st := &openAICompatTurnState{sinks: sinks}
+	if len(liveChat) > 0 {
+		st.liveChat = liveChat[0]
+	}
+	return st
 }
 
 // onText is the per-text-chunk handler. Updates the tps readout and
@@ -143,7 +148,7 @@ func (s *openAICompatTurnState) maybeFlushLive(chunk string) {
 			s.decided = true
 			if !s.looksJSON {
 				if s.liveBuf.Len() > 0 {
-					s.sinks.pushAgentStream(s.liveBuf.String())
+					s.pushLiveText(s.liveBuf.String())
 				}
 				s.liveBuf.Reset()
 			}
@@ -154,7 +159,14 @@ func (s *openAICompatTurnState) maybeFlushLive(chunk string) {
 		s.liveBuf.WriteString(chunk)
 		return
 	}
-	s.sinks.pushAgentStream(chunk)
+	s.pushLiveText(chunk)
+}
+
+func (s *openAICompatTurnState) pushLiveText(text string) {
+	s.sinks.pushAgentStream(text)
+	if s.liveChat != nil {
+		s.liveChat.OnText(text)
+	}
 }
 
 // onToolUseChunk handles a tool_use stream chunk: discards any
@@ -169,6 +181,9 @@ func (s *openAICompatTurnState) onToolUseChunk(toolName, rawInput string) {
 	s.tpsAnchorAt = time.Time{}
 	s.tpsAnchorChrs = 0
 	s.streamedChars = 0
+	if s.liveChat != nil {
+		s.liveChat.Flush()
+	}
 	s.sinks.pushAgentStream(fmt.Sprintf("[tool_use %s] %s", toolName, rawInput))
 }
 
@@ -179,9 +194,15 @@ func (s *openAICompatTurnState) onToolUseChunk(toolName, rawInput string) {
 func (s *openAICompatTurnState) onToolResult(name, result string, err error) {
 	if err != nil {
 		s.sinks.appendLog(fmt.Sprintf("openai_compat_tool_error: %s -> %v", name, err))
+		if s.liveChat != nil {
+			s.liveChat.ReportIssue(fmt.Sprintf("%s: %v", name, err))
+		}
 		return
 	}
 	s.sinks.appendLog(fmt.Sprintf("openai_compat_tool_ok: %s -> %s", name, truncate(result, 240)))
+	if s.liveChat != nil {
+		s.liveChat.ReportIssue(result)
+	}
 	if isUserVisiblePostTool(name) {
 		s.broadcastedThisTurn = true
 	}
@@ -192,6 +213,9 @@ func (s *openAICompatTurnState) onToolResult(name, result string, err error) {
 // stall.
 func (s *openAICompatTurnState) onError(msg string) {
 	s.sinks.pushAgentStream("[error] " + msg)
+	if s.liveChat != nil {
+		s.liveChat.ReportIssue(msg)
+	}
 }
 
 // shouldPostFinalText is the post-loop predicate for "should the
@@ -201,4 +225,10 @@ func (s *openAICompatTurnState) onError(msg string) {
 // fan-out loop where the agent's own post re-fires it).
 func (s *openAICompatTurnState) shouldPostFinalText() bool {
 	return !s.broadcastedThisTurn
+}
+
+func (s *openAICompatTurnState) flushLiveChat() {
+	if s != nil && s.liveChat != nil {
+		s.liveChat.Flush()
+	}
 }

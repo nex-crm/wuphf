@@ -103,11 +103,18 @@ func (l *Launcher) runHeadlessOpenAICompatTurn(ctx context.Context, slug string,
 	// Use the ctx-aware StreamFn so cancellation propagates all the way
 	// to the HTTP request — without this a cancelled turn would pin the
 	// local server's inference slot until the model finishes generating.
-	streamFn := provider.NewOpenAICompatStreamFnWithCtx(ctx, kind)
+	// Per-agent ProviderBinding.Model wins over env/config/default —
+	// this is what makes agents like ceo run kimi-k2.6 while planner
+	// runs deepseek-v4-pro on the same install-wide ollama endpoint.
+	modelOverride := strings.TrimSpace(l.broker.MemberProviderBinding(slug).Model)
+	streamFn := provider.NewOpenAICompatStreamFnWithCtxAndModel(ctx, kind, modelOverride)
 
 	// All policy-bearing per-turn state is owned by openAICompatTurnState
 	// (see openai_compat_turn_state.go). The state machine is
 	// independently unit-tested via openai_compat_turn_state_test.go.
+	liveChat := newHeadlessLiveChatRelay(l, slug, target, notification, func(line string) {
+		appendHeadlessCodexLog(slug, line)
+	})
 	state := newOpenAICompatTurnState(&runtimeTurnSinks{
 		l:    l,
 		slug: slug,
@@ -116,7 +123,11 @@ func (l *Launcher) runHeadlessOpenAICompatTurn(ctx context.Context, slug string,
 		// machine stays oblivious.
 		stream:  agentStream,
 		metrics: &metrics,
-	})
+	}, liveChat)
+
+	// taskID is unique per turn so the Receipts panel groups each
+	// agent's turn into its own row. Format mirrors agent.nextTaskID.
+	taskID := fmt.Sprintf("%s-%d", slug, time.Now().UnixMilli())
 
 	loop := openAICompatToolLoop{
 		streamFn:    streamFn,
@@ -124,6 +135,9 @@ func (l *Launcher) runHeadlessOpenAICompatTurn(ctx context.Context, slug string,
 		toolByName:  toolByName,
 		maxIters:    maxOpenAICompatToolIterations,
 		toolTimeout: 90 * time.Second,
+		taskLogRoot: agent.DefaultTaskLogRoot(),
+		taskID:      taskID,
+		agentSlug:   slug,
 		onText:      state.onText,
 		onToolUse: func(name, rawInput string) {
 			state.onToolUseChunk(name, rawInput)
@@ -144,6 +158,7 @@ func (l *Launcher) runHeadlessOpenAICompatTurn(ctx context.Context, slug string,
 	}
 
 	finalText, iterationsUsed, turnUsage, streamErr, err := loop.run(ctx, msgs)
+	state.flushLiveChat()
 	// Record token counts even on partial / errored turns: a failed turn
 	// can still have generated thousands of tokens we want surfaced in the
 	// usage panel. CostUSD stays at zero — local runtimes have no marginal

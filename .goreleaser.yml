@@ -7,6 +7,7 @@ builds:
     goos:
       - darwin
       - linux
+      - windows
     goarch:
       - amd64
       - arm64
@@ -24,6 +25,11 @@ builds:
 
 archives:
   - formats: [tar.gz]
+    # Windows users get .zip — tar.gz is unfamiliar there, and the npm
+    # wrapper relies on the extension to pick the right unpack path.
+    format_overrides:
+      - goos: windows
+        formats: [zip]
     name_template: "wuphf_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
 
 checksum:

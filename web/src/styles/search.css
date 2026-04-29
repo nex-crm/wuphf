@@ -468,7 +468,11 @@
   flex-shrink: 0;
 }
 
-.upgrade-banner-copy {
+/* Click-to-run chip. Visually descended from `.upgrade-banner-copy` (now
+   removed) but with an InlineCommand-style play glyph and busy/disabled
+   states. The `<code>` child renders the command monospace; the chip
+   itself is the click target. */
+.upgrade-banner-run {
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -479,22 +483,82 @@
   cursor: pointer;
   color: var(--blue);
   font: inherit;
+  transition:
+    background 0.12s,
+    box-shadow 0.12s,
+    opacity 0.12s;
 }
-.upgrade-banner-copy:hover {
-  /* Theme-tinted accent — `var(--blue-bg)` survives dark mode where a
-     literal `rgba(0,0,0,…)` overlay would be invisible. */
+.upgrade-banner-run:hover:not(:disabled),
+.upgrade-banner-run:focus-visible:not(:disabled) {
   background: var(--blue-bg);
+  box-shadow: 0 0 0 2px rgba(33, 117, 255, 0.18);
+  outline: none;
 }
-.upgrade-banner-copy code {
+.upgrade-banner-run:disabled {
+  cursor: progress;
+  opacity: 0.7;
+}
+.upgrade-banner-run code {
   font-family: var(--font-mono);
   font-size: 12px;
   color: var(--text);
 }
-.upgrade-banner-copy-hint {
+
+/* Major-bump treatment: louder colors so a release that crosses a major
+   line is unmissable. Uses the warning palette — present in light AND
+   dark themes — instead of an inline rgba so it survives theme swaps. */
+.upgrade-banner.upgrade-banner--major {
+  background: var(--warning-200);
+  border-bottom-color: var(--warning-500);
+}
+.upgrade-banner.upgrade-banner--major .upgrade-banner-link,
+.upgrade-banner.upgrade-banner--major .upgrade-banner-dismiss {
+  color: var(--warning-500);
+}
+.upgrade-banner.upgrade-banner--major .upgrade-banner-run {
+  border-color: var(--warning-500);
+  color: var(--warning-500);
+}
+.upgrade-banner.upgrade-banner--major .upgrade-banner-run:hover:not(:disabled),
+.upgrade-banner.upgrade-banner--major
+  .upgrade-banner-run:focus-visible:not(:disabled) {
+  background: var(--warning-300, #f3cf90);
+  box-shadow: 0 0 0 2px rgba(153, 66, 0, 0.35);
+}
+
+/* Post-run outcome row. Replaces the chip after the user clicks install.
+   Three variants share the layout; the modifier classes pick the accent. */
+.upgrade-banner-outcome {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 13px;
+}
+.upgrade-banner-outcome code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 6px;
+  color: var(--text);
+}
+.upgrade-banner-outcome--err .upgrade-banner-outcome-msg {
+  color: var(--warning-500);
+}
+.upgrade-banner-output {
+  width: 100%;
+  max-height: 220px;
+  overflow: auto;
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-family: var(--font-mono);
   font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  opacity: 0.75;
+  white-space: pre-wrap;
 }
 
 .upgrade-banner-dismiss {
@@ -607,7 +671,7 @@
   .upgrade-banner-actions {
     justify-content: space-between;
   }
-  .upgrade-banner-copy code {
+  .upgrade-banner-run code {
     font-size: 11px;
   }
 }

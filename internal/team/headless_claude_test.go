@@ -144,7 +144,7 @@ func TestRunHeadlessClaudeTurn_NoResumeFlag(t *testing.T) {
 
 	// The function returns a parse error because /bin/true produces no JSON.
 	// That is expected; we only care about capturedArgs.
-	_ = l.runHeadlessClaudeTurn(context.Background(), "eng", "do the thing")
+	_ = l.runHeadlessClaudeTurn(t.Context(), "eng", "do the thing")
 
 	if len(capturedArgs) == 0 {
 		t.Fatal("no args captured; headlessClaudeCommandContext hook was not called")

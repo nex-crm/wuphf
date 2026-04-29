@@ -100,6 +100,12 @@ type skillCompileStatsResponse struct {
 	// it pushes prompt size out of the cache window. Computed on each request;
 	// O(members * skills) but bounded.
 	CatalogBytesPerAgentMax int `json:"catalog_bytes_per_agent_max"`
+	// CounterNudgesFiredTotal counts skill_review_nudge tasks fired by the
+	// Hermes-style per-agent counter (#379, Stage B').
+	CounterNudgesFiredTotal int64 `json:"counter_nudges_fired_total"`
+	// CounterPerAgent surfaces the per-agent counter snapshot from the
+	// skill counter (Stage B'). Nil when no counter is wired.
+	CounterPerAgent map[string]SkillCounterMetrics `json:"counter_per_agent,omitempty"`
 }
 
 // skillCatalogSoftWarnBytes is the soft warning threshold for the per-agent
@@ -117,6 +123,7 @@ func (b *Broker) handleGetSkillCompileStats(w http.ResponseWriter, r *http.Reque
 	b.mu.Lock()
 	snap := snapshotSkillCompileMetrics(&b.skillCompileMetrics)
 	maxBytes, maxSlug := b.maxCatalogBytesLocked()
+	counter := b.skillCounter
 	b.mu.Unlock()
 
 	if maxBytes > skillCatalogSoftWarnBytes {
@@ -136,6 +143,10 @@ func (b *Broker) handleGetSkillCompileStats(w http.ResponseWriter, r *http.Reque
 		EnhancementAcceptedTotal:      snap.EnhancementAcceptedTotal,
 		EnhancementOverriddenTotal:    snap.EnhancementOverriddenTotal,
 		CatalogBytesPerAgentMax:       maxBytes,
+		CounterNudgesFiredTotal:       snap.CounterNudgesFiredTotal,
+	}
+	if counter != nil {
+		resp.CounterPerAgent = counter.Stats()
 	}
 	if snap.LastSkillCompilePassAtNano != 0 {
 		resp.LastSkillCompilePassAt = time.Unix(0, snap.LastSkillCompilePassAtNano).UTC().Format(timeRFC3339)

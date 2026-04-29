@@ -310,11 +310,13 @@ func (s *SkillScanner) collectCandidates(walkRoot, wikiRoot string) ([]candidate
 	var out []candidate
 	walkErr := filepath.Walk(walkRoot, func(p string, info os.FileInfo, err error) error {
 		if err != nil {
-			return nil // skip-and-log via the outer slog.Warn
+			slog.Warn("skill_scanner: skipping path due to walk error", "path", p, "err", err)
+			return nil
 		}
 		// Compute wiki-relative path with forward slashes for matching.
 		rel, relErr := filepath.Rel(wikiRoot, p)
 		if relErr != nil {
+			slog.Warn("skill_scanner: skipping path with unresolvable relative", "path", p, "wiki_root", wikiRoot, "err", relErr)
 			return nil
 		}
 		rel = filepath.ToSlash(rel)
@@ -337,6 +339,7 @@ func (s *SkillScanner) collectCandidates(walkRoot, wikiRoot string) ([]candidate
 
 		raw, readErr := os.ReadFile(p)
 		if readErr != nil {
+			slog.Warn("skill_scanner: skipping unreadable file", "path", p, "err", readErr)
 			return nil
 		}
 		out = append(out, candidate{relPath: rel, content: string(raw)})

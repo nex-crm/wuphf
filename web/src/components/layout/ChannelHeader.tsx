@@ -1,6 +1,21 @@
 import { useChannels } from "../../hooks/useChannels";
 import { useAppStore } from "../../stores/app";
 
+
+import type { Theme } from "../../stores/app";
+
+function nextTheme(t: Theme): Theme {
+  if (t === "noir-gold") return "nex";
+  if (t === "nex") return "nex-dark";
+  return "noir-gold";
+}
+
+function themeLabel(t: Theme): string {
+  if (t === "noir-gold") return "Noir Gold";
+  if (t === "nex-dark") return "Nex Dark";
+  return "Nex Light";
+}
+
 export function ChannelHeader() {
   const currentChannel = useAppStore((s) => s.currentChannel);
   const currentApp = useAppStore((s) => s.currentApp);
@@ -24,16 +39,23 @@ export function ChannelHeader() {
       <div className="channel-actions">
         <button
           className="sidebar-btn"
-          title={theme === "nex-dark" ? "Light mode" : "Dark mode"}
-          aria-label={theme === "nex-dark" ? "Switch to light mode" : "Switch to dark mode"}
-          onClick={() => setTheme(theme === "nex-dark" ? "nex" : "nex-dark")}
+          title={`Theme: ${themeLabel(theme)} — click to cycle`}
+          aria-label={`Theme: ${themeLabel(theme)}, click to cycle`}
+          onClick={() => setTheme(nextTheme(theme))}
         >
-          {theme === "nex-dark" ? (
+          {theme === "noir-gold" ? (
+            // Sparkle / star — for the gold theme
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 3l1.8 5.5H19l-4.6 3.4 1.8 5.6L12 14l-4.2 3.5 1.8-5.6L5 8.5h5.2L12 3z"/>
+            </svg>
+          ) : theme === "nex-dark" ? (
+            // Sun — currently dark, click to go light
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="12" cy="12" r="4"/>
               <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>
             </svg>
           ) : (
+            // Moon — currently light, click to go noir-gold
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
             </svg>

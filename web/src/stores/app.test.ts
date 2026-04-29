@@ -8,6 +8,7 @@ afterEach(() => {
     currentApp: null,
     activeThreadId: null,
     lastMessageId: null,
+    unreadByChannel: {},
     activeAgentSlug: null,
     searchOpen: false,
     composerSearchInitialQuery: "",
@@ -67,6 +68,55 @@ describe("DM channel helpers", () => {
       notebookAgentSlug: null,
       notebookEntrySlug: null,
     });
+  });
+});
+
+describe("channel unread state", () => {
+  it("increments and clears unread counts by channel", () => {
+    useAppStore.getState().incrementUnread("launch");
+    useAppStore.getState().incrementUnread("launch");
+    useAppStore.getState().incrementUnread("general");
+
+    expect(useAppStore.getState().unreadByChannel).toMatchObject({
+      launch: 2,
+      general: 1,
+    });
+
+    useAppStore.getState().clearUnread("launch");
+
+    expect(useAppStore.getState().unreadByChannel.launch).toBe(0);
+    expect(useAppStore.getState().unreadByChannel.general).toBe(1);
+  });
+
+  it("clears a channel when navigating to its message view", () => {
+    useAppStore.setState({
+      currentChannel: "general",
+      currentApp: "tasks",
+      unreadByChannel: { general: 2, launch: 3 },
+    });
+
+    useAppStore.getState().setCurrentChannel("launch");
+
+    expect(useAppStore.getState()).toMatchObject({
+      currentChannel: "launch",
+      currentApp: null,
+    });
+    expect(useAppStore.getState().unreadByChannel.launch).toBe(0);
+    expect(useAppStore.getState().unreadByChannel.general).toBe(2);
+  });
+
+  it("clears the current channel when returning from an app to messages", () => {
+    useAppStore.setState({
+      currentChannel: "general",
+      currentApp: "tasks",
+      unreadByChannel: { general: 4, launch: 1 },
+    });
+
+    useAppStore.getState().setCurrentApp(null);
+
+    expect(useAppStore.getState().currentApp).toBeNull();
+    expect(useAppStore.getState().unreadByChannel.general).toBe(0);
+    expect(useAppStore.getState().unreadByChannel.launch).toBe(1);
   });
 });
 

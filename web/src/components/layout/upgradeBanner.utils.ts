@@ -136,6 +136,73 @@ export function parseCommit(message: string, sha: string): CommitEntry {
   };
 }
 
+// hasNotable mirrors internal/upgradecheck.Notable. Returns true iff at
+// least one commit is a feat / fix / perf or carries the breaking marker.
+// The banner uses this as the show/hide gate so a release that's purely
+// docs/chore/refactor/test/ci/style/build doesn't trigger a banner.
+//
+// Failure-open intent: callers MUST default to `true` when they couldn't
+// fetch the changelog at all — better to nag than to swallow a critical
+// update. This function is for the "we have data, what does it say" case
+// only; absence-of-data is a separate decision.
+export function hasNotable(commits: CommitEntry[]): boolean {
+  for (const c of commits) {
+    if (c.breaking) return true;
+    if (c.type === "feat" || c.type === "fix" || c.type === "perf") return true;
+  }
+  return false;
+}
+
+// isMajorBump compares the first dotted-numeric segment of from/to. Returns
+// true when `to`'s major is strictly greater. Matches
+// internal/upgradecheck.IsMajorBump. Used by the banner to force-show across
+// a major-version line — bypasses dismiss entirely.
+//
+// Note: today auto-release.yml only knows feat-vs-not (no major bump on
+// `feat!:` markers), so a major bump is a deliberate human action — exactly
+// the kind of release we want to push. When auto-release learns to bump on
+// breaking markers, this rule still does the right thing.
+export function isMajorBump(from: string, to: string): boolean {
+  const pf = splitVersion(from);
+  const pt = splitVersion(to);
+  return (pt[0] ?? 0) > (pf[0] ?? 0);
+}
+
+// decideShow centralises the banner's render gate so the matrix is
+// unit-testable in isolation. Returns true iff the banner should mount.
+//
+// Rules, in order:
+//   1. enabled=false → never show.
+//   2. runPhase==="running" → always show. The user has initiated an
+//      install; killing the banner mid-install would lose their progress
+//      surface.
+//   3. runPhase==="done" → defer to the same matrix as idle. The post-run
+//      outcome row is part of the banner; if the user dismisses after
+//      a failed install, honour that — don't keep the banner sticky just
+//      because a run completed.
+//   4. !upgradeNeeded → hide. Nothing to upgrade.
+//   5. forceMajor → show. Major bumps bypass dismiss because they're
+//      deliberate human actions in our auto-release setup (see comment
+//      block in UpgradeBanner.tsx).
+//   6. silenced → hide. User explicitly muted up to or past `latest`.
+//   7. !notableGate → hide. The diff has zero feat/fix/perf/breaking.
+//   8. Otherwise → show.
+export function decideShow(input: {
+  enabled: boolean;
+  runPhase: "idle" | "running" | "done";
+  upgradeNeeded: boolean;
+  forceMajor: boolean;
+  silenced: boolean;
+  notableGate: boolean;
+}): boolean {
+  if (!input.enabled) return false;
+  if (input.runPhase === "running") return true;
+  if (!input.upgradeNeeded) return false;
+  if (input.forceMajor) return true;
+  if (input.silenced) return false;
+  return input.notableGate;
+}
+
 export function groupCommits(commits: CommitEntry[]) {
   const buckets = new Map<string, CommitEntry[]>();
   for (const c of commits) {

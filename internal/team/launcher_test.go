@@ -124,6 +124,47 @@ func TestNewLauncherFromScratchUsesGenericOffice(t *testing.T) {
 	}
 }
 
+func TestNewLauncherExplicitPackPreservesBrokerState(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("WUPHF_RUNTIME_HOME", home)
+	t.Setenv("WUPHF_BROKER_TOKEN", "")
+
+	statePath := defaultBrokerStatePath()
+	if err := os.MkdirAll(filepath.Dir(statePath), 0o700); err != nil {
+		t.Fatalf("mkdir state dir: %v", err)
+	}
+	state := brokerState{
+		Messages: []channelMessage{{
+			ID:        "msg-keep",
+			From:      "human",
+			Channel:   "general",
+			Content:   "preserve this office state",
+			Timestamp: time.Now().UTC().Format(time.RFC3339),
+		}},
+		Counter: 9,
+	}
+	raw, err := json.Marshal(state)
+	if err != nil {
+		t.Fatalf("marshal state: %v", err)
+	}
+	if err := os.WriteFile(statePath, raw, 0o600); err != nil {
+		t.Fatalf("write state: %v", err)
+	}
+
+	if _, err := NewLauncher("founding-team"); err != nil {
+		t.Fatalf("NewLauncher: %v", err)
+	}
+
+	loaded, err := loadBrokerStateFile(statePath)
+	if err != nil {
+		t.Fatalf("expected broker state to survive explicit pack launch: %v", err)
+	}
+	if len(loaded.Messages) != 1 || loaded.Messages[0].ID != "msg-keep" || loaded.Counter != 9 {
+		t.Fatalf("broker state was not preserved: %+v", loaded)
+	}
+}
+
 func TestAgentPaneSlugsUsesOfficeRosterNotStaticPack(t *testing.T) {
 	l := &Launcher{
 		pack: &agent.PackDefinition{
@@ -2466,13 +2507,7 @@ func TestProcessDueTaskJobResumesRateLimitedBlockedTask(t *testing.T) {
 }
 
 func TestOfficeChangeTaskNotificationsBackfillGeneratedMemberTask(t *testing.T) {
-	// Pin the broker's state file outside t.TempDir(). Goroutines leaked
-	// by prior tests in this package may still be saving via a Broker
-	// whose statePath was captured at construction; targeting a leaked
-	// OS-temp dir prevents races with t.TempDir cleanup ("unlinkat:
-	// directory not empty"). Leaking a few KB in /tmp is the cheap fix;
-	// proper goroutine hygiene across the suite is a separate refactor.
-	b := NewBrokerAt(leakedBrokerStatePath(t))
+	b := NewBrokerAt(filepath.Join(t.TempDir(), "broker-state.json"))
 	b.mu.Lock()
 	b.members = []officeMember{
 		{Slug: "ceo", Name: "CEO"},
@@ -2526,9 +2561,7 @@ func TestOfficeChangeTaskNotificationsBackfillGeneratedMemberTask(t *testing.T) 
 }
 
 func TestOfficeChangeTaskNotificationsBackfillChannelMembershipTask(t *testing.T) {
-	// See TestOfficeChangeTaskNotificationsBackfillGeneratedMemberTask for
-	// why this test uses a leaked state dir instead of t.TempDir().
-	b := NewBrokerAt(leakedBrokerStatePath(t))
+	b := NewBrokerAt(filepath.Join(t.TempDir(), "broker-state.json"))
 	b.mu.Lock()
 	b.members = []officeMember{
 		{Slug: "ceo", Name: "CEO"},

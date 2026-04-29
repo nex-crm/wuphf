@@ -1,6 +1,7 @@
 import { render } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { useAppStore } from "../../stores/app";
 import { MOD_KEY } from "../ui/Kbd";
 import { ChannelList } from "./ChannelList";
 
@@ -31,6 +32,14 @@ vi.mock("../channels/ChannelWizard", () => ({
 import { useChannels } from "../../hooks/useChannels";
 
 const useChannelsMock = vi.mocked(useChannels);
+
+afterEach(() => {
+  useAppStore.setState({
+    currentChannel: "general",
+    currentApp: null,
+    unreadByChannel: {},
+  });
+});
 
 function setChannels(count: number) {
   useChannelsMock.mockReturnValue({
@@ -92,6 +101,26 @@ describe("<ChannelList> keyboard shortcut badges", () => {
     setChannels(3);
     const { container } = render(<ChannelList />);
     const spans = container.querySelectorAll(".sidebar-shortcut");
-    spans.forEach((s) => expect(s.getAttribute("aria-hidden")).toBe("true"));
+    for (const span of spans) {
+      expect(span.getAttribute("aria-hidden")).toBe("true");
+    }
+  });
+
+  it("renders unread counts for channels with background messages", () => {
+    setChannels(3);
+    useAppStore.setState({ unreadByChannel: { c2: 4 } });
+
+    const { getByText } = render(<ChannelList />);
+
+    expect(getByText("4").getAttribute("title")).toBe("4 unread");
+  });
+
+  it("caps large unread counts at 99+", () => {
+    setChannels(3);
+    useAppStore.setState({ unreadByChannel: { c2: 120 } });
+
+    const { getByText } = render(<ChannelList />);
+
+    expect(getByText("99+").getAttribute("title")).toBe("120 unread");
   });
 });

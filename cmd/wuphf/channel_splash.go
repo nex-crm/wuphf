@@ -487,7 +487,7 @@ func (m splashModel) renderNameLabel(slug, name string, slotW int) string {
 		padR = 0
 	}
 	label := strings.Repeat(" ", padL) + name + strings.Repeat(" ", padR)
-	agentColor := sidebarAgentColors[slug]
+	agentColor := agentColor(slug)
 	if agentColor == "" {
 		agentColor = "#64748B"
 	}

@@ -67,6 +67,10 @@ type SkillCompileMetrics struct {
 	// interviews were resolved with "approve_anyway" — the human bypassed
 	// the gate and created a new skill anyway (PR 7 task #15).
 	EnhancementOverriddenTotal int64
+	// CounterNudgesFiredTotal counts skill_review_nudge tasks fired by the
+	// Hermes-style per-agent counter (Stage B'). Incremented atomically by
+	// the tool-event hot path each time a nudge task is appended.
+	CounterNudgesFiredTotal int64
 }
 
 // snapshotSkillCompileMetrics returns a copy of m suitable for serialization.
@@ -87,6 +91,7 @@ func snapshotSkillCompileMetrics(m *SkillCompileMetrics) SkillCompileMetrics {
 		EnhancementCandidatesTotal:    atomic.LoadInt64(&m.EnhancementCandidatesTotal),
 		EnhancementAcceptedTotal:      atomic.LoadInt64(&m.EnhancementAcceptedTotal),
 		EnhancementOverriddenTotal:    atomic.LoadInt64(&m.EnhancementOverriddenTotal),
+		CounterNudgesFiredTotal:       atomic.LoadInt64(&m.CounterNudgesFiredTotal),
 	}
 }
 

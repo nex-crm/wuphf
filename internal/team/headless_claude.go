@@ -142,6 +142,9 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 	var firstTextAt time.Time
 	var firstToolAt time.Time
 	textStarted := false
+	liveChat := newHeadlessLiveChatRelay(l, slug, firstNonEmpty(channel...), notification, func(line string) {
+		appendHeadlessClaudeLog(slug, line)
+	})
 
 	result, parseErr := provider.ReadClaudeJSONStream(teedStdout, func(event provider.ClaudeStreamEvent) {
 		if firstEventAt.IsZero() {
@@ -160,7 +163,9 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 				textStarted = true
 				l.updateHeadlessProgress(slug, "active", "text", "drafting response", metrics)
 			}
+			liveChat.OnText(event.Text)
 		case "tool_use":
+			liveChat.Flush()
 			if firstToolAt.IsZero() {
 				firstToolAt = time.Now()
 				metrics.FirstToolMs = durationMillis(startedAt, firstToolAt)
@@ -170,11 +175,14 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 		case "tool_result":
 			appendHeadlessClaudeLog(slug, "tool_result: "+truncate(event.Text, 140))
 			l.updateHeadlessProgress(slug, "active", "tool_result", truncate(event.Text, 140), metrics)
+			liveChat.ReportIssue(event.Text)
 		case "error":
 			appendHeadlessClaudeLog(slug, "stream_error: "+event.Detail)
 			l.updateHeadlessProgress(slug, "error", "error", truncate(event.Detail, 180), metrics)
+			liveChat.ReportIssue(event.Detail)
 		}
 	})
+	liveChat.Flush()
 	_ = pw.Close() // signal scanner goroutine that stream is done (io.PipeWriter.Close always returns nil)
 	if err := cmd.Wait(); err != nil {
 		detail := strings.TrimSpace(firstNonEmpty(result.LastError, strings.TrimSpace(stderr.String()), err.Error()))

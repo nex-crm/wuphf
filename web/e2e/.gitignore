@@ -1,1 +1,3 @@
 bin/
+playwright-report/
+test-results/

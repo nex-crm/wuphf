@@ -17,7 +17,10 @@
   display: flex;
   flex-direction: column;
   height: 100vh;
-  overflow: hidden;
+  /* Each section sizes to its content (no inner scrollbars) — the
+     whole sidebar scrolls only if total content exceeds viewport. */
+  overflow-y: auto;
+  overflow-x: hidden;
   transition: width 0.22s ease;
 }
 
@@ -385,7 +388,7 @@ html[data-theme="nex"]
 }
 
 .sidebar-section {
-  padding: 14px var(--sidebar-pad-x) 2px;
+  padding: 8px var(--sidebar-pad-x) 0;
 }
 .sidebar-section + .sidebar-section,
 .sidebar-agents + .sidebar-section,
@@ -394,7 +397,7 @@ html[data-theme="nex"]
   border-top: 1px solid var(--border);
 }
 .sidebar-section.is-collapsed {
-  padding-bottom: 12px;
+  padding-bottom: 0;
 }
 .sidebar-section.is-collapsed + .sidebar-section {
   border-top: none;
@@ -767,8 +770,8 @@ html[data-theme="nex"]
   min-height: 0;
 }
 .sidebar-scroll-wrap.is-agents {
-  flex: 0 1 auto;
-  max-height: 40vh;
+  flex: 0 0 auto;
+  max-height: none;
   border-bottom: 1px solid var(--border);
 }
 .sidebar-collapsible {
@@ -786,10 +789,11 @@ html[data-theme="nex"]
 }
 .sidebar-scroll-wrap.is-channels {
   flex: 0 0 auto;
-  max-height: 200px;
+  max-height: none;
 }
 .sidebar-scroll-wrap.is-apps {
-  flex: 1 1 auto;
+  flex: 0 0 auto;
+  max-height: none;
 }
 .sidebar-scroll-wrap::after {
   content: "";
@@ -815,10 +819,10 @@ html[data-theme="nex"]
 }
 
 .sidebar-agents {
-  padding: 4px var(--sidebar-pad-x) 16px;
-  flex: 1 1 auto;
+  padding: 4px var(--sidebar-pad-x) 4px;
+  flex: 0 0 auto;
   min-height: 0;
-  overflow-y: auto;
+  overflow-y: visible;
   overflow-x: visible;
 }
 .sidebar-agents .sidebar-add-btn,
@@ -888,16 +892,16 @@ html[data-theme="nex"]
 }
 
 .sidebar-channels {
-  padding: 4px var(--sidebar-pad-x) 16px;
-  flex: 1 1 auto;
+  padding: 4px var(--sidebar-pad-x) 4px;
+  flex: 0 0 auto;
   min-height: 0;
-  overflow-y: auto;
+  overflow-y: visible;
 }
 .sidebar-apps {
-  padding: 4px var(--sidebar-pad-x) 16px;
-  flex: 1 1 auto;
+  padding: 4px var(--sidebar-pad-x) 4px;
+  flex: 0 0 auto;
   min-height: 0;
-  overflow-y: auto;
+  overflow-y: visible;
 }
 
 /* Minimal hover-reveal scrollbars for sidebar scroll regions. */
@@ -1767,4 +1771,69 @@ html[data-theme="nex"]
     top: 0;
     z-index: 10;
   }
+}
+
+/* ─── Sidebar color picker (footer) ─── */
+.sidebar-color-picker {
+  padding: 8px var(--sidebar-pad-x) 10px;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+  /* Pin to the bottom of the sidebar so it stays visible even when the
+     sidebar content overflows and the user scrolls up. The sidebar root
+     uses overflow-y:auto, which gives sticky a positioned ancestor. */
+  position: sticky;
+  bottom: 0;
+  background: var(--bg-card);
+  z-index: 2;
+  margin-top: auto;
+}
+.sidebar-color-picker-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-tertiary);
+  margin-bottom: 6px;
+}
+.sidebar-color-picker-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.sidebar-color-swatch {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  padding: 0;
+  cursor: pointer;
+  position: relative;
+  transition: transform 0.1s, box-shadow 0.1s;
+}
+.sidebar-color-swatch:hover {
+  transform: scale(1.08);
+}
+.sidebar-color-swatch.is-active {
+  box-shadow: 0 0 0 2px var(--accent, var(--text));
+}
+.sidebar-color-swatch-custom {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--text-tertiary);
+  background: transparent;
+  overflow: hidden;
+}
+.sidebar-color-swatch-custom input[type="color"] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+  opacity: 0;
 }

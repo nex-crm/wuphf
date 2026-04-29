@@ -120,14 +120,24 @@ type notebookEntry struct {
 // files are skipped.
 func (s *NotebookSignalScanner) collectNotebookEntries(wikiRoot string) ([]notebookEntry, error) {
 	root := filepath.Join(wikiRoot, agentsDirPrefix[:len(agentsDirPrefix)-1])
+	if info, err := os.Stat(root); err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	} else if !info.IsDir() {
+		return nil, nil
+	}
 	var out []notebookEntry
 	walkErr := filepath.Walk(root, func(p string, info os.FileInfo, err error) error {
 		if err != nil {
-			return nil //nolint:nilerr // best-effort walk: skip unreadable entries
+			slog.Warn("notebook_signal_scanner: skipping path due to walk error", "path", p, "err", err)
+			return nil
 		}
 		rel, relErr := filepath.Rel(wikiRoot, p)
 		if relErr != nil {
-			return nil //nolint:nilerr // best-effort walk: skip unresolvable paths
+			slog.Warn("notebook_signal_scanner: skipping path with unresolvable relative", "path", p, "wiki_root", wikiRoot, "err", relErr)
+			return nil
 		}
 		rel = filepath.ToSlash(rel)
 
@@ -153,6 +163,7 @@ func (s *NotebookSignalScanner) collectNotebookEntries(wikiRoot string) ([]noteb
 
 		raw, readErr := os.ReadFile(p)
 		if readErr != nil {
+			slog.Warn("notebook_signal_scanner: skipping unreadable notebook file", "path", p, "err", readErr)
 			return nil
 		}
 

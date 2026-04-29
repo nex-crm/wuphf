@@ -71,10 +71,30 @@ func headlessCodexRunTurn(l *Launcher, ctx context.Context, slug, notification s
 	return defaultHeadlessCodexRunTurn(l, ctx, slug, notification, channel...)
 }
 
+// headlessCodexTurnTimeoutEnv reads a duration from env, falling back to the
+// supplied default when the var is unset, empty, non-positive, or unparseable.
+// Accepts any input time.ParseDuration accepts (e.g. "6m", "90s", "1h").
+//
+// The defaults below are intentionally tight (4m / 10m / 12m); operators
+// running slower providers (OpenRouter pooled queues, Kimi via Venice) or
+// tool-heavy turns may need to extend them. See
+// https://github.com/nex-crm/wuphf/issues/313.
+func headlessCodexTurnTimeoutEnv(name string, fallback time.Duration) time.Duration {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return fallback
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		return fallback
+	}
+	return d
+}
+
 var (
-	headlessCodexTurnTimeout              = 4 * time.Minute
-	headlessCodexOfficeLaunchTurnTimeout  = 10 * time.Minute
-	headlessCodexLocalWorktreeTurnTimeout = 12 * time.Minute
+	headlessCodexTurnTimeout              = headlessCodexTurnTimeoutEnv("WUPHF_TURN_TIMEOUT", 4*time.Minute)
+	headlessCodexOfficeLaunchTurnTimeout  = headlessCodexTurnTimeoutEnv("WUPHF_OFFICE_LAUNCH_TIMEOUT", 10*time.Minute)
+	headlessCodexLocalWorktreeTurnTimeout = headlessCodexTurnTimeoutEnv("WUPHF_WORKTREE_TIMEOUT", 12*time.Minute)
 	headlessCodexStaleCancelAfter         = 90 * time.Second
 	// Minimum age an active turn must have before an enqueue can preempt
 	// it via stale-cancel. Floors out tight re-enqueue loops where two
@@ -407,17 +427,46 @@ func (l *Launcher) stopHeadlessWorkers() {
 	}
 	cancel := l.headlessCancel
 	l.headlessMu.Unlock()
-	// Cancel any in-flight turn so the worker doesn't sit inside
-	// headlessCodexRunTurn for the full per-turn timeout (minutes) before
-	// noticing stopHeadlessCh closed at the outer-loop tick. Without this,
-	// production-shape paths with a real provider would hang Wait() until
-	// the turn ctx times out. Tests using the headlessCodexRunTurn override
-	// already return fast, so the bug only bites when the override is the
-	// real call path — but the cost of guarding here is one nil-check.
 	if cancel != nil {
 		cancel()
 	}
-	l.headlessWorkerWg.Wait()
+	// Cancel any in-flight turns and keep cancelling until workers drain.
+	// Polling closes a TOCTOU window: a worker that was past its top-of-loop
+	// stop check but had not yet called beginHeadlessCodexTurn at first
+	// snapshot time would otherwise register a fresh active turn after we
+	// scanned, and Wait() would block on a stub that's parked on ctx.Done().
+	// Production launchers cancel via headlessCancel above; this loop is the
+	// safety net for bare &Launcher{} test fixtures that don't seed one.
+	done := make(chan struct{})
+	go func() {
+		l.headlessWorkerWg.Wait()
+		close(done)
+	}()
+	cancelActive := func() {
+		l.headlessMu.Lock()
+		for _, active := range l.headlessActive {
+			if active != nil && active.Cancel != nil {
+				active.Cancel()
+			}
+		}
+		l.headlessMu.Unlock()
+	}
+	cancelActive()
+	if cancel != nil {
+		// Production path: parent ctx already cancelled; just wait.
+		<-done
+		return
+	}
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-done:
+			return
+		case <-ticker.C:
+			cancelActive()
+		}
+	}
 }
 
 func (l *Launcher) runHeadlessCodexQueue(slug string, stop <-chan struct{}) {
@@ -784,8 +833,7 @@ func (l *Launcher) agentPostedSubstantiveMessageSince(slug string, startedAt tim
 		if msg.From != slug {
 			continue
 		}
-		content := strings.TrimSpace(msg.Content)
-		if content == "" || strings.HasPrefix(content, "[STATUS]") {
+		if !isSubstantiveAgentProgressMessage(msg) {
 			continue
 		}
 		when, err := time.Parse(time.RFC3339, msg.Timestamp)
@@ -816,8 +864,7 @@ func (l *Launcher) agentPostedSubstantiveMessageToChannelSince(slug string, targ
 		if targetChannel != "" && normalizeChannelSlug(msg.Channel) != targetChannel {
 			continue
 		}
-		content := strings.TrimSpace(msg.Content)
-		if content == "" || strings.HasPrefix(content, "[STATUS]") {
+		if !isSubstantiveAgentProgressMessage(msg) {
 			continue
 		}
 		when, err := time.Parse(time.RFC3339, msg.Timestamp)
@@ -856,6 +903,14 @@ func (l *Launcher) postHeadlessFinalMessageIfSilent(slug string, targetChannel s
 		return channelMessage{}, false, err
 	}
 	return msg, true, nil
+}
+
+func isSubstantiveAgentProgressMessage(msg channelMessage) bool {
+	if strings.TrimSpace(msg.Kind) == agentIssueMessageKind {
+		return false
+	}
+	content := strings.TrimSpace(msg.Content)
+	return content != "" && !strings.HasPrefix(content, "[STATUS]")
 }
 
 func headlessReplyToID(notification string) string {
@@ -1038,6 +1093,19 @@ func (l *Launcher) timedOutTurnAlreadyRecovered(task *teamTask, slug string, sta
 func (l *Launcher) beginHeadlessCodexTurn(slug string) (headlessCodexTurn, context.Context, time.Time, time.Duration, bool) {
 	l.headlessMu.Lock()
 	defer l.headlessMu.Unlock()
+
+	// If stopHeadlessWorkers already fired, don't start a new turn. This closes
+	// the race where a worker goroutine passed the outer stop-channel check
+	// just before stopHeadlessWorkers closed headlessStopCh, causing the worker
+	// to block in headlessCodexRunTurn with no cancel registered in headlessActive.
+	if l.headlessStopCh != nil {
+		select {
+		case <-l.headlessStopCh:
+			delete(l.headlessWorkers, slug)
+			return headlessCodexTurn{}, nil, time.Time{}, 0, false
+		default:
+		}
+	}
 
 	queue := l.headlessQueues[slug]
 	if len(queue) == 0 {
@@ -1227,6 +1295,9 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 	var firstTextAt time.Time
 	var firstToolAt time.Time
 	textStarted := false
+	liveChat := newHeadlessLiveChatRelay(l, slug, firstNonEmpty(channel...), notification, func(line string) {
+		appendHeadlessCodexLog(slug, line)
+	})
 	result, parseErr := provider.ReadCodexJSONStream(teedStdout, func(event provider.CodexStreamEvent) {
 		if firstEventAt.IsZero() {
 			firstEventAt = time.Now()
@@ -1242,7 +1313,9 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 				textStarted = true
 				l.updateHeadlessProgress(slug, "active", "text", "drafting response", metrics)
 			}
+			liveChat.OnText(event.Text)
 		case "tool_use":
+			liveChat.Flush()
 			if firstToolAt.IsZero() {
 				firstToolAt = time.Now()
 				metrics.FirstToolMs = durationMillis(startedAt, firstToolAt)
@@ -1254,11 +1327,14 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 			line := "tool_result: " + truncate(event.Text, 140)
 			appendHeadlessCodexLog(slug, line)
 			l.updateHeadlessProgress(slug, "active", "tool_result", truncate(event.Text, 140), metrics)
+			liveChat.ReportIssue(event.Text)
 		case "error":
 			appendHeadlessCodexLog(slug, "stream_error: "+event.Detail)
 			l.updateHeadlessProgress(slug, "error", "error", truncate(event.Detail, 180), metrics)
+			liveChat.ReportIssue(event.Detail)
 		}
 	})
+	liveChat.Flush()
 	_ = pw.Close() // signal scanner goroutine that stream is done (io.PipeWriter.Close always returns nil)
 	if err := cmd.Wait(); err != nil {
 		detail := firstNonEmpty(result.LastError, strings.TrimSpace(stderr.String()))
@@ -1620,22 +1696,23 @@ func buildHeadlessCodexPrompt(systemPrompt string, prompt string) string {
 	return strings.Join(parts, "\n\n")
 }
 
+// wuphfLogDirOverride is a test hook for redirecting headless log writes to
+// an isolated path. Stored as atomic.Pointer so reads on the headless write
+// path don't take a lock; nil in production. Tests set this via TestMain so
+// log files don't pollute the user's real ~/.wuphf/logs while the suite
+// runs. The previous WUPHF_LOG_DIR environment variable was retired in
+// favour of this in-process hook — env vars leak into spawned codex/claude
+// subprocesses, which is not what tests want.
+var wuphfLogDirOverride atomic.Pointer[string]
+
 func wuphfLogDir() string {
-	// WUPHF_LOG_DIR lets tests redirect headless log writes to a
-	// process-stable path. Headless-worker goroutines routinely outlive the
-	// test that started them; if they wrote to the test's t.TempDir() they
-	// would race with go's test-scoped RemoveAll ("directory not empty" on
-	// unlinkat). Tests set this to a package-owned leaked dir so writes
-	// from leaked goroutines land harmlessly. Unset in production → HOME.
-	if override := strings.TrimSpace(os.Getenv("WUPHF_LOG_DIR")); override != "" {
-		// Fail loudly on a broken override instead of silently falling
-		// through — a misconfigured WUPHF_LOG_DIR path otherwise surfaces
-		// as confusing "file open failed" errors far from the root cause.
-		// Returning "" disables headless logging for this call (the
-		// appendHeadless*Log helpers no-op on empty dir), which matches
-		// the HOME-lookup graceful-degradation path below.
+	if p := wuphfLogDirOverride.Load(); p != nil {
+		override := strings.TrimSpace(*p)
+		if override == "" {
+			return ""
+		}
 		if err := os.MkdirAll(override, 0o700); err != nil {
-			fmt.Fprintf(os.Stderr, "wuphf: WUPHF_LOG_DIR=%q unwritable: %v — headless logging disabled\n", override, err)
+			fmt.Fprintf(os.Stderr, "wuphf: log dir override %q unwritable: %v — headless logging disabled\n", override, err)
 			return ""
 		}
 		return override

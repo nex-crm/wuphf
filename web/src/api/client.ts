@@ -103,6 +103,22 @@ export async function post<T = unknown>(
   return r.json();
 }
 
+export async function put<T = unknown>(
+  path: string,
+  body?: unknown,
+): Promise<T> {
+  const r = await fetch(baseURL() + path, {
+    method: "PUT",
+    headers: authHeaders(),
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) {
+    const text = (await r.text().catch(() => "")).trim();
+    throw new Error(text || `${r.status} ${r.statusText}`);
+  }
+  return r.json();
+}
+
 export async function postWithTimeout<T = unknown>(
   path: string,
   body: unknown,
@@ -866,6 +882,7 @@ export function patchSkill(
   );
 }
 
+
 // ── Usage ──
 
 export interface AgentUsage {
@@ -886,24 +903,38 @@ export function getUsage() {
 }
 
 // ── Agent Logs ──
+// Mirrors internal/agent/task_log_reader.go. The broker's /agent-logs
+// returns task summaries by default and tool-call entries when `task` is set.
 
-export interface AgentLog {
-  id: string;
-  agent: string;
-  task?: string;
-  action?: string;
-  content?: string;
-  timestamp?: string;
-  usage?: TokenUsage;
+export interface TaskLogSummary {
+  taskId: string;
+  agentSlug: string;
+  toolCallCount: number;
+  firstToolAt?: number;
+  lastToolAt?: number;
+  hasError?: boolean;
+  sizeBytes: number;
 }
 
-export function getAgentLogs(opts?: { limit?: number; task?: string }) {
-  if (opts?.task) {
-    return get<{ logs: AgentLog[] }>("/agent-logs", { task: opts.task });
-  }
+export interface TaskLogEntry {
+  task_id: string;
+  agent_slug: string;
+  tool_name: string;
+  params?: Record<string, unknown>;
+  result?: string;
+  error?: string;
+  started_at?: number;
+  completed_at?: number;
+}
+
+export function listAgentLogTasks(opts?: { limit?: number }) {
   const params: Record<string, string> = {};
   if (opts?.limit) params.limit = String(opts.limit);
-  return get<{ logs: AgentLog[] }>("/agent-logs", params);
+  return get<{ tasks: TaskLogSummary[] }>("/agent-logs", params);
+}
+
+export function getAgentLogEntries(taskId: string) {
+  return get<{ task: string; entries: TaskLogEntry[] }>("/agent-logs", { task: taskId });
 }
 
 // ── Memory ──
@@ -920,6 +951,7 @@ export function setMemory(namespace: string, key: string, value: string) {
 
 export type LLMProvider =
   | "claude-code"
+  | "ollama"
   | "codex"
   | "opencode"
   | "mlx-lm"
@@ -1048,6 +1080,38 @@ export function getLocalProvidersStatus() {
   return get<LocalProviderStatus[]>("/status/local-providers");
 }
 
+// ── Image generation ──
+
+export interface ImageProviderStatus {
+  kind: string;
+  label: string;
+  blurb: string;
+  reachable: boolean;
+  configured: boolean;
+  base_url?: string;
+  default_model?: string;
+  supported_models?: string[];
+  supports_image: boolean;
+  supports_video: boolean;
+  needs_api_key: boolean;
+  api_key_set: boolean;
+  implementation_ok: boolean;
+  setup_hint?: string;
+}
+
+export function getImageProviders() {
+  return get<{ providers: ImageProviderStatus[] }>("/image-providers");
+}
+
+export function setImageProviderConfig(opts: {
+  kind: string;
+  api_key?: string;
+  base_url?: string;
+  model?: string;
+}) {
+  return put<ImageProviderStatus[]>("/image-providers", opts);
+}
+
 // ── Workspace wipes (Danger Zone) ──
 
 // WorkspaceWipeResult shape mirrors internal/workspace.Result plus the flags
@@ -1075,4 +1139,29 @@ export function resetWorkspace() {
 // The broker resets in place after success so onboarding can reopen immediately.
 export function shredWorkspace() {
   return postWithTimeout<WorkspaceWipeResult>("/workspace/shred", {}, 20_000);
+}
+
+// UpgradeRunResult mirrors broker.upgradeRunResult — keep field names in
+// sync with internal/team/broker.go so a future rename here surfaces a TS
+// error against the canonical wire shape. install_method is optional
+// because the UI also synthesises a result on transport failure (network
+// error / timeout before reaching the broker), where no real method has
+// been observed; the broker itself always sets one of the union members.
+export interface UpgradeRunResult {
+  ok: boolean;
+  install_method?: "global" | "local" | "unknown";
+  command?: string;
+  working_dir?: string;
+  output?: string;
+  error?: string;
+  timed_out?: boolean;
+}
+
+// runUpgrade triggers `npm install [-g] wuphf@latest` on the host that the
+// broker is running on. The 130s timeout is just above the broker-side
+// upgradeRunTimeout (120s) so the client gives the server enough room to
+// surface its own deadline error instead of failing first with a generic
+// "fetch timed out".
+export function runUpgrade() {
+  return postWithTimeout<UpgradeRunResult>("/upgrade/run", {}, 130_000);
 }
