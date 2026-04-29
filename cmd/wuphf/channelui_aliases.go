@@ -145,10 +145,11 @@ var (
 	cloneThreadedMessages = channelui.CloneThreadedMessages
 	renderTimeBucket      = channelui.RenderTimeBucket
 
-	threadRootMessageID = channelui.ThreadRootMessageID
-	hasThreadReplies    = channelui.HasThreadReplies
-	countThreadReplies  = channelui.CountThreadReplies
-	threadParticipants  = channelui.ThreadParticipants
+	threadRootMessageID   = channelui.ThreadRootMessageID
+	hasThreadReplies      = channelui.HasThreadReplies
+	countThreadReplies    = channelui.CountThreadReplies
+	threadParticipants    = channelui.ThreadParticipants
+	flattenThreadMessages = channelui.FlattenThreadMessages
 
 	trimRecoverySentence          = channelui.TrimRecoverySentence
 	renderAwayStrip               = channelui.RenderAwayStrip

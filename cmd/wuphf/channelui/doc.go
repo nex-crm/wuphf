@@ -82,9 +82,13 @@
 //     ThreadRootMessageID walks ReplyTo to the root,
 //     HasThreadReplies reports whether any message replies to a
 //     given id, CountThreadReplies / ThreadParticipants recurse
-//     the children-by-ID adjacency map (built by
-//     flattenThreadMessages) to count descendants and collect
-//     distinct reply-author display names in walk-order.
+//     the children-by-ID adjacency map to count descendants and
+//     collect distinct reply-author display names in walk-order,
+//     and FlattenThreadMessages produces the office-feed thread
+//     layout (timestamp-sorted ThreadedMessage list with depth /
+//     parent-label / collapse state populated; honors expanded[id]
+//     == false to collapse a root and surface HiddenReplies +
+//     ThreadParticipants for the collapsed-summary line).
 //   - recovery.go          — recovery leaf helpers:
 //     TrimRecoverySentence, RenderAwayStrip,
 //     RecoverySurgeryOption struct + BuildRecoverySurgeryOptions

@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"runtime/debug"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -3224,74 +3223,6 @@ func (m *channelModel) syncSidebarCursorToActive() {
 		}
 	}
 	m.clampSidebarCursor()
-}
-
-func flattenThreadMessages(messages []brokerMessage, expanded map[string]bool) []threadedMessage {
-	if len(messages) == 0 {
-		return nil
-	}
-
-	// Sort all messages by timestamp first
-	sorted := make([]brokerMessage, len(messages))
-	copy(sorted, messages)
-	sort.SliceStable(sorted, func(i, j int) bool {
-		return sorted[i].Timestamp < sorted[j].Timestamp
-	})
-
-	byID := make(map[string]brokerMessage, len(sorted))
-	children := make(map[string][]brokerMessage)
-	var roots []brokerMessage
-
-	for _, msg := range sorted {
-		byID[msg.ID] = msg
-	}
-	for _, msg := range sorted {
-		if msg.ReplyTo != "" {
-			if _, ok := byID[msg.ReplyTo]; ok {
-				children[msg.ReplyTo] = append(children[msg.ReplyTo], msg)
-				continue
-			}
-		}
-		roots = append(roots, msg)
-	}
-
-	var out []threadedMessage
-	var walk func(msg brokerMessage, depth int)
-	walk = func(msg brokerMessage, depth int) {
-		parentLabel := ""
-		if msg.ReplyTo != "" {
-			parentLabel = msg.ReplyTo
-			if parent, ok := byID[msg.ReplyTo]; ok {
-				parentLabel = "@" + parent.From
-			}
-		}
-		tm := threadedMessage{
-			Message:     msg,
-			Depth:       depth,
-			ParentLabel: parentLabel,
-		}
-		// Threads are expanded by default. Only collapse if explicitly set to false.
-		if len(children[msg.ID]) > 0 {
-			isExpanded, explicit := expanded[msg.ID]
-			if explicit && !isExpanded {
-				tm.Collapsed = true
-				tm.HiddenReplies = countThreadReplies(children, msg.ID)
-				tm.ThreadParticipants = threadParticipants(children, msg.ID)
-			}
-		}
-		out = append(out, tm)
-		if tm.Collapsed {
-			return
-		}
-		for _, child := range children[msg.ID] {
-			walk(child, depth+1)
-		}
-	}
-
-	for _, root := range roots {
-		walk(root, 0)
-	}
-	return out
 }
 
 // buildThreadPickerOptions returns picker options for all root messages that have replies.

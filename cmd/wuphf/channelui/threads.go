@@ -1,6 +1,9 @@
 package channelui
 
-import "strings"
+import (
+	"sort"
+	"strings"
+)
 
 // ThreadRootMessageID walks up the ReplyTo chain from messageID and
 // returns the root message's ID. Returns the input ID (trimmed) when
@@ -44,6 +47,79 @@ func CountThreadReplies(children map[string][]BrokerMessage, rootID string) int 
 		count += CountThreadReplies(children, child.ID)
 	}
 	return count
+}
+
+// FlattenThreadMessages produces the office-feed thread layout: a
+// timestamp-sorted list of messages where each entry is a
+// ThreadedMessage with Depth, ParentLabel, and (when collapsed)
+// HiddenReplies / ThreadParticipants populated. Threads default to
+// expanded; expanded[msg.ID] == false collapses a thread root and
+// hides its descendants from the output. Dangling ReplyTo targets
+// (parent missing from messages) promote the orphan to a root.
+func FlattenThreadMessages(messages []BrokerMessage, expanded map[string]bool) []ThreadedMessage {
+	if len(messages) == 0 {
+		return nil
+	}
+
+	sorted := make([]BrokerMessage, len(messages))
+	copy(sorted, messages)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		return sorted[i].Timestamp < sorted[j].Timestamp
+	})
+
+	byID := make(map[string]BrokerMessage, len(sorted))
+	children := make(map[string][]BrokerMessage)
+	var roots []BrokerMessage
+
+	for _, msg := range sorted {
+		byID[msg.ID] = msg
+	}
+	for _, msg := range sorted {
+		if msg.ReplyTo != "" {
+			if _, ok := byID[msg.ReplyTo]; ok {
+				children[msg.ReplyTo] = append(children[msg.ReplyTo], msg)
+				continue
+			}
+		}
+		roots = append(roots, msg)
+	}
+
+	var out []ThreadedMessage
+	var walk func(msg BrokerMessage, depth int)
+	walk = func(msg BrokerMessage, depth int) {
+		parentLabel := ""
+		if msg.ReplyTo != "" {
+			parentLabel = msg.ReplyTo
+			if parent, ok := byID[msg.ReplyTo]; ok {
+				parentLabel = "@" + parent.From
+			}
+		}
+		tm := ThreadedMessage{
+			Message:     msg,
+			Depth:       depth,
+			ParentLabel: parentLabel,
+		}
+		if len(children[msg.ID]) > 0 {
+			isExpanded, explicit := expanded[msg.ID]
+			if explicit && !isExpanded {
+				tm.Collapsed = true
+				tm.HiddenReplies = CountThreadReplies(children, msg.ID)
+				tm.ThreadParticipants = ThreadParticipants(children, msg.ID)
+			}
+		}
+		out = append(out, tm)
+		if tm.Collapsed {
+			return
+		}
+		for _, child := range children[msg.ID] {
+			walk(child, depth+1)
+		}
+	}
+
+	for _, root := range roots {
+		walk(root, 0)
+	}
+	return out
 }
 
 // ThreadParticipants returns the distinct display names of every
