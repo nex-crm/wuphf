@@ -11,7 +11,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"runtime/debug"
 	"sort"
@@ -207,8 +206,6 @@ type channelMemberDraft struct {
 	Personality    string
 	PermissionMode string
 }
-
-var mentionPattern = regexp.MustCompile(`@([A-Za-z0-9_-]+)`)
 
 var brokerTokenPath = brokeraddr.DefaultTokenFile
 
@@ -3834,20 +3831,6 @@ func renderInterviewCard(interview channelInterview, selected int, phaseTitle st
 		Padding(0, 1).
 		Width(cardWidth).
 		Render(strings.Join(lines, "\n")) + "\n"
-}
-
-func highlightMentions(text string, agentColors map[string]string) string {
-	return mentionPattern.ReplaceAllStringFunc(text, func(match string) string {
-		slug := strings.TrimPrefix(strings.ToLower(match), "@")
-		color := agentColors[slug]
-		if color == "" {
-			return match
-		}
-		return lipgloss.NewStyle().
-			Foreground(lipgloss.Color(color)).
-			Bold(true).
-			Render(match)
-	})
 }
 
 func postToChannel(text string, replyTo string, channel string) tea.Cmd {

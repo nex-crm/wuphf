@@ -94,6 +94,18 @@
 //     InterviewPhase typed-string + Choose/Draft/Review consts,
 //     InterviewOptionRequiresText, InterviewOptionTextHint, and
 //     SelectedInterviewOption.
+//   - mentions.go          — HighlightMentions wraps every "@slug"
+//     in a colored bold style based on a slug-to-color map (private
+//     mentionPattern regex moved alongside).
+//   - thread_render.go     — pure thread-side-panel rendering:
+//     FlattenThreadReplies (depth-first walk of descendants),
+//     RenderThreadReplies, RenderThreadReply (per-reply
+//     header+body), and RenderThreadMessage (compact parent-style
+//     layout). The channelModel-bound entry renderThreadPanel and
+//     the tui-dependent renderThreadInput stay in package main.
+//   - unread.go            — SummarizeUnreadMessages renders a
+//     short "N new from <names>" label naming up to three distinct
+//     senders for the away-strip.
 //
 // Subsequent extraction PRs will land the workspace / recovery / cache
 // cluster, the sidebar / splash, the broker integrations, and finally

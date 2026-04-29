@@ -156,6 +156,13 @@ var (
 	interviewOptionRequiresText = channelui.InterviewOptionRequiresText
 	interviewOptionTextHint     = channelui.InterviewOptionTextHint
 	selectedInterviewOption     = channelui.SelectedInterviewOption
+
+	highlightMentions       = channelui.HighlightMentions
+	flattenThreadReplies    = channelui.FlattenThreadReplies
+	renderThreadReplies     = channelui.RenderThreadReplies
+	renderThreadReply       = channelui.RenderThreadReply
+	renderThreadMessage     = channelui.RenderThreadMessage
+	summarizeUnreadMessages = channelui.SummarizeUnreadMessages
 )
 
 // Interview-phase typed-string consts.
