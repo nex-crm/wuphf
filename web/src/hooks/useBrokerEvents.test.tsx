@@ -27,6 +27,11 @@ class FakeEventSource {
     const event = new MessageEvent(name, { data: JSON.stringify(data) });
     for (const fn of this.listeners[name] ?? []) fn(event);
   }
+
+  emitRaw(name: string, data: string) {
+    const event = new MessageEvent(name, { data });
+    for (const fn of this.listeners[name] ?? []) fn(event);
+  }
 }
 
 function BrokerEventsHarness() {
@@ -133,6 +138,17 @@ describe("useBrokerEvents unread counts", () => {
           id: "msg-1",
         },
       });
+    });
+
+    expect(useAppStore.getState().unreadByChannel).toEqual({});
+  });
+
+  it("ignores message events with malformed JSON", () => {
+    renderHarness();
+    const [source] = FakeEventSource.created;
+
+    act(() => {
+      source.emitRaw("message", "{not-json");
     });
 
     expect(useAppStore.getState().unreadByChannel).toEqual({});
