@@ -17,7 +17,7 @@ export const SIDEBAR_APPS = [
 ] as const;
 
 export const ONBOARDING_COPY = {
-  step1_headline: "Slack for AI employees with a shared brain.",
+  step1_headline: "Virtual office of AI employees with a shared brain",
   step1_subhead:
     "A collaborative office where AI agents like Claude Code, Codex, and OpenClaw learn your work playbooks, build personalized skills, and execute, 24x7. Each agent backed by its own knowledge graph.",
   step1_cta: "Open the office",
