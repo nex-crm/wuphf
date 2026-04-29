@@ -425,8 +425,13 @@ type teamSkill struct {
 	// teamSkillToFrontmatter so the .md frontmatter and the .rejected.md
 	// tombstone both retain provenance.
 	SourceArticles []string `json:"source_articles,omitempty"`
-	CreatedAt      string   `json:"created_at"`
-	UpdatedAt      string   `json:"updated_at"`
+	// OwnerAgents lists agent slugs that may see and invoke this skill. An
+	// empty slice means the skill is lead-routable (only the office lead can
+	// route it). Round-trips through the same chain as SourceArticles:
+	// specToTeamSkill -> writeSkillProposalLocked -> teamSkillToFrontmatter.
+	OwnerAgents []string `json:"owner_agents,omitempty"`
+	CreatedAt   string   `json:"created_at"`
+	UpdatedAt   string   `json:"updated_at"`
 }
 
 type brokerState struct {
@@ -580,6 +585,15 @@ type Broker struct {
 	// the last 60s so /skills/reject/undo can restore them. Keyed by undo
 	// token. Guarded by b.mu. See skill_crud_endpoints.go for GC semantics.
 	recentlyRejectedSkills map[string]rejectedSkillSnapshot
+
+	// skillEmbedder powers findSimilarActiveSkillLocked when set. Nil means
+	// the similarity gate falls back to token-Jaccard. Wired by Lane A's
+	// integration step (task #5); see skill_similarity.go for the contract.
+	skillEmbedder SkillEmbedder
+	// skillSimCache memoises embeddings per (slug, content-sha) so a single
+	// compile pass doesn't re-embed every existing skill once per candidate.
+	// Lazily allocated by findSimilarActiveSkillLocked when first needed.
+	skillSimCache *skillSimilarityCache
 
 	// statePath is the on-disk broker-state.json path bound at construction.
 	// NewBrokerAt(path) sets this directly; NewBroker() resolves

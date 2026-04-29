@@ -44,6 +44,9 @@ type SkillWuphfMeta struct {
 	Trigger string `yaml:"trigger,omitempty"`
 	// SourceArticles lists the wiki paths that drove this skill's content.
 	SourceArticles []string `yaml:"source_articles,omitempty"`
+	// OwnerAgents lists agent slugs scoped to see and invoke this skill. Empty
+	// means lead-routable (only the office lead can route it).
+	OwnerAgents []string `yaml:"owner_agents,omitempty"`
 	// SourceSignals lists notebook citations (Stage B+ only).
 	SourceSignals []string `yaml:"source_signals,omitempty"`
 	// CreatedBy is the identity that wrote this proposal ("archivist", agent slug, etc.).
@@ -170,6 +173,7 @@ func teamSkillToFrontmatter(sk teamSkill) SkillFrontmatter {
 				Status:             sk.Status,
 				Tags:               append([]string(nil), sk.Tags...),
 				SourceArticles:     append([]string(nil), sk.SourceArticles...),
+				OwnerAgents:        append([]string(nil), sk.OwnerAgents...),
 				WorkflowProvider:   sk.WorkflowProvider,
 				WorkflowKey:        sk.WorkflowKey,
 				WorkflowDefinition: sk.WorkflowDefinition,

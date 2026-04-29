@@ -429,6 +429,7 @@ func specToTeamSkill(fm SkillFrontmatter, body, sourceArticle string) teamSkill 
 		RelayPlatform:      wuphf.RelayPlatform,
 		RelayEventTypes:    append([]string(nil), wuphf.RelayEventTypes...),
 		SourceArticles:     sources,
+		OwnerAgents:        append([]string(nil), wuphf.OwnerAgents...),
 		Status:             "proposed",
 	}
 }

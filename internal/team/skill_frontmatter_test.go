@@ -43,6 +43,7 @@ func TestRenderAndParseSkillMarkdown_RoundTrip(t *testing.T) {
 						Title:                "Weekly Retro",
 						Trigger:              "Every Friday",
 						SourceArticles:       []string{"team/playbooks/retro.md"},
+						OwnerAgents:          []string{"eng", "ceo"},
 						SourceSignals:        []string{"team/agents/eng/notebook/retro-notes.md"},
 						CreatedBy:            "archivist",
 						Status:               "proposed",
@@ -150,6 +151,19 @@ func TestRenderAndParseSkillMarkdown_RoundTrip(t *testing.T) {
 			}
 			if w.RelayPlatform != "" && gw.RelayPlatform != w.RelayPlatform {
 				t.Errorf("Wuphf.RelayPlatform: got %q, want %q", gw.RelayPlatform, w.RelayPlatform)
+			}
+			if len(w.OwnerAgents) > 0 {
+				if len(gw.OwnerAgents) != len(w.OwnerAgents) {
+					t.Errorf("Wuphf.OwnerAgents len: got %d, want %d", len(gw.OwnerAgents), len(w.OwnerAgents))
+				}
+				for i, want := range w.OwnerAgents {
+					if i >= len(gw.OwnerAgents) {
+						break
+					}
+					if gw.OwnerAgents[i] != want {
+						t.Errorf("Wuphf.OwnerAgents[%d]: got %q, want %q", i, gw.OwnerAgents[i], want)
+					}
+				}
 			}
 			if w.SafetyScan != nil {
 				if gw.SafetyScan == nil {
@@ -265,6 +279,7 @@ func TestTeamSkillToFrontmatter(t *testing.T) {
 		RelayPlatform:      "slack",
 		RelayEventTypes:    []string{"message"},
 		SourceArticles:     []string{"team/playbooks/digest.md", "team/agents/comms/notebook/learn-digest.md"},
+		OwnerAgents:        []string{"comms", "ceo"},
 	}
 
 	fm := teamSkillToFrontmatter(sk)
@@ -315,6 +330,16 @@ func TestTeamSkillToFrontmatter(t *testing.T) {
 	for i, want := range sk.SourceArticles {
 		if w.SourceArticles[i] != want {
 			t.Errorf("Wuphf.SourceArticles[%d]: got %q, want %q", i, w.SourceArticles[i], want)
+		}
+	}
+	// Per-agent skill scoping: OwnerAgents must round-trip from teamSkill into
+	// the emitted frontmatter so on-disk SKILL.md retains scope across reboots.
+	if len(w.OwnerAgents) != len(sk.OwnerAgents) {
+		t.Fatalf("Wuphf.OwnerAgents len: got %d, want %d", len(w.OwnerAgents), len(sk.OwnerAgents))
+	}
+	for i, want := range sk.OwnerAgents {
+		if w.OwnerAgents[i] != want {
+			t.Errorf("Wuphf.OwnerAgents[%d]: got %q, want %q", i, w.OwnerAgents[i], want)
 		}
 	}
 }

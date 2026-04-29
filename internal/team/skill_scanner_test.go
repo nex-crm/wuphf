@@ -77,3 +77,79 @@ func TestHasSkillBodyShape(t *testing.T) {
 		})
 	}
 }
+
+// TestSpecToTeamSkill_OwnerAgentsRoundTrip locks in the per-agent skill scoping
+// data field — owner_agents must travel from frontmatter through specToTeamSkill
+// onto the teamSkill struct, mirroring the source_articles plumbing (D2).
+func TestSpecToTeamSkill_OwnerAgentsRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		fm   SkillFrontmatter
+		want []string
+	}{
+		{
+			name: "owner agents from frontmatter",
+			fm: SkillFrontmatter{
+				Name:        "deploy-frontend",
+				Description: "Ship a hotfix release.",
+				Metadata: SkillMetadata{
+					Wuphf: SkillWuphfMeta{
+						OwnerAgents: []string{"deploy-bot", "ceo"},
+					},
+				},
+			},
+			want: []string{"deploy-bot", "ceo"},
+		},
+		{
+			name: "empty owner agents = lead-routable",
+			fm: SkillFrontmatter{
+				Name:        "weekly-retro",
+				Description: "Run the weekly retro.",
+			},
+			want: nil,
+		},
+		{
+			name: "single owner",
+			fm: SkillFrontmatter{
+				Name:        "csm-followup",
+				Description: "Follow up with a customer.",
+				Metadata: SkillMetadata{
+					Wuphf: SkillWuphfMeta{
+						OwnerAgents: []string{"csm"},
+					},
+				},
+			},
+			want: []string{"csm"},
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			spec := specToTeamSkill(tc.fm, "## Steps\n\n1. Do it.", "team/playbooks/x.md")
+
+			if len(spec.OwnerAgents) != len(tc.want) {
+				t.Fatalf("OwnerAgents len: got %d (%v), want %d (%v)", len(spec.OwnerAgents), spec.OwnerAgents, len(tc.want), tc.want)
+			}
+			for i, want := range tc.want {
+				if spec.OwnerAgents[i] != want {
+					t.Errorf("OwnerAgents[%d]: got %q, want %q", i, spec.OwnerAgents[i], want)
+				}
+			}
+
+			// Mutating the spec slice must not bleed back into the source
+			// frontmatter — defensive copy is required so downstream rewrites
+			// can not accidentally edit the parsed frontmatter in place.
+			if len(spec.OwnerAgents) > 0 && len(tc.fm.Metadata.Wuphf.OwnerAgents) > 0 {
+				spec.OwnerAgents[0] = "MUTATED"
+				if tc.fm.Metadata.Wuphf.OwnerAgents[0] == "MUTATED" {
+					t.Error("specToTeamSkill must defensively copy OwnerAgents")
+				}
+			}
+		})
+	}
+}

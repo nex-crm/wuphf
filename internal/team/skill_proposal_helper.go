@@ -113,6 +113,7 @@ func (b *Broker) writeSkillProposalLocked(spec teamSkill) (*teamSkill, error) {
 		UsageCount:          0,
 		Status:              status,
 		SourceArticles:      append([]string(nil), spec.SourceArticles...),
+		OwnerAgents:         append([]string(nil), spec.OwnerAgents...),
 		CreatedAt:           now,
 		UpdatedAt:           now,
 	}
