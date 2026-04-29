@@ -59,6 +59,9 @@ type schedulerBroker interface {
 	PostAutomationMessage(from, channel, title, body, alertID, source, displayName string, ccSlugs []string, replyTo string) (channelMessage, bool, error)
 	UpdateSkillExecutionByWorkflowKey(key, status string, when time.Time) error
 	SetSchedulerJob(job schedulerJob) error
+	// PR 8 Lane G additions for cron registry support.
+	SchedulerJobControl(slug string, defaultInterval time.Duration) (bool, time.Duration)
+	updateSchedulerHeartbeat(slug, label string, intervalMinutes int, nextRun time.Time, status string, runStatus string)
 }
 
 // watchdogScheduler runs the periodic broker-driven watchdog loop. One
@@ -207,6 +210,19 @@ func (w *watchdogScheduler) processOnce() {
 		return
 	}
 	for _, job := range jobs {
+		// PR 8 Lane G: per-instance jobs (task_follow_up, request_follow_up,
+		// task_reminder, task_recheck) inherit the Enabled state of their
+		// class-level system cron. If a human disables "task_reminder" from
+		// the Calendar app, every existing per-task reminder skips its
+		// dispatch this tick. The job is rescheduled (not killed) so flipping
+		// Enabled back on resumes naturally without orphaning state.
+		if classSlug := strings.TrimSpace(job.Kind); classSlug != "" {
+			if classEnabled, _ := w.broker.SchedulerJobControl(classSlug, time.Duration(job.IntervalMinutes)*time.Minute); !classEnabled {
+				next := w.clock.Now().UTC().Add(5 * time.Minute)
+				_ = w.broker.UpdateSchedulerJobState(job.Slug, next, "disabled")
+				continue
+			}
+		}
 		switch strings.TrimSpace(job.TargetType) {
 		case "task":
 			w.processTaskJob(job)
@@ -455,23 +471,15 @@ func (w *watchdogScheduler) recordLedger(channel, kind, targetID, owner, summary
 }
 
 // updateJob is a small helper still used by the launcher's Launch() path
-// to seed the persisted job state on startup. Kept on the scheduler so
-// the broker.SetSchedulerJob call has one owner.
+// to seed the persisted job state on startup. PR 8 Lane G: routes through
+// updateSchedulerHeartbeat so the user-controlled cron-registry fields
+// (Enabled, IntervalOverride, SystemManaged, LastRunStatus) survive each
+// tick instead of being clobbered by SetSchedulerJob's full-row replace.
 func (w *watchdogScheduler) updateJob(slug, label string, interval time.Duration, nextRun time.Time, status string) {
 	if w.broker == nil {
 		return
 	}
-	job := schedulerJob{
-		Slug:            slug,
-		Label:           label,
-		IntervalMinutes: int(interval / time.Minute),
-		NextRun:         nextRun.UTC().Format(time.RFC3339),
-		Status:          status,
-	}
-	if status == "sleeping" {
-		job.LastRun = w.clock.Now().UTC().Format(time.RFC3339)
-	}
-	_ = w.broker.SetSchedulerJob(job)
+	w.broker.updateSchedulerHeartbeat(slug, label, int(interval/time.Minute), nextRun, status, "")
 }
 
 // nextWorkflowRun parses a cron expression and returns the next scheduled
