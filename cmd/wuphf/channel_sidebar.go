@@ -8,6 +8,8 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/nex-crm/wuphf/internal/avatar"
 )
 
 func truncateLabel(label string, max int) string {
@@ -121,9 +123,9 @@ func renderOfficeCharacter(m channelMember, act memberActivity, now time.Time) o
 	if act.Label == "talking" {
 		talkFrame = int(now.UnixNano()/250_000_000) % 2
 	}
-	avatar := renderWuphfAvatar(seed, m.Slug, talkFrame)
+	portrait := avatar.RenderAvatar(seed, m.Slug, talkFrame, agentColorMap[m.Slug])
 	bubble := officeAside(m.Slug, act.Label, m.LastMessage, now)
-	return officeCharacter{Avatar: avatar, Bubble: bubble}
+	return officeCharacter{Avatar: portrait, Bubble: bubble}
 }
 
 func officeAside(slug, activity, lastMessage string, now time.Time) string {

@@ -1,4 +1,4 @@
-package main
+package avatar
 
 import (
 	"crypto/sha1"
@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func spriteDigest(s pixelSprite) string {
+func spriteDigest(s Sprite) string {
 	h := sha1.New()
 	for _, row := range s {
 		for _, v := range row {

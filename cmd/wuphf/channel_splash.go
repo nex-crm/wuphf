@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/nex-crm/wuphf/internal/avatar"
 	"github.com/nex-crm/wuphf/internal/company"
 )
 
@@ -248,16 +249,16 @@ func (m splashModel) renderCast() string {
 			if ceoVariant != "normal" {
 				spriteLines = renderCEOVariant(ceoVariant, m.frame)
 			} else {
-				spriteLines = renderWuphfSplashAvatar(member.Name, member.Slug, m.frame)
+				spriteLines = avatar.RenderSplashAvatar(member.Name, member.Slug, m.frame, agentColorMap[member.Slug])
 			}
 			ceoBlock = &avatarBlock{lines: spriteLines, name: name, slug: member.Slug}
 
 		case member.Slug == "pm":
-			spriteLines = renderWuphfSplashAvatar(member.Name, member.Slug, m.frame)
+			spriteLines = avatar.RenderSplashAvatar(member.Name, member.Slug, m.frame, agentColorMap[member.Slug])
 			pmBlock = &avatarBlock{lines: spriteLines, name: name, slug: member.Slug}
 
 		default:
-			spriteLines = renderWuphfSplashAvatar(member.Name, member.Slug, m.frame)
+			spriteLines = avatar.RenderSplashAvatar(member.Name, member.Slug, m.frame, agentColorMap[member.Slug])
 			rest = append(rest, avatarBlock{lines: spriteLines, name: name, slug: member.Slug})
 		}
 	}
@@ -497,7 +498,7 @@ func (m splashModel) renderNameLabel(slug, name string, slotW int) string {
 // ── CEO sprite variants for the collision gag ───────────────────
 
 func renderCEOVariant(variant string, frame int) []string {
-	var sprite pixelSprite
+	var sprite avatar.Sprite
 	switch variant {
 	case "spill":
 		sprite = spriteCEOSpill()
@@ -511,14 +512,14 @@ func renderCEOVariant(variant string, frame int) []string {
 			sprite = spriteCEOFakeSmileTwitch()
 		}
 	default:
-		sprite = spriteCEO
+		sprite = avatar.SpriteCEO()
 	}
-	return renderSpriteToANSI(sprite, spritePaletteForSlug("ceo"))
+	return avatar.RenderToANSI(sprite, avatar.PaletteForSlug("ceo", agentColorMap["ceo"]))
 }
 
 // CEO shocked — coffee cup flying off to the side, mouth wide open, eyes wide
-func spriteCEOSpill() pixelSprite {
-	return pixelSprite{
+func spriteCEOSpill() avatar.Sprite {
+	return avatar.Sprite{
 		{0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 5, 0},
 		{0, 0, 0, 1, 4, 4, 4, 4, 4, 4, 1, 0, 5, 5},
 		{0, 0, 0, 1, 2, 2, 2, 2, 2, 2, 1, 0, 0, 0},
@@ -537,8 +538,8 @@ func spriteCEOSpill() pixelSprite {
 }
 
 // CEO grumpy — angry eyebrows, tight frown, coffee stain still visible
-func spriteCEOGrumpy() pixelSprite {
-	return pixelSprite{
+func spriteCEOGrumpy() avatar.Sprite {
+	return avatar.Sprite{
 		{0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0},
 		{0, 0, 0, 1, 4, 4, 4, 4, 4, 4, 1, 0, 0, 0},
 		{0, 0, 0, 1, 2, 2, 2, 2, 2, 2, 1, 0, 0, 0},
@@ -557,8 +558,8 @@ func spriteCEOGrumpy() pixelSprite {
 }
 
 // CEO fake smile — forced wide grin, eyebrows up, stain still there
-func spriteCEOFakeSmile() pixelSprite {
-	return pixelSprite{
+func spriteCEOFakeSmile() avatar.Sprite {
+	return avatar.Sprite{
 		{0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0},
 		{0, 0, 0, 1, 4, 4, 4, 4, 4, 4, 1, 0, 0, 0},
 		{0, 0, 1, 1, 2, 2, 2, 2, 2, 2, 1, 1, 0, 0}, // eyebrows up
@@ -577,8 +578,8 @@ func spriteCEOFakeSmile() pixelSprite {
 }
 
 // CEO fake smile twitching — smile flickers, one eyebrow drops
-func spriteCEOFakeSmileTwitch() pixelSprite {
-	return pixelSprite{
+func spriteCEOFakeSmileTwitch() avatar.Sprite {
+	return avatar.Sprite{
 		{0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0},
 		{0, 0, 0, 1, 4, 4, 4, 4, 4, 4, 1, 0, 0, 0},
 		{0, 0, 0, 1, 2, 2, 2, 2, 2, 2, 1, 1, 0, 0}, // one eyebrow up, one down
