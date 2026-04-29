@@ -369,37 +369,6 @@ func renderRuntimeStrip(members []channelMember, tasks []channelTask, requests [
 	return cardStyle.Render(line1 + "\n" + mutedText(detail))
 }
 
-func renderRuntimeEventCard(width int, title, body, accent string, extra []string) []string {
-	if width < 28 {
-		return []string{"  " + title, "    " + body}
-	}
-	lines := []string{title}
-	if strings.TrimSpace(body) != "" {
-		lines = append(lines, mutedText(body))
-	}
-	for _, line := range extra {
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-		lines = append(lines, mutedText(line))
-	}
-	card := lipgloss.NewStyle().
-		Width(width-2).
-		Border(lipgloss.ThickBorder(), false, false, false, true).
-		BorderForeground(lipgloss.Color(accent)).
-		Background(lipgloss.Color("#16181E")).
-		Padding(0, 1).
-		Render(strings.Join(lines, "\n"))
-	return strings.Split(card, "\n")
-}
-
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 func recentDirectExecutionActions(actions []channelAction, focusSlug string, limit int) []channelAction {
 	var filtered []channelAction
 	for _, action := range actions {

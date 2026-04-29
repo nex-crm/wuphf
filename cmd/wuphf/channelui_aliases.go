@@ -67,4 +67,12 @@ var (
 
 	displayName = channelui.DisplayName
 	roleLabel   = channelui.RoleLabel
+
+	minInt                 = channelui.MinInt
+	renderRuntimeEventCard = channelui.RenderRuntimeEventCard
+
+	buildNeedsYouLines           = channelui.BuildNeedsYouLines
+	buildNeedsYouLinesForRequest = channelui.BuildNeedsYouLinesForRequest
+	selectNeedsYouRequest        = channelui.SelectNeedsYouRequest
+	isOpenInterviewStatus        = channelui.IsOpenInterviewStatus
 )

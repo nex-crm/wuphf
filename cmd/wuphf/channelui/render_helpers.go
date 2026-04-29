@@ -93,3 +93,39 @@ func DisplayDecisionSummary(summary string) string {
 	}
 	return summary
 }
+
+// MinInt returns the smaller of two ints.
+func MinInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+// RenderRuntimeEventCard renders a left-bordered card with a title row,
+// optional body row, and an arbitrary number of muted "extra" lines.
+// The accent color drives the left border. Falls back to two unstyled
+// lines when width is too small for a card to make sense.
+func RenderRuntimeEventCard(width int, title, body, accent string, extra []string) []string {
+	if width < 28 {
+		return []string{"  " + title, "    " + body}
+	}
+	lines := []string{title}
+	if strings.TrimSpace(body) != "" {
+		lines = append(lines, MutedText(body))
+	}
+	for _, line := range extra {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		lines = append(lines, MutedText(line))
+	}
+	card := lipgloss.NewStyle().
+		Width(width-2).
+		Border(lipgloss.ThickBorder(), false, false, false, true).
+		BorderForeground(lipgloss.Color(accent)).
+		Background(lipgloss.Color("#16181E")).
+		Padding(0, 1).
+		Render(strings.Join(lines, "\n"))
+	return strings.Split(card, "\n")
+}
