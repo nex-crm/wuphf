@@ -129,20 +129,6 @@ type Launcher struct {
 	notifyMu            sync.Mutex
 	notifyLastDelivered map[string]time.Time
 
-	// paneDispatchMu serializes access to paneDispatchQueues /
-	// paneDispatchWorkers. Each pane-backed agent has its own queue so
-	// rapid notifications no longer race with claude's in-progress turn —
-	// one worker per slug drains its queue with a minimum spacing between
-	// `/clear` sends so claude has time to finalise each reply.
-	paneDispatchMu      sync.Mutex
-	paneDispatchQueues  map[string][]paneDispatchTurn
-	paneDispatchWorkers map[string]bool
-	// paneDispatchLastSentAt records when each slug most recently had a
-	// `/clear` + type cycle dispatched. The coalesce logic in
-	// queuePaneNotification uses this to decide whether to merge a new
-	// notification with a pending one or to start a fresh dispatch.
-	paneDispatchLastSentAt map[string]time.Time
-
 	// targets owns the office-membership-shape and routing-decision logic
 	// (PLAN.md §C2). Lazily constructed via targeter() so tests that build
 	// &Launcher{} directly stay nil-safe. The launcher field stays the
@@ -160,6 +146,12 @@ type Launcher struct {
 	// (PLAN.md §C4). Lazily constructed via scheduler(); Launch() calls
 	// Start, Kill() calls Stop. clock is realClock in production.
 	schedulerWorker *watchdogScheduler
+
+	// dispatcher owns the per-slug pane-dispatch workers (PLAN.md §C6).
+	// Lazily constructed via paneDispatch(); the dispatcher.sendFn
+	// closure consults the package-global launcherSendNotificationToPaneOverride
+	// seam on every call so existing tests keep working unchanged.
+	dispatcher *paneDispatcher
 }
 
 // paneDispatchTurn is one queued notification to type into a tmux pane.
@@ -1977,152 +1969,40 @@ var paneDispatchMinGap = 3 * time.Second
 // them together, and never loses one to a mid-turn clear.
 var paneDispatchCoalesceWindow = 60 * time.Second
 
-// queuePaneNotification enqueues a notification for a pane-backed agent
-// and ensures there is one worker draining its queue. Rapid successive
-// tags for the same slug coalesce into a single dispatch if they arrive
-// inside paneDispatchCoalesceWindow — this is the defence against
-// mid-turn `/clear` wiping claude's in-progress output.
-func (l *Launcher) queuePaneNotification(slug, paneTarget, notification string) {
-	slug = strings.TrimSpace(slug)
-	paneTarget = strings.TrimSpace(paneTarget)
-	if slug == "" || paneTarget == "" || notification == "" {
-		return
+// paneDispatch returns the lazily-constructed dispatcher (PLAN.md §C6).
+// Nil-safe: returns a fresh dispatcher even when l == nil so &Launcher{}
+// fixtures stay nil-safe in tests. The sendFn closure consults the
+// package-global launcherSendNotificationToPaneOverride seam on every
+// call so existing tests keep working unchanged (PLAN.md trap §5.3).
+func (l *Launcher) paneDispatch() *paneDispatcher {
+	if l == nil {
+		return &paneDispatcher{clock: realClock{}}
 	}
-	l.paneDispatchMu.Lock()
-	if l.paneDispatchQueues == nil {
-		l.paneDispatchQueues = make(map[string][]paneDispatchTurn)
+	if l.dispatcher != nil {
+		return l.dispatcher
 	}
-	if l.paneDispatchWorkers == nil {
-		l.paneDispatchWorkers = make(map[string]bool)
+	l.dispatcher = &paneDispatcher{
+		clock: realClock{},
+		sendFn: func(paneTarget, notification string) {
+			launcherSendNotificationToPane(l, paneTarget, notification)
+		},
 	}
-	if l.paneDispatchLastSentAt == nil {
-		l.paneDispatchLastSentAt = make(map[string]time.Time)
-	}
-	// Coalesce path: if a pending turn already exists OR the last send was
-	// within the coalesce window, merge rather than enqueue a separate
-	// dispatch. Merging into the head-of-queue pending item is the cleanest
-	// because the worker picks up the merged content on its next iteration.
-	inflight := false
-	if last, ok := l.paneDispatchLastSentAt[slug]; ok && time.Since(last) < paneDispatchCoalesceWindow {
-		inflight = true
-	}
-	queue := l.paneDispatchQueues[slug]
-	if (inflight || len(queue) > 0) && len(queue) > 0 {
-		// Combine with the pending turn. Claude will see both prompts
-		// separated by a visible divider and typically answers both.
-		last := &l.paneDispatchQueues[slug][len(queue)-1]
-		last.Notification = last.Notification + "\n\n---\n\n" + notification
-		last.EnqueuedAt = time.Now()
-		l.paneDispatchMu.Unlock()
-		return
-	}
-	if inflight && len(queue) == 0 {
-		// No pending turn yet but claude is mid-flight from a recent send.
-		// Create a single pending turn that will absorb further bursts
-		// through the branch above. The worker's pre-send wait will let
-		// claude's current turn finish before /clear fires.
-		l.paneDispatchQueues[slug] = []paneDispatchTurn{{
-			PaneTarget:   paneTarget,
-			Notification: notification,
-			EnqueuedAt:   time.Now(),
-		}}
-		startWorker := !l.paneDispatchWorkers[slug]
-		if startWorker {
-			l.paneDispatchWorkers[slug] = true
-		}
-		l.paneDispatchMu.Unlock()
-		if startWorker {
-			go l.runPaneDispatchQueue(slug)
-		}
-		return
-	}
-	// Cold path: no recent activity, no queue. Dispatch immediately.
-	l.paneDispatchQueues[slug] = append(l.paneDispatchQueues[slug], paneDispatchTurn{
-		PaneTarget:   paneTarget,
-		Notification: notification,
-		EnqueuedAt:   time.Now(),
-	})
-	startWorker := !l.paneDispatchWorkers[slug]
-	if startWorker {
-		l.paneDispatchWorkers[slug] = true
-	}
-	l.paneDispatchMu.Unlock()
-	if startWorker {
-		go l.runPaneDispatchQueue(slug)
-	}
+	return l.dispatcher
 }
 
-// runPaneDispatchQueue is the single worker per agent slug that drains
-// pane-dispatch notifications serially with a minimum gap between
-// `/clear` cycles. Exits when the queue is empty.
-//
-// Per-iteration flow:
-//  1. Peek head of queue.
-//  2. Wait out min-gap (floor) + coalesce window (lets claude's current turn
-//     land). During the wait, concurrent queuePaneNotification calls MAY
-//     merge new content into the head's Notification field — the peek is
-//     re-read after the wait so the pop sees the merged string.
-//  3. Pop + send.
-//  4. Record the send time so the next enqueue sees "claude in flight".
+// queuePaneNotification is a thin wrapper around paneDispatcher.Enqueue
+// (PLAN.md §C6). Kept as a Launcher method so existing call sites and
+// the pane_dispatch_queue_test.go safety net don't need a rename sweep
+// in this PR.
+func (l *Launcher) queuePaneNotification(slug, paneTarget, notification string) {
+	l.paneDispatch().Enqueue(slug, paneTarget, notification)
+}
+
+// runPaneDispatchQueue is retained as a Launcher method for compatibility
+// with any in-package goroutine spawn that might still reference the
+// historical name. Internally it just invokes the dispatcher's runQueue.
 func (l *Launcher) runPaneDispatchQueue(slug string) {
-	var lastSentAt time.Time
-	for {
-		// Step 1: peek (not pop).
-		l.paneDispatchMu.Lock()
-		queue := l.paneDispatchQueues[slug]
-		if len(queue) == 0 {
-			// Atomic handoff: clear worker flag while holding the lock so a
-			// concurrent queuePaneNotification observes "no worker" and
-			// starts a fresh goroutine for the next enqueue.
-			delete(l.paneDispatchWorkers, slug)
-			delete(l.paneDispatchQueues, slug)
-			l.paneDispatchMu.Unlock()
-			return
-		}
-		globalLastSentAt := l.paneDispatchLastSentAt[slug]
-		l.paneDispatchMu.Unlock()
-
-		// Step 2a: min-gap floor against sub-second bursts.
-		if !lastSentAt.IsZero() {
-			wait := paneDispatchMinGap - time.Since(lastSentAt)
-			if wait > 0 {
-				time.Sleep(wait)
-			}
-		}
-		// Step 2b: coalesce window — wait for claude's in-flight turn to
-		// land before /clear fires again. New notifications arriving
-		// during this wait are merged into the head by queuePaneNotification.
-		if !globalLastSentAt.IsZero() {
-			wait := paneDispatchCoalesceWindow - time.Since(globalLastSentAt)
-			if wait > 0 {
-				time.Sleep(wait)
-			}
-		}
-
-		// Step 3: pop (re-read head to pick up any merged content).
-		l.paneDispatchMu.Lock()
-		queue = l.paneDispatchQueues[slug]
-		if len(queue) == 0 {
-			// Defensive: external actor emptied the queue during our wait.
-			l.paneDispatchMu.Unlock()
-			continue
-		}
-		turn := queue[0]
-		if len(queue) == 1 {
-			delete(l.paneDispatchQueues, slug)
-		} else {
-			l.paneDispatchQueues[slug] = queue[1:]
-		}
-		l.paneDispatchMu.Unlock()
-
-		launcherSendNotificationToPane(l, turn.PaneTarget, turn.Notification)
-
-		// Step 4: record send time for the next enqueue's coalesce check.
-		lastSentAt = time.Now()
-		l.paneDispatchMu.Lock()
-		l.paneDispatchLastSentAt[slug] = lastSentAt
-		l.paneDispatchMu.Unlock()
-	}
+	l.paneDispatch().runQueue(slug)
 }
 
 // launcherSendNotificationToPaneFn is the test seam type swapped via
