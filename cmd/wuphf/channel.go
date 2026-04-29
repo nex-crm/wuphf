@@ -112,13 +112,6 @@ func appendUniqueMessages(existing, incoming []brokerMessage) ([]brokerMessage, 
 	return out, added
 }
 
-func normalizeSidebarSlug(value string) string {
-	value = strings.ToLower(strings.TrimSpace(value))
-	value = strings.ReplaceAll(value, " ", "-")
-	value = strings.ReplaceAll(value, "_", "-")
-	return value
-}
-
 type channelHealthMsg struct {
 	Connected     bool
 	SessionMode   string

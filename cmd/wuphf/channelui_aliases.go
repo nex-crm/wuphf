@@ -116,6 +116,15 @@ var (
 	schedulerTargetTaskID              = channelui.SchedulerTargetTaskID
 	schedulerTargetRequestID           = channelui.SchedulerTargetRequestID
 	schedulerTargetThreadID            = channelui.SchedulerTargetThreadID
+
+	normalizeSidebarSlug          = channelui.NormalizeSidebarSlug
+	buildCalendarLines            = channelui.BuildCalendarLines
+	buildCalendarToolbar          = channelui.BuildCalendarToolbar
+	renderCalendarEventCard       = channelui.RenderCalendarEventCard
+	renderCalendarParticipantCard = channelui.RenderCalendarParticipantCard
+	renderCalendarActionCard      = channelui.RenderCalendarActionCard
+	renderedCardLines             = channelui.RenderedCardLines
+	renderedCardLinesWithPrompt   = channelui.RenderedCardLinesWithPrompt
 )
 
 // Calendar-range typed-string consts.

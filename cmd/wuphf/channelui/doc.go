@@ -60,6 +60,13 @@
 //     OrderedCalendarParticipants), CalendarEventColors, and the
 //     SchedulerTarget* helpers that map a job to its task / request /
 //     thread.
+//   - calendar_render.go   — calendar rendering layer:
+//     BuildCalendarLines (entry), BuildCalendarToolbar,
+//     RenderCalendarEventCard, RenderCalendarParticipantCard,
+//     RenderCalendarActionCard, the RenderedCardLines /
+//     RenderedCardLinesWithPrompt card-to-RenderedLine adapters, and
+//     NormalizeSidebarSlug (used to canonicalize channel slugs for
+//     equality).
 //
 // Subsequent extraction PRs will land the workspace / recovery / cache
 // cluster, the sidebar / splash, the broker integrations, and finally
