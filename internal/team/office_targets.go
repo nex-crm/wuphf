@@ -14,12 +14,15 @@ package team
 //     launcher's *current* map reference. Required because
 //     reconfigureVisibleAgents nils l.failedPaneSlugs and the next pane-
 //     spawn failure rebuilds it; a cached map pointer here would become
-//     orphaned. The map is still unsynchronized — no mutex — but the
-//     race is dormant because trySpawnWebAgentPanes is a runtime-promotion
-//     fallback that nothing currently invokes (see launcher.go:2647 /
-//     3470). C5 (paneLifecycle) adds the mutex and replaces this with
-//     failedPane(slug) lookup, which is what the callback shape already
-//     anticipates.
+//     orphaned. The map is still unsynchronized — no mutex. Writers:
+//     (1) trySpawnWebAgentPanes (runtime-promotion fallback, currently
+//     unwired); (2) reconfigureVisibleAgents → recordPaneSpawnFailure on
+//     office_reseeded events, while peer goroutines (notifyAgentsLoop,
+//     notifyTaskActionsLoop, watchdogSchedulerLoop, ...) read
+//     concurrently via SkipPane / ShouldUseHeadlessForSlug. Race
+//     detector hasn't tripped only because integration tests don't
+//     exercise reseeds at scale — a dedicated mutex (or moving this to
+//     paneLifecycle in C5) is the right next step.
 
 import (
 	"fmt"
