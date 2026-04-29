@@ -679,7 +679,7 @@ func renderCalendarEventCard(event calendarEvent, contentWidth int) []renderedLi
 func renderCalendarParticipantCard(name string, event calendarEvent, contentWidth int, agentSlug string) []renderedLine {
 	cardWidth := maxInt(20, contentWidth-10)
 	accent := "#334155"
-	if color := agentColorMap[agentSlug]; color != "" {
+	if color := agentColor(agentSlug); color != "" {
 		accent = color
 	}
 	header := lipgloss.JoinHorizontal(lipgloss.Left,

@@ -191,7 +191,7 @@ func renderThreadReplies(replies []threadedMessage, width int) []string {
 
 func renderThreadReply(reply threadedMessage, width int) []string {
 	msg := reply.Message
-	color := agentColorMap[msg.From]
+	color := agentColor(msg.From)
 	if color == "" {
 		color = "#9CA3AF"
 	}
@@ -247,7 +247,7 @@ func renderThreadReply(reply threadedMessage, width int) []string {
 
 // renderThreadMessage renders a single message in thread style (compact).
 func renderThreadMessage(msg brokerMessage, width int, isParent bool) []string {
-	color := agentColorMap[msg.From]
+	color := agentColor(msg.From)
 	if color == "" {
 		color = "#9CA3AF"
 	}

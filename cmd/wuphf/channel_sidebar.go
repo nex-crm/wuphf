@@ -37,13 +37,6 @@ const (
 	dotIdle     = "#ABABAD"
 )
 
-// sidebarAgentColors maps slugs to their display colors.
-var sidebarAgentColors = map[string]string{
-	"ceo": "#EAB308", "pm": "#22C55E", "fe": "#3B82F6",
-	"be": "#8B5CF6", "ai": "#14B8A6", "designer": "#EC4899",
-	"cmo": "#F97316", "cro": "#06B6D4", "you": "#38BDF8", "human": "#38BDF8",
-}
-
 // memberActivity describes what an agent is doing based on recency and content.
 type memberActivity struct {
 	Label string
@@ -581,7 +574,7 @@ func renderSidebar(channels []channelInfo, members []channelMember, tasks []chan
 		dotStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(act.Color))
 		dot := dotStyle.Render(act.Dot)
 
-		agentColor := sidebarAgentColors[m.Slug]
+		agentColor := agentColor(m.Slug)
 		if agentColor == "" {
 			agentColor = "#64748B"
 		}

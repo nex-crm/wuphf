@@ -35,6 +35,22 @@ func altRuneKey(r rune) tea.KeyMsg {
 	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}, Alt: true}
 }
 
+func TestHighlightMentionsLeavesUnknownSlugsPlain(t *testing.T) {
+	got := highlightMentions("@not-a-real-agent", map[string]string{"ceo": "#E8A838"})
+	if got != "@not-a-real-agent" {
+		t.Fatalf("expected unknown mention to stay plain, got %q", got)
+	}
+}
+
+func TestThreadParticipantDisplayNamesUseCanonicalColors(t *testing.T) {
+	if got, want := threadParticipantColor("Product Manager"), agentColor("pm"); got != want {
+		t.Fatalf("Product Manager color = %q, want canonical pm color %q", got, want)
+	}
+	if got, want := threadParticipantColor("@custom-ops-agent"), agentColor("custom-ops-agent"); got != want {
+		t.Fatalf("custom participant color = %q, want procedural color %q", got, want)
+	}
+}
+
 func TestNewBrokerRequestUsesEnvTokenAtRequestTime(t *testing.T) {
 	oldEnv := os.Getenv("WUPHF_BROKER_TOKEN")
 	oldPath := brokerTokenPath
