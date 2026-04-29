@@ -153,7 +153,12 @@ func TestRunHeadlessCodexTurnUsesHeadlessOfficeRuntime(t *testing.T) {
 
 	t.Setenv("GO_WANT_HEADLESS_CODEX_HELPER_PROCESS", "1")
 	t.Setenv("HEADLESS_CODEX_RECORD_FILE", recordFile)
-	t.Setenv("HOME", t.TempDir())
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	// Pair WUPHF_RUNTIME_HOME so headlessCodexRuntimeHomeDir resolves to the
+	// same tempdir post-Phase-0 migration (worktree_guard_test init pins a
+	// process-wide WUPHF_RUNTIME_HOME otherwise).
+	t.Setenv("WUPHF_RUNTIME_HOME", tmpHome)
 	t.Setenv("WUPHF_API_KEY", "nex-secret-key")
 	t.Setenv("WUPHF_OPENAI_API_KEY", "openai-secret-key")
 	t.Setenv("WUPHF_ONE_SECRET", "one-secret-value")
@@ -287,7 +292,11 @@ func TestRunHeadlessCodexTurnUsesAssignedWorktreeForCodingAgents(t *testing.T) {
 
 	t.Setenv("GO_WANT_HEADLESS_CODEX_HELPER_PROCESS", "1")
 	t.Setenv("HEADLESS_CODEX_RECORD_FILE", recordFile)
-	t.Setenv("HOME", t.TempDir())
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	// Pair WUPHF_RUNTIME_HOME so headlessCodexRuntimeHomeDir resolves to the
+	// same tempdir (post-Phase-0).
+	t.Setenv("WUPHF_RUNTIME_HOME", tmpHome)
 	t.Setenv("OPENAI_API_KEY", "test-key")
 	t.Setenv("PWD", repoRoot)
 	t.Setenv("OLDPWD", "/tmp/previous")
@@ -538,6 +547,10 @@ func TestPrepareHeadlessCodexHomeUsesDedicatedRuntimeHomeAndCopiesAuth(t *testin
 	sourceHome := t.TempDir()
 	runtimeHome := t.TempDir()
 	t.Setenv("HOME", runtimeHome)
+	// Pair WUPHF_RUNTIME_HOME with HOME so config.RuntimeHomeDir (which Lane A's
+	// headlessCodexRuntimeHomeDir now goes through) resolves to runtimeHome and
+	// not the worktree_guard_test process-wide pin.
+	t.Setenv("WUPHF_RUNTIME_HOME", runtimeHome)
 	t.Setenv("WUPHF_GLOBAL_HOME", sourceHome)
 
 	sourceCodexHome := filepath.Join(sourceHome, ".codex")
