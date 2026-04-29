@@ -101,9 +101,11 @@ func wuphfTestBinary(root string) string {
 	return ""
 }
 
-// waitForPort polls addr (host:port) until it accepts a TCP connection or
-// ctx is done.
-func waitForPort(ctx context.Context, addr string) error {
+// waitForTCPAddr polls addr (host:port) until it accepts a TCP connection or
+// ctx is done. Distinct from spawn.go's waitForPort (HTTP HEAD on int port);
+// this test path only needs to confirm the broker is bound to a loopback
+// socket, not whether HTTP routing is up yet.
+func waitForTCPAddr(ctx context.Context, addr string) error {
 	for {
 		select {
 		case <-ctx.Done():
@@ -193,7 +195,7 @@ func TestRuntimeHomeIsolation(t *testing.T) {
 	waitCtx, waitCancel := context.WithTimeout(ctx, 20*time.Second)
 	defer waitCancel()
 
-	if err := waitForPort(waitCtx, brokerAddr); err != nil {
+	if err := waitForTCPAddr(waitCtx, brokerAddr); err != nil {
 		// Kill before logging output so the test doesn't hang.
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
