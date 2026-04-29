@@ -45,6 +45,13 @@ func buildSessionRecovery(sessionMode, directAgent string, tasks []RuntimeTask, 
 		if strings.TrimSpace(task.ReviewState) != "" && task.ReviewState != "not_required" && task.ReviewState != "approved" {
 			recovery.NextSteps = appendUnique(recovery.NextSteps, fmt.Sprintf("Review flow is active on %s (%s).", task.ID, task.ReviewState))
 		}
+		if strings.TrimSpace(task.MemoryPolicy) == taskMemoryPolicyRequired && !task.MemoryComplete {
+			missing := strings.Join(task.MemoryMissing, ", ")
+			if missing == "" {
+				missing = "prior memory search, notebook write, promote-or-skip decision"
+			}
+			recovery.NextSteps = appendUnique(recovery.NextSteps, fmt.Sprintf("Complete memory workflow for %s before marking it done: %s.", task.ID, missing))
+		}
 		if task.Blocked {
 			recovery.NextSteps = appendUnique(recovery.NextSteps, fmt.Sprintf("%s is blocked; check dependencies before continuing.", task.ID))
 		}
@@ -106,6 +113,15 @@ func summarizeTask(task RuntimeTask) string {
 	}
 	if stage := strings.TrimSpace(task.PipelineStage); stage != "" {
 		text += " at stage " + stage
+	}
+	if policy := strings.TrimSpace(task.MemoryPolicy); policy != "" && policy != taskMemoryPolicyNone {
+		text += " with memory_policy=" + policy
+		if topic := strings.TrimSpace(task.MemoryTopic); topic != "" {
+			text += " topic " + topic
+		}
+		if !task.MemoryComplete && len(task.MemoryMissing) > 0 {
+			text += " missing " + strings.Join(task.MemoryMissing, "/")
+		}
 	}
 	return text + "."
 }

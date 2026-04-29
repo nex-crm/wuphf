@@ -295,6 +295,118 @@ func TestBrokerTaskLifecycle(t *testing.T) {
 	}
 }
 
+func TestBrokerProcessResearchMemoryGate(t *testing.T) {
+	b := newTestBroker(t)
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("failed to start broker: %v", err)
+	}
+	defer b.Stop()
+
+	base := fmt.Sprintf("http://%s", b.Addr())
+	post := func(body map[string]any, wantStatus int) (teamTask, string) {
+		t.Helper()
+		raw, _ := json.Marshal(body)
+		req, _ := http.NewRequest(http.MethodPost, base+"/tasks", bytes.NewReader(raw))
+		req.Header.Set("Authorization", "Bearer "+b.Token())
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("POST /tasks: %v", err)
+		}
+		defer resp.Body.Close()
+		payload, _ := io.ReadAll(resp.Body)
+		if resp.StatusCode != wantStatus {
+			t.Fatalf("status=%d want=%d body=%s", resp.StatusCode, wantStatus, payload)
+		}
+		if wantStatus != http.StatusOK {
+			return teamTask{}, string(payload)
+		}
+		var result struct {
+			Task teamTask `json:"task"`
+		}
+		if err := json.Unmarshal(payload, &result); err != nil {
+			t.Fatalf("decode task response: %v body=%s", err, payload)
+		}
+		return result.Task, string(payload)
+	}
+
+	created, _ := post(map[string]any{
+		"action":     "create",
+		"title":      "Research the passport application process",
+		"details":    "Find the reusable steps and requirements.",
+		"created_by": "ceo",
+		"owner":      "research",
+		"task_type":  "research",
+	}, http.StatusOK)
+	if created.MemoryPolicy != taskMemoryPolicyRequired {
+		t.Fatalf("expected required memory policy, got %+v", created)
+	}
+	if created.MemoryTopic != "passport-application" {
+		t.Fatalf("expected passport topic, got %+v", created)
+	}
+
+	_, body := post(map[string]any{
+		"action":     "complete",
+		"id":         created.ID,
+		"created_by": "ceo",
+	}, http.StatusConflict)
+	if !strings.Contains(body, "prior memory search") ||
+		!strings.Contains(body, "notebook write") ||
+		!strings.Contains(body, "promote-or-skip decision") {
+		t.Fatalf("expected memory gate missing requirements, got %q", body)
+	}
+
+	notePath := "agents/research/notebook/passport-application.md"
+	if err := b.RecordTaskMemoryEvidence(created.ID, taskMemoryEvidence{
+		Kind:  taskMemoryEvidencePriorSearch,
+		Tool:  "notebook_search",
+		Actor: "research",
+		Query: "passport application",
+		Hits:  0,
+	}); err != nil {
+		t.Fatalf("record search evidence: %v", err)
+	}
+	if err := b.RecordTaskMemoryEvidence(created.ID, taskMemoryEvidence{
+		Kind:      taskMemoryEvidenceNotebookWrite,
+		Tool:      "notebook_write",
+		Actor:     "research",
+		Path:      notePath,
+		CommitSHA: "abc123",
+	}); err != nil {
+		t.Fatalf("record write evidence: %v", err)
+	}
+
+	_, body = post(map[string]any{
+		"action":     "complete",
+		"id":         created.ID,
+		"created_by": "ceo",
+	}, http.StatusConflict)
+	if !strings.Contains(body, "promote-or-skip decision") {
+		t.Fatalf("expected missing promotion decision, got %q", body)
+	}
+
+	mem, _ := post(map[string]any{
+		"action":             "memory",
+		"id":                 created.ID,
+		"created_by":         "ceo",
+		"promotion_decision": "skipped",
+		"notebook_path":      notePath,
+		"promotion_reason":   "Process note is useful but not canonical until human verifies current government forms.",
+	}, http.StatusOK)
+	if mem.MemoryChecklist == nil || !mem.MemoryChecklist.Complete {
+		t.Fatalf("expected complete memory checklist, got %+v", mem.MemoryChecklist)
+	}
+
+	done, _ := post(map[string]any{
+		"action":     "complete",
+		"id":         created.ID,
+		"created_by": "ceo",
+	}, http.StatusOK)
+	if done.Status != "done" {
+		t.Fatalf("expected done task after memory workflow, got %+v", done)
+	}
+}
+
 func TestBrokerTaskReassignNotifies(t *testing.T) {
 	b := newTestBroker(t)
 	if err := b.StartOnPort(0); err != nil {

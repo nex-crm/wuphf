@@ -118,6 +118,7 @@ func normalizeTaskPlan(task *teamTask) {
 		(task.ReviewState == "pending_review" || task.ReviewState == "ready_for_review") {
 		task.ReviewState = "approved"
 	}
+	normalizeTaskMemoryPlan(task)
 	task.PipelineStage = taskStageForStatus(task)
 }
 

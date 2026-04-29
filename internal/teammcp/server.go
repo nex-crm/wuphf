@@ -181,18 +181,28 @@ type brokerMemoryNote struct {
 }
 
 type brokerTaskSummary struct {
-	ID               string   `json:"id"`
-	Channel          string   `json:"channel"`
-	Title            string   `json:"title"`
-	Details          string   `json:"details"`
-	Owner            string   `json:"owner"`
-	Status           string   `json:"status"`
-	CreatedBy        string   `json:"created_by"`
-	ThreadID         string   `json:"thread_id"`
-	TaskType         string   `json:"task_type"`
-	PipelineStage    string   `json:"pipeline_stage"`
-	ExecutionMode    string   `json:"execution_mode"`
-	ReviewState      string   `json:"review_state"`
+	ID              string `json:"id"`
+	Channel         string `json:"channel"`
+	Title           string `json:"title"`
+	Details         string `json:"details"`
+	Owner           string `json:"owner"`
+	Status          string `json:"status"`
+	CreatedBy       string `json:"created_by"`
+	ThreadID        string `json:"thread_id"`
+	TaskType        string `json:"task_type"`
+	PipelineStage   string `json:"pipeline_stage"`
+	ExecutionMode   string `json:"execution_mode"`
+	ReviewState     string `json:"review_state"`
+	MemoryPolicy    string `json:"memory_policy,omitempty"`
+	MemoryTopic     string `json:"memory_topic,omitempty"`
+	MemoryChecklist *struct {
+		Required          bool     `json:"required"`
+		PriorSearch       bool     `json:"prior_search"`
+		NotebookWrite     bool     `json:"notebook_write"`
+		PromotionDecision bool     `json:"promotion_decision"`
+		Complete          bool     `json:"complete"`
+		Missing           []string `json:"missing,omitempty"`
+	} `json:"memory_checklist,omitempty"`
 	SourceSignalID   string   `json:"source_signal_id"`
 	SourceDecisionID string   `json:"source_decision_id"`
 	WorktreePath     string   `json:"worktree_path"`
@@ -298,17 +308,22 @@ type TeamRuntimeStateArgs struct {
 }
 
 type TeamTaskArgs struct {
-	Action        string   `json:"action" jsonschema:"One of: create, claim, assign, complete, block, resume, release"`
-	Channel       string   `json:"channel,omitempty" jsonschema:"Channel slug. Defaults to the agent's current channel or general."`
-	ID            string   `json:"id,omitempty" jsonschema:"Task ID for non-create actions"`
-	Title         string   `json:"title,omitempty" jsonschema:"Task title when creating a task"`
-	Details       string   `json:"details,omitempty" jsonschema:"Optional detail or update"`
-	Owner         string   `json:"owner,omitempty" jsonschema:"Owner slug for claim or assign"`
-	ThreadID      string   `json:"thread_id,omitempty" jsonschema:"Related thread or message id"`
-	TaskType      string   `json:"task_type,omitempty" jsonschema:"Optional task type such as research, feature, launch, follow_up, bugfix, or incident"`
-	ExecutionMode string   `json:"execution_mode,omitempty" jsonschema:"Optional execution mode such as office or local_worktree"`
-	DependsOn     []string `json:"depends_on,omitempty" jsonschema:"Task IDs this task must wait for before starting (create action only)"`
-	MySlug        string   `json:"my_slug,omitempty" jsonschema:"Your agent slug. Defaults to WUPHF_AGENT_SLUG."`
+	Action            string   `json:"action" jsonschema:"One of: create, claim, assign, complete, block, resume, release, memory"`
+	Channel           string   `json:"channel,omitempty" jsonschema:"Channel slug. Defaults to the agent's current channel or general."`
+	ID                string   `json:"id,omitempty" jsonschema:"Task ID for non-create actions"`
+	Title             string   `json:"title,omitempty" jsonschema:"Task title when creating a task"`
+	Details           string   `json:"details,omitempty" jsonschema:"Optional detail or update"`
+	Owner             string   `json:"owner,omitempty" jsonschema:"Owner slug for claim or assign"`
+	ThreadID          string   `json:"thread_id,omitempty" jsonschema:"Related thread or message id"`
+	TaskType          string   `json:"task_type,omitempty" jsonschema:"Optional task type such as research, feature, launch, follow_up, bugfix, or incident"`
+	ExecutionMode     string   `json:"execution_mode,omitempty" jsonschema:"Optional execution mode such as office or local_worktree"`
+	MemoryPolicy      string   `json:"memory_policy,omitempty" jsonschema:"Optional memory policy: none, recommended, or required. Required blocks completion until memory evidence is complete."`
+	MemoryTopic       string   `json:"memory_topic,omitempty" jsonschema:"Optional normalized memory topic such as passport-application."`
+	PromotionDecision string   `json:"promotion_decision,omitempty" jsonschema:"For action=memory or complete: submitted, promoted, or skipped."`
+	NotebookPath      string   `json:"notebook_path,omitempty" jsonschema:"Notebook entry path backing the promotion decision."`
+	PromotionReason   string   `json:"promotion_reason,omitempty" jsonschema:"Reason for the promotion decision. Required when promotion_decision=skipped."`
+	DependsOn         []string `json:"depends_on,omitempty" jsonschema:"Task IDs this task must wait for before starting (create action only)"`
+	MySlug            string   `json:"my_slug,omitempty" jsonschema:"Your agent slug. Defaults to WUPHF_AGENT_SLUG."`
 }
 
 type TeamChannelsArgs struct{}
@@ -377,6 +392,8 @@ type TeamPlanArgs struct {
 		Details       string   `json:"details,omitempty" jsonschema:"Optional task details"`
 		TaskType      string   `json:"task_type,omitempty" jsonschema:"Optional task type such as research, feature, launch, follow_up, bugfix, or incident"`
 		ExecutionMode string   `json:"execution_mode,omitempty" jsonschema:"Optional execution mode such as office or local_worktree"`
+		MemoryPolicy  string   `json:"memory_policy,omitempty" jsonschema:"Optional memory policy: none, recommended, or required. Use required for reusable process research."`
+		MemoryTopic   string   `json:"memory_topic,omitempty" jsonschema:"Optional normalized memory topic such as passport-application."`
 		DependsOn     []string `json:"depends_on,omitempty" jsonschema:"Titles or IDs of tasks this depends on"`
 	} `json:"tasks" jsonschema:"List of tasks to create in dependency order"`
 	MySlug string `json:"my_slug,omitempty" jsonschema:"Your agent slug. Defaults to WUPHF_AGENT_SLUG."`
@@ -420,6 +437,8 @@ type TeamWikiReadArgs struct {
 // TeamWikiSearchArgs is the contract for team_wiki_search.
 type TeamWikiSearchArgs struct {
 	Pattern string `json:"pattern" jsonschema:"Literal substring to search (not regex)"`
+	TaskID  string `json:"task_id,omitempty" jsonschema:"Task ID this prior-memory search supports. Required when the task has memory_policy=required."`
+	MySlug  string `json:"my_slug,omitempty" jsonschema:"Your agent slug. Defaults to WUPHF_AGENT_SLUG env."`
 }
 
 // TeamWikiListArgs is intentionally empty — team_wiki_list takes no args.
@@ -427,8 +446,10 @@ type TeamWikiListArgs struct{}
 
 // TeamWikiLookupArgs is the contract for wuphf_wiki_lookup.
 type TeamWikiLookupArgs struct {
-	Query string `json:"query" jsonschema:"Natural-language question to answer from the team wiki"`
-	TopK  int    `json:"top_k,omitempty" jsonschema:"Max sources to retrieve (default 20)"`
+	Query  string `json:"query" jsonschema:"Natural-language question to answer from the team wiki"`
+	TopK   int    `json:"top_k,omitempty" jsonschema:"Max sources to retrieve (default 20)"`
+	TaskID string `json:"task_id,omitempty" jsonschema:"Task ID this prior-memory lookup supports. Required when the task has memory_policy=required."`
+	MySlug string `json:"my_slug,omitempty" jsonschema:"Your agent slug. Defaults to WUPHF_AGENT_SLUG env."`
 }
 
 type TeamTaskAckArgs struct {
@@ -547,7 +568,7 @@ func registerSharedMemoryTools(server *mcp.Server) {
 		), handleTeamWikiRead)
 		mcp.AddTool(server, readOnlyTool(
 			"team_wiki_search",
-			"Literal substring search across the team wiki. Use for lookups the index does not surface.",
+			"Literal substring search across the team wiki. Use for lookups the index does not surface. Pass task_id when this is the prior-memory search for a task with memory_policy=required.",
 		), handleTeamWikiSearch)
 		mcp.AddTool(server, readOnlyTool(
 			"team_wiki_list",
@@ -555,7 +576,7 @@ func registerSharedMemoryTools(server *mcp.Server) {
 		), handleTeamWikiList)
 		mcp.AddTool(server, readOnlyTool(
 			"wuphf_wiki_lookup",
-			"Cited-answer lookup against the team wiki. Returns a structured JSON answer with sources and inline citations. Use when you need a verified, sourced answer rather than a raw search.",
+			"Cited-answer lookup against the team wiki. Returns a structured JSON answer with sources and inline citations. Pass task_id when this is the prior-memory lookup for a task with memory_policy=required.",
 		), handleTeamWikiLookup)
 		// Notebook tools ride on the same markdown backend. Registered here
 		// so they share the WUPHF_MEMORY_BACKEND gate with team_wiki_*.
@@ -729,7 +750,7 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 
 	mcp.AddTool(server, officeWriteTool(
 		"team_task",
-		"Create, claim, assign, complete, block, resume, or release a shared task in the office task list.",
+		"Create, claim, assign, complete, block, resume, release, or record a memory promotion decision for a shared task. Tasks with memory_policy=required cannot complete until prior-memory search, notebook_write, and promote-or-skip evidence are recorded with task_id.",
 	), handleTeamTask)
 
 	if slug == "artist" {
@@ -1359,6 +1380,21 @@ func handleTeamTask(ctx context.Context, _ *mcp.CallToolRequest, args TeamTaskAr
 	if executionMode := strings.TrimSpace(args.ExecutionMode); executionMode != "" {
 		payload["execution_mode"] = executionMode
 	}
+	if memoryPolicy := strings.TrimSpace(args.MemoryPolicy); memoryPolicy != "" {
+		payload["memory_policy"] = memoryPolicy
+	}
+	if memoryTopic := strings.TrimSpace(args.MemoryTopic); memoryTopic != "" {
+		payload["memory_topic"] = memoryTopic
+	}
+	if decision := strings.TrimSpace(args.PromotionDecision); decision != "" {
+		payload["promotion_decision"] = decision
+	}
+	if notebookPath := strings.TrimSpace(args.NotebookPath); notebookPath != "" {
+		payload["notebook_path"] = notebookPath
+	}
+	if reason := strings.TrimSpace(args.PromotionReason); reason != "" {
+		payload["promotion_reason"] = reason
+	}
 	if action == "create" && len(args.DependsOn) > 0 {
 		payload["depends_on"] = args.DependsOn
 	}
@@ -1575,10 +1611,16 @@ func convertRuntimeTasks(tasks []brokerTaskSummary) []team.RuntimeTask {
 			PipelineStage:  task.PipelineStage,
 			ReviewState:    task.ReviewState,
 			ExecutionMode:  task.ExecutionMode,
+			MemoryPolicy:   task.MemoryPolicy,
+			MemoryTopic:    task.MemoryTopic,
 			WorktreePath:   task.WorktreePath,
 			WorktreeBranch: task.WorktreeBranch,
 			Blocked:        task.Blocked,
 		})
+		if task.MemoryChecklist != nil {
+			out[len(out)-1].MemoryComplete = task.MemoryChecklist.Complete
+			out[len(out)-1].MemoryMissing = append([]string(nil), task.MemoryChecklist.Missing...)
+		}
 	}
 	return out
 }
@@ -1593,6 +1635,12 @@ func formatTaskRuntimeLine(task brokerTaskSummary) string {
 	}
 	if task.ReviewState != "" && task.ReviewState != "not_required" {
 		line += " · review " + task.ReviewState
+	}
+	if task.MemoryPolicy != "" && task.MemoryPolicy != "none" {
+		line += " · memory " + task.MemoryPolicy
+		if task.MemoryChecklist != nil && !task.MemoryChecklist.Complete && len(task.MemoryChecklist.Missing) > 0 {
+			line += " missing " + strings.Join(task.MemoryChecklist.Missing, "/")
+		}
 	}
 	if task.ExecutionMode != "" {
 		line += " · " + task.ExecutionMode
@@ -1645,6 +1693,8 @@ func handleTeamPlan(ctx context.Context, _ *mcp.CallToolRequest, args TeamPlanAr
 		Details       string   `json:"details,omitempty"`
 		TaskType      string   `json:"task_type,omitempty"`
 		ExecutionMode string   `json:"execution_mode,omitempty"`
+		MemoryPolicy  string   `json:"memory_policy,omitempty"`
+		MemoryTopic   string   `json:"memory_topic,omitempty"`
 		DependsOn     []string `json:"depends_on,omitempty"`
 	}
 	items := make([]planItem, 0, len(args.Tasks))
@@ -1655,6 +1705,8 @@ func handleTeamPlan(ctx context.Context, _ *mcp.CallToolRequest, args TeamPlanAr
 			Details:       strings.TrimSpace(t.Details),
 			TaskType:      strings.TrimSpace(t.TaskType),
 			ExecutionMode: strings.TrimSpace(t.ExecutionMode),
+			MemoryPolicy:  strings.TrimSpace(t.MemoryPolicy),
+			MemoryTopic:   strings.TrimSpace(t.MemoryTopic),
 			DependsOn:     t.DependsOn,
 		})
 	}
@@ -1927,7 +1979,17 @@ func handleTeamWikiSearch(ctx context.Context, _ *mcp.CallToolRequest, args Team
 	var result struct {
 		Hits []map[string]any `json:"hits"`
 	}
-	if err := brokerGetJSON(ctx, "/wiki/search?pattern="+url.QueryEscape(pattern), &result); err != nil {
+	q := url.Values{}
+	q.Set("pattern", pattern)
+	if taskID := strings.TrimSpace(args.TaskID); taskID != "" {
+		q.Set("task_id", taskID)
+	}
+	if slug := strings.TrimSpace(args.MySlug); slug != "" {
+		q.Set("actor", slug)
+	} else if slug := resolveSlugOptional(""); slug != "" {
+		q.Set("actor", slug)
+	}
+	if err := brokerGetJSON(ctx, "/wiki/search?"+q.Encode(), &result); err != nil {
 		return toolError(err), nil, nil
 	}
 	payload, _ := json.Marshal(result.Hits)
@@ -1952,10 +2014,20 @@ func handleTeamWikiLookup(ctx context.Context, _ *mcp.CallToolRequest, args Team
 	if q == "" {
 		return toolError(fmt.Errorf("query is required")), nil, nil
 	}
-	path := "/wiki/lookup?q=" + url.QueryEscape(q)
+	values := url.Values{}
+	values.Set("q", q)
 	if args.TopK > 0 {
-		path += fmt.Sprintf("&top_k=%d", args.TopK)
+		values.Set("top_k", fmt.Sprintf("%d", args.TopK))
 	}
+	if taskID := strings.TrimSpace(args.TaskID); taskID != "" {
+		values.Set("task_id", taskID)
+	}
+	if slug := strings.TrimSpace(args.MySlug); slug != "" {
+		values.Set("actor", slug)
+	} else if slug := resolveSlugOptional(""); slug != "" {
+		values.Set("actor", slug)
+	}
+	path := "/wiki/lookup?" + values.Encode()
 	bytes, err := brokerGetRaw(ctx, path)
 	if err != nil {
 		return toolError(err), nil, nil

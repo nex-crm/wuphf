@@ -464,6 +464,10 @@ export interface Task {
   pipeline_stage?: string;
   execution_mode?: string;
   review_state?: string;
+  memory_policy?: string;
+  memory_topic?: string;
+  memory_evidence?: TaskMemoryEvidence[];
+  memory_checklist?: TaskMemoryChecklist;
   source_signal_id?: string;
   source_decision_id?: string;
   worktree_path?: string;
@@ -477,6 +481,31 @@ export interface Task {
   recheck_at?: string;
   created_at?: string;
   updated_at?: string;
+}
+
+export interface TaskMemoryEvidence {
+  kind: string;
+  tool?: string;
+  actor?: string;
+  query?: string;
+  topic?: string;
+  target_slug?: string;
+  path?: string;
+  commit_sha?: string;
+  promotion_id?: string;
+  decision?: string;
+  reason?: string;
+  hits?: number;
+  created_at?: string;
+}
+
+export interface TaskMemoryChecklist {
+  required: boolean;
+  prior_search: boolean;
+  notebook_write: boolean;
+  promotion_decision: boolean;
+  complete: boolean;
+  missing?: string[];
 }
 
 export function reassignTask(

@@ -120,6 +120,7 @@ func (b *Broker) handleNotebookWrite(w http.ResponseWriter, r *http.Request) {
 	}
 	var body struct {
 		Slug          string `json:"slug"`
+		TaskID        string `json:"task_id"`
 		Path          string `json:"path"`
 		Content       string `json:"content"`
 		Mode          string `json:"mode"`
@@ -127,6 +128,10 @@ func (b *Broker) handleNotebookWrite(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, `{"error":"invalid json"}`, http.StatusBadRequest)
+		return
+	}
+	if err := b.validateTaskMemoryEvidenceTarget(body.TaskID); err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 		return
 	}
 	sha, n, err := worker.NotebookWrite(r.Context(), body.Slug, body.Path, body.Content, body.Mode, body.CommitMessage)
@@ -147,6 +152,16 @@ func (b *Broker) handleNotebookWrite(w http.ResponseWriter, r *http.Request) {
 			}
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		}
+		return
+	}
+	if err := b.RecordTaskMemoryEvidence(body.TaskID, taskMemoryEvidence{
+		Kind:      taskMemoryEvidenceNotebookWrite,
+		Tool:      "notebook_write",
+		Actor:     body.Slug,
+		Path:      body.Path,
+		CommitSHA: sha,
+	}); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -441,12 +456,54 @@ func (b *Broker) handleNotebookSearch(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "q is required"})
 		return
 	}
-	hits, err := worker.NotebookSearch(slug, pattern)
-	if err != nil {
-		if isNotebookValidationError(err) {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+	taskID := strings.TrimSpace(r.URL.Query().Get("task_id"))
+	actor := strings.TrimSpace(r.URL.Query().Get("actor"))
+	if err := b.validateTaskMemoryEvidenceTarget(taskID); err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		return
+	}
+	var hits []WikiSearchHit
+	if strings.EqualFold(slug, "all") {
+		slugs, err := worker.AgentsWithNotebooks()
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
+		for _, notebookSlug := range slugs {
+			part, err := worker.NotebookSearch(notebookSlug, pattern)
+			if err != nil {
+				if isNotebookValidationError(err) {
+					continue
+				}
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				return
+			}
+			hits = append(hits, part...)
+			if len(hits) >= 100 {
+				hits = hits[:100]
+				break
+			}
+		}
+	} else {
+		var err error
+		hits, err = worker.NotebookSearch(slug, pattern)
+		if err != nil {
+			if isNotebookValidationError(err) {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+	}
+	if err := b.RecordTaskMemoryEvidence(taskID, taskMemoryEvidence{
+		Kind:       taskMemoryEvidencePriorSearch,
+		Tool:       "notebook_search",
+		Actor:      actor,
+		Query:      pattern,
+		TargetSlug: slug,
+		Hits:       len(hits),
+	}); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}

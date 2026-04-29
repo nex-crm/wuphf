@@ -1536,6 +1536,87 @@ html[data-theme="nex"]
   padding: 6px 10px;
   border-radius: var(--radius-sm);
 }
+.task-detail-memory {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.task-detail-memory-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.task-detail-memory-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: var(--radius-full);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+}
+.task-detail-memory-badge.is-required {
+  background: #fff4d6;
+  border-color: #f2d98a;
+  color: #7a5500;
+}
+.task-detail-memory-badge.is-complete {
+  background: #e7f9ed;
+  border-color: #c6eed2;
+  color: #0b6b2a;
+}
+.task-detail-memory-checklist {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.task-detail-memory-checklist li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+.task-detail-memory-checklist li.done {
+  color: var(--text-secondary);
+  background: var(--bg-warm);
+}
+.task-detail-memory-check-icon {
+  width: 16px;
+  flex: 0 0 16px;
+  text-align: center;
+  font-family: var(--font-mono);
+}
+.task-detail-memory-evidence {
+  display: grid;
+  gap: 4px;
+}
+.task-detail-memory-evidence-row {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 8px;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+.task-detail-memory-evidence-row span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .task-detail-deps {
   list-style: none;
   padding: 0;
@@ -1584,6 +1665,13 @@ html[data-theme="nex"]
   .task-detail-modal {
     width: 96%;
     padding: 0;
+  }
+  .task-detail-memory-checklist {
+    grid-template-columns: 1fr;
+  }
+  .task-detail-memory-evidence-row {
+    grid-template-columns: 1fr;
+    gap: 2px;
   }
 }
 

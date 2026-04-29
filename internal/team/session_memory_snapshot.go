@@ -13,6 +13,10 @@ type SessionMemoryTaskSummary struct {
 	PipelineStage  string   `json:"pipeline_stage,omitempty"`
 	ReviewState    string   `json:"review_state,omitempty"`
 	ExecutionMode  string   `json:"execution_mode,omitempty"`
+	MemoryPolicy   string   `json:"memory_policy,omitempty"`
+	MemoryTopic    string   `json:"memory_topic,omitempty"`
+	MemoryComplete bool     `json:"memory_complete,omitempty"`
+	MemoryMissing  []string `json:"memory_missing,omitempty"`
 	WorktreePath   string   `json:"worktree_path,omitempty"`
 	WorktreeBranch string   `json:"worktree_branch,omitempty"`
 	ThreadID       string   `json:"thread_id,omitempty"`
@@ -111,6 +115,10 @@ func BuildSessionMemorySnapshot(sessionMode, directAgent string, tasks []Runtime
 			PipelineStage:  strings.TrimSpace(task.PipelineStage),
 			ReviewState:    strings.TrimSpace(task.ReviewState),
 			ExecutionMode:  strings.TrimSpace(task.ExecutionMode),
+			MemoryPolicy:   strings.TrimSpace(task.MemoryPolicy),
+			MemoryTopic:    strings.TrimSpace(task.MemoryTopic),
+			MemoryComplete: task.MemoryComplete,
+			MemoryMissing:  append([]string(nil), task.MemoryMissing...),
 			WorktreePath:   strings.TrimSpace(task.WorktreePath),
 			WorktreeBranch: strings.TrimSpace(task.WorktreeBranch),
 			Blocked:        task.Blocked,
@@ -154,6 +162,12 @@ func BuildSessionMemorySnapshotFromOfficeState(sessionMode, directAgent string, 
 		if !sessionMemoryTaskRelevant(task) {
 			continue
 		}
+		memoryComplete := false
+		var memoryMissing []string
+		if task.MemoryChecklist != nil {
+			memoryComplete = task.MemoryChecklist.Complete
+			memoryMissing = append([]string(nil), task.MemoryChecklist.Missing...)
+		}
 		runtimeTasks = append(runtimeTasks, RuntimeTask{
 			ID:             strings.TrimSpace(task.ID),
 			Title:          strings.TrimSpace(task.Title),
@@ -162,6 +176,10 @@ func BuildSessionMemorySnapshotFromOfficeState(sessionMode, directAgent string, 
 			PipelineStage:  strings.TrimSpace(task.PipelineStage),
 			ReviewState:    strings.TrimSpace(task.ReviewState),
 			ExecutionMode:  strings.TrimSpace(task.ExecutionMode),
+			MemoryPolicy:   strings.TrimSpace(task.MemoryPolicy),
+			MemoryTopic:    strings.TrimSpace(task.MemoryTopic),
+			MemoryComplete: memoryComplete,
+			MemoryMissing:  append([]string(nil), memoryMissing...),
 			WorktreePath:   strings.TrimSpace(task.WorktreePath),
 			WorktreeBranch: strings.TrimSpace(task.WorktreeBranch),
 			Blocked:        task.Blocked,
@@ -174,12 +192,16 @@ func BuildSessionMemorySnapshotFromOfficeState(sessionMode, directAgent string, 
 			PipelineStage:  strings.TrimSpace(task.PipelineStage),
 			ReviewState:    strings.TrimSpace(task.ReviewState),
 			ExecutionMode:  strings.TrimSpace(task.ExecutionMode),
+			MemoryPolicy:   strings.TrimSpace(task.MemoryPolicy),
+			MemoryTopic:    strings.TrimSpace(task.MemoryTopic),
+			MemoryComplete: memoryComplete,
+			MemoryMissing:  append([]string(nil), memoryMissing...),
 			WorktreePath:   strings.TrimSpace(task.WorktreePath),
 			WorktreeBranch: strings.TrimSpace(task.WorktreeBranch),
 			ThreadID:       strings.TrimSpace(task.ThreadID),
 			Blocked:        task.Blocked,
 			DependsOn:      append([]string(nil), task.DependsOn...),
-			Summary:        summarizeTask(RuntimeTask{ID: task.ID, Title: task.Title, Owner: task.Owner, Status: task.Status, PipelineStage: task.PipelineStage, ReviewState: task.ReviewState, ExecutionMode: task.ExecutionMode, WorktreePath: task.WorktreePath, WorktreeBranch: task.WorktreeBranch, Blocked: task.Blocked}),
+			Summary:        summarizeTask(RuntimeTask{ID: task.ID, Title: task.Title, Owner: task.Owner, Status: task.Status, PipelineStage: task.PipelineStage, ReviewState: task.ReviewState, ExecutionMode: task.ExecutionMode, MemoryPolicy: task.MemoryPolicy, MemoryTopic: task.MemoryTopic, MemoryComplete: memoryComplete, MemoryMissing: memoryMissing, WorktreePath: task.WorktreePath, WorktreeBranch: task.WorktreeBranch, Blocked: task.Blocked}),
 		})
 	}
 

@@ -203,6 +203,7 @@ func (b *Broker) handleNotebookPromote(w http.ResponseWriter, r *http.Request) {
 	}
 	var body struct {
 		MySlug         string `json:"my_slug"`
+		TaskID         string `json:"task_id"`
 		SourcePath     string `json:"source_path"`
 		TargetWikiPath string `json:"target_wiki_path"`
 		Rationale      string `json:"rationale"`
@@ -210,6 +211,10 @@ func (b *Broker) handleNotebookPromote(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+		return
+	}
+	if err := b.validateTaskMemoryEvidenceTarget(body.TaskID); err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 		return
 	}
 	// Pre-flight: target must not already exist (state machine re-checks
@@ -242,6 +247,18 @@ func (b *Broker) handleNotebookPromote(w http.ResponseWriter, r *http.Request) {
 		ActorSlug: promotion.SourceSlug,
 		Timestamp: promotion.CreatedAt.Format(time.RFC3339),
 	})
+	if err := b.RecordTaskMemoryEvidence(body.TaskID, taskMemoryEvidence{
+		Kind:        taskMemoryEvidencePromotionDecision,
+		Tool:        "notebook_promote",
+		Actor:       promotion.SourceSlug,
+		Path:        promotion.SourcePath,
+		PromotionID: promotion.ID,
+		Decision:    taskMemoryDecisionSubmitted,
+		Reason:      promotion.Rationale,
+	}); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"promotion_id":  promotion.ID,
 		"reviewer_slug": promotion.ReviewerSlug,
