@@ -11,9 +11,12 @@ package team
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/nex-crm/wuphf/internal/config"
 )
@@ -100,6 +103,125 @@ func (p *paneLifecycle) ChannelPaneStatus() (string, error) {
 		return "", fmt.Errorf("%s", strings.TrimSpace(string(out)))
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// ClearAgentPanes kills every agent pane in the "team" window
+// (preserving pane 0, the channel observer). The list is sorted in
+// reverse so kill-pane on a higher index doesn't reshuffle the lower
+// ones we still need to address. Errors from individual kill-pane calls
+// are intentionally swallowed — the caller (reconfigureVisibleAgents)
+// follows up with spawnVisibleAgents which is where actual failures
+// surface; here, the worst case is a pane that won't die which becomes
+// visible at next list-panes anyway.
+func (p *paneLifecycle) ClearAgentPanes() error {
+	panes, err := p.ListTeamPanes()
+	if err != nil {
+		return err
+	}
+	sort.Sort(sort.Reverse(sort.IntSlice(panes)))
+	for _, idx := range panes {
+		if idx == 0 {
+			continue
+		}
+		target := fmt.Sprintf("%s:team.%d", p.sessionName, idx)
+		_ = p.runner.Run("kill-pane", "-t", target)
+	}
+	return nil
+}
+
+// ClearOverflowAgentWindows enumerates the tmux windows in the session
+// and kills any whose name starts with "agent-" — the prefix used by
+// spawnOverflowAgents for agents that don't fit in the visible "team"
+// grid. A list-windows failure is treated as "nothing to clean up"
+// (tmux is probably down). Like ClearAgentPanes, individual kill-window
+// errors are swallowed — overflow windows are best-effort housekeeping.
+func (p *paneLifecycle) ClearOverflowAgentWindows() {
+	out, err := p.runner.Combined("list-windows",
+		"-t", p.sessionName,
+		"-F", "#{window_name}",
+	)
+	if err != nil {
+		return
+	}
+	for _, name := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		name = strings.TrimSpace(name)
+		if !strings.HasPrefix(name, "agent-") {
+			continue
+		}
+		_ = p.runner.Run("kill-window",
+			"-t", fmt.Sprintf("%s:%s", p.sessionName, name),
+		)
+	}
+}
+
+// KillSession terminates the entire wuphf-team tmux session. Used by
+// reconfigureVisibleAgents when the runtime no longer needs panes (the
+// user switched to headless mid-session). Errors are intentionally
+// dropped — if the session is already gone, kill-session returns a "no
+// such session" error that's the desired post-condition.
+func (p *paneLifecycle) KillSession() {
+	_ = p.runner.Run("kill-session", "-t", p.sessionName)
+}
+
+// RespawnAgentPane runs `respawn-pane -k` against pane <idx> in the
+// "team" window, replacing the running process with cmd executed in
+// cwd. Returns the combined stdout/stderr so callers can surface the
+// tmux error text in their own error messages. Used by
+// reconfigureVisibleAgents to restart agent processes in place,
+// preserving pane sizes and positions.
+func (p *paneLifecycle) RespawnAgentPane(idx int, cwd, cmd string) ([]byte, error) {
+	target := fmt.Sprintf("%s:team.%d", p.sessionName, idx)
+	return p.runner.Combined("respawn-pane", "-k",
+		"-t", target,
+		"-c", cwd,
+		cmd,
+	)
+}
+
+// RespawnChannelPane respawns pane 0 (the channel observer) with the
+// given channelCmd executed in cwd, then re-applies the channel pane
+// title. Used by watchChannelPaneLoop when the channel pane has been
+// dead for at least channelRespawnDelay. Errors are swallowed —
+// watchChannelPaneLoop runs on a periodic tick and will retry on the
+// next iteration if the respawn didn't take.
+func (p *paneLifecycle) RespawnChannelPane(channelCmd, cwd string) {
+	target := p.sessionName + ":team.0"
+	_ = p.runner.Run("respawn-pane", "-k",
+		"-t", target,
+		"-c", cwd,
+		channelCmd,
+	)
+	_ = p.runner.Run("select-pane",
+		"-t", target,
+		"-T", "📢 channel",
+	)
+}
+
+// CaptureDeadChannelPane writes a timestamped snapshot of the channel
+// pane (pane 0) plus its display-message status to
+// channelPaneSnapshotPath. Used by watchChannelPaneLoop the first time
+// a dead pane is observed, so post-mortem inspection has the pane's
+// last known content even after the respawn. Capture failures degrade
+// to a "<capture failed: …>" placeholder so the snapshot file always
+// exists with the status line.
+func (p *paneLifecycle) CaptureDeadChannelPane(status string) error {
+	content, err := p.CapturePaneContent(0)
+	if err != nil {
+		content = fmt.Sprintf("<capture failed: %v>", err)
+	}
+	path := channelPaneSnapshotPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(f, "\n[%s] status=%s\n%s\n", time.Now().Format(time.RFC3339), status, content); err != nil {
+		_ = f.Close()
+		return err
+	}
+	return f.Close()
 }
 
 // channelPaneNeedsRespawn parses a tmux display-message status string of

@@ -1250,16 +1250,7 @@ func (l *Launcher) watchChannelPaneLoop(channelCmd string) {
 		unhealthyCount = 0
 		deadSince = time.Time{}
 		snapshotWritten = false
-		target := l.sessionName + ":team.0"
-		_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "respawn-pane", "-k",
-			"-t", target,
-			"-c", l.cwd,
-			channelCmd,
-		).Run()
-		_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "select-pane",
-			"-t", target,
-			"-T", "📢 channel",
-		).Run()
+		l.panes().RespawnChannelPane(channelCmd, l.cwd)
 	}
 }
 
@@ -1267,24 +1258,9 @@ func (l *Launcher) channelPaneStatus() (string, error) {
 	return l.panes().ChannelPaneStatus()
 }
 
+// captureDeadChannelPane delegates to paneLifecycle (PLAN.md §C5c).
 func (l *Launcher) captureDeadChannelPane(status string) error {
-	content, err := l.capturePaneContent(0)
-	if err != nil {
-		content = fmt.Sprintf("<capture failed: %v>", err)
-	}
-	path := channelPaneSnapshotPath()
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
-	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
-	if err != nil {
-		return err
-	}
-	if _, err := fmt.Fprintf(f, "\n[%s] status=%s\n%s\n", time.Now().Format(time.RFC3339), status, content); err != nil {
-		_ = f.Close()
-		return err
-	}
-	return f.Close()
+	return l.panes().CaptureDeadChannelPane(status)
 }
 
 // primeVisibleAgents clears Claude startup interactivity in newly spawned panes and
@@ -1718,7 +1694,7 @@ func (l *Launcher) reconfigureVisibleAgents() error {
 	l.provider = config.ResolveLLMProvider("")
 	if !l.usesPaneRuntime() {
 		if l.paneBackedAgents {
-			_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "kill-session", "-t", l.sessionName).Run()
+			l.panes().KillSession()
 			l.paneBackedAgents = false
 		}
 		return nil
@@ -1776,14 +1752,9 @@ func (l *Launcher) reconfigureVisibleAgents() error {
 			continue
 		}
 
-		target := fmt.Sprintf("%s:team.%d", l.sessionName, idx)
 		// respawn-pane -k kills the current process and starts a new one
 		// in the same pane — preserving size and position
-		out, err := exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "respawn-pane", "-k",
-			"-t", target,
-			"-c", l.cwd,
-			cmd,
-		).CombinedOutput()
+		out, err := l.panes().RespawnAgentPane(idx, l.cwd, cmd)
 		if err != nil {
 			detail := strings.TrimSpace(string(out))
 			reason := err.Error()
@@ -2076,39 +2047,14 @@ func (l *Launcher) capturePaneContent(paneIdx int) (string, error) {
 	return l.panes().CapturePaneContent(paneIdx)
 }
 
+// clearAgentPanes / clearOverflowAgentWindows delegate to paneLifecycle
+// (PLAN.md §C5c).
 func (l *Launcher) clearAgentPanes() error {
-	panes, err := l.listTeamPanes()
-	if err != nil {
-		return err
-	}
-	sort.Sort(sort.Reverse(sort.IntSlice(panes)))
-	for _, idx := range panes {
-		if idx == 0 {
-			continue // skip pane 0 (channel TUI)
-		}
-		target := fmt.Sprintf("%s:team.%d", l.sessionName, idx)
-		_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "kill-pane", "-t", target).Run()
-	}
-	return nil
+	return l.panes().ClearAgentPanes()
 }
 
 func (l *Launcher) clearOverflowAgentWindows() {
-	out, err := exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "list-windows",
-		"-t", l.sessionName,
-		"-F", "#{window_name}",
-	).CombinedOutput()
-	if err != nil {
-		return
-	}
-	for _, name := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		name = strings.TrimSpace(name)
-		if !strings.HasPrefix(name, "agent-") {
-			continue
-		}
-		_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "kill-window",
-			"-t", fmt.Sprintf("%s:%s", l.sessionName, name),
-		).Run()
-	}
+	l.panes().ClearOverflowAgentWindows()
 }
 
 func (l *Launcher) listTeamPanes() ([]int, error) {
