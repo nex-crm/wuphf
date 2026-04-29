@@ -35,6 +35,13 @@ func altRuneKey(r rune) tea.KeyMsg {
 	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}, Alt: true}
 }
 
+func TestHighlightMentionsLeavesUnknownSlugsPlain(t *testing.T) {
+	got := highlightMentions("@not-a-real-agent", map[string]string{"ceo": "#E8A838"})
+	if got != "@not-a-real-agent" {
+		t.Fatalf("expected unknown mention to stay plain, got %q", got)
+	}
+}
+
 func TestNewBrokerRequestUsesEnvTokenAtRequestTime(t *testing.T) {
 	oldEnv := os.Getenv("WUPHF_BROKER_TOKEN")
 	oldPath := brokerTokenPath

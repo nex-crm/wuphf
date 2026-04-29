@@ -194,6 +194,10 @@ func spriteForSlug(slug string, frame ...int) pixelSprite {
 		_ = f // The generated sprites are static for now.
 		return cloneSprite(sprite.Full)
 	}
+	if sprite, ok := proceduralOfficeSpriteForSlug(slug); ok {
+		_ = f
+		return cloneSprite(sprite.Full)
+	}
 
 	var sprite pixelSprite
 	switch slug {
@@ -349,6 +353,9 @@ func spritePaletteForSlug(slug string) map[int][3]int {
 	if sprite, ok := knownOfficeSpriteForSlug(slug); ok {
 		return sprite.Palette
 	}
+	if sprite, ok := proceduralOfficeSpriteForSlug(slug); ok {
+		return sprite.Palette
+	}
 
 	// Unknown slugs get a fully procedural palette (hash picks skin/hair/accent
 	// independently) to match proceduralSpriteForSlug.
@@ -372,6 +379,83 @@ func spritePaletteForSlug(slug string) map[int][3]int {
 		pxHair:      hair,
 		pxProp:      {180, 170, 155}, // neutral prop color
 		pxHighlight: {255, 255, 255}, // white highlights
+	}
+}
+
+var proceduralOfficeSpriteIDs = []string{
+	"hybridAe",
+	"hybridAi",
+	"hybridBe",
+	"hybridCmo",
+	"hybridContent",
+	"hybridCro",
+	"hybridDesigner",
+	"hybridEng",
+	"hybridFe",
+	"hybridGtm",
+	"hybridNex",
+	"hybridPm",
+	"hybridQa",
+	"hybridResearch",
+	"hybridSdr",
+}
+
+func proceduralOfficeSpriteForSlug(slug string) (knownOfficeSprite, bool) {
+	if len(proceduralOfficeSpriteIDs) == 0 {
+		return knownOfficeSprite{}, false
+	}
+	hash := proceduralHash(slug)
+	baseID := proceduralOfficeSpriteIDs[pickIndex(hash, 8, len(proceduralOfficeSpriteIDs))]
+	base, ok := knownOfficeSprites[baseID]
+	if !ok {
+		return knownOfficeSprite{}, false
+	}
+	return knownOfficeSprite{
+		Full:     cloneSprite(base.Full),
+		Portrait: cloneSprite(base.Portrait),
+		Palette:  proceduralOfficePalette(base.Palette, slug),
+	}, true
+}
+
+func proceduralOfficePalette(base map[int][3]int, slug string) map[int][3]int {
+	hash := proceduralHash(slug)
+	accent := parseHexColor(proceduralOfficeAccentForSlug(slug))
+	amount := 22 + pickIndex(hash, 10, 18)
+	out := make(map[int][3]int, len(base))
+	for idx, rgb := range base {
+		if officeColorLuma(rgb) < 38 || officeColorLooksSkinLike(rgb) {
+			out[idx] = rgb
+			continue
+		}
+		out[idx] = blendOfficeColor(rgb, accent, amount)
+	}
+	return out
+}
+
+func proceduralOfficeAccentForSlug(slug string) string {
+	hash := proceduralHash(slug)
+	return accentPool[pickIndex(hash, 9, len(accentPool))]
+}
+
+func officeColorLuma(rgb [3]int) int {
+	return (2126*rgb[0] + 7152*rgb[1] + 722*rgb[2]) / 10000
+}
+
+func officeColorLooksSkinLike(rgb [3]int) bool {
+	return rgb[0] >= 120 && rgb[1] >= 70 && rgb[2] <= 190 && rgb[0] >= rgb[1] && rgb[1] >= rgb[2]
+}
+
+func blendOfficeColor(a, b [3]int, amountPercent int) [3]int {
+	if amountPercent < 0 {
+		amountPercent = 0
+	}
+	if amountPercent > 100 {
+		amountPercent = 100
+	}
+	return [3]int{
+		a[0] + ((b[0]-a[0])*amountPercent)/100,
+		a[1] + ((b[1]-a[1])*amountPercent)/100,
+		a[2] + ((b[2]-a[2])*amountPercent)/100,
 	}
 }
 
@@ -436,6 +520,9 @@ func renderWuphfSplashAvatar(seed, slug string, frame int) []string {
 func renderWuphfAvatar(seed, slug string, frame int) []string {
 	_ = seed
 	if sprite, ok := knownOfficeSpriteForSlug(slug); ok {
+		return renderSpriteToANSI(sprite.Portrait, sprite.Palette)
+	}
+	if sprite, ok := proceduralOfficeSpriteForSlug(slug); ok {
 		return renderSpriteToANSI(sprite.Portrait, sprite.Palette)
 	}
 

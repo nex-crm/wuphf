@@ -1,6 +1,10 @@
 package main
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"strings"
+
+	"github.com/charmbracelet/lipgloss"
+)
 
 // ── Slack dark-theme palette ────────────────────────────────────────
 const (
@@ -121,13 +125,24 @@ func mutedTextStyle() lipgloss.Style {
 }
 
 func agentNameStyle(slug string) lipgloss.Style {
-	color := agentColorMap[slug]
+	color := agentColor(slug)
 	if color == "" {
 		color = slackMuted
 	}
 	return lipgloss.NewStyle().
 		Foreground(lipgloss.Color(color)).
 		Bold(true)
+}
+
+func agentColor(slug string) string {
+	slug = strings.TrimSpace(slug)
+	if slug == "" {
+		return ""
+	}
+	if color := agentColorMap[slug]; color != "" {
+		return color
+	}
+	return proceduralOfficeAccentForSlug(slug)
 }
 
 func activeChannelStyle() lipgloss.Style {

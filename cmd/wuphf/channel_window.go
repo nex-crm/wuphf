@@ -81,7 +81,7 @@ func renderOfficeMessageBlock(tm threadedMessage, contentWidth int, unreadAnchor
 		ts = ts[11:19]
 	}
 
-	color := agentColorMap[msg.From]
+	color := agentColor(msg.From)
 	if color == "" {
 		color = "#9CA3AF"
 	}
@@ -212,14 +212,14 @@ func renderOfficeMessageBlock(tm threadedMessage, contentWidth int, unreadAnchor
 	if tm.Collapsed && tm.HiddenReplies > 0 {
 		var coloredNames []string
 		for _, p := range tm.ThreadParticipants {
-			pColor := agentColorMap[strings.TrimPrefix(strings.ToLower(p), "@")]
+			pColor := agentColor(strings.TrimPrefix(strings.ToLower(p), "@"))
 			if pColor == "" {
 				for slug, name := range map[string]string{
 					"ceo": "CEO", "pm": "Product Manager", "fe": "Frontend Engineer", "be": "Backend Engineer",
 					"ai": "AI Engineer", "designer": "Designer", "cmo": "CMO", "cro": "CRO",
 				} {
 					if p == name {
-						pColor = agentColorMap[slug]
+						pColor = agentColor(slug)
 						break
 					}
 				}

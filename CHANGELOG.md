@@ -6,6 +6,7 @@ All notable changes to WUPHF will be documented in this file.
 
 ### Fixed
 
+- **Newly created agents now use the office avatar sprite system instead of falling back to the deprecated legacy procedural sprites.** Operation-generated slugs like `planner`, `builder`, `growth`, `reviewer`, and `operator` now resolve to generated office portraits, and arbitrary custom slugs get deterministic office-style procedural portraits in both web and TUI surfaces.
 - **Caret no longer drifts when typing past an `@agent` chip in the composer.** The mirror-overlay treatment rendered mention chips with 4–5px horizontal padding and `font-size: 0.9em`, so each chip took more width than the raw text in the textarea behind it. The caret fell behind the typed characters by a few pixels after every chip. Composer chips now inherit the textarea's font metrics exactly (15px, no padding, `display: inline`) and only apply a background highlight — layout-neutral, so character-for-character alignment with the textarea is preserved. Message-bubble chips keep the original styled pill treatment.
 
 ### Changed
