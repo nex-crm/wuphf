@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"time"
@@ -194,7 +195,10 @@ func runSkillsPublish(args []string) {
 		os.Exit(1)
 	}
 
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
 	prURL, err := publishViaGH(publishParams{
+		ctx:        ctx,
 		hub:        hub,
 		hubRepo:    hubRepo,
 		hubFile:    hubFile,
@@ -214,6 +218,7 @@ func runSkillsPublish(args []string) {
 }
 
 type publishParams struct {
+	ctx        context.Context
 	hub        string
 	hubRepo    string
 	hubFile    string
@@ -257,11 +262,46 @@ func publishViaGH(p publishParams) (string, error) {
 		return "", fmt.Errorf("fork %s: %w", p.hubRepo, err)
 	}
 
-	// 2. Clone the fork. The fork lives under the authenticated user; gh
-	//    resolves that automatically when we pass `--repo OWNER/NAME`.
+	// 2. Resolve the authenticated user so we can clone the user's fork (not
+	//    the upstream — gh repo clone has no `--repo` flag and does not
+	//    auto-rewrite to the fork). Earlier versions of this code cloned
+	//    p.hubRepo directly, which silently cloned the read-only upstream
+	//    and then failed at `git push`.
+	authUser, err := captureGH(tmpDir, env, "api", "user", "--jq", ".login")
+	if err != nil {
+		return "", fmt.Errorf("resolve gh auth user: %w", err)
+	}
+	authUser = strings.TrimSpace(authUser)
+	if authUser == "" {
+		return "", fmt.Errorf("gh api user returned empty login (is `gh auth login` complete?)")
+	}
+	_, hubName, ok := strings.Cut(p.hubRepo, "/")
+	if !ok || hubName == "" {
+		return "", fmt.Errorf("hubRepo %q must be owner/name", p.hubRepo)
+	}
+	forkRepo := authUser + "/" + hubName
+
+	// GitHub's fork API returns before the fork is fully provisioned. Try
+	// the clone up to 3× with a short backoff so a brand-new fork has time
+	// to land. Same backoff we use elsewhere for eventual-consistency calls.
 	cloneDir := filepath.Join(tmpDir, "fork")
-	if err := runGH(tmpDir, env, "repo", "clone", p.hubRepo, cloneDir, "--", "--depth=1", "--branch="+p.baseBranch); err != nil {
-		return "", fmt.Errorf("clone fork: %w", err)
+	var cloneErr error
+	for i := 0; i < 3; i++ {
+		cloneErr = runGH(tmpDir, env, "repo", "clone", forkRepo, cloneDir, "--", "--depth=1", "--branch="+p.baseBranch)
+		if cloneErr == nil {
+			break
+		}
+		// Remove any partial clone before retrying so the next attempt
+		// can start fresh.
+		_ = os.RemoveAll(cloneDir)
+		select {
+		case <-p.ctx.Done():
+			return "", fmt.Errorf("clone fork cancelled: %w", p.ctx.Err())
+		case <-time.After(time.Duration(1+i) * time.Second):
+		}
+	}
+	if cloneErr != nil {
+		return "", fmt.Errorf("clone fork %s after 3 attempts: %w", forkRepo, cloneErr)
 	}
 
 	// 3. Branch from base.
@@ -507,10 +547,23 @@ func runSkillsInstall(args []string) {
 		os.Exit(1)
 	}
 
-	// Post to the broker's /skills endpoint as a proposal.
+	// Validate the fetched name before it touches the broker payload — a
+	// hub repo could publish a SKILL.md with a path-traversal-shaped name
+	// (e.g. "../../etc/x") and we must reject it before created_by /
+	// content reach the broker.
+	if _, err := skillpublish.BuildManifest(skillpublishFrontmatterFromTeam(fm), content, "", time.Now().UTC()); err != nil {
+		fmt.Fprintf(os.Stderr, "error: fetched skill failed validation: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Post to the broker's /skills endpoint as `create`. The user invoking
+	// `wuphf skills install` IS the human approval — we don't need the
+	// proposal queue here. (Earlier this code used action=propose with
+	// `created_by="hub:..."`, which always 403'd because the broker
+	// requires created_by to resolve to a registered member for proposals.)
 	createdBy := "hub:" + sanitizeHubLabel(hub)
 	payload := map[string]any{
-		"action":      "propose",
+		"action":      "create",
 		"name":        fm.Name,
 		"title":       fm.Name,
 		"description": fm.Description,
@@ -518,11 +571,13 @@ func runSkillsInstall(args []string) {
 		"created_by":  createdBy,
 		"channel":     strings.TrimSpace(*channel),
 	}
-	if err := postBrokerSkill(context.Background(), payload); err != nil {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	if err := postBrokerSkill(ctx, payload); err != nil {
 		fmt.Fprintf(os.Stderr, "error: post to broker: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Printf("Installed %s from %s (status=proposed). Approve at /skills.\n", fm.Name, hub)
+	fmt.Printf("Installed %s from %s (status=active). Edit at /skills.\n", fm.Name, hub)
 }
 
 // fetchURL grabs a public raw URL with a bounded timeout and returns the

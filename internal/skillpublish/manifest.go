@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -87,6 +88,13 @@ type FrontmatterLike struct {
 	License     string
 }
 
+// validSkillName matches the kebab slug shape Anthropic Agent Skills accept.
+// Mirrors stageBGenericNameRegex in internal/team. We enforce it here because
+// Name reaches both filepath.Join (HubFilePath) and the broker payload, so a
+// path-traversal-shaped name (e.g. "../../etc/x") could escape the hub
+// repo's clone dir or land an attacker-controlled path on the broker.
+var validSkillName = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
+
 // BuildManifest assembles a Manifest from frontmatter + body. License
 // defaults to MIT when blank; Version defaults to 1.0.0 when blank.
 //
@@ -97,10 +105,19 @@ type FrontmatterLike struct {
 // Source format `wuphf-{repo}-{slug}` is the provenance string a hub indexer
 // can use to dedupe — passing repo="" yields `wuphf-{slug}` so the prefix is
 // still recognisable when no workspace is set.
+//
+// Name is validated against `^[a-z0-9][a-z0-9-]{0,63}$`. Names outside that
+// shape are rejected because Name flows into filepath.Join (HubFilePath) and
+// into the broker payload — a name like "../../etc/x" would write outside
+// the hub clone directory and reach the broker's CRUD path with an
+// attacker-controlled identifier.
 func BuildManifest(fm FrontmatterLike, body string, repo string, publishedAt time.Time) (Manifest, error) {
 	name := strings.TrimSpace(fm.Name)
 	if name == "" {
 		return Manifest{}, errors.New("skillpublish: frontmatter name is required")
+	}
+	if !validSkillName.MatchString(name) {
+		return Manifest{}, fmt.Errorf("skillpublish: invalid skill name %q: must match ^[a-z0-9][a-z0-9-]{0,63}$ (no slashes, no dots, no spaces, no path components)", name)
 	}
 	desc := strings.TrimSpace(fm.Description)
 	if desc == "" {

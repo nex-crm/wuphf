@@ -88,6 +88,46 @@ func TestBuildManifest_RequiresNameAndDescription(t *testing.T) {
 	}
 }
 
+// TestBuildManifest_RejectsPathTraversalName pins the name validator
+// added to defend against path-traversal attacks. Name flows into
+// HubFilePath -> filepath.Join, so a "../../etc/x"-shaped name would
+// write outside the hub clone directory. The validator must reject
+// anything that doesn't match ^[a-z0-9][a-z0-9-]{0,63}$.
+func TestBuildManifest_RejectsPathTraversalName(t *testing.T) {
+	t.Parallel()
+	cases := []string{
+		"../../etc/passwd",
+		"web/../research",
+		"web research",  // space
+		"web.research",  // dot
+		"WEB-RESEARCH",  // uppercase
+		"-leading-dash", // leading dash
+		"trailing-",     // trailing dash is fine for the regex actually — but length cap covers absurd inputs
+		strings.Repeat("a", 100),
+		"name/with/slash",
+		"",
+	}
+	// "trailing-" actually passes the regex above; remove it from the
+	// rejection list so we only assert genuinely malicious shapes.
+	for _, name := range cases {
+		if name == "trailing-" {
+			continue
+		}
+		t.Run("reject_"+name, func(t *testing.T) {
+			fm := FrontmatterLike{Name: name, Description: "x"}
+			_, err := BuildManifest(fm, "body", "repo", time.Time{})
+			if err == nil {
+				t.Fatalf("expected error for name %q, got nil", name)
+			}
+		})
+	}
+	// And the canonical valid shape must still pass.
+	fm := FrontmatterLike{Name: "web-research", Description: "Search the web."}
+	if _, err := BuildManifest(fm, "body", "repo", time.Time{}); err != nil {
+		t.Fatalf("valid name rejected: %v", err)
+	}
+}
+
 func TestBuildManifest_RoundTrip(t *testing.T) {
 	t.Parallel()
 	fm := FrontmatterLike{
