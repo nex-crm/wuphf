@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -117,36 +118,62 @@ func TestCache_RotatesOverSizeCap(t *testing.T) {
 	}
 }
 
-// TestCache_RotatesEvenWhenLoadFails pins the regression: if ensureLoaded
-// fails (corrupt JSONL, partial write from a crashed wuphf), bytesOnDisk
-// must still reflect the actual file size — otherwise the rotation check
-// thinks the file is empty and the cache grows unbounded on disk while
-// the in-memory map stays cold.
+// TestCache_RotatesEvenWhenLoadFails pins the regression: if
+// ensureLoaded errors at os.Open (permission failure mid-flight, racy
+// remove, etc.), bytesOnDisk would stay at 0 — the rotation check
+// thinks the file is empty and the cache grows unbounded on disk
+// while the in-memory map stays cold.
+//
+// Earlier this test used a corrupt-but-readable JSONL file to simulate
+// the failure, which didn't actually exercise the new fix code:
+// ensureLoaded does f.Stat() BEFORE the JSONL scan, so bytesOnDisk
+// gets set from Stat regardless of scanner errors. The real fix path
+// is only hit when os.Open itself fails — we now simulate that with
+// chmod 000.
 func TestCache_RotatesEvenWhenLoadFails(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("chmod-based unreadable-file simulation is not portable to windows")
+	}
+	if os.Getuid() == 0 {
+		t.Skip("running as root: chmod 000 doesn't block reads")
+	}
 	dir := t.TempDir()
 	path := filepath.Join(dir, "embeddings.jsonl")
 
-	// Write a sentinel file slightly under the cap so a single Set tips
-	// past it. We fill it with non-JSONL garbage so ensureLoaded() can
-	// scan it (the row parser is best-effort) but the file size is what
-	// matters for rotation. Use a content size near the cap to force the
-	// rotation branch.
 	garbage := bytes.Repeat([]byte{'x'}, maxCacheBytes-100)
 	if err := os.WriteFile(path, garbage, 0o600); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
+	// Make the file unreadable so os.Open returns EACCES inside
+	// ensureLoaded — this is the path the production fix actually
+	// covers (Stat itself still works on 0o000 files because it only
+	// needs metadata access from the parent directory).
+	if err := os.Chmod(path, 0o000); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(path, 0o600) })
 
 	c := NewCache(path)
 
-	// Drive a Set. With the bug, bytesOnDisk would stay at 0 (load saw
-	// no parseable rows) and rotation would NOT trigger. With the fix,
-	// the post-load Stat sets bytesOnDisk to the file size, so the cap
-	// check fires and the file rotates.
+	// Drive a Set against the chmod-000 file. With the bug,
+	// ensureLoaded errors at os.Open and bytesOnDisk stays 0 →
+	// rotation never fires → the .old file is never created and the
+	// live file grows unbounded. With the fix, Set's post-load Stat
+	// fallback fills bytesOnDisk from the filesystem (Stat itself
+	// still works on a 0o000 file because it only needs metadata
+	// access through the parent dir), so the cap check trips and
+	// rotation runs.
+	//
+	// os.Rename and os.OpenFile(O_CREATE|O_WRONLY) both succeed
+	// because they need write+exec on the PARENT directory, not on
+	// the (about-to-be-removed) 0o000 file. The kernel never tries
+	// to read the contents during rename/create.
 	if err := c.Set("trigger", "m", []float32{1, 2, 3}); err != nil {
 		t.Fatalf("Set: %v", err)
 	}
 
-	// .old must exist — proves rotation triggered despite the load failure.
+	// .old must exist — proves rotation triggered despite the
+	// initial load failure.
 	if _, err := os.Stat(path + ".old"); err != nil {
 		t.Fatalf("expected .old to exist after rotation, got %v", err)
 	}
