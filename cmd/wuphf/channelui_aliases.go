@@ -125,6 +125,13 @@ var (
 	renderCalendarActionCard      = channelui.RenderCalendarActionCard
 	renderedCardLines             = channelui.RenderedCardLines
 	renderedCardLinesWithPrompt   = channelui.RenderedCardLinesWithPrompt
+
+	renderReactions          = channelui.RenderReactions
+	messageUsageTotal        = channelui.MessageUsageTotal
+	renderMessageUsageMeta   = channelui.RenderMessageUsageMeta
+	defaultHumanMessageTitle = channelui.DefaultHumanMessageTitle
+	sliceRenderedLines       = channelui.SliceRenderedLines
+	formatTokenCount         = channelui.FormatTokenCount
 )
 
 // Calendar-range typed-string consts.

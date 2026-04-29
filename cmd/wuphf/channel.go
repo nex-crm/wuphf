@@ -2920,17 +2920,6 @@ func formatUsd(cost float64) string {
 	return fmt.Sprintf("$%.2f", cost)
 }
 
-func formatTokenCount(tokens int) string {
-	switch {
-	case tokens >= 1_000_000:
-		return fmt.Sprintf("%.1fM tok", float64(tokens)/1_000_000)
-	case tokens >= 1_000:
-		return fmt.Sprintf("%.1fk tok", float64(tokens)/1_000)
-	default:
-		return fmt.Sprintf("%d tok", tokens)
-	}
-}
-
 func renderUsageStrip(usage channelUsageState, members []channelMember, width int) string {
 	if len(usage.Agents) == 0 || width < 40 {
 		return ""

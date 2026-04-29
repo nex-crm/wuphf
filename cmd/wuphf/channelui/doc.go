@@ -67,6 +67,12 @@
 //     RenderedCardLinesWithPrompt card-to-RenderedLine adapters, and
 //     NormalizeSidebarSlug (used to canonicalize channel slugs for
 //     equality).
+//   - messages_render.go   — leaf message-render helpers:
+//     RenderReactions (emoji pill row), MessageUsageTotal /
+//     RenderMessageUsageMeta (token-usage strip on assistant
+//     messages), DefaultHumanMessageTitle (fallback titles for
+//     human_* kinds), SliceRenderedLines (viewport windowing) and
+//     FormatTokenCount (compact "1.2M tok" formatter).
 //
 // Subsequent extraction PRs will land the workspace / recovery / cache
 // cluster, the sidebar / splash, the broker integrations, and finally
