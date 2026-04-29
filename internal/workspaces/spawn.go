@@ -77,12 +77,18 @@ func defaultSpawn(name string, runtimeHome string, brokerPort, webPort int) erro
 
 	// Write PID file for reconciliation.
 	pidPath := filepath.Join(runtimeHome, ".wuphf", "broker.pid")
-	_ = os.WriteFile(pidPath, []byte(strconv.Itoa(cmd.Process.Pid)), 0o600)
+	if err := os.WriteFile(pidPath, []byte(strconv.Itoa(cmd.Process.Pid)), 0o600); err != nil {
+		_ = cmd.Process.Kill()
+		return fmt.Errorf("workspaces: spawn %q: write pid %s: %w", name, pidPath, err)
+	}
 
 	// Wait for the broker to bind its port.
 	ctx, cancel := context.WithTimeout(context.Background(), spawnStartTimeout)
 	defer cancel()
 	if err := waitForPort(ctx, brokerPort); err != nil {
+		// Clean up the detached child so a stale broker isn't left running on
+		// the workspace's port pair after a failed readiness probe.
+		_ = cmd.Process.Kill()
 		return fmt.Errorf("workspaces: spawn %q: broker did not bind port %d within %s: %w",
 			name, brokerPort, spawnStartTimeout, err)
 	}

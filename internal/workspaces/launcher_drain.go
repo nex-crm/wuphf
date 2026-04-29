@@ -9,9 +9,10 @@ import "context"
 // Drain cleanly stops every Launcher dispatch path — headless dispatch, pane
 // dispatch, scheduler loop, watchdog loop, and notify poll loop — by
 // cancelling the shared run context and joining all subsystem goroutines.
-// The provided ctx carries the 60-second drain deadline set by the pause
-// orchestrator; Drain should respect ctx.Done() and return an error if it
-// cannot complete in time.
+// The provided ctx carries the pause deadline set by the orchestrator
+// (pauseWallClockTimeout, currently 90s with SIGTERM at 60s and SIGKILL at
+// 75s); Drain should respect ctx.Done() and return an error if it cannot
+// complete in time.
 //
 // Contract for implementors:
 //   - Cancel the headless dispatch context; give in-flight headless invocations

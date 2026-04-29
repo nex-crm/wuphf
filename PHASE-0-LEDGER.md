@@ -12,8 +12,8 @@ Each `os.UserHomeDir()` and `os.Getenv("HOME")` direct call in the codebase is c
 as MUST MIGRATE (workspace state — needs `config.RuntimeHomeDir()`) or MUST NOT CHANGE
 (LLM CLI auth / user-global / npm install detection).
 
-**Total scope:** 30 hits surveyed (28 from `os.UserHomeDir()`, 2 from `os.Getenv("HOME")`).
-**Migrate:** 17 sites. **Carve-out:** 11 sites. **Decide-in-Phase-0:** 2 sites.
+**Total scope:** 31 hits surveyed (29 from `os.UserHomeDir()`, 2 from `os.Getenv("HOME")`).
+**Migrate:** 18 sites. **Carve-out:** 11 sites. **Decide-in-Phase-0:** 2 sites.
 **Estimate:** 3 days (under the 40-line cut-doctor trigger; doctor stays in v1).
 
 ## Must MIGRATE to `config.RuntimeHomeDir()`

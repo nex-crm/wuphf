@@ -2,6 +2,7 @@ package workspaces
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -113,7 +114,7 @@ func TestErrSlugInvalidErrorString(t *testing.T) {
 	if len(msg) == 0 {
 		t.Error("ErrSlugInvalid.Error() returned empty string")
 	}
-	if msg[:len("workspaces:")] != "workspaces:" {
+	if !strings.HasPrefix(msg, "workspaces:") {
 		t.Errorf("expected prefix 'workspaces:', got %q", msg)
 	}
 }
@@ -126,7 +127,7 @@ func TestErrSlugReservedErrorString(t *testing.T) {
 	if len(msg) == 0 {
 		t.Error("ErrSlugReserved.Error() returned empty string")
 	}
-	if msg[:len("workspaces:")] != "workspaces:" {
+	if !strings.HasPrefix(msg, "workspaces:") {
 		t.Errorf("expected prefix 'workspaces:', got %q", msg)
 	}
 }
