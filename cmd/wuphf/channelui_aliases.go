@@ -11,6 +11,7 @@ import "github.com/nex-crm/wuphf/cmd/wuphf/channelui"
 // The aliases will be removed once the channel cluster fully lives in
 // channelui (final cleanup PR).
 type (
+	officeApp              = channelui.OfficeApp
 	brokerReaction         = channelui.BrokerReaction
 	brokerMessageUsage     = channelui.BrokerMessageUsage
 	brokerMessage          = channelui.BrokerMessage
@@ -68,6 +69,8 @@ var (
 	displayName = channelui.DisplayName
 	roleLabel   = channelui.RoleLabel
 
+	appIcon = channelui.AppIcon
+
 	minInt                 = channelui.MinInt
 	renderRuntimeEventCard = channelui.RenderRuntimeEventCard
 
@@ -75,4 +78,19 @@ var (
 	buildNeedsYouLinesForRequest = channelui.BuildNeedsYouLinesForRequest
 	selectNeedsYouRequest        = channelui.SelectNeedsYouRequest
 	isOpenInterviewStatus        = channelui.IsOpenInterviewStatus
+)
+
+// Office-app constant aliases. Typed-string consts copy across packages
+// while preserving type identity via the type alias above.
+const (
+	officeAppMessages  = channelui.OfficeAppMessages
+	officeAppInbox     = channelui.OfficeAppInbox
+	officeAppOutbox    = channelui.OfficeAppOutbox
+	officeAppRecovery  = channelui.OfficeAppRecovery
+	officeAppTasks     = channelui.OfficeAppTasks
+	officeAppRequests  = channelui.OfficeAppRequests
+	officeAppPolicies  = channelui.OfficeAppPolicies
+	officeAppCalendar  = channelui.OfficeAppCalendar
+	officeAppArtifacts = channelui.OfficeAppArtifacts
+	officeAppSkills    = channelui.OfficeAppSkills
 )

@@ -322,21 +322,6 @@ const (
 	channelPickerOpenclawSession channelPickerMode = "openclaw-session"
 )
 
-type officeApp string
-
-const (
-	officeAppMessages  officeApp = "messages"
-	officeAppInbox     officeApp = "inbox"
-	officeAppOutbox    officeApp = "outbox"
-	officeAppRecovery  officeApp = "recovery"
-	officeAppTasks     officeApp = "tasks"
-	officeAppRequests  officeApp = "requests"
-	officeAppPolicies  officeApp = "policies"
-	officeAppCalendar  officeApp = "calendar"
-	officeAppArtifacts officeApp = "artifacts"
-	officeAppSkills    officeApp = "skills"
-)
-
 type quickJumpTarget string
 
 const (

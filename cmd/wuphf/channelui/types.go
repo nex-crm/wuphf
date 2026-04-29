@@ -273,6 +273,44 @@ type SchedulerJob struct {
 	Status          string `json:"status,omitempty"`
 }
 
+// OfficeApp identifies which sub-pane of the office surface is active
+// (the messages feed, the inbox lane, tasks, etc.). The string values
+// double as broker-side identifiers and as URL-style slugs in shortcut
+// commands, so they should not be renamed without updating both.
+type OfficeApp string
+
+const (
+	OfficeAppMessages  OfficeApp = "messages"
+	OfficeAppInbox     OfficeApp = "inbox"
+	OfficeAppOutbox    OfficeApp = "outbox"
+	OfficeAppRecovery  OfficeApp = "recovery"
+	OfficeAppTasks     OfficeApp = "tasks"
+	OfficeAppRequests  OfficeApp = "requests"
+	OfficeAppPolicies  OfficeApp = "policies"
+	OfficeAppCalendar  OfficeApp = "calendar"
+	OfficeAppArtifacts OfficeApp = "artifacts"
+	OfficeAppSkills    OfficeApp = "skills"
+)
+
+// AppIcon returns the unicode glyph that introduces an office-app
+// header. Pairs with OfficeApp so callers don't need a separate switch.
+func AppIcon(app OfficeApp) string {
+	switch app {
+	case OfficeAppTasks:
+		return "☑"
+	case OfficeAppPolicies:
+		return "✦"
+	case OfficeAppCalendar:
+		return "◷"
+	case OfficeAppSkills:
+		return "⚡"
+	case OfficeAppMessages:
+		return "•"
+	default:
+		return "#"
+	}
+}
+
 // Skill is a saved prompt the team has defined and may schedule against
 // a workflow / relay. Drives the "skills" pane and the /skill commands.
 type Skill struct {
