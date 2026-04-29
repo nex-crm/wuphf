@@ -215,6 +215,15 @@ jobs:
         with:
           name: web-dist
           path: web/dist
+      # Build wuphf-test-bin so internal/workspaces.TestRuntimeHomeIsolation
+      # (the Phase-0 isolation leak test) actually runs instead of skipping.
+      # The test spawns this binary with WUPHF_RUNTIME_HOME=<tmpdir> and
+      # asserts no writes leak to $HOME/.wuphf/. Without this build step, the
+      # regression safety net is dormant in CI because wuphfTestBinary()
+      # falls back to looking for ./wuphf-test-bin at repo root.
+      # grep-tag: PHASE0_HOMEDIR_AUDIT
+      - name: Build wuphf-test-bin (for Phase-0 isolation leak test)
+        run: go build -o wuphf-test-bin ./cmd/wuphf
       # `set -euo pipefail` + the empty-package guard close a fail-open
       # path: bash does NOT propagate failures inside `$(...)`, so a
       # transient `go list` error or a regex tweak that drops every match
