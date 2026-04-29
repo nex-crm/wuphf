@@ -254,6 +254,13 @@ var (
 	channelInfosFromManifest  = channelui.ChannelInfosFromManifest
 	officeMembersFallback     = channelui.OfficeMembersFallback
 	channelInfosFallback      = channelui.ChannelInfosFallback
+
+	mapString               = channelui.MapString
+	openBrowserURL          = channelui.OpenBrowserURL
+	isDarwin                = channelui.IsDarwin
+	isLinux                 = channelui.IsLinux
+	isWindows               = channelui.IsWindows
+	resolveInitialOfficeApp = channelui.ResolveInitialOfficeApp
 )
 
 // Channel-confirm action typed-string consts.

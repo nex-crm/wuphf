@@ -204,6 +204,18 @@
 //     and OfficeMembersFallback / ChannelInfosFallback (load the
 //     manifest from disk — falling back to DefaultManifest on
 //     error — when the broker hasn't reported a roster yet).
+//   - platform.go          — IsDarwin / IsLinux / IsWindows
+//     (runtime.GOOS predicates) and OpenBrowserURL (spawns
+//     "open" / "xdg-open" / "cmd /c start" with a background
+//     context for fire-and-forget browser handoff).
+//   - map_string.go        — MapString safely reads a string
+//     field from a map[string]any (used to parse JSON-decoded
+//     broker responses where the shape isn't statically known);
+//     non-string values fall back to fmt.Sprintf("%v").
+//   - initial_app.go       — ResolveInitialOfficeApp normalizes
+//     a CLI-flag string into a known OfficeApp value with the
+//     legacy "insights" alias mapped to OfficeAppPolicies and an
+//     OfficeAppMessages fallback.
 //
 // Subsequent extraction PRs will land the workspace / recovery / cache
 // cluster, the sidebar / splash, the broker integrations, and finally

@@ -11,7 +11,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"runtime/debug"
 	"strconv"
 	"strings"
@@ -4793,50 +4792,6 @@ func tickChannel() tea.Cmd {
 	})
 }
 
-func mapString(m map[string]any, key string) string {
-	if m == nil {
-		return ""
-	}
-	v, ok := m[key]
-	if !ok || v == nil {
-		return ""
-	}
-	switch val := v.(type) {
-	case string:
-		return val
-	default:
-		return fmt.Sprintf("%v", val)
-	}
-}
-
-func openBrowserURL(url string) error {
-	// openBrowserURL spawns a detached helper that hands the URL to the OS.
-	// We use context.Background() because the child must outlive this call —
-	// the user keeps interacting with the browser long after we return — and
-	// noctx's "use CommandContext" recommendation is satisfied by the
-	// background ctx. Cancellation isn't meaningful for a fire-and-forget
-	// open-in-browser handoff.
-	ctx := context.Background()
-	var cmd *exec.Cmd
-	switch {
-	case url == "":
-		return nil
-	case isDarwin():
-		cmd = exec.CommandContext(ctx, "open", url)
-	case isLinux():
-		cmd = exec.CommandContext(ctx, "xdg-open", url)
-	case isWindows():
-		cmd = exec.CommandContext(ctx, "cmd", "/c", "start", "", url)
-	default:
-		return fmt.Errorf("unsupported platform")
-	}
-	return cmd.Start()
-}
-
-func isDarwin() bool  { return runtime.GOOS == "darwin" }
-func isLinux() bool   { return runtime.GOOS == "linux" }
-func isWindows() bool { return runtime.GOOS == "windows" }
-
 // killTeamSession kills the entire wuphf-team tmux session and all agent processes.
 func killTeamSession() {
 	// Best-effort cleanup at process exit; cap each step so a hung tmux or
@@ -4852,19 +4807,6 @@ func killTeamSession() {
 	}
 	if resp, err := http.DefaultClient.Do(req); err == nil {
 		_ = resp.Body.Close()
-	}
-}
-
-func resolveInitialOfficeApp(name string) officeApp {
-	normalized := strings.ToLower(strings.TrimSpace(name))
-	if normalized == "insights" {
-		return officeAppPolicies
-	}
-	switch officeApp(normalized) {
-	case officeAppMessages, officeAppInbox, officeAppOutbox, officeAppRecovery, officeAppTasks, officeAppRequests, officeAppPolicies, officeAppCalendar, officeAppArtifacts:
-		return officeApp(normalized)
-	default:
-		return officeAppMessages
 	}
 }
 
