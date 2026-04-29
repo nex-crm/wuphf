@@ -28,6 +28,24 @@ const AGENT_COLORS: Record<string, string> = {
   nex: '#56D4DD',
 }
 
+const AGENT_COLOR_ALIASES: Record<string, string> = {
+  planner: 'pm',
+  product: 'pm',
+  'product-manager': 'pm',
+  builder: 'eng',
+  'founding-engineer': 'eng',
+  'workflow-architect': 'eng',
+  'automation-builder': 'eng',
+  growth: 'gtm',
+  'growth-ops': 'gtm',
+  monetization: 'cro',
+  revenue: 'cro',
+  invoicing: 'cro',
+  operator: 'nex',
+  ops: 'nex',
+  operations: 'nex',
+}
+
 type Rgb = readonly [number, number, number]
 
 function hexToRgb(hex: string): Rgb {
@@ -43,7 +61,8 @@ function paletteFromHexes(palette: string[]): Record<number, Rgb> {
 }
 
 export function getAgentColor(slug: string): string {
-  const key = slug.trim().toLowerCase()
+  const normalized = slug.trim().toLowerCase()
+  const key = AGENT_COLOR_ALIASES[normalized] ?? normalized
   return AGENT_COLORS[key] ?? proceduralAccentForSlug(key)
 }
 
@@ -93,7 +112,7 @@ function pick(hash: number, salt: number, modulo: number): number {
 
 function proceduralAccentForSlug(slug: string): string {
   const hash = hashSlug(slug || 'unknown')
-  return PROCEDURAL_ACCENTS[pick(hash, 2, PROCEDURAL_ACCENTS.length)] ?? '#56D4DD'
+  return PROCEDURAL_ACCENTS[pick(hash, 9, PROCEDURAL_ACCENTS.length)] ?? '#56D4DD'
 }
 
 function rgbToHex([r, g, b]: Rgb): string {
@@ -119,14 +138,14 @@ function blend(a: Rgb, b: Rgb, amount: number): Rgb {
 function buildProceduralOfficePortrait(slug: string): KnownAvatarSprite {
   const hash = hashSlug(slug || 'unknown')
   const ids = DYNAMIC_AVATAR_IDS.length > 0 ? DYNAMIC_AVATAR_IDS : ['hybridGeneric']
-  const baseID = ids[pick(hash, 1, ids.length)]
+  const baseID = ids[pick(hash, 8, ids.length)]
   const base = KNOWN_AVATAR_SPRITES[baseID] ?? KNOWN_AVATAR_SPRITES.hybridGeneric ?? Object.values(KNOWN_AVATAR_SPRITES)[0]
   if (!base) {
     throw new Error('avatar sprite catalog is empty')
   }
 
   const accent = hexToRgb(proceduralAccentForSlug(slug))
-  const tintStrength = 0.22 + (pick(hash, 3, 18) / 100)
+  const tintStrength = 0.22 + (pick(hash, 10, 18) / 100)
   const palette = base.palette.map((hex) => {
     const rgb = hexToRgb(hex)
     if (luminance(rgb) < 38 || isSkinLike(rgb)) {

@@ -67,6 +67,28 @@ func officeThreadedMessages(messages []brokerMessage, expanded map[string]bool, 
 	return cachedThreadedMessages(messages, expanded, threadsDefaultExpand)
 }
 
+var threadParticipantDisplaySlug = map[string]string{
+	"ceo":               "ceo",
+	"product manager":   "pm",
+	"frontend engineer": "fe",
+	"backend engineer":  "be",
+	"ai engineer":       "ai",
+	"designer":          "designer",
+	"cmo":               "cmo",
+	"cro":               "cro",
+}
+
+func threadParticipantColor(participant string) string {
+	normalized := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(participant)), "@")
+	if slug, ok := threadParticipantDisplaySlug[normalized]; ok {
+		return agentColor(slug)
+	}
+	if color := agentColor(normalized); color != "" {
+		return color
+	}
+	return "#ABABAD"
+}
+
 func renderOfficeMessageBlock(tm threadedMessage, contentWidth int, unreadAnchorID string, unreadCount int) []renderedLine {
 	msg := tm.Message
 	mutedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(slackMuted))
@@ -212,21 +234,7 @@ func renderOfficeMessageBlock(tm threadedMessage, contentWidth int, unreadAnchor
 	if tm.Collapsed && tm.HiddenReplies > 0 {
 		var coloredNames []string
 		for _, p := range tm.ThreadParticipants {
-			pColor := agentColor(strings.TrimPrefix(strings.ToLower(p), "@"))
-			if pColor == "" {
-				for slug, name := range map[string]string{
-					"ceo": "CEO", "pm": "Product Manager", "fe": "Frontend Engineer", "be": "Backend Engineer",
-					"ai": "AI Engineer", "designer": "Designer", "cmo": "CMO", "cro": "CRO",
-				} {
-					if p == name {
-						pColor = agentColor(slug)
-						break
-					}
-				}
-			}
-			if pColor == "" {
-				pColor = "#ABABAD"
-			}
+			pColor := threadParticipantColor(p)
 			coloredNames = append(coloredNames, lipgloss.NewStyle().Foreground(lipgloss.Color(pColor)).Bold(true).Render(p))
 		}
 		participantStr := ""

@@ -4,6 +4,7 @@ import (
 	"crypto/sha1"
 	"encoding/hex"
 	"fmt"
+	"sort"
 	"testing"
 )
 
@@ -20,10 +21,14 @@ func spriteDigest(s pixelSprite) string {
 
 func paletteDigest(p map[int][3]int) string {
 	h := sha1.New()
-	for i := 0; i < 64; i++ {
-		if rgb, ok := p[i]; ok {
-			fmt.Fprintf(h, "%d:%d,%d,%d\n", i, rgb[0], rgb[1], rgb[2])
-		}
+	keys := make([]int, 0, len(p))
+	for k := range p {
+		keys = append(keys, k)
+	}
+	sort.Ints(keys)
+	for _, i := range keys {
+		rgb := p[i]
+		fmt.Fprintf(h, "%d:%d,%d,%d\n", i, rgb[0], rgb[1], rgb[2])
 	}
 	return hex.EncodeToString(h.Sum(nil))[:8]
 }

@@ -42,4 +42,11 @@ describe('pixel avatar sprite resolution', () => {
     expect(getAgentColor('custom-ops-agent')).toMatch(/^#[0-9A-F]{6}$/i)
     expect(getAgentColor('custom-ops-agent')).toBe(getAgentColor('custom-ops-agent'))
   })
+
+  it('keeps known role aliases on canonical role colors', () => {
+    expect(getAgentColor('planner')).toBe(getAgentColor('pm'))
+    expect(getAgentColor('builder')).toBe(getAgentColor('eng'))
+    expect(getAgentColor('growth')).toBe(getAgentColor('gtm'))
+    expect(getAgentColor('operator')).toBe(getAgentColor('nex'))
+  })
 })

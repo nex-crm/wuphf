@@ -42,6 +42,15 @@ func TestHighlightMentionsLeavesUnknownSlugsPlain(t *testing.T) {
 	}
 }
 
+func TestThreadParticipantDisplayNamesUseCanonicalColors(t *testing.T) {
+	if got, want := threadParticipantColor("Product Manager"), agentColor("pm"); got != want {
+		t.Fatalf("Product Manager color = %q, want canonical pm color %q", got, want)
+	}
+	if got, want := threadParticipantColor("@custom-ops-agent"), agentColor("custom-ops-agent"); got != want {
+		t.Fatalf("custom participant color = %q, want procedural color %q", got, want)
+	}
+}
+
 func TestNewBrokerRequestUsesEnvTokenAtRequestTime(t *testing.T) {
 	oldEnv := os.Getenv("WUPHF_BROKER_TOKEN")
 	oldPath := brokerTokenPath
