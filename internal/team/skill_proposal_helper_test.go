@@ -1,6 +1,7 @@
 package team
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
@@ -356,4 +357,330 @@ func TestWriteSkillProposalLocked_ValidSlugVariants(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestWriteSkillProposalLocked_OwnerValidation pins down the PR 7 owner
+// validation contract:
+//   - Unknown slugs are stripped with a WARN log; the skill is NOT rejected.
+//   - All-unknown lists fall back to lead-routable (empty OwnerAgents).
+//   - Known + unknown mix retains the known slugs and drops the rest.
+//   - Whitespace + case differences canonicalise to lowercase trimmed slugs.
+//   - Duplicate slugs are deduped.
+func TestWriteSkillProposalLocked_OwnerValidation(t *testing.T) {
+	t.Parallel()
+
+	makeBrokerWithMembers := func(t *testing.T) *Broker {
+		t.Helper()
+		b := newTestBroker(t)
+		b.mu.Lock()
+		b.members = []officeMember{
+			{Slug: "ceo", Name: "CEO", BuiltIn: true},
+			{Slug: "csm", Name: "CSM"},
+			{Slug: "deploy-bot", Name: "Deploy Bot"},
+		}
+		b.mu.Unlock()
+		return b
+	}
+
+	tests := []struct {
+		name   string
+		owners []string
+		want   []string
+	}{
+		{
+			name:   "all unknown owners falls back to lead-routable",
+			owners: []string{"ghost", "phantom"},
+			want:   nil,
+		},
+		{
+			name:   "known and unknown keeps the known slug",
+			owners: []string{"deploy-bot", "ghost"},
+			want:   []string{"deploy-bot"},
+		},
+		{
+			name:   "all known owners pass through",
+			owners: []string{"deploy-bot", "csm"},
+			want:   []string{"deploy-bot", "csm"},
+		},
+		{
+			name:   "whitespace and case canonicalise to lowercase trimmed",
+			owners: []string{"  Deploy-Bot  ", "CSM"},
+			want:   []string{"deploy-bot", "csm"},
+		},
+		{
+			name:   "duplicate slugs are deduped",
+			owners: []string{"csm", "csm", "CSM"},
+			want:   []string{"csm"},
+		},
+		{
+			name:   "empty input stays empty",
+			owners: nil,
+			want:   nil,
+		},
+		{
+			// F5: belt-and-suspenders regex. The "../etc/passwd" shape would
+			// also fail member-existence, but the regex makes path-injection
+			// shapes inert at the string level — defence in depth.
+			name:   "path-traversal shape rejected by slug regex",
+			owners: []string{"../etc/passwd", "deploy-bot"},
+			want:   []string{"deploy-bot"},
+		},
+		{
+			name:   "leading-dash slug rejected by regex",
+			owners: []string{"-bad-leading-dash", "csm"},
+			want:   []string{"csm"},
+		},
+		{
+			name:   "uppercase-letters fold to lowercase before regex check",
+			owners: []string{"DEPLOY-BOT"},
+			want:   []string{"deploy-bot"},
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			b := makeBrokerWithMembers(t)
+			spec := skillProposalSpec("scoped-skill-"+skillSlug(tc.name), "A description.", "archivist")
+			spec.Content = "## Steps\n\n1. Do it."
+			spec.OwnerAgents = tc.owners
+
+			sk, err := callWriteSkillProposalLocked(b, spec)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if len(sk.OwnerAgents) != len(tc.want) {
+				t.Fatalf("OwnerAgents len: got %v, want %v", sk.OwnerAgents, tc.want)
+			}
+			for i, want := range tc.want {
+				if sk.OwnerAgents[i] != want {
+					t.Errorf("OwnerAgents[%d]: got %q, want %q", i, sk.OwnerAgents[i], want)
+				}
+			}
+		})
+	}
+
+	t.Run("validation does not block the write", func(t *testing.T) {
+		t.Parallel()
+		b := makeBrokerWithMembers(t)
+		spec := skillProposalSpec("survives-typos", "A description.", "archivist")
+		spec.Content = "## Steps\n\n1. Do it."
+		spec.OwnerAgents = []string{"ghost"}
+
+		sk, err := callWriteSkillProposalLocked(b, spec)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		// Skill exists, owners stripped to empty (lead-routable fallback).
+		if sk == nil {
+			t.Fatal("skill must still be written even when every owner is unknown")
+		}
+		if len(sk.OwnerAgents) != 0 {
+			t.Errorf("expected lead-routable fallback (empty OwnerAgents), got %v", sk.OwnerAgents)
+		}
+	})
+}
+
+// PR 7 task #13: similarity gate integration. The four tests below pin
+// down the three writeSkillProposalLocked branches plus the metric
+// increment. Tests use the stubEmbedder from skill_similarity_test.go for
+// deterministic cosine scores; the helper falls through to Jaccard when no
+// embedder is wired, but the embedder path lets tests dial the score
+// precisely across the enhance / ambiguous / create-new bands.
+
+// similaritySpec is a writeSkillProposalLocked spec tuned for the embedder
+// path. The body+description are what the helper hashes for comparison.
+func similaritySpec(name, description string) teamSkill {
+	return teamSkill{
+		Name:        name,
+		Description: description,
+		Content:     "## Steps\n\n1. Do it.",
+		CreatedBy:   "archivist",
+		Channel:     "general",
+		Status:      "proposed",
+	}
+}
+
+// staticVecEmbedder returns a fixed vector for any candidate text and a
+// caller-controlled vector for any existing-skill text. Lets tests pick the
+// exact cosine score by choosing the second vector's projection on the
+// first. All vectors are L2-normalised.
+func staticVecEmbedder(candidateVec, existingVec []float32) *stubEmbedder {
+	cand := l2norm(append([]float32(nil), candidateVec...))
+	exist := l2norm(append([]float32(nil), existingVec...))
+	return &stubEmbedder{
+		vec: func(text string) []float32 {
+			if strings.Contains(text, "candidate-text") {
+				return cand
+			}
+			return exist
+		},
+	}
+}
+
+func TestWriteSkillProposalLocked_SimilarSkillExists_ReturnsErrSentinel(t *testing.T) {
+	t.Parallel()
+	b := newTestBroker(t)
+
+	// Seed an active skill the candidate will collide with.
+	b.mu.Lock()
+	addSkill(b, "send-invoice-reminder", "Send the AR follow-up at d7.", "candidate-text body that the embedder keys off.")
+	b.mu.Unlock()
+
+	// Embedder returns an identical vector for both candidate and existing,
+	// so cosine score = 1.0, which exceeds the enhance threshold (0.85).
+	v := l2norm([]float32{1, 0, 0})
+	b.skillEmbedder = staticVecEmbedder(v, v)
+
+	spec := similaritySpec("invoice-d7-reminder", "AR reminder for the d7 cohort.")
+	// Make the candidate text hashable by the stub embedder.
+	spec.Content = "candidate-text body that the embedder keys off."
+
+	sk, err := callWriteSkillProposalLocked(b, spec)
+	if sk != nil {
+		t.Errorf("expected sk == nil on enhance verdict, got %+v", sk)
+	}
+	if err == nil {
+		t.Fatal("expected errSkillSimilarToExisting, got nil")
+	}
+	var sentinel *errSkillSimilarToExisting
+	if !errorsAs(err, &sentinel) {
+		t.Fatalf("expected *errSkillSimilarToExisting, got %T: %v", err, err)
+	}
+	if sentinel.Slug != "send-invoice-reminder" {
+		t.Errorf("Slug: got %q, want send-invoice-reminder", sentinel.Slug)
+	}
+	if sentinel.Score < 0.85 {
+		t.Errorf("Score: got %v, want >= 0.85", sentinel.Score)
+	}
+	if sentinel.Method != "embedding-cosine" {
+		t.Errorf("Method: got %q, want embedding-cosine", sentinel.Method)
+	}
+	// The candidate must NOT have been written.
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.findSkillByNameLocked("invoice-d7-reminder") != nil {
+		t.Error("similar candidate must not be written to b.skills")
+	}
+}
+
+func TestEnhancementCandidatesTotal_Increments(t *testing.T) {
+	t.Parallel()
+	b := newTestBroker(t)
+	b.mu.Lock()
+	addSkill(b, "send-invoice-reminder", "Send the AR follow-up at d7.", "candidate-text body that the embedder keys off.")
+	b.mu.Unlock()
+
+	v := l2norm([]float32{1, 0, 0})
+	b.skillEmbedder = staticVecEmbedder(v, v)
+
+	spec := similaritySpec("invoice-d7-reminder", "AR reminder for the d7 cohort.")
+	spec.Content = "candidate-text body that the embedder keys off."
+
+	before := b.skillCompileMetrics.EnhancementCandidatesTotal
+	_, err := callWriteSkillProposalLocked(b, spec)
+	if err == nil {
+		t.Fatal("expected errSkillSimilarToExisting, got nil")
+	}
+	after := b.skillCompileMetrics.EnhancementCandidatesTotal
+	if after != before+1 {
+		t.Errorf("EnhancementCandidatesTotal: got %d, want %d", after, before+1)
+	}
+}
+
+func TestWriteSkillProposalLocked_AmbiguousSimilarity_AnnotatesFrontmatter(t *testing.T) {
+	t.Parallel()
+	b := newTestBroker(t)
+	b.mu.Lock()
+	addSkill(b, "draft-monthly-report", "Draft the monthly summary report.", "existing-text drafting workflow.")
+	b.mu.Unlock()
+
+	// Pick vectors so cosine = 0.75 (between ambiguous=0.70 and enhance=0.85).
+	cand := l2norm([]float32{1, 0, 0})
+	exist := l2norm([]float32{0.75, 0.6614, 0}) // dot(cand, exist) ≈ 0.75
+	b.skillEmbedder = staticVecEmbedder(cand, exist)
+
+	spec := similaritySpec("compile-quarterly-summary", "Compile the quarterly summary briefing.")
+	spec.Content = "candidate-text drafting a quarterly summary."
+
+	sk, err := callWriteSkillProposalLocked(b, spec)
+	if err != nil {
+		t.Fatalf("unexpected error on ambiguous verdict: %v", err)
+	}
+	if sk == nil {
+		t.Fatal("expected the candidate to be written despite ambiguous flag")
+	}
+	if sk.Status != "proposed" {
+		t.Errorf("Status: got %q, want proposed", sk.Status)
+	}
+	// EnhancementCandidatesTotal must NOT increment on ambiguous — that's
+	// the contract that distinguishes ambiguous (write + annotate) from
+	// enhance (return sentinel + bump metric).
+	if got := b.skillCompileMetrics.EnhancementCandidatesTotal; got != 0 {
+		t.Errorf("EnhancementCandidatesTotal must NOT increment on ambiguous, got %d", got)
+	}
+
+	// Verify the verdict the integration saw was actually "ambiguous" by
+	// re-running the helper against the original catalog. The candidate was
+	// written into b.skills, so we exclude the just-written entry by name.
+	// (skillSimilarityEligible already self-skips by name.)
+	b.mu.Lock()
+	verdict := b.findSimilarActiveSkillLocked(context.Background(), spec)
+	b.mu.Unlock()
+	if verdict.Recommendation != "ambiguous" {
+		t.Errorf("verdict.Recommendation = %q, want ambiguous (score=%v)", verdict.Recommendation, verdict.Score)
+	}
+	if verdict.Existing == nil || skillSlug(verdict.Existing.Name) != "draft-monthly-report" {
+		t.Errorf("verdict.Existing should point at draft-monthly-report, got %+v", verdict.Existing)
+	}
+}
+
+func TestWriteSkillProposalLocked_DistinctSkill_WritesNormally(t *testing.T) {
+	t.Parallel()
+	b := newTestBroker(t)
+	b.mu.Lock()
+	addSkill(b, "send-invoice-reminder", "Send the AR follow-up at d7.", "completely different existing-text body.")
+	b.mu.Unlock()
+
+	// Pick orthogonal vectors so cosine = 0 (clearly create_new).
+	cand := l2norm([]float32{1, 0, 0})
+	exist := l2norm([]float32{0, 1, 0})
+	b.skillEmbedder = staticVecEmbedder(cand, exist)
+
+	spec := similaritySpec("renewal-reminder", "Customer renewal reminder workflow.")
+	spec.Content = "candidate-text orthogonal body."
+
+	sk, err := callWriteSkillProposalLocked(b, spec)
+	if err != nil {
+		t.Fatalf("unexpected error on distinct skill: %v", err)
+	}
+	if sk == nil {
+		t.Fatal("expected the candidate to be written")
+	}
+	if sk.Status != "proposed" {
+		t.Errorf("Status: got %q, want proposed", sk.Status)
+	}
+	if got := b.skillCompileMetrics.EnhancementCandidatesTotal; got != 0 {
+		t.Errorf("EnhancementCandidatesTotal must stay 0 on create_new, got %d", got)
+	}
+}
+
+// errorsAs is a tiny shim so this test file doesn't need to import errors
+// purely for one call site. Mirrors errors.As for *errSkillSimilarToExisting.
+func errorsAs(err error, target **errSkillSimilarToExisting) bool {
+	for err != nil {
+		if t, ok := err.(*errSkillSimilarToExisting); ok {
+			*target = t
+			return true
+		}
+		// Unwrap if applicable.
+		type unwrapper interface{ Unwrap() error }
+		if u, ok := err.(unwrapper); ok {
+			err = u.Unwrap()
+			continue
+		}
+		break
+	}
+	return false
 }

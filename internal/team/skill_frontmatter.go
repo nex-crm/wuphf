@@ -44,6 +44,9 @@ type SkillWuphfMeta struct {
 	Trigger string `yaml:"trigger,omitempty"`
 	// SourceArticles lists the wiki paths that drove this skill's content.
 	SourceArticles []string `yaml:"source_articles,omitempty"`
+	// OwnerAgents lists agent slugs scoped to see and invoke this skill. Empty
+	// means lead-routable (only the office lead can route it).
+	OwnerAgents []string `yaml:"owner_agents,omitempty"`
 	// SourceSignals lists notebook citations (Stage B+ only).
 	SourceSignals []string `yaml:"source_signals,omitempty"`
 	// CreatedBy is the identity that wrote this proposal ("archivist", agent slug, etc.).
@@ -76,6 +79,25 @@ type SkillWuphfMeta struct {
 	RelayPlatform string `yaml:"relay_platform,omitempty"`
 	// RelayEventTypes lists the relay event types this skill subscribes to.
 	RelayEventTypes []string `yaml:"relay_event_types,omitempty"`
+	// SimilarToExisting flags skills the similarity gate found close-but-not-
+	// duplicate to an existing active skill (PR 7 task #13). The interview UI
+	// surfaces this so the human can choose to enhance the existing skill
+	// instead of approving a near-duplicate. Nil when the proposal was clean.
+	SimilarToExisting *SkillSimilarRef `yaml:"similar_to_existing,omitempty"`
+}
+
+// SkillSimilarRef captures the closest active skill flagged by the
+// similarity gate when a proposal lands in the "ambiguous" band — close
+// enough that the human should know about it, far enough that auto-routing
+// to enhance-existing would be wrong.
+type SkillSimilarRef struct {
+	// Slug is the existing skill's slug (lowercase, kebab).
+	Slug string `yaml:"slug"`
+	// Score is the similarity score in [0,1].
+	Score float64 `yaml:"score"`
+	// Method is "embedding-cosine" or "jaccard-tokens" so eval can split
+	// metrics by detection path.
+	Method string `yaml:"method,omitempty"`
 }
 
 // SkillSafetyScan holds the result of a skill_guard scan.
@@ -170,6 +192,7 @@ func teamSkillToFrontmatter(sk teamSkill) SkillFrontmatter {
 				Status:             sk.Status,
 				Tags:               append([]string(nil), sk.Tags...),
 				SourceArticles:     append([]string(nil), sk.SourceArticles...),
+				OwnerAgents:        append([]string(nil), sk.OwnerAgents...),
 				WorkflowProvider:   sk.WorkflowProvider,
 				WorkflowKey:        sk.WorkflowKey,
 				WorkflowDefinition: sk.WorkflowDefinition,

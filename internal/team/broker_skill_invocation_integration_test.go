@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -44,6 +45,18 @@ func TestBrokerSkillInvocationE2E_PersistsAcrossReload(t *testing.T) {
 		Tags:        []string{"engineering", "debugging"},
 		Content:     "Step 1: Reproduce. Step 2: Isolate. Step 3: Root cause. Step 4: Fix.",
 	}})
+	// PR 7: scope the seeded skill to the test invokers so the visibility gate
+	// in handleInvokeSkill admits both. SeedDefaultSkills lands skills with
+	// empty OwnerAgents (lead-routable), but this test wants per-invoker
+	// attribution from non-lead slugs (eng + qa) for the From accounting
+	// assertions below.
+	b.mu.Lock()
+	for i := range b.skills {
+		if b.skills[i].Name == skillName {
+			b.skills[i].OwnerAgents = []string{"eng", "qa"}
+		}
+	}
+	b.mu.Unlock()
 
 	invoke := func(t *testing.T, invokedBy string) (skillID string, usageCount int) {
 		t.Helper()
@@ -191,5 +204,151 @@ func TestBrokerSkillInvocationE2E_PersistsAcrossReload(t *testing.T) {
 		}
 		t.Errorf("seeded skill %q not found after restart; skills=%s",
 			skillName, strings.Join(names, ","))
+	}
+}
+
+// TestHandleInvokeSkill_NotOwner_Returns403WithDelegateTo verifies the
+// visibility gate added in PR 7. A non-owner agent gets a structured 403 body
+// listing the agents that can route the request, plus a hint.
+func TestHandleInvokeSkill_NotOwner_Returns403WithDelegateTo(t *testing.T) {
+	b := newTestBroker(t)
+	b.mu.Lock()
+	b.members = []officeMember{{Slug: "ceo", BuiltIn: true}, {Slug: "csm"}, {Slug: "deploy-bot"}}
+	b.skills = append(b.skills, teamSkill{
+		ID:          "skill-deploy-frontend",
+		Name:        "deploy-frontend",
+		Title:       "Deploy frontend",
+		Status:      "active",
+		Channel:     "general",
+		Content:     "Ship it.",
+		OwnerAgents: []string{"deploy-bot"},
+	})
+	b.mu.Unlock()
+
+	body := bytes.NewBufferString(`{"invoked_by":"csm","channel":"general"}`)
+	req := httptest.NewRequest(http.MethodPost, "/skills/deploy-frontend/invoke", body)
+	rec := httptest.NewRecorder()
+
+	b.handleInvokeSkill(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.Contains(ct, "application/json") {
+		t.Fatalf("expected json body, got Content-Type=%q", ct)
+	}
+
+	var got struct {
+		OK         bool     `json:"ok"`
+		Error      string   `json:"error"`
+		DelegateTo []string `json:"delegate_to"`
+		Hint       string   `json:"hint"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatalf("decode 403 body: %v", err)
+	}
+	if got.OK {
+		t.Error("ok must be false on 403")
+	}
+	if got.Error != "not_owner" {
+		t.Errorf("error: got %q, want not_owner", got.Error)
+	}
+	if len(got.DelegateTo) != 1 || got.DelegateTo[0] != "deploy-bot" {
+		t.Errorf("delegate_to: got %v, want [deploy-bot]", got.DelegateTo)
+	}
+	if strings.TrimSpace(got.Hint) == "" {
+		t.Error("hint must be non-empty so the LLM caller can route the request")
+	}
+}
+
+// TestHandleInvokeSkill_LeadRoutableEmptyOwners_DelegateToLead verifies that a
+// non-lead invoker hitting a skill with empty OwnerAgents (lead-routable
+// shared skill) gets the office lead in delegate_to.
+func TestHandleInvokeSkill_LeadRoutableEmptyOwners_DelegateToLead(t *testing.T) {
+	b := newTestBroker(t)
+	b.mu.Lock()
+	b.members = []officeMember{{Slug: "ceo", BuiltIn: true}, {Slug: "csm"}}
+	b.skills = append(b.skills, teamSkill{
+		ID:      "skill-shared",
+		Name:    "shared",
+		Title:   "Shared skill",
+		Status:  "active",
+		Channel: "general",
+		Content: "Body.",
+	})
+	b.mu.Unlock()
+
+	body := bytes.NewBufferString(`{"invoked_by":"csm","channel":"general"}`)
+	req := httptest.NewRequest(http.MethodPost, "/skills/shared/invoke", body)
+	rec := httptest.NewRecorder()
+
+	b.handleInvokeSkill(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var got struct {
+		Error      string   `json:"error"`
+		DelegateTo []string `json:"delegate_to"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if got.Error != "not_owner" {
+		t.Errorf("error: got %q, want not_owner", got.Error)
+	}
+	if len(got.DelegateTo) != 1 || got.DelegateTo[0] != "ceo" {
+		t.Errorf("delegate_to: got %v, want [ceo] (lead bypass)", got.DelegateTo)
+	}
+}
+
+// TestHandleInvokeSkill_DisabledReturns403 verifies the disabled status gate.
+// PR 7 step 4 adds the "disabled" status; this test pins down the structured
+// 403 contract for it ahead of step 4 so step 4 only flips the status setter
+// and doesn't have to also modify invoke semantics.
+func TestHandleInvokeSkill_DisabledReturns403(t *testing.T) {
+	b := newTestBroker(t)
+	b.mu.Lock()
+	b.members = []officeMember{{Slug: "ceo", BuiltIn: true}, {Slug: "deploy-bot"}}
+	b.skills = append(b.skills, teamSkill{
+		ID:          "skill-disabled",
+		Name:        "deploy-frontend",
+		Title:       "Deploy frontend",
+		Status:      "disabled",
+		Channel:     "general",
+		Content:     "Ship it.",
+		OwnerAgents: []string{"deploy-bot"},
+	})
+	b.mu.Unlock()
+
+	body := bytes.NewBufferString(`{"invoked_by":"deploy-bot","channel":"general"}`)
+	req := httptest.NewRequest(http.MethodPost, "/skills/deploy-frontend/invoke", body)
+	rec := httptest.NewRecorder()
+
+	b.handleInvokeSkill(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var got struct {
+		OK         bool     `json:"ok"`
+		Error      string   `json:"error"`
+		DelegateTo []string `json:"delegate_to"`
+		Hint       string   `json:"hint"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatalf("decode 403 body: %v", err)
+	}
+	if got.OK {
+		t.Error("ok must be false on 403")
+	}
+	if got.Error != "disabled" {
+		t.Errorf("error: got %q, want disabled", got.Error)
+	}
+	if len(got.DelegateTo) != 1 || got.DelegateTo[0] != "deploy-bot" {
+		t.Errorf("delegate_to: got %v, want [deploy-bot]", got.DelegateTo)
+	}
+	if !strings.Contains(strings.ToLower(got.Hint), "enable") {
+		t.Errorf("hint should reference re-enabling, got %q", got.Hint)
 	}
 }

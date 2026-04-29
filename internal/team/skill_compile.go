@@ -53,6 +53,11 @@ type SkillCompileMetrics struct {
 	// synthesizer (LLM-synth from candidate signals). Incremented atomically
 	// once the unified write helper accepts the proposal.
 	StageBProposalsTotal int64
+	// EnhancementCandidatesTotal counts how many proposals the similarity
+	// gate diverted from create-new to enhance-existing (PR 7 task #13).
+	// Each tick is one redundant skill prevented; eval tracks it as a
+	// quality signal for the proposal funnel.
+	EnhancementCandidatesTotal int64
 }
 
 // snapshotSkillCompileMetrics returns a copy of m suitable for serialization.
@@ -70,6 +75,7 @@ func snapshotSkillCompileMetrics(m *SkillCompileMetrics) SkillCompileMetrics {
 		LastTickDurationMs:            atomic.LoadInt64(&m.LastTickDurationMs),
 		LastSkillCompilePassAtNano:    atomic.LoadInt64(&m.LastSkillCompilePassAtNano),
 		StageBProposalsTotal:          atomic.LoadInt64(&m.StageBProposalsTotal),
+		EnhancementCandidatesTotal:    atomic.LoadInt64(&m.EnhancementCandidatesTotal),
 	}
 }
 

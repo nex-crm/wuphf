@@ -428,3 +428,237 @@ func TestSkillPatchEndpoint_ConflictOnMultipleMatches(t *testing.T) {
 		t.Errorf("status: got %d, want 409", resp.StatusCode)
 	}
 }
+
+// seedActiveSkill is a helper for the disable/enable tests — drops an active
+// skill into b.skills with the required fields populated.
+func seedActiveSkill(t *testing.T, b *Broker, name string) {
+	t.Helper()
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.skills = append(b.skills, teamSkill{
+		ID:          "skill-" + name,
+		Name:        name,
+		Title:       name,
+		Description: "Seeded for tests.",
+		Content:     "Step 1: do something.",
+		CreatedBy:   "archivist",
+		Channel:     "general",
+		Status:      "active",
+		CreatedAt:   "2026-04-28T00:00:00Z",
+		UpdatedAt:   "2026-04-28T00:00:00Z",
+	})
+}
+
+// TestHandleSkillDisable covers the happy path and the conflict case.
+// PR 7: disabled is a fourth status alongside proposed/active/archived. The
+// handler refuses any source status other than active so the UI can model
+// disable as a one-step transition off active.
+func TestHandleSkillDisable(t *testing.T) {
+	t.Parallel()
+
+	t.Run("active flips to disabled", func(t *testing.T) {
+		t.Parallel()
+		_, b, do := crudTestServer(t)
+		seedActiveSkill(t, b, "deploy-frontend")
+
+		resp, body := do(http.MethodPost, "/skills/deploy-frontend/disable", map[string]any{
+			"reason": "paused while we revise the runbook",
+		})
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("status %d, body %s", resp.StatusCode, body)
+		}
+		var out struct {
+			Skill teamSkill `json:"skill"`
+		}
+		if err := json.Unmarshal(body, &out); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if out.Skill.Status != "disabled" {
+			t.Errorf("status: got %q, want disabled", out.Skill.Status)
+		}
+
+		// Catalog filter must skip the now-disabled skill.
+		b.mu.Lock()
+		b.members = []officeMember{{Slug: "ceo", BuiltIn: true}, {Slug: "deploy-bot"}}
+		// Re-scope the seeded skill so the predicate match is unambiguous.
+		for i := range b.skills {
+			if b.skills[i].Name == "deploy-frontend" {
+				b.skills[i].OwnerAgents = []string{"deploy-bot"}
+			}
+		}
+		visible := b.listSkillsForAgentLocked("deploy-bot", listSkillsOpts{activeOnly: true})
+		b.mu.Unlock()
+		for _, sk := range visible {
+			if sk.Name == "deploy-frontend" {
+				t.Error("disabled skill must not appear in activeOnly catalog")
+			}
+		}
+	})
+
+	t.Run("non-active returns 409", func(t *testing.T) {
+		t.Parallel()
+		_, b, do := crudTestServer(t)
+		seedProposedSkill(t, b, "weekly-retro")
+
+		resp, body := do(http.MethodPost, "/skills/weekly-retro/disable", map[string]any{})
+		if resp.StatusCode != http.StatusConflict {
+			t.Fatalf("status %d, body %s, want 409", resp.StatusCode, body)
+		}
+	})
+
+	t.Run("missing skill returns 404", func(t *testing.T) {
+		t.Parallel()
+		_, _, do := crudTestServer(t)
+		resp, _ := do(http.MethodPost, "/skills/does-not-exist/disable", map[string]any{})
+		if resp.StatusCode != http.StatusNotFound {
+			t.Fatalf("status %d, want 404", resp.StatusCode)
+		}
+	})
+}
+
+// TestHandleSkillEnable covers the disabled -> active transition and the
+// conflict for any other source status.
+func TestHandleSkillEnable(t *testing.T) {
+	t.Parallel()
+
+	t.Run("disabled flips to active", func(t *testing.T) {
+		t.Parallel()
+		_, b, do := crudTestServer(t)
+		seedActiveSkill(t, b, "deploy-frontend")
+
+		// First disable it.
+		if resp, body := do(http.MethodPost, "/skills/deploy-frontend/disable", map[string]any{}); resp.StatusCode != http.StatusOK {
+			t.Fatalf("disable: status %d, body %s", resp.StatusCode, body)
+		}
+
+		resp, body := do(http.MethodPost, "/skills/deploy-frontend/enable", map[string]any{})
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("enable: status %d, body %s", resp.StatusCode, body)
+		}
+		var out struct {
+			Skill teamSkill `json:"skill"`
+		}
+		if err := json.Unmarshal(body, &out); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if out.Skill.Status != "active" {
+			t.Errorf("status: got %q, want active", out.Skill.Status)
+		}
+
+		// State persists through the broker so a restart sees active.
+		b.mu.Lock()
+		var found *teamSkill
+		for i := range b.skills {
+			if b.skills[i].Name == "deploy-frontend" {
+				found = &b.skills[i]
+				break
+			}
+		}
+		status := ""
+		if found != nil {
+			status = found.Status
+		}
+		b.mu.Unlock()
+		if status != "active" {
+			t.Errorf("in-memory status: got %q, want active", status)
+		}
+	})
+
+	t.Run("non-disabled returns 409", func(t *testing.T) {
+		t.Parallel()
+		_, b, do := crudTestServer(t)
+		seedActiveSkill(t, b, "live-skill")
+		_ = b
+
+		resp, body := do(http.MethodPost, "/skills/live-skill/enable", map[string]any{})
+		if resp.StatusCode != http.StatusConflict {
+			t.Fatalf("status %d, body %s, want 409", resp.StatusCode, body)
+		}
+	})
+}
+
+// TestHandleSkillRestore covers the archived -> proposed transition. Since
+// findSkillByNameLocked excludes archived, the handler scans b.skills directly;
+// this test pins down that contract.
+func TestHandleSkillRestore(t *testing.T) {
+	t.Parallel()
+
+	t.Run("archived flips to proposed", func(t *testing.T) {
+		t.Parallel()
+		_, b, do := crudTestServer(t)
+		seedActiveSkill(t, b, "weekly-retro")
+
+		if resp, body := do(http.MethodPost, "/skills/weekly-retro/archive", map[string]any{}); resp.StatusCode != http.StatusOK {
+			t.Fatalf("archive: status %d, body %s", resp.StatusCode, body)
+		}
+
+		resp, body := do(http.MethodPost, "/skills/weekly-retro/restore", map[string]any{})
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("restore: status %d, body %s", resp.StatusCode, body)
+		}
+		var out struct {
+			Skill teamSkill `json:"skill"`
+		}
+		if err := json.Unmarshal(body, &out); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if out.Skill.Status != "proposed" {
+			t.Errorf("status: got %q, want proposed (re-confirm gate)", out.Skill.Status)
+		}
+	})
+
+	t.Run("non-archived returns 409", func(t *testing.T) {
+		t.Parallel()
+		_, b, do := crudTestServer(t)
+		seedActiveSkill(t, b, "still-live")
+
+		resp, body := do(http.MethodPost, "/skills/still-live/restore", map[string]any{})
+		if resp.StatusCode != http.StatusConflict {
+			t.Fatalf("status %d, body %s, want 409", resp.StatusCode, body)
+		}
+	})
+
+	t.Run("missing skill returns 404", func(t *testing.T) {
+		t.Parallel()
+		_, _, do := crudTestServer(t)
+		resp, _ := do(http.MethodPost, "/skills/missing/restore", map[string]any{})
+		if resp.StatusCode != http.StatusNotFound {
+			t.Fatalf("status %d, want 404", resp.StatusCode)
+		}
+	})
+}
+
+// TestHandleSkillDisable_DrainsInterviewRequests verifies that disabling a
+// skill drains any matching pending skill_proposal interview entries —
+// symmetric with approve/reject (D8).
+func TestHandleSkillDisable_DrainsInterviewRequests(t *testing.T) {
+	t.Parallel()
+	_, b, do := crudTestServer(t)
+	seedActiveSkill(t, b, "deploy-frontend")
+
+	// Hand-seed a pending skill_proposal interview entry that points at the
+	// active skill via ReplyTo. Disable should drain it.
+	b.mu.Lock()
+	b.requests = append(b.requests, humanInterview{
+		ID:        "req-1",
+		Kind:      "skill_proposal",
+		ReplyTo:   "deploy-frontend",
+		Status:    "pending",
+		CreatedAt: "2026-04-28T00:00:00Z",
+		UpdatedAt: "2026-04-28T00:00:00Z",
+	})
+	b.mu.Unlock()
+
+	resp, body := do(http.MethodPost, "/skills/deploy-frontend/disable", map[string]any{})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d, body %s", resp.StatusCode, body)
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, req := range b.requests {
+		if req.ID == "req-1" && req.Status != "answered" {
+			t.Errorf("skill_proposal request status: got %q, want answered", req.Status)
+		}
+	}
+}

@@ -425,8 +425,13 @@ type teamSkill struct {
 	// teamSkillToFrontmatter so the .md frontmatter and the .rejected.md
 	// tombstone both retain provenance.
 	SourceArticles []string `json:"source_articles,omitempty"`
-	CreatedAt      string   `json:"created_at"`
-	UpdatedAt      string   `json:"updated_at"`
+	// OwnerAgents lists agent slugs that may see and invoke this skill. An
+	// empty slice means the skill is lead-routable (only the office lead can
+	// route it). Round-trips through the same chain as SourceArticles:
+	// specToTeamSkill -> writeSkillProposalLocked -> teamSkillToFrontmatter.
+	OwnerAgents []string `json:"owner_agents,omitempty"`
+	CreatedAt   string   `json:"created_at"`
+	UpdatedAt   string   `json:"updated_at"`
 }
 
 type brokerState struct {
@@ -580,6 +585,15 @@ type Broker struct {
 	// the last 60s so /skills/reject/undo can restore them. Keyed by undo
 	// token. Guarded by b.mu. See skill_crud_endpoints.go for GC semantics.
 	recentlyRejectedSkills map[string]rejectedSkillSnapshot
+
+	// skillEmbedder powers findSimilarActiveSkillLocked when set. Nil means
+	// the similarity gate falls back to token-Jaccard. Wired by Lane A's
+	// integration step (task #5); see skill_similarity.go for the contract.
+	skillEmbedder SkillEmbedder
+	// skillSimCache memoises embeddings per (slug, content-sha) so a single
+	// compile pass doesn't re-embed every existing skill once per candidate.
+	// Lazily allocated by findSimilarActiveSkillLocked when first needed.
+	skillSimCache *skillSimilarityCache
 
 	// statePath is the on-disk broker-state.json path bound at construction.
 	// NewBrokerAt(path) sets this directly; NewBroker() resolves
@@ -10907,6 +10921,68 @@ func skillSlug(name string) string {
 	return s
 }
 
+// listSkillsOpts controls listSkillsForAgentLocked filtering.
+type listSkillsOpts struct {
+	// activeOnly drops anything whose Status is not "active". When false, every
+	// non-tombstoned skill is returned (including proposed/archived/disabled).
+	activeOnly bool
+}
+
+// canAgentSeeSkillLocked is the canonical visibility predicate for per-agent
+// skill scoping (PR 7). The caller MUST hold b.mu.
+//
+// An agent sees a skill when either:
+//   - the agent slug (case-insensitive, trimmed) appears in sk.OwnerAgents, OR
+//   - sk.OwnerAgents is empty AND the agent slug equals the office lead slug
+//     (the lead-routable, shared-skill default — back-compat with skills that
+//     pre-date the OwnerAgents field).
+//
+// Status is intentionally ignored here so the predicate stays orthogonal to
+// active/disabled/archived filtering. Callers that want only active skills
+// pass listSkillsOpts{activeOnly: true} to listSkillsForAgentLocked, or apply
+// their own status check after the visibility gate.
+func (b *Broker) canAgentSeeSkillLocked(slug string, sk *teamSkill) bool {
+	if sk == nil {
+		return false
+	}
+	want := strings.ToLower(strings.TrimSpace(slug))
+	if want == "" {
+		return false
+	}
+	if len(sk.OwnerAgents) == 0 {
+		lead := strings.ToLower(strings.TrimSpace(officeLeadSlugFrom(b.members)))
+		return lead != "" && lead == want
+	}
+	for _, owner := range sk.OwnerAgents {
+		if strings.ToLower(strings.TrimSpace(owner)) == want {
+			return true
+		}
+	}
+	return false
+}
+
+// listSkillsForAgentLocked returns the subset of b.skills visible to slug,
+// sorted by Name lexicographically so catalog injection in buildPrompt produces
+// byte-identical output across calls (cache stability). The caller MUST hold
+// b.mu.
+func (b *Broker) listSkillsForAgentLocked(slug string, opts listSkillsOpts) []teamSkill {
+	out := make([]teamSkill, 0, len(b.skills))
+	for i := range b.skills {
+		sk := &b.skills[i]
+		if opts.activeOnly && sk.Status != "active" {
+			continue
+		}
+		if !b.canAgentSeeSkillLocked(slug, sk) {
+			continue
+		}
+		out = append(out, *sk)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].Name < out[j].Name
+	})
+	return out
+}
+
 func (b *Broker) findSkillByNameLocked(name string) *teamSkill {
 	slug := skillSlug(name)
 	for i := range b.skills {
@@ -11062,7 +11138,7 @@ func (b *Broker) handlePostSkill(w http.ResponseWriter, r *http.Request) {
 	})
 	b.appendActionLocked(msgKind, "office", channel, sk.CreatedBy, truncateSummary(sk.Title, 140), sk.ID)
 	if action == "propose" {
-		b.appendSkillProposalRequestLocked(sk, channel, now)
+		b.appendSkillProposalRequestLocked(sk, channel, now, "")
 	}
 
 	if err := b.saveLocked(); err != nil {
@@ -11282,9 +11358,26 @@ func (b *Broker) handleInvokeSkill(w http.ResponseWriter, r *http.Request) {
 
 	// Security fix (Codex T3): only active skills may be invoked. Proposed or
 	// archived skills must not be executable — proposed means unapproved,
-	// archived means intentionally retired.
+	// archived means intentionally retired. Disabled (PR 7 step 4) is a
+	// reversible pause and gets a structured 403 so callers can distinguish
+	// it from the unrecoverable "not active" case.
+	if sk.Status == "disabled" {
+		writeSkillForbidden(w, "disabled", sk, b.members,
+			"skill is disabled — re-enable it from the Skills app to invoke")
+		return
+	}
 	if sk.Status != "active" {
 		http.Error(w, "skill not active (status="+sk.Status+")", http.StatusForbidden)
+		return
+	}
+
+	// PR 7: per-agent visibility gate. The invoker must be in sk.OwnerAgents,
+	// or sk.OwnerAgents must be empty AND the invoker must be the office lead
+	// (lead-routable shared skills). Returning a structured body lets the LLM
+	// caller delegate the request via team_broadcast instead of guessing.
+	if !b.canAgentSeeSkillLocked(strings.TrimSpace(body.InvokedBy), sk) {
+		writeSkillForbidden(w, "not_owner", sk, b.members,
+			"team_broadcast tag the listed agents or hand off the task")
 		return
 	}
 
@@ -11340,6 +11433,35 @@ func (b *Broker) handleInvokeSkill(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
+// writeSkillForbidden emits the structured 403 body that handleInvokeSkill
+// returns when a skill is disabled or invisible to the caller. The body
+// shape lets LLM clients route the request elsewhere instead of retrying.
+//
+//	{
+//	  "ok": false,
+//	  "error": "<reason>",          // "not_owner" | "disabled"
+//	  "delegate_to": ["agent-slug"], // sk.OwnerAgents, or [leadSlug] if empty
+//	  "hint": "<human-readable next step>"
+//	}
+func writeSkillForbidden(w http.ResponseWriter, reason string, sk *teamSkill, members []officeMember, hint string) {
+	delegateTo := append([]string(nil), sk.OwnerAgents...)
+	if len(delegateTo) == 0 {
+		if lead := strings.TrimSpace(officeLeadSlugFrom(members)); lead != "" {
+			delegateTo = []string{lead}
+		} else {
+			delegateTo = []string{}
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusForbidden)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"ok":          false,
+		"error":       reason,
+		"delegate_to": delegateTo,
+		"hint":        hint,
+	})
+}
+
 // createSkillRunTaskLocked dispatches a task so the office lead picks up and
 // executes the skill. Caller must hold b.mu. Returns the new task ID.
 func (b *Broker) createSkillRunTaskLocked(sk *teamSkill, channel, invoker, now string) (string, error) {
@@ -11390,7 +11512,13 @@ func (b *Broker) createSkillRunTaskLocked(sk *teamSkill, channel, invoker, now s
 	return task.ID, nil
 }
 
-func (b *Broker) appendSkillProposalRequestLocked(skill teamSkill, channel, now string) {
+// appendSkillProposalRequestLocked appends a human interview for an
+// incoming skill proposal. When enhancesSlug is non-empty, the interview is
+// emitted with kind="enhance_skill_proposal" and the framing is adapted so
+// the human reviews whether to fold the candidate into the existing skill
+// (PR 7 task #13). Otherwise the legacy kind="skill_proposal" + "Activate
+// it?" framing is preserved.
+func (b *Broker) appendSkillProposalRequestLocked(skill teamSkill, channel, now string, enhancesSlug string) {
 	title := strings.TrimSpace(skill.Title)
 	if title == "" {
 		title = strings.TrimSpace(skill.Name)
@@ -11401,14 +11529,24 @@ func (b *Broker) appendSkillProposalRequestLocked(skill teamSkill, channel, now 
 		createdBy = "system"
 	}
 	b.counter++
+	enhancesSlug = strings.TrimSpace(enhancesSlug)
+	kind := "skill_proposal"
+	titleLine := "Approve skill: " + title
+	question := fmt.Sprintf("@%s proposed skill **%s**: %s\n\nActivate it?", createdBy, title, description)
+	if enhancesSlug != "" {
+		kind = "enhance_skill_proposal"
+		titleLine = fmt.Sprintf("Enhance %q with new content", enhancesSlug)
+		question = fmt.Sprintf("@%s drafted **%s**, but it looks similar to existing skill **%s**.\n\n%s\n\nFold this into %s, or create %s as a separate skill?",
+			createdBy, title, enhancesSlug, description, enhancesSlug, title)
+	}
 	interview := humanInterview{
 		ID:        fmt.Sprintf("request-%d", b.counter),
-		Kind:      "skill_proposal",
+		Kind:      kind,
 		Status:    "pending",
 		From:      createdBy,
 		Channel:   normalizeChannelSlug(channel),
-		Title:     "Approve skill: " + title,
-		Question:  fmt.Sprintf("@%s proposed skill **%s**: %s\n\nActivate it?", createdBy, title, description),
+		Title:     titleLine,
+		Question:  question,
 		ReplyTo:   strings.TrimSpace(skill.Name),
 		Blocking:  false,
 		CreatedAt: now,
