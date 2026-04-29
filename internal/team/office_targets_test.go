@@ -32,7 +32,16 @@ func fixtureTargeter(t *testing.T, members []officeMember, opts ...func(*officeT
 		failedPaneSlugs: failed,
 		isOneOnOne:      func() bool { return false },
 		oneOnOneSlug:    func() string { return "" },
-		isChannelDM:     func(string) (bool, string) { return false, "" },
+		isChannelDM: func(channelSlug string) (bool, string) {
+			// Mirror Launcher.isChannelDMRaw's legacy-prefix check so tests
+			// that pass channels like "dm-eng" route the same way as
+			// production. Tests that need pure no-DM semantics override
+			// this hook explicitly.
+			if IsDMSlug(channelSlug) {
+				return true, DMTargetAgent(channelSlug)
+			}
+			return false, ""
+		},
 		snapshotMembers: func() []officeMember {
 			return append([]officeMember(nil), members...)
 		},
