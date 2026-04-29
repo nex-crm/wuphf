@@ -149,18 +149,21 @@ type Launcher struct {
 	// authoritative source for sessionName / pack / failedPaneSlugs /
 	// paneBackedAgents — the targeter holds pointers/callbacks back into
 	// the launcher rather than copies.
-	targets *officeTargeter
+	targets     *officeTargeter
+	targetsOnce sync.Once
 
 	// notify owns notification-context and work-packet construction
 	// (PLAN.md §C3). Lazily constructed via notifyCtx() and shares state
 	// with the launcher via callbacks (broker reads, headless queue peek).
-	notify *notificationContextBuilder
+	notify     *notificationContextBuilder
+	notifyOnce sync.Once
 
 	// schedulerWorker owns the watchdog scheduler goroutine
 	// (PLAN.md §C4). Lazily constructed via scheduler(); Launch starts the
 	// goroutine via watchdogSchedulerLoop, Kill drains it via Stop before
 	// tearing down the broker. clock is realClock in production.
-	schedulerWorker *watchdogScheduler
+	schedulerWorker     *watchdogScheduler
+	schedulerWorkerOnce sync.Once
 }
 
 // paneDispatchTurn is one queued notification to type into a tmux pane.
@@ -1444,14 +1447,16 @@ func (l *Launcher) scheduler() *watchdogScheduler {
 	if l == nil {
 		return nil
 	}
-	if l.schedulerWorker != nil {
-		return l.schedulerWorker
-	}
-	l.schedulerWorker = &watchdogScheduler{
-		broker:      l.broker,
-		clock:       realClock{},
-		deliverTask: l.deliverTaskNotification,
-	}
+	// sync.Once guards lazy-init: Launch() spawns watchdogSchedulerLoop
+	// alongside other goroutines that hit scheduler() concurrently
+	// (e.g. headless dispatch enqueues that call updateSchedulerJob).
+	l.schedulerWorkerOnce.Do(func() {
+		l.schedulerWorker = &watchdogScheduler{
+			broker:      l.broker,
+			clock:       realClock{},
+			deliverTask: l.deliverTaskNotification,
+		}
+	})
 	return l.schedulerWorker
 }
 
@@ -1496,25 +1501,30 @@ func (l *Launcher) targeter() *officeTargeter {
 	if l == nil {
 		return nil
 	}
-	if l.targets != nil {
-		return l.targets
-	}
-	if l.failedPaneSlugs == nil {
-		l.failedPaneSlugs = map[string]string{}
-	}
-	l.targets = &officeTargeter{
-		sessionName:        l.sessionName,
-		pack:               l.pack,
-		cwd:                l.cwd,
-		provider:           l.provider,
-		paneBackedFlag:     &l.paneBackedAgents,
-		failedPaneSlugs:    l.failedPaneSlugs,
-		isOneOnOne:         l.isOneOnOne,
-		oneOnOneSlug:       l.oneOnOneAgent,
-		isChannelDM:        l.isChannelDMRaw,
-		snapshotMembers:    l.officeMembersSnapshot,
-		memberProviderKind: l.brokerMemberProviderKind,
-	}
+	// sync.Once guards against the lazy-init races that arise during
+	// Launch() — multiple goroutines (notifyAgentsLoop, watchdogSchedulerLoop,
+	// pollNexNotificationsLoop, etc.) can hit this concurrently before the
+	// first ordered call has finished. Without the Once, two goroutines can
+	// each observe l.targets == nil and both write a fresh pointer.
+	l.targetsOnce.Do(func() {
+		l.targets = &officeTargeter{
+			sessionName:    l.sessionName,
+			pack:           l.pack,
+			cwd:            l.cwd,
+			provider:       l.provider,
+			paneBackedFlag: &l.paneBackedAgents,
+			// Read via callback so reconfigureVisibleAgents nilling
+			// l.failedPaneSlugs (and recordPaneSpawnFailure rebuilding it)
+			// stays observable to the targeter. A snapshotted map pointer
+			// would orphan after the first reconfigure.
+			failedPaneSlugs:    func() map[string]string { return l.failedPaneSlugs },
+			isOneOnOne:         l.isOneOnOne,
+			oneOnOneSlug:       l.oneOnOneAgent,
+			isChannelDM:        l.isChannelDMRaw,
+			snapshotMembers:    l.officeMembersSnapshot,
+			memberProviderKind: l.brokerMemberProviderKind,
+		}
+	})
 	return l.targets
 }
 
@@ -1867,10 +1877,17 @@ func (l *Launcher) notifyCtx() *notificationContextBuilder {
 	if l == nil {
 		return nil
 	}
-	if l.notify != nil {
-		return l.notify
-	}
-	l.notify = &notificationContextBuilder{
+	// sync.Once guards against concurrent first-callers from the various
+	// notify-* goroutines spawned in Launch() — without it, two of them
+	// can both observe l.notify == nil and write competing pointers.
+	l.notifyOnce.Do(func() {
+		l.notify = newNotifyCtx(l)
+	})
+	return l.notify
+}
+
+func newNotifyCtx(l *Launcher) *notificationContextBuilder {
+	return &notificationContextBuilder{
 		targeter: l.targeter(),
 		channelMessages: func(channelSlug string) []channelMessage {
 			if l.broker == nil {
@@ -1899,7 +1916,6 @@ func (l *Launcher) notifyCtx() *notificationContextBuilder {
 		scoreTaskCandidate:   l.scoreMessageForTaskCandidate,
 		activeHeadlessAgents: l.activeHeadlessSlugs,
 	}
-	return l.notify
 }
 
 // activeHeadlessSlugs returns the slugs that have non-empty headless
