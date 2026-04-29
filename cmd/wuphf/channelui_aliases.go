@@ -86,6 +86,9 @@ var (
 	recentExternalActions = channelui.RecentExternalActions
 	agentSlugForDisplay   = channelui.AgentSlugForDisplay
 	displaySignalKind     = channelui.DisplaySignalKind
+
+	buildRequestLines = channelui.BuildRequestLines
+	buildSkillLines   = channelui.BuildSkillLines
 )
 
 // Office-app constant aliases. Typed-string consts copy across packages

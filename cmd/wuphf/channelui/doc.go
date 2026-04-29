@@ -44,6 +44,9 @@
 //     (ReverseSignals, ReverseDecisions, ActiveWatchdogs,
 //     ReverseWatchdogs, RecentExternalActions), plus
 //     AgentSlugForDisplay and DisplaySignalKind.
+//   - build_lines_simple.go — leaf "build*Lines" rendering helpers
+//     for the requests and skills apps (BuildRequestLines,
+//     BuildSkillLines).
 //
 // Subsequent extraction PRs will land the workspace / recovery / cache
 // cluster, the sidebar / splash, the broker integrations, and finally
