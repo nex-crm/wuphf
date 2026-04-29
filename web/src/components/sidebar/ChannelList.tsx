@@ -1,15 +1,71 @@
-import { useChannels } from "../../hooks/useChannels";
+import { type Channel, useChannels } from "../../hooks/useChannels";
 import { useOverflow } from "../../hooks/useOverflow";
 import { useAppStore } from "../../stores/app";
 import { ChannelWizard, useChannelWizard } from "../channels/ChannelWizard";
 import { Kbd, MOD_KEY } from "../ui/Kbd";
 import { SidebarItemLabel } from "./SidebarItemLabel";
 
+function ChannelRow({
+  channel,
+  index,
+  active,
+  unreadCount,
+  onSelect,
+}: {
+  channel: Channel;
+  index: number;
+  active: boolean;
+  unreadCount: number;
+  onSelect: (slug: string) => void;
+}) {
+  // Only the first 9 get a Cmd+N shortcut — the global handler caps there,
+  // so advertising #10+ would be a lie.
+  const shortcutIdx = index < 9 ? index + 1 : null;
+  const name = channel.name || channel.slug;
+  const title =
+    shortcutIdx !== null ? `${name} — ${MOD_KEY}${shortcutIdx}` : name;
+  const unreadLabel = unreadCount > 99 ? "99+" : String(unreadCount);
+  const buttonLabel = unreadCount > 0 ? `${name}, ${unreadCount} unread` : name;
+
+  return (
+    <button
+      type="button"
+      className={`sidebar-item${active ? " active" : ""}`}
+      onClick={() => onSelect(channel.slug)}
+      aria-label={buttonLabel}
+      title={title}
+    >
+      <span
+        style={{
+          color: "currentColor",
+          width: 18,
+          textAlign: "center",
+          flexShrink: 0,
+        }}
+      >
+        #
+      </span>
+      <SidebarItemLabel>{name}</SidebarItemLabel>
+      {unreadCount > 0 && (
+        <span className="sidebar-badge" title={`${unreadCount} unread`}>
+          {unreadLabel}
+        </span>
+      )}
+      {shortcutIdx !== null && (
+        <span className="sidebar-shortcut" aria-hidden="true">
+          <Kbd size="sm">{`${MOD_KEY}${shortcutIdx}`}</Kbd>
+        </span>
+      )}
+    </button>
+  );
+}
+
 export function ChannelList() {
   const { data: channels = [] } = useChannels();
   const currentChannel = useAppStore((s) => s.currentChannel);
   const setCurrentChannel = useAppStore((s) => s.setCurrentChannel);
   const currentApp = useAppStore((s) => s.currentApp);
+  const unreadByChannel = useAppStore((s) => s.unreadByChannel);
   const wizard = useChannelWizard();
   const overflowRef = useOverflow<HTMLDivElement>();
 
@@ -19,40 +75,20 @@ export function ChannelList() {
         <div className="sidebar-channels" ref={overflowRef}>
           {channels.map((ch, idx) => {
             const isActive = currentChannel === ch.slug && !currentApp;
-            // Only the first 9 get a Cmd+N shortcut — the global handler
-            // caps there, so advertising #10+ would be a lie.
-            const shortcutIdx = idx < 9 ? idx + 1 : null;
-            const title =
-              shortcutIdx !== null
-                ? `${ch.name || ch.slug} — ${MOD_KEY}${shortcutIdx}`
-                : ch.name || ch.slug;
+            const unreadCount = unreadByChannel[ch.slug] ?? 0;
             return (
-              <button
+              <ChannelRow
                 key={ch.slug}
-                className={`sidebar-item${isActive ? " active" : ""}`}
-                onClick={() => setCurrentChannel(ch.slug)}
-                title={title}
-              >
-                <span
-                  style={{
-                    color: "currentColor",
-                    width: 18,
-                    textAlign: "center",
-                    flexShrink: 0,
-                  }}
-                >
-                  #
-                </span>
-                <SidebarItemLabel>{ch.name || ch.slug}</SidebarItemLabel>
-                {shortcutIdx !== null && (
-                  <span className="sidebar-shortcut" aria-hidden="true">
-                    <Kbd size="sm">{`${MOD_KEY}${shortcutIdx}`}</Kbd>
-                  </span>
-                )}
-              </button>
+                channel={ch}
+                index={idx}
+                active={isActive}
+                unreadCount={unreadCount}
+                onSelect={setCurrentChannel}
+              />
             );
           })}
           <button
+            type="button"
             className="sidebar-item sidebar-add-btn"
             onClick={wizard.show}
             title="Create a new channel"

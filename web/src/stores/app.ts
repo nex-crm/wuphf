@@ -23,7 +23,11 @@ const SIDEBAR_SECTIONS_KEY = "wuphf-sidebar-sections";
 const SIDEBAR_BG_KEY = "wuphf-sidebar-bg";
 
 const _storedSidebarSections = ((): SidebarSectionsState => {
-  const def: SidebarSectionsState = { agents: true, channels: true, apps: true };
+  const def: SidebarSectionsState = {
+    agents: true,
+    channels: true,
+    apps: true,
+  };
   try {
     const raw = localStorage.getItem(SIDEBAR_SECTIONS_KEY);
     if (!raw) return def;
@@ -41,7 +45,7 @@ const _storedSidebarSections = ((): SidebarSectionsState => {
 const _storedSidebarBg = ((): string | null => {
   try {
     const v = localStorage.getItem(SIDEBAR_BG_KEY);
-    return v && v.trim() ? v : null;
+    return v?.trim() ? v : null;
   } catch {
     return null;
   }
@@ -153,6 +157,9 @@ export interface AppStore {
   // Message polling state
   lastMessageId: string | null;
   setLastMessageId: (id: string | null) => void;
+  unreadByChannel: Record<string, number>;
+  incrementUnread: (channel: string) => void;
+  clearUnread: (channel: string) => void;
 
   // Agent panel
   activeAgentSlug: string | null;
@@ -197,11 +204,20 @@ export const useAppStore = create<AppStore>((set, get) => ({
   setBrokerConnected: (v) => set({ brokerConnected: v }),
 
   currentChannel: "general",
-  setCurrentChannel: (ch) => set({ currentChannel: ch, currentApp: null }),
+  setCurrentChannel: (ch) =>
+    set((state) => ({
+      currentChannel: ch,
+      currentApp: null,
+      unreadByChannel: { ...state.unreadByChannel, [ch]: 0 },
+    })),
   currentApp: null,
   setCurrentApp: (app) => {
     if (!app) {
-      set({ currentApp: null });
+      const { currentChannel, unreadByChannel } = get();
+      set({
+        currentApp: null,
+        unreadByChannel: { ...unreadByChannel, [currentChannel]: 0 },
+      });
       return;
     }
 
@@ -300,10 +316,30 @@ export const useAppStore = create<AppStore>((set, get) => ({
         ...s.channelMeta,
         [channelSlug]: { ...s.channelMeta[channelSlug], type: "D", agentSlug },
       },
+      unreadByChannel: { ...s.unreadByChannel, [channelSlug]: 0 },
     })),
 
   lastMessageId: null,
   setLastMessageId: (id) => set({ lastMessageId: id }),
+  unreadByChannel: {},
+  incrementUnread: (channel) => {
+    const ch = channel.trim() || "general";
+    set((state) => ({
+      unreadByChannel: {
+        ...state.unreadByChannel,
+        [ch]: (state.unreadByChannel[ch] ?? 0) + 1,
+      },
+    }));
+  },
+  clearUnread: (channel) => {
+    const ch = channel.trim() || "general";
+    set((state) => {
+      if ((state.unreadByChannel[ch] ?? 0) === 0) return state;
+      return {
+        unreadByChannel: { ...state.unreadByChannel, [ch]: 0 },
+      };
+    });
+  },
 
   activeAgentSlug: null,
   setActiveAgentSlug: (slug) => set({ activeAgentSlug: slug }),
@@ -322,6 +358,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set({
       currentChannel: "general",
       currentApp: null,
+      unreadByChannel: {},
       activeThreadId: null,
       lastMessageId: null,
       activeAgentSlug: null,
