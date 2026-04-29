@@ -19,6 +19,13 @@ package embedding
 // lock, writes the row, releases. We don't use os.O_APPEND because we
 // also want the size-based rotation to happen atomically with the
 // in-memory map state.
+//
+// IMPORTANT: this cache is goroutine-safe but **single-process only**.
+// Two `wuphf` processes pointed at the same JSONL will race the rotation
+// path (rename + truncate vs. open-append) and may lose rows. If you
+// need shared state across processes, run a single broker and have
+// other tools talk to it; do not point a second wuphf at the same
+// WUPHF_EMBEDDING_CACHE_PATH.
 
 import (
 	"bufio"
@@ -136,10 +143,9 @@ func (c *Cache) Set(text, model string, vector []float32) error {
 	if len(vector) == 0 {
 		return errors.New("embedding: cache: empty vector")
 	}
-	if err := c.ensureLoaded(); err != nil {
-		// Continue: a load failure leaves the in-memory map empty,
-		// which is fine for a Set call.
-	}
+	// Best-effort load: a failure leaves the in-memory map empty, which
+	// is fine for a Set call (we still write the row to disk).
+	_ = c.ensureLoaded()
 
 	key := cacheKey(text, model)
 	row := cacheRow{
@@ -216,7 +222,7 @@ func (c *Cache) ensureLoaded() error {
 		}
 		return fmt.Errorf("embedding: cache: open: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	if info, statErr := f.Stat(); statErr == nil {
 		c.bytesOnDisk = info.Size()
