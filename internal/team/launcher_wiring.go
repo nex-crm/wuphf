@@ -20,18 +20,24 @@ import (
 // first access. Constructed nil-safe so tests that build &Launcher{}
 // directly never trip on a missing scheduler. Production wiring
 // (clock=realClock, broker=l.broker) happens here.
+//
+// PLAN.md §C25 staff-review fix: sync.Once guards lazy-init. Launch()
+// spawns watchdogSchedulerLoop alongside other goroutines (notify*Loop,
+// pollNexNotificationsLoop, headless dispatch enqueues calling
+// updateSchedulerJob) that hit scheduler() concurrently. Without the
+// Once, two goroutines can both observe nil and write competing
+// pointers.
 func (l *Launcher) scheduler() *watchdogScheduler {
 	if l == nil {
 		return nil
 	}
-	if l.schedulerWorker != nil {
-		return l.schedulerWorker
-	}
-	l.schedulerWorker = &watchdogScheduler{
-		broker:      l.broker,
-		clock:       realClock{},
-		deliverTask: l.deliverTaskNotification,
-	}
+	l.schedulerWorkerOnce.Do(func() {
+		l.schedulerWorker = &watchdogScheduler{
+			broker:      l.broker,
+			clock:       realClock{},
+			deliverTask: l.deliverTaskNotification,
+		}
+	})
 	return l.schedulerWorker
 }
 
@@ -48,44 +54,55 @@ func (l *Launcher) watchdogSchedulerLoop() {
 // every sub-type being nil-safe. The targeter shares mutable state with
 // the launcher via pointers/maps (paneBackedFlag, failedPaneSlugs) so
 // later mutations on the launcher are visible to the targeter immediately.
+// PLAN.md §C25 staff-review fix: sync.Once guards lazy-init against
+// the goroutine fan-out from Launch (multiple goroutines hit
+// targeter() concurrently before the first ordered call finishes).
+// failedPaneSlugs is read via callback (not snapshotted) so
+// reconfigureVisibleAgents nil-ing l.failedPaneSlugs and
+// recordPaneSpawnFailure rebuilding it remain observable to the
+// targeter. A snapshotted map pointer would orphan after the first
+// reconfigure and silently miss every subsequent failure.
 func (l *Launcher) targeter() *officeTargeter {
 	if l == nil {
 		return nil
 	}
-	if l.targets != nil {
-		return l.targets
-	}
-	if l.failedPaneSlugs == nil {
-		l.failedPaneSlugs = map[string]string{}
-	}
-	l.targets = &officeTargeter{
-		sessionName:        l.sessionName,
-		pack:               l.pack,
-		cwd:                l.cwd,
-		provider:           l.provider,
-		paneBackedFlag:     &l.paneBackedAgents,
-		failedPaneSlugs:    l.failedPaneSlugs,
-		isOneOnOne:         l.isOneOnOne,
-		oneOnOneSlug:       l.oneOnOneAgent,
-		isChannelDM:        l.isChannelDMRaw,
-		snapshotMembers:    l.officeMembersSnapshot,
-		memberProviderKind: l.brokerMemberProviderKind,
-	}
+	l.targetsOnce.Do(func() {
+		l.targets = &officeTargeter{
+			sessionName:        l.sessionName,
+			pack:               l.pack,
+			cwd:                l.cwd,
+			provider:           l.provider,
+			paneBackedFlag:     &l.paneBackedAgents,
+			failedPaneSlugs:    func() map[string]string { return l.failedPaneSlugs },
+			isOneOnOne:         l.isOneOnOne,
+			oneOnOneSlug:       l.oneOnOneAgent,
+			isChannelDM:        l.isChannelDMRaw,
+			snapshotMembers:    l.officeMembersSnapshot,
+			memberProviderKind: l.brokerMemberProviderKind,
+		}
+	})
 	return l.targets
 }
 
 // notifyCtx returns the notification-context builder, lazily constructing
-// it on first access (PLAN.md §C3). The builder shares state with Launcher
-// via callbacks for broker reads and headless-queue peek; constructed
-// fresh per call so each work packet sees current broker state.
+// it on first access (PLAN.md §C3). The builder is cached after first
+// call; freshness comes from its inner callbacks re-resolving through
+// l.broker on each invocation, not from rebuilding the struct.
+//
+// PLAN.md §C25 staff-review fix: sync.Once guards lazy-init from
+// concurrent first-callers spawned by Launch.
 func (l *Launcher) notifyCtx() *notificationContextBuilder {
 	if l == nil {
 		return nil
 	}
-	if l.notify != nil {
-		return l.notify
-	}
-	l.notify = &notificationContextBuilder{
+	l.notifyOnce.Do(func() {
+		l.notify = newNotifyCtx(l)
+	})
+	return l.notify
+}
+
+func newNotifyCtx(l *Launcher) *notificationContextBuilder {
+	return &notificationContextBuilder{
 		targeter: l.targeter(),
 		channelMessages: func(channelSlug string) []channelMessage {
 			if l.broker == nil {
@@ -114,7 +131,6 @@ func (l *Launcher) notifyCtx() *notificationContextBuilder {
 		scoreTaskCandidate:   l.scoreMessageForTaskCandidate,
 		activeHeadlessAgents: l.activeHeadlessSlugs,
 	}
-	return l.notify
 }
 
 // paneDispatch returns the lazily-constructed dispatcher (PLAN.md §C6).
@@ -122,19 +138,21 @@ func (l *Launcher) notifyCtx() *notificationContextBuilder {
 // fixtures stay nil-safe in tests. The sendFn closure consults the
 // package-global launcherSendNotificationToPaneOverride seam on every
 // call so existing tests keep working unchanged (PLAN.md trap §5.3).
+//
+// PLAN.md §C25 staff-review fix: sync.Once guards lazy-init from
+// concurrent first-callers spawned by Launch.
 func (l *Launcher) paneDispatch() *paneDispatcher {
 	if l == nil {
 		return &paneDispatcher{clock: realClock{}}
 	}
-	if l.dispatcher != nil {
-		return l.dispatcher
-	}
-	l.dispatcher = &paneDispatcher{
-		clock: realClock{},
-		sendFn: func(paneTarget, notification string) {
-			launcherSendNotificationToPane(l, paneTarget, notification)
-		},
-	}
+	l.dispatcherOnce.Do(func() {
+		l.dispatcher = &paneDispatcher{
+			clock: realClock{},
+			sendFn: func(paneTarget, notification string) {
+				launcherSendNotificationToPane(l, paneTarget, notification)
+			},
+		}
+	})
 	return l.dispatcher
 }
 
@@ -153,39 +171,38 @@ func (l *Launcher) panes() *paneLifecycle {
 	if l == nil {
 		return newPaneLifecycle(SessionName)
 	}
-	if l.paneLC != nil {
-		return l.paneLC
-	}
-	name := l.sessionName
-	if name == "" {
-		name = SessionName
-	}
-	deps := paneLifecycleDeps{
-		cwd:                              l.cwd,
-		isOneOnOne:                       l.isOneOnOne,
-		oneOnOneAgent:                    l.oneOnOneAgent,
-		usesPaneRuntime:                  l.targeter().UsesPaneRuntime,
-		visibleOfficeMembers:             l.targeter().VisibleMembers,
-		overflowOfficeMembers:            l.targeter().OverflowMembers,
-		agentPaneTargets:                 l.targeter().PaneTargets,
-		memberUsesHeadlessOneShotRuntime: l.targeter().MemberUsesHeadlessOneShotRuntime,
-		claudeCommand:                    l.claudeCommand,
-		buildPrompt:                      l.buildPrompt,
-		agentName:                        l.targeter().NameFor,
-		recordFailure:                    l.recordPaneSpawnFailure,
-		paneBackedFlag:                   &l.paneBackedAgents,
-	}
-	if l.broker != nil {
-		// Capture the pointer at construction so the deps closure
-		// remains stable even if `l.broker` is reassigned later.
-		// Production never reassigns broker after Launch(), but tests
-		// build &Launcher{} fixtures and want the captured pointer to
-		// match the broker they wired.
-		broker := l.broker
-		deps.postSystemMessage = func(channel, body, kind string) {
-			broker.PostSystemMessage(channel, body, kind)
+	l.paneLCOnce.Do(func() {
+		name := l.sessionName
+		if name == "" {
+			name = SessionName
 		}
-	}
-	l.paneLC = newPaneLifecycleWithDeps(name, deps)
+		deps := paneLifecycleDeps{
+			cwd:                              l.cwd,
+			isOneOnOne:                       l.isOneOnOne,
+			oneOnOneAgent:                    l.oneOnOneAgent,
+			usesPaneRuntime:                  l.targeter().UsesPaneRuntime,
+			visibleOfficeMembers:             l.targeter().VisibleMembers,
+			overflowOfficeMembers:            l.targeter().OverflowMembers,
+			agentPaneTargets:                 l.targeter().PaneTargets,
+			memberUsesHeadlessOneShotRuntime: l.targeter().MemberUsesHeadlessOneShotRuntime,
+			claudeCommand:                    l.claudeCommand,
+			buildPrompt:                      l.buildPrompt,
+			agentName:                        l.targeter().NameFor,
+			recordFailure:                    l.recordPaneSpawnFailure,
+			paneBackedFlag:                   &l.paneBackedAgents,
+		}
+		if l.broker != nil {
+			// Capture the pointer at construction so the deps closure
+			// remains stable even if `l.broker` is reassigned later.
+			// Production never reassigns broker after Launch(), but tests
+			// build &Launcher{} fixtures and want the captured pointer to
+			// match the broker they wired.
+			broker := l.broker
+			deps.postSystemMessage = func(channel, body, kind string) {
+				broker.PostSystemMessage(channel, body, kind)
+			}
+		}
+		l.paneLC = newPaneLifecycleWithDeps(name, deps)
+	})
 	return l.paneLC
 }

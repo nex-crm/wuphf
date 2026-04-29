@@ -71,10 +71,15 @@ type watchdogScheduler struct {
 	initialDelay time.Duration
 	pollEvery    time.Duration
 
-	startOnce sync.Once
-	stopOnce  sync.Once
-	stopCh    chan struct{}
-	done      sync.WaitGroup
+	// mu coordinates Start/Stop so Stop-before-Start can't consume its
+	// signal and orphan a later Start's goroutine. started/stopped are
+	// the actual state; sync.Once isn't enough because the two Onces
+	// don't observe each other's outcome.
+	mu      sync.Mutex
+	started bool
+	stopped bool
+	stopCh  chan struct{}
+	done    sync.WaitGroup
 
 	// runCtx is a cancelable derivation of the ctx passed to Start. Stop
 	// cancels it so any in-flight downstream call (e.g. a workflow provider
@@ -87,29 +92,42 @@ type watchdogScheduler struct {
 	// processOnce call. Tests use it to wait deterministically; production
 	// leaves it nil so the loop has zero overhead.
 	onTickDone chan<- struct{}
+
+	// resolveWorkflowProvider, when non-nil, replaces the live registry
+	// lookup in processWorkflowJob. Tests inject a stub returning a fake
+	// action.Provider so the lookup-failure, execute-failure, success, and
+	// cancellation branches are all reachable without spinning up a real
+	// registry. Production leaves this nil and uses action.NewRegistryFromEnv.
+	resolveWorkflowProvider func(name string) (action.Provider, error)
 }
 
 // Start spawns the scheduler goroutine. Idempotent — multiple calls are
-// no-ops after the first. The returned scheduler keeps running until Stop
-// is called or ctx is cancelled.
+// no-ops after the first. If Stop ran before Start, Start is a no-op so
+// the goroutine never spawns (the alternative would leak it). The
+// returned scheduler keeps running until Stop is called or ctx is
+// cancelled.
 func (w *watchdogScheduler) Start(ctx context.Context) {
-	w.startOnce.Do(func() {
-		if ctx == nil {
-			ctx = context.Background()
-		}
-		w.runCtx, w.runCancel = context.WithCancel(ctx)
-		if w.stopCh == nil {
-			w.stopCh = make(chan struct{})
-		}
-		if w.initialDelay <= 0 {
-			w.initialDelay = 15 * time.Second
-		}
-		if w.pollEvery <= 0 {
-			w.pollEvery = 20 * time.Second
-		}
-		w.done.Add(1)
-		go w.run(w.runCtx)
-	})
+	w.mu.Lock()
+	if w.started || w.stopped {
+		w.mu.Unlock()
+		return
+	}
+	w.started = true
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	w.runCtx, w.runCancel = context.WithCancel(ctx)
+	w.stopCh = make(chan struct{})
+	if w.initialDelay <= 0 {
+		w.initialDelay = 15 * time.Second
+	}
+	if w.pollEvery <= 0 {
+		w.pollEvery = 20 * time.Second
+	}
+	w.done.Add(1)
+	runCtx := w.runCtx
+	w.mu.Unlock()
+	go w.run(runCtx)
 }
 
 func (w *watchdogScheduler) run(ctx context.Context) {
@@ -155,18 +173,25 @@ func (w *watchdogScheduler) signalTick() {
 }
 
 // Stop signals the goroutine to exit and waits for it. Idempotent.
+// Calling Stop before Start is supported: it disables a later Start
+// from ever spawning the goroutine.
 func (w *watchdogScheduler) Stop() {
-	w.stopOnce.Do(func() {
-		// Cancel runCtx first so any downstream blocking call (workflow
-		// provider, etc.) unblocks before we sit on done.Wait.
-		if w.runCancel != nil {
-			w.runCancel()
-		}
-		if w.stopCh == nil {
-			return
-		}
+	w.mu.Lock()
+	if w.stopped {
+		w.mu.Unlock()
+		w.done.Wait()
+		return
+	}
+	w.stopped = true
+	// Cancel runCtx first so any downstream blocking call (workflow
+	// provider, etc.) unblocks before we sit on done.Wait.
+	if w.runCancel != nil {
+		w.runCancel()
+	}
+	if w.stopCh != nil {
 		close(w.stopCh)
-	})
+	}
+	w.mu.Unlock()
 	w.done.Wait()
 }
 
@@ -316,8 +341,13 @@ func (w *watchdogScheduler) processWorkflowJob(job schedulerJob) {
 	if providerName == "" {
 		providerName = strings.TrimSpace(job.Provider)
 	}
-	registry := action.NewRegistryFromEnv()
-	provider, err := registry.ProviderNamed(providerName, action.CapabilityWorkflowExecute)
+	resolve := w.resolveWorkflowProvider
+	if resolve == nil {
+		resolve = func(name string) (action.Provider, error) {
+			return action.NewRegistryFromEnv().ProviderNamed(name, action.CapabilityWorkflowExecute)
+		}
+	}
+	provider, err := resolve(providerName)
 	if err != nil {
 		source := providerName
 		if strings.TrimSpace(source) == "" {
@@ -341,6 +371,12 @@ func (w *watchdogScheduler) processWorkflowJob(job schedulerJob) {
 		KeyOrPath: workflowKey,
 		Inputs:    payload.Inputs,
 	})
+	// Shutdown cancellation is not a failure — the workflow was pre-empted,
+	// not rejected. Recording it as "failed" would corrupt persisted skill
+	// state; bail out and let the job remain scheduled for the next run.
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return
+	}
 	now := w.clock.Now().UTC()
 	nextRun, hasNext := nextWorkflowRun(strings.TrimSpace(payload.ScheduleExpr), now)
 	if err != nil {

@@ -106,23 +106,34 @@ type Launcher struct {
 	// authoritative source for sessionName / pack / failedPaneSlugs /
 	// paneBackedAgents — the targeter holds pointers/callbacks back into
 	// the launcher rather than copies.
-	targets *officeTargeter
+	// *Once fields below pair with each lazy sub-type pointer; see
+	// launcher_wiring.go for the sync.Once-guarded accessors.
+	// PLAN.md §C25 staff-review fix: Launch spawns goroutines (notify*Loop,
+	// watchdogSchedulerLoop, pollNexNotificationsLoop, ...) that all hit
+	// these accessors concurrently — without sync.Once two goroutines can
+	// both observe nil and write competing pointers.
+	targets     *officeTargeter
+	targetsOnce sync.Once
 
 	// notify owns notification-context and work-packet construction
 	// (PLAN.md §C3). Lazily constructed via notifyCtx() and shares state
 	// with the launcher via callbacks (broker reads, headless queue peek).
-	notify *notificationContextBuilder
+	notify     *notificationContextBuilder
+	notifyOnce sync.Once
 
 	// schedulerWorker owns the watchdog scheduler goroutine
-	// (PLAN.md §C4). Lazily constructed via scheduler(); Launch() calls
-	// Start, Kill() calls Stop. clock is realClock in production.
-	schedulerWorker *watchdogScheduler
+	// (PLAN.md §C4). Lazily constructed via scheduler(); Launch starts the
+	// goroutine via watchdogSchedulerLoop, Kill drains it via Stop before
+	// tearing down the broker. clock is realClock in production.
+	schedulerWorker     *watchdogScheduler
+	schedulerWorkerOnce sync.Once
 
 	// dispatcher owns the per-slug pane-dispatch workers (PLAN.md §C6).
 	// Lazily constructed via paneDispatch(); the dispatcher.sendFn
 	// closure consults the package-global launcherSendNotificationToPaneOverride
 	// seam on every call so existing tests keep working unchanged.
-	dispatcher *paneDispatcher
+	dispatcher     *paneDispatcher
+	dispatcherOnce sync.Once
 
 	// paneLC owns the tmux pane lifecycle (PLAN.md §C5b). Lazily
 	// constructed via panes(); the runner is resolved through the
@@ -131,7 +142,8 @@ type Launcher struct {
 	// the type covers read-only methods (HasLiveSession, ListTeamPanes,
 	// ChannelPaneStatus, capture*); the spawn/clear methods migrate in
 	// follow-up PRs.
-	paneLC *paneLifecycle
+	paneLC     *paneLifecycle
+	paneLCOnce sync.Once
 }
 
 // headlessWorkerPool moved to headless_codex.go (PLAN.md §C16) so the

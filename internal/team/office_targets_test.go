@@ -29,7 +29,7 @@ func fixtureTargeter(t *testing.T, members []officeMember, opts ...func(*officeT
 		pack:            &agent.PackDefinition{LeadSlug: "ceo"},
 		provider:        provider.KindClaudeCode,
 		paneBackedFlag:  &paneBacked,
-		failedPaneSlugs: failed,
+		failedPaneSlugs: func() map[string]string { return failed },
 		isOneOnOne:      func() bool { return false },
 		oneOnOneSlug:    func() string { return "" },
 		isChannelDM: func(channelSlug string) (bool, string) {
@@ -99,6 +99,56 @@ func TestTargeter_AgentOrder_LeadFirst(t *testing.T) {
 	got := tg.AgentOrder()
 	if len(got) == 0 || got[0].Slug != "ceo" {
 		t.Fatalf("AgentOrder()[0] = %v, want ceo first; full: %v", got, got)
+	}
+}
+
+// Regression: officeLeadSlugFrom must be order-independent. Pre-fix,
+// for installs without pack.LeadSlug, without a "ceo" member, and with
+// no BuiltIn member, the function returned `members[0].Slug` — which
+// shifted between callers depending on whether they passed sorted-by-slug
+// order or pack/snapshot order. Now the function sorts internally.
+func TestOfficeLeadSlugFrom_DeterministicAcrossInputOrders(t *testing.T) {
+	a := []officeMember{{Slug: "zeta"}, {Slug: "alpha"}, {Slug: "mu"}}
+	b := []officeMember{{Slug: "alpha"}, {Slug: "mu"}, {Slug: "zeta"}}
+	c := []officeMember{{Slug: "mu"}, {Slug: "zeta"}, {Slug: "alpha"}}
+	gotA := officeLeadSlugFrom(a)
+	gotB := officeLeadSlugFrom(b)
+	gotC := officeLeadSlugFrom(c)
+	if gotA != gotB || gotB != gotC {
+		t.Errorf("officeLeadSlugFrom output diverged across input orders: a=%q b=%q c=%q", gotA, gotB, gotC)
+	}
+	if gotA != "alpha" {
+		t.Errorf("expected sorted-fallback to pick alpha; got %q", gotA)
+	}
+}
+
+// Regression: when l.failedPaneSlugs is reset to nil (reconfigureVisibleAgents
+// does this) and then rebuilt by recordPaneSpawnFailure, the targeter
+// reads the *new* map, not a stale snapshot. Pre-fix, the targeter
+// captured the old map pointer at construction time and missed all later
+// spawn failures after a reconfigure.
+func TestTargeter_FailedPaneSlugs_FollowsLauncherReconfigure(t *testing.T) {
+	l := &Launcher{
+		sessionName:      "test",
+		paneBackedAgents: true,
+		pack: &agent.PackDefinition{
+			LeadSlug: "ceo",
+			Agents: []agent.AgentConfig{
+				{Slug: "ceo", Name: "CEO"},
+				{Slug: "fe", Name: "Frontend"},
+			},
+		},
+		failedPaneSlugs: map[string]string{},
+	}
+	tg := l.targeter()
+	if tg.SkipPane("fe") {
+		t.Fatalf("fe should not be skipped before any failure recorded")
+	}
+	// Simulate reconfigure: nil the map, then record a new failure.
+	l.failedPaneSlugs = nil
+	l.recordPaneSpawnFailure("fe", "boom")
+	if !tg.SkipPane("fe") {
+		t.Errorf("targeter missed pane-spawn failure recorded after reconfigure — cache is holding stale map")
 	}
 }
 
@@ -251,7 +301,7 @@ func TestTargeter_PaneTargets_SkipsFailedSlugs(t *testing.T) {
 		{Slug: "ceo", BuiltIn: true},
 		{Slug: "fe"},
 	}, func(o *officeTargeter) {
-		o.failedPaneSlugs["fe"] = "boom"
+		o.failedPaneSlugs()["fe"] = "boom"
 	})
 	targets := tg.PaneTargets()
 	if _, ok := targets["fe"]; ok {
@@ -267,7 +317,7 @@ func TestTargeter_NotificationTargets_AddsHeadlessFallbackForFailedPaneSlug(t *t
 		{Slug: "ceo", BuiltIn: true},
 		{Slug: "fe"},
 	}, func(o *officeTargeter) {
-		o.failedPaneSlugs["fe"] = "spawn failed"
+		o.failedPaneSlugs()["fe"] = "spawn failed"
 	})
 	targets := tg.NotificationTargets()
 	tgt, ok := targets["fe"]
@@ -327,7 +377,7 @@ func TestTargeter_ShouldUseHeadlessForSlug_TruthTable(t *testing.T) {
 		{
 			name: "pane runtime + failed pane slug ⇒ headless",
 			setup: func(o *officeTargeter) {
-				o.failedPaneSlugs["ceo"] = "spawn failed"
+				o.failedPaneSlugs()["ceo"] = "spawn failed"
 			},
 			slug: "ceo", want: true, reason: "fallback path",
 		},
@@ -372,7 +422,7 @@ func TestTargeter_SkipPane_FailedAndHeadlessOneShot(t *testing.T) {
 		{Slug: "fe"},
 		{Slug: "codexer"},
 	}, func(o *officeTargeter) {
-		o.failedPaneSlugs["fe"] = "boom"
+		o.failedPaneSlugs()["fe"] = "boom"
 		o.memberProviderKind = func(s string) string {
 			if s == "codexer" {
 				return provider.KindCodex
