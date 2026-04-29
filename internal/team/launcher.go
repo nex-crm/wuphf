@@ -100,22 +100,15 @@ type Launcher struct {
 	oneOnOne           string
 	provider           string
 
-	headlessMu           sync.Mutex
-	headlessCtx          context.Context
-	headlessCancel       context.CancelFunc
-	headlessWorkers      map[string]bool
-	headlessActive       map[string]*headlessCodexActiveTurn
-	headlessQueues       map[string][]headlessCodexTurn
-	headlessDeferredLead *headlessCodexTurn
-	// headlessStopCh is closed by stopHeadlessWorkers to tell every active
-	// runHeadlessCodexQueue goroutine to exit at its next outer-loop tick.
-	// Lazily allocated by spawnHeadlessWorker / stopHeadlessWorkers under
-	// headlessMu so the zero-value Launcher used in tests doesn't need an
-	// explicit init. headlessWorkerWg tracks live worker goroutines so the
-	// stop helper can drain them deterministically — closing the channel is
-	// a request, the WaitGroup is the proof everyone observed it.
-	headlessStopCh   chan struct{}
-	headlessWorkerWg sync.WaitGroup
+	// headless is the per-launcher headless-worker pool (PLAN.md §C7).
+	// All headless dispatch state — mutex, ctx/cancel, queues, workers,
+	// active turns, deferred lead turn, stop channel, and worker
+	// WaitGroup — is grouped here so the Launcher struct no longer owns
+	// a third sub-mutex directly. Embedded by value (not pointer) so
+	// zero-value &Launcher{} in tests still gets a usable pool with
+	// sane lazy-allocated maps; PR #320's stop-channel goroutine-leak
+	// fix is preserved via the same lazy-allocate-under-mu pattern.
+	headless         headlessWorkerPool
 	webMode          bool
 	paneBackedAgents bool // web mode may spawn per-agent tmux panes; true when panes are live
 	noOpen           bool
@@ -152,6 +145,25 @@ type Launcher struct {
 	// closure consults the package-global launcherSendNotificationToPaneOverride
 	// seam on every call so existing tests keep working unchanged.
 	dispatcher *paneDispatcher
+}
+
+// headlessWorkerPool groups the per-launcher headless-dispatch state
+// (PLAN.md §C7). All fields are lowercase package-internal — the pool is
+// never used outside `internal/team` and stays an embedded value on
+// Launcher rather than its own pointer so zero-value &Launcher{} in
+// tests gets a usable pool with sane lazy-allocated maps. PR #320's
+// goroutine-leak fix relies on stopCh being lazily allocated under mu
+// before any worker can read it; that contract is preserved here.
+type headlessWorkerPool struct {
+	mu           sync.Mutex
+	ctx          context.Context
+	cancel       context.CancelFunc
+	workers      map[string]bool
+	active       map[string]*headlessCodexActiveTurn
+	queues       map[string][]headlessCodexTurn
+	deferredLead *headlessCodexTurn
+	stopCh       chan struct{}
+	workerWg     sync.WaitGroup
 }
 
 // paneDispatchTurn is one queued notification to type into a tmux pane.
@@ -248,18 +260,20 @@ func NewLauncher(packSlug string) (*Launcher, error) {
 	sessionMode, oneOnOne := loadRunningSessionMode()
 
 	return &Launcher{
-		packSlug:            packSlug,
-		pack:                pack,
-		operationBlueprint:  loadedBlueprint,
-		blankSlateLaunch:    blankSlateLaunch,
-		sessionName:         SessionName,
-		cwd:                 cwd,
-		sessionMode:         sessionMode,
-		oneOnOne:            oneOnOne,
-		provider:            config.ResolveLLMProvider(""),
-		headlessWorkers:     make(map[string]bool),
-		headlessActive:      make(map[string]*headlessCodexActiveTurn),
-		headlessQueues:      make(map[string][]headlessCodexTurn),
+		packSlug:           packSlug,
+		pack:               pack,
+		operationBlueprint: loadedBlueprint,
+		blankSlateLaunch:   blankSlateLaunch,
+		sessionName:        SessionName,
+		cwd:                cwd,
+		sessionMode:        sessionMode,
+		oneOnOne:           oneOnOne,
+		provider:           config.ResolveLLMProvider(""),
+		headless: headlessWorkerPool{
+			workers: make(map[string]bool),
+			active:  make(map[string]*headlessCodexActiveTurn),
+			queues:  make(map[string][]headlessCodexTurn),
+		},
 		notifyLastDelivered: make(map[string]time.Time),
 	}, nil
 }
@@ -452,7 +466,7 @@ func (l *Launcher) Launch() error {
 
 	// Headless context for per-turn Claude invocations. Used by both TUI and
 	// web modes since agent dispatch is headless by default.
-	l.headlessCtx, l.headlessCancel = context.WithCancel(context.Background())
+	l.headless.ctx, l.headless.cancel = context.WithCancel(context.Background())
 	l.resumeInFlightWork()
 
 	go l.watchChannelPaneLoop(channelCmd)
@@ -1647,8 +1661,8 @@ func (l *Launcher) Attach() error {
 // removes per-agent temp files (MCP config + system prompt) so the broker
 // token and prompt content do not linger in $TMPDIR.
 func (l *Launcher) Kill() error {
-	if l.headlessCancel != nil {
-		l.headlessCancel()
+	if l.headless.cancel != nil {
+		l.headless.cancel()
 	}
 	if l.broker != nil {
 		l.broker.Stop()
@@ -1859,10 +1873,10 @@ func (l *Launcher) activeHeadlessSlugs(except string) map[string]struct{} {
 	if l == nil {
 		return nil
 	}
-	l.headlessMu.Lock()
-	defer l.headlessMu.Unlock()
+	l.headless.mu.Lock()
+	defer l.headless.mu.Unlock()
 	out := map[string]struct{}{}
-	for workerSlug, queue := range l.headlessQueues {
+	for workerSlug, queue := range l.headless.queues {
 		if workerSlug == except {
 			continue
 		}
@@ -1870,7 +1884,7 @@ func (l *Launcher) activeHeadlessSlugs(except string) map[string]struct{} {
 			out[workerSlug] = struct{}{}
 		}
 	}
-	for workerSlug, active := range l.headlessActive {
+	for workerSlug, active := range l.headless.active {
 		if workerSlug == except {
 			continue
 		}
@@ -3231,13 +3245,13 @@ func (l *Launcher) LaunchWeb(webPort int) error {
 
 	// Headless context is used for codex runtime, default dispatch, and
 	// per-turn operations that don't fit a long-lived pane session.
-	l.headlessCtx, l.headlessCancel = context.WithCancel(context.Background())
+	l.headless.ctx, l.headless.cancel = context.WithCancel(context.Background())
 	l.resumeInFlightWork()
 
 	// Stream tmux pane output to the web UI's per-agent stream so users see
 	// live Claude TUI activity (thinking, tool calls, responses) during a
 	// pane-backed turn. No-op when paneBackedAgents is false.
-	l.startPaneCaptureLoops(l.headlessCtx)
+	l.startPaneCaptureLoops(l.headless.ctx)
 
 	go l.notifyAgentsLoop()
 	go l.notifyTaskActionsLoop()

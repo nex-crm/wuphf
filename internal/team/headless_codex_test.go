@@ -161,10 +161,10 @@ func TestRunHeadlessCodexTurnUsesHeadlessOfficeRuntime(t *testing.T) {
 	t.Setenv("WUPHF_ONE_IDENTITY_TYPE", "user")
 
 	l := &Launcher{
-		pack:        agent.GetPack("founding-team"),
-		cwd:         t.TempDir(),
-		broker:      newTestBroker(t),
-		headlessCtx: t.Context(),
+		pack:     agent.GetPack("founding-team"),
+		cwd:      t.TempDir(),
+		broker:   newTestBroker(t),
+		headless: headlessWorkerPool{ctx: t.Context()},
 	}
 
 	if err := l.runHeadlessCodexTurn(t.Context(), "ceo", "You have new work in #launch."); err != nil {
@@ -317,10 +317,10 @@ func TestRunHeadlessCodexTurnUsesAssignedWorktreeForCodingAgents(t *testing.T) {
 	}
 
 	l := &Launcher{
-		pack:        agent.GetPack("founding-team"),
-		cwd:         repoRoot,
-		broker:      broker,
-		headlessCtx: t.Context(),
+		pack:     agent.GetPack("founding-team"),
+		cwd:      repoRoot,
+		broker:   broker,
+		headless: headlessWorkerPool{ctx: t.Context()},
 	}
 
 	if err := l.runHeadlessCodexTurn(t.Context(), "eng", "Ship the automation runtime."); err != nil {
@@ -433,10 +433,10 @@ func TestRunHeadlessCodexTurnUsesAssignedWorktreeForLocalWorktreeBuilder(t *test
 	}
 
 	l := &Launcher{
-		pack:        agent.GetPack("founding-team"),
-		cwd:         repoRoot,
-		broker:      broker,
-		headlessCtx: t.Context(),
+		pack:     agent.GetPack("founding-team"),
+		cwd:      repoRoot,
+		broker:   broker,
+		headless: headlessWorkerPool{ctx: t.Context()},
 	}
 
 	if err := l.runHeadlessCodexTurn(t.Context(), "builder", "Ship the intake packet."); err != nil {
@@ -491,10 +491,10 @@ func TestRunHeadlessCodexTurnPassesScopedChannelEnv(t *testing.T) {
 	t.Setenv("WUPHF_CHANNEL", "general")
 
 	l := &Launcher{
-		pack:        agent.GetPack("founding-team"),
-		cwd:         t.TempDir(),
-		broker:      newTestBroker(t),
-		headlessCtx: t.Context(),
+		pack:     agent.GetPack("founding-team"),
+		cwd:      t.TempDir(),
+		broker:   newTestBroker(t),
+		headless: headlessWorkerPool{ctx: t.Context()},
 	}
 
 	if err := l.runHeadlessCodexTurn(t.Context(), "eng", "Work the owned task.", "youtube-factory"); err != nil {
@@ -860,11 +860,13 @@ func canonicalPath(path string) string {
 func newHeadlessLauncherForTest(t *testing.T) *Launcher {
 	t.Helper()
 	l := &Launcher{
-		headlessCtx:     t.Context(),
-		headlessWorkers: make(map[string]bool),
-		headlessActive:  make(map[string]*headlessCodexActiveTurn),
-		headlessQueues:  make(map[string][]headlessCodexTurn),
-		pack:            &agent.PackDefinition{LeadSlug: "ceo"}, // deterministic lead; avoids reading global broker state
+		headless: headlessWorkerPool{
+			ctx:     t.Context(),
+			workers: make(map[string]bool),
+			active:  make(map[string]*headlessCodexActiveTurn),
+			queues:  make(map[string][]headlessCodexTurn),
+		},
+		pack: &agent.PackDefinition{LeadSlug: "ceo"}, // deterministic lead; avoids reading global broker state
 	}
 	// Drain queue workers before the test's t.TempDir cleanup runs.
 	// t.Cleanup is LIFO, and t.TempDir registers its cleanup at the
@@ -910,7 +912,7 @@ func TestFinishHeadlessTurnDoesNotWakeLeadWhenOtherSpecialistsActive(t *testing.
 
 	l := newHeadlessLauncherForTest(t)
 	// "be" is still active while "fe" finishes.
-	l.headlessActive["be"] = &headlessCodexActiveTurn{}
+	l.headless.active["be"] = &headlessCodexActiveTurn{}
 
 	l.finishHeadlessTurn("fe")
 
@@ -948,7 +950,7 @@ func TestFinishHeadlessTurnDoesNotWakeLeadWhenLeadAlreadyQueued(t *testing.T) {
 
 	l := newHeadlessLauncherForTest(t)
 	// CEO already has a pending turn.
-	l.headlessQueues["ceo"] = []headlessCodexTurn{{Prompt: "pending work"}}
+	l.headless.queues["ceo"] = []headlessCodexTurn{{Prompt: "pending work"}}
 
 	l.finishHeadlessTurn("fe")
 
@@ -963,7 +965,7 @@ func TestFinishHeadlessTurnDoesNotWakeLeadWhenLeadAlreadyQueued(t *testing.T) {
 func TestEnqueueHeadlessCodexTurnRecordDropsDuplicateLeadTaskWhileActive(t *testing.T) {
 	l := newHeadlessLauncherForTest(t)
 	l.pack = &agent.PackDefinition{LeadSlug: "ceo"}
-	l.headlessActive["ceo"] = &headlessCodexActiveTurn{
+	l.headless.active["ceo"] = &headlessCodexActiveTurn{
 		Turn: headlessCodexTurn{
 			Prompt: "first prompt about #task-3",
 			TaskID: "task-3",
@@ -977,7 +979,7 @@ func TestEnqueueHeadlessCodexTurnRecordDropsDuplicateLeadTaskWhileActive(t *test
 		EnqueuedAt: time.Now(),
 	})
 
-	if got := len(l.headlessQueues["ceo"]); got != 0 {
+	if got := len(l.headless.queues["ceo"]); got != 0 {
 		t.Fatalf("expected no queued duplicate lead turn for same task, got %d", got)
 	}
 }
@@ -1010,8 +1012,8 @@ func TestEnqueueHeadlessCodexTurnRecordQueuesUrgentLeadWakeForSameTask(t *testin
 	l := newHeadlessLauncherForTest(t)
 	l.pack = &agent.PackDefinition{LeadSlug: "ceo"}
 	l.broker = b
-	l.headlessWorkers["ceo"] = true
-	l.headlessActive["ceo"] = &headlessCodexActiveTurn{
+	l.headless.workers["ceo"] = true
+	l.headless.active["ceo"] = &headlessCodexActiveTurn{
 		Turn: headlessCodexTurn{
 			Prompt: "first prompt about #" + task.ID,
 			TaskID: task.ID,
@@ -1028,7 +1030,7 @@ func TestEnqueueHeadlessCodexTurnRecordQueuesUrgentLeadWakeForSameTask(t *testin
 		EnqueuedAt: time.Now(),
 	})
 
-	if got := len(l.headlessQueues["ceo"]); got != 1 {
+	if got := len(l.headless.queues["ceo"]); got != 1 {
 		t.Fatalf("expected urgent lead wake to queue behind same task, got %d", got)
 	}
 	if !cancelled {
@@ -1039,7 +1041,7 @@ func TestEnqueueHeadlessCodexTurnRecordQueuesUrgentLeadWakeForSameTask(t *testin
 func TestEnqueueHeadlessCodexTurnRecordDropsDuplicateAgentTaskWhileActive(t *testing.T) {
 	l := newHeadlessLauncherForTest(t)
 	l.pack = &agent.PackDefinition{LeadSlug: "ceo"}
-	l.headlessActive["eng"] = &headlessCodexActiveTurn{
+	l.headless.active["eng"] = &headlessCodexActiveTurn{
 		Turn: headlessCodexTurn{
 			Prompt: "first prompt about #task-11",
 			TaskID: "task-11",
@@ -1053,7 +1055,7 @@ func TestEnqueueHeadlessCodexTurnRecordDropsDuplicateAgentTaskWhileActive(t *tes
 		EnqueuedAt: time.Now(),
 	})
 
-	if got := len(l.headlessQueues["eng"]); got != 0 {
+	if got := len(l.headless.queues["eng"]); got != 0 {
 		t.Fatalf("expected no queued duplicate agent turn for same task, got %d", got)
 	}
 }
@@ -1061,8 +1063,8 @@ func TestEnqueueHeadlessCodexTurnRecordDropsDuplicateAgentTaskWhileActive(t *tes
 func TestEnqueueHeadlessCodexTurnRecordReplacesPendingAgentTaskTurn(t *testing.T) {
 	l := newHeadlessLauncherForTest(t)
 	l.pack = &agent.PackDefinition{LeadSlug: "ceo"}
-	l.headlessWorkers["eng"] = true
-	l.headlessQueues["eng"] = []headlessCodexTurn{{
+	l.headless.workers["eng"] = true
+	l.headless.queues["eng"] = []headlessCodexTurn{{
 		Prompt:     "older prompt about #task-11",
 		Channel:    "youtube-factory",
 		TaskID:     "task-11",
@@ -1076,7 +1078,7 @@ func TestEnqueueHeadlessCodexTurnRecordReplacesPendingAgentTaskTurn(t *testing.T
 		EnqueuedAt: time.Now(),
 	})
 
-	queue := l.headlessQueues["eng"]
+	queue := l.headless.queues["eng"]
 	if got := len(queue); got != 1 {
 		t.Fatalf("expected single queued agent turn for same task, got %d", got)
 	}
@@ -1088,8 +1090,8 @@ func TestEnqueueHeadlessCodexTurnRecordReplacesPendingAgentTaskTurn(t *testing.T
 func TestEnqueueHeadlessCodexTurnRecordAllowsRetryBehindActiveAgentTask(t *testing.T) {
 	l := newHeadlessLauncherForTest(t)
 	l.pack = &agent.PackDefinition{LeadSlug: "ceo"}
-	l.headlessWorkers["eng"] = true
-	l.headlessActive["eng"] = &headlessCodexActiveTurn{
+	l.headless.workers["eng"] = true
+	l.headless.active["eng"] = &headlessCodexActiveTurn{
 		Turn: headlessCodexTurn{
 			Prompt:   "first prompt about #task-11",
 			TaskID:   "task-11",
@@ -1106,7 +1108,7 @@ func TestEnqueueHeadlessCodexTurnRecordAllowsRetryBehindActiveAgentTask(t *testi
 		EnqueuedAt: time.Now(),
 	})
 
-	queue := l.headlessQueues["eng"]
+	queue := l.headless.queues["eng"]
 	if got := len(queue); got != 1 {
 		t.Fatalf("expected single queued retry turn for same task, got %d", got)
 	}
@@ -1290,7 +1292,7 @@ func TestRecoverTimedOutHeadlessTurnRetriesLocalWorktreeOnceBeforeBlocking(t *te
 
 	l := newHeadlessLauncherForTest(t)
 	l.broker = b
-	l.headlessWorkers["eng"] = true
+	l.headless.workers["eng"] = true
 
 	turn := headlessCodexTurn{
 		Prompt:   "Build #task-" + strings.TrimPrefix(task.ID, "task-"),
@@ -1300,10 +1302,10 @@ func TestRecoverTimedOutHeadlessTurnRetriesLocalWorktreeOnceBeforeBlocking(t *te
 	}
 	l.recoverTimedOutHeadlessTurn("eng", turn, time.Now().UTC().Add(-2*time.Second), headlessCodexLocalWorktreeTurnTimeout)
 
-	if len(l.headlessQueues["eng"]) != 1 {
-		t.Fatalf("expected one queued retry, got %+v", l.headlessQueues["eng"])
+	if len(l.headless.queues["eng"]) != 1 {
+		t.Fatalf("expected one queued retry, got %+v", l.headless.queues["eng"])
 	}
-	retry := l.headlessQueues["eng"][0]
+	retry := l.headless.queues["eng"][0]
 	if retry.Attempts != 1 {
 		t.Fatalf("expected retry attempt 1, got %+v", retry)
 	}
@@ -1344,7 +1346,7 @@ func TestRecoverFailedHeadlessTurnRetriesLocalWorktreeOnceBeforeBlocking(t *test
 
 	l := newHeadlessLauncherForTest(t)
 	l.broker = b
-	l.headlessWorkers["eng"] = true
+	l.headless.workers["eng"] = true
 
 	turn := headlessCodexTurn{
 		Prompt:   "Build #task-" + strings.TrimPrefix(task.ID, "task-"),
@@ -1354,10 +1356,10 @@ func TestRecoverFailedHeadlessTurnRetriesLocalWorktreeOnceBeforeBlocking(t *test
 	}
 	l.recoverFailedHeadlessTurn("eng", turn, time.Now().UTC().Add(-2*time.Second), "Selected model is at capacity. Please try a different model.")
 
-	if len(l.headlessQueues["eng"]) != 1 {
-		t.Fatalf("expected one queued retry, got %+v", l.headlessQueues["eng"])
+	if len(l.headless.queues["eng"]) != 1 {
+		t.Fatalf("expected one queued retry, got %+v", l.headless.queues["eng"])
 	}
-	retry := l.headlessQueues["eng"][0]
+	retry := l.headless.queues["eng"][0]
 	if retry.Attempts != 1 {
 		t.Fatalf("expected retry attempt 1, got %+v", retry)
 	}
@@ -1410,7 +1412,7 @@ func TestRecoverTimedOutLocalWorktreeRetriesEvenAfterSubstantiveReplyIfTaskStill
 
 	l := newHeadlessLauncherForTest(t)
 	l.broker = b
-	l.headlessWorkers["eng"] = true
+	l.headless.workers["eng"] = true
 
 	l.recoverTimedOutHeadlessTurn("eng", headlessCodexTurn{
 		Prompt:   "Build #task-" + strings.TrimPrefix(task.ID, "task-"),
@@ -1419,8 +1421,8 @@ func TestRecoverTimedOutLocalWorktreeRetriesEvenAfterSubstantiveReplyIfTaskStill
 		Attempts: 0,
 	}, startedAt, headlessCodexLocalWorktreeTurnTimeout)
 
-	if len(l.headlessQueues["eng"]) != 1 {
-		t.Fatalf("expected one queued retry, got %+v", l.headlessQueues["eng"])
+	if len(l.headless.queues["eng"]) != 1 {
+		t.Fatalf("expected one queued retry, got %+v", l.headless.queues["eng"])
 	}
 
 	var updated teamTask
@@ -1474,8 +1476,8 @@ func TestRecoverTimedOutLocalWorktreeLeavesReviewReadyTaskUnchanged(t *testing.T
 		Attempts: 0,
 	}, time.Now().UTC().Add(-2*time.Second), headlessCodexLocalWorktreeTurnTimeout)
 
-	if len(l.headlessQueues["eng"]) != 0 {
-		t.Fatalf("expected no retry queue for review-ready task, got %+v", l.headlessQueues["eng"])
+	if len(l.headless.queues["eng"]) != 0 {
+		t.Fatalf("expected no retry queue for review-ready task, got %+v", l.headless.queues["eng"])
 	}
 
 	var updated teamTask
@@ -1628,9 +1630,9 @@ func TestRecoverFailedHeadlessTurnRequeuesExternalActionBeforeBlocking(t *testin
 	// Snapshot the queue under the launcher's headlessMu — the spawned worker
 	// goroutine drains headlessQueues under that mutex, so an unguarded read
 	// from the test races with the drain (caught by `go test -race`).
-	l.headlessMu.Lock()
-	queue := append([]headlessCodexTurn(nil), l.headlessQueues["operator"]...)
-	l.headlessMu.Unlock()
+	l.headless.mu.Lock()
+	queue := append([]headlessCodexTurn(nil), l.headless.queues["operator"]...)
+	l.headless.mu.Unlock()
 	if len(queue) != 1 {
 		t.Fatalf("expected one retry queued for external action, got %+v", queue)
 	}
@@ -1915,13 +1917,13 @@ func TestBeginHeadlessCodexTurnCapturesWorktreeForLocalWorktreeBuilder(t *testin
 
 	l := newHeadlessLauncherForTest(t)
 	l.broker = b
-	l.headlessQueues["builder"] = []headlessCodexTurn{{TaskID: task.ID}}
+	l.headless.queues["builder"] = []headlessCodexTurn{{TaskID: task.ID}}
 
 	_, _, _, _, ok := l.beginHeadlessCodexTurn("builder")
 	if !ok {
 		t.Fatal("expected queued builder turn to begin")
 	}
-	active := l.headlessActive["builder"]
+	active := l.headless.active["builder"]
 	if active == nil {
 		t.Fatal("expected active builder turn")
 	}
@@ -1969,8 +1971,8 @@ func TestRunHeadlessCodexQueueRetriesLocalWorktreeAfterGenericError(t *testing.T
 
 	l := newHeadlessLauncherForTest(t)
 	l.broker = b
-	l.headlessWorkers["eng"] = true
-	l.headlessQueues["eng"] = []headlessCodexTurn{{
+	l.headless.workers["eng"] = true
+	l.headless.queues["eng"] = []headlessCodexTurn{{
 		Prompt:     "Build #task-" + strings.TrimPrefix(task.ID, "task-"),
 		Channel:    "general",
 		TaskID:     task.ID,
@@ -2059,10 +2061,10 @@ func TestEnqueueHeadlessCodexTurnDefersLeadUntilSpecialistFinishes(t *testing.T)
 	})
 
 	l := newHeadlessLauncherForTest(t)
-	l.headlessActive["eng"] = &headlessCodexActiveTurn{}
+	l.headless.active["eng"] = &headlessCodexActiveTurn{}
 
 	l.enqueueHeadlessCodexTurn("ceo", "task-5 blocked after timeout")
-	if l.headlessDeferredLead == nil {
+	if l.headless.deferredLead == nil {
 		t.Fatal("expected lead work to be deferred while specialist is active")
 	}
 
@@ -2112,7 +2114,7 @@ func TestEnqueueHeadlessCodexTurnBypassesLeadHoldForReviewReadyTask(t *testing.T
 
 	l := newHeadlessLauncherForTest(t)
 	l.broker = b
-	l.headlessActive["eng"] = &headlessCodexActiveTurn{}
+	l.headless.active["eng"] = &headlessCodexActiveTurn{}
 
 	action := officeActionLog{
 		Kind:      "task_updated",
@@ -2125,7 +2127,7 @@ func TestEnqueueHeadlessCodexTurnBypassesLeadHoldForReviewReadyTask(t *testing.T
 
 	l.enqueueHeadlessCodexTurn("ceo", packet)
 
-	if l.headlessDeferredLead != nil {
+	if l.headless.deferredLead != nil {
 		t.Fatal("expected review-ready task notification to bypass lead deferral")
 	}
 	got := waitForString(t, processed)

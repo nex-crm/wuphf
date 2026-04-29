@@ -184,7 +184,7 @@ func (l *Launcher) launchHeadlessCodex() error {
 		return fmt.Errorf("write office pid: %w", err)
 	}
 
-	l.headlessCtx, l.headlessCancel = context.WithCancel(context.Background())
+	l.headless.ctx, l.headless.cancel = context.WithCancel(context.Background())
 
 	l.resumeInFlightWork()
 	go l.notifyAgentsLoop()
@@ -235,21 +235,21 @@ func (l *Launcher) enqueueHeadlessCodexTurnRecord(slug string, turn headlessCode
 	var staleAge time.Duration
 	startWorker := false
 
-	l.headlessMu.Lock()
-	if l.headlessQueues == nil {
-		l.headlessQueues = make(map[string][]headlessCodexTurn)
+	l.headless.mu.Lock()
+	if l.headless.queues == nil {
+		l.headless.queues = make(map[string][]headlessCodexTurn)
 	}
-	if l.headlessActive == nil {
-		l.headlessActive = make(map[string]*headlessCodexActiveTurn)
+	if l.headless.active == nil {
+		l.headless.active = make(map[string]*headlessCodexActiveTurn)
 	}
-	if l.headlessWorkers == nil {
-		l.headlessWorkers = make(map[string]bool)
+	if l.headless.workers == nil {
+		l.headless.workers = make(map[string]bool)
 	}
 	urgentLeadTurn := l.headlessLeadTurnNeedsImmediateWakeLocked(slug, turn.Prompt)
 	if turn.TaskID != "" {
-		if active := l.headlessActive[slug]; active != nil && strings.TrimSpace(active.Turn.TaskID) == turn.TaskID {
+		if active := l.headless.active[slug]; active != nil && strings.TrimSpace(active.Turn.TaskID) == turn.TaskID {
 			if !(slug == l.officeLeadSlug() && urgentLeadTurn) && turn.Attempts <= active.Turn.Attempts {
-				l.headlessMu.Unlock()
+				l.headless.mu.Unlock()
 				if slug == l.officeLeadSlug() {
 					appendHeadlessCodexLog(slug, "queue-drop: lead already handling same task")
 				} else {
@@ -259,11 +259,11 @@ func (l *Launcher) enqueueHeadlessCodexTurnRecord(slug string, turn headlessCode
 			}
 		}
 		if pending := l.replaceDuplicateTaskTurnLocked(slug, turn); pending {
-			if !l.headlessWorkers[slug] {
-				l.headlessWorkers[slug] = true
+			if !l.headless.workers[slug] {
+				l.headless.workers[slug] = true
 				startWorker = true
 			}
-			l.headlessMu.Unlock()
+			l.headless.mu.Unlock()
 			if slug == l.officeLeadSlug() {
 				appendHeadlessCodexLog(slug, "queue-replace: refreshed pending lead turn for same task")
 			} else {
@@ -281,24 +281,24 @@ func (l *Launcher) enqueueHeadlessCodexTurnRecord(slug string, turn headlessCode
 	// still running. This eliminates the race condition where CEO fires after the
 	// first specialist completes and redundantly re-routes to still-running agents.
 	if slug == l.officeLeadSlug() && !urgentLeadTurn {
-		for workerSlug, queue := range l.headlessQueues {
+		for workerSlug, queue := range l.headless.queues {
 			if workerSlug == slug {
 				continue
 			}
 			if len(queue) > 0 {
-				l.headlessDeferredLead = &turn
-				l.headlessMu.Unlock()
+				l.headless.deferredLead = &turn
+				l.headless.mu.Unlock()
 				appendHeadlessCodexLog(slug, "queue-hold: specialist still queued, deferring lead notification until all work lands")
 				return
 			}
 		}
-		for workerSlug, active := range l.headlessActive {
+		for workerSlug, active := range l.headless.active {
 			if workerSlug == slug {
 				continue
 			}
 			if active != nil {
-				l.headlessDeferredLead = &turn
-				l.headlessMu.Unlock()
+				l.headless.deferredLead = &turn
+				l.headless.mu.Unlock()
 				appendHeadlessCodexLog(slug, "queue-hold: specialist still running, deferring lead notification until all work lands")
 				return
 			}
@@ -309,30 +309,30 @@ func (l *Launcher) enqueueHeadlessCodexTurnRecord(slug string, turn headlessCode
 	// stack up redundant CEO turns that each re-route the same task. One pending
 	// turn is enough to catch the latest state; extras are dropped.
 	const leadMaxPending = 1
-	if slug == l.officeLeadSlug() && len(l.headlessQueues[slug]) >= leadMaxPending {
+	if slug == l.officeLeadSlug() && len(l.headless.queues[slug]) >= leadMaxPending {
 		if urgentLeadTurn {
-			l.headlessQueues[slug][len(l.headlessQueues[slug])-1] = turn
-			if !l.headlessWorkers[slug] {
-				l.headlessWorkers[slug] = true
+			l.headless.queues[slug][len(l.headless.queues[slug])-1] = turn
+			if !l.headless.workers[slug] {
+				l.headless.workers[slug] = true
 				startWorker = true
 			}
-			l.headlessMu.Unlock()
+			l.headless.mu.Unlock()
 			appendHeadlessCodexLog(slug, "queue-replace: lead queue at cap, replacing pending turn with urgent task notification")
 			if startWorker {
 				l.spawnHeadlessWorker(slug)
 			}
 			return
 		}
-		l.headlessMu.Unlock()
+		l.headless.mu.Unlock()
 		appendHeadlessCodexLog(slug, "queue-drop: lead queue at cap, dropping redundant notification")
 		return
 	}
-	l.headlessQueues[slug] = append(l.headlessQueues[slug], turn)
-	if !l.headlessWorkers[slug] {
-		l.headlessWorkers[slug] = true
+	l.headless.queues[slug] = append(l.headless.queues[slug], turn)
+	if !l.headless.workers[slug] {
+		l.headless.workers[slug] = true
 		startWorker = true
 	}
-	if active := l.headlessActive[slug]; active != nil && active.Cancel != nil {
+	if active := l.headless.active[slug]; active != nil && active.Cancel != nil {
 		age := time.Since(active.StartedAt)
 		// Two conditions must hold to preempt: past the configured staleness
 		// threshold AND past the minimum-turn-age floor. The floor breaks the
@@ -343,7 +343,7 @@ func (l *Launcher) enqueueHeadlessCodexTurnRecord(slug string, turn headlessCode
 			staleAge = age
 		}
 	}
-	l.headlessMu.Unlock()
+	l.headless.mu.Unlock()
 
 	if cancel != nil {
 		appendHeadlessCodexLog(slug, fmt.Sprintf("stale-turn: cancelling active turn after %s to process queued work", staleAge.Round(time.Second)))
@@ -356,16 +356,16 @@ func (l *Launcher) enqueueHeadlessCodexTurnRecord(slug string, turn headlessCode
 }
 
 func (l *Launcher) replaceDuplicateTaskTurnLocked(slug string, turn headlessCodexTurn) bool {
-	for i := range l.headlessQueues[slug] {
-		if strings.TrimSpace(l.headlessQueues[slug][i].TaskID) != turn.TaskID {
+	for i := range l.headless.queues[slug] {
+		if strings.TrimSpace(l.headless.queues[slug][i].TaskID) != turn.TaskID {
 			continue
 		}
-		l.headlessQueues[slug][i] = turn
+		l.headless.queues[slug][i] = turn
 		return true
 	}
-	if slug == l.officeLeadSlug() && l.headlessDeferredLead != nil && strings.TrimSpace(l.headlessDeferredLead.TaskID) == turn.TaskID {
+	if slug == l.officeLeadSlug() && l.headless.deferredLead != nil && strings.TrimSpace(l.headless.deferredLead.TaskID) == turn.TaskID {
 		cp := turn
-		l.headlessDeferredLead = &cp
+		l.headless.deferredLead = &cp
 		return true
 	}
 	return false
@@ -394,18 +394,18 @@ func (l *Launcher) headlessLeadTurnNeedsImmediateWakeLocked(slug, prompt string)
 }
 
 // spawnHeadlessWorker starts a runHeadlessCodexQueue goroutine and registers
-// it with l.headlessWorkerWg so stopHeadlessWorkers can drain it. Lazily
-// initialises l.headlessStopCh; safe for any Launcher (including bare
+// it with l.headless.workerWg so stopHeadlessWorkers can drain it. Lazily
+// initialises l.headless.stopCh; safe for any Launcher (including bare
 // `&Launcher{}` literals that tests construct). All `go runHeadlessCodexQueue`
 // sites must funnel through here so no worker escapes the WaitGroup.
 func (l *Launcher) spawnHeadlessWorker(slug string) {
-	l.headlessMu.Lock()
-	if l.headlessStopCh == nil {
-		l.headlessStopCh = make(chan struct{})
+	l.headless.mu.Lock()
+	if l.headless.stopCh == nil {
+		l.headless.stopCh = make(chan struct{})
 	}
-	stop := l.headlessStopCh
-	l.headlessWorkerWg.Add(1)
-	l.headlessMu.Unlock()
+	stop := l.headless.stopCh
+	l.headless.workerWg.Add(1)
+	l.headless.mu.Unlock()
 	go l.runHeadlessCodexQueue(slug, stop)
 }
 
@@ -415,18 +415,18 @@ func (l *Launcher) spawnHeadlessWorker(slug string) {
 // spawned by the current test can't outlive the test and race the next test's
 // setup of headlessActive / headlessQueues / the test t.TempDir cleanup.
 func (l *Launcher) stopHeadlessWorkers() {
-	l.headlessMu.Lock()
-	if l.headlessStopCh == nil {
-		l.headlessStopCh = make(chan struct{})
+	l.headless.mu.Lock()
+	if l.headless.stopCh == nil {
+		l.headless.stopCh = make(chan struct{})
 	}
 	select {
-	case <-l.headlessStopCh:
+	case <-l.headless.stopCh:
 		// already closed; idempotent re-entry
 	default:
-		close(l.headlessStopCh)
+		close(l.headless.stopCh)
 	}
-	cancel := l.headlessCancel
-	l.headlessMu.Unlock()
+	cancel := l.headless.cancel
+	l.headless.mu.Unlock()
 	if cancel != nil {
 		cancel()
 	}
@@ -439,17 +439,17 @@ func (l *Launcher) stopHeadlessWorkers() {
 	// safety net for bare &Launcher{} test fixtures that don't seed one.
 	done := make(chan struct{})
 	go func() {
-		l.headlessWorkerWg.Wait()
+		l.headless.workerWg.Wait()
 		close(done)
 	}()
 	cancelActive := func() {
-		l.headlessMu.Lock()
-		for _, active := range l.headlessActive {
+		l.headless.mu.Lock()
+		for _, active := range l.headless.active {
 			if active != nil && active.Cancel != nil {
 				active.Cancel()
 			}
 		}
-		l.headlessMu.Unlock()
+		l.headless.mu.Unlock()
 	}
 	cancelActive()
 	if cancel != nil {
@@ -470,7 +470,7 @@ func (l *Launcher) stopHeadlessWorkers() {
 }
 
 func (l *Launcher) runHeadlessCodexQueue(slug string, stop <-chan struct{}) {
-	defer l.headlessWorkerWg.Done()
+	defer l.headless.workerWg.Done()
 	for {
 		// Stop signal short-circuits the loop before grabbing more work.
 		// The check is cheap (non-blocking select) and only fires on test
@@ -478,9 +478,9 @@ func (l *Launcher) runHeadlessCodexQueue(slug string, stop <-chan struct{}) {
 		// stop while the worker is in steady state.
 		select {
 		case <-stop:
-			l.headlessMu.Lock()
-			delete(l.headlessWorkers, slug)
-			l.headlessMu.Unlock()
+			l.headless.mu.Lock()
+			delete(l.headless.workers, slug)
+			l.headless.mu.Unlock()
 			return
 		default:
 		}
@@ -498,9 +498,9 @@ func (l *Launcher) runHeadlessCodexQueue(slug string, stop <-chan struct{}) {
 			ctxErr := turnCtx.Err()
 			isDurabilityError := false
 			if err == nil {
-				l.headlessMu.Lock()
-				active := l.headlessActive[slug]
-				l.headlessMu.Unlock()
+				l.headless.mu.Lock()
+				active := l.headless.active[slug]
+				l.headless.mu.Unlock()
 				if ok, reason := l.headlessTurnCompletedDurably(slug, active); !ok {
 					appendHeadlessCodexLog(slug, "durability-error: "+reason)
 					err = errors.New(reason)
@@ -531,9 +531,9 @@ func (l *Launcher) runHeadlessCodexQueue(slug string, stop <-chan struct{}) {
 			}
 			l.finishHeadlessTurn(slug)
 		}()
-		l.headlessMu.Lock()
-		_, stillRunning := l.headlessWorkers[slug]
-		l.headlessMu.Unlock()
+		l.headless.mu.Lock()
+		_, stillRunning := l.headless.workers[slug]
+		l.headless.mu.Unlock()
 		if !stillRunning {
 			return
 		}
@@ -667,11 +667,11 @@ func (l *Launcher) taskHasExternalWorkflowEvidenceSince(task *teamTask, startedA
 }
 
 func (l *Launcher) finishHeadlessTurn(slug string) {
-	l.headlessMu.Lock()
-	if active := l.headlessActive[slug]; active != nil && active.Cancel != nil {
+	l.headless.mu.Lock()
+	if active := l.headless.active[slug]; active != nil && active.Cancel != nil {
 		active.Cancel()
 	}
-	delete(l.headlessActive, slug)
+	delete(l.headless.active, slug)
 	lead := l.officeLeadSlug()
 	var deferredLead *headlessCodexTurn
 	// Determine if this was a specialist finishing (not the lead), and if so whether
@@ -682,7 +682,7 @@ func (l *Launcher) finishHeadlessTurn(slug string) {
 	// process exits there is nothing else to re-trigger the CEO.
 	shouldWakeLead := slug != lead && lead != ""
 	if shouldWakeLead {
-		for workerSlug, queue := range l.headlessQueues {
+		for workerSlug, queue := range l.headless.queues {
 			if workerSlug == lead {
 				continue
 			}
@@ -693,7 +693,7 @@ func (l *Launcher) finishHeadlessTurn(slug string) {
 		}
 	}
 	if shouldWakeLead {
-		for workerSlug, active := range l.headlessActive {
+		for workerSlug, active := range l.headless.active {
 			if workerSlug == lead {
 				continue
 			}
@@ -704,16 +704,16 @@ func (l *Launcher) finishHeadlessTurn(slug string) {
 		}
 	}
 	// Check if the lead already has work queued — no need to wake it.
-	if shouldWakeLead && len(l.headlessQueues[lead]) > 0 {
+	if shouldWakeLead && len(l.headless.queues[lead]) > 0 {
 		shouldWakeLead = false
 	}
-	if shouldWakeLead && l.headlessDeferredLead != nil {
-		turn := *l.headlessDeferredLead
-		l.headlessDeferredLead = nil
+	if shouldWakeLead && l.headless.deferredLead != nil {
+		turn := *l.headless.deferredLead
+		l.headless.deferredLead = nil
 		deferredLead = &turn
 		shouldWakeLead = false
 	}
-	l.headlessMu.Unlock()
+	l.headless.mu.Unlock()
 
 	if deferredLead != nil {
 		l.enqueueHeadlessCodexTurn(lead, deferredLead.Prompt, deferredLead.Channel)
@@ -1085,41 +1085,41 @@ func (l *Launcher) timedOutTurnAlreadyRecovered(task *teamTask, slug string, sta
 }
 
 func (l *Launcher) beginHeadlessCodexTurn(slug string) (headlessCodexTurn, context.Context, time.Time, time.Duration, bool) {
-	l.headlessMu.Lock()
-	defer l.headlessMu.Unlock()
+	l.headless.mu.Lock()
+	defer l.headless.mu.Unlock()
 
 	// If stopHeadlessWorkers already fired, don't start a new turn. This closes
 	// the race where a worker goroutine passed the outer stop-channel check
 	// just before stopHeadlessWorkers closed headlessStopCh, causing the worker
 	// to block in headlessCodexRunTurn with no cancel registered in headlessActive.
-	if l.headlessStopCh != nil {
+	if l.headless.stopCh != nil {
 		select {
-		case <-l.headlessStopCh:
-			delete(l.headlessWorkers, slug)
+		case <-l.headless.stopCh:
+			delete(l.headless.workers, slug)
 			return headlessCodexTurn{}, nil, time.Time{}, 0, false
 		default:
 		}
 	}
 
-	queue := l.headlessQueues[slug]
+	queue := l.headless.queues[slug]
 	if len(queue) == 0 {
 		// Atomically mark the worker as done. This must happen while the lock is
 		// held so that any concurrent enqueueHeadlessCodexTurn will observe
 		// headlessWorkers[slug] = false and start a new goroutine rather than
 		// assuming the current one will pick up the new item.
-		delete(l.headlessWorkers, slug)
-		delete(l.headlessQueues, slug)
+		delete(l.headless.workers, slug)
+		delete(l.headless.queues, slug)
 		return headlessCodexTurn{}, nil, time.Time{}, 0, false
 	}
 
 	turn := queue[0]
 	if len(queue) == 1 {
-		delete(l.headlessQueues, slug)
+		delete(l.headless.queues, slug)
 	} else {
-		l.headlessQueues[slug] = queue[1:]
+		l.headless.queues[slug] = queue[1:]
 	}
 
-	baseCtx := l.headlessCtx
+	baseCtx := l.headless.ctx
 	if baseCtx == nil {
 		baseCtx = context.Background()
 	}
@@ -1132,7 +1132,7 @@ func (l *Launcher) beginHeadlessCodexTurn(slug string) (headlessCodexTurn, conte
 	} else if codingAgentSlugs[slug] {
 		workspaceDir = normalizeHeadlessWorkspaceDir(l.cwd)
 	}
-	l.headlessActive[slug] = &headlessCodexActiveTurn{
+	l.headless.active[slug] = &headlessCodexActiveTurn{
 		Turn:              turn,
 		StartedAt:         startedAt,
 		Timeout:           timeout,

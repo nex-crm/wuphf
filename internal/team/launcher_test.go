@@ -2653,12 +2653,14 @@ func TestBuildMessageActiveAgentsSorted(t *testing.T) {
 				{Slug: "eng", Name: "Engineer"},
 			},
 		},
-		headlessActive: map[string]*headlessCodexActiveTurn{
-			"zebra": {},
-			"alpha": {},
-			"mango": {},
+		headless: headlessWorkerPool{
+			active: map[string]*headlessCodexActiveTurn{
+				"zebra": {},
+				"alpha": {},
+				"mango": {},
+			},
+			queues: make(map[string][]headlessCodexTurn),
 		},
-		headlessQueues: make(map[string][]headlessCodexTurn),
 	}
 
 	// Run multiple times — Go map iteration order is non-deterministic, so
