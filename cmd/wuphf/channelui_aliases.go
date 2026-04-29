@@ -35,6 +35,7 @@ type (
 	calendarRange          = channelui.CalendarRange
 	calendarEvent          = channelui.CalendarEvent
 	recoverySurgeryOption  = channelui.RecoverySurgeryOption
+	channelInterviewPhase  = channelui.InterviewPhase
 )
 
 // Function aliases keep the lowercase names callable from package main
@@ -151,6 +152,17 @@ var (
 	prefixedCardLines             = channelui.PrefixedCardLines
 	recoveryActiveTasks           = channelui.RecoveryActiveTasks
 	recoveryRecentThreads         = channelui.RecoveryRecentThreads
+
+	interviewOptionRequiresText = channelui.InterviewOptionRequiresText
+	interviewOptionTextHint     = channelui.InterviewOptionTextHint
+	selectedInterviewOption     = channelui.SelectedInterviewOption
+)
+
+// Interview-phase typed-string consts.
+const (
+	interviewPhaseChoose = channelui.InterviewPhaseChoose
+	interviewPhaseDraft  = channelui.InterviewPhaseDraft
+	interviewPhaseReview = channelui.InterviewPhaseReview
 )
 
 // Calendar-range typed-string consts.

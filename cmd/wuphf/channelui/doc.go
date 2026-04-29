@@ -90,6 +90,10 @@
 //     builders, RenderRecoveryActionCard (the card body styler),
 //     PrefixedCardLines, RecoveryActiveTasks (filter+sort by
 //     UpdatedAt), and RecoveryRecentThreads (newest thread roots).
+//   - interview.go         — interview-flow leaf helpers:
+//     InterviewPhase typed-string + Choose/Draft/Review consts,
+//     InterviewOptionRequiresText, InterviewOptionTextHint, and
+//     SelectedInterviewOption.
 //
 // Subsequent extraction PRs will land the workspace / recovery / cache
 // cluster, the sidebar / splash, the broker integrations, and finally

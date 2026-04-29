@@ -2,46 +2,6 @@ package main
 
 import "strings"
 
-type channelInterviewPhase string
-
-const (
-	interviewPhaseChoose channelInterviewPhase = "choose"
-	interviewPhaseDraft  channelInterviewPhase = "draft"
-	interviewPhaseReview channelInterviewPhase = "review"
-)
-
-func interviewOptionRequiresText(option *channelInterviewOption) bool {
-	if option == nil {
-		return false
-	}
-	if option.RequiresText {
-		return true
-	}
-	id := strings.TrimSpace(strings.ToLower(option.ID))
-	return strings.Contains(id, "note") || strings.Contains(id, "steer")
-}
-
-func interviewOptionTextHint(option *channelInterviewOption) string {
-	if option == nil {
-		return ""
-	}
-	if strings.TrimSpace(option.TextHint) != "" {
-		return option.TextHint
-	}
-	if interviewOptionRequiresText(option) {
-		return "Type your note, rationale, or steering before submitting this choice."
-	}
-	return ""
-}
-
-func selectedInterviewOption(options []channelInterviewOption, index int) *channelInterviewOption {
-	if index < 0 || index >= len(options) {
-		return nil
-	}
-	option := options[index]
-	return &option
-}
-
 func (m channelModel) currentInterviewPhase() channelInterviewPhase {
 	if m.pending == nil {
 		return ""
