@@ -83,14 +83,19 @@ type ScanError struct {
 // are intentionally additive: callers can sum results across passes for
 // telemetry.
 type ScanResult struct {
-	Scanned         int         `json:"scanned"`
-	Matched         int         `json:"matched"`
-	Proposed        int         `json:"proposed"`
-	Deduped         int         `json:"deduped"`
-	RejectedByGuard int         `json:"rejected_by_guard"`
-	Errors          []ScanError `json:"errors,omitempty"`
-	DurationMs      int64       `json:"duration_ms"`
-	Trigger         string      `json:"trigger"`
+	Scanned         int `json:"scanned"`
+	Matched         int `json:"matched"`
+	Proposed        int `json:"proposed"`
+	Deduped         int `json:"deduped"`
+	RejectedByGuard int `json:"rejected_by_guard"`
+	// EnhancementCandidates counts articles diverted into an
+	// "enhance_skill_proposal" interview by the similarity gate
+	// (writeSkillProposalLocked → errSkillSimilarToExisting). These are
+	// soft-skips, not errors and not new proposals.
+	EnhancementCandidates int         `json:"enhancement_candidates"`
+	Errors                []ScanError `json:"errors,omitempty"`
+	DurationMs            int64       `json:"duration_ms"`
+	Trigger               string      `json:"trigger"`
 }
 
 // SkillScanner walks the wiki under team/, asks the LLM to classify each
@@ -254,6 +259,24 @@ func (s *SkillScanner) Scan(ctx context.Context, scopePath string, dryRun bool, 
 			// as a successful no-op above. Real errors land here.
 			if isDuplicateSkillError(writeErr) {
 				res.Deduped++
+				continue
+			}
+			// Similarity gate diverted to enhance: emit an
+			// enhance_skill_proposal interview pointing at the existing skill,
+			// then count this article as an enhancement candidate (not an
+			// error, not a new proposal). The article's mtimeCache entry is
+			// retained so we don't re-classify on the next pass.
+			var simErr *errSkillSimilarToExisting
+			if errors.As(writeErr, &simErr) {
+				s.emitEnhancementInterviewFromSentinel(spec, simErr)
+				slog.Info("skill_scanner: similarity gate diverted to enhance",
+					"candidate", spec.Name,
+					"existing", simErr.Slug,
+					"score", simErr.Score,
+					"method", simErr.Method,
+					"path", c.relPath,
+				)
+				res.EnhancementCandidates++
 				continue
 			}
 			res.Errors = append(res.Errors, ScanError{Slug: skillSlug(fm.Name), Reason: "write: " + writeErr.Error()})
@@ -557,6 +580,30 @@ func stringOr(s, fallback string) string {
 		return fallback
 	}
 	return s
+}
+
+// emitEnhancementInterviewFromSentinel appends an
+// enhance_skill_proposal interview pointing the human at the existing
+// near-duplicate skill named by simErr.Slug. Mirrors the channel + now
+// defaults that writeSkillProposalLocked applies so the interview entry
+// matches a successful proposal's shape (channel "general" when unset,
+// timestamp = current UTC RFC3339).
+//
+// Acquires b.mu around appendSkillProposalRequestLocked because that
+// helper mutates b.requests + b.counter and its contract requires the
+// caller to hold the lock.
+func (s *SkillScanner) emitEnhancementInterviewFromSentinel(spec teamSkill, simErr *errSkillSimilarToExisting) {
+	if simErr == nil {
+		return
+	}
+	channel := strings.TrimSpace(spec.Channel)
+	if channel == "" {
+		channel = "general"
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	s.broker.mu.Lock()
+	s.broker.appendSkillProposalRequestLocked(spec, channel, now, simErr.Slug)
+	s.broker.mu.Unlock()
 }
 
 // isDuplicateSkillError reports whether the error returned by
