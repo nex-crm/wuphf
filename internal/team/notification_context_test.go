@@ -350,6 +350,30 @@ func TestNotificationContext_RelevantTaskForTarget_SkipsDoneAndOtherOwners(t *te
 	}
 }
 
+// Regression: a deep reply (msg → parent → root, with task anchored on
+// root) must still resolve to the task. Pre-fix, RelevantTaskForTarget
+// only walked one hop via msg.ReplyTo, so anything past depth 2 missed.
+func TestNotificationContext_RelevantTaskForTarget_DeepReplyResolvesViaUltimateRoot(t *testing.T) {
+	msgs := []channelMessage{
+		{ID: "root", Channel: "general", From: "you"},
+		{ID: "mid", Channel: "general", From: "ceo", ReplyTo: "root"},
+		{ID: "leaf", Channel: "general", From: "you", ReplyTo: "mid"},
+	}
+	tasks := []teamTask{
+		{ID: "t1", Owner: "eng", Status: "in_progress", ThreadID: "root"},
+	}
+	b := newTestNotifyContextBuilder(t, func(b *notificationContextBuilder) {
+		b.channelMessages = func(string) []channelMessage { return msgs }
+		b.allTasks = func() []teamTask { return tasks }
+	})
+	// Trigger is the leaf; its ReplyTo is "mid" (not "root"). Without the
+	// fix, threadRoot would be "mid" and ThreadID="root" would not match.
+	got, ok := b.RelevantTaskForTarget(channelMessage{ID: "leaf", Channel: "general", ReplyTo: "mid"}, "eng")
+	if !ok || got.ID != "t1" {
+		t.Fatalf("expected t1 to match via ultimate thread root; got (%v, %v)", got, ok)
+	}
+}
+
 func TestNotificationContext_ResponseInstruction_LeadFromHumanGetsKickoffGuidance(t *testing.T) {
 	b := newTestNotifyContextBuilder(t)
 	got := b.ResponseInstructionForTarget(channelMessage{From: "you", Channel: "general", Content: "build it"}, "ceo")

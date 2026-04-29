@@ -76,6 +76,13 @@ type watchdogScheduler struct {
 	stopCh    chan struct{}
 	done      sync.WaitGroup
 
+	// runCtx is a cancelable derivation of the ctx passed to Start. Stop
+	// cancels it so any in-flight downstream call (e.g. a workflow provider
+	// blocked on a network request) returns promptly instead of pinning
+	// done.Wait — which would otherwise pin Launcher.Kill.
+	runCtx    context.Context
+	runCancel context.CancelFunc
+
 	// onTickDone, when non-nil, receives one struct after every
 	// processOnce call. Tests use it to wait deterministically; production
 	// leaves it nil so the loop has zero overhead.
@@ -87,6 +94,10 @@ type watchdogScheduler struct {
 // is called or ctx is cancelled.
 func (w *watchdogScheduler) Start(ctx context.Context) {
 	w.startOnce.Do(func() {
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		w.runCtx, w.runCancel = context.WithCancel(ctx)
 		if w.stopCh == nil {
 			w.stopCh = make(chan struct{})
 		}
@@ -97,7 +108,7 @@ func (w *watchdogScheduler) Start(ctx context.Context) {
 			w.pollEvery = 20 * time.Second
 		}
 		w.done.Add(1)
-		go w.run(ctx)
+		go w.run(w.runCtx)
 	})
 }
 
@@ -146,6 +157,11 @@ func (w *watchdogScheduler) signalTick() {
 // Stop signals the goroutine to exit and waits for it. Idempotent.
 func (w *watchdogScheduler) Stop() {
 	w.stopOnce.Do(func() {
+		// Cancel runCtx first so any downstream blocking call (workflow
+		// provider, etc.) unblocks before we sit on done.Wait.
+		if w.runCancel != nil {
+			w.runCancel()
+		}
 		if w.stopCh == nil {
 			return
 		}
@@ -317,7 +333,11 @@ func (w *watchdogScheduler) processWorkflowJob(job schedulerJob) {
 		}
 		return
 	}
-	result, err := provider.ExecuteWorkflow(context.Background(), action.WorkflowExecuteRequest{
+	execCtx := w.runCtx
+	if execCtx == nil {
+		execCtx = context.Background()
+	}
+	result, err := provider.ExecuteWorkflow(execCtx, action.WorkflowExecuteRequest{
 		KeyOrPath: workflowKey,
 		Inputs:    payload.Inputs,
 	})

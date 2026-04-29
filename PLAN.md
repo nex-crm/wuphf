@@ -1,8 +1,8 @@
 # launcher.go decomposition — plan
 
-Status: proposal, not yet implemented. Worktree `refactor/launcher-split` off main.
+Status: in progress. C1–C4 landed (combined PR); C5a / C5 / C6 still ahead. See git log for exact landing commits.
 
-Source of truth: `/Users/fd/src/nex/wuphf-launcher-split/internal/team/launcher.go` (4998 lines, 161 funcs).
+Source of truth: `internal/team/launcher.go` (was 4998 lines, 161 funcs at plan time; -1340 lines through C4).
 
 ## Decisions, up front
 
