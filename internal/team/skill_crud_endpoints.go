@@ -144,6 +144,7 @@ func (b *Broker) handleSkillPatch(w http.ResponseWriter, r *http.Request, name s
 		NewString  string `json:"new_string"`
 		FilePath   string `json:"file_path,omitempty"`
 		ReplaceAll bool   `json:"replace_all,omitempty"`
+		EditedBy   string `json:"edited_by,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
@@ -167,6 +168,19 @@ func (b *Broker) handleSkillPatch(w http.ResponseWriter, r *http.Request, name s
 		b.mu.Unlock()
 		http.Error(w, "skill not found", http.StatusNotFound)
 		return
+	}
+	// PR 7 /review P1: ownership gate. When OwnerAgents is non-empty, only
+	// listed owners or the office lead may edit. Empty OwnerAgents skips
+	// the gate (legacy lead-routable; back-compat with pre-PR-7 skills that
+	// have no scope info on disk).
+	if len(sk.OwnerAgents) > 0 {
+		ownersCopy := append([]string(nil), sk.OwnerAgents...)
+		membersCopy := append([]officeMember(nil), b.members...)
+		if !skillEditAllowedLocked(b, body.EditedBy, ownersCopy) {
+			b.mu.Unlock()
+			writeSkillForbidden(w, "not_owner", &teamSkill{OwnerAgents: ownersCopy}, membersCopy, "team_broadcast tag the listed agents or hand off the edit")
+			return
+		}
 	}
 	matches := strings.Count(sk.Content, body.OldString)
 	if matches == 0 {
@@ -228,7 +242,8 @@ func (b *Broker) handleSkillEdit(w http.ResponseWriter, r *http.Request, name st
 		return
 	}
 	var body struct {
-		Content string `json:"content"`
+		Content  string `json:"content"`
+		EditedBy string `json:"edited_by,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
@@ -253,6 +268,16 @@ func (b *Broker) handleSkillEdit(w http.ResponseWriter, r *http.Request, name st
 		b.mu.Unlock()
 		http.Error(w, "skill not found", http.StatusNotFound)
 		return
+	}
+	// PR 7 /review P1: ownership gate (same contract as handleSkillPatch).
+	if len(sk.OwnerAgents) > 0 {
+		ownersCopy := append([]string(nil), sk.OwnerAgents...)
+		membersCopy := append([]officeMember(nil), b.members...)
+		if !skillEditAllowedLocked(b, body.EditedBy, ownersCopy) {
+			b.mu.Unlock()
+			writeSkillForbidden(w, "not_owner", &teamSkill{OwnerAgents: ownersCopy}, membersCopy, "team_broadcast tag the listed agents or hand off the edit")
+			return
+		}
 	}
 
 	// Trust level: preserve from existing safety_scan if present, else
@@ -547,6 +572,12 @@ func (b *Broker) handleSkillRestore(w http.ResponseWriter, r *http.Request, name
 		http.Error(w, fmt.Sprintf("skill not in archived status (status=%s)", status), http.StatusConflict)
 		return
 	}
+	// PR 7 /review P2: re-validate OwnerAgents against the CURRENT member
+	// table before flipping status back to proposed. Slugs in the archived
+	// snapshot may now be defunct (member deleted while the skill was
+	// archived); validateOwnerAgentsLocked drops those with WARN so the
+	// restored skill can't end up scoped to a ghost agent.
+	sk.OwnerAgents = b.validateOwnerAgentsLocked(sk.Name, sk.OwnerAgents)
 	sk.Status = "proposed"
 	sk.UpdatedAt = now
 	skCopy := *sk
@@ -858,6 +889,34 @@ func (b *Broker) handleSkillRejectUndo(w http.ResponseWriter, r *http.Request) {
 }
 
 // ── helpers ────────────────────────────────────────────────────────────────
+
+// skillEditAllowedLocked reports whether editor (lowercased, trimmed) may
+// mutate a skill whose OwnerAgents is `owners`. PR 7 /review P1: blocks
+// cross-agent edits that would otherwise let any authenticated caller
+// rewrite another agent's body or escalate ownership. Caller holds b.mu.
+//
+// Editor passes when:
+//   - editor is in owners (case-insensitive), OR
+//   - editor is the office lead (the lead routes work; lead-bypass mirrors
+//     the visibility gate's lead-bypass for empty OwnerAgents).
+//
+// Empty editor with non-empty owners is a hard reject — clients must
+// supply edited_by when the skill has any scope.
+func skillEditAllowedLocked(b *Broker, editor string, owners []string) bool {
+	editor = strings.ToLower(strings.TrimSpace(editor))
+	if editor == "" {
+		return false
+	}
+	for _, owner := range owners {
+		if strings.ToLower(strings.TrimSpace(owner)) == editor {
+			return true
+		}
+	}
+	if lead := strings.ToLower(strings.TrimSpace(officeLeadSlugFrom(b.members))); lead != "" && lead == editor {
+		return true
+	}
+	return false
+}
 
 // gcRejectedSkillsLocked removes snapshots older than undoTokenTTL. Caller
 // holds b.mu.

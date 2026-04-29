@@ -1716,7 +1716,12 @@ func (b *Broker) StartOnPort(port int) error {
 		tokenFile = brokeraddr.ResolveTokenFile()
 	}
 	if tokenFile != "" {
-		_ = os.WriteFile(tokenFile, []byte(b.token), 0o600)
+		// PR 7 /review P1: surface token-write failures so a misconfigured
+		// permissions / disk-full state doesn't fail silently and leave
+		// every CLI client unable to authenticate.
+		if err := os.WriteFile(tokenFile, []byte(b.token), 0o600); err != nil {
+			log.Printf("broker: failed to write token file %s: %v", tokenFile, err)
+		}
 	}
 
 	go func() {
@@ -11058,15 +11063,31 @@ func (b *Broker) handleGetSkills(w http.ResponseWriter, r *http.Request) {
 	// has a stable opt-in surface.
 	includeArchived := truthyQuery(r.URL.Query().Get("include_archived"))
 	_ = truthyQuery(r.URL.Query().Get("include_disabled"))
+	// PR 7 /review P1: for_agent narrows the response to skills the named
+	// agent can see, AND strips skill body content from the response. The
+	// strip is unconditional on the for_agent path because the broker has
+	// no first-class identity verification (shared bearer token) — without
+	// stripping, any caller could read another agent's playbook bodies.
+	forAgent := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("for_agent")))
 
 	b.mu.Lock()
 	result := make([]teamSkill, 0, len(b.skills))
-	for _, sk := range b.skills {
+	for i := range b.skills {
+		sk := b.skills[i]
 		if sk.Status == "archived" && !includeArchived {
 			continue
 		}
 		if channelFilter != "" && normalizeChannelSlug(sk.Channel) != channelFilter {
 			continue
+		}
+		if forAgent != "" {
+			if !b.canAgentSeeSkillLocked(forAgent, &b.skills[i]) {
+				continue
+			}
+			// Strip the body so the metadata-listing endpoint never serves
+			// another agent's playbook content. Callers that need the body
+			// hit the per-skill endpoint with explicit identity.
+			sk.Content = ""
 		}
 		result = append(result, sk)
 	}
