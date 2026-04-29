@@ -1473,7 +1473,7 @@ func TestRecordWatchdogLedgerCreatesSignalAndDecision(t *testing.T) {
 	b := newTestBroker(t)
 	l := &Launcher{broker: b}
 
-	signalIDs, decisionID := l.recordWatchdogLedger("general", "task_stalled", "task-1", "fe", "Task is stalled.", "signal-1")
+	signalIDs, decisionID := l.scheduler().recordLedger("general", "task_stalled", "task-1", "fe", "Task is stalled.", "signal-1")
 	if decisionID == "" || len(signalIDs) < 1 {
 		t.Fatalf("expected watchdog refs, got signalIDs=%v decisionID=%q", signalIDs, decisionID)
 	}
@@ -2448,7 +2448,7 @@ func TestProcessDueTaskJobResumesRateLimitedBlockedTask(t *testing.T) {
 	}
 
 	l := &Launcher{broker: b, sessionName: "test"}
-	l.processDueTaskJob(schedulerJob{
+	l.scheduler().processTaskJob(schedulerJob{
 		Slug:       normalizeSchedulerSlug("recheck", "client-loop", "task", task.ID),
 		Kind:       "recheck",
 		TargetType: "task",

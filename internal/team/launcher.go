@@ -16,7 +16,6 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/nex-crm/wuphf/internal/agent"
@@ -158,13 +157,11 @@ type headlessWorkerPool struct {
 	workerWg     sync.WaitGroup
 }
 
-// paneDispatchTurn is one queued notification to type into a tmux pane.
-// Held in the per-slug queue, consumed by runPaneDispatchQueue.
-type paneDispatchTurn struct {
-	PaneTarget   string
-	Notification string
-	EnqueuedAt   time.Time
-}
+// paneDispatchTurn moved to pane_dispatch.go (PLAN.md §C15) so the
+// dispatcher type and its on-the-wire turn shape sit in the same
+// file. Same for paneDispatchMinGap, paneDispatchCoalesceWindow,
+// launcherSendNotificationToPaneFn, launcherSendNotificationToPaneOverride,
+// and launcherSendNotificationToPane.
 
 // SetUnsafe enables unrestricted permissions for all agents (CLI-only flag).
 func (l *Launcher) SetUnsafe(v bool) { l.unsafe = v }
@@ -348,17 +345,11 @@ func (l *Launcher) watchdogSchedulerLoop() {
 	l.scheduler().Start(context.Background())
 }
 
-func (l *Launcher) processDueSchedulerJobs() { l.scheduler().processOnce() }
-
-func (l *Launcher) processDueTaskJob(job schedulerJob) { l.scheduler().processTaskJob(job) }
-
-func (l *Launcher) processDueRequestJob(job schedulerJob) { l.scheduler().processRequestJob(job) }
-
-func (l *Launcher) processDueWorkflowJob(job schedulerJob) { l.scheduler().processWorkflowJob(job) }
-
-func (l *Launcher) recordWatchdogLedger(channel, kind, targetID, owner, summary, sourceSignalID string) ([]string, string) {
-	return l.scheduler().recordLedger(channel, kind, targetID, owner, summary, sourceSignalID)
-}
+// processDue* / recordWatchdogLedger thin Launcher wrappers were
+// deleted by the C15 sweep — call sites use l.scheduler().processOnce()
+// / .processTaskJob(...) / .processRequestJob(...) /
+// .processWorkflowJob(...) / .recordLedger(...) directly. PLAN.md §6
+// "no compatibility shims".
 
 func (req humanInterview) TitleOrDefault() string {
 	if strings.TrimSpace(req.Title) != "" {
@@ -535,26 +526,9 @@ func (l *Launcher) notifyCtx() *notificationContextBuilder {
 // shouldUseHeadlessDispatch wrapper deleted by PLAN.md §6 sweep —
 // callers use l.targeter().ShouldUseHeadless() directly.
 
-// Minimum gap between two consecutive pane `/clear` + type cycles for the
-// same agent. Serves as a safety floor against truly back-to-back sends
-// (sub-second bursts) that could race tmux's input buffer. Not a substitute
-// for the coalesce logic below — claude turns typically take 20-60s, which
-// is much larger than any reasonable fixed gap.
-//
-// Declared as var rather than const so tests can shorten it.
-var paneDispatchMinGap = 3 * time.Second
-
-// paneDispatchCoalesceWindow: if a new notification arrives this soon after
-// the previous send, treat claude's current turn as still in flight and
-// MERGE the new content into the next dispatch instead of triggering a
-// fresh `/clear`. Mid-turn clears were wiping claude's in-progress output
-// and dropping one of two rapid @-tags entirely.
-//
-// 60s covers the p95 claude turn duration (including MCP tool calls) in
-// the observed workload. Multiple bursts in the window get concatenated
-// so claude eventually sees one prompt containing every question, answers
-// them together, and never loses one to a mid-turn clear.
-var paneDispatchCoalesceWindow = 60 * time.Second
+// paneDispatchMinGap and paneDispatchCoalesceWindow live in
+// pane_dispatch.go (PLAN.md §C15) — they're dispatcher knobs, not
+// Launcher knobs.
 
 // paneDispatch returns the lazily-constructed dispatcher (PLAN.md §C6).
 // Nil-safe: returns a fresh dispatcher even when l == nil so &Launcher{}
@@ -644,23 +618,13 @@ func (l *Launcher) runPaneDispatchQueue(slug string) {
 	l.paneDispatch().runQueue(slug)
 }
 
-// launcherSendNotificationToPaneFn is the test seam type swapped via
-// setLauncherSendNotificationToPaneForTest.
-type launcherSendNotificationToPaneFn func(l *Launcher, paneTarget, notification string)
-
-// launcherSendNotificationToPaneOverride is read by the pane-dispatch and
-// resume goroutines, so it lives behind atomic.Pointer to stay race-clean
-// against test cleanups that fire while a worker is mid-dispatch.
-// Production reads fall through to sendNotificationToPane.
-var launcherSendNotificationToPaneOverride atomic.Pointer[launcherSendNotificationToPaneFn]
-
-func launcherSendNotificationToPane(l *Launcher, paneTarget, notification string) {
-	if p := launcherSendNotificationToPaneOverride.Load(); p != nil {
-		(*p)(l, paneTarget, notification)
-		return
-	}
-	l.sendNotificationToPane(paneTarget, notification)
-}
+// launcherSendNotificationToPaneFn / launcherSendNotificationToPaneOverride /
+// launcherSendNotificationToPane live in pane_dispatch.go (PLAN.md
+// §C15) so the dispatcher's send seam sits next to the dispatcher.
+// sendNotificationToPane (the unconditional /clear + type + Enter
+// helper) stays here because it's a Launcher method used by the
+// resume path; the dispatcher itself uses launcherSendNotificationToPane
+// instead.
 
 // sendNotificationToPane delivers a notification to a persistent interactive
 // Claude session in a tmux pane. It sends /clear first so each turn starts
@@ -685,61 +649,18 @@ func (l *Launcher) sendNotificationToPane(paneTarget, notification string) {
 
 // capturePaneTargetContent / capturePaneContent / listTeamPanes /
 // channelPaneStatus delegate to paneLifecycle (PLAN.md §C5b). Thin
-// wrappers keep current callers (broker_handlers, watchdog,
-// captureDeadChannelPane, clearAgentPanes) working without a rename
-// sweep in this PR.
-func (l *Launcher) capturePaneTargetContent(target string) (string, error) {
-	return l.panes().CapturePaneTargetContent(target)
-}
-
-func (l *Launcher) capturePaneContent(paneIdx int) (string, error) {
-	return l.panes().CapturePaneContent(paneIdx)
-}
-
-// clearAgentPanes / clearOverflowAgentWindows delegate to paneLifecycle
-// (PLAN.md §C5c).
-func (l *Launcher) clearAgentPanes() error {
-	return l.panes().ClearAgentPanes()
-}
-
-func (l *Launcher) clearOverflowAgentWindows() {
-	l.panes().ClearOverflowAgentWindows()
-}
-
-func (l *Launcher) listTeamPanes() ([]int, error) {
-	return l.panes().ListTeamPanes()
-}
+// pane-method thin wrappers (capturePaneTargetContent, capturePaneContent,
+// listTeamPanes, clearAgentPanes, clearOverflowAgentWindows,
+// channelPaneStatus, captureDeadChannelPane, spawnVisibleAgents,
+// spawnOverflowAgents, detectDeadPanesAfterSpawn, trySpawnWebAgentPanes,
+// reportPaneFallback) deleted by the C15 sweep — call sites use
+// l.panes().<Method>() directly. PLAN.md §6 "no compatibility shims".
 
 // HasLiveTmuxSession returns true if a wuphf-team tmux session is
 // running. Routes through paneLifecycle (PLAN.md §C5b) so tests can
 // drive it via setTmuxRunnerForTest without a real tmux server.
 func HasLiveTmuxSession() bool {
 	return newPaneLifecycle(SessionName).HasLiveSession()
-}
-
-// spawnVisibleAgents / spawnOverflowAgents / detectDeadPanesAfterSpawn /
-// trySpawnWebAgentPanes / reportPaneFallback delegate to paneLifecycle
-// (PLAN.md §C5e). The orchestration bodies moved onto the type via
-// paneLifecycleDeps so `failedPaneSlugs` writes still flow into the
-// same map the targeter reads (PLAN.md trap §1).
-func (l *Launcher) spawnVisibleAgents() ([]string, error) {
-	return l.panes().SpawnVisibleAgents()
-}
-
-func (l *Launcher) spawnOverflowAgents() {
-	l.panes().SpawnOverflowAgents()
-}
-
-func (l *Launcher) detectDeadPanesAfterSpawn(members []officeMember) {
-	l.panes().DetectDeadPanesAfterSpawn(members)
-}
-
-func (l *Launcher) trySpawnWebAgentPanes() {
-	l.panes().TrySpawnWebAgentPanes()
-}
-
-func (l *Launcher) reportPaneFallback(tmuxInstalled bool, summary string, err error) {
-	l.panes().ReportPaneFallback(tmuxInstalled, summary, err)
 }
 
 // recordPaneSpawnFailure marks a slug so agentPaneTargets() omits it and the

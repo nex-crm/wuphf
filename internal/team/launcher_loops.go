@@ -27,7 +27,7 @@ func (l *Launcher) watchChannelPaneLoop(channelCmd string) {
 	for {
 		time.Sleep(2 * time.Second)
 
-		status, err := l.channelPaneStatus()
+		status, err := l.panes().ChannelPaneStatus()
 		if err != nil {
 			if isNoSessionError(err.Error()) {
 				return
@@ -48,7 +48,7 @@ func (l *Launcher) watchChannelPaneLoop(channelCmd string) {
 			deadSince = time.Now()
 		}
 		if !snapshotWritten {
-			_ = l.captureDeadChannelPane(status)
+			_ = l.panes().CaptureDeadChannelPane(status)
 			snapshotWritten = true
 		}
 		if time.Since(deadSince) < channelRespawnDelay {

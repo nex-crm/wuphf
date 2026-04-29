@@ -288,10 +288,10 @@ func (l *Launcher) ReconfigureSession() error {
 		if err := provider.ResetClaudeSessions(); err != nil {
 			return fmt.Errorf("reset Claude sessions: %w", err)
 		}
-		if err := l.clearAgentPanes(); err != nil {
+		if err := l.panes().ClearAgentPanes(); err != nil {
 			return err
 		}
-		l.clearOverflowAgentWindows()
+		l.panes().ClearOverflowAgentWindows()
 		return nil
 	}
 	return l.reconfigureVisibleAgents()
@@ -321,24 +321,24 @@ func (l *Launcher) reconfigureVisibleAgents() error {
 
 	// Use respawn-pane to restart agent processes IN PLACE.
 	// This preserves pane sizes and positions (no layout reset).
-	panes, err := l.listTeamPanes()
+	panes, err := l.panes().ListTeamPanes()
 	if err != nil {
 		return err
 	}
-	l.clearOverflowAgentWindows()
+	l.panes().ClearOverflowAgentWindows()
 
 	// Respawn each agent pane in place, preserving layout.
 	// Never clear+recreate panes — that destroys the channel's layout.
 	visibleMembers := l.targeter().VisibleMembers()
 	if len(panes) != len(visibleMembers) {
-		if err := l.clearAgentPanes(); err != nil {
+		if err := l.panes().ClearAgentPanes(); err != nil {
 			return err
 		}
-		if _, err := l.spawnVisibleAgents(); err != nil {
+		if _, err := l.panes().SpawnVisibleAgents(); err != nil {
 			return err
 		}
-		l.spawnOverflowAgents()
-		go l.detectDeadPanesAfterSpawn(visibleMembers)
+		l.panes().SpawnOverflowAgents()
+		go l.panes().DetectDeadPanesAfterSpawn(visibleMembers)
 		if l.broker != nil {
 			go l.primeVisibleAgents()
 		}
@@ -375,8 +375,8 @@ func (l *Launcher) reconfigureVisibleAgents() error {
 			l.recordPaneSpawnFailure(slug, reason)
 		}
 	}
-	l.spawnOverflowAgents()
-	go l.detectDeadPanesAfterSpawn(visibleMembers)
+	l.panes().SpawnOverflowAgents()
+	go l.panes().DetectDeadPanesAfterSpawn(visibleMembers)
 
 	if l.broker != nil {
 		go l.primeVisibleAgents()

@@ -24,8 +24,63 @@ package team
 import (
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
+
+// paneDispatchTurn is one queued notification to type into a tmux pane.
+// Held in the per-slug queue, consumed by the dispatcher worker.
+type paneDispatchTurn struct {
+	PaneTarget   string
+	Notification string
+	EnqueuedAt   time.Time
+}
+
+// paneDispatchMinGap caps how often the dispatcher will type into the
+// same pane. Two messages arriving in quick succession get coalesced
+// into one /clear + send so claude doesn't see truncated input. The
+// default is 3s — generous enough to absorb the typical "agent
+// responded then human posted" double-tag without losing either.
+var paneDispatchMinGap = 3 * time.Second
+
+// paneDispatchCoalesceWindow: if a new notification arrives this soon
+// after the previous, the queued sends merge into a single Enter+text
+// burst. 60s lets a multi-step claude turn finish before the next
+// /clear fires for a fresh prompt — without it, the dispatcher would
+// step on a still-running turn and produce truncated tool output.
+//
+// Both knobs are package-level vars (not constants) so tests can
+// override them in-process; see pane_dispatch_queue_test.go for the
+// pattern.
+var paneDispatchCoalesceWindow = 60 * time.Second
+
+// launcherSendNotificationToPaneFn is the test seam type swapped via
+// setLauncherSendNotificationToPaneForTest. Production calls
+// launcherSendNotificationToPane directly; tests intercept by
+// installing a fake closure that records or no-ops the send. Kept as
+// a named type so the atomic.Pointer below stays readable.
+type launcherSendNotificationToPaneFn func(l *Launcher, paneTarget, notification string)
+
+// launcherSendNotificationToPaneOverride is read by the pane-dispatch
+// and pane-priming code paths. Tests must never assign directly; use
+// setLauncherSendNotificationToPaneForTest in test_support.go which
+// nests t.Cleanup correctly so concurrent tests don't corrupt each
+// other's overrides.
+var launcherSendNotificationToPaneOverride atomic.Pointer[launcherSendNotificationToPaneFn]
+
+// launcherSendNotificationToPane is the default production send path.
+// The dispatcher's sendFn closure consults the override on every call
+// so tests can intercept without owning the dispatcher. Production
+// delegates to (l *Launcher).sendNotificationToPane (defined in
+// launcher.go) so the actual /clear + send-keys sequence stays
+// alongside the rest of the Launcher's tmux helpers.
+func launcherSendNotificationToPane(l *Launcher, paneTarget, notification string) {
+	if p := launcherSendNotificationToPaneOverride.Load(); p != nil {
+		(*p)(l, paneTarget, notification)
+		return
+	}
+	l.sendNotificationToPane(paneTarget, notification)
+}
 
 // paneDispatcher serializes notifications per agent slug into tmux Claude
 // panes. One goroutine per slug drains its queue with a min-gap floor
