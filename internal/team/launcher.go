@@ -13,7 +13,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 	"sync"
 	"time"
@@ -24,7 +23,6 @@ import (
 	"github.com/nex-crm/wuphf/internal/company"
 	"github.com/nex-crm/wuphf/internal/config"
 	"github.com/nex-crm/wuphf/internal/operations"
-	"github.com/nex-crm/wuphf/internal/runtimebin"
 )
 
 const (
@@ -150,32 +148,6 @@ type Launcher struct {
 // launcherSendNotificationToPaneFn, launcherSendNotificationToPaneOverride,
 // and launcherSendNotificationToPane.
 
-// SetUnsafe enables unrestricted permissions for all agents (CLI-only flag).
-func (l *Launcher) SetUnsafe(v bool) { l.unsafe = v }
-
-// SetOpusCEO upgrades the CEO agent from Sonnet to Opus.
-func (l *Launcher) SetOpusCEO(v bool) { l.opusCEO = v }
-
-// SetFocusMode enables CEO-routed delegation mode.
-func (l *Launcher) SetFocusMode(v bool) { l.focusMode = v }
-
-// SetNoOpen suppresses automatic browser launch on startup.
-func (l *Launcher) SetNoOpen(v bool) { l.noOpen = v }
-
-func (l *Launcher) SetOneOnOne(slug string) {
-	l.sessionMode = SessionModeOneOnOne
-	l.oneOnOne = NormalizeOneOnOneAgent(slug)
-}
-
-func isBlankSlateLaunchSlug(value string) bool {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "from-scratch", "blank-slate", blankSlateLaunchSlug:
-		return true
-	default:
-		return false
-	}
-}
-
 // NewLauncher creates a launcher for the given operation blueprint or legacy pack.
 func NewLauncher(packSlug string) (*Launcher, error) {
 	cfg, _ := config.Load()
@@ -252,47 +224,6 @@ func NewLauncher(packSlug string) (*Launcher, error) {
 		},
 		notifyLastDelivered: make(map[string]time.Time),
 	}, nil
-}
-
-// Preflight checks that required tools are available.
-func (l *Launcher) Preflight() error {
-	if l.usesCodexRuntime() {
-		if l.usesOpencodeRuntime() {
-			if _, err := runtimebin.LookPath("opencode"); err != nil {
-				return fmt.Errorf("opencode not found. Install Opencode CLI (https://opencode.ai) and configure your provider credentials")
-			}
-			return nil
-		}
-		if _, err := exec.LookPath("codex"); err != nil {
-			return fmt.Errorf("codex not found. Install Codex CLI and run `codex login`")
-		}
-		return nil
-	}
-	if _, err := exec.LookPath("tmux"); err != nil {
-		return fmt.Errorf("tmux not found. Install: brew install tmux")
-	}
-	if _, err := exec.LookPath("claude"); err != nil {
-		return fmt.Errorf("claude not found. Install: npm install -g @anthropic-ai/claude-code")
-	}
-	if _, _, note := checkGHCapability(); note != "" {
-		fmt.Fprintf(os.Stderr, "note: %s\n", note)
-	}
-	return nil
-}
-
-// checkGHCapability checks whether the gh CLI is installed and authenticated.
-// It returns a soft-warning note when either condition is not met; callers
-// should print the note but must NOT treat it as a fatal error — agents can
-// still work locally without gh. Only PR-opening will be unavailable.
-func checkGHCapability() (installed bool, authed bool, note string) {
-	if _, err := exec.LookPath("gh"); err != nil {
-		return false, false, "gh CLI not found in PATH; agents won't be able to open real PRs. Install from https://cli.github.com."
-	}
-	cmd := exec.CommandContext(context.Background(), "gh", "auth", "status")
-	if err := cmd.Run(); err != nil {
-		return true, false, "gh installed but not authenticated; run `gh auth login` so agents can open real PRs."
-	}
-	return true, true, ""
 }
 
 const (
@@ -380,68 +311,12 @@ func (l *Launcher) targeter() *officeTargeter {
 // targeter (PLAN.md §C2). PLAN.md §6 sweep deleted them; in-package
 // call sites now use l.targeter().<Method>() directly.
 
-func (l *Launcher) isOneOnOne() bool {
-	if l.broker != nil {
-		mode, _ := l.broker.SessionModeState()
-		return mode == SessionModeOneOnOne
-	}
-	return NormalizeSessionMode(l.sessionMode) == SessionModeOneOnOne
-}
-
-func (l *Launcher) oneOnOneAgent() string {
-	if l.broker != nil {
-		_, agent := l.broker.SessionModeState()
-		return NormalizeOneOnOneAgent(agent)
-	}
-	return NormalizeOneOnOneAgent(l.oneOnOne)
-}
-
-// usesCodexRuntime reports whether the active install-wide provider uses the
-// headless one-shot runtime (shared by Codex and Opencode — both skip the
-// tmux/claude pane infrastructure and drive a fresh CLI per turn through the
-// broker queue in headless_codex.go).
-//
-// Prefer the capability helpers (usesPaneRuntime, requiresClaudeSessionReset)
-// for new code asking "is this a non-pane runtime" — they're Registry-driven
-// and pick up future providers (Ollama, vLLM, exo, OpenAI-compatible) without
-// further edits here. usesCodexRuntime stays for codex/opencode-binary-specific
-// concerns (Preflight, launch routing).
-func (l *Launcher) usesCodexRuntime() bool {
-	p := strings.TrimSpace(strings.ToLower(l.provider))
-	return p == "codex" || p == "opencode"
-}
-
-// usesOpencodeRuntime reports whether the install-wide provider is Opencode
-// specifically. Used only where the per-turn CLI invocation differs from Codex
-// (binary name, args, prompt layout).
-func (l *Launcher) usesOpencodeRuntime() bool {
-	return strings.EqualFold(strings.TrimSpace(l.provider), "opencode")
-}
-
 // usesPaneRuntime / requiresClaudeSessionReset /
 // memberEffectiveProviderKind / memberUsesHeadlessOneShotRuntime
 // live on officeTargeter (PLAN.md §C2). PLAN.md §6 sweep deleted the
 // transitional wrappers; in-package callers use
 // l.targeter().<Method>() directly. UsesTmuxRuntime stays because
 // cmd/wuphf/main.go imports it.
-
-// UsesTmuxRuntime reports whether agents run in tmux panes. Exported
-// for cmd/wuphf/main.go and tests; thin delegator over the targeter.
-func (l *Launcher) UsesTmuxRuntime() bool {
-	return l.targeter().UsesPaneRuntime()
-}
-
-func (l *Launcher) BrokerToken() string {
-	if l == nil || l.broker == nil {
-		return ""
-	}
-	return l.broker.Token()
-}
-
-// OneOnOneAgent returns the active direct-session agent slug, if any.
-func (l *Launcher) OneOnOneAgent() string {
-	return l.oneOnOneAgent()
-}
 
 // killStaleBroker, the office-PID-file helpers, ResetBrokerState,
 // ClearPersistedBrokerState, resetBrokerState, brokerBaseURL, and
@@ -702,27 +577,3 @@ func (l *Launcher) claudeCommand(slug, systemPrompt string) (string, error) {
 // Web-mode entry points (PreflightWeb, LaunchWeb, maybeOfferNex,
 // waitForWebReady, stdinIsTTY, openBrowser) live in launcher_web.go per
 // PLAN.md §C8.
-
-// postEscalation writes a system message to #general when an agent is stuck
-// or has blown its retry budget. The Slack-style UI renders this as a normal
-// message so humans see it without needing to open a panel.
-func (l *Launcher) postEscalation(slug, taskID string, reason agent.EscalationReason, detail string) {
-	if l.broker == nil {
-		return
-	}
-	who := strings.TrimSpace(slug)
-	if who == "" {
-		who = "an agent"
-	}
-	var body string
-	switch reason {
-	case agent.EscalationStuck:
-		body = fmt.Sprintf("Heads up: %s looks stuck. Task %s — %s. Needs eyes.", who, taskID, detail)
-	case agent.EscalationMaxRetries:
-		body = fmt.Sprintf("Heads up: %s keeps erroring on task %s. Last error: %s. Needs eyes.", who, taskID, detail)
-	default:
-		body = fmt.Sprintf("Heads up: %s escalation on %s: %s", who, taskID, detail)
-	}
-	l.broker.PostSystemMessage("general", body, "escalation")
-	_, _, _ = l.requestSelfHealing(slug, taskID, reason, detail)
-}
