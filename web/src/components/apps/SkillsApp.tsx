@@ -159,17 +159,22 @@ export function OwnersChip({ slugs }: OwnersChipProps) {
 
 export function SkillsApp() {
   const queryClient = useQueryClient();
+  const [previewSkill, setPreviewSkill] = useState<Skill | null>(null);
+  const [previewDirty, setPreviewDirty] = useState(false);
+  // Pause the 30s background refetch while the editor is open. Otherwise
+  // a refetch can replace the previewed skill mid-edit, swap the closed-
+  // over `originalContent` under the user, and invalidate the patchSkill
+  // old_string. The editor still reflects fresh data on next open.
+  const previewOpen = previewSkill !== null;
   const { data, isLoading, error } = useQuery({
     queryKey: ["skills", "all"],
     queryFn: () => getSkillsList("all"),
-    refetchInterval: 30_000,
+    refetchInterval: previewOpen ? false : 30_000,
   });
   const { data: officeMembers } = useOfficeMembers();
   const leadSlug = useTeamLeadSlug(officeMembers);
   const [compileState, setCompileState] = useState<CompileState>("idle");
   const [ownerFilter, setOwnerFilter] = useState<OwnerFilterValue>("all");
-  const [previewSkill, setPreviewSkill] = useState<Skill | null>(null);
-  const [previewDirty, setPreviewDirty] = useState(false);
 
   // Hydrate filter from localStorage on mount, validated against the
   // current office. If the saved slug no longer maps to a member (agent
@@ -876,6 +881,10 @@ function SkillActions({
 
   const handleDisable = useCallback(() => {
     if (!skillName) return;
+    // Don't let archive/disable race with a live invoke. The polling
+    // skill_run task is still settling — disabling here would hide the
+    // chip the user is watching and mask the run result.
+    if (invokePhase !== "idle") return;
     setActionPending(true);
     disableSkill(skillName)
       .then(() => {
@@ -899,7 +908,7 @@ function SkillActions({
         showNotice(`Couldn't disable: ${e.message}`, "error");
       })
       .finally(() => setActionPending(false));
-  }, [skillName, queryClient]);
+  }, [skillName, queryClient, invokePhase]);
 
   const handleEnable = useCallback(() => {
     if (!skillName) return;
@@ -917,6 +926,7 @@ function SkillActions({
 
   const handleArchive = useCallback(() => {
     if (!skillName) return;
+    if (invokePhase !== "idle") return;
     setActionPending(true);
     archiveSkill(skillName)
       .then(() => {
@@ -945,7 +955,7 @@ function SkillActions({
         showNotice(`Couldn't archive: ${e.message}`, "error");
       })
       .finally(() => setActionPending(false));
-  }, [skillName, queryClient]);
+  }, [skillName, queryClient, invokePhase]);
 
   if (status === "archived") {
     return (
@@ -1061,7 +1071,7 @@ function SkillActions({
       <button
         type="button"
         className="btn-text"
-        disabled={actionPending}
+        disabled={actionPending || invokePhase !== "idle"}
         onClick={handleDisable}
         aria-label={`Disable ${skillName}`}
       >
@@ -1071,7 +1081,7 @@ function SkillActions({
       <button
         type="button"
         className="btn-text btn-text--danger"
-        disabled={actionPending}
+        disabled={actionPending || invokePhase !== "idle"}
         onClick={handleArchive}
         aria-label={`Archive ${skillName}`}
       >
@@ -1151,6 +1161,7 @@ function SkillRunChip({
       <button
         type="button"
         onClick={onView}
+        aria-label={`View task ${taskId}`}
         style={{
           border: "none",
           background: "transparent",
@@ -1310,21 +1321,29 @@ function SkillPreviewBody({
 }: SkillPreviewBodyProps) {
   const owners = skill.owner_agents ?? [];
   const isProposed = skill.status === "proposed";
-  const originalContent = skill.content ?? "";
 
-  const [draft, setDraft] = useState(originalContent);
+  // baseline = the content the editor is "based on" (the last server-known
+  // state). It only updates when the user opens a different skill OR
+  // explicitly saves. Comparing draft against baseline determines dirty
+  // state; comparing against `skill.content` would let a background
+  // refetch silently overwrite the user's typing.
+  const [baseline, setBaseline] = useState(skill.content ?? "");
+  const [draft, setDraft] = useState(skill.content ?? "");
   const [saving, setSaving] = useState(false);
 
-  // Reset the draft whenever the previewed skill changes (e.g. user closes
-  // and reopens the panel on a different proposal). Reusing one editor
-  // state across skills would otherwise leak edits between them.
+  // Reset baseline + draft when the user navigates to a DIFFERENT skill.
+  // Keyed on skill.name only so post-save updates to skill.content (from
+  // the parent passing back the updated Skill) don't blow away chars the
+  // user typed in the gap between save resolution and effect run.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: see comment
   useEffect(() => {
-    setDraft(originalContent);
+    const next = skill.content ?? "";
+    setBaseline(next);
+    setDraft(next);
     onDirtyChange?.(false);
-    // originalContent is the source of truth, derived from skill identity.
-  }, [skill.name, originalContent, onDirtyChange]);
+  }, [skill.name]);
 
-  const dirty = isProposed && draft !== originalContent;
+  const dirty = isProposed && draft !== baseline;
 
   // Keep the parent informed of dirty-state so the SidePanel close path
   // can prompt for unsaved edits.
@@ -1335,27 +1354,36 @@ function SkillPreviewBody({
   const handleSave = useCallback(() => {
     if (!(isProposed && dirty && skill.name)) return;
     setSaving(true);
+    // Snapshot the draft we're committing — a chained edit landing while
+    // the request is in flight would otherwise change `draft` under us
+    // and confuse the post-save baseline.
+    const committed = draft;
+    const oldString = baseline;
     patchSkill(skill.name, {
-      old_string: originalContent,
-      new_string: draft,
+      old_string: oldString,
+      new_string: committed,
       replace_all: false,
     })
       .then((res) => {
         showNotice("Saved.", "success");
-        // Architect's patch handler returns the updated skill; fall back
-        // to a local merge if the response is missing it (older brokers).
-        const updated: Skill = res.skill ?? { ...skill, content: draft };
+        // Sync baseline to the saved body BEFORE notifying the parent. If
+        // the user typed more chars while the request was in flight they
+        // remain in `draft`, the dirty flag flips back on, and the
+        // editor naturally surfaces the new unsaved delta — instead of
+        // the parent's effect resetting `draft` and silently losing them.
+        setBaseline(committed);
+        const updated: Skill = res.skill ?? { ...skill, content: committed };
         onSaved?.(updated);
       })
       .catch((e: Error) => {
         showNotice(`Couldn't save: ${e.message}`, "error");
       })
       .finally(() => setSaving(false));
-  }, [isProposed, dirty, skill, originalContent, draft, onSaved]);
+  }, [isProposed, dirty, skill, baseline, draft, onSaved]);
 
   const handleRevert = useCallback(() => {
-    setDraft(originalContent);
-  }, [originalContent]);
+    setDraft(baseline);
+  }, [baseline]);
 
   return (
     <div

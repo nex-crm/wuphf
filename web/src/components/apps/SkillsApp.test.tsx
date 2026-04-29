@@ -165,6 +165,67 @@ describe("<SkillsApp> SidePanel editor", () => {
     });
   });
 
+  it("preserves chars typed between save resolve and parent post-save effect", async () => {
+    // Regression for the stale-closure bug devils-advocate flagged: after
+    // a successful save, the parent passes back res.skill with new content,
+    // which used to land in the reset useEffect's dep array and silently
+    // wipe any chars the user typed in the gap between the patch resolving
+    // and the effect running.
+    vi.mocked(clientMod.patchSkill).mockClear();
+    vi.mocked(clientMod.getSkillsList).mockResolvedValueOnce({
+      skills: [
+        {
+          name: "draft-skill",
+          status: "proposed",
+          content: "first body",
+        },
+      ],
+    });
+    // patchSkill resolves with the new server-known body.
+    vi.mocked(clientMod.patchSkill).mockResolvedValueOnce({
+      skill: {
+        name: "draft-skill",
+        status: "proposed",
+        content: "second body",
+      },
+    });
+
+    render(wrap(<SkillsApp />));
+
+    const viewFull = await screen.findByRole("button", {
+      name: /View full SKILL\.md/i,
+    });
+    fireEvent.click(viewFull);
+
+    const editor = await screen.findByRole("textbox", {
+      name: /Edit body for draft-skill/i,
+    });
+
+    // First save with "second body".
+    fireEvent.change(editor, { target: { value: "second body" } });
+    fireEvent.click(
+      screen.getByRole("button", { name: /Save edits to draft-skill/i }),
+    );
+
+    await waitFor(() => {
+      expect(vi.mocked(clientMod.patchSkill)).toHaveBeenCalledTimes(1);
+    });
+
+    // User keeps typing after save resolves. The parent has now updated
+    // previewSkill.content via onSaved → handlePreviewSaved → setPreviewSkill.
+    // The reset effect must NOT fire (dep array is keyed on skill.name only)
+    // and the new chars must be preserved in the editor.
+    fireEvent.change(editor, {
+      target: { value: "second body and more" },
+    });
+
+    await waitFor(() => {
+      expect((editor as HTMLTextAreaElement).value).toBe(
+        "second body and more",
+      );
+    });
+  });
+
   it("does not show the editor for active skills (preview only)", async () => {
     vi.mocked(clientMod.getSkillsList).mockResolvedValueOnce({
       skills: [
