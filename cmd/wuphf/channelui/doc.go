@@ -125,6 +125,17 @@
 //     ApplyTaskActivity, TaskBubbleText, RenderThoughtBubble
 //     (▗ … ▖ … ▘ pill), PadSidebarContent, SidebarPlainRow,
 //     SidebarStyledRow.
+//   - confirm.go           — confirm-card data + leaf renderers:
+//     ChannelConfirmAction typed-string + the five action consts,
+//     ChannelConfirm struct, ConfirmationForResetDM,
+//     ConfirmationForInterviewAnswer, RenderConfirmCard.
+//     team-bound ConfirmationForSessionSwitch and the
+//     channelModel-bound ConfirmationForReset stay in package main.
+//   - composer_popup.go    — autocomplete popup leaves:
+//     ComposerPopupOption struct, RenderComposerPopup (rounded
+//     popup with selection accent + footer hint),
+//     TypingAgentsFromMembers (display names of recently-active
+//     teammates).
 //
 // Subsequent extraction PRs will land the workspace / recovery / cache
 // cluster, the sidebar / splash, the broker integrations, and finally

@@ -38,6 +38,9 @@ type (
 	channelInterviewPhase  = channelui.InterviewPhase
 	memberActivity         = channelui.MemberActivity
 	officeCharacter        = channelui.OfficeCharacter
+	channelConfirmAction   = channelui.ChannelConfirmAction
+	channelConfirm         = channelui.ChannelConfirm
+	composerPopupOption    = channelui.ComposerPopupOption
 )
 
 // Function aliases keep the lowercase names callable from package main
@@ -189,6 +192,21 @@ var (
 	padSidebarContent     = channelui.PadSidebarContent
 	sidebarPlainRow       = channelui.SidebarPlainRow
 	sidebarStyledRow      = channelui.SidebarStyledRow
+
+	confirmationForResetDM         = channelui.ConfirmationForResetDM
+	confirmationForInterviewAnswer = channelui.ConfirmationForInterviewAnswer
+	renderConfirmCard              = channelui.RenderConfirmCard
+	renderComposerPopup            = channelui.RenderComposerPopup
+	typingAgentsFromMembers        = channelui.TypingAgentsFromMembers
+)
+
+// Channel-confirm action typed-string consts.
+const (
+	confirmActionResetTeam     = channelui.ChannelConfirmActionResetTeam
+	confirmActionResetDM       = channelui.ChannelConfirmActionResetDM
+	confirmActionSwitchMode    = channelui.ChannelConfirmActionSwitchMode
+	confirmActionRecoverFocus  = channelui.ChannelConfirmActionRecoverFocus
+	confirmActionSubmitRequest = channelui.ChannelConfirmActionSubmitRequest
 )
 
 // Sidebar theme color constants.

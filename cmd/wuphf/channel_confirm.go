@@ -5,35 +5,9 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 
 	"github.com/nex-crm/wuphf/internal/team"
 )
-
-type channelConfirmAction string
-
-const (
-	confirmActionResetTeam     channelConfirmAction = "reset_team"
-	confirmActionResetDM       channelConfirmAction = "reset_dm"
-	confirmActionSwitchMode    channelConfirmAction = "switch_mode"
-	confirmActionRecoverFocus  channelConfirmAction = "recover_focus"
-	confirmActionSubmitRequest channelConfirmAction = "submit_request"
-)
-
-type channelConfirm struct {
-	Title        string
-	Detail       string
-	ConfirmLabel string
-	CancelLabel  string
-	Action       channelConfirmAction
-	SessionMode  string
-	Agent        string
-	Channel      string
-	Request      *channelInterview
-	ChoiceID     string
-	ChoiceText   string
-	CustomText   string
-}
 
 func (m channelModel) confirmationForReset() *channelConfirm {
 	title := "Reset Office Session"
@@ -50,18 +24,6 @@ func (m channelModel) confirmationForReset() *channelConfirm {
 		Action:       confirmActionResetTeam,
 		SessionMode:  m.sessionMode,
 		Agent:        m.oneOnOneAgent,
-	}
-}
-
-func confirmationForResetDM(agent, channel string) *channelConfirm {
-	return &channelConfirm{
-		Title:        "Clear Direct Messages",
-		Detail:       fmt.Sprintf("This deletes the saved direct transcript with %s for this session.", displayName(agent)),
-		ConfirmLabel: "Enter clear DMs",
-		CancelLabel:  "Esc keep transcript",
-		Action:       confirmActionResetDM,
-		Agent:        agent,
-		Channel:      channel,
 	}
 }
 
@@ -89,61 +51,6 @@ func confirmationForSessionSwitch(mode, agent string) *channelConfirm {
 		SessionMode:  mode,
 		Agent:        agent,
 	}
-}
-
-func confirmationForInterviewAnswer(interview channelInterview, option *channelInterviewOption, customText string) *channelConfirm {
-	title := "Review Human Answer"
-	detailLines := []string{
-		fmt.Sprintf("Question: %s", strings.TrimSpace(interview.Question)),
-	}
-	if option != nil && strings.TrimSpace(option.Label) != "" {
-		detailLines = append(detailLines, fmt.Sprintf("Choice: %s", strings.TrimSpace(option.Label)))
-	}
-	customText = strings.TrimSpace(customText)
-	if customText != "" {
-		detailLines = append(detailLines, fmt.Sprintf("Note: %s", customText))
-	}
-	if len(detailLines) == 1 && option == nil {
-		detailLines = append(detailLines, "Type an answer before submitting.")
-	}
-	choiceID := ""
-	choiceText := ""
-	if option != nil {
-		choiceID = strings.TrimSpace(option.ID)
-		choiceText = strings.TrimSpace(option.Label)
-	}
-	return &channelConfirm{
-		Title:        title,
-		Detail:       strings.Join(detailLines, "\n\n"),
-		ConfirmLabel: "Enter send answer",
-		CancelLabel:  "Esc keep editing",
-		Action:       confirmActionSubmitRequest,
-		Request:      &interview,
-		ChoiceID:     choiceID,
-		ChoiceText:   choiceText,
-		CustomText:   customText,
-	}
-}
-
-func renderConfirmCard(confirm channelConfirm, width int) string {
-	cardWidth := maxInt(48, width)
-	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#F8FAFC")).Render(confirm.Title)
-	body := lipgloss.NewStyle().Foreground(lipgloss.Color("#CBD5E1")).Width(cardWidth - 4).Render(confirm.Detail)
-	footer := mutedText(confirm.ConfirmLabel + "  ·  " + confirm.CancelLabel)
-	lines := []string{
-		title,
-		"",
-		body,
-		"",
-		footer,
-	}
-	return lipgloss.NewStyle().
-		Width(cardWidth).
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#7C2D12")).
-		Background(lipgloss.Color("#14151B")).
-		Padding(0, 1).
-		Render(strings.Join(lines, "\n"))
 }
 
 func (m channelModel) executeConfirmation(confirm channelConfirm) (tea.Model, tea.Cmd) {
