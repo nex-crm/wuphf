@@ -12,6 +12,7 @@ package team
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -195,6 +196,172 @@ func (p *paneLifecycle) RespawnChannelPane(channelCmd, cwd string) {
 		"-t", target,
 		"-T", "📢 channel",
 	)
+}
+
+// SplitFirstAgent runs `tmux split-window -h -t session:team -p 65 -c
+// cwd cmd` — the layout primitive that creates pane 1 (the first
+// agent) to the right of the channel pane (pane 0). Combined output is
+// returned so callers can surface tmux's stderr in their own error
+// messages.
+func (p *paneLifecycle) SplitFirstAgent(cwd, cmd string) ([]byte, error) {
+	return p.runner.Combined("split-window", "-h",
+		"-t", p.sessionName+":team",
+		"-p", "65",
+		"-c", cwd,
+		cmd,
+	)
+}
+
+// SplitAdditionalAgent runs `tmux split-window -t session:team.1 -c cwd
+// cmd` — adds a pane that the subsequent main-vertical layout will
+// arrange next to the existing agent panes. Combined output is returned
+// so callers can surface tmux's error text.
+func (p *paneLifecycle) SplitAdditionalAgent(cwd, cmd string) ([]byte, error) {
+	return p.runner.Combined("split-window",
+		"-t", p.sessionName+":team.1",
+		"-c", cwd,
+		cmd,
+	)
+}
+
+// NewOverflowWindow runs `tmux new-window -d -t session -n name -c cwd
+// cmd` — creates a hidden ("-d") window for an overflow agent that
+// doesn't fit in the visible team grid. Combined output is returned so
+// callers can surface tmux's error text in failure messages.
+func (p *paneLifecycle) NewOverflowWindow(windowName, cwd, cmd string) ([]byte, error) {
+	return p.runner.Combined("new-window", "-d",
+		"-t", p.sessionName,
+		"-n", windowName,
+		"-c", cwd,
+		cmd,
+	)
+}
+
+// NewSession runs `tmux new-session -d -s session -n team -c cwd cmd`
+// to create the detached session that hosts the team window. Returns
+// the exec error directly because the calling code (trySpawnWebAgentPanes)
+// converts a non-nil result into a "tmux new-session failed" fallback.
+func (p *paneLifecycle) NewSession(cwd, placeholderCmd string) error {
+	return p.runner.Run("new-session", "-d",
+		"-s", p.sessionName,
+		"-n", "team",
+		"-c", cwd,
+		placeholderCmd,
+	)
+}
+
+// SetSessionOption applies a tmux session-level option (e.g.
+// `set-option -t session mouse off`). Errors are intentionally
+// dropped — these are cosmetic / interactivity tweaks that don't gate
+// the launch.
+func (p *paneLifecycle) SetSessionOption(name, value string) {
+	_ = p.runner.Run("set-option",
+		"-t", p.sessionName,
+		name, value,
+	)
+}
+
+// SetTeamWindowOption applies a tmux window-level option scoped to the
+// "team" window (e.g. `set-window-option -t session:team
+// remain-on-exit on`). Errors dropped — same rationale as
+// SetSessionOption.
+func (p *paneLifecycle) SetTeamWindowOption(name, value string) {
+	_ = p.runner.Run("set-window-option",
+		"-t", p.sessionName+":team",
+		name, value,
+	)
+}
+
+// ApplyMainVerticalLayout selects the `main-vertical` tmux layout for
+// the team window. Re-applied after each pane add so the channel
+// (pane 0) stays on the left and agent panes tile vertically on the
+// right. Errors dropped — layout failures aren't recoverable here, and
+// retrying on the next pane add usually fixes them.
+func (p *paneLifecycle) ApplyMainVerticalLayout() {
+	_ = p.runner.Run("select-layout",
+		"-t", p.sessionName+":team",
+		"main-vertical",
+	)
+}
+
+// SetPaneTitle re-titles a pane via `select-pane -t target -T title`.
+// Errors dropped — titles are cosmetic and a transient tmux failure
+// shouldn't fail the launch.
+func (p *paneLifecycle) SetPaneTitle(target, title string) {
+	_ = p.runner.Run("select-pane",
+		"-t", target,
+		"-T", title,
+	)
+}
+
+// SelectTeamWindow runs `tmux select-window -t session:team`. Used to
+// raise the team window after pane adds so the user lands in the
+// expected place when attaching. Errors dropped.
+func (p *paneLifecycle) SelectTeamWindow() {
+	_ = p.runner.Run("select-window",
+		"-t", p.sessionName+":team",
+	)
+}
+
+// FocusPane runs `tmux select-pane -t target` (without -T). Used to
+// focus the channel pane after the spawn flow so the user lands there
+// instead of in an agent pane. Errors dropped.
+func (p *paneLifecycle) FocusPane(target string) {
+	_ = p.runner.Run("select-pane",
+		"-t", target,
+	)
+}
+
+// IsPaneDead reads `#{pane_dead}` for target via display-message.
+// Returns (true, nil) when tmux reports "1", (false, nil) when "0", and
+// the parse-or-exec error otherwise. Used by detectDeadPanesAfterSpawn
+// to decide whether a freshly-spawned agent pane crashed at startup.
+func (p *paneLifecycle) IsPaneDead(target string) (bool, error) {
+	out, err := p.runner.Combined("display-message",
+		"-t", target,
+		"-p", "#{pane_dead}",
+	)
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(string(out)) == "1", nil
+}
+
+// CapturePaneHistory captures the last `lines` rows of pane scrollback
+// at target via `capture-pane -t target -p -J -S -<lines>`. Used by
+// detectDeadPanesAfterSpawn to surface the last output of a dead pane
+// in the headless-fallback warning so the user has a hint about why it
+// died.
+func (p *paneLifecycle) CapturePaneHistory(target string, lines int) (string, error) {
+	out, err := p.runner.Combined("capture-pane",
+		"-t", target,
+		"-p", "-J", "-S", fmt.Sprintf("-%d", lines),
+	)
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
+}
+
+// SendEnter sends a single Enter keypress to the target pane via
+// `send-keys -t target Enter`. Used by primeVisibleAgents to clear
+// claude's startup confirmation prompts so dispatch can type into the
+// pane.
+func (p *paneLifecycle) SendEnter(target string) {
+	_ = p.runner.Run("send-keys",
+		"-t", target,
+		"Enter",
+	)
+}
+
+// TmuxAvailable returns nil when the tmux binary is on PATH, or the
+// LookPath error when not. Wrapper around exec.LookPath so the runner
+// seam is not bypassed for the "is tmux installed?" check (although
+// LookPath itself does not go through the runner — there's nothing
+// useful to fake about a binary lookup).
+func (p *paneLifecycle) TmuxAvailable() error {
+	_, err := exec.LookPath("tmux")
+	return err
 }
 
 // CaptureDeadChannelPane writes a timestamped snapshot of the channel

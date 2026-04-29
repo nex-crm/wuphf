@@ -1273,19 +1273,17 @@ func (l *Launcher) primeVisibleAgents() {
 		return
 	}
 
+	panes := l.panes()
 	for attempt := 0; attempt < 3; attempt++ {
 		allReady := true
 		for _, target := range targets {
-			content, err := l.capturePaneTargetContent(target.PaneTarget)
+			content, err := panes.CapturePaneTargetContent(target.PaneTarget)
 			if err != nil {
 				allReady = false
 				continue
 			}
 			if shouldPrimeClaudePane(content) {
-				_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "send-keys",
-					"-t", target.PaneTarget,
-					"Enter",
-				).Run()
+				panes.SendEnter(target.PaneTarget)
 				allReady = false
 			}
 		}
@@ -2069,18 +2067,15 @@ func HasLiveTmuxSession() bool {
 }
 
 func (l *Launcher) spawnVisibleAgents() ([]string, error) {
+	panes := l.panes()
+	channelPane := l.sessionName + ":team.0"
 	if l.isOneOnOne() {
 		slug := l.oneOnOneAgent()
 		firstCmd, err := l.claudeCommand(slug, l.buildPrompt(slug))
 		if err != nil {
 			return nil, err
 		}
-		out, err := exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "split-window", "-h",
-			"-t", l.sessionName+":team",
-			"-p", "65",
-			"-c", l.cwd,
-			firstCmd,
-		).CombinedOutput()
+		out, err := panes.SplitFirstAgent(l.cwd, firstCmd)
 		if err != nil {
 			detail := strings.TrimSpace(string(out))
 			if detail == "" {
@@ -2088,24 +2083,13 @@ func (l *Launcher) spawnVisibleAgents() ([]string, error) {
 			}
 			return nil, fmt.Errorf("spawn one-on-one agent: %w (tmux: %s)", err, detail)
 		}
-		_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "select-layout",
-			"-t", l.sessionName+":team",
-			"main-vertical",
-		).Run()
-		_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "select-pane",
-			"-t", l.sessionName+":team.0",
-			"-T", "📢 direct",
-		).Run()
-		_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "select-pane",
-			"-t", fmt.Sprintf("%s:team.1", l.sessionName),
-			"-T", fmt.Sprintf("🤖 %s (@%s)", l.getAgentName(slug), slug),
-		).Run()
-		_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "select-window",
-			"-t", l.sessionName+":team",
-		).Run()
-		_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "select-pane",
-			"-t", l.sessionName+":team.0",
-		).Run()
+		panes.ApplyMainVerticalLayout()
+		panes.SetPaneTitle(channelPane, "📢 direct")
+		panes.SetPaneTitle(fmt.Sprintf("%s:team.1", l.sessionName),
+			fmt.Sprintf("🤖 %s (@%s)", l.getAgentName(slug), slug),
+		)
+		panes.SelectTeamWindow()
+		panes.FocusPane(channelPane)
 		return []string{slug}, nil
 	}
 
@@ -2127,12 +2111,7 @@ func (l *Launcher) spawnVisibleAgents() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	out, err := exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "split-window", "-h",
-		"-t", l.sessionName+":team",
-		"-p", "65",
-		"-c", l.cwd,
-		firstCmd,
-	).CombinedOutput()
+	out, err := panes.SplitFirstAgent(l.cwd, firstCmd)
 	if err != nil {
 		detail := strings.TrimSpace(string(out))
 		if detail == "" {
@@ -2152,11 +2131,7 @@ func (l *Launcher) spawnVisibleAgents() ([]string, error) {
 			l.recordPaneSpawnFailure(visible[i].Slug, fmt.Sprintf("claudeCommand: %v", err))
 			continue
 		}
-		out, err := exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "split-window",
-			"-t", l.sessionName+":team.1",
-			"-c", l.cwd,
-			agentCmd,
-		).CombinedOutput()
+		out, err := panes.SplitAdditionalAgent(l.cwd, agentCmd)
 		if err != nil {
 			detail := strings.TrimSpace(string(out))
 			reason := err.Error()
@@ -2173,39 +2148,30 @@ func (l *Launcher) spawnVisibleAgents() ([]string, error) {
 
 	// Apply tiled layout to agent panes, but keep channel (pane 0) as main-vertical
 	// Use main-vertical first to keep channel on the left
-	_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "select-layout",
-		"-t", l.sessionName+":team",
-		"main-vertical",
-	).Run()
+	panes.ApplyMainVerticalLayout()
 
 	// Now set pane titles
 	var visibleSlugs []string
-	_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "select-pane",
-		"-t", l.sessionName+":team.0",
-		"-T", "📢 channel",
-	).Run()
+	panes.SetPaneTitle(channelPane, "📢 channel")
 	for i, a := range visible {
 		paneIdx := i + 1 // pane 0 is channel
 		name := l.getAgentName(a.Slug)
-		_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "select-pane",
-			"-t", fmt.Sprintf("%s:team.%d", l.sessionName, paneIdx),
-			"-T", fmt.Sprintf("🤖 %s (@%s)", name, a.Slug),
-		).Run()
+		panes.SetPaneTitle(
+			fmt.Sprintf("%s:team.%d", l.sessionName, paneIdx),
+			fmt.Sprintf("🤖 %s (@%s)", name, a.Slug),
+		)
 		visibleSlugs = append(visibleSlugs, a.Slug)
 	}
 
 	// Focus channel pane
-	_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "select-window",
-		"-t", l.sessionName+":team",
-	).Run()
-	_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "select-pane",
-		"-t", l.sessionName+":team.0",
-	).Run()
+	panes.SelectTeamWindow()
+	panes.FocusPane(channelPane)
 
 	return visibleSlugs, nil
 }
 
 func (l *Launcher) spawnOverflowAgents() {
+	panes := l.panes()
 	for _, member := range l.overflowOfficeMembers() {
 		// Codex/Opencode-bound agents use the headless one-shot pipeline; they
 		// don't need a claude pane. Creating one would launch `claude` with
@@ -2220,12 +2186,7 @@ func (l *Launcher) spawnOverflowAgents() {
 			continue
 		}
 		windowName := overflowWindowName(member.Slug)
-		out, err := exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "new-window", "-d",
-			"-t", l.sessionName,
-			"-n", windowName,
-			"-c", l.cwd,
-			agentCmd,
-		).CombinedOutput()
+		out, err := panes.NewOverflowWindow(windowName, l.cwd, agentCmd)
 		if err != nil {
 			detail := strings.TrimSpace(string(out))
 			reason := err.Error()
@@ -2249,24 +2210,19 @@ func (l *Launcher) detectDeadPanesAfterSpawn(members []officeMember) {
 		return
 	}
 	time.Sleep(1500 * time.Millisecond)
+	panes := l.panes()
 	targets := l.agentPaneTargets()
 	for _, m := range members {
 		target, ok := targets[m.Slug]
 		if !ok || target.PaneTarget == "" {
 			continue
 		}
-		out, err := exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "display-message",
-			"-t", target.PaneTarget,
-			"-p", "#{pane_dead}",
-		).CombinedOutput()
-		if err != nil || strings.TrimSpace(string(out)) != "1" {
+		dead, err := panes.IsPaneDead(target.PaneTarget)
+		if err != nil || !dead {
 			continue
 		}
-		history, _ := exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "capture-pane",
-			"-t", target.PaneTarget,
-			"-p", "-J", "-S", "-200",
-		).CombinedOutput()
-		snippet := strings.TrimSpace(string(history))
+		history, _ := panes.CapturePaneHistory(target.PaneTarget, 200)
+		snippet := strings.TrimSpace(history)
 		if len(snippet) > 400 {
 			snippet = snippet[:400] + "..."
 		}
@@ -2322,40 +2278,30 @@ func (l *Launcher) trySpawnWebAgentPanes() {
 	if !l.usesPaneRuntime() {
 		return
 	}
-	if _, err := exec.LookPath("tmux"); err != nil {
+	panes := l.panes()
+	if err := panes.TmuxAvailable(); err != nil {
 		l.reportPaneFallback(false, "tmux not found on PATH", err)
 		return
 	}
 
 	// Remove any stale session from a previous run. Ignore errors — the common
 	// case is "no such session".
-	_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "kill-session", "-t", l.sessionName).Run()
+	panes.KillSession()
 
 	// Create a detached session with a placeholder pane 0. Agent panes are
 	// attached as splits afterward so agentPaneTargets() (which starts at
 	// team.1) maps correctly.
 	placeholderCmd := "sh -c 'while :; do sleep 3600; done'"
-	if err := exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "new-session", "-d",
-		"-s", l.sessionName,
-		"-n", "team",
-		"-c", l.cwd,
-		placeholderCmd,
-	).Run(); err != nil {
+	if err := panes.NewSession(l.cwd, placeholderCmd); err != nil {
 		l.reportPaneFallback(true, "tmux new-session failed", err)
 		return
 	}
-	_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "set-option", "-t", l.sessionName,
-		"mouse", "off",
-	).Run()
-	_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "set-option", "-t", l.sessionName,
-		"status", "off",
-	).Run()
-	_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "set-window-option", "-t", l.sessionName+":team",
-		"remain-on-exit", "on",
-	).Run()
+	panes.SetSessionOption("mouse", "off")
+	panes.SetSessionOption("status", "off")
+	panes.SetTeamWindowOption("remain-on-exit", "on")
 
 	if _, err := l.spawnVisibleAgents(); err != nil {
-		_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "kill-session", "-t", l.sessionName).Run()
+		panes.KillSession()
 		l.reportPaneFallback(true, "spawn visible agents failed", err)
 		return
 	}
