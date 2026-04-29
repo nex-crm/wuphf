@@ -190,8 +190,13 @@ func TestHandleStudioGeneratePackage_RejectsOversizedBody(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(b.handleStudioGeneratePackage))
 	defer srv.Close()
 
-	oversize := bytes.Repeat([]byte("x"), studioRequestMaxBodyBytes+1)
-	resp, err := http.Post(srv.URL, "application/json", bytes.NewReader(oversize))
+	// Wrap the bulk inside a JSON-string field so the decoder reads
+	// past the start byte and trips MaxBytesReader before erroring on
+	// syntax. Without this framing the test would still pass with the
+	// cap removed (raw "xxxxx" is invalid JSON at byte 1).
+	body := append([]byte(`{"actor":"`), bytes.Repeat([]byte("a"), studioRequestMaxBodyBytes+1)...)
+	body = append(body, []byte(`"}`)...)
+	resp, err := http.Post(srv.URL, "application/json", bytes.NewReader(body))
 	if err != nil {
 		t.Fatalf("request: %v", err)
 	}
@@ -211,8 +216,9 @@ func TestHandleStudioRunWorkflow_RejectsOversizedBody(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(b.handleStudioRunWorkflow))
 	defer srv.Close()
 
-	oversize := bytes.Repeat([]byte("x"), studioRequestMaxBodyBytes+1)
-	resp, err := http.Post(srv.URL, "application/json", bytes.NewReader(oversize))
+	body := append([]byte(`{"workflow_key":"`), bytes.Repeat([]byte("a"), studioRequestMaxBodyBytes+1)...)
+	body = append(body, []byte(`"}`)...)
+	resp, err := http.Post(srv.URL, "application/json", bytes.NewReader(body))
 	if err != nil {
 		t.Fatalf("request: %v", err)
 	}

@@ -162,8 +162,12 @@ func TestHandlePolicies_RejectsOversizedBody(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(b.handlePolicies))
 	defer srv.Close()
 
-	oversize := bytes.Repeat([]byte("x"), policyRequestMaxBodyBytes+1)
-	resp, err := http.Post(srv.URL, "application/json", bytes.NewReader(oversize))
+	// Send valid JSON with the rule field pushed past the cap so the
+	// failure is unambiguously coming from MaxBytesReader, not from
+	// json.Decoder bailing at byte 1 on garbage input.
+	body := append([]byte(`{"source":"test","rule":"`), bytes.Repeat([]byte("a"), policyRequestMaxBodyBytes+1)...)
+	body = append(body, []byte(`"}`)...)
+	resp, err := http.Post(srv.URL, "application/json", bytes.NewReader(body))
 	if err != nil {
 		t.Fatalf("request: %v", err)
 	}

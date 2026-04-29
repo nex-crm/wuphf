@@ -67,12 +67,23 @@ func TestJaccardWordSimilarity_KnownPairs(t *testing.T) {
 		}
 	}
 
-	// Near-paraphrase should clear the 0.85 threshold (Jaccard counts
-	// tokens, so high overlap of common content words wins).
-	a := "the quick brown fox jumps"
-	b := "the quick brown fox jumped"
-	if got := jaccardWordSimilarity(a, b); got < 0.5 {
-		t.Errorf("near-paraphrase similarity unexpectedly low: %v", got)
+	// Pin the duplicateBroadcastSimilarity (0.85) threshold with a pair
+	// the dedupe path WOULD treat as duplicate: identical content with
+	// trivial whitespace difference. Jaccard on this pair should be 1.0
+	// (same token set), well above 0.85. A near-paraphrase pair like
+	// "fox jumps" vs "fox jumped" only scores ~0.67 — useful as a
+	// floor but doesn't pin the actual cutoff.
+	near := "the quick brown fox jumps over the lazy dog"
+	nearVar := "  the quick brown fox jumps over the lazy dog  "
+	if got := jaccardWordSimilarity(near, nearVar); got < 0.85 {
+		t.Errorf("identical-modulo-whitespace pair: want ≥ 0.85, got %v", got)
+	}
+	// And a clear non-duplicate pair must fall below the cutoff so a
+	// regression that lowers the threshold gets caught.
+	farA := "the quick brown fox jumps"
+	farB := "completely unrelated tokens here"
+	if got := jaccardWordSimilarity(farA, farB); got >= 0.85 {
+		t.Errorf("disjoint-token pair: want < 0.85, got %v", got)
 	}
 }
 

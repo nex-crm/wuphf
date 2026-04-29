@@ -13,34 +13,10 @@ import (
 	"github.com/nex-crm/wuphf/internal/agent"
 )
 
-// TestPostAutomationMessage_DedupesByEventID is a unit-level guard for
-// the eventID dedupe path: posting twice with the same eventID returns
-// the original message and a duplicate=true flag without inserting a
-// second record. Distinct from the integration test that hits the HTTP
-// surface — this version exercises the broker method directly.
-func TestPostAutomationMessage_DedupesByEventID(t *testing.T) {
-	b := newTestBroker(t)
-	first, dup1, err := b.PostAutomationMessage("nex", "general", "T", "first", "evt-x", "src", "Src", nil, "")
-	if err != nil {
-		t.Fatalf("first: %v", err)
-	}
-	if dup1 {
-		t.Errorf("first call: expected duplicate=false")
-	}
-	second, dup2, err := b.PostAutomationMessage("nex", "general", "T", "second", "evt-x", "src", "Src", nil, "")
-	if err != nil {
-		t.Fatalf("second: %v", err)
-	}
-	if !dup2 {
-		t.Errorf("second call: expected duplicate=true")
-	}
-	if second.ID != first.ID {
-		t.Errorf("expected same ID on dedupe, got %q vs %q", first.ID, second.ID)
-	}
-	if got := len(b.Messages()); got != 1 {
-		t.Errorf("expected 1 message after dedupe, got %d", got)
-	}
-}
+// (TestPostAutomationMessage_DedupesByEventID removed: the relocated
+// TestPostAutomationMessageDeduplicatesByEventID below already covers
+// the eventID dedupe path with stronger HTTP-level assertions. Keeping
+// both was duplicate coverage; CodeRabbit flagged the redundancy.)
 
 // TestPostMessage_SetsTimestampAndChannel pins basic invariants on the
 // exported PostMessage entry point used by every other package: a
