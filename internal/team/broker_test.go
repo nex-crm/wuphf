@@ -5836,12 +5836,13 @@ func TestInvokeSkillTracksInvokerChannelAndExecutionMetadata(t *testing.T) {
 	b := newTestBroker(t)
 	b.mu.Lock()
 	b.skills = append(b.skills, teamSkill{
-		ID:        "skill-youtube-factory-bootstrap",
-		Name:      "youtube-factory-bootstrap",
-		Title:     "Bootstrap Automated YouTube Factory",
-		Status:    "active",
-		Channel:   "general",
-		CreatedBy: "ceo",
+		ID:          "skill-youtube-factory-bootstrap",
+		Name:        "youtube-factory-bootstrap",
+		Title:       "Bootstrap Automated YouTube Factory",
+		Status:      "active",
+		Channel:     "general",
+		CreatedBy:   "ceo",
+		OwnerAgents: []string{"you"},
 	})
 	b.channels = append(b.channels, teamChannel{
 		Slug:    "youtube-factory",
@@ -5887,12 +5888,13 @@ func TestInvokeSkillCreatesSkillRunTask(t *testing.T) {
 	b.mu.Lock()
 	b.members = []officeMember{{Slug: "ceo", Name: "CEO", Role: "lead"}}
 	b.skills = append(b.skills, teamSkill{
-		ID:      "skill-deploy",
-		Name:    "deploy",
-		Title:   "Deploy to Production",
-		Status:  "active",
-		Channel: "general",
-		Content: "Step 1: Run tests. Step 2: Push tag.",
+		ID:          "skill-deploy",
+		Name:        "deploy",
+		Title:       "Deploy to Production",
+		Status:      "active",
+		Channel:     "general",
+		Content:     "Step 1: Run tests. Step 2: Push tag.",
+		OwnerAgents: []string{"eng"},
 	})
 	b.mu.Unlock()
 

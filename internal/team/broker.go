@@ -11349,9 +11349,26 @@ func (b *Broker) handleInvokeSkill(w http.ResponseWriter, r *http.Request) {
 
 	// Security fix (Codex T3): only active skills may be invoked. Proposed or
 	// archived skills must not be executable — proposed means unapproved,
-	// archived means intentionally retired.
+	// archived means intentionally retired. Disabled (PR 7 step 4) is a
+	// reversible pause and gets a structured 403 so callers can distinguish
+	// it from the unrecoverable "not active" case.
+	if sk.Status == "disabled" {
+		writeSkillForbidden(w, "disabled", sk, b.members,
+			"skill is disabled — re-enable it from the Skills app to invoke")
+		return
+	}
 	if sk.Status != "active" {
 		http.Error(w, "skill not active (status="+sk.Status+")", http.StatusForbidden)
+		return
+	}
+
+	// PR 7: per-agent visibility gate. The invoker must be in sk.OwnerAgents,
+	// or sk.OwnerAgents must be empty AND the invoker must be the office lead
+	// (lead-routable shared skills). Returning a structured body lets the LLM
+	// caller delegate the request via team_broadcast instead of guessing.
+	if !b.canAgentSeeSkillLocked(strings.TrimSpace(body.InvokedBy), sk) {
+		writeSkillForbidden(w, "not_owner", sk, b.members,
+			"team_broadcast tag the listed agents or hand off the task")
 		return
 	}
 
@@ -11405,6 +11422,35 @@ func (b *Broker) handleInvokeSkill(w http.ResponseWriter, r *http.Request) {
 		resp["task_id"] = taskID
 	}
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// writeSkillForbidden emits the structured 403 body that handleInvokeSkill
+// returns when a skill is disabled or invisible to the caller. The body
+// shape lets LLM clients route the request elsewhere instead of retrying.
+//
+//	{
+//	  "ok": false,
+//	  "error": "<reason>",          // "not_owner" | "disabled"
+//	  "delegate_to": ["agent-slug"], // sk.OwnerAgents, or [leadSlug] if empty
+//	  "hint": "<human-readable next step>"
+//	}
+func writeSkillForbidden(w http.ResponseWriter, reason string, sk *teamSkill, members []officeMember, hint string) {
+	delegateTo := append([]string(nil), sk.OwnerAgents...)
+	if len(delegateTo) == 0 {
+		if lead := strings.TrimSpace(officeLeadSlugFrom(members)); lead != "" {
+			delegateTo = []string{lead}
+		} else {
+			delegateTo = []string{}
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusForbidden)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"ok":          false,
+		"error":       reason,
+		"delegate_to": delegateTo,
+		"hint":        hint,
+	})
 }
 
 // createSkillRunTaskLocked dispatches a task so the office lead picks up and
