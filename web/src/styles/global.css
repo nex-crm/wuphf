@@ -224,6 +224,32 @@ body {
   padding: 16px 40px;
   font-size: 16px;
 }
+.btn-text {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  padding: 6px 4px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+  border-radius: 4px;
+  transition: color 0.12s;
+}
+.btn-text:hover:not(:disabled) {
+  text-decoration: underline;
+  color: var(--text);
+}
+.btn-text:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.btn-text--danger {
+  color: var(--text-secondary);
+}
+.btn-text--danger:hover:not(:disabled) {
+  color: var(--red, #c43e3e);
+}
 .btn-sm {
   padding: 6px 12px;
   font-size: 12px;
@@ -384,6 +410,103 @@ body {
 }
 ::-webkit-scrollbar-thumb:hover {
   background: var(--text-tertiary);
+}
+
+/* ─── App card (skill scoping additions) ─── */
+.app-card--proposed {
+  border-left: 3px solid var(--yellow);
+}
+.app-card--disabled {
+  position: relative;
+  background: var(--neutral-50);
+  /* Text stays neutral-900 for AA contrast (≥4.5:1). Only the diagonal
+     pinstripe overlay carries the disabled visual signal at 0.55 opacity. */
+}
+.app-card--disabled::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  opacity: 0.55;
+  background-image: repeating-linear-gradient(
+    45deg,
+    transparent 0 8px,
+    var(--neutral-50) 8px 9px
+  );
+}
+.app-card--disabled > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* ─── Skills app: owners chip ─── */
+.owners-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  background: var(--neutral-100);
+  color: var(--neutral-700);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  border-radius: 6px;
+  line-height: 1.4;
+}
+.owners-chip--lead {
+  background: var(--neutral-50);
+  color: var(--neutral-500);
+  font-style: italic;
+  font-family: var(--font-sans);
+}
+
+/* ─── Side panel responsive ─── */
+@media (max-width: 900px) {
+  .side-panel {
+    width: 60vw !important;
+  }
+}
+@media (max-width: 600px) {
+  .side-panel {
+    width: 100vw !important;
+  }
+}
+
+/* ─── Mobile tap targets (a11y) ─── */
+@media (max-width: 600px) {
+  .btn-sm {
+    min-height: 44px;
+    padding: 10px 14px;
+  }
+  .btn-text {
+    min-height: 44px;
+    padding: 10px 8px;
+  }
+}
+
+/* ─── Reduced motion for optimistic-update animations ─── */
+@media (prefers-reduced-motion: reduce) {
+  .skill-suggest-expander,
+  .side-panel,
+  .animate-fade {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+.skill-suggest-expander {
+  animation: skill-suggest-slide 0.18s ease-out;
+  overflow: hidden;
+}
+@keyframes skill-suggest-slide {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* ─── SR-only ─── */

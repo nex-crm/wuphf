@@ -11,6 +11,8 @@ vi.mock("../../api/client", async () => {
   return {
     ...actual,
     getSkills: vi.fn().mockResolvedValue({ skills: [] }),
+    getSkillsList: vi.fn().mockResolvedValue({ skills: [] }),
+    getOfficeMembers: vi.fn().mockResolvedValue({ members: [] }),
     compileSkills: vi.fn().mockResolvedValue({
       scanned: 0,
       matched: 0,
@@ -24,7 +26,7 @@ vi.mock("../../api/client", async () => {
   };
 });
 
-import { SkillsApp } from "./SkillsApp";
+import { OwnersChip, SkillsApp } from "./SkillsApp";
 
 function wrap(ui: ReactNode) {
   const qc = new QueryClient({
@@ -48,5 +50,22 @@ describe("<SkillsApp> empty state", () => {
       .getAllByRole("button")
       .filter((b) => /Compile/.test(b.textContent ?? ""));
     expect(buttons.length).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe("<OwnersChip>", () => {
+  it("renders 'lead-routable' when slugs are missing or empty", () => {
+    render(<OwnersChip />);
+    expect(screen.getByText(/lead-routable/i)).toBeInTheDocument();
+  });
+
+  it("renders comma-separated @-prefixed slugs when provided", () => {
+    render(<OwnersChip slugs={["deploy-bot", "csm"]} />);
+    expect(screen.getByText("@deploy-bot, @csm")).toBeInTheDocument();
+  });
+
+  it("ignores empty/whitespace slugs and falls back to lead-routable", () => {
+    render(<OwnersChip slugs={["", "   "]} />);
+    expect(screen.getByText(/lead-routable/i)).toBeInTheDocument();
   });
 });

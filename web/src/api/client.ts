@@ -463,6 +463,35 @@ export interface Task {
   updated_at?: string;
 }
 
+export interface CreateTaskInput {
+  title: string;
+  assignee: string;
+  details?: string;
+  task_type?: string;
+  execution_mode?: string;
+  depends_on?: string[];
+}
+
+export interface CreateTasksResponse {
+  tasks: Task[];
+}
+
+/**
+ * Create one or more tasks via the /task-plan endpoint. Used by surfaces
+ * that hand off work (e.g. Suggest changes on a skill proposal creates a
+ * "Revise skill" task assigned to the lead).
+ */
+export function createTasks(
+  tasks: CreateTaskInput[],
+  opts?: { channel?: string; createdBy?: string },
+): Promise<CreateTasksResponse> {
+  return post<CreateTasksResponse>("/task-plan", {
+    channel: opts?.channel || "general",
+    created_by: opts?.createdBy || "human",
+    tasks,
+  });
+}
+
 export function reassignTask(
   taskId: string,
   newOwner: string,
@@ -587,7 +616,7 @@ export function getScheduler(opts?: { dueOnly?: boolean }) {
 
 // ── Skills ──
 
-export type SkillStatus = "active" | "proposed" | "archived";
+export type SkillStatus = "active" | "proposed" | "archived" | "disabled";
 
 export interface SkillMetadata {
   wuphf?: {
@@ -595,20 +624,85 @@ export interface SkillMetadata {
   };
 }
 
+export type OwnerAgents = string[];
+
 export interface Skill {
   name: string;
+  title?: string;
   description?: string;
   source?: string;
+  content?: string;
+  trigger?: string;
   parameters?: unknown;
   status?: SkillStatus;
   created_by?: string;
   created_at?: string;
   updated_at?: string;
+  /** Per-agent scoping (PR 7). Empty/missing = lead-routable shared skill. */
+  owner_agents?: OwnerAgents;
   metadata?: SkillMetadata;
 }
 
+export type SkillsListScope = "active" | "all";
+
 export function getSkills() {
   return get<{ skills: Skill[] }>("/skills");
+}
+
+/**
+ * Fetch the full skills list including disabled and archived. The base
+ * /skills endpoint hides archived and (post PR 7) disabled skills; the
+ * Skills app needs to render every section.
+ */
+export function getSkillsList(scope: SkillsListScope = "all") {
+  return get<{ skills: Skill[] }>("/skills", { scope });
+}
+
+export interface DisableSkillResponse {
+  skill?: Skill;
+}
+
+export function disableSkill(name: string): Promise<DisableSkillResponse> {
+  return post<DisableSkillResponse>(
+    `/skills/${encodeURIComponent(name)}/disable`,
+    {},
+  );
+}
+
+export interface EnableSkillResponse {
+  skill?: Skill;
+}
+
+export function enableSkill(name: string): Promise<EnableSkillResponse> {
+  return post<EnableSkillResponse>(
+    `/skills/${encodeURIComponent(name)}/enable`,
+    {},
+  );
+}
+
+export interface RestoreArchivedSkillResponse {
+  skill?: Skill;
+}
+
+export function restoreArchivedSkill(
+  name: string,
+): Promise<RestoreArchivedSkillResponse> {
+  return post<RestoreArchivedSkillResponse>(
+    `/skills/${encodeURIComponent(name)}/restore`,
+    {},
+  );
+}
+
+export interface ArchiveSkillResponse {
+  ok?: boolean;
+  skill?: Skill;
+}
+
+export function archiveSkill(name: string): Promise<ArchiveSkillResponse> {
+  return post<ArchiveSkillResponse>(
+    `/skills/${encodeURIComponent(name)}/archive`,
+    {},
+  );
 }
 
 export interface InvokeSkillResult {
