@@ -168,6 +168,9 @@ func (l *Launcher) runHeadlessOpencodeTurn(ctx context.Context, slug string, not
 			}
 			pushStream(ev.Text)
 		case "tool_use":
+			if liveChat != nil {
+				liveChat.Flush()
+			}
 			if firstToolAt.IsZero() {
 				firstToolAt = time.Now()
 				metrics.FirstToolMs = durationMillis(startedAt, firstToolAt)
