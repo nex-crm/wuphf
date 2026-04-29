@@ -1,8 +1,12 @@
-// Office-sheet avatar portraits for built-in agents, with procedural fallback
-// for any dynamic or unknown slugs that do not have a mapped character yet.
+// Office-sheet avatar portraits for built-in agents and dynamic agents.
+// Unknown slugs deterministically pick from the generated office catalog so
+// newly created teammates do not fall back to the deprecated legacy sprites.
 
-import { resolveKnownPortraitSprite } from './avatarSprites.generated'
-import { buildProceduralSprite, getProceduralAccent } from './proceduralAvatar'
+import {
+  KNOWN_AVATAR_SPRITES,
+  resolveKnownPortraitSprite,
+  type KnownAvatarSprite,
+} from './avatarSprites.generated'
 
 const AGENT_COLORS: Record<string, string> = {
   ceo: '#E8A838',
@@ -39,26 +43,125 @@ function paletteFromHexes(palette: string[]): Record<number, Rgb> {
 }
 
 export function getAgentColor(slug: string): string {
-  return AGENT_COLORS[slug] ?? getProceduralAccent(slug)
+  const key = slug.trim().toLowerCase()
+  return AGENT_COLORS[key] ?? proceduralAccentForSlug(key)
+}
+
+const RESERVED_DYNAMIC_AVATAR_IDS = new Set([
+  'hybridCeo',
+  'hybridGeneric',
+  'hybridHuman',
+  'hybridPam',
+  'hybridPamCute',
+])
+
+const DYNAMIC_AVATAR_IDS = Object.keys(KNOWN_AVATAR_SPRITES)
+  .filter((id) => id.startsWith('hybrid') && !RESERVED_DYNAMIC_AVATAR_IDS.has(id))
+  .sort()
+
+const PROCEDURAL_ACCENTS = [
+  '#E8A838',
+  '#58A6FF',
+  '#A371F7',
+  '#3FB950',
+  '#D2A8FF',
+  '#F778BA',
+  '#FFA657',
+  '#79C0FF',
+  '#FF7B72',
+  '#56D4DD',
+  '#FFD866',
+  '#C9D1D9',
+]
+
+function hashSlug(slug: string): number {
+  let h = 0x811c9dc5
+  for (let i = 0; i < slug.length; i++) {
+    h ^= slug.charCodeAt(i)
+    h = Math.imul(h, 0x01000193)
+  }
+  return h >>> 0
+}
+
+function pick(hash: number, salt: number, modulo: number): number {
+  let h = hash ^ (salt * 0x9e3779b1)
+  h = Math.imul(h ^ (h >>> 16), 0x85ebca6b)
+  h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35)
+  h ^= h >>> 16
+  return (h >>> 0) % modulo
+}
+
+function proceduralAccentForSlug(slug: string): string {
+  const hash = hashSlug(slug || 'unknown')
+  return PROCEDURAL_ACCENTS[pick(hash, 2, PROCEDURAL_ACCENTS.length)] ?? '#56D4DD'
+}
+
+function rgbToHex([r, g, b]: Rgb): string {
+  return `#${[r, g, b].map((v) => Math.max(0, Math.min(255, v)).toString(16).padStart(2, '0')).join('')}`
+}
+
+function luminance([r, g, b]: Rgb): number {
+  return (0.2126 * r) + (0.7152 * g) + (0.0722 * b)
+}
+
+function isSkinLike([r, g, b]: Rgb): boolean {
+  return r >= 120 && g >= 70 && b <= 190 && r >= g && g >= b
+}
+
+function blend(a: Rgb, b: Rgb, amount: number): Rgb {
+  return [
+    Math.round(a[0] + ((b[0] - a[0]) * amount)),
+    Math.round(a[1] + ((b[1] - a[1]) * amount)),
+    Math.round(a[2] + ((b[2] - a[2]) * amount)),
+  ]
+}
+
+function buildProceduralOfficePortrait(slug: string): KnownAvatarSprite {
+  const hash = hashSlug(slug || 'unknown')
+  const ids = DYNAMIC_AVATAR_IDS.length > 0 ? DYNAMIC_AVATAR_IDS : ['hybridGeneric']
+  const baseID = ids[pick(hash, 1, ids.length)]
+  const base = KNOWN_AVATAR_SPRITES[baseID] ?? KNOWN_AVATAR_SPRITES.hybridGeneric ?? Object.values(KNOWN_AVATAR_SPRITES)[0]
+  if (!base) {
+    throw new Error('avatar sprite catalog is empty')
+  }
+
+  const accent = hexToRgb(proceduralAccentForSlug(slug))
+  const tintStrength = 0.22 + (pick(hash, 3, 18) / 100)
+  const palette = base.palette.map((hex) => {
+    const rgb = hexToRgb(hex)
+    if (luminance(rgb) < 38 || isSkinLike(rgb)) {
+      return hex
+    }
+    return rgbToHex(blend(rgb, accent, tintStrength))
+  })
+
+  return {
+    ...base,
+    id: `procedural:${slug || 'unknown'}:${base.id}`,
+    palette,
+  }
+}
+
+export function resolvePortraitSprite(slug: string): KnownAvatarSprite {
+  const known = resolveKnownPortraitSprite(slug)
+  if (known) return known
+
+  return buildProceduralOfficePortrait(slug)
 }
 
 /**
  * Paint a pixel-art agent avatar into an existing canvas element.
- * Known agents render from the generated avatar catalog; everything else keeps
- * the deterministic procedural fallback.
+ * Known agents render from the generated avatar catalog; everything else gets
+ * a deterministic generated office portrait.
  */
 export function drawPixelAvatar(
   canvas: HTMLCanvasElement,
   slug: string,
   size: number,
 ): void {
-  const known = resolveKnownPortraitSprite(slug)
-  const procedural = known ? null : buildProceduralSprite(slug)
-
-  const sprite = known?.portrait ?? procedural?.grid ?? []
-  const palette = known
-    ? paletteFromHexes(known.palette)
-    : procedural?.palette ?? {}
+  const avatar = resolvePortraitSprite(slug)
+  const sprite = avatar.portrait
+  const palette = paletteFromHexes(avatar.palette)
 
   const rows = sprite.length
   const cols = sprite[0]?.length ?? 0

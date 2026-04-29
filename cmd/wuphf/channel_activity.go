@@ -152,7 +152,7 @@ func buildLiveWorkLines(members []channelMember, tasks []channelTask, actions []
 		lines = append(lines, renderedLine{Text: renderDateSeparator(contentWidth, "Live work now")})
 		for _, member := range active {
 			summary := deriveMemberRuntimeSummary(member, tasks, now)
-			nameColor := agentColorMap[member.Slug]
+			nameColor := agentColor(member.Slug)
 			if nameColor == "" {
 				nameColor = "#64748B"
 			}
