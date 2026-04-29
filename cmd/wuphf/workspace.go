@@ -74,10 +74,13 @@ type ListOpts struct {
 }
 
 // ListResult is what the orchestrator hands back. Two slices rather than a
-// merged shape so JSON output stays unambiguous.
+// merged shape so JSON output stays unambiguous. Both fields render as `[]`
+// rather than being omitted when empty — consumers of `--json` rely on
+// presence so they can `jq '.trash | length'` without a defined-or-default
+// dance.
 type ListResult struct {
 	Workspaces []Workspace  `json:"workspaces"`
-	Trash      []TrashEntry `json:"trash,omitempty"`
+	Trash      []TrashEntry `json:"trash"`
 }
 
 // CreateRequest is the payload for `workspace create`. The orchestrator owns
