@@ -389,7 +389,10 @@ export function Composer() {
       // for approval-style requests. The request UI above the composer lets
       // the user answer or dismiss/cancel it without leaving the textbox.
       if (/request pending|answer required/i.test(message)) {
-        showNotice("Answer or dismiss the request above to send messages.", "info");
+        showNotice(
+          "Answer or dismiss the request above to send messages.",
+          "info",
+        );
         return;
       }
       showNotice(message, "error");
