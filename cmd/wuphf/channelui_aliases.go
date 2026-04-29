@@ -147,6 +147,8 @@ var (
 
 	threadRootMessageID = channelui.ThreadRootMessageID
 	hasThreadReplies    = channelui.HasThreadReplies
+	countThreadReplies  = channelui.CountThreadReplies
+	threadParticipants  = channelui.ThreadParticipants
 
 	trimRecoverySentence          = channelui.TrimRecoverySentence
 	renderAwayStrip               = channelui.RenderAwayStrip

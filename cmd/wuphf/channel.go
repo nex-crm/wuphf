@@ -3332,33 +3332,6 @@ func flattenThreadMessages(messages []brokerMessage, expanded map[string]bool) [
 	return out
 }
 
-func countThreadReplies(children map[string][]brokerMessage, rootID string) int {
-	count := 0
-	for _, child := range children[rootID] {
-		count++
-		count += countThreadReplies(children, child.ID)
-	}
-	return count
-}
-
-func threadParticipants(children map[string][]brokerMessage, rootID string) []string {
-	seen := make(map[string]bool)
-	var participants []string
-	var walk func(id string)
-	walk = func(id string) {
-		for _, child := range children[id] {
-			name := displayName(child.From)
-			if !seen[name] {
-				seen[name] = true
-				participants = append(participants, name)
-			}
-			walk(child.ID)
-		}
-	}
-	walk(rootID)
-	return participants
-}
-
 // buildThreadPickerOptions returns picker options for all root messages that have replies.
 func (m channelModel) buildThreadPickerOptions() []tui.PickerOption {
 	// Find root messages with replies

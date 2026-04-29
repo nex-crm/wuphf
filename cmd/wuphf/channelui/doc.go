@@ -78,10 +78,13 @@
 //     for cached snapshots) and RenderTimeBucket (per-second
 //     bucket for direct DMs and the messages app, per-30s
 //     elsewhere).
-//   - threads.go           — thread navigation helpers:
+//   - threads.go           — thread navigation + walker helpers:
 //     ThreadRootMessageID walks ReplyTo to the root,
 //     HasThreadReplies reports whether any message replies to a
-//     given id.
+//     given id, CountThreadReplies / ThreadParticipants recurse
+//     the children-by-ID adjacency map (built by
+//     flattenThreadMessages) to count descendants and collect
+//     distinct reply-author display names in walk-order.
 //   - recovery.go          — recovery leaf helpers:
 //     TrimRecoverySentence, RenderAwayStrip,
 //     RecoverySurgeryOption struct + BuildRecoverySurgeryOptions

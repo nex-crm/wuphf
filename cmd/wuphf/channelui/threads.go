@@ -33,3 +33,38 @@ func HasThreadReplies(messages []BrokerMessage, id string) bool {
 	}
 	return false
 }
+
+// CountThreadReplies returns the total number of descendants of rootID
+// in the children adjacency map (built by flattenThreadMessages). The
+// root itself is not counted.
+func CountThreadReplies(children map[string][]BrokerMessage, rootID string) int {
+	count := 0
+	for _, child := range children[rootID] {
+		count++
+		count += CountThreadReplies(children, child.ID)
+	}
+	return count
+}
+
+// ThreadParticipants returns the distinct display names of every
+// descendant sender under rootID in walk-order (depth-first, children
+// in slice order). Names are resolved via the package's office
+// directory so a "ceo" slug becomes its display name. The root sender
+// is intentionally excluded — only replies count.
+func ThreadParticipants(children map[string][]BrokerMessage, rootID string) []string {
+	seen := make(map[string]bool)
+	var participants []string
+	var walk func(id string)
+	walk = func(id string) {
+		for _, child := range children[id] {
+			name := DisplayName(child.From)
+			if !seen[name] {
+				seen[name] = true
+				participants = append(participants, name)
+			}
+			walk(child.ID)
+		}
+	}
+	walk(rootID)
+	return participants
+}
