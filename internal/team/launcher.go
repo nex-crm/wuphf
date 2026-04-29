@@ -11,24 +11,19 @@ package team
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"net/http"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/nex-crm/wuphf/internal/action"
 	"github.com/nex-crm/wuphf/internal/agent"
 	"github.com/nex-crm/wuphf/internal/brokeraddr"
 	"github.com/nex-crm/wuphf/internal/channel"
 	"github.com/nex-crm/wuphf/internal/company"
 	"github.com/nex-crm/wuphf/internal/config"
-	"github.com/nex-crm/wuphf/internal/onboarding"
 	"github.com/nex-crm/wuphf/internal/operations"
 	"github.com/nex-crm/wuphf/internal/runtimebin"
 )
@@ -275,18 +270,6 @@ func NewLauncher(packSlug string) (*Launcher, error) {
 	}, nil
 }
 
-// isOnboarded reports whether the user has completed the onboarding wizard.
-// Any error loading state is treated as not-onboarded so a corrupt or
-// missing ~/.wuphf/onboarded.json still lets the web UI boot into the
-// wizard rather than failing at preflight.
-func isOnboarded() bool {
-	s, err := onboarding.Load()
-	if err != nil || s == nil {
-		return false
-	}
-	return s.Onboarded()
-}
-
 // Preflight checks that required tools are available.
 func (l *Launcher) Preflight() error {
 	if l.usesCodexRuntime() {
@@ -332,141 +315,6 @@ const (
 	agentNotifyCooldown      = 1 * time.Second
 	agentNotifyCooldownAgent = 2 * time.Second
 )
-
-func (l *Launcher) watchChannelPaneLoop(channelCmd string) {
-	unhealthyCount := 0
-	var deadSince time.Time
-	snapshotWritten := false
-	for {
-		time.Sleep(2 * time.Second)
-
-		status, err := l.channelPaneStatus()
-		if err != nil {
-			if isNoSessionError(err.Error()) {
-				return
-			}
-			continue
-		}
-		if !channelPaneNeedsRespawn(status) {
-			unhealthyCount = 0
-			deadSince = time.Time{}
-			snapshotWritten = false
-			continue
-		}
-		unhealthyCount++
-		if unhealthyCount < 2 {
-			continue
-		}
-		if deadSince.IsZero() {
-			deadSince = time.Now()
-		}
-		if !snapshotWritten {
-			_ = l.captureDeadChannelPane(status)
-			snapshotWritten = true
-		}
-		if time.Since(deadSince) < channelRespawnDelay {
-			continue
-		}
-		unhealthyCount = 0
-		deadSince = time.Time{}
-		snapshotWritten = false
-		l.panes().RespawnChannelPane(channelCmd, l.cwd)
-	}
-}
-
-func (l *Launcher) channelPaneStatus() (string, error) {
-	return l.panes().ChannelPaneStatus()
-}
-
-// captureDeadChannelPane delegates to paneLifecycle (PLAN.md §C5c).
-func (l *Launcher) captureDeadChannelPane(status string) error {
-	return l.panes().CaptureDeadChannelPane(status)
-}
-
-// primeVisibleAgents clears Claude startup interactivity in newly spawned panes and
-// replays a catch-up channel nudge once they are actually ready to read it.
-// primeVisibleAgents delegates the pane-priming loop to paneLifecycle
-// (PLAN.md §C5e), then runs the launcher-side replay-catchup so the
-// first message that arrived during claude's startup window isn't lost
-// behind the trust prompt.
-func (l *Launcher) primeVisibleAgents() {
-	l.panes().PrimeVisibleAgents()
-	if l.broker == nil {
-		return
-	}
-	msgs := l.broker.Messages()
-	if len(msgs) > 0 {
-		latest := msgs[len(msgs)-1]
-		l.deliverMessageNotification(latest)
-	}
-	l.resumeInFlightWork()
-}
-
-func (l *Launcher) pollOneRelayEventsLoop() {
-	if l.broker == nil {
-		return
-	}
-	provider := action.NewOneCLIFromEnv()
-	if _, err := provider.ListRelays(context.Background(), action.ListRelaysOptions{Limit: 1}); err != nil {
-		return
-	}
-	interval := time.Minute
-	time.Sleep(25 * time.Second)
-	for {
-		l.updateSchedulerJob("one-relay-events", "One relay events", interval, time.Now().UTC(), "running")
-		l.fetchAndRecordOneRelayEvents(provider)
-		l.updateSchedulerJob("one-relay-events", "One relay events", interval, time.Now().UTC().Add(interval), "sleeping")
-		time.Sleep(interval)
-	}
-}
-
-func (l *Launcher) fetchAndRecordOneRelayEvents(provider *action.OneCLI) {
-	if l.broker == nil || provider == nil {
-		return
-	}
-	result, err := provider.ListRelayEvents(context.Background(), action.RelayEventsOptions{Limit: 20})
-	if err != nil {
-		return
-	}
-	if len(result.Events) == 0 {
-		return
-	}
-	var signals []officeSignal
-	for _, event := range result.Events {
-		title := strings.TrimSpace(event.EventType)
-		if title == "" {
-			title = "Relay event"
-		}
-		content := fmt.Sprintf("One relay received %s on %s.", strings.TrimSpace(event.EventType), strings.TrimSpace(event.Platform))
-		signals = append(signals, officeSignal{
-			ID:         strings.TrimSpace(event.ID),
-			Source:     "one",
-			Kind:       "relay_event",
-			Title:      title,
-			Content:    content,
-			Channel:    "general",
-			Owner:      "ceo",
-			Confidence: "medium",
-			Urgency:    "medium",
-		})
-	}
-	records, err := l.broker.RecordSignals(signals)
-	if err != nil || len(records) == 0 {
-		return
-	}
-	for _, record := range records {
-		_ = l.broker.RecordAction(
-			"external_trigger_received",
-			"one",
-			record.Channel,
-			"one",
-			truncateSummary(record.Title+" "+record.Content, 140),
-			record.ID,
-			[]string{record.ID},
-			"",
-		)
-	}
-}
 
 // scheduler returns the watchdog scheduler, lazily constructing it on
 // first access. Constructed nil-safe so tests that build &Launcher{}
@@ -548,15 +396,6 @@ func (l *Launcher) targeter() *officeTargeter {
 		memberProviderKind: l.brokerMemberProviderKind,
 	}
 	return l.targets
-}
-
-// brokerMemberProviderKind reads the per-member provider override from the
-// broker, or "" when no broker is wired or no override is set.
-func (l *Launcher) brokerMemberProviderKind(slug string) string {
-	if l == nil || l.broker == nil {
-		return ""
-	}
-	return l.broker.MemberProviderKind(slug)
 }
 
 // agentPaneSlugs / officeAgentOrder / visibleOfficeMembers /
@@ -991,272 +830,8 @@ func (l *Launcher) claudeCommand(slug, systemPrompt string) (string, error) {
 	), nil
 }
 
-// agentActiveTask returns the first in_progress task owned by the given agent slug.
-// AllTasks() is used so agents working in non-general channels still get their
-// worktree set up correctly.
-func (l *Launcher) agentActiveTask(slug string) *teamTask {
-	if l.broker == nil {
-		return nil
-	}
-	tasks := l.broker.AllTasks()
-	for i := range tasks {
-		if tasks[i].Owner == slug && tasks[i].Status == "in_progress" {
-			return &tasks[i]
-		}
-	}
-	return nil
-}
-
-func (l *Launcher) officeMembersSnapshot() []officeMember {
-	mergePackMembers := func(members []officeMember) []officeMember {
-		if l == nil || l.pack == nil || len(l.pack.Agents) == 0 {
-			return members
-		}
-		bySlug := make(map[string]struct{}, len(members))
-		for _, member := range members {
-			bySlug[member.Slug] = struct{}{}
-		}
-		for _, cfg := range l.pack.Agents {
-			if _, ok := bySlug[cfg.Slug]; ok {
-				continue
-			}
-			member := officeMember{
-				Slug:           cfg.Slug,
-				Name:           cfg.Name,
-				Role:           cfg.Name,
-				Expertise:      append([]string(nil), cfg.Expertise...),
-				Personality:    cfg.Personality,
-				PermissionMode: cfg.PermissionMode,
-				AllowedTools:   append([]string(nil), cfg.AllowedTools...),
-				BuiltIn:        cfg.Slug == l.pack.LeadSlug || cfg.Slug == "ceo",
-			}
-			applyOfficeMemberDefaults(&member)
-			members = append(members, member)
-		}
-		return members
-	}
-	if l.broker != nil {
-		if members := l.broker.OfficeMembers(); len(members) > 0 {
-			return mergePackMembers(members)
-		}
-	}
-	path := defaultBrokerStatePath()
-	data, err := os.ReadFile(path)
-	if err == nil {
-		var state brokerState
-		if json.Unmarshal(data, &state) == nil && len(state.Members) > 0 {
-			for i := range state.Members {
-				applyOfficeMemberDefaults(&state.Members[i])
-			}
-			return state.Members
-		}
-	}
-	if l.pack != nil && len(l.pack.Agents) > 0 {
-		members := make([]officeMember, 0, len(l.pack.Agents))
-		for _, cfg := range l.pack.Agents {
-			member := officeMember{
-				Slug:           cfg.Slug,
-				Name:           cfg.Name,
-				Role:           cfg.Name,
-				Expertise:      append([]string(nil), cfg.Expertise...),
-				Personality:    cfg.Personality,
-				PermissionMode: cfg.PermissionMode,
-				AllowedTools:   append([]string(nil), cfg.AllowedTools...),
-				BuiltIn:        cfg.Slug == l.pack.LeadSlug || cfg.Slug == "ceo",
-			}
-			applyOfficeMemberDefaults(&member)
-			members = append(members, member)
-		}
-		return mergePackMembers(members)
-	}
-	if manifest, err := company.LoadRuntimeManifest(resolveRepoRoot(l.cwd)); err == nil && len(manifest.Members) > 0 {
-		members := make([]officeMember, 0, len(manifest.Members))
-		for _, cfg := range manifest.Members {
-			member := officeMember{
-				Slug:           cfg.Slug,
-				Name:           cfg.Name,
-				Role:           cfg.Role,
-				Expertise:      append([]string(nil), cfg.Expertise...),
-				Personality:    cfg.Personality,
-				PermissionMode: cfg.PermissionMode,
-				AllowedTools:   append([]string(nil), cfg.AllowedTools...),
-				BuiltIn:        cfg.System,
-			}
-			applyOfficeMemberDefaults(&member)
-			members = append(members, member)
-		}
-		return mergePackMembers(members)
-	}
-	return mergePackMembers(defaultOfficeMembers())
-}
-
-// resetManifestToPack overwrites company.json with the members defined in the
-// given legacy pack. Called when the user passes --pack explicitly so the flag
-// remains authoritative over any previously saved company configuration.
-func resetManifestToPack(pack *agent.PackDefinition) error {
-	members := make([]company.MemberSpec, 0, len(pack.Agents))
-	for _, cfg := range pack.Agents {
-		members = append(members, company.MemberSpec{
-			Slug:           cfg.Slug,
-			Name:           cfg.Name,
-			Role:           cfg.Name,
-			Expertise:      append([]string(nil), cfg.Expertise...),
-			Personality:    cfg.Personality,
-			PermissionMode: cfg.PermissionMode,
-			AllowedTools:   append([]string(nil), cfg.AllowedTools...),
-			System:         cfg.Slug == pack.LeadSlug || cfg.Slug == "ceo",
-		})
-	}
-	manifest := company.Manifest{
-		Name:    pack.Name,
-		Lead:    pack.LeadSlug,
-		Members: members,
-	}
-	return company.SaveManifest(manifest)
-}
-
-func resetManifestToOperationBlueprint(repoRoot, blueprintID string) error {
-	manifest := company.Manifest{
-		BlueprintRefs: []company.BlueprintRef{{
-			Kind:   "operation",
-			ID:     blueprintID,
-			Source: "launcher",
-		}},
-	}
-	resolved, ok := company.MaterializeManifest(manifest, repoRoot)
-	if !ok {
-		return fmt.Errorf("materialize operation blueprint %q", blueprintID)
-	}
-	return company.SaveManifest(resolved)
-}
-
-func resolveRepoRoot(start string) string {
-	start = strings.TrimSpace(start)
-	if start == "" {
-		start = "."
-	}
-	current := start
-	for {
-		if _, err := os.Stat(filepath.Join(current, "go.mod")); err == nil {
-			return current
-		}
-		if _, err := os.Stat(filepath.Join(current, "templates")); err == nil {
-			return current
-		}
-		parent := filepath.Dir(current)
-		if parent == current {
-			return start
-		}
-		current = parent
-	}
-}
-
-func loadRunningSessionMode() (string, string) {
-	token := strings.TrimSpace(os.Getenv("WUPHF_BROKER_TOKEN"))
-	if token == "" {
-		return SessionModeOffice, DefaultOneOnOneAgent
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, brokerBaseURL()+"/session-mode", nil)
-	if err != nil {
-		return SessionModeOffice, DefaultOneOnOneAgent
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-
-	client := &http.Client{Timeout: time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return SessionModeOffice, DefaultOneOnOneAgent
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return SessionModeOffice, DefaultOneOnOneAgent
-	}
-
-	var result struct {
-		SessionMode   string `json:"session_mode"`
-		OneOnOneAgent string `json:"one_on_one_agent"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return SessionModeOffice, DefaultOneOnOneAgent
-	}
-	return NormalizeSessionMode(result.SessionMode), NormalizeOneOnOneAgent(result.OneOnOneAgent)
-}
-
-func (l *Launcher) isFocusModeEnabled() bool {
-	if l != nil && l.broker != nil {
-		return l.broker.FocusModeEnabled()
-	}
-	if l == nil {
-		return false
-	}
-	return l.focusMode
-}
-
-// officeMemberBySlug / officeLeadSlug / activeSessionMembers / getAgentName
-// live on officeTargeter (PLAN.md §C2); thin wrappers keep current callers
-// working without a rename sweep.
-func (l *Launcher) officeMemberBySlug(slug string) officeMember {
-	return l.targeter().MemberBySlug(slug)
-}
-
 // officeLeadSlug wrapper deleted by PLAN.md §6 sweep — callers use
 // l.targeter().LeadSlug() directly.
-
-func agentConfigFromMember(member officeMember) agent.AgentConfig {
-	cfg := agent.AgentConfig{
-		Slug:           member.Slug,
-		Name:           member.Name,
-		Expertise:      append([]string(nil), member.Expertise...),
-		Personality:    member.Personality,
-		PermissionMode: member.PermissionMode,
-		AllowedTools:   append([]string(nil), member.AllowedTools...),
-	}
-	if cfg.Name == "" {
-		cfg.Name = humanizeSlug(member.Slug)
-	}
-	if len(cfg.Expertise) == 0 {
-		cfg.Expertise = inferOfficeExpertise(member.Slug, member.Role)
-	}
-	if cfg.Personality == "" {
-		cfg.Personality = inferOfficePersonality(member.Slug, member.Role)
-	}
-	return cfg
-}
-
-func (l *Launcher) activeSessionMembers() []officeMember {
-	return l.targeter().ActiveSessionMembers()
-}
-
-// PackName returns the display name of the pack.
-func (l *Launcher) PackName() string {
-	if l.isOneOnOne() {
-		return "1:1 with " + l.targeter().NameFor(l.oneOnOneAgent())
-	}
-	return "WUPHF Office"
-}
-
-// AgentCount returns the number of agents in the pack.
-func (l *Launcher) AgentCount() int {
-	if l.isOneOnOne() {
-		return 1
-	}
-	return len(l.officeMembersSnapshot())
-}
-
-// filterEnv returns env with the given key removed.
-func filterEnv(env []string, key string) []string {
-	prefix := key + "="
-	out := make([]string, 0, len(env))
-	for _, kv := range env {
-		if !strings.HasPrefix(kv, prefix) {
-			out = append(out, kv)
-		}
-	}
-	return out
-}
 
 // getAgentName wrapper deleted by PLAN.md §6 sweep — callers use
 // l.targeter().NameFor(slug) directly.
