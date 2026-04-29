@@ -290,6 +290,10 @@ var (
 
 	resolveWorkspaceAwaySummary = channelui.ResolveWorkspaceAwaySummary
 	deriveWorkspaceReadiness    = channelui.DeriveWorkspaceReadiness
+
+	buildRecoveryLines        = channelui.BuildRecoveryLines
+	buildRecoveryActionLines  = channelui.BuildRecoveryActionLines
+	buildRecoverySurgeryLines = channelui.BuildRecoverySurgeryLines
 )
 
 // Workspace readiness level consts.

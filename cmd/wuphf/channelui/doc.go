@@ -251,6 +251,16 @@
 //     terminal statuses), CountIsolatedRuntimeTasks (counts tasks
 //     in a "local_worktree" execution mode or with a non-empty
 //     WorktreePath / WorktreeBranch).
+//   - recovery_builders.go — recovery-view section builders:
+//     BuildRecoveryLines (the full recovery view — while-away
+//     card, runtime status card, readiness card, next-step +
+//     highlights strips, and the action / surgery rows; offline
+//     preview message when broker is detached and runtime is
+//     empty), BuildRecoveryActionLines (the "Resume human
+//     decisions" / "Resume active tasks" / "Return to recent
+//     threads" sections wired with click-target metadata), and
+//     BuildRecoverySurgeryLines (the "Transcript surgery"
+//     composer-prefill cards).
 //   - workspace_state.go    — WorkspaceReadinessLevel typed-string
 //   - the three Ready/Warn/Preview consts,
 //     WorkspaceReadinessState struct, WorkspaceUIState struct, and
