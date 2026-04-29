@@ -81,26 +81,6 @@ func runtimeMessagesFromChannel(messages []brokerMessage, limit int) []team.Runt
 	return out
 }
 
-func summarizeAwayRecovery(unreadCount int, recovery team.SessionRecovery) string {
-	parts := make([]string, 0, 3)
-	if focus := trimRecoverySentence(recovery.Focus); focus != "" {
-		parts = append(parts, focus)
-	}
-	if len(recovery.NextSteps) > 0 {
-		if next := trimRecoverySentence(recovery.NextSteps[0]); next != "" {
-			parts = append(parts, "Next: "+next)
-		}
-	}
-	if len(parts) == 0 {
-		return fmt.Sprintf("%d new since you looked. Open /recover for the full summary.", unreadCount)
-	}
-	summary := strings.Join(parts, " ")
-	if unreadCount > 0 {
-		summary = fmt.Sprintf("%d new since you looked. %s", unreadCount, summary)
-	}
-	return truncateText(summary, 120)
-}
-
 func (m channelModel) currentAwaySummary() string {
 	return m.currentWorkspaceUIState().AwaySummary
 }

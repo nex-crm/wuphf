@@ -114,11 +114,6 @@ func resolveWorkspaceAwaySummary(cached string, unreadCount int, recovery team.S
 	return summarizeAwayRecovery(unreadCount, recovery)
 }
 
-func runtimeRequestIsOpen(req team.RuntimeRequest) bool {
-	status := strings.ToLower(strings.TrimSpace(req.Status))
-	return status == "" || status == "pending" || status == "open" || status == "draft"
-}
-
 func deriveWorkspaceReadiness(state workspaceUIState, doctor *channelDoctorReport) workspaceReadinessState {
 	if !state.BrokerConnected {
 		return workspaceReadinessState{
@@ -177,27 +172,6 @@ func deriveWorkspaceReadiness(state workspaceUIState, doctor *channelDoctorRepor
 		Detail:   fmt.Sprintf("The live office runtime is attached and ready for collaboration with %s memory.", state.Memory.ActiveLabel),
 		NextStep: "Use /switcher to move through the office, or /recover to regain context before replying.",
 	}
-}
-
-func firstDoctorNextStep(report channelDoctorReport, fallback string) string {
-	for _, check := range report.Checks {
-		if strings.TrimSpace(check.NextStep) == "" {
-			continue
-		}
-		if check.Severity == doctorFail || check.Severity == doctorWarn {
-			return check.NextStep
-		}
-	}
-	return fallback
-}
-
-func firstWorkspaceString(values ...string) string {
-	for _, value := range values {
-		if trimmed := strings.TrimSpace(value); trimmed != "" {
-			return trimmed
-		}
-	}
-	return ""
 }
 
 func (s workspaceUIState) readinessCard() (title, body, accent string, extra []string) {
@@ -345,27 +319,6 @@ func (s workspaceUIState) sidebarHintLine() string {
 		return "Focus: " + s.Focus
 	default:
 		return "Use /switcher or /recover to move through live office context"
-	}
-}
-
-func sidebarViewLabel(activeApp officeApp) string {
-	switch activeApp {
-	case officeAppRecovery:
-		return "Recovery view"
-	case officeAppTasks:
-		return "Task board"
-	case officeAppRequests:
-		return "Decision queue"
-	case officeAppPolicies:
-		return "Insights view"
-	case officeAppCalendar:
-		return "Calendar view"
-	case officeAppArtifacts:
-		return "Artifacts view"
-	case officeAppSkills:
-		return "Skills view"
-	default:
-		return "Message lane"
 	}
 }
 

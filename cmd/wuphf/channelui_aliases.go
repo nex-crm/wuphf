@@ -272,6 +272,12 @@ var (
 	renderDoctorCard            = channelui.RenderDoctorCard
 	renderDoctorLabel           = channelui.RenderDoctorLabel
 	renderDoctorLifecycle       = channelui.RenderDoctorLifecycle
+
+	summarizeAwayRecovery = channelui.SummarizeAwayRecovery
+	runtimeRequestIsOpen  = channelui.RuntimeRequestIsOpen
+	firstWorkspaceString  = channelui.FirstWorkspaceString
+	sidebarViewLabel      = channelui.SidebarViewLabel
+	firstDoctorNextStep   = channelui.FirstDoctorNextStep
 )
 
 // Doctor severity consts mirror channelui's exported names.

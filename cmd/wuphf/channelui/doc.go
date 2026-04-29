@@ -234,6 +234,14 @@
 //     The team-coupled tea.Cmd entry runDoctorChecks /
 //     inspectDoctor and the test mock-point detectRuntimeCapabilitiesFn
 //     stay in package main.
+//   - workspace_helpers.go — pure / team-typed leaves used by the
+//     workspace state machinery: SummarizeAwayRecovery (the
+//     "while away" one-liner combining unread count + recovery
+//     focus + first next step), RuntimeRequestIsOpen
+//     (open/pending/draft/empty status predicate), the
+//     FirstWorkspaceString chain helper, FirstDoctorNextStep
+//     (first non-empty NextStep on a fail/warn check), and
+//     SidebarViewLabel (OfficeApp → short sidebar summary label).
 //
 // Subsequent extraction PRs will land the workspace / recovery / cache
 // cluster, the sidebar / splash, the broker integrations, and finally
