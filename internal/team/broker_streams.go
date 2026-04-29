@@ -37,8 +37,16 @@ func (s *agentStreamBuffer) subscribe() (<-chan string, func()) {
 	ch := make(chan string, 128)
 	s.subs[id] = ch
 	return ch, func() {
+		// Close the channel after removing it from the map so a
+		// consumer blocked on `<-ch` is unparked instead of leaking.
+		// Matches the pattern used by Broker.SubscribeMessages and
+		// friends. Push() never sends after delete(), so closing here
+		// is race-free.
 		s.mu.Lock()
-		delete(s.subs, id)
+		if existing, ok := s.subs[id]; ok {
+			delete(s.subs, id)
+			close(existing)
+		}
 		s.mu.Unlock()
 	}
 }

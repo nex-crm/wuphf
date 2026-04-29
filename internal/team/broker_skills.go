@@ -332,6 +332,15 @@ func (b *Broker) handlePutSkill(w http.ResponseWriter, r *http.Request) {
 		sk.LastExecutionStatus = status
 	}
 	if s := strings.TrimSpace(body.Status); s != "" {
+		// Don't let PUT /skills smuggle a "proposed" skill into "active"
+		// without going through the human-approval flow that
+		// handlePostSkill action="propose" creates. Approval lives in
+		// handlePostRequestAnswer (skill_proposal kind); allowing this
+		// path to flip the status would let any caller bypass it.
+		if sk.Status == "proposed" && s != "proposed" && s != "archived" {
+			http.Error(w, "proposed skills must be approved or rejected via the request answer flow", http.StatusForbidden)
+			return
+		}
 		sk.Status = s
 	}
 	sk.UpdatedAt = now

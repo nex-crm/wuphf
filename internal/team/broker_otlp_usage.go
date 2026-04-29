@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -90,6 +91,12 @@ type usageEvent struct {
 	CacheReadTokens     int
 	CacheCreationTokens int
 	CostUsd             float64
+	// Timestamp is the OTLP record's nanos-since-epoch when populated;
+	// zero value means "use ingest time at attach time". A delayed or
+	// retried /v1/logs batch can therefore land on the message that was
+	// active when the event happened, not whatever turn is in-flight on
+	// the broker at the moment we receive it.
+	Timestamp time.Time
 }
 
 const messageUsageAttachMaxAge = 15 * time.Minute
@@ -171,7 +178,14 @@ func (b *Broker) attachUsageToRecentMessagesLocked(event usageEvent) {
 	if slug == "" {
 		return
 	}
-	now := time.Now().UTC()
+	// Reference time = the event's wall clock when supplied, else ingest
+	// time. This makes the attach-window predicate compare a delayed/
+	// retried batch against the message that was current when the event
+	// happened, not whatever just got posted on the broker.
+	now := event.Timestamp
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
 	for i := len(b.messages) - 1; i >= 0; i-- {
 		msg := &b.messages[i]
 		if strings.TrimSpace(msg.From) != slug {
@@ -204,7 +218,14 @@ func (b *Broker) RecordAgentUsage(slug, model string, usage provider.ClaudeUsage
 	}
 	b.mu.Lock()
 	b.recordUsageLocked(event)
-	_ = b.saveLocked()
+	// RecordAgentUsage is called from headless launchers that have no
+	// HTTP path to surface a 500. Log the persistence failure so it
+	// shows up in operator logs; in-memory state still reflects the
+	// usage and the next saveLocked call (next message, next request)
+	// will retry the snapshot.
+	if err := b.saveLocked(); err != nil {
+		log.Printf("broker: saveLocked after RecordAgentUsage(%q): %v", slug, err)
+	}
 	b.mu.Unlock()
 }
 
@@ -243,6 +264,7 @@ func parseOTLPUsageEvents(payload map[string]any) []usageEvent {
 					CacheReadTokens:     otlpIntValue(attrs["cache_read_tokens"]),
 					CacheCreationTokens: otlpIntValue(attrs["cache_creation_tokens"]),
 					CostUsd:             otlpFloatValue(attrs["cost_usd"]),
+					Timestamp:           otlpRecordTimestamp(recordMap),
 				})
 			}
 		}
@@ -256,6 +278,27 @@ func nestedMap(m map[string]any, key string) map[string]any {
 	}
 	child, _ := m[key].(map[string]any)
 	return child
+}
+
+// otlpRecordTimestamp extracts the OTLP log record's wall-clock time
+// from the standard `timeUnixNano` / `observedTimeUnixNano` fields.
+// Returns the zero time when neither is present or parseable so callers
+// fall back to ingest time.
+func otlpRecordTimestamp(record map[string]any) time.Time {
+	if record == nil {
+		return time.Time{}
+	}
+	for _, key := range []string{"timeUnixNano", "observedTimeUnixNano"} {
+		raw, ok := record[key]
+		if !ok || raw == nil {
+			continue
+		}
+		nanos := otlpIntValue(fmt.Sprintf("%v", raw))
+		if nanos > 0 {
+			return time.Unix(0, int64(nanos)).UTC()
+		}
+	}
+	return time.Time{}
 }
 
 func otlpAttributesMap(record map[string]any) map[string]string {

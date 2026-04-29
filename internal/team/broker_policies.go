@@ -8,6 +8,12 @@ import (
 	"strings"
 )
 
+// ErrPolicyRuleEmpty is the sentinel returned by RecordPolicy when the
+// caller passes a blank rule. Callers (HTTP handlers) match on it via
+// errors.Is to map the validation case to 400 — a sentinel keeps that
+// dispatch from drifting if the underlying message ever changes.
+var ErrPolicyRuleEmpty = errors.New("rule cannot be empty")
+
 // RecordPolicy adds a new active policy or reactivates an existing one.
 // Deduplicates by case-insensitive rule text — re-recording the same
 // rule (any casing) returns the original record with Active flipped
@@ -15,15 +21,19 @@ import (
 func (b *Broker) RecordPolicy(source, rule string) (officePolicy, error) {
 	rule = strings.TrimSpace(rule)
 	if rule == "" {
-		return officePolicy{}, fmt.Errorf("rule cannot be empty")
+		return officePolicy{}, ErrPolicyRuleEmpty
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	// Dedupe: don't add the same rule twice.
 	for i, p := range b.policies {
 		if strings.EqualFold(p.Rule, rule) {
+			prevActive := b.policies[i].Active
 			b.policies[i].Active = true
 			if err := b.saveLocked(); err != nil {
+				// Roll back the Active flip so the in-memory state
+				// stays consistent with what's persisted on disk.
+				b.policies[i].Active = prevActive
 				return officePolicy{}, fmt.Errorf("persist policy: %w", err)
 			}
 			return b.policies[i], nil
@@ -95,9 +105,11 @@ func (b *Broker) handlePolicies(w http.ResponseWriter, r *http.Request) {
 		}
 		p, err := b.RecordPolicy(body.Source, body.Rule)
 		if err != nil {
-			// "rule cannot be empty" is the only validation-class error
-			// from RecordPolicy; anything else is a persistence failure.
-			if strings.Contains(err.Error(), "rule cannot be empty") {
+			// Validation vs persistence: ErrPolicyRuleEmpty is the only
+			// validation-class error; anything else is a persistence
+			// failure. Match on the sentinel rather than the message
+			// text so a future copy edit can't break this dispatch.
+			if errors.Is(err, ErrPolicyRuleEmpty) {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}

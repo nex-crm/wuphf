@@ -9,7 +9,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/nex-crm/wuphf/internal/agent"
 )
@@ -753,10 +752,16 @@ func TestRecentHumanMessagesLimitCapsResults(t *testing.T) {
 	}
 	b.mu.Unlock()
 
-	// nex is also a human/external sender — all 3 qualify; limit=5 returns all 3.
-	got := b.RecentHumanMessages(5)
-	if len(got) != 3 {
-		t.Fatalf("expected 3 messages (you+you+nex), got %d", len(got))
+	// limit=2 forces truncation: with 3 qualifying messages and a cap of 2,
+	// the cap path actually exercises. Pin the truncated slice to the
+	// most-recent 2 so a regression that returns the FIRST n (instead of
+	// the LAST n) gets caught.
+	got := b.RecentHumanMessages(2)
+	if len(got) != 2 {
+		t.Fatalf("expected limit cap to truncate to 2, got %d", len(got))
+	}
+	if got[0].ID != "m2" || got[1].ID != "m3" {
+		t.Fatalf("expected truncation to keep newest two (m2, m3), got %+v", got)
 	}
 }
 
@@ -842,45 +847,9 @@ func TestPostAutomationMessageDeduplicatesByEventID(t *testing.T) {
 	}
 }
 
-// TestExternalQueueDeduplicatesByMessageID verifies that calling ExternalQueue
-// twice for a surface channel only delivers each message once.
-func TestExternalQueueDeduplicatesByMessageID(t *testing.T) {
-	b := newTestBroker(t)
-
-	// Register a channel with a surface so ExternalQueue has something to scan.
-	b.mu.Lock()
-	b.channels = append(b.channels, teamChannel{
-		Slug:    "slack-general",
-		Name:    "Slack General",
-		Members: []string{"ceo"},
-		Surface: &channelSurface{Provider: "slack"},
-	})
-	b.mu.Unlock()
-
-	// Post a message directly into the broker state (bypassing HTTP) so it lands
-	// in the surface channel without going through PostInboundSurfaceMessage (which
-	// auto-marks as delivered).
-	b.mu.Lock()
-	b.counter++
-	b.messages = append(b.messages, channelMessage{
-		ID:        fmt.Sprintf("msg-%d", b.counter),
-		From:      "you",
-		Channel:   "slack-general",
-		Content:   "Hello from Slack",
-		Timestamp: time.Now().UTC().Format(time.RFC3339),
-	})
-	b.mu.Unlock()
-
-	first := b.ExternalQueue("slack")
-	if len(first) != 1 {
-		t.Fatalf("expected 1 message on first ExternalQueue call, got %d", len(first))
-	}
-
-	second := b.ExternalQueue("slack")
-	if len(second) != 0 {
-		t.Fatalf("expected 0 messages on second ExternalQueue call (already delivered), got %d", len(second))
-	}
-}
+// (TestExternalQueueDeduplicatesByMessageID removed: TestBrokerExternalQueueDeduplication
+// above already covers first-drain/second-drain through the real PostMessage
+// path. Keeping both was duplicate coverage; CodeRabbit flagged the redundancy.)
 
 // ─── Focus mode routing ───────────────────────────────────────────────────
 
@@ -968,9 +937,15 @@ func TestFocusModeRouting_TaggedSpecialistWakesSpecialistOnly(t *testing.T) {
 	}
 }
 
-// TestFocusModeRouting_CollobaborativeUntaggedWakesAll verifies the contrast:
-// without focus mode, an untagged human message wakes all enabled agents.
-func TestFocusModeRouting_CollaborativeUntaggedWakesAll(t *testing.T) {
+// TestFocusModeRouting_CollaborativeUntaggedWakesLead pins the actual
+// collaborative-mode contract for an untagged human message: CEO is the
+// only immediate target. The previous test name implied "wakes all" but
+// the production launcher (notificationTargetsForMessage) only adds the
+// lead plus the task owner (none here) plus explicitly tagged slugs.
+// Rename + assertion match what the code actually does so a real
+// regression to lead-only-on-purpose vs accidental routing change can
+// still be told apart in review.
+func TestFocusModeRouting_CollaborativeUntaggedWakesLead(t *testing.T) {
 	b := newTestBroker(t)
 	b.mu.Lock()
 	b.members = []officeMember{
@@ -1010,15 +985,11 @@ func TestFocusModeRouting_CollaborativeUntaggedWakesAll(t *testing.T) {
 	}
 	immediate, _ := l.notificationTargetsForMessage(msg)
 
-	// In collaborative mode, CEO always wakes for human messages.
-	hasCEO := false
-	for _, target := range immediate {
-		if target.Slug == "ceo" {
-			hasCEO = true
-		}
-	}
-	if !hasCEO {
-		t.Fatalf("collaborative mode: expected CEO in targets, got %v", immediate)
+	// Collaborative mode + untagged human + no task owner = CEO only.
+	// Specialists wake on explicit @-tags or as task owners; an untagged
+	// channel message goes through the lead. Lock that contract here.
+	if len(immediate) != 1 || immediate[0].Slug != "ceo" {
+		t.Fatalf("collaborative mode untagged: expected exactly [ceo], got %v", immediate)
 	}
 }
 

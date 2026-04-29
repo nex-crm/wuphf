@@ -568,6 +568,20 @@ func (b *Broker) handlePostRequestAnswer(w http.ResponseWriter, r *http.Request)
 			http.Error(w, "choice_text or custom_text required", http.StatusBadRequest)
 			return
 		}
+		// Skill proposals carry an irreversible side-effect (activate
+		// vs archive) that hangs off choiceID == "accept". Without an
+		// explicit choice_id, free-text answers fall through to the
+		// archive branch silently — surface that as a 400 instead.
+		if b.requests[i].Kind == "skill_proposal" {
+			switch choiceID {
+			case "accept", "reject":
+				// ok
+			default:
+				b.mu.Unlock()
+				http.Error(w, "skill_proposal answers require choice_id of 'accept' or 'reject'", http.StatusBadRequest)
+				return
+			}
+		}
 		answer := &interviewAnswer{
 			ChoiceID:   choiceID,
 			ChoiceText: choiceText,
@@ -655,7 +669,7 @@ func (b *Broker) unblockTasksForAnsweredRequestLocked(req humanInterview) {
 			continue
 		}
 		haystack := strings.ToLower(strings.TrimSpace(task.Title + "\n" + task.Details))
-		if !strings.Contains(haystack, strings.ToLower(reqID)) {
+		if !taskMentionsRequestID(haystack, strings.ToLower(reqID)) {
 			continue
 		}
 		// Even though the title/details mention the answered request, the
@@ -695,6 +709,43 @@ func (b *Broker) unblockTasksForAnsweredRequestLocked(req humanInterview) {
 			)
 		}
 	}
+}
+
+// taskMentionsRequestID returns true when haystack contains needle as a
+// standalone token. Without the boundary check, "request-1" would match
+// "request-10", letting an answer to request-1 incorrectly unblock tasks
+// that only reference request-10. A token boundary is any non-id-char
+// (anything outside [a-z0-9-_]) or the start/end of the string.
+func taskMentionsRequestID(haystack, needle string) bool {
+	if needle == "" {
+		return false
+	}
+	for {
+		idx := strings.Index(haystack, needle)
+		if idx < 0 {
+			return false
+		}
+		left := idx == 0 || !isRequestIDChar(haystack[idx-1])
+		end := idx + len(needle)
+		right := end == len(haystack) || !isRequestIDChar(haystack[end])
+		if left && right {
+			return true
+		}
+		// Skip one char to keep searching past this rejected match.
+		haystack = haystack[idx+1:]
+	}
+}
+
+func isRequestIDChar(c byte) bool {
+	switch {
+	case c >= 'a' && c <= 'z':
+		return true
+	case c >= '0' && c <= '9':
+		return true
+	case c == '-' || c == '_':
+		return true
+	}
+	return false
 }
 
 func reqAnswerSummary(answer *interviewAnswer) string {

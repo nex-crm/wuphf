@@ -655,6 +655,11 @@ func upgradeChangelogCached(_ context.Context, from, to string) ([]upgradecheck.
 	// See upgradeCheckCached: leader uses broker-owned background ctx
 	// so client cancellations don't kill the shared upstream fetch.
 	v, _, _ := upgradeChangelogFlt.Do(key, func() (any, error) {
+		// upgradeUpstreamTime+3s: GitHub's compare API consistently
+		// runs ~2-3s slower than the npm registry hit used by the
+		// version check. Pad the budget here so a normal-latency
+		// changelog fetch doesn't cancel mid-flight while the version
+		// gate's tighter timeout still bounds the cheaper request.
 		fctx, cancel := context.WithTimeout(context.Background(), upgradeUpstreamTime+3*time.Second)
 		defer cancel()
 		entries, err := upgradecheck.FetchChangelog(fctx, nil, from, to)

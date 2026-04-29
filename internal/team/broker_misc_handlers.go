@@ -191,7 +191,10 @@ func (b *Broker) handleResetDM(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		if isAgent {
-			// Drop agent->human DMs: messages tagged with you/human.
+			// Drop agent->human DMs: messages where the agent explicitly
+			// tagged the human. Anything else (untagged broadcasts,
+			// messages tagged at other agents, channel-wide replies) is
+			// preserved — only the human↔agent thread is being reset.
 			taggedHuman := false
 			for _, t := range msg.Tagged {
 				if t == "you" || t == "human" {
@@ -199,7 +202,7 @@ func (b *Broker) handleResetDM(w http.ResponseWriter, r *http.Request) {
 					break
 				}
 			}
-			if !taggedHuman && len(msg.Tagged) > 0 {
+			if !taggedHuman {
 				filtered = append(filtered, msg)
 				continue
 			}
@@ -238,8 +241,12 @@ func respawnAgentPane(slug string) {
 		if agent.Slug == slug {
 			paneIdx := i + 1 // pane 0 is channel view
 			target := fmt.Sprintf("wuphf-team:team.%d", paneIdx)
-			// Send Ctrl+C to interrupt, then exit to terminate
-			ctx := context.Background()
+			// Bound each tmux call so a stalled socket can't strand the
+			// goroutine that handleResetDM spawned. 5s is generous for a
+			// healthy local tmux server and short enough that an offline
+			// server fails fast.
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
 			_ = exec.CommandContext(ctx, "tmux", "-L", "wuphf", "send-keys", "-t", target, "C-c", "").Run()
 			time.Sleep(500 * time.Millisecond)
 			_ = exec.CommandContext(ctx, "tmux", "-L", "wuphf", "send-keys", "-t", target, "C-c", "").Run()

@@ -879,6 +879,10 @@ func (b *Broker) handleOfficeMembers(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, "failed to persist broker state", http.StatusInternalServerError)
 				return
 			}
+			// Match the create/remove paths so SSE subscribers learn about
+			// updated member metadata (provider switch, name changes,
+			// channel reassignment) instead of waiting for a full reload.
+			b.publishOfficeChangeLocked(officeChangeEvent{Kind: "member_updated", Slug: slug})
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{"member": member})
 		case "remove":
@@ -1290,19 +1294,25 @@ func (b *Broker) handleCreateDM(w http.ResponseWriter, r *http.Request) {
 		created bool
 	)
 	dmType := strings.TrimSpace(strings.ToLower(body.Type))
-	if dmType == "group" && len(body.Members) > 2 {
-		existing, ok := b.channelStore.FindDirectByMembers(body.Members[0], body.Members[1])
-		if !ok || existing == nil {
-			created = true
+	// For group DMs, infer "created" from the group slug — the previous
+	// FindDirectByMembers lookup checked for a 1:1 channel between the
+	// first two members, which has no semantic relationship to whether
+	// the group already existed.
+	groupAlreadyExists := func(members []string) bool {
+		slug := channel.GroupSlug(members)
+		if slug == "" {
+			return false
 		}
+		_, exists := b.channelStore.GetBySlug(slug)
+		return exists
+	}
+	if dmType == "group" && len(body.Members) > 2 {
+		created = !groupAlreadyExists(body.Members)
 		ch, err = b.channelStore.GetOrCreateGroup(body.Members, "human")
 	} else {
 		// Default: direct (1:1). For >2 members use group.
 		if len(body.Members) > 2 {
-			existing, ok := b.channelStore.FindDirectByMembers(body.Members[0], body.Members[1])
-			if !ok || existing == nil {
-				created = true
-			}
+			created = !groupAlreadyExists(body.Members)
 			ch, err = b.channelStore.GetOrCreateGroup(body.Members, "human")
 		} else {
 			// Normalize: find the non-human member for the slug.
@@ -1473,6 +1483,11 @@ func (b *Broker) handleChannelMembers(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "failed to persist broker state", http.StatusInternalServerError)
 			return
 		}
+		// Match the channel-create/update/remove paths: notify SSE
+		// subscribers that the roster changed. Without this, sidebars
+		// and member dialogs keep stale member lists until a full
+		// reload.
+		b.publishOfficeChangeLocked(officeChangeEvent{Kind: "channel_updated", Slug: ch.Slug})
 		state := map[string]any{
 			"channel":  ch.Slug,
 			"members":  ch.Members,

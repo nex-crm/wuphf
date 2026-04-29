@@ -540,9 +540,18 @@ func (b *Broker) handleGetMessages(w http.ResponseWriter, r *http.Request) {
 		threadID = strings.TrimSpace(q.Get("reply_to"))
 	}
 	scope := normalizeMessageScope(q.Get("scope"))
-	if rawScope := strings.TrimSpace(q.Get("scope")); rawScope != "" && scope == "" {
-		http.Error(w, "invalid message scope", http.StatusBadRequest)
-		return
+	if rawScope := strings.ToLower(strings.TrimSpace(q.Get("scope"))); rawScope != "" && scope == "" {
+		// normalizeMessageScope collapses both valid no-filter values
+		// ("all", "channel") and truly-unknown values to "". Accept the
+		// known no-filter aliases here so the wire contract matches the
+		// semantics described in the test cases.
+		switch rawScope {
+		case "all", "channel":
+			// no-filter: leave scope == ""
+		default:
+			http.Error(w, "invalid message scope", http.StatusBadRequest)
+			return
+		}
 	}
 	channel := normalizeChannelSlug(q.Get("channel"))
 	if channel == "" {

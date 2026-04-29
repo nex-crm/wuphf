@@ -245,7 +245,14 @@ func extractStudioOfferNames(offers []any) []string {
 		if !ok {
 			continue
 		}
-		name := strings.TrimSpace(fmt.Sprintf("%v", record["name"]))
+		// Skip when "name" is missing or null — fmt.Sprintf("%v", nil)
+		// returns the literal string "<nil>" which would otherwise leak
+		// into the generated follow-up payload.
+		raw, present := record["name"]
+		if !present || raw == nil {
+			continue
+		}
+		name := strings.TrimSpace(fmt.Sprintf("%v", raw))
 		if name == "" {
 			continue
 		}
