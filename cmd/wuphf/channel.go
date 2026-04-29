@@ -2297,12 +2297,12 @@ func (m channelModel) View() string {
 	} else if m.isOneOnOne() {
 		statusBar = statusBarStyle(m.width).Render(
 			lipgloss.NewStyle().Foreground(lipgloss.Color(slackActive)).Render(
-				workspaceState.defaultStatusLine(scrollHint),
+				workspaceState.DefaultStatusLine(scrollHint),
 			),
 		)
 	} else if !m.brokerConnected {
 		statusBar = statusBarStyle(m.width).Render(
-			lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Render(workspaceState.defaultStatusLine(scrollHint)),
+			lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Render(workspaceState.DefaultStatusLine(scrollHint)),
 		)
 	} else if m.replyToID != "" {
 		statusBar = statusBarStyle(m.width).Render(
@@ -2326,7 +2326,7 @@ func (m channelModel) View() string {
 		)
 	} else {
 		statusBar = statusBarStyle(m.width).Render(
-			lipgloss.NewStyle().Foreground(lipgloss.Color(slackActive)).Render(workspaceState.defaultStatusLine(scrollHint)),
+			lipgloss.NewStyle().Foreground(lipgloss.Color(slackActive)).Render(workspaceState.DefaultStatusLine(scrollHint)),
 		)
 	}
 
@@ -2407,7 +2407,7 @@ func (m channelModel) currentHeaderMeta() string {
 		return "  " + strings.Join(parts, " · ")
 	}
 	if m.isOneOnOne() {
-		return workspace.headerMeta()
+		return workspace.HeaderMeta()
 	}
 	switch m.activeApp {
 	case officeAppInbox:
@@ -2506,7 +2506,7 @@ func (m channelModel) currentHeaderMeta() string {
 		}
 		return "  " + summary
 	default:
-		return workspace.headerMeta()
+		return workspace.HeaderMeta()
 	}
 }
 

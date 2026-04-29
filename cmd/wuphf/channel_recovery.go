@@ -74,7 +74,7 @@ func buildRecoveryLines(workspace workspaceUIState, contentWidth int, tasks []ch
 		lines = append(lines, renderedLine{Text: "  " + line})
 	}
 
-	readinessTitle, readinessBody, readinessAccent, readinessExtra := workspace.readinessCard()
+	readinessTitle, readinessBody, readinessAccent, readinessExtra := workspace.ReadinessCard()
 	for _, line := range renderRuntimeEventCard(contentWidth, readinessTitle, readinessBody, readinessAccent, readinessExtra) {
 		lines = append(lines, renderedLine{Text: "  " + line})
 	}

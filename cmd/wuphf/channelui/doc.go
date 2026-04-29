@@ -251,6 +251,17 @@
 //     terminal statuses), CountIsolatedRuntimeTasks (counts tasks
 //     in a "local_worktree" execution mode or with a non-empty
 //     WorktreePath / WorktreeBranch).
+//   - workspace_state.go    — WorkspaceReadinessLevel typed-string
+//   - the three Ready/Warn/Preview consts,
+//     WorkspaceReadinessState struct, WorkspaceUIState struct, and
+//     the workspace-state machinery: ResolveWorkspaceAwaySummary,
+//     DeriveWorkspaceReadiness, ReadinessCard / NeedsYouLines /
+//     HeaderMeta / DefaultStatusLine / SidebarSummaryLine /
+//     SidebarHintLine method receivers. Imports internal/config
+//     for the memory-backend-kind consts and internal/team for
+//     RuntimeSnapshot / SessionRecovery / MemoryBackendStatus.
+//     The channelModel.currentWorkspaceUIState() builder stays in
+//     package main since it touches private channelModel fields.
 //
 // Subsequent extraction PRs will land the workspace / recovery / cache
 // cluster, the sidebar / splash, the broker integrations, and finally

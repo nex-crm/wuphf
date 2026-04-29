@@ -59,8 +59,8 @@ func renderSidebar(channels []channelInfo, members []channelMember, tasks []chan
 		workspaceHintStyle = workspaceHintStyle.Foreground(lipgloss.Color("#D1FAE5"))
 	}
 
-	summaryLine := truncateLabel(workspace.sidebarSummaryLine(activeApp), maxInt(8, innerW-1))
-	hintLine := truncateLabel(workspace.sidebarHintLine(), maxInt(8, innerW-1))
+	summaryLine := truncateLabel(workspace.SidebarSummaryLine(activeApp), maxInt(8, innerW-1))
+	hintLine := truncateLabel(workspace.SidebarHintLine(), maxInt(8, innerW-1))
 
 	var lines []string
 	lines = append(lines, "")

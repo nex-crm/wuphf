@@ -11,40 +11,43 @@ import "github.com/nex-crm/wuphf/cmd/wuphf/channelui"
 // The aliases will be removed once the channel cluster fully lives in
 // channelui (final cleanup PR).
 type (
-	officeApp              = channelui.OfficeApp
-	brokerReaction         = channelui.BrokerReaction
-	brokerMessageUsage     = channelui.BrokerMessageUsage
-	brokerMessage          = channelui.BrokerMessage
-	renderedLine           = channelui.RenderedLine
-	threadedMessage        = channelui.ThreadedMessage
-	layoutDimensions       = channelui.LayoutDimensions
-	officeMemberInfo       = channelui.OfficeMember
-	channelMember          = channelui.Member
-	channelInfo            = channelui.ChannelInfo
-	channelInterviewOption = channelui.InterviewOption
-	channelInterview       = channelui.Interview
-	channelUsageTotals     = channelui.UsageTotals
-	channelUsageState      = channelui.UsageState
-	channelTask            = channelui.Task
-	channelAction          = channelui.Action
-	channelSignal          = channelui.Signal
-	channelDecision        = channelui.Decision
-	channelWatchdog        = channelui.Watchdog
-	channelSchedulerJob    = channelui.SchedulerJob
-	channelSkill           = channelui.Skill
-	calendarRange          = channelui.CalendarRange
-	calendarEvent          = channelui.CalendarEvent
-	recoverySurgeryOption  = channelui.RecoverySurgeryOption
-	channelInterviewPhase  = channelui.InterviewPhase
-	memberActivity         = channelui.MemberActivity
-	officeCharacter        = channelui.OfficeCharacter
-	channelConfirmAction   = channelui.ChannelConfirmAction
-	channelConfirm         = channelui.ChannelConfirm
-	composerPopupOption    = channelui.ComposerPopupOption
-	officeSidebarApp       = channelui.OfficeSidebarApp
-	doctorSeverity         = channelui.DoctorSeverity
-	doctorCheck            = channelui.DoctorCheck
-	channelDoctorReport    = channelui.DoctorReport
+	officeApp               = channelui.OfficeApp
+	brokerReaction          = channelui.BrokerReaction
+	brokerMessageUsage      = channelui.BrokerMessageUsage
+	brokerMessage           = channelui.BrokerMessage
+	renderedLine            = channelui.RenderedLine
+	threadedMessage         = channelui.ThreadedMessage
+	layoutDimensions        = channelui.LayoutDimensions
+	officeMemberInfo        = channelui.OfficeMember
+	channelMember           = channelui.Member
+	channelInfo             = channelui.ChannelInfo
+	channelInterviewOption  = channelui.InterviewOption
+	channelInterview        = channelui.Interview
+	channelUsageTotals      = channelui.UsageTotals
+	channelUsageState       = channelui.UsageState
+	channelTask             = channelui.Task
+	channelAction           = channelui.Action
+	channelSignal           = channelui.Signal
+	channelDecision         = channelui.Decision
+	channelWatchdog         = channelui.Watchdog
+	channelSchedulerJob     = channelui.SchedulerJob
+	channelSkill            = channelui.Skill
+	calendarRange           = channelui.CalendarRange
+	calendarEvent           = channelui.CalendarEvent
+	recoverySurgeryOption   = channelui.RecoverySurgeryOption
+	channelInterviewPhase   = channelui.InterviewPhase
+	memberActivity          = channelui.MemberActivity
+	officeCharacter         = channelui.OfficeCharacter
+	channelConfirmAction    = channelui.ChannelConfirmAction
+	channelConfirm          = channelui.ChannelConfirm
+	composerPopupOption     = channelui.ComposerPopupOption
+	officeSidebarApp        = channelui.OfficeSidebarApp
+	doctorSeverity          = channelui.DoctorSeverity
+	doctorCheck             = channelui.DoctorCheck
+	channelDoctorReport     = channelui.DoctorReport
+	workspaceReadinessLevel = channelui.WorkspaceReadinessLevel
+	workspaceReadinessState = channelui.WorkspaceReadinessState
+	workspaceUIState        = channelui.WorkspaceUIState
 )
 
 // Function aliases keep the lowercase names callable from package main
@@ -284,6 +287,16 @@ var (
 	runtimeMessagesFromChannel = channelui.RuntimeMessagesFromChannel
 	countRunningRuntimeTasks   = channelui.CountRunningRuntimeTasks
 	countIsolatedRuntimeTasks  = channelui.CountIsolatedRuntimeTasks
+
+	resolveWorkspaceAwaySummary = channelui.ResolveWorkspaceAwaySummary
+	deriveWorkspaceReadiness    = channelui.DeriveWorkspaceReadiness
+)
+
+// Workspace readiness level consts.
+const (
+	workspaceReadinessReady   = channelui.WorkspaceReadinessReady
+	workspaceReadinessWarn    = channelui.WorkspaceReadinessWarn
+	workspaceReadinessPreview = channelui.WorkspaceReadinessPreview
 )
 
 // Doctor severity consts mirror channelui's exported names.
