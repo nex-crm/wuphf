@@ -198,6 +198,19 @@ type humanInterview struct {
 	CreatedAt     string            `json:"created_at"`
 	UpdatedAt     string            `json:"updated_at,omitempty"`
 	Answered      *interviewAnswer  `json:"answered,omitempty"`
+	// Metadata carries small structured payloads the UI parses to drive
+	// kind-specific affordances (PR 7 task #15). Known keys:
+	//   enhances_slug      string             — set on enhance_skill_proposal
+	//   similar_to_existing *SkillSimilarRef  — set on ambiguous skill_proposal
+	// New keys may be added freely; consumers must tolerate unknown keys.
+	Metadata map[string]any `json:"metadata,omitempty"`
+	// EnhanceCandidate carries the full candidate teamSkill that the
+	// similarity gate diverted to enhance-existing (PR 7 task #15). Only
+	// set on enhance_skill_proposal interviews; nil otherwise. Stored as a
+	// typed pointer rather than via Metadata so the answer handler can
+	// replay the candidate spec through writeSkillProposalLocked when the
+	// human chooses "approve_anyway".
+	EnhanceCandidate *teamSkill `json:"enhance_candidate,omitempty"`
 }
 
 type teamTask struct {
@@ -430,8 +443,14 @@ type teamSkill struct {
 	// route it). Round-trips through the same chain as SourceArticles:
 	// specToTeamSkill -> writeSkillProposalLocked -> teamSkillToFrontmatter.
 	OwnerAgents []string `json:"owner_agents,omitempty"`
-	CreatedAt   string   `json:"created_at"`
-	UpdatedAt   string   `json:"updated_at"`
+	// SimilarToExisting flags ambiguous-band proposals (PR 7 task #15).
+	// Populated by writeSkillProposalLocked when the similarity gate found a
+	// near-match but not close enough to divert to enhance_existing. The
+	// Skills app reads this via /skills JSON to render an "this looks
+	// similar to <existing>" banner without a second round-trip to the wiki.
+	SimilarToExisting *SkillSimilarRef `json:"similar_to_existing,omitempty"`
+	CreatedAt         string           `json:"created_at"`
+	UpdatedAt         string           `json:"updated_at"`
 }
 
 type brokerState struct {
@@ -10651,6 +10670,29 @@ func (b *Broker) handlePostRequestAnswer(w http.ResponseWriter, r *http.Request)
 			}
 		}
 
+		// Enhance interview dispatch (PR 7 task #15). Three decisions:
+		//   enhance         — fold into the existing skill (UI drives edit flow);
+		//                     bump EnhancementAcceptedTotal.
+		//   approve_anyway  — bypass the similarity gate and write the candidate
+		//                     as a normal proposed skill via the unified write
+		//                     funnel; bump EnhancementOverriddenTotal.
+		//   reject          — drop the candidate (no-op at broker level, just log).
+		if b.requests[i].Kind == "enhance_skill_proposal" {
+			switch choiceID {
+			case "enhance":
+				atomic.AddInt64(&b.skillCompileMetrics.EnhancementAcceptedTotal, 1)
+			case "approve_anyway":
+				atomic.AddInt64(&b.skillCompileMetrics.EnhancementOverriddenTotal, 1)
+				if cand := b.requests[i].EnhanceCandidate; cand != nil {
+					if _, writeErr := b.writeSkillProposalWithOptsLocked(*cand, proposalOpts{bypassSimilarity: true}); writeErr != nil {
+						log.Printf("enhance_skill_proposal: approve_anyway write failed for %q: %v", cand.Name, writeErr)
+					}
+				} else {
+					log.Printf("enhance_skill_proposal: approve_anyway with nil EnhanceCandidate for interview %s", b.requests[i].ID)
+				}
+			}
+		}
+
 		b.counter++
 		msg := channelMessage{
 			ID:        fmt.Sprintf("msg-%d", b.counter),
@@ -10921,6 +10963,68 @@ func skillSlug(name string) string {
 	return s
 }
 
+// listSkillsOpts controls listSkillsForAgentLocked filtering.
+type listSkillsOpts struct {
+	// activeOnly drops anything whose Status is not "active". When false, every
+	// non-tombstoned skill is returned (including proposed/archived/disabled).
+	activeOnly bool
+}
+
+// canAgentSeeSkillLocked is the canonical visibility predicate for per-agent
+// skill scoping (PR 7). The caller MUST hold b.mu.
+//
+// An agent sees a skill when either:
+//   - the agent slug (case-insensitive, trimmed) appears in sk.OwnerAgents, OR
+//   - sk.OwnerAgents is empty AND the agent slug equals the office lead slug
+//     (the lead-routable, shared-skill default — back-compat with skills that
+//     pre-date the OwnerAgents field).
+//
+// Status is intentionally ignored here so the predicate stays orthogonal to
+// active/disabled/archived filtering. Callers that want only active skills
+// pass listSkillsOpts{activeOnly: true} to listSkillsForAgentLocked, or apply
+// their own status check after the visibility gate.
+func (b *Broker) canAgentSeeSkillLocked(slug string, sk *teamSkill) bool {
+	if sk == nil {
+		return false
+	}
+	want := strings.ToLower(strings.TrimSpace(slug))
+	if want == "" {
+		return false
+	}
+	if len(sk.OwnerAgents) == 0 {
+		lead := strings.ToLower(strings.TrimSpace(officeLeadSlugFrom(b.members)))
+		return lead != "" && lead == want
+	}
+	for _, owner := range sk.OwnerAgents {
+		if strings.ToLower(strings.TrimSpace(owner)) == want {
+			return true
+		}
+	}
+	return false
+}
+
+// listSkillsForAgentLocked returns the subset of b.skills visible to slug,
+// sorted by Name lexicographically so catalog injection in buildPrompt produces
+// byte-identical output across calls (cache stability). The caller MUST hold
+// b.mu.
+func (b *Broker) listSkillsForAgentLocked(slug string, opts listSkillsOpts) []teamSkill {
+	out := make([]teamSkill, 0, len(b.skills))
+	for i := range b.skills {
+		sk := &b.skills[i]
+		if opts.activeOnly && sk.Status != "active" {
+			continue
+		}
+		if !b.canAgentSeeSkillLocked(slug, sk) {
+			continue
+		}
+		out = append(out, *sk)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].Name < out[j].Name
+	})
+	return out
+}
+
 func (b *Broker) findSkillByNameLocked(name string) *teamSkill {
 	slug := skillSlug(name)
 	for i := range b.skills {
@@ -10946,11 +11050,19 @@ func (b *Broker) findSkillByWorkflowKeyLocked(key string) *teamSkill {
 
 func (b *Broker) handleGetSkills(w http.ResponseWriter, r *http.Request) {
 	channelFilter := normalizeChannelSlug(r.URL.Query().Get("channel"))
+	// PR 7 follow-up: opt-in flags so the Skills app can request the full
+	// catalog (proposed + active + disabled + archived) without breaking
+	// older consumers that expect the active+proposed+disabled subset.
+	// include_disabled is currently a no-op — disabled skills already pass
+	// through this handler — but it's wired now so a future filter change
+	// has a stable opt-in surface.
+	includeArchived := truthyQuery(r.URL.Query().Get("include_archived"))
+	_ = truthyQuery(r.URL.Query().Get("include_disabled"))
 
 	b.mu.Lock()
 	result := make([]teamSkill, 0, len(b.skills))
 	for _, sk := range b.skills {
-		if sk.Status == "archived" {
+		if sk.Status == "archived" && !includeArchived {
 			continue
 		}
 		if channelFilter != "" && normalizeChannelSlug(sk.Channel) != channelFilter {
@@ -10962,6 +11074,16 @@ func (b *Broker) handleGetSkills(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"skills": result})
+}
+
+// truthyQuery accepts any of "1", "true", "yes" (case-insensitive) as true.
+// Anything else, including empty, is false.
+func truthyQuery(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "1", "true", "yes":
+		return true
+	}
+	return false
 }
 
 func (b *Broker) handlePostSkill(w http.ResponseWriter, r *http.Request) {
@@ -11076,7 +11198,7 @@ func (b *Broker) handlePostSkill(w http.ResponseWriter, r *http.Request) {
 	})
 	b.appendActionLocked(msgKind, "office", channel, sk.CreatedBy, truncateSummary(sk.Title, 140), sk.ID)
 	if action == "propose" {
-		b.appendSkillProposalRequestLocked(sk, channel, now)
+		b.appendSkillProposalRequestLocked(sk, channel, now, "")
 	}
 
 	if err := b.saveLocked(); err != nil {
@@ -11296,9 +11418,26 @@ func (b *Broker) handleInvokeSkill(w http.ResponseWriter, r *http.Request) {
 
 	// Security fix (Codex T3): only active skills may be invoked. Proposed or
 	// archived skills must not be executable — proposed means unapproved,
-	// archived means intentionally retired.
+	// archived means intentionally retired. Disabled (PR 7 step 4) is a
+	// reversible pause and gets a structured 403 so callers can distinguish
+	// it from the unrecoverable "not active" case.
+	if sk.Status == "disabled" {
+		writeSkillForbidden(w, "disabled", sk, b.members,
+			"skill is disabled — re-enable it from the Skills app to invoke")
+		return
+	}
 	if sk.Status != "active" {
 		http.Error(w, "skill not active (status="+sk.Status+")", http.StatusForbidden)
+		return
+	}
+
+	// PR 7: per-agent visibility gate. The invoker must be in sk.OwnerAgents,
+	// or sk.OwnerAgents must be empty AND the invoker must be the office lead
+	// (lead-routable shared skills). Returning a structured body lets the LLM
+	// caller delegate the request via team_broadcast instead of guessing.
+	if !b.canAgentSeeSkillLocked(strings.TrimSpace(body.InvokedBy), sk) {
+		writeSkillForbidden(w, "not_owner", sk, b.members,
+			"team_broadcast tag the listed agents or hand off the task")
 		return
 	}
 
@@ -11354,6 +11493,35 @@ func (b *Broker) handleInvokeSkill(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
+// writeSkillForbidden emits the structured 403 body that handleInvokeSkill
+// returns when a skill is disabled or invisible to the caller. The body
+// shape lets LLM clients route the request elsewhere instead of retrying.
+//
+//	{
+//	  "ok": false,
+//	  "error": "<reason>",          // "not_owner" | "disabled"
+//	  "delegate_to": ["agent-slug"], // sk.OwnerAgents, or [leadSlug] if empty
+//	  "hint": "<human-readable next step>"
+//	}
+func writeSkillForbidden(w http.ResponseWriter, reason string, sk *teamSkill, members []officeMember, hint string) {
+	delegateTo := append([]string(nil), sk.OwnerAgents...)
+	if len(delegateTo) == 0 {
+		if lead := strings.TrimSpace(officeLeadSlugFrom(members)); lead != "" {
+			delegateTo = []string{lead}
+		} else {
+			delegateTo = []string{}
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusForbidden)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"ok":          false,
+		"error":       reason,
+		"delegate_to": delegateTo,
+		"hint":        hint,
+	})
+}
+
 // createSkillRunTaskLocked dispatches a task so the office lead picks up and
 // executes the skill. Caller must hold b.mu. Returns the new task ID.
 func (b *Broker) createSkillRunTaskLocked(sk *teamSkill, channel, invoker, now string) (string, error) {
@@ -11404,7 +11572,13 @@ func (b *Broker) createSkillRunTaskLocked(sk *teamSkill, channel, invoker, now s
 	return task.ID, nil
 }
 
-func (b *Broker) appendSkillProposalRequestLocked(skill teamSkill, channel, now string) {
+// appendSkillProposalRequestLocked appends a human interview for an
+// incoming skill proposal. When enhancesSlug is non-empty, the interview is
+// emitted with kind="enhance_skill_proposal" and the framing is adapted so
+// the human reviews whether to fold the candidate into the existing skill
+// (PR 7 task #13). Otherwise the legacy kind="skill_proposal" + "Activate
+// it?" framing is preserved.
+func (b *Broker) appendSkillProposalRequestLocked(skill teamSkill, channel, now string, enhancesSlug string) {
 	title := strings.TrimSpace(skill.Title)
 	if title == "" {
 		title = strings.TrimSpace(skill.Name)
@@ -11415,23 +11589,64 @@ func (b *Broker) appendSkillProposalRequestLocked(skill teamSkill, channel, now 
 		createdBy = "system"
 	}
 	b.counter++
+	enhancesSlug = strings.TrimSpace(enhancesSlug)
+	kind := "skill_proposal"
+	titleLine := "Approve skill: " + title
+	question := fmt.Sprintf("@%s proposed skill **%s**: %s\n\nActivate it?", createdBy, title, description)
+	if enhancesSlug != "" {
+		kind = "enhance_skill_proposal"
+		titleLine = fmt.Sprintf("Enhance %q with new content", enhancesSlug)
+		question = fmt.Sprintf("@%s drafted **%s**, but it looks similar to existing skill **%s**.\n\n%s\n\nFold this into %s, or create %s as a separate skill?",
+			createdBy, title, enhancesSlug, description, enhancesSlug, title)
+	}
 	interview := humanInterview{
 		ID:        fmt.Sprintf("request-%d", b.counter),
-		Kind:      "skill_proposal",
+		Kind:      kind,
 		Status:    "pending",
 		From:      createdBy,
 		Channel:   normalizeChannelSlug(channel),
-		Title:     "Approve skill: " + title,
-		Question:  fmt.Sprintf("@%s proposed skill **%s**: %s\n\nActivate it?", createdBy, title, description),
+		Title:     titleLine,
+		Question:  question,
 		ReplyTo:   strings.TrimSpace(skill.Name),
 		Blocking:  false,
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
-	interview.Options, interview.RecommendedID = normalizeRequestOptions(interview.Kind, "accept", []interviewOption{
-		{ID: "accept", Label: "Accept"},
-		{ID: "reject", Label: "Reject"},
-	})
+	// Three-option contract for enhance interviews; two-option for the
+	// legacy skill_proposal kind (PR 7 task #15). The recommended action
+	// for an enhance proposal is "enhance" — the gate's whole point is to
+	// nudge the human away from creating a near-duplicate.
+	if enhancesSlug != "" {
+		interview.Options, interview.RecommendedID = normalizeRequestOptions(interview.Kind, "enhance", []interviewOption{
+			{ID: "enhance", Label: "Enhance existing", Description: fmt.Sprintf("Fold this into %s. The candidate is dropped.", enhancesSlug)},
+			{ID: "approve_anyway", Label: "Approve anyway", Description: "Bypass the similarity gate and create a new skill."},
+			{ID: "reject", Label: "Reject", Description: "Drop this draft. The existing skill stays unchanged."},
+		})
+		// Stash the structured metadata + the candidate spec so the answer
+		// handler can replay the candidate through writeSkillProposalLocked
+		// when the human picks "approve_anyway".
+		if interview.Metadata == nil {
+			interview.Metadata = make(map[string]any, 1)
+		}
+		interview.Metadata["enhances_slug"] = enhancesSlug
+		candidate := skill
+		interview.EnhanceCandidate = &candidate
+	} else {
+		interview.Options, interview.RecommendedID = normalizeRequestOptions(interview.Kind, "accept", []interviewOption{
+			{ID: "accept", Label: "Accept"},
+			{ID: "reject", Label: "Reject"},
+		})
+		// For ambiguous-band proposals the candidate WAS written and lands
+		// in b.skills with SimilarToExisting populated. Mirror that ref into
+		// the interview Metadata so the UI doesn't have to walk the skill
+		// list to render the "looks similar to <existing>" banner.
+		if skill.SimilarToExisting != nil {
+			if interview.Metadata == nil {
+				interview.Metadata = make(map[string]any, 1)
+			}
+			interview.Metadata["similar_to_existing"] = *skill.SimilarToExisting
+		}
+	}
 	b.requests = append(b.requests, interview)
 }
 

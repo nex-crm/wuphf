@@ -100,6 +100,15 @@ func (b *Broker) handleSkillsCRUDSubpath(w http.ResponseWriter, r *http.Request)
 	case "reject":
 		b.handleSkillReject(w, r, name)
 		return true
+	case "disable":
+		b.handleSkillDisable(w, r, name)
+		return true
+	case "enable":
+		b.handleSkillEnable(w, r, name)
+		return true
+	case "restore":
+		b.handleSkillRestore(w, r, name)
+		return true
 	}
 	return false
 }
@@ -270,6 +279,11 @@ func (b *Broker) handleSkillEdit(w http.ResponseWriter, r *http.Request, name st
 	if d := strings.TrimSpace(fm.Description); d != "" {
 		sk.Description = d
 	}
+	// PR 7 follow-up (E2E P2): propagate OwnerAgents from parsed frontmatter
+	// so a PUT can rescope a skill. validateOwnerAgentsLocked enforces the
+	// same slug-regex + member-existence checks the write path uses; unknown
+	// or malformed entries are dropped with WARN, never errored.
+	sk.OwnerAgents = b.validateOwnerAgentsLocked(sk.Name, fm.Metadata.Wuphf.OwnerAgents)
 	sk.Content = parsedBody
 	sk.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 	skCopy := *sk
@@ -342,6 +356,10 @@ func (b *Broker) handleSkillArchive(w http.ResponseWriter, r *http.Request, name
 		channel = "general"
 	}
 	b.appendActionLocked("skill_archived", "office", channel, skCopy.CreatedBy, truncateSummary(skCopy.Title+" [archived]", 140), skCopy.ID)
+	// Drain any pending skill_proposal interview entries so an archive
+	// triggered while a proposal is still in the queue doesn't leave the
+	// human-interview list cluttered with orphan entries.
+	b.drainSkillProposalRequestsLocked(skCopy.Name, "archive", skCopy.UpdatedAt)
 	wikiWorker := b.wikiWorker
 	wikiPath := skillWikiPath(skCopy.Name)
 	b.mu.Unlock()
@@ -366,6 +384,197 @@ func (b *Broker) handleSkillArchive(w http.ResponseWriter, r *http.Request, name
 		slog.Warn("handleSkillArchive: saveLocked failed", "name", skCopy.Name, "err", saveErr)
 	}
 	b.mu.Unlock()
+
+	writeJSON(w, http.StatusOK, map[string]any{"skill": skCopy})
+}
+
+// handleSkillDisable flips an active skill to status="disabled". Disabled
+// skills stay visible in the Skills app (collapsed under a "Disabled"
+// section) and stay scoped to their owners, but the catalog injector skips
+// them and handleInvokeSkill returns a structured 403 with reason="disabled".
+// Mirrors handleSkillArchive's frontmatter-rewrite + state-persist pattern.
+func (b *Broker) handleSkillDisable(w http.ResponseWriter, r *http.Request, name string) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var body struct {
+		Reason string `json:"reason,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil && !errors.Is(err, io.EOF) {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	b.mu.Lock()
+	sk := b.findSkillByNameLocked(name)
+	if sk == nil {
+		b.mu.Unlock()
+		http.Error(w, "skill not found", http.StatusNotFound)
+		return
+	}
+	if sk.Status != "active" {
+		status := sk.Status
+		b.mu.Unlock()
+		http.Error(w, fmt.Sprintf("skill not in active status (status=%s)", status), http.StatusConflict)
+		return
+	}
+	sk.Status = "disabled"
+	sk.UpdatedAt = now
+	skCopy := *sk
+
+	channel := normalizeChannelSlug(skCopy.Channel)
+	if channel == "" {
+		channel = "general"
+	}
+	actor := strings.TrimSpace(skCopy.CreatedBy)
+	if actor == "" {
+		actor = "system"
+	}
+	b.appendActionLocked("skill_disabled", "office", channel, actor, truncateSummary(skCopy.Title+" [disabled]", 140), skCopy.ID)
+	// Drain any pending skill_proposal interview entries — same hygiene as
+	// approve/reject. A skill can only be disabled after it was approved, so
+	// in practice nothing matches; the call is cheap and keeps the four
+	// status-changing handlers symmetric.
+	b.drainSkillProposalRequestsLocked(skCopy.Name, "disable", now)
+
+	fm := teamSkillToFrontmatter(skCopy)
+	mdBytes, renderErr := RenderSkillMarkdown(fm, skCopy.Content)
+	wikiWorker := b.wikiWorker
+	wikiPath := skillWikiPath(skCopy.Name)
+	if saveErr := b.saveLocked(); saveErr != nil {
+		slog.Warn("handleSkillDisable: saveLocked failed", "name", skCopy.Name, "err", saveErr)
+	}
+	b.mu.Unlock()
+
+	if wikiWorker != nil && renderErr == nil {
+		commitMsg := "wuphf: disable skill " + skCopy.Name
+		if r := strings.TrimSpace(body.Reason); r != "" {
+			commitMsg += " — " + r
+		}
+		if _, _, err := wikiWorker.Enqueue(context.Background(), skCopy.Name, wikiPath, string(mdBytes), "replace", commitMsg); err != nil {
+			slog.Warn("handleSkillDisable: wiki enqueue failed", "name", skCopy.Name, "err", err)
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"skill": skCopy})
+}
+
+// handleSkillEnable flips a disabled skill back to status="active". This is
+// the recoverable counterpart to disable — no undo token, no toast: clicking
+// Enable in the UI is itself the undo for a Disable.
+func (b *Broker) handleSkillEnable(w http.ResponseWriter, r *http.Request, name string) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	b.mu.Lock()
+	sk := b.findSkillByNameLocked(name)
+	if sk == nil {
+		b.mu.Unlock()
+		http.Error(w, "skill not found", http.StatusNotFound)
+		return
+	}
+	if sk.Status != "disabled" {
+		status := sk.Status
+		b.mu.Unlock()
+		http.Error(w, fmt.Sprintf("skill not in disabled status (status=%s)", status), http.StatusConflict)
+		return
+	}
+	sk.Status = "active"
+	sk.UpdatedAt = now
+	skCopy := *sk
+
+	channel := normalizeChannelSlug(skCopy.Channel)
+	if channel == "" {
+		channel = "general"
+	}
+	actor := strings.TrimSpace(skCopy.CreatedBy)
+	if actor == "" {
+		actor = "system"
+	}
+	b.appendActionLocked("skill_enabled", "office", channel, actor, truncateSummary(skCopy.Title+" [enabled]", 140), skCopy.ID)
+
+	fm := teamSkillToFrontmatter(skCopy)
+	mdBytes, renderErr := RenderSkillMarkdown(fm, skCopy.Content)
+	wikiWorker := b.wikiWorker
+	wikiPath := skillWikiPath(skCopy.Name)
+	if saveErr := b.saveLocked(); saveErr != nil {
+		slog.Warn("handleSkillEnable: saveLocked failed", "name", skCopy.Name, "err", saveErr)
+	}
+	b.mu.Unlock()
+
+	if wikiWorker != nil && renderErr == nil {
+		if _, _, err := wikiWorker.Enqueue(context.Background(), skCopy.Name, wikiPath, string(mdBytes), "replace", "wuphf: enable skill "+skCopy.Name); err != nil {
+			slog.Warn("handleSkillEnable: wiki enqueue failed", "name", skCopy.Name, "err", err)
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"skill": skCopy})
+}
+
+// handleSkillRestore flips an archived skill back to status="proposed" so the
+// human re-confirms the skill before it becomes invocable again. Powers the
+// archive-undo flow on the Skills app card. findSkillByNameLocked filters out
+// archived, so we scan b.skills directly.
+func (b *Broker) handleSkillRestore(w http.ResponseWriter, r *http.Request, name string) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	target := skillSlug(name)
+
+	b.mu.Lock()
+	var sk *teamSkill
+	for i := range b.skills {
+		if skillSlug(b.skills[i].Name) == target {
+			sk = &b.skills[i]
+			break
+		}
+	}
+	if sk == nil {
+		b.mu.Unlock()
+		http.Error(w, "skill not found", http.StatusNotFound)
+		return
+	}
+	if sk.Status != "archived" {
+		status := sk.Status
+		b.mu.Unlock()
+		http.Error(w, fmt.Sprintf("skill not in archived status (status=%s)", status), http.StatusConflict)
+		return
+	}
+	sk.Status = "proposed"
+	sk.UpdatedAt = now
+	skCopy := *sk
+
+	channel := normalizeChannelSlug(skCopy.Channel)
+	if channel == "" {
+		channel = "general"
+	}
+	actor := strings.TrimSpace(skCopy.CreatedBy)
+	if actor == "" {
+		actor = "system"
+	}
+	b.appendActionLocked("skill_restored", "office", channel, actor, truncateSummary(skCopy.Title+" [restored]", 140), skCopy.ID)
+
+	fm := teamSkillToFrontmatter(skCopy)
+	mdBytes, renderErr := RenderSkillMarkdown(fm, skCopy.Content)
+	wikiWorker := b.wikiWorker
+	wikiPath := skillWikiPath(skCopy.Name)
+	if saveErr := b.saveLocked(); saveErr != nil {
+		slog.Warn("handleSkillRestore: saveLocked failed", "name", skCopy.Name, "err", saveErr)
+	}
+	b.mu.Unlock()
+
+	if wikiWorker != nil && renderErr == nil {
+		if _, _, err := wikiWorker.Enqueue(context.Background(), skCopy.Name, wikiPath, string(mdBytes), "replace", "wuphf: restore skill "+skCopy.Name); err != nil {
+			slog.Warn("handleSkillRestore: wiki enqueue failed", "name", skCopy.Name, "err", err)
+		}
+	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"skill": skCopy})
 }
@@ -699,15 +908,19 @@ func validateSkillFilePath(p string) error {
 	return nil
 }
 
-// reconcileSkillStatusFromDisk updates b.skills in-memory statuses to match
-// the on-disk SKILL.md frontmatter values. It is called once after the wiki
-// worker is wired during broker startup so a restart after an archive (or
-// approve) that did not persist saveLocked does not silently revert the
-// skill's status to its stale broker-state.json value.
+// reconcileSkillStatusFromDisk updates b.skills in-memory statuses and
+// owner_agents to match the on-disk SKILL.md frontmatter values. It is called
+// once after the wiki worker is wired during broker startup so a restart that
+// did not persist saveLocked does not silently revert the skill's status or
+// per-agent scope to a stale broker-state.json value.
 //
-// Only skills that have a SKILL.md on disk AND whose in-memory status differs
-// from the frontmatter status are updated. Missing or unparseable files are
-// silently skipped so reconciliation cannot break startup.
+// PR 7: OwnerAgents reconcile makes scope durable across "edit SKILL.md on
+// disk and restart" — without this, a manual scope edit (or a restored
+// backup) would be silently overwritten by the in-memory snapshot.
+//
+// Only skills that have a SKILL.md on disk are touched. Missing or
+// unparseable files are silently skipped so reconciliation cannot break
+// startup.
 func (b *Broker) reconcileSkillStatusFromDisk() {
 	b.mu.Lock()
 	worker := b.wikiWorker
@@ -734,15 +947,22 @@ func (b *Broker) reconcileSkillStatusFromDisk() {
 			continue
 		}
 		diskStatus := strings.TrimSpace(fm.Metadata.Wuphf.Status)
-		if diskStatus == "" {
-			continue
-		}
-		if b.skills[i].Status != diskStatus {
+		if diskStatus != "" && b.skills[i].Status != diskStatus {
 			slog.Info("skill_crud: reconcile status from disk",
 				"name", b.skills[i].Name,
 				"was", b.skills[i].Status,
 				"now", diskStatus)
 			b.skills[i].Status = diskStatus
+			updated = true
+		}
+
+		diskOwners := fm.Metadata.Wuphf.OwnerAgents
+		if !ownerAgentsEqual(b.skills[i].OwnerAgents, diskOwners) {
+			slog.Info("skill_crud: reconcile owner_agents from disk",
+				"name", b.skills[i].Name,
+				"was", b.skills[i].OwnerAgents,
+				"now", diskOwners)
+			b.skills[i].OwnerAgents = append([]string(nil), diskOwners...)
 			updated = true
 		}
 	}
@@ -751,6 +971,21 @@ func (b *Broker) reconcileSkillStatusFromDisk() {
 			slog.Warn("skill_crud: reconcileSkillStatusFromDisk saveLocked failed", "err", saveErr)
 		}
 	}
+}
+
+// ownerAgentsEqual reports whether two OwnerAgents slices are semantically
+// equal. Order matters because reconcile keeps disk's order as authoritative;
+// a (a,b) → (b,a) reorder on disk should trigger a refresh.
+func ownerAgentsEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // resolveSkillSourceArticle reads the on-disk SKILL.md for name and extracts

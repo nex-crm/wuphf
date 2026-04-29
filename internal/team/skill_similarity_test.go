@@ -79,7 +79,7 @@ func TestFindSimilarActive_NoSkills(t *testing.T) {
 		Content:     "Run kubectl apply, wait for readiness, then ramp traffic.",
 	}
 
-	v := b.findSimilarActiveSkillLocked(spec)
+	v := b.findSimilarActiveSkillLocked(context.Background(), spec)
 
 	if v.Recommendation != "create_new" {
 		t.Fatalf("recommendation = %q, want create_new", v.Recommendation)
@@ -106,7 +106,7 @@ func TestFindSimilarActive_ExactDuplicate(t *testing.T) {
 		Content:     "Look up the invoice on Stripe and email the contact at day 7.",
 	}
 
-	v := b.findSimilarActiveSkillLocked(spec)
+	v := b.findSimilarActiveSkillLocked(context.Background(), spec)
 
 	// Score is high but not 1.0 because the names differ ("v2" suffix);
 	// the description and body are identical, so Jaccard over the combined
@@ -141,7 +141,7 @@ func TestFindSimilarActive_NearDuplicateDifferentName(t *testing.T) {
 		Content:     "Lookup customer invoice on Stripe and send reminder email via Postmark template.",
 	}
 
-	v := b.findSimilarActiveSkillLocked(spec)
+	v := b.findSimilarActiveSkillLocked(context.Background(), spec)
 
 	if v.Recommendation != "enhance_existing" {
 		t.Fatalf("recommendation = %q (score %.3f), want enhance_existing", v.Recommendation, v.Score)
@@ -170,7 +170,7 @@ func TestFindSimilarActive_DistinctSkills(t *testing.T) {
 		Content:     "Authenticate with Vault, request a new lease, restart pods to pick up the new credential.",
 	}
 
-	v := b.findSimilarActiveSkillLocked(spec)
+	v := b.findSimilarActiveSkillLocked(context.Background(), spec)
 
 	if v.Recommendation != "create_new" {
 		t.Fatalf("recommendation = %q (score %.3f), want create_new", v.Recommendation, v.Score)
@@ -213,7 +213,7 @@ func TestFindSimilarActive_AmbiguousRange(t *testing.T) {
 		Content:     "Pull KPIs across all customers and compile a quarterly summary report.",
 	}
 
-	v := b.findSimilarActiveSkillLocked(spec)
+	v := b.findSimilarActiveSkillLocked(context.Background(), spec)
 
 	if v.Method != "embedding-cosine" {
 		t.Fatalf("method = %q, want embedding-cosine", v.Method)
@@ -245,7 +245,7 @@ func TestFindSimilarActive_SkipsSelf(t *testing.T) {
 		Content:     "Look up the invoice on Stripe and email the contact at day 7.",
 	}
 
-	v := b.findSimilarActiveSkillLocked(spec)
+	v := b.findSimilarActiveSkillLocked(context.Background(), spec)
 
 	if v.Existing != nil {
 		t.Fatalf("Existing = %+v, want nil (self-match must be skipped)", v.Existing)
@@ -272,7 +272,7 @@ func TestFindSimilarActive_FallbackToJaccard_NoEmbeddingProvider(t *testing.T) {
 		Content:     "Lookup customer invoice on Stripe and send reminder email via Postmark template.",
 	}
 
-	v := b.findSimilarActiveSkillLocked(spec)
+	v := b.findSimilarActiveSkillLocked(context.Background(), spec)
 
 	if v.Method != "jaccard-tokens" {
 		t.Fatalf("method = %q, want jaccard-tokens (no embedder configured)", v.Method)
@@ -301,7 +301,7 @@ func TestFindSimilarActive_ActiveOnly(t *testing.T) {
 		Content:     "Look up the invoice on Stripe and email the contact at day 7.",
 	}
 
-	v := b.findSimilarActiveSkillLocked(spec)
+	v := b.findSimilarActiveSkillLocked(context.Background(), spec)
 
 	if v.Existing != nil {
 		t.Fatalf("Existing = %+v, want nil (no active skills should be eligible)", v.Existing)
@@ -329,7 +329,7 @@ func TestFindSimilarActive_EmbedderFailureFallsBackToJaccard(t *testing.T) {
 		Content:     "Lookup customer invoice on Stripe and send reminder email via Postmark template.",
 	}
 
-	v := b.findSimilarActiveSkillLocked(spec)
+	v := b.findSimilarActiveSkillLocked(context.Background(), spec)
 
 	if v.Method != "jaccard-tokens" {
 		t.Fatalf("method = %q, want jaccard-tokens fallback when embedder errors", v.Method)
@@ -372,9 +372,9 @@ func TestFindSimilarActive_EmbeddingCacheReusesAcrossCalls(t *testing.T) {
 		Description: "x",
 		Content:     "y",
 	}
-	_ = b.findSimilarActiveSkillLocked(spec1)
+	_ = b.findSimilarActiveSkillLocked(context.Background(), spec1)
 	beforeSecond := len(calls)
-	_ = b.findSimilarActiveSkillLocked(spec1)
+	_ = b.findSimilarActiveSkillLocked(context.Background(), spec1)
 	afterSecond := len(calls)
 
 	if afterSecond != beforeSecond {

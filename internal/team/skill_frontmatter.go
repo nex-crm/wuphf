@@ -79,6 +79,36 @@ type SkillWuphfMeta struct {
 	RelayPlatform string `yaml:"relay_platform,omitempty"`
 	// RelayEventTypes lists the relay event types this skill subscribes to.
 	RelayEventTypes []string `yaml:"relay_event_types,omitempty"`
+	// SimilarToExisting flags skills the similarity gate found close-but-not-
+	// duplicate to an existing active skill (PR 7 task #13). The interview UI
+	// surfaces this so the human can choose to enhance the existing skill
+	// instead of approving a near-duplicate. Nil when the proposal was clean.
+	SimilarToExisting *SkillSimilarRef `yaml:"similar_to_existing,omitempty"`
+}
+
+// SkillSimilarRef captures the closest active skill flagged by the
+// similarity gate when a proposal lands in the "ambiguous" band — close
+// enough that the human should know about it, far enough that auto-routing
+// to enhance-existing would be wrong.
+type SkillSimilarRef struct {
+	// Slug is the existing skill's slug (lowercase, kebab).
+	Slug string `yaml:"slug" json:"slug"`
+	// Score is the similarity score in [0,1].
+	Score float64 `yaml:"score" json:"score"`
+	// Method is "embedding-cosine" or "jaccard-tokens" so eval can split
+	// metrics by detection path.
+	Method string `yaml:"method,omitempty" json:"method,omitempty"`
+}
+
+// cloneSkillSimilarRef returns a deep copy of ref, or nil when ref is nil.
+// Used by teamSkillToFrontmatter so the rendered frontmatter doesn't share
+// a pointer with the in-memory teamSkill.
+func cloneSkillSimilarRef(ref *SkillSimilarRef) *SkillSimilarRef {
+	if ref == nil {
+		return nil
+	}
+	cp := *ref
+	return &cp
 }
 
 // SkillSafetyScan holds the result of a skill_guard scan.
@@ -174,6 +204,7 @@ func teamSkillToFrontmatter(sk teamSkill) SkillFrontmatter {
 				Tags:               append([]string(nil), sk.Tags...),
 				SourceArticles:     append([]string(nil), sk.SourceArticles...),
 				OwnerAgents:        append([]string(nil), sk.OwnerAgents...),
+				SimilarToExisting:  cloneSkillSimilarRef(sk.SimilarToExisting),
 				WorkflowProvider:   sk.WorkflowProvider,
 				WorkflowKey:        sk.WorkflowKey,
 				WorkflowDefinition: sk.WorkflowDefinition,

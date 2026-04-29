@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -82,7 +83,29 @@ type skillCompileStatsResponse struct {
 	LastTickDurationMs            int64  `json:"last_tick_duration_ms"`
 	LastSkillCompilePassAt        string `json:"last_skill_compile_pass_at,omitempty"`
 	StageBProposalsTotal          int64  `json:"stage_b_proposals_total"`
+	// EnhancementCandidatesTotal counts proposals diverted to enhance an
+	// existing skill instead of creating a new one (PR 7 task #13). Eval
+	// asserts on this field as a quality signal for the proposal funnel.
+	EnhancementCandidatesTotal int64 `json:"enhancement_candidates_total"`
+	// EnhancementAcceptedTotal counts enhance_skill_proposal interviews
+	// resolved with "enhance" (PR 7 task #15).
+	EnhancementAcceptedTotal int64 `json:"enhancement_accepted_total"`
+	// EnhancementOverriddenTotal counts enhance_skill_proposal interviews
+	// resolved with "approve_anyway" — the human bypassed the gate (PR 7
+	// task #15).
+	EnhancementOverriddenTotal int64 `json:"enhancement_overridden_total"`
+	// CatalogBytesPerAgentMax is the maximum byte length the prompt catalog
+	// would render to across active office members for the current b.skills
+	// snapshot. PR 7 surfaces it so operators can spot catalog bloat before
+	// it pushes prompt size out of the cache window. Computed on each request;
+	// O(members * skills) but bounded.
+	CatalogBytesPerAgentMax int `json:"catalog_bytes_per_agent_max"`
 }
+
+// skillCatalogSoftWarnBytes is the soft warning threshold for the per-agent
+// catalog. Above this the handler emits a WARN log; the hard 8KB cap is NOT
+// enforced for v1 — operators get a metric and a log, not a 500.
+const skillCatalogSoftWarnBytes = 6 * 1024
 
 // handleGetSkillCompileStats returns a snapshot of the compile metrics.
 func (b *Broker) handleGetSkillCompileStats(w http.ResponseWriter, r *http.Request) {
@@ -93,7 +116,13 @@ func (b *Broker) handleGetSkillCompileStats(w http.ResponseWriter, r *http.Reque
 
 	b.mu.Lock()
 	snap := snapshotSkillCompileMetrics(&b.skillCompileMetrics)
+	maxBytes, maxSlug := b.maxCatalogBytesLocked()
 	b.mu.Unlock()
+
+	if maxBytes > skillCatalogSoftWarnBytes {
+		slog.Warn("skills: per-agent catalog exceeds soft warning threshold",
+			"agent", maxSlug, "bytes", maxBytes, "warn_bytes", skillCatalogSoftWarnBytes)
+	}
 
 	resp := skillCompileStatsResponse{
 		ManualClicksTotal:             snap.ManualClicksTotal,
@@ -103,11 +132,33 @@ func (b *Broker) handleGetSkillCompileStats(w http.ResponseWriter, r *http.Reque
 		ProposalsRejectedByGuardTotal: snap.ProposalsRejectedByGuardTotal,
 		LastTickDurationMs:            snap.LastTickDurationMs,
 		StageBProposalsTotal:          snap.StageBProposalsTotal,
+		EnhancementCandidatesTotal:    snap.EnhancementCandidatesTotal,
+		EnhancementAcceptedTotal:      snap.EnhancementAcceptedTotal,
+		EnhancementOverriddenTotal:    snap.EnhancementOverriddenTotal,
+		CatalogBytesPerAgentMax:       maxBytes,
 	}
 	if snap.LastSkillCompilePassAtNano != 0 {
 		resp.LastSkillCompilePassAt = time.Unix(0, snap.LastSkillCompilePassAtNano).UTC().Format(timeRFC3339)
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// maxCatalogBytesLocked returns the largest per-agent catalog byte size across
+// every active office member. Caller MUST hold b.mu. Returns (0, "") if no
+// member ends up with a non-empty catalog. Used by /skills/compile/stats so
+// operators can detect catalog bloat before it pushes prompt size out of cache.
+func (b *Broker) maxCatalogBytesLocked() (int, string) {
+	maxBytes := 0
+	maxSlug := ""
+	for _, m := range b.members {
+		visible := b.listSkillsForAgentLocked(m.Slug, listSkillsOpts{activeOnly: true})
+		size := len(renderSkillCatalogSection(visible))
+		if size > maxBytes {
+			maxBytes = size
+			maxSlug = m.Slug
+		}
+	}
+	return maxBytes, maxSlug
 }
 
 // timeRFC3339 is RFC3339 with second precision (no timezone offset suffix

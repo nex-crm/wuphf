@@ -3815,6 +3815,7 @@ func (l *Launcher) buildPrompt(slug string) string {
 		sb.WriteString("- human_message: Present output or a recommendation directly to the human.\n")
 		sb.WriteString("- human_interview: Ask the human a cancelable interview question; it never blocks chat, and dismiss/send cancels it.\n")
 		sb.WriteString("Other tools: team_tasks, team_task_status, team_requests, team_request, team_status, team_members, team_office_members, team_channels, team_channel, team_member, team_channel_member, team_action_guide, team_action_workflow_create, team_action_workflow_schedule, team_action_relays, team_action_relay_event_types, team_action_relay_create, team_action_relay_activate, team_action_relay_events, team_action_relay_event.\n\n")
+		sb.WriteString(l.skillCatalogSection(slug))
 		sb.WriteString("== TOOL HYGIENE ==\n")
 		sb.WriteString("All team_*, human_*, and mcp__wuphf-office__* tools listed above are ALREADY registered. Call them directly. Do NOT use ToolSearch/select: to look them up — that wastes a full turn.\n")
 		sb.WriteString("Do not read unrelated files (MEMORY.md, arbitrary docs) unless the current packet's task requires it. Every tool call pays full turn cost.\n")
@@ -3941,6 +3942,7 @@ func (l *Launcher) buildPrompt(slug string) string {
 		sb.WriteString("- human_message: Present completion or a recommendation directly to the human.\n")
 		sb.WriteString("- human_interview: Ask the human only for cancelable clarifications you cannot responsibly guess.\n")
 		sb.WriteString("Other tools: team_tasks, team_task_status, team_requests, team_request, team_status, team_members, team_office_members, team_channels, team_channel, team_member, team_channel_member, team_action_guide, team_action_workflow_create, team_action_workflow_schedule, team_action_relays, team_action_relay_event_types, team_action_relay_create, team_action_relay_activate, team_action_relay_events, team_action_relay_event.\n\n")
+		sb.WriteString(l.skillCatalogSection(slug))
 		sb.WriteString("== TOOL HYGIENE ==\n")
 		sb.WriteString("All team_*, human_*, and mcp__wuphf-office__* tools listed above are ALREADY registered. Call them directly. Do NOT use ToolSearch/select: to look them up — that wastes a full turn.\n")
 		sb.WriteString("Do not read unrelated files (MEMORY.md, arbitrary docs) unless the current packet's task requires it. Every tool call pays full turn cost.\n")
@@ -4544,6 +4546,52 @@ func (l *Launcher) officeLeadSlug() string {
 		return l.pack.LeadSlug
 	}
 	return officeLeadSlugFrom(l.activeSessionMembers())
+}
+
+// skillCatalogSection renders the per-agent skill catalog injected into
+// buildPrompt. Empty string means no section is emitted (omits the header
+// entirely). Output is byte-stable: same b.skills + slug + lead → same bytes,
+// so prompt caching keeps hitting between turns.
+//
+// PR 7: Anthropic Level 1 metadata preload. ~80 tokens per skill, scoped to
+// owners via listSkillsForAgentLocked, so agent A never sees agent B's
+// catalog and the cumulative budget stays bounded as the pack grows.
+func (l *Launcher) skillCatalogSection(slug string) string {
+	if l.broker == nil {
+		return ""
+	}
+	l.broker.mu.Lock()
+	visible := l.broker.listSkillsForAgentLocked(slug, listSkillsOpts{activeOnly: true})
+	l.broker.mu.Unlock()
+	return renderSkillCatalogSection(visible)
+}
+
+// renderSkillCatalogSection is the pure-function variant of
+// skillCatalogSection: it takes an already-filtered, already-sorted slice of
+// teamSkill and renders the deterministic prompt section. Reused by
+// /skills/compile/stats to compute catalog_bytes_per_agent_max without
+// duplicating format strings.
+func renderSkillCatalogSection(visible []teamSkill) string {
+	if len(visible) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("== YOUR SKILL CATALOG ==\n")
+	sb.WriteString("When a request matches one of these skills, call team_skill_run(name) BEFORE doing the work. If the request matches a skill not in your catalog, use team_skill_list to find its owner and delegate.\n")
+	for _, sk := range visible {
+		desc := strings.TrimSpace(sk.Description)
+		if len(desc) > 100 {
+			desc = desc[:100] + "..."
+		}
+		trigger := strings.TrimSpace(sk.Trigger)
+		if trigger != "" {
+			sb.WriteString(fmt.Sprintf("- %s: %s [trigger: %s]\n", sk.Name, desc, trigger))
+		} else {
+			sb.WriteString(fmt.Sprintf("- %s: %s\n", sk.Name, desc))
+		}
+	}
+	sb.WriteString("\n")
+	return sb.String()
 }
 
 // officeLeadSlugFrom derives the lead slug from an already-loaded member
