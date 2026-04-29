@@ -11,9 +11,12 @@ package team
 //     pane-spawn path flips that bool deep inside trySpawnWebAgentPanes;
 //     reading via pointer keeps the targeter in sync without callbacks.
 //   - failedPaneSlugs is a shared map. Today it's read here, written by the
-//     pane-spawn path (still on Launcher). The shared-map race is pre-
-//     existing (writes happen sequentially during Launch); when C5 lands
-//     paneLifecycle this becomes failedPane(slug) func, removing the dangle.
+//     pane-spawn path (still on Launcher). No mutex — the race is dormant
+//     only because trySpawnWebAgentPanes is a runtime-promotion fallback
+//     that nothing currently invokes (see launcher.go:2647 / 3470). The
+//     moment promotion is wired, or any concurrent reader of the targeter
+//     overlaps the writer, this races. C5 (paneLifecycle) replaces this
+//     with a failedPane(slug) callback and removes the shared map entirely.
 
 import (
 	"fmt"
