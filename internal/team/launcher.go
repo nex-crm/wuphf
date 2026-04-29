@@ -1870,9 +1870,11 @@ func (l *Launcher) reconfigureVisibleAgents() error {
 }
 
 // notifyCtx returns the notification-context builder, lazily constructing
-// it on first access (PLAN.md §C3). The builder shares state with Launcher
-// via callbacks for broker reads and headless-queue peek; constructed
-// fresh per call so each work packet sees current broker state.
+// it once via sync.Once (PLAN.md §C3). The builder shares state with
+// Launcher via callbacks (channelMessages, channelTasks, allTasks,
+// channelStore, scoreTaskCandidate, activeHeadlessAgents) — those are
+// re-resolved through l.broker on every invocation, so the cached
+// builder still sees current broker state on each work-packet build.
 func (l *Launcher) notifyCtx() *notificationContextBuilder {
 	if l == nil {
 		return nil

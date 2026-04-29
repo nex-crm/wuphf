@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -657,14 +658,21 @@ func memberSlugsFromMembers(members []officeMember) []string {
 	return uniqueSlugs(out)
 }
 
+// officeLeadSlugFromMembers picks a lead from a member list when the pack
+// doesn't declare one. Sorts a copy of the input by slug before iterating
+// so the answer is order-independent — same rationale as officeLeadSlugFrom
+// in office_targets.go (callers pass differently-ordered snapshots; without
+// the sort they'd disagree on the lead in BuiltIn-free rosters).
 func officeLeadSlugFromMembers(members []officeMember) string {
-	for _, member := range members {
+	sorted := append([]officeMember(nil), members...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Slug < sorted[j].Slug })
+	for _, member := range sorted {
 		if member.BuiltIn {
 			return strings.TrimSpace(member.Slug)
 		}
 	}
-	if len(members) > 0 {
-		return strings.TrimSpace(members[0].Slug)
+	if len(sorted) > 0 {
+		return strings.TrimSpace(sorted[0].Slug)
 	}
 	return ""
 }
