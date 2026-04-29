@@ -13,6 +13,7 @@ import {
   getOfficeTasks,
   getSkillsList,
   invokeSkill,
+  patchSkill,
   rejectSkill,
   restoreArchivedSkill,
   type Skill,
@@ -168,6 +169,7 @@ export function SkillsApp() {
   const [compileState, setCompileState] = useState<CompileState>("idle");
   const [ownerFilter, setOwnerFilter] = useState<OwnerFilterValue>("all");
   const [previewSkill, setPreviewSkill] = useState<Skill | null>(null);
+  const [previewDirty, setPreviewDirty] = useState(false);
 
   // Hydrate filter from localStorage on mount, validated against the
   // current office. If the saved slug no longer maps to a member (agent
@@ -216,7 +218,33 @@ export function SkillsApp() {
 
   const handlePreview = useCallback((skill: Skill) => {
     setPreviewSkill(skill);
+    setPreviewDirty(false);
   }, []);
+
+  // Closes the SidePanel; prompts the user to confirm when there are
+  // unsaved edits (proposed skills can be edited inline). The browser
+  // confirm() is fine here — we already use it elsewhere for danger-zone
+  // confirmations, and the destructive consequence (lost edits) maps cleanly
+  // onto the binary OK/Cancel UX.
+  const handlePreviewClose = useCallback(() => {
+    if (previewDirty) {
+      const ok = window.confirm(
+        "You have unsaved edits. Discard them and close?",
+      );
+      if (!ok) return;
+    }
+    setPreviewSkill(null);
+    setPreviewDirty(false);
+  }, [previewDirty]);
+
+  const handlePreviewSaved = useCallback(
+    (updated: Skill) => {
+      setPreviewSkill(updated);
+      setPreviewDirty(false);
+      queryClient.invalidateQueries({ queryKey: ["skills"] });
+    },
+    [queryClient],
+  );
 
   if (isLoading) {
     return (
@@ -413,11 +441,17 @@ export function SkillsApp() {
 
       <SidePanel
         open={previewSkill !== null}
-        onClose={() => setPreviewSkill(null)}
+        onClose={handlePreviewClose}
         title={previewSkill?.title || previewSkill?.name || "Skill"}
         subtitle={previewSkill?.name}
       >
-        {previewSkill ? <SkillPreviewBody skill={previewSkill} /> : null}
+        {previewSkill ? (
+          <SkillPreviewBody
+            skill={previewSkill}
+            onDirtyChange={setPreviewDirty}
+            onSaved={handlePreviewSaved}
+          />
+        ) : null}
       </SidePanel>
     </>
   );
@@ -1261,8 +1295,68 @@ function SuggestChangesExpander({
   );
 }
 
-function SkillPreviewBody({ skill }: { skill: Skill }) {
+interface SkillPreviewBodyProps {
+  skill: Skill;
+  /** Notifies the parent panel when the editor has unsaved changes. */
+  onDirtyChange?: (dirty: boolean) => void;
+  /** Called after a successful save with the updated skill. */
+  onSaved?: (updated: Skill) => void;
+}
+
+function SkillPreviewBody({
+  skill,
+  onDirtyChange,
+  onSaved,
+}: SkillPreviewBodyProps) {
   const owners = skill.owner_agents ?? [];
+  const isProposed = skill.status === "proposed";
+  const originalContent = skill.content ?? "";
+
+  const [draft, setDraft] = useState(originalContent);
+  const [saving, setSaving] = useState(false);
+
+  // Reset the draft whenever the previewed skill changes (e.g. user closes
+  // and reopens the panel on a different proposal). Reusing one editor
+  // state across skills would otherwise leak edits between them.
+  useEffect(() => {
+    setDraft(originalContent);
+    onDirtyChange?.(false);
+    // originalContent is the source of truth, derived from skill identity.
+  }, [skill.name, originalContent, onDirtyChange]);
+
+  const dirty = isProposed && draft !== originalContent;
+
+  // Keep the parent informed of dirty-state so the SidePanel close path
+  // can prompt for unsaved edits.
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
+
+  const handleSave = useCallback(() => {
+    if (!(isProposed && dirty && skill.name)) return;
+    setSaving(true);
+    patchSkill(skill.name, {
+      old_string: originalContent,
+      new_string: draft,
+      replace_all: false,
+    })
+      .then((res) => {
+        showNotice("Saved.", "success");
+        // Architect's patch handler returns the updated skill; fall back
+        // to a local merge if the response is missing it (older brokers).
+        const updated: Skill = res.skill ?? { ...skill, content: draft };
+        onSaved?.(updated);
+      })
+      .catch((e: Error) => {
+        showNotice(`Couldn't save: ${e.message}`, "error");
+      })
+      .finally(() => setSaving(false));
+  }, [isProposed, dirty, skill, originalContent, draft, onSaved]);
+
+  const handleRevert = useCallback(() => {
+    setDraft(originalContent);
+  }, [originalContent]);
+
   return (
     <div
       style={{
@@ -1302,7 +1396,105 @@ function SkillPreviewBody({ skill }: { skill: Skill }) {
           Trigger: {skill.trigger}
         </p>
       ) : null}
-      {skill.content ? (
+
+      {isProposed ? (
+        <>
+          <label
+            htmlFor="skill-body-editor"
+            style={{
+              display: "block",
+              fontSize: 12,
+              fontWeight: 500,
+              color: "var(--text-secondary)",
+              marginBottom: 6,
+            }}
+          >
+            SKILL.md body
+            <span
+              style={{
+                fontWeight: 400,
+                color: "var(--text-tertiary)",
+                marginLeft: 6,
+              }}
+            >
+              (frontmatter is read-only in v1)
+            </span>
+          </label>
+          <textarea
+            id="skill-body-editor"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            disabled={saving}
+            spellCheck={false}
+            aria-label={`Edit body for ${skill.name}`}
+            style={{
+              width: "100%",
+              minHeight: 240,
+              maxHeight: "60vh",
+              padding: 12,
+              background: "var(--bg-warm, var(--neutral-50))",
+              border: "1px solid var(--border)",
+              borderRadius: 6,
+              fontFamily: "var(--font-mono)",
+              fontSize: 12,
+              lineHeight: 1.5,
+              color: "var(--text)",
+              resize: "vertical",
+              boxSizing: "border-box",
+            }}
+          />
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "flex-end",
+              gap: 8,
+              marginTop: 8,
+            }}
+          >
+            {dirty ? (
+              <span
+                aria-live="polite"
+                style={{
+                  fontSize: 12,
+                  color: "var(--text-tertiary)",
+                  marginRight: "auto",
+                }}
+              >
+                Unsaved changes.
+              </span>
+            ) : null}
+            <button
+              type="button"
+              className="btn-text"
+              onClick={handleRevert}
+              disabled={saving || !dirty}
+            >
+              Revert
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              onClick={handleSave}
+              disabled={saving || !dirty}
+              aria-label={`Save edits to ${skill.name}`}
+            >
+              {saving ? "Saving..." : "Save"}
+            </button>
+          </div>
+          <p
+            style={{
+              marginTop: 12,
+              marginBottom: 0,
+              fontSize: 12,
+              color: "var(--text-tertiary)",
+            }}
+          >
+            Saving leaves this proposal pending. Approve or reject from the
+            interview to promote it.
+          </p>
+        </>
+      ) : skill.content ? (
         <pre
           style={{
             background: "var(--bg-warm, var(--neutral-50))",
@@ -1442,6 +1634,29 @@ function SkillCard({
 
       {isProposed ? (
         <>
+          {skill.similar_to_existing ? (
+            <div
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "3px 8px",
+                marginBottom: 8,
+                background: "var(--bg-warm, var(--neutral-50))",
+                border: "1px solid var(--border)",
+                borderRadius: 4,
+                fontSize: 12,
+                color: "var(--text-secondary)",
+              }}
+              title={`Similarity score: ${Math.round(skill.similar_to_existing.score * 100)}% (${skill.similar_to_existing.method ?? ""})`}
+            >
+              <span aria-hidden="true">≈</span>
+              Similar to:{" "}
+              <strong style={{ fontFamily: "var(--font-mono)" }}>
+                {skill.similar_to_existing.slug}
+              </strong>
+            </div>
+          ) : null}
           <ProposedPreviewBody skill={skill} />
           <button
             type="button"

@@ -672,12 +672,22 @@ export function getSkills() {
 }
 
 /**
- * Fetch the full skills list including disabled and archived. The base
- * /skills endpoint hides archived and (post PR 7) disabled skills; the
- * Skills app needs to render every section.
+ * Fetch the skill catalog. With scope="all" the legacy /skills endpoint
+ * accepts include_archived + include_disabled flags (PR 7 task #18) so the
+ * Skills app can render every section (Pending / Active / Disabled /
+ * Archived) from a single query — keeping body content intact for the
+ * SidePanel preview and the enhance-existing patchSkill flow.
+ *
+ * scope="active" returns the legacy default (active + proposed + disabled,
+ * archived hidden) for callers that don't need the archived bucket.
  */
 export function getSkillsList(scope: SkillsListScope = "all") {
-  return get<{ skills: Skill[] }>("/skills", { scope });
+  const params: Record<string, string> = {};
+  if (scope === "all") {
+    params.include_archived = "true";
+    params.include_disabled = "true";
+  }
+  return get<{ skills: Skill[] }>("/skills", params);
 }
 
 export interface DisableSkillResponse {
