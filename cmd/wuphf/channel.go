@@ -3609,15 +3609,6 @@ func (m *channelModel) openRequestActionPicker(req channelInterview) tea.Cmd {
 	return nil
 }
 
-func hasThreadReplies(messages []brokerMessage, id string) bool {
-	for _, msg := range messages {
-		if msg.ReplyTo == id {
-			return true
-		}
-	}
-	return false
-}
-
 func containsSlug(items []string, want string) bool {
 	for _, item := range items {
 		if item == want {

@@ -34,6 +34,7 @@ type (
 	channelSkill           = channelui.Skill
 	calendarRange          = channelui.CalendarRange
 	calendarEvent          = channelui.CalendarEvent
+	recoverySurgeryOption  = channelui.RecoverySurgeryOption
 )
 
 // Function aliases keep the lowercase names callable from package main
@@ -136,6 +137,20 @@ var (
 	cloneRenderedLines    = channelui.CloneRenderedLines
 	cloneThreadedMessages = channelui.CloneThreadedMessages
 	renderTimeBucket      = channelui.RenderTimeBucket
+
+	threadRootMessageID = channelui.ThreadRootMessageID
+	hasThreadReplies    = channelui.HasThreadReplies
+
+	trimRecoverySentence          = channelui.TrimRecoverySentence
+	renderAwayStrip               = channelui.RenderAwayStrip
+	buildRecoverySurgeryOptions   = channelui.BuildRecoverySurgeryOptions
+	buildRecoveryPromptForMessage = channelui.BuildRecoveryPromptForMessage
+	buildRecoveryPromptForRequest = channelui.BuildRecoveryPromptForRequest
+	buildRecoveryPromptForTask    = channelui.BuildRecoveryPromptForTask
+	renderRecoveryActionCard      = channelui.RenderRecoveryActionCard
+	prefixedCardLines             = channelui.PrefixedCardLines
+	recoveryActiveTasks           = channelui.RecoveryActiveTasks
+	recoveryRecentThreads         = channelui.RecoveryRecentThreads
 )
 
 // Calendar-range typed-string consts.

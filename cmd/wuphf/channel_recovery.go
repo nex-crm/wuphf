@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -104,26 +103,6 @@ func summarizeAwayRecovery(unreadCount int, recovery team.SessionRecovery) strin
 
 func (m channelModel) currentAwaySummary() string {
 	return m.currentWorkspaceUIState().AwaySummary
-}
-
-func trimRecoverySentence(text string) string {
-	text = strings.TrimSpace(text)
-	text = strings.TrimSuffix(text, ".")
-	return text
-}
-
-func renderAwayStrip(width, unreadCount int, summary string) string {
-	label := fmt.Sprintf("While away · %d new · /recover", unreadCount)
-	if strings.TrimSpace(summary) != "" {
-		label = fmt.Sprintf("While away · %s · /recover", strings.TrimSpace(summary))
-	}
-	label = truncateText(label, maxInt(24, width-6))
-	return "  " + lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#0F172A")).
-		Background(lipgloss.Color("#BFDBFE")).
-		Padding(0, 1).
-		Bold(true).
-		Render(label)
 }
 
 func buildRecoveryLines(workspace workspaceUIState, contentWidth int, tasks []channelTask, requests []channelInterview, messages []brokerMessage) []renderedLine {
@@ -280,163 +259,6 @@ func buildRecoverySurgeryLines(contentWidth int, tasks []channelTask, requests [
 	}
 
 	return lines
-}
-
-type recoverySurgeryOption struct {
-	Tag    string
-	Title  string
-	Body   string
-	Accent string
-	Extra  []string
-	Prompt string
-}
-
-func buildRecoverySurgeryOptions(tasks []channelTask, requests []channelInterview, messages []brokerMessage) []recoverySurgeryOption {
-	options := make([]recoverySurgeryOption, 0, 6)
-
-	for _, req := range requests {
-		if !isOpenInterviewStatus(req.Status) {
-			continue
-		}
-		options = append(options, recoverySurgeryOption{
-			Tag:    "decision brief",
-			Title:  "Draft the decision context for " + req.ID,
-			Body:   fallbackString(strings.TrimSpace(req.Context), req.TitleOrQuestion()),
-			Accent: "#B45309",
-			Extra:  []string{"Request " + req.ID, "Asked by @" + fallbackString(req.From, "unknown")},
-			Prompt: buildRecoveryPromptForRequest(req),
-		})
-		if len(options) >= 2 {
-			break
-		}
-	}
-
-	taskCount := 0
-	for _, task := range recoveryActiveTasks(tasks, 3) {
-		options = append(options, recoverySurgeryOption{
-			Tag:    "task handoff",
-			Title:  "Restore context for " + task.ID,
-			Body:   fallbackString(strings.TrimSpace(task.Details), task.Title),
-			Accent: "#2563EB",
-			Extra:  []string{"Owner @" + fallbackString(task.Owner, "unowned"), "Status " + fallbackString(strings.TrimSpace(task.Status), "open")},
-			Prompt: buildRecoveryPromptForTask(task),
-		})
-		taskCount++
-		if taskCount >= 2 {
-			break
-		}
-	}
-
-	threadCount := 0
-	for _, msg := range recoveryRecentThreads(messages, 3) {
-		options = append(options, recoverySurgeryOption{
-			Tag:    "rewind",
-			Title:  "Summarize everything since " + msg.ID,
-			Body:   truncateText(strings.TrimSpace(msg.Content), 160),
-			Accent: "#475569",
-			Extra:  []string{"Thread " + msg.ID, "Started by @" + fallbackString(msg.From, "unknown")},
-			Prompt: buildRecoveryPromptForMessage(msg),
-		})
-		threadCount++
-		if threadCount >= 2 {
-			break
-		}
-	}
-
-	return options
-}
-
-func buildRecoveryPromptForMessage(msg brokerMessage) string {
-	return fmt.Sprintf("Summarize everything since %s from @%s, focusing on decisions, blocked work, owner changes, risks, and the next concrete actions. Include what a human needs to know before replying. Message context: %s", msg.ID, fallbackString(msg.From, "unknown"), truncateText(strings.TrimSpace(msg.Content), 120))
-}
-
-func buildRecoveryPromptForRequest(req channelInterview) string {
-	return fmt.Sprintf("Draft a decision brief for request %s (%s). Summarize the arguments so far, what is blocked, the recommendation, open risks, and the smallest next action after the human answers.", req.ID, req.TitleOrQuestion())
-}
-
-func buildRecoveryPromptForTask(task channelTask) string {
-	return fmt.Sprintf("Restore context for task %s (%s). Draft a clean handoff note with current status, work already done, blockers, linked thread context, review state, and the next best move.", task.ID, task.Title)
-}
-
-func renderRecoveryActionCard(contentWidth int, header, body, accent string, extra []string) string {
-	cardWidth := maxInt(24, contentWidth-6)
-	parts := []string{header}
-	if strings.TrimSpace(body) != "" {
-		parts = append(parts, mutedText(body))
-	}
-	for _, line := range extra {
-		if strings.TrimSpace(line) != "" {
-			parts = append(parts, mutedText(line))
-		}
-	}
-	return lipgloss.NewStyle().
-		Width(cardWidth).
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color(accent)).
-		Background(lipgloss.Color("#16181E")).
-		Padding(0, 1).
-		Render(strings.Join(parts, "\n"))
-}
-
-func prefixedCardLines(lines []renderedLine, prefix string) []renderedLine {
-	out := make([]renderedLine, 0, len(lines))
-	for _, line := range lines {
-		line.Text = prefix + line.Text
-		out = append(out, line)
-	}
-	return out
-}
-
-func recoveryActiveTasks(tasks []channelTask, limit int) []channelTask {
-	filtered := make([]channelTask, 0, len(tasks))
-	for _, task := range tasks {
-		switch strings.ToLower(strings.TrimSpace(task.Status)) {
-		case "", "done", "completed", "canceled", "cancelled":
-			continue
-		default:
-			filtered = append(filtered, task)
-		}
-	}
-	sort.Slice(filtered, func(i, j int) bool {
-		left, lok := parseChannelTime(filtered[i].UpdatedAt)
-		right, rok := parseChannelTime(filtered[j].UpdatedAt)
-		switch {
-		case lok && rok:
-			return left.After(right)
-		case lok:
-			return true
-		case rok:
-			return false
-		default:
-			return filtered[i].ID > filtered[j].ID
-		}
-	})
-	if limit > 0 && len(filtered) > limit {
-		filtered = filtered[:limit]
-	}
-	return filtered
-}
-
-func recoveryRecentThreads(messages []brokerMessage, limit int) []brokerMessage {
-	roots := []brokerMessage{}
-	seen := map[string]bool{}
-	for i := len(messages) - 1; i >= 0 && len(roots) < limit; i-- {
-		msg := messages[i]
-		rootID := threadRootMessageID(messages, msg.ID)
-		if rootID == "" || seen[rootID] {
-			continue
-		}
-		if !hasThreadReplies(messages, rootID) && strings.TrimSpace(msg.ReplyTo) == "" {
-			continue
-		}
-		root, ok := findMessageByID(messages, rootID)
-		if !ok {
-			continue
-		}
-		roots = append(roots, root)
-		seen[rootID] = true
-	}
-	return roots
 }
 
 func countRunningRuntimeTasks(tasks []team.RuntimeTask) int {

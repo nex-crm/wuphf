@@ -246,18 +246,3 @@ func (m channelModel) recentRootMessages(limit int) []brokerMessage {
 	}
 	return out
 }
-
-func threadRootMessageID(messages []brokerMessage, messageID string) string {
-	current, ok := findMessageByID(messages, messageID)
-	if !ok {
-		return strings.TrimSpace(messageID)
-	}
-	for strings.TrimSpace(current.ReplyTo) != "" {
-		parent, ok := findMessageByID(messages, current.ReplyTo)
-		if !ok {
-			return current.ReplyTo
-		}
-		current = parent
-	}
-	return current.ID
-}

@@ -78,6 +78,18 @@
 //     for cached snapshots) and RenderTimeBucket (per-second
 //     bucket for direct DMs and the messages app, per-30s
 //     elsewhere).
+//   - threads.go           — thread navigation helpers:
+//     ThreadRootMessageID walks ReplyTo to the root,
+//     HasThreadReplies reports whether any message replies to a
+//     given id.
+//   - recovery.go          — recovery leaf helpers:
+//     TrimRecoverySentence, RenderAwayStrip,
+//     RecoverySurgeryOption struct + BuildRecoverySurgeryOptions
+//     (cards for "draft a decision brief / restore task context /
+//     summarize since"), the BuildRecoveryPromptFor* prompt
+//     builders, RenderRecoveryActionCard (the card body styler),
+//     PrefixedCardLines, RecoveryActiveTasks (filter+sort by
+//     UpdatedAt), and RecoveryRecentThreads (newest thread roots).
 //
 // Subsequent extraction PRs will land the workspace / recovery / cache
 // cluster, the sidebar / splash, the broker integrations, and finally
