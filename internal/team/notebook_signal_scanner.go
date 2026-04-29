@@ -250,6 +250,16 @@ func (s *NotebookSignalScanner) candidatesFromClusters(ctx context.Context, clus
 		desc := suggestedDescriptionFromCluster(c.members)
 		related := s.relatedWikiPaths(ctx, c.centroid)
 
+		// Owner inference: union of every contributing agent on the cluster.
+		// authors above is already deduped via the map gate; sort it so the
+		// synthesized skill carries a deterministic owner_agents list across
+		// runs (matters for test stability and rendered SKILL.md churn).
+		owners := make([]string, 0, len(authors))
+		for slug := range authors {
+			owners = append(owners, slug)
+		}
+		sort.Strings(owners)
+
 		candidate := SkillCandidate{
 			Source:               SourceNotebookCluster,
 			SuggestedName:        name,
@@ -257,6 +267,7 @@ func (s *NotebookSignalScanner) candidatesFromClusters(ctx context.Context, clus
 			Excerpts:             excerpts,
 			RelatedWikiPaths:     related,
 			SignalCount:          len(c.members),
+			OwnerAgents:          owners,
 			FirstSeenAt:          first,
 			LastSeenAt:           last,
 		}

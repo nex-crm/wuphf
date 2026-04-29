@@ -309,6 +309,11 @@ func buildStageBWikiContext(wikiRoot string, paths []string, cap int) string {
 // helper deliberately stamps a "Signals" footer onto the body so source
 // provenance survives even though teamSkill itself doesn't carry a
 // source_signals field.
+//
+// OwnerAgents resolution mirrors Stage A: explicit owner_agents in the
+// LLM-emitted frontmatter wins; otherwise the candidate's inferred owner
+// list (self-heal incident → [task.Owner]; notebook cluster → union of
+// contributing agents) seeds the spec.
 func stageBCandToSpec(fm SkillFrontmatter, body string, cand SkillCandidate) teamSkill {
 	tags := append([]string(nil), fm.Metadata.Wuphf.Tags...)
 	tags = appendUnique(tags, fmt.Sprintf("signal:source-%s", cand.Source))
@@ -324,6 +329,11 @@ func stageBCandToSpec(fm SkillFrontmatter, body string, cand SkillCandidate) tea
 		title = strings.TrimSpace(fm.Name)
 	}
 
+	owners := append([]string(nil), fm.Metadata.Wuphf.OwnerAgents...)
+	if len(owners) == 0 && len(cand.OwnerAgents) > 0 {
+		owners = append([]string(nil), cand.OwnerAgents...)
+	}
+
 	return teamSkill{
 		Name:        fm.Name,
 		Title:       title,
@@ -333,6 +343,7 @@ func stageBCandToSpec(fm SkillFrontmatter, body string, cand SkillCandidate) tea
 		Channel:     "general",
 		Tags:        tags,
 		Trigger:     fm.Metadata.Wuphf.Trigger,
+		OwnerAgents: owners,
 		Status:      "proposed",
 	}
 }

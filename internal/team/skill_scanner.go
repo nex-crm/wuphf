@@ -406,12 +406,17 @@ func (s *SkillScanner) loadTombstone() (slugs, sources map[string]bool) {
 // specToTeamSkill folds a SkillFrontmatter + body + source article into the
 // teamSkill shape that writeSkillProposalLocked expects. Only the fields the
 // frontmatter actually carries get set; the helper fills in defaults.
+//
+// OwnerAgents resolution: explicit frontmatter owner_agents wins; otherwise
+// inferOwnerAgentsFromPath derives a default from sourceArticle. A nil result
+// means the skill is lead-routable.
 func specToTeamSkill(fm SkillFrontmatter, body, sourceArticle string) teamSkill {
 	wuphf := fm.Metadata.Wuphf
 	sources := append([]string(nil), wuphf.SourceArticles...)
 	if s := strings.TrimSpace(sourceArticle); s != "" {
 		sources = appendUnique(sources, s)
 	}
+	owners := inferOwnerAgentsFromPath(sourceArticle, wuphf.OwnerAgents)
 	return teamSkill{
 		Name:               fm.Name,
 		Title:              wuphf.Title,
@@ -429,9 +434,66 @@ func specToTeamSkill(fm SkillFrontmatter, body, sourceArticle string) teamSkill 
 		RelayPlatform:      wuphf.RelayPlatform,
 		RelayEventTypes:    append([]string(nil), wuphf.RelayEventTypes...),
 		SourceArticles:     sources,
-		OwnerAgents:        append([]string(nil), wuphf.OwnerAgents...),
+		OwnerAgents:        owners,
 		Status:             "proposed",
 	}
+}
+
+// inferOwnerAgentsFromPath returns the owner_agents list a skill should default
+// to based on its wiki source path. Non-empty frontmatterOwners always wins
+// (the human author opted in explicitly) and the inference is logged for
+// audit. The returned slice is nil — never []string{} — for the lead-routable
+// case so it omits cleanly through `omitempty` YAML.
+//
+//   - team/agents/<slug>/notebook/...  -> ["<slug>"]
+//   - team/playbooks/...               -> nil (lead-routable)
+//   - team/customers/...               -> nil (lead-routable)
+//   - anything else                    -> nil (lead-routable)
+//
+// Slug case is normalised to lowercase so a stray `team/agents/CSM/notebook/...`
+// collapses to `csm`, matching the office member registry.
+func inferOwnerAgentsFromPath(relPath string, frontmatterOwners []string) []string {
+	if len(frontmatterOwners) > 0 {
+		// Defensive copy: callers must be free to mutate the result without
+		// touching the parsed frontmatter.
+		out := append([]string(nil), frontmatterOwners...)
+		// Debug only: explicit frontmatter owners is the NORMAL case for
+		// human-authored skills, not an anomaly worth a structured INFO line
+		// on every promote.
+		slog.Debug("skill_scanner: path_inference",
+			"path", relPath,
+			"frontmatter_owners", out,
+			"winner", "frontmatter",
+		)
+		return out
+	}
+	clean := strings.TrimSpace(filepath.ToSlash(relPath))
+	if clean == "" {
+		return nil
+	}
+	if !strings.HasPrefix(clean, agentsDirPrefix) {
+		// Playbooks, customers, or any other team/ path: lead-routable.
+		return nil
+	}
+	rest := strings.TrimPrefix(clean, agentsDirPrefix)
+	parts := strings.SplitN(rest, "/", 2)
+	if len(parts) < 2 {
+		// team/agents/<slug>.md or team/agents/<slug>/ with no further nesting
+		// is not a notebook entry — lead-routable.
+		return nil
+	}
+	slug := strings.ToLower(strings.TrimSpace(parts[0]))
+	tail := parts[1]
+	if slug == "" {
+		return nil
+	}
+	// Only the notebook subtree under team/agents/<slug>/ implies ownership.
+	// Anything else under team/agents/<slug>/ (e.g. profile.md) stays
+	// lead-routable.
+	if !strings.HasPrefix(tail, "notebook/") && tail != "notebook" {
+		return nil
+	}
+	return []string{slug}
 }
 
 // skillSlugFromPath synthesizes a candidate slug from a wiki path. It is a

@@ -38,6 +38,13 @@ type SkillCandidate struct {
 	// candidate (e.g. 3 agents wrote about the same topic).
 	SignalCount int
 
+	// OwnerAgents lists the agent slugs that should default-own the
+	// synthesized skill. Self-heal incidents seed this with [task.Owner];
+	// notebook clusters seed it with the dedup union of the contributing
+	// agents. The synthesizer threads this onto the resulting teamSkill.
+	// Nil means lead-routable.
+	OwnerAgents []string
+
 	// FirstSeenAt and LastSeenAt frame the time window of the signal cluster.
 	FirstSeenAt time.Time
 	LastSeenAt  time.Time
