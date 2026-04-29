@@ -1674,8 +1674,8 @@ func TestMainComposerRecallRestoresDraft(t *testing.T) {
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	got := next.(channelModel)
-	if len(got.inputHistory.entries) != 1 {
-		t.Fatalf("expected one history entry, got %d", len(got.inputHistory.entries))
+	if got.inputHistory.Len() != 1 {
+		t.Fatalf("expected one history entry, got %d", got.inputHistory.Len())
 	}
 
 	got.input = []rune("draft in progress")
@@ -1707,8 +1707,8 @@ func TestThreadComposerRecallRestoresDraft(t *testing.T) {
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	got := next.(channelModel)
-	if len(got.threadInputHistory.entries) != 1 {
-		t.Fatalf("expected one thread history entry, got %d", len(got.threadInputHistory.entries))
+	if got.threadInputHistory.Len() != 1 {
+		t.Fatalf("expected one thread history entry, got %d", got.threadInputHistory.Len())
 	}
 
 	got.threadInput = []rune("thread draft")

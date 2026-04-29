@@ -24,6 +24,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/nex-crm/wuphf/cmd/wuphf/channelui"
 	"github.com/nex-crm/wuphf/internal/brokeraddr"
 	"github.com/nex-crm/wuphf/internal/company"
 	"github.com/nex-crm/wuphf/internal/config"
@@ -640,7 +641,7 @@ type channelModel struct {
 	mention              tui.MentionModel
 	input                []rune
 	inputPos             int
-	inputHistory         composerHistory
+	inputHistory         channelui.History
 	width                int
 	height               int
 	scroll               int
@@ -667,7 +668,7 @@ type channelModel struct {
 	threadPanelID       string
 	threadInput         []rune
 	threadInputPos      int
-	threadInputHistory  composerHistory
+	threadInputHistory  channelui.History
 	threadScroll        int
 	usage               channelUsageState
 	brokerConnected     bool
@@ -721,7 +722,7 @@ func newChannelModelWithApp(threadsCollapsed bool, initialApp officeApp) channel
 		threadsDefaultExpand: !threadsCollapsed,
 		autocomplete:         tui.NewAutocomplete(channelSlashCommands),
 		mention:              tui.NewMention(channelMentionAgents(nil)),
-		inputHistory:         newComposerHistory(),
+		inputHistory:         channelui.NewHistory(),
 		initFlow:             tui.NewInitFlow(),
 		activeChannel:        "general",
 		activeApp:            initialApp,
@@ -730,7 +731,7 @@ func newChannelModelWithApp(threadsCollapsed bool, initialApp officeApp) channel
 		channels:             channels,
 		sessionMode:          sessionMode,
 		oneOnOneAgent:        oneOnOneAgent,
-		threadInputHistory:   newComposerHistory(),
+		threadInputHistory:   channelui.NewHistory(),
 		lastAgentContent:     make(map[string]string),
 	}
 	if m.isOneOnOne() {
@@ -1239,7 +1240,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if len(m.input) > 0 {
 				text := string(m.input)
 				trimmed := strings.TrimSpace(text)
-				m.inputHistory.record(m.input, m.inputPos)
+				m.inputHistory.Record(m.input, m.inputPos)
 				if trimmed == "/quit" || trimmed == "/exit" || trimmed == "/q" {
 					killTeamSession()
 					return m, tea.Quit
@@ -1275,25 +1276,25 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "backspace":
 			m.lastCtrlCAt = time.Time{}
 			if m.inputPos > 0 {
-				m.inputHistory.resetRecall()
+				m.inputHistory.ResetRecall()
 				m.input = append(m.input[:m.inputPos-1], m.input[m.inputPos:]...)
 				m.inputPos--
 				m.updateInputOverlays()
 			}
 		case "ctrl+u":
 			m.lastCtrlCAt = time.Time{}
-			m.inputHistory.resetRecall()
+			m.inputHistory.ResetRecall()
 			m.input = nil
 			m.inputPos = 0
 			m.updateInputOverlays()
 		case "ctrl+p":
 			m.lastCtrlCAt = time.Time{}
-			if snapshot, ok := m.inputHistory.previous(m.input, m.inputPos); ok {
+			if snapshot, ok := m.inputHistory.Previous(m.input, m.inputPos); ok {
 				m.restoreMainSnapshot(snapshot)
 			}
 		case "ctrl+n":
 			m.lastCtrlCAt = time.Time{}
-			if snapshot, ok := m.inputHistory.next(); ok {
+			if snapshot, ok := m.inputHistory.Next(); ok {
 				m.restoreMainSnapshot(snapshot)
 			}
 		case "ctrl+a":
@@ -1306,7 +1307,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.updateInputOverlays()
 		case "ctrl+j":
 			m.lastCtrlCAt = time.Time{}
-			m.inputHistory.resetRecall()
+			m.inputHistory.ResetRecall()
 			ch := []rune{'\n'}
 			tail := make([]rune, len(m.input[m.inputPos:]))
 			copy(tail, m.input[m.inputPos:])
@@ -1364,7 +1365,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		default:
 			m.lastCtrlCAt = time.Time{}
 			if ch := composerInsertRunes(msg); len(ch) > 0 {
-				m.inputHistory.resetRecall()
+				m.inputHistory.ResetRecall()
 				m.input, m.inputPos = insertComposerRunes(m.input, m.inputPos, ch)
 				m.updateInputOverlays()
 			} else if len(msg.String()) == 1 || msg.Type == tea.KeyRunes {
@@ -1373,7 +1374,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					ch = []rune(msg.String())
 				}
 				if len(ch) > 0 {
-					m.inputHistory.resetRecall()
+					m.inputHistory.ResetRecall()
 					tail := make([]rune, len(m.input[m.inputPos:]))
 					copy(tail, m.input[m.inputPos:])
 					m.input = append(m.input[:m.inputPos], append(ch, tail...)...)
@@ -2379,7 +2380,7 @@ func (m channelModel) View() string {
 		thread = renderThreadPanel(m.messages, m.threadPanelID,
 			layout.ThreadW, layout.ContentH,
 			m.threadInput, m.threadInputPos, m.threadScroll,
-			threadPopup, m.focus == focusThread, len(m.threadInputHistory.entries) > 0)
+			threadPopup, m.focus == focusThread, m.threadInputHistory.Len() > 0)
 	}
 
 	activePending := m.visiblePendingRequest()
@@ -3282,10 +3283,10 @@ func (m channelModel) updateThread(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			text := string(m.threadInput)
 			trimmed := strings.TrimSpace(text)
 			if strings.HasPrefix(trimmed, "/") {
-				m.threadInputHistory.record(m.threadInput, m.threadInputPos)
+				m.threadInputHistory.Record(m.threadInput, m.threadInputPos)
 				return m.runCommand(trimmed, m.threadPanelID)
 			}
-			m.threadInputHistory.record(m.threadInput, m.threadInputPos)
+			m.threadInputHistory.Record(m.threadInput, m.threadInputPos)
 			m.threadInput = nil
 			m.threadInputPos = 0
 			m.posting = true
@@ -3293,22 +3294,22 @@ func (m channelModel) updateThread(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "backspace":
 		if m.threadInputPos > 0 {
-			m.threadInputHistory.resetRecall()
+			m.threadInputHistory.ResetRecall()
 			m.threadInput = append(m.threadInput[:m.threadInputPos-1], m.threadInput[m.threadInputPos:]...)
 			m.threadInputPos--
 			m.updateThreadOverlays()
 		}
 	case "ctrl+u":
-		m.threadInputHistory.resetRecall()
+		m.threadInputHistory.ResetRecall()
 		m.threadInput = nil
 		m.threadInputPos = 0
 		m.updateThreadOverlays()
 	case "ctrl+p":
-		if snapshot, ok := m.threadInputHistory.previous(m.threadInput, m.threadInputPos); ok {
+		if snapshot, ok := m.threadInputHistory.Previous(m.threadInput, m.threadInputPos); ok {
 			m.restoreThreadSnapshot(snapshot)
 		}
 	case "ctrl+n":
-		if snapshot, ok := m.threadInputHistory.next(); ok {
+		if snapshot, ok := m.threadInputHistory.Next(); ok {
 			m.restoreThreadSnapshot(snapshot)
 		}
 	case "ctrl+a":
@@ -3318,7 +3319,7 @@ func (m channelModel) updateThread(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.threadInputPos = len(m.threadInput)
 		m.updateThreadOverlays()
 	case "ctrl+j":
-		m.threadInputHistory.resetRecall()
+		m.threadInputHistory.ResetRecall()
 		ch := []rune{'\n'}
 		tail := make([]rune, len(m.threadInput[m.threadInputPos:]))
 		copy(tail, m.threadInput[m.threadInputPos:])
@@ -3351,7 +3352,7 @@ func (m channelModel) updateThread(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	default:
 		if ch := composerInsertRunes(msg); len(ch) > 0 {
-			m.threadInputHistory.resetRecall()
+			m.threadInputHistory.ResetRecall()
 			m.threadInput, m.threadInputPos = insertComposerRunes(m.threadInput, m.threadInputPos, ch)
 			m.updateThreadOverlays()
 		} else if len(msg.String()) == 1 || msg.Type == tea.KeyRunes {
@@ -3360,7 +3361,7 @@ func (m channelModel) updateThread(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				ch = []rune(msg.String())
 			}
 			if len(ch) > 0 {
-				m.threadInputHistory.resetRecall()
+				m.threadInputHistory.ResetRecall()
 				tail := make([]rune, len(m.threadInput[m.threadInputPos:]))
 				copy(tail, m.threadInput[m.threadInputPos:])
 				m.threadInput = append(m.threadInput[:m.threadInputPos], append(ch, tail...)...)
@@ -4368,13 +4369,13 @@ func (m *channelModel) setActiveInput(text string) {
 	if m.focus == focusThread && m.threadPanelOpen {
 		m.threadInput = []rune(text)
 		m.threadInputPos = len(m.threadInput)
-		m.threadInputHistory.resetRecall()
+		m.threadInputHistory.ResetRecall()
 		m.updateThreadOverlays()
 		return
 	}
 	m.input = []rune(text)
 	m.inputPos = len(m.input)
-	m.inputHistory.resetRecall()
+	m.inputHistory.ResetRecall()
 	m.updateInputOverlays()
 	m.maybeActivateChannelPickerFromInput()
 }
@@ -4388,25 +4389,25 @@ func (m *channelModel) activeInputString() string {
 
 func (m *channelModel) insertAcceptedMention(mention string) {
 	if m.focus == focusThread && m.threadPanelOpen {
-		m.threadInputHistory.resetRecall()
+		m.threadInputHistory.ResetRecall()
 		m.threadInput, m.threadInputPos = replaceMentionInInput(m.threadInput, m.threadInputPos, mention)
 		m.updateThreadOverlays()
 		return
 	}
-	m.inputHistory.resetRecall()
+	m.inputHistory.ResetRecall()
 	m.input, m.inputPos = replaceMentionInInput(m.input, m.inputPos, mention)
 	m.updateInputOverlays()
 }
 
-func (m *channelModel) restoreMainSnapshot(snapshot composerSnapshot) {
-	m.input = append([]rune(nil), snapshot.input...)
-	m.inputPos = normalizeCursorPos(m.input, snapshot.pos)
+func (m *channelModel) restoreMainSnapshot(snapshot channelui.Snapshot) {
+	m.input = append([]rune(nil), snapshot.Input...)
+	m.inputPos = normalizeCursorPos(m.input, snapshot.Pos)
 	m.updateInputOverlays()
 }
 
-func (m *channelModel) restoreThreadSnapshot(snapshot composerSnapshot) {
-	m.threadInput = append([]rune(nil), snapshot.input...)
-	m.threadInputPos = normalizeCursorPos(m.threadInput, snapshot.pos)
+func (m *channelModel) restoreThreadSnapshot(snapshot channelui.Snapshot) {
+	m.threadInput = append([]rune(nil), snapshot.Input...)
+	m.threadInputPos = normalizeCursorPos(m.threadInput, snapshot.Pos)
 	m.updateThreadOverlays()
 }
 
