@@ -44,13 +44,18 @@ type SynthError struct {
 // StageBSynthResult is the JSON-serializable summary of a single synth pass.
 // Counts mirror ScanResult so callers can fold them into Stage A telemetry.
 type StageBSynthResult struct {
-	CandidatesScanned int          `json:"candidates_scanned"`
-	Synthesized       int          `json:"synthesized"`
-	Deduped           int          `json:"deduped"`
-	RejectedByGuard   int          `json:"rejected_by_guard"`
-	Errors            []SynthError `json:"errors,omitempty"`
-	DurationMs        int64        `json:"duration_ms"`
-	Trigger           string       `json:"trigger"`
+	CandidatesScanned int `json:"candidates_scanned"`
+	Synthesized       int `json:"synthesized"`
+	Deduped           int `json:"deduped"`
+	RejectedByGuard   int `json:"rejected_by_guard"`
+	// EnhancementCandidates counts candidates diverted into an
+	// "enhance_skill_proposal" interview by the similarity gate
+	// (writeSkillProposalLocked → errSkillSimilarToExisting). These are
+	// soft-skips, not errors and not new proposals.
+	EnhancementCandidates int          `json:"enhancement_candidates"`
+	Errors                []SynthError `json:"errors,omitempty"`
+	DurationMs            int64        `json:"duration_ms"`
+	Trigger               string       `json:"trigger"`
 }
 
 // stageBCandidateSource is the small interface SkillSynthesizer reads
@@ -228,6 +233,23 @@ func (s *SkillSynthesizer) runPass(ctx context.Context, trigger string, start ti
 		written, writeErr := s.broker.writeSkillProposalLocked(spec)
 		s.broker.mu.Unlock()
 		if writeErr != nil {
+			// Similarity gate diverted to enhance: emit an
+			// enhance_skill_proposal interview pointing at the existing
+			// skill, then count this candidate as an enhancement
+			// candidate (not an error, not a new synthesis).
+			var simErr *errSkillSimilarToExisting
+			if errors.As(writeErr, &simErr) {
+				s.emitEnhancementInterviewFromSentinel(spec, simErr)
+				slog.Info("skill_synthesizer: similarity gate diverted to enhance",
+					"candidate", spec.Name,
+					"existing", simErr.Slug,
+					"score", simErr.Score,
+					"method", simErr.Method,
+					"source", string(cand.Source),
+				)
+				res.EnhancementCandidates++
+				continue
+			}
 			// Fall through: the unified helper rejects guard verdicts
 			// stricter than the local check would, so a guard rejection at
 			// this layer is the same severity as the local one.
@@ -382,6 +404,28 @@ func isStageBGuardError(err error) bool {
 		return false
 	}
 	return strings.Contains(err.Error(), "skill_guard:")
+}
+
+// emitEnhancementInterviewFromSentinel appends an enhance_skill_proposal
+// interview for a Stage B candidate diverted by the similarity gate.
+// Mirrors the channel + now defaults that writeSkillProposalLocked applies
+// so the interview entry matches a successful proposal's shape.
+//
+// Acquires b.mu around appendSkillProposalRequestLocked because that
+// helper mutates b.requests + b.counter and its contract requires the
+// caller to hold the lock.
+func (s *SkillSynthesizer) emitEnhancementInterviewFromSentinel(spec teamSkill, simErr *errSkillSimilarToExisting) {
+	if simErr == nil {
+		return
+	}
+	channel := strings.TrimSpace(spec.Channel)
+	if channel == "" {
+		channel = "general"
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	s.broker.mu.Lock()
+	s.broker.appendSkillProposalRequestLocked(spec, channel, now, simErr.Slug)
+	s.broker.mu.Unlock()
 }
 
 // stageBSynthBudgetFromEnv returns the per-pass synth budget. Defaults to

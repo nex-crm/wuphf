@@ -348,6 +348,93 @@ func TestStageBSignalsFooter_RendersCitations(t *testing.T) {
 	}
 }
 
+// TestSynthesizeOnce_SimilarityDivertsToEnhance exercises the
+// errors.As(writeErr, &errSkillSimilarToExisting) wiring in SynthesizeOnce:
+// when writeSkillProposalLocked returns the sentinel, the synthesizer
+// must (a) NOT write the candidate to b.skills, (b) NOT count it as an
+// error or as Synthesized, (c) bump res.EnhancementCandidates, and
+// (d) append an enhance_skill_proposal interview pointing at the
+// existing skill's slug.
+func TestSynthesizeOnce_SimilarityDivertsToEnhance(t *testing.T) {
+	b := newTestBroker(t)
+
+	// Seed an active skill the candidate will collide with.
+	b.mu.Lock()
+	addSkill(b, "send-invoice-reminder", "Send the AR follow-up at d7.",
+		"candidate-text body that the embedder keys off.")
+	b.mu.Unlock()
+
+	// Stub embedder returns the same vector for both candidate and
+	// existing → cosine = 1.0, well above the enhance threshold (0.85).
+	v := l2norm([]float32{1, 0, 0})
+	b.skillEmbedder = staticVecEmbedder(v, v)
+
+	prov := &stubLLMProvider{
+		queue: []stubLLMResponse{{
+			fm: SkillFrontmatter{
+				Name:        "invoice-d7-reminder",
+				Description: "AR reminder for the d7 cohort.",
+			},
+			body: "## Steps\n1. Pull the AR list.\n2. Send the reminder.\n",
+		}},
+	}
+	cand := SkillCandidate{
+		Source:               SourceNotebookCluster,
+		SuggestedName:        "invoice-d7-reminder",
+		SuggestedDescription: "AR reminder for the d7 cohort.",
+		SignalCount:          2,
+		Excerpts: []SkillCandidateExcerpt{
+			{Path: "team/agents/csm/notebook/ar.md", Snippet: "AR followup", Author: "csm"},
+		},
+	}
+	synth := newSynthWithCandidates(t, b, prov, []SkillCandidate{cand})
+
+	requestsBefore := len(b.requests)
+
+	res, err := synth.SynthesizeOnce(context.Background(), "manual")
+	if err != nil {
+		t.Fatalf("SynthesizeOnce: %v", err)
+	}
+	if res.Synthesized != 0 {
+		t.Errorf("Synthesized: got %d, want 0 (sentinel must not count as a synth)", res.Synthesized)
+	}
+	if res.EnhancementCandidates != 1 {
+		t.Fatalf("EnhancementCandidates: got %d, want 1", res.EnhancementCandidates)
+	}
+	if len(res.Errors) != 0 {
+		t.Errorf("Errors: got %+v, want empty (similarity divert is not an error)", res.Errors)
+	}
+
+	// Candidate must NOT have been written.
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.findSkillByNameLocked("invoice-d7-reminder") != nil {
+		t.Error("similar candidate must not be written to b.skills on enhance verdict")
+	}
+
+	// An enhance_skill_proposal interview must have been appended pointing
+	// at the existing skill.
+	if got, want := len(b.requests), requestsBefore+1; got != want {
+		t.Fatalf("requests len: got %d, want %d", got, want)
+	}
+	last := b.requests[len(b.requests)-1]
+	if last.Kind != "enhance_skill_proposal" {
+		t.Errorf("interview kind: got %q, want enhance_skill_proposal", last.Kind)
+	}
+	if last.ReplyTo != "invoice-d7-reminder" {
+		t.Errorf("interview ReplyTo: got %q, want invoice-d7-reminder", last.ReplyTo)
+	}
+	if last.Channel == "" {
+		t.Error("interview channel must default to general, got empty")
+	}
+	if !strings.Contains(last.Title, "send-invoice-reminder") {
+		t.Errorf("interview title should reference the existing slug, got %q", last.Title)
+	}
+	if !strings.Contains(last.Question, "send-invoice-reminder") {
+		t.Errorf("interview question should reference the existing slug, got %q", last.Question)
+	}
+}
+
 func TestStageBProposalsTotalIncrementsOnSynth(t *testing.T) {
 	b := newTestBroker(t)
 	prov := &stubLLMProvider{
