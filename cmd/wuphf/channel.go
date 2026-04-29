@@ -84,32 +84,6 @@ type channelUsageMsg struct {
 	usage channelUsageState
 }
 
-func appendUniqueMessages(existing, incoming []brokerMessage) ([]brokerMessage, int) {
-	if len(incoming) == 0 {
-		return existing, 0
-	}
-	seen := make(map[string]struct{}, len(existing)+len(incoming))
-	out := make([]brokerMessage, 0, len(existing)+len(incoming))
-	for _, msg := range existing {
-		out = append(out, msg)
-		if strings.TrimSpace(msg.ID) != "" {
-			seen[msg.ID] = struct{}{}
-		}
-	}
-	added := 0
-	for _, msg := range incoming {
-		if id := strings.TrimSpace(msg.ID); id != "" {
-			if _, ok := seen[id]; ok {
-				continue
-			}
-			seen[id] = struct{}{}
-		}
-		out = append(out, msg)
-		added++
-	}
-	return out, added
-}
-
 type channelHealthMsg struct {
 	Connected     bool
 	SessionMode   string
@@ -2575,14 +2549,6 @@ type mouseAction struct {
 	Value string
 }
 
-func popupActionIndex(raw string) (int, bool) {
-	var idx int
-	if _, err := fmt.Sscanf(raw, "%d", &idx); err != nil || idx < 0 {
-		return 0, false
-	}
-	return idx, true
-}
-
 func (m channelModel) mouseActionAt(x, y int) (mouseAction, bool) {
 	if m.width == 0 || m.height == 0 || y >= m.height-1 {
 		return mouseAction{}, false
@@ -2880,10 +2846,6 @@ func (m channelModel) selectedInterviewOption() *channelInterviewOption {
 		return nil
 	}
 	return &m.pending.Options[m.selectedOption]
-}
-
-func formatUsd(cost float64) string {
-	return fmt.Sprintf("$%.2f", cost)
 }
 
 func renderUsageStrip(usage channelUsageState, members []channelMember, width int) string {

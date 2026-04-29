@@ -175,6 +175,11 @@
 //     side panels), LatestHumanFacingMessage (newest human_*-kind
 //     pointer or nil), CountUniqueAgents (distinct senders excluding
 //     "you" / "nex" / kind=="automation").
+//   - misc_helpers.go      — small pure helpers:
+//     AppendUniqueMessages (dedup-by-trimmed-ID merge, returns the
+//     added count), PopupActionIndex (parses the numeric token of a
+//     "popup_action_N" value), FormatUSD (two-decimal "$X.YZ"
+//     dollar-cost formatter).
 //
 // Subsequent extraction PRs will land the workspace / recovery / cache
 // cluster, the sidebar / splash, the broker integrations, and finally

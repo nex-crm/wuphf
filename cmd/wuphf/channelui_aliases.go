@@ -240,6 +240,10 @@ var (
 	filterInsightMessages    = channelui.FilterInsightMessages
 	latestHumanFacingMessage = channelui.LatestHumanFacingMessage
 	countUniqueAgents        = channelui.CountUniqueAgents
+
+	appendUniqueMessages = channelui.AppendUniqueMessages
+	popupActionIndex     = channelui.PopupActionIndex
+	formatUsd            = channelui.FormatUSD
 )
 
 // Channel-confirm action typed-string consts.
