@@ -4,9 +4,9 @@
 // half-block characters (▀▄█) so two pixel rows occupy one terminal row.
 // Known slugs ("ceo", "pm", "fe", …) get hand-designed sprites; unknown
 // slugs get a deterministic procedural composition seeded by the slug.
-// The package is intentionally free of any TUI/state dependency: callers
-// pass an accent hex color so the avatar layer doesn't reach into
-// channel-side palettes.
+// The package is intentionally free of any TUI / channel-state
+// dependency — every public function takes only a slug (and frame for
+// animation) and resolves its palette internally.
 package avatar
 
 import (
@@ -354,45 +354,16 @@ func parseHexColor(hex string) [3]int {
 }
 
 // PaletteForSlug returns the per-pixel-index color map for an avatar.
-// Known slugs (ceo, pm, fe, …) and procedural slugs use a fixed palette
-// derived from the slug itself; for any other slug the caller-supplied
-// accentHex (e.g. "#3B82F6") drives the accent channel and the hair color
-// is derived from it. Pass "" to fall back to a neutral default accent.
-func PaletteForSlug(slug, accentHex string) map[int][3]int {
+// The known office roster (ceo, pm, fe, …) uses the hand-tuned palettes
+// shipped with each sprite; every other slug routes through the
+// procedural palette generator (which derives skin/hair/accent
+// independently from a hash of the slug). Together those two branches
+// cover every input — there is no third path.
+func PaletteForSlug(slug string) map[int][3]int {
 	if sprite, ok := knownOfficeSpriteForSlug(slug); ok {
 		return sprite.Palette
 	}
-
-	// Unknown slugs get a fully procedural palette (hash picks skin/hair/accent
-	// independently) to match proceduralSpriteForSlug.
-	if isProceduralSlug(slug) {
-		return proceduralPaletteForSlug(slug)
-	}
-	accent := parseHexColor(accentHex)
-	if accent == ([3]int{}) {
-		accent = [3]int{88, 166, 255}
-	}
-	// Hair color: darker version of accent
-	hair := [3]int{
-		max(0, accent[0]-60),
-		max(0, accent[1]-60),
-		max(0, accent[2]-60),
-	}
-	return map[int][3]int{
-		pxLine:      {36, 32, 30},    // dark outline
-		pxSkin:      {235, 215, 190}, // warm skin
-		pxAccent:    accent,
-		pxHair:      hair,
-		pxProp:      {180, 170, 155}, // neutral prop color
-		pxHighlight: {255, 255, 255}, // white highlights
-	}
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
+	return proceduralPaletteForSlug(slug)
 }
 
 // ── Half-block renderer ─────────────────────────────────────────
@@ -449,20 +420,18 @@ func SpriteForSlug(slug string, frame ...int) Sprite {
 }
 
 // RenderSplashAvatar renders a full-body character for the splash
-// screen. frame alternates 0/1 for animation. accentHex is the agent's
-// brand color (e.g. "#3B82F6") and is only consulted for slugs not in
-// the known/procedural set.
-func RenderSplashAvatar(seed, slug string, frame int, accentHex string) []string {
-	_ = seed
+// screen. frame alternates 0/1 for animation; the palette is fully
+// determined by the slug.
+func RenderSplashAvatar(slug string, frame int) []string {
 	sprite := spriteForSlug(slug, frame)
-	return RenderToANSI(sprite, PaletteForSlug(slug, accentHex))
+	return RenderToANSI(sprite, PaletteForSlug(slug))
 }
 
 // RenderAvatar renders a small face-portrait avatar for inline use in
-// sidebars/composer/etc. accentHex is the agent's brand color (only
-// consulted for non-known, non-procedural slugs).
-func RenderAvatar(seed, slug string, frame int, accentHex string) []string {
-	_ = seed
+// sidebars / composer / etc. Known office roster slugs use the
+// hand-designed portrait sprite; other slugs render the head row of
+// their full body sprite with the procedural palette.
+func RenderAvatar(slug string, frame int) []string {
 	if sprite, ok := knownOfficeSpriteForSlug(slug); ok {
 		return RenderToANSI(sprite.Portrait, sprite.Palette)
 	}
@@ -471,9 +440,9 @@ func RenderAvatar(seed, slug string, frame int, accentHex string) []string {
 	full := spriteForSlug(slug, frame)
 	if len(full) > 6 {
 		head := full[:6]
-		return RenderToANSI(head, PaletteForSlug(slug, accentHex))
+		return RenderToANSI(head, PaletteForSlug(slug))
 	}
-	return RenderToANSI(full, PaletteForSlug(slug, accentHex))
+	return RenderToANSI(full, PaletteForSlug(slug))
 }
 
 // SpriteCEO returns a clone of the canonical CEO sprite. The splash
