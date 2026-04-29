@@ -26,6 +26,7 @@ vi.mock("../../api/client", async () => {
   };
 });
 
+import * as clientMod from "../../api/client";
 import { OwnersChip, SkillsApp } from "./SkillsApp";
 
 function wrap(ui: ReactNode) {
@@ -50,6 +51,44 @@ describe("<SkillsApp> empty state", () => {
       .getAllByRole("button")
       .filter((b) => /Compile/.test(b.textContent ?? ""));
     expect(buttons.length).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe("<SkillsApp> similar_to_existing badge", () => {
+  it("shows a similar-to indicator on proposed skills flagged by the similarity gate", async () => {
+    vi.mocked(clientMod.getSkillsList).mockResolvedValueOnce({
+      skills: [
+        {
+          name: "send-email",
+          status: "proposed",
+          description: "Send emails",
+          similar_to_existing: {
+            slug: "email-ops",
+            score: 0.82,
+            method: "embedding-cosine",
+          },
+        },
+      ],
+    });
+
+    render(wrap(<SkillsApp />));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Similar to:/i)).toBeInTheDocument();
+      expect(screen.getByText("email-ops")).toBeInTheDocument();
+    });
+  });
+
+  it("does not show a similar-to indicator on proposed skills without the flag", async () => {
+    vi.mocked(clientMod.getSkillsList).mockResolvedValueOnce({
+      skills: [{ name: "clean-skill", status: "proposed" }],
+    });
+
+    render(wrap(<SkillsApp />));
+
+    await waitFor(() => {
+      expect(screen.queryByText(/Similar to:/i)).not.toBeInTheDocument();
+    });
   });
 });
 

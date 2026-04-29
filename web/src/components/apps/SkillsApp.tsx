@@ -1442,6 +1442,29 @@ function SkillCard({
 
       {isProposed ? (
         <>
+          {skill.similar_to_existing ? (
+            <div
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "3px 8px",
+                marginBottom: 8,
+                background: "var(--bg-warm, var(--neutral-50))",
+                border: "1px solid var(--border)",
+                borderRadius: 4,
+                fontSize: 12,
+                color: "var(--text-secondary)",
+              }}
+              title={`Similarity score: ${Math.round(skill.similar_to_existing.score * 100)}% (${skill.similar_to_existing.method ?? ""})`}
+            >
+              <span aria-hidden="true">≈</span>
+              Similar to:{" "}
+              <strong style={{ fontFamily: "var(--font-mono)" }}>
+                {skill.similar_to_existing.slug}
+              </strong>
+            </div>
+          ) : null}
           <ProposedPreviewBody skill={skill} />
           <button
             type="button"
