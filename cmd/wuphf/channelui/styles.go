@@ -1,30 +1,30 @@
-package main
+package channelui
 
 import "github.com/charmbracelet/lipgloss"
 
 // ── Slack dark-theme palette ────────────────────────────────────────
 const (
-	slackSidebarBg   = "#19171D"
-	slackMainBg      = "#1F1D24"
-	slackThreadBg    = "#18171D"
-	slackBorder      = "#2A2830"
-	slackActive      = "#1264A3"
-	slackHover       = "#2B2931"
-	slackText        = "#E8E8EA"
-	slackMuted       = "#A6A6AC"
-	slackTimestamp   = "#616164"
-	slackDivider     = "#34313B"
-	slackMentionBg   = "#E8912D"
-	slackMentionText = "#F2C744"
-	slackOnline      = "#2BAC76"
-	slackAway        = "#E8912D"
-	slackBusy        = "#8B5CF6"
-	slackInputBorder = "#565856"
-	slackInputFocus  = "#1264A3"
+	SlackSidebarBg   = "#19171D"
+	SlackMainBg      = "#1F1D24"
+	SlackThreadBg    = "#18171D"
+	SlackBorder      = "#2A2830"
+	SlackActive      = "#1264A3"
+	SlackHover       = "#2B2931"
+	SlackText        = "#E8E8EA"
+	SlackMuted       = "#A6A6AC"
+	SlackTimestamp   = "#616164"
+	SlackDivider     = "#34313B"
+	SlackMentionBg   = "#E8912D"
+	SlackMentionText = "#F2C744"
+	SlackOnline      = "#2BAC76"
+	SlackAway        = "#E8912D"
+	SlackBusy        = "#8B5CF6"
+	SlackInputBorder = "#565856"
+	SlackInputFocus  = "#1264A3"
 )
 
-// agentColorMap maps agent slugs to their brand colors.
-var agentColorMap = map[string]string{
+// AgentColorMap maps agent slugs to their brand colors.
+var AgentColorMap = map[string]string{
 	"all":      "#FFFFFF",
 	"ceo":      "#EAB308",
 	"pm":       "#22C55E",
@@ -39,67 +39,67 @@ var agentColorMap = map[string]string{
 	"human":    "#38BDF8",
 }
 
-// statusDotColors maps activity states to dot colors.
-var statusDotColors = map[string]string{
-	"talking":  slackOnline,
-	"thinking": slackAway,
-	"coding":   slackBusy,
-	"idle":     slackMuted,
+// StatusDotColors maps activity states to dot colors.
+var StatusDotColors = map[string]string{
+	"talking":  SlackOnline,
+	"thinking": SlackAway,
+	"coding":   SlackBusy,
+	"idle":     SlackMuted,
 }
 
 // ── Style constructors ──────────────────────────────────────────────
 
-func sidebarStyle(width, height int) lipgloss.Style {
+func SidebarStyle(width, height int) lipgloss.Style {
 	return lipgloss.NewStyle().
 		Width(width).
 		Height(height).
-		Background(lipgloss.Color(slackSidebarBg)).
-		Foreground(lipgloss.Color(slackText)).
+		Background(lipgloss.Color(SlackSidebarBg)).
+		Foreground(lipgloss.Color(SlackText)).
 		Padding(1, 1)
 }
 
-func mainPanelStyle(width, height int) lipgloss.Style {
+func MainPanelStyle(width, height int) lipgloss.Style {
 	return lipgloss.NewStyle().
 		Width(width).
 		MaxWidth(width).
 		Height(height).
-		Background(lipgloss.Color(slackMainBg)).
-		Foreground(lipgloss.Color(slackText))
+		Background(lipgloss.Color(SlackMainBg)).
+		Foreground(lipgloss.Color(SlackText))
 }
 
-func threadPanelStyle(width, height int) lipgloss.Style {
+func ThreadPanelStyle(width, height int) lipgloss.Style {
 	return lipgloss.NewStyle().
 		Width(width).
 		Height(height).
-		Background(lipgloss.Color(slackThreadBg)).
-		Foreground(lipgloss.Color(slackText)).
+		Background(lipgloss.Color(SlackThreadBg)).
+		Foreground(lipgloss.Color(SlackText)).
 		Padding(1, 1)
 }
 
-func statusBarStyle(width int) lipgloss.Style {
+func StatusBarStyle(width int) lipgloss.Style {
 	return lipgloss.NewStyle().
 		Width(width).
-		Background(lipgloss.Color(slackSidebarBg)).
-		Foreground(lipgloss.Color(slackMuted)).
+		Background(lipgloss.Color(SlackSidebarBg)).
+		Foreground(lipgloss.Color(SlackMuted)).
 		Padding(0, 1)
 }
 
-func channelHeaderStyle(width int) lipgloss.Style {
+func ChannelHeaderStyle(width int) lipgloss.Style {
 	return lipgloss.NewStyle().
 		Width(width).
-		Background(lipgloss.Color(slackMainBg)).
-		Foreground(lipgloss.Color(slackText)).
+		Background(lipgloss.Color(SlackMainBg)).
+		Foreground(lipgloss.Color(SlackText)).
 		Bold(true).
 		Padding(0, 2, 1, 2).
 		BorderStyle(lipgloss.NormalBorder()).
 		BorderBottom(true).
-		BorderForeground(lipgloss.Color(slackBorder))
+		BorderForeground(lipgloss.Color(SlackBorder))
 }
 
-func composerBorderStyle(width int, focused bool) lipgloss.Style {
-	borderColor := slackInputBorder
+func ComposerBorderStyle(width int, focused bool) lipgloss.Style {
+	borderColor := SlackInputBorder
 	if focused {
-		borderColor = slackInputFocus
+		borderColor = SlackInputFocus
 	}
 	return lipgloss.NewStyle().
 		Width(width).
@@ -110,50 +110,50 @@ func composerBorderStyle(width int, focused bool) lipgloss.Style {
 		Padding(0, 1)
 }
 
-func timestampStyle() lipgloss.Style {
+func TimestampStyle() lipgloss.Style {
 	return lipgloss.NewStyle().
-		Foreground(lipgloss.Color(slackTimestamp))
+		Foreground(lipgloss.Color(SlackTimestamp))
 }
 
-func mutedTextStyle() lipgloss.Style {
+func MutedTextStyle() lipgloss.Style {
 	return lipgloss.NewStyle().
-		Foreground(lipgloss.Color(slackMuted))
+		Foreground(lipgloss.Color(SlackMuted))
 }
 
-func agentNameStyle(slug string) lipgloss.Style {
-	color := agentColorMap[slug]
+func AgentNameStyle(slug string) lipgloss.Style {
+	color := AgentColorMap[slug]
 	if color == "" {
-		color = slackMuted
+		color = SlackMuted
 	}
 	return lipgloss.NewStyle().
 		Foreground(lipgloss.Color(color)).
 		Bold(true)
 }
 
-func activeChannelStyle() lipgloss.Style {
+func ActiveChannelStyle() lipgloss.Style {
 	return lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#FFFFFF")).
 		Bold(true).
 		BorderStyle(lipgloss.ThickBorder()).
 		BorderLeft(true).
-		BorderForeground(lipgloss.Color(slackActive)).
+		BorderForeground(lipgloss.Color(SlackActive)).
 		PaddingLeft(1)
 }
 
-func dateSeparatorStyle() lipgloss.Style {
+func DateSeparatorStyle() lipgloss.Style {
 	return lipgloss.NewStyle().
-		Foreground(lipgloss.Color(slackDivider)).
+		Foreground(lipgloss.Color(SlackDivider)).
 		Bold(true)
 }
 
-func threadIndicatorStyle() lipgloss.Style {
+func ThreadIndicatorStyle() lipgloss.Style {
 	return lipgloss.NewStyle().
-		Foreground(lipgloss.Color(slackActive)).
+		Foreground(lipgloss.Color(SlackActive)).
 		Bold(true).
 		Underline(true)
 }
 
-func agentAvatar(slug string) string {
+func AgentAvatar(slug string) string {
 	switch slug {
 	case "ceo":
 		return "◆"
@@ -180,7 +180,7 @@ func agentAvatar(slug string) string {
 	}
 }
 
-func mascotAccent(slug string) string {
+func MascotAccent(slug string) string {
 	switch slug {
 	case "ceo":
 		return "⌐"
@@ -207,7 +207,7 @@ func mascotAccent(slug string) string {
 	}
 }
 
-func mascotEyes(slug string) (string, string) {
+func MascotEyes(slug string) (string, string) {
 	switch slug {
 	case "ceo":
 		return "■", "■"
@@ -222,7 +222,7 @@ func mascotEyes(slug string) (string, string) {
 	}
 }
 
-func mascotMouth(activity string, frame int) string {
+func MascotMouth(activity string, frame int) string {
 	switch activity {
 	case "talking":
 		if frame%2 == 0 {
@@ -247,7 +247,7 @@ func mascotMouth(activity string, frame int) string {
 	}
 }
 
-func mascotTop(activity string, frame int) string {
+func MascotTop(activity string, frame int) string {
 	switch activity {
 	case "talking":
 		if frame%2 == 0 {
@@ -264,7 +264,7 @@ func mascotTop(activity string, frame int) string {
 	}
 }
 
-func mascotProp(slug string) string {
+func MascotProp(slug string) string {
 	switch slug {
 	case "ceo":
 		return "$"
@@ -291,47 +291,30 @@ func mascotProp(slug string) string {
 	}
 }
 
-func mascotLines(slug, activity string, frame int) [3]string {
-	leftEye, rightEye := mascotEyes(slug)
-	face := "(" + leftEye + mascotMouth(activity, frame) + rightEye + ")"
-	body := " /|" + mascotProp(slug) + "\\ "
+func MascotLines(slug, activity string, frame int) [3]string {
+	leftEye, rightEye := MascotEyes(slug)
+	face := "(" + leftEye + MascotMouth(activity, frame) + rightEye + ")"
+	body := " /|" + MascotProp(slug) + "\\ "
 	return [3]string{
-		mascotTop(activity, frame),
+		MascotTop(activity, frame),
 		face,
 		body,
 	}
 }
 
-// agentCharacter returns a compact mascot-like face for inline use.
+// AgentCharacter returns a compact mascot-like face for inline use.
 // WUPHF uses one coherent visual grammar: a role accent + a rounded face.
-func agentCharacter(slug, activity string, frame int) string {
-	leftEye, rightEye := mascotEyes(slug)
-	return mascotAccent(slug) + "(" + leftEye + mascotMouth(activity, frame) + rightEye + ")"
+func AgentCharacter(slug, activity string, frame int) string {
+	leftEye, rightEye := MascotEyes(slug)
+	return MascotAccent(slug) + "(" + leftEye + MascotMouth(activity, frame) + rightEye + ")"
 }
 
-func appIcon(app officeApp) string {
-	switch app {
-	case officeAppTasks:
-		return "☑"
-	case officeAppPolicies:
-		return "✦"
-	case officeAppCalendar:
-		return "◷"
-	case officeAppSkills:
-		return "⚡"
-	case officeAppMessages:
-		return "•"
-	default:
-		return "#"
-	}
-}
-
-func accentPill(label, color string) string {
+func AccentPill(label, color string) string {
 	if label == "" {
 		return ""
 	}
 	if color == "" {
-		color = slackActive
+		color = SlackActive
 	}
 	return lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#FFFFFF")).
@@ -341,15 +324,15 @@ func accentPill(label, color string) string {
 		Render(label)
 }
 
-func subtlePill(label, fg, bg string) string {
+func SubtlePill(label, fg, bg string) string {
 	if label == "" {
 		return ""
 	}
 	if fg == "" {
-		fg = slackText
+		fg = SlackText
 	}
 	if bg == "" {
-		bg = slackHover
+		bg = SlackHover
 	}
 	return lipgloss.NewStyle().
 		Foreground(lipgloss.Color(fg)).
@@ -358,34 +341,34 @@ func subtlePill(label, fg, bg string) string {
 		Render(label)
 }
 
-func taskStatusPill(status string) string {
+func TaskStatusPill(status string) string {
 	switch status {
 	case "in_progress":
-		return accentPill("moving", "#D97706")
+		return AccentPill("moving", "#D97706")
 	case "review":
-		return accentPill("review", "#2563EB")
+		return AccentPill("review", "#2563EB")
 	case "blocked":
-		return accentPill("blocked", "#B91C1C")
+		return AccentPill("blocked", "#B91C1C")
 	case "done":
-		return accentPill("done", "#15803D")
+		return AccentPill("done", "#15803D")
 	default:
-		return subtlePill("open", "#CBD5E1", "#334155")
+		return SubtlePill("open", "#CBD5E1", "#334155")
 	}
 }
 
-func requestKindPill(kind string) string {
+func RequestKindPill(kind string) string {
 	switch kind {
 	case "approval":
-		return accentPill("approval", "#B45309")
+		return AccentPill("approval", "#B45309")
 	case "confirm":
-		return accentPill("confirm", "#1D4ED8")
+		return AccentPill("confirm", "#1D4ED8")
 	case "secret":
-		return accentPill("private", "#7C3AED")
+		return AccentPill("private", "#7C3AED")
 	case "freeform":
-		return subtlePill("open question", "#E5E7EB", "#374151")
+		return SubtlePill("open question", "#E5E7EB", "#374151")
 	case "interview":
-		return subtlePill("interview", "#F8FAFC", "#4B5563")
+		return SubtlePill("interview", "#F8FAFC", "#4B5563")
 	default:
-		return subtlePill(kind, "#E5E7EB", "#374151")
+		return SubtlePill(kind, "#E5E7EB", "#374151")
 	}
 }
