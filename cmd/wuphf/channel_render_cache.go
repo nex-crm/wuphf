@@ -172,13 +172,6 @@ func (m channelModel) hashMainLinesState(contentWidth int) uint64 {
 	return h.sum()
 }
 
-func renderTimeBucket(activeApp officeApp, direct bool) int64 {
-	if direct || activeApp == officeAppMessages {
-		return time.Now().Unix()
-	}
-	return time.Now().Unix() / 30
-}
-
 func hashSidebarState(channels []channelInfo, members []channelMember, tasks []channelTask, activeChannel string, activeApp officeApp, cursor int, rosterOffset int, focused bool, quickJump quickJumpTarget, workspace workspaceUIState, width, height int) uint64 {
 	h := newStateHasher()
 	h.add("sidebar")
@@ -213,24 +206,6 @@ func hashSidebarState(channels []channelInfo, members []channelMember, tasks []c
 	h.addMembers(members)
 	h.addTasks(tasks)
 	return h.sum()
-}
-
-func cloneRenderedLines(lines []renderedLine) []renderedLine {
-	if len(lines) == 0 {
-		return nil
-	}
-	out := make([]renderedLine, len(lines))
-	copy(out, lines)
-	return out
-}
-
-func cloneThreadedMessages(items []threadedMessage) []threadedMessage {
-	if len(items) == 0 {
-		return nil
-	}
-	out := make([]threadedMessage, len(items))
-	copy(out, items)
-	return out
 }
 
 func (c *channelRenderCacheStore) getMainLines(key uint64) ([]renderedLine, bool) {

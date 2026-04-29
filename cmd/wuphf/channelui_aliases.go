@@ -132,6 +132,10 @@ var (
 	defaultHumanMessageTitle = channelui.DefaultHumanMessageTitle
 	sliceRenderedLines       = channelui.SliceRenderedLines
 	formatTokenCount         = channelui.FormatTokenCount
+
+	cloneRenderedLines    = channelui.CloneRenderedLines
+	cloneThreadedMessages = channelui.CloneThreadedMessages
+	renderTimeBucket      = channelui.RenderTimeBucket
 )
 
 // Calendar-range typed-string consts.

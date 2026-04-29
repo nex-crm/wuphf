@@ -73,6 +73,11 @@
 //     messages), DefaultHumanMessageTitle (fallback titles for
 //     human_* kinds), SliceRenderedLines (viewport windowing) and
 //     FormatTokenCount (compact "1.2M tok" formatter).
+//   - cache_helpers.go     — leaf render-cache helpers:
+//     CloneRenderedLines / CloneThreadedMessages (defensive copies
+//     for cached snapshots) and RenderTimeBucket (per-second
+//     bucket for direct DMs and the messages app, per-30s
+//     elsewhere).
 //
 // Subsequent extraction PRs will land the workspace / recovery / cache
 // cluster, the sidebar / splash, the broker integrations, and finally
