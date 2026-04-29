@@ -47,6 +47,8 @@
 //   - build_lines_simple.go — leaf "build*Lines" rendering helpers
 //     for the requests and skills apps (BuildRequestLines,
 //     BuildSkillLines).
+//   - build_lines_policy_task.go — "build*Lines" rendering helpers for
+//     the policies and tasks apps (BuildPolicyLines, BuildTaskLines).
 //
 // Subsequent extraction PRs will land the workspace / recovery / cache
 // cluster, the sidebar / splash, the broker integrations, and finally

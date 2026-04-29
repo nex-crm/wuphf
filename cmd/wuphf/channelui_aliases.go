@@ -89,6 +89,8 @@ var (
 
 	buildRequestLines = channelui.BuildRequestLines
 	buildSkillLines   = channelui.BuildSkillLines
+	buildPolicyLines  = channelui.BuildPolicyLines
+	buildTaskLines    = channelui.BuildTaskLines
 )
 
 // Office-app constant aliases. Typed-string consts copy across packages
