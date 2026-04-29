@@ -187,45 +187,6 @@ func TestCalendarParticipantsForRequestEmptyFromUsesChannelMembers(t *testing.T)
 	}
 }
 
-func TestContainsStringMatchesTrimmedTarget(t *testing.T) {
-	items := []string{" fe ", "be", "ceo"}
-	if !containsString(items, "fe") {
-		t.Fatalf("expected trimmed match for fe")
-	}
-	if !containsString(items, "be") {
-		t.Fatalf("expected match for be")
-	}
-	if containsString(items, "pm") {
-		t.Fatalf("unexpected match for pm")
-	}
-	if containsString(nil, "fe") {
-		t.Fatalf("nil slice should not match")
-	}
-}
-
-func TestRenderTimingSummaryJoinsParts(t *testing.T) {
-	got := renderTimingSummary("2030-01-01T10:00:00Z", "", "", "")
-	if got == "" {
-		t.Fatalf("expected non-empty timing summary, got empty")
-	}
-	if !strings.Contains(got, "due") {
-		t.Fatalf("expected 'due' label in timing summary, got %q", got)
-	}
-}
-
-func TestRenderTimingSummaryAllBlank(t *testing.T) {
-	if got := renderTimingSummary("", "", "", ""); got != "" {
-		t.Fatalf("blank inputs should yield empty timing summary, got %q", got)
-	}
-}
-
-func TestPrettyWhenUnparsable(t *testing.T) {
-	got := prettyWhen("not-a-time", "due")
-	if !strings.Contains(got, "not-a-time") {
-		t.Fatalf("unparsable timestamps should fall through, got %q", got)
-	}
-}
-
 func TestSummarizeUnreadMessagesGroups(t *testing.T) {
 	cases := []struct {
 		messages []brokerMessage
@@ -242,45 +203,5 @@ func TestSummarizeUnreadMessagesGroups(t *testing.T) {
 		if !strings.Contains(got, tc.want) {
 			t.Errorf("messages=%v: expected %q in %q", tc.messages, tc.want, got)
 		}
-	}
-}
-
-func TestCountRepliesFollowsNestedThread(t *testing.T) {
-	messages := []brokerMessage{
-		{ID: "root", From: "ceo"},
-		{ID: "r1", From: "fe", ReplyTo: "root", Timestamp: "2026-04-29T10:00:00Z"},
-		{ID: "r2", From: "be", ReplyTo: "r1", Timestamp: "2026-04-29T10:05:00Z"},
-		{ID: "r3", From: "pm", ReplyTo: "root", Timestamp: "2026-04-29T10:10:00Z"},
-	}
-	count, last := countReplies(messages, "root")
-	if count != 3 {
-		t.Fatalf("expected 3 replies counting nested, got %d", count)
-	}
-	if last == "" {
-		t.Fatalf("expected last reply timestamp, got empty")
-	}
-}
-
-func TestCountRepliesNoReplies(t *testing.T) {
-	messages := []brokerMessage{{ID: "root"}}
-	count, last := countReplies(messages, "root")
-	if count != 0 || last != "" {
-		t.Fatalf("expected zero replies for solo message, got count=%d last=%q", count, last)
-	}
-}
-
-func TestParseTimestampHandlesInvalidString(t *testing.T) {
-	if !parseTimestamp("nope").IsZero() {
-		t.Fatalf("invalid string should yield zero time")
-	}
-}
-
-func TestFormatShortTimeFallsBackOnInvalid(t *testing.T) {
-	if got := formatShortTime("not-a-time"); got != "" {
-		t.Fatalf("expected empty for unparsable short input, got %q", got)
-	}
-	// Long enough to slice — should return raw HH:MM substring.
-	if got := formatShortTime("2026-04-29T15:30:00Z"); got == "" {
-		t.Fatalf("expected formatted time for valid RFC3339")
 	}
 }

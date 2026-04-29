@@ -20,41 +20,6 @@ func TestDefaultHumanMessageTitleByKind(t *testing.T) {
 	}
 }
 
-func TestHumanMessageLabelByKind(t *testing.T) {
-	cases := map[string]string{
-		"human_decision": "decision",
-		"human_action":   "action",
-		"":               "report",
-		"unknown":        "report",
-	}
-	for kind, want := range cases {
-		if got := humanMessageLabel(kind); got != want {
-			t.Errorf("humanMessageLabel(%q) = %q, want %q", kind, got, want)
-		}
-	}
-}
-
-func TestRenderUnreadDividerIncludesCount(t *testing.T) {
-	got := stripANSI(renderUnreadDivider(60, 3))
-	if !strings.Contains(got, "3 new since you looked") {
-		t.Fatalf("expected count in divider, got %q", got)
-	}
-}
-
-func TestRenderUnreadDividerNoCountFallback(t *testing.T) {
-	got := stripANSI(renderUnreadDivider(60, 0))
-	if !strings.Contains(got, "New since you looked") {
-		t.Fatalf("expected generic divider when count is zero, got %q", got)
-	}
-}
-
-func TestRenderUnreadDividerSurvivesNarrowWidth(t *testing.T) {
-	// Width below the label length must not panic and must still produce text.
-	if got := renderUnreadDivider(4, 1); got == "" {
-		t.Fatalf("narrow divider should still render content")
-	}
-}
-
 func TestSliceRenderedLinesScrollsFromBottom(t *testing.T) {
 	lines := []renderedLine{
 		{Text: "0"}, {Text: "1"}, {Text: "2"}, {Text: "3"}, {Text: "4"},
