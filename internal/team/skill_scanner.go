@@ -457,9 +457,13 @@ func inferOwnerAgentsFromPath(relPath string, frontmatterOwners []string) []stri
 		// Defensive copy: callers must be free to mutate the result without
 		// touching the parsed frontmatter.
 		out := append([]string(nil), frontmatterOwners...)
-		slog.Info("path_inference_overridden",
+		// Debug only: explicit frontmatter owners is the NORMAL case for
+		// human-authored skills, not an anomaly worth a structured INFO line
+		// on every promote.
+		slog.Debug("skill_scanner: path_inference",
 			"path", relPath,
 			"frontmatter_owners", out,
+			"winner", "frontmatter",
 		)
 		return out
 	}
