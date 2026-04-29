@@ -22,7 +22,6 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/x/ansi"
 
 	"github.com/nex-crm/wuphf/cmd/wuphf/channelui"
 	"github.com/nex-crm/wuphf/internal/brokeraddr"
@@ -3401,14 +3400,6 @@ func (m channelModel) updateSidebar(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func appendWrapped(lines []string, width int, text string) []string {
-	if width <= 0 {
-		return append(lines, strings.Split(text, "\n")...)
-	}
-	wrapped := ansi.Wrap(text, width, "")
-	return append(lines, strings.Split(wrapped, "\n")...)
-}
-
 type sidebarItem struct {
 	Kind  string
 	Value string
@@ -3876,13 +3867,6 @@ func (req channelInterview) TitleOrQuestion() string {
 	return req.Question
 }
 
-func truncateText(s string, max int) string {
-	if len(s) <= max {
-		return s
-	}
-	return s[:max] + "…"
-}
-
 func hasThreadReplies(messages []brokerMessage, id string) bool {
 	for _, msg := range messages {
 		if msg.ReplyTo == id {
@@ -4069,17 +4053,6 @@ func roleLabel(slug string) string {
 	default:
 		return "teammate"
 	}
-}
-
-func renderDateSeparator(width int, label string) string {
-	lineWidth := width - len(label) - 8
-	if lineWidth < 4 {
-		lineWidth = 4
-	}
-	segment := strings.Repeat("─", lineWidth/2)
-	return lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#64748B")).
-		Render(fmt.Sprintf("%s  %s  %s", segment, label, segment))
 }
 
 func inferMood(text string) string {

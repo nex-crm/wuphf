@@ -95,33 +95,6 @@ func buildOneOnOneMessageLines(messages []brokerMessage, expanded map[string]boo
 	return buildOfficeMessageLines(messages, expanded, contentWidth, true, unreadAnchorID, unreadCount)
 }
 
-func renderUnreadDivider(contentWidth int, unreadCount int) string {
-	label := " New since you looked "
-	if unreadCount > 0 {
-		label = fmt.Sprintf(" %d new since you looked ", unreadCount)
-	}
-	lineLen := contentWidth - len(label) - 2
-	if lineLen < 4 {
-		lineLen = 4
-	}
-	left := strings.Repeat("─", lineLen/2)
-	right := strings.Repeat("─", lineLen-lineLen/2)
-	return lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#93C5FD")).
-		Render("  " + left + label + right)
-}
-
-func humanMessageLabel(kind string) string {
-	switch strings.TrimSpace(kind) {
-	case "human_decision":
-		return "decision"
-	case "human_action":
-		return "action"
-	default:
-		return "report"
-	}
-}
-
 func defaultHumanMessageTitle(kind, from string) string {
 	switch strings.TrimSpace(kind) {
 	case "human_decision":
@@ -339,14 +312,6 @@ func displaySignalKind(signal channelSignal) string {
 		return "Human directive"
 	}
 	return kind
-}
-
-func displayDecisionSummary(summary string) string {
-	summary = strings.TrimSpace(summary)
-	if strings.HasPrefix(summary, "Human directed the office:") {
-		return strings.Replace(summary, "Human directed the office:", "Human directive:", 1)
-	}
-	return summary
 }
 
 func buildTaskLines(tasks []channelTask, contentWidth int) []renderedLine {
@@ -773,10 +738,6 @@ func buildCalendarToolbar(viewRange calendarRange, filterSlug string) string {
 		filterLabel = displayName(filterSlug)
 	}
 	return "  " + mutedText("d") + " " + day + "   " + mutedText("w") + " " + week + "   " + mutedText("f") + " " + subtlePill(filterLabel, "#E2E8F0", "#334155") + "   " + mutedText("a reset")
-}
-
-func mutedText(label string) string {
-	return lipgloss.NewStyle().Foreground(lipgloss.Color(slackMuted)).Render(label)
 }
 
 type calendarEvent struct {

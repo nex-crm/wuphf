@@ -42,4 +42,12 @@ var (
 	prettyWhen          = channelui.PrettyWhen
 	prettyRelativeTime  = channelui.PrettyRelativeTime
 	renderTimingSummary = channelui.RenderTimingSummary
+
+	appendWrapped          = channelui.AppendWrapped
+	truncateText           = channelui.TruncateText
+	mutedText              = channelui.MutedText
+	renderDateSeparator    = channelui.RenderDateSeparator
+	humanMessageLabel      = channelui.HumanMessageLabel
+	renderUnreadDivider    = channelui.RenderUnreadDivider
+	displayDecisionSummary = channelui.DisplayDecisionSummary
 )
