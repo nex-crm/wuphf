@@ -251,6 +251,15 @@
 //     terminal statuses), CountIsolatedRuntimeTasks (counts tasks
 //     in a "local_worktree" execution mode or with a non-empty
 //     WorktreePath / WorktreeBranch).
+//   - artifact_renderers.go — execution-artifacts subsection
+//     renderers: RenderArtifactSection (date separator + per-
+//     artifact card with TaskID / RequestID click-target wiring
+//     on the first line of Task/TaskLog/Request artifacts),
+//     RenderArtifactHeader ("<clock pill> <lifecycle pill>
+//     <bold title>" + accent color picked by kind/state), and
+//     ArtifactExtraLines (the optional progress / output / owner
+//     / channel / worktree / path / related-id / blocking /
+//     review / resume rows).
 //   - runtime_builders.go  — runtime-strip + live-work builders:
 //     MemberRuntimeSummary struct, DeriveMemberRuntimeSummary
 //     (per-member activity classification + meta detail + thought

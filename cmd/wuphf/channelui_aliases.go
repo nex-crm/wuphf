@@ -302,6 +302,10 @@ var (
 	buildDirectExecutionLines  = channelui.BuildDirectExecutionLines
 	renderRuntimeStrip         = channelui.RenderRuntimeStrip
 	oneOnOneRuntimeLine        = channelui.OneOnOneRuntimeLine
+
+	renderArtifactSection = channelui.RenderArtifactSection
+	renderArtifactHeader  = channelui.RenderArtifactHeader
+	artifactExtraLines    = channelui.ArtifactExtraLines
 )
 
 // Workspace readiness level consts.
