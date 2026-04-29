@@ -884,3 +884,10 @@ func paneFallbackMessages(tmuxInstalled bool, detail string) (stderrMsg, brokerM
 	)
 	return
 }
+
+// HasLiveTmuxSession returns true if a wuphf-team tmux session is
+// running. Routes through paneLifecycle (PLAN.md §C5b) so tests can
+// drive it via setTmuxRunnerForTest without a real tmux server.
+func HasLiveTmuxSession() bool {
+	return newPaneLifecycle(SessionName).HasLiveSession()
+}

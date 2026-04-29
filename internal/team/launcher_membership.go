@@ -195,3 +195,17 @@ func filterEnv(env []string, key string) []string {
 	}
 	return out
 }
+
+// recordPaneSpawnFailure marks a slug so agentPaneTargets() omits it and the
+// pane-capture loops never try to read from a non-existent target. The agent
+// still receives messages via the headless dispatch fallback.
+func (l *Launcher) recordPaneSpawnFailure(slug, reason string) {
+	slug = strings.TrimSpace(slug)
+	if slug == "" {
+		return
+	}
+	if l.failedPaneSlugs == nil {
+		l.failedPaneSlugs = make(map[string]string)
+	}
+	l.failedPaneSlugs[slug] = reason
+}
