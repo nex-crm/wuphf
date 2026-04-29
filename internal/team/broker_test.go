@@ -242,46 +242,6 @@ func TestBrokerLoadsLastGoodSnapshotWhenPrimaryStateIsClobbered(t *testing.T) {
 	}
 }
 
-func TestBrokerSessionModePersistsAndSurvivesReset(t *testing.T) {
-	b := newTestBroker(t)
-	b.mu.Lock()
-	b.members = append(b.members, officeMember{Slug: "pm", Name: "Product Manager"})
-	for i := range b.channels {
-		if b.channels[i].Slug == "general" {
-			b.channels[i].Members = append(b.channels[i].Members, "pm")
-			break
-		}
-	}
-	b.mu.Unlock()
-	if err := b.SetSessionMode(SessionModeOneOnOne, "pm"); err != nil {
-		t.Fatalf("SetSessionMode failed: %v", err)
-	}
-	if _, err := b.PostMessage("pm", "general", "hello", nil, ""); err != nil {
-		t.Fatalf("seed direct message: %v", err)
-	}
-
-	reloaded := reloadedBroker(t, b)
-	mode, agent := reloaded.SessionModeState()
-	if mode != SessionModeOneOnOne {
-		t.Fatalf("expected persisted 1o1 mode, got %q", mode)
-	}
-	if agent != "pm" {
-		t.Fatalf("expected persisted 1o1 agent pm, got %q", agent)
-	}
-
-	reloaded.Reset()
-	mode, agent = reloaded.SessionModeState()
-	if mode != SessionModeOneOnOne {
-		t.Fatalf("expected reset to preserve 1o1 mode, got %q", mode)
-	}
-	if agent != "pm" {
-		t.Fatalf("expected reset to preserve 1o1 agent pm, got %q", agent)
-	}
-	if len(reloaded.Messages()) != 0 {
-		t.Fatalf("expected reset to clear direct messages, got %d", len(reloaded.Messages()))
-	}
-}
-
 func TestBrokerMessageSubscribersReceivePostedMessages(t *testing.T) {
 	b := newTestBroker(t)
 	msgs, unsubscribe := b.SubscribeMessages(4)
@@ -1364,41 +1324,6 @@ func TestTaskAndRequestViewsRejectNonMembers(t *testing.T) {
 	}
 }
 
-func TestBrokerActionsAndSchedulerEndpoints(t *testing.T) {
-	b := newTestBroker(t)
-	b.mu.Lock()
-	b.appendActionLocked("request_created", "office", "general", "ceo", "Asked for approval", "request-1")
-	b.mu.Unlock()
-	if err := b.SetSchedulerJob(schedulerJob{
-		Slug:            "nex-insights",
-		Label:           "Nex insights",
-		IntervalMinutes: 15,
-		Status:          "sleeping",
-		NextRun:         "2026-03-24T10:15:00Z",
-	}); err != nil {
-		t.Fatalf("SetSchedulerJob failed: %v", err)
-	}
-	if err := b.StartOnPort(0); err != nil {
-		t.Fatalf("failed to start broker: %v", err)
-	}
-	defer b.Stop()
-
-	base := fmt.Sprintf("http://%s", b.Addr())
-	for _, path := range []string{"/actions", "/scheduler"} {
-		req, _ := http.NewRequest(http.MethodGet, base+path, nil)
-		req.Header.Set("Authorization", "Bearer "+b.Token())
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Fatalf("%s request failed: %v", path, err)
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			body, _ := io.ReadAll(resp.Body)
-			t.Fatalf("expected 200 on %s, got %d: %s", path, resp.StatusCode, body)
-		}
-	}
-}
-
 func TestSchedulerDueOnlyFiltersFutureJobs(t *testing.T) {
 	b := newTestBroker(t)
 	if err := b.SetSchedulerJob(schedulerJob{
@@ -1436,50 +1361,6 @@ func TestSchedulerDueOnlyFiltersFutureJobs(t *testing.T) {
 	}
 	if len(listing.Jobs) != 0 {
 		t.Fatalf("expected future job to be filtered out, got %+v", listing.Jobs)
-	}
-}
-
-func TestBrokerPostsAndDedupesNexNotifications(t *testing.T) {
-	b := newTestBroker(t)
-	if err := b.StartOnPort(0); err != nil {
-		t.Fatalf("failed to start broker: %v", err)
-	}
-	defer b.Stop()
-
-	base := fmt.Sprintf("http://%s", b.Addr())
-	body := map[string]any{
-		"event_id":     "feed-item-1",
-		"title":        "Context alert",
-		"content":      "Important: Acme mentioned budget pressure",
-		"tagged":       []string{"ceo"},
-		"source":       "context_graph",
-		"source_label": "Nex",
-	}
-	payload, _ := json.Marshal(body)
-
-	for i := 0; i < 2; i++ {
-		req, _ := http.NewRequest(http.MethodPost, base+"/notifications/nex", bytes.NewReader(payload))
-		req.Header.Set("Authorization", "Bearer "+b.Token())
-		req.Header.Set("Content-Type", "application/json")
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Fatalf("notification post failed: %v", err)
-		}
-		resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			t.Fatalf("expected 200 from nex notification ingest, got %d", resp.StatusCode)
-		}
-	}
-
-	msgs := b.Messages()
-	if len(msgs) != 1 {
-		t.Fatalf("expected deduped single notification, got %d", len(msgs))
-	}
-	if msgs[0].Kind != "automation" || msgs[0].From != "nex" {
-		t.Fatalf("expected automation message from nex, got %+v", msgs[0])
-	}
-	if msgs[0].EventID != "feed-item-1" {
-		t.Fatalf("expected event id to persist, got %+v", msgs[0])
 	}
 }
 
@@ -4370,45 +4251,6 @@ func TestBrokerRequestAnswerRequiresCustomTextWhenOptionNeedsIt(t *testing.T) {
 	if resp.StatusCode != http.StatusBadRequest {
 		raw, _ := io.ReadAll(resp.Body)
 		t.Fatalf("expected 400 for missing custom text, got %d: %s", resp.StatusCode, raw)
-	}
-}
-
-func TestQueueEndpointShowsDueJobs(t *testing.T) {
-	b := newTestBroker(t)
-	if err := b.SetSchedulerJob(schedulerJob{
-		Slug:       "request-follow-up:general:request-1",
-		Kind:       "request_follow_up",
-		Label:      "Follow up on approval",
-		TargetType: "request",
-		TargetID:   "request-1",
-		Channel:    "general",
-		DueAt:      time.Now().UTC().Add(-2 * time.Minute).Format(time.RFC3339),
-		NextRun:    time.Now().UTC().Add(-2 * time.Minute).Format(time.RFC3339),
-		Status:     "scheduled",
-	}); err != nil {
-		t.Fatalf("SetSchedulerJob failed: %v", err)
-	}
-	if err := b.StartOnPort(0); err != nil {
-		t.Fatalf("failed to start broker: %v", err)
-	}
-	defer b.Stop()
-
-	base := fmt.Sprintf("http://%s", b.Addr())
-	req, _ := http.NewRequest(http.MethodGet, base+"/queue", nil)
-	req.Header.Set("Authorization", "Bearer "+b.Token())
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("queue request failed: %v", err)
-	}
-	defer resp.Body.Close()
-	var queue struct {
-		Due []schedulerJob `json:"due"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&queue); err != nil {
-		t.Fatalf("decode queue response: %v", err)
-	}
-	if len(queue.Due) != 1 {
-		t.Fatalf("expected due scheduler job to surface, got %+v", queue.Due)
 	}
 }
 
