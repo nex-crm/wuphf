@@ -154,6 +154,23 @@ type channelMessage struct {
 	Reactions   []messageReaction `json:"reactions,omitempty"`
 }
 
+type agentIssueRecord struct {
+	ID                string `json:"id"`
+	Agent             string `json:"agent"`
+	Channel           string `json:"channel"`
+	ReplyTo           string `json:"reply_to,omitempty"`
+	Detail            string `json:"detail"`
+	NormalizedKey     string `json:"normalized_key"`
+	Severity          string `json:"severity,omitempty"`
+	TaskID            string `json:"task_id,omitempty"`
+	SelfHealTaskID    string `json:"self_heal_task_id,omitempty"`
+	SelfHealError     string `json:"self_heal_error,omitempty"`
+	ApprovalRequestID string `json:"approval_request_id,omitempty"`
+	Count             int    `json:"count"`
+	CreatedAt         string `json:"created_at"`
+	UpdatedAt         string `json:"updated_at"`
+}
+
 type messageUsage struct {
 	InputTokens         int `json:"input_tokens,omitempty"`
 	OutputTokens        int `json:"output_tokens,omitempty"`
@@ -428,6 +445,7 @@ type teamSkill struct {
 type brokerState struct {
 	ChannelStore      json.RawMessage              `json:"channel_store,omitempty"`
 	Messages          []channelMessage             `json:"messages"`
+	AgentIssues       []agentIssueRecord           `json:"agent_issues,omitempty"`
 	Members           []officeMember               `json:"members,omitempty"`
 	Channels          []teamChannel                `json:"channels,omitempty"`
 	SessionMode       string                       `json:"session_mode,omitempty"`
@@ -476,6 +494,7 @@ type ipRateLimitBucket struct {
 type Broker struct {
 	channelStore            *channel.Store
 	messages                []channelMessage
+	agentIssues             []agentIssueRecord
 	members                 []officeMember
 	memberIndex             map[string]int // slug → index into members; guarded by mu
 	channels                []teamChannel
@@ -3212,6 +3231,7 @@ func (b *Broker) Reset() {
 	mode := b.sessionMode
 	agent := b.oneOnOneAgent
 	b.messages = nil
+	b.agentIssues = nil
 	b.members = defaultOfficeMembers()
 	b.channels = defaultTeamChannels()
 	b.sessionMode = mode
@@ -3276,6 +3296,7 @@ func loadBrokerStateFile(path string) (brokerState, error) {
 func brokerStateActivityScore(state brokerState) int {
 	score := 0
 	score += len(state.Messages) * 10
+	score += len(state.AgentIssues) * 8
 	score += len(state.Tasks) * 20
 	score += len(activeRequests(state.Requests)) * 10
 	score += len(state.Actions) * 4
@@ -3318,6 +3339,7 @@ func (b *Broker) loadState() error {
 		}
 	}
 	b.messages = state.Messages
+	b.agentIssues = state.AgentIssues
 	b.members = state.Members
 	b.channels = state.Channels
 	b.sessionMode = state.SessionMode
@@ -3382,7 +3404,7 @@ func (b *Broker) saveLocked() error {
 	}
 	path := b.statePath
 	snapshotPath := b.stateSnapshotPath()
-	if len(b.messages) == 0 && len(b.tasks) == 0 && len(activeRequests(b.requests)) == 0 && len(b.actions) == 0 && len(b.signals) == 0 && len(b.decisions) == 0 && len(b.watchdogs) == 0 && len(b.policies) == 0 && len(b.scheduler) == 0 && len(b.skills) == 0 && len(b.sharedMemory) == 0 && isDefaultChannelState(b.channels) && isDefaultOfficeMemberState(b.members) && b.counter == 0 && b.notificationSince == "" && b.insightsSince == "" && usageStateIsZero(b.usage) && b.sessionMode == SessionModeOffice && b.oneOnOneAgent == DefaultOneOnOneAgent {
+	if len(b.messages) == 0 && len(b.agentIssues) == 0 && len(b.tasks) == 0 && len(activeRequests(b.requests)) == 0 && len(b.actions) == 0 && len(b.signals) == 0 && len(b.decisions) == 0 && len(b.watchdogs) == 0 && len(b.policies) == 0 && len(b.scheduler) == 0 && len(b.skills) == 0 && len(b.sharedMemory) == 0 && isDefaultChannelState(b.channels) && isDefaultOfficeMemberState(b.members) && b.counter == 0 && b.notificationSince == "" && b.insightsSince == "" && usageStateIsZero(b.usage) && b.sessionMode == SessionModeOffice && b.oneOnOneAgent == DefaultOneOnOneAgent {
 		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
@@ -3403,6 +3425,7 @@ func (b *Broker) saveLocked() error {
 	state := brokerState{
 		ChannelStore:      channelStoreRaw,
 		Messages:          b.messages,
+		AgentIssues:       b.agentIssues,
 		Members:           b.members,
 		Channels:          b.channels,
 		SessionMode:       b.sessionMode,
@@ -3725,6 +3748,19 @@ func (b *Broker) normalizeLoadedStateLocked() {
 	for i := range b.messages {
 		if strings.TrimSpace(b.messages[i].Channel) == "" {
 			b.messages[i].Channel = "general"
+		}
+	}
+	for i := range b.agentIssues {
+		issueChannel := normalizeChannelSlug(channel.MigrateDMSlugString(b.agentIssues[i].Channel))
+		if issueChannel == "" {
+			issueChannel = "general"
+		}
+		b.agentIssues[i].Channel = issueChannel
+		if strings.TrimSpace(b.agentIssues[i].UpdatedAt) == "" {
+			b.agentIssues[i].UpdatedAt = b.agentIssues[i].CreatedAt
+		}
+		if b.agentIssues[i].Count <= 0 {
+			b.agentIssues[i].Count = 1
 		}
 	}
 	for i := range b.tasks {
@@ -5668,6 +5704,7 @@ func (b *Broker) handleResetDM(w http.ResponseWriter, r *http.Request) {
 		filtered = append(filtered, msg)
 	}
 	b.messages = filtered
+	b.pruneAgentIssuesByChannelAndAgentLocked(channel, agent)
 	_ = b.saveLocked()
 	b.mu.Unlock()
 
@@ -7979,6 +8016,7 @@ func (b *Broker) handleChannels(w http.ResponseWriter, r *http.Request) {
 			}
 			b.requests = filteredRequests
 			b.pendingInterview = firstBlockingRequest(b.requests)
+			b.pruneAgentIssuesByChannelLocked(slug)
 			if err := b.saveLocked(); err != nil {
 				http.Error(w, "failed to persist broker state", http.StatusInternalServerError)
 				return
@@ -11222,6 +11260,7 @@ func (b *Broker) handlePostRequestAnswer(w http.ResponseWriter, r *http.Request)
 				}
 			}
 		}
+		b.maybeCreateApprovedSelfHealTaskLocked(b.requests[i])
 
 		b.counter++
 		msg := channelMessage{
