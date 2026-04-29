@@ -279,6 +279,34 @@ func TestSchedulerStart_IdempotentDoubleStartIsNoOp(t *testing.T) {
 	w.Stop()
 }
 
+// Regression: Stop→Start→Stop must not leak the goroutine. With the
+// original sync.Once pair, the first Stop consumed stopOnce, then Start
+// happily spawned an unstoppable goroutine. The current mutex+flag
+// design makes Start a no-op after Stop, so no goroutine is spawned.
+func TestSchedulerStopBeforeStart_DisablesLaterStart(t *testing.T) {
+	w := &watchdogScheduler{
+		broker:       newSchedulerFixtureBroker(t),
+		clock:        newManualClock(time.Now()),
+		initialDelay: time.Hour,
+		pollEvery:    time.Hour,
+		deliverTask:  func(officeActionLog, teamTask) {},
+	}
+	w.Stop() // before Start
+	w.Start(context.Background())
+	// If Start spawned a goroutine despite the prior Stop, done.Wait
+	// in the second Stop would block on the leaked goroutine.
+	stopReturned := make(chan struct{})
+	go func() {
+		w.Stop()
+		close(stopReturned)
+	}()
+	select {
+	case <-stopReturned:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("second Stop did not return — Start spawned an unstoppable goroutine after Stop")
+	}
+}
+
 func TestSchedulerUpdateJob_NilBrokerNoOp(t *testing.T) {
 	w := &watchdogScheduler{clock: newManualClock(time.Now())}
 	w.updateJob("x", "X", time.Minute, time.Now(), "scheduled")
@@ -461,6 +489,11 @@ type schedulerFixtureBroker struct {
 	jobStateUpdates  []jobStateCall
 	automationPosts  []automationCall
 	deliveredActions []string
+	skillUpdates     []skillUpdateCall
+}
+
+type skillUpdateCall struct {
+	key, status string
 }
 
 type alertCall struct {
@@ -532,7 +565,8 @@ func (b *schedulerFixtureBroker) PostAutomationMessage(_ string, channel string,
 	return channelMessage{}, false, nil
 }
 
-func (b *schedulerFixtureBroker) UpdateSkillExecutionByWorkflowKey(_, _ string, _ time.Time) error {
+func (b *schedulerFixtureBroker) UpdateSkillExecutionByWorkflowKey(key, status string, _ time.Time) error {
+	b.skillUpdates = append(b.skillUpdates, skillUpdateCall{key: key, status: status})
 	return nil
 }
 

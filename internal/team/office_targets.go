@@ -10,16 +10,20 @@ package team
 //   - paneBackedFlag is a *bool aliased to launcher.paneBackedAgents. The
 //     pane-spawn path flips that bool deep inside trySpawnWebAgentPanes;
 //     reading via pointer keeps the targeter in sync without callbacks.
-//   - failedPaneSlugs is a shared map. Today it's read here, written by the
-//     pane-spawn path (still on Launcher). No mutex — the race is dormant
-//     only because trySpawnWebAgentPanes is a runtime-promotion fallback
-//     that nothing currently invokes (see launcher.go:2647 / 3470). The
-//     moment promotion is wired, or any concurrent reader of the targeter
-//     overlaps the writer, this races. C5 (paneLifecycle) replaces this
-//     with a failedPane(slug) callback and removes the shared map entirely.
+//   - failedPaneSlugs is read via callback so every targeter call sees the
+//     launcher's *current* map reference. Required because
+//     reconfigureVisibleAgents nils l.failedPaneSlugs and the next pane-
+//     spawn failure rebuilds it; a cached map pointer here would become
+//     orphaned. The map is still unsynchronized — no mutex — but the
+//     race is dormant because trySpawnWebAgentPanes is a runtime-promotion
+//     fallback that nothing currently invokes (see launcher.go:2647 /
+//     3470). C5 (paneLifecycle) adds the mutex and replaces this with
+//     failedPane(slug) lookup, which is what the callback shape already
+//     anticipates.
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/nex-crm/wuphf/internal/agent"
@@ -42,10 +46,11 @@ type officeTargeter struct {
 	// the headless path silently when panes were actually live (PLAN.md §5.2).
 	paneBackedFlag *bool
 
-	// failedPaneSlugs is the shared map of slugs whose pane spawn failed.
-	// Written by the pane-spawn path on Launcher; read here. Map sharing
-	// across types is a deliberate transitional state — see file header.
-	failedPaneSlugs map[string]string
+	// failedPaneSlugs returns the live map of slugs whose pane spawn failed.
+	// Read via callback (not cached) so reconfigure-time invalidation on
+	// the launcher side is observable. See file header for the migration
+	// path to a per-slug lookup once C5 lands.
+	failedPaneSlugs func() map[string]string
 
 	// Live-state callbacks. Pulled rather than pushed so tests can stub.
 	isOneOnOne         func() bool
@@ -94,20 +99,26 @@ func (o *officeTargeter) LeadSlug() string {
 
 // officeLeadSlugFrom is a free function (kept package-level) so the prompt
 // builder can derive the lead from an already-loaded member snapshot
-// without a redundant snapshotMembers call.
+// without a redundant snapshotMembers call. Sorts a copy of the input
+// by slug before iterating so the answer is deterministic regardless
+// of caller-supplied order — matters for prompt-cache byte-stability
+// and for callers that iterate AgentOrder (pack-ordered) vs. raw
+// MembersSnapshot (broker-snapshot order).
 func officeLeadSlugFrom(members []officeMember) string {
-	for _, member := range members {
+	sorted := append([]officeMember(nil), members...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Slug < sorted[j].Slug })
+	for _, member := range sorted {
 		if member.Slug == "ceo" {
 			return "ceo"
 		}
 	}
-	for _, member := range members {
+	for _, member := range sorted {
 		if member.BuiltIn {
 			return member.Slug
 		}
 	}
-	if len(members) > 0 {
-		return members[0].Slug
+	if len(sorted) > 0 {
+		return sorted[0].Slug
 	}
 	return ""
 }
@@ -375,8 +386,10 @@ func (o *officeTargeter) ShouldUseHeadlessForSlug(slug string) bool {
 	if o.MemberUsesHeadlessOneShotRuntime(slug) {
 		return true
 	}
-	if _, failed := o.failedPaneSlugs[strings.TrimSpace(slug)]; failed {
-		return true
+	if o.failedPaneSlugs != nil {
+		if _, failed := o.failedPaneSlugs()[strings.TrimSpace(slug)]; failed {
+			return true
+		}
 	}
 	return false
 }
@@ -401,8 +414,10 @@ func (o *officeTargeter) SkipPane(slug string) bool {
 	if slug == "" {
 		return true
 	}
-	if _, bad := o.failedPaneSlugs[slug]; bad {
-		return true
+	if o.failedPaneSlugs != nil {
+		if _, bad := o.failedPaneSlugs()[slug]; bad {
+			return true
+		}
 	}
 	if o.MemberUsesHeadlessOneShotRuntime(slug) {
 		return true
