@@ -22,7 +22,7 @@
 #   GO_TEST_FLAGS="-count=1 -timeout 5m"  # extra flags for go test.
 #
 # Exit codes: 0 = all listed files >= min, 1 = at least one below, 2 = bad
-# input.
+# input or coverage-generation failure.
 
 set -uo pipefail
 
@@ -59,10 +59,13 @@ if [ -z "$profile" ]; then
   profile="$(mktemp -t wuphf-cover.XXXXXX)"
   trap 'rm -f "$profile"' EXIT
   # shellcheck disable=SC2086
-  go test ${GO_TEST_FLAGS:-} -coverprofile="$profile" -coverpkg="$pkg" "$pkg" >/dev/null
+  if ! go test ${GO_TEST_FLAGS:-} -coverprofile="$profile" -coverpkg="$pkg" "$pkg" >/dev/null; then
+    echo "check-file-coverage: failed to generate coverage profile (go test exit $?)" >&2
+    exit 2
+  fi
 fi
 
-# Module path is the prefix `go tool cover -func` prints before each file
+# Module path is the prefix coverprofile entries carry before each file
 # entry, so we need it to match against the relative paths the caller
 # passes in --files.
 module="$(go list -m 2>/dev/null)"
@@ -74,47 +77,44 @@ fi
 failures=0
 total=0
 
-# Convert "a,b,c" to a newline-separated list and iterate.
-echo "$files_csv" | tr ',' '\n' | while IFS= read -r rel; do
+# Run the loop in the parent shell via process substitution so updates to
+# `failures` and `total` are visible after the loop ends. Avoids a shared
+# /tmp sentinel that would clobber across concurrent invocations.
+while IFS= read -r rel; do
   [ -z "$rel" ] && continue
   total=$((total + 1))
-  # `go tool cover -func` lines look like:
-  #   github.com/nex-crm/wuphf/internal/team/prompt_builder.go:42:    Build         100.0%
-  # The trailing "total:" line is per-package, not per-file, so we filter
-  # it out by requiring a colon-delimited line number.
-  awk_out="$(go tool cover -func="$profile" \
-    | awk -v prefix="${module}/${rel}:" '
-        index($1, prefix) == 1 {
-          gsub("%", "", $NF)
-          covered += $NF
-          n += 1
-        }
-        END {
-          if (n == 0) { print "MISSING"; exit }
-          printf "%.1f %d\n", covered / n, n
-        }')"
+  # Coverprofile rows look like:
+  #   github.com/nex-crm/wuphf/internal/team/prompt_builder.go:42.2,44.13 3 1
+  # That's: file:start_line.col,end_line.col  numStmts  count.  We sum
+  # numStmts per file (covered when count>0, total always) so the gate
+  # measures *statement* coverage rather than averaged function %.
+  awk_out="$(awk -v prefix="${module}/${rel}:" '
+      $1 == "mode:" { next }
+      index($1, prefix) == 1 {
+        total += $2
+        if ($3 > 0) { covered += $2 }
+      }
+      END {
+        if (total == 0) { print "MISSING"; exit }
+        printf "%.1f %d\n", (covered / total) * 100, total
+      }
+    ' "$profile")"
 
   if [ "$awk_out" = "MISSING" ]; then
-    printf '  %-60s  no funcs in profile (file not covered by --pkg?)\n' "$rel" >&2
+    printf '  %-60s  no statements in profile (file not covered by --pkg?)\n' "$rel" >&2
     failures=$((failures + 1))
-    # Subshell — write progress to a tempfile so the parent can see it.
-    echo "$failures" > /tmp/wuphf-cov-failures
     continue
   fi
 
   pct="$(echo "$awk_out" | awk '{print $1}')"
-  funcs="$(echo "$awk_out" | awk '{print $2}')"
+  stmts="$(echo "$awk_out" | awk '{print $2}')"
   if awk -v p="$pct" -v m="$min" 'BEGIN { exit !(p + 0 < m + 0) }'; then
-    printf '  %-60s  %s%%  (%s funcs)  BELOW %s%%\n' "$rel" "$pct" "$funcs" "$min" >&2
+    printf '  %-60s  %s%%  (%s stmts)  BELOW %s%%\n' "$rel" "$pct" "$stmts" "$min" >&2
     failures=$((failures + 1))
   else
-    printf '  %-60s  %s%%  (%s funcs)  OK\n' "$rel" "$pct" "$funcs"
+    printf '  %-60s  %s%%  (%s stmts)  OK\n' "$rel" "$pct" "$stmts"
   fi
-  echo "$failures" > /tmp/wuphf-cov-failures
-done
-
-failures="$(cat /tmp/wuphf-cov-failures 2>/dev/null || echo 0)"
-rm -f /tmp/wuphf-cov-failures
+done < <(printf '%s\n' "$files_csv" | tr ',' '\n')
 
 if [ "$failures" -gt 0 ]; then
   echo "check-file-coverage: $failures file(s) below ${min}% floor" >&2

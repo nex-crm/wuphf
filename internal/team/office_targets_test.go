@@ -102,6 +102,46 @@ func TestTargeter_AgentOrder_LeadFirst(t *testing.T) {
 	}
 }
 
+// Regression: AgentOrder and PaneSlugs must follow pack.Agents order, not
+// the broker snapshot order. Pack indexing is the contract pane spawn
+// relies on, so a shuffled snapshot must not perturb the resulting order.
+func TestTargeter_AgentOrderAndPaneSlugs_FollowPackNotSnapshot(t *testing.T) {
+	// Snapshot order is intentionally non-pack: be, fe, ceo.
+	members := []officeMember{
+		{Slug: "be"},
+		{Slug: "fe"},
+		{Slug: "ceo", BuiltIn: true},
+	}
+	tg := fixtureTargeter(t, members, func(o *officeTargeter) {
+		// Pack order: ceo, fe, be — different from snapshot order.
+		o.pack = &agent.PackDefinition{
+			LeadSlug: "ceo",
+			Agents: []agent.AgentConfig{
+				{Slug: "ceo"}, {Slug: "fe"}, {Slug: "be"},
+			},
+		}
+	})
+	gotOrder := tg.AgentOrder()
+	wantSlugs := []string{"ceo", "fe", "be"}
+	if len(gotOrder) != len(wantSlugs) {
+		t.Fatalf("AgentOrder length = %d, want %d (got %+v)", len(gotOrder), len(wantSlugs), gotOrder)
+	}
+	for i, want := range wantSlugs {
+		if gotOrder[i].Slug != want {
+			t.Errorf("AgentOrder[%d] = %q, want %q (full: %+v)", i, gotOrder[i].Slug, want, gotOrder)
+		}
+	}
+	gotPane := tg.PaneSlugs()
+	if len(gotPane) != len(wantSlugs) {
+		t.Fatalf("PaneSlugs length = %d, want %d (got %+v)", len(gotPane), len(wantSlugs), gotPane)
+	}
+	for i, want := range wantSlugs {
+		if gotPane[i] != want {
+			t.Errorf("PaneSlugs[%d] = %q, want %q (full: %+v)", i, gotPane[i], want, gotPane)
+		}
+	}
+}
+
 func TestTargeter_PaneEligibleMembers_ExcludesHeadlessOneShot(t *testing.T) {
 	tg := fixtureTargeter(t, []officeMember{
 		{Slug: "ceo", BuiltIn: true},
