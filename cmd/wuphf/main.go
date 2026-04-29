@@ -97,6 +97,11 @@ func printSubcommandHelp(sub string) {
 		fmt.Fprintln(os.Stderr, "")
 		fmt.Fprintln(os.Stderr, "Usage:")
 		fmt.Fprintln(os.Stderr, "  wuphf mcp-team")
+	case "workspace", "ws":
+		// Delegate to the workspace help printer so adding a new subcommand
+		// only touches workspace.go.
+		printWorkspaceHelp()
+		return
 	case "upgrade":
 		fmt.Fprintln(os.Stderr, "wuphf upgrade — check npm for a newer wuphf and show the changelog")
 		fmt.Fprintln(os.Stderr, "")
@@ -160,6 +165,12 @@ func main() {
 	opusCEO := flag.Bool("opus-ceo", false, "Upgrade CEO agent from Sonnet to Opus")
 	collabMode := flag.Bool("collab", false, "Start in collaborative mode (all agents see all messages)")
 	noOpen := flag.Bool("no-open", false, "Don't open browser automatically on launch")
+	// --workspace=<name> overrides the active workspace for a single
+	// invocation. The flag sets WUPHF_RUNTIME_HOME so every WUPHF state path
+	// (config.RuntimeHomeDir() callers) lands in that workspace's tree
+	// without flipping registry.cli_current. Persistent change is via
+	// `wuphf workspace switch`.
+	workspaceOverride := flag.String("workspace", "", "Use a specific workspace for this command only (does not change cli_current)")
 	helpAll := flag.Bool("help-all", false, "Show all flags including internal ones")
 
 	flag.Usage = func() {
@@ -173,6 +184,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  %s import --from legacy  Import from a running external orchestrator (auto-detect)\n", appName)
 		fmt.Fprintf(os.Stderr, "  %s log          Show what your agents actually did (task receipts)\n", appName)
 		fmt.Fprintf(os.Stderr, "  %s memory migrate --from {nex,gbrain}  Port legacy memory into the team wiki\n", appName)
+		fmt.Fprintf(os.Stderr, "  %s workspace ...  Manage multiple isolated WUPHF workspaces\n", appName)
 		fmt.Fprintf(os.Stderr, "  %s --cmd <cmd>  Run a command non-interactively\n", appName)
 		fmt.Fprintf(os.Stderr, "\nFlags:\n")
 		printVisibleFlags(os.Stderr)
@@ -192,6 +204,15 @@ func main() {
 	}
 	if *brokerPort > 0 {
 		_ = os.Setenv("WUPHF_BROKER_PORT", fmt.Sprintf("%d", *brokerPort))
+	}
+	if name := strings.TrimSpace(*workspaceOverride); name != "" {
+		// Resolve the workspace's runtime_home and export it so downstream
+		// state-path resolvers (config.RuntimeHomeDir) target the right
+		// tree. Resolver runs against the registry — when Lane B's package
+		// is wired this becomes a single call; for now we shell out to the
+		// orchestrator factory, which prints a friendly error if not yet
+		// wired.
+		applyWorkspaceOverride(name)
 	}
 	if backend := strings.TrimSpace(*memoryBackend); backend != "" {
 		normalized := config.NormalizeMemoryBackend(backend)
@@ -303,6 +324,9 @@ func main() {
 			return
 		case "memory":
 			runMemory(args[1:])
+			return
+		case "workspace", "ws":
+			runWorkspace(args[1:])
 			return
 		}
 	}
