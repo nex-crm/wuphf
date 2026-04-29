@@ -11062,6 +11062,14 @@ func (b *Broker) handleGetSkills(w http.ResponseWriter, r *http.Request) {
 	// any authenticated agent could read every skill body via GET /skills.
 	// Absent param preserves the existing humans/UI-facing unfiltered view.
 	forAgent := strings.TrimSpace(r.URL.Query().Get("for_agent"))
+	// PR 7 follow-up: opt-in flags so the Skills app can request the full
+	// catalog (proposed + active + disabled + archived) without breaking
+	// older consumers that expect the active+proposed+disabled subset.
+	// include_disabled is currently a no-op — disabled skills already pass
+	// through this handler — but it's wired now so a future filter change
+	// has a stable opt-in surface.
+	includeArchived := truthyQuery(r.URL.Query().Get("include_archived"))
+	_ = truthyQuery(r.URL.Query().Get("include_disabled"))
 
 	b.mu.Lock()
 	var pool []teamSkill
@@ -11073,7 +11081,7 @@ func (b *Broker) handleGetSkills(w http.ResponseWriter, r *http.Request) {
 	}
 	result := make([]teamSkill, 0, len(pool))
 	for _, sk := range pool {
-		if sk.Status == "archived" {
+		if sk.Status == "archived" && !includeArchived {
 			continue
 		}
 		if channelFilter != "" && normalizeChannelSlug(sk.Channel) != channelFilter {
@@ -11163,6 +11171,16 @@ func skillHasTag(sk teamSkill, tag string) bool {
 		if strings.ToLower(strings.TrimSpace(t)) == tag {
 			return true
 		}
+	}
+	return false
+}
+
+// truthyQuery accepts any of "1", "true", "yes" (case-insensitive) as true.
+// Anything else, including empty, is false.
+func truthyQuery(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "1", "true", "yes":
+		return true
 	}
 	return false
 }

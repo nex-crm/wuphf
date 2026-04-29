@@ -279,6 +279,11 @@ func (b *Broker) handleSkillEdit(w http.ResponseWriter, r *http.Request, name st
 	if d := strings.TrimSpace(fm.Description); d != "" {
 		sk.Description = d
 	}
+	// PR 7 follow-up (E2E P2): propagate OwnerAgents from parsed frontmatter
+	// so a PUT can rescope a skill. validateOwnerAgentsLocked enforces the
+	// same slug-regex + member-existence checks the write path uses; unknown
+	// or malformed entries are dropped with WARN, never errored.
+	sk.OwnerAgents = b.validateOwnerAgentsLocked(sk.Name, fm.Metadata.Wuphf.OwnerAgents)
 	sk.Content = parsedBody
 	sk.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 	skCopy := *sk
