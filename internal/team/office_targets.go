@@ -169,16 +169,18 @@ func (o *officeTargeter) NameFor(slug string) string {
 }
 
 // AgentOrder returns the member roster with the lead slug always first.
-// Used by pane spawn to guarantee the CEO pane lands at index 1.
+// Used by pane spawn to guarantee the CEO pane lands at index 1. Drives
+// off ActiveSessionMembers (pack-ordered) so pane indices stay stable
+// across launches even if the broker snapshot order shifts.
 func (o *officeTargeter) AgentOrder() []officeMember {
 	var agentOrder []officeMember
 	lead := o.LeadSlug()
-	for _, member := range o.MembersSnapshot() {
+	for _, member := range o.ActiveSessionMembers() {
 		if member.Slug == lead {
 			agentOrder = append([]officeMember{member}, agentOrder...)
 		}
 	}
-	for _, member := range o.MembersSnapshot() {
+	for _, member := range o.ActiveSessionMembers() {
 		if member.Slug != lead {
 			agentOrder = append(agentOrder, member)
 		}
@@ -187,12 +189,13 @@ func (o *officeTargeter) AgentOrder() []officeMember {
 }
 
 // PaneSlugs returns the slug list in spawn order. In 1:1 mode it returns
-// just the active 1:1 agent.
+// just the active 1:1 agent. Like AgentOrder, drives off ActiveSessionMembers
+// so pack order is deterministic regardless of broker snapshot order.
 func (o *officeTargeter) PaneSlugs() []string {
 	if o.isOneOnOne != nil && o.isOneOnOne() {
 		return []string{o.oneOnOneSlug()}
 	}
-	members := o.MembersSnapshot()
+	members := o.ActiveSessionMembers()
 	lead := o.LeadSlug()
 	var slugs []string
 	if lead != "" {

@@ -68,7 +68,11 @@ func (p *promptBuilder) Build(slug string) string {
 	markdownMemory := p.markdownMemory
 	noNex := p.nexDisabled
 
-	activePolicies := p.policies()
+	// Sort policies by ID inside the builder so prompt-cache byte-stability
+	// no longer depends on every caller pre-sorting before handing the
+	// snapshot in. Same reason as officeMembers above.
+	activePolicies := append([]officePolicy(nil), p.policies()...)
+	sort.Slice(activePolicies, func(i, j int) bool { return activePolicies[i].ID < activePolicies[j].ID })
 
 	var sb strings.Builder
 	companyCtx := config.CompanyContextBlock()

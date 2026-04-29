@@ -57,6 +57,9 @@ func (b *notificationContextBuilder) NotificationContext(channel, triggerMsgID, 
 	if b == nil || b.channelMessages == nil {
 		return ""
 	}
+	if limit <= 0 {
+		return ""
+	}
 	if strings.TrimSpace(channel) == "" {
 		channel = "general"
 	}
@@ -318,9 +321,16 @@ func (b *notificationContextBuilder) RelevantTaskForTarget(msg channelMessage, s
 	if b == nil || b.allTasks == nil || slug == "" {
 		return teamTask{}, false
 	}
+	// Resolve to the ultimate thread root so deep replies still match a
+	// task anchored on the top-level message. msg.ReplyTo only points at
+	// the immediate parent, which loses second-level+ replies.
 	threadRoot := strings.TrimSpace(msg.ID)
 	if replyTo := strings.TrimSpace(msg.ReplyTo); replyTo != "" {
-		threadRoot = replyTo
+		if root := strings.TrimSpace(b.UltimateThreadRoot(strings.TrimSpace(msg.Channel), replyTo)); root != "" {
+			threadRoot = root
+		} else {
+			threadRoot = replyTo
+		}
 	}
 	var domainOwned teamTask
 	bestOwnedScore := 0.0
