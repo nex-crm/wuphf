@@ -10912,6 +10912,68 @@ func skillSlug(name string) string {
 	return s
 }
 
+// listSkillsOpts controls listSkillsForAgentLocked filtering.
+type listSkillsOpts struct {
+	// activeOnly drops anything whose Status is not "active". When false, every
+	// non-tombstoned skill is returned (including proposed/archived/disabled).
+	activeOnly bool
+}
+
+// canAgentSeeSkillLocked is the canonical visibility predicate for per-agent
+// skill scoping (PR 7). The caller MUST hold b.mu.
+//
+// An agent sees a skill when either:
+//   - the agent slug (case-insensitive, trimmed) appears in sk.OwnerAgents, OR
+//   - sk.OwnerAgents is empty AND the agent slug equals the office lead slug
+//     (the lead-routable, shared-skill default — back-compat with skills that
+//     pre-date the OwnerAgents field).
+//
+// Status is intentionally ignored here so the predicate stays orthogonal to
+// active/disabled/archived filtering. Callers that want only active skills
+// pass listSkillsOpts{activeOnly: true} to listSkillsForAgentLocked, or apply
+// their own status check after the visibility gate.
+func (b *Broker) canAgentSeeSkillLocked(slug string, sk *teamSkill) bool {
+	if sk == nil {
+		return false
+	}
+	want := strings.ToLower(strings.TrimSpace(slug))
+	if want == "" {
+		return false
+	}
+	if len(sk.OwnerAgents) == 0 {
+		lead := strings.ToLower(strings.TrimSpace(officeLeadSlugFrom(b.members)))
+		return lead != "" && lead == want
+	}
+	for _, owner := range sk.OwnerAgents {
+		if strings.ToLower(strings.TrimSpace(owner)) == want {
+			return true
+		}
+	}
+	return false
+}
+
+// listSkillsForAgentLocked returns the subset of b.skills visible to slug,
+// sorted by Name lexicographically so catalog injection in buildPrompt produces
+// byte-identical output across calls (cache stability). The caller MUST hold
+// b.mu.
+func (b *Broker) listSkillsForAgentLocked(slug string, opts listSkillsOpts) []teamSkill {
+	out := make([]teamSkill, 0, len(b.skills))
+	for i := range b.skills {
+		sk := &b.skills[i]
+		if opts.activeOnly && sk.Status != "active" {
+			continue
+		}
+		if !b.canAgentSeeSkillLocked(slug, sk) {
+			continue
+		}
+		out = append(out, *sk)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].Name < out[j].Name
+	})
+	return out
+}
+
 func (b *Broker) findSkillByNameLocked(name string) *teamSkill {
 	slug := skillSlug(name)
 	for i := range b.skills {
