@@ -80,10 +80,20 @@ type Config struct {
 	// (WUPHF_MLX_LM_BASE_URL, WUPHF_OLLAMA_MODEL, etc.) take precedence over
 	// this map.
 	ProviderEndpoints map[string]ProviderEndpoint `json:"provider_endpoints,omitempty"`
+	ImageEndpoints    map[string]ImageEndpoint    `json:"image_endpoints,omitempty"`
 }
 
 // ProviderEndpoint configures one OpenAI-compatible HTTP backend.
 type ProviderEndpoint struct {
+	BaseURL string `json:"base_url,omitempty"`
+	Model   string `json:"model,omitempty"`
+}
+
+// ImageEndpoint is per-image-gen-provider runtime config (api key, base URL,
+// default model). Stored under Config.ImageEndpoints keyed by kind slug
+// (nano-banana, higgsfield, gpt-image, seedance, comfyui).
+type ImageEndpoint struct {
+	APIKey  string `json:"api_key,omitempty"`
 	BaseURL string `json:"base_url,omitempty"`
 	Model   string `json:"model,omitempty"`
 }

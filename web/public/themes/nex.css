@@ -78,6 +78,7 @@ html[data-theme="nex"] {
   --accent:         var(--tertiary-400);
   --accent-warm:    var(--tertiary-500);
   --accent-bg:      var(--tertiary-100);
+  --accent-bg-strong: rgba(159, 77, 191, 0.35);
 
   --border:         var(--neutral-100);
   --border-light:   var(--neutral-50);

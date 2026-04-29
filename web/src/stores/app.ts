@@ -1,16 +1,56 @@
 import { create } from "zustand";
 
-export type Theme = "nex" | "nex-dark";
+export type Theme = "nex" | "nex-dark" | "noir-gold";
 
 const _storedTheme = ((): Theme => {
   try {
     const v = localStorage.getItem("wuphf-theme");
-    if (v === "nex-dark") return "nex-dark";
+    if (v === "nex" || v === "nex-dark" || v === "noir-gold") return v;
   } catch {}
   return "nex";
 })();
 if (typeof document !== "undefined") {
   document.documentElement.setAttribute("data-theme", _storedTheme);
+}
+
+interface SidebarSectionsState {
+  agents: boolean;
+  channels: boolean;
+  apps: boolean;
+}
+
+const SIDEBAR_SECTIONS_KEY = "wuphf-sidebar-sections";
+const SIDEBAR_BG_KEY = "wuphf-sidebar-bg";
+
+const _storedSidebarSections = ((): SidebarSectionsState => {
+  const def: SidebarSectionsState = { agents: true, channels: true, apps: true };
+  try {
+    const raw = localStorage.getItem(SIDEBAR_SECTIONS_KEY);
+    if (!raw) return def;
+    const parsed = JSON.parse(raw) as Partial<SidebarSectionsState>;
+    return {
+      agents: parsed.agents ?? def.agents,
+      channels: parsed.channels ?? def.channels,
+      apps: parsed.apps ?? def.apps,
+    };
+  } catch {
+    return def;
+  }
+})();
+
+const _storedSidebarBg = ((): string | null => {
+  try {
+    const v = localStorage.getItem(SIDEBAR_BG_KEY);
+    return v && v.trim() ? v : null;
+  } catch {
+    return null;
+  }
+})();
+
+function persistSidebarSections(state: SidebarSectionsState): void {
+  try {
+    localStorage.setItem(SIDEBAR_SECTIONS_KEY, JSON.stringify(state));
+  } catch {}
 }
 
 export interface ChannelMeta {
@@ -87,8 +127,14 @@ export interface AppStore {
   // Sidebar
   sidebarAgentsOpen: boolean;
   toggleSidebarAgents: () => void;
+  sidebarChannelsOpen: boolean;
+  toggleSidebarChannels: () => void;
+  sidebarAppsOpen: boolean;
+  toggleSidebarApps: () => void;
   sidebarCollapsed: boolean;
   toggleSidebarCollapsed: () => void;
+  sidebarBg: string | null;
+  setSidebarBg: (color: string | null) => void;
 
   // Thread panel
   activeThreadId: string | null;
@@ -192,12 +238,47 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set({ theme: t });
   },
 
-  sidebarAgentsOpen: true,
-  toggleSidebarAgents: () =>
-    set({ sidebarAgentsOpen: !get().sidebarAgentsOpen }),
+  sidebarAgentsOpen: _storedSidebarSections.agents,
+  toggleSidebarAgents: () => {
+    const next = !get().sidebarAgentsOpen;
+    set({ sidebarAgentsOpen: next });
+    persistSidebarSections({
+      agents: next,
+      channels: get().sidebarChannelsOpen,
+      apps: get().sidebarAppsOpen,
+    });
+  },
+  sidebarChannelsOpen: _storedSidebarSections.channels,
+  toggleSidebarChannels: () => {
+    const next = !get().sidebarChannelsOpen;
+    set({ sidebarChannelsOpen: next });
+    persistSidebarSections({
+      agents: get().sidebarAgentsOpen,
+      channels: next,
+      apps: get().sidebarAppsOpen,
+    });
+  },
+  sidebarAppsOpen: _storedSidebarSections.apps,
+  toggleSidebarApps: () => {
+    const next = !get().sidebarAppsOpen;
+    set({ sidebarAppsOpen: next });
+    persistSidebarSections({
+      agents: get().sidebarAgentsOpen,
+      channels: get().sidebarChannelsOpen,
+      apps: next,
+    });
+  },
   sidebarCollapsed: false,
   toggleSidebarCollapsed: () =>
     set({ sidebarCollapsed: !get().sidebarCollapsed }),
+  sidebarBg: _storedSidebarBg,
+  setSidebarBg: (color) => {
+    try {
+      if (color) localStorage.setItem(SIDEBAR_BG_KEY, color);
+      else localStorage.removeItem(SIDEBAR_BG_KEY);
+    } catch {}
+    set({ sidebarBg: color });
+  },
 
   activeThreadId: null,
   setActiveThreadId: (id) => set({ activeThreadId: id }),

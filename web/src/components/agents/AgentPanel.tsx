@@ -2,8 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Xmark } from "iconoir-react";
 
-import type { AgentLog, OfficeMember } from "../../api/client";
-import { createDM, getAgentLogs, post } from "../../api/client";
+import type { OfficeMember, TaskLogSummary } from "../../api/client";
+import { createDM, listAgentLogTasks, post } from "../../api/client";
 import { useAgentStream } from "../../hooks/useAgentStream";
 import { useDefaultHarness } from "../../hooks/useConfig";
 import { useChannelMembers, useOfficeMembers } from "../../hooks/useMembers";
@@ -54,18 +54,18 @@ function StreamSection({ slug }: { slug: string }) {
 }
 
 function LogsSection({ slug }: { slug: string }) {
-  const [logs, setLogs] = useState<AgentLog[]>([]);
+  const [tasks, setTasks] = useState<TaskLogSummary[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
 
-    getAgentLogs({ limit: 10 })
+    listAgentLogTasks({ limit: 50 })
       .then((data) => {
         if (!cancelled) {
-          const agentLogs = data.logs.filter((l) => l.agent === slug);
-          setLogs(agentLogs.slice(0, 10));
+          const mine = (data.tasks ?? []).filter((t) => t.agentSlug === slug);
+          setTasks(mine.slice(0, 10));
           setLoading(false);
         }
       })
@@ -78,11 +78,10 @@ function LogsSection({ slug }: { slug: string }) {
     };
   }, [slug]);
 
-  function formatTime(timestamp: string | undefined): string {
-    if (!timestamp) return "";
+  function formatTime(ms: number | undefined): string {
+    if (!ms) return "";
     try {
-      const d = new Date(timestamp);
-      return d.toLocaleTimeString(undefined, {
+      return new Date(ms).toLocaleTimeString(undefined, {
         hour: "2-digit",
         minute: "2-digit",
       });
@@ -98,16 +97,18 @@ function LogsSection({ slug }: { slug: string }) {
       </div>
       {loading ? (
         <div className="agent-log-empty">Loading...</div>
-      ) : logs.length === 0 ? (
+      ) : tasks.length === 0 ? (
         <div className="agent-log-empty">No recent activity</div>
       ) : (
-        logs.map((log) => (
-          <div key={log.id} className="agent-log-item">
-            {log.action && <div className="agent-log-action">{log.action}</div>}
-            {log.content && (
-              <div className="agent-log-content">{log.content}</div>
-            )}
-            <div className="agent-log-time">{formatTime(log.timestamp)}</div>
+        tasks.map((t) => (
+          <div key={t.taskId} className="agent-log-item">
+            <div className="agent-log-action">
+              {t.taskId} {t.hasError ? "\u26a0" : ""}
+            </div>
+            <div className="agent-log-content">
+              {t.toolCallCount} tool call{t.toolCallCount === 1 ? "" : "s"}
+            </div>
+            <div className="agent-log-time">{formatTime(t.lastToolAt)}</div>
           </div>
         ))
       )}

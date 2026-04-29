@@ -103,7 +103,11 @@ func (l *Launcher) runHeadlessOpenAICompatTurn(ctx context.Context, slug string,
 	// Use the ctx-aware StreamFn so cancellation propagates all the way
 	// to the HTTP request — without this a cancelled turn would pin the
 	// local server's inference slot until the model finishes generating.
-	streamFn := provider.NewOpenAICompatStreamFnWithCtx(ctx, kind)
+	// Per-agent ProviderBinding.Model wins over env/config/default —
+	// this is what makes agents like ceo run kimi-k2.6 while planner
+	// runs deepseek-v4-pro on the same install-wide ollama endpoint.
+	modelOverride := strings.TrimSpace(l.broker.MemberProviderBinding(slug).Model)
+	streamFn := provider.NewOpenAICompatStreamFnWithCtxAndModel(ctx, kind, modelOverride)
 
 	// All policy-bearing per-turn state is owned by openAICompatTurnState
 	// (see openai_compat_turn_state.go). The state machine is
@@ -118,12 +122,19 @@ func (l *Launcher) runHeadlessOpenAICompatTurn(ctx context.Context, slug string,
 		metrics: &metrics,
 	})
 
+	// taskID is unique per turn so the Receipts panel groups each
+	// agent's turn into its own row. Format mirrors agent.nextTaskID.
+	taskID := fmt.Sprintf("%s-%d", slug, time.Now().UnixMilli())
+
 	loop := openAICompatToolLoop{
 		streamFn:    streamFn,
 		tools:       tools,
 		toolByName:  toolByName,
 		maxIters:    maxOpenAICompatToolIterations,
 		toolTimeout: 90 * time.Second,
+		taskLogRoot: agent.DefaultTaskLogRoot(),
+		taskID:      taskID,
+		agentSlug:   slug,
 		onText:      state.onText,
 		onToolUse: func(name, rawInput string) {
 			state.onToolUseChunk(name, rawInput)

@@ -47,7 +47,7 @@ func NewOpenAICompatStreamFn(kind, defaultBaseURL, defaultModel string) func(str
 		// on Kind only.
 		return func(msgs []agent.Message, tools []agent.AgentTool) <-chan agent.StreamChunk {
 			ch := make(chan agent.StreamChunk, 64)
-			go runOpenAICompatStream(context.Background(), ch, kind, defaultBaseURL, defaultModel, msgs, tools)
+			go runOpenAICompatStream(context.Background(), ch, kind, defaultBaseURL, defaultModel, msgs, tools, "")
 			return ch
 		}
 	}
@@ -80,7 +80,34 @@ func NewOpenAICompatStreamFnWithCtx(ctx context.Context, kind string) agent.Stre
 	}
 	return func(msgs []agent.Message, tools []agent.AgentTool) <-chan agent.StreamChunk {
 		ch := make(chan agent.StreamChunk, 64)
-		go runOpenAICompatStream(ctx, ch, kind, baseURL, model, msgs, tools)
+		go runOpenAICompatStream(ctx, ch, kind, baseURL, model, msgs, tools, "")
+		return ch
+	}
+}
+
+// NewOpenAICompatStreamFnWithCtxAndModel is the per-agent variant of
+// NewOpenAICompatStreamFnWithCtx. modelOverride, when non-empty, wins over
+// env / config / compile-time defaults for the model field on outbound
+// /v1/chat/completions requests. This is how a member's persisted
+// ProviderBinding.Model lands on the wire — without it every agent would
+// send the install-wide default model name regardless of what's stored on
+// their member record.
+func NewOpenAICompatStreamFnWithCtxAndModel(ctx context.Context, kind, modelOverride string) agent.StreamFn {
+	baseURL, model := openAICompatDefaultsFor(kind)
+	if baseURL == "" && model == "" {
+		return func(_ []agent.Message, _ []agent.AgentTool) <-chan agent.StreamChunk {
+			ch := make(chan agent.StreamChunk, 1)
+			ch <- agent.StreamChunk{
+				Type:    "error",
+				Content: fmt.Sprintf("openai-compat: kind %q has no registered defaults — did its init() forget to call NewOpenAICompatStreamFn?", kind),
+			}
+			close(ch)
+			return ch
+		}
+	}
+	return func(msgs []agent.Message, tools []agent.AgentTool) <-chan agent.StreamChunk {
+		ch := make(chan agent.StreamChunk, 64)
+		go runOpenAICompatStream(ctx, ch, kind, baseURL, model, msgs, tools, modelOverride)
 		return ch
 	}
 }
@@ -176,10 +203,14 @@ func runOpenAICompatStream(
 	ch chan<- agent.StreamChunk,
 	kind, defaultBaseURL, defaultModel string,
 	msgs []agent.Message, tools []agent.AgentTool,
+	modelOverride string,
 ) {
 	defer close(ch)
 
 	baseURL, model := config.ResolveProviderEndpoint(kind, defaultBaseURL, defaultModel)
+	if trimmed := strings.TrimSpace(modelOverride); trimmed != "" {
+		model = trimmed
+	}
 	endpoint := normalizeOpenAICompatEndpoint(baseURL)
 
 	body := openaiRequest{

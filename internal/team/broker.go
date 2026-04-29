@@ -1658,6 +1658,7 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/company", b.requireAuth(b.handleCompany))
 	mux.HandleFunc("/config", b.requireAuth(b.handleConfig))
 	mux.HandleFunc("/status/local-providers", b.requireAuth(b.handleLocalProvidersStatus))
+	mux.HandleFunc("/image-providers", b.requireAuth(b.handleImageProviders))
 	mux.HandleFunc("/nex/register", b.requireAuth(b.handleNexRegister))
 	mux.HandleFunc("/v1/logs", b.requireAuth(b.handleOTLPLogs))
 	mux.HandleFunc("/events", b.handleEvents)
@@ -2572,6 +2573,19 @@ func (b *Broker) ServeWebUI(port int) error {
 	// under /assets/ are content-addressed and safe to cache aggressively.
 	// Without this, users stay pinned to a stale bundle for days because
 	// Chrome's heuristic cache revalidates HTML only occasionally.
+	// Serve generated images from ~/.wuphf/office/artist/ so the BoardRoom
+	// can render them inline via standard markdown <img>. Browsers can't
+	// fetch file:// URLs and don't carry the broker's bearer token on
+	// <img> requests, so this mount must live on the web-UI port (no auth)
+	// rather than the API mux. Path traversal is bounded by http.FileServer
+	// + http.Dir; we strip the prefix so requests resolve relative to the
+	// artist root.
+	artistRoot := imagegenArtistRoot()
+	mux.Handle("/artist-files/", http.StripPrefix(
+		"/artist-files/",
+		http.FileServer(http.Dir(artistRoot)),
+	))
+
 	mux.Handle("/", cacheControlMiddleware(fileServer))
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
 	// noctx: net.Listen is the blocking primitive; the lint rule is meant
@@ -3351,7 +3365,7 @@ func (b *Broker) loadState() error {
 	for i := range b.requests {
 		b.requests[i].Channel = channel.MigrateDMSlugString(b.requests[i].Channel)
 	}
-	b.ensureDefaultChannelsLocked()
+	// b.ensureDefaultChannelsLocked() // channels come from saved state
 	b.ensureDefaultOfficeMembersLocked()
 	b.normalizeLoadedStateLocked()
 	return nil

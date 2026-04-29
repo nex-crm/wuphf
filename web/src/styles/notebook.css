@@ -692,9 +692,9 @@
 }
 .notebook-surface .nb-promote-btn:disabled,
 .notebook-surface .nb-promote-btn.is-pending {
-  background: rgba(159, 77, 191, 0.12);
+  background: var(--accent-bg, rgba(159, 77, 191, 0.12));
   color: var(--accent, #9f4dbf);
-  border-color: rgba(159, 77, 191, 0.35);
+  border-color: var(--accent-bg-strong, rgba(159, 77, 191, 0.35));
   cursor: not-allowed;
 }
 .notebook-surface .nb-discard-link {

@@ -9,6 +9,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Building,
   Key,
+  MediaImage,
   Puzzle,
   Refresh,
   Settings as SettingsIcon,
@@ -16,6 +17,8 @@ import {
   Timer,
   WarningTriangle,
 } from "iconoir-react";
+
+import { ImageGenSection } from "./SettingsApp.imageGen";
 
 import {
   type ConfigSnapshot,
@@ -42,6 +45,7 @@ import { WipeModal } from "../ui/WipeModal";
 type SectionId =
   | "general"
   | "local-llms"
+  | "image-gen"
   | "company"
   | "keys"
   | "integrations"
@@ -66,6 +70,7 @@ const SECTION_GROUPS: SectionGroup[] = [
     items: [
       { id: "general", Icon: SettingsIcon, name: "General" },
       { id: "local-llms", Icon: Terminal, name: "Local LLMs" },
+      { id: "image-gen", Icon: MediaImage, name: "Image generation" },
       { id: "company", Icon: Building, name: "Company" },
     ],
   },
@@ -411,7 +416,7 @@ function useShredAction() {
 }
 
 function GeneralSection({ cfg, save }: SectionProps) {
-  const [provider, setProvider] = useState(cfg.llm_provider ?? "claude-code");
+  const [provider, setProvider] = useState(cfg.llm_provider ?? "ollama");
   const [memory, setMemory] = useState(cfg.memory_backend ?? "nex");
   const [teamLead, setTeamLead] = useState(cfg.team_lead_slug ?? "");
   const [maxConcurrent, setMaxConcurrent] = useState(
@@ -1772,6 +1777,7 @@ export function SettingsApp() {
         {section === "local-llms" && (
           <LocalLLMsSection cfg={data} save={save} />
         )}
+        {section === "image-gen" && <ImageGenSection />}
         {section === "company" && <CompanySection cfg={data} save={save} />}
         {section === "keys" && <KeysSection cfg={data} save={save} />}
         {section === "integrations" && (

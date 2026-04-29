@@ -1,0 +1,659 @@
+/* ═══════════════════════════════════════════════════════════════
+   BoardRoom Theme: Noir Gold
+   Hanger8200 brand theme — deep noir backgrounds, oxidized → polished
+   gold accents, gold-tinted off-white text. Self-contained: does not
+   inherit nex.css. Scoped to [data-theme="noir-gold"].
+   ═══════════════════════════════════════════════════════════════ */
+
+html[data-theme="noir-gold"] {
+  /* ── Neutral ramp (warm noir, dark → light) ── */
+  --neutral-950: #060606;
+  --neutral-900: #0a0a0b;
+  --neutral-800: #111113;
+  --neutral-700: #16171a;
+  --neutral-600: #1f2024;
+  --neutral-500: #2a2c30;
+  --neutral-400: #3c3e43;
+  --neutral-300: #5a5d62;
+  --neutral-200: #8a8d92;
+  --neutral-100: #b39e6b;
+  --neutral-50:  #d9c897;
+  --neutral-10:  #f5e9c8;
+
+  /* ── Gold ramp (oxidized → patina → polished → champagne) ── */
+  --gold-950: #1a1206;
+  --gold-900: #2a1c0a;
+  --gold-800: #3d2e0a;
+  --gold-700: #5c4413;
+  --gold-600: #8a6817;
+  --gold-500: #b8881e;
+  --gold-400: #c9a227;
+  --gold-300: #d9b84a;
+  --gold-200: #f0c75e;
+  --gold-100: #fce8a8;
+  --gold-50:  #fff5d4;
+
+  /* ── Accent stand-ins so any code referencing tertiary/cyan/olive still works ── */
+  --tertiary-500: var(--gold-700);
+  --tertiary-400: var(--gold-400);
+  --tertiary-300: var(--gold-300);
+  --tertiary-200: var(--gold-200);
+  --tertiary-100: var(--gold-100);
+
+  --olive-500: #3d2e0a;
+  --olive-400: var(--gold-500);
+  --olive-300: var(--gold-300);
+  --olive-200: var(--gold-200);
+  --olive-100: var(--gold-100);
+
+  --cyan-500: #b8881e;
+  --cyan-400: var(--gold-400);
+  --cyan-300: var(--gold-300);
+  --cyan-200: var(--gold-200);
+  --cyan-100: var(--gold-100);
+
+  /* ── Status colors (warmed for noir surface) ── */
+  --success-500: #1c5b34;
+  --success-400: #2faa64;
+  --success-300: #54c984;
+  --success-200: #9adcb6;
+  --success-100: #1a2b21;
+
+  --error-500: #6e1018;
+  --error-400: #d6443c;
+  --error-300: #ff7e6e;
+  --error-200: #2a1416;
+  --error-100: #1f0f10;
+
+  --warning-500: #5a3a07;
+  --warning-400: #c98e1e;
+  --warning-300: #f0b14a;
+  --warning-200: #2a1f0d;
+  --warning-100: #1f160a;
+
+  /* ── Overlays ── */
+  --overlay-soft:         rgba(255, 232, 168, 0.04);
+  --overlay:              rgba(255, 232, 168, 0.08);
+  --overlay-strong:       rgba(255, 232, 168, 0.16);
+  --scrim:                rgba(0, 0, 0, 0.72);
+  --overlay-white-soft:   rgba(245, 233, 200, 0.06);
+  --overlay-white:        rgba(245, 233, 200, 0.12);
+  --overlay-white-strong: rgba(245, 233, 200, 0.32);
+
+  /* ── Semantic aliases ── */
+  --bg:             #0a0a0b;
+  --bg-warm:        #111113;
+  --bg-subtle:      #060606;
+  --bg-card:        #111113;
+  --text:           #f5e9c8;
+  --text-secondary: #b39e6b;
+  --text-tertiary:  #7a6a45;
+  --text-disabled:  #4a4234;
+
+  --accent:      var(--gold-400);
+  --accent-warm: var(--gold-500);
+  --accent-bg:        rgba(201, 162, 39, 0.10);
+  --accent-bg-strong: rgba(201, 162, 39, 0.30);
+
+  --border:        #1a1a1c;
+  --border-light:  #141416;
+  --border-dark:   #2a261d;
+  --border-strong: #3c3528;
+
+  --green:      var(--success-400);
+  --green-dark: var(--success-500);
+  --green-bg:   var(--success-100);
+  --red:        var(--error-400);
+  --red-dark:   var(--error-500);
+  --red-bg:     var(--error-100);
+  --yellow:     var(--warning-400);
+  --yellow-dark:var(--warning-500);
+  --yellow-bg:  var(--warning-100);
+  --blue:       var(--gold-400);
+  --blue-bg:    var(--accent-bg);
+
+  --font-sans: "Source Serif 4", "IBM Plex Serif", Georgia, "Times New Roman", serif;
+  --font-serif: "Fraunces", Georgia, "Times New Roman", serif;
+  --font-logo: "Fraunces", Georgia, "Times New Roman", serif;
+  --font-mono: "Geist Mono", "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+
+  /* ── Sidebar tokens (no purple anywhere) ── */
+  --nex-sidebar:             #0a0a0b;
+  --nex-sidebar-hover:       rgba(201, 162, 39, 0.12);
+  --nex-sidebar-active:      var(--gold-400);
+  --nex-sidebar-text:        rgba(245, 233, 200, 0.78);
+  --nex-sidebar-text-active: var(--gold-200);
+
+  /* purple aliases redirected to gold so any stale rule is harmless */
+  --purple:    var(--gold-400);
+  --purple-bg: var(--accent-bg);
+
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --radius-full: 9999px;
+}
+
+html[data-theme="noir-gold"] body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+}
+
+/* ─── Sidebar — flat noir, gold accents, no purple, no glow ─── */
+html[data-theme="noir-gold"] .sidebar {
+  background: var(--nex-sidebar);
+  color: var(--nex-sidebar-text);
+  border-right: 1px solid var(--border);
+}
+html[data-theme="noir-gold"] .sidebar .sidebar-logo {
+  color: var(--gold-200);
+  letter-spacing: 0.08em;
+}
+html[data-theme="noir-gold"] .sidebar .sidebar-section-title {
+  color: rgba(245, 233, 200, 0.45);
+}
+html[data-theme="noir-gold"] .sidebar .sidebar-section-toggle {
+  color: rgba(245, 233, 200, 0.62);
+}
+html[data-theme="noir-gold"] .sidebar .sidebar-section-toggle:hover {
+  color: var(--gold-200);
+}
+html[data-theme="noir-gold"] .sidebar .sidebar-icon-btn {
+  color: rgba(245, 233, 200, 0.75);
+}
+html[data-theme="noir-gold"] .sidebar .sidebar-icon-btn:hover {
+  background: var(--nex-sidebar-hover);
+  color: var(--gold-200);
+}
+html[data-theme="noir-gold"] .sidebar .sidebar-icon-btn.active {
+  background: rgba(201, 162, 39, 0.18);
+  color: var(--gold-100);
+}
+html[data-theme="noir-gold"] .sidebar .sidebar-icon-btn.active:hover {
+  background: rgba(201, 162, 39, 0.26);
+}
+html[data-theme="noir-gold"] .sidebar .sidebar-header {
+  border-bottom-color: var(--border);
+}
+html[data-theme="noir-gold"] .sidebar .sidebar-scroll-wrap.is-agents {
+  border-bottom-color: var(--border);
+}
+html[data-theme="noir-gold"] .sidebar .sidebar-section + .sidebar-section,
+html[data-theme="noir-gold"] .sidebar .sidebar-agents + .sidebar-section,
+html[data-theme="noir-gold"] .sidebar .sidebar-channels + .sidebar-section,
+html[data-theme="noir-gold"] .sidebar .sidebar-apps + .sidebar-section {
+  border-top-color: var(--border);
+}
+html[data-theme="noir-gold"] .sidebar .sidebar-agent-task,
+html[data-theme="noir-gold"] .sidebar .sidebar-agent-activity {
+  color: rgba(245, 233, 200, 0.42);
+}
+
+html[data-theme="noir-gold"] .sidebar-item,
+html[data-theme="noir-gold"] .sidebar-channel,
+html[data-theme="noir-gold"] .sidebar-agent {
+  color: var(--nex-sidebar-text);
+}
+html[data-theme="noir-gold"] .sidebar-item:hover,
+html[data-theme="noir-gold"] .sidebar-channel:hover,
+html[data-theme="noir-gold"] .sidebar-agent:hover {
+  background: var(--nex-sidebar-hover);
+  color: var(--gold-100);
+}
+html[data-theme="noir-gold"] .sidebar-item.active,
+html[data-theme="noir-gold"] .sidebar-channel.active,
+html[data-theme="noir-gold"] .sidebar-agent.active {
+  background: rgba(201, 162, 39, 0.18);
+  color: var(--gold-100);
+}
+html[data-theme="noir-gold"] .sidebar-item.active:hover,
+html[data-theme="noir-gold"] .sidebar-channel.active:hover,
+html[data-theme="noir-gold"] .sidebar-agent.active:hover {
+  background: rgba(201, 162, 39, 0.24);
+}
+
+html[data-theme="noir-gold"] .sidebar .usage-toggle {
+  color: rgba(245, 233, 200, 0.72);
+  border-top-color: var(--border);
+}
+html[data-theme="noir-gold"] .sidebar .usage-toggle:hover {
+  color: var(--gold-100);
+  background: var(--nex-sidebar-hover);
+}
+html[data-theme="noir-gold"] .sidebar .usage-toggle.open {
+  background: rgba(201, 162, 39, 0.18);
+  color: var(--gold-100);
+}
+html[data-theme="noir-gold"] .sidebar-summary,
+html[data-theme="noir-gold"] .sidebar-hint {
+  color: rgba(245, 233, 200, 0.42);
+  border-top-color: var(--border);
+}
+
+/* ─── Channel header ─── */
+html[data-theme="noir-gold"] .channel-header {
+  background: var(--bg-warm);
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+}
+html[data-theme="noir-gold"] .channel-title {
+  color: var(--gold-100);
+}
+html[data-theme="noir-gold"] .channel-desc {
+  color: var(--text-secondary);
+}
+html[data-theme="noir-gold"] .sidebar-btn {
+  color: var(--text-secondary);
+}
+html[data-theme="noir-gold"] .sidebar-btn:hover {
+  background: var(--overlay);
+  color: var(--gold-100);
+}
+
+/* ─── Composer / messages ─── */
+html[data-theme="noir-gold"] .composer-inner {
+  background: var(--bg-warm);
+  border-color: var(--border-dark);
+}
+html[data-theme="noir-gold"] .message-text { color: var(--text); }
+html[data-theme="noir-gold"] .message:hover { background: var(--bg-warm); }
+
+/* ─── Buttons ─── */
+html[data-theme="noir-gold"] .btn-primary,
+html[data-theme="noir-gold"] button.btn-primary {
+  background: var(--gold-400);
+  color: var(--gold-950);
+  border: 1px solid var(--gold-500);
+}
+html[data-theme="noir-gold"] .btn-primary:hover {
+  background: var(--gold-300);
+  color: #000;
+}
+html[data-theme="noir-gold"] .btn-secondary {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+}
+html[data-theme="noir-gold"] .btn-secondary:hover {
+  border-color: var(--gold-500);
+  color: var(--gold-100);
+}
+
+/* ─── Cards / panels ─── */
+html[data-theme="noir-gold"] .card,
+html[data-theme="noir-gold"] .panel,
+html[data-theme="noir-gold"] .modal-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+
+/* ─── Sidebar section breaks — video-game menu style ───────────────
+   Replaces the flat border-top between sections with a centered gold
+   diamond on a gradient hairline ( ◆ ), and gives each section title
+   a vertical gold "blade" marker on its left edge. Scoped to noir-gold
+   so the nex themes keep their flat dividers. */
+
+html[data-theme="noir-gold"] .sidebar .sidebar-section + .sidebar-section,
+html[data-theme="noir-gold"] .sidebar .sidebar-agents + .sidebar-section,
+html[data-theme="noir-gold"] .sidebar .sidebar-channels + .sidebar-section,
+html[data-theme="noir-gold"] .sidebar .sidebar-apps + .sidebar-section,
+html[data-theme="noir-gold"] .sidebar .sidebar-collapsible + .sidebar-section {
+  border-top: none;
+  position: relative;
+  padding-top: 16px;
+  margin-top: 0;
+}
+
+/* Gold gradient hairline that runs the width of the divider */
+html[data-theme="noir-gold"] .sidebar .sidebar-section + .sidebar-section::after,
+html[data-theme="noir-gold"] .sidebar .sidebar-agents + .sidebar-section::after,
+html[data-theme="noir-gold"] .sidebar .sidebar-channels + .sidebar-section::after,
+html[data-theme="noir-gold"] .sidebar .sidebar-apps + .sidebar-section::after,
+html[data-theme="noir-gold"] .sidebar .sidebar-collapsible + .sidebar-section::after {
+  content: "";
+  position: absolute;
+  top: 7px;
+  left: 14px;
+  right: 14px;
+  height: 1px;
+  background: linear-gradient(
+    to right,
+    transparent 0%,
+    rgba(92, 68, 19, 0.6) 12%,
+    var(--gold-500) 48%,
+    var(--gold-400) 52%,
+    rgba(92, 68, 19, 0.6) 88%,
+    transparent 100%
+  );
+  pointer-events: none;
+}
+
+/* Centered diamond ornament — sits ON the hairline */
+html[data-theme="noir-gold"] .sidebar .sidebar-section + .sidebar-section::before,
+html[data-theme="noir-gold"] .sidebar .sidebar-agents + .sidebar-section::before,
+html[data-theme="noir-gold"] .sidebar .sidebar-channels + .sidebar-section::before,
+html[data-theme="noir-gold"] .sidebar .sidebar-apps + .sidebar-section::before,
+html[data-theme="noir-gold"] .sidebar .sidebar-collapsible + .sidebar-section::before {
+  content: "◆";
+  position: absolute;
+  top: -1px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 9px;
+  line-height: 1;
+  color: var(--gold-300);
+  background: var(--nex-sidebar);
+  padding: 3px 10px;
+  text-shadow:
+    0 0 4px rgba(240, 199, 94, 0.55),
+    0 0 8px rgba(201, 162, 39, 0.35);
+  z-index: 1;
+  pointer-events: none;
+}
+
+/* Section title — blade marker on the left + JRPG-ish small caps */
+html[data-theme="noir-gold"] .sidebar .sidebar-section-title,
+html[data-theme="noir-gold"] .sidebar .sidebar-section-toggle {
+  position: relative;
+  padding-left: 18px;
+  letter-spacing: 0.14em;
+  font-weight: 700;
+  text-transform: uppercase;
+  font-size: 10px;
+  color: var(--gold-200);
+}
+
+html[data-theme="noir-gold"] .sidebar .sidebar-section-toggle::before,
+html[data-theme="noir-gold"] .sidebar .sidebar-section-title::before {
+  content: "";
+  position: absolute;
+  left: 6px;
+  top: 4px;
+  bottom: 4px;
+  width: 2px;
+  background: linear-gradient(
+    to bottom,
+    var(--gold-200) 0%,
+    var(--gold-400) 50%,
+    var(--gold-700) 100%
+  );
+  border-radius: 1px;
+  box-shadow: 0 0 4px rgba(201, 162, 39, 0.5);
+}
+
+/* Hover: gleam intensifies + title brightens */
+html[data-theme="noir-gold"] .sidebar .sidebar-section-toggle:hover {
+  color: var(--gold-50);
+}
+html[data-theme="noir-gold"] .sidebar .sidebar-section-toggle:hover::before {
+  background: linear-gradient(
+    to bottom,
+    var(--gold-100) 0%,
+    var(--gold-300) 50%,
+    var(--gold-500) 100%
+  );
+  box-shadow: 0 0 6px rgba(240, 199, 94, 0.75);
+}
+
+/* Collapsed section: dim the blade slightly so it reads "closed" */
+html[data-theme="noir-gold"] .sidebar .sidebar-section.is-collapsed .sidebar-section-toggle::before {
+  background: linear-gradient(
+    to bottom,
+    var(--gold-600) 0%,
+    var(--gold-700) 50%,
+    var(--gold-900) 100%
+  );
+  box-shadow: none;
+  opacity: 0.6;
+}
+
+/* Chevron color matches the blade */
+html[data-theme="noir-gold"] .sidebar .sidebar-section-toggle svg {
+  color: var(--gold-400);
+}
+html[data-theme="noir-gold"] .sidebar .sidebar-section-toggle:hover svg {
+  color: var(--gold-200);
+}
+
+/* ─── Notebook + Review subsurface — paper → aged gilt manuscript ───────
+   The notebook scopes its design tokens at `.notebook-surface` (per
+   DESIGN-NOTEBOOK.md). Override those tokens for noir-gold so the paper
+   metaphor reads as deep aged parchment / leather inner cover instead of
+   cream paper, with gold ink and gold rules. All review subviews use the
+   same tokens and pick up the change automatically. */
+
+html[data-theme="noir-gold"] .notebook-surface {
+  --nb-paper:          #1a160e;
+  --nb-paper-dark:     #14110a;
+  --nb-rule:           rgba(201, 162, 39, 0.07);
+  --nb-surface:        #18140d;
+  --nb-text:           #e8d9a8;
+  --nb-text-muted:     #b39e6b;
+  --nb-text-tertiary:  #7a6a45;
+  --nb-border:         #2a261d;
+  --nb-border-light:   #1f1c14;
+  --nb-ink-blue:       #88a4c2;
+  --nb-stamp-red:      #d6443c;
+  --nb-amber:          var(--gold-400);
+  --nb-amber-bg:       rgba(201, 162, 39, 0.10);
+  --nb-amber-hover:    var(--gold-300);
+  --nb-green-approve:  var(--green);
+  --nb-green-bg:       rgba(47, 170, 100, 0.10);
+}
+
+/* The literal rgba(42, 39, 33, X) calls in notebook.css are the dark
+   paper-ink color at low opacity — meant to read as a hint of ink on
+   cream paper. On dark parchment that math inverts: we want the gold
+   cream color at low opacity instead. */
+html[data-theme="noir-gold"] .notebook-surface .nb-shelf-item:hover {
+  background: rgba(232, 217, 168, 0.06);
+}
+html[data-theme="noir-gold"] .notebook-surface .nb-shelf-item.is-current {
+  background: rgba(232, 217, 168, 0.10);
+}
+html[data-theme="noir-gold"] .notebook-surface .nb-shelf-item .nb-shelf-meta,
+html[data-theme="noir-gold"] .notebook-surface .nb-shelf-card .nb-shelf-card-meta > span:not([class]) {
+  color: var(--nb-text-tertiary);
+}
+html[data-theme="noir-gold"] .notebook-surface .nb-tag,
+html[data-theme="noir-gold"] .notebook-surface .nb-frontmatter-key {
+  background: rgba(232, 217, 168, 0.08);
+  color: var(--nb-text-muted);
+}
+/* Card / shelf box-shadow — was warm ink on cream; switch to gold soft glow */
+html[data-theme="noir-gold"] .notebook-surface .nb-shelf-card {
+  box-shadow:
+    0 1px 1px rgba(0, 0, 0, 0.4),
+    0 1px 2px rgba(201, 162, 39, 0.06);
+}
+html[data-theme="noir-gold"] .notebook-surface .nb-shelf-card:hover {
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.55),
+    0 2px 4px rgba(201, 162, 39, 0.10);
+}
+/* Sticky-note / draft stamp text colors that hardcoded gray/amber */
+html[data-theme="noir-gold"] .notebook-surface .nb-empty-hint {
+  color: var(--nb-text-tertiary);
+}
+html[data-theme="noir-gold"] .notebook-surface .nb-frontmatter-readonly {
+  color: var(--nb-amber);
+}
+
+/* ─── Wiki shell (around the notebook) ─── */
+
+/* "NEW" / type pill — was teal #CFF5F5/#0F5C5C, jarring on noir-gold */
+html[data-theme="noir-gold"] .wk-section-new {
+  background: var(--accent-bg);
+  color: var(--gold-200);
+  border: 1px solid rgba(201, 162, 39, 0.4);
+}
+
+/* Playbook synthesis status (success/error border + text) — keep semantic
+   green/red but warm them so they read on dark gold parchment */
+html[data-theme="noir-gold"] .wk-playbook-synthesis[data-state='success'] .wk-playbook-synthesis__button {
+  color: var(--green);
+  border-color: var(--green);
+}
+html[data-theme="noir-gold"] .wk-playbook-synthesis[data-state='error'] .wk-playbook-synthesis__button {
+  color: var(--red);
+  border-color: var(--red);
+}
+html[data-theme="noir-gold"] .wk-playbook-synthesis__pending {
+  color: var(--gold-300);
+}
+html[data-theme="noir-gold"] .wk-playbook-synthesis__button:hover:not([disabled]) {
+  background: var(--overlay);
+}
+
+/* ─── Notebook surface — strip the paper-ruled lines + SVG noise ─────
+   The light-mode notebook overlays a repeating-linear-gradient (16px
+   horizontal lines) and a fractal-noise SVG to simulate a ruled paper
+   page. On dark gold both effects read as garbage scanlines and a
+   muddy grain. Flatten the background. */
+
+html[data-theme="noir-gold"] .notebook-surface {
+  background-image: none !important;
+  background-color: var(--nb-paper);
+}
+
+/* ─── Review cards — were yellow sticky-notes (#eef679 / #f5fb95).
+   Reskin to dark gold leather with a thin gold outline + soft glow,
+   so they read as objects on the parchment rather than highlighter blobs. */
+
+html[data-theme="noir-gold"] .notebook-surface .nb-review-card {
+  background: var(--nb-paper-dark);
+  outline: 0.5px solid var(--gold-700);
+  outline-offset: -0.5px;
+  color: var(--nb-text);
+  box-shadow:
+    0 1px 1px rgba(0, 0, 0, 0.45),
+    0 1px 2px rgba(201, 162, 39, 0.05);
+}
+html[data-theme="noir-gold"] .notebook-surface .nb-review-card:hover {
+  background: #1f1a10;
+  outline-color: var(--gold-500);
+  box-shadow:
+    0 1px 1px rgba(0, 0, 0, 0.55),
+    0 3px 6px rgba(0, 0, 0, 0.45),
+    0 8px 14px rgba(201, 162, 39, 0.10);
+}
+html[data-theme="noir-gold"] .notebook-surface .nb-review-card.is-active {
+  outline: 2px solid var(--gold-400);
+  outline-offset: -2px;
+  background: #221c11;
+}
+
+/* Card text — title stays bright cream-gold for readability; excerpt at
+   reduced opacity should still be legible on dark, so bump opacity up
+   from the 0.7/0.55 the original used (which assumed dark-on-cream). */
+html[data-theme="noir-gold"] .notebook-surface .nb-review-card-title {
+  color: var(--gold-100);
+}
+html[data-theme="noir-gold"] .notebook-surface .nb-review-card-excerpt {
+  color: var(--nb-text-muted);
+  opacity: 1;
+}
+html[data-theme="noir-gold"] .notebook-surface .nb-review-card-path {
+  color: var(--nb-text-tertiary);
+  opacity: 1;
+}
+html[data-theme="noir-gold"] .notebook-surface .nb-review-col-empty {
+  color: var(--nb-text-tertiary);
+  opacity: 1;
+}
+
+/* ─── Wiki app shell — top tab bar + left nav menu buttons ─────────────
+   wiki-shell.css uses fallback aliases (--surface, --text-muted, --purple)
+   that don't exist in the global theme; in noir-gold those fall back to
+   white/blue/purple, leaving the wiki tabs visually unthemed. Override
+   them inline so the bar reads as gold-on-noir, the active tab uses the
+   gold accent, and the unread badge is gold instead of purple. */
+
+html[data-theme="noir-gold"] .wiki-tabs {
+  background: var(--bg-card);
+  border-bottom-color: var(--border);
+}
+html[data-theme="noir-gold"] .wiki-tab {
+  color: var(--text-secondary);
+}
+html[data-theme="noir-gold"] .wiki-tab:hover {
+  color: var(--gold-100);
+}
+html[data-theme="noir-gold"] .wiki-tab:focus-visible {
+  outline-color: var(--gold-400);
+}
+html[data-theme="noir-gold"] .wiki-tab.is-active {
+  color: var(--gold-100);
+  border-bottom-color: var(--gold-400);
+}
+html[data-theme="noir-gold"] .wiki-tab-badge {
+  background: var(--gold-400);
+  color: var(--gold-950);
+}
+
+/* ─── Wiki surface — left nav menu buttons + wikilinks ───────────────
+   --wk-wikilink resolves to --olive-500 which we already redirected to
+   #3d2e0a (deep oxidized) — too dark on dark bg. Re-route the wiki
+   palette to gold tones so links and the active menu button read. */
+html[data-theme="noir-gold"] .wiki-root {
+  --wk-wikilink:        var(--gold-300);
+  --wk-wikilink-broken: var(--red);
+  --wk-amber:           var(--gold-400);
+  --wk-amber-bg:        rgba(201, 162, 39, 0.10);
+  --wk-amber-banner:    rgba(201, 162, 39, 0.05);
+  --wk-code-bg:         var(--bg-warm);
+}
+html[data-theme="noir-gold"] .wk-nav-sidebar h3 {
+  color: var(--gold-300);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-size: 11px;
+}
+html[data-theme="noir-gold"] .wk-nav-sidebar li.current a {
+  background: rgba(201, 162, 39, 0.12);
+  color: var(--gold-100);
+}
+html[data-theme="noir-gold"] .wk-nav-sidebar .search {
+  background: var(--bg-warm);
+  border-color: var(--border-dark);
+  color: var(--text);
+}
+html[data-theme="noir-gold"] .wk-nav-sidebar .search:focus {
+  border-color: var(--gold-500);
+}
+
+/* Wiki "NEW" pill (was teal #CFF5F5/#0F5C5C — already had a partial
+   override but only for one selector). Cover the wiki-shell tab badge
+   and any other inline pills for completeness. */
+html[data-theme="noir-gold"] .wk-section-new {
+  background: var(--accent-bg);
+  color: var(--gold-200);
+  border: 1px solid rgba(201, 162, 39, 0.4);
+}
+
+/* ─── Entity-graph node palette ────────────────────────────────────
+   Default theme uses pastel Tailwind colors (lavender/sky/mint). On
+   noir those wash out as bright neon dots; redirect to gold-toned
+   variants tuned for the dark surface. */
+html[data-theme="noir-gold"] {
+  --graph-people-fill:       rgba(201, 162, 39, 0.14);
+  --graph-people-stroke:     var(--gold-300);
+  --graph-companies-fill:    rgba(136, 164, 194, 0.16);
+  --graph-companies-stroke:  #88a4c2;
+  --graph-customers-fill:    rgba(47, 170, 100, 0.15);
+  --graph-customers-stroke:  var(--green);
+  --graph-other-fill:        rgba(245, 233, 200, 0.06);
+  --graph-other-stroke:      var(--text-tertiary);
+}
+
+/* ─── Sidebar agent task / activity (the "token burn" line under each
+       team member) — was barely visible on noir at 42% cream opacity.
+       Bump to a clean readable gold so the user can actually see it. */
+html[data-theme="noir-gold"] .sidebar .sidebar-agent-task,
+html[data-theme="noir-gold"] .sidebar .sidebar-agent-activity {
+  color: var(--gold-300);
+  opacity: 1;
+}

@@ -58,20 +58,20 @@ const NODE_STYLES: Record<
   { fill: string; stroke: string; icon: string; label: string }
 > = {
   people: {
-    fill: "#EDE9FE",
-    stroke: "#7C3AED",
+    fill: "var(--graph-people-fill, #EDE9FE)",
+    stroke: "var(--graph-people-stroke, #7C3AED)",
     icon: "👤", // 👤
     label: "People",
   },
   companies: {
-    fill: "#DBEAFE",
-    stroke: "#2563EB",
+    fill: "var(--graph-companies-fill, #DBEAFE)",
+    stroke: "var(--graph-companies-stroke, #2563EB)",
     icon: "🏢", // 🏢
     label: "Companies",
   },
   customers: {
-    fill: "#DCFCE7",
-    stroke: "#059669",
+    fill: "var(--graph-customers-fill, #DCFCE7)",
+    stroke: "var(--graph-customers-stroke, #059669)",
     icon: "🤝", // handshake — customer = relationship
     label: "Customers",
   },
@@ -80,8 +80,8 @@ const NODE_STYLES: Record<
 function styleFor(kind: string) {
   return (
     NODE_STYLES[kind] ?? {
-      fill: "#F3F4F6",
-      stroke: "#6B7280",
+      fill: "var(--graph-other-fill, #F3F4F6)",
+      stroke: "var(--graph-other-stroke, #6B7280)",
       icon: "◆",
       label: kind,
     }
@@ -469,14 +469,16 @@ export function GraphApp() {
                           width={120}
                           height={20}
                           rx={4}
-                          fill="var(--text)"
-                          opacity={0.9}
+                          fill="var(--bg-card)"
+                          stroke="var(--border)"
+                          strokeWidth={1}
+                          opacity={0.95}
                         />
                         <text
                           x={(x1 + x2) / 2}
                           y={(y1 + y2) / 2 + 2}
                           fontSize={10}
-                          fill="#fff"
+                          fill="var(--text)"
                           textAnchor="middle"
                           dominantBaseline="middle"
                         >
