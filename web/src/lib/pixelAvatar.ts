@@ -162,10 +162,11 @@ function buildProceduralOfficePortrait(slug: string): KnownAvatarSprite {
 }
 
 export function resolvePortraitSprite(slug: string): KnownAvatarSprite {
-  const known = resolveKnownPortraitSprite(slug)
+  const normalized = slug.trim().toLowerCase()
+  const known = resolveKnownPortraitSprite(normalized)
   if (known) return known
 
-  return buildProceduralOfficePortrait(slug)
+  return buildProceduralOfficePortrait(normalized)
 }
 
 /**

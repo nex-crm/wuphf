@@ -17,6 +17,15 @@ describe('pixel avatar sprite resolution', () => {
     }
   })
 
+  it('normalizes slugs before resolving portraits', () => {
+    expect(resolvePortraitSprite(' Planner ')?.id).toBe('hybridPm')
+
+    const mixedCase = resolvePortraitSprite('Custom-Ops-Agent')
+    const normalized = resolvePortraitSprite(' custom-ops-agent ')
+    expect(mixedCase.id).toBe(normalized.id)
+    expect(mixedCase.palette).toEqual(normalized.palette)
+  })
+
   it('keeps arbitrary new-agent slugs on generated office sprites', () => {
     const avatar = resolvePortraitSprite('custom-ops-agent')
     const idParts = avatar.id.split(':')
