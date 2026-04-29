@@ -609,3 +609,47 @@ func TestLauncher_SchedulerWiringDelegatesProcessOnce(t *testing.T) {
 // known package-level string without importing internal packages. Trivial
 // const so the wiring test has something concrete to assert against.
 const launcherSchedulerSentinel = "watchdog scheduler"
+
+// Regression: Launcher.Kill() must drain the watchdog scheduler goroutine
+// before returning. The pre-refactor loop was for{ ... time.Sleep } with no
+// exit; C4 added Stop() but the first cut of Kill() did not call it, so the
+// goroutine outlived Kill and held a reference to the broker. This test
+// observes goroutine exit via done.Wait and asserts it closes promptly
+// after Kill returns. With the bug present, the goroutine sits forever on
+// the 1h initialDelay sleeper and exited never closes within the timeout.
+func TestLauncher_KillDrainsScheduler(t *testing.T) {
+	clk := newManualClock(time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC))
+	sched := &watchdogScheduler{
+		broker:       newSchedulerFixtureBroker(t),
+		clock:        clk,
+		initialDelay: time.Hour, // intentionally never released by the manual clock
+		pollEvery:    time.Hour,
+		deliverTask:  func(officeActionLog, teamTask) {},
+	}
+	l := &Launcher{schedulerWorker: sched}
+	sched.Start(context.Background())
+
+	select {
+	case <-clk.registered:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("scheduler never registered its initial sleeper")
+	}
+
+	// Watch for goroutine exit. done is incremented by Start and decremented
+	// by run() at exit; if Kill drains via Stop, this fires immediately.
+	exited := make(chan struct{})
+	go func() {
+		sched.done.Wait()
+		close(exited)
+	}()
+
+	// Bare &Launcher{} takes the non-tmux Kill path; ignore the error —
+	// the only thing we care about is that Stop got invoked along the way.
+	_ = l.Kill()
+
+	select {
+	case <-exited:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("scheduler goroutine did not exit within 2s after Kill — Kill is not draining the scheduler")
+	}
+}

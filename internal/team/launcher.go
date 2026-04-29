@@ -157,8 +157,9 @@ type Launcher struct {
 	notify *notificationContextBuilder
 
 	// schedulerWorker owns the watchdog scheduler goroutine
-	// (PLAN.md §C4). Lazily constructed via scheduler(); Launch() calls
-	// Start, Kill() calls Stop. clock is realClock in production.
+	// (PLAN.md §C4). Lazily constructed via scheduler(); Launch starts the
+	// goroutine via watchdogSchedulerLoop, Kill drains it via Stop before
+	// tearing down the broker. clock is realClock in production.
 	schedulerWorker *watchdogScheduler
 }
 
@@ -1693,6 +1694,12 @@ func (l *Launcher) Attach() error {
 func (l *Launcher) Kill() error {
 	if l.headlessCancel != nil {
 		l.headlessCancel()
+	}
+	// Drain the watchdog scheduler before tearing down the broker so the
+	// goroutine doesn't try to read jobs through a half-shut-down broker.
+	// Stop() is a no-op if the scheduler was never started.
+	if l.schedulerWorker != nil {
+		l.schedulerWorker.Stop()
 	}
 	if l.broker != nil {
 		l.broker.Stop()
