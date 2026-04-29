@@ -603,11 +603,24 @@ export function getScheduler(opts?: { dueOnly?: boolean }) {
 
 // ── Skills ──
 
+export type SkillStatus = "active" | "proposed" | "archived";
+
+export interface SkillMetadata {
+  wuphf?: {
+    source_articles?: string[];
+  };
+}
+
 export interface Skill {
   name: string;
   description?: string;
   source?: string;
   parameters?: unknown;
+  status?: SkillStatus;
+  created_by?: string;
+  created_at?: string;
+  updated_at?: string;
+  metadata?: SkillMetadata;
 }
 
 export function getSkills() {
@@ -616,6 +629,94 @@ export function getSkills() {
 
 export function invokeSkill(name: string, params?: Record<string, unknown>) {
   return post(`/skills/${encodeURIComponent(name)}/invoke`, params ?? {});
+}
+
+// ── Skill compile (PR 1a wiki-skill-compile) ──
+
+export interface CompileError {
+  slug: string;
+  reason: string;
+}
+
+export interface CompileResult {
+  scanned: number;
+  matched: number;
+  proposed: number;
+  deduped: number;
+  rejected_by_guard: number;
+  errors: CompileError[];
+  duration_ms: number;
+  trigger: string;
+}
+
+export interface CompileQueued {
+  queued: true;
+}
+
+export interface CompileSkipped {
+  skipped: string;
+}
+
+export type CompileResponse = CompileResult | CompileQueued | CompileSkipped;
+
+export function compileSkills(opts?: {
+  dry_run?: boolean;
+  scope_path?: string;
+}) {
+  return post<CompileResponse>("/skills/compile", opts ?? {});
+}
+
+export interface SkillCompileStats {
+  last_run_at?: string;
+  total_runs?: number;
+  total_proposed?: number;
+  total_deduped?: number;
+  total_rejected_by_guard?: number;
+  [key: string]: unknown;
+}
+
+export function getSkillCompileStats() {
+  return get<SkillCompileStats>("/skills/compile/stats");
+}
+
+export interface ApproveSkillResponse {
+  skill?: Skill;
+}
+
+export function approveSkill(name: string): Promise<ApproveSkillResponse> {
+  return post<ApproveSkillResponse>(
+    `/skills/${encodeURIComponent(name)}/approve`,
+    {},
+  );
+}
+
+export interface RejectSkillResponse {
+  ok: boolean;
+  undo_token: string;
+  skill_name: string;
+  expires_in: number;
+}
+
+export function rejectSkill(
+  name: string,
+  reason?: string,
+): Promise<RejectSkillResponse> {
+  return post<RejectSkillResponse>(
+    `/skills/${encodeURIComponent(name)}/reject`,
+    reason ? { reason } : {},
+  );
+}
+
+export interface UndoRejectSkillResponse {
+  skill?: Skill;
+}
+
+export function undoRejectSkill(
+  token: string,
+): Promise<UndoRejectSkillResponse> {
+  return post<UndoRejectSkillResponse>(`/skills/reject/undo`, {
+    undo_token: token,
+  });
 }
 
 // ── Usage ──
@@ -874,4 +975,29 @@ export function resetWorkspace() {
 // The broker resets in place after success so onboarding can reopen immediately.
 export function shredWorkspace() {
   return postWithTimeout<WorkspaceWipeResult>("/workspace/shred", {}, 20_000);
+}
+
+// UpgradeRunResult mirrors broker.upgradeRunResult — keep field names in
+// sync with internal/team/broker.go so a future rename here surfaces a TS
+// error against the canonical wire shape. install_method is optional
+// because the UI also synthesises a result on transport failure (network
+// error / timeout before reaching the broker), where no real method has
+// been observed; the broker itself always sets one of the union members.
+export interface UpgradeRunResult {
+  ok: boolean;
+  install_method?: "global" | "local" | "unknown";
+  command?: string;
+  working_dir?: string;
+  output?: string;
+  error?: string;
+  timed_out?: boolean;
+}
+
+// runUpgrade triggers `npm install [-g] wuphf@latest` on the host that the
+// broker is running on. The 130s timeout is just above the broker-side
+// upgradeRunTimeout (120s) so the client gives the server enough room to
+// surface its own deadline error instead of failing first with a generic
+// "fetch timed out".
+export function runUpgrade() {
+  return postWithTimeout<UpgradeRunResult>("/upgrade/run", {}, 130_000);
 }

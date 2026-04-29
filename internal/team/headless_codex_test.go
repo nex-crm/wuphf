@@ -164,10 +164,10 @@ func TestRunHeadlessCodexTurnUsesHeadlessOfficeRuntime(t *testing.T) {
 		pack:        agent.GetPack("founding-team"),
 		cwd:         t.TempDir(),
 		broker:      newTestBroker(t),
-		headlessCtx: context.Background(),
+		headlessCtx: t.Context(),
 	}
 
-	if err := l.runHeadlessCodexTurn(context.Background(), "ceo", "You have new work in #launch."); err != nil {
+	if err := l.runHeadlessCodexTurn(t.Context(), "ceo", "You have new work in #launch."); err != nil {
 		t.Fatalf("runHeadlessCodexTurn: %v", err)
 	}
 
@@ -320,10 +320,10 @@ func TestRunHeadlessCodexTurnUsesAssignedWorktreeForCodingAgents(t *testing.T) {
 		pack:        agent.GetPack("founding-team"),
 		cwd:         repoRoot,
 		broker:      broker,
-		headlessCtx: context.Background(),
+		headlessCtx: t.Context(),
 	}
 
-	if err := l.runHeadlessCodexTurn(context.Background(), "eng", "Ship the automation runtime."); err != nil {
+	if err := l.runHeadlessCodexTurn(t.Context(), "eng", "Ship the automation runtime."); err != nil {
 		t.Fatalf("runHeadlessCodexTurn: %v", err)
 	}
 
@@ -436,10 +436,10 @@ func TestRunHeadlessCodexTurnUsesAssignedWorktreeForLocalWorktreeBuilder(t *test
 		pack:        agent.GetPack("founding-team"),
 		cwd:         repoRoot,
 		broker:      broker,
-		headlessCtx: context.Background(),
+		headlessCtx: t.Context(),
 	}
 
-	if err := l.runHeadlessCodexTurn(context.Background(), "builder", "Ship the intake packet."); err != nil {
+	if err := l.runHeadlessCodexTurn(t.Context(), "builder", "Ship the intake packet."); err != nil {
 		t.Fatalf("runHeadlessCodexTurn: %v", err)
 	}
 
@@ -494,10 +494,10 @@ func TestRunHeadlessCodexTurnPassesScopedChannelEnv(t *testing.T) {
 		pack:        agent.GetPack("founding-team"),
 		cwd:         t.TempDir(),
 		broker:      newTestBroker(t),
-		headlessCtx: context.Background(),
+		headlessCtx: t.Context(),
 	}
 
-	if err := l.runHeadlessCodexTurn(context.Background(), "eng", "Work the owned task.", "youtube-factory"); err != nil {
+	if err := l.runHeadlessCodexTurn(t.Context(), "eng", "Work the owned task.", "youtube-factory"); err != nil {
 		t.Fatalf("runHeadlessCodexTurn: %v", err)
 	}
 
@@ -860,7 +860,7 @@ func canonicalPath(path string) string {
 func newHeadlessLauncherForTest(t *testing.T) *Launcher {
 	t.Helper()
 	l := &Launcher{
-		headlessCtx:     context.Background(),
+		headlessCtx:     t.Context(),
 		headlessWorkers: make(map[string]bool),
 		headlessActive:  make(map[string]*headlessCodexActiveTurn),
 		headlessQueues:  make(map[string][]headlessCodexTurn),
@@ -881,7 +881,7 @@ func newHeadlessLauncherForTest(t *testing.T) *Launcher {
 	// CI's `-race` carve-out for internal/team. Convert those tests'
 	// `defer restore()` to `t.Cleanup(restore)` to fix the residual
 	// race; not done here to keep this PR scoped.
-	t.Cleanup(l.stopHeadlessWorkers)
+	t.Cleanup(func() { l.waitForHeadlessIdle(t) })
 	return l
 }
 
@@ -1653,12 +1653,9 @@ func TestHeadlessTurnCompletedDurablyRejectsCodingTurnWithoutTaskStateOrEvidence
 	})
 
 	// Build the task state directly instead of going through
-	// EnsurePlannedTask so we never call saveLocked — broker save
-	// goroutines spawned by this test can outlive t.TempDir cleanup and
-	// race the rename .tmp -> final step (same root cause as
-	// leakedBrokerStatePath in launcher_test.go). We don't need persistence
-	// here; we only need the task fields that headlessTurnCompletedDurably
-	// reads.
+	// EnsurePlannedTask so we never call saveLocked — we don't need
+	// persistence here; we only need the task fields that
+	// headlessTurnCompletedDurably reads.
 	b := newTestBroker(t)
 	b.mu.Lock()
 	b.tasks = []teamTask{{
@@ -2262,5 +2259,38 @@ func TestIsCodexAuthError(t *testing.T) {
 		if got := isCodexAuthError(c.in); got != c.want {
 			t.Errorf("isCodexAuthError(%q) = %v, want %v", c.in, got, c.want)
 		}
+	}
+}
+
+func TestHeadlessCodexTurnTimeoutEnv(t *testing.T) {
+	const name = "WUPHF_TURN_TIMEOUT_TEST_ONLY"
+	fallback := 4 * time.Minute
+	cases := []struct {
+		label string
+		set   bool
+		val   string
+		want  time.Duration
+	}{
+		{label: "unset falls back", set: false, want: fallback},
+		{label: "empty falls back", set: true, val: "", want: fallback},
+		{label: "whitespace falls back", set: true, val: "   ", want: fallback},
+		{label: "garbage falls back", set: true, val: "not-a-duration", want: fallback},
+		{label: "zero falls back", set: true, val: "0s", want: fallback},
+		{label: "negative falls back", set: true, val: "-30s", want: fallback},
+		{label: "minutes parsed", set: true, val: "6m", want: 6 * time.Minute},
+		{label: "seconds parsed", set: true, val: "90s", want: 90 * time.Second},
+		{label: "hours parsed", set: true, val: "1h", want: time.Hour},
+	}
+	for _, c := range cases {
+		t.Run(c.label, func(t *testing.T) {
+			if c.set {
+				t.Setenv(name, c.val)
+			} else {
+				os.Unsetenv(name)
+			}
+			if got := headlessCodexTurnTimeoutEnv(name, fallback); got != c.want {
+				t.Fatalf("headlessCodexTurnTimeoutEnv(%q=%q) = %s, want %s", name, c.val, got, c.want)
+			}
+		})
 	}
 }

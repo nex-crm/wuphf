@@ -1,13 +1,41 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  type CommitEntry,
   compareVersions,
+  decideShow,
   groupCommits,
+  hasNotable,
   isDevVersion,
+  isMajorBump,
   parseCommit,
   prGitHubURL,
   VERSION_RE,
 } from "./upgradeBanner.utils";
+
+// baseShow defines a "everything that could be true is true" matrix for
+// decideShow tests. Each test overrides one or two fields so the cause
+// of expected hide/show is the specific override, not noise.
+const baseShow = {
+  enabled: true,
+  runPhase: "idle" as const,
+  upgradeNeeded: true,
+  forceMajor: false,
+  silenced: false,
+  notableGate: true,
+};
+
+function entry(over: Partial<CommitEntry>): CommitEntry {
+  return {
+    type: "other",
+    scope: "",
+    description: "",
+    pr: null,
+    sha: "abc",
+    breaking: false,
+    ...over,
+  };
+}
 
 describe("compareVersions", () => {
   it.each([
@@ -183,6 +211,124 @@ describe("groupCommits", () => {
     ]);
     const other = grouped.find((g) => g.label === "Other changes");
     expect(other?.entries.map((e) => e.description)).toEqual(["tidy", "pin"]);
+  });
+});
+
+describe("hasNotable", () => {
+  it("true when any commit is feat/fix/perf", () => {
+    expect(hasNotable([entry({ type: "docs" }), entry({ type: "fix" })])).toBe(
+      true,
+    );
+    expect(hasNotable([entry({ type: "feat" })])).toBe(true);
+    expect(hasNotable([entry({ type: "perf" })])).toBe(true);
+  });
+  it("true when any commit carries the breaking marker", () => {
+    // Even if the type alone wouldn't qualify (e.g. refactor), `breaking`
+    // wins. Locks in the rule that the marker is the canonical signal,
+    // not the type label.
+    expect(hasNotable([entry({ type: "refactor", breaking: true })])).toBe(
+      true,
+    );
+  });
+  it("false when only docs/chore/refactor/test/style/ci/build", () => {
+    expect(
+      hasNotable([
+        entry({ type: "docs" }),
+        entry({ type: "chore" }),
+        entry({ type: "refactor" }),
+        entry({ type: "test" }),
+        entry({ type: "style" }),
+        entry({ type: "ci" }),
+        entry({ type: "build" }),
+      ]),
+    ).toBe(false);
+  });
+  it("false on empty list (caller must failure-open separately)", () => {
+    // The gate's documented contract: hasNotable([]) === false. Callers
+    // distinguish "no data fetched yet" from "fetched, found nothing"
+    // outside this function — see UpgradeBanner.notableGate.
+    expect(hasNotable([])).toBe(false);
+  });
+});
+
+describe("isMajorBump", () => {
+  it.each([
+    ["0.79.10", "0.79.15", false],
+    ["0.79.10", "0.80.0", false],
+    ["0.83.7", "1.0.0", true],
+    ["1.0.0", "1.5.10", false],
+    ["1.5.10", "2.0.0", true],
+    ["2.0.0", "1.5.10", false], // downgrade isn't a bump
+    // Pre-release suffixes stripped before comparison.
+    ["0.83.7-rc.1", "1.0.0", true],
+    ["1.0.0", "1.0.1+build.5", false],
+  ] as const)("isMajorBump(%s, %s) === %s", (from, to, want) => {
+    expect(isMajorBump(from, to)).toBe(want);
+  });
+});
+
+describe("decideShow", () => {
+  it("happy path: all signals true → show", () => {
+    expect(decideShow(baseShow)).toBe(true);
+  });
+  it("enabled=false short-circuits everything", () => {
+    expect(
+      decideShow({
+        ...baseShow,
+        enabled: false,
+        forceMajor: true, // even forceMajor can't override
+        runPhase: "running",
+      }),
+    ).toBe(false);
+  });
+  it("running phase always shows (carve-out for in-flight install)", () => {
+    expect(
+      decideShow({
+        ...baseShow,
+        runPhase: "running",
+        silenced: true, // would normally hide
+        upgradeNeeded: false, // would normally hide
+      }),
+    ).toBe(true);
+  });
+  it("done phase defers to idle matrix (so dismiss-after-failure works)", () => {
+    // The reviewer's IMPORTANT #5 case: post-install user wants out
+    // without window.location.reload(). Done state must NOT pin the
+    // banner if silenced=true.
+    expect(decideShow({ ...baseShow, runPhase: "done", silenced: true })).toBe(
+      false,
+    );
+  });
+  it("upgradeNeeded=false hides regardless of notable/major", () => {
+    expect(
+      decideShow({
+        ...baseShow,
+        upgradeNeeded: false,
+        forceMajor: true,
+        notableGate: true,
+      }),
+    ).toBe(false);
+  });
+  it("forceMajor wins over silenced", () => {
+    // Major bumps bypass dismiss because they're deliberate human
+    // actions. A silenced user still sees the banner on a major.
+    expect(decideShow({ ...baseShow, forceMajor: true, silenced: true })).toBe(
+      true,
+    );
+  });
+  it("forceMajor wins over notableGate=false", () => {
+    // Even if the diff has zero notable commits, a major bump shows.
+    // (The "major bump" itself IS the signal.)
+    expect(
+      decideShow({ ...baseShow, forceMajor: true, notableGate: false }),
+    ).toBe(true);
+  });
+  it("silenced hides when not major", () => {
+    expect(decideShow({ ...baseShow, silenced: true })).toBe(false);
+  });
+  it("notableGate=false hides when not silenced and not major", () => {
+    // Docs/chore-only release with no dismiss yet: hide.
+    expect(decideShow({ ...baseShow, notableGate: false })).toBe(false);
   });
 });
 

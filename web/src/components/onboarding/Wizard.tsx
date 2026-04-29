@@ -121,6 +121,33 @@ interface PrereqResult {
   install_url?: string;
 }
 
+// runtimeIsReady centralizes the "should this runtime label count as a
+// configured LLM?" predicate used at the SetupStep gate, the keyboard
+// gate, and the ReadyStep summary. Three call sites had drifted apart
+// once already (see PR #367 review) — keeping the rule in one place
+// stops the next drift in its tracks.
+//
+// Rules:
+//   - Unknown labels (not in RUNTIMES) never count.
+//   - Runtimes with provider:null (Cursor/Windsurf) NEVER count, in
+//     either branch. finishOnboarding silently drops them from
+//     providerPriority, so a Cursor-only selection would let the gate
+//     pass and /config would persist no llm_provider.
+//   - With a non-null provider AND prereqs detection succeeded, the
+//     runtime's binary must be on PATH (detection.found).
+//   - With a non-null provider AND prereqs detection FAILED
+//     (prereqsError truthy), trust the user's selection.
+function runtimeIsReady(
+  label: string,
+  prereqs: PrereqResult[],
+  prereqsError: string,
+): boolean {
+  const spec = RUNTIMES.find((r) => r.label === label);
+  if (!spec || spec.provider === null) return false;
+  if (prereqsError) return true;
+  return Boolean(detectedBinary(prereqs, spec.binary)?.found);
+}
+
 // "Start from scratch" starter roster. Mirrors scratchFoundingTeamBlueprint
 // in internal/team/broker_onboarding.go — the broker seeds these exact slugs
 // when the wizard POSTs blueprint:null. Kept in sync manually; backend is the
@@ -1097,6 +1124,7 @@ export function ApiKeyRow({ field, value, onChange }: ApiKeyRowProps) {
 interface SetupStepProps {
   prereqs: PrereqResult[];
   prereqsLoading: boolean;
+  prereqsError: string;
   runtimePriority: string[];
   onToggleRuntime: (label: string) => void;
   onReorderRuntime: (label: string, direction: -1 | 1) => void;
@@ -1129,6 +1157,7 @@ function detectedBinary(
 function SetupStep({
   prereqs,
   prereqsLoading,
+  prereqsError,
   runtimePriority,
   onToggleRuntime,
   onReorderRuntime,
@@ -1154,14 +1183,10 @@ function SetupStep({
   // off clears localProvider via onSelectLocalProvider("").
   const [localModeOn, setLocalModeOn] = useState<boolean>(localProvider !== "");
 
-  // A runtime is usable only when its binary is actually present on PATH.
-  // "Selected and installed" drives whether we can continue without keys.
-  const hasInstalledSelection = runtimePriority.some((label) => {
-    const spec = RUNTIMES.find((r) => r.label === label);
-    if (!spec) return false;
-    const detection = detectedBinary(prereqs, spec.binary);
-    return Boolean(detection?.found);
-  });
+  // Any priority slot that satisfies runtimeIsReady satisfies the gate.
+  const hasInstalledSelection = runtimePriority.some((label) =>
+    runtimeIsReady(label, prereqs, prereqsError),
+  );
   const hasAnyApiKey = Object.values(apiKeys).some((v) => v.trim().length > 0);
   // GBrain requires an OpenAI key to function — the TUI gates on this in
   // InitGBrainOpenAIKey (see internal/tui/init_flow.go:215). Mirror the
@@ -1203,17 +1228,40 @@ function SetupStep({
           >
             Checking which CLIs are installed&hellip;
           </div>
-        ) : (
+        ) : prereqsError ? (
+          <div
+            data-testid="prereqs-error-banner"
+            role="alert"
+            style={{
+              fontSize: 12,
+              color: "var(--danger-500, #c33)",
+              padding: "10px 12px",
+              background: "var(--danger-50, #fee)",
+              border: "1px solid var(--danger-200, #fcc)",
+              borderRadius: 6,
+              marginBottom: 12,
+            }}
+          >
+            Could not detect installed CLIs:{" "}
+            <code style={{ fontFamily: "var(--font-mono)" }}>
+              {prereqsError}
+            </code>
+            . You can still select a runtime below or add an API key to
+            continue.
+          </div>
+        ) : null}
+        {prereqsLoading ? null : (
           <div className="runtime-grid">
             {RUNTIMES.map((spec) => {
               const detection = detectedBinary(prereqs, spec.binary);
               const installed = Boolean(detection?.found);
+              const selectable = installed || Boolean(prereqsError);
               const priorityIdx = runtimePriority.indexOf(spec.label);
               const selected = priorityIdx >= 0;
               const classes = [
                 "runtime-tile",
                 selected ? "selected" : "",
-                installed ? "" : "disabled",
+                selectable ? "" : "disabled",
               ]
                 .filter(Boolean)
                 .join(" ");
@@ -1221,20 +1269,23 @@ function SetupStep({
                 <button
                   key={spec.label}
                   className={classes}
+                  data-testid={`setup-runtime-tile-${spec.label}`}
                   onClick={() => {
-                    if (!installed) return;
+                    if (!selectable) return;
                     onToggleRuntime(spec.label);
                   }}
                   type="button"
-                  disabled={!installed}
-                  aria-disabled={!installed}
+                  disabled={!selectable}
+                  aria-disabled={!selectable}
                   aria-pressed={selected}
                   title={
                     installed
                       ? detection?.version
                         ? `${spec.label} — ${detection.version}`
                         : spec.label
-                      : `${spec.label} — not installed`
+                      : prereqsError
+                        ? `${spec.label} — detection failed, select if installed`
+                        : `${spec.label} — not installed`
                   }
                 >
                   {selected && (
@@ -1259,6 +1310,8 @@ function SetupStep({
                       ) : (
                         "Installed"
                       )
+                    ) : prereqsError ? (
+                      "Select if installed"
                     ) : (
                       <>
                         Not installed{" · "}
@@ -1667,6 +1720,7 @@ interface ReadyStepProps {
   checks: ReadinessCheck[];
   taskText: string;
   submitting: boolean;
+  submitError: string;
   onSkip: () => void;
   onSubmit: () => void;
   onBack: () => void;
@@ -1681,6 +1735,7 @@ function ReadyStep({
   checks,
   taskText,
   submitting,
+  submitError,
   onSkip,
   onSubmit,
   onBack,
@@ -1722,6 +1777,25 @@ function ReadyStep({
         </ul>
       </div>
 
+      {submitError && (
+        <div
+          role="alert"
+          data-testid="onboarding-submit-error"
+          style={{
+            fontSize: 13,
+            color: "var(--danger-500, #c33)",
+            padding: "12px 14px",
+            background: "var(--danger-50, #fee)",
+            border: "1px solid var(--danger-200, #fcc)",
+            borderRadius: 6,
+          }}
+        >
+          <strong>Could not start the office:</strong> {submitError}. Check that
+          your CLI runtime is installed and try again, or go back to adjust your
+          setup.
+        </div>
+      )}
+
       <div className="wizard-nav">
         <button className="btn btn-ghost" onClick={onBack} type="button">
           Back
@@ -1729,11 +1803,16 @@ function ReadyStep({
         <div className="wizard-nav-right">
           <button
             className="btn btn-primary"
+            data-testid="onboarding-submit-button"
             onClick={taskText.trim().length === 0 ? onSkip : onSubmit}
             disabled={submitting}
             type="button"
           >
-            {submitting ? "Starting..." : ONBOARDING_COPY.step3_cta}
+            {submitting
+              ? "Starting..."
+              : submitError
+                ? "Retry"
+                : ONBOARDING_COPY.step3_cta}
             {!submitting && taskText.trim().length > 0 && <EnterHint />}
           </button>
         </div>
@@ -1782,6 +1861,7 @@ export function Wizard({ onComplete }: WizardProps) {
   // Step 5: setup
   const [prereqs, setPrereqs] = useState<PrereqResult[]>([]);
   const [prereqsLoading, setPrereqsLoading] = useState(true);
+  const [prereqsError, setPrereqsError] = useState("");
   // Ordered list of runtime labels (matches RUNTIMES[].label). Position in
   // the array is the fallback priority. Initially empty — we auto-populate
   // with the first installed CLI once prereqs land so the happy path still
@@ -1816,6 +1896,7 @@ export function Wizard({ onComplete }: WizardProps) {
   >(null);
   const [taskText, setTaskText] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState("");
 
   // Fetch blueprints on mount
   useEffect(() => {
@@ -1861,9 +1942,10 @@ export function Wizard({ onComplete }: WizardProps) {
           return firstInstalled ? [firstInstalled.label] : [];
         });
       })
-      .catch(() => {
-        // Broker may not expose the endpoint yet; leave prereqs empty and
-        // the user can still add API keys to proceed.
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        const msg = err instanceof Error ? err.message : String(err);
+        setPrereqsError(msg);
       })
       .finally(() => {
         if (!cancelled) setPrereqsLoading(false);
@@ -2081,21 +2163,51 @@ export function Wizard({ onComplete }: WizardProps) {
       detail: "Web session. No tmux required in the browser.",
     });
 
-    // 3. LLM runtime — whatever CLI the user picked as primary, if installed.
+    // 3. LLM runtime — whatever CLI the user picked as primary, if
+    //    installed (or trusted under prereqsError). Skip provider:null
+    //    runtimes (Cursor/Windsurf) under prereqsError because
+    //    finishOnboarding drops them from the llm_provider payload —
+    //    crediting them as "ready" would tell the user the office is
+    //    configured for an LLM that's silently absent on launch.
+    // ReadyStep inspects only runtimePriority[0] — the active provider —
+    // not the full priority list. The gate sites use .some(...) because
+    // any installed entry satisfies the install gate; the readiness
+    // summary should reflect what's actually about to be persisted as
+    // llm_provider, which is the head of the list.
+    //
+    // The primary label can resolve to either a cloud-CLI RUNTIMES
+    // entry or a local-provider LOCAL_PROVIDER_LABELS entry; the
+    // checks below cover both. Pre-fix this block only looked at
+    // RUNTIMES, so picking MLX-LM/Ollama/Exo as primary made the
+    // summary report a missing LLM right before /config persisted a
+    // perfectly valid local provider.
     const primaryLabel = runtimePriority[0];
+    const primaryLocal = primaryLabel
+      ? LOCAL_PROVIDER_LABELS.find((m) => m.label === primaryLabel)
+      : undefined;
     const primarySpec = primaryLabel
       ? RUNTIMES.find((r) => r.label === primaryLabel)
       : undefined;
     const primaryDetection = primarySpec
       ? detectedBinary(prereqs, primarySpec.binary)
       : undefined;
-    if (primarySpec && primaryDetection?.found) {
+    const primaryReady =
+      !!primaryLabel && runtimeIsReady(primaryLabel, prereqs, prereqsError);
+    if (primaryLocal) {
       checks.push({
         label: "LLM runtime",
         status: "ready",
-        detail: primaryDetection.version
+        detail: `${primaryLocal.label} selected (${primaryLocal.blurb}).`,
+      });
+    } else if (primarySpec && primaryReady) {
+      checks.push({
+        label: "LLM runtime",
+        status: "ready",
+        detail: primaryDetection?.version
           ? `${primarySpec.label} — ${primaryDetection.version}`
-          : `${primarySpec.label} installed`,
+          : prereqsError
+            ? `${primarySpec.label} selected (detection skipped)`
+            : `${primarySpec.label} installed`,
       });
     } else if (primarySpec) {
       checks.push({
@@ -2185,6 +2297,7 @@ export function Wizard({ onComplete }: WizardProps) {
   const finishOnboarding = useCallback(
     async (skipTask: boolean) => {
       setSubmitting(true);
+      setSubmitError("");
       try {
         // Translate UI labels to the provider ids the broker validates.
         // Cloud CLI labels resolve via RUNTIMES; local labels (MLX-LM,
@@ -2257,7 +2370,13 @@ export function Wizard({ onComplete }: WizardProps) {
         if (genericGemini.length > 0) {
           configPayload.gemini_api_key = genericGemini;
         }
-        post("/config", configPayload).catch(() => {});
+        // /config persistence is fatal: we have to know the user's API keys
+        // are saved to disk before the first headless turn fires, otherwise
+        // agents try to authenticate with empty values and fail with opaque
+        // errors. Letting this through silently was the bug PR #365 set out
+        // to fix; leaving it as a console.warn would re-introduce it. The
+        // outer try/catch hands the error to the submitError + Retry UI.
+        await post("/config", configPayload);
 
         // Primary runtime label for the onboarding payload (best-effort;
         // the broker only acts on {task, skip_task} today, but the extra
@@ -2277,9 +2396,12 @@ export function Wizard({ onComplete }: WizardProps) {
           task: skipTask ? "" : taskText.trim(),
           skip_task: skipTask,
         });
-      } catch {
-        // Best-effort — the broker may not support this endpoint yet.
-        // Continue to mark onboarding complete locally.
+      } catch (err: unknown) {
+        const msg =
+          err instanceof Error ? err.message : "Failed to start the office";
+        setSubmitError(msg);
+        setSubmitting(false);
+        return;
       }
 
       setOnboardingComplete(true);
@@ -2333,11 +2455,9 @@ export function Wizard({ onComplete }: WizardProps) {
 
       const canIdentityContinue =
         company.trim().length > 0 && description.trim().length > 0;
-      const hasInstalledSelection = runtimePriority.some((label) => {
-        const spec = RUNTIMES.find((r) => r.label === label);
-        if (!spec) return false;
-        return Boolean(detectedBinary(prereqs, spec.binary)?.found);
-      });
+      const hasInstalledSelection = runtimePriority.some((label) =>
+        runtimeIsReady(label, prereqs, prereqsError),
+      );
       const hasAnyApiKey = Object.values(apiKeys).some(
         (v) => v.trim().length > 0,
       );
@@ -2403,6 +2523,7 @@ export function Wizard({ onComplete }: WizardProps) {
     description,
     runtimePriority,
     prereqs,
+    prereqsError,
     apiKeys,
     memoryBackend,
     gbrainOpenAIKey,
@@ -2464,6 +2585,7 @@ export function Wizard({ onComplete }: WizardProps) {
           <SetupStep
             prereqs={prereqs}
             prereqsLoading={prereqsLoading}
+            prereqsError={prereqsError}
             runtimePriority={runtimePriority}
             onToggleRuntime={toggleRuntime}
             onReorderRuntime={reorderRuntime}
@@ -2507,6 +2629,7 @@ export function Wizard({ onComplete }: WizardProps) {
             checks={readinessChecks}
             taskText={taskText}
             submitting={submitting}
+            submitError={submitError}
             onSkip={() => finishOnboarding(true)}
             onSubmit={() => finishOnboarding(false)}
             onBack={prevStep}

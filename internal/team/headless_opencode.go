@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,6 +13,7 @@ import (
 	"time"
 
 	"github.com/nex-crm/wuphf/internal/config"
+	"github.com/nex-crm/wuphf/internal/provider"
 	"github.com/nex-crm/wuphf/internal/runtimebin"
 )
 
@@ -107,23 +107,10 @@ func (l *Launcher) runHeadlessOpencodeTurn(ctx context.Context, slug string, not
 	if l.broker != nil {
 		agentStream = l.broker.AgentStream(slug)
 	}
-	pr, pw := io.Pipe()
-	teedStdout := io.TeeReader(stdout, pw)
-	go func() {
-		scanner := bufio.NewScanner(pr)
-		scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
-		for scanner.Scan() {
-			line := scanner.Text()
-			if agentStream != nil && line != "" {
-				agentStream.Push(line)
-			}
-		}
-	}()
 
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	if err := cmd.Start(); err != nil {
-		_ = pw.Close()
 		return err
 	}
 	done := make(chan struct{})
@@ -133,7 +120,6 @@ func (l *Launcher) runHeadlessOpencodeTurn(ctx context.Context, slug string, not
 		case <-ctx.Done():
 			terminateHeadlessProcess(cmd)
 			_ = stdout.Close()
-			_ = pw.CloseWithError(ctx.Err())
 		case <-done:
 		}
 	}()
@@ -147,19 +133,25 @@ func (l *Launcher) runHeadlessOpencodeTurn(ctx context.Context, slug string, not
 	}
 	l.updateHeadlessProgress(slug, "active", "thinking", "reviewing work packet", metrics)
 
-	var firstEventAt, firstTextAt time.Time
+	var firstEventAt, firstTextAt, firstToolAt time.Time
 	textStarted := false
-	var outputBuf strings.Builder
+	var lastError string
+	pushStream := func(line string) {
+		if agentStream != nil && strings.TrimSpace(line) != "" {
+			agentStream.Push(line)
+		}
+	}
 
-	scanner := bufio.NewScanner(teedStdout)
-	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
-	for scanner.Scan() {
-		line := scanner.Text()
+	streamRes, scanErr := provider.ReadOpencodeJSONStream(stdout, func(ev provider.OpencodeStreamEvent) {
 		if firstEventAt.IsZero() {
 			firstEventAt = time.Now()
 			metrics.FirstEventMs = durationMillis(startedAt, firstEventAt)
 		}
-		if strings.TrimSpace(line) != "" {
+		switch ev.Type {
+		case "text":
+			if strings.TrimSpace(ev.Text) == "" {
+				return
+			}
 			if firstTextAt.IsZero() {
 				firstTextAt = time.Now()
 				metrics.FirstTextMs = durationMillis(startedAt, firstTextAt)
@@ -168,19 +160,34 @@ func (l *Launcher) runHeadlessOpencodeTurn(ctx context.Context, slug string, not
 				textStarted = true
 				l.updateHeadlessProgress(slug, "active", "text", "drafting response", metrics)
 			}
+			pushStream(ev.Text)
+		case "tool_use":
+			if firstToolAt.IsZero() {
+				firstToolAt = time.Now()
+				metrics.FirstToolMs = durationMillis(startedAt, firstToolAt)
+			}
+			detail := strings.TrimSpace(ev.ToolName)
+			if detail == "" {
+				detail = "tool"
+			}
+			l.updateHeadlessProgress(slug, "active", "tool", "running "+detail, metrics)
+			pushStream("[tool] " + detail)
+		case "tool_result":
+			if d := strings.TrimSpace(ev.Detail); d != "" {
+				pushStream("[tool_result] " + truncate(d, 240))
+			}
+		case "error":
+			if msg := strings.TrimSpace(ev.Detail); msg != "" {
+				lastError = msg
+				pushStream("[error] " + msg)
+			}
 		}
-		if outputBuf.Len() > 0 {
-			outputBuf.WriteByte('\n')
-		}
-		outputBuf.WriteString(line)
-	}
-	scanErr := scanner.Err()
+	})
 	if scanErr != nil && errors.Is(scanErr, bufio.ErrTooLong) {
 		// A single >4 MiB line would block cmd.Wait() on pipe backpressure
 		// forever; kill the child so Wait returns promptly.
 		terminateHeadlessProcess(cmd)
 	}
-	_ = pw.Close()
 
 	if err := cmd.Wait(); err != nil {
 		detail := strings.TrimSpace(stderr.String())
@@ -224,12 +231,14 @@ func (l *Launcher) runHeadlessOpencodeTurn(ctx context.Context, slug string, not
 	}
 
 	metrics.TotalMs = time.Since(startedAt).Milliseconds()
-	text := strings.TrimSpace(outputBuf.String())
-	appendHeadlessCodexLatency(slug, fmt.Sprintf("status=ok provider=opencode total_ms=%d first_event_ms=%d first_text_ms=%d final_chars=%d",
+	text := strings.TrimSpace(streamRes.FinalMessage)
+	appendHeadlessCodexLatency(slug, fmt.Sprintf("status=ok provider=opencode total_ms=%d first_event_ms=%d first_text_ms=%d first_tool_ms=%d final_chars=%d last_error=%q",
 		metrics.TotalMs,
 		durationMillis(startedAt, firstEventAt),
 		durationMillis(startedAt, firstTextAt),
+		durationMillis(startedAt, firstToolAt),
 		len(text),
+		strings.TrimSpace(lastError),
 	))
 	summary := strings.TrimSpace(formatHeadlessLatencySummary(metrics))
 	if summary == "" {
@@ -254,11 +263,16 @@ func (l *Launcher) runHeadlessOpencodeTurn(ctx context.Context, slug string, not
 // buildHeadlessOpencodeArgs mirrors provider.buildOpencodeArgs but is kept
 // local so the team package doesn't need to import the provider package just
 // for argv construction (and stays consistent with how headless_codex.go
-// builds its own argv). Opencode's CLI shape: `opencode run [--model X]
-// [message..]` — no --cwd, no --quiet, no stdin sentinel. Working directory
-// is set via cmd.Dir by the caller.
+// builds its own argv). Opencode's CLI shape: `opencode run [--format X]
+// [--model X] [message..]` — no --cwd, no --quiet, no stdin sentinel.
+// Working directory is set via cmd.Dir by the caller.
+//
+// `--format json` opts the headless path into opencode's JSON event stream so
+// wuphf can see tool-use / tool-result / error events that opencode otherwise
+// renders as TUI-styled stdout (or routes to stderr) and the previous
+// bufio.Scanner-based consumer was blind to. See #313 (Finding 1).
 func buildHeadlessOpencodeArgs(model string, prompt string) []string {
-	args := []string{"run"}
+	args := []string{"run", "--format", "json"}
 	if strings.TrimSpace(model) != "" {
 		args = append(args, "--model", strings.TrimSpace(model))
 	}
@@ -316,9 +330,15 @@ func (l *Launcher) writeHeadlessOpencodeMCPConfig(slug string) (string, error) {
 
 	merged := map[string]any{}
 	if raw, err := os.ReadFile(baseConfigPath); err == nil && len(raw) > 0 {
-		// Best-effort: if the existing file isn't valid JSON, overwrite it
-		// rather than silently losing the WUPHF overlay.
-		_ = json.Unmarshal(raw, &merged)
+		// Best-effort: if the existing file isn't valid JSON, fall back to
+		// writing a minimal overlay so wuphf keeps booting — but surface the
+		// parse error in the agent log so the operator can see they have a
+		// malformed base config silently dropping their `model`/`provider`
+		// blocks from every per-agent merge. (#313 bonus #1)
+		if uerr := json.Unmarshal(raw, &merged); uerr != nil {
+			merged = map[string]any{}
+			appendHeadlessCodexLog(slug, fmt.Sprintf("opencode_base-config-parse-failed: %s: %s — per-agent config will not inherit user model/provider/MCP keys until this is fixed", baseConfigPath, uerr.Error()))
+		}
 	}
 
 	mcp, _ := merged["mcp"].(map[string]any)
