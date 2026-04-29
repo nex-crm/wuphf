@@ -195,6 +195,15 @@
 //     timing summary, the option list with the selected option
 //     arrowed, the "Something else" custom row, and the
 //     accept/type hint footer.
+//   - manifest.go          — company-manifest projection +
+//     roster fallback: MergeOfficeMembers (channel/order-aware
+//     merge of broker members with office-roster metadata,
+//     preserving members who haven't posted yet),
+//     OfficeMembersFromManifest / ChannelInfosFromManifest
+//     (project a company.Manifest into the channel UI shapes),
+//     and OfficeMembersFallback / ChannelInfosFallback (load the
+//     manifest from disk — falling back to DefaultManifest on
+//     error — when the broker hasn't reported a roster yet).
 //
 // Subsequent extraction PRs will land the workspace / recovery / cache
 // cluster, the sidebar / splash, the broker integrations, and finally

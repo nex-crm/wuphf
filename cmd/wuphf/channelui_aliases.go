@@ -248,6 +248,12 @@ var (
 
 	inferMood           = channelui.InferMood
 	renderInterviewCard = channelui.RenderInterviewCard
+
+	mergeOfficeMembers        = channelui.MergeOfficeMembers
+	officeMembersFromManifest = channelui.OfficeMembersFromManifest
+	channelInfosFromManifest  = channelui.ChannelInfosFromManifest
+	officeMembersFallback     = channelui.OfficeMembersFallback
+	channelInfosFallback      = channelui.ChannelInfosFallback
 )
 
 // Channel-confirm action typed-string consts.
