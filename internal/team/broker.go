@@ -563,6 +563,17 @@ type Broker struct {
 	// goroutine writing via a stale closure (or a sibling broker built at
 	// a different path) cannot retarget this broker's saves.
 	statePath string
+
+	// Multi-workspace plumbing. All three are nil until SetWorkspaceOrchestrator /
+	// SetLauncherDrainer / SetAdminPauseExitFn wire concrete impls. nil is
+	// the expected state on a broker started without multi-workspace
+	// support — handlers degrade to 503 (orchestrator) or fall back to
+	// os.Exit(0) (exit hook). Lane B owns the orchestrator + Launcher.Drain
+	// implementations; this broker only depends on the interfaces in
+	// broker_workspaces.go.
+	workspaces       workspaceOrchestrator
+	launcherDrain    launcherDrainer
+	adminPauseExitFn func(int)
 }
 
 func stringSliceContainsFold(values []string, want string) bool {
@@ -728,14 +739,13 @@ func (b *Broker) ChannelStore() *channel.Store {
 
 // requireAuth wraps a handler to enforce Bearer token authentication.
 // Accepts token via Authorization header or ?token= query parameter (for EventSource which can't set headers).
+//
+// Backed by withAuth (broker_auth.go); kept as the legacy name on the
+// existing route registrations so a full sweep of HandleFunc lines is
+// not required by this PR. Both names produce identical behavior — the
+// auth-route assertion test covers both.
 func (b *Broker) requireAuth(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if b.requestHasBrokerAuth(r) {
-			next(w, r)
-			return
-		}
-		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
-	}
+	return b.withAuth(next)
 }
 
 // Start launches the broker on the configured localhost port.
@@ -955,6 +965,18 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/events", b.handleEvents)
 	mux.HandleFunc("/agent-stream/", b.requireAuth(b.handleAgentStream))
 	mux.HandleFunc("/agent-tool-event", b.requireAuth(b.handleAgentToolEvent))
+	// Multi-workspace routes (broker_workspaces.go). Every route below is
+	// wrapped through b.withAuth so the design's "every protected route
+	// requires bearer" assertion holds. /admin/pause additionally requires
+	// loopback RemoteAddr (defense-in-depth, applied inside the handler).
+	mux.HandleFunc("/workspaces/list", b.withAuth(b.handleWorkspacesList))
+	mux.HandleFunc("/workspaces/create", b.withAuth(b.handleWorkspacesCreate))
+	mux.HandleFunc("/workspaces/switch", b.withAuth(b.handleWorkspacesSwitch))
+	mux.HandleFunc("/workspaces/pause", b.withAuth(b.handleWorkspacesPause))
+	mux.HandleFunc("/workspaces/resume", b.withAuth(b.handleWorkspacesResume))
+	mux.HandleFunc("/workspaces/shred", b.withAuth(b.handleWorkspacesShred))
+	mux.HandleFunc("/workspaces/restore", b.withAuth(b.handleWorkspacesRestore))
+	mux.HandleFunc("/admin/pause", b.withAuth(b.handleAdminPause))
 	mux.HandleFunc("/web-token", b.handleWebToken)
 	// Onboarding: state/progress/complete + prereqs/templates/validate-key + checklist.
 	// completeFn posts the first task as a human message and seeds the team.
