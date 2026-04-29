@@ -357,3 +357,108 @@ func TestWriteSkillProposalLocked_ValidSlugVariants(t *testing.T) {
 		})
 	}
 }
+
+// TestWriteSkillProposalLocked_OwnerValidation pins down the PR 7 owner
+// validation contract:
+//   - Unknown slugs are stripped with a WARN log; the skill is NOT rejected.
+//   - All-unknown lists fall back to lead-routable (empty OwnerAgents).
+//   - Known + unknown mix retains the known slugs and drops the rest.
+//   - Whitespace + case differences canonicalise to lowercase trimmed slugs.
+//   - Duplicate slugs are deduped.
+func TestWriteSkillProposalLocked_OwnerValidation(t *testing.T) {
+	t.Parallel()
+
+	makeBrokerWithMembers := func(t *testing.T) *Broker {
+		t.Helper()
+		b := newTestBroker(t)
+		b.mu.Lock()
+		b.members = []officeMember{
+			{Slug: "ceo", Name: "CEO", BuiltIn: true},
+			{Slug: "csm", Name: "CSM"},
+			{Slug: "deploy-bot", Name: "Deploy Bot"},
+		}
+		b.mu.Unlock()
+		return b
+	}
+
+	tests := []struct {
+		name   string
+		owners []string
+		want   []string
+	}{
+		{
+			name:   "all unknown owners falls back to lead-routable",
+			owners: []string{"ghost", "phantom"},
+			want:   nil,
+		},
+		{
+			name:   "known and unknown keeps the known slug",
+			owners: []string{"deploy-bot", "ghost"},
+			want:   []string{"deploy-bot"},
+		},
+		{
+			name:   "all known owners pass through",
+			owners: []string{"deploy-bot", "csm"},
+			want:   []string{"deploy-bot", "csm"},
+		},
+		{
+			name:   "whitespace and case canonicalise to lowercase trimmed",
+			owners: []string{"  Deploy-Bot  ", "CSM"},
+			want:   []string{"deploy-bot", "csm"},
+		},
+		{
+			name:   "duplicate slugs are deduped",
+			owners: []string{"csm", "csm", "CSM"},
+			want:   []string{"csm"},
+		},
+		{
+			name:   "empty input stays empty",
+			owners: nil,
+			want:   nil,
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			b := makeBrokerWithMembers(t)
+			spec := skillProposalSpec("scoped-skill-"+skillSlug(tc.name), "A description.", "archivist")
+			spec.Content = "## Steps\n\n1. Do it."
+			spec.OwnerAgents = tc.owners
+
+			sk, err := callWriteSkillProposalLocked(b, spec)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if len(sk.OwnerAgents) != len(tc.want) {
+				t.Fatalf("OwnerAgents len: got %v, want %v", sk.OwnerAgents, tc.want)
+			}
+			for i, want := range tc.want {
+				if sk.OwnerAgents[i] != want {
+					t.Errorf("OwnerAgents[%d]: got %q, want %q", i, sk.OwnerAgents[i], want)
+				}
+			}
+		})
+	}
+
+	t.Run("validation does not block the write", func(t *testing.T) {
+		t.Parallel()
+		b := makeBrokerWithMembers(t)
+		spec := skillProposalSpec("survives-typos", "A description.", "archivist")
+		spec.Content = "## Steps\n\n1. Do it."
+		spec.OwnerAgents = []string{"ghost"}
+
+		sk, err := callWriteSkillProposalLocked(b, spec)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		// Skill exists, owners stripped to empty (lead-routable fallback).
+		if sk == nil {
+			t.Fatal("skill must still be written even when every owner is unknown")
+		}
+		if len(sk.OwnerAgents) != 0 {
+			t.Errorf("expected lead-routable fallback (empty OwnerAgents), got %v", sk.OwnerAgents)
+		}
+	})
+}

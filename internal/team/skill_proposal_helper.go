@@ -75,6 +75,14 @@ func (b *Broker) writeSkillProposalLocked(spec teamSkill) (*teamSkill, error) {
 		return existing, nil
 	}
 
+	// --- Step 3a: Owner validation (PR 7 step 5) ---
+	// Strip any OwnerAgents slug that does not correspond to an active office
+	// member. Graceful degradation: an unknown slug becomes a no-op (the skill
+	// stays scoped to the remaining valid owners, or falls back to lead-only
+	// when the entire list ends up empty). We do NOT reject the skill — that
+	// would block the user's stated intent over a typo.
+	spec.OwnerAgents = b.validateOwnerAgentsLocked(name, spec.OwnerAgents)
+
 	// --- Step 4: Build in-memory struct + render markdown ---
 	now := time.Now().UTC().Format(time.RFC3339)
 	channel := strings.TrimSpace(spec.Channel)
@@ -202,4 +210,35 @@ func (b *Broker) writeSkillProposalLocked(spec teamSkill) (*teamSkill, error) {
 	slog.Info("writeSkillProposalLocked: skill proposal created",
 		"name", name, "slug", slug, "created_by", createdBy, "sha", sha)
 	return result, nil
+}
+
+// validateOwnerAgentsLocked filters owners down to slugs that correspond to a
+// registered office member. Unknown slugs are dropped with a WARN log (one per
+// unknown slug) so the operator sees the typo without losing the rest of the
+// scope. Returns the filtered list — empty means the skill is lead-routable.
+//
+// Caller MUST hold b.mu.
+func (b *Broker) validateOwnerAgentsLocked(skillName string, owners []string) []string {
+	if len(owners) == 0 {
+		return nil
+	}
+	seen := make(map[string]bool, len(owners))
+	out := make([]string, 0, len(owners))
+	for _, raw := range owners {
+		slug := strings.ToLower(strings.TrimSpace(raw))
+		if slug == "" || seen[slug] {
+			continue
+		}
+		seen[slug] = true
+		if b.findMemberLocked(slug) == nil {
+			slog.Warn("writeSkillProposalLocked: dropping unknown owner slug",
+				"skill", skillName, "owner", slug)
+			continue
+		}
+		out = append(out, slug)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
