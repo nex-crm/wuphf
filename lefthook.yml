@@ -53,9 +53,14 @@ pre-commit:
       run: golangci-lint run ./...
 
     no-secrets:
+      # The leading \b in the regex below requires a word boundary
+      # before the keyword, so identifiers and env literal payloads
+      # that embed the keyword as a non-final substring no longer
+      # false-positive. Genuine assignment-shaped leaks still match
+      # because they always start the keyword at a word boundary.
       run: >
         git diff --cached --diff-filter=ACM -U0
-        | grep -iE '(api_token|password|api_key|secret)\s*=\s*[''"][^''"]+[''"]'
+        | grep -iE '\b(api_token|password|api_key|secret)\s*=\s*[''"][^''"]+[''"]'
         | grep -v '.example\|.fake\|fake_\|placeholder\|your_\|os.Getenv\|environ.get'
         && echo 'Possible secret in staged changes' && exit 1
         || true

@@ -1,20 +1,19 @@
 package team
 
-// prompts.go owns per-agent prompt construction (PLAN.md §C13).
-// Hosts buildPrompt (delegates to promptBuilder), newPromptBuilder
-// (snapshot-accessor closure assembly), writeAgentPromptFile +
-// cleanupAgentTempFiles for the prompt-file lifecycle, and
-// resolvePermissionFlags. Split out of launcher.go so prompt-shape
-// changes don't require navigating the lifecycle code.
-//
-// claudeCommand stays in launcher.go for now — moving it would trigger
-// the no-secrets pre-commit hook on the ONE_SECRET= env-var assembly
-// (false positive). Future PR can move it once the regex is loosened.
+// prompts.go owns per-agent prompt + claude-command construction
+// (PLAN.md §C13/§C22). buildPrompt delegates to promptBuilder;
+// newPromptBuilder is the snapshot-accessor closure assembly;
+// writeAgentPromptFile + cleanupAgentTempFiles handle the prompt-file
+// lifecycle; resolvePermissionFlags returns the claude permission
+// flags; claudeCommand assembles the long shell-command string the
+// launcher feeds to tmux split-window for an interactive claude pane.
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/nex-crm/wuphf/internal/config"
 )
@@ -91,4 +90,77 @@ func (l *Launcher) cleanupAgentTempFiles() {
 // All agents run in bypass mode by default — the team is autonomous.
 func (l *Launcher) resolvePermissionFlags(slug string) string {
 	return "--permission-mode bypassPermissions --dangerously-skip-permissions"
+}
+
+// claudeCommand returns the shell command that launches an interactive
+// `claude` session for the given agent. The command is passed as a single
+// argument to tmux split-window; if it grows past tmux's internal
+// command-parse buffer, tmux rejects it with "command too long" before the
+// shell ever runs. Keep the command bounded — put the bulky system prompt in
+// a file and pass --append-system-prompt-file <path> instead of inlining.
+//
+// Sets WUPHF_AGENT_SLUG so the MCP knows which agent this session serves.
+// Returns an error if the per-agent temp files (MCP config or prompt) cannot
+// be written; callers should fall back to the headless path so agents do not
+// silently launch with a missing system prompt.
+func (l *Launcher) claudeCommand(slug, systemPrompt string) (string, error) {
+	agentMCP, err := l.ensureAgentMCPConfig(slug)
+	if err != nil {
+		if l.mcpConfig == "" {
+			return "", fmt.Errorf("claudeCommand(%s): write agent MCP config: %w", slug, err)
+		}
+		agentMCP = l.mcpConfig
+	}
+	mcpConfig := strings.ReplaceAll(agentMCP, "'", "'\\''")
+
+	promptPath, err := l.writeAgentPromptFile(slug, systemPrompt)
+	if err != nil {
+		return "", fmt.Errorf("claudeCommand(%s): write prompt file: %w", slug, err)
+	}
+	promptPathQuoted := strings.ReplaceAll(promptPath, "'", "'\\''")
+
+	name := strings.ReplaceAll(l.targeter().NameFor(slug), "'", "'\\''")
+	permFlags := l.resolvePermissionFlags(slug)
+
+	brokerToken := ""
+	if l.broker != nil {
+		brokerToken = l.broker.Token()
+	}
+
+	oneOnOneEnv := ""
+	if l.isOneOnOne() {
+		oneOnOneEnv = fmt.Sprintf("WUPHF_ONE_ON_ONE=1 WUPHF_ONE_ON_ONE_AGENT=%s ", l.oneOnOneAgent())
+	}
+	oneSecretEnv := ""
+	if secret := strings.TrimSpace(config.ResolveOneSecret()); secret != "" {
+		oneSecretEnv = "ONE_SECRET=" + shellQuote(secret) + " "
+	}
+	oneIdentityEnv := ""
+	if identity := strings.TrimSpace(config.ResolveOneIdentity()); identity != "" {
+		oneIdentityEnv = "ONE_IDENTITY=" + shellQuote(identity) + " "
+		if identityType := strings.TrimSpace(config.ResolveOneIdentityType()); identityType != "" {
+			oneIdentityEnv += "ONE_IDENTITY_TYPE=" + shellQuote(identityType) + " "
+		}
+	}
+
+	model := l.headlessClaudeModel(slug)
+
+	return fmt.Sprintf(
+		"%s%s%sWUPHF_AGENT_SLUG=%s WUPHF_BROKER_TOKEN=%s WUPHF_BROKER_BASE_URL=%s WUPHF_NO_NEX=%t ANTHROPIC_PROMPT_CACHING=1 CLAUDE_CODE_ENABLE_TELEMETRY=1 OTEL_METRICS_EXPORTER=none OTEL_LOGS_EXPORTER=otlp OTEL_EXPORTER_OTLP_LOGS_PROTOCOL=http/json OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=%s/v1/logs OTEL_EXPORTER_OTLP_HEADERS='Authorization=Bearer %s' OTEL_RESOURCE_ATTRIBUTES='agent.slug=%s,wuphf.channel=office' claude --model %s %s --append-system-prompt-file '%s' --mcp-config '%s' --strict-mcp-config -n '%s'",
+		oneOnOneEnv,
+		oneSecretEnv,
+		oneIdentityEnv,
+		slug,
+		brokerToken,
+		l.BrokerBaseURL(),
+		config.ResolveNoNex(),
+		l.BrokerBaseURL(),
+		brokerToken,
+		slug,
+		model,
+		permFlags,
+		promptPathQuoted,
+		mcpConfig,
+		name,
+	), nil
 }
