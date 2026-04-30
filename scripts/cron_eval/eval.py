@@ -655,6 +655,31 @@ def render_markdown_report(report: CronEvalReport) -> str:
     return "\n".join(out) + "\n"
 
 
+# ---------- State reset ----------
+
+
+def reset_scheduler_state(broker: str, token: str) -> None:
+    """Reset all system crons to their default state before a full run.
+
+    Clears any interval_override and re-enables any disabled cron so that
+    each run starts from a deterministic baseline.  Without this, overrides
+    written by scenario_floor_rejection, scenario_patch_happy_path, and
+    scenario_persistence_snapshot bleed into the next invocation and cause
+    spurious failures (e.g. floor checks starting from a pre-patched value,
+    self-registration failing because a cron was left disabled).
+    """
+    for slug, spec in SYSTEM_CRONS.items():
+        if spec.get("read_only"):
+            # Read-only crons reject any PATCH — nothing to reset.
+            continue
+        http_request(
+            "PATCH",
+            f"{broker}/scheduler/{urllib.parse.quote(slug)}",
+            token=token,
+            body={"interval_override": 0, "enabled": True},
+        )
+
+
 # ---------- Main ----------
 
 
@@ -715,6 +740,16 @@ def main() -> int:
         print("=" * 78)
         print(f"  cron_persistence: {'PASS' if ok else 'FAIL'}")
         return 0 if ok else 1
+
+    # Full run: reset broker state first so each invocation starts from a
+    # deterministic baseline (clears overrides left by the previous run).
+    # Also remove a stale snapshot so --verify-persistence won't pick up
+    # a result from a different broker boot.
+    print(f"[cron-eval] resetting scheduler state before run…")
+    reset_scheduler_state(args.broker, token)
+    snapshot_path = Path(PERSISTENCE_SNAPSHOT_PATH)
+    if snapshot_path.exists():
+        snapshot_path.unlink()
 
     # Full run: scenarios 1-6, then write the persistence snapshot last so
     # downstream tooling can chain --verify-persistence against the restart.
