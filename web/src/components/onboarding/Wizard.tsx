@@ -11,115 +11,29 @@ import { useAppStore } from "../../stores/app";
 import { Kbd, MOD_KEY } from "../ui/Kbd";
 import "../../styles/onboarding.css";
 
-/* ═══════════════════════════════════════════
-   Types
-   ═══════════════════════════════════════════ */
-
-interface BlueprintTemplate {
-  id: string;
-  name: string;
-  description: string;
-  emoji?: string;
-  agents?: BlueprintAgent[];
-}
-
-interface BlueprintAgent {
-  slug: string;
-  name: string;
-  role: string;
-  emoji?: string;
-  checked?: boolean;
-  // built_in marks the lead agent — always included, never removable.
-  // The backend also refuses to disable or remove a BuiltIn member, so
-  // even if someone bypassed this UI, the broker would reject the write.
-  built_in?: boolean;
-}
-
-interface TaskTemplate {
-  id: string;
-  name: string;
-  description: string;
-  emoji?: string;
-  prompt?: string;
-}
-
-type WizardStep =
-  | "welcome"
-  | "templates"
-  | "identity"
-  | "team"
-  | "setup"
-  | "task"
-  | "ready";
-
-// Step order: company info before blueprint. The blueprint picker is a
-// decision about how the office starts; it makes more sense after the
-// user has anchored who they are than as the very first question.
-// `ready` is the final-step readiness summary matching the TUI's InitDone
-// phase (see internal/tui/init_flow.go readinessChecks()) — shows the user
-// exactly what's configured before we submit.
-const STEP_ORDER: readonly WizardStep[] = [
-  "welcome",
-  "identity",
-  "templates",
-  "team",
-  "setup",
-  "task",
-  "ready",
-] as const;
-
-// Each runtime has a display label, the binary name the broker's prereqs
-// check looks for, a canonical install page to link to when missing, and
-// — for the runtimes the broker can actually dispatch agents to — the
-// provider id the broker expects on POST /config.
-interface RuntimeSpec {
-  label: string;
-  binary: string;
-  installUrl: string;
-  provider: "claude-code" | "codex" | "opencode" | null;
-}
-
-const RUNTIMES: readonly RuntimeSpec[] = [
-  {
-    label: "Claude Code",
-    binary: "claude",
-    installUrl: "https://claude.ai/code",
-    provider: "claude-code",
-  },
-  {
-    label: "Codex",
-    binary: "codex",
-    installUrl: "https://github.com/openai/codex",
-    provider: "codex",
-  },
-  {
-    label: "Opencode",
-    binary: "opencode",
-    installUrl: "https://opencode.ai",
-    provider: "opencode",
-  },
-  {
-    label: "Cursor",
-    binary: "cursor",
-    installUrl: "https://cursor.com/",
-    provider: null,
-  },
-  {
-    label: "Windsurf",
-    binary: "windsurf",
-    installUrl: "https://codeium.com/windsurf",
-    provider: null,
-  },
-] as const;
-
-interface PrereqResult {
-  name: string;
-  required: boolean;
-  found: boolean;
-  ok?: boolean;
-  version?: string;
-  install_url?: string;
-}
+import {
+  API_KEY_FIELDS,
+  BLUEPRINT_CATEGORIES,
+  BLUEPRINT_DISPLAY,
+  MEMORY_BACKEND_OPTIONS,
+  RUNTIMES,
+  SCRATCH_FOUNDING_TEAM,
+  STEP_ORDER,
+} from "./wizard/constants";
+import type {
+  BlueprintAgent,
+  BlueprintCategoryKey,
+  BlueprintDisplay,
+  BlueprintTemplate,
+  MemoryBackend,
+  NexSignupStatus,
+  PrereqResult,
+  ReadinessCheck,
+  ReadinessStatus,
+  RuntimeSpec,
+  TaskTemplate,
+  WizardStep,
+} from "./wizard/types";
 
 // runtimeIsReady centralizes the "should this runtime label count as a
 // configured LLM?" predicate used at the SetupStep gate, the keyboard
@@ -153,140 +67,6 @@ function runtimeIsReady(
 // when the wizard POSTs blueprint:null. Kept in sync manually; backend is the
 // source of truth, this is just the Team-step preview so users don't see an
 // empty roster before confirming.
-const SCRATCH_FOUNDING_TEAM: readonly BlueprintAgent[] = [
-  { slug: "ceo", name: "CEO", role: "lead", checked: true, built_in: true },
-  { slug: "gtm-lead", name: "GTM Lead", role: "go-to-market", checked: true },
-  {
-    slug: "founding-engineer",
-    name: "Founding Engineer",
-    role: "engineering",
-    checked: true,
-  },
-  { slug: "pm", name: "Product Manager", role: "product", checked: true },
-  { slug: "designer", name: "Designer", role: "design", checked: true },
-];
-
-// Display overrides for blueprints. Backend names/descriptions are long-form
-// ("Bookkeeping and Invoicing Service", "Template for a bookkeeping operation
-// that handles recurring books..."). For the onboarding picker we want short,
-// scannable copy and visible categorization. Overrides are keyed by blueprint
-// id (see templates/operations/*/blueprint.yaml). If a blueprint isn't in the
-// map we fall back to the backend name + description, so new blueprints still
-// render without frontend changes.
-type BlueprintCategoryKey = "services" | "media" | "product";
-
-interface BlueprintDisplay {
-  category: BlueprintCategoryKey;
-  shortDescription: string;
-  icon: string;
-}
-
-const BLUEPRINT_CATEGORIES: ReadonlyArray<{
-  key: BlueprintCategoryKey;
-  label: string;
-  hint: string;
-}> = [
-  {
-    key: "services",
-    label: "Services",
-    hint: "Client work, done by your office",
-  },
-  {
-    key: "media",
-    label: "Media & Community",
-    hint: "Content or community as the business",
-  },
-  { key: "product", label: "Products", hint: "Software you build and sell" },
-] as const;
-
-const BLUEPRINT_DISPLAY: Record<string, BlueprintDisplay> = {
-  "bookkeeping-invoicing-service": {
-    category: "services",
-    shortDescription: "Books · invoices · monthly close",
-    icon: "📊",
-  },
-  "local-business-ai-package": {
-    category: "services",
-    shortDescription: "Intake · booking · follow-up",
-    icon: "🏪",
-  },
-  "multi-agent-workflow-consulting": {
-    category: "services",
-    shortDescription: "Client engagements · workflow delivery",
-    icon: "💼",
-  },
-  "niche-crm": {
-    category: "product",
-    shortDescription: "Build & launch a focused CRM",
-    icon: "🎯",
-  },
-  "paid-discord-community": {
-    category: "media",
-    shortDescription: "Moderation · onboarding · engagement",
-    icon: "💬",
-  },
-  "youtube-factory": {
-    category: "media",
-    shortDescription: "Script · film · publish · analyze",
-    icon: "📹",
-  },
-};
-
-// API_KEY_FIELDS: each provider's auth has two valid paths — log in via
-// the provider's CLI (claude login, codex login, etc.) or paste an API
-// key here. The wizard defaults to CLI login because it's the existing
-// primary path for most users; clicking "Use API key" reveals the
-// password input so users can paste a key without it being on screen
-// the whole time.
-const API_KEY_FIELDS = [
-  {
-    key: "ANTHROPIC_API_KEY",
-    label: "Anthropic",
-    hint: "Powers Claude-based agents",
-    cliLoginCmd: "claude login",
-  },
-  {
-    key: "OPENAI_API_KEY",
-    label: "OpenAI",
-    hint: "Powers GPT-based agents",
-    cliLoginCmd: "codex login",
-  },
-  {
-    key: "GOOGLE_API_KEY",
-    label: "Google",
-    hint: "Powers Gemini-based agents",
-    cliLoginCmd: "gcloud auth application-default login",
-  },
-] as const;
-
-type MemoryBackend = "markdown" | "nex" | "gbrain" | "none";
-
-const MEMORY_BACKEND_OPTIONS: ReadonlyArray<{
-  value: MemoryBackend;
-  label: string;
-  hint: string;
-}> = [
-  {
-    value: "markdown",
-    label: "Team wiki (default)",
-    hint: 'A living knowledge graph for your team. Agents record typed facts as git commits, the LLM rewrites briefs under the "archivist" identity, and every claim has a citation. `/lookup` answers questions with sources. `/lint` flags contradictions, orphans, and stale facts. File-over-app, `git clone`-able, no API key needed.',
-  },
-  {
-    value: "nex",
-    label: "Nex",
-    hint: "Hosted memory graph that streams in HubSpot, Slack, Gmail, Calendar, and more — your tools become entities agents already know. Free tier available; needs NEX_API_KEY.",
-  },
-  {
-    value: "gbrain",
-    label: "GBrain",
-    hint: "Local graph over Postgres. Needs an LLM key for embeddings.",
-  },
-  {
-    value: "none",
-    label: "None",
-    hint: "Skip shared memory. Agents work with only per-turn context.",
-  },
-] as const;
 
 /* ═══════════════════════════════════════════
    Arrow icon reused across buttons
@@ -545,7 +325,6 @@ function TemplatesStep({
 // is the in-flight POST to /nex/register; 'ok' shows a green "sent, check
 // your inbox" hint; 'fallback' flips to the external-link version when
 // nex-cli is not installed (the broker responds 502 with ErrNotInstalled).
-type NexSignupStatus = "hidden" | "open" | "submitting" | "ok" | "fallback";
 
 interface IdentityStepProps {
   company: string;
@@ -1714,13 +1493,6 @@ function TaskStep({
 // ReadinessStatus mirrors the TUI's three-state readiness color mapping
 // (see internal/tui/init_flow.go readinessStatusColor): 'ready' = green
 // check, 'next' = blue warning (follow-up needed), 'missing' = red.
-type ReadinessStatus = "ready" | "next" | "missing";
-
-interface ReadinessCheck {
-  label: string;
-  status: ReadinessStatus;
-  detail: string;
-}
 
 interface ReadyStepProps {
   checks: ReadinessCheck[];
