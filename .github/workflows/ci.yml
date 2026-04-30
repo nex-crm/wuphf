@@ -41,6 +41,12 @@ jobs:
           bun install --frozen-lockfile
           bun run typecheck
           bun run build
+      - name: Bundle-size budget
+        # Forward-only ratchet against accidental bundle bloat. Warn at
+        # 950 KB, fail at 1200 KB on the JS bundle total. To raise the
+        # ceiling intentionally, edit constants in scripts/check-bundle-size.sh
+        # in the same PR. See CONTRIBUTING.md "no perf degradations" rule.
+        run: bash scripts/check-bundle-size.sh
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # ratchet:actions/upload-artifact@v7
         with:
           name: web-dist
