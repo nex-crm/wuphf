@@ -112,7 +112,12 @@ export default function Wiki({
           />
         )}
       </div>
-      {!loading && <EditLogFooter onNavigate={(path) => onNavigate(path)} />}
+      {!loading && (
+        <EditLogFooter
+          historyPath={isAudit || isLint ? null : articlePath}
+          onNavigate={(path) => onNavigate(path)}
+        />
+      )}
     </div>
   );
 }

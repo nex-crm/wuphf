@@ -796,6 +796,8 @@ func (b *Broker) ensureWikiWorker() {
 	b.wikiDLQ = dlq
 	b.mu.Unlock()
 
+	b.ensureNotebookDirsForRoster()
+
 	// Skill status reconciliation: now that the wiki worker is wired,
 	// prefer the on-disk SKILL.md frontmatter status over the potentially
 	// stale broker-state.json snapshot. This closes the race window where a
@@ -1771,6 +1773,12 @@ func (b *Broker) EnsureBridgedMember(slug, name, createdBy string) error {
 	if slug == "" {
 		return fmt.Errorf("slug required")
 	}
+	ensureNotebookDirsAfterUnlock := false
+	defer func() {
+		if ensureNotebookDirsAfterUnlock {
+			b.ensureNotebookDirsForRoster()
+		}
+	}()
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.findMemberLocked(slug) != nil {
@@ -1801,6 +1809,7 @@ func (b *Broker) EnsureBridgedMember(slug, name, createdBy string) error {
 		return err
 	}
 	b.publishOfficeChangeLocked(officeChangeEvent{Kind: "member_created", Slug: slug})
+	ensureNotebookDirsAfterUnlock = true
 	return nil
 }
 

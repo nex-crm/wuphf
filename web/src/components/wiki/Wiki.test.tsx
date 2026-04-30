@@ -7,6 +7,8 @@ import Wiki from "./Wiki";
 describe("<Wiki>", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    vi.spyOn(api, "fetchSections").mockResolvedValue([]);
+    vi.spyOn(api, "fetchHistory").mockResolvedValue({ commits: [] });
     vi.spyOn(api, "subscribeEditLog").mockImplementation(() => () => {});
   });
 
@@ -49,5 +51,20 @@ describe("<Wiki>", () => {
         screen.getByRole("heading", { name: "Customer X" }),
       ).toBeInTheDocument(),
     );
+  });
+
+  it("does not hydrate footer history for pseudo wiki routes", async () => {
+    vi.spyOn(api, "fetchCatalog").mockResolvedValue([]);
+    vi.spyOn(api, "fetchAuditLog").mockResolvedValue({ entries: [], total: 0 });
+    const fetchHistory = vi
+      .spyOn(api, "fetchHistory")
+      .mockResolvedValue({ commits: [] });
+
+    render(<Wiki articlePath="_audit" onNavigate={() => {}} />);
+
+    await waitFor(() =>
+      expect(screen.getByTestId("wk-audit")).toBeInTheDocument(),
+    );
+    expect(fetchHistory).not.toHaveBeenCalled();
   });
 });

@@ -8,10 +8,13 @@ package team
 // single-writer guarantee that protects the wiki also protects notebooks.
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -52,6 +55,43 @@ func (b *Broker) PublishNotebookEvent(evt notebookWriteEvent) {
 		case ch <- evt:
 		default:
 		}
+	}
+}
+
+// ensureNotebookDirsForRoster creates blank notebook shelves for the current
+// office roster. It is best-effort: notebook shelves are helpful bootstrap
+// metadata, but a failure should not block onboarding or hiring.
+func (b *Broker) ensureNotebookDirsForRoster() {
+	worker := b.WikiWorker()
+	if worker == nil {
+		return
+	}
+	members := b.OfficeMembers()
+	seen := make(map[string]struct{}, len(members))
+	slugs := make([]string, 0, len(members))
+	for _, member := range members {
+		slug := strings.TrimSpace(member.Slug)
+		if slug == "" {
+			continue
+		}
+		if _, ok := seen[slug]; ok {
+			continue
+		}
+		seen[slug] = struct{}{}
+		slugs = append(slugs, slug)
+	}
+	if len(slugs) == 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	sha, err := worker.EnsureNotebookDirs(ctx, slugs)
+	if err != nil {
+		log.Printf("notebook: initialize roster shelves failed: %v", err)
+		return
+	}
+	if sha != "" {
+		log.Printf("notebook: initialized roster shelves %s", sha)
 	}
 }
 
@@ -199,8 +239,9 @@ func (b *Broker) handleNotebookList(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleNotebookCatalog returns a team-wide rollup for the bookshelf view:
-// every agent that has a notebook dir, their most-recent entries, and the
-// count of pending promotions so the sidebar badge reflects reality.
+// every current roster agent (even before their first entry), plus any former
+// agent that still has notebook entries, and the count of pending promotions
+// so the sidebar badge reflects reality.
 //
 //	GET /notebook/catalog
 //
@@ -227,7 +268,7 @@ func (b *Broker) handleNotebookCatalog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	slugs, err := worker.AgentsWithNotebooks()
+	notebookSlugs, err := worker.AgentsWithNotebooks()
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -241,6 +282,18 @@ func (b *Broker) handleNotebookCatalog(w http.ResponseWriter, r *http.Request) {
 	for _, m := range b.OfficeMembers() {
 		rosterBySlug[m.Slug] = m
 	}
+	slugSet := make(map[string]struct{}, len(notebookSlugs)+len(rosterBySlug))
+	for _, slug := range notebookSlugs {
+		slugSet[slug] = struct{}{}
+	}
+	for slug := range rosterBySlug {
+		slugSet[slug] = struct{}{}
+	}
+	slugs := make([]string, 0, len(slugSet))
+	for slug := range slugSet {
+		slugs = append(slugs, slug)
+	}
+	sort.Strings(slugs)
 
 	// Cross-reference active reviews so entry status reflects what's happening
 	// right now. One List call, scan-once, reused across all agents.
@@ -281,25 +334,25 @@ func (b *Broker) handleNotebookCatalog(w http.ResponseWriter, r *http.Request) {
 			// catalog — partial data beats a 500 for the bookshelf.
 			continue
 		}
-		if len(entries) == 0 {
+		member, known := rosterBySlug[slug]
+		if len(entries) == 0 && !known {
 			continue
 		}
-
-		member, known := rosterBySlug[slug]
 		name := slug
 		role := ""
+		lastEdited := ""
 		if known {
 			if strings.TrimSpace(member.Name) != "" {
 				name = member.Name
 			}
 			role = member.Role
+			lastEdited = strings.TrimSpace(member.CreatedAt)
 		} else {
 			role = "former teammate"
 		}
 
 		mapped := make([]entrySummary, 0, len(entries))
 		promoted := 0
-		var lastEdited string
 		for _, e := range entries {
 			entrySlug := strings.TrimSuffix(filepath.Base(e.Path), ".md")
 			status := "draft"
