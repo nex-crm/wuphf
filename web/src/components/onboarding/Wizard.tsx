@@ -352,10 +352,16 @@ function EnterHint({ modifier }: { modifier?: string } = {}) {
    Sub-components
    ═══════════════════════════════════════════ */
 
-function ProgressDots({ current }: { current: WizardStep }) {
+function ProgressDots({
+  current,
+  steps,
+}: {
+  current: WizardStep;
+  steps: readonly WizardStep[];
+}) {
   return (
     <div className="wizard-progress">
-      {STEP_ORDER.map((step) => (
+      {steps.map((step) => (
         <div
           key={step}
           className={`wizard-progress-dot ${step === current ? "active" : "inactive"}`}
@@ -1832,6 +1838,15 @@ interface WizardProps {
 export function Wizard({ onComplete }: WizardProps) {
   const setOnboardingComplete = useAppStore((s) => s.setOnboardingComplete);
 
+  // When creating a new workspace from an existing one, identity is skipped —
+  // the user already exists, they just need blueprint/team/setup/task.
+  const skipIdentity = new URLSearchParams(window.location.search).has(
+    "skip_identity",
+  );
+  const activeSteps: readonly WizardStep[] = skipIdentity
+    ? STEP_ORDER.filter((s) => s !== "identity")
+    : STEP_ORDER;
+
   // Navigation
   const [step, setStep] = useState<WizardStep>("welcome");
 
@@ -2056,18 +2071,18 @@ export function Wizard({ onComplete }: WizardProps) {
   }, []);
 
   const nextStep = useCallback(() => {
-    const idx = STEP_ORDER.indexOf(step);
-    if (idx < STEP_ORDER.length - 1) {
-      setStep(STEP_ORDER[idx + 1]);
+    const idx = activeSteps.indexOf(step);
+    if (idx < activeSteps.length - 1) {
+      setStep(activeSteps[idx + 1]);
     }
-  }, [step]);
+  }, [step, activeSteps]);
 
   const prevStep = useCallback(() => {
-    const idx = STEP_ORDER.indexOf(step);
+    const idx = activeSteps.indexOf(step);
     if (idx > 0) {
-      setStep(STEP_ORDER[idx - 1]);
+      setStep(activeSteps[idx - 1]);
     }
-  }, [step]);
+  }, [step, activeSteps]);
 
   // Toggle agent selection. The lead agent (built_in) is locked: TeamStep
   // disables its button, and this guard prevents any programmatic path
@@ -2477,7 +2492,7 @@ export function Wizard({ onComplete }: WizardProps) {
       switch (step) {
         case "welcome":
           e.preventDefault();
-          goTo("identity");
+          goTo(activeSteps[1] ?? "templates");
           return;
         case "templates":
           e.preventDefault();
@@ -2519,6 +2534,7 @@ export function Wizard({ onComplete }: WizardProps) {
     };
   }, [
     step,
+    activeSteps,
     company,
     description,
     runtimePriority,
@@ -2538,9 +2554,11 @@ export function Wizard({ onComplete }: WizardProps) {
   return (
     <div className="wizard-container">
       <div className="wizard-body">
-        <ProgressDots current={step} />
+        <ProgressDots current={step} steps={activeSteps} />
 
-        {step === "welcome" && <WelcomeStep onNext={() => goTo("identity")} />}
+        {step === "welcome" && (
+          <WelcomeStep onNext={() => goTo(activeSteps[1] ?? "templates")} />
+        )}
 
         {step === "templates" && (
           <TemplatesStep

@@ -72,6 +72,7 @@ type Workspace struct {
 	CreatedAt   string  `json:"created_at,omitempty"`
 	LastUsedAt  string  `json:"last_used_at,omitempty"`
 	PausedAt    *string `json:"paused_at,omitempty"`
+	IsActive    bool    `json:"is_active,omitempty"`
 }
 
 // CreateRequest is the POST body for /workspaces/create. Fields beyond
@@ -363,6 +364,12 @@ func (b *Broker) handleWorkspacesList(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeOrchestratorError(w, err)
 		return
+	}
+	selfHome := filepath.Clean(config.RuntimeHomeDir())
+	for i := range ws {
+		if filepath.Clean(ws[i].RuntimeHome) == selfHome {
+			ws[i].IsActive = true
+		}
 	}
 	writeWorkspaceJSON(w, http.StatusOK, map[string]any{
 		"workspaces": ws,
