@@ -39,7 +39,7 @@ func TestMemberEffectiveProviderKind_PerAgentWins(t *testing.T) {
 	b.mu.Unlock()
 
 	l := &Launcher{broker: b, provider: "claude-code"}
-	if got := l.memberEffectiveProviderKind("pm-codex"); got != provider.KindCodex {
+	if got := l.targeter().MemberEffectiveProviderKind("pm-codex"); got != provider.KindCodex {
 		t.Fatalf("per-agent should win over global, got %q", got)
 	}
 }
@@ -55,12 +55,12 @@ func TestMemberEffectiveProviderKind_FallsBackToGlobal(t *testing.T) {
 	b.mu.Unlock()
 
 	l := &Launcher{broker: b, provider: "codex"}
-	if got := l.memberEffectiveProviderKind("no-binding"); got != provider.KindCodex {
+	if got := l.targeter().MemberEffectiveProviderKind("no-binding"); got != provider.KindCodex {
 		t.Fatalf("empty Kind should fall back to global=codex, got %q", got)
 	}
 
 	// Unknown member also falls back to global (dispatch then errors if global is bad).
-	if got := l.memberEffectiveProviderKind("nobody"); got != provider.KindCodex {
+	if got := l.targeter().MemberEffectiveProviderKind("nobody"); got != provider.KindCodex {
 		t.Fatalf("unknown slug should fall back to global=codex, got %q", got)
 	}
 }
@@ -70,7 +70,7 @@ func TestMemberEffectiveProviderKind_DefaultsToClaudeWhenAllEmpty(t *testing.T) 
 	l := &Launcher{broker: b, provider: ""}
 	// Fully empty globals fall through to claude-code. This preserves the
 	// install-default behavior that predated per-agent providers.
-	if got := l.memberEffectiveProviderKind("anybody"); got != provider.KindClaudeCode {
+	if got := l.targeter().MemberEffectiveProviderKind("anybody"); got != provider.KindClaudeCode {
 		t.Fatalf("default fallback should be claude-code, got %q", got)
 	}
 }
@@ -100,7 +100,7 @@ func TestShouldUseHeadlessDispatch(t *testing.T) {
 			webMode:          tt.webMode,
 			paneBackedAgents: tt.paneBackedAgents,
 		}
-		if got := l.shouldUseHeadlessDispatch(); got != tt.want {
+		if got := l.targeter().ShouldUseHeadless(); got != tt.want {
 			t.Errorf("%s: shouldUseHeadlessDispatch() = %v, want %v", tt.name, got, tt.want)
 		}
 	}

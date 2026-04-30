@@ -18,20 +18,37 @@ import (
 	"github.com/nex-crm/wuphf/internal/provider"
 )
 
+// targeterFailedPaneSlugs is the test-scoped failed-slugs map keyed
+// by the targeter pointer. Tests previously poked the targeter's
+// failedPaneSlugs map directly via `o.failedPaneSlugs()["fe"] =
+// "boom"`; the callback shape now hides the map (so production
+// callers can't bypass the launcher's failedPaneMu), so this
+// indirection lets tests still mark slugs failed without exposing
+// the map handle.
+var targeterFailedPaneSlugs = map[*officeTargeter]map[string]string{}
+
+// markTargeterFailedSlug is the test helper replacing the old
+// `o.failedPaneSlugs()[slug] = reason` poke. Lookup via the
+// fixture-installed callback continues to read from the same map.
+func markTargeterFailedSlug(o *officeTargeter, slug, reason string) {
+	if targeterFailedPaneSlugs[o] == nil {
+		targeterFailedPaneSlugs[o] = map[string]string{}
+	}
+	targeterFailedPaneSlugs[o][slug] = reason
+}
+
 // fixtureTargeter builds an officeTargeter with sane defaults; tests
 // override only the bits they care about.
 func fixtureTargeter(t *testing.T, members []officeMember, opts ...func(*officeTargeter)) *officeTargeter {
 	t.Helper()
 	paneBacked := true
-	failed := map[string]string{}
 	tg := &officeTargeter{
-		sessionName:     "test-sess",
-		pack:            &agent.PackDefinition{LeadSlug: "ceo"},
-		provider:        provider.KindClaudeCode,
-		paneBackedFlag:  &paneBacked,
-		failedPaneSlugs: func() map[string]string { return failed },
-		isOneOnOne:      func() bool { return false },
-		oneOnOneSlug:    func() string { return "" },
+		sessionName:    "test-sess",
+		pack:           &agent.PackDefinition{LeadSlug: "ceo"},
+		provider:       provider.KindClaudeCode,
+		paneBackedFlag: &paneBacked,
+		isOneOnOne:     func() bool { return false },
+		oneOnOneSlug:   func() string { return "" },
 		isChannelDM: func(channelSlug string) (bool, string) {
 			// Mirror Launcher.isChannelDMRaw's legacy-prefix check so tests
 			// that pass channels like "dm-eng" route the same way as
@@ -47,6 +64,15 @@ func fixtureTargeter(t *testing.T, members []officeMember, opts ...func(*officeT
 		},
 		memberProviderKind: func(string) string { return "" },
 	}
+	tg.failedPaneSlugs = func(slug string) bool {
+		failed := targeterFailedPaneSlugs[tg]
+		if failed == nil {
+			return false
+		}
+		_, ok := failed[slug]
+		return ok
+	}
+	t.Cleanup(func() { delete(targeterFailedPaneSlugs, tg) })
 	for _, opt := range opts {
 		opt(tg)
 	}
@@ -301,7 +327,7 @@ func TestTargeter_PaneTargets_SkipsFailedSlugs(t *testing.T) {
 		{Slug: "ceo", BuiltIn: true},
 		{Slug: "fe"},
 	}, func(o *officeTargeter) {
-		o.failedPaneSlugs()["fe"] = "boom"
+		markTargeterFailedSlug(o, "fe", "boom")
 	})
 	targets := tg.PaneTargets()
 	if _, ok := targets["fe"]; ok {
@@ -317,7 +343,7 @@ func TestTargeter_NotificationTargets_AddsHeadlessFallbackForFailedPaneSlug(t *t
 		{Slug: "ceo", BuiltIn: true},
 		{Slug: "fe"},
 	}, func(o *officeTargeter) {
-		o.failedPaneSlugs()["fe"] = "spawn failed"
+		markTargeterFailedSlug(o, "fe", "spawn failed")
 	})
 	targets := tg.NotificationTargets()
 	tgt, ok := targets["fe"]
@@ -377,7 +403,7 @@ func TestTargeter_ShouldUseHeadlessForSlug_TruthTable(t *testing.T) {
 		{
 			name: "pane runtime + failed pane slug ⇒ headless",
 			setup: func(o *officeTargeter) {
-				o.failedPaneSlugs()["ceo"] = "spawn failed"
+				markTargeterFailedSlug(o, "ceo", "spawn failed")
 			},
 			slug: "ceo", want: true, reason: "fallback path",
 		},
@@ -422,7 +448,7 @@ func TestTargeter_SkipPane_FailedAndHeadlessOneShot(t *testing.T) {
 		{Slug: "fe"},
 		{Slug: "codexer"},
 	}, func(o *officeTargeter) {
-		o.failedPaneSlugs()["fe"] = "boom"
+		markTargeterFailedSlug(o, "fe", "boom")
 		o.memberProviderKind = func(s string) string {
 			if s == "codexer" {
 				return provider.KindCodex
@@ -534,7 +560,7 @@ func TestLauncher_TargeterWiringMatchesPaneTargets(t *testing.T) {
 		},
 		failedPaneSlugs: map[string]string{},
 	}
-	got := l.agentPaneTargets()
+	got := l.targeter().PaneTargets()
 	if _, ok := got["ceo"]; !ok {
 		t.Fatalf("expected ceo in launcher pane targets, got %v", got)
 	}

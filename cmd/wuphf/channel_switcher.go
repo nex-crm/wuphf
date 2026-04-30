@@ -8,6 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/nex-crm/wuphf/cmd/wuphf/channelui"
 	"github.com/nex-crm/wuphf/internal/team"
 	"github.com/nex-crm/wuphf/internal/tui"
 )
@@ -61,16 +62,16 @@ func (m channelModel) buildWorkspaceSwitcherOptions() []tui.PickerOption {
 		}
 	}
 
-	for _, member := range mergeOfficeMembers(m.officeMembers, m.members, m.currentChannelInfo()) {
+	for _, member := range channelui.MergeOfficeMembers(m.officeMembers, m.members, m.currentChannelInfo()) {
 		if member.Slug == "you" || strings.TrimSpace(member.Slug) == "" {
 			continue
 		}
 		description := "Direct session with @" + member.Slug
-		summary := deriveMemberRuntimeSummary(member, m.tasks, time.Now())
+		summary := channelui.DeriveMemberRuntimeSummary(member, m.tasks, time.Now())
 		if strings.TrimSpace(summary.Detail) != "" {
 			description = summary.Detail
 		} else if strings.TrimSpace(member.LastMessage) != "" {
-			description = summarizeSentence(member.LastMessage)
+			description = channelui.SummarizeSentence(member.LastMessage)
 		}
 		options = append(options, tui.PickerOption{
 			Label:       "1:1 with " + member.Name,
@@ -80,10 +81,10 @@ func (m channelModel) buildWorkspaceSwitcherOptions() []tui.PickerOption {
 	}
 
 	for _, req := range m.switcherPendingRequests(3) {
-		label := "Request " + req.ID + " · " + truncateText(req.TitleOrQuestion(), 40)
+		label := "Request " + req.ID + " · " + channelui.TruncateText(req.TitleOrQuestion(), 40)
 		description := strings.TrimSpace(strings.Join([]string{
 			strings.ReplaceAll(strings.TrimSpace(req.Kind), "_", " "),
-			"@" + fallbackString(req.From, "unknown"),
+			"@" + channelui.FallbackString(req.From, "unknown"),
 			switcherTiming(req.CreatedAt, req.DueAt),
 		}, " · "))
 		if req.Blocking || req.Required {
@@ -99,7 +100,7 @@ func (m channelModel) buildWorkspaceSwitcherOptions() []tui.PickerOption {
 	for _, task := range m.switcherActiveTasks(4) {
 		descriptionParts := []string{
 			strings.ReplaceAll(strings.TrimSpace(task.Status), "_", " "),
-			"@" + fallbackString(task.Owner, "unowned"),
+			"@" + channelui.FallbackString(task.Owner, "unowned"),
 			switcherTiming(task.UpdatedAt, task.DueAt),
 		}
 		if strings.TrimSpace(task.WorktreePath) != "" {
@@ -109,7 +110,7 @@ func (m channelModel) buildWorkspaceSwitcherOptions() []tui.PickerOption {
 			descriptionParts = append(descriptionParts, "thread "+task.ThreadID)
 		}
 		options = append(options, tui.PickerOption{
-			Label:       "Task " + task.ID + " · " + truncateText(task.Title, 44),
+			Label:       "Task " + task.ID + " · " + channelui.TruncateText(task.Title, 44),
 			Value:       "task:" + task.ID,
 			Description: strings.Trim(strings.Join(descriptionParts, " · "), " ·"),
 		})
@@ -117,9 +118,9 @@ func (m channelModel) buildWorkspaceSwitcherOptions() []tui.PickerOption {
 
 	for _, msg := range m.switcherRecentThreads(3) {
 		options = append(options, tui.PickerOption{
-			Label:       "Thread " + msg.ID + " · @" + fallbackString(msg.From, "unknown"),
+			Label:       "Thread " + msg.ID + " · @" + channelui.FallbackString(msg.From, "unknown"),
 			Value:       "thread:" + msg.ID,
-			Description: truncateText(strings.TrimSpace(msg.Content), 72),
+			Description: channelui.TruncateText(strings.TrimSpace(msg.Content), 72),
 		})
 	}
 
@@ -133,12 +134,12 @@ func (m channelModel) buildWorkspaceSwitcherOptions() []tui.PickerOption {
 	return options
 }
 
-func fallbackChannelDescription(ch channelInfo) string {
+func fallbackChannelDescription(ch channelui.ChannelInfo) string {
 	if strings.TrimSpace(ch.Description) != "" {
 		return ch.Description
 	}
 	if len(ch.Members) > 0 {
-		return fmt.Sprintf("%d %s", len(ch.Members), pluralizeWord(len(ch.Members), "member", "members"))
+		return fmt.Sprintf("%d %s", len(ch.Members), channelui.PluralizeWord(len(ch.Members), "member", "members"))
 	}
 	return "Shared office channel"
 }
@@ -167,7 +168,7 @@ func (m *channelModel) applyWorkspaceSwitcherSelection(value string) tea.Cmd {
 			return nil
 		}
 		m.activeChannel = channel
-		m.activeApp = officeAppMessages
+		m.activeApp = channelui.OfficeAppMessages
 		m.messages = nil
 		m.members = nil
 		m.requests = nil
@@ -182,24 +183,34 @@ func (m *channelModel) applyWorkspaceSwitcherSelection(value string) tea.Cmd {
 		m.notice = "Switched to #" + channel
 		return tea.Batch(pollBroker("", m.activeChannel), pollMembers(m.activeChannel), pollRequests(m.activeChannel), pollTasks(m.activeChannel))
 	case strings.HasPrefix(value, "app:"):
-		app := officeApp(strings.TrimSpace(strings.TrimPrefix(value, "app:")))
+		app := channelui.OfficeApp(strings.TrimSpace(strings.TrimPrefix(value, "app:")))
+		switch app {
+		case channelui.OfficeAppMessages, channelui.OfficeAppInbox, channelui.OfficeAppOutbox,
+			channelui.OfficeAppRecovery, channelui.OfficeAppTasks, channelui.OfficeAppRequests,
+			channelui.OfficeAppPolicies, channelui.OfficeAppCalendar, channelui.OfficeAppArtifacts,
+			channelui.OfficeAppSkills:
+			// recognized; fall through to the activation block below
+		default:
+			m.notice = "Unknown app: " + string(app)
+			return nil
+		}
 		m.activeApp = app
 		m.syncSidebarCursorToActive()
 		m.notice = "Viewing " + titleCaser.String(string(app)) + "."
 		switch app {
-		case officeAppRecovery:
+		case channelui.OfficeAppRecovery:
 			return m.pollCurrentState()
-		case officeAppInbox, officeAppOutbox:
+		case channelui.OfficeAppInbox, channelui.OfficeAppOutbox:
 			return pollBroker("", m.activeChannel)
-		case officeAppTasks:
+		case channelui.OfficeAppTasks:
 			return pollTasks(m.activeChannel)
-		case officeAppRequests:
+		case channelui.OfficeAppRequests:
 			return pollRequests(m.activeChannel)
-		case officeAppPolicies:
+		case channelui.OfficeAppPolicies:
 			return pollOfficeLedger()
-		case officeAppCalendar:
+		case channelui.OfficeAppCalendar:
 			return tea.Batch(pollTasks(m.activeChannel), pollRequests(m.activeChannel), pollOfficeLedger())
-		case officeAppArtifacts:
+		case channelui.OfficeAppArtifacts:
 			return m.pollCurrentState()
 		default:
 			return nil
@@ -222,35 +233,35 @@ func (m *channelModel) applyWorkspaceSwitcherSelection(value string) tea.Cmd {
 	}
 }
 
-func (m channelModel) officeFeedDescription(workspace workspaceUIState) string {
+func (m channelModel) officeFeedDescription(workspace channelui.WorkspaceUIState) string {
 	if summary := strings.TrimSpace(workspace.AwaySummary); summary != "" {
 		return summary
 	}
 	if workspace.NeedsYou != nil {
-		return "Needs you: " + truncateText(workspace.NeedsYou.TitleOrQuestion(), 64)
+		return "Needs you: " + channelui.TruncateText(workspace.NeedsYou.TitleOrQuestion(), 64)
 	}
 	if strings.TrimSpace(workspace.Focus) != "" {
-		return truncateText(workspace.Focus, 64)
+		return channelui.TruncateText(workspace.Focus, 64)
 	}
 	return "Main office feed"
 }
 
-func (m channelModel) recoverySwitcherDescription(workspace workspaceUIState) string {
+func (m channelModel) recoverySwitcherDescription(workspace channelui.WorkspaceUIState) string {
 	recovery := workspace.Runtime.Recovery
-	if focus := trimRecoverySentence(recovery.Focus); focus != "" {
-		return truncateText(focus, 72)
+	if focus := channelui.TrimRecoverySentence(recovery.Focus); focus != "" {
+		return channelui.TruncateText(focus, 72)
 	}
 	if len(recovery.NextSteps) > 0 {
-		return truncateText("Next: "+recovery.NextSteps[0], 72)
+		return channelui.TruncateText("Next: "+recovery.NextSteps[0], 72)
 	}
 	return "Resume work with focus, changes, and next steps"
 }
 
-func (m channelModel) switcherPendingRequests(limit int) []channelInterview {
-	requests := recentHumanArtifactRequests(m.requests, 0)
-	filtered := make([]channelInterview, 0, len(requests))
+func (m channelModel) switcherPendingRequests(limit int) []channelui.Interview {
+	requests := channelui.RecentHumanArtifactRequests(m.requests, 0)
+	filtered := make([]channelui.Interview, 0, len(requests))
 	for _, req := range requests {
-		if !isOpenInterviewStatus(req.Status) {
+		if !channelui.IsOpenInterviewStatus(req.Status) {
 			continue
 		}
 		filtered = append(filtered, req)
@@ -261,8 +272,8 @@ func (m channelModel) switcherPendingRequests(limit int) []channelInterview {
 	return filtered
 }
 
-func (m channelModel) switcherActiveTasks(limit int) []channelTask {
-	filtered := make([]channelTask, 0, len(m.tasks))
+func (m channelModel) switcherActiveTasks(limit int) []channelui.Task {
+	filtered := make([]channelui.Task, 0, len(m.tasks))
 	for _, task := range m.tasks {
 		status := strings.ToLower(strings.TrimSpace(task.Status))
 		switch status {
@@ -277,8 +288,8 @@ func (m channelModel) switcherActiveTasks(limit int) []channelTask {
 		if leftRank != rightRank {
 			return leftRank < rightRank
 		}
-		leftTime, lok := parseChannelTime(fallbackString(filtered[i].UpdatedAt, filtered[i].CreatedAt))
-		rightTime, rok := parseChannelTime(fallbackString(filtered[j].UpdatedAt, filtered[j].CreatedAt))
+		leftTime, lok := channelui.ParseChannelTime(channelui.FallbackString(filtered[i].UpdatedAt, filtered[i].CreatedAt))
+		rightTime, rok := channelui.ParseChannelTime(channelui.FallbackString(filtered[j].UpdatedAt, filtered[j].CreatedAt))
 		switch {
 		case lok && rok:
 			if !leftTime.Equal(rightTime) {
@@ -297,7 +308,7 @@ func (m channelModel) switcherActiveTasks(limit int) []channelTask {
 	return filtered
 }
 
-func taskSwitcherRank(task channelTask) int {
+func taskSwitcherRank(task channelui.Task) int {
 	status := strings.ToLower(strings.TrimSpace(task.Status))
 	switch status {
 	case "blocked":
@@ -313,18 +324,18 @@ func taskSwitcherRank(task channelTask) int {
 	}
 }
 
-func (m channelModel) switcherRecentThreads(limit int) []brokerMessage {
-	roots := make([]brokerMessage, 0, limit)
+func (m channelModel) switcherRecentThreads(limit int) []channelui.BrokerMessage {
+	roots := make([]channelui.BrokerMessage, 0, limit)
 	seen := map[string]bool{}
 	for _, msg := range m.recentRootMessages(24) {
-		rootID := threadRootMessageID(m.messages, msg.ID)
+		rootID := channelui.ThreadRootMessageID(m.messages, msg.ID)
 		if rootID == "" || seen[rootID] {
 			continue
 		}
-		if !hasThreadReplies(m.messages, rootID) && strings.TrimSpace(msg.ReplyTo) == "" {
+		if !channelui.HasThreadReplies(m.messages, rootID) && strings.TrimSpace(msg.ReplyTo) == "" {
 			continue
 		}
-		root, ok := findMessageByID(m.messages, rootID)
+		root, ok := channelui.FindMessageByID(m.messages, rootID)
 		if !ok {
 			continue
 		}
@@ -339,10 +350,10 @@ func (m channelModel) switcherRecentThreads(limit int) []brokerMessage {
 
 func switcherTiming(createdAt, dueAt string) string {
 	if due := strings.TrimSpace(dueAt); due != "" {
-		return "due " + prettyRelativeTime(due)
+		return "due " + channelui.PrettyRelativeTime(due)
 	}
 	if created := strings.TrimSpace(createdAt); created != "" {
-		return prettyRelativeTime(created)
+		return channelui.PrettyRelativeTime(created)
 	}
 	return ""
 }

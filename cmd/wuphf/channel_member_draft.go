@@ -13,6 +13,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/nex-crm/wuphf/cmd/wuphf/channelui"
 	"github.com/nex-crm/wuphf/internal/team"
 )
 
@@ -58,7 +59,7 @@ func (m channelModel) submitMemberDraft() (tea.Model, tea.Cmd) {
 			m.notice = "Slug is required."
 			return m, nil
 		}
-		draft.Slug = normalizeDraftSlug(value)
+		draft.Slug = channelui.NormalizeDraftSlug(value)
 		if draft.Slug == "ceo" {
 			m.notice = "CEO is reserved."
 			return m, nil
@@ -204,31 +205,6 @@ func renderMemberDraftCard(draft channelMemberDraft, width int) string {
 		Render(strings.Join(lines, "\n"))
 }
 
-func normalizeDraftSlug(raw string) string {
-	raw = strings.ToLower(strings.TrimSpace(raw))
-	raw = strings.ReplaceAll(raw, " ", "-")
-	raw = strings.ReplaceAll(raw, "_", "-")
-	return raw
-}
-
-func parseExpertiseInput(raw string) []string {
-	parts := strings.Split(raw, ",")
-	out := make([]string, 0, len(parts))
-	seen := map[string]struct{}{}
-	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		if part == "" {
-			continue
-		}
-		if _, ok := seen[part]; ok {
-			continue
-		}
-		seen[part] = struct{}{}
-		out = append(out, part)
-	}
-	return out
-}
-
 func mutateOfficeMemberSpec(draft channelMemberDraft, activeChannel string) tea.Cmd {
 	return func() tea.Msg {
 		action := "create"
@@ -240,7 +216,7 @@ func mutateOfficeMemberSpec(draft channelMemberDraft, activeChannel string) tea.
 			"slug":            draft.Slug,
 			"name":            draft.Name,
 			"role":            draft.Role,
-			"expertise":       parseExpertiseInput(draft.Expertise),
+			"expertise":       channelui.ParseExpertiseInput(draft.Expertise),
 			"personality":     draft.Personality,
 			"permission_mode": strings.TrimSpace(draft.PermissionMode),
 			"created_by":      "you",

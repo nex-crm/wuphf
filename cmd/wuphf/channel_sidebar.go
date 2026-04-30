@@ -2,389 +2,22 @@ package main
 
 import (
 	"fmt"
-	"hash/fnv"
 	"strings"
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/nex-crm/wuphf/cmd/wuphf/channelui"
 )
-
-func truncateLabel(label string, max int) string {
-	if max <= 0 {
-		return ""
-	}
-	r := []rune(label)
-	if len(r) <= max {
-		return label
-	}
-	if max == 1 {
-		return "…"
-	}
-	return string(r[:max-1]) + "…"
-}
-
-// Sidebar theme colors.
-const (
-	sidebarBG      = "#1A1D21"
-	sidebarMuted   = "#ABABAD"
-	sidebarDivider = "#35373B"
-	sidebarActive  = "#1264A3"
-
-	dotTalking  = "#2BAC76"
-	dotThinking = "#E8912D"
-	dotCoding   = "#8B5CF6"
-	dotIdle     = "#ABABAD"
-)
-
-// memberActivity describes what an agent is doing based on recency and content.
-type memberActivity struct {
-	Label string
-	Color string
-	Dot   string
-}
-
-type officeCharacter struct {
-	Avatar []string
-	Bubble string
-}
-
-// classifyActivity determines activity from last message time and content.
-func classifyActivity(m channelMember) memberActivity {
-	if m.Disabled {
-		return memberActivity{Label: "away", Color: dotIdle, Dot: "○"} // ○ empty
-	}
-
-	now := time.Now()
-	elapsed := 24 * time.Hour
-
-	if m.LastTime != "" {
-		for _, layout := range []string{
-			time.RFC3339,
-			"2006-01-02T15:04:05.000Z",
-			"2006-01-02T15:04:05Z",
-		} {
-			if t, err := time.Parse(layout, m.LastTime); err == nil {
-				elapsed = now.Sub(t)
-				break
-			}
-		}
-	}
-
-	// Active: recently posted or working in Claude Code
-	if elapsed < 10*time.Second {
-		return memberActivity{Label: "talking", Color: dotTalking, Dot: "●"} // ● green filled
-	}
-	if elapsed < 30*time.Second {
-		lower := strings.ToLower(m.LastMessage)
-		for _, kw := range []string{"bash", "edit", "read", "write", "grep", "glob"} {
-			if strings.Contains(lower, kw) {
-				return memberActivity{Label: "shipping", Color: dotCoding, Dot: "●"} // ● purple filled
-			}
-		}
-		return memberActivity{Label: "plotting", Color: dotThinking, Dot: "●"} // ● yellow filled
-	}
-	if m.LiveActivity != "" {
-		return memberActivity{Label: "talking", Color: dotTalking, Dot: "●"} // ● green filled
-	}
-
-	// Idle
-	return memberActivity{Label: "lurking", Color: dotIdle, Dot: "●"} // ● grey filled
-}
-
-func defaultSidebarRoster() []channelMember {
-	return []channelMember{
-		{Slug: "ceo", Name: "CEO", Role: "strategy"},
-		{Slug: "pm", Name: "Product Manager", Role: "product"},
-		{Slug: "fe", Name: "Frontend Engineer", Role: "frontend"},
-		{Slug: "be", Name: "Backend Engineer", Role: "backend"},
-		{Slug: "ai", Name: "AI Engineer", Role: "AI Engineer"},
-		{Slug: "designer", Name: "Designer", Role: "design"},
-		{Slug: "cmo", Name: "CMO", Role: "marketing"},
-		{Slug: "cro", Name: "CRO", Role: "revenue"},
-	}
-}
-
-func renderOfficeCharacter(m channelMember, act memberActivity, now time.Time) officeCharacter {
-	seed := m.Name
-	if seed == "" {
-		seed = m.Slug
-	}
-	talkFrame := 0
-	if act.Label == "talking" {
-		talkFrame = int(now.UnixNano()/250_000_000) % 2
-	}
-	avatar := renderWuphfAvatar(seed, m.Slug, talkFrame)
-	bubble := officeAside(m.Slug, act.Label, m.LastMessage, now)
-	return officeCharacter{Avatar: avatar, Bubble: bubble}
-}
-
-func officeAside(slug, activity, lastMessage string, now time.Time) string {
-	lists := map[string][]string{
-		"ceo:talking": {
-			"Delegating.",
-			"Have a plan.",
-		},
-		"ceo:plotting": {
-			"Smells strategic.",
-			"Possible reorg.",
-		},
-		"pm:plotting": {
-			"Scope creep.",
-			"Needs triage.",
-		},
-		"pm:lurking": {
-			"Hidden work.",
-			"Roadmap vibes.",
-		},
-		"fe:shipping": {
-			"Shipping it.",
-			"Please no redesign.",
-		},
-		"fe:plotting": {
-			"That button though.",
-			"UI is loaded.",
-		},
-		"be:shipping": {
-			"It will work.",
-			"DB has feelings.",
-		},
-		"be:plotting": {
-			"Too many moving parts.",
-			"One less service?",
-		},
-		"ai:plotting": {
-			"Eval first.",
-			"Latency says hi.",
-		},
-		"ai:talking": {
-			"Could be smarter.",
-			"This becomes a system.",
-		},
-		"designer:plotting": {
-			"Needs whitespace.",
-			"Not polished.",
-		},
-		"designer:lurking": {
-			"I have notes.",
-			"That color dies.",
-		},
-		"cmo:talking": {
-			"Message matters.",
-			"No oatmeal copy.",
-		},
-		"cmo:plotting": {
-			"Bland alert.",
-			"We need a hook.",
-		},
-		"cro:talking": {
-			"Price question.",
-			"Revenue is real.",
-		},
-		"cro:lurking": {
-			"Objection incoming.",
-			"What are we selling?",
-		},
-		"default:talking": {
-			"Have a thought.",
-			"Need opinions.",
-		},
-		"default:plotting": {
-			"Mild concern.",
-			"Needs follow-up.",
-		},
-		"default:shipping": {
-			"Doing it.",
-			"My problem now.",
-		},
-		"default:lurking": {
-			"Still here.",
-			"Thinking quietly.",
-		},
-	}
-
-	key := slug + ":" + activity
-	options := lists[key]
-	if len(options) == 0 {
-		options = lists["default:"+activity]
-	}
-	if len(options) == 0 {
-		return ""
-	}
-
-	h := fnv.New32a()
-	_, _ = h.Write([]byte(key + "|" + lastMessage))
-	offset := int(h.Sum32() % 9)
-	phase := (int(now.Unix()) + offset) % 18
-	if activity != "talking" {
-		showFor := 5
-		if phase >= showFor {
-			return ""
-		}
-	}
-	if activity == "talking" && lastMessage == "" {
-		return ""
-	}
-
-	if lower := strings.ToLower(lastMessage); lower != "" {
-		switch {
-		case strings.Contains(lower, "blocked"):
-			return "Blocked."
-		case strings.Contains(lower, "launch"):
-			return "Launch mode."
-		case strings.Contains(lower, "design"):
-			return "Taste fight."
-		case strings.Contains(lower, "pricing"):
-			return "Money time."
-		}
-	}
-	return options[int(h.Sum32())%len(options)]
-}
-
-func activeSidebarTask(tasks []channelTask, slug string) (channelTask, bool) {
-	bestScore := -1
-	var best channelTask
-	for _, task := range tasks {
-		if strings.TrimSpace(task.Owner) != slug {
-			continue
-		}
-		status := strings.ToLower(strings.TrimSpace(task.Status))
-		if status == "done" || status == "released" {
-			continue
-		}
-		score := 1
-		switch status {
-		case "in_progress":
-			score = 4
-		case "review":
-			score = 3
-		case "blocked":
-			score = 2
-		case "claimed", "pending", "open":
-			score = 1
-		}
-		if score > bestScore {
-			bestScore = score
-			best = task
-		}
-	}
-	return best, bestScore >= 0
-}
-
-func applyTaskActivity(act memberActivity, task channelTask) memberActivity {
-	switch strings.ToLower(strings.TrimSpace(task.Status)) {
-	case "in_progress":
-		return memberActivity{Label: "working", Color: dotCoding, Dot: "\u26A1"}
-	case "review":
-		return memberActivity{Label: "reviewing", Color: dotThinking, Dot: "\u25C6"}
-	case "blocked":
-		return memberActivity{Label: "blocked", Color: "#DC2626", Dot: "\u25CF"}
-	case "claimed", "pending", "open":
-		if act.Label == "talking" || act.Label == "plotting" {
-			return act
-		}
-		return memberActivity{Label: "queued", Color: dotThinking, Dot: "\u25D4"}
-	default:
-		return act
-	}
-}
-
-func taskBubbleText(task channelTask) string {
-	title := strings.TrimSpace(task.Title)
-	if title == "" {
-		return ""
-	}
-	switch strings.ToLower(strings.TrimSpace(task.Status)) {
-	case "in_progress":
-		return "On " + title + "."
-	case "review":
-		return "Reviewing " + title + "."
-	case "blocked":
-		return "Blocked on " + title + "."
-	case "claimed", "pending", "open":
-		return "Queued: " + title + "."
-	default:
-		return ""
-	}
-}
-
-func renderThoughtBubble(text string, width int) []string {
-	if text == "" || width < 6 {
-		return nil
-	}
-	wrapWidth := width - 4
-	if wrapWidth < 6 {
-		wrapWidth = 6
-	}
-	wrapped := strings.Split(ansi.Wrap(text, wrapWidth, ""), "\n")
-	if len(wrapped) == 0 {
-		return nil
-	}
-	bubbleStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#2E2827")).
-		Background(lipgloss.Color("#F2EDE6")).
-		Bold(true)
-	tailStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#F2EDE6"))
-	lines := make([]string, 0, len(wrapped))
-	for i, line := range wrapped {
-		rendered := bubbleStyle.Render("▗ " + strings.TrimSpace(line) + " ▖")
-		if i == len(wrapped)-1 {
-			rendered += tailStyle.Render(" ▘")
-		}
-		lines = append(lines, rendered)
-	}
-	return lines
-}
-
-func padSidebarContent(text string, width int) string {
-	if width <= 0 {
-		return ""
-	}
-	visibleWidth := ansi.StringWidth(text)
-	if visibleWidth < width {
-		text += strings.Repeat(" ", width-visibleWidth)
-	}
-	return text
-}
-
-func sidebarPlainRow(text string, width int) string {
-	return " " + padSidebarContent(text, maxInt(1, width-1))
-}
-
-func sidebarStyledRow(style lipgloss.Style, text string, width int) string {
-	return style.Width(maxInt(1, width)).Render(text)
-}
-
-func visibleSidebarApps(apps []officeSidebarApp, activeApp officeApp, maxRows int) []officeSidebarApp {
-	if maxRows <= 0 || len(apps) == 0 {
-		return nil
-	}
-	if len(apps) <= maxRows {
-		return apps
-	}
-	visible := append([]officeSidebarApp(nil), apps[:maxRows]...)
-	for _, app := range visible {
-		if app.App == activeApp {
-			return visible
-		}
-	}
-	for _, app := range apps {
-		if app.App == activeApp {
-			visible[len(visible)-1] = app
-			return visible
-		}
-	}
-	return visible
-}
 
 // renderSidebar renders the Slack-style sidebar with channels and team members.
-func renderSidebar(channels []channelInfo, members []channelMember, tasks []channelTask, activeChannel string, activeApp officeApp, cursor int, rosterOffset int, focused bool, quickJump quickJumpTarget, workspace workspaceUIState, width, height int, checklist ...onboardingChecklist) string {
+func renderSidebar(channels []channelui.ChannelInfo, members []channelui.Member, tasks []channelui.Task, activeChannel string, activeApp channelui.OfficeApp, cursor int, rosterOffset int, focused bool, quickJump quickJumpTarget, workspace channelui.WorkspaceUIState, width, height int, checklist ...onboardingChecklist) string {
 	if width < 2 {
 		return ""
 	}
 
-	bg := lipgloss.Color(sidebarBG)
+	bg := lipgloss.Color(channelui.SidebarBG)
 	innerW := width - 2 // 1 char padding each side
 
 	sectionBandStyle := lipgloss.NewStyle().
@@ -396,12 +29,12 @@ func renderSidebar(channels []channelInfo, members []channelMember, tasks []chan
 		Foreground(lipgloss.Color("#FFFFFF")).
 		Bold(true)
 	workspaceMetaStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(sidebarMuted))
+		Foreground(lipgloss.Color(channelui.SidebarMuted))
 	workspaceSummaryStyle := workspaceMetaStyle
 	workspaceHintStyle := workspaceMetaStyle
 	activeRowStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#FFFFFF")).
-		Background(lipgloss.Color(sidebarActive)).
+		Background(lipgloss.Color(channelui.SidebarActive)).
 		Bold(true).
 		Padding(0, 1)
 	cursorRowStyle := lipgloss.NewStyle().
@@ -409,10 +42,10 @@ func renderSidebar(channels []channelInfo, members []channelMember, tasks []chan
 		Background(lipgloss.Color("#253041")).
 		Padding(0, 1)
 	channelRowStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(sidebarMuted)).
+		Foreground(lipgloss.Color(channelui.SidebarMuted)).
 		Padding(0, 1)
 	memberMetaStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(sidebarMuted))
+		Foreground(lipgloss.Color(channelui.SidebarMuted))
 
 	switch {
 	case !workspace.BrokerConnected:
@@ -428,39 +61,39 @@ func renderSidebar(channels []channelInfo, members []channelMember, tasks []chan
 		workspaceHintStyle = workspaceHintStyle.Foreground(lipgloss.Color("#D1FAE5"))
 	}
 
-	summaryLine := truncateLabel(workspace.sidebarSummaryLine(activeApp), maxInt(8, innerW-1))
-	hintLine := truncateLabel(workspace.sidebarHintLine(), maxInt(8, innerW-1))
+	summaryLine := channelui.TruncateLabel(workspace.SidebarSummaryLine(activeApp), channelui.MaxInt(8, innerW-1))
+	hintLine := channelui.TruncateLabel(workspace.SidebarHintLine(), channelui.MaxInt(8, innerW-1))
 
 	var lines []string
 	lines = append(lines, "")
-	lines = append(lines, sidebarPlainRow(workspaceStyle.Render("WUPHF"), width))
-	lines = append(lines, sidebarPlainRow(workspaceMetaStyle.Render("The WUPHF Office"), width))
-	lines = append(lines, sidebarPlainRow(workspaceSummaryStyle.Render(summaryLine), width))
-	lines = append(lines, sidebarPlainRow(workspaceMetaStyle.Render("Ctrl+G channels · Ctrl+O apps · d DM agent"), width))
-	lines = append(lines, sidebarPlainRow(workspaceHintStyle.Render(hintLine), width))
+	lines = append(lines, channelui.SidebarPlainRow(workspaceStyle.Render("WUPHF"), width))
+	lines = append(lines, channelui.SidebarPlainRow(workspaceMetaStyle.Render("The WUPHF Office"), width))
+	lines = append(lines, channelui.SidebarPlainRow(workspaceSummaryStyle.Render(summaryLine), width))
+	lines = append(lines, channelui.SidebarPlainRow(workspaceMetaStyle.Render("Ctrl+G channels · Ctrl+O apps · d DM agent"), width))
+	lines = append(lines, channelui.SidebarPlainRow(workspaceHintStyle.Render(hintLine), width))
 	lines = append(lines, "")
 	channelHeaderText := "Channels"
 	if quickJump == quickJumpChannels {
 		channelHeaderText = "Channels · 1-9"
 	}
-	lines = append(lines, sidebarStyledRow(sectionBandStyle, channelHeaderText, width))
+	lines = append(lines, channelui.SidebarStyledRow(sectionBandStyle, channelHeaderText, width))
 	if len(channels) == 0 {
-		channels = []channelInfo{{Slug: "general", Name: "general"}}
+		channels = []channelui.ChannelInfo{{Slug: "general", Name: "general"}}
 	}
 	sidebarIndex := 0
 	for _, ch := range channels {
 		label := "# " + ch.Slug
-		shortcut := sidebarShortcutLabel(sidebarIndex)
+		shortcut := channelui.SidebarShortcutLabel(sidebarIndex)
 		if shortcut != "" {
 			label = shortcut + "  " + label
 		}
 		switch {
 		case ch.Slug == activeChannel:
-			lines = append(lines, sidebarStyledRow(activeRowStyle, label, width))
+			lines = append(lines, channelui.SidebarStyledRow(activeRowStyle, label, width))
 		case focused && cursor == sidebarIndex:
-			lines = append(lines, sidebarStyledRow(cursorRowStyle, label, width))
+			lines = append(lines, channelui.SidebarStyledRow(cursorRowStyle, label, width))
 		default:
-			lines = append(lines, sidebarStyledRow(channelRowStyle, label, width))
+			lines = append(lines, channelui.SidebarStyledRow(channelRowStyle, label, width))
 		}
 		sidebarIndex++
 	}
@@ -470,15 +103,15 @@ func renderSidebar(channels []channelInfo, members []channelMember, tasks []chan
 	if quickJump == quickJumpApps {
 		appHeaderText = "Apps · 1-9"
 	}
-	lines = append(lines, sidebarStyledRow(sectionBandStyle, appHeaderText, width))
-	apps := officeSidebarApps()
+	lines = append(lines, channelui.SidebarStyledRow(sectionBandStyle, appHeaderText, width))
+	apps := channelui.OfficeSidebarApps()
 	const minRosterReserve = 3
 	maxAppRows := height - len(lines) - minRosterReserve
 	if maxAppRows < 1 {
 		maxAppRows = 1
 	}
-	for _, app := range visibleSidebarApps(apps, activeApp, maxAppRows) {
-		label := appIcon(app.App) + " " + app.Label
+	for _, app := range channelui.VisibleSidebarApps(apps, activeApp, maxAppRows) {
+		label := channelui.AppIcon(app.App) + " " + app.Label
 		appIndex := 0
 		for idx, candidate := range apps {
 			if candidate.App == app.App {
@@ -486,24 +119,24 @@ func renderSidebar(channels []channelInfo, members []channelMember, tasks []chan
 				break
 			}
 		}
-		shortcut := sidebarShortcutLabel(appIndex)
+		shortcut := channelui.SidebarShortcutLabel(appIndex)
 		if shortcut != "" {
 			label = shortcut + "  " + label
 		}
 		switch {
 		case activeApp == app.App:
-			lines = append(lines, sidebarStyledRow(activeRowStyle, label, width))
+			lines = append(lines, channelui.SidebarStyledRow(activeRowStyle, label, width))
 		case focused && cursor == sidebarIndex:
-			lines = append(lines, sidebarStyledRow(cursorRowStyle, label, width))
+			lines = append(lines, channelui.SidebarStyledRow(cursorRowStyle, label, width))
 		default:
-			lines = append(lines, sidebarStyledRow(channelRowStyle, label, width))
+			lines = append(lines, channelui.SidebarStyledRow(channelRowStyle, label, width))
 		}
 		sidebarIndex++
 	}
 
-	dividerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(sidebarDivider))
+	dividerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(channelui.SidebarDivider))
 	divider := dividerStyle.Render(strings.Repeat("\u2500", innerW))
-	lines = append(lines, sidebarPlainRow(divider, width))
+	lines = append(lines, channelui.SidebarPlainRow(divider, width))
 
 	// Insert onboarding checklist section above the agents list, if provided and active.
 	if len(checklist) > 0 {
@@ -531,7 +164,7 @@ func renderSidebar(channels []channelInfo, members []channelMember, tasks []chan
 
 	fallbackRoster := len(members) == 0
 	if fallbackRoster {
-		members = defaultSidebarRoster()
+		members = channelui.DefaultSidebarRoster()
 	}
 
 	totalMembers := len(members)
@@ -559,14 +192,14 @@ func renderSidebar(channels []channelInfo, members []channelMember, tasks []chan
 	} else if totalMembers > 0 && end > start {
 		peopleHeader = fmt.Sprintf("Agents · %d-%d/%d", start+1, end, totalMembers)
 	}
-	lines = append(lines, sidebarStyledRow(sectionBandStyle, peopleHeader, width))
+	lines = append(lines, channelui.SidebarStyledRow(sectionBandStyle, peopleHeader, width))
 
 	now := time.Now()
 	for i := start; i < end; i++ {
 		m := members[i]
-		summary := deriveMemberRuntimeSummary(m, tasks, now)
+		summary := channelui.DeriveMemberRuntimeSummary(m, tasks, now)
 		act := summary.Activity
-		character := renderOfficeCharacter(m, act, now)
+		character := channelui.RenderOfficeCharacter(m, act, now)
 		if summary.Bubble != "" {
 			character.Bubble = summary.Bubble
 		}
@@ -574,36 +207,33 @@ func renderSidebar(channels []channelInfo, members []channelMember, tasks []chan
 		dotStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(act.Color))
 		dot := dotStyle.Render(act.Dot)
 
-		agentColor := agentColor(m.Slug)
-		if agentColor == "" {
-			agentColor = "#64748B"
-		}
+		nameColor := channelui.AgentColor(m.Slug)
 		name := m.Name
 		if name == "" {
-			name = displayName(m.Slug)
+			name = channelui.DisplayName(m.Slug)
 		}
 		sidebarLabel := act.Label
 		nameMax := innerW - 8 - ansi.StringWidth(sidebarLabel)
 		if nameMax < 8 {
 			nameMax = 8
 		}
-		name = truncateLabel(name, nameMax)
+		name = channelui.TruncateLabel(name, nameMax)
 		nameStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color(agentColor)).
+			Foreground(lipgloss.Color(nameColor)).
 			Bold(true)
 		nameRendered := nameStyle.Render(name)
-		accent := lipgloss.NewStyle().Foreground(lipgloss.Color(agentColor)).Render("▎")
+		accent := lipgloss.NewStyle().Foreground(lipgloss.Color(nameColor)).Render("▎")
 		leftPart := accent + " " + dot + " " + nameRendered
 		if compact {
 			// Compact: single line per member with a simple glyph.
 			meta := memberMetaStyle.Render(sidebarLabel)
-			mini := lipgloss.NewStyle().Foreground(lipgloss.Color(agentColor)).Render(agentAvatar(m.Slug))
+			mini := lipgloss.NewStyle().Foreground(lipgloss.Color(nameColor)).Render(channelui.AgentAvatar(m.Slug))
 			line := leftPart + " " + mini
 			pad := innerW - ansi.StringWidth(line) - ansi.StringWidth(sidebarLabel)
 			if pad < 1 {
 				pad = 1
 			}
-			lines = append(lines, sidebarPlainRow(line+strings.Repeat(" ", pad)+meta, width))
+			lines = append(lines, channelui.SidebarPlainRow(line+strings.Repeat(" ", pad)+meta, width))
 		} else {
 			// Full mode: two dense rows per member, using the second row for real detail.
 			const avatarW = 4
@@ -627,21 +257,21 @@ func renderSidebar(channels []channelInfo, members []channelMember, tasks []chan
 			if pad < 1 {
 				pad = 1
 			}
-			lines = append(lines, sidebarPlainRow(linePrefix+strings.Repeat(" ", pad)+memberMetaStyle.Render(sidebarLabel), width))
+			lines = append(lines, channelui.SidebarPlainRow(linePrefix+strings.Repeat(" ", pad)+memberMetaStyle.Render(sidebarLabel), width))
 			detail := strings.TrimSpace(summary.Detail)
 			if detail == "" {
 				detail = "No updates yet."
 			}
-			detail = truncateLabel(detail, maxInt(12, innerW-avatarW-2))
+			detail = channelui.TruncateLabel(detail, channelui.MaxInt(12, innerW-avatarW-2))
 			secondLine := avatarBottom
 			if secondLine == "" {
 				secondLine = strings.Repeat(" ", avatarW)
 			}
 			secondLine = secondLine + " " + memberMetaStyle.Render(detail)
-			lines = append(lines, sidebarPlainRow(secondLine, width))
+			lines = append(lines, channelui.SidebarPlainRow(secondLine, width))
 			if character.Bubble != "" {
-				for _, bubbleLine := range renderThoughtBubble(character.Bubble, innerW-2) {
-					lines = append(lines, sidebarPlainRow(bubbleLine, width))
+				for _, bubbleLine := range channelui.RenderThoughtBubble(character.Bubble, innerW-2) {
+					lines = append(lines, channelui.SidebarPlainRow(bubbleLine, width))
 				}
 			}
 		}
@@ -649,7 +279,7 @@ func renderSidebar(channels []channelInfo, members []channelMember, tasks []chan
 
 	if totalMembers > maxMembers {
 		hint := memberMetaStyle.Render("PgUp/PgDn scroll agents")
-		lines = append(lines, sidebarPlainRow(hint, width))
+		lines = append(lines, channelui.SidebarPlainRow(hint, width))
 	}
 
 	// Pad remaining height with empty lines.

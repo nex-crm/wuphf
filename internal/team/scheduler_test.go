@@ -652,6 +652,11 @@ func TestLauncher_SchedulerWiring_PopulatesBrokerClockAndDeliver(t *testing.T) {
 	}
 }
 
+// launcherSchedulerSentinel exists only so the test above can reference a
+// known package-level string without importing internal packages. Trivial
+// const so the wiring test has something concrete to assert against.
+const launcherSchedulerSentinel = "watchdog scheduler"
+
 // Regression: Launcher.Kill() must drain the watchdog scheduler goroutine
 // before returning. The pre-refactor loop was for{ ... time.Sleep } with no
 // exit; C4 added Stop() but the first cut of Kill() did not call it, so the

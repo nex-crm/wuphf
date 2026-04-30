@@ -159,7 +159,7 @@ func TestProcessDueWorkflowJobUsesComposioProvider(t *testing.T) {
 	b.scheduler = append(b.scheduler, job)
 
 	l := &Launcher{broker: b}
-	l.processDueWorkflowJob(job)
+	l.scheduler().processWorkflowJob(job)
 
 	actions := b.Actions()
 	if len(actions) == 0 {

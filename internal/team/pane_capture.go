@@ -90,7 +90,7 @@ func (l *Launcher) startPaneCaptureLoops(ctx context.Context) {
 	if !l.paneBackedAgents || l.broker == nil {
 		return
 	}
-	targets := l.agentPaneTargets()
+	targets := l.targeter().PaneTargets()
 	for slug, target := range targets {
 		if slug == "" || target.PaneTarget == "" {
 			continue
@@ -141,7 +141,7 @@ func (l *Launcher) paneCaptureLoop(ctx context.Context, slug, paneTarget string)
 					return
 				case <-time.After(paneCaptureRetryAfterDeath):
 				}
-				if newTarget, ok := l.resolvePaneTargetForSlug(slug); ok && newTarget != "" {
+				if newTarget, ok := l.targeter().ResolvePaneTarget(slug); ok && newTarget != "" {
 					paneTarget = newTarget
 				}
 				// Clear prev-line cache so the re-surfaced pane pushes a

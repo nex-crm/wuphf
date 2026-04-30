@@ -547,9 +547,11 @@ func TestResumeInFlightWorkHeadlessEnqueuesLeadEvenWhenSpecialistsPresent(t *tes
 				{Slug: "fe", Name: "Frontend Engineer"},
 			},
 		},
-		headlessWorkers: make(map[string]bool),
-		headlessActive:  make(map[string]*headlessCodexActiveTurn),
-		headlessQueues:  make(map[string][]headlessCodexTurn),
+		headless: headlessWorkerPool{
+			workers: make(map[string]bool),
+			active:  make(map[string]*headlessCodexActiveTurn),
+			queues:  make(map[string][]headlessCodexTurn),
+		},
 	}
 	t.Cleanup(l.stopHeadlessWorkers)
 
@@ -559,14 +561,14 @@ func TestResumeInFlightWorkHeadlessEnqueuesLeadEvenWhenSpecialistsPresent(t *tes
 	// Check both queue and active entries to avoid a race where the goroutine
 	// has already consumed the queue entry before we read it.
 	ceoPresent := func() bool {
-		l.headlessMu.Lock()
-		defer l.headlessMu.Unlock()
-		return len(l.headlessQueues["ceo"]) > 0 || l.headlessActive["ceo"] != nil
+		l.headless.mu.Lock()
+		defer l.headless.mu.Unlock()
+		return len(l.headless.queues["ceo"]) > 0 || l.headless.active["ceo"] != nil
 	}
 	fePresent := func() bool {
-		l.headlessMu.Lock()
-		defer l.headlessMu.Unlock()
-		return len(l.headlessQueues["fe"]) > 0 || l.headlessActive["fe"] != nil
+		l.headless.mu.Lock()
+		defer l.headless.mu.Unlock()
+		return len(l.headless.queues["fe"]) > 0 || l.headless.active["fe"] != nil
 	}
 
 	if !ceoPresent() {
@@ -671,18 +673,20 @@ func TestResumeInFlightWorkTUIClaudeRoutesHeadless(t *testing.T) {
 				{Slug: "fe", Name: "Frontend Engineer"},
 			},
 		},
-		headlessWorkers: make(map[string]bool),
-		headlessActive:  make(map[string]*headlessCodexActiveTurn),
-		headlessQueues:  make(map[string][]headlessCodexTurn),
+		headless: headlessWorkerPool{
+			workers: make(map[string]bool),
+			active:  make(map[string]*headlessCodexActiveTurn),
+			queues:  make(map[string][]headlessCodexTurn),
+		},
 	}
 	t.Cleanup(l.stopHeadlessWorkers)
 
 	l.resumeInFlightWork()
 
 	present := func(slug string) bool {
-		l.headlessMu.Lock()
-		defer l.headlessMu.Unlock()
-		return len(l.headlessQueues[slug]) > 0 || l.headlessActive[slug] != nil
+		l.headless.mu.Lock()
+		defer l.headless.mu.Unlock()
+		return len(l.headless.queues[slug]) > 0 || l.headless.active[slug] != nil
 	}
 
 	if !present("ceo") {
@@ -734,12 +738,14 @@ func TestResumeInFlightWorkRoutesPerAgentProviderBinding(t *testing.T) {
 				{Slug: "fe", Name: "Frontend Engineer"},
 			},
 		},
-		headlessWorkers: map[string]bool{
-			"ceo": true,
-			"fe":  true,
+		headless: headlessWorkerPool{
+			workers: map[string]bool{
+				"ceo": true,
+				"fe":  true,
+			},
+			active: make(map[string]*headlessCodexActiveTurn),
+			queues: make(map[string][]headlessCodexTurn),
 		},
-		headlessActive: make(map[string]*headlessCodexActiveTurn),
-		headlessQueues: make(map[string][]headlessCodexTurn),
 	}
 	t.Cleanup(l.stopHeadlessWorkers)
 
@@ -752,10 +758,10 @@ func TestResumeInFlightWorkRoutesPerAgentProviderBinding(t *testing.T) {
 		t.Fatalf("unexpected pane notification: %q", paneNotifications[0])
 	}
 
-	l.headlessMu.Lock()
-	ceoQueue := append([]headlessCodexTurn(nil), l.headlessQueues["ceo"]...)
-	feQueue := append([]headlessCodexTurn(nil), l.headlessQueues["fe"]...)
-	l.headlessMu.Unlock()
+	l.headless.mu.Lock()
+	ceoQueue := append([]headlessCodexTurn(nil), l.headless.queues["ceo"]...)
+	feQueue := append([]headlessCodexTurn(nil), l.headless.queues["fe"]...)
+	l.headless.mu.Unlock()
 
 	if len(ceoQueue) != 0 {
 		t.Fatalf("claude-bound lead should not also be enqueued headless, got %#v", ceoQueue)

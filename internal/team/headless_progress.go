@@ -45,3 +45,10 @@ func formatHeadlessLatencySummary(metrics headlessProgressMetrics) string {
 	}
 	return strings.Join(parts, " · ")
 }
+
+func durationMillis(start, mark time.Time) int64 {
+	if start.IsZero() || mark.IsZero() {
+		return -1
+	}
+	return mark.Sub(start).Milliseconds()
+}

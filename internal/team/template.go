@@ -26,7 +26,7 @@ func (l *Launcher) GenerateMemberTemplateFromPrompt(request string) (generatedMe
 	if stub := strings.TrimSpace(os.Getenv("WUPHF_AGENT_TEMPLATE_STUB")); stub != "" {
 		return parseGeneratedMemberTemplate(stub)
 	}
-	systemPrompt := l.buildPrompt(l.officeLeadSlug()) + `
+	systemPrompt := l.buildPrompt(l.targeter().LeadSlug()) + `
 
 You are designing a NEW office teammate template for WUPHF.
 Return exactly one JSON object and nothing else.
@@ -104,7 +104,7 @@ func (l *Launcher) GenerateChannelTemplateFromPrompt(request string) (generatedC
 	if stub := strings.TrimSpace(os.Getenv("WUPHF_CHANNEL_TEMPLATE_STUB")); stub != "" {
 		return parseGeneratedChannelTemplate(stub)
 	}
-	systemPrompt := l.buildPrompt(l.officeLeadSlug()) + `
+	systemPrompt := l.buildPrompt(l.targeter().LeadSlug()) + `
 
 You are designing a NEW office channel for WUPHF.
 Return exactly one JSON object and nothing else.
