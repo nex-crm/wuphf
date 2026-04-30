@@ -217,6 +217,64 @@ func TestRunSchedulerJob_WrongMethodReturns405(t *testing.T) {
 	}
 }
 
+// TestRunSchedulerJob_WorkflowJobBumpsNextRun verifies that force-triggering a
+// workflow-type cron sets next_run to now (making it due on the next scheduler
+// poll) while system crons leave next_run untouched.
+func TestRunSchedulerJob_WorkflowJobBumpsNextRun(t *testing.T) {
+	b := newTestBroker(t)
+	futureNextRun := time.Now().UTC().Add(60 * time.Minute).Format(time.RFC3339)
+	if err := b.SetSchedulerJob(schedulerJob{
+		Slug:        "weekly-digest",
+		Label:       "Weekly digest",
+		TargetType:  "workflow",
+		WorkflowKey: "weekly-digest-wf",
+		NextRun:     futureNextRun,
+		Status:      "sleeping",
+		Enabled:     true,
+	}); err != nil {
+		t.Fatalf("SetSchedulerJob: %v", err)
+	}
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("failed to start broker: %v", err)
+	}
+	defer b.Stop()
+
+	before := time.Now().UTC()
+
+	base := fmt.Sprintf("http://%s", b.Addr())
+	req, _ := http.NewRequest(http.MethodPost, base+"/scheduler/weekly-digest/run", nil)
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("run request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	b.mu.Lock()
+	var found *schedulerJob
+	for i := range b.scheduler {
+		if b.scheduler[i].Slug == "weekly-digest" {
+			found = &b.scheduler[i]
+			break
+		}
+	}
+	b.mu.Unlock()
+	if found == nil {
+		t.Fatal("job not found after run")
+	}
+	// next_run must have been moved to ≤ now so the scheduler sees it as due.
+	nextRun, err := time.Parse(time.RFC3339, found.NextRun)
+	if err != nil {
+		t.Fatalf("parse NextRun %q: %v", found.NextRun, err)
+	}
+	if nextRun.After(before) {
+		t.Errorf("workflow NextRun not bumped: got %q, want <= %q", found.NextRun, before.Format(time.RFC3339))
+	}
+}
+
 func TestSchedulerDueOnlyFiltersFutureJobs(t *testing.T) {
 	b := newTestBroker(t)
 	if err := b.SetSchedulerJob(schedulerJob{

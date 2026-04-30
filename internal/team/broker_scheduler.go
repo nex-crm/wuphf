@@ -651,20 +651,20 @@ func (b *Broker) handleSchedulerSubpath(w http.ResponseWriter, r *http.Request) 
 
 // handleRunSchedulerJob implements POST /scheduler/{slug}/run.
 //
-// It force-triggers the named job once, immediately, without touching
-// next_run or the recurring schedule. System crons that are driven by
-// dedicated goroutines (nex-notifications, nex-insights, one-relay-events)
-// do NOT have their goroutines poked — only LastRun and LastRunStatus are
-// updated on the scheduler row to reflect the manual trigger. The actual
-// side-effects those crons produce (e.g. fetching the Nex notifications feed)
-// require their goroutines to tick naturally; a force-run records the intent
-// and advances LastRun so the Calendar panel shows the trigger happened.
+// Behaviour by job type:
 //
-// For workflow jobs the execution is dispatched synchronously (mirroring
-// processWorkflowJob in scheduler.go). For task / request / system crons
-// the row is updated in-memory only — no external call is made — because
-// those jobs are driven by data-triggered logic that depends on full
-// Launcher context unavailable at the HTTP layer.
+//   - Workflow cron jobs (TargetType == "workflow"): next_run is set to now
+//     so the watchdog scheduler's next poll finds the job as due and dispatches
+//     processWorkflowJob. The job executes within one scheduler tick (~20 s).
+//
+//   - System crons (SystemManaged == true, e.g. nex-notifications, nex-insights):
+//     executed by dedicated broker goroutines that cannot be poked from the HTTP
+//     layer. LastRun and LastRunStatus are updated so the Calendar panel shows the
+//     manual trigger; actual side-effects happen on the goroutine's natural tick.
+//
+//   - Task / request cron jobs: LastRun and LastRunStatus updated only.
+//     These are driven by data state (task status, request lifecycle) that the
+//     HTTP handler has no context to evaluate.
 //
 // Idempotency: this handler never touches the notification cursor. It cannot
 // cause the cursor to advance twice; the nex-notifications goroutine advances
@@ -687,11 +687,22 @@ func (b *Broker) handleRunSchedulerJob(w http.ResponseWriter, r *http.Request, s
 	now := time.Now().UTC()
 	prevLastRun := job.LastRun
 	prevLastRunStatus := job.LastRunStatus
+	prevNextRun := job.NextRun
+	prevDueAt := job.DueAt
 	job.LastRun = now.Format(time.RFC3339)
 	job.LastRunStatus = "triggered"
+	// Workflow cron jobs are dispatched through the watchdog scheduler's
+	// processWorkflowJob path. Marking next_run = now makes the job appear
+	// due on the next scheduler poll so it executes within one tick.
+	if strings.TrimSpace(job.TargetType) == "workflow" {
+		job.NextRun = now.Format(time.RFC3339)
+		job.DueAt = job.NextRun
+	}
 	if err := b.saveLocked(); err != nil {
 		job.LastRun = prevLastRun
 		job.LastRunStatus = prevLastRunStatus
+		job.NextRun = prevNextRun
+		job.DueAt = prevDueAt
 		b.mu.Unlock()
 		http.Error(w, "failed to persist trigger", http.StatusInternalServerError)
 		return
