@@ -91,6 +91,15 @@ func (l *Launcher) BrokerToken() string {
 	return l.broker.Token()
 }
 
+// Broker returns the Launcher's internal broker instance. Used by
+// cmd/wuphf/main.go to wire workspace orchestration after launch.
+func (l *Launcher) Broker() *Broker {
+	if l == nil {
+		return nil
+	}
+	return l.broker
+}
+
 // OneOnOneAgent returns the active direct-session agent slug, if any.
 func (l *Launcher) OneOnOneAgent() string {
 	return l.oneOnOneAgent()

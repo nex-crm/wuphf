@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/nex-crm/wuphf/internal/config"
 )
 
 // external orchestrator state types (input format — JSON file path)
@@ -324,8 +326,8 @@ func importFromLegacyDB(portOverride int) (importedBrokerState, int, int, error)
 
 // readLegacyPort reads the external orchestrator config file to find a custom Postgres port.
 func readLegacyPort() (int, bool) {
-	home, err := os.UserHomeDir()
-	if err != nil {
+	home := config.RuntimeHomeDir()
+	if home == "" {
 		return 0, false
 	}
 	legacyHome := os.Getenv("PAPERCLIP_HOME")
@@ -470,9 +472,8 @@ func mapTaskStatus(status string) string {
 
 // wuphfBrokerStatePath mirrors defaultBrokerStatePath in internal/team/broker.go.
 func wuphfBrokerStatePath() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return filepath.Join(".wuphf", "team", "broker-state.json")
+	if home := config.RuntimeHomeDir(); home != "" {
+		return filepath.Join(home, ".wuphf", "team", "broker-state.json")
 	}
-	return filepath.Join(home, ".wuphf", "team", "broker-state.json")
+	return filepath.Join(".wuphf", "team", "broker-state.json")
 }

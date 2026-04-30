@@ -15,6 +15,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/nex-crm/wuphf/internal/config"
 )
 
 // notifyAgentsLoop subscribes to broker messages and pushes notifications immediately.
@@ -70,7 +72,7 @@ func recoverPanicTo(site, extra string) {
 	buf := make([]byte, 16<<10)
 	n := runtime.Stack(buf, false)
 	fmt.Fprintf(os.Stderr, "panic in %s: %v\n%s\n%s\n", site, r, extra, buf[:n])
-	if home, err := os.UserHomeDir(); err == nil {
+	if home := config.RuntimeHomeDir(); home != "" {
 		// MkdirAll first — on a fresh install (or after
 		// `rm -rf ~/.wuphf`) the logs directory does not yet
 		// exist, OpenFile alone would fail with ENOENT, and the

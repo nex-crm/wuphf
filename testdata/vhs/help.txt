@@ -10,6 +10,7 @@ Usage:
   wuphf import --from legacy  Import from a running external orchestrator (auto-detect)
   wuphf log          Show what your agents actually did (task receipts)
   wuphf memory migrate --from {nex,gbrain}  Port legacy memory into the team wiki
+  wuphf workspace ...  Manage multiple isolated WUPHF workspaces
   wuphf --cmd <cmd>  Run a command non-interactively
 
 Flags:
@@ -45,4 +46,3 @@ Flags:
         Start with threads collapsed (default: expanded)
   --tui
         Launch with tmux TUI instead of the web UI
-  --unsafe

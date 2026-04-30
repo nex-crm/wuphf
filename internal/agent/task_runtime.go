@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/nex-crm/wuphf/internal/config"
 )
 
 const (
@@ -25,12 +27,10 @@ func defaultTaskLogRoot() string {
 	if root := strings.TrimSpace(os.Getenv(taskLogRootEnv)); root != "" {
 		return root
 	}
-
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return filepath.Join(".wuphf", "office", "tasks")
+	if home := config.RuntimeHomeDir(); home != "" {
+		return filepath.Join(home, ".wuphf", "office", "tasks")
 	}
-	return filepath.Join(home, ".wuphf", "office", "tasks")
+	return filepath.Join(".wuphf", "office", "tasks")
 }
 
 func nextTaskID(slug string) string {

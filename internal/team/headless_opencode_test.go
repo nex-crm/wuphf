@@ -38,6 +38,10 @@ func TestBuildHeadlessOpencodeArgsOmitsModelWhenUnset(t *testing.T) {
 func TestWriteHeadlessOpencodeMCPConfigConcurrent(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	// Pair WUPHF_RUNTIME_HOME with HOME so the post-Phase-0 opencode race fix
+	// (per-agent configs under <runtime_home>/.wuphf/opencode-configs/) lands
+	// in the test tempdir and not the worktree_guard_test process-wide pin.
+	t.Setenv("WUPHF_RUNTIME_HOME", home)
 
 	configDir := filepath.Join(home, ".config", "opencode")
 	if err := os.MkdirAll(configDir, 0o755); err != nil {

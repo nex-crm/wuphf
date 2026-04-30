@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"sort"
 	"time"
+
+	"github.com/nex-crm/wuphf/internal/config"
 )
 
 // storeData is the on-disk JSON structure.
@@ -24,7 +26,7 @@ type CalendarStore struct {
 // If path is empty, defaults to ~/.wuphf/calendar.json.
 func NewCalendarStore(path string) *CalendarStore {
 	if path == "" {
-		home, _ := os.UserHomeDir()
+		home := config.RuntimeHomeDir()
 		path = filepath.Join(home, ".wuphf", "calendar.json")
 	}
 	s := &CalendarStore{path: path}

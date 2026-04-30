@@ -3,6 +3,7 @@ package workspace
 import (
 	"os"
 	"path/filepath"
+	"sort"
 	"testing"
 )
 
@@ -147,5 +148,115 @@ func TestClearRuntimeWithNoTeamDirIsNoOp(t *testing.T) {
 	}
 	if len(res.Removed) != 0 || len(res.Errors) != 0 {
 		t.Fatalf("expected empty result, got %+v", res)
+	}
+}
+
+// sortedRemoved returns a copy of res.Removed sorted alphabetically so
+// comparisons between two parametrized runs are order-independent.
+func sortedRemoved(res Result) []string {
+	out := append([]string(nil), res.Removed...)
+	sort.Strings(out)
+	return out
+}
+
+// equalSlices reports whether two string slices contain the same elements in
+// the same order. Used after sortedRemoved to compare wipe sets.
+func equalSlices(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func TestClearRuntimeMatchesResetAt(t *testing.T) {
+	// ClearRuntime() must produce the same wipe set as ResetAt(<default home>).
+	dir1 := withRuntimeHome(t)
+	seedWorkspace(t, dir1)
+	resA, err := ClearRuntime()
+	if err != nil {
+		t.Fatalf("ClearRuntime: %v", err)
+	}
+
+	// Fresh isolated home for the parametrized variant so seeded state is
+	// identical and untouched by the previous run.
+	dir2 := withRuntimeHome(t)
+	seedWorkspace(t, dir2)
+	resB, err := ResetAt(filepath.Join(dir2, ".wuphf"))
+	if err != nil {
+		t.Fatalf("ResetAt: %v", err)
+	}
+
+	gotA, gotB := sortedRemoved(resA), sortedRemoved(resB)
+	// Strip the per-run home prefix so the comparison is path-shape only.
+	stripPrefix := func(prefix string, paths []string) []string {
+		out := make([]string, len(paths))
+		for i, p := range paths {
+			rel, err := filepath.Rel(prefix, p)
+			if err != nil {
+				out[i] = p
+				continue
+			}
+			out[i] = rel
+		}
+		return out
+	}
+	if len(resA.Errors) != 0 {
+		t.Fatalf("ClearRuntime had unexpected errors: %v", resA.Errors)
+	}
+	if len(resB.Errors) != 0 {
+		t.Fatalf("ResetAt had unexpected errors: %v", resB.Errors)
+	}
+	relA := stripPrefix(dir1, gotA)
+	relB := stripPrefix(dir2, gotB)
+	if !equalSlices(relA, relB) {
+		t.Fatalf("wipe set drift:\n  ClearRuntime: %v\n  ResetAt:      %v", relA, relB)
+	}
+}
+
+func TestShredMatchesShredAt(t *testing.T) {
+	// Shred() must produce the same wipe set as ShredAt(<default home>) when
+	// no env-override paths are pointing outside the wuphfHome tree.
+	dir1 := withRuntimeHome(t)
+	seedWorkspace(t, dir1)
+	resA, err := Shred()
+	if err != nil {
+		t.Fatalf("Shred: %v", err)
+	}
+
+	dir2 := withRuntimeHome(t)
+	seedWorkspace(t, dir2)
+	resB, err := ShredAt(filepath.Join(dir2, ".wuphf"))
+	if err != nil {
+		t.Fatalf("ShredAt: %v", err)
+	}
+
+	gotA, gotB := sortedRemoved(resA), sortedRemoved(resB)
+	stripPrefix := func(prefix string, paths []string) []string {
+		out := make([]string, len(paths))
+		for i, p := range paths {
+			rel, err := filepath.Rel(prefix, p)
+			if err != nil {
+				out[i] = p
+				continue
+			}
+			out[i] = rel
+		}
+		return out
+	}
+	if len(resA.Errors) != 0 {
+		t.Fatalf("Shred had unexpected errors: %v", resA.Errors)
+	}
+	if len(resB.Errors) != 0 {
+		t.Fatalf("ShredAt had unexpected errors: %v", resB.Errors)
+	}
+	relA := stripPrefix(dir1, gotA)
+	relB := stripPrefix(dir2, gotB)
+	if !equalSlices(relA, relB) {
+		t.Fatalf("wipe set drift:\n  Shred:   %v\n  ShredAt: %v", relA, relB)
 	}
 }

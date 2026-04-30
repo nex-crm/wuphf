@@ -22,6 +22,7 @@ import (
 	"github.com/nex-crm/wuphf/internal/teammcp"
 	"github.com/nex-crm/wuphf/internal/upgradecheck"
 	"github.com/nex-crm/wuphf/internal/workspace"
+	"github.com/nex-crm/wuphf/internal/workspaces"
 )
 
 const appName = "wuphf"
@@ -97,6 +98,11 @@ func printSubcommandHelp(sub string) {
 		fmt.Fprintln(os.Stderr, "")
 		fmt.Fprintln(os.Stderr, "Usage:")
 		fmt.Fprintln(os.Stderr, "  wuphf mcp-team")
+	case "workspace", "ws":
+		// Delegate to the workspace help printer so adding a new subcommand
+		// only touches workspace.go.
+		printWorkspaceHelp()
+		return
 	case "upgrade":
 		fmt.Fprintln(os.Stderr, "wuphf upgrade — check npm for a newer wuphf and show the changelog")
 		fmt.Fprintln(os.Stderr, "")
@@ -138,6 +144,44 @@ func printVisibleFlags(w *os.File) {
 	})
 }
 
+// initWorkspaces wires the workspaces package into the CLI factory, the
+// broker's cross-broker URL resolver, and runs the migration to the
+// symmetric multi-workspace layout. Idempotent — safe to call on every
+// `wuphf` invocation, including subcommands that never touch workspaces.
+func initWorkspaces() {
+	orchestratorFactory = func() (workspaceOrchestrator, error) {
+		return cliOrchestratorAdapter{}, nil
+	}
+	// targetBrokerURL is no longer wired into the broker — the orchestrator
+	// owns cross-broker URL resolution now. Keeping the helper around for
+	// the doctor/list paths that still surface the URL to humans.
+	_ = targetBrokerURL
+
+	if err := workspaces.MigrateToSymmetric(); err != nil {
+		// Non-fatal: existing single-workspace installs keep working
+		// even if the symmetric migration is blocked (e.g. a broker is
+		// running on the legacy port).
+		fmt.Fprintf(os.Stderr, "workspace migration: %v\n", err)
+	}
+}
+
+// wireBrokerWorkspaces is called after a launcher has constructed and
+// started its broker. It hooks the broker's workspace endpoints up to the
+// shared orchestrator and the launcher's drain path. Safe to call when
+// l.Broker() is nil (no broker spawned).
+func wireBrokerWorkspaces(l *team.Launcher) {
+	if l == nil {
+		return
+	}
+	b := l.Broker()
+	if b == nil {
+		return
+	}
+	b.SetWorkspaceOrchestrator(brokerOrchestratorAdapter{})
+	b.SetLauncherDrainer(l)
+	b.SetAdminPauseExitFn(os.Exit)
+}
+
 func main() {
 	cmd := flag.String("cmd", "", "Run a command non-interactively")
 	format := flag.String("format", "text", "Output format (text, json)")
@@ -160,6 +204,12 @@ func main() {
 	opusCEO := flag.Bool("opus-ceo", false, "Upgrade CEO agent from Sonnet to Opus")
 	collabMode := flag.Bool("collab", false, "Start in collaborative mode (all agents see all messages)")
 	noOpen := flag.Bool("no-open", false, "Don't open browser automatically on launch")
+	// --workspace=<name> overrides the active workspace for a single
+	// invocation. The flag sets WUPHF_RUNTIME_HOME so every WUPHF state path
+	// (config.RuntimeHomeDir() callers) lands in that workspace's tree
+	// without flipping registry.cli_current. Persistent change is via
+	// `wuphf workspace switch`.
+	workspaceOverride := flag.String("workspace", "", "Use a specific workspace for this command only (does not change cli_current)")
 	helpAll := flag.Bool("help-all", false, "Show all flags including internal ones")
 
 	flag.Usage = func() {
@@ -173,6 +223,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  %s import --from legacy  Import from a running external orchestrator (auto-detect)\n", appName)
 		fmt.Fprintf(os.Stderr, "  %s log          Show what your agents actually did (task receipts)\n", appName)
 		fmt.Fprintf(os.Stderr, "  %s memory migrate --from {nex,gbrain}  Port legacy memory into the team wiki\n", appName)
+		fmt.Fprintf(os.Stderr, "  %s workspace ...  Manage multiple isolated WUPHF workspaces\n", appName)
 		fmt.Fprintf(os.Stderr, "  %s --cmd <cmd>  Run a command non-interactively\n", appName)
 		fmt.Fprintf(os.Stderr, "\nFlags:\n")
 		printVisibleFlags(os.Stderr)
@@ -192,6 +243,15 @@ func main() {
 	}
 	if *brokerPort > 0 {
 		_ = os.Setenv("WUPHF_BROKER_PORT", fmt.Sprintf("%d", *brokerPort))
+	}
+	if name := strings.TrimSpace(*workspaceOverride); name != "" {
+		// Resolve the workspace's runtime_home and export it so downstream
+		// state-path resolvers (config.RuntimeHomeDir) target the right
+		// tree. Resolver runs against the registry — when Lane B's package
+		// is wired this becomes a single call; for now we shell out to the
+		// orchestrator factory, which prints a friendly error if not yet
+		// wired.
+		applyWorkspaceOverride(name)
 	}
 	if backend := strings.TrimSpace(*memoryBackend); backend != "" {
 		normalized := config.NormalizeMemoryBackend(backend)
@@ -216,7 +276,14 @@ func main() {
 	startFromScratch := *fromScratchFlag
 	if startFromScratch {
 		_ = os.Setenv("WUPHF_START_FROM_SCRATCH", "1")
-		if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
+		// user-global; intentionally NOT under WUPHF_RUNTIME_HOME —
+		// WUPHF_GLOBAL_HOME captures the user's REAL home so downstream
+		// code can still reach user-global auth (codex, opencode) at the
+		// original location even when WUPHF_RUNTIME_HOME is later set
+		// for from-scratch isolation. RuntimeHomeDir() can already be
+		// pointing at a workspace tree at this point (applyWorkspaceOverride
+		// runs above), so consult os.UserHomeDir directly.
+		if home, herr := os.UserHomeDir(); herr == nil && strings.TrimSpace(home) != "" {
 			_ = os.Setenv("WUPHF_GLOBAL_HOME", home)
 		}
 		if runtimeHome := fromScratchRuntimeHome(); runtimeHome != "" {
@@ -236,6 +303,11 @@ func main() {
 		fmt.Printf("%s v%s\n", appName, buildinfo.Current().Version)
 		os.Exit(0)
 	}
+
+	// Wire the workspaces orchestrator + run the symmetric-layout migration.
+	// Placed after --help-all and --version early exits so read-only
+	// invocations skip the filesystem migration entirely.
+	initWorkspaces()
 
 	// Channel view mode (launched by wuphf team in tmux)
 	if *channelView {
@@ -300,6 +372,9 @@ func main() {
 			return
 		case "memory":
 			runMemory(args[1:])
+			return
+		case "workspace", "ws":
+			runWorkspace(args[1:])
 			return
 		}
 	}
@@ -492,6 +567,7 @@ func runTeam(args []string, packSlug string, unsafe bool, oneOnOne bool, opusCEO
 		fmt.Fprintf(os.Stderr, "error launching team: %v\n", err)
 		os.Exit(1)
 	}
+	wireBrokerWorkspaces(l)
 	if !l.UsesTmuxRuntime() {
 		if token := strings.TrimSpace(l.BrokerToken()); token != "" {
 			_ = os.Setenv("WUPHF_BROKER_TOKEN", token)
@@ -554,6 +630,7 @@ func runWeb(args []string, packSlug string, unsafe bool, webPort int, opusCEO bo
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
+	wireBrokerWorkspaces(l)
 }
 
 func fromScratchRuntimeHome() string {

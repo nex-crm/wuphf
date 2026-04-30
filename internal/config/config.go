@@ -17,6 +17,9 @@ import (
 // RuntimeHomeDir returns the home directory WUPHF should use for persisted
 // runtime state. Inventive runs may override this with WUPHF_RUNTIME_HOME so
 // they don't inherit an existing office from the user's global ~/.wuphf.
+//
+// user-global; intentionally NOT under WUPHF_RUNTIME_HOME — this is the
+// definition of RuntimeHomeDir itself; os.UserHomeDir() is the fallback only.
 func RuntimeHomeDir() string {
 	if v := strings.TrimSpace(os.Getenv("WUPHF_RUNTIME_HOME")); v != "" {
 		return v
@@ -416,6 +419,8 @@ func codexConfigSearchPaths(cwd string) []string {
 		}
 	}
 
+	// user-global; intentionally NOT under WUPHF_RUNTIME_HOME — codex config
+	// layering reads from the user's real home, not the WUPHF workspace root.
 	if home, err := os.UserHomeDir(); err == nil {
 		add(filepath.Join(home, ".codex", "config.toml"))
 	}
@@ -870,6 +875,10 @@ func ResolveProviderEndpoint(kind, defaultBaseURL, defaultModel string) (string,
 // persisted. OpenClaw's gateway requires device-pair auth — token alone grants
 // zero scopes — so this keypair is effectively credentials: write only to a
 // user-scoped 0600 file under the WUPHF home.
+//
+// user-global; intentionally NOT under WUPHF_RUNTIME_HOME — OpenClaw identity
+// is device-bound credentials, not workspace state. Per-workspace OpenClaw
+// identity is a separate feature decision deferred to post-v1.
 func ResolveOpenclawIdentityPath() string {
 	if v := strings.TrimSpace(os.Getenv("WUPHF_OPENCLAW_IDENTITY_PATH")); v != "" {
 		return v

@@ -15,6 +15,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"github.com/nex-crm/wuphf/internal/config"
 )
 
 // wuphfLogDirOverride is a test hook for redirecting headless log writes to
@@ -38,13 +40,12 @@ func wuphfLogDir() string {
 		}
 		return override
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
+	if home := config.RuntimeHomeDir(); home != "" {
+		dir := filepath.Join(home, ".wuphf", "logs")
+		_ = os.MkdirAll(dir, 0o700)
+		return dir
 	}
-	dir := filepath.Join(home, ".wuphf", "logs")
-	_ = os.MkdirAll(dir, 0o700)
-	return dir
+	return ""
 }
 
 func appendHeadlessCodexLog(slug string, line string) {

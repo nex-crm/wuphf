@@ -30,6 +30,9 @@ func main() {
 		}
 		token = strings.TrimSpace(string(data))
 	}
+	// user-global; intentionally NOT under WUPHF_RUNTIME_HOME — OpenClaw identity
+	// is device-bound credentials, not workspace state. Per-workspace OpenClaw
+	// identity is a separate feature decision deferred to post-v1.
 	home, err := os.UserHomeDir()
 	if err != nil {
 		die("user home dir: %v", err)

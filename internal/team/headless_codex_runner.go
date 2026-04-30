@@ -289,6 +289,8 @@ func (l *Launcher) buildHeadlessCodexEnv(slug string, workspaceDir string, chann
 		_ = os.MkdirAll(filepath.Join(codexHome, "plugins", "cache"), 0o755)
 		env = setEnvValue(env, "CODEX_HOME", codexHome)
 	} else if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
+		// user-global; intentionally NOT under WUPHF_RUNTIME_HOME — HOME passthrough
+		// to codex subprocess so tool resolution uses the real user home.
 		env = setEnvValue(env, "HOME", home)
 	}
 	if base := l.headlessCodexWorkspaceCacheDir(workspaceDir); base != "" {
@@ -339,6 +341,8 @@ func headlessCodexHomeDir() string {
 			return abs
 		}
 	}
+	// user-global; intentionally NOT under WUPHF_RUNTIME_HOME — ~/.codex is the
+	// Codex auth credential directory, shared across all workspaces.
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return ""
@@ -357,6 +361,8 @@ func headlessCodexGlobalHomeDir() string {
 		}
 		return raw
 	}
+	// user-global; intentionally NOT under WUPHF_RUNTIME_HOME — resolves the
+	// user's real home for cross-workspace codex tool lookup.
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return ""
@@ -365,15 +371,10 @@ func headlessCodexGlobalHomeDir() string {
 }
 
 func headlessCodexRuntimeHomeDir() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
+	if home := config.RuntimeHomeDir(); home != "" {
+		return filepath.Join(home, ".wuphf", "codex-headless")
 	}
-	home = strings.TrimSpace(home)
-	if home == "" {
-		return ""
-	}
-	return filepath.Join(home, ".wuphf", "codex-headless")
+	return ""
 }
 
 func prepareHeadlessCodexHome() string {

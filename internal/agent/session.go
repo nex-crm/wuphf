@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/nex-crm/wuphf/internal/config"
 )
 
 // SessionStore manages JSONL-based session files for agents.
@@ -19,9 +21,9 @@ type SessionStore struct {
 
 // NewSessionStore creates a store rooted at ~/.wuphf/sessions by default.
 func NewSessionStore() (*SessionStore, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil, fmt.Errorf("get home dir: %w", err)
+	home := config.RuntimeHomeDir()
+	if home == "" {
+		return nil, fmt.Errorf("get home dir: cannot resolve runtime home directory")
 	}
 	return &SessionStore{baseDir: filepath.Join(home, ".wuphf", "sessions")}, nil
 }
