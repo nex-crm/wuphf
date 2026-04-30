@@ -385,7 +385,7 @@ func (b *Broker) channelExists(channel string) bool {
 }
 
 func (b *Broker) afterSurfaceMutation(eventType, actionKind string, surface SurfaceManifest, widgetID, actor, title, eventID string) {
-	summary := title
+	var summary string
 	if widgetID != "" {
 		summary = fmt.Sprintf("%s %s in %s", title, widgetID, surface.Title)
 	} else {

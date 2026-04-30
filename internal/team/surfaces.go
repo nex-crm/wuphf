@@ -11,8 +11,9 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/nex-crm/wuphf/internal/config"
 	"gopkg.in/yaml.v3"
+
+	"github.com/nex-crm/wuphf/internal/config"
 )
 
 const (
