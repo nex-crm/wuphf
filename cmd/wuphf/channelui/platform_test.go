@@ -3,20 +3,14 @@ package channelui
 import "testing"
 
 // Empty URL must short-circuit before any exec.Command, so it can never
-// fail and can never spawn anything. Locks the contract that callers
-// can pass an unconditional `OpenBrowserURL(maybeBlankURL)` without a
-// pre-check.
+// fail and can never spawn a browser helper. Locks the contract that
+// callers can pass an unconditional `OpenBrowserURL(maybeBlankURL)`
+// without a pre-check. Whitespace-only inputs are intentionally not
+// covered here — exercising them would spawn the platform browser
+// launcher with junk input and produce nondeterministic test runs.
 func TestOpenBrowserURLEmptyIsNoop(t *testing.T) {
 	if err := OpenBrowserURL(""); err != nil {
 		t.Fatalf("expected nil error for empty url, got %v", err)
-	}
-	if err := OpenBrowserURL("   "); err != nil {
-		// Whitespace-only isn't currently special-cased to no-op, but
-		// the contract is "non-empty triggers exec". A future change
-		// that adds whitespace handling should update this test
-		// accordingly. For now, we accept either nil (added trim) or
-		// a non-nil error (helper rejected the URL).
-		t.Logf("whitespace url returned: %v", err)
 	}
 }
 

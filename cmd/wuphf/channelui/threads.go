@@ -102,6 +102,14 @@ func FlattenThreadMessages(messages []BrokerMessage, expanded map[string]bool) [
 		}
 		roots = append(roots, msg)
 	}
+	// Pure-cycle guard: if every message points at a present parent
+	// (e.g. broker emits A→B→A), no node ever becomes a root and the
+	// walker would have nothing to traverse. Promote the
+	// chronologically-first message to a synthetic root so the
+	// thread still renders instead of silently disappearing.
+	if len(roots) == 0 && len(sorted) > 0 {
+		roots = append(roots, sorted[0])
+	}
 
 	var out []ThreadedMessage
 	visited := make(map[string]bool)

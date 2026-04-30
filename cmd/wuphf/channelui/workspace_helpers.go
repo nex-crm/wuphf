@@ -86,11 +86,12 @@ func SidebarViewLabel(activeApp OfficeApp) string {
 // card without showing the full doctor report.
 func FirstDoctorNextStep(report DoctorReport, fallback string) string {
 	for _, check := range report.Checks {
-		if strings.TrimSpace(check.NextStep) == "" {
+		next := strings.TrimSpace(check.NextStep)
+		if next == "" {
 			continue
 		}
 		if check.Severity == DoctorFail || check.Severity == DoctorWarn {
-			return check.NextStep
+			return next
 		}
 	}
 	return fallback

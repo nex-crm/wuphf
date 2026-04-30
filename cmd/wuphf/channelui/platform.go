@@ -40,7 +40,11 @@ func OpenBrowserURL(url string) error {
 	case IsLinux():
 		cmd = exec.CommandContext(ctx, "xdg-open", url)
 	case IsWindows():
-		cmd = exec.CommandContext(ctx, "cmd", "/c", "start", "", url)
+		// rundll32 url.dll,FileProtocolHandler is the documented
+		// non-shell launcher; using "cmd /c start" would re-parse the
+		// URL through cmd.exe's quoting rules, which split "&" in
+		// query strings and silently truncate the URL.
+		cmd = exec.CommandContext(ctx, "rundll32", "url.dll,FileProtocolHandler", url)
 	default:
 		return fmt.Errorf("unsupported platform")
 	}

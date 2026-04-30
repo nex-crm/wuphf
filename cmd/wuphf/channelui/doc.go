@@ -355,10 +355,10 @@
 //     The channelModel.currentWorkspaceUIState() builder stays in
 //     package main since it touches private channelModel fields.
 //
-// Subsequent extraction PRs will land the workspace / recovery / cache
-// cluster, the sidebar / splash, the broker integrations, and finally
-// the channelModel itself. cmd/wuphf maintains lowercase-name aliases
-// (channelui_aliases.go, channelui_styles_aliases.go) so existing
-// callers keep compiling unchanged during the migration; those alias
-// files are deleted in the final cleanup PR.
+// The original incremental extraction stack maintained lowercase-name
+// alias files (channelui_aliases.go, channelui_styles_aliases.go) so
+// in-flight package-main callers kept compiling between PRs. Those
+// aliases were retired in the cleanup pass that ships with this
+// package; every package-main caller now references channelui.X
+// directly.
 package channelui

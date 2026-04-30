@@ -117,13 +117,13 @@ func ClassifyActivity(m Member) MemberActivity {
 
 // DefaultSidebarRoster returns the canonical eight-agent office
 // roster used as a fallback when no broker-side roster is available.
-// Slugs come from CanonicalRosterSlugs; Name/Role are resolved via the
-// shared DisplayName / RoleLabel helpers so adding a new built-in role
-// only requires editing the canonical slug list and the
-// DisplayName/RoleLabel switches.
+// Slugs come from the canonical roster (see canonical_roster.go);
+// Name/Role are resolved via the shared DisplayName / RoleLabel
+// helpers so adding a new built-in role only requires editing the
+// canonical slug list and the DisplayName/RoleLabel switches.
 func DefaultSidebarRoster() []Member {
-	roster := make([]Member, 0, len(CanonicalRosterSlugs))
-	for _, slug := range CanonicalRosterSlugs {
+	roster := make([]Member, 0, len(canonicalRosterSlugs))
+	for _, slug := range canonicalRosterSlugs {
 		roster = append(roster, Member{
 			Slug: slug,
 			Name: DisplayName(slug),

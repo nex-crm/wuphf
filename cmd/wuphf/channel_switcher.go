@@ -184,6 +184,16 @@ func (m *channelModel) applyWorkspaceSwitcherSelection(value string) tea.Cmd {
 		return tea.Batch(pollBroker("", m.activeChannel), pollMembers(m.activeChannel), pollRequests(m.activeChannel), pollTasks(m.activeChannel))
 	case strings.HasPrefix(value, "app:"):
 		app := channelui.OfficeApp(strings.TrimSpace(strings.TrimPrefix(value, "app:")))
+		switch app {
+		case channelui.OfficeAppMessages, channelui.OfficeAppInbox, channelui.OfficeAppOutbox,
+			channelui.OfficeAppRecovery, channelui.OfficeAppTasks, channelui.OfficeAppRequests,
+			channelui.OfficeAppPolicies, channelui.OfficeAppCalendar, channelui.OfficeAppArtifacts,
+			channelui.OfficeAppSkills:
+			// recognized; fall through to the activation block below
+		default:
+			m.notice = "Unknown app: " + string(app)
+			return nil
+		}
 		m.activeApp = app
 		m.syncSidebarCursorToActive()
 		m.notice = "Viewing " + titleCaser.String(string(app)) + "."

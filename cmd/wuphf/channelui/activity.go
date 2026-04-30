@@ -92,15 +92,18 @@ func SanitizeActivityLine(line string) string {
 }
 
 // SummarizeSentence collapses newlines + surrounding quotes, then
-// truncates to 88 characters with a "..." continuation.
+// truncates to 88 runes with a "..." continuation. Rune-based slicing
+// keeps multibyte characters intact so an activity-strip summary never
+// renders a half-character.
 func SummarizeSentence(text string) string {
 	text = strings.TrimSpace(strings.ReplaceAll(text, "\n", " "))
 	text = strings.Trim(text, "\"")
 	text = strings.TrimSpace(text)
-	if len(text) <= 88 {
+	runes := []rune(text)
+	if len(runes) <= 88 {
 		return text
 	}
-	return text[:85] + "..."
+	return string(runes[:85]) + "..."
 }
 
 // BlockedWorkTasks returns up to limit blocked tasks, optionally

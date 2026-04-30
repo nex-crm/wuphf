@@ -16,9 +16,13 @@ func NormalizeCursorPos(input []rune, pos int) int {
 // InsertComposerRunes inserts ch into input at pos and returns the
 // updated slice and the new cursor position (just after the
 // inserted runes). pos is normalized via NormalizeCursorPos before
-// insertion. Empty ch is a no-op. The result is always a freshly
-// allocated slice so the caller's input/ch backing arrays are never
-// mutated regardless of their spare capacity.
+// insertion. Empty ch returns input unchanged (zero-cost no-op).
+//
+// When a real insertion happens the result is a freshly allocated
+// slice so neither input nor ch backing arrays are mutated through
+// spare capacity. Callers that mutate input after a no-op return must
+// be aware they're sharing storage with the caller-supplied slice;
+// every existing call site treats the returned slice as opaque.
 func InsertComposerRunes(input []rune, pos int, ch []rune) ([]rune, int) {
 	pos = NormalizeCursorPos(input, pos)
 	if len(ch) == 0 {

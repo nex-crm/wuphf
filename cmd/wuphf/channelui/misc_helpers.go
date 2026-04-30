@@ -2,6 +2,7 @@ package channelui
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -41,10 +42,12 @@ func AppendUniqueMessages(existing, incoming []BrokerMessage) ([]BrokerMessage, 
 // PopupActionIndex parses a numeric popup-action token (e.g. the "3"
 // in a "popup_action_3" mouse target) and returns it. Returns
 // (0, false) on a parse error or a negative value, so callers can
-// safely fall through.
+// safely fall through. Uses strconv.Atoi so trailing non-digit garbage
+// (e.g. "3abc") is rejected — fmt.Sscanf would have accepted that and
+// silently truncated.
 func PopupActionIndex(raw string) (int, bool) {
-	var idx int
-	if _, err := fmt.Sscanf(raw, "%d", &idx); err != nil || idx < 0 {
+	idx, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || idx < 0 {
 		return 0, false
 	}
 	return idx, true

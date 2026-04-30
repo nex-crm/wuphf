@@ -24,12 +24,16 @@ func RenderUsageStrip(usage UsageState, members []Member, width int) string {
 	var ordered []string
 	seen := make(map[string]bool)
 	for _, member := range members {
-		if _, ok := usage.Agents[member.Slug]; ok && !seen[member.Slug] {
-			ordered = append(ordered, member.Slug)
-			seen[member.Slug] = true
+		slug := strings.TrimSpace(member.Slug)
+		if slug == "" {
+			continue
+		}
+		if _, ok := usage.Agents[slug]; ok && !seen[slug] {
+			ordered = append(ordered, slug)
+			seen[slug] = true
 		}
 	}
-	for _, slug := range CanonicalRosterSlugs {
+	for _, slug := range canonicalRosterSlugs {
 		if _, ok := usage.Agents[slug]; ok && !seen[slug] {
 			ordered = append(ordered, slug)
 			seen[slug] = true
@@ -37,9 +41,10 @@ func RenderUsageStrip(usage UsageState, members []Member, width int) string {
 	}
 	var rest []string
 	for slug := range usage.Agents {
-		if !seen[slug] {
-			rest = append(rest, slug)
+		if strings.TrimSpace(slug) == "" || seen[slug] {
+			continue
 		}
+		rest = append(rest, slug)
 	}
 	sort.Strings(rest)
 	ordered = append(ordered, rest...)

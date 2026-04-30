@@ -311,7 +311,7 @@ func CalendarParticipantsForTask(task Task, activeChannel string, members []Memb
 	if owner := strings.TrimSpace(task.Owner); owner != "" {
 		slugs = append(slugs, owner)
 	}
-	return CalendarParticipantNames(slugs, ChooseCalendarChannel(task.Channel, activeChannel), members, len(slugs) == 0)
+	return CalendarParticipantNames(slugs, members, len(slugs) == 0)
 }
 
 // CalendarParticipantSlugsForTask returns the slugs for the task's
@@ -322,7 +322,7 @@ func CalendarParticipantSlugsForTask(task Task, activeChannel string, members []
 	if owner := strings.TrimSpace(task.Owner); owner != "" {
 		slugs = append(slugs, owner)
 	}
-	return CalendarParticipantSlugs(slugs, ChooseCalendarChannel(task.Channel, activeChannel), members, len(slugs) == 0)
+	return CalendarParticipantSlugs(slugs, members, len(slugs) == 0)
 }
 
 // CalendarParticipantsForRequest returns the display names for the
@@ -333,7 +333,7 @@ func CalendarParticipantsForRequest(req Interview, activeChannel string, members
 	if from := strings.TrimSpace(req.From); from != "" {
 		slugs = append(slugs, from)
 	}
-	return CalendarParticipantNames(slugs, ChooseCalendarChannel(req.Channel, activeChannel), members, len(slugs) == 0)
+	return CalendarParticipantNames(slugs, members, len(slugs) == 0)
 }
 
 // CalendarParticipantSlugsForRequest returns the slugs for the
@@ -344,7 +344,7 @@ func CalendarParticipantSlugsForRequest(req Interview, activeChannel string, mem
 	if from := strings.TrimSpace(req.From); from != "" {
 		slugs = append(slugs, from)
 	}
-	return CalendarParticipantSlugs(slugs, ChooseCalendarChannel(req.Channel, activeChannel), members, len(slugs) == 0)
+	return CalendarParticipantSlugs(slugs, members, len(slugs) == 0)
 }
 
 // CalendarParticipantsForJob resolves a scheduler job's participants
@@ -365,8 +365,7 @@ func CalendarParticipantsForJob(job SchedulerJob, tasks []Task, requests []Inter
 			}
 		}
 	}
-	channel := ChooseCalendarChannel(job.Channel, activeChannel)
-	return CalendarParticipantNames(nil, channel, members, true)
+	return CalendarParticipantNames(nil, members, true)
 }
 
 // CalendarParticipantSlugsForJob resolves a scheduler job's
@@ -387,15 +386,15 @@ func CalendarParticipantSlugsForJob(job SchedulerJob, tasks []Task, requests []I
 			}
 		}
 	}
-	channel := ChooseCalendarChannel(job.Channel, activeChannel)
-	return CalendarParticipantSlugs(nil, channel, members, true)
+	return CalendarParticipantSlugs(nil, members, true)
 }
 
 // CalendarParticipantNames resolves slugs to human names, sorted
 // alphabetically and capped at four with "+N more". Falls back to the
-// channel roster when fallbackToChannel is true and primary is empty.
-func CalendarParticipantNames(primary []string, channel string, members []Member, fallbackToChannel bool) []string {
-	slugs := CalendarParticipantSlugs(primary, channel, members, fallbackToChannel)
+// channel roster (members, scoped to the active channel by the caller)
+// when fallbackToChannel is true and primary is empty.
+func CalendarParticipantNames(primary []string, members []Member, fallbackToChannel bool) []string {
+	slugs := CalendarParticipantSlugs(primary, members, fallbackToChannel)
 	var names []string
 	for _, slug := range slugs {
 		name := DisplayName(slug)
@@ -419,9 +418,10 @@ func CalendarParticipantNames(primary []string, channel string, members []Member
 }
 
 // CalendarParticipantSlugs deduplicates primary slugs, optionally
-// filling from the channel roster (sorted alphabetically) when
-// fallbackToChannel is true and primary is empty.
-func CalendarParticipantSlugs(primary []string, channel string, members []Member, fallbackToChannel bool) []string {
+// filling from members (the channel roster the caller scoped down to
+// the active channel; sorted alphabetically) when fallbackToChannel is
+// true and primary is empty. Disabled members are skipped.
+func CalendarParticipantSlugs(primary []string, members []Member, fallbackToChannel bool) []string {
 	seen := make(map[string]bool)
 	var slugs []string
 	addSlug := func(slug string) {

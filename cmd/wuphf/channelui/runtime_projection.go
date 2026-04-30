@@ -14,7 +14,7 @@ func RuntimeTasksFromChannel(tasks []Task) []team.RuntimeTask {
 	out := make([]team.RuntimeTask, 0, len(tasks))
 	for _, task := range tasks {
 		out = append(out, team.RuntimeTask{
-			ID:             task.ID,
+			ID:             strings.TrimSpace(task.ID),
 			Title:          strings.TrimSpace(task.Title),
 			Owner:          strings.TrimSpace(task.Owner),
 			Status:         strings.TrimSpace(task.Status),
@@ -36,7 +36,7 @@ func RuntimeRequestsFromChannel(requests []Interview) []team.RuntimeRequest {
 	out := make([]team.RuntimeRequest, 0, len(requests))
 	for _, req := range requests {
 		out = append(out, team.RuntimeRequest{
-			ID:       req.ID,
+			ID:       strings.TrimSpace(req.ID),
 			Kind:     strings.TrimSpace(req.Kind),
 			Title:    strings.TrimSpace(req.Title),
 			Question: strings.TrimSpace(req.Question),
@@ -67,7 +67,7 @@ func RuntimeMessagesFromChannel(messages []BrokerMessage, limit int) []team.Runt
 	for i := start; i < len(messages); i++ {
 		msg := messages[i]
 		out = append(out, team.RuntimeMessage{
-			ID:        msg.ID,
+			ID:        strings.TrimSpace(msg.ID),
 			From:      strings.TrimSpace(msg.From),
 			Title:     strings.TrimSpace(msg.Title),
 			Content:   strings.TrimSpace(msg.Content),
