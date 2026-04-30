@@ -93,14 +93,31 @@ func launcherSendNotificationToPane(l *Launcher, paneTarget, notification string
 // race each other. The dispatcher serializes per-slug and inserts
 // the minimum gap.
 func (l *Launcher) sendNotificationToPane(paneTarget, notification string) {
-	_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "send-keys",
-		"-t", paneTarget, "/clear", "Enter",
-	).Run()
-	_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "send-keys",
-		"-t", paneTarget, "-l", notification,
-	).Run()
-	_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "send-keys",
-		"-t", paneTarget, "Enter",
+	tmuxSendKeys(paneTarget, "/clear", "Enter")
+	tmuxSendKeysLiteral(paneTarget, notification)
+	tmuxSendKeys(paneTarget, "Enter")
+}
+
+// tmuxSendKeysTimeout caps any single send-keys invocation. tmux
+// itself replies in ~ms, but a stalled pty (claude pane wedged on
+// a tool prompt, terminal allocation contention) can hang the
+// dispatcher worker indefinitely if the runtime context isn't
+// bounded. 3s is well past the p99 of a real send and short enough
+// that a stuck pane doesn't queue up a backlog.
+const tmuxSendKeysTimeout = 3 * time.Second
+
+func tmuxSendKeys(paneTarget string, keys ...string) {
+	ctx, cancel := context.WithTimeout(context.Background(), tmuxSendKeysTimeout)
+	defer cancel()
+	args := append([]string{"-L", tmuxSocketName, "send-keys", "-t", paneTarget}, keys...)
+	_ = exec.CommandContext(ctx, "tmux", args...).Run()
+}
+
+func tmuxSendKeysLiteral(paneTarget, payload string) {
+	ctx, cancel := context.WithTimeout(context.Background(), tmuxSendKeysTimeout)
+	defer cancel()
+	_ = exec.CommandContext(ctx, "tmux", "-L", tmuxSocketName, "send-keys",
+		"-t", paneTarget, "-l", payload,
 	).Run()
 }
 

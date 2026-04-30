@@ -413,7 +413,11 @@ func (l *Launcher) timedOutTurnAlreadyRecovered(task *teamTask, slug string, sta
 		// requeued or blocked-again by the timeout recovery path.
 		// Same semantics as a "done" or "blocked" terminal state for
 		// recovery purposes.
-		return status == "done" || status == "review" || status == "blocked" ||
+		// Mirror taskHasDurableCompletionState's terminal-state set
+		// (which includes "completed") so the fast path here doesn't
+		// requeue or re-block a task that's already terminal-by-name
+		// but in the "completed" branch.
+		return status == "done" || status == "completed" || status == "review" || status == "blocked" ||
 			status == "canceled" || status == "cancelled" ||
 			review == "ready_for_review" || review == "approved"
 	}

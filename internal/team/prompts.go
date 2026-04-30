@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/nex-crm/wuphf/internal/config"
@@ -43,11 +42,11 @@ func (l *Launcher) newPromptBuilder() *promptBuilder {
 			if l == nil || l.broker == nil {
 				return nil
 			}
-			policies := l.broker.ListPolicies()
-			// Sort so the policies section is deterministic and
-			// cache-friendly across turns.
-			sort.Slice(policies, func(i, j int) bool { return policies[i].ID < policies[j].ID })
-			return policies
+			// promptBuilder.Build sorts the returned slice for
+			// prompt-cache byte-stability, so this callback hands
+			// back the broker's order as-is. Sorting both here and
+			// inside Build is redundant.
+			return l.broker.ListPolicies()
 		},
 		nameFor:        l.targeter().NameFor,
 		markdownMemory: memoryBackend == config.MemoryBackendMarkdown,

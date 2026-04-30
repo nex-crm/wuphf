@@ -186,7 +186,7 @@ func TestAutoPromote_EndToEnd_HumanTagsPM_DispatchesToPM(t *testing.T) {
 	l := newHeadlessLauncherForTest(t)
 	l.broker = b
 	l.provider = "codex"
-	l.notifyLastDelivered = make(map[string]time.Time)
+	l.notifyLastDelivered = make(map[notifyDedupKey]time.Time)
 	l.pack = &agent.PackDefinition{
 		LeadSlug: "ceo",
 		Agents: []agent.AgentConfig{

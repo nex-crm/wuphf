@@ -131,7 +131,7 @@ func fullDispatchLauncher(t *testing.T) (*Launcher, chan string, func()) {
 	l := newHeadlessLauncherForTest(t)
 	l.broker = b
 	l.provider = "codex" // forces headless dispatch for every agent
-	l.notifyLastDelivered = make(map[string]time.Time)
+	l.notifyLastDelivered = make(map[notifyDedupKey]time.Time)
 	l.pack = &agent.PackDefinition{
 		LeadSlug: "ceo",
 		Agents: []agent.AgentConfig{
@@ -268,7 +268,7 @@ func TestBug_FocusMode_HumanTagsWizardHiredPM_SpecialistIsImmediate(t *testing.T
 	l.broker = b
 	l.provider = "codex"
 	l.focusMode = true
-	l.notifyLastDelivered = make(map[string]time.Time)
+	l.notifyLastDelivered = make(map[notifyDedupKey]time.Time)
 	l.pack = &agent.PackDefinition{
 		LeadSlug: "ceo",
 		Agents: []agent.AgentConfig{
@@ -308,7 +308,7 @@ func TestBug_FocusMode_CEOTagsWizardHiredPM_SpecialistIsImmediate(t *testing.T) 
 	l.broker = b
 	l.provider = "codex"
 	l.focusMode = true
-	l.notifyLastDelivered = make(map[string]time.Time)
+	l.notifyLastDelivered = make(map[notifyDedupKey]time.Time)
 	l.pack = &agent.PackDefinition{
 		LeadSlug: "ceo",
 		Agents: []agent.AgentConfig{
@@ -353,7 +353,7 @@ func TestBug_DisabledMember_ExplicitTagDoesNotBypassMute(t *testing.T) {
 	l := newHeadlessLauncherForTest(t)
 	l.broker = b
 	l.provider = "codex"
-	l.notifyLastDelivered = make(map[string]time.Time)
+	l.notifyLastDelivered = make(map[notifyDedupKey]time.Time)
 	l.pack = &agent.PackDefinition{
 		LeadSlug: "ceo",
 		Agents:   []agent.AgentConfig{{Slug: "ceo", Name: "CEO"}, {Slug: "pm", Name: "PM"}},
@@ -420,7 +420,7 @@ func TestBug_DMToWizardHiredPM_Dispatch(t *testing.T) {
 	l := newHeadlessLauncherForTest(t)
 	l.broker = b
 	l.provider = "codex"
-	l.notifyLastDelivered = make(map[string]time.Time)
+	l.notifyLastDelivered = make(map[notifyDedupKey]time.Time)
 	// Pack was set at launch — does NOT include pm.
 	l.pack = &agent.PackDefinition{
 		LeadSlug: "ceo",
@@ -464,7 +464,7 @@ func TestBug_TagWizardHiredPM_InGeneral_Dispatch(t *testing.T) {
 	l := newHeadlessLauncherForTest(t)
 	l.broker = b
 	l.provider = "codex"
-	l.notifyLastDelivered = make(map[string]time.Time)
+	l.notifyLastDelivered = make(map[notifyDedupKey]time.Time)
 	l.pack = &agent.PackDefinition{
 		LeadSlug: "ceo",
 		Agents: []agent.AgentConfig{
@@ -514,7 +514,7 @@ func TestBug_RootCause_ChannelMembershipFilterDropsExplicitMention(t *testing.T)
 	l := newHeadlessLauncherForTest(t)
 	l.broker = b
 	l.provider = "codex"
-	l.notifyLastDelivered = make(map[string]time.Time)
+	l.notifyLastDelivered = make(map[notifyDedupKey]time.Time)
 	l.pack = &agent.PackDefinition{
 		LeadSlug: "ceo",
 		Agents: []agent.AgentConfig{

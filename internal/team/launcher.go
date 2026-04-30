@@ -116,8 +116,13 @@ type Launcher struct {
 	failedPaneMu    sync.RWMutex
 	failedPaneSlugs map[string]string
 
-	notifyMu            sync.Mutex
-	notifyLastDelivered map[string]time.Time
+	notifyMu sync.Mutex
+	// notifyLastDelivered keys the (recipient, sender, channel) tuple
+	// to its last-delivered timestamp. Struct-keyed (not string-
+	// concatenated) so slugs/senders containing the previous "\x00"
+	// separator can never collide; the runtime-allocated struct is
+	// just as fast as a string lookup.
+	notifyLastDelivered map[notifyDedupKey]time.Time
 
 	// targets owns the office-membership-shape and routing-decision logic
 	// (PLAN.md §C2). Lazily constructed via targeter() so tests that build
@@ -251,7 +256,7 @@ func NewLauncher(packSlug string) (*Launcher, error) {
 			active:  make(map[string]*headlessCodexActiveTurn),
 			queues:  make(map[string][]headlessCodexTurn),
 		},
-		notifyLastDelivered: make(map[string]time.Time),
+		notifyLastDelivered: make(map[notifyDedupKey]time.Time),
 	}, nil
 }
 

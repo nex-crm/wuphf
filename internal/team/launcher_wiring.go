@@ -41,12 +41,19 @@ func (l *Launcher) scheduler() *watchdogScheduler {
 	return l.schedulerWorker
 }
 
+// updateSchedulerJob is nil-safe on a nil receiver: scheduler() returns
+// nil for nil-l fixtures (matches the rest of the wiring layer), so
+// guard the call. Same shape as targeter()/notifyCtx() callers.
 func (l *Launcher) updateSchedulerJob(slug, label string, interval time.Duration, nextRun time.Time, status string) {
-	l.scheduler().updateJob(slug, label, interval, nextRun, status)
+	if s := l.scheduler(); s != nil {
+		s.updateJob(slug, label, interval, nextRun, status)
+	}
 }
 
 func (l *Launcher) watchdogSchedulerLoop() {
-	l.scheduler().Start(context.Background())
+	if s := l.scheduler(); s != nil {
+		s.Start(context.Background())
+	}
 }
 
 // targeter returns the office-targeter, lazily constructing it on first

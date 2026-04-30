@@ -581,7 +581,7 @@ func TestDeliverDMMessageQueuesCodexHeadlessTurn(t *testing.T) {
 	l := newHeadlessLauncherForTest(t)
 	l.broker = b
 	l.provider = "codex"
-	l.notifyLastDelivered = make(map[string]time.Time)
+	l.notifyLastDelivered = make(map[notifyDedupKey]time.Time)
 
 	processed := make(chan string, 1)
 	setHeadlessCodexRunTurnForTest(t, func(_ *Launcher, _ context.Context, slug, notification string, channel ...string) error {

@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"time"
 
 	"github.com/nex-crm/wuphf/internal/runtimebin"
 )
@@ -61,11 +62,21 @@ func emitGHCapabilityNote() {
 // It returns a soft-warning note when either condition is not met; callers
 // should print the note but must NOT treat it as a fatal error — agents can
 // still work locally without gh. Only PR-opening will be unavailable.
+//
+// `gh auth status` runs under a short timeout because gh's credential helper
+// can stall (e.g. macOS keychain prompt waiting on a locked keychain, or an
+// offline laptop where the helper retries DNS). Pre-fix, a stalled helper
+// blocked Preflight indefinitely with no log visible to the user. A 3s
+// deadline is generous for the keychain happy path; on timeout we treat
+// the situation as "installed but not authenticated" so the user gets the
+// same advisory note a clean unauth would produce.
 func checkGHCapability() (installed bool, authed bool, note string) {
 	if _, err := exec.LookPath("gh"); err != nil {
 		return false, false, "gh CLI not found in PATH; agents won't be able to open real PRs. Install from https://cli.github.com."
 	}
-	cmd := exec.CommandContext(context.Background(), "gh", "auth", "status")
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "gh", "auth", "status")
 	if err := cmd.Run(); err != nil {
 		return true, false, "gh installed but not authenticated; run `gh auth login` so agents can open real PRs."
 	}

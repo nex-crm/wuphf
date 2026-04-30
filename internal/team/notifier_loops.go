@@ -71,7 +71,12 @@ func recoverPanicTo(site, extra string) {
 	n := runtime.Stack(buf, false)
 	fmt.Fprintf(os.Stderr, "panic in %s: %v\n%s\n%s\n", site, r, extra, buf[:n])
 	if home, err := os.UserHomeDir(); err == nil {
-		if f, ferr := os.OpenFile(filepath.Join(home, ".wuphf", "logs", "panics.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644); ferr == nil {
+		// 0o600 (owner-only) — even though message bodies are now
+		// redacted, panics.log still leaks routing metadata
+		// (channel slugs, agent slugs) that's sensitive on shared
+		// systems where wuphf runs under a service account whose
+		// home is world-readable.
+		if f, ferr := os.OpenFile(filepath.Join(home, ".wuphf", "logs", "panics.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600); ferr == nil {
 			_, _ = fmt.Fprintf(f, "%s panic in %s: %v\n%s\n%s\n\n", time.Now().UTC().Format(time.RFC3339), site, r, extra, buf[:n])
 			_ = f.Close()
 		}

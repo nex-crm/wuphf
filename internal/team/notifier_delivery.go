@@ -24,6 +24,16 @@ const (
 	agentNotifyCooldownAgent = 2 * time.Second
 )
 
+// notifyDedupKey is the composite key the dedup map uses. Struct-keyed
+// so a slug or sender containing the previous "\x00" separator can
+// never collide; Go's map runtime hashes structs as cheaply as
+// strings for this size.
+type notifyDedupKey struct {
+	slug    string
+	sender  string
+	channel string
+}
+
 func (l *Launcher) deliverMessageNotification(msg channelMessage) {
 	// demo_seed messages exist purely to make #general feel staffed on first
 	// paint; they must never wake an agent or burn an LLM call. Filter at
@@ -56,10 +66,21 @@ func (l *Launcher) deliverMessageNotification(msg channelMessage) {
 	channelKey := normalizeChannelSlug(msg.Channel)
 	l.notifyMu.Lock()
 	if l.notifyLastDelivered == nil {
-		l.notifyLastDelivered = make(map[string]time.Time)
+		l.notifyLastDelivered = make(map[notifyDedupKey]time.Time)
+	}
+	// Opportunistic purge: drop entries older than 2× the longer
+	// cooldown (still well past any legitimate dedup window) so the
+	// map can't grow unbounded over a long-running session. The
+	// (slug, sender, channel) key shape grows O(slugs × senders ×
+	// channels) which is bounded but not small.
+	purgeBefore := now.Add(-2 * agentNotifyCooldownAgent)
+	for k, t := range l.notifyLastDelivered {
+		if t.Before(purgeBefore) {
+			delete(l.notifyLastDelivered, k)
+		}
 	}
 	for _, t := range immediate {
-		key := t.Slug + "\x00" + msg.From + "\x00" + channelKey
+		key := notifyDedupKey{slug: t.Slug, sender: msg.From, channel: channelKey}
 		if last, ok := l.notifyLastDelivered[key]; ok && now.Sub(last) < cooldown {
 			continue
 		}

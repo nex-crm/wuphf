@@ -497,7 +497,7 @@ func (l *Launcher) latestLeadWakeTaskAction(specialistSlug string) (officeAction
 			continue
 		}
 		switch strings.ToLower(strings.TrimSpace(task.Status)) {
-		case "done", "review", "blocked":
+		case "done", "completed", "review", "blocked":
 			return action, task, true
 		}
 	}

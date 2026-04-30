@@ -13,7 +13,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"strings"
 
 	"github.com/nex-crm/wuphf/internal/provider"
 )
@@ -42,11 +41,21 @@ func (l *Launcher) Attach() error {
 // removes per-agent temp files (MCP config + system prompt) so the broker
 // token and prompt content do not linger in $TMPDIR.
 //
-// PLAN.md §C25 staff-review fix: drain the watchdog scheduler before
-// tearing down the broker. Pre-fix, the scheduler goroutine outlived
-// Kill and held a reference to the broker; the Stop() call here unblocks
-// done.Wait inside the scheduler so Kill returns once the goroutine has
-// exited.
+// Drains every long-lived goroutine before broker.Stop and the
+// per-launch tempdir RemoveAll. Pre-fix the scheduler goroutine
+// outlived Kill (now drained via schedulerWorker.Stop) but the
+// headless workers were only context-cancelled — cancel kicks the
+// subprocess but the worker goroutine takes a tick to unwind, and
+// it can race os.RemoveAll(launchTempDirPath) inside
+// cleanupAgentTempFiles by writing a fresh per-agent prompt/MCP
+// file into a directory the cleanup is removing.
+//
+// Sequence:
+//  1. schedulerWorker.Stop()    — drain watchdog
+//  2. headless.cancel()         — kick subprocess
+//  3. stopHeadlessWorkers()     — wait on workerWg
+//  4. broker.Stop()             — listener teardown
+//  5. cleanupAgentTempFiles()   — rm -rf launch dir
 func (l *Launcher) Kill() error {
 	if l.schedulerWorker != nil {
 		l.schedulerWorker.Stop()
@@ -54,6 +63,7 @@ func (l *Launcher) Kill() error {
 	if l.headless.cancel != nil {
 		l.headless.cancel()
 	}
+	l.stopHeadlessWorkers()
 	if l.broker != nil {
 		l.broker.Stop()
 	}
@@ -73,13 +83,11 @@ func (l *Launcher) Kill() error {
 	if err != nil {
 		// "session not found" is the desired post-condition for
 		// Kill, not an error — caller's intent is "make sure the
-		// session is gone". Match against tmux's literal "can't find
-		// session" error text plus the broader "no server" /
-		// "error connecting" outputs we'd see if the socket itself
-		// is already torn down. Without this check, killing a
-		// session twice (or killing one that exited on its own)
-		// surfaces a misleading exit-1 error to the caller.
-		if isMissingTmuxSession(string(out)) || strings.Contains(string(out), "can't find session") {
+		// session is gone". isMissingTmuxSession matches tmux's
+		// "can't find" / "no server" / "error connecting" outputs,
+		// so kill-twice-in-a-row no longer surfaces a misleading
+		// exit-1 to the caller.
+		if isMissingTmuxSession(string(out)) {
 			return nil
 		}
 		return err

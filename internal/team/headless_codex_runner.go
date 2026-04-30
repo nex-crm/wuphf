@@ -372,7 +372,22 @@ func prepareHeadlessCodexHome() string {
 	if err := os.MkdirAll(runtimeHome, 0o755); err != nil {
 		return headlessCodexHomeDir()
 	}
-	sourceHome := normalizeHeadlessWorkspaceDir(filepath.Join(headlessCodexGlobalHomeDir(), ".codex"))
+	// Prefer an explicit CODEX_HOME (returned by headlessCodexHomeDir
+	// when set) when its auth.json actually exists; otherwise fall
+	// back to the default $HOME/.codex layout. Pre-fix the order was
+	// reversed: $HOME/.codex always won, so a custom CODEX_HOME with
+	// valid auth was never copied into the isolated runtime home,
+	// and headless codex died with 401 even though the user had
+	// logged in via the explicit override.
+	sourceHome := ""
+	if explicit := normalizeHeadlessWorkspaceDir(headlessCodexHomeDir()); explicit != "" {
+		if _, err := os.Stat(filepath.Join(explicit, "auth.json")); err == nil {
+			sourceHome = explicit
+		}
+	}
+	if sourceHome == "" {
+		sourceHome = normalizeHeadlessWorkspaceDir(filepath.Join(headlessCodexGlobalHomeDir(), ".codex"))
+	}
 	if sourceHome == "" {
 		sourceHome = normalizeHeadlessWorkspaceDir(headlessCodexHomeDir())
 	}

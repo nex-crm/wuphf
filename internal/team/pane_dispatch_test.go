@@ -44,6 +44,13 @@ type recordingSend struct {
 	// observe sends (rs.signal as <-chan) and pass the send-only end to
 	// the dispatcher's onSent field.
 	signal chan struct{}
+	// sent is a sentinel channel the test can wait on independent of
+	// the dispatcher's onSent wiring. Tests that want to verify the
+	// worker ran without setting onSent (e.g. TestPaneDispatcher_OnSentNilDoesNotPanic)
+	// use this so the assertion is deterministic without polling
+	// time.Sleep — which violates the no-sleeps-in-tests rule and is
+	// flaky under CI load.
+	sent chan struct{}
 }
 
 func (r *recordingSend) send(paneTarget, notification string) {
@@ -51,6 +58,12 @@ func (r *recordingSend) send(paneTarget, notification string) {
 	r.captured = append(r.captured, notification)
 	r.mu.Unlock()
 	atomic.AddInt64(&r.count, 1)
+	if r.sent != nil {
+		select {
+		case r.sent <- struct{}{}:
+		default:
+		}
+	}
 }
 
 func (r *recordingSend) snapshot() []string {
@@ -168,7 +181,11 @@ func TestPaneDispatcher_DistinctSlugsRunInParallel(t *testing.T) {
 
 func TestPaneDispatcher_OnSentNilDoesNotPanic(t *testing.T) {
 	clk := newManualClock(time.Now())
-	rs := &recordingSend{}
+	// Use the rs.sent sentinel (which fires from send() regardless of
+	// onSent wiring) to wait for the worker deterministically. The
+	// previous version polled via time.Sleep, which violates the
+	// no-sleeps-in-tests rule and was flaky under CI load.
+	rs := &recordingSend{sent: make(chan struct{}, 1)}
 	d := &paneDispatcher{
 		clock:  clk,
 		sendFn: rs.send,
@@ -176,17 +193,13 @@ func TestPaneDispatcher_OnSentNilDoesNotPanic(t *testing.T) {
 	}
 	d.Enqueue("pm", "team:1", "no-signal")
 
-	// Wait briefly via a second clock-watching goroutine. We can't use
-	// rs.signal because onSent is nil; instead poll the count atomically.
-	deadline := time.Now().Add(2 * time.Second)
-	for atomic.LoadInt64(&rs.count) < 1 && time.Now().Before(deadline) {
-		clk.Advance(time.Millisecond)
-		// Yield to scheduler. Not a sleep with a behavior dependency —
-		// it's just letting the worker goroutine run.
-		time.Sleep(time.Millisecond)
+	select {
+	case <-rs.sent:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("expected one dispatch with onSent=nil; worker never sent")
 	}
-	if atomic.LoadInt64(&rs.count) != 1 {
-		t.Fatalf("expected one dispatch with onSent=nil; got %d", rs.count)
+	if got := atomic.LoadInt64(&rs.count); got != 1 {
+		t.Fatalf("expected one dispatch with onSent=nil; got %d", got)
 	}
 }
 
