@@ -1655,3 +1655,56 @@ func (b *Broker) handleMembers(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"channel": channel, "members": list})
 }
+
+func (b *Broker) EnabledMembers(channel string) []string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.sessionMode == SessionModeOneOnOne {
+		return []string{b.oneOnOneAgent}
+	}
+	channel = normalizeChannelSlug(channel)
+	if channel == "" {
+		channel = "general"
+	}
+	if ch := b.findChannelLocked(channel); ch != nil {
+		return b.enabledChannelMembersLocked(channel, ch.Members)
+	}
+	return nil
+}
+
+// DisabledMembers returns the slugs explicitly disabled for a channel —
+// members who were present in ch.Members at some point but have been muted
+// for this channel. Callers use this to distinguish "never added" (which an
+// explicit @-tag can bypass) from "deliberately muted" (which an @-tag must
+// respect — muting an agent is the user's explicit intent to silence them).
+func (b *Broker) DisabledMembers(channel string) []string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	channel = normalizeChannelSlug(channel)
+	if channel == "" {
+		channel = "general"
+	}
+	ch := b.findChannelLocked(channel)
+	if ch == nil || len(ch.Disabled) == 0 {
+		return nil
+	}
+	return append([]string(nil), ch.Disabled...)
+}
+
+// SurfaceChannels returns all channels that have a surface configured for the given provider.
+func (b *Broker) SurfaceChannels(provider string) []teamChannel {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	var out []teamChannel
+	for _, ch := range b.channels {
+		if ch.Surface != nil && ch.Surface.Provider == provider {
+			cp := ch
+			cp.Members = append([]string(nil), ch.Members...)
+			cp.Disabled = append([]string(nil), ch.Disabled...)
+			s := *ch.Surface
+			cp.Surface = &s
+			out = append(out, cp)
+		}
+	}
+	return out
+}
