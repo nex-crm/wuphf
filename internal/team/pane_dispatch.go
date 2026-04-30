@@ -63,6 +63,12 @@ var paneDispatchCoalesceWindow = 60 * time.Second
 // launcherSendNotificationToPane directly; tests intercept by
 // installing a fake closure that records or no-ops the send. Kept as
 // a named type so the atomic.Pointer below stays readable.
+//
+// The legacy void shape is preserved here so existing tests keep
+// compiling — fakes that record calls don't need to invent an error
+// to return. The dispatcher wraps it into the error-returning
+// dispatchSendFn at construction time, treating any test-installed
+// override as a successful send.
 type launcherSendNotificationToPaneFn func(l *Launcher, paneTarget, notification string)
 
 // launcherSendNotificationToPaneOverride is read by the pane-dispatch
@@ -74,13 +80,16 @@ var launcherSendNotificationToPaneOverride atomic.Pointer[launcherSendNotificati
 
 // launcherSendNotificationToPane is the default production send path.
 // The dispatcher's sendFn closure consults the override on every call
-// so tests can intercept without owning the dispatcher.
-func launcherSendNotificationToPane(l *Launcher, paneTarget, notification string) {
+// so tests can intercept without owning the dispatcher. Returns the
+// real send error in production; tests that install an override get a
+// nil error back (the override fakes are recording-only and have no
+// failure to signal).
+func launcherSendNotificationToPane(l *Launcher, paneTarget, notification string) error {
 	if p := launcherSendNotificationToPaneOverride.Load(); p != nil {
 		(*p)(l, paneTarget, notification)
-		return
+		return nil
 	}
-	l.sendNotificationToPane(paneTarget, notification)
+	return l.sendNotificationToPane(paneTarget, notification)
 }
 
 // sendNotificationToPane delivers a notification to a persistent
@@ -90,14 +99,20 @@ func launcherSendNotificationToPane(l *Launcher, paneTarget, notification string
 // and only causes drift over time. --append-system-prompt is a CLI
 // flag and survives /clear intact.
 //
-// Callers should prefer paneDispatch().Enqueue — this function runs
-// /clear + type + Enter unconditionally, so rapid direct calls will
-// race each other. The dispatcher serializes per-slug and inserts
-// the minimum gap.
-func (l *Launcher) sendNotificationToPane(paneTarget, notification string) {
-	tmuxSendKeys(paneTarget, "/clear", "Enter")
-	tmuxSendKeysLiteral(paneTarget, notification)
-	tmuxSendKeys(paneTarget, "Enter")
+// Returns the first non-nil send error (if any). Callers should prefer
+// paneDispatch().Enqueue — this function runs /clear + type + Enter
+// unconditionally, so rapid direct calls will race each other. The
+// dispatcher serializes per-slug, inserts the minimum gap, and uses
+// the returned error to suppress the post-send coalesce window when
+// the send didn't actually land.
+func (l *Launcher) sendNotificationToPane(paneTarget, notification string) error {
+	if err := tmuxSendKeys(paneTarget, "/clear", "Enter"); err != nil {
+		return err
+	}
+	if err := tmuxSendKeysLiteral(paneTarget, notification); err != nil {
+		return err
+	}
+	return tmuxSendKeys(paneTarget, "Enter")
 }
 
 // tmuxSendKeysTimeout caps any single send-keys invocation. tmux
@@ -108,33 +123,35 @@ func (l *Launcher) sendNotificationToPane(paneTarget, notification string) {
 // that a stuck pane doesn't queue up a backlog.
 const tmuxSendKeysTimeout = 3 * time.Second
 
-// Both helpers below are intentionally fire-and-forget — the dispatch
-// worker is one-way (broker → pane) and there's no caller equipped to
-// recover from a failed send mid-loop. But silently swallowing errors
-// makes "agent never sees the message" debugging impossible: a stale
-// pane target, a tmux server that died between Enqueue and send, and
-// a context-deadline timeout all look identical from outside. Surface
-// the failure to stderr with paneTarget context so the next reader of
-// the wuphf logs has a fighting chance.
+// Both helpers log to stderr on failure (the next reader of wuphf
+// logs needs the trail — a stale pane target, a dead tmux server, and
+// a context-deadline timeout all look identical otherwise) AND return
+// the error so the dispatcher can decide whether to update its
+// coalesce-window timestamp. Pre-fix the dispatcher always advanced
+// d.lastSent regardless of send outcome, gating the next enqueue
+// behind a 60s coalesce window for a notification that never landed.
 
-func tmuxSendKeys(paneTarget string, keys ...string) {
+func tmuxSendKeys(paneTarget string, keys ...string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), tmuxSendKeysTimeout)
 	defer cancel()
 	args := append([]string{"-L", tmuxSocketName, "send-keys", "-t", paneTarget}, keys...)
 	if err := exec.CommandContext(ctx, "tmux", args...).Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "tmux send-keys to %s failed: %v\n", paneTarget, err)
+		return err
 	}
+	return nil
 }
 
-func tmuxSendKeysLiteral(paneTarget, payload string) {
+func tmuxSendKeysLiteral(paneTarget, payload string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), tmuxSendKeysTimeout)
 	defer cancel()
-	err := exec.CommandContext(ctx, "tmux", "-L", tmuxSocketName, "send-keys",
+	if err := exec.CommandContext(ctx, "tmux", "-L", tmuxSocketName, "send-keys",
 		"-t", paneTarget, "-l", payload,
-	).Run()
-	if err != nil {
+	).Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "tmux send-keys -l to %s failed (%d bytes): %v\n", paneTarget, len(payload), err)
+		return err
 	}
+	return nil
 }
 
 // paneDispatcher serializes notifications per agent slug into tmux Claude
@@ -154,7 +171,10 @@ type paneDispatcher struct {
 	// sendFn is the actual /clear + type + Enter sequence. The Launcher
 	// wires this to a closure that consults launcherSendNotificationToPaneOverride
 	// on every call (preserving the existing test seam without moving it).
-	sendFn func(paneTarget, notification string)
+	// Returns nil on a successful send and the underlying tmux error
+	// otherwise; runQueue uses the error to decide whether to update
+	// the per-slug coalesce-window timestamp.
+	sendFn func(paneTarget, notification string) error
 
 	// onSent, when non-nil, receives one struct after every successful
 	// send. Tests use it to wait deterministically. Production leaves
@@ -288,15 +308,25 @@ func (d *paneDispatcher) runQueue(slug string) {
 		}
 		d.mu.Unlock()
 
+		var sendErr error
 		if d.sendFn != nil {
-			d.sendFn(turn.PaneTarget, turn.Notification)
+			sendErr = d.sendFn(turn.PaneTarget, turn.Notification)
 		}
 
-		// Step 4: record send time for the next enqueue's coalesce check.
+		// Step 4: only record send time when the send actually
+		// landed. Pre-fix d.lastSent was advanced even when sendFn
+		// failed, gating the next enqueue behind the 60s coalesce
+		// window for a notification that never reached the pane —
+		// turning a transient tmux glitch into a minute of silent
+		// stalling for the user. The local lastSentAt advances either
+		// way so the per-worker min-gap floor still rate-limits a
+		// runaway dispatch loop on repeated failures.
 		lastSentAt = d.now()
-		d.mu.Lock()
-		d.lastSent[slug] = lastSentAt
-		d.mu.Unlock()
+		if sendErr == nil {
+			d.mu.Lock()
+			d.lastSent[slug] = lastSentAt
+			d.mu.Unlock()
+		}
 
 		if d.onSent != nil {
 			select {

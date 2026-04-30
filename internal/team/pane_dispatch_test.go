@@ -53,7 +53,7 @@ type recordingSend struct {
 	sent chan struct{}
 }
 
-func (r *recordingSend) send(paneTarget, notification string) {
+func (r *recordingSend) send(paneTarget, notification string) error {
 	r.mu.Lock()
 	r.captured = append(r.captured, notification)
 	r.mu.Unlock()
@@ -64,6 +64,7 @@ func (r *recordingSend) send(paneTarget, notification string) {
 		default:
 		}
 	}
+	return nil
 }
 
 func (r *recordingSend) snapshot() []string {

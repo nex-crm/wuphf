@@ -158,8 +158,8 @@ func (l *Launcher) paneDispatch() *paneDispatcher {
 	l.dispatcherOnce.Do(func() {
 		l.dispatcher = &paneDispatcher{
 			clock: realClock{},
-			sendFn: func(paneTarget, notification string) {
-				launcherSendNotificationToPane(l, paneTarget, notification)
+			sendFn: func(paneTarget, notification string) error {
+				return launcherSendNotificationToPane(l, paneTarget, notification)
 			},
 		}
 	})

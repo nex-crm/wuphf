@@ -236,7 +236,13 @@ func (l *Launcher) resumeInFlightWork() {
 			l.enqueueHeadlessCodexTurn(slug, packet)
 			return
 		}
-		launcherSendNotificationToPane(l, target.PaneTarget, packet)
+		// Resume path: the send failure (if any) is already logged
+		// to stderr inside tmuxSendKeys. Resume is a one-time
+		// best-effort priming write — the broker still has the
+		// packet, so a transient failure is recovered by the next
+		// regular dispatch loop. Discard the return rather than
+		// blowing up resume on a single pane glitch.
+		_ = launcherSendNotificationToPane(l, target.PaneTarget, packet)
 	}
 
 	lead := l.targeter().LeadSlug()
