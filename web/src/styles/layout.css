@@ -1101,6 +1101,10 @@ html[data-theme="nex"]
   font-size: 13px;
   font-weight: 600;
   margin-bottom: 4px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .app-card-meta {
   font-size: 11px;
@@ -1770,6 +1774,21 @@ html[data-theme="nex"]
     right: 0;
     top: 0;
     z-index: 10;
+  }
+}
+
+/* ─── Narrow mobile (≤430px): sidebar overlays instead of pushing content ─── */
+@media (max-width: 430px) {
+  .sidebar {
+    position: absolute;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    height: 100%;
+    z-index: 20;
+  }
+  .main {
+    width: 100%;
   }
 }
 
