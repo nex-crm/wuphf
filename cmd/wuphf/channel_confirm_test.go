@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/nex-crm/wuphf/cmd/wuphf/channelui"
 )
 
 func TestConfirmationForResetTeamMode(t *testing.T) {
@@ -13,7 +15,7 @@ func TestConfirmationForResetTeamMode(t *testing.T) {
 	if got == nil {
 		t.Fatalf("expected confirmation")
 	}
-	if got.Action != confirmActionResetTeam {
+	if got.Action != channelui.ChannelConfirmActionResetTeam {
 		t.Errorf("expected action=reset_team, got %q", got.Action)
 	}
 	if !strings.Contains(strings.ToLower(got.Title), "office") {
@@ -38,8 +40,8 @@ func TestConfirmationForResetOneOnOneMode(t *testing.T) {
 }
 
 func TestConfirmationForResetDM(t *testing.T) {
-	got := confirmationForResetDM("fe", "office__fe")
-	if got == nil || got.Action != confirmActionResetDM {
+	got := channelui.ConfirmationForResetDM("fe", "office__fe")
+	if got == nil || got.Action != channelui.ChannelConfirmActionResetDM {
 		t.Fatalf("expected reset_dm action, got %#v", got)
 	}
 	if got.Agent != "fe" || got.Channel != "office__fe" {
@@ -49,7 +51,7 @@ func TestConfirmationForResetDM(t *testing.T) {
 
 func TestConfirmationForSessionSwitchToOneOnOne(t *testing.T) {
 	got := confirmationForSessionSwitch("1o1", "fe")
-	if got.Action != confirmActionSwitchMode {
+	if got.Action != channelui.ChannelConfirmActionSwitchMode {
 		t.Errorf("expected switch_mode action, got %q", got.Action)
 	}
 	if !strings.Contains(strings.ToLower(got.Title), "direct") {
@@ -68,13 +70,13 @@ func TestConfirmationForSessionSwitchToOffice(t *testing.T) {
 }
 
 func TestConfirmationForInterviewAnswerWithChoiceAndCustomText(t *testing.T) {
-	interview := channelInterview{
+	interview := channelui.Interview{
 		ID:       "req-1",
 		Question: "Approve?",
 	}
-	option := &channelInterviewOption{ID: "yes", Label: "Approve"}
-	got := confirmationForInterviewAnswer(interview, option, "let's ship Friday")
-	if got.Action != confirmActionSubmitRequest {
+	option := &channelui.InterviewOption{ID: "yes", Label: "Approve"}
+	got := channelui.ConfirmationForInterviewAnswer(interview, option, "let's ship Friday")
+	if got.Action != channelui.ChannelConfirmActionSubmitRequest {
 		t.Fatalf("expected submit_request action, got %q", got.Action)
 	}
 	if got.ChoiceID != "yes" || got.ChoiceText != "Approve" {
@@ -89,20 +91,20 @@ func TestConfirmationForInterviewAnswerWithChoiceAndCustomText(t *testing.T) {
 }
 
 func TestConfirmationForInterviewAnswerNoOptionPromptsForAnswer(t *testing.T) {
-	got := confirmationForInterviewAnswer(channelInterview{Question: "Why?"}, nil, "")
+	got := channelui.ConfirmationForInterviewAnswer(channelui.Interview{Question: "Why?"}, nil, "")
 	if !strings.Contains(got.Detail, "Type an answer before submitting") {
 		t.Fatalf("expected coaching detail when no option/text, got %q", got.Detail)
 	}
 }
 
 func TestRenderConfirmCardContainsTitleAndDetail(t *testing.T) {
-	confirm := channelConfirm{
+	confirm := channelui.ChannelConfirm{
 		Title:        "Reset Office Session",
 		Detail:       "This clears the live transcript.",
 		ConfirmLabel: "Enter",
 		CancelLabel:  "Esc",
 	}
-	got := stripANSI(renderConfirmCard(confirm, 80))
+	got := stripANSI(channelui.RenderConfirmCard(confirm, 80))
 	for _, want := range []string{"Reset Office Session", "clears the live transcript", "Enter", "Esc"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("expected %q in card, got %q", want, got)
@@ -111,15 +113,15 @@ func TestRenderConfirmCardContainsTitleAndDetail(t *testing.T) {
 }
 
 func TestRenderConfirmCardEnforcesMinimumWidth(t *testing.T) {
-	confirm := channelConfirm{Title: "X", Detail: "y", ConfirmLabel: "ok", CancelLabel: "no"}
-	if got := renderConfirmCard(confirm, 10); got == "" {
+	confirm := channelui.ChannelConfirm{Title: "X", Detail: "y", ConfirmLabel: "ok", CancelLabel: "no"}
+	if got := channelui.RenderConfirmCard(confirm, 10); got == "" {
 		t.Fatalf("undersized confirm card should still render")
 	}
 }
 
 func TestExecuteConfirmationSubmitRequestWithoutRequestSetsNotice(t *testing.T) {
 	m := channelModel{}
-	confirm := channelConfirm{Action: confirmActionSubmitRequest, Request: nil}
+	confirm := channelui.ChannelConfirm{Action: channelui.ChannelConfirmActionSubmitRequest, Request: nil}
 	model, cmd := m.executeConfirmation(confirm)
 	if cmd != nil {
 		t.Errorf("expected nil cmd when request missing, got %T", cmd)
@@ -135,8 +137,8 @@ func TestExecuteConfirmationSubmitRequestWithoutRequestSetsNotice(t *testing.T) 
 
 func TestExecuteConfirmationDefaultActionClearsConfirm(t *testing.T) {
 	m := channelModel{}
-	m.confirm = &channelConfirm{}
-	confirm := channelConfirm{Action: "unknown"}
+	m.confirm = &channelui.ChannelConfirm{}
+	confirm := channelui.ChannelConfirm{Action: "unknown"}
 	model, cmd := m.executeConfirmation(confirm)
 	out := model.(channelModel)
 	if out.confirm != nil {
@@ -149,7 +151,7 @@ func TestExecuteConfirmationDefaultActionClearsConfirm(t *testing.T) {
 
 func TestExecuteConfirmationSwitchModeReturnsCmd(t *testing.T) {
 	m := channelModel{}
-	confirm := channelConfirm{Action: confirmActionSwitchMode, SessionMode: "office"}
+	confirm := channelui.ChannelConfirm{Action: channelui.ChannelConfirmActionSwitchMode, SessionMode: "office"}
 	_, cmd := m.executeConfirmation(confirm)
 	if cmd == nil {
 		t.Fatalf("expected non-nil cmd for switch_mode")
@@ -159,8 +161,8 @@ func TestExecuteConfirmationSwitchModeReturnsCmd(t *testing.T) {
 // Sanity: tea.Cmd returned for reset/dm actions is non-nil.
 func TestExecuteConfirmationResetReturnsCmd(t *testing.T) {
 	m := channelModel{}
-	for _, action := range []channelConfirmAction{confirmActionResetTeam, confirmActionResetDM} {
-		_, cmd := m.executeConfirmation(channelConfirm{Action: action, Agent: "fe", Channel: "office"})
+	for _, action := range []channelui.ChannelConfirmAction{channelui.ChannelConfirmActionResetTeam, channelui.ChannelConfirmActionResetDM} {
+		_, cmd := m.executeConfirmation(channelui.ChannelConfirm{Action: action, Agent: "fe", Channel: "office"})
 		if cmd == nil {
 			t.Errorf("action %q expected non-nil cmd", action)
 		}

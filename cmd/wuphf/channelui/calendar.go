@@ -468,12 +468,10 @@ func NextCalendarEventByParticipant(events []CalendarEvent) map[string]CalendarE
 }
 
 // OrderedCalendarParticipants returns the participant names from
-// byParticipant sorted alphabetically. The members parameter is
-// retained for compatibility — member-order rendering was deliberately
-// replaced with alphabetical sort because poll ticks were shifting
-// member order every refresh.
-func OrderedCalendarParticipants(byParticipant map[string]CalendarEvent, members []Member) []string {
-	_ = members
+// byParticipant sorted alphabetically. Member-order rendering was
+// deliberately replaced with alphabetical sort because poll ticks were
+// shifting member order every refresh.
+func OrderedCalendarParticipants(byParticipant map[string]CalendarEvent) []string {
 	var names []string
 	for name := range byParticipant {
 		names = append(names, name)

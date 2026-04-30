@@ -33,7 +33,7 @@ func BuildCalendarLines(actions []Action, jobs []SchedulerJob, tasks []Task, req
 	if len(byParticipant) > 0 {
 		lines = append(lines, RenderedLine{Text: ""})
 		lines = append(lines, RenderedLine{Text: "  " + lipgloss.NewStyle().Bold(true).Render("Teammate calendars")})
-		for _, name := range OrderedCalendarParticipants(byParticipant, members) {
+		for _, name := range OrderedCalendarParticipants(byParticipant) {
 			event := byParticipant[name]
 			lines = append(lines, RenderCalendarParticipantCard(name, event, contentWidth, AgentSlugForDisplay(name, members))...)
 		}

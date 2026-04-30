@@ -5,11 +5,12 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/nex-crm/wuphf/cmd/wuphf/channelui"
 	"github.com/nex-crm/wuphf/internal/team"
 )
 
 type channelDoctorDoneMsg struct {
-	report channelDoctorReport
+	report channelui.DoctorReport
 	err    error
 }
 
@@ -24,20 +25,20 @@ func runDoctorChecks() tea.Cmd {
 	}
 }
 
-func inspectDoctor() (channelDoctorReport, error) {
+func inspectDoctor() (channelui.DoctorReport, error) {
 	capabilities := detectRuntimeCapabilitiesFn(team.CapabilityProbeOptions{
 		IncludeConnections: true,
 		ConnectionLimit:    5,
 		ConnectionTimeout:  5 * time.Second,
 	})
-	report := channelDoctorReport{
+	report := channelui.DoctorReport{
 		GeneratedAt: time.Now(),
 		Registry:    capabilities.Registry,
 	}
 	for _, entry := range capabilities.Registry.Entries {
-		report.Checks = append(report.Checks, doctorCheck{
+		report.Checks = append(report.Checks, channelui.DoctorCheck{
 			Label:     entry.Label,
-			Severity:  doctorSeverityForCapability(entry),
+			Severity:  channelui.DoctorSeverityForCapability(entry),
 			Lifecycle: entry.Lifecycle,
 			Detail:    entry.Detail,
 			NextStep:  entry.NextStep,

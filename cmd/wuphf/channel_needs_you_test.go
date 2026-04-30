@@ -3,14 +3,16 @@ package main
 import (
 	"strings"
 	"testing"
+
+	"github.com/nex-crm/wuphf/cmd/wuphf/channelui"
 )
 
 func TestCurrentMainViewportLinesPrependsNeedsYouStrip(t *testing.T) {
 	m := newChannelModel(false)
 	m.width = 120
 	m.height = 40
-	m.activeApp = officeAppMessages
-	m.requests = []channelInterview{{
+	m.activeApp = channelui.OfficeAppMessages
+	m.requests = []channelui.Interview{{
 		ID:       "req-1",
 		Kind:     "approval",
 		Status:   "pending",
@@ -20,7 +22,7 @@ func TestCurrentMainViewportLinesPrependsNeedsYouStrip(t *testing.T) {
 		From:     "ceo",
 		Blocking: true,
 	}}
-	m.messages = []brokerMessage{{ID: "msg-1", From: "pm", Content: "Main feed update."}}
+	m.messages = []channelui.BrokerMessage{{ID: "msg-1", From: "pm", Content: "Main feed update."}}
 
 	lines := m.currentMainViewportLines(96, 20)
 	plain := stripANSI(joinRenderedLines(lines))

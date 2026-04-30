@@ -6,13 +6,15 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/nex-crm/wuphf/cmd/wuphf/channelui"
 )
 
 // renderComposer renders the Slack-style input area with typing indicator,
 // label, rounded border, cursor, @mention popup, and interview options.
 func renderComposer(width int, input []rune, inputPos int, channelName string,
 	replyToID string, typingAgents []string, liveActivities map[string]string,
-	pending *channelInterview, selectedOption int, hint string, focused bool, tickFrame int) string {
+	pending *channelui.Interview, selectedOption int, hint string, focused bool, tickFrame int) string {
 
 	if width < 10 {
 		width = 10
@@ -36,12 +38,12 @@ func renderComposer(width int, input []rune, inputPos int, channelName string,
 		label = fmt.Sprintf("Reply to thread %s", replyToID)
 	}
 	labelStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(slackActive)).
+		Foreground(lipgloss.Color(channelui.SlackActive)).
 		Bold(true)
 	if isDM && pending == nil && replyToID == "" {
 		labelStyle = labelStyle.Foreground(lipgloss.Color("#8B5CF6"))
 	}
-	hintStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(slackMuted))
+	hintStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(channelui.SlackMuted))
 	if strings.TrimSpace(hint) == "" {
 		hint = "/ commands · @ mention · Ctrl+J newline · Enter send · Esc pause all"
 		if pending != nil {
@@ -76,7 +78,7 @@ func renderComposer(width int, input []rune, inputPos int, channelName string,
 			placeholder = fmt.Sprintf("Reply in thread %s... (Ctrl+J newline, /cancel to go back)", replyToID)
 		}
 		inputStr = cursorStyle.Render(" ") + lipgloss.NewStyle().
-			Foreground(lipgloss.Color(slackMuted)).Render(" "+placeholder)
+			Foreground(lipgloss.Color(channelui.SlackMuted)).Render(" "+placeholder)
 	} else {
 		before := string(input[:inputPos])
 		cursorStyle := lipgloss.NewStyle().Reverse(true)
@@ -94,7 +96,7 @@ func renderComposer(width int, input []rune, inputPos int, channelName string,
 	// Wrap input text to fit within border
 	inputStr = ansi.Wrap(inputStr, innerW, "")
 
-	borderStyle := composerBorderStyle(width-4, focused)
+	borderStyle := channelui.ComposerBorderStyle(width-4, focused)
 	inputBox := borderStyle.Render(inputStr)
 	parts = append(parts, inputBox)
 

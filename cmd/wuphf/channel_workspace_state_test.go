@@ -3,6 +3,8 @@ package main
 import (
 	"strings"
 	"testing"
+
+	"github.com/nex-crm/wuphf/cmd/wuphf/channelui"
 )
 
 func TestBuildOfficeIntroLinesUsesWorkspaceState(t *testing.T) {
@@ -14,9 +16,9 @@ func TestBuildOfficeIntroLinesUsesWorkspaceState(t *testing.T) {
 	t.Setenv("WUPHF_MEMORY_BACKEND", "none")
 	m := newChannelModel(false)
 	m.brokerConnected = true
-	m.members = []channelMember{{Slug: "ceo", Name: "CEO"}, {Slug: "pm", Name: "Product Manager"}}
-	m.tasks = []channelTask{{ID: "task-1", Title: "Ship launch", Status: "in_progress", Owner: "pm"}}
-	m.requests = []channelInterview{{ID: "req-1", Kind: "approval", Status: "pending", Title: "Approve launch copy", Question: "Approve launch copy?", From: "ceo"}}
+	m.members = []channelui.Member{{Slug: "ceo", Name: "CEO"}, {Slug: "pm", Name: "Product Manager"}}
+	m.tasks = []channelui.Task{{ID: "task-1", Title: "Ship launch", Status: "in_progress", Owner: "pm"}}
+	m.requests = []channelui.Interview{{ID: "req-1", Kind: "approval", Status: "pending", Title: "Approve launch copy", Question: "Approve launch copy?", From: "ceo"}}
 
 	lines := m.buildOfficeIntroLines(96)
 	plain := stripANSI(joinRenderedLines(lines))
@@ -65,12 +67,12 @@ func TestBuildDirectIntroLinesPreservesDirectSessionResetLanguage(t *testing.T) 
 
 func TestCurrentHeaderMetaUsesWorkspaceStateForOfficeMessages(t *testing.T) {
 	m := newChannelModel(false)
-	m.activeApp = officeAppMessages
+	m.activeApp = channelui.OfficeAppMessages
 	m.activeChannel = "launch"
 	m.brokerConnected = true
-	m.members = []channelMember{{Slug: "ceo", Name: "CEO"}, {Slug: "pm", Name: "Product Manager"}}
-	m.tasks = []channelTask{{ID: "task-1", Title: "Ship launch", Status: "in_progress", Owner: "pm"}}
-	m.requests = []channelInterview{{ID: "req-1", Kind: "approval", Status: "pending", Title: "Approve launch copy", Question: "Approve launch copy?", From: "ceo", Blocking: true}}
+	m.members = []channelui.Member{{Slug: "ceo", Name: "CEO"}, {Slug: "pm", Name: "Product Manager"}}
+	m.tasks = []channelui.Task{{ID: "task-1", Title: "Ship launch", Status: "in_progress", Owner: "pm"}}
+	m.requests = []channelui.Interview{{ID: "req-1", Kind: "approval", Status: "pending", Title: "Approve launch copy", Question: "Approve launch copy?", From: "ceo", Blocking: true}}
 
 	meta := stripANSI(m.currentHeaderMeta())
 	if !strings.Contains(meta, "2 teammates") {
@@ -89,11 +91,11 @@ func TestCurrentWorkspaceUIStatePromotesDoctorWarningsIntoReadiness(t *testing.T
 	m := newChannelModel(false)
 	m.brokerConnected = true
 	m.activeChannel = "general"
-	m.doctor = &channelDoctorReport{
-		Checks: []doctorCheck{
+	m.doctor = &channelui.DoctorReport{
+		Checks: []channelui.DoctorCheck{
 			{
 				Label:    "Connected accounts",
-				Severity: doctorWarn,
+				Severity: channelui.DoctorWarn,
 				Detail:   "No accounts connected.",
 				NextStep: "Connect Gmail, CRM, or another account in the provider dashboard.",
 			},
@@ -101,7 +103,7 @@ func TestCurrentWorkspaceUIStatePromotesDoctorWarningsIntoReadiness(t *testing.T
 	}
 
 	state := m.currentWorkspaceUIState()
-	if state.Readiness.Level != workspaceReadinessReady {
+	if state.Readiness.Level != channelui.WorkspaceReadinessReady {
 		t.Fatalf("expected ready local-only readiness, got %+v", state.Readiness)
 	}
 	if !strings.Contains(state.Readiness.Headline, "Local-only") {

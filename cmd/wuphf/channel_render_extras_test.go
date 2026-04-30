@@ -3,10 +3,12 @@ package main
 import (
 	"strings"
 	"testing"
+
+	"github.com/nex-crm/wuphf/cmd/wuphf/channelui"
 )
 
 func TestBuildSkillLinesEmptyShowsCoachingCopy(t *testing.T) {
-	lines := buildSkillLines(nil, 80)
+	lines := channelui.BuildSkillLines(nil, 80)
 	plain := stripANSI(joinRenderedLines(lines))
 	if !strings.Contains(plain, "No skills yet") {
 		t.Fatalf("expected empty-state copy, got %q", plain)
@@ -17,7 +19,7 @@ func TestBuildSkillLinesEmptyShowsCoachingCopy(t *testing.T) {
 }
 
 func TestBuildSkillLinesRendersAllMetadata(t *testing.T) {
-	skills := []channelSkill{{
+	skills := []channelui.Skill{{
 		ID:                  "s1",
 		Name:                "summarize",
 		Title:               "Summarize PR",
@@ -36,7 +38,7 @@ func TestBuildSkillLinesRendersAllMetadata(t *testing.T) {
 		LastExecutionAt:     "2026-04-29T08:00:00Z",
 		LastExecutionStatus: "success",
 	}}
-	lines := buildSkillLines(skills, 80)
+	lines := channelui.BuildSkillLines(skills, 80)
 	plain := stripANSI(joinRenderedLines(lines))
 	for _, want := range []string{
 		"Summarize PR",
@@ -57,8 +59,8 @@ func TestBuildSkillLinesRendersAllMetadata(t *testing.T) {
 }
 
 func TestBuildSkillLinesUnknownStatusFallsBackToActive(t *testing.T) {
-	skills := []channelSkill{{ID: "s1", Title: "x", Status: ""}}
-	lines := buildSkillLines(skills, 80)
+	skills := []channelui.Skill{{ID: "s1", Title: "x", Status: ""}}
+	lines := channelui.BuildSkillLines(skills, 80)
 	plain := stripANSI(joinRenderedLines(lines))
 	if !strings.Contains(plain, "active") {
 		t.Fatalf("blank status must default to active, got %q", plain)
@@ -77,7 +79,7 @@ func TestBuildOneOnOneMessageLinesEmptyShowsCoachingCopy(t *testing.T) {
 }
 
 func TestBuildOneOnOneMessageLinesPopulatedDelegatesToOffice(t *testing.T) {
-	messages := []brokerMessage{
+	messages := []channelui.BrokerMessage{
 		{ID: "m1", From: "fe", Content: "hello", Timestamp: "2026-04-29T10:00:00Z"},
 	}
 	lines := buildOneOnOneMessageLines(messages, nil, 80, "Frontend", "", 0)
@@ -91,7 +93,7 @@ func TestBuildOneOnOneMessageLinesPopulatedDelegatesToOffice(t *testing.T) {
 }
 
 func TestRequestCalendarEventsProducesEventForEachTimeField(t *testing.T) {
-	req := channelInterview{
+	req := channelui.Interview{
 		ID:         "req-1",
 		From:       "ceo",
 		Question:   "Approve?",
@@ -102,7 +104,7 @@ func TestRequestCalendarEventsProducesEventForEachTimeField(t *testing.T) {
 		ReminderAt: "2026-04-29T12:00:00Z",
 		RecheckAt:  "2026-04-29T13:00:00Z",
 	}
-	events := requestCalendarEvents(req, "office", nil)
+	events := channelui.RequestCalendarEvents(req, "office", nil)
 	if len(events) != 4 {
 		t.Fatalf("expected 4 calendar events from 4 time fields, got %d", len(events))
 	}
@@ -124,8 +126,8 @@ func TestRequestCalendarEventsProducesEventForEachTimeField(t *testing.T) {
 }
 
 func TestRequestCalendarEventsSkipsBlankTimestamps(t *testing.T) {
-	req := channelInterview{ID: "req-2", From: "ceo", Question: "x", DueAt: "2026-04-29T10:00:00Z"}
-	events := requestCalendarEvents(req, "office", nil)
+	req := channelui.Interview{ID: "req-2", From: "ceo", Question: "x", DueAt: "2026-04-29T10:00:00Z"}
+	events := channelui.RequestCalendarEvents(req, "office", nil)
 	if len(events) != 1 {
 		t.Fatalf("only DueAt set, expected 1 event, got %d", len(events))
 	}
@@ -135,20 +137,20 @@ func TestRequestCalendarEventsSkipsBlankTimestamps(t *testing.T) {
 }
 
 func TestRequestCalendarEventsBlankStatusDefaultsToPending(t *testing.T) {
-	req := channelInterview{ID: "req-3", From: "ceo", DueAt: "2026-04-29T10:00:00Z"}
-	events := requestCalendarEvents(req, "office", nil)
+	req := channelui.Interview{ID: "req-3", From: "ceo", DueAt: "2026-04-29T10:00:00Z"}
+	events := channelui.RequestCalendarEvents(req, "office", nil)
 	if len(events) != 1 || events[0].Status != "pending" {
 		t.Fatalf("blank status should default to pending, got %#v", events)
 	}
 }
 
 func TestCalendarParticipantsForRequestUsesRequester(t *testing.T) {
-	members := []channelMember{
+	members := []channelui.Member{
 		{Slug: "ceo", Name: "CEO"},
 		{Slug: "fe", Name: "Frontend"},
 	}
-	req := channelInterview{ID: "r1", From: "fe", Channel: "office"}
-	names := calendarParticipantsForRequest(req, "office", members)
+	req := channelui.Interview{ID: "r1", From: "fe", Channel: "office"}
+	names := channelui.CalendarParticipantsForRequest(req, "office", members)
 	if len(names) == 0 {
 		t.Fatalf("expected at least one participant name")
 	}
@@ -162,7 +164,7 @@ func TestCalendarParticipantsForRequestUsesRequester(t *testing.T) {
 		t.Fatalf("expected Frontend in participants, got %v", names)
 	}
 
-	slugs := calendarParticipantSlugsForRequest(req, "office", members)
+	slugs := channelui.CalendarParticipantSlugsForRequest(req, "office", members)
 	foundSlug := false
 	for _, s := range slugs {
 		if s == "fe" {
@@ -175,12 +177,12 @@ func TestCalendarParticipantsForRequestUsesRequester(t *testing.T) {
 }
 
 func TestCalendarParticipantsForRequestEmptyFromUsesChannelMembers(t *testing.T) {
-	members := []channelMember{
+	members := []channelui.Member{
 		{Slug: "ceo", Name: "CEO"},
 		{Slug: "fe", Name: "Frontend"},
 	}
-	req := channelInterview{ID: "r1", From: "", Channel: "office"}
-	names := calendarParticipantsForRequest(req, "office", members)
+	req := channelui.Interview{ID: "r1", From: "", Channel: "office"}
+	names := channelui.CalendarParticipantsForRequest(req, "office", members)
 	// When req has no From, it should still produce some output (channel-wide).
 	if len(names) == 0 {
 		t.Fatalf("expected channel-wide participants when From is blank, got nothing")
@@ -189,17 +191,17 @@ func TestCalendarParticipantsForRequestEmptyFromUsesChannelMembers(t *testing.T)
 
 func TestSummarizeUnreadMessagesGroups(t *testing.T) {
 	cases := []struct {
-		messages []brokerMessage
+		messages []channelui.BrokerMessage
 		want     string
 	}{
 		{nil, ""},
-		{[]brokerMessage{{From: "fe"}}, "1 new from"},
-		{[]brokerMessage{{From: "fe"}, {From: "be"}}, " and "},
-		{[]brokerMessage{{From: "fe"}, {From: "be"}, {From: "pm"}}, ", and "},
-		{[]brokerMessage{{From: ""}, {From: "  "}}, "2 new messages"},
+		{[]channelui.BrokerMessage{{From: "fe"}}, "1 new from"},
+		{[]channelui.BrokerMessage{{From: "fe"}, {From: "be"}}, " and "},
+		{[]channelui.BrokerMessage{{From: "fe"}, {From: "be"}, {From: "pm"}}, ", and "},
+		{[]channelui.BrokerMessage{{From: ""}, {From: "  "}}, "2 new messages"},
 	}
 	for _, tc := range cases {
-		got := summarizeUnreadMessages(tc.messages)
+		got := channelui.SummarizeUnreadMessages(tc.messages)
 		if !strings.Contains(got, tc.want) {
 			t.Errorf("messages=%v: expected %q in %q", tc.messages, tc.want, got)
 		}

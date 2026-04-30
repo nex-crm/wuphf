@@ -29,7 +29,7 @@ func RenderUsageStrip(usage UsageState, members []Member, width int) string {
 			seen[member.Slug] = true
 		}
 	}
-	for _, slug := range []string{"ceo", "pm", "fe", "be", "ai", "designer", "cmo", "cro"} {
+	for _, slug := range CanonicalRosterSlugs {
 		if _, ok := usage.Agents[slug]; ok && !seen[slug] {
 			ordered = append(ordered, slug)
 			seen[slug] = true

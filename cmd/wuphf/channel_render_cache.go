@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/charmbracelet/glamour"
+
+	"github.com/nex-crm/wuphf/cmd/wuphf/channelui"
 )
 
 const (
@@ -24,24 +26,24 @@ const (
 type channelRenderCacheStore struct {
 	mu sync.Mutex
 
-	mainLines map[uint64][]renderedLine
+	mainLines map[uint64][]channelui.RenderedLine
 	sidebars  map[uint64]string
 	markdown  map[uint64]string
 	renderers map[int]*glamour.TermRenderer
-	threaded  map[uint64][]threadedMessage
-	blocks    map[uint64][]renderedLine
+	threaded  map[uint64][]channelui.ThreadedMessage
+	blocks    map[uint64][]channelui.RenderedLine
 }
 
 var channelRenderCache = channelRenderCacheStore{
-	mainLines: make(map[uint64][]renderedLine),
+	mainLines: make(map[uint64][]channelui.RenderedLine),
 	sidebars:  make(map[uint64]string),
 	markdown:  make(map[uint64]string),
 	renderers: make(map[int]*glamour.TermRenderer),
-	threaded:  make(map[uint64][]threadedMessage),
-	blocks:    make(map[uint64][]renderedLine),
+	threaded:  make(map[uint64][]channelui.ThreadedMessage),
+	blocks:    make(map[uint64][]channelui.RenderedLine),
 }
 
-func cachedSidebarRender(channels []channelInfo, members []channelMember, tasks []channelTask, activeChannel string, activeApp officeApp, cursor int, rosterOffset int, focused bool, quickJump quickJumpTarget, workspace workspaceUIState, width, height int, checklist ...onboardingChecklist) string {
+func cachedSidebarRender(channels []channelui.ChannelInfo, members []channelui.Member, tasks []channelui.Task, activeChannel string, activeApp channelui.OfficeApp, cursor int, rosterOffset int, focused bool, quickJump quickJumpTarget, workspace channelui.WorkspaceUIState, width, height int, checklist ...onboardingChecklist) string {
 	key := hashSidebarState(channels, members, tasks, activeChannel, activeApp, cursor, rosterOffset, focused, quickJump, workspace, width, height)
 	// Checklist is dynamic per render — bypass cache when it's active.
 	checklistActive := len(checklist) > 0 && !checklist[0].Dismissed
@@ -57,51 +59,51 @@ func cachedSidebarRender(channels []channelInfo, members []channelMember, tasks 
 	return rendered
 }
 
-func (m channelModel) cachedMainLines(contentWidth int) []renderedLine {
+func (m channelModel) cachedMainLines(contentWidth int) []channelui.RenderedLine {
 	key := m.hashMainLinesState(contentWidth)
 	if cached, ok := channelRenderCache.getMainLines(key); ok {
 		return cached
 	}
 
-	var lines []renderedLine
+	var lines []channelui.RenderedLine
 	if m.isOneOnOne() {
 		switch m.activeApp {
-		case officeAppRecovery:
+		case channelui.OfficeAppRecovery:
 			lines = m.buildRecoveryLines(contentWidth)
-		case officeAppInbox:
-			lines = buildInboxLines(filterMessagesForViewerScope(m.messages, m.oneOnOneAgentSlug(), "inbox"), m.requests, contentWidth)
-		case officeAppOutbox:
-			lines = buildOutboxLines(filterMessagesForViewerScope(m.messages, m.oneOnOneAgentSlug(), "outbox"), m.actions, contentWidth)
+		case channelui.OfficeAppInbox:
+			lines = buildInboxLines(channelui.FilterMessagesForViewerScope(m.messages, m.oneOnOneAgentSlug(), "inbox"), m.requests, contentWidth)
+		case channelui.OfficeAppOutbox:
+			lines = buildOutboxLines(channelui.FilterMessagesForViewerScope(m.messages, m.oneOnOneAgentSlug(), "outbox"), m.actions, contentWidth)
 		default:
 			lines = m.buildDirectFeedLines(contentWidth)
 		}
 	} else {
 		switch m.activeApp {
-		case officeAppInbox:
+		case channelui.OfficeAppInbox:
 			lines = buildInboxLines(m.messages, m.requests, contentWidth)
-		case officeAppOutbox:
+		case channelui.OfficeAppOutbox:
 			lines = buildOutboxLines(m.messages, m.actions, contentWidth)
-		case officeAppRecovery:
+		case channelui.OfficeAppRecovery:
 			lines = m.buildRecoveryLines(contentWidth)
-		case officeAppTasks:
-			lines = buildTaskLines(m.tasks, contentWidth)
-		case officeAppRequests:
-			lines = buildRequestLines(m.requests, contentWidth)
-		case officeAppPolicies:
-			lines = buildPolicyLines(m.signals, m.decisions, m.watchdogs, m.actions, contentWidth)
-		case officeAppCalendar:
-			lines = buildCalendarLines(m.actions, m.scheduler, m.tasks, m.requests, m.activeChannel, m.members, m.calendarRange, m.calendarFilter, contentWidth)
-		case officeAppArtifacts:
+		case channelui.OfficeAppTasks:
+			lines = channelui.BuildTaskLines(m.tasks, contentWidth)
+		case channelui.OfficeAppRequests:
+			lines = channelui.BuildRequestLines(m.requests, contentWidth)
+		case channelui.OfficeAppPolicies:
+			lines = channelui.BuildPolicyLines(m.signals, m.decisions, m.watchdogs, m.actions, contentWidth)
+		case channelui.OfficeAppCalendar:
+			lines = channelui.BuildCalendarLines(m.actions, m.scheduler, m.tasks, m.requests, m.activeChannel, m.members, m.calendarRange, m.calendarFilter, contentWidth)
+		case channelui.OfficeAppArtifacts:
 			lines = m.buildArtifactLines(contentWidth)
-		case officeAppSkills:
-			lines = buildSkillLines(m.skills, contentWidth)
+		case channelui.OfficeAppSkills:
+			lines = channelui.BuildSkillLines(m.skills, contentWidth)
 		default:
 			lines = m.buildOfficeFeedLines(contentWidth)
 		}
 	}
 
 	channelRenderCache.putMainLines(key, lines)
-	return cloneRenderedLines(lines)
+	return channelui.CloneRenderedLines(lines)
 }
 
 func (m channelModel) hashMainLinesState(contentWidth int) uint64 {
@@ -114,9 +116,9 @@ func (m channelModel) hashMainLinesState(contentWidth int) uint64 {
 	h.add(m.calendarFilter)
 	h.add(m.sessionMode)
 	h.add(m.oneOnOneAgent)
-	h.addInt64(renderTimeBucket(m.activeApp, m.isOneOnOne()))
+	h.addInt64(channelui.RenderTimeBucket(m.activeApp, m.isOneOnOne()))
 
-	if m.isOneOnOne() || m.activeApp == officeAppMessages || m.activeApp == officeAppInbox || m.activeApp == officeAppOutbox || m.activeApp == officeAppRecovery {
+	if m.isOneOnOne() || m.activeApp == channelui.OfficeAppMessages || m.activeApp == channelui.OfficeAppInbox || m.activeApp == channelui.OfficeAppOutbox || m.activeApp == channelui.OfficeAppRecovery {
 		workspace := m.currentWorkspaceUIState()
 		h.addMessages(m.messages)
 		h.addExpandedThreads(m.expandedThreads)
@@ -140,39 +142,39 @@ func (m channelModel) hashMainLinesState(contentWidth int) uint64 {
 	}
 
 	switch m.activeApp {
-	case officeAppInbox:
+	case channelui.OfficeAppInbox:
 		h.addMessages(m.messages)
 		h.addRequests(m.requests)
-	case officeAppOutbox:
+	case channelui.OfficeAppOutbox:
 		h.addMessages(m.messages)
 		h.addActions(m.actions)
-	case officeAppTasks:
+	case channelui.OfficeAppTasks:
 		h.addTasks(m.tasks)
-	case officeAppRequests:
+	case channelui.OfficeAppRequests:
 		h.addRequests(m.requests)
-	case officeAppPolicies:
+	case channelui.OfficeAppPolicies:
 		h.addSignals(m.signals)
 		h.addDecisions(m.decisions)
 		h.addWatchdogs(m.watchdogs)
 		h.addActions(m.actions)
-	case officeAppCalendar:
+	case channelui.OfficeAppCalendar:
 		h.addActions(m.actions)
 		h.addScheduler(m.scheduler)
 		h.addTasks(m.tasks)
 		h.addRequests(m.requests)
 		h.addMembers(m.members)
-	case officeAppArtifacts:
+	case channelui.OfficeAppArtifacts:
 		h.addTasks(m.tasks)
 		h.addRequests(m.requests)
 		h.addActions(m.actions)
 		h.addInt64(time.Now().Unix() / 10)
-	case officeAppSkills:
+	case channelui.OfficeAppSkills:
 		h.addSkills(m.skills)
 	}
 	return h.sum()
 }
 
-func hashSidebarState(channels []channelInfo, members []channelMember, tasks []channelTask, activeChannel string, activeApp officeApp, cursor int, rosterOffset int, focused bool, quickJump quickJumpTarget, workspace workspaceUIState, width, height int) uint64 {
+func hashSidebarState(channels []channelui.ChannelInfo, members []channelui.Member, tasks []channelui.Task, activeChannel string, activeApp channelui.OfficeApp, cursor int, rosterOffset int, focused bool, quickJump quickJumpTarget, workspace channelui.WorkspaceUIState, width, height int) uint64 {
 	h := newStateHasher()
 	h.add("sidebar")
 	h.addInt(width)
@@ -208,23 +210,23 @@ func hashSidebarState(channels []channelInfo, members []channelMember, tasks []c
 	return h.sum()
 }
 
-func (c *channelRenderCacheStore) getMainLines(key uint64) ([]renderedLine, bool) {
+func (c *channelRenderCacheStore) getMainLines(key uint64) ([]channelui.RenderedLine, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	lines, ok := c.mainLines[key]
 	if !ok {
 		return nil, false
 	}
-	return cloneRenderedLines(lines), true
+	return channelui.CloneRenderedLines(lines), true
 }
 
-func (c *channelRenderCacheStore) putMainLines(key uint64, lines []renderedLine) {
+func (c *channelRenderCacheStore) putMainLines(key uint64, lines []channelui.RenderedLine) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if len(c.mainLines) >= mainLinesCacheLimit {
-		c.mainLines = make(map[uint64][]renderedLine)
+		c.mainLines = make(map[uint64][]channelui.RenderedLine)
 	}
-	c.mainLines[key] = cloneRenderedLines(lines)
+	c.mainLines[key] = channelui.CloneRenderedLines(lines)
 }
 
 func (c *channelRenderCacheStore) getSidebar(key uint64) (string, bool) {
@@ -259,42 +261,42 @@ func (c *channelRenderCacheStore) putMarkdown(key uint64, rendered string) {
 	c.markdown[key] = rendered
 }
 
-func (c *channelRenderCacheStore) getThreaded(key uint64) ([]threadedMessage, bool) {
+func (c *channelRenderCacheStore) getThreaded(key uint64) ([]channelui.ThreadedMessage, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	items, ok := c.threaded[key]
 	if !ok {
 		return nil, false
 	}
-	return cloneThreadedMessages(items), true
+	return channelui.CloneThreadedMessages(items), true
 }
 
-func (c *channelRenderCacheStore) putThreaded(key uint64, items []threadedMessage) {
+func (c *channelRenderCacheStore) putThreaded(key uint64, items []channelui.ThreadedMessage) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if len(c.threaded) >= threadedCacheLimit {
-		c.threaded = make(map[uint64][]threadedMessage)
+		c.threaded = make(map[uint64][]channelui.ThreadedMessage)
 	}
-	c.threaded[key] = cloneThreadedMessages(items)
+	c.threaded[key] = channelui.CloneThreadedMessages(items)
 }
 
-func (c *channelRenderCacheStore) getViewportBlock(key uint64) ([]renderedLine, bool) {
+func (c *channelRenderCacheStore) getViewportBlock(key uint64) ([]channelui.RenderedLine, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	lines, ok := c.blocks[key]
 	if !ok {
 		return nil, false
 	}
-	return cloneRenderedLines(lines), true
+	return channelui.CloneRenderedLines(lines), true
 }
 
-func (c *channelRenderCacheStore) putViewportBlock(key uint64, lines []renderedLine) {
+func (c *channelRenderCacheStore) putViewportBlock(key uint64, lines []channelui.RenderedLine) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if len(c.blocks) >= viewportBlockLimit {
-		c.blocks = make(map[uint64][]renderedLine)
+		c.blocks = make(map[uint64][]channelui.RenderedLine)
 	}
-	c.blocks[key] = cloneRenderedLines(lines)
+	c.blocks[key] = channelui.CloneRenderedLines(lines)
 }
 
 func (c *channelRenderCacheStore) renderer(width int) (*glamour.TermRenderer, error) {
@@ -349,7 +351,7 @@ func (s stateHasher) sum() uint64 {
 	return s.h.Sum64()
 }
 
-func (s stateHasher) addMessages(messages []brokerMessage) {
+func (s stateHasher) addMessages(messages []channelui.BrokerMessage) {
 	s.addInt(len(messages))
 	for _, msg := range messages {
 		s.add(msg.ID, msg.From, msg.Kind, msg.Source, msg.Title, msg.ReplyTo, msg.Timestamp, msg.Content)
@@ -372,7 +374,7 @@ func (s stateHasher) addExpandedThreads(expanded map[string]bool) {
 	s.add(strings.Join(keys, ","))
 }
 
-func (s stateHasher) addMembers(members []channelMember) {
+func (s stateHasher) addMembers(members []channelui.Member) {
 	s.addInt(len(members))
 	for _, member := range members {
 		s.add(member.Slug, member.Name, member.Role, member.LastMessage, member.LastTime, member.LiveActivity)
@@ -380,7 +382,7 @@ func (s stateHasher) addMembers(members []channelMember) {
 	}
 }
 
-func (s stateHasher) addChannels(channels []channelInfo) {
+func (s stateHasher) addChannels(channels []channelui.ChannelInfo) {
 	s.addInt(len(channels))
 	for _, channel := range channels {
 		s.add(channel.Slug, channel.Name, channel.Description)
@@ -389,14 +391,14 @@ func (s stateHasher) addChannels(channels []channelInfo) {
 	}
 }
 
-func (s stateHasher) addTasks(tasks []channelTask) {
+func (s stateHasher) addTasks(tasks []channelui.Task) {
 	s.addInt(len(tasks))
 	for _, task := range tasks {
 		s.add(task.ID, task.Channel, task.Title, task.Owner, task.Status, task.TaskType, task.PipelineStage, task.ExecutionMode, task.ReviewState, task.DueAt, task.UpdatedAt)
 	}
 }
 
-func (s stateHasher) addActions(actions []channelAction) {
+func (s stateHasher) addActions(actions []channelui.Action) {
 	s.addInt(len(actions))
 	for _, action := range actions {
 		s.add(action.ID, action.Kind, action.Source, action.Channel, action.Actor, action.Summary, action.RelatedID, action.DecisionID, action.CreatedAt)
@@ -404,7 +406,7 @@ func (s stateHasher) addActions(actions []channelAction) {
 	}
 }
 
-func (s stateHasher) addRequests(requests []channelInterview) {
+func (s stateHasher) addRequests(requests []channelui.Interview) {
 	s.addInt(len(requests))
 	for _, req := range requests {
 		s.add(req.ID, req.Kind, req.Status, req.From, req.Channel, req.Title, req.Question, req.Context, req.RecommendedID, req.ReplyTo, req.CreatedAt, req.DueAt, req.FollowUpAt, req.ReminderAt, req.RecheckAt)
@@ -417,7 +419,7 @@ func (s stateHasher) addRequests(requests []channelInterview) {
 	}
 }
 
-func (s stateHasher) addDecisions(decisions []channelDecision) {
+func (s stateHasher) addDecisions(decisions []channelui.Decision) {
 	s.addInt(len(decisions))
 	for _, decision := range decisions {
 		s.add(decision.ID, decision.Kind, decision.Channel, decision.Summary, decision.Reason, decision.Owner, decision.CreatedAt)
@@ -427,7 +429,7 @@ func (s stateHasher) addDecisions(decisions []channelDecision) {
 	}
 }
 
-func (s stateHasher) addSignals(signals []channelSignal) {
+func (s stateHasher) addSignals(signals []channelui.Signal) {
 	s.addInt(len(signals))
 	for _, signal := range signals {
 		s.add(signal.ID, signal.Source, signal.SourceRef, signal.Kind, signal.Title, signal.Content, signal.Channel, signal.Owner, signal.Confidence, signal.Urgency, signal.DedupeKey, signal.CreatedAt)
@@ -436,14 +438,14 @@ func (s stateHasher) addSignals(signals []channelSignal) {
 	}
 }
 
-func (s stateHasher) addWatchdogs(alerts []channelWatchdog) {
+func (s stateHasher) addWatchdogs(alerts []channelui.Watchdog) {
 	s.addInt(len(alerts))
 	for _, alert := range alerts {
 		s.add(alert.ID, alert.Kind, alert.Channel, alert.TargetType, alert.TargetID, alert.Owner, alert.Status, alert.Summary, alert.CreatedAt, alert.UpdatedAt)
 	}
 }
 
-func (s stateHasher) addScheduler(jobs []channelSchedulerJob) {
+func (s stateHasher) addScheduler(jobs []channelui.SchedulerJob) {
 	s.addInt(len(jobs))
 	for _, job := range jobs {
 		s.add(job.Slug, job.Label, job.Kind, job.TargetType, job.TargetID, job.Channel, job.Provider, job.ScheduleExpr, job.WorkflowKey, job.SkillName, job.DueAt, job.NextRun, job.LastRun, job.Status)
@@ -451,7 +453,7 @@ func (s stateHasher) addScheduler(jobs []channelSchedulerJob) {
 	}
 }
 
-func (s stateHasher) addSkills(skills []channelSkill) {
+func (s stateHasher) addSkills(skills []channelui.Skill) {
 	s.addInt(len(skills))
 	for _, skill := range skills {
 		s.add(skill.ID, skill.Name, skill.Title, skill.Description, skill.Channel, skill.WorkflowProvider, skill.WorkflowKey, skill.WorkflowSchedule, skill.RelayID, skill.RelayPlatform, skill.LastExecutionAt, skill.LastExecutionStatus, skill.Status, skill.UpdatedAt)

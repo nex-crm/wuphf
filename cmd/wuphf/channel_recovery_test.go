@@ -5,10 +5,12 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/nex-crm/wuphf/cmd/wuphf/channelui"
 )
 
 func TestResolveInitialOfficeAppSupportsRecovery(t *testing.T) {
-	if got := resolveInitialOfficeApp("recovery"); got != officeAppRecovery {
+	if got := channelui.ResolveInitialOfficeApp("recovery"); got != channelui.OfficeAppRecovery {
 		t.Fatalf("expected recovery app, got %q", got)
 	}
 }
@@ -23,7 +25,7 @@ func TestRecoverCommandSwitchesToRecoveryApp(t *testing.T) {
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	got := next.(channelModel)
 
-	if got.activeApp != officeAppRecovery {
+	if got.activeApp != channelui.OfficeAppRecovery {
 		t.Fatalf("expected recovery app, got %q", got.activeApp)
 	}
 	if !strings.Contains(got.notice, "recovery summary") {
@@ -34,7 +36,7 @@ func TestRecoverCommandSwitchesToRecoveryApp(t *testing.T) {
 func TestCurrentAwaySummaryUsesRecoveryFocus(t *testing.T) {
 	m := newChannelModel(false)
 	m.unreadCount = 3
-	m.requests = []channelInterview{
+	m.requests = []channelui.Interview{
 		{
 			ID:       "req-1",
 			Title:    "Review launch scope",
@@ -58,19 +60,19 @@ func TestBuildRecoveryLinesShowsSummaryAndHighlights(t *testing.T) {
 	m := newChannelModel(false)
 	m.brokerConnected = true
 	m.unreadCount = 4
-	m.tasks = []channelTask{
+	m.tasks = []channelui.Task{
 		{ID: "task-1", Title: "Ship launch checklist", Owner: "pm", Status: "in_progress", ExecutionMode: "local_worktree", WorktreePath: "/tmp/wuphf-task-1"},
 	}
-	m.requests = []channelInterview{
+	m.requests = []channelui.Interview{
 		{ID: "req-1", Title: "Review launch scope", Question: "Review the launch scope", From: "ceo", Blocking: true, Status: "pending"},
 	}
-	m.messages = []brokerMessage{
+	m.messages = []channelui.BrokerMessage{
 		{ID: "msg-1", From: "ceo", Content: "Need final scope review before launch.", Timestamp: "2026-04-06T10:00:00Z"},
 		{ID: "msg-2", From: "pm", Content: "Checklist is nearly ready.", Timestamp: "2026-04-06T10:01:00Z"},
 	}
 
 	workspace := m.currentWorkspaceUIState()
-	lines := buildRecoveryLines(workspace, 88, m.tasks, m.requests, m.messages)
+	lines := channelui.BuildRecoveryLines(workspace, 88, m.tasks, m.requests, m.messages)
 	plain := stripANSI(joinRenderedLines(lines))
 
 	if !strings.Contains(plain, "What changed while you were gone") {
@@ -92,13 +94,13 @@ func TestBuildRecoveryLinesShowsSummaryAndHighlights(t *testing.T) {
 
 func TestBuildRecoveryLinesIncludesTranscriptSurgeryActions(t *testing.T) {
 	m := newChannelModel(false)
-	m.tasks = []channelTask{
+	m.tasks = []channelui.Task{
 		{ID: "task-1", Title: "Ship launch checklist", Owner: "pm", Status: "in_progress"},
 	}
-	m.requests = []channelInterview{
+	m.requests = []channelui.Interview{
 		{ID: "req-1", Title: "Review launch scope", Question: "Review the launch scope", From: "ceo", Blocking: true, Status: "pending"},
 	}
-	m.messages = []brokerMessage{
+	m.messages = []channelui.BrokerMessage{
 		{ID: "msg-1", From: "ceo", Content: "Need final scope review before launch.", Timestamp: "2026-04-06T10:00:00Z"},
 		{ID: "msg-2", From: "pm", Content: "Checklist is nearly ready.", ReplyTo: "msg-1", Timestamp: "2026-04-06T10:01:00Z"},
 	}

@@ -3,6 +3,8 @@ package main
 import (
 	"strings"
 	"testing"
+
+	"github.com/nex-crm/wuphf/cmd/wuphf/channelui"
 )
 
 func TestNormalizeMailboxScopeAcceptsKnownScopes(t *testing.T) {
@@ -16,92 +18,92 @@ func TestNormalizeMailboxScopeAcceptsKnownScopes(t *testing.T) {
 		"random":  "",
 	}
 	for input, want := range cases {
-		if got := normalizeMailboxScope(input); got != want {
-			t.Errorf("normalizeMailboxScope(%q) = %q, want %q", input, got, want)
+		if got := channelui.NormalizeMailboxScope(input); got != want {
+			t.Errorf("channelui.NormalizeMailboxScope(%q) = %q, want %q", input, got, want)
 		}
 	}
 }
 
 func TestMailboxOutboxOnlyOwnedByViewer(t *testing.T) {
-	msg := brokerMessage{ID: "m1", From: "fe", Content: "hi"}
-	if !mailboxMessageBelongsToViewerOutbox(msg, "fe") {
+	msg := channelui.BrokerMessage{ID: "m1", From: "fe", Content: "hi"}
+	if !channelui.MailboxMessageBelongsToViewerOutbox(msg, "fe") {
 		t.Fatalf("viewer's own message should be in their outbox")
 	}
-	if mailboxMessageBelongsToViewerOutbox(msg, "be") {
+	if channelui.MailboxMessageBelongsToViewerOutbox(msg, "be") {
 		t.Fatalf("other-author message should not be in viewer outbox")
 	}
-	if mailboxMessageBelongsToViewerOutbox(msg, "") {
+	if channelui.MailboxMessageBelongsToViewerOutbox(msg, "") {
 		t.Fatalf("empty viewer should never match")
 	}
 }
 
 func TestMailboxInboxIncludesHumanAndDirectTags(t *testing.T) {
-	idx := map[string]brokerMessage{}
+	idx := map[string]channelui.BrokerMessage{}
 
-	human := brokerMessage{ID: "m1", From: "human", Content: "ping"}
-	if !mailboxMessageBelongsToViewerInbox(human, "fe", idx) {
+	human := channelui.BrokerMessage{ID: "m1", From: "human", Content: "ping"}
+	if !channelui.MailboxMessageBelongsToViewerInbox(human, "fe", idx) {
 		t.Fatalf("messages from human should land in any agent's inbox")
 	}
 
-	directTag := brokerMessage{ID: "m2", From: "ceo", Content: "do this", Tagged: []string{"fe"}}
-	if !mailboxMessageBelongsToViewerInbox(directTag, "fe", idx) {
+	directTag := channelui.BrokerMessage{ID: "m2", From: "ceo", Content: "do this", Tagged: []string{"fe"}}
+	if !channelui.MailboxMessageBelongsToViewerInbox(directTag, "fe", idx) {
 		t.Fatalf("messages tagging the viewer should land in their inbox")
 	}
 
-	allTag := brokerMessage{ID: "m3", From: "ceo", Content: "team-wide", Tagged: []string{"all"}}
-	if !mailboxMessageBelongsToViewerInbox(allTag, "fe", idx) {
+	allTag := channelui.BrokerMessage{ID: "m3", From: "ceo", Content: "team-wide", Tagged: []string{"all"}}
+	if !channelui.MailboxMessageBelongsToViewerInbox(allTag, "fe", idx) {
 		t.Fatalf("messages tagged @all should land in every viewer's inbox")
 	}
 
-	own := brokerMessage{ID: "m4", From: "fe", Content: "self"}
-	if mailboxMessageBelongsToViewerInbox(own, "fe", idx) {
+	own := channelui.BrokerMessage{ID: "m4", From: "fe", Content: "self"}
+	if channelui.MailboxMessageBelongsToViewerInbox(own, "fe", idx) {
 		t.Fatalf("own messages must not appear in viewer's inbox lane")
 	}
 
-	other := brokerMessage{ID: "m5", From: "be", Content: "tagged elsewhere", Tagged: []string{"pm"}}
-	if mailboxMessageBelongsToViewerInbox(other, "fe", idx) {
+	other := channelui.BrokerMessage{ID: "m5", From: "be", Content: "tagged elsewhere", Tagged: []string{"pm"}}
+	if channelui.MailboxMessageBelongsToViewerInbox(other, "fe", idx) {
 		t.Fatalf("messages tagging someone else should not be in viewer's inbox")
 	}
 }
 
 func TestMailboxInboxFollowsThreadReplies(t *testing.T) {
-	root := brokerMessage{ID: "root", From: "fe", Content: "viewer wrote this"}
-	reply := brokerMessage{ID: "r1", From: "be", Content: "reply", ReplyTo: "root"}
-	idx := map[string]brokerMessage{"root": root, "r1": reply}
+	root := channelui.BrokerMessage{ID: "root", From: "fe", Content: "viewer wrote this"}
+	reply := channelui.BrokerMessage{ID: "r1", From: "be", Content: "reply", ReplyTo: "root"}
+	idx := map[string]channelui.BrokerMessage{"root": root, "r1": reply}
 
-	if !mailboxMessageBelongsToViewerInbox(reply, "fe", idx) {
+	if !channelui.MailboxMessageBelongsToViewerInbox(reply, "fe", idx) {
 		t.Fatalf("a reply to viewer's message should be inbox-bound")
 	}
 
 	// Cycle protection: msg replies to itself.
-	cycle := brokerMessage{ID: "c1", From: "be", Content: "loop", ReplyTo: "c1"}
-	cycleIdx := map[string]brokerMessage{"c1": cycle}
-	if mailboxMessageBelongsToViewerInbox(cycle, "fe", cycleIdx) {
+	cycle := channelui.BrokerMessage{ID: "c1", From: "be", Content: "loop", ReplyTo: "c1"}
+	cycleIdx := map[string]channelui.BrokerMessage{"c1": cycle}
+	if channelui.MailboxMessageBelongsToViewerInbox(cycle, "fe", cycleIdx) {
 		t.Fatalf("self-cycle reply should not match anyone's inbox")
 	}
 }
 
 func TestFilterMessagesForViewerScopeUnknownScopeReturnsCopy(t *testing.T) {
-	msgs := []brokerMessage{{ID: "a", From: "fe"}, {ID: "b", From: "be"}}
-	got := filterMessagesForViewerScope(msgs, "fe", "")
+	msgs := []channelui.BrokerMessage{{ID: "a", From: "fe"}, {ID: "b", From: "be"}}
+	got := channelui.FilterMessagesForViewerScope(msgs, "fe", "")
 	if len(got) != 2 {
 		t.Fatalf("empty scope should pass everything through, got %d", len(got))
 	}
 	// Verify it returns a copy, not the same backing array.
 	got[0].ID = "mutated"
 	if msgs[0].ID == "mutated" {
-		t.Fatalf("filterMessagesForViewerScope must not share backing array")
+		t.Fatalf("channelui.FilterMessagesForViewerScope must not share backing array")
 	}
 }
 
 func TestFilterMessagesForViewerScopeAgentMode(t *testing.T) {
-	msgs := []brokerMessage{
+	msgs := []channelui.BrokerMessage{
 		{ID: "a", From: "fe", Content: "viewer wrote"},                   // outbox
 		{ID: "b", From: "human", Content: "human ping"},                  // inbox (human)
 		{ID: "c", From: "be", Content: "tag fe", Tagged: []string{"fe"}}, // inbox (tagged)
 		{ID: "d", From: "be", Content: "for someone else", Tagged: []string{"pm"}},
 	}
-	got := filterMessagesForViewerScope(msgs, "fe", "agent")
+	got := channelui.FilterMessagesForViewerScope(msgs, "fe", "agent")
 	ids := map[string]bool{}
 	for _, m := range got {
 		ids[m.ID] = true
@@ -126,7 +128,7 @@ func TestBuildInboxLinesEmptyShowsCoachingCopy(t *testing.T) {
 }
 
 func TestBuildInboxLinesShowsRequestsAndMessages(t *testing.T) {
-	requests := []channelInterview{{
+	requests := []channelui.Interview{{
 		ID:        "req-1",
 		Kind:      "decision",
 		From:      "ceo",
@@ -134,7 +136,7 @@ func TestBuildInboxLinesShowsRequestsAndMessages(t *testing.T) {
 		Context:   "Need green light",
 		CreatedAt: "2026-04-29T10:00:00Z",
 	}}
-	messages := []brokerMessage{{
+	messages := []channelui.BrokerMessage{{
 		ID:        "m1",
 		From:      "ceo",
 		Content:   "FYI here is the plan",
@@ -168,13 +170,13 @@ func TestBuildOutboxLinesEmptyShowsCoachingCopy(t *testing.T) {
 }
 
 func TestBuildOutboxLinesShowsAuthoredMessagesAndActions(t *testing.T) {
-	messages := []brokerMessage{{
+	messages := []channelui.BrokerMessage{{
 		ID:        "m1",
 		From:      "fe",
 		Content:   "Shipped the homepage update",
 		Timestamp: "2026-04-29T10:00:00Z",
 	}}
-	actions := []channelAction{{
+	actions := []channelui.Action{{
 		ID:        "a1",
 		Kind:      "github_pr_opened",
 		Summary:   "Opened PR #42",

@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/nex-crm/wuphf/cmd/wuphf/channelui"
 )
 
 // brokerStub stands up an httptest.Server, points the broker base URL at it
@@ -256,7 +258,7 @@ func TestCancelRequestSurfacesNon2xxBody(t *testing.T) {
 		_, _ = w.Write([]byte("already cancelled"))
 	}))
 
-	interview := channelInterview{ID: "req-1"}
+	interview := channelui.Interview{ID: "req-1"}
 	msg := cancelRequest(interview)().(channelCancelDoneMsg)
 	if msg.err == nil || msg.err.Error() != "already cancelled" {
 		t.Fatalf("expected 'already cancelled' error, got %v", msg.err)
@@ -271,7 +273,7 @@ func TestCancelRequestEmptyBodyUsesStatus(t *testing.T) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 
-	msg := cancelRequest(channelInterview{ID: "req-2"})().(channelCancelDoneMsg)
+	msg := cancelRequest(channelui.Interview{ID: "req-2"})().(channelCancelDoneMsg)
 	if msg.err == nil {
 		t.Fatalf("expected error for empty 5xx body")
 	}
@@ -292,7 +294,7 @@ func TestPostInterviewAnswerSendsChoiceAndCustomText(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
-	msg := postInterviewAnswer(channelInterview{ID: "req-7"}, "yes", "Yes", "with this twist")().(channelInterviewAnswerDoneMsg)
+	msg := postInterviewAnswer(channelui.Interview{ID: "req-7"}, "yes", "Yes", "with this twist")().(channelInterviewAnswerDoneMsg)
 	if msg.err != nil {
 		t.Fatalf("expected nil err, got %v", msg.err)
 	}
@@ -308,7 +310,7 @@ func TestPostInterviewAnswerSurfacesErrorBody(t *testing.T) {
 		_, _ = w.Write([]byte("not allowed"))
 	}))
 
-	msg := postInterviewAnswer(channelInterview{ID: "req-8"}, "no", "No", "")().(channelInterviewAnswerDoneMsg)
+	msg := postInterviewAnswer(channelui.Interview{ID: "req-8"}, "no", "No", "")().(channelInterviewAnswerDoneMsg)
 	if msg.err == nil || msg.err.Error() != "not allowed" {
 		t.Fatalf("expected 'not allowed' error, got %v", msg.err)
 	}

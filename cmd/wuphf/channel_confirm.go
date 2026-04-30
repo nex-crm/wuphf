@@ -6,35 +6,36 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/nex-crm/wuphf/cmd/wuphf/channelui"
 	"github.com/nex-crm/wuphf/internal/team"
 )
 
-func (m channelModel) confirmationForReset() *channelConfirm {
+func (m channelModel) confirmationForReset() *channelui.ChannelConfirm {
 	title := "Reset Office Session"
 	detail := "This clears the live office transcript and refreshes all team panes in place."
 	if m.isOneOnOne() {
 		title = "Reset Direct Session"
 		detail = fmt.Sprintf("This clears the direct transcript with %s and reloads the direct pane in place.", m.oneOnOneAgentName())
 	}
-	return &channelConfirm{
+	return &channelui.ChannelConfirm{
 		Title:        title,
 		Detail:       detail,
 		ConfirmLabel: "Enter reset now",
 		CancelLabel:  "Esc keep working",
-		Action:       confirmActionResetTeam,
+		Action:       channelui.ChannelConfirmActionResetTeam,
 		SessionMode:  m.sessionMode,
 		Agent:        m.oneOnOneAgent,
 	}
 }
 
-func confirmationForSessionSwitch(mode, agent string) *channelConfirm {
+func confirmationForSessionSwitch(mode, agent string) *channelui.ChannelConfirm {
 	mode = strings.TrimSpace(mode)
 	agent = strings.TrimSpace(agent)
 	var title, detail string
 	if team.NormalizeSessionMode(mode) == team.SessionModeOneOnOne {
-		name := displayName(agent)
+		name := channelui.DisplayName(agent)
 		if agent == "" {
-			name = displayName(team.DefaultOneOnOneAgent)
+			name = channelui.DisplayName(team.DefaultOneOnOneAgent)
 		}
 		title = "Enter Direct Session"
 		detail = fmt.Sprintf("This leaves the shared office view and zooms into a direct session with %s.", name)
@@ -42,33 +43,33 @@ func confirmationForSessionSwitch(mode, agent string) *channelConfirm {
 		title = "Return To Main Office"
 		detail = "This exits direct mode and restores the shared office session."
 	}
-	return &channelConfirm{
+	return &channelui.ChannelConfirm{
 		Title:        title,
 		Detail:       detail,
 		ConfirmLabel: "Enter switch now",
 		CancelLabel:  "Esc stay here",
-		Action:       confirmActionSwitchMode,
+		Action:       channelui.ChannelConfirmActionSwitchMode,
 		SessionMode:  mode,
 		Agent:        agent,
 	}
 }
 
-func (m channelModel) executeConfirmation(confirm channelConfirm) (tea.Model, tea.Cmd) {
+func (m channelModel) executeConfirmation(confirm channelui.ChannelConfirm) (tea.Model, tea.Cmd) {
 	switch confirm.Action {
-	case confirmActionResetTeam:
+	case channelui.ChannelConfirmActionResetTeam:
 		m.confirm = nil
 		m.notice = ""
 		m.posting = true
 		return m, resetTeamSession(m.isOneOnOne())
-	case confirmActionResetDM:
+	case channelui.ChannelConfirmActionResetDM:
 		m.confirm = nil
 		m.posting = true
 		return m, resetDMSession(confirm.Agent, confirm.Channel)
-	case confirmActionSwitchMode:
+	case channelui.ChannelConfirmActionSwitchMode:
 		m.confirm = nil
 		m.posting = true
 		return m, switchSessionMode(confirm.SessionMode, confirm.Agent)
-	case confirmActionSubmitRequest:
+	case channelui.ChannelConfirmActionSubmitRequest:
 		m.confirm = nil
 		m.notice = ""
 		m.posting = true

@@ -13,6 +13,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/nex-crm/wuphf/cmd/wuphf/channelui"
 	"github.com/nex-crm/wuphf/internal/team"
 )
 
@@ -58,7 +59,7 @@ func (m channelModel) submitMemberDraft() (tea.Model, tea.Cmd) {
 			m.notice = "Slug is required."
 			return m, nil
 		}
-		draft.Slug = normalizeDraftSlug(value)
+		draft.Slug = channelui.NormalizeDraftSlug(value)
 		if draft.Slug == "ceo" {
 			m.notice = "CEO is reserved."
 			return m, nil
@@ -215,7 +216,7 @@ func mutateOfficeMemberSpec(draft channelMemberDraft, activeChannel string) tea.
 			"slug":            draft.Slug,
 			"name":            draft.Name,
 			"role":            draft.Role,
-			"expertise":       parseExpertiseInput(draft.Expertise),
+			"expertise":       channelui.ParseExpertiseInput(draft.Expertise),
 			"personality":     draft.Personality,
 			"permission_mode": strings.TrimSpace(draft.PermissionMode),
 			"created_by":      "you",

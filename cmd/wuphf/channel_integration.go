@@ -15,6 +15,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/nex-crm/wuphf/cmd/wuphf/channelui"
 	"github.com/nex-crm/wuphf/internal/api"
 	"github.com/nex-crm/wuphf/internal/company"
 	"github.com/nex-crm/wuphf/internal/config"
@@ -60,11 +61,11 @@ func connectIntegration(spec channelIntegrationSpec) tea.Cmd {
 			return channelIntegrationDoneMsg{err: err}
 		}
 
-		authURL := mapString(result, "auth_url")
+		authURL := channelui.MapString(result, "auth_url")
 		if authURL != "" {
-			_ = openBrowserURL(authURL)
+			_ = channelui.OpenBrowserURL(authURL)
 		}
-		connectID := mapString(result, "connect_id")
+		connectID := channelui.MapString(result, "connect_id")
 		if connectID == "" {
 			return channelIntegrationDoneMsg{label: spec.Label, url: authURL}
 		}
@@ -83,12 +84,12 @@ func connectIntegration(spec channelIntegrationSpec) tea.Cmd {
 				}
 				continue
 			}
-			status := strings.ToLower(mapString(statusResp, "status"))
+			status := strings.ToLower(channelui.MapString(statusResp, "status"))
 			switch status {
 			case "connected", "complete", "completed", "active":
 				return channelIntegrationDoneMsg{label: spec.Label, url: authURL}
 			case "failed", "error":
-				reason := mapString(statusResp, "error")
+				reason := channelui.MapString(statusResp, "error")
 				if reason == "" {
 					reason = status
 				}

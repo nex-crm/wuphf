@@ -4,25 +4,27 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/nex-crm/wuphf/cmd/wuphf/channelui"
 )
 
-func buildOfficeMessageLines(messages []brokerMessage, expanded map[string]bool, contentWidth int, threadsDefaultExpand bool, unreadAnchorID string, unreadCount int) []renderedLine {
-	mutedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(slackMuted))
+func buildOfficeMessageLines(messages []channelui.BrokerMessage, expanded map[string]bool, contentWidth int, threadsDefaultExpand bool, unreadAnchorID string, unreadCount int) []channelui.RenderedLine {
+	mutedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(channelui.SlackMuted))
 
-	var lines []renderedLine
+	var lines []channelui.RenderedLine
 	if len(messages) == 0 {
 		lines = append(lines,
-			renderedLine{Text: ""},
-			renderedLine{Text: mutedStyle.Render("  Welcome to The WUPHF Office. The cast is assembled.")},
-			renderedLine{Text: mutedStyle.Render("  Drop a company-building thought in #general, or tag a teammate to get things moving.")},
-			renderedLine{Text: ""},
-			renderedLine{Text: mutedStyle.Render("  Suggested: Let's build an AI notetaking company. (Ryan Howard would've called it NoteWUPHF.)")},
-			renderedLine{Text: mutedStyle.Render("  The CEO triages first, then the right specialists pile in — unlike the original WUPHF.com, this ships.")},
+			channelui.RenderedLine{Text: ""},
+			channelui.RenderedLine{Text: mutedStyle.Render("  Welcome to The WUPHF Office. The cast is assembled.")},
+			channelui.RenderedLine{Text: mutedStyle.Render("  Drop a company-building thought in #general, or tag a teammate to get things moving.")},
+			channelui.RenderedLine{Text: ""},
+			channelui.RenderedLine{Text: mutedStyle.Render("  Suggested: Let's build an AI notetaking company. (Ryan Howard would've called it NoteWUPHF.)")},
+			channelui.RenderedLine{Text: mutedStyle.Render("  The CEO triages first, then the right specialists pile in — unlike the original WUPHF.com, this ships.")},
 		)
 		return lines
 	}
 
-	lines = append(lines, renderedLine{Text: renderDateSeparator(contentWidth, "Today")})
+	lines = append(lines, channelui.RenderedLine{Text: channelui.RenderDateSeparator(contentWidth, "Today")})
 	for _, tm := range officeThreadedMessages(messages, expanded, threadsDefaultExpand) {
 		lines = append(lines, renderOfficeMessageBlock(tm, contentWidth, unreadAnchorID, unreadCount)...)
 	}
@@ -30,10 +32,10 @@ func buildOfficeMessageLines(messages []brokerMessage, expanded map[string]bool,
 	return lines
 }
 
-func buildOneOnOneMessageLines(messages []brokerMessage, expanded map[string]bool, contentWidth int, agentName string, unreadAnchorID string, unreadCount int) []renderedLine {
+func buildOneOnOneMessageLines(messages []channelui.BrokerMessage, expanded map[string]bool, contentWidth int, agentName string, unreadAnchorID string, unreadCount int) []channelui.RenderedLine {
 	if len(messages) == 0 {
-		mutedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(slackMuted))
-		return []renderedLine{
+		mutedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(channelui.SlackMuted))
+		return []channelui.RenderedLine{
 			{Text: ""},
 			{Text: mutedStyle.Render("  Conference room reserved. Direct session reset. Agent pane reloaded in place.")},
 			{Text: mutedStyle.Render("  No colleagues, no sidebar, no Toby. Just you and " + agentName + ".")},

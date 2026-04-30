@@ -1,20 +1,24 @@
 package main
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/nex-crm/wuphf/cmd/wuphf/channelui"
+)
 
 func freshCacheStore() *channelRenderCacheStore {
 	return &channelRenderCacheStore{
-		mainLines: make(map[uint64][]renderedLine),
+		mainLines: make(map[uint64][]channelui.RenderedLine),
 		sidebars:  make(map[uint64]string),
 		markdown:  make(map[uint64]string),
-		threaded:  make(map[uint64][]threadedMessage),
-		blocks:    make(map[uint64][]renderedLine),
+		threaded:  make(map[uint64][]channelui.ThreadedMessage),
+		blocks:    make(map[uint64][]channelui.RenderedLine),
 	}
 }
 
 func TestCacheStoreMainLinesRoundTripIsClone(t *testing.T) {
 	c := freshCacheStore()
-	original := []renderedLine{{Text: "one"}, {Text: "two"}}
+	original := []channelui.RenderedLine{{Text: "one"}, {Text: "two"}}
 	c.putMainLines(42, original)
 	got, ok := c.getMainLines(42)
 	if !ok || len(got) != 2 || got[0].Text != "one" {
@@ -54,13 +58,13 @@ func TestCacheStoreMissReturnsFalse(t *testing.T) {
 func TestCacheStoreMainLinesEvictsAtLimit(t *testing.T) {
 	c := freshCacheStore()
 	for i := 0; i < mainLinesCacheLimit; i++ {
-		c.putMainLines(uint64(i), []renderedLine{{Text: "x"}})
+		c.putMainLines(uint64(i), []channelui.RenderedLine{{Text: "x"}})
 	}
 	if len(c.mainLines) != mainLinesCacheLimit {
 		t.Fatalf("expected store at limit, got %d", len(c.mainLines))
 	}
 	// Insertion at the limit triggers a wipe before storing the new key.
-	c.putMainLines(9999, []renderedLine{{Text: "fresh"}})
+	c.putMainLines(9999, []channelui.RenderedLine{{Text: "fresh"}})
 	if _, ok := c.getMainLines(0); ok {
 		t.Fatalf("oldest entry should have been evicted on overflow")
 	}
@@ -95,7 +99,7 @@ func TestCacheStoreMarkdownEvictionAndRetrieval(t *testing.T) {
 
 func TestCacheStoreThreadedClones(t *testing.T) {
 	c := freshCacheStore()
-	original := []threadedMessage{{Message: brokerMessage{ID: "a"}, Depth: 0}}
+	original := []channelui.ThreadedMessage{{Message: channelui.BrokerMessage{ID: "a"}, Depth: 0}}
 	c.putThreaded(1, original)
 	got, ok := c.getThreaded(1)
 	if !ok || got[0].Message.ID != "a" {
@@ -131,16 +135,16 @@ func TestStateHasherStableForSameInputs(t *testing.T) {
 		h.addInt(7)
 		h.addInt64(42)
 		h.addBool(true)
-		h.addMessages([]brokerMessage{{ID: "m1", From: "fe", Content: "hi"}})
-		h.addMembers([]channelMember{{Slug: "fe", Name: "Frontend"}})
-		h.addChannels([]channelInfo{{Slug: "office", Name: "Office", Members: []string{"fe"}}})
-		h.addTasks([]channelTask{{ID: "t1", Title: "Ship"}})
-		h.addActions([]channelAction{{ID: "a1", Kind: "k", Summary: "did it"}})
-		h.addRequests([]channelInterview{{ID: "r1", Question: "?"}})
-		h.addDecisions([]channelDecision{{ID: "d1", Summary: "yes"}})
-		h.addSignals([]channelSignal{{ID: "s1", Content: "noise"}})
-		h.addWatchdogs([]channelWatchdog{{ID: "w1", Summary: "alert"}})
-		h.addScheduler([]channelSchedulerJob{{Slug: "j1", Label: "Hourly"}})
+		h.addMessages([]channelui.BrokerMessage{{ID: "m1", From: "fe", Content: "hi"}})
+		h.addMembers([]channelui.Member{{Slug: "fe", Name: "Frontend"}})
+		h.addChannels([]channelui.ChannelInfo{{Slug: "office", Name: "Office", Members: []string{"fe"}}})
+		h.addTasks([]channelui.Task{{ID: "t1", Title: "Ship"}})
+		h.addActions([]channelui.Action{{ID: "a1", Kind: "k", Summary: "did it"}})
+		h.addRequests([]channelui.Interview{{ID: "r1", Question: "?"}})
+		h.addDecisions([]channelui.Decision{{ID: "d1", Summary: "yes"}})
+		h.addSignals([]channelui.Signal{{ID: "s1", Content: "noise"}})
+		h.addWatchdogs([]channelui.Watchdog{{ID: "w1", Summary: "alert"}})
+		h.addScheduler([]channelui.SchedulerJob{{Slug: "j1", Label: "Hourly"}})
 		h.addExpandedThreads(map[string]bool{"a": true, "b": false, "c": true})
 		return h.sum()
 	}
@@ -153,10 +157,10 @@ func TestStateHasherStableForSameInputs(t *testing.T) {
 
 func TestStateHasherChangesWithMessages(t *testing.T) {
 	h1 := newStateHasher()
-	h1.addMessages([]brokerMessage{{ID: "m1", From: "fe", Content: "hello"}})
+	h1.addMessages([]channelui.BrokerMessage{{ID: "m1", From: "fe", Content: "hello"}})
 
 	h2 := newStateHasher()
-	h2.addMessages([]brokerMessage{{ID: "m1", From: "fe", Content: "goodbye"}})
+	h2.addMessages([]channelui.BrokerMessage{{ID: "m1", From: "fe", Content: "goodbye"}})
 
 	if h1.sum() == h2.sum() {
 		t.Fatalf("changing message content must change hash")
@@ -188,25 +192,25 @@ func TestStateHasherIgnoresUnexpandedThreads(t *testing.T) {
 }
 
 func TestCloneRenderedLinesIndependentOfSource(t *testing.T) {
-	src := []renderedLine{{Text: "a"}, {Text: "b"}}
-	clone := cloneRenderedLines(src)
+	src := []channelui.RenderedLine{{Text: "a"}, {Text: "b"}}
+	clone := channelui.CloneRenderedLines(src)
 	clone[0].Text = "mutated"
 	if src[0].Text != "a" {
 		t.Fatalf("clone must not share storage with source")
 	}
-	if got := cloneRenderedLines(nil); got != nil {
+	if got := channelui.CloneRenderedLines(nil); got != nil {
 		t.Fatalf("nil input should clone to nil")
 	}
 }
 
 func TestCloneThreadedMessagesIndependentOfSource(t *testing.T) {
-	src := []threadedMessage{{Message: brokerMessage{ID: "x"}}}
-	clone := cloneThreadedMessages(src)
+	src := []channelui.ThreadedMessage{{Message: channelui.BrokerMessage{ID: "x"}}}
+	clone := channelui.CloneThreadedMessages(src)
 	clone[0].Message.ID = "mutated"
 	if src[0].Message.ID != "x" {
 		t.Fatalf("clone must not share storage with source")
 	}
-	if got := cloneThreadedMessages(nil); got != nil {
+	if got := channelui.CloneThreadedMessages(nil); got != nil {
 		t.Fatalf("nil input should clone to nil")
 	}
 }

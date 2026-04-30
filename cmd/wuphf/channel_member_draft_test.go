@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/nex-crm/wuphf/cmd/wuphf/channelui"
 )
 
 func TestChannelMemberDraftCurrentStepClampsBounds(t *testing.T) {
@@ -38,14 +40,14 @@ func TestNormalizeDraftSlugLowercasesAndDashes(t *testing.T) {
 		"FOO_BAR  Baz":     "foo-bar--baz",
 	}
 	for input, want := range cases {
-		if got := normalizeDraftSlug(input); got != want {
-			t.Errorf("normalizeDraftSlug(%q) = %q, want %q", input, got, want)
+		if got := channelui.NormalizeDraftSlug(input); got != want {
+			t.Errorf("channelui.NormalizeDraftSlug(%q) = %q, want %q", input, got, want)
 		}
 	}
 }
 
 func TestParseExpertiseInputDedupesAndTrims(t *testing.T) {
-	got := parseExpertiseInput("Go,  React, Go,  ,Postgres ,React")
+	got := channelui.ParseExpertiseInput("Go,  React, Go,  ,Postgres ,React")
 	want := []string{"Go", "React", "Postgres"}
 	if len(got) != len(want) {
 		t.Fatalf("len mismatch: got %v want %v", got, want)
@@ -58,10 +60,10 @@ func TestParseExpertiseInputDedupesAndTrims(t *testing.T) {
 }
 
 func TestParseExpertiseInputEmpty(t *testing.T) {
-	if got := parseExpertiseInput(""); len(got) != 0 {
+	if got := channelui.ParseExpertiseInput(""); len(got) != 0 {
 		t.Fatalf("empty input should yield empty slice, got %v", got)
 	}
-	if got := parseExpertiseInput("   ,  ,"); len(got) != 0 {
+	if got := channelui.ParseExpertiseInput("   ,  ,"); len(got) != 0 {
 		t.Fatalf("whitespace-only input should yield empty slice, got %v", got)
 	}
 }

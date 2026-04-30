@@ -3,6 +3,8 @@ package main
 import (
 	"strings"
 	"testing"
+
+	"github.com/nex-crm/wuphf/cmd/wuphf/channelui"
 )
 
 func TestDefaultHumanMessageTitleByKind(t *testing.T) {
@@ -13,18 +15,18 @@ func TestDefaultHumanMessageTitleByKind(t *testing.T) {
 		"":               "has an update for you",
 	}
 	for kind, want := range cases {
-		got := defaultHumanMessageTitle(kind, "ceo")
+		got := channelui.DefaultHumanMessageTitle(kind, "ceo")
 		if !strings.Contains(got, want) {
-			t.Errorf("defaultHumanMessageTitle(%q, ceo) = %q, want substring %q", kind, got, want)
+			t.Errorf("channelui.DefaultHumanMessageTitle(%q, ceo) = %q, want substring %q", kind, got, want)
 		}
 	}
 }
 
 func TestSliceRenderedLinesScrollsFromBottom(t *testing.T) {
-	lines := []renderedLine{
+	lines := []channelui.RenderedLine{
 		{Text: "0"}, {Text: "1"}, {Text: "2"}, {Text: "3"}, {Text: "4"},
 	}
-	visible, scroll, start, end := sliceRenderedLines(lines, 3, 0)
+	visible, scroll, start, end := channelui.SliceRenderedLines(lines, 3, 0)
 	if scroll != 0 || start != 2 || end != 5 || len(visible) != 3 {
 		t.Fatalf("expected bottom 3 lines, got start=%d end=%d scroll=%d len=%d", start, end, scroll, len(visible))
 	}
@@ -34,8 +36,8 @@ func TestSliceRenderedLinesScrollsFromBottom(t *testing.T) {
 }
 
 func TestSliceRenderedLinesScrollClampsToBuffer(t *testing.T) {
-	lines := []renderedLine{{Text: "a"}, {Text: "b"}, {Text: "c"}, {Text: "d"}}
-	visible, scroll, start, _ := sliceRenderedLines(lines, 2, 99)
+	lines := []channelui.RenderedLine{{Text: "a"}, {Text: "b"}, {Text: "c"}, {Text: "d"}}
+	visible, scroll, start, _ := channelui.SliceRenderedLines(lines, 2, 99)
 	// scroll clamped: total - msgH = 4 - 2 = 2
 	if scroll != 2 {
 		t.Fatalf("expected scroll clamped to 2, got %d", scroll)
@@ -49,14 +51,14 @@ func TestSliceRenderedLinesScrollClampsToBuffer(t *testing.T) {
 }
 
 func TestSliceRenderedLinesEmptyInput(t *testing.T) {
-	visible, scroll, start, end := sliceRenderedLines(nil, 5, 0)
+	visible, scroll, start, end := channelui.SliceRenderedLines(nil, 5, 0)
 	if visible != nil || scroll != 0 || start != 0 || end != 0 {
 		t.Fatalf("empty input should return zero values, got %v %d %d %d", visible, scroll, start, end)
 	}
 }
 
 func TestBuildRequestLinesEmptyShowsCoachingCopy(t *testing.T) {
-	lines := buildRequestLines(nil, 80)
+	lines := channelui.BuildRequestLines(nil, 80)
 	plain := stripANSI(joinRenderedLines(lines))
 	if !strings.Contains(plain, "No open requests") {
 		t.Fatalf("expected empty-state message, got %q", plain)
@@ -64,7 +66,7 @@ func TestBuildRequestLinesEmptyShowsCoachingCopy(t *testing.T) {
 }
 
 func TestBuildRequestLinesIncludesQuestionAndContext(t *testing.T) {
-	requests := []channelInterview{{
+	requests := []channelui.Interview{{
 		ID:            "req-1",
 		Kind:          "decision",
 		From:          "ceo",
@@ -77,7 +79,7 @@ func TestBuildRequestLinesIncludesQuestionAndContext(t *testing.T) {
 		Required:      true,
 		CreatedAt:     "2026-04-29T09:00:00Z",
 	}}
-	lines := buildRequestLines(requests, 80)
+	lines := channelui.BuildRequestLines(requests, 80)
 	plain := stripANSI(joinRenderedLines(lines))
 	if !strings.Contains(plain, "Approve the rollout?") {
 		t.Fatalf("expected question, got %q", plain)
@@ -97,7 +99,7 @@ func TestBuildRequestLinesIncludesQuestionAndContext(t *testing.T) {
 }
 
 func TestBuildPolicyLinesEmptyShowsGuidance(t *testing.T) {
-	lines := buildPolicyLines(nil, nil, nil, nil, 80)
+	lines := channelui.BuildPolicyLines(nil, nil, nil, nil, 80)
 	plain := stripANSI(joinRenderedLines(lines))
 	if !strings.Contains(plain, "Insights") {
 		t.Fatalf("expected Insights header, got %q", plain)
@@ -108,10 +110,10 @@ func TestBuildPolicyLinesEmptyShowsGuidance(t *testing.T) {
 }
 
 func TestBuildPolicyLinesShowsSignalsDecisionsWatchdogs(t *testing.T) {
-	signals := []channelSignal{{ID: "s1", Title: "Spike", Content: "Latency rising", Owner: "be"}}
-	decisions := []channelDecision{{ID: "d1", Summary: "Roll forward", Reason: "Risk acceptable", Owner: "ceo"}}
-	watchdogs := []channelWatchdog{{ID: "w1", Summary: "Build flaking", Status: "active", Kind: "ci"}}
-	lines := buildPolicyLines(signals, decisions, watchdogs, nil, 80)
+	signals := []channelui.Signal{{ID: "s1", Title: "Spike", Content: "Latency rising", Owner: "be"}}
+	decisions := []channelui.Decision{{ID: "d1", Summary: "Roll forward", Reason: "Risk acceptable", Owner: "ceo"}}
+	watchdogs := []channelui.Watchdog{{ID: "w1", Summary: "Build flaking", Status: "active", Kind: "ci"}}
+	lines := channelui.BuildPolicyLines(signals, decisions, watchdogs, nil, 80)
 	plain := stripANSI(joinRenderedLines(lines))
 	if !strings.Contains(plain, "Spike") {
 		t.Fatalf("expected signal title, got %q", plain)

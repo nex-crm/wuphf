@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 
+	"github.com/nex-crm/wuphf/cmd/wuphf/channelui"
 	"github.com/nex-crm/wuphf/internal/tui"
 )
 
@@ -46,10 +47,10 @@ func (m channelModel) activeInteractionContext() channelInteractionContext {
 	}
 }
 
-func (m channelModel) composerHint(channelName, replyToID string, pending *channelInterview) string {
+func (m channelModel) composerHint(channelName, replyToID string, pending *channelui.Interview) string {
 	switch m.activeInteractionContext() {
 	case contextConfirm:
-		if m.confirm != nil && m.confirm.Action == confirmActionSubmitRequest {
+		if m.confirm != nil && m.confirm.Action == channelui.ChannelConfirmActionSubmitRequest {
 			return tui.ComposerHint(tui.ComposerHintState{
 				Context:          tui.ContextInterviewReview,
 				HistoryAvailable: m.inputHistory.Len() > 0,

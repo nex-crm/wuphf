@@ -13,28 +13,29 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/nex-crm/wuphf/cmd/wuphf/channelui"
 	"github.com/nex-crm/wuphf/internal/config"
 	"github.com/nex-crm/wuphf/internal/team"
 )
 
-func (m channelModel) buildArtifactLines(contentWidth int) []renderedLine {
-	lines := []renderedLine{{Text: renderDateSeparator(contentWidth, "Execution artifacts")}}
+func (m channelModel) buildArtifactLines(contentWidth int) []channelui.RenderedLine {
+	lines := []channelui.RenderedLine{{Text: channelui.RenderDateSeparator(contentWidth, "Execution artifacts")}}
 	snapshot := m.currentArtifactSnapshot(24)
 	artifacts := snapshot.Items
 
 	if len(artifacts) == 0 {
-		muted := lipgloss.NewStyle().Foreground(lipgloss.Color(slackMuted))
+		muted := lipgloss.NewStyle().Foreground(lipgloss.Color(channelui.SlackMuted))
 		return append(lines,
-			renderedLine{Text: ""},
-			renderedLine{Text: muted.Render("  No retained execution artifacts yet.")},
-			renderedLine{Text: muted.Render("  Task tool logs, workflow runs, and human decision traces will appear here.")},
+			channelui.RenderedLine{Text: ""},
+			channelui.RenderedLine{Text: muted.Render("  No retained execution artifacts yet.")},
+			channelui.RenderedLine{Text: muted.Render("  Task tool logs, workflow runs, and human decision traces will appear here.")},
 		)
 	}
 
-	lines = append(lines, renderArtifactSection(contentWidth, "Task execution", snapshot.Filter(team.RuntimeArtifactTask, team.RuntimeArtifactTaskLog))...)
-	lines = append(lines, renderArtifactSection(contentWidth, "Workflow runs", snapshot.Filter(team.RuntimeArtifactWorkflowRun))...)
-	lines = append(lines, renderArtifactSection(contentWidth, "Requests and approvals", snapshot.Filter(team.RuntimeArtifactRequest))...)
-	lines = append(lines, renderArtifactSection(contentWidth, "Action traces", snapshot.Filter(team.RuntimeArtifactHumanAction, team.RuntimeArtifactExternalAction))...)
+	lines = append(lines, channelui.RenderArtifactSection(contentWidth, "Task execution", snapshot.Filter(team.RuntimeArtifactTask, team.RuntimeArtifactTaskLog))...)
+	lines = append(lines, channelui.RenderArtifactSection(contentWidth, "Workflow runs", snapshot.Filter(team.RuntimeArtifactWorkflowRun))...)
+	lines = append(lines, channelui.RenderArtifactSection(contentWidth, "Requests and approvals", snapshot.Filter(team.RuntimeArtifactRequest))...)
+	lines = append(lines, channelui.RenderArtifactSection(contentWidth, "Action traces", snapshot.Filter(team.RuntimeArtifactHumanAction, team.RuntimeArtifactExternalAction))...)
 
 	return lines
 }
@@ -46,13 +47,13 @@ func (m channelModel) currentArtifactSummary() string {
 	requestCount := snapshot.Count(team.RuntimeArtifactRequest, team.RuntimeArtifactHumanAction, team.RuntimeArtifactExternalAction)
 	parts := make([]string, 0, 3)
 	if logCount > 0 {
-		parts = append(parts, fmt.Sprintf("%d %s", logCount, pluralizeWord(logCount, "task run", "task runs")))
+		parts = append(parts, fmt.Sprintf("%d %s", logCount, channelui.PluralizeWord(logCount, "task run", "task runs")))
 	}
 	if workflowCount > 0 {
-		parts = append(parts, fmt.Sprintf("%d %s", workflowCount, pluralizeWord(workflowCount, "workflow run", "workflow runs")))
+		parts = append(parts, fmt.Sprintf("%d %s", workflowCount, channelui.PluralizeWord(workflowCount, "workflow run", "workflow runs")))
 	}
 	if requestCount > 0 {
-		parts = append(parts, fmt.Sprintf("%d %s", requestCount, pluralizeWord(requestCount, "action trace", "action traces")))
+		parts = append(parts, fmt.Sprintf("%d %s", requestCount, channelui.PluralizeWord(requestCount, "action trace", "action traces")))
 	}
 	return strings.Join(parts, " · ")
 }
@@ -61,19 +62,19 @@ func (m channelModel) currentRuntimeArtifacts(limit int) []team.RuntimeArtifact 
 	return m.currentArtifactSnapshot(limit).Items
 }
 
-func (m channelModel) recentTaskLogArtifacts(limit int) []taskLogArtifact {
-	root := taskLogRoot()
+func (m channelModel) recentTaskLogArtifacts(limit int) []channelui.TaskLogArtifact {
+	root := channelui.TaskLogRoot()
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		return nil
 	}
 
-	taskIndex := make(map[string]channelTask, len(m.tasks))
+	taskIndex := make(map[string]channelui.Task, len(m.tasks))
 	for _, task := range m.tasks {
 		taskIndex[task.ID] = task
 	}
 
-	artifacts := make([]taskLogArtifact, 0, len(entries))
+	artifacts := make([]channelui.TaskLogArtifact, 0, len(entries))
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
@@ -103,10 +104,10 @@ func (m channelModel) recentTaskLogArtifacts(limit int) []taskLogArtifact {
 	return artifacts
 }
 
-func readTaskLogArtifact(path string, info fs.FileInfo) (taskLogArtifact, bool) {
+func readTaskLogArtifact(path string, info fs.FileInfo) (channelui.TaskLogArtifact, bool) {
 	f, err := os.Open(path)
 	if err != nil {
-		return taskLogArtifact{}, false
+		return channelui.TaskLogArtifact{}, false
 	}
 	defer func() { _ = f.Close() }()
 
@@ -125,14 +126,14 @@ func readTaskLogArtifact(path string, info fs.FileInfo) (taskLogArtifact, bool) 
 		entryCount++
 	}
 	if scanner.Err() != nil || last == "" {
-		return taskLogArtifact{}, false
+		return channelui.TaskLogArtifact{}, false
 	}
 
-	var record taskLogRecord
+	var record channelui.TaskLogRecord
 	if err := json.Unmarshal([]byte(last), &record); err != nil {
-		return taskLogArtifact{
+		return channelui.TaskLogArtifact{
 			TaskID:     filepath.Base(filepath.Dir(path)),
-			Summary:    truncateText(last, 160),
+			Summary:    channelui.TruncateText(last, 160),
 			LogPath:    path,
 			EntryCount: entryCount,
 			UpdatedAt:  info.ModTime(),
@@ -143,11 +144,11 @@ func readTaskLogArtifact(path string, info fs.FileInfo) (taskLogArtifact, bool) 
 	if taskID == "" {
 		taskID = filepath.Base(filepath.Dir(path))
 	}
-	return taskLogArtifact{
+	return channelui.TaskLogArtifact{
 		TaskID:      taskID,
 		AgentSlug:   strings.TrimSpace(record.AgentSlug),
 		ToolName:    strings.TrimSpace(record.ToolName),
-		Summary:     summarizeTaskLogRecord(record),
+		Summary:     channelui.SummarizeTaskLogRecord(record),
 		StartedAt:   strings.TrimSpace(record.StartedAt),
 		CompletedAt: strings.TrimSpace(record.CompletedAt),
 		LogPath:     path,
@@ -156,9 +157,9 @@ func readTaskLogArtifact(path string, info fs.FileInfo) (taskLogArtifact, bool) 
 	}, true
 }
 
-func recentWorkflowRunArtifacts(limit int) []workflowRunArtifact {
+func recentWorkflowRunArtifacts(limit int) []channelui.WorkflowRunArtifact {
 	root := filepath.Join(filepath.Dir(config.ConfigPath()), "workflows")
-	entries := []workflowRunArtifact{}
+	entries := []channelui.WorkflowRunArtifact{}
 	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			if errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrPermission) {
@@ -194,10 +195,10 @@ func recentWorkflowRunArtifacts(limit int) []workflowRunArtifact {
 	return entries
 }
 
-func readWorkflowRunArtifact(path string, info fs.FileInfo) (workflowRunArtifact, bool) {
+func readWorkflowRunArtifact(path string, info fs.FileInfo) (channelui.WorkflowRunArtifact, bool) {
 	f, err := os.Open(path)
 	if err != nil {
-		return workflowRunArtifact{}, false
+		return channelui.WorkflowRunArtifact{}, false
 	}
 	defer func() { _ = f.Close() }()
 
@@ -214,12 +215,12 @@ func readWorkflowRunArtifact(path string, info fs.FileInfo) (workflowRunArtifact
 		last = line
 	}
 	if scanner.Err() != nil || last == "" {
-		return workflowRunArtifact{}, false
+		return channelui.WorkflowRunArtifact{}, false
 	}
 
-	var artifact workflowRunArtifact
+	var artifact channelui.WorkflowRunArtifact
 	if err := json.Unmarshal([]byte(last), &artifact); err != nil {
-		return workflowRunArtifact{}, false
+		return channelui.WorkflowRunArtifact{}, false
 	}
 	artifact.Path = path
 	artifact.UpdatedAt = info.ModTime()

@@ -12,6 +12,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/nex-crm/wuphf/cmd/wuphf/channelui"
 	"github.com/nex-crm/wuphf/internal/config"
 	"github.com/nex-crm/wuphf/internal/team"
 	"github.com/nex-crm/wuphf/internal/tui"
@@ -23,7 +24,7 @@ func stripANSI(s string) string {
 	return ansiPattern.ReplaceAllString(s, "")
 }
 
-func joinRenderedLines(lines []renderedLine) string {
+func joinRenderedLines(lines []channelui.RenderedLine) string {
 	parts := make([]string, 0, len(lines))
 	for _, line := range lines {
 		parts = append(parts, line.Text)
@@ -36,17 +37,17 @@ func altRuneKey(r rune) tea.KeyMsg {
 }
 
 func TestHighlightMentionsLeavesUnknownSlugsPlain(t *testing.T) {
-	got := highlightMentions("@not-a-real-agent", map[string]string{"ceo": "#E8A838"})
+	got := channelui.HighlightMentions("@not-a-real-agent", map[string]string{"ceo": "#E8A838"})
 	if got != "@not-a-real-agent" {
 		t.Fatalf("expected unknown mention to stay plain, got %q", got)
 	}
 }
 
 func TestThreadParticipantDisplayNamesUseCanonicalColors(t *testing.T) {
-	if got, want := threadParticipantColor("Product Manager"), agentColor("pm"); got != want {
+	if got, want := threadParticipantColor("Product Manager"), channelui.AgentColor("pm"); got != want {
 		t.Fatalf("Product Manager color = %q, want canonical pm color %q", got, want)
 	}
-	if got, want := threadParticipantColor("@custom-ops-agent"), agentColor("custom-ops-agent"); got != want {
+	if got, want := threadParticipantColor("@custom-ops-agent"), channelui.AgentColor("custom-ops-agent"); got != want {
 		t.Fatalf("custom participant color = %q, want procedural color %q", got, want)
 	}
 }
@@ -106,30 +107,30 @@ func TestNewBrokerRequestFallsBackToTokenFile(t *testing.T) {
 }
 
 func TestAppendWrappedWrapsLongLines(t *testing.T) {
-	lines := appendWrapped(nil, 12, "this is a long line that should wrap")
+	lines := channelui.AppendWrapped(nil, 12, "this is a long line that should wrap")
 	if len(lines) < 2 {
 		t.Fatalf("expected wrapped output to span multiple lines, got %q", lines)
 	}
 }
 
 func TestClampScrollCapsToBufferHeight(t *testing.T) {
-	if got := clampScroll(10, 4, 99); got != 6 {
+	if got := channelui.ClampScroll(10, 4, 99); got != 6 {
 		t.Fatalf("expected scroll to clamp to 6, got %d", got)
 	}
-	if got := clampScroll(3, 10, 5); got != 0 {
+	if got := channelui.ClampScroll(3, 10, 5); got != 0 {
 		t.Fatalf("expected scroll to clamp to 0 for short buffer, got %d", got)
 	}
 }
 
 func TestFlattenThreadMessagesNestsRepliesUnderParent(t *testing.T) {
-	messages := []brokerMessage{
+	messages := []channelui.BrokerMessage{
 		{ID: "msg-1", From: "ceo", Content: "Root"},
 		{ID: "msg-2", From: "fe", Content: "Reply", ReplyTo: "msg-1"},
 		{ID: "msg-3", From: "pm", Content: "Second root"},
 		{ID: "msg-4", From: "be", Content: "Nested", ReplyTo: "msg-2"},
 	}
 
-	got := flattenThreadMessages(messages, map[string]bool{"msg-1": true, "msg-2": true})
+	got := channelui.FlattenThreadMessages(messages, map[string]bool{"msg-1": true, "msg-2": true})
 	if len(got) != 4 {
 		t.Fatalf("expected 4 flattened messages, got %d", len(got))
 	}
@@ -152,7 +153,7 @@ func TestChannelViewShowsThreadReplyLabel(t *testing.T) {
 	m.width = 120
 	m.height = 30
 	m.expandedThreads["msg-1"] = true
-	m.messages = []brokerMessage{
+	m.messages = []channelui.BrokerMessage{
 		{ID: "msg-1", From: "ceo", Content: "Should we target founders first?", Timestamp: "2026-03-24T10:00:00Z"},
 		{ID: "msg-2", From: "cmo", Content: "Yes, wedge is stronger there.", ReplyTo: "msg-1", Timestamp: "2026-03-24T10:01:00Z"},
 	}
@@ -171,7 +172,7 @@ func TestThreadsStartCollapsedByDefault(t *testing.T) {
 	m := newChannelModel(true) // explicit collapsed mode
 	m.width = 120
 	m.height = 30
-	m.messages = []brokerMessage{
+	m.messages = []channelui.BrokerMessage{
 		{ID: "msg-1", From: "ceo", Content: "Root topic", Timestamp: "2026-03-24T10:00:00Z"},
 		{ID: "msg-2", From: "fe", Content: "Reply one", ReplyTo: "msg-1", Timestamp: "2026-03-24T10:01:00Z"},
 		{ID: "msg-3", From: "be", Content: "Reply two", ReplyTo: "msg-1", Timestamp: "2026-03-24T10:02:00Z"},
@@ -187,13 +188,13 @@ func TestThreadsStartCollapsedByDefault(t *testing.T) {
 }
 
 func TestCountRepliesCountsNestedDescendants(t *testing.T) {
-	messages := []brokerMessage{
+	messages := []channelui.BrokerMessage{
 		{ID: "msg-1", From: "ceo", Content: "Root"},
 		{ID: "msg-2", From: "fe", Content: "Reply", ReplyTo: "msg-1", Timestamp: "2026-03-24T10:01:00Z"},
 		{ID: "msg-3", From: "be", Content: "Nested", ReplyTo: "msg-2", Timestamp: "2026-03-24T10:02:00Z"},
 	}
 
-	count, lastReply := countReplies(messages, "msg-1")
+	count, lastReply := channelui.CountReplies(messages, "msg-1")
 	if count != 2 {
 		t.Fatalf("expected nested reply count 2, got %d", count)
 	}
@@ -204,7 +205,7 @@ func TestCountRepliesCountsNestedDescendants(t *testing.T) {
 
 func TestRenderThreadPanelShowsNestedReplies(t *testing.T) {
 	t.Skip("skipped: test needs update after thread/policies/calendar refactors")
-	messages := []brokerMessage{
+	messages := []channelui.BrokerMessage{
 		{ID: "msg-1", From: "ceo", Content: "Root topic", Timestamp: "2026-03-24T10:00:00Z"},
 		{ID: "msg-2", From: "fe", Content: "First reply", ReplyTo: "msg-1", Timestamp: "2026-03-24T10:01:00Z"},
 		{ID: "msg-3", From: "be", Content: "Nested reply", ReplyTo: "msg-2", Timestamp: "2026-03-24T10:02:00Z"},
@@ -256,7 +257,7 @@ func TestOneOnOneViewShowsExecutionTimeline(t *testing.T) {
 	m.oneOnOneAgent = "ceo"
 	m.sidebarCollapsed = true
 	m.refreshSlashCommands()
-	m.actions = []channelAction{
+	m.actions = []channelui.Action{
 		{ID: "action-1", Kind: "external_action_planned", Source: "composio", Actor: "ceo", Summary: "Dry-run Gmail send ready.", RelatedID: "GMAIL_SEND_EMAIL", CreatedAt: "2026-04-02T10:00:00Z"},
 		{ID: "action-2", Kind: "external_action_executed", Source: "composio", Actor: "ceo", Summary: "Sent the test email.", RelatedID: "GMAIL_SEND_EMAIL", CreatedAt: "2026-04-02T10:01:00Z"},
 	}
@@ -279,12 +280,12 @@ func TestOneOnOneStatusBarShowsRuntimeSummary(t *testing.T) {
 	m.sidebarCollapsed = true
 	m.refreshSlashCommands()
 	m.brokerConnected = true
-	m.members = []channelMember{{
+	m.members = []channelui.Member{{
 		Slug:         "ceo",
 		Name:         "CEO",
 		LiveActivity: "go test ./cmd/wuphf",
 	}}
-	m.tasks = []channelTask{{
+	m.tasks = []channelui.Task{{
 		ID:      "task-1",
 		Channel: "general",
 		Title:   "launch review",
@@ -313,7 +314,7 @@ func TestOneOnOneModeBlocksOfficeCommands(t *testing.T) {
 
 func TestSwitchCommandOpensChannelPicker(t *testing.T) {
 	m := newChannelModel(false)
-	m.channels = []channelInfo{
+	m.channels = []channelui.ChannelInfo{
 		{Slug: "general", Name: "general", Members: []string{"ceo", "pm"}},
 		{Slug: "launch", Name: "launch", Description: "Release work", Members: []string{"ceo", "fe"}},
 	}
@@ -354,15 +355,15 @@ func TestSwitchCommandIncludesWorkspaceDestinations(t *testing.T) {
 func TestSwitchAliasSelectsChannel(t *testing.T) {
 	m := newChannelModel(false)
 	m.activeChannel = "general"
-	m.channels = []channelInfo{
+	m.channels = []channelui.ChannelInfo{
 		{Slug: "general", Name: "general", Members: []string{"ceo", "pm"}},
 		{Slug: "launch", Name: "launch", Description: "Release work", Members: []string{"ceo", "fe"}},
 	}
 	m.picker = tui.NewPicker("Switch Channel", m.buildChannelPickerOptions())
 	m.picker.SetActive(true)
 	m.pickerMode = channelPickerChannels
-	m.messages = []brokerMessage{{ID: "msg-1", Content: "hello"}}
-	m.members = []channelMember{{Slug: "ceo"}}
+	m.messages = []channelui.BrokerMessage{{ID: "msg-1", Content: "hello"}}
+	m.members = []channelui.Member{{Slug: "ceo"}}
 	m.replyToID = "msg-1"
 	m.threadPanelOpen = true
 	m.threadPanelID = "thread-1"
@@ -391,7 +392,7 @@ func TestSwitchAliasSelectsChannel(t *testing.T) {
 
 func TestBuildSwitchChannelPickerOptionsOnlyIncludesSwitchTargets(t *testing.T) {
 	m := newChannelModel(false)
-	m.channels = []channelInfo{
+	m.channels = []channelui.ChannelInfo{
 		{Slug: "general", Name: "general", Members: []string{"ceo", "pm"}},
 		{Slug: "launch", Name: "launch", Description: "Release work", Members: []string{"ceo", "fe"}},
 	}
@@ -470,7 +471,7 @@ func TestProviderSelectionSavesCodexAndRequestsRestart(t *testing.T) {
 func TestTypingSwitchShortcutOpensChannelPicker(t *testing.T) {
 	t.Setenv("WUPHF_API_KEY", "test-key")
 	m := newChannelModel(false)
-	m.channels = []channelInfo{
+	m.channels = []channelui.ChannelInfo{
 		{Slug: "general", Name: "general", Members: []string{"ceo", "pm"}},
 		{Slug: "launch", Name: "launch", Description: "Release work", Members: []string{"ceo", "fe"}},
 	}
@@ -498,7 +499,7 @@ func TestTypingSwitchShortcutOpensChannelPicker(t *testing.T) {
 func TestPickerTypingDoesNotAppendToComposer(t *testing.T) {
 	t.Setenv("WUPHF_API_KEY", "test-key")
 	m := newChannelModel(false)
-	m.channels = []channelInfo{
+	m.channels = []channelui.ChannelInfo{
 		{Slug: "general", Name: "general", Members: []string{"ceo", "pm"}},
 		{Slug: "launch", Name: "launch", Description: "Release work", Members: []string{"ceo", "fe"}},
 		{Slug: "ops", Name: "ops", Members: []string{"ceo"}},
@@ -589,7 +590,7 @@ func TestOneOnOnePickerDisableInDirectModeRequiresConfirmation(t *testing.T) {
 	if got.confirm == nil {
 		t.Fatal("expected confirmation card to open")
 	}
-	if got.confirm.Action != confirmActionSwitchMode {
+	if got.confirm.Action != channelui.ChannelConfirmActionSwitchMode {
 		t.Fatalf("expected switch-mode confirmation, got %q", got.confirm.Action)
 	}
 }
@@ -608,17 +609,17 @@ func TestOneOnOneAgentSelectionRequiresConfirmation(t *testing.T) {
 	if got.confirm == nil {
 		t.Fatal("expected confirmation card to open")
 	}
-	if got.confirm.Action != confirmActionSwitchMode || got.confirm.Agent != "ceo" {
+	if got.confirm.Action != channelui.ChannelConfirmActionSwitchMode || got.confirm.Agent != "ceo" {
 		t.Fatalf("unexpected confirmation: %+v", got.confirm)
 	}
 }
 
 func TestHumanFacingMessageSwitchesBackToMessages(t *testing.T) {
 	m := newChannelModel(false)
-	m.activeApp = officeAppTasks
+	m.activeApp = channelui.OfficeAppTasks
 	m.lastID = "msg-0"
 
-	next, _ := m.Update(channelMsg{messages: []brokerMessage{
+	next, _ := m.Update(channelMsg{messages: []channelui.BrokerMessage{
 		{ID: "msg-1", From: "fe", Kind: "human_report", Title: "Frontend ready", Content: "Please review the launch page."},
 	}})
 
@@ -626,7 +627,7 @@ func TestHumanFacingMessageSwitchesBackToMessages(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected channelModel, got %T", next)
 	}
-	if got.activeApp != officeAppMessages {
+	if got.activeApp != channelui.OfficeAppMessages {
 		t.Fatalf("expected active app to switch to messages, got %v", got.activeApp)
 	}
 	if !strings.Contains(got.notice, "@fe has something for you") {
@@ -636,9 +637,9 @@ func TestHumanFacingMessageSwitchesBackToMessages(t *testing.T) {
 
 func TestInitialHumanFacingHistoryDoesNotForceMessagesApp(t *testing.T) {
 	t.Skip("skipped: pre-existing failure, needs CI environment fix")
-	m := newChannelModelWithApp(false, officeAppPolicies)
+	m := newChannelModelWithApp(false, channelui.OfficeAppPolicies)
 
-	next, _ := m.Update(channelMsg{messages: []brokerMessage{
+	next, _ := m.Update(channelMsg{messages: []channelui.BrokerMessage{
 		{ID: "msg-1", From: "pm", Kind: "human_report", Title: "Scope ready", Content: "Please review the scope."},
 	}})
 
@@ -646,7 +647,7 @@ func TestInitialHumanFacingHistoryDoesNotForceMessagesApp(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected channelModel, got %T", next)
 	}
-	if got.activeApp != officeAppPolicies {
+	if got.activeApp != channelui.OfficeAppPolicies {
 		t.Fatalf("expected initial history to keep insights active, got %v", got.activeApp)
 	}
 	if got.notice != "" {
@@ -656,12 +657,12 @@ func TestInitialHumanFacingHistoryDoesNotForceMessagesApp(t *testing.T) {
 
 func TestChannelMsgDedupesOverlappingMessages(t *testing.T) {
 	m := newChannelModel(false)
-	m.messages = []brokerMessage{
+	m.messages = []channelui.BrokerMessage{
 		{ID: "msg-1", From: "ceo", Content: "first"},
 	}
 	m.lastID = "msg-1"
 
-	next, _ := m.Update(channelMsg{messages: []brokerMessage{
+	next, _ := m.Update(channelMsg{messages: []channelui.BrokerMessage{
 		{ID: "msg-1", From: "ceo", Content: "first"},
 		{ID: "msg-2", From: "pm", Content: "second"},
 	}})
@@ -678,7 +679,7 @@ func TestChannelMsgDedupesOverlappingMessages(t *testing.T) {
 func TestChannelCreateDoneSwitchesToNewChannel(t *testing.T) {
 	m := newChannelModel(false)
 	m.activeChannel = "general"
-	m.messages = []brokerMessage{{ID: "msg-1", From: "ceo", Content: "hello"}}
+	m.messages = []channelui.BrokerMessage{{ID: "msg-1", From: "ceo", Content: "hello"}}
 	m.lastID = "msg-1"
 
 	next, _ := m.Update(channelPostDoneMsg{action: "create", slug: "launch", notice: "Created #launch."})
@@ -695,40 +696,40 @@ func TestChannelCreateDoneSwitchesToNewChannel(t *testing.T) {
 }
 
 func TestResolveInitialOfficeAppFallsBackToMessages(t *testing.T) {
-	if got := resolveInitialOfficeApp("insights"); got != officeAppPolicies {
+	if got := channelui.ResolveInitialOfficeApp("insights"); got != channelui.OfficeAppPolicies {
 		t.Fatalf("expected policies app, got %q", got)
 	}
-	if got := resolveInitialOfficeApp("calendar"); got != officeAppCalendar {
+	if got := channelui.ResolveInitialOfficeApp("calendar"); got != channelui.OfficeAppCalendar {
 		t.Fatalf("expected calendar app, got %q", got)
 	}
-	if got := resolveInitialOfficeApp("not-real"); got != officeAppMessages {
+	if got := channelui.ResolveInitialOfficeApp("not-real"); got != channelui.OfficeAppMessages {
 		t.Fatalf("expected invalid app to fall back to messages, got %q", got)
 	}
 }
 
 func TestResolveInitialOfficeAppSupportsSkills(t *testing.T) {
-	if got := resolveInitialOfficeApp("skills"); got != officeAppSkills {
+	if got := channelui.ResolveInitialOfficeApp("skills"); got != channelui.OfficeAppSkills {
 		t.Fatalf("expected skills app, got %q", got)
 	}
 }
 
 func TestDisplaySignalKindUsesHumanDirectiveLabel(t *testing.T) {
-	got := displaySignalKind(channelSignal{Kind: "directive", Source: "human"})
+	got := channelui.DisplaySignalKind(channelui.Signal{Kind: "directive", Source: "human"})
 	if got != "Human directive" {
 		t.Fatalf("expected human directive label, got %q", got)
 	}
-	if got := displaySignalKind(channelSignal{Kind: "risk", Source: "nex_insights"}); got != "risk" {
+	if got := channelui.DisplaySignalKind(channelui.Signal{Kind: "risk", Source: "nex_insights"}); got != "risk" {
 		t.Fatalf("expected raw signal kind for non-human signal, got %q", got)
 	}
 }
 
 func TestRecentExternalActionsIncludesBridgeChannel(t *testing.T) {
-	actions := []channelAction{
+	actions := []channelui.Action{
 		{ID: "action-1", Kind: "note_internal"},
 		{ID: "action-2", Kind: "bridge_channel"},
 		{ID: "action-3", Kind: "external_webhook"},
 	}
-	got := recentExternalActions(actions, 10)
+	got := channelui.RecentExternalActions(actions, 10)
 	if len(got) != 2 {
 		t.Fatalf("expected bridge and external actions, got %d", len(got))
 	}
@@ -738,21 +739,21 @@ func TestRecentExternalActionsIncludesBridgeChannel(t *testing.T) {
 }
 
 func TestDisplayDecisionSummaryUsesHumanDirectiveLabel(t *testing.T) {
-	got := displayDecisionSummary("Human directed the office:\n- tighten scope")
+	got := channelui.DisplayDecisionSummary("Human directed the office:\n- tighten scope")
 	if !strings.Contains(got, "Human directive:") {
 		t.Fatalf("expected human directive heading, got %q", got)
 	}
-	if got := displayDecisionSummary("Open a frontend follow-up."); got != "Open a frontend follow-up." {
+	if got := channelui.DisplayDecisionSummary("Open a frontend follow-up."); got != "Open a frontend follow-up." {
 		t.Fatalf("expected non-human decision summary to remain unchanged, got %q", got)
 	}
 }
 
 func TestCalendarRecentActionsIncludeBridgeChannel(t *testing.T) {
-	lines := buildCalendarLines([]channelAction{
+	lines := channelui.BuildCalendarLines([]channelui.Action{
 		{ID: "action-1", Kind: "human_directive", Channel: "general", Summary: "Human directed the office:", Actor: "you"},
 		{ID: "action-2", Kind: "bridge_channel", Channel: "launch", Summary: "Use the sharper product narrative.", Actor: "ceo"},
 		{ID: "action-3", Kind: "task_created", Channel: "general", Summary: "Tighten v1 scope", Actor: "ceo"},
-	}, nil, nil, nil, "general", nil, calendarRangeWeek, "", 90)
+	}, nil, nil, nil, "general", nil, channelui.CalendarRangeWeek, "", 90)
 	view := stripANSI(joinRenderedLines(lines))
 	if !strings.Contains(view, "bridge_channel") {
 		t.Fatalf("expected calendar recent actions to include bridge_channel, got %q", view)
@@ -763,13 +764,13 @@ func TestCalendarRecentActionsIncludeBridgeChannel(t *testing.T) {
 }
 
 func TestCalendarRecentActionsPinsBridgeWhenCapWouldDropIt(t *testing.T) {
-	lines := buildCalendarLines([]channelAction{
+	lines := channelui.BuildCalendarLines([]channelui.Action{
 		{ID: "action-1", Kind: "bridge_channel", Channel: "launch", Summary: "Use the sharper product narrative.", Actor: "ceo"},
 		{ID: "action-2", Kind: "human_directive", Channel: "general", Summary: "Human directed the office.", Actor: "you"},
 		{ID: "action-3", Kind: "request_answered", Channel: "general", Summary: "Approved the launch direction.", Actor: "you"},
 		{ID: "action-4", Kind: "task_created", Channel: "general", Summary: "Tighten v1 scope", Actor: "ceo"},
 		{ID: "action-5", Kind: "signal_recorded", Channel: "general", Summary: "Recorded a human directive signal.", Actor: "ceo"},
-	}, nil, nil, nil, "general", nil, calendarRangeWeek, "", 90)
+	}, nil, nil, nil, "general", nil, channelui.CalendarRangeWeek, "", 90)
 
 	view := stripANSI(joinRenderedLines(lines))
 	if !strings.Contains(view, "bridge_channel") {
@@ -781,7 +782,7 @@ func TestChannelViewRendersHumanFacingMessageCard(t *testing.T) {
 	m := newChannelModel(false)
 	m.width = 120
 	m.height = 30
-	m.messages = []brokerMessage{
+	m.messages = []channelui.BrokerMessage{
 		{
 			ID:        "msg-1",
 			From:      "pm",
@@ -805,7 +806,7 @@ func TestChannelViewRendersHumanFacingMessageCard(t *testing.T) {
 }
 
 func TestBuildTaskLinesShowsTimingMetadata(t *testing.T) {
-	lines := buildTaskLines([]channelTask{
+	lines := channelui.BuildTaskLines([]channelui.Task{
 		{
 			ID:         "task-1",
 			Title:      "Ship onboarding page",
@@ -826,7 +827,7 @@ func TestBuildTaskLinesShowsTimingMetadata(t *testing.T) {
 }
 
 func TestBuildRequestLinesShowsBlockingAndTimingMetadata(t *testing.T) {
-	lines := buildRequestLines([]channelInterview{
+	lines := channelui.BuildRequestLines([]channelui.Interview{
 		{
 			ID:       "req-1",
 			Kind:     "approval",
@@ -848,7 +849,7 @@ func TestBuildRequestLinesShowsBlockingAndTimingMetadata(t *testing.T) {
 }
 
 func TestBuildCalendarLinesShowsNextRunMetadata(t *testing.T) {
-	lines := buildCalendarLines(nil, []channelSchedulerJob{
+	lines := channelui.BuildCalendarLines(nil, []channelui.SchedulerJob{
 		{
 			Label:           "CEO insight sweep",
 			Status:          "scheduled",
@@ -857,7 +858,7 @@ func TestBuildCalendarLinesShowsNextRunMetadata(t *testing.T) {
 			NextRun:         time.Now().Add(10 * time.Minute).Format(time.RFC3339),
 			LastRun:         time.Now().Add(-5 * time.Minute).Format(time.RFC3339),
 		},
-	}, nil, nil, "general", []channelMember{{Slug: "ceo", Name: "CEO"}}, calendarRangeWeek, "", 80)
+	}, nil, nil, "general", []channelui.Member{{Slug: "ceo", Name: "CEO"}}, channelui.CalendarRangeWeek, "", 80)
 
 	rendered := stripANSI(joinRenderedLines(lines))
 	if !strings.Contains(rendered, "every 15 min") || (!strings.Contains(rendered, "today") && !strings.Contains(rendered, "tomorrow")) {
@@ -869,7 +870,7 @@ func TestBuildCalendarLinesShowsNextRunMetadata(t *testing.T) {
 }
 
 func TestBuildCalendarLinesPinsTeammateCalendarsBeforeAgenda(t *testing.T) {
-	lines := buildCalendarLines(nil, nil, []channelTask{
+	lines := channelui.BuildCalendarLines(nil, nil, []channelui.Task{
 		{
 			ID:        "task-1",
 			Title:     "Ship onboarding",
@@ -881,10 +882,10 @@ func TestBuildCalendarLinesPinsTeammateCalendarsBeforeAgenda(t *testing.T) {
 			UpdatedAt: time.Now().Format(time.RFC3339),
 			CreatedAt: time.Now().Format(time.RFC3339),
 		},
-	}, nil, "general", []channelMember{
+	}, nil, "general", []channelui.Member{
 		{Slug: "ceo", Name: "CEO"},
 		{Slug: "fe", Name: "Frontend Engineer"},
-	}, calendarRangeWeek, "", 80)
+	}, channelui.CalendarRangeWeek, "", 80)
 
 	rendered := stripANSI(joinRenderedLines(lines))
 	teamIdx := strings.Index(rendered, "Teammate calendars")
@@ -904,7 +905,7 @@ func TestCtrlGQuickJumpSelectsChannel(t *testing.T) {
 	m := newChannelModel(false)
 	m.width = 120
 	m.height = 30
-	m.channels = []channelInfo{{Slug: "general", Name: "general"}, {Slug: "launch", Name: "launch"}}
+	m.channels = []channelui.ChannelInfo{{Slug: "general", Name: "general"}, {Slug: "launch", Name: "launch"}}
 
 	model, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlG})
 	got := model.(channelModel)
@@ -917,7 +918,7 @@ func TestCtrlGQuickJumpSelectsChannel(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("expected selecting a numbered channel to trigger a command")
 	}
-	if got.activeChannel != "launch" || got.activeApp != officeAppMessages {
+	if got.activeChannel != "launch" || got.activeApp != channelui.OfficeAppMessages {
 		t.Fatalf("expected quick jump 2 to open #launch messages, got channel=%s app=%s", got.activeChannel, got.activeApp)
 	}
 	if got.quickJumpTarget != quickJumpNone {
@@ -929,7 +930,7 @@ func TestCtrlOQuickJumpSelectsApp(t *testing.T) {
 	m := newChannelModel(false)
 	m.width = 120
 	m.height = 30
-	m.channels = []channelInfo{{Slug: "general", Name: "general"}}
+	m.channels = []channelui.ChannelInfo{{Slug: "general", Name: "general"}}
 
 	model, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlO})
 	got := model.(channelModel)
@@ -942,7 +943,7 @@ func TestCtrlOQuickJumpSelectsApp(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("expected selecting a numbered app to trigger a command")
 	}
-	if got.activeApp != officeAppCalendar {
+	if got.activeApp != channelui.OfficeAppCalendar {
 		t.Fatalf("expected quick jump 6 to open calendar, got %s", got.activeApp)
 	}
 	if got.quickJumpTarget != quickJumpNone {
@@ -952,7 +953,7 @@ func TestCtrlOQuickJumpSelectsApp(t *testing.T) {
 
 func TestBuildChannelPickerOptionsUsesChannelDescriptions(t *testing.T) {
 	m := newChannelModel(false)
-	m.channels = []channelInfo{
+	m.channels = []channelui.ChannelInfo{
 		{Slug: "general", Name: "general", Description: "Company-wide coordination", Members: []string{"ceo", "pm"}},
 		{Slug: "launch", Name: "launch", Description: "Launch planning and release work", Members: []string{"ceo", "pm", "fe"}},
 	}
@@ -971,7 +972,7 @@ func TestBuildChannelPickerOptionsUsesChannelDescriptions(t *testing.T) {
 
 func TestBuildSwitchChannelPickerOptionsExcludeRemoveActions(t *testing.T) {
 	m := newChannelModel(false)
-	m.channels = []channelInfo{
+	m.channels = []channelui.ChannelInfo{
 		{Slug: "general", Name: "general", Description: "Company-wide coordination", Members: []string{"ceo", "pm"}},
 		{Slug: "launch", Name: "launch", Description: "Launch planning", Members: []string{"ceo", "fe"}},
 	}
@@ -989,8 +990,8 @@ func TestBuildSwitchChannelPickerOptionsExcludeRemoveActions(t *testing.T) {
 
 func TestRenderSidebarShowsOfficeCharacterBubble(t *testing.T) {
 	sidebar := stripANSI(renderSidebar(
-		[]channelInfo{{Slug: "general", Name: "general"}},
-		[]channelMember{{
+		[]channelui.ChannelInfo{{Slug: "general", Name: "general"}},
+		[]channelui.Member{{
 			Slug:        "fe",
 			Name:        "Frontend Engineer",
 			Role:        "Frontend Engineer",
@@ -999,12 +1000,12 @@ func TestRenderSidebarShowsOfficeCharacterBubble(t *testing.T) {
 		}},
 		nil,
 		"general",
-		officeAppMessages,
+		channelui.OfficeAppMessages,
 		0,
 		0,
 		false,
 		quickJumpNone,
-		workspaceUIState{BrokerConnected: true, Channel: "general", PeerCount: 1},
+		channelui.WorkspaceUIState{BrokerConnected: true, Channel: "general", PeerCount: 1},
 		36,
 		40,
 	))
@@ -1021,21 +1022,21 @@ func TestRenderSidebarShowsOfficeCharacterBubble(t *testing.T) {
 
 func TestRenderSidebarReflectsWorkspaceState(t *testing.T) {
 	sidebar := stripANSI(renderSidebar(
-		[]channelInfo{{Slug: "launch", Name: "launch"}},
+		[]channelui.ChannelInfo{{Slug: "launch", Name: "launch"}},
 		nil,
 		nil,
 		"launch",
-		officeAppMessages,
+		channelui.OfficeAppMessages,
 		0,
 		0,
 		false,
 		quickJumpNone,
-		workspaceUIState{
+		channelui.WorkspaceUIState{
 			BrokerConnected: true,
 			Channel:         "launch",
 			PeerCount:       4,
 			BlockingCount:   1,
-			NeedsYou: &channelInterview{
+			NeedsYou: &channelui.Interview{
 				ID:       "req-1",
 				Title:    "Approve launch copy",
 				Question: "Approve launch copy?",
@@ -1054,16 +1055,16 @@ func TestRenderSidebarReflectsWorkspaceState(t *testing.T) {
 
 func TestRenderSidebarShowsRecoveryRequestsAndArtifactsApps(t *testing.T) {
 	sidebar := stripANSI(renderSidebar(
-		[]channelInfo{{Slug: "general", Name: "general"}},
+		[]channelui.ChannelInfo{{Slug: "general", Name: "general"}},
 		nil,
 		nil,
 		"general",
-		officeAppMessages,
+		channelui.OfficeAppMessages,
 		0,
 		0,
 		false,
 		quickJumpNone,
-		workspaceUIState{BrokerConnected: true, Channel: "general"},
+		channelui.WorkspaceUIState{BrokerConnected: true, Channel: "general"},
 		48,
 		40,
 	))
@@ -1075,7 +1076,7 @@ func TestRenderSidebarShowsRecoveryRequestsAndArtifactsApps(t *testing.T) {
 }
 
 func TestRenderThoughtBubbleDoesNotTruncateLongerAside(t *testing.T) {
-	got := stripANSI(strings.Join(renderThoughtBubble("This is still happening", 10), "\n"))
+	got := stripANSI(strings.Join(channelui.RenderThoughtBubble("This is still happening", 10), "\n"))
 	compact := strings.NewReplacer("▗", "", "▖", "", "▘", "", " ", "", "\n", "").Replace(got)
 	if compact != "Thisisstillhappening" {
 		t.Fatalf("expected thought bubble to keep full wrapped text, got %q", got)
@@ -1084,16 +1085,16 @@ func TestRenderThoughtBubbleDoesNotTruncateLongerAside(t *testing.T) {
 
 func TestRenderSidebarUsesCompactRosterWhenSpaceIsTight(t *testing.T) {
 	sidebar := stripANSI(renderSidebar(
-		[]channelInfo{{Slug: "general", Name: "general"}},
+		[]channelui.ChannelInfo{{Slug: "general", Name: "general"}},
 		nil,
 		nil,
 		"general",
-		officeAppMessages,
+		channelui.OfficeAppMessages,
 		0,
 		0,
 		false,
 		quickJumpNone,
-		workspaceUIState{BrokerConnected: false, Channel: "general"},
+		channelui.WorkspaceUIState{BrokerConnected: false, Channel: "general"},
 		36,
 		22,
 	))
@@ -1109,7 +1110,7 @@ func TestRenderSidebarUsesCompactRosterWhenSpaceIsTight(t *testing.T) {
 }
 
 func TestClassifyActivityInvalidTimestampStaysIdle(t *testing.T) {
-	act := classifyActivity(channelMember{
+	act := channelui.ClassifyActivity(channelui.Member{
 		Slug:        "fe",
 		LastTime:    "not-a-time",
 		LastMessage: "git add, git commit, and ship it",
@@ -1121,16 +1122,16 @@ func TestClassifyActivityInvalidTimestampStaysIdle(t *testing.T) {
 
 func TestRenderSidebarFallsBackToOfficeRosterWhenPeopleListIsEmpty(t *testing.T) {
 	sidebar := stripANSI(renderSidebar(
-		[]channelInfo{{Slug: "general", Name: "general"}},
+		[]channelui.ChannelInfo{{Slug: "general", Name: "general"}},
 		nil,
 		nil,
 		"general",
-		officeAppMessages,
+		channelui.OfficeAppMessages,
 		0,
 		0,
 		false,
 		quickJumpNone,
-		workspaceUIState{BrokerConnected: false, Channel: "general"},
+		channelui.WorkspaceUIState{BrokerConnected: false, Channel: "general"},
 		42,
 		20,
 	))
@@ -1144,13 +1145,13 @@ func TestRenderSidebarFallsBackToOfficeRosterWhenPeopleListIsEmpty(t *testing.T)
 
 func TestRenderSidebarShowsTaskDrivenWorkingState(t *testing.T) {
 	sidebar := stripANSI(renderSidebar(
-		[]channelInfo{{Slug: "general", Name: "general"}},
-		[]channelMember{{
+		[]channelui.ChannelInfo{{Slug: "general", Name: "general"}},
+		[]channelui.Member{{
 			Slug: "fe",
 			Name: "Frontend Engineer",
 			Role: "Frontend Engineer",
 		}},
-		[]channelTask{{
+		[]channelui.Task{{
 			ID:      "task-1",
 			Channel: "general",
 			Title:   "landing page polish",
@@ -1158,12 +1159,12 @@ func TestRenderSidebarShowsTaskDrivenWorkingState(t *testing.T) {
 			Status:  "in_progress",
 		}},
 		"general",
-		officeAppMessages,
+		channelui.OfficeAppMessages,
 		0,
 		0,
 		false,
 		quickJumpNone,
-		workspaceUIState{BrokerConnected: true, Channel: "general", PeerCount: 1},
+		channelui.WorkspaceUIState{BrokerConnected: true, Channel: "general", PeerCount: 1},
 		40,
 		44,
 	))
@@ -1179,26 +1180,26 @@ func TestChannelViewShowsRuntimeStripForOfficeMessages(t *testing.T) {
 	m := newChannelModel(false)
 	m.width = 120
 	m.height = 30
-	m.activeApp = officeAppMessages
-	m.members = []channelMember{{
+	m.activeApp = channelui.OfficeAppMessages
+	m.members = []channelui.Member{{
 		Slug:         "fe",
 		Name:         "Frontend Engineer",
 		LiveActivity: "go test ./cmd/wuphf",
 	}}
-	m.tasks = []channelTask{{
+	m.tasks = []channelui.Task{{
 		ID:      "task-1",
 		Channel: "general",
 		Title:   "landing page polish",
 		Owner:   "fe",
 		Status:  "in_progress",
 	}}
-	m.requests = []channelInterview{{
+	m.requests = []channelui.Interview{{
 		ID:       "req-1",
 		From:     "ceo",
 		Question: "Ship now?",
 		Blocking: true,
 	}}
-	m.actions = []channelAction{{
+	m.actions = []channelui.Action{{
 		ID:        "action-1",
 		Kind:      "external_action_executed",
 		Actor:     "fe",
@@ -1219,7 +1220,7 @@ func TestChannelViewRendersNexAutomationMessage(t *testing.T) {
 	m := newChannelModel(false)
 	m.width = 120
 	m.height = 30
-	m.messages = []brokerMessage{
+	m.messages = []channelui.BrokerMessage{
 		{
 			ID:          "msg-1",
 			From:        "nex",
@@ -1241,7 +1242,7 @@ func TestChannelViewRendersNexAutomationMessage(t *testing.T) {
 func TestReplyCommandEntersReplyMode(t *testing.T) {
 	t.Skip("skipped: pre-existing failure, needs CI environment fix")
 	m := newChannelModel(false)
-	m.messages = []brokerMessage{
+	m.messages = []channelui.BrokerMessage{
 		{ID: "msg-1", From: "ceo", Content: "Root topic"},
 	}
 	m.input = []rune("/reply msg-1")
@@ -1261,7 +1262,7 @@ func TestReplyCommandEntersReplyMode(t *testing.T) {
 func TestExpandCommandExpandsThread(t *testing.T) {
 	t.Skip("skipped: pre-existing failure, needs CI environment fix")
 	m := newChannelModel(false)
-	m.messages = []brokerMessage{
+	m.messages = []channelui.BrokerMessage{
 		{ID: "msg-1", From: "ceo", Content: "Root topic"},
 		{ID: "msg-2", From: "fe", Content: "Reply", ReplyTo: "msg-1"},
 	}
@@ -1400,7 +1401,7 @@ func TestRefreshSlashCommandsPreservesAutocompleteQuery(t *testing.T) {
 	m.input = []rune("/")
 	m.inputPos = len(m.input)
 	m.updateInputOverlays()
-	m.skills = []channelSkill{{Name: "daily-digest", Description: "Run the digest", Status: "active"}}
+	m.skills = []channelui.Skill{{Name: "daily-digest", Description: "Run the digest", Status: "active"}}
 
 	m.refreshSlashCommands()
 
@@ -1460,11 +1461,11 @@ func TestChannelDoctorDoneShowsDoctorCard(t *testing.T) {
 	m.width = 120
 	m.height = 30
 
-	next, _ := m.Update(channelDoctorDoneMsg{report: channelDoctorReport{
+	next, _ := m.Update(channelDoctorDoneMsg{report: channelui.DoctorReport{
 		GeneratedAt: time.Now(),
-		Checks: []doctorCheck{{
+		Checks: []channelui.DoctorCheck{{
 			Label:    "Nex API key",
-			Severity: doctorWarn,
+			Severity: channelui.DoctorWarn,
 			Detail:   "Missing WUPHF/Nex API key.",
 			NextStep: "Run /init and paste your WUPHF API key.",
 		}},
@@ -1606,7 +1607,7 @@ func TestCtrlCRequiresDoublePress(t *testing.T) {
 
 func TestMentionAutocompleteFiltersAgents(t *testing.T) {
 	m := newChannelModel(false)
-	m.members = []channelMember{{Slug: "designer"}, {Slug: "cmo"}}
+	m.members = []channelui.Member{{Slug: "designer"}, {Slug: "cmo"}}
 	m.input = []rune("@de")
 	m.inputPos = len(m.input)
 	m.updateInputOverlays()
@@ -1776,7 +1777,7 @@ func TestIntegrateCommandOpensPicker(t *testing.T) {
 func TestRequestsCommandSwitchesToRequestsView(t *testing.T) {
 	t.Skip("skipped: pre-existing CI environment issue")
 	m := newChannelModel(false)
-	m.requests = []channelInterview{{
+	m.requests = []channelui.Interview{{
 		ID:       "request-1",
 		Kind:     "approval",
 		From:     "ceo",
@@ -1791,7 +1792,7 @@ func TestRequestsCommandSwitchesToRequestsView(t *testing.T) {
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	got := next.(channelModel)
 
-	if got.activeApp != officeAppRequests {
+	if got.activeApp != channelui.OfficeAppRequests {
 		t.Fatalf("expected requests app to be active, got %q", got.activeApp)
 	}
 }
@@ -1804,7 +1805,7 @@ func TestTasksCommandSwitchesToTasksView(t *testing.T) {
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	got := next.(channelModel)
-	if got.activeApp != officeAppTasks {
+	if got.activeApp != channelui.OfficeAppTasks {
 		t.Fatalf("expected tasks app to be active, got %q", got.activeApp)
 	}
 }
@@ -1812,7 +1813,7 @@ func TestTasksCommandSwitchesToTasksView(t *testing.T) {
 func TestTaskSlashCommandOpensPicker(t *testing.T) {
 	t.Skip("skipped: pre-existing CI environment issue")
 	m := newChannelModel(false)
-	m.tasks = []channelTask{{
+	m.tasks = []channelui.Task{{
 		ID:        "task-1",
 		Channel:   "general",
 		Title:     "Ship the dashboard",
@@ -1835,7 +1836,7 @@ func TestTaskSlashCommandOpensPicker(t *testing.T) {
 func TestRequestSlashCommandOpensPicker(t *testing.T) {
 	t.Skip("skipped: pre-existing CI environment issue")
 	m := newChannelModel(false)
-	m.requests = []channelInterview{{
+	m.requests = []channelui.Interview{{
 		ID:       "request-1",
 		Kind:     "approval",
 		From:     "ceo",
@@ -1859,7 +1860,7 @@ func TestRequestSlashCommandOpensPicker(t *testing.T) {
 
 func TestTaskRowOpensActionPicker(t *testing.T) {
 	m := newChannelModel(false)
-	m.tasks = []channelTask{{
+	m.tasks = []channelui.Task{{
 		ID:        "task-1",
 		Channel:   "general",
 		Title:     "Ship the dashboard",
@@ -1876,7 +1877,7 @@ func TestTaskRowOpensActionPicker(t *testing.T) {
 
 func TestRequestRowOpensActionPicker(t *testing.T) {
 	m := newChannelModel(false)
-	m.requests = []channelInterview{{
+	m.requests = []channelui.Interview{{
 		ID:       "request-1",
 		Kind:     "approval",
 		From:     "ceo",
@@ -1912,7 +1913,7 @@ func TestTaskSlashCommandQueuesMutation(t *testing.T) {
 func TestRequestSlashCommandFocusesRequest(t *testing.T) {
 	t.Skip("skipped: pre-existing CI environment issue")
 	m := newChannelModel(false)
-	m.requests = []channelInterview{{
+	m.requests = []channelui.Interview{{
 		ID:       "request-1",
 		Kind:     "approval",
 		From:     "ceo",
@@ -1929,7 +1930,7 @@ func TestRequestSlashCommandFocusesRequest(t *testing.T) {
 	if got.pending == nil || got.pending.ID != "request-1" {
 		t.Fatalf("expected request to become pending/focused, got %+v", got.pending)
 	}
-	if got.activeApp != officeAppRequests {
+	if got.activeApp != channelui.OfficeAppRequests {
 		t.Fatalf("expected requests app to stay active, got %q", got.activeApp)
 	}
 }
@@ -1942,7 +1943,7 @@ func TestSidebarNavigationCanSwitchToCalendar(t *testing.T) {
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	got := next.(channelModel)
-	if got.activeApp != officeAppCalendar {
+	if got.activeApp != channelui.OfficeAppCalendar {
 		t.Fatalf("expected calendar app to be active, got %q", got.activeApp)
 	}
 }
@@ -1951,8 +1952,8 @@ func TestRequestsViewRendersOpenRequests(t *testing.T) {
 	m := newChannelModel(false)
 	m.width = 120
 	m.height = 30
-	m.activeApp = officeAppRequests
-	m.requests = []channelInterview{{
+	m.activeApp = channelui.OfficeAppRequests
+	m.requests = []channelui.Interview{{
 		ID:       "request-1",
 		Kind:     "approval",
 		From:     "ceo",
@@ -1972,10 +1973,10 @@ func TestCalendarViewRendersSchedulerAndActions(t *testing.T) {
 	m := newChannelModel(false)
 	m.width = 120
 	m.height = 30
-	m.activeApp = officeAppCalendar
-	m.actions = []channelAction{{ID: "action-1", Kind: "task_created", Actor: "ceo", Summary: "Opened a follow-up task", CreatedAt: "2026-03-24T10:00:00Z"}}
-	m.scheduler = []channelSchedulerJob{{Slug: "nex-insights", Label: "Nex insights", IntervalMinutes: 15, NextRun: "2026-03-24T10:15:00Z", Status: "sleeping"}}
-	m.members = []channelMember{{Slug: "ceo", Name: "CEO"}}
+	m.activeApp = channelui.OfficeAppCalendar
+	m.actions = []channelui.Action{{ID: "action-1", Kind: "task_created", Actor: "ceo", Summary: "Opened a follow-up task", CreatedAt: "2026-03-24T10:00:00Z"}}
+	m.scheduler = []channelui.SchedulerJob{{Slug: "nex-insights", Label: "Nex insights", IntervalMinutes: 15, NextRun: "2026-03-24T10:15:00Z", Status: "sleeping"}}
+	m.members = []channelui.Member{{Slug: "ceo", Name: "CEO"}}
 
 	view := stripANSI(m.View())
 	if !strings.Contains(view, "Calendar") || !strings.Contains(view, "Nex insights") || !strings.Contains(view, "Opened a follow-up task") {
@@ -1988,8 +1989,8 @@ func TestInsightsViewRendersSignalsDecisionsAndWatchdogs(t *testing.T) {
 	m := newChannelModel(false)
 	m.width = 120
 	m.height = 30
-	m.activeApp = officeAppPolicies
-	m.signals = []channelSignal{{
+	m.activeApp = channelui.OfficeAppPolicies
+	m.signals = []channelui.Signal{{
 		ID:         "signal-1",
 		Source:     "nex_insights",
 		Kind:       "risk",
@@ -2000,7 +2001,7 @@ func TestInsightsViewRendersSignalsDecisionsAndWatchdogs(t *testing.T) {
 		Urgency:    "high",
 		Confidence: "high",
 	}}
-	m.decisions = []channelDecision{{
+	m.decisions = []channelui.Decision{{
 		ID:        "decision-1",
 		Kind:      "create_task",
 		Summary:   "Open a frontend follow-up.",
@@ -2009,7 +2010,7 @@ func TestInsightsViewRendersSignalsDecisionsAndWatchdogs(t *testing.T) {
 		SignalIDs: []string{"signal-1"},
 		Channel:   "general",
 	}}
-	m.watchdogs = []channelWatchdog{{
+	m.watchdogs = []channelui.Watchdog{{
 		ID:      "watchdog-1",
 		Kind:    "task_stalled",
 		Channel: "general",
@@ -2030,13 +2031,13 @@ func TestInsightsViewRendersSignalsDecisionsAndWatchdogs(t *testing.T) {
 func TestCalendarSlashCommandCanChangeRangeAndFilter(t *testing.T) {
 	t.Skip("skipped: pre-existing CI environment issue")
 	m := newChannelModel(false)
-	m.members = []channelMember{{Slug: "fe", Name: "Frontend Engineer"}}
+	m.members = []channelui.Member{{Slug: "fe", Name: "Frontend Engineer"}}
 	m.input = []rune("/calendar day")
 	m.inputPos = len(m.input)
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	got := next.(channelModel)
-	if got.activeApp != officeAppCalendar || got.calendarRange != calendarRangeDay {
+	if got.activeApp != channelui.OfficeAppCalendar || got.calendarRange != channelui.CalendarRangeDay {
 		t.Fatalf("expected /calendar day to open day calendar, got app=%q range=%q", got.activeApp, got.calendarRange)
 	}
 
@@ -2053,9 +2054,9 @@ func TestCalendarMouseClickOpensTask(t *testing.T) {
 	m := newChannelModel(false)
 	m.width = 120
 	m.height = 30
-	m.activeApp = officeAppCalendar
-	m.members = []channelMember{{Slug: "fe", Name: "Frontend Engineer"}}
-	m.tasks = []channelTask{{
+	m.activeApp = channelui.OfficeAppCalendar
+	m.members = []channelui.Member{{Slug: "fe", Name: "Frontend Engineer"}}
+	m.tasks = []channelui.Task{{
 		ID:        "task-1",
 		Title:     "Ship onboarding",
 		Status:    "open",
@@ -2067,14 +2068,14 @@ func TestCalendarMouseClickOpensTask(t *testing.T) {
 		CreatedAt: time.Now().Format(time.RFC3339),
 	}}
 
-	layout := computeLayout(m.width, m.height, m.threadPanelOpen, m.sidebarCollapsed)
+	layout := channelui.ComputeLayout(m.width, m.height, m.threadPanelOpen, m.sidebarCollapsed)
 	mainX := layout.SidebarW + 3
 	headerH, msgH, _ := m.mainPanelGeometry(layout.MainW, layout.ContentH)
 	contentWidth := layout.MainW - 2
 	if contentWidth < 32 {
 		contentWidth = 32
 	}
-	rows, _, _, _ := sliceRenderedLines(m.currentMainLines(contentWidth), msgH, m.scroll)
+	rows, _, _, _ := channelui.SliceRenderedLines(m.currentMainLines(contentWidth), msgH, m.scroll)
 	targetRow := -1
 	for i, row := range rows {
 		if row.TaskID == "task-1" || row.ThreadID == "msg-1" {
@@ -2098,7 +2099,7 @@ func TestChannelMsgKeepsScrollWhenReadingHistory(t *testing.T) {
 	m := newChannelModel(false)
 	m.scroll = 3
 
-	next, _ := m.Update(channelMsg{messages: []brokerMessage{{ID: "msg-1", From: "ceo", Content: "new"}}})
+	next, _ := m.Update(channelMsg{messages: []channelui.BrokerMessage{{ID: "msg-1", From: "ceo", Content: "new"}}})
 	got := next.(channelModel)
 
 	if got.scroll != 4 {
@@ -2115,7 +2116,7 @@ func TestMouseClickJumpLatestClearsUnread(t *testing.T) {
 	m.height = 32
 	m.scroll = 3
 	m.unreadCount = 2
-	m.messages = []brokerMessage{
+	m.messages = []channelui.BrokerMessage{
 		{ID: "msg-1", From: "ceo", Content: "Root", Timestamp: "2026-03-24T10:00:00Z"},
 		{ID: "msg-2", From: "fe", Content: "Reply", Timestamp: "2026-03-24T10:01:00Z"},
 		{ID: "msg-3", From: "be", Content: "Reply", Timestamp: "2026-03-24T10:02:00Z"},
@@ -2123,7 +2124,7 @@ func TestMouseClickJumpLatestClearsUnread(t *testing.T) {
 		{ID: "msg-5", From: "cmo", Content: "Reply", Timestamp: "2026-03-24T10:04:00Z"},
 	}
 
-	layout := computeLayout(m.width, m.height, m.threadPanelOpen, m.sidebarCollapsed)
+	layout := channelui.ComputeLayout(m.width, m.height, m.threadPanelOpen, m.sidebarCollapsed)
 	mainX := layout.SidebarW + 1
 	headerH, _, _ := m.mainPanelGeometry(layout.MainW, layout.ContentH)
 
@@ -2138,9 +2139,9 @@ func TestOfficeViewportWindowMatchesFullRenderAndMouseHitTesting(t *testing.T) {
 	m := newChannelModel(false)
 	m.width = 120
 	m.height = 32
-	m.activeApp = officeAppMessages
-	m.members = []channelMember{{Slug: "fe", Name: "Frontend Engineer", LastMessage: "Landing the next slice"}}
-	m.tasks = []channelTask{{
+	m.activeApp = channelui.OfficeAppMessages
+	m.members = []channelui.Member{{Slug: "fe", Name: "Frontend Engineer", LastMessage: "Landing the next slice"}}
+	m.tasks = []channelui.Task{{
 		ID:            "task-1",
 		Title:         "Ship onboarding",
 		Status:        "in_progress",
@@ -2151,13 +2152,13 @@ func TestOfficeViewportWindowMatchesFullRenderAndMouseHitTesting(t *testing.T) {
 		CreatedAt:     time.Now().Add(-2 * time.Hour).Format(time.RFC3339),
 		UpdatedAt:     time.Now().Format(time.RFC3339),
 	}}
-	m.actions = []channelAction{{
+	m.actions = []channelui.Action{{
 		Kind:      "external_build",
 		Actor:     "fe",
 		Summary:   "Build the office UI",
 		CreatedAt: time.Now().Add(-90 * time.Minute).Format(time.RFC3339),
 	}}
-	m.messages = []brokerMessage{
+	m.messages = []channelui.BrokerMessage{
 		{ID: "msg-1", From: "ceo", Content: "A very long root message that should wrap across multiple rows to make sure the viewport helper actually has to window the history instead of rendering everything at once.", Timestamp: "2026-03-24T10:00:00Z"},
 		{ID: "msg-2", From: "fe", Content: "Reply one with enough content to wrap and keep the total line count above the viewport height.", ReplyTo: "msg-1", Timestamp: "2026-03-24T10:01:00Z"},
 		{ID: "msg-3", From: "be", Content: "Second root message with more wrapped text so the suffix collector has to stop before the entire history is materialized.", Timestamp: "2026-03-24T10:02:00Z"},
@@ -2169,17 +2170,17 @@ func TestOfficeViewportWindowMatchesFullRenderAndMouseHitTesting(t *testing.T) {
 	}
 	m.expandedThreads["msg-7"] = false
 
-	layout := computeLayout(m.width, m.height, m.threadPanelOpen, m.sidebarCollapsed)
+	layout := channelui.ComputeLayout(m.width, m.height, m.threadPanelOpen, m.sidebarCollapsed)
 	headerH, msgH, _ := m.mainPanelGeometry(layout.MainW, layout.ContentH)
 	contentWidth := layout.MainW - 2
 	if contentWidth < 32 {
 		contentWidth = 32
 	}
 
-	full := append(buildOfficeMessageLines(m.messages, m.expandedThreads, contentWidth, m.threadsDefaultExpand, m.unreadAnchorID, m.unreadCount), buildLiveWorkLines(m.members, m.tasks, m.actions, contentWidth, "")...)
-	expected, expectedScroll, _, _ := sliceRenderedLines(full, msgH, m.scroll)
+	full := append(buildOfficeMessageLines(m.messages, m.expandedThreads, contentWidth, m.threadsDefaultExpand, m.unreadAnchorID, m.unreadCount), channelui.BuildLiveWorkLines(m.members, m.tasks, m.actions, contentWidth, "")...)
+	expected, expectedScroll, _, _ := channelui.SliceRenderedLines(full, msgH, m.scroll)
 	window := m.currentMainViewportLines(contentWidth, msgH)
-	got, gotScroll, _, _ := sliceRenderedLines(window, msgH, m.scroll)
+	got, gotScroll, _, _ := channelui.SliceRenderedLines(window, msgH, m.scroll)
 	if gotScroll != expectedScroll {
 		t.Fatalf("expected scroll %d from windowed render, got %d", expectedScroll, gotScroll)
 	}
@@ -2212,12 +2213,12 @@ func TestOfficeViewportVirtualizationCachesVisibleBlocks(t *testing.T) {
 	defer func() { renderOfficeMessageBlockFn = oldRender }()
 
 	channelRenderCache.mu.Lock()
-	channelRenderCache.threaded = make(map[uint64][]threadedMessage)
-	channelRenderCache.blocks = make(map[uint64][]renderedLine)
+	channelRenderCache.threaded = make(map[uint64][]channelui.ThreadedMessage)
+	channelRenderCache.blocks = make(map[uint64][]channelui.RenderedLine)
 	channelRenderCache.mu.Unlock()
 
 	renderCalls := 0
-	renderOfficeMessageBlockFn = func(tm threadedMessage, contentWidth int, unreadAnchorID string, unreadCount int) []renderedLine {
+	renderOfficeMessageBlockFn = func(tm channelui.ThreadedMessage, contentWidth int, unreadAnchorID string, unreadCount int) []channelui.RenderedLine {
 		renderCalls++
 		return renderOfficeMessageBlock(tm, contentWidth, unreadAnchorID, unreadCount)
 	}
@@ -2225,9 +2226,9 @@ func TestOfficeViewportVirtualizationCachesVisibleBlocks(t *testing.T) {
 	m := newChannelModel(false)
 	m.width = 120
 	m.height = 22
-	m.activeApp = officeAppMessages
+	m.activeApp = channelui.OfficeAppMessages
 	for i := 0; i < 120; i++ {
-		m.messages = append(m.messages, brokerMessage{
+		m.messages = append(m.messages, channelui.BrokerMessage{
 			ID:        fmt.Sprintf("msg-%03d", i),
 			From:      "ceo",
 			Content:   fmt.Sprintf("Longer history row %03d should not force the viewport to render the full transcript before showing the tail.", i),
@@ -2235,7 +2236,7 @@ func TestOfficeViewportVirtualizationCachesVisibleBlocks(t *testing.T) {
 		})
 	}
 
-	layout := computeLayout(m.width, m.height, m.threadPanelOpen, m.sidebarCollapsed)
+	layout := channelui.ComputeLayout(m.width, m.height, m.threadPanelOpen, m.sidebarCollapsed)
 	_, msgH, _ := m.mainPanelGeometry(layout.MainW, layout.ContentH)
 	contentWidth := layout.MainW - 2
 
@@ -2267,26 +2268,26 @@ func TestRecoveryMouseClickInsertsPromptAndReturnsToMessages(t *testing.T) {
 	m := newChannelModel(false)
 	m.width = 120
 	m.height = 32
-	m.activeApp = officeAppRecovery
-	m.tasks = []channelTask{{
+	m.activeApp = channelui.OfficeAppRecovery
+	m.tasks = []channelui.Task{{
 		ID:        "task-1",
 		Title:     "Ship onboarding",
 		Status:    "in_progress",
 		Owner:     "fe",
 		UpdatedAt: time.Now().Format(time.RFC3339),
 	}}
-	m.messages = []brokerMessage{
+	m.messages = []channelui.BrokerMessage{
 		{ID: "msg-1", From: "ceo", Content: "Need launch review.", Timestamp: time.Now().Add(-3 * time.Minute).Format(time.RFC3339)},
 		{ID: "msg-2", From: "pm", Content: "Reply in thread", ReplyTo: "msg-1", Timestamp: time.Now().Add(-2 * time.Minute).Format(time.RFC3339)},
 	}
 
-	layout := computeLayout(m.width, m.height, m.threadPanelOpen, m.sidebarCollapsed)
+	layout := channelui.ComputeLayout(m.width, m.height, m.threadPanelOpen, m.sidebarCollapsed)
 	headerH, msgH, _ := m.mainPanelGeometry(layout.MainW, layout.ContentH)
 	contentWidth := layout.MainW - 2
 	if contentWidth < 32 {
 		contentWidth = 32
 	}
-	rows, _, _, _ := sliceRenderedLines(m.currentMainLines(contentWidth), msgH, m.scroll)
+	rows, _, _, _ := channelui.SliceRenderedLines(m.currentMainLines(contentWidth), msgH, m.scroll)
 	targetRow := -1
 	for i, row := range rows {
 		if strings.TrimSpace(row.PromptValue) != "" {
@@ -2309,7 +2310,7 @@ func TestRecoveryMouseClickInsertsPromptAndReturnsToMessages(t *testing.T) {
 
 	next, _ := m.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: mainX, Y: headerH + targetRow})
 	got := next.(channelModel)
-	if got.activeApp != officeAppMessages {
+	if got.activeApp != channelui.OfficeAppMessages {
 		t.Fatalf("expected recovery click to return to messages, got %q", got.activeApp)
 	}
 	if !strings.Contains(string(got.input), "Restore context for task task-1") && !strings.Contains(string(got.input), "Summarize everything since") {
@@ -2318,7 +2319,7 @@ func TestRecoveryMouseClickInsertsPromptAndReturnsToMessages(t *testing.T) {
 }
 
 func TestBuildLiveWorkLinesShowsWaitStateWhenQuiet(t *testing.T) {
-	lines := buildLiveWorkLines(nil, nil, nil, 96, "")
+	lines := channelui.BuildLiveWorkLines(nil, nil, nil, 96, "")
 	plain := stripANSI(joinRenderedLines(lines))
 	if !strings.Contains(plain, "Wait state") {
 		t.Fatalf("expected wait-state section, got %q", plain)
@@ -2329,7 +2330,7 @@ func TestBuildLiveWorkLinesShowsWaitStateWhenQuiet(t *testing.T) {
 }
 
 func TestBuildLiveWorkLinesShowsBlockedWork(t *testing.T) {
-	lines := buildLiveWorkLines(nil, []channelTask{{
+	lines := channelui.BuildLiveWorkLines(nil, []channelui.Task{{
 		ID:       "task-1",
 		Title:    "Ship onboarding",
 		Status:   "blocked",
@@ -2358,16 +2359,16 @@ func TestMouseClickCollapsedThreadOpensThreadPanel(t *testing.T) {
 	m := newChannelModel(true)
 	m.width = 120
 	m.height = 32
-	m.messages = []brokerMessage{
+	m.messages = []channelui.BrokerMessage{
 		{ID: "msg-1", From: "ceo", Content: "Root topic", Timestamp: "2026-03-24T10:00:00Z"},
 		{ID: "msg-2", From: "fe", Content: "Reply one", ReplyTo: "msg-1", Timestamp: "2026-03-24T10:01:00Z"},
 	}
 
-	layout := computeLayout(m.width, m.height, m.threadPanelOpen, m.sidebarCollapsed)
+	layout := channelui.ComputeLayout(m.width, m.height, m.threadPanelOpen, m.sidebarCollapsed)
 	headerH, msgH, _ := m.mainPanelGeometry(layout.MainW, layout.ContentH)
 	contentWidth := layout.MainW - 2
 	lines := buildOfficeMessageLines(m.messages, m.expandedThreads, contentWidth, m.threadsDefaultExpand, m.unreadAnchorID, m.unreadCount)
-	visible, _, _, _ := sliceRenderedLines(lines, msgH, m.scroll)
+	visible, _, _, _ := channelui.SliceRenderedLines(lines, msgH, m.scroll)
 	row := -1
 	for i, line := range visible {
 		if line.ThreadID == "msg-1" {
@@ -2414,19 +2415,19 @@ func TestResetCommandOpensConfirmation(t *testing.T) {
 	if got.confirm == nil {
 		t.Fatal("expected reset confirmation")
 	}
-	if got.confirm.Action != confirmActionResetTeam {
+	if got.confirm.Action != channelui.ChannelConfirmActionResetTeam {
 		t.Fatalf("expected reset-team confirmation, got %q", got.confirm.Action)
 	}
 }
 
 func TestPendingRequestEnterOpensReviewConfirmation(t *testing.T) {
 	m := newChannelModel(false)
-	m.pending = &channelInterview{
+	m.pending = &channelui.Interview{
 		ID:       "request-1",
 		Kind:     "approval",
 		From:     "ceo",
 		Question: "Ship it?",
-		Options: []channelInterviewOption{
+		Options: []channelui.InterviewOption{
 			{ID: "approve", Label: "Approve"},
 		},
 	}
@@ -2439,7 +2440,7 @@ func TestPendingRequestEnterOpensReviewConfirmation(t *testing.T) {
 	if got.confirm == nil {
 		t.Fatal("expected review confirmation")
 	}
-	if got.confirm.Action != confirmActionSubmitRequest {
+	if got.confirm.Action != channelui.ChannelConfirmActionSubmitRequest {
 		t.Fatalf("expected submit-request confirmation, got %q", got.confirm.Action)
 	}
 	if got.confirm.ChoiceID != "approve" {
@@ -2449,12 +2450,12 @@ func TestPendingRequestEnterOpensReviewConfirmation(t *testing.T) {
 
 func TestPendingRequestRequiresTextBeforeReview(t *testing.T) {
 	m := newChannelModel(false)
-	m.pending = &channelInterview{
+	m.pending = &channelui.Interview{
 		ID:       "request-1",
 		Kind:     "approval",
 		From:     "ceo",
 		Question: "Ship it?",
-		Options: []channelInterviewOption{
+		Options: []channelui.InterviewOption{
 			{ID: "approve_with_note", Label: "Approve with note", RequiresText: true, TextHint: "Type constraints first."},
 		},
 	}
@@ -2474,7 +2475,7 @@ func TestPendingRequestRequiresTextBeforeReview(t *testing.T) {
 
 func TestPendingRequestTypedAnswerOpensReviewConfirmation(t *testing.T) {
 	m := newChannelModel(false)
-	m.pending = &channelInterview{
+	m.pending = &channelui.Interview{
 		ID:       "request-1",
 		Kind:     "approval",
 		From:     "ceo",
@@ -2489,7 +2490,7 @@ func TestPendingRequestTypedAnswerOpensReviewConfirmation(t *testing.T) {
 		t.Fatalf("expected no immediate post while reviewing typed answer, got %v", cmd)
 	}
 	got := next.(channelModel)
-	if got.confirm == nil || got.confirm.Action != confirmActionSubmitRequest {
+	if got.confirm == nil || got.confirm.Action != channelui.ChannelConfirmActionSubmitRequest {
 		t.Fatalf("expected submit-request confirmation, got %+v", got.confirm)
 	}
 	if got.confirm.CustomText != "Need legal review first." {
@@ -2526,7 +2527,7 @@ func TestChannelViewShowsMessageIDInMeta(t *testing.T) {
 	m := newChannelModel(false)
 	m.width = 120
 	m.height = 30
-	m.messages = []brokerMessage{
+	m.messages = []channelui.BrokerMessage{
 		{ID: "msg-12", From: "ceo", Content: "We should choose a sharper wedge.", Timestamp: "2026-03-24T10:00:00Z"},
 	}
 
@@ -2540,13 +2541,13 @@ func TestChannelViewShowsPerMessageTokenUsage(t *testing.T) {
 	m := newChannelModel(false)
 	m.width = 120
 	m.height = 30
-	m.messages = []brokerMessage{
+	m.messages = []channelui.BrokerMessage{
 		{
 			ID:        "msg-token-1",
 			From:      "ceo",
 			Content:   "We should choose a sharper wedge.",
 			Timestamp: "2026-03-24T10:00:00Z",
-			Usage:     &brokerMessageUsage{TotalTokens: 1234},
+			Usage:     &channelui.BrokerMessageUsage{TotalTokens: 1234},
 		},
 	}
 
@@ -2560,10 +2561,10 @@ func TestChannelViewShowsUsageTotals(t *testing.T) {
 	m := newChannelModel(false)
 	m.width = 120
 	m.height = 30
-	m.usage = channelUsageState{
-		Session: channelUsageTotals{TotalTokens: 3200, CostUsd: 0.41},
-		Total:   channelUsageTotals{TotalTokens: 12500, CostUsd: 1.23},
-		Agents: map[string]channelUsageTotals{
+	m.usage = channelui.UsageState{
+		Session: channelui.UsageTotals{TotalTokens: 3200, CostUsd: 0.41},
+		Total:   channelui.UsageTotals{TotalTokens: 12500, CostUsd: 1.23},
+		Agents: map[string]channelui.UsageTotals{
 			"ceo": {TotalTokens: 5000, CostUsd: 0.62},
 			"fe":  {TotalTokens: 7500, CostUsd: 0.61},
 		},
@@ -2582,10 +2583,10 @@ func TestChannelViewShowsUsageTotals(t *testing.T) {
 }
 
 func TestRenderInterviewCardShowsCustomAnswerAsFinalOption(t *testing.T) {
-	card := renderInterviewCard(channelInterview{
+	card := channelui.RenderInterviewCard(channelui.Interview{
 		From:     "ceo",
 		Question: "What should we optimize for?",
-		Options: []channelInterviewOption{
+		Options: []channelui.InterviewOption{
 			{ID: "speed", Label: "Ship fast", Description: "Bias toward launch speed."},
 			{ID: "quality", Label: "Higher polish", Description: "Bias toward experience quality."},
 		},
@@ -2606,30 +2607,30 @@ func TestRenderInterviewCardShowsCustomAnswerAsFinalOption(t *testing.T) {
 
 func TestInterviewPhaseTracksChooseDraftAndReview(t *testing.T) {
 	m := newChannelModel(false)
-	m.pending = &channelInterview{
+	m.pending = &channelui.Interview{
 		ID:       "request-1",
 		Kind:     "approval",
 		From:     "ceo",
 		Question: "Ship it?",
-		Options: []channelInterviewOption{
+		Options: []channelui.InterviewOption{
 			{ID: "approve_with_note", Label: "Approve with note", RequiresText: true},
 		},
 	}
 
-	if got := m.currentInterviewPhase(); got != interviewPhaseDraft {
+	if got := m.currentInterviewPhase(); got != channelui.InterviewPhaseDraft {
 		t.Fatalf("expected text-required option to enter draft phase, got %q", got)
 	}
-	m.pending.Options[0] = channelInterviewOption{ID: "approve", Label: "Approve"}
-	if got := m.currentInterviewPhase(); got != interviewPhaseChoose {
+	m.pending.Options[0] = channelui.InterviewOption{ID: "approve", Label: "Approve"}
+	if got := m.currentInterviewPhase(); got != channelui.InterviewPhaseChoose {
 		t.Fatalf("expected choose phase without typed text, got %q", got)
 	}
 	m.input = []rune("Need legal review first.")
 	m.inputPos = len(m.input)
-	if got := m.currentInterviewPhase(); got != interviewPhaseDraft {
+	if got := m.currentInterviewPhase(); got != channelui.InterviewPhaseDraft {
 		t.Fatalf("expected typed input to enter draft phase, got %q", got)
 	}
-	m.confirm = confirmationForInterviewAnswer(*m.pending, nil, "Need legal review first.")
-	if got := m.currentInterviewPhase(); got != interviewPhaseReview {
+	m.confirm = channelui.ConfirmationForInterviewAnswer(*m.pending, nil, "Need legal review first.")
+	if got := m.currentInterviewPhase(); got != channelui.InterviewPhaseReview {
 		t.Fatalf("expected review phase once confirmation is open, got %q", got)
 	}
 	if hint := m.composerHint(m.composerTargetLabel(), "", m.pending); !strings.Contains(hint, "Enter submit") || !strings.Contains(hint, "Esc revise") {
@@ -2641,7 +2642,7 @@ func TestEscCancelsPendingInterviewWithoutAnswering(t *testing.T) {
 	m := newChannelModel(false)
 	m.width = 120
 	m.height = 30
-	m.pending = &channelInterview{
+	m.pending = &channelui.Interview{
 		ID:       "interview-1",
 		Kind:     "interview",
 		From:     "ceo",
@@ -2674,17 +2675,17 @@ func TestNewInterviewShowsCard(t *testing.T) {
 	m := newChannelModel(false)
 	m.width = 120
 	m.height = 30
-	m.pending = &channelInterview{
+	m.pending = &channelui.Interview{
 		ID:       "interview-1",
 		From:     "ceo",
 		Question: "Old question",
 	}
 
-	next, _ := m.Update(channelRequestsMsg{requests: []channelInterview{{
+	next, _ := m.Update(channelRequestsMsg{requests: []channelui.Interview{{
 		ID:       "interview-2",
 		From:     "pm",
 		Question: "New question",
-	}}, pending: &channelInterview{
+	}}, pending: &channelui.Interview{
 		ID:       "interview-2",
 		From:     "pm",
 		Question: "New question",
@@ -2698,9 +2699,9 @@ func TestNewInterviewShowsCard(t *testing.T) {
 
 func TestBlockingRequestSwitchesBackToMessages(t *testing.T) {
 	m := newChannelModel(false)
-	m.activeApp = officeAppRequests
+	m.activeApp = channelui.OfficeAppRequests
 	next, _ := m.Update(channelRequestsMsg{
-		requests: []channelInterview{{
+		requests: []channelui.Interview{{
 			ID:       "request-1",
 			Kind:     "approval",
 			From:     "ceo",
@@ -2709,7 +2710,7 @@ func TestBlockingRequestSwitchesBackToMessages(t *testing.T) {
 			Blocking: true,
 			Required: true,
 		}},
-		pending: &channelInterview{
+		pending: &channelui.Interview{
 			ID:       "request-1",
 			Kind:     "approval",
 			From:     "ceo",
@@ -2720,7 +2721,7 @@ func TestBlockingRequestSwitchesBackToMessages(t *testing.T) {
 		},
 	})
 	got := next.(channelModel)
-	if got.activeApp != officeAppMessages {
+	if got.activeApp != channelui.OfficeAppMessages {
 		t.Fatalf("expected blocking request to switch to messages, got %q", got.activeApp)
 	}
 	if got.pending == nil || got.pending.ID != "request-1" {
@@ -2733,7 +2734,7 @@ func TestBlockingRequestSwitchesBackToMessages(t *testing.T) {
 
 func TestBlockingRequestEscCancelsRequest(t *testing.T) {
 	m := newChannelModel(false)
-	m.pending = &channelInterview{
+	m.pending = &channelui.Interview{
 		ID:       "request-1",
 		Kind:     "approval",
 		From:     "ceo",
@@ -2764,7 +2765,7 @@ func TestBlockingRequestEscCancelsRequest(t *testing.T) {
 func TestBlockingRequestDismissCommandCancelsRequest(t *testing.T) {
 	t.Skip("skipped: pre-existing CI environment issue")
 	m := newChannelModel(false)
-	m.requests = []channelInterview{{
+	m.requests = []channelui.Interview{{
 		ID:       "request-1",
 		Kind:     "approval",
 		From:     "ceo",

@@ -4,12 +4,13 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/nex-crm/wuphf/cmd/wuphf/channelui"
 	"github.com/nex-crm/wuphf/internal/team"
 )
 
-func (m channelModel) currentArtifactSnapshot(limit int) runtimeArtifactSnapshot {
-	taskLogs := m.recentTaskLogArtifacts(maxInt(limit, 12))
-	taskLogsByID := make(map[string]taskLogArtifact, len(taskLogs))
+func (m channelModel) currentArtifactSnapshot(limit int) channelui.RuntimeArtifactSnapshot {
+	taskLogs := m.recentTaskLogArtifacts(channelui.MaxInt(limit, 12))
+	taskLogsByID := make(map[string]channelui.TaskLogArtifact, len(taskLogs))
 	for _, artifact := range taskLogs {
 		if id := strings.TrimSpace(artifact.TaskID); id != "" {
 			taskLogsByID[id] = artifact
@@ -17,32 +18,32 @@ func (m channelModel) currentArtifactSnapshot(limit int) runtimeArtifactSnapshot
 	}
 
 	artifacts := make([]team.RuntimeArtifact, 0, len(m.tasks)+len(taskLogs)+len(m.requests)+len(m.actions)+8)
-	for _, task := range recentArtifactTasks(m.tasks, maxInt(limit, 12)) {
+	for _, task := range channelui.RecentArtifactTasks(m.tasks, channelui.MaxInt(limit, 12)) {
 		logArtifact, ok := taskLogsByID[strings.TrimSpace(task.ID)]
 		if ok {
 			delete(taskLogsByID, strings.TrimSpace(task.ID))
 		}
-		artifacts = append(artifacts, buildTaskRuntimeArtifact(task, logArtifact, ok))
+		artifacts = append(artifacts, channelui.BuildTaskRuntimeArtifact(task, logArtifact, ok))
 	}
 	for _, orphan := range taskLogs {
 		if _, ok := taskLogsByID[strings.TrimSpace(orphan.TaskID)]; !ok {
 			continue
 		}
-		artifacts = append(artifacts, buildOrphanTaskLogRuntimeArtifact(orphan))
+		artifacts = append(artifacts, channelui.BuildOrphanTaskLogRuntimeArtifact(orphan))
 	}
-	for _, run := range recentWorkflowRunArtifacts(maxInt(limit, 8)) {
-		artifacts = append(artifacts, buildWorkflowRuntimeArtifact(run))
+	for _, run := range recentWorkflowRunArtifacts(channelui.MaxInt(limit, 8)) {
+		artifacts = append(artifacts, channelui.BuildWorkflowRuntimeArtifact(run))
 	}
-	for _, req := range recentHumanArtifactRequests(m.requests, maxInt(limit, 8)) {
-		artifacts = append(artifacts, buildRequestRuntimeArtifact(req))
+	for _, req := range channelui.RecentHumanArtifactRequests(m.requests, channelui.MaxInt(limit, 8)) {
+		artifacts = append(artifacts, channelui.BuildRequestRuntimeArtifact(req))
 	}
-	for _, action := range recentExecutionArtifactActions(m.actions, maxInt(limit, 8)) {
-		artifacts = append(artifacts, buildActionRuntimeArtifact(action))
+	for _, action := range channelui.RecentExecutionArtifactActions(m.actions, channelui.MaxInt(limit, 8)) {
+		artifacts = append(artifacts, channelui.BuildActionRuntimeArtifact(action))
 	}
 
 	sort.SliceStable(artifacts, func(i, j int) bool {
-		left := parseArtifactTimestamp(artifacts[i].UpdatedAt, artifacts[i].StartedAt)
-		right := parseArtifactTimestamp(artifacts[j].UpdatedAt, artifacts[j].StartedAt)
+		left := channelui.ParseArtifactTimestamp(artifacts[i].UpdatedAt, artifacts[i].StartedAt)
+		right := channelui.ParseArtifactTimestamp(artifacts[j].UpdatedAt, artifacts[j].StartedAt)
 		switch {
 		case !left.IsZero() && !right.IsZero():
 			return left.After(right)
@@ -57,5 +58,5 @@ func (m channelModel) currentArtifactSnapshot(limit int) runtimeArtifactSnapshot
 	if limit > 0 && len(artifacts) > limit {
 		artifacts = artifacts[:limit]
 	}
-	return runtimeArtifactSnapshot{Items: artifacts}
+	return channelui.RuntimeArtifactSnapshot{Items: artifacts}
 }

@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/nex-crm/wuphf/cmd/wuphf/channelui"
 	"github.com/nex-crm/wuphf/internal/avatar"
 	"github.com/nex-crm/wuphf/internal/company"
 )
@@ -478,7 +479,7 @@ func (m splashModel) renderCast() string {
 }
 
 func (m splashModel) renderNameLabel(slug, name string, slotW int) string {
-	name = truncateLabel(name, slotW)
+	name = channelui.TruncateLabel(name, slotW)
 	padL := (slotW - len([]rune(name))) / 2
 	padR := slotW - len([]rune(name)) - padL
 	if padL < 0 {
@@ -488,11 +489,8 @@ func (m splashModel) renderNameLabel(slug, name string, slotW int) string {
 		padR = 0
 	}
 	label := strings.Repeat(" ", padL) + name + strings.Repeat(" ", padR)
-	agentColor := agentColor(slug)
-	if agentColor == "" {
-		agentColor = "#64748B"
-	}
-	return lipgloss.NewStyle().Foreground(lipgloss.Color(agentColor)).Bold(true).Render(label)
+	color := channelui.AgentColor(slug)
+	return lipgloss.NewStyle().Foreground(lipgloss.Color(color)).Bold(true).Render(label)
 }
 
 // ── Title card ──────────────────────────────────────────────────

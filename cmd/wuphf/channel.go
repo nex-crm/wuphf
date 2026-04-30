@@ -29,56 +29,56 @@ import (
 )
 
 type channelMsg struct {
-	messages []brokerMessage
+	messages []channelui.BrokerMessage
 }
 
 type channelMembersMsg struct {
-	members []channelMember
+	members []channelui.Member
 }
 
 type channelOfficeMembersMsg struct {
-	members []officeMemberInfo
+	members []channelui.OfficeMember
 }
 
 type channelChannelsMsg struct {
-	channels []channelInfo
+	channels []channelui.ChannelInfo
 }
 
 type channelRequestsMsg struct {
-	requests []channelInterview
-	pending  *channelInterview
+	requests []channelui.Interview
+	pending  *channelui.Interview
 }
 
 type channelTasksMsg struct {
-	tasks []channelTask
+	tasks []channelui.Task
 }
 
 type channelActionsMsg struct {
-	actions []channelAction
+	actions []channelui.Action
 }
 
 type channelSignalsMsg struct {
-	signals []channelSignal
+	signals []channelui.Signal
 }
 
 type channelDecisionsMsg struct {
-	decisions []channelDecision
+	decisions []channelui.Decision
 }
 
 type channelWatchdogsMsg struct {
-	alerts []channelWatchdog
+	alerts []channelui.Watchdog
 }
 
 type channelSchedulerMsg struct {
-	jobs []channelSchedulerJob
+	jobs []channelui.SchedulerJob
 }
 
 type channelSkillsMsg struct {
-	skills []channelSkill
+	skills []channelui.Skill
 }
 
 type channelUsageMsg struct {
-	usage channelUsageState
+	usage channelui.UsageState
 }
 
 type channelHealthMsg struct {
@@ -319,22 +319,22 @@ const (
 )
 
 type channelModel struct {
-	messages             []brokerMessage
-	members              []channelMember
-	officeMembers        []officeMemberInfo
-	channels             []channelInfo
-	requests             []channelInterview
-	tasks                []channelTask
-	actions              []channelAction
-	signals              []channelSignal
-	decisions            []channelDecision
-	watchdogs            []channelWatchdog
-	scheduler            []channelSchedulerJob
-	skills               []channelSkill
-	pending              *channelInterview
+	messages             []channelui.BrokerMessage
+	members              []channelui.Member
+	officeMembers        []channelui.OfficeMember
+	channels             []channelui.ChannelInfo
+	requests             []channelui.Interview
+	tasks                []channelui.Task
+	actions              []channelui.Action
+	signals              []channelui.Signal
+	decisions            []channelui.Decision
+	watchdogs            []channelui.Watchdog
+	scheduler            []channelui.SchedulerJob
+	skills               []channelui.Skill
+	pending              *channelui.Interview
 	lastID               string
 	activeChannel        string
-	activeApp            officeApp
+	activeApp            channelui.OfficeApp
 	replyToID            string
 	expandedThreads      map[string]bool
 	clickableThreads     map[int]string // rendered line index → message ID for click-to-expand
@@ -355,8 +355,8 @@ type channelModel struct {
 	selectedOption       int
 	notice               string
 	noticeExpireAt       time.Time
-	confirm              *channelConfirm
-	doctor               *channelDoctorReport
+	confirm              *channelui.ChannelConfirm
+	doctor               *channelui.DoctorReport
 	memberDraft          *channelMemberDraft
 	initFlow             tui.InitFlowModel
 	picker               tui.PickerModel
@@ -373,13 +373,13 @@ type channelModel struct {
 	threadInputPos      int
 	threadInputHistory  channelui.History
 	threadScroll        int
-	usage               channelUsageState
+	usage               channelui.UsageState
 	brokerConnected     bool
 	sessionMode         string
 	oneOnOneAgent       string
 	lastCtrlCAt         time.Time
 	quickJumpTarget     quickJumpTarget
-	calendarRange       calendarRange
+	calendarRange       channelui.CalendarRange
 	calendarFilter      string
 
 	// Telegram connect flow state
@@ -399,13 +399,13 @@ type channelModel struct {
 }
 
 func newChannelModel(threadsCollapsed bool) channelModel {
-	return newChannelModelWithApp(threadsCollapsed, officeAppMessages)
+	return newChannelModelWithApp(threadsCollapsed, channelui.OfficeAppMessages)
 }
 
-func newChannelModelWithApp(threadsCollapsed bool, initialApp officeApp) channelModel {
+func newChannelModelWithApp(threadsCollapsed bool, initialApp channelui.OfficeApp) channelModel {
 	manifest, _ := company.LoadManifest()
-	officeMembers := officeMembersFromManifest(manifest)
-	channels := channelInfosFromManifest(manifest)
+	officeMembers := channelui.OfficeMembersFromManifest(manifest)
+	channels := channelui.ChannelInfosFromManifest(manifest)
 	sessionMode := team.SessionModeOffice
 	oneOnOneAgent := ""
 	if strings.EqualFold(strings.TrimSpace(os.Getenv("WUPHF_ONE_ON_ONE")), "1") || strings.EqualFold(strings.TrimSpace(os.Getenv("WUPHF_ONE_ON_ONE")), "true") {
@@ -414,7 +414,7 @@ func newChannelModelWithApp(threadsCollapsed bool, initialApp officeApp) channel
 		if oneOnOneAgent == "" {
 			oneOnOneAgent = team.DefaultOneOnOneAgent
 		}
-		initialApp = officeAppMessages
+		initialApp = channelui.OfficeAppMessages
 	}
 	channelui.SetOfficeDirectory(officeMembers)
 	m := channelModel{
@@ -426,7 +426,7 @@ func newChannelModelWithApp(threadsCollapsed bool, initialApp officeApp) channel
 		initFlow:             tui.NewInitFlow(),
 		activeChannel:        "general",
 		activeApp:            initialApp,
-		calendarRange:        calendarRangeWeek,
+		calendarRange:        channelui.CalendarRangeWeek,
 		officeMembers:        officeMembers,
 		channels:             channels,
 		sessionMode:          sessionMode,
@@ -476,12 +476,12 @@ func (m channelModel) oneOnOneAgentSlug() string {
 
 func (m channelModel) oneOnOneAgentName() string {
 	slug := m.oneOnOneAgentSlug()
-	for _, member := range mergeOfficeMembers(m.officeMembers, m.members, nil) {
+	for _, member := range channelui.MergeOfficeMembers(m.officeMembers, m.members, nil) {
 		if member.Slug == slug && strings.TrimSpace(member.Name) != "" {
 			return member.Name
 		}
 	}
-	return displayName(slug)
+	return channelui.DisplayName(slug)
 }
 
 func (m *channelModel) refreshSlashCommands() {
@@ -561,7 +561,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.ClearScreen
 
 	case tea.MouseMsg:
-		layout := computeLayout(m.width, m.height, m.threadPanelOpen, m.sidebarCollapsed)
+		layout := channelui.ComputeLayout(m.width, m.height, m.threadPanelOpen, m.sidebarCollapsed)
 		inSidebar := layout.ShowSidebar && msg.X < layout.SidebarW
 		switch msg.Button {
 		case tea.MouseButtonWheelUp:
@@ -616,7 +616,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.clearUnreadState()
 					return m, nil
 				case "autocomplete":
-					if idx, ok := popupActionIndex(action.Value); ok {
+					if idx, ok := channelui.PopupActionIndex(action.Value); ok {
 						for m.autocomplete.SelectedIndex() != idx {
 							m.autocomplete.Next()
 						}
@@ -626,7 +626,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 					return m, nil
 				case "mention":
-					if idx, ok := popupActionIndex(action.Value); ok {
+					if idx, ok := channelui.PopupActionIndex(action.Value); ok {
 						for m.mention.SelectedIndex() != idx {
 							m.mention.Next()
 						}
@@ -752,7 +752,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.String() == "esc" {
 			switch m.activeInteractionContext() {
 			case contextConfirm:
-				if m.confirm != nil && m.confirm.Action == confirmActionSubmitRequest {
+				if m.confirm != nil && m.confirm.Action == channelui.ChannelConfirmActionSubmitRequest {
 					m.confirm = nil
 					m.notice = "Review closed. Keep editing before you send."
 					return m, nil
@@ -887,14 +887,14 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		if m.focus == focusMain && m.activeApp == officeAppCalendar && len(m.input) == 0 && !m.posting {
+		if m.focus == focusMain && m.activeApp == channelui.OfficeAppCalendar && len(m.input) == 0 && !m.posting {
 			switch msg.String() {
 			case "d":
-				m.calendarRange = calendarRangeDay
+				m.calendarRange = channelui.CalendarRangeDay
 				m.notice = "Calendar now shows today."
 				return m, nil
 			case "w":
-				m.calendarRange = calendarRangeWeek
+				m.calendarRange = channelui.CalendarRangeWeek
 				m.notice = "Calendar now shows this week."
 				return m, nil
 			case "f":
@@ -925,7 +925,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// ── focusMain: existing behavior ──────────────────────────────
 		if motionKey, ok := composerMotionKey(msg); ok {
 			m.lastCtrlCAt = time.Time{}
-			if nextPos, handled := moveComposerCursor(m.input, m.inputPos, motionKey); handled {
+			if nextPos, handled := channelui.MoveComposerCursor(m.input, m.inputPos, motionKey); handled {
 				m.inputPos = nextPos
 				m.updateInputOverlays()
 			}
@@ -949,7 +949,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m.runActiveCommand(trimmed)
 				}
 				if m.pending != nil {
-					m.confirm = confirmationForInterviewAnswer(*m.pending, m.selectedInterviewOption(), text)
+					m.confirm = channelui.ConfirmationForInterviewAnswer(*m.pending, m.selectedInterviewOption(), text)
 					m.notice = "Review your answer before sending."
 					return m, nil
 				}
@@ -962,11 +962,11 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if m.pending != nil {
 				if opt := m.selectedInterviewOption(); opt != nil {
-					if interviewOptionRequiresText(opt) {
-						m.notice = interviewOptionTextHint(opt)
+					if channelui.InterviewOptionRequiresText(opt) {
+						m.notice = channelui.InterviewOptionTextHint(opt)
 						return m, nil
 					}
-					m.confirm = confirmationForInterviewAnswer(*m.pending, opt, "")
+					m.confirm = channelui.ConfirmationForInterviewAnswer(*m.pending, opt, "")
 					m.notice = "Review your answer before sending."
 					return m, nil
 				}
@@ -1052,10 +1052,10 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.clearUnreadState()
 		case "pgup":
 			m.lastCtrlCAt = time.Time{}
-			m.scroll += maxInt(10, m.height/2)
+			m.scroll += channelui.MaxInt(10, m.height/2)
 		case "pgdown":
 			m.lastCtrlCAt = time.Time{}
-			m.scroll -= maxInt(10, m.height/2)
+			m.scroll -= channelui.MaxInt(10, m.height/2)
 			if m.scroll < 0 {
 				m.scroll = 0
 			}
@@ -1066,7 +1066,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.lastCtrlCAt = time.Time{}
 			if ch := composerInsertRunes(msg); len(ch) > 0 {
 				m.inputHistory.ResetRecall()
-				m.input, m.inputPos = insertComposerRunes(m.input, m.inputPos, ch)
+				m.input, m.inputPos = channelui.InsertComposerRunes(m.input, m.inputPos, ch)
 				m.updateInputOverlays()
 			} else if len(msg.String()) == 1 || msg.Type == tea.KeyRunes {
 				ch := msg.Runes
@@ -1098,9 +1098,9 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		switch strings.TrimSpace(msg.action) {
 		case "create":
-			if slug := normalizeSidebarSlug(msg.slug); slug != "" {
+			if slug := channelui.NormalizeSidebarSlug(msg.slug); slug != "" {
 				m.activeChannel = slug
-				m.activeApp = officeAppMessages
+				m.activeApp = channelui.OfficeAppMessages
 				m.messages = nil
 				m.members = nil
 				m.tasks = nil
@@ -1114,9 +1114,9 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.syncSidebarCursorToActive()
 			}
 		case "remove":
-			if normalizeSidebarSlug(msg.slug) == normalizeSidebarSlug(m.activeChannel) {
+			if channelui.NormalizeSidebarSlug(msg.slug) == channelui.NormalizeSidebarSlug(m.activeChannel) {
 				m.activeChannel = "general"
-				m.activeApp = officeAppMessages
+				m.activeApp = channelui.OfficeAppMessages
 				m.messages = nil
 				m.members = nil
 				m.tasks = nil
@@ -1204,7 +1204,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.scheduler = nil
 			m.refreshSlashCommands()
 			if m.isOneOnOne() {
-				m.activeApp = officeAppMessages
+				m.activeApp = channelui.OfficeAppMessages
 				m.sidebarCollapsed = true
 				m.threadPanelOpen = false
 				m.threadPanelID = ""
@@ -1400,7 +1400,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.notice = fmt.Sprintf("Connected \"%s\" as #%s. Restart WUPHF to activate the Telegram bridge.", msg.groupTitle, msg.channelSlug)
 		m.activeChannel = msg.channelSlug
-		m.activeApp = officeAppMessages
+		m.activeApp = channelui.OfficeAppMessages
 		m.messages = nil
 		m.members = nil
 		m.tasks = nil
@@ -1413,7 +1413,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.clearUnreadState()
 		m.syncSidebarCursorToActive()
 		manifest, _ := company.LoadManifest()
-		m.channels = channelInfosFromManifest(manifest)
+		m.channels = channelui.ChannelInfosFromManifest(manifest)
 		return m, tea.Batch(pollBroker("", m.activeChannel), pollMembers(m.activeChannel), pollChannels())
 
 	case channelMemberDraftDoneMsg:
@@ -1440,12 +1440,12 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case channelMsg:
 		if len(msg.messages) > 0 {
 			hadHistory := m.lastID != ""
-			uniqueMessages, added := appendUniqueMessages(m.messages, msg.messages)
+			uniqueMessages, added := channelui.AppendUniqueMessages(m.messages, msg.messages)
 			if added == 0 {
 				break
 			}
 			addedMessages := uniqueMessages[len(m.messages):]
-			latestHumanFacing := latestHumanFacingMessage(addedMessages)
+			latestHumanFacing := channelui.LatestHumanFacingMessage(addedMessages)
 			if m.scroll > 0 {
 				m.scroll += added
 			}
@@ -1471,7 +1471,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.clearUnreadState()
 			}
 			if latestHumanFacing != nil && hadHistory {
-				m.activeApp = officeAppMessages
+				m.activeApp = channelui.OfficeAppMessages
 				m.notice = fmt.Sprintf("@%s has something for you", latestHumanFacing.From)
 			}
 		}
@@ -1491,7 +1491,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case channelOfficeMembersMsg:
 		if len(msg.members) == 0 {
-			msg.members = officeMembersFallback(m.officeMembers)
+			msg.members = channelui.OfficeMembersFallback(m.officeMembers)
 		}
 		m.officeMembers = msg.members
 		channelui.SetOfficeDirectory(msg.members)
@@ -1499,14 +1499,14 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case channelChannelsMsg:
 		if len(msg.channels) == 0 {
-			msg.channels = channelInfosFallback(m.channels)
+			msg.channels = channelui.ChannelInfosFallback(m.channels)
 		}
 		m.channels = msg.channels
 		m.clampSidebarCursor()
 		if m.activeChannel == "" {
 			m.activeChannel = "general"
 		}
-		if !channelExists(msg.channels, m.activeChannel) && len(msg.channels) > 0 {
+		if !channelui.ChannelExists(msg.channels, m.activeChannel) && len(msg.channels) > 0 {
 			m.activeChannel = msg.channels[0].Slug
 			m.lastID = ""
 			return m, tea.Batch(pollBroker("", m.activeChannel), pollMembers(m.activeChannel), pollRequests(m.activeChannel))
@@ -1515,7 +1515,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case channelUsageMsg:
 		m.usage = msg.usage
 		if m.usage.Agents == nil {
-			m.usage.Agents = make(map[string]channelUsageTotals)
+			m.usage.Agents = make(map[string]channelui.UsageTotals)
 		}
 
 	case channelHealthMsg:
@@ -1527,7 +1527,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.sessionMode = nextMode
 			m.oneOnOneAgent = nextAgent
 			if m.isOneOnOne() {
-				m.activeApp = officeAppMessages
+				m.activeApp = channelui.OfficeAppMessages
 				m.sidebarCollapsed = true
 				m.threadPanelOpen = false
 				m.threadPanelID = ""
@@ -1590,29 +1590,29 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pickerMode = channelPickerNone
 			switch {
 			case strings.HasPrefix(msg.Value, "app:"):
-				switch officeApp(strings.TrimPrefix(msg.Value, "app:")) {
-				case officeAppMessages:
-					m.activeApp = officeAppMessages
+				switch channelui.OfficeApp(strings.TrimPrefix(msg.Value, "app:")) {
+				case channelui.OfficeAppMessages:
+					m.activeApp = channelui.OfficeAppMessages
 					m.notice = "Viewing messages."
 					m.syncSidebarCursorToActive()
 					return m, tea.Batch(pollBroker("", m.activeChannel), pollMembers(m.activeChannel))
-				case officeAppTasks:
-					m.activeApp = officeAppTasks
+				case channelui.OfficeAppTasks:
+					m.activeApp = channelui.OfficeAppTasks
 					m.notice = "Viewing tasks in #" + m.activeChannel + "."
 					m.syncSidebarCursorToActive()
 					return m, pollTasks(m.activeChannel)
-				case officeAppRequests:
-					m.activeApp = officeAppRequests
+				case channelui.OfficeAppRequests:
+					m.activeApp = channelui.OfficeAppRequests
 					m.notice = "Viewing requests in #" + m.activeChannel + "."
 					m.syncSidebarCursorToActive()
 					return m, pollRequests(m.activeChannel)
-				case officeAppPolicies:
-					m.activeApp = officeAppPolicies
+				case channelui.OfficeAppPolicies:
+					m.activeApp = channelui.OfficeAppPolicies
 					m.notice = "Viewing policies and decisions."
 					m.syncSidebarCursorToActive()
 					return m, pollOfficeLedger()
-				case officeAppCalendar:
-					m.activeApp = officeAppCalendar
+				case channelui.OfficeAppCalendar:
+					m.activeApp = channelui.OfficeAppCalendar
 					m.notice = "Viewing the office calendar."
 					m.syncSidebarCursorToActive()
 					return m, nil
@@ -1711,7 +1711,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.calendarFilter == "" {
 				m.notice = "Showing all teammate calendars."
 			} else {
-				m.notice = "Filtering calendar for " + displayName(m.calendarFilter) + "."
+				m.notice = "Filtering calendar for " + channelui.DisplayName(m.calendarFilter) + "."
 			}
 			return m, nil
 		case channelPickerOneOnOneMode:
@@ -1966,7 +1966,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				actions = append(actions, tui.PickerOption{Label: "Expand thread", Value: "expand:" + selectedMsgID, Description: "Show replies inline"})
 			}
-			m.picker = tui.NewPicker("Thread: "+truncateText(msg.Label, 40), actions)
+			m.picker = tui.NewPicker("Thread: "+channelui.TruncateText(msg.Label, 40), actions)
 			m.picker.SetActive(true)
 			m.pickerMode = channelPickerThreadAction
 			return m, nil
@@ -2031,7 +2031,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.input = nil
 			m.inputPos = 0
 			if m.pending.Blocking || m.pending.Required {
-				m.activeApp = officeAppMessages
+				m.activeApp = channelui.OfficeAppMessages
 				m.syncSidebarCursorToActive()
 				m.notice = "Human decision needed. Team is paused until you answer."
 				if m.pending.ReplyTo != "" {
@@ -2058,13 +2058,13 @@ func (m channelModel) View() string {
 		return "Loading..."
 	}
 
-	layout := computeLayout(m.width, m.height, m.threadPanelOpen && !m.isOneOnOne(), m.sidebarCollapsed || m.isOneOnOne())
+	layout := channelui.ComputeLayout(m.width, m.height, m.threadPanelOpen && !m.isOneOnOne(), m.sidebarCollapsed || m.isOneOnOne())
 	workspaceState := m.currentWorkspaceUIState()
 
 	// ── Sidebar ──────────────────────────────────────────────────────
 	sidebar := ""
 	if layout.ShowSidebar && !m.isOneOnOne() {
-		sidebar = cachedSidebarRender(m.channels, mergeOfficeMembers(m.officeMembers, m.members, m.currentChannelInfo()), m.tasks, m.activeChannel, m.activeApp, m.sidebarCursor, m.sidebarRosterOffset, m.focus == focusSidebar, m.quickJumpTarget, workspaceState, layout.SidebarW, layout.ContentH, m.onboardingChecklist)
+		sidebar = cachedSidebarRender(m.channels, channelui.MergeOfficeMembers(m.officeMembers, m.members, m.currentChannelInfo()), m.tasks, m.activeChannel, m.activeApp, m.sidebarCursor, m.sidebarRosterOffset, m.focus == focusSidebar, m.quickJumpTarget, workspaceState, layout.SidebarW, layout.ContentH, m.onboardingChecklist)
 	}
 
 	// ── Thread panel ─────────────────────────────────────────────────
@@ -2072,7 +2072,7 @@ func (m channelModel) View() string {
 	if layout.ShowThread && !m.isOneOnOne() {
 		threadPopup := ""
 		if m.focus == focusThread {
-			threadPopup = m.renderActivePopup(maxInt(layout.ThreadW-4, 24))
+			threadPopup = m.renderActivePopup(channelui.MaxInt(layout.ThreadW-4, 24))
 		}
 		thread = renderThreadPanel(m.messages, m.threadPanelID,
 			layout.ThreadW, layout.ContentH,
@@ -2088,10 +2088,10 @@ func (m channelModel) View() string {
 	}
 
 	// Channel header (2 lines)
-	headerStyle := channelHeaderStyle(mainW)
+	headerStyle := channelui.ChannelHeaderStyle(mainW)
 	headerLine1 := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#F8FAFC")).
-		Render(appIcon(m.activeApp) + " " + m.currentHeaderTitle())
-	headerMeta := lipgloss.NewStyle().Foreground(lipgloss.Color(slackMuted)).
+		Render(channelui.AppIcon(m.activeApp) + " " + m.currentHeaderTitle())
+	headerMeta := lipgloss.NewStyle().Foreground(lipgloss.Color(channelui.SlackMuted)).
 		Render(m.currentHeaderMeta())
 	if m.usage.Total.TotalTokens > 0 || m.usage.Total.CostUsd > 0 || m.usage.Session.TotalTokens > 0 || m.usage.Session.CostUsd > 0 {
 		sinceLabel := ""
@@ -2101,19 +2101,19 @@ func (m channelModel) View() string {
 			}
 		}
 		headerMeta += "  " + lipgloss.NewStyle().
-			Foreground(lipgloss.Color(slackActive)).
+			Foreground(lipgloss.Color(channelui.SlackActive)).
 			Render(fmt.Sprintf("Session %s · %s  Total %s · %s%s",
-				formatUsd(m.usage.Session.CostUsd),
-				formatTokenCount(m.usage.Session.TotalTokens),
-				formatUsd(m.usage.Total.CostUsd),
-				formatTokenCount(m.usage.Total.TotalTokens),
+				channelui.FormatUSD(m.usage.Session.CostUsd),
+				channelui.FormatTokenCount(m.usage.Session.TotalTokens),
+				channelui.FormatUSD(m.usage.Total.CostUsd),
+				channelui.FormatTokenCount(m.usage.Total.TotalTokens),
 				sinceLabel,
 			))
 	}
-	if m.activeApp == officeAppMessages && m.unreadCount > 0 && m.scroll > 0 {
+	if m.activeApp == channelui.OfficeAppMessages && m.unreadCount > 0 && m.scroll > 0 {
 		headerMeta += "  " + lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#FFFFFF")).
-			Background(lipgloss.Color(slackActive)).
+			Background(lipgloss.Color(channelui.SlackActive)).
 			Padding(0, 1).
 			Bold(true).
 			Render(fmt.Sprintf("%d new", m.unreadCount))
@@ -2124,28 +2124,28 @@ func (m channelModel) View() string {
 		}
 	}
 	if m.pending != nil {
-		headerMeta += "  " + accentPill("request pending", "#B45309")
+		headerMeta += "  " + channelui.AccentPill("request pending", "#B45309")
 	} else if len(m.requests) > 0 {
-		headerMeta += "  " + subtlePill(fmt.Sprintf("%d open requests", len(m.requests)), "#FDE68A", "#78350F")
+		headerMeta += "  " + channelui.SubtlePill(fmt.Sprintf("%d open requests", len(m.requests)), "#FDE68A", "#78350F")
 	}
 	channelHeader := headerStyle.Render(headerLine1 + headerMeta)
-	if usageLine := renderUsageStrip(m.usage, m.members, mainW); usageLine != "" {
+	if usageLine := channelui.RenderUsageStrip(m.usage, m.members, mainW); usageLine != "" {
 		channelHeader += "\n" + usageLine
 	}
 	headerH := lipgloss.Height(channelHeader)
 	runtimeStrip := ""
-	if m.activeApp == officeAppMessages || m.isOneOnOne() {
+	if m.activeApp == channelui.OfficeAppMessages || m.isOneOnOne() {
 		focusSlug := ""
 		if m.isOneOnOne() {
 			focusSlug = m.oneOnOneAgentSlug()
 		}
-		runtimeStrip = renderRuntimeStrip(m.members, m.tasks, m.requests, m.actions, mainW-4, focusSlug)
+		runtimeStrip = channelui.RenderRuntimeStrip(m.members, m.tasks, m.requests, m.actions, mainW-4, focusSlug)
 	}
 	runtimeH := lipgloss.Height(runtimeStrip)
 
 	// Composer
-	typingAgents := typingAgentsFromMembers(m.members)
-	liveActivities := liveActivityFromMembers(m.members)
+	typingAgents := channelui.TypingAgentsFromMembers(m.members)
+	liveActivities := channelui.LiveActivityFromMembers(m.members)
 	composerStr := renderComposer(mainW, m.input, m.inputPos, m.composerTargetLabel(),
 		m.replyToID, typingAgents, liveActivities, activePending, m.selectedOption, m.composerHint(m.composerTargetLabel(), m.replyToID, activePending),
 		m.focus == focusMain, m.tickFrame)
@@ -2157,7 +2157,7 @@ func (m channelModel) View() string {
 	// Interview card (above composer)
 	interviewCard := ""
 	if activePending != nil {
-		interviewCard = renderInterviewCard(*activePending, m.selectedOption, m.interviewPhaseTitle(), mainW-4)
+		interviewCard = channelui.RenderInterviewCard(*activePending, m.selectedOption, m.interviewPhaseTitle(), mainW-4)
 	}
 	memberDraftCard := ""
 	if m.memberDraft != nil {
@@ -2165,11 +2165,11 @@ func (m channelModel) View() string {
 	}
 	doctorCard := ""
 	if m.doctor != nil {
-		doctorCard = renderDoctorCard(*m.doctor, mainW-4)
+		doctorCard = channelui.RenderDoctorCard(*m.doctor, mainW-4)
 	}
 	confirmCard := ""
 	if m.confirm != nil {
-		confirmCard = renderConfirmCard(*m.confirm, mainW-4)
+		confirmCard = channelui.RenderConfirmCard(*m.confirm, mainW-4)
 	}
 
 	// Init/picker overlays
@@ -2199,7 +2199,7 @@ func (m channelModel) View() string {
 		contentWidth = 32
 	}
 	allLines := m.currentMainViewportLines(contentWidth, msgH)
-	visibleRows, scroll, _, _ := sliceRenderedLines(allLines, msgH, m.scroll)
+	visibleRows, scroll, _, _ := channelui.SliceRenderedLines(allLines, msgH, m.scroll)
 	var visible []string
 	for _, row := range visibleRows {
 		visible = append(visible, row.Text)
@@ -2207,14 +2207,14 @@ func (m channelModel) View() string {
 	for len(visible) < msgH {
 		visible = append(visible, "")
 	}
-	if m.activeApp == officeAppMessages && m.unreadCount > 0 && scroll > 0 && len(visible) > 0 {
-		visible[0] = renderAwayStrip(contentWidth, m.unreadCount, m.currentAwaySummary())
+	if m.activeApp == channelui.OfficeAppMessages && m.unreadCount > 0 && scroll > 0 && len(visible) > 0 {
+		visible[0] = channelui.RenderAwayStrip(contentWidth, m.unreadCount, m.currentAwaySummary())
 	}
 	if popup := m.renderActivePopup(contentWidth); popup != "" && m.focus == focusMain {
-		visible = overlayBottomLines(visible, strings.Split(popup, "\n"))
+		visible = channelui.OverlayBottomLines(visible, strings.Split(popup, "\n"))
 	}
 
-	msgPanel := mainPanelStyle(mainW, msgH).Render(strings.Join(visible, "\n"))
+	msgPanel := channelui.MainPanelStyle(mainW, msgH).Render(strings.Join(visible, "\n"))
 
 	// Assemble main column
 	mainParts := []string{channelHeader}
@@ -2234,13 +2234,13 @@ func (m channelModel) View() string {
 	if initPanel != "" {
 		mainParts = append(mainParts, initPanel)
 	}
-	if m.activeApp == officeAppMessages || m.memberDraft != nil {
+	if m.activeApp == channelui.OfficeAppMessages || m.memberDraft != nil {
 		mainParts = append(mainParts, composerStr)
 	}
 	mainCol := strings.Join(mainParts, "\n")
 
 	// ── Compose 3 columns ────────────────────────────────────────────
-	border := renderVerticalBorder(layout.ContentH, slackBorder)
+	border := channelui.RenderVerticalBorder(layout.ContentH, channelui.SlackBorder)
 	var panels []string
 	if sidebar != "" {
 		panels = append(panels, sidebar, border)
@@ -2262,7 +2262,7 @@ func (m channelModel) View() string {
 	var statusBar string
 	if m.pending != nil {
 		statusText := m.interviewStatusLine()
-		statusBar = statusBarStyle(m.width).Render(
+		statusBar = channelui.StatusBarStyle(m.width).Render(
 			lipgloss.NewStyle().Foreground(lipgloss.Color("#FBBF24")).Render(statusText),
 		)
 	} else if m.usage.Total.TotalTokens > 0 || m.usage.Total.CostUsd > 0 || m.usage.Session.TotalTokens > 0 || m.usage.Session.CostUsd > 0 {
@@ -2272,11 +2272,11 @@ func (m channelModel) View() string {
 				sinceStatus = " since " + t.Local().Format("Jan 2 15:04")
 			}
 		}
-		statusBar = statusBarStyle(m.width).Render(fmt.Sprintf(
+		statusBar = channelui.StatusBarStyle(m.width).Render(fmt.Sprintf(
 			" %s %d online │ session %s · %s │ total %s · %s%s │ %s │ Ctrl+J newline │ /doctor",
 			"\u25CF", onlineCount,
-			formatUsd(m.usage.Session.CostUsd), formatTokenCount(m.usage.Session.TotalTokens),
-			formatUsd(m.usage.Total.CostUsd), formatTokenCount(m.usage.Total.TotalTokens),
+			channelui.FormatUSD(m.usage.Session.CostUsd), channelui.FormatTokenCount(m.usage.Session.TotalTokens),
+			channelui.FormatUSD(m.usage.Total.CostUsd), channelui.FormatTokenCount(m.usage.Total.TotalTokens),
 			sinceStatus, scrollHint,
 		))
 	} else if m.quickJumpTarget != quickJumpNone {
@@ -2284,48 +2284,48 @@ func (m channelModel) View() string {
 		if m.quickJumpTarget == quickJumpApps {
 			label = "apps"
 		}
-		statusBar = statusBarStyle(m.width).Render(
-			lipgloss.NewStyle().Foreground(lipgloss.Color(slackActive)).Render(
+		statusBar = channelui.StatusBarStyle(m.width).Render(
+			lipgloss.NewStyle().Foreground(lipgloss.Color(channelui.SlackActive)).Render(
 				fmt.Sprintf(" Quick nav │ Ctrl+G channels · Ctrl+O apps │ 1-9 switch %s │ Esc cancel", label),
 			),
 		)
 	} else if m.notice != "" {
-		statusBar = statusBarStyle(m.width).Render(
-			lipgloss.NewStyle().Foreground(lipgloss.Color(slackActive)).Render(" " + m.notice),
+		statusBar = channelui.StatusBarStyle(m.width).Render(
+			lipgloss.NewStyle().Foreground(lipgloss.Color(channelui.SlackActive)).Render(" " + m.notice),
 		)
 	} else if m.isOneOnOne() {
-		statusBar = statusBarStyle(m.width).Render(
-			lipgloss.NewStyle().Foreground(lipgloss.Color(slackActive)).Render(
+		statusBar = channelui.StatusBarStyle(m.width).Render(
+			lipgloss.NewStyle().Foreground(lipgloss.Color(channelui.SlackActive)).Render(
 				workspaceState.DefaultStatusLine(scrollHint),
 			),
 		)
 	} else if !m.brokerConnected {
-		statusBar = statusBarStyle(m.width).Render(
+		statusBar = channelui.StatusBarStyle(m.width).Render(
 			lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Render(workspaceState.DefaultStatusLine(scrollHint)),
 		)
 	} else if m.replyToID != "" {
-		statusBar = statusBarStyle(m.width).Render(
-			lipgloss.NewStyle().Foreground(lipgloss.Color(slackActive)).Render(
+		statusBar = channelui.StatusBarStyle(m.width).Render(
+			lipgloss.NewStyle().Foreground(lipgloss.Color(channelui.SlackActive)).Render(
 				fmt.Sprintf(" ↩ Reply mode │ thread %s │ Ctrl+J newline │ /cancel to return", m.replyToID),
 			),
 		)
-	} else if m.activeApp != officeAppMessages {
+	} else if m.activeApp != channelui.OfficeAppMessages {
 		message := fmt.Sprintf(" Viewing %s │ %s │ /messages to return │ /doctor", m.currentAppLabel(), scrollHint)
-		if m.activeApp == officeAppCalendar {
+		if m.activeApp == channelui.OfficeAppCalendar {
 			filter := "all"
 			if strings.TrimSpace(m.calendarFilter) != "" {
 				filter = "@" + m.calendarFilter
 			}
 			message = fmt.Sprintf(" Calendar │ d day · w week · f filter · a all │ current %s/%s", m.calendarRange, filter)
 		}
-		statusBar = statusBarStyle(m.width).Render(
-			lipgloss.NewStyle().Foreground(lipgloss.Color(slackActive)).Render(
+		statusBar = channelui.StatusBarStyle(m.width).Render(
+			lipgloss.NewStyle().Foreground(lipgloss.Color(channelui.SlackActive)).Render(
 				message,
 			),
 		)
 	} else {
-		statusBar = statusBarStyle(m.width).Render(
-			lipgloss.NewStyle().Foreground(lipgloss.Color(slackActive)).Render(workspaceState.DefaultStatusLine(scrollHint)),
+		statusBar = channelui.StatusBarStyle(m.width).Render(
+			lipgloss.NewStyle().Foreground(lipgloss.Color(channelui.SlackActive)).Render(workspaceState.DefaultStatusLine(scrollHint)),
 		)
 	}
 
@@ -2333,36 +2333,36 @@ func (m channelModel) View() string {
 }
 
 func (m channelModel) currentHeaderTitle() string {
-	if m.isOneOnOne() && m.activeApp != officeAppRecovery && m.activeApp != officeAppInbox && m.activeApp != officeAppOutbox {
+	if m.isOneOnOne() && m.activeApp != channelui.OfficeAppRecovery && m.activeApp != channelui.OfficeAppInbox && m.activeApp != channelui.OfficeAppOutbox {
 		return "1:1 with " + m.oneOnOneAgentName()
 	}
 	switch m.activeApp {
-	case officeAppRecovery:
+	case channelui.OfficeAppRecovery:
 		if m.isOneOnOne() {
 			return "1:1 with " + m.oneOnOneAgentName() + " · Recovery"
 		}
 		return "# " + m.activeChannel + " · Recovery"
-	case officeAppInbox:
+	case channelui.OfficeAppInbox:
 		if m.isOneOnOne() {
 			return "1:1 with " + m.oneOnOneAgentName() + " · Inbox"
 		}
 		return "# " + m.activeChannel + " · Inbox"
-	case officeAppOutbox:
+	case channelui.OfficeAppOutbox:
 		if m.isOneOnOne() {
 			return "1:1 with " + m.oneOnOneAgentName() + " · Outbox"
 		}
 		return "# " + m.activeChannel + " · Outbox"
-	case officeAppArtifacts:
+	case channelui.OfficeAppArtifacts:
 		return "# " + m.activeChannel + " · Artifacts"
-	case officeAppTasks:
+	case channelui.OfficeAppTasks:
 		return "# " + m.activeChannel + " · Tasks"
-	case officeAppRequests:
+	case channelui.OfficeAppRequests:
 		return "# " + m.activeChannel + " · Requests"
-	case officeAppPolicies:
+	case channelui.OfficeAppPolicies:
 		return "# " + m.activeChannel + " · Insights"
-	case officeAppCalendar:
+	case channelui.OfficeAppCalendar:
 		return "# " + m.activeChannel + " · Calendar"
-	case officeAppSkills:
+	case channelui.OfficeAppSkills:
 		return "# " + m.activeChannel + " · Skills"
 	default:
 		return "# " + m.activeChannel
@@ -2371,28 +2371,28 @@ func (m channelModel) currentHeaderTitle() string {
 
 func (m channelModel) currentHeaderMeta() string {
 	workspace := m.currentWorkspaceUIState()
-	if m.activeApp == officeAppRecovery {
+	if m.activeApp == channelui.OfficeAppRecovery {
 		snapshot := workspace.Runtime
 		if m.isOneOnOne() {
 			return fmt.Sprintf("  Re-entry summary for %s · %d running tasks · %d open requests · %d new since you looked", m.oneOnOneAgentName(), workspace.RunningTasks, workspace.OpenRequests, workspace.UnreadCount)
 		}
 		parts := []string{
-			fmt.Sprintf("Re-entry summary for #%s", fallbackString(snapshot.Channel, m.activeChannel)),
+			fmt.Sprintf("Re-entry summary for #%s", channelui.FallbackString(snapshot.Channel, m.activeChannel)),
 			fmt.Sprintf("%d blocking requests", workspace.BlockingCount),
 			fmt.Sprintf("%d running tasks", workspace.RunningTasks),
 			fmt.Sprintf("%d new since you looked", workspace.UnreadCount),
 		}
-		if workspace.Readiness.Level != workspaceReadinessReady && strings.TrimSpace(workspace.Readiness.Headline) != "" {
+		if workspace.Readiness.Level != channelui.WorkspaceReadinessReady && strings.TrimSpace(workspace.Readiness.Headline) != "" {
 			parts = append(parts, strings.ToLower(workspace.Readiness.Headline))
 		}
 		return "  " + strings.Join(parts, " · ")
 	}
-	if m.isOneOnOne() && (m.activeApp == officeAppInbox || m.activeApp == officeAppOutbox) {
+	if m.isOneOnOne() && (m.activeApp == channelui.OfficeAppInbox || m.activeApp == channelui.OfficeAppOutbox) {
 		scopeLabel := "inbox"
-		if m.activeApp == officeAppOutbox {
+		if m.activeApp == channelui.OfficeAppOutbox {
 			scopeLabel = "outbox"
 		}
-		scopeCount := len(filterMessagesForViewerScope(m.messages, m.oneOnOneAgentSlug(), scopeLabel))
+		scopeCount := len(channelui.FilterMessagesForViewerScope(m.messages, m.oneOnOneAgentSlug(), scopeLabel))
 		parts := []string{
 			fmt.Sprintf("%s lane for %s", titleCaser.String(scopeLabel), m.oneOnOneAgentName()),
 			fmt.Sprintf("%d visible messages", scopeCount),
@@ -2409,11 +2409,11 @@ func (m channelModel) currentHeaderMeta() string {
 		return workspace.HeaderMeta()
 	}
 	switch m.activeApp {
-	case officeAppInbox:
+	case channelui.OfficeAppInbox:
 		return fmt.Sprintf("  Inbox lane · %d visible messages · %d open requests", len(m.messages), len(m.requests))
-	case officeAppOutbox:
+	case channelui.OfficeAppOutbox:
 		return fmt.Sprintf("  Outbox lane · %d visible messages · %d recent actions", len(m.messages), len(m.actions))
-	case officeAppTasks:
+	case channelui.OfficeAppTasks:
 		open, inProgress, review, blocked, overdue := 0, 0, 0, 0, 0
 		for _, task := range m.tasks {
 			switch task.Status {
@@ -2426,23 +2426,23 @@ func (m channelModel) currentHeaderMeta() string {
 			default:
 				open++
 			}
-			if parsed, ok := parseChannelTime(task.DueAt); ok && parsed.Before(time.Now()) && task.Status != "done" {
+			if parsed, ok := channelui.ParseChannelTime(task.DueAt); ok && parsed.Before(time.Now()) && task.Status != "done" {
 				overdue++
 			}
 		}
 		return fmt.Sprintf("  Clear ownership, no duplicate work · %d open · %d moving · %d in review · %d blocked · %d overdue", open, inProgress, review, blocked, overdue)
-	case officeAppRequests:
+	case channelui.OfficeAppRequests:
 		blocking, urgent := 0, 0
 		for _, req := range m.requests {
 			if req.Blocking {
 				blocking++
 			}
-			if parsed, ok := parseChannelTime(req.DueAt); ok && parsed.Before(time.Now().Add(2*time.Hour)) {
+			if parsed, ok := channelui.ParseChannelTime(req.DueAt); ok && parsed.Before(time.Now().Add(2*time.Hour)) {
 				urgent++
 			}
 		}
 		return fmt.Sprintf("  Decisions and approvals the team is waiting on · %d open · %d blocking · %d soon", len(m.requests), blocking, urgent)
-	case officeAppPolicies:
+	case channelui.OfficeAppPolicies:
 		highSignal := 0
 		for _, signal := range m.signals {
 			if signal.Urgency == "high" || signal.Blocking || signal.RequiresHuman {
@@ -2462,8 +2462,8 @@ func (m channelModel) currentHeaderMeta() string {
 			}
 		}
 		return fmt.Sprintf("  Signals, Decisions, External Actions, and Watchdogs driving the office · %d signals · %d decisions · %d external · %d active watchdogs · %d high signal", len(m.signals), len(m.decisions), external, activeWatchdogs, highSignal)
-	case officeAppCalendar:
-		events := filterCalendarEvents(collectCalendarEvents(m.scheduler, m.tasks, m.requests, m.activeChannel, m.members), m.calendarRange, m.calendarFilter)
+	case channelui.OfficeAppCalendar:
+		events := channelui.FilterCalendarEvents(channelui.CollectCalendarEvents(m.scheduler, m.tasks, m.requests, m.activeChannel, m.members), m.calendarRange, m.calendarFilter)
 		dueSoon := 0
 		now := time.Now()
 		for _, event := range events {
@@ -2472,12 +2472,12 @@ func (m channelModel) currentHeaderMeta() string {
 			}
 		}
 		view := "week"
-		if m.calendarRange == calendarRangeDay {
+		if m.calendarRange == channelui.CalendarRangeDay {
 			view = "day"
 		}
 		filter := "everyone"
 		if strings.TrimSpace(m.calendarFilter) != "" {
-			filter = displayName(m.calendarFilter)
+			filter = channelui.DisplayName(m.calendarFilter)
 		}
 		scheduledWorkflows := 0
 		for _, job := range m.scheduler {
@@ -2486,7 +2486,7 @@ func (m channelModel) currentHeaderMeta() string {
 			}
 		}
 		return fmt.Sprintf("  %s view · %s · %d upcoming · %d due soon · %d scheduled workflows · %d recent actions", view, filter, len(events), dueSoon, scheduledWorkflows, len(m.actions))
-	case officeAppSkills:
+	case channelui.OfficeAppSkills:
 		active := 0
 		workflowBacked := 0
 		for _, skill := range m.skills {
@@ -2498,7 +2498,7 @@ func (m channelModel) currentHeaderMeta() string {
 			}
 		}
 		return fmt.Sprintf("  Reusable team skills · %d total · %d active · %d workflow-backed", len(m.skills), active, workflowBacked)
-	case officeAppArtifacts:
+	case channelui.OfficeAppArtifacts:
 		summary := m.currentArtifactSummary()
 		if summary == "" {
 			return "  Retained task logs, approvals, and workflow history for this office"
@@ -2510,34 +2510,34 @@ func (m channelModel) currentHeaderMeta() string {
 }
 
 func (m channelModel) currentAppLabel() string {
-	if m.isOneOnOne() && m.activeApp != officeAppRecovery && m.activeApp != officeAppInbox && m.activeApp != officeAppOutbox {
+	if m.isOneOnOne() && m.activeApp != channelui.OfficeAppRecovery && m.activeApp != channelui.OfficeAppInbox && m.activeApp != channelui.OfficeAppOutbox {
 		return "messages"
 	}
 	switch m.activeApp {
-	case officeAppRecovery:
+	case channelui.OfficeAppRecovery:
 		return "recovery"
-	case officeAppInbox:
+	case channelui.OfficeAppInbox:
 		return "inbox"
-	case officeAppOutbox:
+	case channelui.OfficeAppOutbox:
 		return "outbox"
-	case officeAppTasks:
+	case channelui.OfficeAppTasks:
 		return "tasks"
-	case officeAppRequests:
+	case channelui.OfficeAppRequests:
 		return "requests"
-	case officeAppPolicies:
+	case channelui.OfficeAppPolicies:
 		return "policies"
-	case officeAppCalendar:
+	case channelui.OfficeAppCalendar:
 		return "calendar"
-	case officeAppArtifacts:
+	case channelui.OfficeAppArtifacts:
 		return "artifacts"
-	case officeAppSkills:
+	case channelui.OfficeAppSkills:
 		return "skills"
 	default:
 		return "messages"
 	}
 }
 
-func (m channelModel) currentMainLines(contentWidth int) []renderedLine {
+func (m channelModel) currentMainLines(contentWidth int) []channelui.RenderedLine {
 	return m.cachedMainLines(contentWidth)
 }
 
@@ -2551,7 +2551,7 @@ func (m channelModel) mouseActionAt(x, y int) (mouseAction, bool) {
 		return mouseAction{}, false
 	}
 
-	layout := computeLayout(m.width, m.height, m.threadPanelOpen, m.sidebarCollapsed)
+	layout := channelui.ComputeLayout(m.width, m.height, m.threadPanelOpen, m.sidebarCollapsed)
 	sidebarW := 0
 	if layout.ShowSidebar {
 		sidebarW = layout.SidebarW
@@ -2624,7 +2624,7 @@ func (m channelModel) mainPanelMouseAction(x, y, mainW, contentH int) (mouseActi
 	msgBottom := headerH + msgH
 	if y >= msgTop && y < msgBottom {
 		row := y - msgTop
-		if m.activeApp == officeAppMessages && m.unreadCount > 0 && m.scroll > 0 && row == 0 {
+		if m.activeApp == channelui.OfficeAppMessages && m.unreadCount > 0 && m.scroll > 0 && row == 0 {
 			return mouseAction{Kind: "jump-latest"}, true
 		}
 		if len(popupRows) > 0 {
@@ -2651,32 +2651,32 @@ func (m channelModel) mainPanelMouseAction(x, y, mainW, contentH int) (mouseActi
 			contentWidth = 32
 		}
 		allLines := m.currentMainViewportLines(contentWidth, msgH)
-		visibleRows, _, _, _ := sliceRenderedLines(allLines, msgH, m.scroll)
+		visibleRows, _, _, _ := channelui.SliceRenderedLines(allLines, msgH, m.scroll)
 		if row >= 0 && row < len(visibleRows) {
 			if visibleRows[row].PromptValue != "" {
 				return mouseAction{Kind: "prompt", Value: visibleRows[row].PromptValue}, true
 			}
 			switch m.activeApp {
-			case officeAppMessages:
+			case channelui.OfficeAppMessages:
 				if visibleRows[row].ThreadID != "" {
 					return mouseAction{Kind: "thread", Value: visibleRows[row].ThreadID}, true
 				}
-			case officeAppInbox, officeAppOutbox:
+			case channelui.OfficeAppInbox, channelui.OfficeAppOutbox:
 				if visibleRows[row].ThreadID != "" {
 					return mouseAction{Kind: "thread", Value: visibleRows[row].ThreadID}, true
 				}
 				if visibleRows[row].RequestID != "" {
 					return mouseAction{Kind: "request", Value: visibleRows[row].RequestID}, true
 				}
-			case officeAppTasks:
+			case channelui.OfficeAppTasks:
 				if visibleRows[row].TaskID != "" {
 					return mouseAction{Kind: "task", Value: visibleRows[row].TaskID}, true
 				}
-			case officeAppRequests:
+			case channelui.OfficeAppRequests:
 				if visibleRows[row].RequestID != "" {
 					return mouseAction{Kind: "request", Value: visibleRows[row].RequestID}, true
 				}
-			case officeAppCalendar:
+			case channelui.OfficeAppCalendar:
 				if visibleRows[row].ThreadID != "" {
 					return mouseAction{Kind: "thread", Value: visibleRows[row].ThreadID}, true
 				}
@@ -2686,7 +2686,7 @@ func (m channelModel) mainPanelMouseAction(x, y, mainW, contentH int) (mouseActi
 				if visibleRows[row].RequestID != "" {
 					return mouseAction{Kind: "request", Value: visibleRows[row].RequestID}, true
 				}
-			case officeAppRecovery, officeAppArtifacts:
+			case channelui.OfficeAppRecovery, channelui.OfficeAppArtifacts:
 				if visibleRows[row].ThreadID != "" {
 					return mouseAction{Kind: "thread", Value: visibleRows[row].ThreadID}, true
 				}
@@ -2709,7 +2709,7 @@ func (m *channelModel) applyRecoveryPrompt(prompt string) {
 		m.notice = "Nothing inserted."
 		return
 	}
-	m.activeApp = officeAppMessages
+	m.activeApp = channelui.OfficeAppMessages
 	m.syncSidebarCursorToActive()
 	m.focus = focusMain
 	m.insertIntoActiveComposer(prompt)
@@ -2717,10 +2717,10 @@ func (m *channelModel) applyRecoveryPrompt(prompt string) {
 }
 
 func (m channelModel) mainPanelGeometry(mainW, contentH int) (headerH, msgH int, popupRows []string) {
-	headerStyle := channelHeaderStyle(mainW)
+	headerStyle := channelui.ChannelHeaderStyle(mainW)
 	headerLine1 := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#F8FAFC")).
 		Render(m.currentHeaderTitle())
-	headerMeta := lipgloss.NewStyle().Foreground(lipgloss.Color(slackMuted)).
+	headerMeta := lipgloss.NewStyle().Foreground(lipgloss.Color(channelui.SlackMuted)).
 		Render(m.currentHeaderMeta())
 	if m.usage.Total.TotalTokens > 0 || m.usage.Total.CostUsd > 0 || m.usage.Session.TotalTokens > 0 || m.usage.Session.CostUsd > 0 {
 		sinceLabel := ""
@@ -2730,24 +2730,24 @@ func (m channelModel) mainPanelGeometry(mainW, contentH int) (headerH, msgH int,
 			}
 		}
 		headerMeta += "  " + lipgloss.NewStyle().
-			Foreground(lipgloss.Color(slackActive)).
+			Foreground(lipgloss.Color(channelui.SlackActive)).
 			Render(fmt.Sprintf("Session %s · %s  Total %s · %s%s",
-				formatUsd(m.usage.Session.CostUsd),
-				formatTokenCount(m.usage.Session.TotalTokens),
-				formatUsd(m.usage.Total.CostUsd),
-				formatTokenCount(m.usage.Total.TotalTokens),
+				channelui.FormatUSD(m.usage.Session.CostUsd),
+				channelui.FormatTokenCount(m.usage.Session.TotalTokens),
+				channelui.FormatUSD(m.usage.Total.CostUsd),
+				channelui.FormatTokenCount(m.usage.Total.TotalTokens),
 				sinceLabel,
 			))
 	}
 	channelHeader := headerStyle.Render(headerLine1 + headerMeta)
-	if usageLine := renderUsageStrip(m.usage, m.members, mainW); usageLine != "" {
+	if usageLine := channelui.RenderUsageStrip(m.usage, m.members, mainW); usageLine != "" {
 		channelHeader += "\n" + usageLine
 	}
 	headerH = lipgloss.Height(channelHeader)
 
 	activePending := m.visiblePendingRequest()
-	typingAgents := typingAgentsFromMembers(m.members)
-	liveActivities := liveActivityFromMembers(m.members)
+	typingAgents := channelui.TypingAgentsFromMembers(m.members)
+	liveActivities := channelui.LiveActivityFromMembers(m.members)
 	composerStr := renderComposer(mainW, m.input, m.inputPos, m.composerTargetLabel(),
 		m.replyToID, typingAgents, liveActivities, activePending, m.selectedOption, m.composerHint(m.composerTargetLabel(), m.replyToID, activePending),
 		m.focus == focusMain, m.tickFrame)
@@ -2757,7 +2757,7 @@ func (m channelModel) mainPanelGeometry(mainW, contentH int) (headerH, msgH int,
 	}
 	interviewCard := ""
 	if activePending != nil {
-		interviewCard = renderInterviewCard(*activePending, m.selectedOption, m.interviewPhaseTitle(), mainW-4)
+		interviewCard = channelui.RenderInterviewCard(*activePending, m.selectedOption, m.interviewPhaseTitle(), mainW-4)
 	}
 	memberDraftCard := ""
 	if m.memberDraft != nil {
@@ -2765,7 +2765,7 @@ func (m channelModel) mainPanelGeometry(mainW, contentH int) (headerH, msgH int,
 	}
 	initPanel := ""
 	if m.confirm != nil {
-		initPanel = renderConfirmCard(*m.confirm, mainW-4)
+		initPanel = channelui.RenderConfirmCard(*m.confirm, mainW-4)
 	} else if m.picker.IsActive() {
 		initPanel = m.picker.View()
 	} else if m.initFlow.IsActive() || m.initFlow.Phase() == tui.InitDone {
@@ -2786,7 +2786,7 @@ func (m channelModel) mainPanelGeometry(mainW, contentH int) (headerH, msgH int,
 	return headerH, msgH, popupRows
 }
 
-func (m channelModel) visiblePendingRequest() *channelInterview {
+func (m channelModel) visiblePendingRequest() *channelui.Interview {
 	if m.pending == nil {
 		return nil
 	}
@@ -2829,7 +2829,7 @@ func (m channelModel) interviewOptionCount() int {
 	return len(m.pending.Options) + 1
 }
 
-func (m channelModel) selectedInterviewOption() *channelInterviewOption {
+func (m channelModel) selectedInterviewOption() *channelui.InterviewOption {
 	if m.pending == nil {
 		return nil
 	}
@@ -2865,7 +2865,7 @@ func (m channelModel) nextFocus() focusArea {
 // updateThread handles key events when the thread panel is focused.
 func (m channelModel) updateThread(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if motionKey, ok := composerMotionKey(msg); ok {
-		if nextPos, handled := moveComposerCursor(m.threadInput, m.threadInputPos, motionKey); handled {
+		if nextPos, handled := channelui.MoveComposerCursor(m.threadInput, m.threadInputPos, motionKey); handled {
 			m.threadInputPos = nextPos
 			m.updateThreadOverlays()
 		}
@@ -2951,7 +2951,7 @@ func (m channelModel) updateThread(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	default:
 		if ch := composerInsertRunes(msg); len(ch) > 0 {
 			m.threadInputHistory.ResetRecall()
-			m.threadInput, m.threadInputPos = insertComposerRunes(m.threadInput, m.threadInputPos, ch)
+			m.threadInput, m.threadInputPos = channelui.InsertComposerRunes(m.threadInput, m.threadInputPos, ch)
 			m.updateThreadOverlays()
 		} else if len(msg.String()) == 1 || msg.Type == tea.KeyRunes {
 			ch := msg.Runes
@@ -2973,7 +2973,7 @@ func (m channelModel) updateThread(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // updateSidebar handles key events when the sidebar is focused.
 func (m channelModel) updateSidebar(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	roster := mergeOfficeMembers(m.officeMembers, m.members, m.currentChannelInfo())
+	roster := channelui.MergeOfficeMembers(m.officeMembers, m.members, m.currentChannelInfo())
 	switch msg.String() {
 	case "up", "k":
 		m.sidebarCursor--
@@ -2988,14 +2988,14 @@ func (m channelModel) updateSidebar(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "pgdown":
 		m.sidebarRosterOffset += 3
-		maxOffset := maxInt(0, len(roster)-1)
+		maxOffset := channelui.MaxInt(0, len(roster)-1)
 		if m.sidebarRosterOffset > maxOffset {
 			m.sidebarRosterOffset = maxOffset
 		}
 	case "home":
 		m.sidebarRosterOffset = 0
 	case "end":
-		m.sidebarRosterOffset = maxInt(0, len(roster)-1)
+		m.sidebarRosterOffset = channelui.MaxInt(0, len(roster)-1)
 	case "enter":
 		items := m.sidebarItems()
 		m.clampSidebarCursor()
@@ -3006,7 +3006,7 @@ func (m channelModel) updateSidebar(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "d":
 		// Switch the main channel view to the per-agent DM channel.
 		// The office continues running; this is just a channel switch.
-		roster := mergeOfficeMembers(m.officeMembers, m.members, m.currentChannelInfo())
+		roster := channelui.MergeOfficeMembers(m.officeMembers, m.members, m.currentChannelInfo())
 		if len(roster) > 0 {
 			idx := m.sidebarRosterOffset
 			if idx < 0 {
@@ -3048,7 +3048,7 @@ func (m channelModel) channelSidebarItems() []sidebarItem {
 	items := make([]sidebarItem, 0, len(m.channels))
 	channels := m.channels
 	if len(channels) == 0 {
-		channels = []channelInfo{{Slug: "general", Name: "general"}}
+		channels = []channelui.ChannelInfo{{Slug: "general", Name: "general"}}
 	}
 	for _, ch := range channels {
 		items = append(items, sidebarItem{Kind: "channel", Value: ch.Slug, Label: "# " + ch.Slug})
@@ -3057,7 +3057,7 @@ func (m channelModel) channelSidebarItems() []sidebarItem {
 }
 
 func (m channelModel) appSidebarItems() []sidebarItem {
-	apps := officeSidebarApps()
+	apps := channelui.OfficeSidebarApps()
 	items := make([]sidebarItem, 0, len(apps))
 	for _, app := range apps {
 		items = append(items, sidebarItem{Kind: "app", Value: string(app.App), Label: app.Label})
@@ -3104,7 +3104,7 @@ func (m *channelModel) selectSidebarItem(item sidebarItem) tea.Cmd {
 	switch item.Kind {
 	case "channel":
 		m.activeChannel = item.Value
-		m.activeApp = officeAppMessages
+		m.activeApp = channelui.OfficeAppMessages
 		m.syncSidebarCursorToActive()
 		m.lastID = ""
 		m.messages = nil
@@ -3117,37 +3117,37 @@ func (m *channelModel) selectSidebarItem(item sidebarItem) tea.Cmd {
 		m.notice = "Switched to #" + m.activeChannel
 		return tea.Batch(pollBroker("", m.activeChannel), pollMembers(m.activeChannel), pollRequests(m.activeChannel), pollTasks(m.activeChannel))
 	case "app":
-		m.activeApp = officeApp(item.Value)
+		m.activeApp = channelui.OfficeApp(item.Value)
 		m.syncSidebarCursorToActive()
 		switch m.activeApp {
-		case officeAppMessages:
+		case channelui.OfficeAppMessages:
 			m.notice = "Viewing #" + m.activeChannel + "."
 			return pollBroker("", m.activeChannel)
-		case officeAppInbox:
+		case channelui.OfficeAppInbox:
 			m.notice = "Viewing the selected agent inbox."
 			return pollBroker("", m.activeChannel)
-		case officeAppOutbox:
+		case channelui.OfficeAppOutbox:
 			m.notice = "Viewing the selected agent outbox."
 			return pollBroker("", m.activeChannel)
-		case officeAppRecovery:
+		case channelui.OfficeAppRecovery:
 			m.notice = "Viewing the recovery summary."
 			return m.pollCurrentState()
-		case officeAppTasks:
+		case channelui.OfficeAppTasks:
 			m.notice = "Viewing tasks in #" + m.activeChannel + "."
 			return pollTasks(m.activeChannel)
-		case officeAppRequests:
+		case channelui.OfficeAppRequests:
 			m.notice = "Viewing requests in #" + m.activeChannel + "."
 			return pollRequests(m.activeChannel)
-		case officeAppPolicies:
+		case channelui.OfficeAppPolicies:
 			m.notice = "Viewing Nex and office insights."
 			return pollOfficeLedger()
-		case officeAppCalendar:
+		case channelui.OfficeAppCalendar:
 			m.notice = "Viewing the office calendar."
 			return pollOfficeLedger()
-		case officeAppArtifacts:
+		case channelui.OfficeAppArtifacts:
 			m.notice = "Viewing recent execution artifacts."
 			return m.pollCurrentState()
-		case officeAppSkills:
+		case channelui.OfficeAppSkills:
 			m.notice = "Viewing skills."
 			return pollSkills("")
 		}
@@ -3158,7 +3158,7 @@ func (m *channelModel) selectSidebarItem(item sidebarItem) tea.Cmd {
 func (m *channelModel) syncSidebarCursorToActive() {
 	items := m.sidebarItems()
 	for i, item := range items {
-		if item.Kind == "channel" && item.Value == m.activeChannel && m.activeApp == officeAppMessages {
+		if item.Kind == "channel" && item.Value == m.activeChannel && m.activeApp == channelui.OfficeAppMessages {
 			m.sidebarCursor = i
 			return
 		}
@@ -3187,7 +3187,7 @@ func (m channelModel) buildThreadPickerOptions() []tui.PickerOption {
 			continue // skip non-root or messages without replies
 		}
 
-		preview := truncateText(msg.Content, 50)
+		preview := channelui.TruncateText(msg.Content, 50)
 		status := "collapsed"
 		if m.expandedThreads[msg.ID] {
 			status = "expanded"
@@ -3220,7 +3220,7 @@ func (m channelModel) buildRequestPickerOptions() []tui.PickerOption {
 			desc += " · blocking"
 		}
 		options = append(options, tui.PickerOption{
-			Label:       truncateText(label, 56),
+			Label:       channelui.TruncateText(label, 56),
 			Value:       req.ID,
 			Description: desc,
 		})
@@ -3240,14 +3240,14 @@ func (m channelModel) buildTaskPickerOptions() []tui.PickerOption {
 		}
 		label := task.Title
 		if strings.TrimSpace(task.Owner) != "" {
-			label = fmt.Sprintf("%s · %s", task.Title, displayName(task.Owner))
+			label = fmt.Sprintf("%s · %s", task.Title, channelui.DisplayName(task.Owner))
 		}
 		desc := task.Status
 		if task.ThreadID != "" {
 			desc += " · thread " + task.ThreadID
 		}
 		options = append(options, tui.PickerOption{
-			Label:       truncateText(label, 56),
+			Label:       channelui.TruncateText(label, 56),
 			Value:       task.ID,
 			Description: desc,
 		})
@@ -3255,7 +3255,7 @@ func (m channelModel) buildTaskPickerOptions() []tui.PickerOption {
 	return options
 }
 
-func (m channelModel) buildTaskActionPickerOptions(task channelTask) []tui.PickerOption {
+func (m channelModel) buildTaskActionPickerOptions(task channelui.Task) []tui.PickerOption {
 	options := []tui.PickerOption{
 		{Label: "Claim task", Value: "claim:" + task.ID, Description: "Take ownership as you"},
 		{Label: "Release task", Value: "release:" + task.ID, Description: "Clear the current owner"},
@@ -3276,7 +3276,7 @@ func (m channelModel) buildTaskActionPickerOptions(task channelTask) []tui.Picke
 	return options
 }
 
-func (m channelModel) buildRequestActionPickerOptions(req channelInterview) []tui.PickerOption {
+func (m channelModel) buildRequestActionPickerOptions(req channelui.Interview) []tui.PickerOption {
 	dismissDescription := "Cancel this request"
 	if req.Blocking || req.Required {
 		dismissDescription = "Cancel this request and unblock the team"
@@ -3292,29 +3292,29 @@ func (m channelModel) buildRequestActionPickerOptions(req channelInterview) []tu
 	return options
 }
 
-func (m channelModel) findTaskByID(id string) (channelTask, bool) {
+func (m channelModel) findTaskByID(id string) (channelui.Task, bool) {
 	for _, task := range m.tasks {
 		if task.ID == id {
 			return task, true
 		}
 	}
-	return channelTask{}, false
+	return channelui.Task{}, false
 }
 
-func (m channelModel) findRequestByID(id string) (channelInterview, bool) {
+func (m channelModel) findRequestByID(id string) (channelui.Interview, bool) {
 	for _, req := range m.requests {
 		if req.ID == id {
 			return req, true
 		}
 	}
-	return channelInterview{}, false
+	return channelui.Interview{}, false
 }
 
-func (m channelModel) focusRequest(req channelInterview, notice string) (tea.Model, tea.Cmd) {
+func (m channelModel) focusRequest(req channelui.Interview, notice string) (tea.Model, tea.Cmd) {
 	if req.Blocking || req.Required {
-		m.activeApp = officeAppMessages
+		m.activeApp = channelui.OfficeAppMessages
 	} else {
-		m.activeApp = officeAppRequests
+		m.activeApp = channelui.OfficeAppRequests
 	}
 	m.syncSidebarCursorToActive()
 	m.pending = &req
@@ -3327,11 +3327,11 @@ func (m channelModel) focusRequest(req channelInterview, notice string) (tea.Mod
 	return m, tea.Batch(pollRequests(m.activeChannel))
 }
 
-func (m channelModel) answerRequest(req channelInterview) (tea.Model, tea.Cmd) {
+func (m channelModel) answerRequest(req channelui.Interview) (tea.Model, tea.Cmd) {
 	if req.Blocking || req.Required {
-		m.activeApp = officeAppMessages
+		m.activeApp = channelui.OfficeAppMessages
 	} else {
-		m.activeApp = officeAppRequests
+		m.activeApp = channelui.OfficeAppRequests
 	}
 	m.syncSidebarCursorToActive()
 	m.pending = &req
@@ -3344,24 +3344,24 @@ func (m channelModel) answerRequest(req channelInterview) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *channelModel) openTaskActionPicker(task channelTask) tea.Cmd {
+func (m *channelModel) openTaskActionPicker(task channelui.Task) tea.Cmd {
 	actions := m.buildTaskActionPickerOptions(task)
 	if len(actions) == 0 {
 		return nil
 	}
-	m.picker = tui.NewPicker("Task: "+truncateText(task.Title, 40), actions)
+	m.picker = tui.NewPicker("Task: "+channelui.TruncateText(task.Title, 40), actions)
 	m.picker.SetActive(true)
 	m.pickerMode = channelPickerTaskAction
 	m.notice = "Choose a task action."
 	return nil
 }
 
-func (m *channelModel) openRequestActionPicker(req channelInterview) tea.Cmd {
+func (m *channelModel) openRequestActionPicker(req channelui.Interview) tea.Cmd {
 	actions := m.buildRequestActionPickerOptions(req)
 	if len(actions) == 0 {
 		return nil
 	}
-	m.picker = tui.NewPicker("Request: "+truncateText(req.TitleOrQuestion(), 40), actions)
+	m.picker = tui.NewPicker("Request: "+channelui.TruncateText(req.TitleOrQuestion(), 40), actions)
 	m.picker.SetActive(true)
 	m.pickerMode = channelPickerRequestAction
 	m.notice = "Choose a request action."
@@ -3374,7 +3374,7 @@ func postToChannel(text string, replyTo string, channel string) tea.Cmd {
 			"channel":  channel,
 			"from":     "you",
 			"content":  text,
-			"tagged":   extractTagsFromText(text),
+			"tagged":   channelui.ExtractTagsFromText(text),
 			"reply_to": strings.TrimSpace(replyTo),
 		})
 		req, err := newBrokerRequest(context.Background(), http.MethodPost, "http://127.0.0.1:7890/messages", bytes.NewReader(body))
@@ -3398,7 +3398,7 @@ func postToChannel(text string, replyTo string, channel string) tea.Cmd {
 	}
 }
 
-func channelMentionAgents(members []channelMember) []tui.AgentMention {
+func channelMentionAgents(members []channelui.Member) []tui.AgentMention {
 	defaults := []tui.AgentMention{
 		{Slug: "all", Name: "All agents"},
 		{Slug: "ceo", Name: "CEO"},
@@ -3421,7 +3421,7 @@ func channelMentionAgents(members []channelMember) []tui.AgentMention {
 			continue
 		}
 		seen[member.Slug] = true
-		mentions = append(mentions, tui.AgentMention{Slug: member.Slug, Name: displayName(member.Slug)})
+		mentions = append(mentions, tui.AgentMention{Slug: member.Slug, Name: channelui.DisplayName(member.Slug)})
 	}
 	return mentions
 }
@@ -3486,24 +3486,24 @@ func (m *channelModel) activeInputString() string {
 func (m *channelModel) insertAcceptedMention(mention string) {
 	if m.focus == focusThread && m.threadPanelOpen {
 		m.threadInputHistory.ResetRecall()
-		m.threadInput, m.threadInputPos = replaceMentionInInput(m.threadInput, m.threadInputPos, mention)
+		m.threadInput, m.threadInputPos = channelui.ReplaceMentionInInput(m.threadInput, m.threadInputPos, mention)
 		m.updateThreadOverlays()
 		return
 	}
 	m.inputHistory.ResetRecall()
-	m.input, m.inputPos = replaceMentionInInput(m.input, m.inputPos, mention)
+	m.input, m.inputPos = channelui.ReplaceMentionInInput(m.input, m.inputPos, mention)
 	m.updateInputOverlays()
 }
 
 func (m *channelModel) restoreMainSnapshot(snapshot channelui.Snapshot) {
 	m.input = append([]rune(nil), snapshot.Input...)
-	m.inputPos = normalizeCursorPos(m.input, snapshot.Pos)
+	m.inputPos = channelui.NormalizeCursorPos(m.input, snapshot.Pos)
 	m.updateInputOverlays()
 }
 
 func (m *channelModel) restoreThreadSnapshot(snapshot channelui.Snapshot) {
 	m.threadInput = append([]rune(nil), snapshot.Input...)
-	m.threadInputPos = normalizeCursorPos(m.threadInput, snapshot.Pos)
+	m.threadInputPos = channelui.NormalizeCursorPos(m.threadInput, snapshot.Pos)
 	m.updateThreadOverlays()
 }
 
@@ -3575,28 +3575,28 @@ func (m channelModel) renderActivePopup(width int) string {
 		width = 24
 	}
 	if m.autocomplete.IsVisible() {
-		var options []composerPopupOption
+		var options []channelui.ComposerPopupOption
 		for _, cmd := range m.autocomplete.Matches() {
 			meta := cmd.Description
 			if strings.TrimSpace(cmd.Category) != "" {
 				meta = strings.ToUpper(cmd.Category) + " · " + meta
 			}
-			options = append(options, composerPopupOption{
+			options = append(options, channelui.ComposerPopupOption{
 				Label: "/" + cmd.Name,
 				Meta:  meta,
 			})
 		}
-		return renderComposerPopup(options, m.autocomplete.SelectedIndex(), width, slackActive)
+		return channelui.RenderComposerPopup(options, m.autocomplete.SelectedIndex(), width, channelui.SlackActive)
 	}
 	if m.mention.IsVisible() {
-		var options []composerPopupOption
+		var options []channelui.ComposerPopupOption
 		for _, ag := range m.mention.Matches() {
-			options = append(options, composerPopupOption{
+			options = append(options, channelui.ComposerPopupOption{
 				Label: "@" + ag.Slug,
 				Meta:  ag.Name,
 			})
 		}
-		return renderComposerPopup(options, m.mention.SelectedIndex(), width, "#2BAC76")
+		return channelui.RenderComposerPopup(options, m.mention.SelectedIndex(), width, "#2BAC76")
 	}
 	return ""
 }
@@ -3684,7 +3684,7 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 		return m, switchSessionMode(team.SessionModeOneOnOne, agent)
 	case trimmed == "/messages" || trimmed == "/general":
 		clearCurrent()
-		m.activeApp = officeAppMessages
+		m.activeApp = channelui.OfficeAppMessages
 		m.syncSidebarCursorToActive()
 		if m.isOneOnOne() {
 			m.notice = "Viewing your direct session."
@@ -3698,7 +3698,7 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 			m.notice = "/inbox only applies in direct 1:1 mode."
 			return m, nil
 		}
-		m.activeApp = officeAppInbox
+		m.activeApp = channelui.OfficeAppInbox
 		m.syncSidebarCursorToActive()
 		m.notice = "Viewing the selected agent inbox."
 		return m, nil
@@ -3708,13 +3708,13 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 			m.notice = "/outbox only applies in direct 1:1 mode."
 			return m, nil
 		}
-		m.activeApp = officeAppOutbox
+		m.activeApp = channelui.OfficeAppOutbox
 		m.syncSidebarCursorToActive()
 		m.notice = "Viewing the selected agent outbox."
 		return m, nil
 	case trimmed == "/recover" || trimmed == "/resume":
 		clearCurrent()
-		m.activeApp = officeAppRecovery
+		m.activeApp = channelui.OfficeAppRecovery
 		m.syncSidebarCursorToActive()
 		if m.isOneOnOne() {
 			m.notice = "Viewing the direct-session recovery summary."
@@ -3760,7 +3760,7 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 		return m, nil
 	case trimmed == "/tasks":
 		clearCurrent()
-		m.activeApp = officeAppTasks
+		m.activeApp = channelui.OfficeAppTasks
 		m.syncSidebarCursorToActive()
 		m.notice = "Viewing tasks in #" + m.activeChannel + "."
 		return m, tea.Batch(pollTasks(m.activeChannel))
@@ -3818,7 +3818,7 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 			m.notice = "Usage: /reset-dm <agent> or use in 1:1 mode"
 			return m, nil
 		}
-		m.confirm = confirmationForResetDM(agent, m.activeChannel)
+		m.confirm = channelui.ConfirmationForResetDM(agent, m.activeChannel)
 		m.notice = "Confirm clearing the direct transcript."
 		return m, nil
 	case trimmed == "/dm":
@@ -3915,7 +3915,7 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 		return m, nil
 	case trimmed == "/requests":
 		clearCurrent()
-		m.activeApp = officeAppRequests
+		m.activeApp = channelui.OfficeAppRequests
 		m.syncSidebarCursorToActive()
 		m.notice = "Viewing requests in #" + m.activeChannel + "."
 		return m, tea.Batch(pollRequests(m.activeChannel))
@@ -3964,20 +3964,20 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 		}
 	case trimmed == "/policies":
 		clearCurrent()
-		m.activeApp = officeAppPolicies
+		m.activeApp = channelui.OfficeAppPolicies
 		m.syncSidebarCursorToActive()
 		m.notice = "Viewing Nex and office insights."
 		return m, pollOfficeLedger()
 	case trimmed == "/calendar" || trimmed == "/queue":
 		clearCurrent()
-		m.activeApp = officeAppCalendar
+		m.activeApp = channelui.OfficeAppCalendar
 		m.syncSidebarCursorToActive()
 		m.notice = "Viewing the office calendar."
 		return m, pollOfficeLedger()
 	case strings.HasPrefix(trimmed, "/calendar "):
 		clearCurrent()
 		parts := strings.Fields(trimmed)
-		m.activeApp = officeAppCalendar
+		m.activeApp = channelui.OfficeAppCalendar
 		m.syncSidebarCursorToActive()
 		if len(parts) < 2 {
 			m.notice = "Usage: /calendar [day|week|all|@agent|agent]"
@@ -3986,11 +3986,11 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 		arg := strings.TrimSpace(parts[1])
 		switch {
 		case arg == "day" || arg == "today":
-			m.calendarRange = calendarRangeDay
+			m.calendarRange = channelui.CalendarRangeDay
 			m.notice = "Calendar now shows today."
 			return m, pollOfficeLedger()
 		case arg == "week":
-			m.calendarRange = calendarRangeWeek
+			m.calendarRange = channelui.CalendarRangeWeek
 			m.notice = "Calendar now shows this week."
 			return m, pollOfficeLedger()
 		case arg == "all":
@@ -4014,18 +4014,18 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 				return m, nil
 			}
 			m.calendarFilter = filter
-			m.notice = "Filtering calendar for " + displayName(filter) + "."
+			m.notice = "Filtering calendar for " + channelui.DisplayName(filter) + "."
 			return m, pollOfficeLedger()
 		}
 	case trimmed == "/skills":
 		clearCurrent()
-		m.activeApp = officeAppSkills
+		m.activeApp = channelui.OfficeAppSkills
 		m.syncSidebarCursorToActive()
 		m.notice = "Viewing skills."
 		return m, pollSkills("")
 	case trimmed == "/artifacts":
 		clearCurrent()
-		m.activeApp = officeAppArtifacts
+		m.activeApp = channelui.OfficeAppArtifacts
 		m.syncSidebarCursorToActive()
 		m.notice = "Viewing recent execution artifacts."
 		return m, m.pollCurrentState()
@@ -4190,7 +4190,7 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 			m.notice = "Usage: /reply <message-id>"
 			return m, nil
 		}
-		if _, ok := findMessageByID(m.messages, target); !ok {
+		if _, ok := channelui.FindMessageByID(m.messages, target); !ok {
 			m.notice = fmt.Sprintf("Message %s not found. Maybe Creed filed it.", target)
 			return m, nil
 		}
@@ -4212,14 +4212,14 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 		}
 		if target == "all" {
 			for _, msg := range m.messages {
-				if hasThreadReplies(m.messages, msg.ID) {
+				if channelui.HasThreadReplies(m.messages, msg.ID) {
 					m.expandedThreads[msg.ID] = true
 				}
 			}
 			m.notice = "Expanded all threads."
 			return m, nil
 		}
-		if _, ok := findMessageByID(m.messages, target); !ok {
+		if _, ok := channelui.FindMessageByID(m.messages, target); !ok {
 			m.notice = fmt.Sprintf("Message %s not found. Maybe Creed filed it.", target)
 			return m, nil
 		}
@@ -4238,7 +4238,7 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 			m.notice = "Collapsed all threads."
 			return m, nil
 		}
-		if _, ok := findMessageByID(m.messages, target); !ok {
+		if _, ok := channelui.FindMessageByID(m.messages, target); !ok {
 			m.notice = fmt.Sprintf("Message %s not found. Maybe Creed filed it.", target)
 			return m, nil
 		}
@@ -4277,11 +4277,11 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 	}
 }
 
-func (m channelModel) currentChannelInfo() *channelInfo {
+func (m channelModel) currentChannelInfo() *channelui.ChannelInfo {
 	return m.findChannelInfo(m.activeChannel)
 }
 
-func (m channelModel) findChannelInfo(slug string) *channelInfo {
+func (m channelModel) findChannelInfo(slug string) *channelui.ChannelInfo {
 	for i := range m.channels {
 		if m.channels[i].Slug == slug {
 			return &m.channels[i]
@@ -4333,7 +4333,7 @@ func (m channelModel) buildSwitchChannelPickerOptions() []tui.PickerOption {
 		for _, member := range m.officeMembers {
 			name := strings.TrimSpace(member.Name)
 			if name == "" {
-				name = displayName(member.Slug)
+				name = channelui.DisplayName(member.Slug)
 			}
 			options = append(options, tui.PickerOption{
 				Label:       "1:1 with " + name,
@@ -4355,7 +4355,7 @@ func (m channelModel) buildAgentPickerOptions() []tui.PickerOption {
 	if ch == nil {
 		return nil
 	}
-	officeMap := make(map[string]officeMemberInfo, len(m.officeMembers))
+	officeMap := make(map[string]channelui.OfficeMember, len(m.officeMembers))
 	for _, member := range m.officeMembers {
 		officeMap[member.Slug] = member
 	}
@@ -4365,7 +4365,7 @@ func (m channelModel) buildAgentPickerOptions() []tui.PickerOption {
 	}
 	var options []tui.PickerOption
 	for _, slug := range ch.Members {
-		name := displayName(slug)
+		name := channelui.DisplayName(slug)
 		if meta, ok := officeMap[slug]; ok && meta.Name != "" {
 			name = meta.Name
 		}
@@ -4450,7 +4450,7 @@ func (m channelModel) buildOneOnOneAgentPickerOptions() []tui.PickerOption {
 	for _, member := range m.officeMembers {
 		name := member.Name
 		if strings.TrimSpace(name) == "" {
-			name = displayName(member.Slug)
+			name = channelui.DisplayName(member.Slug)
 		}
 		description := strings.TrimSpace(member.Role)
 		if description == "" {
@@ -4474,7 +4474,7 @@ func (m channelModel) buildCalendarAgentPickerOptions() []tui.PickerOption {
 	for _, member := range m.members {
 		name := member.Name
 		if strings.TrimSpace(name) == "" {
-			name = displayName(member.Slug)
+			name = channelui.DisplayName(member.Slug)
 		}
 		description := member.Role
 		if strings.TrimSpace(description) == "" {
@@ -4620,7 +4620,7 @@ func switchSessionMode(mode, agent string) tea.Cmd {
 		switch team.NormalizeSessionMode(result.SessionMode) {
 		case team.SessionModeOneOnOne:
 			return channelResetDoneMsg{
-				notice:        "Direct 1:1 with " + displayName(team.NormalizeOneOnOneAgent(result.OneOnOneAgent)) + " is ready.",
+				notice:        "Direct 1:1 with " + channelui.DisplayName(team.NormalizeOneOnOneAgent(result.OneOnOneAgent)) + " is ready.",
 				sessionMode:   result.SessionMode,
 				oneOnOneAgent: result.OneOnOneAgent,
 			}
@@ -4756,7 +4756,7 @@ func killTeamSession() {
 	}
 }
 
-func runChannelView(threadsCollapsed bool, initialApp officeApp, skipSplash bool) {
+func runChannelView(threadsCollapsed bool, initialApp channelui.OfficeApp, skipSplash bool) {
 	defer func() {
 		if r := recover(); r != nil {
 			reportChannelCrash(fmt.Sprintf("panic: %v\n\n%s", r, debug.Stack()))
@@ -4792,9 +4792,9 @@ func runChannelView(threadsCollapsed bool, initialApp officeApp, skipSplash bool
 }
 
 func reportChannelCrash(details string) {
-	_ = appendChannelCrashLog(details)
+	_ = channelui.AppendChannelCrashLog(details)
 	fmt.Fprintln(os.Stderr, "WUPHF channel crashed.")
-	fmt.Fprintln(os.Stderr, "Log:", channelCrashLogPath())
+	fmt.Fprintln(os.Stderr, "Log:", channelui.ChannelCrashLogPath())
 	fmt.Fprintln(os.Stderr, "")
 	fmt.Fprintln(os.Stderr, "The rest of the team is still running.")
 	if strings.TrimSpace(os.Getenv("WUPHF_HEADLESS_PROVIDER")) != "" {

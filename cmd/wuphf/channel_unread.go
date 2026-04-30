@@ -1,6 +1,8 @@
 package main
 
-func (m *channelModel) noteIncomingMessages(added []brokerMessage) {
+import "github.com/nex-crm/wuphf/cmd/wuphf/channelui"
+
+func (m *channelModel) noteIncomingMessages(added []channelui.BrokerMessage) {
 	if len(added) == 0 {
 		return
 	}
@@ -8,7 +10,7 @@ func (m *channelModel) noteIncomingMessages(added []brokerMessage) {
 		m.unreadAnchorID = added[0].ID
 	}
 	m.unreadCount += len(added)
-	m.awaySummary = resolveWorkspaceAwaySummary("", m.unreadCount, m.currentRuntimeSnapshot().Recovery)
+	m.awaySummary = channelui.ResolveWorkspaceAwaySummary("", m.unreadCount, m.currentRuntimeSnapshot().Recovery)
 }
 
 func (m *channelModel) clearUnreadState() {

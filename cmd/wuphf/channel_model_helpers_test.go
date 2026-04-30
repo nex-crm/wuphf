@@ -3,16 +3,18 @@ package main
 import (
 	"strings"
 	"testing"
+
+	"github.com/nex-crm/wuphf/cmd/wuphf/channelui"
 )
 
 func TestFilterInsightMessagesKeepsAutomationAndNex(t *testing.T) {
-	messages := []brokerMessage{
+	messages := []channelui.BrokerMessage{
 		{ID: "m1", From: "ceo", Content: "talk", Kind: "human_decision"},
 		{ID: "m2", From: "nex", Content: "policy"},
 		{ID: "m3", From: "fe", Content: "automation tick", Kind: "automation"},
 		{ID: "m4", From: "fe", Content: "regular"},
 	}
-	got := filterInsightMessages(messages)
+	got := channelui.FilterInsightMessages(messages)
 	if len(got) != 2 {
 		t.Fatalf("expected 2 insight messages, got %d (%v)", len(got), got)
 	}
@@ -24,19 +26,19 @@ func TestFilterInsightMessagesKeepsAutomationAndNex(t *testing.T) {
 }
 
 func TestPopupActionIndexParses(t *testing.T) {
-	if idx, ok := popupActionIndex("3"); !ok || idx != 3 {
+	if idx, ok := channelui.PopupActionIndex("3"); !ok || idx != 3 {
 		t.Errorf("expected (3,true), got (%d,%v)", idx, ok)
 	}
-	if _, ok := popupActionIndex("not a number"); ok {
+	if _, ok := channelui.PopupActionIndex("not a number"); ok {
 		t.Errorf("expected miss for non-numeric")
 	}
-	if _, ok := popupActionIndex("-5"); ok {
+	if _, ok := channelui.PopupActionIndex("-5"); ok {
 		t.Errorf("expected miss for negative")
 	}
 }
 
 func TestCountUniqueAgentsExcludesYouNexAndAutomation(t *testing.T) {
-	messages := []brokerMessage{
+	messages := []channelui.BrokerMessage{
 		{From: "fe"},
 		{From: "be"},
 		{From: "fe"}, // duplicate, should not double-count
@@ -44,13 +46,13 @@ func TestCountUniqueAgentsExcludesYouNexAndAutomation(t *testing.T) {
 		{From: "nex"},
 		{From: "fe", Kind: "automation"},
 	}
-	if got := countUniqueAgents(messages); got != 2 {
+	if got := channelui.CountUniqueAgents(messages); got != 2 {
 		t.Fatalf("expected 2 unique agents (fe, be), got %d", got)
 	}
 }
 
 func TestCountUniqueAgentsEmpty(t *testing.T) {
-	if got := countUniqueAgents(nil); got != 0 {
+	if got := channelui.CountUniqueAgents(nil); got != 0 {
 		t.Fatalf("expected 0 for empty input, got %d", got)
 	}
 }
@@ -63,8 +65,8 @@ func TestFormatUsdFormatsTwoDecimals(t *testing.T) {
 		1500.999: "$1501.00",
 	}
 	for in, want := range cases {
-		if got := formatUsd(in); got != want {
-			t.Errorf("formatUsd(%g) = %q, want %q", in, got, want)
+		if got := channelui.FormatUSD(in); got != want {
+			t.Errorf("channelui.FormatUSD(%g) = %q, want %q", in, got, want)
 		}
 	}
 }
@@ -77,16 +79,16 @@ func TestFormatTokenCountUnits(t *testing.T) {
 		2_000_000: "2.0M tok",
 	}
 	for in, want := range cases {
-		if got := formatTokenCount(in); got != want {
-			t.Errorf("formatTokenCount(%d) = %q, want %q", in, got, want)
+		if got := channelui.FormatTokenCount(in); got != want {
+			t.Errorf("channelui.FormatTokenCount(%d) = %q, want %q", in, got, want)
 		}
 	}
 }
 
 func TestRecommendedOptionIndexFindsMatch(t *testing.T) {
 	m := channelModel{}
-	m.pending = &channelInterview{
-		Options: []channelInterviewOption{
+	m.pending = &channelui.Interview{
+		Options: []channelui.InterviewOption{
 			{ID: "yes"},
 			{ID: "no"},
 			{ID: "maybe"},
@@ -113,7 +115,7 @@ func TestInterviewOptionCountIncludesCustomAnswerSlot(t *testing.T) {
 	if got := m.interviewOptionCount(); got != 0 {
 		t.Errorf("nil pending should yield 0 option count, got %d", got)
 	}
-	m.pending = &channelInterview{Options: []channelInterviewOption{{ID: "a"}, {ID: "b"}}}
+	m.pending = &channelui.Interview{Options: []channelui.InterviewOption{{ID: "a"}, {ID: "b"}}}
 	if got := m.interviewOptionCount(); got != 3 {
 		t.Errorf("expected len(options)+1 = 3, got %d", got)
 	}
@@ -125,7 +127,7 @@ func TestSelectedInterviewOptionEdgeCases(t *testing.T) {
 		t.Fatalf("nil pending should yield nil option")
 	}
 
-	m.pending = &channelInterview{Options: []channelInterviewOption{{ID: "a"}, {ID: "b"}}}
+	m.pending = &channelui.Interview{Options: []channelui.InterviewOption{{ID: "a"}, {ID: "b"}}}
 	m.selectedOption = -1
 	got := m.selectedInterviewOption()
 	if got == nil || got.ID != "a" {
@@ -145,14 +147,14 @@ func TestSelectedInterviewOptionEdgeCases(t *testing.T) {
 }
 
 func TestRenderUsageStripBuildsAgentColumn(t *testing.T) {
-	usage := channelUsageState{
-		Agents: map[string]channelUsageTotals{
+	usage := channelui.UsageState{
+		Agents: map[string]channelui.UsageTotals{
 			"fe":  {InputTokens: 100, OutputTokens: 50, TotalTokens: 150, CostUsd: 0.5},
 			"ceo": {InputTokens: 5, OutputTokens: 1, TotalTokens: 6},
 		},
 	}
-	members := []channelMember{{Slug: "fe", Name: "Frontend"}}
-	got := stripANSI(renderUsageStrip(usage, members, 120))
+	members := []channelui.Member{{Slug: "fe", Name: "Frontend"}}
+	got := stripANSI(channelui.RenderUsageStrip(usage, members, 120))
 	if got == "" {
 		t.Fatalf("expected non-empty usage strip")
 	}
@@ -165,11 +167,11 @@ func TestRenderUsageStripBuildsAgentColumn(t *testing.T) {
 }
 
 func TestRenderUsageStripEmptyReturnsEmpty(t *testing.T) {
-	if got := renderUsageStrip(channelUsageState{}, nil, 120); got != "" {
+	if got := channelui.RenderUsageStrip(channelui.UsageState{}, nil, 120); got != "" {
 		t.Fatalf("empty usage should yield empty strip, got %q", got)
 	}
-	usage := channelUsageState{Agents: map[string]channelUsageTotals{"fe": {TotalTokens: 1}}}
-	if got := renderUsageStrip(usage, nil, 30); got != "" {
+	usage := channelui.UsageState{Agents: map[string]channelui.UsageTotals{"fe": {TotalTokens: 1}}}
+	if got := channelui.RenderUsageStrip(usage, nil, 30); got != "" {
 		t.Fatalf("narrow width should yield empty strip, got %q", got)
 	}
 }
@@ -180,15 +182,15 @@ func TestRenderUsageStripEmptyReturnsEmpty(t *testing.T) {
 // stands in), so the test uses unique token totals as slug proxies and
 // asserts they appear in the order matching alphabetical slug sort.
 func TestRenderUsageStripSortsUnrosteredSlugsAlphabetically(t *testing.T) {
-	usage := channelUsageState{
-		Agents: map[string]channelUsageTotals{
+	usage := channelui.UsageState{
+		Agents: map[string]channelui.UsageTotals{
 			"zeta":    {TotalTokens: 30, CostUsd: 0.30},
 			"alpha":   {TotalTokens: 10, CostUsd: 0.10},
 			"mango":   {TotalTokens: 20, CostUsd: 0.20},
 			"unicorn": {TotalTokens: 40, CostUsd: 0.40},
 		},
 	}
-	got := stripANSI(renderUsageStrip(usage, nil, 240))
+	got := stripANSI(channelui.RenderUsageStrip(usage, nil, 240))
 	idx10 := strings.Index(got, "10 tok")
 	idx20 := strings.Index(got, "20 tok")
 	idx40 := strings.Index(got, "40 tok")
@@ -228,17 +230,17 @@ func TestChannelModelInitReturnsPollCmd(t *testing.T) {
 }
 
 func TestCurrentAppLabelByApp(t *testing.T) {
-	cases := map[officeApp]string{
-		officeAppMessages:  "messages",
-		officeAppRecovery:  "recovery",
-		officeAppInbox:     "inbox",
-		officeAppOutbox:    "outbox",
-		officeAppTasks:     "tasks",
-		officeAppRequests:  "requests",
-		officeAppPolicies:  "policies",
-		officeAppCalendar:  "calendar",
-		officeAppArtifacts: "artifacts",
-		officeAppSkills:    "skills",
+	cases := map[channelui.OfficeApp]string{
+		channelui.OfficeAppMessages:  "messages",
+		channelui.OfficeAppRecovery:  "recovery",
+		channelui.OfficeAppInbox:     "inbox",
+		channelui.OfficeAppOutbox:    "outbox",
+		channelui.OfficeAppTasks:     "tasks",
+		channelui.OfficeAppRequests:  "requests",
+		channelui.OfficeAppPolicies:  "policies",
+		channelui.OfficeAppCalendar:  "calendar",
+		channelui.OfficeAppArtifacts: "artifacts",
+		channelui.OfficeAppSkills:    "skills",
 	}
 	for app, want := range cases {
 		m := channelModel{activeApp: app}
@@ -252,12 +254,12 @@ func TestCurrentAppLabelOneOnOneOverridesMostApps(t *testing.T) {
 	m := channelModel{}
 	m.sessionMode = "1o1"
 	m.oneOnOneAgent = "fe"
-	m.activeApp = officeAppTasks
+	m.activeApp = channelui.OfficeAppTasks
 	if got := m.currentAppLabel(); got != "messages" {
 		t.Errorf("1:1 mode should report 'messages' for non-mailbox apps, got %q", got)
 	}
 	// inbox/outbox/recovery still surface their own labels in 1:1 mode.
-	m.activeApp = officeAppInbox
+	m.activeApp = channelui.OfficeAppInbox
 	if got := m.currentAppLabel(); got != "inbox" {
 		t.Errorf("1:1 mode should still surface inbox label, got %q", got)
 	}
@@ -294,13 +296,13 @@ func TestNextFocusSkipsCollapsedSidebar(t *testing.T) {
 }
 
 func TestLatestHumanFacingMessageScansFromEnd(t *testing.T) {
-	messages := []brokerMessage{
+	messages := []channelui.BrokerMessage{
 		{ID: "1", Kind: "automation"},
 		{ID: "2", Kind: "human_decision"},
 		{ID: "3", Kind: "human_action"},
 		{ID: "4", Kind: "automation"},
 	}
-	got := latestHumanFacingMessage(messages)
+	got := channelui.LatestHumanFacingMessage(messages)
 	if got == nil {
 		t.Fatalf("expected to find latest human-facing message")
 	}
@@ -308,10 +310,10 @@ func TestLatestHumanFacingMessageScansFromEnd(t *testing.T) {
 		t.Errorf("expected last human message id=3, got %s", got.ID)
 	}
 
-	if got := latestHumanFacingMessage(nil); got != nil {
+	if got := channelui.LatestHumanFacingMessage(nil); got != nil {
 		t.Fatalf("nil input should yield nil")
 	}
-	if got := latestHumanFacingMessage([]brokerMessage{{Kind: "automation"}}); got != nil {
+	if got := channelui.LatestHumanFacingMessage([]channelui.BrokerMessage{{Kind: "automation"}}); got != nil {
 		t.Fatalf("no human-facing kinds should yield nil")
 	}
 }

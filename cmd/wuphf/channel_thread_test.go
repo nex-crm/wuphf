@@ -3,17 +3,19 @@ package main
 import (
 	"strings"
 	"testing"
+
+	"github.com/nex-crm/wuphf/cmd/wuphf/channelui"
 )
 
 func TestFlattenThreadRepliesNestedDepth(t *testing.T) {
-	messages := []brokerMessage{
+	messages := []channelui.BrokerMessage{
 		{ID: "root", From: "ceo", Content: "Should we ship?"},
 		{ID: "r1", From: "fe", Content: "Yes", ReplyTo: "root"},
 		{ID: "r1a", From: "be", Content: "Agree", ReplyTo: "r1"},
 		{ID: "r2", From: "pm", Content: "Wait", ReplyTo: "root"},
 		{ID: "unrelated", From: "cmo", Content: "Different topic"},
 	}
-	out := flattenThreadReplies(messages, "root")
+	out := channelui.FlattenThreadReplies(messages, "root")
 	if len(out) != 3 {
 		t.Fatalf("expected 3 thread replies, got %d", len(out))
 	}
@@ -29,19 +31,19 @@ func TestFlattenThreadRepliesNestedDepth(t *testing.T) {
 }
 
 func TestFlattenThreadRepliesUnknownParentReturnsNothing(t *testing.T) {
-	messages := []brokerMessage{
+	messages := []channelui.BrokerMessage{
 		{ID: "a", From: "fe", Content: "hi"},
 		{ID: "b", From: "be", Content: "reply", ReplyTo: "a"},
 	}
-	out := flattenThreadReplies(messages, "missing")
+	out := channelui.FlattenThreadReplies(messages, "missing")
 	if len(out) != 0 {
 		t.Fatalf("unknown parent should yield zero replies, got %d", len(out))
 	}
 }
 
 func TestRenderThreadReplyContainsAuthorAndBody(t *testing.T) {
-	reply := threadedMessage{
-		Message: brokerMessage{
+	reply := channelui.ThreadedMessage{
+		Message: channelui.BrokerMessage{
 			ID:        "r1",
 			From:      "fe",
 			Content:   "Looks good",
@@ -50,7 +52,7 @@ func TestRenderThreadReplyContainsAuthorAndBody(t *testing.T) {
 		Depth:       1,
 		ParentLabel: "@ceo",
 	}
-	lines := renderThreadReply(reply, 60)
+	lines := channelui.RenderThreadReply(reply, 60)
 	plain := stripANSI(strings.Join(lines, "\n"))
 	if !strings.Contains(strings.ToLower(plain), "frontend") {
 		t.Fatalf("expected author label in reply, got %q", plain)
@@ -67,11 +69,11 @@ func TestRenderThreadReplyContainsAuthorAndBody(t *testing.T) {
 }
 
 func TestRenderThreadRepliesMultipleProducesLines(t *testing.T) {
-	replies := []threadedMessage{
-		{Message: brokerMessage{ID: "r1", From: "fe", Content: "A"}, Depth: 0, ParentLabel: "@ceo"},
-		{Message: brokerMessage{ID: "r2", From: "be", Content: "B"}, Depth: 0, ParentLabel: "@ceo"},
+	replies := []channelui.ThreadedMessage{
+		{Message: channelui.BrokerMessage{ID: "r1", From: "fe", Content: "A"}, Depth: 0, ParentLabel: "@ceo"},
+		{Message: channelui.BrokerMessage{ID: "r2", From: "be", Content: "B"}, Depth: 0, ParentLabel: "@ceo"},
 	}
-	lines := renderThreadReplies(replies, 60)
+	lines := channelui.RenderThreadReplies(replies, 60)
 	if len(lines) == 0 {
 		t.Fatalf("expected lines for replies")
 	}
@@ -82,19 +84,19 @@ func TestRenderThreadRepliesMultipleProducesLines(t *testing.T) {
 }
 
 func TestRenderThreadRepliesEmptyReturnsNil(t *testing.T) {
-	if got := renderThreadReplies(nil, 60); got != nil {
+	if got := channelui.RenderThreadReplies(nil, 60); got != nil {
 		t.Fatalf("empty replies should return nil, got %v", got)
 	}
 }
 
 func TestRenderThreadMessageHasAvatarAndBody(t *testing.T) {
-	msg := brokerMessage{
+	msg := channelui.BrokerMessage{
 		ID:        "m1",
 		From:      "ceo",
 		Content:   "Approve the launch",
 		Timestamp: "2026-04-29T10:00:00Z",
 	}
-	lines := renderThreadMessage(msg, 60, true)
+	lines := channelui.RenderThreadMessage(msg, 60, true)
 	plain := stripANSI(strings.Join(lines, "\n"))
 	if !strings.Contains(plain, "Approve the launch") {
 		t.Fatalf("expected message body, got %q", plain)
@@ -130,7 +132,7 @@ func TestRenderThreadPanelMissingParentShowsNotice(t *testing.T) {
 }
 
 func TestRenderThreadPanelRendersParentAndReplies(t *testing.T) {
-	messages := []brokerMessage{
+	messages := []channelui.BrokerMessage{
 		{ID: "root", From: "ceo", Content: "Approve?", Timestamp: "2026-04-29T10:00:00Z"},
 		{ID: "r1", From: "fe", Content: "Approved", ReplyTo: "root", Timestamp: "2026-04-29T10:01:00Z"},
 	}
