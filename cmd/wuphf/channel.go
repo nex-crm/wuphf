@@ -2054,8 +2054,6 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // main-panel geometry (mainPanelGeometry), and the recovery-prompt click
 // handler (applyRecoveryPrompt) all moved to channel_mouse.go.
 
-// Thread keymap moved to channel_thread_input.go.
-
 // Sidebar state, items, cursor, selection, and the updateSidebar key
 // handler all live in channel_sidebar_state.go.
 
@@ -2063,8 +2061,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // Lookup helpers + request-action dispatch moved to channel_lookups.go.
 
-// Composer overlay management + composer motion/insert helpers moved
-// to channel_input.go.
+// Composer input helpers and thread keymap moved to channel_composer_input.go.
 
 // runActiveCommand, runCommand, and maybeActivateChannelPickerFromInput moved
 // to channel_commands.go.
