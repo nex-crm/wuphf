@@ -160,15 +160,19 @@ func fixOrphanTreeRegister(treePath string) error {
 	}
 	reg, err := readFile(rp)
 	if err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
-			// Try backup, otherwise start fresh.
+		if errors.Is(err, os.ErrNotExist) {
+			// Genuine first-run: no registry file exists yet.
+			reg = &Registry{Version: Version, CLICurrent: name}
+		} else {
+			// Primary corrupt — try the backup before giving up.
 			bak := rp + ".bak"
 			reg, err = readFile(bak)
 			if err != nil {
-				reg = &Registry{Version: Version, CLICurrent: name}
+				// Both primary and backup unreadable. Fail closed rather
+				// than bootstrapping a fresh registry that would strand
+				// every other registered workspace.
+				return fmt.Errorf("workspaces: orphan-register %q: registry and backup both unreadable — run 'wuphf workspace doctor --dry-run' for manual recovery: %w", name, err)
 			}
-		} else {
-			reg = &Registry{Version: Version, CLICurrent: name}
 		}
 	}
 

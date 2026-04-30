@@ -208,6 +208,11 @@ func (d *paneDispatcher) Enqueue(slug, paneTarget, notification string) {
 	if slug == "" || paneTarget == "" || notification == "" {
 		return
 	}
+	// Short-circuit during /admin/pause drain so new pane /clear cycles
+	// are not enqueued after Launcher.Drain has started.
+	if IsDraining() {
+		return
+	}
 	d.mu.Lock()
 	if d.queues == nil {
 		d.queues = make(map[string][]paneDispatchTurn)

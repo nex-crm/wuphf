@@ -142,6 +142,14 @@ func Read() (*Registry, error) {
 		return reg, nil
 	}
 	if errors.Is(err, os.ErrNotExist) {
+		// Primary file missing. Try the backup first: an interrupted
+		// write-temp-rename (process killed between the two renames) can
+		// leave the only valid copy in registry.json.bak.
+		bak := rp + ".bak"
+		bakReg, bakErr := readFile(bak)
+		if bakErr == nil {
+			return bakReg, nil
+		}
 		return nil, ErrRegistryNotFound
 	}
 	// Main file parse failure — try backup.
