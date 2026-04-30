@@ -91,7 +91,7 @@ func TestCompilePlaybook_ProducesFrontmatterAndBody(t *testing.T) {
 		"---\n",
 		"name: churn-prevention\n",
 		"description: ",
-		"allowed-tools: team_wiki_read, playbook_list, playbook_execution_record\n",
+		"allowed-tools: team_wiki_read, playbook_list, playbook_execution_record, team_learning_record\n",
 		"source_path: team/playbooks/churn-prevention.md\n",
 		"compiled_by: archivist\n",
 	} {
@@ -104,6 +104,7 @@ func TestCompilePlaybook_ProducesFrontmatterAndBody(t *testing.T) {
 		"# Playbook: Churn prevention",
 		"team_wiki_read",
 		"playbook_execution_record",
+		"team_learning_record",
 		"team/playbooks/churn-prevention.executions.jsonl",
 	} {
 		if !strings.Contains(compiled, want) {

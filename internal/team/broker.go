@@ -483,6 +483,7 @@ type Broker struct {
 	factLog                 *FactLog
 	entityGraph             *EntityGraph
 	entitySynthesizer       *EntitySynthesizer
+	teamLearningLog         *LearningLog
 	playbookSynthesizer     *PlaybookSynthesizer
 	pamDispatcher           *PamDispatcher
 	scanTracker             *scanStatusTracker
@@ -938,6 +939,8 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/playbook/executions", b.requireAuth(b.handlePlaybookExecutionsList))
 	mux.HandleFunc("/playbook/synthesize", b.requireAuth(b.handlePlaybookSynthesize))
 	mux.HandleFunc("/playbook/synthesis-status", b.requireAuth(b.handlePlaybookSynthesisStatus))
+	mux.HandleFunc("/learning/record", b.requireAuth(b.handleLearningRecord))
+	mux.HandleFunc("/learning/search", b.requireAuth(b.handleLearningSearch))
 	mux.HandleFunc("/pam/actions", b.requireAuth(b.handlePamActions))
 	mux.HandleFunc("/pam/action", b.requireAuth(b.handlePamAction))
 	mux.HandleFunc("/scan/start", b.requireAuth(b.handleScanStart))

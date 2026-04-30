@@ -38,6 +38,7 @@ import ReferencedBy from "./ReferencedBy";
 import SeeAlso from "./SeeAlso";
 import type { SourceItem } from "./Sources";
 import Sources from "./Sources";
+import TeamLearningPanel from "./TeamLearningPanel";
 import TocBox, { type TocEntry } from "./TocBox";
 import WikiEditor from "./WikiEditor";
 
@@ -322,6 +323,9 @@ export default function WikiArticle({
         )}
         {playbook && tab === "article" && (
           <PlaybookExecutionLog slug={playbook.slug} />
+        )}
+        {playbook && tab === "article" && (
+          <TeamLearningPanel playbookSlug={playbook.slug} />
         )}
         <SeeAlso
           items={article.backlinks.map((b) => ({

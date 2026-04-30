@@ -567,6 +567,8 @@ func registerSharedMemoryTools(server *mcp.Server) {
 		// into invokable skills + record execution outcomes. Same markdown
 		// substrate, so the backend gate is unchanged.
 		registerPlaybookTools(server)
+		// Team learnings — typed reusable memory stored in the wiki.
+		registerLearningTools(server)
 		// Lint tools (Slice 1 wiki intelligence) — daily health check +
 		// contradiction resolution. Same markdown substrate.
 		mcp.AddTool(server, readOnlyTool(

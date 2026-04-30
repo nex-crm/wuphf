@@ -40,7 +40,7 @@ func (l *Launcher) Launch() error {
 	killStaleBroker()
 
 	// Start the shared channel broker
-	l.broker = NewBroker()
+	l.installBroker(NewBroker())
 	l.broker.runtimeProvider = l.provider
 	l.broker.packSlug = l.packSlug
 	l.broker.blankSlateLaunch = l.blankSlateLaunch
@@ -180,7 +180,7 @@ func (l *Launcher) launchHeadlessCodex() error {
 	killStaleHeadlessTaskRunners()
 	_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "kill-session", "-t", l.sessionName).Run()
 
-	l.broker = NewBroker()
+	l.installBroker(NewBroker())
 	l.broker.runtimeProvider = l.provider
 	l.broker.packSlug = l.packSlug
 	l.broker.blankSlateLaunch = l.blankSlateLaunch

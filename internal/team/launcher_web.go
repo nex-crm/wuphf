@@ -82,7 +82,7 @@ func (l *Launcher) LaunchWeb(webPort int) error {
 
 	killStaleBroker()
 
-	l.broker = NewBroker()
+	l.installBroker(NewBroker())
 	l.broker.runtimeProvider = l.provider
 	l.broker.packSlug = l.packSlug
 	l.broker.blankSlateLaunch = l.blankSlateLaunch

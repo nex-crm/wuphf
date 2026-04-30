@@ -1917,6 +1917,88 @@
   color: #c94a4a;
   border-color: #c94a4a;
 }
+
+.wk-team-learnings {
+  margin: 24px 0;
+  padding: 16px 0 4px;
+  border-top: 1px solid var(--wk-rule, rgba(0, 0, 0, 0.18));
+}
+.wk-team-learnings h2 {
+  margin: 0 0 12px;
+  font-family: var(--wk-display);
+  font-size: 18px;
+  font-weight: 650;
+  line-height: 1.25;
+  color: var(--wk-body, #111);
+}
+.wk-team-learnings__empty {
+  margin: 0;
+  font-family: var(--wk-chrome);
+  font-size: 13px;
+  color: var(--wk-body-muted, rgba(0, 0, 0, 0.6));
+}
+.wk-team-learnings__list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.wk-team-learning {
+  padding: 12px 0;
+  border-top: 1px solid var(--wk-rule-soft, rgba(0, 0, 0, 0.1));
+}
+.wk-team-learning:first-child {
+  border-top: 0;
+}
+.wk-team-learning__topline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.wk-team-learning__type,
+.wk-team-learning__trusted {
+  font-family: var(--wk-chrome);
+  font-size: 11px;
+  line-height: 1;
+  text-transform: uppercase;
+  letter-spacing: 0;
+  color: var(--wk-body-muted, rgba(0, 0, 0, 0.6));
+}
+.wk-team-learning__type {
+  padding: 3px 6px;
+  border: 1px solid var(--wk-rule, rgba(0, 0, 0, 0.18));
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.025);
+}
+.wk-team-learning__trusted {
+  color: #2a7d2a;
+}
+.wk-team-learning__key {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-family: var(--wk-mono);
+  font-size: 12px;
+  color: var(--wk-body, #111);
+}
+.wk-team-learning__insight {
+  margin: 8px 0 0;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--wk-body, #111);
+}
+.wk-team-learning__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  margin-top: 8px;
+  font-family: var(--wk-chrome);
+  font-size: 12px;
+  color: var(--wk-body-muted, rgba(0, 0, 0, 0.6));
+}
 /* ────────────────────────────────────────────────────────────
  * v1.3 Image embeds — agents embed via standard markdown
  * `![alt](https://...)`; renderer routes through ImageEmbed.

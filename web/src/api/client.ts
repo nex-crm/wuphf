@@ -7,6 +7,7 @@ const apiBase = "/api";
 let brokerDirect = "http://localhost:7890";
 let useProxy = true;
 let token: string | null = null;
+const brokerHandshakeTimeoutMs = 8000;
 
 // ── Init ──
 
@@ -28,6 +29,70 @@ export async function initApi(): Promise<void> {
     } catch {
       // broker unreachable — will fail on first request
     }
+  }
+}
+
+export async function connectBroker(
+  brokerUrl: string,
+  brokerToken?: string,
+): Promise<void> {
+  const nextBroker = brokerUrl.trim().replace(/\/+$/, "");
+  if (!nextBroker) {
+    throw new Error("Broker URL is required");
+  }
+  try {
+    const parsed = new URL(nextBroker);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      throw new Error("unsupported protocol");
+    }
+  } catch {
+    throw new Error("Broker URL must be a valid http:// or https:// URL");
+  }
+  let nextToken = brokerToken?.trim() || null;
+  const r = await fetchWithTimeout(
+    `${nextBroker}/health`,
+    brokerHandshakeTimeoutMs,
+  );
+  if (!r.ok) {
+    const text = (await r.text().catch(() => "")).trim();
+    throw new Error(text || `${r.status} ${r.statusText}`);
+  }
+  if (!nextToken) {
+    const tokenResp = await fetchWithTimeout(
+      `${nextBroker}/web-token`,
+      brokerHandshakeTimeoutMs,
+    );
+    if (!tokenResp.ok) {
+      const text = (await tokenResp.text().catch(() => "")).trim();
+      throw new Error(text || `${tokenResp.status} ${tokenResp.statusText}`);
+    }
+    const data = await tokenResp.json();
+    const candidate = typeof data?.token === "string" ? data.token.trim() : "";
+    if (!candidate) {
+      throw new Error("Broker /web-token response did not include a token");
+    }
+    nextToken = candidate;
+  }
+  brokerDirect = nextBroker;
+  token = nextToken;
+  useProxy = false;
+}
+
+async function fetchWithTimeout(
+  url: string,
+  timeoutMs: number,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = globalThis.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { signal: controller.signal });
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new Error(`Timed out connecting to broker after ${timeoutMs}ms`);
+    }
+    throw err;
+  } finally {
+    globalThis.clearTimeout(timeout);
   }
 }
 

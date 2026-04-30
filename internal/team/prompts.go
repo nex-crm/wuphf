@@ -48,7 +48,22 @@ func (l *Launcher) newPromptBuilder() *promptBuilder {
 			// inside Build is redundant.
 			return l.broker.ListPolicies()
 		},
-		nameFor:        l.targeter().NameFor,
+		nameFor: l.targeter().NameFor,
+		learnings: func(slug string) []LearningSearchResult {
+			if l == nil || l.broker == nil || memoryBackend != config.MemoryBackendMarkdown {
+				return nil
+			}
+			l.broker.ensureTeamLearningLog()
+			log := l.broker.TeamLearningLog()
+			if log == nil {
+				return nil
+			}
+			results, err := log.Search(LearningSearchFilters{Limit: 8})
+			if err != nil {
+				return nil
+			}
+			return results
+		},
 		markdownMemory: memoryBackend == config.MemoryBackendMarkdown,
 		nexDisabled:    noNex,
 	}
