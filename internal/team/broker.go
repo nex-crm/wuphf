@@ -920,6 +920,8 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/studio/bootstrap-package", b.requireAuth(handleOperationBootstrapPackage))
 	mux.HandleFunc("/operations/bootstrap-package", b.requireAuth(handleOperationBootstrapPackage))
 	mux.HandleFunc("/studio/run-workflow", b.requireAuth(b.handleStudioRunWorkflow))
+	mux.HandleFunc("/surfaces", b.requireAuth(b.handleSurfaces))
+	mux.HandleFunc("/surfaces/", b.requireAuth(b.handleSurfaceSubpath))
 	mux.HandleFunc("/requests", b.requireAuth(b.handleRequests))
 	mux.HandleFunc("/requests/answer", b.requireAuth(b.handleRequestAnswer))
 	mux.HandleFunc("/interview", b.requireAuth(b.handleInterview))
@@ -1084,6 +1086,8 @@ func (b *Broker) handleEvents(w http.ResponseWriter, r *http.Request) {
 	defer unsubscribePlaybook()
 	playbookSynthEvents, unsubscribePlaybookSynth := b.SubscribePlaybookSynthesizedEvents(64)
 	defer unsubscribePlaybookSynth()
+	surfaceEvents, unsubscribeSurfaces := b.SubscribeSurfaceEvents(64)
+	defer unsubscribeSurfaces()
 	pamStarted, pamDone, pamFailed, unsubscribePam := b.SubscribePamActionEvents(64)
 	defer unsubscribePam()
 
@@ -1152,6 +1156,10 @@ func (b *Broker) handleEvents(w http.ResponseWriter, r *http.Request) {
 			}
 		case evt, ok := <-playbookSynthEvents:
 			if !ok || writeEvent("playbook:synthesized", evt) != nil {
+				return
+			}
+		case evt, ok := <-surfaceEvents:
+			if !ok || writeEvent(evt.Type, evt) != nil {
 				return
 			}
 		case evt, ok := <-pamStarted:

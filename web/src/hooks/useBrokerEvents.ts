@@ -58,6 +58,19 @@ export function useBrokerEvents(enabled: boolean) {
       void queryClient.invalidateQueries({ queryKey: ["actions"] });
       void queryClient.invalidateQueries({ queryKey: ["office-tasks"] });
     });
+    for (const eventName of [
+      "surface:created",
+      "surface:updated",
+      "surface:deleted",
+      "surface:widget_created",
+      "surface:widget_updated",
+      "surface:render_checked",
+    ]) {
+      source.addEventListener(eventName, () => {
+        void queryClient.invalidateQueries({ queryKey: ["surfaces"] });
+        void queryClient.invalidateQueries({ queryKey: ["surface-detail"] });
+      });
+    }
     source.onerror = () => setBrokerConnected(false);
 
     return () => {

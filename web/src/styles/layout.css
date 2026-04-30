@@ -1761,8 +1761,11 @@ html[data-theme="nex"]
 
 /* ─── Responsive ─── */
 @media (max-width: 768px) {
-  .sidebar {
+  .sidebar:not(.sidebar-collapsed) {
     width: 240px;
+  }
+  .sidebar.sidebar-collapsed {
+    width: 56px;
   }
   .thread-panel {
     width: 100%;

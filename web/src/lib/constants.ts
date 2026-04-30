@@ -3,6 +3,7 @@
 // Each surface gets its own tab inside the Wiki app; notebooks/reviews
 // have no top-level sidebar entries of their own.
 export const SIDEBAR_APPS = [
+  { id: "studio", icon: "\u25B6", name: "Studio" },
   { id: "wiki", icon: "\uD83D\uDCD6", name: "Wiki" },
   { id: "tasks", icon: "\u2705", name: "Tasks" },
   { id: "requests", icon: "\uD83D\uDCCB", name: "Requests" },

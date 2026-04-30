@@ -619,6 +619,7 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 		), handleHumanMessage)
 
 		registerSharedMemoryTools(server)
+		registerSurfaceTools(server)
 
 		registerSkillAuthoringTools(server)
 
@@ -658,6 +659,7 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 			"Ask the human an interview question. If they dismiss it, or send another message in this channel/thread, the interview is canceled.",
 		), handleHumanInterview)
 		registerSharedMemoryTools(server)
+		registerSurfaceTools(server)
 		mcp.AddTool(server, officeWriteTool(
 			"team_skill_run",
 			"Invoke a named team skill. When the human's request matches an available skill, call this BEFORE replying — do not freelance. Bumps the skill's usage, logs a skill_invocation to the channel, and returns the skill's canonical step-by-step content for you to follow.",
@@ -736,6 +738,7 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 		registerImageTools(server)
 	}
 	registerSharedMemoryTools(server)
+	registerSurfaceTools(server)
 
 	mcp.AddTool(server, readOnlyTool(
 		"team_requests",

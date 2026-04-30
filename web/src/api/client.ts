@@ -119,6 +119,22 @@ export async function put<T = unknown>(
   return r.json();
 }
 
+export async function patch<T = unknown>(
+  path: string,
+  body?: unknown,
+): Promise<T> {
+  const r = await fetch(baseURL() + path, {
+    method: "PATCH",
+    headers: authHeaders(),
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) {
+    const text = (await r.text().catch(() => "")).trim();
+    throw new Error(text || `${r.status} ${r.statusText}`);
+  }
+  return r.json();
+}
+
 export async function postWithTimeout<T = unknown>(
   path: string,
   body: unknown,

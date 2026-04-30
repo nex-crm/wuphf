@@ -16,6 +16,7 @@ import { ReceiptsApp } from "./components/apps/ReceiptsApp";
 import { RequestsApp } from "./components/apps/RequestsApp";
 import { SettingsApp } from "./components/apps/SettingsApp";
 import { SkillsApp } from "./components/apps/SkillsApp";
+import { StudioApp } from "./components/apps/StudioApp";
 import { TasksApp } from "./components/apps/TasksApp";
 import { ThreadsApp } from "./components/apps/ThreadsApp";
 import { Shell } from "./components/layout/Shell";
@@ -48,6 +49,7 @@ import "./styles/agents.css";
 import "./styles/search.css";
 import "./styles/wiki-shell.css";
 import "./styles/kbd.css";
+import "./styles/studio.css";
 
 // ── Error boundary ─────────────────────────────────────────────
 
@@ -232,6 +234,7 @@ function MainContent() {
 
   if (currentApp) {
     const panels: Record<string, ComponentType> = {
+      studio: StudioApp,
       tasks: TasksApp,
       requests: RequestsApp,
       graph: GraphApp,
