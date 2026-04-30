@@ -459,6 +459,7 @@ export function TaskDetailModal({ task, onClose }: TaskDetailModalProps) {
                 disabledFor={["done"]}
                 currentStatus={currentStatus}
                 onClick={handleStatusAction}
+                disabled={memoryWorkflowNeedsOverride}
               />
               <StatusButton
                 action="cancel"
@@ -765,6 +766,7 @@ interface StatusButtonProps {
   disabledFor: string[];
   currentStatus: string;
   onClick: (action: TaskStatusAction) => void;
+  disabled?: boolean;
   danger?: boolean;
 }
 
@@ -775,6 +777,7 @@ function StatusButton({
   disabledFor,
   currentStatus,
   onClick,
+  disabled,
   danger,
 }: StatusButtonProps) {
   const isCurrent = disabledFor.includes(currentStatus);
@@ -788,7 +791,7 @@ function StatusButton({
       type="button"
       className={className}
       onClick={() => onClick(action)}
-      disabled={isCurrent || anyBusy}
+      disabled={disabled || isCurrent || anyBusy}
       title={isCurrent ? "Task is already in this state" : undefined}
     >
       {isBusy ? "..." : label}

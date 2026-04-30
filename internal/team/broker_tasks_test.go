@@ -1165,6 +1165,12 @@ func TestBrokerTaskCompleteRejectsLiveBusinessTheater(t *testing.T) {
 		raw, _ := io.ReadAll(resp.Body)
 		t.Fatalf("expected theater rejection on completion, got status %d: %s", resp.StatusCode, raw)
 	}
+	b.mu.Lock()
+	gotStatus := b.tasks[0].Status
+	b.mu.Unlock()
+	if gotStatus != "in_progress" {
+		t.Fatalf("failed completion should roll back task status, got %q", gotStatus)
+	}
 }
 
 func TestBrokerStoresLedgerAndReviewLifecycle(t *testing.T) {
@@ -2779,6 +2785,85 @@ func TestBrokerTaskMemoryWorkflowBadRequestErrorsReturn400(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("expected bad request for malformed workflow event, got status=%d body=%s", resp.StatusCode, raw)
+	}
+}
+
+func TestBrokerTaskMemoryWorkflowRecordsBatchedArtifacts(t *testing.T) {
+	b := newTestBroker(t)
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("failed to start broker: %v", err)
+	}
+	defer b.Stop()
+
+	createBody, _ := json.Marshal(map[string]any{
+		"action":     "create",
+		"title":      "Research prior context for onboarding",
+		"created_by": "ceo",
+		"owner":      "ceo",
+		"task_type":  "research",
+	})
+	req, _ := http.NewRequest(http.MethodPost, fmt.Sprintf("http://%s/tasks", b.Addr()), bytes.NewReader(createBody))
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	raw, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("create status=%d body=%s", resp.StatusCode, raw)
+	}
+	var created struct {
+		Task teamTask `json:"task"`
+	}
+	if err := json.Unmarshal(raw, &created); err != nil {
+		t.Fatalf("decode create: %v", err)
+	}
+
+	workflowBody, _ := json.Marshal(map[string]any{
+		"event":   "capture",
+		"task_id": created.Task.ID,
+		"actor":   "pm",
+		"artifacts": []map[string]any{
+			{
+				"backend": "markdown",
+				"source":  "notebook",
+				"path":    "agents/pm/notebook/onboarding.md",
+				"title":   "Onboarding",
+			},
+			{
+				"backend": "markdown",
+				"source":  "notebook",
+				"path":    "agents/pm/notebook/checklist.md",
+				"title":   "Checklist",
+			},
+		},
+	})
+	req, _ = http.NewRequest(http.MethodPost, fmt.Sprintf("http://%s/tasks/memory-workflow", b.Addr()), bytes.NewReader(workflowBody))
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	req.Header.Set("Content-Type", "application/json")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("record workflow: %v", err)
+	}
+	raw, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("workflow status=%d body=%s", resp.StatusCode, raw)
+	}
+	var updated struct {
+		Task    teamTask `json:"task"`
+		Updated bool     `json:"updated"`
+	}
+	if err := json.Unmarshal(raw, &updated); err != nil {
+		t.Fatalf("decode workflow: %v", err)
+	}
+	if !updated.Updated {
+		t.Fatal("expected batched workflow artifacts to update task")
+	}
+	if got := len(updated.Task.MemoryWorkflow.Captures); got != 2 {
+		t.Fatalf("expected both capture artifacts to persist, got %d: %+v", got, updated.Task.MemoryWorkflow.Captures)
 	}
 }
 

@@ -676,6 +676,9 @@ func recordMemoryWorkflowArtifact(task *teamTask, actor string, artifact MemoryW
 }
 
 func appendContextCitation(citations *[]ContextCitation, citation ContextCitation) bool {
+	if !contextCitationHasEvidence(citation) {
+		return false
+	}
 	for i := range *citations {
 		if contextCitationKey((*citations)[i]) == contextCitationKey(citation) {
 			merged := mergeContextCitation((*citations)[i], citation)
@@ -686,6 +689,16 @@ func appendContextCitation(citations *[]ContextCitation, citation ContextCitatio
 	}
 	*citations = append(*citations, citation)
 	return true
+}
+
+func contextCitationHasEvidence(citation ContextCitation) bool {
+	return strings.TrimSpace(citation.SourceID) != "" ||
+		strings.TrimSpace(citation.Path) != "" ||
+		strings.TrimSpace(citation.PageID) != "" ||
+		strings.TrimSpace(citation.ChunkID) != "" ||
+		strings.TrimSpace(citation.SourceURL) != "" ||
+		strings.TrimSpace(citation.Title) != "" ||
+		strings.TrimSpace(citation.Snippet) != ""
 }
 
 func appendMemoryWorkflowArtifact(artifacts *[]MemoryWorkflowArtifact, artifact MemoryWorkflowArtifact) bool {

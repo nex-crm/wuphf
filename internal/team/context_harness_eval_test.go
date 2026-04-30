@@ -323,6 +323,9 @@ func assertSecondRunMemoryWorkflowRecordedPriorCitations(t *testing.T, task *tea
 			t.Fatalf("%s workflow missing prior citation %q: %+v", run.ID, want, task.MemoryWorkflow.Citations)
 		}
 	}
+	if task.MemoryWorkflow.Lookup.Status != MemoryWorkflowStepStatusSatisfied || task.MemoryWorkflow.Lookup.CompletedAt == "" {
+		t.Fatalf("%s workflow lookup step not satisfied after prior citations: %+v", run.ID, task.MemoryWorkflow.Lookup)
+	}
 }
 
 func passportProcessNotebookContent(run passportProcessEvalRun, query string) string {

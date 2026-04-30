@@ -2,6 +2,7 @@ package team
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -69,6 +70,16 @@ func TestMemoryWorkflowJSONRoundTrip(t *testing.T) {
 	}
 	if len(decoded.MemoryWorkflow.PartialErrors) != 1 || decoded.MemoryWorkflow.PartialErrors[0] != "wiki search timed out" {
 		t.Fatalf("partial_errors did not round trip: %+v", decoded.MemoryWorkflow.PartialErrors)
+	}
+	wantSteps := []MemoryWorkflowStep{MemoryWorkflowStepLookup, MemoryWorkflowStepCapture, MemoryWorkflowStepPromote}
+	if !reflect.DeepEqual(decoded.MemoryWorkflow.RequiredSteps, wantSteps) {
+		t.Fatalf("required steps did not round trip: %+v", decoded.MemoryWorkflow.RequiredSteps)
+	}
+	if decoded.MemoryWorkflow.Lookup.Required != true ||
+		decoded.MemoryWorkflow.Lookup.Status != MemoryWorkflowStepStatusSatisfied ||
+		decoded.MemoryWorkflow.Lookup.Query != "prior onboarding context" ||
+		decoded.MemoryWorkflow.Lookup.CompletedAt != "2026-04-30T10:01:00Z" {
+		t.Fatalf("lookup state did not round trip: %+v", decoded.MemoryWorkflow.Lookup)
 	}
 	cloned := cloneMemoryWorkflow(decoded.MemoryWorkflow)
 	cloned.PartialErrors[0] = "mutated"
@@ -221,6 +232,27 @@ func TestMemoryWorkflowLookupRequiresCitationEvidence(t *testing.T) {
 	}
 	if recordMemoryWorkflowLookup(task, "pm", "prior onboarding", nil, "2026-04-30T10:02:00Z") {
 		t.Fatal("duplicate zero-hit lookup should be idempotent")
+	}
+}
+
+func TestMemoryWorkflowLookupRejectsEmptyCitations(t *testing.T) {
+	task := &teamTask{
+		ID:        "task-1",
+		TaskType:  "research",
+		Title:     "Research prior context for onboarding",
+		CreatedAt: "2026-04-30T10:00:00Z",
+		UpdatedAt: "2026-04-30T10:00:00Z",
+	}
+	syncTaskMemoryWorkflow(task, "2026-04-30T10:00:00Z")
+
+	if !recordMemoryWorkflowLookup(task, "pm", "prior onboarding", []ContextCitation{{LineStart: 1, LineEnd: 1}}, "2026-04-30T10:01:00Z") {
+		t.Fatal("first lookup attempt should record query metadata")
+	}
+	if len(task.MemoryWorkflow.Citations) != 0 {
+		t.Fatalf("empty citation should not be retained: %+v", task.MemoryWorkflow.Citations)
+	}
+	if task.MemoryWorkflow.Lookup.Status != MemoryWorkflowStepStatusPending || task.MemoryWorkflow.Lookup.CompletedAt != "" {
+		t.Fatalf("empty citation should not satisfy lookup: %+v", task.MemoryWorkflow.Lookup)
 	}
 }
 

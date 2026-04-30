@@ -143,7 +143,7 @@ describe("TaskDetailModal memory override", () => {
       owner: "ceo",
       memory_workflow: {
         required: true,
-        status: "complete",
+        status: "satisfied",
         required_steps: ["lookup", "capture", "promote"],
         lookup: {
           required: true,
@@ -169,6 +169,7 @@ describe("TaskDetailModal memory override", () => {
     expect(
       screen.getByRole("button", { name: "Mark done with override" }),
     ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Mark done" })).toBeDisabled();
   });
 
   it("requires a reason and submits the human override payload", async () => {

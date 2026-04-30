@@ -600,6 +600,9 @@ func (b *Broker) handlePostTask(w http.ResponseWriter, r *http.Request) {
 		}
 		task := &b.tasks[i]
 		previousTask := cloneTeamTaskForRollback(*task)
+		rollbackTask := func() {
+			*task = previousTask
+		}
 		taskChannel := normalizeChannelSlug(task.Channel)
 		// Authorize against the task's ACTUAL channel, not the channel the
 		// caller put in the body. Without this, a viewer with access to
@@ -710,6 +713,7 @@ func (b *Broker) handlePostTask(w http.ResponseWriter, r *http.Request) {
 		if strings.TrimSpace(body.Details) != "" {
 			if appendDetails {
 				if err := appendTaskDetailLocked(task, body.Details); err != nil {
+					rollbackTask()
 					http.Error(w, err.Error(), http.StatusBadRequest)
 					return
 				}
@@ -752,7 +756,7 @@ func (b *Broker) handlePostTask(w http.ResponseWriter, r *http.Request) {
 				overrideReason = strings.TrimSpace(body.OverrideReason)
 			}
 			if err := applyMemoryWorkflowCompletionGate(task, overrideActor, overrideReason, body.MemoryWorkflowOverride, now); err != nil {
-				*task = previousTask
+				rollbackTask()
 				http.Error(w, err.Error(), http.StatusConflict)
 				return
 			}
@@ -761,6 +765,7 @@ func (b *Broker) handlePostTask(w http.ResponseWriter, r *http.Request) {
 		b.queueTaskBehindActiveOwnerLaneLocked(task)
 		task.UpdatedAt = now
 		if err := rejectTheaterTaskForLiveBusiness(task); err != nil {
+			rollbackTask()
 			http.Error(w, err.Error(), http.StatusConflict)
 			return
 		}
@@ -774,6 +779,7 @@ func (b *Broker) handlePostTask(w http.ResponseWriter, r *http.Request) {
 		}
 		b.scheduleTaskLifecycleLocked(task)
 		if err := b.syncTaskWorktreeLocked(task); err != nil {
+			rollbackTask()
 			http.Error(w, "failed to manage task worktree", http.StatusInternalServerError)
 			return
 		}
@@ -788,6 +794,7 @@ func (b *Broker) handlePostTask(w http.ResponseWriter, r *http.Request) {
 			b.postTaskCancelNotificationsLocked(strings.TrimSpace(body.CreatedBy), task, cancelPrevOwner)
 		}
 		if err := b.saveLocked(); err != nil {
+			rollbackTask()
 			http.Error(w, "failed to persist broker state", http.StatusInternalServerError)
 			return
 		}
@@ -1346,33 +1353,47 @@ func (b *Broker) handleTaskMemoryWorkflow(w http.ResponseWriter, r *http.Request
 	case "lookup":
 		task, found, changed, err = b.RecordTaskMemoryLookup(body.TaskID, body.Actor, body.Query, body.Citations)
 	case "capture", "capture_skipped":
-		artifact := body.Artifact
-		if len(body.Artifacts) > 0 {
-			artifact = body.Artifacts[0]
+		artifacts := body.Artifacts
+		if len(artifacts) == 0 {
+			artifacts = []MemoryWorkflowArtifact{body.Artifact}
 		}
-		if action == "capture_skipped" && memoryWorkflowArtifactKey(normalizeMemoryWorkflowArtifact(artifact, "")) == "" {
-			skipReason := strings.TrimSpace(body.SkipReason)
-			artifact = MemoryWorkflowArtifact{Source: "skip", Title: skipReason, SkipReason: skipReason}
+		for _, artifact := range artifacts {
+			if action == "capture_skipped" && memoryWorkflowArtifactKey(normalizeMemoryWorkflowArtifact(artifact, "")) == "" {
+				skipReason := strings.TrimSpace(body.SkipReason)
+				artifact = MemoryWorkflowArtifact{Source: "skip", Title: skipReason, SkipReason: skipReason}
+			}
+			if memoryWorkflowArtifactKey(normalizeMemoryWorkflowArtifact(artifact, "")) == "" {
+				http.Error(w, "memory workflow capture artifact required", http.StatusBadRequest)
+				return
+			}
+			var artifactChanged bool
+			task, found, artifactChanged, err = b.RecordTaskMemoryCapture(body.TaskID, body.Actor, artifact)
+			changed = artifactChanged || changed
+			if err != nil || !found {
+				break
+			}
 		}
-		if memoryWorkflowArtifactKey(normalizeMemoryWorkflowArtifact(artifact, "")) == "" {
-			http.Error(w, "memory workflow capture artifact required", http.StatusBadRequest)
-			return
-		}
-		task, found, changed, err = b.RecordTaskMemoryCapture(body.TaskID, body.Actor, artifact)
 	case "promote", "promotion", "promote_skipped":
-		artifact := body.Artifact
-		if len(body.Artifacts) > 0 {
-			artifact = body.Artifacts[0]
+		artifacts := body.Artifacts
+		if len(artifacts) == 0 {
+			artifacts = []MemoryWorkflowArtifact{body.Artifact}
 		}
-		if action == "promote_skipped" && memoryWorkflowArtifactKey(normalizeMemoryWorkflowArtifact(artifact, "")) == "" {
-			skipReason := strings.TrimSpace(body.SkipReason)
-			artifact = MemoryWorkflowArtifact{Source: "skip", Title: skipReason, SkipReason: skipReason}
+		for _, artifact := range artifacts {
+			if action == "promote_skipped" && memoryWorkflowArtifactKey(normalizeMemoryWorkflowArtifact(artifact, "")) == "" {
+				skipReason := strings.TrimSpace(body.SkipReason)
+				artifact = MemoryWorkflowArtifact{Source: "skip", Title: skipReason, SkipReason: skipReason}
+			}
+			if memoryWorkflowArtifactKey(normalizeMemoryWorkflowArtifact(artifact, "")) == "" {
+				http.Error(w, "memory workflow promotion artifact required", http.StatusBadRequest)
+				return
+			}
+			var artifactChanged bool
+			task, found, artifactChanged, err = b.RecordTaskMemoryPromotion(body.TaskID, body.Actor, artifact)
+			changed = artifactChanged || changed
+			if err != nil || !found {
+				break
+			}
 		}
-		if memoryWorkflowArtifactKey(normalizeMemoryWorkflowArtifact(artifact, "")) == "" {
-			http.Error(w, "memory workflow promotion artifact required", http.StatusBadRequest)
-			return
-		}
-		task, found, changed, err = b.RecordTaskMemoryPromotion(body.TaskID, body.Actor, artifact)
 	default:
 		http.Error(w, "unknown memory workflow action", http.StatusBadRequest)
 		return
