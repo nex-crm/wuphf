@@ -157,8 +157,9 @@ func PrettyWhen(ts, prefix string) string {
 
 // PrettyRelativeTime renders a timestamp as a human relative duration
 // ("just now", "5m ago", "3h ago") for recent inputs and falls back to
-// "Jan 2 15:04" once we're more than a day away. Unparsable inputs are
-// returned unchanged.
+// "Jan 2 15:04" once we're more than a day away. Future timestamps
+// render with an "in …" prefix instead of "… ago" so deadlines don't
+// look like history. Unparsable inputs are returned unchanged.
 func PrettyRelativeTime(ts string) string {
 	parsed, ok := ParseChannelTime(ts)
 	if !ok {
@@ -166,15 +167,22 @@ func PrettyRelativeTime(ts string) string {
 	}
 	now := time.Now()
 	diff := now.Sub(parsed)
-	if diff < 0 {
+	future := diff < 0
+	if future {
 		diff = -diff
 	}
 	switch {
 	case diff < time.Minute:
 		return "just now"
 	case diff < time.Hour:
+		if future {
+			return fmt.Sprintf("in %dm", int(diff/time.Minute))
+		}
 		return fmt.Sprintf("%dm ago", int(diff/time.Minute))
 	case diff < 24*time.Hour:
+		if future {
+			return fmt.Sprintf("in %dh", int(diff/time.Hour))
+		}
 		return fmt.Sprintf("%dh ago", int(diff/time.Hour))
 	default:
 		return parsed.Format("Jan 2 15:04")

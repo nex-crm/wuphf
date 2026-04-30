@@ -1,6 +1,11 @@
-// Package channelui hosts the Bubble Tea TUI for the wuphf "channel"
-// surface — channel feed, sidebar, thread panel, composer, splash, and
-// the broker-backed model that drives them.
+// Package channelui hosts the pure rendering and data-projection layer
+// for the wuphf "channel" TUI surface — broker-shape data types, slug-
+// to-display-name resolution, layout / wrap / time helpers, message
+// flatteners, mailbox / artifact / runtime / recovery / calendar
+// renderers, and the lipgloss-backed pill / card primitives. The Bubble
+// Tea program model (channelModel.Update / View / tea.Cmd builders)
+// stays in package main; channelui only exposes pure helpers it can
+// consume.
 //
 // The package lives under cmd/wuphf/ rather than internal/ because it is
 // binary-private; the broker-side internal/channel package owns the

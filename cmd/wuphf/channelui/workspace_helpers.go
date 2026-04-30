@@ -24,7 +24,10 @@ func SummarizeAwayRecovery(unreadCount int, recovery team.SessionRecovery) strin
 		}
 	}
 	if len(parts) == 0 {
-		return fmt.Sprintf("%d new since you looked. Open /recover for the full summary.", unreadCount)
+		if unreadCount > 0 {
+			return fmt.Sprintf("%d new since you looked. Open /recover for the full summary.", unreadCount)
+		}
+		return "Open /recover for the full summary."
 	}
 	summary := strings.Join(parts, " ")
 	if unreadCount > 0 {

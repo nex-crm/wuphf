@@ -74,29 +74,29 @@ func ArtifactExtraLines(artifact team.RuntimeArtifact) []string {
 	if output := strings.TrimSpace(artifact.PartialOutput); output != "" {
 		extra = append(extra, "Output: "+output)
 	}
-	if strings.TrimSpace(artifact.Owner) != "" {
-		extra = append(extra, "@"+artifact.Owner)
+	if owner := strings.TrimSpace(artifact.Owner); owner != "" {
+		extra = append(extra, "@"+owner)
 	}
-	if strings.TrimSpace(artifact.Channel) != "" {
-		extra = append(extra, "#"+artifact.Channel)
+	if channel := strings.TrimSpace(artifact.Channel); channel != "" {
+		extra = append(extra, "#"+channel)
 	}
-	if strings.TrimSpace(artifact.Worktree) != "" {
-		extra = append(extra, "Worktree: "+artifact.Worktree)
+	if worktree := strings.TrimSpace(artifact.Worktree); worktree != "" {
+		extra = append(extra, "Worktree: "+worktree)
 	}
-	if strings.TrimSpace(artifact.Path) != "" {
-		extra = append(extra, "Path: "+artifact.Path)
+	if path := strings.TrimSpace(artifact.Path); path != "" {
+		extra = append(extra, "Path: "+path)
 	}
-	if strings.TrimSpace(artifact.RelatedID) != "" {
-		extra = append(extra, "Related: "+artifact.RelatedID)
+	if related := strings.TrimSpace(artifact.RelatedID); related != "" {
+		extra = append(extra, "Related: "+related)
 	}
 	if artifact.Blocking {
 		extra = append(extra, "Blocking")
 	}
-	if strings.TrimSpace(artifact.ReviewHint) != "" {
-		extra = append(extra, artifact.ReviewHint)
+	if hint := strings.TrimSpace(artifact.ReviewHint); hint != "" {
+		extra = append(extra, hint)
 	}
-	if strings.TrimSpace(artifact.ResumeHint) != "" {
-		extra = append(extra, artifact.ResumeHint)
+	if hint := strings.TrimSpace(artifact.ResumeHint); hint != "" {
+		extra = append(extra, hint)
 	}
 	return extra
 }

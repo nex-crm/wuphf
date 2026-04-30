@@ -112,7 +112,8 @@ func CollectCalendarEvents(jobs []SchedulerJob, tasks []Task, requests []Intervi
 		})
 	}
 	for _, task := range tasks {
-		if task.Status == "done" {
+		switch strings.ToLower(strings.TrimSpace(task.Status)) {
+		case "done", "completed", "canceled", "cancelled":
 			continue
 		}
 		events = append(events, TaskCalendarEvents(task, activeChannel, members)...)

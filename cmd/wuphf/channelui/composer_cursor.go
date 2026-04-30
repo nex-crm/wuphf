@@ -1,28 +1,36 @@
 package channelui
 
-import (
-	"strings"
-	"unicode"
-)
+import "unicode"
 
 // ReplaceMentionInInput replaces the in-progress "@…" token at or before
 // pos with mention plus a trailing space. The new cursor position lands
 // just after the inserted space. If no "@" is found before pos the input
-// and pos are returned unchanged.
+// and pos are returned unchanged. pos is a rune index throughout, so
+// multibyte runes before the mention can't desync the slice/byte view.
 func ReplaceMentionInInput(input []rune, pos int, mention string) ([]rune, int) {
-	text := string(input)
 	if pos < 0 {
 		pos = 0
 	}
 	if pos > len(input) {
 		pos = len(input)
 	}
-	atIdx := strings.LastIndex(text[:pos], "@")
-	if atIdx < 0 {
+	atRune := -1
+	for i := pos - 1; i >= 0; i-- {
+		if input[i] == '@' {
+			atRune = i
+			break
+		}
+	}
+	if atRune < 0 {
 		return input, pos
 	}
-	updated := []rune(text[:atIdx] + mention + " " + text[pos:])
-	return updated, atIdx + len([]rune(mention)) + 1
+	mentionRunes := []rune(mention)
+	updated := make([]rune, 0, atRune+len(mentionRunes)+1+(len(input)-pos))
+	updated = append(updated, input[:atRune]...)
+	updated = append(updated, mentionRunes...)
+	updated = append(updated, ' ')
+	updated = append(updated, input[pos:]...)
+	return updated, atRune + len(mentionRunes) + 1
 }
 
 // IsComposerWordRune reports whether r is part of a composer "word"

@@ -86,10 +86,7 @@ func BuildLiveWorkLines(members []Member, tasks []Task, actions []Action, conten
 		lines = append(lines, RenderedLine{Text: RenderDateSeparator(contentWidth, "Live work now")})
 		for _, member := range active {
 			summary := DeriveMemberRuntimeSummary(member, tasks, now)
-			nameColor := AgentColorMap[member.Slug]
-			if nameColor == "" {
-				nameColor = "#64748B"
-			}
+			nameColor := AgentColor(member.Slug)
 			name := member.Name
 			if strings.TrimSpace(name) == "" {
 				name = DisplayName(member.Slug)

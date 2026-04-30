@@ -205,10 +205,7 @@ func renderSidebar(channels []channelInfo, members []channelMember, tasks []chan
 		dotStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(act.Color))
 		dot := dotStyle.Render(act.Dot)
 
-		agentColor := sidebarAgentColors[m.Slug]
-		if agentColor == "" {
-			agentColor = "#64748B"
-		}
+		nameColor := agentColor(m.Slug)
 		name := m.Name
 		if name == "" {
 			name = displayName(m.Slug)
@@ -220,15 +217,15 @@ func renderSidebar(channels []channelInfo, members []channelMember, tasks []chan
 		}
 		name = truncateLabel(name, nameMax)
 		nameStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color(agentColor)).
+			Foreground(lipgloss.Color(nameColor)).
 			Bold(true)
 		nameRendered := nameStyle.Render(name)
-		accent := lipgloss.NewStyle().Foreground(lipgloss.Color(agentColor)).Render("▎")
+		accent := lipgloss.NewStyle().Foreground(lipgloss.Color(nameColor)).Render("▎")
 		leftPart := accent + " " + dot + " " + nameRendered
 		if compact {
 			// Compact: single line per member with a simple glyph.
 			meta := memberMetaStyle.Render(sidebarLabel)
-			mini := lipgloss.NewStyle().Foreground(lipgloss.Color(agentColor)).Render(agentAvatar(m.Slug))
+			mini := lipgloss.NewStyle().Foreground(lipgloss.Color(nameColor)).Render(agentAvatar(m.Slug))
 			line := leftPart + " " + mini
 			pad := innerW - ansi.StringWidth(line) - ansi.StringWidth(sidebarLabel)
 			if pad < 1 {

@@ -166,7 +166,10 @@ func ExecutionMetaLine(action Action) string {
 }
 
 // LatestRelevantAction finds the most recent external_* action whose
-// actor matches slug (or is "scheduler" / empty). Returns the action
+// actor matches slug (or is "scheduler" / empty). When slug is blank
+// the actor filter is dropped — every external_* action is eligible —
+// so the default channel view (no focus) sees the most recent external
+// activity instead of skipping actor-bound entries. Returns the action
 // and true on hit, the zero Action and false on miss.
 func LatestRelevantAction(actions []Action, slug string) (Action, bool) {
 	slug = strings.TrimSpace(slug)
@@ -175,9 +178,11 @@ func LatestRelevantAction(actions []Action, slug string) (Action, bool) {
 		if !strings.HasPrefix(strings.TrimSpace(action.Kind), "external_") {
 			continue
 		}
-		actor := strings.TrimSpace(action.Actor)
-		if actor != "" && actor != slug && actor != "scheduler" {
-			continue
+		if slug != "" {
+			actor := strings.TrimSpace(action.Actor)
+			if actor != "" && actor != slug && actor != "scheduler" {
+				continue
+			}
 		}
 		return action, true
 	}
@@ -227,9 +232,11 @@ func ActivityPill(act MemberActivity) string {
 }
 
 // ActionStatePill maps an action's Kind to a colored pill — failed
-// (red) / planned (blue) / listening (purple) / completed (green) /
-// generic neutral pill for anything else (with underscores
-// space-separated).
+// (red) / planned (blue) / listening (purple) / scheduled (amber) /
+// completed (green) / generic neutral pill for anything else (with
+// underscores space-separated). "scheduled" is kept distinct from
+// "completed" so future work doesn't get the green completed badge
+// while DescribeActionState still reports it as scheduled.
 func ActionStatePill(kind string) string {
 	switch {
 	case strings.Contains(kind, "failed"):
@@ -238,7 +245,9 @@ func ActionStatePill(kind string) string {
 		return AccentPill("planned", "#1D4ED8")
 	case strings.Contains(kind, "registered"), strings.Contains(kind, "received"):
 		return AccentPill("listening", "#7C3AED")
-	case strings.Contains(kind, "executed"), strings.Contains(kind, "created"), strings.Contains(kind, "scheduled"):
+	case strings.Contains(kind, "scheduled"):
+		return AccentPill("scheduled", "#B45309")
+	case strings.Contains(kind, "executed"), strings.Contains(kind, "created"):
 		return AccentPill("completed", "#15803D")
 	default:
 		return SubtlePill(strings.ReplaceAll(kind, "_", " "), "#E2E8F0", "#334155")

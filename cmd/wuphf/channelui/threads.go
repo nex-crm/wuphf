@@ -9,17 +9,25 @@ import (
 // returns the root message's ID. Returns the input ID (trimmed) when
 // the message is not in the slice. Returns the dangling ReplyTo target
 // when an intermediate message has been pruned but the chain still
-// points to it — callers can use that as a synthetic root.
+// points to it — callers can use that as a synthetic root. Visited IDs
+// are tracked so malformed cyclic data (A→B→A) terminates instead of
+// hanging the caller; on cycle detection the current node is returned
+// as the root.
 func ThreadRootMessageID(messages []BrokerMessage, messageID string) string {
 	current, ok := FindMessageByID(messages, messageID)
 	if !ok {
 		return strings.TrimSpace(messageID)
 	}
+	visited := map[string]bool{current.ID: true}
 	for strings.TrimSpace(current.ReplyTo) != "" {
+		if visited[current.ReplyTo] {
+			return current.ID
+		}
 		parent, ok := FindMessageByID(messages, current.ReplyTo)
 		if !ok {
 			return current.ReplyTo
 		}
+		visited[parent.ID] = true
 		current = parent
 	}
 	return current.ID
@@ -39,14 +47,25 @@ func HasThreadReplies(messages []BrokerMessage, id string) bool {
 
 // CountThreadReplies returns the total number of descendants of rootID
 // in the children adjacency map (built by flattenThreadMessages). The
-// root itself is not counted.
+// root itself is not counted. A visited set guards against cyclic
+// adjacency (broker data with A→B→A reply chains) so the caller can't
+// be hung by malformed input.
 func CountThreadReplies(children map[string][]BrokerMessage, rootID string) int {
-	count := 0
-	for _, child := range children[rootID] {
-		count++
-		count += CountThreadReplies(children, child.ID)
+	visited := make(map[string]bool)
+	var walk func(id string) int
+	walk = func(id string) int {
+		if visited[id] {
+			return 0
+		}
+		visited[id] = true
+		count := 0
+		for _, child := range children[id] {
+			count++
+			count += walk(child.ID)
+		}
+		return count
 	}
-	return count
+	return walk(rootID)
 }
 
 // FlattenThreadMessages produces the office-feed thread layout: a
@@ -85,8 +104,13 @@ func FlattenThreadMessages(messages []BrokerMessage, expanded map[string]bool) [
 	}
 
 	var out []ThreadedMessage
+	visited := make(map[string]bool)
 	var walk func(msg BrokerMessage, depth int)
 	walk = func(msg BrokerMessage, depth int) {
+		if visited[msg.ID] {
+			return
+		}
+		visited[msg.ID] = true
 		parentLabel := ""
 		if msg.ReplyTo != "" {
 			parentLabel = msg.ReplyTo
@@ -126,12 +150,19 @@ func FlattenThreadMessages(messages []BrokerMessage, expanded map[string]bool) [
 // descendant sender under rootID in walk-order (depth-first, children
 // in slice order). Names are resolved via the package's office
 // directory so a "ceo" slug becomes its display name. The root sender
-// is intentionally excluded — only replies count.
+// is intentionally excluded — only replies count. A visited set guards
+// against cyclic adjacency so malformed broker data can't hang the
+// walk.
 func ThreadParticipants(children map[string][]BrokerMessage, rootID string) []string {
 	seen := make(map[string]bool)
+	visited := make(map[string]bool)
 	var participants []string
 	var walk func(id string)
 	walk = func(id string) {
+		if visited[id] {
+			return
+		}
+		visited[id] = true
 		for _, child := range children[id] {
 			name := DisplayName(child.From)
 			if !seen[name] {

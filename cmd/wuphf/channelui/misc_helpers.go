@@ -8,8 +8,10 @@ import (
 // AppendUniqueMessages returns existing extended with the entries of
 // incoming whose IDs are not already present, plus the count actually
 // added. Empty / whitespace-only IDs are appended unconditionally — the
-// dedup index is keyed on trimmed IDs only. Order is preserved:
-// existing first, then new arrivals in their incoming order.
+// dedup index is keyed on trimmed IDs only, so existing entries seed
+// the index with the trimmed form and incoming poll results dedupe
+// against that canonical key. Order is preserved: existing first, then
+// new arrivals in their incoming order.
 func AppendUniqueMessages(existing, incoming []BrokerMessage) ([]BrokerMessage, int) {
 	if len(incoming) == 0 {
 		return existing, 0
@@ -18,8 +20,8 @@ func AppendUniqueMessages(existing, incoming []BrokerMessage) ([]BrokerMessage, 
 	out := make([]BrokerMessage, 0, len(existing)+len(incoming))
 	for _, msg := range existing {
 		out = append(out, msg)
-		if strings.TrimSpace(msg.ID) != "" {
-			seen[msg.ID] = struct{}{}
+		if id := strings.TrimSpace(msg.ID); id != "" {
+			seen[id] = struct{}{}
 		}
 	}
 	added := 0

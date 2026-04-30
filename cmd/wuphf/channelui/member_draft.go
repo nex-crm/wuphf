@@ -37,14 +37,20 @@ func ParseExpertiseInput(raw string) []string {
 
 // LiveActivityFromMembers returns a slug -> activity map for members
 // currently doing real work in their Claude Code instance. The "you"
-// slug and members with empty LiveActivity are filtered out.
+// slug and members with empty/whitespace-only LiveActivity are filtered
+// out. Stored values are trimmed so downstream consumers don't render
+// stray padding.
 func LiveActivityFromMembers(members []Member) map[string]string {
 	result := make(map[string]string)
 	for _, m := range members {
-		if m.Slug == "you" || m.LiveActivity == "" {
+		if m.Slug == "you" {
 			continue
 		}
-		result[m.Slug] = m.LiveActivity
+		activity := strings.TrimSpace(m.LiveActivity)
+		if activity == "" {
+			continue
+		}
+		result[m.Slug] = activity
 	}
 	return result
 }

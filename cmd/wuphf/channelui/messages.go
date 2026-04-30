@@ -7,13 +7,20 @@ import (
 
 // CountReplies walks the reply tree rooted at parentID and reports the
 // total count plus the formatted time of the most recent reply (suitable
-// for "Last reply 3:04 PM" labels in the inline thread indicator).
+// for "Last reply 3:04 PM" labels in the inline thread indicator). A
+// visited set guards against cyclic broker data (A→B→A reply chains)
+// so the walk can't hang or stack-overflow on malformed input.
 func CountReplies(messages []BrokerMessage, parentID string) (count int, lastReplyTime string) {
 	children := BuildReplyChildren(messages)
+	visited := make(map[string]bool)
 	var lastTS time.Time
 
 	var walk func(id string)
 	walk = func(id string) {
+		if visited[id] {
+			return
+		}
+		visited[id] = true
 		for _, msg := range children[id] {
 			count++
 			ts := ParseTimestamp(msg.Timestamp)

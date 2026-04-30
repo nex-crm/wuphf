@@ -52,15 +52,19 @@ func RuntimeRequestsFromChannel(requests []Interview) []team.RuntimeRequest {
 }
 
 // RuntimeMessagesFromChannel projects the most recent up-to-limit
-// BrokerMessages into team.RuntimeMessage. Walks newest-first so the
-// returned slice preserves the original slice's tail order. limit
-// defaults to 6 when non-positive.
+// BrokerMessages into team.RuntimeMessage, preserving the original
+// slice's tail order (oldest of the kept window first, newest last).
+// limit defaults to 6 when non-positive.
 func RuntimeMessagesFromChannel(messages []BrokerMessage, limit int) []team.RuntimeMessage {
 	if limit <= 0 {
 		limit = 6
 	}
-	out := make([]team.RuntimeMessage, 0, MinInt(len(messages), limit))
-	for i := len(messages) - 1; i >= 0 && len(out) < limit; i-- {
+	start := len(messages) - limit
+	if start < 0 {
+		start = 0
+	}
+	out := make([]team.RuntimeMessage, 0, len(messages)-start)
+	for i := start; i < len(messages); i++ {
 		msg := messages[i]
 		out = append(out, team.RuntimeMessage{
 			ID:        msg.ID,

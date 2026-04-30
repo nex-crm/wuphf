@@ -20,14 +20,19 @@ func AppendWrapped(lines []string, width int, text string) []string {
 	return append(lines, strings.Split(wrapped, "\n")...)
 }
 
-// TruncateText shortens s to at most max runes (treated as bytes —
-// adequate for the ASCII-only labels this helper handles) and appends an
-// ellipsis "…" when truncation occurs.
+// TruncateText shortens s so its rune count is at most max, appending
+// an ellipsis "…" when truncation occurs. Rune-based slicing keeps
+// multibyte runes intact and prevents the result from exceeding max
+// runes.
 func TruncateText(s string, max int) string {
-	if len(s) <= max {
+	if max <= 0 {
+		return ""
+	}
+	runes := []rune(s)
+	if len(runes) <= max {
 		return s
 	}
-	return s[:max] + "…"
+	return string(runes[:max]) + "…"
 }
 
 // MutedText renders label in the muted-foreground style. Used for

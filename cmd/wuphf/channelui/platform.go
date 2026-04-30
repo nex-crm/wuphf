@@ -24,6 +24,11 @@ func IsWindows() bool { return runtime.GOOS == "windows" }
 // isn't meaningful for a fire-and-forget open-in-browser handoff.
 // Empty url is a no-op. Returns an error on unsupported platforms or
 // if the helper fails to start.
+//
+// A detached goroutine reaps the child via cmd.Wait() so its OS
+// resources (pipes, zombie process slot) are released once the helper
+// exits. The reap goroutine intentionally discards Wait's error — the
+// helper's exit status doesn't change anything the caller can act on.
 func OpenBrowserURL(url string) error {
 	ctx := context.Background()
 	var cmd *exec.Cmd
@@ -39,5 +44,9 @@ func OpenBrowserURL(url string) error {
 	default:
 		return fmt.Errorf("unsupported platform")
 	}
-	return cmd.Start()
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	go func() { _ = cmd.Wait() }()
+	return nil
 }

@@ -98,7 +98,7 @@ func ConfirmationForInterviewAnswer(interview Interview, option *InterviewOption
 // width, blank, then a muted footer with the confirm and cancel
 // labels.
 func RenderConfirmCard(confirm ChannelConfirm, width int) string {
-	cardWidth := MaxInt(48, width)
+	cardWidth := MinInt(48, width)
 	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#F8FAFC")).Render(confirm.Title)
 	body := lipgloss.NewStyle().Foreground(lipgloss.Color("#CBD5E1")).Width(cardWidth - 4).Render(confirm.Detail)
 	footer := MutedText(confirm.ConfirmLabel + "  ·  " + confirm.CancelLabel)

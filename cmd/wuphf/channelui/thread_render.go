@@ -20,8 +20,13 @@ func FlattenThreadReplies(allMessages []BrokerMessage, parentID string) []Thread
 	}
 
 	var out []ThreadedMessage
+	visited := make(map[string]bool)
 	var walk func(id string, depth int)
 	walk = func(id string, depth int) {
+		if visited[id] {
+			return
+		}
+		visited[id] = true
 		for _, child := range children[id] {
 			parentLabel := parentID
 			if parent, ok := byID[child.ReplyTo]; ok {

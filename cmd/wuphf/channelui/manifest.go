@@ -53,6 +53,20 @@ func MergeOfficeMembers(officeMembers []OfficeMember, brokerMembers []Member, ch
 		if ContainsSlug(memberOrder, member.Slug) {
 			continue
 		}
+		if meta, ok := officeMap[member.Slug]; ok {
+			if member.Name == "" {
+				member.Name = meta.Name
+			}
+			if member.Role == "" {
+				member.Role = meta.Role
+			}
+		}
+		if member.Name == "" {
+			member.Name = DisplayName(member.Slug)
+		}
+		if member.Role == "" {
+			member.Role = RoleLabel(member.Slug)
+		}
 		result = append(result, member)
 	}
 	return result
