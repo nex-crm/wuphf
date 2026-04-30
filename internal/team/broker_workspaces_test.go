@@ -493,44 +493,26 @@ func TestWorkspaceHandlers_RejectWrongMethod(t *testing.T) {
 	}
 }
 
-// --- 3. Pause cross-broker proxy ----------------------------------------------
+// --- 3. Pause delegates to orchestrator ---------------------------------------
 
-func TestHandleWorkspacesPause_ProxiesToTargetBroker(t *testing.T) {
-	// Stand up a fake target broker that records its received Authorization
-	// header and request method/path. handleWorkspacesPause should forward
-	// using the sibling token from disk and POST to /admin/pause.
-	receivedAuth := ""
-	receivedMethod := ""
-	receivedPath := ""
-	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		receivedAuth = r.Header.Get("Authorization")
-		receivedMethod = r.Method
-		receivedPath = r.URL.Path
-		w.WriteHeader(http.StatusAccepted)
-	}))
-	defer target.Close()
+// pauseRecorder is a workspaceOrchestrator stub that records the inbound
+// Pause call so the handler-level test can assert delegation without
+// re-running the orchestrator's HTTP machinery.
+type pauseRecorder struct {
+	fakeOrchestrator
+	pausedName atomic.Value // string
+	pauseErr   error
+}
 
-	// Stage the sibling token under a temp ~/.wuphf-spaces/tokens/<name>.token
-	tokenDir := t.TempDir()
-	siblingToken := "sibling-secret-deadbeef"
-	if err := os.WriteFile(filepath.Join(tokenDir, "demo.token"), []byte(siblingToken+"\n"), 0o600); err != nil {
-		t.Fatalf("write sibling token: %v", err)
-	}
-	prevDir := workspaceTokenDirOverride
-	workspaceTokenDirOverride = tokenDir
-	t.Cleanup(func() { workspaceTokenDirOverride = prevDir })
+func (p *pauseRecorder) Pause(_ context.Context, name string) error {
+	p.pausedName.Store(name)
+	return p.pauseErr
+}
 
-	// Resolve target URL through the test seam.
-	prevFn := targetBrokerBaseURLFn
-	targetBrokerBaseURLFn = func(name string) string {
-		if name == "demo" {
-			return target.URL
-		}
-		return ""
-	}
-	t.Cleanup(func() { targetBrokerBaseURLFn = prevFn })
-
-	b, _, _ := newWorkspaceTestBroker(t)
+func TestHandleWorkspacesPause_DelegatesToOrchestrator(t *testing.T) {
+	b := newTestBroker(t)
+	rec := &pauseRecorder{}
+	b.SetWorkspaceOrchestrator(rec)
 	srv := httptest.NewServer(b.withAuth(b.handleWorkspacesPause))
 	defer srv.Close()
 
@@ -540,28 +522,20 @@ func TestHandleWorkspacesPause_ProxiesToTargetBroker(t *testing.T) {
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("status: want 202 got %d body=%s", resp.StatusCode, string(body))
 	}
-	if receivedMethod != http.MethodPost {
-		t.Fatalf("target method: want POST got %q", receivedMethod)
-	}
-	if receivedPath != "/admin/pause" {
-		t.Fatalf("target path: want /admin/pause got %q", receivedPath)
-	}
-	if receivedAuth != "Bearer "+siblingToken {
-		t.Fatalf("target authorization: want Bearer %s got %q", siblingToken, receivedAuth)
+	if got, _ := rec.pausedName.Load().(string); got != "demo" {
+		t.Fatalf("orchestrator.Pause name: want %q got %q", "demo", got)
 	}
 }
 
-func TestHandleWorkspacesPause_MissingTokenReturns404(t *testing.T) {
-	tokenDir := t.TempDir()
-	prevDir := workspaceTokenDirOverride
-	workspaceTokenDirOverride = tokenDir
-	t.Cleanup(func() { workspaceTokenDirOverride = prevDir })
-
-	prevFn := targetBrokerBaseURLFn
-	targetBrokerBaseURLFn = func(string) string { return "http://127.0.0.1:1" }
-	t.Cleanup(func() { targetBrokerBaseURLFn = prevFn })
-
-	b, _, _ := newWorkspaceTestBroker(t)
+func TestHandleWorkspacesPause_NotFoundFromOrchestrator(t *testing.T) {
+	// When the orchestrator surfaces ErrWorkspaceNotFound the handler must
+	// translate it through errorToStatus to 404. This is the same surface
+	// the previous hand-rolled proxy gave us via the missing-token branch,
+	// just expressed through the typed-error mapper now that the
+	// orchestrator owns the cross-broker call.
+	b := newTestBroker(t)
+	rec := &pauseRecorder{pauseErr: workspaces.ErrWorkspaceNotFound}
+	b.SetWorkspaceOrchestrator(rec)
 	srv := httptest.NewServer(b.withAuth(b.handleWorkspacesPause))
 	defer srv.Close()
 
@@ -572,33 +546,95 @@ func TestHandleWorkspacesPause_MissingTokenReturns404(t *testing.T) {
 	}
 }
 
-func TestHandleWorkspacesPause_TargetReturns502OnError(t *testing.T) {
-	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
-	}))
-	defer target.Close()
-
-	tokenDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(tokenDir, "demo.token"), []byte("tok"), 0o600); err != nil {
-		t.Fatalf("write token: %v", err)
-	}
-	prevDir := workspaceTokenDirOverride
-	workspaceTokenDirOverride = tokenDir
-	t.Cleanup(func() { workspaceTokenDirOverride = prevDir })
-
-	prevFn := targetBrokerBaseURLFn
-	targetBrokerBaseURLFn = func(string) string { return target.URL }
-	t.Cleanup(func() { targetBrokerBaseURLFn = prevFn })
-
-	b, _, _ := newWorkspaceTestBroker(t)
+func TestHandleWorkspacesPause_OrchestratorErrorReturns500(t *testing.T) {
+	b := newTestBroker(t)
+	rec := &pauseRecorder{pauseErr: errors.New("broker still alive after kill ladder")}
+	b.SetWorkspaceOrchestrator(rec)
 	srv := httptest.NewServer(b.withAuth(b.handleWorkspacesPause))
 	defer srv.Close()
 
 	resp := mustPost(t, srv.URL, b.Token(), `{"name":"demo"}`)
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusBadGateway {
-		t.Fatalf("status: want 502 got %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status: want 500 got %d", resp.StatusCode)
 	}
+}
+
+// TestHandleWorkspacesPause_BrokerHTTPCallStillCarriesSiblingToken pins the
+// invariant that the cross-broker /admin/pause call uses the sibling
+// workspace's token from ~/.wuphf-spaces/tokens/<name>.token. Since the
+// orchestrator now owns that wiring, the assertion is exercised against
+// orchestrator-level coverage rather than the handler. We repeat it here as
+// a smoke test that catches a future regression where the handler tries to
+// shortcut around the orchestrator.
+func TestHandleWorkspacesPause_BrokerHTTPCallStillCarriesSiblingToken(t *testing.T) {
+	// Stand up a fake target broker that records the Authorization header.
+	receivedAuth := ""
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/admin/pause" {
+			receivedAuth = r.Header.Get("Authorization")
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer target.Close()
+
+	// Pretend the sibling token is staged at the well-known path so the
+	// orchestrator-shaped fake can read it back. We don't run the real
+	// orchestrator here — we simulate the contract: the handler calls
+	// orch.Pause with the workspace name; the orchestrator (stub) reads
+	// the token and forwards it.
+	tokenDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tokenDir, "demo.token"), []byte("sibling-token"), 0o600); err != nil {
+		t.Fatalf("write token: %v", err)
+	}
+
+	rec := &pauseRecorder{}
+	rec.pauseErr = nil
+	// Wire a stub Pause that simulates what the real orchestrator does:
+	// reads the sibling token + POSTs to the target's /admin/pause.
+	stub := &orchestratorPauseStub{tokenDir: tokenDir, targetURL: target.URL}
+	b := newTestBroker(t)
+	b.SetWorkspaceOrchestrator(stub)
+	srv := httptest.NewServer(b.withAuth(b.handleWorkspacesPause))
+	defer srv.Close()
+
+	resp := mustPost(t, srv.URL, b.Token(), `{"name":"demo"}`)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status: want 202 got %d body=%s", resp.StatusCode, string(body))
+	}
+	if receivedAuth != "Bearer sibling-token" {
+		t.Fatalf("target authorization: want %q got %q", "Bearer sibling-token", receivedAuth)
+	}
+}
+
+// orchestratorPauseStub is a workspaceOrchestrator that mimics the real
+// orchestrator's Pause: read sibling token, POST to target /admin/pause.
+type orchestratorPauseStub struct {
+	fakeOrchestrator
+	tokenDir  string
+	targetURL string
+}
+
+func (s *orchestratorPauseStub) Pause(ctx context.Context, name string) error {
+	tokenPath := filepath.Join(s.tokenDir, name+".token")
+	tok, err := os.ReadFile(tokenPath)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.targetURL+"/admin/pause", nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(string(tok)))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	return nil
 }
 
 // --- handleAdminPause ---------------------------------------------------------

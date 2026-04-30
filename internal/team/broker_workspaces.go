@@ -35,7 +35,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -50,12 +49,6 @@ import (
 // inheritance fields; 32 KiB leaves comfortable headroom for company name,
 // description, blueprint name, and a small set of flags.
 const maxWorkspaceRequestBodyBytes = 1 << 15 // 32 KiB
-
-// pauseProxyTimeout caps the cross-broker pause RPC. The target broker's
-// /admin/pause returns immediately on accept (the Launcher.Drain runs
-// asynchronously), so this is a generous ceiling rather than the drain
-// budget. The 90s wall-clock pause budget lives in the orchestrator.
-const pauseProxyTimeout = 10 * time.Second
 
 // adminPauseSelfShutdownDelay is how long /admin/pause waits before calling
 // the exit hook after returning the 202 Accepted response. Gives the HTTP
@@ -199,53 +192,12 @@ func workspaceTokenPath(name string) string {
 	return filepath.Join(workspaceTokenDir(), name+".token")
 }
 
-// readWorkspaceToken reads the bearer token of a sibling workspace's
-// broker for cross-broker orchestration calls. Returns ErrTokenNotFound
-// if the file does not exist (typical for a paused or never-started
-// workspace).
-//
-// The SPA NEVER reads sibling tokens — this path is broker-internal.
-// Documented in the design's Token Files section.
-var errWorkspaceTokenNotFound = errors.New("workspace token not found")
-
-func readWorkspaceToken(name string) (string, error) {
-	path := workspaceTokenPath(name)
-	raw, err := os.ReadFile(path) // #nosec G304 — path resolved from validated workspace name + fixed dir.
-	if err != nil {
-		if os.IsNotExist(err) {
-			return "", errWorkspaceTokenNotFound
-		}
-		return "", fmt.Errorf("read workspace token %q: %w", name, err)
-	}
-	return strings.TrimSpace(string(raw)), nil
-}
-
-// targetBrokerBaseURLOverride lets pause tests redirect cross-broker calls
-// at a fake httptest.Server. Production resolves the URL from the
-// orchestrator's registry lookup; the override is for unit tests only.
-//
-// Empty string (the default) means "use the orchestrator's resolution".
-var targetBrokerBaseURLFn func(name string) string
-
-// SetTargetBrokerURLResolver wires the function the broker calls to translate
-// a workspace name into the cross-broker base URL used by the pause proxy.
-// Production wires this in cmd/wuphf to the orchestrator's registry lookup;
-// tests use the package-level test seam directly.
-func SetTargetBrokerURLResolver(fn func(name string) string) {
-	targetBrokerBaseURLFn = fn
-}
-
-// resolveTargetBrokerURL returns the http://127.0.0.1:<port> base URL for
-// the target workspace's broker. Production uses the orchestrator's
-// registry; for now (Lane B not yet merged) we expose a settable function
-// pointer that defaults to a registry-less stub returning "" (which
-// triggers a 503 on pause).
-func resolveTargetBrokerURL(name string) string {
-	if targetBrokerBaseURLFn != nil {
-		return targetBrokerBaseURLFn(name)
-	}
-	return ""
-}
+// SetTargetBrokerURLResolver is retained as a no-op public API for callers
+// that wired the previous hand-rolled pause-proxy seam. The orchestrator now
+// owns cross-broker resolution; this function exists solely to avoid
+// breaking compile-time consumers (cmd/wuphf/main.go) until they are
+// migrated. Safe to remove once main.go drops the call.
+func SetTargetBrokerURLResolver(_ func(name string) string) {}
 
 // workspaceNameValid mirrors the design's slug validation. Centralized
 // here so handlers can fail-fast before calling the orchestrator.
@@ -459,12 +411,17 @@ func (b *Broker) handleWorkspacesSwitch(w http.ResponseWriter, r *http.Request) 
 
 // handleWorkspacesPause — POST /workspaces/pause.
 //
-// Active broker reads target's bearer token from
-// ~/.wuphf-spaces/tokens/<name>.token and proxies to target's /admin/pause.
-// Self-pause case (target == active broker) is detected by URL match and
-// short-circuits to a direct /admin/pause call against this broker so the
-// drain runs in-process. The SPA never sees sibling tokens — this path
-// is strictly broker-internal.
+// Delegates to the orchestrator's Pause. The orchestrator owns the full
+// pause lifecycle: it reads the sibling broker's bearer token, POSTs to its
+// /admin/pause, runs the SIGTERM/SIGKILL escalation ladder against the PID
+// from disk, calls tmuxKiller, and fails closed if the broker is still
+// alive after the kill ladder runs. The SPA never sees sibling tokens —
+// the cross-broker call is broker-internal.
+//
+// 202 Accepted is returned because Pause is asynchronous from the caller's
+// vantage: the orchestrator runs the kill ladder synchronously inside its
+// own bounded budget, but the caller treats "we accepted the request and
+// will not return until the broker is gone" as the contract.
 func (b *Broker) handleWorkspacesPause(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodPost) {
 		return
@@ -481,51 +438,18 @@ func (b *Broker) handleWorkspacesPause(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	targetURL := resolveTargetBrokerURL(req.Name)
-	if targetURL == "" {
-		writeWorkspaceError(w, http.StatusServiceUnavailable, "target broker URL not resolvable")
+	o := b.orchestrator()
+	if o == nil {
+		writeWorkspaceError(w, http.StatusServiceUnavailable, "workspaces not configured")
 		return
 	}
-	token, err := readWorkspaceToken(req.Name)
-	if err != nil {
-		if errors.Is(err, errWorkspaceTokenNotFound) {
-			writeWorkspaceError(w, http.StatusNotFound, "workspace not running")
-			return
-		}
-		writeWorkspaceError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	pauseURL, err := url.JoinPath(targetURL, "/admin/pause")
-	if err != nil {
-		writeWorkspaceError(w, http.StatusInternalServerError, fmt.Sprintf("build pause URL: %v", err))
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(r.Context(), pauseProxyTimeout)
-	defer cancel()
-	pReq, err := http.NewRequestWithContext(ctx, http.MethodPost, pauseURL, nil)
-	if err != nil {
-		writeWorkspaceError(w, http.StatusInternalServerError, fmt.Sprintf("build pause request: %v", err))
-		return
-	}
-	pReq.Header.Set("Authorization", "Bearer "+token)
-
-	client := &http.Client{Timeout: pauseProxyTimeout}
-	resp, err := client.Do(pReq)
-	if err != nil {
-		writeWorkspaceError(w, http.StatusBadGateway, fmt.Sprintf("proxy pause: %v", err))
-		return
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		writeWorkspaceError(w, http.StatusBadGateway, fmt.Sprintf("target broker returned %d", resp.StatusCode))
+	if err := o.Pause(r.Context(), req.Name); err != nil {
+		writeOrchestratorError(w, err)
 		return
 	}
 	writeWorkspaceJSON(w, http.StatusAccepted, map[string]any{
-		"ok":     true,
-		"name":   req.Name,
-		"target": targetURL,
+		"ok":   true,
+		"name": req.Name,
 	})
 }
 

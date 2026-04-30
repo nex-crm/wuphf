@@ -152,7 +152,10 @@ func initWorkspaces() {
 	orchestratorFactory = func() (workspaceOrchestrator, error) {
 		return cliOrchestratorAdapter{}, nil
 	}
-	team.SetTargetBrokerURLResolver(targetBrokerURL)
+	// targetBrokerURL is no longer wired into the broker — the orchestrator
+	// owns cross-broker URL resolution now. Keeping the helper around for
+	// the doctor/list paths that still surface the URL to humans.
+	_ = targetBrokerURL
 
 	if err := workspaces.MigrateToSymmetric(); err != nil {
 		// Non-fatal: existing single-workspace installs keep working
