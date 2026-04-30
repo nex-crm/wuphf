@@ -17,6 +17,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -131,16 +132,94 @@ func (f *fakeWorkspaceOrchestrator) Resolve(ctx context.Context, name string) (W
 	return f.resolveResult, f.resolveErr
 }
 
-// withFakeOrchestrator swaps in a fake for the duration of the test and
-// restores the original factory afterward. Returns the fake so the test can
-// configure responses + assert calls.
-func withFakeOrchestrator(t *testing.T) *fakeWorkspaceOrchestrator {
+// newFakeOrchestrator constructs a zero-value fake and registers it as the
+// active orchestrator for the duration of the test. Returns the fake so the
+// test can configure responses + assert calls. Convenience wrapper around
+// withFakeOrchestrator for the common "I just need an empty fake" case.
+func newFakeOrchestrator(t *testing.T) *fakeWorkspaceOrchestrator {
+	t.Helper()
+	fake := &fakeWorkspaceOrchestrator{}
+	cleanup := withFakeOrchestrator(t, fake)
+	t.Cleanup(cleanup)
+	return fake
+}
+
+// withFakeOrchestrator swaps the package-level orchestratorFactory to return
+// the supplied orch and returns a cleanup that restores the original factory.
+// The returned cleanup is idempotent (safe to call once even if the test
+// already registered it via t.Cleanup).
+//
+// This is the lower-level seam used by tests that already hold a custom
+// workspaceOrchestrator implementation (e.g., a struct embedding
+// fakeWorkspaceOrchestrator with overridden methods, or a different fake
+// shape entirely). For the common case use newFakeOrchestrator.
+func withFakeOrchestrator(t *testing.T, orch workspaceOrchestrator) func() {
 	t.Helper()
 	prev := orchestratorFactory
-	fake := &fakeWorkspaceOrchestrator{}
-	orchestratorFactory = func() (workspaceOrchestrator, error) { return fake, nil }
-	t.Cleanup(func() { orchestratorFactory = prev })
-	return fake
+	orchestratorFactory = func() (workspaceOrchestrator, error) { return orch, nil }
+	var once sync.Once
+	return func() {
+		once.Do(func() { orchestratorFactory = prev })
+	}
+}
+
+// printErrorCapture redirects printError's output and exit handler so tests
+// can assert (a) the formatted error message bytes and (b) that the error
+// path actually called printErrorExit. The returned closure restores the
+// originals; the *bytes.Buffer accumulates whatever printError wrote.
+//
+// We swap printErrorExit for a panic-with-sentinel rather than a no-op so
+// callers downstream of printError don't keep running with stale state. The
+// helper installs a deferred-recover at the test boundary via runAndCapture.
+func printErrorCapture(t *testing.T) (*bytes.Buffer, func()) {
+	t.Helper()
+	prevOut := printErrorOutput
+	prevExit := printErrorExit
+	buf := &bytes.Buffer{}
+	printErrorOutput = buf
+	printErrorExit = func(code int) {
+		// panic with a sentinel so the calling test can recover and assert
+		// the message instead of terminating the whole test binary.
+		panic(printErrorExitSentinel{code: code})
+	}
+	var once sync.Once
+	cleanup := func() {
+		once.Do(func() {
+			printErrorOutput = prevOut
+			printErrorExit = prevExit
+		})
+	}
+	return buf, cleanup
+}
+
+// printErrorExitSentinel is recovered by runAndCapturePrintError so the test
+// can assert the exit code without aborting the binary.
+type printErrorExitSentinel struct{ code int }
+
+// runAndCapturePrintError invokes f under the printErrorCapture seam,
+// recovers the printErrorExitSentinel panic if printError fired, and returns
+// (true, exitCode, output) on a fired error or (false, 0, output) when f
+// completed without calling printError.
+func runAndCapturePrintError(t *testing.T, f func()) (fired bool, code int, output string) {
+	t.Helper()
+	buf, restore := printErrorCapture(t)
+	defer restore()
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				if sentinel, ok := r.(printErrorExitSentinel); ok {
+					fired = true
+					code = sentinel.code
+					return
+				}
+				// Unrelated panic — re-raise so it surfaces normally.
+				panic(r)
+			}
+		}()
+		f()
+	}()
+	output = buf.String()
+	return fired, code, output
 }
 
 // ---------- list ----------
@@ -525,7 +604,7 @@ func captureFD(t *testing.T, f func()) (string, string) {
 // ---------- subcommand dispatch (happy paths) ----------
 
 func TestList_HappyPath(t *testing.T) {
-	fake := withFakeOrchestrator(t)
+	fake := newFakeOrchestrator(t)
 	fake.listResult = ListResult{
 		Workspaces: []Workspace{{Name: "main", BrokerPort: 7890, WebPort: 7891, State: WorkspaceStateRunning, IsCLICurrent: true}},
 	}
@@ -541,7 +620,7 @@ func TestList_HappyPath(t *testing.T) {
 }
 
 func TestList_TrashFlagPropagates(t *testing.T) {
-	fake := withFakeOrchestrator(t)
+	fake := newFakeOrchestrator(t)
 	fake.listResult = ListResult{Trash: []TrashEntry{{TrashID: "x"}}}
 	captureStreams(t, func() {
 		runWorkspaceList([]string{"--trash"})
@@ -552,7 +631,7 @@ func TestList_TrashFlagPropagates(t *testing.T) {
 }
 
 func TestList_JSONFlagDoesNotChangeCallShape(t *testing.T) {
-	fake := withFakeOrchestrator(t)
+	fake := newFakeOrchestrator(t)
 	fake.listResult = ListResult{Workspaces: []Workspace{{Name: "alpha"}}}
 	captureStreams(t, func() {
 		runWorkspaceList([]string{"--json"})
@@ -563,7 +642,7 @@ func TestList_JSONFlagDoesNotChangeCallShape(t *testing.T) {
 }
 
 func TestCreate_PassesFlagsThrough(t *testing.T) {
-	fake := withFakeOrchestrator(t)
+	fake := newFakeOrchestrator(t)
 	fake.createResult = Workspace{Name: "demo", BrokerPort: 7910, WebPort: 7911}
 	captureStreams(t, func() {
 		runWorkspaceCreate([]string{"--blueprint=founding-team", "--inherit-from=main", "demo"})
@@ -578,7 +657,7 @@ func TestCreate_PassesFlagsThrough(t *testing.T) {
 }
 
 func TestCreate_FromScratchFlagPropagates(t *testing.T) {
-	fake := withFakeOrchestrator(t)
+	fake := newFakeOrchestrator(t)
 	fake.createResult = Workspace{Name: "scratch", BrokerPort: 7912, WebPort: 7913}
 	captureStreams(t, func() {
 		runWorkspaceCreate([]string{"--from-scratch", "scratch"})
@@ -589,7 +668,7 @@ func TestCreate_FromScratchFlagPropagates(t *testing.T) {
 }
 
 func TestSwitch_PassesOpenFlag(t *testing.T) {
-	fake := withFakeOrchestrator(t)
+	fake := newFakeOrchestrator(t)
 	fake.switchResult = Workspace{Name: "demo", BrokerPort: 7910, WebPort: 7911}
 	prev := browserOpener
 	defer func() { browserOpener = prev }()
@@ -610,7 +689,7 @@ func TestSwitch_PassesOpenFlag(t *testing.T) {
 }
 
 func TestSwitch_NoOpenFlag_DoesNotOpen(t *testing.T) {
-	fake := withFakeOrchestrator(t)
+	fake := newFakeOrchestrator(t)
 	fake.switchResult = Workspace{Name: "demo", BrokerPort: 7910, WebPort: 7911}
 	prev := browserOpener
 	defer func() { browserOpener = prev }()
@@ -628,7 +707,7 @@ func TestSwitch_NoOpenFlag_DoesNotOpen(t *testing.T) {
 }
 
 func TestPause_DefaultIsGraceful(t *testing.T) {
-	fake := withFakeOrchestrator(t)
+	fake := newFakeOrchestrator(t)
 	captureStreams(t, func() {
 		runWorkspacePause([]string{"demo"})
 	})
@@ -638,7 +717,7 @@ func TestPause_DefaultIsGraceful(t *testing.T) {
 }
 
 func TestPause_ForceFlagPropagates(t *testing.T) {
-	fake := withFakeOrchestrator(t)
+	fake := newFakeOrchestrator(t)
 	captureStreams(t, func() {
 		runWorkspacePause([]string{"--force", "demo"})
 	})
@@ -648,7 +727,7 @@ func TestPause_ForceFlagPropagates(t *testing.T) {
 }
 
 func TestResume_HappyPath(t *testing.T) {
-	fake := withFakeOrchestrator(t)
+	fake := newFakeOrchestrator(t)
 	fake.resumeResult = Workspace{Name: "demo", BrokerPort: 7910, WebPort: 7911}
 	captureStreams(t, func() {
 		runWorkspaceResume([]string{"demo"})
@@ -659,7 +738,7 @@ func TestResume_HappyPath(t *testing.T) {
 }
 
 func TestShred_YesFlagSkipsConfirm(t *testing.T) {
-	fake := withFakeOrchestrator(t)
+	fake := newFakeOrchestrator(t)
 	captureStreams(t, func() {
 		runWorkspaceShred([]string{"--yes", "demo"})
 	})
@@ -669,7 +748,7 @@ func TestShred_YesFlagSkipsConfirm(t *testing.T) {
 }
 
 func TestShred_PermanentFlagPropagates(t *testing.T) {
-	fake := withFakeOrchestrator(t)
+	fake := newFakeOrchestrator(t)
 	captureStreams(t, func() {
 		runWorkspaceShred([]string{"--yes", "--permanent", "demo"})
 	})
@@ -679,7 +758,7 @@ func TestShred_PermanentFlagPropagates(t *testing.T) {
 }
 
 func TestRestore_PassesTrashID(t *testing.T) {
-	fake := withFakeOrchestrator(t)
+	fake := newFakeOrchestrator(t)
 	fake.restoreResult = Workspace{Name: "demo", BrokerPort: 7920, WebPort: 7921}
 	captureStreams(t, func() {
 		runWorkspaceRestore([]string{"demo-1714305600"})
@@ -690,7 +769,7 @@ func TestRestore_PassesTrashID(t *testing.T) {
 }
 
 func TestDoctor_DispatchHappyPath(t *testing.T) {
-	fake := withFakeOrchestrator(t)
+	fake := newFakeOrchestrator(t)
 	fake.doctorReport = DoctorReport{}
 	captureStreams(t, func() {
 		runWorkspaceDoctor([]string{"--dry-run"})
@@ -703,7 +782,7 @@ func TestDoctor_DispatchHappyPath(t *testing.T) {
 // ---------- workspace_test for runWorkspace dispatch table ----------
 
 func TestRunWorkspace_DispatchTable(t *testing.T) {
-	fake := withFakeOrchestrator(t)
+	fake := newFakeOrchestrator(t)
 	fake.listResult = ListResult{}
 	fake.createResult = Workspace{Name: "x", BrokerPort: 7910, WebPort: 7911}
 	fake.switchResult = Workspace{Name: "x", BrokerPort: 7910, WebPort: 7911}
@@ -742,22 +821,61 @@ func TestRunWorkspace_DispatchTable(t *testing.T) {
 // ---------- error path coverage via dispatch ----------
 
 func TestList_ErrorIsSurfaced(t *testing.T) {
-	// Errors normally bubble to printError → os.Exit(1). To assert the error
-	// wiring without dying, we install a fake that returns a sentinel error
-	// and rely on the orchestrator factory swap (the dispatch helper itself
-	// would call os.Exit). Here we assert the orchestrator IS called even
-	// when it's about to fail — that's the contract that matters for our
-	// coverage target. End-to-end exit-code coverage is provided by the
-	// shadowed-binary integration test in main_pipe_test.go style (out of
-	// scope for Lane D unit tests; tracked in TODOS for E2E).
-	fake := withFakeOrchestrator(t)
-	fake.listErr = errors.New("registry corrupt")
-	// We can't run runWorkspaceList here because it calls printError →
-	// os.Exit. Direct rendering covers the success/JSON paths, and the
-	// table test above covers dispatch. The error wiring is exercised by
-	// the orchestrator returning the error to the dispatch helper.
-	if fake.listErr == nil {
-		t.Fatal("sentinel guard")
+	// Exercise the real error path: runWorkspaceList → orch.List returns
+	// sentinel error → printError formats & exits. We swap printErrorOutput
+	// + printErrorExit so the panic-with-sentinel inside printErrorExit is
+	// recovered here and we can assert the exact bytes the user would see
+	// on stderr.
+	fake := newFakeOrchestrator(t)
+	const sentinel = "registry corrupt: bad checksum"
+	fake.listErr = errors.New(sentinel)
+
+	fired, code, output := runAndCapturePrintError(t, func() {
+		runWorkspaceList(nil)
+	})
+
+	if !fired {
+		t.Fatalf("expected printError to fire when orchestrator returns an error; output=%q", output)
+	}
+	if code != 1 {
+		t.Errorf("expected exit code 1, got %d", code)
+	}
+	if !strings.Contains(output, sentinel) {
+		t.Errorf("expected captured stderr to contain orchestrator error %q, got %q", sentinel, output)
+	}
+	if !strings.Contains(output, "list workspaces") {
+		t.Errorf("expected captured stderr to contain the `list workspaces` prefix from runWorkspaceList, got %q", output)
+	}
+	if !strings.HasPrefix(output, "error: ") {
+		t.Errorf("expected output to start with `error: ` prefix from printError, got %q", output)
+	}
+	// Sanity: the fake must actually have been invoked. If a future regression
+	// short-circuits before calling List, this would catch it.
+	if len(fake.listCalls) != 1 {
+		t.Errorf("expected exactly 1 List call, got %d", len(fake.listCalls))
+	}
+}
+
+// TestList_ErrorIsSurfaced_ViaRunWorkspaceDispatch confirms the same wiring
+// when the error path is reached via the top-level `runWorkspace` dispatcher
+// (mirrors how the user actually invokes `wuphf workspace list`). Catches a
+// dispatch regression that bypasses runWorkspaceList.
+func TestList_ErrorIsSurfaced_ViaRunWorkspaceDispatch(t *testing.T) {
+	fake := newFakeOrchestrator(t)
+	fake.listErr = errors.New("orchestrator unavailable")
+
+	fired, code, output := runAndCapturePrintError(t, func() {
+		runWorkspace([]string{"list"})
+	})
+
+	if !fired {
+		t.Fatalf("expected printError to fire from dispatch path; output=%q", output)
+	}
+	if code != 1 {
+		t.Errorf("expected exit code 1, got %d", code)
+	}
+	if !strings.Contains(output, "orchestrator unavailable") {
+		t.Errorf("expected stderr to contain orchestrator error, got %q", output)
 	}
 }
 

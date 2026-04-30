@@ -15,6 +15,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -261,11 +262,25 @@ func workspaceCtxLong() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), 60*time.Second)
 }
 
+// printErrorOutput is the writer printError formats into. Defaults to
+// os.Stderr in production. Tests swap this to a buffer to assert the
+// exact error message the user would see, without paying the cost of full
+// FD redirection.
+var printErrorOutput io.Writer = os.Stderr
+
+// printErrorExit is the process-terminating function printError calls after
+// writing the message. Defaults to os.Exit in production. Tests swap it for
+// a panic-with-sentinel (recovered in the test helper) so the assertion
+// path doesn't terminate the test binary.
+var printErrorExit = os.Exit
+
 // printError writes a one-line user-facing error and exits 1. Centralized so
-// every subcommand has the same exit posture.
+// every subcommand has the same exit posture. Output destination + exit
+// behavior are both swappable (printErrorOutput / printErrorExit) so tests
+// can exercise the real error path without killing the test process.
 func printError(format string, a ...any) {
-	fmt.Fprintf(os.Stderr, "error: "+strings.TrimRight(format, "\n")+"\n", a...)
-	os.Exit(1)
+	fmt.Fprintf(printErrorOutput, "error: "+strings.TrimRight(format, "\n")+"\n", a...)
+	printErrorExit(1)
 }
 
 // applyWorkspaceOverride resolves a --workspace=<name> override into a
