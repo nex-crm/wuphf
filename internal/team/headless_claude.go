@@ -5,9 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -142,9 +140,6 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 	var firstTextAt time.Time
 	var firstToolAt time.Time
 	textStarted := false
-	liveChat := newHeadlessLiveChatRelay(l, slug, firstNonEmpty(channel...), notification, func(line string) {
-		appendHeadlessClaudeLog(slug, line)
-	})
 
 	result, parseErr := provider.ReadClaudeJSONStream(teedStdout, func(event provider.ClaudeStreamEvent) {
 		if firstEventAt.IsZero() {
@@ -163,9 +158,7 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 				textStarted = true
 				l.updateHeadlessProgress(slug, "active", "text", "drafting response", metrics)
 			}
-			liveChat.OnText(event.Text)
 		case "tool_use":
-			liveChat.Flush()
 			if firstToolAt.IsZero() {
 				firstToolAt = time.Now()
 				metrics.FirstToolMs = durationMillis(startedAt, firstToolAt)
@@ -175,14 +168,11 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 		case "tool_result":
 			appendHeadlessClaudeLog(slug, "tool_result: "+truncate(event.Text, 140))
 			l.updateHeadlessProgress(slug, "active", "tool_result", truncate(event.Text, 140), metrics)
-			liveChat.ReportIssue(event.Text)
 		case "error":
 			appendHeadlessClaudeLog(slug, "stream_error: "+event.Detail)
 			l.updateHeadlessProgress(slug, "error", "error", truncate(event.Detail, 180), metrics)
-			liveChat.ReportIssue(event.Detail)
 		}
 	})
-	liveChat.Flush()
 	_ = pw.Close() // signal scanner goroutine that stream is done (io.PipeWriter.Close always returns nil)
 	if err := cmd.Wait(); err != nil {
 		detail := strings.TrimSpace(firstNonEmpty(result.LastError, strings.TrimSpace(stderr.String()), err.Error()))
@@ -242,7 +232,7 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 }
 
 func (l *Launcher) headlessClaudeModel(slug string) string {
-	if l.opusCEO && slug == l.officeLeadSlug() {
+	if l.opusCEO && slug == l.targeter().LeadSlug() {
 		return "claude-opus-4-6"
 	}
 	return "claude-sonnet-4-6"
@@ -253,7 +243,7 @@ func (l *Launcher) headlessClaudeModel(slug string) string {
 // members, and posting an assignment — easily more than 5 turns. Specialists
 // get a smaller budget since they focus on a single task.
 func (l *Launcher) headlessClaudeMaxTurns(slug string) string {
-	if slug == l.officeLeadSlug() {
+	if slug == l.targeter().LeadSlug() {
 		return "30"
 	}
 	return "15"
@@ -296,30 +286,4 @@ func (l *Launcher) buildHeadlessClaudeEnv(slug string) []string {
 		)
 	}
 	return env
-}
-
-func appendHeadlessClaudeLog(slug string, line string) {
-	dir := wuphfLogDir()
-	if dir == "" {
-		return
-	}
-	f, err := os.OpenFile(filepath.Join(dir, "headless-claude-"+slug+".log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
-	if err != nil {
-		return
-	}
-	defer func() { _ = f.Close() }()
-	_, _ = fmt.Fprintf(f, "[%s] %s\n", time.Now().Format(time.RFC3339), strings.TrimSpace(line))
-}
-
-func appendHeadlessClaudeLatency(slug string, line string) {
-	dir := wuphfLogDir()
-	if dir == "" {
-		return
-	}
-	f, err := os.OpenFile(filepath.Join(dir, "headless-claude-latency.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
-	if err != nil {
-		return
-	}
-	defer func() { _ = f.Close() }()
-	_, _ = fmt.Fprintf(f, "[%s] agent=%s %s\n", time.Now().Format(time.RFC3339), strings.TrimSpace(slug), strings.TrimSpace(line))
 }

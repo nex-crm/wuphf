@@ -883,10 +883,15 @@ func makeFocusModeLauncher(t *testing.T) (*Launcher, *Broker) {
 				{Slug: "pm", Name: "Product Manager"},
 			},
 		},
-		broker:          b,
-		headlessWorkers: make(map[string]bool),
-		headlessActive:  make(map[string]*headlessCodexActiveTurn),
-		headlessQueues:  make(map[string][]headlessCodexTurn),
+		broker: b,
+		headless: headlessWorkerPool{
+
+			workers: make(map[string]bool),
+
+			active: make(map[string]*headlessCodexActiveTurn),
+
+			queues: make(map[string][]headlessCodexTurn),
+		},
 	}
 	return l, b
 }
@@ -970,10 +975,15 @@ func TestFocusModeRouting_CollaborativeUntaggedWakesLead(t *testing.T) {
 				{Slug: "pm", Name: "Product Manager"},
 			},
 		},
-		broker:          b,
-		headlessWorkers: make(map[string]bool),
-		headlessActive:  make(map[string]*headlessCodexActiveTurn),
-		headlessQueues:  make(map[string][]headlessCodexTurn),
+		broker: b,
+		headless: headlessWorkerPool{
+
+			workers: make(map[string]bool),
+
+			active: make(map[string]*headlessCodexActiveTurn),
+
+			queues: make(map[string][]headlessCodexTurn),
+		},
 	}
 
 	msg := channelMessage{

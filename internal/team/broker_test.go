@@ -324,15 +324,20 @@ func TestHeadlessQueue_EmptyBeforePush(t *testing.T) {
 				{Slug: "eng", Name: "Engineer"},
 			},
 		},
-		headlessWorkers: make(map[string]bool),
-		headlessActive:  make(map[string]*headlessCodexActiveTurn),
-		headlessQueues:  make(map[string][]headlessCodexTurn),
+		headless: headlessWorkerPool{
+
+			workers: make(map[string]bool),
+
+			active: make(map[string]*headlessCodexActiveTurn),
+
+			queues: make(map[string][]headlessCodexTurn),
+		},
 	}
 
-	l.headlessMu.Lock()
-	ceoLen := len(l.headlessQueues["ceo"])
-	engLen := len(l.headlessQueues["eng"])
-	l.headlessMu.Unlock()
+	l.headless.mu.Lock()
+	ceoLen := len(l.headless.queues["ceo"])
+	engLen := len(l.headless.queues["eng"])
+	l.headless.mu.Unlock()
 
 	if ceoLen != 0 || engLen != 0 {
 		t.Fatalf("expected empty queues before any push, got ceo=%d eng=%d", ceoLen, engLen)
@@ -358,19 +363,24 @@ func TestHeadlessQueue_PopulatedAfterEnqueue(t *testing.T) {
 				{Slug: "eng", Name: "Engineer"},
 			},
 		},
-		headlessWorkers: make(map[string]bool),
-		headlessActive:  make(map[string]*headlessCodexActiveTurn),
-		headlessQueues:  make(map[string][]headlessCodexTurn),
+		headless: headlessWorkerPool{
+
+			workers: make(map[string]bool),
+
+			active: make(map[string]*headlessCodexActiveTurn),
+
+			queues: make(map[string][]headlessCodexTurn),
+		},
 	}
-	l.headlessCtx, l.headlessCancel = context.WithCancel(t.Context())
+	l.headless.ctx, l.headless.cancel = context.WithCancel(t.Context())
 	t.Cleanup(func() { l.waitForHeadlessIdle(t) })
 
 	l.enqueueHeadlessCodexTurn("eng", "review the diff")
 
-	l.headlessMu.Lock()
-	engLen := len(l.headlessQueues["eng"])
-	ceoLen := len(l.headlessQueues["ceo"])
-	l.headlessMu.Unlock()
+	l.headless.mu.Lock()
+	engLen := len(l.headless.queues["eng"])
+	ceoLen := len(l.headless.queues["ceo"])
+	l.headless.mu.Unlock()
 
 	// The worker goroutine may have already consumed the turn from the queue —
 	// that is valid. What matters is that the queue was populated (worker started)
@@ -378,7 +388,7 @@ func TestHeadlessQueue_PopulatedAfterEnqueue(t *testing.T) {
 	if ceoLen != 0 {
 		t.Fatalf("expected ceo queue empty after enqueuing for eng, got %d", ceoLen)
 	}
-	if !l.headlessWorkers["eng"] {
+	if !l.headless.workers["eng"] {
 		t.Fatalf("expected eng worker to be flagged as started after enqueue")
 	}
 	// engLen may be 0 (worker consumed it) or 1 (still pending) — both are valid.
@@ -397,24 +407,29 @@ func TestHeadlessQueue_NoTimerDrivenWakeup(t *testing.T) {
 				{Slug: "eng", Name: "Engineer"},
 			},
 		},
-		headlessWorkers: make(map[string]bool),
-		headlessActive:  make(map[string]*headlessCodexActiveTurn),
-		headlessQueues:  make(map[string][]headlessCodexTurn),
+		headless: headlessWorkerPool{
+
+			workers: make(map[string]bool),
+
+			active: make(map[string]*headlessCodexActiveTurn),
+
+			queues: make(map[string][]headlessCodexTurn),
+		},
 	}
 
 	// No enqueue calls. The queues must remain empty.
-	l.headlessMu.Lock()
+	l.headless.mu.Lock()
 	totalItems := 0
-	for _, q := range l.headlessQueues {
+	for _, q := range l.headless.queues {
 		totalItems += len(q)
 	}
-	l.headlessMu.Unlock()
+	l.headless.mu.Unlock()
 
 	if totalItems != 0 {
 		t.Fatalf("expected no queued turns without an explicit enqueue, got %d", totalItems)
 	}
-	if len(l.headlessWorkers) != 0 {
-		t.Fatalf("expected no workers started without an explicit enqueue, got %v", l.headlessWorkers)
+	if len(l.headless.workers) != 0 {
+		t.Fatalf("expected no workers started without an explicit enqueue, got %v", l.headless.workers)
 	}
 }
 

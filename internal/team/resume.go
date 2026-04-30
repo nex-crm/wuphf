@@ -126,7 +126,7 @@ func (l *Launcher) buildResumePackets() map[string]string {
 	}
 
 	// Determine office lead slug.
-	lead := l.officeLeadSlug()
+	lead := l.targeter().LeadSlug()
 
 	// Collect in-flight tasks per owner — skip owners not in the pack.
 	tasksByAgent := make(map[string][]teamTask)
@@ -225,9 +225,9 @@ func (l *Launcher) resumeInFlightWork() {
 		return
 	}
 
-	paneTargets := l.agentPaneTargets()
+	paneTargets := l.targeter().PaneTargets()
 	routePacket := func(slug, packet string) {
-		if l.memberUsesHeadlessOneShotRuntime(slug) || !l.paneBackedAgents {
+		if l.targeter().MemberUsesHeadlessOneShotRuntime(slug) || !l.paneBackedAgents {
 			l.enqueueHeadlessCodexTurn(slug, packet)
 			return
 		}
@@ -239,7 +239,7 @@ func (l *Launcher) resumeInFlightWork() {
 		launcherSendNotificationToPane(l, target.PaneTarget, packet)
 	}
 
-	lead := l.officeLeadSlug()
+	lead := l.targeter().LeadSlug()
 	if packet, ok := packets[lead]; ok {
 		routePacket(lead, packet)
 	}

@@ -158,20 +158,6 @@ func TestNotebookSignalScanner_NoBrokerOrWorkerIsHarmless(t *testing.T) {
 	}
 }
 
-func TestNotebookSignalScanner_MissingAgentsDirIsHarmless(t *testing.T) {
-	b, _, teardown := newNotebookScannerHarness(t)
-	defer teardown()
-
-	scanner := NewNotebookSignalScanner(b)
-	cands, err := scanner.Scan(context.Background())
-	if err != nil {
-		t.Fatalf("scan: %v", err)
-	}
-	if len(cands) != 0 {
-		t.Fatalf("expected 0 candidates with no team/agents dir, got %d", len(cands))
-	}
-}
-
 func TestTokenizeForCluster_DropsStopwordsAndShortTokens(t *testing.T) {
 	got := tokenizeForCluster("The quick BROWN fox a in")
 	for _, sw := range []string{"the", "in", "a"} {

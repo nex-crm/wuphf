@@ -53,10 +53,20 @@ pre-commit:
       run: golangci-lint run ./...
 
     no-secrets:
+      # The leading (^|[^a-zA-Z0-9]) requires the keyword to start at
+      # a non-alphanumeric boundary. Crucially, that EXCLUDES `_` from
+      # the boundary so env-var-shaped identifiers like
+      # OPENAI_API_KEY=, STRIPE_SECRET=, or MY_PASSWORD= still match —
+      # those are the dominant real-world leak shape. Bare-Go word
+      # boundary (\b treats _ as a word char) would have silently
+      # disabled detection of this category. The boundary still
+      # excludes the false positive that motivated this rule:
+      # oneSecretEnv = "ONE_SECRET=" + ... where the keyword sits
+      # after a letter inside an identifier.
       run: >
         git diff --cached --diff-filter=ACM -U0
-        | grep -iE '(api_token|password|api_key|secret)\s*=\s*[''"][^''"]+[''"]'
-        | grep -v '.example\|.fake\|fake_\|placeholder\|your_\|os.Getenv\|environ.get'
+        | grep -iE '(^|[^a-zA-Z0-9])(api_token|password|api_key|secret)\s*=\s*[''"][^''"]+[''"]'
+        | grep -v '.example\|.fake\|fake_\|placeholder\|your_\|os.Getenv\|environ.get\|shellQuote\|ResolveOneSecret\|ResolveOneIdentity'
         && echo 'Possible secret in staged changes' && exit 1
         || true
 

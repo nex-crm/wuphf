@@ -39,7 +39,7 @@ func (l *Launcher) runHeadlessOpenAICompatTurn(ctx context.Context, slug string,
 		return fmt.Errorf("broker is not running")
 	}
 
-	kind := l.memberEffectiveProviderKind(slug)
+	kind := l.targeter().MemberEffectiveProviderKind(slug)
 	entry := provider.Lookup(kind)
 	if entry == nil || entry.StreamFn == nil {
 		return fmt.Errorf("openai-compat runtime %q is not registered", kind)
@@ -112,9 +112,6 @@ func (l *Launcher) runHeadlessOpenAICompatTurn(ctx context.Context, slug string,
 	// All policy-bearing per-turn state is owned by openAICompatTurnState
 	// (see openai_compat_turn_state.go). The state machine is
 	// independently unit-tested via openai_compat_turn_state_test.go.
-	liveChat := newHeadlessLiveChatRelay(l, slug, target, notification, func(line string) {
-		appendHeadlessCodexLog(slug, line)
-	})
 	state := newOpenAICompatTurnState(&runtimeTurnSinks{
 		l:    l,
 		slug: slug,
@@ -123,7 +120,7 @@ func (l *Launcher) runHeadlessOpenAICompatTurn(ctx context.Context, slug string,
 		// machine stays oblivious.
 		stream:  agentStream,
 		metrics: &metrics,
-	}, liveChat)
+	})
 
 	// taskID is unique per turn so the Receipts panel groups each
 	// agent's turn into its own row. Format mirrors agent.nextTaskID.
@@ -158,7 +155,6 @@ func (l *Launcher) runHeadlessOpenAICompatTurn(ctx context.Context, slug string,
 	}
 
 	finalText, iterationsUsed, turnUsage, streamErr, err := loop.run(ctx, msgs)
-	state.flushLiveChat()
 	// Record token counts even on partial / errored turns: a failed turn
 	// can still have generated thousands of tokens we want surfaced in the
 	// usage panel. CostUSD stays at zero — local runtimes have no marginal

@@ -141,6 +141,15 @@ type humanInterview struct {
 	Answered      *interviewAnswer  `json:"answered,omitempty"`
 }
 
+// TitleOrDefault returns req.Title trimmed, or "Request" if empty.
+// Used by the watchdog scheduler when announcing a stalled interview.
+func (req humanInterview) TitleOrDefault() string {
+	if strings.TrimSpace(req.Title) != "" {
+		return req.Title
+	}
+	return "Request"
+}
+
 type teamTask struct {
 	ID               string   `json:"id"`
 	Channel          string   `json:"channel,omitempty"`

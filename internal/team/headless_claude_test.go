@@ -23,10 +23,12 @@ func minimalLauncher(opusCEO bool) *Launcher {
 				{Slug: "pm", Name: "Product Manager"},
 			},
 		},
-		opusCEO:         opusCEO,
-		headlessWorkers: make(map[string]bool),
-		headlessActive:  make(map[string]*headlessCodexActiveTurn),
-		headlessQueues:  make(map[string][]headlessCodexTurn),
+		opusCEO: opusCEO,
+		headless: headlessWorkerPool{
+			workers: make(map[string]bool),
+			active:  make(map[string]*headlessCodexActiveTurn),
+			queues:  make(map[string][]headlessCodexTurn),
+		},
 	}
 }
 
@@ -78,10 +80,12 @@ func TestHeadlessClaudeModel_CustomLeadSlug(t *testing.T) {
 				{Slug: "crew", Name: "Crew"},
 			},
 		},
-		opusCEO:         true,
-		headlessWorkers: make(map[string]bool),
-		headlessActive:  make(map[string]*headlessCodexActiveTurn),
-		headlessQueues:  make(map[string][]headlessCodexTurn),
+		opusCEO: true,
+		headless: headlessWorkerPool{
+			workers: make(map[string]bool),
+			active:  make(map[string]*headlessCodexActiveTurn),
+			queues:  make(map[string][]headlessCodexTurn),
+		},
 	}
 
 	tests := []struct {

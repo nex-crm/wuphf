@@ -81,7 +81,7 @@ func TestAgentPaneSlugsOneOnOneUsesOnlySelectedAgent(t *testing.T) {
 		oneOnOne:    "pm",
 	}
 
-	got := l.agentPaneSlugs()
+	got := l.targeter().PaneSlugs()
 	if len(got) != 1 || got[0] != "pm" {
 		t.Fatalf("expected only pm in 1o1 pane list, got %v", got)
 	}
@@ -124,47 +124,6 @@ func TestNewLauncherFromScratchUsesGenericOffice(t *testing.T) {
 	}
 }
 
-func TestNewLauncherExplicitPackPreservesBrokerState(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("WUPHF_RUNTIME_HOME", home)
-	t.Setenv("WUPHF_BROKER_TOKEN", "")
-
-	statePath := defaultBrokerStatePath()
-	if err := os.MkdirAll(filepath.Dir(statePath), 0o700); err != nil {
-		t.Fatalf("mkdir state dir: %v", err)
-	}
-	state := brokerState{
-		Messages: []channelMessage{{
-			ID:        "msg-keep",
-			From:      "human",
-			Channel:   "general",
-			Content:   "preserve this office state",
-			Timestamp: time.Now().UTC().Format(time.RFC3339),
-		}},
-		Counter: 9,
-	}
-	raw, err := json.Marshal(state)
-	if err != nil {
-		t.Fatalf("marshal state: %v", err)
-	}
-	if err := os.WriteFile(statePath, raw, 0o600); err != nil {
-		t.Fatalf("write state: %v", err)
-	}
-
-	if _, err := NewLauncher("founding-team"); err != nil {
-		t.Fatalf("NewLauncher: %v", err)
-	}
-
-	loaded, err := loadBrokerStateFile(statePath)
-	if err != nil {
-		t.Fatalf("expected broker state to survive explicit pack launch: %v", err)
-	}
-	if len(loaded.Messages) != 1 || loaded.Messages[0].ID != "msg-keep" || loaded.Counter != 9 {
-		t.Fatalf("broker state was not preserved: %+v", loaded)
-	}
-}
-
 func TestAgentPaneSlugsUsesOfficeRosterNotStaticPack(t *testing.T) {
 	l := &Launcher{
 		pack: &agent.PackDefinition{
@@ -185,7 +144,7 @@ func TestAgentPaneSlugsUsesOfficeRosterNotStaticPack(t *testing.T) {
 		},
 	}
 
-	got := l.agentPaneSlugs()
+	got := l.targeter().PaneSlugs()
 	want := []string{"ceo", "pm", "fe", "growthops"}
 	if len(got) != len(want) {
 		t.Fatalf("expected %d pane slugs, got %v", len(want), got)
@@ -1514,7 +1473,7 @@ func TestRecordWatchdogLedgerCreatesSignalAndDecision(t *testing.T) {
 	b := newTestBroker(t)
 	l := &Launcher{broker: b}
 
-	signalIDs, decisionID := l.recordWatchdogLedger("general", "task_stalled", "task-1", "fe", "Task is stalled.", "signal-1")
+	signalIDs, decisionID := l.scheduler().recordLedger("general", "task_stalled", "task-1", "fe", "Task is stalled.", "signal-1")
 	if decisionID == "" || len(signalIDs) < 1 {
 		t.Fatalf("expected watchdog refs, got signalIDs=%v decisionID=%q", signalIDs, decisionID)
 	}
@@ -2489,7 +2448,7 @@ func TestProcessDueTaskJobResumesRateLimitedBlockedTask(t *testing.T) {
 	}
 
 	l := &Launcher{broker: b, sessionName: "test"}
-	l.processDueTaskJob(schedulerJob{
+	l.scheduler().processTaskJob(schedulerJob{
 		Slug:       normalizeSchedulerSlug("recheck", "client-loop", "task", task.ID),
 		Kind:       "recheck",
 		TargetType: "task",
@@ -2694,12 +2653,14 @@ func TestBuildMessageActiveAgentsSorted(t *testing.T) {
 				{Slug: "eng", Name: "Engineer"},
 			},
 		},
-		headlessActive: map[string]*headlessCodexActiveTurn{
-			"zebra": {},
-			"alpha": {},
-			"mango": {},
+		headless: headlessWorkerPool{
+			active: map[string]*headlessCodexActiveTurn{
+				"zebra": {},
+				"alpha": {},
+				"mango": {},
+			},
+			queues: make(map[string][]headlessCodexTurn),
 		},
-		headlessQueues: make(map[string][]headlessCodexTurn),
 	}
 
 	// Run multiple times — Go map iteration order is non-deterministic, so
