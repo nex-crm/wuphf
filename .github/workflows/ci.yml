@@ -175,6 +175,15 @@ jobs:
             echo "See internal/brokeraddr/addr.go for the runtime.GOOS pattern." >&2
             exit 1
           fi
+      - name: No new time.Sleep in tests
+        # Forward-only enforcement of CONTRIBUTING.md's "no time.Sleep
+        # in tests" rule. Existing offenders are grandfathered (would
+        # require ~80 fixes in one PR); diff-only lets the rule lock
+        # now while paced PRs migrate the existing call sites to a
+        # manualClock fixture.
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: bash scripts/check-no-new-sleeps-in-tests.sh
       - name: Reject unix-only exec.Command shapes outside tmux/tui paths
         # Windows guard: bash/sh/chmod/ln/mkfifo/killall don't exist there.
         # Code that needs them must be in a _unix.go file with a build tag,
