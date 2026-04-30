@@ -90,11 +90,13 @@ export async function getText(
 export async function post<T = unknown>(
   path: string,
   body?: unknown,
+  opts?: { signal?: AbortSignal },
 ): Promise<T> {
   const r = await fetch(baseURL() + path, {
     method: "POST",
     headers: authHeaders(),
     body: JSON.stringify(body),
+    signal: opts?.signal,
   });
   if (!r.ok) {
     const text = (await r.text().catch(() => "")).trim();
@@ -770,7 +772,9 @@ export function listAgentLogTasks(opts?: { limit?: number }) {
 }
 
 export function getAgentLogEntries(taskId: string) {
-  return get<{ task: string; entries: TaskLogEntry[] }>("/agent-logs", { task: taskId });
+  return get<{ task: string; entries: TaskLogEntry[] }>("/agent-logs", {
+    task: taskId,
+  });
 }
 
 // ── Memory ──
@@ -1000,4 +1004,64 @@ export interface UpgradeRunResult {
 // "fetch timed out".
 export function runUpgrade() {
   return postWithTimeout<UpgradeRunResult>("/upgrade/run", {}, 130_000);
+}
+
+// ── Telegram /connect wizard ──
+// These mirror the TUI's `/connect telegram` flow but drive it from the web.
+// Pass an explicit `token` to override what the broker has on disk; pass an
+// empty string to use the saved token from config / WUPHF_TELEGRAM_BOT_TOKEN.
+
+export interface TelegramVerifyResponse {
+  ok: boolean;
+  bot_name?: string;
+  error?: string;
+}
+
+export interface TelegramGroup {
+  // chat_id comes from Go's int64 on the wire. Telegram's API docs say chat
+  // IDs may have at most 52 significant bits — exactly inside JS's
+  // Number.MAX_SAFE_INTEGER (53 bits). Today's supergroup IDs (~13 digits)
+  // are well below that, so a plain `number` is safe. If Telegram ever
+  // widens past 52 bits this needs to become a string (or bigint with an
+  // explicit serialiser) to avoid silent precision loss on the round-trip.
+  chat_id: number;
+  title: string;
+  type: string;
+}
+
+export interface TelegramDiscoverResponse {
+  groups: TelegramGroup[];
+}
+
+export interface TelegramConnectResponse {
+  channel_slug: string;
+  group_title: string;
+}
+
+export function verifyTelegramBot(token: string, signal?: AbortSignal) {
+  return post<TelegramVerifyResponse>(
+    "/telegram/verify",
+    { token },
+    { signal },
+  );
+}
+
+export function discoverTelegramChats(token: string, signal?: AbortSignal) {
+  return post<TelegramDiscoverResponse>(
+    "/telegram/discover",
+    { token },
+    { signal },
+  );
+}
+
+export function connectTelegramChannel(
+  opts: {
+    token?: string;
+    chat_id: number;
+    title?: string;
+    type?: string;
+  },
+  signal?: AbortSignal,
+) {
+  return post<TelegramConnectResponse>("/telegram/connect", opts, { signal });
 }

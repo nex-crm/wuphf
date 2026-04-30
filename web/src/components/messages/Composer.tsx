@@ -295,6 +295,26 @@ function handleSlashCommand(input: string, handlers: SlashHandlers): boolean {
         .catch(() => showNotice("Cancel failed", "error"));
       return true;
     }
+    case "/connect": {
+      // Bare `/connect` opens the provider picker (parity with the TUI's
+      // `/connect` 4-option picker — see cmd/wuphf/channel.go:4871). Direct
+      // forms like `/connect telegram` skip the picker and land straight in
+      // the integration's wizard, also matching TUI behaviour.
+      const target = args.trim().toLowerCase();
+      if (!target) {
+        store.openConnectWizard("provider");
+        return true;
+      }
+      if (target === "telegram") {
+        store.openConnectWizard("telegram");
+        return true;
+      }
+      showNotice(
+        `Integration "${target}" doesn't have a web wizard yet — try /connect on its own to see what's available.`,
+        "info",
+      );
+      return true;
+    }
     default:
       return false;
   }

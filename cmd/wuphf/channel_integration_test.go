@@ -3,6 +3,8 @@ package main
 import (
 	"strings"
 	"testing"
+
+	"github.com/nex-crm/wuphf/internal/team"
 )
 
 func TestSlugifyGroupTitleAddsTgPrefix(t *testing.T) {
@@ -14,8 +16,8 @@ func TestSlugifyGroupTitleAddsTgPrefix(t *testing.T) {
 		"NUMBERS 123":         "tg-numbers-123",
 	}
 	for input, want := range cases {
-		if got := slugifyGroupTitle(input); got != want {
-			t.Errorf("slugifyGroupTitle(%q) = %q, want %q", input, got, want)
+		if got := team.SlugifyTelegramTitle(input); got != want {
+			t.Errorf("team.SlugifyTelegramTitle(%q) = %q, want %q", input, got, want)
 		}
 	}
 }

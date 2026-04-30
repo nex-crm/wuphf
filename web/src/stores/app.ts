@@ -179,6 +179,16 @@ export interface AppStore {
   composerHelpOpen: boolean;
   setComposerHelpOpen: (v: boolean) => void;
 
+  // /connect integration wizard. Bare /connect opens the provider picker
+  // (mode = "provider", parity with the TUI's `/connect` 4-option picker).
+  // `/connect telegram` skips the picker and lands on the Telegram token
+  // step (mode = "telegram"). Other modes can be added when more
+  // integrations get web wizards.
+  telegramConnectOpen: boolean;
+  telegramConnectMode: "provider" | "telegram";
+  openConnectWizard: (mode: "provider" | "telegram") => void;
+  setTelegramConnectOpen: (v: boolean) => void;
+
   // Onboarding
   onboardingComplete: boolean;
   setOnboardingComplete: (v: boolean) => void;
@@ -354,6 +364,12 @@ export const useAppStore = create<AppStore>((set, get) => ({
   composerHelpOpen: false,
   setComposerHelpOpen: (v) => set({ composerHelpOpen: v }),
 
+  telegramConnectOpen: false,
+  telegramConnectMode: "provider",
+  openConnectWizard: (mode) =>
+    set({ telegramConnectOpen: true, telegramConnectMode: mode }),
+  setTelegramConnectOpen: (v) => set({ telegramConnectOpen: v }),
+
   onboardingComplete: false,
   setOnboardingComplete: (v) => set({ onboardingComplete: v }),
   resetForOnboarding: () =>
@@ -367,6 +383,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
       searchOpen: false,
       composerSearchInitialQuery: "",
       composerHelpOpen: false,
+      // Close the /connect wizard during an onboarding reset for the same
+      // reason searchOpen / composerHelpOpen are: any modal left open here
+      // would float over the onboarding flow.
+      telegramConnectOpen: false,
       onboardingComplete: false,
       wikiPath: null,
       wikiLookupQuery: null,

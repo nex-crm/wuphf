@@ -158,9 +158,10 @@ run_shell_phase() {
 {"version":1,"completed_at":"2026-01-01T00:00:00Z","company_name":"e2e-local"}
 EOF
   start_wuphf "shell"
-  # Shell-phase specs: post-onboarding UI surfaces (smoke, settings).
+  # Shell-phase specs: post-onboarding UI surfaces (smoke, settings,
+  # /connect telegram wizard).
   echo "[run-local] running shell-phase specs"
-  (cd web/e2e && WUPHF_E2E_BASE_URL="http://localhost:${web_port}" bunx playwright test tests/smoke.spec.ts tests/local-llm-settings.spec.ts)
+  (cd web/e2e && WUPHF_E2E_BASE_URL="http://localhost:${web_port}" bunx playwright test tests/smoke.spec.ts tests/local-llm-settings.spec.ts tests/telegram-connect.spec.ts)
   stop_wuphf
 }
 
