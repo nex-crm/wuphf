@@ -115,6 +115,7 @@ function ScheduleRow({ job }: ScheduleRowProps) {
   const committedTextRef = useRef(
     initialOverride > 0 ? String(initialOverride) : String(defaultInterval),
   );
+  const committedOverrideRef = useRef(initialOverride);
   const committedEnabledRef = useRef(initialEnabled);
 
   const sourceLabel = describeSource(job);
@@ -153,6 +154,7 @@ function ScheduleRow({ job }: ScheduleRowProps) {
           }
           if (typeof res.job?.interval_override === "number") {
             const next = res.job.interval_override;
+            committedOverrideRef.current = next;
             const nextText =
               next > 0
                 ? String(next)
@@ -197,24 +199,14 @@ function ScheduleRow({ job }: ScheduleRowProps) {
       setOverrideText(committedTextRef.current);
       return;
     }
-    // Treat "same as current default" as no-op (keeps server state stable).
-    if (
-      (initialOverride === 0 && parsed === defaultInterval) ||
-      parsed === initialOverride
-    ) {
+    // No-op: parsed matches what the server already has.
+    const committedValue = Number(committedTextRef.current);
+    if (Number.isFinite(committedValue) && parsed === committedValue) {
       setError(null);
       return;
     }
     submitPatch({ interval_override: parsed === defaultInterval ? 0 : parsed });
-  }, [
-    isReadOnly,
-    isCron,
-    overrideText,
-    floor,
-    initialOverride,
-    defaultInterval,
-    submitPatch,
-  ]);
+  }, [isReadOnly, isCron, overrideText, floor, defaultInterval, submitPatch]);
 
   const lastRunChip = describeLastRun(job);
   const nextRunCountdown = describeNextRun(job);
@@ -313,7 +305,7 @@ function ScheduleRow({ job }: ScheduleRowProps) {
         </div>
       ) : null}
 
-      {!isReadOnly && isInterval && initialOverride > 0 ? (
+      {!isReadOnly && isInterval && committedOverrideRef.current > 0 ? (
         <div
           style={{
             marginTop: 6,
