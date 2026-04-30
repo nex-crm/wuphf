@@ -731,6 +731,18 @@ export async function getSystemCronSpecs(): Promise<SystemCronSpec[]> {
   return res.specs ?? [];
 }
 
+/**
+ * Force-trigger a scheduler job once, immediately. Does not affect the
+ * recurring schedule or next_run. Backed by POST /scheduler/{slug}/run (PR 9).
+ */
+export async function runSchedulerJob(
+  slug: string,
+): Promise<{ triggered: boolean; slug: string; at: string }> {
+  return post<{ triggered: boolean; slug: string; at: string }>(
+    `/scheduler/${encodeURIComponent(slug)}/run`,
+  );
+}
+
 // ── Skills ──
 
 export type SkillStatus = "active" | "proposed" | "archived" | "disabled";

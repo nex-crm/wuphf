@@ -606,28 +606,115 @@ func (b *Broker) handleSchedulerSystemSpecs(w http.ResponseWriter, r *http.Reque
 	_ = json.NewEncoder(w).Encode(map[string]any{"specs": out})
 }
 
-// handleSchedulerSubpath dispatches /scheduler/{slug} requests. Currently
-// PATCH and the special "system-specs" sub-resource are supported (PR 8
-// Lane G + min-floor-from-api); future verbs (delete, run-now) would land
-// here too.
+// handleSchedulerSubpath dispatches /scheduler/{slug} and /scheduler/{slug}/run.
+// Supported: GET /scheduler/system-specs, POST /scheduler/{slug}/run,
+// PATCH /scheduler/{slug} (PR 8 Lane G + min-floor-from-api + PR 9).
 func (b *Broker) handleSchedulerSubpath(w http.ResponseWriter, r *http.Request) {
-	slug := strings.TrimPrefix(r.URL.Path, "/scheduler/")
-	slug = strings.TrimSpace(slug)
-	if slug == "" {
+	rest := strings.TrimPrefix(r.URL.Path, "/scheduler/")
+	rest = strings.TrimSpace(rest)
+	if rest == "" {
 		http.Error(w, "scheduler slug required in path", http.StatusBadRequest)
 		return
 	}
 	// system-specs is a read-only sub-resource, not a per-job path.
-	if slug == "system-specs" {
+	if rest == "system-specs" {
 		b.handleSchedulerSystemSpecs(w, r)
 		return
 	}
+
+	// /scheduler/{slug}/run — POST only, force-triggers the job once without
+	// touching next_run or the recurring schedule.
+	if strings.HasSuffix(rest, "/run") {
+		slug := strings.TrimSuffix(rest, "/run")
+		slug = strings.TrimSpace(slug)
+		if slug == "" {
+			http.Error(w, "scheduler slug required in path", http.StatusBadRequest)
+			return
+		}
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		b.handleRunSchedulerJob(w, r, slug)
+		return
+	}
+
+	// /scheduler/{slug} — PATCH only.
+	slug := rest
 	switch r.Method {
 	case http.MethodPatch:
 		b.handlePatchSchedulerJob(w, r, slug)
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+// handleRunSchedulerJob implements POST /scheduler/{slug}/run.
+//
+// Behaviour by job type:
+//
+//   - Workflow cron jobs (TargetType == "workflow"): next_run is set to now
+//     so the watchdog scheduler's next poll finds the job as due and dispatches
+//     processWorkflowJob. The job executes within one scheduler tick (~20 s).
+//
+//   - System crons (SystemManaged == true, e.g. nex-notifications, nex-insights):
+//     executed by dedicated broker goroutines that cannot be poked from the HTTP
+//     layer. LastRun and LastRunStatus are updated so the Calendar panel shows the
+//     manual trigger; actual side-effects happen on the goroutine's natural tick.
+//
+//   - Task / request cron jobs: LastRun and LastRunStatus updated only.
+//     These are driven by data state (task status, request lifecycle) that the
+//     HTTP handler has no context to evaluate.
+//
+// Idempotency: this handler never touches the notification cursor. It cannot
+// cause the cursor to advance twice; the nex-notifications goroutine advances
+// the cursor via SetNotificationCursor only after a successful API round-trip,
+// entirely independently of this endpoint.
+func (b *Broker) handleRunSchedulerJob(w http.ResponseWriter, r *http.Request, slug string) {
+	b.mu.Lock()
+	var job *schedulerJob
+	for i := range b.scheduler {
+		if b.scheduler[i].Slug == slug {
+			job = &b.scheduler[i]
+			break
+		}
+	}
+	if job == nil {
+		b.mu.Unlock()
+		http.Error(w, "scheduler job not found", http.StatusNotFound)
+		return
+	}
+	now := time.Now().UTC()
+	prevLastRun := job.LastRun
+	prevLastRunStatus := job.LastRunStatus
+	prevNextRun := job.NextRun
+	prevDueAt := job.DueAt
+	job.LastRun = now.Format(time.RFC3339)
+	job.LastRunStatus = "triggered"
+	// Workflow cron jobs are dispatched through the watchdog scheduler's
+	// processWorkflowJob path. Marking next_run = now makes the job appear
+	// due on the next scheduler poll so it executes within one tick.
+	if strings.TrimSpace(job.TargetType) == "workflow" {
+		job.NextRun = now.Format(time.RFC3339)
+		job.DueAt = job.NextRun
+	}
+	if err := b.saveLocked(); err != nil {
+		job.LastRun = prevLastRun
+		job.LastRunStatus = prevLastRunStatus
+		job.NextRun = prevNextRun
+		job.DueAt = prevDueAt
+		b.mu.Unlock()
+		http.Error(w, "failed to persist trigger", http.StatusInternalServerError)
+		return
+	}
+	b.mu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"triggered": true,
+		"slug":      slug,
+		"at":        now.Format(time.RFC3339),
+	})
 }
 
 // handlePatchSchedulerJob updates the Enabled flag and / or
