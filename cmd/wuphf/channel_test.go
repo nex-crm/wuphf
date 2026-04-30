@@ -706,6 +706,12 @@ func TestResolveInitialOfficeAppFallsBackToMessages(t *testing.T) {
 	}
 }
 
+func TestResolveInitialOfficeAppSupportsSkills(t *testing.T) {
+	if got := resolveInitialOfficeApp("skills"); got != officeAppSkills {
+		t.Fatalf("expected skills app, got %q", got)
+	}
+}
+
 func TestDisplaySignalKindUsesHumanDirectiveLabel(t *testing.T) {
 	got := displaySignalKind(channelSignal{Kind: "directive", Source: "human"})
 	if got != "Human directive" {

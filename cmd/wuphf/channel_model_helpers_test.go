@@ -174,6 +174,34 @@ func TestRenderUsageStripEmptyReturnsEmpty(t *testing.T) {
 	}
 }
 
+// Un-rostered usage slugs render in a deterministic alphabetical order
+// instead of map-iteration order, so poll-tick output stays stable.
+// Slug names themselves don't appear in the strip (the avatar glyph
+// stands in), so the test uses unique token totals as slug proxies and
+// asserts they appear in the order matching alphabetical slug sort.
+func TestRenderUsageStripSortsUnrosteredSlugsAlphabetically(t *testing.T) {
+	usage := channelUsageState{
+		Agents: map[string]channelUsageTotals{
+			"zeta":    {TotalTokens: 30, CostUsd: 0.30},
+			"alpha":   {TotalTokens: 10, CostUsd: 0.10},
+			"mango":   {TotalTokens: 20, CostUsd: 0.20},
+			"unicorn": {TotalTokens: 40, CostUsd: 0.40},
+		},
+	}
+	got := stripANSI(renderUsageStrip(usage, nil, 240))
+	idx10 := strings.Index(got, "10 tok")
+	idx20 := strings.Index(got, "20 tok")
+	idx40 := strings.Index(got, "40 tok")
+	idx30 := strings.Index(got, "30 tok")
+	if idx10 < 0 || idx20 < 0 || idx30 < 0 || idx40 < 0 {
+		t.Fatalf("expected all four token totals in strip, got %q", got)
+	}
+	// Slugs sort: alpha(10) < mango(20) < unicorn(40) < zeta(30).
+	if !(idx10 < idx20 && idx20 < idx40 && idx40 < idx30) {
+		t.Fatalf("expected alphabetical-by-slug order (10,20,40,30), got %q", got)
+	}
+}
+
 func TestVisiblePendingRequestNilWhenNoPending(t *testing.T) {
 	m := channelModel{}
 	if got := m.visiblePendingRequest(); got != nil {
