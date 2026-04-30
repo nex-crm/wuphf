@@ -110,6 +110,8 @@ def http_request(
             return e.code, json.loads(payload)
         except (json.JSONDecodeError, ValueError):
             return e.code, payload
+    except urllib.error.URLError as e:
+        return 0, f"request failed: {e.reason}"
 
 
 # ---------- Result types ----------
@@ -164,6 +166,13 @@ def scenario_list_empty(broker: str, token: str) -> ScenarioResult:
             detail="non-JSON response body",
         )
     skills = body.get("skills", [])
+    if not isinstance(skills, list) or any(not isinstance(s, dict) for s in skills):
+        return ScenarioResult(
+            id="skill-01-list",
+            title="GET /skills succeeds",
+            ok=False,
+            detail="invalid skills payload shape",
+        )
     probe = next((s for s in skills if s.get("name") == _EVAL_SKILL_NAME), None)
     if probe is not None:
         return ScenarioResult(
@@ -282,6 +291,13 @@ def scenario_archive(broker: str, token: str) -> ScenarioResult:
             detail=f"verification GET failed (status={list_code})",
         )
     skills = list_body.get("skills", [])
+    if not isinstance(skills, list) or any(not isinstance(s, dict) for s in skills):
+        return ScenarioResult(
+            id="skill-05-archive",
+            title="DELETE /skills (archive)",
+            ok=False,
+            detail="invalid skills payload shape",
+        )
     probe = next((s for s in skills if s.get("name") == _EVAL_SKILL_NAME), None)
     ok = probe is None
     return ScenarioResult(
