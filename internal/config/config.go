@@ -747,7 +747,7 @@ func PersistRegistration(data map[string]interface{}) error {
 }
 
 func ResolveInsightsPollInterval() int {
-	minutes := 15
+	minutes := 30
 	if raw := os.Getenv("WUPHF_INSIGHTS_INTERVAL_MINUTES"); raw != "" {
 		if n, err := strconv.Atoi(raw); err == nil {
 			minutes = n

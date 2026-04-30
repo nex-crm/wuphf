@@ -571,6 +571,11 @@ func (b *schedulerFixtureBroker) UpdateSkillExecutionByWorkflowKey(key, status s
 }
 
 func (b *schedulerFixtureBroker) SetSchedulerJob(_ schedulerJob) error { return nil }
+func (b *schedulerFixtureBroker) SchedulerJobControl(_ string, defaultInterval time.Duration) (bool, time.Duration) {
+	return true, defaultInterval
+}
+func (b *schedulerFixtureBroker) updateSchedulerHeartbeat(_, _ string, _ int, _ time.Time, _, _ string) {
+}
 
 // recordingLedgerBroker is a minimal stub that captures the kind+owner
 // passed to RecordDecision. Used by recordLedger branch tests.
@@ -610,9 +615,17 @@ func (b *recordingLedgerBroker) UpdateSkillExecutionByWorkflowKey(string, string
 	return nil
 }
 func (b *recordingLedgerBroker) SetSchedulerJob(schedulerJob) error { return nil }
+func (b *recordingLedgerBroker) SchedulerJobControl(_ string, defaultInterval time.Duration) (bool, time.Duration) {
+	return true, defaultInterval
+}
+func (b *recordingLedgerBroker) updateSchedulerHeartbeat(_, _ string, _ int, _ time.Time, _, _ string) {
+}
 
 // capturingSetJobBroker wraps schedulerFixtureBroker and intercepts
 // SetSchedulerJob so updateJob persistence can be asserted on directly.
+// PR 8 Lane G: also intercepts updateSchedulerHeartbeat since updateJob
+// now routes heartbeats through that path to preserve user-controlled
+// cron-registry fields.
 type capturingSetJobBroker struct {
 	*schedulerFixtureBroker
 	captureSet func(schedulerJob)
@@ -623,6 +636,27 @@ func (b *capturingSetJobBroker) SetSchedulerJob(j schedulerJob) error {
 		b.captureSet(j)
 	}
 	return nil
+}
+
+func (b *capturingSetJobBroker) updateSchedulerHeartbeat(slug, label string, intervalMinutes int, nextRun time.Time, status string, runStatus string) {
+	if b.captureSet == nil {
+		return
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	job := schedulerJob{
+		Slug:            slug,
+		Label:           label,
+		IntervalMinutes: intervalMinutes,
+		Status:          status,
+		LastRunStatus:   runStatus,
+	}
+	if !nextRun.IsZero() {
+		job.NextRun = nextRun.UTC().Format(time.RFC3339)
+	}
+	if status == "sleeping" || runStatus != "" {
+		job.LastRun = now
+	}
+	b.captureSet(job)
 }
 
 // Sanity: assert that the launcher wires the scheduler with broker, clock,

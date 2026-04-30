@@ -91,10 +91,17 @@ func (l *Launcher) pollNexNotificationsLoop() {
 		return
 	}
 	client := api.NewClient(apiKey)
-	interval := notificationPollInterval()
+	defaultInterval := notificationPollInterval()
 
 	time.Sleep(10 * time.Second)
 	for {
+		// PR 8 Lane G: honor enabled / interval_override from the cron registry.
+		enabled, interval := l.broker.SchedulerJobControl("nex-notifications", defaultInterval)
+		if !enabled {
+			l.updateSchedulerJob("nex-notifications", "Nex notifications", interval, time.Now().UTC().Add(interval), "disabled")
+			time.Sleep(interval)
+			continue
+		}
 		l.updateSchedulerJob("nex-notifications", "Nex notifications", interval, time.Now().UTC(), "running")
 		l.fetchAndIngestNexNotifications(client)
 		l.updateSchedulerJob("nex-notifications", "Nex notifications", interval, time.Now().UTC().Add(interval), "sleeping")
@@ -198,10 +205,17 @@ func (l *Launcher) pollNexInsightsLoop() {
 		return
 	}
 	client := api.NewClient(apiKey)
-	interval := time.Duration(config.ResolveInsightsPollInterval()) * time.Minute
+	defaultInterval := time.Duration(config.ResolveInsightsPollInterval()) * time.Minute
 
 	time.Sleep(20 * time.Second)
 	for {
+		// PR 8 Lane G: honor enabled / interval_override from the cron registry.
+		enabled, interval := l.broker.SchedulerJobControl("nex-insights", defaultInterval)
+		if !enabled {
+			l.updateSchedulerJob("nex-insights", "Nex insights", interval, time.Now().UTC().Add(interval), "disabled")
+			time.Sleep(interval)
+			continue
+		}
 		l.updateSchedulerJob("nex-insights", "Nex insights", interval, time.Now().UTC(), "running")
 		l.fetchAndPostNexInsights(client)
 		l.updateSchedulerJob("nex-insights", "Nex insights", interval, time.Now().UTC().Add(interval), "sleeping")

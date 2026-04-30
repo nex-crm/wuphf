@@ -12,6 +12,34 @@ func (b *Broker) DueSchedulerJobs() []schedulerJob {
 	return append([]schedulerJob(nil), b.dueSchedulerJobsLocked(time.Now().UTC())...)
 }
 
+// SchedulerJobControl returns (enabled, effective interval) for the named
+// cron slug. effectiveInterval is IntervalOverride when non-zero, else the
+// caller's defaultInterval. Run-loops call this once per tick (PR 8 Lane G):
+//
+//	enabled, interval := l.broker.SchedulerJobControl("nex-insights", config-default)
+//	if !enabled { time.Sleep(interval); continue }
+//	... do work ...
+//	time.Sleep(interval)
+//
+// When the slug isn't registered (e.g. broker not yet seeded), returns
+// (true, defaultInterval) so callers fall back to legacy behavior. ok=false
+// is reserved for "slug found but caller passed an invalid default".
+func (b *Broker) SchedulerJobControl(slug string, defaultInterval time.Duration) (bool, time.Duration) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, job := range b.scheduler {
+		if job.Slug != slug {
+			continue
+		}
+		interval := defaultInterval
+		if job.IntervalOverride > 0 {
+			interval = time.Duration(job.IntervalOverride) * time.Minute
+		}
+		return job.Enabled, interval
+	}
+	return true, defaultInterval
+}
+
 func (b *Broker) UpdateSchedulerJobState(slug string, nextRun time.Time, status string) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()

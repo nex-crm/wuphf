@@ -97,13 +97,22 @@ func (l *Launcher) pollOneRelayEventsLoop() {
 	if _, err := provider.ListRelays(context.Background(), action.ListRelaysOptions{Limit: 1}); err != nil {
 		return
 	}
-	interval := time.Minute
+	const defaultInterval = time.Minute
 	time.Sleep(25 * time.Second)
 	for {
-		l.updateSchedulerJob("one-relay-events", "One relay events", interval, time.Now().UTC(), "running")
+		// one-relay-events is read-only in v1 (interval_override is not
+		// user-settable), but Enabled is honored so a future admin path
+		// stays consistent with other system crons.
+		enabled, _ := l.broker.SchedulerJobControl("one-relay-events", defaultInterval)
+		if !enabled {
+			l.updateSchedulerJob("one-relay-events", "One relay events", defaultInterval, time.Now().UTC().Add(defaultInterval), "disabled")
+			time.Sleep(defaultInterval)
+			continue
+		}
+		l.updateSchedulerJob("one-relay-events", "One relay events", defaultInterval, time.Now().UTC(), "running")
 		l.fetchAndRecordOneRelayEvents(provider)
-		l.updateSchedulerJob("one-relay-events", "One relay events", interval, time.Now().UTC().Add(interval), "sleeping")
-		time.Sleep(interval)
+		l.updateSchedulerJob("one-relay-events", "One relay events", defaultInterval, time.Now().UTC().Add(defaultInterval), "sleeping")
+		time.Sleep(defaultInterval)
 	}
 }
 
