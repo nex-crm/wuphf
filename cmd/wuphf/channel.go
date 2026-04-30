@@ -10,20 +10,15 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"regexp"
-	"runtime"
 	"runtime/debug"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
-	"unicode"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/x/ansi"
 
+	"github.com/nex-crm/wuphf/cmd/wuphf/channelui"
 	"github.com/nex-crm/wuphf/internal/brokeraddr"
 	"github.com/nex-crm/wuphf/internal/company"
 	"github.com/nex-crm/wuphf/internal/config"
@@ -78,31 +73,6 @@ type channelSchedulerMsg struct {
 	jobs []channelSchedulerJob
 }
 
-type channelSkill struct {
-	ID                  string   `json:"id"`
-	Name                string   `json:"name"`
-	Title               string   `json:"title"`
-	Description         string   `json:"description"`
-	Content             string   `json:"content"`
-	CreatedBy           string   `json:"created_by"`
-	Channel             string   `json:"channel"`
-	Tags                []string `json:"tags"`
-	Trigger             string   `json:"trigger"`
-	WorkflowProvider    string   `json:"workflow_provider"`
-	WorkflowKey         string   `json:"workflow_key"`
-	WorkflowDefinition  string   `json:"workflow_definition"`
-	WorkflowSchedule    string   `json:"workflow_schedule"`
-	RelayID             string   `json:"relay_id"`
-	RelayPlatform       string   `json:"relay_platform"`
-	RelayEventTypes     []string `json:"relay_event_types"`
-	LastExecutionAt     string   `json:"last_execution_at"`
-	LastExecutionStatus string   `json:"last_execution_status"`
-	UsageCount          int      `json:"usage_count"`
-	Status              string   `json:"status"`
-	CreatedAt           string   `json:"created_at"`
-	UpdatedAt           string   `json:"updated_at"`
-}
-
 type channelSkillsMsg struct {
 	skills []channelSkill
 }
@@ -111,251 +81,10 @@ type channelUsageMsg struct {
 	usage channelUsageState
 }
 
-func appendUniqueMessages(existing, incoming []brokerMessage) ([]brokerMessage, int) {
-	if len(incoming) == 0 {
-		return existing, 0
-	}
-	seen := make(map[string]struct{}, len(existing)+len(incoming))
-	out := make([]brokerMessage, 0, len(existing)+len(incoming))
-	for _, msg := range existing {
-		out = append(out, msg)
-		if strings.TrimSpace(msg.ID) != "" {
-			seen[msg.ID] = struct{}{}
-		}
-	}
-	added := 0
-	for _, msg := range incoming {
-		if id := strings.TrimSpace(msg.ID); id != "" {
-			if _, ok := seen[id]; ok {
-				continue
-			}
-			seen[id] = struct{}{}
-		}
-		out = append(out, msg)
-		added++
-	}
-	return out, added
-}
-
-func normalizeSidebarSlug(value string) string {
-	value = strings.ToLower(strings.TrimSpace(value))
-	value = strings.ReplaceAll(value, " ", "-")
-	value = strings.ReplaceAll(value, "_", "-")
-	return value
-}
-
 type channelHealthMsg struct {
 	Connected     bool
 	SessionMode   string
 	OneOnOneAgent string
-}
-
-type brokerReaction struct {
-	Emoji string `json:"emoji"`
-	From  string `json:"from"`
-}
-
-type brokerMessageUsage struct {
-	InputTokens         int `json:"input_tokens,omitempty"`
-	OutputTokens        int `json:"output_tokens,omitempty"`
-	CacheReadTokens     int `json:"cache_read_tokens,omitempty"`
-	CacheCreationTokens int `json:"cache_creation_tokens,omitempty"`
-	TotalTokens         int `json:"total_tokens,omitempty"`
-}
-
-type brokerMessage struct {
-	ID          string              `json:"id"`
-	From        string              `json:"from"`
-	Kind        string              `json:"kind,omitempty"`
-	Source      string              `json:"source,omitempty"`
-	SourceLabel string              `json:"source_label,omitempty"`
-	EventID     string              `json:"event_id,omitempty"`
-	Title       string              `json:"title,omitempty"`
-	Content     string              `json:"content"`
-	Tagged      []string            `json:"tagged"`
-	ReplyTo     string              `json:"reply_to"`
-	Timestamp   string              `json:"timestamp"`
-	Usage       *brokerMessageUsage `json:"usage,omitempty"`
-	Reactions   []brokerReaction    `json:"reactions,omitempty"`
-}
-
-type channelMember struct {
-	Slug         string `json:"slug"`
-	Name         string `json:"name,omitempty"`
-	Role         string `json:"role,omitempty"`
-	Disabled     bool   `json:"disabled,omitempty"`
-	LastMessage  string `json:"lastMessage"`
-	LastTime     string `json:"lastTime"`
-	LiveActivity string `json:"liveActivity,omitempty"`
-}
-
-type officeMemberInfo struct {
-	Slug        string   `json:"slug"`
-	Name        string   `json:"name"`
-	Role        string   `json:"role"`
-	Expertise   []string `json:"expertise,omitempty"`
-	Personality string   `json:"personality,omitempty"`
-	BuiltIn     bool     `json:"built_in,omitempty"`
-}
-
-type channelInfo struct {
-	Slug        string   `json:"slug"`
-	Name        string   `json:"name"`
-	Type        string   `json:"type,omitempty"` // "O", "D", or "G" (channel store types)
-	Description string   `json:"description,omitempty"`
-	Members     []string `json:"members"`
-	Disabled    []string `json:"disabled"`
-}
-
-func (ch channelInfo) isDM() bool {
-	return ch.Type == "D" || ch.Type == "G"
-}
-
-type channelInterviewOption struct {
-	ID           string `json:"id"`
-	Label        string `json:"label"`
-	Description  string `json:"description"`
-	RequiresText bool   `json:"requires_text,omitempty"`
-	TextHint     string `json:"text_hint,omitempty"`
-}
-
-type channelInterview struct {
-	ID            string                   `json:"id"`
-	Kind          string                   `json:"kind,omitempty"`
-	Status        string                   `json:"status,omitempty"`
-	From          string                   `json:"from"`
-	Channel       string                   `json:"channel"`
-	Title         string                   `json:"title,omitempty"`
-	Question      string                   `json:"question"`
-	Context       string                   `json:"context"`
-	Options       []channelInterviewOption `json:"options"`
-	RecommendedID string                   `json:"recommended_id"`
-	Blocking      bool                     `json:"blocking,omitempty"`
-	Required      bool                     `json:"required,omitempty"`
-	Secret        bool                     `json:"secret,omitempty"`
-	ReplyTo       string                   `json:"reply_to,omitempty"`
-	CreatedAt     string                   `json:"created_at"`
-	DueAt         string                   `json:"due_at,omitempty"`
-	FollowUpAt    string                   `json:"follow_up_at,omitempty"`
-	ReminderAt    string                   `json:"reminder_at,omitempty"`
-	RecheckAt     string                   `json:"recheck_at,omitempty"`
-}
-
-type channelUsageTotals struct {
-	InputTokens         int     `json:"input_tokens"`
-	OutputTokens        int     `json:"output_tokens"`
-	CacheReadTokens     int     `json:"cache_read_tokens"`
-	CacheCreationTokens int     `json:"cache_creation_tokens"`
-	TotalTokens         int     `json:"total_tokens"`
-	CostUsd             float64 `json:"cost_usd"`
-	Requests            int     `json:"requests"`
-}
-
-type channelUsageState struct {
-	Session channelUsageTotals            `json:"session,omitempty"`
-	Total   channelUsageTotals            `json:"total"`
-	Agents  map[string]channelUsageTotals `json:"agents"`
-	Since   string                        `json:"since,omitempty"`
-}
-
-type channelTask struct {
-	ID               string `json:"id"`
-	Channel          string `json:"channel,omitempty"`
-	Title            string `json:"title"`
-	Details          string `json:"details,omitempty"`
-	Owner            string `json:"owner,omitempty"`
-	Status           string `json:"status"`
-	CreatedBy        string `json:"created_by"`
-	ThreadID         string `json:"thread_id,omitempty"`
-	TaskType         string `json:"task_type,omitempty"`
-	PipelineID       string `json:"pipeline_id,omitempty"`
-	PipelineStage    string `json:"pipeline_stage,omitempty"`
-	ExecutionMode    string `json:"execution_mode,omitempty"`
-	ReviewState      string `json:"review_state,omitempty"`
-	SourceSignalID   string `json:"source_signal_id,omitempty"`
-	SourceDecisionID string `json:"source_decision_id,omitempty"`
-	WorktreePath     string `json:"worktree_path,omitempty"`
-	WorktreeBranch   string `json:"worktree_branch,omitempty"`
-	CreatedAt        string `json:"created_at"`
-	UpdatedAt        string `json:"updated_at"`
-	DueAt            string `json:"due_at,omitempty"`
-	FollowUpAt       string `json:"follow_up_at,omitempty"`
-	ReminderAt       string `json:"reminder_at,omitempty"`
-	RecheckAt        string `json:"recheck_at,omitempty"`
-}
-
-type channelAction struct {
-	ID         string   `json:"id"`
-	Kind       string   `json:"kind"`
-	Source     string   `json:"source,omitempty"`
-	Channel    string   `json:"channel,omitempty"`
-	Actor      string   `json:"actor,omitempty"`
-	Summary    string   `json:"summary"`
-	RelatedID  string   `json:"related_id,omitempty"`
-	SignalIDs  []string `json:"signal_ids,omitempty"`
-	DecisionID string   `json:"decision_id,omitempty"`
-	CreatedAt  string   `json:"created_at"`
-}
-
-type channelSignal struct {
-	ID            string `json:"id"`
-	Source        string `json:"source"`
-	SourceRef     string `json:"source_ref,omitempty"`
-	Kind          string `json:"kind,omitempty"`
-	Title         string `json:"title,omitempty"`
-	Content       string `json:"content"`
-	Channel       string `json:"channel,omitempty"`
-	Owner         string `json:"owner,omitempty"`
-	Confidence    string `json:"confidence,omitempty"`
-	Urgency       string `json:"urgency,omitempty"`
-	DedupeKey     string `json:"dedupe_key,omitempty"`
-	RequiresHuman bool   `json:"requires_human,omitempty"`
-	Blocking      bool   `json:"blocking,omitempty"`
-	CreatedAt     string `json:"created_at"`
-}
-
-type channelDecision struct {
-	ID            string   `json:"id"`
-	Kind          string   `json:"kind"`
-	Channel       string   `json:"channel,omitempty"`
-	Summary       string   `json:"summary"`
-	Reason        string   `json:"reason,omitempty"`
-	Owner         string   `json:"owner,omitempty"`
-	SignalIDs     []string `json:"signal_ids,omitempty"`
-	RequiresHuman bool     `json:"requires_human,omitempty"`
-	Blocking      bool     `json:"blocking,omitempty"`
-	CreatedAt     string   `json:"created_at"`
-}
-
-type channelWatchdog struct {
-	ID         string `json:"id"`
-	Kind       string `json:"kind"`
-	Channel    string `json:"channel,omitempty"`
-	TargetType string `json:"target_type,omitempty"`
-	TargetID   string `json:"target_id,omitempty"`
-	Owner      string `json:"owner,omitempty"`
-	Status     string `json:"status,omitempty"`
-	Summary    string `json:"summary"`
-	CreatedAt  string `json:"created_at"`
-	UpdatedAt  string `json:"updated_at,omitempty"`
-}
-
-type channelSchedulerJob struct {
-	Slug            string `json:"slug"`
-	Label           string `json:"label"`
-	Kind            string `json:"kind,omitempty"`
-	TargetType      string `json:"target_type,omitempty"`
-	TargetID        string `json:"target_id,omitempty"`
-	Channel         string `json:"channel,omitempty"`
-	Provider        string `json:"provider,omitempty"`
-	ScheduleExpr    string `json:"schedule_expr,omitempty"`
-	WorkflowKey     string `json:"workflow_key,omitempty"`
-	SkillName       string `json:"skill_name,omitempty"`
-	IntervalMinutes int    `json:"interval_minutes"`
-	DueAt           string `json:"due_at,omitempty"`
-	NextRun         string `json:"next_run,omitempty"`
-	LastRun         string `json:"last_run,omitempty"`
-	Status          string `json:"status,omitempty"`
 }
 
 type channelTickMsg time.Time
@@ -448,10 +177,7 @@ type channelMemberDraft struct {
 	PermissionMode string
 }
 
-var mentionPattern = regexp.MustCompile(`@([A-Za-z0-9_-]+)`)
-
 var brokerTokenPath = brokeraddr.DefaultTokenFile
-var officeDirectory = map[string]officeMemberInfo{}
 
 var channelSlashCommands = []tui.SlashCommand{
 	{Name: "init", Description: "Run setup (Ryan Howard skipped this step — don't be Ryan)", Category: "setup"},
@@ -556,34 +282,12 @@ const (
 	channelPickerOpenclawSession channelPickerMode = "openclaw-session"
 )
 
-type officeApp string
-
-const (
-	officeAppMessages  officeApp = "messages"
-	officeAppInbox     officeApp = "inbox"
-	officeAppOutbox    officeApp = "outbox"
-	officeAppRecovery  officeApp = "recovery"
-	officeAppTasks     officeApp = "tasks"
-	officeAppRequests  officeApp = "requests"
-	officeAppPolicies  officeApp = "policies"
-	officeAppCalendar  officeApp = "calendar"
-	officeAppArtifacts officeApp = "artifacts"
-	officeAppSkills    officeApp = "skills"
-)
-
 type quickJumpTarget string
 
 const (
 	quickJumpNone     quickJumpTarget = ""
 	quickJumpChannels quickJumpTarget = "channels"
 	quickJumpApps     quickJumpTarget = "apps"
-)
-
-type calendarRange string
-
-const (
-	calendarRangeDay  calendarRange = "day"
-	calendarRangeWeek calendarRange = "week"
 )
 
 type channelIntegrationSpec struct {
@@ -640,7 +344,7 @@ type channelModel struct {
 	mention              tui.MentionModel
 	input                []rune
 	inputPos             int
-	inputHistory         composerHistory
+	inputHistory         channelui.History
 	width                int
 	height               int
 	scroll               int
@@ -667,7 +371,7 @@ type channelModel struct {
 	threadPanelID       string
 	threadInput         []rune
 	threadInputPos      int
-	threadInputHistory  composerHistory
+	threadInputHistory  channelui.History
 	threadScroll        int
 	usage               channelUsageState
 	brokerConnected     bool
@@ -712,16 +416,13 @@ func newChannelModelWithApp(threadsCollapsed bool, initialApp officeApp) channel
 		}
 		initialApp = officeAppMessages
 	}
-	officeDirectory = make(map[string]officeMemberInfo, len(officeMembers))
-	for _, member := range officeMembers {
-		officeDirectory[member.Slug] = member
-	}
+	channelui.SetOfficeDirectory(officeMembers)
 	m := channelModel{
 		expandedThreads:      make(map[string]bool),
 		threadsDefaultExpand: !threadsCollapsed,
 		autocomplete:         tui.NewAutocomplete(channelSlashCommands),
 		mention:              tui.NewMention(channelMentionAgents(nil)),
-		inputHistory:         newComposerHistory(),
+		inputHistory:         channelui.NewHistory(),
 		initFlow:             tui.NewInitFlow(),
 		activeChannel:        "general",
 		activeApp:            initialApp,
@@ -730,7 +431,7 @@ func newChannelModelWithApp(threadsCollapsed bool, initialApp officeApp) channel
 		channels:             channels,
 		sessionMode:          sessionMode,
 		oneOnOneAgent:        oneOnOneAgent,
-		threadInputHistory:   newComposerHistory(),
+		threadInputHistory:   channelui.NewHistory(),
 		lastAgentContent:     make(map[string]string),
 	}
 	if m.isOneOnOne() {
@@ -1013,7 +714,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "ctrl+d":
 			// Return to #general from a DM channel.
-			if chInfo := m.findChannelInfo(m.activeChannel); chInfo != nil && chInfo.isDM() {
+			if chInfo := m.findChannelInfo(m.activeChannel); chInfo != nil && chInfo.IsDM() {
 				m.activeChannel = "general"
 				m.lastID = ""
 				m.messages = nil
@@ -1239,7 +940,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if len(m.input) > 0 {
 				text := string(m.input)
 				trimmed := strings.TrimSpace(text)
-				m.inputHistory.record(m.input, m.inputPos)
+				m.inputHistory.Record(m.input, m.inputPos)
 				if trimmed == "/quit" || trimmed == "/exit" || trimmed == "/q" {
 					killTeamSession()
 					return m, tea.Quit
@@ -1275,25 +976,25 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "backspace":
 			m.lastCtrlCAt = time.Time{}
 			if m.inputPos > 0 {
-				m.inputHistory.resetRecall()
+				m.inputHistory.ResetRecall()
 				m.input = append(m.input[:m.inputPos-1], m.input[m.inputPos:]...)
 				m.inputPos--
 				m.updateInputOverlays()
 			}
 		case "ctrl+u":
 			m.lastCtrlCAt = time.Time{}
-			m.inputHistory.resetRecall()
+			m.inputHistory.ResetRecall()
 			m.input = nil
 			m.inputPos = 0
 			m.updateInputOverlays()
 		case "ctrl+p":
 			m.lastCtrlCAt = time.Time{}
-			if snapshot, ok := m.inputHistory.previous(m.input, m.inputPos); ok {
+			if snapshot, ok := m.inputHistory.Previous(m.input, m.inputPos); ok {
 				m.restoreMainSnapshot(snapshot)
 			}
 		case "ctrl+n":
 			m.lastCtrlCAt = time.Time{}
-			if snapshot, ok := m.inputHistory.next(); ok {
+			if snapshot, ok := m.inputHistory.Next(); ok {
 				m.restoreMainSnapshot(snapshot)
 			}
 		case "ctrl+a":
@@ -1306,7 +1007,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.updateInputOverlays()
 		case "ctrl+j":
 			m.lastCtrlCAt = time.Time{}
-			m.inputHistory.resetRecall()
+			m.inputHistory.ResetRecall()
 			ch := []rune{'\n'}
 			tail := make([]rune, len(m.input[m.inputPos:]))
 			copy(tail, m.input[m.inputPos:])
@@ -1364,7 +1065,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		default:
 			m.lastCtrlCAt = time.Time{}
 			if ch := composerInsertRunes(msg); len(ch) > 0 {
-				m.inputHistory.resetRecall()
+				m.inputHistory.ResetRecall()
 				m.input, m.inputPos = insertComposerRunes(m.input, m.inputPos, ch)
 				m.updateInputOverlays()
 			} else if len(msg.String()) == 1 || msg.Type == tea.KeyRunes {
@@ -1373,7 +1074,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					ch = []rune(msg.String())
 				}
 				if len(ch) > 0 {
-					m.inputHistory.resetRecall()
+					m.inputHistory.ResetRecall()
 					tail := make([]rune, len(m.input[m.inputPos:]))
 					copy(tail, m.input[m.inputPos:])
 					m.input = append(m.input[:m.inputPos], append(ch, tail...)...)
@@ -1793,10 +1494,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			msg.members = officeMembersFallback(m.officeMembers)
 		}
 		m.officeMembers = msg.members
-		officeDirectory = make(map[string]officeMemberInfo, len(msg.members))
-		for _, member := range msg.members {
-			officeDirectory[member.Slug] = member
-		}
+		channelui.SetOfficeDirectory(msg.members)
 		m.updateOverlaysForCurrentInput()
 
 	case channelChannelsMsg:
@@ -2379,7 +2077,7 @@ func (m channelModel) View() string {
 		thread = renderThreadPanel(m.messages, m.threadPanelID,
 			layout.ThreadW, layout.ContentH,
 			m.threadInput, m.threadInputPos, m.threadScroll,
-			threadPopup, m.focus == focusThread, len(m.threadInputHistory.entries) > 0)
+			threadPopup, m.focus == focusThread, m.threadInputHistory.Len() > 0)
 	}
 
 	activePending := m.visiblePendingRequest()
@@ -2598,12 +2296,12 @@ func (m channelModel) View() string {
 	} else if m.isOneOnOne() {
 		statusBar = statusBarStyle(m.width).Render(
 			lipgloss.NewStyle().Foreground(lipgloss.Color(slackActive)).Render(
-				workspaceState.defaultStatusLine(scrollHint),
+				workspaceState.DefaultStatusLine(scrollHint),
 			),
 		)
 	} else if !m.brokerConnected {
 		statusBar = statusBarStyle(m.width).Render(
-			lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Render(workspaceState.defaultStatusLine(scrollHint)),
+			lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Render(workspaceState.DefaultStatusLine(scrollHint)),
 		)
 	} else if m.replyToID != "" {
 		statusBar = statusBarStyle(m.width).Render(
@@ -2627,7 +2325,7 @@ func (m channelModel) View() string {
 		)
 	} else {
 		statusBar = statusBarStyle(m.width).Render(
-			lipgloss.NewStyle().Foreground(lipgloss.Color(slackActive)).Render(workspaceState.defaultStatusLine(scrollHint)),
+			lipgloss.NewStyle().Foreground(lipgloss.Color(slackActive)).Render(workspaceState.DefaultStatusLine(scrollHint)),
 		)
 	}
 
@@ -2708,7 +2406,7 @@ func (m channelModel) currentHeaderMeta() string {
 		return "  " + strings.Join(parts, " · ")
 	}
 	if m.isOneOnOne() {
-		return workspace.headerMeta()
+		return workspace.HeaderMeta()
 	}
 	switch m.activeApp {
 	case officeAppInbox:
@@ -2807,7 +2505,7 @@ func (m channelModel) currentHeaderMeta() string {
 		}
 		return "  " + summary
 	default:
-		return workspace.headerMeta()
+		return workspace.HeaderMeta()
 	}
 }
 
@@ -2843,36 +2541,9 @@ func (m channelModel) currentMainLines(contentWidth int) []renderedLine {
 	return m.cachedMainLines(contentWidth)
 }
 
-func filterInsightMessages(messages []brokerMessage) []brokerMessage {
-	filtered := make([]brokerMessage, 0, len(messages))
-	for _, msg := range messages {
-		if msg.Kind == "automation" || msg.From == "nex" {
-			filtered = append(filtered, msg)
-		}
-	}
-	return filtered
-}
-
-func latestHumanFacingMessage(messages []brokerMessage) *brokerMessage {
-	for i := len(messages) - 1; i >= 0; i-- {
-		if strings.HasPrefix(strings.TrimSpace(messages[i].Kind), "human_") {
-			return &messages[i]
-		}
-	}
-	return nil
-}
-
 type mouseAction struct {
 	Kind  string
 	Value string
-}
-
-func popupActionIndex(raw string) (int, bool) {
-	var idx int
-	if _, err := fmt.Sscanf(raw, "%d", &idx); err != nil || idx < 0 {
-		return 0, false
-	}
-	return idx, true
 }
 
 func (m channelModel) mouseActionAt(x, y int) (mouseAction, bool) {
@@ -3129,7 +2800,7 @@ func (m channelModel) composerTargetLabel() string {
 	if m.isOneOnOne() {
 		return "1:1 with " + m.oneOnOneAgentName()
 	}
-	if chInfo := m.currentChannelInfo(); chInfo != nil && chInfo.isDM() {
+	if chInfo := m.currentChannelInfo(); chInfo != nil && chInfo.IsDM() {
 		name := chInfo.Name
 		if name == "" {
 			name = chInfo.Slug
@@ -3174,78 +2845,6 @@ func (m channelModel) selectedInterviewOption() *channelInterviewOption {
 	return &m.pending.Options[m.selectedOption]
 }
 
-func countUniqueAgents(messages []brokerMessage) int {
-	seen := make(map[string]bool)
-	for _, m := range messages {
-		if m.From == "you" || m.From == "nex" || m.Kind == "automation" {
-			continue
-		}
-		seen[m.From] = true
-	}
-	return len(seen)
-}
-
-func formatUsd(cost float64) string {
-	return fmt.Sprintf("$%.2f", cost)
-}
-
-func formatTokenCount(tokens int) string {
-	switch {
-	case tokens >= 1_000_000:
-		return fmt.Sprintf("%.1fM tok", float64(tokens)/1_000_000)
-	case tokens >= 1_000:
-		return fmt.Sprintf("%.1fk tok", float64(tokens)/1_000)
-	default:
-		return fmt.Sprintf("%d tok", tokens)
-	}
-}
-
-func renderUsageStrip(usage channelUsageState, members []channelMember, width int) string {
-	if len(usage.Agents) == 0 || width < 40 {
-		return ""
-	}
-
-	var ordered []string
-	seen := make(map[string]bool)
-	for _, member := range members {
-		if _, ok := usage.Agents[member.Slug]; ok && !seen[member.Slug] {
-			ordered = append(ordered, member.Slug)
-			seen[member.Slug] = true
-		}
-	}
-	for _, slug := range []string{"ceo", "pm", "fe", "be", "ai", "designer", "cmo", "cro"} {
-		if _, ok := usage.Agents[slug]; ok && !seen[slug] {
-			ordered = append(ordered, slug)
-			seen[slug] = true
-		}
-	}
-	for slug := range usage.Agents {
-		if !seen[slug] {
-			ordered = append(ordered, slug)
-		}
-	}
-
-	pillStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#CBD5E1")).
-		Background(lipgloss.Color("#111827")).
-		Padding(0, 1)
-
-	var pills []string
-	for _, slug := range ordered {
-		totals := usage.Agents[slug]
-		if totals.TotalTokens == 0 && totals.CostUsd == 0 {
-			continue
-		}
-		label := fmt.Sprintf("%s %s · %s", agentAvatar(slug), formatTokenCount(totals.TotalTokens), formatUsd(totals.CostUsd))
-		pills = append(pills, pillStyle.Render(label))
-	}
-	if len(pills) == 0 {
-		return ""
-	}
-	prefix := lipgloss.NewStyle().Foreground(lipgloss.Color(slackMuted)).Render("  Spend by teammate")
-	return prefix + "  " + strings.Join(pills, " ")
-}
-
 // nextFocus cycles through visible panels: main → sidebar → thread → main.
 func (m channelModel) nextFocus() focusArea {
 	order := []focusArea{focusMain}
@@ -3282,10 +2881,10 @@ func (m channelModel) updateThread(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			text := string(m.threadInput)
 			trimmed := strings.TrimSpace(text)
 			if strings.HasPrefix(trimmed, "/") {
-				m.threadInputHistory.record(m.threadInput, m.threadInputPos)
+				m.threadInputHistory.Record(m.threadInput, m.threadInputPos)
 				return m.runCommand(trimmed, m.threadPanelID)
 			}
-			m.threadInputHistory.record(m.threadInput, m.threadInputPos)
+			m.threadInputHistory.Record(m.threadInput, m.threadInputPos)
 			m.threadInput = nil
 			m.threadInputPos = 0
 			m.posting = true
@@ -3293,22 +2892,22 @@ func (m channelModel) updateThread(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "backspace":
 		if m.threadInputPos > 0 {
-			m.threadInputHistory.resetRecall()
+			m.threadInputHistory.ResetRecall()
 			m.threadInput = append(m.threadInput[:m.threadInputPos-1], m.threadInput[m.threadInputPos:]...)
 			m.threadInputPos--
 			m.updateThreadOverlays()
 		}
 	case "ctrl+u":
-		m.threadInputHistory.resetRecall()
+		m.threadInputHistory.ResetRecall()
 		m.threadInput = nil
 		m.threadInputPos = 0
 		m.updateThreadOverlays()
 	case "ctrl+p":
-		if snapshot, ok := m.threadInputHistory.previous(m.threadInput, m.threadInputPos); ok {
+		if snapshot, ok := m.threadInputHistory.Previous(m.threadInput, m.threadInputPos); ok {
 			m.restoreThreadSnapshot(snapshot)
 		}
 	case "ctrl+n":
-		if snapshot, ok := m.threadInputHistory.next(); ok {
+		if snapshot, ok := m.threadInputHistory.Next(); ok {
 			m.restoreThreadSnapshot(snapshot)
 		}
 	case "ctrl+a":
@@ -3318,7 +2917,7 @@ func (m channelModel) updateThread(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.threadInputPos = len(m.threadInput)
 		m.updateThreadOverlays()
 	case "ctrl+j":
-		m.threadInputHistory.resetRecall()
+		m.threadInputHistory.ResetRecall()
 		ch := []rune{'\n'}
 		tail := make([]rune, len(m.threadInput[m.threadInputPos:]))
 		copy(tail, m.threadInput[m.threadInputPos:])
@@ -3351,7 +2950,7 @@ func (m channelModel) updateThread(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	default:
 		if ch := composerInsertRunes(msg); len(ch) > 0 {
-			m.threadInputHistory.resetRecall()
+			m.threadInputHistory.ResetRecall()
 			m.threadInput, m.threadInputPos = insertComposerRunes(m.threadInput, m.threadInputPos, ch)
 			m.updateThreadOverlays()
 		} else if len(msg.String()) == 1 || msg.Type == tea.KeyRunes {
@@ -3360,7 +2959,7 @@ func (m channelModel) updateThread(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				ch = []rune(msg.String())
 			}
 			if len(ch) > 0 {
-				m.threadInputHistory.resetRecall()
+				m.threadInputHistory.ResetRecall()
 				tail := make([]rune, len(m.threadInput[m.threadInputPos:]))
 				copy(tail, m.threadInput[m.threadInputPos:])
 				m.threadInput = append(m.threadInput[:m.threadInputPos], append(ch, tail...)...)
@@ -3429,45 +3028,10 @@ func (m channelModel) updateSidebar(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func appendWrapped(lines []string, width int, text string) []string {
-	if width <= 0 {
-		return append(lines, strings.Split(text, "\n")...)
-	}
-	wrapped := ansi.Wrap(text, width, "")
-	return append(lines, strings.Split(wrapped, "\n")...)
-}
-
-type threadedMessage struct {
-	Message            brokerMessage
-	Depth              int
-	ParentLabel        string
-	Collapsed          bool
-	HiddenReplies      int
-	ThreadParticipants []string
-}
-
 type sidebarItem struct {
 	Kind  string
 	Value string
 	Label string
-}
-
-type officeSidebarApp struct {
-	App   officeApp
-	Label string
-}
-
-func officeSidebarApps() []officeSidebarApp {
-	return []officeSidebarApp{
-		{App: officeAppMessages, Label: "Messages"},
-		{App: officeAppRecovery, Label: "Recovery"},
-		{App: officeAppTasks, Label: "Tasks"},
-		{App: officeAppRequests, Label: "Requests"},
-		{App: officeAppPolicies, Label: "Policies"},
-		{App: officeAppCalendar, Label: "Calendar"},
-		{App: officeAppArtifacts, Label: "Artifacts"},
-		{App: officeAppSkills, Label: "Skills"},
-	}
 }
 
 func (m channelModel) sidebarItems() []sidebarItem {
@@ -3499,13 +3063,6 @@ func (m channelModel) appSidebarItems() []sidebarItem {
 		items = append(items, sidebarItem{Kind: "app", Value: string(app.App), Label: app.Label})
 	}
 	return items
-}
-
-func sidebarShortcutLabel(index int) string {
-	if index < 0 || index > 8 {
-		return ""
-	}
-	return fmt.Sprintf("%d", index+1)
 }
 
 func (m channelModel) quickJumpItems() []sidebarItem {
@@ -3611,110 +3168,6 @@ func (m *channelModel) syncSidebarCursorToActive() {
 		}
 	}
 	m.clampSidebarCursor()
-}
-
-func flattenThreadMessages(messages []brokerMessage, expanded map[string]bool) []threadedMessage {
-	if len(messages) == 0 {
-		return nil
-	}
-
-	// Sort all messages by timestamp first
-	sorted := make([]brokerMessage, len(messages))
-	copy(sorted, messages)
-	sort.SliceStable(sorted, func(i, j int) bool {
-		return sorted[i].Timestamp < sorted[j].Timestamp
-	})
-
-	byID := make(map[string]brokerMessage, len(sorted))
-	children := make(map[string][]brokerMessage)
-	var roots []brokerMessage
-
-	for _, msg := range sorted {
-		byID[msg.ID] = msg
-	}
-	for _, msg := range sorted {
-		if msg.ReplyTo != "" {
-			if _, ok := byID[msg.ReplyTo]; ok {
-				children[msg.ReplyTo] = append(children[msg.ReplyTo], msg)
-				continue
-			}
-		}
-		roots = append(roots, msg)
-	}
-
-	var out []threadedMessage
-	var walk func(msg brokerMessage, depth int)
-	walk = func(msg brokerMessage, depth int) {
-		parentLabel := ""
-		if msg.ReplyTo != "" {
-			parentLabel = msg.ReplyTo
-			if parent, ok := byID[msg.ReplyTo]; ok {
-				parentLabel = "@" + parent.From
-			}
-		}
-		tm := threadedMessage{
-			Message:     msg,
-			Depth:       depth,
-			ParentLabel: parentLabel,
-		}
-		// Threads are expanded by default. Only collapse if explicitly set to false.
-		if len(children[msg.ID]) > 0 {
-			isExpanded, explicit := expanded[msg.ID]
-			if explicit && !isExpanded {
-				tm.Collapsed = true
-				tm.HiddenReplies = countThreadReplies(children, msg.ID)
-				tm.ThreadParticipants = threadParticipants(children, msg.ID)
-			}
-		}
-		out = append(out, tm)
-		if tm.Collapsed {
-			return
-		}
-		for _, child := range children[msg.ID] {
-			walk(child, depth+1)
-		}
-	}
-
-	for _, root := range roots {
-		walk(root, 0)
-	}
-	return out
-}
-
-func countThreadReplies(children map[string][]brokerMessage, rootID string) int {
-	count := 0
-	for _, child := range children[rootID] {
-		count++
-		count += countThreadReplies(children, child.ID)
-	}
-	return count
-}
-
-func threadParticipants(children map[string][]brokerMessage, rootID string) []string {
-	seen := make(map[string]bool)
-	var participants []string
-	var walk func(id string)
-	walk = func(id string) {
-		for _, child := range children[id] {
-			name := displayName(child.From)
-			if !seen[name] {
-				seen[name] = true
-				participants = append(participants, name)
-			}
-			walk(child.ID)
-		}
-	}
-	walk(rootID)
-	return participants
-}
-
-func findMessageByID(messages []brokerMessage, id string) (brokerMessage, bool) {
-	for _, msg := range messages {
-		if msg.ID == id {
-			return msg, true
-		}
-	}
-	return brokerMessage{}, false
 }
 
 // buildThreadPickerOptions returns picker options for all root messages that have replies.
@@ -3915,362 +3368,6 @@ func (m *channelModel) openRequestActionPicker(req channelInterview) tea.Cmd {
 	return nil
 }
 
-func (req channelInterview) TitleOrQuestion() string {
-	if strings.TrimSpace(req.Title) != "" {
-		return req.Title
-	}
-	return req.Question
-}
-
-func truncateText(s string, max int) string {
-	if len(s) <= max {
-		return s
-	}
-	return s[:max] + "…"
-}
-
-func hasThreadReplies(messages []brokerMessage, id string) bool {
-	for _, msg := range messages {
-		if msg.ReplyTo == id {
-			return true
-		}
-	}
-	return false
-}
-
-func containsSlug(items []string, want string) bool {
-	for _, item := range items {
-		if item == want {
-			return true
-		}
-	}
-	return false
-}
-
-func pluralizeWord(count int, singular, plural string) string {
-	if count == 1 {
-		return singular
-	}
-	if strings.TrimSpace(plural) != "" {
-		return plural
-	}
-	return singular + "s"
-}
-
-func maxInt(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-func clampScroll(total, viewHeight, scroll int) int {
-	if scroll < 0 {
-		return 0
-	}
-	maxScroll := total - viewHeight
-	if maxScroll < 0 {
-		maxScroll = 0
-	}
-	if scroll > maxScroll {
-		return maxScroll
-	}
-	return scroll
-}
-
-// mergeOfficeMembers returns all current channel members enriched with office roster
-// metadata and broker activity. Members who have not posted yet still appear as idle.
-func mergeOfficeMembers(officeMembers []officeMemberInfo, brokerMembers []channelMember, channel *channelInfo) []channelMember {
-	memberOrder := make([]string, 0)
-	if channel != nil && len(channel.Members) > 0 {
-		memberOrder = append(memberOrder, channel.Members...)
-	} else {
-		for _, member := range officeMembers {
-			memberOrder = append(memberOrder, member.Slug)
-		}
-	}
-
-	officeMap := make(map[string]officeMemberInfo, len(officeMembers))
-	for _, member := range officeMembers {
-		officeMap[member.Slug] = member
-	}
-	brokerMap := make(map[string]channelMember, len(brokerMembers))
-	for _, member := range brokerMembers {
-		brokerMap[member.Slug] = member
-	}
-
-	result := make([]channelMember, 0, len(memberOrder))
-	for _, slug := range memberOrder {
-		member := brokerMap[slug]
-		member.Slug = slug
-		if meta, ok := officeMap[slug]; ok {
-			if member.Name == "" {
-				member.Name = meta.Name
-			}
-			if member.Role == "" {
-				member.Role = meta.Role
-			}
-		}
-		if member.Name == "" {
-			member.Name = displayName(slug)
-		}
-		if member.Role == "" {
-			member.Role = roleLabel(slug)
-		}
-		result = append(result, member)
-	}
-	for _, member := range brokerMembers {
-		if containsSlug(memberOrder, member.Slug) {
-			continue
-		}
-		result = append(result, member)
-	}
-	return result
-}
-
-func officeMembersFromManifest(manifest company.Manifest) []officeMemberInfo {
-	members := make([]officeMemberInfo, 0, len(manifest.Members))
-	for _, member := range manifest.Members {
-		members = append(members, officeMemberInfo{
-			Slug:        member.Slug,
-			Name:        member.Name,
-			Role:        member.Role,
-			Expertise:   append([]string(nil), member.Expertise...),
-			Personality: member.Personality,
-			BuiltIn:     member.System,
-		})
-	}
-	return members
-}
-
-func channelInfosFromManifest(manifest company.Manifest) []channelInfo {
-	channels := make([]channelInfo, 0, len(manifest.Channels))
-	for _, channel := range manifest.Channels {
-		channels = append(channels, channelInfo{
-			Slug:     channel.Slug,
-			Name:     channel.Name,
-			Members:  append([]string(nil), channel.Members...),
-			Disabled: append([]string(nil), channel.Disabled...),
-		})
-	}
-	return channels
-}
-
-func officeMembersFallback(existing []officeMemberInfo) []officeMemberInfo {
-	if len(existing) > 0 {
-		return existing
-	}
-	manifest, err := company.LoadManifest()
-	if err != nil {
-		manifest = company.DefaultManifest()
-	}
-	return officeMembersFromManifest(manifest)
-}
-
-func channelInfosFallback(existing []channelInfo) []channelInfo {
-	if len(existing) > 0 {
-		return existing
-	}
-	manifest, err := company.LoadManifest()
-	if err != nil {
-		manifest = company.DefaultManifest()
-	}
-	return channelInfosFromManifest(manifest)
-}
-
-func displayName(slug string) string {
-	if member, ok := officeDirectory[slug]; ok && member.Name != "" {
-		return member.Name
-	}
-	switch slug {
-	case "ceo":
-		return "CEO"
-	case "pm":
-		return "Product Manager"
-	case "fe":
-		return "Frontend Engineer"
-	case "be":
-		return "Backend Engineer"
-	case "ai":
-		return "AI Engineer"
-	case "designer":
-		return "Designer"
-	case "cmo":
-		return "CMO"
-	case "cro":
-		return "CRO"
-	case "nex":
-		return "Nex"
-	case "you":
-		return "You"
-	default:
-		return "@" + slug
-	}
-}
-
-func roleLabel(slug string) string {
-	if member, ok := officeDirectory[slug]; ok && member.Role != "" {
-		return member.Role
-	}
-	switch slug {
-	case "ceo":
-		return "strategy"
-	case "pm":
-		return "product"
-	case "fe":
-		return "frontend"
-	case "be":
-		return "backend"
-	case "ai":
-		return "AI Engineer"
-	case "designer":
-		return "design"
-	case "cmo":
-		return "marketing"
-	case "cro":
-		return "revenue"
-	case "nex":
-		return "context graph"
-	case "you":
-		return "human"
-	default:
-		return "teammate"
-	}
-}
-
-func renderDateSeparator(width int, label string) string {
-	lineWidth := width - len(label) - 8
-	if lineWidth < 4 {
-		lineWidth = 4
-	}
-	segment := strings.Repeat("─", lineWidth/2)
-	return lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#64748B")).
-		Render(fmt.Sprintf("%s  %s  %s", segment, label, segment))
-}
-
-func inferMood(text string) string {
-	lower := strings.ToLower(text)
-	switch {
-	case lower == "":
-		return ""
-	case strings.Contains(lower, "love this") || strings.Contains(lower, "excited") || strings.Contains(lower, "let's go") || strings.Contains(lower, "great wedge"):
-		return "energized"
-	case strings.Contains(lower, "hmm") || strings.Contains(lower, "skept") || strings.Contains(lower, "push back") || strings.Contains(lower, "bloodbath") || strings.Contains(lower, "crowded"):
-		return "skeptical"
-	case strings.Contains(lower, "worr") || strings.Contains(lower, "risk") || strings.Contains(lower, "concern"):
-		return "concerned"
-	case strings.Contains(lower, "blocked") || strings.Contains(lower, "stuck") || strings.Contains(lower, "hard part"):
-		return "tense"
-	case strings.Contains(lower, "done") || strings.Contains(lower, "shipped") || strings.Contains(lower, "works"):
-		return "relieved"
-	case strings.Contains(lower, "need") || strings.Contains(lower, "should") || strings.Contains(lower, "must") || strings.Contains(lower, "v1"):
-		return "focused"
-	default:
-		return ""
-	}
-}
-
-func renderInterviewCard(interview channelInterview, selected int, phaseTitle string, width int) string {
-	cardWidth := width
-	if cardWidth < 40 {
-		cardWidth = 40
-	}
-	labelStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#FBBF24")).Bold(true)
-	titleStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#F8FAFC")).Bold(true)
-	textStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#E2E8F0"))
-	muted := lipgloss.NewStyle().Foreground(lipgloss.Color("#94A3B8"))
-
-	cardLabel := "Request"
-	switch strings.TrimSpace(interview.Kind) {
-	case "interview":
-		cardLabel = "Human Interview"
-	case "approval":
-		cardLabel = "Approval Request"
-	case "confirm":
-		cardLabel = "Confirmation Request"
-	case "secret":
-		cardLabel = "Private Request"
-	case "freeform":
-		cardLabel = "Open Question"
-	}
-	title := fmt.Sprintf("@%s needs your decision", interview.From)
-	if strings.TrimSpace(interview.Title) != "" {
-		title = interview.Title + " · @" + interview.From
-	}
-	headerBits := []string{labelStyle.Render(cardLabel)}
-	if strings.TrimSpace(phaseTitle) != "" {
-		headerBits = append(headerBits, subtlePill(phaseTitle, "#DBEAFE", "#1D4ED8"))
-	}
-	if interview.Blocking {
-		headerBits = append(headerBits, accentPill("blocking", "#B45309"))
-	}
-	if interview.Secret {
-		headerBits = append(headerBits, accentPill("private", "#6D28D9"))
-	}
-	lines := []string{
-		strings.Join(headerBits, "  "),
-		titleStyle.Render(title),
-		"",
-		textStyle.Width(cardWidth - 4).Render(interview.Question),
-	}
-	if strings.TrimSpace(interview.Context) != "" {
-		lines = append(lines, "")
-		lines = append(lines, muted.Width(cardWidth-4).Render(interview.Context))
-	}
-	if timing := renderTimingSummary(interview.DueAt, interview.FollowUpAt, interview.ReminderAt, interview.RecheckAt); timing != "" {
-		lines = append(lines, "", muted.Render(timing))
-	}
-	lines = append(lines, "", muted.Render("Options"))
-	for i, option := range interview.Options {
-		prefix := "  "
-		if i == selected {
-			prefix = lipgloss.NewStyle().Foreground(lipgloss.Color("#60A5FA")).Bold(true).Render("→ ")
-		}
-		label := option.Label
-		if option.ID == interview.RecommendedID {
-			label += " (Recommended)"
-		}
-		lines = append(lines, prefix+titleStyle.Render(label))
-		if strings.TrimSpace(option.Description) != "" {
-			lines = append(lines, "    "+muted.Width(cardWidth-8).Render(option.Description))
-		}
-	}
-	if hint := interviewOptionTextHint(selectedInterviewOption(interview.Options, selected)); hint != "" {
-		lines = append(lines, "", muted.Width(cardWidth-4).Render(hint))
-	}
-	customPrefix := "  "
-	if selected >= len(interview.Options) {
-		customPrefix = lipgloss.NewStyle().Foreground(lipgloss.Color("#60A5FA")).Bold(true).Render("→ ")
-	}
-	customLine := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(slackMuted)).
-		Render("Something else")
-	lines = append(lines, customPrefix+customLine)
-	lines = append(lines, "    "+muted.Width(cardWidth-8).Render("Type your own answer directly in the composer below."))
-	lines = append(lines, "", muted.Render("Press Enter to accept the selected option, or type your own answer below."))
-	return lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#F59E0B")).
-		Padding(0, 1).
-		Width(cardWidth).
-		Render(strings.Join(lines, "\n")) + "\n"
-}
-
-func highlightMentions(text string, agentColors map[string]string) string {
-	return mentionPattern.ReplaceAllStringFunc(text, func(match string) string {
-		slug := strings.TrimPrefix(strings.ToLower(match), "@")
-		color := agentColors[slug]
-		if color == "" {
-			return match
-		}
-		return lipgloss.NewStyle().
-			Foreground(lipgloss.Color(color)).
-			Bold(true).
-			Render(match)
-	})
-}
-
 func postToChannel(text string, replyTo string, channel string) tea.Cmd {
 	return func() tea.Msg {
 		body, _ := json.Marshal(map[string]any{
@@ -4368,13 +3465,13 @@ func (m *channelModel) setActiveInput(text string) {
 	if m.focus == focusThread && m.threadPanelOpen {
 		m.threadInput = []rune(text)
 		m.threadInputPos = len(m.threadInput)
-		m.threadInputHistory.resetRecall()
+		m.threadInputHistory.ResetRecall()
 		m.updateThreadOverlays()
 		return
 	}
 	m.input = []rune(text)
 	m.inputPos = len(m.input)
-	m.inputHistory.resetRecall()
+	m.inputHistory.ResetRecall()
 	m.updateInputOverlays()
 	m.maybeActivateChannelPickerFromInput()
 }
@@ -4388,104 +3485,26 @@ func (m *channelModel) activeInputString() string {
 
 func (m *channelModel) insertAcceptedMention(mention string) {
 	if m.focus == focusThread && m.threadPanelOpen {
-		m.threadInputHistory.resetRecall()
+		m.threadInputHistory.ResetRecall()
 		m.threadInput, m.threadInputPos = replaceMentionInInput(m.threadInput, m.threadInputPos, mention)
 		m.updateThreadOverlays()
 		return
 	}
-	m.inputHistory.resetRecall()
+	m.inputHistory.ResetRecall()
 	m.input, m.inputPos = replaceMentionInInput(m.input, m.inputPos, mention)
 	m.updateInputOverlays()
 }
 
-func (m *channelModel) restoreMainSnapshot(snapshot composerSnapshot) {
-	m.input = append([]rune(nil), snapshot.input...)
-	m.inputPos = normalizeCursorPos(m.input, snapshot.pos)
+func (m *channelModel) restoreMainSnapshot(snapshot channelui.Snapshot) {
+	m.input = append([]rune(nil), snapshot.Input...)
+	m.inputPos = normalizeCursorPos(m.input, snapshot.Pos)
 	m.updateInputOverlays()
 }
 
-func (m *channelModel) restoreThreadSnapshot(snapshot composerSnapshot) {
-	m.threadInput = append([]rune(nil), snapshot.input...)
-	m.threadInputPos = normalizeCursorPos(m.threadInput, snapshot.pos)
+func (m *channelModel) restoreThreadSnapshot(snapshot channelui.Snapshot) {
+	m.threadInput = append([]rune(nil), snapshot.Input...)
+	m.threadInputPos = normalizeCursorPos(m.threadInput, snapshot.Pos)
 	m.updateThreadOverlays()
-}
-
-func replaceMentionInInput(input []rune, pos int, mention string) ([]rune, int) {
-	text := string(input)
-	if pos < 0 {
-		pos = 0
-	}
-	if pos > len(input) {
-		pos = len(input)
-	}
-	atIdx := strings.LastIndex(text[:pos], "@")
-	if atIdx < 0 {
-		return input, pos
-	}
-	updated := []rune(text[:atIdx] + mention + " " + text[pos:])
-	return updated, atIdx + len([]rune(mention)) + 1
-}
-
-func normalizeCursorPos(input []rune, pos int) int {
-	if pos < 0 {
-		return 0
-	}
-	if pos > len(input) {
-		return len(input)
-	}
-	return pos
-}
-
-func isComposerWordRune(r rune) bool {
-	return unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || r == '-'
-}
-
-func moveCursorBackwardWord(input []rune, pos int) int {
-	pos = normalizeCursorPos(input, pos)
-	for pos > 0 && !isComposerWordRune(input[pos-1]) {
-		pos--
-	}
-	for pos > 0 && isComposerWordRune(input[pos-1]) {
-		pos--
-	}
-	return pos
-}
-
-func moveCursorForwardWord(input []rune, pos int) int {
-	pos = normalizeCursorPos(input, pos)
-	for pos < len(input) && isComposerWordRune(input[pos]) {
-		pos++
-	}
-	for pos < len(input) && !isComposerWordRune(input[pos]) {
-		pos++
-	}
-	return pos
-}
-
-func moveComposerCursor(input []rune, pos int, key string) (int, bool) {
-	pos = normalizeCursorPos(input, pos)
-	switch key {
-	case "left", "ctrl+b", "alt+h":
-		if pos > 0 {
-			pos--
-		}
-		return pos, true
-	case "right", "ctrl+f", "alt+l":
-		if pos < len(input) {
-			pos++
-		}
-		return pos, true
-	case "ctrl+a", "alt+0":
-		return 0, true
-	case "ctrl+e", "alt+$":
-		return len(input), true
-	case "alt+b":
-		return moveCursorBackwardWord(input, pos), true
-	case "alt+w":
-		return moveCursorForwardWord(input, pos), true
-	default:
-		return pos, false
-	}
 }
 
 func composerMotionKey(msg tea.KeyMsg) (string, bool) {
@@ -4524,17 +3543,6 @@ func composerInsertRunes(msg tea.KeyMsg) []rune {
 		return msg.Runes
 	}
 	return nil
-}
-
-func insertComposerRunes(input []rune, pos int, ch []rune) ([]rune, int) {
-	pos = normalizeCursorPos(input, pos)
-	if len(ch) == 0 {
-		return input, pos
-	}
-	tail := make([]rune, len(input[pos:]))
-	copy(tail, input[pos:])
-	input = append(input[:pos], append(ch, tail...)...)
-	return input, pos + len(ch)
 }
 
 func (m *channelModel) maybeActivateChannelPickerFromInput() bool {
@@ -4591,22 +3599,6 @@ func (m channelModel) renderActivePopup(width int) string {
 		return renderComposerPopup(options, m.mention.SelectedIndex(), width, "#2BAC76")
 	}
 	return ""
-}
-
-func overlayBottomLines(base, overlay []string) []string {
-	if len(base) == 0 || len(overlay) == 0 {
-		return base
-	}
-	out := append([]string(nil), base...)
-	start := len(out) - len(overlay)
-	if start < 0 {
-		start = 0
-		overlay = overlay[len(overlay)-len(out):]
-	}
-	for i, line := range overlay {
-		out[start+i] = line
-	}
-	return out
 }
 
 func (m channelModel) runActiveCommand(trimmed string) (tea.Model, tea.Cmd) {
@@ -5285,26 +4277,6 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 	}
 }
 
-func extractTagsFromText(text string) []string {
-	var tags []string
-	for _, word := range strings.Fields(text) {
-		if strings.HasPrefix(word, "@") && len(word) > 1 {
-			tag := strings.TrimRight(word[1:], ".,!?;:")
-			tags = append(tags, tag)
-		}
-	}
-	return tags
-}
-
-func channelExists(channels []channelInfo, slug string) bool {
-	for _, ch := range channels {
-		if ch.Slug == slug {
-			return true
-		}
-	}
-	return false
-}
-
 func (m channelModel) currentChannelInfo() *channelInfo {
 	return m.findChannelInfo(m.activeChannel)
 }
@@ -5766,50 +4738,6 @@ func tickChannel() tea.Cmd {
 	})
 }
 
-func mapString(m map[string]any, key string) string {
-	if m == nil {
-		return ""
-	}
-	v, ok := m[key]
-	if !ok || v == nil {
-		return ""
-	}
-	switch val := v.(type) {
-	case string:
-		return val
-	default:
-		return fmt.Sprintf("%v", val)
-	}
-}
-
-func openBrowserURL(url string) error {
-	// openBrowserURL spawns a detached helper that hands the URL to the OS.
-	// We use context.Background() because the child must outlive this call —
-	// the user keeps interacting with the browser long after we return — and
-	// noctx's "use CommandContext" recommendation is satisfied by the
-	// background ctx. Cancellation isn't meaningful for a fire-and-forget
-	// open-in-browser handoff.
-	ctx := context.Background()
-	var cmd *exec.Cmd
-	switch {
-	case url == "":
-		return nil
-	case isDarwin():
-		cmd = exec.CommandContext(ctx, "open", url)
-	case isLinux():
-		cmd = exec.CommandContext(ctx, "xdg-open", url)
-	case isWindows():
-		cmd = exec.CommandContext(ctx, "cmd", "/c", "start", "", url)
-	default:
-		return fmt.Errorf("unsupported platform")
-	}
-	return cmd.Start()
-}
-
-func isDarwin() bool  { return runtime.GOOS == "darwin" }
-func isLinux() bool   { return runtime.GOOS == "linux" }
-func isWindows() bool { return runtime.GOOS == "windows" }
-
 // killTeamSession kills the entire wuphf-team tmux session and all agent processes.
 func killTeamSession() {
 	// Best-effort cleanup at process exit; cap each step so a hung tmux or
@@ -5825,19 +4753,6 @@ func killTeamSession() {
 	}
 	if resp, err := http.DefaultClient.Do(req); err == nil {
 		_ = resp.Body.Close()
-	}
-}
-
-func resolveInitialOfficeApp(name string) officeApp {
-	normalized := strings.ToLower(strings.TrimSpace(name))
-	if normalized == "insights" {
-		return officeAppPolicies
-	}
-	switch officeApp(normalized) {
-	case officeAppMessages, officeAppInbox, officeAppOutbox, officeAppRecovery, officeAppTasks, officeAppRequests, officeAppPolicies, officeAppCalendar, officeAppArtifacts:
-		return officeApp(normalized)
-	default:
-		return officeAppMessages
 	}
 }
 
@@ -5889,28 +4804,4 @@ func reportChannelCrash(details string) {
 		fmt.Fprintln(os.Stderr, "then restart WUPHF when ready.")
 	}
 	select {}
-}
-
-func appendChannelCrashLog(details string) error {
-	path := channelCrashLogPath()
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
-	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
-	if err != nil {
-		return err
-	}
-	if _, err := fmt.Fprintf(f, "\n[%s]\n%s\n", time.Now().Format(time.RFC3339), details); err != nil {
-		_ = f.Close()
-		return err
-	}
-	return f.Close()
-}
-
-func channelCrashLogPath() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ".wuphf-channel-crash.log"
-	}
-	return filepath.Join(home, ".wuphf", "logs", "channel-crash.log")
 }

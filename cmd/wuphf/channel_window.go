@@ -9,7 +9,7 @@ import (
 
 func (m channelModel) currentMainViewportLines(contentWidth, msgH int) []renderedLine {
 	workspace := m.currentWorkspaceUIState()
-	needsYou := workspace.needsYouLines(contentWidth)
+	needsYou := workspace.NeedsYouLines(contentWidth)
 	bodyHeight := msgH
 	if len(needsYou) > 0 && bodyHeight-len(needsYou) >= 8 {
 		bodyHeight -= len(needsYou)

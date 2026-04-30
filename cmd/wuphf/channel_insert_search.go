@@ -134,12 +134,12 @@ func (m *channelModel) insertIntoActiveComposer(text string) {
 	insert := []rune(text)
 	if m.focus == focusThread && m.threadPanelOpen {
 		m.threadInput, m.threadInputPos = insertComposerRunes(m.threadInput, m.threadInputPos, insert)
-		m.threadInputHistory.resetRecall()
+		m.threadInputHistory.ResetRecall()
 		return
 	}
 	m.focus = focusMain
 	m.input, m.inputPos = insertComposerRunes(m.input, m.inputPos, insert)
-	m.inputHistory.resetRecall()
+	m.inputHistory.ResetRecall()
 }
 
 func (m *channelModel) applySearchSelection(value, label string) tea.Cmd {
@@ -245,19 +245,4 @@ func (m channelModel) recentRootMessages(limit int) []brokerMessage {
 		out = append(out, msg)
 	}
 	return out
-}
-
-func threadRootMessageID(messages []brokerMessage, messageID string) string {
-	current, ok := findMessageByID(messages, messageID)
-	if !ok {
-		return strings.TrimSpace(messageID)
-	}
-	for strings.TrimSpace(current.ReplyTo) != "" {
-		parent, ok := findMessageByID(messages, current.ReplyTo)
-		if !ok {
-			return current.ReplyTo
-		}
-		current = parent
-	}
-	return current.ID
 }

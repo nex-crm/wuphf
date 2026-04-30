@@ -1,4 +1,4 @@
-package main
+package avatar
 
 import (
 	"crypto/sha1"
@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func spriteDigest(s pixelSprite) string {
+func spriteDigest(s Sprite) string {
 	h := sha1.New()
 	for _, row := range s {
 		for _, v := range row {
@@ -95,16 +95,6 @@ func TestKnownSlugsUseHandDesignedSprites(t *testing.T) {
 		if !isProceduralSlug(slug) {
 			t.Errorf("slug %q should be procedural", slug)
 		}
-	}
-}
-
-func TestAgentColorUsesProceduralAccentForDynamicSlugs(t *testing.T) {
-	slug := "qa-lead"
-	if got, want := agentColor(slug), proceduralOfficeAccentForSlug(slug); got != want {
-		t.Fatalf("agentColor(%q) = %q, want procedural accent %q", slug, got, want)
-	}
-	if got := agentColor("ceo"); got != agentColorMap["ceo"] {
-		t.Fatalf("agentColor(%q) = %q, want fixed built-in color %q", "ceo", got, agentColorMap["ceo"])
 	}
 }
 
