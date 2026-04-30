@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/nex-crm/wuphf/cmd/wuphf/channelui"
 	"github.com/nex-crm/wuphf/internal/team"
 )
 
@@ -44,14 +45,14 @@ func TestInspectDoctorUsesCapabilityRegistry(t *testing.T) {
 	if len(report.Checks) != 2 {
 		t.Fatalf("expected two checks, got %+v", report.Checks)
 	}
-	if report.Checks[0].Severity != doctorFail {
+	if report.Checks[0].Severity != channelui.DoctorFail {
 		t.Fatalf("expected needs-setup capability to map to fail, got %+v", report.Checks[0])
 	}
-	if report.Checks[1].Severity != doctorWarn {
+	if report.Checks[1].Severity != channelui.DoctorWarn {
 		t.Fatalf("expected partial capability to map to warn, got %+v", report.Checks[1])
 	}
 
-	card := renderDoctorCard(report, 80)
+	card := channelui.RenderDoctorCard(report, 80)
 	for _, want := range []string{"needs setup", "partial", "Connected accounts"} {
 		if !strings.Contains(card, want) {
 			t.Fatalf("expected %q in doctor card: %q", want, card)

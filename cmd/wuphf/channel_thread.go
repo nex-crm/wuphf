@@ -7,12 +7,13 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/nex-crm/wuphf/cmd/wuphf/channelui"
 	"github.com/nex-crm/wuphf/internal/tui"
 )
 
 // renderThreadPanel renders the thread side panel with parent message,
 // reply count divider, replies, and its own input field.
-func renderThreadPanel(allMessages []brokerMessage, parentID string,
+func renderThreadPanel(allMessages []channelui.BrokerMessage, parentID string,
 	width, height int, threadInput []rune, threadInputPos int,
 	threadScroll int, popup string, focused bool, historyAvailable bool) string {
 
@@ -20,7 +21,7 @@ func renderThreadPanel(allMessages []brokerMessage, parentID string,
 		return ""
 	}
 
-	bg := lipgloss.Color(slackThreadBg)
+	bg := lipgloss.Color(channelui.SlackThreadBg)
 	innerW := width - 2 // 1 char padding each side
 
 	// ── Header: "Thread" + "✕" ────────────────────────────────────────
@@ -28,7 +29,7 @@ func renderThreadPanel(allMessages []brokerMessage, parentID string,
 		Foreground(lipgloss.Color("#FFFFFF")).
 		Bold(true)
 	closeStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(slackMuted))
+		Foreground(lipgloss.Color(channelui.SlackMuted))
 
 	titleText := headerStyle.Render("Thread")
 	closeText := closeStyle.Render("✕ Esc")
@@ -40,21 +41,21 @@ func renderThreadPanel(allMessages []brokerMessage, parentID string,
 	}
 	headerLine := titleText + strings.Repeat(" ", headerPad) + closeText
 
-	dividerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(slackDivider))
+	dividerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(channelui.SlackDivider))
 	headerDivider := dividerStyle.Render(strings.Repeat("─", innerW))
 
 	// ── Find parent message ───────────────────────────────────────────
-	parent, parentFound := findMessageByID(allMessages, parentID)
+	parent, parentFound := channelui.FindMessageByID(allMessages, parentID)
 
 	// ── Collect full thread replies (including nested replies) ───────
-	replies := flattenThreadReplies(allMessages, parentID)
+	replies := channelui.FlattenThreadReplies(allMessages, parentID)
 
 	// ── Build content lines ───────────────────────────────────────────
 	var contentLines []string
 
 	// Parent message
 	if parentFound {
-		contentLines = append(contentLines, renderThreadMessage(parent, innerW, true)...)
+		contentLines = append(contentLines, channelui.RenderThreadMessage(parent, innerW, true)...)
 		contentLines = append(contentLines, "")
 
 		// Reply count divider
@@ -76,11 +77,11 @@ func renderThreadPanel(allMessages []brokerMessage, parentID string,
 			contentLines = append(contentLines, "")
 		}
 
-		contentLines = append(contentLines, renderThreadReplies(replies, innerW)...)
+		contentLines = append(contentLines, channelui.RenderThreadReplies(replies, innerW)...)
 	} else {
 		contentLines = append(contentLines,
 			lipgloss.NewStyle().
-				Foreground(lipgloss.Color(slackMuted)).
+				Foreground(lipgloss.Color(channelui.SlackMuted)).
 				Render("  Thread message not found."))
 	}
 
@@ -95,7 +96,7 @@ func renderThreadPanel(allMessages []brokerMessage, parentID string,
 
 	// Apply scroll to content
 	total := len(contentLines)
-	scroll := clampScroll(total, contentH, threadScroll)
+	scroll := channelui.ClampScroll(total, contentH, threadScroll)
 	end := total - scroll
 	if end > total {
 		end = total
@@ -116,7 +117,7 @@ func renderThreadPanel(allMessages []brokerMessage, parentID string,
 		visible = append(visible, "")
 	}
 	if popup != "" {
-		visible = overlayBottomLines(visible, strings.Split(popup, "\n"))
+		visible = channelui.OverlayBottomLines(visible, strings.Split(popup, "\n"))
 	}
 
 	// ── Compose panel ─────────────────────────────────────────────────
@@ -149,144 +150,6 @@ func renderThreadPanel(allMessages []brokerMessage, parentID string,
 	return strings.Join(rendered, "\n")
 }
 
-func flattenThreadReplies(allMessages []brokerMessage, parentID string) []threadedMessage {
-	byID := make(map[string]brokerMessage, len(allMessages))
-	children := buildReplyChildren(allMessages)
-	for _, msg := range allMessages {
-		byID[msg.ID] = msg
-	}
-
-	var out []threadedMessage
-	var walk func(id string, depth int)
-	walk = func(id string, depth int) {
-		for _, child := range children[id] {
-			parentLabel := parentID
-			if parent, ok := byID[child.ReplyTo]; ok {
-				parentLabel = "@" + parent.From
-			}
-			out = append(out, threadedMessage{
-				Message:     child,
-				Depth:       depth,
-				ParentLabel: parentLabel,
-			})
-			walk(child.ID, depth+1)
-		}
-	}
-
-	walk(parentID, 0)
-	return out
-}
-
-func renderThreadReplies(replies []threadedMessage, width int) []string {
-	if len(replies) == 0 {
-		return nil
-	}
-
-	var lines []string
-	for _, reply := range replies {
-		lines = append(lines, renderThreadReply(reply, width)...)
-	}
-	return lines
-}
-
-func renderThreadReply(reply threadedMessage, width int) []string {
-	msg := reply.Message
-	color := agentColor(msg.From)
-	if color == "" {
-		color = "#9CA3AF"
-	}
-	nameStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(color)).
-		Bold(true)
-	tsStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(slackTimestamp))
-	metaStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(slackMuted))
-
-	name := displayName(msg.From)
-	ts := formatShortTime(msg.Timestamp)
-
-	prefix := "  " + strings.Repeat("  ", reply.Depth)
-	if reply.Depth > 0 {
-		prefix += "↳ "
-	}
-
-	meta := roleLabel(msg.From)
-	if usageMeta := renderMessageUsageMeta(msg.Usage, color); usageMeta != "" {
-		meta += " · " + usageMeta
-	}
-	if reply.ParentLabel != "" {
-		meta += " · reply to " + reply.ParentLabel
-	}
-
-	var lines []string
-	lines = append(lines, fmt.Sprintf("%s%s %s  %s  %s",
-		prefix,
-		agentAvatar(msg.From),
-		nameStyle.Render(name),
-		tsStyle.Render(ts),
-		metaStyle.Render(meta),
-	))
-
-	bodyPrefix := "  " + strings.Repeat("  ", reply.Depth)
-	if reply.Depth > 0 {
-		bodyPrefix += lipgloss.NewStyle().Foreground(lipgloss.Color(color)).Render("┆") + " "
-	} else {
-		bodyPrefix += lipgloss.NewStyle().Foreground(lipgloss.Color(color)).Render("│") + " "
-	}
-
-	for _, paragraph := range strings.Split(msg.Content, "\n") {
-		paragraph = highlightMentions(paragraph, agentColorMap)
-		for _, wrappedLine := range strings.Split(ansi.Wrap(paragraph, width-4, ""), "\n") {
-			lines = append(lines, bodyPrefix+wrappedLine)
-		}
-	}
-	lines = append(lines, "")
-	return lines
-}
-
-// renderThreadMessage renders a single message in thread style (compact).
-func renderThreadMessage(msg brokerMessage, width int, isParent bool) []string {
-	color := agentColor(msg.From)
-	if color == "" {
-		color = "#9CA3AF"
-	}
-	nameStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(color)).
-		Bold(true)
-	tsStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(slackTimestamp))
-
-	name := displayName(msg.From)
-	ts := formatShortTime(msg.Timestamp)
-
-	nameRendered := nameStyle.Render(name)
-	tsRendered := tsStyle.Render(ts)
-	nameWidth := lipgloss.Width(nameRendered)
-	tsWidth := lipgloss.Width(tsRendered)
-	gap := width - nameWidth - tsWidth - 4
-	if gap < 2 {
-		gap = 2
-	}
-
-	var lines []string
-	lines = append(lines, fmt.Sprintf("  %s %s%s%s",
-		agentAvatar(msg.From), nameRendered, strings.Repeat(" ", gap), tsRendered))
-	if usageMeta := renderMessageUsageMeta(msg.Usage, color); usageMeta != "" {
-		lines = append(lines, "  "+usageMeta)
-	}
-
-	// Render content
-	for _, paragraph := range strings.Split(msg.Content, "\n") {
-		paragraph = highlightMentions(paragraph, agentColorMap)
-		wrapped := ansi.Wrap(paragraph, width-4, "")
-		for _, wl := range strings.Split(wrapped, "\n") {
-			lines = append(lines, "  "+wl)
-		}
-	}
-	return lines
-}
-
 // renderThreadInput renders the input area at the bottom of the thread panel.
 func renderThreadInput(input []rune, inputPos int, width int, focused bool, historyAvailable bool) string {
 	if width < 6 {
@@ -297,7 +160,7 @@ func renderThreadInput(input []rune, inputPos int, width int, focused bool, hist
 	if len(input) == 0 {
 		cursorStyle := lipgloss.NewStyle().Reverse(true)
 		placeholder := lipgloss.NewStyle().
-			Foreground(lipgloss.Color(slackMuted)).
+			Foreground(lipgloss.Color(channelui.SlackMuted)).
 			Render(" Reply in thread...")
 		inputStr = cursorStyle.Render(" ") + placeholder
 	} else {
@@ -316,9 +179,9 @@ func renderThreadInput(input []rune, inputPos int, width int, focused bool, hist
 
 	inputStr = ansi.Wrap(inputStr, width-2, "")
 
-	borderColor := slackInputBorder
+	borderColor := channelui.SlackInputBorder
 	if focused {
-		borderColor = slackInputFocus
+		borderColor = channelui.SlackInputFocus
 	}
 	borderStyle := lipgloss.NewStyle().
 		Width(width).
@@ -327,8 +190,8 @@ func renderThreadInput(input []rune, inputPos int, width int, focused bool, hist
 		Background(lipgloss.Color("#17161C")).
 		Padding(0, 1)
 
-	label := lipgloss.NewStyle().Foreground(lipgloss.Color(slackActive)).Bold(true).Render("Reply")
-	hint := lipgloss.NewStyle().Foreground(lipgloss.Color(slackMuted)).Render(
+	label := lipgloss.NewStyle().Foreground(lipgloss.Color(channelui.SlackActive)).Bold(true).Render("Reply")
+	hint := lipgloss.NewStyle().Foreground(lipgloss.Color(channelui.SlackMuted)).Render(
 		tui.ComposerHint(tui.ComposerHintState{
 			Context:          tui.ContextThreadCompose,
 			HistoryAvailable: historyAvailable,

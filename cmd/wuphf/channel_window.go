@@ -5,11 +5,13 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/nex-crm/wuphf/cmd/wuphf/channelui"
 )
 
-func (m channelModel) currentMainViewportLines(contentWidth, msgH int) []renderedLine {
+func (m channelModel) currentMainViewportLines(contentWidth, msgH int) []channelui.RenderedLine {
 	workspace := m.currentWorkspaceUIState()
-	needsYou := workspace.needsYouLines(contentWidth)
+	needsYou := workspace.NeedsYouLines(contentWidth)
 	bodyHeight := msgH
 	if len(needsYou) > 0 && bodyHeight-len(needsYou) >= 8 {
 		bodyHeight -= len(needsYou)
@@ -18,10 +20,10 @@ func (m channelModel) currentMainViewportLines(contentWidth, msgH int) []rendere
 	}
 
 	if m.isOneOnOne() {
-		if m.activeApp == officeAppRecovery {
+		if m.activeApp == channelui.OfficeAppRecovery {
 			return m.currentMainLines(contentWidth)
 		}
-		if m.activeApp == officeAppInbox || m.activeApp == officeAppOutbox {
+		if m.activeApp == channelui.OfficeAppInbox || m.activeApp == channelui.OfficeAppOutbox {
 			return append(needsYou, m.currentMainLines(contentWidth)...)
 		}
 		if len(m.messages) == 0 {
@@ -30,7 +32,7 @@ func (m channelModel) currentMainViewportLines(contentWidth, msgH int) []rendere
 		lines := buildOneOnOneViewportSuffix(m.messages, m.actions, m.tasks, m.members, m.expandedThreads, contentWidth, bodyHeight, m.scroll, m.oneOnOneAgentName(), m.oneOnOneAgentSlug(), m.unreadAnchorID, m.unreadCount)
 		return append(needsYou, lines...)
 	}
-	if m.activeApp == officeAppMessages {
+	if m.activeApp == channelui.OfficeAppMessages {
 		if len(m.messages) == 0 {
 			return append(needsYou, m.buildOfficeFeedLines(contentWidth)...)
 		}
@@ -40,15 +42,15 @@ func (m channelModel) currentMainViewportLines(contentWidth, msgH int) []rendere
 	return m.currentMainLines(contentWidth)
 }
 
-func buildOfficeViewportSuffix(messages []brokerMessage, expanded map[string]bool, contentWidth, msgH, scroll int, threadsDefaultExpand bool, unreadAnchorID string, unreadCount int, members []channelMember, tasks []channelTask, actions []channelAction) []renderedLine {
-	tail := buildLiveWorkLines(members, tasks, actions, contentWidth, "")
+func buildOfficeViewportSuffix(messages []channelui.BrokerMessage, expanded map[string]bool, contentWidth, msgH, scroll int, threadsDefaultExpand bool, unreadAnchorID string, unreadCount int, members []channelui.Member, tasks []channelui.Task, actions []channelui.Action) []channelui.RenderedLine {
+	tail := channelui.BuildLiveWorkLines(members, tasks, actions, contentWidth, "")
 	return buildVirtualizedOfficeViewport(messages, expanded, contentWidth, msgH, scroll, threadsDefaultExpand, unreadAnchorID, unreadCount, tail)
 }
 
-func buildOneOnOneViewportSuffix(messages []brokerMessage, actions []channelAction, tasks []channelTask, members []channelMember, expanded map[string]bool, contentWidth, msgH, scroll int, agentName, agentSlug, unreadAnchorID string, unreadCount int) []renderedLine {
-	var tail []renderedLine
-	tail = append(tail, buildDirectExecutionLines(actions, agentSlug, contentWidth)...)
-	tail = append(tail, buildLiveWorkLines(members, tasks, nil, contentWidth, agentSlug)...)
+func buildOneOnOneViewportSuffix(messages []channelui.BrokerMessage, actions []channelui.Action, tasks []channelui.Task, members []channelui.Member, expanded map[string]bool, contentWidth, msgH, scroll int, agentName, agentSlug, unreadAnchorID string, unreadCount int) []channelui.RenderedLine {
+	var tail []channelui.RenderedLine
+	tail = append(tail, channelui.BuildDirectExecutionLines(actions, agentSlug, contentWidth)...)
+	tail = append(tail, channelui.BuildLiveWorkLines(members, tasks, nil, contentWidth, agentSlug)...)
 	if len(messages) == 0 {
 		limit := msgH + scroll
 		if limit < 1 {
@@ -56,14 +58,14 @@ func buildOneOnOneViewportSuffix(messages []brokerMessage, actions []channelActi
 		}
 		lines := append(buildOneOnOneMessageLines(messages, expanded, contentWidth, agentName, unreadAnchorID, unreadCount), tail...)
 		if len(lines) > limit {
-			return cloneRenderedLines(lines[len(lines)-limit:])
+			return channelui.CloneRenderedLines(lines[len(lines)-limit:])
 		}
 		return lines
 	}
 	return buildVirtualizedOfficeViewport(messages, expanded, contentWidth, msgH, scroll, true, unreadAnchorID, unreadCount, tail)
 }
 
-func officeThreadedMessages(messages []brokerMessage, expanded map[string]bool, threadsDefaultExpand bool) []threadedMessage {
+func officeThreadedMessages(messages []channelui.BrokerMessage, expanded map[string]bool, threadsDefaultExpand bool) []channelui.ThreadedMessage {
 	return cachedThreadedMessages(messages, expanded, threadsDefaultExpand)
 }
 
@@ -81,29 +83,29 @@ var threadParticipantDisplaySlug = map[string]string{
 func threadParticipantColor(participant string) string {
 	normalized := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(participant)), "@")
 	if slug, ok := threadParticipantDisplaySlug[normalized]; ok {
-		return agentColor(slug)
+		return channelui.AgentColor(slug)
 	}
-	if color := agentColor(normalized); color != "" {
+	if color := channelui.AgentColor(normalized); color != "" {
 		return color
 	}
 	return "#ABABAD"
 }
 
-func renderOfficeMessageBlock(tm threadedMessage, contentWidth int, unreadAnchorID string, unreadCount int) []renderedLine {
+func renderOfficeMessageBlock(tm channelui.ThreadedMessage, contentWidth int, unreadAnchorID string, unreadCount int) []channelui.RenderedLine {
 	msg := tm.Message
-	mutedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(slackMuted))
+	mutedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(channelui.SlackMuted))
 	statusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#CBD5E1")).Italic(true)
 
-	var lines []renderedLine
+	var lines []channelui.RenderedLine
 	if unreadAnchorID != "" && msg.ID == unreadAnchorID {
-		lines = append(lines, renderedLine{Text: renderUnreadDivider(contentWidth, unreadCount)})
+		lines = append(lines, channelui.RenderedLine{Text: channelui.RenderUnreadDivider(contentWidth, unreadCount)})
 	}
 	ts := msg.Timestamp
 	if len(ts) > 19 {
 		ts = ts[11:19]
 	}
 
-	color := agentColor(msg.From)
+	color := channelui.AgentColor(msg.From)
 	if color == "" {
 		color = "#9CA3AF"
 	}
@@ -113,26 +115,26 @@ func renderOfficeMessageBlock(tm threadedMessage, contentWidth int, unreadAnchor
 	ruleStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(color))
 
 	appendWrappedLine := func(text string) {
-		wrapped := appendWrapped(nil, contentWidth, text)
+		wrapped := channelui.AppendWrapped(nil, contentWidth, text)
 		for _, line := range wrapped {
-			lines = append(lines, renderedLine{Text: line})
+			lines = append(lines, channelui.RenderedLine{Text: line})
 		}
 	}
 
 	if strings.HasPrefix(msg.Kind, "human_") {
-		lines = append(lines, renderedLine{Text: ""})
+		lines = append(lines, channelui.RenderedLine{Text: ""})
 		headerPrefix := "  " + strings.Repeat("  ", tm.Depth)
 		if tm.Depth > 0 {
 			headerPrefix += "↳ "
 		}
-		meta := fmt.Sprintf("for you · %s · %s", humanMessageLabel(msg.Kind), msg.ID)
+		meta := fmt.Sprintf("for you · %s · %s", channelui.HumanMessageLabel(msg.Kind), msg.ID)
 		if tm.Depth > 0 {
 			meta += fmt.Sprintf(" · thread reply to %s", tm.ParentLabel)
 		}
 		appendWrappedLine(fmt.Sprintf("%s%s %s  %s  %s",
 			headerPrefix,
-			agentAvatar(msg.From),
-			nameStyle.Render(displayName(msg.From)),
+			channelui.AgentAvatar(msg.From),
+			nameStyle.Render(channelui.DisplayName(msg.From)),
 			mutedStyle.Render(ts),
 			lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Render(meta),
 		))
@@ -145,18 +147,18 @@ func renderOfficeMessageBlock(tm threadedMessage, contentWidth int, unreadAnchor
 		}
 		titleLine := msg.Title
 		if titleLine == "" {
-			titleLine = defaultHumanMessageTitle(msg.Kind, msg.From)
+			titleLine = channelui.DefaultHumanMessageTitle(msg.Kind, msg.From)
 		}
-		appendWrappedLine(prefix + subtlePill("for you", "#FEF3C7", "#92400E") + " " + lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#F8FAFC")).Render(titleLine))
+		appendWrappedLine(prefix + channelui.SubtlePill("for you", "#FEF3C7", "#92400E") + " " + lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#F8FAFC")).Render(titleLine))
 		for _, paragraph := range strings.Split(msg.Content, "\n") {
-			paragraph = highlightMentions(paragraph, agentColorMap)
+			paragraph = channelui.HighlightMentions(paragraph, channelui.AgentColorMap)
 			appendWrappedLine(prefix + paragraph)
 		}
 		return lines
 	}
 
 	if msg.Kind == "automation" || msg.From == "nex" {
-		lines = append(lines, renderedLine{Text: ""})
+		lines = append(lines, channelui.RenderedLine{Text: ""})
 		source := msg.Source
 		if source == "" {
 			source = "context graph"
@@ -167,18 +169,18 @@ func renderOfficeMessageBlock(tm threadedMessage, contentWidth int, unreadAnchor
 		if tm.Depth > 0 {
 			meta += fmt.Sprintf(" · thread reply to %s", tm.ParentLabel)
 		}
-		titleLine := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(color)).Render(fallbackString(msg.Title, "Automation update"))
-		for _, lineText := range renderRuntimeEventCard(contentWidth, subtlePill("automation", "#F8FAFC", "#334155")+" "+titleLine, meta, "#7C3AED", strings.Split(msg.Content, "\n")) {
-			lines = append(lines, renderedLine{Text: "  " + lineText})
+		titleLine := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(color)).Render(channelui.FallbackString(msg.Title, "Automation update"))
+		for _, lineText := range channelui.RenderRuntimeEventCard(contentWidth, channelui.SubtlePill("automation", "#F8FAFC", "#334155")+" "+titleLine, meta, "#7C3AED", strings.Split(msg.Content, "\n")) {
+			lines = append(lines, channelui.RenderedLine{Text: "  " + lineText})
 		}
 		return lines
 	}
 
 	if strings.HasPrefix(msg.Content, "[STATUS]") {
 		status := strings.TrimPrefix(msg.Content, "[STATUS] ")
-		titleLine := subtlePill("status", "#E2E8F0", "#334155") + " " + nameStyle.Render("@"+msg.From) + " " + statusStyle.Render("is "+status)
-		for _, lineText := range renderRuntimeEventCard(contentWidth, titleLine, mutedStyle.Render(ts), "#475569", nil) {
-			lines = append(lines, renderedLine{Text: "  " + lineText})
+		titleLine := channelui.SubtlePill("status", "#E2E8F0", "#334155") + " " + nameStyle.Render("@"+msg.From) + " " + statusStyle.Render("is "+status)
+		for _, lineText := range channelui.RenderRuntimeEventCard(contentWidth, titleLine, mutedStyle.Render(ts), "#475569", nil) {
+			lines = append(lines, channelui.RenderedLine{Text: "  " + lineText})
 		}
 		return lines
 	}
@@ -188,18 +190,18 @@ func renderOfficeMessageBlock(tm threadedMessage, contentWidth int, unreadAnchor
 		if msg.Kind == "stage" {
 			label = "stage"
 		}
-		for _, lineText := range renderRuntimeEventCard(contentWidth, subtlePill(label, "#E5E7EB", "#334155")+" "+mutedStyle.Render(ts), msg.Content, "#475569", nil) {
-			lines = append(lines, renderedLine{Text: "  " + lineText})
+		for _, lineText := range channelui.RenderRuntimeEventCard(contentWidth, channelui.SubtlePill(label, "#E5E7EB", "#334155")+" "+mutedStyle.Render(ts), msg.Content, "#475569", nil) {
+			lines = append(lines, channelui.RenderedLine{Text: "  " + lineText})
 		}
 		return lines
 	}
 
-	mood := inferMood(msg.Content)
-	meta := roleLabel(msg.From) + " · " + msg.ID
+	mood := channelui.InferMood(msg.Content)
+	meta := channelui.RoleLabel(msg.From) + " · " + msg.ID
 	if mood != "" {
 		meta += " · " + mood
 	}
-	if usageMeta := renderMessageUsageMeta(msg.Usage, color); usageMeta != "" {
+	if usageMeta := channelui.RenderMessageUsageMeta(msg.Usage, color); usageMeta != "" {
 		meta += " · " + usageMeta
 	}
 	if tm.Depth > 0 {
@@ -209,12 +211,12 @@ func renderOfficeMessageBlock(tm threadedMessage, contentWidth int, unreadAnchor
 	if mood != "" {
 		metaStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(color))
 	}
-	lines = append(lines, renderedLine{Text: ""})
+	lines = append(lines, channelui.RenderedLine{Text: ""})
 	headerPrefix := "  " + strings.Repeat("  ", tm.Depth)
 	if tm.Depth > 0 {
 		headerPrefix += "↳ "
 	}
-	appendWrappedLine(fmt.Sprintf("%s%s %s  %s  %s", headerPrefix, agentAvatar(msg.From), nameStyle.Render(displayName(msg.From)), mutedStyle.Render(ts), metaStyle.Render(meta)))
+	appendWrappedLine(fmt.Sprintf("%s%s %s  %s  %s", headerPrefix, channelui.AgentAvatar(msg.From), nameStyle.Render(channelui.DisplayName(msg.From)), mutedStyle.Render(ts), metaStyle.Render(meta)))
 
 	prefix := "  " + strings.Repeat("  ", tm.Depth)
 	if tm.Depth > 0 {
@@ -225,10 +227,10 @@ func renderOfficeMessageBlock(tm threadedMessage, contentWidth int, unreadAnchor
 
 	rendered := renderMarkdown(msg.Content, contentWidth-len(prefix)-2)
 	for _, paragraph := range strings.Split(rendered, "\n") {
-		paragraph = highlightMentions(paragraph, agentColorMap)
+		paragraph = channelui.HighlightMentions(paragraph, channelui.AgentColorMap)
 		appendWrappedLine(prefix + paragraph)
 	}
-	if reactionLine := renderReactions(msg.Reactions); reactionLine != "" {
+	if reactionLine := channelui.RenderReactions(msg.Reactions); reactionLine != "" {
 		appendWrappedLine(prefix + reactionLine)
 	}
 	if tm.Collapsed && tm.HiddenReplies > 0 {
@@ -241,18 +243,18 @@ func renderOfficeMessageBlock(tm threadedMessage, contentWidth int, unreadAnchor
 		if len(coloredNames) > 0 {
 			participantStr = "  " + strings.Join(coloredNames, ", ")
 		}
-		label := fmt.Sprintf("  ↩ %d %s%s", tm.HiddenReplies, pluralizeWord(tm.HiddenReplies, "reply", "replies"), participantStr)
-		lines = append(lines, renderedLine{Text: label, ThreadID: msg.ID})
+		label := fmt.Sprintf("  ↩ %d %s%s", tm.HiddenReplies, channelui.PluralizeWord(tm.HiddenReplies, "reply", "replies"), participantStr)
+		lines = append(lines, channelui.RenderedLine{Text: label, ThreadID: msg.ID})
 	}
 
 	return lines
 }
 
-func prependRenderedLines(dst, prefix []renderedLine) []renderedLine {
+func prependRenderedLines(dst, prefix []channelui.RenderedLine) []channelui.RenderedLine {
 	if len(prefix) == 0 {
 		return dst
 	}
-	out := make([]renderedLine, 0, len(prefix)+len(dst))
+	out := make([]channelui.RenderedLine, 0, len(prefix)+len(dst))
 	out = append(out, prefix...)
 	out = append(out, dst...)
 	return out

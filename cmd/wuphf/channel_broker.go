@@ -13,6 +13,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/nex-crm/wuphf/cmd/wuphf/channelui"
 	"github.com/nex-crm/wuphf/internal/brokeraddr"
 	"github.com/nex-crm/wuphf/internal/team"
 )
@@ -88,7 +89,7 @@ func pollBroker(sinceID string, channel string) tea.Cmd {
 		}
 
 		var result struct {
-			Messages []brokerMessage `json:"messages"`
+			Messages []channelui.BrokerMessage `json:"messages"`
 		}
 		if err := json.Unmarshal(body, &result); err != nil {
 			return channelMsg{}
@@ -116,7 +117,7 @@ func pollMembers(channel string) tea.Cmd {
 		}
 
 		var result struct {
-			Members []channelMember `json:"members"`
+			Members []channelui.Member `json:"members"`
 		}
 		if err := json.Unmarshal(body, &result); err != nil {
 			return channelMembersMsg{}
@@ -144,7 +145,7 @@ func pollOfficeMembers() tea.Cmd {
 		}
 
 		var result struct {
-			Members []officeMemberInfo `json:"members"`
+			Members []channelui.OfficeMember `json:"members"`
 		}
 		if err := json.Unmarshal(body, &result); err != nil {
 			return channelOfficeMembersMsg{}
@@ -172,7 +173,7 @@ func pollChannels() tea.Cmd {
 		}
 
 		var result struct {
-			Channels []channelInfo `json:"channels"`
+			Channels []channelui.ChannelInfo `json:"channels"`
 		}
 		if err := json.Unmarshal(body, &result); err != nil {
 			return channelChannelsMsg{}
@@ -269,11 +270,11 @@ func mutateChannel(action, slug, description string) tea.Cmd {
 		notice := ""
 		switch action {
 		case "create":
-			notice = fmt.Sprintf("Created #%s.", normalizeSidebarSlug(slug))
+			notice = fmt.Sprintf("Created #%s.", channelui.NormalizeSidebarSlug(slug))
 		case "remove":
-			notice = fmt.Sprintf("Removed #%s.", normalizeSidebarSlug(slug))
+			notice = fmt.Sprintf("Removed #%s.", channelui.NormalizeSidebarSlug(slug))
 		}
-		return channelPostDoneMsg{notice: notice, action: action, slug: normalizeSidebarSlug(slug)}
+		return channelPostDoneMsg{notice: notice, action: action, slug: channelui.NormalizeSidebarSlug(slug)}
 	}
 }
 
@@ -301,7 +302,7 @@ func mutateChannelMember(channel, action, slug string) tea.Cmd {
 		if err := reconfigureLiveOfficeSession(); err != nil {
 			return channelPostDoneMsg{err: err}
 		}
-		notice := fmt.Sprintf("%s @%s in #%s.", titleCaser.String(action), normalizeSidebarSlug(slug), normalizeSidebarSlug(channel))
+		notice := fmt.Sprintf("%s @%s in #%s.", titleCaser.String(action), channelui.NormalizeSidebarSlug(slug), channelui.NormalizeSidebarSlug(channel))
 		return channelPostDoneMsg{notice: notice}
 	}
 }
@@ -332,7 +333,7 @@ func mutateOfficeMember(action, slug, name string) tea.Cmd {
 		if err := reconfigureLiveOfficeSession(); err != nil {
 			return channelPostDoneMsg{err: err}
 		}
-		notice := fmt.Sprintf("%s @%s.", titleCaser.String(action), normalizeSidebarSlug(slug))
+		notice := fmt.Sprintf("%s @%s.", titleCaser.String(action), channelui.NormalizeSidebarSlug(slug))
 		return channelPostDoneMsg{notice: notice}
 	}
 }
@@ -402,12 +403,12 @@ func pollUsage() tea.Cmd {
 			return channelUsageMsg{}
 		}
 
-		var result channelUsageState
+		var result channelui.UsageState
 		if err := json.Unmarshal(body, &result); err != nil {
 			return channelUsageMsg{}
 		}
 		if result.Agents == nil {
-			result.Agents = make(map[string]channelUsageTotals)
+			result.Agents = make(map[string]channelui.UsageTotals)
 		}
 		return channelUsageMsg{usage: result}
 	}
@@ -429,7 +430,7 @@ func pollTasks(channel string) tea.Cmd {
 			return channelTasksMsg{}
 		}
 		var result struct {
-			Tasks []channelTask `json:"tasks"`
+			Tasks []channelui.Task `json:"tasks"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 			return channelTasksMsg{}
@@ -454,7 +455,7 @@ func pollSkills(channel string) tea.Cmd {
 			return channelSkillsMsg{}
 		}
 		var result struct {
-			Skills []channelSkill `json:"skills"`
+			Skills []channelui.Skill `json:"skills"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 			return channelSkillsMsg{}
@@ -489,7 +490,7 @@ func pollActions() tea.Cmd {
 			return channelActionsMsg{}
 		}
 		var result struct {
-			Actions []channelAction `json:"actions"`
+			Actions []channelui.Action `json:"actions"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 			return channelActionsMsg{}
@@ -511,7 +512,7 @@ func pollSignals() tea.Cmd {
 		}
 		defer resp.Body.Close()
 		var result struct {
-			Signals []channelSignal `json:"signals"`
+			Signals []channelui.Signal `json:"signals"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 			return channelSignalsMsg{}
@@ -533,7 +534,7 @@ func pollDecisions() tea.Cmd {
 		}
 		defer resp.Body.Close()
 		var result struct {
-			Decisions []channelDecision `json:"decisions"`
+			Decisions []channelui.Decision `json:"decisions"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 			return channelDecisionsMsg{}
@@ -555,7 +556,7 @@ func pollWatchdogs() tea.Cmd {
 		}
 		defer resp.Body.Close()
 		var result struct {
-			Watchdogs []channelWatchdog `json:"watchdogs"`
+			Watchdogs []channelui.Watchdog `json:"watchdogs"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 			return channelWatchdogsMsg{}
@@ -580,7 +581,7 @@ func pollScheduler() tea.Cmd {
 			return channelSchedulerMsg{}
 		}
 		var result struct {
-			Jobs []channelSchedulerJob `json:"jobs"`
+			Jobs []channelui.SchedulerJob `json:"jobs"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 			return channelSchedulerMsg{}
@@ -608,8 +609,8 @@ func pollRequests(channel string) tea.Cmd {
 		}
 
 		var result struct {
-			Requests []channelInterview `json:"requests"`
-			Pending  *channelInterview  `json:"pending"`
+			Requests []channelui.Interview `json:"requests"`
+			Pending  *channelui.Interview  `json:"pending"`
 		}
 		if err := json.Unmarshal(body, &result); err != nil {
 			return channelRequestsMsg{}
@@ -645,7 +646,7 @@ func postHumanInterrupt(channel string) tea.Cmd {
 	}
 }
 
-func cancelRequest(interview channelInterview) tea.Cmd {
+func cancelRequest(interview channelui.Interview) tea.Cmd {
 	return func() tea.Msg {
 		body, _ := json.Marshal(map[string]any{
 			"action": "cancel",
@@ -672,7 +673,7 @@ func cancelRequest(interview channelInterview) tea.Cmd {
 	}
 }
 
-func postInterviewAnswer(interview channelInterview, choiceID, choiceText, customText string) tea.Cmd {
+func postInterviewAnswer(interview channelui.Interview, choiceID, choiceText, customText string) tea.Cmd {
 	return func() tea.Msg {
 		body, _ := json.Marshal(map[string]any{
 			"id":          interview.ID,

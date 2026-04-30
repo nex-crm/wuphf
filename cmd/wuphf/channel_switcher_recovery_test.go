@@ -4,20 +4,22 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/nex-crm/wuphf/cmd/wuphf/channelui"
 )
 
 func TestBuildWorkspaceSwitcherOptionsIncludesActiveWorkAndThreads(t *testing.T) {
 	m := newChannelModel(false)
 	m.unreadCount = 3
 	m.awaySummary = "3 new since you looked. Next: answer the blocking request."
-	m.members = []channelMember{{
+	m.members = []channelui.Member{{
 		Slug:         "pm",
 		Name:         "Product Manager",
 		LastMessage:  "Reviewing the launch checklist now",
 		LastTime:     time.Now().Add(-time.Minute).Format(time.RFC3339),
 		LiveActivity: "Reading the launch checklist",
 	}}
-	m.requests = []channelInterview{{
+	m.requests = []channelui.Interview{{
 		ID:        "req-1",
 		Kind:      "approval",
 		Status:    "pending",
@@ -26,7 +28,7 @@ func TestBuildWorkspaceSwitcherOptionsIncludesActiveWorkAndThreads(t *testing.T)
 		From:      "ceo",
 		CreatedAt: time.Now().Add(-2 * time.Minute).Format(time.RFC3339),
 	}}
-	m.tasks = []channelTask{{
+	m.tasks = []channelui.Task{{
 		ID:        "task-1",
 		Title:     "Ship launch checklist",
 		Owner:     "pm",
@@ -34,7 +36,7 @@ func TestBuildWorkspaceSwitcherOptionsIncludesActiveWorkAndThreads(t *testing.T)
 		ThreadID:  "msg-1",
 		UpdatedAt: time.Now().Add(-time.Minute).Format(time.RFC3339),
 	}}
-	m.messages = []brokerMessage{
+	m.messages = []channelui.BrokerMessage{
 		{ID: "msg-1", From: "ceo", Content: "Need launch review.", Timestamp: time.Now().Add(-3 * time.Minute).Format(time.RFC3339)},
 		{ID: "msg-2", From: "pm", Content: "Reply in thread", ReplyTo: "msg-1", Timestamp: time.Now().Add(-2 * time.Minute).Format(time.RFC3339)},
 	}
@@ -59,13 +61,13 @@ func TestBuildWorkspaceSwitcherOptionsIncludesActiveWorkAndThreads(t *testing.T)
 
 func TestApplyWorkspaceSwitcherSelectionSupportsTaskAndRequestTargets(t *testing.T) {
 	m := newChannelModel(false)
-	m.tasks = []channelTask{{
+	m.tasks = []channelui.Task{{
 		ID:       "task-1",
 		Title:    "Ship launch checklist",
 		Status:   "in_progress",
 		ThreadID: "msg-1",
 	}}
-	m.requests = []channelInterview{{
+	m.requests = []channelui.Interview{{
 		ID:       "req-1",
 		Kind:     "approval",
 		Status:   "pending",
@@ -77,7 +79,7 @@ func TestApplyWorkspaceSwitcherSelectionSupportsTaskAndRequestTargets(t *testing
 	if cmd := m.applyWorkspaceSwitcherSelection("task:task-1"); cmd == nil {
 		t.Fatal("expected task selection to return a poll command")
 	}
-	if m.activeApp != officeAppTasks || !m.threadPanelOpen || m.threadPanelID != "msg-1" {
+	if m.activeApp != channelui.OfficeAppTasks || !m.threadPanelOpen || m.threadPanelID != "msg-1" {
 		t.Fatalf("expected task selection to focus tasks/thread, got app=%q threadOpen=%v threadID=%q", m.activeApp, m.threadPanelOpen, m.threadPanelID)
 	}
 
@@ -86,7 +88,7 @@ func TestApplyWorkspaceSwitcherSelectionSupportsTaskAndRequestTargets(t *testing
 	if cmd := m.applyWorkspaceSwitcherSelection("request:req-1"); cmd == nil {
 		t.Fatal("expected request selection to return a focus command")
 	}
-	if m.activeApp != officeAppRequests || m.pending == nil || m.pending.ID != "req-1" {
+	if m.activeApp != channelui.OfficeAppRequests || m.pending == nil || m.pending.ID != "req-1" {
 		t.Fatalf("expected request selection to focus request state, got app=%q pending=%+v", m.activeApp, m.pending)
 	}
 }
@@ -94,7 +96,7 @@ func TestApplyWorkspaceSwitcherSelectionSupportsTaskAndRequestTargets(t *testing
 func TestBuildRecoveryLinesIncludesActionCards(t *testing.T) {
 	m := newChannelModel(false)
 	m.unreadCount = 2
-	m.tasks = []channelTask{{
+	m.tasks = []channelui.Task{{
 		ID:           "task-1",
 		Title:        "Ship launch checklist",
 		Details:      "Checklist almost ready for review.",
@@ -104,7 +106,7 @@ func TestBuildRecoveryLinesIncludesActionCards(t *testing.T) {
 		WorktreePath: "/tmp/wuphf-task-1",
 		UpdatedAt:    time.Now().Add(-time.Minute).Format(time.RFC3339),
 	}}
-	m.requests = []channelInterview{{
+	m.requests = []channelui.Interview{{
 		ID:            "req-1",
 		Kind:          "approval",
 		Status:        "pending",
@@ -115,7 +117,7 @@ func TestBuildRecoveryLinesIncludesActionCards(t *testing.T) {
 		Blocking:      true,
 		RecommendedID: "approve",
 	}}
-	m.messages = []brokerMessage{
+	m.messages = []channelui.BrokerMessage{
 		{ID: "msg-1", From: "ceo", Content: "Need launch review.", Timestamp: time.Now().Add(-3 * time.Minute).Format(time.RFC3339)},
 		{ID: "msg-2", From: "pm", Content: "Reply in thread", ReplyTo: "msg-1", Timestamp: time.Now().Add(-2 * time.Minute).Format(time.RFC3339)},
 	}

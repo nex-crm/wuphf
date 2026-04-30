@@ -1,68 +1,32 @@
 package main
 
-import "strings"
+import (
+	"strings"
 
-type channelInterviewPhase string
-
-const (
-	interviewPhaseChoose channelInterviewPhase = "choose"
-	interviewPhaseDraft  channelInterviewPhase = "draft"
-	interviewPhaseReview channelInterviewPhase = "review"
+	"github.com/nex-crm/wuphf/cmd/wuphf/channelui"
 )
 
-func interviewOptionRequiresText(option *channelInterviewOption) bool {
-	if option == nil {
-		return false
-	}
-	if option.RequiresText {
-		return true
-	}
-	id := strings.TrimSpace(strings.ToLower(option.ID))
-	return strings.Contains(id, "note") || strings.Contains(id, "steer")
-}
-
-func interviewOptionTextHint(option *channelInterviewOption) string {
-	if option == nil {
-		return ""
-	}
-	if strings.TrimSpace(option.TextHint) != "" {
-		return option.TextHint
-	}
-	if interviewOptionRequiresText(option) {
-		return "Type your note, rationale, or steering before submitting this choice."
-	}
-	return ""
-}
-
-func selectedInterviewOption(options []channelInterviewOption, index int) *channelInterviewOption {
-	if index < 0 || index >= len(options) {
-		return nil
-	}
-	option := options[index]
-	return &option
-}
-
-func (m channelModel) currentInterviewPhase() channelInterviewPhase {
+func (m channelModel) currentInterviewPhase() channelui.InterviewPhase {
 	if m.pending == nil {
 		return ""
 	}
-	if m.confirm != nil && m.confirm.Action == confirmActionSubmitRequest {
-		return interviewPhaseReview
+	if m.confirm != nil && m.confirm.Action == channelui.ChannelConfirmActionSubmitRequest {
+		return channelui.InterviewPhaseReview
 	}
 	if strings.TrimSpace(string(m.input)) != "" {
-		return interviewPhaseDraft
+		return channelui.InterviewPhaseDraft
 	}
-	if interviewOptionRequiresText(m.selectedInterviewOption()) {
-		return interviewPhaseDraft
+	if channelui.InterviewOptionRequiresText(m.selectedInterviewOption()) {
+		return channelui.InterviewPhaseDraft
 	}
-	return interviewPhaseChoose
+	return channelui.InterviewPhaseChoose
 }
 
 func (m channelModel) interviewPhaseTitle() string {
 	switch m.currentInterviewPhase() {
-	case interviewPhaseReview:
+	case channelui.InterviewPhaseReview:
 		return "Step 3 of 3 · review"
-	case interviewPhaseDraft:
+	case channelui.InterviewPhaseDraft:
 		return "Step 2 of 3 · draft"
 	default:
 		return "Step 1 of 3 · choose"
@@ -71,9 +35,9 @@ func (m channelModel) interviewPhaseTitle() string {
 
 func (m channelModel) interviewStatusLine() string {
 	switch m.currentInterviewPhase() {
-	case interviewPhaseReview:
+	case channelui.InterviewPhaseReview:
 		return " Request review │ Enter submit │ Esc revise"
-	case interviewPhaseDraft:
+	case channelui.InterviewPhaseDraft:
 		return " Request draft │ type answer │ Enter review"
 	default:
 		return " Request choose │ ↑/↓ select │ Enter continue"

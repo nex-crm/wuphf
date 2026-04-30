@@ -8,10 +8,12 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/nex-crm/wuphf/cmd/wuphf/channelui"
 )
 
 func TestResolveInitialOfficeAppSupportsArtifacts(t *testing.T) {
-	if got := resolveInitialOfficeApp("artifacts"); got != officeAppArtifacts {
+	if got := channelui.ResolveInitialOfficeApp("artifacts"); got != channelui.OfficeAppArtifacts {
 		t.Fatalf("expected artifacts app, got %q", got)
 	}
 }
@@ -26,7 +28,7 @@ func TestArtifactsCommandSwitchesToArtifactsApp(t *testing.T) {
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	got := next.(channelModel)
 
-	if got.activeApp != officeAppArtifacts {
+	if got.activeApp != channelui.OfficeAppArtifacts {
 		t.Fatalf("expected artifacts app, got %q", got.activeApp)
 	}
 	if !strings.Contains(got.notice, "execution artifacts") {
@@ -43,7 +45,7 @@ func TestCurrentArtifactSummaryUsesLogsAndWorkflows(t *testing.T) {
 	writeWorkflowRun(t, home, "one", "daily-digest", `{"provider":"one","workflow_key":"daily-digest","run_id":"run-1","status":"success","started_at":"2026-04-07T10:02:00Z","finished_at":"2026-04-07T10:03:00Z"}`)
 
 	m := newChannelModel(false)
-	m.requests = []channelInterview{{ID: "req-1", Kind: "approval", Status: "pending", Title: "Approve copy", Question: "Approve copy?", From: "ceo"}}
+	m.requests = []channelui.Interview{{ID: "req-1", Kind: "approval", Status: "pending", Title: "Approve copy", Question: "Approve copy?", From: "ceo"}}
 
 	got := m.currentArtifactSummary()
 	if !strings.Contains(got, "task run") {
@@ -66,8 +68,8 @@ func TestBuildArtifactLinesShowsTaskLogsWorkflowRunsAndApprovals(t *testing.T) {
 	writeWorkflowRun(t, home, "one", "launch-sync", `{"provider":"one","workflow_key":"launch-sync","run_id":"run-2","status":"success","started_at":"2026-04-07T10:02:00Z","finished_at":"2026-04-07T10:03:00Z"}`)
 
 	m := newChannelModel(false)
-	m.tasks = []channelTask{{ID: "task-1", Title: "Ship launch notes", WorktreePath: "/tmp/wuphf-task-1"}}
-	m.requests = []channelInterview{{
+	m.tasks = []channelui.Task{{ID: "task-1", Title: "Ship launch notes", WorktreePath: "/tmp/wuphf-task-1"}}
+	m.requests = []channelui.Interview{{
 		ID:            "req-1",
 		Kind:          "approval",
 		Status:        "pending",
@@ -78,7 +80,7 @@ func TestBuildArtifactLinesShowsTaskLogsWorkflowRunsAndApprovals(t *testing.T) {
 		RecommendedID: "approve",
 		CreatedAt:     time.Now().Add(-time.Minute).Format(time.RFC3339),
 	}}
-	m.actions = []channelAction{{
+	m.actions = []channelui.Action{{
 		ID:        "action-1",
 		Kind:      "request_answered",
 		Actor:     "you",

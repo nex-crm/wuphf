@@ -6,13 +6,15 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/nex-crm/wuphf/cmd/wuphf/channelui"
 )
 
 // renderComposer renders the Slack-style input area with typing indicator,
 // label, rounded border, cursor, @mention popup, and interview options.
 func renderComposer(width int, input []rune, inputPos int, channelName string,
 	replyToID string, typingAgents []string, liveActivities map[string]string,
-	pending *channelInterview, selectedOption int, hint string, focused bool, tickFrame int) string {
+	pending *channelui.Interview, selectedOption int, hint string, focused bool, tickFrame int) string {
 
 	if width < 10 {
 		width = 10
@@ -36,12 +38,12 @@ func renderComposer(width int, input []rune, inputPos int, channelName string,
 		label = fmt.Sprintf("Reply to thread %s", replyToID)
 	}
 	labelStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(slackActive)).
+		Foreground(lipgloss.Color(channelui.SlackActive)).
 		Bold(true)
 	if isDM && pending == nil && replyToID == "" {
 		labelStyle = labelStyle.Foreground(lipgloss.Color("#8B5CF6"))
 	}
-	hintStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(slackMuted))
+	hintStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(channelui.SlackMuted))
 	if strings.TrimSpace(hint) == "" {
 		hint = "/ commands · @ mention · Ctrl+J newline · Enter send · Esc pause all"
 		if pending != nil {
@@ -76,7 +78,7 @@ func renderComposer(width int, input []rune, inputPos int, channelName string,
 			placeholder = fmt.Sprintf("Reply in thread %s... (Ctrl+J newline, /cancel to go back)", replyToID)
 		}
 		inputStr = cursorStyle.Render(" ") + lipgloss.NewStyle().
-			Foreground(lipgloss.Color(slackMuted)).Render(" "+placeholder)
+			Foreground(lipgloss.Color(channelui.SlackMuted)).Render(" "+placeholder)
 	} else {
 		before := string(input[:inputPos])
 		cursorStyle := lipgloss.NewStyle().Reverse(true)
@@ -94,92 +96,9 @@ func renderComposer(width int, input []rune, inputPos int, channelName string,
 	// Wrap input text to fit within border
 	inputStr = ansi.Wrap(inputStr, innerW, "")
 
-	borderStyle := composerBorderStyle(width-4, focused)
+	borderStyle := channelui.ComposerBorderStyle(width-4, focused)
 	inputBox := borderStyle.Render(inputStr)
 	parts = append(parts, inputBox)
 
 	return strings.Join(parts, "\n")
-}
-
-type composerPopupOption struct {
-	Label string
-	Meta  string
-}
-
-func renderComposerPopup(options []composerPopupOption, selectedIdx int, width int, accent string) string {
-	if len(options) == 0 {
-		return ""
-	}
-
-	maxShow := len(options)
-
-	popupStyle := lipgloss.NewStyle().
-		Background(lipgloss.Color("#111218")).
-		Foreground(lipgloss.Color(slackText)).
-		Width(width).
-		Padding(0, 1).
-		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color(slackBorder))
-
-	selectedStyle := lipgloss.NewStyle().
-		Background(lipgloss.Color(accent)).
-		Foreground(lipgloss.Color("#FFFFFF")).
-		Bold(true)
-
-	normalStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(slackText))
-
-	var lines []string
-	for i := 0; i < maxShow; i++ {
-		option := options[i]
-		entry := fmt.Sprintf("  %-18s %s", option.Label, option.Meta)
-		if i == selectedIdx {
-			lines = append(lines, selectedStyle.Render(entry))
-		} else {
-			lines = append(lines, normalStyle.Render(entry))
-		}
-	}
-	lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color(slackMuted)).Render("  Enter submit • Tab complete • Esc close"))
-	return popupStyle.Render(strings.Join(lines, "\n"))
-}
-
-// typingAgentsFromMembers returns a list of agent display names that are
-// currently typing (activity within the last 5 seconds) or working in their
-// Claude Code instance (live activity captured from tmux pane).
-func typingAgentsFromMembers(members []channelMember) []string {
-	var typing []string
-	for _, m := range members {
-		if m.Slug == "you" {
-			continue
-		}
-		act := classifyActivity(m)
-		if act.Label == "talking" || act.Label == "shipping" {
-			if m.Name != "" {
-				typing = append(typing, m.Name)
-			} else {
-				typing = append(typing, displayName(m.Slug))
-			}
-		} else if m.LiveActivity != "" {
-			// Agent is working in Claude Code but hasn't posted recently
-			name := m.Name
-			if name == "" {
-				name = displayName(m.Slug)
-			}
-			typing = append(typing, name)
-		}
-	}
-	return typing
-}
-
-// liveActivityFromMembers returns a map of agent slug -> live activity text
-// for agents currently working in their Claude Code instances.
-func liveActivityFromMembers(members []channelMember) map[string]string {
-	result := make(map[string]string)
-	for _, m := range members {
-		if m.Slug == "you" || m.LiveActivity == "" {
-			continue
-		}
-		result[m.Slug] = m.LiveActivity
-	}
-	return result
 }

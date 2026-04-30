@@ -1,10 +1,14 @@
 package main
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/nex-crm/wuphf/cmd/wuphf/channelui"
+)
 
 var renderOfficeMessageBlockFn = renderOfficeMessageBlock
 
-func buildVirtualizedOfficeViewport(messages []brokerMessage, expanded map[string]bool, contentWidth, msgH, scroll int, threadsDefaultExpand bool, unreadAnchorID string, unreadCount int, tail []renderedLine) []renderedLine {
+func buildVirtualizedOfficeViewport(messages []channelui.BrokerMessage, expanded map[string]bool, contentWidth, msgH, scroll int, threadsDefaultExpand bool, unreadAnchorID string, unreadCount int, tail []channelui.RenderedLine) []channelui.RenderedLine {
 	limit := msgH + scroll
 	if limit < 1 {
 		limit = 1
@@ -13,7 +17,7 @@ func buildVirtualizedOfficeViewport(messages []brokerMessage, expanded map[strin
 	if len(messages) == 0 {
 		lines := append(buildOfficeMessageLines(messages, expanded, contentWidth, threadsDefaultExpand, unreadAnchorID, unreadCount), tail...)
 		if len(lines) > limit {
-			return cloneRenderedLines(lines[len(lines)-limit:])
+			return channelui.CloneRenderedLines(lines[len(lines)-limit:])
 		}
 		return lines
 	}
@@ -24,7 +28,7 @@ func buildVirtualizedOfficeViewport(messages []brokerMessage, expanded map[strin
 		return collected
 	}
 
-	selected := make([][]renderedLine, 0, minInt(len(threaded), limit))
+	selected := make([][]channelui.RenderedLine, 0, channelui.MinInt(len(threaded), limit))
 	total := len(collected)
 	for i := len(threaded) - 1; i >= 0 && total < limit; i-- {
 		block := cachedThreadedMessageBlock(threaded[i], contentWidth, unreadAnchorID, unreadCount)
@@ -35,18 +39,18 @@ func buildVirtualizedOfficeViewport(messages []brokerMessage, expanded map[strin
 		selected = append(selected, cachedViewportTextBlock(contentWidth, "Today"))
 	}
 
-	out := make([]renderedLine, 0, total)
+	out := make([]channelui.RenderedLine, 0, total)
 	for i := len(selected) - 1; i >= 0; i-- {
 		out = append(out, selected[i]...)
 	}
 	out = append(out, collected...)
 	if len(out) > limit {
-		return cloneRenderedLines(out[len(out)-limit:])
+		return channelui.CloneRenderedLines(out[len(out)-limit:])
 	}
 	return out
 }
 
-func cachedThreadedMessages(messages []brokerMessage, expanded map[string]bool, threadsDefaultExpand bool) []threadedMessage {
+func cachedThreadedMessages(messages []channelui.BrokerMessage, expanded map[string]bool, threadsDefaultExpand bool) []channelui.ThreadedMessage {
 	ensureCollapsedThreadDefaults(messages, expanded, threadsDefaultExpand)
 	h := newStateHasher()
 	h.add("threaded-messages")
@@ -57,17 +61,17 @@ func cachedThreadedMessages(messages []brokerMessage, expanded map[string]bool, 
 	if cached, ok := channelRenderCache.getThreaded(key); ok {
 		return cached
 	}
-	threaded := flattenThreadMessages(messages, expanded)
+	threaded := channelui.FlattenThreadMessages(messages, expanded)
 	channelRenderCache.putThreaded(key, threaded)
-	return cloneThreadedMessages(threaded)
+	return channelui.CloneThreadedMessages(threaded)
 }
 
-func ensureCollapsedThreadDefaults(messages []brokerMessage, expanded map[string]bool, threadsDefaultExpand bool) {
+func ensureCollapsedThreadDefaults(messages []channelui.BrokerMessage, expanded map[string]bool, threadsDefaultExpand bool) {
 	if threadsDefaultExpand {
 		return
 	}
 	for _, msg := range messages {
-		if msg.ReplyTo != "" || !hasThreadReplies(messages, msg.ID) {
+		if msg.ReplyTo != "" || !channelui.HasThreadReplies(messages, msg.ID) {
 			continue
 		}
 		if _, ok := expanded[msg.ID]; !ok {
@@ -76,7 +80,7 @@ func ensureCollapsedThreadDefaults(messages []brokerMessage, expanded map[string
 	}
 }
 
-func cachedThreadedMessageBlock(tm threadedMessage, contentWidth int, unreadAnchorID string, unreadCount int) []renderedLine {
+func cachedThreadedMessageBlock(tm channelui.ThreadedMessage, contentWidth int, unreadAnchorID string, unreadCount int) []channelui.RenderedLine {
 	h := newStateHasher()
 	h.add("threaded-block")
 	h.addInt(contentWidth)
@@ -101,10 +105,10 @@ func cachedThreadedMessageBlock(tm threadedMessage, contentWidth int, unreadAnch
 	}
 	lines := renderOfficeMessageBlockFn(tm, contentWidth, unreadAnchorID, unreadCount)
 	channelRenderCache.putViewportBlock(key, lines)
-	return cloneRenderedLines(lines)
+	return channelui.CloneRenderedLines(lines)
 }
 
-func cachedViewportTextBlock(contentWidth int, label string) []renderedLine {
+func cachedViewportTextBlock(contentWidth int, label string) []channelui.RenderedLine {
 	h := newStateHasher()
 	h.add("viewport-text-block", label)
 	h.addInt(contentWidth)
@@ -112,12 +116,12 @@ func cachedViewportTextBlock(contentWidth int, label string) []renderedLine {
 	if cached, ok := channelRenderCache.getViewportBlock(key); ok {
 		return cached
 	}
-	lines := []renderedLine{{Text: renderDateSeparator(contentWidth, label)}}
+	lines := []channelui.RenderedLine{{Text: channelui.RenderDateSeparator(contentWidth, label)}}
 	channelRenderCache.putViewportBlock(key, lines)
-	return cloneRenderedLines(lines)
+	return channelui.CloneRenderedLines(lines)
 }
 
-func trimRenderedTail(lines []renderedLine, limit int) []renderedLine {
+func trimRenderedTail(lines []channelui.RenderedLine, limit int) []channelui.RenderedLine {
 	if len(lines) == 0 {
 		return nil
 	}
@@ -125,7 +129,7 @@ func trimRenderedTail(lines []renderedLine, limit int) []renderedLine {
 		limit = 1
 	}
 	if len(lines) <= limit {
-		return cloneRenderedLines(lines)
+		return channelui.CloneRenderedLines(lines)
 	}
-	return cloneRenderedLines(lines[len(lines)-limit:])
+	return channelui.CloneRenderedLines(lines[len(lines)-limit:])
 }

@@ -1,4 +1,4 @@
-package main
+package avatar
 
 import "hash/fnv"
 
@@ -19,7 +19,7 @@ const (
 )
 
 // baseBody is the always-drawn skeleton — face, torso, arms. No hair.
-var baseBody = pixelSprite{
+var baseBody = Sprite{
 	{0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0},
 	{0, 0, 0, 1, 2, 2, 2, 2, 2, 2, 1, 0, 0, 0},
 	{0, 0, 0, 1, 2, 2, 2, 2, 2, 2, 1, 0, 0, 0},
@@ -282,7 +282,7 @@ func pickIndex(hash, salt uint32, modulo int) int {
 
 // proceduralSpriteForSlug returns a composed sprite for a slug that has no
 // hand-designed mascot. Stable per slug.
-func proceduralSpriteForSlug(slug string) pixelSprite {
+func proceduralSpriteForSlug(slug string) Sprite {
 	hash := proceduralHash(slug)
 
 	sprite := cloneSprite(baseBody)
