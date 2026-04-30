@@ -2,7 +2,9 @@
 
 ## Register
 
-brand
+Use a direct, product-first register. Write like developer tooling that happens to be playful, not like a marketing site trying to sound clever.
+Keep the tone crisp, concrete, and slightly self-aware. Prefer short sentences, visible commands, and exact nouns over abstract claims.
+Avoid hype, buzzwords, and generic SaaS phrasing. When in doubt, explain the office by showing what it does and what the user runs next.
 
 ## Users
 

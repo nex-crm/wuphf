@@ -1705,11 +1705,19 @@
   });
 
   // ── COPY INSTALL ──────────────────────────────────────────────────────
-  function flashCopy(label) {
+  function announceCopyStatus(message) {
     var status = document.getElementById('copyStatus');
+    if (!status) return;
+    status.textContent = '';
+    window.requestAnimationFrame(function() {
+      status.textContent = message;
+    });
+  }
+
+  function flashCopy(label) {
     label.textContent = 'COPIED!';
     label.classList.add('copied');
-    if (status) status.textContent = 'Copied install command to clipboard.';
+    announceCopyStatus('Copied install command to clipboard.');
     setTimeout(function() {
       label.textContent = 'COPY';
       label.classList.remove('copied');
@@ -1717,17 +1725,16 @@
   }
 
   function copyInstall() {
-    var status = document.getElementById('copyStatus');
     var label = document.getElementById('copyLabel');
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText('npx wuphf@latest').then(function() {
         if (label) flashCopy(label);
       }).catch(function() {
-        if (status) status.textContent = 'Unable to copy install command.';
+        announceCopyStatus('Unable to copy install command.');
       });
       return;
     }
-    if (status) status.textContent = 'Clipboard copy is unavailable in this browser.';
+    announceCopyStatus('Clipboard copy is unavailable in this browser.');
   }
   window.copyInstall = copyInstall;
 
@@ -1735,16 +1742,15 @@
     btn.addEventListener('click', function() {
       var text = btn.dataset.copy || '';
       var label = btn.querySelector('.install-copy');
-      var status = document.getElementById('copyStatus');
       if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(text).then(function() {
           if (label) flashCopy(label);
         }).catch(function() {
-          if (status) status.textContent = 'Unable to copy install command.';
+          announceCopyStatus('Unable to copy install command.');
         });
         return;
       }
-      if (status) status.textContent = 'Clipboard copy is unavailable in this browser.';
+      announceCopyStatus('Clipboard copy is unavailable in this browser.');
     });
   });
 
@@ -1874,6 +1880,20 @@
     var OY = 72;
     var animHandle = null;
     var lastTime = 0;
+    var officeVisible = false;
+    var officeObserver = null;
+
+    function updateOfficeVisibility() {
+      if (!canvas || !canvas.getBoundingClientRect) {
+        officeVisible = true;
+        return;
+      }
+      var rect = canvas.getBoundingClientRect();
+      officeVisible = rect.bottom > 0 &&
+        rect.right > 0 &&
+        rect.top < window.innerHeight &&
+        rect.left < window.innerWidth;
+    }
 
     // ── ISO PROJECTION ─────────────────────────────────
     function iso(gx, gy) {
@@ -2800,13 +2820,16 @@
     }
 
     function startLoop() {
-      if (animHandle || !pageCanAnimate()) return;
+      if (animHandle || !pageCanAnimate() || !officeVisible) return;
       lastTime = performance.now();
       animHandle = window.requestAnimationFrame(loop);
     }
 
     function syncOfficeMotion() {
-      if (pageCanAnimate()) {
+      if (!officeObserver) {
+        updateOfficeVisibility();
+      }
+      if (pageCanAnimate() && officeVisible) {
         startLoop();
         return;
       }
@@ -2819,7 +2842,7 @@
       lastTime = now;
       update(dt);
       drawFrame();
-      animHandle = pageCanAnimate() ? window.requestAnimationFrame(loop) : null;
+      animHandle = pageCanAnimate() && officeVisible ? window.requestAnimationFrame(loop) : null;
     }
 
     document.addEventListener('visibilitychange', syncOfficeMotion);
@@ -2827,6 +2850,18 @@
       motionQuery.addEventListener('change', syncOfficeMotion);
     } else if (motionQuery.addListener) {
       motionQuery.addListener(syncOfficeMotion);
+    }
+
+    if (window.IntersectionObserver) {
+      officeObserver = new IntersectionObserver(function(entries) {
+        officeVisible = !!(entries[0] && entries[0].isIntersecting);
+        syncOfficeMotion();
+      }, { threshold: 0.12 });
+      officeObserver.observe(canvas);
+    } else {
+      updateOfficeVisibility();
+      window.addEventListener('scroll', syncOfficeMotion, { passive: true });
+      window.addEventListener('resize', syncOfficeMotion);
     }
 
     window.addEventListener('resize', function() {
