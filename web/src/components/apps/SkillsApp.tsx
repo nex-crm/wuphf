@@ -852,7 +852,7 @@ function SkillActions({
       .then((res) => {
         queryClient.invalidateQueries({ queryKey: ["skills"] });
         const token = res.undo_token;
-        const undoMs = Math.max(1, (res.expires_in ?? 5) * 1000);
+        const undoMs = Math.max(1, (res.expires_in ?? 6) * 1000);
         showUndoToast(
           `Rejected ${skillName}`,
           () => {

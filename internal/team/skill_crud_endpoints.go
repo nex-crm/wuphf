@@ -46,7 +46,8 @@ const undoTokenTTL = 60 * time.Second
 
 // undoToastWindow is the strict window the front-end requests; the backend
 // will refuse undo requests beyond this even if the token is still in the map.
-const undoToastWindow = 5 * time.Second
+// 6s gives a comfortable undo window without being too aggressive on token GC.
+const undoToastWindow = 6 * time.Second
 
 // rejectedSkillSnapshot captures everything we need to revive a rejected skill
 // via /skills/reject/undo. The frontmatter is rendered fresh on revival from
