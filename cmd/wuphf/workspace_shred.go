@@ -15,6 +15,7 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -39,6 +40,9 @@ func runWorkspaceShred(args []string) {
 		fmt.Fprintln(os.Stderr, "`wuphf workspace list --trash` and bring one back with `wuphf workspace restore`.")
 	}
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			os.Exit(0)
+		}
 		os.Exit(2)
 	}
 	positional := fs.Args()

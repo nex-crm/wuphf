@@ -9,6 +9,7 @@ package main
 // name already exists.
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -29,6 +30,9 @@ func runWorkspaceRestore(args []string) {
 		fmt.Fprintln(os.Stderr, "the restored workspace gets a numeric suffix.")
 	}
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			os.Exit(0)
+		}
 		os.Exit(2)
 	}
 	positional := fs.Args()

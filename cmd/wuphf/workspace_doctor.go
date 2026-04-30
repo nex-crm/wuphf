@@ -18,6 +18,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -43,6 +44,9 @@ func runWorkspaceDoctor(args []string) {
 		fmt.Fprintln(os.Stderr, "rows, expired trash entries, and the opencode shared-config race.")
 	}
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			os.Exit(0)
+		}
 		os.Exit(2)
 	}
 	if *yes && *dryRun {
