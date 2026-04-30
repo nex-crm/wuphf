@@ -13,6 +13,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/nex-crm/wuphf/cmd/wuphf/channelui"
 )
 
 // ── Onboarding state ────────────────────────────────────────────
@@ -79,9 +81,9 @@ func (s simpleInput) View(focused bool) string {
 	if w < 10 {
 		w = 10
 	}
-	borderColor := slackInputBorder
+	borderColor := channelui.SlackInputBorder
 	if focused {
-		borderColor = slackInputFocus
+		borderColor = channelui.SlackInputFocus
 	}
 
 	var display string
@@ -533,7 +535,7 @@ func (m onboardingModel) View() string {
 
 func (m onboardingModel) viewWelcome(w, h int) string {
 	accentStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#EAB308")).Bold(true)
-	mutedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(slackMuted))
+	mutedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(channelui.SlackMuted))
 	labelStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#E8E8EA")).Bold(true)
 
 	var lines []string
@@ -561,7 +563,7 @@ func (m onboardingModel) viewWelcome(w, h int) string {
 
 func (m onboardingModel) viewSetup(w, h int) string {
 	accentStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#EAB308")).Bold(true)
-	mutedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(slackMuted))
+	mutedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(channelui.SlackMuted))
 	labelStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#E8E8EA")).Bold(true)
 	okStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#2BAC76"))
 	failStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444"))
@@ -570,7 +572,7 @@ func (m onboardingModel) viewSetup(w, h int) string {
 	var lines []string
 	lines = append(lines, "")
 	lines = append(lines, accentStyle.Render("  Tools check"))
-	lines = append(lines, mutedStyle.Render("  "+strings.Repeat("\u2500", maxInt(10, w/2-4))))
+	lines = append(lines, mutedStyle.Render("  "+strings.Repeat("\u2500", channelui.MaxInt(10, w/2-4))))
 
 	if len(m.prereqs) == 0 {
 		lines = append(lines, mutedStyle.Render("  Checking tools..."))
@@ -601,7 +603,7 @@ func (m onboardingModel) viewSetup(w, h int) string {
 
 	lines = append(lines, "")
 	lines = append(lines, accentStyle.Render("  Provider keys"))
-	lines = append(lines, mutedStyle.Render("  "+strings.Repeat("\u2500", maxInt(10, w/2-4))))
+	lines = append(lines, mutedStyle.Render("  "+strings.Repeat("\u2500", channelui.MaxInt(10, w/2-4))))
 
 	cliAuthActive := hasInstalledRuntimeCLI(m.prereqs)
 	if cliAuthActive {
@@ -659,10 +661,10 @@ func (m onboardingModel) viewSetup(w, h int) string {
 
 func (m onboardingModel) viewTask(w, h int) string {
 	accentStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#EAB308")).Bold(true)
-	mutedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(slackMuted))
+	mutedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(channelui.SlackMuted))
 	labelStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#E8E8EA")).Bold(true)
 	activeStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF")).Background(lipgloss.Color("#1264A3")).Bold(true).Padding(0, 1)
-	inactiveStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(slackMuted)).Padding(0, 1)
+	inactiveStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(channelui.SlackMuted)).Padding(0, 1)
 	agentStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#64748B"))
 
 	var lines []string
@@ -1071,22 +1073,22 @@ func renderOnboardingChecklist(checklist onboardingChecklist, width int) string 
 	}
 	total := len(checklist.Items)
 
-	bg := lipgloss.Color(sidebarBG)
+	bg := lipgloss.Color(channelui.SidebarBG)
 	sectionBandStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#D4D4D8")).
 		Background(lipgloss.Color("#20242A")).
 		Bold(true).
 		Padding(0, 1)
 	doneStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#2BAC76"))
-	todoStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(sidebarMuted))
+	todoStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(channelui.SidebarMuted))
 	panel := lipgloss.NewStyle().Background(bg)
 
 	header := fmt.Sprintf("Getting started  %d/%d", done, total)
-	headerLine := sidebarStyledRow(sectionBandStyle, header, width)
+	headerLine := channelui.SidebarStyledRow(sectionBandStyle, header, width)
 
 	innerW := width - 2
-	dividerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(sidebarDivider))
-	divider := sidebarPlainRow(dividerStyle.Render(strings.Repeat("\u2500", maxInt(1, innerW))), width)
+	dividerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(channelui.SidebarDivider))
+	divider := channelui.SidebarPlainRow(dividerStyle.Render(strings.Repeat("\u2500", channelui.MaxInt(1, innerW))), width)
 
 	var rows []string
 	rows = append(rows, headerLine)

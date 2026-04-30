@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"testing"
 	"time"
+
+	"github.com/nex-crm/wuphf/cmd/wuphf/channelui"
 )
 
 func BenchmarkOfficeViewportVirtualizedHot(b *testing.B) {
@@ -21,8 +23,8 @@ func BenchmarkOfficeViewportVirtualizedCold(b *testing.B) {
 
 func BenchmarkOfficeViewportFullRender(b *testing.B) {
 	benchmarkOfficeViewport(b, 2000, false, func(m channelModel, contentWidth, msgH int) {
-		full := append(buildOfficeMessageLines(m.messages, m.expandedThreads, contentWidth, m.threadsDefaultExpand, m.unreadAnchorID, m.unreadCount), buildLiveWorkLines(m.members, m.tasks, m.actions, contentWidth, "")...)
-		_, _, _, _ = sliceRenderedLines(full, msgH, m.scroll)
+		full := append(buildOfficeMessageLines(m.messages, m.expandedThreads, contentWidth, m.threadsDefaultExpand, m.unreadAnchorID, m.unreadCount), channelui.BuildLiveWorkLines(m.members, m.tasks, m.actions, contentWidth, "")...)
+		_, _, _, _ = channelui.SliceRenderedLines(full, msgH, m.scroll)
 	})
 }
 
@@ -31,7 +33,7 @@ func benchmarkOfficeViewport(b *testing.B, messageCount int, warmCache bool, fn 
 	resetViewportBenchmarkCaches()
 
 	m := benchmarkViewportModel(messageCount)
-	layout := computeLayout(m.width, m.height, m.threadPanelOpen, m.sidebarCollapsed)
+	layout := channelui.ComputeLayout(m.width, m.height, m.threadPanelOpen, m.sidebarCollapsed)
 	_, msgH, _ := m.mainPanelGeometry(layout.MainW, layout.ContentH)
 	contentWidth := layout.MainW - 2
 	if contentWidth < 32 {
@@ -53,12 +55,12 @@ func benchmarkViewportModel(messageCount int) channelModel {
 	m := newChannelModel(false)
 	m.width = 140
 	m.height = 34
-	m.activeApp = officeAppMessages
-	m.members = []channelMember{
+	m.activeApp = channelui.OfficeAppMessages
+	m.members = []channelui.Member{
 		{Slug: "fe", Name: "Frontend Engineer", LastMessage: "Landing the next slice"},
 		{Slug: "pm", Name: "Product Manager", LastMessage: "Reviewing launch decisions"},
 	}
-	m.tasks = []channelTask{{
+	m.tasks = []channelui.Task{{
 		ID:            "task-bench-1",
 		Title:         "Ship onboarding",
 		Status:        "in_progress",
@@ -69,7 +71,7 @@ func benchmarkViewportModel(messageCount int) channelModel {
 		CreatedAt:     time.Date(2026, 4, 8, 9, 0, 0, 0, time.UTC).Format(time.RFC3339),
 		UpdatedAt:     time.Date(2026, 4, 8, 10, 0, 0, 0, time.UTC).Format(time.RFC3339),
 	}}
-	m.actions = []channelAction{{
+	m.actions = []channelui.Action{{
 		Kind:      "external_build",
 		Actor:     "fe",
 		Summary:   "Build the office UI",
@@ -78,7 +80,7 @@ func benchmarkViewportModel(messageCount int) channelModel {
 
 	for i := 0; i < messageCount; i++ {
 		from := []string{"ceo", "fe", "pm", "designer"}[i%4]
-		msg := brokerMessage{
+		msg := channelui.BrokerMessage{
 			ID:        fmt.Sprintf("msg-%04d", i),
 			From:      from,
 			Content:   fmt.Sprintf("Long benchmark message %04d keeps the transcript heavy enough that viewport virtualization and block caching matter during scroll and repaint work.", i),
@@ -95,7 +97,7 @@ func benchmarkViewportModel(messageCount int) channelModel {
 func resetViewportBenchmarkCaches() {
 	channelRenderCache.mu.Lock()
 	defer channelRenderCache.mu.Unlock()
-	channelRenderCache.threaded = make(map[uint64][]threadedMessage)
-	channelRenderCache.blocks = make(map[uint64][]renderedLine)
-	channelRenderCache.mainLines = make(map[uint64][]renderedLine)
+	channelRenderCache.threaded = make(map[uint64][]channelui.ThreadedMessage)
+	channelRenderCache.blocks = make(map[uint64][]channelui.RenderedLine)
+	channelRenderCache.mainLines = make(map[uint64][]channelui.RenderedLine)
 }

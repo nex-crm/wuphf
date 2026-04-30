@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nex-crm/wuphf/cmd/wuphf/channelui"
 	"github.com/nex-crm/wuphf/internal/buildinfo"
 	"github.com/nex-crm/wuphf/internal/commands"
 	"github.com/nex-crm/wuphf/internal/config"
@@ -238,7 +239,7 @@ func main() {
 
 	// Channel view mode (launched by wuphf team in tmux)
 	if *channelView {
-		runChannelView(*threadsCollapsed, resolveInitialOfficeApp(*channelApp), strings.TrimSpace(*channelApp) != "")
+		runChannelView(*threadsCollapsed, channelui.ResolveInitialOfficeApp(*channelApp), strings.TrimSpace(*channelApp) != "")
 		return
 	}
 
@@ -502,7 +503,7 @@ func runTeam(args []string, packSlug string, unsafe bool, oneOnOne bool, opusCEO
 			_ = os.Setenv("WUPHF_ONE_ON_ONE_AGENT", l.OneOnOneAgent())
 		}
 		defer func() { _ = l.Kill() }()
-		runChannelView(false, resolveInitialOfficeApp(""), false)
+		runChannelView(false, channelui.ResolveInitialOfficeApp(""), false)
 		return
 	}
 

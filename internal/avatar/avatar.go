@@ -1,4 +1,13 @@
-package main
+// Package avatar renders pixel-block sprites for office members.
+//
+// Sprites are 14×14 grids of palette indices, encoded with Unicode
+// half-block characters (▀▄█) so two pixel rows occupy one terminal row.
+// Known slugs ("ceo", "pm", "fe", …) get hand-designed sprites; unknown
+// slugs get a deterministic procedural composition seeded by the slug.
+// The package is intentionally free of any TUI / channel-state
+// dependency — every public function takes only a slug (and frame for
+// animation) and resolves its palette internally.
+package avatar
 
 import (
 	"fmt"
@@ -6,10 +15,6 @@ import (
 )
 
 // ── Pixel sprite engine ─────────────────────────────────────────
-//
-// Each sprite is a 2D grid of palette indices rendered with Unicode
-// half-block characters (▀▄█). Two pixel rows fit in one terminal row
-// using foreground/background colors, giving double vertical resolution.
 //
 // Palette:
 //   0 = transparent
@@ -20,7 +25,10 @@ import (
 //   5 = prop/accessory
 //   6 = white/highlight
 
-type pixelSprite [][]int
+// Sprite is a 2D grid of palette indices. Indices are interpreted via
+// the package constants (pxClear, pxLine, …) through the per-slug
+// palette returned by PaletteForSlug.
+type Sprite [][]int
 
 const (
 	pxClear     = 0
@@ -39,7 +47,7 @@ const (
 // Faces are deliberately squarish/blocky (Minecraft-ish).
 
 // CEO: leaning back, sunglasses, confident stance, coffee in hand
-var spriteCEO = pixelSprite{
+var spriteCEO = Sprite{
 	{0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0},
 	{0, 0, 0, 1, 4, 4, 4, 4, 4, 4, 1, 0, 0, 0},
 	{0, 0, 0, 1, 2, 2, 2, 2, 2, 2, 1, 0, 0, 0},
@@ -57,7 +65,7 @@ var spriteCEO = pixelSprite{
 }
 
 // PM: standing straight, clipboard in hand, organized look
-var spritePM = pixelSprite{
+var spritePM = Sprite{
 	{0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0},
 	{0, 0, 0, 1, 4, 4, 4, 4, 4, 4, 1, 0, 0, 0},
 	{0, 0, 0, 1, 2, 2, 2, 2, 2, 2, 1, 0, 0, 0},
@@ -75,7 +83,7 @@ var spritePM = pixelSprite{
 }
 
 // FE: hunched over laptop, typing furiously, hoodie
-var spriteFE = pixelSprite{
+var spriteFE = Sprite{
 	{0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0},
 	{0, 0, 0, 1, 4, 4, 4, 4, 4, 4, 1, 0, 0, 0},
 	{0, 0, 1, 4, 2, 2, 2, 2, 2, 2, 4, 1, 0, 0},
@@ -93,7 +101,7 @@ var spriteFE = pixelSprite{
 }
 
 // BE: arms crossed, slightly grumpy, server rack behind
-var spriteBE = pixelSprite{
+var spriteBE = Sprite{
 	{0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0},
 	{0, 0, 0, 1, 4, 4, 4, 4, 4, 4, 1, 0, 0, 0},
 	{0, 0, 0, 1, 2, 2, 2, 2, 2, 2, 1, 0, 0, 0},
@@ -111,7 +119,7 @@ var spriteBE = pixelSprite{
 }
 
 // AI: antenna on head, glowing eyes, slightly robotic
-var spriteAI = pixelSprite{
+var spriteAI = Sprite{
 	{0, 0, 0, 0, 0, 0, 5, 5, 0, 0, 0, 0, 0, 0},
 	{0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0},
 	{0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0},
@@ -129,7 +137,7 @@ var spriteAI = pixelSprite{
 }
 
 // Designer: beret, holding pencil, creative pose
-var spriteDesigner = pixelSprite{
+var spriteDesigner = Sprite{
 	{0, 0, 0, 5, 5, 5, 5, 1, 0, 0, 0, 0, 0, 0},
 	{0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0},
 	{0, 0, 0, 1, 4, 4, 4, 4, 4, 4, 1, 0, 0, 0},
@@ -147,7 +155,7 @@ var spriteDesigner = pixelSprite{
 }
 
 // CMO: energetic pose, arms up, megaphone
-var spriteCMO = pixelSprite{
+var spriteCMO = Sprite{
 	{0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0},
 	{0, 0, 0, 1, 4, 4, 4, 4, 4, 4, 1, 0, 0, 0},
 	{0, 0, 0, 1, 2, 2, 2, 2, 2, 2, 1, 0, 0, 0},
@@ -165,7 +173,7 @@ var spriteCMO = pixelSprite{
 }
 
 // CRO: sharp look, briefcase, power stance
-var spriteCRO = pixelSprite{
+var spriteCRO = Sprite{
 	{0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0},
 	{0, 0, 0, 1, 4, 4, 4, 4, 4, 4, 1, 0, 0, 0},
 	{0, 0, 0, 1, 2, 2, 2, 2, 2, 2, 1, 0, 0, 0},
@@ -184,7 +192,7 @@ var spriteCRO = pixelSprite{
 
 // spriteForSlug returns the generated avatar sprite for mapped roles,
 // or a seeded procedural variation for dynamic slugs. frame alternates 0/1.
-func spriteForSlug(slug string, frame ...int) pixelSprite {
+func spriteForSlug(slug string, frame ...int) Sprite {
 	f := 0
 	if len(frame) > 0 {
 		f = frame[0] % 2
@@ -199,7 +207,7 @@ func spriteForSlug(slug string, frame ...int) pixelSprite {
 		return cloneSprite(sprite.Full)
 	}
 
-	var sprite pixelSprite
+	var sprite Sprite
 	switch slug {
 	case "ceo":
 		sprite = cloneSprite(spriteCEO)
@@ -239,7 +247,7 @@ func spriteForSlug(slug string, frame ...int) pixelSprite {
 //	Designer: pencil moves (prop shifts position)
 //	CMO:      megaphone raised higher
 //	CRO:      briefcase swings
-func animateFrame(sprite pixelSprite, slug string) {
+func animateFrame(sprite Sprite, slug string) {
 	if len(sprite) < 14 {
 		return
 	}
@@ -327,8 +335,8 @@ func animateFrame(sprite pixelSprite, slug string) {
 	}
 }
 
-func cloneSprite(src pixelSprite) pixelSprite {
-	out := make(pixelSprite, len(src))
+func cloneSprite(src Sprite) Sprite {
+	out := make(Sprite, len(src))
 	for i := range src {
 		out[i] = append([]int(nil), src[i]...)
 	}
@@ -349,37 +357,20 @@ func parseHexColor(hex string) [3]int {
 	return [3]int{r, g, b}
 }
 
-func spritePaletteForSlug(slug string) map[int][3]int {
+// PaletteForSlug returns the per-pixel-index color map for an avatar.
+// The known office roster (ceo, pm, fe, …) uses the hand-tuned palettes
+// shipped with each sprite; every other slug routes through the
+// procedural palette generator (which derives skin/hair/accent
+// independently from a hash of the slug). Together those two branches
+// cover every input — there is no third path.
+func PaletteForSlug(slug string) map[int][3]int {
 	if sprite, ok := knownOfficeSpriteForSlug(slug); ok {
 		return sprite.Palette
 	}
 	if sprite, ok := proceduralOfficeSpriteForSlug(slug); ok {
 		return sprite.Palette
 	}
-
-	// Unknown slugs get a fully procedural palette (hash picks skin/hair/accent
-	// independently) to match proceduralSpriteForSlug.
-	if isProceduralSlug(slug) {
-		return proceduralPaletteForSlug(slug)
-	}
-	accent := parseHexColor(agentColorMap[slug])
-	if accent == ([3]int{}) {
-		accent = [3]int{88, 166, 255}
-	}
-	// Hair color: darker version of accent
-	hair := [3]int{
-		max(0, accent[0]-60),
-		max(0, accent[1]-60),
-		max(0, accent[2]-60),
-	}
-	return map[int][3]int{
-		pxLine:      {36, 32, 30},    // dark outline
-		pxSkin:      {235, 215, 190}, // warm skin
-		pxAccent:    accent,
-		pxHair:      hair,
-		pxProp:      {180, 170, 155}, // neutral prop color
-		pxHighlight: {255, 255, 255}, // white highlights
-	}
+	return proceduralPaletteForSlug(slug)
 }
 
 var proceduralOfficeSpriteIDs = []string{
@@ -419,7 +410,7 @@ func proceduralOfficeSpriteForSlug(slug string) (knownOfficeSprite, bool) {
 
 func proceduralOfficePalette(base map[int][3]int, slug string) map[int][3]int {
 	hash := proceduralHash(slug)
-	accent := parseHexColor(proceduralOfficeAccentForSlug(slug))
+	accent := parseHexColor(ProceduralOfficeAccentForSlug(slug))
 	amount := 22 + pickIndex(hash, 10, 18)
 	out := make(map[int][3]int, len(base))
 	for idx, rgb := range base {
@@ -432,7 +423,11 @@ func proceduralOfficePalette(base map[int][3]int, slug string) map[int][3]int {
 	return out
 }
 
-func proceduralOfficeAccentForSlug(slug string) string {
+// ProceduralOfficeAccentForSlug deterministically picks an accent
+// color from the procedural pool for a non-canonical slug. Used by
+// channelui.AgentColor to give dynamic agents (operation-created,
+// custom roles) a stable color identity.
+func ProceduralOfficeAccentForSlug(slug string) string {
 	hash := proceduralHash(slug)
 	return accentPool[pickIndex(hash, 9, len(accentPool))]
 }
@@ -459,16 +454,12 @@ func blendOfficeColor(a, b [3]int, amountPercent int) [3]int {
 	}
 }
 
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
 // ── Half-block renderer ─────────────────────────────────────────
 
-func renderSpriteToANSI(sprite pixelSprite, palette map[int][3]int) []string {
+// RenderToANSI renders a sprite to ANSI lines using the supplied
+// palette. Each pair of pixel rows collapses into one terminal row via
+// half-block characters (▀▄), so a 14-row sprite renders to 7 lines.
+func RenderToANSI(sprite Sprite, palette map[int][3]int) []string {
 	reset := "\x1b[0m"
 	lines := make([]string, 0, (len(sprite)+1)/2)
 	for r := 0; r < len(sprite); r += 2 {
@@ -508,29 +499,44 @@ func renderSpriteToANSI(sprite pixelSprite, palette map[int][3]int) []string {
 
 // ── Public API ──────────────────────────────────────────────────
 
-// renderWuphfSplashAvatar renders a full-body character for the splash screen.
-// frame alternates 0/1 for animation.
-func renderWuphfSplashAvatar(seed, slug string, frame int) []string {
-	_ = seed
-	sprite := spriteForSlug(slug, frame)
-	return renderSpriteToANSI(sprite, spritePaletteForSlug(slug))
+// SpriteForSlug returns the full-body avatar sprite for known roles or a
+// seeded procedural sprite for unknown slugs. frame alternates 0/1 for
+// the legacy hand-designed sprites; the generated office sprites are
+// frame-independent today.
+func SpriteForSlug(slug string, frame ...int) Sprite {
+	return spriteForSlug(slug, frame...)
 }
 
-// renderWuphfAvatar renders a small face portrait for inline use.
-func renderWuphfAvatar(seed, slug string, frame int) []string {
-	_ = seed
+// RenderSplashAvatar renders a full-body character for the splash
+// screen. frame alternates 0/1 for animation; the palette is fully
+// determined by the slug.
+func RenderSplashAvatar(slug string, frame int) []string {
+	sprite := spriteForSlug(slug, frame)
+	return RenderToANSI(sprite, PaletteForSlug(slug))
+}
+
+// RenderAvatar renders a small face-portrait avatar for inline use in
+// sidebars / composer / etc. Known office roster slugs use the
+// hand-designed portrait sprite; other slugs render the head row of
+// their full body sprite with the procedural palette.
+func RenderAvatar(slug string, frame int) []string {
 	if sprite, ok := knownOfficeSpriteForSlug(slug); ok {
-		return renderSpriteToANSI(sprite.Portrait, sprite.Palette)
+		return RenderToANSI(sprite.Portrait, sprite.Palette)
 	}
 	if sprite, ok := proceduralOfficeSpriteForSlug(slug); ok {
-		return renderSpriteToANSI(sprite.Portrait, sprite.Palette)
+		return RenderToANSI(sprite.Portrait, sprite.Palette)
 	}
 
 	// Use just the head portion (rows 0-5) of the full sprite
 	full := spriteForSlug(slug, frame)
 	if len(full) > 6 {
 		head := full[:6]
-		return renderSpriteToANSI(head, spritePaletteForSlug(slug))
+		return RenderToANSI(head, PaletteForSlug(slug))
 	}
-	return renderSpriteToANSI(full, spritePaletteForSlug(slug))
+	return RenderToANSI(full, PaletteForSlug(slug))
 }
+
+// SpriteCEO returns a clone of the canonical CEO sprite. The splash
+// renderer uses this as a fallback when none of its dramatic CEO variant
+// poses is active.
+func SpriteCEO() Sprite { return cloneSprite(spriteCEO) }

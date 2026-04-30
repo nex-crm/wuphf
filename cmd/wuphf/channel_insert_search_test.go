@@ -6,13 +6,14 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/nex-crm/wuphf/cmd/wuphf/channelui"
 	"github.com/nex-crm/wuphf/internal/tui"
 )
 
 func TestInsertCommandOpensReferencePicker(t *testing.T) {
 	m := newChannelModel(false)
-	m.channels = []channelInfo{{Slug: "launch", Description: "Launch work"}}
-	m.members = []channelMember{{Slug: "pm", Name: "Product Manager"}}
+	m.channels = []channelui.ChannelInfo{{Slug: "launch", Description: "Launch work"}}
+	m.members = []channelui.Member{{Slug: "pm", Name: "Product Manager"}}
 
 	next, _ := m.runCommand("/insert", "")
 	got := next.(channelModel)
@@ -44,7 +45,7 @@ func TestPickerInsertSelectionUpdatesComposer(t *testing.T) {
 
 func TestSearchCommandOpensWorkspaceSearchPicker(t *testing.T) {
 	m := newChannelModel(false)
-	m.channels = []channelInfo{{Slug: "launch", Description: "Launch work"}}
+	m.channels = []channelui.ChannelInfo{{Slug: "launch", Description: "Launch work"}}
 
 	next, _ := m.runCommand("/search", "")
 	got := next.(channelModel)
@@ -73,7 +74,7 @@ func TestSearchPickerIncludesOfficeApps(t *testing.T) {
 
 func TestSearchSelectionOpensThread(t *testing.T) {
 	m := newChannelModel(false)
-	m.messages = []brokerMessage{
+	m.messages = []channelui.BrokerMessage{
 		{ID: "msg-1", From: "ceo", Content: "Root thread"},
 		{ID: "msg-2", From: "pm", Content: "Reply", ReplyTo: "msg-1"},
 	}
@@ -94,7 +95,7 @@ func TestSearchSelectionSupportsOfficeAppTargets(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("expected app selection to trigger a refresh command")
 	}
-	if m.activeApp != officeAppArtifacts {
+	if m.activeApp != channelui.OfficeAppArtifacts {
 		t.Fatalf("expected artifacts app to be active, got %q", m.activeApp)
 	}
 	if !strings.Contains(m.notice, "Viewing Artifacts") {
@@ -104,7 +105,7 @@ func TestSearchSelectionSupportsOfficeAppTargets(t *testing.T) {
 
 func TestRewindCommandOpensRecoveryPromptPicker(t *testing.T) {
 	m := newChannelModel(false)
-	m.messages = []brokerMessage{{ID: "msg-1", From: "ceo", Content: "Need a summary."}}
+	m.messages = []channelui.BrokerMessage{{ID: "msg-1", From: "ceo", Content: "Need a summary."}}
 
 	next, _ := m.runCommand("/rewind", "")
 	got := next.(channelModel)
@@ -119,7 +120,7 @@ func TestRewindCommandOpensRecoveryPromptPicker(t *testing.T) {
 
 func TestRewindSelectionInsertsRecoveryPrompt(t *testing.T) {
 	m := newChannelModel(false)
-	m.activeApp = officeAppRecovery
+	m.activeApp = channelui.OfficeAppRecovery
 	m.pickerMode = channelPickerRewind
 	m.picker = tui.NewPicker("Rewind", []tui.PickerOption{{Label: "Since msg-1", Value: "Summarize everything since msg-1"}})
 	m.picker.SetActive(true)
@@ -130,7 +131,7 @@ func TestRewindSelectionInsertsRecoveryPrompt(t *testing.T) {
 	if !strings.Contains(string(got.input), "Summarize everything since msg-1") {
 		t.Fatalf("expected recovery prompt in composer, got %q", string(got.input))
 	}
-	if got.activeApp != officeAppMessages {
+	if got.activeApp != channelui.OfficeAppMessages {
 		t.Fatalf("expected rewind selection to return to messages, got %q", got.activeApp)
 	}
 	if got.focus != focusMain {
@@ -140,7 +141,7 @@ func TestRewindSelectionInsertsRecoveryPrompt(t *testing.T) {
 
 func TestInsertAndSearchCommandsAreAvailableThroughEnter(t *testing.T) {
 	m := newChannelModel(false)
-	m.channels = []channelInfo{{Slug: "launch", Description: "Launch work"}}
+	m.channels = []channelui.ChannelInfo{{Slug: "launch", Description: "Launch work"}}
 	m.input = []rune("/search")
 	m.inputPos = len(m.input)
 

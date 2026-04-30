@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 
+	"github.com/nex-crm/wuphf/cmd/wuphf/channelui"
 	"github.com/nex-crm/wuphf/internal/tui"
 )
 
@@ -46,13 +47,13 @@ func (m channelModel) activeInteractionContext() channelInteractionContext {
 	}
 }
 
-func (m channelModel) composerHint(channelName, replyToID string, pending *channelInterview) string {
+func (m channelModel) composerHint(channelName, replyToID string, pending *channelui.Interview) string {
 	switch m.activeInteractionContext() {
 	case contextConfirm:
-		if m.confirm != nil && m.confirm.Action == confirmActionSubmitRequest {
+		if m.confirm != nil && m.confirm.Action == channelui.ChannelConfirmActionSubmitRequest {
 			return tui.ComposerHint(tui.ComposerHintState{
 				Context:          tui.ContextInterviewReview,
-				HistoryAvailable: len(m.inputHistory.entries) > 0,
+				HistoryAvailable: m.inputHistory.Len() > 0,
 			})
 		}
 		return tui.ContinuePrompt{
@@ -64,60 +65,60 @@ func (m channelModel) composerHint(channelName, replyToID string, pending *chann
 	case contextInterview:
 		return tui.ComposerHint(tui.ComposerHintState{
 			Context:          tui.ContextInterview,
-			HistoryAvailable: len(m.inputHistory.entries) > 0,
+			HistoryAvailable: m.inputHistory.Len() > 0,
 		})
 	case contextThread:
 		return tui.ComposerHint(tui.ComposerHintState{
 			Context:          tui.ContextThreadCompose,
-			HistoryAvailable: len(m.threadInputHistory.entries) > 0,
+			HistoryAvailable: m.threadInputHistory.Len() > 0,
 		})
 	case contextMain:
 		if replyToID != "" {
 			return fmt.Sprintf("%s · /cancel leave thread %s", tui.ComposerHint(tui.ComposerHintState{
 				Context:          tui.ContextReplyCompose,
-				HistoryAvailable: len(m.inputHistory.entries) > 0,
+				HistoryAvailable: m.inputHistory.Len() > 0,
 			}), replyToID)
 		}
 		if stringsHasOneOnOnePrefix(channelName) {
 			return tui.ComposerHint(tui.ComposerHintState{
 				Context:          tui.ContextDirectCompose,
-				HistoryAvailable: len(m.inputHistory.entries) > 0,
+				HistoryAvailable: m.inputHistory.Len() > 0,
 			})
 		}
 		return tui.ComposerHint(tui.ComposerHintState{
 			Context:          tui.ContextCompose,
-			HistoryAvailable: len(m.inputHistory.entries) > 0,
+			HistoryAvailable: m.inputHistory.Len() > 0,
 		})
 	case contextAutocomplete:
 		return tui.ComposerHint(tui.ComposerHintState{
 			Context:          tui.ContextAutocomplete,
-			HistoryAvailable: len(m.inputHistory.entries) > 0,
+			HistoryAvailable: m.inputHistory.Len() > 0,
 		})
 	case contextMention:
 		return tui.ComposerHint(tui.ComposerHintState{
 			Context:          tui.ContextMention,
-			HistoryAvailable: len(m.inputHistory.entries) > 0,
+			HistoryAvailable: m.inputHistory.Len() > 0,
 		})
 	case contextPicker:
 		return tui.ComposerHint(tui.ComposerHintState{
 			Context:          tui.ContextPicker,
-			HistoryAvailable: len(m.inputHistory.entries) > 0,
+			HistoryAvailable: m.inputHistory.Len() > 0,
 		})
 	case contextDoctor:
 		return tui.ComposerHint(tui.ComposerHintState{
 			Context:          tui.ContextDoctor,
-			HistoryAvailable: len(m.inputHistory.entries) > 0,
+			HistoryAvailable: m.inputHistory.Len() > 0,
 		})
 	default:
 		if stringsHasOneOnOnePrefix(channelName) {
 			return tui.ComposerHint(tui.ComposerHintState{
 				Context:          tui.ContextDirectCompose,
-				HistoryAvailable: len(m.inputHistory.entries) > 0,
+				HistoryAvailable: m.inputHistory.Len() > 0,
 			})
 		}
 		return tui.ComposerHint(tui.ComposerHintState{
 			Context:          tui.ContextCompose,
-			HistoryAvailable: len(m.inputHistory.entries) > 0,
+			HistoryAvailable: m.inputHistory.Len() > 0,
 		})
 	}
 }
