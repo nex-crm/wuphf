@@ -118,7 +118,6 @@ export function CreateWorkspaceModal({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const navigateToWorkspace = (ws: Workspace) => {
-    setPhase("ready" as Phase);
     window.location.assign(
       `http://localhost:${ws.web_port}/onboarding?skip_identity=1`,
     );
