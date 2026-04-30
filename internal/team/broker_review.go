@@ -31,6 +31,8 @@ import (
 	"time"
 )
 
+const notebookPromotionTaskPipeline = "notebook_promotion"
+
 // ReviewStateChangeEvent is the SSE payload for every promotion transition.
 // Kept narrow on purpose — the frontend re-fetches the full review to get
 // comment threads and such.
@@ -259,12 +261,110 @@ func (b *Broker) handleNotebookPromote(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	reviewTaskID := ""
+	if task, _, taskErr := b.ensureNotebookPromotionReviewTask(promotion); taskErr != nil {
+		log.Printf("notebook promotion review task create failed promotion=%s reviewer=%s: %v", promotion.ID, promotion.ReviewerSlug, taskErr)
+	} else {
+		reviewTaskID = task.ID
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"promotion_id":  promotion.ID,
-		"reviewer_slug": promotion.ReviewerSlug,
-		"state":         promotion.State,
-		"human_only":    promotion.HumanOnly,
+		"promotion_id":   promotion.ID,
+		"reviewer_slug":  promotion.ReviewerSlug,
+		"state":          promotion.State,
+		"human_only":     promotion.HumanOnly,
+		"review_task_id": reviewTaskID,
 	})
+}
+
+func (b *Broker) ensureNotebookPromotionReviewTask(p *Promotion) (teamTask, bool, error) {
+	if p == nil {
+		return teamTask{}, false, nil
+	}
+	if p.HumanOnly {
+		return teamTask{}, false, nil
+	}
+	reviewer := strings.TrimSpace(p.ReviewerSlug)
+	if reviewer == "" || reviewer == "human-only" {
+		return teamTask{}, false, nil
+	}
+	titleSubject := strings.TrimSpace(notebookEntrySlug(p.SourcePath))
+	if titleSubject == "" {
+		titleSubject = strings.TrimSpace(p.TargetPath)
+	}
+	title := "Review notebook promotion: " + titleSubject
+	details := strings.TrimSpace(strings.Join([]string{
+		fmt.Sprintf("Notebook promotion %s from @%s needs review.", p.ID, p.SourceSlug),
+		fmt.Sprintf("Source notebook: %s", p.SourcePath),
+		fmt.Sprintf("Target wiki path: %s", p.TargetPath),
+		fmt.Sprintf("Rationale: %s", firstLine(p.Rationale)),
+		"Use team_reviews to inspect the queue, then call team_review action=approve with this review_id to write it into the team wiki, or action=request_changes with rationale if the note is not ready.",
+	}, "\n"))
+	return b.EnsurePlannedTask(plannedTaskInput{
+		Channel:          "general",
+		Title:            title,
+		Details:          details,
+		Owner:            reviewer,
+		CreatedBy:        "system",
+		TaskType:         "review",
+		PipelineID:       notebookPromotionTaskPipeline,
+		ExecutionMode:    "office",
+		ReviewState:      "not_required",
+		SourceDecisionID: p.ID,
+	})
+}
+
+func (b *Broker) closeNotebookPromotionReviewTask(p *Promotion, actorSlug string, reviewState string, rationale string) {
+	if p == nil {
+		return
+	}
+	promotionID := strings.TrimSpace(p.ID)
+	if promotionID == "" {
+		return
+	}
+	actor := strings.TrimSpace(actorSlug)
+	if actor == "" {
+		actor = "system"
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	summary := fmt.Sprintf("Notebook promotion %s %s", promotionID, strings.TrimSpace(reviewState))
+	if strings.TrimSpace(rationale) != "" {
+		summary += ": " + firstLine(rationale)
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	changed := false
+	for i := range b.tasks {
+		task := &b.tasks[i]
+		if strings.TrimSpace(task.SourceDecisionID) != promotionID ||
+			strings.TrimSpace(task.PipelineID) != notebookPromotionTaskPipeline {
+			continue
+		}
+		if isTerminalTeamTaskStatus(task.Status) && strings.EqualFold(strings.TrimSpace(task.ReviewState), reviewState) {
+			continue
+		}
+		task.Status = "done"
+		task.Blocked = false
+		task.ReviewState = strings.TrimSpace(reviewState)
+		task.UpdatedAt = now
+		b.scheduleTaskLifecycleLocked(task)
+		b.appendActionWithRefsLocked(
+			"task_updated",
+			"office",
+			normalizeChannelSlug(task.Channel),
+			actor,
+			truncateSummary(summary, 140),
+			task.ID,
+			nil,
+			promotionID,
+		)
+		changed = true
+	}
+	if changed {
+		if err := b.saveLocked(); err != nil {
+			log.Printf("notebook promotion review task close failed promotion=%s: %v", promotionID, err)
+		}
+	}
 }
 
 // handleReviewList returns all active reviews or a scoped slice.
@@ -504,6 +604,7 @@ func (b *Broker) reviewApprove(w http.ResponseWriter, r *http.Request, id string
 					ActorSlug: body.ActorSlug,
 					Timestamp: updated.UpdatedAt.Format(time.RFC3339),
 				})
+				b.closeNotebookPromotionReviewTask(updated, body.ActorSlug, "changes_requested", "target path already exists: "+p.TargetPath)
 			}
 			writeJSON(w, http.StatusConflict, map[string]string{"error": commitErr.Error()})
 			return
@@ -524,6 +625,7 @@ func (b *Broker) reviewApprove(w http.ResponseWriter, r *http.Request, id string
 		ActorSlug: body.ActorSlug,
 		Timestamp: t.Timestamp.Format(time.RFC3339),
 	})
+	b.closeNotebookPromotionReviewTask(updated, body.ActorSlug, "approved", body.Rationale)
 	writeJSON(w, http.StatusOK, updated)
 }
 
@@ -553,6 +655,7 @@ func (b *Broker) reviewRequestChanges(w http.ResponseWriter, r *http.Request, id
 		ActorSlug: body.ActorSlug,
 		Timestamp: t.Timestamp.Format(time.RFC3339),
 	})
+	b.closeNotebookPromotionReviewTask(updated, body.ActorSlug, "changes_requested", body.Rationale)
 	writeJSON(w, http.StatusOK, updated)
 }
 
@@ -577,6 +680,7 @@ func (b *Broker) reviewReject(w http.ResponseWriter, r *http.Request, id string)
 		ActorSlug: body.ActorSlug,
 		Timestamp: t.Timestamp.Format(time.RFC3339),
 	})
+	b.closeNotebookPromotionReviewTask(updated, body.ActorSlug, "rejected", "")
 	writeJSON(w, http.StatusOK, updated)
 }
 
@@ -601,6 +705,9 @@ func (b *Broker) reviewResubmit(w http.ResponseWriter, r *http.Request, id strin
 		ActorSlug: body.ActorSlug,
 		Timestamp: t.Timestamp.Format(time.RFC3339),
 	})
+	if _, _, taskErr := b.ensureNotebookPromotionReviewTask(updated); taskErr != nil {
+		log.Printf("notebook promotion review task recreate failed promotion=%s reviewer=%s: %v", updated.ID, updated.ReviewerSlug, taskErr)
+	}
 	writeJSON(w, http.StatusOK, updated)
 }
 

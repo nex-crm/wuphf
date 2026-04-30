@@ -581,6 +581,7 @@ func registerSharedMemoryTools(server *mcp.Server) {
 		// Notebook tools ride on the same markdown backend. Registered here
 		// so they share the WUPHF_MEMORY_BACKEND gate with team_wiki_*.
 		registerNotebookTools(server)
+		registerReviewTools(server)
 		// Entity brief tools (v1.2) — fact log + broker-level synthesis.
 		// Same backend gate: entity briefs live in the wiki subtree.
 		registerEntityTools(server)

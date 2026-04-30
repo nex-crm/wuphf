@@ -219,6 +219,7 @@ func handleTeamNotebookPromote(ctx context.Context, _ *mcp.CallToolRequest, args
 		ReviewerSlug string `json:"reviewer_slug"`
 		State        string `json:"state"`
 		HumanOnly    bool   `json:"human_only"`
+		ReviewTaskID string `json:"review_task_id,omitempty"`
 	}
 	err = brokerPostJSON(ctx, "/notebook/promote", map[string]any{
 		"my_slug":          slug,

@@ -348,6 +348,7 @@ func (p *promptBuilder) Build(slug string) string {
 func markdownKnowledgeToolBlock() string {
 	return "- notebook_write: Save your own working notes, rough observations, draft decisions, draft playbooks, and task learnings at agents/{my_slug}/notebook/{date-or-topic}.md. This is the default write path for agent-authored knowledge.\n" +
 		"- notebook_promote: Submit a durable notebook entry for reviewer approval into the team wiki. Use this when the team should rely on the note as canonical knowledge.\n" +
+		"- team_reviews / team_review: Inspect and act on notebook promotion reviews assigned to you. Approval is what writes a submitted notebook entry into the team wiki.\n" +
 		"- notebook_read / notebook_list / notebook_search: Inspect agent notebooks for fresh working context before asking someone to repeat themselves.\n" +
 		"- team_wiki_read / team_wiki_search / team_wiki_list / wuphf_wiki_lookup: Read the canonical shared wiki.\n" +
 		"- team_wiki_write: Direct canonical wiki writes only for already-approved edits, bootstrap/admin maintenance, or explicit human requests. Do not bypass notebook_promote for new agent-authored knowledge.\n" +
@@ -355,7 +356,7 @@ func markdownKnowledgeToolBlock() string {
 }
 
 func markdownKnowledgeMemoryBlock() string {
-	return "Markdown notebook/wiki memory is active. Keep scratch and draft knowledge in notebook_write first; promote durable conclusions with notebook_promote when they are ready for review. For memory_policy=required tasks, pass task_id to search/write/promote tools and record a skipped promotion decision with a reason if the note should stay notebook-only. Do not claim something is in the team wiki unless notebook_promote was submitted and approved, or team_wiki_write was explicitly appropriate and succeeded.\n\n"
+	return "Markdown notebook/wiki memory is active. Keep scratch and draft knowledge in notebook_write first; promote durable conclusions with notebook_promote when they are ready for review. A submitted promotion is not canonical until a reviewer approves it with team_review or the web review UI. For memory_policy=required tasks, pass task_id to search/write/promote tools and record a skipped promotion decision with a reason if the note should stay notebook-only. Do not claim something is in the team wiki unless notebook_promote was submitted and approved, or team_wiki_write was explicitly appropriate and succeeded.\n\n"
 }
 
 func headlessSandboxNote() string {

@@ -98,6 +98,7 @@ func TestPromotionHandlers_EndToEnd(t *testing.T) {
 		PromotionID  string `json:"promotion_id"`
 		ReviewerSlug string `json:"reviewer_slug"`
 		State        string `json:"state"`
+		ReviewTaskID string `json:"review_task_id"`
 	}
 	_ = json.NewDecoder(res.Body).Decode(&submitRes)
 	if submitRes.PromotionID == "" {
@@ -105,6 +106,20 @@ func TestPromotionHandlers_EndToEnd(t *testing.T) {
 	}
 	if submitRes.State != "pending" {
 		t.Fatalf("state=%s", submitRes.State)
+	}
+	if submitRes.ReviewTaskID == "" {
+		t.Fatalf("expected reviewer task id in response: %+v", submitRes)
+	}
+	task := findTaskByIDForTest(t, b, submitRes.ReviewTaskID)
+	if task.Owner != "ceo" || task.Status != "in_progress" || task.SourceDecisionID != submitRes.PromotionID {
+		t.Fatalf("review task not assigned to reviewer/promotion: %+v", task)
+	}
+	if task.PipelineID != notebookPromotionTaskPipeline {
+		t.Fatalf("review task pipeline=%q", task.PipelineID)
+	}
+	if !strings.Contains(task.Details, "team_review action=approve") ||
+		!strings.Contains(task.Details, "team/playbooks/retro.md") {
+		t.Fatalf("review task details do not give approval path: %q", task.Details)
 	}
 
 	// Verify an SSE event was emitted.
@@ -201,6 +216,10 @@ func TestPromotionHandlers_EndToEnd(t *testing.T) {
 	target := filepath.Join(b.wikiWorker.Repo().Root(), "team/playbooks/retro.md")
 	if _, err := readArticle(b.wikiWorker.Repo(), "team/playbooks/retro.md"); err != nil {
 		t.Fatalf("target missing: %v (path=%s)", err, target)
+	}
+	task = findTaskByIDForTest(t, b, submitRes.ReviewTaskID)
+	if task.Status != "done" || task.ReviewState != "approved" {
+		t.Fatalf("review task not closed after approval: %+v", task)
 	}
 }
 
@@ -313,4 +332,17 @@ func drainEvents(ch <-chan ReviewStateChangeEvent) {
 			return
 		}
 	}
+}
+
+func findTaskByIDForTest(t *testing.T, b *Broker, id string) teamTask {
+	t.Helper()
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, task := range b.tasks {
+		if task.ID == id {
+			return task
+		}
+	}
+	t.Fatalf("task %s not found", id)
+	return teamTask{}
 }
