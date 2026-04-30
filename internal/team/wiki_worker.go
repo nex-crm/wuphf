@@ -863,8 +863,24 @@ func (b *Broker) handleWikiSearch(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "pattern is required"})
 		return
 	}
+	taskID := strings.TrimSpace(r.URL.Query().Get("task_id"))
+	actor := strings.TrimSpace(r.URL.Query().Get("actor"))
+	if err := b.validateTaskMemoryEvidenceTarget(taskID); err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		return
+	}
 	hits, err := searchArticles(worker.Repo(), pattern)
 	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if err := b.RecordTaskMemoryEvidence(taskID, taskMemoryEvidence{
+		Kind:  taskMemoryEvidencePriorSearch,
+		Tool:  "team_wiki_search",
+		Actor: actor,
+		Query: pattern,
+		Hits:  len(hits),
+	}); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}

@@ -117,6 +117,12 @@ export function TaskDetailModal({ task, onClose }: TaskDetailModalProps) {
 
   const status = (task.status || "").replace(/_/g, " ");
   const reviewState = (task.review_state || "").replace(/_/g, " ");
+  const memoryPolicy = (task.memory_policy || "none").replace(/_/g, " ");
+  const memoryChecklist = task.memory_checklist;
+  const memoryEvidence = task.memory_evidence ?? [];
+  const showMemory = Boolean(
+    (task.memory_policy && task.memory_policy !== "none") || memoryChecklist,
+  );
   const description = task.description?.trim() || "";
   const details = task.details?.trim() || "";
 
@@ -127,6 +133,8 @@ export function TaskDetailModal({ task, onClose }: TaskDetailModalProps) {
     ["Review state", reviewState || null],
     ["Task type", task.task_type || null],
     ["Execution mode", task.execution_mode || null],
+    ["Memory policy", task.memory_policy || null],
+    ["Memory topic", task.memory_topic || null],
     ["Pipeline", task.pipeline_id || null],
     ["Pipeline stage", task.pipeline_stage || null],
     ["Worktree branch", task.worktree_branch || null],
@@ -295,6 +303,63 @@ export function TaskDetailModal({ task, onClose }: TaskDetailModalProps) {
           </section>
         )}
 
+        {showMemory ? (
+          <section className="task-detail-section">
+            <div className="task-detail-label">Memory</div>
+            <div className="task-detail-memory">
+              <div className="task-detail-memory-header">
+                <span
+                  className={`task-detail-memory-badge ${
+                    memoryChecklist?.complete
+                      ? "is-complete"
+                      : memoryChecklist?.required
+                        ? "is-required"
+                        : ""
+                  }`}
+                >
+                  {memoryChecklist?.complete ? "complete" : memoryPolicy}
+                </span>
+                {task.memory_topic && (
+                  <span className="task-detail-hint">{task.memory_topic}</span>
+                )}
+              </div>
+              <ul className="task-detail-memory-checklist">
+                <MemoryCheckItem
+                  label="Prior search"
+                  done={Boolean(memoryChecklist?.prior_search)}
+                />
+                <MemoryCheckItem
+                  label="Notebook write"
+                  done={Boolean(memoryChecklist?.notebook_write)}
+                />
+                <MemoryCheckItem
+                  label="Promote or skip"
+                  done={Boolean(memoryChecklist?.promotion_decision)}
+                />
+              </ul>
+              {memoryEvidence.length > 0 && (
+                <div className="task-detail-memory-evidence">
+                  {memoryEvidence.slice(-4).map((ev, index) => (
+                    <div
+                      key={`${ev.kind}-${ev.tool}-${ev.path}-${ev.created_at}-${index}`}
+                      className="task-detail-memory-evidence-row"
+                    >
+                      <span>{ev.tool || ev.kind}</span>
+                      <span>
+                        {ev.path ||
+                          ev.query ||
+                          ev.decision ||
+                          ev.promotion_id ||
+                          "recorded"}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </section>
+        ) : null}
+
         {dependsOn.length > 0 && (
           <section className="task-detail-section">
             <div className="task-detail-label">Depends on</div>
@@ -321,6 +386,17 @@ export function TaskDetailModal({ task, onClose }: TaskDetailModalProps) {
         </section>
       </div>
     </div>
+  );
+}
+
+function MemoryCheckItem({ label, done }: { label: string; done: boolean }) {
+  return (
+    <li className={done ? "done" : ""}>
+      <span className="task-detail-memory-check-icon">
+        {done ? "✓" : "•"}
+      </span>
+      <span>{label}</span>
+    </li>
   );
 }
 

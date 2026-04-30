@@ -14,6 +14,10 @@ type RuntimeTask struct {
 	PipelineStage  string
 	ReviewState    string
 	ExecutionMode  string
+	MemoryPolicy   string
+	MemoryTopic    string
+	MemoryComplete bool
+	MemoryMissing  []string
 	WorktreePath   string
 	WorktreeBranch string
 	Blocked        bool

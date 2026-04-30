@@ -134,6 +134,67 @@ func TestBrokerNotebookHandlersEndToEnd(t *testing.T) {
 	}
 }
 
+func TestBrokerNotebookHandlersRecordTaskMemoryEvidence(t *testing.T) {
+	srv, b, teardown := newNotebookTestServer(t)
+	defer teardown()
+	token := b.Token()
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	b.mu.Lock()
+	b.tasks = []teamTask{{
+		ID:           "task-passport",
+		Channel:      "general",
+		Title:        "Research passport application process",
+		Owner:        "pm",
+		Status:       "in_progress",
+		CreatedBy:    "ceo",
+		TaskType:     "research",
+		MemoryPolicy: taskMemoryPolicyRequired,
+		MemoryTopic:  "passport-application",
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}}
+	normalizeTaskPlan(&b.tasks[0])
+	b.mu.Unlock()
+
+	writeBody, _ := json.Marshal(map[string]any{
+		"slug":           "pm",
+		"task_id":        "task-passport",
+		"path":           "agents/pm/notebook/passport-application.md",
+		"content":        "# Passport application\n\nDurable notes.\n",
+		"mode":           "create",
+		"commit_message": "draft passport process",
+	})
+	req, _ := authReq(http.MethodPost, srv.URL+"/notebook/write", bytes.NewReader(writeBody), token)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	body, _ := io.ReadAll(res.Body)
+	res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("write status %d: %s", res.StatusCode, body)
+	}
+
+	req, _ = authReq(http.MethodGet, srv.URL+"/notebook/search?slug=all&q=Passport&task_id=task-passport&actor=pm", nil, token)
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	body, _ = io.ReadAll(res.Body)
+	res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("search status %d: %s", res.StatusCode, body)
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	task := b.tasks[0]
+	if task.MemoryChecklist == nil || !task.MemoryChecklist.NotebookWrite || !task.MemoryChecklist.PriorSearch {
+		t.Fatalf("expected notebook write and prior search evidence, got checklist=%+v evidence=%+v", task.MemoryChecklist, task.MemoryEvidence)
+	}
+}
+
 func TestBrokerNotebookWriteAuthRequired(t *testing.T) {
 	srv, _, teardown := newNotebookTestServer(t)
 	defer teardown()
