@@ -20,11 +20,16 @@ import (
 )
 
 const (
+	liveProbeTimeout = 200 * time.Millisecond
+	trashDirName     = ".trash"
+)
+
+// Pause escalation timeouts. Declared as vars (not consts) so tests can
+// shrink the wall-clock budget; production callers should not mutate these.
+var (
 	pauseWallClockTimeout = 90 * time.Second
 	pauseSIGTERMAt        = 60 * time.Second
 	pauseSIGKILLAt        = 75 * time.Second
-	liveProbeTimeout      = 200 * time.Millisecond
-	trashDirName          = ".trash"
 )
 
 // CreateOptions controls the Create operation.
@@ -198,6 +203,14 @@ func Switch(ctx context.Context, name string) (string, error) {
 // Steps: mark stopping → POST /admin/pause → wait exit (90s) → tmux kill →
 // mark paused. If the broker doesn't exit cleanly within the wall-clock
 // budget, SIGTERM is sent at 60s and SIGKILL at 75s.
+//
+// Fail-closed semantics: if the broker is still bound to its port after the
+// SIGTERM/SIGKILL escalation ladder has run to completion, Pause refuses to
+// claim the workspace is paused. The registry transitions to StateError and
+// Pause returns the underlying shutdown error so the caller can surface it.
+// Transient errors that don't actually leave a live broker (token file
+// missing because the broker already exited cleanly, /admin/pause HTTP errors
+// followed by a successful exit) fall through to StatePaused as before.
 func Pause(ctx context.Context, name string) error {
 	reg, err := Read()
 	if err != nil {
@@ -229,16 +242,23 @@ func Pause(ctx context.Context, name string) error {
 	}
 
 	// Read the workspace's bearer token and POST /admin/pause.
+	// Token file missing is fail-open: if the broker already exited cleanly
+	// and removed its token file, /admin/pause without an Authorization
+	// header is harmless — the SIGTERM/SIGKILL ladder still covers a live
+	// broker. We track the postAdminPause result so we can include it in the
+	// fail-closed error annotation if shutdown ultimately fails.
 	token, _ := readTokenFile(name)
-	_ = postAdminPause(target.BrokerPort, token)
+	pauseHTTPErr := postAdminPause(target.BrokerPort, token)
 
 	// Escalation schedule.
 	start := time.Now()
 	pid := readPIDFile(target.RuntimeHome)
+	brokerExited := false
 
 	// Poll for exit up to pauseWallClockTimeout.
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
+loop:
 	for {
 		elapsed := time.Since(start)
 		if elapsed >= pauseWallClockTimeout {
@@ -247,7 +267,8 @@ func Pause(ctx context.Context, name string) error {
 		select {
 		case <-ticker.C:
 			if !probePort(target.BrokerPort) {
-				goto brokerDown
+				brokerExited = true
+				break loop
 			}
 			if pid > 0 && elapsed >= pauseSIGTERMAt && elapsed < pauseSIGKILLAt {
 				sendSIGTERM(pid)
@@ -259,8 +280,23 @@ func Pause(ctx context.Context, name string) error {
 		}
 	}
 
-brokerDown:
 	tmuxKiller(target.BrokerPort)
+
+	// Final liveness check after the kill ladder + tmux kill: if the broker
+	// is STILL bound, fail closed. Marking the registry "paused" while the
+	// process is alive would let a second resume attempt collide with the
+	// surviving broker.
+	if !brokerExited && probePort(target.BrokerPort) {
+		shutdownErr := fmt.Errorf("workspaces: pause %q: broker still alive after SIGTERM/SIGKILL escalation (port %d)", name, target.BrokerPort)
+		if pauseHTTPErr != nil {
+			shutdownErr = fmt.Errorf("%w; admin/pause: %v", shutdownErr, pauseHTTPErr)
+		}
+		_ = Update(name, func(ws *Workspace) error {
+			ws.State = StateError
+			return nil
+		})
+		return shutdownErr
+	}
 
 	return Update(name, func(ws *Workspace) error {
 		ws.State = StatePaused

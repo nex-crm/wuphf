@@ -1135,3 +1135,161 @@ func TestDoctorDetectsWrongSymlinkTarget(t *testing.T) {
 		t.Error("expected SymlinkWrong to be set for wrong symlink target")
 	}
 }
+
+// ---- Pause fail-closed tests (CodeRabbit #3164366631) ----------------------
+
+// withShortPauseTimeouts shrinks the pause escalation budget so the
+// fail-closed test can run in under a second instead of 90s. Restores the
+// production values via t.Cleanup.
+func withShortPauseTimeouts(t *testing.T) {
+	t.Helper()
+	origWall := pauseWallClockTimeout
+	origTerm := pauseSIGTERMAt
+	origKill := pauseSIGKILLAt
+	pauseWallClockTimeout = 800 * time.Millisecond
+	pauseSIGTERMAt = 200 * time.Millisecond
+	pauseSIGKILLAt = 500 * time.Millisecond
+	t.Cleanup(func() {
+		pauseWallClockTimeout = origWall
+		pauseSIGTERMAt = origTerm
+		pauseSIGKILLAt = origKill
+	})
+}
+
+// withTmuxKillerStub replaces tmuxKiller with a no-op for tests that don't
+// have tmux installed and don't care about session teardown.
+func withTmuxKillerStub(t *testing.T) {
+	t.Helper()
+	orig := tmuxKiller
+	tmuxKiller = func(port int) {}
+	t.Cleanup(func() { tmuxKiller = orig })
+}
+
+// TestPauseHappyPathBrokerExitsCleanly verifies the canonical clean shutdown:
+// the broker port is unbound from the start (simulating a process that has
+// already exited), so probePort returns false on the first tick and the
+// registry transitions cleanly to StatePaused.
+func TestPauseHappyPathBrokerExitsCleanly(t *testing.T) {
+	withOrchestratorHome(t)
+	withShortPauseTimeouts(t)
+	withTmuxKillerStub(t)
+
+	now := time.Now().UTC()
+	rt := t.TempDir()
+	// Use a port that is guaranteed to be unbound.
+	if err := Write(&Registry{
+		Version:    Version,
+		CLICurrent: "main",
+		Workspaces: []*Workspace{
+			{Name: "clean", RuntimeHome: rt,
+				BrokerPort: 29980, WebPort: 29981,
+				State: StateRunning, CreatedAt: now, LastUsedAt: now},
+		},
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	if err := Pause(context.Background(), "clean"); err != nil {
+		t.Fatalf("Pause clean: %v", err)
+	}
+
+	reg, _ := Read()
+	for _, ws := range reg.Workspaces {
+		if ws.Name == "clean" && ws.State != StatePaused {
+			t.Errorf("state: want paused, got %s", ws.State)
+		}
+	}
+}
+
+// TestPauseFallsThroughWhenTokenMissingButProcessGone verifies the fail-open
+// case: the token file does not exist (so readTokenFile errors) AND
+// /admin/pause errors (no listener), but the broker is in fact gone. Pause
+// must still mark the workspace paused — refusing because of a missing token
+// file would be a regression.
+func TestPauseFallsThroughWhenTokenMissingButProcessGone(t *testing.T) {
+	withOrchestratorHome(t)
+	withShortPauseTimeouts(t)
+	withTmuxKillerStub(t)
+
+	now := time.Now().UTC()
+	rt := t.TempDir()
+	if err := Write(&Registry{
+		Version:    Version,
+		CLICurrent: "main",
+		Workspaces: []*Workspace{
+			{Name: "no-token", RuntimeHome: rt,
+				BrokerPort: 29982, WebPort: 29983,
+				State: StateRunning, CreatedAt: now, LastUsedAt: now},
+		},
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	// Sanity: the token file does NOT exist on disk.
+	if _, err := readTokenFile("no-token"); err == nil {
+		t.Fatal("expected readTokenFile to error for nonexistent token")
+	}
+
+	if err := Pause(context.Background(), "no-token"); err != nil {
+		t.Fatalf("Pause no-token: %v", err)
+	}
+
+	reg, _ := Read()
+	for _, ws := range reg.Workspaces {
+		if ws.Name == "no-token" && ws.State != StatePaused {
+			t.Errorf("state: want paused (fail-open), got %s", ws.State)
+		}
+	}
+}
+
+// TestPauseFailsClosedWhenBrokerStillAlive verifies the core regression: if
+// the broker is bound throughout the wall-clock budget AND survives the
+// SIGTERM/SIGKILL ladder (because we point pid at our own test process which
+// will not actually exit when "killed" — sendSIGTERM/SIGKILL are best-effort
+// and we never write a real pid file), Pause must NOT mark the registry
+// paused. It must transition to StateError and return an error.
+func TestPauseFailsClosedWhenBrokerStillAlive(t *testing.T) {
+	withOrchestratorHome(t)
+	withShortPauseTimeouts(t)
+	withTmuxKillerStub(t)
+
+	// Stand up a fake broker that stays alive for the duration of the test.
+	// probePort will see this port as live throughout the escalation ladder.
+	port, shutdown := startFakeServer(t)
+	defer shutdown()
+
+	// Stub out sendSIGTERM/sendSIGKILL? We can't (they're package-level
+	// functions, not vars). Instead: deliberately omit any pid file so
+	// readPIDFile returns 0. With pid=0, sendSIGTERM/sendSIGKILL are no-ops
+	// and the broker survives the ladder — exactly the failure case we want
+	// the registry to reflect.
+	now := time.Now().UTC()
+	rt := t.TempDir()
+	// Note: do NOT write rt/.wuphf/broker.pid — readPIDFile returns 0.
+	if err := Write(&Registry{
+		Version:    Version,
+		CLICurrent: "main",
+		Workspaces: []*Workspace{
+			{Name: "stuck", RuntimeHome: rt,
+				BrokerPort: port, WebPort: port + 1,
+				State: StateRunning, CreatedAt: now, LastUsedAt: now},
+		},
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	err := Pause(context.Background(), "stuck")
+	if err == nil {
+		t.Fatal("expected Pause to fail closed when broker survives escalation")
+	}
+
+	// Registry must reflect StateError, not StatePaused.
+	reg, _ := Read()
+	for _, ws := range reg.Workspaces {
+		if ws.Name == "stuck" {
+			if ws.State != StateError {
+				t.Errorf("state: want error (fail-closed), got %s", ws.State)
+			}
+		}
+	}
+}
