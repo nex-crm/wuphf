@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useAppStore } from "../../stores/app";
@@ -38,15 +44,14 @@ function pressEnterOn(
 
 beforeEach(() => {
   postMock.mockClear();
+  window.history.replaceState({}, "", "/");
   useAppStore.setState({
     onboardingComplete: false,
   });
 });
 
 afterEach(() => {
-  while (document.body.firstChild) {
-    document.body.removeChild(document.body.firstChild);
-  }
+  cleanup();
 });
 
 describe("Wizard keyboard advancement", () => {
@@ -95,6 +100,31 @@ describe("Wizard keyboard advancement", () => {
 
     // Should move to templates step — "What should your office run?" is the
     // templates headline.
+    await waitFor(() => {
+      expect(
+        screen.getByText(/What should your office run\?/i),
+      ).toBeInTheDocument();
+    });
+  });
+
+  it("only skips identity when skip_identity is explicitly 1", async () => {
+    window.history.replaceState({}, "", "/onboarding?skip_identity=0");
+    render(<Wizard onComplete={vi.fn()} />);
+
+    pressEnterOn(window);
+
+    await waitFor(() => {
+      expect(
+        screen.getByLabelText(/Company or project name/i),
+      ).toBeInTheDocument();
+    });
+
+    cleanup();
+    window.history.replaceState({}, "", "/onboarding?skip_identity=1");
+    render(<Wizard onComplete={vi.fn()} />);
+
+    pressEnterOn(window);
+
     await waitFor(() => {
       expect(
         screen.getByText(/What should your office run\?/i),

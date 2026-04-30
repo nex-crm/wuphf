@@ -273,6 +273,47 @@ func TestHandleWorkspacesList_ReturnsJSONShape(t *testing.T) {
 	}
 }
 
+func TestHandleWorkspacesList_MarksActiveWorkspaceWithCanonicalRuntimeHome(t *testing.T) {
+	runtimeHome := t.TempDir()
+	parent := t.TempDir()
+	linkPath := filepath.Join(parent, "runtime-link")
+	if err := os.Symlink(runtimeHome, linkPath); err != nil {
+		t.Fatalf("symlink runtime home: %v", err)
+	}
+	t.Setenv("WUPHF_RUNTIME_HOME", linkPath)
+
+	b, o, _ := newWorkspaceTestBroker(t)
+	o.listResp = []Workspace{
+		{Name: "main", RuntimeHome: runtimeHome, BrokerPort: 7890, WebPort: 7891, State: "running"},
+		{Name: "demo", RuntimeHome: t.TempDir(), BrokerPort: 7910, WebPort: 7911, State: "paused"},
+	}
+
+	srv := httptest.NewServer(b.withAuth(b.handleWorkspacesList))
+	defer srv.Close()
+
+	resp := mustGet(t, srv.URL, b.Token())
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status: %d body: %s", resp.StatusCode, string(body))
+	}
+	var payload struct {
+		Workspaces []Workspace `json:"workspaces"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(payload.Workspaces) != 2 {
+		t.Fatalf("workspaces: want 2, got %d", len(payload.Workspaces))
+	}
+	if !payload.Workspaces[0].IsActive {
+		t.Fatalf("main workspace should be active after symlink canonicalization")
+	}
+	if payload.Workspaces[1].IsActive {
+		t.Fatalf("demo workspace should not be active")
+	}
+}
+
 func TestHandleWorkspacesList_NoOrchestratorReturns503(t *testing.T) {
 	b := newTestBroker(t)
 	srv := httptest.NewServer(b.withAuth(b.handleWorkspacesList))
