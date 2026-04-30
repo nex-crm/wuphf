@@ -49,6 +49,28 @@ func DMTargetAgent(slug string) string {
 	return canonicalDMTargetAgent(slug)
 }
 
+// DMPartner returns the non-human member slug of a 1:1 DM channel. Returns
+// "" if the channel is not a DM, does not exist, or is a group DM. Used by
+// surface bridges to resolve who the human is talking to when routing DM posts
+// to the right agent without requiring an @mention.
+func (b *Broker) DMPartner(channelSlug string) string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	ch := b.findChannelLocked(normalizeChannelSlug(channelSlug))
+	if ch == nil || !ch.isDM() {
+		return ""
+	}
+	if len(ch.Members) != 2 {
+		return ""
+	}
+	for _, m := range ch.Members {
+		if m != "human" && m != "you" {
+			return m
+		}
+	}
+	return ""
+}
+
 func canonicalDMTargetAgent(slug string) string {
 	parts := strings.Split(normalizeChannelSlug(slug), "__")
 	if len(parts) != 2 {

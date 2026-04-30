@@ -91,6 +91,14 @@ func (b *Broker) serveOfficeMemberList(w http.ResponseWriter) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"members": members})
 }
 
+func (b *Broker) OfficeMembers() []officeMember {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out := make([]officeMember, len(b.members))
+	copy(out, b.members)
+	return out
+}
+
 func (b *Broker) serveOfficeMemberMutation(w http.ResponseWriter, r *http.Request) {
 	var body officeMemberMutationBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
