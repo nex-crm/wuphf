@@ -3,6 +3,7 @@ package workspaces
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -759,6 +760,88 @@ func Trash(ctx context.Context) ([]TrashEntry, error) {
 		})
 	}
 	return out, nil
+}
+
+// OnboardingFields is the rich-field bundle that the create-workspace flow
+// forwards to a freshly spawned target broker. These fields aren't part of
+// CreateRequest (the broker's CreateRequest decoder is strict and rejects
+// them); instead they're written via the target's /onboarding/progress
+// endpoint after the new broker is up.
+type OnboardingFields struct {
+	CompanyDescription string `json:"company_description,omitempty"`
+	CompanyPriority    string `json:"company_priority,omitempty"`
+	LLMProvider        string `json:"llm_provider,omitempty"`
+	TeamLeadSlug       string `json:"team_lead_slug,omitempty"`
+}
+
+// onboardingProxyTimeout caps the cross-broker /onboarding/progress call.
+// The target broker's progress handler does a single SaveProgress to disk,
+// so 10s is generous.
+const onboardingProxyTimeout = 10 * time.Second
+
+// Onboard forwards an OnboardingFields bundle to the target workspace's
+// broker via its /onboarding/progress endpoint. Used by the create-workspace
+// flow to apply the rich fields the broker's strict CreateRequest decoder
+// can't accept (company_description, company_priority, llm_provider,
+// team_lead_slug).
+//
+// Auth: the target's bearer token is read from
+// ~/.wuphf-spaces/tokens/<name>.token (the same token Pause uses for its
+// cross-broker /admin/pause call).
+//
+// Returns ErrWorkspaceNotFound if name isn't in the registry. Returns a
+// wrapped HTTP-status error if the target broker rejects the call.
+func Onboard(ctx context.Context, name string, fields OnboardingFields) error {
+	reg, err := Read()
+	if err != nil {
+		return err
+	}
+	var target *Workspace
+	for _, ws := range reg.Workspaces {
+		if ws.Name == name {
+			target = ws
+			break
+		}
+	}
+	if target == nil {
+		return ErrWorkspaceNotFound
+	}
+
+	token, err := readTokenFile(name)
+	if err != nil {
+		return fmt.Errorf("workspaces: onboard %q: read token: %w", name, err)
+	}
+
+	body := map[string]any{
+		"step":    "company",
+		"answers": fields,
+	}
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return fmt.Errorf("workspaces: onboard %q: marshal: %w", name, err)
+	}
+
+	url := fmt.Sprintf("http://127.0.0.1:%d/onboarding/progress", target.BrokerPort)
+	reqCtx, cancel := context.WithTimeout(ctx, onboardingProxyTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, url, bytes.NewReader(buf))
+	if err != nil {
+		return fmt.Errorf("workspaces: onboard %q: build request: %w", name, err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: onboardingProxyTimeout}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("workspaces: onboard %q: post: %w", name, err)
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("workspaces: onboard %q: target broker returned %d", name, resp.StatusCode)
+	}
+	return nil
 }
 
 // extractTrashTimestamp returns the trailing numeric segment of a trash ID

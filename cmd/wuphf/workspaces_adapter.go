@@ -209,6 +209,15 @@ func (brokerOrchestratorAdapter) Restore(ctx context.Context, trashID string) (t
 	return brokerWorkspace(ws), nil
 }
 
+func (brokerOrchestratorAdapter) Onboard(ctx context.Context, name string, fields team.OnboardingFields) error {
+	return workspaces.Onboard(ctx, name, workspaces.OnboardingFields{
+		CompanyDescription: fields.CompanyDescription,
+		CompanyPriority:    fields.CompanyPriority,
+		LLMProvider:        fields.LLMProvider,
+		TeamLeadSlug:       fields.TeamLeadSlug,
+	})
+}
+
 func (brokerOrchestratorAdapter) Trash(ctx context.Context) ([]team.TrashEntry, error) {
 	entries, err := workspaces.Trash(ctx)
 	if err != nil {

@@ -977,6 +977,7 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/workspaces/shred", b.withAuth(b.handleWorkspacesShred))
 	mux.HandleFunc("/workspaces/restore", b.withAuth(b.handleWorkspacesRestore))
 	mux.HandleFunc("/workspaces/trash", b.withAuth(b.handleWorkspacesTrash))
+	mux.HandleFunc("/workspaces/onboarding", b.withAuth(b.handleWorkspacesOnboarding))
 	mux.HandleFunc("/admin/pause", b.withAuth(b.handleAdminPause))
 	mux.HandleFunc("/web-token", b.handleWebToken)
 	// Onboarding: state/progress/complete + prereqs/templates/validate-key + checklist.

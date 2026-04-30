@@ -48,6 +48,7 @@ type fakeOrchestrator struct {
 	restoreErr  error
 	trashResp   []TrashEntry
 	trashErr    error
+	onboardErr  error
 
 	calls []string // human-readable trace, e.g. "list", "create:demo"
 }
@@ -104,6 +105,16 @@ func (f *fakeOrchestrator) Restore(_ context.Context, trashID string) (Workspace
 func (f *fakeOrchestrator) Trash(_ context.Context) ([]TrashEntry, error) {
 	f.record("trash")
 	return f.trashResp, f.trashErr
+}
+
+func (f *fakeOrchestrator) Onboard(_ context.Context, name string, fields OnboardingFields) error {
+	f.record(fmt.Sprintf("onboard:%s:%s/%s/%s/%s",
+		name,
+		fields.CompanyDescription,
+		fields.CompanyPriority,
+		fields.LLMProvider,
+		fields.TeamLeadSlug))
+	return f.onboardErr
 }
 
 // recordingDrainer records Drain calls; tests assert it was called.
@@ -527,6 +538,50 @@ func TestHandleWorkspacesTrash_NilEntriesEmitsEmptyArray(t *testing.T) {
 	}
 }
 
+// --- /workspaces/onboarding ---------------------------------------------------
+
+func TestHandleWorkspacesOnboarding_DelegatesToOrchestrator(t *testing.T) {
+	b, o, _ := newWorkspaceTestBroker(t)
+	srv := httptest.NewServer(b.withAuth(b.handleWorkspacesOnboarding))
+	defer srv.Close()
+
+	body := `{"name":"demo","company_description":"d","company_priority":"p","llm_provider":"openai","team_lead_slug":"alice"}`
+	resp := mustPost(t, srv.URL, b.Token(), body)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status: %d body: %s", resp.StatusCode, string(bodyBytes))
+	}
+	calls := o.callTrace()
+	want := "onboard:demo:d/p/openai/alice"
+	if len(calls) != 1 || calls[0] != want {
+		t.Fatalf("orchestrator call: want [%q] got %v", want, calls)
+	}
+}
+
+func TestHandleWorkspacesOnboarding_RejectsInvalidName(t *testing.T) {
+	b, _, _ := newWorkspaceTestBroker(t)
+	srv := httptest.NewServer(b.withAuth(b.handleWorkspacesOnboarding))
+	defer srv.Close()
+	resp := mustPost(t, srv.URL, b.Token(), `{"name":"BAD"}`)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status: want 400 got %d", resp.StatusCode)
+	}
+}
+
+func TestHandleWorkspacesOnboarding_NotFoundFromOrchestrator(t *testing.T) {
+	b, o, _ := newWorkspaceTestBroker(t)
+	o.onboardErr = workspaces.ErrWorkspaceNotFound
+	srv := httptest.NewServer(b.withAuth(b.handleWorkspacesOnboarding))
+	defer srv.Close()
+	resp := mustPost(t, srv.URL, b.Token(), `{"name":"missing","company_description":"x"}`)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status: want 404 got %d", resp.StatusCode)
+	}
+}
+
 // Method-not-allowed coverage: every handler that takes POST rejects GET, the
 // list handler takes GET and rejects POST.
 func TestWorkspaceHandlers_RejectWrongMethod(t *testing.T) {
@@ -545,6 +600,7 @@ func TestWorkspaceHandlers_RejectWrongMethod(t *testing.T) {
 		{"shred rejects GET", b.handleWorkspacesShred, http.MethodGet},
 		{"restore rejects GET", b.handleWorkspacesRestore, http.MethodGet},
 		{"trash rejects POST", b.handleWorkspacesTrash, http.MethodPost},
+		{"onboarding rejects GET", b.handleWorkspacesOnboarding, http.MethodGet},
 		{"admin pause rejects GET", b.handleAdminPause, http.MethodGet},
 	}
 	for _, tc := range tests {
@@ -786,8 +842,9 @@ func TestEveryProtectedRouteRequiresAuth(t *testing.T) {
 		"/workspaces/resume":  b.handleWorkspacesResume,
 		"/workspaces/shred":   b.handleWorkspacesShred,
 		"/workspaces/restore": b.handleWorkspacesRestore,
-		"/workspaces/trash":   b.handleWorkspacesTrash,
-		"/admin/pause":        b.handleAdminPause,
+		"/workspaces/trash":      b.handleWorkspacesTrash,
+		"/workspaces/onboarding": b.handleWorkspacesOnboarding,
+		"/admin/pause":           b.handleAdminPause,
 	}
 
 	for path, handler := range routes {
@@ -1022,6 +1079,7 @@ func TestBrokerMuxAuthCoverage(t *testing.T) {
 		"/workspaces/shred",
 		"/workspaces/restore",
 		"/workspaces/trash",
+		"/workspaces/onboarding",
 		"/admin/pause",
 		// onboarding (mounted via onboarding.RegisterRoutes)
 		"/onboarding/state",

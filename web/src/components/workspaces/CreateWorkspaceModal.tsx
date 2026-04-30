@@ -1,28 +1,30 @@
 /**
  * CreateWorkspaceModal — inline modal that creates a new WUPHF workspace.
  *
- * Two paths:
+ * Two paths (CodeRabbit #3164366659 + #3164366660):
  *   1. Inherit from current (default): pre-fills blueprint, company info,
- *      LLM provider, team lead. Single screen + slug input.
- *   2. From-scratch: toggles off inherit. Shows the standard onboarding
- *      Wizard inline, scoped to the new workspace's runtime. Submit is
- *      handled by the wizard's own /onboarding/complete; the rail picks
- *      up the new workspace via /workspaces/list invalidation.
- *
- * Submit (inherit path) calls POST /workspaces/create. On success the
- * SPA navigates to the new workspace's URL via a full page reload —
- * page-reload-on-switch architecture, see design doc "Switch Protocol".
+ *      LLM provider, team lead. After /workspaces/create succeeds, the
+ *      rich onboarding fields (company_description/priority/llm_provider/
+ *      team_lead_slug) are forwarded to the new broker via
+ *      POST /workspaces/onboarding before the page reload — the broker's
+ *      strict CreateRequest decoder rejects them inline so the apply step
+ *      runs separately.
+ *   2. From-scratch: toggles off inherit. POST /workspaces/create with
+ *      from_scratch=true, then full-page-navigate to the NEW broker's
+ *      /onboarding URL so the wizard runs scoped to the new workspace's
+ *      runtime, NOT the active broker. Previously this ran the wizard
+ *      inline against the active broker, which mutated the wrong workspace.
  */
 import { useEffect, useId, useMemo, useState } from "react";
 
 import { type ConfigSnapshot, getConfig } from "../../api/client";
 import {
   type CreateWorkspaceInput,
+  type Workspace,
+  useApplyOnboarding,
   useCreateWorkspace,
   validateWorkspaceSlug,
 } from "../../api/workspaces";
-import { Wizard } from "../onboarding/Wizard";
-import { showNotice } from "../ui/Toast";
 
 interface CreateWorkspaceModalProps {
   open: boolean;
@@ -48,16 +50,6 @@ const styles = {
     border: "1px solid var(--border)",
     borderRadius: "var(--radius-md)",
     padding: 24,
-    boxShadow: "0 20px 60px rgba(0,0,0,0.4)",
-  },
-  panelWizard: {
-    width: "min(960px, calc(100vw - 40px))",
-    maxHeight: "calc(100vh - 60px)",
-    overflowY: "auto" as const,
-    background: "var(--bg-card)",
-    border: "1px solid var(--border)",
-    borderRadius: "var(--radius-md)",
-    padding: 0,
     boxShadow: "0 20px 60px rgba(0,0,0,0.4)",
   },
   title: {
@@ -191,13 +183,54 @@ export function CreateWorkspaceModal({
   const [stageIdx, setStageIdx] = useState(0);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
+  const applyOnboarding = useApplyOnboarding();
+
+  const navigateToWorkspace = (ws: Workspace, fromScratch: boolean) => {
+    setPhase("ready");
+    // Full page reload to the new workspace — page-reload-on-switch.
+    // From-scratch path lands on /onboarding so the wizard runs scoped to
+    // the new broker, not the active one (CodeRabbit #3164366660).
+    const path = fromScratch ? "/onboarding" : "/";
+    window.location.assign(`http://localhost:${ws.web_port}${path}`);
+  };
+
   const create = useCreateWorkspace({
-    onSuccess: (ws) => {
-      setPhase("ready");
-      // Full page reload to the new workspace — page-reload-on-switch.
-      // Broker returns the Workspace row directly (not {workspace, url}),
-      // so derive the URL from web_port.
-      window.location.assign(`http://localhost:${ws.web_port}/`);
+    onSuccess: (ws, vars) => {
+      const fromScratch = Boolean(vars.from_scratch);
+      // Inherit path: forward the rich onboarding fields the broker's
+      // strict CreateRequest decoder can't accept (company_description,
+      // company_priority, llm_provider, team_lead_slug) via the new
+      // /workspaces/onboarding proxy. From-scratch path skips this — the
+      // wizard running on the new broker will collect them itself.
+      if (
+        !fromScratch &&
+        (form.company_description ||
+          form.company_priority ||
+          form.llm_provider ||
+          form.team_lead_slug)
+      ) {
+        applyOnboarding.mutate(
+          {
+            name: ws.name,
+            company_description: form.company_description || undefined,
+            company_priority: form.company_priority || undefined,
+            llm_provider: form.llm_provider || undefined,
+            team_lead_slug: form.team_lead_slug || undefined,
+          },
+          {
+            onSuccess: () => navigateToWorkspace(ws, false),
+            onError: (err) => {
+              // Don't block navigation — the user can re-run onboarding
+              // inside the new workspace. Surface the failure but proceed.
+              // eslint-disable-next-line no-console
+              console.warn("[CreateWorkspaceModal] onboarding apply failed:", err);
+              navigateToWorkspace(ws, false);
+            },
+          },
+        );
+        return;
+      }
+      navigateToWorkspace(ws, fromScratch);
     },
     onError: (err) => {
       setPhase("error");
@@ -272,13 +305,11 @@ export function CreateWorkspaceModal({
 
   if (!open) return null;
 
-  // From-scratch: hand the inline wizard responsibility for the heavier
-  // path. The wizard uses the active broker's /onboarding/* endpoints —
-  // for a true "scoped to new WUPHF_RUNTIME_HOME" run, Lane C exposes
-  // those endpoints on a per-workspace basis (via /workspaces/create
-  // first, then /workspaces/<name>/onboarding/...). For v1 the wizard
-  // runs against the current broker after the workspace is allocated.
-  if (form.inherit === false && phase === "form") {
+  // From-scratch path: spawn a blank broker and navigate to its
+  // /onboarding route, where the wizard runs scoped to the new workspace's
+  // runtime instead of mutating the active workspace (CodeRabbit
+  // #3164366660). The active broker's /onboarding endpoints are NOT used.
+  if (form.inherit === false) {
     return (
       <div
         style={styles.backdrop}
@@ -286,45 +317,103 @@ export function CreateWorkspaceModal({
         aria-modal="true"
         aria-labelledby={titleId}
         onClick={(e) => {
-          if (e.target === e.currentTarget) onClose();
+          if (e.target === e.currentTarget && phase !== "spawning") onClose();
         }}
       >
-        <div style={styles.panelWizard} className="card">
-          <div
-            style={{
-              padding: "16px 24px",
-              borderBottom: "1px solid var(--border)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-            }}
-          >
-            <div>
-              <h3 id={titleId} style={{ ...styles.title, marginBottom: 0 }}>
-                New workspace from scratch
-              </h3>
-              <p style={{ ...styles.subtitle, marginBottom: 0 }}>
-                Run the full onboarding wizard scoped to a fresh runtime.
-              </p>
-            </div>
-            <label style={styles.toggleRow}>
-              <input
-                type="checkbox"
-                checked={form.inherit}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, inherit: e.target.checked }))
-                }
-                data-testid="inherit-toggle"
-              />
-              Inherit from current
+        <div style={styles.panel} className="card">
+          <h3 id={titleId} style={styles.title}>
+            New workspace from scratch
+          </h3>
+          <p style={styles.subtitle}>
+            Spawns a blank workspace, then drops you into the onboarding
+            wizard scoped to the new broker. Nothing inherits from the
+            current workspace.
+          </p>
+
+          <label style={styles.toggleRow}>
+            <input
+              type="checkbox"
+              checked={form.inherit}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, inherit: e.target.checked }))
+              }
+              data-testid="inherit-toggle"
+              disabled={phase === "spawning"}
+            />
+            Inherit from current
+          </label>
+
+          <div style={styles.field}>
+            <label style={styles.label} htmlFor={`${titleId}-slug`}>
+              Workspace name
             </label>
+            <input
+              id={`${titleId}-slug`}
+              style={styles.input}
+              value={form.name}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, name: e.target.value.toLowerCase() }))
+              }
+              placeholder="e.g. scratchpad"
+              autoComplete="off"
+              spellCheck={false}
+              data-testid="workspace-slug-input"
+              disabled={phase === "spawning"}
+            />
+            {form.name.length > 0 && !slugValidation.ok ? (
+              <div style={styles.errorText} data-testid="workspace-slug-error">
+                {slugValidation.reason}
+              </div>
+            ) : (
+              <div style={styles.hintText}>
+                Lowercase letters, digits, hyphens. Must start with a letter.
+                Reserved: main, dev, prod, default, current, tokens, trash.
+              </div>
+            )}
           </div>
-          <Wizard
-            onComplete={() => {
-              showNotice("Workspace created.", "success");
-              onClose();
-            }}
-          />
+
+          {phase === "spawning" ? (
+            <div style={styles.progress} data-testid="workspace-create-progress">
+              ⏳ {SPAWN_STAGES[stageIdx]}…
+            </div>
+          ) : null}
+          {phase === "error" && errorMsg ? (
+            <div style={styles.errorText} data-testid="workspace-create-error">
+              {errorMsg}
+            </div>
+          ) : null}
+
+          <div style={styles.row}>
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={onClose}
+              disabled={phase === "spawning"}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              disabled={
+                !slugValidation.ok || phase === "spawning" || create.isPending
+              }
+              data-testid="workspace-create-from-scratch-submit"
+              onClick={() => {
+                setErrorMsg(null);
+                setPhase("spawning");
+                const payload: CreateWorkspaceInput = {
+                  name: form.name.trim(),
+                  from_scratch: true,
+                };
+                create.mutate(payload);
+              }}
+            >
+              {phase === "spawning"
+                ? "Creating..."
+                : "Spawn and open onboarding"}
+            </button>
+          </div>
         </div>
       </div>
     );

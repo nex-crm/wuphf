@@ -18,24 +18,19 @@ vi.mock("../../../api/workspaces", async (importOriginal) => {
   return {
     ...actual,
     useCreateWorkspace: vi.fn(),
+    useApplyOnboarding: vi.fn(),
   };
 });
 
-vi.mock("../../onboarding/Wizard", () => ({
-  Wizard: ({ onComplete }: { onComplete?: () => void }) => (
-    <div data-testid="wizard-stub">
-      <button type="button" onClick={onComplete}>
-        Complete
-      </button>
-    </div>
-  ),
-}));
-
 import { getConfig } from "../../../api/client";
-import { useCreateWorkspace } from "../../../api/workspaces";
+import {
+  useApplyOnboarding,
+  useCreateWorkspace,
+} from "../../../api/workspaces";
 
 const getConfigMock = vi.mocked(getConfig);
 const useCreateWorkspaceMock = vi.mocked(useCreateWorkspace);
+const useApplyOnboardingMock = vi.mocked(useApplyOnboarding);
 
 function renderModal(open = true) {
   const onClose = vi.fn();
@@ -65,6 +60,10 @@ describe("<CreateWorkspaceModal>", () => {
       mutate: vi.fn(),
       isPending: false,
     } as unknown as ReturnType<typeof useCreateWorkspace>);
+    useApplyOnboardingMock.mockReturnValue({
+      mutate: vi.fn(),
+      isPending: false,
+    } as unknown as ReturnType<typeof useApplyOnboarding>);
   });
   afterEach(() => {
     vi.clearAllMocks();
@@ -158,12 +157,127 @@ describe("<CreateWorkspaceModal>", () => {
     );
   });
 
-  it("toggling 'Inherit from current' switches to the inline wizard", () => {
+  it("toggling 'Inherit from current' switches to the from-scratch panel", () => {
     renderModal();
 
     fireEvent.click(screen.getByTestId("inherit-toggle"));
 
-    expect(screen.getByTestId("wizard-stub")).toBeInTheDocument();
+    // The from-scratch panel keeps the slug input (the wizard runs on the
+    // new broker, not inline) and exposes a dedicated submit affordance.
+    expect(screen.getByTestId("workspace-slug-input")).toBeInTheDocument();
+    expect(
+      screen.getByTestId("workspace-create-from-scratch-submit"),
+    ).toBeInTheDocument();
+  });
+
+  it("inherit submit forwards rich fields through useApplyOnboarding", async () => {
+    const createMutate = vi.fn();
+    const applyMutate = vi.fn();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    useCreateWorkspaceMock.mockImplementation(((opts?: any) => ({
+      mutate: (input: unknown) => {
+        createMutate(input);
+        opts?.onSuccess?.(
+          {
+            name: "side-project",
+            broker_port: 7910,
+            web_port: 7911,
+            runtime_home: "/tmp/x",
+            state: "running",
+          },
+          input,
+          undefined,
+          {} as never,
+        );
+      },
+      isPending: false,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    })) as unknown as typeof useCreateWorkspace);
+    useApplyOnboardingMock.mockReturnValue({
+      mutate: applyMutate,
+      isPending: false,
+    } as unknown as ReturnType<typeof useApplyOnboarding>);
+
+    // Stub window.location.assign so the test doesn't actually navigate.
+    const assign = vi.fn();
+    Object.defineProperty(window, "location", {
+      value: { assign },
+      writable: true,
+    });
+
+    renderModal();
+
+    await waitFor(() => {
+      expect(
+        (screen.getByLabelText(/Company description/i) as HTMLTextAreaElement)
+          .value,
+      ).toBe("Synthesis");
+    });
+
+    const slug = screen.getByTestId(
+      "workspace-slug-input",
+    ) as HTMLInputElement;
+    fireEvent.change(slug, { target: { value: "side-project" } });
+
+    fireEvent.click(screen.getByTestId("workspace-create-submit"));
+
+    expect(createMutate).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "side-project", from_scratch: false }),
+    );
+    expect(applyMutate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "side-project",
+        company_description: "Synthesis",
+        company_priority: "Ship multi-workspace",
+        llm_provider: "claude-code",
+        team_lead_slug: "michael",
+      }),
+      expect.any(Object),
+    );
+  });
+
+  it("from-scratch submit creates with from_scratch=true (no inline wizard, no apply)", async () => {
+    const createMutate = vi.fn();
+    const applyMutate = vi.fn();
+    useCreateWorkspaceMock.mockReturnValue({
+      mutate: createMutate,
+      isPending: false,
+    } as unknown as ReturnType<typeof useCreateWorkspace>);
+    useApplyOnboardingMock.mockReturnValue({
+      mutate: applyMutate,
+      isPending: false,
+    } as unknown as ReturnType<typeof useApplyOnboarding>);
+
+    renderModal();
+
+    fireEvent.click(screen.getByTestId("inherit-toggle"));
+
+    const slug = screen.getByTestId(
+      "workspace-slug-input",
+    ) as HTMLInputElement;
+    fireEvent.change(slug, { target: { value: "scratchpad" } });
+
+    await waitFor(() => {
+      expect(
+        (
+          screen.getByTestId(
+            "workspace-create-from-scratch-submit",
+          ) as HTMLButtonElement
+        ).disabled,
+      ).toBe(false);
+    });
+
+    fireEvent.click(
+      screen.getByTestId("workspace-create-from-scratch-submit"),
+    );
+
+    expect(createMutate).toHaveBeenCalledWith({
+      name: "scratchpad",
+      from_scratch: true,
+    });
+    // From-scratch path must not run the apply-onboarding mutation against
+    // the active workspace — the new broker's wizard collects the fields.
+    expect(applyMutate).not.toHaveBeenCalled();
   });
 
   it("Esc key closes the modal in form phase", () => {

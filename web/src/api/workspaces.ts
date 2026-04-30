@@ -263,6 +263,49 @@ export function useShredWorkspace(
   });
 }
 
+/* ─── Per-workspace onboarding ──────────────────────────────── */
+
+/**
+ * Rich onboarding fields applied to a freshly created workspace via the
+ * broker's `/workspaces/onboarding` proxy. The broker's `CreateRequest`
+ * decoder is strict (DisallowUnknownFields), so these fields can't ride on
+ * the create payload — instead we run a two-step "create then onboard"
+ * flow per CodeRabbit #3164366659 and #3164366660.
+ *
+ * Wire shape mirrors `internal/team/broker_workspaces.go::OnboardingFields`.
+ */
+export interface ApplyOnboardingInput {
+  name: string;
+  company_description?: string;
+  company_priority?: string;
+  llm_provider?: string;
+  team_lead_slug?: string;
+}
+
+export interface ApplyOnboardingResponse {
+  ok: boolean;
+  name: string;
+}
+
+export function useApplyOnboarding(
+  options?: UseMutationOptions<
+    ApplyOnboardingResponse,
+    Error,
+    ApplyOnboardingInput
+  >,
+) {
+  const qc = useQueryClient();
+  return useMutation<ApplyOnboardingResponse, Error, ApplyOnboardingInput>({
+    mutationFn: (body) =>
+      post<ApplyOnboardingResponse>("/workspaces/onboarding", body),
+    onSuccess: (data, vars, onMutate, ctx) => {
+      void qc.invalidateQueries({ queryKey: workspaceKeys.all });
+      options?.onSuccess?.(data, vars, onMutate, ctx);
+    },
+    ...options,
+  });
+}
+
 export interface RestoreWorkspaceInput {
   trash_id: string;
 }

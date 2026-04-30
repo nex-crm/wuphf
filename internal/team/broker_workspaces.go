@@ -100,6 +100,17 @@ type workspaceOrchestrator interface {
 	Shred(ctx context.Context, name string, permanent bool) error
 	Restore(ctx context.Context, trashID string) (Workspace, error)
 	Trash(ctx context.Context) ([]TrashEntry, error)
+	Onboard(ctx context.Context, name string, fields OnboardingFields) error
+}
+
+// OnboardingFields mirrors internal/workspaces.OnboardingFields. The CLI
+// adapter maps between the two; defining the shape here keeps the broker's
+// public surface self-contained.
+type OnboardingFields struct {
+	CompanyDescription string `json:"company_description,omitempty"`
+	CompanyPriority    string `json:"company_priority,omitempty"`
+	LLMProvider        string `json:"llm_provider,omitempty"`
+	TeamLeadSlug       string `json:"team_lead_slug,omitempty"`
 }
 
 // TrashEntry mirrors internal/workspaces.TrashEntry on the wire. Defined
@@ -562,6 +573,55 @@ func (b *Broker) handleWorkspacesRestore(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeWorkspaceJSON(w, http.StatusOK, ws)
+}
+
+// handleWorkspacesOnboarding — POST /workspaces/onboarding.
+//
+// Body: {name, company_description?, company_priority?, llm_provider?,
+// team_lead_slug?}. The active broker proxies to the target workspace's
+// /onboarding/progress endpoint via the orchestrator's Onboard call.
+//
+// This is the "two-step create-then-onboard" path described in
+// CodeRabbit #3164366659 and #3164366660. It exists because the broker's
+// CreateRequest decoder is strict (DisallowUnknownFields), so the rich
+// onboarding fields can't ride on the create payload — instead the SPA
+// calls /workspaces/create first, then this endpoint with the rich fields.
+func (b *Broker) handleWorkspacesOnboarding(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	var req struct {
+		Name               string `json:"name"`
+		CompanyDescription string `json:"company_description,omitempty"`
+		CompanyPriority    string `json:"company_priority,omitempty"`
+		LLMProvider        string `json:"llm_provider,omitempty"`
+		TeamLeadSlug       string `json:"team_lead_slug,omitempty"`
+	}
+	if err := decodeWorkspaceJSON(w, r, &req); err != nil {
+		return
+	}
+	req.Name = strings.TrimSpace(req.Name)
+	if !workspaceNameValid(req.Name) {
+		writeWorkspaceError(w, http.StatusBadRequest, "invalid workspace name")
+		return
+	}
+
+	o := b.orchestrator()
+	if o == nil {
+		writeWorkspaceError(w, http.StatusServiceUnavailable, "workspaces not configured")
+		return
+	}
+	fields := OnboardingFields{
+		CompanyDescription: req.CompanyDescription,
+		CompanyPriority:    req.CompanyPriority,
+		LLMProvider:        req.LLMProvider,
+		TeamLeadSlug:       req.TeamLeadSlug,
+	}
+	if err := o.Onboard(r.Context(), req.Name, fields); err != nil {
+		writeOrchestratorError(w, err)
+		return
+	}
+	writeWorkspaceJSON(w, http.StatusOK, map[string]any{"ok": true, "name": req.Name})
 }
 
 // handleWorkspacesTrash — GET /workspaces/trash.
