@@ -5,6 +5,11 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { SchedulerJob } from "../../api/client";
 
+const MOCK_SPECS = [
+  { slug: "nex-insights", min_floor_minutes: 30, default_interval_minutes: 30, description: "Nex insights" },
+  { slug: "task_recheck", min_floor_minutes: 5, default_interval_minutes: 5, description: "Task recheck cadence" },
+];
+
 vi.mock("../../api/client", async () => {
   const actual =
     await vi.importActual<typeof import("../../api/client")>(
@@ -13,8 +18,7 @@ vi.mock("../../api/client", async () => {
   return {
     ...actual,
     patchSchedulerJob: vi.fn(),
-    runSchedulerJob: vi.fn().mockResolvedValue({ triggered: true, slug: "task_recheck", at: new Date().toISOString() }),
-    getSystemCronSpecs: vi.fn().mockResolvedValue([]),
+    getSystemCronSpecs: vi.fn().mockResolvedValue(MOCK_SPECS),
   };
 });
 

@@ -402,6 +402,19 @@ type systemCronSpec struct {
 	ReadOnly        bool       // one-relay-events: hardcoded for v1
 }
 
+// resolvedDefaultInterval returns the effective default interval for this
+// spec: at least 1, and never below MinFloor.
+func (s systemCronSpec) resolvedDefaultInterval() int {
+	d := s.DefaultInterval()
+	if d <= 0 {
+		d = 1
+	}
+	if s.MinFloor > 0 && d < s.MinFloor {
+		d = s.MinFloor
+	}
+	return d
+}
+
 // systemCronSpecs is the v1 system cron registry. Order is alphabetical
 // for deterministic startup. Each entry SHOULD be invisible in /scheduler
 // today (or surface only sporadically); registration makes them
@@ -471,13 +484,7 @@ func (b *Broker) registerSystemCrons() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	for _, spec := range systemCronSpecs() {
-		defaultInterval := spec.DefaultInterval()
-		if defaultInterval <= 0 {
-			defaultInterval = 1
-		}
-		if spec.MinFloor > 0 && defaultInterval < spec.MinFloor {
-			defaultInterval = spec.MinFloor
-		}
+		defaultInterval := spec.resolvedDefaultInterval()
 		// Find existing — preserve user-controlled fields.
 		var existing *schedulerJob
 		for i := range b.scheduler {
@@ -588,17 +595,10 @@ func (b *Broker) handleSchedulerSystemSpecs(w http.ResponseWriter, r *http.Reque
 	specs := systemCronSpecs()
 	out := make([]systemCronSpecJSON, 0, len(specs))
 	for _, s := range specs {
-		defaultInterval := s.DefaultInterval()
-		if defaultInterval <= 0 {
-			defaultInterval = 1
-		}
-		if s.MinFloor > 0 && defaultInterval < s.MinFloor {
-			defaultInterval = s.MinFloor
-		}
 		out = append(out, systemCronSpecJSON{
 			Slug:                   s.Slug,
 			MinFloorMinutes:        s.MinFloor,
-			DefaultIntervalMinutes: defaultInterval,
+			DefaultIntervalMinutes: s.resolvedDefaultInterval(),
 			Description:            s.Label,
 		})
 	}
