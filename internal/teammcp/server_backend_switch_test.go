@@ -42,7 +42,7 @@ func TestConfigureServerToolsBackendMatrix(t *testing.T) {
 				"team_memory_write",
 				"team_memory_promote",
 			},
-			commonPresent: []string{"team_broadcast", "team_poll"},
+			commonPresent: []string{"team_broadcast", "team_poll", "context_lookup", "context_capture", "context_promote", "context_health"},
 		},
 		{
 			name:    "nex/office",
@@ -60,7 +60,7 @@ func TestConfigureServerToolsBackendMatrix(t *testing.T) {
 				"notebook_write",
 				"notebook_promote",
 			},
-			commonPresent: []string{"team_broadcast", "team_poll"},
+			commonPresent: []string{"team_broadcast", "team_poll", "context_lookup", "context_capture", "context_promote", "context_health"},
 		},
 		{
 			name:    "gbrain/office",
@@ -78,7 +78,7 @@ func TestConfigureServerToolsBackendMatrix(t *testing.T) {
 				"notebook_write",
 				"notebook_promote",
 			},
-			commonPresent: []string{"team_broadcast", "team_poll"},
+			commonPresent: []string{"team_broadcast", "team_poll", "context_lookup", "context_capture", "context_promote", "context_health"},
 		},
 		{
 			name:     "none/office",
@@ -95,7 +95,7 @@ func TestConfigureServerToolsBackendMatrix(t *testing.T) {
 				"notebook_write",
 				"notebook_promote",
 			},
-			commonPresent: []string{"team_broadcast", "team_poll"},
+			commonPresent: []string{"team_broadcast", "team_poll", "context_lookup", "context_capture", "context_promote", "context_health"},
 		},
 		{
 			name:     "markdown/dm",
@@ -112,7 +112,7 @@ func TestConfigureServerToolsBackendMatrix(t *testing.T) {
 				"team_memory_write",
 				"team_memory_promote",
 			},
-			commonPresent: []string{"team_broadcast", "team_poll"},
+			commonPresent: []string{"team_broadcast", "team_poll", "context_lookup", "context_capture", "context_promote", "context_health"},
 		},
 		{
 			name:     "markdown/oneOnOne",
@@ -129,7 +129,7 @@ func TestConfigureServerToolsBackendMatrix(t *testing.T) {
 				"team_memory_write",
 				"team_memory_promote",
 			},
-			commonPresent: []string{"reply", "read_conversation"},
+			commonPresent: []string{"reply", "read_conversation", "context_lookup", "context_capture", "context_promote", "context_health"},
 		},
 	}
 

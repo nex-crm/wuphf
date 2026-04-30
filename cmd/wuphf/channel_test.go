@@ -826,6 +826,74 @@ func TestBuildTaskLinesShowsTimingMetadata(t *testing.T) {
 	}
 }
 
+func TestBuildTaskLinesShowsMemoryWorkflowStatus(t *testing.T) {
+	lines := channelui.BuildTaskLines([]channelui.Task{
+		{
+			ID:     "task-1",
+			Title:  "Research reuse loop",
+			Status: "in_progress",
+			Owner:  "pm",
+			MemoryWorkflow: &channelui.TaskMemoryWorkflow{
+				Required:      true,
+				Status:        "pending",
+				RequiredSteps: []string{"lookup", "capture", "promote"},
+				Lookup: channelui.TaskMemoryWorkflowStepState{
+					Required:    true,
+					Status:      "satisfied",
+					CompletedAt: "2026-04-30T10:00:00Z",
+					Count:       1,
+				},
+				Capture: channelui.TaskMemoryWorkflowStepState{Required: true, Status: "pending"},
+				Promote: channelui.TaskMemoryWorkflowStepState{Required: true, Status: "pending"},
+			},
+		},
+	}, 80)
+
+	rendered := stripANSI(joinRenderedLines(lines))
+	if !strings.Contains(rendered, "memory 1/3") {
+		t.Fatalf("expected memory workflow status in task metadata, got %q", rendered)
+	}
+}
+
+func TestTaskRenderHashChangesWhenMemoryWorkflowChanges(t *testing.T) {
+	m := channelModel{
+		activeApp:     channelui.OfficeAppTasks,
+		activeChannel: "general",
+		tasks: []channelui.Task{
+			{
+				ID:     "task-1",
+				Title:  "Research reuse loop",
+				Status: "in_progress",
+				MemoryWorkflow: &channelui.TaskMemoryWorkflow{
+					Required:      true,
+					Status:        "pending",
+					RequiredSteps: []string{"lookup", "capture", "promote"},
+					Lookup: channelui.TaskMemoryWorkflowStepState{
+						Required:    true,
+						Status:      "satisfied",
+						CompletedAt: "2026-04-30T10:00:00Z",
+					},
+					Capture: channelui.TaskMemoryWorkflowStepState{Required: true, Status: "pending"},
+					Promote: channelui.TaskMemoryWorkflowStepState{Required: true, Status: "pending"},
+				},
+			},
+		},
+	}
+
+	before := m.hashMainLinesState(80)
+	m.tasks[0].MemoryWorkflow.Status = "satisfied"
+	m.tasks[0].MemoryWorkflow.Capture.Status = "satisfied"
+	m.tasks[0].MemoryWorkflow.Capture.CompletedAt = "2026-04-30T10:05:00Z"
+	m.tasks[0].MemoryWorkflow.Promote.Status = "satisfied"
+	m.tasks[0].MemoryWorkflow.Promote.CompletedAt = "2026-04-30T10:10:00Z"
+	m.tasks[0].MemoryWorkflow.CompletedAt = "2026-04-30T10:10:00Z"
+	after := m.hashMainLinesState(80)
+
+	if before == after {
+		t.Fatal("expected task render hash to change when memory workflow changes")
+	}
+}
+
 func TestBuildRequestLinesShowsBlockingAndTimingMetadata(t *testing.T) {
 	lines := channelui.BuildRequestLines([]channelui.Interview{
 		{

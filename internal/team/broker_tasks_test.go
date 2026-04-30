@@ -2426,3 +2426,273 @@ func TestInFlightTasksExcludesCompletedStatus(t *testing.T) {
 		}
 	}
 }
+
+func TestBrokerMemoryWorkflowCompletionGateAndOverride(t *testing.T) {
+	b := newTestBroker(t)
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("failed to start broker: %v", err)
+	}
+	defer b.Stop()
+
+	postTask := func(payload map[string]any) (*http.Response, []byte) {
+		t.Helper()
+		body, _ := json.Marshal(payload)
+		req, _ := http.NewRequest(http.MethodPost, fmt.Sprintf("http://%s/tasks", b.Addr()), bytes.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+b.Token())
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("post task: %v", err)
+		}
+		raw, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		return resp, raw
+	}
+
+	createResp, raw := postTask(map[string]any{
+		"action":     "create",
+		"title":      "Research prior context for onboarding",
+		"created_by": "ceo",
+		"owner":      "ceo",
+		"task_type":  "research",
+	})
+	if createResp.StatusCode != http.StatusOK {
+		t.Fatalf("create status=%d body=%s", createResp.StatusCode, raw)
+	}
+	var created struct {
+		Task teamTask `json:"task"`
+	}
+	if err := json.Unmarshal(raw, &created); err != nil {
+		t.Fatalf("decode create: %v", err)
+	}
+	if created.Task.MemoryWorkflow == nil || !created.Task.MemoryWorkflow.Required {
+		t.Fatalf("expected required workflow on create, got %+v", created.Task.MemoryWorkflow)
+	}
+
+	completeResp, raw := postTask(map[string]any{
+		"action":     "complete",
+		"id":         created.Task.ID,
+		"created_by": "ceo",
+	})
+	if completeResp.StatusCode != http.StatusConflict {
+		t.Fatalf("expected completion conflict, got status=%d body=%s", completeResp.StatusCode, raw)
+	}
+	if !strings.Contains(string(raw), "memory workflow incomplete") {
+		t.Fatalf("expected actionable memory workflow error, got %s", raw)
+	}
+
+	overrideResp, raw := postTask(map[string]any{
+		"action":                          "complete",
+		"id":                              created.Task.ID,
+		"created_by":                      "ceo",
+		"memory_workflow_override":        true,
+		"memory_workflow_override_reason": "Human reviewed and accepted missing memory evidence.",
+	})
+	if overrideResp.StatusCode != http.StatusOK {
+		t.Fatalf("override status=%d body=%s", overrideResp.StatusCode, raw)
+	}
+	var overridden struct {
+		Task teamTask `json:"task"`
+	}
+	if err := json.Unmarshal(raw, &overridden); err != nil {
+		t.Fatalf("decode override: %v", err)
+	}
+	if overridden.Task.Status != "done" {
+		t.Fatalf("expected done after override, got %+v", overridden.Task)
+	}
+	wf := overridden.Task.MemoryWorkflow
+	if wf == nil || wf.Status != MemoryWorkflowStatusOverridden || wf.Override == nil {
+		t.Fatalf("expected recorded override, got %+v", wf)
+	}
+	if wf.Override.Actor != "ceo" || wf.Override.Reason == "" || wf.Override.Timestamp == "" {
+		t.Fatalf("override metadata missing: %+v", wf.Override)
+	}
+}
+
+func TestBrokerTaskPlanInitializesMemoryWorkflow(t *testing.T) {
+	b := newTestBroker(t)
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("failed to start broker: %v", err)
+	}
+	defer b.Stop()
+
+	body, _ := json.Marshal(map[string]any{
+		"channel":    "general",
+		"created_by": "ceo",
+		"tasks": []map[string]any{
+			{
+				"title":     "Map support process memory",
+				"assignee":  "ceo",
+				"task_type": "process-research",
+			},
+		},
+	})
+	req, _ := http.NewRequest(http.MethodPost, fmt.Sprintf("http://%s/task-plan", b.Addr()), bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("task plan request: %v", err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("task plan status=%d body=%s", resp.StatusCode, raw)
+	}
+	var result struct {
+		Tasks []teamTask `json:"tasks"`
+	}
+	if err := json.Unmarshal(raw, &result); err != nil {
+		t.Fatalf("decode task plan: %v", err)
+	}
+	if len(result.Tasks) != 1 || result.Tasks[0].MemoryWorkflow == nil || !result.Tasks[0].MemoryWorkflow.Required {
+		t.Fatalf("expected required workflow from task_plan, got %+v", result.Tasks)
+	}
+}
+
+func TestBrokerReusedTaskPreservesAndRecomputesMemoryWorkflow(t *testing.T) {
+	b := newTestBroker(t)
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("failed to start broker: %v", err)
+	}
+	defer b.Stop()
+
+	postTask := func(payload map[string]any) teamTask {
+		t.Helper()
+		body, _ := json.Marshal(payload)
+		req, _ := http.NewRequest(http.MethodPost, fmt.Sprintf("http://%s/tasks", b.Addr()), bytes.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+b.Token())
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("post task: %v", err)
+		}
+		defer resp.Body.Close()
+		raw, _ := io.ReadAll(resp.Body)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("post task status=%d body=%s", resp.StatusCode, raw)
+		}
+		var result struct {
+			Task teamTask `json:"task"`
+		}
+		if err := json.Unmarshal(raw, &result); err != nil {
+			t.Fatalf("decode task: %v", err)
+		}
+		return result.Task
+	}
+
+	created := postTask(map[string]any{
+		"action":     "create",
+		"title":      "Research prior context for onboarding",
+		"created_by": "ceo",
+		"owner":      "ceo",
+		"task_type":  "research",
+		"thread_id":  "thread-1",
+	})
+	if _, found, err := b.RecordTaskMemoryCapture(created.ID, "ceo", MemoryWorkflowArtifact{Backend: "markdown", Source: "notebook", Path: "agents/ceo/notebook/onboarding.md"}); err != nil || !found {
+		t.Fatalf("record capture found=%v err=%v", found, err)
+	}
+
+	reused := postTask(map[string]any{
+		"action":     "create",
+		"title":      "Research prior context for onboarding",
+		"created_by": "ceo",
+		"owner":      "ceo",
+		"task_type":  "feature",
+		"thread_id":  "thread-1",
+	})
+	if reused.ID != created.ID {
+		t.Fatalf("expected task reuse, got new task %s vs %s", reused.ID, created.ID)
+	}
+	if reused.TaskType != "feature" {
+		t.Fatalf("expected reused task type recomputed to feature, got %+v", reused)
+	}
+	if reused.MemoryWorkflow == nil {
+		t.Fatalf("expected existing workflow preserved")
+	}
+	if reused.MemoryWorkflow.Required {
+		t.Fatalf("expected reused feature task not to require workflow, got %+v", reused.MemoryWorkflow)
+	}
+	if len(reused.MemoryWorkflow.Captures) != 1 {
+		t.Fatalf("expected prior captures preserved, got %+v", reused.MemoryWorkflow)
+	}
+}
+
+func TestBrokerTaskMemoryWorkflowAcceptsContextToolEventShape(t *testing.T) {
+	b := newTestBroker(t)
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("failed to start broker: %v", err)
+	}
+	defer b.Stop()
+
+	createBody, _ := json.Marshal(map[string]any{
+		"action":     "create",
+		"title":      "Research prior context for renewal process",
+		"created_by": "ceo",
+		"owner":      "ceo",
+		"task_type":  "research",
+	})
+	req, _ := http.NewRequest(http.MethodPost, fmt.Sprintf("http://%s/tasks", b.Addr()), bytes.NewReader(createBody))
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	raw, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("create status=%d body=%s", resp.StatusCode, raw)
+	}
+	var created struct {
+		Task teamTask `json:"task"`
+	}
+	if err := json.Unmarshal(raw, &created); err != nil {
+		t.Fatalf("decode create: %v", err)
+	}
+
+	workflowBody, _ := json.Marshal(map[string]any{
+		"event":   "lookup",
+		"task_id": created.Task.ID,
+		"actor":   "pm",
+		"query":   "renewal process",
+		"citations": []map[string]any{
+			{
+				"corpus":   "shared",
+				"backend":  "gbrain",
+				"source":   "compiled_truth",
+				"slug":     "process/passport-renewal",
+				"page_id":  42,
+				"chunk_id": 7,
+				"title":    "Passport renewal process",
+				"snippet":  "Use the updated renewal checklist.",
+			},
+		},
+	})
+	req, _ = http.NewRequest(http.MethodPost, fmt.Sprintf("http://%s/tasks/memory-workflow", b.Addr()), bytes.NewReader(workflowBody))
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	req.Header.Set("Content-Type", "application/json")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("record workflow: %v", err)
+	}
+	raw, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("workflow status=%d body=%s", resp.StatusCode, raw)
+	}
+	var updated struct {
+		Task teamTask `json:"task"`
+	}
+	if err := json.Unmarshal(raw, &updated); err != nil {
+		t.Fatalf("decode workflow: %v", err)
+	}
+	wf := updated.Task.MemoryWorkflow
+	if wf == nil || wf.Lookup.Status != MemoryWorkflowStepStatusSatisfied || len(wf.Citations) != 1 {
+		t.Fatalf("expected lookup workflow update, got %+v", wf)
+	}
+	citation := wf.Citations[0]
+	if citation.PageID != "42" || citation.ChunkID != "7" || citation.SourceID != "process/passport-renewal" {
+		t.Fatalf("expected normalized gbrain citation ids, got %+v", citation)
+	}
+}

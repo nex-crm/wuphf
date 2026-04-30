@@ -43,12 +43,19 @@ type memoryBackend interface {
 }
 
 type ScopedMemoryHit struct {
-	Scope      string
-	Backend    string
-	Identifier string
-	Title      string
-	Snippet    string
-	OwnerSlug  string
+	Scope      string   `json:"scope,omitempty"`
+	Backend    string   `json:"backend,omitempty"`
+	Identifier string   `json:"identifier,omitempty"`
+	Title      string   `json:"title,omitempty"`
+	Snippet    string   `json:"snippet,omitempty"`
+	OwnerSlug  string   `json:"owner_slug,omitempty"`
+	Slug       string   `json:"slug,omitempty"`
+	PageID     int      `json:"page_id,omitempty"`
+	ChunkID    int      `json:"chunk_id,omitempty"`
+	ChunkIndex int      `json:"chunk_index,omitempty"`
+	Source     string   `json:"source,omitempty"`
+	Score      *float64 `json:"score,omitempty"`
+	Stale      *bool    `json:"stale,omitempty"`
 }
 
 type SharedMemoryWrite struct {
@@ -233,27 +240,41 @@ func (gbrainMemoryBackend) QueryShared(ctx context.Context, query string, limit 
 			continue
 		}
 		seen[result.Slug] = struct{}{}
-		title := strings.TrimSpace(result.Title)
-		if title == "" {
-			title = strings.TrimSpace(result.Slug)
-		}
-		snippet := strings.TrimSpace(strings.ReplaceAll(result.ChunkText, "\n", " "))
-		if snippet == "" {
-			snippet = "Relevant context found in the brain."
-		}
-		hits = append(hits, ScopedMemoryHit{
-			Scope:      "shared",
-			Backend:    config.MemoryBackendGBrain,
-			Identifier: strings.TrimSpace(result.Slug),
-			Title:      title,
-			Snippet:    truncate(snippet, 220),
-			OwnerSlug:  inferSharedMemoryOwner(strings.TrimSpace(result.Slug), snippet),
-		})
+		hits = append(hits, scopedMemoryHitFromGBrainResult(result))
 		if len(hits) >= limit && limit > 0 {
 			break
 		}
 	}
 	return hits, nil
+}
+
+func scopedMemoryHitFromGBrainResult(result gbrain.SearchResult) ScopedMemoryHit {
+	title := strings.TrimSpace(result.Title)
+	if title == "" {
+		title = strings.TrimSpace(result.Slug)
+	}
+	snippet := strings.TrimSpace(strings.ReplaceAll(result.ChunkText, "\n", " "))
+	if snippet == "" {
+		snippet = "Relevant context found in the brain."
+	}
+	score := result.Score
+	stale := result.Stale
+	slug := strings.TrimSpace(result.Slug)
+	return ScopedMemoryHit{
+		Scope:      "shared",
+		Backend:    config.MemoryBackendGBrain,
+		Identifier: slug,
+		Title:      title,
+		Snippet:    truncate(snippet, 220),
+		OwnerSlug:  inferSharedMemoryOwner(slug, snippet),
+		Slug:       slug,
+		PageID:     result.PageID,
+		ChunkID:    result.ChunkID,
+		ChunkIndex: result.ChunkIndex,
+		Source:     strings.TrimSpace(result.ChunkSource),
+		Score:      &score,
+		Stale:      &stale,
+	}
 }
 func (gbrainMemoryBackend) WriteShared(ctx context.Context, note SharedMemoryWrite) (string, error) {
 	slug := slugify(firstNonEmpty(note.Key, note.Title, note.Content))

@@ -485,6 +485,83 @@ export function getVersion() {
 
 // ── Tasks ──
 
+export interface TaskMemoryWorkflowCitation {
+  backend?: string;
+  source?: string;
+  source_id?: string;
+  path?: string;
+  page_id?: string;
+  chunk_id?: string;
+  source_url?: string;
+  line_start?: number;
+  line_end?: number;
+  title?: string;
+  snippet?: string;
+  score?: number;
+  stale?: boolean;
+  retrieved_at?: string;
+}
+
+export interface TaskMemoryWorkflowArtifact {
+  backend?: string;
+  source?: string;
+  path?: string;
+  page_id?: string;
+  promotion_id?: string;
+  entity_kind?: string;
+  entity_slug?: string;
+  playbook_slug?: string;
+  title?: string;
+  snippet?: string;
+  commit_sha?: string;
+  state?: string;
+  recorded_at?: string;
+  updated_at?: string;
+  missing?: boolean;
+}
+
+export interface TaskMemoryWorkflowStepState {
+  required?: boolean;
+  status?: string;
+  actor?: string;
+  query?: string;
+  completed_at?: string;
+  updated_at?: string;
+  count?: number;
+}
+
+export interface TaskMemoryWorkflowOverride {
+  actor: string;
+  reason: string;
+  timestamp: string;
+}
+
+export interface TaskMemoryWorkflowPartialError {
+  step?: string;
+  code?: string;
+  message?: string;
+  detail?: string;
+  timestamp?: string;
+}
+
+export interface TaskMemoryWorkflow {
+  required: boolean;
+  status?: string;
+  requirement_reason?: string;
+  required_steps?: string[];
+  lookup?: TaskMemoryWorkflowStepState;
+  capture?: TaskMemoryWorkflowStepState;
+  promote?: TaskMemoryWorkflowStepState;
+  citations?: TaskMemoryWorkflowCitation[];
+  captures?: TaskMemoryWorkflowArtifact[];
+  promotions?: TaskMemoryWorkflowArtifact[];
+  override?: TaskMemoryWorkflowOverride;
+  partial_errors?: Array<string | TaskMemoryWorkflowPartialError>;
+  created_at?: string;
+  updated_at?: string;
+  completed_at?: string;
+}
+
 export interface Task {
   id: string;
   title: string;
@@ -513,6 +590,7 @@ export interface Task {
   recheck_at?: string;
   created_at?: string;
   updated_at?: string;
+  memory_workflow?: TaskMemoryWorkflow;
 }
 
 export interface CreateTaskInput {
@@ -566,18 +644,38 @@ export type TaskStatusAction =
   | "complete"
   | "cancel";
 
+export interface UpdateTaskStatusOptions {
+  memoryWorkflowOverride?: boolean;
+  memoryWorkflowOverrideActor?: string;
+  memoryWorkflowOverrideReason?: string;
+  overrideReason?: string;
+}
+
 export function updateTaskStatus(
   taskId: string,
   action: TaskStatusAction,
   channel: string,
   actor = "human",
+  options?: UpdateTaskStatusOptions,
 ) {
-  return post<{ task: Task }>("/tasks", {
+  const body: Record<string, string | boolean> = {
     action,
     id: taskId,
     channel: channel || "general",
     created_by: actor,
-  });
+  };
+  if (options?.memoryWorkflowOverride) {
+    body.memory_workflow_override = true;
+    body.memory_workflow_override_actor =
+      options.memoryWorkflowOverrideActor || actor;
+  }
+  const overrideReason =
+    options?.memoryWorkflowOverrideReason || options?.overrideReason;
+  if (overrideReason) {
+    body.memory_workflow_override_reason = overrideReason;
+    body.override_reason = overrideReason;
+  }
+  return post<{ task: Task }>("/tasks", body);
 }
 
 export function getTasks(
@@ -1026,7 +1124,9 @@ export function listAgentLogTasks(opts?: { limit?: number }) {
 }
 
 export function getAgentLogEntries(taskId: string) {
-  return get<{ task: string; entries: TaskLogEntry[] }>("/agent-logs", { task: taskId });
+  return get<{ task: string; entries: TaskLogEntry[] }>("/agent-logs", {
+    task: taskId,
+  });
 }
 
 // ── Memory ──

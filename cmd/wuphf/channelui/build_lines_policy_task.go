@@ -1,6 +1,7 @@
 package channelui
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -180,6 +181,9 @@ func BuildTaskLines(tasks []Task, contentWidth int) []RenderedLine {
 		if task.ExecutionMode != "" {
 			metaParts = append(metaParts, task.ExecutionMode)
 		}
+		if memory := TaskMemoryWorkflowMeta(task.MemoryWorkflow); memory != "" {
+			metaParts = append(metaParts, memory)
+		}
 		meta := strings.Join(metaParts, " · ")
 		lines = append(lines, RenderedLine{Text: ""})
 		lines = append(lines, RenderedLine{Text: "  " + TaskStatusPill(task.Status) + " " + lipgloss.NewStyle().Bold(true).Render(task.Title), TaskID: task.ID})
@@ -214,4 +218,171 @@ func BuildTaskLines(tasks []Task, contentWidth int) []RenderedLine {
 		lines = append(lines, RenderedLine{Text: "  " + muted.Render(taskActionHint), TaskID: task.ID})
 	}
 	return lines
+}
+
+func TaskMemoryWorkflowMeta(workflow *TaskMemoryWorkflow) string {
+	if !HasVisibleTaskMemoryWorkflow(workflow) {
+		return ""
+	}
+	status := NormalizeTaskMemoryWorkflowStatus(workflow.Status)
+	done, total := TaskMemoryWorkflowStepCount(workflow)
+	if HasTaskMemoryWorkflowOverride(workflow) {
+		return "memory override"
+	}
+	if len(workflow.PartialErrors) > 0 || HasMissingTaskMemoryWorkflowArtifact(workflow) || IsIssueTaskMemoryWorkflowStatus(status) {
+		return "memory issue"
+	}
+	if IsCompleteTaskMemoryWorkflowStatus(status) || (workflow.Required && done >= total) {
+		return "memory done"
+	}
+	if workflow.Required || done > 0 {
+		return fmt.Sprintf("memory %d/%d", done, total)
+	}
+	if status == "" {
+		status = "pending"
+	}
+	return "memory " + strings.ReplaceAll(status, "_", " ")
+}
+
+func HasVisibleTaskMemoryWorkflow(workflow *TaskMemoryWorkflow) bool {
+	if workflow == nil {
+		return false
+	}
+	status := NormalizeTaskMemoryWorkflowStatus(workflow.Status)
+	done, _ := TaskMemoryWorkflowStepCount(workflow)
+	return workflow.Required ||
+		(status != "" && status != "not_required") ||
+		strings.TrimSpace(workflow.RequirementReason) != "" ||
+		done > 0 ||
+		len(workflow.Citations) > 0 ||
+		len(workflow.Captures) > 0 ||
+		len(workflow.Promotions) > 0 ||
+		len(workflow.PartialErrors) > 0 ||
+		HasTaskMemoryWorkflowOverride(workflow)
+}
+
+func TaskMemoryWorkflowStepCount(workflow *TaskMemoryWorkflow) (int, int) {
+	if workflow == nil {
+		return 0, 3
+	}
+	steps := TaskMemoryWorkflowRequiredSteps(workflow)
+	total := len(steps)
+	if total == 0 {
+		total = 3
+	}
+	done := 0
+	for _, step := range steps {
+		if TaskMemoryWorkflowStepSatisfied(TaskMemoryWorkflowStep(workflow, step)) {
+			done++
+		}
+	}
+	return done, total
+}
+
+func TaskMemoryWorkflowRequiredSteps(workflow *TaskMemoryWorkflow) []string {
+	if workflow == nil {
+		return []string{"lookup", "capture", "promote"}
+	}
+	var steps []string
+	for _, step := range workflow.RequiredSteps {
+		normalized := NormalizeTaskMemoryWorkflowStatus(step)
+		if IsKnownTaskMemoryWorkflowStep(normalized) {
+			steps = append(steps, normalized)
+		}
+	}
+	if len(steps) > 0 {
+		return steps
+	}
+	for _, step := range []string{"lookup", "capture", "promote"} {
+		if TaskMemoryWorkflowStep(workflow, step).Required {
+			steps = append(steps, step)
+		}
+	}
+	if len(steps) > 0 {
+		return steps
+	}
+	return []string{"lookup", "capture", "promote"}
+}
+
+func TaskMemoryWorkflowStep(workflow *TaskMemoryWorkflow, step string) TaskMemoryWorkflowStepState {
+	if workflow == nil {
+		return TaskMemoryWorkflowStepState{}
+	}
+	switch NormalizeTaskMemoryWorkflowStatus(step) {
+	case "lookup":
+		return workflow.Lookup
+	case "capture":
+		return workflow.Capture
+	case "promote":
+		return workflow.Promote
+	default:
+		return TaskMemoryWorkflowStepState{}
+	}
+}
+
+func TaskMemoryWorkflowStepSatisfied(step TaskMemoryWorkflowStepState) bool {
+	return NormalizeTaskMemoryWorkflowStatus(step.Status) == "satisfied" || strings.TrimSpace(step.CompletedAt) != ""
+}
+
+func HasTaskMemoryWorkflowOverride(workflow *TaskMemoryWorkflow) bool {
+	if workflow == nil {
+		return false
+	}
+	status := NormalizeTaskMemoryWorkflowStatus(workflow.Status)
+	return status == "override" ||
+		status == "overridden" ||
+		workflow.Override != nil
+}
+
+func HasMissingTaskMemoryWorkflowArtifact(workflow *TaskMemoryWorkflow) bool {
+	if workflow == nil {
+		return false
+	}
+	for _, artifact := range workflow.Captures {
+		if artifact.Missing {
+			return true
+		}
+	}
+	for _, artifact := range workflow.Promotions {
+		if artifact.Missing {
+			return true
+		}
+	}
+	return false
+}
+
+func NormalizeTaskMemoryWorkflowStatus(status string) string {
+	normalized := strings.NewReplacer(" ", "_", "-", "_").
+		Replace(strings.ToLower(strings.TrimSpace(status)))
+	for strings.Contains(normalized, "__") {
+		normalized = strings.ReplaceAll(normalized, "__", "_")
+	}
+	return strings.Trim(normalized, "_")
+}
+
+func IsKnownTaskMemoryWorkflowStep(step string) bool {
+	switch step {
+	case "lookup", "capture", "promote":
+		return true
+	default:
+		return false
+	}
+}
+
+func IsCompleteTaskMemoryWorkflowStatus(status string) bool {
+	switch status {
+	case "satisfied", "complete", "completed", "done":
+		return true
+	default:
+		return false
+	}
+}
+
+func IsIssueTaskMemoryWorkflowStatus(status string) bool {
+	switch status {
+	case "blocked", "error", "errored", "failed", "incomplete":
+		return true
+	default:
+		return false
+	}
 }

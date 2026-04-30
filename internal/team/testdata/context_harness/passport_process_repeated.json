@@ -1,0 +1,37 @@
+{
+  "scenario": "repeated passport process research",
+  "task_type": "research",
+  "lookup_query": "passport process",
+  "retrieval_contract": {
+    "required_capabilities": [
+      "literal_notebook_search",
+      "literal_wiki_search",
+      "direct_artifact_citation"
+    ],
+    "requires_semantic_index": false,
+    "requires_external_network": false
+  },
+  "runs": [
+    {
+      "id": "run-1",
+      "prompt": "Research the passport process for a child renewal and leave reusable instructions.",
+      "agent_slug": "researcher",
+      "notebook_path": "agents/researcher/notebook/2026-04-30-passport-process.md",
+      "wiki_path": "team/process/passport-process.md",
+      "official_source": "fixture://official/passport-process-baseline",
+      "must_start_without_prior_artifacts": true
+    },
+    {
+      "id": "run-2",
+      "prompt": "Research the passport process again for a similar renewal request.",
+      "agent_slug": "researcher",
+      "notebook_path": "agents/researcher/notebook/2026-04-30-passport-process-followup.md",
+      "official_source": "fixture://official/passport-process-followup",
+      "expected_prior_citations": [
+        "agents/researcher/notebook/2026-04-30-passport-process.md",
+        "team/process/passport-process.md"
+      ],
+      "promotion_skip_reason": "prior shared wiki artifact already canonical for this repeated process task"
+    }
+  ]
+}

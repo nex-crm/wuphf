@@ -395,6 +395,84 @@ func (s stateHasher) addTasks(tasks []channelui.Task) {
 	s.addInt(len(tasks))
 	for _, task := range tasks {
 		s.add(task.ID, task.Channel, task.Title, task.Owner, task.Status, task.TaskType, task.PipelineStage, task.ExecutionMode, task.ReviewState, task.DueAt, task.UpdatedAt)
+		s.addTaskMemoryWorkflow(task.MemoryWorkflow)
+	}
+}
+
+func (s stateHasher) addTaskMemoryWorkflow(workflow *channelui.TaskMemoryWorkflow) {
+	s.addBool(workflow != nil)
+	if workflow == nil {
+		return
+	}
+	s.add(workflow.Status, workflow.RequirementReason, workflow.CreatedAt, workflow.UpdatedAt, workflow.CompletedAt)
+	s.addBool(workflow.Required)
+	s.add(strings.Join(workflow.RequiredSteps, ","))
+	s.addTaskMemoryWorkflowStep(workflow.Lookup)
+	s.addTaskMemoryWorkflowStep(workflow.Capture)
+	s.addTaskMemoryWorkflowStep(workflow.Promote)
+	s.addInt(len(workflow.Citations))
+	for _, citation := range workflow.Citations {
+		s.add(
+			citation.Backend,
+			citation.Source,
+			citation.SourceID,
+			citation.Path,
+			citation.PageID,
+			citation.ChunkID,
+			citation.SourceURL,
+			citation.Title,
+			citation.Snippet,
+			citation.RetrievedAt,
+		)
+		s.addInt(citation.LineStart)
+		s.addInt(citation.LineEnd)
+		s.addBool(citation.Score != nil)
+		if citation.Score != nil {
+			s.add(fmt.Sprintf("%g", *citation.Score))
+		}
+		s.addBool(citation.Stale != nil)
+		if citation.Stale != nil {
+			s.addBool(*citation.Stale)
+		}
+	}
+	s.addTaskMemoryWorkflowArtifacts(workflow.Captures)
+	s.addTaskMemoryWorkflowArtifacts(workflow.Promotions)
+	s.addBool(workflow.Override != nil)
+	if workflow.Override != nil {
+		s.add(workflow.Override.Actor, workflow.Override.Reason, workflow.Override.Timestamp)
+	}
+	s.addInt(len(workflow.PartialErrors))
+	for _, partialErr := range workflow.PartialErrors {
+		s.add(partialErr.Step, partialErr.Code, partialErr.Message, partialErr.Detail, partialErr.Timestamp)
+	}
+}
+
+func (s stateHasher) addTaskMemoryWorkflowStep(step channelui.TaskMemoryWorkflowStepState) {
+	s.add(step.Status, step.Actor, step.Query, step.CompletedAt, step.UpdatedAt)
+	s.addBool(step.Required)
+	s.addInt(step.Count)
+}
+
+func (s stateHasher) addTaskMemoryWorkflowArtifacts(artifacts []channelui.TaskMemoryWorkflowArtifact) {
+	s.addInt(len(artifacts))
+	for _, artifact := range artifacts {
+		s.add(
+			artifact.Backend,
+			artifact.Source,
+			artifact.Path,
+			artifact.PageID,
+			artifact.PromotionID,
+			artifact.EntityKind,
+			artifact.EntitySlug,
+			artifact.PlaybookSlug,
+			artifact.Title,
+			artifact.Snippet,
+			artifact.CommitSHA,
+			artifact.State,
+			artifact.RecordedAt,
+			artifact.UpdatedAt,
+		)
+		s.addBool(artifact.Missing)
 	}
 }
 
