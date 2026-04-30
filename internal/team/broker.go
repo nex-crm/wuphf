@@ -763,8 +763,20 @@ func (b *Broker) Start() error {
 	// IntervalOverride and Enabled choices.
 	b.registerSystemCrons()
 	b.startReviewExpiryLoop(context.Background())
-	b.startMemoryWorkflowReconcilerLoop(context.Background())
-	return b.StartOnPort(brokeraddr.ResolvePort())
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		select {
+		case <-b.stopCh:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+	b.startMemoryWorkflowReconcilerLoop(ctx)
+	if err := b.StartOnPort(brokeraddr.ResolvePort()); err != nil {
+		cancel()
+		return err
+	}
+	return nil
 }
 
 // ensureWikiWorker initializes the markdown-backend wiki worker when the

@@ -65,14 +65,14 @@ func TestContextHarnessPassportProcessEvalRequiresPriorArtifactBeforeResearch(t 
 	}
 
 	for _, run := range fixture.Runs {
-		runner.runPassportProcessTask(fixture.LookupQuery, run)
+		runner.runPassportProcessTask(fixture.LookupQuery, fixture.TaskType, run)
 	}
 
 	first := fixture.Runs[0]
 	second := fixture.Runs[1]
 	assertFirstRunCapturesPromotesAndCites(t, runner.events, first)
 	assertSecondRunCitesPriorArtifactsBeforeResearch(t, runner.events, second)
-	assertPromotedRunMemoryWorkflowSatisfied(t, runner.workflowTasks[first.ID], first)
+	assertFirstRunMemoryWorkflowCapturedAndPromoted(t, runner.workflowTasks[first.ID], first)
 	assertSecondRunMemoryWorkflowRecordedPriorCitations(t, runner.workflowTasks[second.ID], second)
 }
 
@@ -96,9 +96,9 @@ func TestContextHarnessPassportProcessEvalDoesNotRequireSemanticSearch(t *testin
 	}
 }
 
-func (r *contextHarnessEvalRunner) runPassportProcessTask(query string, run passportProcessEvalRun) {
+func (r *contextHarnessEvalRunner) runPassportProcessTask(query, taskType string, run passportProcessEvalRun) {
 	r.t.Helper()
-	task := newPassportProcessEvalWorkflowTask(run)
+	task := newPassportProcessEvalWorkflowTask(run, taskType)
 	r.workflowTasks[run.ID] = task
 
 	prior := r.literalContextLookup(run.ID, query)
@@ -170,8 +170,11 @@ func (r *contextHarnessEvalRunner) runPassportProcessTask(query string, run pass
 		if strings.TrimSpace(run.PromotionSkipReason) == "" {
 			r.t.Fatalf("%s must either promote or record an explicit promotion skip reason", run.ID)
 		}
-		// MemoryWorkflow currently records promotion artifacts, while this eval
-		// keeps the explicit skip reason in the deterministic trace.
+		recordMemoryWorkflowPromotion(task, run.AgentSlug, MemoryWorkflowArtifact{
+			Backend: "markdown",
+			Source:  "skip",
+			Title:   run.PromotionSkipReason,
+		}, evalTimestamp("03"))
 		r.events = append(r.events, contextHarnessEvalEvent{
 			RunID:      run.ID,
 			Tool:       "context_promote",
@@ -286,17 +289,20 @@ func assertSecondRunCitesPriorArtifactsBeforeResearch(t *testing.T, events []con
 	}
 }
 
-func assertPromotedRunMemoryWorkflowSatisfied(t *testing.T, task *teamTask, run passportProcessEvalRun) {
+func assertFirstRunMemoryWorkflowCapturedAndPromoted(t *testing.T, task *teamTask, run passportProcessEvalRun) {
 	t.Helper()
 	if task == nil || task.MemoryWorkflow == nil {
 		t.Fatalf("%s missing memory workflow", run.ID)
 	}
 	wf := task.MemoryWorkflow
-	if !wf.Required || wf.Status != MemoryWorkflowStatusSatisfied {
-		t.Fatalf("%s workflow should be satisfied after lookup/capture/promote, got %+v", run.ID, wf)
+	if !wf.Required {
+		t.Fatalf("%s workflow should be required, got %+v", run.ID, wf)
 	}
-	if wf.Lookup.Status != MemoryWorkflowStepStatusSatisfied || wf.Capture.Status != MemoryWorkflowStepStatusSatisfied || wf.Promote.Status != MemoryWorkflowStepStatusSatisfied {
-		t.Fatalf("%s workflow steps not satisfied: %+v", run.ID, wf)
+	if wf.Lookup.Status != MemoryWorkflowStepStatusPending || len(wf.Citations) != 0 {
+		t.Fatalf("%s zero-hit prior lookup should remain pending, got %+v", run.ID, wf)
+	}
+	if wf.Capture.Status != MemoryWorkflowStepStatusSatisfied || wf.Promote.Status != MemoryWorkflowStepStatusSatisfied {
+		t.Fatalf("%s capture/promote steps not satisfied: %+v", run.ID, wf)
 	}
 	if !memoryWorkflowHasCapturePath(wf, run.NotebookPath) {
 		t.Fatalf("%s workflow missing notebook capture %q: %+v", run.ID, run.NotebookPath, wf.Captures)
@@ -330,7 +336,11 @@ func passportProcessNotebookContent(run passportProcessEvalRun, query string) st
 		"- 2026-04-30: Captured deterministic process-research notes without live network calls.\n"
 }
 
-func newPassportProcessEvalWorkflowTask(run passportProcessEvalRun) *teamTask {
+func newPassportProcessEvalWorkflowTask(run passportProcessEvalRun, taskType string) *teamTask {
+	taskType = strings.TrimSpace(taskType)
+	if taskType == "" {
+		taskType = "process_research"
+	}
 	task := &teamTask{
 		ID:        run.ID,
 		Channel:   "eval",
@@ -339,7 +349,7 @@ func newPassportProcessEvalWorkflowTask(run passportProcessEvalRun) *teamTask {
 		Owner:     run.AgentSlug,
 		Status:    "in_progress",
 		CreatedBy: "eval",
-		TaskType:  "process_research",
+		TaskType:  taskType,
 		CreatedAt: evalTimestamp("00"),
 		UpdatedAt: evalTimestamp("00"),
 	}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -269,7 +270,9 @@ func handleContextLookup(ctx context.Context, _ *mcp.CallToolRequest, args Conte
 		result.Status.Message = "No relevant context found."
 	}
 	if taskID := strings.TrimSpace(args.TaskID); taskID != "" {
-		result.Workflow = recordContextWorkflowEvent(lookupCtx, contextWorkflowEvent{
+		workflowCtx, workflowCancel := context.WithTimeout(ctx, contextDefaultTimeout)
+		defer workflowCancel()
+		result.Workflow = recordContextWorkflowEvent(workflowCtx, contextWorkflowEvent{
 			TaskID:    taskID,
 			Actor:     strings.TrimSpace(resolveSlugOptional(args.MySlug)),
 			Event:     "lookup",
@@ -589,7 +592,7 @@ func recordContextWorkflowEvent(ctx context.Context, event contextWorkflowEvent)
 		"event":       strings.TrimSpace(event.Event),
 		"query":       strings.TrimSpace(event.Query),
 		"task_type":   strings.TrimSpace(event.TaskType),
-		"citations":   event.Citations,
+		"citations":   workflowCitations(event.Citations),
 		"artifact":    event.Artifact,
 		"backend":     event.Backend,
 		"skip_reason": strings.TrimSpace(event.SkipReason),
@@ -598,9 +601,45 @@ func recordContextWorkflowEvent(ctx context.Context, event contextWorkflowEvent)
 		update.Error = err.Error()
 		return update
 	}
-	update.Updated = true
 	update.Response = response
+	if updated, ok := response["updated"].(bool); ok {
+		update.Updated = updated
+	} else {
+		update.Updated = true
+	}
 	return update
+}
+
+func workflowCitations(citations []ContextCitation) []team.ContextCitation {
+	if len(citations) == 0 {
+		return nil
+	}
+	out := make([]team.ContextCitation, 0, len(citations))
+	for _, citation := range citations {
+		pageID := ""
+		if citation.PageID != 0 {
+			pageID = strconv.Itoa(citation.PageID)
+		}
+		chunkID := ""
+		if citation.ChunkID != 0 {
+			chunkID = strconv.Itoa(citation.ChunkID)
+		}
+		out = append(out, team.ContextCitation{
+			Backend:   strings.TrimSpace(citation.Backend),
+			Source:    firstNonEmptyString(citation.Source, citation.Corpus),
+			SourceID:  firstNonEmptyString(citation.Identifier, citation.Slug),
+			Path:      strings.TrimSpace(citation.Path),
+			PageID:    pageID,
+			ChunkID:   chunkID,
+			LineStart: citation.Line,
+			LineEnd:   citation.Line,
+			Title:     strings.TrimSpace(citation.Title),
+			Snippet:   strings.TrimSpace(citation.Snippet),
+			Score:     citation.Score,
+			Stale:     citation.Stale,
+		})
+	}
+	return out
 }
 
 func fetchContextTaskWorkflow(ctx context.Context, taskID string) (map[string]any, any, error) {
@@ -731,12 +770,18 @@ func validateContextNotebookPath(slug, path string) error {
 }
 
 func validateContextPromotion(slug, sourcePath, targetPath, rationale string) error {
+	sourcePath = strings.TrimSpace(sourcePath)
+	targetPath = strings.TrimSpace(targetPath)
+	rationale = strings.TrimSpace(rationale)
 	if sourcePath == "" {
 		return fmt.Errorf("source_path is required")
 	}
 	expectedSourcePrefix := "agents/" + slug + "/notebook/"
 	if !strings.HasPrefix(sourcePath, expectedSourcePrefix) {
 		return fmt.Errorf("source_path %q must start with %s", sourcePath, expectedSourcePrefix)
+	}
+	if strings.Contains(sourcePath, "..") || strings.Contains(sourcePath, "\\") {
+		return fmt.Errorf("source_path must not contain path traversal; got %q", sourcePath)
 	}
 	if !strings.HasSuffix(strings.ToLower(sourcePath), ".md") {
 		return fmt.Errorf("source_path must end in .md; got %q", sourcePath)
@@ -746,6 +791,9 @@ func validateContextPromotion(slug, sourcePath, targetPath, rationale string) er
 	}
 	if !strings.HasPrefix(targetPath, "team/") {
 		return fmt.Errorf("target_wiki_path %q must start with team/", targetPath)
+	}
+	if strings.Contains(targetPath, "..") || strings.Contains(targetPath, "\\") {
+		return fmt.Errorf("target_wiki_path must not contain path traversal; got %q", targetPath)
 	}
 	if !strings.HasSuffix(strings.ToLower(targetPath), ".md") {
 		return fmt.Errorf("target_wiki_path must end in .md; got %q", targetPath)

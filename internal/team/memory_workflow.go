@@ -177,6 +177,7 @@ type MemoryWorkflow struct {
 	Captures          []MemoryWorkflowArtifact `json:"captures,omitempty"`
 	Promotions        []MemoryWorkflowArtifact `json:"promotions,omitempty"`
 	Override          *MemoryWorkflowOverride  `json:"override,omitempty"`
+	PartialErrors     []string                 `json:"partial_errors,omitempty"`
 	CreatedAt         string                   `json:"created_at,omitempty"`
 	UpdatedAt         string                   `json:"updated_at,omitempty"`
 	CompletedAt       string                   `json:"completed_at,omitempty"`
@@ -375,6 +376,9 @@ func refreshMemoryWorkflowStatus(wf *MemoryWorkflow, timestamp string) bool {
 	}
 	oldStatus := wf.Status
 	oldCompletedAt := wf.CompletedAt
+	oldLookup := wf.Lookup
+	oldCapture := wf.Capture
+	oldPromote := wf.Promote
 	if wf.Override != nil {
 		wf.Status = MemoryWorkflowStatusOverridden
 		if wf.CompletedAt == "" {
@@ -401,7 +405,11 @@ func refreshMemoryWorkflowStatus(wf *MemoryWorkflow, timestamp string) bool {
 		wf.Status = MemoryWorkflowStatusPending
 		wf.CompletedAt = ""
 	}
-	return oldStatus != wf.Status || oldCompletedAt != wf.CompletedAt
+	return oldStatus != wf.Status ||
+		oldCompletedAt != wf.CompletedAt ||
+		oldLookup != wf.Lookup ||
+		oldCapture != wf.Capture ||
+		oldPromote != wf.Promote
 }
 
 func refreshMemoryWorkflowStepStatus(wf *MemoryWorkflow, step MemoryWorkflowStep) {
@@ -410,19 +418,32 @@ func refreshMemoryWorkflowStepStatus(wf *MemoryWorkflow, step MemoryWorkflowStep
 	}
 	switch step {
 	case MemoryWorkflowStepLookup:
-		if wf.Lookup.CompletedAt != "" || wf.Lookup.Query != "" || len(wf.Citations) > 0 {
+		if len(wf.Citations) > 0 {
 			wf.Lookup.Status = MemoryWorkflowStepStatusSatisfied
 			wf.Lookup.Count = len(wf.Citations)
 			return
 		}
+		wf.Lookup.CompletedAt = ""
+		wf.Lookup.Count = 0
 		if wf.Lookup.Required {
 			wf.Lookup.Status = MemoryWorkflowStepStatusPending
 		}
 	case MemoryWorkflowStepCapture:
 		count := countPresentArtifacts(wf.Captures)
-		if count > 0 || wf.Capture.CompletedAt != "" {
+		if count > 0 {
 			wf.Capture.Status = MemoryWorkflowStepStatusSatisfied
 			wf.Capture.Count = count
+			return
+		}
+		if hasMissingMemoryWorkflowArtifact(wf.Captures) {
+			wf.Capture.CompletedAt = ""
+			wf.Capture.Status = MemoryWorkflowStepStatusPending
+			wf.Capture.Count = 0
+			return
+		}
+		if wf.Capture.CompletedAt != "" {
+			wf.Capture.Status = MemoryWorkflowStepStatusSatisfied
+			wf.Capture.Count = 0
 			return
 		}
 		if wf.Capture.Required {
@@ -431,9 +452,20 @@ func refreshMemoryWorkflowStepStatus(wf *MemoryWorkflow, step MemoryWorkflowStep
 		}
 	case MemoryWorkflowStepPromote:
 		count := countPresentArtifacts(wf.Promotions)
-		if count > 0 || wf.Promote.CompletedAt != "" {
+		if count > 0 {
 			wf.Promote.Status = MemoryWorkflowStepStatusSatisfied
 			wf.Promote.Count = count
+			return
+		}
+		if hasMissingMemoryWorkflowArtifact(wf.Promotions) {
+			wf.Promote.CompletedAt = ""
+			wf.Promote.Status = MemoryWorkflowStepStatusPending
+			wf.Promote.Count = 0
+			return
+		}
+		if wf.Promote.CompletedAt != "" {
+			wf.Promote.Status = MemoryWorkflowStepStatusSatisfied
+			wf.Promote.Count = 0
 			return
 		}
 		if wf.Promote.Required {
@@ -453,8 +485,17 @@ func countPresentArtifacts(artifacts []MemoryWorkflowArtifact) int {
 	return count
 }
 
+func hasMissingMemoryWorkflowArtifact(artifacts []MemoryWorkflowArtifact) bool {
+	for _, artifact := range artifacts {
+		if artifact.Missing {
+			return true
+		}
+	}
+	return false
+}
+
 func memoryWorkflowStepSatisfied(step MemoryWorkflowStepState) bool {
-	return step.Status == MemoryWorkflowStepStatusSatisfied || step.CompletedAt != ""
+	return step.Status == MemoryWorkflowStepStatusSatisfied
 }
 
 func taskMemoryWorkflowReady(task *teamTask) bool {
@@ -541,30 +582,31 @@ func recordMemoryWorkflowLookup(task *teamTask, actor, query string, citations [
 	}
 	timestamp = memoryWorkflowTimestamp(timestamp, task)
 	changed := false
+	stepChanged := false
 	actor = strings.TrimSpace(actor)
 	query = strings.TrimSpace(query)
 	if wf.Lookup.Actor != actor {
 		wf.Lookup.Actor = actor
-		changed = true
+		stepChanged = true
 	}
 	if wf.Lookup.Query != query {
 		wf.Lookup.Query = query
-		changed = true
+		stepChanged = true
 	}
-	if wf.Lookup.CompletedAt == "" {
+	if len(citations) > 0 && wf.Lookup.CompletedAt == "" {
 		wf.Lookup.CompletedAt = timestamp
-		changed = true
-	}
-	if wf.Lookup.UpdatedAt != timestamp {
-		wf.Lookup.UpdatedAt = timestamp
-		changed = true
+		stepChanged = true
 	}
 	for _, citation := range citations {
 		normalized := normalizeContextCitation(citation, timestamp)
 		if appendContextCitation(&wf.Citations, normalized) {
-			changed = true
+			stepChanged = true
 		}
 	}
+	if stepChanged && wf.Lookup.UpdatedAt != timestamp {
+		wf.Lookup.UpdatedAt = timestamp
+	}
+	changed = stepChanged
 	changed = refreshMemoryWorkflowStatus(wf, timestamp) || changed
 	if changed {
 		wf.UpdatedAt = timestamp
@@ -591,40 +633,40 @@ func recordMemoryWorkflowArtifact(task *teamTask, actor string, artifact MemoryW
 		return false
 	}
 	changed := false
+	stepChanged := false
 	switch step {
 	case MemoryWorkflowStepCapture:
 		if appendMemoryWorkflowArtifact(&wf.Captures, artifact) {
-			changed = true
+			stepChanged = true
 		}
 		if wf.Capture.Actor != strings.TrimSpace(actor) {
 			wf.Capture.Actor = strings.TrimSpace(actor)
-			changed = true
+			stepChanged = true
 		}
 		if wf.Capture.CompletedAt == "" {
 			wf.Capture.CompletedAt = timestamp
-			changed = true
+			stepChanged = true
 		}
-		if wf.Capture.UpdatedAt != timestamp {
+		if stepChanged && wf.Capture.UpdatedAt != timestamp {
 			wf.Capture.UpdatedAt = timestamp
-			changed = true
 		}
 	case MemoryWorkflowStepPromote:
 		if appendMemoryWorkflowArtifact(&wf.Promotions, artifact) {
-			changed = true
+			stepChanged = true
 		}
 		if wf.Promote.Actor != strings.TrimSpace(actor) {
 			wf.Promote.Actor = strings.TrimSpace(actor)
-			changed = true
+			stepChanged = true
 		}
 		if wf.Promote.CompletedAt == "" {
 			wf.Promote.CompletedAt = timestamp
-			changed = true
+			stepChanged = true
 		}
-		if wf.Promote.UpdatedAt != timestamp {
+		if stepChanged && wf.Promote.UpdatedAt != timestamp {
 			wf.Promote.UpdatedAt = timestamp
-			changed = true
 		}
 	}
+	changed = stepChanged
 	changed = refreshMemoryWorkflowStatus(wf, timestamp) || changed
 	if changed {
 		wf.UpdatedAt = timestamp
@@ -798,6 +840,7 @@ func mergeContextCitation(existing, incoming ContextCitation) ContextCitation {
 }
 
 func mergeMemoryWorkflowArtifact(existing, incoming MemoryWorkflowArtifact) MemoryWorkflowArtifact {
+	before := existing
 	if existing.Backend == "" {
 		existing.Backend = incoming.Backend
 	}
@@ -837,7 +880,21 @@ func mergeMemoryWorkflowArtifact(existing, incoming MemoryWorkflowArtifact) Memo
 	if existing.RecordedAt == "" {
 		existing.RecordedAt = incoming.RecordedAt
 	}
-	if incoming.UpdatedAt != "" {
+	contentChanged := existing.Backend != before.Backend ||
+		existing.Source != before.Source ||
+		existing.Path != before.Path ||
+		existing.PageID != before.PageID ||
+		existing.PromotionID != before.PromotionID ||
+		existing.EntityKind != before.EntityKind ||
+		existing.EntitySlug != before.EntitySlug ||
+		existing.PlaybookSlug != before.PlaybookSlug ||
+		existing.Title != before.Title ||
+		existing.Snippet != before.Snippet ||
+		existing.CommitSHA != before.CommitSHA ||
+		existing.State != before.State ||
+		existing.RecordedAt != before.RecordedAt ||
+		existing.Missing != incoming.Missing
+	if incoming.UpdatedAt != "" && (existing.UpdatedAt == "" || contentChanged) {
 		existing.UpdatedAt = incoming.UpdatedAt
 	}
 	existing.Missing = incoming.Missing
@@ -897,6 +954,9 @@ func cloneMemoryWorkflow(wf *MemoryWorkflow) *MemoryWorkflow {
 	}
 	if wf.Promotions != nil {
 		cloned.Promotions = append([]MemoryWorkflowArtifact(nil), wf.Promotions...)
+	}
+	if wf.PartialErrors != nil {
+		cloned.PartialErrors = append([]string(nil), wf.PartialErrors...)
 	}
 	if wf.Override != nil {
 		override := *wf.Override

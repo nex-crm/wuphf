@@ -41,6 +41,7 @@ func TestMemoryWorkflowJSONRoundTrip(t *testing.T) {
 					RetrievedAt: "2026-04-30T10:01:00Z",
 				},
 			},
+			PartialErrors: []string{"wiki search timed out"},
 		},
 	}
 
@@ -65,6 +66,14 @@ func TestMemoryWorkflowJSONRoundTrip(t *testing.T) {
 	}
 	if got.Score == nil || *got.Score != score || got.Stale == nil || *got.Stale != stale {
 		t.Fatalf("score/stale did not round trip: %+v", got)
+	}
+	if len(decoded.MemoryWorkflow.PartialErrors) != 1 || decoded.MemoryWorkflow.PartialErrors[0] != "wiki search timed out" {
+		t.Fatalf("partial_errors did not round trip: %+v", decoded.MemoryWorkflow.PartialErrors)
+	}
+	cloned := cloneMemoryWorkflow(decoded.MemoryWorkflow)
+	cloned.PartialErrors[0] = "mutated"
+	if decoded.MemoryWorkflow.PartialErrors[0] != "wiki search timed out" {
+		t.Fatalf("clone should deep-copy partial_errors, got %+v", decoded.MemoryWorkflow.PartialErrors)
 	}
 }
 
@@ -162,6 +171,61 @@ func TestMemoryWorkflowTransitionsAreIdempotent(t *testing.T) {
 	}
 	if got := len(task.MemoryWorkflow.Promotions); got != 1 {
 		t.Fatalf("expected one promotion, got %d", got)
+	}
+}
+
+func TestMemoryWorkflowLookupRequiresCitationEvidence(t *testing.T) {
+	task := &teamTask{
+		ID:        "task-1",
+		TaskType:  "research",
+		Title:     "Research prior context for onboarding",
+		CreatedAt: "2026-04-30T10:00:00Z",
+		UpdatedAt: "2026-04-30T10:00:00Z",
+	}
+	syncTaskMemoryWorkflow(task, "2026-04-30T10:00:00Z")
+
+	if !recordMemoryWorkflowLookup(task, "pm", "prior onboarding", nil, "2026-04-30T10:01:00Z") {
+		t.Fatal("first zero-hit lookup should record the attempt metadata")
+	}
+	if task.MemoryWorkflow.Lookup.Status != MemoryWorkflowStepStatusPending || task.MemoryWorkflow.Lookup.CompletedAt != "" {
+		t.Fatalf("zero-hit lookup must not satisfy the gate, got %+v", task.MemoryWorkflow.Lookup)
+	}
+	if taskMemoryWorkflowReady(task) {
+		t.Fatalf("zero-hit lookup should not make workflow ready: %+v", task.MemoryWorkflow)
+	}
+	if recordMemoryWorkflowLookup(task, "pm", "prior onboarding", nil, "2026-04-30T10:02:00Z") {
+		t.Fatal("duplicate zero-hit lookup should be idempotent")
+	}
+}
+
+func TestMemoryWorkflowMissingArtifactsReopenCompletedSteps(t *testing.T) {
+	task := &teamTask{
+		ID:        "task-1",
+		TaskType:  "research",
+		Title:     "Research prior context for onboarding",
+		CreatedAt: "2026-04-30T10:00:00Z",
+		UpdatedAt: "2026-04-30T10:00:00Z",
+	}
+	syncTaskMemoryWorkflow(task, "2026-04-30T10:00:00Z")
+	recordMemoryWorkflowLookup(task, "pm", "prior onboarding", []ContextCitation{{Backend: "markdown", Source: "notebook", Path: "agents/pm/notebook/onboarding.md"}}, "2026-04-30T10:01:00Z")
+	recordMemoryWorkflowCapture(task, "pm", MemoryWorkflowArtifact{Backend: "markdown", Source: "notebook", Path: "agents/pm/notebook/onboarding.md"}, "2026-04-30T10:02:00Z")
+	recordMemoryWorkflowPromotion(task, "pm", MemoryWorkflowArtifact{Backend: "markdown", Source: "promotion", Path: "team/process/onboarding.md", PromotionID: "rvw-1"}, "2026-04-30T10:03:00Z")
+	if task.MemoryWorkflow.Status != MemoryWorkflowStatusSatisfied {
+		t.Fatalf("expected satisfied workflow before missing repair, got %+v", task.MemoryWorkflow)
+	}
+
+	task.MemoryWorkflow.Captures[0].Missing = true
+	task.MemoryWorkflow.Promotions[0].Missing = true
+	refreshMemoryWorkflowStatus(task.MemoryWorkflow, "2026-04-30T10:04:00Z")
+
+	if task.MemoryWorkflow.Capture.Status != MemoryWorkflowStepStatusPending || task.MemoryWorkflow.Capture.CompletedAt != "" {
+		t.Fatalf("missing capture should reopen capture step, got %+v", task.MemoryWorkflow.Capture)
+	}
+	if task.MemoryWorkflow.Promote.Status != MemoryWorkflowStepStatusPending || task.MemoryWorkflow.Promote.CompletedAt != "" {
+		t.Fatalf("missing promotion should reopen promote step, got %+v", task.MemoryWorkflow.Promote)
+	}
+	if task.MemoryWorkflow.Status != MemoryWorkflowStatusPending {
+		t.Fatalf("missing durable artifacts should make workflow pending, got %+v", task.MemoryWorkflow)
 	}
 }
 

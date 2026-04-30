@@ -1247,10 +1247,10 @@ func (b *Broker) handleTaskPlan(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"tasks": created})
 }
 
-func (b *Broker) RecordTaskMemoryLookup(taskID, actor, query string, citations []ContextCitation) (teamTask, bool, error) {
+func (b *Broker) RecordTaskMemoryLookup(taskID, actor, query string, citations []ContextCitation) (teamTask, bool, bool, error) {
 	taskID = strings.TrimSpace(taskID)
 	if taskID == "" {
-		return teamTask{}, false, fmt.Errorf("task id required")
+		return teamTask{}, false, false, fmt.Errorf("task id required")
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	b.mu.Lock()
@@ -1263,26 +1263,26 @@ func (b *Broker) RecordTaskMemoryLookup(taskID, actor, query string, citations [
 		if changed {
 			b.tasks[i].UpdatedAt = now
 			if err := b.saveLocked(); err != nil {
-				return teamTask{}, true, err
+				return teamTask{}, true, true, err
 			}
 		}
-		return b.tasks[i], true, nil
+		return b.tasks[i], true, changed, nil
 	}
-	return teamTask{}, false, nil
+	return teamTask{}, false, false, nil
 }
 
-func (b *Broker) RecordTaskMemoryCapture(taskID, actor string, artifact MemoryWorkflowArtifact) (teamTask, bool, error) {
+func (b *Broker) RecordTaskMemoryCapture(taskID, actor string, artifact MemoryWorkflowArtifact) (teamTask, bool, bool, error) {
 	return b.recordTaskMemoryArtifact(taskID, actor, artifact, MemoryWorkflowStepCapture)
 }
 
-func (b *Broker) RecordTaskMemoryPromotion(taskID, actor string, artifact MemoryWorkflowArtifact) (teamTask, bool, error) {
+func (b *Broker) RecordTaskMemoryPromotion(taskID, actor string, artifact MemoryWorkflowArtifact) (teamTask, bool, bool, error) {
 	return b.recordTaskMemoryArtifact(taskID, actor, artifact, MemoryWorkflowStepPromote)
 }
 
-func (b *Broker) recordTaskMemoryArtifact(taskID, actor string, artifact MemoryWorkflowArtifact, step MemoryWorkflowStep) (teamTask, bool, error) {
+func (b *Broker) recordTaskMemoryArtifact(taskID, actor string, artifact MemoryWorkflowArtifact, step MemoryWorkflowStep) (teamTask, bool, bool, error) {
 	taskID = strings.TrimSpace(taskID)
 	if taskID == "" {
-		return teamTask{}, false, fmt.Errorf("task id required")
+		return teamTask{}, false, false, fmt.Errorf("task id required")
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	b.mu.Lock()
@@ -1298,17 +1298,17 @@ func (b *Broker) recordTaskMemoryArtifact(taskID, actor string, artifact MemoryW
 		case MemoryWorkflowStepPromote:
 			changed = recordMemoryWorkflowPromotion(&b.tasks[i], actor, artifact, now)
 		default:
-			return teamTask{}, true, fmt.Errorf("unsupported memory workflow step %q", step)
+			return teamTask{}, true, false, fmt.Errorf("unsupported memory workflow step %q", step)
 		}
 		if changed {
 			b.tasks[i].UpdatedAt = now
 			if err := b.saveLocked(); err != nil {
-				return teamTask{}, true, err
+				return teamTask{}, true, true, err
 			}
 		}
-		return b.tasks[i], true, nil
+		return b.tasks[i], true, changed, nil
 	}
-	return teamTask{}, false, nil
+	return teamTask{}, false, false, nil
 }
 
 func (b *Broker) handleTaskMemoryWorkflow(w http.ResponseWriter, r *http.Request) {
@@ -1336,13 +1336,14 @@ func (b *Broker) handleTaskMemoryWorkflow(w http.ResponseWriter, r *http.Request
 		action = strings.TrimSpace(body.Event)
 	}
 	var (
-		task  teamTask
-		found bool
-		err   error
+		task    teamTask
+		found   bool
+		changed bool
+		err     error
 	)
 	switch action {
 	case "lookup":
-		task, found, err = b.RecordTaskMemoryLookup(body.TaskID, body.Actor, body.Query, body.Citations)
+		task, found, changed, err = b.RecordTaskMemoryLookup(body.TaskID, body.Actor, body.Query, body.Citations)
 	case "capture", "capture_skipped":
 		artifact := body.Artifact
 		if len(body.Artifacts) > 0 {
@@ -1355,7 +1356,7 @@ func (b *Broker) handleTaskMemoryWorkflow(w http.ResponseWriter, r *http.Request
 			http.Error(w, "memory workflow capture artifact required", http.StatusBadRequest)
 			return
 		}
-		task, found, err = b.RecordTaskMemoryCapture(body.TaskID, body.Actor, artifact)
+		task, found, changed, err = b.RecordTaskMemoryCapture(body.TaskID, body.Actor, artifact)
 	case "promote", "promotion", "promote_skipped":
 		artifact := body.Artifact
 		if len(body.Artifacts) > 0 {
@@ -1368,7 +1369,7 @@ func (b *Broker) handleTaskMemoryWorkflow(w http.ResponseWriter, r *http.Request
 			http.Error(w, "memory workflow promotion artifact required", http.StatusBadRequest)
 			return
 		}
-		task, found, err = b.RecordTaskMemoryPromotion(body.TaskID, body.Actor, artifact)
+		task, found, changed, err = b.RecordTaskMemoryPromotion(body.TaskID, body.Actor, artifact)
 	default:
 		http.Error(w, "unknown memory workflow action", http.StatusBadRequest)
 		return
@@ -1381,7 +1382,7 @@ func (b *Broker) handleTaskMemoryWorkflow(w http.ResponseWriter, r *http.Request
 		http.Error(w, "task not found", http.StatusNotFound)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"task": task, "updated": true})
+	writeJSON(w, http.StatusOK, map[string]any{"task": task, "updated": changed})
 }
 
 func (b *Broker) handleTaskMemoryWorkflowReconcile(w http.ResponseWriter, r *http.Request) {
@@ -1578,6 +1579,7 @@ func (b *Broker) EnsureTask(channel, title, details, owner, createdBy, threadID 
 		ThreadID: strings.TrimSpace(threadID),
 		Owner:    strings.TrimSpace(owner),
 	}); existing != nil {
+		now := time.Now().UTC().Format(time.RFC3339)
 		if existing.Details == "" && strings.TrimSpace(details) != "" {
 			existing.Details = strings.TrimSpace(details)
 		}
@@ -1590,8 +1592,9 @@ func (b *Broker) EnsureTask(channel, title, details, owner, createdBy, threadID 
 		if existing.ThreadID == "" && strings.TrimSpace(threadID) != "" {
 			existing.ThreadID = strings.TrimSpace(threadID)
 		}
+		syncTaskMemoryWorkflow(existing, now)
 		b.ensureTaskOwnerChannelMembershipLocked(channel, existing.Owner)
-		existing.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+		existing.UpdatedAt = now
 		b.queueTaskBehindActiveOwnerLaneLocked(existing)
 		if err := rejectTheaterTaskForLiveBusiness(existing); err != nil {
 			return teamTask{}, false, err
@@ -1625,6 +1628,7 @@ func (b *Broker) EnsureTask(channel, title, details, owner, createdBy, threadID 
 	} else if task.Owner != "" {
 		task.Status = "in_progress"
 	}
+	syncTaskMemoryWorkflow(&task, now)
 	b.ensureTaskOwnerChannelMembershipLocked(channel, task.Owner)
 	b.queueTaskBehindActiveOwnerLaneLocked(&task)
 	if err := rejectTheaterTaskForLiveBusiness(&task); err != nil {
@@ -1678,6 +1682,7 @@ func (b *Broker) EnsurePlannedTask(input plannedTaskInput) (teamTask, bool, erro
 		SourceSignalID:   strings.TrimSpace(input.SourceSignalID),
 		SourceDecisionID: strings.TrimSpace(input.SourceDecisionID),
 	}); existing != nil {
+		now := time.Now().UTC().Format(time.RFC3339)
 		if existing.Details == "" && strings.TrimSpace(input.Details) != "" {
 			existing.Details = strings.TrimSpace(input.Details)
 		}
@@ -1706,8 +1711,9 @@ func (b *Broker) EnsurePlannedTask(input plannedTaskInput) (teamTask, bool, erro
 		if existing.SourceDecisionID == "" && strings.TrimSpace(input.SourceDecisionID) != "" {
 			existing.SourceDecisionID = strings.TrimSpace(input.SourceDecisionID)
 		}
+		syncTaskMemoryWorkflow(existing, now)
 		b.ensureTaskOwnerChannelMembershipLocked(channel, existing.Owner)
-		existing.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+		existing.UpdatedAt = now
 		b.queueTaskBehindActiveOwnerLaneLocked(existing)
 		if err := rejectTheaterTaskForLiveBusiness(existing); err != nil {
 			return teamTask{}, false, err
@@ -1747,6 +1753,7 @@ func (b *Broker) EnsurePlannedTask(input plannedTaskInput) (teamTask, bool, erro
 	} else if task.Owner != "" {
 		task.Status = "in_progress"
 	}
+	syncTaskMemoryWorkflow(&task, now)
 	b.ensureTaskOwnerChannelMembershipLocked(channel, task.Owner)
 	b.queueTaskBehindActiveOwnerLaneLocked(&task)
 	if err := rejectTheaterTaskForLiveBusiness(&task); err != nil {

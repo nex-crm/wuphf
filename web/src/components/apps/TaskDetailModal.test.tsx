@@ -130,6 +130,47 @@ describe("taskMemoryWorkflowBadge", () => {
 });
 
 describe("TaskDetailModal memory override", () => {
+  it("keeps the override action visible for issue-state completed workflows", () => {
+    getOfficeMembersMock.mockResolvedValue({
+      members: [{ slug: "ceo", name: "CEO", role: "lead" }],
+    });
+
+    const task: Task = {
+      id: "task-issue",
+      title: "Research passport renewal process",
+      status: "in_progress",
+      channel: "general",
+      owner: "ceo",
+      memory_workflow: {
+        required: true,
+        status: "partial_errors",
+        required_steps: ["lookup", "capture", "promote"],
+        lookup: {
+          required: true,
+          status: "satisfied",
+          completed_at: "2026-04-30T10:00:00Z",
+        },
+        capture: {
+          required: true,
+          status: "satisfied",
+          completed_at: "2026-04-30T10:01:00Z",
+        },
+        promote: {
+          required: true,
+          status: "satisfied",
+          completed_at: "2026-04-30T10:02:00Z",
+        },
+        partial_errors: ["workflow write failed"],
+      },
+    };
+
+    renderTaskDetail(task);
+
+    expect(
+      screen.getByRole("button", { name: "Mark done with override" }),
+    ).toBeInTheDocument();
+  });
+
   it("requires a reason and submits the human override payload", async () => {
     getOfficeMembersMock.mockResolvedValue({
       members: [{ slug: "ceo", name: "CEO", role: "lead" }],

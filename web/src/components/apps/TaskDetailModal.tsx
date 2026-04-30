@@ -42,6 +42,8 @@ const ISSUE_MEMORY_STATUSES = new Set([
   "errored",
   "failed",
   "incomplete",
+  "missing_artifacts",
+  "partial_errors",
 ]);
 const OVERRIDE_MEMORY_STATUSES = new Set(["overridden", "override"]);
 const WORKFLOW_STEP_NAMES = ["lookup", "capture", "promote"] as const;
@@ -339,13 +341,22 @@ export function TaskDetailModal({ task, onClose }: TaskDetailModalProps) {
   const memoryWorkflowProgress = memoryWorkflow
     ? memoryWorkflowStepCount(memoryWorkflow)
     : { done: 0, total: 0 };
+  const memoryWorkflowHasIssue = Boolean(
+    memoryWorkflow &&
+      ((memoryWorkflow.partial_errors?.length ?? 0) > 0 ||
+        hasMissingMemoryArtifact(memoryWorkflow) ||
+        ISSUE_MEMORY_STATUSES.has(
+          normalizeMemoryStatus(memoryWorkflow.status),
+        )),
+  );
   const memoryWorkflowNeedsOverride = Boolean(
     memoryWorkflow?.required &&
       !hasMemoryWorkflowOverride(memoryWorkflow) &&
       !COMPLETE_MEMORY_STATUSES.has(
         normalizeMemoryStatus(memoryWorkflow.status),
       ) &&
-      memoryWorkflowProgress.done < memoryWorkflowProgress.total,
+      (memoryWorkflowHasIssue ||
+        memoryWorkflowProgress.done < memoryWorkflowProgress.total),
   );
 
   const metaRows: Array<[string, string | null | undefined]> = [

@@ -154,6 +154,50 @@ func TestMemoryWorkflowReconcilerMarksMissingArtifacts(t *testing.T) {
 	}
 }
 
+func TestMemoryWorkflowReconcilerNilWorkerSkipsArtifactExistenceRepairs(t *testing.T) {
+	now := "2026-04-30T10:00:00Z"
+	task := teamTask{
+		ID:        "task-1",
+		TaskType:  "research",
+		Title:     "Research prior context for onboarding",
+		Status:    "in_progress",
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	syncTaskMemoryWorkflow(&task, now)
+	recordMemoryWorkflowLookup(&task, "pm", "prior onboarding", []ContextCitation{{Backend: "markdown", Source: "notebook", Path: "agents/pm/notebook/onboarding.md"}}, now)
+	recordMemoryWorkflowCapture(&task, "pm", MemoryWorkflowArtifact{Backend: "markdown", Source: "notebook", Path: "agents/pm/notebook/onboarding.md"}, now)
+	recordMemoryWorkflowPromotion(&task, "pm", MemoryWorkflowArtifact{Backend: "markdown", Source: "wiki", Path: "team/process/onboarding.md"}, now)
+
+	reconciler := NewMemoryWorkflowReconciler(nil, nil, func() time.Time {
+		return time.Date(2026, 4, 30, 10, 5, 0, 0, time.UTC)
+	})
+	updated, report, err := reconciler.ReconcileTasks(context.Background(), []teamTask{task})
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if report.Repaired != 0 || len(report.MissingArtifacts) != 0 {
+		t.Fatalf("nil worker should skip file existence repairs, got %+v", report)
+	}
+	wf := updated[0].MemoryWorkflow
+	if wf.Captures[0].Missing || wf.Promotions[0].Missing || wf.Status != MemoryWorkflowStatusSatisfied {
+		t.Fatalf("nil worker should preserve satisfied workflow, got %+v", wf)
+	}
+}
+
+func TestReconciledTaskNewerRequiresStrictlyNewerTimestamp(t *testing.T) {
+	current := teamTask{ID: "task-1", UpdatedAt: "2026-04-30T10:05:00Z"}
+	if reconciledTaskNewer(teamTask{ID: "task-1", UpdatedAt: "2026-04-30T10:05:00Z"}, current) {
+		t.Fatal("equal reconciler timestamp should not overwrite current task")
+	}
+	if reconciledTaskNewer(teamTask{ID: "task-1", UpdatedAt: "2026-04-30T10:04:59Z"}, current) {
+		t.Fatal("older reconciler timestamp should not overwrite current task")
+	}
+	if !reconciledTaskNewer(teamTask{ID: "task-1", UpdatedAt: "2026-04-30T10:05:01Z"}, current) {
+		t.Fatal("newer reconciler timestamp should apply")
+	}
+}
+
 func TestBrokerRunMemoryWorkflowReconcilerManualTrigger(t *testing.T) {
 	worker, review, _ := newMemoryWorkflowReconcilerFixture(t)
 	b := newTestBroker(t)
@@ -175,6 +219,7 @@ func TestBrokerRunMemoryWorkflowReconcilerManualTrigger(t *testing.T) {
 				Lookup:        MemoryWorkflowStepState{Required: true, Status: MemoryWorkflowStepStatusSatisfied, Query: "prior onboarding", CompletedAt: "2026-04-30T10:00:00Z"},
 				Capture:       MemoryWorkflowStepState{Required: true, Status: MemoryWorkflowStepStatusPending},
 				Promote:       MemoryWorkflowStepState{Required: true, Status: MemoryWorkflowStepStatusPending},
+				Citations:     []ContextCitation{{Backend: "markdown", Source: "notebook", Path: "agents/pm/notebook/onboarding.md"}},
 				Captures:      []MemoryWorkflowArtifact{{Backend: "markdown", Source: "notebook", Path: "agents/pm/notebook/onboarding.md"}},
 			},
 		},

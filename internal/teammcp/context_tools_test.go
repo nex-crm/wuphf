@@ -104,6 +104,45 @@ func TestContextLookupGBrainMapsTypedCitationFields(t *testing.T) {
 	}
 }
 
+func TestRecordContextWorkflowEventMapsCitationsAndUpdatedFlag(t *testing.T) {
+	var workflowBody map[string]any
+	var auth *testingAuth
+	srv, auth := stubBroker(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/tasks/memory-workflow" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		if err := json.NewDecoder(strings.NewReader(auth.lastBody)).Decode(&workflowBody); err != nil {
+			t.Fatalf("decode workflow body: %v", err)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"updated": false})
+	})
+	defer srv.Close()
+	withBrokerURL(t, srv.URL)
+
+	score := 0.82
+	update := recordContextWorkflowEvent(context.Background(), contextWorkflowEvent{
+		TaskID: "task-1",
+		Actor:  "pm",
+		Event:  "lookup",
+		Query:  "passport",
+		Citations: []ContextCitation{{
+			Corpus: "shared", Backend: config.MemoryBackendGBrain, Identifier: "process/passport", Slug: "process/passport",
+			PageID: 42, ChunkID: 7, Line: 11, Source: "compiled_truth", Title: "Passport", Snippet: "typed chunk", Score: &score,
+		}},
+	})
+	if update == nil || update.Error != "" || update.Updated {
+		t.Fatalf("expected broker updated=false to propagate, got %+v", update)
+	}
+	citations, ok := workflowBody["citations"].([]any)
+	if !ok || len(citations) != 1 {
+		t.Fatalf("expected one mapped citation, got %+v", workflowBody["citations"])
+	}
+	citation := citations[0].(map[string]any)
+	if citation["chunk_id"] != "7" || citation["page_id"] != "42" || citation["line_start"] != float64(11) || citation["line_end"] != float64(11) {
+		t.Fatalf("expected team citation wire fields, got %+v", citation)
+	}
+}
+
 func TestContextLookupInactiveBackendReturnsTypedEmptyResult(t *testing.T) {
 	t.Setenv("WUPHF_MEMORY_BACKEND", config.MemoryBackendNone)
 	res, data, err := handleContextLookup(context.Background(), nil, ContextLookupArgs{Query: "anything"})
@@ -163,6 +202,43 @@ func TestContextCaptureWritesNotebookAndUpdatesWorkflow(t *testing.T) {
 	}
 	if !strings.Contains(workflowBody, `"event":"capture"`) || !strings.Contains(workflowBody, `"task_id":"task-1"`) {
 		t.Fatalf("unexpected workflow body: %s", workflowBody)
+	}
+}
+
+func TestValidateContextPromotionRejectsTraversal(t *testing.T) {
+	cases := []struct {
+		name       string
+		sourcePath string
+		targetPath string
+	}{
+		{
+			name:       "source traversal",
+			sourcePath: "agents/pm/notebook/../../team/secret.md",
+			targetPath: "team/processes/passport.md",
+		},
+		{
+			name:       "source backslash",
+			sourcePath: `agents/pm/notebook/passport\evil.md`,
+			targetPath: "team/processes/passport.md",
+		},
+		{
+			name:       "target traversal",
+			sourcePath: "agents/pm/notebook/passport.md",
+			targetPath: "team/../agents/other/notebook/passport.md",
+		},
+		{
+			name:       "target backslash",
+			sourcePath: "agents/pm/notebook/passport.md",
+			targetPath: `team/passport\evil.md`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateContextPromotion("pm", tc.sourcePath, tc.targetPath, "ready")
+			if err == nil || !strings.Contains(err.Error(), "path traversal") {
+				t.Fatalf("expected traversal rejection, got %v", err)
+			}
+		})
 	}
 }
 

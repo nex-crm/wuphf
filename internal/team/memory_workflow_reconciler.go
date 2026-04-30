@@ -200,7 +200,7 @@ func (r *MemoryWorkflowReconciler) promotionsBySource() map[string]*Promotion {
 
 func (r *MemoryWorkflowReconciler) artifactExists(artifact MemoryWorkflowArtifact) bool {
 	if r.worker == nil {
-		return false
+		return true
 	}
 	path := strings.TrimSpace(artifact.Path)
 	if path == "" {
@@ -236,7 +236,7 @@ func (b *Broker) startMemoryWorkflowReconcilerLoop(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				_, _ = b.ReconcileMemoryWorkflows(context.Background())
+				_, _ = b.ReconcileMemoryWorkflows(ctx)
 			}
 		}
 	}()
@@ -269,6 +269,9 @@ func (b *Broker) ReconcileMemoryWorkflows(ctx context.Context) (MemoryWorkflowRe
 	}
 	for i := range b.tasks {
 		if updated, ok := byID[b.tasks[i].ID]; ok {
+			if !reconciledTaskNewer(updated, b.tasks[i]) {
+				continue
+			}
 			b.tasks[i].MemoryWorkflow = cloneMemoryWorkflow(updated.MemoryWorkflow)
 			b.tasks[i].UpdatedAt = updated.UpdatedAt
 		}
@@ -281,4 +284,17 @@ func (b *Broker) ReconcileMemoryWorkflows(ctx context.Context) (MemoryWorkflowRe
 
 func (b *Broker) runMemoryWorkflowReconciler() (MemoryWorkflowReconcileReport, error) {
 	return b.ReconcileMemoryWorkflows(context.Background())
+}
+
+func reconciledTaskNewer(updated, current teamTask) bool {
+	updatedAt := parseBrokerTimestamp(updated.UpdatedAt)
+	currentAt := parseBrokerTimestamp(current.UpdatedAt)
+	switch {
+	case updatedAt.IsZero():
+		return strings.TrimSpace(updated.UpdatedAt) > strings.TrimSpace(current.UpdatedAt)
+	case currentAt.IsZero():
+		return true
+	default:
+		return updatedAt.After(currentAt)
+	}
 }

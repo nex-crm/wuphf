@@ -2589,8 +2589,8 @@ func TestBrokerReusedTaskPreservesAndRecomputesMemoryWorkflow(t *testing.T) {
 		"task_type":  "research",
 		"thread_id":  "thread-1",
 	})
-	if _, found, err := b.RecordTaskMemoryCapture(created.ID, "ceo", MemoryWorkflowArtifact{Backend: "markdown", Source: "notebook", Path: "agents/ceo/notebook/onboarding.md"}); err != nil || !found {
-		t.Fatalf("record capture found=%v err=%v", found, err)
+	if _, found, changed, err := b.RecordTaskMemoryCapture(created.ID, "ceo", MemoryWorkflowArtifact{Backend: "markdown", Source: "notebook", Path: "agents/ceo/notebook/onboarding.md"}); err != nil || !found || !changed {
+		t.Fatalf("record capture found=%v changed=%v err=%v", found, changed, err)
 	}
 
 	reused := postTask(map[string]any{
@@ -2615,6 +2615,83 @@ func TestBrokerReusedTaskPreservesAndRecomputesMemoryWorkflow(t *testing.T) {
 	}
 	if len(reused.MemoryWorkflow.Captures) != 1 {
 		t.Fatalf("expected prior captures preserved, got %+v", reused.MemoryWorkflow)
+	}
+}
+
+func TestBrokerTaskMemoryWorkflowReportsIdempotentNoOp(t *testing.T) {
+	b := newTestBroker(t)
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("failed to start broker: %v", err)
+	}
+	defer b.Stop()
+
+	createBody, _ := json.Marshal(map[string]any{
+		"action":     "create",
+		"title":      "Research prior context for onboarding",
+		"created_by": "ceo",
+		"owner":      "ceo",
+		"task_type":  "research",
+	})
+	req, _ := http.NewRequest(http.MethodPost, fmt.Sprintf("http://%s/tasks", b.Addr()), bytes.NewReader(createBody))
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	raw, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("create status=%d body=%s", resp.StatusCode, raw)
+	}
+	var created struct {
+		Task teamTask `json:"task"`
+	}
+	if err := json.Unmarshal(raw, &created); err != nil {
+		t.Fatalf("decode create: %v", err)
+	}
+
+	workflowBody, _ := json.Marshal(map[string]any{
+		"event":   "lookup",
+		"task_id": created.Task.ID,
+		"actor":   "pm",
+		"query":   "onboarding context",
+		"citations": []map[string]any{
+			{
+				"backend": "markdown",
+				"source":  "notebook",
+				"path":    "agents/pm/notebook/onboarding.md",
+				"title":   "Onboarding",
+			},
+		},
+	})
+	postWorkflow := func() bool {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodPost, fmt.Sprintf("http://%s/tasks/memory-workflow", b.Addr()), bytes.NewReader(workflowBody))
+		req.Header.Set("Authorization", "Bearer "+b.Token())
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("record workflow: %v", err)
+		}
+		raw, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("workflow status=%d body=%s", resp.StatusCode, raw)
+		}
+		var result struct {
+			Updated bool `json:"updated"`
+		}
+		if err := json.Unmarshal(raw, &result); err != nil {
+			t.Fatalf("decode workflow: %v", err)
+		}
+		return result.Updated
+	}
+	if !postWorkflow() {
+		t.Fatal("first workflow event should update state")
+	}
+	if postWorkflow() {
+		t.Fatal("duplicate workflow event should report updated=false")
 	}
 }
 

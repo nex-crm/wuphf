@@ -380,7 +380,7 @@ func IsCompleteTaskMemoryWorkflowStatus(status string) bool {
 
 func IsIssueTaskMemoryWorkflowStatus(status string) bool {
 	switch status {
-	case "blocked", "error", "errored", "failed", "incomplete":
+	case "blocked", "error", "errored", "failed", "incomplete", "missing_artifacts", "partial_errors":
 		return true
 	default:
 		return false
