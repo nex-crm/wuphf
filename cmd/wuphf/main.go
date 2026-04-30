@@ -165,21 +165,28 @@ func initWorkspaces() {
 	}
 }
 
-// wireBrokerWorkspaces is called after a launcher has constructed and
-// started its broker. It hooks the broker's workspace endpoints up to the
-// shared orchestrator and the launcher's drain path. Safe to call when
-// l.Broker() is nil (no broker spawned).
+// wireBrokerWorkspaces registers startup wiring for the launcher's broker.
+// When the broker already exists it wires it immediately; otherwise the
+// launcher runs the hook as soon as it constructs the broker and before it
+// starts serving requests.
 func wireBrokerWorkspaces(l *team.Launcher) {
 	if l == nil {
 		return
 	}
+	configure := func(b *team.Broker) {
+		if b == nil {
+			return
+		}
+		b.SetWorkspaceOrchestrator(brokerOrchestratorAdapter{})
+		b.SetLauncherDrainer(l)
+		b.SetAdminPauseExitFn(os.Exit)
+	}
+	l.SetBrokerConfigurator(configure)
 	b := l.Broker()
 	if b == nil {
 		return
 	}
-	b.SetWorkspaceOrchestrator(brokerOrchestratorAdapter{})
-	b.SetLauncherDrainer(l)
-	b.SetAdminPauseExitFn(os.Exit)
+	configure(b)
 }
 
 func main() {
@@ -560,6 +567,7 @@ func runTeam(args []string, packSlug string, unsafe bool, oneOnOne bool, opusCEO
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
+	wireBrokerWorkspaces(l)
 
 	fmt.Printf("Launching %s (%d agents)... the cast is assembling.\n", l.PackName(), l.AgentCount())
 
@@ -567,7 +575,6 @@ func runTeam(args []string, packSlug string, unsafe bool, oneOnOne bool, opusCEO
 		fmt.Fprintf(os.Stderr, "error launching team: %v\n", err)
 		os.Exit(1)
 	}
-	wireBrokerWorkspaces(l)
 	if !l.UsesTmuxRuntime() {
 		if token := strings.TrimSpace(l.BrokerToken()); token != "" {
 			_ = os.Setenv("WUPHF_BROKER_TOKEN", token)
@@ -625,12 +632,12 @@ func runWeb(args []string, packSlug string, unsafe bool, webPort int, opusCEO bo
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
+	wireBrokerWorkspaces(l)
 	fmt.Printf("Launching %s web view (%d agents)... the browser is the office now.\n", l.PackName(), l.AgentCount())
 	if err := l.LaunchWeb(webPort); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
-	wireBrokerWorkspaces(l)
 }
 
 func fromScratchRuntimeHome() string {
