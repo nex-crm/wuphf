@@ -512,6 +512,7 @@ export interface TaskMemoryWorkflowArtifact {
   entity_slug?: string;
   playbook_slug?: string;
   title?: string;
+  skip_reason?: string;
   snippet?: string;
   commit_sha?: string;
   state?: string;

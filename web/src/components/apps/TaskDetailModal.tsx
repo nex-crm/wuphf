@@ -352,11 +352,11 @@ export function TaskDetailModal({ task, onClose }: TaskDetailModalProps) {
   const memoryWorkflowNeedsOverride = Boolean(
     memoryWorkflow?.required &&
       !hasMemoryWorkflowOverride(memoryWorkflow) &&
-      !COMPLETE_MEMORY_STATUSES.has(
-        normalizeMemoryStatus(memoryWorkflow.status),
-      ) &&
       (memoryWorkflowHasIssue ||
-        memoryWorkflowProgress.done < memoryWorkflowProgress.total),
+        (!COMPLETE_MEMORY_STATUSES.has(
+          normalizeMemoryStatus(memoryWorkflow.status),
+        ) &&
+          memoryWorkflowProgress.done < memoryWorkflowProgress.total)),
   );
 
   const metaRows: Array<[string, string | null | undefined]> = [
@@ -739,6 +739,8 @@ function formatWorkflowArtifact(artifact: TaskMemoryWorkflowArtifact): string {
     "artifact";
   const parts = [title];
   if (artifact.source) parts.unshift(artifact.source);
+  if (artifact.skip_reason && artifact.skip_reason !== title)
+    parts.push(artifact.skip_reason);
   if (artifact.path && artifact.path !== title) parts.push(artifact.path);
   if (artifact.state) parts.push(artifact.state);
   if (artifact.missing) parts.push("missing");

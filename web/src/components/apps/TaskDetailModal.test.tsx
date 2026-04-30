@@ -143,7 +143,7 @@ describe("TaskDetailModal memory override", () => {
       owner: "ceo",
       memory_workflow: {
         required: true,
-        status: "partial_errors",
+        status: "complete",
         required_steps: ["lookup", "capture", "promote"],
         lookup: {
           required: true,

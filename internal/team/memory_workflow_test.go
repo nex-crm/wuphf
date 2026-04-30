@@ -174,6 +174,32 @@ func TestMemoryWorkflowTransitionsAreIdempotent(t *testing.T) {
 	}
 }
 
+func TestMemoryWorkflowSkipArtifactsKeepDistinctReasons(t *testing.T) {
+	task := &teamTask{
+		ID:        "task-1",
+		TaskType:  "research",
+		Title:     "Research prior context for onboarding",
+		CreatedAt: "2026-04-30T10:00:00Z",
+		UpdatedAt: "2026-04-30T10:00:00Z",
+	}
+	syncTaskMemoryWorkflow(task, "2026-04-30T10:00:00Z")
+
+	first := MemoryWorkflowArtifact{Backend: "markdown", Source: "skip", Title: "already canonical", SkipReason: "already canonical"}
+	second := MemoryWorkflowArtifact{Backend: "markdown", Source: "skip", Title: "not reusable", SkipReason: "not reusable"}
+	if !recordMemoryWorkflowPromotion(task, "pm", first, "2026-04-30T10:01:00Z") {
+		t.Fatal("expected first skip reason to record")
+	}
+	if !recordMemoryWorkflowPromotion(task, "pm", second, "2026-04-30T10:02:00Z") {
+		t.Fatal("expected second skip reason to record distinctly")
+	}
+	if got := len(task.MemoryWorkflow.Promotions); got != 2 {
+		t.Fatalf("expected distinct skip artifacts by reason, got %d: %+v", got, task.MemoryWorkflow.Promotions)
+	}
+	if task.MemoryWorkflow.Promotions[0].SkipReason == "" || task.MemoryWorkflow.Promotions[1].SkipReason == "" {
+		t.Fatalf("expected skip reasons preserved: %+v", task.MemoryWorkflow.Promotions)
+	}
+}
+
 func TestMemoryWorkflowLookupRequiresCitationEvidence(t *testing.T) {
 	task := &teamTask{
 		ID:        "task-1",

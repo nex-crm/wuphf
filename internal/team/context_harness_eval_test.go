@@ -171,9 +171,10 @@ func (r *contextHarnessEvalRunner) runPassportProcessTask(query, taskType string
 			r.t.Fatalf("%s must either promote or record an explicit promotion skip reason", run.ID)
 		}
 		recordMemoryWorkflowPromotion(task, run.AgentSlug, MemoryWorkflowArtifact{
-			Backend: "markdown",
-			Source:  "skip",
-			Title:   run.PromotionSkipReason,
+			Backend:    "markdown",
+			Source:     "skip",
+			Title:      run.PromotionSkipReason,
+			SkipReason: run.PromotionSkipReason,
 		}, evalTimestamp("03"))
 		r.events = append(r.events, contextHarnessEvalEvent{
 			RunID:      run.ID,

@@ -13,6 +13,8 @@ import (
 	"github.com/nex-crm/wuphf/internal/agent"
 )
 
+var errTaskMemoryWorkflowBadRequest = errors.New("bad memory workflow request")
+
 func taskNeedsLocalWorktree(task *teamTask) bool {
 	if task == nil {
 		return false
@@ -598,7 +600,6 @@ func (b *Broker) handlePostTask(w http.ResponseWriter, r *http.Request) {
 		}
 		task := &b.tasks[i]
 		previousTask := cloneTeamTaskForRollback(*task)
-		wasDone := strings.EqualFold(strings.TrimSpace(task.Status), "done")
 		taskChannel := normalizeChannelSlug(task.Channel)
 		// Authorize against the task's ACTUAL channel, not the channel the
 		// caller put in the body. Without this, a viewer with access to
@@ -741,7 +742,7 @@ func (b *Broker) handlePostTask(w http.ResponseWriter, r *http.Request) {
 			task.WorktreeBranch = worktreeBranch
 		}
 		syncTaskMemoryWorkflow(task, now)
-		if strings.EqualFold(strings.TrimSpace(task.Status), "done") && (!wasDone || body.MemoryWorkflowOverride) {
+		if strings.EqualFold(strings.TrimSpace(task.Status), "done") {
 			overrideActor := strings.TrimSpace(body.MemoryWorkflowOverrideActor)
 			if overrideActor == "" {
 				overrideActor = strings.TrimSpace(body.CreatedBy)
@@ -1250,7 +1251,7 @@ func (b *Broker) handleTaskPlan(w http.ResponseWriter, r *http.Request) {
 func (b *Broker) RecordTaskMemoryLookup(taskID, actor, query string, citations []ContextCitation) (teamTask, bool, bool, error) {
 	taskID = strings.TrimSpace(taskID)
 	if taskID == "" {
-		return teamTask{}, false, false, fmt.Errorf("task id required")
+		return teamTask{}, false, false, fmt.Errorf("%w: task id required", errTaskMemoryWorkflowBadRequest)
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	b.mu.Lock()
@@ -1282,7 +1283,7 @@ func (b *Broker) RecordTaskMemoryPromotion(taskID, actor string, artifact Memory
 func (b *Broker) recordTaskMemoryArtifact(taskID, actor string, artifact MemoryWorkflowArtifact, step MemoryWorkflowStep) (teamTask, bool, bool, error) {
 	taskID = strings.TrimSpace(taskID)
 	if taskID == "" {
-		return teamTask{}, false, false, fmt.Errorf("task id required")
+		return teamTask{}, false, false, fmt.Errorf("%w: task id required", errTaskMemoryWorkflowBadRequest)
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	b.mu.Lock()
@@ -1298,7 +1299,7 @@ func (b *Broker) recordTaskMemoryArtifact(taskID, actor string, artifact MemoryW
 		case MemoryWorkflowStepPromote:
 			changed = recordMemoryWorkflowPromotion(&b.tasks[i], actor, artifact, now)
 		default:
-			return teamTask{}, true, false, fmt.Errorf("unsupported memory workflow step %q", step)
+			return teamTask{}, true, false, fmt.Errorf("%w: unsupported memory workflow step %q", errTaskMemoryWorkflowBadRequest, step)
 		}
 		if changed {
 			b.tasks[i].UpdatedAt = now
@@ -1350,7 +1351,8 @@ func (b *Broker) handleTaskMemoryWorkflow(w http.ResponseWriter, r *http.Request
 			artifact = body.Artifacts[0]
 		}
 		if action == "capture_skipped" && memoryWorkflowArtifactKey(normalizeMemoryWorkflowArtifact(artifact, "")) == "" {
-			artifact = MemoryWorkflowArtifact{Source: "skip", Title: strings.TrimSpace(body.SkipReason)}
+			skipReason := strings.TrimSpace(body.SkipReason)
+			artifact = MemoryWorkflowArtifact{Source: "skip", Title: skipReason, SkipReason: skipReason}
 		}
 		if memoryWorkflowArtifactKey(normalizeMemoryWorkflowArtifact(artifact, "")) == "" {
 			http.Error(w, "memory workflow capture artifact required", http.StatusBadRequest)
@@ -1363,7 +1365,8 @@ func (b *Broker) handleTaskMemoryWorkflow(w http.ResponseWriter, r *http.Request
 			artifact = body.Artifacts[0]
 		}
 		if action == "promote_skipped" && memoryWorkflowArtifactKey(normalizeMemoryWorkflowArtifact(artifact, "")) == "" {
-			artifact = MemoryWorkflowArtifact{Source: "skip", Title: strings.TrimSpace(body.SkipReason)}
+			skipReason := strings.TrimSpace(body.SkipReason)
+			artifact = MemoryWorkflowArtifact{Source: "skip", Title: skipReason, SkipReason: skipReason}
 		}
 		if memoryWorkflowArtifactKey(normalizeMemoryWorkflowArtifact(artifact, "")) == "" {
 			http.Error(w, "memory workflow promotion artifact required", http.StatusBadRequest)
@@ -1375,7 +1378,11 @@ func (b *Broker) handleTaskMemoryWorkflow(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		status := http.StatusInternalServerError
+		if errors.Is(err, errTaskMemoryWorkflowBadRequest) {
+			status = http.StatusBadRequest
+		}
+		http.Error(w, err.Error(), status)
 		return
 	}
 	if !found {

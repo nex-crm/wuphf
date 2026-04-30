@@ -108,6 +108,7 @@ type MemoryWorkflowArtifact struct {
 	EntitySlug   string `json:"entity_slug,omitempty"`
 	PlaybookSlug string `json:"playbook_slug,omitempty"`
 	Title        string `json:"title,omitempty"`
+	SkipReason   string `json:"skip_reason,omitempty"`
 	Snippet      string `json:"snippet,omitempty"`
 	CommitSHA    string `json:"commit_sha,omitempty"`
 	State        string `json:"state,omitempty"`
@@ -748,6 +749,7 @@ func normalizeMemoryWorkflowArtifact(artifact MemoryWorkflowArtifact, timestamp 
 	artifact.EntitySlug = strings.TrimSpace(artifact.EntitySlug)
 	artifact.PlaybookSlug = strings.TrimSpace(artifact.PlaybookSlug)
 	artifact.Title = strings.TrimSpace(artifact.Title)
+	artifact.SkipReason = strings.TrimSpace(artifact.SkipReason)
 	artifact.Snippet = strings.TrimSpace(artifact.Snippet)
 	artifact.CommitSHA = strings.TrimSpace(artifact.CommitSHA)
 	artifact.State = strings.TrimSpace(artifact.State)
@@ -789,6 +791,7 @@ func memoryWorkflowArtifactKey(artifact MemoryWorkflowArtifact) string {
 		artifact.EntityKind,
 		artifact.EntitySlug,
 		artifact.PlaybookSlug,
+		artifact.SkipReason,
 	}
 	return strings.Trim(strings.Join(parts, "|"), "|")
 }
@@ -868,6 +871,10 @@ func mergeMemoryWorkflowArtifact(existing, incoming MemoryWorkflowArtifact) Memo
 	if existing.Title == "" {
 		existing.Title = incoming.Title
 	}
+	if incoming.SkipReason != "" && incoming.SkipReason != existing.SkipReason {
+		existing.SkipReason = incoming.SkipReason
+		existing.Title = incoming.Title
+	}
 	if existing.Snippet == "" {
 		existing.Snippet = incoming.Snippet
 	}
@@ -889,6 +896,7 @@ func mergeMemoryWorkflowArtifact(existing, incoming MemoryWorkflowArtifact) Memo
 		existing.EntitySlug != before.EntitySlug ||
 		existing.PlaybookSlug != before.PlaybookSlug ||
 		existing.Title != before.Title ||
+		existing.SkipReason != before.SkipReason ||
 		existing.Snippet != before.Snippet ||
 		existing.CommitSHA != before.CommitSHA ||
 		existing.State != before.State ||

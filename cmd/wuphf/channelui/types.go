@@ -257,6 +257,7 @@ type TaskMemoryWorkflowArtifact struct {
 	EntitySlug   string `json:"entity_slug,omitempty"`
 	PlaybookSlug string `json:"playbook_slug,omitempty"`
 	Title        string `json:"title,omitempty"`
+	SkipReason   string `json:"skip_reason,omitempty"`
 	Snippet      string `json:"snippet,omitempty"`
 	CommitSHA    string `json:"commit_sha,omitempty"`
 	State        string `json:"state,omitempty"`

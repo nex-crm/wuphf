@@ -2509,6 +2509,68 @@ func TestBrokerMemoryWorkflowCompletionGateAndOverride(t *testing.T) {
 	}
 }
 
+func TestBrokerMemoryWorkflowCompletionGateRerunsForExistingDoneTask(t *testing.T) {
+	b := newTestBroker(t)
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("failed to start broker: %v", err)
+	}
+	defer b.Stop()
+
+	postTask := func(payload map[string]any) (*http.Response, []byte) {
+		t.Helper()
+		body, _ := json.Marshal(payload)
+		req, _ := http.NewRequest(http.MethodPost, fmt.Sprintf("http://%s/tasks", b.Addr()), bytes.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+b.Token())
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("post task: %v", err)
+		}
+		raw, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		return resp, raw
+	}
+
+	createResp, raw := postTask(map[string]any{
+		"action":     "create",
+		"title":      "Compare pricing pages",
+		"created_by": "ceo",
+		"owner":      "ceo",
+		"task_type":  "feature",
+	})
+	if createResp.StatusCode != http.StatusOK {
+		t.Fatalf("create status=%d body=%s", createResp.StatusCode, raw)
+	}
+	var created struct {
+		Task teamTask `json:"task"`
+	}
+	if err := json.Unmarshal(raw, &created); err != nil {
+		t.Fatalf("decode create: %v", err)
+	}
+	completeResp, raw := postTask(map[string]any{
+		"action":     "complete",
+		"id":         created.Task.ID,
+		"created_by": "ceo",
+	})
+	if completeResp.StatusCode != http.StatusOK {
+		t.Fatalf("complete status=%d body=%s", completeResp.StatusCode, raw)
+	}
+
+	updateResp, raw := postTask(map[string]any{
+		"action":     "reassign",
+		"id":         created.Task.ID,
+		"created_by": "ceo",
+		"owner":      "pm",
+		"task_type":  "process_research",
+	})
+	if updateResp.StatusCode != http.StatusConflict {
+		t.Fatalf("expected done-state update to rerun memory gate, got status=%d body=%s", updateResp.StatusCode, raw)
+	}
+	if !strings.Contains(string(raw), "memory workflow incomplete") {
+		t.Fatalf("expected memory workflow gate error, got %s", raw)
+	}
+}
+
 func TestBrokerTaskPlanInitializesMemoryWorkflow(t *testing.T) {
 	b := newTestBroker(t)
 	if err := b.StartOnPort(0); err != nil {
@@ -2692,6 +2754,31 @@ func TestBrokerTaskMemoryWorkflowReportsIdempotentNoOp(t *testing.T) {
 	}
 	if postWorkflow() {
 		t.Fatal("duplicate workflow event should report updated=false")
+	}
+}
+
+func TestBrokerTaskMemoryWorkflowBadRequestErrorsReturn400(t *testing.T) {
+	b := newTestBroker(t)
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("failed to start broker: %v", err)
+	}
+	defer b.Stop()
+
+	body, _ := json.Marshal(map[string]any{
+		"event": "lookup",
+		"query": "missing task id",
+	})
+	req, _ := http.NewRequest(http.MethodPost, fmt.Sprintf("http://%s/tasks/memory-workflow", b.Addr()), bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("record workflow: %v", err)
+	}
+	raw, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected bad request for malformed workflow event, got status=%d body=%s", resp.StatusCode, raw)
 	}
 }
 

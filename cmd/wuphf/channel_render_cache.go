@@ -466,6 +466,7 @@ func (s stateHasher) addTaskMemoryWorkflowArtifacts(artifacts []channelui.TaskMe
 			artifact.EntitySlug,
 			artifact.PlaybookSlug,
 			artifact.Title,
+			artifact.SkipReason,
 			artifact.Snippet,
 			artifact.CommitSHA,
 			artifact.State,
