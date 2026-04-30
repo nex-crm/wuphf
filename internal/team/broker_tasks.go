@@ -431,23 +431,28 @@ func (b *Broker) handleGetTasks(w http.ResponseWriter, r *http.Request) {
 
 func (b *Broker) handlePostTask(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Action           string   `json:"action"`
-		Channel          string   `json:"channel"`
-		ID               string   `json:"id"`
-		Title            string   `json:"title"`
-		Details          string   `json:"details"`
-		Owner            string   `json:"owner"`
-		CreatedBy        string   `json:"created_by"`
-		ThreadID         string   `json:"thread_id"`
-		TaskType         string   `json:"task_type"`
-		PipelineID       string   `json:"pipeline_id"`
-		ExecutionMode    string   `json:"execution_mode"`
-		ReviewState      string   `json:"review_state"`
-		SourceSignalID   string   `json:"source_signal_id"`
-		SourceDecisionID string   `json:"source_decision_id"`
-		WorktreePath     string   `json:"worktree_path"`
-		WorktreeBranch   string   `json:"worktree_branch"`
-		DependsOn        []string `json:"depends_on"`
+		Action            string   `json:"action"`
+		Channel           string   `json:"channel"`
+		ID                string   `json:"id"`
+		Title             string   `json:"title"`
+		Details           string   `json:"details"`
+		Owner             string   `json:"owner"`
+		CreatedBy         string   `json:"created_by"`
+		ThreadID          string   `json:"thread_id"`
+		TaskType          string   `json:"task_type"`
+		PipelineID        string   `json:"pipeline_id"`
+		ExecutionMode     string   `json:"execution_mode"`
+		ReviewState       string   `json:"review_state"`
+		MemoryPolicy      string   `json:"memory_policy"`
+		MemoryTopic       string   `json:"memory_topic"`
+		PromotionDecision string   `json:"promotion_decision"`
+		NotebookPath      string   `json:"notebook_path"`
+		PromotionReason   string   `json:"promotion_reason"`
+		SourceSignalID    string   `json:"source_signal_id"`
+		SourceDecisionID  string   `json:"source_decision_id"`
+		WorktreePath      string   `json:"worktree_path"`
+		WorktreeBranch    string   `json:"worktree_branch"`
+		DependsOn         []string `json:"depends_on"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
@@ -505,6 +510,12 @@ func (b *Broker) handlePostTask(w http.ResponseWriter, r *http.Request) {
 			if reviewState := strings.TrimSpace(body.ReviewState); reviewState != "" {
 				existing.ReviewState = reviewState
 			}
+			if memoryPolicy := normalizeTaskMemoryPolicy(body.MemoryPolicy); memoryPolicy != "" {
+				existing.MemoryPolicy = memoryPolicy
+			}
+			if memoryTopic := strings.TrimSpace(body.MemoryTopic); memoryTopic != "" {
+				existing.MemoryTopic = memoryTopic
+			}
 			if sourceSignalID := strings.TrimSpace(body.SourceSignalID); sourceSignalID != "" {
 				existing.SourceSignalID = sourceSignalID
 			}
@@ -550,6 +561,8 @@ func (b *Broker) handlePostTask(w http.ResponseWriter, r *http.Request) {
 			PipelineID:       strings.TrimSpace(body.PipelineID),
 			ExecutionMode:    strings.TrimSpace(body.ExecutionMode),
 			ReviewState:      strings.TrimSpace(body.ReviewState),
+			MemoryPolicy:     normalizeTaskMemoryPolicy(body.MemoryPolicy),
+			MemoryTopic:      strings.TrimSpace(body.MemoryTopic),
 			SourceSignalID:   strings.TrimSpace(body.SourceSignalID),
 			SourceDecisionID: strings.TrimSpace(body.SourceDecisionID),
 			WorktreePath:     strings.TrimSpace(body.WorktreePath),
@@ -636,7 +649,22 @@ func (b *Broker) handlePostTask(w http.ResponseWriter, r *http.Request) {
 				task.ReviewState = "pending_review"
 			}
 			reassignTriggered = reassignPrevOwner != newOwner
+		case "memory":
+			if err := applyTaskPromotionDecisionLocked(task, strings.TrimSpace(body.CreatedBy), body.PromotionDecision, body.NotebookPath, body.PromotionReason); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
 		case "complete":
+			if strings.TrimSpace(body.PromotionDecision) != "" {
+				if err := applyTaskPromotionDecisionLocked(task, strings.TrimSpace(body.CreatedBy), body.PromotionDecision, body.NotebookPath, body.PromotionReason); err != nil {
+					http.Error(w, err.Error(), http.StatusBadRequest)
+					return
+				}
+			}
+			if err := taskMemoryGateError(task); err != nil {
+				http.Error(w, err.Error(), http.StatusConflict)
+				return
+			}
 			if strings.EqualFold(strings.TrimSpace(task.Status), "done") {
 				if taskNeedsStructuredReview(task) {
 					task.ReviewState = "approved"
@@ -719,6 +747,12 @@ func (b *Broker) handlePostTask(w http.ResponseWriter, r *http.Request) {
 		}
 		if reviewState := strings.TrimSpace(body.ReviewState); reviewState != "" {
 			task.ReviewState = reviewState
+		}
+		if memoryPolicy := normalizeTaskMemoryPolicy(body.MemoryPolicy); memoryPolicy != "" {
+			task.MemoryPolicy = memoryPolicy
+		}
+		if memoryTopic := strings.TrimSpace(body.MemoryTopic); memoryTopic != "" {
+			task.MemoryTopic = memoryTopic
 		}
 		if sourceSignalID := strings.TrimSpace(body.SourceSignalID); sourceSignalID != "" {
 			task.SourceSignalID = sourceSignalID
@@ -1078,6 +1112,8 @@ func (b *Broker) handleTaskPlan(w http.ResponseWriter, r *http.Request) {
 			Details       string   `json:"details"`
 			TaskType      string   `json:"task_type"`
 			ExecutionMode string   `json:"execution_mode"`
+			MemoryPolicy  string   `json:"memory_policy"`
+			MemoryTopic   string   `json:"memory_topic"`
 			DependsOn     []string `json:"depends_on"`
 		} `json:"tasks"`
 	}
@@ -1148,6 +1184,12 @@ func (b *Broker) handleTaskPlan(w http.ResponseWriter, r *http.Request) {
 			if executionMode := strings.TrimSpace(item.ExecutionMode); executionMode != "" {
 				existing.ExecutionMode = executionMode
 			}
+			if memoryPolicy := normalizeTaskMemoryPolicy(item.MemoryPolicy); memoryPolicy != "" {
+				existing.MemoryPolicy = memoryPolicy
+			}
+			if memoryTopic := strings.TrimSpace(item.MemoryTopic); memoryTopic != "" {
+				existing.MemoryTopic = memoryTopic
+			}
 			existing.DependsOn = resolvedDeps
 			if len(existing.DependsOn) > 0 && b.hasUnresolvedDepsLocked(existing) {
 				existing.Blocked = true
@@ -1187,6 +1229,8 @@ func (b *Broker) handleTaskPlan(w http.ResponseWriter, r *http.Request) {
 			CreatedBy:     createdBy,
 			TaskType:      strings.TrimSpace(item.TaskType),
 			ExecutionMode: strings.TrimSpace(item.ExecutionMode),
+			MemoryPolicy:  normalizeTaskMemoryPolicy(item.MemoryPolicy),
+			MemoryTopic:   strings.TrimSpace(item.MemoryTopic),
 			DependsOn:     resolvedDeps,
 			CreatedAt:     now,
 			UpdatedAt:     now,
@@ -1477,6 +1521,8 @@ type plannedTaskInput struct {
 	PipelineID       string
 	ExecutionMode    string
 	ReviewState      string
+	MemoryPolicy     string
+	MemoryTopic      string
 	SourceSignalID   string
 	SourceDecisionID string
 	DependsOn        []string
@@ -1524,6 +1570,12 @@ func (b *Broker) EnsurePlannedTask(input plannedTaskInput) (teamTask, bool, erro
 		if existing.ReviewState == "" && strings.TrimSpace(input.ReviewState) != "" {
 			existing.ReviewState = strings.TrimSpace(input.ReviewState)
 		}
+		if existing.MemoryPolicy == "" && normalizeTaskMemoryPolicy(input.MemoryPolicy) != "" {
+			existing.MemoryPolicy = normalizeTaskMemoryPolicy(input.MemoryPolicy)
+		}
+		if existing.MemoryTopic == "" && strings.TrimSpace(input.MemoryTopic) != "" {
+			existing.MemoryTopic = strings.TrimSpace(input.MemoryTopic)
+		}
 		if existing.SourceSignalID == "" && strings.TrimSpace(input.SourceSignalID) != "" {
 			existing.SourceSignalID = strings.TrimSpace(input.SourceSignalID)
 		}
@@ -1560,6 +1612,8 @@ func (b *Broker) EnsurePlannedTask(input plannedTaskInput) (teamTask, bool, erro
 		PipelineID:       strings.TrimSpace(input.PipelineID),
 		ExecutionMode:    strings.TrimSpace(input.ExecutionMode),
 		ReviewState:      strings.TrimSpace(input.ReviewState),
+		MemoryPolicy:     normalizeTaskMemoryPolicy(input.MemoryPolicy),
+		MemoryTopic:      strings.TrimSpace(input.MemoryTopic),
 		SourceSignalID:   strings.TrimSpace(input.SourceSignalID),
 		SourceDecisionID: strings.TrimSpace(input.SourceDecisionID),
 		DependsOn:        input.DependsOn,

@@ -1551,6 +1551,8 @@ func TestHandleTeamPlanCreatesDependentBlockedTasks(t *testing.T) {
 			Details       string   `json:"details,omitempty" jsonschema:"Optional task details"`
 			TaskType      string   `json:"task_type,omitempty" jsonschema:"Optional task type such as research, feature, launch, follow_up, bugfix, or incident"`
 			ExecutionMode string   `json:"execution_mode,omitempty" jsonschema:"Optional execution mode such as office or local_worktree"`
+			MemoryPolicy  string   `json:"memory_policy,omitempty" jsonschema:"Optional memory policy: none, recommended, or required. Use required for reusable process research."`
+			MemoryTopic   string   `json:"memory_topic,omitempty" jsonschema:"Optional normalized memory topic such as passport-application."`
 			DependsOn     []string `json:"depends_on,omitempty" jsonschema:"Titles or IDs of tasks this depends on"`
 		}{
 			{Title: "Research competitors", Assignee: "research"},
@@ -1605,6 +1607,8 @@ func TestHandleTeamPlanPreservesTaskMetadata(t *testing.T) {
 			Details       string   `json:"details,omitempty" jsonschema:"Optional task details"`
 			TaskType      string   `json:"task_type,omitempty" jsonschema:"Optional task type such as research, feature, launch, follow_up, bugfix, or incident"`
 			ExecutionMode string   `json:"execution_mode,omitempty" jsonschema:"Optional execution mode such as office or local_worktree"`
+			MemoryPolicy  string   `json:"memory_policy,omitempty" jsonschema:"Optional memory policy: none, recommended, or required. Use required for reusable process research."`
+			MemoryTopic   string   `json:"memory_topic,omitempty" jsonschema:"Optional normalized memory topic such as passport-application."`
 			DependsOn     []string `json:"depends_on,omitempty" jsonschema:"Titles or IDs of tasks this depends on"`
 		}{
 			{Title: "Build the studio control plane", Assignee: "eng", TaskType: "feature", ExecutionMode: "local_worktree"},

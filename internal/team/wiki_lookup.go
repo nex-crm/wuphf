@@ -91,6 +91,14 @@ func (b *Broker) handleWikiLookup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	channel := strings.TrimSpace(r.URL.Query().Get("channel"))
+	taskID := strings.TrimSpace(r.URL.Query().Get("task_id"))
+	actor := strings.TrimSpace(r.URL.Query().Get("actor"))
+	if err := b.validateTaskMemoryEvidenceTarget(taskID); err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{
+			"error": err.Error(),
+		})
+		return
+	}
 
 	idx := b.WikiIndex()
 	if idx == nil {
@@ -108,6 +116,18 @@ func (b *Broker) handleWikiLookup(w http.ResponseWriter, r *http.Request) {
 		Timeout:     15 * time.Second,
 	})
 	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{
+			"error": err.Error(),
+		})
+		return
+	}
+	if err := b.RecordTaskMemoryEvidence(taskID, taskMemoryEvidence{
+		Kind:  taskMemoryEvidencePriorSearch,
+		Tool:  "wuphf_wiki_lookup",
+		Actor: actor,
+		Query: q,
+		Hits:  len(ans.Sources),
+	}); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{
 			"error": err.Error(),
 		})

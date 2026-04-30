@@ -151,32 +151,36 @@ func (req humanInterview) TitleOrDefault() string {
 }
 
 type teamTask struct {
-	ID               string   `json:"id"`
-	Channel          string   `json:"channel,omitempty"`
-	Title            string   `json:"title"`
-	Details          string   `json:"details,omitempty"`
-	Owner            string   `json:"owner,omitempty"`
-	Status           string   `json:"status"`
-	CreatedBy        string   `json:"created_by"`
-	ThreadID         string   `json:"thread_id,omitempty"`
-	TaskType         string   `json:"task_type,omitempty"`
-	PipelineID       string   `json:"pipeline_id,omitempty"`
-	PipelineStage    string   `json:"pipeline_stage,omitempty"`
-	ExecutionMode    string   `json:"execution_mode,omitempty"`
-	ReviewState      string   `json:"review_state,omitempty"`
-	SourceSignalID   string   `json:"source_signal_id,omitempty"`
-	SourceDecisionID string   `json:"source_decision_id,omitempty"`
-	WorktreePath     string   `json:"worktree_path,omitempty"`
-	WorktreeBranch   string   `json:"worktree_branch,omitempty"`
-	DependsOn        []string `json:"depends_on,omitempty"`
-	Blocked          bool     `json:"blocked,omitempty"`
-	AckedAt          string   `json:"acked_at,omitempty"`
-	DueAt            string   `json:"due_at,omitempty"`
-	FollowUpAt       string   `json:"follow_up_at,omitempty"`
-	ReminderAt       string   `json:"reminder_at,omitempty"`
-	RecheckAt        string   `json:"recheck_at,omitempty"`
-	CreatedAt        string   `json:"created_at"`
-	UpdatedAt        string   `json:"updated_at"`
+	ID               string               `json:"id"`
+	Channel          string               `json:"channel,omitempty"`
+	Title            string               `json:"title"`
+	Details          string               `json:"details,omitempty"`
+	Owner            string               `json:"owner,omitempty"`
+	Status           string               `json:"status"`
+	CreatedBy        string               `json:"created_by"`
+	ThreadID         string               `json:"thread_id,omitempty"`
+	TaskType         string               `json:"task_type,omitempty"`
+	PipelineID       string               `json:"pipeline_id,omitempty"`
+	PipelineStage    string               `json:"pipeline_stage,omitempty"`
+	ExecutionMode    string               `json:"execution_mode,omitempty"`
+	ReviewState      string               `json:"review_state,omitempty"`
+	MemoryPolicy     string               `json:"memory_policy,omitempty"`
+	MemoryTopic      string               `json:"memory_topic,omitempty"`
+	MemoryEvidence   []taskMemoryEvidence `json:"memory_evidence,omitempty"`
+	MemoryChecklist  *taskMemoryChecklist `json:"memory_checklist,omitempty"`
+	SourceSignalID   string               `json:"source_signal_id,omitempty"`
+	SourceDecisionID string               `json:"source_decision_id,omitempty"`
+	WorktreePath     string               `json:"worktree_path,omitempty"`
+	WorktreeBranch   string               `json:"worktree_branch,omitempty"`
+	DependsOn        []string             `json:"depends_on,omitempty"`
+	Blocked          bool                 `json:"blocked,omitempty"`
+	AckedAt          string               `json:"acked_at,omitempty"`
+	DueAt            string               `json:"due_at,omitempty"`
+	FollowUpAt       string               `json:"follow_up_at,omitempty"`
+	ReminderAt       string               `json:"reminder_at,omitempty"`
+	RecheckAt        string               `json:"recheck_at,omitempty"`
+	CreatedAt        string               `json:"created_at"`
+	UpdatedAt        string               `json:"updated_at"`
 }
 
 type channelSurface struct {
@@ -795,6 +799,8 @@ func (b *Broker) ensureWikiWorker() {
 	b.wikiExtractor = extractor
 	b.wikiDLQ = dlq
 	b.mu.Unlock()
+
+	b.ensureNotebookDirsForRoster()
 
 	// Skill status reconciliation: now that the wiki worker is wired,
 	// prefer the on-disk SKILL.md frontmatter status over the potentially
@@ -1771,6 +1777,12 @@ func (b *Broker) EnsureBridgedMember(slug, name, createdBy string) error {
 	if slug == "" {
 		return fmt.Errorf("slug required")
 	}
+	ensureNotebookDirsAfterUnlock := false
+	defer func() {
+		if ensureNotebookDirsAfterUnlock {
+			b.ensureNotebookDirsForRoster()
+		}
+	}()
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.findMemberLocked(slug) != nil {
@@ -1801,6 +1813,7 @@ func (b *Broker) EnsureBridgedMember(slug, name, createdBy string) error {
 		return err
 	}
 	b.publishOfficeChangeLocked(officeChangeEvent{Kind: "member_created", Slug: slug})
+	ensureNotebookDirsAfterUnlock = true
 	return nil
 }
 

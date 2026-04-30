@@ -8,10 +8,13 @@ package team
 // single-writer guarantee that protects the wiki also protects notebooks.
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -55,6 +58,43 @@ func (b *Broker) PublishNotebookEvent(evt notebookWriteEvent) {
 	}
 }
 
+// ensureNotebookDirsForRoster creates blank notebook shelves for the current
+// office roster. It is best-effort: notebook shelves are helpful bootstrap
+// metadata, but a failure should not block onboarding or hiring.
+func (b *Broker) ensureNotebookDirsForRoster() {
+	worker := b.WikiWorker()
+	if worker == nil {
+		return
+	}
+	members := b.OfficeMembers()
+	seen := make(map[string]struct{}, len(members))
+	slugs := make([]string, 0, len(members))
+	for _, member := range members {
+		slug := strings.TrimSpace(member.Slug)
+		if slug == "" {
+			continue
+		}
+		if _, ok := seen[slug]; ok {
+			continue
+		}
+		seen[slug] = struct{}{}
+		slugs = append(slugs, slug)
+	}
+	if len(slugs) == 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	sha, err := worker.EnsureNotebookDirs(ctx, slugs)
+	if err != nil {
+		log.Printf("notebook: initialize roster shelves failed: %v", err)
+		return
+	}
+	if sha != "" {
+		log.Printf("notebook: initialized roster shelves %s", sha)
+	}
+}
+
 // handleNotebookWrite is the broker HTTP endpoint the MCP subprocess posts to
 // when an agent calls notebook_write.
 //
@@ -80,6 +120,7 @@ func (b *Broker) handleNotebookWrite(w http.ResponseWriter, r *http.Request) {
 	}
 	var body struct {
 		Slug          string `json:"slug"`
+		TaskID        string `json:"task_id"`
 		Path          string `json:"path"`
 		Content       string `json:"content"`
 		Mode          string `json:"mode"`
@@ -87,6 +128,10 @@ func (b *Broker) handleNotebookWrite(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, `{"error":"invalid json"}`, http.StatusBadRequest)
+		return
+	}
+	if err := b.validateTaskMemoryEvidenceTarget(body.TaskID); err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 		return
 	}
 	sha, n, err := worker.NotebookWrite(r.Context(), body.Slug, body.Path, body.Content, body.Mode, body.CommitMessage)
@@ -107,6 +152,16 @@ func (b *Broker) handleNotebookWrite(w http.ResponseWriter, r *http.Request) {
 			}
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		}
+		return
+	}
+	if err := b.RecordTaskMemoryEvidence(body.TaskID, taskMemoryEvidence{
+		Kind:      taskMemoryEvidenceNotebookWrite,
+		Tool:      "notebook_write",
+		Actor:     body.Slug,
+		Path:      body.Path,
+		CommitSHA: sha,
+	}); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -199,8 +254,9 @@ func (b *Broker) handleNotebookList(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleNotebookCatalog returns a team-wide rollup for the bookshelf view:
-// every agent that has a notebook dir, their most-recent entries, and the
-// count of pending promotions so the sidebar badge reflects reality.
+// every current roster agent (even before their first entry), plus any former
+// agent that still has notebook entries, and the count of pending promotions
+// so the sidebar badge reflects reality.
 //
 //	GET /notebook/catalog
 //
@@ -227,7 +283,7 @@ func (b *Broker) handleNotebookCatalog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	slugs, err := worker.AgentsWithNotebooks()
+	notebookSlugs, err := worker.AgentsWithNotebooks()
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -241,6 +297,18 @@ func (b *Broker) handleNotebookCatalog(w http.ResponseWriter, r *http.Request) {
 	for _, m := range b.OfficeMembers() {
 		rosterBySlug[m.Slug] = m
 	}
+	slugSet := make(map[string]struct{}, len(notebookSlugs)+len(rosterBySlug))
+	for _, slug := range notebookSlugs {
+		slugSet[slug] = struct{}{}
+	}
+	for slug := range rosterBySlug {
+		slugSet[slug] = struct{}{}
+	}
+	slugs := make([]string, 0, len(slugSet))
+	for slug := range slugSet {
+		slugs = append(slugs, slug)
+	}
+	sort.Strings(slugs)
 
 	// Cross-reference active reviews so entry status reflects what's happening
 	// right now. One List call, scan-once, reused across all agents.
@@ -281,25 +349,25 @@ func (b *Broker) handleNotebookCatalog(w http.ResponseWriter, r *http.Request) {
 			// catalog — partial data beats a 500 for the bookshelf.
 			continue
 		}
-		if len(entries) == 0 {
+		member, known := rosterBySlug[slug]
+		if len(entries) == 0 && !known {
 			continue
 		}
-
-		member, known := rosterBySlug[slug]
 		name := slug
 		role := ""
+		lastEdited := ""
 		if known {
 			if strings.TrimSpace(member.Name) != "" {
 				name = member.Name
 			}
 			role = member.Role
+			lastEdited = strings.TrimSpace(member.CreatedAt)
 		} else {
 			role = "former teammate"
 		}
 
 		mapped := make([]entrySummary, 0, len(entries))
 		promoted := 0
-		var lastEdited string
 		for _, e := range entries {
 			entrySlug := strings.TrimSuffix(filepath.Base(e.Path), ".md")
 			status := "draft"
@@ -388,12 +456,54 @@ func (b *Broker) handleNotebookSearch(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "q is required"})
 		return
 	}
-	hits, err := worker.NotebookSearch(slug, pattern)
-	if err != nil {
-		if isNotebookValidationError(err) {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+	taskID := strings.TrimSpace(r.URL.Query().Get("task_id"))
+	actor := strings.TrimSpace(r.URL.Query().Get("actor"))
+	if err := b.validateTaskMemoryEvidenceTarget(taskID); err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		return
+	}
+	var hits []WikiSearchHit
+	if strings.EqualFold(slug, "all") {
+		slugs, err := worker.AgentsWithNotebooks()
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
+		for _, notebookSlug := range slugs {
+			part, err := worker.NotebookSearch(notebookSlug, pattern)
+			if err != nil {
+				if isNotebookValidationError(err) {
+					continue
+				}
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				return
+			}
+			hits = append(hits, part...)
+			if len(hits) >= 100 {
+				hits = hits[:100]
+				break
+			}
+		}
+	} else {
+		var err error
+		hits, err = worker.NotebookSearch(slug, pattern)
+		if err != nil {
+			if isNotebookValidationError(err) {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+	}
+	if err := b.RecordTaskMemoryEvidence(taskID, taskMemoryEvidence{
+		Kind:       taskMemoryEvidencePriorSearch,
+		Tool:       "notebook_search",
+		Actor:      actor,
+		Query:      pattern,
+		TargetSlug: slug,
+		Hits:       len(hits),
+	}); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}

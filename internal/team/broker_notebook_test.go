@@ -7,9 +7,11 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // newNotebookTestServer wires a full httptest server with the auth-gated
@@ -34,6 +36,7 @@ func newNotebookTestServer(t *testing.T) (*httptest.Server, *Broker, func()) {
 	mux.HandleFunc("/notebook/write", b.requireAuth(b.handleNotebookWrite))
 	mux.HandleFunc("/notebook/read", b.requireAuth(b.handleNotebookRead))
 	mux.HandleFunc("/notebook/list", b.requireAuth(b.handleNotebookList))
+	mux.HandleFunc("/notebook/catalog", b.requireAuth(b.handleNotebookCatalog))
 	mux.HandleFunc("/notebook/search", b.requireAuth(b.handleNotebookSearch))
 	srv := httptest.NewServer(mux)
 
@@ -131,6 +134,67 @@ func TestBrokerNotebookHandlersEndToEnd(t *testing.T) {
 	}
 }
 
+func TestBrokerNotebookHandlersRecordTaskMemoryEvidence(t *testing.T) {
+	srv, b, teardown := newNotebookTestServer(t)
+	defer teardown()
+	token := b.Token()
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	b.mu.Lock()
+	b.tasks = []teamTask{{
+		ID:           "task-passport",
+		Channel:      "general",
+		Title:        "Research passport application process",
+		Owner:        "pm",
+		Status:       "in_progress",
+		CreatedBy:    "ceo",
+		TaskType:     "research",
+		MemoryPolicy: taskMemoryPolicyRequired,
+		MemoryTopic:  "passport-application",
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}}
+	normalizeTaskPlan(&b.tasks[0])
+	b.mu.Unlock()
+
+	writeBody, _ := json.Marshal(map[string]any{
+		"slug":           "pm",
+		"task_id":        "task-passport",
+		"path":           "agents/pm/notebook/passport-application.md",
+		"content":        "# Passport application\n\nDurable notes.\n",
+		"mode":           "create",
+		"commit_message": "draft passport process",
+	})
+	req, _ := authReq(http.MethodPost, srv.URL+"/notebook/write", bytes.NewReader(writeBody), token)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	body, _ := io.ReadAll(res.Body)
+	res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("write status %d: %s", res.StatusCode, body)
+	}
+
+	req, _ = authReq(http.MethodGet, srv.URL+"/notebook/search?slug=all&q=Passport&task_id=task-passport&actor=pm", nil, token)
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	body, _ = io.ReadAll(res.Body)
+	res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("search status %d: %s", res.StatusCode, body)
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	task := b.tasks[0]
+	if task.MemoryChecklist == nil || !task.MemoryChecklist.NotebookWrite || !task.MemoryChecklist.PriorSearch {
+		t.Fatalf("expected notebook write and prior search evidence, got checklist=%+v evidence=%+v", task.MemoryChecklist, task.MemoryEvidence)
+	}
+}
+
 func TestBrokerNotebookWriteAuthRequired(t *testing.T) {
 	srv, _, teardown := newNotebookTestServer(t)
 	defer teardown()
@@ -162,6 +226,19 @@ func TestBrokerNotebookListAuthRequired(t *testing.T) {
 	srv, _, teardown := newNotebookTestServer(t)
 	defer teardown()
 	res, err := http.Get(srv.URL + "/notebook/list?slug=pm")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", res.StatusCode)
+	}
+}
+
+func TestBrokerNotebookCatalogAuthRequired(t *testing.T) {
+	srv, _, teardown := newNotebookTestServer(t)
+	defer teardown()
+	res, err := http.Get(srv.URL + "/notebook/catalog")
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -261,6 +338,104 @@ func TestBrokerNotebookListEmptyReturnsEmptyArray(t *testing.T) {
 	}
 	if len(parsed.Entries) != 0 {
 		t.Fatalf("expected 0 entries, got %d", len(parsed.Entries))
+	}
+}
+
+func TestBrokerNotebookCatalogIncludesRosterAgentsWithoutEntries(t *testing.T) {
+	srv, b, teardown := newNotebookTestServer(t)
+	defer teardown()
+	b.mu.Lock()
+	b.members = []officeMember{
+		{Slug: "ceo", Name: "CEO", Role: "lead", CreatedAt: "2026-04-20T10:00:00Z"},
+		{Slug: "pm", Name: "PM", Role: "product", CreatedAt: "2026-04-20T10:01:00Z"},
+	}
+	b.mu.Unlock()
+
+	req, _ := authReq(http.MethodGet, srv.URL+"/notebook/catalog", nil, b.Token())
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("catalog: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(res.Body)
+		t.Fatalf("expected 200, got %d: %s", res.StatusCode, string(body))
+	}
+	var parsed struct {
+		Agents []struct {
+			AgentSlug string           `json:"agent_slug"`
+			Entries   []map[string]any `json:"entries"`
+			Total     int              `json:"total"`
+		} `json:"agents"`
+		TotalAgents  int `json:"total_agents"`
+		TotalEntries int `json:"total_entries"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&parsed); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if parsed.TotalAgents != 2 || len(parsed.Agents) != 2 {
+		t.Fatalf("expected two roster shelves, got total=%d agents=%+v", parsed.TotalAgents, parsed.Agents)
+	}
+	if parsed.TotalEntries != 0 {
+		t.Fatalf("expected no entries, got %d", parsed.TotalEntries)
+	}
+	for _, agent := range parsed.Agents {
+		if agent.Total != 0 || len(agent.Entries) != 0 {
+			t.Fatalf("expected blank shelf for %s, got %+v", agent.AgentSlug, agent)
+		}
+	}
+}
+
+func TestEnsureNotebookDirsForRosterCreatesBlankShelves(t *testing.T) {
+	_, b, teardown := newNotebookTestServer(t)
+	defer teardown()
+	b.mu.Lock()
+	b.members = []officeMember{
+		{Slug: "ceo", Name: "CEO"},
+		{Slug: "pm", Name: "PM"},
+	}
+	b.mu.Unlock()
+
+	b.ensureNotebookDirsForRoster()
+
+	root := b.WikiWorker().Repo().Root()
+	for _, slug := range []string{"ceo", "pm"} {
+		marker := filepath.Join(root, "agents", slug, "notebook", ".gitkeep")
+		if _, err := os.Stat(marker); err != nil {
+			t.Fatalf("expected notebook shelf marker for %s: %v", slug, err)
+		}
+	}
+}
+
+func TestEnsureBridgedMemberInitializesNotebookAfterUnlock(t *testing.T) {
+	_, b, teardown := newNotebookTestServer(t)
+	defer teardown()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- b.EnsureBridgedMember("openclaw-bot", "OpenClaw Bot", "openclaw")
+	}()
+
+	deadline, ok := t.Deadline()
+	if !ok {
+		t.Fatal("test deadline unavailable")
+	}
+	remaining := time.Until(deadline)
+	if remaining <= 0 {
+		t.Fatal("test deadline exceeded")
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("ensure bridged member: %v", err)
+		}
+	case <-time.After(remaining):
+		t.Fatal("EnsureBridgedMember deadlocked while initializing notebook shelves")
+	}
+
+	marker := filepath.Join(b.WikiWorker().Repo().Root(), "agents", "openclaw-bot", "notebook", ".gitkeep")
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("expected bridged member notebook shelf marker: %v", err)
 	}
 }
 

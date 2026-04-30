@@ -84,6 +84,8 @@ func (b *Broker) onboardingCompleteFn(task string, skipTask bool, blueprintID st
 		return seedErr
 	}
 
+	b.ensureNotebookDirsForRoster()
+
 	// Materialize the blueprint's LLM wiki outside the broker lock. Lane A
 	// owns the git repo at ~/.wuphf/wiki; we write the skeleton files, commit
 	// them under the reserved `wuphf-bootstrap` author, then regenerate the

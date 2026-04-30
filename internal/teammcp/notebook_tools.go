@@ -28,6 +28,7 @@ import (
 // TeamNotebookWriteArgs is the contract for notebook_write.
 type TeamNotebookWriteArgs struct {
 	MySlug      string `json:"my_slug,omitempty" jsonschema:"Your agent slug. Defaults to WUPHF_AGENT_SLUG env."`
+	TaskID      string `json:"task_id,omitempty" jsonschema:"Task ID this notebook write supports. Required when the task has memory_policy=required."`
 	ArticlePath string `json:"article_path" jsonschema:"Path within wiki root — MUST be agents/{my_slug}/notebook/{filename}.md"`
 	Mode        string `json:"mode" jsonschema:"One of: create | replace | append_section"`
 	Content     string `json:"content" jsonschema:"Full entry content (create/replace) or new section text (append_section)"`
@@ -47,8 +48,10 @@ type TeamNotebookListArgs struct {
 
 // TeamNotebookSearchArgs is the contract for notebook_search.
 type TeamNotebookSearchArgs struct {
-	TargetSlug string `json:"target_slug" jsonschema:"Agent whose notebook to search."`
+	TargetSlug string `json:"target_slug" jsonschema:"Agent whose notebook to search, or all to search every notebook shelf."`
 	Pattern    string `json:"pattern" jsonschema:"Literal substring to search (not regex)."`
+	TaskID     string `json:"task_id,omitempty" jsonschema:"Task ID this prior-memory search supports. Required when the task has memory_policy=required."`
+	MySlug     string `json:"my_slug,omitempty" jsonschema:"Your agent slug. Defaults to WUPHF_AGENT_SLUG env."`
 }
 
 // TeamNotebookPromoteArgs is the contract for notebook_promote. Used to
@@ -57,6 +60,7 @@ type TeamNotebookSearchArgs struct {
 // preserved with a back-link frontmatter block once approved.
 type TeamNotebookPromoteArgs struct {
 	MySlug         string `json:"my_slug,omitempty" jsonschema:"Your agent slug. Defaults to WUPHF_AGENT_SLUG env."`
+	TaskID         string `json:"task_id,omitempty" jsonschema:"Task ID this promotion decision supports. Required when the task has memory_policy=required."`
 	SourcePath     string `json:"source_path" jsonschema:"Notebook source path — MUST be agents/{my_slug}/notebook/{filename}.md"`
 	TargetWikiPath string `json:"target_wiki_path" jsonschema:"Proposed wiki path — MUST start with team/ and end in .md (e.g. team/playbooks/q2-launch.md)"`
 	Rationale      string `json:"rationale" jsonschema:"Why this entry is ready for promotion — the reviewer sees this as the commit message rationale."`
@@ -69,7 +73,7 @@ type TeamNotebookPromoteArgs struct {
 func registerNotebookTools(server *mcp.Server) {
 	mcp.AddTool(server, officeWriteTool(
 		"notebook_write",
-		"Write a draft entry to your personal notebook at agents/{my_slug}/notebook/{filename}.md. Use this for half-baked thoughts, working notes, and draft playbooks before anything is reviewed and promoted to the team wiki. Author-only: you cannot write to another agent's notebook.",
+		"Write a draft entry to your personal notebook at agents/{my_slug}/notebook/{filename}.md. Use this for half-baked thoughts, working notes, and draft playbooks before anything is reviewed and promoted to the team wiki. Pass task_id when this write supports a task with memory_policy=required. Author-only: you cannot write to another agent's notebook.",
 	), handleTeamNotebookWrite)
 	mcp.AddTool(server, readOnlyTool(
 		"notebook_read",
@@ -81,11 +85,11 @@ func registerNotebookTools(server *mcp.Server) {
 	), handleTeamNotebookList)
 	mcp.AddTool(server, readOnlyTool(
 		"notebook_search",
-		"Literal substring search scoped to one agent's notebook subtree. Pattern is matched as a substring (not a regex).",
+		"Literal substring search scoped to one agent's notebook subtree, or every notebook when target_slug=all. Pattern is matched as a substring (not a regex). Pass task_id when this is the prior-memory search for a task with memory_policy=required.",
 	), handleTeamNotebookSearch)
 	mcp.AddTool(server, officeWriteTool(
 		"notebook_promote",
-		"Submit a notebook entry for reviewer approval + promotion to the team wiki. Copy-not-move: once approved the source entry is retained with a back-link frontmatter block. Target path must start with team/ and end in .md.",
+		"Submit a notebook entry for reviewer approval + promotion to the team wiki. Copy-not-move: once approved the source entry is retained with a back-link frontmatter block. Pass task_id when this is the promote decision for a task with memory_policy=required. Target path must start with team/ and end in .md.",
 	), handleTeamNotebookPromote)
 }
 
@@ -124,6 +128,7 @@ func handleTeamNotebookWrite(ctx context.Context, _ *mcp.CallToolRequest, args T
 	}
 	err = brokerPostJSON(ctx, "/notebook/write", map[string]any{
 		"slug":           slug,
+		"task_id":        strings.TrimSpace(args.TaskID),
 		"path":           path,
 		"mode":           mode,
 		"content":        args.Content,
@@ -214,9 +219,11 @@ func handleTeamNotebookPromote(ctx context.Context, _ *mcp.CallToolRequest, args
 		ReviewerSlug string `json:"reviewer_slug"`
 		State        string `json:"state"`
 		HumanOnly    bool   `json:"human_only"`
+		ReviewTaskID string `json:"review_task_id,omitempty"`
 	}
 	err = brokerPostJSON(ctx, "/notebook/promote", map[string]any{
 		"my_slug":          slug,
+		"task_id":          strings.TrimSpace(args.TaskID),
 		"source_path":      sourcePath,
 		"target_wiki_path": targetPath,
 		"rationale":        args.Rationale,
@@ -241,6 +248,14 @@ func handleTeamNotebookSearch(ctx context.Context, _ *mcp.CallToolRequest, args 
 	q := url.Values{}
 	q.Set("slug", target)
 	q.Set("q", pattern)
+	if taskID := strings.TrimSpace(args.TaskID); taskID != "" {
+		q.Set("task_id", taskID)
+	}
+	if slug := strings.TrimSpace(args.MySlug); slug != "" {
+		q.Set("actor", slug)
+	} else if slug := resolveSlugOptional(""); slug != "" {
+		q.Set("actor", slug)
+	}
 	var result struct {
 		Hits []map[string]any `json:"hits"`
 	}

@@ -658,6 +658,12 @@ func (b *Broker) handleOfficeMembers(w http.ResponseWriter, r *http.Request) {
 		now := time.Now().UTC().Format(time.RFC3339)
 
 		b.mu.Lock()
+		ensureNotebookDirsAfterUnlock := false
+		defer func() {
+			if ensureNotebookDirsAfterUnlock {
+				b.ensureNotebookDirsForRoster()
+			}
+		}()
 		defer b.mu.Unlock()
 		switch action {
 		case "create":
@@ -777,6 +783,7 @@ func (b *Broker) handleOfficeMembers(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, "failed to persist broker state", http.StatusInternalServerError)
 				return
 			}
+			ensureNotebookDirsAfterUnlock = true
 			b.publishOfficeChangeLocked(officeChangeEvent{Kind: "member_created", Slug: slug})
 			// Notify SSE subscribers that these channels' rosters changed so
 			// the UI sidebar refreshes without requiring a separate trigger.

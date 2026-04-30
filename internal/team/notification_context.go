@@ -246,6 +246,9 @@ func (b *notificationContextBuilder) TaskNotificationContext(channelSlug, slug s
 		if len(task.DependsOn) > 0 {
 			meta += ", depends: " + strings.Join(task.DependsOn, " ")
 		}
+		if memory := strings.TrimPrefix(taskMemoryPacketMeta(task), ", "); memory != "" {
+			meta += ", " + memory
+		}
 		taskChannel := normalizeChannelSlug(task.Channel)
 		if taskChannel == "" {
 			taskChannel = "general"
@@ -514,6 +517,9 @@ func (b *notificationContextBuilder) BuildTaskExecutionPacket(slug string, actio
 		lines = append(lines, fmt.Sprintf("- Channel: #%s", channelSlug))
 	}
 	lines = append(lines, fmt.Sprintf("- Mutation channel: use #%s when claiming or completing #%s", channelSlug, task.ID))
+	if memory := strings.TrimPrefix(taskMemoryPacketMeta(task), ", "); memory != "" {
+		lines = append(lines, fmt.Sprintf("- Memory: %s", memory))
+	}
 	if path := strings.TrimSpace(task.WorktreePath); path != "" {
 		lines = append(lines, fmt.Sprintf("- Working directory: %q", path))
 	}
@@ -595,6 +601,7 @@ func (b *notificationContextBuilder) TaskNotificationContent(action officeAction
 	if strings.TrimSpace(task.ExecutionMode) != "" {
 		execMode = ", execution " + task.ExecutionMode
 	}
+	memory := taskMemoryPacketMeta(task)
 	worktree := ""
 	if strings.TrimSpace(task.WorktreeBranch) != "" || strings.TrimSpace(task.WorktreePath) != "" {
 		parts := make([]string, 0, 2)
@@ -622,10 +629,25 @@ func (b *notificationContextBuilder) TaskNotificationContent(action officeAction
 	if taskLooksLikeLiveBusinessObjective(&task) {
 		hygiene = "\n" + taskHygieneCoachingBlock()
 	}
-	return fmt.Sprintf("[%s #%s on #%s]: %s%s (owner %s, status %s%s%s%s%s). Context is included — do NOT call team_poll or team_tasks. Respond with the concrete next step immediately. Stay in your lane. Once you have posted the needed update, STOP and wait for the next pushed notification.%s%s%s%s", verb, task.ID, channelSlug, task.Title, details, owner, status, pipeline, review, execMode, worktree, guidance, framing, capability, hygiene)
+	return fmt.Sprintf("[%s #%s on #%s]: %s%s (owner %s, status %s%s%s%s%s%s). Context is included — do NOT call team_poll or team_tasks. Respond with the concrete next step immediately. Stay in your lane. Once you have posted the needed update, STOP and wait for the next pushed notification.%s%s%s%s", verb, task.ID, channelSlug, task.Title, details, owner, status, pipeline, review, execMode, memory, worktree, guidance, framing, capability, hygiene)
 }
 
 // ── package-level helpers used inside the builder ──────────────────────
+
+func taskMemoryPacketMeta(task teamTask) string {
+	policy := strings.TrimSpace(task.MemoryPolicy)
+	if policy == "" || policy == taskMemoryPolicyNone {
+		return ""
+	}
+	parts := []string{"memory_policy=" + policy}
+	if topic := strings.TrimSpace(task.MemoryTopic); topic != "" {
+		parts = append(parts, "memory_topic="+topic)
+	}
+	if task.MemoryChecklist != nil && !task.MemoryChecklist.Complete && len(task.MemoryChecklist.Missing) > 0 {
+		parts = append(parts, "missing "+strings.Join(task.MemoryChecklist.Missing, "/"))
+	}
+	return ", " + strings.Join(parts, ", ")
+}
 
 // truncate clips s to max bytes followed by "..." when it overflows.
 func truncate(s string, max int) string {
