@@ -23,6 +23,8 @@ package team
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -106,19 +108,33 @@ func (l *Launcher) sendNotificationToPane(paneTarget, notification string) {
 // that a stuck pane doesn't queue up a backlog.
 const tmuxSendKeysTimeout = 3 * time.Second
 
+// Both helpers below are intentionally fire-and-forget — the dispatch
+// worker is one-way (broker → pane) and there's no caller equipped to
+// recover from a failed send mid-loop. But silently swallowing errors
+// makes "agent never sees the message" debugging impossible: a stale
+// pane target, a tmux server that died between Enqueue and send, and
+// a context-deadline timeout all look identical from outside. Surface
+// the failure to stderr with paneTarget context so the next reader of
+// the wuphf logs has a fighting chance.
+
 func tmuxSendKeys(paneTarget string, keys ...string) {
 	ctx, cancel := context.WithTimeout(context.Background(), tmuxSendKeysTimeout)
 	defer cancel()
 	args := append([]string{"-L", tmuxSocketName, "send-keys", "-t", paneTarget}, keys...)
-	_ = exec.CommandContext(ctx, "tmux", args...).Run()
+	if err := exec.CommandContext(ctx, "tmux", args...).Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "tmux send-keys to %s failed: %v\n", paneTarget, err)
+	}
 }
 
 func tmuxSendKeysLiteral(paneTarget, payload string) {
 	ctx, cancel := context.WithTimeout(context.Background(), tmuxSendKeysTimeout)
 	defer cancel()
-	_ = exec.CommandContext(ctx, "tmux", "-L", tmuxSocketName, "send-keys",
+	err := exec.CommandContext(ctx, "tmux", "-L", tmuxSocketName, "send-keys",
 		"-t", paneTarget, "-l", payload,
 	).Run()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "tmux send-keys -l to %s failed (%d bytes): %v\n", paneTarget, len(payload), err)
+	}
 }
 
 // paneDispatcher serializes notifications per agent slug into tmux Claude

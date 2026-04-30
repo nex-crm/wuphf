@@ -102,13 +102,25 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 	teedStdout := io.TeeReader(stdout, pw)
 	// Pipe every raw line from the provider (codex/claude) to the web UI's live stream.
 	// No filtering — the user sees everything the agent sees.
+	// bufio.Reader rather than bufio.Scanner: a single line larger
+	// than the scanner buffer returns false from Scan() and stops
+	// the loop, leaving io.TeeReader's writes blocked on a full
+	// pipe. Reader.ReadString('\n') keeps draining indefinitely
+	// (oversize lines come back as one or more chunks), so the tee
+	// path can never wedge regardless of provider output.
 	go func() {
-		scanner := bufio.NewScanner(pr)
-		scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
-		for scanner.Scan() {
-			line := scanner.Text()
-			if agentStream != nil && line != "" {
-				agentStream.Push(line)
+		r := bufio.NewReader(pr)
+		for {
+			chunk, err := r.ReadString('\n')
+			chunk = strings.TrimRight(chunk, "\r\n")
+			if agentStream != nil && chunk != "" {
+				agentStream.Push(chunk)
+			}
+			if err != nil {
+				if err != io.EOF {
+					appendHeadlessCodexLog(slug, "stream-drain-error: "+err.Error())
+				}
+				return
 			}
 		}
 	}()
@@ -580,6 +592,19 @@ func (l *Launcher) preflightHeadlessCodexAuth(slug string, channel string) error
 	isolatedAuth := filepath.Join(headlessCodexRuntimeHomeDir(), "auth.json")
 	if _, err := os.Stat(isolatedAuth); err == nil {
 		return nil
+	}
+	// Explicit CODEX_HOME override: when the user sets CODEX_HOME to
+	// point at a non-default codex home (e.g. ~/.codex-work), neither
+	// the global probe (~/, source) nor the runtime probe
+	// (~/.wuphf/codex-headless) would find auth there — but codex
+	// itself will read it because it honors $CODEX_HOME. Probe that
+	// path too so a user who runs `CODEX_HOME=~/.codex-work codex
+	// login` doesn't see a spurious "cannot authenticate" failure.
+	if explicitHome := strings.TrimSpace(headlessCodexHomeDir()); explicitHome != "" {
+		explicitAuth := filepath.Join(explicitHome, "auth.json")
+		if _, err := os.Stat(explicitAuth); err == nil {
+			return nil
+		}
 	}
 	if strings.TrimSpace(config.ResolveOpenAIAPIKey()) != "" {
 		return nil

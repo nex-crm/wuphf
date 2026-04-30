@@ -132,15 +132,23 @@ func (l *Launcher) claudeCommand(slug, systemPrompt string) (string, error) {
 		}
 		agentMCP = l.mcpConfig
 	}
-	mcpConfig := strings.ReplaceAll(agentMCP, "'", "'\\''")
+	// Every interpolated value below flows through shellQuote so the
+	// resulting tmux command is injection-safe regardless of source.
+	// Pre-fix the slug, brokerToken, BrokerBaseURL(), model, and OTEL
+	// header/resource strings were interpolated raw — most can't carry
+	// shell metacharacters today (slug is alphanumeric per blueprint
+	// validation, BrokerBaseURL is a Go-formatted URL), but a hostile
+	// blueprint or a future BrokerBaseURL bug could land a single
+	// quote or $() inside the command and execute arbitrary shell as
+	// the user. Single-quoting via shellQuote closes that surface
+	// uniformly; the cost is one shellQuote() call per field.
 
 	promptPath, err := l.writeAgentPromptFile(slug, systemPrompt)
 	if err != nil {
 		return "", fmt.Errorf("claudeCommand(%s): write prompt file: %w", slug, err)
 	}
-	promptPathQuoted := strings.ReplaceAll(promptPath, "'", "'\\''")
 
-	name := strings.ReplaceAll(l.targeter().NameFor(slug), "'", "'\\''")
+	name := l.targeter().NameFor(slug)
 	permFlags := l.resolvePermissionFlags(slug)
 
 	brokerToken := ""
@@ -150,7 +158,7 @@ func (l *Launcher) claudeCommand(slug, systemPrompt string) (string, error) {
 
 	oneOnOneEnv := ""
 	if l.isOneOnOne() {
-		oneOnOneEnv = fmt.Sprintf("WUPHF_ONE_ON_ONE=1 WUPHF_ONE_ON_ONE_AGENT=%s ", l.oneOnOneAgent())
+		oneOnOneEnv = "WUPHF_ONE_ON_ONE=1 WUPHF_ONE_ON_ONE_AGENT=" + shellQuote(l.oneOnOneAgent()) + " "
 	}
 	oneSecretEnv := ""
 	if secret := strings.TrimSpace(config.ResolveOneSecret()); secret != "" {
@@ -165,23 +173,27 @@ func (l *Launcher) claudeCommand(slug, systemPrompt string) (string, error) {
 	}
 
 	model := l.headlessClaudeModel(slug)
+	brokerBaseURL := l.BrokerBaseURL()
+	otelLogsEndpoint := brokerBaseURL + "/v1/logs"
+	otelHeaders := "Authorization=Bearer " + brokerToken
+	otelResource := "agent.slug=" + slug + ",wuphf.channel=office"
 
 	return fmt.Sprintf(
-		"%s%s%sWUPHF_AGENT_SLUG=%s WUPHF_BROKER_TOKEN=%s WUPHF_BROKER_BASE_URL=%s WUPHF_NO_NEX=%t ANTHROPIC_PROMPT_CACHING=1 CLAUDE_CODE_ENABLE_TELEMETRY=1 OTEL_METRICS_EXPORTER=none OTEL_LOGS_EXPORTER=otlp OTEL_EXPORTER_OTLP_LOGS_PROTOCOL=http/json OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=%s/v1/logs OTEL_EXPORTER_OTLP_HEADERS='Authorization=Bearer %s' OTEL_RESOURCE_ATTRIBUTES='agent.slug=%s,wuphf.channel=office' claude --model %s %s --append-system-prompt-file '%s' --mcp-config '%s' --strict-mcp-config -n '%s'",
+		"%s%s%sWUPHF_AGENT_SLUG=%s WUPHF_BROKER_TOKEN=%s WUPHF_BROKER_BASE_URL=%s WUPHF_NO_NEX=%t ANTHROPIC_PROMPT_CACHING=1 CLAUDE_CODE_ENABLE_TELEMETRY=1 OTEL_METRICS_EXPORTER=none OTEL_LOGS_EXPORTER=otlp OTEL_EXPORTER_OTLP_LOGS_PROTOCOL=http/json OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=%s OTEL_EXPORTER_OTLP_HEADERS=%s OTEL_RESOURCE_ATTRIBUTES=%s claude --model %s %s --append-system-prompt-file %s --mcp-config %s --strict-mcp-config -n %s",
 		oneOnOneEnv,
 		oneSecretEnv,
 		oneIdentityEnv,
-		slug,
-		brokerToken,
-		l.BrokerBaseURL(),
+		shellQuote(slug),
+		shellQuote(brokerToken),
+		shellQuote(brokerBaseURL),
 		config.ResolveNoNex(),
-		l.BrokerBaseURL(),
-		brokerToken,
-		slug,
-		model,
+		shellQuote(otelLogsEndpoint),
+		shellQuote(otelHeaders),
+		shellQuote(otelResource),
+		shellQuote(model),
 		permFlags,
-		promptPathQuoted,
-		mcpConfig,
-		name,
+		shellQuote(promptPath),
+		shellQuote(agentMCP),
+		shellQuote(name),
 	), nil
 }

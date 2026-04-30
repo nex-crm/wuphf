@@ -71,12 +71,23 @@ func recoverPanicTo(site, extra string) {
 	n := runtime.Stack(buf, false)
 	fmt.Fprintf(os.Stderr, "panic in %s: %v\n%s\n%s\n", site, r, extra, buf[:n])
 	if home, err := os.UserHomeDir(); err == nil {
+		// MkdirAll first — on a fresh install (or after
+		// `rm -rf ~/.wuphf`) the logs directory does not yet
+		// exist, OpenFile alone would fail with ENOENT, and the
+		// first-ever panic stack would be silently dropped exactly
+		// when we most need it. 0o700 on the dir mirrors the 0o600
+		// owner-only intent of the file itself.
+		dir := filepath.Join(home, ".wuphf", "logs")
+		if mkErr := os.MkdirAll(dir, 0o700); mkErr != nil {
+			fmt.Fprintf(os.Stderr, "panic-log: cannot ensure %s: %v\n", dir, mkErr)
+			return
+		}
 		// 0o600 (owner-only) — even though message bodies are now
 		// redacted, panics.log still leaks routing metadata
 		// (channel slugs, agent slugs) that's sensitive on shared
 		// systems where wuphf runs under a service account whose
 		// home is world-readable.
-		if f, ferr := os.OpenFile(filepath.Join(home, ".wuphf", "logs", "panics.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600); ferr == nil {
+		if f, ferr := os.OpenFile(filepath.Join(dir, "panics.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600); ferr == nil {
 			_, _ = fmt.Fprintf(f, "%s panic in %s: %v\n%s\n%s\n\n", time.Now().UTC().Format(time.RFC3339), site, r, extra, buf[:n])
 			_ = f.Close()
 		}
