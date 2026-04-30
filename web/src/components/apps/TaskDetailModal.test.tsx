@@ -140,7 +140,7 @@ describe("taskMemoryWorkflowBadge", () => {
 });
 
 describe("TaskDetailModal memory override", () => {
-  it("keeps the override action visible for issue-state completed workflows", () => {
+  it("keeps the override action visible for satisfied workflows with partial errors", () => {
     getOfficeMembersMock.mockResolvedValue({
       members: [{ slug: "ceo", name: "CEO", role: "lead" }],
     });
@@ -180,6 +180,7 @@ describe("TaskDetailModal memory override", () => {
       screen.getByRole("button", { name: "Mark done with override" }),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Mark done" })).toBeDisabled();
+    expect(screen.getByText("workflow write failed")).toBeInTheDocument();
   });
 
   it("requires a reason and submits the human override payload", async () => {
