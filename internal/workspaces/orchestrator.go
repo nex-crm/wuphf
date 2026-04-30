@@ -289,7 +289,7 @@ loop:
 	if !brokerExited && probePort(target.BrokerPort) {
 		shutdownErr := fmt.Errorf("workspaces: pause %q: broker still alive after SIGTERM/SIGKILL escalation (port %d)", name, target.BrokerPort)
 		if pauseHTTPErr != nil {
-			shutdownErr = fmt.Errorf("%w; admin/pause: %v", shutdownErr, pauseHTTPErr)
+			shutdownErr = fmt.Errorf("%w; admin/pause: %w", shutdownErr, pauseHTTPErr)
 		}
 		_ = Update(name, func(ws *Workspace) error {
 			ws.State = StateError
@@ -606,7 +606,11 @@ func Doctor(ctx context.Context) (DoctorReport, error) {
 func probePort(port int) bool {
 	client := &http.Client{Timeout: liveProbeTimeout}
 	url := fmt.Sprintf("http://127.0.0.1:%d/", port)
-	resp, err := client.Head(url)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodHead, url, nil)
+	if err != nil {
+		return false
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return false
 	}
@@ -616,7 +620,7 @@ func probePort(port int) bool {
 
 func postAdminPause(port int, token string) error {
 	url := fmt.Sprintf("http://127.0.0.1:%d/admin/pause", port)
-	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(nil))
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, url, bytes.NewReader(nil))
 	if err != nil {
 		return err
 	}

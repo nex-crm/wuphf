@@ -323,7 +323,7 @@ func fixCorruptRegistry() error {
 	}
 	// Validate that the bak parses before we promote it.
 	if _, err := readFile(bak); err != nil {
-		return fmt.Errorf("%w: registry.json.bak unreadable (%v); recover from a backup tool",
+		return fmt.Errorf("%w: registry.json.bak unreadable (%w); recover from a backup tool",
 			ErrManualFixRequired, err)
 	}
 

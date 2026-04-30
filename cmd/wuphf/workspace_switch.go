@@ -8,6 +8,7 @@ package main
 // the chosen workspace from this point on.
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -63,8 +64,8 @@ func runWorkspaceSwitch(args []string) {
 	}
 
 	url := fmt.Sprintf("http://localhost:%d/", ws.WebPort)
-	fmt.Fprintf(os.Stdout, "Switched to %q (broker :%d, web :%d)\n", ws.Name, ws.BrokerPort, ws.WebPort)
-	fmt.Fprintf(os.Stdout, "Open: %s\n", url)
+	_, _ = fmt.Fprintf(os.Stdout, "Switched to %q (broker :%d, web :%d)\n", ws.Name, ws.BrokerPort, ws.WebPort)
+	_, _ = fmt.Fprintf(os.Stdout, "Open: %s\n", url)
 
 	if *openFlag {
 		if err := browserOpener(url); err != nil {
@@ -72,7 +73,7 @@ func runWorkspaceSwitch(args []string) {
 			fmt.Fprintf(os.Stderr, "warning: could not auto-open browser: %v\n", err)
 			return
 		}
-		fmt.Fprintln(os.Stdout, "Browser launched.")
+		_, _ = fmt.Fprintln(os.Stdout, "Browser launched.")
 	}
 }
 
@@ -84,12 +85,12 @@ func openInDefaultBrowser(url string) error {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "darwin":
-		cmd = exec.Command("open", url)
+		cmd = exec.CommandContext(context.Background(), "open", url)
 	case "windows":
-		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+		cmd = exec.CommandContext(context.Background(), "rundll32", "url.dll,FileProtocolHandler", url)
 	default:
 		// linux, freebsd, openbsd — xdg-open is the de-facto standard.
-		cmd = exec.Command("xdg-open", url)
+		cmd = exec.CommandContext(context.Background(), "xdg-open", url)
 	}
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("launch browser: %w", err)

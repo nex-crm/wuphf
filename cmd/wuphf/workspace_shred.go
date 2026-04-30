@@ -62,7 +62,7 @@ func runWorkspaceShred(args []string) {
 			printError("read confirmation: %v", err)
 		}
 		if !ok {
-			fmt.Fprintln(os.Stdout, "Cancelled. The office lives to see another quarter.")
+			_, _ = fmt.Fprintln(os.Stdout, "Cancelled. The office lives to see another quarter.")
 			return
 		}
 	}
@@ -76,10 +76,10 @@ func runWorkspaceShred(args []string) {
 	}
 
 	if *permanent {
-		fmt.Fprintf(os.Stdout, "Permanently shredded %q. No restore available.\n", name)
+		_, _ = fmt.Fprintf(os.Stdout, "Permanently shredded %q. No restore available.\n", name)
 		return
 	}
-	fmt.Fprintf(os.Stdout, "Shredded %q to trash. Restorable for 30 days via `wuphf workspace restore`.\n", name)
+	_, _ = fmt.Fprintf(os.Stdout, "Shredded %q to trash. Restorable for 30 days via `wuphf workspace restore`.\n", name)
 }
 
 // shredConfirmFromReader prompts the user to type the workspace name to
@@ -90,20 +90,20 @@ func runWorkspaceShred(args []string) {
 // because the user's entire pre-multi-workspace office lives there.
 func shredConfirmFromReader(in io.Reader, out io.Writer, name string, permanent bool) (bool, error) {
 	if name == "main" {
-		fmt.Fprintln(out, "WARNING: shredding `main` removes your migrated ~/.wuphf/ workspace.")
-		fmt.Fprintln(out, "         This is the workspace WUPHF created from your pre-multi-workspace install.")
-		fmt.Fprintln(out, "         Everything in your team, wiki, office tasks, and broker state goes with it.")
-		fmt.Fprintln(out, "")
+		_, _ = fmt.Fprintln(out, "WARNING: shredding `main` removes your migrated ~/.wuphf/ workspace.")
+		_, _ = fmt.Fprintln(out, "         This is the workspace WUPHF created from your pre-multi-workspace install.")
+		_, _ = fmt.Fprintln(out, "         Everything in your team, wiki, office tasks, and broker state goes with it.")
+		_, _ = fmt.Fprintln(out, "")
 	}
 	if permanent {
-		fmt.Fprintf(out, "PERMANENT SHRED — workspace %q will be deleted immediately and CANNOT be restored.\n", name)
-		fmt.Fprintln(out, "Trash retention is BYPASSED with --permanent.")
-		fmt.Fprintln(out, "")
+		_, _ = fmt.Fprintf(out, "PERMANENT SHRED — workspace %q will be deleted immediately and CANNOT be restored.\n", name)
+		_, _ = fmt.Fprintln(out, "Trash retention is BYPASSED with --permanent.")
+		_, _ = fmt.Fprintln(out, "")
 	} else {
-		fmt.Fprintf(out, "Shredding workspace %q. The tree moves to trash and is restorable for 30 days.\n", name)
-		fmt.Fprintln(out, "")
+		_, _ = fmt.Fprintf(out, "Shredding workspace %q. The tree moves to trash and is restorable for 30 days.\n", name)
+		_, _ = fmt.Fprintln(out, "")
 	}
-	fmt.Fprintf(out, "Type the workspace name (`%s`) to confirm, or anything else to cancel: ", name)
+	_, _ = fmt.Fprintf(out, "Type the workspace name (`%s`) to confirm, or anything else to cancel: ", name)
 
 	reader := bufio.NewReader(in)
 	line, err := reader.ReadString('\n')

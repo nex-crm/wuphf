@@ -149,7 +149,7 @@ func Read() (*Registry, error) {
 	reg, bakErr := readFile(bak)
 	if bakErr != nil {
 		// Return original parse error as the primary.
-		return nil, fmt.Errorf("workspaces: registry parse failed (%w); backup unreadable (%v)", err, bakErr)
+		return nil, fmt.Errorf("workspaces: registry parse failed (%w); backup unreadable (%w)", err, bakErr)
 	}
 	return reg, nil
 }

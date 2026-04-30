@@ -1,6 +1,7 @@
 package workspaces
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -133,7 +134,11 @@ func MigrateToSymmetric() error {
 func isBrokerRunning(port int) bool {
 	client := &http.Client{Timeout: migrationProbeTO}
 	url := fmt.Sprintf("http://127.0.0.1:%d/", port)
-	resp, err := client.Head(url)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodHead, url, nil)
+	if err != nil {
+		return false
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return false
 	}

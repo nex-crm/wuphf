@@ -80,8 +80,8 @@ func runWorkspaceCreate(args []string) {
 	// Three explicit progress lines so users on a slow machine see motion. We
 	// don't have a streaming progress channel from the orchestrator yet, so
 	// these are deliberately coarse — Lane B can wire a callback later.
-	fmt.Fprintln(os.Stdout, "Allocating ports...")
-	fmt.Fprintln(os.Stdout, "Spawning broker...")
+	_, _ = fmt.Fprintln(os.Stdout, "Allocating ports...")
+	_, _ = fmt.Fprintln(os.Stdout, "Spawning broker...")
 
 	ctx, cancel := workspaceCtxLong()
 	defer cancel()
@@ -91,7 +91,7 @@ func runWorkspaceCreate(args []string) {
 		printError("create workspace %q: %v", name, err)
 	}
 
-	fmt.Fprintf(os.Stdout, "Ready (broker :%d, web :%d)\n", ws.BrokerPort, ws.WebPort)
-	fmt.Fprintf(os.Stdout, "Open: http://localhost:%d/\n", ws.WebPort)
-	fmt.Fprintf(os.Stdout, "Switch CLI default with: wuphf workspace switch %s\n", ws.Name)
+	_, _ = fmt.Fprintf(os.Stdout, "Ready (broker :%d, web :%d)\n", ws.BrokerPort, ws.WebPort)
+	_, _ = fmt.Fprintf(os.Stdout, "Open: http://localhost:%d/\n", ws.WebPort)
+	_, _ = fmt.Fprintf(os.Stdout, "Switch CLI default with: wuphf workspace switch %s\n", ws.Name)
 }

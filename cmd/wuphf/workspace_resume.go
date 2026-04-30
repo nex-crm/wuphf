@@ -49,13 +49,13 @@ func runWorkspaceResume(args []string) {
 	ctx, cancel := workspaceCtxLong()
 	defer cancel()
 
-	fmt.Fprintf(os.Stdout, "Resuming %q (spawning broker, waiting for port-bind)...\n", name)
+	_, _ = fmt.Fprintf(os.Stdout, "Resuming %q (spawning broker, waiting for port-bind)...\n", name)
 
 	ws, err := orch.Resume(ctx, name)
 	if err != nil {
 		printError("resume %q: %v", name, err)
 	}
 
-	fmt.Fprintf(os.Stdout, "Resumed %q (broker :%d, web :%d)\n", ws.Name, ws.BrokerPort, ws.WebPort)
-	fmt.Fprintf(os.Stdout, "Open: http://localhost:%d/\n", ws.WebPort)
+	_, _ = fmt.Fprintf(os.Stdout, "Resumed %q (broker :%d, web :%d)\n", ws.Name, ws.BrokerPort, ws.WebPort)
+	_, _ = fmt.Fprintf(os.Stdout, "Open: http://localhost:%d/\n", ws.WebPort)
 }

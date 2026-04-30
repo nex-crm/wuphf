@@ -281,7 +281,7 @@ var printErrorExit = os.Exit
 // behavior are both swappable (printErrorOutput / printErrorExit) so tests
 // can exercise the real error path without killing the test process.
 func printError(format string, a ...any) {
-	fmt.Fprintf(printErrorOutput, "error: "+strings.TrimRight(format, "\n")+"\n", a...)
+	_, _ = fmt.Fprintf(printErrorOutput, "error: "+strings.TrimRight(format, "\n")+"\n", a...)
 	printErrorExit(1)
 }
 

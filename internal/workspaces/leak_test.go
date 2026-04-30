@@ -90,14 +90,14 @@ func snapshotDir(t *testing.T, dir string) map[string]fileFingerprint {
 	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			// Tolerate permission errors on system dirs.
-			return nil
+			return err
 		}
 		if info.IsDir() {
 			return nil
 		}
 		rel, rerr := filepath.Rel(dir, path)
 		if rerr != nil {
-			return nil
+			return rerr
 		}
 
 		// Symlinks: record target only. Lstat since filepath.Walk's Lstat-aware
@@ -109,7 +109,7 @@ func snapshotDir(t *testing.T, dir string) map[string]fileFingerprint {
 				// Symlink disappeared between walk and read — skip rather than
 				// fail the test (mirrors the temp-file tolerance for regular
 				// files below).
-				return nil
+				return lerr
 			}
 			m[rel] = fileFingerprint{Size: info.Size(), SymlinkTarget: target}
 			return nil

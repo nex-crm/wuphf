@@ -50,14 +50,14 @@ func runWorkspaceRestore(args []string) {
 	ctx, cancel := workspaceCtxLong()
 	defer cancel()
 
-	fmt.Fprintf(os.Stdout, "Restoring %q (allocating fresh port pair)...\n", trashID)
+	_, _ = fmt.Fprintf(os.Stdout, "Restoring %q (allocating fresh port pair)...\n", trashID)
 
 	ws, err := orch.Restore(ctx, trashID)
 	if err != nil {
 		printError("restore %q: %v", trashID, err)
 	}
 
-	fmt.Fprintf(os.Stdout, "Restored as %q (broker :%d, web :%d)\n", ws.Name, ws.BrokerPort, ws.WebPort)
-	fmt.Fprintf(os.Stdout, "Open: http://localhost:%d/\n", ws.WebPort)
-	fmt.Fprintf(os.Stdout, "Switch CLI default with: wuphf workspace switch %s\n", ws.Name)
+	_, _ = fmt.Fprintf(os.Stdout, "Restored as %q (broker :%d, web :%d)\n", ws.Name, ws.BrokerPort, ws.WebPort)
+	_, _ = fmt.Fprintf(os.Stdout, "Open: http://localhost:%d/\n", ws.WebPort)
+	_, _ = fmt.Fprintf(os.Stdout, "Switch CLI default with: wuphf workspace switch %s\n", ws.Name)
 }

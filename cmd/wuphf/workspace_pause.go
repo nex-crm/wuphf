@@ -54,14 +54,14 @@ func runWorkspacePause(args []string) {
 	defer cancel()
 
 	if *force {
-		fmt.Fprintf(os.Stdout, "Force-pausing %q (SIGKILL after 5s)...\n", name)
+		_, _ = fmt.Fprintf(os.Stdout, "Force-pausing %q (SIGKILL after 5s)...\n", name)
 	} else {
-		fmt.Fprintf(os.Stdout, "Pausing %q (graceful drain, up to 90s)...\n", name)
+		_, _ = fmt.Fprintf(os.Stdout, "Pausing %q (graceful drain, up to 90s)...\n", name)
 	}
 
 	if err := orch.Pause(ctx, name, *force); err != nil {
 		printError("pause %q: %v", name, err)
 	}
 
-	fmt.Fprintf(os.Stdout, "Paused %q. Resume with: wuphf workspace resume %s\n", name, name)
+	_, _ = fmt.Fprintf(os.Stdout, "Paused %q. Resume with: wuphf workspace resume %s\n", name, name)
 }

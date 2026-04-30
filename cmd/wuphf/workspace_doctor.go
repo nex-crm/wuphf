@@ -63,11 +63,11 @@ func runWorkspaceDoctor(args []string) {
 	}
 
 	if len(report.Issues) == 0 {
-		fmt.Fprintln(os.Stdout, "All clean. Registry, trees, ports, and symlinks are consistent.")
+		_, _ = fmt.Fprintln(os.Stdout, "All clean. Registry, trees, ports, and symlinks are consistent.")
 		return
 	}
 
-	fmt.Fprintf(os.Stdout, "Found %d issue(s):\n\n", len(report.Issues))
+	_, _ = fmt.Fprintf(os.Stdout, "Found %d issue(s):\n\n", len(report.Issues))
 
 	mode := doctorModeInteractive
 	if *yes {
@@ -101,26 +101,26 @@ func runDoctorIssueLoop(ctx context.Context, orch workspaceOrchestrator, report 
 	skipped := 0
 	for i, issue := range report.Issues {
 		if firstErr != nil {
-			fmt.Fprintf(out, "[%d/%d] %s — skipped (prior fix failed)\n", i+1, len(report.Issues), issue.Kind)
+			_, _ = fmt.Fprintf(out, "[%d/%d] %s — skipped (prior fix failed)\n", i+1, len(report.Issues), issue.Kind)
 			skipped++
 			continue
 		}
-		fmt.Fprintf(out, "[%d/%d] %s — %s\n", i+1, len(report.Issues), issue.Kind, issue.Subject)
+		_, _ = fmt.Fprintf(out, "[%d/%d] %s — %s\n", i+1, len(report.Issues), issue.Kind, issue.Subject)
 		if issue.Detail != "" {
-			fmt.Fprintf(out, "        %s\n", issue.Detail)
+			_, _ = fmt.Fprintf(out, "        %s\n", issue.Detail)
 		}
-		fmt.Fprintf(out, "        fix: %s\n", issue.FixAction)
+		_, _ = fmt.Fprintf(out, "        fix: %s\n", issue.FixAction)
 
 		var apply bool
 		switch mode {
 		case doctorModeDryRun:
-			fmt.Fprintln(out, "        [dry-run] not applied")
+			_, _ = fmt.Fprintln(out, "        [dry-run] not applied")
 			continue
 		case doctorModeAutoYes:
 			apply = true
-			fmt.Fprintln(out, "        [--yes] applying")
+			_, _ = fmt.Fprintln(out, "        [--yes] applying")
 		case doctorModeInteractive:
-			fmt.Fprint(out, "        Apply this fix? [y/N]: ")
+			_, _ = fmt.Fprint(out, "        Apply this fix? [y/N]: ")
 			line, err := reader.ReadString('\n')
 			if err != nil && line == "" {
 				return fmt.Errorf("read confirmation for issue %d: %w", i+1, err)
@@ -128,28 +128,28 @@ func runDoctorIssueLoop(ctx context.Context, orch workspaceOrchestrator, report 
 			ans := strings.ToLower(strings.TrimSpace(line))
 			apply = ans == "y" || ans == "yes"
 			if !apply {
-				fmt.Fprintln(out, "        skipped")
+				_, _ = fmt.Fprintln(out, "        skipped")
 				continue
 			}
 		}
 
 		if err := orch.FixDoctorIssue(ctx, issue.FixID); err != nil {
-			fmt.Fprintf(out, "        FAILED: %v\n", err)
+			_, _ = fmt.Fprintf(out, "        FAILED: %v\n", err)
 			firstErr = err
 			continue
 		}
-		fmt.Fprintln(out, "        applied")
+		_, _ = fmt.Fprintln(out, "        applied")
 	}
 	if firstErr != nil {
-		fmt.Fprintf(out, "\nStopped after first failure. %d issue(s) skipped.\n", skipped)
+		_, _ = fmt.Fprintf(out, "\nStopped after first failure. %d issue(s) skipped.\n", skipped)
 		return firstErr
 	}
-	fmt.Fprintln(out, "")
+	_, _ = fmt.Fprintln(out, "")
 	switch mode {
 	case doctorModeDryRun:
-		fmt.Fprintln(out, "Dry-run complete. Re-run without --dry-run to fix.")
+		_, _ = fmt.Fprintln(out, "Dry-run complete. Re-run without --dry-run to fix.")
 	default:
-		fmt.Fprintln(out, "Doctor scan complete.")
+		_, _ = fmt.Fprintln(out, "Doctor scan complete.")
 	}
 	return nil
 }

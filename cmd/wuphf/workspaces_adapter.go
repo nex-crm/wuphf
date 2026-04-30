@@ -43,7 +43,7 @@ func (cliOrchestratorAdapter) List(ctx context.Context, opts ListOpts) (ListResu
 	for _, lw := range live {
 		ws := workspaceFromRegistry(lw.Workspace)
 		ws.IsActive = lw.Live
-		ws.IsCLICurrent = lw.Workspace.Name == cliCurrent
+		ws.IsCLICurrent = lw.Name == cliCurrent
 		out.Workspaces = append(out.Workspaces, ws)
 	}
 
@@ -447,7 +447,7 @@ func dirSizeBytes(root string) (int64, error) {
 	var total int64
 	err := filepath.Walk(root, func(_ string, info os.FileInfo, err error) error {
 		if err != nil {
-			return nil
+			return err
 		}
 		if !info.IsDir() {
 			total += info.Size()
@@ -490,11 +490,11 @@ func openWorkspaceURL(url string) {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "darwin":
-		cmd = exec.Command("open", url)
+		cmd = exec.CommandContext(context.Background(), "open", url)
 	case "linux":
-		cmd = exec.Command("xdg-open", url)
+		cmd = exec.CommandContext(context.Background(), "xdg-open", url)
 	case "windows":
-		cmd = exec.Command("cmd", "/c", "start", "", url)
+		cmd = exec.CommandContext(context.Background(), "cmd", "/c", "start", "", url)
 	default:
 		return
 	}

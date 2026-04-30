@@ -53,9 +53,9 @@ func defaultSpawn(name string, runtimeHome string, brokerPort, webPort int) erro
 	if err != nil {
 		return fmt.Errorf("workspaces: spawn %q: open log %s: %w", name, logPath, err)
 	}
-	defer logFile.Close()
+	defer func() { _ = logFile.Close() }()
 
-	cmd := exec.Command(binary,
+	cmd := exec.CommandContext(context.Background(), binary,
 		"--broker-port", strconv.Itoa(brokerPort),
 		"--web-port", strconv.Itoa(webPort),
 	)
@@ -105,7 +105,8 @@ func waitForPort(ctx context.Context, port int) error {
 			return ctx.Err()
 		default:
 		}
-		resp, err := client.Head(url)
+		req, _ := http.NewRequestWithContext(ctx, http.MethodHead, url, nil)
+		resp, err := client.Do(req)
 		if err == nil {
 			resp.Body.Close()
 			return nil
