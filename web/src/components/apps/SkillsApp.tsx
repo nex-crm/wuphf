@@ -959,8 +959,30 @@ function SkillActions({
 
   if (status === "archived") {
     return (
-      <span style={{ fontSize: 12, color: "var(--text-tertiary)" }}>
-        Archived
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+        <span style={{ fontSize: 12, color: "var(--text-tertiary)" }}>
+          Archived
+        </span>
+        <button
+          type="button"
+          className="btn btn-sm"
+          disabled={actionPending}
+          aria-label={`Restore ${skillName} to pending review`}
+          onClick={() => {
+            setActionPending(true);
+            restoreArchivedSkill(skillName)
+              .then(() => {
+                showNotice("Restored — skill is now pending review", "success");
+                queryClient.invalidateQueries({ queryKey: ["skills"] });
+              })
+              .catch((e: Error) => {
+                showNotice(`Couldn't restore: ${e.message}`, "error");
+              })
+              .finally(() => setActionPending(false));
+          }}
+        >
+          Restore
+        </button>
       </span>
     );
   }

@@ -30,12 +30,12 @@ export function showNotice(message: string, type: ToastItem["type"] = "info") {
 
 /**
  * Show a toast with an inline Undo button. Auto-dismisses after `ms`
- * (default 5000). Calling `onUndo` triggers the action and closes the toast.
+ * (default 6000). Calling `onUndo` triggers the action and closes the toast.
  */
 export function showUndoToast(
   message: string,
   onUndo: () => void,
-  ms = 5000,
+  ms = 6000,
 ): void {
   addToastFn?.(message, "info", {
     actionLabel: "Undo",
@@ -82,6 +82,8 @@ export function ToastContainer() {
 
   return (
     <div
+      aria-live="polite"
+      aria-atomic="false"
       style={{
         position: "fixed",
         bottom: 20,
@@ -122,6 +124,7 @@ function ToastRow({ toast, onDismiss }: ToastRowProps) {
   return (
     <div
       className="animate-fade"
+      role={toast.type === "error" ? "alert" : "status"}
       style={{
         padding: "10px 16px",
         borderRadius: "var(--radius-md)",
