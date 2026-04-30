@@ -42,6 +42,7 @@ import (
 	"time"
 
 	"github.com/nex-crm/wuphf/internal/config"
+	"github.com/nex-crm/wuphf/internal/workspaces"
 )
 
 // maxWorkspaceRequestBodyBytes caps every /workspaces/* and /admin/pause
@@ -298,6 +299,65 @@ func writeWorkspaceError(w http.ResponseWriter, status int, msg string) {
 	writeWorkspaceJSON(w, status, map[string]any{"error": msg})
 }
 
+// errorToStatus maps an orchestrator error to its HTTP status code. Returns
+// 500 only for unknown errors so genuine client-fixable failures (bad slug,
+// port pool full, missing workspace) surface as 4xx/503 rather than getting
+// swallowed in a generic 500.
+//
+// Order matters: type-assert sentinels first, then fall back to substring
+// matches for non-typed errors that still encode a 4xx-class condition (e.g.
+// the dup-name case in Create that hasn't been rewrapped yet).
+func errorToStatus(err error) int {
+	if err == nil {
+		return http.StatusOK
+	}
+
+	var slugInvalid workspaces.ErrSlugInvalid
+	if errors.As(err, &slugInvalid) {
+		return http.StatusBadRequest
+	}
+	var slugReserved workspaces.ErrSlugReserved
+	if errors.As(err, &slugReserved) {
+		return http.StatusBadRequest
+	}
+
+	switch {
+	case errors.Is(err, workspaces.ErrWorkspaceNotFound),
+		errors.Is(err, workspaces.ErrRegistryNotFound):
+		return http.StatusNotFound
+	case errors.Is(err, workspaces.ErrWorkspaceConflict):
+		return http.StatusConflict
+	case errors.Is(err, workspaces.ErrPortExhausted),
+		errors.Is(err, workspaces.ErrPortPoolExhausted):
+		return http.StatusServiceUnavailable
+	case errors.Is(err, workspaces.ErrUnknownFixID):
+		return http.StatusBadRequest
+	case errors.Is(err, workspaces.ErrManualFixRequired):
+		// Manual-fix issues are advisory: the orchestrator can't auto-remediate
+		// but the request itself was legal. 409 (Conflict) signals "the
+		// resource is in a state that prevents this operation" without
+		// implying a server fault.
+		return http.StatusConflict
+	}
+
+	// Fallback: pattern-match Create's currently-untyped dup-name error so a
+	// duplicate workspace becomes 409 today. When Create is rewrapped to
+	// return ErrWorkspaceConflict directly this branch becomes dead code.
+	msg := err.Error()
+	if strings.Contains(msg, "already exists") {
+		return http.StatusConflict
+	}
+
+	return http.StatusInternalServerError
+}
+
+// writeOrchestratorError centralises the "orchestrator returned an error"
+// branch every handler shares. Status is derived from errorToStatus; the
+// JSON body shape stays the standard {error: "..."} envelope.
+func writeOrchestratorError(w http.ResponseWriter, err error) {
+	writeWorkspaceError(w, errorToStatus(err), err.Error())
+}
+
 // requireMethod returns true and lets the handler proceed if r.Method matches
 // expected. Otherwise writes 405 and returns false.
 func requireMethod(w http.ResponseWriter, r *http.Request, expected string) bool {
@@ -325,7 +385,7 @@ func (b *Broker) handleWorkspacesList(w http.ResponseWriter, r *http.Request) {
 	}
 	ws, err := o.List(r.Context())
 	if err != nil {
-		writeWorkspaceError(w, http.StatusInternalServerError, err.Error())
+		writeOrchestratorError(w, err)
 		return
 	}
 	writeWorkspaceJSON(w, http.StatusOK, map[string]any{
@@ -359,7 +419,7 @@ func (b *Broker) handleWorkspacesCreate(w http.ResponseWriter, r *http.Request) 
 	}
 	ws, err := o.Create(r.Context(), req)
 	if err != nil {
-		writeWorkspaceError(w, http.StatusInternalServerError, err.Error())
+		writeOrchestratorError(w, err)
 		return
 	}
 	writeWorkspaceJSON(w, http.StatusCreated, ws)
@@ -391,7 +451,7 @@ func (b *Broker) handleWorkspacesSwitch(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if err := o.Switch(r.Context(), req.Name); err != nil {
-		writeWorkspaceError(w, http.StatusInternalServerError, err.Error())
+		writeOrchestratorError(w, err)
 		return
 	}
 	writeWorkspaceJSON(w, http.StatusOK, map[string]any{"ok": true, "name": req.Name})
@@ -494,7 +554,7 @@ func (b *Broker) handleWorkspacesResume(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if err := o.Resume(r.Context(), req.Name); err != nil {
-		writeWorkspaceError(w, http.StatusInternalServerError, err.Error())
+		writeOrchestratorError(w, err)
 		return
 	}
 	writeWorkspaceJSON(w, http.StatusOK, map[string]any{"ok": true, "name": req.Name})
@@ -526,7 +586,7 @@ func (b *Broker) handleWorkspacesShred(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := o.Shred(r.Context(), req.Name, req.Permanent); err != nil {
-		writeWorkspaceError(w, http.StatusInternalServerError, err.Error())
+		writeOrchestratorError(w, err)
 		return
 	}
 	writeWorkspaceJSON(w, http.StatusOK, map[string]any{
@@ -562,7 +622,7 @@ func (b *Broker) handleWorkspacesRestore(w http.ResponseWriter, r *http.Request)
 	}
 	ws, err := o.Restore(r.Context(), req.TrashID)
 	if err != nil {
-		writeWorkspaceError(w, http.StatusInternalServerError, err.Error())
+		writeOrchestratorError(w, err)
 		return
 	}
 	writeWorkspaceJSON(w, http.StatusOK, ws)

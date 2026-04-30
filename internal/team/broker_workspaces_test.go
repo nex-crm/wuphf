@@ -26,6 +26,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/nex-crm/wuphf/internal/workspaces"
 )
 
 // fakeOrchestrator is a programmable workspaceOrchestrator for table tests.
@@ -1032,4 +1034,126 @@ func mustPost(t *testing.T, urlStr, token, body string) *http.Response {
 // time.After so test failure messages can reference a named helper.
 func makeTimeoutCh(seconds int) <-chan time.Time {
 	return time.After(time.Duration(seconds) * time.Second)
+}
+
+// --- errorToStatus mapper -----------------------------------------------------
+
+func TestErrorToStatus_MapsTypedSentinels(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want int
+	}{
+		{"nil → 200", nil, http.StatusOK},
+		{"slug invalid → 400", workspaces.ErrSlugInvalid{Slug: "Bad"}, http.StatusBadRequest},
+		{"slug reserved → 400", workspaces.ErrSlugReserved{Slug: "main"}, http.StatusBadRequest},
+		{"workspace not found → 404", workspaces.ErrWorkspaceNotFound, http.StatusNotFound},
+		{"registry not found → 404", workspaces.ErrRegistryNotFound, http.StatusNotFound},
+		{"workspace conflict → 409", workspaces.ErrWorkspaceConflict, http.StatusConflict},
+		{"port pool exhausted → 503", workspaces.ErrPortPoolExhausted, http.StatusServiceUnavailable},
+		{"port exhausted alias → 503", workspaces.ErrPortExhausted, http.StatusServiceUnavailable},
+		{"unknown fix id → 400", workspaces.ErrUnknownFixID, http.StatusBadRequest},
+		{"manual fix required → 409", workspaces.ErrManualFixRequired, http.StatusConflict},
+		{
+			name: "wrapped slug invalid still 400",
+			err:  fmt.Errorf("create %q: %w", "x", workspaces.ErrSlugInvalid{Slug: "X"}),
+			want: http.StatusBadRequest,
+		},
+		{
+			name: "wrapped not-found still 404",
+			err:  fmt.Errorf("resolve: %w", workspaces.ErrWorkspaceNotFound),
+			want: http.StatusNotFound,
+		},
+		{
+			name: "untyped already-exists falls back to 409",
+			err:  errors.New(`workspaces: workspace "demo" already exists`),
+			want: http.StatusConflict,
+		},
+		{
+			name: "untyped opaque error falls back to 500",
+			err:  errors.New("something exploded"),
+			want: http.StatusInternalServerError,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := errorToStatus(tc.err); got != tc.want {
+				t.Fatalf("errorToStatus(%v) = %d, want %d", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestHandlersSurfaceTypedSentinelsAsClientErrors hits each orchestrator-fronted
+// handler with a typed sentinel and asserts the wire status matches the
+// mapper. This pins the contract that the broker never papers over a 4xx-
+// class orchestrator failure as 500.
+func TestHandlersSurfaceTypedSentinelsAsClientErrors(t *testing.T) {
+	type call struct {
+		path    string
+		body    string
+		handler func(*Broker) http.HandlerFunc
+		setErr  func(*fakeOrchestrator, error)
+	}
+	calls := map[string]call{
+		"create": {
+			path:    "/workspaces/create",
+			body:    `{"name":"demo"}`,
+			handler: func(b *Broker) http.HandlerFunc { return b.handleWorkspacesCreate },
+			setErr:  func(f *fakeOrchestrator, e error) { f.createErr = e },
+		},
+		"switch": {
+			path:    "/workspaces/switch",
+			body:    `{"name":"demo"}`,
+			handler: func(b *Broker) http.HandlerFunc { return b.handleWorkspacesSwitch },
+			setErr:  func(f *fakeOrchestrator, e error) { f.switchErr = e },
+		},
+		"resume": {
+			path:    "/workspaces/resume",
+			body:    `{"name":"demo"}`,
+			handler: func(b *Broker) http.HandlerFunc { return b.handleWorkspacesResume },
+			setErr:  func(f *fakeOrchestrator, e error) { f.resumeErr = e },
+		},
+		"shred": {
+			path:    "/workspaces/shred",
+			body:    `{"name":"demo"}`,
+			handler: func(b *Broker) http.HandlerFunc { return b.handleWorkspacesShred },
+			setErr:  func(f *fakeOrchestrator, e error) { f.shredErr = e },
+		},
+		"restore": {
+			path:    "/workspaces/restore",
+			body:    `{"trash_id":"demo-1700000000"}`,
+			handler: func(b *Broker) http.HandlerFunc { return b.handleWorkspacesRestore },
+			setErr:  func(f *fakeOrchestrator, e error) { f.restoreErr = e },
+		},
+	}
+	cases := []struct {
+		errName string
+		err     error
+		want    int
+	}{
+		{"not found", workspaces.ErrWorkspaceNotFound, http.StatusNotFound},
+		{"conflict", workspaces.ErrWorkspaceConflict, http.StatusConflict},
+		{"port exhausted", workspaces.ErrPortExhausted, http.StatusServiceUnavailable},
+		{"slug invalid", workspaces.ErrSlugInvalid{Slug: "x"}, http.StatusBadRequest},
+		{"slug reserved", workspaces.ErrSlugReserved{Slug: "main"}, http.StatusBadRequest},
+		{"opaque", errors.New("opaque"), http.StatusInternalServerError},
+	}
+	for handlerName, c := range calls {
+		for _, tc := range cases {
+			t.Run(handlerName+"_"+tc.errName, func(t *testing.T) {
+				b, o, _ := newWorkspaceTestBroker(t)
+				c.setErr(o, tc.err)
+				srv := httptest.NewServer(b.withAuth(c.handler(b)))
+				defer srv.Close()
+				resp := mustPost(t, srv.URL, b.Token(), c.body)
+				defer resp.Body.Close()
+				if resp.StatusCode != tc.want {
+					body, _ := io.ReadAll(resp.Body)
+					t.Fatalf("%s/%s: want %d got %d body=%s",
+						handlerName, tc.errName, tc.want, resp.StatusCode, string(body))
+				}
+			})
+		}
+	}
 }
