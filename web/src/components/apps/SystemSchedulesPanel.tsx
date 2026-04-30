@@ -486,7 +486,7 @@ function describeLastRun(
   if (status === "failed" || status === "error") {
     return {
       text: `Failed · ${job.last_run ? formatRelativeTime(job.last_run) : "—"}`,
-      cls: "badge-muted",
+      cls: "badge badge-red",
     };
   }
   return { text: status, cls: "badge-neutral" };
