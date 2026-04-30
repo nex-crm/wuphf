@@ -1242,6 +1242,90 @@ func TestPauseFallsThroughWhenTokenMissingButProcessGone(t *testing.T) {
 	}
 }
 
+// TestPauseReadsTokenFromRealHomeNotRuntimeHome verifies that Pause resolves
+// the token file via the user's REAL HOME (~/.wuphf-spaces/tokens/) and not
+// via WUPHF_RUNTIME_HOME. Cross-workspace artifacts must live at the same
+// shared location regardless of which workspace's runtime home is active —
+// otherwise sibling workspaces would each look in their own token directory
+// and admin/pause would always go out unauthenticated.
+//
+// Regression test for CodeRabbit #3164366633.
+func TestPauseReadsTokenFromRealHomeNotRuntimeHome(t *testing.T) {
+	// Two distinct directories: real HOME (where the token actually lives)
+	// and WUPHF_RUNTIME_HOME (a per-workspace runtime tree).
+	realHome := t.TempDir()
+	runtimeHome := t.TempDir()
+	t.Setenv("HOME", realHome)
+	t.Setenv("WUPHF_RUNTIME_HOME", runtimeHome)
+
+	// Fake broker that records the Authorization header it receives.
+	var gotAuth string
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/admin/pause" {
+			gotAuth = r.Header.Get("Authorization")
+		}
+		w.WriteHeader(http.StatusOK)
+	})}
+	go func() { _ = srv.Serve(ln) }()
+	defer srv.Close()
+	port := ln.Addr().(*net.TCPAddr).Port
+
+	// Plant the token file under the REAL home (the shared cross-workspace
+	// location). If Pause incorrectly resolves via RuntimeHomeDir, it will
+	// look under runtimeHome and miss this file.
+	tokenDir := filepath.Join(realHome, ".wuphf-spaces", "tokens")
+	if err := os.MkdirAll(tokenDir, 0o700); err != nil {
+		t.Fatalf("mkdir tokens: %v", err)
+	}
+	wantToken := "secret-token-value"
+	if err := os.WriteFile(filepath.Join(tokenDir, "tokens-test.token"),
+		[]byte(wantToken+"\n"), 0o600); err != nil {
+		t.Fatalf("write token: %v", err)
+	}
+
+	// Make sure the wrong location (under runtimeHome) does NOT contain a
+	// token, so a regression would result in an empty Authorization header.
+	wrongDir := filepath.Join(runtimeHome, ".wuphf-spaces", "tokens")
+	if _, err := os.Stat(wrongDir); !os.IsNotExist(err) {
+		t.Fatalf("wrongDir should not exist: %v", err)
+	}
+
+	// Seed the registry. spacesDir resolves under realHome (already verified
+	// in workspaces/registry.go) so Write/Read use the right registry path.
+	now := time.Now().UTC()
+	if err := Write(&Registry{
+		Version:    Version,
+		CLICurrent: "main",
+		Workspaces: []*Workspace{
+			{Name: "tokens-test", RuntimeHome: t.TempDir(),
+				BrokerPort: port, WebPort: port + 1,
+				State: StateRunning, CreatedAt: now, LastUsedAt: now},
+		},
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	// Shrink the wall-clock budget so the test doesn't sit waiting for the
+	// broker to "exit" (it stays alive throughout the fake server's lifetime).
+	withShortPauseTimeouts(t)
+	withTmuxKillerStub(t)
+
+	// Pause will fail (broker stays alive → fail-closed StateError), but we
+	// only care that the Authorization header was set from the real-HOME
+	// token before that failure.
+	_ = Pause(context.Background(), "tokens-test")
+
+	if gotAuth != "Bearer "+wantToken {
+		t.Errorf("Authorization header: want %q, got %q\n  Pause likely resolved tokenFilePath under WUPHF_RUNTIME_HOME instead of real HOME.",
+			"Bearer "+wantToken, gotAuth)
+	}
+}
+
 // TestPauseFailsClosedWhenBrokerStillAlive verifies the core regression: if
 // the broker is bound throughout the wall-clock budget AND survives the
 // SIGTERM/SIGKILL ladder (because we point pid at our own test process which

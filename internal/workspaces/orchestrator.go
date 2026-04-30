@@ -507,9 +507,13 @@ func List(ctx context.Context) ([]*LiveWorkspace, error) {
 func Doctor(ctx context.Context) (DoctorReport, error) {
 	var report DoctorReport
 
-	home := config.RuntimeHomeDir()
-	if home == "" {
-		return report, errors.New("workspaces: doctor: cannot resolve home directory")
+	// The ~/.wuphf compatibility symlink lives at the user's REAL home, not
+	// under WUPHF_RUNTIME_HOME — see doctor_fix.go::symlinkPaths for the
+	// matching rationale. Using config.RuntimeHomeDir() here would create or
+	// inspect the symlink in a per-workspace tree.
+	home, err := realHomeDir()
+	if err != nil {
+		return report, fmt.Errorf("workspaces: doctor: %w", err)
 	}
 
 	sd, err := spacesDir()
@@ -645,9 +649,13 @@ func tokenFilePath(home, name string) string {
 }
 
 func readTokenFile(name string) (string, error) {
-	home := config.RuntimeHomeDir()
-	if home == "" {
-		return "", errors.New("workspaces: cannot resolve home directory")
+	// Token files live under ~/.wuphf-spaces/tokens/ at the user's REAL home,
+	// not under any per-workspace WUPHF_RUNTIME_HOME. See paths.go for the
+	// rationale; using config.RuntimeHomeDir() here would route a workspace's
+	// own pause request to a tokens directory that no broker writes into.
+	home, err := realHomeDir()
+	if err != nil {
+		return "", err
 	}
 	data, err := os.ReadFile(tokenFilePath(home, name))
 	if err != nil {
