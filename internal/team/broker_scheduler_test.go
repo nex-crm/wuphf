@@ -161,6 +161,9 @@ func TestRunSchedulerJob_TriggersJobAndUpdatesLastRun(t *testing.T) {
 	if found.LastRun != body.At {
 		t.Errorf("LastRun mismatch: want %q, got %q", body.At, found.LastRun)
 	}
+	if found.LastRunStatus != "triggered" {
+		t.Errorf("LastRunStatus mismatch: want %q, got %q", "triggered", found.LastRunStatus)
+	}
 }
 
 // TestRunSchedulerJob_UnknownSlugReturns404 ensures that triggering a
