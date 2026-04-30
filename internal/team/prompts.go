@@ -125,12 +125,18 @@ func (l *Launcher) resolvePermissionFlags(slug string) string {
 // be written; callers should fall back to the headless path so agents do not
 // silently launch with a missing system prompt.
 func (l *Launcher) claudeCommand(slug, systemPrompt string) (string, error) {
+	// Always fail closed when ensureAgentMCPConfig errors. Pre-fix
+	// the function fell back to l.mcpConfig (the launcher-wide
+	// config containing every MCP server) when the per-agent
+	// filtered write failed — turning a transient os.WriteFile
+	// failure into silent privilege expansion: an agent restricted
+	// to a small allowlist via agentMCPServers(slug) would launch
+	// with full access to every server in the office. Caller must
+	// now handle the error (typically by falling back to the
+	// headless path that doesn't share this code path).
 	agentMCP, err := l.ensureAgentMCPConfig(slug)
 	if err != nil {
-		if l.mcpConfig == "" {
-			return "", fmt.Errorf("claudeCommand(%s): write agent MCP config: %w", slug, err)
-		}
-		agentMCP = l.mcpConfig
+		return "", fmt.Errorf("claudeCommand(%s): write agent MCP config: %w", slug, err)
 	}
 	// Every interpolated value below flows through shellQuote so the
 	// resulting tmux command is injection-safe regardless of source.

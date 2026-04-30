@@ -38,7 +38,22 @@ type paneDispatchTurn struct {
 	PaneTarget   string
 	Notification string
 	EnqueuedAt   time.Time
+	// Attempts tracks how many times the dispatcher has tried to
+	// send this turn. Bumped on each failed sendFn; the worker
+	// keeps the turn at the head of the queue and retries until
+	// paneDispatchMaxAttempts, then drops with a stderr log so
+	// the user has a trail even after a permanently-wedged pane.
+	Attempts int
 }
+
+// paneDispatchMaxAttempts caps per-turn retries against transient
+// tmux failures. Below this floor a permanently-wedged pane (kill -9
+// of the claude process, dialog stuck open, terminal allocation
+// contention) would loop forever and burn CPU; above it we'd hold a
+// stale notification in front of fresher work. Three attempts at
+// paneDispatchMinGap apart (≈9s total) covers a brief tmux server
+// hiccup while still draining within a reasonable window.
+const paneDispatchMaxAttempts = 3
 
 // paneDispatchMinGap caps how often the dispatcher will type into the
 // same pane. Two messages arriving in quick succession get coalesced
@@ -293,7 +308,12 @@ func (d *paneDispatcher) runQueue(slug string) {
 			}
 		}
 
-		// Step 3: pop (re-read head to pick up any merged content).
+		// Step 3: peek (don't pop yet — head stays in place so a
+		// failed send can be retried without losing the
+		// notification, and concurrent Enqueue calls keep merging
+		// fresh content into queue[0] right up until the success
+		// branch dequeues). Re-read after the wait windows to pick
+		// up that merged content.
 		d.mu.Lock()
 		queue = d.queues[slug]
 		if len(queue) == 0 {
@@ -301,11 +321,6 @@ func (d *paneDispatcher) runQueue(slug string) {
 			continue
 		}
 		turn := queue[0]
-		if len(queue) == 1 {
-			delete(d.queues, slug)
-		} else {
-			d.queues[slug] = queue[1:]
-		}
 		d.mu.Unlock()
 
 		var sendErr error
@@ -313,27 +328,65 @@ func (d *paneDispatcher) runQueue(slug string) {
 			sendErr = d.sendFn(turn.PaneTarget, turn.Notification)
 		}
 
-		// Step 4: only record send time when the send actually
-		// landed. Pre-fix d.lastSent was advanced even when sendFn
-		// failed, gating the next enqueue behind the 60s coalesce
-		// window for a notification that never reached the pane —
-		// turning a transient tmux glitch into a minute of silent
-		// stalling for the user. The local lastSentAt advances either
-		// way so the per-worker min-gap floor still rate-limits a
-		// runaway dispatch loop on repeated failures.
+		// Step 4: advance the per-worker rate-limit floor either
+		// way so a runaway sendFn that always errors can't burn
+		// CPU faster than paneDispatchMinGap.
 		lastSentAt = d.now()
+
 		if sendErr == nil {
+			// Success path: dequeue the head, advance the global
+			// coalesce-window timestamp, and signal onSent. Pre-fix
+			// the dispatcher updated d.lastSent regardless of
+			// outcome, gating the next enqueue behind a 60s
+			// coalesce window for a notification that never
+			// reached the pane — a transient tmux glitch became a
+			// minute of silent stalling. Onsent is success-only so
+			// the test seam doesn't flicker on a retry burst.
 			d.mu.Lock()
+			queue = d.queues[slug]
+			if len(queue) == 1 {
+				delete(d.queues, slug)
+			} else if len(queue) > 1 {
+				d.queues[slug] = queue[1:]
+			}
 			d.lastSent[slug] = lastSentAt
 			d.mu.Unlock()
+			if d.onSent != nil {
+				select {
+				case d.onSent <- struct{}{}:
+				default:
+				}
+			}
+			continue
 		}
 
-		if d.onSent != nil {
-			select {
-			case d.onSent <- struct{}{}:
-			default:
+		// Failure path: bump the in-place attempts counter and
+		// either retry on the next loop iteration (the head stays
+		// in queue, so it's the natural target of the next pop) or
+		// drop the turn after exhausting paneDispatchMaxAttempts.
+		// The head was never popped, so concurrent Enqueue calls
+		// continue to merge fresh content into queue[0] which the
+		// retry will pick up. d.lastSent is NOT advanced — a fresh
+		// enqueue should not be gated by a 60s coalesce window for
+		// a notification that didn't actually land.
+		d.mu.Lock()
+		queue = d.queues[slug]
+		if len(queue) > 0 {
+			queue[0].Attempts++
+			if queue[0].Attempts >= paneDispatchMaxAttempts {
+				attempts := queue[0].Attempts
+				if len(queue) == 1 {
+					delete(d.queues, slug)
+				} else {
+					d.queues[slug] = queue[1:]
+				}
+				d.mu.Unlock()
+				fmt.Fprintf(os.Stderr, "pane dispatch: dropping %s notification to %s after %d failed attempts: %v\n",
+					slug, turn.PaneTarget, attempts, sendErr)
+				continue
 			}
 		}
+		d.mu.Unlock()
 	}
 }
 
