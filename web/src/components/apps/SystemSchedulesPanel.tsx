@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
 import {
@@ -110,6 +110,11 @@ function ScheduleRow({ job }: ScheduleRowProps) {
   );
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  // Tracks the last value confirmed by the server so validation failures can
+  // rollback the input to a known-good state instead of leaving the bad value.
+  const committedTextRef = useRef(
+    initialOverride > 0 ? String(initialOverride) : String(defaultInterval),
+  );
 
   const sourceLabel = describeSource(job);
 
@@ -146,21 +151,18 @@ function ScheduleRow({ job }: ScheduleRowProps) {
           }
           if (typeof res.job?.interval_override === "number") {
             const next = res.job.interval_override;
-            setOverrideText(
+            const nextText =
               next > 0
                 ? String(next)
-                : String(res.job.interval_minutes ?? defaultInterval),
-            );
+                : String(res.job.interval_minutes ?? defaultInterval);
+            setOverrideText(nextText);
+            committedTextRef.current = nextText;
           }
         })
         .catch((e: Error) => {
-          // Roll back optimistic state.
+          // Roll back optimistic state to last server-confirmed value.
           setEnabled(initialEnabled);
-          setOverrideText(
-            initialOverride > 0
-              ? String(initialOverride)
-              : String(defaultInterval),
-          );
+          setOverrideText(committedTextRef.current);
           setError(e.message || "Update failed");
           showNotice(`Couldn't update ${labelOf(job)}: ${e.message}`, "error");
         })
@@ -198,6 +200,7 @@ function ScheduleRow({ job }: ScheduleRowProps) {
     }
     if (parsed > 0 && parsed < floor) {
       setError(`Min interval is ${floor} min for this cron`);
+      setOverrideText(committedTextRef.current);
       return;
     }
     // Treat "same as current default" as no-op (keeps server state stable).

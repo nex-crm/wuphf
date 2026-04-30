@@ -475,6 +475,9 @@ func (b *Broker) registerSystemCrons() {
 		if defaultInterval <= 0 {
 			defaultInterval = 1
 		}
+		if spec.MinFloor > 0 && defaultInterval < spec.MinFloor {
+			defaultInterval = spec.MinFloor
+		}
 		// Find existing — preserve user-controlled fields.
 		var existing *schedulerJob
 		for i := range b.scheduler {
