@@ -708,6 +708,29 @@ export function patchSchedulerJob(
   );
 }
 
+/**
+ * Wire shape for one entry from GET /scheduler/system-specs.
+ * Mirrors systemCronSpecJSON in internal/team/broker_scheduler.go.
+ */
+export interface SystemCronSpec {
+  slug: string;
+  min_floor_minutes: number;
+  default_interval_minutes: number;
+  description: string;
+}
+
+/**
+ * Fetch the system-cron spec registry from the broker so the UI can
+ * derive per-slug MinFloor values at runtime instead of maintaining a
+ * hardcoded mirror constant.
+ */
+export async function getSystemCronSpecs(): Promise<SystemCronSpec[]> {
+  const res = await get<{ specs: SystemCronSpec[] }>(
+    "/scheduler/system-specs",
+  );
+  return res.specs ?? [];
+}
+
 // ── Skills ──
 
 export type SkillStatus = "active" | "proposed" | "archived" | "disabled";

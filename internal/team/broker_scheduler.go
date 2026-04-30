@@ -402,6 +402,19 @@ type systemCronSpec struct {
 	ReadOnly        bool       // one-relay-events: hardcoded for v1
 }
 
+// resolvedDefaultInterval returns the effective default interval for this
+// spec: at least 1, and never below MinFloor.
+func (s systemCronSpec) resolvedDefaultInterval() int {
+	d := s.DefaultInterval()
+	if d <= 0 {
+		d = 1
+	}
+	if s.MinFloor > 0 && d < s.MinFloor {
+		d = s.MinFloor
+	}
+	return d
+}
+
 // systemCronSpecs is the v1 system cron registry. Order is alphabetical
 // for deterministic startup. Each entry SHOULD be invisible in /scheduler
 // today (or surface only sporadically); registration makes them
@@ -471,13 +484,7 @@ func (b *Broker) registerSystemCrons() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	for _, spec := range systemCronSpecs() {
-		defaultInterval := spec.DefaultInterval()
-		if defaultInterval <= 0 {
-			defaultInterval = 1
-		}
-		if spec.MinFloor > 0 && defaultInterval < spec.MinFloor {
-			defaultInterval = spec.MinFloor
-		}
+		defaultInterval := spec.resolvedDefaultInterval()
 		// Find existing — preserve user-controlled fields.
 		var existing *schedulerJob
 		for i := range b.scheduler {
@@ -566,14 +573,53 @@ func (b *Broker) updateSchedulerHeartbeat(slug, label string, intervalMinutes in
 	_ = b.saveLocked()
 }
 
+// systemCronSpecJSON is the wire shape for a single entry in
+// GET /scheduler/system-specs. It is intentionally flat so callers
+// never need to read systemCronSpec (an internal type) directly.
+type systemCronSpecJSON struct {
+	Slug                   string `json:"slug"`
+	MinFloorMinutes        int    `json:"min_floor_minutes"`
+	DefaultIntervalMinutes int    `json:"default_interval_minutes"`
+	Description            string `json:"description"`
+}
+
+// handleSchedulerSystemSpecs serves GET /scheduler/system-specs.
+// It serialises every entry from systemCronSpecs() so the web UI can
+// derive MinFloor values at runtime instead of maintaining a hardcoded
+// mirror constant. No request body; no auth-specific data — read-only.
+func (b *Broker) handleSchedulerSystemSpecs(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	specs := systemCronSpecs()
+	out := make([]systemCronSpecJSON, 0, len(specs))
+	for _, s := range specs {
+		out = append(out, systemCronSpecJSON{
+			Slug:                   s.Slug,
+			MinFloorMinutes:        s.MinFloor,
+			DefaultIntervalMinutes: s.resolvedDefaultInterval(),
+			Description:            s.Label,
+		})
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"specs": out})
+}
+
 // handleSchedulerSubpath dispatches /scheduler/{slug} requests. Currently
-// only PATCH is supported (PR 8 Lane G); future verbs (delete, run-now)
-// would land here too.
+// PATCH and the special "system-specs" sub-resource are supported (PR 8
+// Lane G + min-floor-from-api); future verbs (delete, run-now) would land
+// here too.
 func (b *Broker) handleSchedulerSubpath(w http.ResponseWriter, r *http.Request) {
 	slug := strings.TrimPrefix(r.URL.Path, "/scheduler/")
 	slug = strings.TrimSpace(slug)
 	if slug == "" {
 		http.Error(w, "scheduler slug required in path", http.StatusBadRequest)
+		return
+	}
+	// system-specs is a read-only sub-resource, not a per-job path.
+	if slug == "system-specs" {
+		b.handleSchedulerSystemSpecs(w, r)
 		return
 	}
 	switch r.Method {

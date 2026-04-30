@@ -1,34 +1,14 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
 import {
+  getSystemCronSpecs,
   type PatchSchedulerJobResponse,
   patchSchedulerJob,
   type SchedulerJob,
 } from "../../api/client";
 import { formatRelativeTime } from "../../lib/format";
 import { showNotice } from "../ui/Toast";
-
-/**
- * Per-cron interval floors. Source of truth: systemCronSpecs() in
- * internal/team/broker.go (PR 8 Lane G). Mirrored here so the UI can
- * validate before issuing the PATCH and surface a typed error inline
- * instead of relying on a 400 round-trip.
- *
- * Keep in sync when broker MinFloor changes. The non-system fallback
- * floor (5 minutes) matches the server's `floor := 5` default for jobs
- * outside the registry.
- */
-const SYSTEM_CRON_FLOORS_MINUTES: Record<string, number> = {
-  "nex-insights": 30,
-  "nex-notifications": 5,
-  "one-relay-events": 1,
-  request_follow_up: 5,
-  "review-expiry": 5,
-  task_follow_up: 5,
-  task_recheck: 5,
-  task_reminder: 5,
-};
 
 const DEFAULT_FLOOR_MINUTES = 5;
 
@@ -45,11 +25,41 @@ interface SystemSchedulesPanelProps {
  * interval picker, last/next run, and source badge. Inline validation
  * mirrors the backend's MinFloor before allowing a PATCH.
  *
+ * Floors are fetched once on mount from GET /scheduler/system-specs so
+ * they stay in sync with the broker without any hardcoded mirror.
+ *
  * Empty if the broker hasn't surfaced any system or interval crons (test
  * environments before registerSystemCrons runs).
  */
 export function SystemSchedulesPanel({ jobs }: SystemSchedulesPanelProps) {
   const rows = useMemo(() => filterSchedulerRows(jobs), [jobs]);
+  // floors: slug → min_floor_minutes, populated from the API on mount.
+  // Stored in a ref so updates don't trigger a re-render of every row.
+  const floorsRef = useRef<Record<string, number>>({});
+
+  useEffect(() => {
+    let aborted = false;
+    getSystemCronSpecs()
+      .then((specs) => {
+        if (aborted) return;
+        const map: Record<string, number> = {};
+        for (const s of specs) {
+          map[s.slug] = s.min_floor_minutes;
+        }
+        floorsRef.current = map;
+      })
+      .catch((err: unknown) => {
+        if (aborted) return;
+        console.warn(
+          "SystemSchedulesPanel: could not fetch system-specs; falling back to default floor",
+          err,
+        );
+      });
+    return () => {
+      aborted = true;
+    };
+  }, []);
+
   if (rows.length === 0) return null;
 
   return (
@@ -67,7 +77,11 @@ export function SystemSchedulesPanel({ jobs }: SystemSchedulesPanelProps) {
         System Schedules
       </div>
       {rows.map((job) => (
-        <ScheduleRow key={job.slug ?? job.id} job={job} />
+        <ScheduleRow
+          key={job.slug ?? job.id}
+          job={job}
+          floorsRef={floorsRef}
+        />
       ))}
     </section>
   );
@@ -90,16 +104,17 @@ function filterSchedulerRows(jobs: SchedulerJob[]): SchedulerJob[] {
 
 interface ScheduleRowProps {
   job: SchedulerJob;
+  floorsRef: RefObject<Record<string, number>>;
 }
 
-function ScheduleRow({ job }: ScheduleRowProps) {
+function ScheduleRow({ job, floorsRef }: ScheduleRowProps) {
   const queryClient = useQueryClient();
   const slug = job.slug ?? "";
   const isReadOnly = READ_ONLY_SLUGS.has(slug);
   const isCron = typeof job.schedule_expr === "string" && job.schedule_expr;
   const isInterval = typeof job.interval_minutes === "number";
 
-  const floor = SYSTEM_CRON_FLOORS_MINUTES[slug] ?? DEFAULT_FLOOR_MINUTES;
+  const floor = floorsRef.current[slug] ?? DEFAULT_FLOOR_MINUTES;
   const defaultInterval = job.interval_minutes ?? 0;
   const initialOverride = job.interval_override ?? 0;
   const initialEnabled = job.enabled !== false; // missing → assume enabled
