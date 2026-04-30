@@ -156,7 +156,14 @@ def scenario_list_empty(broker: str, token: str) -> ScenarioResult:
             ok=False,
             detail=f"status={code}",
         )
-    skills = body.get("skills", []) if isinstance(body, dict) else []
+    if not isinstance(body, dict):
+        return ScenarioResult(
+            id="skill-01-list",
+            title="GET /skills succeeds",
+            ok=False,
+            detail="non-JSON response body",
+        )
+    skills = body.get("skills", [])
     probe = next((s for s in skills if s.get("name") == _EVAL_SKILL_NAME), None)
     if probe is not None:
         return ScenarioResult(
@@ -266,8 +273,15 @@ def scenario_archive(broker: str, token: str) -> ScenarioResult:
             detail=f"status={code}",
         )
     # Confirm it is gone from GET.
-    _, list_body = http_request("GET", f"{broker}/skills", token=token)
-    skills = list_body.get("skills", []) if isinstance(list_body, dict) else []
+    list_code, list_body = http_request("GET", f"{broker}/skills", token=token)
+    if list_code != 200 or not isinstance(list_body, dict):
+        return ScenarioResult(
+            id="skill-05-archive",
+            title="DELETE /skills (archive)",
+            ok=False,
+            detail=f"verification GET failed (status={list_code})",
+        )
+    skills = list_body.get("skills", [])
     probe = next((s for s in skills if s.get("name") == _EVAL_SKILL_NAME), None)
     ok = probe is None
     return ScenarioResult(
