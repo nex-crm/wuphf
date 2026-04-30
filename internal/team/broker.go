@@ -2,8 +2,6 @@ package team
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -611,16 +609,6 @@ func parseBrokerTimestamp(raw string) time.Time {
 	return ts.UTC()
 }
 
-// generateToken returns a cryptographically random hex token.
-func generateToken() string {
-	b := make([]byte, 16)
-	if _, err := rand.Read(b); err != nil {
-		// Fallback: this should never happen on modern systems
-		return fmt.Sprintf("wuphf-%d", time.Now().UnixNano())
-	}
-	return hex.EncodeToString(b)
-}
-
 // skipBrokerStateLoadOnConstruct gates the auto-load of disk state
 // inside NewBrokerAt. Production keeps it false so the CLI resumes from
 // disk state. A *_test.go init flips it to true so tests that call
@@ -700,38 +688,6 @@ func NewBrokerAt(statePath string) *Broker {
 	return b
 }
 
-func (b *Broker) appendMessageLocked(msg channelMessage) {
-	b.messages = append(b.messages, msg)
-	b.publishMessageLocked(msg)
-}
-
-func (b *Broker) publishMessageLocked(msg channelMessage) {
-	for _, ch := range b.messageSubscribers {
-		select {
-		case ch <- msg:
-		default:
-		}
-	}
-}
-
-func (b *Broker) publishActionLocked(action officeActionLog) {
-	for _, ch := range b.actionSubscribers {
-		select {
-		case ch <- action:
-		default:
-		}
-	}
-}
-
-func (b *Broker) publishActivityLocked(activity agentActivitySnapshot) {
-	for _, ch := range b.activitySubscribers {
-		select {
-		case ch <- activity:
-		default:
-		}
-	}
-}
-
 // Token returns the shared secret that agents must include in requests.
 func (b *Broker) Token() string {
 	return b.token
@@ -745,17 +701,6 @@ func (b *Broker) Addr() string {
 // ChannelStore returns the channel store for DM type checks and member lookups.
 func (b *Broker) ChannelStore() *channel.Store {
 	return b.channelStore
-}
-
-// requireAuth wraps a handler to enforce Bearer token authentication.
-// Accepts token via Authorization header or ?token= query parameter (for EventSource which can't set headers).
-//
-// Backed by withAuth (broker_auth.go); kept as the legacy name on the
-// existing route registrations so a full sweep of HandleFunc lines is
-// not required by this PR. Both names produce identical behavior — the
-// auth-route assertion test covers both.
-func (b *Broker) requireAuth(next http.HandlerFunc) http.HandlerFunc {
-	return b.withAuth(next)
 }
 
 // Start launches the broker on the configured localhost port.
@@ -1097,14 +1042,6 @@ func (b *Broker) Stop() {
 // after the browser's origin check passes. Go's default mux routes purely
 // on path, so without an explicit Host check the response would flow back
 // to the attacker's origin. Validate both RemoteAddr AND Host here.
-func (b *Broker) handleWebToken(w http.ResponseWriter, r *http.Request) {
-	if !isLoopbackRemote(r) || !hostHeaderIsLoopback(r) {
-		http.Error(w, "forbidden", http.StatusForbidden)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]string{"token": b.token})
-}
 
 func (b *Broker) handleEvents(w http.ResponseWriter, r *http.Request) {
 	if !b.requestHasBrokerAuth(r) {
