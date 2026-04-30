@@ -1077,489 +1077,91 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case channelPostDoneMsg:
-		m.posting = false
-		if msg.err != nil {
-			m.notice = "Send failed: " + msg.err.Error()
-		} else if strings.TrimSpace(msg.notice) != "" {
-			m.notice = msg.notice
-		} else if m.replyToID != "" {
-			m.notice = fmt.Sprintf("Reply sent to %s. Use /cancel to leave the thread.", m.replyToID)
-		}
-		switch strings.TrimSpace(msg.action) {
-		case "create":
-			if slug := channelui.NormalizeSidebarSlug(msg.slug); slug != "" {
-				m.activeChannel = slug
-				m.activeApp = channelui.OfficeAppMessages
-				m.messages = nil
-				m.members = nil
-				m.tasks = nil
-				m.requests = nil
-				m.lastID = ""
-				m.replyToID = ""
-				m.threadPanelOpen = false
-				m.threadPanelID = ""
-				m.scroll = 0
-				m.clearUnreadState()
-				m.syncSidebarCursorToActive()
-			}
-		case "remove":
-			if channelui.NormalizeSidebarSlug(msg.slug) == channelui.NormalizeSidebarSlug(m.activeChannel) {
-				m.activeChannel = "general"
-				m.activeApp = channelui.OfficeAppMessages
-				m.messages = nil
-				m.members = nil
-				m.tasks = nil
-				m.requests = nil
-				m.lastID = ""
-				m.replyToID = ""
-				m.threadPanelOpen = false
-				m.threadPanelID = ""
-				m.scroll = 0
-				m.clearUnreadState()
-				m.syncSidebarCursorToActive()
-			}
-		}
-		return m, tea.Batch(pollChannels(), pollBroker("", m.activeChannel), pollMembers(m.activeChannel), pollRequests(m.activeChannel), pollTasks(m.activeChannel), pollOfficeLedger())
+		return m.handleChannelPostDoneMsg(msg)
 
 	case channelInterviewAnswerDoneMsg:
-		m.posting = false
-		if msg.err != nil {
-			m.notice = "Request answer failed: " + msg.err.Error()
-		} else {
-			m.pending = nil
-			m.input = nil
-			m.inputPos = 0
-			return m, tea.Batch(pollBroker("", m.activeChannel), pollRequests(m.activeChannel), pollTasks(m.activeChannel), pollOfficeLedger())
-		}
+		return m.handleChannelInterviewAnswerDoneMsg(msg)
 
 	case channelCancelDoneMsg:
-		m.posting = false
-		if msg.err != nil {
-			m.notice = "Request cancel failed: " + msg.err.Error()
-			return m, tea.Batch(pollRequests(m.activeChannel), pollBroker(m.lastID, m.activeChannel))
-		} else {
-			if m.pending != nil && m.pending.ID == msg.requestID {
-				m.pending = nil
-				m.input = nil
-				m.inputPos = 0
-				m.updateInputOverlays()
-			}
-			return m, tea.Batch(pollBroker("", m.activeChannel), pollRequests(m.activeChannel), pollTasks(m.activeChannel), pollOfficeLedger())
-		}
+		return m.handleChannelCancelDoneMsg(msg)
 
 	case channelInterruptDoneMsg:
-		m.posting = false
-		if msg.err != nil {
-			m.notice = "Failed to pause team: " + msg.err.Error()
-		} else {
-			m.notice = "Team paused. Answer the interrupt to resume."
-		}
-		return m, tea.Batch(pollRequests(m.activeChannel), pollBroker(m.lastID, m.activeChannel))
+		return m.handleChannelInterruptDoneMsg(msg)
 
 	case channelResetDoneMsg:
-		m.posting = false
-		m.confirm = nil
-		if msg.err == nil {
-			if normalized := team.NormalizeSessionMode(msg.sessionMode); normalized != "" {
-				m.sessionMode = normalized
-			}
-			if strings.TrimSpace(msg.oneOnOneAgent) != "" || m.sessionMode == team.SessionModeOneOnOne {
-				m.oneOnOneAgent = team.NormalizeOneOnOneAgent(msg.oneOnOneAgent)
-			}
-			m.messages = nil
-			m.members = nil
-			m.requests = nil
-			m.pending = nil
-			m.lastID = ""
-			m.replyToID = ""
-			m.expandedThreads = make(map[string]bool)
-			m.input = nil
-			m.inputPos = 0
-			m.scroll = 0
-			m.clearUnreadState()
-			m.notice = ""
-			m.initFlow = tui.NewInitFlow()
-			m.picker.SetActive(false)
-			m.threadPanelOpen = false
-			m.threadPanelID = ""
-			m.threadInput = nil
-			m.threadInputPos = 0
-			m.threadScroll = 0
-			m.focus = focusMain
-			m.pickerMode = channelPickerNone
-			m.doctor = nil
-			m.tasks = nil
-			m.actions = nil
-			m.scheduler = nil
-			m.refreshSlashCommands()
-			if m.isOneOnOne() {
-				m.activeApp = channelui.OfficeAppMessages
-				m.sidebarCollapsed = true
-				m.threadPanelOpen = false
-				m.threadPanelID = ""
-				m.replyToID = ""
-			}
-			m.notice = strings.TrimSpace(msg.notice)
-			if m.notice == "" {
-				m.notice = "Office reset. Team panes reloaded in place."
-			}
-			return m, m.pollCurrentState()
-		} else {
-			m.notice = "Reset failed: " + msg.err.Error()
-		}
+		return m.handleChannelResetDoneMsg(msg)
 
 	case channelResetDMDoneMsg:
-		m.posting = false
-		m.confirm = nil
-		if msg.err != nil {
-			m.notice = "Failed to clear DMs: " + msg.err.Error()
-		} else {
-			m.notice = fmt.Sprintf("Cleared %d direct messages.", msg.removed)
-			m.messages = nil
-			m.lastID = ""
-		}
-		return m, m.pollCurrentState()
+		return m.handleChannelResetDMDoneMsg(msg)
 
 	case channelDMCreatedMsg:
-		if msg.err != nil {
-			m.notice = "Failed to open DM: " + msg.err.Error()
-			return m, nil
-		}
-		// Switch to the DM channel (slug is now deterministic, e.g. "engineering__human").
-		m.activeChannel = msg.slug
-		m.focus = focusMain
-		m.lastID = ""
-		m.messages = nil
-		agentDisplay := msg.agentSlug
-		if msg.name != "" {
-			agentDisplay = msg.name
-		}
-		m.notice = fmt.Sprintf("DM with %s — Ctrl+D to return to #general", agentDisplay)
-		return m, tea.Batch(pollBroker("", m.activeChannel), pollMembers(m.activeChannel))
+		return m.handleChannelDMCreatedMsg(msg)
 
 	case channelInitDoneMsg:
-		m.posting = false
-		if msg.err != nil {
-			m.notice = "Setup failed: " + msg.err.Error()
-		} else {
-			m.notice = strings.TrimSpace(msg.notice)
-			if m.notice == "" {
-				m.notice = "Setup applied. Team reloaded with the new configuration."
-			}
-		}
-		m.initFlow = tui.NewInitFlow()
-		m.picker.SetActive(false)
-		m.pickerMode = channelPickerNone
+		return m.handleChannelInitDoneMsg(msg)
 
 	case channelIntegrationDoneMsg:
-		m.posting = false
-		m.picker.SetActive(false)
-		m.pickerMode = channelPickerNone
-		if msg.err != nil {
-			m.notice = "Integration failed: " + msg.err.Error()
-		} else if msg.url != "" {
-			m.notice = fmt.Sprintf("%s connected. Browser opened at %s", msg.label, msg.url)
-		} else {
-			m.notice = fmt.Sprintf("%s connected.", msg.label)
-		}
+		return m.handleChannelIntegrationDoneMsg(msg)
 
 	case channelDoctorDoneMsg:
-		if msg.err != nil {
-			m.notice = "Doctor failed: " + msg.err.Error()
-			m.doctor = nil
-		} else {
-			report := msg.report
-			m.doctor = &report
-			m.notice = "Doctor: " + report.StatusLine()
-		}
+		return m.handleChannelDoctorDoneMsg(msg)
 
 	case telegramDiscoverMsg:
-		m.posting = false
-		if msg.err != nil {
-			m.notice = "Telegram error: " + msg.err.Error()
-			return m, nil
-		}
-		m.telegramToken = msg.token
-
-		// Merge discovered groups with existing manifest channels
-		allGroups := msg.groups
-		manifest, _ := company.LoadManifest()
-		for _, ch := range manifest.Channels {
-			if ch.Surface == nil || ch.Surface.Provider != "telegram" || ch.Surface.RemoteID == "" || ch.Surface.RemoteID == "0" {
-				continue
-			}
-			// Check if already discovered
-			found := false
-			for _, g := range allGroups {
-				if fmt.Sprintf("%d", g.ChatID) == ch.Surface.RemoteID {
-					found = true
-					break
-				}
-			}
-			if !found {
-				chatID, _ := strconv.ParseInt(ch.Surface.RemoteID, 10, 64)
-				if chatID != 0 {
-					title := ch.Surface.RemoteTitle
-					if title == "" {
-						title = ch.Name
-					}
-					allGroups = append(allGroups, team.TelegramGroup{
-						ChatID: chatID,
-						Title:  title,
-						Type:   "group",
-					})
-				}
-			}
-		}
-		m.telegramGroups = allGroups
-
-		// Build picker: DM + discovered groups + manual group entry
-		options := []tui.PickerOption{
-			{Label: "Direct message with Telegram bot", Value: "dm", Description: "Anyone can DM the bot to reach the office"},
-		}
-		for _, g := range allGroups {
-			options = append(options, tui.PickerOption{
-				Label:       g.Title,
-				Value:       fmt.Sprintf("%d", g.ChatID),
-				Description: fmt.Sprintf("Shared %s channel", g.Type),
-			})
-		}
-		if len(allGroups) == 0 {
-			options = append(options, tui.PickerOption{
-				Label:       "Waiting for groups...",
-				Value:       "retry",
-				Description: "Add the bot to a Telegram group and send a message, then try again",
-			})
-		}
-		m.picker = tui.NewPicker(fmt.Sprintf("Bot \"%s\" verified. Choose how to connect:", msg.botName), options)
-		m.picker.SetActive(true)
-		m.pickerMode = channelPickerTelegramGroup
-		return m, nil
+		return m.handleTelegramDiscoverMsg(msg)
 
 	case openclawSessionsMsg:
-		m.posting = false
-		if msg.err != nil {
-			options := []tui.PickerOption{
-				{Label: "Retry with different gateway URL", Value: "retry-url", Description: "Go back and change the URL/token"},
-			}
-			m.picker = tui.NewPicker(fmt.Sprintf("OpenClaw dial failed: %s", msg.err.Error()), options)
-			m.picker.SetActive(true)
-			m.pickerMode = channelPickerOpenclawSession
-			m.notice = "OpenClaw connect failed: " + msg.err.Error()
-			return m, nil
-		}
-		m.openclawSessions = msg.sessions
-		if len(msg.sessions) == 0 {
-			m.notice = "OpenClaw gateway returned no sessions. Start one in OpenClaw and retry /connect openclaw."
-			return m, nil
-		}
-		options := make([]tui.PickerOption, 0, len(msg.sessions))
-		for _, s := range msg.sessions {
-			label := s.Label
-			if label == "" {
-				label = s.SessionKey
-			}
-			desc := s.Preview
-			options = append(options, tui.PickerOption{
-				Label:       label,
-				Value:       s.SessionKey,
-				Description: desc,
-			})
-		}
-		m.picker = tui.NewPicker("Pick an OpenClaw session to bridge:", options)
-		m.picker.SetActive(true)
-		m.pickerMode = channelPickerOpenclawSession
-		m.notice = fmt.Sprintf("Found %d OpenClaw session(s). Pick one to bridge.", len(msg.sessions))
-		return m, nil
+		return m.handleOpenclawSessionsMsg(msg)
 
 	case openclawConnectDoneMsg:
-		m.posting = false
-		if msg.err != nil {
-			m.notice = "OpenClaw connect failed: " + msg.err.Error()
-			return m, nil
-		}
-		m.notice = fmt.Sprintf("@%s is now in the office", msg.slug)
-		return m, nil
+		return m.handleOpenclawConnectDoneMsg(msg)
 
 	case telegramConnectDoneMsg:
-		m.posting = false
-		if msg.err != nil {
-			m.notice = "Telegram connect failed: " + msg.err.Error()
-			return m, nil
-		}
-		m.notice = fmt.Sprintf("Connected \"%s\" as #%s. Restart WUPHF to activate the Telegram bridge.", msg.groupTitle, msg.channelSlug)
-		m.activeChannel = msg.channelSlug
-		m.activeApp = channelui.OfficeAppMessages
-		m.messages = nil
-		m.members = nil
-		m.tasks = nil
-		m.requests = nil
-		m.lastID = ""
-		m.replyToID = ""
-		m.threadPanelOpen = false
-		m.threadPanelID = ""
-		m.scroll = 0
-		m.clearUnreadState()
-		m.syncSidebarCursorToActive()
-		manifest, _ := company.LoadManifest()
-		m.channels = channelui.ChannelInfosFromManifest(manifest)
-		return m, tea.Batch(pollBroker("", m.activeChannel), pollMembers(m.activeChannel), pollChannels())
+		return m.handleTelegramConnectDoneMsg(msg)
 
 	case channelMemberDraftDoneMsg:
-		m.posting = false
-		if msg.err != nil {
-			m.notice = "Agent update failed: " + msg.err.Error()
-		} else {
-			m.notice = msg.notice
-			m.memberDraft = nil
-			m.input = nil
-			m.inputPos = 0
-			return m, tea.Batch(pollOfficeMembers(), pollChannels(), pollMembers(m.activeChannel), pollBroker("", m.activeChannel), pollRequests(m.activeChannel), pollTasks(m.activeChannel), pollOfficeLedger())
-		}
+		return m.handleChannelMemberDraftDoneMsg(msg)
 
 	case channelTaskMutationDoneMsg:
-		m.posting = false
-		if msg.err != nil {
-			m.notice = "Task update failed: " + msg.err.Error()
-		} else if strings.TrimSpace(msg.notice) != "" {
-			m.notice = msg.notice
-		}
-		return m, tea.Batch(pollTasks(m.activeChannel), pollOfficeLedger())
+		return m.handleChannelTaskMutationDoneMsg(msg)
 
 	case channelMsg:
-		if len(msg.messages) > 0 {
-			hadHistory := m.lastID != ""
-			uniqueMessages, added := channelui.AppendUniqueMessages(m.messages, msg.messages)
-			if added == 0 {
-				break
-			}
-			addedMessages := uniqueMessages[len(m.messages):]
-			latestHumanFacing := channelui.LatestHumanFacingMessage(addedMessages)
-			if m.scroll > 0 {
-				m.scroll += added
-			}
-			m.messages = uniqueMessages
-			m.lastID = msg.messages[len(msg.messages)-1].ID
-			// Track latest streaming text per agent for sidebar display.
-			if m.lastAgentContent == nil {
-				m.lastAgentContent = make(map[string]string)
-			}
-			for _, bm := range addedMessages {
-				if bm.From != "" && bm.From != "you" && bm.From != "human" && bm.Content != "" {
-					snippet := strings.TrimSpace(bm.Content)
-					if len([]rune(snippet)) > 38 {
-						runes := []rune(snippet)
-						snippet = "…" + string(runes[len(runes)-37:])
-					}
-					m.lastAgentContent[bm.From] = snippet
-				}
-			}
-			if m.scroll > 0 || m.focus != focusMain || m.threadPanelOpen {
-				m.noteIncomingMessages(addedMessages)
-			} else {
-				m.clearUnreadState()
-			}
-			if latestHumanFacing != nil && hadHistory {
-				m.activeApp = channelui.OfficeAppMessages
-				m.notice = fmt.Sprintf("@%s has something for you", latestHumanFacing.From)
-			}
-		}
+		return m.handleChannelMsg(msg)
 
 	case channelMembersMsg:
-		m.members = msg.members
-		// Overlay last-seen streaming content into LiveActivity when the broker
-		// hasn't set it yet (e.g. between polls or when liveActivity is stale).
-		if m.lastAgentContent != nil {
-			for i, mem := range m.members {
-				if snippet, ok := m.lastAgentContent[mem.Slug]; ok && snippet != "" && mem.LiveActivity == "" {
-					m.members[i].LiveActivity = snippet
-				}
-			}
-		}
-		m.updateOverlaysForCurrentInput()
+		return m.handleChannelMembersMsg(msg)
 
 	case channelOfficeMembersMsg:
-		if len(msg.members) == 0 {
-			msg.members = channelui.OfficeMembersFallback(m.officeMembers)
-		}
-		m.officeMembers = msg.members
-		channelui.SetOfficeDirectory(msg.members)
-		m.updateOverlaysForCurrentInput()
+		return m.handleChannelOfficeMembersMsg(msg)
 
 	case channelChannelsMsg:
-		if len(msg.channels) == 0 {
-			msg.channels = channelui.ChannelInfosFallback(m.channels)
-		}
-		m.channels = msg.channels
-		m.clampSidebarCursor()
-		if m.activeChannel == "" {
-			m.activeChannel = "general"
-		}
-		if !channelui.ChannelExists(msg.channels, m.activeChannel) && len(msg.channels) > 0 {
-			m.activeChannel = msg.channels[0].Slug
-			m.lastID = ""
-			return m, tea.Batch(pollBroker("", m.activeChannel), pollMembers(m.activeChannel), pollRequests(m.activeChannel))
-		}
+		return m.handleChannelChannelsMsg(msg)
 
 	case channelUsageMsg:
-		m.usage = msg.usage
-		if m.usage.Agents == nil {
-			m.usage.Agents = make(map[string]channelui.UsageTotals)
-		}
+		return m.handleChannelUsageMsg(msg)
 
 	case channelHealthMsg:
-		m.brokerConnected = msg.Connected
-		if msg.Connected {
-			nextMode := team.NormalizeSessionMode(msg.SessionMode)
-			nextAgent := team.NormalizeOneOnOneAgent(msg.OneOnOneAgent)
-			modeChanged := nextMode != m.sessionMode || nextAgent != m.oneOnOneAgent
-			m.sessionMode = nextMode
-			m.oneOnOneAgent = nextAgent
-			if m.isOneOnOne() {
-				m.activeApp = channelui.OfficeAppMessages
-				m.sidebarCollapsed = true
-				m.threadPanelOpen = false
-				m.threadPanelID = ""
-				m.replyToID = ""
-			}
-			if modeChanged {
-				m.messages = nil
-				m.members = nil
-				m.tasks = nil
-				m.requests = nil
-				m.lastID = ""
-				m.scroll = 0
-				m.clearUnreadState()
-				m.refreshSlashCommands()
-				if m.isOneOnOne() && strings.TrimSpace(m.notice) == "" {
-					m.notice = "Conference room reserved. Direct session reset. Agent pane reloaded in place. No Toby."
-				}
-				return m, m.pollCurrentState()
-			}
-		}
+		return m.handleChannelHealthMsg(msg)
 
 	case channelTasksMsg:
-		m.tasks = msg.tasks
+		return m.handleChannelTasksMsg(msg)
 
 	case channelSkillsMsg:
-		m.skills = msg.skills
-		m.refreshSlashCommands()
-		return m, nil
+		return m.handleChannelSkillsMsg(msg)
 
 	case channelActionsMsg:
-		m.actions = msg.actions
+		return m.handleChannelActionsMsg(msg)
 
 	case channelSignalsMsg:
-		m.signals = msg.signals
+		return m.handleChannelSignalsMsg(msg)
 
 	case channelDecisionsMsg:
-		m.decisions = msg.decisions
+		return m.handleChannelDecisionsMsg(msg)
 
 	case channelWatchdogsMsg:
-		m.watchdogs = msg.alerts
+		return m.handleChannelWatchdogsMsg(msg)
 
 	case channelSchedulerMsg:
-		m.scheduler = msg.jobs
+		return m.handleChannelSchedulerMsg(msg)
 
 	case tui.PickerSelectMsg:
 		switch m.pickerMode {
@@ -2009,34 +1611,10 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case channelRequestsMsg:
-		prevID := ""
-		if m.pending != nil {
-			prevID = m.pending.ID
-		}
-		m.requests = msg.requests
-		m.pending = msg.pending
-		if m.pending != nil && m.pending.ID != prevID {
-			m.selectedOption = m.recommendedOptionIndex()
-			m.input = nil
-			m.inputPos = 0
-			if m.pending.Blocking || m.pending.Required {
-				m.activeApp = channelui.OfficeAppMessages
-				m.syncSidebarCursorToActive()
-				m.notice = "Human decision needed. Team is paused until you answer."
-				if m.pending.ReplyTo != "" {
-					m.threadPanelOpen = true
-					m.threadPanelID = m.pending.ReplyTo
-				}
-			}
-		}
+		return m.handleChannelRequestsMsg(msg)
 
 	case channelTickMsg:
-		m.tickFrame++
-		if m.notice != "" && !m.noticeExpireAt.IsZero() && time.Now().After(m.noticeExpireAt) {
-			m.notice = ""
-			m.noticeExpireAt = time.Time{}
-		}
-		return m, m.pollCurrentState()
+		return m.handleChannelTickMsg(msg)
 	}
 
 	return m, nil
