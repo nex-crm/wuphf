@@ -52,6 +52,7 @@ func TestMarkdownKnowledgeToolBlock_ListsCanonicalTools(t *testing.T) {
 	for _, tool := range []string{
 		"notebook_write", "notebook_promote", "notebook_read",
 		"team_wiki_read", "team_wiki_write", "wuphf_wiki_lookup",
+		"team_learning_search", "team_learning_record",
 	} {
 		if !strings.Contains(block, tool) {
 			t.Errorf("markdownKnowledgeToolBlock missing %q", tool)
@@ -64,10 +65,55 @@ func TestMarkdownKnowledgeMemoryBlock_RequiresPromotionDiscipline(t *testing.T) 
 	for _, want := range []string{
 		"notebook_write",
 		"notebook_promote",
+		"team_learning_record",
 		"approved",
 	} {
 		if !strings.Contains(block, want) {
 			t.Errorf("markdownKnowledgeMemoryBlock missing %q", want)
+		}
+	}
+}
+
+func TestPromptBuilder_RendersPriorLearningsWhenMarkdownMemoryActive(t *testing.T) {
+	pb := &promptBuilder{
+		isOneOnOne:  func() bool { return false },
+		isFocusMode: func() bool { return false },
+		packName:    func() string { return "Test Office" },
+		leadSlug:    func() string { return "ceo" },
+		members: func() []officeMember {
+			return []officeMember{
+				{Slug: "ceo", Name: "CEO", Role: "ceo"},
+				{Slug: "fe", Name: "Frontend", Role: "fe"},
+			}
+		},
+		policies: func() []officePolicy { return nil },
+		nameFor:  func(slug string) string { return slug },
+		learnings: func(slug string) []LearningSearchResult {
+			return []LearningSearchResult{{
+				LearningRecord: LearningRecord{
+					Type:       LearningTypePitfall,
+					Key:        "skill-catalog-active-only",
+					Insight:    "Skill discovery must filter proposed and archived skills before prompt injection.",
+					Confidence: 8,
+					Source:     LearningSourceObserved,
+					Scope:      "repo",
+					Trusted:    false,
+				},
+				EffectiveConfidence: 8,
+			}}
+		},
+		markdownMemory: true,
+	}
+
+	got := pb.Build("fe")
+	for _, want := range []string{
+		"== PRIOR TEAM LEARNINGS ==",
+		"skill-catalog-active-only",
+		"source=observed",
+		"confidence=8/10",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("prompt missing prior learning fragment %q\n%s", want, got)
 		}
 	}
 }
@@ -114,6 +160,28 @@ func TestPromptBuilder_OneOnOneBranch(t *testing.T) {
 	}
 	if !strings.Contains(got, "Nex tools are disabled for this run") {
 		t.Fatalf("nexDisabled=true should produce the no-Nex 1:1 line")
+	}
+}
+
+func TestPromptBuilder_OneOnOneSkipsLearningLookup(t *testing.T) {
+	pb := &promptBuilder{
+		isOneOnOne:  func() bool { return true },
+		isFocusMode: func() bool { return false },
+		packName:    func() string { return "1:1 with CEO" },
+		leadSlug:    func() string { return "ceo" },
+		members:     func() []officeMember { return []officeMember{{Slug: "ceo", Name: "CEO"}} },
+		policies:    func() []officePolicy { return nil },
+		nameFor:     func(slug string) string { return slug },
+		learnings: func(slug string) []LearningSearchResult {
+			t.Fatalf("1:1 prompt should not fetch prior learnings")
+			return nil
+		},
+		markdownMemory: true,
+	}
+
+	got := pb.Build("ceo")
+	if strings.Contains(got, "== PRIOR TEAM LEARNINGS ==") {
+		t.Fatalf("1:1 prompt should not render prior learnings")
 	}
 }
 

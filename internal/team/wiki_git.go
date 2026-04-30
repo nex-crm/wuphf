@@ -209,6 +209,7 @@ func (r *Repo) ensureLayoutLocked() error {
 		filepath.Join(r.root, "team", "companies"),
 		filepath.Join(r.root, "team", "projects"),
 		filepath.Join(r.root, "team", "playbooks"),
+		filepath.Join(r.root, "team", "learnings"),
 		filepath.Join(r.root, "team", "decisions"),
 		filepath.Join(r.root, "team", "inbox", "raw"),
 		filepath.Join(r.root, "index"),

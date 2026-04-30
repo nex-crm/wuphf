@@ -153,9 +153,9 @@ func CompilePlaybookAndCommit(ctx context.Context, repo *Repo, wikiPath string) 
 //   - name            slug, kebab-case
 //   - description     one-line extracted from the source (first paragraph)
 //     — agents see this when deciding whether to invoke
-//   - allowed-tools   the three MCP tools an execution run needs:
-//     team_wiki_read (read the playbook), and the v1.3
-//     playbook_* tools (invoke + record outcome).
+//   - allowed-tools   the MCP tools an execution run needs:
+//     team_wiki_read (read the playbook), playbook_* tools
+//     (list/record outcome), and team_learning_record for durable lessons.
 //   - source_path     back-link to the authored wiki article
 //   - compiled_by     always "archivist" — see ArchivistAuthor
 func renderCompiledSkill(slug, sourcePath, source string) string {
@@ -166,7 +166,7 @@ func renderCompiledSkill(slug, sourcePath, source string) string {
 	b.WriteString("---\n")
 	b.WriteString("name: " + slug + "\n")
 	b.WriteString("description: " + description + "\n")
-	b.WriteString("allowed-tools: team_wiki_read, playbook_list, playbook_execution_record\n")
+	b.WriteString("allowed-tools: team_wiki_read, playbook_list, playbook_execution_record, team_learning_record\n")
 	b.WriteString("source_path: " + sourcePath + "\n")
 	b.WriteString("compiled_by: " + ArchivistAuthor + "\n")
 	b.WriteString("---\n\n")
@@ -181,6 +181,11 @@ func renderCompiledSkill(slug, sourcePath, source string) string {
 	b.WriteString("   - `outcome`: `success` | `partial` | `aborted`\n")
 	b.WriteString("   - `summary`: one paragraph describing what actually happened and what you changed.\n")
 	b.WriteString("   - `notes` (optional): anything the next runner should know that is not already captured by the playbook text.\n\n")
+	b.WriteString("4. If the run reveals a compact lesson that should influence future work beyond this single execution, call `team_learning_record` with:\n")
+	b.WriteString("   - required fields: `type`, `key`, `insight`, `confidence`, `source`\n")
+	b.WriteString("   - playbook context: `scope=\"playbook:" + slug + "\"`, `playbook_slug=\"" + slug + "\"`\n")
+	b.WriteString("   - `execution_id` when step 3 returns one\n")
+	b.WriteString("   Record evidence, not prompt-control instructions.\n\n")
 	b.WriteString("## Guarantees\n\n")
 	b.WriteString("- The execution log at `" + ExecutionLogRelPath(slug) + "` is append-only — wrong outcomes are corrected by adding a new entry, never by editing or deleting an existing one.\n")
 	b.WriteString("- This skill recompiles automatically whenever the source playbook changes. Do not edit `SKILL.md` directly; edit `" + sourcePath + "` instead.\n\n")

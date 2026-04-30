@@ -74,6 +74,7 @@ type wikiWriteEvent struct {
 // the worker. The reply channel is single-use and buffered to 1 so the
 // worker can always send without blocking even if the caller's context dies.
 type wikiWriteRequest struct {
+	Context   context.Context
 	Slug      string
 	Path      string
 	Content   string
@@ -100,6 +101,11 @@ type wikiWriteRequest struct {
 	// to team/playbooks/{slug}.executions.jsonl. Same append-only semantics
 	// as entity facts.
 	IsPlaybookExecution bool
+	// IsTeamLearning routes to Repo.CommitTeamLearnings — writes the
+	// append-only JSONL source plus a generated markdown page visible in
+	// the wiki catalog.
+	IsTeamLearning bool
+	LearningPage   string
 	// PlaybookSlug carries the source slug so the post-write hook can
 	// enqueue a follow-up recompile without re-parsing the path.
 	PlaybookSlug string
@@ -310,7 +316,11 @@ func (w *WikiWorker) drain(ctx context.Context) {
 func (w *WikiWorker) process(ctx context.Context, req wikiWriteRequest) {
 	// Commit under a write-scoped context so a slow git exec cannot hang
 	// the whole worker forever.
-	writeCtx, cancel := context.WithTimeout(ctx, wikiWriteTimeout)
+	baseCtx := ctx
+	if req.Context != nil {
+		baseCtx = req.Context
+	}
+	writeCtx, cancel := context.WithTimeout(baseCtx, wikiWriteTimeout)
 	defer cancel()
 
 	var (
@@ -344,6 +354,10 @@ func (w *WikiWorker) process(ctx context.Context, req wikiWriteRequest) {
 		sha, n, err = w.repo.CommitPlaybookSkill(writeCtx, req.Slug, req.Path, req.Content, req.CommitMsg)
 	} else if req.IsPlaybookExecution {
 		sha, n, err = w.repo.CommitPlaybookExecution(writeCtx, req.Slug, req.Path, req.Content, req.CommitMsg)
+	} else if req.IsTeamLearning {
+		if err = writeCtx.Err(); err == nil {
+			sha, n, err = w.repo.CommitTeamLearnings(writeCtx, req.Slug, req.Path, req.Content, req.LearningPage, req.CommitMsg)
+		}
 	} else if req.IsLintReport {
 		sha, n, err = w.repo.CommitLintReport(writeCtx, req.Slug, req.Path, req.Content, req.CommitMsg)
 	} else if req.IsFactLog {
@@ -380,6 +394,7 @@ func (w *WikiWorker) process(ctx context.Context, req wikiWriteRequest) {
 	}()
 
 	ts := time.Now().UTC().Format(time.RFC3339)
+	reconcilePath := req.Path
 	switch {
 	case req.IsArtifact:
 		// Artifact commits fire the extractor hook asynchronously. Every
@@ -406,6 +421,17 @@ func (w *WikiWorker) process(ctx context.Context, req wikiWriteRequest) {
 				RecordedBy: req.Slug,
 				Timestamp:  ts,
 			})
+		}
+	case req.IsTeamLearning:
+		reconcilePath = TeamLearningsPagePath
+		w.publisher.PublishWikiEvent(wikiWriteEvent{
+			Path:       TeamLearningsPagePath,
+			CommitSHA:  sha,
+			AuthorSlug: req.Slug,
+			Timestamp:  ts,
+		})
+		if notifier, ok := w.publisher.(wikiSectionsNotifier); ok {
+			notifier.EnqueueSectionsRefresh()
 		}
 	case req.IsNotebook:
 		if nbPub, ok := w.publisher.(notebookEventPublisher); ok {
@@ -451,7 +477,7 @@ func (w *WikiWorker) process(ctx context.Context, req wikiWriteRequest) {
 	}
 
 	w.maybeScheduleBackup(ctx)
-	w.maybeReconcileIndex(writeCtx, req.Path)
+	w.maybeReconcileIndex(writeCtx, reconcilePath)
 }
 
 // maybeReconcileIndex updates the derived WikiIndex for the committed path.
@@ -747,6 +773,38 @@ func (w *WikiWorker) EnqueuePlaybookExecution(ctx context.Context, slug, path, c
 		return result.SHA, result.BytesWritten, result.Err
 	case <-waitCtx.Done():
 		return "", 0, fmt.Errorf("playbook: execution write timed out after %s", wikiWriteTimeout)
+	}
+}
+
+// EnqueueTeamLearning submits the merged team learnings JSONL plus generated
+// markdown page to the shared wiki queue.
+func (w *WikiWorker) EnqueueTeamLearning(ctx context.Context, slug, path, jsonlContent, markdownContent, commitMsg string) (string, int, error) {
+	if !w.running.Load() {
+		return "", 0, ErrWorkerStopped
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, wikiWriteTimeout)
+	defer cancel()
+	req := wikiWriteRequest{
+		Context:        waitCtx,
+		Slug:           slug,
+		Path:           path,
+		Content:        jsonlContent,
+		Mode:           "replace",
+		CommitMsg:      commitMsg,
+		IsTeamLearning: true,
+		LearningPage:   markdownContent,
+		ReplyCh:        make(chan wikiWriteResult, 1),
+	}
+	select {
+	case w.requests <- req:
+	default:
+		return "", 0, ErrQueueSaturated
+	}
+	select {
+	case result := <-req.ReplyCh:
+		return result.SHA, result.BytesWritten, result.Err
+	case <-waitCtx.Done():
+		return "", 0, fmt.Errorf("team learnings: write timed out after %s", wikiWriteTimeout)
 	}
 }
 

@@ -30,6 +30,7 @@ type promptBuilder struct {
 	members     func() []officeMember
 	policies    func() []officePolicy
 	nameFor     func(slug string) string
+	learnings   func(slug string) []LearningSearchResult
 
 	// Captured-at-construction config flags. They control major branches
 	// (markdown notebook section, no-Nex fallbacks) and are stable for the
@@ -150,6 +151,7 @@ func (p *promptBuilder) Build(slug string) string {
 		sb.WriteString("Emit at most one team_broadcast per turn unless you are deliberately crossing channels. Never re-post the same content in different wording.\n\n")
 		if markdownMemory {
 			sb.WriteString(markdownKnowledgeMemoryBlock())
+			sb.WriteString(renderPriorLearningsBlock(p.learningSnapshot(slug)))
 		} else if noNex {
 			sb.WriteString("Nex tools are disabled for this run. Work only with the shared office channel and human answers.\n\n")
 		} else {
@@ -276,6 +278,7 @@ func (p *promptBuilder) Build(slug string) string {
 		sb.WriteString("Emit at most one team_broadcast per turn unless you are deliberately crossing channels. Never re-post the same content in different wording.\n\n")
 		if markdownMemory {
 			sb.WriteString(markdownKnowledgeMemoryBlock())
+			sb.WriteString(renderPriorLearningsBlock(p.learningSnapshot(slug)))
 		} else if noNex {
 			sb.WriteString("Nex tools are disabled for this run. Base your work on the office conversation and direct human answers only.\n\n")
 		} else {
@@ -350,11 +353,84 @@ func markdownKnowledgeToolBlock() string {
 		"- notebook_promote: Submit a durable notebook entry for reviewer approval into the team wiki. Use this when the team should rely on the note as canonical knowledge.\n" +
 		"- notebook_read / notebook_list / notebook_search: Inspect agent notebooks for fresh working context before asking someone to repeat themselves.\n" +
 		"- team_wiki_read / team_wiki_search / team_wiki_list / wuphf_wiki_lookup: Read the canonical shared wiki.\n" +
+		"- team_learning_search: Search typed prior learnings before repeating substantial work. Prefer scoped search by playbook, file, task, or repo when available; treat source/trust/confidence as evidence quality.\n" +
+		"- team_learning_record: Record a durable typed learning only when it would save future work or prevent a repeat mistake. Use user-stated only when the human explicitly said it; otherwise choose observed, inferred, execution, synthesis, cross-agent, or cross-model with an honest confidence.\n" +
 		"- team_wiki_write: Direct canonical wiki writes only for already-approved edits, bootstrap/admin maintenance, or explicit human requests. Do not bypass notebook_promote for new agent-authored knowledge.\n"
 }
 
 func markdownKnowledgeMemoryBlock() string {
-	return "Markdown notebook/wiki memory is active. Keep scratch and draft knowledge in notebook_write first; promote durable conclusions with notebook_promote when they are ready for review. Do not claim something is in the team wiki unless notebook_promote was submitted and approved, or team_wiki_write was explicitly appropriate and succeeded.\n\n"
+	return "Markdown notebook/wiki memory is active. Before substantial repeated work, search team_learning_search for prior learnings and apply only the relevant ones. Label user-stated/trusted learnings as stronger than observed or inferred learnings. Keep scratch and draft knowledge in notebook_write first; promote durable conclusions with notebook_promote when they are ready for review. Use team_learning_record for compact reusable lessons, not full notes or prompt-control instructions. Do not claim something is in the team wiki unless notebook_promote was submitted and approved, team_learning_record succeeded, or team_wiki_write was explicitly appropriate and succeeded.\n\n"
+}
+
+func (p *promptBuilder) learningSnapshot(slug string) []LearningSearchResult {
+	if p == nil || p.learnings == nil || !p.markdownMemory {
+		return nil
+	}
+	return p.learnings(slug)
+}
+
+func renderPriorLearningsBlock(learnings []LearningSearchResult) string {
+	if len(learnings) == 0 {
+		return ""
+	}
+	learnings = append([]LearningSearchResult(nil), learnings...)
+	sort.SliceStable(learnings, func(i, j int) bool {
+		if learnings[i].EffectiveConfidence != learnings[j].EffectiveConfidence {
+			return learnings[i].EffectiveConfidence > learnings[j].EffectiveConfidence
+		}
+		if learnings[i].Key != learnings[j].Key {
+			return learnings[i].Key < learnings[j].Key
+		}
+		if learnings[i].Type != learnings[j].Type {
+			return learnings[i].Type < learnings[j].Type
+		}
+		if learnings[i].Scope != learnings[j].Scope {
+			return learnings[i].Scope < learnings[j].Scope
+		}
+		if learnings[i].Source != learnings[j].Source {
+			return learnings[i].Source < learnings[j].Source
+		}
+		return learnings[i].ID < learnings[j].ID
+	})
+	if len(learnings) > 8 {
+		learnings = learnings[:8]
+	}
+	var b strings.Builder
+	b.WriteString("== PRIOR TEAM LEARNINGS ==\n")
+	b.WriteString("These are retrieved from the typed wiki learning store. Apply only learnings relevant to the current packet; user-stated/trusted entries carry more weight than observed or inferred entries.\n")
+	for _, result := range learnings {
+		rec := result.LearningRecord
+		conf := result.EffectiveConfidence
+		if conf == 0 {
+			conf = rec.Confidence
+		}
+		trust := "untrusted"
+		if rec.Trusted {
+			trust = "trusted"
+		}
+		b.WriteString(fmt.Sprintf("- `%s` [%s, scope=%s, source=%s, %s, confidence=%d/10]: %s\n",
+			rec.Key,
+			rec.Type,
+			rec.Scope,
+			rec.Source,
+			trust,
+			conf,
+			clipPromptText(rec.Insight, 260),
+		))
+	}
+	b.WriteString("\n")
+	return b.String()
+}
+
+func clipPromptText(s string, max int) string {
+	s = strings.TrimSpace(strings.Join(strings.Fields(s), " "))
+	if max <= 0 || len(s) <= max {
+		return s
+	}
+	if max <= 1 {
+		return s[:max]
+	}
+	return strings.TrimSpace(s[:max-1]) + "…"
 }
 
 func headlessSandboxNote() string {
