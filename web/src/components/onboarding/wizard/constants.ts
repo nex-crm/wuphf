@@ -159,6 +159,20 @@ export const API_KEY_FIELDS = [
   },
 ] as const;
 
+// LOCAL_PROVIDER_LABELS is shared between LocalLLMPicker.tsx (the picker
+// itself), the SetupStep tile that summarizes the user's pick, and the
+// ReadyStep readiness summary. Keeping it here avoids three-way drift if
+// a runtime is renamed or added.
+export const LOCAL_PROVIDER_LABELS: ReadonlyArray<{
+  kind: string;
+  label: string;
+  blurb: string;
+}> = [
+  { kind: "mlx-lm", label: "MLX-LM", blurb: "macOS · Apple Silicon" },
+  { kind: "ollama", label: "Ollama", blurb: "macOS / Linux" },
+  { kind: "exo", label: "Exo", blurb: "Multi-device pool" },
+];
+
 export const MEMORY_BACKEND_OPTIONS: ReadonlyArray<{
   value: MemoryBackend;
   label: string;

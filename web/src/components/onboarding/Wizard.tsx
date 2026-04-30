@@ -11,15 +11,29 @@ import { useAppStore } from "../../stores/app";
 import { Kbd, MOD_KEY } from "../ui/Kbd";
 import "../../styles/onboarding.css";
 
+import { ApiKeyRow } from "./wizard/ApiKeyRow";
+
+// ApiKeyRow is re-exported here for back-compat with onboarding/ApiKeyRow.test.tsx.
+export { ApiKeyRow };
+
+import {
+  ArrowIcon,
+  CheckIcon,
+  EnterHint,
+  ProgressDots,
+} from "./wizard/components";
 import {
   API_KEY_FIELDS,
   BLUEPRINT_CATEGORIES,
   BLUEPRINT_DISPLAY,
+  LOCAL_PROVIDER_LABELS,
   MEMORY_BACKEND_OPTIONS,
   RUNTIMES,
   SCRATCH_FOUNDING_TEAM,
   STEP_ORDER,
 } from "./wizard/constants";
+import { LocalLLMPicker } from "./wizard/LocalLLMPicker";
+import { NexSignupPanel } from "./wizard/NexSignupPanel";
 import type {
   BlueprintAgent,
   BlueprintCategoryKey,
@@ -68,88 +82,7 @@ function runtimeIsReady(
 // source of truth, this is just the Team-step preview so users don't see an
 // empty roster before confirming.
 
-/* ═══════════════════════════════════════════
-   Arrow icon reused across buttons
-   ═══════════════════════════════════════════ */
-
-function ArrowIcon() {
-  return (
-    <svg
-      width="14"
-      height="14"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M5 12h14" />
-      <path d="m12 5 7 7-7 7" />
-    </svg>
-  );
-}
-
-function CheckIcon() {
-  return (
-    <svg
-      width="12"
-      height="12"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="3"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <polyline points="20 6 9 17 4 12" />
-    </svg>
-  );
-}
-
-/**
- * Inline Enter-key hint for primary CTAs. Purely decorative — the real
- * Enter handling lives at the Wizard level so it works from anywhere on
- * the step, not just when the button has focus. Pass `modifier` (e.g.
- * ⌘/Ctrl) when the step binds ⌘+Enter instead of plain Enter.
- */
-function EnterHint({ modifier }: { modifier?: string } = {}) {
-  return (
-    <span className="kbd-hint" aria-hidden="true">
-      {modifier && (
-        <Kbd size="sm" variant="inverse">
-          {modifier}
-        </Kbd>
-      )}
-      <Kbd size="sm" variant="inverse">
-        ↵
-      </Kbd>
-    </span>
-  );
-}
-
-/* ═══════════════════════════════════════════
-   Sub-components
-   ═══════════════════════════════════════════ */
-
-function ProgressDots({
-  current,
-  steps,
-}: {
-  current: WizardStep;
-  steps: readonly WizardStep[];
-}) {
-  return (
-    <div className="wizard-progress">
-      {steps.map((step) => (
-        <div
-          key={step}
-          className={`wizard-progress-dot ${step === current ? "active" : "inactive"}`}
-        />
-      ))}
-    </div>
-  );
-}
+// ArrowIcon, CheckIcon, EnterHint, ProgressDots moved to wizard/components.tsx.
 
 /* ─── Step 1: Welcome ─── */
 
@@ -445,110 +378,6 @@ function IdentityStep({
   );
 }
 
-/* ─── Nex signup affordance (rendered inside IdentityStep) ─── */
-
-interface NexSignupPanelProps {
-  email: string;
-  status: NexSignupStatus;
-  error: string;
-  onChangeEmail: (v: string) => void;
-  onSubmit: () => void;
-}
-
-// NexSignupPanel is the optional "don't have a Nex account yet?"
-// affordance. It's compact by default (one-line link) so users with a key
-// already aren't distracted. The primary path calls /nex/register on the
-// broker, which shells out to `nex-cli setup <email>`. If nex-cli isn't
-// installed, the broker returns 502 with ErrNotInstalled and we flip to
-// the external-link fallback (open nex.ai/register + paste key on Setup
-// step). Matches the TUI's InitNexRegister phase in init_flow.go.
-function NexSignupPanel({
-  email,
-  status,
-  error,
-  onChangeEmail,
-  onSubmit,
-}: NexSignupPanelProps) {
-  return (
-    <div className="wizard-panel wiz-nex-signup">
-      <p className="wizard-panel-title">Sign up for Nex (optional)</p>
-      <p
-        style={{
-          fontSize: 12,
-          color: "var(--text-secondary)",
-          margin: "-8px 0 12px 0",
-        }}
-      >
-        {status === "fallback"
-          ? "nex-cli is not installed on this machine. Register in your browser, then paste the key on the Setup step."
-          : "Register an email to get a free Nex API key. Powers shared memory, entity briefs, and integrations. You can also paste an existing key on the Setup step."}
-      </p>
-
-      {status === "fallback" ? (
-        <a
-          className="btn btn-secondary"
-          href="https://nex.ai/register"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Open nex.ai/register
-          <ArrowIcon />
-        </a>
-      ) : status === "ok" ? (
-        <p className="wiz-nex-ok" role="status">
-          Check your inbox at {email} for the Nex API key, then paste it on the
-          Setup step.
-        </p>
-      ) : (
-        <div className="form-group" style={{ margin: 0 }}>
-          <label className="label" htmlFor="wiz-nex-email">
-            Email
-          </label>
-          <div style={{ display: "flex", gap: 8 }}>
-            <input
-              className="input"
-              id="wiz-nex-email"
-              type="email"
-              placeholder="you@example.com"
-              value={email}
-              onChange={(e) => onChangeEmail(e.target.value)}
-              onKeyDown={(e) => {
-                if (
-                  e.key === "Enter" &&
-                  status !== "submitting" &&
-                  email.trim().length > 0
-                ) {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  onSubmit();
-                }
-              }}
-              disabled={status === "submitting"}
-              style={{ flex: 1 }}
-            />
-            <button
-              className="btn btn-primary"
-              type="button"
-              onClick={onSubmit}
-              disabled={status === "submitting" || email.trim().length === 0}
-            >
-              {status === "submitting" ? "Registering..." : "Register"}
-            </button>
-          </div>
-          {error && (
-            <p
-              style={{ color: "var(--red)", fontSize: 12, marginTop: 6 }}
-              role="alert"
-            >
-              {error}
-            </p>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
 /* ─── Step 4: Team Review ─── */
 
 interface TeamStepProps {
@@ -627,278 +456,6 @@ function TeamStep({ agents, onToggle, onNext, onBack }: TeamStepProps) {
           <ArrowIcon />
           <EnterHint />
         </button>
-      </div>
-    </div>
-  );
-}
-
-/* ─── Local LLM picker (revealed when "Run a local model" tile is on) ─── */
-
-const LOCAL_PROVIDER_LABELS: ReadonlyArray<{
-  kind: string;
-  label: string;
-  blurb: string;
-}> = [
-  { kind: "mlx-lm", label: "MLX-LM", blurb: "macOS · Apple Silicon" },
-  { kind: "ollama", label: "Ollama", blurb: "macOS / Linux" },
-  { kind: "exo", label: "Exo", blurb: "Multi-device pool" },
-];
-
-interface LocalLLMPickerProps {
-  // selected: kind that the user picked here, if any. Stored in wizard
-  // state so the parent can flip the active llm_provider on Continue
-  // without committing to /config until the user explicitly says so.
-  selected: string;
-  onSelect: (kind: string) => void;
-}
-
-// LocalLLMPicker is the second-step grid of mlx-lm / ollama / exo
-// tiles. The parent reveals it when the "Run a local model" tile in
-// the primary runtime grid is on, so it reads as a peer of the cloud
-// CLIs rather than a tucked-away "advanced" toggle.
-function LocalLLMPicker({ selected, onSelect }: LocalLLMPickerProps) {
-  const [status, setStatus] = useState<LocalProviderStatus[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [fetchError, setFetchError] = useState<string>("");
-
-  useEffect(() => {
-    let alive = true;
-    setLoading(true);
-    setFetchError("");
-    getLocalProvidersStatus()
-      .then((data) => {
-        if (!alive) return;
-        setStatus(data ?? []);
-      })
-      .catch((err: unknown) => {
-        if (!alive) return;
-        // Surfaced inline below the tiles so a 401 / 5xx / missing
-        // endpoint isn't silently rendered as "every runtime is
-        // platform_supported but not installed". Lets users distinguish
-        // "the broker can't reach detection" from "you have nothing
-        // installed".
-        const msg = err instanceof Error ? err.message : String(err);
-        setFetchError(msg);
-      })
-      .finally(() => {
-        if (alive) setLoading(false);
-      });
-    return () => {
-      alive = false;
-    };
-  }, []);
-
-  const byKind = new Map<string, LocalProviderStatus>();
-  for (const s of status) byKind.set(s.kind, s);
-
-  return (
-    <div
-      data-testid="onboarding-local-llm-picker"
-      style={{
-        marginTop: 12,
-        marginLeft: 12,
-        paddingLeft: 16,
-        borderLeft: "2px solid var(--accent, #b88efb)",
-      }}
-    >
-      <p
-        style={{
-          fontSize: 12,
-          fontWeight: 600,
-          color: "var(--text)",
-          margin: "0 0 4px 0",
-        }}
-      >
-        Pick a local runtime
-      </p>
-      <p
-        style={{
-          fontSize: 12,
-          color: "var(--text-secondary)",
-          margin: "0 0 10px 0",
-        }}
-      >
-        No cloud key required. Best on macOS or Linux. Need install commands?
-        See <strong>Settings → Local LLMs</strong> after onboarding for the
-        doctor panel with copy-paste shell snippets.
-      </p>
-
-      {loading && (
-        <div
-          style={{
-            fontSize: 12,
-            color: "var(--text-tertiary)",
-            padding: "4px 0",
-          }}
-        >
-          Detecting local runtimes…
-        </div>
-      )}
-      {!loading && fetchError && (
-        <div
-          data-testid="onboarding-local-llm-fetch-error"
-          style={{
-            fontSize: 12,
-            color: "var(--danger-500, #c33)",
-            padding: "6px 8px",
-            background: "var(--danger-50, #fee)",
-            border: "1px solid var(--danger-200, #fcc)",
-            borderRadius: 4,
-            marginBottom: 8,
-          }}
-        >
-          Couldn't reach the broker to check installed runtimes:{" "}
-          <code style={{ fontFamily: "var(--font-mono)" }}>{fetchError}</code>.
-          You can still pick a runtime — install/start commands live in{" "}
-          <strong>Settings → Local LLMs</strong> after onboarding.
-        </div>
-      )}
-      {!loading && (
-        <div className="runtime-grid">
-          {LOCAL_PROVIDER_LABELS.map((meta) => {
-            const s = byKind.get(meta.kind);
-            // When `s` is undefined the status probe didn't return a
-            // record for this kind — either the broker is unreachable
-            // (fetchError set) or the response was malformed. In that
-            // "unknown" state we fall OPEN so the banner copy ("you
-            // can still pick a runtime — install commands live in
-            // Settings") matches what the UI actually does. The
-            // agent-turn surface and the Settings doctor card will
-            // catch a real install gap later with a clear error;
-            // here we just don't trap the user.
-            //
-            // When `s` IS defined we trust it: a tile is selectable
-            // only when the platform supports the runtime AND the
-            // binary is on PATH. Selecting an un-installed runtime
-            // would land the user in a shell where every agent turn
-            // fails connection-refused, so we route them to Settings
-            // instead of letting them commit to a broken default.
-            const statusKnown = s !== undefined;
-            const installed = statusKnown ? Boolean(s.binary_installed) : true;
-            const running = Boolean(s?.reachable);
-            const supported = statusKnown ? s.platform_supported : true;
-            const selectable = supported && installed;
-            const isSelected = selected === meta.kind;
-            const classes = [
-              "runtime-tile",
-              isSelected ? "selected" : "",
-              selectable ? "" : "disabled",
-            ]
-              .filter(Boolean)
-              .join(" ");
-            const statusText = !statusKnown
-              ? "Status unknown — verify in Settings"
-              : !supported
-                ? "Not supported on this OS"
-                : running
-                  ? "Running"
-                  : installed
-                    ? "Installed (server not started)"
-                    : "Not installed — install via Settings";
-            return (
-              <button
-                key={meta.kind}
-                type="button"
-                className={classes}
-                onClick={() => {
-                  if (!selectable) return;
-                  onSelect(isSelected ? "" : meta.kind);
-                }}
-                disabled={!selectable}
-                aria-pressed={isSelected}
-                data-testid={`onboarding-local-llm-tile-${meta.kind}`}
-              >
-                <div className="runtime-tile-head">
-                  <span
-                    className={`runtime-tile-status ${running ? "installed" : ""}`}
-                    aria-hidden="true"
-                  />
-                  {meta.label}
-                </div>
-                <div className="runtime-tile-meta">
-                  {meta.blurb} · {statusText}
-                </div>
-              </button>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ApiKeyRow renders one provider's CLI-login-vs-API-key choice. Default
-// path is CLI login (most users have one of claude/codex/gcloud logged
-// in already from the runtime grid above); clicking "Use API key"
-// reveals the password input so users can paste without exposing the
-// key the whole time. If the user has any value typed in, the input
-// stays open even after toggling away — we don't drop their key.
-interface ApiKeyRowProps {
-  field: (typeof API_KEY_FIELDS)[number];
-  value: string;
-  onChange: (v: string) => void;
-}
-
-export function ApiKeyRow({ field, value, onChange }: ApiKeyRowProps) {
-  const [showInput, setShowInput] = useState<boolean>(value.length > 0);
-  const useApiKey = showInput || value.length > 0;
-  return (
-    <div className="key-row" data-testid={`api-key-row-${field.key}`}>
-      <div className="key-label-wrap">
-        <span className="key-label">{field.label}</span>
-        <span className="key-hint">{field.hint}</span>
-      </div>
-      <div
-        className="key-input-wrap"
-        style={{ display: "flex", flexDirection: "column", gap: 6 }}
-      >
-        <div style={{ display: "flex", gap: 8 }}>
-          <button
-            type="button"
-            className={`runtime-tile ${!useApiKey ? "selected" : ""}`}
-            onClick={() => {
-              setShowInput(false);
-              if (value) onChange("");
-            }}
-            data-testid={`api-key-cli-${field.key}`}
-            style={{ padding: "6px 10px", fontSize: 12, minWidth: 0 }}
-          >
-            Use CLI login
-          </button>
-          <button
-            type="button"
-            className={`runtime-tile ${useApiKey ? "selected" : ""}`}
-            onClick={() => setShowInput(true)}
-            data-testid={`api-key-paste-${field.key}`}
-            style={{ padding: "6px 10px", fontSize: 12, minWidth: 0 }}
-          >
-            Use API key
-          </button>
-        </div>
-        {!useApiKey && (
-          <p
-            style={{
-              fontSize: 11,
-              color: "var(--text-tertiary)",
-              margin: 0,
-              fontFamily: "var(--font-mono)",
-            }}
-          >
-            Run <code>{field.cliLoginCmd}</code> in a terminal — agents pick up
-            the session automatically.
-          </p>
-        )}
-        {useApiKey && (
-          <input
-            className="input"
-            type="password"
-            placeholder={field.key}
-            value={value}
-            onChange={(e) => onChange(e.target.value)}
-            autoComplete="off"
-            data-testid={`api-key-input-${field.key}`}
-          />
-        )}
       </div>
     </div>
   );
