@@ -81,6 +81,10 @@ func (l *Launcher) Launch() error {
 	// Resolve wuphf binary path for the channel view
 	wuphfBinary, _ := os.Executable()
 	if err := os.MkdirAll(filepath.Dir(channelStderrLogPath()), 0o700); err != nil {
+		// Stop the broker we already started so we don't leak a
+		// listener on an aborted Launch. Same unwind reason as the
+		// PID-file failure path in launcher_web.go.
+		l.broker.Stop()
 		return fmt.Errorf("prepare channel log dir: %w", err)
 	}
 
@@ -104,6 +108,7 @@ func (l *Launcher) Launch() error {
 		channelCmd,
 	).Run()
 	if err != nil {
+		l.broker.Stop()
 		return fmt.Errorf("create tmux session: %w", err)
 	}
 
@@ -176,15 +181,42 @@ func (l *Launcher) launchHeadlessCodex() error {
 	_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "kill-session", "-t", l.sessionName).Run()
 
 	l.broker = NewBroker()
+	l.broker.runtimeProvider = l.provider
 	l.broker.packSlug = l.packSlug
 	l.broker.blankSlateLaunch = l.blankSlateLaunch
+	// Wire the notebook-promotion reviewer resolver from the active
+	// blueprint, mirroring Launch(). Without this, every promotion
+	// in headless mode falls back to "ceo" regardless of blueprint
+	// reviewer_paths.
+	if l.operationBlueprint != nil {
+		bp := l.operationBlueprint
+		l.broker.SetReviewerResolver(func(wikiPath string) string {
+			return bp.ResolveReviewer(wikiPath)
+		})
+	}
 	if err := l.broker.SetSessionMode(l.sessionMode, l.oneOnOne); err != nil {
 		return fmt.Errorf("set session mode: %w", err)
+	}
+	// SetFocusMode + default-skill seed mirror Launch() so that the
+	// broker's focus-mode predicate (used by isFocusModeEnabled) and
+	// the productivity skill set are wired before the broker becomes
+	// reachable. Pre-fix headless launches missed both, leaving
+	// isFocusModeEnabled stuck on l.focusMode regardless of broker
+	// state and the cross-cutting productivity skills (grill-me, tdd,
+	// diagnose) absent.
+	if err := l.broker.SetFocusMode(l.focusMode); err != nil {
+		return fmt.Errorf("set focus mode: %w", err)
 	}
 	if err := l.broker.Start(); err != nil {
 		return fmt.Errorf("start broker: %w", err)
 	}
+	if l.pack != nil {
+		l.broker.SeedDefaultSkills(agent.AppendProductivitySkills(l.pack.DefaultSkills))
+	} else {
+		l.broker.SeedDefaultSkills(agent.AppendProductivitySkills(nil))
+	}
 	if err := writeOfficePIDFile(); err != nil {
+		l.broker.Stop()
 		return fmt.Errorf("write office pid: %w", err)
 	}
 

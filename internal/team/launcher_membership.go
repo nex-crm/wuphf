@@ -204,8 +204,25 @@ func (l *Launcher) recordPaneSpawnFailure(slug, reason string) {
 	if slug == "" {
 		return
 	}
+	l.failedPaneMu.Lock()
+	defer l.failedPaneMu.Unlock()
 	if l.failedPaneSlugs == nil {
 		l.failedPaneSlugs = make(map[string]string)
 	}
 	l.failedPaneSlugs[slug] = reason
+}
+
+// isFailedPaneSlug reports whether the slug previously failed to
+// spawn its tmux pane. Read under failedPaneMu so concurrent writes
+// from recordPaneSpawnFailure don't tear the map. Wired into
+// officeTargeter as the failedPaneSlugs callback so the targeter's
+// routing checks share the same locked view.
+func (l *Launcher) isFailedPaneSlug(slug string) bool {
+	if l == nil {
+		return false
+	}
+	l.failedPaneMu.RLock()
+	defer l.failedPaneMu.RUnlock()
+	_, ok := l.failedPaneSlugs[slug]
+	return ok
 }

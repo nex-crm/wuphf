@@ -159,7 +159,11 @@ func (d *paneDispatcher) Enqueue(slug, paneTarget, notification string) {
 	if (inflight || len(queue) > 0) && len(queue) > 0 {
 		// Combine with the pending turn. Claude will see both prompts
 		// separated by a visible divider and typically answers both.
+		// Also refresh PaneTarget — if the pane was respawned between
+		// the original enqueue and this one, the old target is stale
+		// and the merged notification would land in a defunct pane.
 		last := &d.queues[slug][len(queue)-1]
+		last.PaneTarget = paneTarget
 		last.Notification = last.Notification + "\n\n---\n\n" + notification
 		last.EnqueuedAt = now
 		d.mu.Unlock()
@@ -223,7 +227,7 @@ func (d *paneDispatcher) runQueue(slug string) {
 		if !lastSentAt.IsZero() {
 			wait := paneDispatchMinGap - d.now().Sub(lastSentAt)
 			if wait > 0 {
-				<-d.clock.After(wait)
+				<-d.after(wait)
 			}
 		}
 		// Step 2b: coalesce window — let Claude's in-flight turn land
@@ -232,7 +236,7 @@ func (d *paneDispatcher) runQueue(slug string) {
 		if !globalLastSentAt.IsZero() {
 			wait := paneDispatchCoalesceWindow - d.now().Sub(globalLastSentAt)
 			if wait > 0 {
-				<-d.clock.After(wait)
+				<-d.after(wait)
 			}
 		}
 
@@ -278,4 +282,15 @@ func (d *paneDispatcher) now() time.Time {
 		return time.Now()
 	}
 	return d.clock.Now()
+}
+
+// after returns a channel that fires after wait, falling back to the
+// real clock when no clock is wired. Mirrors now()'s nil-safety so a
+// zero-value paneDispatcher (e.g. l == nil receiver) doesn't panic in
+// the runQueue sleep path.
+func (d *paneDispatcher) after(wait time.Duration) <-chan time.Time {
+	if d.clock == nil {
+		return time.After(wait)
+	}
+	return d.clock.After(wait)
 }

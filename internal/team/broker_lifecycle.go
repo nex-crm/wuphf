@@ -98,6 +98,9 @@ func killPersistedOfficeProcess() error {
 		return nil //nolint:nilerr // intentional: corrupt PID file is a no-op
 	}
 	if pid == os.Getpid() {
+		// We are the persisted process — leave the PID file alone
+		// for our own ongoing run; the active process clears it on
+		// shutdown via clearOfficePIDFile.
 		return nil
 	}
 	proc, err := os.FindProcess(pid)
@@ -109,6 +112,11 @@ func killPersistedOfficeProcess() error {
 		return nil //nolint:nilerr // intentional: no process to kill, clear PID and move on
 	}
 	_ = proc.Kill()
+	// Clear the PID file after the kill so a future launcher doesn't
+	// try to kill a now-defunct PID that the OS might have reused.
+	// Pre-fix this only happened on the corrupt-file / FindProcess-
+	// failed branches, leaving stale PIDs on the happy path.
+	_ = clearOfficePIDFile()
 	return nil
 }
 

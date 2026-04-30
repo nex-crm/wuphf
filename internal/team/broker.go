@@ -144,8 +144,8 @@ type humanInterview struct {
 // TitleOrDefault returns req.Title trimmed, or "Request" if empty.
 // Used by the watchdog scheduler when announcing a stalled interview.
 func (req humanInterview) TitleOrDefault() string {
-	if strings.TrimSpace(req.Title) != "" {
-		return req.Title
+	if t := strings.TrimSpace(req.Title); t != "" {
+		return t
 	}
 	return "Request"
 }

@@ -57,11 +57,14 @@ func (l *Launcher) watchdogSchedulerLoop() {
 // PLAN.md §C25 staff-review fix: sync.Once guards lazy-init against
 // the goroutine fan-out from Launch (multiple goroutines hit
 // targeter() concurrently before the first ordered call finishes).
-// failedPaneSlugs is read via callback (not snapshotted) so
-// reconfigureVisibleAgents nil-ing l.failedPaneSlugs and
-// recordPaneSpawnFailure rebuilding it remain observable to the
-// targeter. A snapshotted map pointer would orphan after the first
-// reconfigure and silently miss every subsequent failure.
+// failedPaneSlugs is read via per-slug callback (l.isFailedPaneSlug)
+// so each lookup acquires l.failedPaneMu's read-lock for the duration
+// of the check. Returning the map handle would race a concurrent
+// recordPaneSpawnFailure write running from
+// detectDeadPanesAfterSpawn's goroutine. The callback also keeps the
+// reconfigure boundary observable to the targeter — clear() under
+// the same mutex preserves the underlying map handle so the targeter
+// always sees current launcher state.
 func (l *Launcher) targeter() *officeTargeter {
 	if l == nil {
 		return nil
@@ -73,7 +76,7 @@ func (l *Launcher) targeter() *officeTargeter {
 			cwd:                l.cwd,
 			provider:           l.provider,
 			paneBackedFlag:     &l.paneBackedAgents,
-			failedPaneSlugs:    func() map[string]string { return l.failedPaneSlugs },
+			failedPaneSlugs:    l.isFailedPaneSlug,
 			isOneOnOne:         l.isOneOnOne,
 			oneOnOneSlug:       l.oneOnOneAgent,
 			isChannelDM:        l.isChannelDMRaw,

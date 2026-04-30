@@ -63,26 +63,48 @@ func (l *Launcher) newPromptBuilder() *promptBuilder {
 // artifacts are easy to clean up together. Perms are 0o600 because the prompt
 // can contain team-internal instructions and tool lists.
 func (l *Launcher) writeAgentPromptFile(slug, prompt string) (string, error) {
-	path := filepath.Join(os.TempDir(), "wuphf-prompt-"+slug+".txt")
+	dir, err := l.launchTempDir()
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(dir, "wuphf-prompt-"+slug+".txt")
 	if err := os.WriteFile(path, []byte(prompt), 0o600); err != nil {
 		return "", err
 	}
 	return path, nil
 }
 
-// cleanupAgentTempFiles removes the per-agent MCP config + system prompt
-// temp files for every known office member. Safe to call multiple times and
-// idempotent — missing files are ignored. Called from Shutdown so the broker
-// token + prompt content do not linger in $TMPDIR after the session ends.
-func (l *Launcher) cleanupAgentTempFiles() {
-	tmp := os.TempDir()
-	for _, m := range l.officeMembersSnapshot() {
-		for _, path := range []string{
-			filepath.Join(tmp, "wuphf-mcp-"+m.Slug+".json"),
-			filepath.Join(tmp, "wuphf-prompt-"+m.Slug+".txt"),
-		} {
-			_ = os.Remove(path)
+// launchTempDir returns the per-launch temp directory, lazily
+// creating it via os.MkdirTemp on first call. Pre-fix every launcher
+// wrote to $TMPDIR/wuphf-{prompt,mcp}-<slug>; two offices launching
+// the same slug clobbered each other's prompt during startup, and one
+// shutdown's cleanupAgentTempFiles would delete the other session's
+// prompt out from under it. With a per-launch directory each office
+// gets its own scoped namespace and cleanupAgentTempFiles can rm -rf
+// the whole directory atomically.
+func (l *Launcher) launchTempDir() (string, error) {
+	l.launchTempDirOnce.Do(func() {
+		dir, err := os.MkdirTemp("", "wuphf-launch-*")
+		if err != nil {
+			l.launchTempDirErr = err
+			return
 		}
+		l.launchTempDirPath = dir
+	})
+	return l.launchTempDirPath, l.launchTempDirErr
+}
+
+// cleanupAgentTempFiles removes the per-launch temp directory (which
+// holds every per-agent MCP config + system prompt). Safe to call
+// multiple times and idempotent. Called from Shutdown so the broker
+// token + prompt content do not linger in $TMPDIR after the session
+// ends. Pre-fix this iterated office members and tried to delete each
+// file by name from the global $TMPDIR — that worked but didn't
+// catch members removed mid-session and could collide with peer
+// launches; rm -rf on the launch-scoped dir solves both.
+func (l *Launcher) cleanupAgentTempFiles() {
+	if l.launchTempDirPath != "" {
+		_ = os.RemoveAll(l.launchTempDirPath)
 	}
 }
 

@@ -139,7 +139,11 @@ func (l *Launcher) ensureMCPConfig() (string, error) {
 		return "", err
 	}
 
-	path := filepath.Join(os.TempDir(), "wuphf-team-mcp.json")
+	dir, err := l.launchTempDir()
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(dir, "wuphf-team-mcp.json")
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return "", err
 	}
@@ -147,7 +151,9 @@ func (l *Launcher) ensureMCPConfig() (string, error) {
 }
 
 // ensureAgentMCPConfig writes a per-agent MCP config containing only the servers
-// that agent needs. Returns the config file path.
+// that agent needs. Returns the config file path. The file lives under the
+// per-launch temp directory (see writeAgentPromptFile) so two offices can
+// run the same slug without one clobbering the other's broker token.
 func (l *Launcher) ensureAgentMCPConfig(slug string) (string, error) {
 	allServers, err := l.buildMCPServerMap()
 	if err != nil {
@@ -170,7 +176,11 @@ func (l *Launcher) ensureAgentMCPConfig(slug string) (string, error) {
 		return "", err
 	}
 
-	path := filepath.Join(os.TempDir(), "wuphf-mcp-"+slug+".json")
+	dir, err := l.launchTempDir()
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(dir, "wuphf-mcp-"+slug+".json")
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return "", err
 	}

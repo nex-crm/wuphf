@@ -10,19 +10,15 @@ package team
 //   - paneBackedFlag is a *bool aliased to launcher.paneBackedAgents. The
 //     pane-spawn path flips that bool deep inside trySpawnWebAgentPanes;
 //     reading via pointer keeps the targeter in sync without callbacks.
-//   - failedPaneSlugs is read via callback so every targeter call sees the
-//     launcher's *current* map reference. Required because
-//     reconfigureVisibleAgents nils l.failedPaneSlugs and the next pane-
-//     spawn failure rebuilds it; a cached map pointer here would become
-//     orphaned. The map is still unsynchronized — no mutex. Writers:
-//     (1) trySpawnWebAgentPanes (runtime-promotion fallback, currently
-//     unwired); (2) reconfigureVisibleAgents → recordPaneSpawnFailure on
-//     office_reseeded events, while peer goroutines (notifyAgentsLoop,
-//     notifyTaskActionsLoop, watchdogSchedulerLoop, ...) read
-//     concurrently via SkipPane / ShouldUseHeadlessForSlug. Race
-//     detector hasn't tripped only because integration tests don't
-//     exercise reseeds at scale — a dedicated mutex (or moving this to
-//     paneLifecycle in C5) is the right next step.
+//   - failedPaneSlugs is a per-slug lookup callback wired to
+//     Launcher.isFailedPaneSlug, which acquires l.failedPaneMu's
+//     read-lock for the duration of the check. Writers
+//     (recordPaneSpawnFailure from the detectDeadPanesAfterSpawn
+//     goroutine) take the write-lock; reconfigureVisibleAgents takes
+//     the write-lock and clear()s in place so the same map handle
+//     stays valid across the reconfigure boundary. Read concurrency
+//     is unbounded; only a single writer ever runs at a time because
+//     pane spawn is sequential during Launch().
 
 import (
 	"fmt"
@@ -49,11 +45,13 @@ type officeTargeter struct {
 	// the headless path silently when panes were actually live (PLAN.md §5.2).
 	paneBackedFlag *bool
 
-	// failedPaneSlugs returns the live map of slugs whose pane spawn failed.
-	// Read via callback (not cached) so reconfigure-time invalidation on
-	// the launcher side is observable. See file header for the migration
-	// path to a per-slug lookup once C5 lands.
-	failedPaneSlugs func() map[string]string
+	// failedPaneSlugs reports whether a given slug previously failed to
+	// spawn its tmux pane. Per-slug callback (not a map snapshot) so the
+	// underlying l.failedPaneMu read-lock is held only for the duration
+	// of the lookup — handing out the map handle would race a concurrent
+	// writer (recordPaneSpawnFailure runs from the
+	// detectDeadPanesAfterSpawn goroutine).
+	failedPaneSlugs func(slug string) bool
 
 	// Live-state callbacks. Pulled rather than pushed so tests can stub.
 	isOneOnOne         func() bool
@@ -389,10 +387,8 @@ func (o *officeTargeter) ShouldUseHeadlessForSlug(slug string) bool {
 	if o.MemberUsesHeadlessOneShotRuntime(slug) {
 		return true
 	}
-	if o.failedPaneSlugs != nil {
-		if _, failed := o.failedPaneSlugs()[strings.TrimSpace(slug)]; failed {
-			return true
-		}
+	if o.failedPaneSlugs != nil && o.failedPaneSlugs(strings.TrimSpace(slug)) {
+		return true
 	}
 	return false
 }
@@ -417,10 +413,8 @@ func (o *officeTargeter) SkipPane(slug string) bool {
 	if slug == "" {
 		return true
 	}
-	if o.failedPaneSlugs != nil {
-		if _, bad := o.failedPaneSlugs()[slug]; bad {
-			return true
-		}
+	if o.failedPaneSlugs != nil && o.failedPaneSlugs(slug) {
+		return true
 	}
 	if o.MemberUsesHeadlessOneShotRuntime(slug) {
 		return true

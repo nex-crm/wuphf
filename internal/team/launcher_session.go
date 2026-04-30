@@ -69,12 +69,18 @@ func (l *Launcher) Kill() error {
 		_ = clearOfficePIDFile()
 		return nil
 	}
-	err := exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "kill-session", "-t", l.sessionName).Run()
+	out, err := exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "kill-session", "-t", l.sessionName).CombinedOutput()
 	if err != nil {
-		// Check if the session simply doesn't exist
-		out, _ := exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "list-sessions").CombinedOutput()
-		if strings.Contains(string(out), "no server") || strings.Contains(string(out), "error connecting") {
-			return nil // no session running, nothing to kill
+		// "session not found" is the desired post-condition for
+		// Kill, not an error — caller's intent is "make sure the
+		// session is gone". Match against tmux's literal "can't find
+		// session" error text plus the broader "no server" /
+		// "error connecting" outputs we'd see if the socket itself
+		// is already torn down. Without this check, killing a
+		// session twice (or killing one that exited on its own)
+		// surfaces a misleading exit-1 error to the caller.
+		if isMissingTmuxSession(string(out)) || strings.Contains(string(out), "can't find session") {
+			return nil
 		}
 		return err
 	}

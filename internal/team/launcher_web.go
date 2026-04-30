@@ -106,6 +106,12 @@ func (l *Launcher) LaunchWeb(webPort int) error {
 		return fmt.Errorf("start broker: %w", err)
 	}
 	if err := writeOfficePIDFile(); err != nil {
+		// Stop the broker we just started so we don't leave an
+		// orphaned listener bound to the broker port. Without this,
+		// a PID-file write failure (full disk, perms, …) leaves
+		// the broker accepting requests with no PID record — the
+		// next launch can't kill it cleanly.
+		l.broker.Stop()
 		return fmt.Errorf("write office pid: %w", err)
 	}
 

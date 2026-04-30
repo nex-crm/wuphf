@@ -39,7 +39,13 @@ func (l *Launcher) deliverMessageNotification(msg channelMessage) {
 	immediate, delayed := l.notificationTargetsForMessage(msg)
 
 	// Debounce: use shorter cooldown for human/CEO messages, longer for agent-originated
-	// to prevent agent-to-agent feedback loops (devil's advocate finding #3)
+	// to prevent agent-to-agent feedback loops (devil's advocate finding #3).
+	//
+	// The dedup key is (recipient slug, sender, channel) — recipient-
+	// only would silently drop an unrelated message that arrives within
+	// the cooldown window from a different sender or in a different
+	// channel. Per-(recipient, sender, channel) keeps the loop-breaker
+	// behaviour while letting genuinely unrelated traffic through.
 	isHumanOrCEO := msg.From == "you" || msg.From == "human" || msg.From == "nex" || msg.From == l.targeter().LeadSlug()
 	cooldown := agentNotifyCooldownAgent
 	if isHumanOrCEO {
@@ -47,15 +53,17 @@ func (l *Launcher) deliverMessageNotification(msg channelMessage) {
 	}
 	now := time.Now()
 	filtered := make([]notificationTarget, 0, len(immediate))
+	channelKey := normalizeChannelSlug(msg.Channel)
 	l.notifyMu.Lock()
 	if l.notifyLastDelivered == nil {
 		l.notifyLastDelivered = make(map[string]time.Time)
 	}
 	for _, t := range immediate {
-		if last, ok := l.notifyLastDelivered[t.Slug]; ok && now.Sub(last) < cooldown {
+		key := t.Slug + "\x00" + msg.From + "\x00" + channelKey
+		if last, ok := l.notifyLastDelivered[key]; ok && now.Sub(last) < cooldown {
 			continue
 		}
-		l.notifyLastDelivered[t.Slug] = now
+		l.notifyLastDelivered[key] = now
 		filtered = append(filtered, t)
 	}
 	l.notifyMu.Unlock()

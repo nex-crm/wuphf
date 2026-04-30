@@ -39,9 +39,23 @@ func (l *Launcher) notifyAgentsLoop() {
 // safeDeliverMessage wraps deliverMessageNotification in a panic recover so a
 // bad message doesn't take the whole broker down. Stack is written to stderr
 // and logs/panics.log so we can diagnose the next occurrence.
+//
+// The panic-context line includes IDs and channel only — not the
+// full message body. Bodies are attacker-controlled (CRM emails,
+// calendar entries, agent output) and the panic log lands in
+// ~/.wuphf/logs/panics.log which the user often shares verbatim
+// when filing a bug. Drop the payload to avoid leaking secrets or
+// personal data.
 func (l *Launcher) safeDeliverMessage(msg channelMessage) {
-	defer recoverPanicTo("deliverMessageNotification", fmt.Sprintf("msg=%+v", msg))
+	defer recoverPanicTo("deliverMessageNotification", messagePanicContext(msg))
 	l.deliverMessageNotification(msg)
+}
+
+// messagePanicContext returns a redacted summary of msg suitable for
+// inclusion in panic logs.
+func messagePanicContext(msg channelMessage) string {
+	return fmt.Sprintf("msg.id=%s msg.channel=%s msg.from=%s msg.kind=%s msg.tagged=%v",
+		msg.ID, msg.Channel, msg.From, msg.Kind, msg.Tagged)
 }
 
 // recoverPanicTo is the shared panic-recovery body used by broker background
@@ -90,7 +104,9 @@ func (l *Launcher) notifyTaskActionsLoop() {
 			continue
 		}
 		func() {
-			defer recoverPanicTo("deliverTaskNotification", fmt.Sprintf("action=%+v task=%+v", action, task))
+			defer recoverPanicTo("deliverTaskNotification",
+				fmt.Sprintf("action.kind=%s action.actor=%s action.channel=%s task.id=%s task.status=%s",
+					action.Kind, action.Actor, action.Channel, task.ID, task.Status))
 			l.deliverTaskNotification(action, task)
 		}()
 	}
@@ -104,19 +120,28 @@ func (l *Launcher) notifyOfficeChangesLoop() {
 	defer unsubscribe()
 
 	for evt := range changes {
-		// office_reseeded fires after onboarding rewrites the whole roster
-		// (blueprint selection). The interactive claude panes were spawned
-		// from the earlier default team and now point at slugs that are no
-		// longer registered agents — messages typed into them go into a
-		// dead shell. Respawn them against the new roster, outside the
-		// interview guard so it can't be blocked by a half-complete wizard.
-		if evt.Kind == "office_reseeded" {
-			l.respawnPanesAfterReseed()
-			continue
-		}
-		if l.broker.HasPendingInterview() {
-			continue
-		}
-		l.deliverOfficeChangeNotification(evt)
+		// Wrap each iteration in the same panic guard the other
+		// subscriber loops use. Pre-fix a panic in respawnPanesAfterReseed
+		// or deliverOfficeChangeNotification would kill this goroutine
+		// silently and leave the launcher unable to react to subsequent
+		// roster changes.
+		func(evt officeChangeEvent) {
+			defer recoverPanicTo("deliverOfficeChangeNotification",
+				fmt.Sprintf("evt.kind=%s evt.slug=%s", evt.Kind, evt.Slug))
+			// office_reseeded fires after onboarding rewrites the whole roster
+			// (blueprint selection). The interactive claude panes were spawned
+			// from the earlier default team and now point at slugs that are no
+			// longer registered agents — messages typed into them go into a
+			// dead shell. Respawn them against the new roster, outside the
+			// interview guard so it can't be blocked by a half-complete wizard.
+			if evt.Kind == "office_reseeded" {
+				l.respawnPanesAfterReseed()
+				return
+			}
+			if l.broker.HasPendingInterview() {
+				return
+			}
+			l.deliverOfficeChangeNotification(evt)
+		}(evt)
 	}
 }

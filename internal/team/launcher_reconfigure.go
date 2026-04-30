@@ -88,7 +88,21 @@ func (l *Launcher) reconfigureVisibleAgents() error {
 		return fmt.Errorf("reset Claude sessions: %w", err)
 	}
 
-	l.failedPaneSlugs = nil
+	// Drop every recorded failure under the mutex so a concurrent
+	// reader (officeTargeter via the failedPaneSlugs callback)
+	// observes either the pre-reconfigure full map or the
+	// post-reconfigure empty map — never a torn intermediate state.
+	// Clear the existing map in place rather than nil-then-rebuild so
+	// the targeter (which reads via the callback returning
+	// l.failedPaneSlugs) keeps seeing the same map handle across the
+	// reconfigure boundary.
+	l.failedPaneMu.Lock()
+	if l.failedPaneSlugs == nil {
+		l.failedPaneSlugs = make(map[string]string)
+	} else {
+		clear(l.failedPaneSlugs)
+	}
+	l.failedPaneMu.Unlock()
 
 	// Use respawn-pane to restart agent processes IN PLACE.
 	// This preserves pane sizes and positions (no layout reset).

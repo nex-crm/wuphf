@@ -91,10 +91,29 @@ type Launcher struct {
 	paneBackedAgents bool // web mode may spawn per-agent tmux panes; true when panes are live
 	noOpen           bool
 
+	// launchTempDir* hold the per-launch scratch directory used for
+	// per-agent prompt + MCP config files. Lazily initialised via
+	// launchTempDir(); cleanupAgentTempFiles rm -rf's the whole
+	// directory at shutdown. Without per-launch scoping two offices
+	// running the same slug clobber each other's files in $TMPDIR.
+	launchTempDirOnce sync.Once
+	launchTempDirPath string
+	launchTempDirErr  error
+
 	// failedPaneSlugs records agents whose tmux pane/window creation failed.
 	// agentPaneTargets() omits them so the pane-capture loops don't spin on
 	// missing targets (which produces "stopped after 5 failures" spam). These
 	// agents fall back to the headless dispatch path automatically.
+	//
+	// failedPaneMu guards every read/write of failedPaneSlugs. Required
+	// because the writer (recordPaneSpawnFailure) runs from
+	// detectDeadPanesAfterSpawn — a goroutine spawned by trySpawnWebAgentPanes
+	// — concurrently with reads from notifyAgentsLoop / pane-capture
+	// goroutines hitting officeTargeter.PaneTargets etc. Pre-mutex the race
+	// was dormant only because trySpawnWebAgentPanes was a runtime-promotion
+	// fallback nothing currently invokes; landing it now closes the race
+	// regardless of whether the promotion path becomes live.
+	failedPaneMu    sync.RWMutex
 	failedPaneSlugs map[string]string
 
 	notifyMu            sync.Mutex

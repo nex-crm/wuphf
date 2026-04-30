@@ -122,11 +122,19 @@ func TestSpawnVisibleAgents_AdditionalSplitFailureRecordsAndContinues(t *testing
 	if err != nil {
 		t.Fatalf("SpawnVisibleAgents err = %v, want nil (later split failures don't abort)", err)
 	}
-	// All three slugs are returned (the recorded failure doesn't remove them
-	// from the visibleSlugs list — that's the targeter's job through
-	// failedPaneSlugs).
-	if len(got) != 3 {
-		t.Errorf("returned slugs = %v, want 3 entries", got)
+	// Only the two successfully-spawned slugs (ceo, be) end up in the
+	// returned list — the failed spawn (fe) is recorded via
+	// recordFailure and skipped from the title-set + visibleSlugs
+	// loop. Pre-fix every member appeared regardless, which titled
+	// pane index 2 with the failed agent's name and gave callers a
+	// stale "all three panes alive" view.
+	if len(got) != 2 {
+		t.Errorf("returned slugs = %v, want 2 entries (failed spawn excluded)", got)
+	}
+	for _, slug := range got {
+		if slug == "fe" {
+			t.Errorf("returned slugs %v unexpectedly contains the failed-spawn slug fe", got)
+		}
 	}
 	// "fe" is the second agent, which is the one we made fail.
 	if _, ok := recorded["fe"]; !ok {

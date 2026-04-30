@@ -79,6 +79,13 @@ func (p *paneLifecycle) SpawnVisibleAgents() ([]string, error) {
 	// Subsequent splits can fail individually (e.g. terminal too small to
 	// accommodate another tile); record the failure and fall those agents
 	// back to headless dispatch so the capture loop doesn't hunt ghost panes.
+	//
+	// Track which members actually got a pane so the title-set loop and
+	// the returned visibleSlugs only reference live panes. Without this
+	// distinction, `visible[1]` failing while `visible[2]` succeeds would
+	// title pane index 2 as the failed agent and the caller would think
+	// both panes existed.
+	spawned := []officeMember{visible[0]}
 	for i := 1; i < len(visible); i++ {
 		agentCmd, err := p.deps.claudeCommand(visible[i].Slug, p.deps.buildPrompt(visible[i].Slug))
 		if err != nil {
@@ -97,14 +104,16 @@ func (p *paneLifecycle) SpawnVisibleAgents() ([]string, error) {
 				visible[i].Slug, reason,
 			)
 			p.deps.recordFailure(visible[i].Slug, reason)
+			continue
 		}
+		spawned = append(spawned, visible[i])
 	}
 
 	p.ApplyMainVerticalLayout()
 
 	var visibleSlugs []string
 	p.SetPaneTitle(channelPane, "📢 channel")
-	for i, a := range visible {
+	for i, a := range spawned {
 		paneIdx := i + 1 // pane 0 is channel
 		name := p.deps.agentName(a.Slug)
 		p.SetPaneTitle(

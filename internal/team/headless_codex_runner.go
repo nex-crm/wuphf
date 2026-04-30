@@ -555,9 +555,14 @@ func (l *Launcher) preflightHeadlessCodexAuth(slug string, channel string) error
 			return nil
 		}
 	}
-	// Also accept a previously-copied auth.json in the isolated runtime home —
-	// codex would still work even if the source was since removed.
-	isolatedAuth := filepath.Join(headlessCodexHomeDir(), "auth.json")
+	// Also accept a previously-copied auth.json in the isolated runtime
+	// home — codex would still work even if the source was since
+	// removed. Probe the runtime home (where prepareHeadlessCodexHome
+	// actually copies into); the original code probed
+	// headlessCodexHomeDir() which is the source path that
+	// prepareHeadlessCodexHome reads FROM, not where it writes — so
+	// the check was effectively a no-op for the isolated copy.
+	isolatedAuth := filepath.Join(headlessCodexRuntimeHomeDir(), "auth.json")
 	if _, err := os.Stat(isolatedAuth); err == nil {
 		return nil
 	}

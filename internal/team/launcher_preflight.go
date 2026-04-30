@@ -18,17 +18,24 @@ import (
 )
 
 // Preflight checks that required tools are available.
+//
+// The gh capability advisory runs after every successful runtime check
+// (codex, opencode, claude+tmux), not just the claude branch. Pre-fix,
+// codex/opencode launches missed the "gh CLI not found / not authed"
+// note, leaving operators puzzled when their agents couldn't open PRs.
 func (l *Launcher) Preflight() error {
 	if l.usesCodexRuntime() {
 		if l.usesOpencodeRuntime() {
 			if _, err := runtimebin.LookPath("opencode"); err != nil {
 				return fmt.Errorf("opencode not found. Install Opencode CLI (https://opencode.ai) and configure your provider credentials")
 			}
+			emitGHCapabilityNote()
 			return nil
 		}
 		if _, err := exec.LookPath("codex"); err != nil {
 			return fmt.Errorf("codex not found. Install Codex CLI and run `codex login`")
 		}
+		emitGHCapabilityNote()
 		return nil
 	}
 	if _, err := exec.LookPath("tmux"); err != nil {
@@ -37,10 +44,17 @@ func (l *Launcher) Preflight() error {
 	if _, err := exec.LookPath("claude"); err != nil {
 		return fmt.Errorf("claude not found. Install: npm install -g @anthropic-ai/claude-code")
 	}
+	emitGHCapabilityNote()
+	return nil
+}
+
+// emitGHCapabilityNote prints checkGHCapability's advisory to stderr
+// when one is set. Wrapped because the same emit pattern fires from
+// every runtime branch in Preflight.
+func emitGHCapabilityNote() {
 	if _, _, note := checkGHCapability(); note != "" {
 		fmt.Fprintf(os.Stderr, "note: %s\n", note)
 	}
-	return nil
 }
 
 // checkGHCapability checks whether the gh CLI is installed and authenticated.

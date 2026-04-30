@@ -166,8 +166,11 @@ func (l *Launcher) agentPostedSubstantiveMessageSince(slug string, startedAt tim
 		if !isSubstantiveAgentProgressMessage(msg) {
 			continue
 		}
-		when, err := time.Parse(time.RFC3339, msg.Timestamp)
-		if err != nil {
+		// parseBrokerTimestamp (broker.go) accepts RFC3339 + RFC3339Nano
+		// so fractional-second timestamps from a high-res clock still
+		// parse. Returns zero on parse failure.
+		when := parseBrokerTimestamp(msg.Timestamp)
+		if when.IsZero() {
 			continue
 		}
 		if when.Add(time.Second).After(startedAt) {
@@ -197,8 +200,8 @@ func (l *Launcher) agentPostedSubstantiveMessageToChannelSince(slug string, targ
 		if !isSubstantiveAgentProgressMessage(msg) {
 			continue
 		}
-		when, err := time.Parse(time.RFC3339, msg.Timestamp)
-		if err != nil {
+		when := parseBrokerTimestamp(msg.Timestamp)
+		if when.IsZero() {
 			continue
 		}
 		if when.Add(time.Second).After(startedAt) {
@@ -406,7 +409,12 @@ func (l *Launcher) timedOutTurnAlreadyRecovered(task *teamTask, slug string, sta
 	if strings.EqualFold(strings.TrimSpace(task.ExecutionMode), "local_worktree") {
 		status := strings.ToLower(strings.TrimSpace(task.Status))
 		review := strings.ToLower(strings.TrimSpace(task.ReviewState))
+		// Include canceled / cancelled so a user-canceled task isn't
+		// requeued or blocked-again by the timeout recovery path.
+		// Same semantics as a "done" or "blocked" terminal state for
+		// recovery purposes.
 		return status == "done" || status == "review" || status == "blocked" ||
+			status == "canceled" || status == "cancelled" ||
 			review == "ready_for_review" || review == "approved"
 	}
 	return l.agentPostedSubstantiveMessageSince(slug, startedAt)

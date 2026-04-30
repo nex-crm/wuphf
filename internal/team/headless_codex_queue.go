@@ -63,7 +63,7 @@ func (l *Launcher) enqueueHeadlessCodexTurnRecord(slug string, turn headlessCode
 	if l.headless.workers == nil {
 		l.headless.workers = make(map[string]bool)
 	}
-	urgentLeadTurn := l.headlessLeadTurnNeedsImmediateWakeLocked(slug, turn.Prompt)
+	urgentLeadTurn := l.headlessLeadTurnNeedsImmediateWakeLocked(slug, turn.TaskID)
 	if turn.TaskID != "" {
 		if active := l.headless.active[slug]; active != nil && strings.TrimSpace(active.Turn.TaskID) == turn.TaskID {
 			if !(slug == l.targeter().LeadSlug() && urgentLeadTurn) && turn.Attempts <= active.Turn.Attempts {
@@ -189,14 +189,21 @@ func (l *Launcher) replaceDuplicateTaskTurnLocked(slug string, turn headlessCode
 	return false
 }
 
-func (l *Launcher) headlessLeadTurnNeedsImmediateWakeLocked(slug, prompt string) bool {
+// headlessLeadTurnNeedsImmediateWakeLocked decides whether a lead-
+// agent enqueue should bypass the "wait for specialists to finish"
+// queue-hold. taskID is the already-normalized turn.TaskID — we
+// must NOT re-parse the prompt here. The original implementation
+// did `headlessCodexTaskID(prompt)`, which broke any enqueue path
+// that set TaskID without embedding `#task-...` in the prompt
+// (e.g. recovery dispatchers that build the prompt fresh).
+func (l *Launcher) headlessLeadTurnNeedsImmediateWakeLocked(slug, taskID string) bool {
 	if l == nil || l.broker == nil {
 		return false
 	}
 	if strings.TrimSpace(slug) != l.targeter().LeadSlug() {
 		return false
 	}
-	taskID := strings.TrimSpace(headlessCodexTaskID(prompt))
+	taskID = strings.TrimSpace(taskID)
 	if taskID == "" {
 		return false
 	}
@@ -451,8 +458,10 @@ func (l *Launcher) wakeLeadAfterSpecialist(specialistSlug string) {
 		if m.From != specialistSlug {
 			continue
 		}
-		content := strings.TrimSpace(m.Content)
-		if strings.HasPrefix(content, "[STATUS]") {
+		// Reuse the substantive-message predicate so agent_issue
+		// helpdesk pings (and other non-progress kinds) don't get
+		// treated as a completion handoff and wake the lead unnecessarily.
+		if !isSubstantiveAgentProgressMessage(m) {
 			continue
 		}
 		lastMsg = &msgs[i]

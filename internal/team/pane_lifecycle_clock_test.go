@@ -86,8 +86,19 @@ func TestPrimeVisibleAgents_NoTargetsExitsImmediately(t *testing.T) {
 		pl.PrimeVisibleAgents()
 		close(done)
 	}()
-	<-clk.registered
-	clk.Advance(1 * time.Second)
+	// Drive the manual clock forward without coupling the test to
+	// the internal sleep ordering. PrimeVisibleAgents currently
+	// registers a 1s warmup sleeper before checking targets, so
+	// advancing 1s lets it through; if a future implementation
+	// short-circuits earlier, <-done fires immediately and the
+	// Advance call is harmless.
+	go func() {
+		select {
+		case <-clk.registered:
+			clk.Advance(1 * time.Second)
+		case <-done:
+		}
+	}()
 	<-done
 
 	// Empty agentPaneTargets short-circuits — no capture-pane / send-keys
