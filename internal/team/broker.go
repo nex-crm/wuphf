@@ -8,7 +8,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -16,7 +15,6 @@ import (
 
 	"github.com/nex-crm/wuphf/internal/brokeraddr"
 	"github.com/nex-crm/wuphf/internal/channel"
-	"github.com/nex-crm/wuphf/internal/company"
 	"github.com/nex-crm/wuphf/internal/onboarding"
 	"github.com/nex-crm/wuphf/internal/provider"
 	"github.com/nex-crm/wuphf/internal/workspace"
@@ -1232,67 +1230,9 @@ func (b *Broker) rebuildMemberIndexLocked() {
 	}
 }
 
-// AttachOpenclawBridge wires the OpenClaw bridge into the broker so
-// handleOfficeMembers can drive live subscribe/unsubscribe/sessions.create/
-// sessions.end calls as members are hired and fired. Called by the launcher
-// after StartOpenclawBridgeFromConfig succeeds. Safe to call with nil to
-// detach (tests).
-func (b *Broker) AttachOpenclawBridge(bridge *OpenclawBridge) {
-	b.mu.Lock()
-	b.openclawBridge = bridge
-	b.mu.Unlock()
-}
-
-// openclawBridgeLocked returns the attached bridge pointer. Callers must
-// hold b.mu. Kept as a small helper so the field is never read without the
-// lock (and so we have one place to note the invariant).
-func (b *Broker) openclawBridgeLocked() *OpenclawBridge {
-	return b.openclawBridge
-}
-
-// SetMemberProvider attaches or replaces the ProviderBinding on the given
-// office member and persists broker state. Used by the OpenClaw bootstrap
-// migration (moving legacy config.OpenclawBridges onto members) and by the
-// handleOfficeMembers update path. Returns an error if the member doesn't
-// exist; callers should ensure the member exists first.
-func (b *Broker) SetMemberProvider(slug string, binding provider.ProviderBinding) error {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	m := b.findMemberLocked(slug)
-	if m == nil {
-		return fmt.Errorf("set member provider: unknown slug %q", slug)
-	}
-	m.Provider = binding
-	return b.saveLocked()
-}
-
-// MemberProviderBinding returns the per-agent provider binding for slug, or
-// the zero value if the member does not exist. Safe to call from outside the
-// broker; takes the mutex internally.
-func (b *Broker) MemberProviderBinding(slug string) provider.ProviderBinding {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	m := b.findMemberLocked(slug)
-	if m == nil {
-		return provider.ProviderBinding{}
-	}
-	return m.Provider
-}
-
-// MemberProviderKind returns the effective runtime kind for the given slug,
-// falling back to the global runtime when the member has no explicit binding.
-// Used by the launcher's dispatch switch so each agent can run on its own
-// provider (e.g., one Codex agent + one Claude Code agent in the same team).
-func (b *Broker) MemberProviderKind(slug string) string {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	m := b.findMemberLocked(slug)
-	if m == nil {
-		return ""
-	}
-	return m.Provider.Kind
-}
-
+// OpenClaw bridge wiring, provider binding, persistence cursors, pane capture,
+// and the channel bridge handler moved to broker_bridge.go,
+// broker_provider_binding.go, broker_cursors.go, and broker_pane.go.
 // Member construction, text helpers, and channel-access predicates moved to
 // broker_member_construction.go, broker_text.go, and broker_channel_access.go.
 
@@ -1310,220 +1250,6 @@ func usageStateIsZero(state teamUsageState) bool {
 
 func (b *Broker) appendActionLocked(kind, source, channel, actor, summary, relatedID string) {
 	b.appendActionWithRefsLocked(kind, source, channel, actor, summary, relatedID, nil, "")
-}
-
-func (b *Broker) handleBridge(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var body struct {
-		Actor         string   `json:"actor"`
-		SourceChannel string   `json:"source_channel"`
-		TargetChannel string   `json:"target_channel"`
-		Summary       string   `json:"summary"`
-		Tagged        []string `json:"tagged"`
-		ReplyTo       string   `json:"reply_to"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		http.Error(w, "invalid json", http.StatusBadRequest)
-		return
-	}
-
-	actor := normalizeActorSlug(body.Actor)
-	if actor != "ceo" {
-		http.Error(w, "only the CEO can bridge channel context", http.StatusForbidden)
-		return
-	}
-	source := normalizeChannelSlug(body.SourceChannel)
-	target := normalizeChannelSlug(body.TargetChannel)
-	if source == "" || target == "" {
-		http.Error(w, "source_channel and target_channel required", http.StatusBadRequest)
-		return
-	}
-	summary := strings.TrimSpace(body.Summary)
-	if summary == "" {
-		http.Error(w, "summary required", http.StatusBadRequest)
-		return
-	}
-
-	b.mu.Lock()
-	sourceExists := b.findChannelLocked(source) != nil
-	targetExists := b.findChannelLocked(target) != nil
-	b.mu.Unlock()
-	if !sourceExists || !targetExists {
-		http.Error(w, "channel not found", http.StatusNotFound)
-		return
-	}
-
-	records, err := b.RecordSignals([]officeSignal{{
-		ID:         fmt.Sprintf("bridge:%s:%s:%s", source, target, truncateSummary(strings.ToLower(summary), 48)),
-		Source:     "channel_bridge",
-		Kind:       "bridge",
-		Title:      "Cross-channel bridge",
-		Content:    fmt.Sprintf("CEO bridged context from #%s to #%s: %s", source, target, summary),
-		Channel:    target,
-		Owner:      "ceo",
-		Confidence: "explicit",
-		Urgency:    "normal",
-	}})
-	if err != nil {
-		http.Error(w, "failed to record bridge signal", http.StatusInternalServerError)
-		return
-	}
-	signalIDs := make([]string, 0, len(records))
-	for _, record := range records {
-		signalIDs = append(signalIDs, record.ID)
-	}
-	decision, err := b.RecordDecision(
-		"bridge_channel",
-		target,
-		fmt.Sprintf("CEO bridged context from #%s to #%s.", source, target),
-		"Relevant context existed in another channel, so the CEO carried it into this channel explicitly.",
-		"ceo",
-		signalIDs,
-		false,
-		false,
-	)
-	if err != nil {
-		http.Error(w, "failed to record bridge decision", http.StatusInternalServerError)
-		return
-	}
-	content := summary + fmt.Sprintf("\n\nCEO bridged this context from #%s to help #%s.", source, target)
-	msg, _, err := b.PostAutomationMessage(
-		"wuphf",
-		target,
-		"Bridge from #"+source,
-		content,
-		decision.ID,
-		"ceo_bridge",
-		"CEO bridge",
-		uniqueSlugs(body.Tagged),
-		strings.TrimSpace(body.ReplyTo),
-	)
-	if err != nil {
-		http.Error(w, "failed to persist bridge message", http.StatusInternalServerError)
-		return
-	}
-	if err := b.RecordAction("bridge_channel", "ceo_bridge", target, actor, truncateSummary(summary, 140), msg.ID, signalIDs, decision.ID); err != nil {
-		http.Error(w, "failed to persist bridge action", http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"id":          msg.ID,
-		"decision_id": decision.ID,
-		"signal_ids":  signalIDs,
-	})
-}
-
-func (b *Broker) NotificationCursor() string {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.notificationSince
-}
-
-func (b *Broker) SetNotificationCursor(cursor string) error {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if cursor == "" || cursor == b.notificationSince {
-		return nil
-	}
-	b.notificationSince = cursor
-	return b.saveLocked()
-}
-
-func (b *Broker) InsightsCursor() string {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.insightsSince
-}
-
-func (b *Broker) SetInsightsCursor(cursor string) error {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if cursor == "" || cursor == b.insightsSince {
-		return nil
-	}
-	b.insightsSince = cursor
-	return b.saveLocked()
-}
-
-// If content is the same as last time, agent is idle — return nothing.
-func (b *Broker) capturePaneActivity(slugOverride string) map[string]string {
-	result := make(map[string]string)
-
-	type paneCheck struct {
-		slug   string
-		target string
-	}
-
-	var checks []paneCheck
-	if slugOverride != "" {
-		// 1:1 mode: only check pane 1
-		checks = append(checks, paneCheck{slug: slugOverride, target: fmt.Sprintf("%s:team.1", SessionName)})
-	} else {
-		manifest := company.DefaultManifest()
-		loaded, loadErr := company.LoadManifest()
-		if loadErr == nil && len(loaded.Members) > 0 {
-			manifest = loaded
-		}
-		for i, agent := range manifest.Members {
-			checks = append(checks, paneCheck{
-				slug:   agent.Slug,
-				target: fmt.Sprintf("wuphf-team:team.%d", i+1),
-			})
-		}
-	}
-
-	b.mu.Lock()
-	if b.lastPaneSnapshot == nil {
-		b.lastPaneSnapshot = make(map[string]string)
-	}
-	b.mu.Unlock()
-
-	for _, check := range checks {
-		paneOut, err := exec.CommandContext(context.Background(), "tmux", "-L", "wuphf", "capture-pane",
-			"-p", "-J",
-			"-t", check.target).CombinedOutput()
-		if err != nil {
-			continue
-		}
-
-		content := string(paneOut)
-
-		// Compare with previous snapshot
-		b.mu.Lock()
-		prev := b.lastPaneSnapshot[check.slug]
-		b.lastPaneSnapshot[check.slug] = content
-		b.mu.Unlock()
-
-		if content == prev {
-			// No change — agent is idle
-			continue
-		}
-
-		// Content changed — agent is active. Extract last 5 meaningful lines.
-		lines := strings.Split(content, "\n")
-		var meaningful []string
-		for i := len(lines) - 1; i >= 0 && len(meaningful) < 5; i-- {
-			trimmed := strings.TrimSpace(lines[i])
-			if trimmed == "" {
-				continue
-			}
-			meaningful = append(meaningful, trimmed)
-		}
-		// Reverse to chronological order
-		for i, j := 0, len(meaningful)-1; i < j; i, j = i+1, j-1 {
-			meaningful[i], meaningful[j] = meaningful[j], meaningful[i]
-		}
-		if len(meaningful) > 0 {
-			result[check.slug] = strings.Join(meaningful, "\n")
-		}
-	}
-	return result
 }
 
 // FormatChannelView returns a clean, Slack-style rendering of recent messages.
