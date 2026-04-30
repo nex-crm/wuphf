@@ -147,6 +147,93 @@ func RenderOfficeCharacter(m Member, act MemberActivity, now time.Time) OfficeCh
 	return OfficeCharacter{Avatar: portrait, Bubble: bubble}
 }
 
+// asidePhrases is the static slug:activity → catchphrase table used by
+// OfficeAside. Hoisted to package scope so the render path doesn't
+// rebuild a 20-key map literal on every sidebar tick. Read-only;
+// callers must not mutate the slices.
+var asidePhrases = map[string][]string{
+	"ceo:talking": {
+		"Delegating.",
+		"Have a plan.",
+	},
+	"ceo:plotting": {
+		"Smells strategic.",
+		"Possible reorg.",
+	},
+	"pm:plotting": {
+		"Scope creep.",
+		"Needs triage.",
+	},
+	"pm:lurking": {
+		"Hidden work.",
+		"Roadmap vibes.",
+	},
+	"fe:shipping": {
+		"Shipping it.",
+		"Please no redesign.",
+	},
+	"fe:plotting": {
+		"That button though.",
+		"UI is loaded.",
+	},
+	"be:shipping": {
+		"It will work.",
+		"DB has feelings.",
+	},
+	"be:plotting": {
+		"Too many moving parts.",
+		"One less service?",
+	},
+	"ai:plotting": {
+		"Eval first.",
+		"Latency says hi.",
+	},
+	"ai:talking": {
+		"Could be smarter.",
+		"This becomes a system.",
+	},
+	"designer:plotting": {
+		"Needs whitespace.",
+		"Not polished.",
+	},
+	"designer:lurking": {
+		"I have notes.",
+		"That color dies.",
+	},
+	"cmo:talking": {
+		"Message matters.",
+		"No oatmeal copy.",
+	},
+	"cmo:plotting": {
+		"Bland alert.",
+		"We need a hook.",
+	},
+	"cro:talking": {
+		"Price question.",
+		"Revenue is real.",
+	},
+	"cro:lurking": {
+		"Objection incoming.",
+		"What are we selling?",
+	},
+	"default:talking": {
+		"Have a thought.",
+		"Need opinions.",
+	},
+	"default:plotting": {
+		"Mild concern.",
+		"Needs follow-up.",
+	},
+	"default:shipping": {
+		"Doing it.",
+		"My problem now.",
+	},
+	"default:lurking": {
+		"Still here.",
+		"Thinking quietly.",
+	},
+}
+
 // OfficeAside picks a per-slug catchphrase for the thought bubble,
 // falling back to a generic phrase when the slug:activity key is not
 // in the table. Phrases rotate with a per-second phase offset so the
@@ -154,93 +241,10 @@ func RenderOfficeCharacter(m Member, act MemberActivity, now time.Time) OfficeCh
 // LastMessage keywords ("blocked", "launch", "design", "pricing")
 // short-circuit to a topical line.
 func OfficeAside(slug, activity, lastMessage string, now time.Time) string {
-	lists := map[string][]string{
-		"ceo:talking": {
-			"Delegating.",
-			"Have a plan.",
-		},
-		"ceo:plotting": {
-			"Smells strategic.",
-			"Possible reorg.",
-		},
-		"pm:plotting": {
-			"Scope creep.",
-			"Needs triage.",
-		},
-		"pm:lurking": {
-			"Hidden work.",
-			"Roadmap vibes.",
-		},
-		"fe:shipping": {
-			"Shipping it.",
-			"Please no redesign.",
-		},
-		"fe:plotting": {
-			"That button though.",
-			"UI is loaded.",
-		},
-		"be:shipping": {
-			"It will work.",
-			"DB has feelings.",
-		},
-		"be:plotting": {
-			"Too many moving parts.",
-			"One less service?",
-		},
-		"ai:plotting": {
-			"Eval first.",
-			"Latency says hi.",
-		},
-		"ai:talking": {
-			"Could be smarter.",
-			"This becomes a system.",
-		},
-		"designer:plotting": {
-			"Needs whitespace.",
-			"Not polished.",
-		},
-		"designer:lurking": {
-			"I have notes.",
-			"That color dies.",
-		},
-		"cmo:talking": {
-			"Message matters.",
-			"No oatmeal copy.",
-		},
-		"cmo:plotting": {
-			"Bland alert.",
-			"We need a hook.",
-		},
-		"cro:talking": {
-			"Price question.",
-			"Revenue is real.",
-		},
-		"cro:lurking": {
-			"Objection incoming.",
-			"What are we selling?",
-		},
-		"default:talking": {
-			"Have a thought.",
-			"Need opinions.",
-		},
-		"default:plotting": {
-			"Mild concern.",
-			"Needs follow-up.",
-		},
-		"default:shipping": {
-			"Doing it.",
-			"My problem now.",
-		},
-		"default:lurking": {
-			"Still here.",
-			"Thinking quietly.",
-		},
-	}
-
 	key := slug + ":" + activity
-	options := lists[key]
+	options := asidePhrases[key]
 	if len(options) == 0 {
-		options = lists["default:"+activity]
+		options = asidePhrases["default:"+activity]
 	}
 	if len(options) == 0 {
 		return ""
@@ -278,9 +282,11 @@ func OfficeAside(slug, activity, lastMessage string, now time.Time) string {
 // ActiveSidebarTask picks the highest-priority in-flight task owned
 // by slug. Status priority: in_progress > review > blocked > pending
 // (claimed/pending/open). Returns the chosen task and whether one was
-// found. Done/released tasks are skipped.
+// found. Done/released tasks are skipped, as are tasks whose status is
+// outside the documented vocabulary — promoting unknown statuses to
+// pending priority would silently classify garbage as in-flight work.
 func ActiveSidebarTask(tasks []Task, slug string) (Task, bool) {
-	bestScore := -1
+	bestScore := 0
 	var best Task
 	for _, task := range tasks {
 		if strings.TrimSpace(task.Owner) != slug {
@@ -290,7 +296,7 @@ func ActiveSidebarTask(tasks []Task, slug string) (Task, bool) {
 		if status == "done" || status == "released" {
 			continue
 		}
-		score := 1
+		score := 0
 		switch status {
 		case "in_progress":
 			score = 4
@@ -301,12 +307,15 @@ func ActiveSidebarTask(tasks []Task, slug string) (Task, bool) {
 		case "claimed", "pending", "open":
 			score = 1
 		}
+		if score == 0 {
+			continue
+		}
 		if score > bestScore {
 			bestScore = score
 			best = task
 		}
 	}
-	return best, bestScore >= 0
+	return best, bestScore > 0
 }
 
 // ApplyTaskActivity overrides the activity-derived MemberActivity

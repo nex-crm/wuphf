@@ -128,8 +128,10 @@ func BlockedWorkTasks(tasks []Task, focusSlug string, limit int) []Task {
 // RecentDirectExecutionActions returns up to limit external_*
 // actions in newest-first order, optionally scoped to focusSlug
 // (matching the action.Actor — actions actored by "scheduler" or
-// with no actor always pass).
+// with no actor always pass). focusSlug is trimmed before comparison
+// so padded inputs match LatestRelevantAction's normalization.
 func RecentDirectExecutionActions(actions []Action, focusSlug string, limit int) []Action {
+	focusSlug = strings.TrimSpace(focusSlug)
 	var filtered []Action
 	for _, action := range actions {
 		if !strings.HasPrefix(strings.TrimSpace(action.Kind), "external_") {

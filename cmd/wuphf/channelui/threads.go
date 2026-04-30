@@ -47,19 +47,21 @@ func HasThreadReplies(messages []BrokerMessage, id string) bool {
 
 // CountThreadReplies returns the total number of descendants of rootID
 // in the children adjacency map (built by flattenThreadMessages). The
-// root itself is not counted. A visited set guards against cyclic
-// adjacency (broker data with A→B→A reply chains) so the caller can't
-// be hung by malformed input.
+// root itself is not counted, including in cyclic graphs — back-edges
+// to an already-visited node are skipped before count++ so a A→B→A
+// cycle doesn't inflate B's descendant count by counting A through the
+// back-edge. The visited set is seeded with rootID so the root can't
+// be reached as a child of any descendant.
 func CountThreadReplies(children map[string][]BrokerMessage, rootID string) int {
-	visited := make(map[string]bool)
+	visited := map[string]bool{rootID: true}
 	var walk func(id string) int
 	walk = func(id string) int {
-		if visited[id] {
-			return 0
-		}
-		visited[id] = true
 		count := 0
 		for _, child := range children[id] {
+			if visited[child.ID] {
+				continue
+			}
+			visited[child.ID] = true
 			count++
 			count += walk(child.ID)
 		}
