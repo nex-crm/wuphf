@@ -148,7 +148,7 @@ func TestBuildArticle_Backlinks(t *testing.T) {
 		}
 	}
 
-	meta, err := repo.BuildArticle(ctx, "team/people/b.md")
+	meta, err := repo.BuildArticle(ctx, "team/people/b.md", "", nil)
 	if err != nil {
 		t.Fatalf("BuildArticle: %v", err)
 	}
@@ -220,7 +220,7 @@ func TestBuildArticle_NotFound(t *testing.T) {
 	if err := repo.Init(context.Background()); err != nil {
 		t.Fatalf("Init: %v", err)
 	}
-	_, err := repo.BuildArticle(context.Background(), "team/people/ghost.md")
+	_, err := repo.BuildArticle(context.Background(), "team/people/ghost.md", "", nil)
 	if err == nil {
 		t.Fatal("BuildArticle on missing article: want error, got nil")
 	}
@@ -237,7 +237,7 @@ func TestBuildArticle_RejectsBadPath(t *testing.T) {
 		"not-team/x.md",
 	}
 	for _, p := range bad {
-		if _, err := repo.BuildArticle(context.Background(), p); err == nil {
+		if _, err := repo.BuildArticle(context.Background(), p, "", nil); err == nil {
 			t.Errorf("BuildArticle(%q): want error, got nil", p)
 		}
 	}
@@ -276,7 +276,7 @@ func TestBuildCatalog_ExcludesInbox(t *testing.T) {
 		t.Fatalf("write inbox file: %v", err)
 	}
 
-	entries, err := repo.BuildCatalog(ctx)
+	entries, err := repo.BuildCatalog(ctx, "", nil)
 	if err != nil {
 		t.Fatalf("BuildCatalog: %v", err)
 	}
@@ -312,7 +312,7 @@ func TestBuildArticle_NoBacklinks(t *testing.T) {
 	if _, _, err := repo.Commit(ctx, "ceo", "team/people/solo.md", "# Solo\n\nAlone.\n", "create", "add solo"); err != nil {
 		t.Fatalf("Commit: %v", err)
 	}
-	meta, err := repo.BuildArticle(ctx, "team/people/solo.md")
+	meta, err := repo.BuildArticle(ctx, "team/people/solo.md", "", nil)
 	if err != nil {
 		t.Fatalf("BuildArticle: %v", err)
 	}

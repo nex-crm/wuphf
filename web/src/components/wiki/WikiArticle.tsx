@@ -42,6 +42,37 @@ import TeamLearningPanel from "./TeamLearningPanel";
 import TocBox, { type TocEntry } from "./TocBox";
 import WikiEditor from "./WikiEditor";
 
+// StalenessIndicator shows a small badge when an article has not been accessed
+// by anyone (human or agent) in a while. "Agents only" signals an article
+// actively used for context but never opened by a human.
+function StalenessIndicator({ article }: { article: WikiArticleT }) {
+  const days_unread = article.days_unread ?? 0;
+  const human_read_count = article.human_read_count ?? 0;
+  const agent_read_count = article.agent_read_count ?? 0;
+  if (agent_read_count > 0 && human_read_count === 0) {
+    return (
+      <div className="wk-staleness-badge wk-staleness-agents-only">
+        agents only
+      </div>
+    );
+  }
+  if (days_unread > 30) {
+    return (
+      <div className="wk-staleness-badge wk-staleness-stale">
+        unread 30d+
+      </div>
+    );
+  }
+  if (days_unread > 7) {
+    return (
+      <div className="wk-staleness-badge wk-staleness-aging">
+        unread 7d+
+      </div>
+    );
+  }
+  return null;
+}
+
 // Real backend paths look like `team/people/nazz.md`. Mock/dev paths may
 // drop the `team/` prefix or the `.md` suffix. Accept both so the entity
 // surface lights up in demos without forcing every caller to normalize.
@@ -258,6 +289,7 @@ export default function WikiArticle({
             </span>
           ))}
         </div>
+        <StalenessIndicator article={article} />
         <ArticleTitle title={article.title} />
         {byline}
         <Hatnote>

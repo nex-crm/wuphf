@@ -24,6 +24,14 @@ export interface WikiArticle {
   backlinks: { path: string; title: string; author_slug: string }[];
   word_count: number;
   categories: string[];
+  /** ISO-8601 timestamp of the last access by any reader (human or agent). Null if never accessed. */
+  last_read?: string | null;
+  /** Number of accesses from the web UI (human readers). Absent when zero. */
+  human_read_count?: number;
+  /** Number of accesses from agent MCP tool calls. Absent when zero. */
+  agent_read_count?: number;
+  /** Whole days since last_read; 0 if accessed today. */
+  days_unread?: number;
 }
 
 /**
@@ -110,6 +118,11 @@ export interface WikiCatalogEntry {
   author_slug: string;
   last_edited_ts: string;
   group: string;
+  /** ISO-8601 timestamp of the last access by any reader. Null if never accessed. */
+  last_read?: string | null;
+  human_read_count?: number;
+  agent_read_count?: number;
+  days_unread?: number;
 }
 
 /**
@@ -188,7 +201,7 @@ export async function fetchArticle(path: string): Promise<WikiArticle> {
     tried.push(candidate);
     try {
       return await get<WikiArticle>(
-        `/wiki/article?path=${encodeURIComponent(candidate)}`,
+        `/wiki/article?path=${encodeURIComponent(candidate)}&reader=web`,
       );
     } catch {
       // Try next candidate. Real 404s and bare-slug misses look identical

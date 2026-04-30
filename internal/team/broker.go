@@ -481,6 +481,7 @@ type Broker struct {
 	reviewLog               *ReviewLog
 	reviewResolver          ReviewerResolver
 	factLog                 *FactLog
+	readLog                 *ReadLog
 	entityGraph             *EntityGraph
 	entitySynthesizer       *EntitySynthesizer
 	teamLearningLog         *LearningLog
@@ -834,6 +835,7 @@ func (b *Broker) ensureWikiWorker() {
 	b.wikiIndex = idx
 	b.wikiExtractor = extractor
 	b.wikiDLQ = dlq
+	b.readLog = NewReadLog(WikiRootDir())
 	b.mu.Unlock()
 
 	// Skill status reconciliation: now that the wiki worker is wired,

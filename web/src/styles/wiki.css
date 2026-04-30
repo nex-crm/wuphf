@@ -2073,3 +2073,32 @@
   align-items: center;
   justify-content: center;
 }
+
+/* Staleness indicator — shown above the article title */
+.wk-staleness-badge {
+  display: inline-flex;
+  align-items: center;
+  font-family: system-ui, sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 3px;
+  margin-bottom: 8px;
+}
+.wk-staleness-aging {
+  background: rgba(236, 178, 46, 0.15);
+  color: #B8860B;
+  border: 1px solid rgba(236, 178, 46, 0.4);
+}
+.wk-staleness-stale {
+  background: rgba(201, 74, 74, 0.12);
+  color: #B94040;
+  border: 1px solid rgba(201, 74, 74, 0.35);
+}
+.wk-staleness-agents-only {
+  background: rgba(18, 100, 163, 0.1);
+  color: #1264A3;
+  border: 1px solid rgba(18, 100, 163, 0.3);
+}

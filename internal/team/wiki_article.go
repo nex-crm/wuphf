@@ -65,6 +65,13 @@ type ArticleMeta struct {
 	Backlinks    []Backlink `json:"backlinks"`
 	WordCount    int        `json:"word_count"`
 	Categories   []string   `json:"categories"`
+	// Read tracking — populated when BuildArticle is called with a non-empty reader.
+	// LastRead is nil when the article has never been accessed by anyone.
+	LastRead       *time.Time `json:"last_read,omitempty"`
+	HumanReadCount int        `json:"human_read_count"`
+	AgentReadCount int        `json:"agent_read_count"`
+	// DaysUnread is whole days since LastRead; 0 when accessed today or never.
+	DaysUnread int `json:"days_unread"`
 }
 
 // Backlink represents another article that wikilinks to this article.
@@ -83,15 +90,23 @@ type CatalogEntry struct {
 	AuthorSlug   string `json:"author_slug"`
 	LastEditedTs string `json:"last_edited_ts"`
 	Group        string `json:"group"`
+	// Read tracking — always present; zero when no reads have been recorded.
+	LastRead       *time.Time `json:"last_read,omitempty"`
+	HumanReadCount int        `json:"human_read_count"`
+	AgentReadCount int        `json:"agent_read_count"`
+	DaysUnread     int        `json:"days_unread"`
 }
 
 // BuildCatalog walks team/ and returns every .md article with title + author +
 // last-edit metadata grouped by top-level thematic dir. Git metadata is read
 // in one batch so catalog latency scales with repo history, not article count.
 //
-// Shape matches web/src/api/wiki.ts WikiCatalogEntry. Sorted by path for
-// reproducibility; the UI re-sorts by recency within each group.
-func (r *Repo) BuildCatalog(ctx context.Context) ([]CatalogEntry, error) {
+// When sort is "last_read", entries are sorted by last access time ascending
+// (oldest-accessed first; never-accessed articles appear first). readLog may
+// be nil, in which case read stats are all zero and sort falls back to path order.
+//
+// Shape matches web/src/api/wiki.ts WikiCatalogEntry.
+func (r *Repo) BuildCatalog(ctx context.Context, sort_ string, readLog *ReadLog) ([]CatalogEntry, error) {
 	teamDir := r.TeamDir()
 	var entries []CatalogEntry
 
@@ -170,7 +185,38 @@ func (r *Repo) BuildCatalog(ctx context.Context) ([]CatalogEntry, error) {
 		}
 	}
 
-	sort.Slice(entries, func(i, j int) bool { return entries[i].Path < entries[j].Path })
+	// Join read stats from a single AllStats scan (O(n+m), not O(n*m)).
+	if readLog != nil {
+		allStats := readLog.AllStats()
+		for i := range entries {
+			if s, ok := allStats[entries[i].Path]; ok {
+				entries[i].LastRead = s.LastRead
+				entries[i].HumanReadCount = s.HumanReadCount
+				entries[i].AgentReadCount = s.AgentReadCount
+				entries[i].DaysUnread = s.DaysUnread
+			}
+		}
+	}
+
+	if sort_ == "last_read" {
+		// Unread articles (nil LastRead) sort first; among read articles,
+		// oldest-accessed-first so the most stale content surfaces at top.
+		sort.Slice(entries, func(i, j int) bool {
+			li, lj := entries[i].LastRead, entries[j].LastRead
+			if li == nil && lj == nil {
+				return entries[i].Path < entries[j].Path
+			}
+			if li == nil {
+				return true
+			}
+			if lj == nil {
+				return false
+			}
+			return li.Before(*lj)
+		})
+	} else {
+		sort.Slice(entries, func(i, j int) bool { return entries[i].Path < entries[j].Path })
+	}
 	return entries, nil
 }
 
@@ -227,7 +273,11 @@ var wikilinkPattern = regexp.MustCompile(`\[\[([^\[\]|]+)(\|([^\[\]|]+))?\]\]`)
 
 // BuildArticle reads an article and computes its metadata + backlinks.
 // Returns os.ErrNotExist wrapped if the article is missing.
-func (r *Repo) BuildArticle(ctx context.Context, relPath string) (ArticleMeta, error) {
+//
+// reader is "web" for a human browser request, an agent slug (e.g.
+// "slack-agent") for MCP tool access, or "" to suppress read tracking.
+// readLog may be nil, in which case tracking is skipped regardless of reader.
+func (r *Repo) BuildArticle(ctx context.Context, relPath, reader string, readLog *ReadLog) (ArticleMeta, error) {
 	if err := validateArticlePath(relPath); err != nil {
 		return ArticleMeta{}, err
 	}
@@ -264,6 +314,17 @@ func (r *Repo) BuildArticle(ctx context.Context, relPath string) (ArticleMeta, e
 		return meta, nil //nolint:nilerr // intentional: backlink failure degrades to empty backlinks
 	}
 	meta.Backlinks = backs
+
+	// Read tracking: log the access then populate stats. Both happen only
+	// when reader is non-empty and readLog is wired up.
+	if reader != "" && readLog != nil {
+		readLog.Append(relPath, reader)
+		s := readLog.Stats(relPath)
+		meta.LastRead = s.LastRead
+		meta.HumanReadCount = s.HumanReadCount
+		meta.AgentReadCount = s.AgentReadCount
+		meta.DaysUnread = s.DaysUnread
+	}
 
 	return meta, nil
 }

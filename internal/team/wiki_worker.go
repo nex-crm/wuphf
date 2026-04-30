@@ -899,6 +899,11 @@ func (b *Broker) handleWikiRead(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 		return
 	}
+	// Track agent reads. The ?reader= param is set by the MCP layer using
+	// WUPHF_AGENT_SLUG. Human reads go through /wiki/article, not here.
+	if reader := strings.TrimSpace(r.URL.Query().Get("reader")); reader != "" {
+		b.readLog.Append(relPath, reader)
+	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	_, _ = w.Write(bytes)
 }
@@ -968,7 +973,8 @@ func (b *Broker) handleWikiCatalog(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"wiki backend is not active"}`, http.StatusServiceUnavailable)
 		return
 	}
-	entries, err := worker.Repo().BuildCatalog(r.Context())
+	sortParam := strings.TrimSpace(r.URL.Query().Get("sort"))
+	entries, err := worker.Repo().BuildCatalog(r.Context(), sortParam, b.readLog)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -1000,7 +1006,8 @@ func (b *Broker) handleWikiArticle(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	meta, err := worker.Repo().BuildArticle(r.Context(), relPath)
+	reader := strings.TrimSpace(r.URL.Query().Get("reader"))
+	meta, err := worker.Repo().BuildArticle(r.Context(), relPath, reader, b.readLog)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 		return
