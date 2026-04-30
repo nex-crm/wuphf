@@ -672,12 +672,16 @@ def reset_scheduler_state(broker: str, token: str) -> None:
         if spec.get("read_only"):
             # Read-only crons reject any PATCH — nothing to reset.
             continue
-        http_request(
+        code, body = http_request(
             "PATCH",
             f"{broker}/scheduler/{urllib.parse.quote(slug)}",
             token=token,
             body={"interval_override": 0, "enabled": True},
         )
+        if code < 200 or code >= 300:
+            raise RuntimeError(
+                f"reset_scheduler_state: PATCH {slug} returned {code}: {body!r}"
+            )
 
 
 # ---------- Main ----------

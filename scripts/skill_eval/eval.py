@@ -63,7 +63,7 @@ def _dev_home() -> str:
     append the suffix so the broker subprocess writes into the isolated
     directory instead of the real ``~/.wuphf``.
     """
-    home = os.environ.get("HOME", os.path.expanduser("~"))
+    home = os.path.normpath(os.environ.get("HOME", os.path.expanduser("~")))
     if home.endswith(_DEV_HOME_SUFFIX):
         return home
     return home + _DEV_HOME_SUFFIX
@@ -237,7 +237,11 @@ def scenario_invoke(broker: str, token: str) -> ScenarioResult:
     usage = 0
     if isinstance(body, dict):
         skill_obj = body.get("skill") or {}
-        usage = int(skill_obj.get("usage_count") or 0)
+        raw = skill_obj.get("usage_count")
+        try:
+            usage = int(raw)
+        except (TypeError, ValueError):
+            usage = 0
     ok = usage >= 1
     return ScenarioResult(
         id="skill-04-invoke",
@@ -305,6 +309,14 @@ def main() -> int:
         ),
     )
     args = ap.parse_args()
+
+    parsed_url = urllib.parse.urlparse(args.broker)
+    if parsed_url.scheme not in ("http", "https"):
+        print(
+            f"error: --broker must use http or https scheme, got {args.broker!r}",
+            file=sys.stderr,
+        )
+        return 2
 
     if args.home:
         isolated = apply_home_isolation()
