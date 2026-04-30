@@ -835,13 +835,13 @@ func TestEveryProtectedRouteRequiresAuth(t *testing.T) {
 	// Each route is registered with the same withAuth wrapping that
 	// production uses (mirrors broker.go's HandleFunc block).
 	routes := map[string]http.HandlerFunc{
-		"/workspaces/list":    b.handleWorkspacesList,
-		"/workspaces/create":  b.handleWorkspacesCreate,
-		"/workspaces/switch":  b.handleWorkspacesSwitch,
-		"/workspaces/pause":   b.handleWorkspacesPause,
-		"/workspaces/resume":  b.handleWorkspacesResume,
-		"/workspaces/shred":   b.handleWorkspacesShred,
-		"/workspaces/restore": b.handleWorkspacesRestore,
+		"/workspaces/list":       b.handleWorkspacesList,
+		"/workspaces/create":     b.handleWorkspacesCreate,
+		"/workspaces/switch":     b.handleWorkspacesSwitch,
+		"/workspaces/pause":      b.handleWorkspacesPause,
+		"/workspaces/resume":     b.handleWorkspacesResume,
+		"/workspaces/shred":      b.handleWorkspacesShred,
+		"/workspaces/restore":    b.handleWorkspacesRestore,
 		"/workspaces/trash":      b.handleWorkspacesTrash,
 		"/workspaces/onboarding": b.handleWorkspacesOnboarding,
 		"/admin/pause":           b.handleAdminPause,

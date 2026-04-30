@@ -21,7 +21,7 @@ var ReservedSlugs = func() []string {
 		"current",
 		"default",
 		"dev",
-		"main",   // auto-assigned to the migrated primary workspace
+		"main", // auto-assigned to the migrated primary workspace
 		"prod",
 		"tokens", // collides with ~/.wuphf-spaces/tokens/ directory
 		"trash",  // collides with ~/.wuphf-spaces/.trash/ directory

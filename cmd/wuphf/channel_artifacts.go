@@ -226,4 +226,3 @@ func readWorkflowRunArtifact(path string, info fs.FileInfo) (channelui.WorkflowR
 	artifact.UpdatedAt = info.ModTime()
 	return artifact, true
 }
-

@@ -54,9 +54,9 @@ type DoctorReport struct {
 	ZombieRunning    []string // registry says running but port unbound
 	PortConflicts    []string // port in use by unknown process
 	CorruptRegistry  bool
-	SymlinkMissing   bool   // ~/.wuphf symlink absent
-	SymlinkWrong     string // symlink points to wrong target
-	PartialMigration bool   // regular ~/.wuphf coexists with spaces dir
+	SymlinkMissing   bool     // ~/.wuphf symlink absent
+	SymlinkWrong     string   // symlink points to wrong target
+	PartialMigration bool     // regular ~/.wuphf coexists with spaces dir
 	Actions          []string // human-readable fixes applied
 }
 

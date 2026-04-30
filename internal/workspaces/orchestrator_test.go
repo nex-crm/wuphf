@@ -749,7 +749,7 @@ func TestPauseMarksStoppingImmediately(t *testing.T) {
 		Workspaces: []*Workspace{
 			{Name: "to-pause", RuntimeHome: rt,
 				BrokerPort: 29988, WebPort: 29989,
-				State: StateRunning,
+				State:     StateRunning,
 				CreatedAt: now, LastUsedAt: now},
 		},
 	}); err != nil {
