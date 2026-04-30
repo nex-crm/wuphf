@@ -37,50 +37,54 @@ type Result struct {
 	Errors  []string `json:"errors,omitempty"`
 }
 
-// ClearRuntime performs a narrow reset: deletes the broker state file and the
+// ClearRuntime performs a narrow reset on the user-default workspace tree at
+// config.RuntimeHomeDir()/.wuphf. It deletes the broker state file and the
 // last-good snapshot. Safe to call when no broker is running. The live broker
 // may keep using the same office.pid and team directory; callers that want to
 // clear in-memory runtime should do so separately.
+//
+// Equivalent to ResetAt(<default wuphf home>). Both honor
+// WUPHF_BROKER_STATE_PATH when set.
 func ClearRuntime() (Result, error) {
-	var res Result
-	statePath, snapshotPath, err := brokerStatePaths()
+	home, err := wuphfHome()
 	if err != nil {
 		return Result{}, err
 	}
-	res.removeIfPresent(statePath)
-	res.removeIfPresent(snapshotPath)
-	return res, nil
+	return ResetAt(home)
 }
 
-// Shred performs a full workspace wipe. Runs ClearRuntime first, then removes
-// onboarding state, company identity, office task receipts, workflows, logs,
-// provider session state, and local markdown memory.
+// Shred performs a full workspace wipe on the user-default workspace tree at
+// config.RuntimeHomeDir()/.wuphf. Runs the same wipe set as ShredAt and, for
+// parity with the previous implementation, additionally removes any env-
+// overridden onboarding state path (onboarding.StatePath) and company manifest
+// path (company.ManifestPath, which may resolve to WUPHF_COMPANY_FILE,
+// NEX_COMPANY_FILE, or a CWD-local wuphf.company.json) when those resolve
+// outside the wuphfHome tree.
 func Shred() (Result, error) {
 	home, err := wuphfHome()
 	if err != nil {
 		return Result{}, err
 	}
-	res, err := ClearRuntime()
+	res, err := ShredAt(home)
 	if err != nil {
 		return res, err
 	}
+	// Cover env-overridden locations that ShredAt cannot see because it is
+	// scoped to a wuphfHome tree. removeIfPresent is a no-op when the path
+	// has already been removed via ShredAt or does not exist.
 	res.removeIfPresent(onboarding.StatePath())
 	res.removeIfPresent(company.ManifestPath())
-	res.removeIfPresent(filepath.Join(home, "office"))
-	res.removeIfPresent(filepath.Join(home, "workflows"))
-	res.removeIfPresent(filepath.Join(home, "logs"))
-	res.removeIfPresent(filepath.Join(home, "sessions"))
-	res.removeIfPresent(filepath.Join(home, "providers"))
-	res.removeIfPresent(filepath.Join(home, "codex-headless"))
-	res.removeIfPresent(filepath.Join(home, "wiki"))
-	res.removeIfPresent(filepath.Join(home, "wiki.bak"))
-	res.removeIfPresent(filepath.Join(home, "calendar.json"))
 	return res, nil
 }
 
 // ResetAt performs a narrow reset on an explicit workspace tree rooted at
-// wuphfHome (the .wuphf subdirectory of a workspace's runtime home).
-// The parameterless ClearRuntime delegates here using config.RuntimeHomeDir().
+// wuphfHome (the .wuphf subdirectory of a workspace's runtime home). It
+// deletes the broker state file and the last-good snapshot. Honors
+// WUPHF_BROKER_STATE_PATH when set, in which case the override path replaces
+// the in-tree default.
+//
+// ClearRuntime delegates here using config.RuntimeHomeDir()/.wuphf as the
+// canonical wipe set.
 func ResetAt(wuphfHome string) (Result, error) {
 	var res Result
 	statePath := filepath.Join(wuphfHome, "team", "broker-state.json")
@@ -95,8 +99,15 @@ func ResetAt(wuphfHome string) (Result, error) {
 }
 
 // ShredAt performs a full workspace wipe on an explicit workspace tree rooted
-// at wuphfHome (the .wuphf subdirectory of a workspace's runtime home).
-// The parameterless Shred delegates here using config.RuntimeHomeDir().
+// at wuphfHome (the .wuphf subdirectory of a workspace's runtime home). It
+// runs ResetAt first, then removes onboarded.json, company.json, and the
+// directories holding office task receipts, workflows, logs, sessions,
+// provider session state, codex-headless cache, wiki, wiki.bak, and the
+// calendar JSON file.
+//
+// Shred delegates here using config.RuntimeHomeDir()/.wuphf and additionally
+// covers env-overridden onboarding/company paths that may resolve outside the
+// wuphfHome tree.
 func ShredAt(wuphfHome string) (Result, error) {
 	res, err := ResetAt(wuphfHome)
 	if err != nil {
@@ -124,18 +135,6 @@ func wuphfHome() (string, error) {
 		return "", errors.New("workspace: could not resolve home directory")
 	}
 	return filepath.Join(home, ".wuphf"), nil
-}
-
-func brokerStatePaths() (string, string, error) {
-	if p := strings.TrimSpace(os.Getenv("WUPHF_BROKER_STATE_PATH")); p != "" {
-		return p, p + ".last-good", nil
-	}
-	home, err := wuphfHome()
-	if err != nil {
-		return "", "", err
-	}
-	path := filepath.Join(home, "team", "broker-state.json")
-	return path, path + ".last-good", nil
 }
 
 func (r *Result) removeIfPresent(path string) {
