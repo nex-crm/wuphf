@@ -19,12 +19,10 @@ var errFileLockUnavailable = errors.New("workspaces: file lock not implemented o
 // the Windows port follow-up.
 func lockFileExclusive(f *os.File) error { return nil }
 
-// lockFileExclusiveNonBlocking always succeeds on Windows; same caveat as
-// lockFileExclusive. We keep the function signature so callers can be
-// portable without #ifdef-style branching.
-func lockFileExclusiveNonBlocking(f *os.File) error { return nil }
+// lockFileExclusiveNonBlocking returns errFileLockUnavailable on Windows.
+// Callers that use the non-blocking path must handle this signal; blocking
+// acquireLock uses lockFileExclusive (no-op) instead.
+func lockFileExclusiveNonBlocking(f *os.File) error { return errFileLockUnavailable }
 
-// unlockFile is a no-op on Windows — no lock was acquired.
+// unlockFile is a no-op on Windows — no lock was acquired by lockFileExclusive.
 func unlockFile(f *os.File) error { return nil }
-
-var _ = errFileLockUnavailable // reserved for future windows.LockFileEx wiring

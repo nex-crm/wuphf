@@ -9,8 +9,6 @@ package workspaces
 import (
 	"errors"
 	"os"
-
-	"github.com/nex-crm/wuphf/internal/config"
 )
 
 // realHomeDir returns the user's real home directory. It prefers
@@ -26,8 +24,7 @@ func realHomeDir() (string, error) {
 	if home, err := os.UserHomeDir(); err == nil && home != "" {
 		return home, nil
 	}
-	if home := config.RuntimeHomeDir(); home != "" {
-		return home, nil
-	}
+	// No RuntimeHomeDir fallback: cross-workspace artifacts must live at the
+	// user's real HOME, not inside any per-workspace WUPHF_RUNTIME_HOME tree.
 	return "", errors.New("workspaces: cannot resolve home directory")
 }

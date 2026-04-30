@@ -200,9 +200,16 @@ describe("<CreateWorkspaceModal>", () => {
 
     // Stub window.location.assign so the test doesn't actually navigate.
     const assign = vi.fn();
+    const originalLocation = window.location;
     Object.defineProperty(window, "location", {
       value: { assign },
       writable: true,
+    });
+    afterEach(() => {
+      Object.defineProperty(window, "location", {
+        value: originalLocation,
+        writable: true,
+      });
     });
 
     renderModal();

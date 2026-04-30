@@ -205,6 +205,12 @@ func TestClearRuntimeMatchesResetAt(t *testing.T) {
 		}
 		return out
 	}
+	if len(resA.Errors) != 0 {
+		t.Fatalf("ClearRuntime had unexpected errors: %v", resA.Errors)
+	}
+	if len(resB.Errors) != 0 {
+		t.Fatalf("ResetAt had unexpected errors: %v", resB.Errors)
+	}
 	relA := stripPrefix(dir1, gotA)
 	relB := stripPrefix(dir2, gotB)
 	if !equalSlices(relA, relB) {
@@ -241,6 +247,12 @@ func TestShredMatchesShredAt(t *testing.T) {
 			out[i] = rel
 		}
 		return out
+	}
+	if len(resA.Errors) != 0 {
+		t.Fatalf("Shred had unexpected errors: %v", resA.Errors)
+	}
+	if len(resB.Errors) != 0 {
+		t.Fatalf("ShredAt had unexpected errors: %v", resB.Errors)
 	}
 	relA := stripPrefix(dir1, gotA)
 	relB := stripPrefix(dir2, gotB)

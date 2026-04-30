@@ -49,9 +49,10 @@ func (cliOrchestratorAdapter) List(ctx context.Context, opts ListOpts) (ListResu
 
 	if opts.IncludeTrash {
 		entries, terr := listTrashEntries()
-		if terr == nil {
-			out.Trash = entries
+		if terr != nil {
+			return ListResult{}, fmt.Errorf("list trash entries: %w", terr)
 		}
+		out.Trash = entries
 	}
 	return out, nil
 }

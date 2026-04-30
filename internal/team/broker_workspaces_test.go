@@ -716,8 +716,6 @@ func TestHandleWorkspacesPause_BrokerHTTPCallStillCarriesSiblingToken(t *testing
 		t.Fatalf("write token: %v", err)
 	}
 
-	rec := &pauseRecorder{}
-	rec.pauseErr = nil
 	// Wire a stub Pause that simulates what the real orchestrator does:
 	// reads the sibling token + POSTs to the target's /admin/pause.
 	stub := &orchestratorPauseStub{tokenDir: tokenDir, targetURL: target.URL}

@@ -232,12 +232,6 @@ func main() {
 
 	flag.Parse()
 
-	// Wire the workspaces orchestrator + run the symmetric-layout migration
-	// before any subcommand dispatch. Both are idempotent: migration no-ops
-	// when registry.json already exists, and the factory swap is safe even
-	// when the user is about to run a non-workspace subcommand.
-	initWorkspaces()
-
 	if *helpAll {
 		fmt.Fprintf(os.Stderr, "WUPHF v%s — all flags (including internal):\n\n", buildinfo.Current().Version)
 		flag.PrintDefaults()
@@ -309,6 +303,11 @@ func main() {
 		fmt.Printf("%s v%s\n", appName, buildinfo.Current().Version)
 		os.Exit(0)
 	}
+
+	// Wire the workspaces orchestrator + run the symmetric-layout migration.
+	// Placed after --help-all and --version early exits so read-only
+	// invocations skip the filesystem migration entirely.
+	initWorkspaces()
 
 	// Channel view mode (launched by wuphf team in tmux)
 	if *channelView {

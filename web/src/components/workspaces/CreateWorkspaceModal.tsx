@@ -271,6 +271,7 @@ export function CreateWorkspaceModal({
       setPhase("form");
       setStageIdx(0);
       setErrorMsg(null);
+      setForm(defaultsFromConfig());
     }
   }, [open]);
 
@@ -301,7 +302,10 @@ export function CreateWorkspaceModal({
     [form.name],
   );
   const canSubmit =
-    phase === "form" && form.inherit && slugValidation.ok && !create.isPending;
+    (phase === "form" || phase === "error") &&
+    form.inherit &&
+    slugValidation.ok &&
+    !create.isPending;
 
   if (!open) return null;
 

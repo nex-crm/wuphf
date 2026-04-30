@@ -33,14 +33,22 @@ func (l *Launcher) writeHeadlessOpencodeMCPConfig(slug string) (string, error) {
 	// user-global; intentionally NOT under WUPHF_RUNTIME_HOME — the base opencode
 	// config (~/.config/opencode/opencode.json) is a user-global read; the
 	// per-agent write path uses runtimeHome below.
-	userHome, err := os.UserHomeDir()
-	if err != nil || strings.TrimSpace(userHome) == "" {
-		return "", fmt.Errorf("resolve user home: %w", err)
+	//
+	// os.UserHomeDir failure is non-fatal for the base config read: if HOME is
+	// unset the base path is simply skipped and the agent config gets a minimal
+	// overlay. Only the write path (runtimeHome) must be non-empty.
+	var baseConfigPath string
+	if userHome, herr := os.UserHomeDir(); herr == nil && strings.TrimSpace(userHome) != "" {
+		baseConfigPath = filepath.Join(userHome, ".config", "opencode", "opencode.json")
 	}
-	baseConfigPath := filepath.Join(userHome, ".config", "opencode", "opencode.json")
 	runtimeHome := config.RuntimeHomeDir()
 	if runtimeHome == "" {
-		runtimeHome = userHome
+		if userHome, herr := os.UserHomeDir(); herr == nil && strings.TrimSpace(userHome) != "" {
+			runtimeHome = userHome
+		}
+	}
+	if runtimeHome == "" {
+		return "", fmt.Errorf("resolve runtime home for opencode config: WUPHF_RUNTIME_HOME unset and os.UserHomeDir failed")
 	}
 	configPath := headlessOpencodeAgentConfigPath(runtimeHome, slug)
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {

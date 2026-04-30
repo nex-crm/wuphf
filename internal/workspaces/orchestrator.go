@@ -321,6 +321,13 @@ func Resume(ctx context.Context, name string) error {
 		return ErrWorkspaceNotFound
 	}
 
+	// Guard: refuse to spawn over a broker that is already live. A live
+	// port means the workspace is Running (or mid-start), and issuing Spawn
+	// again would collide with the existing process.
+	if target.State == StateRunning || target.State == StateStarting || probePort(target.BrokerPort) {
+		return fmt.Errorf("workspaces: resume %q: workspace is already running (port %d)", name, target.BrokerPort)
+	}
+
 	if err := Update(name, func(ws *Workspace) error {
 		ws.State = StateStarting
 		return nil
@@ -360,6 +367,13 @@ func Shred(ctx context.Context, name string, permanent bool) error {
 	}
 	if target == nil {
 		return ErrWorkspaceNotFound
+	}
+
+	// Refuse to shred a running workspace. Deleting the runtime tree while the
+	// broker holds open files and sockets leaves a zombie process and can cause
+	// AllocatePortPair to hand the same ports to a new workspace immediately.
+	if target.State == StateRunning || target.State == StateStarting || probePort(target.BrokerPort) {
+		return fmt.Errorf("workspaces: shred %q: workspace is running (port %d); pause it first", name, target.BrokerPort)
 	}
 
 	// Token file and the ~/.wuphf compatibility symlink live at the real user

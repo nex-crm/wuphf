@@ -34,6 +34,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -466,7 +467,11 @@ func (b *Broker) handleWorkspacesPause(w http.ResponseWriter, r *http.Request) {
 		writeWorkspaceError(w, http.StatusServiceUnavailable, "workspaces not configured")
 		return
 	}
-	if err := o.Pause(r.Context(), req.Name); err != nil {
+	// Use a detached context so a client disconnect cannot abort a 90-second
+	// graceful drain mid-flight, leaving the workspace in a partial state.
+	pauseCtx, pauseCancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer pauseCancel()
+	if err := o.Pause(pauseCtx, req.Name); err != nil {
 		writeOrchestratorError(w, err)
 		return
 	}
@@ -680,13 +685,17 @@ func (b *Broker) handleAdminPause(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
+		exitCode := 0
 		if drainer := b.launcherDrainHook(); drainer != nil {
-			_ = drainer.Drain(ctx)
+			if err := drainer.Drain(ctx); err != nil {
+				log.Printf("admin/pause: drain error: %v", err)
+				exitCode = 1
+			}
 		}
 		// Give the response a moment to flush before tearing down the
-		// process. In production this is os.Exit(0); in tests the hook
+		// process. In production this is os.Exit; in tests the hook
 		// records the call without exiting.
 		time.Sleep(adminPauseSelfShutdownDelay)
-		b.adminPauseExit(0)
+		b.adminPauseExit(exitCode)
 	}()
 }

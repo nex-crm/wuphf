@@ -12,8 +12,9 @@ type TrashEntry struct {
 	Name string `json:"name"`
 	// TrashID is the trash directory name ("<name>-<unix-ts>").
 	TrashID string `json:"trash_id"`
-	// Path is the absolute path to the trash directory on disk.
-	Path string `json:"path"`
+	// Path is the absolute path to the trash directory on disk. Not serialised
+	// to JSON to avoid leaking server filesystem layout to API clients.
+	Path string `json:"-"`
 	// ShredAt is the moment the workspace was moved to trash, parsed from
 	// the trailing unix-timestamp segment of the directory name.
 	ShredAt time.Time `json:"shred_at"`
