@@ -86,7 +86,7 @@ function memoryWorkflowRequiredSteps(
   );
   if (fromStates.length > 0) return fromStates;
 
-  return WORKFLOW_STEP_NAMES.slice();
+  return workflow.required ? WORKFLOW_STEP_NAMES.slice() : [];
 }
 
 function memoryWorkflowStepCount(workflow: TaskMemoryWorkflow): {
@@ -94,7 +94,7 @@ function memoryWorkflowStepCount(workflow: TaskMemoryWorkflow): {
   total: number;
 } {
   const requiredSteps = memoryWorkflowRequiredSteps(workflow);
-  const total = requiredSteps.length || WORKFLOW_STEP_NAMES.length;
+  const total = requiredSteps.length;
   const done = requiredSteps.filter((step) =>
     isMemoryStepSatisfied(memoryWorkflowStep(workflow, step)),
   ).length;

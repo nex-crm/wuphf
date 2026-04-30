@@ -1173,6 +1173,79 @@ func TestBrokerTaskCompleteRejectsLiveBusinessTheater(t *testing.T) {
 	}
 }
 
+func TestBrokerTaskUpdateRollsBackBrokerSideEffectsOnSaveFailure(t *testing.T) {
+	b := newTestBroker(t)
+	ensureTestMemberAccess(b, "general", "operator", "Operator")
+	ensureTestMemberAccess(b, "general", "builder", "Builder")
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("failed to start broker: %v", err)
+	}
+	defer b.Stop()
+	b.mu.Lock()
+	b.tasks = []teamTask{
+		{
+			ID:        "task-1",
+			Channel:   "general",
+			Title:     "Implement reusable importer",
+			Owner:     "builder",
+			Status:    "in_progress",
+			CreatedBy: "operator",
+			TaskType:  "feature",
+			CreatedAt: "2026-04-15T00:00:00Z",
+			UpdatedAt: "2026-04-15T00:00:00Z",
+		},
+		{
+			ID:        "task-2",
+			Channel:   "general",
+			Title:     "Follow-up importer docs",
+			Status:    "open",
+			CreatedBy: "operator",
+			TaskType:  "feature",
+			DependsOn: []string{"task-1"},
+			Blocked:   true,
+			CreatedAt: "2026-04-15T00:00:00Z",
+			UpdatedAt: "2026-04-15T00:00:00Z",
+		},
+	}
+	b.counter = 7
+	b.statePath = t.TempDir()
+	b.mu.Unlock()
+
+	body, _ := json.Marshal(map[string]any{
+		"action":     "complete",
+		"channel":    "general",
+		"id":         "task-1",
+		"created_by": "builder",
+	})
+	req, _ := http.NewRequest(http.MethodPost, fmt.Sprintf("http://%s/tasks", b.Addr()), bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("task complete request failed: %v", err)
+	}
+	raw, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("expected save failure, got status %d: %s", resp.StatusCode, raw)
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.tasks[0].Status != "in_progress" {
+		t.Fatalf("failed save should roll back completed task, got %+v", b.tasks[0])
+	}
+	if !b.tasks[1].Blocked || b.tasks[1].Status != "open" {
+		t.Fatalf("failed save should roll back dependent unblock, got %+v", b.tasks[1])
+	}
+	if b.counter != 7 {
+		t.Fatalf("failed save should roll back broker counter, got %d", b.counter)
+	}
+	if got := len(b.actions); got != 0 {
+		t.Fatalf("failed save should roll back action log, got %+v", b.actions[:got])
+	}
+}
+
 func TestBrokerStoresLedgerAndReviewLifecycle(t *testing.T) {
 	setPrepareTaskWorktreeForTest(t, func(taskID string) (string, string, error) {
 		return "/tmp/wuphf-task-" + taskID, "wuphf-" + taskID, nil
@@ -2864,6 +2937,77 @@ func TestBrokerTaskMemoryWorkflowRecordsBatchedArtifacts(t *testing.T) {
 	}
 	if got := len(updated.Task.MemoryWorkflow.Captures); got != 2 {
 		t.Fatalf("expected both capture artifacts to persist, got %d: %+v", got, updated.Task.MemoryWorkflow.Captures)
+	}
+}
+
+func TestBrokerTaskMemoryWorkflowPrevalidatesBatchedArtifacts(t *testing.T) {
+	b := newTestBroker(t)
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("failed to start broker: %v", err)
+	}
+	defer b.Stop()
+
+	createBody, _ := json.Marshal(map[string]any{
+		"action":     "create",
+		"title":      "Research prior context for onboarding",
+		"created_by": "ceo",
+		"owner":      "ceo",
+		"task_type":  "research",
+	})
+	req, _ := http.NewRequest(http.MethodPost, fmt.Sprintf("http://%s/tasks", b.Addr()), bytes.NewReader(createBody))
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	raw, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("create status=%d body=%s", resp.StatusCode, raw)
+	}
+	var created struct {
+		Task teamTask `json:"task"`
+	}
+	if err := json.Unmarshal(raw, &created); err != nil {
+		t.Fatalf("decode create: %v", err)
+	}
+
+	workflowBody, _ := json.Marshal(map[string]any{
+		"event":   "capture",
+		"task_id": created.Task.ID,
+		"actor":   "pm",
+		"artifacts": []map[string]any{
+			{
+				"backend": "markdown",
+				"source":  "notebook",
+				"path":    "agents/pm/notebook/onboarding.md",
+			},
+			{},
+		},
+	})
+	req, _ = http.NewRequest(http.MethodPost, fmt.Sprintf("http://%s/tasks/memory-workflow", b.Addr()), bytes.NewReader(workflowBody))
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	req.Header.Set("Content-Type", "application/json")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("record workflow: %v", err)
+	}
+	raw, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected invalid batch to be rejected, got status=%d body=%s", resp.StatusCode, raw)
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, task := range b.tasks {
+		if task.ID != created.Task.ID || task.MemoryWorkflow == nil {
+			continue
+		}
+		if got := len(task.MemoryWorkflow.Captures); got != 0 {
+			t.Fatalf("invalid batch should not partially persist captures, got %+v", task.MemoryWorkflow.Captures)
+		}
 	}
 }
 

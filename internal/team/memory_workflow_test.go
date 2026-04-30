@@ -245,7 +245,7 @@ func TestMemoryWorkflowLookupRejectsEmptyCitations(t *testing.T) {
 	}
 	syncTaskMemoryWorkflow(task, "2026-04-30T10:00:00Z")
 
-	if !recordMemoryWorkflowLookup(task, "pm", "prior onboarding", []ContextCitation{{LineStart: 1, LineEnd: 1}}, "2026-04-30T10:01:00Z") {
+	if !recordMemoryWorkflowLookup(task, "pm", "prior onboarding", []ContextCitation{{}}, "2026-04-30T10:01:00Z") {
 		t.Fatal("first lookup attempt should record query metadata")
 	}
 	if len(task.MemoryWorkflow.Citations) != 0 {
@@ -253,6 +253,40 @@ func TestMemoryWorkflowLookupRejectsEmptyCitations(t *testing.T) {
 	}
 	if task.MemoryWorkflow.Lookup.Status != MemoryWorkflowStepStatusPending || task.MemoryWorkflow.Lookup.CompletedAt != "" {
 		t.Fatalf("empty citation should not satisfy lookup: %+v", task.MemoryWorkflow.Lookup)
+	}
+}
+
+func TestMemoryWorkflowLookupAcceptsLineOnlyCitationEvidence(t *testing.T) {
+	task := &teamTask{
+		ID:        "task-1",
+		TaskType:  "research",
+		Title:     "Research prior context for onboarding",
+		CreatedAt: "2026-04-30T10:00:00Z",
+		UpdatedAt: "2026-04-30T10:00:00Z",
+	}
+	syncTaskMemoryWorkflow(task, "2026-04-30T10:00:00Z")
+
+	if !recordMemoryWorkflowLookup(task, "pm", "prior onboarding", []ContextCitation{{Source: "notebook", LineStart: 12}}, "2026-04-30T10:01:00Z") {
+		t.Fatal("line-only citation should record lookup evidence")
+	}
+	if len(task.MemoryWorkflow.Citations) != 1 {
+		t.Fatalf("line-only citation should be retained: %+v", task.MemoryWorkflow.Citations)
+	}
+	if task.MemoryWorkflow.Lookup.Status != MemoryWorkflowStepStatusSatisfied || task.MemoryWorkflow.Lookup.CompletedAt == "" {
+		t.Fatalf("line-only citation should satisfy lookup: %+v", task.MemoryWorkflow.Lookup)
+	}
+}
+
+func TestMemoryWorkflowContentOnlyCitationsKeepDistinctKeys(t *testing.T) {
+	var citations []ContextCitation
+	if !appendContextCitation(&citations, ContextCitation{Title: "First", Snippet: "Alpha"}) {
+		t.Fatal("expected first content citation to append")
+	}
+	if !appendContextCitation(&citations, ContextCitation{Title: "Second", Snippet: "Beta"}) {
+		t.Fatal("expected second content citation to append")
+	}
+	if got := len(citations); got != 2 {
+		t.Fatalf("expected content-only citations to remain distinct, got %d: %+v", got, citations)
 	}
 }
 

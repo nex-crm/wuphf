@@ -127,6 +127,16 @@ describe("taskMemoryWorkflowBadge", () => {
       taskMemoryWorkflowBadge({ required: false, status: "not_required" }),
     ).toBeNull();
   });
+
+  it("does not infer required steps for non-required workflows with artifacts", () => {
+    const badge = taskMemoryWorkflowBadge({
+      required: false,
+      status: "pending",
+      captures: [{ source: "notebook", path: "agents/pm/notebook/notes.md" }],
+    });
+
+    expect(badge?.label).toBe("memory pending");
+  });
 });
 
 describe("TaskDetailModal memory override", () => {
@@ -221,7 +231,7 @@ describe("TaskDetailModal memory override", () => {
           memoryWorkflowOverrideReason: "Customer deadline accepted by founder",
         },
       );
+      expect(onClose).toHaveBeenCalled();
     });
-    expect(onClose).toHaveBeenCalled();
   });
 });

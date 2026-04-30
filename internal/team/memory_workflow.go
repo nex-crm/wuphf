@@ -692,13 +692,16 @@ func appendContextCitation(citations *[]ContextCitation, citation ContextCitatio
 }
 
 func contextCitationHasEvidence(citation ContextCitation) bool {
-	return strings.TrimSpace(citation.SourceID) != "" ||
+	return strings.TrimSpace(citation.Source) != "" ||
+		strings.TrimSpace(citation.SourceID) != "" ||
 		strings.TrimSpace(citation.Path) != "" ||
 		strings.TrimSpace(citation.PageID) != "" ||
 		strings.TrimSpace(citation.ChunkID) != "" ||
 		strings.TrimSpace(citation.SourceURL) != "" ||
 		strings.TrimSpace(citation.Title) != "" ||
-		strings.TrimSpace(citation.Snippet) != ""
+		strings.TrimSpace(citation.Snippet) != "" ||
+		citation.LineStart > 0 ||
+		citation.LineEnd > 0
 }
 
 func appendMemoryWorkflowArtifact(artifacts *[]MemoryWorkflowArtifact, artifact MemoryWorkflowArtifact) bool {
@@ -784,8 +787,12 @@ func contextCitationKey(citation ContextCitation) string {
 		citation.PageID,
 		citation.ChunkID,
 		citation.SourceURL,
-		fmt.Sprintf("%d", citation.LineStart),
-		fmt.Sprintf("%d", citation.LineEnd),
+	}
+	if citation.LineStart > 0 {
+		parts = append(parts, fmt.Sprintf("%d", citation.LineStart))
+	}
+	if citation.LineEnd > 0 {
+		parts = append(parts, fmt.Sprintf("%d", citation.LineEnd))
 	}
 	key := strings.Trim(strings.Join(parts, "|"), "|")
 	if key == "" {
