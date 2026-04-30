@@ -323,8 +323,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   setLastMessageId: (id) => set({ lastMessageId: id }),
   unreadByChannel: {},
   incrementUnread: (channel) => {
-    const ch = channel.trim();
-    if (!ch) return;
+    const ch = channel.trim() || "general";
     set((state) => ({
       unreadByChannel: {
         ...state.unreadByChannel,
@@ -333,8 +332,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     }));
   },
   clearUnread: (channel) => {
-    const ch = channel.trim();
-    if (!ch) return;
+    const ch = channel.trim() || "general";
     set((state) => {
       if ((state.unreadByChannel[ch] ?? 0) === 0) return state;
       return {

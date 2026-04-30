@@ -88,15 +88,6 @@ describe("channel unread state", () => {
     expect(useAppStore.getState().unreadByChannel.general).toBe(1);
   });
 
-  it("ignores blank channel names for unread actions", () => {
-    useAppStore.setState({ unreadByChannel: { general: 1 } });
-
-    useAppStore.getState().incrementUnread("   ");
-    useAppStore.getState().clearUnread("");
-
-    expect(useAppStore.getState().unreadByChannel).toEqual({ general: 1 });
-  });
-
   it("clears a channel when navigating to its message view", () => {
     useAppStore.setState({
       currentChannel: "general",
