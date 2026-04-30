@@ -1840,9 +1840,8 @@ export function Wizard({ onComplete }: WizardProps) {
 
   // When creating a new workspace from an existing one, identity is skipped —
   // the user already exists, they just need blueprint/team/setup/task.
-  const skipIdentity = new URLSearchParams(window.location.search).has(
-    "skip_identity",
-  );
+  const skipIdentity =
+    new URLSearchParams(window.location.search).get("skip_identity") === "1";
   const activeSteps: readonly WizardStep[] = skipIdentity
     ? STEP_ORDER.filter((s) => s !== "identity")
     : STEP_ORDER;

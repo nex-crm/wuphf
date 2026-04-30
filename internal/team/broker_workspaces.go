@@ -335,6 +335,22 @@ func writeOrchestratorError(w http.ResponseWriter, err error) {
 	writeWorkspaceError(w, errorToStatus(err), err.Error())
 }
 
+func canonicalWorkspaceRuntimeHome(raw string) (string, bool) {
+	path := strings.TrimSpace(raw)
+	if path == "" {
+		return "", false
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return filepath.Clean(path), true
+	}
+	resolved, err := filepath.EvalSymlinks(abs)
+	if err == nil {
+		return resolved, true
+	}
+	return filepath.Clean(abs), true
+}
+
 // requireMethod returns true and lets the handler proceed if r.Method matches
 // expected. Otherwise writes 405 and returns false.
 func requireMethod(w http.ResponseWriter, r *http.Request, expected string) bool {
@@ -365,9 +381,16 @@ func (b *Broker) handleWorkspacesList(w http.ResponseWriter, r *http.Request) {
 		writeOrchestratorError(w, err)
 		return
 	}
-	selfHome := filepath.Clean(config.RuntimeHomeDir())
+	selfHome, ok := canonicalWorkspaceRuntimeHome(config.RuntimeHomeDir())
+	if !ok {
+		writeWorkspaceJSON(w, http.StatusOK, map[string]any{
+			"workspaces": ws,
+		})
+		return
+	}
 	for i := range ws {
-		if filepath.Clean(ws[i].RuntimeHome) == selfHome {
+		candidate, ok := canonicalWorkspaceRuntimeHome(ws[i].RuntimeHome)
+		if ok && candidate == selfHome {
 			ws[i].IsActive = true
 		}
 	}
