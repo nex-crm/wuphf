@@ -2309,6 +2309,6 @@ func (m channelModel) buildCalendarAgentPickerOptions() []tui.PickerOption {
 	return options
 }
 
-// HTTP/network commands moved to channel_client.go.
+// HTTP/network commands moved to channel_broker.go.
 
 // Process lifecycle helpers moved to channel_lifecycle.go.
