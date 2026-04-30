@@ -81,16 +81,21 @@
 
   :root {
     --bg: #1A1610;
-    --bg2: #242018;
-    --bg3: #2E2820;
+    --surface: #242018;
+    --surface-high: #2E2820;
     --border: #3A3028;
     --yellow: #ECB22E;
     --yellow-dark: #C49020;
-    --yellow-dim: rgba(236,178,46,0.15);
-    --accent-lime: #5AAA7A;
+    --yellow-glow: rgba(236,178,46,0.15);
+    --green: #5AAA7A;
     --blue: #5A9AC8;
     --text: #F0EBD8;
-    --text-dim: #8A7D6A;
+    --text-muted: #8A7D6A;
+    --bg2: var(--surface);
+    --bg3: var(--surface-high);
+    --yellow-dim: var(--yellow-glow);
+    --accent-lime: var(--green);
+    --text-dim: var(--text-muted);
     --font-display: 'Press Start 2P', monospace;
     --font-vt: 'VT323', monospace;
     --font-mono: 'DM Mono', monospace;
@@ -859,8 +864,12 @@
     letter-spacing: 0.04em;
   }
   .code-line:hover .line-copy,
+  .code-line:active .line-copy,
   .line-copy:focus-visible { opacity: 1; }
   .line-copy:hover { background: var(--yellow); color: var(--bg); border-color: var(--yellow); }
+  @media (hover: none), (pointer: coarse) {
+    .line-copy { opacity: 1; }
+  }
 
   /* ── ISOMETRIC OFFICE SECTION ─────────────────────── */
   .office-section {
@@ -1708,11 +1717,17 @@
   }
 
   function copyInstall() {
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText('npx wuphf@latest').catch(function() {});
-    }
+    var status = document.getElementById('copyStatus');
     var label = document.getElementById('copyLabel');
-    if (label) flashCopy(label);
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText('npx wuphf@latest').then(function() {
+        if (label) flashCopy(label);
+      }).catch(function() {
+        if (status) status.textContent = 'Unable to copy install command.';
+      });
+      return;
+    }
+    if (status) status.textContent = 'Clipboard copy is unavailable in this browser.';
   }
   window.copyInstall = copyInstall;
 
@@ -1720,10 +1735,16 @@
     btn.addEventListener('click', function() {
       var text = btn.dataset.copy || '';
       var label = btn.querySelector('.install-copy');
+      var status = document.getElementById('copyStatus');
       if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(text).catch(function() {});
+        navigator.clipboard.writeText(text).then(function() {
+          if (label) flashCopy(label);
+        }).catch(function() {
+          if (status) status.textContent = 'Unable to copy install command.';
+        });
+        return;
       }
-      if (label) flashCopy(label);
+      if (status) status.textContent = 'Clipboard copy is unavailable in this browser.';
     });
   });
 
