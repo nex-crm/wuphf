@@ -385,6 +385,20 @@ export interface InterviewOption {
   text_hint?: string;
 }
 
+export interface SkillSimilarRef {
+  slug: string;
+  score: number;
+  method?: string;
+}
+
+export interface InterviewMetadata {
+  /** Set on enhance_skill_proposal interviews (PR 7 task #15). */
+  enhances_slug?: string;
+  /** Set on ambiguous-band skill_proposal interviews (PR 7 task #15). */
+  similar_to_existing?: SkillSimilarRef;
+  [key: string]: unknown;
+}
+
 export interface AgentRequest {
   id: string;
   from: string;
@@ -403,6 +417,12 @@ export interface AgentRequest {
   recommended_id?: string;
   created_at?: string;
   updated_at?: string;
+  /** Echoes the entity slug the request is about (e.g. a skill name). */
+  reply_to?: string;
+  /** Structured metadata. Used by the enhance-existing UX (PR 7 task #14). */
+  metadata?: InterviewMetadata;
+  /** Full candidate spec on enhance_skill_proposal interviews. */
+  enhance_candidate?: Skill;
 }
 
 export function getRequests(channel: string) {
@@ -493,6 +513,35 @@ export interface Task {
   recheck_at?: string;
   created_at?: string;
   updated_at?: string;
+}
+
+export interface CreateTaskInput {
+  title: string;
+  assignee: string;
+  details?: string;
+  task_type?: string;
+  execution_mode?: string;
+  depends_on?: string[];
+}
+
+export interface CreateTasksResponse {
+  tasks: Task[];
+}
+
+/**
+ * Create one or more tasks via the /task-plan endpoint. Used by surfaces
+ * that hand off work (e.g. Suggest changes on a skill proposal creates a
+ * "Revise skill" task assigned to the lead).
+ */
+export function createTasks(
+  tasks: CreateTaskInput[],
+  opts?: { channel?: string; createdBy?: string },
+): Promise<CreateTasksResponse> {
+  return post<CreateTasksResponse>("/task-plan", {
+    channel: opts?.channel || "general",
+    created_by: opts?.createdBy || "human",
+    tasks,
+  });
 }
 
 export function reassignTask(
@@ -661,7 +710,7 @@ export function patchSchedulerJob(
 
 // ── Skills ──
 
-export type SkillStatus = "active" | "proposed" | "archived";
+export type SkillStatus = "active" | "proposed" | "archived" | "disabled";
 
 export interface SkillMetadata {
   wuphf?: {
@@ -669,24 +718,113 @@ export interface SkillMetadata {
   };
 }
 
+export type OwnerAgents = string[];
+
 export interface Skill {
   name: string;
+  title?: string;
   description?: string;
   source?: string;
+  content?: string;
+  trigger?: string;
   parameters?: unknown;
   status?: SkillStatus;
   created_by?: string;
   created_at?: string;
   updated_at?: string;
+  /** Per-agent scoping (PR 7). Empty/missing = lead-routable shared skill. */
+  owner_agents?: OwnerAgents;
+  /** Set on ambiguous-band proposals by the similarity gate (PR 7 task #15). */
+  similar_to_existing?: SkillSimilarRef;
   metadata?: SkillMetadata;
 }
+
+export type SkillsListScope = "active" | "all";
 
 export function getSkills() {
   return get<{ skills: Skill[] }>("/skills");
 }
 
-export function invokeSkill(name: string, params?: Record<string, unknown>) {
-  return post(`/skills/${encodeURIComponent(name)}/invoke`, params ?? {});
+/**
+ * Fetch the skill catalog. With scope="all" the legacy /skills endpoint
+ * accepts include_archived + include_disabled flags (PR 7 task #18) so the
+ * Skills app can render every section (Pending / Active / Disabled /
+ * Archived) from a single query — keeping body content intact for the
+ * SidePanel preview and the enhance-existing patchSkill flow.
+ *
+ * scope="active" returns the legacy default (active + proposed + disabled,
+ * archived hidden) for callers that don't need the archived bucket.
+ */
+export function getSkillsList(scope: SkillsListScope = "all") {
+  const params: Record<string, string> = {};
+  if (scope === "all") {
+    params.include_archived = "true";
+    params.include_disabled = "true";
+  }
+  return get<{ skills: Skill[] }>("/skills", params);
+}
+
+export interface DisableSkillResponse {
+  skill?: Skill;
+}
+
+export function disableSkill(name: string): Promise<DisableSkillResponse> {
+  return post<DisableSkillResponse>(
+    `/skills/${encodeURIComponent(name)}/disable`,
+    {},
+  );
+}
+
+export interface EnableSkillResponse {
+  skill?: Skill;
+}
+
+export function enableSkill(name: string): Promise<EnableSkillResponse> {
+  return post<EnableSkillResponse>(
+    `/skills/${encodeURIComponent(name)}/enable`,
+    {},
+  );
+}
+
+export interface RestoreArchivedSkillResponse {
+  skill?: Skill;
+}
+
+export function restoreArchivedSkill(
+  name: string,
+): Promise<RestoreArchivedSkillResponse> {
+  return post<RestoreArchivedSkillResponse>(
+    `/skills/${encodeURIComponent(name)}/restore`,
+    {},
+  );
+}
+
+export interface ArchiveSkillResponse {
+  ok?: boolean;
+  skill?: Skill;
+}
+
+export function archiveSkill(name: string): Promise<ArchiveSkillResponse> {
+  return post<ArchiveSkillResponse>(
+    `/skills/${encodeURIComponent(name)}/archive`,
+    {},
+  );
+}
+
+export interface InvokeSkillResult {
+  channel?: string;
+  skill?: Skill;
+  task_id?: string;
+}
+
+export function invokeSkill(
+  name: string,
+  params?: Record<string, unknown>,
+): Promise<InvokeSkillResult> {
+  return post<InvokeSkillResult>(
+    `/skills/${encodeURIComponent(name)}/invoke`,
+    params ?? {},
+  );
 }
 
 // ── Skill compile (PR 1a wiki-skill-compile) ──
@@ -775,6 +913,31 @@ export function undoRejectSkill(
   return post<UndoRejectSkillResponse>(`/skills/reject/undo`, {
     undo_token: token,
   });
+}
+
+export interface PatchSkillRequest {
+  old_string: string;
+  new_string: string;
+  replace_all?: boolean;
+}
+
+export interface PatchSkillResponse {
+  skill?: Skill;
+}
+
+/**
+ * Edit-tool style find/replace patch against a skill's body.
+ * Used by the enhance-existing flow (PR 7 task #14) to fold a candidate
+ * proposal into an existing skill without losing provenance.
+ */
+export function patchSkill(
+  name: string,
+  body: PatchSkillRequest,
+): Promise<PatchSkillResponse> {
+  return post<PatchSkillResponse>(
+    `/skills/${encodeURIComponent(name)}/patch`,
+    body,
+  );
 }
 
 // ── Usage ──
