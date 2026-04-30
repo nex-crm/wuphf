@@ -41,7 +41,16 @@ func (l *Launcher) Attach() error {
 // Kill destroys the tmux session, all agent processes, and the broker. Also
 // removes per-agent temp files (MCP config + system prompt) so the broker
 // token and prompt content do not linger in $TMPDIR.
+//
+// PLAN.md §C25 staff-review fix: drain the watchdog scheduler before
+// tearing down the broker. Pre-fix, the scheduler goroutine outlived
+// Kill and held a reference to the broker; the Stop() call here unblocks
+// done.Wait inside the scheduler so Kill returns once the goroutine has
+// exited.
 func (l *Launcher) Kill() error {
+	if l.schedulerWorker != nil {
+		l.schedulerWorker.Stop()
+	}
 	if l.headless.cancel != nil {
 		l.headless.cancel()
 	}
