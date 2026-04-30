@@ -13,7 +13,7 @@ class TestDevHome(unittest.TestCase):
     """_dev_home() must never produce a doubled path."""
 
     def setUp(self) -> None:
-        self._original_home = os.environ.get("HOME", "")
+        self._original_home = os.environ.get("HOME")
 
     def test_plain_home_appends_suffix(self) -> None:
         """When HOME is a normal user home, suffix is appended."""
@@ -50,7 +50,10 @@ class TestDevHome(unittest.TestCase):
         self.assertEqual(os.environ["HOME"], "/Users/testuser/.wuphf-dev-home")
 
     def tearDown(self) -> None:
-        os.environ["HOME"] = self._original_home
+        if self._original_home is None:
+            os.environ.pop("HOME", None)
+        else:
+            os.environ["HOME"] = self._original_home
 
 
 if __name__ == "__main__":
