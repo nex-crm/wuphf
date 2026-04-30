@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/nex-crm/wuphf/internal/config"
 )
 
 // SummarizeJSONField returns a TruncateText'd one-line summary of a
@@ -37,9 +39,8 @@ func TaskLogRoot() string {
 	if root := strings.TrimSpace(os.Getenv("WUPHF_TASK_LOG_ROOT")); root != "" {
 		return root
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return filepath.Join(".wuphf", "office", "tasks")
+	if home := config.RuntimeHomeDir(); home != "" {
+		return filepath.Join(home, ".wuphf", "office", "tasks")
 	}
-	return filepath.Join(home, ".wuphf", "office", "tasks")
+	return filepath.Join(".wuphf", "office", "tasks")
 }

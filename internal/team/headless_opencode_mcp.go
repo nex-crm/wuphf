@@ -30,12 +30,19 @@ func (l *Launcher) writeHeadlessOpencodeMCPConfig(slug string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve wuphf binary: %w", err)
 	}
-	home, err := os.UserHomeDir()
-	if err != nil || strings.TrimSpace(home) == "" {
+	// user-global; intentionally NOT under WUPHF_RUNTIME_HOME — the base opencode
+	// config (~/.config/opencode/opencode.json) is a user-global read; the
+	// per-agent write path uses runtimeHome below.
+	userHome, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(userHome) == "" {
 		return "", fmt.Errorf("resolve user home: %w", err)
 	}
-	baseConfigPath := filepath.Join(home, ".config", "opencode", "opencode.json")
-	configPath := headlessOpencodeAgentConfigPath(home, slug)
+	baseConfigPath := filepath.Join(userHome, ".config", "opencode", "opencode.json")
+	runtimeHome := config.RuntimeHomeDir()
+	if runtimeHome == "" {
+		runtimeHome = userHome
+	}
+	configPath := headlessOpencodeAgentConfigPath(runtimeHome, slug)
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
 		return "", fmt.Errorf("mkdir opencode config dir: %w", err)
 	}

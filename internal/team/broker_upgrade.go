@@ -332,6 +332,8 @@ func detectUpgradeInstall(ctx context.Context) upgradeInstallPlan {
 	// Local install: walk up from cwd, skipping non-declaring ancestors so
 	// monorepos with wuphf at the workspace root still detect cleanly when
 	// cwd is inside a sub-package that doesn't declare it directly.
+	// user-global; intentionally NOT under WUPHF_RUNTIME_HOME — detectLocalInstall
+	// walks the npm dependency tree from the real user HOME, not WUPHF state.
 	homeDir, _ := os.UserHomeDir()
 	cwd, err := os.Getwd()
 	if err != nil {

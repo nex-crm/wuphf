@@ -41,7 +41,15 @@ var allowedFiles = map[string]string{
 	"internal/team/memory_backend.go": "gbrainMCPEnv + gbrainMCPEnvVars — gbrain is user-global",
 
 	// npm install detection — walks up from user real HOME, not WUPHF state.
-	"internal/team/broker.go": "detectLocalInstall — npm dependency walk from user HOME",
+	// broker_upgrade.go is the refactored split of broker.go; same rationale.
+	"internal/team/broker.go":         "detectLocalInstall — npm dependency walk from user HOME",
+	"internal/team/broker_upgrade.go": "detectLocalInstall — npm dependency walk from user HOME (split from broker.go)",
+
+	// Codex runner carve-outs — HOME passthrough to subprocess + codex auth path + global home resolver.
+	"internal/team/headless_codex_runner.go": "HOME passthrough + headlessCodexHomeDir (~/.codex auth) + headlessCodexGlobalHomeDir",
+
+	// Opencode MCP config — base opencode.json is user-global (read-only); agent config writes use RuntimeHomeDir.
+	"internal/team/headless_opencode_mcp.go": "base opencode config read from real user HOME (user-global); agent config write uses RuntimeHomeDir",
 
 	// OpenClaw probe utility — device-bound identity credentials.
 	"cmd/wuphf-oc-probe/main.go": "OpenClaw identity is device-bound credentials, not workspace state",

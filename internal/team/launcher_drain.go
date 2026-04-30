@@ -43,8 +43,11 @@ func (l *Launcher) Drain(ctx context.Context) error {
 
 	drainingFlag.Store(true)
 
-	if l.headlessCancel != nil {
-		l.headlessCancel()
+	l.headless.mu.Lock()
+	cancel := l.headless.cancel
+	l.headless.mu.Unlock()
+	if cancel != nil {
+		cancel()
 	}
 
 	if l.schedulerWorker != nil {
@@ -53,7 +56,7 @@ func (l *Launcher) Drain(ctx context.Context) error {
 
 	done := make(chan struct{})
 	go func() {
-		l.headlessWorkerWg.Wait()
+		l.headless.workerWg.Wait()
 		close(done)
 	}()
 

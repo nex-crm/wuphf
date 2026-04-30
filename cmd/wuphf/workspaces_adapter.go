@@ -15,7 +15,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"time"
 
@@ -482,8 +484,18 @@ func trashIDTimestamp(trashID string) int64 {
 }
 
 // openWorkspaceURL opens a browser at the workspace's web URL when the user
-// passed --open. Reuses the package-level openBrowserURL helper from the
-// rest of the CLI.
+// passed --open.
 func openWorkspaceURL(url string) {
-	_ = openBrowserURL(url)
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", url)
+	case "linux":
+		cmd = exec.Command("xdg-open", url)
+	case "windows":
+		cmd = exec.Command("cmd", "/c", "start", "", url)
+	default:
+		return
+	}
+	_ = cmd.Start()
 }
