@@ -7,6 +7,7 @@ package main
 // snapshot). The CLI just invokes and prints the URL once it's bound.
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -26,6 +27,9 @@ func runWorkspaceResume(args []string) {
 		fmt.Fprintln(os.Stderr, "Workspace state (team, wiki, office tasks) resumes exactly as it was at pause.")
 	}
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			os.Exit(0)
+		}
 		os.Exit(2)
 	}
 	positional := fs.Args()

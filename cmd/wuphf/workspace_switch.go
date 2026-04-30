@@ -8,6 +8,7 @@ package main
 // the chosen workspace from this point on.
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -36,6 +37,9 @@ func runWorkspaceSwitch(args []string) {
 		fmt.Fprintln(os.Stderr, "Pass --workspace=<name> on a single command to override without switching.")
 	}
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			os.Exit(0)
+		}
 		os.Exit(2)
 	}
 	positional := fs.Args()

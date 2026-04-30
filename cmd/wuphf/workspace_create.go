@@ -9,6 +9,7 @@ package main
 // missing) is the orchestrator's job.
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -39,6 +40,9 @@ func runWorkspaceCreate(args []string) {
 		fmt.Fprintln(os.Stderr, "Slug rules: lowercase letters, digits, hyphens. Must start with a letter. Max 31 chars.")
 	}
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			os.Exit(0)
+		}
 		os.Exit(2)
 	}
 
