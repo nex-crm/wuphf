@@ -78,6 +78,13 @@ export function StatusPill({
   const totalTokens =
     usage?.session?.total_tokens ?? usage?.total?.total_tokens ?? 0;
 
+  // While the usage query is in-flight and no override is supplied, render an
+  // em-dash placeholder instead of "0 tokens today" — the zero is briefly
+  // misleading because the broker has not yet replied. Once usage data is
+  // available the counter switches to the real number. The override path
+  // (tests/storybook) skips this entirely so existing assertions stay stable.
+  const usagePending = !usageOverride && usageQuery.data === undefined;
+
   return (
     <span
       className="status-bar-item workspace-pill"
@@ -88,7 +95,7 @@ export function StatusPill({
       <span className="workspace-pill-name">{name}</span>
       <span className="status-bar-sep"> · </span>
       <span className="workspace-pill-cost">
-        {formatTokens(totalTokens)} tokens today
+        {usagePending ? "— tokens today" : `${formatTokens(totalTokens)} tokens today`}
       </span>
     </span>
   );

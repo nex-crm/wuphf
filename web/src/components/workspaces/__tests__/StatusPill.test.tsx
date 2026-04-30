@@ -123,4 +123,37 @@ describe("<StatusPill>", () => {
       "50 tokens today",
     );
   });
+
+  it("renders an em-dash placeholder while the usage query is pending", () => {
+    setListData(
+      [
+        {
+          name: "main",
+          runtime_home: "/r",
+          broker_port: 7890,
+          web_port: 7891,
+          state: "running",
+          is_active: true,
+        },
+      ],
+      "main",
+    );
+    // Never-resolving promise keeps useQuery in the pending state for the
+    // lifetime of the render so we can assert on the loading placeholder.
+    getUsageMock.mockReturnValue(new Promise(() => {}));
+
+    // Render WITHOUT a usage override so the live useQuery path is exercised.
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={client}>
+        <StatusPill />
+      </QueryClientProvider>,
+    );
+
+    const pill = screen.getByTestId("workspace-status-pill");
+    expect(pill.textContent).toContain("— tokens today");
+    expect(pill.textContent).not.toContain("0 tokens today");
+  });
 });
