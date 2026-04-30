@@ -554,7 +554,8 @@ jobs:
             tests/slash-commands.spec.ts \
             tests/dm.spec.ts \
             tests/mentions.spec.ts \
-            tests/interview.spec.ts
+            tests/interview.spec.ts \
+            tests/studio.spec.ts
       - name: Stop wuphf (shell phase)
         if: always()
         run: |

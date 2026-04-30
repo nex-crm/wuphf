@@ -137,6 +137,7 @@ export interface AppStore {
   toggleSidebarApps: () => void;
   sidebarCollapsed: boolean;
   toggleSidebarCollapsed: () => void;
+  setSidebarCollapsed: (collapsed: boolean) => void;
   sidebarBg: string | null;
   setSidebarBg: (color: string | null) => void;
 
@@ -287,6 +288,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   sidebarCollapsed: false,
   toggleSidebarCollapsed: () =>
     set({ sidebarCollapsed: !get().sidebarCollapsed }),
+  setSidebarCollapsed: (collapsed) => set({ sidebarCollapsed: collapsed }),
   sidebarBg: _storedSidebarBg,
   setSidebarBg: (color) => {
     try {

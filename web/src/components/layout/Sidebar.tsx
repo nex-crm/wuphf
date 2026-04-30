@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { Settings as SettingsIcon, SidebarCollapse } from "iconoir-react";
 
 import { useAppStore } from "../../stores/app";
@@ -55,11 +56,23 @@ export function Sidebar() {
   const toggleSidebarApps = useAppStore((s) => s.toggleSidebarApps);
   const sidebarCollapsed = useAppStore((s) => s.sidebarCollapsed);
   const toggleSidebarCollapsed = useAppStore((s) => s.toggleSidebarCollapsed);
+  const setSidebarCollapsed = useAppStore((s) => s.setSidebarCollapsed);
   const sidebarBg = useAppStore((s) => s.sidebarBg);
   const currentApp = useAppStore((s) => s.currentApp);
   const setCurrentApp = useAppStore((s) => s.setCurrentApp);
 
   const asideStyle = sidebarBg ? { background: sidebarBg } : undefined;
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const query = window.matchMedia("(max-width: 768px)");
+    const collapseForMobile = () => {
+      if (query.matches) setSidebarCollapsed(true);
+    };
+    collapseForMobile();
+    query.addEventListener("change", collapseForMobile);
+    return () => query.removeEventListener("change", collapseForMobile);
+  }, [setSidebarCollapsed]);
 
   return (
     <aside
