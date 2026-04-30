@@ -229,6 +229,9 @@ func (gbrainMemoryBackend) FetchBrief(ctx context.Context, notification string) 
 	return strings.Join(lines, "\n")
 }
 func (gbrainMemoryBackend) QueryShared(ctx context.Context, query string, limit int) ([]ScopedMemoryHit, error) {
+	if limit <= 0 {
+		limit = 5
+	}
 	results, err := gbrain.Query(ctx, query, limit)
 	if err != nil {
 		return nil, err
