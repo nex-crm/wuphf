@@ -640,6 +640,9 @@ func (b *Broker) handlePatchSchedulerJob(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
+	// Snapshot before mutation so we can roll back if persistence fails.
+	snapshot := *job
+
 	if body.IntervalOverride != nil {
 		override := *body.IntervalOverride
 		if override < 0 {
@@ -667,6 +670,8 @@ func (b *Broker) handlePatchSchedulerJob(w http.ResponseWriter, r *http.Request,
 		}
 	}
 	if err := b.saveLocked(); err != nil {
+		// Restore in-memory state so the broker stays consistent with disk.
+		*job = snapshot
 		http.Error(w, "failed to persist scheduler update", http.StatusInternalServerError)
 		return
 	}

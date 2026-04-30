@@ -110,11 +110,12 @@ function ScheduleRow({ job }: ScheduleRowProps) {
   );
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
-  // Tracks the last value confirmed by the server so validation failures can
-  // rollback the input to a known-good state instead of leaving the bad value.
+  // Track last server-confirmed values so PATCH failures roll back to the
+  // right state rather than the stale mount-time values.
   const committedTextRef = useRef(
     initialOverride > 0 ? String(initialOverride) : String(defaultInterval),
   );
+  const committedEnabledRef = useRef(initialEnabled);
 
   const sourceLabel = describeSource(job);
 
@@ -148,6 +149,7 @@ function ScheduleRow({ job }: ScheduleRowProps) {
           // adjusted it (e.g. clamping to default).
           if (typeof res.job?.enabled === "boolean") {
             setEnabled(res.job.enabled);
+            committedEnabledRef.current = res.job.enabled;
           }
           if (typeof res.job?.interval_override === "number") {
             const next = res.job.interval_override;
@@ -160,23 +162,15 @@ function ScheduleRow({ job }: ScheduleRowProps) {
           }
         })
         .catch((e: Error) => {
-          // Roll back optimistic state to last server-confirmed value.
-          setEnabled(initialEnabled);
+          // Roll back optimistic state to last server-confirmed values.
+          setEnabled(committedEnabledRef.current);
           setOverrideText(committedTextRef.current);
           setError(e.message || "Update failed");
           showNotice(`Couldn't update ${labelOf(job)}: ${e.message}`, "error");
         })
         .finally(() => setPending(false));
     },
-    [
-      slug,
-      isReadOnly,
-      job,
-      queryClient,
-      initialEnabled,
-      initialOverride,
-      defaultInterval,
-    ],
+    [slug, isReadOnly, job, queryClient, initialOverride, defaultInterval],
   );
 
   const handleToggle = useCallback(() => {
