@@ -3,6 +3,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
+import { ToastContainer } from "../ui/Toast";
+
 import type { SchedulerJob } from "../../api/client";
 
 const MOCK_SPECS = [
@@ -19,6 +21,11 @@ vi.mock("../../api/client", async () => {
     ...actual,
     patchSchedulerJob: vi.fn(),
     getSystemCronSpecs: vi.fn().mockResolvedValue(MOCK_SPECS),
+    runSchedulerJob: vi.fn().mockResolvedValue({
+      triggered: true,
+      slug: "task_recheck",
+      at: new Date().toISOString(),
+    }),
   };
 });
 
@@ -30,6 +37,18 @@ function wrap(ui: ReactNode) {
     defaultOptions: { queries: { retry: false } },
   });
   return <QueryClientProvider client={qc}>{ui}</QueryClientProvider>;
+}
+
+function wrapWithToast(ui: ReactNode) {
+  const qc = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return (
+    <QueryClientProvider client={qc}>
+      {ui}
+      <ToastContainer />
+    </QueryClientProvider>
+  );
 }
 
 const baseSystemJob: SchedulerJob = {
@@ -276,5 +295,65 @@ describe("<SystemSchedulesPanel> interval validation", () => {
         interval_override: 0,
       });
     });
+  });
+});
+
+describe("<SystemSchedulesPanel> run now", () => {
+  it("calls runSchedulerJob with the row's slug on click", async () => {
+    const runMock = vi.mocked(clientMod.runSchedulerJob);
+    runMock.mockClear();
+
+    render(wrap(<SystemSchedulesPanel jobs={[baseSystemJob]} />));
+
+    const btn = screen.getByRole("button", {
+      name: /Run Task recheck cadence now/i,
+    });
+    fireEvent.click(btn);
+
+    await waitFor(() => {
+      expect(runMock).toHaveBeenCalledWith("task_recheck");
+    });
+  });
+
+  it("shows a success toast and re-enables the button after run succeeds", async () => {
+    const runMock = vi.mocked(clientMod.runSchedulerJob);
+    runMock.mockResolvedValueOnce({
+      triggered: true,
+      slug: "task_recheck",
+      at: new Date().toISOString(),
+    });
+
+    render(wrapWithToast(<SystemSchedulesPanel jobs={[baseSystemJob]} />));
+
+    const btn = screen.getByRole("button", {
+      name: /Run Task recheck cadence now/i,
+    });
+    fireEvent.click(btn);
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/Task recheck cadence triggered/i),
+      ).toBeInTheDocument();
+    });
+    expect(btn).not.toBeDisabled();
+  });
+
+  it("shows an error toast and re-enables the button after run fails", async () => {
+    const runMock = vi.mocked(clientMod.runSchedulerJob);
+    runMock.mockRejectedValueOnce(new Error("broker unreachable"));
+
+    render(wrapWithToast(<SystemSchedulesPanel jobs={[baseSystemJob]} />));
+
+    const btn = screen.getByRole("button", {
+      name: /Run Task recheck cadence now/i,
+    });
+    fireEvent.click(btn);
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/Couldn't trigger Task recheck cadence/i),
+      ).toBeInTheDocument();
+    });
+    expect(btn).not.toBeDisabled();
   });
 });

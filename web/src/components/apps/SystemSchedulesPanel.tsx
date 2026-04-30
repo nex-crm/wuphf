@@ -5,6 +5,7 @@ import {
   getSystemCronSpecs,
   type PatchSchedulerJobResponse,
   patchSchedulerJob,
+  runSchedulerJob,
   type SchedulerJob,
 } from "../../api/client";
 import { formatRelativeTime } from "../../lib/format";
@@ -125,6 +126,7 @@ function ScheduleRow({ job, floorsRef }: ScheduleRowProps) {
   );
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [runPending, setRunPending] = useState(false);
   // Track last server-confirmed values so PATCH failures roll back to the
   // right state rather than the stale mount-time values.
   const committedTextRef = useRef(
@@ -223,6 +225,20 @@ function ScheduleRow({ job, floorsRef }: ScheduleRowProps) {
     submitPatch({ interval_override: parsed === defaultInterval ? 0 : parsed });
   }, [isReadOnly, isCron, overrideText, floor, defaultInterval, submitPatch]);
 
+  const handleRunNow = useCallback(() => {
+    if (!slug || runPending) return;
+    setRunPending(true);
+    runSchedulerJob(slug)
+      .then(() => {
+        queryClient.invalidateQueries({ queryKey: ["scheduler"] });
+        showNotice(`${labelOf(job)} triggered`, "success");
+      })
+      .catch((e: Error) => {
+        showNotice(`Couldn't trigger ${labelOf(job)}: ${e.message}`, "error");
+      })
+      .finally(() => setRunPending(false));
+  }, [slug, runPending, job, queryClient]);
+
   const lastRunChip = describeLastRun(job);
   const nextRunCountdown = describeNextRun(job);
 
@@ -301,6 +317,27 @@ function ScheduleRow({ job, floorsRef }: ScheduleRowProps) {
           onToggle={handleToggle}
           ariaLabel={`${enabled ? "Disable" : "Enable"} ${labelOf(job)}`}
         />
+
+        <button
+          type="button"
+          disabled={runPending}
+          onClick={handleRunNow}
+          aria-label={`Run ${labelOf(job)} now`}
+          style={{
+            padding: "2px 8px",
+            fontSize: 11,
+            fontWeight: 500,
+            background: "transparent",
+            border: "1px solid var(--border)",
+            borderRadius: 4,
+            color: "var(--text-secondary)",
+            cursor: runPending ? "not-allowed" : "pointer",
+            opacity: runPending ? 0.6 : 1,
+            transition: "opacity 0.1s",
+          }}
+        >
+          {runPending ? "…" : "Run now"}
+        </button>
 
         {nextRunCountdown ? (
           <span style={{ marginLeft: "auto" }}>{nextRunCountdown}</span>

@@ -606,28 +606,104 @@ func (b *Broker) handleSchedulerSystemSpecs(w http.ResponseWriter, r *http.Reque
 	_ = json.NewEncoder(w).Encode(map[string]any{"specs": out})
 }
 
-// handleSchedulerSubpath dispatches /scheduler/{slug} requests. Currently
-// PATCH and the special "system-specs" sub-resource are supported (PR 8
-// Lane G + min-floor-from-api); future verbs (delete, run-now) would land
-// here too.
+// handleSchedulerSubpath dispatches /scheduler/{slug} and /scheduler/{slug}/run.
+// Supported: GET /scheduler/system-specs, POST /scheduler/{slug}/run,
+// PATCH /scheduler/{slug} (PR 8 Lane G + min-floor-from-api + PR 9).
 func (b *Broker) handleSchedulerSubpath(w http.ResponseWriter, r *http.Request) {
-	slug := strings.TrimPrefix(r.URL.Path, "/scheduler/")
-	slug = strings.TrimSpace(slug)
-	if slug == "" {
+	rest := strings.TrimPrefix(r.URL.Path, "/scheduler/")
+	rest = strings.TrimSpace(rest)
+	if rest == "" {
 		http.Error(w, "scheduler slug required in path", http.StatusBadRequest)
 		return
 	}
 	// system-specs is a read-only sub-resource, not a per-job path.
-	if slug == "system-specs" {
+	if rest == "system-specs" {
 		b.handleSchedulerSystemSpecs(w, r)
 		return
 	}
+
+	// /scheduler/{slug}/run — POST only, force-triggers the job once without
+	// touching next_run or the recurring schedule.
+	if strings.HasSuffix(rest, "/run") {
+		slug := strings.TrimSuffix(rest, "/run")
+		slug = strings.TrimSpace(slug)
+		if slug == "" {
+			http.Error(w, "scheduler slug required in path", http.StatusBadRequest)
+			return
+		}
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		b.handleRunSchedulerJob(w, r, slug)
+		return
+	}
+
+	// /scheduler/{slug} — PATCH only.
+	slug := rest
 	switch r.Method {
 	case http.MethodPatch:
 		b.handlePatchSchedulerJob(w, r, slug)
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+// handleRunSchedulerJob implements POST /scheduler/{slug}/run.
+//
+// It force-triggers the named job once, immediately, without touching
+// next_run or the recurring schedule. System crons that are driven by
+// dedicated goroutines (nex-notifications, nex-insights, one-relay-events)
+// do NOT have their goroutines poked — only LastRun and LastRunStatus are
+// updated on the scheduler row to reflect the manual trigger. The actual
+// side-effects those crons produce (e.g. fetching the Nex notifications feed)
+// require their goroutines to tick naturally; a force-run records the intent
+// and advances LastRun so the Calendar panel shows the trigger happened.
+//
+// For workflow jobs the execution is dispatched synchronously (mirroring
+// processWorkflowJob in scheduler.go). For task / request / system crons
+// the row is updated in-memory only — no external call is made — because
+// those jobs are driven by data-triggered logic that depends on full
+// Launcher context unavailable at the HTTP layer.
+//
+// Idempotency: this handler never touches the notification cursor. It cannot
+// cause the cursor to advance twice; the nex-notifications goroutine advances
+// the cursor via SetNotificationCursor only after a successful API round-trip,
+// entirely independently of this endpoint.
+func (b *Broker) handleRunSchedulerJob(w http.ResponseWriter, r *http.Request, slug string) {
+	b.mu.Lock()
+	var job *schedulerJob
+	for i := range b.scheduler {
+		if b.scheduler[i].Slug == slug {
+			job = &b.scheduler[i]
+			break
+		}
+	}
+	if job == nil {
+		b.mu.Unlock()
+		http.Error(w, "scheduler job not found", http.StatusNotFound)
+		return
+	}
+	now := time.Now().UTC()
+	prevLastRun := job.LastRun
+	prevLastRunStatus := job.LastRunStatus
+	job.LastRun = now.Format(time.RFC3339)
+	job.LastRunStatus = "triggered"
+	if err := b.saveLocked(); err != nil {
+		job.LastRun = prevLastRun
+		job.LastRunStatus = prevLastRunStatus
+		b.mu.Unlock()
+		http.Error(w, "failed to persist trigger", http.StatusInternalServerError)
+		return
+	}
+	b.mu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"triggered": true,
+		"slug":      slug,
+		"at":        now.Format(time.RFC3339),
+	})
 }
 
 // handlePatchSchedulerJob updates the Enabled flag and / or
