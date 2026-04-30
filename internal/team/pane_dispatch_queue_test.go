@@ -49,9 +49,9 @@ func TestQueuePaneNotification_CoalescesBurstsIntoOneDispatch(t *testing.T) {
 	// First enqueue dispatches immediately. Second arrives during its
 	// coalesce window and should be merged into the pending follow-up,
 	// which itself waits out the window before sending.
-	l.queuePaneNotification("pm", "team:1", "what are you working on?")
+	l.paneDispatch().Enqueue("pm", "team:1", "what are you working on?")
 	time.Sleep(20 * time.Millisecond) // let first dispatch complete
-	l.queuePaneNotification("pm", "team:1", "you doing fine?")
+	l.paneDispatch().Enqueue("pm", "team:1", "you doing fine?")
 
 	// Wait out the coalesce window plus slack for the second dispatch.
 	deadline := time.Now().Add(paneDispatchCoalesceWindow + 300*time.Millisecond)
@@ -103,7 +103,7 @@ func TestQueuePaneNotification_SingleTagDispatchesImmediately(t *testing.T) {
 	})
 
 	startedAt := time.Now()
-	l.queuePaneNotification("pm", "team:1", "solo tag")
+	l.paneDispatch().Enqueue("pm", "team:1", "solo tag")
 
 	select {
 	case <-dispatched:
@@ -142,8 +142,8 @@ func TestQueuePaneNotification_DifferentSlugsRunInParallel(t *testing.T) {
 	})
 
 	startedAt := time.Now()
-	l.queuePaneNotification("alpha", "team:a", "first")
-	l.queuePaneNotification("beta", "team:b", "first")
+	l.paneDispatch().Enqueue("alpha", "team:a", "first")
+	l.paneDispatch().Enqueue("beta", "team:b", "first")
 
 	deadline := time.Now().Add(200 * time.Millisecond)
 	for (atomic.LoadInt64(&countA) == 0 || atomic.LoadInt64(&countB) == 0) && time.Now().Before(deadline) {

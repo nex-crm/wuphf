@@ -131,7 +131,7 @@ func fullDispatchLauncher(t *testing.T) (*Launcher, chan string, func()) {
 	l := newHeadlessLauncherForTest(t)
 	l.broker = b
 	l.provider = "codex" // forces headless dispatch for every agent
-	l.notifyLastDelivered = make(map[string]time.Time)
+	l.notifyLastDelivered = make(map[notifyDedupKey]time.Time)
 	l.pack = &agent.PackDefinition{
 		LeadSlug: "ceo",
 		Agents: []agent.AgentConfig{
@@ -187,9 +187,9 @@ func TestBug_HumanTagsSpecialist_Dispatch_SpecialistReceivesTurn(t *testing.T) {
 
 	immediate, _ := l.notificationTargetsForMessage(msg)
 	t.Logf("notification targets: %+v", immediate)
-	t.Logf("agentNotificationTargets: %+v", l.agentNotificationTargets())
+	t.Logf("agentNotificationTargets: %+v", l.targeter().NotificationTargets())
 	t.Logf("activeSessionMembers: %+v", l.activeSessionMembers())
-	t.Logf("officeLeadSlug: %q", l.officeLeadSlug())
+	t.Logf("officeLeadSlug: %q", l.targeter().LeadSlug())
 
 	l.deliverMessageNotification(msg)
 
@@ -268,7 +268,7 @@ func TestBug_FocusMode_HumanTagsWizardHiredPM_SpecialistIsImmediate(t *testing.T
 	l.broker = b
 	l.provider = "codex"
 	l.focusMode = true
-	l.notifyLastDelivered = make(map[string]time.Time)
+	l.notifyLastDelivered = make(map[notifyDedupKey]time.Time)
 	l.pack = &agent.PackDefinition{
 		LeadSlug: "ceo",
 		Agents: []agent.AgentConfig{
@@ -308,7 +308,7 @@ func TestBug_FocusMode_CEOTagsWizardHiredPM_SpecialistIsImmediate(t *testing.T) 
 	l.broker = b
 	l.provider = "codex"
 	l.focusMode = true
-	l.notifyLastDelivered = make(map[string]time.Time)
+	l.notifyLastDelivered = make(map[notifyDedupKey]time.Time)
 	l.pack = &agent.PackDefinition{
 		LeadSlug: "ceo",
 		Agents: []agent.AgentConfig{
@@ -353,7 +353,7 @@ func TestBug_DisabledMember_ExplicitTagDoesNotBypassMute(t *testing.T) {
 	l := newHeadlessLauncherForTest(t)
 	l.broker = b
 	l.provider = "codex"
-	l.notifyLastDelivered = make(map[string]time.Time)
+	l.notifyLastDelivered = make(map[notifyDedupKey]time.Time)
 	l.pack = &agent.PackDefinition{
 		LeadSlug: "ceo",
 		Agents:   []agent.AgentConfig{{Slug: "ceo", Name: "CEO"}, {Slug: "pm", Name: "PM"}},
@@ -420,7 +420,7 @@ func TestBug_DMToWizardHiredPM_Dispatch(t *testing.T) {
 	l := newHeadlessLauncherForTest(t)
 	l.broker = b
 	l.provider = "codex"
-	l.notifyLastDelivered = make(map[string]time.Time)
+	l.notifyLastDelivered = make(map[notifyDedupKey]time.Time)
 	// Pack was set at launch — does NOT include pm.
 	l.pack = &agent.PackDefinition{
 		LeadSlug: "ceo",
@@ -432,7 +432,7 @@ func TestBug_DMToWizardHiredPM_Dispatch(t *testing.T) {
 		},
 	}
 
-	targetMap := l.agentNotificationTargets()
+	targetMap := l.targeter().NotificationTargets()
 	t.Logf("targetMap after hiring pm: %+v", targetMap)
 
 	immediate, _ := l.notificationTargetsForMessage(channelMessage{
@@ -464,7 +464,7 @@ func TestBug_TagWizardHiredPM_InGeneral_Dispatch(t *testing.T) {
 	l := newHeadlessLauncherForTest(t)
 	l.broker = b
 	l.provider = "codex"
-	l.notifyLastDelivered = make(map[string]time.Time)
+	l.notifyLastDelivered = make(map[notifyDedupKey]time.Time)
 	l.pack = &agent.PackDefinition{
 		LeadSlug: "ceo",
 		Agents: []agent.AgentConfig{
@@ -487,7 +487,7 @@ func TestBug_TagWizardHiredPM_InGeneral_Dispatch(t *testing.T) {
 		t.Fatalf(
 			"bug reproduced: @pm in #general did not reach pm. targetMap=%+v immediate=%+v. "+
 				"Wizard-hired agents must be reachable via explicit @-tag.",
-			l.agentNotificationTargets(), immediate,
+			l.targeter().NotificationTargets(), immediate,
 		)
 	}
 }
@@ -514,7 +514,7 @@ func TestBug_RootCause_ChannelMembershipFilterDropsExplicitMention(t *testing.T)
 	l := newHeadlessLauncherForTest(t)
 	l.broker = b
 	l.provider = "codex"
-	l.notifyLastDelivered = make(map[string]time.Time)
+	l.notifyLastDelivered = make(map[notifyDedupKey]time.Time)
 	l.pack = &agent.PackDefinition{
 		LeadSlug: "ceo",
 		Agents: []agent.AgentConfig{
@@ -524,7 +524,7 @@ func TestBug_RootCause_ChannelMembershipFilterDropsExplicitMention(t *testing.T)
 	}
 
 	// Sanity: fe IS in the target map (pane/headless resolution is correct).
-	targetMap := l.agentNotificationTargets()
+	targetMap := l.targeter().NotificationTargets()
 	if _, ok := targetMap["fe"]; !ok {
 		t.Fatalf("pre-condition failed: fe should be in agentNotificationTargets: %+v", targetMap)
 	}
