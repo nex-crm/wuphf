@@ -13,6 +13,8 @@ vi.mock("../../api/client", async () => {
   return {
     ...actual,
     patchSchedulerJob: vi.fn(),
+    runSchedulerJob: vi.fn().mockResolvedValue({ triggered: true, slug: "task_recheck", at: new Date().toISOString() }),
+    getSystemCronSpecs: vi.fn().mockResolvedValue([]),
   };
 });
 
