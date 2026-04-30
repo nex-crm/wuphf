@@ -46,6 +46,8 @@ type fakeOrchestrator struct {
 	shredErr    error
 	restoreResp Workspace
 	restoreErr  error
+	trashResp   []TrashEntry
+	trashErr    error
 
 	calls []string // human-readable trace, e.g. "list", "create:demo"
 }
@@ -97,6 +99,11 @@ func (f *fakeOrchestrator) Shred(_ context.Context, name string, permanent bool)
 func (f *fakeOrchestrator) Restore(_ context.Context, trashID string) (Workspace, error) {
 	f.record("restore:" + trashID)
 	return f.restoreResp, f.restoreErr
+}
+
+func (f *fakeOrchestrator) Trash(_ context.Context) ([]TrashEntry, error) {
+	f.record("trash")
+	return f.trashResp, f.trashErr
 }
 
 // recordingDrainer records Drain calls; tests assert it was called.
@@ -456,6 +463,70 @@ func TestHandleWorkspacesRestore_RequiresTrashID(t *testing.T) {
 	})
 }
 
+// TestHandleWorkspacesTrash_ReturnsListShape pins the wire shape of
+// GET /workspaces/trash: {"trash": [...]} with each entry mirroring the
+// internal/workspaces.TrashEntry contract.
+func TestHandleWorkspacesTrash_ReturnsListShape(t *testing.T) {
+	b, o, _ := newWorkspaceTestBroker(t)
+	o.trashResp = []TrashEntry{
+		{Name: "demo", TrashID: "demo-1714000000", Path: "/tmp/x/demo-1714000000", ShredAt: "2024-04-25T00:00:00Z"},
+		{Name: "scratch", TrashID: "scratch-1715000000", Path: "/tmp/x/scratch-1715000000"},
+	}
+
+	srv := httptest.NewServer(b.withAuth(b.handleWorkspacesTrash))
+	defer srv.Close()
+
+	resp := mustGet(t, srv.URL, b.Token())
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status: %d body: %s", resp.StatusCode, string(body))
+	}
+	var payload struct {
+		Trash []TrashEntry `json:"trash"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(payload.Trash) != 2 {
+		t.Fatalf("trash entries: want 2 got %d", len(payload.Trash))
+	}
+	if payload.Trash[0].Name != "demo" || payload.Trash[0].TrashID != "demo-1714000000" {
+		t.Fatalf("entry 0 mismatch: %+v", payload.Trash[0])
+	}
+	calls := o.callTrace()
+	if len(calls) != 1 || calls[0] != "trash" {
+		t.Fatalf("orchestrator call: want [trash], got %v", calls)
+	}
+}
+
+func TestHandleWorkspacesTrash_NilOrchestratorReturns503(t *testing.T) {
+	b := newTestBroker(t)
+	srv := httptest.NewServer(b.withAuth(b.handleWorkspacesTrash))
+	defer srv.Close()
+	resp := mustGet(t, srv.URL, b.Token())
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("status: want 503 got %d", resp.StatusCode)
+	}
+}
+
+func TestHandleWorkspacesTrash_NilEntriesEmitsEmptyArray(t *testing.T) {
+	b, o, _ := newWorkspaceTestBroker(t)
+	o.trashResp = nil
+	srv := httptest.NewServer(b.withAuth(b.handleWorkspacesTrash))
+	defer srv.Close()
+	resp := mustGet(t, srv.URL, b.Token())
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status: %d", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), `"trash":[]`) {
+		t.Fatalf("expected empty trash array in body: %s", string(body))
+	}
+}
+
 // Method-not-allowed coverage: every handler that takes POST rejects GET, the
 // list handler takes GET and rejects POST.
 func TestWorkspaceHandlers_RejectWrongMethod(t *testing.T) {
@@ -473,6 +544,7 @@ func TestWorkspaceHandlers_RejectWrongMethod(t *testing.T) {
 		{"resume rejects GET", b.handleWorkspacesResume, http.MethodGet},
 		{"shred rejects GET", b.handleWorkspacesShred, http.MethodGet},
 		{"restore rejects GET", b.handleWorkspacesRestore, http.MethodGet},
+		{"trash rejects POST", b.handleWorkspacesTrash, http.MethodPost},
 		{"admin pause rejects GET", b.handleAdminPause, http.MethodGet},
 	}
 	for _, tc := range tests {
@@ -714,6 +786,7 @@ func TestEveryProtectedRouteRequiresAuth(t *testing.T) {
 		"/workspaces/resume":  b.handleWorkspacesResume,
 		"/workspaces/shred":   b.handleWorkspacesShred,
 		"/workspaces/restore": b.handleWorkspacesRestore,
+		"/workspaces/trash":   b.handleWorkspacesTrash,
 		"/admin/pause":        b.handleAdminPause,
 	}
 
@@ -948,6 +1021,7 @@ func TestBrokerMuxAuthCoverage(t *testing.T) {
 		"/workspaces/resume",
 		"/workspaces/shred",
 		"/workspaces/restore",
+		"/workspaces/trash",
 		"/admin/pause",
 		// onboarding (mounted via onboarding.RegisterRoutes)
 		"/onboarding/state",

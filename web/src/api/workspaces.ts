@@ -59,10 +59,22 @@ export interface WorkspaceListResponse {
   active?: string;
 }
 
+/**
+ * Mirrors `internal/workspaces.TrashEntry` (Go side) — the orchestrator
+ * canonical shape. `shred_at` is RFC3339 from the broker, empty string
+ * when the trash directory name lacks a parseable timestamp.
+ */
 export interface TrashEntry {
-  trash_id: string;
   name: string;
-  shredded_at: string;
+  trash_id: string;
+  path: string;
+  shred_at?: string;
+  original_runtime_home?: string;
+  /**
+   * Legacy field preserved for callers that still read `shredded_at`. The
+   * broker no longer emits this; clients should migrate to `shred_at`.
+   */
+  shredded_at?: string;
   size_bytes?: number;
 }
 
@@ -100,11 +112,10 @@ export function useWorkspacesList(
 }
 
 /**
- * NOTE: the broker's `/workspaces/list` does NOT yet emit a `trash` field
- * on the response payload, and there is no dedicated trash endpoint either
- * (#3164366654). This hook will return an empty `entries` array until
- * Lane B / C exposes one — see TODOS.md "trash listing endpoint". Kept
- * exported so consumers wire against a stable signature once it lands.
+ * Lists the contents of `~/.wuphf-spaces/.trash/` via the broker's
+ * dedicated `/workspaces/trash` endpoint (CodeRabbit #3164366654). The
+ * earlier shape piggy-backed on `/workspaces/list?include=trash`; that
+ * has been retired in favour of a clean GET on its own path.
  */
 export function useWorkspaceTrash(
   options?: Partial<UseQueryOptions<TrashListResponse>>,
@@ -112,12 +123,9 @@ export function useWorkspaceTrash(
   return useQuery<TrashListResponse>({
     queryKey: workspaceKeys.trash(),
     queryFn: () =>
-      get<TrashListResponse>("/workspaces/list", {
-        include: "trash",
-      }).then((d) => {
-        const entries = (d as unknown as { trash?: TrashEntry[] }).trash ?? [];
-        return { entries };
-      }),
+      get<{ trash: TrashEntry[] }>("/workspaces/trash").then((d) => ({
+        entries: d.trash ?? [],
+      })),
     staleTime: 30_000,
     ...options,
   });

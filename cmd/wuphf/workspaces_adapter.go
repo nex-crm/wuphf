@@ -209,6 +209,28 @@ func (brokerOrchestratorAdapter) Restore(ctx context.Context, trashID string) (t
 	return brokerWorkspace(ws), nil
 }
 
+func (brokerOrchestratorAdapter) Trash(ctx context.Context) ([]team.TrashEntry, error) {
+	entries, err := workspaces.Trash(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]team.TrashEntry, 0, len(entries))
+	for _, e := range entries {
+		shredAt := ""
+		if !e.ShredAt.IsZero() {
+			shredAt = e.ShredAt.Format(time.RFC3339)
+		}
+		out = append(out, team.TrashEntry{
+			Name:                e.Name,
+			TrashID:             e.TrashID,
+			Path:                e.Path,
+			ShredAt:             shredAt,
+			OriginalRuntimeHome: e.OriginalRuntimeHome,
+		})
+	}
+	return out, nil
+}
+
 // --- shared helpers ----------------------------------------------------------
 
 func workspaceFromRegistry(ws *workspaces.Workspace) Workspace {

@@ -361,6 +361,73 @@ func TestRestoreFromTrash(t *testing.T) {
 	}
 }
 
+// ---- Trash listing ---------------------------------------------------------
+
+func TestTrashListsValidEntriesAndSkipsJunk(t *testing.T) {
+	withOrchestratorHome(t)
+	sd, _ := spacesDir()
+	trashDir := filepath.Join(sd, trashDirName)
+	if err := os.MkdirAll(trashDir, 0o700); err != nil {
+		t.Fatalf("mkdir trash: %v", err)
+	}
+
+	// Two valid entries (with parseable trailing timestamp) and one junk
+	// directory that should be skipped.
+	mkEntry := func(id string) {
+		if err := os.MkdirAll(filepath.Join(trashDir, id, ".wuphf"), 0o700); err != nil {
+			t.Fatalf("mkdir %s: %v", id, err)
+		}
+	}
+	now := time.Now().Unix()
+	demoID := fmt.Sprintf("demo-%d", now)
+	scratchID := fmt.Sprintf("scratch-%d", now-100)
+	mkEntry(demoID)
+	mkEntry(scratchID)
+	mkEntry("garbage-no-timestamp")
+
+	got, err := Trash(context.Background())
+	if err != nil {
+		t.Fatalf("Trash: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("entries: want 2, got %d (%v)", len(got), got)
+	}
+
+	byID := make(map[string]TrashEntry, len(got))
+	for _, e := range got {
+		byID[e.TrashID] = e
+	}
+	if got, ok := byID[demoID]; !ok {
+		t.Fatalf("missing demo entry: %v", byID)
+	} else if got.Name != "demo" {
+		t.Fatalf("demo name: %q", got.Name)
+	}
+	if got, ok := byID[scratchID]; !ok {
+		t.Fatalf("missing scratch entry: %v", byID)
+	} else {
+		if got.Name != "scratch" {
+			t.Fatalf("scratch name: %q", got.Name)
+		}
+		if got.ShredAt.IsZero() {
+			t.Fatalf("scratch shred_at should be parsed, got zero")
+		}
+		if !filepath.IsAbs(got.Path) {
+			t.Fatalf("scratch path should be absolute, got %q", got.Path)
+		}
+	}
+}
+
+func TestTrashReturnsEmptyWhenDirMissing(t *testing.T) {
+	withOrchestratorHome(t)
+	got, err := Trash(context.Background())
+	if err != nil {
+		t.Fatalf("Trash: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("want empty slice, got %d entries", len(got))
+	}
+}
+
 // ---- Shred tests -----------------------------------------------------------
 
 func TestShredMovesToTrashByDefault(t *testing.T) {

@@ -99,6 +99,18 @@ type workspaceOrchestrator interface {
 	Resume(ctx context.Context, name string) error
 	Shred(ctx context.Context, name string, permanent bool) error
 	Restore(ctx context.Context, trashID string) (Workspace, error)
+	Trash(ctx context.Context) ([]TrashEntry, error)
+}
+
+// TrashEntry mirrors internal/workspaces.TrashEntry on the wire. Defined
+// here so the broker package's exported surface is self-contained; the
+// adapter in cmd/wuphf maps between the two.
+type TrashEntry struct {
+	Name                string `json:"name"`
+	TrashID             string `json:"trash_id"`
+	Path                string `json:"path"`
+	ShredAt             string `json:"shred_at,omitempty"`
+	OriginalRuntimeHome string `json:"original_runtime_home,omitempty"`
 }
 
 // launcherDrainer is the cancellation surface /admin/pause calls before
@@ -550,6 +562,32 @@ func (b *Broker) handleWorkspacesRestore(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeWorkspaceJSON(w, http.StatusOK, ws)
+}
+
+// handleWorkspacesTrash — GET /workspaces/trash.
+//
+// Returns: {"trash": [...]}. Lists the contents of ~/.wuphf-spaces/.trash/
+// without requiring the caller to also fetch /workspaces/list — useful when
+// the SPA wants to render the Restore UI without paying for a full
+// workspace listing.
+func (b *Broker) handleWorkspacesTrash(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodGet) {
+		return
+	}
+	o := b.orchestrator()
+	if o == nil {
+		writeWorkspaceError(w, http.StatusServiceUnavailable, "workspaces not configured")
+		return
+	}
+	entries, err := o.Trash(r.Context())
+	if err != nil {
+		writeOrchestratorError(w, err)
+		return
+	}
+	if entries == nil {
+		entries = []TrashEntry{}
+	}
+	writeWorkspaceJSON(w, http.StatusOK, map[string]any{"trash": entries})
 }
 
 // handleAdminPause — POST /admin/pause.

@@ -708,3 +708,69 @@ func removeFromRegistry(name string) error {
 	}
 	return writeUnderLock(reg)
 }
+
+// Trash returns the contents of ~/.wuphf-spaces/.trash/. Each entry encodes
+// the original workspace name and the unix timestamp of when it was
+// shredded; both are recovered from the directory name (`<name>-<unix-ts>`).
+//
+// Directories that don't match the expected name pattern are skipped rather
+// than surfaced as errors — the trash dir is user-writable and stale junk
+// is normal. A missing trash dir is not an error either; an empty slice is
+// returned.
+//
+// ctx is reserved for future cancellation hooks; today the implementation
+// only does a single os.ReadDir which doesn't take long enough to need
+// context plumbing.
+func Trash(ctx context.Context) ([]TrashEntry, error) {
+	_ = ctx
+	sd, err := spacesDir()
+	if err != nil {
+		return nil, err
+	}
+	trashDir := filepath.Join(sd, trashDirName)
+	entries, err := os.ReadDir(trashDir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return []TrashEntry{}, nil
+		}
+		return nil, fmt.Errorf("workspaces: trash: read %s: %w", trashDir, err)
+	}
+	out := make([]TrashEntry, 0, len(entries))
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		id := e.Name()
+		name := extractOriginalName(id)
+		if name == "" {
+			continue
+		}
+		ts := extractTrashTimestamp(id)
+		shredAt := time.Time{}
+		if ts > 0 {
+			shredAt = time.Unix(ts, 0).UTC()
+		}
+		out = append(out, TrashEntry{
+			Name:                name,
+			TrashID:             id,
+			Path:                filepath.Join(trashDir, id),
+			ShredAt:             shredAt,
+			OriginalRuntimeHome: filepath.Join(sd, name),
+		})
+	}
+	return out, nil
+}
+
+// extractTrashTimestamp returns the trailing numeric segment of a trash ID
+// of the form "<name>-<unix-ts>". Returns 0 if no numeric suffix is present.
+func extractTrashTimestamp(trashID string) int64 {
+	for i := len(trashID) - 1; i >= 0; i-- {
+		if trashID[i] == '-' {
+			suffix := trashID[i+1:]
+			if v, err := strconv.ParseInt(suffix, 10, 64); err == nil {
+				return v
+			}
+		}
+	}
+	return 0
+}
