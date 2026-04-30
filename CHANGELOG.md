@@ -22,6 +22,7 @@ All notable changes to WUPHF will be documented in this file.
 
 ### Fixed
 
+- **Workspace endpoints are wired before the web broker starts serving.** Creating a workspace from the web UI no longer hits `503 {"error":"workspaces not configured"}` because `/workspaces/*` routes now receive the orchestrator during broker construction instead of after `LaunchWeb` blocks forever.
 - **Newly created agents now use the office avatar sprite system instead of falling back to the deprecated legacy procedural sprites.** Operation-generated slugs like `planner`, `builder`, `growth`, `reviewer`, and `operator` now resolve to generated office portraits, and arbitrary custom slugs get deterministic office-style procedural portraits in both web and TUI surfaces.
 - **Passing `--pack`/`--blueprint` no longer deletes broker state on launch.** Restarting the same office after a crash can pass the selected blueprint again; the launcher treated that as an authoritative reseed and removed `broker-state.json`, making the office look wiped even though `wuphf shred` was never run.
 - **Fresh wikis no longer warn during Stage B skill synthesis because `team/agents/` does not exist yet.** The notebook signal scanner now treats the missing agents directory as an empty signal source.
