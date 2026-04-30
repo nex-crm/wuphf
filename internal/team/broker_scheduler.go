@@ -487,6 +487,13 @@ func (b *Broker) registerSystemCrons() {
 			}
 		}
 		if existing != nil {
+			// Migration: rows written before the cron registry had no
+			// Enabled field; JSON zero-value is false. Re-enable any
+			// system-managed row that was disabled only because it
+			// predates the registry (not by a deliberate user action).
+			if !existing.SystemManaged {
+				existing.Enabled = true
+			}
 			existing.Label = spec.Label
 			existing.SystemManaged = true
 			existing.IntervalMinutes = defaultInterval

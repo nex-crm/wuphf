@@ -287,7 +287,6 @@ function ScheduleRow({ job }: ScheduleRowProps) {
             ariaLabel={`Interval in minutes for ${labelOf(job)}`}
             floor={floor}
             defaultInterval={defaultInterval}
-            override={initialOverride}
           />
         ) : (
           <span style={{ color: "var(--text-tertiary)" }}>
@@ -343,7 +342,6 @@ interface IntervalPickerProps {
   ariaLabel: string;
   floor: number;
   defaultInterval: number;
-  override: number;
 }
 
 function IntervalPicker({

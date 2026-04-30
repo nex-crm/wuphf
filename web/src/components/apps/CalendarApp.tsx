@@ -13,7 +13,7 @@ function isCadenceJob(job: SchedulerJob): boolean {
   return (
     job.system_managed === true ||
     typeof job.interval_minutes === "number" ||
-    typeof job.schedule_expr === "string"
+    (typeof job.schedule_expr === "string" && job.schedule_expr.trim().length > 0)
   );
 }
 

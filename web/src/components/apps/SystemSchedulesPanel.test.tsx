@@ -221,12 +221,11 @@ describe("<SystemSchedulesPanel> interval validation", () => {
   });
 
   it("submits a valid override above the floor", async () => {
-    const patchMock = vi
-      .mocked(clientMod.patchSchedulerJob)
-      .mockResolvedValueOnce({
-        job: { ...baseSystemJob, interval_override: 20 },
-      });
+    const patchMock = vi.mocked(clientMod.patchSchedulerJob);
     patchMock.mockClear();
+    patchMock.mockResolvedValueOnce({
+      job: { ...baseSystemJob, interval_override: 20 },
+    });
 
     // task_recheck default 10, floor 5. Try 20.
     render(wrap(<SystemSchedulesPanel jobs={[baseSystemJob]} />));
