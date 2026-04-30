@@ -1293,14 +1293,8 @@ func (b *Broker) MemberProviderKind(slug string) string {
 	return m.Provider.Kind
 }
 
-// memberFromSpec builds an officeMember from a manifest MemberSpec, threading
-// Pure helpers + channel-membership predicates (memberFromSpec,
-// extractMentionedSlugs, uniqueSlugs, normalizeStringList, containsString,
-// humanizeSlug, defaultTeamChannelDescription, canAccessChannelLocked,
-// truncateSummary, applyOfficeMemberDefaults, inferOfficeExpertise,
-// inferOfficePersonality, channelHasMemberLocked,
-// channelMemberEnabledLocked, enabledChannelMembersLocked,
-// ensureTaskOwnerChannelMembershipLocked) moved to broker_helpers.go.
+// Member construction, text helpers, and channel-access predicates moved to
+// broker_member_construction.go, broker_text.go, and broker_channel_access.go.
 
 func usageStateIsZero(state teamUsageState) bool {
 	if state.Total.TotalTokens > 0 || state.Total.CostUsd > 0 || state.Total.Requests > 0 {
