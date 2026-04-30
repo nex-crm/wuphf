@@ -420,7 +420,7 @@ func TestChannelCreateRejectsReservedSlugs(t *testing.T) {
 
 	base := fmt.Sprintf("http://%s", b.Addr())
 
-	for _, reserved := range []string{"system", "nex", "you", "human"} {
+	for _, reserved := range []string{"system", "nex", "you", "human", "ceo"} {
 		t.Run(reserved, func(t *testing.T) {
 			body, _ := json.Marshal(map[string]any{
 				"action":     "create",
@@ -459,6 +459,45 @@ func TestChannelCreateRejectsReservedSlugs(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("create feature-launch: expected 200, got %d", resp.StatusCode)
+	}
+}
+
+// Regression for "empty slug normalized to general, falls through to
+// 'channel already exists' instead of 'slug required'". The fix validates
+// the raw slug before normalizeChannelSlug rewrites whitespace to "general".
+func TestChannelCreateRejectsEmptySlug(t *testing.T) {
+	b := newTestBroker(t)
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("failed to start broker: %v", err)
+	}
+	defer b.Stop()
+
+	base := fmt.Sprintf("http://%s", b.Addr())
+
+	for _, raw := range []string{"", "   ", "\t"} {
+		body, _ := json.Marshal(map[string]any{
+			"action":     "create",
+			"slug":       raw,
+			"name":       "anything",
+			"created_by": "ceo",
+		})
+		req, _ := http.NewRequest(http.MethodPost, base+"/channels", bytes.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+b.Token())
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("create empty slug %q: %v", raw, err)
+		}
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("create empty slug %q: expected 400, got %d (body=%s)",
+				raw, resp.StatusCode, string(bodyBytes))
+		}
+		if !strings.Contains(strings.ToLower(string(bodyBytes)), "slug") {
+			t.Fatalf("create empty slug %q: expected error to mention 'slug', got %q",
+				raw, string(bodyBytes))
+		}
 	}
 }
 

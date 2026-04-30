@@ -3,14 +3,67 @@ package company
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/nex-crm/wuphf/internal/config"
 	"github.com/nex-crm/wuphf/internal/provider"
 )
+
+// manifestUpdateMu serializes load → mutate → save sequences against the
+// manifest file. Two callers that both Load + append + Save can otherwise
+// race: each reads the same file, each mutates locally, and whichever Save
+// wins drops the loser's mutation. Use UpdateManifest from any code that
+// needs to add or modify entries; bare Load/Save callers (read-only or
+// full-rewrite) don't need the lock and are unchanged.
+var manifestUpdateMu sync.Mutex
+
+// UpdateManifest atomically reads the manifest from disk, applies the
+// caller's mutation, and writes the result back. Concurrent callers see a
+// serialized order, so an append-then-save sequence cannot lose entries.
+//
+// The mutation callback receives a pointer; mutate the manifest in place and
+// return nil to commit, or return an error to abort the save. If LoadManifest
+// fails for any reason other than "file does not exist", UpdateManifest
+// surfaces that error rather than silently starting from DefaultManifest —
+// silently overwriting a corrupted manifest hides the real problem.
+func UpdateManifest(mutate func(*Manifest) error) (err error) {
+	manifestUpdateMu.Lock()
+	defer manifestUpdateMu.Unlock()
+	// Recover so a panic from inside `mutate` doesn't take down the whole
+	// process — important when this is called from an HTTP handler goroutine
+	// (the round-2 commit added /telegram/connect as one such caller). Re-
+	// surface as an error so the caller can return a 500 instead of crashing.
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("UpdateManifest: panic in mutate: %v", r)
+		}
+	}()
+
+	manifest, loadErr := LoadManifest()
+	if loadErr != nil {
+		return loadErr
+	}
+	if err := mutate(&manifest); err != nil {
+		return err
+	}
+	return SaveManifest(manifest)
+}
+
+// SnapshotManifest returns the current on-disk manifest under the same lock
+// UpdateManifest uses, so a caller that only reads (e.g. to derive a member
+// set from manifest.Members) sees a consistent snapshot relative to any
+// concurrent UpdateManifest writer. Falls back to DefaultManifest if the
+// file doesn't exist; surfaces other errors.
+func SnapshotManifest() (Manifest, error) {
+	manifestUpdateMu.Lock()
+	defer manifestUpdateMu.Unlock()
+	return LoadManifest()
+}
 
 type MemberSpec struct {
 	Slug           string                   `json:"slug"`
