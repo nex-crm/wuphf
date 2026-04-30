@@ -93,6 +93,8 @@ type CreateRequest struct {
 	// InheritFrom defaults to "main" inside the orchestrator when empty.
 	// Surfaced so test cases can assert pass-through.
 	InheritFrom string
+	// CompanyName seeds the new workspace's company metadata. Optional.
+	CompanyName string
 }
 
 // DoctorIssueKind tags every reconcile finding. Strings rather than ints so

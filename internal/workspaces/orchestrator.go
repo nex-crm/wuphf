@@ -16,7 +16,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/nex-crm/wuphf/internal/config"
 	"github.com/nex-crm/wuphf/internal/workspace"
 )
 
@@ -363,7 +362,12 @@ func Shred(ctx context.Context, name string, permanent bool) error {
 		return ErrWorkspaceNotFound
 	}
 
-	home := config.RuntimeHomeDir()
+	// Token file and the ~/.wuphf compatibility symlink live at the real user
+	// HOME (shared cross-workspace root), not the per-workspace RuntimeHome.
+	home, err := realHomeDir()
+	if err != nil {
+		return fmt.Errorf("workspaces: shred %q: resolve home: %w", name, err)
+	}
 	wuphfDir := filepath.Join(target.RuntimeHome, ".wuphf")
 
 	if permanent {

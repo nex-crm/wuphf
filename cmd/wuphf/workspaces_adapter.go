@@ -61,6 +61,7 @@ func (cliOrchestratorAdapter) Create(ctx context.Context, req CreateRequest) (Wo
 		Blueprint:   req.Blueprint,
 		FromScratch: req.FromScratch,
 		InheritFrom: req.InheritFrom,
+		CompanyName: req.CompanyName,
 	}
 	if err := workspaces.Create(ctx, req.Name, req.Blueprint, opts); err != nil {
 		return Workspace{}, err
