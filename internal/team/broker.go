@@ -465,6 +465,11 @@ func (b *Broker) StartOnPort(port int) error {
 	// renders the same command set as the TUI. See broker_commands.go.
 	mux.HandleFunc("/commands", b.requireAuth(b.handleCommands))
 	mux.HandleFunc("/telegram/groups", b.requireAuth(b.handleTelegramGroups))
+	// Web-driven /connect wizard endpoints. The TUI talks to the Telegram Bot
+	// API directly; the web composer drives the same flow through these.
+	mux.HandleFunc("/telegram/verify", b.requireAuth(b.handleTelegramVerify))
+	mux.HandleFunc("/telegram/discover", b.requireAuth(b.handleTelegramDiscover))
+	mux.HandleFunc("/telegram/connect", b.requireAuth(b.handleTelegramConnect))
 	mux.HandleFunc("/bridges", b.requireAuth(b.handleBridge))
 	mux.HandleFunc("/queue", b.requireAuth(b.handleQueue))
 	mux.HandleFunc("/company", b.requireAuth(b.handleCompany))

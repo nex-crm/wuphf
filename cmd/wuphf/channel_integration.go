@@ -172,54 +172,60 @@ func discoverTelegramGroups(token string) tea.Cmd {
 
 func connectTelegramGroup(token string, group team.TelegramGroup) tea.Cmd {
 	return func() tea.Msg {
-		slug := slugifyGroupTitle(group.Title)
+		slug := team.SlugifyTelegramTitle(group.Title)
 
-		// Load manifest and add the new channel with telegram surface
-		manifest, err := company.LoadManifest()
-		if err != nil {
-			manifest = company.DefaultManifest()
-		}
-
-		// Check if channel already exists (by slug or remote_id)
+		// Run the manifest read-modify-write through company.UpdateManifest so
+		// it serializes against any concurrent /telegram/connect call from the
+		// web wizard. Without the shared lock, a TUI connect and a web connect
+		// can both load the same on-disk manifest, each append their own
+		// channel row, and the slower SaveManifest drops the faster one.
+		//
+		// existingSlug + members are populated by the closure and read after
+		// the call so the live-broker create below can reuse the same member
+		// set the manifest just persisted.
+		var (
+			existingSlug string
+			members      []string
+		)
 		remoteID := fmt.Sprintf("%d", group.ChatID)
-		for _, ch := range manifest.Channels {
-			if ch.Slug == slug {
-				return telegramConnectDoneMsg{
-					channelSlug: ch.Slug,
-					groupTitle:  group.Title,
+		mutateErr := company.UpdateManifest(func(manifest *company.Manifest) error {
+			// Idempotent: same slug or same remote id ⇒ already connected.
+			for _, ch := range manifest.Channels {
+				if ch.Slug == slug ||
+					(ch.Surface != nil && ch.Surface.Provider == "telegram" && ch.Surface.RemoteID == remoteID) {
+					existingSlug = ch.Slug
+					return nil
 				}
 			}
-			if ch.Surface != nil && ch.Surface.Provider == "telegram" && ch.Surface.RemoteID == remoteID {
-				return telegramConnectDoneMsg{
-					channelSlug: ch.Slug,
-					groupTitle:  group.Title,
+			// Build default members: lead + all manifest members.
+			members = []string{manifest.Lead}
+			for _, member := range manifest.Members {
+				if member.Slug != manifest.Lead {
+					members = append(members, member.Slug)
 				}
 			}
+			manifest.Channels = append(manifest.Channels, company.ChannelSpec{
+				Slug:        slug,
+				Name:        group.Title,
+				Description: fmt.Sprintf("Telegram bridge for %s.", group.Title),
+				Members:     members,
+				Surface: &company.ChannelSurfaceSpec{
+					Provider:    "telegram",
+					RemoteID:    remoteID,
+					RemoteTitle: group.Title,
+					BotTokenEnv: "WUPHF_TELEGRAM_BOT_TOKEN",
+				},
+			})
+			return nil
+		})
+		if mutateErr != nil {
+			return telegramConnectDoneMsg{err: fmt.Errorf("failed to save manifest: %w", mutateErr)}
 		}
-
-		// Build default members: lead + all manifest members
-		members := []string{manifest.Lead}
-		for _, member := range manifest.Members {
-			if member.Slug != manifest.Lead {
-				members = append(members, member.Slug)
+		if existingSlug != "" {
+			return telegramConnectDoneMsg{
+				channelSlug: existingSlug,
+				groupTitle:  group.Title,
 			}
-		}
-
-		newChannel := company.ChannelSpec{
-			Slug:        slug,
-			Name:        group.Title,
-			Description: fmt.Sprintf("Telegram bridge for %s.", group.Title),
-			Members:     members,
-			Surface: &company.ChannelSurfaceSpec{
-				Provider:    "telegram",
-				RemoteID:    fmt.Sprintf("%d", group.ChatID),
-				RemoteTitle: group.Title,
-				BotTokenEnv: "WUPHF_TELEGRAM_BOT_TOKEN",
-			},
-		}
-		manifest.Channels = append(manifest.Channels, newChannel)
-		if err := company.SaveManifest(manifest); err != nil {
-			return telegramConnectDoneMsg{err: fmt.Errorf("failed to save manifest: %w", err)}
 		}
 
 		// Create channel in the live broker WITH surface metadata
@@ -261,17 +267,6 @@ func connectTelegramGroup(token string, group team.TelegramGroup) tea.Cmd {
 			groupTitle:  group.Title,
 		}
 	}
-}
-
-func slugifyGroupTitle(title string) string {
-	slug := strings.ToLower(strings.TrimSpace(title))
-	slug = regexp.MustCompile(`[^a-z0-9]+`).ReplaceAllString(slug, "-")
-	slug = strings.Trim(slug, "-")
-	if slug == "" {
-		slug = "telegram"
-	}
-	// Prefix with tg- to make it clear it's a telegram channel
-	return "tg-" + slug
 }
 
 // startOpenclawConnect seeds the /connect openclaw picker flow at the URL step.
