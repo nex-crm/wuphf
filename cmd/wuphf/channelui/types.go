@@ -1,6 +1,9 @@
 package channelui
 
-import "strings"
+import (
+	"encoding/json"
+	"strings"
+)
 
 // BrokerReaction is a single emoji reaction on a broker message.
 type BrokerReaction struct {
@@ -164,29 +167,135 @@ type UsageState struct {
 // are populated for tasks that ride a configured pipeline; everything
 // else stays blank for free-form work.
 type Task struct {
-	ID               string `json:"id"`
-	Channel          string `json:"channel,omitempty"`
-	Title            string `json:"title"`
-	Details          string `json:"details,omitempty"`
-	Owner            string `json:"owner,omitempty"`
-	Status           string `json:"status"`
-	CreatedBy        string `json:"created_by"`
-	ThreadID         string `json:"thread_id,omitempty"`
-	TaskType         string `json:"task_type,omitempty"`
-	PipelineID       string `json:"pipeline_id,omitempty"`
-	PipelineStage    string `json:"pipeline_stage,omitempty"`
-	ExecutionMode    string `json:"execution_mode,omitempty"`
-	ReviewState      string `json:"review_state,omitempty"`
-	SourceSignalID   string `json:"source_signal_id,omitempty"`
-	SourceDecisionID string `json:"source_decision_id,omitempty"`
-	WorktreePath     string `json:"worktree_path,omitempty"`
-	WorktreeBranch   string `json:"worktree_branch,omitempty"`
-	CreatedAt        string `json:"created_at"`
-	UpdatedAt        string `json:"updated_at"`
-	DueAt            string `json:"due_at,omitempty"`
-	FollowUpAt       string `json:"follow_up_at,omitempty"`
-	ReminderAt       string `json:"reminder_at,omitempty"`
-	RecheckAt        string `json:"recheck_at,omitempty"`
+	ID               string              `json:"id"`
+	Channel          string              `json:"channel,omitempty"`
+	Title            string              `json:"title"`
+	Details          string              `json:"details,omitempty"`
+	Owner            string              `json:"owner,omitempty"`
+	Status           string              `json:"status"`
+	CreatedBy        string              `json:"created_by"`
+	ThreadID         string              `json:"thread_id,omitempty"`
+	TaskType         string              `json:"task_type,omitempty"`
+	PipelineID       string              `json:"pipeline_id,omitempty"`
+	PipelineStage    string              `json:"pipeline_stage,omitempty"`
+	ExecutionMode    string              `json:"execution_mode,omitempty"`
+	ReviewState      string              `json:"review_state,omitempty"`
+	SourceSignalID   string              `json:"source_signal_id,omitempty"`
+	SourceDecisionID string              `json:"source_decision_id,omitempty"`
+	WorktreePath     string              `json:"worktree_path,omitempty"`
+	WorktreeBranch   string              `json:"worktree_branch,omitempty"`
+	CreatedAt        string              `json:"created_at"`
+	UpdatedAt        string              `json:"updated_at"`
+	DueAt            string              `json:"due_at,omitempty"`
+	FollowUpAt       string              `json:"follow_up_at,omitempty"`
+	ReminderAt       string              `json:"reminder_at,omitempty"`
+	RecheckAt        string              `json:"recheck_at,omitempty"`
+	MemoryWorkflow   *TaskMemoryWorkflow `json:"memory_workflow,omitempty"`
+}
+
+// TaskMemoryWorkflow is the task-level context harness state returned by the
+// broker. It stays backend-neutral so markdown, Nex, and GBrain citations can
+// share one terminal projection.
+type TaskMemoryWorkflow struct {
+	Required          bool                         `json:"required"`
+	Status            string                       `json:"status,omitempty"`
+	RequirementReason string                       `json:"requirement_reason,omitempty"`
+	RequiredSteps     []string                     `json:"required_steps,omitempty"`
+	Lookup            TaskMemoryWorkflowStepState  `json:"lookup,omitempty"`
+	Capture           TaskMemoryWorkflowStepState  `json:"capture,omitempty"`
+	Promote           TaskMemoryWorkflowStepState  `json:"promote,omitempty"`
+	Citations         []TaskMemoryWorkflowCitation `json:"citations,omitempty"`
+	Captures          []TaskMemoryWorkflowArtifact `json:"captures,omitempty"`
+	Promotions        []TaskMemoryWorkflowArtifact `json:"promotions,omitempty"`
+	Override          *TaskMemoryWorkflowOverride  `json:"override,omitempty"`
+	PartialErrors     TaskMemoryWorkflowErrorList  `json:"partial_errors,omitempty"`
+	CreatedAt         string                       `json:"created_at,omitempty"`
+	UpdatedAt         string                       `json:"updated_at,omitempty"`
+	CompletedAt       string                       `json:"completed_at,omitempty"`
+}
+
+type TaskMemoryWorkflowStepState struct {
+	Required    bool   `json:"required,omitempty"`
+	Status      string `json:"status,omitempty"`
+	Actor       string `json:"actor,omitempty"`
+	Query       string `json:"query,omitempty"`
+	CompletedAt string `json:"completed_at,omitempty"`
+	UpdatedAt   string `json:"updated_at,omitempty"`
+	Count       int    `json:"count,omitempty"`
+}
+
+type TaskMemoryWorkflowOverride struct {
+	Actor     string `json:"actor"`
+	Reason    string `json:"reason"`
+	Timestamp string `json:"timestamp"`
+}
+
+type TaskMemoryWorkflowCitation struct {
+	Backend     string   `json:"backend,omitempty"`
+	Source      string   `json:"source,omitempty"`
+	SourceID    string   `json:"source_id,omitempty"`
+	Path        string   `json:"path,omitempty"`
+	PageID      string   `json:"page_id,omitempty"`
+	ChunkID     string   `json:"chunk_id,omitempty"`
+	SourceURL   string   `json:"source_url,omitempty"`
+	LineStart   int      `json:"line_start,omitempty"`
+	LineEnd     int      `json:"line_end,omitempty"`
+	Title       string   `json:"title,omitempty"`
+	Snippet     string   `json:"snippet,omitempty"`
+	Score       *float64 `json:"score,omitempty"`
+	Stale       *bool    `json:"stale,omitempty"`
+	RetrievedAt string   `json:"retrieved_at,omitempty"`
+}
+
+type TaskMemoryWorkflowArtifact struct {
+	Backend      string `json:"backend,omitempty"`
+	Source       string `json:"source,omitempty"`
+	Path         string `json:"path,omitempty"`
+	PageID       string `json:"page_id,omitempty"`
+	PromotionID  string `json:"promotion_id,omitempty"`
+	EntityKind   string `json:"entity_kind,omitempty"`
+	EntitySlug   string `json:"entity_slug,omitempty"`
+	PlaybookSlug string `json:"playbook_slug,omitempty"`
+	Title        string `json:"title,omitempty"`
+	SkipReason   string `json:"skip_reason,omitempty"`
+	Snippet      string `json:"snippet,omitempty"`
+	CommitSHA    string `json:"commit_sha,omitempty"`
+	State        string `json:"state,omitempty"`
+	RecordedAt   string `json:"recorded_at,omitempty"`
+	UpdatedAt    string `json:"updated_at,omitempty"`
+	Missing      bool   `json:"missing,omitempty"`
+}
+
+type TaskMemoryWorkflowError struct {
+	Step      string `json:"step,omitempty"`
+	Code      string `json:"code,omitempty"`
+	Message   string `json:"message,omitempty"`
+	Detail    string `json:"detail,omitempty"`
+	Timestamp string `json:"timestamp,omitempty"`
+}
+
+type TaskMemoryWorkflowErrorList []TaskMemoryWorkflowError
+
+func (l *TaskMemoryWorkflowErrorList) UnmarshalJSON(data []byte) error {
+	if string(data) == "null" {
+		*l = nil
+		return nil
+	}
+	var records []TaskMemoryWorkflowError
+	if err := json.Unmarshal(data, &records); err == nil {
+		*l = records
+		return nil
+	}
+	var messages []string
+	if err := json.Unmarshal(data, &messages); err != nil {
+		return err
+	}
+	records = make([]TaskMemoryWorkflowError, 0, len(messages))
+	for _, msg := range messages {
+		records = append(records, TaskMemoryWorkflowError{Message: msg})
+	}
+	*l = records
+	return nil
 }
 
 // Action describes an external event observed by the broker (a GitHub

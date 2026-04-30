@@ -151,32 +151,33 @@ func (req humanInterview) TitleOrDefault() string {
 }
 
 type teamTask struct {
-	ID               string   `json:"id"`
-	Channel          string   `json:"channel,omitempty"`
-	Title            string   `json:"title"`
-	Details          string   `json:"details,omitempty"`
-	Owner            string   `json:"owner,omitempty"`
-	Status           string   `json:"status"`
-	CreatedBy        string   `json:"created_by"`
-	ThreadID         string   `json:"thread_id,omitempty"`
-	TaskType         string   `json:"task_type,omitempty"`
-	PipelineID       string   `json:"pipeline_id,omitempty"`
-	PipelineStage    string   `json:"pipeline_stage,omitempty"`
-	ExecutionMode    string   `json:"execution_mode,omitempty"`
-	ReviewState      string   `json:"review_state,omitempty"`
-	SourceSignalID   string   `json:"source_signal_id,omitempty"`
-	SourceDecisionID string   `json:"source_decision_id,omitempty"`
-	WorktreePath     string   `json:"worktree_path,omitempty"`
-	WorktreeBranch   string   `json:"worktree_branch,omitempty"`
-	DependsOn        []string `json:"depends_on,omitempty"`
-	Blocked          bool     `json:"blocked,omitempty"`
-	AckedAt          string   `json:"acked_at,omitempty"`
-	DueAt            string   `json:"due_at,omitempty"`
-	FollowUpAt       string   `json:"follow_up_at,omitempty"`
-	ReminderAt       string   `json:"reminder_at,omitempty"`
-	RecheckAt        string   `json:"recheck_at,omitempty"`
-	CreatedAt        string   `json:"created_at"`
-	UpdatedAt        string   `json:"updated_at"`
+	ID               string          `json:"id"`
+	Channel          string          `json:"channel,omitempty"`
+	Title            string          `json:"title"`
+	Details          string          `json:"details,omitempty"`
+	Owner            string          `json:"owner,omitempty"`
+	Status           string          `json:"status"`
+	CreatedBy        string          `json:"created_by"`
+	ThreadID         string          `json:"thread_id,omitempty"`
+	TaskType         string          `json:"task_type,omitempty"`
+	PipelineID       string          `json:"pipeline_id,omitempty"`
+	PipelineStage    string          `json:"pipeline_stage,omitempty"`
+	ExecutionMode    string          `json:"execution_mode,omitempty"`
+	ReviewState      string          `json:"review_state,omitempty"`
+	SourceSignalID   string          `json:"source_signal_id,omitempty"`
+	SourceDecisionID string          `json:"source_decision_id,omitempty"`
+	WorktreePath     string          `json:"worktree_path,omitempty"`
+	WorktreeBranch   string          `json:"worktree_branch,omitempty"`
+	DependsOn        []string        `json:"depends_on,omitempty"`
+	Blocked          bool            `json:"blocked,omitempty"`
+	AckedAt          string          `json:"acked_at,omitempty"`
+	DueAt            string          `json:"due_at,omitempty"`
+	FollowUpAt       string          `json:"follow_up_at,omitempty"`
+	ReminderAt       string          `json:"reminder_at,omitempty"`
+	RecheckAt        string          `json:"recheck_at,omitempty"`
+	MemoryWorkflow   *MemoryWorkflow `json:"memory_workflow,omitempty"`
+	CreatedAt        string          `json:"created_at"`
+	UpdatedAt        string          `json:"updated_at"`
 }
 
 type channelSurface struct {
@@ -762,7 +763,20 @@ func (b *Broker) Start() error {
 	// IntervalOverride and Enabled choices.
 	b.registerSystemCrons()
 	b.startReviewExpiryLoop(context.Background())
-	return b.StartOnPort(brokeraddr.ResolvePort())
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		select {
+		case <-b.stopCh:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+	b.startMemoryWorkflowReconcilerLoop(ctx)
+	if err := b.StartOnPort(brokeraddr.ResolvePort()); err != nil {
+		cancel()
+		return err
+	}
+	return nil
 }
 
 // ensureWikiWorker initializes the markdown-backend wiki worker when the
@@ -884,6 +898,8 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/members", b.requireAuth(b.handleMembers))
 	mux.HandleFunc("/tasks", b.requireAuth(b.handleTasks))
 	mux.HandleFunc("/tasks/ack", b.requireAuth(b.handleTaskAck))
+	mux.HandleFunc("/tasks/memory-workflow", b.requireAuth(b.handleTaskMemoryWorkflow))
+	mux.HandleFunc("/tasks/memory-workflow/reconcile", b.requireAuth(b.handleTaskMemoryWorkflowReconcile))
 	mux.HandleFunc("/agent-logs", b.requireAuth(b.handleAgentLogs))
 	mux.HandleFunc("/task-plan", b.requireAuth(b.handleTaskPlan))
 	mux.HandleFunc("/memory", b.requireAuth(b.handleMemory))
@@ -2689,6 +2705,7 @@ func (b *Broker) normalizeLoadedStateLocked() {
 			b.tasks[i].Channel = "general"
 		}
 		normalizeTaskPlan(&b.tasks[i])
+		syncTaskMemoryWorkflow(&b.tasks[i], "")
 		b.ensureTaskOwnerChannelMembershipLocked(b.tasks[i].Channel, b.tasks[i].Owner)
 		b.queueTaskBehindActiveOwnerLaneLocked(&b.tasks[i])
 		b.scheduleTaskLifecycleLocked(&b.tasks[i])

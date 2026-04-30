@@ -618,6 +618,7 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 			"Send a direct human-facing note into the chat when you need to present completion, recommend a decision, or tell the human what they should do next.",
 		), handleHumanMessage)
 
+		registerContextTools(server)
 		registerSharedMemoryTools(server)
 
 		registerSkillAuthoringTools(server)
@@ -657,6 +658,7 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 			"human_interview",
 			"Ask the human an interview question. If they dismiss it, or send another message in this channel/thread, the interview is canceled.",
 		), handleHumanInterview)
+		registerContextTools(server)
 		registerSharedMemoryTools(server)
 		mcp.AddTool(server, officeWriteTool(
 			"team_skill_run",
@@ -735,6 +737,7 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 	if slug == "artist" {
 		registerImageTools(server)
 	}
+	registerContextTools(server)
 	registerSharedMemoryTools(server)
 
 	mcp.AddTool(server, readOnlyTool(
