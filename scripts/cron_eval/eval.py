@@ -177,7 +177,7 @@ def scenario_self_registration(
     ok = pass_count == len(SYSTEM_CRONS)
     detail = (
         f"{pass_count}/{len(SYSTEM_CRONS)} system crons registered with "
-        f"system_managed=true and enabled=true"
+        "system_managed=true and enabled=true"
     )
     return ScenarioResult(
         id="cron-01-self-registration",
@@ -624,11 +624,11 @@ def render_markdown_report(report: CronEvalReport) -> str:
         f"- **Floors enforced:** {report.floors_pass}/{report.floors_total}"
     )
     out.append(
-        f"- **Disabled-skips-run:** "
+        "- **Disabled-skips-run:** "
         f"{'pass' if report.disabled_skips_run else 'fail' if report.disabled_skips_run is False else 'n/a'}"
     )
     out.append(
-        f"- **Persistence:** "
+        "- **Persistence:** "
         f"{'pass' if report.persistence_ok else 'fail' if report.persistence_ok is False else 'n/a (run --verify-persistence)'}"
     )
     out.append("")
@@ -653,6 +653,35 @@ def render_markdown_report(report: CronEvalReport) -> str:
                 detail = (sub_detail or "").replace("|", "/")
                 out.append(f"| `{sc.id}` | `{sub_id}` | {sign} | {detail} |")
     return "\n".join(out) + "\n"
+
+
+# ---------- State reset ----------
+
+
+def reset_scheduler_state(broker: str, token: str) -> None:
+    """Reset all system crons to their default state before a full run.
+
+    Clears any interval_override and re-enables any disabled cron so that
+    each run starts from a deterministic baseline.  Without this, overrides
+    written by scenario_floor_rejection, scenario_patch_happy_path, and
+    scenario_persistence_snapshot bleed into the next invocation and cause
+    spurious failures (e.g. floor checks starting from a pre-patched value,
+    self-registration failing because a cron was left disabled).
+    """
+    for slug, spec in SYSTEM_CRONS.items():
+        if spec.get("read_only"):
+            # Read-only crons reject any PATCH — nothing to reset.
+            continue
+        code, body = http_request(
+            "PATCH",
+            f"{broker}/scheduler/{urllib.parse.quote(slug)}",
+            token=token,
+            body={"interval_override": 0, "enabled": True},
+        )
+        if code < 200 or code >= 300:
+            raise RuntimeError(
+                f"reset_scheduler_state: PATCH {slug} returned {code}: {body!r}"
+            )
 
 
 # ---------- Main ----------
@@ -716,6 +745,16 @@ def main() -> int:
         print(f"  cron_persistence: {'PASS' if ok else 'FAIL'}")
         return 0 if ok else 1
 
+    # Full run: reset broker state first so each invocation starts from a
+    # deterministic baseline (clears overrides left by the previous run).
+    # Also remove a stale snapshot so --verify-persistence won't pick up
+    # a result from a different broker boot.
+    print("[cron-eval] resetting scheduler state before run…")
+    reset_scheduler_state(args.broker, token)
+    snapshot_path = Path(PERSISTENCE_SNAPSHOT_PATH)
+    if snapshot_path.exists():
+        snapshot_path.unlink()
+
     # Full run: scenarios 1-6, then write the persistence snapshot last so
     # downstream tooling can chain --verify-persistence against the restart.
     print(f"[cron-eval] broker={args.broker}")
@@ -754,23 +793,23 @@ def main() -> int:
     print("ACCEPTANCE GATES")
     print("=" * 78)
     print(
-        f"  cron_self_registration:   "
+        "  cron_self_registration:   "
         f"{report.self_registration_pass}/{report.self_registration_total}  "
         f"({'PASS' if self_reg_ok else 'FAIL'})"
     )
     print(
-        f"  cron_patch_floors:        "
+        "  cron_patch_floors:        "
         f"{report.floors_pass}/{report.floors_total}  "
         f"({'PASS' if floors_ok else 'FAIL'})"
     )
     print(
-        f"  cron_disabled_skips_run:  "
+        "  cron_disabled_skips_run:  "
         f"{'PASS' if disabled_ok else 'FAIL'}"
     )
     print(
-        f"  cron_persistence_snap:    "
+        "  cron_persistence_snap:    "
         f"{'PASS' if persistence_snapshot_ok else 'FAIL'}  "
-        f"(restart broker + --verify-persistence to confirm gate 4)"
+        "(restart broker + --verify-persistence to confirm gate 4)"
     )
 
     other_scenarios_ok = all(
