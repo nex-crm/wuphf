@@ -1,14 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
-import {
-  get,
-  getLocalProvidersStatus,
-  type LocalProviderStatus,
-  post,
-} from "../../api/client";
-import { ONBOARDING_COPY } from "../../lib/constants";
+import { get, post } from "../../api/client";
 import { useAppStore } from "../../stores/app";
-import { Kbd, MOD_KEY } from "../ui/Kbd";
 import "../../styles/onboarding.css";
 
 // ApiKeyRow is re-exported here for back-compat with onboarding/ApiKeyRow.test.tsx.
@@ -414,7 +407,7 @@ export function Wizard({ onComplete }: WizardProps) {
     // RUNTIMES, so picking MLX-LM/Ollama/Exo as primary made the
     // summary report a missing LLM right before /config persisted a
     // perfectly valid local provider.
-    const primaryLabel = runtimePriority[0];
+    const [primaryLabel] = runtimePriority;
     const primaryLocal = primaryLabel
       ? LOCAL_PROVIDER_LABELS.find((m) => m.label === primaryLabel)
       : undefined;
@@ -767,6 +760,7 @@ export function Wizard({ onComplete }: WizardProps) {
     nextStep,
     finishOnboarding,
     closeNexSignup,
+    localProvider,
   ]);
 
   return (

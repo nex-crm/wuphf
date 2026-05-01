@@ -10,6 +10,7 @@ import type { WizardStep } from "./types";
 export function ArrowIcon() {
   return (
     <svg
+      aria-hidden="true"
       width="14"
       height="14"
       viewBox="0 0 24 24"
@@ -28,6 +29,7 @@ export function ArrowIcon() {
 export function CheckIcon() {
   return (
     <svg
+      aria-hidden="true"
       width="12"
       height="12"
       viewBox="0 0 24 24"
@@ -63,10 +65,16 @@ export function EnterHint({ modifier }: { modifier?: string } = {}) {
   );
 }
 
-export function ProgressDots({ current }: { current: WizardStep }) {
+export function ProgressDots({
+  current,
+  steps = STEP_ORDER,
+}: {
+  current: WizardStep;
+  steps?: readonly WizardStep[];
+}) {
   return (
     <div className="wizard-progress">
-      {STEP_ORDER.map((step) => (
+      {steps.map((step) => (
         <div
           key={step}
           className={`wizard-progress-dot ${step === current ? "active" : "inactive"}`}

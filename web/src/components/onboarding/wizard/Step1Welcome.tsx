@@ -17,7 +17,7 @@ export function WelcomeStep({ onNext }: WelcomeStepProps) {
         <p className="wizard-subhead">{ONBOARDING_COPY.step1_subhead}</p>
       </div>
       <div style={{ display: "flex", justifyContent: "center" }}>
-        <button className="btn btn-primary" onClick={onNext}>
+        <button className="btn btn-primary" onClick={onNext} type="button">
           {ONBOARDING_COPY.step1_cta}
           <ArrowIcon />
           <EnterHint />
