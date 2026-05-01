@@ -199,7 +199,8 @@ Two new fields on `ArticleMeta` (Go) / `WikiArticle` (TypeScript):
 - [ ] Read `WUPHF_ENTITY_SYNTHESIS_MODE` in `resolveXxxFromEnv`
 - [ ] Add `Ghost bool` and `SynthesisQueued bool` to `ArticleMeta`
 - [ ] Parse frontmatter `ghost` field in `BuildArticle`
-- [ ] In `BuildArticle`, when `ghost: true` AND mode is `Demand` AND facts ≥ threshold: call `EnqueueSynthesis`; set `SynthesisQueued` from in-flight set
+- [ ] In `handleWikiArticle`, when `ghost: true` AND mode is `Demand` AND facts ≥ threshold: call `EnqueueSynthesis`
+- [ ] In `handleWikiArticle`, when `ghost: true` (any mode): set `SynthesisQueued` from synthesizer in-flight set so the badge works for Auto-mode syntheses too
 - [ ] Add `Ghost bool` and `SynthesisQueued bool` to TypeScript `WikiArticle`
 - [ ] UI: show "Generating brief..." spinner when `synthesis_queued: true`
 - [ ] UI: poll or refresh after synthesis (simple: manual reload prompt; stretch: SSE)
