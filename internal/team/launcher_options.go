@@ -26,6 +26,16 @@ func (l *Launcher) SetFocusMode(v bool) { l.focusMode = v }
 // SetNoOpen suppresses automatic browser launch on startup.
 func (l *Launcher) SetNoOpen(v bool) { l.noOpen = v }
 
+// SetBrokerConfigurator registers startup wiring that must run immediately
+// after the launcher constructs its broker and before that broker starts
+// serving requests.
+func (l *Launcher) SetBrokerConfigurator(fn func(*Broker)) {
+	if l == nil {
+		return
+	}
+	l.brokerConfigurator = fn
+}
+
 func (l *Launcher) SetOneOnOne(slug string) {
 	l.sessionMode = SessionModeOneOnOne
 	l.oneOnOne = NormalizeOneOnOneAgent(slug)
@@ -89,6 +99,15 @@ func (l *Launcher) BrokerToken() string {
 		return ""
 	}
 	return l.broker.Token()
+}
+
+// Broker returns the Launcher's internal broker instance. Used by
+// cmd/wuphf/main.go to wire workspace orchestration after launch.
+func (l *Launcher) Broker() *Broker {
+	if l == nil {
+		return nil
+	}
+	return l.broker
 }
 
 // OneOnOneAgent returns the active direct-session agent slug, if any.

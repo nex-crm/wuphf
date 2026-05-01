@@ -77,6 +77,7 @@ type Launcher struct {
 	sessionMode        string
 	oneOnOne           string
 	provider           string
+	brokerConfigurator func(*Broker)
 
 	// headless is the per-launcher headless-worker pool (PLAN.md §C7).
 	// All headless dispatch state — mutex, ctx/cancel, queues, workers,

@@ -567,6 +567,8 @@ func registerSharedMemoryTools(server *mcp.Server) {
 		// into invokable skills + record execution outcomes. Same markdown
 		// substrate, so the backend gate is unchanged.
 		registerPlaybookTools(server)
+		// Team learnings — typed reusable memory stored in the wiki.
+		registerLearningTools(server)
 		// Lint tools (Slice 1 wiki intelligence) — daily health check +
 		// contradiction resolution. Same markdown substrate.
 		mcp.AddTool(server, readOnlyTool(
@@ -618,6 +620,7 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 			"Send a direct human-facing note into the chat when you need to present completion, recommend a decision, or tell the human what they should do next.",
 		), handleHumanMessage)
 
+		registerContextTools(server)
 		registerSharedMemoryTools(server)
 
 		registerSkillAuthoringTools(server)
@@ -657,6 +660,7 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 			"human_interview",
 			"Ask the human an interview question. If they dismiss it, or send another message in this channel/thread, the interview is canceled.",
 		), handleHumanInterview)
+		registerContextTools(server)
 		registerSharedMemoryTools(server)
 		mcp.AddTool(server, officeWriteTool(
 			"team_skill_run",
@@ -735,6 +739,7 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 	if slug == "artist" {
 		registerImageTools(server)
 	}
+	registerContextTools(server)
 	registerSharedMemoryTools(server)
 
 	mcp.AddTool(server, readOnlyTool(

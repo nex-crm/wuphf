@@ -7,6 +7,7 @@ const apiBase = "/api";
 let brokerDirect = "http://localhost:7890";
 let useProxy = true;
 let token: string | null = null;
+const brokerHandshakeTimeoutMs = 8000;
 
 // ── Init ──
 
@@ -28,6 +29,70 @@ export async function initApi(): Promise<void> {
     } catch {
       // broker unreachable — will fail on first request
     }
+  }
+}
+
+export async function connectBroker(
+  brokerUrl: string,
+  brokerToken?: string,
+): Promise<void> {
+  const nextBroker = brokerUrl.trim().replace(/\/+$/, "");
+  if (!nextBroker) {
+    throw new Error("Broker URL is required");
+  }
+  try {
+    const parsed = new URL(nextBroker);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      throw new Error("unsupported protocol");
+    }
+  } catch {
+    throw new Error("Broker URL must be a valid http:// or https:// URL");
+  }
+  let nextToken = brokerToken?.trim() || null;
+  const r = await fetchWithTimeout(
+    `${nextBroker}/health`,
+    brokerHandshakeTimeoutMs,
+  );
+  if (!r.ok) {
+    const text = (await r.text().catch(() => "")).trim();
+    throw new Error(text || `${r.status} ${r.statusText}`);
+  }
+  if (!nextToken) {
+    const tokenResp = await fetchWithTimeout(
+      `${nextBroker}/web-token`,
+      brokerHandshakeTimeoutMs,
+    );
+    if (!tokenResp.ok) {
+      const text = (await tokenResp.text().catch(() => "")).trim();
+      throw new Error(text || `${tokenResp.status} ${tokenResp.statusText}`);
+    }
+    const data = await tokenResp.json();
+    const candidate = typeof data?.token === "string" ? data.token.trim() : "";
+    if (!candidate) {
+      throw new Error("Broker /web-token response did not include a token");
+    }
+    nextToken = candidate;
+  }
+  brokerDirect = nextBroker;
+  token = nextToken;
+  useProxy = false;
+}
+
+async function fetchWithTimeout(
+  url: string,
+  timeoutMs: number,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = globalThis.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { signal: controller.signal });
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new Error(`Timed out connecting to broker after ${timeoutMs}ms`);
+    }
+    throw err;
+  } finally {
+    globalThis.clearTimeout(timeout);
   }
 }
 
@@ -146,6 +211,22 @@ export async function postWithTimeout<T = unknown>(
   } finally {
     globalThis.clearTimeout(timeout);
   }
+}
+
+export async function patch<T = unknown>(
+  path: string,
+  body?: unknown,
+): Promise<T> {
+  const r = await fetch(baseURL() + path, {
+    method: "PATCH",
+    headers: authHeaders(),
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) {
+    const text = (await r.text().catch(() => "")).trim();
+    throw new Error(text || `${r.status} ${r.statusText}`);
+  }
+  return r.json();
 }
 
 export async function del<T = unknown>(
@@ -369,6 +450,20 @@ export interface InterviewOption {
   text_hint?: string;
 }
 
+export interface SkillSimilarRef {
+  slug: string;
+  score: number;
+  method?: string;
+}
+
+export interface InterviewMetadata {
+  /** Set on enhance_skill_proposal interviews (PR 7 task #15). */
+  enhances_slug?: string;
+  /** Set on ambiguous-band skill_proposal interviews (PR 7 task #15). */
+  similar_to_existing?: SkillSimilarRef;
+  [key: string]: unknown;
+}
+
 export interface AgentRequest {
   id: string;
   from: string;
@@ -387,6 +482,12 @@ export interface AgentRequest {
   recommended_id?: string;
   created_at?: string;
   updated_at?: string;
+  /** Echoes the entity slug the request is about (e.g. a skill name). */
+  reply_to?: string;
+  /** Structured metadata. Used by the enhance-existing UX (PR 7 task #14). */
+  metadata?: InterviewMetadata;
+  /** Full candidate spec on enhance_skill_proposal interviews. */
+  enhance_candidate?: Skill;
 }
 
 export function getRequests(channel: string) {
@@ -449,6 +550,84 @@ export function getVersion() {
 
 // ── Tasks ──
 
+export interface TaskMemoryWorkflowCitation {
+  backend?: string;
+  source?: string;
+  source_id?: string;
+  path?: string;
+  page_id?: string;
+  chunk_id?: string;
+  source_url?: string;
+  line_start?: number;
+  line_end?: number;
+  title?: string;
+  snippet?: string;
+  score?: number;
+  stale?: boolean;
+  retrieved_at?: string;
+}
+
+export interface TaskMemoryWorkflowArtifact {
+  backend?: string;
+  source?: string;
+  path?: string;
+  page_id?: string;
+  promotion_id?: string;
+  entity_kind?: string;
+  entity_slug?: string;
+  playbook_slug?: string;
+  title?: string;
+  skip_reason?: string;
+  snippet?: string;
+  commit_sha?: string;
+  state?: string;
+  recorded_at?: string;
+  updated_at?: string;
+  missing?: boolean;
+}
+
+export interface TaskMemoryWorkflowStepState {
+  required?: boolean;
+  status?: string;
+  actor?: string;
+  query?: string;
+  completed_at?: string;
+  updated_at?: string;
+  count?: number;
+}
+
+export interface TaskMemoryWorkflowOverride {
+  actor: string;
+  reason: string;
+  timestamp: string;
+}
+
+export interface TaskMemoryWorkflowPartialError {
+  step?: string;
+  code?: string;
+  message?: string;
+  detail?: string;
+  timestamp?: string;
+}
+
+export interface TaskMemoryWorkflow {
+  required: boolean;
+  status?: string;
+  requirement_reason?: string;
+  required_steps?: string[];
+  lookup?: TaskMemoryWorkflowStepState;
+  capture?: TaskMemoryWorkflowStepState;
+  promote?: TaskMemoryWorkflowStepState;
+  citations?: TaskMemoryWorkflowCitation[];
+  captures?: TaskMemoryWorkflowArtifact[];
+  promotions?: TaskMemoryWorkflowArtifact[];
+  override?: TaskMemoryWorkflowOverride;
+  partial_errors?: Array<string | TaskMemoryWorkflowPartialError>;
+  created_at?: string;
+  updated_at?: string;
+  completed_at?: string;
+}
+
 export interface Task {
   id: string;
   title: string;
@@ -477,6 +656,36 @@ export interface Task {
   recheck_at?: string;
   created_at?: string;
   updated_at?: string;
+  memory_workflow?: TaskMemoryWorkflow;
+}
+
+export interface CreateTaskInput {
+  title: string;
+  assignee: string;
+  details?: string;
+  task_type?: string;
+  execution_mode?: string;
+  depends_on?: string[];
+}
+
+export interface CreateTasksResponse {
+  tasks: Task[];
+}
+
+/**
+ * Create one or more tasks via the /task-plan endpoint. Used by surfaces
+ * that hand off work (e.g. Suggest changes on a skill proposal creates a
+ * "Revise skill" task assigned to the lead).
+ */
+export function createTasks(
+  tasks: CreateTaskInput[],
+  opts?: { channel?: string; createdBy?: string },
+): Promise<CreateTasksResponse> {
+  return post<CreateTasksResponse>("/task-plan", {
+    channel: opts?.channel || "general",
+    created_by: opts?.createdBy || "human",
+    tasks,
+  });
 }
 
 export function reassignTask(
@@ -501,18 +710,38 @@ export type TaskStatusAction =
   | "complete"
   | "cancel";
 
+export interface UpdateTaskStatusOptions {
+  memoryWorkflowOverride?: boolean;
+  memoryWorkflowOverrideActor?: string;
+  memoryWorkflowOverrideReason?: string;
+  overrideReason?: string;
+}
+
 export function updateTaskStatus(
   taskId: string,
   action: TaskStatusAction,
   channel: string,
   actor = "human",
+  options?: UpdateTaskStatusOptions,
 ) {
-  return post<{ task: Task }>("/tasks", {
+  const body: Record<string, string | boolean> = {
     action,
     id: taskId,
     channel: channel || "general",
     created_by: actor,
-  });
+  };
+  if (options?.memoryWorkflowOverride) {
+    body.memory_workflow_override = true;
+    body.memory_workflow_override_actor =
+      options.memoryWorkflowOverrideActor || actor;
+  }
+  const overrideReason =
+    options?.memoryWorkflowOverrideReason || options?.overrideReason;
+  if (overrideReason) {
+    body.memory_workflow_override_reason = overrideReason;
+    body.override_reason = overrideReason;
+  }
+  return post<{ task: Task }>("/tasks", body);
 }
 
 export function getTasks(
@@ -593,6 +822,24 @@ export interface SchedulerJob {
   last_run?: string;
   due_at?: string;
   status?: string;
+  /** Interval-driven cadence in minutes (system crons + interval workflows). */
+  interval_minutes?: number;
+  /** Cron expression for cron-driven workflow jobs. */
+  schedule_expr?: string;
+  /** Provider that owns this job (e.g. "system", "agent", "workflow"). */
+  provider?: string;
+  /** Target type ("workflow" | "skill" | …) when surfaced by the runtime. */
+  target_type?: string;
+  target_id?: string;
+  // PR 8 Lane G/H — cron registry surface fields.
+  /** Whether the cron is currently enabled. */
+  enabled?: boolean;
+  /** Human override for the cadence in minutes. 0/missing = use default. */
+  interval_override?: number;
+  /** "ok" | "failed" — chip on the row. */
+  last_run_status?: string;
+  /** True for crons that self-register at broker startup. */
+  system_managed?: boolean;
 }
 
 export function getScheduler(opts?: { dueOnly?: boolean }) {
@@ -601,9 +848,68 @@ export function getScheduler(opts?: { dueOnly?: boolean }) {
   return get<{ jobs: SchedulerJob[] }>("/scheduler", params);
 }
 
+export interface PatchSchedulerJobBody {
+  enabled?: boolean;
+  /** Minutes; 0 clears the override. Must be >= the cron's MinFloor. */
+  interval_override?: number;
+}
+
+export interface PatchSchedulerJobResponse {
+  job: SchedulerJob;
+}
+
+/**
+ * Update the enabled flag and / or interval_override for a scheduler job.
+ * Backed by PATCH /scheduler/{slug} (PR 8 Lane G).
+ */
+export function patchSchedulerJob(
+  slug: string,
+  body: PatchSchedulerJobBody,
+): Promise<PatchSchedulerJobResponse> {
+  return patch<PatchSchedulerJobResponse>(
+    `/scheduler/${encodeURIComponent(slug)}`,
+    body,
+  );
+}
+
+/**
+ * Wire shape for one entry from GET /scheduler/system-specs.
+ * Mirrors systemCronSpecJSON in internal/team/broker_scheduler.go.
+ */
+export interface SystemCronSpec {
+  slug: string;
+  min_floor_minutes: number;
+  default_interval_minutes: number;
+  description: string;
+}
+
+/**
+ * Fetch the system-cron spec registry from the broker so the UI can
+ * derive per-slug MinFloor values at runtime instead of maintaining a
+ * hardcoded mirror constant.
+ */
+export async function getSystemCronSpecs(): Promise<SystemCronSpec[]> {
+  const res = await get<{ specs: SystemCronSpec[] }>(
+    "/scheduler/system-specs",
+  );
+  return res.specs ?? [];
+}
+
+/**
+ * Force-trigger a scheduler job once, immediately. Does not affect the
+ * recurring schedule or next_run. Backed by POST /scheduler/{slug}/run (PR 9).
+ */
+export async function runSchedulerJob(
+  slug: string,
+): Promise<{ triggered: boolean; slug: string; at: string }> {
+  return post<{ triggered: boolean; slug: string; at: string }>(
+    `/scheduler/${encodeURIComponent(slug)}/run`,
+  );
+}
+
 // ── Skills ──
 
-export type SkillStatus = "active" | "proposed" | "archived";
+export type SkillStatus = "active" | "proposed" | "archived" | "disabled";
 
 export interface SkillMetadata {
   wuphf?: {
@@ -611,24 +917,113 @@ export interface SkillMetadata {
   };
 }
 
+export type OwnerAgents = string[];
+
 export interface Skill {
   name: string;
+  title?: string;
   description?: string;
   source?: string;
+  content?: string;
+  trigger?: string;
   parameters?: unknown;
   status?: SkillStatus;
   created_by?: string;
   created_at?: string;
   updated_at?: string;
+  /** Per-agent scoping (PR 7). Empty/missing = lead-routable shared skill. */
+  owner_agents?: OwnerAgents;
+  /** Set on ambiguous-band proposals by the similarity gate (PR 7 task #15). */
+  similar_to_existing?: SkillSimilarRef;
   metadata?: SkillMetadata;
 }
+
+export type SkillsListScope = "active" | "all";
 
 export function getSkills() {
   return get<{ skills: Skill[] }>("/skills");
 }
 
-export function invokeSkill(name: string, params?: Record<string, unknown>) {
-  return post(`/skills/${encodeURIComponent(name)}/invoke`, params ?? {});
+/**
+ * Fetch the skill catalog. With scope="all" the legacy /skills endpoint
+ * accepts include_archived + include_disabled flags (PR 7 task #18) so the
+ * Skills app can render every section (Pending / Active / Disabled /
+ * Archived) from a single query — keeping body content intact for the
+ * SidePanel preview and the enhance-existing patchSkill flow.
+ *
+ * scope="active" returns the legacy default (active + proposed + disabled,
+ * archived hidden) for callers that don't need the archived bucket.
+ */
+export function getSkillsList(scope: SkillsListScope = "all") {
+  const params: Record<string, string> = {};
+  if (scope === "all") {
+    params.include_archived = "true";
+    params.include_disabled = "true";
+  }
+  return get<{ skills: Skill[] }>("/skills", params);
+}
+
+export interface DisableSkillResponse {
+  skill?: Skill;
+}
+
+export function disableSkill(name: string): Promise<DisableSkillResponse> {
+  return post<DisableSkillResponse>(
+    `/skills/${encodeURIComponent(name)}/disable`,
+    {},
+  );
+}
+
+export interface EnableSkillResponse {
+  skill?: Skill;
+}
+
+export function enableSkill(name: string): Promise<EnableSkillResponse> {
+  return post<EnableSkillResponse>(
+    `/skills/${encodeURIComponent(name)}/enable`,
+    {},
+  );
+}
+
+export interface RestoreArchivedSkillResponse {
+  skill?: Skill;
+}
+
+export function restoreArchivedSkill(
+  name: string,
+): Promise<RestoreArchivedSkillResponse> {
+  return post<RestoreArchivedSkillResponse>(
+    `/skills/${encodeURIComponent(name)}/restore`,
+    {},
+  );
+}
+
+export interface ArchiveSkillResponse {
+  ok?: boolean;
+  skill?: Skill;
+}
+
+export function archiveSkill(name: string): Promise<ArchiveSkillResponse> {
+  return post<ArchiveSkillResponse>(
+    `/skills/${encodeURIComponent(name)}/archive`,
+    {},
+  );
+}
+
+export interface InvokeSkillResult {
+  channel?: string;
+  skill?: Skill;
+  task_id?: string;
+}
+
+export function invokeSkill(
+  name: string,
+  params?: Record<string, unknown>,
+): Promise<InvokeSkillResult> {
+  return post<InvokeSkillResult>(
+    `/skills/${encodeURIComponent(name)}/invoke`,
+    params ?? {},
+  );
 }
 
 // ── Skill compile (PR 1a wiki-skill-compile) ──
@@ -719,6 +1114,31 @@ export function undoRejectSkill(
   });
 }
 
+export interface PatchSkillRequest {
+  old_string: string;
+  new_string: string;
+  replace_all?: boolean;
+}
+
+export interface PatchSkillResponse {
+  skill?: Skill;
+}
+
+/**
+ * Edit-tool style find/replace patch against a skill's body.
+ * Used by the enhance-existing flow (PR 7 task #14) to fold a candidate
+ * proposal into an existing skill without losing provenance.
+ */
+export function patchSkill(
+  name: string,
+  body: PatchSkillRequest,
+): Promise<PatchSkillResponse> {
+  return post<PatchSkillResponse>(
+    `/skills/${encodeURIComponent(name)}/patch`,
+    body,
+  );
+}
+
 // ── Usage ──
 
 export interface AgentUsage {
@@ -770,7 +1190,9 @@ export function listAgentLogTasks(opts?: { limit?: number }) {
 }
 
 export function getAgentLogEntries(taskId: string) {
-  return get<{ task: string; entries: TaskLogEntry[] }>("/agent-logs", { task: taskId });
+  return get<{ task: string; entries: TaskLogEntry[] }>("/agent-logs", {
+    task: taskId,
+  });
 }
 
 // ── Memory ──

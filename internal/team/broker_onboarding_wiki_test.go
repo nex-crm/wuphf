@@ -14,10 +14,13 @@ import (
 func TestOnboardingCompleteMaterializesWiki(t *testing.T) {
 	ensureOperationsFallbackFS(t)
 
-	// Redirect HOME so the onboarding hook writes into the test tempdir
-	// instead of ~/.wuphf. os.UserHomeDir respects $HOME on unix.
+	// Redirect runtime home so the onboarding hook writes into the test
+	// tempdir instead of ~/.wuphf. Set both HOME (for legacy test-isolation
+	// patterns) AND WUPHF_RUNTIME_HOME (post-Phase-0, materializeBlueprintWiki
+	// resolves through config.RuntimeHomeDir which checks WUPHF_RUNTIME_HOME first).
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
+	t.Setenv("WUPHF_RUNTIME_HOME", tmpHome)
 
 	b := newTestBroker(t)
 	if err := b.onboardingCompleteFn("Stand up niche CRM", false, "niche-crm", nil); err != nil {
@@ -59,6 +62,7 @@ func TestOnboardingCompleteWikiIsIdempotent(t *testing.T) {
 
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
+	t.Setenv("WUPHF_RUNTIME_HOME", tmpHome)
 
 	// First run.
 	b := newTestBroker(t)
@@ -101,6 +105,7 @@ func TestOnboardingCompleteSynthesizedBlueprintSkipsWiki(t *testing.T) {
 
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
+	t.Setenv("WUPHF_RUNTIME_HOME", tmpHome)
 
 	b := newTestBroker(t)
 	if err := b.onboardingCompleteFn("Run a bespoke operation", false, "", nil); err != nil {

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/nex-crm/wuphf/internal/config"
+	"github.com/nex-crm/wuphf/internal/gbrain"
 )
 
 func TestResolveMemoryBackendStatusNoNexFallsBackToMarkdown(t *testing.T) {
@@ -110,5 +111,29 @@ func TestInferSharedMemoryOwnerFromGBrainSlug(t *testing.T) {
 	owner := inferSharedMemoryOwner("wuphf-shared--pm--launch-brief--20260416-120000", "")
 	if owner != "pm" {
 		t.Fatalf("expected owner pm from gbrain slug, got %q", owner)
+	}
+}
+
+func TestScopedMemoryHitFromGBrainResultPreservesCitationFields(t *testing.T) {
+	hit := scopedMemoryHitFromGBrainResult(gbrain.SearchResult{
+		Slug:        "people/nazz",
+		PageID:      42,
+		Title:       "Nazz",
+		ChunkText:   "Relevant compiled truth",
+		ChunkSource: "compiled_truth",
+		ChunkID:     7,
+		ChunkIndex:  3,
+		Score:       0.91,
+		Stale:       true,
+	})
+
+	if hit.Identifier != "people/nazz" || hit.Slug != "people/nazz" || hit.PageID != 42 || hit.ChunkID != 7 || hit.ChunkIndex != 3 || hit.Source != "compiled_truth" {
+		t.Fatalf("gbrain citation fields were not preserved: %+v", hit)
+	}
+	if hit.Score == nil || *hit.Score != 0.91 {
+		t.Fatalf("expected score 0.91, got %+v", hit.Score)
+	}
+	if hit.Stale == nil || !*hit.Stale {
+		t.Fatalf("expected stale=true, got %+v", hit.Stale)
 	}
 }

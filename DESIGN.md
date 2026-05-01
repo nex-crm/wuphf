@@ -33,6 +33,8 @@
 | `--blue` | `#5A9AC8` | Secondary accent, links, engineer agent (brighter for dark bg) |
 | `--green` | `#5AAA7A` | CMO agent nameplate |
 
+**Implementation aliases:** The live page may keep legacy CSS variable names while using this token system: `--bg2` maps to `--surface`, `--bg3` maps to `--surface-high`, `--text-dim` maps to `--text-muted`, and `--accent-lime` maps to `--green`. These aliases must not reintroduce purple/violet accents.
+
 **Scene-specific:**
 | Token | Hex | Usage |
 |-------|-----|-------|

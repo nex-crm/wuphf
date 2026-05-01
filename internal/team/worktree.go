@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/nex-crm/wuphf/internal/config"
 	"github.com/nex-crm/wuphf/internal/gitexec"
 )
 
@@ -251,7 +252,7 @@ func defaultTaskWorktreeRootDir(repoRoot string) string {
 		repoToken = "workspace"
 	}
 
-	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
+	if home := config.RuntimeHomeDir(); home != "" {
 		return filepath.Join(home, ".wuphf", "task-worktrees", repoToken)
 	}
 	return filepath.Join(os.TempDir(), "wuphf-task-worktrees", repoToken)
@@ -540,7 +541,7 @@ func worktreePathLooksSafe(path string) bool {
 
 func managedWorktreeRoots() []string {
 	roots := make([]string, 0, 2)
-	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
+	if home := config.RuntimeHomeDir(); home != "" {
 		roots = append(roots, filepath.Join(home, ".wuphf", "task-worktrees"))
 	}
 	roots = append(roots, filepath.Join(os.TempDir(), "wuphf-task-worktrees"))

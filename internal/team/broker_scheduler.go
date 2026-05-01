@@ -3,6 +3,7 @@ package team
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -388,4 +389,427 @@ func (b *Broker) handleScheduler(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+// systemCronSpec describes a self-registered cron's identity + default
+// interval (PR 8 Lane G). Read-only crons (one-relay-events for v1) refuse
+// PATCH; everything else can be throttled within its floor.
+type systemCronSpec struct {
+	Slug            string
+	Label           string
+	DefaultInterval func() int // minutes; resolved fresh at registration
+	MinFloor        int        // minutes; minimum interval_override accepted
+	ReadOnly        bool       // one-relay-events: hardcoded for v1
+}
+
+// resolvedDefaultInterval returns the effective default interval for this
+// spec: at least 1, and never below MinFloor.
+func (s systemCronSpec) resolvedDefaultInterval() int {
+	d := s.DefaultInterval()
+	if d <= 0 {
+		d = 1
+	}
+	if s.MinFloor > 0 && d < s.MinFloor {
+		d = s.MinFloor
+	}
+	return d
+}
+
+// systemCronSpecs is the v1 system cron registry. Order is alphabetical
+// for deterministic startup. Each entry SHOULD be invisible in /scheduler
+// today (or surface only sporadically); registration makes them
+// configurable from the Calendar app.
+func systemCronSpecs() []systemCronSpec {
+	return []systemCronSpec{
+		{
+			Slug:            "nex-insights",
+			Label:           "Nex insights",
+			DefaultInterval: func() int { return config.ResolveInsightsPollInterval() },
+			MinFloor:        30, // LLM-touching, quota burn — keep the floor high
+		},
+		{
+			Slug:            "nex-notifications",
+			Label:           "Nex notifications",
+			DefaultInterval: func() int { return int(notificationPollInterval() / time.Minute) },
+			MinFloor:        5,
+		},
+		{
+			Slug:            "one-relay-events",
+			Label:           "One relay events",
+			DefaultInterval: func() int { return 1 },
+			MinFloor:        1,
+			ReadOnly:        true, // hardcoded for v1 — surface only
+		},
+		{
+			Slug:            "request_follow_up",
+			Label:           "Request follow-up reminders",
+			DefaultInterval: func() int { return config.ResolveTaskFollowUpInterval() },
+			MinFloor:        5,
+		},
+		{
+			Slug:            "review-expiry",
+			Label:           "Review expiry sweep",
+			DefaultInterval: func() int { return 10 },
+			MinFloor:        5,
+		},
+		{
+			Slug:            "task_follow_up",
+			Label:           "Task follow-up reminders",
+			DefaultInterval: func() int { return config.ResolveTaskFollowUpInterval() },
+			MinFloor:        5,
+		},
+		{
+			Slug:            "task_recheck",
+			Label:           "Task recheck cadence",
+			DefaultInterval: func() int { return config.ResolveTaskRecheckInterval() },
+			MinFloor:        5,
+		},
+		{
+			Slug:            "task_reminder",
+			Label:           "Task reminder cadence",
+			DefaultInterval: func() int { return config.ResolveTaskReminderInterval() },
+			MinFloor:        5,
+		},
+	}
+}
+
+// registerSystemCrons self-registers every system cron from
+// systemCronSpecs. Idempotent: existing entries keep their Enabled and
+// IntervalOverride values; only the Label / SystemManaged / IntervalMinutes
+// (default) fields refresh, so a config change to the env-resolved default
+// shows up the next time the broker starts.
+//
+// Takes b.mu internally — DO NOT call while holding the lock.
+func (b *Broker) registerSystemCrons() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, spec := range systemCronSpecs() {
+		defaultInterval := spec.resolvedDefaultInterval()
+		// Find existing — preserve user-controlled fields.
+		var existing *schedulerJob
+		for i := range b.scheduler {
+			if b.scheduler[i].Slug == spec.Slug {
+				existing = &b.scheduler[i]
+				break
+			}
+		}
+		if existing != nil {
+			// Migration: rows written before the cron registry had no
+			// Enabled field; JSON zero-value is false. Re-enable any
+			// system-managed row that was disabled only because it
+			// predates the registry (not by a deliberate user action).
+			if !existing.SystemManaged {
+				existing.Enabled = true
+			}
+			existing.Label = spec.Label
+			existing.SystemManaged = true
+			existing.IntervalMinutes = defaultInterval
+			continue
+		}
+		b.scheduler = append(b.scheduler, schedulerJob{
+			Slug:            spec.Slug,
+			Label:           spec.Label,
+			IntervalMinutes: defaultInterval,
+			Status:          "scheduled",
+			SystemManaged:   true,
+			Enabled:         true,
+		})
+	}
+	if err := b.saveLocked(); err != nil {
+		log.Printf("registerSystemCronsLocked: saveLocked failed: %v", err)
+	}
+}
+
+// updateSchedulerHeartbeat refreshes the in-memory scheduler entry for slug
+// with the latest interval / next-run / status fields (PR 8 Lane G). When
+// the slug isn't yet registered we fall through to a fresh entry so legacy
+// subsystems that surface a cron without going through registerSystemCrons
+// still appear in the Calendar app's System Schedules panel.
+func (b *Broker) updateSchedulerHeartbeat(slug, label string, intervalMinutes int, nextRun time.Time, status string, runStatus string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	now := time.Now().UTC().Format(time.RFC3339)
+	for i := range b.scheduler {
+		if b.scheduler[i].Slug != slug {
+			continue
+		}
+		b.scheduler[i].Label = label
+		b.scheduler[i].IntervalMinutes = intervalMinutes
+		if !nextRun.IsZero() {
+			b.scheduler[i].NextRun = nextRun.UTC().Format(time.RFC3339)
+		}
+		if status != "" {
+			b.scheduler[i].Status = status
+		}
+		if status == "sleeping" || runStatus != "" {
+			b.scheduler[i].LastRun = now
+		}
+		if runStatus != "" {
+			b.scheduler[i].LastRunStatus = runStatus
+		}
+		_ = b.saveLocked()
+		return
+	}
+	// Slug missing — fall back to a fresh entry so legacy subsystems that
+	// surface a cron without registerSystemCrons still appear.
+	job := schedulerJob{
+		Slug:            slug,
+		Label:           label,
+		IntervalMinutes: intervalMinutes,
+		Status:          status,
+		Enabled:         true,
+	}
+	if !nextRun.IsZero() {
+		job.NextRun = nextRun.UTC().Format(time.RFC3339)
+	}
+	if status == "sleeping" || runStatus != "" {
+		job.LastRun = now
+	}
+	if runStatus != "" {
+		job.LastRunStatus = runStatus
+	}
+	job = normalizeSchedulerJob(job)
+	b.scheduler = append(b.scheduler, job)
+	_ = b.saveLocked()
+}
+
+// systemCronSpecJSON is the wire shape for a single entry in
+// GET /scheduler/system-specs. It is intentionally flat so callers
+// never need to read systemCronSpec (an internal type) directly.
+type systemCronSpecJSON struct {
+	Slug                   string `json:"slug"`
+	MinFloorMinutes        int    `json:"min_floor_minutes"`
+	DefaultIntervalMinutes int    `json:"default_interval_minutes"`
+	Description            string `json:"description"`
+}
+
+// handleSchedulerSystemSpecs serves GET /scheduler/system-specs.
+// It serialises every entry from systemCronSpecs() so the web UI can
+// derive MinFloor values at runtime instead of maintaining a hardcoded
+// mirror constant. No request body; no auth-specific data — read-only.
+func (b *Broker) handleSchedulerSystemSpecs(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	specs := systemCronSpecs()
+	out := make([]systemCronSpecJSON, 0, len(specs))
+	for _, s := range specs {
+		out = append(out, systemCronSpecJSON{
+			Slug:                   s.Slug,
+			MinFloorMinutes:        s.MinFloor,
+			DefaultIntervalMinutes: s.resolvedDefaultInterval(),
+			Description:            s.Label,
+		})
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"specs": out})
+}
+
+// handleSchedulerSubpath dispatches /scheduler/{slug} and /scheduler/{slug}/run.
+// Supported: GET /scheduler/system-specs, POST /scheduler/{slug}/run,
+// PATCH /scheduler/{slug} (PR 8 Lane G + min-floor-from-api + PR 9).
+func (b *Broker) handleSchedulerSubpath(w http.ResponseWriter, r *http.Request) {
+	rest := strings.TrimPrefix(r.URL.Path, "/scheduler/")
+	rest = strings.TrimSpace(rest)
+	if rest == "" {
+		http.Error(w, "scheduler slug required in path", http.StatusBadRequest)
+		return
+	}
+	// system-specs is a read-only sub-resource, not a per-job path.
+	if rest == "system-specs" {
+		b.handleSchedulerSystemSpecs(w, r)
+		return
+	}
+
+	// /scheduler/{slug}/run — POST only, force-triggers the job once without
+	// touching next_run or the recurring schedule.
+	if strings.HasSuffix(rest, "/run") {
+		slug := strings.TrimSuffix(rest, "/run")
+		slug = strings.TrimSpace(slug)
+		if slug == "" {
+			http.Error(w, "scheduler slug required in path", http.StatusBadRequest)
+			return
+		}
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		b.handleRunSchedulerJob(w, r, slug)
+		return
+	}
+
+	// /scheduler/{slug} — PATCH only.
+	slug := rest
+	switch r.Method {
+	case http.MethodPatch:
+		b.handlePatchSchedulerJob(w, r, slug)
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleRunSchedulerJob implements POST /scheduler/{slug}/run.
+//
+// Behaviour by job type:
+//
+//   - Workflow cron jobs (TargetType == "workflow"): next_run is set to now
+//     so the watchdog scheduler's next poll finds the job as due and dispatches
+//     processWorkflowJob. The job executes within one scheduler tick (~20 s).
+//
+//   - System crons (SystemManaged == true, e.g. nex-notifications, nex-insights):
+//     executed by dedicated broker goroutines that cannot be poked from the HTTP
+//     layer. LastRun and LastRunStatus are updated so the Calendar panel shows the
+//     manual trigger; actual side-effects happen on the goroutine's natural tick.
+//
+//   - Task / request cron jobs: LastRun and LastRunStatus updated only.
+//     These are driven by data state (task status, request lifecycle) that the
+//     HTTP handler has no context to evaluate.
+//
+// Idempotency: this handler never touches the notification cursor. It cannot
+// cause the cursor to advance twice; the nex-notifications goroutine advances
+// the cursor via SetNotificationCursor only after a successful API round-trip,
+// entirely independently of this endpoint.
+func (b *Broker) handleRunSchedulerJob(w http.ResponseWriter, r *http.Request, slug string) {
+	b.mu.Lock()
+	var job *schedulerJob
+	for i := range b.scheduler {
+		if b.scheduler[i].Slug == slug {
+			job = &b.scheduler[i]
+			break
+		}
+	}
+	if job == nil {
+		b.mu.Unlock()
+		http.Error(w, "scheduler job not found", http.StatusNotFound)
+		return
+	}
+	now := time.Now().UTC()
+	prevLastRun := job.LastRun
+	prevLastRunStatus := job.LastRunStatus
+	prevNextRun := job.NextRun
+	prevDueAt := job.DueAt
+	job.LastRun = now.Format(time.RFC3339)
+	job.LastRunStatus = "triggered"
+	// Workflow cron jobs are dispatched through the watchdog scheduler's
+	// processWorkflowJob path. Marking next_run = now makes the job appear
+	// due on the next scheduler poll so it executes within one tick.
+	if strings.TrimSpace(job.TargetType) == "workflow" {
+		job.NextRun = now.Format(time.RFC3339)
+		job.DueAt = job.NextRun
+	}
+	if err := b.saveLocked(); err != nil {
+		job.LastRun = prevLastRun
+		job.LastRunStatus = prevLastRunStatus
+		job.NextRun = prevNextRun
+		job.DueAt = prevDueAt
+		b.mu.Unlock()
+		http.Error(w, "failed to persist trigger", http.StatusInternalServerError)
+		return
+	}
+	b.mu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"triggered": true,
+		"slug":      slug,
+		"at":        now.Format(time.RFC3339),
+	})
+}
+
+// handlePatchSchedulerJob updates the Enabled flag and / or
+// IntervalOverride on a registered cron. System-managed read-only crons
+// (one-relay-events for v1) reject any change with 400.
+//
+//	PATCH /scheduler/{slug}
+//	{ "enabled"?: bool, "interval_override"?: int }
+//
+// Validation:
+//   - interval_override of 0 clears the override (fall back to default).
+//   - interval_override > 0 must be >= the spec's MinFloor; otherwise 400.
+//   - Unknown slug → 404.
+//   - Read-only spec (one-relay-events) → 400 with reason.
+func (b *Broker) handlePatchSchedulerJob(w http.ResponseWriter, r *http.Request, slug string) {
+	var body struct {
+		Enabled          *bool `json:"enabled,omitempty"`
+		IntervalOverride *int  `json:"interval_override,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	if body.Enabled == nil && body.IntervalOverride == nil {
+		http.Error(w, "at least one of enabled or interval_override required", http.StatusBadRequest)
+		return
+	}
+
+	// Look up the spec for floor + read-only enforcement. System-cron specs
+	// are the source of truth; non-system jobs (workflow / task follow-ups
+	// scheduled per-instance) inherit a generic 5-minute floor.
+	var spec *systemCronSpec
+	for _, s := range systemCronSpecs() {
+		if s.Slug == slug {
+			cp := s
+			spec = &cp
+			break
+		}
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	var job *schedulerJob
+	for i := range b.scheduler {
+		if b.scheduler[i].Slug == slug {
+			job = &b.scheduler[i]
+			break
+		}
+	}
+	if job == nil {
+		http.Error(w, "scheduler job not found", http.StatusNotFound)
+		return
+	}
+	if spec != nil && spec.ReadOnly {
+		http.Error(w, fmt.Sprintf("scheduler job %q is read-only in v1", slug), http.StatusBadRequest)
+		return
+	}
+
+	// Snapshot before mutation so we can roll back if persistence fails.
+	snapshot := *job
+
+	if body.IntervalOverride != nil {
+		override := *body.IntervalOverride
+		if override < 0 {
+			http.Error(w, "interval_override must be >= 0", http.StatusBadRequest)
+			return
+		}
+		floor := 5
+		if spec != nil {
+			floor = spec.MinFloor
+		}
+		if override > 0 && override < floor {
+			http.Error(w, fmt.Sprintf("interval_override below floor (%d minutes)", floor), http.StatusBadRequest)
+			return
+		}
+		job.IntervalOverride = override
+	}
+	if body.Enabled != nil {
+		job.Enabled = *body.Enabled
+		// Reflect in Status so /scheduler GET surfaces the disabled state
+		// without requiring callers to read Enabled separately.
+		if !job.Enabled {
+			job.Status = "disabled"
+		} else if strings.EqualFold(job.Status, "disabled") {
+			job.Status = "scheduled"
+		}
+	}
+	if err := b.saveLocked(); err != nil {
+		// Restore in-memory state so the broker stays consistent with disk.
+		*job = snapshot
+		http.Error(w, "failed to persist scheduler update", http.StatusInternalServerError)
+		return
+	}
+
+	updated := *job
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"job": updated})
 }

@@ -21,7 +21,7 @@
 <meta name="twitter:description" content="A collaborative office of AI employees who build and maintain their own knowledge base to never lose context for the tasks you give them.">
 <meta name="twitter:image" content="https://wuphf.team/og-image.png">
 <meta name="twitter:image:alt" content="WUPHF — AI employees with a shared brain. Open-source AI office with channels and a pixel-art team.">
-<meta name="theme-color" content="#1b0d2a">
+<meta name="theme-color" content="#1A1610">
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
 <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
 <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
@@ -80,16 +80,22 @@
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
   :root {
-    /* Palette sourced from Figma: Brand/Tertiary (purple) */
-    --bg: #1b0d2a;
-    --bg2: #24123a;
-    --bg3: #2e1647;
-    --yellow: #cf72d9;       /* Tertiary/300 — primary accent */
-    --yellow-dark: #9f4dbf;  /* Tertiary/400 — accent shadow */
-    --yellow-dim: rgba(207,114,217,0.12);
-    --accent-lime: #D4DB18;  /* accent pop against the purple palette */
-    --text: #ffebfc;         /* Tertiary/100 */
-    --text-dim: #a580c0;
+    --bg: #1A1610;
+    --surface: #242018;
+    --surface-high: #2E2820;
+    --border: #3A3028;
+    --yellow: #ECB22E;
+    --yellow-dark: #C49020;
+    --yellow-glow: rgba(236,178,46,0.15);
+    --green: #5AAA7A;
+    --blue: #5A9AC8;
+    --text: #F0EBD8;
+    --text-muted: #8A7D6A;
+    --bg2: var(--surface);
+    --bg3: var(--surface-high);
+    --yellow-dim: var(--yellow-glow);
+    --accent-lime: var(--green);
+    --text-dim: var(--text-muted);
     --font-display: 'Press Start 2P', monospace;
     --font-vt: 'VT323', monospace;
     --font-mono: 'DM Mono', monospace;
@@ -152,7 +158,8 @@
     text-decoration: none;
     letter-spacing: 0.04em;
     transition: color 0.15s;
-    min-height: 44px; padding: 0 10px;
+    min-width: 44px; min-height: 44px; padding: 0 10px;
+    justify-content: center;
   }
   .nav-social-link:hover { color: var(--yellow); }
   .nav-social-link svg { flex-shrink: 0; }
@@ -187,15 +194,13 @@
   .hero::before {
     content: '';
     position: absolute; inset: 0;
-    background:
-      radial-gradient(ellipse 700px 400px at 50% 48%, rgba(207,114,217,0.07) 0%, transparent 70%),
-      repeating-linear-gradient(
-        0deg,
-        transparent,
-        transparent 3px,
-        rgba(0,0,0,0.09) 3px,
-        rgba(0,0,0,0.09) 4px
-      );
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 3px,
+      rgba(0,0,0,0.09) 3px,
+      rgba(0,0,0,0.09) 4px
+    );
     pointer-events: none; z-index: 1;
   }
 
@@ -283,6 +288,7 @@
   .hero-by {
     display: flex;
     align-items: center;
+    justify-content: center;
     gap: 8px;
     color: var(--text-dim);
     font-family: var(--font-mono);
@@ -294,6 +300,7 @@
     margin-bottom: 16px;
     text-decoration: none;
     transition: color 0.15s;
+    min-height: 44px;
   }
   .hero-by:hover { color: var(--text); }
   .hero-nex-logo {
@@ -335,6 +342,7 @@
   }
   .install-tab {
     flex: 1;
+    min-height: 44px;
     padding: 10px 12px;
     font-family: var(--font-display);
     font-size: 8px;
@@ -364,15 +372,25 @@
     flex-direction: column;
     gap: 6px;
     padding: 14px 20px;
-    cursor: pointer;
   }
   .install-block.active { display: flex; }
-  .install-block:hover { background: var(--bg2); }
 
   .install-line {
     display: flex;
     align-items: center;
     gap: 12px;
+    width: 100%;
+    min-height: 44px;
+    padding: 0;
+    color: inherit;
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+    text-align: left;
+  }
+  .install-line:hover,
+  .install-line:focus-visible {
+    background: var(--bg2);
   }
 
   .install-prompt {
@@ -483,8 +501,10 @@
   }
   .ambient-scroll {
     display: inline-flex; gap: 64px;
-    animation: marquee 120s linear infinite;
+    animation: marquee 120s steps(240, end) infinite;
+    will-change: transform;
   }
+  .is-page-hidden .ambient-scroll { animation-play-state: paused; }
   @keyframes marquee {
     from { transform: translateX(0); }
     to { transform: translateX(-50%); }
@@ -534,6 +554,13 @@
 
   /* ── SECTIONS ─────────────────────────────────────── */
   section { padding: 80px 24px; max-width: 1000px; margin: 0 auto; }
+
+  .office-section,
+  #open-source,
+  footer {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 640px;
+  }
 
   .section-eyebrow {
     font-family: var(--font-display);
@@ -716,7 +743,7 @@
   .tok-kw { color: var(--yellow); }
   .tok-str { color: var(--accent-lime); }
   .tok-cmt { color: var(--text-dim); font-style: italic; }
-  .tok-fn { color: #ffb3e6; }
+  .tok-fn { color: var(--blue); }
 
   /* ── THREAD DEMO ──────────────────────────────────── */
   .thread-demo {
@@ -830,12 +857,19 @@
     border: 1px solid var(--yellow-dark);
     color: var(--yellow);
     font-family: var(--font-mono); font-size: 11px;
-    cursor: pointer; padding: 1px 7px;
+    cursor: pointer; padding: 6px 9px;
+    min-width: 44px;
+    min-height: 44px;
     flex-shrink: 0; margin-left: 12px;
     letter-spacing: 0.04em;
   }
-  .code-line:hover .line-copy { opacity: 1; }
+  .code-line:hover .line-copy,
+  .code-line:active .line-copy,
+  .line-copy:focus-visible { opacity: 1; }
   .line-copy:hover { background: var(--yellow); color: var(--bg); border-color: var(--yellow); }
+  @media (hover: none), (pointer: coarse) {
+    .line-copy { opacity: 1; }
+  }
 
   /* ── ISOMETRIC OFFICE SECTION ─────────────────────── */
   .office-section {
@@ -942,6 +976,9 @@
     font-size: 12px;
     color: var(--text-dim);
     text-align: right;
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
   }
 
   /* ── FOOTER ───────────────────────────────────────── */
@@ -968,6 +1005,12 @@
     font-size: 11px;
     color: var(--text-dim);
   }
+  .footer-sub a {
+    display: inline-flex;
+    align-items: center;
+    min-width: 44px;
+    min-height: 44px;
+  }
 
   .footer-links {
     margin-left: auto;
@@ -978,6 +1021,11 @@
     font-size: 11px;
     color: var(--text-dim);
     text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 44px;
+    min-height: 44px;
   }
   .footer-links a:hover { color: var(--yellow); }
 
@@ -1112,6 +1160,30 @@
     overflow: visible;
   }
 
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      scroll-behavior: auto !important;
+      transition-duration: 0.001ms !important;
+    }
+
+    .ambient-scroll,
+    .sprite,
+    .blink,
+    .scroll-arrow {
+      animation: none !important;
+    }
+
+    .btn-primary:hover,
+    .btn-primary:active,
+    .agent-card:hover {
+      transform: none;
+    }
+  }
+
   /* ── RESPONSIVE ──────────────────────────────────── */
   @media (max-width: 640px) {
     .nav-links { display: none; }
@@ -1129,6 +1201,10 @@
     .faq-q { font-size: 10px; }
 
     .section-inner { padding: 48px 20px; }
+  }
+
+  @media (max-width: 900px) {
+    .conversations-layout { grid-template-columns: 1fr; }
   }
 </style>
 </head>
@@ -1161,17 +1237,17 @@
 
     <div class="hero-sprites">
       <div class="sprite" title="CEO Agent">
-        <canvas id="s0" width="24" height="36"></canvas>
+        <canvas id="s0" width="24" height="36" aria-hidden="true"></canvas>
         <span class="label-tag">CEO</span>
         <span class="sprite-name">Strategy</span>
       </div>
       <div class="sprite" title="Eng Agent">
-        <canvas id="s1" width="24" height="36"></canvas>
+        <canvas id="s1" width="24" height="36" aria-hidden="true"></canvas>
         <span class="label-tag">ENG</span>
         <span class="sprite-name">Code</span>
       </div>
       <div class="sprite" title="CMO Agent">
-        <canvas id="s2" width="24" height="36"></canvas>
+        <canvas id="s2" width="24" height="36" aria-hidden="true"></canvas>
         <span class="label-tag">CMO</span>
         <span class="sprite-name">Growth</span>
       </div>
@@ -1190,29 +1266,30 @@
     </p>
 
     <div class="install-wrap" id="install">
-      <div class="install-tabs">
-        <button class="install-tab active" onclick="switchInstallTab('npx')">NPX</button>
-        <button class="install-tab" onclick="switchInstallTab('build')">CLONE + BUILD</button>
+      <div class="install-tabs" role="tablist" aria-label="Install options">
+        <button class="install-tab active" id="installTabNpx" type="button" role="tab" aria-selected="true" aria-controls="installBlock" onclick="switchInstallTab('npx')">NPX</button>
+        <button class="install-tab" id="installTabBuild" type="button" role="tab" aria-selected="false" aria-controls="installBlockBuild" tabindex="-1" onclick="switchInstallTab('build')">CLONE + BUILD</button>
       </div>
-      <div class="install-block active" id="installBlock" data-tab="npx">
-        <div class="install-line">
+      <div class="install-block active" id="installBlock" data-tab="npx" role="tabpanel" aria-labelledby="installTabNpx">
+        <button class="install-line" type="button" data-copy="npx wuphf@latest" aria-label="Copy NPX install command">
           <span class="install-prompt">$</span>
           <span class="install-cmd">npx wuphf@latest</span>
           <span class="install-copy" id="copyLabel">COPY</span>
-        </div>
+        </button>
       </div>
-      <div class="install-block" id="installBlockBuild" data-tab="build">
-        <div class="install-line">
+      <div class="install-block" id="installBlockBuild" data-tab="build" role="tabpanel" aria-labelledby="installTabBuild" hidden>
+        <button class="install-line" type="button" data-copy="git clone https://github.com/nex-crm/wuphf.git && cd wuphf" aria-label="Copy clone command">
           <span class="install-prompt">$</span>
           <span class="install-cmd">git clone https://github.com/nex-crm/wuphf.git && cd wuphf</span>
           <span class="install-copy" id="copyLabelBuild1">COPY</span>
-        </div>
-        <div class="install-line">
+        </button>
+        <button class="install-line" type="button" data-copy="go build -o wuphf ./cmd/wuphf && ./wuphf" aria-label="Copy build and run command">
           <span class="install-prompt">$</span>
           <span class="install-cmd">go build -o wuphf ./cmd/wuphf && ./wuphf</span>
           <span class="install-copy" id="copyLabelBuild2">COPY</span>
-        </div>
+        </button>
       </div>
+      <div class="visually-hidden" id="copyStatus" aria-live="polite" aria-atomic="true"></div>
       <p class="install-note">Free and open source. Runs local. No account, no cloud, no per-seat pricing. MIT licensed.</p>
     </div>
 
@@ -1228,8 +1305,8 @@
     </div>
 
     <div class="hero-badges">
-      <a href="https://www.producthunt.com/products/wuphf-2?embed=true&amp;utm_source=badge-featured&amp;utm_medium=badge&amp;utm_campaign=badge-wuphf-by-nex-ai" target="_blank" rel="noopener noreferrer" class="ph-badge"><img alt="WUPHF by Nex.ai - AI employees who build their own knowledge base | Product Hunt" width="250" height="54" src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1132040&amp;theme=neutral&amp;t=1777385299660"></a>
       <a href="https://news.ycombinator.com/item?id=47899844" target="_blank" rel="noopener noreferrer" class="hn-badge" aria-label="Hacker News Life of Product Week's #1"><img src="hn-badge.svg" alt="Hacker News Life of Product Week's #1" width="223" height="48"></a>
+      <a href="https://www.producthunt.com/products/wuphf-2?embed=true&amp;utm_source=badge-featured&amp;utm_medium=badge&amp;utm_campaign=badge-wuphf-by-nex-ai" target="_blank" rel="noopener noreferrer" class="ph-badge"><img alt="WUPHF by Nex.ai - AI employees who build their own knowledge base | Product Hunt" width="250" height="54" src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1132040&amp;theme=neutral&amp;t=1777385299660"></a>
     </div>
 
   </div>
@@ -1247,9 +1324,10 @@
     <video
       src="wuphf-demo-v28.mp4"
       controls
-      preload="metadata"
+      preload="none"
       poster="og-image.png"
-    ></video>
+      aria-label="WUPHF product demo video"
+    >Your browser does not support the WUPHF product demo video.</video>
   </div>
 </div>
 
@@ -1268,7 +1346,7 @@
 
   <div class="steps-grid">
     <div class="step-card">
-      <div class="step-num">01 --</div>
+      <div class="step-num">01</div>
       <span class="step-icon">&#9889;</span>
       <div class="step-title">Install</div>
       <div class="step-body">
@@ -1276,7 +1354,7 @@
       </div>
     </div>
     <div class="step-card">
-      <div class="step-num">02 --</div>
+      <div class="step-num">02</div>
       <span class="step-icon">&#128172;</span>
       <div class="step-title">Drop a goal</div>
       <div class="step-body">
@@ -1284,7 +1362,7 @@
       </div>
     </div>
     <div class="step-card">
-      <div class="step-num">03 --</div>
+      <div class="step-num">03</div>
       <span class="step-icon">&#127970;</span>
       <div class="step-title">Close the tab</div>
       <div class="step-body">
@@ -1292,7 +1370,7 @@
       </div>
     </div>
     <div class="step-card">
-      <div class="step-num">04 --</div>
+      <div class="step-num">04</div>
       <span class="step-icon">&#128640;</span>
       <div class="step-title">Come back to shipped work</div>
       <div class="step-body">
@@ -1309,7 +1387,9 @@
     <h2 class="office-section-title">AI employees with a shared brain</h2>
     <div class="office-section-sub">AI employees share a brain and run your work 24x7. You watch, or you do not.</div>
   </div>
-  <canvas id="officeCanvas" height="420"></canvas>
+  <canvas id="officeCanvas" height="420" role="img" aria-label="Animated pixel office scene showing AI employees coordinating around shared workstations and status boards.">
+    Animated pixel office scene showing AI employees coordinating around shared workstations and status boards.
+  </canvas>
 </div>
 
 <!-- THE TEAM -->
@@ -1554,7 +1634,7 @@
   </div>
   <div class="footer-links">
     <a href="https://github.com/nex-crm/wuphf">GitHub</a>
-    <a href="#">Docs</a>
+    <a href="https://github.com/nex-crm/wuphf#readme" target="_blank" rel="noopener">Docs</a>
     <a href="https://discord.gg/gjSySC3PzV" target="_blank" rel="noopener">Discord</a>
     <a href="https://github.com/nex-crm/wuphf/blob/main/LICENSE" target="_blank" rel="noopener">MIT License</a>
   </div>
@@ -1563,6 +1643,25 @@
 <script>
 (function () {
   'use strict';
+
+  var motionQuery = window.matchMedia
+    ? window.matchMedia('(prefers-reduced-motion: reduce)')
+    : { matches: false, addEventListener: null, addListener: null };
+
+  function prefersReducedMotion() {
+    return !!motionQuery.matches;
+  }
+
+  function pageCanAnimate() {
+    return !document.hidden && !prefersReducedMotion();
+  }
+
+  function updatePageMotionClass() {
+    document.body.classList.toggle('is-page-hidden', document.hidden);
+  }
+
+  updatePageMotionClass();
+  document.addEventListener('visibilitychange', updatePageMotionClass);
 
   // ── GITHUB STARS ──────────────────────────────────────────────────────
   fetch('https://api.github.com/repos/nex-crm/wuphf')
@@ -1584,17 +1683,41 @@
     tabs.forEach(function(t, i) {
       var isActive = (tab === 'npx' && i === 0) || (tab === 'build' && i === 1);
       t.classList.toggle('active', isActive);
+      t.setAttribute('aria-selected', isActive ? 'true' : 'false');
+      t.setAttribute('tabindex', isActive ? '0' : '-1');
     });
     blocks.forEach(function(b) {
-      b.classList.toggle('active', b.dataset.tab === tab);
+      var isActive = b.dataset.tab === tab;
+      b.classList.toggle('active', isActive);
+      b.hidden = !isActive;
     });
   }
   window.switchInstallTab = switchInstallTab;
 
+  document.querySelectorAll('.install-tab').forEach(function(tabButton) {
+    tabButton.addEventListener('keydown', function(e) {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      e.preventDefault();
+      var nextTab = tabButton.id === 'installTabNpx' ? 'build' : 'npx';
+      switchInstallTab(nextTab);
+      document.getElementById(nextTab === 'npx' ? 'installTabNpx' : 'installTabBuild').focus();
+    });
+  });
+
   // ── COPY INSTALL ──────────────────────────────────────────────────────
+  function announceCopyStatus(message) {
+    var status = document.getElementById('copyStatus');
+    if (!status) return;
+    status.textContent = '';
+    window.requestAnimationFrame(function() {
+      status.textContent = message;
+    });
+  }
+
   function flashCopy(label) {
     label.textContent = 'COPIED!';
     label.classList.add('copied');
+    announceCopyStatus('Copied install command to clipboard.');
     setTimeout(function() {
       label.textContent = 'COPY';
       label.classList.remove('copied');
@@ -1602,25 +1725,33 @@
   }
 
   function copyInstall() {
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText('npx wuphf@latest').catch(function() {});
-    }
     var label = document.getElementById('copyLabel');
-    if (label) flashCopy(label);
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText('npx wuphf@latest').then(function() {
+        if (label) flashCopy(label);
+      }).catch(function() {
+        announceCopyStatus('Unable to copy install command.');
+      });
+      return;
+    }
+    announceCopyStatus('Clipboard copy is unavailable in this browser.');
   }
   window.copyInstall = copyInstall;
 
-  document.getElementById('installBlock').addEventListener('click', copyInstall);
-
-  document.getElementById('copyLabelBuild1').parentElement.addEventListener('click', function(e) {
-    e.stopPropagation();
-    navigator.clipboard.writeText('git clone https://github.com/nex-crm/wuphf.git && cd wuphf').catch(function() {});
-    flashCopy(document.getElementById('copyLabelBuild1'));
-  });
-  document.getElementById('copyLabelBuild2').parentElement.addEventListener('click', function(e) {
-    e.stopPropagation();
-    navigator.clipboard.writeText('go build -o wuphf ./cmd/wuphf && ./wuphf').catch(function() {});
-    flashCopy(document.getElementById('copyLabelBuild2'));
+  document.querySelectorAll('.install-line').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var text = btn.dataset.copy || '';
+      var label = btn.querySelector('.install-copy');
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(function() {
+          if (label) flashCopy(label);
+        }).catch(function() {
+          announceCopyStatus('Unable to copy install command.');
+        });
+        return;
+      }
+      announceCopyStatus('Clipboard copy is unavailable in this browser.');
+    });
   });
 
   // ── PER-LINE COPY BUTTONS ────────────────────────────────────────────
@@ -1663,7 +1794,7 @@
 
   // ── SPRITE CANVASES ───────────────────────────────────────────────────
   var bodyColors = ['#2D4A7A', '#4A7A2D', '#7A2D4A'];
-  var accentColors = ['#cf72d9', '#ffb3e6', '#9f4dbf'];
+  var accentColors = ['#ECB22E', '#5A9AC8', '#5AAA7A'];
 
   function drawSprite(canvasId, colorBody, colorAccent, frame) {
     var canvas = document.getElementById(canvasId);
@@ -1704,14 +1835,38 @@
   }
 
   var spriteFrame = 0;
+  var spriteInterval = null;
   function animSprites() {
     spriteFrame = (spriteFrame + 1) % 4;
     for (var i = 0; i < 3; i++) {
       drawSprite('s' + i, bodyColors[i], accentColors[i], (spriteFrame + i) % 4);
     }
   }
+  function drawStaticSprites() {
+    for (var i = 0; i < 3; i++) {
+      drawSprite('s' + i, bodyColors[i], accentColors[i], i % 4);
+    }
+  }
+  function syncSpriteAnimation() {
+    if (pageCanAnimate()) {
+      if (!spriteInterval) spriteInterval = window.setInterval(animSprites, 250);
+      return;
+    }
+    if (spriteInterval) {
+      window.clearInterval(spriteInterval);
+      spriteInterval = null;
+    }
+    drawStaticSprites();
+  }
   animSprites();
-  setInterval(animSprites, 250);
+  syncSpriteAnimation();
+
+  document.addEventListener('visibilitychange', syncSpriteAnimation);
+  if (motionQuery.addEventListener) {
+    motionQuery.addEventListener('change', syncSpriteAnimation);
+  } else if (motionQuery.addListener) {
+    motionQuery.addListener(syncSpriteAnimation);
+  }
 
   // ── ISOMETRIC OFFICE SCENE ────────────────────────────────────────────
   (function() {
@@ -1725,7 +1880,20 @@
     var OY = 72;
     var animHandle = null;
     var lastTime = 0;
-    var paused = false;
+    var officeVisible = false;
+    var officeObserver = null;
+
+    function updateOfficeVisibility() {
+      if (!canvas || !canvas.getBoundingClientRect) {
+        officeVisible = true;
+        return;
+      }
+      var rect = canvas.getBoundingClientRect();
+      officeVisible = rect.bottom > 0 &&
+        rect.right > 0 &&
+        rect.top < window.innerHeight &&
+        rect.left < window.innerWidth;
+    }
 
     // ── ISO PROJECTION ─────────────────────────────────
     function iso(gx, gy) {
@@ -1746,11 +1914,11 @@
     }
 
     var TILE_COLORS = {
-      0: { top: '#4a2d6e', left: '#372053', right: '#3f2660' },
-      1: { top: '#57347f', left: '#41286a', right: '#4c2e75' },
-      2: { top: '#432968', left: '#321e4f', right: '#38235a' },
-      3: { top: '#4e3074', left: '#3a2258', right: '#422865' },
-      4: { top: '#402561', left: '#2f1b47', right: '#362052' }
+      0: { top: '#3A3228', left: '#2F281F', right: '#342B22' },
+      1: { top: '#3F362B', left: '#302820', right: '#372D24' },
+      2: { top: '#302A20', left: '#241F18', right: '#2A241B' },
+      3: { top: '#3A3028', left: '#2C241E', right: '#332A22' },
+      4: { top: '#332C22', left: '#282118', right: '#2D261D' }
     };
 
     // ── RESIZE ──────────────────────────────────────────
@@ -1904,21 +2072,21 @@
         hair:'#1A1610', skin:'#D4B896', shirt:'#2D4A7A', pants:'#1A2A4A',
         faceRight:true, walkFrame:0, animTimer:0,
         state:'IDLE_DESK', stateTimer:5000, arriveState:'IDLE_DESK', arriveWait:5000,
-        destX:8.0, destY:4.0, isAgent:true, agentColor:'#cf72d9', label:'CEO', /* unified agent-badge color */
+        destX:8.0, destY:4.0, isAgent:true, agentColor:'#ECB22E', label:'CEO',
         chatPartner:null, chatStep:0, chatTimer:0, chatConvo:null,
         patrolStep:0, patrolTimer:0, bubbleTimer: 8000 + Math.random()*8000 },
       { id:'eng',    name:'ENG',    x:10.0, y:3.0, homeX:10.0, homeY:3.0,
         hair:'#2A1A40', skin:'#C4A882', shirt:'#4A2D7A', pants:'#2A1A4A',
         faceRight:false, walkFrame:0, animTimer:0,
         state:'IDLE_DESK', stateTimer:7000, arriveState:'IDLE_DESK', arriveWait:7000,
-        destX:10.0, destY:3.0, isAgent:true, agentColor:'#cf72d9', label:'ENG',
+        destX:10.0, destY:3.0, isAgent:true, agentColor:'#5A9AC8', label:'ENG',
         chatPartner:null, chatStep:0, chatTimer:0, chatConvo:null,
         patrolStep:0, patrolTimer:0, bubbleTimer: 8000 + Math.random()*8000 },
       { id:'cmo',    name:'CMO',    x:3.0, y:5.0, homeX:3.0, homeY:5.0,
         hair:'#4A2010', skin:'#D4A870', shirt:'#7A4A2D', pants:'#3A2010',
         faceRight:true, walkFrame:0, animTimer:0,
         state:'IDLE_DESK', stateTimer:5500, arriveState:'IDLE_DESK', arriveWait:5500,
-        destX:3.0, destY:5.0, isAgent:true, agentColor:'#cf72d9', label:'CMO',
+        destX:3.0, destY:5.0, isAgent:true, agentColor:'#5AAA7A', label:'CMO',
         chatPartner:null, chatStep:0, chatTimer:0, chatConvo:null,
         patrolStep:0, patrolTimer:0, bubbleTimer: 8000 + Math.random()*8000 }
     ];
@@ -2385,11 +2553,11 @@
         var badgeY = nameY - badgeH + 4;
         ctx.fillStyle = ch.agentColor;
         ctx.fillRect(cx - badgeW / 2, badgeY, badgeW, badgeH);
-        ctx.fillStyle = '#1b0d2a';
+        ctx.fillStyle = '#1A1610';
         ctx.font = '6px "Press Start 2P", monospace';
         ctx.fillText(ch.label, cx, badgeY + badgeH - 2);
       } else {
-        ctx.fillStyle = 'rgba(255,235,252,0.88)';
+        ctx.fillStyle = 'rgba(240,235,216,0.88)';
         ctx.font = '6px "Press Start 2P", monospace';
         ctx.fillText(ch.name, cx, nameY);
       }
@@ -2419,26 +2587,26 @@
       var bx3 = pos.x - bw / 2;
       var by3 = headTop - bh - 10;
 
-      ctx.fillStyle = '#ffebfc';
+      ctx.fillStyle = '#F0EBD8';
       ctx.fillRect(bx3, by3, bw, bh);
-      ctx.fillStyle = '#612a92';
-      ctx.strokeStyle = '#612a92';
+      ctx.fillStyle = '#C49020';
+      ctx.strokeStyle = '#C49020';
       ctx.lineWidth = 2;
       ctx.strokeRect(bx3, by3, bw, bh);
 
       // tail
-      ctx.fillStyle = '#ffebfc';
+      ctx.fillStyle = '#F0EBD8';
       ctx.beginPath();
       ctx.moveTo(pos.x - 4, by3 + bh);
       ctx.lineTo(pos.x + 4, by3 + bh);
       ctx.lineTo(pos.x, by3 + bh + 8);
       ctx.closePath();
       ctx.fill();
-      ctx.strokeStyle = '#612a92';
+      ctx.strokeStyle = '#C49020';
       ctx.lineWidth = 1;
       ctx.stroke();
 
-      ctx.fillStyle = '#1b0d2a';
+      ctx.fillStyle = '#1A1610';
       ctx.textAlign = 'center';
       ctx.fillText(b.text, pos.x, by3 + bh - 7);
 
@@ -2452,7 +2620,7 @@
       var wallH = 48;
 
       // ── BACK WALLS ──────────────────────────────────
-      ctx.fillStyle = '#2a1445';
+      ctx.fillStyle = '#201C14';
       for (var gx2 = 0; gx2 < 12; gx2++) {
         var p0 = iso(gx2, 0);
         var p1 = iso(gx2 + 1, 0);
@@ -2464,7 +2632,7 @@
         ctx.closePath();
         ctx.fill();
       }
-      ctx.fillStyle = '#20103a';
+      ctx.fillStyle = '#18140E';
       for (var gy2 = 0; gy2 < 8; gy2++) {
         var lp0 = iso(0, gy2);
         var lp1 = iso(0, gy2 + 1);
@@ -2522,9 +2690,9 @@
       // ── MICHAEL'S OFFICE WALL AWARDS ─────────────────
       // Plaques on the interior face of the gx=9 glass wall
       var awards = [
-        { gy: 0.55, lines: ['DUNDIE', 'AWARD'], color: '#cf72d9' },
-        { gy: 1.55, lines: ["WORLD'S", 'BEST BOSS'], color: '#cf72d9' },
-        { gy: 2.45, lines: ['MIT', 'LICENSE'], color: '#cf72d9' }
+        { gy: 0.55, lines: ['DUNDIE', 'AWARD'], color: '#ECB22E' },
+        { gy: 1.55, lines: ["WORLD'S", 'BEST BOSS'], color: '#ECB22E' },
+        { gy: 2.45, lines: ['MIT', 'LICENSE'], color: '#ECB22E' }
       ];
       ctx.save();
       ctx.font = '5px "Press Start 2P", monospace';
@@ -2534,7 +2702,7 @@
         var aw = 30, ah = 18;
         var ax = ap.x - aw / 2;
         var ay = ap.y - wallH + 8;
-        ctx.fillStyle = '#1b0d2a';
+        ctx.fillStyle = '#1A1610';
         ctx.fillRect(ax, ay, aw, ah);
         ctx.strokeStyle = a.color;
         ctx.lineWidth = 1.5;
@@ -2548,45 +2716,45 @@
       // ── FURNITURE ────────────────────────────────────
 
       // Conference table
-      drawBox(ctx, 0.6, 0.7, 1.8, 0.8, 12, '#5c3c82', '#432a62', '#432a62');
+      drawBox(ctx, 0.6, 0.7, 1.8, 0.8, 12, '#7A5A18', '#5A3C08', '#3A2404');
       // Conf chairs
-      drawBox(ctx, 0.5, 0.5, 0.4, 0.4, 8, '#6a4a90', '#523470', '#523470');
-      drawBox(ctx, 2.1, 0.5, 0.4, 0.4, 8, '#6a4a90', '#523470', '#523470');
-      drawBox(ctx, 0.5, 1.4, 0.4, 0.4, 8, '#6a4a90', '#523470', '#523470');
-      drawBox(ctx, 2.1, 1.4, 0.4, 0.4, 8, '#6a4a90', '#523470', '#523470');
+      drawBox(ctx, 0.5, 0.5, 0.4, 0.4, 8, '#5A4632', '#403020', '#403020');
+      drawBox(ctx, 2.1, 0.5, 0.4, 0.4, 8, '#5A4632', '#403020', '#403020');
+      drawBox(ctx, 0.5, 1.4, 0.4, 0.4, 8, '#5A4632', '#403020', '#403020');
+      drawBox(ctx, 2.1, 1.4, 0.4, 0.4, 8, '#5A4632', '#403020', '#403020');
 
       // Bullpen desks
       var desks = [[3,2.8],[5,2.8],[3,4.3],[5,4.3],[8,2.8],[10,2.8]];
       desks.forEach(function(d) {
-        drawBox(ctx, d[0], d[1], 0.9, 0.6, 10, '#634692', '#4c3472', '#4c3472');
+        drawBox(ctx, d[0], d[1], 0.9, 0.6, 10, '#7A5A18', '#5A3C08', '#3A2404');
         // monitor
         var mp = iso(d[0] + 0.35, d[1] + 0.1);
-        ctx.fillStyle = '#1b0d2a';
+        ctx.fillStyle = '#1A1610';
         ctx.fillRect(mp.x - 9, mp.y - 26, 18, 16);
-        ctx.fillStyle = 'rgba(207,114,217,0.28)';
+        ctx.fillStyle = 'rgba(236,178,46,0.28)';
         ctx.fillRect(mp.x - 7, mp.y - 24, 14, 12);
       });
 
       // Michael's fancy desk
-      drawBox(ctx, 9.8, 0.6, 1.2, 0.7, 12, '#7a55a6', '#5c3e80', '#5c3e80');
+      drawBox(ctx, 9.8, 0.6, 1.2, 0.7, 12, '#5A9AC8', '#3F6C8C', '#3F6C8C');
 
       // Reception desk
-      drawBox(ctx, 4.8, 5.2, 1.0, 0.6, 12, '#4f3770', '#3a2454', '#3a2454');
-      drawBox(ctx, 5.8, 5.0, 0.8, 0.6, 12, '#4f3770', '#3a2454', '#3a2454');
+      drawBox(ctx, 4.8, 5.2, 1.0, 0.6, 12, '#6A4A14', '#4A3208', '#4A3208');
+      drawBox(ctx, 5.8, 5.0, 0.8, 0.6, 12, '#6A4A14', '#4A3208', '#4A3208');
 
       // Whiteboard
-      drawBox(ctx, 0.05, 4.2, 0.08, 0.8, 20, '#ffebfc', '#cf72d9', '#9f4dbf');
+      drawBox(ctx, 0.05, 4.2, 0.08, 0.8, 20, '#F0EBD8', '#ECB22E', '#C49020');
       var wb = iso(0.1, 4.5);
-      ctx.fillStyle = '#D4DB18';
+      ctx.fillStyle = '#5AAA7A';
       ctx.fillRect(wb.x, wb.y - 30, 3, 2);
       ctx.fillRect(wb.x + 1, wb.y - 26, 2, 2);
-      ctx.fillStyle = '#cf72d9';
+      ctx.fillStyle = '#ECB22E';
       ctx.fillRect(wb.x + 2, wb.y - 22, 4, 2);
 
       // Water cooler
-      drawBox(ctx, 7.3, 6.3, 0.3, 0.3, 16, '#7a55a6', '#5c3e80', '#5c3e80');
+      drawBox(ctx, 7.3, 6.3, 0.3, 0.3, 16, '#5A9AC8', '#3F6C8C', '#3F6C8C');
       var wcTop = iso(7.45, 6.45);
-      ctx.fillStyle = '#cf72d9';
+      ctx.fillStyle = '#ECB22E';
       ctx.fillRect(wcTop.x - 3, wcTop.y - 20, 6, 6);
 
       // ── ROOM LABELS ──────────────────────────────────
@@ -2595,16 +2763,16 @@
       ctx.textAlign = 'center';
 
       var confLabel = iso(1.5, 2.6);
-      ctx.fillStyle = 'rgba(207,114,217,0.75)';
+      ctx.fillStyle = 'rgba(236,178,46,0.75)';
       ctx.fillText('CONF ROOM', confLabel.x, confLabel.y);
 
       var mLabel = iso(10.5, 2.6);
-      ctx.fillStyle = 'rgba(207,114,217,0.75)';
+      ctx.fillStyle = 'rgba(236,178,46,0.75)';
       ctx.fillText("MICHAEL'S", mLabel.x, mLabel.y);
       ctx.fillText('OFFICE', mLabel.x, mLabel.y + 10);
 
       var recLabel = iso(5.5, 6.4);
-      ctx.fillStyle = 'rgba(207,114,217,0.75)';
+      ctx.fillStyle = 'rgba(236,178,46,0.75)';
       ctx.fillText('RECEPTION', recLabel.x, recLabel.y);
 
       ctx.restore();
@@ -2636,31 +2804,74 @@
     }
 
     // ── ANIMATION LOOP ───────────────────────────────────
-    function loop(now) {
-      if (paused) { animHandle = requestAnimationFrame(loop); return; }
-      var dt = Math.min(now - lastTime, 50);
-      lastTime = now;
-      update(dt);
+    function drawFrame() {
       var ctx = canvas.getContext('2d');
       ctx.save();
       ctx.scale(DPR, DPR);
       draw(ctx);
       ctx.restore();
-      animHandle = requestAnimationFrame(loop);
     }
 
-    document.addEventListener('visibilitychange', function() {
-      paused = document.hidden;
-      if (!paused) lastTime = performance.now();
-    });
+    function stopLoop() {
+      if (animHandle) {
+        window.cancelAnimationFrame(animHandle);
+        animHandle = null;
+      }
+    }
+
+    function startLoop() {
+      if (animHandle || !pageCanAnimate() || !officeVisible) return;
+      lastTime = performance.now();
+      animHandle = window.requestAnimationFrame(loop);
+    }
+
+    function syncOfficeMotion() {
+      if (!officeObserver) {
+        updateOfficeVisibility();
+      }
+      if (pageCanAnimate() && officeVisible) {
+        startLoop();
+        return;
+      }
+      stopLoop();
+      drawFrame();
+    }
+
+    function loop(now) {
+      var dt = Math.min(now - lastTime, 50);
+      lastTime = now;
+      update(dt);
+      drawFrame();
+      animHandle = pageCanAnimate() && officeVisible ? window.requestAnimationFrame(loop) : null;
+    }
+
+    document.addEventListener('visibilitychange', syncOfficeMotion);
+    if (motionQuery.addEventListener) {
+      motionQuery.addEventListener('change', syncOfficeMotion);
+    } else if (motionQuery.addListener) {
+      motionQuery.addListener(syncOfficeMotion);
+    }
+
+    if (window.IntersectionObserver) {
+      officeObserver = new IntersectionObserver(function(entries) {
+        officeVisible = !!(entries[0] && entries[0].isIntersecting);
+        syncOfficeMotion();
+      }, { threshold: 0.12 });
+      officeObserver.observe(canvas);
+    } else {
+      updateOfficeVisibility();
+      window.addEventListener('scroll', syncOfficeMotion, { passive: true });
+      window.addEventListener('resize', syncOfficeMotion);
+    }
 
     window.addEventListener('resize', function() {
       resize();
+      drawFrame();
     });
 
     resize();
-    lastTime = performance.now();
-    animHandle = requestAnimationFrame(loop);
+    drawFrame();
+    syncOfficeMotion();
 
   })(); // end isometric scene IIFE
 

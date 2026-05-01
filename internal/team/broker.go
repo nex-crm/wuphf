@@ -151,32 +151,33 @@ func (req humanInterview) TitleOrDefault() string {
 }
 
 type teamTask struct {
-	ID               string   `json:"id"`
-	Channel          string   `json:"channel,omitempty"`
-	Title            string   `json:"title"`
-	Details          string   `json:"details,omitempty"`
-	Owner            string   `json:"owner,omitempty"`
-	Status           string   `json:"status"`
-	CreatedBy        string   `json:"created_by"`
-	ThreadID         string   `json:"thread_id,omitempty"`
-	TaskType         string   `json:"task_type,omitempty"`
-	PipelineID       string   `json:"pipeline_id,omitempty"`
-	PipelineStage    string   `json:"pipeline_stage,omitempty"`
-	ExecutionMode    string   `json:"execution_mode,omitempty"`
-	ReviewState      string   `json:"review_state,omitempty"`
-	SourceSignalID   string   `json:"source_signal_id,omitempty"`
-	SourceDecisionID string   `json:"source_decision_id,omitempty"`
-	WorktreePath     string   `json:"worktree_path,omitempty"`
-	WorktreeBranch   string   `json:"worktree_branch,omitempty"`
-	DependsOn        []string `json:"depends_on,omitempty"`
-	Blocked          bool     `json:"blocked,omitempty"`
-	AckedAt          string   `json:"acked_at,omitempty"`
-	DueAt            string   `json:"due_at,omitempty"`
-	FollowUpAt       string   `json:"follow_up_at,omitempty"`
-	ReminderAt       string   `json:"reminder_at,omitempty"`
-	RecheckAt        string   `json:"recheck_at,omitempty"`
-	CreatedAt        string   `json:"created_at"`
-	UpdatedAt        string   `json:"updated_at"`
+	ID               string          `json:"id"`
+	Channel          string          `json:"channel,omitempty"`
+	Title            string          `json:"title"`
+	Details          string          `json:"details,omitempty"`
+	Owner            string          `json:"owner,omitempty"`
+	Status           string          `json:"status"`
+	CreatedBy        string          `json:"created_by"`
+	ThreadID         string          `json:"thread_id,omitempty"`
+	TaskType         string          `json:"task_type,omitempty"`
+	PipelineID       string          `json:"pipeline_id,omitempty"`
+	PipelineStage    string          `json:"pipeline_stage,omitempty"`
+	ExecutionMode    string          `json:"execution_mode,omitempty"`
+	ReviewState      string          `json:"review_state,omitempty"`
+	SourceSignalID   string          `json:"source_signal_id,omitempty"`
+	SourceDecisionID string          `json:"source_decision_id,omitempty"`
+	WorktreePath     string          `json:"worktree_path,omitempty"`
+	WorktreeBranch   string          `json:"worktree_branch,omitempty"`
+	DependsOn        []string        `json:"depends_on,omitempty"`
+	Blocked          bool            `json:"blocked,omitempty"`
+	AckedAt          string          `json:"acked_at,omitempty"`
+	DueAt            string          `json:"due_at,omitempty"`
+	FollowUpAt       string          `json:"follow_up_at,omitempty"`
+	ReminderAt       string          `json:"reminder_at,omitempty"`
+	RecheckAt        string          `json:"recheck_at,omitempty"`
+	MemoryWorkflow   *MemoryWorkflow `json:"memory_workflow,omitempty"`
+	CreatedAt        string          `json:"created_at"`
+	UpdatedAt        string          `json:"updated_at"`
 }
 
 type channelSurface struct {
@@ -347,6 +348,16 @@ type schedulerJob struct {
 	LastRun         string `json:"last_run,omitempty"`
 	Status          string `json:"status,omitempty"`
 	Payload         string `json:"payload,omitempty"`
+	// PR 8 Lane G: cron registry fields. SystemManaged crons are
+	// self-registered at broker startup and surfaced in the Calendar app's
+	// System Schedules panel; humans can disable/throttle them but cannot
+	// delete them. IntervalOverride lets the human dial the cadence without
+	// touching env / config — when non-zero, the run-loop uses it instead
+	// of the env-resolved default.
+	Enabled          bool   `json:"enabled"`
+	IntervalOverride int    `json:"interval_override,omitempty"`
+	LastRunStatus    string `json:"last_run_status,omitempty"`
+	SystemManaged    bool   `json:"system_managed,omitempty"`
 }
 
 type teamSkill struct {
@@ -472,6 +483,7 @@ type Broker struct {
 	factLog                 *FactLog
 	entityGraph             *EntityGraph
 	entitySynthesizer       *EntitySynthesizer
+	teamLearningLog         *LearningLog
 	playbookSynthesizer     *PlaybookSynthesizer
 	pamDispatcher           *PamDispatcher
 	scanTracker             *scanStatusTracker
@@ -553,6 +565,17 @@ type Broker struct {
 	// goroutine writing via a stale closure (or a sibling broker built at
 	// a different path) cannot retarget this broker's saves.
 	statePath string
+
+	// Multi-workspace plumbing. All three are nil until SetWorkspaceOrchestrator /
+	// SetLauncherDrainer / SetAdminPauseExitFn wire concrete impls. nil is
+	// the expected state on a broker started without multi-workspace
+	// support — handlers degrade to 503 (orchestrator) or fall back to
+	// os.Exit(0) (exit hook). Lane B owns the orchestrator + Launcher.Drain
+	// implementations; this broker only depends on the interfaces in
+	// broker_workspaces.go.
+	workspaces       workspaceOrchestrator
+	launcherDrain    launcherDrainer
+	adminPauseExitFn func(int)
 }
 
 func stringSliceContainsFold(values []string, want string) bool {
@@ -718,14 +741,13 @@ func (b *Broker) ChannelStore() *channel.Store {
 
 // requireAuth wraps a handler to enforce Bearer token authentication.
 // Accepts token via Authorization header or ?token= query parameter (for EventSource which can't set headers).
+//
+// Backed by withAuth (broker_auth.go); kept as the legacy name on the
+// existing route registrations so a full sweep of HandleFunc lines is
+// not required by this PR. Both names produce identical behavior — the
+// auth-route assertion test covers both.
 func (b *Broker) requireAuth(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if b.requestHasBrokerAuth(r) {
-			next(w, r)
-			return
-		}
-		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
-	}
+	return b.withAuth(next)
 }
 
 // Start launches the broker on the configured localhost port.
@@ -736,8 +758,26 @@ func (b *Broker) Start() error {
 	b.ensureEntitySynthesizer()
 	b.ensurePlaybookExecutionLog()
 	b.ensurePlaybookSynthesizer()
+	// PR 8 Lane G: register system-managed crons AFTER review log + wiki
+	// worker init so the registry reflects subsystems that are actually up.
+	// Registration is idempotent — pre-existing entries keep their
+	// IntervalOverride and Enabled choices.
+	b.registerSystemCrons()
 	b.startReviewExpiryLoop(context.Background())
-	return b.StartOnPort(brokeraddr.ResolvePort())
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		select {
+		case <-b.stopCh:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+	b.startMemoryWorkflowReconcilerLoop(ctx)
+	if err := b.StartOnPort(brokeraddr.ResolvePort()); err != nil {
+		cancel()
+		return err
+	}
+	return nil
 }
 
 // ensureWikiWorker initializes the markdown-backend wiki worker when the
@@ -859,6 +899,8 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/members", b.requireAuth(b.handleMembers))
 	mux.HandleFunc("/tasks", b.requireAuth(b.handleTasks))
 	mux.HandleFunc("/tasks/ack", b.requireAuth(b.handleTaskAck))
+	mux.HandleFunc("/tasks/memory-workflow", b.requireAuth(b.handleTaskMemoryWorkflow))
+	mux.HandleFunc("/tasks/memory-workflow/reconcile", b.requireAuth(b.handleTaskMemoryWorkflowReconcile))
 	mux.HandleFunc("/agent-logs", b.requireAuth(b.handleAgentLogs))
 	mux.HandleFunc("/task-plan", b.requireAuth(b.handleTaskPlan))
 	mux.HandleFunc("/memory", b.requireAuth(b.handleMemory))
@@ -897,6 +939,8 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/playbook/executions", b.requireAuth(b.handlePlaybookExecutionsList))
 	mux.HandleFunc("/playbook/synthesize", b.requireAuth(b.handlePlaybookSynthesize))
 	mux.HandleFunc("/playbook/synthesis-status", b.requireAuth(b.handlePlaybookSynthesisStatus))
+	mux.HandleFunc("/learning/record", b.requireAuth(b.handleLearningRecord))
+	mux.HandleFunc("/learning/search", b.requireAuth(b.handleLearningSearch))
 	mux.HandleFunc("/pam/actions", b.requireAuth(b.handlePamActions))
 	mux.HandleFunc("/pam/action", b.requireAuth(b.handlePamAction))
 	mux.HandleFunc("/scan/start", b.requireAuth(b.handleScanStart))
@@ -918,6 +962,7 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/watchdogs", b.requireAuth(b.handleWatchdogs))
 	mux.HandleFunc("/actions", b.requireAuth(b.handleActions))
 	mux.HandleFunc("/scheduler", b.requireAuth(b.handleScheduler))
+	mux.HandleFunc("/scheduler/", b.requireAuth(b.handleSchedulerSubpath))
 	mux.HandleFunc("/skills", b.requireAuth(b.handleSkills))
 	// /skills/compile lives ABOVE the wildcard subpath route so the
 	// ServeMux longest-match wins for the compile endpoints.
@@ -939,6 +984,20 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/events", b.handleEvents)
 	mux.HandleFunc("/agent-stream/", b.requireAuth(b.handleAgentStream))
 	mux.HandleFunc("/agent-tool-event", b.requireAuth(b.handleAgentToolEvent))
+	// Multi-workspace routes (broker_workspaces.go). Every route below is
+	// wrapped through b.withAuth so the design's "every protected route
+	// requires bearer" assertion holds. /admin/pause additionally requires
+	// loopback RemoteAddr (defense-in-depth, applied inside the handler).
+	mux.HandleFunc("/workspaces/list", b.withAuth(b.handleWorkspacesList))
+	mux.HandleFunc("/workspaces/create", b.withAuth(b.handleWorkspacesCreate))
+	mux.HandleFunc("/workspaces/switch", b.withAuth(b.handleWorkspacesSwitch))
+	mux.HandleFunc("/workspaces/pause", b.withAuth(b.handleWorkspacesPause))
+	mux.HandleFunc("/workspaces/resume", b.withAuth(b.handleWorkspacesResume))
+	mux.HandleFunc("/workspaces/shred", b.withAuth(b.handleWorkspacesShred))
+	mux.HandleFunc("/workspaces/restore", b.withAuth(b.handleWorkspacesRestore))
+	mux.HandleFunc("/workspaces/trash", b.withAuth(b.handleWorkspacesTrash))
+	mux.HandleFunc("/workspaces/onboarding", b.withAuth(b.handleWorkspacesOnboarding))
+	mux.HandleFunc("/admin/pause", b.withAuth(b.handleAdminPause))
 	mux.HandleFunc("/web-token", b.handleWebToken)
 	// Onboarding: state/progress/complete + prereqs/templates/validate-key + checklist.
 	// completeFn posts the first task as a human message and seeds the team.
@@ -2649,6 +2708,7 @@ func (b *Broker) normalizeLoadedStateLocked() {
 			b.tasks[i].Channel = "general"
 		}
 		normalizeTaskPlan(&b.tasks[i])
+		syncTaskMemoryWorkflow(&b.tasks[i], "")
 		b.ensureTaskOwnerChannelMembershipLocked(b.tasks[i].Channel, b.tasks[i].Owner)
 		b.queueTaskBehindActiveOwnerLaneLocked(&b.tasks[i])
 		b.scheduleTaskLifecycleLocked(&b.tasks[i])

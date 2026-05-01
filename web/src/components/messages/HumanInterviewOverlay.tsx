@@ -87,6 +87,10 @@ function BlockingInterview({
   onDismiss,
 }: BlockingInterviewProps) {
   const options = request.options ?? request.choices ?? [];
+  const isEnhanceInterview = request.kind === "enhance_skill_proposal";
+  const enhancesSlug = isEnhanceInterview
+    ? (request.metadata?.enhances_slug as string | undefined)
+    : undefined;
 
   return (
     <div
@@ -108,6 +112,40 @@ function BlockingInterview({
             ? request.title
             : "Human decision requested"}
         </h2>
+        {isEnhanceInterview && enhancesSlug && (
+          <div
+            className="interview-enhance-banner"
+            role="note"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "8px 12px",
+              marginBottom: 12,
+              background: "var(--bg-warm, var(--neutral-50))",
+              border: "1px solid var(--border)",
+              borderRadius: 6,
+              fontSize: 13,
+              color: "var(--text-secondary)",
+            }}
+          >
+            <span aria-hidden="true" style={{ fontSize: 16 }}>
+              ≈
+            </span>
+            <span>
+              Similar to existing skill:{" "}
+              <strong
+                style={{
+                  color: "var(--text)",
+                  fontFamily: "var(--font-mono)",
+                }}
+              >
+                {enhancesSlug}
+              </strong>
+              . Enhance it or approve anyway.
+            </span>
+          </div>
+        )}
         <p className="interview-question">{request.question}</p>
         {request.context && (
           <p className="interview-context">{request.context}</p>

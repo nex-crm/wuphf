@@ -16,6 +16,16 @@ import (
 	"github.com/nex-crm/wuphf/internal/channel"
 )
 
+func (l *Launcher) installBroker(b *Broker) {
+	if l == nil {
+		return
+	}
+	l.broker = b
+	if b != nil && l.brokerConfigurator != nil {
+		l.brokerConfigurator(b)
+	}
+}
+
 // scheduler returns the watchdog scheduler, lazily constructing it on
 // first access. Constructed nil-safe so tests that build &Launcher{}
 // directly never trip on a missing scheduler. Production wiring

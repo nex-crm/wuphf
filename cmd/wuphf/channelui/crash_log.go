@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/nex-crm/wuphf/internal/config"
 )
 
 // AppendChannelCrashLog appends an RFC3339-stamped crash entry to
@@ -32,9 +34,8 @@ func AppendChannelCrashLog(details string) error {
 // is available, otherwise a working-directory fallback so the
 // log is still capturable in restricted environments.
 func ChannelCrashLogPath() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ".wuphf-channel-crash.log"
+	if home := config.RuntimeHomeDir(); home != "" {
+		return filepath.Join(home, ".wuphf", "logs", "channel-crash.log")
 	}
-	return filepath.Join(home, ".wuphf", "logs", "channel-crash.log")
+	return ".wuphf-channel-crash.log"
 }

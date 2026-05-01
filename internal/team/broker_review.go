@@ -149,20 +149,41 @@ func (b *Broker) ensureReviewLog() {
 }
 
 // startReviewExpiryLoop runs a background goroutine that fires TickExpiry
-// every 10 minutes. Auto-transitions are broadcast via the SSE event feed.
+// every 10 minutes (default). Auto-transitions are broadcast via the SSE
+// event feed. PR 8 Lane G: cadence + enabled flag honour the cron registry
+// — interval is re-read every tick so a PATCH takes effect on the next
+// scheduled fire instead of waiting for a process restart.
 func (b *Broker) startReviewExpiryLoop(ctx context.Context) {
+	const defaultInterval = 10 * time.Minute
 	go func() {
-		ticker := time.NewTicker(10 * time.Minute)
-		defer ticker.Stop()
+		// Lazy ticker so a mid-run interval change resizes naturally.
 		for {
+			enabled, interval := b.SchedulerJobControl("review-expiry", defaultInterval)
+			now := time.Now().UTC()
+			b.updateSchedulerHeartbeat("review-expiry", "Review expiry sweep",
+				int(interval/time.Minute), now.Add(interval),
+				disabledOrSleeping(enabled), "")
 			select {
 			case <-ctx.Done():
 				return
-			case <-ticker.C:
-				b.runReviewTick()
+			case <-time.After(interval):
 			}
+			if !enabled {
+				continue
+			}
+			b.runReviewTick()
+			b.updateSchedulerHeartbeat("review-expiry", "Review expiry sweep",
+				int(interval/time.Minute), time.Now().UTC().Add(interval),
+				"sleeping", "ok")
 		}
 	}()
+}
+
+func disabledOrSleeping(enabled bool) string {
+	if enabled {
+		return "sleeping"
+	}
+	return "disabled"
 }
 
 // runReviewTick fires one TickExpiry pass + publishes resulting SSE events.

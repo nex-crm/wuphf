@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getOfficeTasks, post, type Task } from "../../api/client";
 import { formatRelativeTime } from "../../lib/format";
 import { showNotice } from "../ui/Toast";
-import { TaskDetailModal } from "./TaskDetailModal";
+import { TaskDetailModal, taskMemoryWorkflowBadge } from "./TaskDetailModal";
 
 const STATUS_ORDER = [
   "in_progress",
@@ -323,6 +323,7 @@ function TaskCard({
   const status = normalizeStatus(task.status);
   const timestamp = task.updated_at ?? task.created_at;
   const className = `app-card task-card${isDragging ? " dragging" : ""}`;
+  const memoryBadge = taskMemoryWorkflowBadge(task.memory_workflow);
 
   function handleKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
     if (event.key === "Enter" || event.key === " ") {
@@ -369,6 +370,11 @@ function TaskCard({
         {task.channel && <span className="app-card-meta">#{task.channel}</span>}
         {timestamp && (
           <span className="app-card-meta">{formatRelativeTime(timestamp)}</span>
+        )}
+        {memoryBadge && (
+          <span className={memoryBadge.className} title={memoryBadge.title}>
+            {memoryBadge.label}
+          </span>
         )}
       </div>
     </div>

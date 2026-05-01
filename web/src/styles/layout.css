@@ -1101,6 +1101,10 @@ html[data-theme="nex"]
   font-size: 13px;
   font-weight: 600;
   margin-bottom: 4px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .app-card-meta {
   font-size: 11px;
@@ -1500,6 +1504,34 @@ html[data-theme="nex"]
   gap: 6px;
   flex-wrap: wrap;
 }
+.task-detail-override {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: end;
+  margin-top: 12px;
+}
+.task-detail-override .task-detail-label {
+  grid-column: 1 / -1;
+  margin-bottom: -2px;
+}
+.task-detail-textarea {
+  min-height: 72px;
+  resize: vertical;
+  padding: 8px 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.4;
+  font-family: var(--font-sans);
+}
+.task-detail-textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-bg);
+}
 .task-detail-status-btn-danger {
   color: var(--red);
   border-color: var(--red-bg);
@@ -1584,6 +1616,9 @@ html[data-theme="nex"]
   .task-detail-modal {
     width: 96%;
     padding: 0;
+  }
+  .task-detail-override {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -1773,6 +1808,21 @@ html[data-theme="nex"]
   }
 }
 
+/* ─── Narrow mobile (≤430px): sidebar overlays instead of pushing content ─── */
+@media (max-width: 430px) {
+  .sidebar {
+    position: absolute;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    height: 100%;
+    z-index: 20;
+  }
+  .main {
+    width: 100%;
+  }
+}
+
 /* ─── Sidebar color picker (footer) ─── */
 .sidebar-color-picker {
   padding: 8px var(--sidebar-pad-x) 10px;
@@ -1808,7 +1858,9 @@ html[data-theme="nex"]
   padding: 0;
   cursor: pointer;
   position: relative;
-  transition: transform 0.1s, box-shadow 0.1s;
+  transition:
+    transform 0.1s,
+    box-shadow 0.1s;
 }
 .sidebar-color-swatch:hover {
   transform: scale(1.08);
