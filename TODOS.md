@@ -170,7 +170,7 @@ Tracking work that is deliberately deferred from the current branch. Each item n
 
 ### 15. SystemSchedulesPanel.test.tsx — vi.mock top-level variable bug
 
-**What:** `src/components/apps/SystemSchedulesPanel.test.tsx` crashes vitest with `ReferenceError: Cannot access 'MOCK_SPECS' before initialization` because `vi.mock` hoisting runs before the top-level `MOCK_SPECS` const is initialized.
+**What:** `web/src/components/apps/SystemSchedulesPanel.test.tsx` crashes vitest with `ReferenceError: Cannot access 'MOCK_SPECS' before initialization` because `vi.mock` hoisting runs before the top-level `MOCK_SPECS` const is initialized.
 
 **Why:** Pre-existing bug in the file as merged. The fix is to move `MOCK_SPECS` inside the factory callback or use `vi.hoisted()`. Out of scope for the wiki read-tracking feature.
 

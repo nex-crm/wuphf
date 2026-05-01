@@ -212,6 +212,9 @@ func (r *Repo) BuildCatalog(ctx context.Context, sortBy string, readLog *ReadLog
 			if lj == nil {
 				return false
 			}
+			if li.Equal(*lj) {
+				return entries[i].Path < entries[j].Path
+			}
 			return li.Before(*lj)
 		})
 	} else {
