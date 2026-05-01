@@ -161,6 +161,204 @@ func TestUpsertPromotionFrontmatter_UpdatesExistingKeys(t *testing.T) {
 	}
 }
 
+func TestApplyPromotion_PreservesSkillFrontmatterOnPlaybookPath(t *testing.T) {
+	repo := newPromotionRepo(t)
+	source := "---\n" +
+		"name: customer-refund\n" +
+		"description: Issue a refund for a customer order.\n" +
+		"version: 1.0.0\n" +
+		"# trailing comment kept verbatim\n" +
+		"---\n" +
+		"# Customer Refund\n\nSteps go here.\n"
+	src := seedNotebookEntry(t, repo, "pm", "customer-refund.md", source)
+
+	p := &Promotion{
+		ID:         "rvw-skill-1",
+		SourceSlug: "pm",
+		SourcePath: src,
+		TargetPath: "team/playbooks/customer-refund.md",
+		Rationale:  "Promote skill",
+	}
+	if _, err := repo.ApplyPromotion(context.Background(), p, "ceo"); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(repo.Root(), p.TargetPath))
+	if err != nil {
+		t.Fatalf("read target: %v", err)
+	}
+	body := string(got)
+	if !strings.HasPrefix(body, "---\nname: customer-refund\n") {
+		t.Fatalf("target missing skill frontmatter prefix: %q", body)
+	}
+	if !strings.Contains(body, "description: Issue a refund for a customer order.") {
+		t.Fatalf("target missing description: %q", body)
+	}
+	// Comments and unknown keys MUST survive (we do not parse-and-
+	// reserialise).
+	if !strings.Contains(body, "# trailing comment kept verbatim") {
+		t.Fatalf("target lost YAML comment: %q", body)
+	}
+	if !strings.Contains(body, "# Customer Refund") {
+		t.Fatalf("target dropped markdown body: %q", body)
+	}
+}
+
+func TestApplyPromotion_PreservesSkillFrontmatterOnSkillsPath(t *testing.T) {
+	repo := newPromotionRepo(t)
+	source := "---\n" +
+		"name: incident-response\n" +
+		"description: Triage and resolve a production incident.\n" +
+		"---\n" +
+		"# Incident\n\nbody\n"
+	src := seedNotebookEntry(t, repo, "ops", "incident.md", source)
+
+	p := &Promotion{
+		ID:         "rvw-skill-2",
+		SourceSlug: "ops",
+		SourcePath: src,
+		TargetPath: "team/skills/incident-response.md",
+		Rationale:  "Promote skill",
+	}
+	if _, err := repo.ApplyPromotion(context.Background(), p, "ceo"); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(repo.Root(), p.TargetPath))
+	if err != nil {
+		t.Fatalf("read target: %v", err)
+	}
+	if !strings.HasPrefix(string(got), "---\nname: incident-response\n") {
+		t.Fatalf("target missing skill frontmatter on team/skills/ path: %q", string(got))
+	}
+}
+
+func TestApplyPromotion_StripsBackLinkOnlyFrontmatterOnPlaybookPath(t *testing.T) {
+	// Source carries promoted_* keys (a re-promotion scenario where the
+	// notebook entry was previously promoted somewhere else) but no
+	// `name`/`description` keys. The target should have the back-link
+	// frontmatter stripped — preserving it would self-reference the
+	// previous target.
+	repo := newPromotionRepo(t)
+	source := "---\n" +
+		"promoted_to: team/playbooks/old-target.md\n" +
+		"promoted_at: 2026-04-01T00:00:00Z\n" +
+		"promoted_by: ceo\n" +
+		"promoted_commit_sha: abc1234\n" +
+		"---\n" +
+		"# Retro\n\nbody\n"
+	src := seedNotebookEntry(t, repo, "pm", "retro.md", source)
+
+	p := &Promotion{
+		ID: "rvw-strip-1", SourceSlug: "pm", SourcePath: src,
+		TargetPath: "team/playbooks/new-target.md", Rationale: "r",
+	}
+	if _, err := repo.ApplyPromotion(context.Background(), p, "ceo"); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(repo.Root(), p.TargetPath))
+	if err != nil {
+		t.Fatalf("read target: %v", err)
+	}
+	if strings.HasPrefix(string(got), "---") {
+		t.Fatalf("target should NOT inherit back-link-only frontmatter: %q", string(got))
+	}
+	if strings.Contains(string(got), "promoted_to") {
+		t.Fatalf("target leaked back-link key: %q", string(got))
+	}
+}
+
+func TestApplyPromotion_StripsFrontmatterOnNonSkillPath(t *testing.T) {
+	// Even with skill-shaped name/description keys, the rule does NOT apply
+	// to non-skill paths (e.g. team/people/, team/decisions/). We keep the
+	// pre-existing strip behaviour so those wiki sections continue to look
+	// the way they did.
+	repo := newPromotionRepo(t)
+	source := "---\n" +
+		"name: jane-doe\n" +
+		"description: Engineer.\n" +
+		"---\n" +
+		"# Jane Doe\n\nbody\n"
+	src := seedNotebookEntry(t, repo, "pm", "jane.md", source)
+
+	p := &Promotion{
+		ID: "rvw-people-1", SourceSlug: "pm", SourcePath: src,
+		TargetPath: "team/people/jane-doe.md", Rationale: "r",
+	}
+	if _, err := repo.ApplyPromotion(context.Background(), p, "ceo"); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(repo.Root(), p.TargetPath))
+	if err != nil {
+		t.Fatalf("read target: %v", err)
+	}
+	if strings.HasPrefix(string(got), "---") {
+		t.Fatalf("non-skill target should not preserve frontmatter: %q", string(got))
+	}
+}
+
+func TestStripPromotionFrontmatterForTarget(t *testing.T) {
+	cases := []struct {
+		name       string
+		body       string
+		targetPath string
+		want       string
+	}{
+		{
+			name:       "no frontmatter passes through",
+			body:       "# hi\n",
+			targetPath: "team/playbooks/x.md",
+			want:       "# hi\n",
+		},
+		{
+			name:       "skill frontmatter preserved on team/playbooks/",
+			body:       "---\nname: x\ndescription: y\n---\n# body\n",
+			targetPath: "team/playbooks/x.md",
+			want:       "---\nname: x\ndescription: y\n---\n# body\n",
+		},
+		{
+			name:       "skill frontmatter preserved on team/skills/",
+			body:       "---\nname: x\ndescription: y\n---\n# body\n",
+			targetPath: "team/skills/x.md",
+			want:       "---\nname: x\ndescription: y\n---\n# body\n",
+		},
+		{
+			name:       "skill frontmatter stripped on team/people/",
+			body:       "---\nname: x\ndescription: y\n---\n# body\n",
+			targetPath: "team/people/x.md",
+			want:       "# body\n",
+		},
+		{
+			name:       "back-link only frontmatter stripped on team/playbooks/",
+			body:       "---\npromoted_to: team/playbooks/old.md\npromoted_by: ceo\n---\n# body\n",
+			targetPath: "team/playbooks/new.md",
+			want:       "# body\n",
+		},
+		{
+			name:       "name without description stripped on team/playbooks/",
+			body:       "---\nname: x\n---\n# body\n",
+			targetPath: "team/playbooks/x.md",
+			want:       "# body\n",
+		},
+		{
+			name:       "indented name does not satisfy preservation gate",
+			body:       "---\nmetadata:\n  name: nested\n  description: nested\n---\n# body\n",
+			targetPath: "team/playbooks/x.md",
+			want:       "# body\n",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := stripPromotionFrontmatterForTarget(tc.body, tc.targetPath)
+			if got != tc.want {
+				t.Errorf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestStripFrontmatter(t *testing.T) {
 	cases := map[string]string{
 		"# hi\n":                       "# hi\n",
