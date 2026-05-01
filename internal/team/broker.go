@@ -781,6 +781,15 @@ func (b *Broker) Start() error {
 	return nil
 }
 
+// WikiReadLog returns the broker's ReadLog under b.mu, matching the pattern
+// used by ReviewLog(). Handlers must use this accessor — not b.readLog directly —
+// to avoid a data race with ensureWikiWorker's write under b.mu.
+func (b *Broker) WikiReadLog() *ReadLog {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.readLog
+}
+
 // ensureWikiWorker initializes the markdown-backend wiki worker when the
 // resolved memory backend is "markdown". Runs once. Never crashes the
 // broker on wiki init failure — the worker is advisory; writes simply fail

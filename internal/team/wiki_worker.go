@@ -918,8 +918,10 @@ func (b *Broker) handleWikiRead(w http.ResponseWriter, r *http.Request) {
 	}
 	// Track agent reads. The ?reader= param is set by the MCP layer using
 	// WUPHF_AGENT_SLUG. Human reads go through /wiki/article, not here.
-	if reader := sanitizeReader(r.URL.Query().Get("reader")); reader != "" {
-		b.readLog.Append(relPath, reader)
+	// Reject ReaderHuman ("web") on this endpoint: agent slugs must not be
+	// named "web" or reads would incorrectly inflate human_read_count.
+	if reader := sanitizeReader(r.URL.Query().Get("reader")); reader != "" && reader != ReaderHuman {
+		b.WikiReadLog().Append(relPath, reader)
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	_, _ = w.Write(bytes)
@@ -991,7 +993,7 @@ func (b *Broker) handleWikiCatalog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sortParam := strings.TrimSpace(r.URL.Query().Get("sort"))
-	entries, err := worker.Repo().BuildCatalog(r.Context(), sortParam, b.readLog)
+	entries, err := worker.Repo().BuildCatalog(r.Context(), sortParam, b.WikiReadLog())
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -1024,7 +1026,7 @@ func (b *Broker) handleWikiArticle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	reader := sanitizeReader(r.URL.Query().Get("reader"))
-	meta, err := worker.Repo().BuildArticle(r.Context(), relPath, reader, b.readLog)
+	meta, err := worker.Repo().BuildArticle(r.Context(), relPath, reader, b.WikiReadLog())
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 		return

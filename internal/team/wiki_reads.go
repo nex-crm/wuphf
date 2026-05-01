@@ -17,6 +17,8 @@ package team
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
+	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
@@ -99,7 +101,11 @@ func (l *ReadLog) Append(relPath, reader string) {
 		log.Printf("wiki reads: open: %v", err)
 		return
 	}
-	defer f.Close()
+	defer func() {
+		if cerr := f.Close(); cerr != nil {
+			log.Printf("wiki reads: close: %v", cerr)
+		}
+	}()
 	line = append(line, '\n')
 	if _, err := f.Write(line); err != nil {
 		log.Printf("wiki reads: write: %v", err)
@@ -131,16 +137,17 @@ func (l *ReadLog) AllStats() map[string]ReadStats {
 
 	f, err := os.Open(l.path)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, fs.ErrNotExist) {
 			return result // zero reads — not an error
 		}
 		log.Printf("wiki reads: open for stats: %v", err)
 		return result
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }() // read-only; close error is inconsequential
 
 	now := time.Now().UTC()
 	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 4096), 1<<20) // 1 MiB max — prevents silent truncation on long lines
 	for scanner.Scan() {
 		line := scanner.Bytes()
 		if len(line) == 0 {
