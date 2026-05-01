@@ -350,9 +350,9 @@ test.describe("wuphf onboarding wizard smoke", () => {
       "Draft a launch plan for the first customer loop.",
     );
 
-    await page.getByRole("button", { name: "Back" }).click();
-    await page.getByRole("button", { name: "Back" }).click();
-    await page.getByRole("button", { name: "Back" }).click();
+    await page.getByRole("button", { exact: true, name: "Back" }).click();
+    await page.getByRole("button", { exact: true, name: "Back" }).click();
+    await page.getByRole("button", { exact: true, name: "Back" }).click();
     await expect(page.getByText("What should your office run?")).toBeVisible();
 
     await page.getByRole("button", { name: /Start from scratch/i }).click();
