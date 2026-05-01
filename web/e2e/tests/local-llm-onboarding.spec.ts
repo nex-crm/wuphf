@@ -162,11 +162,15 @@ test.describe("Onboarding → Run a local model", () => {
     await mlxTile.click();
     await expect(mlxTile).toHaveAttribute("aria-pressed", "true");
 
-    // Click again clears the selection — the wizard's Continue gate is
-    // satisfied either way (cloud CLI or local), but allowing the
-    // toggle-off path keeps the UI honest if the user changes their mind.
+    // Click again clears the selection and closes the local picker, keeping
+    // the meta-tile, picker, and fallback chain in sync.
     await mlxTile.click();
-    await expect(mlxTile).toHaveAttribute("aria-pressed", "false");
+    await expect(
+      page.getByTestId("onboarding-local-llm-toggle"),
+    ).toHaveAttribute("aria-pressed", "false");
+    await expect(page.getByTestId("onboarding-local-llm-picker")).toHaveCount(
+      0,
+    );
   });
 
   test("disabled runtime tile (platform_supported=false) does not change selection", async ({
@@ -299,11 +303,23 @@ test.describe("Onboarding → Run a local model", () => {
     });
     await mlxRow.getByRole("button", { name: /Remove MLX-LM/i }).click();
 
-    // Picker tile is no longer pressed AND the row is gone.
-    await expect(mlxTile).toHaveAttribute("aria-pressed", "false");
+    // The parent cleared localProvider, so the meta-tile closes the picker and
+    // the row is gone.
+    await expect(
+      page.getByTestId("onboarding-local-llm-toggle"),
+    ).toHaveAttribute("aria-pressed", "false");
+    await expect(page.getByTestId("onboarding-local-llm-picker")).toHaveCount(
+      0,
+    );
     await expect(
       page.locator(".runtime-priority-row-label").filter({ hasText: "MLX-LM" }),
     ).toHaveCount(0);
+
+    // Re-opening proves the selection is cleared, not just hidden.
+    await page.getByTestId("onboarding-local-llm-toggle").click();
+    await expect(
+      page.getByTestId("onboarding-local-llm-tile-mlx-lm"),
+    ).toHaveAttribute("aria-pressed", "false");
   });
 
   test("status fetch failure: fall-open so the picker isn't deadlocked", async ({

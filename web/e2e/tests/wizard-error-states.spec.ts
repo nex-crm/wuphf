@@ -60,7 +60,7 @@ async function advanceToSetupStep(page: Page) {
 }
 
 test.describe("Wizard error states", () => {
-  test("prereqsError banner appears + provider:null tiles stay disabled when /onboarding/prereqs fails", async ({
+  test("prereqsError banner appears + provider:null runtimes are not offered when /onboarding/prereqs fails", async ({
     page,
   }) => {
     // Fail the prereqs endpoint BEFORE navigation. Wizard.tsx fires
@@ -88,20 +88,16 @@ test.describe("Wizard error states", () => {
     await expect(claudeTile).toHaveAttribute("aria-disabled", "false");
     await expect(claudeTile).not.toHaveClass(/disabled/);
 
-    // 3. provider:null runtimes (Cursor, Windsurf) are still selectable
-    //    BUT — and this is the regression guard — clicking one must
-    //    NOT satisfy the "install gate" alone. The Wizard's
-    //    hasInstalledSelection predicate now requires spec.provider !==
-    //    null under prereqsError, so a Cursor-only selection should
-    //    leave the primary CTA disabled. Asserted via the keyboard gate
-    //    behavior is hard to drive in e2e; instead we just confirm the
-    //    tile is reachable. The unit-test side of the gate lives in
-    //    Wizard's internal logic — covered there.
-    const cursorTile = page.getByTestId("setup-runtime-tile-Cursor");
-    await expect(cursorTile).toHaveAttribute("aria-disabled", "false");
+    // 3. provider:null runtimes (Cursor, Windsurf) are intentionally not
+    //    offered in setup. The broker drops them from llm_provider, so showing
+    //    them as selectable would create a dead-end selection.
+    await expect(page.getByTestId("setup-runtime-tile-Cursor")).toHaveCount(0);
+    await expect(page.getByTestId("setup-runtime-tile-Windsurf")).toHaveCount(
+      0,
+    );
   });
 
-  test("submitError alert + Retry button appear when /onboarding/complete fails, then succeed on retry", async ({
+  test("submitError alert appears when /onboarding/complete fails, then succeeds on the next submit", async ({
     page,
   }) => {
     // Stub /config to a fixed 200 so the only varying surface in this
@@ -162,16 +158,17 @@ test.describe("Wizard error states", () => {
     const submit = page.getByTestId("onboarding-submit-button");
     await expect(submit).toBeVisible({ timeout: 10_000 });
 
-    // First click → /onboarding/complete fails → submitError banner
-    // appears, button text flips to "Retry".
+    // First click → /onboarding/complete fails → submitError banner appears.
+    // Since this path skipped the freeform task, the CTA keeps the normal
+    // "Get started" label; "Retry" is reserved for retrying a non-empty task.
     await submit.click();
     await expect(page.getByTestId("onboarding-submit-error")).toBeVisible({
       timeout: 10_000,
     });
-    await expect(submit).toHaveText(/Retry/);
+    await expect(submit).not.toHaveText(/Retry/);
 
     // The PR #367 invariant: a retry must not be silently no-op'd.
-    // Click Retry → second /onboarding/complete returns 200 → the
+    // Click again → second /onboarding/complete returns 200 → the
     // submitError clears (Wizard sets submitError = "" before the
     // POST and only re-sets on rejection).
     await submit.click();

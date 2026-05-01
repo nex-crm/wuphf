@@ -13,7 +13,6 @@
 cmd/wuphf/channel.go                          # Phase 2: split into channel_<concern>.go siblings
 internal/team/broker.go                       # Phase 3: extract sse/auth/rate_limit/wiki/telemetry/web_proxy/publish
 internal/team/broker_office_channels.go       # Phase 4: split by operation type (crud/members/kinds)
-web/src/components/onboarding/Wizard.tsx      # Phase 6: per-step files in wizard/
 web/src/components/apps/SettingsApp.tsx       # Phase 7: per-section panels in settings/
 
 # Other current offenders — to be addressed in follow-up PRs after Phase 1-9
