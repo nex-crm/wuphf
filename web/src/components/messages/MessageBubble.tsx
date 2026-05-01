@@ -124,13 +124,13 @@ export function MessageBubble({
         ) : (
           <>
             <PixelAvatar slug={message.from} size={24} />
-            {harness && (
+            {harness ? (
               <HarnessBadge
                 kind={harness}
                 size={14}
                 className="harness-badge-on-avatar"
               />
-            )}
+            ) : null}
           </>
         )}
       </div>
@@ -221,13 +221,13 @@ export function MessageBubble({
 
       {/* Hover actions — reply in thread, quote, copy link. Absolutely
           positioned so they don't change the bubble's flow layout. */}
-      {(onOpenThread || onQuoteReply || onCopyLink) && (
+      {onOpenThread || onQuoteReply || onCopyLink ? (
         <div
           className="message-hover-actions"
           role="toolbar"
           aria-label="Message actions"
         >
-          {onOpenThread && (
+          {onOpenThread ? (
             <button
               className="message-hover-btn"
               onClick={() => onOpenThread(message.id)}
@@ -247,8 +247,8 @@ export function MessageBubble({
                 <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
               </svg>
             </button>
-          )}
-          {onQuoteReply && (
+          ) : null}
+          {onQuoteReply ? (
             <button
               className="message-hover-btn"
               onClick={() => onQuoteReply(message)}
@@ -269,8 +269,8 @@ export function MessageBubble({
                 <path d="m16 16-5-5 5-5" />
               </svg>
             </button>
-          )}
-          {onCopyLink && (
+          ) : null}
+          {onCopyLink ? (
             <button
               className="message-hover-btn"
               onClick={() => onCopyLink(message.id)}
@@ -291,9 +291,9 @@ export function MessageBubble({
                 <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.72-1.71" />
               </svg>
             </button>
-          )}
+          ) : null}
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

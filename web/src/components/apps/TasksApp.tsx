@@ -295,12 +295,12 @@ export function TasksApp() {
           );
         })}
       </div>
-      {selectedTask && (
+      {selectedTask ? (
         <TaskDetailModal
           task={selectedTask}
           onClose={() => setSelectedTaskId(null)}
         />
-      )}
+      ) : null}
     </>
   );
 }
@@ -345,7 +345,7 @@ function TaskCard({
       style={{ marginBottom: 8, cursor: "pointer" }}
     >
       <div className="app-card-title">{task.title || "Untitled"}</div>
-      {task.description && (
+      {task.description ? (
         <div
           style={{
             fontSize: 12,
@@ -356,7 +356,7 @@ function TaskCard({
         >
           {task.description.slice(0, 160)}
         </div>
-      )}
+      ) : null}
       <div
         style={{
           display: "flex",
@@ -366,11 +366,15 @@ function TaskCard({
         }}
       >
         <span className={statusBadgeClass(status)}>{COLUMN_LABEL[status]}</span>
-        {task.owner && <span className="app-card-meta">@{task.owner}</span>}
-        {task.channel && <span className="app-card-meta">#{task.channel}</span>}
-        {timestamp && (
+        {task.owner ? (
+          <span className="app-card-meta">@{task.owner}</span>
+        ) : null}
+        {task.channel ? (
+          <span className="app-card-meta">#{task.channel}</span>
+        ) : null}
+        {timestamp ? (
           <span className="app-card-meta">{formatRelativeTime(timestamp)}</span>
-        )}
+        ) : null}
         {memoryBadge && (
           <span className={memoryBadge.className} title={memoryBadge.title}>
             {memoryBadge.label}
