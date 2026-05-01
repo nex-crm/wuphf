@@ -102,6 +102,9 @@ type CatalogEntry struct {
 	HumanReadCount int        `json:"human_read_count"`
 	AgentReadCount int        `json:"agent_read_count"`
 	DaysUnread     int        `json:"days_unread"`
+	// Archived is true when the entry is a tombstone (frontmatter archived: true).
+	// Only present in responses when ?include_archived=true is passed.
+	Archived bool `json:"archived,omitempty"`
 }
 
 // BuildCatalog walks team/ and returns every .md article with title + author +
@@ -112,8 +115,11 @@ type CatalogEntry struct {
 // (oldest-accessed first; never-accessed articles appear first). readLog may
 // be nil, in which case read stats are all zero and sort falls back to path order.
 //
+// Archived tombstones (frontmatter archived: true) are excluded by default.
+// Pass includeArchived=true to include them (for admin/recovery views).
+//
 // Shape matches web/src/api/wiki.ts WikiCatalogEntry.
-func (r *Repo) BuildCatalog(ctx context.Context, sortBy string, readLog *ReadLog) ([]CatalogEntry, error) {
+func (r *Repo) BuildCatalog(ctx context.Context, sortBy string, readLog *ReadLog, includeArchived bool) ([]CatalogEntry, error) {
 	teamDir := r.TeamDir()
 	var entries []CatalogEntry
 
@@ -171,9 +177,15 @@ func (r *Repo) BuildCatalog(ctx context.Context, sortBy string, readLog *ReadLog
 			return fmt.Errorf("read %s: %w", path, err)
 		}
 
+		isArchived := parseFrontmatterBool(string(content), "archived")
+		if isArchived && !includeArchived {
+			return nil
+		}
+
 		entry := CatalogEntry{
-			Path:  rel,
-			Title: extractTitle(content, rel),
+			Path:     rel,
+			Archived: isArchived,
+			Title:    extractTitle(content, rel),
 			Group: groupFromPath(rel),
 		}
 		entries = append(entries, entry)

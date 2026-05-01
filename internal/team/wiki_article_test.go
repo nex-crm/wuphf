@@ -276,7 +276,7 @@ func TestBuildCatalog_ExcludesInbox(t *testing.T) {
 		t.Fatalf("write inbox file: %v", err)
 	}
 
-	entries, err := repo.BuildCatalog(ctx, "", nil)
+	entries, err := repo.BuildCatalog(ctx, "", nil, false)
 	if err != nil {
 		t.Fatalf("BuildCatalog: %v", err)
 	}
@@ -360,7 +360,7 @@ func TestBuildCatalog_ReadTracking(t *testing.T) {
 	rl.Append("team/people/alice.md", "web")
 	rl.Append("team/people/alice.md", "slack-agent")
 
-	entries, err := repo.BuildCatalog(ctx, "", rl)
+	entries, err := repo.BuildCatalog(ctx, "", rl, false)
 	if err != nil {
 		t.Fatalf("BuildCatalog: %v", err)
 	}
@@ -413,7 +413,7 @@ func TestBuildCatalog_SortLastRead(t *testing.T) {
 	// Only alice has been read.
 	rl.Append("team/people/alice.md", "web")
 
-	entries, err := repo.BuildCatalog(ctx, "last_read", rl)
+	entries, err := repo.BuildCatalog(ctx, "last_read", rl, false)
 	if err != nil {
 		t.Fatalf("BuildCatalog: %v", err)
 	}

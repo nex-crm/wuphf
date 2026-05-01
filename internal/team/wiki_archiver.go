@@ -1,0 +1,165 @@
+package team
+
+// wiki_archiver.go — WikiArchiver.Sweep moves zero-read articles older than
+// the cutoff to .archive/ and replaces them with tombstones.
+//
+// Design: docs/specs/wiki-archival-icp-examples.md
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+)
+
+const (
+	// DefaultArchiveCutoffDays is the number of days an article must have been
+	// unread before it is eligible for archival.
+	DefaultArchiveCutoffDays = 90
+
+	// archiveMinWordCount is the minimum word count for archival eligibility.
+	// Stubs below this threshold are left in place — they may still accumulate
+	// facts and get synthesized later.
+	archiveMinWordCount = 50
+)
+
+// SweepResult summarises a single WikiArchiver.Sweep run.
+type SweepResult struct {
+	Archived int `json:"archived"`
+	Skipped  int `json:"skipped"`
+	Errors   int `json:"errors"`
+}
+
+// WikiArchiver sweeps team/ for stale articles and moves them to .archive/.
+type WikiArchiver struct {
+	repo    *Repo
+	readLog *ReadLog
+	cutoff  time.Duration
+}
+
+// NewWikiArchiver returns an archiver. cutoff=0 uses DefaultArchiveCutoffDays.
+func NewWikiArchiver(repo *Repo, readLog *ReadLog, cutoff time.Duration) *WikiArchiver {
+	if cutoff <= 0 {
+		cutoff = DefaultArchiveCutoffDays * 24 * time.Hour
+	}
+	return &WikiArchiver{repo: repo, readLog: readLog, cutoff: cutoff}
+}
+
+// Sweep walks team/ and archives every eligible article.
+//
+// Eligibility (all must hold):
+//  1. File age ≥ cutoff (oldest commit via commitBoundsByPath)
+//  2. Last read ≥ cutoff days ago (or never read at all)
+//  3. Word count ≥ archiveMinWordCount (skip stubs)
+//  4. Not already a tombstone (frontmatter archived: true)
+func (a *WikiArchiver) Sweep(ctx context.Context) (SweepResult, error) {
+	bounds, err := a.repo.commitBoundsByPath(ctx)
+	if err != nil {
+		return SweepResult{}, fmt.Errorf("wiki archive: commitBoundsByPath: %w", err)
+	}
+
+	var readStats map[string]ReadStats
+	if a.readLog != nil {
+		readStats = a.readLog.AllStats()
+	}
+
+	cutoffAgo := time.Now().UTC().Add(-a.cutoff)
+	cutoffDays := int(a.cutoff / (24 * time.Hour))
+
+	teamDir := filepath.Join(a.repo.Root(), "team")
+	var toArchive []string
+
+	walkErr := filepath.WalkDir(teamDir, func(path string, d os.DirEntry, werr error) error {
+		if werr != nil || d.IsDir() || !strings.HasSuffix(path, ".md") {
+			return werr
+		}
+		if strings.HasPrefix(d.Name(), ".") {
+			return nil
+		}
+		rel, err := filepath.Rel(a.repo.Root(), path)
+		if err != nil {
+			return nil
+		}
+		rel = filepath.ToSlash(rel)
+
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+
+		// Already archived.
+		if parseFrontmatterBool(string(data), "archived") {
+			return nil
+		}
+
+		// Word count check.
+		if countWords(data) < archiveMinWordCount {
+			return nil
+		}
+
+		// Age check: oldest commit must predate the cutoff window.
+		b, ok := bounds[rel]
+		if !ok || b.Oldest.Timestamp.IsZero() || !b.Oldest.Timestamp.Before(cutoffAgo) {
+			return nil
+		}
+
+		// Read recency check.
+		if readStats != nil {
+			if s, ok := readStats[rel]; ok && s.LastRead != nil {
+				if !s.LastRead.Before(cutoffAgo) {
+					// Read within the cutoff window — keep.
+					return nil
+				}
+			}
+		}
+		// Never read (nil LastRead) counts as unread since first commit —
+		// falls through to archive.
+
+		_ = cutoffDays // used in tombstone body
+		toArchive = append(toArchive, rel)
+		return nil
+	})
+	if walkErr != nil {
+		return SweepResult{}, fmt.Errorf("wiki archive: walk: %w", walkErr)
+	}
+
+	var result SweepResult
+	for _, relPath := range toArchive {
+		if err := a.archiveOne(ctx, relPath, cutoffDays); err != nil {
+			log.Printf("wiki archive: archive %s: %v", relPath, err)
+			result.Errors++
+			continue
+		}
+		result.Archived++
+	}
+	result.Skipped = len(toArchive) - result.Archived - result.Errors
+	return result, nil
+}
+
+func (a *WikiArchiver) archiveOne(ctx context.Context, relPath string, cutoffDays int) error {
+	fullPath := filepath.Join(a.repo.Root(), filepath.FromSlash(relPath))
+	original, err := os.ReadFile(fullPath)
+	if err != nil {
+		return fmt.Errorf("read: %w", err)
+	}
+
+	now := time.Now().UTC()
+	archivePath := ".archive/" + relPath
+
+	tombstone := fmt.Sprintf("---\narchived: true\narchived_at: %s\narchive_path: %s\n---\n\n*This article was archived on %s. It had not been accessed in %d+ days.*\n\nThe full content is preserved at `%s`.\n",
+		now.Format(time.RFC3339),
+		archivePath,
+		now.Format("2006-01-02"),
+		cutoffDays,
+		archivePath,
+	)
+
+	msg := fmt.Sprintf("archivist: archive %s (unread %d+ days)", relPath, cutoffDays)
+	if _, err := a.repo.CommitArchive(ctx, relPath, tombstone, archivePath, string(original), msg); err != nil {
+		return fmt.Errorf("commit: %w", err)
+	}
+	return nil
+}

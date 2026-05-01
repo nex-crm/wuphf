@@ -339,6 +339,7 @@ func (b *Broker) Start() error {
 	// IntervalOverride and Enabled choices.
 	b.registerSystemCrons()
 	b.startReviewExpiryLoop(context.Background())
+	b.startArchiveSweepLoop(context.Background())
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
 		select {
@@ -406,6 +407,7 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/wiki/article", b.requireAuth(b.handleWikiArticle))
 	mux.HandleFunc("/wiki/catalog", b.requireAuth(b.handleWikiCatalog))
 	mux.HandleFunc("/wiki/audit", b.requireAuth(b.handleWikiAudit))
+	mux.HandleFunc("/wiki/archive/sweep", b.requireAuth(b.handleWikiArchiveSweep))
 	mux.HandleFunc("/wiki/sections", b.requireAuth(b.handleWikiSections))
 	mux.HandleFunc("/wiki/lint/run", b.requireAuth(b.handleLintRun))
 	mux.HandleFunc("/wiki/lint/resolve", b.requireAuth(b.handleLintResolve))

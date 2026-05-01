@@ -127,6 +127,8 @@ export interface WikiCatalogEntry {
   human_read_count?: number;
   agent_read_count?: number;
   days_unread?: number;
+  /** True when the entry is an archived tombstone. Only present with ?include_archived=true. */
+  archived?: boolean;
 }
 
 /**

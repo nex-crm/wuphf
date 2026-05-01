@@ -341,6 +341,73 @@ func (r *Repo) Commit(ctx context.Context, slug, relPath, content, mode, message
 	return strings.TrimSpace(sha), bytesWritten, nil
 }
 
+// CommitArchive writes a tombstone at relPath and the full original content
+// at archivePath (.archive/<relPath>), then commits both files in a single
+// git commit under the archivist identity. Used by WikiArchiver.Sweep.
+//
+// archivePath must be a descendant of the repo root and must not be under
+// team/ (it lives under .archive/). The caller is responsible for
+// constructing a valid archivePath.
+//
+// Returns the commit SHA. Returns ("", nil) when there was nothing to commit
+// (both files were already identical to what's on disk).
+func (r *Repo) CommitArchive(ctx context.Context, relPath, tombstone, archivePath, archiveContent, message string) (string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	// Write tombstone at original path.
+	fullOrig := filepath.Join(r.root, filepath.FromSlash(relPath))
+	if err := os.MkdirAll(filepath.Dir(fullOrig), 0o700); err != nil {
+		return "", fmt.Errorf("wiki archive: mkdir orig: %w", err)
+	}
+	if err := os.WriteFile(fullOrig, []byte(tombstone), 0o600); err != nil {
+		return "", fmt.Errorf("wiki archive: write tombstone: %w", err)
+	}
+
+	// Write full content to .archive/<relPath>.
+	fullArchive := filepath.Join(r.root, filepath.FromSlash(archivePath))
+	if err := os.MkdirAll(filepath.Dir(fullArchive), 0o700); err != nil {
+		return "", fmt.Errorf("wiki archive: mkdir archive: %w", err)
+	}
+	if err := os.WriteFile(fullArchive, []byte(archiveContent), 0o600); err != nil {
+		return "", fmt.Errorf("wiki archive: write archive: %w", err)
+	}
+
+	if err := r.regenerateIndexLocked(); err != nil {
+		return "", fmt.Errorf("wiki archive: index regen: %w", err)
+	}
+
+	if out, err := r.runGitLocked(ctx, ArchivistAuthor, "add", "--",
+		filepath.ToSlash(relPath), filepath.ToSlash(archivePath), "index/all.md"); err != nil {
+		return "", fmt.Errorf("wiki archive: git add: %w: %s", err, out)
+	}
+
+	cached, err := r.runGitLocked(ctx, ArchivistAuthor, "diff", "--cached", "--name-only")
+	if err != nil {
+		return "", fmt.Errorf("wiki archive: git diff --cached: %w", err)
+	}
+	if strings.TrimSpace(cached) == "" {
+		head, err := r.runGitLocked(ctx, "system", "rev-parse", "--short", "HEAD")
+		if err != nil {
+			return "", fmt.Errorf("wiki archive: resolve HEAD: %w", err)
+		}
+		return strings.TrimSpace(head), nil
+	}
+
+	msg := strings.TrimSpace(message)
+	if msg == "" {
+		msg = fmt.Sprintf("archivist: archive %s", relPath)
+	}
+	if out, err := r.runGitLocked(ctx, ArchivistAuthor, "commit", "-q", "-m", msg); err != nil {
+		return "", fmt.Errorf("wiki archive: git commit: %w: %s", err, out)
+	}
+	sha, err := r.runGitLocked(ctx, ArchivistAuthor, "rev-parse", "--short", "HEAD")
+	if err != nil {
+		return "", fmt.Errorf("wiki archive: resolve HEAD sha: %w", err)
+	}
+	return strings.TrimSpace(sha), nil
+}
+
 // CommitBootstrap stages every untracked / modified path under team/ and
 // commits the whole pile as author `wuphf-bootstrap`. It is idempotent: if
 // nothing is dirty, it returns ("", nil) without creating an empty commit.
@@ -814,16 +881,19 @@ func searchArticles(repo *Repo, pattern string) ([]WikiSearchHit, error) {
 		if len(hits) >= maxHits {
 			return filepath.SkipDir
 		}
-		f, err := os.Open(path)
+		data, err := os.ReadFile(path)
 		if err != nil {
 			return nil
 		}
-		defer func() { _ = f.Close() }()
-		scanner := bufio.NewScanner(f)
-		scanner.Buffer(make([]byte, 64*1024), 1024*1024)
-		lineNo := 0
+		// Skip archived tombstones — they are no longer active wiki content.
+		if parseFrontmatterBool(string(data), "archived") {
+			return nil
+		}
 		rel, _ := filepath.Rel(repo.root, path)
 		rel = filepath.ToSlash(rel)
+		scanner := bufio.NewScanner(strings.NewReader(string(data)))
+		scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+		lineNo := 0
 		for scanner.Scan() {
 			lineNo++
 			line := scanner.Text()

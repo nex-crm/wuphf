@@ -996,7 +996,8 @@ func (b *Broker) handleWikiCatalog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sortParam := strings.TrimSpace(r.URL.Query().Get("sort"))
-	entries, err := worker.Repo().BuildCatalog(r.Context(), sortParam, b.WikiReadLog())
+	includeArchived := r.URL.Query().Get("include_archived") == "true"
+	entries, err := worker.Repo().BuildCatalog(r.Context(), sortParam, b.WikiReadLog(), includeArchived)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -1060,6 +1061,73 @@ func (b *Broker) handleWikiArticle(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, meta)
+}
+
+// handleWikiArchiveSweep runs one WikiArchiver.Sweep synchronously and
+// returns the SweepResult as JSON.
+//
+//	GET /wiki/archive/sweep
+func (b *Broker) handleWikiArchiveSweep(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	worker := b.WikiWorker()
+	if worker == nil {
+		http.Error(w, `{"error":"wiki backend is not active"}`, http.StatusServiceUnavailable)
+		return
+	}
+	archiver := NewWikiArchiver(worker.Repo(), b.WikiReadLog(), 0)
+	result, err := archiver.Sweep(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+// startArchiveSweepLoop runs WikiArchiver.Sweep on the wiki-archive-sweep
+// cron schedule (default: daily, MinFloor: 60 min).
+func (b *Broker) startArchiveSweepLoop(ctx context.Context) {
+	const defaultInterval = 1440 * time.Minute
+	go func() {
+		for {
+			enabled, interval := b.SchedulerJobControl("wiki-archive-sweep", defaultInterval)
+			now := time.Now().UTC()
+			b.updateSchedulerHeartbeat("wiki-archive-sweep", "Wiki archive sweep",
+				int(interval/time.Minute), now.Add(interval),
+				disabledOrSleeping(enabled), "")
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(interval):
+			}
+			if !enabled {
+				continue
+			}
+			b.runArchiveSweepTick()
+			b.updateSchedulerHeartbeat("wiki-archive-sweep", "Wiki archive sweep",
+				int(interval/time.Minute), time.Now().UTC().Add(interval),
+				"sleeping", "ok")
+		}
+	}()
+}
+
+func (b *Broker) runArchiveSweepTick() {
+	worker := b.WikiWorker()
+	if worker == nil {
+		return
+	}
+	archiver := NewWikiArchiver(worker.Repo(), b.WikiReadLog(), 0)
+	result, err := archiver.Sweep(context.Background())
+	if err != nil {
+		log.Printf("wiki archive: sweep error: %v", err)
+		return
+	}
+	if result.Archived > 0 || result.Errors > 0 {
+		log.Printf("wiki archive: sweep complete — archived=%d skipped=%d errors=%d",
+			result.Archived, result.Skipped, result.Errors)
+	}
 }
 
 // handleWikiAudit returns the cross-article commit log for audit / compliance.
