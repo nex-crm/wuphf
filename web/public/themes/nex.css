@@ -883,9 +883,7 @@ html[data-theme^="nex"] .welcome-tagline {
   color: var(--text);
 }
 html[data-theme^="nex"] .tagline-gradient {
-  background: linear-gradient(135deg, var(--accent), #00CCFF);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
+  color: var(--accent);
 }
 html[data-theme^="nex"] .step-title {
   font-family: var(--font-sans);
@@ -1234,8 +1232,8 @@ html[data-theme^="nex"] .sidebar-item-team i {
    ═══════════════════════════════════════ */
 html[data-theme^="nex"] .sidebar-checklist-float {
   background: color-mix(in srgb, var(--bg-warm) 85%, transparent);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
   border-top: 1px solid var(--border);
 }
 html[data-theme^="nex"] .sidebar-checklist-float .checklist-header {

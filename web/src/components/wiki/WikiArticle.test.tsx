@@ -233,9 +233,17 @@ describe("<WikiArticle>", () => {
       human_read_count: 0,
       days_unread: 0,
     });
-    render(<WikiArticle path="people/customer-x" catalog={[]} onNavigate={() => {}} />);
+    render(
+      <WikiArticle
+        path="people/customer-x"
+        catalog={[]}
+        onNavigate={() => {}}
+      />,
+    );
     await waitFor(() =>
-      expect(screen.getByRole("heading", { name: "Customer X" })).toBeInTheDocument(),
+      expect(
+        screen.getByRole("heading", { name: "Customer X" }),
+      ).toBeInTheDocument(),
     );
     expect(screen.getByText("agents only")).toBeInTheDocument();
   });
@@ -247,9 +255,17 @@ describe("<WikiArticle>", () => {
       human_read_count: 2,
       days_unread: 45,
     });
-    render(<WikiArticle path="people/customer-x" catalog={[]} onNavigate={() => {}} />);
+    render(
+      <WikiArticle
+        path="people/customer-x"
+        catalog={[]}
+        onNavigate={() => {}}
+      />,
+    );
     await waitFor(() =>
-      expect(screen.getByRole("heading", { name: "Customer X" })).toBeInTheDocument(),
+      expect(
+        screen.getByRole("heading", { name: "Customer X" }),
+      ).toBeInTheDocument(),
     );
     expect(screen.getByText("unread 30d+")).toBeInTheDocument();
   });
@@ -261,9 +277,17 @@ describe("<WikiArticle>", () => {
       human_read_count: 1,
       days_unread: 14,
     });
-    render(<WikiArticle path="people/customer-x" catalog={[]} onNavigate={() => {}} />);
+    render(
+      <WikiArticle
+        path="people/customer-x"
+        catalog={[]}
+        onNavigate={() => {}}
+      />,
+    );
     await waitFor(() =>
-      expect(screen.getByRole("heading", { name: "Customer X" })).toBeInTheDocument(),
+      expect(
+        screen.getByRole("heading", { name: "Customer X" }),
+      ).toBeInTheDocument(),
     );
     expect(screen.getByText("unread 7d+")).toBeInTheDocument();
   });
@@ -275,9 +299,17 @@ describe("<WikiArticle>", () => {
       human_read_count: 1,
       days_unread: 30,
     });
-    render(<WikiArticle path="people/customer-x" catalog={[]} onNavigate={() => {}} />);
+    render(
+      <WikiArticle
+        path="people/customer-x"
+        catalog={[]}
+        onNavigate={() => {}}
+      />,
+    );
     await waitFor(() =>
-      expect(screen.getByRole("heading", { name: "Customer X" })).toBeInTheDocument(),
+      expect(
+        screen.getByRole("heading", { name: "Customer X" }),
+      ).toBeInTheDocument(),
     );
     expect(screen.getByText("unread 30d+")).toBeInTheDocument();
     expect(screen.queryByText("unread 7d+")).not.toBeInTheDocument();
@@ -305,9 +337,17 @@ describe("<WikiArticle>", () => {
       human_read_count: 1,
       days_unread: 31,
     });
-    render(<WikiArticle path="people/customer-x" catalog={[]} onNavigate={() => {}} />);
+    render(
+      <WikiArticle
+        path="people/customer-x"
+        catalog={[]}
+        onNavigate={() => {}}
+      />,
+    );
     await waitFor(() =>
-      expect(screen.getByRole("heading", { name: "Customer X" })).toBeInTheDocument(),
+      expect(
+        screen.getByRole("heading", { name: "Customer X" }),
+      ).toBeInTheDocument(),
     );
     expect(screen.getByText("unread 30d+")).toBeInTheDocument();
     expect(screen.queryByText("unread 7d+")).not.toBeInTheDocument();
@@ -320,9 +360,17 @@ describe("<WikiArticle>", () => {
       human_read_count: 1,
       days_unread: 7,
     });
-    render(<WikiArticle path="people/customer-x" catalog={[]} onNavigate={() => {}} />);
+    render(
+      <WikiArticle
+        path="people/customer-x"
+        catalog={[]}
+        onNavigate={() => {}}
+      />,
+    );
     await waitFor(() =>
-      expect(screen.getByRole("heading", { name: "Customer X" })).toBeInTheDocument(),
+      expect(
+        screen.getByRole("heading", { name: "Customer X" }),
+      ).toBeInTheDocument(),
     );
     expect(screen.getByText("unread 7d+")).toBeInTheDocument();
     expect(screen.queryByText("unread 30d+")).not.toBeInTheDocument();
@@ -335,9 +383,17 @@ describe("<WikiArticle>", () => {
       human_read_count: 2,
       days_unread: 3,
     });
-    render(<WikiArticle path="people/customer-x" catalog={[]} onNavigate={() => {}} />);
+    render(
+      <WikiArticle
+        path="people/customer-x"
+        catalog={[]}
+        onNavigate={() => {}}
+      />,
+    );
     await waitFor(() =>
-      expect(screen.getByRole("heading", { name: "Customer X" })).toBeInTheDocument(),
+      expect(
+        screen.getByRole("heading", { name: "Customer X" }),
+      ).toBeInTheDocument(),
     );
     expect(screen.queryByText("agents only")).not.toBeInTheDocument();
     expect(screen.queryByText("unread 30d+")).not.toBeInTheDocument();

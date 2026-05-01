@@ -18,7 +18,9 @@
       "!playwright-report",
       "!test-results",
       "!**/*.gen.ts",
-      "!**/*.gen.tsx"
+      "!**/*.gen.tsx",
+      "!**/*.generated.ts",
+      "!**/*.generated.tsx"
     ]
   },
   "formatter": {
