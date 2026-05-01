@@ -429,3 +429,227 @@ func TestSkillPatchEndpoint_ConflictOnMultipleMatches(t *testing.T) {
 		t.Errorf("status: got %d, want 409", resp.StatusCode)
 	}
 }
+
+// setSkillStatus is a tiny helper that flips the in-memory status of a seeded
+// skill so the lifecycle tests can drive transitions without round-tripping
+// through other handlers.
+func setSkillStatus(t *testing.T, b *Broker, name, status string) {
+	t.Helper()
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for i := range b.skills {
+		if skillSlug(b.skills[i].Name) == skillSlug(name) {
+			b.skills[i].Status = status
+			return
+		}
+	}
+	t.Fatalf("setSkillStatus: skill %q not found", name)
+}
+
+// TestSkillDisableEnableRoundTrip covers the active → disabled → active
+// lifecycle. /skills/{name}/disable and /enable were 404'd before this fix
+// because only /archive was wired in handleSkillsCRUDSubpath.
+func TestSkillDisableEnableRoundTrip(t *testing.T) {
+	t.Parallel()
+	_, b, do := crudTestServer(t)
+	seedProposedSkill(t, b, "round-trip")
+	setSkillStatus(t, b, "round-trip", "active")
+
+	// Disable.
+	resp, body := do(http.MethodPost, "/skills/round-trip/disable", map[string]any{})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("disable: status %d, body %s", resp.StatusCode, body)
+	}
+	var disabled struct {
+		Skill teamSkill `json:"skill"`
+	}
+	if err := json.Unmarshal(body, &disabled); err != nil {
+		t.Fatalf("disable unmarshal: %v", err)
+	}
+	if disabled.Skill.Status != "disabled" {
+		t.Errorf("disable status: got %q, want disabled", disabled.Skill.Status)
+	}
+
+	// Confirm GET /skills?include_disabled=true surfaces the disabled skill.
+	resp, body = do(http.MethodGet, "/skills?include_disabled=true", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("list: status %d, body %s", resp.StatusCode, body)
+	}
+	var list struct {
+		Skills []teamSkill `json:"skills"`
+	}
+	if err := json.Unmarshal(body, &list); err != nil {
+		t.Fatalf("list unmarshal: %v", err)
+	}
+	found := false
+	for _, s := range list.Skills {
+		if skillSlug(s.Name) == "round-trip" {
+			found = true
+			if s.Status != "disabled" {
+				t.Errorf("listed status: got %q, want disabled", s.Status)
+			}
+		}
+	}
+	if !found {
+		t.Error("disabled skill missing from /skills response")
+	}
+
+	// Enable.
+	resp, body = do(http.MethodPost, "/skills/round-trip/enable", map[string]any{})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("enable: status %d, body %s", resp.StatusCode, body)
+	}
+	var enabled struct {
+		Skill teamSkill `json:"skill"`
+	}
+	if err := json.Unmarshal(body, &enabled); err != nil {
+		t.Fatalf("enable unmarshal: %v", err)
+	}
+	if enabled.Skill.Status != "active" {
+		t.Errorf("enable status: got %q, want active", enabled.Skill.Status)
+	}
+}
+
+// TestSkillRestoreFromArchive covers the archive → restore round trip and
+// asserts the skill is visible again in the default /skills listing.
+func TestSkillRestoreFromArchive(t *testing.T) {
+	t.Parallel()
+	_, b, do := crudTestServer(t)
+	seedProposedSkill(t, b, "restore-me")
+	setSkillStatus(t, b, "restore-me", "active")
+
+	// Archive.
+	resp, body := do(http.MethodPost, "/skills/restore-me/archive", map[string]any{})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("archive: status %d, body %s", resp.StatusCode, body)
+	}
+
+	// Default list must hide it.
+	resp, body = do(http.MethodGet, "/skills", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("list pre-restore: status %d, body %s", resp.StatusCode, body)
+	}
+	var preList struct {
+		Skills []teamSkill `json:"skills"`
+	}
+	if err := json.Unmarshal(body, &preList); err != nil {
+		t.Fatalf("pre-list unmarshal: %v", err)
+	}
+	for _, s := range preList.Skills {
+		if skillSlug(s.Name) == "restore-me" {
+			t.Errorf("archived skill should not appear in default list: status=%q", s.Status)
+		}
+	}
+
+	// Restore.
+	resp, body = do(http.MethodPost, "/skills/restore-me/restore", map[string]any{})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("restore: status %d, body %s", resp.StatusCode, body)
+	}
+	var restored struct {
+		Skill teamSkill `json:"skill"`
+	}
+	if err := json.Unmarshal(body, &restored); err != nil {
+		t.Fatalf("restore unmarshal: %v", err)
+	}
+	if restored.Skill.Status != "active" {
+		t.Errorf("restore status: got %q, want active", restored.Skill.Status)
+	}
+
+	// Default list must show it again.
+	resp, body = do(http.MethodGet, "/skills", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("list post-restore: status %d, body %s", resp.StatusCode, body)
+	}
+	var postList struct {
+		Skills []teamSkill `json:"skills"`
+	}
+	if err := json.Unmarshal(body, &postList); err != nil {
+		t.Fatalf("post-list unmarshal: %v", err)
+	}
+	found := false
+	for _, s := range postList.Skills {
+		if skillSlug(s.Name) == "restore-me" {
+			found = true
+			if s.Status != "active" {
+				t.Errorf("restored listing status: got %q, want active", s.Status)
+			}
+		}
+	}
+	if !found {
+		t.Error("restored skill missing from default /skills listing")
+	}
+}
+
+// TestSkillDisableInvalidTransitions enforces the status invariants:
+// - disable requires active or proposed
+// - enable requires disabled
+// - restore requires archived
+func TestSkillDisableInvalidTransitions(t *testing.T) {
+	t.Parallel()
+	_, b, do := crudTestServer(t)
+
+	// Disabling an archived skill → 409.
+	seedProposedSkill(t, b, "already-archived")
+	setSkillStatus(t, b, "already-archived", "archived")
+	resp, _ := do(http.MethodPost, "/skills/already-archived/disable", map[string]any{})
+	// Note: archived skills are also hidden by findSkillByNameLocked, so the
+	// caller sees 404 before the status check. Either response (404 or 409)
+	// signals the invalid transition; assert non-2xx.
+	if resp.StatusCode == http.StatusOK {
+		t.Errorf("disabling archived skill should fail; got 200")
+	}
+
+	// Enabling an active skill → 409.
+	seedProposedSkill(t, b, "already-active")
+	setSkillStatus(t, b, "already-active", "active")
+	resp, body := do(http.MethodPost, "/skills/already-active/enable", map[string]any{})
+	if resp.StatusCode != http.StatusConflict {
+		t.Errorf("enable on active: status %d, want 409 — body=%s", resp.StatusCode, body)
+	}
+
+	// Restoring a non-archived skill → 409. The lookup uses the archive-aware
+	// helper so the skill is reachable and the status check fires.
+	seedProposedSkill(t, b, "still-proposed")
+	resp, body = do(http.MethodPost, "/skills/still-proposed/restore", map[string]any{})
+	if resp.StatusCode != http.StatusConflict {
+		t.Errorf("restore on proposed: status %d, want 409 — body=%s", resp.StatusCode, body)
+	}
+}
+
+// TestSkillEndpointsMethodAndPath covers method/path edge cases on the new
+// verbs: GET → 405, missing skill → 404.
+func TestSkillEndpointsMethodAndPath(t *testing.T) {
+	t.Parallel()
+	_, _, do := crudTestServer(t)
+
+	// GET on disable → 405.
+	resp, _ := do(http.MethodGet, "/skills/anything/disable", nil)
+	if resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Errorf("GET /disable: status %d, want 405", resp.StatusCode)
+	}
+
+	// POST on a non-existent skill → 404.
+	resp, _ = do(http.MethodPost, "/skills/nonexistent/disable", map[string]any{})
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("POST /disable nonexistent: status %d, want 404", resp.StatusCode)
+	}
+
+	// Same expectations for enable + restore.
+	resp, _ = do(http.MethodGet, "/skills/anything/enable", nil)
+	if resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Errorf("GET /enable: status %d, want 405", resp.StatusCode)
+	}
+	resp, _ = do(http.MethodPost, "/skills/nonexistent/enable", map[string]any{})
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("POST /enable nonexistent: status %d, want 404", resp.StatusCode)
+	}
+	resp, _ = do(http.MethodGet, "/skills/anything/restore", nil)
+	if resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Errorf("GET /restore: status %d, want 405", resp.StatusCode)
+	}
+	resp, _ = do(http.MethodPost, "/skills/nonexistent/restore", map[string]any{})
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("POST /restore nonexistent: status %d, want 404", resp.StatusCode)
+	}
+}
