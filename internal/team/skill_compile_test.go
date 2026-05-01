@@ -8,6 +8,9 @@ package team
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -211,6 +214,119 @@ func TestSkillCompileEnv_DefaultsAndOverrides(t *testing.T) {
 			t.Fatalf("invalid budget should fall back: got %d", got)
 		}
 	})
+}
+
+// fixedSkillProvider is a stub llmProvider that classifies every article as
+// a skill with a deterministic frontmatter derived from the path. Used to
+// exercise Stage A's proposal write path without an LLM round-trip.
+type fixedSkillProvider struct{}
+
+func (p *fixedSkillProvider) AskIsSkill(_ context.Context, articlePath, _ string) (bool, SkillFrontmatter, string, error) {
+	base := strings.TrimSuffix(filepath.Base(articlePath), ".md")
+	fm := SkillFrontmatter{
+		Name:        base,
+		Description: "Auto-classified skill for " + base + ".",
+		Version:     "1.0.0",
+		License:     "MIT",
+	}
+	return true, fm, "## Steps\n\n1. Do the thing.\n", nil
+}
+
+// TestStageACompilerSetsSourceArticle asserts that Stage A scans thread the
+// wiki-relative article path through to the proposed skill's SourceArticle
+// field — both on the in-memory record and on the rendered SKILL.md
+// frontmatter (metadata.wuphf.source_articles[0]). The provenance chain
+// (notebook → wiki → skill) is what drift detection, the UI source link,
+// and read-based staleness all key off, so this regression test guards
+// against the field being silently dropped on the write path.
+func TestStageACompilerSetsSourceArticle(t *testing.T) {
+	// Build a real wiki repo and seed an article that the scanner will
+	// classify as a skill via the deterministic stub provider.
+	root := filepath.Join(t.TempDir(), "wiki")
+	backup := filepath.Join(t.TempDir(), "wiki.bak")
+	repo := NewRepoAt(root, backup)
+	if err := repo.Init(context.Background()); err != nil {
+		t.Fatalf("init repo: %v", err)
+	}
+
+	b := newTestBroker(t)
+	worker := NewWikiWorker(repo, b)
+	worker.Start(context.Background())
+	defer worker.Stop()
+	b.mu.Lock()
+	b.wikiWorker = worker
+	b.mu.Unlock()
+
+	// Seed a playbook article. Frontmatter not strictly required for this
+	// test (the stub provider returns is_skill=true regardless), but
+	// matching the agent-authored shape keeps the test scenario realistic.
+	articleRel := "team/playbooks/customer-refund.md"
+	body := "---\nname: customer-refund\ndescription: Issue a refund.\n---\n# Customer Refund\n\nbody\n"
+	if _, _, err := repo.Commit(context.Background(), "ceo", articleRel, body, "create", "seed playbook"); err != nil {
+		t.Fatalf("seed playbook: %v", err)
+	}
+
+	scanner := NewSkillScanner(b, &fixedSkillProvider{}, 10)
+	res, err := scanner.Scan(context.Background(), "", false, "manual")
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if res.Proposed == 0 {
+		t.Fatalf("expected at least one proposed skill, got %+v", res)
+	}
+
+	// In-memory proposal carries SourceArticle.
+	b.mu.Lock()
+	var found *teamSkill
+	for i := range b.skills {
+		if b.skills[i].Name == "customer-refund" {
+			found = &b.skills[i]
+			break
+		}
+	}
+	b.mu.Unlock()
+	if found == nil {
+		t.Fatalf("proposed skill customer-refund not found in broker.skills")
+	}
+	if found.SourceArticle != articleRel {
+		t.Fatalf("SourceArticle: got %q, want %q", found.SourceArticle, articleRel)
+	}
+
+	// On-disk SKILL.md surfaces it under metadata.wuphf.source_articles.
+	skillBytes, err := os.ReadFile(filepath.Join(root, "team/skills/customer-refund.md"))
+	if err != nil {
+		t.Fatalf("read SKILL.md: %v", err)
+	}
+	if !strings.Contains(string(skillBytes), "source_articles:") {
+		t.Fatalf("SKILL.md missing source_articles key: %q", string(skillBytes))
+	}
+	if !strings.Contains(string(skillBytes), articleRel) {
+		t.Fatalf("SKILL.md missing source article path %q: %q", articleRel, string(skillBytes))
+	}
+}
+
+// TestStageBSynthLeavesSourceArticleEmpty asserts that the Stage B synth
+// path — which is signal-derived rather than rooted in a specific wiki
+// page — does NOT set SourceArticle. Stage B's provenance lives in
+// metadata.wuphf.source_signals + the Signals body footer; coupling it to
+// a single source article would be incorrect.
+func TestStageBSynthLeavesSourceArticleEmpty(t *testing.T) {
+	fm := SkillFrontmatter{
+		Name:        "synth-skill",
+		Description: "A synthesized skill.",
+	}
+	cand := SkillCandidate{
+		Source:        SourceNotebookCluster,
+		SuggestedName: "synth-skill",
+		SignalCount:   2,
+		Excerpts: []SkillCandidateExcerpt{
+			{Path: "team/agents/eng/notebook/x.md", Snippet: "x", Author: "eng"},
+		},
+	}
+	spec := stageBCandToSpec(fm, "## Body\n", cand)
+	if spec.SourceArticle != "" {
+		t.Fatalf("Stage B spec.SourceArticle should be empty, got %q", spec.SourceArticle)
+	}
 }
 
 func TestParseSkillJSON_TolerantDecoder(t *testing.T) {

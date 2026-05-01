@@ -361,12 +361,19 @@ type schedulerJob struct {
 }
 
 type teamSkill struct {
-	ID                  string   `json:"id"`
-	Name                string   `json:"name"`
-	Title               string   `json:"title"`
-	Description         string   `json:"description,omitempty"`
-	Content             string   `json:"content"`
-	CreatedBy           string   `json:"created_by"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Title       string `json:"title"`
+	Description string `json:"description,omitempty"`
+	Content     string `json:"content"`
+	CreatedBy   string `json:"created_by"`
+	// SourceArticle is the wiki-relative path of the article that drove
+	// this skill (e.g. "team/playbooks/customer-refund.md"). Stage A
+	// (article-rooted) compiles populate it; Stage B (signal-derived)
+	// synthesised skills legitimately leave it empty. Surfaces as
+	// metadata.wuphf.source_articles[0] in the rendered SKILL.md and as
+	// source_article in the /skills JSON response.
+	SourceArticle       string   `json:"source_article,omitempty"`
 	Channel             string   `json:"channel,omitempty"`
 	Tags                []string `json:"tags,omitempty"`
 	Trigger             string   `json:"trigger,omitempty"`

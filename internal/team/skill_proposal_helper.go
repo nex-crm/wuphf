@@ -98,6 +98,7 @@ func (b *Broker) writeSkillProposalLocked(spec teamSkill) (*teamSkill, error) {
 		Description:         strings.TrimSpace(spec.Description),
 		Content:             strings.TrimSpace(spec.Content),
 		CreatedBy:           createdBy,
+		SourceArticle:       strings.TrimSpace(spec.SourceArticle),
 		Channel:             channel,
 		Tags:                append([]string(nil), spec.Tags...),
 		Trigger:             strings.TrimSpace(spec.Trigger),
