@@ -104,93 +104,98 @@ export default function FactsOnFile({ kind, slug }: FactsOnFileProps) {
       ) : (
         <>
           <ol className="wk-facts-items">
-            {visibleFacts.map((f) => (
-              <li
-                key={f.id}
-                className="wk-facts-item"
-                data-fact-type={f.type ?? "observation"}
-                data-superseded={isSuperseded(f) ? "true" : undefined}
-              >
-                <PixelAvatar slug={f.recorded_by} size={14} />
-                <div className="wk-facts-body">
-                  <span className="wk-facts-text">{f.text}</span>
-                  {f.triplet && (
-                    <span
-                      className="wk-facts-triplet"
-                      aria-label="Typed triplet"
-                    >
-                      <code>{f.triplet.subject}</code>
-                      {" — "}
-                      <code>{f.triplet.predicate}</code>
-                      {" → "}
-                      <code>{f.triplet.object}</code>
+            {visibleFacts.map((f) => {
+              const validity = formatValidity(f);
+              return (
+                <li
+                  key={f.id}
+                  className="wk-facts-item"
+                  data-fact-type={f.type ?? "observation"}
+                  data-superseded={isSuperseded(f) ? "true" : undefined}
+                >
+                  <PixelAvatar slug={f.recorded_by} size={14} />
+                  <div className="wk-facts-body">
+                    <span className="wk-facts-text">{f.text}</span>
+                    {f.triplet ? (
+                      <span
+                        className="wk-facts-triplet"
+                        aria-label="Typed triplet"
+                      >
+                        <code>{f.triplet.subject}</code>
+                        {" — "}
+                        <code>{f.triplet.predicate}</code>
+                        {" → "}
+                        <code>{f.triplet.object}</code>
+                      </span>
+                    ) : null}
+                    <span className="wk-facts-meta">
+                      {f.type ? (
+                        <span className="wk-facts-type">{f.type}</span>
+                      ) : null}
+                      {typeof f.confidence === "number" ? (
+                        <>
+                          {f.type ? " · " : null}
+                          <span
+                            className="wk-facts-confidence"
+                            aria-label={`Confidence ${(f.confidence * 100).toFixed(0)} percent`}
+                          >
+                            {f.confidence.toFixed(2)}
+                          </span>
+                        </>
+                      ) : null}
+                      {f.type || typeof f.confidence === "number"
+                        ? " · "
+                        : null}
+                      {formatAgentName(f.recorded_by)}
+                      {" · "}
+                      <time dateTime={f.created_at}>
+                        {formatShortTs(f.created_at)}
+                      </time>
+                      {validity ? (
+                        <>
+                          {" · "}
+                          <span className="wk-facts-validity">{validity}</span>
+                        </>
+                      ) : null}
+                      {f.reinforced_at ? (
+                        <>
+                          {" · "}
+                          <span
+                            className="wk-facts-reinforced"
+                            aria-label={`Reinforced ${formatShortTs(f.reinforced_at)}`}
+                          >
+                            reinforced {formatShortTs(f.reinforced_at)}
+                          </span>
+                        </>
+                      ) : null}
+                      {isWikiSource(f.source_path) ? (
+                        <>
+                          {" · "}
+                          <a
+                            className="wk-facts-source"
+                            href={`#/wiki/${f.source_path}`}
+                            data-wikilink="true"
+                          >
+                            {sourceLabel(f.source_path as string)}
+                          </a>
+                        </>
+                      ) : null}
+                      {f.supersedes && f.supersedes.length > 0 ? (
+                        <>
+                          {" · "}
+                          <span
+                            className="wk-facts-supersedes"
+                            aria-label={`Supersedes ${f.supersedes.length} prior fact${f.supersedes.length === 1 ? "" : "s"}`}
+                          >
+                            supersedes {f.supersedes.length} prior
+                          </span>
+                        </>
+                      ) : null}
                     </span>
-                  )}
-                  <span className="wk-facts-meta">
-                    {f.type && <span className="wk-facts-type">{f.type}</span>}
-                    {typeof f.confidence === "number" && (
-                      <>
-                        {f.type && " · "}
-                        <span
-                          className="wk-facts-confidence"
-                          aria-label={`Confidence ${(f.confidence * 100).toFixed(0)} percent`}
-                        >
-                          {f.confidence.toFixed(2)}
-                        </span>
-                      </>
-                    )}
-                    {(f.type || typeof f.confidence === "number") && " · "}
-                    {formatAgentName(f.recorded_by)}
-                    {" · "}
-                    <time dateTime={f.created_at}>
-                      {formatShortTs(f.created_at)}
-                    </time>
-                    {formatValidity(f) && (
-                      <>
-                        {" · "}
-                        <span className="wk-facts-validity">
-                          {formatValidity(f)}
-                        </span>
-                      </>
-                    )}
-                    {f.reinforced_at && (
-                      <>
-                        {" · "}
-                        <span
-                          className="wk-facts-reinforced"
-                          aria-label={`Reinforced ${formatShortTs(f.reinforced_at)}`}
-                        >
-                          reinforced {formatShortTs(f.reinforced_at)}
-                        </span>
-                      </>
-                    )}
-                    {isWikiSource(f.source_path) && (
-                      <>
-                        {" · "}
-                        <a
-                          className="wk-facts-source"
-                          href={`#/wiki/${f.source_path}`}
-                          data-wikilink="true"
-                        >
-                          {sourceLabel(f.source_path as string)}
-                        </a>
-                      </>
-                    )}
-                    {f.supersedes && f.supersedes.length > 0 && (
-                      <>
-                        {" · "}
-                        <span
-                          className="wk-facts-supersedes"
-                          aria-label={`Supersedes ${f.supersedes.length} prior fact${f.supersedes.length === 1 ? "" : "s"}`}
-                        >
-                          supersedes {f.supersedes.length} prior
-                        </span>
-                      </>
-                    )}
-                  </span>
-                </div>
-              </li>
-            ))}
+                  </div>
+                </li>
+              );
+            })}
           </ol>
           {facts.length > INITIAL_LIMIT && (
             <button
