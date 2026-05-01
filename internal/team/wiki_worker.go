@@ -1034,24 +1034,27 @@ func (b *Broker) handleWikiArticle(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 		return
 	}
-	// Demand-pull synthesis: when the article is a ghost brief and the
-	// synthesizer is in Demand mode, fire synthesis on first open if there
-	// are enough facts. SynthesisQueued is computed from the in-flight set —
-	// true means the caller should show a "generating..." indicator.
+	// Ghost brief handling: in Demand mode, fire synthesis on first open when
+	// facts meet the threshold. In both modes, always surface in-flight state
+	// so the "generating..." badge works regardless of how synthesis was triggered.
 	if meta.Ghost {
-		if synth := b.EntitySynthesizer(); synth != nil && synth.Mode() == SynthesisModeDemand {
+		if synth := b.EntitySynthesizer(); synth != nil {
 			// Derive kind and slug from "team/{kind}/{slug}.md".
 			parts := strings.SplitN(strings.TrimPrefix(relPath, "team/"), "/", 2)
 			if len(parts) == 2 {
 				kind := EntityKind(parts[0])
 				slug := strings.TrimSuffix(parts[1], ".md")
-				if factLog := b.FactLog(); factLog != nil {
-					if facts, _ := factLog.List(kind, slug); len(facts) >= synth.Threshold() {
-						if _, enqErr := synth.EnqueueSynthesis(kind, slug, ArchivistAuthor); enqErr != nil && !errors.Is(enqErr, ErrSynthesisQueueSaturated) && !errors.Is(enqErr, ErrSynthesizerStopped) {
-							log.Printf("wiki: demand-pull enqueue %s/%s: %v", kind, slug, enqErr)
+				if synth.Mode() == SynthesisModeDemand {
+					if factLog := b.FactLog(); factLog != nil {
+						if facts, _ := factLog.List(kind, slug); len(facts) >= synth.Threshold() {
+							if _, enqErr := synth.EnqueueSynthesis(kind, slug, ArchivistAuthor); enqErr != nil && !errors.Is(enqErr, ErrSynthesisQueueSaturated) && !errors.Is(enqErr, ErrSynthesizerStopped) {
+								log.Printf("wiki: demand-pull enqueue %s/%s: %v", kind, slug, enqErr)
+							}
 						}
 					}
 				}
+				// Always reflect in-flight state — auto-mode syntheses triggered at
+				// ingest also benefit from the badge.
 				meta.SynthesisQueued = synth.IsInflightOrQueued(kind, slug)
 			}
 		}

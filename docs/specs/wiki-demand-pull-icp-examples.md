@@ -24,7 +24,7 @@ No synthesis has run yet (demand mode: it never fires on ingest alone).
 
 **Step 1 — Alex opens the article (T=0)**
 
-```
+```go
 BuildArticle(ctx, "team/company/acme-corp.md", "web", readLog)
 ```
 
@@ -32,6 +32,7 @@ Broker detects `ghost: true`. Fact log has 11 entries ≥ `DefaultSynthesisThres
 (5). Calls `synth.EnqueueSynthesis("company", "acme-corp", ArchivistAuthor)`.
 
 Returns immediately with:
+
 ```json
 {
   "title": "Acme Corp",
@@ -56,11 +57,12 @@ removes the job from the in-flight coalescing set.
 
 **Step 3 — Alex reloads or the UI polls (T=~12s)**
 
-```
+```go
 BuildArticle(ctx, "team/company/acme-corp.md", "web", readLog)
 ```
 
 Broker reads the file. No `ghost: true` in frontmatter. Returns:
+
 ```json
 {
   "title": "Acme Corp",
@@ -91,11 +93,13 @@ with 8 facts in its fact log. The agent runs via `NEX_AGENT_SLUG=prep-qbr`.
 **Step 1 — Agent requests the article**
 
 MCP tool call → broker hits:
-```
+
+```go
 BuildArticle(ctx, "team/company/techflow-inc.md", "prep-qbr", readLog)
 ```
 
 8 facts ≥ threshold. Synthesis enqueued. Returns:
+
 ```json
 {
   "title": "TechFlow Inc",
@@ -114,11 +118,12 @@ in 15 seconds." (Agent-side behavior — not part of this PR.)
 
 **Step 2 — Agent re-requests after synthesis completes**
 
-```
+```go
 BuildArticle(ctx, "team/company/techflow-inc.md", "prep-qbr", readLog)
 ```
 
 Returns real brief:
+
 ```json
 {
   "title": "TechFlow Inc",
@@ -149,7 +154,7 @@ Fact log has 2 entries. `WUPHF_ENTITY_SYNTHESIS_MODE=demand` is set.
 
 **Step 1 — Script calls BuildArticle**
 
-```
+```go
 BuildArticle(ctx, "team/company/cloudvault-inc.md", "web", readLog)
 ```
 
