@@ -283,6 +283,21 @@ describe("<WikiArticle>", () => {
     expect(screen.queryByText("unread 7d+")).not.toBeInTheDocument();
   });
 
+  it("shows 'unread 30d+' badge at exact 30-day boundary", async () => {
+    vi.spyOn(api, "fetchArticle").mockResolvedValue({
+      ...STUB_ARTICLE,
+      agent_read_count: 0,
+      human_read_count: 1,
+      days_unread: 30,
+    });
+    render(<WikiArticle path="people/customer-x" catalog={[]} onNavigate={() => {}} />);
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Customer X" })).toBeInTheDocument(),
+    );
+    expect(screen.getByText("unread 30d+")).toBeInTheDocument();
+    expect(screen.queryByText("unread 7d+")).not.toBeInTheDocument();
+  });
+
   it("shows 'unread 30d+' badge for days_unread=31 (above stale threshold)", async () => {
     vi.spyOn(api, "fetchArticle").mockResolvedValue({
       ...STUB_ARTICLE,
