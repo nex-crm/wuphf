@@ -359,6 +359,76 @@ func TestStripPromotionFrontmatterForTarget(t *testing.T) {
 	}
 }
 
+func TestStripPromotionFrontmatterForTarget_FiltersPromotedKeys(t *testing.T) {
+	body := "---\n" +
+		"name: send-digest\n" +
+		"description: Send the daily digest.\n" +
+		"promoted_to: team/playbooks/old.md\n" +
+		"promoted_at: 2026-01-01T00:00:00Z\n" +
+		"promoted_by: builder\n" +
+		"promoted_commit_sha: abc123\n" +
+		"---\n" +
+		"# body\n"
+
+	got := stripPromotionFrontmatterForTarget(body, "team/skills/send-digest.md")
+
+	mustContain := []string{
+		"name: send-digest",
+		"description: Send the daily digest.",
+		"# body",
+	}
+	for _, want := range mustContain {
+		if !strings.Contains(got, want) {
+			t.Errorf("output missing %q\nfull output:\n%s", want, got)
+		}
+	}
+
+	mustNotContain := []string{
+		"promoted_to:",
+		"promoted_at:",
+		"promoted_by:",
+		"promoted_commit_sha:",
+	}
+	for _, banned := range mustNotContain {
+		if strings.Contains(got, banned) {
+			t.Errorf("output should not contain %q\nfull output:\n%s", banned, got)
+		}
+	}
+
+	// Frontmatter delimiters preserved.
+	if !strings.HasPrefix(got, "---\n") {
+		t.Errorf("output should start with frontmatter delimiter, got:\n%s", got)
+	}
+	if !strings.Contains(got, "\n---\n") {
+		t.Errorf("output should contain closing frontmatter delimiter, got:\n%s", got)
+	}
+}
+
+func TestStripPromotionKeys_HandlesIndentedAndCommentVariants(t *testing.T) {
+	yamlBlock := "name: x\n" +
+		"description: y\n" +
+		"  promoted_to: leading-space\n" +
+		"\tpromoted_at: leading-tab\n" +
+		"promoted_by: builder\n" +
+		"promoted_commit_sha: abc\n" +
+		"keep_me: still-here\n"
+
+	got := stripPromotionKeys(yamlBlock)
+
+	if strings.Contains(got, "promoted_to:") {
+		t.Errorf("indented promoted_to should be stripped, got:\n%s", got)
+	}
+	if strings.Contains(got, "promoted_at:") {
+		t.Errorf("tab-indented promoted_at should be stripped, got:\n%s", got)
+	}
+	if strings.Contains(got, "promoted_by:") || strings.Contains(got, "promoted_commit_sha:") {
+		t.Errorf("promoted_by/commit_sha should be stripped, got:\n%s", got)
+	}
+	if !strings.Contains(got, "name: x") || !strings.Contains(got, "description: y") || !strings.Contains(got, "keep_me: still-here") {
+		t.Errorf("non-promotion keys should be preserved, got:\n%s", got)
+	}
+}
+
 func TestStripFrontmatter(t *testing.T) {
 	cases := map[string]string{
 		"# hi\n":                       "# hi\n",

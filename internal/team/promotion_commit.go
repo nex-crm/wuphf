@@ -297,9 +297,35 @@ func stripPromotionFrontmatterForTarget(body, targetPath string) string {
 	if !frontmatterHasSkillKeys(yamlBlock) {
 		return stripFrontmatter(body)
 	}
-	// Preserve as-is. Returning body unchanged keeps the leading "---\n",
-	// the YAML block, the closing "\n---\n", and the body intact.
-	return body
+	// Preserve the skill frontmatter, but filter back-link keys that only
+	// belong on the source notebook. Without this, a re-promoted notebook
+	// inherits stale `promoted_to`/`promoted_at`/`promoted_by`/
+	// `promoted_commit_sha` values pointing back at the previous target.
+	cleaned := stripPromotionKeys(yamlBlock)
+	return "---\n" + cleaned + "\n---\n" + rest[idx+len("\n---\n"):]
+}
+
+// stripPromotionKeys removes the back-link metadata keys archivists stamp on
+// the source notebook after a promotion. Operates on the YAML text so it
+// preserves comments, key ordering, and any unknown keys downstream readers
+// rely on. Tolerates leading whitespace (YAML allows it) so an indented
+// `  promoted_to: x` is filtered too.
+func stripPromotionKeys(yamlBlock string) string {
+	lines := strings.Split(yamlBlock, "\n")
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(trimmed, "promoted_to:"),
+			strings.HasPrefix(trimmed, "promoted_at:"),
+			strings.HasPrefix(trimmed, "promoted_by:"),
+			strings.HasPrefix(trimmed, "promoted_commit_sha:"):
+			continue
+		default:
+			out = append(out, line)
+		}
+	}
+	return strings.Join(out, "\n")
 }
 
 // isSkillBearingTargetPath reports whether the wiki-relative target path
