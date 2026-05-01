@@ -106,7 +106,7 @@ type CatalogEntry struct {
 // be nil, in which case read stats are all zero and sort falls back to path order.
 //
 // Shape matches web/src/api/wiki.ts WikiCatalogEntry.
-func (r *Repo) BuildCatalog(ctx context.Context, sort_ string, readLog *ReadLog) ([]CatalogEntry, error) {
+func (r *Repo) BuildCatalog(ctx context.Context, sortBy string, readLog *ReadLog) ([]CatalogEntry, error) {
 	teamDir := r.TeamDir()
 	var entries []CatalogEntry
 
@@ -198,7 +198,7 @@ func (r *Repo) BuildCatalog(ctx context.Context, sort_ string, readLog *ReadLog)
 		}
 	}
 
-	if sort_ == "last_read" {
+	if sortBy == CatalogSortLastRead {
 		// Unread articles (nil LastRead) sort first; among read articles,
 		// oldest-accessed-first so the most stale content surfaces at top.
 		sort.Slice(entries, func(i, j int) bool {

@@ -876,6 +876,23 @@ func (b *Broker) handleWikiWrite(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// sanitizeReader validates a ?reader= query param before writing it to
+// reads.jsonl. Returns the original value when it is safe, or "" to suppress
+// tracking when it is not. Allowed: lowercase letters, digits, hyphens,
+// underscores, max 64 chars. The special value ReaderHuman ("web") passes.
+func sanitizeReader(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || len(raw) > 64 {
+		return ""
+	}
+	for _, ch := range raw {
+		if !((ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '-' || ch == '_') {
+			return ""
+		}
+	}
+	return raw
+}
+
 // handleWikiRead returns raw article bytes.
 //
 //	GET /wiki/read?path=team/people/nazz.md
@@ -901,7 +918,7 @@ func (b *Broker) handleWikiRead(w http.ResponseWriter, r *http.Request) {
 	}
 	// Track agent reads. The ?reader= param is set by the MCP layer using
 	// WUPHF_AGENT_SLUG. Human reads go through /wiki/article, not here.
-	if reader := strings.TrimSpace(r.URL.Query().Get("reader")); reader != "" {
+	if reader := sanitizeReader(r.URL.Query().Get("reader")); reader != "" {
 		b.readLog.Append(relPath, reader)
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -1006,7 +1023,7 @@ func (b *Broker) handleWikiArticle(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	reader := strings.TrimSpace(r.URL.Query().Get("reader"))
+	reader := sanitizeReader(r.URL.Query().Get("reader"))
 	meta, err := worker.Repo().BuildArticle(r.Context(), relPath, reader, b.readLog)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})

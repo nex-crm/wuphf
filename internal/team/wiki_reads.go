@@ -24,6 +24,14 @@ import (
 	"time"
 )
 
+// ReaderHuman is the reader identifier used when a human opens an article in
+// the web UI. Any other non-empty reader value is treated as an agent slug.
+const ReaderHuman = "web"
+
+// CatalogSortLastRead is the sort key accepted by BuildCatalog to sort
+// articles by access time, oldest-accessed first.
+const CatalogSortLastRead = "last_read"
+
 // ReadEvent is one access record written to reads.jsonl.
 type ReadEvent struct {
 	Path      string    `json:"path"`
@@ -46,8 +54,9 @@ type ReadStats struct {
 // ReadLog appends access events to reads.jsonl and answers stats queries.
 // It is safe to share across goroutines.
 type ReadLog struct {
-	path string // absolute path to reads.jsonl
-	mu   sync.Mutex
+	path       string // absolute path to reads.jsonl
+	mu         sync.Mutex
+	dirEnsured bool // set after first successful ensureDir to skip the mkdir syscall
 }
 
 // NewReadLog constructs a ReadLog whose backing file sits at
@@ -69,7 +78,7 @@ func (l *ReadLog) Append(relPath, reader string) {
 		Path:      relPath,
 		Timestamp: time.Now().UTC(),
 		Reader:    reader,
-		IsAgent:   reader != "web",
+		IsAgent:   reader != ReaderHuman,
 	}
 	line, err := json.Marshal(ev)
 	if err != nil {
@@ -78,9 +87,12 @@ func (l *ReadLog) Append(relPath, reader string) {
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if err := l.ensureDir(); err != nil {
-		log.Printf("wiki reads: ensureDir: %v", err)
-		return
+	if !l.dirEnsured {
+		if err := l.ensureDir(); err != nil {
+			log.Printf("wiki reads: ensureDir: %v", err)
+			return
+		}
+		l.dirEnsured = true
 	}
 	f, err := os.OpenFile(l.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
@@ -94,8 +106,9 @@ func (l *ReadLog) Append(relPath, reader string) {
 	}
 }
 
-// Stats returns access statistics for a single article path.
-// It scans reads.jsonl linearly; for bulk queries use AllStats.
+// Stats returns access statistics for a single article path by calling AllStats
+// (full file scan). For multiple paths, call AllStats directly to avoid repeated
+// scans.
 func (l *ReadLog) Stats(relPath string) ReadStats {
 	if l == nil {
 		return ReadStats{}
