@@ -297,6 +297,162 @@ func TestBuildCatalog_ExcludesInbox(t *testing.T) {
 	}
 }
 
+// BuildArticle with a readLog and non-empty reader records the read and populates stats.
+func TestBuildArticle_ReadTracking(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	root := t.TempDir()
+	backup := filepath.Join(t.TempDir(), "bak")
+	repo := NewRepoAt(root, backup)
+	ctx := context.Background()
+	if err := repo.Init(ctx); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	if _, _, err := repo.Commit(ctx, "ceo", "team/people/nazz.md", "# Nazz\n\nFounder.\n", "create", "add nazz"); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+
+	rl := NewReadLog(root)
+	meta, err := repo.BuildArticle(ctx, "team/people/nazz.md", "web", rl)
+	if err != nil {
+		t.Fatalf("BuildArticle: %v", err)
+	}
+
+	if meta.HumanReadCount != 1 {
+		t.Errorf("HumanReadCount: want 1, got %d", meta.HumanReadCount)
+	}
+	if meta.AgentReadCount != 0 {
+		t.Errorf("AgentReadCount: want 0, got %d", meta.AgentReadCount)
+	}
+	if meta.LastRead == nil {
+		t.Error("LastRead should be non-nil after human read")
+	}
+	if meta.DaysUnread != 0 {
+		t.Errorf("DaysUnread: want 0 for just-read article, got %d", meta.DaysUnread)
+	}
+}
+
+// BuildCatalog with a readLog joins read stats onto catalog entries.
+func TestBuildCatalog_ReadTracking(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	root := t.TempDir()
+	backup := filepath.Join(t.TempDir(), "bak")
+	repo := NewRepoAt(root, backup)
+	ctx := context.Background()
+	if err := repo.Init(ctx); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	articles := []struct{ slug, path, content string }{
+		{"ceo", "team/people/alice.md", "# Alice\n\nHello.\n"},
+		{"pm", "team/people/bob.md", "# Bob\n\nHi.\n"},
+	}
+	for _, a := range articles {
+		if _, _, err := repo.Commit(ctx, a.slug, a.path, a.content, "create", "add "+a.path); err != nil {
+			t.Fatalf("Commit %s: %v", a.path, err)
+		}
+	}
+
+	rl := NewReadLog(root)
+	// Alice read by a human and an agent; Bob never read.
+	rl.Append("team/people/alice.md", "web")
+	rl.Append("team/people/alice.md", "slack-agent")
+
+	entries, err := repo.BuildCatalog(ctx, "", rl)
+	if err != nil {
+		t.Fatalf("BuildCatalog: %v", err)
+	}
+
+	byPath := map[string]CatalogEntry{}
+	for _, e := range entries {
+		byPath[e.Path] = e
+	}
+
+	alice := byPath["team/people/alice.md"]
+	if alice.HumanReadCount != 1 {
+		t.Errorf("alice HumanReadCount: want 1, got %d", alice.HumanReadCount)
+	}
+	if alice.AgentReadCount != 1 {
+		t.Errorf("alice AgentReadCount: want 1, got %d", alice.AgentReadCount)
+	}
+	if alice.LastRead == nil {
+		t.Error("alice LastRead should be non-nil")
+	}
+
+	bob := byPath["team/people/bob.md"]
+	if bob.HumanReadCount != 0 || bob.AgentReadCount != 0 {
+		t.Errorf("bob counts: want 0/0, got %d/%d", bob.HumanReadCount, bob.AgentReadCount)
+	}
+	if bob.LastRead != nil {
+		t.Error("bob LastRead should be nil (never read)")
+	}
+}
+
+// BuildCatalog with sort=last_read puts unread articles first.
+func TestBuildCatalog_SortLastRead(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	root := t.TempDir()
+	backup := filepath.Join(t.TempDir(), "bak")
+	repo := NewRepoAt(root, backup)
+	ctx := context.Background()
+	if err := repo.Init(ctx); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	for _, slug := range []string{"alice", "bob"} {
+		path := "team/people/" + slug + ".md"
+		if _, _, err := repo.Commit(ctx, "ceo", path, "# "+slug+"\n", "create", "add "+path); err != nil {
+			t.Fatalf("Commit: %v", err)
+		}
+	}
+
+	rl := NewReadLog(root)
+	// Only alice has been read.
+	rl.Append("team/people/alice.md", "web")
+
+	entries, err := repo.BuildCatalog(ctx, "last_read", rl)
+	if err != nil {
+		t.Fatalf("BuildCatalog: %v", err)
+	}
+	if len(entries) < 2 {
+		t.Fatalf("expected 2 entries, got %d", len(entries))
+	}
+	// Bob (unread) must sort before alice (read).
+	if entries[0].Path != "team/people/bob.md" {
+		t.Errorf("sort=last_read: want unread article first, got %s", entries[0].Path)
+	}
+}
+
+// BuildArticle with nil readLog does not populate read stats (no panic).
+func TestBuildArticle_NilReadLog(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	root := t.TempDir()
+	backup := filepath.Join(t.TempDir(), "bak")
+	repo := NewRepoAt(root, backup)
+	ctx := context.Background()
+	if err := repo.Init(ctx); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	if _, _, err := repo.Commit(ctx, "ceo", "team/people/solo.md", "# Solo\n\nAlone.\n", "create", "add solo"); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+	meta, err := repo.BuildArticle(ctx, "team/people/solo.md", "web", nil)
+	if err != nil {
+		t.Fatalf("BuildArticle with nil readLog: %v", err)
+	}
+	if meta.HumanReadCount != 0 || meta.AgentReadCount != 0 {
+		t.Error("nil readLog should leave counts at zero")
+	}
+	if meta.LastRead != nil {
+		t.Error("nil readLog should leave LastRead nil")
+	}
+}
+
 // BuildArticle with no backlinks returns an empty slice (non-nil, JSON-friendly).
 func TestBuildArticle_NoBacklinks(t *testing.T) {
 	if testing.Short() {

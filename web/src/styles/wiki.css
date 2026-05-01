@@ -15,6 +15,8 @@
   --wk-wikilink:        var(--olive-500);
   --wk-wikilink-broken: var(--red);
   --wk-amber:           var(--olive-500);
+  --wk-amber-text:      #B8860B;  /* dark amber for readable text on light amber bg */
+  --wk-stale-text:      #B94040;  /* dark red for readable text on light red bg */
   --wk-amber-bg:        var(--olive-200);
   --wk-amber-banner:    var(--olive-100);
   --wk-code-bg:         var(--bg-warm);
@@ -2078,7 +2080,7 @@
 .wk-staleness-badge {
   display: inline-flex;
   align-items: center;
-  font-family: system-ui, sans-serif;
+  font-family: var(--wk-chrome);
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.04em;
@@ -2089,12 +2091,12 @@
 }
 .wk-staleness-aging {
   background: rgba(236, 178, 46, 0.15);
-  color: #B8860B;
+  color: var(--wk-amber-text);
   border: 1px solid rgba(236, 178, 46, 0.4);
 }
 .wk-staleness-stale {
   background: rgba(201, 74, 74, 0.12);
-  color: #B94040;
+  color: var(--wk-stale-text);
   border: 1px solid rgba(201, 74, 74, 0.35);
 }
 .wk-staleness-agents-only {

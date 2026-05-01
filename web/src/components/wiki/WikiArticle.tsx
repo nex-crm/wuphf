@@ -42,6 +42,9 @@ import TeamLearningPanel from "./TeamLearningPanel";
 import TocBox, { type TocEntry } from "./TocBox";
 import WikiEditor from "./WikiEditor";
 
+const STALENESS_STALE_DAYS = 30;
+const STALENESS_AGING_DAYS = 7;
+
 // StalenessIndicator shows a small badge when an article has not been accessed
 // by anyone (human or agent) in a while. "Agents only" signals an article
 // actively used for context but never opened by a human.
@@ -51,23 +54,35 @@ function StalenessIndicator({ article }: { article: WikiArticleT }) {
   const agent_read_count = article.agent_read_count ?? 0;
   if (agent_read_count > 0 && human_read_count === 0) {
     return (
-      <div className="wk-staleness-badge wk-staleness-agents-only">
+      <span
+        className="wk-staleness-badge wk-staleness-agents-only"
+        role="status"
+        aria-label="Article accessed by agents only — never opened by a human"
+      >
         agents only
-      </div>
+      </span>
     );
   }
-  if (days_unread > 30) {
+  if (days_unread > STALENESS_STALE_DAYS) {
     return (
-      <div className="wk-staleness-badge wk-staleness-stale">
+      <span
+        className="wk-staleness-badge wk-staleness-stale"
+        role="status"
+        aria-label={`Article not read in ${days_unread} days`}
+      >
         unread 30d+
-      </div>
+      </span>
     );
   }
-  if (days_unread > 7) {
+  if (days_unread > STALENESS_AGING_DAYS) {
     return (
-      <div className="wk-staleness-badge wk-staleness-aging">
+      <span
+        className="wk-staleness-badge wk-staleness-aging"
+        role="status"
+        aria-label={`Article not read in ${days_unread} days`}
+      >
         unread 7d+
-      </div>
+      </span>
     );
   }
   return null;
@@ -289,9 +304,9 @@ export default function WikiArticle({
             </span>
           ))}
         </div>
-        <StalenessIndicator article={article} />
         <ArticleTitle title={article.title} />
         {byline}
+        <StalenessIndicator article={article} />
         <Hatnote>
           This article is auto-generated from team activity. See the commit
           history for the full trail.

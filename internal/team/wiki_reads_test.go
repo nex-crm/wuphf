@@ -1,6 +1,7 @@
 package team
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"sync"
@@ -193,6 +194,28 @@ func TestReadLog_NilSafe(t *testing.T) {
 	all := rl.AllStats()
 	if len(all) != 0 {
 		t.Error("nil ReadLog AllStats should return empty map")
+	}
+}
+
+// TestReadLog_Stats_DaysUnread_Positive: backdated event produces DaysUnread > 0.
+func TestReadLog_Stats_DaysUnread_Positive(t *testing.T) {
+	rl := newTestReadLog(t)
+	path := "team/people/old.md"
+
+	// Write a backdated entry directly to the file (3 days ago).
+	if err := os.MkdirAll(filepath.Dir(rl.path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().UTC().Add(-72 * time.Hour)
+	ev := ReadEvent{Path: path, Timestamp: old, Reader: "web", IsAgent: false}
+	line, _ := json.Marshal(ev)
+	if err := os.WriteFile(rl.path, append(line, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	s := rl.Stats(path)
+	if s.DaysUnread < 2 {
+		t.Errorf("DaysUnread: want >=2 for 72h-old read, got %d", s.DaysUnread)
 	}
 }
 

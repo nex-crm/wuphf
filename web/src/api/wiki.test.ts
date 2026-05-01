@@ -67,6 +67,24 @@ describe("wiki api client", () => {
     );
   });
 
+  it("fetchArticle always includes reader=web in the request URL", async () => {
+    const article: api.WikiArticle = {
+      path: "team/people/nazz.md",
+      title: "Nazz",
+      content: "Hi",
+      last_edited_by: "pm",
+      last_edited_ts: new Date().toISOString(),
+      revisions: 1,
+      contributors: ["pm"],
+      backlinks: [],
+      word_count: 1,
+      categories: [],
+    };
+    const spy = vi.spyOn(client, "get").mockResolvedValue(article);
+    await api.fetchArticle("team/people/nazz.md");
+    expect(spy).toHaveBeenCalledWith(expect.stringContaining("reader=web"));
+  });
+
   it("fetchArticle passes through a full team/ path without fanning out", async () => {
     const article: api.WikiArticle = {
       path: "team/playbooks/pricing.md",
