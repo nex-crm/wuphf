@@ -57,7 +57,9 @@ describe("TaskStep", () => {
     const onApplyTaskTemplate = vi.fn();
     renderTask({ onApplyTaskTemplate });
 
-    fireEvent.click(screen.getByText("Email first customer"));
+    fireEvent.click(
+      screen.getByRole("button", { name: /Email first customer/i }),
+    );
     // 'first-customer' has a prompt set; that's what should fill the textarea.
     expect(onApplyTaskTemplate).toHaveBeenCalledWith(
       "first-customer",
@@ -68,7 +70,7 @@ describe("TaskStep", () => {
   it("falls back to template name when prompt is missing", () => {
     const onApplyTaskTemplate = vi.fn();
     renderTask({ onApplyTaskTemplate });
-    fireEvent.click(screen.getByText("Draft a plan"));
+    fireEvent.click(screen.getByRole("button", { name: /Draft a plan/i }));
     expect(onApplyTaskTemplate).toHaveBeenCalledWith(
       "draft-plan",
       "Draft a plan",
@@ -83,7 +85,7 @@ describe("TaskStep", () => {
       onSelectTaskTemplate,
       onChangeTaskText,
     });
-    fireEvent.click(screen.getByText("Draft a plan"));
+    fireEvent.click(screen.getByRole("button", { name: /Draft a plan/i }));
     expect(onSelectTaskTemplate).toHaveBeenCalledWith(null);
     // No refill on deselect — the user keeps whatever they typed.
     expect(onChangeTaskText).not.toHaveBeenCalled();
@@ -92,7 +94,7 @@ describe("TaskStep", () => {
   it("exposes the active suggestion via aria-pressed", () => {
     renderTask({ selectedTaskTemplate: "first-customer" });
     expect(
-      screen.getByText("Email first customer").closest("button"),
+      screen.getByRole("button", { name: /Email first customer/i }),
     ).toHaveAttribute("aria-pressed", "true");
   });
 
