@@ -66,9 +66,11 @@ export function Timeline({ events, emptyLabel, limit }: TimelineProps) {
           <div className="timeline-body">
             <div className="timeline-content">{truncate(ev.content, 220)}</div>
             <div className="timeline-meta">
-              {ev.timestamp && <span>{formatRelativeTime(ev.timestamp)}</span>}
-              {ev.actor && <span>@{ev.actor}</span>}
-              {ev.meta && <span>{ev.meta}</span>}
+              {ev.timestamp ? (
+                <span>{formatRelativeTime(ev.timestamp)}</span>
+              ) : null}
+              {ev.actor ? <span>@{ev.actor}</span> : null}
+              {ev.meta ? <span>{ev.meta}</span> : null}
             </div>
           </div>
         </div>
