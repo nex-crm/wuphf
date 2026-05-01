@@ -39,7 +39,9 @@ fi
 total_bytes=0
 shopt -s nullglob
 for f in "$dist_assets"/*.js; do
-  size=$(stat -f '%z' "$f" 2>/dev/null || stat -c '%s' "$f")
+  # `wc -c` is portable across BSD/macOS and GNU/Linux; `stat -f`/`-c`
+  # divergence between the two trips `set -u` inside `(( ))`.
+  size=$(wc -c < "$f" | tr -d '[:space:]')
   total_bytes=$(( total_bytes + size ))
 done
 
