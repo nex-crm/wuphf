@@ -307,6 +307,15 @@ export default function WikiArticle({
         <ArticleTitle title={article.title} />
         {byline}
         <StalenessIndicator article={article} />
+        {article.synthesis_queued && (
+          <span
+            className="wk-staleness-badge wk-synthesis-queued"
+            role="status"
+            aria-label="Brief is being generated from recent activity"
+          >
+            generating brief…
+          </span>
+        )}
         <Hatnote>
           This article is auto-generated from team activity. See the commit
           history for the full trail.

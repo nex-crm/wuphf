@@ -122,12 +122,27 @@ type EntityFactRecordedEvent struct {
 	Timestamp        string     `json:"timestamp"`
 }
 
+// SynthesisMode controls when the synthesizer fires LLM calls.
+type SynthesisMode int
+
+const (
+	// SynthesisModeAuto (default) fires synthesis automatically when fact
+	// count crosses the threshold at ingest time.
+	SynthesisModeAuto SynthesisMode = iota
+
+	// SynthesisModeDemand suppresses auto-synthesis at ingest. Synthesis fires
+	// the first time BuildArticle is called on a ghost brief with enough facts.
+	// Opt-in via WUPHF_ENTITY_SYNTHESIS_MODE=demand.
+	SynthesisModeDemand
+)
+
 // SynthesizerConfig is the tunable knobs for the worker. All fields are
 // optional; defaults match constants above.
 type SynthesizerConfig struct {
 	Provider  string
 	Threshold int
 	Timeout   time.Duration
+	Mode      SynthesisMode
 
 	// LLMCall is the pluggable shell-out used by tests. Production code
 	// leaves this nil and the worker falls back to provider.RunConfiguredOneShot.
@@ -268,6 +283,20 @@ func (s *EntitySynthesizer) EnqueueSynthesis(kind EntityKind, slug, requestBy st
 		s.mu.Unlock()
 		return 0, ErrSynthesisQueueSaturated
 	}
+}
+
+// Mode returns the synthesis mode from the config.
+func (s *EntitySynthesizer) Mode() SynthesisMode {
+	return s.cfg.Mode
+}
+
+// IsInflightOrQueued reports whether a synthesis job is currently running or
+// pending for the given entity. Used by BuildArticle to set SynthesisQueued.
+func (s *EntitySynthesizer) IsInflightOrQueued(kind EntityKind, slug string) bool {
+	key := entityKey(kind, slug)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.inflight[key] || s.queued[key]
 }
 
 // drain is the single synthesis worker goroutine. Runs exactly one job at

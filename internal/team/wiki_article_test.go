@@ -479,3 +479,96 @@ func TestBuildArticle_NoBacklinks(t *testing.T) {
 		t.Errorf("Backlinks len = %d, want 0", len(meta.Backlinks))
 	}
 }
+
+// TestBuildArticle_Ghost covers ICP Example 3 (below-threshold ghost):
+// a ghost brief returns Ghost=true, SynthesisQueued is not set by BuildArticle.
+func TestBuildArticle_Ghost(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	root := t.TempDir()
+	backup := filepath.Join(t.TempDir(), "bak")
+	repo := NewRepoAt(root, backup)
+	ctx := context.Background()
+	if err := repo.Init(ctx); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	ghostContent := "---\nslug: acme-corp\nkind: company\nghost: true\ncreated_at: 2026-05-01T00:00:00Z\n---\n\n# Acme Corp\n\n## Signals\n\n_No facts synthesized yet._\n"
+	if _, _, err := repo.Commit(ctx, "archivist", "team/company/acme-corp.md", ghostContent, "create", "ghost brief"); err != nil {
+		t.Fatalf("Commit ghost: %v", err)
+	}
+
+	meta, err := repo.BuildArticle(ctx, "team/company/acme-corp.md", "", nil)
+	if err != nil {
+		t.Fatalf("BuildArticle: %v", err)
+	}
+	if !meta.Ghost {
+		t.Error("Ghost = false, want true")
+	}
+	// BuildArticle itself never sets SynthesisQueued — the handler does.
+	if meta.SynthesisQueued {
+		t.Error("SynthesisQueued = true, want false (set by handler, not BuildArticle)")
+	}
+}
+
+// TestBuildArticle_NonGhost verifies Ghost=false for a regular synthesized brief.
+func TestBuildArticle_NonGhost(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	root := t.TempDir()
+	backup := filepath.Join(t.TempDir(), "bak")
+	repo := NewRepoAt(root, backup)
+	ctx := context.Background()
+	if err := repo.Init(ctx); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	realContent := "---\nslug: acme-corp\nkind: company\nlast_synthesized_sha: abc1234\n---\n\n# Acme Corp\n\nReal brief.\n"
+	if _, _, err := repo.Commit(ctx, "archivist", "team/company/acme-corp.md", realContent, "create", "real brief"); err != nil {
+		t.Fatalf("Commit real: %v", err)
+	}
+
+	meta, err := repo.BuildArticle(ctx, "team/company/acme-corp.md", "", nil)
+	if err != nil {
+		t.Fatalf("BuildArticle: %v", err)
+	}
+	if meta.Ghost {
+		t.Error("Ghost = true, want false for synthesized brief")
+	}
+}
+
+// TestParseGhostFrontmatter covers the ghost field parser.
+func TestParseGhostFrontmatter(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  bool
+	}{
+		{"ghost true", "---\nslug: x\nghost: true\n---\n\n# X\n", true},
+		{"ghost false explicit", "---\nslug: x\nghost: false\n---\n\n# X\n", false},
+		{"no ghost key", "---\nslug: x\n---\n\n# X\n", false},
+		{"no frontmatter", "# X\n\nNo frontmatter.", false},
+		{"malformed frontmatter", "---\nno closing fence\n# X\n", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := parseGhostFrontmatter(tc.input); got != tc.want {
+				t.Errorf("parseGhostFrontmatter: got %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestResolveSynthesisModeFromEnv checks that the env var is read correctly.
+func TestResolveSynthesisModeFromEnv(t *testing.T) {
+	t.Setenv("WUPHF_ENTITY_SYNTHESIS_MODE", "demand")
+	if got := resolveSynthesisModeFromEnv(); got != SynthesisModeDemand {
+		t.Errorf("got %v, want SynthesisModeDemand", got)
+	}
+	t.Setenv("WUPHF_ENTITY_SYNTHESIS_MODE", "")
+	if got := resolveSynthesisModeFromEnv(); got != SynthesisModeAuto {
+		t.Errorf("got %v, want SynthesisModeAuto", got)
+	}
+}

@@ -72,6 +72,13 @@ type ArticleMeta struct {
 	AgentReadCount int        `json:"agent_read_count"`
 	// DaysUnread is whole days since LastRead; 0 when accessed today or never.
 	DaysUnread int `json:"days_unread"`
+	// Ghost is true when the article's frontmatter contains ghost: true —
+	// a placeholder stub written by persistGhostBriefs, not yet LLM-synthesized.
+	Ghost bool `json:"ghost,omitempty"`
+	// SynthesisQueued is true when a synthesis job is in-flight or pending for
+	// this entity. Computed at serve time from the EntitySynthesizer coalescing
+	// set — never persisted. Only true when Ghost is also true.
+	SynthesisQueued bool `json:"synthesis_queued,omitempty"`
 }
 
 // Backlink represents another article that wikilinks to this article.
@@ -298,6 +305,7 @@ func (r *Repo) BuildArticle(ctx context.Context, relPath, reader string, readLog
 		Contributors: []string{},
 		Backlinks:    []Backlink{},
 		Categories:   []string{},
+		Ghost:        parseGhostFrontmatter(string(content)),
 	}
 
 	// Revision history and last-edit info (via git log).

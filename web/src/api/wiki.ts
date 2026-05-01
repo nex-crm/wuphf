@@ -32,6 +32,10 @@ export interface WikiArticle {
   agent_read_count?: number;
   /** Whole days since last_read; 0 if accessed today. */
   days_unread?: number;
+  /** True when the article is a ghost placeholder stub (frontmatter ghost: true). */
+  ghost?: boolean;
+  /** True when a synthesis job is in-flight for this ghost article. Show a "generating..." indicator. Never true when ghost is false. */
+  synthesis_queued?: boolean;
 }
 
 /**

@@ -371,4 +371,44 @@ describe("<WikiArticle>", () => {
     ).not.toBeInTheDocument();
     expect(screen.queryByText(/loading sources/i)).not.toBeInTheDocument();
   });
+
+  it("shows 'generating brief…' badge when synthesis_queued is true (ICP Example 1 & 2)", async () => {
+    vi.spyOn(api, "fetchArticle").mockResolvedValue({
+      ...STUB_ARTICLE,
+      ghost: true,
+      synthesis_queued: true,
+    });
+    render(<WikiArticle path="company/acme-corp" catalog={[]} onNavigate={() => {}} />);
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Customer X" })).toBeInTheDocument(),
+    );
+    expect(screen.getByText("generating brief…")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toBeInTheDocument();
+  });
+
+  it("shows no 'generating brief…' badge when synthesis_queued is false (ICP Example 3)", async () => {
+    vi.spyOn(api, "fetchArticle").mockResolvedValue({
+      ...STUB_ARTICLE,
+      ghost: true,
+      synthesis_queued: false,
+    });
+    render(<WikiArticle path="company/cloudvault-inc" catalog={[]} onNavigate={() => {}} />);
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Customer X" })).toBeInTheDocument(),
+    );
+    expect(screen.queryByText("generating brief…")).not.toBeInTheDocument();
+  });
+
+  it("shows no 'generating brief…' badge on a real (non-ghost) article", async () => {
+    vi.spyOn(api, "fetchArticle").mockResolvedValue({
+      ...STUB_ARTICLE,
+      ghost: false,
+      synthesis_queued: false,
+    });
+    render(<WikiArticle path="company/acme-corp" catalog={[]} onNavigate={() => {}} />);
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Customer X" })).toBeInTheDocument(),
+    );
+    expect(screen.queryByText("generating brief…")).not.toBeInTheDocument();
+  });
 });
