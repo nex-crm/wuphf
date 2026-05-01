@@ -170,6 +170,7 @@ func (b *Broker) ensureEntitySynthesizer() {
 	cfg := SynthesizerConfig{
 		Threshold: resolveThresholdFromEnv(),
 		Timeout:   resolveTimeoutFromEnv(),
+		Mode:      resolveSynthesisModeFromEnv(),
 		Graph:     graph,
 	}
 	synth := NewEntitySynthesizer(worker, factLog, b, cfg)
@@ -213,6 +214,13 @@ func resolveTimeoutFromEnv() time.Duration {
 		return DefaultSynthesisTimeout
 	}
 	return time.Duration(secs) * time.Second
+}
+
+func resolveSynthesisModeFromEnv() SynthesisMode {
+	if strings.TrimSpace(os.Getenv("WUPHF_ENTITY_SYNTHESIS_MODE")) == "demand" {
+		return SynthesisModeDemand
+	}
+	return SynthesisModeAuto
 }
 
 // handleEntityFact is POST /entity/fact.
@@ -292,10 +300,11 @@ func (b *Broker) handleEntityFact(w http.ResponseWriter, r *http.Request) {
 	threshold := synth.Threshold()
 	thresholdCrossed := newSinceSynth >= threshold
 
-	// If either new facts since last synth crosses threshold OR there's
-	// never been a synthesis (priorCount == 0 && we have >=threshold facts),
-	// enqueue automatically.
-	if thresholdCrossed {
+	// In Auto mode: enqueue synthesis when the threshold is crossed.
+	// In Demand mode: synthesis fires on first BuildArticle call for the ghost brief,
+	// not here, so the LLM call is only triggered when a human or agent actually
+	// opens the article.
+	if thresholdCrossed && synth.Mode() == SynthesisModeAuto {
 		if _, enqueueErr := synth.EnqueueSynthesis(kind, slug, ArchivistAuthor); enqueueErr != nil && !errors.Is(enqueueErr, ErrSynthesisQueueSaturated) {
 			// Coalesced requests return (0, nil); saturation is a soft error.
 			// Every other error is a bug — log so ops can see it without

@@ -22,6 +22,30 @@ var (
 
 var frontmatterKeyLine = regexp.MustCompile(`(?m)^([a-zA-Z0-9_]+):\s*(.*)$`)
 
+// parseGhostFrontmatter reports whether the brief's frontmatter contains
+// ghost: true. Returns false for non-ghost briefs and files without frontmatter.
+func parseGhostFrontmatter(brief string) bool {
+	if !strings.HasPrefix(brief, "---\n") {
+		return false
+	}
+	rest := brief[len("---\n"):]
+	end := strings.Index(rest, "\n---")
+	if end < 0 {
+		return false
+	}
+	block := rest[:end]
+	for _, line := range strings.Split(block, "\n") {
+		m := frontmatterKeyLine.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+		if m[1] == "ghost" && strings.TrimSpace(m[2]) == "true" {
+			return true
+		}
+	}
+	return false
+}
+
 // parseSynthesisFrontmatter extracts the three synthesis keys from the
 // existing brief. Missing keys yield zero values. Other keys are
 // ignored — preservedFrontmatterKeys handles non-synthesis keys.
