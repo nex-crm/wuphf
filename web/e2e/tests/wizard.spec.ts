@@ -282,7 +282,10 @@ test.describe("wuphf onboarding wizard smoke", () => {
     await page.locator(".wizard-step button.btn-primary").first().click();
 
     await expect(page.locator("#wiz-task-input")).toBeVisible();
-    await page.locator("#wiz-task-input").fill("Draft the launch plan");
+    await page.getByRole("button", { name: /Draft launch plan/i }).click();
+    await expect(page.locator("#wiz-task-input")).toHaveValue(
+      "Draft a launch plan for the first customer loop.",
+    );
     await page.locator(".wizard-step button.btn-primary").first().click();
 
     await expect(page.getByText("You're set")).toBeVisible();
@@ -309,12 +312,50 @@ test.describe("wuphf onboarding wizard smoke", () => {
       runtime_priority: ["Claude Code"],
       memory_backend: "markdown",
       blueprint: "niche-crm",
-      task: "Draft the launch plan",
+      task: "Draft a launch plan for the first customer loop.",
       skip_task: false,
     });
-    expect(captures.complete.agents).toEqual(
-      expect.arrayContaining(["ceo", "gtm-lead", "designer"]),
-    );
+    expect(captures.complete.agents).toEqual(["ceo", "gtm-lead", "designer"]);
     await expectNoReactErrors(page, getErrors, "completing all wizard steps");
+  });
+
+  test("switching from a blueprint to from-scratch clears suggested task text", async ({
+    page,
+  }) => {
+    const captures = { config: null, complete: null };
+    await stubDeterministicWizardEndpoints(page, captures);
+
+    await page.goto("/");
+    await waitForReactMount(page);
+    await advanceToTemplatesStep(page);
+
+    await page
+      .locator(".template-card")
+      .filter({ hasText: "Niche CRM" })
+      .first()
+      .click();
+    await page.locator(".wizard-step button.btn-primary").first().click();
+    await page.locator(".wizard-step button.btn-primary").first().click();
+    await page.locator(".wizard-step button.btn-primary").first().click();
+
+    await page.getByRole("button", { name: /Draft launch plan/i }).click();
+    await expect(page.locator("#wiz-task-input")).toHaveValue(
+      "Draft a launch plan for the first customer loop.",
+    );
+
+    await page.getByRole("button", { name: "Back" }).click();
+    await page.getByRole("button", { name: "Back" }).click();
+    await page.getByRole("button", { name: "Back" }).click();
+    await expect(page.getByText("What should your office run?")).toBeVisible();
+
+    await page.getByRole("button", { name: /Start from scratch/i }).click();
+    await page.locator(".wizard-step button.btn-primary").first().click();
+    await page.locator(".wizard-step button.btn-primary").first().click();
+    await page.locator(".wizard-step button.btn-primary").first().click();
+
+    await expect(page.locator("#wiz-task-input")).toHaveValue("");
+    await expect(
+      page.getByRole("button", { name: /Draft launch plan/i }),
+    ).toHaveCount(0);
   });
 });

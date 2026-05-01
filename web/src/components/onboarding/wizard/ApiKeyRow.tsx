@@ -36,6 +36,7 @@ export function ApiKeyRow({ field, value, onChange }: ApiKeyRowProps) {
               setShowInput(false);
               if (value) onChange("");
             }}
+            aria-pressed={!useApiKey}
             data-testid={`api-key-cli-${field.key}`}
             style={{ padding: "6px 10px", fontSize: 12, minWidth: 0 }}
           >
@@ -45,6 +46,7 @@ export function ApiKeyRow({ field, value, onChange }: ApiKeyRowProps) {
             type="button"
             className={`runtime-tile ${useApiKey ? "selected" : ""}`}
             onClick={() => setShowInput(true)}
+            aria-pressed={useApiKey}
             data-testid={`api-key-paste-${field.key}`}
             style={{ padding: "6px 10px", fontSize: 12, minWidth: 0 }}
           >
@@ -64,7 +66,7 @@ export function ApiKeyRow({ field, value, onChange }: ApiKeyRowProps) {
             the session automatically.
           </p>
         )}
-        {useApiKey && (
+        {useApiKey ? (
           <input
             className="input"
             type="password"
@@ -74,7 +76,7 @@ export function ApiKeyRow({ field, value, onChange }: ApiKeyRowProps) {
             autoComplete="off"
             data-testid={`api-key-input-${field.key}`}
           />
-        )}
+        ) : null}
       </div>
     </div>
   );

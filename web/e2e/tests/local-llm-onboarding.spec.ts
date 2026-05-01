@@ -299,11 +299,23 @@ test.describe("Onboarding → Run a local model", () => {
     });
     await mlxRow.getByRole("button", { name: /Remove MLX-LM/i }).click();
 
-    // Picker tile is no longer pressed AND the row is gone.
-    await expect(mlxTile).toHaveAttribute("aria-pressed", "false");
+    // The parent cleared localProvider, so the meta-tile closes the picker and
+    // the row is gone.
+    await expect(
+      page.getByTestId("onboarding-local-llm-toggle"),
+    ).toHaveAttribute("aria-pressed", "false");
+    await expect(page.getByTestId("onboarding-local-llm-picker")).toHaveCount(
+      0,
+    );
     await expect(
       page.locator(".runtime-priority-row-label").filter({ hasText: "MLX-LM" }),
     ).toHaveCount(0);
+
+    // Re-opening proves the selection is cleared, not just hidden.
+    await page.getByTestId("onboarding-local-llm-toggle").click();
+    await expect(
+      page.getByTestId("onboarding-local-llm-tile-mlx-lm"),
+    ).toHaveAttribute("aria-pressed", "false");
   });
 
   test("status fetch failure: fall-open so the picker isn't deadlocked", async ({

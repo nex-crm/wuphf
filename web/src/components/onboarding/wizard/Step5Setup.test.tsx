@@ -1,6 +1,10 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
+vi.mock("../../../api/client", () => ({
+  getLocalProvidersStatus: vi.fn().mockResolvedValue([]),
+}));
+
 import { SetupStep } from "./Step5Setup";
 import type { MemoryBackend, PrereqResult } from "./types";
 
@@ -15,33 +19,59 @@ interface Overrides {
   gbrainOpenAIKey?: string;
   gbrainAnthropicKey?: string;
   localProvider?: string;
+  onSelectLocalProvider?: (kind: string) => void;
+}
+
+function setupProps(overrides: Overrides = {}) {
+  const {
+    prereqs = [],
+    prereqsLoading = false,
+    prereqsError = "",
+    runtimePriority = [],
+    apiKeys = {},
+    memoryBackend = "markdown",
+    nexApiKey = "",
+    gbrainOpenAIKey = "",
+    gbrainAnthropicKey = "",
+    localProvider = "",
+    onSelectLocalProvider = () => {},
+  } = overrides;
+  return {
+    prereqStatus: {
+      items: prereqs,
+      loading: prereqsLoading,
+      error: prereqsError,
+    },
+    runtimeSelection: {
+      priority: runtimePriority,
+      onToggle: () => {},
+      onReorder: () => {},
+    },
+    apiKeyState: {
+      values: apiKeys,
+      onChange: () => {},
+    },
+    memoryState: {
+      backend: memoryBackend as MemoryBackend,
+      onChangeBackend: () => {},
+      nexApiKey,
+      onChangeNexApiKey: () => {},
+      gbrainOpenAIKey,
+      onChangeGBrainOpenAIKey: () => {},
+      gbrainAnthropicKey,
+      onChangeGBrainAnthropicKey: () => {},
+    },
+    localLLMState: {
+      provider: localProvider,
+      onSelectProvider: onSelectLocalProvider,
+    },
+    onNext: () => {},
+    onBack: () => {},
+  };
 }
 
 function renderSetup(overrides: Overrides = {}) {
-  const props = {
-    prereqs: [] as PrereqResult[],
-    prereqsLoading: false,
-    prereqsError: "",
-    runtimePriority: [] as string[],
-    onToggleRuntime: () => {},
-    onReorderRuntime: () => {},
-    apiKeys: {} as Record<string, string>,
-    onChangeApiKey: () => {},
-    memoryBackend: "markdown" as MemoryBackend,
-    onChangeMemoryBackend: () => {},
-    nexApiKey: "",
-    onChangeNexApiKey: () => {},
-    gbrainOpenAIKey: "",
-    onChangeGBrainOpenAIKey: () => {},
-    gbrainAnthropicKey: "",
-    onChangeGBrainAnthropicKey: () => {},
-    localProvider: "",
-    onSelectLocalProvider: () => {},
-    onNext: () => {},
-    onBack: () => {},
-    ...overrides,
-  };
-  return render(<SetupStep {...props} />);
+  return render(<SetupStep {...setupProps(overrides)} />);
 }
 
 // Step 5's CTA text is `ONBOARDING_COPY.step2_cta` ("Ready"). Match
@@ -61,6 +91,14 @@ describe("SetupStep — canContinue gate", () => {
       runtimePriority: ["Claude Code"],
     });
     expect(screen.getByRole("button", { name: ctaName })).toBeEnabled();
+  });
+
+  it("keeps providerless runtimes from satisfying the gate when prereqs fail", () => {
+    renderSetup({
+      prereqsError: "broker unavailable",
+      runtimePriority: ["Cursor"],
+    });
+    expect(screen.getByRole("button", { name: ctaName })).toBeDisabled();
   });
 
   it("enables Continue when any API key is non-empty", () => {
@@ -106,60 +144,30 @@ describe("SetupStep — surfaces", () => {
       screen.queryByTestId("wizard-nex-api-key-panel"),
     ).not.toBeInTheDocument();
 
-    rerender(
-      <SetupStep
-        prereqs={[]}
-        prereqsLoading={false}
-        prereqsError=""
-        runtimePriority={[]}
-        onToggleRuntime={() => {}}
-        onReorderRuntime={() => {}}
-        apiKeys={{}}
-        onChangeApiKey={() => {}}
-        memoryBackend="nex"
-        onChangeMemoryBackend={() => {}}
-        nexApiKey=""
-        onChangeNexApiKey={() => {}}
-        gbrainOpenAIKey=""
-        onChangeGBrainOpenAIKey={() => {}}
-        gbrainAnthropicKey=""
-        onChangeGBrainAnthropicKey={() => {}}
-        localProvider=""
-        onSelectLocalProvider={() => {}}
-        onNext={() => {}}
-        onBack={() => {}}
-      />,
-    );
+    rerender(<SetupStep {...setupProps({ memoryBackend: "nex" })} />);
     expect(screen.getByTestId("wizard-nex-api-key-panel")).toBeInTheDocument();
   });
 
   it("toggling the local-LLM tile off clears localProvider via callback", () => {
     const onSelectLocalProvider = vi.fn();
-    render(
-      <SetupStep
-        prereqs={[]}
-        prereqsLoading={false}
-        prereqsError=""
-        runtimePriority={[]}
-        onToggleRuntime={() => {}}
-        onReorderRuntime={() => {}}
-        apiKeys={{}}
-        onChangeApiKey={() => {}}
-        memoryBackend="markdown"
-        onChangeMemoryBackend={() => {}}
-        nexApiKey=""
-        onChangeNexApiKey={() => {}}
-        gbrainOpenAIKey=""
-        onChangeGBrainOpenAIKey={() => {}}
-        gbrainAnthropicKey=""
-        onChangeGBrainAnthropicKey={() => {}}
-        localProvider="ollama"
-        onSelectLocalProvider={onSelectLocalProvider}
-        onNext={() => {}}
-        onBack={() => {}}
-      />,
-    );
+    renderSetup({ localProvider: "ollama", onSelectLocalProvider });
     fireEvent.click(screen.getByTestId("onboarding-local-llm-toggle"));
     expect(onSelectLocalProvider).toHaveBeenCalledWith("");
+  });
+
+  it("closes local-LLM mode when parent state clears localProvider", () => {
+    const { rerender } = renderSetup({ localProvider: "ollama" });
+    expect(screen.getByTestId("onboarding-local-llm-toggle")).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+
+    rerender(<SetupStep {...setupProps({ localProvider: "" })} />);
+
+    expect(screen.getByTestId("onboarding-local-llm-toggle")).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+    expect(screen.queryByTestId("onboarding-local-llm-picker")).toBeNull();
   });
 });

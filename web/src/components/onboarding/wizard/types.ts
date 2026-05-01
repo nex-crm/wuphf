@@ -10,6 +10,7 @@ export interface BlueprintTemplate {
   description: string;
   emoji?: string;
   agents?: BlueprintAgent[];
+  tasks?: TaskTemplate[];
 }
 
 export interface BlueprintAgent {

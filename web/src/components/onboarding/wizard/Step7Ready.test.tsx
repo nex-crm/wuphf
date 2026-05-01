@@ -35,12 +35,17 @@ function renderReady(
 }
 
 describe("ReadyStep", () => {
-  it("renders one row per readiness check", () => {
-    renderReady();
-    for (const c of checks) {
-      expect(screen.getByText(c.label)).toBeInTheDocument();
-      expect(screen.getByText(c.detail)).toBeInTheDocument();
-    }
+  it("maps each readiness status to the expected row state", () => {
+    const { container } = renderReady();
+    expect(container.querySelector(".readiness-glyph.ready")).toHaveTextContent(
+      "✓",
+    );
+    expect(container.querySelector(".readiness-glyph.next")).toHaveTextContent(
+      "—",
+    );
+    expect(
+      container.querySelector(".readiness-glyph.missing"),
+    ).toHaveTextContent("!");
   });
 
   it("with non-empty taskText, the primary CTA fires onSubmit (not onSkip)", () => {
@@ -68,14 +73,16 @@ describe("ReadyStep", () => {
     expect(cta).toBeDisabled();
   });
 
-  it("surfaces submitError in an alert and switches CTA to 'Retry'", () => {
-    renderReady({ submitError: "broker offline" });
+  it("surfaces submitError and makes Retry submit the same task again", () => {
+    const onSubmit = vi.fn();
+    renderReady({ submitError: "broker offline", onSubmit });
     expect(screen.getByTestId("onboarding-submit-error")).toHaveTextContent(
       /broker offline/i,
     );
-    expect(screen.getByTestId("onboarding-submit-button")).toHaveTextContent(
-      /Retry/i,
-    );
+    const retry = screen.getByTestId("onboarding-submit-button");
+    expect(retry).toHaveTextContent(/Retry/i);
+    fireEvent.click(retry);
+    expect(onSubmit).toHaveBeenCalledTimes(1);
   });
 
   it("Back button fires onBack", () => {

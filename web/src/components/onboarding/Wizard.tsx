@@ -15,7 +15,11 @@ import {
   SCRATCH_FOUNDING_TEAM,
   STEP_ORDER,
 } from "./wizard/constants";
-import { detectedBinary, runtimeIsReady } from "./wizard/runtime-helpers";
+import {
+  canSetupContinue,
+  detectedBinary,
+  runtimeIsReady,
+} from "./wizard/runtime-helpers";
 import { WelcomeStep } from "./wizard/Step1Welcome";
 import { TemplatesStep } from "./wizard/Step2Templates";
 import { IdentityStep } from "./wizard/Step3Identity";
@@ -38,7 +42,6 @@ import type {
 // runtimeIsReady + detectedBinary moved to wizard/runtime-helpers.ts.
 // ArrowIcon, CheckIcon, EnterHint, ProgressDots moved to wizard/components.tsx.
 // Step components extracted to wizard/Step1Welcome.tsx through Step7Ready.tsx.
-// runtimeIsReady + detectedBinary moved to wizard/runtime-helpers.ts.
 /* ═══════════════════════════════════════════
    Main Wizard
    ═══════════════════════════════════════════ */
@@ -243,6 +246,16 @@ export function Wizard({ onComplete }: WizardProps) {
   // the task step showed ~26 tiles of unrelated work — including tasks from
   // blueprints the user never picked.
   useEffect(() => {
+    // Clear any task-template selection and suggestion-derived text when the
+    // blueprint changes. Without this, switching from (say) Consulting to
+    // YouTube Factory leaves "Turn the directive..." stuck in the textarea —
+    // nonsensical in the new context. User-typed custom text is preserved,
+    // since selectedTaskTemplate is null for that path.
+    setSelectedTaskTemplate((prevSel) => {
+      if (prevSel !== null) setTaskText("");
+      return null;
+    });
+
     if (selectedBlueprint === null) {
       // "Start from scratch" — preview the same 5-agent founding team the
       // broker seeds via scratchFoundingTeamBlueprint. Keep the slugs and
@@ -262,18 +275,8 @@ export function Wizard({ onComplete }: WizardProps) {
     } else {
       setAgents([]);
     }
-    const bpTasks = (bp as unknown as { tasks?: TaskTemplate[] } | undefined)
-      ?.tasks;
+    const bpTasks = bp?.tasks;
     setTaskTemplates(Array.isArray(bpTasks) ? bpTasks : []);
-    // Clear any task-template selection and suggestion-derived text when the
-    // blueprint changes. Without this, switching from (say) Consulting to
-    // YouTube Factory leaves "Turn the directive..." stuck in the textarea —
-    // nonsensical in the new context. User-typed custom text is preserved,
-    // since selectedTaskTemplate is null for that path.
-    setSelectedTaskTemplate((prevSel) => {
-      if (prevSel !== null) setTaskText("");
-      return null;
-    });
   }, [selectedBlueprint, blueprints]);
 
   // Navigation helpers
@@ -681,24 +684,15 @@ export function Wizard({ onComplete }: WizardProps) {
 
       const canIdentityContinue =
         company.trim().length > 0 && description.trim().length > 0;
-      const hasInstalledSelection = runtimePriority.some((label) =>
-        runtimeIsReady(label, prereqs, prereqsError),
-      );
-      const hasAnyApiKey = Object.values(apiKeys).some(
-        (v) => v.trim().length > 0,
-      );
-      // Keyboard gate must mirror SetupStep's own canContinue logic
-      // (line ~1176): a keyboard-only user who picks just `mlx-lm` /
-      // `ollama` / `exo` should be able to advance with Enter even
-      // though they didn't install a cloud CLI or paste an API key.
-      // Without this, the primary-CTA enabled state and the Enter
-      // gate disagreed — visually advanceable, keyboardly stuck.
-      const hasLocalProvider = localProvider.trim().length > 0;
-      const gbrainOpenAIMissing =
-        memoryBackend === "gbrain" && gbrainOpenAIKey.trim().length === 0;
-      const canSetupContinue =
-        (hasInstalledSelection || hasAnyApiKey || hasLocalProvider) &&
-        !gbrainOpenAIMissing;
+      const setupCanContinue = canSetupContinue({
+        runtimePriority,
+        prereqs,
+        prereqsError,
+        apiKeys,
+        localProvider,
+        memoryBackend,
+        gbrainOpenAIKey,
+      });
 
       switch (step) {
         case "welcome":
@@ -720,7 +714,7 @@ export function Wizard({ onComplete }: WizardProps) {
           nextStep();
           return;
         case "setup":
-          if (canSetupContinue) {
+          if (setupCanContinue) {
             e.preventDefault();
             nextStep();
           }
@@ -813,24 +807,34 @@ export function Wizard({ onComplete }: WizardProps) {
 
         {step === "setup" && (
           <SetupStep
-            prereqs={prereqs}
-            prereqsLoading={prereqsLoading}
-            prereqsError={prereqsError}
-            runtimePriority={runtimePriority}
-            onToggleRuntime={toggleRuntime}
-            onReorderRuntime={reorderRuntime}
-            apiKeys={apiKeys}
-            onChangeApiKey={handleApiKeyChange}
-            memoryBackend={memoryBackend}
-            onChangeMemoryBackend={setMemoryBackend}
-            nexApiKey={nexApiKey}
-            onChangeNexApiKey={setNexApiKey}
-            gbrainOpenAIKey={gbrainOpenAIKey}
-            onChangeGBrainOpenAIKey={setGbrainOpenAIKey}
-            gbrainAnthropicKey={gbrainAnthropicKey}
-            onChangeGBrainAnthropicKey={setGbrainAnthropicKey}
-            localProvider={localProvider}
-            onSelectLocalProvider={selectLocalProvider}
+            prereqStatus={{
+              items: prereqs,
+              loading: prereqsLoading,
+              error: prereqsError,
+            }}
+            runtimeSelection={{
+              priority: runtimePriority,
+              onToggle: toggleRuntime,
+              onReorder: reorderRuntime,
+            }}
+            apiKeyState={{
+              values: apiKeys,
+              onChange: handleApiKeyChange,
+            }}
+            memoryState={{
+              backend: memoryBackend,
+              onChangeBackend: setMemoryBackend,
+              nexApiKey,
+              onChangeNexApiKey: setNexApiKey,
+              gbrainOpenAIKey,
+              onChangeGBrainOpenAIKey: setGbrainOpenAIKey,
+              gbrainAnthropicKey,
+              onChangeGBrainAnthropicKey: setGbrainAnthropicKey,
+            }}
+            localLLMState={{
+              provider: localProvider,
+              onSelectProvider: selectLocalProvider,
+            }}
             onNext={nextStep}
             onBack={prevStep}
           />

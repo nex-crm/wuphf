@@ -90,15 +90,16 @@ test.describe("Wizard error states", () => {
 
     // 3. provider:null runtimes (Cursor, Windsurf) are still selectable
     //    BUT — and this is the regression guard — clicking one must
-    //    NOT satisfy the "install gate" alone. The Wizard's
-    //    hasInstalledSelection predicate now requires spec.provider !==
-    //    null under prereqsError, so a Cursor-only selection should
-    //    leave the primary CTA disabled. Asserted via the keyboard gate
-    //    behavior is hard to drive in e2e; instead we just confirm the
-    //    tile is reachable. The unit-test side of the gate lives in
-    //    Wizard's internal logic — covered there.
+    //    NOT satisfy the "install gate" alone. The Wizard's shared
+    //    canSetupContinue predicate requires spec.provider !== null
+    //    under prereqsError, so a Cursor-only selection should leave
+    //    the primary CTA disabled.
     const cursorTile = page.getByTestId("setup-runtime-tile-Cursor");
     await expect(cursorTile).toHaveAttribute("aria-disabled", "false");
+    await cursorTile.click();
+    await expect(
+      page.locator(".wizard-step button.btn-primary").first(),
+    ).toBeDisabled();
   });
 
   test("submitError alert + Retry button appear when /onboarding/complete fails, then succeed on retry", async ({

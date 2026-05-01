@@ -44,9 +44,10 @@ export function TemplatesStep({
         key={t.id}
         className={`template-card ${selected === t.id ? "selected" : ""}`}
         onClick={() => onSelect(t.id)}
+        aria-pressed={selected === t.id}
         type="button"
       >
-        {icon && <div className="template-card-emoji">{icon}</div>}
+        {icon ? <div className="template-card-emoji">{icon}</div> : null}
         <div className="template-card-name">{t.name}</div>
         <div className="template-card-desc">{desc}</div>
       </button>
@@ -111,6 +112,7 @@ export function TemplatesStep({
             <button
               className={`template-from-scratch-btn ${selected === null ? "selected" : ""}`}
               onClick={() => onSelect(null)}
+              aria-pressed={selected === null}
               type="button"
             >
               <span className="template-from-scratch-icon">+</span>

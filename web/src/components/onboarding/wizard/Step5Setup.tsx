@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { ONBOARDING_COPY } from "../../../lib/constants";
 import { ApiKeyRow } from "./ApiKeyRow";
@@ -10,81 +10,363 @@ import {
   RUNTIMES,
 } from "./constants";
 import { LocalLLMPicker } from "./LocalLLMPicker";
-import { detectedBinary, runtimeIsReady } from "./runtime-helpers";
-import type { MemoryBackend, PrereqResult } from "./types";
+import {
+  canSetupContinue,
+  detectedBinary,
+  runtimeIsReady,
+} from "./runtime-helpers";
+import type { MemoryBackend, PrereqResult, RuntimeSpec } from "./types";
 
-interface SetupStepProps {
-  prereqs: PrereqResult[];
-  prereqsLoading: boolean;
-  prereqsError: string;
-  runtimePriority: string[];
-  onToggleRuntime: (label: string) => void;
-  onReorderRuntime: (label: string, direction: -1 | 1) => void;
-  apiKeys: Record<string, string>;
-  onChangeApiKey: (key: string, value: string) => void;
-  memoryBackend: MemoryBackend;
-  onChangeMemoryBackend: (value: MemoryBackend) => void;
+interface PrereqStatus {
+  items: PrereqResult[];
+  loading: boolean;
+  error: string;
+}
+
+interface RuntimeSelection {
+  priority: string[];
+  onToggle: (label: string) => void;
+  onReorder: (label: string, direction: -1 | 1) => void;
+}
+
+interface ApiKeyState {
+  values: Record<string, string>;
+  onChange: (key: string, value: string) => void;
+}
+
+interface MemoryState {
+  backend: MemoryBackend;
+  onChangeBackend: (value: MemoryBackend) => void;
   nexApiKey: string;
   onChangeNexApiKey: (v: string) => void;
   gbrainOpenAIKey: string;
   onChangeGBrainOpenAIKey: (v: string) => void;
   gbrainAnthropicKey: string;
   onChangeGBrainAnthropicKey: (v: string) => void;
+}
+
+interface LocalLLMState {
   // Local-LLM opt-in chosen here; submitted with the rest of the wizard
   // payload at /onboarding/complete and applied to llm_provider so the
   // user's selection takes effect on first agent turn.
-  localProvider: string;
-  onSelectLocalProvider: (kind: string) => void;
+  provider: string;
+  onSelectProvider: (kind: string) => void;
+}
+
+interface SetupStepProps {
+  prereqStatus: PrereqStatus;
+  runtimeSelection: RuntimeSelection;
+  apiKeyState: ApiKeyState;
+  memoryState: MemoryState;
+  localLLMState: LocalLLMState;
   onNext: () => void;
   onBack: () => void;
 }
 
-export function SetupStep({
+interface RuntimeTileProps {
+  spec: RuntimeSpec;
+  prereqs: PrereqResult[];
+  prereqsError: string;
+  runtimePriority: string[];
+  onToggleRuntime: (label: string) => void;
+}
+
+function runtimeTileTitle(
+  spec: RuntimeSpec,
+  installed: boolean,
+  prereqsError: string,
+  version?: string,
+) {
+  if (installed) return version ? `${spec.label} — ${version}` : spec.label;
+  if (prereqsError) {
+    return `${spec.label} — detection failed, select if installed`;
+  }
+  return `${spec.label} — not installed`;
+}
+
+function RuntimeTileMeta({
+  spec,
+  installed,
+  prereqsError,
+  version,
+}: {
+  spec: RuntimeSpec;
+  installed: boolean;
+  prereqsError: string;
+  version?: string;
+}) {
+  if (installed) return version ? version : "Installed";
+  if (prereqsError) return "Select if installed";
+  return (
+    <>
+      Not installed{" · "}
+      <a
+        className="runtime-tile-install-link"
+        href={spec.installUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        install
+      </a>
+    </>
+  );
+}
+
+function RuntimeTile({
+  spec,
   prereqs,
-  prereqsLoading,
   prereqsError,
   runtimePriority,
   onToggleRuntime,
-  onReorderRuntime,
-  apiKeys,
-  onChangeApiKey,
+}: RuntimeTileProps) {
+  const detection = detectedBinary(prereqs, spec.binary);
+  const installed = Boolean(detection?.found);
+  const selectable = installed || Boolean(prereqsError);
+  const priorityIdx = runtimePriority.indexOf(spec.label);
+  const selected = priorityIdx >= 0;
+  const classes = [
+    "runtime-tile",
+    selected ? "selected" : "",
+    selectable ? "" : "disabled",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const title = runtimeTileTitle(
+    spec,
+    installed,
+    prereqsError,
+    detection?.version,
+  );
+  const content = (
+    <>
+      {selected && (
+        <span
+          className="runtime-priority-badge"
+          title={`Priority ${priorityIdx + 1}`}
+        >
+          {priorityIdx + 1}
+        </span>
+      )}
+      <div className="runtime-tile-head">
+        <span
+          className={`runtime-tile-status ${installed ? "installed" : ""}`}
+          aria-hidden="true"
+        />
+        {spec.label}
+      </div>
+      <div className="runtime-tile-meta">
+        <RuntimeTileMeta
+          spec={spec}
+          installed={installed}
+          prereqsError={prereqsError}
+          version={detection?.version}
+        />
+      </div>
+    </>
+  );
+
+  if (!selectable) {
+    return (
+      <div
+        className={classes}
+        data-testid={`setup-runtime-tile-${spec.label}`}
+        aria-disabled="true"
+        title={title}
+      >
+        {content}
+      </div>
+    );
+  }
+
+  return (
+    <button
+      className={classes}
+      data-testid={`setup-runtime-tile-${spec.label}`}
+      onClick={() => onToggleRuntime(spec.label)}
+      type="button"
+      aria-disabled="false"
+      aria-pressed={selected}
+      title={title}
+    >
+      {content}
+    </button>
+  );
+}
+
+interface MemoryBackendPanelProps {
+  memoryBackend: MemoryBackend;
+  onChangeMemoryBackend: (value: MemoryBackend) => void;
+  gbrainOpenAIKey: string;
+  onChangeGBrainOpenAIKey: (v: string) => void;
+  gbrainAnthropicKey: string;
+  onChangeGBrainAnthropicKey: (v: string) => void;
+}
+
+function MemoryBackendPanel({
   memoryBackend,
   onChangeMemoryBackend,
-  nexApiKey,
-  onChangeNexApiKey,
   gbrainOpenAIKey,
   onChangeGBrainOpenAIKey,
   gbrainAnthropicKey,
   onChangeGBrainAnthropicKey,
-  localProvider,
-  onSelectLocalProvider,
-  onNext,
-  onBack,
-}: SetupStepProps) {
-  // localModeOn governs whether the second-step LocalLLMPicker is
-  // shown beneath the runtime grid. Initialised from the parent's
-  // localProvider so re-entering the step preserves the user's
-  // earlier "I want a local model" choice. Toggling the meta-tile
-  // off clears localProvider via onSelectLocalProvider("").
-  const [localModeOn, setLocalModeOn] = useState<boolean>(localProvider !== "");
-
-  // Any priority slot that satisfies runtimeIsReady satisfies the gate.
-  const hasInstalledSelection = runtimePriority.some((label) =>
-    runtimeIsReady(label, prereqs, prereqsError),
-  );
-  const hasAnyApiKey = Object.values(apiKeys).some((v) => v.trim().length > 0);
-  // GBrain requires an OpenAI key to function — the TUI gates on this in
-  // InitGBrainOpenAIKey (see internal/tui/init_flow.go:215). Mirror the
-  // gate here so the wizard doesn't let users commit an unusable config.
+}: MemoryBackendPanelProps) {
   const gbrainSelected = memoryBackend === "gbrain";
   const gbrainOpenAIMissing =
     gbrainSelected && gbrainOpenAIKey.trim().length === 0;
-  // Picking a local LLM is an alternative path — once selected the user
-  // doesn't need a cloud CLI installed or any cloud API key set.
-  const hasLocalProvider = localProvider.trim().length > 0;
-  const canContinue =
-    (hasInstalledSelection || hasAnyApiKey || hasLocalProvider) &&
-    !gbrainOpenAIMissing;
+
+  return (
+    <div className="wizard-panel">
+      <p className="wizard-panel-title">Organizational memory</p>
+      <p
+        style={{
+          fontSize: 12,
+          color: "var(--text-secondary)",
+          margin: "-8px 0 12px 0",
+        }}
+      >
+        Where agents store shared context, relationships, and learnings across
+        sessions. You can change this later in Settings or via{" "}
+        <code>--memory-backend</code>.
+      </p>
+      <div className="runtime-grid">
+        {MEMORY_BACKEND_OPTIONS.map((opt) => (
+          <button
+            key={opt.value}
+            className={`runtime-tile ${memoryBackend === opt.value ? "selected" : ""}`}
+            onClick={() => onChangeMemoryBackend(opt.value)}
+            aria-pressed={memoryBackend === opt.value}
+            type="button"
+            title={opt.hint}
+          >
+            <div style={{ fontWeight: 600 }}>{opt.label}</div>
+            <div
+              style={{
+                fontSize: 11,
+                color: "var(--text-tertiary)",
+                marginTop: 4,
+                fontWeight: 400,
+              }}
+            >
+              {opt.hint}
+            </div>
+          </button>
+        ))}
+      </div>
+
+      {gbrainSelected ? (
+        <div className="wiz-backend-keys">
+          <p className="wiz-backend-keys-title">GBrain keys</p>
+          <p className="wiz-backend-keys-hint">
+            GBrain uses OpenAI for embeddings (required) and optionally
+            Anthropic for reasoning.
+          </p>
+          <div className="form-group">
+            <label className="label" htmlFor="wiz-gbrain-openai">
+              OpenAI API key <span style={{ color: "var(--red)" }}>*</span>
+            </label>
+            <input
+              className="input"
+              id="wiz-gbrain-openai"
+              type="password"
+              placeholder="sk-..."
+              value={gbrainOpenAIKey}
+              onChange={(e) => onChangeGBrainOpenAIKey(e.target.value)}
+              autoComplete="off"
+            />
+            {gbrainOpenAIMissing ? (
+              <p style={{ color: "var(--red)", fontSize: 11, marginTop: 4 }}>
+                Required: GBrain can&apos;t create embeddings without an OpenAI
+                key.
+              </p>
+            ) : null}
+          </div>
+          <div className="form-group" style={{ marginBottom: 0 }}>
+            <label className="label" htmlFor="wiz-gbrain-anthropic">
+              Anthropic API key{" "}
+              <span style={{ fontSize: 11, color: "var(--text-tertiary)" }}>
+                (optional)
+              </span>
+            </label>
+            <input
+              className="input"
+              id="wiz-gbrain-anthropic"
+              type="password"
+              placeholder="sk-ant-..."
+              value={gbrainAnthropicKey}
+              onChange={(e) => onChangeGBrainAnthropicKey(e.target.value)}
+              autoComplete="off"
+            />
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+export function SetupStep({
+  prereqStatus,
+  runtimeSelection,
+  apiKeyState,
+  memoryState,
+  localLLMState,
+  onNext,
+  onBack,
+}: SetupStepProps) {
+  const {
+    items: prereqs,
+    loading: prereqsLoading,
+    error: prereqsError,
+  } = prereqStatus;
+  const {
+    priority: runtimePriority,
+    onToggle: onToggleRuntime,
+    onReorder: onReorderRuntime,
+  } = runtimeSelection;
+  const { values: apiKeys, onChange: onChangeApiKey } = apiKeyState;
+  const {
+    backend: memoryBackend,
+    onChangeBackend: onChangeMemoryBackend,
+    nexApiKey,
+    onChangeNexApiKey,
+    gbrainOpenAIKey,
+    onChangeGBrainOpenAIKey,
+    gbrainAnthropicKey,
+    onChangeGBrainAnthropicKey,
+  } = memoryState;
+  const { provider: localProvider, onSelectProvider: onSelectLocalProvider } =
+    localLLMState;
+
+  // localModeOn governs whether the second-step LocalLLMPicker is
+  // shown beneath the runtime grid. It opens either from the meta-tile
+  // or an existing localProvider, and closes again when parent state
+  // clears that provider via the fallback-chain remove button.
+  const [localModeOn, setLocalModeOn] = useState<boolean>(localProvider !== "");
+  const hasSeenLocalProvider = useRef(localProvider.trim().length > 0);
+
+  useEffect(() => {
+    const hasLocalProvider = localProvider.trim().length > 0;
+    if (hasLocalProvider) {
+      hasSeenLocalProvider.current = true;
+      setLocalModeOn(true);
+    } else if (hasSeenLocalProvider.current) {
+      hasSeenLocalProvider.current = false;
+      setLocalModeOn(false);
+    }
+  }, [localProvider]);
+
+  // Any priority slot that satisfies runtimeIsReady satisfies the API-key hint.
+  const hasInstalledSelection = runtimePriority.some((label) =>
+    runtimeIsReady(label, prereqs, prereqsError),
+  );
+  const canContinue = canSetupContinue({
+    runtimePriority,
+    prereqs,
+    prereqsError,
+    apiKeys,
+    localProvider,
+    memoryBackend,
+    gbrainOpenAIKey,
+  });
 
   return (
     <div className="wizard-step">
@@ -137,84 +419,16 @@ export function SetupStep({
         ) : null}
         {prereqsLoading ? null : (
           <div className="runtime-grid">
-            {RUNTIMES.map((spec) => {
-              const detection = detectedBinary(prereqs, spec.binary);
-              const installed = Boolean(detection?.found);
-              const selectable = installed || Boolean(prereqsError);
-              const priorityIdx = runtimePriority.indexOf(spec.label);
-              const selected = priorityIdx >= 0;
-              const classes = [
-                "runtime-tile",
-                selected ? "selected" : "",
-                selectable ? "" : "disabled",
-              ]
-                .filter(Boolean)
-                .join(" ");
-              return (
-                <button
-                  key={spec.label}
-                  className={classes}
-                  data-testid={`setup-runtime-tile-${spec.label}`}
-                  onClick={() => {
-                    if (!selectable) return;
-                    onToggleRuntime(spec.label);
-                  }}
-                  type="button"
-                  disabled={!selectable}
-                  aria-disabled={!selectable}
-                  aria-pressed={selected}
-                  title={
-                    installed
-                      ? detection?.version
-                        ? `${spec.label} — ${detection.version}`
-                        : spec.label
-                      : prereqsError
-                        ? `${spec.label} — detection failed, select if installed`
-                        : `${spec.label} — not installed`
-                  }
-                >
-                  {selected && (
-                    <span
-                      className="runtime-priority-badge"
-                      aria-label={`Priority ${priorityIdx + 1}`}
-                    >
-                      {priorityIdx + 1}
-                    </span>
-                  )}
-                  <div className="runtime-tile-head">
-                    <span
-                      className={`runtime-tile-status ${installed ? "installed" : ""}`}
-                      aria-hidden="true"
-                    />
-                    {spec.label}
-                  </div>
-                  <div className="runtime-tile-meta">
-                    {installed ? (
-                      detection?.version ? (
-                        detection.version
-                      ) : (
-                        "Installed"
-                      )
-                    ) : prereqsError ? (
-                      "Select if installed"
-                    ) : (
-                      <>
-                        Not installed{" · "}
-                        <a
-                          className="runtime-tile-install-link"
-                          href={spec.installUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          install
-                        </a>
-                      </>
-                    )}
-                  </div>
-                </button>
-              );
-            })}
+            {RUNTIMES.map((spec) => (
+              <RuntimeTile
+                key={spec.label}
+                spec={spec}
+                prereqs={prereqs}
+                prereqsError={prereqsError}
+                runtimePriority={runtimePriority}
+                onToggleRuntime={onToggleRuntime}
+              />
+            ))}
             {/* Run a local model — peer tile alongside the cloud CLIs.
                 Selecting it reveals the second-step picker (LocalLLMPicker)
                 below the grid. The dot stays grey because there's no single
@@ -248,12 +462,12 @@ export function SetupStep({
           </div>
         )}
 
-        {localModeOn && (
+        {localModeOn ? (
           <LocalLLMPicker
             selected={localProvider}
             onSelect={onSelectLocalProvider}
           />
-        )}
+        ) : null}
 
         {runtimePriority.length > 1 && (
           <div className="runtime-priority-controls">
@@ -338,90 +552,14 @@ export function SetupStep({
         </div>
       </div>
 
-      <div className="wizard-panel">
-        <p className="wizard-panel-title">Organizational memory</p>
-        <p
-          style={{
-            fontSize: 12,
-            color: "var(--text-secondary)",
-            margin: "-8px 0 12px 0",
-          }}
-        >
-          Where agents store shared context, relationships, and learnings across
-          sessions. You can change this later in Settings or via{" "}
-          <code>--memory-backend</code>.
-        </p>
-        <div className="runtime-grid">
-          {MEMORY_BACKEND_OPTIONS.map((opt) => (
-            <button
-              key={opt.value}
-              className={`runtime-tile ${memoryBackend === opt.value ? "selected" : ""}`}
-              onClick={() => onChangeMemoryBackend(opt.value)}
-              type="button"
-              title={opt.hint}
-            >
-              <div style={{ fontWeight: 600 }}>{opt.label}</div>
-              <div
-                style={{
-                  fontSize: 11,
-                  color: "var(--text-tertiary)",
-                  marginTop: 4,
-                  fontWeight: 400,
-                }}
-              >
-                {opt.hint}
-              </div>
-            </button>
-          ))}
-        </div>
-
-        {gbrainSelected && (
-          <div className="wiz-backend-keys">
-            <p className="wiz-backend-keys-title">GBrain keys</p>
-            <p className="wiz-backend-keys-hint">
-              GBrain uses OpenAI for embeddings (required) and optionally
-              Anthropic for reasoning.
-            </p>
-            <div className="form-group">
-              <label className="label" htmlFor="wiz-gbrain-openai">
-                OpenAI API key <span style={{ color: "var(--red)" }}>*</span>
-              </label>
-              <input
-                className="input"
-                id="wiz-gbrain-openai"
-                type="password"
-                placeholder="sk-..."
-                value={gbrainOpenAIKey}
-                onChange={(e) => onChangeGBrainOpenAIKey(e.target.value)}
-                autoComplete="off"
-              />
-              {gbrainOpenAIMissing && (
-                <p style={{ color: "var(--red)", fontSize: 11, marginTop: 4 }}>
-                  Required: GBrain can&apos;t create embeddings without an
-                  OpenAI key.
-                </p>
-              )}
-            </div>
-            <div className="form-group" style={{ marginBottom: 0 }}>
-              <label className="label" htmlFor="wiz-gbrain-anthropic">
-                Anthropic API key{" "}
-                <span style={{ fontSize: 11, color: "var(--text-tertiary)" }}>
-                  (optional)
-                </span>
-              </label>
-              <input
-                className="input"
-                id="wiz-gbrain-anthropic"
-                type="password"
-                placeholder="sk-ant-..."
-                value={gbrainAnthropicKey}
-                onChange={(e) => onChangeGBrainAnthropicKey(e.target.value)}
-                autoComplete="off"
-              />
-            </div>
-          </div>
-        )}
-      </div>
+      <MemoryBackendPanel
+        memoryBackend={memoryBackend}
+        onChangeMemoryBackend={onChangeMemoryBackend}
+        gbrainOpenAIKey={gbrainOpenAIKey}
+        onChangeGBrainOpenAIKey={onChangeGBrainOpenAIKey}
+        gbrainAnthropicKey={gbrainAnthropicKey}
+        onChangeGBrainAnthropicKey={onChangeGBrainAnthropicKey}
+      />
 
       {memoryBackend === "nex" && (
         // Only show the Nex API key panel when the chosen memory backend
