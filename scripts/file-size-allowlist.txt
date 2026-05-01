@@ -21,3 +21,4 @@ web/src/components/apps/SettingsApp.tsx       # Phase 7: per-section panels in s
 internal/teammcp/server.go                    # vertical slice along tool families
 internal/team/broker_tasks.go                 # vertical slice (already split once; further breakdown along action vs query)
 internal/team/operation_bootstrap.go          # split per bootstrap concern (db/manifest/seed)
+web/src/components/apps/SkillsApp.tsx         # decompose alongside SettingsApp/Wizard pattern (per-section panels in skills/)
