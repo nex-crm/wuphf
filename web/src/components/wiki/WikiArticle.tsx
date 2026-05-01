@@ -63,7 +63,7 @@ function StalenessIndicator({ article }: { article: WikiArticleT }) {
       </span>
     );
   }
-  if (days_unread > STALENESS_STALE_DAYS) {
+  if (days_unread >= STALENESS_STALE_DAYS) {
     return (
       <span
         className="wk-staleness-badge wk-staleness-stale"
@@ -74,7 +74,7 @@ function StalenessIndicator({ article }: { article: WikiArticleT }) {
       </span>
     );
   }
-  if (days_unread > STALENESS_AGING_DAYS) {
+  if (days_unread >= STALENESS_AGING_DAYS) {
     return (
       <span
         className="wk-staleness-badge wk-staleness-aging"

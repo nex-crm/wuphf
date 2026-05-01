@@ -96,8 +96,13 @@ func (l *ReadLog) Append(relPath, reader string) {
 		}
 		l.dirEnsured = true
 	}
-	f, err := os.OpenFile(l.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(l.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
+		// If the .reads/ directory was removed after dirEnsured was set,
+		// reset so the next call recreates it rather than failing again.
+		if errors.Is(err, fs.ErrNotExist) {
+			l.dirEnsured = false
+		}
 		log.Printf("wiki reads: open: %v", err)
 		return
 	}

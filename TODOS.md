@@ -168,8 +168,6 @@ Tracking work that is deliberately deferred from the current branch. Each item n
 
 ---
 
-## Closed
-
 ### 15. SystemSchedulesPanel.test.tsx — vi.mock top-level variable bug
 
 **What:** `src/components/apps/SystemSchedulesPanel.test.tsx` crashes vitest with `ReferenceError: Cannot access 'MOCK_SPECS' before initialization` because `vi.mock` hoisting runs before the top-level `MOCK_SPECS` const is initialized.
@@ -178,6 +176,7 @@ Tracking work that is deliberately deferred from the current branch. Each item n
 
 **Trigger to revisit:** Next pass on the SystemSchedulesPanel test suite or when vitest compatibility is reviewed.
 
+---
 
 ### 16. wiki_reads.go: in-memory ReadStats cache to replace per-article file scan
 
@@ -186,4 +185,8 @@ Tracking work that is deliberately deferred from the current branch. Each item n
 **Why:** At v1 corpus scale (≤500 articles, ≤10k read events) the scan is fast enough. After 6+ months with active agent reads it will noticeably slow article page loads.
 
 **Trigger to revisit:** When `reads.jsonl` exceeds ~10k lines, or if article load latency exceeds 200ms in production.
+
+---
+
+## Closed
 

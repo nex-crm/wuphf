@@ -2076,7 +2076,7 @@
   justify-content: center;
 }
 
-/* Staleness indicator — shown above the article title */
+/* Staleness indicator — shown below the byline */
 .wk-staleness-badge {
   display: inline-flex;
   align-items: center;

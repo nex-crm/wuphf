@@ -222,17 +222,28 @@ func TestReadLog_Stats_DaysUnread_Positive(t *testing.T) {
 func TestReadLog_LastRead_IsLatest(t *testing.T) {
 	rl := newTestReadLog(t)
 	path := "team/people/carol.md"
-	rl.Append(path, "web")
-	time.Sleep(2 * time.Millisecond)
-	before := time.Now()
-	time.Sleep(2 * time.Millisecond)
-	rl.Append(path, "slack-agent")
+
+	// Write two events with explicit timestamps 1 second apart — no sleeps needed.
+	if err := os.MkdirAll(filepath.Dir(rl.path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	earlier := time.Now().UTC().Add(-2 * time.Second)
+	later := earlier.Add(time.Second)
+
+	ev1 := ReadEvent{Path: path, Timestamp: earlier, Reader: "web", IsAgent: false}
+	ev2 := ReadEvent{Path: path, Timestamp: later, Reader: "slack-agent", IsAgent: true}
+	line1, _ := json.Marshal(ev1)
+	line2, _ := json.Marshal(ev2)
+	data := append(append(line1, '\n'), append(line2, '\n')...)
+	if err := os.WriteFile(rl.path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
 
 	s := rl.Stats(path)
 	if s.LastRead == nil {
 		t.Fatal("LastRead should be non-nil")
 	}
-	if !s.LastRead.After(before) {
-		t.Error("LastRead should reflect the most recent access")
+	if !s.LastRead.Equal(later) {
+		t.Errorf("LastRead should equal the later timestamp; got %v, want %v", s.LastRead, later)
 	}
 }

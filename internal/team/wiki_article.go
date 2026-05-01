@@ -306,17 +306,9 @@ func (r *Repo) BuildArticle(ctx context.Context, relPath, reader string, readLog
 		meta.Contributors = uniqueAuthors(refs)
 	}
 
-	// Backlinks: walk team/ and collect articles that reference this one.
-	backs, err := r.backlinksFor(ctx, relPath)
-	if err != nil {
-		// Non-fatal: surface the article without backlinks rather than 500.
-		// The UI degrades gracefully.
-		return meta, nil //nolint:nilerr // intentional: backlink failure degrades to empty backlinks
-	}
-	meta.Backlinks = backs
-
 	// Read tracking: log the access then populate stats. Both happen only
-	// when reader is non-empty and readLog is wired up.
+	// when reader is non-empty and readLog is wired up. This runs before
+	// backlinksFor so reads are recorded even when the backlink walk fails.
 	if reader != "" && readLog != nil {
 		readLog.Append(relPath, reader)
 		s := readLog.Stats(relPath)
@@ -325,6 +317,15 @@ func (r *Repo) BuildArticle(ctx context.Context, relPath, reader string, readLog
 		meta.AgentReadCount = s.AgentReadCount
 		meta.DaysUnread = s.DaysUnread
 	}
+
+	// Backlinks: walk team/ and collect articles that reference this one.
+	backs, err := r.backlinksFor(ctx, relPath)
+	if err != nil {
+		// Non-fatal: surface the article without backlinks rather than 500.
+		// The UI degrades gracefully.
+		return meta, nil //nolint:nilerr // intentional: backlink failure degrades to empty backlinks
+	}
+	meta.Backlinks = backs
 
 	return meta, nil
 }
