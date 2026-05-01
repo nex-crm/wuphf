@@ -74,9 +74,20 @@ func (r *Repo) ApplyPromotion(ctx context.Context, p *Promotion, approverSlug st
 		return "", fmt.Errorf("promotion: read source: %w", err)
 	}
 	// The target body is the source body MINUS any existing promotion
-	// frontmatter. Otherwise the target ends up with a self-referencing
-	// back-link that points to its own source — confusing for readers.
-	targetBody := stripFrontmatter(string(sourceBytes))
+	// back-link frontmatter. Otherwise the target ends up with a
+	// self-referencing back-link that points to its own source — confusing
+	// for readers.
+	//
+	// Exception (skill-frontmatter preservation, 2026-05-01): when the
+	// target lives under team/playbooks/ or team/skills/ AND the source
+	// already carries an Anthropic-Agent-Skills-shaped frontmatter block
+	// (both `name` and `description` keys present), preserve that block
+	// verbatim on the target. This keeps the LLM-free fast path in
+	// skill_scanner.go working: agent-authored skills with explicit
+	// frontmatter must promote without losing the YAML, otherwise the
+	// scanner falls back to a CLI-LLM round-trip that fails in
+	// no-auth environments.
+	targetBody := stripPromotionFrontmatterForTarget(string(sourceBytes), p.TargetPath)
 
 	if err := os.MkdirAll(filepath.Dir(targetFull), 0o700); err != nil {
 		return "", fmt.Errorf("promotion: mkdir target: %w", err)
@@ -250,6 +261,128 @@ func stripFrontmatter(body string) string {
 		return body
 	}
 	return strings.TrimLeft(rest[idx+len("\n---\n"):], "\n")
+}
+
+// stripPromotionFrontmatterForTarget strips a leading frontmatter block from
+// the source notebook content before it is written as the target wiki
+// article — UNLESS the target is a skill-bearing path AND the frontmatter
+// already carries Anthropic Agent Skills-shaped keys (both `name` and
+// `description` present at the top level of the YAML block).
+//
+// The rule exists so agent-authored playbooks/skills that explicitly opt
+// into skill frontmatter survive the notebook→wiki promotion intact. Stage
+// A's skill_scanner.go has a fast path that promotes such articles without
+// an LLM call; stripping the YAML here would break that path and force a
+// CLI-LLM round-trip that fails in environments without configured auth.
+//
+// We deliberately preserve the YAML block as-is rather than parsing and
+// re-serialising it: that preserves comments, key ordering, and unknown
+// keys that future readers may rely on.
+func stripPromotionFrontmatterForTarget(body, targetPath string) string {
+	if !strings.HasPrefix(body, "---\n") {
+		return body
+	}
+	if !isSkillBearingTargetPath(targetPath) {
+		return stripFrontmatter(body)
+	}
+	rest := body[len("---\n"):]
+	idx := strings.Index(rest, "\n---\n")
+	if idx < 0 {
+		// Malformed frontmatter (no closing delimiter): fall through to the
+		// existing strip behaviour, which returns body unchanged when no
+		// closing delimiter exists. Safer than guessing.
+		return stripFrontmatter(body)
+	}
+	yamlBlock := rest[:idx]
+	if !frontmatterHasSkillKeys(yamlBlock) {
+		return stripFrontmatter(body)
+	}
+	// Preserve the skill frontmatter, but filter back-link keys that only
+	// belong on the source notebook. Without this, a re-promoted notebook
+	// inherits stale `promoted_to`/`promoted_at`/`promoted_by`/
+	// `promoted_commit_sha` values pointing back at the previous target.
+	cleaned := stripPromotionKeys(yamlBlock)
+	return "---\n" + cleaned + "\n---\n" + rest[idx+len("\n---\n"):]
+}
+
+// stripPromotionKeys removes the back-link metadata keys archivists stamp on
+// the source notebook after a promotion. Operates on the YAML text so it
+// preserves comments, key ordering, and any unknown keys downstream readers
+// rely on. Tolerates leading whitespace (YAML allows it) so an indented
+// `  promoted_to: x` is filtered too.
+func stripPromotionKeys(yamlBlock string) string {
+	lines := strings.Split(yamlBlock, "\n")
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(trimmed, "promoted_to:"),
+			strings.HasPrefix(trimmed, "promoted_at:"),
+			strings.HasPrefix(trimmed, "promoted_by:"),
+			strings.HasPrefix(trimmed, "promoted_commit_sha:"):
+			continue
+		default:
+			out = append(out, line)
+		}
+	}
+	return strings.Join(out, "\n")
+}
+
+// isSkillBearingTargetPath reports whether the wiki-relative target path
+// lives in a directory whose articles are scanned for skill frontmatter.
+// Mirrored from skill_scanner.go's walk roots; must stay in sync.
+func isSkillBearingTargetPath(targetPath string) bool {
+	clean := strings.TrimPrefix(targetPath, "/")
+	if strings.HasPrefix(clean, "team/playbooks/") {
+		return true
+	}
+	if strings.HasPrefix(clean, "team/skills/") {
+		return true
+	}
+	return false
+}
+
+// frontmatterHasSkillKeys reports whether the YAML block (without the
+// surrounding --- delimiters) carries top-level `name` and `description`
+// keys. We do a textual scan rather than a full YAML decode to keep the
+// detection cheap and to avoid any chance of mutating the block via
+// re-serialisation.
+func frontmatterHasSkillKeys(yamlBlock string) bool {
+	hasName := false
+	hasDescription := false
+	for _, line := range strings.Split(yamlBlock, "\n") {
+		// Skip indented lines: a `name:` nested under another key (e.g.
+		// metadata.wuphf.name) is not the top-level skill name.
+		if line == "" || line[0] == ' ' || line[0] == '\t' {
+			continue
+		}
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		colonIdx := strings.Index(trimmed, ":")
+		if colonIdx <= 0 {
+			continue
+		}
+		key := strings.TrimSpace(trimmed[:colonIdx])
+		value := strings.TrimSpace(trimmed[colonIdx+1:])
+		// Require a non-empty value so `name:` with no content doesn't
+		// satisfy the gate. Quoted values stay quoted; we only need to
+		// know the key carries SOMETHING.
+		if value == "" {
+			continue
+		}
+		switch key {
+		case "name":
+			hasName = true
+		case "description":
+			hasDescription = true
+		}
+		if hasName && hasDescription {
+			return true
+		}
+	}
+	return false
 }
 
 // headerLineFrom returns the first markdown H1 line from a body, or "" when

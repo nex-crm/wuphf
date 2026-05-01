@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -303,6 +304,83 @@ func TestReviewTargetExists_BouncesToChangesRequested(t *testing.T) {
 	if res.StatusCode != http.StatusConflict {
 		t.Fatalf("want 409 at submit, got %d", res.StatusCode)
 	}
+}
+
+func TestPromoteToPlaybookPreservesFrontmatter(t *testing.T) {
+	srv, b, teardown := newReviewTestServer(t)
+	defer teardown()
+	token := b.Token()
+
+	// Notebook entry begins with valid Anthropic Agent Skills frontmatter
+	// (name + description). After promotion to a team/playbooks/ path the
+	// target wiki article must keep the frontmatter intact, otherwise the
+	// LLM-free fast path in skill_scanner.go's defaultLLMProvider can't
+	// match the article.
+	notebookBody := "---\n" +
+		"name: customer-refund\n" +
+		"description: Issue a refund for a customer order.\n" +
+		"version: 1.0.0\n" +
+		"---\n" +
+		"# Customer Refund\n\nSteps go here.\n"
+	seedNotebookViaHTTP(t, srv, token, "pm",
+		"agents/pm/notebook/customer-refund.md", notebookBody)
+
+	res := submitPromotion(t, srv, token, map[string]any{
+		"my_slug":          "pm",
+		"source_path":      "agents/pm/notebook/customer-refund.md",
+		"target_wiki_path": "team/playbooks/customer-refund.md",
+		"rationale":        "Promote skill",
+	})
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(res.Body)
+		t.Fatalf("submit status=%d body=%s", res.StatusCode, string(body))
+	}
+	var submitRes struct {
+		PromotionID string `json:"promotion_id"`
+	}
+	_ = json.NewDecoder(res.Body).Decode(&submitRes)
+	if submitRes.PromotionID == "" {
+		t.Fatalf("no promotion ID")
+	}
+
+	// Approve to trigger the on-disk promote commit.
+	approveBody, _ := json.Marshal(map[string]any{"actor_slug": "ceo"})
+	req, _ := authReq(http.MethodPost, srv.URL+"/review/"+submitRes.PromotionID+"/approve",
+		bytes.NewReader(approveBody), token)
+	approveRes, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+	approveRes.Body.Close()
+	if approveRes.StatusCode != http.StatusOK {
+		t.Fatalf("approve status=%d", approveRes.StatusCode)
+	}
+
+	// Wait briefly for the commit to land — ApplyPromotion is synchronous
+	// from the approve handler so the file should already exist.
+	target := filepath.Join(b.wikiWorker.Repo().Root(), "team/playbooks/customer-refund.md")
+	contents, err := readFile(target)
+	if err != nil {
+		t.Fatalf("read target: %v", err)
+	}
+	if !strings.HasPrefix(contents, "---\nname: customer-refund\n") {
+		t.Fatalf("target missing skill frontmatter prefix: %q", contents)
+	}
+	if !strings.Contains(contents, "description: Issue a refund for a customer order.") {
+		t.Fatalf("target missing description: %q", contents)
+	}
+	if !strings.Contains(contents, "# Customer Refund") {
+		t.Fatalf("target dropped markdown body: %q", contents)
+	}
+}
+
+func readFile(path string) (string, error) {
+	bs, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	return string(bs), nil
 }
 
 func drainEvents(ch <-chan ReviewStateChangeEvent) {

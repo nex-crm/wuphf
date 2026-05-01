@@ -156,7 +156,17 @@ func ParseSkillMarkdown(content []byte) (SkillFrontmatter, string, error) {
 
 // teamSkillToFrontmatter converts a teamSkill into its SkillFrontmatter
 // representation. All fields are populated so the emitted YAML is hub-ready.
+//
+// SourceArticle (Stage A wiki-rooted compiles) lands at
+// metadata.wuphf.source_articles[0] so the on-disk SKILL.md preserves the
+// wiki provenance chain across binary restarts. Stage B synth paths leave
+// SourceArticle empty and the slice stays nil — that path emits skills with
+// metadata.wuphf.source_signals instead, populated at the synth layer.
 func teamSkillToFrontmatter(sk teamSkill) SkillFrontmatter {
+	var sourceArticles []string
+	if s := strings.TrimSpace(sk.SourceArticle); s != "" {
+		sourceArticles = []string{s}
+	}
 	return SkillFrontmatter{
 		Name:        sk.Name,
 		Description: sk.Description,
@@ -166,6 +176,7 @@ func teamSkillToFrontmatter(sk teamSkill) SkillFrontmatter {
 			Wuphf: SkillWuphfMeta{
 				Title:              sk.Title,
 				Trigger:            sk.Trigger,
+				SourceArticles:     sourceArticles,
 				CreatedBy:          sk.CreatedBy,
 				Status:             sk.Status,
 				Tags:               append([]string(nil), sk.Tags...),

@@ -1,6 +1,7 @@
 package team
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
@@ -324,6 +325,101 @@ func TestWriteSkillProposalLocked_GuardStampsSafetyScan(t *testing.T) {
 	b.mu.Unlock()
 	if rejected != 0 {
 		t.Errorf("expected zero rejections for safe verdict, got %d", rejected)
+	}
+}
+
+// TestWriteSkillProposalLocked_BackfillsSourceArticleOnDedup covers the
+// healing path for Stage A skills created before the provenance fix landed.
+// The existing skill carries an empty SourceArticle; the incoming spec has
+// it populated; dedup should copy the value through, persist, and surface a
+// log without creating a second skill.
+func TestWriteSkillProposalLocked_BackfillsSourceArticleOnDedup(t *testing.T) {
+	t.Parallel()
+	b := newTestBroker(t)
+
+	// Seed an existing skill with empty SourceArticle (simulates a
+	// pre-fix Stage A proposal).
+	first := skillProposalSpec("provenance-skill", "Backfill provenance.", "archivist")
+	first.SourceArticle = ""
+	sk1, err := callWriteSkillProposalLocked(b, first)
+	if err != nil {
+		t.Fatalf("seed write: %v", err)
+	}
+	if sk1.SourceArticle != "" {
+		t.Fatalf("seed precondition: SourceArticle should be empty, got %q", sk1.SourceArticle)
+	}
+
+	// Snapshot the count before the dedup call.
+	b.mu.Lock()
+	beforeCount := 0
+	for _, s := range b.skills {
+		if skillSlug(s.Name) == "provenance-skill" {
+			beforeCount++
+		}
+	}
+	b.mu.Unlock()
+
+	// Re-propose with provenance populated.
+	second := skillProposalSpec("provenance-skill", "Backfill provenance (again).", "archivist")
+	second.SourceArticle = "team/playbooks/provenance-skill.md"
+	sk2, err := callWriteSkillProposalLocked(b, second)
+	if err != nil {
+		t.Fatalf("dedup write: %v", err)
+	}
+	if sk2 == nil {
+		t.Fatal("dedup: expected non-nil skill")
+	}
+	if sk2.SourceArticle != "team/playbooks/provenance-skill.md" {
+		t.Errorf("SourceArticle: got %q, want %q (backfill did not run)",
+			sk2.SourceArticle, "team/playbooks/provenance-skill.md")
+	}
+
+	// No duplicate skill was created.
+	b.mu.Lock()
+	afterCount := 0
+	for _, s := range b.skills {
+		if skillSlug(s.Name) == "provenance-skill" {
+			afterCount++
+		}
+	}
+	found := b.findSkillByNameLocked("provenance-skill")
+	b.mu.Unlock()
+	if afterCount != beforeCount {
+		t.Errorf("dedup: skill count changed (before=%d, after=%d)", beforeCount, afterCount)
+	}
+	if found == nil || found.SourceArticle != "team/playbooks/provenance-skill.md" {
+		t.Errorf("in-memory skill SourceArticle not persisted: %+v", found)
+	}
+
+	// Saved state file exists (proves saveLocked was invoked). The state
+	// file was empty before the seed because newTestBroker pins statePath
+	// to a tmpdir; saveLocked wrote it during the seed write and again
+	// during backfill. We assert it exists rather than re-reading content.
+	if _, statErr := os.Stat(b.statePath); statErr != nil {
+		t.Errorf("expected state file at %q to exist after backfill, got: %v", b.statePath, statErr)
+	}
+}
+
+// TestWriteSkillProposalLocked_DedupNoBackfillWhenAlreadySet ensures we do
+// NOT overwrite an existing non-empty SourceArticle on the dedup path.
+func TestWriteSkillProposalLocked_DedupNoBackfillWhenAlreadySet(t *testing.T) {
+	t.Parallel()
+	b := newTestBroker(t)
+
+	first := skillProposalSpec("already-set", "Has provenance.", "archivist")
+	first.SourceArticle = "team/playbooks/original.md"
+	if _, err := callWriteSkillProposalLocked(b, first); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	second := skillProposalSpec("already-set", "Different.", "archivist")
+	second.SourceArticle = "team/playbooks/different.md"
+	sk, err := callWriteSkillProposalLocked(b, second)
+	if err != nil {
+		t.Fatalf("dedup: %v", err)
+	}
+	if sk.SourceArticle != "team/playbooks/original.md" {
+		t.Errorf("backfill should not overwrite a non-empty SourceArticle: got %q", sk.SourceArticle)
 	}
 }
 
