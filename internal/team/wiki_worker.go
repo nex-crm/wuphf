@@ -918,9 +918,12 @@ func (b *Broker) handleWikiRead(w http.ResponseWriter, r *http.Request) {
 	}
 	// Track agent reads. The ?reader= param is set by the MCP layer using
 	// WUPHF_AGENT_SLUG. Human reads go through /wiki/article, not here.
-	// Reject ReaderHuman ("web") on this endpoint: agent slugs must not be
-	// named "web" or reads would incorrectly inflate human_read_count.
-	if reader := sanitizeReader(r.URL.Query().Get("reader")); reader != "" && reader != ReaderHuman {
+	// Return 400 if the caller passes the reserved human reader ("web"):
+	// an agent slug named "web" would silently inflate human_read_count.
+	if raw := r.URL.Query().Get("reader"); raw == ReaderHuman {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": `reader "web" is reserved for human browser access`})
+		return
+	} else if reader := sanitizeReader(raw); reader != "" {
 		b.WikiReadLog().Append(relPath, reader)
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")

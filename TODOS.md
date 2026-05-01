@@ -188,8 +188,9 @@ Tracking work that is deliberately deferred from the current branch. Each item n
 
 ---
 
-## Closed
+## Deferred
 
+Items with known fixes but out of scope for this branch. Each names the trigger that would unblock revisiting.
 
 ### 17. Staleness badges need catalog card rendering (article view has a catch-22)
 
@@ -198,4 +199,8 @@ Tracking work that is deliberately deferred from the current branch. Each item n
 **Fix:** Add badge rendering to the wiki catalog cards (sidebar article list) where browsing does not trigger a read. Alternatively, add a `?stats_only=1` param to `BuildArticle` that returns stored stats without appending a new read event.
 
 **Trigger to revisit:** Next pass on the wiki catalog UI, or when a user reports "I never see the staleness badges."
+
+---
+
+## Closed
 
