@@ -226,6 +226,109 @@ describe("<WikiArticle>", () => {
     finish?.({ commits: [] });
   });
 
+  it("shows 'agents only' badge when agent_read_count > 0 and human_read_count = 0", async () => {
+    vi.spyOn(api, "fetchArticle").mockResolvedValue({
+      ...STUB_ARTICLE,
+      agent_read_count: 3,
+      human_read_count: 0,
+      days_unread: 0,
+    });
+    render(<WikiArticle path="people/customer-x" catalog={[]} onNavigate={() => {}} />);
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Customer X" })).toBeInTheDocument(),
+    );
+    expect(screen.getByText("agents only")).toBeInTheDocument();
+  });
+
+  it("shows 'unread 30d+' badge when days_unread > 30", async () => {
+    vi.spyOn(api, "fetchArticle").mockResolvedValue({
+      ...STUB_ARTICLE,
+      agent_read_count: 0,
+      human_read_count: 2,
+      days_unread: 45,
+    });
+    render(<WikiArticle path="people/customer-x" catalog={[]} onNavigate={() => {}} />);
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Customer X" })).toBeInTheDocument(),
+    );
+    expect(screen.getByText("unread 30d+")).toBeInTheDocument();
+  });
+
+  it("shows 'unread 7d+' badge when days_unread is between 8 and 30", async () => {
+    vi.spyOn(api, "fetchArticle").mockResolvedValue({
+      ...STUB_ARTICLE,
+      agent_read_count: 0,
+      human_read_count: 1,
+      days_unread: 14,
+    });
+    render(<WikiArticle path="people/customer-x" catalog={[]} onNavigate={() => {}} />);
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Customer X" })).toBeInTheDocument(),
+    );
+    expect(screen.getByText("unread 7d+")).toBeInTheDocument();
+  });
+
+  it("shows 'unread 30d+' badge at the boundary — days_unread=30 is 'unread 30d+', not 7d+", async () => {
+    vi.spyOn(api, "fetchArticle").mockResolvedValue({
+      ...STUB_ARTICLE,
+      agent_read_count: 0,
+      human_read_count: 1,
+      days_unread: 30,
+    });
+    render(<WikiArticle path="people/customer-x" catalog={[]} onNavigate={() => {}} />);
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Customer X" })).toBeInTheDocument(),
+    );
+    expect(screen.getByText("unread 30d+")).toBeInTheDocument();
+    expect(screen.queryByText("unread 7d+")).not.toBeInTheDocument();
+  });
+
+  it("shows 'unread 30d+' badge for days_unread=31 (above stale threshold)", async () => {
+    vi.spyOn(api, "fetchArticle").mockResolvedValue({
+      ...STUB_ARTICLE,
+      agent_read_count: 0,
+      human_read_count: 1,
+      days_unread: 31,
+    });
+    render(<WikiArticle path="people/customer-x" catalog={[]} onNavigate={() => {}} />);
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Customer X" })).toBeInTheDocument(),
+    );
+    expect(screen.getByText("unread 30d+")).toBeInTheDocument();
+    expect(screen.queryByText("unread 7d+")).not.toBeInTheDocument();
+  });
+
+  it("shows 'unread 7d+' badge at exact boundary — days_unread=7 now triggers aging badge", async () => {
+    vi.spyOn(api, "fetchArticle").mockResolvedValue({
+      ...STUB_ARTICLE,
+      agent_read_count: 0,
+      human_read_count: 1,
+      days_unread: 7,
+    });
+    render(<WikiArticle path="people/customer-x" catalog={[]} onNavigate={() => {}} />);
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Customer X" })).toBeInTheDocument(),
+    );
+    expect(screen.getByText("unread 7d+")).toBeInTheDocument();
+    expect(screen.queryByText("unread 30d+")).not.toBeInTheDocument();
+  });
+
+  it("shows no staleness badge for a recently-read article", async () => {
+    vi.spyOn(api, "fetchArticle").mockResolvedValue({
+      ...STUB_ARTICLE,
+      agent_read_count: 1,
+      human_read_count: 2,
+      days_unread: 3,
+    });
+    render(<WikiArticle path="people/customer-x" catalog={[]} onNavigate={() => {}} />);
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Customer X" })).toBeInTheDocument(),
+    );
+    expect(screen.queryByText("agents only")).not.toBeInTheDocument();
+    expect(screen.queryByText("unread 30d+")).not.toBeInTheDocument();
+    expect(screen.queryByText("unread 7d+")).not.toBeInTheDocument();
+  });
+
   it("renders nothing for Sources when fetchHistory rejects", async () => {
     // Arrange
     vi.spyOn(api, "fetchArticle").mockResolvedValue(STUB_ARTICLE);

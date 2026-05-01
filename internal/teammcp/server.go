@@ -1916,7 +1916,15 @@ func handleTeamWikiRead(ctx context.Context, _ *mcp.CallToolRequest, args TeamWi
 	if path == "" {
 		return toolError(fmt.Errorf("article_path is required")), nil, nil
 	}
-	bytes, err := brokerGetRaw(ctx, "/wiki/read?path="+url.QueryEscape(path))
+	brokerPath := "/wiki/read?path=" + url.QueryEscape(path)
+	// Pass agent slug so the broker can record this read in the attention log.
+	// Fall back to NEX_AGENT_SLUG for environments that use the new Nex CLI identity.
+	if slug := strings.TrimSpace(os.Getenv("WUPHF_AGENT_SLUG")); slug != "" {
+		brokerPath += "&reader=" + url.QueryEscape(slug)
+	} else if slug := strings.TrimSpace(os.Getenv("NEX_AGENT_SLUG")); slug != "" {
+		brokerPath += "&reader=" + url.QueryEscape(slug)
+	}
+	bytes, err := brokerGetRaw(ctx, brokerPath)
 	if err != nil {
 		return toolError(err), nil, nil
 	}

@@ -168,4 +168,39 @@ Tracking work that is deliberately deferred from the current branch. Each item n
 
 ---
 
+### 15. SystemSchedulesPanel.test.tsx — vi.mock top-level variable bug
+
+**What:** `src/components/apps/SystemSchedulesPanel.test.tsx` crashes vitest with `ReferenceError: Cannot access 'MOCK_SPECS' before initialization` because `vi.mock` hoisting runs before the top-level `MOCK_SPECS` const is initialized.
+
+**Why:** Pre-existing bug in the file as merged. The fix is to move `MOCK_SPECS` inside the factory callback or use `vi.hoisted()`. Out of scope for the wiki read-tracking feature.
+
+**Trigger to revisit:** Next pass on the SystemSchedulesPanel test suite or when vitest compatibility is reviewed.
+
+---
+
+### 16. wiki_reads.go: in-memory ReadStats cache to replace per-article file scan
+
+**What:** `AllStats()` does a full linear scan of `reads.jsonl` on every `BuildArticle` call. As the log grows over months of agent + human reads, this becomes O(n) on every wiki article open. Fix: maintain an in-memory `map[string]ReadStats` updated on each `Append` (already holding the mutex), and serve `Stats`/`AllStats` from the map rather than the file. The file stays as a durable audit log.
+
+**Why:** At v1 corpus scale (≤500 articles, ≤10k read events) the scan is fast enough. After 6+ months with active agent reads it will noticeably slow article page loads.
+
+**Trigger to revisit:** When `reads.jsonl` exceeds ~10k lines, or if article load latency exceeds 200ms in production.
+
+---
+
+## Deferred
+
+Items with known fixes but out of scope for this branch. Each names the trigger that would unblock revisiting.
+
+### 17. Staleness badges need catalog card rendering (article view has a catch-22)
+
+**What:** `StalenessIndicator` is rendered in `WikiArticle.tsx`, which means it only shows in the article view. But `fetchArticle` always sends `&reader=web`, which records a human read and resets `days_unread=0` before the component renders. Result: a human can never see the "unread 30d+" or "agents only" badge in the browser — their own page view clears the state.
+
+**Fix:** Add badge rendering to the wiki catalog cards (sidebar article list) where browsing does not trigger a read. Alternatively, add a `?stats_only=1` param to `BuildArticle` that returns stored stats without appending a new read event.
+
+**Trigger to revisit:** Next pass on the wiki catalog UI, or when a user reports "I never see the staleness badges."
+
+---
+
 ## Closed
+

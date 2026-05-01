@@ -15,6 +15,8 @@
   --wk-wikilink:        var(--olive-500);
   --wk-wikilink-broken: var(--red);
   --wk-amber:           var(--olive-500);
+  --wk-amber-text:      #B8860B;  /* dark amber for readable text on light amber bg */
+  --wk-stale-text:      #B94040;  /* dark red for readable text on light red bg */
   --wk-amber-bg:        var(--olive-200);
   --wk-amber-banner:    var(--olive-100);
   --wk-code-bg:         var(--bg-warm);
@@ -2072,4 +2074,33 @@
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+/* Staleness indicator — shown below the byline */
+.wk-staleness-badge {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--wk-chrome);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 3px;
+  margin-bottom: 8px;
+}
+.wk-staleness-aging {
+  background: rgba(236, 178, 46, 0.15);
+  color: var(--wk-amber-text);
+  border: 1px solid rgba(236, 178, 46, 0.4);
+}
+.wk-staleness-stale {
+  background: rgba(201, 74, 74, 0.12);
+  color: var(--wk-stale-text);
+  border: 1px solid rgba(201, 74, 74, 0.35);
+}
+.wk-staleness-agents-only {
+  background: rgba(18, 100, 163, 0.1);
+  color: #1264A3;
+  border: 1px solid rgba(18, 100, 163, 0.3);
 }

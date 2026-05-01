@@ -42,6 +42,52 @@ import TeamLearningPanel from "./TeamLearningPanel";
 import TocBox, { type TocEntry } from "./TocBox";
 import WikiEditor from "./WikiEditor";
 
+const STALENESS_STALE_DAYS = 30;
+const STALENESS_AGING_DAYS = 7;
+
+// StalenessIndicator shows a small badge when an article has not been accessed
+// by anyone (human or agent) in a while. "Agents only" signals an article
+// actively used for context but never opened by a human.
+function StalenessIndicator({ article }: { article: WikiArticleT }) {
+  const days_unread = article.days_unread ?? 0;
+  const human_read_count = article.human_read_count ?? 0;
+  const agent_read_count = article.agent_read_count ?? 0;
+  if (agent_read_count > 0 && human_read_count === 0) {
+    return (
+      <span
+        className="wk-staleness-badge wk-staleness-agents-only"
+        role="status"
+        aria-label="Article accessed by agents only — never opened by a human"
+      >
+        agents only
+      </span>
+    );
+  }
+  if (days_unread >= STALENESS_STALE_DAYS) {
+    return (
+      <span
+        className="wk-staleness-badge wk-staleness-stale"
+        role="status"
+        aria-label={`Article not read in ${days_unread} days`}
+      >
+        unread 30d+
+      </span>
+    );
+  }
+  if (days_unread >= STALENESS_AGING_DAYS) {
+    return (
+      <span
+        className="wk-staleness-badge wk-staleness-aging"
+        role="status"
+        aria-label={`Article not read in ${days_unread} days`}
+      >
+        unread 7d+
+      </span>
+    );
+  }
+  return null;
+}
+
 // Real backend paths look like `team/people/nazz.md`. Mock/dev paths may
 // drop the `team/` prefix or the `.md` suffix. Accept both so the entity
 // surface lights up in demos without forcing every caller to normalize.
@@ -260,6 +306,7 @@ export default function WikiArticle({
         </div>
         <ArticleTitle title={article.title} />
         {byline}
+        <StalenessIndicator article={article} />
         <Hatnote>
           This article is auto-generated from team activity. See the commit
           history for the full trail.

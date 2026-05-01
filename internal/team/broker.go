@@ -481,6 +481,7 @@ type Broker struct {
 	reviewLog               *ReviewLog
 	reviewResolver          ReviewerResolver
 	factLog                 *FactLog
+	readLog                 *ReadLog
 	entityGraph             *EntityGraph
 	entitySynthesizer       *EntitySynthesizer
 	teamLearningLog         *LearningLog
@@ -780,6 +781,15 @@ func (b *Broker) Start() error {
 	return nil
 }
 
+// WikiReadLog returns the broker's ReadLog under b.mu, matching the pattern
+// used by ReviewLog(). Handlers must use this accessor — not b.readLog directly —
+// to avoid a data race with ensureWikiWorker's write under b.mu.
+func (b *Broker) WikiReadLog() *ReadLog {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.readLog
+}
+
 // ensureWikiWorker initializes the markdown-backend wiki worker when the
 // resolved memory backend is "markdown". Runs once. Never crashes the
 // broker on wiki init failure — the worker is advisory; writes simply fail
@@ -834,6 +844,7 @@ func (b *Broker) ensureWikiWorker() {
 	b.wikiIndex = idx
 	b.wikiExtractor = extractor
 	b.wikiDLQ = dlq
+	b.readLog = NewReadLog(WikiRootDir())
 	b.mu.Unlock()
 
 	// Skill status reconciliation: now that the wiki worker is wired,

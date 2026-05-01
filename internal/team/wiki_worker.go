@@ -876,6 +876,23 @@ func (b *Broker) handleWikiWrite(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// sanitizeReader validates a ?reader= query param before writing it to
+// reads.jsonl. Returns the original value when it is safe, or "" to suppress
+// tracking when it is not. Allowed: lowercase letters, digits, hyphens,
+// underscores, max 64 chars. The special value ReaderHuman ("web") passes.
+func sanitizeReader(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || len(raw) > 64 {
+		return ""
+	}
+	for _, ch := range raw {
+		if !((ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '-' || ch == '_') {
+			return ""
+		}
+	}
+	return raw
+}
+
 // handleWikiRead returns raw article bytes.
 //
 //	GET /wiki/read?path=team/people/nazz.md
@@ -898,6 +915,16 @@ func (b *Broker) handleWikiRead(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 		return
+	}
+	// Track agent reads. The ?reader= param is set by the MCP layer using
+	// WUPHF_AGENT_SLUG. Human reads go through /wiki/article, not here.
+	// Return 400 if the caller passes the reserved human reader ("web"):
+	// an agent slug named "web" would silently inflate human_read_count.
+	if raw := r.URL.Query().Get("reader"); raw == ReaderHuman {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": `reader "web" is reserved for human browser access`})
+		return
+	} else if reader := sanitizeReader(raw); reader != "" {
+		b.WikiReadLog().Append(relPath, reader)
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	_, _ = w.Write(bytes)
@@ -968,7 +995,8 @@ func (b *Broker) handleWikiCatalog(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"wiki backend is not active"}`, http.StatusServiceUnavailable)
 		return
 	}
-	entries, err := worker.Repo().BuildCatalog(r.Context())
+	sortParam := strings.TrimSpace(r.URL.Query().Get("sort"))
+	entries, err := worker.Repo().BuildCatalog(r.Context(), sortParam, b.WikiReadLog())
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -1000,7 +1028,8 @@ func (b *Broker) handleWikiArticle(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	meta, err := worker.Repo().BuildArticle(r.Context(), relPath)
+	reader := sanitizeReader(r.URL.Query().Get("reader"))
+	meta, err := worker.Repo().BuildArticle(r.Context(), relPath, reader, b.WikiReadLog())
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 		return
