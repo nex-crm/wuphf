@@ -42,33 +42,21 @@ function renderIdentity(
     onBack: callbacks.onBack ?? (() => {}),
     ...overrides,
   };
-  return render(<IdentityStep {...props} />);
+  const result = render(<IdentityStep {...props} />);
+  return {
+    ...result,
+    rerenderWith: (newOverrides: Overrides) =>
+      result.rerender(<IdentityStep {...props} {...newOverrides} />),
+  };
 }
 
 describe("IdentityStep", () => {
   it("disables Continue when company or description are empty", () => {
-    const { rerender } = renderIdentity({ company: "", description: "" });
+    const { rerenderWith } = renderIdentity({ company: "", description: "" });
     const cta = screen.getByRole("button", { name: /Choose a blueprint/i });
     expect(cta).toBeDisabled();
 
-    rerender(
-      <IdentityStep
-        company="Acme"
-        description=""
-        priority=""
-        nexEmail=""
-        nexSignupStatus="hidden"
-        nexSignupError=""
-        onChangeCompany={() => {}}
-        onChangeDescription={() => {}}
-        onChangePriority={() => {}}
-        onChangeNexEmail={() => {}}
-        onSubmitNexSignup={() => {}}
-        onOpenNexSignup={() => {}}
-        onNext={() => {}}
-        onBack={() => {}}
-      />,
-    );
+    rerenderWith({ company: "Acme", description: "" });
     expect(
       screen.getByRole("button", { name: /Choose a blueprint/i }),
     ).toBeDisabled();

@@ -21,8 +21,16 @@ export function ApiKeyRow({ field, value, onChange }: ApiKeyRowProps) {
   return (
     <div className="key-row" data-testid={`api-key-row-${field.key}`}>
       <div className="key-label-wrap">
-        <span className="key-label">{field.label}</span>
-        <span className="key-hint">{field.hint}</span>
+        <label
+          className="key-label"
+          htmlFor={`api-key-input-${field.key}`}
+          id={`api-key-label-${field.key}`}
+        >
+          {field.label}
+        </label>
+        <span className="key-hint" id={`api-key-hint-${field.key}`}>
+          {field.hint}
+        </span>
       </div>
       <div
         className="key-input-wrap"
@@ -68,12 +76,15 @@ export function ApiKeyRow({ field, value, onChange }: ApiKeyRowProps) {
         )}
         {useApiKey ? (
           <input
+            id={`api-key-input-${field.key}`}
             className="input"
             type="password"
             placeholder={field.key}
             value={value}
             onChange={(e) => onChange(e.target.value)}
             autoComplete="off"
+            aria-labelledby={`api-key-label-${field.key}`}
+            aria-describedby={`api-key-hint-${field.key}`}
             data-testid={`api-key-input-${field.key}`}
           />
         ) : null}

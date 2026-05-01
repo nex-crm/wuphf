@@ -181,7 +181,7 @@ export const MEMORY_BACKEND_OPTIONS: ReadonlyArray<{
   {
     value: "markdown",
     label: "Team wiki (default)",
-    hint: 'A living knowledge graph for your team. Agents record typed facts as git commits, the LLM rewrites briefs under the "archivist" identity, and every claim has a citation. `/lookup` answers questions with sources. `/lint` flags contradictions, orphans, and stale facts. File-over-app, `git clone`-able, no API key needed.',
+    hint: "Git-backed team memory with cited facts, wiki briefs, and no hosted API key required.",
   },
   {
     value: "nex",

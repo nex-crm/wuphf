@@ -40,7 +40,9 @@ describe("TemplatesStep", () => {
       />,
     );
     expect(screen.getByText(/Loading blueprints/i)).toBeInTheDocument();
-    expect(document.querySelectorAll(".template-card")).toHaveLength(0);
+    expect(
+      screen.queryAllByRole("button", { name: /Bookkeeping|YouTube|Mystery/i }),
+    ).toHaveLength(0);
   });
 
   it("groups known blueprints by category and routes unknown ids to Other", () => {

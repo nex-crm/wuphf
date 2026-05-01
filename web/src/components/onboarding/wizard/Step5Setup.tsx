@@ -358,6 +358,8 @@ export function SetupStep({
   const hasInstalledSelection = runtimePriority.some((label) =>
     runtimeIsReady(label, prereqs, prereqsError),
   );
+  const hasRuntimePath =
+    hasInstalledSelection || localProvider.trim().length > 0;
   const canContinue = canSetupContinue({
     runtimePriority,
     prereqs,
@@ -527,8 +529,7 @@ export function SetupStep({
               color: "var(--text)",
             }}
           >
-            API keys{" "}
-            {hasInstalledSelection ? "(optional fallback)" : "(required)"}
+            API keys {hasRuntimePath ? "(optional fallback)" : "(required)"}
           </p>
           <p
             style={{
@@ -537,9 +538,9 @@ export function SetupStep({
               margin: "0 0 12px 0",
             }}
           >
-            {hasInstalledSelection
-              ? "Only used if every selected CLI fails. Leave blank to rely on the CLI login."
-              : "No installed CLI selected. Add at least one key so agents can reason."}
+            {hasRuntimePath
+              ? "Only used if every selected runtime fails. Leave blank to rely on the selected runtime."
+              : "No runtime selected. Add at least one key so agents can reason."}
           </p>
           {API_KEY_FIELDS.map((field) => (
             <ApiKeyRow

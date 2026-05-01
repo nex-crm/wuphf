@@ -40,26 +40,25 @@ export function TeamStep({ agents, onToggle, onNext, onBack }: TeamStepProps) {
                 <button
                   key={a.slug}
                   className={`wiz-team-tile ${a.checked ? "selected" : ""} ${locked ? "locked" : ""}`}
-                  onClick={() => !locked && onToggle(a.slug)}
+                  onClick={() => onToggle(a.slug)}
                   type="button"
                   disabled={locked}
-                  aria-disabled={locked}
                   title={locked ? "Lead agent — always included" : undefined}
                 >
                   <div className="wiz-team-check">
-                    {a.checked && <CheckIcon />}
+                    {a.checked ? <CheckIcon /> : null}
                   </div>
                   <div>
-                    {a.emoji && (
+                    {a.emoji ? (
                       <span style={{ marginRight: 6 }}>{a.emoji}</span>
-                    )}
+                    ) : null}
                     <span className="wiz-team-name">{a.name}</span>
-                    {locked && (
-                      <span className="wiz-team-lead-badge" aria-label="Lead">
-                        Lead
-                      </span>
-                    )}
-                    {a.role && <div className="wiz-team-role">{a.role}</div>}
+                    {locked ? (
+                      <span className="wiz-team-lead-badge">Lead</span>
+                    ) : null}
+                    {a.role ? (
+                      <div className="wiz-team-role">{a.role}</div>
+                    ) : null}
                   </div>
                 </button>
               );

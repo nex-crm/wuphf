@@ -61,7 +61,8 @@ describe("TeamStep", () => {
         onBack={() => {}}
       />,
     );
-    const tile = screen.getByText("CEO").closest("button") as HTMLButtonElement;
+    const tile = screen.getByText("CEO").closest("button");
+    if (!tile) throw new Error("expected CEO tile to be a button");
     expect(tile).toBeDisabled();
     fireEvent.click(tile);
     expect(onToggle).not.toHaveBeenCalled();

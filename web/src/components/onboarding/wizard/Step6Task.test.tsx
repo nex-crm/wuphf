@@ -47,10 +47,9 @@ describe("TaskStep", () => {
   it("typing in the textarea fires onChangeTaskText", () => {
     const onChangeTaskText = vi.fn();
     renderTask({ onChangeTaskText });
-    fireEvent.change(
-      document.querySelector("#wiz-task-input") as HTMLTextAreaElement,
-      { target: { value: "ship the thing" } },
-    );
+    fireEvent.change(screen.getByLabelText(/First task/i), {
+      target: { value: "ship the thing" },
+    });
     expect(onChangeTaskText).toHaveBeenCalledWith("ship the thing");
   });
 
