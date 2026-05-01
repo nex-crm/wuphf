@@ -13,6 +13,10 @@
 !/docs/experiments/
 !/docs/experiments/**
 !/docs/REVOPS_TEST_PLAN.md
+!/docs/CODE-QUALITY.md
+!/docs/surfaces.md
+!/docs/adr/
+!/docs/adr/**
 /termwright-artifacts/
 .worktrees/
 .vexp/

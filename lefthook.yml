@@ -123,3 +123,10 @@ pre-push:
           exit 0
         fi
         testdata/vhs/check.sh
+    file-size:
+      # Enforce CONTRIBUTING.md's file-size budget: warn at 800 LOC, fail
+      # at 1500 LOC unless the file is on scripts/file-size-allowlist.txt
+      # (forward-only). See docs/CODE-QUALITY.md for the decomposition
+      # patterns. Cheap to run (git ls-files + wc -l), so it lives in
+      # pre-push alongside the other smoke checks.
+      run: bash scripts/check-file-size.sh
