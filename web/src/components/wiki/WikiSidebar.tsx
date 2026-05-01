@@ -82,12 +82,12 @@ export default function WikiSidebar({
         value={query}
         onChange={(e) => setQuery(e.target.value)}
       />
-      {bannerSlug && (
+      {bannerSlug ? (
         <AddToBlueprintBanner
           slug={bannerSlug}
           onDismiss={() => setBannerSlug(null)}
         />
-      )}
+      ) : null}
       <div className="wk-nav-sidebar-scroll">
         {usingSections
           ? sectionList.map((section) => (
@@ -133,7 +133,7 @@ export default function WikiSidebar({
               );
             })}
       </div>
-      {onNavigateAudit && (
+      {onNavigateAudit ? (
         <div className="wk-sidebar-audit">
           <button
             type="button"
@@ -146,8 +146,8 @@ export default function WikiSidebar({
             View audit log →
           </button>
         </div>
-      )}
-      {onNavigateLint && (
+      ) : null}
+      {onNavigateLint ? (
         <div className="wk-sidebar-audit">
           <button
             type="button"
@@ -160,7 +160,7 @@ export default function WikiSidebar({
             Check wiki health →
           </button>
         </div>
-      )}
+      ) : null}
     </aside>
   );
 }
@@ -198,14 +198,14 @@ function SectionGroup({
         }
       >
         <span className="wk-section-title">{section.slug}</span>
-        {!section.from_schema && (
+        {!section.from_schema ? (
           <span className="wk-section-marker" aria-label="Discovered section" />
-        )}
-        {isNew && (
+        ) : null}
+        {isNew ? (
           <span className="wk-section-new" aria-label="New section">
             new
           </span>
-        )}
+        ) : null}
       </h3>
       <ul>
         {entries.length === 0 ? (
