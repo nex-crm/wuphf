@@ -190,3 +190,12 @@ Tracking work that is deliberately deferred from the current branch. Each item n
 
 ## Closed
 
+
+### 17. Staleness badges need catalog card rendering (article view has a catch-22)
+
+**What:** `StalenessIndicator` is rendered in `WikiArticle.tsx`, which means it only shows in the article view. But `fetchArticle` always sends `&reader=web`, which records a human read and resets `days_unread=0` before the component renders. Result: a human can never see the "unread 30d+" or "agents only" badge in the browser — their own page view clears the state.
+
+**Fix:** Add badge rendering to the wiki catalog cards (sidebar article list) where browsing does not trigger a read. Alternatively, add a `?stats_only=1` param to `BuildArticle` that returns stored stats without appending a new read event.
+
+**Trigger to revisit:** Next pass on the wiki catalog UI, or when a user reports "I never see the staleness badges."
+
