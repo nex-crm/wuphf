@@ -7,6 +7,7 @@ This doc is the canonical map. If you ship a feature on one surface, update the 
 ## Status legend
 
 - `✓` — feature exists and is supported on this surface
+- `partial` — a deliberately narrower version exists on this surface
 - `—` — feature does not exist on this surface
 - `⏳` — planned, tracked
 - `⊘` — intentionally not on this surface (see Reasoning)
