@@ -90,7 +90,7 @@ export function extractTaggedMentions(
   const re = new RegExp(MENTION_RE.source, "g");
   for (const match of content.matchAll(re)) {
     const slug = match[1]?.toLowerCase();
-    if (!slug || !known.has(slug)) continue;
+    if (!(slug && known.has(slug))) continue;
     if (slug === "all") {
       wantsAll = true;
       continue;

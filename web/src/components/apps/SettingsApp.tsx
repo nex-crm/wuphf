@@ -18,8 +18,6 @@ import {
   WarningTriangle,
 } from "iconoir-react";
 
-import { ImageGenSection } from "./SettingsApp.imageGen";
-
 import {
   type ConfigSnapshot,
   type ConfigUpdate,
@@ -41,6 +39,7 @@ import {
 } from "../ui/ShredWarning";
 import { showNotice } from "../ui/Toast";
 import { WipeModal } from "../ui/WipeModal";
+import { ImageGenSection } from "./SettingsApp.imageGen";
 
 type SectionId =
   | "general"
@@ -335,6 +334,7 @@ function SaveButton({ label, onSave }: SaveButtonProps) {
   return (
     <div style={styles.saveRow}>
       <button
+        type="button"
         className="btn btn-primary btn-sm"
         onClick={handle}
         disabled={state === "saving"}
@@ -1760,6 +1760,7 @@ export function SettingsApp() {
               const Icon = sec.Icon;
               return (
                 <button
+                  type="button"
                   key={sec.id}
                   style={styles.navItem(sec.id === section)}
                   onClick={() => setSection(sec.id)}

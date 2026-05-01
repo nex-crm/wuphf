@@ -95,7 +95,9 @@ export function StatusPill({
       <span className="workspace-pill-name">{name}</span>
       <span className="status-bar-sep"> · </span>
       <span className="workspace-pill-cost">
-        {usagePending ? "— tokens today" : `${formatTokens(totalTokens)} tokens today`}
+        {usagePending
+          ? "— tokens today"
+          : `${formatTokens(totalTokens)} tokens today`}
       </span>
     </span>
   );

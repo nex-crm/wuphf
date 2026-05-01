@@ -101,7 +101,11 @@ function ProviderCard({ s }: { s: ImageProviderStatus }) {
         <StatusDot s={s} />
         <h3 style={{ fontSize: 15, fontWeight: 600 }}>{s.label}</h3>
         <span
-          style={{ fontSize: 11, color: "var(--text-tertiary)", marginLeft: "auto" }}
+          style={{
+            fontSize: 11,
+            color: "var(--text-tertiary)",
+            marginLeft: "auto",
+          }}
         >
           {s.kind}
           {s.supports_video && " · video"}
@@ -135,11 +139,12 @@ function ProviderCard({ s }: { s: ImageProviderStatus }) {
 
       {s.needs_api_key && (
         <div style={{ marginBottom: 10 }}>
-          <label style={labelStyle}>
+          <label style={labelStyle} htmlFor={`${s.kind}-api-key`}>
             API key {s.api_key_set ? "(set)" : "(unset)"}
           </label>
           <div style={{ display: "flex", gap: 8 }}>
             <input
+              id={`${s.kind}-api-key`}
               type={showKey ? "text" : "password"}
               value={apiKey}
               placeholder={s.api_key_set ? "•••••• (replace)" : "paste here"}
@@ -158,10 +163,20 @@ function ProviderCard({ s }: { s: ImageProviderStatus }) {
         </div>
       )}
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr",
+          gap: 10,
+          marginBottom: 10,
+        }}
+      >
         <div>
-          <label style={labelStyle}>Base URL (optional)</label>
+          <label style={labelStyle} htmlFor={`${s.kind}-base-url`}>
+            Base URL (optional)
+          </label>
           <input
+            id={`${s.kind}-base-url`}
             type="text"
             value={baseURL}
             onChange={(e) => setBaseURL(e.target.value)}
@@ -170,8 +185,11 @@ function ProviderCard({ s }: { s: ImageProviderStatus }) {
           />
         </div>
         <div>
-          <label style={labelStyle}>Default model</label>
+          <label style={labelStyle} htmlFor={`${s.kind}-model`}>
+            Default model
+          </label>
           <input
+            id={`${s.kind}-model`}
             type="text"
             value={model}
             onChange={(e) => setModel(e.target.value)}
@@ -229,9 +247,9 @@ export function ImageGenSection() {
             lineHeight: 1.5,
           }}
         >
-          Backends Artist can call via the <code>image_generate</code> tool. Paste an
-          API key + (optional) base URL + default model. Status dot: green = ready, amber =
-          needs key, grey = stub (backend not yet wired).
+          Backends Artist can call via the <code>image_generate</code> tool.
+          Paste an API key + (optional) base URL + default model. Status dot:
+          green = ready, amber = needs key, grey = stub (backend not yet wired).
         </p>
       </header>
       {providers.map((p) => (

@@ -116,7 +116,11 @@ export function ChannelWizard({ open, onClose }: ChannelWizardProps) {
   if (!open) return null;
 
   return (
-    <div className="channel-wizard-overlay" onClick={handleOverlayClick}>
+    <div
+      className="channel-wizard-overlay"
+      role="presentation"
+      onClick={handleOverlayClick}
+    >
       <div className="channel-wizard-modal card">
         <div className="channel-wizard-title">Create channel</div>
 

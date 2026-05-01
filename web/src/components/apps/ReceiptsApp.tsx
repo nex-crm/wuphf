@@ -2,10 +2,10 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import {
-  type TaskLogEntry,
-  type TaskLogSummary,
   getAgentLogEntries,
   listAgentLogTasks,
+  type TaskLogEntry,
+  type TaskLogSummary,
 } from "../../api/client";
 
 export function ReceiptsApp() {
@@ -46,8 +46,8 @@ function ReceiptList({
         <div
           style={{ fontSize: 12, color: "var(--text-tertiary)", marginTop: 4 }}
         >
-          What each agent actually did, tool by tool. No claims {"—"} just
-          the log.
+          What each agent actually did, tool by tool. No claims {"—"} just the
+          log.
         </div>
       </div>
 
@@ -272,7 +272,11 @@ function ReceiptDetail({
       {!(isLoading || error) && entries.length > 0 && (
         <div style={{ overflow: "auto", flex: 1, padding: "0 20px 20px" }}>
           {entries.map((entry, i) => (
-            <EntryRow key={`${entry.started_at ?? 0}-${i}`} index={i} entry={entry} />
+            <EntryRow
+              key={`${entry.started_at ?? 0}-${i}`}
+              index={i}
+              entry={entry}
+            />
           ))}
         </div>
       )}
