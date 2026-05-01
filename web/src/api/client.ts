@@ -889,9 +889,7 @@ export interface SystemCronSpec {
  * hardcoded mirror constant.
  */
 export async function getSystemCronSpecs(): Promise<SystemCronSpec[]> {
-  const res = await get<{ specs: SystemCronSpec[] }>(
-    "/scheduler/system-specs",
-  );
+  const res = await get<{ specs: SystemCronSpec[] }>("/scheduler/system-specs");
   return res.specs ?? [];
 }
 

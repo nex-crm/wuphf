@@ -3,14 +3,23 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
+import type { SchedulerJob } from "../../api/client";
 import { ToastContainer } from "../ui/Toast";
 
-import type { SchedulerJob } from "../../api/client";
-
-const MOCK_SPECS = [
-  { slug: "nex-insights", min_floor_minutes: 30, default_interval_minutes: 30, description: "Nex insights" },
-  { slug: "task_recheck", min_floor_minutes: 5, default_interval_minutes: 5, description: "Task recheck cadence" },
-];
+const MOCK_SPECS = vi.hoisted(() => [
+  {
+    slug: "nex-insights",
+    min_floor_minutes: 30,
+    default_interval_minutes: 30,
+    description: "Nex insights",
+  },
+  {
+    slug: "task_recheck",
+    min_floor_minutes: 5,
+    default_interval_minutes: 5,
+    description: "Task recheck cadence",
+  },
+]);
 
 vi.mock("../../api/client", async () => {
   const actual =
@@ -192,12 +201,13 @@ describe("<SystemSchedulesPanel> toggle round-trip", () => {
 });
 
 describe("<SystemSchedulesPanel> interval validation", () => {
-  it("blocks PATCH when override is below the per-cron floor", () => {
+  it("blocks PATCH when override is below the per-cron floor", async () => {
     const patchMock = vi.mocked(clientMod.patchSchedulerJob);
     patchMock.mockClear();
 
     // nex-insights floor is 30 min. Try 10.
     render(wrap(<SystemSchedulesPanel jobs={[insightsJob]} />));
+    await screen.findByText(/min: 30m/i);
 
     const input = screen.getByRole("spinbutton", {
       name: /Interval in minutes for Nex insights/i,

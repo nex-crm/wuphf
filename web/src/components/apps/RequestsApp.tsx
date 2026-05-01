@@ -205,6 +205,7 @@ function RequestItem({ request, isPending, onAnswer }: RequestItemProps) {
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {options.map((opt) => (
             <button
+              type="button"
               key={opt.id}
               className={`btn btn-sm ${opt.id === request.recommended_id ? "btn-primary" : "btn-ghost"}`}
               title={opt.description}

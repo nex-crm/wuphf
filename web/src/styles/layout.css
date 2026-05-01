@@ -21,7 +21,6 @@
      whole sidebar scrolls only if total content exceeds viewport. */
   overflow-y: auto;
   overflow-x: hidden;
-  transition: width 0.22s ease;
 }
 
 /* ─── Collapsed rail ─── */
@@ -1046,8 +1045,8 @@ html[data-theme="nex"]
   box-sizing: border-box;
   padding: 0 20px;
   border-bottom: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.8);
-  backdrop-filter: blur(8px);
+  background: var(--bg-card);
+  backdrop-filter: none;
   flex-shrink: 0;
 }
 .channel-title {
@@ -1792,6 +1791,15 @@ html[data-theme="nex"]
 }
 .live-work-section:empty {
   display: none;
+}
+
+.app-panel-loading {
+  display: flex;
+  min-height: 160px;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-tertiary);
+  font-size: 13px;
 }
 
 /* ─── Responsive ─── */

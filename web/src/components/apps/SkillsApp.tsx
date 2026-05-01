@@ -1579,7 +1579,9 @@ function ProposedPreviewBody({ skill }: { skill: Skill }) {
         marginTop: 4,
         marginBottom: 8,
         paddingLeft: 10,
-        borderLeft: "3px solid var(--neutral-200, #cfd1d2)",
+        border: "1px solid var(--neutral-200)",
+        borderRadius: "var(--radius-sm)",
+        padding: 10,
       }}
     >
       {skill.trigger ? (
