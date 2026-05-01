@@ -279,7 +279,7 @@ export default function WikiEditor({
       className={`wk-editor${previewOn ? " wk-editor--with-preview" : ""}`}
       data-testid="wk-editor"
     >
-      {draft && (
+      {draft ? (
         <div
           className="wk-editor-banner wk-editor-banner--draft"
           role="alert"
@@ -303,8 +303,8 @@ export default function WikiEditor({
             </button>
           </div>
         </div>
-      )}
-      {conflict && (
+      ) : null}
+      {conflict ? (
         <div
           className="wk-editor-banner wk-editor-banner--conflict"
           role="alert"
@@ -317,13 +317,13 @@ export default function WikiEditor({
             </button>
           </div>
         </div>
-      )}
+      ) : null}
       {error && !conflict && (
         <div className="wk-editor-banner wk-editor-banner--error" role="alert">
           {error}
         </div>
       )}
-      {previewOn && isMobile && (
+      {previewOn && isMobile ? (
         <div
           className="wk-editor-mobile-tabs"
           role="tablist"
@@ -356,9 +356,9 @@ export default function WikiEditor({
             Preview
           </button>
         </div>
-      )}
+      ) : null}
       <div className="wk-editor-panes">
-        {showSource && (
+        {showSource ? (
           <div className="wk-editor-pane wk-editor-pane--source">
             <label className="wk-editor-label" htmlFor="wk-editor-textarea">
               Article source ({path})
@@ -374,8 +374,8 @@ export default function WikiEditor({
               rows={28}
             />
           </div>
-        )}
-        {showPreview && (
+        ) : null}
+        {showPreview ? (
           <div
             className="wk-editor-pane wk-editor-pane--preview"
             data-testid="wk-editor-preview"
@@ -391,7 +391,7 @@ export default function WikiEditor({
               </ReactMarkdown>
             </div>
           </div>
-        )}
+        ) : null}
       </div>
       <label className="wk-editor-label" htmlFor="wk-editor-commit-msg">
         Edit summary

@@ -399,7 +399,9 @@ function ToolCallCard({
       >
         <span className={`cc-tool-chevron${open ? " open" : ""}`}>▸</span>
         <span className="cc-tool-name">{toolName}</span>
-        {summaryArg && <span className="cc-tool-summary">{summaryArg}</span>}
+        {summaryArg ? (
+          <span className="cc-tool-summary">{summaryArg}</span>
+        ) : null}
       </button>
       {summaryResult && !open && (
         <div className="cc-tool-result-summary">
@@ -413,7 +415,7 @@ function ToolCallCard({
           {summaryError}
         </div>
       )}
-      {open && (
+      {open ? (
         <div className="cc-tool-body">
           {Object.keys(cleanArgs).length > 0 && (
             <>
@@ -433,16 +435,16 @@ function ToolCallCard({
                 ))}
               </>
             )}
-          {hasError && (
+          {hasError ? (
             <>
               <div className="cc-tool-section-label cc-tool-error">
                 {"\u2717 Error"}
               </div>
               <ToolErrorContent error={errorField} compact={compact} />
             </>
-          )}
+          ) : null}
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -565,6 +567,8 @@ function GenericEventCard({
       parsed.text ??
       parsed.summary,
   );
+  const displayDetail =
+    detail.length > 300 ? `${detail.slice(0, 300)}\u2026` : detail;
 
   const extras = useMemo<Record<string, unknown>>(() => {
     const out: Record<string, unknown> = {};
@@ -578,7 +582,7 @@ function GenericEventCard({
 
   return (
     <div className="stream-card">
-      {(phase || agent) && (
+      {phase || agent ? (
         <div className="stream-card-header">
           {phase && (
             <span
@@ -589,12 +593,10 @@ function GenericEventCard({
           )}
           {agent && <span className="stream-card-agent">{agent}</span>}
         </div>
-      )}
-      {detail && (
-        <div className="stream-card-detail">
-          {detail.length > 300 ? `${detail.slice(0, 300)}\u2026` : detail}
-        </div>
-      )}
+      ) : null}
+      {detail ? (
+        <div className="stream-card-detail">{displayDetail}</div>
+      ) : null}
       {Object.keys(extras).length > 0 && Object.keys(extras).length <= 8 && (
         <div className="stream-line-json">
           <Value value={extras} depth={0} compact={compact} />
