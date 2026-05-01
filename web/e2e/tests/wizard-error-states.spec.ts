@@ -60,7 +60,7 @@ async function advanceToSetupStep(page: Page) {
 }
 
 test.describe("Wizard error states", () => {
-  test("prereqsError banner appears + provider:null tiles stay disabled when /onboarding/prereqs fails", async ({
+  test("prereqsError banner appears + provider:null tiles stay selectable when /onboarding/prereqs fails", async ({
     page,
   }) => {
     // Fail the prereqs endpoint BEFORE navigation. Wizard.tsx fires
