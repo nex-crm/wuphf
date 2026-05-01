@@ -63,7 +63,7 @@ export function ReadyStep({
         </ul>
       </div>
 
-      {submitError && (
+      {submitError ? (
         <div
           role="alert"
           data-testid="onboarding-submit-error"
@@ -80,7 +80,7 @@ export function ReadyStep({
           your CLI runtime is installed and try again, or go back to adjust your
           setup.
         </div>
-      )}
+      ) : null}
 
       <div className="wizard-nav">
         <button className="btn btn-ghost" onClick={onBack} type="button">
@@ -96,7 +96,7 @@ export function ReadyStep({
           >
             {submitting
               ? "Starting..."
-              : submitError
+              : submitError && taskText.trim().length > 0
                 ? "Retry"
                 : ONBOARDING_COPY.step3_cta}
             {!submitting && taskText.trim().length > 0 && <EnterHint />}

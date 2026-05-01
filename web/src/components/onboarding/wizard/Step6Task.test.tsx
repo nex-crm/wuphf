@@ -21,6 +21,7 @@ function renderTask(
     taskText: string;
     submitting: boolean;
     onSelectTaskTemplate: (id: string | null) => void;
+    onApplyTaskTemplate: (id: string, text: string) => void;
     onChangeTaskText: (v: string) => void;
     onNext: () => void;
     onSkip: () => void;
@@ -31,6 +32,7 @@ function renderTask(
     taskTemplates: overrides.taskTemplates ?? templates,
     selectedTaskTemplate: overrides.selectedTaskTemplate ?? null,
     onSelectTaskTemplate: overrides.onSelectTaskTemplate ?? (() => {}),
+    onApplyTaskTemplate: overrides.onApplyTaskTemplate ?? (() => {}),
     taskText: overrides.taskText ?? "",
     onChangeTaskText: overrides.onChangeTaskText ?? (() => {}),
     onNext: overrides.onNext ?? (() => {}),
@@ -53,23 +55,25 @@ describe("TaskStep", () => {
   });
 
   it("clicking a suggestion selects it and fills text from prompt (or name)", () => {
-    const onSelectTaskTemplate = vi.fn();
-    const onChangeTaskText = vi.fn();
-    renderTask({ onSelectTaskTemplate, onChangeTaskText });
+    const onApplyTaskTemplate = vi.fn();
+    renderTask({ onApplyTaskTemplate });
 
     fireEvent.click(screen.getByText("Email first customer"));
-    expect(onSelectTaskTemplate).toHaveBeenCalledWith("first-customer");
     // 'first-customer' has a prompt set; that's what should fill the textarea.
-    expect(onChangeTaskText).toHaveBeenCalledWith(
+    expect(onApplyTaskTemplate).toHaveBeenCalledWith(
+      "first-customer",
       "Email the first 5 customers about beta",
     );
   });
 
   it("falls back to template name when prompt is missing", () => {
-    const onChangeTaskText = vi.fn();
-    renderTask({ onChangeTaskText });
+    const onApplyTaskTemplate = vi.fn();
+    renderTask({ onApplyTaskTemplate });
     fireEvent.click(screen.getByText("Draft a plan"));
-    expect(onChangeTaskText).toHaveBeenCalledWith("Draft a plan");
+    expect(onApplyTaskTemplate).toHaveBeenCalledWith(
+      "draft-plan",
+      "Draft a plan",
+    );
   });
 
   it("re-clicking a selected suggestion deselects it (does not refill text)", () => {
@@ -84,6 +88,13 @@ describe("TaskStep", () => {
     expect(onSelectTaskTemplate).toHaveBeenCalledWith(null);
     // No refill on deselect — the user keeps whatever they typed.
     expect(onChangeTaskText).not.toHaveBeenCalled();
+  });
+
+  it("exposes the active suggestion via aria-pressed", () => {
+    renderTask({ selectedTaskTemplate: "first-customer" });
+    expect(
+      screen.getByText("Email first customer").closest("button"),
+    ).toHaveAttribute("aria-pressed", "true");
   });
 
   it("disables the Skip button while submitting", () => {

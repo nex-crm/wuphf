@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { get, post } from "../../api/client";
 import { useAppStore } from "../../stores/app";
@@ -124,6 +124,7 @@ export function Wizard({ onComplete }: WizardProps) {
     string | null
   >(null);
   const [taskText, setTaskText] = useState("");
+  const taskTextAutofilled = useRef(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
 
@@ -165,6 +166,7 @@ export function Wizard({ onComplete }: WizardProps) {
         setRuntimePriority((current) => {
           if (current.length > 0) return current;
           const firstInstalled = RUNTIMES.find((spec) => {
+            if (spec.provider === null) return false;
             const det = list.find((p) => p.name === spec.binary);
             return Boolean(det?.found);
           });
@@ -246,15 +248,15 @@ export function Wizard({ onComplete }: WizardProps) {
   // the task step showed ~26 tiles of unrelated work — including tasks from
   // blueprints the user never picked.
   useEffect(() => {
-    // Clear any task-template selection and suggestion-derived text when the
-    // blueprint changes. Without this, switching from (say) Consulting to
-    // YouTube Factory leaves "Turn the directive..." stuck in the textarea —
-    // nonsensical in the new context. User-typed custom text is preserved,
-    // since selectedTaskTemplate is null for that path.
-    setSelectedTaskTemplate((prevSel) => {
-      if (prevSel !== null) setTaskText("");
-      return null;
-    });
+    // Clear suggestion-derived text when the blueprint changes. Track this
+    // separately from selectedTaskTemplate because re-clicking a suggestion
+    // intentionally deselects the tile while leaving its autofilled text in
+    // place for editing.
+    if (taskTextAutofilled.current) {
+      setTaskText("");
+      taskTextAutofilled.current = false;
+    }
+    setSelectedTaskTemplate(null);
 
     if (selectedBlueprint === null) {
       // "Start from scratch" — preview the same 5-agent founding team the
@@ -845,12 +847,22 @@ export function Wizard({ onComplete }: WizardProps) {
             taskTemplates={taskTemplates}
             selectedTaskTemplate={selectedTaskTemplate}
             onSelectTaskTemplate={setSelectedTaskTemplate}
+            onApplyTaskTemplate={(id, text) => {
+              setSelectedTaskTemplate(id);
+              setTaskText(text);
+              taskTextAutofilled.current = true;
+            }}
             taskText={taskText}
-            onChangeTaskText={setTaskText}
+            onChangeTaskText={(text) => {
+              setTaskText(text);
+              setSelectedTaskTemplate(null);
+              taskTextAutofilled.current = false;
+            }}
             onNext={nextStep}
             onSkip={() => {
               setTaskText("");
               setSelectedTaskTemplate(null);
+              taskTextAutofilled.current = false;
               nextStep();
             }}
             onBack={prevStep}

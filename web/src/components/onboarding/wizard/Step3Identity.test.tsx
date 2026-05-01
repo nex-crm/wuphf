@@ -47,13 +47,30 @@ function renderIdentity(
 
 describe("IdentityStep", () => {
   it("disables Continue when company or description are empty", () => {
-    renderIdentity({ company: "", description: "" });
+    const { rerender } = renderIdentity({ company: "", description: "" });
     const cta = screen.getByRole("button", { name: /Choose a blueprint/i });
     expect(cta).toBeDisabled();
 
-    renderIdentity({ company: "Acme", description: "" });
+    rerender(
+      <IdentityStep
+        company="Acme"
+        description=""
+        priority=""
+        nexEmail=""
+        nexSignupStatus="hidden"
+        nexSignupError=""
+        onChangeCompany={() => {}}
+        onChangeDescription={() => {}}
+        onChangePriority={() => {}}
+        onChangeNexEmail={() => {}}
+        onSubmitNexSignup={() => {}}
+        onOpenNexSignup={() => {}}
+        onNext={() => {}}
+        onBack={() => {}}
+      />,
+    );
     expect(
-      screen.getAllByRole("button", { name: /Choose a blueprint/i })[1],
+      screen.getByRole("button", { name: /Choose a blueprint/i }),
     ).toBeDisabled();
   });
 

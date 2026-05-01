@@ -7,6 +7,7 @@ interface TaskStepProps {
   taskTemplates: TaskTemplate[];
   selectedTaskTemplate: string | null;
   onSelectTaskTemplate: (id: string | null) => void;
+  onApplyTaskTemplate: (id: string, text: string) => void;
   taskText: string;
   onChangeTaskText: (v: string) => void;
   onNext: () => void;
@@ -19,6 +20,7 @@ export function TaskStep({
   taskTemplates,
   selectedTaskTemplate,
   onSelectTaskTemplate,
+  onApplyTaskTemplate,
   taskText,
   onChangeTaskText,
   onNext,
@@ -41,14 +43,18 @@ export function TaskStep({
       </div>
 
       <div>
+        <label className="label" htmlFor="wiz-task-input">
+          First task
+        </label>
         <textarea
           className="task-textarea task-textarea-primary"
           id="wiz-task-input"
+          aria-describedby="wiz-task-input-hint"
           placeholder={ONBOARDING_COPY.step3_placeholder}
           value={taskText}
           onChange={(e) => onChangeTaskText(e.target.value)}
         />
-        <p className="task-textarea-hint">
+        <p className="task-textarea-hint" id="wiz-task-input-hint">
           <Kbd size="sm">↵</Kbd> new line · <Kbd size="sm">{MOD_KEY}</Kbd>
           <Kbd size="sm">↵</Kbd> review setup
         </p>
@@ -66,11 +72,13 @@ export function TaskStep({
                 <button
                   key={t.id}
                   className={`task-suggestion ${isSelected ? "selected" : ""}`}
+                  aria-pressed={isSelected}
                   onClick={() => {
                     const nextId = isSelected ? null : t.id;
-                    onSelectTaskTemplate(nextId);
                     if (nextId) {
-                      onChangeTaskText(t.prompt ?? t.name);
+                      onApplyTaskTemplate(nextId, t.prompt ?? t.name);
+                    } else {
+                      onSelectTaskTemplate(null);
                     }
                   }}
                   type="button"

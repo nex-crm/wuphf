@@ -85,6 +85,15 @@ describe("ReadyStep", () => {
     expect(onSubmit).toHaveBeenCalledTimes(1);
   });
 
+  it("does not label an empty-task retry as Retry because it still skips", () => {
+    const onSkip = vi.fn();
+    renderReady({ taskText: "", submitError: "broker offline", onSkip });
+    const cta = screen.getByTestId("onboarding-submit-button");
+    expect(cta).not.toHaveTextContent(/Retry/i);
+    fireEvent.click(cta);
+    expect(onSkip).toHaveBeenCalledTimes(1);
+  });
+
   it("Back button fires onBack", () => {
     const onBack = vi.fn();
     renderReady({ onBack });

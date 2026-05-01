@@ -186,7 +186,7 @@ export const MEMORY_BACKEND_OPTIONS: ReadonlyArray<{
   {
     value: "nex",
     label: "Nex",
-    hint: "Hosted memory graph that streams in HubSpot, Slack, Gmail, Calendar, and more — your tools become entities agents already know. Free tier available; needs NEX_API_KEY.",
+    hint: "Hosted memory graph that streams in HubSpot, Slack, Gmail, Calendar, and more — your tools become entities agents already know. Paste NEX_API_KEY now or add it later.",
   },
   {
     value: "gbrain",

@@ -419,7 +419,7 @@ export function SetupStep({
         ) : null}
         {prereqsLoading ? null : (
           <div className="runtime-grid">
-            {RUNTIMES.map((spec) => (
+            {RUNTIMES.filter((spec) => spec.provider !== null).map((spec) => (
               <RuntimeTile
                 key={spec.label}
                 spec={spec}
@@ -584,7 +584,7 @@ export function SetupStep({
             <label className="label" htmlFor="wiz-nex-api-key">
               Nex API key{" "}
               <span style={{ fontSize: 11, color: "var(--text-tertiary)" }}>
-                (optional, paste if you have one)
+                (optional during onboarding)
               </span>
             </label>
             <input

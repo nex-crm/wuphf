@@ -95,21 +95,19 @@ const BLUEPRINT_FIXTURE = {
   ],
 };
 
-const PREREQS_FIXTURE = {
-  prereqs: [
-    {
-      name: "claude",
-      required: false,
-      found: true,
-      ok: true,
-      version: "claude test fixture",
-    },
-    { name: "codex", required: false, found: false, ok: false },
-    { name: "opencode", required: false, found: false, ok: false },
-    { name: "cursor", required: false, found: false, ok: false },
-    { name: "windsurf", required: false, found: false, ok: false },
-  ],
-};
+const PREREQS_FIXTURE = [
+  {
+    name: "claude",
+    required: false,
+    found: true,
+    ok: true,
+    version: "claude test fixture",
+  },
+  { name: "codex", required: false, found: false, ok: false },
+  { name: "opencode", required: false, found: false, ok: false },
+  { name: "cursor", required: false, found: false, ok: false },
+  { name: "windsurf", required: false, found: false, ok: false },
+];
 
 async function fulfillJson(route: Route, body: unknown): Promise<void> {
   await route.fulfill({
@@ -145,10 +143,12 @@ async function stubDeterministicWizardEndpoints(
     await fulfillJson(route, { ok: true });
   });
   await page.route("**/onboarding/complete*", async (route) => {
-    captures.complete = route.request().postDataJSON() as Record<
-      string,
-      unknown
-    >;
+    if (route.request().method() === "POST") {
+      captures.complete = route.request().postDataJSON() as Record<
+        string,
+        unknown
+      >;
+    }
     await fulfillJson(route, { ok: true });
   });
 }
@@ -338,7 +338,14 @@ test.describe("wuphf onboarding wizard smoke", () => {
     await page.locator(".wizard-step button.btn-primary").first().click();
     await page.locator(".wizard-step button.btn-primary").first().click();
 
-    await page.getByRole("button", { name: /Draft launch plan/i }).click();
+    const launchPlanSuggestion = page.getByRole("button", {
+      name: /Draft launch plan/i,
+    });
+    await launchPlanSuggestion.click();
+    await expect(page.locator("#wiz-task-input")).toHaveValue(
+      "Draft a launch plan for the first customer loop.",
+    );
+    await launchPlanSuggestion.click();
     await expect(page.locator("#wiz-task-input")).toHaveValue(
       "Draft a launch plan for the first customer loop.",
     );
