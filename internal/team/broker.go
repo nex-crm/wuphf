@@ -63,6 +63,8 @@ type Broker struct {
 	focusMode               bool
 	tasks                   []teamTask
 	requests                []humanInterview
+	humanInvites            []humanInvite
+	humanSessions           []humanSession
 	actions                 []officeActionLog
 	signals                 []officeSignalRecord
 	decisions               []officeDecisionRecord
@@ -408,6 +410,10 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/wiki/write", b.requireAuth(b.handleWikiWrite))
 	mux.HandleFunc("/wiki/write-human", b.requireAuth(b.handleWikiWriteHuman))
 	mux.HandleFunc("/humans", b.requireAuth(b.handleHumans))
+	mux.HandleFunc("/humans/me", b.handleHumanMe)
+	mux.HandleFunc("/humans/invites", b.requireAuth(b.handleHumanInvites))
+	mux.HandleFunc("/humans/invites/accept", b.handleHumanInviteAccept)
+	mux.HandleFunc("/humans/sessions", b.requireAuth(b.handleHumanSessions))
 	mux.HandleFunc("/wiki/read", b.requireAuth(b.handleWikiRead))
 	mux.HandleFunc("/wiki/search", b.requireAuth(b.handleWikiSearch))
 	mux.HandleFunc("/wiki/lookup", b.requireAuth(b.handleWikiLookup))
