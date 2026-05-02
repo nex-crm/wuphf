@@ -1,13 +1,11 @@
 #!/usr/bin/env bash
-# test-go.sh — local mirror of CI's go-test-matrix job.
+# test-go.sh — local package-isolated Go test runner.
 #
-# Why this script exists: the team test suite (internal/team and
-# internal/teammcp) has known goroutine-leak patterns where a worker spawned
-# by one test outlives that test and races against the next test's setup.
-# The race detector is correct to flag those, but they make
-# `go test -race ./...` non-deterministically fail on Mac under any system
-# load. CI works around this by fanning out per-package and disabling
-# -race for the two known-bad packages (see ci.yml :: go-test-list).
+# Why this script exists: a few integration-heavy packages have worker
+# lifecycles and filesystem state that make one big `go test ./...` harder
+# to debug than package-isolated invocations. CI runs the race detector for
+# everything except the known `internal/teammcp` carve-out; keep this helper
+# aligned so local pre-push gives roughly the same signal before GitHub runs.
 #
 # Without a sanctioned local entry point, developers hit the same flakes
 # CI carved away and lose hours bisecting "their" change.
@@ -16,18 +14,17 @@
 #   1. Lists every package under ./... that has test files.
 #   2. Runs each package's tests in its own `go test` invocation
 #      (separate processes = no cross-package state leakage).
-#   3. Adds -race to every package EXCEPT internal/team(mcp)?.
+#   3. Adds -race to every package EXCEPT internal/teammcp.
 #
 # Usage:
 #   bash scripts/test-go.sh                # all packages
-#   bash scripts/test-go.sh internal/team  # one package (still no -race
-#                                          # if it matches the carve-out)
+#   bash scripts/test-go.sh ./internal/team  # one package, still race-enabled
 #   COUNT=3 bash scripts/test-go.sh        # -count=3 for flake hunting
 #   PARALLEL=1 bash scripts/test-go.sh     # -p 1 inside go test
 #
 # Exit code: number of failed packages (0 = green).
 
-set -uo pipefail
+set -euo pipefail
 
 count="${COUNT:-1}"
 parallel="${PARALLEL:-}"
@@ -55,12 +52,9 @@ if [ ! -s "$pkg_list" ]; then
 fi
 total=$(wc -l < "$pkg_list" | tr -d ' ')
 
-# Mirror ci.yml :: go-test-list: skip -race on internal/team(mcp)? and
-# their subpackages until the test-isolation work in those packages
-# (goroutine leaks in headless_codex.go's enqueueHeadlessCodexTurnRecord +
-# pam dispatcher) lands. Keep this regex byte-identical to the jq filter
-# in .github/workflows/ci.yml.
-race_carveout='/internal/team(mcp)?($|/)'
+# Mirror ci.yml :: go-test: skip -race only on internal/teammcp and its
+# subpackages.
+race_carveout='/internal/teammcp($|/)'
 
 failures=0
 while IFS= read -r pkg; do
