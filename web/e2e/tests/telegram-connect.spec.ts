@@ -330,6 +330,35 @@ test.describe("wuphf web /connect Telegram wizard", () => {
     expect(connectBody?.chat_id).toBe(-5093020979);
   });
 
+  test("[8b] manual connect failure stays on the manual step", async ({
+    page,
+  }) => {
+    await page.goto("/");
+    await waitForShellReady(page);
+
+    await page.route("**/telegram/verify", (route) => route.fulfill(verifyOK));
+    await page.route("**/telegram/discover", (route) =>
+      route.fulfill(discoverEmpty),
+    );
+    await page.route("**/telegram/connect", (route) =>
+      route.fulfill(connectFail),
+    );
+
+    await openTelegramWizard(page);
+    await page.getByTestId("tg-token-input").fill("123456:ABC");
+    await page.getByTestId("tg-token-submit").click();
+    await expect(page.getByTestId("tg-step-pick")).toBeVisible({
+      timeout: 5_000,
+    });
+
+    await page.getByTestId("tg-manual-chat-id").click();
+    await page.getByTestId("tg-manual-id-input").fill("-5093020979");
+    await page.getByTestId("tg-manual-submit").click();
+
+    await expect(page.getByTestId("tg-step-manual")).toBeVisible();
+    await expect(page.getByRole("alert")).toContainText(/chat not found/i);
+  });
+
   test('[9] "Use as DM" posts chat_id=0', async ({ page }) => {
     await page.goto("/");
     await waitForShellReady(page);
