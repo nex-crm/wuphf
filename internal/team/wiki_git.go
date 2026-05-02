@@ -359,10 +359,10 @@ func (r *Repo) CommitArchive(ctx context.Context, relPath, tombstone, archivePat
 	slashRel := filepath.ToSlash(relPath)
 	slashArchive := filepath.ToSlash(archivePath)
 	if strings.Contains(slashRel, "..") || !strings.HasPrefix(slashRel, "team/") {
-		return "", fmt.Errorf("wiki archive: invalid relPath %q: must be under team/ with no ..", relPath)
+		return "", fmt.Errorf("wiki archive: relPath %q must be under team/ and must not contain dot-dot segments", relPath)
 	}
 	if strings.Contains(slashArchive, "..") || !strings.HasPrefix(slashArchive, ".archive/") {
-		return "", fmt.Errorf("wiki archive: invalid archivePath %q: must be under .archive/ with no ..", archivePath)
+		return "", fmt.Errorf("wiki archive: archivePath %q must be under .archive/ and must not contain dot-dot segments", archivePath)
 	}
 
 	// Write archive content FIRST so that on a crash between the two writes,

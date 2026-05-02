@@ -120,9 +120,11 @@ func (a *WikiArchiver) Sweep(ctx context.Context) (SweepResult, error) {
 			return nil
 		}
 
-		// Article is too young (inclusive: age == cutoff qualifies).
+		// Article has been edited too recently — use the most recent commit
+		// (Latest), not the first (Oldest), so a page updated yesterday is
+		// never archived even if it was first created years ago.
 		b, ok := bounds[rel]
-		if !ok || b.Oldest.Timestamp.IsZero() || b.Oldest.Timestamp.After(cutoffAgo) {
+		if !ok || b.Latest.Timestamp.IsZero() || b.Latest.Timestamp.After(cutoffAgo) {
 			skipped++
 			return nil
 		}

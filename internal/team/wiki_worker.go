@@ -1080,8 +1080,13 @@ func (b *Broker) handleWikiArchiveSweep(w http.ResponseWriter, r *http.Request) 
 	}
 	b.archiveSweepMu.Lock()
 	defer b.archiveSweepMu.Unlock()
+	// Cap the manual sweep with the same 10-minute timeout as the scheduled
+	// path — prevents a hung git process holding archiveSweepMu indefinitely
+	// if the caller holds the connection open.
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Minute)
+	defer cancel()
 	archiver := NewWikiArchiver(worker.Repo(), b.WikiReadLog(), 0)
-	result, err := archiver.Sweep(r.Context())
+	result, err := archiver.Sweep(ctx)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
