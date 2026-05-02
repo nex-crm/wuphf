@@ -1,4 +1,3 @@
-/* biome-ignore-all lint/suspicious/noDuplicateProperties: Image-rendering fallbacks intentionally target multiple browser engines. */
 /* Notebook surface — scoped to `.notebook-surface`.
  * Per DESIGN-NOTEBOOK.md: physical-notebook metaphor with tan ruled paper,
  * Caveat handwritten display, IBM Plex Serif body, rotated DRAFT stamp.
@@ -890,6 +889,7 @@
 /* Avatars — reuse pixel-art canvas convention. */
 .notebook-surface canvas {
   image-rendering: pixelated;
+  /* biome-ignore lint/suspicious/noDuplicateProperties: Pixel-art fallback targets engines with different crisp-rendering support. */
   image-rendering: -moz-crisp-edges;
   image-rendering: crisp-edges;
 }

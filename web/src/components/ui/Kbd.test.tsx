@@ -69,6 +69,7 @@ describe("<KbdSequence>", () => {
   it("propagates size to every rendered <kbd>", () => {
     const { container } = render(<KbdSequence keys={["⌘", "K"]} size="sm" />);
     const kbds = container.querySelectorAll("kbd");
+    expect(kbds).toHaveLength(2);
     for (const kbd of kbds) {
       expect(kbd.className).toContain("kbd-sm");
     }
@@ -79,6 +80,7 @@ describe("<KbdSequence>", () => {
       <KbdSequence keys={["⌘", "K"]} variant="inverse" />,
     );
     const kbds = container.querySelectorAll("kbd");
+    expect(kbds).toHaveLength(2);
     for (const kbd of kbds) {
       expect(kbd.className).toContain("kbd-inverse");
     }

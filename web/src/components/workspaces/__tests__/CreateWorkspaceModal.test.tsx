@@ -1,4 +1,8 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+  type MutationFunctionContext,
+  QueryClient,
+  QueryClientProvider,
+} from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -128,6 +132,11 @@ describe("<CreateWorkspaceModal>", () => {
     });
 
     try {
+      const mutationContext: MutationFunctionContext = {
+        client: new QueryClient(),
+        meta: undefined,
+      };
+
       useCreateWorkspaceMock.mockImplementation(((
         opts?: Parameters<typeof useCreateWorkspace>[0],
       ) => ({
@@ -142,7 +151,7 @@ describe("<CreateWorkspaceModal>", () => {
             },
             workspaceInput,
             undefined,
-            {} as never,
+            mutationContext,
           );
         },
         isPending: false,

@@ -1,5 +1,3 @@
-/* biome-ignore-all lint/complexity/noImportantStyles: Responsive panel sizing and reduced-motion overrides must win over component CSS. */
-/* biome-ignore-all lint/suspicious/noDuplicateProperties: Image-rendering fallbacks intentionally target multiple browser engines. */
 /* ═══════════════════════════════════════════════════════════════
    WUPHF Web — Global Styles (React)
    Ported from index.legacy.html design system CSS.
@@ -341,6 +339,7 @@ body {
    upscale and the sprites lose their pixel-art edges. */
 .pixel-avatar {
   image-rendering: crisp-edges;
+  /* biome-ignore lint/suspicious/noDuplicateProperties: Pixel-art fallback targets engines with different crisp-rendering support. */
   image-rendering: pixelated;
   border-radius: 4px;
   display: block;
@@ -476,11 +475,13 @@ body {
 /* ─── Side panel responsive ─── */
 @media (max-width: 900px) {
   .side-panel {
+    /* biome-ignore lint/complexity/noImportantStyles: Responsive panel width override must win over fixed desktop sizing. */
     width: 60vw !important;
   }
 }
 @media (max-width: 600px) {
   .side-panel {
+    /* biome-ignore lint/complexity/noImportantStyles: Mobile full-width panel override must win over wider breakpoints. */
     width: 100vw !important;
   }
 }
@@ -502,7 +503,9 @@ body {
   .skill-suggest-expander,
   .side-panel,
   .animate-fade {
+    /* biome-ignore lint/complexity/noImportantStyles: Reduced-motion override must beat animation declarations. */
     animation: none !important;
+    /* biome-ignore lint/complexity/noImportantStyles: Reduced-motion override must beat transition declarations. */
     transition: none !important;
   }
 }
