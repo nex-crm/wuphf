@@ -201,6 +201,31 @@ function candidatePaths(pathOrSlug: string): string[] {
   ];
 }
 
+export interface CompressArticleResponse {
+  queued: boolean;
+  in_flight: boolean;
+  path: string;
+}
+
+/**
+ * Asks the broker to compress the given article. The compressor is a
+ * background goroutine; the response just acknowledges enqueue / debounce.
+ *
+ * - `queued: true` — a fresh compress job was scheduled. Toast: "Compressing…"
+ * - `in_flight: true` — a job is already running for this article. Toast:
+ *   "Already compressing, check back soon."
+ *
+ * The compressed article shows up after the worker commits; callers should
+ * refetch the article on a subsequent navigation or via a manual refresh.
+ */
+export async function compressArticle(
+  path: string,
+): Promise<CompressArticleResponse> {
+  return post<CompressArticleResponse>(
+    `/wiki/compress?path=${encodeURIComponent(path)}`,
+  );
+}
+
 export async function fetchArticle(path: string): Promise<WikiArticle> {
   const tried: string[] = [];
   for (const candidate of candidatePaths(path)) {

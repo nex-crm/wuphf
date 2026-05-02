@@ -6,6 +6,7 @@ import type { PluggableList } from "unified";
 import type { EntityKind } from "../../api/entity";
 import { detectPlaybook } from "../../api/playbook";
 import {
+  compressArticle,
   fetchArticle,
   fetchHistory,
   fetchHumans,
@@ -88,6 +89,70 @@ function StalenessIndicator({ article }: { article: WikiArticleT }) {
     );
   }
   return null;
+}
+
+// CompressButton triggers POST /wiki/compress and surfaces the queued vs.
+// already-compressing states inline. The button is shown when an article is
+// long enough to benefit from compression (word_count > MIN_COMPRESS_WORDS).
+const MIN_COMPRESS_WORDS = 200;
+
+interface CompressButtonProps {
+  path: string;
+  wordCount: number;
+}
+
+function CompressButton({ path, wordCount }: CompressButtonProps) {
+  const [status, setStatus] = useState<
+    "idle" | "pending" | "queued" | "in_flight" | "error"
+  >("idle");
+  const [message, setMessage] = useState<string>("");
+
+  if (wordCount <= MIN_COMPRESS_WORDS) return null;
+
+  async function handleClick() {
+    setStatus("pending");
+    setMessage("");
+    try {
+      const res = await compressArticle(path);
+      if (res.queued) {
+        setStatus("queued");
+        setMessage("Compressing article…");
+      } else if (res.in_flight) {
+        setStatus("in_flight");
+        setMessage("Already compressing, check back soon.");
+      } else {
+        setStatus("idle");
+        setMessage("");
+      }
+    } catch (err: unknown) {
+      setStatus("error");
+      setMessage(err instanceof Error ? err.message : "Compress failed");
+    }
+  }
+
+  return (
+    <span className="wk-compress-control">
+      <button
+        type="button"
+        className="wk-compress-btn"
+        onClick={() => {
+          void handleClick();
+        }}
+        disabled={status === "pending"}
+        aria-label={`Compress this article (${wordCount} words)`}
+      >
+        {status === "pending" ? "Compressing…" : "Compress"}
+      </button>
+      {message ? (
+        <span
+          className={`wk-compress-toast wk-compress-${status}`}
+          role="status"
+        >
+          {message}
+        </span>
+      ) : null}
+    </span>
+  );
 }
 
 // Real backend paths look like `team/people/nazz.md`. Mock/dev paths may
@@ -432,6 +497,7 @@ function ArticleBadges({ article }: { article: WikiArticleT }) {
   return (
     <>
       <StalenessIndicator article={article} />
+      <CompressButton path={article.path} wordCount={article.word_count} />
       <SynthesisQueuedBadge queued={article.synthesis_queued} />
     </>
   );
