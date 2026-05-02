@@ -1,3 +1,4 @@
+/* biome-ignore-all lint/style/noDescendingSpecificity: Search modal selectors are section-grouped so state overrides stay near their component rules. */
 /* ═══════════════════════════════════════════════════════════════
    Search Modal + Channel Wizard + Disconnect Banner
    ═══════════════════════════════════════════════════════════════ */
