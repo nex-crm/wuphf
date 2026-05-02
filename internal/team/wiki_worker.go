@@ -1040,7 +1040,10 @@ func (b *Broker) handleWikiArticle(w http.ResponseWriter, r *http.Request) {
 	if meta.Ghost {
 		if synth := b.EntitySynthesizer(); synth != nil {
 			// Derive kind and slug from "team/{kind}/{slug}.md".
-			parts := strings.SplitN(strings.TrimPrefix(relPath, "team/"), "/", 2)
+			// SplitN with limit 3 lets us distinguish a valid two-segment path
+			// (len==2) from a deeper nested path (len==3) like team/a/b/c.md,
+			// which does not correspond to a standard entity brief.
+			parts := strings.SplitN(strings.TrimPrefix(relPath, "team/"), "/", 3)
 			if len(parts) == 2 {
 				kind := EntityKind(parts[0])
 				slug := strings.TrimSuffix(parts[1], ".md")
