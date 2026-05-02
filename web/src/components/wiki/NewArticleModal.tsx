@@ -145,20 +145,20 @@ export default function NewArticleModal({
           onChange={(e) => setTitle(e.target.value)}
         />
 
-        {path && (
+        {path ? (
           <p className="wk-editor-help">
             Will create <code>{path}</code>
           </p>
-        )}
+        ) : null}
 
-        {error && (
+        {error ? (
           <div
             className="wk-editor-banner wk-editor-banner--error"
             role="alert"
           >
             {error}
           </div>
-        )}
+        ) : null}
 
         <div className="wk-editor-actions">
           <button

@@ -565,7 +565,7 @@ function ActivitySection({
         }}
       >
         <div style={{ fontSize: 14, fontWeight: 600 }}>{title}</div>
-        {meta && <div className="app-card-meta">{meta}</div>}
+        {meta ? <div className="app-card-meta">{meta}</div> : null}
       </div>
       {children}
     </section>
@@ -598,7 +598,7 @@ function ActivityItem({
           {title}
         </span>
       </div>
-      {body && (
+      {body ? (
         <div
           style={{
             fontSize: 12,
@@ -608,10 +608,10 @@ function ActivityItem({
         >
           {body}
         </div>
-      )}
-      {meta.length > 0 && (
+      ) : null}
+      {meta.length > 0 ? (
         <div className="app-card-meta">{meta.join(" \u2022 ")}</div>
-      )}
+      ) : null}
     </div>
   );
 }

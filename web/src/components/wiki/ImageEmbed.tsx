@@ -79,9 +79,11 @@ export function ImageEmbed({
             className="image-embed__img"
           />
         </button>
-        {alt && <figcaption className="image-embed__caption">{alt}</figcaption>}
+        {alt ? (
+          <figcaption className="image-embed__caption">{alt}</figcaption>
+        ) : null}
       </figure>
-      {open && (
+      {open ? (
         <div
           className="image-embed__lightbox"
           role="dialog"
@@ -109,7 +111,7 @@ export function ImageEmbed({
             onClick={(e) => e.stopPropagation()}
           />
         </div>
-      )}
+      ) : null}
     </>
   );
 }

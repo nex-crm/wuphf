@@ -145,16 +145,16 @@ export function ThreadPanel() {
       </div>
 
       <div ref={messagesRef} className="thread-panel-body">
-        {parent && (
+        {parent ? (
           <div className="thread-panel-parent">
             <MessageBubble message={parent} />
           </div>
-        )}
-        {replies.length > 0 && (
+        ) : null}
+        {replies.length > 0 ? (
           <div className="thread-panel-replies-count">
             {replies.length} {replies.length === 1 ? "reply" : "replies"}
           </div>
-        )}
+        ) : null}
         {replies.length === 0 ? (
           <div className="thread-panel-empty">
             No replies yet. Start the conversation below.
@@ -178,7 +178,7 @@ export function ThreadPanel() {
           offers a dismiss. This mirrors Slack's "Replying to …" affordance
           and makes the active reply_to target visible. */}
       <div className="composer">
-        {quoting && (
+        {quoting ? (
           <div className="thread-quote-chip">
             <svg
               width="12"
@@ -220,7 +220,7 @@ export function ThreadPanel() {
               </svg>
             </button>
           </div>
-        )}
+        ) : null}
         <div className="composer-inner">
           <textarea
             ref={textareaRef}

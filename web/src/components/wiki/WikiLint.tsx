@@ -95,11 +95,11 @@ export default function WikiLint({ onNavigate }: WikiLintProps) {
         >
           {loading ? "Checking…" : "Check again now"}
         </button>
-        {report && (
+        {report ? (
           <span className="wk-audit-strapline" style={{ alignSelf: "center" }}>
             Last checked: {report.date}
           </span>
-        )}
+        ) : null}
       </section>
 
       {loading && !report ? (
@@ -174,7 +174,7 @@ export default function WikiLint({ onNavigate }: WikiLintProps) {
         </table>
       ) : null}
 
-      {resolveTarget && report && (
+      {resolveTarget && report ? (
         <ResolveContradictionModal
           finding={resolveTarget.finding}
           findingIdx={resolveTarget.idx}
@@ -185,7 +185,7 @@ export default function WikiLint({ onNavigate }: WikiLintProps) {
             loadReport();
           }}
         />
-      )}
+      ) : null}
     </main>
   );
 }
