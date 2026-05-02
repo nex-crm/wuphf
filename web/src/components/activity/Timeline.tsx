@@ -58,7 +58,10 @@ export function Timeline({ events, emptyLabel, limit }: TimelineProps) {
   return (
     <div className="timeline">
       {visible.map((ev, i) => (
-        <div key={i} className={`timeline-row timeline-${ev.type}`}>
+        <div
+          key={`${ev.type}-${ev.timestamp}-${ev.content}`}
+          className={`timeline-row timeline-${ev.type}`}
+        >
           <div className="timeline-rail">
             <span className="timeline-icon">{ICONS[ev.type] || "\u00B7"}</span>
             {i < visible.length - 1 && <span className="timeline-connector" />}

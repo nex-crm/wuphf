@@ -1,4 +1,5 @@
 /* biome-ignore-all lint/complexity/noImportantStyles: Responsive panel sizing and reduced-motion overrides must win over component CSS. */
+/* biome-ignore-all lint/suspicious/noDuplicateProperties: Image-rendering fallbacks intentionally target multiple browser engines. */
 /* ═══════════════════════════════════════════════════════════════
    WUPHF Web — Global Styles (React)
    Ported from index.legacy.html design system CSS.

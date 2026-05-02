@@ -45,17 +45,24 @@ export function KbdSequence({
   const chords: string[][] = Array.isArray(keys[0])
     ? (keys as string[][])
     : [keys as string[]];
+  const chordKeys = new Map<string, number>();
+  const keyKeys = new Map<string, number>();
+  const uniqueKey = (seen: Map<string, number>, value: string) => {
+    const occurrence = seen.get(value) ?? 0;
+    seen.set(value, occurrence + 1);
+    return occurrence === 0 ? value : `${value}-${occurrence}`;
+  };
   return (
     <span className={`kbd-sequence ${className}`.trim()}>
       {chords.map((chord, i) => (
-        <span key={i} className="kbd-chord">
+        <span key={uniqueKey(chordKeys, chord.join("+"))} className="kbd-chord">
           {i > 0 && (
             <span className="kbd-then" aria-hidden="true">
               then
             </span>
           )}
-          {chord.map((k, j) => (
-            <Kbd key={j} size={size} variant={variant}>
+          {chord.map((k) => (
+            <Kbd key={uniqueKey(keyKeys, k)} size={size} variant={variant}>
               {k}
             </Kbd>
           ))}

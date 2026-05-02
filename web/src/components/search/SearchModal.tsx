@@ -42,11 +42,14 @@ function highlightMatch(text: string, query: string): ReactNode {
   const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const regex = new RegExp(`(${escaped})`, "gi");
   const parts = text.split(regex);
-  return parts.map((part, i) => {
+  let offset = 0;
+  return parts.map((part) => {
+    const key = `${part}-${offset}`;
+    offset += part.length;
     const isMatch =
       regex.test(part) && part.toLowerCase() === query.toLowerCase();
     regex.lastIndex = 0;
-    return isMatch ? <mark key={i}>{part}</mark> : part;
+    return isMatch ? <mark key={key}>{part}</mark> : part;
   });
 }
 
@@ -122,8 +125,8 @@ export function SearchModal() {
               return [] as MessageHit[];
             }
           }),
-        ).then((grouped) =>
-          grouped
+        ).then((messageGroups) =>
+          messageGroups
             .flat()
             .sort(
               (a, b) =>
@@ -150,7 +153,7 @@ export function SearchModal() {
               () => [] as NotebookSearchHit[],
             ),
           ),
-        ).then((grouped) => grouped.flat().slice(0, 8));
+        ).then((notebookGroups) => notebookGroups.flat().slice(0, 8));
 
         const [msg, wiki, nb] = await Promise.all([
           messagesP,

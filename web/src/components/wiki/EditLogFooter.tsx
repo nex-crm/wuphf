@@ -41,7 +41,7 @@ export default function EditLogFooter({
         const isLive = idx === 0;
         return (
           <span
-            key={`${entry.commit_sha}-${idx}`}
+            key={entry.commit_sha}
             className={isLive ? "wk-entry wk-live" : "wk-entry"}
             data-testid={isLive ? "wk-live-entry" : undefined}
           >

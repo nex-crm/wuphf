@@ -273,7 +273,7 @@ function ReceiptDetail({
         <div style={{ overflow: "auto", flex: 1, padding: "0 20px 20px" }}>
           {entries.map((entry, i) => (
             <EntryRow
-              key={`${entry.started_at ?? 0}-${i}`}
+              key={`${entry.started_at ?? 0}-${entry.agent_slug}-${entry.tool_name}`}
               index={i}
               entry={entry}
             />

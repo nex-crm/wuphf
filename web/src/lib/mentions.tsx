@@ -54,7 +54,7 @@ export function parseMentions(
   // matchAll over a fresh regex avoids lastIndex leaking between invocations.
   const re = new RegExp(MENTION_RE.source, "g");
   for (const m of content.matchAll(re)) {
-    const slug = m[1];
+    const [, slug] = m;
     if (m.index === undefined) continue;
     if (!known.has(slug.toLowerCase())) continue;
     // The pattern captures an optional leading boundary char; preserve it
@@ -104,10 +104,14 @@ export function extractTaggedMentions(
 }
 
 export function renderMentionTokens(tokens: MentionToken[]): ReactNode[] {
-  return tokens.map((t, i) => {
+  const seen = new Map<string, number>();
+  return tokens.map((t) => {
+    const occurrence = seen.get(t.value) ?? 0;
+    seen.set(t.value, occurrence + 1);
+    const key = `${t.kind}-${t.value}-${occurrence}`;
     if (t.kind === "mention") {
       return (
-        <span key={`m-${i}-${t.value}`} className="mention">
+        <span key={key} className="mention">
           @{t.value}
         </span>
       );

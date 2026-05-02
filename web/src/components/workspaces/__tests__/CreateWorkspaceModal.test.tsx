@@ -14,7 +14,10 @@ vi.mock("../../../api/workspaces", async () => {
   };
 });
 
-import { useCreateWorkspace } from "../../../api/workspaces";
+import {
+  type CreateWorkspaceInput,
+  useCreateWorkspace,
+} from "../../../api/workspaces";
 
 const useCreateWorkspaceMock = vi.mocked(useCreateWorkspace);
 
@@ -130,9 +133,10 @@ describe("<CreateWorkspaceModal>", () => {
       });
     });
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    useCreateWorkspaceMock.mockImplementation(((opts?: any) => ({
-      mutate: (input: unknown) => {
+    useCreateWorkspaceMock.mockImplementation(((
+      opts?: Parameters<typeof useCreateWorkspace>[0],
+    ) => ({
+      mutate: (workspaceInput: CreateWorkspaceInput) => {
         opts?.onSuccess?.(
           {
             name: "side-project",
@@ -141,13 +145,12 @@ describe("<CreateWorkspaceModal>", () => {
             runtime_home: "/tmp/x",
             state: "running",
           },
-          input,
+          workspaceInput,
           undefined,
           {} as never,
         );
       },
       isPending: false,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
     })) as unknown as typeof useCreateWorkspace);
 
     renderModal();

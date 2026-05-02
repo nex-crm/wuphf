@@ -687,9 +687,9 @@ function DetailList({ label, items }: { label: string; items: string[] }) {
         {label}
       </div>
       <ul className="task-detail-deps" style={{ display: "block" }}>
-        {items.map((item, index) => (
+        {items.map((item) => (
           <li
-            key={`${label}-${index}`}
+            key={`${label}-${item}`}
             style={{
               marginBottom: 6,
               whiteSpace: "normal",

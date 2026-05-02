@@ -45,7 +45,7 @@ export default function HatBar({
       {rightRail && rightRail.length > 0 && (
         <span className="wk-rail-right">
           {rightRail.map((item, i) => (
-            <span key={`${item}-${i}`}>
+            <span key={item}>
               {i > 0 && <span>•</span>} {item}
             </span>
           ))}

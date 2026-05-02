@@ -1401,7 +1401,7 @@ export function SettingsApp() {
           <div key={group.label}>
             <p style={styles.navGroupLabel}>{group.label}</p>
             {group.items.map((sec) => {
-              const Icon = sec.Icon;
+              const { Icon } = sec;
               return (
                 <button
                   key={sec.id}

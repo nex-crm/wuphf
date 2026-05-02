@@ -402,9 +402,9 @@ export function ArtifactsApp() {
             ) : (
               allActions
                 .slice(0, 12)
-                .map((action, i) => (
+                .map((action) => (
                   <ActivityItem
-                    key={i}
+                    key={`${action.name ?? ""}-${action.title ?? ""}-${action.related_id ?? ""}-${action.summary ?? ""}`}
                     title={
                       action.summary || action.name || action.title || "Action"
                     }

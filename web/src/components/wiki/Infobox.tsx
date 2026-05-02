@@ -25,8 +25,11 @@ export default function Infobox({ title, fields, sections }: InfoboxProps) {
             <FieldRow key={f.dt} field={f} />
           ))}
         </dl>
-        {sections?.map((section, i) => (
-          <div key={`ib-section-${i}`} className="wk-ib-section">
+        {sections?.map((section) => (
+          <div
+            key={section.fields.map((field) => field.dt).join("|")}
+            className="wk-ib-section"
+          >
             <dl>
               {section.fields.map((f) => (
                 <FieldRow key={f.dt} field={f} />

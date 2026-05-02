@@ -195,7 +195,7 @@ export function WipeModal({
             onClick={enabled ? onConfirm : undefined}
             disabled={!enabled}
           >
-            {busy === true ? "Working…" : <>{confirmLabel}</>}
+            {busy === true ? "Working…" : confirmLabel}
           </button>
         </div>
       </div>

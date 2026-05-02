@@ -55,7 +55,7 @@ export function parseWikiLinkInner(raw: string): WikiLink | null {
   if (slug.includes("..")) return null;
   if (slug.startsWith("/")) return null;
   // Control chars / NUL.
-  if (/[\x00-\x1f]/.test(slug)) return null;
+  if ([...slug].some((char) => char.charCodeAt(0) <= 0x1f)) return null;
 
   return { slug, display };
 }
@@ -94,7 +94,7 @@ export function wikiLinkRemarkPlugin(resolver: (slug: string) => boolean) {
   return function plugin() {
     return function transformer(tree: unknown) {
       walk(tree as MdAnyNode, (parent) => {
-        const children = parent.children;
+        const { children } = parent;
         for (let i = 0; i < children.length; i++) {
           const child = children[i];
           if (
@@ -102,7 +102,7 @@ export function wikiLinkRemarkPlugin(resolver: (slug: string) => boolean) {
             typeof (child as MdTextNode).value !== "string"
           )
             continue;
-          const value = (child as MdTextNode).value;
+          const { value } = child as MdTextNode;
           if (!value.includes("[[")) continue;
 
           const replacements = buildReplacements(value, resolver);
@@ -122,11 +122,16 @@ function buildReplacements(
   const re = /\[\[([^\]\n]+)\]\]/g;
   const out: MdAnyNode[] = [];
   let lastIndex = 0;
-  let match: RegExpExecArray | null;
   let changed = false;
-  while ((match = re.exec(value)) !== null) {
-    const link = parseWikiLinkInner(match[1]);
-    if (!link) continue;
+  let match = re.exec(value);
+  while (match !== null) {
+    const [, rawLink] = match;
+    const { lastIndex: nextLastIndex } = re;
+    const link = parseWikiLinkInner(rawLink);
+    if (!link) {
+      match = re.exec(value);
+      continue;
+    }
     changed = true;
     if (match.index > lastIndex) {
       out.push({ type: "text", value: value.slice(lastIndex, match.index) });
@@ -145,7 +150,8 @@ function buildReplacements(
         },
       },
     });
-    lastIndex = re.lastIndex;
+    lastIndex = nextLastIndex;
+    match = re.exec(value);
   }
   if (!changed) return [];
   if (lastIndex < value.length) {
@@ -156,7 +162,7 @@ function buildReplacements(
 
 function walk(node: MdAnyNode, onParent: (parent: MdParent) => void) {
   const maybeParent = node as { children?: MdAnyNode[] };
-  const children = maybeParent.children;
+  const { children } = maybeParent;
   if (!Array.isArray(children)) return;
   onParent(node as MdParent);
   // Walk a snapshot because onParent may have mutated children.

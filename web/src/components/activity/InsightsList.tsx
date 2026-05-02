@@ -41,8 +41,11 @@ export function InsightsList({
 
   return (
     <div className="insight-list">
-      {visible.map((ins, i) => (
-        <div key={i} className={`insight-row insight-${ins.priority}`}>
+      {visible.map((ins) => (
+        <div
+          key={`${ins.priority}-${ins.category ?? ""}-${ins.title}`}
+          className={`insight-row insight-${ins.priority}`}
+        >
           <div className="insight-head">
             <span className={`insight-badge insight-badge-${ins.priority}`}>
               [{PRIORITY_LABEL[ins.priority]}]

@@ -152,6 +152,7 @@ export default function WikiArticle({
 
   useEffect(() => {
     let cancelled = false;
+    void externalRefreshNonce;
     setLoading(true);
     setError(null);
     fetchArticle(path)
@@ -169,10 +170,11 @@ export default function WikiArticle({
     return () => {
       cancelled = true;
     };
-  }, [path]);
+  }, [path, externalRefreshNonce]);
 
   useEffect(() => {
     let cancelled = false;
+    void externalRefreshNonce;
     setHistoryCommits(null);
     setHistoryLoading(true);
     setHistoryError(false);
@@ -193,7 +195,7 @@ export default function WikiArticle({
     return () => {
       cancelled = true;
     };
-  }, [path]);
+  }, [path, externalRefreshNonce]);
 
   useEffect(() => {
     setLiveAgent(null);
@@ -295,7 +297,7 @@ export default function WikiArticle({
             Team Wiki
           </a>
           {breadcrumbSegments.map((seg, i) => (
-            <span key={`${seg}-${i}`} style={{ display: "contents" }}>
+            <span key={seg} style={{ display: "contents" }}>
               <span className="sep">›</span>
               {i < breadcrumbSegments.length - 1 ? (
                 <a href="#">{seg}</a>

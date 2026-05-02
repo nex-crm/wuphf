@@ -125,7 +125,7 @@ export default function WikiLint({ onNavigate }: WikiLintProps) {
           <tbody>
             {report.findings.map((f, idx) => (
               <tr
-                key={`${f.type}-${f.entity_slug ?? ""}-${idx}`}
+                key={`${f.type}-${f.entity_slug ?? ""}-${f.summary}`}
                 className={`wk-audit-row ${findingRowClass(f.severity)}`}
               >
                 <td className="wk-audit-when">

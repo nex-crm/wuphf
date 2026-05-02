@@ -57,7 +57,9 @@ describe("<KbdSequence>", () => {
   it("propagates size to every rendered <kbd>", () => {
     const { container } = render(<KbdSequence keys={["⌘", "K"]} size="sm" />);
     const kbds = container.querySelectorAll("kbd");
-    kbds.forEach((k) => expect(k.className).toContain("kbd-sm"));
+    for (const kbd of kbds) {
+      expect(kbd.className).toContain("kbd-sm");
+    }
   });
 
   it("propagates inverse variant to every rendered <kbd>", () => {
@@ -65,7 +67,9 @@ describe("<KbdSequence>", () => {
       <KbdSequence keys={["⌘", "K"]} variant="inverse" />,
     );
     const kbds = container.querySelectorAll("kbd");
-    kbds.forEach((k) => expect(k.className).toContain("kbd-inverse"));
+    for (const kbd of kbds) {
+      expect(kbd.className).toContain("kbd-inverse");
+    }
   });
 
   it('marks the "then" separator aria-hidden so screen readers skip it', () => {

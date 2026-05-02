@@ -32,13 +32,13 @@ export function ThreadPanel() {
   // returns both in the same list because thread_id matches either id or
   // reply_to.
   const { parent, replies } = useMemo(() => {
-    let parent: Message | null = null;
-    const replies: Message[] = [];
+    let threadParent: Message | null = null;
+    const threadReplies: Message[] = [];
     for (const m of messages) {
-      if (m.id === activeThreadId) parent = m;
-      else if (m.reply_to) replies.push(m);
+      if (m.id === activeThreadId) threadParent = m;
+      else if (m.reply_to) threadReplies.push(m);
     }
-    return { parent, replies };
+    return { parent: threadParent, replies: threadReplies };
   }, [messages, activeThreadId]);
 
   // Auto-scroll to the bottom when a new reply arrives. Anchoring at the

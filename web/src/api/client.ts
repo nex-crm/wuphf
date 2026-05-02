@@ -15,9 +15,10 @@ export async function initApi(): Promise<void> {
   try {
     const r = await fetch("/api-token");
     const data = await r.json();
-    token = data.token;
-    if (data.broker_url) {
-      brokerDirect = String(data.broker_url).replace(/\/+$/, "");
+    const { token: nextToken, broker_url: brokerUrl } = data;
+    token = nextToken;
+    if (brokerUrl) {
+      brokerDirect = String(brokerUrl).replace(/\/+$/, "");
     }
     useProxy = true;
   } catch {
@@ -25,7 +26,8 @@ export async function initApi(): Promise<void> {
     try {
       const r = await fetch(`${brokerDirect}/web-token`);
       const data = await r.json();
-      token = data.token;
+      const { token: nextToken } = data;
+      token = nextToken;
     } catch {
       // broker unreachable — will fail on first request
     }
@@ -1111,10 +1113,10 @@ export interface UndoRejectSkillResponse {
 }
 
 export function undoRejectSkill(
-  token: string,
+  undoToken: string,
 ): Promise<UndoRejectSkillResponse> {
   return post<UndoRejectSkillResponse>(`/skills/reject/undo`, {
-    undo_token: token,
+    undo_token: undoToken,
   });
 }
 
@@ -1329,8 +1331,8 @@ export function getConfig() {
   return get<ConfigSnapshot>("/config");
 }
 
-export function updateConfig(patch: ConfigUpdate) {
-  return post<{ status: string }>("/config", patch);
+export function updateConfig(configPatch: ConfigUpdate) {
+  return post<{ status: string }>("/config", configPatch);
 }
 
 // Doctor endpoint — one entry per registered local OpenAI-compatible

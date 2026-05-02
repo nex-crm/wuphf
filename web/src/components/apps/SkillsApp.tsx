@@ -24,6 +24,7 @@ import {
 import { useTeamLeadSlug } from "../../hooks/useConfig";
 import { useOfficeMembers } from "../../hooks/useMembers";
 import { useAppStore } from "../../stores/app";
+import { confirm as confirmDialog } from "../ui/ConfirmDialog";
 import { LightningIcon } from "../ui/LightningIcon";
 import { SidePanel } from "../ui/SidePanel";
 import { showNotice, showUndoToast } from "../ui/Toast";
@@ -226,20 +227,22 @@ export function SkillsApp() {
     setPreviewDirty(false);
   }, []);
 
-  // Closes the SidePanel; prompts the user to confirm when there are
-  // unsaved edits (proposed skills can be edited inline). The browser
-  // confirm() is fine here — we already use it elsewhere for danger-zone
-  // confirmations, and the destructive consequence (lost edits) maps cleanly
-  // onto the binary OK/Cancel UX.
   const handlePreviewClose = useCallback(() => {
+    const closePreview = () => {
+      setPreviewSkill(null);
+      setPreviewDirty(false);
+    };
     if (previewDirty) {
-      const ok = window.confirm(
-        "You have unsaved edits. Discard them and close?",
-      );
-      if (!ok) return;
+      confirmDialog({
+        title: "Discard edits?",
+        message: "You have unsaved edits. Discard them and close?",
+        confirmLabel: "Discard",
+        danger: true,
+        onConfirm: closePreview,
+      });
+      return;
     }
-    setPreviewSkill(null);
-    setPreviewDirty(false);
+    closePreview();
   }, [previewDirty]);
 
   const handlePreviewSaved = useCallback(
