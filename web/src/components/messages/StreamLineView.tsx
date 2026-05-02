@@ -124,9 +124,10 @@ function ClaudeAssistantEvent({
   compact: boolean;
 }) {
   const blocks = messageContentBlocks(parsed);
+  const blockKey = uniqueSiblingKeyer();
   const rendered = blocks
     .map((block) => {
-      const key = streamBlockKey(block);
+      const key = blockKey(block);
       const blockType = stringish(block.type);
       if (blockType === "text") {
         const text = stringish(block.text).trim();
@@ -174,12 +175,13 @@ function ClaudeUserEvent({
   compact: boolean;
 }) {
   const blocks = messageContentBlocks(parsed);
+  const blockKey = uniqueSiblingKeyer();
   const rendered = blocks
     .map((block) => {
       if (stringish(block.type) !== "tool_result") return null;
       const { content } = block;
       return (
-        <div key={streamBlockKey(block)} className="cc-tool-call">
+        <div key={blockKey(block)} className="cc-tool-call">
           <div className="cc-tool-section-label">Tool result</div>
           <ToolResultContent
             text={stringFromToolContent(content)}
@@ -389,6 +391,7 @@ function ToolCallCard({
     }
     return out;
   }, [args]);
+  const resultContentKey = uniqueSiblingKeyer();
 
   return (
     <div className="cc-tool-call">
@@ -432,7 +435,7 @@ function ToolCallCard({
                 </div>
                 {result.content.map((c) => (
                   <ToolResultContent
-                    key={streamBlockKey(c)}
+                    key={resultContentKey(c)}
                     text={c.text}
                     compact={compact}
                   />
@@ -624,6 +627,16 @@ function streamBlockKey(value: unknown): string {
   }
 }
 
+function uniqueSiblingKeyer(): (value: unknown) => string {
+  const counts = new Map<string, number>();
+  return (value: unknown) => {
+    const base = streamBlockKey(value);
+    const count = counts.get(base) ?? 0;
+    counts.set(base, count + 1);
+    return count === 0 ? base : `${base}#${count}`;
+  };
+}
+
 /* ───── JSON tree primitive (shared by both card and fallback paths) ───── */
 
 function Value({
@@ -666,11 +679,12 @@ function Value({
     if (value.length === 0) return <span className="sv-null">[]</span>;
     if ((compact && depth >= 1) || depth > 3)
       return <span className="sv-str">[{value.length} items]</span>;
+    const itemKey = uniqueSiblingKeyer();
     return (
       <Collapsible label={`[${value.length}]`} startOpen={depth === 0}>
         <div className="sv-array">
           {value.map((item) => (
-            <div key={streamBlockKey(item)} className="sv-array-item">
+            <div key={itemKey(item)} className="sv-array-item">
               <Value value={item} depth={depth + 1} compact={compact} />
             </div>
           ))}
