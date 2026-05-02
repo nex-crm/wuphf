@@ -28,7 +28,7 @@ vi.mock("../../api/client", async () => {
     );
   return {
     ...actual,
-    patchSchedulerJob: vi.fn(),
+    patchSchedulerJob: vi.fn().mockResolvedValue({ job: {} }),
     getSystemCronSpecs: vi.fn().mockResolvedValue(MOCK_SPECS),
     runSchedulerJob: vi.fn().mockResolvedValue({
       triggered: true,
