@@ -1,6 +1,6 @@
 // biome-ignore-all lint/a11y/useAriaPropsSupportedByRole: Passive metadata uses accessible labels queried by screen-reader tests; visual text remains unchanged.
 // biome-ignore-all lint/a11y/useKeyWithClickEvents: Pointer handler is paired with an existing modal, image, or routed-control keyboard path; preserving current interaction model.
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { type LintFinding, resolveContradiction } from "../../api/wiki";
 import { showNotice } from "../ui/Toast";
@@ -28,6 +28,17 @@ interface ResolveContradictionModalProps {
   onResolved: () => void;
 }
 
+function resolveErrorMessage(err: unknown) {
+  return err instanceof Error
+    ? err.message
+    : "Failed to resolve contradiction.";
+}
+
+function resolvedNotice(commitSha: string) {
+  const shortSha = commitSha.slice(0, 7);
+  return shortSha ? `Resolved. Commit ${shortSha}.` : "Resolved.";
+}
+
 export default function ResolveContradictionModal({
   finding,
   findingIdx,
@@ -49,24 +60,22 @@ export default function ResolveContradictionModal({
   const backdropRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  function closeAfterAbort() {
+  const closeAfterAbort = useCallback(() => {
     abortControllerRef.current?.abort();
     abortControllerRef.current = null;
     onClose();
-  }
+  }, [onClose]);
 
   // Escape key aborts any in-flight resolution and closes.
   useEffect(() => {
     function onKeyDown(ev: KeyboardEvent) {
       if (ev.key === "Escape") {
-        abortControllerRef.current?.abort();
-        abortControllerRef.current = null;
-        onClose();
+        closeAfterAbort();
       }
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onClose]);
+  }, [closeAfterAbort]);
 
   // Click outside (on backdrop) aborts any in-flight resolution and closes.
   function handleBackdropClick(ev: React.MouseEvent<HTMLDivElement>) {
@@ -95,11 +104,7 @@ export default function ResolveContradictionModal({
       // There is no commit-viewer route today, so the sha rides inside the
       // toast copy in mono-style rather than as a link (spec §4). Short
       // sha mirrors git's default display width.
-      const shortSha = (res.commit_sha || "").slice(0, 7);
-      showNotice(
-        shortSha ? `Resolved. Commit ${shortSha}.` : "Resolved.",
-        "success",
-      );
+      showNotice(resolvedNotice(res.commit_sha || ""), "success");
       if (abortControllerRef.current === controller) {
         abortControllerRef.current = null;
       }
@@ -112,9 +117,7 @@ export default function ResolveContradictionModal({
       if (controller.signal.aborted) {
         return;
       }
-      setError(
-        err instanceof Error ? err.message : "Failed to resolve contradiction.",
-      );
+      setError(resolveErrorMessage(err));
       setSubmitting(false);
       setPendingWinner(null);
     } finally {
