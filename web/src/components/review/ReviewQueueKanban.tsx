@@ -137,7 +137,7 @@ export default function ReviewQueueKanban() {
             </button>
           </>
         ) : (
-          <div className="nb-review-columns" role="list">
+          <ul className="nb-review-columns">
             {STATE_ORDER.map((state) => (
               <ReviewColumn
                 key={state}
@@ -147,7 +147,7 @@ export default function ReviewQueueKanban() {
                 onOpenCard={(id) => setActiveId(id)}
               />
             ))}
-          </div>
+          </ul>
         )}
       </main>
       {active ? (

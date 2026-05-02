@@ -116,7 +116,7 @@ export function ThreadPanel() {
   if (!activeThreadId) return null;
 
   return (
-    <div className="thread-panel open" role="complementary" aria-label="Thread">
+    <aside className="thread-panel open" aria-label="Thread">
       <div className="thread-panel-header">
         <div className="thread-panel-title-group">
           <span className="thread-panel-title">Thread</span>
@@ -264,7 +264,7 @@ export function ThreadPanel() {
           </button>
         </div>
       </div>
-    </div>
+    </aside>
   );
 }
 

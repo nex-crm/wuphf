@@ -17,11 +17,10 @@ export function SplashScreen({ onDone }: SplashScreenProps) {
   }, [dismiss]);
 
   return (
-    <div
+    <button
+      type="button"
       className="launch-screen"
       onClick={dismiss}
-      role="button"
-      tabIndex={0}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") dismiss();
       }}
@@ -31,6 +30,6 @@ export function SplashScreen({ onDone }: SplashScreenProps) {
       <div className="launch-spinner" />
       <p className="launch-text">Opening the office&hellip;</p>
       <p className="launch-sub">Preparing a live operating loop</p>
-    </div>
+    </button>
   );
 }

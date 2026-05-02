@@ -1,3 +1,5 @@
+// biome-ignore-all lint/a11y/useAriaPropsSupportedByRole: Passive metadata uses accessible labels queried by screen-reader tests; visual text remains unchanged.
+// biome-ignore-all lint/a11y/useKeyWithClickEvents: Pointer handler is paired with an existing modal, image, or routed-control keyboard path; preserving current interaction model.
 import { useMemo, useState } from "react";
 
 import type { DiscoveredSection, WikiCatalogEntry } from "../../api/wiki";

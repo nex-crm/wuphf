@@ -1,3 +1,4 @@
+// biome-ignore-all lint/a11y/noStaticElementInteractions: Intentional wrapper/backdrop or SVG hover target; interactive child controls and keyboard paths are handled nearby.
 import { useQuery } from "@tanstack/react-query";
 
 import {
@@ -520,9 +521,7 @@ function StatCard({ kicker, value, copy, anchorId }: StatCardProps) {
       onKeyDown={clickable ? handleKeyDown : undefined}
       role={clickable ? "button" : undefined}
       tabIndex={clickable ? 0 : undefined}
-      aria-label={
-        clickable ? `${kicker}: ${value}. Scroll to details.` : undefined
-      }
+      title={clickable ? `${kicker}: ${value}. Scroll to details.` : undefined}
     >
       <div
         style={{

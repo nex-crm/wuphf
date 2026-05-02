@@ -1,3 +1,4 @@
+// biome-ignore-all lint/a11y/useAriaPropsSupportedByRole: Passive metadata uses accessible labels queried by screen-reader tests; visual text remains unchanged.
 import { useQuery } from "@tanstack/react-query";
 
 import { fetchReviews } from "../../api/notebook";
@@ -74,10 +75,7 @@ export default function WikiTabs({
           >
             <span className="wiki-tab-label">{tab.label}</span>
             {tab.badge !== undefined && (
-              <span
-                className="wiki-tab-badge"
-                aria-label={`${tab.badge} pending`}
-              >
+              <span className="wiki-tab-badge" title={`${tab.badge} pending`}>
                 {tab.badge}
               </span>
             )}

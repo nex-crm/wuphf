@@ -221,11 +221,7 @@ export function InterviewBar() {
     fallbackCandidateFromRequest(current);
 
   return (
-    <div
-      className="interview-bar"
-      role="region"
-      aria-label="Pending agent request"
-    >
+    <section className="interview-bar" aria-label="Pending agent request">
       <div className="interview-bar-head">
         <span className="badge badge-yellow">
           {current.blocking ? "BLOCKING" : "INTERVIEW"}
@@ -397,7 +393,7 @@ export function InterviewBar() {
           </p>
         )}
       </SidePanel>
-    </div>
+    </section>
   );
 }
 
