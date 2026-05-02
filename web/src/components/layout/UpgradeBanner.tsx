@@ -405,7 +405,7 @@ export function UpgradeBanner() {
     // role="region" + an accessible name lets the banner be navigable as a
     // landmark without auto-announcing on every render the way role="status"
     // (a live region) would for what is really an interactive container.
-    <div className={bannerClass} role="region" aria-label="Upgrade available">
+    <section className={bannerClass} aria-label="Upgrade available">
       <div className="upgrade-banner-row">
         <div className="upgrade-banner-content">
           <svg
@@ -525,14 +525,14 @@ export function UpgradeBanner() {
         className="upgrade-banner-changelog"
         hidden={!expanded}
       >
-        {expanded && (
+        {expanded ? (
           <>
-            {changelog.loading && (
+            {changelog.loading ? (
               <div className="upgrade-banner-changelog-status">
                 Loading changes…
               </div>
-            )}
-            {changelog.error && (
+            ) : null}
+            {changelog.error ? (
               <div className="upgrade-banner-changelog-status">
                 Could not load changelog ({changelog.error}).{" "}
                 <a href={compareUrl} target="_blank" rel="noopener noreferrer">
@@ -540,7 +540,7 @@ export function UpgradeBanner() {
                 </a>
                 .
               </div>
-            )}
+            ) : null}
             {!(changelog.loading || changelog.error) &&
               changelog.commits.length === 0 && (
                 <div className="upgrade-banner-changelog-status">
@@ -595,9 +595,9 @@ export function UpgradeBanner() {
               </div>
             ))}
           </>
-        )}
+        ) : null}
       </div>
-    </div>
+    </section>
   );
 }
 

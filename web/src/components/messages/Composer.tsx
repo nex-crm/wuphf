@@ -637,12 +637,15 @@ export function Composer() {
           />
         </div>
         <button
+          type="button"
           className="composer-send"
           disabled={!text.trim() || sendMutation.isPending}
           onClick={handleSend}
           aria-label="Send message"
         >
           <svg
+            aria-hidden="true"
+            focusable="false"
             width="16"
             height="16"
             viewBox="0 0 24 24"

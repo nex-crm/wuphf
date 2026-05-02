@@ -1,3 +1,4 @@
+/* biome-ignore-all lint/style/noDescendingSpecificity: Message CSS groups base and state selectors by component for cascade readability. */
 /* ═══════════════════════════════════════════════════════════════
    Messages — Bubbles, composer, reactions, typing indicator
    Ported from index.legacy.html

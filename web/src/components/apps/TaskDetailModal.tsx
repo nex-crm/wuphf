@@ -1,3 +1,4 @@
+// biome-ignore-all lint/a11y/useKeyWithClickEvents: Pointer handler is paired with an existing modal, image, or routed-control keyboard path; preserving current interaction model.
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
@@ -222,6 +223,7 @@ export function TaskDetailModal({ task, onClose }: TaskDetailModalProps) {
   const [overrideReason, setOverrideReason] = useState("");
 
   useEffect(() => {
+    void task.id;
     setSelectedOwner((task.owner ?? "").trim());
     setErrorMsg(null);
     setOverrideReason("");
@@ -535,19 +537,21 @@ export function TaskDetailModal({ task, onClose }: TaskDetailModalProps) {
                 {submitting ? "Reassigning..." : "Reassign"}
               </button>
             </div>
-            {errorMsg && <div className="task-detail-error">{errorMsg}</div>}
+            {errorMsg ? (
+              <div className="task-detail-error">{errorMsg}</div>
+            ) : null}
           </div>
         </section>
 
-        {(description || details) && (
+        {description || details ? (
           <section className="task-detail-section">
-            {description && (
+            {description ? (
               <>
                 <div className="task-detail-label">Description</div>
                 <div className="task-detail-body">{description}</div>
               </>
-            )}
-            {details && (
+            ) : null}
+            {details ? (
               <>
                 <div
                   className="task-detail-label"
@@ -557,9 +561,9 @@ export function TaskDetailModal({ task, onClose }: TaskDetailModalProps) {
                 </div>
                 <div className="task-detail-body">{details}</div>
               </>
-            )}
+            ) : null}
           </section>
-        )}
+        ) : null}
 
         {dependsOn.length > 0 && (
           <section className="task-detail-section">
@@ -637,7 +641,10 @@ function MemoryWorkflowSection({ workflow }: { workflow: TaskMemoryWorkflow }) {
       )}
       <dl className="task-detail-meta">
         {rows
-          .filter(([, value]) => value != null && value !== "")
+          .filter(
+            ([, value]) =>
+              value !== null && value !== undefined && value !== "",
+          )
           .map(([key, value]) => (
             <div key={key} className="task-detail-meta-row">
               <dt>{key}</dt>
@@ -707,7 +714,7 @@ function formatWorkflowStep(step?: TaskMemoryWorkflowStepState): string | null {
     step.status
       ? displayMemoryStatus(normalizeMemoryStatus(step.status))
       : null,
-    step.count != null && step.count > 0
+    step.count !== null && step.count !== undefined && step.count > 0
       ? `${step.count} item${step.count === 1 ? "" : "s"}`
       : null,
     step.actor ? `@${step.actor}` : null,
@@ -786,6 +793,7 @@ function StatusButton({
   const className =
     "btn btn-sm " +
     (danger ? "btn-ghost task-detail-status-btn-danger" : "btn-ghost");
+  const buttonLabel = isBusy ? "..." : label;
   return (
     <button
       type="button"
@@ -794,7 +802,7 @@ function StatusButton({
       disabled={disabled || isCurrent || anyBusy}
       title={isCurrent ? "Task is already in this state" : undefined}
     >
-      {isBusy ? "..." : label}
+      {buttonLabel}
     </button>
   );
 }

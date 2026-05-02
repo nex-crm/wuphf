@@ -1,3 +1,4 @@
+/* biome-ignore-all lint/style/noDescendingSpecificity: Layout CSS is organized by surface sections; selector order is intentional and visually covered by app tests/build. */
 /* ═══════════════════════════════════════════════════════════════
    Layout — Office shell, sidebar, channel header, thread panel
    Ported from index.legacy.html

@@ -67,6 +67,13 @@ function ProviderCard({ s }: { s: ImageProviderStatus }) {
   const [baseURL, setBaseURL] = useState(s.base_url ?? "");
   const [model, setModel] = useState(s.default_model ?? "");
   const [showKey, setShowKey] = useState(false);
+  const capabilityLabel = [
+    s.kind,
+    s.supports_video ? "video" : "",
+    s.implementation_ok ? "" : "stub",
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   const mutation = useMutation({
     mutationFn: () =>
@@ -101,11 +108,13 @@ function ProviderCard({ s }: { s: ImageProviderStatus }) {
         <StatusDot s={s} />
         <h3 style={{ fontSize: 15, fontWeight: 600 }}>{s.label}</h3>
         <span
-          style={{ fontSize: 11, color: "var(--text-tertiary)", marginLeft: "auto" }}
+          style={{
+            fontSize: 11,
+            color: "var(--text-tertiary)",
+            marginLeft: "auto",
+          }}
         >
-          {s.kind}
-          {s.supports_video && " · video"}
-          {s.implementation_ok ? "" : " · stub"}
+          {capabilityLabel}
         </span>
       </div>
       <p
@@ -118,7 +127,7 @@ function ProviderCard({ s }: { s: ImageProviderStatus }) {
       >
         {s.blurb}
       </p>
-      {s.setup_hint && (
+      {s.setup_hint ? (
         <p
           style={{
             fontSize: 11,
@@ -131,9 +140,9 @@ function ProviderCard({ s }: { s: ImageProviderStatus }) {
         >
           {s.setup_hint}
         </p>
-      )}
+      ) : null}
 
-      {s.needs_api_key && (
+      {s.needs_api_key ? (
         <div style={{ marginBottom: 10 }}>
           <label style={labelStyle}>
             API key {s.api_key_set ? "(set)" : "(unset)"}
@@ -156,9 +165,16 @@ function ProviderCard({ s }: { s: ImageProviderStatus }) {
             </button>
           </div>
         </div>
-      )}
+      ) : null}
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr",
+          gap: 10,
+          marginBottom: 10,
+        }}
+      >
         <div>
           <label style={labelStyle}>Base URL (optional)</label>
           <input
@@ -229,9 +245,9 @@ export function ImageGenSection() {
             lineHeight: 1.5,
           }}
         >
-          Backends Artist can call via the <code>image_generate</code> tool. Paste an
-          API key + (optional) base URL + default model. Status dot: green = ready, amber =
-          needs key, grey = stub (backend not yet wired).
+          Backends Artist can call via the <code>image_generate</code> tool.
+          Paste an API key + (optional) base URL + default model. Status dot:
+          green = ready, amber = needs key, grey = stub (backend not yet wired).
         </p>
       </header>
       {providers.map((p) => (

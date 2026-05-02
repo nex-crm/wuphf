@@ -1,3 +1,5 @@
+// biome-ignore-all lint/a11y/useKeyWithClickEvents: Pointer handler is paired with an existing modal, image, or routed-control keyboard path; preserving current interaction model.
+// biome-ignore-all lint/a11y/noStaticElementInteractions: Intentional wrapper/backdrop or SVG hover target; interactive child controls and keyboard paths are handled nearby.
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -406,6 +408,8 @@ export function SearchModal() {
       <div className="search-modal card cmd-palette">
         <div className="search-input-wrap">
           <svg
+            aria-hidden="true"
+            focusable="false"
             className="search-input-icon"
             width="16"
             height="16"
@@ -427,7 +431,7 @@ export function SearchModal() {
             value={query}
             onChange={(e) => handleQueryChange(e.target.value)}
           />
-          {searching && <span className="search-spinner" />}
+          {searching ? <span className="search-spinner" /> : null}
         </div>
 
         <div className="cmd-palette-results">
@@ -458,17 +462,17 @@ export function SearchModal() {
                           ? highlightMatch(item.label, query.trim())
                           : item.label}
                       </span>
-                      {item.desc && (
+                      {item.desc ? (
                         <span className="cmd-palette-item-desc">
                           {item.group === "Wiki" || item.group === "Notebooks"
                             ? highlightMatch(item.desc, query.trim())
                             : item.desc}
                         </span>
-                      )}
+                      ) : null}
                     </span>
-                    {item.meta && (
+                    {item.meta ? (
                       <span className="cmd-palette-item-meta">{item.meta}</span>
-                    )}
+                    ) : null}
                   </button>
                 ))}
               </div>

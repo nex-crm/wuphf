@@ -19,10 +19,13 @@ export function UsagePanel() {
   return (
     <>
       <button
+        type="button"
         className={`usage-toggle${open ? " open" : ""}`}
         onClick={() => setOpen((v) => !v)}
       >
         <svg
+          aria-hidden="true"
+          focusable="false"
           width="10"
           height="10"
           viewBox="0 0 24 24"
@@ -39,7 +42,7 @@ export function UsagePanel() {
           {formatUSD(totalCost)}
         </span>
       </button>
-      {open && (
+      {open ? (
         <div className="usage-panel open">
           {slugs.length === 0 && totalCost === 0 ? (
             <p
@@ -86,7 +89,7 @@ export function UsagePanel() {
             </>
           )}
         </div>
-      )}
+      ) : null}
     </>
   );
 }

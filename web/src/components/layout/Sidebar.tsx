@@ -27,6 +27,8 @@ function SectionToggle({
     >
       <span>{label}</span>
       <svg
+        aria-hidden="true"
+        focusable="false"
         style={{
           width: 10,
           height: 10,

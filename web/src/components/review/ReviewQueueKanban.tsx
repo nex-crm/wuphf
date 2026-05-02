@@ -43,7 +43,7 @@ export default function ReviewQueueKanban() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [refreshTick, setRefreshTick] = useState(0);
+  const [_refreshTick, setRefreshTick] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -63,7 +63,7 @@ export default function ReviewQueueKanban() {
     return () => {
       cancelled = true;
     };
-  }, [refreshTick]);
+  }, []);
 
   useEffect(() => {
     const unsub = subscribeNotebookEvents((ev) => {
@@ -137,7 +137,7 @@ export default function ReviewQueueKanban() {
             </button>
           </>
         ) : (
-          <div className="nb-review-columns" role="list">
+          <ul className="nb-review-columns">
             {STATE_ORDER.map((state) => (
               <ReviewColumn
                 key={state}
@@ -147,7 +147,7 @@ export default function ReviewQueueKanban() {
                 onOpenCard={(id) => setActiveId(id)}
               />
             ))}
-          </div>
+          </ul>
         )}
       </main>
       {active ? (

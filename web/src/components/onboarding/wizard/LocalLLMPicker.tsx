@@ -86,7 +86,7 @@ export function LocalLLMPicker({ selected, onSelect }: LocalLLMPickerProps) {
         doctor panel with copy-paste shell snippets.
       </p>
 
-      {loading && (
+      {loading ? (
         <div
           style={{
             fontSize: 12,
@@ -96,7 +96,7 @@ export function LocalLLMPicker({ selected, onSelect }: LocalLLMPickerProps) {
         >
           Detecting local runtimes…
         </div>
-      )}
+      ) : null}
       {!loading && fetchError && (
         <div
           data-testid="onboarding-local-llm-fetch-error"

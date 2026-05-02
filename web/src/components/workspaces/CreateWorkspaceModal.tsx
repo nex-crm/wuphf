@@ -1,3 +1,4 @@
+// biome-ignore-all lint/a11y/useKeyWithClickEvents: Pointer handler is paired with an existing modal, image, or routed-control keyboard path; preserving current interaction model.
 /**
  * CreateWorkspaceModal — minimal name-capture modal for new workspace creation.
  *
@@ -9,9 +10,9 @@ import { useEffect, useId, useMemo, useState } from "react";
 
 import {
   type CreateWorkspaceInput,
-  type Workspace,
   useCreateWorkspace,
   validateWorkspaceSlug,
+  type Workspace,
 } from "../../api/workspaces";
 
 interface CreateWorkspaceModalProps {
@@ -211,7 +212,6 @@ export function CreateWorkspaceModal({
             placeholder="e.g. acme-demo"
             autoComplete="off"
             spellCheck={false}
-            autoFocus
             data-testid="workspace-slug-input"
             disabled={phase === "spawning"}
             onKeyDown={(e) => {

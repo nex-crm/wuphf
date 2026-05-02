@@ -266,9 +266,9 @@ function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
                 style={{ marginLeft: -2 }}
               />
             </div>
-            {agent.role && (
+            {agent.role ? (
               <span className="agent-panel-role">{agent.role}</span>
-            )}
+            ) : null}
           </div>
         </div>
         <button
@@ -297,18 +297,18 @@ function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
               </div>
             ) : null;
           })()}
-          {agent.status && (
+          {agent.status ? (
             <div className="agent-panel-info-row">
               <span className="agent-panel-info-label">status</span>
               <span className="agent-panel-info-value">{agent.status}</span>
             </div>
-          )}
-          {agent.task && (
+          ) : null}
+          {agent.task ? (
             <div className="agent-panel-info-row">
               <span className="agent-panel-info-label">task</span>
               <span className="agent-panel-info-value">{agent.task}</span>
             </div>
-          )}
+          ) : null}
         </div>
       </div>
 
@@ -396,6 +396,8 @@ export function AgentPanel() {
   // instantly un-selected it and the panel never mounted (React #31 guard
   // e2e regression).
   useEffect(() => {
+    void currentChannel;
+    void currentApp;
     close();
   }, [currentChannel, currentApp, close]);
 

@@ -1,3 +1,4 @@
+// biome-ignore-all lint/a11y/useAriaPropsSupportedByRole: Passive metadata uses accessible labels queried by screen-reader tests; visual text remains unchanged.
 import { useCallback, useEffect, useState } from "react";
 
 import { type LintFinding, type LintReport, runLint } from "../../api/wiki";
@@ -95,11 +96,11 @@ export default function WikiLint({ onNavigate }: WikiLintProps) {
         >
           {loading ? "Checking…" : "Check again now"}
         </button>
-        {report && (
+        {report ? (
           <span className="wk-audit-strapline" style={{ alignSelf: "center" }}>
             Last checked: {report.date}
           </span>
-        )}
+        ) : null}
       </section>
 
       {loading && !report ? (
@@ -174,7 +175,7 @@ export default function WikiLint({ onNavigate }: WikiLintProps) {
         </table>
       ) : null}
 
-      {resolveTarget && report && (
+      {resolveTarget && report ? (
         <ResolveContradictionModal
           finding={resolveTarget.finding}
           findingIdx={resolveTarget.idx}
@@ -185,7 +186,7 @@ export default function WikiLint({ onNavigate }: WikiLintProps) {
             loadReport();
           }}
         />
-      )}
+      ) : null}
     </main>
   );
 }

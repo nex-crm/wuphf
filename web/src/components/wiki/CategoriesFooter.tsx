@@ -1,3 +1,4 @@
+// biome-ignore-all lint/a11y/useAriaPropsSupportedByRole: Passive metadata uses accessible labels queried by screen-reader tests; visual text remains unchanged.
 /** Chip-style category tags row above the page footer. */
 
 interface CategoriesFooterProps {

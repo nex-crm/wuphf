@@ -227,12 +227,12 @@ function GeneralSection({ cfg, save }: SectionProps) {
         <SaveButton label="Save general settings" onSave={onSave} />
       </div>
 
-      {cfg.config_path && (
+      {cfg.config_path ? (
         <div style={{ marginTop: 24 }}>
           <div style={styles.groupTitle}>Config file</div>
           <div style={styles.filePath}>{cfg.config_path}</div>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -455,7 +455,7 @@ function LocalProviderCard({
               Default
             </span>
           )}
-          {status?.binary_version && (
+          {status?.binary_version ? (
             <span
               style={{
                 marginLeft: 8,
@@ -466,7 +466,7 @@ function LocalProviderCard({
             >
               {status.binary_version}
             </span>
-          )}
+          ) : null}
         </div>
         {!isDefault && (
           <button
@@ -489,12 +489,12 @@ function LocalProviderCard({
         {meta.blurb}
       </p>
 
-      {status?.windows_note && (
+      {status?.windows_note ? (
         <div style={{ ...styles.banner, fontSize: 12 }}>
           <span style={{ fontSize: 14, flexShrink: 0 }}>{"⚠"}</span>
           <div>{status.windows_note}</div>
         </div>
-      )}
+      ) : null}
 
       <Field
         label="Base URL"
@@ -522,7 +522,7 @@ function LocalProviderCard({
       </Field>
       <SaveButton label="Save endpoint" onSave={onSaveEndpoint} />
 
-      {!status?.binary_installed && installCmd && (
+      {!status?.binary_installed && installCmd ? (
         <div
           style={{
             marginTop: 12,
@@ -541,7 +541,7 @@ function LocalProviderCard({
             Install
           </div>
           <CommandRow command={installCmd} />
-          {startCmd && (
+          {startCmd ? (
             <>
               <div
                 style={{
@@ -556,10 +556,10 @@ function LocalProviderCard({
               </div>
               <CommandRow command={startCmd} />
             </>
-          )}
+          ) : null}
         </div>
-      )}
-      {status?.binary_installed && !status.reachable && startCmd && (
+      ) : null}
+      {status?.binary_installed && !status.reachable && startCmd ? (
         <div
           style={{
             marginTop: 12,
@@ -582,7 +582,7 @@ function LocalProviderCard({
           </div>
           <CommandRow command={startCmd} />
         </div>
-      )}
+      ) : null}
       {(status?.notes ?? []).map((note) => (
         <p
           key={note}
@@ -657,17 +657,17 @@ function LocalLLMsSection({ cfg, save }: SectionProps) {
         </button>
       </div>
 
-      {isLoading && (
+      {isLoading ? (
         <div style={{ color: "var(--text-tertiary)", fontSize: 13 }}>
           Detecting installed runtimes…
         </div>
-      )}
-      {error && (
+      ) : null}
+      {error ? (
         <div style={{ color: "var(--danger-500, #c33)", fontSize: 13 }}>
           Failed to load status:{" "}
           {error instanceof Error ? error.message : String(error)}
         </div>
-      )}
+      ) : null}
 
       {!(isLoading || error) &&
         LOCAL_PROVIDERS.map((meta) => (
@@ -1192,7 +1192,6 @@ type DangerAction = "reset" | "shred";
 function DangerZoneSection() {
   const [open, setOpen] = useState<DangerAction | null>(null);
   const [busy, setBusy] = useState(false);
-  const queryClient = useQueryClient();
   const shred = useShredAction();
 
   const handleReset = async () => {

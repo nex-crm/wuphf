@@ -126,9 +126,9 @@ export function HealthCheckApp() {
                 />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontWeight: 500, fontSize: 13 }}>{slug}</div>
-                  {agentStatus && (
+                  {agentStatus ? (
                     <div className="app-card-meta">{agentStatus}</div>
-                  )}
+                  ) : null}
                 </div>
               </div>
             );

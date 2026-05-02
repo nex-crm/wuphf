@@ -66,12 +66,12 @@ export default function PlaybookSkillBadge({ slug }: PlaybookSkillBadgeProps) {
           <>Compiled skill pending — recompiling…</>
         )}
       </span>
-      {compiled && playbook && (
+      {compiled && playbook ? (
         <span className="wk-playbook-badge__meta">
           {playbook.execution_count} execution
           {playbook.execution_count === 1 ? "" : "s"} logged
         </span>
-      )}
+      ) : null}
     </div>
   );
 }

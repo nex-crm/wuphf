@@ -1,3 +1,4 @@
+// biome-ignore-all lint/a11y/noStaticElementInteractions: Modal backdrop uses pointer hit-testing while dialog controls retain keyboard handling.
 import { useCallback, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -223,7 +224,7 @@ export function AgentWizard({ open, onClose, onCreated }: AgentWizardProps) {
               </span>
             </div>
 
-            {error && <div className="agent-wizard-error">{error}</div>}
+            {error ? <div className="agent-wizard-error">{error}</div> : null}
 
             <div className="agent-wizard-footer">
               <button
@@ -360,7 +361,7 @@ export function AgentWizard({ open, onClose, onCreated }: AgentWizardProps) {
               )}
             </div>
 
-            {error && <div className="agent-wizard-error">{error}</div>}
+            {error ? <div className="agent-wizard-error">{error}</div> : null}
 
             {/* Footer */}
             <div className="agent-wizard-footer">

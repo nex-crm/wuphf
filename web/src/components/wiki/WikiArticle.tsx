@@ -1,3 +1,4 @@
+// biome-ignore-all lint/a11y/useValidAnchor: Anchor is intercepted by the app router or markdown renderer while preserving href fallback behavior.
 import { useEffect, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import type { PluggableList } from "unified";
@@ -261,7 +262,7 @@ export default function WikiArticle({
   return (
     <>
       <main className="wk-article-col">
-        {liveAgent && (
+        {liveAgent ? (
           <ArticleStatusBanner
             message={`${formatAgentName(liveAgent)} is editing this article right now.`}
             liveAgent={liveAgent}
@@ -269,7 +270,7 @@ export default function WikiArticle({
             contributors={article.contributors.length}
             wordCount={article.word_count}
           />
-        )}
+        ) : null}
         {entity && (
           <EntityBriefBar
             kind={entity.kind}

@@ -1,3 +1,4 @@
+// biome-ignore-all lint/a11y/noStaticElementInteractions: Intentional wrapper/backdrop or SVG hover target; interactive child controls and keyboard paths are handled nearby.
 import { useCallback, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -214,7 +215,7 @@ export function ChannelWizard({ open, onClose }: ChannelWizardProps) {
             </>
           )}
 
-          {error && <div className="channel-wizard-error">{error}</div>}
+          {error ? <div className="channel-wizard-error">{error}</div> : null}
 
           <div className="channel-wizard-footer">
             <button

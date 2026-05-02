@@ -191,42 +191,44 @@ export function CollapsedSidebar() {
         active={popover === "usage"}
       />
 
-      {popover &&
-        createPortal(
-          <div
-            ref={popoverRef}
-            className={`sidebar-rail-popover sidebar-rail-popover-${popover}`}
-            role="dialog"
-            onMouseEnter={() => openPopover(popover)}
-            onMouseLeave={scheduleClose}
-          >
-            <div className="sidebar-rail-popover-title">
-              {popover === "team"
-                ? "Team"
-                : popover === "channels"
-                  ? "Channels"
-                  : "Usage"}
-            </div>
-            <div className="sidebar-rail-popover-body">
-              {popover === "team" && <AgentList />}
-              {popover === "channels" && <ChannelList />}
-              {popover === "usage" && <UsageBody />}
-            </div>
-          </div>,
-          document.body,
-        )}
+      {popover
+        ? createPortal(
+            <div
+              ref={popoverRef}
+              className={`sidebar-rail-popover sidebar-rail-popover-${popover}`}
+              role="dialog"
+              onMouseEnter={() => openPopover(popover)}
+              onMouseLeave={scheduleClose}
+            >
+              <div className="sidebar-rail-popover-title">
+                {popover === "team"
+                  ? "Team"
+                  : popover === "channels"
+                    ? "Channels"
+                    : "Usage"}
+              </div>
+              <div className="sidebar-rail-popover-body">
+                {popover === "team" ? <AgentList /> : null}
+                {popover === "channels" ? <ChannelList /> : null}
+                {popover === "usage" ? <UsageBody /> : null}
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
 
-      {hint &&
-        createPortal(
-          <div
-            className="sidebar-rail-hint"
-            style={{ top: hint.y }}
-            role="tooltip"
-          >
-            {hint.label}
-          </div>,
-          document.body,
-        )}
+      {hint
+        ? createPortal(
+            <div
+              className="sidebar-rail-hint"
+              style={{ top: hint.y }}
+              role="tooltip"
+            >
+              {hint.label}
+            </div>,
+            document.body,
+          )
+        : null}
     </>
   );
 }

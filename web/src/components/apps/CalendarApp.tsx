@@ -13,7 +13,8 @@ function isCadenceJob(job: SchedulerJob): boolean {
   return (
     job.system_managed === true ||
     typeof job.interval_minutes === "number" ||
-    (typeof job.schedule_expr === "string" && job.schedule_expr.trim().length > 0)
+    (typeof job.schedule_expr === "string" &&
+      job.schedule_expr.trim().length > 0)
   );
 }
 
@@ -191,7 +192,7 @@ function JobCard({ job }: { job: SchedulerJob }) {
         <span className="app-card-title" style={{ marginBottom: 0 }}>
           {job.label || job.name || job.slug || "Job"}
         </span>
-        {job.status && (
+        {job.status ? (
           <span
             className={
               job.status === "active"
@@ -201,9 +202,9 @@ function JobCard({ job }: { job: SchedulerJob }) {
           >
             {job.status.toUpperCase()}
           </span>
-        )}
+        ) : null}
       </div>
-      {job.next_run && (
+      {job.next_run ? (
         <div
           className="app-card-meta"
           style={{
@@ -214,7 +215,7 @@ function JobCard({ job }: { job: SchedulerJob }) {
         >
           {formatRelativeTime(job.next_run)}
         </div>
-      )}
+      ) : null}
       {metaParts.length > 0 && (
         <div className="app-card-meta">{metaParts.join(" \u2022 ")}</div>
       )}

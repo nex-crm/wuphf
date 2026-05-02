@@ -1,3 +1,4 @@
+// biome-ignore-all lint/a11y/useAriaPropsSupportedByRole: Passive metadata uses accessible labels queried by screen-reader tests; visual text remains unchanged.
 import type { ComponentType } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -85,6 +86,7 @@ export function AppList() {
               : currentApp === app.id;
           return (
             <button
+              type="button"
               key={app.id}
               className={`sidebar-item${isActive ? " active" : ""}`}
               onClick={() => setCurrentApp(app.id)}

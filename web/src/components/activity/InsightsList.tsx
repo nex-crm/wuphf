@@ -47,16 +47,18 @@ export function InsightsList({
             <span className={`insight-badge insight-badge-${ins.priority}`}>
               [{PRIORITY_LABEL[ins.priority]}]
             </span>
-            {ins.category && (
+            {ins.category ? (
               <span className="insight-category">[{ins.category}]</span>
-            )}
+            ) : null}
             <span className="insight-title">{ins.title}</span>
-            {ins.time && <span className="insight-time">{ins.time}</span>}
+            {ins.time ? <span className="insight-time">{ins.time}</span> : null}
           </div>
-          {ins.body && (
+          {ins.body ? (
             <div className="insight-body">{truncate(ins.body, 220)}</div>
-          )}
-          {ins.target && <div className="insight-target">({ins.target})</div>}
+          ) : null}
+          {ins.target ? (
+            <div className="insight-target">({ins.target})</div>
+          ) : null}
         </div>
       ))}
       {overflow > 0 && <div className="insight-more">+ {overflow} more</div>}
