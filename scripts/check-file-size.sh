@@ -67,7 +67,7 @@ if [[ -n "$base_commit" ]] && git -C "$repo_root" cat-file -e "$base_commit:scri
   git -C "$repo_root" show "$base_commit:scripts/file-size-allowlist.txt" | normalize_allowlist > "$base_allow_norm"
 fi
 
-if [[ -s "$allow_norm" && -s "$base_allow_norm" ]]; then
+if [[ -s "$allow_norm" ]]; then
   added_allowlist_entries=$(sort -u "$allow_norm" | comm -13 <(sort -u "$base_allow_norm") - || true)
   if [[ -n "$added_allowlist_entries" ]]; then
     printf '%s\n' "$added_allowlist_entries" > "$allowlist_added_f"
@@ -107,7 +107,8 @@ while IFS= read -r rel; do
     if [[ -s "$allow_norm" ]] && grep -Fxq "$rel" "$allow_norm"; then
       printf '%s\n' "$rel" >> "$allow_seen"
       if [[ -s "$base_allow_norm" ]] && grep -Fxq "$rel" "$base_allow_norm"; then
-        if base_loc=$(git -C "$repo_root" show "$base_commit:$rel" 2>/dev/null | wc -l | tr -d ' '); then
+        if [[ -n "$base_commit" ]] && git -C "$repo_root" cat-file -e "$base_commit:$rel" 2>/dev/null; then
+          base_loc=$(git -C "$repo_root" show "$base_commit:$rel" | wc -l | tr -d ' ')
           if [[ -n "$base_loc" ]] && (( loc > base_loc )); then
             printf '%s  %d > %d\n' "$rel" "$loc" "$base_loc" >> "$allowlist_growth_f"
           fi
