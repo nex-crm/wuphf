@@ -35,23 +35,46 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # ratchet:oven-sh/setup-bun@v2.2.0
         with:
           bun-version: "1.1.38"
-      - name: Install and build
+      - name: Install and typecheck
+        id: web-typecheck
         working-directory: web
         run: |
           bun install --frozen-lockfile
           bun run typecheck
-          bun run build
+      - name: Run coverage
+        id: web-coverage
+        working-directory: web
+        if: ${{ steps.web-typecheck.outcome == 'success' }}
+        continue-on-error: true
+        run: bun run test:coverage
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # ratchet:actions/upload-artifact@v7
+        if: always()
+        with:
+          name: web-coverage
+          path: web/coverage
+          retention-days: 14
+          if-no-files-found: ignore
+      - name: Build web dist
+        working-directory: web
+        if: ${{ always() && steps.web-typecheck.outcome == 'success' }}
+        run: bun run build
       - name: Bundle-size budget
+        if: ${{ always() && steps.web-typecheck.outcome == 'success' }}
         # Forward-only ratchet against accidental bundle bloat. Warn at
         # 950 KB, fail at 1200 KB on the JS bundle total. To raise the
         # ceiling intentionally, edit constants in scripts/check-bundle-size.sh
         # in the same PR. See CONTRIBUTING.md "no perf degradations" rule.
         run: bash scripts/check-bundle-size.sh
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # ratchet:actions/upload-artifact@v7
+        if: ${{ always() && steps.web-typecheck.outcome == 'success' }}
         with:
           name: web-dist
           path: web/dist
           retention-days: 1
+          if-no-files-found: ignore
+      - name: Fail web job if coverage failed
+        if: ${{ always() && steps.web-typecheck.outcome == 'success' && steps.web-coverage.outcome == 'failure' }}
+        run: exit 1
 
   lint:
     runs-on: ubuntu-latest
