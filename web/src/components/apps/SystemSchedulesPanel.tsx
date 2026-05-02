@@ -21,6 +21,11 @@ interface SystemSchedulesPanelProps {
   jobs: SchedulerJob[];
 }
 
+type FloorState =
+  | { status: "loading"; values: Record<string, number> }
+  | { status: "ready"; values: Record<string, number> }
+  | { status: "fallback"; values: Record<string, number> };
+
 /**
  * "System Schedules" section above the timeline-grouped job cards in
  * CalendarApp. Shows every cron-style scheduler entry with its toggle,
@@ -36,8 +41,10 @@ interface SystemSchedulesPanelProps {
 export function SystemSchedulesPanel({ jobs }: SystemSchedulesPanelProps) {
   const rows = useMemo(() => filterSchedulerRows(jobs), [jobs]);
   // floors: slug → min_floor_minutes, populated from the API on mount.
-  // Stored in state so the rows rerender once the async floor data arrives.
-  const [floors, setFloors] = useState<Record<string, number>>({});
+  const [floorState, setFloorState] = useState<FloorState>({
+    status: "loading",
+    values: {},
+  });
 
   useEffect(() => {
     let aborted = false;
@@ -48,7 +55,7 @@ export function SystemSchedulesPanel({ jobs }: SystemSchedulesPanelProps) {
         for (const s of specs) {
           map[s.slug] = s.min_floor_minutes;
         }
-        setFloors(map);
+        setFloorState({ status: "ready", values: map });
       })
       .catch((err: unknown) => {
         if (aborted) return;
@@ -56,6 +63,7 @@ export function SystemSchedulesPanel({ jobs }: SystemSchedulesPanelProps) {
           "SystemSchedulesPanel: could not fetch system-specs; falling back to default floor",
           err,
         );
+        setFloorState({ status: "fallback", values: {} });
       });
     return () => {
       aborted = true;
@@ -79,7 +87,11 @@ export function SystemSchedulesPanel({ jobs }: SystemSchedulesPanelProps) {
         System Schedules
       </div>
       {rows.map((job) => (
-        <ScheduleRow key={job.slug ?? job.id} job={job} floors={floors} />
+        <ScheduleRow
+          key={job.slug ?? job.id}
+          job={job}
+          floorState={floorState}
+        />
       ))}
     </section>
   );
@@ -97,17 +109,18 @@ function filterSchedulerRows(jobs: SchedulerJob[]): SchedulerJob[] {
 
 interface ScheduleRowProps {
   job: SchedulerJob;
-  floors: Record<string, number>;
+  floorState: FloorState;
 }
 
-function ScheduleRow({ job, floors }: ScheduleRowProps) {
+function ScheduleRow({ job, floorState }: ScheduleRowProps) {
   const queryClient = useQueryClient();
   const slug = job.slug ?? "";
   const isReadOnly = READ_ONLY_SLUGS.has(slug);
   const isCron = typeof job.schedule_expr === "string" && job.schedule_expr;
   const isInterval = typeof job.interval_minutes === "number";
 
-  const floor = floors[slug] ?? DEFAULT_FLOOR_MINUTES;
+  const floorReady = floorState.status !== "loading";
+  const floor = floorState.values[slug] ?? DEFAULT_FLOOR_MINUTES;
   const defaultInterval = job.interval_minutes ?? 0;
   const initialOverride = job.interval_override ?? 0;
   const initialEnabled = job.enabled !== false; // missing → assume enabled
@@ -193,6 +206,10 @@ function ScheduleRow({ job, floors }: ScheduleRowProps) {
 
   const handleIntervalCommit = useCallback(() => {
     if (isReadOnly || isCron) return;
+    if (!floorReady) {
+      setError("Scheduler floors are still loading");
+      return;
+    }
     const trimmed = overrideText.trim();
     if (trimmed === "") {
       setError("Interval is required");
@@ -215,7 +232,15 @@ function ScheduleRow({ job, floors }: ScheduleRowProps) {
       return;
     }
     submitPatch({ interval_override: parsed === defaultInterval ? 0 : parsed });
-  }, [isReadOnly, isCron, overrideText, floor, defaultInterval, submitPatch]);
+  }, [
+    isReadOnly,
+    isCron,
+    floorReady,
+    overrideText,
+    floor,
+    defaultInterval,
+    submitPatch,
+  ]);
 
   const handleRunNow = useCallback(() => {
     if (!slug || runPending) return;
@@ -287,7 +312,7 @@ function ScheduleRow({ job, floors }: ScheduleRowProps) {
         ) : isInterval ? (
           <IntervalPicker
             value={overrideText}
-            disabled={pending}
+            disabled={pending || !floorReady}
             onChange={(v) => {
               setOverrideText(v);
               setError(null);
