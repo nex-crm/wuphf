@@ -178,6 +178,7 @@ export function MessageBubble({
           <div className="message-reactions">
             {reactions.map((r) => (
               <button
+                type="button"
                 key={r.emoji}
                 className="reaction-pill"
                 onClick={() => {
@@ -198,11 +199,14 @@ export function MessageBubble({
             opens the thread panel where the full chain is browsable. */}
         {replyCount > 0 && onOpenThread && (
           <button
+            type="button"
             className="inline-thread-toggle"
             onClick={() => onOpenThread(message.id)}
             title="Open thread"
           >
             <svg
+              aria-hidden="true"
+              focusable="false"
               width="12"
               height="12"
               viewBox="0 0 24 24"
@@ -229,12 +233,15 @@ export function MessageBubble({
         >
           {onOpenThread && (
             <button
+              type="button"
               className="message-hover-btn"
               onClick={() => onOpenThread(message.id)}
               title="Reply in thread"
               aria-label="Reply in thread"
             >
               <svg
+                aria-hidden="true"
+                focusable="false"
                 width="14"
                 height="14"
                 viewBox="0 0 24 24"
@@ -250,12 +257,15 @@ export function MessageBubble({
           )}
           {onQuoteReply && (
             <button
+              type="button"
               className="message-hover-btn"
               onClick={() => onQuoteReply(message)}
               title="Quote-reply"
               aria-label="Quote-reply"
             >
               <svg
+                aria-hidden="true"
+                focusable="false"
                 width="14"
                 height="14"
                 viewBox="0 0 24 24"
@@ -272,12 +282,15 @@ export function MessageBubble({
           )}
           {onCopyLink && (
             <button
+              type="button"
               className="message-hover-btn"
               onClick={() => onCopyLink(message.id)}
               title="Copy link"
               aria-label="Copy link"
             >
               <svg
+                aria-hidden="true"
+                focusable="false"
                 width="14"
                 height="14"
                 viewBox="0 0 24 24"

@@ -64,6 +64,7 @@ export function AgentList() {
 
               return (
                 <button
+                  type="button"
                   key={agent.slug}
                   data-agent-slug={agent.slug}
                   className={`sidebar-agent${isDMActive ? " active" : ""}`}
@@ -96,6 +97,7 @@ export function AgentList() {
             })
           )}
           <button
+            type="button"
             className="sidebar-item sidebar-add-btn"
             onClick={wizard.show}
             title="Create a new agent"

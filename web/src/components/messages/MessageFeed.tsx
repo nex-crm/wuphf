@@ -198,6 +198,8 @@ export function MessageFeed() {
                 aria-controls={`thread-${parentId}-replies`}
               >
                 <svg
+                  aria-hidden="true"
+                  focusable="false"
                   className="thread-collapse-chevron"
                   width="10"
                   height="10"

@@ -123,12 +123,15 @@ export function ThreadPanel() {
           <span className="thread-panel-channel">#{currentChannel}</span>
         </div>
         <button
+          type="button"
           className="thread-panel-close"
           onClick={() => setActiveThreadId(null)}
           aria-label="Close thread"
           title="Close (Esc)"
         >
           <svg
+            aria-hidden="true"
+            focusable="false"
             width="16"
             height="16"
             viewBox="0 0 24 24"
@@ -181,6 +184,8 @@ export function ThreadPanel() {
         {quoting && (
           <div className="thread-quote-chip">
             <svg
+              aria-hidden="true"
+              focusable="false"
               width="12"
               height="12"
               viewBox="0 0 24 24"
@@ -200,12 +205,15 @@ export function ThreadPanel() {
               {truncate(quoting.content, 60)}
             </span>
             <button
+              type="button"
               className="thread-quote-dismiss"
               onClick={() => setQuoting(null)}
               aria-label="Cancel quote"
               title="Cancel quote"
             >
               <svg
+                aria-hidden="true"
+                focusable="false"
                 width="12"
                 height="12"
                 viewBox="0 0 24 24"
@@ -243,12 +251,15 @@ export function ThreadPanel() {
             rows={1}
           />
           <button
+            type="button"
             className="composer-send"
             disabled={!text.trim() || sendReply.isPending}
             onClick={handleSend}
             aria-label="Send reply"
           >
             <svg
+              aria-hidden="true"
+              focusable="false"
               width="16"
               height="16"
               viewBox="0 0 24 24"

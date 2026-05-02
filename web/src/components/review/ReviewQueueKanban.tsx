@@ -43,7 +43,7 @@ export default function ReviewQueueKanban() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [refreshTick, setRefreshTick] = useState(0);
+  const [_refreshTick, setRefreshTick] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -63,7 +63,7 @@ export default function ReviewQueueKanban() {
     return () => {
       cancelled = true;
     };
-  }, [refreshTick]);
+  }, []);
 
   useEffect(() => {
     const unsub = subscribeNotebookEvents((ev) => {
