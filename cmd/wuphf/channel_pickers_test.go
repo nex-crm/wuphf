@@ -162,6 +162,24 @@ func TestBuildRequestPickerOptions_FiltersByStatusAndChannel(t *testing.T) {
 	}
 }
 
+func TestBuildRequestPickerOptions_EmptyChannelOnlyAppearsInGeneral(t *testing.T) {
+	m := channelModel{
+		activeChannel: "engineering",
+		requests: []channelui.Interview{
+			{ID: "default-channel", Status: "open", Channel: "", Question: "q"},
+			{ID: "engineering", Status: "open", Channel: "engineering", Question: "q"},
+		},
+	}
+
+	opts := m.buildRequestPickerOptions()
+
+	got := pickerValues(opts)
+	want := []string{"engineering"}
+	if !equalStringSlice(got, want) {
+		t.Fatalf("empty channel should be scoped to general only, got %v want %v", got, want)
+	}
+}
+
 func TestBuildThreadPickerOptions_OnlyRootsWithReplies(t *testing.T) {
 	m := channelModel{
 		messages: []channelui.BrokerMessage{

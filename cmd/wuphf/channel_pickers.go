@@ -50,7 +50,12 @@ func (m channelModel) buildThreadPickerOptions() []tui.PickerOption {
 func (m channelModel) buildRequestPickerOptions() []tui.PickerOption {
 	options := make([]tui.PickerOption, 0, len(m.requests))
 	for _, req := range m.requests {
-		if req.Channel != "" && req.Channel != m.activeChannel {
+		requestChannel := strings.ToLower(strings.TrimSpace(req.Channel))
+		if requestChannel == "" {
+			requestChannel = "general"
+		}
+		activeChannel := strings.ToLower(strings.TrimSpace(m.activeChannel))
+		if requestChannel != activeChannel {
 			continue
 		}
 		if req.Status != "" && req.Status != "pending" && req.Status != "open" {
