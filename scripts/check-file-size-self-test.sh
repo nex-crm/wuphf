@@ -54,6 +54,17 @@ expect_failure_containing() {
   fi
 }
 
+expect_success() {
+  local repo="$1"
+  local output="$repo/check.out"
+
+  if ! bash "$repo/scripts/check-file-size.sh" > "$output" 2>&1; then
+    echo "expected file-size check to pass in $repo" >&2
+    cat "$output" >&2
+    exit 1
+  fi
+}
+
 test_first_allowlist_addition_fails() {
   local repo="$tmp_root/first-allowlist-addition"
   init_fixture_repo "$repo"
@@ -80,7 +91,20 @@ test_allowlisted_growth_fails() {
   expect_failure_containing "$repo" "allowlisted files grew"
 }
 
+test_origin_main_fallback_when_branch_has_no_upstream() {
+  local repo="$tmp_root/origin-main-fallback"
+  init_fixture_repo "$repo"
+  write_lines "$repo/pkg/large.go" 1500
+  printf '%s\n' "pkg/large.go" >> "$repo/scripts/file-size-allowlist.txt"
+  commit_fixture_base "$repo"
+  git -C "$repo" update-ref refs/remotes/origin/main HEAD
+  git -C "$repo" checkout -b local-review >/dev/null 2>&1
+
+  expect_success "$repo"
+}
+
 test_first_allowlist_addition_fails
 test_allowlisted_growth_fails
+test_origin_main_fallback_when_branch_has_no_upstream
 
 echo "file-size self-test OK"

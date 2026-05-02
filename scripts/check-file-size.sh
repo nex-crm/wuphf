@@ -55,6 +55,9 @@ base_ref="${FILE_SIZE_BASE_REF:-}"
 if [[ -z "$base_ref" && -n "${GITHUB_BASE_REF:-}" ]]; then
   base_ref="origin/${GITHUB_BASE_REF}"
 fi
+if [[ -z "$base_ref" ]] && git -C "$repo_root" rev-parse --verify origin/main >/dev/null 2>&1; then
+  base_ref="origin/main"
+fi
 if [[ -z "$base_ref" ]]; then
   base_ref="$(git -C "$repo_root" rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || true)"
 fi
