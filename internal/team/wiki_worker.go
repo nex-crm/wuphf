@@ -1064,11 +1064,12 @@ func (b *Broker) handleWikiArticle(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleWikiArchiveSweep runs one WikiArchiver.Sweep synchronously and
-// returns the SweepResult as JSON.
+// returns the SweepResult as JSON. POST is required because this endpoint
+// mutates state (archives articles, commits to git).
 //
-//	GET /wiki/archive/sweep
+//	POST /wiki/archive/sweep
 func (b *Broker) handleWikiArchiveSweep(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
+	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
@@ -1077,6 +1078,8 @@ func (b *Broker) handleWikiArchiveSweep(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, `{"error":"wiki backend is not active"}`, http.StatusServiceUnavailable)
 		return
 	}
+	b.archiveSweepMu.Lock()
+	defer b.archiveSweepMu.Unlock()
 	archiver := NewWikiArchiver(worker.Repo(), b.WikiReadLog(), 0)
 	result, err := archiver.Sweep(r.Context())
 	if err != nil {
@@ -1118,6 +1121,8 @@ func (b *Broker) runArchiveSweepTick() {
 	if worker == nil {
 		return
 	}
+	b.archiveSweepMu.Lock()
+	defer b.archiveSweepMu.Unlock()
 	archiver := NewWikiArchiver(worker.Repo(), b.WikiReadLog(), 0)
 	result, err := archiver.Sweep(context.Background())
 	if err != nil {

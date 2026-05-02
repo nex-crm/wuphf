@@ -355,22 +355,25 @@ func (r *Repo) CommitArchive(ctx context.Context, relPath, tombstone, archivePat
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	// Write tombstone at original path.
-	fullOrig := filepath.Join(r.root, filepath.FromSlash(relPath))
-	if err := os.MkdirAll(filepath.Dir(fullOrig), 0o700); err != nil {
-		return "", fmt.Errorf("wiki archive: mkdir orig: %w", err)
-	}
-	if err := os.WriteFile(fullOrig, []byte(tombstone), 0o600); err != nil {
-		return "", fmt.Errorf("wiki archive: write tombstone: %w", err)
-	}
-
-	// Write full content to .archive/<relPath>.
+	// Write archive content FIRST so that on a crash between the two writes,
+	// RecoverDirtyTree commits the archive file while the original article is
+	// still intact on disk. Writing tombstone first would destroy the original
+	// before the archive is persisted.
 	fullArchive := filepath.Join(r.root, filepath.FromSlash(archivePath))
 	if err := os.MkdirAll(filepath.Dir(fullArchive), 0o700); err != nil {
 		return "", fmt.Errorf("wiki archive: mkdir archive: %w", err)
 	}
 	if err := os.WriteFile(fullArchive, []byte(archiveContent), 0o600); err != nil {
 		return "", fmt.Errorf("wiki archive: write archive: %w", err)
+	}
+
+	// Write tombstone at original path only after archive is safely on disk.
+	fullOrig := filepath.Join(r.root, filepath.FromSlash(relPath))
+	if err := os.MkdirAll(filepath.Dir(fullOrig), 0o700); err != nil {
+		return "", fmt.Errorf("wiki archive: mkdir orig: %w", err)
+	}
+	if err := os.WriteFile(fullOrig, []byte(tombstone), 0o600); err != nil {
+		return "", fmt.Errorf("wiki archive: write tombstone: %w", err)
 	}
 
 	if err := r.regenerateIndexLocked(); err != nil {
@@ -647,6 +650,11 @@ func (r *Repo) regenerateIndexLocked() error {
 			return err
 		}
 		rel = filepath.ToSlash(rel)
+		// Exclude archived tombstones from the index so agents consuming
+		// index/all.md don't follow links to archived content.
+		if content, cerr := os.ReadFile(path); cerr == nil && parseFrontmatterBool(string(content), "archived") {
+			return nil
+		}
 		entries = append(entries, entry{
 			relPath: rel,
 			dir:     filepath.ToSlash(filepath.Dir(rel)),

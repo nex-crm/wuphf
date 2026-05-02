@@ -46,7 +46,7 @@ func commitArticleWithAge(t *testing.T, repo *Repo, relPath, content, slug strin
 // TestWikiArchiver_ICP1_StaleArticleArchived covers ICP Example 1:
 // a stale article (old + zero reads + ≥50 words) is archived and replaced
 // with a tombstone.
-func TestWikiArchiver_ICP1_StaleArticiveArchived(t *testing.T) {
+func TestWikiArchiver_ICP1_StaleArticleArchived(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
 	}
@@ -115,6 +115,9 @@ func TestWikiArchiver_ICP2_ShortStubSkipped(t *testing.T) {
 	if result.Archived != 0 {
 		t.Errorf("Archived = %d, want 0 (short stub must be skipped)", result.Archived)
 	}
+	if result.Skipped != 1 {
+		t.Errorf("Skipped = %d, want 1", result.Skipped)
+	}
 
 	// File unchanged.
 	data, err := os.ReadFile(filepath.Join(repo.Root(), "team/company/acme-micro.md"))
@@ -163,6 +166,32 @@ func TestWikiArchiver_ICP3_RecentlyReadKept(t *testing.T) {
 
 	if result.Archived != 0 {
 		t.Errorf("Archived = %d, want 0 (recently-read article must be kept)", result.Archived)
+	}
+	if result.Skipped != 1 {
+		t.Errorf("Skipped = %d, want 1", result.Skipped)
+	}
+}
+
+// TestWikiSearch_ExcludesArchivedTombstone verifies that searchArticles skips
+// tombstones so archived content doesn't appear in active wiki search.
+func TestWikiSearch_ExcludesArchivedTombstone(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	repo := newArchiverRepo(t)
+	ctx := context.Background()
+
+	tombstone := "---\narchived: true\narchived_at: 2026-01-01T00:00:00Z\narchive_path: .archive/team/company/oldcorp.md\n---\n\n*OldCorp was archived.*\n"
+	if _, _, err := repo.Commit(ctx, "archivist", "team/company/oldcorp.md", tombstone, "create", "add tombstone"); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+
+	hits, err := searchArticles(repo, "OldCorp")
+	if err != nil {
+		t.Fatalf("searchArticles: %v", err)
+	}
+	if len(hits) != 0 {
+		t.Errorf("searchArticles returned %d hits for archived tombstone, want 0", len(hits))
 	}
 }
 

@@ -34,10 +34,16 @@ type SweepResult struct {
 }
 
 // WikiArchiver sweeps team/ for stale articles and moves them to .archive/.
+// nil readLog means every article is treated as never-read.
 type WikiArchiver struct {
 	repo    *Repo
 	readLog *ReadLog
 	cutoff  time.Duration
+}
+
+type archiveCandidate struct {
+	relPath string
+	content []byte
 }
 
 // NewWikiArchiver returns an archiver. cutoff=0 uses DefaultArchiveCutoffDays.
@@ -70,7 +76,8 @@ func (a *WikiArchiver) Sweep(ctx context.Context) (SweepResult, error) {
 	cutoffDays := int(a.cutoff / (24 * time.Hour))
 
 	teamDir := filepath.Join(a.repo.Root(), "team")
-	var toArchive []string
+	var toArchive []archiveCandidate
+	var skipped int
 
 	walkErr := filepath.WalkDir(teamDir, func(path string, d os.DirEntry, werr error) error {
 		if werr != nil || d.IsDir() || !strings.HasSuffix(path, ".md") {
@@ -90,27 +97,29 @@ func (a *WikiArchiver) Sweep(ctx context.Context) (SweepResult, error) {
 			return nil //nolint:nilerr // non-fatal: skip unreadable file (race with delete)
 		}
 
-		// Already archived.
+		// Already archived — not counted as skipped (not active content).
 		if parseFrontmatterBool(string(data), "archived") {
 			return nil
 		}
 
-		// Word count check.
+		// Word count too low — article is a stub, leave it in place.
 		if countWords(data) < archiveMinWordCount {
+			skipped++
 			return nil
 		}
 
-		// Age check: oldest commit must predate the cutoff window.
+		// Article is too young.
 		b, ok := bounds[rel]
 		if !ok || b.Oldest.Timestamp.IsZero() || !b.Oldest.Timestamp.Before(cutoffAgo) {
+			skipped++
 			return nil
 		}
 
-		// Read recency check.
+		// Article was read within the cutoff window.
 		if readStats != nil {
 			if s, ok := readStats[rel]; ok && s.LastRead != nil {
 				if !s.LastRead.Before(cutoffAgo) {
-					// Read within the cutoff window — keep.
+					skipped++
 					return nil
 				}
 			}
@@ -118,8 +127,10 @@ func (a *WikiArchiver) Sweep(ctx context.Context) (SweepResult, error) {
 		// Never read (nil LastRead) counts as unread since first commit —
 		// falls through to archive.
 
-		_ = cutoffDays // used in tombstone body
-		toArchive = append(toArchive, rel)
+		// Capture content here to avoid a second read inside archiveOne,
+		// which prevents TOCTOU if the WikiWorker modifies the file between
+		// the eligibility check and the commit.
+		toArchive = append(toArchive, archiveCandidate{relPath: rel, content: data})
 		return nil
 	})
 	if walkErr != nil {
@@ -127,25 +138,23 @@ func (a *WikiArchiver) Sweep(ctx context.Context) (SweepResult, error) {
 	}
 
 	var result SweepResult
-	for _, relPath := range toArchive {
-		if err := a.archiveOne(ctx, relPath, cutoffDays); err != nil {
-			log.Printf("wiki archive: archive %s: %v", relPath, err)
+	result.Skipped = skipped
+	for _, c := range toArchive {
+		if err := a.archiveOne(ctx, c.relPath, c.content, cutoffDays); err != nil {
+			log.Printf("wiki archive: archive %s: %v", c.relPath, err)
 			result.Errors++
 			continue
 		}
 		result.Archived++
 	}
-	result.Skipped = len(toArchive) - result.Archived - result.Errors
 	return result, nil
 }
 
-func (a *WikiArchiver) archiveOne(ctx context.Context, relPath string, cutoffDays int) error {
-	fullPath := filepath.Join(a.repo.Root(), filepath.FromSlash(relPath))
-	original, err := os.ReadFile(fullPath)
-	if err != nil {
-		return fmt.Errorf("read: %w", err)
-	}
-
+// archiveOne moves a single article to .archive/. content is the file bytes
+// captured during the eligibility walk — passing it avoids a second read and
+// eliminates the TOCTOU window where the WikiWorker could modify the file
+// between the eligibility check and this commit.
+func (a *WikiArchiver) archiveOne(ctx context.Context, relPath string, content []byte, cutoffDays int) error {
 	now := time.Now().UTC()
 	archivePath := ".archive/" + relPath
 
@@ -158,7 +167,7 @@ func (a *WikiArchiver) archiveOne(ctx context.Context, relPath string, cutoffDay
 	)
 
 	msg := fmt.Sprintf("archivist: archive %s (unread %d+ days)", relPath, cutoffDays)
-	if _, err := a.repo.CommitArchive(ctx, relPath, tombstone, archivePath, string(original), msg); err != nil {
+	if _, err := a.repo.CommitArchive(ctx, relPath, tombstone, archivePath, string(content), msg); err != nil {
 		return fmt.Errorf("commit: %w", err)
 	}
 	return nil

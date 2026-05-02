@@ -117,7 +117,13 @@ type Broker struct {
 	// /config calls don't corrupt ~/.wuphf/config.json. config.Save uses
 	// os.WriteFile (O_TRUNC) without locking, so two parallel POSTs can
 	// produce a truncated/overlaid file.
-	configMu           sync.Mutex
+	configMu sync.Mutex
+	// archiveSweepMu ensures only one WikiArchiver.Sweep runs at a time.
+	// Without this, concurrent POST /wiki/archive/sweep requests and the
+	// background cron tick could both archive the same articles, with the
+	// second sweep reading tombstone content (written by the first) into the
+	// .archive/ copy — silently destroying the original.
+	archiveSweepMu     sync.Mutex
 	server             *http.Server
 	lifecycleCtx       context.Context
 	lifecycleCancel    context.CancelFunc
