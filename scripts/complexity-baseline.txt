@@ -20,7 +20,6 @@ web/src/components/apps/SettingsApp.tsx|lint/complexity/noExcessiveCognitiveComp
 web/src/components/apps/SkillsApp.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
 web/src/components/apps/SkillsApp.tsx|lint/complexity/noExcessiveLinesPerFunction|1|Existing function length is baselined for a focused follow-up refactor.
 web/src/components/apps/SkillsApp.tsx|lint/complexity/noExcessiveCognitiveComplexity|2|Existing cognitive complexity is baselined for a focused follow-up refactor.
-web/src/components/apps/SkillsApp.tsx|lint/complexity/noExcessiveCognitiveComplexity|3|Existing cognitive complexity is baselined for a focused follow-up refactor.
 web/src/components/apps/SystemSchedulesPanel.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
 web/src/components/apps/SystemSchedulesPanel.tsx|lint/complexity/noExcessiveCognitiveComplexity|2|Existing cognitive complexity is baselined for a focused follow-up refactor.
 web/src/components/apps/SystemSchedulesPanel.tsx|lint/complexity/noExcessiveCognitiveComplexity|3|Existing cognitive complexity is baselined for a focused follow-up refactor.
