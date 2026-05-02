@@ -36,7 +36,44 @@ checksum:
   name_template: checksums.txt
 
 changelog:
-  disable: true
+  use: git
+  sort: asc
+  abbrev: -1
+  format: "{{ .Message }}"
+  groups:
+    - title: Breaking changes
+      regexp: '^.*?(feat|fix|perf|refactor|docs|chore|test|build|ci|style|revert)(\([^)]+\))?!:.+$'
+      order: 0
+    - title: New features
+      regexp: '^.*?feat(\([^)]+\))?(!)?:.+$'
+      order: 1
+    - title: Bug fixes
+      regexp: '^.*?fix(\([^)]+\))?(!)?:.+$'
+      order: 2
+    - title: Performance
+      regexp: '^.*?perf(\([^)]+\))?(!)?:.+$'
+      order: 3
+    - title: Refactoring
+      regexp: '^.*?refactor(\([^)]+\))?(!)?:.+$'
+      order: 4
+    - title: Documentation
+      regexp: '^.*?docs(\([^)]+\))?(!)?:.+$'
+      order: 5
+    - title: Build and CI
+      regexp: '^.*?(build|ci)(\([^)]+\))?(!)?:.+$'
+      order: 6
+    - title: Maintenance
+      regexp: '^.*?(chore|test|style)(\([^)]+\))?(!)?:.+$'
+      order: 7
+    - title: Reverts
+      regexp: '^.*?revert(\([^)]+\))?(!)?:.+$'
+      order: 8
+    - title: Other changes
+      order: 999
+  filters:
+    exclude:
+      - "^Merge pull request"
+      - "^Merge remote-tracking branch"
 
 release:
   github:
