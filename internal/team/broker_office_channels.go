@@ -703,54 +703,18 @@ func (b *Broker) handleChannels(w http.ResponseWriter, r *http.Request) {
 		}
 		switch action {
 		case "create":
-			if slug == "" {
-				http.Error(w, "slug required", http.StatusBadRequest)
-				return
-			}
-			if reservedChannelSlugs[slug] {
-				// Reject slugs that canAccessChannelLocked treats as universally
-				// trusted senders. Without this gate, a user-created channel
-				// named e.g. "system" would let every trusted-sender slug read
-				// + post in it without an explicit Members entry — defeating
-				// the membership check the rest of the auth path relies on.
-				http.Error(w, "slug is reserved", http.StatusBadRequest)
-				return
-			}
-			if b.findChannelLocked(slug) != nil {
-				http.Error(w, "channel already exists", http.StatusConflict)
-				return
-			}
-			members, missing := validateMembers(body.Members)
-			if missing != "" {
-				http.Error(w, "unknown members: "+missing, http.StatusNotFound)
-				return
-			}
-			members = append([]string{"ceo"}, members...)
-			if creator := normalizeChannelSlug(body.CreatedBy); creator != "" && creator != "ceo" && b.findMemberLocked(creator) != nil {
-				members = append(members, creator)
-			}
-			ch := teamChannel{
-				Slug:        slug,
-				Name:        strings.TrimSpace(body.Name),
-				Description: strings.TrimSpace(body.Description),
-				Members:     uniqueSlugs(members),
+			ch, cerr := b.createChannelLocked(channelCreateInput{
+				Slug:        body.Slug,
+				Name:        body.Name,
+				Description: body.Description,
+				Members:     body.Members,
+				CreatedBy:   body.CreatedBy,
 				Surface:     body.Surface,
-				CreatedBy:   strings.TrimSpace(body.CreatedBy),
-				CreatedAt:   now,
-				UpdatedAt:   now,
-			}
-			if ch.Name == "" {
-				ch.Name = slug
-			}
-			if ch.Description == "" {
-				ch.Description = defaultTeamChannelDescription(ch.Slug, ch.Name)
-			}
-			b.channels = append(b.channels, ch)
-			if err := b.saveLocked(); err != nil {
-				http.Error(w, "failed to persist broker state", http.StatusInternalServerError)
+			})
+			if cerr != nil {
+				http.Error(w, cerr.Msg, cerr.Code)
 				return
 			}
-			b.publishOfficeChangeLocked(officeChangeEvent{Kind: "channel_created", Slug: slug})
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{"channel": ch})
 		case "update":
@@ -856,6 +820,110 @@ func (b *Broker) handleChannels(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+// channelCreateInput is the input shape for createChannelLocked. It mirrors
+// the bits of the POST /channels body that drive a "create" action so the
+// Telegram-connect handler (and any future integration handler) can reuse the
+// canonical create path without re-implementing the validation rules.
+type channelCreateInput struct {
+	Slug        string
+	Name        string
+	Description string
+	Members     []string
+	CreatedBy   string
+	Surface     *channelSurface
+}
+
+// channelCreateError pairs an HTTP status with a user-facing message so the
+// caller can write it back through http.Error without rebuilding the
+// status-code → message mapping in every handler.
+type channelCreateError struct {
+	Code int
+	Msg  string
+}
+
+func (e *channelCreateError) Error() string { return e.Msg }
+
+// createChannelLocked is the canonical channel-create path. It validates the
+// slug, applies the reserved-slug guard, validates members against
+// b.findMemberLocked, prepends "ceo", optionally adds the creator, persists,
+// and publishes the change event. Caller MUST hold b.mu.
+//
+// All of this used to be inlined in handleChannels' "create" case; pulling it
+// out lets the Telegram-connect web flow share the exact same validation
+// rather than reimplementing them and drifting (the original copy in
+// handleTelegramConnect skipped member validation, the reserved-slug guard,
+// and the creator-self-add — all silent gaps that this consolidation closes).
+func (b *Broker) createChannelLocked(in channelCreateInput) (*teamChannel, *channelCreateError) {
+	// Validate the raw slug before normalizing — normalizeChannelSlug rewrites
+	// "" / whitespace to "general" and would have skipped the "slug required"
+	// branch entirely, falling through to "channel already exists" because
+	// #general always exists. Surface the missing-slug case as 400 with a
+	// useful message instead.
+	if strings.TrimSpace(in.Slug) == "" {
+		return nil, &channelCreateError{Code: http.StatusBadRequest, Msg: "slug required"}
+	}
+	slug := normalizeChannelSlug(in.Slug)
+	if slug == "" {
+		return nil, &channelCreateError{Code: http.StatusBadRequest, Msg: "slug required"}
+	}
+	if reservedChannelSlugs[slug] {
+		return nil, &channelCreateError{Code: http.StatusBadRequest, Msg: "slug is reserved"}
+	}
+	if b.findChannelLocked(slug) != nil {
+		return nil, &channelCreateError{Code: http.StatusConflict, Msg: "channel already exists"}
+	}
+
+	requested := uniqueSlugs(in.Members)
+	validated := make([]string, 0, len(requested))
+	var missing []string
+	for _, m := range requested {
+		if b.findMemberLocked(m) == nil {
+			missing = append(missing, m)
+			continue
+		}
+		validated = append(validated, m)
+	}
+	if len(missing) > 0 {
+		return nil, &channelCreateError{
+			Code: http.StatusNotFound,
+			Msg:  "unknown members: " + strings.Join(missing, ", "),
+		}
+	}
+
+	final := append([]string{"ceo"}, validated...)
+	// CreatedBy is an actor slug, not a channel slug. normalizeChannelSlug
+	// rewrites "" to "general", which would silently auto-add a real office
+	// member named "general" as a channel member whenever CreatedBy was
+	// empty. normalizeActorSlug preserves "" so the guard below short-circuits.
+	if creator := normalizeActorSlug(in.CreatedBy); creator != "" && creator != "ceo" && b.findMemberLocked(creator) != nil {
+		final = append(final, creator)
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	ch := teamChannel{
+		Slug:        slug,
+		Name:        strings.TrimSpace(in.Name),
+		Description: strings.TrimSpace(in.Description),
+		Members:     uniqueSlugs(final),
+		Surface:     in.Surface,
+		CreatedBy:   strings.TrimSpace(in.CreatedBy),
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	if ch.Name == "" {
+		ch.Name = slug
+	}
+	if ch.Description == "" {
+		ch.Description = defaultTeamChannelDescription(ch.Slug, ch.Name)
+	}
+	b.channels = append(b.channels, ch)
+	if err := b.saveLocked(); err != nil {
+		return nil, &channelCreateError{Code: http.StatusInternalServerError, Msg: "failed to persist broker state"}
+	}
+	b.publishOfficeChangeLocked(officeChangeEvent{Kind: "channel_created", Slug: slug})
+	return &b.channels[len(b.channels)-1], nil
 }
 
 // handleCreateDM creates or returns an existing DM channel.

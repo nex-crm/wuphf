@@ -2,8 +2,17 @@
 /* Wiki surface — scoped to .wiki-root.
  * Aligned to the Nex design system: cyan accent, neutral palette.
  * Keeps Wikipedia IA + editorial serif hierarchy for articles only.
+ * The wk-modal-* / wk-editor-* primitives below are global selectors reused
+ * outside the wiki (e.g. the Telegram /connect wizard, mounted from App.tsx).
+ * The variables they read therefore have to be defined at :root, not on
+ * .wiki-root, or the modal renders with a transparent background and no
+ * border outside the wiki page.
+ *
+ * Each --wk-* below is an alias of an already-global token (--bg, --border,
+ * etc.), so promoting the declarations to :root doesn't change any wiki
+ * rendering — it just makes the aliases resolve everywhere.
  */
-.wiki-root {
+:root {
   --wk-paper: var(--bg);
   --wk-paper-dark: var(--bg-warm);
   --wk-surface: var(--bg-card);
@@ -28,6 +37,8 @@
   --wk-sidebar-left: 240px;
   --wk-sidebar-right: 280px;
   --wk-article-max: 640px;
+}
+.wiki-root {
   background: var(--wk-paper);
   color: var(--wk-text);
   line-height: 1.6;
