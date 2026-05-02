@@ -93,6 +93,20 @@ func printSubcommandHelp(sub string) {
 		fmt.Fprintln(os.Stderr, "  wuphf log                     List recent tasks")
 		fmt.Fprintln(os.Stderr, "  wuphf log <taskID>            Show one task in detail")
 		fmt.Fprintln(os.Stderr, "  wuphf log --agent eng         Filter to one agent")
+	case "share":
+		fmt.Fprintln(os.Stderr, "wuphf share — invite one co-founder to this office")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "Starts a private-network web listener and prints a one-use invite URL.")
+		fmt.Fprintln(os.Stderr, "Prerequisite: both machines are on the same Tailscale or WireGuard network.")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "Usage:")
+		fmt.Fprintln(os.Stderr, "  wuphf share                         Use a Tailscale 100.x address")
+		fmt.Fprintln(os.Stderr, "  wuphf share --bind 100.x.y.z        Bind a specific private address")
+		fmt.Fprintln(os.Stderr, "  wuphf share --bind wireguard        Prefer a WireGuard interface")
+		fmt.Fprintln(os.Stderr, "  wuphf share --json                  Emit invite details for scripts")
+		fmt.Fprintln(os.Stderr, "  wuphf share --unsafe-lan            Allow RFC1918 LAN addresses")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "Public interfaces are blocked by default.")
 	case "mcp-team":
 		fmt.Fprintln(os.Stderr, "wuphf mcp-team — start the team MCP server (used by agents, not humans)")
 		fmt.Fprintln(os.Stderr, "")
@@ -229,6 +243,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  %s shred        Burn the workspace down and reopen onboarding\n", appName)
 		fmt.Fprintf(os.Stderr, "  %s import --from legacy  Import from a running external orchestrator (auto-detect)\n", appName)
 		fmt.Fprintf(os.Stderr, "  %s log          Show what your agents actually did (task receipts)\n", appName)
+		fmt.Fprintf(os.Stderr, "  %s share        Invite one co-founder over a private network\n", appName)
 		fmt.Fprintf(os.Stderr, "  %s memory migrate --from {nex,gbrain}  Port legacy memory into the team wiki\n", appName)
 		fmt.Fprintf(os.Stderr, "  %s workspace ...  Manage multiple isolated WUPHF workspaces\n", appName)
 		fmt.Fprintf(os.Stderr, "  %s --cmd <cmd>  Run a command non-interactively\n", appName)
@@ -376,6 +391,9 @@ func main() {
 			return
 		case "log":
 			runLogCmd(args[1:])
+			return
+		case "share":
+			runShare(args[1:])
 			return
 		case "memory":
 			runMemory(args[1:])

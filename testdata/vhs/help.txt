@@ -9,6 +9,7 @@ Usage:
   wuphf shred        Burn the workspace down and reopen onboarding
   wuphf import --from legacy  Import from a running external orchestrator (auto-detect)
   wuphf log          Show what your agents actually did (task receipts)
+  wuphf share        Invite one co-founder over a private network
   wuphf memory migrate --from {nex,gbrain}  Port legacy memory into the team wiki
   wuphf workspace ...  Manage multiple isolated WUPHF workspaces
   wuphf --cmd <cmd>  Run a command non-interactively
