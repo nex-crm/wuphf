@@ -15,7 +15,7 @@ function createMemoryStorage(): Storage {
     clear: () => {
       for (const k of Object.keys(data)) delete data[k];
     },
-    getItem: (key: string) => (key in data ? data[key] : null),
+    getItem: (key: string) => data[key] ?? null,
     key: (index: number) => Object.keys(data)[index] ?? null,
     removeItem: (key: string) => {
       delete data[key];
