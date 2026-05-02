@@ -881,9 +881,9 @@ func searchArticles(repo *Repo, pattern string) ([]WikiSearchHit, error) {
 		if len(hits) >= maxHits {
 			return filepath.SkipDir
 		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return nil
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return nil //nolint:nilerr // non-fatal: skip unreadable file (race with delete)
 		}
 		// Skip archived tombstones — they are no longer active wiki content.
 		if parseFrontmatterBool(string(data), "archived") {

@@ -186,7 +186,7 @@ func (r *Repo) BuildCatalog(ctx context.Context, sortBy string, readLog *ReadLog
 			Path:     rel,
 			Archived: isArchived,
 			Title:    extractTitle(content, rel),
-			Group: groupFromPath(rel),
+			Group:    groupFromPath(rel),
 		}
 		entries = append(entries, entry)
 		return nil

@@ -79,15 +79,15 @@ func (a *WikiArchiver) Sweep(ctx context.Context) (SweepResult, error) {
 		if strings.HasPrefix(d.Name(), ".") {
 			return nil
 		}
-		rel, err := filepath.Rel(a.repo.Root(), path)
-		if err != nil {
-			return nil
+		rel, relErr := filepath.Rel(a.repo.Root(), path)
+		if relErr != nil {
+			return nil //nolint:nilerr // non-fatal: skip unresolvable path
 		}
 		rel = filepath.ToSlash(rel)
 
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return nil
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return nil //nolint:nilerr // non-fatal: skip unreadable file (race with delete)
 		}
 
 		// Already archived.
