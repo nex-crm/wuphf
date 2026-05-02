@@ -223,7 +223,7 @@ export function AgentWizard({ open, onClose, onCreated }: AgentWizardProps) {
               </span>
             </div>
 
-            {error && <div className="agent-wizard-error">{error}</div>}
+            {error ? <div className="agent-wizard-error">{error}</div> : null}
 
             <div className="agent-wizard-footer">
               <button
@@ -360,7 +360,7 @@ export function AgentWizard({ open, onClose, onCreated }: AgentWizardProps) {
               )}
             </div>
 
-            {error && <div className="agent-wizard-error">{error}</div>}
+            {error ? <div className="agent-wizard-error">{error}</div> : null}
 
             {/* Footer */}
             <div className="agent-wizard-footer">

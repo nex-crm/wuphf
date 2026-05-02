@@ -61,7 +61,7 @@ export default function WikiCatalog({
           >
             + New article
           </button>
-          {onOpenAudit && (
+          {onOpenAudit ? (
             <>
               {" · "}
               <button
@@ -75,10 +75,10 @@ export default function WikiCatalog({
                 Audit log
               </button>
             </>
-          )}
+          ) : null}
         </div>
       </header>
-      {showNew && (
+      {showNew ? (
         <NewArticleModal
           catalog={catalog}
           onCancel={() => setShowNew(false)}
@@ -87,7 +87,7 @@ export default function WikiCatalog({
             onNavigate(path);
           }}
         />
-      )}
+      ) : null}
       <div className="wk-catalog-grid">
         {groupOrder.map((group) => {
           const items = grouped[group];
