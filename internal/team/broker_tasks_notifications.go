@@ -152,7 +152,7 @@ func (b *Broker) postTaskDMLocked(from, targetSlug, kind, title, content string)
 // The human user ("human"/"you") and the CEO seat ("ceo", which is the human)
 // are excluded because they would create self-DMs.
 func isDMTargetSlug(slug string) bool {
-	slug = strings.TrimSpace(slug)
+	slug = strings.ToLower(strings.TrimSpace(slug))
 	if slug == "" {
 		return false
 	}

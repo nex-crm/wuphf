@@ -64,7 +64,7 @@ func handleTeamMemoryQuery(ctx context.Context, _ *mcp.CallToolRequest, args Tea
 		if len(hits) > 0 {
 			header := "Shared memory:"
 			if scope == "shared" {
-				header = fmt.Sprintf("Shared %s memory:", strings.ToUpper(hits[0].Backend[:1])+hits[0].Backend[1:])
+				header = fmt.Sprintf("Shared %s memory:", titleMemoryBackend(hits[0].Backend))
 			}
 			lines = append(lines, header)
 			for _, hit := range hits {
@@ -91,6 +91,16 @@ func handleTeamMemoryQuery(ctx context.Context, _ *mcp.CallToolRequest, args Tea
 		}
 	}
 	return textResult(strings.Join(lines, "\n")), nil, nil
+}
+
+func titleMemoryBackend(backend string) string {
+	backend = strings.TrimSpace(backend)
+	if backend == "" {
+		return "shared"
+	}
+	runes := []rune(backend)
+	runes[0] = unicode.ToUpper(runes[0])
+	return string(runes)
 }
 
 func handleTeamMemoryWrite(ctx context.Context, _ *mcp.CallToolRequest, args TeamMemoryWriteArgs) (*mcp.CallToolResult, any, error) {

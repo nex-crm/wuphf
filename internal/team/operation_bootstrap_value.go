@@ -143,19 +143,27 @@ func buildOperationOffers(blueprint operations.Blueprint, pack operationChannelP
 		})
 	}
 	for _, product := range monetization.Offers.DigitalProducts {
+		name := strings.TrimSpace(product.Name)
+		if name == "" {
+			continue
+		}
 		out = append(out, operationOffer{
 			ID:   product.ID,
-			Name: product.Name,
+			Name: name,
 			Type: "digital_product",
-			CTA:  "See " + product.Name,
+			CTA:  "See " + name,
 		})
 	}
 	for _, service := range monetization.Offers.Services {
+		name := strings.TrimSpace(service.Name)
+		if name == "" {
+			continue
+		}
 		out = append(out, operationOffer{
 			ID:   service.ID,
-			Name: service.Name,
+			Name: name,
 			Type: "service",
-			CTA:  "Request " + service.Name,
+			CTA:  "Request " + name,
 		})
 	}
 	return out

@@ -31,17 +31,18 @@ func operationRuntimeIntegrationsFromConnections(runtimeConnections []action.Con
 		if integration == "" {
 			continue
 		}
-		key := strings.ToLower(integration)
+		key := normalizeOperationIntegrationKey(integration)
 		if _, ok := seen[key]; ok {
 			continue
 		}
 		seen[key] = struct{}{}
+		displayName := operationFirstNonEmpty(strings.TrimSpace(conn.Name), titleCaser.String(integration))
 		integrations = append(integrations, operations.RuntimeIntegration{
-			Name:        operationFirstNonEmpty(strings.TrimSpace(conn.Name), titleCaser.String(integration)),
+			Name:        displayName,
 			Provider:    integration,
 			Status:      strings.TrimSpace(conn.State),
 			Purpose:     fmt.Sprintf("Connected %s account available for workflow planning.", integration),
-			Description: fmt.Sprintf("Connected account %q with key %q.", strings.TrimSpace(conn.Name), strings.TrimSpace(conn.Key)),
+			Description: fmt.Sprintf("Connected account %q.", displayName),
 			Connected:   isOperationConnectionConnected(conn),
 		})
 	}
@@ -63,17 +64,38 @@ func operationRuntimeCapabilitiesFromConnections(runtimeConnections []action.Con
 			Detail:    "Discover connected accounts and map them into workflows.",
 		})
 	}
+	type platformCapability struct {
+		name  string
+		state string
+	}
+	platforms := make(map[string]platformCapability, len(runtimeConnections))
 	for _, conn := range runtimeConnections {
 		integration := strings.TrimSpace(conn.Platform)
 		if integration == "" {
 			continue
 		}
+		key := normalizeOperationIntegrationKey(integration)
+		if _, ok := platforms[key]; ok {
+			continue
+		}
+		platforms[key] = platformCapability{
+			name:  integration,
+			state: strings.TrimSpace(conn.State),
+		}
+	}
+	keys := make([]string, 0, len(platforms))
+	for key := range platforms {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		platform := platforms[key]
 		capabilities = append(capabilities, operations.RuntimeCapability{
-			Key:       operationSlug(integration),
-			Name:      titleCaser.String(integration),
+			Key:       operationSlug(platform.name),
+			Name:      titleCaser.String(platform.name),
 			Category:  "integration",
-			Lifecycle: strings.TrimSpace(conn.State),
-			Detail:    fmt.Sprintf("Use the connected %s account when the workflow needs it.", integration),
+			Lifecycle: platform.state,
+			Detail:    fmt.Sprintf("Use the connected %s account when the workflow needs it.", platform.name),
 		})
 	}
 	return capabilities

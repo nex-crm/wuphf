@@ -203,7 +203,7 @@ func buildOperationKPIs(pack operationChannelPackDoc) []operationKPI {
 func operationPublishingCadence(pack operationChannelPackDoc) string {
 	days := pack.LaunchDefaults.Cadence.PublishDays
 	if len(days) == 0 {
-		return "Publish cadence pending"
+		return ""
 	}
 	return fmt.Sprintf("%d release days/week (%s)", len(days), strings.Join(days, ", "))
 }

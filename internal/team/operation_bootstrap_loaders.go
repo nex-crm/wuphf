@@ -206,13 +206,13 @@ func selectOperationPackFile(packs []operationPackFile, profile operationCompany
 		}
 	}
 	if bestScore <= 0 {
-		if strings.TrimSpace(query) != "" {
-			return operationPackFile{}, fmt.Errorf("no matching operation pack")
-		}
 		for _, pack := range packs {
 			if strings.Contains(strings.ToLower(pack.Doc.Metadata.ID), "default") {
 				return pack, nil
 			}
+		}
+		if strings.TrimSpace(query) != "" {
+			return operationPackFile{}, fmt.Errorf("no matching operation pack")
 		}
 	}
 	return best, nil

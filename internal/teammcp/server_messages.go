@@ -76,9 +76,13 @@ func handleTeamBroadcast(ctx context.Context, _ *mcp.CallToolRequest, args TeamB
 	text += "."
 
 	if len(autoTagged) > 0 {
+		displayTagged := make([]string, 0, len(autoTagged))
+		for _, tag := range autoTagged {
+			displayTagged = append(displayTagged, "@"+strings.TrimLeft(tag, "@"))
+		}
 		text += fmt.Sprintf(
 			" Auto-tagged %s from the body so they get woken; pass them explicitly in `tagged` next time to avoid this note.",
-			strings.Join(autoTagged, ", "),
+			strings.Join(displayTagged, ", "),
 		)
 	}
 
@@ -130,7 +134,7 @@ func detectUntaggedMentions(content string, tagged []string) []string {
 			continue
 		}
 		seen[raw] = struct{}{}
-		out = append(out, "@"+raw)
+		out = append(out, raw)
 	}
 	return out
 }
@@ -241,16 +245,29 @@ func threadRootForReply(replyTo string, messages []brokerMessage) string {
 	if replyTo == "" {
 		return ""
 	}
+	byID := make(map[string]brokerMessage, len(messages))
 	for _, msg := range messages {
-		if strings.TrimSpace(msg.ID) != replyTo {
-			continue
+		if id := strings.TrimSpace(msg.ID); id != "" {
+			byID[id] = msg
 		}
-		if root := strings.TrimSpace(msg.ReplyTo); root != "" {
-			return root
-		}
-		return replyTo
 	}
-	return replyTo
+	current := replyTo
+	seen := map[string]struct{}{}
+	for {
+		if _, ok := seen[current]; ok {
+			return current
+		}
+		seen[current] = struct{}{}
+		msg, ok := byID[current]
+		if !ok {
+			return current
+		}
+		parent := strings.TrimSpace(msg.ReplyTo)
+		if parent == "" {
+			return current
+		}
+		current = parent
+	}
 }
 
 func ownsRelevantTask(slug, replyTo, threadRoot, domain string, tasks []brokerTaskSummary) bool {

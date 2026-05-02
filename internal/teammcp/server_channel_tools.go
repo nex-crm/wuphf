@@ -3,6 +3,7 @@ package teammcp
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -48,7 +49,8 @@ func handleTeamDMOpen(ctx context.Context, _ *mcp.CallToolRequest, args TeamDMOp
 	// Validate: must include human. Agent-to-agent DMs are not allowed.
 	hasHuman := false
 	for _, m := range args.Members {
-		if m == "human" || m == "you" {
+		member := strings.ToLower(strings.TrimSpace(m))
+		if member == "human" || member == "you" {
 			hasHuman = true
 			break
 		}
@@ -108,10 +110,8 @@ func handleTeamChannel(ctx context.Context, _ *mcp.CallToolRequest, args TeamCha
 	}, nil); err != nil {
 		return toolError(err), nil, nil
 	}
-	if err := reconfigureOfficeSessionFn(); err != nil {
-		return toolError(err), nil, nil
-	}
-	return textResult(fmt.Sprintf("%s channel #%s", titleCaser.String(strings.TrimSpace(args.Action)), channel)), nil, nil
+	warning := reconfigureOfficeSessionWarning("channel_" + action)
+	return textResult(fmt.Sprintf("%s channel #%s", titleCaser.String(strings.TrimSpace(args.Action)), channel) + warning), nil, nil
 }
 
 func handleTeamChannelMember(ctx context.Context, _ *mcp.CallToolRequest, args TeamChannelMemberArgs) (*mcp.CallToolResult, any, error) {
@@ -131,10 +131,8 @@ func handleTeamChannelMember(ctx context.Context, _ *mcp.CallToolRequest, args T
 	}, nil); err != nil {
 		return toolError(err), nil, nil
 	}
-	if err := reconfigureOfficeSessionFn(); err != nil {
-		return toolError(err), nil, nil
-	}
-	return textResult(fmt.Sprintf("%s @%s in #%s", titleCaser.String(strings.TrimSpace(args.Action)), member, channel)), nil, nil
+	warning := reconfigureOfficeSessionWarning("channel_member_" + strings.TrimSpace(args.Action))
+	return textResult(fmt.Sprintf("%s @%s in #%s", titleCaser.String(strings.TrimSpace(args.Action)), member, channel) + warning), nil, nil
 }
 
 func handleTeamBridge(ctx context.Context, _ *mcp.CallToolRequest, args TeamBridgeArgs) (*mcp.CallToolResult, any, error) {
@@ -211,10 +209,8 @@ func handleTeamMember(ctx context.Context, _ *mcp.CallToolRequest, args TeamMemb
 		if err := brokerPostJSON(ctx, "/office-members", body, nil); err != nil {
 			return toolError(err), nil, nil
 		}
-		if err := reconfigureOfficeSessionFn(); err != nil {
-			return toolError(err), nil, nil
-		}
-		return textResult(fmt.Sprintf("Created office member @%s.", slug)), nil, nil
+		warning := reconfigureOfficeSessionWarning("member_create")
+		return textResult(fmt.Sprintf("Created office member @%s.", slug) + warning), nil, nil
 	case "remove":
 		if err := brokerPostJSON(ctx, "/office-members", map[string]any{
 			"action": "remove",
@@ -222,13 +218,19 @@ func handleTeamMember(ctx context.Context, _ *mcp.CallToolRequest, args TeamMemb
 		}, nil); err != nil {
 			return toolError(err), nil, nil
 		}
-		if err := reconfigureOfficeSessionFn(); err != nil {
-			return toolError(err), nil, nil
-		}
-		return textResult(fmt.Sprintf("Removed office member @%s.", slug)), nil, nil
+		warning := reconfigureOfficeSessionWarning("member_remove")
+		return textResult(fmt.Sprintf("Removed office member @%s.", slug) + warning), nil, nil
 	default:
 		return toolError(fmt.Errorf("unknown action %q", args.Action)), nil, nil
 	}
+}
+
+func reconfigureOfficeSessionWarning(action string) string {
+	if err := reconfigureOfficeSessionFn(); err != nil {
+		slog.Warn("teammcp_reconfigure_failed", "action", action, "err", err)
+		return fmt.Sprintf(" Reconfigure warning: %v", err)
+	}
+	return ""
 }
 
 func normalizeSlug(input string) string {

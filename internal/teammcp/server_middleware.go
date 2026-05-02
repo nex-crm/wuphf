@@ -3,6 +3,7 @@ package teammcp
 import (
 	"context"
 	"strings"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -78,9 +79,11 @@ func postAgentToolEvent(ctx context.Context, slug, phase, tool, args, result, er
 	}
 	// Fire-and-forget; dropping a log line must never fail a tool call.
 	go func() {
+		eventCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
 		// Ignore errors — the broker might be restarting or unreachable,
 		// and an audit-log failure is not worth surfacing to the agent.
-		_ = brokerPostJSON(context.Background(), "/agent-tool-event", body, nil)
+		_ = brokerPostJSON(eventCtx, "/agent-tool-event", body, nil)
 	}()
 	_ = ctx
 }

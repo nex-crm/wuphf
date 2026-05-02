@@ -60,6 +60,10 @@ func (b *Broker) handlePostTask(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "title and created_by required", http.StatusBadRequest)
 			return
 		}
+		mutationSnapshot := snapshotBrokerTaskMutationLocked(b)
+		rollbackTask := func() {
+			mutationSnapshot.restore(b)
+		}
 		if existing := b.findReusableTaskLocked(taskReuseMatch{
 			Channel:          channel,
 			Title:            strings.TrimSpace(body.Title),
@@ -106,13 +110,20 @@ func (b *Broker) handlePostTask(w http.ResponseWriter, r *http.Request) {
 			syncTaskMemoryWorkflow(existing, now)
 			b.ensureTaskOwnerChannelMembershipLocked(channel, existing.Owner)
 			existing.UpdatedAt = now
+			if err := rejectTheaterTaskForLiveBusiness(existing); err != nil {
+				rollbackTask()
+				http.Error(w, err.Error(), http.StatusConflict)
+				return
+			}
 			b.scheduleTaskLifecycleLocked(existing)
 			if err := b.syncTaskWorktreeLocked(existing); err != nil {
+				rollbackTask()
 				http.Error(w, "failed to manage task worktree", http.StatusInternalServerError)
 				return
 			}
 			b.appendActionLocked("task_updated", "office", channel, strings.TrimSpace(body.CreatedBy), truncateSummary(existing.Title+" ["+existing.Status+"]", 140), existing.ID)
 			if err := b.saveLocked(); err != nil {
+				rollbackTask()
 				http.Error(w, "failed to persist broker state", http.StatusInternalServerError)
 				return
 			}
@@ -151,17 +162,20 @@ func (b *Broker) handlePostTask(w http.ResponseWriter, r *http.Request) {
 		b.ensureTaskOwnerChannelMembershipLocked(channel, task.Owner)
 		b.queueTaskBehindActiveOwnerLaneLocked(&task)
 		if err := rejectTheaterTaskForLiveBusiness(&task); err != nil {
+			rollbackTask()
 			http.Error(w, err.Error(), http.StatusConflict)
 			return
 		}
 		b.scheduleTaskLifecycleLocked(&task)
 		if err := b.syncTaskWorktreeLocked(&task); err != nil {
+			rollbackTask()
 			http.Error(w, "failed to manage task worktree", http.StatusInternalServerError)
 			return
 		}
 		b.tasks = append(b.tasks, task)
 		b.appendActionLocked("task_created", "office", channel, task.CreatedBy, truncateSummary(task.Title, 140), task.ID)
 		if err := b.saveLocked(); err != nil {
+			rollbackTask()
 			http.Error(w, "failed to persist broker state", http.StatusInternalServerError)
 			return
 		}
@@ -243,12 +257,14 @@ func (b *Broker) handlePostTask(w http.ResponseWriter, r *http.Request) {
 				task.ReviewState = "ready_for_review"
 			} else {
 				task.Status = "done"
+				task.Blocked = false
 			}
 		case "review":
 			task.Status = "review"
 			task.ReviewState = "ready_for_review"
 		case "approve":
 			task.Status = "done"
+			task.Blocked = false
 			if taskNeedsStructuredReview(task) {
 				task.ReviewState = "approved"
 			}

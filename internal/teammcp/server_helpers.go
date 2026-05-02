@@ -26,11 +26,12 @@ func toolError(err error) *mcp.CallToolResult {
 }
 
 func truncate(text string, max int) string {
-	if max <= 0 || len(text) <= max {
+	runes := []rune(text)
+	if max <= 0 || len(runes) <= max {
 		return text
 	}
 	if max <= 1 {
-		return text[:max]
+		return string(runes[:max])
 	}
-	return text[:max-1] + "…"
+	return string(runes[:max-1]) + "…"
 }

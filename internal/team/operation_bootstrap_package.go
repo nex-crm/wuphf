@@ -45,6 +45,7 @@ func buildOperationBootstrapPackage(selected operationPackFile, blueprint operat
 }
 
 func buildOperationSynthesizedBootstrapPackage(profile operationCompanyProfile, runtimeConnections []action.Connection, providerName string) operationBootstrapPackage {
+	normalizedProvider := strings.TrimSpace(providerName)
 	blueprint := operations.SynthesizeBlueprint(operations.SynthesisInput{
 		Directive: operationFirstNonEmpty(profile.Goals, profile.Description, profile.Name, "stand up a new operation"),
 		Profile: operations.CompanyProfile{
@@ -56,7 +57,7 @@ func buildOperationSynthesizedBootstrapPackage(profile operationCompanyProfile, 
 			Notes:       []string{strings.TrimSpace(profile.BlueprintID)},
 		},
 		Integrations: operationRuntimeIntegrationsFromConnections(runtimeConnections),
-		Capabilities: operationRuntimeCapabilitiesFromConnections(runtimeConnections, providerName),
+		Capabilities: operationRuntimeCapabilitiesFromConnections(runtimeConnections, normalizedProvider),
 	})
-	return buildOperationBootstrapPackage(operationPackFile{}, blueprint, operationBacklogDoc{}, operationMonetizationDoc{}, runtimeConnections, providerName, profile)
+	return buildOperationBootstrapPackage(operationPackFile{}, blueprint, operationBacklogDoc{}, operationMonetizationDoc{}, runtimeConnections, normalizedProvider, profile)
 }

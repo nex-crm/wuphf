@@ -118,7 +118,7 @@ func (b *Broker) syncTaskWorktreeLocked(task *teamTask) error {
 		}
 	}
 	if taskNeedsLocalWorktree(task) {
-		if strings.TrimSpace(task.WorktreePath) != "" && strings.TrimSpace(task.WorktreeBranch) != "" {
+		if strings.TrimSpace(task.WorktreePath) != "" || strings.TrimSpace(task.WorktreeBranch) != "" {
 			if taskWorktreeSourceLooksUsable(task.WorktreePath) {
 				return nil
 			}

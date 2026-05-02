@@ -8,7 +8,7 @@ export interface OwnersChipProps {
  * legible at a glance without the user squinting at a missing field.
  */
 export function OwnersChip({ slugs }: OwnersChipProps) {
-  const list = (slugs ?? []).filter((s) => s.trim().length > 0);
+  const list = (slugs ?? []).map((s) => s.trim()).filter(Boolean);
   if (list.length === 0) {
     return (
       <span

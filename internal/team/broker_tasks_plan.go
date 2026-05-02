@@ -45,6 +45,10 @@ func (b *Broker) handleTaskPlan(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "channel not found", http.StatusNotFound)
 		return
 	}
+	mutationSnapshot := snapshotBrokerTaskMutationLocked(b)
+	rollbackPlan := func() {
+		mutationSnapshot.restore(b)
+	}
 
 	// Map title → task ID for resolving depends_on by title
 	titleToID := map[string]string{}
@@ -54,6 +58,7 @@ func (b *Broker) handleTaskPlan(w http.ResponseWriter, r *http.Request) {
 	for _, item := range body.Tasks {
 		taskChannel := b.preferredTaskChannelLocked(channel, createdBy, item.Assignee, item.Title, item.Details)
 		if b.findChannelLocked(taskChannel) == nil {
+			rollbackPlan()
 			http.Error(w, "channel not found", http.StatusNotFound)
 			return
 		}
@@ -63,6 +68,7 @@ func (b *Broker) handleTaskPlan(w http.ResponseWriter, r *http.Request) {
 		// Without this gate any authenticated caller could plant tasks in
 		// channels they aren't a member of by spoofing the body channel.
 		if !b.canAccessChannelLocked(createdBy, taskChannel) {
+			rollbackPlan()
 			http.Error(w, "channel access denied", http.StatusForbidden)
 			return
 		}
@@ -93,23 +99,19 @@ func (b *Broker) handleTaskPlan(w http.ResponseWriter, r *http.Request) {
 				existing.ExecutionMode = executionMode
 			}
 			existing.DependsOn = resolvedDeps
-			if len(existing.DependsOn) > 0 && b.hasUnresolvedDepsLocked(existing) {
-				existing.Blocked = true
-				existing.Status = "open"
-			} else if strings.TrimSpace(existing.Owner) != "" {
-				existing.Blocked = false
-				existing.Status = "in_progress"
-			}
+			b.refreshPlannedTaskBlockStateLocked(existing)
 			syncTaskMemoryWorkflow(existing, now)
 			b.ensureTaskOwnerChannelMembershipLocked(taskChannel, existing.Owner)
 			b.queueTaskBehindActiveOwnerLaneLocked(existing)
 			existing.UpdatedAt = now
 			if err := rejectTheaterTaskForLiveBusiness(existing); err != nil {
+				rollbackPlan()
 				http.Error(w, err.Error(), http.StatusConflict)
 				return
 			}
 			b.scheduleTaskLifecycleLocked(existing)
 			if err := b.syncTaskWorktreeLocked(existing); err != nil {
+				rollbackPlan()
 				http.Error(w, "failed to manage task worktree", http.StatusInternalServerError)
 				return
 			}
@@ -136,21 +138,18 @@ func (b *Broker) handleTaskPlan(w http.ResponseWriter, r *http.Request) {
 			CreatedAt:     now,
 			UpdatedAt:     now,
 		}
-		if task.Owner != "" && len(resolvedDeps) == 0 {
-			task.Status = "in_progress"
-		}
-		if len(resolvedDeps) > 0 && b.hasUnresolvedDepsLocked(&task) {
-			task.Blocked = true
-		}
+		b.refreshPlannedTaskBlockStateLocked(&task)
 		syncTaskMemoryWorkflow(&task, now)
 		b.ensureTaskOwnerChannelMembershipLocked(taskChannel, task.Owner)
 		b.queueTaskBehindActiveOwnerLaneLocked(&task)
 		if err := rejectTheaterTaskForLiveBusiness(&task); err != nil {
+			rollbackPlan()
 			http.Error(w, err.Error(), http.StatusConflict)
 			return
 		}
 		b.scheduleTaskLifecycleLocked(&task)
 		if err := b.syncTaskWorktreeLocked(&task); err != nil {
+			rollbackPlan()
 			http.Error(w, "failed to manage task worktree", http.StatusInternalServerError)
 			return
 		}
@@ -160,6 +159,7 @@ func (b *Broker) handleTaskPlan(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := b.saveLocked(); err != nil {
+		rollbackPlan()
 		http.Error(w, "failed to persist broker state", http.StatusInternalServerError)
 		return
 	}
@@ -183,6 +183,23 @@ type plannedTaskInput struct {
 	DependsOn        []string
 }
 
+func (b *Broker) refreshPlannedTaskBlockStateLocked(task *teamTask) {
+	if task == nil {
+		return
+	}
+	if len(task.DependsOn) > 0 && b.hasUnresolvedDepsLocked(task) {
+		task.Blocked = true
+		task.Status = "open"
+		return
+	}
+	task.Blocked = false
+	if strings.TrimSpace(task.Owner) != "" {
+		task.Status = "in_progress"
+	} else if strings.EqualFold(strings.TrimSpace(task.Status), "blocked") {
+		task.Status = "open"
+	}
+}
+
 func (b *Broker) EnsurePlannedTask(input plannedTaskInput) (teamTask, bool, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -192,6 +209,10 @@ func (b *Broker) EnsurePlannedTask(input plannedTaskInput) (teamTask, bool, erro
 	}
 	if !b.canAccessChannelLocked(input.CreatedBy, channel) {
 		return teamTask{}, false, fmt.Errorf("channel access denied")
+	}
+	mutationSnapshot := snapshotBrokerTaskMutationLocked(b)
+	rollbackTask := func() {
+		mutationSnapshot.restore(b)
 	}
 	title := strings.TrimSpace(input.Title)
 	if existing := b.findReusableTaskLocked(taskReuseMatch{
@@ -209,7 +230,6 @@ func (b *Broker) EnsurePlannedTask(input plannedTaskInput) (teamTask, bool, erro
 		}
 		if existing.Owner == "" && strings.TrimSpace(input.Owner) != "" {
 			existing.Owner = strings.TrimSpace(input.Owner)
-			existing.Status = "in_progress"
 		}
 		if existing.ThreadID == "" && strings.TrimSpace(input.ThreadID) != "" {
 			existing.ThreadID = strings.TrimSpace(input.ThreadID)
@@ -232,18 +252,25 @@ func (b *Broker) EnsurePlannedTask(input plannedTaskInput) (teamTask, bool, erro
 		if existing.SourceDecisionID == "" && strings.TrimSpace(input.SourceDecisionID) != "" {
 			existing.SourceDecisionID = strings.TrimSpace(input.SourceDecisionID)
 		}
+		if input.DependsOn != nil {
+			existing.DependsOn = append([]string(nil), input.DependsOn...)
+		}
+		b.refreshPlannedTaskBlockStateLocked(existing)
 		syncTaskMemoryWorkflow(existing, now)
 		b.ensureTaskOwnerChannelMembershipLocked(channel, existing.Owner)
 		existing.UpdatedAt = now
 		b.queueTaskBehindActiveOwnerLaneLocked(existing)
 		if err := rejectTheaterTaskForLiveBusiness(existing); err != nil {
+			rollbackTask()
 			return teamTask{}, false, err
 		}
 		b.scheduleTaskLifecycleLocked(existing)
 		if err := b.syncTaskWorktreeLocked(existing); err != nil {
+			rollbackTask()
 			return teamTask{}, false, err
 		}
 		if err := b.saveLocked(); err != nil {
+			rollbackTask()
 			return teamTask{}, false, err
 		}
 		return *existing, true, nil
@@ -265,28 +292,27 @@ func (b *Broker) EnsurePlannedTask(input plannedTaskInput) (teamTask, bool, erro
 		ReviewState:      strings.TrimSpace(input.ReviewState),
 		SourceSignalID:   strings.TrimSpace(input.SourceSignalID),
 		SourceDecisionID: strings.TrimSpace(input.SourceDecisionID),
-		DependsOn:        input.DependsOn,
+		DependsOn:        append([]string(nil), input.DependsOn...),
 		CreatedAt:        now,
 		UpdatedAt:        now,
 	}
-	if len(task.DependsOn) > 0 && b.hasUnresolvedDepsLocked(&task) {
-		task.Blocked = true
-	} else if task.Owner != "" {
-		task.Status = "in_progress"
-	}
+	b.refreshPlannedTaskBlockStateLocked(&task)
 	syncTaskMemoryWorkflow(&task, now)
 	b.ensureTaskOwnerChannelMembershipLocked(channel, task.Owner)
 	b.queueTaskBehindActiveOwnerLaneLocked(&task)
 	if err := rejectTheaterTaskForLiveBusiness(&task); err != nil {
+		rollbackTask()
 		return teamTask{}, false, err
 	}
 	b.scheduleTaskLifecycleLocked(&task)
 	if err := b.syncTaskWorktreeLocked(&task); err != nil {
+		rollbackTask()
 		return teamTask{}, false, err
 	}
 	b.tasks = append(b.tasks, task)
 	b.appendActionWithRefsLocked("task_created", "office", channel, input.CreatedBy, truncateSummary(task.Title, 140), task.ID, compactStringList([]string{task.SourceSignalID}), task.SourceDecisionID)
 	if err := b.saveLocked(); err != nil {
+		rollbackTask()
 		return teamTask{}, false, err
 	}
 	return task, false, nil

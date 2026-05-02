@@ -234,7 +234,7 @@ func handleHumanMessage(ctx context.Context, _ *mcp.CallToolRequest, args HumanM
 }
 
 func defaultRequestKind(kind string) string {
-	kind = strings.TrimSpace(kind)
+	kind = strings.ToLower(strings.TrimSpace(kind))
 	if kind == "" {
 		return "choice"
 	}

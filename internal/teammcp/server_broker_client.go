@@ -8,12 +8,15 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/nex-crm/wuphf/internal/brokeraddr"
 	"github.com/nex-crm/wuphf/internal/team"
 )
 
 var defaultBrokerTokenFile = brokeraddr.DefaultTokenFile
+
+var brokerHTTPClient = &http.Client{Timeout: 15 * time.Second}
 
 func reconfigureLiveOffice() error {
 	if !team.HasLiveTmuxSession() {
@@ -106,7 +109,7 @@ func brokerGetJSON(ctx context.Context, path string, out any) error {
 		return err
 	}
 	req.Header = authHeaders()
-	res, err := http.DefaultClient.Do(req)
+	res, err := brokerHTTPClient.Do(req)
 	if err != nil {
 		return err
 	}
@@ -129,7 +132,7 @@ func brokerGetRaw(ctx context.Context, path string) ([]byte, error) {
 		return nil, err
 	}
 	req.Header = authHeaders()
-	res, err := http.DefaultClient.Do(req)
+	res, err := brokerHTTPClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -152,7 +155,7 @@ func brokerPostJSON(ctx context.Context, path string, body any, out any) error {
 	}
 	req.Header = authHeaders()
 	req.Header.Set("Content-Type", "application/json")
-	res, err := http.DefaultClient.Do(req)
+	res, err := brokerHTTPClient.Do(req)
 	if err != nil {
 		return err
 	}
@@ -178,7 +181,7 @@ func brokerPutJSON(ctx context.Context, path string, body any, out any) error {
 	}
 	req.Header = authHeaders()
 	req.Header.Set("Content-Type", "application/json")
-	res, err := http.DefaultClient.Do(req)
+	res, err := brokerHTTPClient.Do(req)
 	if err != nil {
 		return err
 	}

@@ -109,13 +109,17 @@ func buildOperationConnectionCards(blueprint operations.Blueprint, runtimeConnec
 			SmokeTest:   blueprint.SmokeTest,
 			Blocker:     blueprint.Blocker,
 		}
-		if providerName != "" {
+		providerLabel := strings.TrimSpace(providerName)
+		if providerLabel != "" {
 			card.State = "ready_for_auth"
 		}
 		if live, ok := connectionMap[normalizeOperationIntegrationKey(blueprint.Integration)]; ok {
+			if providerLabel == "" {
+				providerLabel = "the provider"
+			}
 			card.State = "connected"
 			card.Mode = "live_capable"
-			card.Blocker = fmt.Sprintf("Connection %q is available via %s. Live mutations still require human approval.", live.Key, providerName)
+			card.Blocker = fmt.Sprintf("Connection %q is available via %s. Live mutations still require human approval.", live.Key, providerLabel)
 		}
 		out = append(out, card)
 	}

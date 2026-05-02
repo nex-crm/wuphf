@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -153,6 +154,12 @@ func handleResolveContradiction(ctx context.Context, _ *mcp.CallToolRequest, arg
 	if reportDate == "" {
 		return toolError(fmt.Errorf("report_date is required")), nil, nil
 	}
+	if !isLintReportDate(reportDate) {
+		return toolError(fmt.Errorf("report_date must be YYYY-MM-DD; got %q", reportDate)), nil, nil
+	}
+	if args.FindingIdx < 0 {
+		return toolError(fmt.Errorf("finding_idx must be non-negative; got %d", args.FindingIdx)), nil, nil
+	}
 	winner := strings.TrimSpace(args.Winner)
 	if winner != "A" && winner != "B" && winner != "Both" {
 		return toolError(fmt.Errorf("winner must be A, B, or Both; got %q", winner)), nil, nil
@@ -172,4 +179,9 @@ func handleResolveContradiction(ctx context.Context, _ *mcp.CallToolRequest, arg
 		msg = fmt.Sprintf("Resolved finding %d from report %s as winner=%s", args.FindingIdx, reportDate, winner)
 	}
 	return textResult(msg), nil, nil
+}
+
+func isLintReportDate(value string) bool {
+	_, err := time.Parse("2006-01-02", value)
+	return err == nil
 }

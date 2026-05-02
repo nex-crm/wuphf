@@ -392,7 +392,8 @@ type taskReuseMatch struct {
 }
 
 func (m taskReuseMatch) hasScopedIdentity() bool {
-	return strings.TrimSpace(m.SourceSignalID) != "" ||
+	return strings.TrimSpace(m.PipelineID) != "" ||
+		strings.TrimSpace(m.SourceSignalID) != "" ||
 		strings.TrimSpace(m.SourceDecisionID) != ""
 }
 
@@ -416,8 +417,10 @@ func scopedTaskIdentityMatches(task *teamTask, match taskReuseMatch) bool {
 	if task == nil {
 		return false
 	}
-	if match.PipelineID != "" && strings.TrimSpace(task.PipelineID) != "" && strings.TrimSpace(task.PipelineID) != match.PipelineID {
-		return false
+	if match.PipelineID != "" {
+		if strings.TrimSpace(task.PipelineID) != match.PipelineID {
+			return false
+		}
 	}
 	if match.SourceSignalID != "" && strings.TrimSpace(task.SourceSignalID) != match.SourceSignalID {
 		return false
@@ -426,6 +429,13 @@ func scopedTaskIdentityMatches(task *teamTask, match taskReuseMatch) bool {
 		return false
 	}
 	return true
+}
+
+func taskCanMatchScopedIdentity(task *teamTask, match taskReuseMatch) bool {
+	if hasScopedTaskIdentity(task) {
+		return true
+	}
+	return strings.TrimSpace(match.PipelineID) != "" && strings.TrimSpace(task.PipelineID) != ""
 }
 
 func (b *Broker) findReusableTaskLocked(match taskReuseMatch) *teamTask {
@@ -445,7 +455,7 @@ func (b *Broker) findReusableTaskLocked(match taskReuseMatch) *teamTask {
 		sameTitle := title != "" && strings.EqualFold(strings.TrimSpace(task.Title), title)
 		if threadID != "" && strings.TrimSpace(task.ThreadID) == threadID {
 			if sameTitle && taskOwnerMatches(task, owner) {
-				taskHasScopedIdentity := hasScopedTaskIdentity(task)
+				taskHasScopedIdentity := taskCanMatchScopedIdentity(task, match)
 				if scopedIdentity || taskHasScopedIdentity {
 					if !scopedIdentity || !taskHasScopedIdentity {
 						continue
@@ -462,7 +472,7 @@ func (b *Broker) findReusableTaskLocked(match taskReuseMatch) *teamTask {
 		if !sameTitle || !taskOwnerMatches(task, owner) {
 			continue
 		}
-		taskHasScopedIdentity := hasScopedTaskIdentity(task)
+		taskHasScopedIdentity := taskCanMatchScopedIdentity(task, match)
 		if scopedIdentity || taskHasScopedIdentity {
 			if !scopedIdentity || !taskHasScopedIdentity {
 				continue

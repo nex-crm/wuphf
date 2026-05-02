@@ -65,13 +65,19 @@ export function SkillPreviewBody({
     })
       .then((res) => {
         showNotice("Saved.", "success");
+        const canonicalContent = res.skill?.content ?? committed;
         // Sync baseline to the saved body BEFORE notifying the parent. If
         // the user typed more chars while the request was in flight they
         // remain in `draft`, the dirty flag flips back on, and the
         // editor naturally surfaces the new unsaved delta — instead of
         // the parent's effect resetting `draft` and silently losing them.
-        setBaseline(committed);
-        const updated: Skill = res.skill ?? { ...skill, content: committed };
+        setBaseline(canonicalContent);
+        setDraft((current) =>
+          current === committed ? canonicalContent : current,
+        );
+        const updated: Skill = res.skill
+          ? { ...res.skill, content: canonicalContent }
+          : { ...skill, content: canonicalContent };
         onSaved?.(updated);
       })
       .catch((e: Error) => {
