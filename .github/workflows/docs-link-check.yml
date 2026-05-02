@@ -1,9 +1,8 @@
 name: docs-link-check
 
-# Delegates to nex-crm/.github reusable. Catches dead links in Markdown
-# + MDX before they reach customers (especially relevant on this public
-# docs site). PR runs are scoped to doc paths; the weekly cron catches
-# external-link rot.
+# Catches dead links in Markdown + MDX before they reach customers
+# (especially relevant on this public docs site). PR runs are scoped
+# to doc paths; the weekly cron catches external-link rot.
 
 on:
   pull_request:
@@ -18,15 +17,25 @@ on:
 
 jobs:
   check:
-    # The reusable workflow sets job permissions to contents:read + issues:write.
-    # Grant them explicitly here; org defaults are read-only, and without this
-    # GitHub rejects the reusable call before creating any job logs.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       contents: read
-      issues: write
-    # NOTE: 98294031… is the COMMIT sha v0.6.2 dereferences to. The
-    # earlier pin (34310b13…) was the annotated-tag-object sha — GitHub
-    # Actions cannot resolve `uses: …@<tag-object-sha>`, the workflow
-    # silently fails validation with conclusion=failure and zero jobs.
-    # Verified with: gh api repos/nex-crm/.github/git/tags/<tag-obj-sha> --jq .object.sha
-    uses: nex-crm/.github/.github/workflows/docs-link-check.yml@98294031b84bf07f8bdf227940225ba21e9d2678 # v0.6.2
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Link check (lychee)
+        uses: lycheeverse/lychee-action@8646ba30535128ac92d33dfc9133794bfdd9b411 # v2.8.0
+        with:
+          args: |
+            --verbose
+            --no-progress
+            --max-retries 2
+            --cache
+            --max-cache-age 1d
+            --exclude-path .git
+            --exclude-path node_modules
+            --exclude "example\.com"
+            --exclude "localhost"
+            **/*.md **/*.mdx
+          fail: true
