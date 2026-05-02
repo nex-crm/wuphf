@@ -31,6 +31,16 @@ export default function WikiCatalog({
     () => resolveGroupOrder(catalog.map((c) => c.group)),
     [catalog],
   );
+  // Top-decile threshold for the "verbose" prune-signal badge. We sort a
+  // copy of the catalog by prune_score descending and read the score at
+  // index `floor(len * 0.1)`. Any entry whose score is at or above the
+  // threshold (and strictly greater than zero) earns the badge. Skipping
+  // zero-score entries avoids painting the badge on a wiki where nothing
+  // has been read yet.
+  const verboseThreshold = useMemo(
+    () => computeVerboseThreshold(catalog),
+    [catalog],
+  );
   const stats = useMemo(
     () =>
       [
@@ -111,6 +121,17 @@ export default function WikiCatalog({
                       }}
                     >
                       {item.title}
+                      {isVerbose(item, verboseThreshold) && (
+                        <span
+                          className="wk-staleness-badge wk-prune-verbose"
+                          title={`Verbose: ${item.word_count ?? 0} words, ${
+                            item.days_unread ?? 0
+                          } days since last read`}
+                          data-testid="wk-prune-verbose-badge"
+                        >
+                          verbose
+                        </span>
+                      )}
                     </a>
                     <span className="wk-when">
                       {safeRelative(item.last_edited_ts)}
@@ -126,6 +147,33 @@ export default function WikiCatalog({
   );
 }
 
+/**
+ * computeVerboseThreshold returns the prune_score at the top-decile cutoff
+ * across the catalog. Returns 0 when the catalog is empty or no entry has
+ * a positive score, which means the badge stays hidden. Sorting a copy
+ * keeps the original catalog ordering stable.
+ */
+function computeVerboseThreshold(entries: WikiCatalogEntry[]): number {
+  if (entries.length === 0) return 0;
+  const sorted = [...entries].sort(
+    (a, b) => (b.prune_score ?? 0) - (a.prune_score ?? 0),
+  );
+  // For catalogs < 10 articles floor(n*0.1) is 0, which points at the highest
+  // scorer and means the badge is never shown under strict >. Use at least 1
+  // so the top entry in any non-empty catalog can qualify.
+  const idx = Math.max(1, Math.floor(entries.length * 0.1));
+  const cutoff = sorted[idx]?.prune_score ?? 0;
+  return cutoff;
+}
+
+function isVerbose(entry: WikiCatalogEntry, threshold: number): boolean {
+  if (threshold <= 0) return false;
+  const score = entry.prune_score ?? 0;
+  // Strictly greater-than so the boundary entry (exactly at the 90th percentile
+  // cutoff) does not earn the badge — only entries above it do.
+  return score > threshold;
+}
+
 function groupByGroup(
   catalog: WikiCatalogEntry[],
 ): Record<string, WikiCatalogEntry[]> {
@@ -135,7 +183,13 @@ function groupByGroup(
     out[entry.group].push(entry);
   }
   for (const k of Object.keys(out)) {
-    out[k].sort((a, b) => (a.last_edited_ts < b.last_edited_ts ? 1 : -1));
+    out[k].sort((a, b) =>
+      a.last_edited_ts < b.last_edited_ts
+        ? 1
+        : a.last_edited_ts > b.last_edited_ts
+          ? -1
+          : 0,
+    );
   }
   return out;
 }
