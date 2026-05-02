@@ -243,7 +243,7 @@ func (b *Broker) createTelegramChannel(slug, title string, chatID int64, chType 
 	// manifest's member list. Snapshot, then proceed under b.mu.
 	manifest, err := company.SnapshotManifest()
 	if err != nil {
-		manifest = company.DefaultManifest()
+		return nil, fmt.Errorf("load company manifest: %w", err)
 	}
 	// Mirror the TUI exactly: lead first, then every other manifest member.
 	// "ceo" is prepended by createChannelLocked itself, so we don't add it here.

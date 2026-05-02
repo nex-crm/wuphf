@@ -2,6 +2,9 @@ package team
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -69,5 +72,24 @@ func TestCreateTelegramChannelRejectsNonTelegramSurface(t *testing.T) {
 	}
 	if ch := b.findChannelLocked("standup"); ch == nil || ch.Surface != nil {
 		t.Fatalf("connect into non-telegram channel: surface mutated: %+v", ch)
+	}
+}
+
+func TestCreateTelegramChannelSurfacesManifestReadError(t *testing.T) {
+	b := newTestBroker(t)
+	defer b.Stop()
+
+	manifestPath := filepath.Join(t.TempDir(), "company.json")
+	if err := os.WriteFile(manifestPath, []byte("{not-json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WUPHF_COMPANY_FILE", manifestPath)
+
+	_, err := b.createTelegramChannel("standup", "Standup", 100, "group")
+	if err == nil {
+		t.Fatal("expected manifest read error, got nil")
+	}
+	if !strings.Contains(err.Error(), "load company manifest") {
+		t.Fatalf("expected manifest load context, got %v", err)
 	}
 }

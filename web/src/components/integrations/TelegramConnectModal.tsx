@@ -93,13 +93,17 @@ export function TelegramConnectModal({
     abortRef.current = null;
   }, [initialStep]);
 
-  // Reset only on open transitions. The previous `if (open) reset(); else
-  // reset();` was a no-op ternary that ran reset on close too, which is
-  // technically fine (the hidden modal short-circuits on `if (!open) return
-  // null`) but misleading. The new shape makes the intent explicit: reset
-  // when the wizard is freshly opened.
+  // Reset when the wizard opens, and invalidate requests when it closes. The
+  // component stays mounted by the host, so closing must still abort fetches
+  // and bump the request id or a late response can update hidden state.
   useEffect(() => {
-    if (open) reset();
+    if (open) {
+      reset();
+      return;
+    }
+    requestIdRef.current += 1;
+    abortRef.current?.abort();
+    abortRef.current = null;
   }, [open, reset]);
 
   useEffect(() => {
@@ -167,11 +171,14 @@ export function TelegramConnectModal({
     }
   }
 
-  async function connect(opts: {
-    chat_id: number;
-    title?: string;
-    type?: string;
-  }) {
+  async function connect(
+    opts: {
+      chat_id: number;
+      title?: string;
+      type?: string;
+    },
+    fallbackStep: "pick" | "manual" = "pick",
+  ) {
     const { id: myReq, signal } = beginRequest();
     setError(null);
     setStep("connecting");
@@ -185,7 +192,7 @@ export function TelegramConnectModal({
       if (myReq !== requestIdRef.current || isAbortError(e)) return;
       const msg = e instanceof Error ? e.message : String(e);
       setError(msg);
-      setStep("pick");
+      setStep(fallbackStep);
     }
   }
 
@@ -467,7 +474,7 @@ export function TelegramConnectModal({
                     setError("Chat ID must be a non-zero integer.");
                     return;
                   }
-                  void connect({ chat_id: parsed });
+                  void connect({ chat_id: parsed }, "manual");
                 }}
               >
                 Connect
