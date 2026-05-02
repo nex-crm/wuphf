@@ -1,3 +1,4 @@
+/* biome-ignore-all lint/style/noDescendingSpecificity: Wiki stylesheet is organized by page region; moving selectors would risk broad visual regressions. */
 /* Wiki surface — scoped to .wiki-root.
  * Aligned to the Nex design system: cyan accent, neutral palette.
  * Keeps Wikipedia IA + editorial serif hierarchy for articles only.

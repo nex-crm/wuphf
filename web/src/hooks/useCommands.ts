@@ -95,7 +95,7 @@ function toAutocomplete(commands: SlashCommandDescriptor[]): SlashCommand[] {
   return commands
     .filter((c) => c.webSupported)
     .map((c) => ({
-      name: '/' + c.name,
+      name: `/${c.name}`,
       desc: c.description,
       icon: COMMAND_ICONS[c.name] ?? DEFAULT_ICON,
     }))
