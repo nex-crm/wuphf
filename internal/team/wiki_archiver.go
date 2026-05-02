@@ -80,8 +80,20 @@ func (a *WikiArchiver) Sweep(ctx context.Context) (SweepResult, error) {
 	var skipped int
 
 	walkErr := filepath.WalkDir(teamDir, func(path string, d os.DirEntry, werr error) error {
-		if werr != nil || d.IsDir() || !strings.HasSuffix(path, ".md") {
+		if werr != nil {
 			return werr
+		}
+		// Skip hidden entries and non-catalog subtrees (inbox = raw ingests,
+		// skills = generated output). These are not lifecycle-managed articles.
+		if d.IsDir() {
+			name := d.Name()
+			if strings.HasPrefix(name, ".") || name == "inbox" || name == "skills" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".md") {
+			return nil
 		}
 		if strings.HasPrefix(d.Name(), ".") {
 			return nil
@@ -108,14 +120,14 @@ func (a *WikiArchiver) Sweep(ctx context.Context) (SweepResult, error) {
 			return nil
 		}
 
-		// Article is too young.
+		// Article is too young (inclusive: age == cutoff qualifies).
 		b, ok := bounds[rel]
-		if !ok || b.Oldest.Timestamp.IsZero() || !b.Oldest.Timestamp.Before(cutoffAgo) {
+		if !ok || b.Oldest.Timestamp.IsZero() || b.Oldest.Timestamp.After(cutoffAgo) {
 			skipped++
 			return nil
 		}
 
-		// Article was read within the cutoff window.
+		// Article was read within the cutoff window (inclusive: read == cutoff disqualifies).
 		if readStats != nil {
 			if s, ok := readStats[rel]; ok && s.LastRead != nil {
 				if !s.LastRead.Before(cutoffAgo) {

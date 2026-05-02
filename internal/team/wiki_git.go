@@ -42,6 +42,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -345,9 +346,8 @@ func (r *Repo) Commit(ctx context.Context, slug, relPath, content, mode, message
 // at archivePath (.archive/<relPath>), then commits both files in a single
 // git commit under the archivist identity. Used by WikiArchiver.Sweep.
 //
-// archivePath must be a descendant of the repo root and must not be under
-// team/ (it lives under .archive/). The caller is responsible for
-// constructing a valid archivePath.
+// relPath must be under team/. archivePath must be under .archive/.
+// Both are validated to prevent path traversal before any file is written.
 //
 // Returns the commit SHA. Returns ("", nil) when there was nothing to commit
 // (both files were already identical to what's on disk).
@@ -355,11 +355,21 @@ func (r *Repo) CommitArchive(ctx context.Context, relPath, tombstone, archivePat
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	// Validate paths before touching the filesystem.
+	slashRel := filepath.ToSlash(relPath)
+	slashArchive := filepath.ToSlash(archivePath)
+	if strings.Contains(slashRel, "..") || !strings.HasPrefix(slashRel, "team/") {
+		return "", fmt.Errorf("wiki archive: invalid relPath %q: must be under team/ with no ..", relPath)
+	}
+	if strings.Contains(slashArchive, "..") || !strings.HasPrefix(slashArchive, ".archive/") {
+		return "", fmt.Errorf("wiki archive: invalid archivePath %q: must be under .archive/ with no ..", archivePath)
+	}
+
 	// Write archive content FIRST so that on a crash between the two writes,
 	// RecoverDirtyTree commits the archive file while the original article is
 	// still intact on disk. Writing tombstone first would destroy the original
 	// before the archive is persisted.
-	fullArchive := filepath.Join(r.root, filepath.FromSlash(archivePath))
+	fullArchive := filepath.Join(r.root, filepath.FromSlash(slashArchive))
 	if err := os.MkdirAll(filepath.Dir(fullArchive), 0o700); err != nil {
 		return "", fmt.Errorf("wiki archive: mkdir archive: %w", err)
 	}
@@ -368,7 +378,9 @@ func (r *Repo) CommitArchive(ctx context.Context, relPath, tombstone, archivePat
 	}
 
 	// Write tombstone at original path only after archive is safely on disk.
-	fullOrig := filepath.Join(r.root, filepath.FromSlash(relPath))
+	// If any subsequent git operation fails, restore the original content so
+	// the article is not silently lost.
+	fullOrig := filepath.Join(r.root, filepath.FromSlash(slashRel))
 	if err := os.MkdirAll(filepath.Dir(fullOrig), 0o700); err != nil {
 		return "", fmt.Errorf("wiki archive: mkdir orig: %w", err)
 	}
@@ -376,22 +388,34 @@ func (r *Repo) CommitArchive(ctx context.Context, relPath, tombstone, archivePat
 		return "", fmt.Errorf("wiki archive: write tombstone: %w", err)
 	}
 
+	// restoreOrig reverts the tombstone write so the live article is never
+	// permanently lost on a partial failure (index regen, git add, git commit).
+	restoreOrig := func() {
+		if werr := os.WriteFile(fullOrig, []byte(archiveContent), 0o600); werr != nil {
+			log.Printf("wiki archive: WARN restore %s after failure: %v", relPath, werr)
+		}
+	}
+
 	if err := r.regenerateIndexLocked(); err != nil {
+		restoreOrig()
 		return "", fmt.Errorf("wiki archive: index regen: %w", err)
 	}
 
 	if out, err := r.runGitLocked(ctx, ArchivistAuthor, "add", "--",
-		filepath.ToSlash(relPath), filepath.ToSlash(archivePath), "index/all.md"); err != nil {
+		slashRel, slashArchive, "index/all.md"); err != nil {
+		restoreOrig()
 		return "", fmt.Errorf("wiki archive: git add: %w: %s", err, out)
 	}
 
 	cached, err := r.runGitLocked(ctx, ArchivistAuthor, "diff", "--cached", "--name-only")
 	if err != nil {
+		restoreOrig()
 		return "", fmt.Errorf("wiki archive: git diff --cached: %w", err)
 	}
 	if strings.TrimSpace(cached) == "" {
 		head, err := r.runGitLocked(ctx, "system", "rev-parse", "--short", "HEAD")
 		if err != nil {
+			restoreOrig()
 			return "", fmt.Errorf("wiki archive: resolve HEAD: %w", err)
 		}
 		return strings.TrimSpace(head), nil
@@ -402,6 +426,7 @@ func (r *Repo) CommitArchive(ctx context.Context, relPath, tombstone, archivePat
 		msg = fmt.Sprintf("archivist: archive %s", relPath)
 	}
 	if out, err := r.runGitLocked(ctx, ArchivistAuthor, "commit", "-q", "-m", msg); err != nil {
+		restoreOrig()
 		return "", fmt.Errorf("wiki archive: git commit: %w: %s", err, out)
 	}
 	sha, err := r.runGitLocked(ctx, ArchivistAuthor, "rev-parse", "--short", "HEAD")
