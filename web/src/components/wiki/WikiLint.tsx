@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { type LintFinding, type LintReport, runLint } from "../../api/wiki";
+import { keyedByOccurrence } from "../../lib/reactKeys";
 import ResolveContradictionModal from "./ResolveContradictionModal";
 
 /**
@@ -123,9 +124,12 @@ export default function WikiLint({ onNavigate }: WikiLintProps) {
             </tr>
           </thead>
           <tbody>
-            {report.findings.map((f, idx) => (
+            {keyedByOccurrence(
+              report.findings,
+              (f) => `${f.type}-${f.entity_slug ?? ""}-${f.summary}`,
+            ).map(({ key, value: f, index: idx }) => (
               <tr
-                key={`${f.type}-${f.entity_slug ?? ""}-${f.summary}`}
+                key={key}
                 className={`wk-audit-row ${findingRowClass(f.severity)}`}
               >
                 <td className="wk-audit-when">

@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
 
+import { keyedByOccurrence } from "./reactKeys";
+
 /**
  * Shared @-mention pattern. Matches `@slug` where slug is lowercase
  * alphanumeric-plus-hyphens and starts with a letter or digit. Mirrors the
@@ -104,11 +106,10 @@ export function extractTaggedMentions(
 }
 
 export function renderMentionTokens(tokens: MentionToken[]): ReactNode[] {
-  const seen = new Map<string, number>();
-  return tokens.map((t) => {
-    const occurrence = seen.get(t.value) ?? 0;
-    seen.set(t.value, occurrence + 1);
-    const key = `${t.kind}-${t.value}-${occurrence}`;
+  return keyedByOccurrence(
+    tokens,
+    (token) => `${token.kind}-${token.value}`,
+  ).map(({ key, value: t }) => {
     if (t.kind === "mention") {
       return (
         <span key={key} className="mention">

@@ -7,6 +7,7 @@ import {
   type TaskLogEntry,
   type TaskLogSummary,
 } from "../../api/client";
+import { keyedByOccurrence } from "../../lib/reactKeys";
 
 export function ReceiptsApp() {
   const [selectedTask, setSelectedTask] = useState<string | null>(null);
@@ -208,6 +209,7 @@ function ReceiptDetail({
   });
 
   const entries = data?.entries ?? [];
+  const keyedEntries = keyedTaskLogEntries(entries);
 
   return (
     <>
@@ -271,17 +273,26 @@ function ReceiptDetail({
 
       {!(isLoading || error) && entries.length > 0 && (
         <div style={{ overflow: "auto", flex: 1, padding: "0 20px 20px" }}>
-          {entries.map((entry, i) => (
-            <EntryRow
-              key={`${entry.started_at ?? 0}-${entry.agent_slug}-${entry.tool_name}`}
-              index={i}
-              entry={entry}
-            />
+          {keyedEntries.map(({ entry, key }, i) => (
+            <EntryRow key={key} index={i} entry={entry} />
           ))}
         </div>
       )}
     </>
   );
+}
+
+function keyedTaskLogEntries(entries: TaskLogEntry[]) {
+  return keyedByOccurrence(entries, (entry) =>
+    [
+      entry.task_id,
+      entry.started_at ?? 0,
+      entry.completed_at ?? 0,
+      entry.agent_slug,
+      entry.tool_name,
+      entry.error ? "error" : "ok",
+    ].join(":"),
+  ).map(({ key, value: entry }) => ({ entry, key }));
 }
 
 function EntryRow({ index, entry }: { index: number; entry: TaskLogEntry }) {

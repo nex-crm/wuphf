@@ -16,6 +16,7 @@ import {
   type WikiHistoryCommit,
 } from "../../api/wiki";
 import { formatAgentName } from "../../lib/agentName";
+import { keyedByOccurrence } from "../../lib/reactKeys";
 import {
   buildMarkdownComponents,
   buildRehypePlugins,
@@ -156,8 +157,10 @@ export default function WikiArticle({
 
   useEffect(() => {
     let cancelled = false;
-    void refreshNonce;
+    // These nonce values are explicit refetch triggers. The effect body only
+    // needs their change notification, not their numeric value.
     void externalRefreshNonce;
+    void refreshNonce;
     setLoading(true);
     setError(null);
     fetchArticle(path)
@@ -175,12 +178,14 @@ export default function WikiArticle({
     return () => {
       cancelled = true;
     };
-  }, [path, refreshNonce, externalRefreshNonce]);
+  }, [path, externalRefreshNonce, refreshNonce]);
 
   useEffect(() => {
     let cancelled = false;
-    void refreshNonce;
+    // These nonce values are explicit refetch triggers. The effect body only
+    // needs their change notification, not their numeric value.
     void externalRefreshNonce;
+    void refreshNonce;
     setHistoryCommits(null);
     setHistoryLoading(true);
     setHistoryError(false);
@@ -201,7 +206,7 @@ export default function WikiArticle({
     return () => {
       cancelled = true;
     };
-  }, [path, refreshNonce, externalRefreshNonce]);
+  }, [path, externalRefreshNonce, refreshNonce]);
 
   useEffect(() => {
     setLiveAgent(null);
@@ -407,16 +412,18 @@ function ArticleBreadcrumb({
       >
         Team Wiki
       </a>
-      {segments.map((seg, i) => (
-        <span key={seg} style={{ display: "contents" }}>
-          <span className="sep">›</span>
-          {i < segments.length - 1 ? (
-            <a href="#">{seg}</a>
-          ) : (
-            <span>{article.title}</span>
-          )}
-        </span>
-      ))}
+      {keyedByOccurrence(segments, (seg) => seg).map(
+        ({ key, value: seg, index: i }) => (
+          <span key={key} style={{ display: "contents" }}>
+            <span className="sep">›</span>
+            {i < segments.length - 1 ? (
+              <a href="#">{seg}</a>
+            ) : (
+              <span>{article.title}</span>
+            )}
+          </span>
+        ),
+      )}
     </div>
   );
 }

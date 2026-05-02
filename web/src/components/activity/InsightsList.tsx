@@ -1,3 +1,5 @@
+import { keyedByOccurrence } from "../../lib/reactKeys";
+
 export type InsightPriority = "critical" | "high" | "medium" | "low";
 
 export interface Insight {
@@ -37,15 +39,16 @@ export function InsightsList({
   }
   const visible =
     typeof limit === "number" ? insights.slice(0, limit) : insights;
+  const keyedInsights = keyedByOccurrence(
+    visible,
+    (ins) => `${ins.priority}-${ins.category ?? ""}-${ins.title}`,
+  );
   const overflow = insights.length - visible.length;
 
   return (
     <div className="insight-list">
-      {visible.map((ins) => (
-        <div
-          key={`${ins.priority}-${ins.category ?? ""}-${ins.title}`}
-          className={`insight-row insight-${ins.priority}`}
-        >
+      {keyedInsights.map(({ key, value: ins }) => (
+        <div key={key} className={`insight-row insight-${ins.priority}`}>
           <div className="insight-head">
             <span className={`insight-badge insight-badge-${ins.priority}`}>
               [{PRIORITY_LABEL[ins.priority]}]

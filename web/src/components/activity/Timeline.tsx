@@ -1,4 +1,5 @@
 import { formatRelativeTime } from "../../lib/format";
+import { keyedByOccurrence } from "../../lib/reactKeys";
 
 export type TimelineEventType =
   | "created"
@@ -54,14 +55,15 @@ export function Timeline({ events, emptyLabel, limit }: TimelineProps) {
     b.timestamp.localeCompare(a.timestamp),
   );
   const visible = typeof limit === "number" ? sorted.slice(0, limit) : sorted;
+  const keyedEvents = keyedByOccurrence(
+    visible,
+    (ev) => `${ev.type}-${ev.timestamp}-${ev.content}`,
+  );
 
   return (
     <div className="timeline">
-      {visible.map((ev, i) => (
-        <div
-          key={`${ev.type}-${ev.timestamp}-${ev.content}`}
-          className={`timeline-row timeline-${ev.type}`}
-        >
+      {keyedEvents.map(({ key, value: ev, index: i }) => (
+        <div key={key} className={`timeline-row timeline-${ev.type}`}>
           <div className="timeline-rail">
             <span className="timeline-icon">{ICONS[ev.type] || "\u00B7"}</span>
             {i < visible.length - 1 && <span className="timeline-connector" />}

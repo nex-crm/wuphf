@@ -1,5 +1,7 @@
 /** Right-floated Wikipedia-style infobox: dark title band + structured dt/dd. */
 
+import { keyedByOccurrence } from "../../lib/reactKeys";
+
 export interface InfoboxField {
   dt: string;
   dd: string;
@@ -21,19 +23,22 @@ export default function Infobox({ title, fields, sections }: InfoboxProps) {
       <div className="wk-ib-title">{title}</div>
       <div className="wk-ib-body">
         <dl>
-          {fields.map((f) => (
-            <FieldRow key={f.dt} field={f} />
-          ))}
+          {keyedByOccurrence(fields, (field) => field.dt).map(
+            ({ key, value: field }) => (
+              <FieldRow key={key} field={field} />
+            ),
+          )}
         </dl>
-        {sections?.map((section) => (
-          <div
-            key={section.fields.map((field) => field.dt).join("|")}
-            className="wk-ib-section"
-          >
+        {keyedByOccurrence(sections ?? [], (section) =>
+          section.fields.map((field) => field.dt).join("|"),
+        ).map(({ key, value: section }) => (
+          <div key={key} className="wk-ib-section">
             <dl>
-              {section.fields.map((f) => (
-                <FieldRow key={f.dt} field={f} />
-              ))}
+              {keyedByOccurrence(section.fields, (field) => field.dt).map(
+                ({ key: fieldKey, value: field }) => (
+                  <FieldRow key={fieldKey} field={field} />
+                ),
+              )}
             </dl>
           </div>
         ))}

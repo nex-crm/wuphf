@@ -12,6 +12,7 @@ import {
   type OfficeMember,
 } from "../../api/client";
 import { formatTokens } from "../../lib/format";
+import { keyedByOccurrence } from "../../lib/reactKeys";
 import { type Insight, InsightsList } from "../activity/InsightsList";
 import { Timeline, type TimelineEvent } from "../activity/Timeline";
 
@@ -400,27 +401,29 @@ export function ArtifactsApp() {
             {allActions.length === 0 ? (
               <EmptyState>No actions recorded yet.</EmptyState>
             ) : (
-              allActions
-                .slice(0, 12)
-                .map((action) => (
-                  <ActivityItem
-                    key={`${action.name ?? ""}-${action.title ?? ""}-${action.related_id ?? ""}-${action.summary ?? ""}`}
-                    title={
-                      action.summary || action.name || action.title || "Action"
-                    }
-                    body={
-                      action.related_id ? `Related: ${action.related_id}` : ""
-                    }
-                    meta={[
-                      action.channel ? `#${action.channel}` : "",
-                      action.actor ? `@${action.actor}` : "",
-                      action.created_at
-                        ? new Date(action.created_at).toLocaleString()
-                        : "",
-                    ].filter(Boolean)}
-                    kindLabel={action.kind || action.type || "action"}
-                  />
-                ))
+              keyedByOccurrence(
+                allActions.slice(0, 12),
+                (action) =>
+                  `${action.name ?? ""}-${action.title ?? ""}-${action.related_id ?? ""}-${action.summary ?? ""}`,
+              ).map(({ key, value: action }) => (
+                <ActivityItem
+                  key={key}
+                  title={
+                    action.summary || action.name || action.title || "Action"
+                  }
+                  body={
+                    action.related_id ? `Related: ${action.related_id}` : ""
+                  }
+                  meta={[
+                    action.channel ? `#${action.channel}` : "",
+                    action.actor ? `@${action.actor}` : "",
+                    action.created_at
+                      ? new Date(action.created_at).toLocaleString()
+                      : "",
+                  ].filter(Boolean)}
+                  kindLabel={action.kind || action.type || "action"}
+                />
+              ))
             )}
           </ActivitySection>
         </div>

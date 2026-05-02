@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as api from "../../api/wiki";
@@ -260,6 +260,51 @@ describe("<WikiArticle history and refresh>", () => {
     // Finalize so cleanup is clean
     const finish = resolveHistory as Resolve | null;
     finish?.({ commits: [] });
+  });
+
+  it("refetches article and history after an inline editor save", async () => {
+    const fetchArticleSpy = vi
+      .spyOn(api, "fetchArticle")
+      .mockResolvedValueOnce({
+        ...STUB_ARTICLE,
+        content: "Original body",
+        commit_sha: "oldsha1",
+      })
+      .mockResolvedValueOnce({
+        ...STUB_ARTICLE,
+        content: "Updated body",
+        commit_sha: "newsha1",
+      });
+    const fetchHistorySpy = vi
+      .spyOn(api, "fetchHistory")
+      .mockResolvedValue({ commits: [] });
+    vi.spyOn(api, "writeHumanArticle").mockResolvedValue({
+      path: STUB_ARTICLE.path,
+      commit_sha: "newsha1",
+      bytes_written: 12,
+    });
+
+    render(
+      <WikiArticle
+        path="people/customer-x"
+        catalog={CATALOG}
+        onNavigate={() => {}}
+      />,
+    );
+
+    await screen.findByText("Original body");
+    fireEvent.click(screen.getByRole("button", { name: "Edit source" }));
+    fireEvent.change(screen.getByTestId("wk-editor-textarea"), {
+      target: { value: "Updated body" },
+    });
+    fireEvent.change(screen.getByTestId("wk-editor-commit"), {
+      target: { value: "refresh article" },
+    });
+    fireEvent.click(screen.getByTestId("wk-editor-save"));
+
+    await waitFor(() => expect(fetchArticleSpy).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(fetchHistorySpy).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText("Updated body")).toBeInTheDocument();
   });
 });
 

@@ -4,6 +4,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../../api/wiki";
 import EditLogFooter from "./EditLogFooter";
 
+function hasDuplicateKeyWarning(calls: unknown[][]) {
+  return calls.some((args) =>
+    args.some((arg) =>
+      String(arg).includes("Encountered two children with the same key"),
+    ),
+  );
+}
+
 describe("<EditLogFooter>", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -33,6 +41,34 @@ describe("<EditLogFooter>", () => {
     expect(live).toHaveClass("wk-live");
     expect(screen.getByText("Customer X")).toBeInTheDocument();
     expect(screen.getByText("Churn")).toBeInTheDocument();
+  });
+
+  it("renders duplicate commit-shaped entries without duplicate React keys", () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const timestamp = new Date().toISOString();
+    const initial: api.WikiEditLogEntry[] = [
+      {
+        who: "CEO",
+        action: "edited",
+        article_path: "people/customer-x",
+        article_title: "Customer X",
+        timestamp,
+        commit_sha: "same",
+      },
+      {
+        who: "PM",
+        action: "edited",
+        article_path: "people/customer-x",
+        article_title: "Customer X",
+        timestamp,
+        commit_sha: "same",
+      },
+    ];
+
+    render(<EditLogFooter initialEntries={initial} />);
+
+    expect(screen.getAllByText("Customer X")).toHaveLength(2);
+    expect(hasDuplicateKeyWarning(errorSpy.mock.calls)).toBe(false);
   });
 
   it("invokes onNavigate on entry click instead of navigating", () => {
