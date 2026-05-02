@@ -138,7 +138,7 @@ function CompressButton({ path, wordCount }: CompressButtonProps) {
         onClick={() => {
           void handleClick();
         }}
-        disabled={status === "pending"}
+        disabled={status === "pending" || status === "queued" || status === "in_flight"}
         aria-label={`Compress this article (${wordCount} words)`}
       >
         {status === "pending" ? "Compressing…" : "Compress"}
