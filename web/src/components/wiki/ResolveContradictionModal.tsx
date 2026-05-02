@@ -47,6 +47,15 @@ export default function ResolveContradictionModal({
   );
   const [error, setError] = useState<string | null>(null);
   const backdropRef = useRef<HTMLDivElement>(null);
+  const requestRef = useRef<AbortController | null>(null);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+      requestRef.current?.abort();
+    };
+  }, []);
 
   // Escape closes only while no write is in flight.
   useEffect(() => {
@@ -66,36 +75,78 @@ export default function ResolveContradictionModal({
     }
   }
 
-  async function handlePick(winner: "A" | "B" | "Both") {
-    setError(null);
-    setSubmitting(true);
-    setPendingWinner(winner);
-    try {
-      const res = await resolveContradiction({
+  function beginRequest() {
+    const controller = new AbortController();
+    requestRef.current?.abort();
+    requestRef.current = controller;
+    return controller;
+  }
+
+  function finishRequest(controller: AbortController) {
+    if (requestRef.current === controller) {
+      requestRef.current = null;
+    }
+  }
+
+  function withCurrentRequest(
+    controller: AbortController,
+    callback: () => void,
+  ) {
+    if (!mountedRef.current || controller.signal.aborted) {
+      return;
+    }
+    callback();
+  }
+
+  function handleResolveError(err: unknown) {
+    setError(
+      err instanceof Error ? err.message : "Failed to resolve contradiction.",
+    );
+    setSubmitting(false);
+    setPendingWinner(null);
+  }
+
+  async function submitResolution(
+    winner: "A" | "B" | "Both",
+    signal: AbortSignal,
+  ) {
+    return await resolveContradiction(
+      {
         report_date: reportDate,
         finding_idx: findingIdx,
         finding,
         winner,
-      });
+      },
+      { signal },
+    );
+  }
+
+  async function handlePick(winner: "A" | "B" | "Both") {
+    setError(null);
+    setSubmitting(true);
+    setPendingWinner(winner);
+    const controller = beginRequest();
+    try {
+      const res = await submitResolution(winner, controller.signal);
       // There is no commit-viewer route today, so the sha rides inside the
       // toast copy in mono-style rather than as a link (spec §4). Short
       // sha mirrors git's default display width.
-      const shortSha = (res.commit_sha || "").slice(0, 7);
-      showNotice(
-        shortSha ? `Resolved. Commit ${shortSha}.` : "Resolved.",
-        "success",
-      );
-      onResolved();
+      withCurrentRequest(controller, () => {
+        const shortSha = (res.commit_sha || "").slice(0, 7);
+        showNotice(
+          shortSha ? `Resolved. Commit ${shortSha}.` : "Resolved.",
+          "success",
+        );
+        onResolved();
+      });
       // WikiLint refreshes on success, which unmounts this modal. Return
       // early so we don't setState on an unmounted component (React 18
       // tolerates it today, but it's a latent footgun).
       return;
     } catch (err: unknown) {
-      setError(
-        err instanceof Error ? err.message : "Failed to resolve contradiction.",
-      );
-      setSubmitting(false);
-      setPendingWinner(null);
+      withCurrentRequest(controller, () => handleResolveError(err));
+    } finally {
+      finishRequest(controller);
     }
   }
 
