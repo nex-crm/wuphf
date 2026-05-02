@@ -1,9 +1,8 @@
 name: docs-link-check
 
-# Delegates to nex-crm/.github reusable. Catches dead links in Markdown
-# + MDX before they reach customers (especially relevant on this public
-# docs site). PR runs are scoped to doc paths; the weekly cron catches
-# external-link rot.
+# Catches dead links in Markdown + MDX before they reach customers
+# (especially relevant on this public docs site). PR runs are scoped
+# to doc paths; the weekly cron catches external-link rot.
 
 on:
   pull_request:
@@ -11,15 +10,54 @@ on:
       - '**/*.md'
       - '**/*.mdx'
       - 'docs/**'
+      - '.github/workflows/docs-link-check.yml'
   schedule:
     - cron: '0 9 * * 1'  # Monday 09:00 UTC
   workflow_dispatch:
 
 jobs:
   check:
-    # NOTE: 98294031… is the COMMIT sha v0.6.2 dereferences to. The
-    # earlier pin (34310b13…) was the annotated-tag-object sha — GitHub
-    # Actions cannot resolve `uses: …@<tag-object-sha>`, the workflow
-    # silently fails validation with conclusion=failure and zero jobs.
-    # Verified with: gh api repos/nex-crm/.github/git/tags/<tag-obj-sha> --jq .object.sha
-    uses: nex-crm/.github/.github/workflows/docs-link-check.yml@98294031b84bf07f8bdf227940225ba21e9d2678 # v0.6.2
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Restore lychee cache
+        id: lychee-cache
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # ratchet:actions/cache/restore@v5.0.5
+        with:
+          path: .lycheecache
+          # GitHub caches are immutable, so each run saves a fresh cache while
+          # future runs restore from this stable prefix.
+          key: lychee-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: lychee-${{ runner.os }}-
+
+      - name: Link check (lychee)
+        uses: lycheeverse/lychee-action@8646ba30535128ac92d33dfc9133794bfdd9b411 # v2.8.0
+        with:
+          # npmjs.com and fandom.com return 403 to lychee in CI for these
+          # known-good links, so keep the exceptions URL-specific.
+          args: |
+            --verbose
+            --no-progress
+            --root-dir "$(pwd)"
+            --max-retries 2
+            --cache
+            --max-cache-age 1d
+            --exclude-path .git
+            --exclude-path node_modules
+            --exclude "example\.com"
+            --exclude "localhost"
+            --exclude "https://www\.npmjs\.com/package/wuphf"
+            --exclude "https://theoffice\.fandom\.com/wiki/WUPHF\.com_\(Website\)"
+            '**/*.md' '**/*.mdx'
+          fail: true
+
+      - name: Save lychee cache
+        if: ${{ always() && hashFiles('.lycheecache') != '' }}
+        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # ratchet:actions/cache/save@v5.0.5
+        with:
+          path: .lycheecache
+          key: ${{ steps.lychee-cache.outputs.cache-primary-key }}
