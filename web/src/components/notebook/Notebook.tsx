@@ -45,6 +45,7 @@ export default function Notebook({
   useEffect(() => {
     if (agentSlug) return;
     let cancelled = false;
+    void refreshTick;
     setCatalogLoading(true);
     setCatalogError(null);
     fetchCatalog()

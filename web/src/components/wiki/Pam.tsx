@@ -68,6 +68,14 @@ export default function Pam({ articlePath, onActionDone }: PamProps) {
   const activeJobIdRef = useRef<number | null>(null);
   const menuRef = useRef<PamMenuEntry[] | null>(menu);
   const onActionDoneRef = useRef<(() => void) | undefined>(onActionDone);
+
+  const scheduleClear = useCallback(() => {
+    if (statusTimerRef.current) clearTimeout(statusTimerRef.current);
+    statusTimerRef.current = setTimeout(() => {
+      setStatus({ kind: "idle" });
+    }, STATUS_CLEAR_MS);
+  }, []);
+
   useEffect(() => {
     activeJobIdRef.current = activeJobId;
   }, [activeJobId]);
@@ -140,7 +148,7 @@ export default function Pam({ articlePath, onActionDone }: PamProps) {
       unsub();
     };
     // scheduleClear is stable (useCallback with empty deps) — safe to omit.
-  }, []);
+  }, [scheduleClear]);
 
   // Close menu on outside click so it doesn't linger when the user moves
   // on. Keep it simple: single global listener, cleaned up on unmount.
@@ -169,13 +177,6 @@ export default function Pam({ articlePath, onActionDone }: PamProps) {
       menuElRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]');
     firstItem?.focus();
   }, [menuOpen]);
-
-  const scheduleClear = useCallback(() => {
-    if (statusTimerRef.current) clearTimeout(statusTimerRef.current);
-    statusTimerRef.current = setTimeout(() => {
-      setStatus({ kind: "idle" });
-    }, STATUS_CLEAR_MS);
-  }, []);
 
   const closeMenuAndRefocus = useCallback(() => {
     setMenuOpen(false);
@@ -215,9 +216,11 @@ export default function Pam({ articlePath, onActionDone }: PamProps) {
       ).filter((el) => !el.disabled);
       if (items.length === 0) return;
       e.preventDefault();
-      const activeIndex = items.findIndex(
-        (el) => el === document.activeElement,
-      );
+      const activeElement = document.activeElement;
+      const activeIndex =
+        activeElement instanceof HTMLButtonElement
+          ? items.indexOf(activeElement)
+          : -1;
       const nextIndex =
         e.key === "ArrowDown"
           ? (activeIndex + 1 + items.length) % items.length
