@@ -72,7 +72,7 @@ test.describe("wuphf web human interview", () => {
     // useRequests refetches every 5s (REQUEST_REFETCH_MS in useRequests.ts:10),
     // so the bar appears within that window. Use a 12s budget to absorb one
     // full poll cycle plus React commit.
-    const bar = page.locator('.interview-bar[role="region"]');
+    const bar = page.getByRole("region", { name: "Pending agent request" });
     await expect(bar).toBeVisible({ timeout: 12_000 });
 
     // Sanity-check the bar content reflects the seeded request, not stale state.
