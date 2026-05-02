@@ -42,6 +42,7 @@ jobs:
           args: |
             --verbose
             --no-progress
+            --root-dir "$(pwd)"
             --max-retries 2
             --cache
             --max-cache-age 1d
