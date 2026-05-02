@@ -510,7 +510,7 @@ func TestBuildCatalog_PruneScore(t *testing.T) {
 		// so prune_score = words * 0 / 1.0 = 0 — verify the formula stays
 		// well-behaved even at the zero-stale boundary.
 		rl := NewReadLog(root)
-		entries, err := repo.BuildCatalog(ctx, "", rl)
+		entries, err := repo.BuildCatalog(ctx, "", rl, false)
 		if err != nil {
 			t.Fatalf("BuildCatalog: %v", err)
 		}
@@ -545,7 +545,7 @@ func TestBuildCatalog_PruneScore(t *testing.T) {
 		writeReadEvent(t, root, "team/playbooks/old-discovery.md", "web", time.Now().Add(-45*24*time.Hour))
 
 		rl := NewReadLog(root)
-		entries, err := repo.BuildCatalog(ctx, "", rl)
+		entries, err := repo.BuildCatalog(ctx, "", rl, false)
 		if err != nil {
 			t.Fatalf("BuildCatalog: %v", err)
 		}
@@ -584,7 +584,7 @@ func TestBuildCatalog_PruneScore(t *testing.T) {
 		writeReadEvent(t, root, "team/playbooks/old-discovery.md", "slack-agent", time.Now().Add(-7*24*time.Hour))
 
 		rl := NewReadLog(root)
-		entries, err := repo.BuildCatalog(ctx, "", rl)
+		entries, err := repo.BuildCatalog(ctx, "", rl, false)
 		if err != nil {
 			t.Fatalf("BuildCatalog: %v", err)
 		}
@@ -637,7 +637,7 @@ func TestBuildCatalog_PruneScore(t *testing.T) {
 		writeReadEvent(t, root, "team/playbooks/old-discovery.md", "web", time.Now().Add(-30*24*time.Hour))
 
 		rl := NewReadLog(root)
-		entries, err := repo.BuildCatalog(ctx, CatalogSortPruneScore, rl)
+		entries, err := repo.BuildCatalog(ctx, CatalogSortPruneScore, rl, false)
 		if err != nil {
 			t.Fatalf("BuildCatalog: %v", err)
 		}
