@@ -410,15 +410,19 @@ export async function runLint(): Promise<LintReport> {
  * The caller echoes the full LintFinding it received from /wiki/lint/run so
  * the broker can resolve without re-running or persisting structured findings.
  */
-export async function resolveContradiction(args: {
-  report_date: string;
-  finding_idx: number;
-  finding: LintFinding;
-  winner: "A" | "B" | "Both";
-}): Promise<{ commit_sha: string; message: string }> {
+export async function resolveContradiction(
+  args: {
+    report_date: string;
+    finding_idx: number;
+    finding: LintFinding;
+    winner: "A" | "B" | "Both";
+  },
+  options: { signal?: AbortSignal } = {},
+): Promise<{ commit_sha: string; message: string }> {
   return await post<{ commit_sha: string; message: string }>(
     "/wiki/lint/resolve",
     args,
+    options,
   );
 }
 

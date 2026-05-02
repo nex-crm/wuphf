@@ -831,7 +831,8 @@ function KeysSection({ cfg, save }: SectionProps) {
   const onSave = async () => {
     const entries = Object.entries(values).filter(([, v]) => v.trim() !== "");
     if (entries.length === 0) {
-      throw new Error("No keys entered — leave blank to keep existing keys.");
+      showNotice("No keys entered. Leave blank to keep existing keys.", "info");
+      return false;
     }
     const patch: ConfigUpdate = {};
     for (const [k, v] of entries) {

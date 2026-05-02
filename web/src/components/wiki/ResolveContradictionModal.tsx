@@ -47,16 +47,20 @@ export default function ResolveContradictionModal({
   );
   const [error, setError] = useState<string | null>(null);
   const backdropRef = useRef<HTMLDivElement>(null);
-  const submittingRef = useRef(submitting);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
-  useEffect(() => {
-    submittingRef.current = submitting;
-  }, [submitting]);
+  function closeAfterAbort() {
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
+    onClose();
+  }
 
-  // Escape key closes without submitting.
+  // Escape key aborts any in-flight resolution and closes.
   useEffect(() => {
     function onKeyDown(ev: KeyboardEvent) {
-      if (ev.key === "Escape" && !submittingRef.current) {
+      if (ev.key === "Escape") {
+        abortControllerRef.current?.abort();
+        abortControllerRef.current = null;
         onClose();
       }
     }
@@ -64,25 +68,30 @@ export default function ResolveContradictionModal({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [onClose]);
 
-  // Click outside (on backdrop) closes without submitting.
+  // Click outside (on backdrop) aborts any in-flight resolution and closes.
   function handleBackdropClick(ev: React.MouseEvent<HTMLDivElement>) {
-    if (ev.target === backdropRef.current && !submittingRef.current) {
-      onClose();
+    if (ev.target === backdropRef.current) {
+      closeAfterAbort();
     }
   }
 
   async function handlePick(winner: "A" | "B" | "Both") {
+    abortControllerRef.current?.abort();
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
     setError(null);
     setSubmitting(true);
-    submittingRef.current = true;
     setPendingWinner(winner);
     try {
-      const res = await resolveContradiction({
-        report_date: reportDate,
-        finding_idx: findingIdx,
-        finding,
-        winner,
-      });
+      const res = await resolveContradiction(
+        {
+          report_date: reportDate,
+          finding_idx: findingIdx,
+          finding,
+          winner,
+        },
+        { signal: controller.signal },
+      );
       // There is no commit-viewer route today, so the sha rides inside the
       // toast copy in mono-style rather than as a link (spec §4). Short
       // sha mirrors git's default display width.
@@ -91,18 +100,27 @@ export default function ResolveContradictionModal({
         shortSha ? `Resolved. Commit ${shortSha}.` : "Resolved.",
         "success",
       );
+      if (abortControllerRef.current === controller) {
+        abortControllerRef.current = null;
+      }
       onResolved();
       // WikiLint refreshes on success, which unmounts this modal. Return
       // early so we don't setState on an unmounted component (React 18
       // tolerates it today, but it's a latent footgun).
       return;
     } catch (err: unknown) {
+      if (controller.signal.aborted) {
+        return;
+      }
       setError(
         err instanceof Error ? err.message : "Failed to resolve contradiction.",
       );
       setSubmitting(false);
-      submittingRef.current = false;
       setPendingWinner(null);
+    } finally {
+      if (abortControllerRef.current === controller) {
+        abortControllerRef.current = null;
+      }
     }
   }
 
@@ -211,8 +229,7 @@ export default function ResolveContradictionModal({
             type="button"
             className="wk-editor-cancel"
             data-testid="wk-resolve-cancel"
-            onClick={onClose}
-            disabled={submitting}
+            onClick={closeAfterAbort}
           >
             Cancel
           </button>

@@ -28,7 +28,7 @@ export function Field({ label, hint, children }: FieldProps) {
 
 interface SaveButtonProps {
   label: string;
-  onSave: () => Promise<void> | void;
+  onSave: () => Promise<boolean | void> | boolean | void;
 }
 
 export function SaveButton({ label, onSave }: SaveButtonProps) {
@@ -38,7 +38,11 @@ export function SaveButton({ label, onSave }: SaveButtonProps) {
     if (state === "saving") return;
     setState("saving");
     try {
-      await onSave();
+      const result = await onSave();
+      if (result === false) {
+        setState("idle");
+        return;
+      }
       setState("saved");
       setTimeout(() => setState("idle"), 1500);
     } catch (err: unknown) {

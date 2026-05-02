@@ -108,6 +108,10 @@ function authHeaders(): Record<string, string> {
   return h;
 }
 
+interface RequestOptions {
+  signal?: AbortSignal;
+}
+
 export async function get<T = unknown>(
   path: string,
   params?: Record<string, string | number | boolean | null | undefined>,
@@ -155,11 +159,13 @@ export async function getText(
 export async function post<T = unknown>(
   path: string,
   body?: unknown,
+  options: RequestOptions = {},
 ): Promise<T> {
   const r = await fetch(baseURL() + path, {
     method: "POST",
     headers: authHeaders(),
     body: JSON.stringify(body),
+    signal: options.signal,
   });
   if (!r.ok) {
     const text = (await r.text().catch(() => "")).trim();
@@ -889,9 +895,7 @@ export interface SystemCronSpec {
  * hardcoded mirror constant.
  */
 export async function getSystemCronSpecs(): Promise<SystemCronSpec[]> {
-  const res = await get<{ specs: SystemCronSpec[] }>(
-    "/scheduler/system-specs",
-  );
+  const res = await get<{ specs: SystemCronSpec[] }>("/scheduler/system-specs");
   return res.specs ?? [];
 }
 
