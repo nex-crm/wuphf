@@ -121,18 +121,18 @@ export default function WikiCatalog({
                       }}
                     >
                       {item.title}
+                      {isVerbose(item, verboseThreshold) && (
+                        <span
+                          className="wk-staleness-badge wk-prune-verbose"
+                          title={`Verbose: ${item.word_count ?? 0} words, ${
+                            item.days_unread ?? 0
+                          } days since last read`}
+                          data-testid="wk-prune-verbose-badge"
+                        >
+                          verbose
+                        </span>
+                      )}
                     </a>
-                    {isVerbose(item, verboseThreshold) && (
-                      <span
-                        className="wk-staleness-badge wk-prune-verbose"
-                        title={`Verbose: ${item.word_count ?? 0} words, ${
-                          item.days_unread ?? 0
-                        } days since last read`}
-                        data-testid="wk-prune-verbose-badge"
-                      >
-                        verbose
-                      </span>
-                    )}
                     <span className="wk-when">
                       {safeRelative(item.last_edited_ts)}
                     </span>
@@ -158,7 +158,10 @@ function computeVerboseThreshold(entries: WikiCatalogEntry[]): number {
   const sorted = [...entries].sort(
     (a, b) => (b.prune_score ?? 0) - (a.prune_score ?? 0),
   );
-  const idx = Math.floor(entries.length * 0.1);
+  // For catalogs < 10 articles floor(n*0.1) is 0, which points at the highest
+  // scorer and means the badge is never shown under strict >. Use at least 1
+  // so the top entry in any non-empty catalog can qualify.
+  const idx = Math.max(1, Math.floor(entries.length * 0.1));
   const cutoff = sorted[idx]?.prune_score ?? 0;
   return cutoff;
 }
@@ -180,7 +183,13 @@ function groupByGroup(
     out[entry.group].push(entry);
   }
   for (const k of Object.keys(out)) {
-    out[k].sort((a, b) => (a.last_edited_ts < b.last_edited_ts ? 1 : -1));
+    out[k].sort((a, b) =>
+      a.last_edited_ts < b.last_edited_ts
+        ? 1
+        : a.last_edited_ts > b.last_edited_ts
+          ? -1
+          : 0,
+    );
   }
   return out;
 }
