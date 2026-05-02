@@ -102,20 +102,16 @@ export default function WikiCatalog({
                 {items.slice(0, 6).map((item) => (
                   <li key={item.path}>
                     <PixelAvatar slug={item.author_slug} size={16} />
-                    <span
+                    <a
                       className="wk-title"
-                      role="link"
-                      tabIndex={0}
-                      onClick={() => onNavigate(item.path)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" || e.key === " ") {
-                          e.preventDefault();
-                          onNavigate(item.path);
-                        }
+                      href={`#/wiki/${item.path}`}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        onNavigate(item.path);
                       }}
                     >
                       {item.title}
-                    </span>
+                    </a>
                     <span className="wk-when">
                       {safeRelative(item.last_edited_ts)}
                     </span>

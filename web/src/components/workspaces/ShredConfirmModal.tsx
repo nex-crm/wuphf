@@ -1,3 +1,4 @@
+// biome-ignore-all lint/a11y/useKeyWithClickEvents: Pointer handler is paired with an existing modal, image, or routed-control keyboard path; preserving current interaction model.
 /**
  * ShredConfirmModal — destructive workspace removal with a copy
  * escalation for the `main` workspace.

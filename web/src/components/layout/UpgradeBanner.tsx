@@ -405,7 +405,7 @@ export function UpgradeBanner() {
     // role="region" + an accessible name lets the banner be navigable as a
     // landmark without auto-announcing on every render the way role="status"
     // (a live region) would for what is really an interactive container.
-    <div className={bannerClass} role="region" aria-label="Upgrade available">
+    <section className={bannerClass} aria-label="Upgrade available">
       <div className="upgrade-banner-row">
         <div className="upgrade-banner-content">
           <svg
@@ -597,7 +597,7 @@ export function UpgradeBanner() {
           </>
         ) : null}
       </div>
-    </div>
+    </section>
   );
 }
 
