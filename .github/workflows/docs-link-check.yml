@@ -52,6 +52,7 @@ jobs:
             --exclude "localhost"
             --exclude "https://www\.npmjs\.com/package/wuphf"
             --exclude "https://theoffice\.fandom\.com/wiki/WUPHF\.com_\(Website\)"
+            --exclude "https://news\.ycombinator\.com"
             '**/*.md' '**/*.mdx'
           fail: true
 
