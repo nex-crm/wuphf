@@ -246,7 +246,7 @@ export default function Pam({ articlePath, onActionDone }: PamProps) {
       </button>
       <div className="pam-desk" aria-hidden="true" />
 
-      {menuOpen && (
+      {menuOpen ? (
         <div
           ref={menuElRef}
           className="pam-menu"
@@ -282,7 +282,7 @@ export default function Pam({ articlePath, onActionDone }: PamProps) {
             ))
           )}
         </div>
-      )}
+      ) : null}
 
       {status.kind !== "idle" && (
         <div

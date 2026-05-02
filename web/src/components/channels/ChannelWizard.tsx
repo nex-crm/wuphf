@@ -214,7 +214,7 @@ export function ChannelWizard({ open, onClose }: ChannelWizardProps) {
             </>
           )}
 
-          {error && <div className="channel-wizard-error">{error}</div>}
+          {error ? <div className="channel-wizard-error">{error}</div> : null}
 
           <div className="channel-wizard-footer">
             <button

@@ -36,7 +36,7 @@ export default function TocBox({ entries }: TocBoxProps) {
               href={`#${entry.anchor}`}
               className={`wk-lvl-${entry.level}`}
             >
-              {entry.num && <span className="wk-num">{entry.num}</span>}
+              {entry.num ? <span className="wk-num">{entry.num}</span> : null}
               {entry.title}
             </a>
           ))}
