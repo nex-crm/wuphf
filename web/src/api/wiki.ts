@@ -221,8 +221,12 @@ export interface CompressArticleResponse {
 export async function compressArticle(
   path: string,
 ): Promise<CompressArticleResponse> {
+  // Normalize non-canonical paths (e.g. "people/nazz") to canonical form
+  // (e.g. "team/people/nazz.md") so validateArticlePath on the server
+  // doesn't reject paths that fetchArticle would resolve successfully.
+  const canonical = candidatePaths(path)[0] ?? path;
   return post<CompressArticleResponse>(
-    `/wiki/compress?path=${encodeURIComponent(path)}`,
+    `/wiki/compress?path=${encodeURIComponent(canonical)}`,
   );
 }
 

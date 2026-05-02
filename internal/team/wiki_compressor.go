@@ -130,22 +130,25 @@ func (c *WikiCompressor) IsInflight(relPath string) bool {
 }
 
 // EnqueueCompress adds a compression job if none is already in-flight or
-// queued for the same article. Returns (queued, err). When the article is
-// already being compressed the call is a silent no-op: queued=false, err=nil.
-// Callers can use IsInflight to distinguish "queued just now" from "already
-// compressing".
-func (c *WikiCompressor) EnqueueCompress(relPath, requestBy string) (bool, error) {
-	if err := validateArticlePath(relPath); err != nil {
-		return false, err
+// queued for the same article. Returns (queued, inFlight bool, err).
+//   - queued=true, inFlight=false: fresh job scheduled.
+//   - queued=false, inFlight=true: job already running/queued — debounced.
+//   - queued=false, inFlight=false, err!=nil: queue saturated or compressor stopped.
+//
+// queued and inFlight are captured atomically under the lock so callers do
+// not need a separate IsInflight call that could race with job completion.
+func (c *WikiCompressor) EnqueueCompress(relPath, requestBy string) (queued, inFlight bool, err error) {
+	if validateErr := validateArticlePath(relPath); validateErr != nil {
+		return false, false, validateErr
 	}
 	c.mu.Lock()
 	if !c.running {
 		c.mu.Unlock()
-		return false, ErrCompressorStopped
+		return false, false, ErrCompressorStopped
 	}
 	if c.inflight[relPath] || c.queued[relPath] {
 		c.mu.Unlock()
-		return false, nil
+		return false, true, nil
 	}
 	c.queued[relPath] = true
 	c.mu.Unlock()
@@ -157,13 +160,13 @@ func (c *WikiCompressor) EnqueueCompress(relPath, requestBy string) (bool, error
 	}
 	select {
 	case c.jobs <- job:
-		return true, nil
+		return true, false, nil
 	default:
 		// Queue saturated — undo the reservation so future calls can retry.
 		c.mu.Lock()
 		delete(c.queued, relPath)
 		c.mu.Unlock()
-		return false, ErrCompressQueueSaturated
+		return false, false, ErrCompressQueueSaturated
 	}
 }
 
@@ -343,7 +346,7 @@ func (b *Broker) handleWikiCompress(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	requestBy := strings.TrimSpace(r.Header.Get("X-Wuphf-Agent"))
-	queued, err := compressor.EnqueueCompress(relPath, requestBy)
+	queued, inFlight, err := compressor.EnqueueCompress(relPath, requestBy)
 	if err != nil {
 		if errors.Is(err, ErrCompressQueueSaturated) {
 			writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": err.Error()})
@@ -358,7 +361,7 @@ func (b *Broker) handleWikiCompress(w http.ResponseWriter, r *http.Request) {
 	}
 	resp := map[string]any{
 		"queued":    queued,
-		"in_flight": !queued && compressor.IsInflight(relPath),
+		"in_flight": inFlight,
 		"path":      relPath,
 	}
 	writeJSON(w, http.StatusOK, resp)

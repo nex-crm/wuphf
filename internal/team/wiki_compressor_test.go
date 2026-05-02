@@ -89,7 +89,7 @@ func TestWikiCompressor_ICP1_Compress(t *testing.T) {
 	relPath := "team/customers/contoso.md"
 	commitArticle(t, worker, relPath, original)
 
-	queued, err := cmp.EnqueueCompress(relPath, "alex")
+	queued, _, err := cmp.EnqueueCompress(relPath, "alex")
 	if err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
@@ -144,7 +144,7 @@ func TestWikiCompressor_ICP2_Debounce(t *testing.T) {
 	relPath := "team/customers/globex.md"
 	commitArticle(t, worker, relPath, "# Globex\n\nlong body that needs trimming.\n")
 
-	queued1, err := cmp.EnqueueCompress(relPath, "jordan")
+	queued1, _, err := cmp.EnqueueCompress(relPath, "jordan")
 	if err != nil {
 		t.Fatalf("enqueue 1: %v", err)
 	}
@@ -164,7 +164,7 @@ func TestWikiCompressor_ICP2_Debounce(t *testing.T) {
 		t.Fatalf("first job not flagged in-flight")
 	}
 
-	queued2, err := cmp.EnqueueCompress(relPath, "jordan")
+	queued2, _, err := cmp.EnqueueCompress(relPath, "jordan")
 	if err != nil {
 		t.Fatalf("enqueue 2: %v", err)
 	}
@@ -299,7 +299,7 @@ func TestWikiCompressor_PreservesFrontmatter(t *testing.T) {
 	relPath := "team/people/example.md"
 	commitArticle(t, worker, relPath, original)
 
-	if _, err := cmp.EnqueueCompress(relPath, "test"); err != nil {
+	if _, _, err := cmp.EnqueueCompress(relPath, "test"); err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
 	body := waitForBody(t, worker, relPath, func(b string) bool {
