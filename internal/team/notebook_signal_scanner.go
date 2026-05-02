@@ -19,11 +19,18 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/nex-crm/wuphf/internal/embedding"
 )
 
 // NotebookSignalScanner walks team/agents/*/notebook/**/*.md and clusters
-// cross-agent entries by token-overlap similarity. Each qualifying cluster
-// becomes a SkillCandidate.
+// cross-agent entries — either by token-overlap similarity (legacy
+// Jaccard path) or by cosine similarity over real text embeddings (new
+// semantic path). Each qualifying cluster becomes a SkillCandidate.
+//
+// The two paths produce SkillCandidate values with the same shape; only
+// the clustering algorithm differs. embeddingClusteringEnabled (see
+// notebook_signal_scanner_embeddings.go) decides which path runs.
 type NotebookSignalScanner struct {
 	broker *Broker
 
@@ -31,6 +38,15 @@ type NotebookSignalScanner struct {
 	minDistinctAgents    int
 	similarityThreshold  float64
 	maxCandidatesPerPass int
+
+	// embeddingProvider is the pluggable text-embedding source for the
+	// semantic clustering path. Defaults to embedding.NewDefault() in
+	// NewNotebookSignalScanner; tests inject deterministic stubs via
+	// SetEmbeddingProvider.
+	embeddingProvider embedding.Provider
+	// embeddingCache memoises (text, model) → vector pairs across compile
+	// passes. Populated lazily; nil + empty path acts as a no-op.
+	embeddingCache *embedding.Cache
 }
 
 // NewNotebookSignalScanner constructs a scanner with defaults pulled from
@@ -47,7 +63,29 @@ func NewNotebookSignalScanner(b *Broker) *NotebookSignalScanner {
 		minDistinctAgents:    envIntDefault("WUPHF_STAGE_B_NOTEBOOK_MIN_AGENTS", 2),
 		similarityThreshold:  envFloatDefault("WUPHF_STAGE_B_NOTEBOOK_SIMILARITY", 0.6),
 		maxCandidatesPerPass: envIntDefault("WUPHF_STAGE_B_NOTEBOOK_MAX_PER_PASS", 10),
+		embeddingProvider:    embedding.NewDefault(),
+		embeddingCache:       embedding.NewCache(embedding.DefaultCachePath()),
 	}
+}
+
+// SetEmbeddingProvider replaces the embedding provider — primarily a
+// test seam so unit tests can dependency-inject a deterministic stub
+// without touching env vars. Passing nil restores the auto-default on
+// the next Scan call.
+func (s *NotebookSignalScanner) SetEmbeddingProvider(p embedding.Provider) {
+	if s == nil {
+		return
+	}
+	s.embeddingProvider = p
+}
+
+// SetEmbeddingCache replaces the embedding cache. Tests pass a temp-dir-
+// backed cache; production use the lazy default from RuntimeHomeDir.
+func (s *NotebookSignalScanner) SetEmbeddingCache(c *embedding.Cache) {
+	if s == nil {
+		return
+	}
+	s.embeddingCache = c
 }
 
 // Scan walks team/agents/*/notebook/**/*.md, tokenises each entry, clusters
@@ -79,7 +117,20 @@ func (s *NotebookSignalScanner) Scan(ctx context.Context) ([]SkillCandidate, err
 		return nil, fmt.Errorf("notebook_signal_scanner: ctx cancelled: %w", err)
 	}
 
-	clusters := clusterNotebookEntries(entries, s.similarityThreshold)
+	var clusters []notebookCluster
+	if embeddingClusteringEnabled(s.embeddingProvider) {
+		clusters = s.clusterNotebookEntriesByEmbedding(ctx, entries)
+		reportClusterCounts("notebook_embedding", clusters)
+		// Defensive fallback: if the embedding path produced no clusters
+		// (provider failure on every entry, no API key reachable, etc.)
+		// drop back to the Jaccard path so the scanner is regression-safe.
+		if len(clusters) == 0 {
+			slog.Warn("notebook_embedding_yielded_zero_clusters_falling_back_to_jaccard")
+			clusters = clusterNotebookEntries(entries, s.similarityThreshold)
+		}
+	} else {
+		clusters = clusterNotebookEntries(entries, s.similarityThreshold)
+	}
 	candidates := s.candidatesFromClusters(ctx, clusters)
 
 	// Stable order: highest SignalCount first; ties break on suggested name
