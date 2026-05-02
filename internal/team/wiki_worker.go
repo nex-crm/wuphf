@@ -1123,8 +1123,13 @@ func (b *Broker) runArchiveSweepTick() {
 	}
 	b.archiveSweepMu.Lock()
 	defer b.archiveSweepMu.Unlock()
+	// 10 minutes is generous for 500 eligible articles at ~1s/commit.
+	// Without a timeout a hung git process holds archiveSweepMu forever,
+	// blocking the POST /wiki/archive/sweep handler with no escape.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
 	archiver := NewWikiArchiver(worker.Repo(), b.WikiReadLog(), 0)
-	result, err := archiver.Sweep(context.Background())
+	result, err := archiver.Sweep(ctx)
 	if err != nil {
 		log.Printf("wiki archive: sweep error: %v", err)
 		return
