@@ -117,7 +117,13 @@ type Broker struct {
 	// /config calls don't corrupt ~/.wuphf/config.json. config.Save uses
 	// os.WriteFile (O_TRUNC) without locking, so two parallel POSTs can
 	// produce a truncated/overlaid file.
-	configMu           sync.Mutex
+	configMu sync.Mutex
+	// archiveSweepMu ensures only one WikiArchiver.Sweep runs at a time.
+	// Without this, concurrent POST /wiki/archive/sweep requests and the
+	// background cron tick could both archive the same articles, with the
+	// second sweep reading tombstone content (written by the first) into the
+	// .archive/ copy — silently destroying the original.
+	archiveSweepMu     sync.Mutex
 	server             *http.Server
 	lifecycleCtx       context.Context
 	lifecycleCancel    context.CancelFunc
@@ -338,7 +344,6 @@ func (b *Broker) Start() error {
 	// Registration is idempotent — pre-existing entries keep their
 	// IntervalOverride and Enabled choices.
 	b.registerSystemCrons()
-	b.startReviewExpiryLoop(context.Background())
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
 		select {
@@ -347,6 +352,8 @@ func (b *Broker) Start() error {
 		case <-ctx.Done():
 		}
 	}()
+	b.startReviewExpiryLoop(ctx)
+	b.startArchiveSweepLoop(ctx)
 	b.startMemoryWorkflowReconcilerLoop(ctx)
 	if err := b.StartOnPort(brokeraddr.ResolvePort()); err != nil {
 		cancel()
@@ -406,6 +413,7 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/wiki/article", b.requireAuth(b.handleWikiArticle))
 	mux.HandleFunc("/wiki/catalog", b.requireAuth(b.handleWikiCatalog))
 	mux.HandleFunc("/wiki/audit", b.requireAuth(b.handleWikiAudit))
+	mux.HandleFunc("/wiki/archive/sweep", b.requireAuth(b.handleWikiArchiveSweep))
 	mux.HandleFunc("/wiki/sections", b.requireAuth(b.handleWikiSections))
 	mux.HandleFunc("/wiki/lint/run", b.requireAuth(b.handleLintRun))
 	mux.HandleFunc("/wiki/lint/resolve", b.requireAuth(b.handleLintResolve))

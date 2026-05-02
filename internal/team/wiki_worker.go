@@ -996,7 +996,8 @@ func (b *Broker) handleWikiCatalog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sortParam := strings.TrimSpace(r.URL.Query().Get("sort"))
-	entries, err := worker.Repo().BuildCatalog(r.Context(), sortParam, b.WikiReadLog())
+	includeArchived := r.URL.Query().Get("include_archived") == "true"
+	entries, err := worker.Repo().BuildCatalog(r.Context(), sortParam, b.WikiReadLog(), includeArchived)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -1060,6 +1061,92 @@ func (b *Broker) handleWikiArticle(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, meta)
+}
+
+// handleWikiArchiveSweep runs one WikiArchiver.Sweep synchronously and
+// returns the SweepResult as JSON. POST is required because this endpoint
+// mutates state (archives articles, commits to git).
+//
+//	POST /wiki/archive/sweep
+func (b *Broker) handleWikiArchiveSweep(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	worker := b.WikiWorker()
+	if worker == nil {
+		http.Error(w, `{"error":"wiki backend is not active"}`, http.StatusServiceUnavailable)
+		return
+	}
+	b.archiveSweepMu.Lock()
+	defer b.archiveSweepMu.Unlock()
+	// Cap the manual sweep with the same 10-minute timeout as the scheduled
+	// path — prevents a hung git process holding archiveSweepMu indefinitely
+	// if the caller holds the connection open.
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Minute)
+	defer cancel()
+	archiver := NewWikiArchiver(worker.Repo(), b.WikiReadLog(), 0)
+	result, err := archiver.Sweep(ctx)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+// startArchiveSweepLoop runs WikiArchiver.Sweep on the wiki-archive-sweep
+// cron schedule (default: daily, MinFloor: 60 min).
+func (b *Broker) startArchiveSweepLoop(ctx context.Context) {
+	const defaultInterval = 1440 * time.Minute
+	go func() {
+		for {
+			enabled, interval := b.SchedulerJobControl("wiki-archive-sweep", defaultInterval)
+			now := time.Now().UTC()
+			b.updateSchedulerHeartbeat("wiki-archive-sweep", "Wiki archive sweep",
+				int(interval/time.Minute), now.Add(interval),
+				disabledOrSleeping(enabled), "")
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(interval):
+			}
+			if !enabled {
+				continue
+			}
+			runStatus := b.runArchiveSweepTick()
+			b.updateSchedulerHeartbeat("wiki-archive-sweep", "Wiki archive sweep",
+				int(interval/time.Minute), time.Now().UTC().Add(interval),
+				"sleeping", runStatus)
+		}
+	}()
+}
+
+func (b *Broker) runArchiveSweepTick() string {
+	worker := b.WikiWorker()
+	if worker == nil {
+		return "inactive"
+	}
+	b.archiveSweepMu.Lock()
+	defer b.archiveSweepMu.Unlock()
+	// 10 minutes is generous for 500 eligible articles at ~1s/commit.
+	// Without a timeout a hung git process holds archiveSweepMu forever,
+	// blocking the POST /wiki/archive/sweep handler with no escape.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	archiver := NewWikiArchiver(worker.Repo(), b.WikiReadLog(), 0)
+	result, err := archiver.Sweep(ctx)
+	if err != nil {
+		log.Printf("wiki archive: sweep error: %v", err)
+		return "error"
+	}
+	if result.Archived > 0 || result.Errors > 0 {
+		log.Printf("wiki archive: sweep complete — archived=%d skipped=%d errors=%d",
+			result.Archived, result.Skipped, result.Errors)
+	}
+	if result.Errors > 0 {
+		return "error"
+	}
+	return "ok"
 }
 
 // handleWikiAudit returns the cross-article commit log for audit / compliance.
