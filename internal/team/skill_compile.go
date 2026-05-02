@@ -57,6 +57,16 @@ type SkillCompileMetrics struct {
 	// Hermes-style per-agent counter (Stage B'). Incremented atomically by
 	// the tool-event hot path each time a nudge task is appended.
 	CounterNudgesFiredTotal int64
+	// SelfHealCandidatesScanned counts candidates with Source ==
+	// SourceSelfHealResolved that the synthesizer attempted to LLM-synthesize.
+	SelfHealCandidatesScanned int64
+	// SelfHealSkillsSynthesized counts self-heal candidates that the LLM
+	// accepted AND that successfully wrote through the unified funnel.
+	SelfHealSkillsSynthesized int64
+	// SelfHealLLMRejections counts self-heal candidates rejected by the LLM
+	// or by the post-LLM sanity checks (parse failures, name regex, body
+	// heading missing, length checks, etc.).
+	SelfHealLLMRejections int64
 }
 
 // snapshotSkillCompileMetrics returns a copy of m suitable for serialization.
@@ -75,6 +85,9 @@ func snapshotSkillCompileMetrics(m *SkillCompileMetrics) SkillCompileMetrics {
 		LastSkillCompilePassAtNano:    atomic.LoadInt64(&m.LastSkillCompilePassAtNano),
 		StageBProposalsTotal:          atomic.LoadInt64(&m.StageBProposalsTotal),
 		CounterNudgesFiredTotal:       atomic.LoadInt64(&m.CounterNudgesFiredTotal),
+		SelfHealCandidatesScanned:     atomic.LoadInt64(&m.SelfHealCandidatesScanned),
+		SelfHealSkillsSynthesized:     atomic.LoadInt64(&m.SelfHealSkillsSynthesized),
+		SelfHealLLMRejections:         atomic.LoadInt64(&m.SelfHealLLMRejections),
 	}
 }
 

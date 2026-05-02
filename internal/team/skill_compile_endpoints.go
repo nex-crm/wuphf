@@ -84,6 +84,9 @@ type skillCompileStatsResponse struct {
 	StageBProposalsTotal          int64                          `json:"stage_b_proposals_total"`
 	CounterNudgesFiredTotal       int64                          `json:"counter_nudges_fired_total"`
 	CounterPerAgent               map[string]SkillCounterMetrics `json:"counter_per_agent,omitempty"`
+	SelfHealCandidatesScanned     int64                          `json:"self_heal_candidates_scanned"`
+	SelfHealSkillsSynthesized     int64                          `json:"self_heal_skills_synthesized"`
+	SelfHealLLMRejections         int64                          `json:"self_heal_llm_rejections"`
 }
 
 // handleGetSkillCompileStats returns a snapshot of the compile metrics.
@@ -107,6 +110,9 @@ func (b *Broker) handleGetSkillCompileStats(w http.ResponseWriter, r *http.Reque
 		LastTickDurationMs:            snap.LastTickDurationMs,
 		StageBProposalsTotal:          snap.StageBProposalsTotal,
 		CounterNudgesFiredTotal:       snap.CounterNudgesFiredTotal,
+		SelfHealCandidatesScanned:     snap.SelfHealCandidatesScanned,
+		SelfHealSkillsSynthesized:     snap.SelfHealSkillsSynthesized,
+		SelfHealLLMRejections:         snap.SelfHealLLMRejections,
 	}
 	if counter != nil {
 		resp.CounterPerAgent = counter.Stats()
