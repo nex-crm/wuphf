@@ -53,6 +53,8 @@ export function DisconnectBanner() {
     <div className="disconnect-banner" role="alert">
       <div className="disconnect-banner-content">
         <svg
+          aria-hidden="true"
+          focusable="false"
           width="16"
           height="16"
           viewBox="0 0 24 24"
@@ -84,6 +86,8 @@ export function DisconnectBanner() {
           aria-label="Dismiss"
         >
           <svg
+            aria-hidden="true"
+            focusable="false"
             width="14"
             height="14"
             viewBox="0 0 24 24"

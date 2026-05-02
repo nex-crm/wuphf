@@ -85,6 +85,7 @@ export function AppList() {
               : currentApp === app.id;
           return (
             <button
+              type="button"
               key={app.id}
               className={`sidebar-item${isActive ? " active" : ""}`}
               onClick={() => setCurrentApp(app.id)}

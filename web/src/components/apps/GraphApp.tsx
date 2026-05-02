@@ -395,6 +395,8 @@ export function GraphApp() {
         ) : (
           <>
             <svg
+              aria-hidden="true"
+              focusable="false"
               width={size.width}
               height={size.height}
               style={{ display: "block", userSelect: "none" }}

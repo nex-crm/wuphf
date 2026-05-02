@@ -406,6 +406,8 @@ export function SearchModal() {
       <div className="search-modal card cmd-palette">
         <div className="search-input-wrap">
           <svg
+            aria-hidden="true"
+            focusable="false"
             className="search-input-icon"
             width="16"
             height="16"

@@ -87,7 +87,7 @@ export function InterviewBar() {
     setTextMode(null);
     setCustomText("");
     setCompareOpen(false);
-  }, [current?.id]);
+  }, []);
 
   useEffect(() => {
     if (textMode && textareaRef.current) {
