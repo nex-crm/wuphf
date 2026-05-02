@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -62,7 +63,7 @@ func waitForBody(t *testing.T, worker *WikiWorker, relPath string, pred func(str
 				return body
 			}
 		}
-		time.Sleep(20 * time.Millisecond)
+		runtime.Gosched()
 	}
 	bytes, _ := readArticle(worker.Repo(), relPath)
 	t.Fatalf("waitForBody timed out for %s; last body:\n%s", relPath, string(bytes))
@@ -127,9 +128,14 @@ func TestWikiCompressor_ICP2_Debounce(t *testing.T) {
 	// Block the LLM call so the first job stays in-flight while we issue
 	// the second. Release on test cleanup so the goroutine exits cleanly.
 	release := make(chan struct{})
+	started := make(chan struct{}, 1)
 	var calls atomic.Int32
 	stub := func(ctx context.Context, sys, user string) (string, error) {
 		calls.Add(1)
+		select {
+		case started <- struct{}{}:
+		default:
+		}
 		select {
 		case <-release:
 		case <-ctx.Done():
@@ -153,12 +159,10 @@ func TestWikiCompressor_ICP2_Debounce(t *testing.T) {
 	}
 
 	// Wait until the first job is actually in-flight (LLM stub started).
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) && calls.Load() == 0 {
-		time.Sleep(5 * time.Millisecond)
-	}
-	if calls.Load() == 0 {
-		t.Fatalf("first job never reached LLM stub")
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first job never reached LLM stub")
 	}
 	if !cmp.IsInflight(relPath) {
 		t.Fatalf("first job not flagged in-flight")
