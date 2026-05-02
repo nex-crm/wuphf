@@ -126,7 +126,7 @@ export default function PlaybookExecutionLog({
           {expanded ? "▾" : "▸"}
         </span>
       </button>
-      {expanded && (
+      {expanded ? (
         <div className="wk-playbook-executions__body">
           {loading ? (
             <p className="wk-playbook-executions__loading">
@@ -154,11 +154,11 @@ export default function PlaybookExecutionLog({
                       <p className="wk-playbook-execution__summary">
                         {e.summary}
                       </p>
-                      {e.notes && (
+                      {e.notes ? (
                         <p className="wk-playbook-execution__notes">
                           {e.notes}
                         </p>
-                      )}
+                      ) : null}
                       <span className="wk-playbook-execution__meta">
                         {formatAgentName(e.recorded_by)}
                         {" · "}
@@ -170,7 +170,7 @@ export default function PlaybookExecutionLog({
                   </li>
                 ))}
               </ol>
-              {entries.length > INITIAL_LIMIT && (
+              {entries.length > INITIAL_LIMIT ? (
                 <button
                   type="button"
                   className="wk-playbook-executions__more"
@@ -180,7 +180,7 @@ export default function PlaybookExecutionLog({
                     ? "show recent only"
                     : `show all (${entries.length - INITIAL_LIMIT} more)`}
                 </button>
-              )}
+              ) : null}
             </>
           )}
           <SynthesisFooter
@@ -189,7 +189,7 @@ export default function PlaybookExecutionLog({
             onResynthesize={handleResynthesize}
           />
         </div>
-      )}
+      ) : null}
     </section>
   );
 }
@@ -227,9 +227,9 @@ function SynthesisFooter({
     >
       <div className="wk-playbook-synthesis__status">
         <span className="wk-playbook-synthesis__badge">{lastLabel}</span>
-        {pendingLabel && (
+        {pendingLabel ? (
           <span className="wk-playbook-synthesis__pending">{pendingLabel}</span>
-        )}
+        ) : null}
       </div>
       <button
         type="button"

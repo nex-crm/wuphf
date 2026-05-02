@@ -427,7 +427,7 @@ export function SearchModal() {
             value={query}
             onChange={(e) => handleQueryChange(e.target.value)}
           />
-          {searching && <span className="search-spinner" />}
+          {searching ? <span className="search-spinner" /> : null}
         </div>
 
         <div className="cmd-palette-results">
@@ -458,17 +458,17 @@ export function SearchModal() {
                           ? highlightMatch(item.label, query.trim())
                           : item.label}
                       </span>
-                      {item.desc && (
+                      {item.desc ? (
                         <span className="cmd-palette-item-desc">
                           {item.group === "Wiki" || item.group === "Notebooks"
                             ? highlightMatch(item.desc, query.trim())
                             : item.desc}
                         </span>
-                      )}
+                      ) : null}
                     </span>
-                    {item.meta && (
+                    {item.meta ? (
                       <span className="cmd-palette-item-meta">{item.meta}</span>
-                    )}
+                    ) : null}
                   </button>
                 ))}
               </div>

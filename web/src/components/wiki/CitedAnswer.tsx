@@ -147,7 +147,7 @@ export default function CitedAnswer({ query }: CitedAnswerProps) {
       </Hatnote>
 
       {/* Body — only when there is an answer */}
-      {answer.answer_markdown && (
+      {answer.answer_markdown ? (
         <div className="wk-article-body" data-testid="wk-cited-answer-body">
           <ReactMarkdown
             remarkPlugins={remarkPlugins}
@@ -157,15 +157,15 @@ export default function CitedAnswer({ query }: CitedAnswerProps) {
             {answer.answer_markdown}
           </ReactMarkdown>
         </div>
-      )}
+      ) : null}
 
       {/* Out-of-scope: no sources block */}
-      {isOutOfScope && (
+      {isOutOfScope ? (
         <p className="wk-cited-answer-oos">
           I can help with questions about people, companies, and activities in
           your workspace.
         </p>
-      )}
+      ) : null}
 
       {/* Sources — only cited entries, only when not out-of-scope.
           Each <li> carries an explicit `value` so browser numbering matches
@@ -190,13 +190,15 @@ export default function CitedAnswer({ query }: CitedAnswerProps) {
                     value={n}
                   >
                     <span className="wk-commit-msg">{excerpt}</span>
-                    {src.title && <span className="wk-agent">{src.title}</span>}
-                    {src.valid_from && (
+                    {src.title ? (
+                      <span className="wk-agent">{src.title}</span>
+                    ) : null}
+                    {src.valid_from ? (
                       <span className="wk-dim">
                         {" "}
                         · {src.valid_from.slice(0, 10)}
                       </span>
-                    )}
+                    ) : null}
                   </li>
                 );
               })}

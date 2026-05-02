@@ -162,14 +162,14 @@ function RequestItem({ request, isPending, onAnswer }: RequestItemProps) {
         <span style={{ fontWeight: 600, fontSize: 13 }}>
           {request.from || "Unknown"}
         </span>
-        {request.status && (
+        {request.status ? (
           <span className="badge badge-accent">
             {request.status.toUpperCase()}
           </span>
-        )}
-        {request.blocking && (
+        ) : null}
+        {request.blocking ? (
           <span className="badge badge-yellow">BLOCKING</span>
-        )}
+        ) : null}
       </div>
 
       {request.title && request.title !== "Request" && (
@@ -182,7 +182,7 @@ function RequestItem({ request, isPending, onAnswer }: RequestItemProps) {
         {request.question || ""}
       </div>
 
-      {request.context && (
+      {request.context ? (
         <div
           style={{
             fontSize: 12,
@@ -193,13 +193,13 @@ function RequestItem({ request, isPending, onAnswer }: RequestItemProps) {
         >
           {request.context}
         </div>
-      )}
+      ) : null}
 
-      {ts && (
+      {ts ? (
         <div className="app-card-meta" style={{ marginBottom: 6 }}>
           {formatRelativeTime(ts)}
         </div>
-      )}
+      ) : null}
 
       {isPending && options.length > 0 && (
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
