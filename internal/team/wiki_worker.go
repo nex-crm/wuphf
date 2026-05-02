@@ -535,6 +535,31 @@ func (w *WikiWorker) maybeScheduleBackup(ctx context.Context) {
 	}()
 }
 
+// NotifyArchived fires the same post-commit hooks that process() fires for
+// standard wiki writes, but for paths committed by WikiArchiver.Sweep().
+// Sweep calls CommitArchive directly (bypassing process()) to keep the
+// single-writer invariant; this method bridges the gap so SSE subscribers,
+// the section cache, the search index, and the backup mirror stay in sync
+// after a sweep.
+func (w *WikiWorker) NotifyArchived(ctx context.Context, paths []string) {
+	if len(paths) == 0 {
+		return
+	}
+	ts := time.Now().UTC().Format(time.RFC3339)
+	for _, p := range paths {
+		w.publisher.PublishWikiEvent(wikiWriteEvent{
+			Path:       p,
+			AuthorSlug: "archivist",
+			Timestamp:  ts,
+		})
+		w.maybeReconcileIndex(ctx, p)
+	}
+	if notifier, ok := w.publisher.(wikiSectionsNotifier); ok {
+		notifier.EnqueueSectionsRefresh()
+	}
+	w.maybeScheduleBackup(ctx)
+}
+
 // QueueLength returns the current number of pending requests. Useful for
 // diagnostics and tests.
 func (w *WikiWorker) QueueLength() int {
@@ -1091,6 +1116,7 @@ func (b *Broker) handleWikiArchiveSweep(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	worker.NotifyArchived(ctx, result.ArchivedPaths)
 	writeJSON(w, http.StatusOK, result)
 }
 
@@ -1143,6 +1169,7 @@ func (b *Broker) runArchiveSweepTick() string {
 		log.Printf("wiki archive: sweep complete — archived=%d skipped=%d errors=%d",
 			result.Archived, result.Skipped, result.Errors)
 	}
+	worker.NotifyArchived(ctx, result.ArchivedPaths)
 	if result.Errors > 0 {
 		return "error"
 	}

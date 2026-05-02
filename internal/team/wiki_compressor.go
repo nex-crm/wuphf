@@ -19,6 +19,7 @@ package team
 //     LLM run that just landed is already the freshest result.
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -175,6 +176,15 @@ func (c *WikiCompressor) EnqueueCompress(relPath, requestBy string) (queued, inF
 func (c *WikiCompressor) drain(ctx context.Context) {
 	defer c.wg.Done()
 	for {
+		// Priority check: stop signals must be handled before draining jobs
+		// so that a full c.jobs buffer cannot delay shutdown indefinitely.
+		select {
+		case <-ctx.Done():
+			return
+		case <-c.stopCh:
+			return
+		default:
+		}
 		select {
 		case <-ctx.Done():
 			return
@@ -255,6 +265,21 @@ func (c *WikiCompressor) compress(ctx context.Context, job CompressJob) error {
 	if compressed == "" {
 		return fmt.Errorf("model returned empty body after stripping frontmatter — refusing to overwrite article")
 	}
+	if countWords([]byte(compressed)) >= countWords([]byte(body)) {
+		return fmt.Errorf("compression did not reduce article length — refusing to overwrite article")
+	}
+
+	// Re-read the article to detect concurrent edits that occurred during the
+	// LLM call. If the content changed, abort to avoid clobbering the newer
+	// version (read-LLM-write TOCTOU guard).
+	currentBytes, rerr := readArticle(repo, job.RelPath)
+	if rerr != nil {
+		return fmt.Errorf("re-read after llm: %w", rerr)
+	}
+	if !bytes.Equal(currentBytes, rawBytes) {
+		return fmt.Errorf("article was modified during compression — skipping to avoid overwrite")
+	}
+
 	var newBody string
 	if frontmatter != "" {
 		newBody = frontmatter + compressed + "\n"

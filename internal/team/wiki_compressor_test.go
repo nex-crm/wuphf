@@ -168,12 +168,15 @@ func TestWikiCompressor_ICP2_Debounce(t *testing.T) {
 		t.Fatalf("first job not flagged in-flight")
 	}
 
-	queued2, _, err := cmp.EnqueueCompress(relPath, "jordan")
+	queued2, inFlight2, err := cmp.EnqueueCompress(relPath, "jordan")
 	if err != nil {
 		t.Fatalf("enqueue 2: %v", err)
 	}
 	if queued2 {
 		t.Errorf("expected queued=false on debounced second call")
+	}
+	if !inFlight2 {
+		t.Errorf("expected inFlight=true on debounced second call")
 	}
 	if !cmp.IsInflight(relPath) {
 		t.Errorf("expected IsInflight=true while job runs")
@@ -293,9 +296,11 @@ func TestWikiCompressor_HandlerRejectsBadPath(t *testing.T) {
 // frontmatter must survive a compress. The LLM stub returns plain markdown
 // with no frontmatter; the compressor re-prepends the original block.
 func TestWikiCompressor_PreservesFrontmatter(t *testing.T) {
-	original := "---\nghost: true\nkind: people\n---\n\n# Long\n\nverbose body.\n"
+	original := "---\nghost: true\nkind: people\n---\n\n# Long\n\nVerbose body with many words that will be compressed.\n"
+	wantFrontmatter := "---\nghost: true\nkind: people\n---\n\n"
 	stub := func(ctx context.Context, sys, user string) (string, error) {
-		return "# Short\n\ntight body.\n", nil
+		// Stub output strips several words — strictly fewer than the original body.
+		return "# Long\n\ntight.\n", nil
 	}
 	cmp, worker, teardown := newCompressFixture(t, stub)
 	defer teardown()
@@ -307,15 +312,9 @@ func TestWikiCompressor_PreservesFrontmatter(t *testing.T) {
 		t.Fatalf("enqueue: %v", err)
 	}
 	body := waitForBody(t, worker, relPath, func(b string) bool {
-		return strings.Contains(b, "tight body")
+		return strings.Contains(b, "tight.")
 	}, 3*time.Second)
-	if !strings.HasPrefix(body, "---\n") {
-		t.Errorf("frontmatter missing after compress: %s", body)
-	}
-	if !strings.Contains(body, "ghost: true") {
-		t.Errorf("ghost frontmatter lost: %s", body)
-	}
-	if !strings.Contains(body, "kind: people") {
-		t.Errorf("kind frontmatter lost: %s", body)
+	if !strings.HasPrefix(body, wantFrontmatter) {
+		t.Fatalf("frontmatter changed after compress:\nwant prefix:\n%s\ngot:\n%s", wantFrontmatter, body)
 	}
 }

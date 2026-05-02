@@ -401,11 +401,22 @@ func (r *Repo) CommitArchive(ctx context.Context, relPath, tombstone, archivePat
 		return "", fmt.Errorf("wiki archive: write tombstone: %w", err)
 	}
 
-	// restoreOrig reverts the tombstone write so the live article is never
-	// permanently lost on a partial failure (index regen, git add, git commit).
+	// restoreOrig reverts all on-disk and staged changes on partial failure:
+	//   1. Restore the live article so the tombstone is never permanently
+	//      committed without a corresponding archive copy.
+	//   2. Remove the archive copy so RecoverDirtyTree cannot auto-commit
+	//      a partial archive state on the next startup.
+	//   3. Unstage any changes git add may have introduced — prevents the
+	//      same RecoverDirtyTree auto-commit path.
 	restoreOrig := func() {
 		if werr := os.WriteFile(fullOrig, []byte(archiveContent), 0o600); werr != nil {
 			log.Printf("wiki archive: WARN restore %s after failure: %v", relPath, werr)
+		}
+		if werr := os.Remove(fullArchive); werr != nil && !errors.Is(werr, os.ErrNotExist) {
+			log.Printf("wiki archive: WARN remove archive %s after failure: %v", archivePath, werr)
+		}
+		if _, werr := r.runGitLocked(ctx, "system", "reset", "HEAD", "--"); werr != nil {
+			log.Printf("wiki archive: WARN git reset after failure: %v", werr)
 		}
 	}
 
