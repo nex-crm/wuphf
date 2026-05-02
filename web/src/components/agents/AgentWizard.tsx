@@ -157,10 +157,20 @@ export function AgentWizard({ open, onClose, onCreated }: AgentWizardProps) {
     }
   }
 
+  function handleOverlayKeyDown(e: React.KeyboardEvent) {
+    if (e.key === "Escape") {
+      handleCancel();
+    }
+  }
+
   if (!open) return null;
 
   return (
-    <div className="agent-wizard-overlay" onClick={handleOverlayClick}>
+    <div
+      className="agent-wizard-overlay"
+      onClick={handleOverlayClick}
+      onKeyDown={handleOverlayKeyDown}
+    >
       <div className="agent-wizard-modal card">
         <div className="agent-wizard-title">Create agent</div>
 

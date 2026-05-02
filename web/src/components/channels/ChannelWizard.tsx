@@ -75,6 +75,12 @@ export function ChannelWizard({ open, onClose }: ChannelWizardProps) {
     }
   }
 
+  function handleOverlayKeyDown(e: React.KeyboardEvent) {
+    if (e.key === "Escape") {
+      handleCancel();
+    }
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSubmitting(true);
@@ -117,7 +123,11 @@ export function ChannelWizard({ open, onClose }: ChannelWizardProps) {
   if (!open) return null;
 
   return (
-    <div className="channel-wizard-overlay" onClick={handleOverlayClick}>
+    <div
+      className="channel-wizard-overlay"
+      onClick={handleOverlayClick}
+      onKeyDown={handleOverlayKeyDown}
+    >
       <div className="channel-wizard-modal card">
         <div className="channel-wizard-title">Create channel</div>
 
