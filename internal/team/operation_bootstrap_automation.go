@@ -117,9 +117,10 @@ func buildOperationConnectionCards(blueprint operations.Blueprint, runtimeConnec
 			if providerLabel == "" {
 				providerLabel = "the provider"
 			}
+			connectionLabel := operationFirstNonEmpty(strings.TrimSpace(live.Name), strings.TrimSpace(live.Platform), "connected account")
 			card.State = "connected"
 			card.Mode = "live_capable"
-			card.Blocker = fmt.Sprintf("Connection %q is available via %s. Live mutations still require human approval.", live.Key, providerLabel)
+			card.Blocker = fmt.Sprintf("Connection %q is available via %s. Live mutations still require human approval.", connectionLabel, providerLabel)
 		}
 		out = append(out, card)
 	}
