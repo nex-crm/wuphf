@@ -53,11 +53,11 @@ export function CheckIcon() {
 export function EnterHint({ modifier }: { modifier?: string } = {}) {
   return (
     <span className="kbd-hint" aria-hidden="true">
-      {modifier && (
+      {modifier ? (
         <Kbd size="sm" variant="inverse">
           {modifier}
         </Kbd>
-      )}
+      ) : null}
       <Kbd size="sm" variant="inverse">
         ↵
       </Kbd>
