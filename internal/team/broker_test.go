@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"go.uber.org/goleak"
+
 	"github.com/nex-crm/wuphf/internal/agent"
 	"github.com/nex-crm/wuphf/internal/gitexec"
 )
@@ -84,6 +86,35 @@ func TestMain(m *testing.M) {
 
 	rc := m.Run()
 	cleanup()
+
+	// Goroutine-leak detection: opt-in via WUPHF_GOLEAK=1 until existing
+	// leak-prone tests are migrated. Once green, drop the env gate and
+	// fail by default — the historical leak record (see CLAUDE.md memory
+	// "wuphf_test_isolation_breakdown") makes a regression detector
+	// load-bearing.
+	if rc == 0 && os.Getenv("WUPHF_GOLEAK") != "" {
+		if err := goleak.Find(
+			// runtime/trace background goroutine; not ours.
+			goleak.IgnoreAnyFunction("runtime/trace.(*tracer).goStart"),
+			// HTTP/2 idle conn keep-alive workers from net/http transport.
+			goleak.IgnoreAnyFunction("net/http.(*http2ClientConnReadLoop).run"),
+			goleak.IgnoreAnyFunction("net/http.(*persistConn).readLoop"),
+			goleak.IgnoreAnyFunction("net/http.(*persistConn).writeLoop"),
+			// bleve analysis queue: package-init worker pool that stays
+			// alive for process lifetime by design (see
+			// blevesearch/bleve_index_api/analysis.go NewAnalysisQueue).
+			// Not a leak — there is no Stop() and the workers are sized
+			// to GOMAXPROCS at import time.
+			goleak.IgnoreAnyFunction("github.com/blevesearch/bleve_index_api.AnalysisWorker"),
+			// OpenCensus stats worker: package-init goroutine in go.opencensus.io
+			// (worker.go:34 NewWorker). Pulled in transitively via gRPC/cloud
+			// SDK deps; no Stop() exposed. Process-lifetime by design.
+			goleak.IgnoreAnyFunction("go.opencensus.io/stats/view.(*worker).start"),
+		); err != nil {
+			fmt.Fprintf(os.Stderr, "goleak: %v\n", err)
+			os.Exit(1)
+		}
+	}
 	os.Exit(rc)
 }
 

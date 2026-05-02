@@ -839,3 +839,74 @@ func formatMessageUsageSuffix(usage *messageUsage) string {
 	}
 	return fmt.Sprintf(" [%d tok]", total)
 }
+
+// Messages returns all channel messages (for the Go TUI channel view).
+func (b *Broker) Messages() []channelMessage {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out := make([]channelMessage, len(b.messages))
+	for i, msg := range b.messages {
+		out[i] = cloneChannelMessageForRead(msg)
+	}
+	return out
+}
+
+func (b *Broker) ChannelMessages(channel string) []channelMessage {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	channel = normalizeChannelSlug(channel)
+	if channel == "" {
+		channel = "general"
+	}
+	out := make([]channelMessage, 0, len(b.messages))
+	for _, msg := range b.messages {
+		if normalizeChannelSlug(msg.Channel) == channel {
+			out = append(out, cloneChannelMessageForRead(msg))
+		}
+	}
+	return out
+}
+
+// AllMessages returns a copy of all messages across all channels, ordered by
+// creation time. Use this when the caller needs to search across channels rather
+// than in a single known channel.
+func (b *Broker) AllMessages() []channelMessage {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out := make([]channelMessage, len(b.messages))
+	for i, msg := range b.messages {
+		out[i] = cloneChannelMessageForRead(msg)
+	}
+	return out
+}
+
+// RecentHumanMessages returns up to limit messages sent by a human or
+// human-facing external sender ("you", "human", or "nex"). The returned slice
+// contains the most recent messages in chronological order (earliest first).
+func (b *Broker) RecentHumanMessages(limit int) []channelMessage {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	var human []channelMessage
+	for _, msg := range b.messages {
+		f := strings.ToLower(strings.TrimSpace(msg.From))
+		if f == "you" || f == "human" || f == "nex" {
+			human = append(human, cloneChannelMessageForRead(msg))
+		}
+	}
+	if len(human) <= limit {
+		return human
+	}
+	return human[len(human)-limit:]
+}
+
+func cloneChannelMessageForRead(msg channelMessage) channelMessage {
+	clone := msg
+	if len(msg.Tagged) > 0 {
+		clone.Tagged = append([]string(nil), msg.Tagged...)
+	}
+	if len(msg.Reactions) > 0 {
+		clone.Reactions = append([]messageReaction(nil), msg.Reactions...)
+	}
+	clone.Usage = cloneMessageUsage(msg.Usage)
+	return clone
+}

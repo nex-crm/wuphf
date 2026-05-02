@@ -88,14 +88,14 @@
   --accent-bg-strong: rgba(159, 77, 191, 0.35);
   /* Entity-graph node palette — Tailwind-ish pastels for the default
      light theme. Themes can override these in their token block. */
-  --graph-people-fill:       #EDE9FE;
-  --graph-people-stroke:     #7C3AED;
-  --graph-companies-fill:    #DBEAFE;
-  --graph-companies-stroke:  #2563EB;
-  --graph-customers-fill:    #DCFCE7;
-  --graph-customers-stroke:  #059669;
-  --graph-other-fill:        #F3F4F6;
-  --graph-other-stroke:      #6B7280;
+  --graph-people-fill: #ede9fe;
+  --graph-people-stroke: #7c3aed;
+  --graph-companies-fill: #dbeafe;
+  --graph-companies-stroke: #2563eb;
+  --graph-customers-fill: #dcfce7;
+  --graph-customers-stroke: #059669;
+  --graph-other-fill: #f3f4f6;
+  --graph-other-stroke: #6b7280;
   --border: var(--neutral-100);
   --border-light: var(--neutral-50);
   --border-dark: var(--neutral-200);

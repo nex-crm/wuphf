@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 )
 
 // humanIdentityRegistry is the process-wide registry the broker uses to
@@ -170,4 +171,79 @@ func (b *Broker) handleHumans(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"humans": out})
+}
+
+func (b *Broker) Requests(channel string, includeResolved bool) []humanInterview {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	channel = normalizeChannelSlug(channel)
+	if channel == "" {
+		channel = "general"
+	}
+	out := make([]humanInterview, 0, len(b.requests))
+	for _, req := range b.requests {
+		reqChannel := normalizeChannelSlug(req.Channel)
+		if reqChannel == "" {
+			reqChannel = "general"
+		}
+		if reqChannel != channel {
+			continue
+		}
+		if !includeResolved && !requestIsActive(req) {
+			continue
+		}
+		out = append(out, cloneHumanInterview(req))
+	}
+	return out
+}
+
+func cloneHumanInterview(req humanInterview) humanInterview {
+	clone := req
+	if len(req.Options) > 0 {
+		clone.Options = append([]interviewOption(nil), req.Options...)
+	}
+	if req.Answered != nil {
+		answer := *req.Answered
+		clone.Answered = &answer
+	}
+	return clone
+}
+
+func (b *Broker) HasPendingInterview() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, req := range b.requests {
+		if requestIsHumanInterview(req) && requestIsActive(req) {
+			return true
+		}
+	}
+	return false
+}
+
+func (b *Broker) HasBlockingRequest() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, req := range b.requests {
+		if requestBlocksMessages(req) {
+			return true
+		}
+	}
+	return false
+}
+
+// HasRecentlyTaggedAgents returns true if any agent was @mentioned within
+// the given duration and has not yet replied (i.e. is presumably "typing").
+func (b *Broker) HasRecentlyTaggedAgents(within time.Duration) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if len(b.lastTaggedAt) == 0 {
+		return false
+	}
+	cutoff := time.Now().Add(-within)
+	for _, t := range b.lastTaggedAt {
+		if t.After(cutoff) {
+			return true
+		}
+	}
+	return false
 }

@@ -1,8 +1,9 @@
 // biome-ignore-all lint/a11y/useAriaPropsSupportedByRole: Passive metadata uses accessible labels queried by screen-reader tests; visual text remains unchanged.
 // biome-ignore-all lint/a11y/useKeyWithClickEvents: Pointer handler is paired with an existing modal, image, or routed-control keyboard path; preserving current interaction model.
-import { useEffect, useRef, useState } from 'react'
-import { resolveContradiction, type LintFinding } from '../../api/wiki'
-import { showNotice } from '../ui/Toast'
+import { useCallback, useEffect, useRef, useState } from "react";
+
+import { type LintFinding, resolveContradiction } from "../../api/wiki";
+import { showNotice } from "../ui/Toast";
 
 /**
  * ResolveContradictionModal — modal for resolving a lint contradiction finding.
@@ -20,11 +21,22 @@ import { showNotice } from '../ui/Toast'
  * without submitting (spec: §5 modal UX).
  */
 interface ResolveContradictionModalProps {
-  finding: LintFinding
-  findingIdx: number
-  reportDate: string
-  onClose: () => void
-  onResolved: () => void
+  finding: LintFinding;
+  findingIdx: number;
+  reportDate: string;
+  onClose: () => void;
+  onResolved: () => void;
+}
+
+function resolveErrorMessage(err: unknown) {
+  return err instanceof Error
+    ? err.message
+    : "Failed to resolve contradiction.";
+}
+
+function resolvedNotice(commitSha: string) {
+  const shortSha = commitSha.slice(0, 7);
+  return shortSha ? `Resolved. Commit ${shortSha}.` : "Resolved.";
 }
 
 export default function ResolveContradictionModal({
@@ -34,69 +46,90 @@ export default function ResolveContradictionModal({
   onClose,
   onResolved,
 }: ResolveContradictionModalProps) {
-  const [submitting, setSubmitting] = useState(false)
+  const [submitting, setSubmitting] = useState(false);
   /**
    * Which button the user clicked. Only that button shows the spinner +
    * "Resolving…" label — the other two stay at their static label but go
    * disabled. This prevents the "pick A" click from redrawing "Resolving…"
    * on all three buttons, which would flash and feel confused.
    */
-  const [pendingWinner, setPendingWinner] = useState<'A' | 'B' | 'Both' | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const backdropRef = useRef<HTMLDivElement>(null)
+  const [pendingWinner, setPendingWinner] = useState<"A" | "B" | "Both" | null>(
+    null,
+  );
+  const [error, setError] = useState<string | null>(null);
+  const backdropRef = useRef<HTMLDivElement>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
-  // Escape key closes without submitting.
+  const closeAfterAbort = useCallback(() => {
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
+    onClose();
+  }, [onClose]);
+
+  // Escape key aborts any in-flight resolution and closes.
   useEffect(() => {
     function onKeyDown(ev: KeyboardEvent) {
-      if (ev.key === 'Escape') {
-        onClose()
+      if (ev.key === "Escape") {
+        closeAfterAbort();
       }
     }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [onClose])
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [closeAfterAbort]);
 
-  // Click outside (on backdrop) closes without submitting.
+  // Click outside (on backdrop) aborts any in-flight resolution and closes.
   function handleBackdropClick(ev: React.MouseEvent<HTMLDivElement>) {
     if (ev.target === backdropRef.current) {
-      onClose()
+      closeAfterAbort();
     }
   }
 
-  async function handlePick(winner: 'A' | 'B' | 'Both') {
-    setError(null)
-    setSubmitting(true)
-    setPendingWinner(winner)
+  async function handlePick(winner: "A" | "B" | "Both") {
+    abortControllerRef.current?.abort();
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    setError(null);
+    setSubmitting(true);
+    setPendingWinner(winner);
     try {
-      const res = await resolveContradiction({
-        report_date: reportDate,
-        finding_idx: findingIdx,
-        finding,
-        winner,
-      })
+      const res = await resolveContradiction(
+        {
+          report_date: reportDate,
+          finding_idx: findingIdx,
+          finding,
+          winner,
+        },
+        { signal: controller.signal },
+      );
       // There is no commit-viewer route today, so the sha rides inside the
       // toast copy in mono-style rather than as a link (spec §4). Short
       // sha mirrors git's default display width.
-      const shortSha = (res.commit_sha || '').slice(0, 7)
-      showNotice(
-        shortSha ? `Resolved. Commit ${shortSha}.` : 'Resolved.',
-        'success',
-      )
-      onResolved()
+      showNotice(resolvedNotice(res.commit_sha || ""), "success");
+      if (abortControllerRef.current === controller) {
+        abortControllerRef.current = null;
+      }
+      onResolved();
       // WikiLint refreshes on success, which unmounts this modal. Return
       // early so we don't setState on an unmounted component (React 18
       // tolerates it today, but it's a latent footgun).
-      return
+      return;
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Failed to resolve contradiction.')
-      setSubmitting(false)
-      setPendingWinner(null)
+      if (controller.signal.aborted) {
+        return;
+      }
+      setError(resolveErrorMessage(err));
+      setSubmitting(false);
+      setPendingWinner(null);
+    } finally {
+      if (abortControllerRef.current === controller) {
+        abortControllerRef.current = null;
+      }
     }
   }
 
   // resolve_actions is always [factAText, factBText, "Both"] for contradictions.
-  const factA = finding.resolve_actions?.[0] ?? 'Fact A'
-  const factB = finding.resolve_actions?.[1] ?? 'Fact B'
+  const factA = finding.resolve_actions?.[0] ?? "Fact A";
+  const factB = finding.resolve_actions?.[1] ?? "Fact B";
 
   return (
     <div
@@ -112,9 +145,9 @@ export default function ResolveContradictionModal({
         <h2 id="wk-resolve-title">Resolve contradiction</h2>
 
         <p className="wk-editor-help">
-          Entity: <strong>{finding.entity_slug ?? '(unknown)'}</strong>
+          Entity: <strong>{finding.entity_slug ?? "(unknown)"}</strong>
           {finding.fact_ids && finding.fact_ids.length > 0 && (
-            <> &mdash; facts: {finding.fact_ids.join(', ')}</>
+            <> &mdash; facts: {finding.fact_ids.join(", ")}</>
           )}
         </p>
 
@@ -148,64 +181,63 @@ export default function ResolveContradictionModal({
             type="button"
             className="wk-editor-save"
             data-testid="wk-resolve-pick-a"
-            onClick={() => handlePick('A')}
+            onClick={() => handlePick("A")}
             disabled={submitting}
-            aria-busy={pendingWinner === 'A' ? 'true' : undefined}
+            aria-busy={pendingWinner === "A" ? "true" : undefined}
           >
-            {pendingWinner === 'A' ? (
+            {pendingWinner === "A" ? (
               <>
                 <span className="wk-spinner" aria-hidden="true" />
                 Resolving…
               </>
             ) : (
-              'Fact A'
+              "Fact A"
             )}
           </button>
           <button
             type="button"
             className="wk-editor-save"
             data-testid="wk-resolve-pick-b"
-            onClick={() => handlePick('B')}
+            onClick={() => handlePick("B")}
             disabled={submitting}
-            aria-busy={pendingWinner === 'B' ? 'true' : undefined}
+            aria-busy={pendingWinner === "B" ? "true" : undefined}
           >
-            {pendingWinner === 'B' ? (
+            {pendingWinner === "B" ? (
               <>
                 <span className="wk-spinner" aria-hidden="true" />
                 Resolving…
               </>
             ) : (
-              'Fact B'
+              "Fact B"
             )}
           </button>
           <button
             type="button"
             className="wk-editor-save"
             data-testid="wk-resolve-pick-both"
-            onClick={() => handlePick('Both')}
+            onClick={() => handlePick("Both")}
             disabled={submitting}
-            aria-busy={pendingWinner === 'Both' ? 'true' : undefined}
+            aria-busy={pendingWinner === "Both" ? "true" : undefined}
           >
-            {pendingWinner === 'Both' ? (
+            {pendingWinner === "Both" ? (
               <>
                 <span className="wk-spinner" aria-hidden="true" />
                 Resolving…
               </>
             ) : (
-              'Both'
+              "Both"
             )}
           </button>
           <button
             type="button"
             className="wk-editor-cancel"
             data-testid="wk-resolve-cancel"
-            onClick={onClose}
-            disabled={submitting}
+            onClick={closeAfterAbort}
           >
             Cancel
           </button>
         </div>
       </div>
     </div>
-  )
+  );
 }

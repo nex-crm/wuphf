@@ -1,24 +1,6 @@
-import {
-  type ComponentType,
-  type CSSProperties,
-  type ReactNode,
-  useEffect,
-  useState,
-} from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  Building,
-  Key,
-  MediaImage,
-  Puzzle,
-  Refresh,
-  Settings as SettingsIcon,
-  Terminal,
-  Timer,
-  WarningTriangle,
-} from "iconoir-react";
-
-import { ImageGenSection } from "./SettingsApp.imageGen";
+import { Refresh, WarningTriangle } from "iconoir-react";
 
 import {
   type ConfigSnapshot,
@@ -41,350 +23,13 @@ import {
 } from "../ui/ShredWarning";
 import { showNotice } from "../ui/Toast";
 import { WipeModal } from "../ui/WipeModal";
-
-type SectionId =
-  | "general"
-  | "local-llms"
-  | "image-gen"
-  | "company"
-  | "keys"
-  | "integrations"
-  | "intervals"
-  | "flags"
-  | "danger";
-
-interface Section {
-  id: SectionId;
-  Icon: ComponentType<{ className?: string; style?: CSSProperties }>;
-  name: string;
-}
-
-interface SectionGroup {
-  label: string;
-  items: Section[];
-}
-
-const SECTION_GROUPS: SectionGroup[] = [
-  {
-    label: "Workspace",
-    items: [
-      { id: "general", Icon: SettingsIcon, name: "General" },
-      { id: "local-llms", Icon: Terminal, name: "Local LLMs" },
-      { id: "image-gen", Icon: MediaImage, name: "Image generation" },
-      { id: "company", Icon: Building, name: "Company" },
-    ],
-  },
-  {
-    label: "Credentials",
-    items: [
-      { id: "keys", Icon: Key, name: "API Keys" },
-      { id: "integrations", Icon: Puzzle, name: "Integrations" },
-    ],
-  },
-  {
-    label: "System",
-    items: [
-      { id: "intervals", Icon: Timer, name: "Polling" },
-      { id: "flags", Icon: Terminal, name: "CLI Flags" },
-    ],
-  },
-  {
-    label: "Advanced",
-    items: [{ id: "danger", Icon: WarningTriangle, name: "Danger Zone" }],
-  },
-];
-
-// ─── Styles ─────────────────────────────────────────────────────────────
-
-const styles = {
-  shell: {
-    display: "flex",
-    flex: 1,
-    minHeight: 0,
-    alignItems: "flex-start",
-  } as const,
-  nav: {
-    width: 260,
-    flexShrink: 0,
-    padding: "14px 12px",
-    position: "sticky" as const,
-    top: 0,
-    maxHeight: "100vh",
-    overflowY: "auto" as const,
-    display: "flex",
-    flexDirection: "column" as const,
-    gap: 14,
-    background: "var(--bg-card)",
-  } as const,
-  navGroupLabel: {
-    fontSize: 10,
-    fontWeight: 600,
-    textTransform: "uppercase" as const,
-    letterSpacing: "0.05em",
-    color: "var(--text-tertiary)",
-    margin: "0 0 4px 10px",
-  } as const,
-  navItem: (active: boolean) => ({
-    display: "flex",
-    alignItems: "center",
-    gap: 10,
-    padding: "8px 10px",
-    fontSize: 12,
-    borderRadius: 6,
-    color: active ? "var(--text)" : "var(--text-secondary)",
-    cursor: "pointer",
-    border: "none",
-    background: active ? "rgba(0, 0, 0, 0.06)" : "transparent",
-    width: "100%",
-    textAlign: "left" as const,
-    fontFamily: "var(--font-sans)",
-    fontWeight: active ? 600 : 400,
-    transition: "all 0.15s",
-  }),
-  navIcon: {
-    width: 16,
-    height: 16,
-    flexShrink: 0,
-    strokeWidth: 2,
-  } as const,
-  body: {
-    flex: 1,
-    padding: "24px 32px",
-    maxWidth: 680,
-  } as const,
-  sectionTitle: { fontSize: 18, fontWeight: 700, marginBottom: 4 } as const,
-  sectionDesc: {
-    fontSize: 13,
-    color: "var(--text-secondary)",
-    marginBottom: 20,
-    lineHeight: 1.5,
-  } as const,
-  banner: {
-    display: "flex",
-    gap: 10,
-    alignItems: "flex-start",
-    padding: "10px 14px",
-    marginBottom: 16,
-    background: "var(--yellow-bg)",
-    borderRadius: "var(--radius-md)",
-    fontSize: 12,
-    lineHeight: 1.5,
-    color: "var(--text)",
-  } as const,
-  row: {
-    display: "flex",
-    alignItems: "flex-start",
-    gap: 12,
-    marginBottom: 14,
-  } as const,
-  rowLabel: { width: 160, flexShrink: 0, paddingTop: 8 } as const,
-  rowLabelName: {
-    fontSize: 13,
-    fontWeight: 500,
-    color: "var(--text)",
-  } as const,
-  rowLabelHint: {
-    fontSize: 11,
-    color: "var(--text-tertiary)",
-    marginTop: 2,
-  } as const,
-  rowField: { flex: 1, minWidth: 0 } as const,
-  input: {
-    background: "var(--bg-card)",
-    border: "1px solid var(--border)",
-    color: "var(--text)",
-    borderRadius: "var(--radius-sm)",
-    height: 36,
-    fontSize: 13,
-    padding: "0 10px",
-    outline: "none",
-    width: "100%",
-    fontFamily: "var(--font-sans)",
-  } as const,
-  textarea: {
-    background: "var(--bg-card)",
-    border: "1px solid var(--border)",
-    color: "var(--text)",
-    borderRadius: "var(--radius-sm)",
-    minHeight: 60,
-    fontSize: 13,
-    padding: "8px 10px",
-    outline: "none",
-    width: "100%",
-    fontFamily: "var(--font-sans)",
-    lineHeight: 1.5,
-    resize: "vertical" as const,
-  },
-  keyStatus: (set: boolean) => ({
-    display: "inline-flex",
-    alignItems: "center",
-    fontSize: 11,
-    fontWeight: 500,
-    padding: "2px 8px",
-    borderRadius: "var(--radius-full)",
-    whiteSpace: "nowrap" as const,
-    background: set ? "var(--green-bg)" : "var(--bg-warm)",
-    color: set ? "var(--green)" : "var(--text-tertiary)",
-  }),
-  saveRow: {
-    display: "flex",
-    gap: 8,
-    marginTop: 20,
-    paddingTop: 16,
-    borderTop: "1px solid var(--border-light)",
-  } as const,
-  filePath: {
-    fontFamily: "var(--font-mono)",
-    fontSize: 11,
-    color: "var(--text-tertiary)",
-    padding: "6px 10px",
-    background: "var(--bg-warm)",
-    borderRadius: "var(--radius-sm)",
-    border: "1px solid var(--border-light)",
-    userSelect: "all" as const,
-    wordBreak: "break-all" as const,
-  },
-  table: {
-    width: "100%",
-    borderCollapse: "collapse" as const,
-    fontSize: 12,
-  } as const,
-  th: {
-    textAlign: "left" as const,
-    fontWeight: 600,
-    fontSize: 11,
-    textTransform: "uppercase" as const,
-    letterSpacing: "0.06em",
-    color: "var(--text-tertiary)",
-    padding: "6px 8px",
-    borderBottom: "1px solid var(--border)",
-  } as const,
-  td: {
-    padding: "6px 8px",
-    borderBottom: "1px solid var(--border-light)",
-    verticalAlign: "top" as const,
-  } as const,
-  tdFlag: {
-    padding: "6px 8px",
-    borderBottom: "1px solid var(--border-light)",
-    verticalAlign: "top" as const,
-    fontFamily: "var(--font-mono)",
-    color: "var(--accent)",
-    whiteSpace: "nowrap" as const,
-  } as const,
-  tdDesc: {
-    padding: "6px 8px",
-    borderBottom: "1px solid var(--border-light)",
-    verticalAlign: "top" as const,
-    color: "var(--text-secondary)",
-  } as const,
-  groupTitle: {
-    fontSize: 11,
-    fontWeight: 600,
-    textTransform: "uppercase" as const,
-    letterSpacing: "0.06em",
-    color: "var(--text-tertiary)",
-    marginBottom: 10,
-    paddingBottom: 6,
-    borderBottom: "1px solid var(--border-light)",
-  } as const,
-};
-
-// ─── Small components ───────────────────────────────────────────────────
-
-interface FieldProps {
-  label: string;
-  hint?: string;
-  children: ReactNode;
-}
-
-function Field({ label, hint, children }: FieldProps) {
-  return (
-    <div style={styles.row}>
-      <div style={styles.rowLabel}>
-        <div style={styles.rowLabelName}>{label}</div>
-        {hint ? <div style={styles.rowLabelHint}>{hint}</div> : null}
-      </div>
-      <div style={styles.rowField}>{children}</div>
-    </div>
-  );
-}
-
-interface SaveButtonProps {
-  label: string;
-  onSave: () => Promise<void> | void;
-}
-
-function SaveButton({ label, onSave }: SaveButtonProps) {
-  const [state, setState] = useState<"idle" | "saving" | "saved">("idle");
-
-  const handle = async () => {
-    if (state === "saving") return;
-    setState("saving");
-    try {
-      await onSave();
-      setState("saved");
-      setTimeout(() => setState("idle"), 1500);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      showNotice(`Save failed: ${msg}`, "error");
-      setState("idle");
-    }
-  };
-
-  return (
-    <div style={styles.saveRow}>
-      <button
-        className="btn btn-primary btn-sm"
-        onClick={handle}
-        disabled={state === "saving"}
-      >
-        {state === "saving" ? "Saving..." : state === "saved" ? "Saved" : label}
-      </button>
-    </div>
-  );
-}
-
-interface KeyFieldProps {
-  hasValue: boolean;
-  placeholder: string;
-  value: string;
-  onChange: (v: string) => void;
-}
-
-function KeyField({ hasValue, placeholder, value, onChange }: KeyFieldProps) {
-  return (
-    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-      <input
-        type="password"
-        className="input"
-        style={{
-          ...styles.input,
-          flex: 1,
-          fontFamily: "var(--font-mono)",
-          fontSize: 12,
-        }}
-        placeholder={
-          hasValue
-            ? "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022 (set)"
-            : placeholder
-        }
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-      />
-      <span style={styles.keyStatus(hasValue)}>
-        {hasValue ? "Set" : "Not set"}
-      </span>
-    </div>
-  );
-}
+import { ImageGenSection } from "./SettingsApp.imageGen";
+import { Field, KeyField, SaveButton } from "./settings/components";
+import { SECTION_GROUPS } from "./settings/constants";
+import { styles } from "./settings/styles";
+import type { SectionId, SectionProps } from "./settings/types";
 
 // ─── Section components ─────────────────────────────────────────────────
-
-interface SectionProps {
-  cfg: ConfigSnapshot;
-  save: (patch: ConfigUpdate) => Promise<void>;
-}
 
 // useShredAction wraps `shredWorkspace()` with the cleanup both call sites
 // (GeneralSection's inline button and DangerZoneSection's full card) need on
@@ -423,7 +68,7 @@ function GeneralSection({ cfg, save }: SectionProps) {
     cfg.max_concurrent_agents ? String(cfg.max_concurrent_agents) : "",
   );
   const [format, setFormat] = useState(cfg.default_format ?? "text");
-  const [timeout, setTimeout] = useState(
+  const [timeout, setTimeoutMs] = useState(
     cfg.default_timeout ? String(cfg.default_timeout) : "",
   );
   const [blueprint, setBlueprint] = useState(cfg.blueprint ?? "");
@@ -547,7 +192,7 @@ function GeneralSection({ cfg, save }: SectionProps) {
           min={1000}
           placeholder="120000"
           value={timeout}
-          onChange={(e) => setTimeout(e.target.value)}
+          onChange={(e) => setTimeoutMs(e.target.value)}
         />
       </Field>
 
@@ -1187,7 +832,7 @@ function KeysSection({ cfg, save }: SectionProps) {
     const entries = Object.entries(values).filter(([, v]) => v.trim() !== "");
     if (entries.length === 0) {
       showNotice("No keys entered. Leave blank to keep existing keys.", "info");
-      throw new Error("no_keys_entered");
+      return false;
     }
     const patch: ConfigUpdate = {};
     for (const [k, v] of entries) {

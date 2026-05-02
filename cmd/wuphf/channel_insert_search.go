@@ -199,9 +199,7 @@ func (m *channelModel) applySearchSelection(value, label string) tea.Cmd {
 			return nil
 		}
 		next, cmd := m.focusRequest(req, "Focused request "+req.ID)
-		if updated, ok := next.(channelModel); ok {
-			*m = updated
-		}
+		*m = next
 		return cmd
 	case strings.HasPrefix(value, "thread:"):
 		rootID := strings.TrimSpace(strings.TrimPrefix(value, "thread:"))

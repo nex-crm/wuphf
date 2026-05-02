@@ -1,8 +1,6 @@
 import { useChannels } from "../../hooks/useChannels";
-import { useAppStore } from "../../stores/app";
-
-
 import type { Theme } from "../../stores/app";
+import { useAppStore } from "../../stores/app";
 
 function nextTheme(t: Theme): Theme {
   if (t === "noir-gold") return "nex";

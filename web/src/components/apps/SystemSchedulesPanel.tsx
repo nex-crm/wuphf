@@ -1,4 +1,11 @@
-import { type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type RefObject,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
 import {
@@ -78,11 +85,7 @@ export function SystemSchedulesPanel({ jobs }: SystemSchedulesPanelProps) {
         System Schedules
       </div>
       {rows.map((job) => (
-        <ScheduleRow
-          key={job.slug ?? job.id}
-          job={job}
-          floorsRef={floorsRef}
-        />
+        <ScheduleRow key={job.slug ?? job.id} job={job} floorsRef={floorsRef} />
       ))}
     </section>
   );

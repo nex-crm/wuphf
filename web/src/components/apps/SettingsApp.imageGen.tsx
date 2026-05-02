@@ -108,7 +108,11 @@ function ProviderCard({ s }: { s: ImageProviderStatus }) {
         <StatusDot s={s} />
         <h3 style={{ fontSize: 15, fontWeight: 600 }}>{s.label}</h3>
         <span
-          style={{ fontSize: 11, color: "var(--text-tertiary)", marginLeft: "auto" }}
+          style={{
+            fontSize: 11,
+            color: "var(--text-tertiary)",
+            marginLeft: "auto",
+          }}
         >
           {capabilityLabel}
         </span>
@@ -163,7 +167,14 @@ function ProviderCard({ s }: { s: ImageProviderStatus }) {
         </div>
       ) : null}
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr",
+          gap: 10,
+          marginBottom: 10,
+        }}
+      >
         <div>
           <label style={labelStyle}>Base URL (optional)</label>
           <input
@@ -234,9 +245,9 @@ export function ImageGenSection() {
             lineHeight: 1.5,
           }}
         >
-          Backends Artist can call via the <code>image_generate</code> tool. Paste an
-          API key + (optional) base URL + default model. Status dot: green = ready, amber =
-          needs key, grey = stub (backend not yet wired).
+          Backends Artist can call via the <code>image_generate</code> tool.
+          Paste an API key + (optional) base URL + default model. Status dot:
+          green = ready, amber = needs key, grey = stub (backend not yet wired).
         </p>
       </header>
       {providers.map((p) => (

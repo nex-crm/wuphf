@@ -6,13 +6,13 @@
  * URL with ?skip_identity=1 so the wizard skips the identity step (company
  * info) — you're an existing user, not a first-time setup.
  */
-import { useEffect, useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 
 import {
   type CreateWorkspaceInput,
-  type Workspace,
   useCreateWorkspace,
   validateWorkspaceSlug,
+  type Workspace,
 } from "../../api/workspaces";
 
 interface CreateWorkspaceModalProps {
@@ -117,6 +117,7 @@ export function CreateWorkspaceModal({
   const [phase, setPhase] = useState<Phase>("form");
   const [stageIdx, setStageIdx] = useState(0);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const slugInputRef = useRef<HTMLInputElement>(null);
 
   const navigateToWorkspace = (ws: Workspace) => {
     window.location.assign(
@@ -134,12 +135,15 @@ export function CreateWorkspaceModal({
 
   // Reset on open.
   useEffect(() => {
-    if (open) {
-      setName("");
-      setPhase("form");
-      setStageIdx(0);
-      setErrorMsg(null);
-    }
+    if (!open) return;
+    setName("");
+    setPhase("form");
+    setStageIdx(0);
+    setErrorMsg(null);
+    const focusFrame = window.requestAnimationFrame(() => {
+      slugInputRef.current?.focus();
+    });
+    return () => window.cancelAnimationFrame(focusFrame);
   }, [open]);
 
   // Animated stage hints while waiting on /workspaces/create.
@@ -206,13 +210,13 @@ export function CreateWorkspaceModal({
           </label>
           <input
             id={`${titleId}-slug`}
+            ref={slugInputRef}
             style={styles.input}
             value={name}
             onChange={(e) => setName(e.target.value.toLowerCase())}
             placeholder="e.g. acme-demo"
             autoComplete="off"
             spellCheck={false}
-            autoFocus
             data-testid="workspace-slug-input"
             disabled={phase === "spawning"}
             onKeyDown={(e) => {
