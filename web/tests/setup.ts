@@ -7,7 +7,7 @@ import { vi } from "vitest";
 // Storage polyfill for tests so draft-autosave logic can be exercised
 // deterministically.
 function createMemoryStorage(): Storage {
-  const data: Record<string, string> = {};
+  const data: Record<string, string> = Object.create(null);
   const storage: Storage = {
     get length() {
       return Object.keys(data).length;
@@ -15,7 +15,7 @@ function createMemoryStorage(): Storage {
     clear: () => {
       for (const k of Object.keys(data)) delete data[k];
     },
-    getItem: (key: string) => (Object.hasOwn(data, key) ? data[key] : null),
+    getItem: (key: string) => (key in data ? data[key] : null),
     key: (index: number) => Object.keys(data)[index] ?? null,
     removeItem: (key: string) => {
       delete data[key];
