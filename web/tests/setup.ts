@@ -7,7 +7,7 @@ import { vi } from "vitest";
 // Storage polyfill for tests so draft-autosave logic can be exercised
 // deterministically.
 function createMemoryStorage(): Storage {
-  const data: Record<string, string> = Object.create(null);
+  const data: Record<string, string | undefined> = Object.create(null);
   const storage: Storage = {
     get length() {
       return Object.keys(data).length;
