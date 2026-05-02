@@ -22,7 +22,7 @@
   --wk-amber-banner: var(--olive-100);
   --wk-code-bg: var(--bg-warm);
   --wk-display: var(--font-sans);
-  --wk-body-serif: "Source Serif 4", ui-serif, Georgia, serif;
+  --wk-body-serif: "Source Serif 4", ui-serif, georgia, serif;
   --wk-chrome: var(--font-sans);
   --wk-mono: var(--font-mono);
   --wk-sidebar-left: 240px;

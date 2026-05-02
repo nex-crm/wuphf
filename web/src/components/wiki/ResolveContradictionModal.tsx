@@ -47,11 +47,16 @@ export default function ResolveContradictionModal({
   );
   const [error, setError] = useState<string | null>(null);
   const backdropRef = useRef<HTMLDivElement>(null);
+  const submittingRef = useRef(submitting);
+
+  useEffect(() => {
+    submittingRef.current = submitting;
+  }, [submitting]);
 
   // Escape key closes without submitting.
   useEffect(() => {
     function onKeyDown(ev: KeyboardEvent) {
-      if (ev.key === "Escape") {
+      if (ev.key === "Escape" && !submittingRef.current) {
         onClose();
       }
     }
@@ -61,7 +66,7 @@ export default function ResolveContradictionModal({
 
   // Click outside (on backdrop) closes without submitting.
   function handleBackdropClick(ev: React.MouseEvent<HTMLDivElement>) {
-    if (ev.target === backdropRef.current) {
+    if (ev.target === backdropRef.current && !submittingRef.current) {
       onClose();
     }
   }
@@ -69,6 +74,7 @@ export default function ResolveContradictionModal({
   async function handlePick(winner: "A" | "B" | "Both") {
     setError(null);
     setSubmitting(true);
+    submittingRef.current = true;
     setPendingWinner(winner);
     try {
       const res = await resolveContradiction({
@@ -95,6 +101,7 @@ export default function ResolveContradictionModal({
         err instanceof Error ? err.message : "Failed to resolve contradiction.",
       );
       setSubmitting(false);
+      submittingRef.current = false;
       setPendingWinner(null);
     }
   }

@@ -68,7 +68,7 @@ function GeneralSection({ cfg, save }: SectionProps) {
     cfg.max_concurrent_agents ? String(cfg.max_concurrent_agents) : "",
   );
   const [format, setFormat] = useState(cfg.default_format ?? "text");
-  const [timeout, setTimeout] = useState(
+  const [timeout, setTimeoutMs] = useState(
     cfg.default_timeout ? String(cfg.default_timeout) : "",
   );
   const [blueprint, setBlueprint] = useState(cfg.blueprint ?? "");
@@ -192,7 +192,7 @@ function GeneralSection({ cfg, save }: SectionProps) {
           min={1000}
           placeholder="120000"
           value={timeout}
-          onChange={(e) => setTimeout(e.target.value)}
+          onChange={(e) => setTimeoutMs(e.target.value)}
         />
       </Field>
 
@@ -831,8 +831,7 @@ function KeysSection({ cfg, save }: SectionProps) {
   const onSave = async () => {
     const entries = Object.entries(values).filter(([, v]) => v.trim() !== "");
     if (entries.length === 0) {
-      showNotice("No keys entered. Leave blank to keep existing keys.", "info");
-      throw new Error("no_keys_entered");
+      throw new Error("No keys entered — leave blank to keep existing keys.");
     }
     const patch: ConfigUpdate = {};
     for (const [k, v] of entries) {
