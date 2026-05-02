@@ -35,6 +35,7 @@ type humanSessionResponse struct {
 	Device      string `json:"device,omitempty"`
 	RemoteAddr  string `json:"remote_addr,omitempty"`
 	CreatedAt   string `json:"created_at"`
+	ExpiresAt   string `json:"expires_at"`
 	RevokedAt   string `json:"revoked_at,omitempty"`
 	LastSeenAt  string `json:"last_seen_at,omitempty"`
 }
@@ -96,7 +97,7 @@ func (b *Broker) handleHumanInviteAccept(w http.ResponseWriter, r *http.Request)
 		writeShareError(w, status, code, "This invite is no longer valid.", "Ask the host founder for a new invite.")
 		return
 	}
-	http.SetCookie(w, humanSessionCookieForToken(sessionToken, session.ExpiresAt()))
+	http.SetCookie(w, humanSessionCookieForToken(sessionToken, sessionExpiresAt(session)))
 	writeJSON(w, http.StatusOK, map[string]any{"session": humanSessionToResponse(session)})
 }
 
@@ -216,6 +217,7 @@ func (b *Broker) acceptHumanInvite(token, displayName, device, remoteAddr string
 			Device:      strings.TrimSpace(device),
 			RemoteAddr:  strings.TrimSpace(remoteAddr),
 			CreatedAt:   now.Format(time.RFC3339),
+			ExpiresAt:   now.Add(7 * 24 * time.Hour).Format(time.RFC3339),
 			LastSeenAt:  now.Format(time.RFC3339),
 		}
 		b.humanSessions = append(b.humanSessions, session)
@@ -270,6 +272,10 @@ func (b *Broker) humanSessionFromRequest(r *http.Request) (humanSession, bool) {
 		if session.TokenHash != tokenHash || session.RevokedAt != "" {
 			continue
 		}
+		expiresAt := sessionExpiresAt(*session)
+		if !expiresAt.IsZero() && !now.Before(expiresAt) {
+			continue
+		}
 		session.LastSeenAt = now.Format(time.RFC3339)
 		return *session, true
 	}
@@ -287,7 +293,10 @@ func humanSessionCookieForToken(token string, expires time.Time) *http.Cookie {
 	}
 }
 
-func (s humanSession) ExpiresAt() time.Time {
+func sessionExpiresAt(s humanSession) time.Time {
+	if expires := parseBrokerTimestamp(s.ExpiresAt); !expires.IsZero() {
+		return expires
+	}
 	created := parseBrokerTimestamp(s.CreatedAt)
 	if created.IsZero() {
 		created = time.Now().UTC()
@@ -315,6 +324,7 @@ func humanSessionToResponse(session humanSession) humanSessionResponse {
 		Device:      session.Device,
 		RemoteAddr:  session.RemoteAddr,
 		CreatedAt:   session.CreatedAt,
+		ExpiresAt:   sessionExpiresAt(session).Format(time.RFC3339),
 		RevokedAt:   session.RevokedAt,
 		LastSeenAt:  session.LastSeenAt,
 	}

@@ -46,4 +46,3 @@ Flags:
   --threads-collapsed
         Start with threads collapsed (default: expanded)
   --tui
-        Launch with tmux TUI instead of the web UI

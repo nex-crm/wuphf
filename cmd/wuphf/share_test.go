@@ -99,6 +99,56 @@ func TestShareJoinFlowEndToEnd(t *testing.T) {
 	}
 }
 
+func TestShareProxyDoesNotExposeBrokerToken(t *testing.T) {
+	b := team.NewBrokerAt(t.TempDir() + "/broker-state.json")
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("start broker: %v", err)
+	}
+	t.Cleanup(b.Stop)
+
+	invite, err := createShareInvite("http://"+b.Addr(), b.Token())
+	if err != nil {
+		t.Fatalf("create invite: %v", err)
+	}
+	shareSrv := httptest.NewServer(newShareHandler("http://"+b.Addr(), b.Token(), nil))
+	t.Cleanup(shareSrv.Close)
+
+	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}}
+	joinResp, err := client.Get(shareSrv.URL + "/join/" + invite.Token)
+	if err != nil {
+		t.Fatalf("join request: %v", err)
+	}
+	_ = joinResp.Body.Close()
+	cookies := joinResp.Cookies()
+	if len(cookies) == 0 {
+		t.Fatalf("join did not set a session cookie")
+	}
+
+	for _, path := range []string{"/api/web-token", "/api/notebook/list"} {
+		req, err := http.NewRequest(http.MethodGet, shareSrv.URL+path, nil)
+		if err != nil {
+			t.Fatalf("build %s request: %v", path, err)
+		}
+		for _, cookie := range cookies {
+			req.AddCookie(cookie)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("%s request: %v", path, err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusForbidden {
+			t.Fatalf("%s status = %d, want 403 body=%s", path, resp.StatusCode, string(body))
+		}
+		if strings.Contains(string(body), b.Token()) {
+			t.Fatalf("share proxy leaked broker token in %s body: %s", path, string(body))
+		}
+	}
+}
+
 func containsAll(s string, wants ...string) bool {
 	for _, want := range wants {
 		if !strings.Contains(s, want) {
