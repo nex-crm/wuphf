@@ -115,6 +115,30 @@ type humanInterview struct {
 	Answered      *interviewAnswer  `json:"answered,omitempty"`
 }
 
+type humanInvite struct {
+	ID         string `json:"id"`
+	TokenHash  string `json:"token_hash"`
+	CreatedAt  string `json:"created_at"`
+	ExpiresAt  string `json:"expires_at"`
+	AcceptedAt string `json:"accepted_at,omitempty"`
+	AcceptedBy string `json:"accepted_by,omitempty"`
+	RevokedAt  string `json:"revoked_at,omitempty"`
+}
+
+type humanSession struct {
+	ID          string `json:"id"`
+	TokenHash   string `json:"token_hash"`
+	InviteID    string `json:"invite_id"`
+	HumanSlug   string `json:"human_slug"`
+	DisplayName string `json:"display_name"`
+	Device      string `json:"device,omitempty"`
+	RemoteAddr  string `json:"remote_addr,omitempty"`
+	CreatedAt   string `json:"created_at"`
+	ExpiresAt   string `json:"expires_at"`
+	RevokedAt   string `json:"revoked_at,omitempty"`
+	LastSeenAt  string `json:"last_seen_at,omitempty"`
+}
+
 // TitleOrDefault returns req.Title trimmed, or "Request" if empty.
 // Used by the watchdog scheduler when announcing a stalled interview.
 func (req humanInterview) TitleOrDefault() string {
@@ -336,6 +360,8 @@ type brokerState struct {
 	Watchdogs         []watchdogAlert              `json:"watchdogs,omitempty"`
 	Scheduler         []schedulerJob               `json:"scheduler,omitempty"`
 	Skills            []teamSkill                  `json:"skills,omitempty"`
+	HumanInvites      []humanInvite                `json:"human_invites,omitempty"`
+	HumanSessions     []humanSession               `json:"human_sessions,omitempty"`
 	SharedMemory      map[string]map[string]string `json:"shared_memory,omitempty"`
 	Counter           int                          `json:"counter"`
 	NotificationSince string                       `json:"notification_since,omitempty"`

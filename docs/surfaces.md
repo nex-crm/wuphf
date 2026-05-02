@@ -27,6 +27,7 @@ This doc is the canonical map. If you ship a feature on one surface, update the 
 | Skills / Playbooks | ✓ | ✓ | Core. |
 | Policies | ✓ | ✓ | Core. |
 | Settings | partial | ✓ | TUI has minimal integration UI; richer config (provider keys, integrations) lives in web. |
+| Co-founder sharing | ✓ | partial | CLI owns the private-network listener and invite URL via `wuphf share`; the web UI consumes the shared office after invite acceptance. |
 | Wiki / Codex | — | ✓ | ⏳ TUI version is text+search shaped → terminal-friendly. Tracked for Phase 8. |
 | HealthCheck | — | ✓ | ⏳ TUI version `top`-style for broker health → terminal-friendly. Tracked for Phase 8. |
 | Notebook | — | ✓ | Pending decision: if data model is structured-text, ⏳ TUI; if rich-text+embeds, ⊘. |

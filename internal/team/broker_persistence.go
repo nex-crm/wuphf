@@ -122,6 +122,8 @@ func (b *Broker) loadState() error {
 	b.focusMode = state.FocusMode
 	b.tasks = state.Tasks
 	b.requests = state.Requests
+	b.humanInvites = state.HumanInvites
+	b.humanSessions = state.HumanSessions
 	b.actions = state.Actions
 	b.signals = state.Signals
 	b.decisions = state.Decisions
@@ -219,6 +221,8 @@ func (b *Broker) prepareBrokerStateWriteLocked() (brokerStateWrite, error) {
 		Policies:          b.policies,
 		Scheduler:         b.scheduler,
 		Skills:            b.skills,
+		HumanInvites:      b.humanInvites,
+		HumanSessions:     b.humanSessions,
 		SharedMemory:      b.sharedMemory,
 		Counter:           b.counter,
 		NotificationSince: b.notificationSince,
@@ -290,6 +294,8 @@ func (b *Broker) isDefaultBrokerStateLocked() bool {
 		len(b.agentIssues) == 0 &&
 		len(b.tasks) == 0 &&
 		len(activeRequests(b.requests)) == 0 &&
+		len(b.humanInvites) == 0 &&
+		len(b.humanSessions) == 0 &&
 		len(b.actions) == 0 &&
 		len(b.signals) == 0 &&
 		len(b.decisions) == 0 &&
