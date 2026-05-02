@@ -76,6 +76,7 @@ interface MdParent {
 export function mentionRemarkPlugin() {
   return function plugin() {
     return function transformer(tree: unknown) {
+      // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
       walk(tree as MdAnyNode, (parent) => {
         const { children } = parent;
         for (let i = 0; i < children.length; i++) {

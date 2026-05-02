@@ -50,6 +50,7 @@ interface WizardProps {
   onComplete?: () => void;
 }
 
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: Existing function length is baselined for a focused follow-up refactor.
 export function Wizard({ onComplete }: WizardProps) {
   const setOnboardingComplete = useAppStore((s) => s.setOnboardingComplete);
 
@@ -372,6 +373,7 @@ export function Wizard({ onComplete }: WizardProps) {
   // useMemo because the surface is small (6 checks) and recomputation only
   // happens when one of these inputs changes. Matches the TUI's six-item
   // list in init_flow.go readinessChecks().
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
   const readinessChecks: ReadinessCheck[] = (() => {
     const checks: ReadinessCheck[] = [];
 
@@ -526,6 +528,7 @@ export function Wizard({ onComplete }: WizardProps) {
 
   // Complete onboarding
   const finishOnboarding = useCallback(
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
     async (skipTask: boolean) => {
       setSubmitting(true);
       setSubmitError("");
@@ -662,6 +665,7 @@ export function Wizard({ onComplete }: WizardProps) {
   // The NexSignupPanel handles its own Enter inside the email input via an
   // onKeyDown below, so we bail out when that's the focused target.
   useEffect(() => {
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") {
         closeNexSignup();

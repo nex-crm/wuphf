@@ -31,6 +31,7 @@ type SynthState = "idle" | "pending" | "success" | "error";
  * SSE event when synthesis commits; this component listens for
  * playbook:synthesized specifically to refresh its own status strip.
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
 export default function PlaybookExecutionLog({
   slug,
 }: PlaybookExecutionLogProps) {

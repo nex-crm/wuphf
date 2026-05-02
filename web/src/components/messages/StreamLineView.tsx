@@ -15,6 +15,7 @@ interface StreamLineViewProps {
  * lines, tool calls render as collapsible cards, token totals render as
  * a single line. Everything else falls back to pretty-printed JSON.
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
 export function StreamLineView({ line, compact = false }: StreamLineViewProps) {
   const { data, parsed } = line;
   if (!parsed) {
@@ -330,6 +331,7 @@ function ToolCallCard({
     item.error !== null && item.error !== undefined && item.error !== "";
   const errorField = hasError ? item.error : null;
 
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
   const { summaryArg, summaryResult, summaryError } = useMemo(() => {
     const pick = [
       args.content,
@@ -629,6 +631,7 @@ function keyedStreamValues<T>(values: readonly T[]) {
 
 /* ───── JSON tree primitive (shared by both card and fallback paths) ───── */
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
 function Value({
   value,
   depth,

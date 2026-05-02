@@ -31,6 +31,8 @@ import { showNotice } from "../ui/Toast";
  * - kind="skill_proposal" with metadata.similar_to_existing renders a
  *   warning banner with a [Compare] action above the standard options.
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: Existing function length is baselined for a focused follow-up refactor.
 export function InterviewBar() {
   const { pending } = useRequests();
   const queryClient = useQueryClient();
@@ -104,6 +106,7 @@ export function InterviewBar() {
     return ar - br;
   });
 
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
   const submit = async (option: InterviewOption, text?: string) => {
     if (submitting) return;
     setSubmitting(true);

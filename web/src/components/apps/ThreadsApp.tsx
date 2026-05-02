@@ -81,6 +81,7 @@ export function ThreadsApp() {
         </div>
       ) : (
         <div className="threads-view-list">
+          {/* biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor. */}
           {threads.map((t) => {
             const agent = members.find((m) => m.slug === t.message.from);
             const preview =

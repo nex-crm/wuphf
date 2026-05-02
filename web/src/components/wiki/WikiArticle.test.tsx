@@ -541,8 +541,11 @@ describe("<WikiArticle synthesis status>", () => {
         screen.getByRole("heading", { name: "Customer X" }),
       ).toBeInTheDocument(),
     );
-    expect(screen.getByText("generating brief…")).toBeInTheDocument();
-    expect(screen.getByRole("status")).toBeInTheDocument();
+    expect(
+      screen.getByRole("status", {
+        name: "Brief is being generated from recent activity",
+      }),
+    ).toHaveTextContent("generating brief…");
   });
 
   it("shows no 'generating brief…' badge when synthesis_queued is false (ICP Example 3)", async () => {

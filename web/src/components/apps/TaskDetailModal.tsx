@@ -142,6 +142,7 @@ function displayMemoryStatus(status: string): string {
   return status.replace(/_/g, " ");
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
 export function taskMemoryWorkflowBadge(
   workflow?: TaskMemoryWorkflow | null,
 ): TaskMemoryWorkflowBadge | null {
@@ -207,6 +208,8 @@ export function taskMemoryWorkflowBadge(
   };
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: Existing function length is baselined for a focused follow-up refactor.
 export function TaskDetailModal({ task, onClose }: TaskDetailModalProps) {
   const queryClient = useQueryClient();
   const { data: memberData } = useQuery({

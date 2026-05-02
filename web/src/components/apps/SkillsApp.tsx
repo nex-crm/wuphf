@@ -174,11 +174,8 @@ export function SkillsApp() {
   const [compileState, setCompileState] = useState<CompileState>("idle");
   const [ownerFilter, setOwnerFilter] = useState<OwnerFilterValue>("all");
 
-  // Hydrate filter from localStorage on mount, validated against the
-  // current office. If the saved slug no longer maps to a member (agent
-  // removed), drop back to "all" instead of rendering an empty list with
-  // no error message. We wait for officeMembers to resolve so a still-
-  // loading roster doesn't wipe a valid filter.
+  // Hydrate filter after officeMembers loads; if the saved slug no longer
+  // exists, fall back to "all" instead of rendering an empty owner result.
   useEffect(() => {
     if (officeMembers === undefined) return;
     const stored = readOwnerFilter();
@@ -761,6 +758,8 @@ function isTerminalTaskStatus(s: string | undefined): boolean {
   return ["done", "completed", "blocked", "cancelled", "canceled"].includes(s);
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: Existing function length is baselined for a focused follow-up refactor.
 function SkillActions({
   status,
   skillName,
@@ -881,9 +880,7 @@ function SkillActions({
 
   const handleDisable = useCallback(() => {
     if (!skillName) return;
-    // Don't let archive/disable race with a live invoke. The polling
-    // skill_run task is still settling — disabling here would hide the
-    // chip the user is watching and mask the run result.
+    // Do not hide the live run chip while the polling task is still settling.
     if (invokePhase !== "idle") return;
     setActionPending(true);
     disableSkill(skillName)
@@ -1336,6 +1333,7 @@ interface SkillPreviewBodyProps {
   onSaved?: (updated: Skill) => void;
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
 function SkillPreviewBody({
   skill,
   onDirtyChange,
@@ -1611,6 +1609,7 @@ function ProposedPreviewBody({ skill }: { skill: Skill }) {
   );
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
 function SkillCard({
   skill,
   onPreview,

@@ -109,6 +109,7 @@ interface SimOpts {
   iterations: number;
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
 function runSimulation(
   nodes: SimNode[],
   edges: SimEdge[],
@@ -215,6 +216,7 @@ function runSimulation(
 
 // ── Component ────────────────────────────────────────────────────
 
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: Existing function length is baselined for a focused follow-up refactor.
 export function GraphApp() {
   const setCurrentApp = useAppStore((s) => s.setCurrentApp);
   const setWikiPath = useAppStore((s) => s.setWikiPath);
@@ -417,6 +419,7 @@ export function GraphApp() {
               </defs>
 
               {/* Edges first so nodes paint on top. */}
+              {/* biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor. */}
               {simResult.edges.map((e, i) => {
                 const a = nodesById.get(e.from);
                 const b = nodesById.get(e.to);

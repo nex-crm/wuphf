@@ -362,6 +362,7 @@ interface LocalProviderCardProps {
   hostPlatform: ReturnType<typeof detectHostPlatform>;
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
 function LocalProviderCard({
   meta,
   status,

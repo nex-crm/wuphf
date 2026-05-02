@@ -1,0 +1,75 @@
+# Biome complexity suppression baseline.
+#
+# Format:
+#   path|rule|occurrence|reason
+#
+# The occurrence is per identical path+rule+reason tuple so duplicated scoped
+# suppressions in one file remain tracked without tying the baseline to line
+# numbers. This file is forward-only during the migration: entries can become
+# stale and be removed, but new entries require an explicit debt diff.
+
+web/src/api/wiki.test.ts|lint/complexity/noExcessiveLinesPerFunction|1|Existing function length is baselined for a focused follow-up refactor.
+web/src/components/agents/AgentPanel.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
+web/src/components/agents/AgentWizard.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
+web/src/components/apps/ArtifactsApp.tsx|lint/complexity/noExcessiveLinesPerFunction|1|Existing function length is baselined for a focused follow-up refactor.
+web/src/components/apps/GraphApp.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
+web/src/components/apps/GraphApp.tsx|lint/complexity/noExcessiveLinesPerFunction|1|Existing function length is baselined for a focused follow-up refactor.
+web/src/components/apps/GraphApp.tsx|lint/complexity/noExcessiveCognitiveComplexity|2|Existing cognitive complexity is baselined for a focused follow-up refactor.
+web/src/components/apps/SettingsApp.imageGen.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
+web/src/components/apps/SettingsApp.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
+web/src/components/apps/SkillsApp.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
+web/src/components/apps/SkillsApp.tsx|lint/complexity/noExcessiveLinesPerFunction|1|Existing function length is baselined for a focused follow-up refactor.
+web/src/components/apps/SkillsApp.tsx|lint/complexity/noExcessiveCognitiveComplexity|2|Existing cognitive complexity is baselined for a focused follow-up refactor.
+web/src/components/apps/SkillsApp.tsx|lint/complexity/noExcessiveCognitiveComplexity|3|Existing cognitive complexity is baselined for a focused follow-up refactor.
+web/src/components/apps/SystemSchedulesPanel.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
+web/src/components/apps/SystemSchedulesPanel.tsx|lint/complexity/noExcessiveCognitiveComplexity|2|Existing cognitive complexity is baselined for a focused follow-up refactor.
+web/src/components/apps/SystemSchedulesPanel.tsx|lint/complexity/noExcessiveCognitiveComplexity|3|Existing cognitive complexity is baselined for a focused follow-up refactor.
+web/src/components/apps/TaskDetailModal.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
+web/src/components/apps/TaskDetailModal.tsx|lint/complexity/noExcessiveCognitiveComplexity|2|Existing cognitive complexity is baselined for a focused follow-up refactor.
+web/src/components/apps/TaskDetailModal.tsx|lint/complexity/noExcessiveLinesPerFunction|1|Existing function length is baselined for a focused follow-up refactor.
+web/src/components/apps/ThreadsApp.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
+web/src/components/layout/CollapsedSidebar.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
+web/src/components/layout/Sidebar.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
+web/src/components/layout/UpgradeBanner.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
+web/src/components/layout/UpgradeBanner.tsx|lint/complexity/noExcessiveLinesPerFunction|1|Existing function length is baselined for a focused follow-up refactor.
+web/src/components/messages/Composer.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
+web/src/components/messages/Composer.tsx|lint/complexity/noExcessiveLinesPerFunction|1|Existing function length is baselined for a focused follow-up refactor.
+web/src/components/messages/Composer.tsx|lint/complexity/noExcessiveCognitiveComplexity|2|Existing cognitive complexity is baselined for a focused follow-up refactor.
+web/src/components/messages/InterviewBar.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
+web/src/components/messages/InterviewBar.tsx|lint/complexity/noExcessiveLinesPerFunction|1|Existing function length is baselined for a focused follow-up refactor.
+web/src/components/messages/InterviewBar.tsx|lint/complexity/noExcessiveCognitiveComplexity|2|Existing cognitive complexity is baselined for a focused follow-up refactor.
+web/src/components/messages/MessageBubble.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
+web/src/components/messages/MessageFeed.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
+web/src/components/messages/MessageFeed.tsx|lint/complexity/noExcessiveCognitiveComplexity|2|Existing cognitive complexity is baselined for a focused follow-up refactor.
+web/src/components/messages/StreamLineView.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
+web/src/components/messages/StreamLineView.tsx|lint/complexity/noExcessiveCognitiveComplexity|2|Existing cognitive complexity is baselined for a focused follow-up refactor.
+web/src/components/messages/StreamLineView.tsx|lint/complexity/noExcessiveCognitiveComplexity|3|Existing cognitive complexity is baselined for a focused follow-up refactor.
+web/src/components/onboarding/Wizard.tsx|lint/complexity/noExcessiveLinesPerFunction|1|Existing function length is baselined for a focused follow-up refactor.
+web/src/components/onboarding/Wizard.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
+web/src/components/onboarding/Wizard.tsx|lint/complexity/noExcessiveCognitiveComplexity|2|Existing cognitive complexity is baselined for a focused follow-up refactor.
+web/src/components/onboarding/Wizard.tsx|lint/complexity/noExcessiveCognitiveComplexity|3|Existing cognitive complexity is baselined for a focused follow-up refactor.
+web/src/components/onboarding/wizard/LocalLLMPicker.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
+web/src/components/onboarding/wizard/Step4Team.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
+web/src/components/search/SearchModal.tsx|lint/complexity/noExcessiveLinesPerFunction|1|Existing function length is baselined for a focused follow-up refactor.
+web/src/components/search/SearchModal.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
+web/src/components/search/SearchModal.tsx|lint/complexity/noExcessiveCognitiveComplexity|2|Existing cognitive complexity is baselined for a focused follow-up refactor.
+web/src/components/search/SearchModal.tsx|lint/complexity/noExcessiveCognitiveComplexity|3|Existing cognitive complexity is baselined for a focused follow-up refactor.
+web/src/components/wiki/EntityBriefBar.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
+web/src/components/wiki/EntityBriefBar.tsx|lint/complexity/noExcessiveCognitiveComplexity|2|Existing cognitive complexity is baselined for a focused follow-up refactor.
+web/src/components/wiki/FactsOnFile.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
+web/src/components/wiki/Pam.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
+web/src/components/wiki/PlaybookExecutionLog.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
+web/src/components/wiki/WikiAudit.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
+web/src/components/wiki/WikiEditor.test.tsx|lint/complexity/noExcessiveLinesPerFunction|1|Existing function length is baselined for a focused follow-up refactor.
+web/src/components/wiki/WikiEditor.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
+web/src/components/wiki/WikiLint.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
+web/src/hooks/useHashRouter.ts|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
+web/src/hooks/useHashRouter.ts|lint/complexity/noExcessiveCognitiveComplexity|2|Existing cognitive complexity is baselined for a focused follow-up refactor.
+web/src/hooks/useHashRouter.ts|lint/complexity/noExcessiveCognitiveComplexity|3|Existing cognitive complexity is baselined for a focused follow-up refactor.
+web/src/hooks/useKeyboardShortcuts.ts|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
+web/src/lib/messageMarkdown.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
+web/src/lib/wikilink.ts|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
+web/src/styles/global.css|lint/complexity/noImportantStyles|1|Responsive panel width override must win over fixed desktop sizing.
+web/src/styles/global.css|lint/complexity/noImportantStyles|1|Mobile full-width panel override must win over wider breakpoints.
+web/src/styles/global.css|lint/complexity/noImportantStyles|1|Reduced-motion override must beat animation declarations.
+web/src/styles/global.css|lint/complexity/noImportantStyles|1|Reduced-motion override must beat transition declarations.

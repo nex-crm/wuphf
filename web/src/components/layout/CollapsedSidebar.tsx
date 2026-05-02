@@ -51,6 +51,7 @@ const APP_ICONS: Record<string, ComponentType<{ className?: string }>> = {
 type Popover = "team" | "channels" | "usage" | null;
 type HintState = { label: string; y: number } | null;
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
 export function CollapsedSidebar() {
   const toggleCollapsed = useAppStore((s) => s.toggleSidebarCollapsed);
   const currentApp = useAppStore((s) => s.currentApp);

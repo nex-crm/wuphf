@@ -139,3 +139,8 @@ pre-push:
       # patterns. Cheap to run (git ls-files + wc -l), so it lives in
       # pre-push alongside the other smoke checks.
       run: bash scripts/check-file-size.sh
+    complexity-baseline:
+      # Keep Biome complexity suppressions forward-only. This lets the
+      # migration baseline land while forcing future broad complexity ignores
+      # to show up as explicit debt diffs.
+      run: bash scripts/check-complexity-baseline.sh
