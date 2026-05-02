@@ -344,8 +344,6 @@ func (b *Broker) Start() error {
 	// Registration is idempotent — pre-existing entries keep their
 	// IntervalOverride and Enabled choices.
 	b.registerSystemCrons()
-	b.startReviewExpiryLoop(context.Background())
-	b.startArchiveSweepLoop(context.Background())
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
 		select {
@@ -354,6 +352,8 @@ func (b *Broker) Start() error {
 		case <-ctx.Done():
 		}
 	}()
+	b.startReviewExpiryLoop(ctx)
+	b.startArchiveSweepLoop(ctx)
 	b.startMemoryWorkflowReconcilerLoop(ctx)
 	if err := b.StartOnPort(brokeraddr.ResolvePort()); err != nil {
 		cancel()

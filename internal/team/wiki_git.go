@@ -68,6 +68,8 @@ var ErrRepoCorrupt = errors.New("wiki: repo integrity check failed")
 // exists to restore from.
 var ErrBackupMissing = errors.New("wiki: backup mirror does not exist")
 
+var errArchiveCandidateChanged = errors.New("wiki archive: candidate changed during sweep")
+
 // CommitRef is a lightweight git log entry for a single article.
 type CommitRef struct {
 	SHA       string
@@ -346,8 +348,8 @@ func (r *Repo) Commit(ctx context.Context, slug, relPath, content, mode, message
 // at archivePath (.archive/<relPath>), then commits both files in a single
 // git commit under the archivist identity. Used by WikiArchiver.Sweep.
 //
-// relPath must be under team/. archivePath must be under .archive/.
-// Both are validated to prevent path traversal before any file is written.
+// relPath must be a valid team/ article path and archivePath must live under
+// .archive/. Both are validated before any file is written.
 //
 // Returns the commit SHA. Returns ("", nil) when there was nothing to commit
 // (both files were already identical to what's on disk).
@@ -355,21 +357,33 @@ func (r *Repo) CommitArchive(ctx context.Context, relPath, tombstone, archivePat
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	// Validate paths before touching the filesystem.
-	slashRel := filepath.ToSlash(relPath)
-	slashArchive := filepath.ToSlash(archivePath)
-	if strings.Contains(slashRel, "..") || !strings.HasPrefix(slashRel, "team/") {
-		return "", fmt.Errorf("wiki archive: relPath %q must be under team/ and must not contain dot-dot segments", relPath)
+	if err := validateArticlePath(relPath); err != nil {
+		return "", err
 	}
-	if strings.Contains(slashArchive, "..") || !strings.HasPrefix(slashArchive, ".archive/") {
-		return "", fmt.Errorf("wiki archive: archivePath %q must be under .archive/ and must not contain dot-dot segments", archivePath)
+	relPath = filepath.ToSlash(filepath.Clean(strings.TrimSpace(relPath)))
+	cleanArchivePath, err := validateArchivePath(archivePath)
+	if err != nil {
+		return "", err
+	}
+	archivePath = cleanArchivePath
+
+	fullOrig := filepath.Join(r.root, filepath.FromSlash(relPath))
+	current, err := os.ReadFile(fullOrig)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", errArchiveCandidateChanged
+		}
+		return "", fmt.Errorf("wiki archive: read current article: %w", err)
+	}
+	if string(current) != archiveContent {
+		return "", errArchiveCandidateChanged
 	}
 
 	// Write archive content FIRST so that on a crash between the two writes,
 	// RecoverDirtyTree commits the archive file while the original article is
 	// still intact on disk. Writing tombstone first would destroy the original
 	// before the archive is persisted.
-	fullArchive := filepath.Join(r.root, filepath.FromSlash(slashArchive))
+	fullArchive := filepath.Join(r.root, filepath.FromSlash(archivePath))
 	if err := os.MkdirAll(filepath.Dir(fullArchive), 0o700); err != nil {
 		return "", fmt.Errorf("wiki archive: mkdir archive: %w", err)
 	}
@@ -380,7 +394,6 @@ func (r *Repo) CommitArchive(ctx context.Context, relPath, tombstone, archivePat
 	// Write tombstone at original path only after archive is safely on disk.
 	// If any subsequent git operation fails, restore the original content so
 	// the article is not silently lost.
-	fullOrig := filepath.Join(r.root, filepath.FromSlash(slashRel))
 	if err := os.MkdirAll(filepath.Dir(fullOrig), 0o700); err != nil {
 		return "", fmt.Errorf("wiki archive: mkdir orig: %w", err)
 	}
@@ -402,7 +415,7 @@ func (r *Repo) CommitArchive(ctx context.Context, relPath, tombstone, archivePat
 	}
 
 	if out, err := r.runGitLocked(ctx, ArchivistAuthor, "add", "--",
-		slashRel, slashArchive, "index/all.md"); err != nil {
+		relPath, archivePath, "index/all.md"); err != nil {
 		restoreOrig()
 		return "", fmt.Errorf("wiki archive: git add: %w: %s", err, out)
 	}
@@ -972,6 +985,30 @@ func validateArticlePath(relPath string) error {
 		return fmt.Errorf("wiki: article path must end with .md; got %q", relPath)
 	}
 	return nil
+}
+
+func validateArchivePath(relPath string) (string, error) {
+	relPath = strings.TrimSpace(relPath)
+	if relPath == "" {
+		return "", fmt.Errorf("wiki: archive_path is required")
+	}
+	if filepath.IsAbs(relPath) {
+		return "", fmt.Errorf("wiki: archive path must be relative; got %q", relPath)
+	}
+	clean := filepath.ToSlash(filepath.Clean(relPath))
+	if strings.HasPrefix(clean, "../") || strings.Contains(clean, "/../") || clean == ".." {
+		return "", fmt.Errorf("wiki: archive path must not contain ..; got %q", relPath)
+	}
+	if !strings.HasPrefix(clean, ".archive/") {
+		return "", fmt.Errorf("wiki: archive path must be within .archive/; got %q", relPath)
+	}
+	if strings.HasPrefix(clean, "team/") {
+		return "", fmt.Errorf("wiki: archive path must not be within team/; got %q", relPath)
+	}
+	if !strings.HasSuffix(strings.ToLower(clean), ".md") {
+		return "", fmt.Errorf("wiki: archive path must end with .md; got %q", relPath)
+	}
+	return clean, nil
 }
 
 // extractArticleTitle returns the first level-1 heading in the file, or the

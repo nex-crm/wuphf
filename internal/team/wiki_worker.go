@@ -1113,21 +1113,18 @@ func (b *Broker) startArchiveSweepLoop(ctx context.Context) {
 			if !enabled {
 				continue
 			}
-			status := "ok"
-			if err := b.runArchiveSweepTick(); err != nil {
-				status = "error"
-			}
+			runStatus := b.runArchiveSweepTick()
 			b.updateSchedulerHeartbeat("wiki-archive-sweep", "Wiki archive sweep",
 				int(interval/time.Minute), time.Now().UTC().Add(interval),
-				"sleeping", status)
+				"sleeping", runStatus)
 		}
 	}()
 }
 
-func (b *Broker) runArchiveSweepTick() error {
+func (b *Broker) runArchiveSweepTick() string {
 	worker := b.WikiWorker()
 	if worker == nil {
-		return nil
+		return "inactive"
 	}
 	b.archiveSweepMu.Lock()
 	defer b.archiveSweepMu.Unlock()
@@ -1140,13 +1137,16 @@ func (b *Broker) runArchiveSweepTick() error {
 	result, err := archiver.Sweep(ctx)
 	if err != nil {
 		log.Printf("wiki archive: sweep error: %v", err)
-		return err
+		return "error"
 	}
 	if result.Archived > 0 || result.Errors > 0 {
 		log.Printf("wiki archive: sweep complete — archived=%d skipped=%d errors=%d",
 			result.Archived, result.Skipped, result.Errors)
 	}
-	return nil
+	if result.Errors > 0 {
+		return "error"
+	}
+	return "ok"
 }
 
 // handleWikiAudit returns the cross-article commit log for audit / compliance.

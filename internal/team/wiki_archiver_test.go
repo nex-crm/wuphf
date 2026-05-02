@@ -3,6 +3,7 @@ package team
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -169,6 +170,117 @@ func TestWikiArchiver_ICP3_RecentlyReadKept(t *testing.T) {
 	}
 	if result.Skipped != 1 {
 		t.Errorf("Skipped = %d, want 1", result.Skipped)
+	}
+}
+
+func TestWikiArchiver_SkipsNonArticleSubtrees(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	repo := newArchiverRepo(t)
+	ctx := context.Background()
+
+	content := "# Candidate\n\n" + strings.Repeat("word ", 60) + "\n"
+	commitArticleWithAge(t, repo, "team/inbox/raw/import.md", content, "archivist", 120)
+	commitArticleWithAge(t, repo, "team/skills/customer-refund.md", content, "archivist", 120)
+	commitArticleWithAge(t, repo, "team/company/archive-me.md", content, "archivist", 120)
+
+	archiver := NewWikiArchiver(repo, nil, 90*24*time.Hour)
+	result, err := archiver.Sweep(ctx)
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if result.Archived != 1 {
+		t.Fatalf("Archived = %d, want 1", result.Archived)
+	}
+	if result.Errors != 0 {
+		t.Fatalf("Errors = %d, want 0", result.Errors)
+	}
+
+	for _, rel := range []string{"team/inbox/raw/import.md", "team/skills/customer-refund.md"} {
+		data, err := os.ReadFile(filepath.Join(repo.Root(), filepath.FromSlash(rel)))
+		if err != nil {
+			t.Fatalf("read %s: %v", rel, err)
+		}
+		if parseFrontmatterBool(string(data), "archived") {
+			t.Fatalf("%s was tombstoned; non-article subtrees must be ignored", rel)
+		}
+		if _, err := os.Stat(filepath.Join(repo.Root(), ".archive", filepath.FromSlash(rel))); !os.IsNotExist(err) {
+			t.Fatalf("archive for %s exists or stat failed unexpectedly: %v", rel, err)
+		}
+	}
+}
+
+func TestCommitArchiveRejectsUnsafeArchivePath(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	repo := newArchiverRepo(t)
+	ctx := context.Background()
+	rel := "team/company/safe.md"
+	content := "# Safe\n\n" + strings.Repeat("word ", 60) + "\n"
+	if _, _, err := repo.Commit(ctx, "ceo", rel, content, "create", "add safe"); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+
+	for _, archivePath := range []string{
+		"../outside.md",
+		"/tmp/outside.md",
+		"team/company/safe.md",
+		".archive/../team/company/safe.md",
+	} {
+		_, err := repo.CommitArchive(ctx, rel, "tombstone", archivePath, content, "archive")
+		if err == nil {
+			t.Fatalf("CommitArchive(%q) succeeded, want validation error", archivePath)
+		}
+	}
+
+	data, err := os.ReadFile(filepath.Join(repo.Root(), filepath.FromSlash(rel)))
+	if err != nil {
+		t.Fatalf("read article: %v", err)
+	}
+	if string(data) != content {
+		t.Fatalf("article changed after rejected archive path:\n%s", string(data))
+	}
+}
+
+func TestCommitArchiveSkipsChangedCandidate(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	repo := newArchiverRepo(t)
+	ctx := context.Background()
+	rel := "team/company/race.md"
+	original := "# Race\n\n" + strings.Repeat("old ", 60) + "\n"
+	updated := "# Race\n\n" + strings.Repeat("new ", 60) + "\n"
+	if _, _, err := repo.Commit(ctx, "ceo", rel, original, "create", "add race"); err != nil {
+		t.Fatalf("Commit original: %v", err)
+	}
+	if _, _, err := repo.Commit(ctx, "ceo", rel, updated, "replace", "update race"); err != nil {
+		t.Fatalf("Commit update: %v", err)
+	}
+
+	_, err := repo.CommitArchive(ctx, rel, "tombstone", ".archive/"+rel, original, "archive stale")
+	if !errors.Is(err, errArchiveCandidateChanged) {
+		t.Fatalf("CommitArchive error = %v, want errArchiveCandidateChanged", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(repo.Root(), filepath.FromSlash(rel)))
+	if err != nil {
+		t.Fatalf("read article: %v", err)
+	}
+	if string(data) != updated {
+		t.Fatalf("article changed after stale archive attempt:\n%s", string(data))
+	}
+	if _, err := os.Stat(filepath.Join(repo.Root(), ".archive", filepath.FromSlash(rel))); !os.IsNotExist(err) {
+		t.Fatalf("archive exists or stat failed unexpectedly: %v", err)
+	}
+}
+
+func TestRunArchiveSweepTickReportsInactive(t *testing.T) {
+	b := newTestBroker(t)
+	if got := b.runArchiveSweepTick(); got != "inactive" {
+		t.Fatalf("runArchiveSweepTick() = %q, want inactive", got)
 	}
 }
 

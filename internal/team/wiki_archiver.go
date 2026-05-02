@@ -7,6 +7,7 @@ package team
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -86,9 +87,15 @@ func (a *WikiArchiver) Sweep(ctx context.Context) (SweepResult, error) {
 		// Skip hidden entries and non-catalog subtrees (inbox = raw ingests,
 		// skills = generated output). These are not lifecycle-managed articles.
 		if d.IsDir() {
-			name := d.Name()
-			if strings.HasPrefix(name, ".") || name == "inbox" || name == "skills" {
+			if strings.HasPrefix(d.Name(), ".") {
 				return filepath.SkipDir
+			}
+			rel, relErr := filepath.Rel(a.repo.Root(), path)
+			if relErr == nil {
+				slash := filepath.ToSlash(rel)
+				if slash == "team/inbox" || slash == "team/skills" {
+					return filepath.SkipDir
+				}
 			}
 			return nil
 		}
@@ -141,9 +148,8 @@ func (a *WikiArchiver) Sweep(ctx context.Context) (SweepResult, error) {
 		// Never read (nil LastRead) counts as unread since first commit —
 		// falls through to archive.
 
-		// Capture content here to avoid a second read inside archiveOne,
-		// which prevents TOCTOU if the WikiWorker modifies the file between
-		// the eligibility check and the commit.
+		// CommitArchive re-checks these bytes under repo.mu before writing so
+		// a concurrent wiki update is skipped instead of tombstoned.
 		toArchive = append(toArchive, archiveCandidate{relPath: rel, content: data})
 		return nil
 	})
@@ -155,6 +161,10 @@ func (a *WikiArchiver) Sweep(ctx context.Context) (SweepResult, error) {
 	result.Skipped = skipped
 	for _, c := range toArchive {
 		if err := a.archiveOne(ctx, c.relPath, c.content, cutoffDays); err != nil {
+			if errors.Is(err, errArchiveCandidateChanged) {
+				result.Skipped++
+				continue
+			}
 			log.Printf("wiki archive: archive %s: %v", c.relPath, err)
 			result.Errors++
 			continue
@@ -165,9 +175,8 @@ func (a *WikiArchiver) Sweep(ctx context.Context) (SweepResult, error) {
 }
 
 // archiveOne moves a single article to .archive/. content is the file bytes
-// captured during the eligibility walk — passing it avoids a second read and
-// eliminates the TOCTOU window where the WikiWorker could modify the file
-// between the eligibility check and this commit.
+// captured during the eligibility walk; CommitArchive verifies those bytes
+// under the repo lock before writing the archive/tombstone pair.
 func (a *WikiArchiver) archiveOne(ctx context.Context, relPath string, content []byte, cutoffDays int) error {
 	now := time.Now().UTC()
 	archivePath := ".archive/" + relPath
