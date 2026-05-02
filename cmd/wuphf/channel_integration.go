@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -170,86 +171,184 @@ func discoverTelegramGroups(token string) tea.Cmd {
 	}
 }
 
+type telegramBrokerSurface struct {
+	Provider string `json:"provider,omitempty"`
+	RemoteID string `json:"remote_id,omitempty"`
+}
+
+type telegramBrokerChannel struct {
+	Slug    string                 `json:"slug"`
+	Surface *telegramBrokerSurface `json:"surface,omitempty"`
+}
+
+func manifestMembers(manifest company.Manifest) []string {
+	members := []string{manifest.Lead}
+	for _, member := range manifest.Members {
+		if member.Slug != manifest.Lead {
+			members = append(members, member.Slug)
+		}
+	}
+	return members
+}
+
+func findManifestTelegramChannel(manifest company.Manifest, slug, remoteID string) (string, error) {
+	for _, ch := range manifest.Channels {
+		if ch.Surface != nil && ch.Surface.Provider == "telegram" && ch.Surface.RemoteID == remoteID {
+			return ch.Slug, nil
+		}
+	}
+	for _, ch := range manifest.Channels {
+		if ch.Slug == slug {
+			return "", fmt.Errorf("channel %q already exists in the company manifest and does not bridge Telegram chat %s", slug, remoteID)
+		}
+	}
+	return "", nil
+}
+
+func findLiveTelegramChannel(channels []telegramBrokerChannel, slug, remoteID string) (string, error) {
+	for _, ch := range channels {
+		if ch.Surface != nil && ch.Surface.Provider == "telegram" && ch.Surface.RemoteID == remoteID {
+			return ch.Slug, nil
+		}
+	}
+	for _, ch := range channels {
+		if ch.Slug == slug {
+			if ch.Surface == nil || ch.Surface.Provider != "telegram" {
+				return "", fmt.Errorf("channel %q already exists in the live broker and is not a Telegram bridge", slug)
+			}
+			return "", fmt.Errorf("channel %q already bridges Telegram chat %s", slug, ch.Surface.RemoteID)
+		}
+	}
+	return "", nil
+}
+
+func readBrokerError(resp *http.Response) string {
+	body, _ := io.ReadAll(resp.Body)
+	msg := strings.TrimSpace(string(body))
+	if msg == "" {
+		return resp.Status
+	}
+	return fmt.Sprintf("%s: %s", resp.Status, msg)
+}
+
+func fetchLiveTelegramChannel(ctx context.Context, client *http.Client, slug, remoteID string) (string, error) {
+	req, err := newBrokerRequest(ctx, http.MethodGet, "http://127.0.0.1:7890/channels", nil)
+	if err != nil {
+		return "", err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("query live broker channels: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("query live broker channels: %s", readBrokerError(resp))
+	}
+	var result struct {
+		Channels []telegramBrokerChannel `json:"channels"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("decode live broker channels: %w", err)
+	}
+	return findLiveTelegramChannel(result.Channels, slug, remoteID)
+}
+
+func createLiveTelegramChannel(ctx context.Context, client *http.Client, body []byte, slug, remoteID string) error {
+	req, err := newBrokerRequest(ctx, http.MethodPost, "http://127.0.0.1:7890/channels", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("create live broker channel: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return nil
+	}
+	brokerErr := readBrokerError(resp)
+	if resp.StatusCode == http.StatusConflict {
+		if existingSlug, reconcileErr := fetchLiveTelegramChannel(ctx, client, slug, remoteID); reconcileErr != nil {
+			return fmt.Errorf("create live broker channel: %s; reconcile failed: %w", brokerErr, reconcileErr)
+		} else if existingSlug != "" {
+			return nil
+		}
+	}
+	return fmt.Errorf("create live broker channel: %s", brokerErr)
+}
+
 func connectTelegramGroup(token string, group team.TelegramGroup) tea.Cmd {
 	return func() tea.Msg {
 		slug := team.SlugifyTelegramTitle(group.Title)
-
-		// Run the manifest read-modify-write through company.UpdateManifest so
-		// it serializes against any concurrent /telegram/connect call from the
-		// web wizard. Without the shared lock, a TUI connect and a web connect
-		// can both load the same on-disk manifest, each append their own
-		// channel row, and the slower SaveManifest drops the faster one.
-		//
-		// existingSlug + members are populated by the closure and read after
-		// the call so the live-broker create below can reuse the same member
-		// set the manifest just persisted.
-		var (
-			existingSlug string
-			members      []string
-		)
 		remoteID := fmt.Sprintf("%d", group.ChatID)
-		mutateErr := company.UpdateManifest(func(manifest *company.Manifest) error {
-			// Idempotent: same slug or same remote id ⇒ already connected.
-			for _, ch := range manifest.Channels {
-				if ch.Slug == slug ||
-					(ch.Surface != nil && ch.Surface.Provider == "telegram" && ch.Surface.RemoteID == remoteID) {
-					existingSlug = ch.Slug
-					return nil
-				}
-			}
-			// Build default members: lead + all manifest members.
-			members = []string{manifest.Lead}
-			for _, member := range manifest.Members {
-				if member.Slug != manifest.Lead {
-					members = append(members, member.Slug)
-				}
-			}
-			manifest.Channels = append(manifest.Channels, company.ChannelSpec{
-				Slug:        slug,
-				Name:        group.Title,
-				Description: fmt.Sprintf("Telegram bridge for %s.", group.Title),
-				Members:     members,
-				Surface: &company.ChannelSurfaceSpec{
-					Provider:    "telegram",
-					RemoteID:    remoteID,
-					RemoteTitle: group.Title,
-					BotTokenEnv: "WUPHF_TELEGRAM_BOT_TOKEN",
-				},
-			})
-			return nil
-		})
-		if mutateErr != nil {
-			return telegramConnectDoneMsg{err: fmt.Errorf("failed to save manifest: %w", mutateErr)}
+
+		manifest, err := company.SnapshotManifest()
+		if err != nil {
+			return telegramConnectDoneMsg{err: fmt.Errorf("failed to load manifest: %w", err)}
+		}
+		existingSlug, err := findManifestTelegramChannel(manifest, slug, remoteID)
+		if err != nil {
+			return telegramConnectDoneMsg{err: err}
 		}
 		if existingSlug != "" {
-			return telegramConnectDoneMsg{
-				channelSlug: existingSlug,
-				groupTitle:  group.Title,
+			slug = existingSlug
+		}
+		members := manifestMembers(manifest)
+		client := &http.Client{Timeout: 3 * time.Second}
+		ctx := context.Background()
+
+		liveSlug, err := fetchLiveTelegramChannel(ctx, client, slug, remoteID)
+		if err != nil {
+			return telegramConnectDoneMsg{err: err}
+		}
+		if liveSlug != "" {
+			slug = liveSlug
+		} else {
+			// Create channel in the live broker WITH surface metadata before
+			// mutating the manifest or notifying Telegram. If the broker
+			// rejects the bridge, reporting success would leave company.yaml
+			// claiming a connection that the running office cannot route.
+			body, _ := json.Marshal(map[string]any{
+				"action":      "create",
+				"slug":        slug,
+				"name":        group.Title,
+				"description": fmt.Sprintf("Telegram bridge for %s.", group.Title),
+				"members":     members,
+				"created_by":  "you",
+				"surface": map[string]any{
+					"provider":      "telegram",
+					"remote_id":     remoteID,
+					"remote_title":  group.Title,
+					"mode":          group.Type,
+					"bot_token_env": "WUPHF_TELEGRAM_BOT_TOKEN",
+				},
+			})
+			if err := createLiveTelegramChannel(ctx, client, body, slug, remoteID); err != nil {
+				return telegramConnectDoneMsg{err: err}
 			}
 		}
 
-		// Create channel in the live broker WITH surface metadata
-		body, _ := json.Marshal(map[string]any{
-			"action":      "create",
-			"slug":        slug,
-			"name":        group.Title,
-			"description": fmt.Sprintf("Telegram bridge for %s.", group.Title),
-			"members":     members,
-			"created_by":  "you",
-			"surface": map[string]any{
-				"provider":      "telegram",
-				"remote_id":     fmt.Sprintf("%d", group.ChatID),
-				"remote_title":  group.Title,
-				"mode":          group.Type,
-				"bot_token_env": "WUPHF_TELEGRAM_BOT_TOKEN",
-			},
-		})
-		req, reqErr := newBrokerRequest(context.Background(), http.MethodPost, "http://127.0.0.1:7890/channels", bytes.NewReader(body))
-		if reqErr == nil {
-			client := &http.Client{Timeout: 3 * time.Second}
-			resp, err := client.Do(req)
-			if err == nil {
-				resp.Body.Close()
+		if existingSlug == "" {
+			mutateErr := company.UpdateManifest(func(manifest *company.Manifest) error {
+				if foundSlug, err := findManifestTelegramChannel(*manifest, slug, remoteID); err != nil || foundSlug != "" {
+					return err
+				}
+				manifest.Channels = append(manifest.Channels, company.ChannelSpec{
+					Slug:        slug,
+					Name:        group.Title,
+					Description: fmt.Sprintf("Telegram bridge for %s.", group.Title),
+					Members:     manifestMembers(*manifest),
+					Surface: &company.ChannelSurfaceSpec{
+						Provider:    "telegram",
+						RemoteID:    remoteID,
+						RemoteTitle: group.Title,
+						BotTokenEnv: "WUPHF_TELEGRAM_BOT_TOKEN",
+					},
+				})
+				return nil
+			})
+			if mutateErr != nil {
+				return telegramConnectDoneMsg{err: fmt.Errorf("failed to save manifest: %w", mutateErr)}
 			}
 		}
 
