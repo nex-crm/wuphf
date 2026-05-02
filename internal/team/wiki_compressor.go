@@ -249,6 +249,9 @@ func (c *WikiCompressor) compress(ctx context.Context, job CompressJob) error {
 	// silently mutate frontmatter keys (synthesis stamps, ghost flags,
 	// promoted_* keys, etc.).
 	compressed := strings.TrimSpace(stripFrontmatter(output))
+	if compressed == "" {
+		return fmt.Errorf("model returned empty body after stripping frontmatter — refusing to overwrite article")
+	}
 	var newBody string
 	if frontmatter != "" {
 		newBody = frontmatter + compressed + "\n"
@@ -344,6 +347,10 @@ func (b *Broker) handleWikiCompress(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if errors.Is(err, ErrCompressQueueSaturated) {
 			writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": err.Error()})
+			return
+		}
+		if errors.Is(err, ErrCompressorStopped) {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": err.Error()})
 			return
 		}
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})

@@ -1,5 +1,5 @@
 // biome-ignore-all lint/a11y/useValidAnchor: Anchor is intercepted by the app router or markdown renderer while preserving href fallback behavior.
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import type { PluggableList } from "unified";
 
@@ -106,6 +106,15 @@ function CompressButton({ path, wordCount }: CompressButtonProps) {
     "idle" | "pending" | "queued" | "in_flight" | "error"
   >("idle");
   const [message, setMessage] = useState<string>("");
+
+  // Reset state when navigating to a different article so button is never
+  // disabled/stuck from the previous page's compress session.
+  const prevPathRef = useRef(path);
+  if (prevPathRef.current !== path) {
+    prevPathRef.current = path;
+    setStatus("idle");
+    setMessage("");
+  }
 
   if (wordCount <= MIN_COMPRESS_WORDS) return null;
 
