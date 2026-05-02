@@ -132,9 +132,8 @@ interface OwnersChipProps {
 }
 
 /**
- * Small pill rendering the agent slugs that own a skill. Empty/missing
- * slugs render as "lead-routable" (italic, dim) to make ownership status
- * legible at a glance without the user squinting at a missing field.
+ * Renders owner slugs. Empty/missing slugs render as "lead-routable"
+ * so ownership stays legible when the backing field is empty.
  */
 export function OwnersChip({ slugs }: OwnersChipProps) {
   const list = (slugs ?? []).filter((s) => s.trim().length > 0);
@@ -162,10 +161,8 @@ export function SkillsApp() {
   const queryClient = useQueryClient();
   const [previewSkill, setPreviewSkill] = useState<Skill | null>(null);
   const [previewDirty, setPreviewDirty] = useState(false);
-  // Pause the 30s background refetch while the editor is open. Otherwise
-  // a refetch can replace the previewed skill mid-edit, swap the closed-
-  // over `originalContent` under the user, and invalidate the patchSkill
-  // old_string. The editor still reflects fresh data on next open.
+  // Pause background refetch while the editor is open so it cannot replace
+  // `originalContent` mid-edit and break patchSkill old_string matching.
   const previewOpen = previewSkill !== null;
   const { data, isLoading, error } = useQuery({
     queryKey: ["skills", "all"],
