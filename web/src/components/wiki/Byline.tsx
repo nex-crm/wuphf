@@ -54,7 +54,7 @@ export default function Byline({
       <span className="wk-ts" data-testid="wk-ts">
         {formatBylineTime(lastEditedTs)}
       </span>
-      {startedDate && (
+      {startedDate ? (
         <>
           <span className="wk-dot">•</span>
           <span>
@@ -62,7 +62,7 @@ export default function Byline({
             {startedBy ? <> by {startedBy}</> : null}
           </span>
         </>
-      )}
+      ) : null}
       {typeof revisions === "number" && revisions > 0 && (
         <>
           <span className="wk-dot">•</span>

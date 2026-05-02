@@ -34,7 +34,7 @@ export function ChannelHeader() {
     <div className="channel-header">
       <div style={{ display: "flex", alignItems: "center" }}>
         <span className="channel-title">{title}</span>
-        {desc && <span className="channel-desc">{desc}</span>}
+        {desc ? <span className="channel-desc">{desc}</span> : null}
       </div>
       <div className="channel-actions">
         <button

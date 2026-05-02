@@ -107,11 +107,11 @@ export function ThreadsApp() {
                     <span className="thread-list-item-replies">
                       {t.replyCount} repl{t.replyCount === 1 ? "y" : "ies"}
                     </span>
-                    {agent && <span>{agent.name}</span>}
+                    {agent ? <span>{agent.name}</span> : null}
                     <span>#{t.channel}</span>
-                    {t.message.timestamp && (
+                    {t.message.timestamp ? (
                       <span>{formatRelativeTime(t.message.timestamp)}</span>
-                    )}
+                    ) : null}
                   </div>
                 </div>
               </button>

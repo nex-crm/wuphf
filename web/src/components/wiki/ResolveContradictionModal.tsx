@@ -127,11 +127,14 @@ export default function ResolveContradictionModal({
           </div>
         </div>
 
-        {error && (
-          <div className="wk-editor-banner wk-editor-banner--error" role="alert">
+        {error ? (
+          <div
+            className="wk-editor-banner wk-editor-banner--error"
+            role="alert"
+          >
             {error}
           </div>
-        )}
+        ) : null}
 
         <p className="wk-editor-help">
           Pick which fact is authoritative. The other will be marked superseded.

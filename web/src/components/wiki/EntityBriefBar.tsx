@@ -157,7 +157,9 @@ export default function EntityBriefBar({
           {state === "synthesizing" ? "Synthesizing…" : "Refresh brief"}
         </button>
       )}
-      {error && <span className="wk-entity-brief-bar__error">{error}</span>}
+      {error ? (
+        <span className="wk-entity-brief-bar__error">{error}</span>
+      ) : null}
     </div>
   );
 }

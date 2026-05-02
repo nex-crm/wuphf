@@ -39,7 +39,7 @@ export function UsagePanel() {
           {formatUSD(totalCost)}
         </span>
       </button>
-      {open && (
+      {open ? (
         <div className="usage-panel open">
           {slugs.length === 0 && totalCost === 0 ? (
             <p
@@ -86,7 +86,7 @@ export function UsagePanel() {
             </>
           )}
         </div>
-      )}
+      ) : null}
     </>
   );
 }

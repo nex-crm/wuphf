@@ -66,7 +66,7 @@ export function StatusBar() {
       <span className="status-bar-item">
         {agentCount} agent{agentCount === 1 ? "" : "s"}
       </span>
-      {provider && (
+      {provider ? (
         <span
           className="status-bar-item"
           title={
@@ -77,14 +77,14 @@ export function StatusBar() {
         >
           {"⚙ "}
           {provider}
-          {providerModel && (
+          {providerModel ? (
             <>
               <span className="status-bar-sep"> · </span>
               <span className="status-bar-model">{providerModel}</span>
             </>
-          )}
+          ) : null}
         </span>
-      )}
+      ) : null}
       <span
         className={`status-bar-item status-bar-conn${brokerConnected ? "" : " disconnected"}`}
       >
