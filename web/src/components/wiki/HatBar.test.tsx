@@ -63,7 +63,8 @@ describe("<HatBar>", () => {
       <HatBar active="article" rightRail={["Draft", "Draft", "Draft#1"]} />,
     );
 
-    expect(screen.getAllByText(/Draft/)).toHaveLength(3);
+    expect(screen.getAllByText("Draft")).toHaveLength(2);
+    expect(screen.getByText("Draft#1")).toBeInTheDocument();
     expect(hasDuplicateKeyWarning(errorSpy.mock.calls)).toBe(false);
   });
 });
