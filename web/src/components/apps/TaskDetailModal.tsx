@@ -535,19 +535,21 @@ export function TaskDetailModal({ task, onClose }: TaskDetailModalProps) {
                 {submitting ? "Reassigning..." : "Reassign"}
               </button>
             </div>
-            {errorMsg && <div className="task-detail-error">{errorMsg}</div>}
+            {errorMsg ? (
+              <div className="task-detail-error">{errorMsg}</div>
+            ) : null}
           </div>
         </section>
 
-        {(description || details) && (
+        {description || details ? (
           <section className="task-detail-section">
-            {description && (
+            {description ? (
               <>
                 <div className="task-detail-label">Description</div>
                 <div className="task-detail-body">{description}</div>
               </>
-            )}
-            {details && (
+            ) : null}
+            {details ? (
               <>
                 <div
                   className="task-detail-label"
@@ -557,9 +559,9 @@ export function TaskDetailModal({ task, onClose }: TaskDetailModalProps) {
                 </div>
                 <div className="task-detail-body">{details}</div>
               </>
-            )}
+            ) : null}
           </section>
-        )}
+        ) : null}
 
         {dependsOn.length > 0 && (
           <section className="task-detail-section">
@@ -786,6 +788,7 @@ function StatusButton({
   const className =
     "btn btn-sm " +
     (danger ? "btn-ghost task-detail-status-btn-danger" : "btn-ghost");
+  const buttonLabel = isBusy ? "..." : label;
   return (
     <button
       type="button"
@@ -794,7 +797,7 @@ function StatusButton({
       disabled={disabled || isCurrent || anyBusy}
       title={isCurrent ? "Task is already in this state" : undefined}
     >
-      {isBusy ? "..." : label}
+      {buttonLabel}
     </button>
   );
 }
