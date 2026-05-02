@@ -27,6 +27,8 @@ jobs:
       - name: Link check (lychee)
         uses: lycheeverse/lychee-action@8646ba30535128ac92d33dfc9133794bfdd9b411 # v2.8.0
         with:
+          # npmjs.com and fandom.com return 403 to lychee in CI for these
+          # known-good links, so keep the exceptions URL-specific.
           args: |
             --verbose
             --no-progress
@@ -37,5 +39,7 @@ jobs:
             --exclude-path node_modules
             --exclude "example\.com"
             --exclude "localhost"
+            --exclude "https://www\.npmjs\.com/package/wuphf"
+            --exclude "https://theoffice\.fandom\.com/wiki/WUPHF\.com_\(Website\)"
             **/*.md **/*.mdx
           fail: true
