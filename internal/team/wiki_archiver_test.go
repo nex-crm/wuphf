@@ -103,8 +103,10 @@ func TestWikiArchiver_ICP2_ShortStubSkipped(t *testing.T) {
 	repo := newArchiverRepo(t)
 	ctx := context.Background()
 
-	// 30-word stub — below archiveMinWordCount.
-	short := "---\nslug: acme-micro\nghost: true\n---\n\n# Acme Micro\n\n" + strings.Repeat("word ", 20) + "\n"
+	// Short body below archiveMinWordCount. Verbose frontmatter must not push
+	// the article over the archival threshold.
+	short := "---\nslug: acme-micro\nghost: true\nnotes: " + strings.Repeat("metadata ", 60) +
+		"\n---\n\n# Acme Micro\n\n" + strings.Repeat("word ", 20) + "\n"
 	commitArticleWithAge(t, repo, "team/company/acme-micro.md", short, "archivist", 120)
 
 	archiver := NewWikiArchiver(repo, nil, 90*24*time.Hour)

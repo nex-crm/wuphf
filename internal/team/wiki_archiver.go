@@ -122,7 +122,8 @@ func (a *WikiArchiver) Sweep(ctx context.Context) (SweepResult, error) {
 		}
 
 		// Word count too low — article is a stub, leave it in place.
-		if countWords(data) < archiveMinWordCount {
+		body := stripFrontmatter(string(data))
+		if countWords([]byte(body)) < archiveMinWordCount {
 			skipped++
 			return nil
 		}
