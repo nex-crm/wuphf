@@ -83,7 +83,7 @@ export function StatusPill({
   // misleading because the broker has not yet replied. Once usage data is
   // available the counter switches to the real number. The override path
   // (tests/storybook) skips this entirely so existing assertions stay stable.
-  const usagePending = !usageOverride && usageQuery.data === undefined;
+  const usagePending = !usageOverride && usageQuery.isLoading;
 
   return (
     <span
@@ -95,7 +95,9 @@ export function StatusPill({
       <span className="workspace-pill-name">{name}</span>
       <span className="status-bar-sep"> · </span>
       <span className="workspace-pill-cost">
-        {usagePending ? "— tokens today" : `${formatTokens(totalTokens)} tokens today`}
+        {usagePending
+          ? "— tokens today"
+          : `${formatTokens(totalTokens)} tokens today`}
       </span>
     </span>
   );

@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
 
+import { keyedByOccurrence } from "./reactKeys";
+
 /**
  * Shared @-mention pattern. Matches `@slug` where slug is lowercase
  * alphanumeric-plus-hyphens and starts with a letter or digit. Mirrors the
@@ -54,7 +56,7 @@ export function parseMentions(
   // matchAll over a fresh regex avoids lastIndex leaking between invocations.
   const re = new RegExp(MENTION_RE.source, "g");
   for (const m of content.matchAll(re)) {
-    const slug = m[1];
+    const [, slug] = m;
     if (m.index === undefined) continue;
     if (!known.has(slug.toLowerCase())) continue;
     // The pattern captures an optional leading boundary char; preserve it
@@ -90,7 +92,7 @@ export function extractTaggedMentions(
   const re = new RegExp(MENTION_RE.source, "g");
   for (const match of content.matchAll(re)) {
     const slug = match[1]?.toLowerCase();
-    if (!slug || !known.has(slug)) continue;
+    if (!(slug && known.has(slug))) continue;
     if (slug === "all") {
       wantsAll = true;
       continue;
@@ -104,10 +106,13 @@ export function extractTaggedMentions(
 }
 
 export function renderMentionTokens(tokens: MentionToken[]): ReactNode[] {
-  return tokens.map((t, i) => {
+  return keyedByOccurrence(
+    tokens,
+    (token) => `${token.kind}-${token.value}`,
+  ).map(({ key, value: t }) => {
     if (t.kind === "mention") {
       return (
-        <span key={`m-${i}-${t.value}`} className="mention">
+        <span key={key} className="mention">
           @{t.value}
         </span>
       );

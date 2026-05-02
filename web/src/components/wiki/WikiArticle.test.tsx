@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as api from "../../api/wiki";
@@ -27,13 +27,13 @@ const STUB_ARTICLE: api.WikiArticle = {
   categories: [],
 };
 
-describe("<WikiArticle>", () => {
-  beforeEach(() => {
-    vi.restoreAllMocks();
-    // Default history stub — individual tests override as needed.
-    vi.spyOn(api, "fetchHistory").mockResolvedValue({ commits: [] });
-  });
+beforeEach(() => {
+  vi.restoreAllMocks();
+  // Default history stub — individual tests override as needed.
+  vi.spyOn(api, "fetchHistory").mockResolvedValue({ commits: [] });
+});
 
+describe("<WikiArticle content>", () => {
   it("fetches an article, renders its markdown, and distinguishes broken wikilinks", async () => {
     // Arrange
     vi.spyOn(api, "fetchArticle").mockResolvedValue({
@@ -139,7 +139,9 @@ describe("<WikiArticle>", () => {
       expect(screen.queryByText(/Loading article/i)).not.toBeInTheDocument(),
     );
   });
+});
 
+describe("<WikiArticle history and refresh>", () => {
   it("renders Sources populated from fetchHistory with author slugs visible", async () => {
     // Arrange
     vi.spyOn(api, "fetchArticle").mockResolvedValue(STUB_ARTICLE);
@@ -192,6 +194,40 @@ describe("<WikiArticle>", () => {
     expect(sourcesSection.textContent).toContain("aaaaaaa");
   });
 
+  it("refetches article and history when externalRefreshNonce changes", async () => {
+    const fetchArticle = vi.spyOn(api, "fetchArticle").mockResolvedValue({
+      ...STUB_ARTICLE,
+      title: "Customer X",
+    });
+    const fetchHistory = vi
+      .spyOn(api, "fetchHistory")
+      .mockResolvedValue({ commits: [] });
+
+    const { rerender } = render(
+      <WikiArticle
+        path="people/customer-x"
+        catalog={CATALOG}
+        onNavigate={() => {}}
+        externalRefreshNonce={0}
+      />,
+    );
+
+    await waitFor(() => expect(fetchArticle).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(fetchHistory).toHaveBeenCalledTimes(1));
+
+    rerender(
+      <WikiArticle
+        path="people/customer-x"
+        catalog={CATALOG}
+        onNavigate={() => {}}
+        externalRefreshNonce={1}
+      />,
+    );
+
+    await waitFor(() => expect(fetchArticle).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(fetchHistory).toHaveBeenCalledTimes(2));
+  });
+
   it("renders a loading placeholder in Sources while history is fetching", async () => {
     // Arrange
     vi.spyOn(api, "fetchArticle").mockResolvedValue(STUB_ARTICLE);
@@ -226,6 +262,53 @@ describe("<WikiArticle>", () => {
     finish?.({ commits: [] });
   });
 
+  it("refetches article and history after an inline editor save", async () => {
+    const fetchArticleSpy = vi
+      .spyOn(api, "fetchArticle")
+      .mockResolvedValueOnce({
+        ...STUB_ARTICLE,
+        content: "Original body",
+        commit_sha: "oldsha1",
+      })
+      .mockResolvedValueOnce({
+        ...STUB_ARTICLE,
+        content: "Updated body",
+        commit_sha: "newsha1",
+      });
+    const fetchHistorySpy = vi
+      .spyOn(api, "fetchHistory")
+      .mockResolvedValue({ commits: [] });
+    vi.spyOn(api, "writeHumanArticle").mockResolvedValue({
+      path: STUB_ARTICLE.path,
+      commit_sha: "newsha1",
+      bytes_written: 12,
+    });
+
+    render(
+      <WikiArticle
+        path="people/customer-x"
+        catalog={CATALOG}
+        onNavigate={() => {}}
+      />,
+    );
+
+    await screen.findByText("Original body");
+    fireEvent.click(screen.getByRole("button", { name: "Edit source" }));
+    fireEvent.change(screen.getByTestId("wk-editor-textarea"), {
+      target: { value: "Updated body" },
+    });
+    fireEvent.change(screen.getByTestId("wk-editor-commit"), {
+      target: { value: "refresh article" },
+    });
+    fireEvent.click(screen.getByTestId("wk-editor-save"));
+
+    await waitFor(() => expect(fetchArticleSpy).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(fetchHistorySpy).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText("Updated body")).toBeInTheDocument();
+  });
+});
+
+describe("<WikiArticle staleness badges>", () => {
   it("shows 'agents only' badge when agent_read_count > 0 and human_read_count = 0", async () => {
     vi.spyOn(api, "fetchArticle").mockResolvedValue({
       ...STUB_ARTICLE,
@@ -233,9 +316,17 @@ describe("<WikiArticle>", () => {
       human_read_count: 0,
       days_unread: 0,
     });
-    render(<WikiArticle path="people/customer-x" catalog={[]} onNavigate={() => {}} />);
+    render(
+      <WikiArticle
+        path="people/customer-x"
+        catalog={[]}
+        onNavigate={() => {}}
+      />,
+    );
     await waitFor(() =>
-      expect(screen.getByRole("heading", { name: "Customer X" })).toBeInTheDocument(),
+      expect(
+        screen.getByRole("heading", { name: "Customer X" }),
+      ).toBeInTheDocument(),
     );
     expect(screen.getByText("agents only")).toBeInTheDocument();
   });
@@ -247,9 +338,17 @@ describe("<WikiArticle>", () => {
       human_read_count: 2,
       days_unread: 45,
     });
-    render(<WikiArticle path="people/customer-x" catalog={[]} onNavigate={() => {}} />);
+    render(
+      <WikiArticle
+        path="people/customer-x"
+        catalog={[]}
+        onNavigate={() => {}}
+      />,
+    );
     await waitFor(() =>
-      expect(screen.getByRole("heading", { name: "Customer X" })).toBeInTheDocument(),
+      expect(
+        screen.getByRole("heading", { name: "Customer X" }),
+      ).toBeInTheDocument(),
     );
     expect(screen.getByText("unread 30d+")).toBeInTheDocument();
   });
@@ -261,9 +360,17 @@ describe("<WikiArticle>", () => {
       human_read_count: 1,
       days_unread: 14,
     });
-    render(<WikiArticle path="people/customer-x" catalog={[]} onNavigate={() => {}} />);
+    render(
+      <WikiArticle
+        path="people/customer-x"
+        catalog={[]}
+        onNavigate={() => {}}
+      />,
+    );
     await waitFor(() =>
-      expect(screen.getByRole("heading", { name: "Customer X" })).toBeInTheDocument(),
+      expect(
+        screen.getByRole("heading", { name: "Customer X" }),
+      ).toBeInTheDocument(),
     );
     expect(screen.getByText("unread 7d+")).toBeInTheDocument();
   });
@@ -275,9 +382,17 @@ describe("<WikiArticle>", () => {
       human_read_count: 1,
       days_unread: 30,
     });
-    render(<WikiArticle path="people/customer-x" catalog={[]} onNavigate={() => {}} />);
+    render(
+      <WikiArticle
+        path="people/customer-x"
+        catalog={[]}
+        onNavigate={() => {}}
+      />,
+    );
     await waitFor(() =>
-      expect(screen.getByRole("heading", { name: "Customer X" })).toBeInTheDocument(),
+      expect(
+        screen.getByRole("heading", { name: "Customer X" }),
+      ).toBeInTheDocument(),
     );
     expect(screen.getByText("unread 30d+")).toBeInTheDocument();
     expect(screen.queryByText("unread 7d+")).not.toBeInTheDocument();
@@ -290,9 +405,17 @@ describe("<WikiArticle>", () => {
       human_read_count: 1,
       days_unread: 30,
     });
-    render(<WikiArticle path="people/customer-x" catalog={[]} onNavigate={() => {}} />);
+    render(
+      <WikiArticle
+        path="people/customer-x"
+        catalog={[]}
+        onNavigate={() => {}}
+      />,
+    );
     await waitFor(() =>
-      expect(screen.getByRole("heading", { name: "Customer X" })).toBeInTheDocument(),
+      expect(
+        screen.getByRole("heading", { name: "Customer X" }),
+      ).toBeInTheDocument(),
     );
     expect(screen.getByText("unread 30d+")).toBeInTheDocument();
     expect(screen.queryByText("unread 7d+")).not.toBeInTheDocument();
@@ -305,9 +428,17 @@ describe("<WikiArticle>", () => {
       human_read_count: 1,
       days_unread: 31,
     });
-    render(<WikiArticle path="people/customer-x" catalog={[]} onNavigate={() => {}} />);
+    render(
+      <WikiArticle
+        path="people/customer-x"
+        catalog={[]}
+        onNavigate={() => {}}
+      />,
+    );
     await waitFor(() =>
-      expect(screen.getByRole("heading", { name: "Customer X" })).toBeInTheDocument(),
+      expect(
+        screen.getByRole("heading", { name: "Customer X" }),
+      ).toBeInTheDocument(),
     );
     expect(screen.getByText("unread 30d+")).toBeInTheDocument();
     expect(screen.queryByText("unread 7d+")).not.toBeInTheDocument();
@@ -320,9 +451,17 @@ describe("<WikiArticle>", () => {
       human_read_count: 1,
       days_unread: 7,
     });
-    render(<WikiArticle path="people/customer-x" catalog={[]} onNavigate={() => {}} />);
+    render(
+      <WikiArticle
+        path="people/customer-x"
+        catalog={[]}
+        onNavigate={() => {}}
+      />,
+    );
     await waitFor(() =>
-      expect(screen.getByRole("heading", { name: "Customer X" })).toBeInTheDocument(),
+      expect(
+        screen.getByRole("heading", { name: "Customer X" }),
+      ).toBeInTheDocument(),
     );
     expect(screen.getByText("unread 7d+")).toBeInTheDocument();
     expect(screen.queryByText("unread 30d+")).not.toBeInTheDocument();
@@ -335,15 +474,25 @@ describe("<WikiArticle>", () => {
       human_read_count: 2,
       days_unread: 3,
     });
-    render(<WikiArticle path="people/customer-x" catalog={[]} onNavigate={() => {}} />);
+    render(
+      <WikiArticle
+        path="people/customer-x"
+        catalog={[]}
+        onNavigate={() => {}}
+      />,
+    );
     await waitFor(() =>
-      expect(screen.getByRole("heading", { name: "Customer X" })).toBeInTheDocument(),
+      expect(
+        screen.getByRole("heading", { name: "Customer X" }),
+      ).toBeInTheDocument(),
     );
     expect(screen.queryByText("agents only")).not.toBeInTheDocument();
     expect(screen.queryByText("unread 30d+")).not.toBeInTheDocument();
     expect(screen.queryByText("unread 7d+")).not.toBeInTheDocument();
   });
+});
 
+describe("<WikiArticle history fallback>", () => {
   it("renders nothing for Sources when fetchHistory rejects", async () => {
     // Arrange
     vi.spyOn(api, "fetchArticle").mockResolvedValue(STUB_ARTICLE);
@@ -371,16 +520,26 @@ describe("<WikiArticle>", () => {
     ).not.toBeInTheDocument();
     expect(screen.queryByText(/loading sources/i)).not.toBeInTheDocument();
   });
+});
 
+describe("<WikiArticle synthesis status>", () => {
   it("shows 'generating brief…' badge when synthesis_queued is true (ICP Example 1 & 2)", async () => {
     vi.spyOn(api, "fetchArticle").mockResolvedValue({
       ...STUB_ARTICLE,
       ghost: true,
       synthesis_queued: true,
     });
-    render(<WikiArticle path="company/acme-corp" catalog={[]} onNavigate={() => {}} />);
+    render(
+      <WikiArticle
+        path="company/acme-corp"
+        catalog={[]}
+        onNavigate={() => {}}
+      />,
+    );
     await waitFor(() =>
-      expect(screen.getByRole("heading", { name: "Customer X" })).toBeInTheDocument(),
+      expect(
+        screen.getByRole("heading", { name: "Customer X" }),
+      ).toBeInTheDocument(),
     );
     expect(screen.getByText("generating brief…")).toBeInTheDocument();
     expect(screen.getByRole("status")).toBeInTheDocument();
@@ -392,9 +551,17 @@ describe("<WikiArticle>", () => {
       ghost: true,
       synthesis_queued: false,
     });
-    render(<WikiArticle path="company/cloudvault-inc" catalog={[]} onNavigate={() => {}} />);
+    render(
+      <WikiArticle
+        path="company/cloudvault-inc"
+        catalog={[]}
+        onNavigate={() => {}}
+      />,
+    );
     await waitFor(() =>
-      expect(screen.getByRole("heading", { name: "Customer X" })).toBeInTheDocument(),
+      expect(
+        screen.getByRole("heading", { name: "Customer X" }),
+      ).toBeInTheDocument(),
     );
     expect(screen.queryByText("generating brief…")).not.toBeInTheDocument();
   });
@@ -405,9 +572,17 @@ describe("<WikiArticle>", () => {
       ghost: false,
       synthesis_queued: false,
     });
-    render(<WikiArticle path="company/acme-corp" catalog={[]} onNavigate={() => {}} />);
+    render(
+      <WikiArticle
+        path="company/acme-corp"
+        catalog={[]}
+        onNavigate={() => {}}
+      />,
+    );
     await waitFor(() =>
-      expect(screen.getByRole("heading", { name: "Customer X" })).toBeInTheDocument(),
+      expect(
+        screen.getByRole("heading", { name: "Customer X" }),
+      ).toBeInTheDocument(),
     );
     expect(screen.queryByText("generating brief…")).not.toBeInTheDocument();
   });

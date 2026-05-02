@@ -27,6 +27,7 @@ export function ChannelHeader() {
     ? currentApp.charAt(0).toUpperCase() + currentApp.slice(1)
     : `# ${currentChannel}`;
   const desc = currentApp ? "" : channel?.description || "";
+  const targetTheme = nextTheme(theme);
 
   return (
     <div className="channel-header">
@@ -38,12 +39,12 @@ export function ChannelHeader() {
         <button
           type="button"
           className="sidebar-btn"
-          title={`Theme: ${themeLabel(theme)} — click to cycle`}
-          aria-label={`Theme: ${themeLabel(theme)}, click to cycle`}
-          onClick={() => setTheme(nextTheme(theme))}
+          title={`Switch theme to ${themeLabel(targetTheme)}`}
+          aria-label={`Switch theme to ${themeLabel(targetTheme)}`}
+          onClick={() => setTheme(targetTheme)}
         >
-          {theme === "noir-gold" ? (
-            // Sparkle / star — for the gold theme
+          {targetTheme === "noir-gold" ? (
+            // Sparkle / star — switch to the gold theme
             <svg
               aria-hidden="true"
               focusable="false"
@@ -58,8 +59,8 @@ export function ChannelHeader() {
             >
               <path d="M12 3l1.8 5.5H19l-4.6 3.4 1.8 5.6L12 14l-4.2 3.5 1.8-5.6L5 8.5h5.2L12 3z" />
             </svg>
-          ) : theme === "nex-dark" ? (
-            // Sun — currently dark, click to go light
+          ) : targetTheme === "nex" ? (
+            // Sun — switch to the light theme
             <svg
               aria-hidden="true"
               focusable="false"
@@ -76,7 +77,7 @@ export function ChannelHeader() {
               <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
             </svg>
           ) : (
-            // Moon — currently light, click to go noir-gold
+            // Moon — switch to the dark theme
             <svg
               aria-hidden="true"
               focusable="false"

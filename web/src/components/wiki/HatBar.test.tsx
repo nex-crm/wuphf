@@ -1,7 +1,19 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import HatBar from "./HatBar";
+
+function hasDuplicateKeyWarning(calls: unknown[][]) {
+  return calls.some((args) =>
+    args.some((arg) =>
+      String(arg).includes("Encountered two children with the same key"),
+    ),
+  );
+}
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe("<HatBar>", () => {
   it("marks the active tab and disables the Talk tab by default", () => {
@@ -43,5 +55,16 @@ describe("<HatBar>", () => {
     );
     expect(screen.getByText(/Cincinnati, OH/)).toBeInTheDocument();
     expect(screen.getByText(/Mid-market Logistics/)).toBeInTheDocument();
+  });
+
+  it("renders duplicate suffix-shaped right-rail items without duplicate React keys", () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    render(
+      <HatBar active="article" rightRail={["Draft", "Draft", "Draft#1"]} />,
+    );
+
+    expect(screen.getAllByText("Draft")).toHaveLength(2);
+    expect(screen.getByText("Draft#1")).toBeInTheDocument();
+    expect(hasDuplicateKeyWarning(errorSpy.mock.calls)).toBe(false);
   });
 });

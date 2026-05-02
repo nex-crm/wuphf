@@ -397,7 +397,7 @@ export function WorkspaceRail({
 
   const shredMutation = useShredWorkspace({
     onSuccess: (resp, vars) => {
-      const name = vars.name;
+      const { name } = vars;
       setShredTarget(null);
       if (vars.permanent) {
         showNotice(`Workspace '${name}' shredded permanently.`, "info");

@@ -272,6 +272,7 @@ function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
           </div>
         </div>
         <button
+          type="button"
           className="agent-panel-close"
           onClick={onClose}
           aria-label="Close agent panel"
@@ -338,6 +339,7 @@ function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
       {/* Primary actions */}
       <div className="agent-panel-actions">
         <button
+          type="button"
           className="btn btn-primary btn-sm"
           onClick={handleOpenDM}
           disabled={dmLoading}
@@ -345,6 +347,7 @@ function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
           {dmLoading ? "Opening..." : "Open DM"}
         </button>
         <button
+          type="button"
           className="btn btn-ghost btn-sm"
           onClick={() => setView(view === "logs" ? "stream" : "logs")}
         >
@@ -356,6 +359,7 @@ function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
       {canRemove && (
         <div className="agent-panel-actions-stack">
           <button
+            type="button"
             className="btn btn-ghost btn-sm"
             onClick={handleRemove}
             disabled={removing}

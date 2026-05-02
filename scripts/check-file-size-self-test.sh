@@ -42,7 +42,7 @@ expect_failure_containing() {
   local needle="$2"
   local output="$repo/check.out"
 
-  if FILE_SIZE_BASE_REF=main bash "$repo/scripts/check-file-size.sh" > "$output" 2>&1; then
+  if GITHUB_BASE_REF='' FILE_SIZE_BASE_REF=main bash "$repo/scripts/check-file-size.sh" > "$output" 2>&1; then
     echo "expected file-size check to fail in $repo" >&2
     cat "$output" >&2
     exit 1
@@ -58,7 +58,7 @@ expect_success() {
   local repo="$1"
   local output="$repo/check.out"
 
-  if ! bash "$repo/scripts/check-file-size.sh" > "$output" 2>&1; then
+  if ! GITHUB_BASE_REF='' FILE_SIZE_BASE_REF='' bash "$repo/scripts/check-file-size.sh" > "$output" 2>&1; then
     echo "expected file-size check to pass in $repo" >&2
     cat "$output" >&2
     exit 1

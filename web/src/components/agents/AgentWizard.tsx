@@ -1,8 +1,10 @@
 // biome-ignore-all lint/a11y/noStaticElementInteractions: Modal backdrop uses pointer hit-testing while dialog controls retain keyboard handling.
+// biome-ignore-all lint/a11y/useKeyWithClickEvents: Backdrop pointer dismissal is paired with a window Escape listener while the modal is open.
 import { useCallback, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { generateAgent, post } from "../../api/client";
+import { useWindowEscape } from "../../hooks/useWindowEscape";
 
 type Provider = "inherit" | "claude-code" | "codex" | "opencode";
 type WizardMode = "describe" | "manual";
@@ -142,20 +144,23 @@ export function AgentWizard({ open, onClose, onCreated }: AgentWizardProps) {
     }
   }
 
-  function handleCancel() {
+  const handleCancel = useCallback(() => {
+    if (generating || submitting) return;
     setForm(INITIAL_FORM);
     setSlugEdited(false);
     setError(null);
     setMode("describe");
     setPrompt("");
     onClose();
-  }
+  }, [generating, onClose, submitting]);
 
   function handleOverlayClick(e: React.MouseEvent) {
     if (e.target === e.currentTarget) {
       handleCancel();
     }
   }
+
+  useWindowEscape(open, handleCancel);
 
   if (!open) return null;
 

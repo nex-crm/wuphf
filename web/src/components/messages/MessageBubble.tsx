@@ -50,12 +50,6 @@ export function MessageBubble({
     ? resolveHarness(agent?.provider, defaultHarness)
     : null;
 
-  // Status messages — compact
-  if (message.content?.startsWith("[STATUS]")) {
-    const statusText = message.content.replace(/^\[STATUS\]\s*/, "");
-    return <div className="message-status animate-fade">{statusText}</div>;
-  }
-
   const usageTotal = message.usage
     ? (message.usage.total_tokens ??
       (message.usage.input_tokens ?? 0) +
@@ -94,6 +88,12 @@ export function MessageBubble({
     () => (isHuman ? renderMentions(message.content || "", knownSlugs) : null),
     [isHuman, message.content, knownSlugs],
   );
+
+  // Status messages — compact
+  if (message.content?.startsWith("[STATUS]")) {
+    const statusText = message.content.replace(/^\[STATUS\]\s*/, "");
+    return <div className="message-status animate-fade">{statusText}</div>;
+  }
 
   return (
     <div

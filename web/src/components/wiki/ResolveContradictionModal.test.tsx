@@ -60,23 +60,20 @@ describe("<ResolveContradictionModal>", () => {
     expect(pickA.querySelector(".wk-spinner")).toBeTruthy();
     expect(pickB.querySelector(".wk-spinner")).toBeNull();
     expect(pickA.textContent).toContain("Resolving");
-    // Pick buttons are disabled; cancel remains available because it aborts
-    // the in-flight request before closing the modal.
+    // All three pick buttons are disabled; cancel is also disabled while
+    // the request is in flight so the user can't drop the modal mid-write.
     expect(pickA).toBeDisabled();
     expect(pickB).toBeDisabled();
     expect(screen.getByTestId("wk-resolve-pick-both")).toBeDisabled();
-    expect(screen.getByTestId("wk-resolve-cancel")).not.toBeDisabled();
+    expect(screen.getByTestId("wk-resolve-cancel")).toBeDisabled();
   });
 
-  it("aborts the in-flight request when cancel closes the modal", async () => {
-    let signal: AbortSignal | undefined;
+  it("does not close from Escape or backdrop while resolving", async () => {
     vi.spyOn(wikiApi, "resolveContradiction").mockImplementation(
-      (_args, options) => {
-        signal = options?.signal;
-        return new Promise(() => {
+      () =>
+        new Promise(() => {
           /* never resolves */
-        });
-      },
+        }),
     );
     const onClose = vi.fn();
 
@@ -91,13 +88,14 @@ describe("<ResolveContradictionModal>", () => {
     );
 
     fireEvent.click(screen.getByTestId("wk-resolve-pick-a"));
-    await waitFor(() => expect(signal).toBeDefined());
-    expect(signal?.aborted).toBe(false);
+    await waitFor(() => {
+      expect(screen.getByTestId("wk-resolve-pick-a")).toBeDisabled();
+    });
 
-    fireEvent.click(screen.getByTestId("wk-resolve-cancel"));
+    fireEvent.keyDown(window, { key: "Escape" });
+    fireEvent.click(screen.getByTestId("wk-resolve-modal"));
 
-    expect(signal?.aborted).toBe(true);
-    expect(onClose).toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it("surfaces errors inline (no toast) and re-enables the buttons", async () => {

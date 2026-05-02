@@ -16,6 +16,7 @@ import {
   updateTaskStatus,
 } from "../../api/client";
 import { formatRelativeTime } from "../../lib/format";
+import { keyedByOccurrence } from "../../lib/reactKeys";
 import { confirm } from "../ui/ConfirmDialog";
 
 interface TaskDetailModalProps {
@@ -687,18 +688,20 @@ function DetailList({ label, items }: { label: string; items: string[] }) {
         {label}
       </div>
       <ul className="task-detail-deps" style={{ display: "block" }}>
-        {items.map((item, index) => (
-          <li
-            key={`${label}-${index}`}
-            style={{
-              marginBottom: 6,
-              whiteSpace: "normal",
-              wordBreak: "break-word",
-            }}
-          >
-            {item}
-          </li>
-        ))}
+        {keyedByOccurrence(items, (item) => `${label}-${item}`).map(
+          ({ key, value: item }) => (
+            <li
+              key={key}
+              style={{
+                marginBottom: 6,
+                whiteSpace: "normal",
+                wordBreak: "break-word",
+              }}
+            >
+              {item}
+            </li>
+          ),
+        )}
       </ul>
     </div>
   );

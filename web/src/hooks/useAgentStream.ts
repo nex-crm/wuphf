@@ -75,7 +75,7 @@ export function useAgentStream(slug: string | null) {
       }
 
       setLines((prev) => {
-        const { lines, usedId } = appendStreamLine(
+        const { lines: nextLines, usedId } = appendStreamLine(
           prev,
           e.data,
           parsed,
@@ -84,7 +84,7 @@ export function useAgentStream(slug: string | null) {
         if (usedId) {
           counterRef.current += 1;
         }
-        return lines;
+        return nextLines;
       });
 
       // Auto-stop on idle

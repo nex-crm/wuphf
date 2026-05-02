@@ -1,4 +1,8 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+  type MutationFunctionContext,
+  QueryClient,
+  QueryClientProvider,
+} from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -14,7 +18,10 @@ vi.mock("../../../api/workspaces", async () => {
   };
 });
 
-import { useCreateWorkspace } from "../../../api/workspaces";
+import {
+  type CreateWorkspaceInput,
+  useCreateWorkspace,
+} from "../../../api/workspaces";
 
 const useCreateWorkspaceMock = vi.mocked(useCreateWorkspace);
 
@@ -123,46 +130,52 @@ describe("<CreateWorkspaceModal>", () => {
       value: { assign },
       writable: true,
     });
-    afterEach(() => {
+
+    try {
+      const mutationContext: MutationFunctionContext = {
+        client: new QueryClient(),
+        meta: undefined,
+      };
+
+      useCreateWorkspaceMock.mockImplementation(((
+        opts?: Parameters<typeof useCreateWorkspace>[0],
+      ) => ({
+        mutate: (workspaceInput: CreateWorkspaceInput) => {
+          opts?.onSuccess?.(
+            {
+              name: "side-project",
+              broker_port: 7910,
+              web_port: 7911,
+              runtime_home: "/tmp/x",
+              state: "running",
+            },
+            workspaceInput,
+            undefined,
+            mutationContext,
+          );
+        },
+        isPending: false,
+      })) as unknown as typeof useCreateWorkspace);
+
+      renderModal();
+
+      const input = screen.getByTestId(
+        "workspace-slug-input",
+      ) as HTMLInputElement;
+      fireEvent.change(input, { target: { value: "side-project" } });
+      fireEvent.click(screen.getByTestId("workspace-create-submit"));
+
+      await waitFor(() => {
+        expect(assign).toHaveBeenCalledWith(
+          "http://localhost:7911/onboarding?skip_identity=1",
+        );
+      });
+    } finally {
       Object.defineProperty(window, "location", {
         value: originalLocation,
         writable: true,
       });
-    });
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    useCreateWorkspaceMock.mockImplementation(((opts?: any) => ({
-      mutate: (input: unknown) => {
-        opts?.onSuccess?.(
-          {
-            name: "side-project",
-            broker_port: 7910,
-            web_port: 7911,
-            runtime_home: "/tmp/x",
-            state: "running",
-          },
-          input,
-          undefined,
-          {} as never,
-        );
-      },
-      isPending: false,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    })) as unknown as typeof useCreateWorkspace);
-
-    renderModal();
-
-    const input = screen.getByTestId(
-      "workspace-slug-input",
-    ) as HTMLInputElement;
-    fireEvent.change(input, { target: { value: "side-project" } });
-    fireEvent.click(screen.getByTestId("workspace-create-submit"));
-
-    await waitFor(() => {
-      expect(assign).toHaveBeenCalledWith(
-        "http://localhost:7911/onboarding?skip_identity=1",
-      );
-    });
+    }
   });
 
   it("Esc key closes the modal in form phase", () => {

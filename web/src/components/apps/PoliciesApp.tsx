@@ -94,6 +94,7 @@ export function PoliciesApp() {
           patterns.
         </div>
         <button
+          type="button"
           className="btn btn-secondary btn-sm"
           onClick={() => {
             setFormOpen((v) => !v);
@@ -123,10 +124,15 @@ export function PoliciesApp() {
             style={{ marginBottom: 8 }}
           />
           <div style={{ display: "flex", gap: 8 }}>
-            <button className="btn btn-primary btn-sm" onClick={handleSave}>
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              onClick={handleSave}
+            >
               Save
             </button>
             <button
+              type="button"
               className="btn btn-secondary btn-sm"
               onClick={() => {
                 setFormOpen(false);
@@ -244,6 +250,7 @@ function PolicyRow({ policy, onDelete }: PolicyRowProps) {
         </div>
       </div>
       <button
+        type="button"
         style={{
           background: "none",
           border: "none",

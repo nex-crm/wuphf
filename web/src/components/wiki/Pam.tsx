@@ -116,7 +116,7 @@ export default function Pam({ articlePath, onActionDone }: PamProps) {
   // `started` event fired between POST and the next effect pass.
   useEffect(() => {
     const unsub = subscribePamEvents((evt: PamActionEvent) => {
-      const current = activeJobIdRef.current;
+      const { current } = activeJobIdRef;
       if (current === null || evt.job_id !== current) return;
       if (evt.kind === "started") {
         setStatus({
@@ -216,7 +216,7 @@ export default function Pam({ articlePath, onActionDone }: PamProps) {
       ).filter((el) => !el.disabled);
       if (items.length === 0) return;
       e.preventDefault();
-      const activeElement = document.activeElement;
+      const { activeElement } = document;
       const activeIndex =
         activeElement instanceof HTMLButtonElement
           ? items.indexOf(activeElement)

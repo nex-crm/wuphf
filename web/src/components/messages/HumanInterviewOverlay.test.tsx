@@ -12,7 +12,9 @@ vi.mock("../../hooks/useRequests", () => ({
 
 vi.mock("../../api/client", async () => {
   const actual =
-    await vi.importActual<typeof import("../../api/client")>("../../api/client");
+    await vi.importActual<typeof import("../../api/client")>(
+      "../../api/client",
+    );
   return {
     ...actual,
     answerRequest: vi.fn().mockResolvedValue({}),

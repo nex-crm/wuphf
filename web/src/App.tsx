@@ -107,6 +107,7 @@ class ErrorBoundary extends Component<
             {this.state.error.stack}
           </pre>
           <button
+            type="button"
             onClick={() => this.setState({ error: null })}
             style={{
               marginTop: 12,

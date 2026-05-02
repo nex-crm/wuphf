@@ -7,6 +7,7 @@ import {
   type WikiEditLogEntry,
 } from "../../api/wiki";
 import { formatRelativeTime } from "../../lib/format";
+import { keyedByOccurrence } from "../../lib/reactKeys";
 import PixelAvatar from "./PixelAvatar";
 
 /** Fixed-bottom live edit-log: streams wiki:write events, newest on the left. */
@@ -37,11 +38,15 @@ export default function EditLogFooter({
   return (
     <div className="wk-edit-log" aria-label="Live wiki edit log">
       <span className="wk-label">Live</span>
-      {entries.map((entry, idx) => {
+      {keyedByOccurrence(
+        entries,
+        (entry) =>
+          `${entry.commit_sha}-${entry.article_path}-${entry.timestamp}`,
+      ).map(({ key, value: entry, index: idx }) => {
         const isLive = idx === 0;
         return (
           <span
-            key={`${entry.commit_sha}-${idx}`}
+            key={key}
             className={isLive ? "wk-entry wk-live" : "wk-entry"}
             data-testid={isLive ? "wk-live-entry" : undefined}
           >

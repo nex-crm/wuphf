@@ -120,14 +120,14 @@ function runSimulation(
   // Scale forces with node count so a 6-node graph spreads across the canvas
   // the same way a 30-node graph does. Empirically: repulse grows with n,
   // link length with √n.
-  const n = nodes.length;
-  const idealLink = Math.min(280, 140 + n * 8);
-  const repulse = 18000 + n * 600;
+  const nodeCount = nodes.length;
+  const idealLink = Math.min(280, 140 + nodeCount * 8);
+  const repulse = 18000 + nodeCount * 600;
   const centerPull = 0.008;
 
   // Adjacency for quick neighbor lookup.
   const adjacency = new Map<string, string[]>();
-  for (const n of nodes) adjacency.set(n.id, []);
+  for (const node of nodes) adjacency.set(node.id, []);
   for (const e of edges) {
     adjacency.get(e.from)?.push(e.to);
     adjacency.get(e.to)?.push(e.from);
@@ -138,9 +138,9 @@ function runSimulation(
     // Reset forces.
     const fx = new Map<string, number>();
     const fy = new Map<string, number>();
-    for (const n of nodes) {
-      fx.set(n.id, 0);
-      fy.set(n.id, 0);
+    for (const node of nodes) {
+      fx.set(node.id, 0);
+      fy.set(node.id, 0);
     }
 
     // Repulsion between every pair of nodes (O(n²) — fine for v1 scale).
@@ -169,7 +169,7 @@ function runSimulation(
 
     // Attraction along edges (Hooke's law toward idealLink).
     const byId = new Map<string, SimNode>();
-    for (const n of nodes) byId.set(n.id, n);
+    for (const node of nodes) byId.set(node.id, node);
     for (const e of edges) {
       const a = byId.get(e.from);
       const b = byId.get(e.to);
@@ -187,28 +187,28 @@ function runSimulation(
     }
 
     // Center pull keeps disconnected nodes from drifting off-canvas.
-    for (const n of nodes) {
-      fx.set(n.id, (fx.get(n.id) ?? 0) + (cx - n.x) * centerPull);
-      fy.set(n.id, (fy.get(n.id) ?? 0) + (cy - n.y) * centerPull);
+    for (const node of nodes) {
+      fx.set(node.id, (fx.get(node.id) ?? 0) + (cx - node.x) * centerPull);
+      fy.set(node.id, (fy.get(node.id) ?? 0) + (cy - node.y) * centerPull);
     }
 
     // Integrate + clamp to canvas.
     const damping = 0.85;
     const maxVel = 30;
-    for (const n of nodes) {
-      n.vx = (n.vx + (fx.get(n.id) ?? 0)) * damping * cooling;
-      n.vy = (n.vy + (fy.get(n.id) ?? 0)) * damping * cooling;
-      if (n.vx > maxVel) n.vx = maxVel;
-      if (n.vx < -maxVel) n.vx = -maxVel;
-      if (n.vy > maxVel) n.vy = maxVel;
-      if (n.vy < -maxVel) n.vy = -maxVel;
-      n.x += n.vx;
-      n.y += n.vy;
+    for (const node of nodes) {
+      node.vx = (node.vx + (fx.get(node.id) ?? 0)) * damping * cooling;
+      node.vy = (node.vy + (fy.get(node.id) ?? 0)) * damping * cooling;
+      if (node.vx > maxVel) node.vx = maxVel;
+      if (node.vx < -maxVel) node.vx = -maxVel;
+      if (node.vy > maxVel) node.vy = maxVel;
+      if (node.vy < -maxVel) node.vy = -maxVel;
+      node.x += node.vx;
+      node.y += node.vy;
       const pad = NODE_RADIUS + 8;
-      if (n.x < pad) n.x = pad;
-      if (n.x > width - pad) n.x = width - pad;
-      if (n.y < pad) n.y = pad;
-      if (n.y > height - pad) n.y = height - pad;
+      if (node.x < pad) node.x = pad;
+      if (node.x > width - pad) node.x = width - pad;
+      if (node.y < pad) node.y = pad;
+      if (node.y > height - pad) node.y = height - pad;
     }
   }
 }
@@ -436,7 +436,7 @@ export function GraphApp() {
                 const y2 = b.y - (dy / dist) * shrink;
                 return (
                   <g
-                    key={i}
+                    key={`${e.from}->${e.to}`}
                     onMouseEnter={() => setHoveredEdge(i)}
                     onMouseLeave={() => setHoveredEdge(null)}
                   >

@@ -67,6 +67,9 @@ function ProviderCard({ s }: { s: ImageProviderStatus }) {
   const [baseURL, setBaseURL] = useState(s.base_url ?? "");
   const [model, setModel] = useState(s.default_model ?? "");
   const [showKey, setShowKey] = useState(false);
+  const apiKeyId = `image-provider-${s.kind}-api-key`;
+  const baseUrlId = `image-provider-${s.kind}-base-url`;
+  const modelId = `image-provider-${s.kind}-model`;
   const capabilityLabel = [
     s.kind,
     s.supports_video ? "video" : "",
@@ -144,11 +147,12 @@ function ProviderCard({ s }: { s: ImageProviderStatus }) {
 
       {s.needs_api_key ? (
         <div style={{ marginBottom: 10 }}>
-          <label style={labelStyle}>
+          <label style={labelStyle} htmlFor={apiKeyId}>
             API key {s.api_key_set ? "(set)" : "(unset)"}
           </label>
           <div style={{ display: "flex", gap: 8 }}>
             <input
+              id={apiKeyId}
               type={showKey ? "text" : "password"}
               value={apiKey}
               placeholder={s.api_key_set ? "•••••• (replace)" : "paste here"}
@@ -176,8 +180,11 @@ function ProviderCard({ s }: { s: ImageProviderStatus }) {
         }}
       >
         <div>
-          <label style={labelStyle}>Base URL (optional)</label>
+          <label style={labelStyle} htmlFor={baseUrlId}>
+            Base URL (optional)
+          </label>
           <input
+            id={baseUrlId}
             type="text"
             value={baseURL}
             onChange={(e) => setBaseURL(e.target.value)}
@@ -186,8 +193,11 @@ function ProviderCard({ s }: { s: ImageProviderStatus }) {
           />
         </div>
         <div>
-          <label style={labelStyle}>Default model</label>
+          <label style={labelStyle} htmlFor={modelId}>
+            Default model
+          </label>
           <input
+            id={modelId}
             type="text"
             value={model}
             onChange={(e) => setModel(e.target.value)}
