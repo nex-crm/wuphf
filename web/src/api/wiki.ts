@@ -129,6 +129,18 @@ export interface WikiCatalogEntry {
   days_unread?: number;
   /** True when the entry is an archived tombstone. Only present with ?include_archived=true. */
   archived?: boolean;
+  /**
+   * Whitespace-delimited word count of the article body (frontmatter included).
+   * Drives the `verbose` badge in the catalog grid alongside `prune_score`.
+   */
+  word_count?: number;
+  /**
+   * Derived prune signal — `(word_count * days_unread) / readWeight`. Higher
+   * means more verbose AND staler AND less read. Top-decile entries get a
+   * `verbose` badge; PR 4 will surface a one-click compress action driven
+   * by this score.
+   */
+  prune_score?: number;
 }
 
 /**

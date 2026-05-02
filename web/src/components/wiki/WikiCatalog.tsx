@@ -31,6 +31,16 @@ export default function WikiCatalog({
     () => resolveGroupOrder(catalog.map((c) => c.group)),
     [catalog],
   );
+  // Top-decile threshold for the "verbose" prune-signal badge. We sort a
+  // copy of the catalog by prune_score descending and read the score at
+  // index `floor(len * 0.1)`. Any entry whose score is at or above the
+  // threshold (and strictly greater than zero) earns the badge. Skipping
+  // zero-score entries avoids painting the badge on a wiki where nothing
+  // has been read yet.
+  const verboseThreshold = useMemo(
+    () => computeVerboseThreshold(catalog),
+    [catalog],
+  );
   const stats = useMemo(
     () =>
       [
@@ -112,6 +122,17 @@ export default function WikiCatalog({
                     >
                       {item.title}
                     </a>
+                    {isVerbose(item, verboseThreshold) && (
+                      <span
+                        className="wk-staleness-badge wk-prune-verbose"
+                        title={`Verbose: ${item.word_count ?? 0} words, ${
+                          item.days_unread ?? 0
+                        } days since last read`}
+                        data-testid="wk-prune-verbose-badge"
+                      >
+                        verbose
+                      </span>
+                    )}
                     <span className="wk-when">
                       {safeRelative(item.last_edited_ts)}
                     </span>
@@ -124,6 +145,28 @@ export default function WikiCatalog({
       </div>
     </main>
   );
+}
+
+/**
+ * computeVerboseThreshold returns the prune_score at the top-decile cutoff
+ * across the catalog. Returns 0 when the catalog is empty or no entry has
+ * a positive score, which means the badge stays hidden. Sorting a copy
+ * keeps the original catalog ordering stable.
+ */
+function computeVerboseThreshold(entries: WikiCatalogEntry[]): number {
+  if (entries.length === 0) return 0;
+  const sorted = [...entries].sort(
+    (a, b) => (b.prune_score ?? 0) - (a.prune_score ?? 0),
+  );
+  const idx = Math.floor(entries.length * 0.1);
+  const cutoff = sorted[idx]?.prune_score ?? 0;
+  return cutoff;
+}
+
+function isVerbose(entry: WikiCatalogEntry, threshold: number): boolean {
+  if (threshold <= 0) return false;
+  const score = entry.prune_score ?? 0;
+  return score >= threshold;
 }
 
 function groupByGroup(

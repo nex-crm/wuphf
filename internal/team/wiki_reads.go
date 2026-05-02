@@ -34,6 +34,12 @@ const ReaderHuman = "web"
 // articles by access time, oldest-accessed first.
 const CatalogSortLastRead = "last_read"
 
+// CatalogSortPruneScore is the sort key accepted by BuildCatalog to sort
+// articles descending by prune_score (most prunable first). Prune score
+// is (words * daysUnread) / readWeight — high for verbose + stale +
+// under-read articles. See BuildCatalog for the formula.
+const CatalogSortPruneScore = "prune_score"
+
 // ReadEvent is one access record written to reads.jsonl.
 type ReadEvent struct {
 	Path      string    `json:"path"`
