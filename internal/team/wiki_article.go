@@ -233,7 +233,7 @@ func (r *Repo) BuildCatalog(ctx context.Context, sortBy string, readLog *ReadLog
 		e := &entries[i]
 		if e.WordCount > 0 {
 			denom := math.Max(float64(e.HumanReadCount)+0.3*float64(e.AgentReadCount), 1.0)
-			e.PruneScore = float64(e.WordCount*e.DaysUnread) / denom
+			e.PruneScore = float64(e.WordCount) * float64(e.DaysUnread) / denom
 		}
 	}
 

@@ -166,7 +166,9 @@ function computeVerboseThreshold(entries: WikiCatalogEntry[]): number {
 function isVerbose(entry: WikiCatalogEntry, threshold: number): boolean {
   if (threshold <= 0) return false;
   const score = entry.prune_score ?? 0;
-  return score >= threshold;
+  // Strictly greater-than so the boundary entry (exactly at the 90th percentile
+  // cutoff) does not earn the badge — only entries above it do.
+  return score > threshold;
 }
 
 function groupByGroup(
