@@ -1901,7 +1901,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			action, taskID := parts[0], parts[1]
 			switch action {
-			case "claim", "release", "complete", "block":
+			case "claim", "release", "complete", "approve", "block":
 				m.posting = true
 				return m, mutateTask(action, taskID, "you", m.activeChannel)
 			case "open":
