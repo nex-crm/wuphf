@@ -41,5 +41,5 @@ jobs:
             --exclude "localhost"
             --exclude "https://www\.npmjs\.com/package/wuphf"
             --exclude "https://theoffice\.fandom\.com/wiki/WUPHF\.com_\(Website\)"
-            **/*.md **/*.mdx
+            '**/*.md' '**/*.mdx'
           fail: true
