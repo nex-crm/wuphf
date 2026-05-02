@@ -126,46 +126,47 @@ describe("<CreateWorkspaceModal>", () => {
       value: { assign },
       writable: true,
     });
-    afterEach(() => {
+
+    try {
+      useCreateWorkspaceMock.mockImplementation(((
+        opts?: Parameters<typeof useCreateWorkspace>[0],
+      ) => ({
+        mutate: (workspaceInput: CreateWorkspaceInput) => {
+          opts?.onSuccess?.(
+            {
+              name: "side-project",
+              broker_port: 7910,
+              web_port: 7911,
+              runtime_home: "/tmp/x",
+              state: "running",
+            },
+            workspaceInput,
+            undefined,
+            {} as never,
+          );
+        },
+        isPending: false,
+      })) as unknown as typeof useCreateWorkspace);
+
+      renderModal();
+
+      const input = screen.getByTestId(
+        "workspace-slug-input",
+      ) as HTMLInputElement;
+      fireEvent.change(input, { target: { value: "side-project" } });
+      fireEvent.click(screen.getByTestId("workspace-create-submit"));
+
+      await waitFor(() => {
+        expect(assign).toHaveBeenCalledWith(
+          "http://localhost:7911/onboarding?skip_identity=1",
+        );
+      });
+    } finally {
       Object.defineProperty(window, "location", {
         value: originalLocation,
         writable: true,
       });
-    });
-
-    useCreateWorkspaceMock.mockImplementation(((
-      opts?: Parameters<typeof useCreateWorkspace>[0],
-    ) => ({
-      mutate: (workspaceInput: CreateWorkspaceInput) => {
-        opts?.onSuccess?.(
-          {
-            name: "side-project",
-            broker_port: 7910,
-            web_port: 7911,
-            runtime_home: "/tmp/x",
-            state: "running",
-          },
-          workspaceInput,
-          undefined,
-          {} as never,
-        );
-      },
-      isPending: false,
-    })) as unknown as typeof useCreateWorkspace);
-
-    renderModal();
-
-    const input = screen.getByTestId(
-      "workspace-slug-input",
-    ) as HTMLInputElement;
-    fireEvent.change(input, { target: { value: "side-project" } });
-    fireEvent.click(screen.getByTestId("workspace-create-submit"));
-
-    await waitFor(() => {
-      expect(assign).toHaveBeenCalledWith(
-        "http://localhost:7911/onboarding?skip_identity=1",
-      );
-    });
+    }
   });
 
   it("Esc key closes the modal in form phase", () => {
