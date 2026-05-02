@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as client from "./client";
 import * as api from "./wiki";
 
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: Existing function length is baselined for a focused follow-up refactor.
 describe("wiki api client", () => {
   beforeEach(() => {
     vi.restoreAllMocks();

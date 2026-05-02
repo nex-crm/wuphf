@@ -61,6 +61,7 @@ function StatusDot({ s }: { s: ImageProviderStatus }) {
   );
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
 function ProviderCard({ s }: { s: ImageProviderStatus }) {
   const qc = useQueryClient();
   const [apiKey, setApiKey] = useState("");

@@ -109,6 +109,7 @@ interface OutboundMessage {
  * Some commands (e.g. `/ask`) rewrite the input and invoke sendAsMessage so
  * the broker sees a normal user message with the right @mention routing.
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
 function handleSlashCommand(input: string, handlers: SlashHandlers): boolean {
   const parts = input.split(/\s+/);
   const cmd = parts[0].toLowerCase();
@@ -338,6 +339,7 @@ function emptyHistoryState(): HistoryState {
   return { index: -1, draftStash: null, entries: [] };
 }
 
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: Existing function length is baselined for a focused follow-up refactor.
 export function Composer() {
   const currentChannel = useAppStore((s) => s.currentChannel);
   const [text, setText] = useState("");
@@ -510,6 +512,7 @@ export function Composer() {
   }, []);
 
   const handleKeyDown = useCallback(
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
     (e: React.KeyboardEvent) => {
       // Autocomplete navigation runs first
       if (acItems.length > 0) {

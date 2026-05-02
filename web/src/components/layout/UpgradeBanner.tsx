@@ -78,6 +78,8 @@ type RunState =
   | { phase: "running" }
   | { phase: "done"; result: UpgradeRunResult };
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: Existing function length is baselined for a focused follow-up refactor.
 export function UpgradeBanner() {
   const forced = useMemo(readForcedPair, []);
   // Suppress in dev so local devs aren't nagged by the placeholder VERSION.

@@ -112,6 +112,7 @@ interface ScheduleRowProps {
   floorState: FloorState;
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
 function ScheduleRow({ job, floorState }: ScheduleRowProps) {
   const queryClient = useQueryClient();
   const slug = job.slug ?? "";
@@ -148,6 +149,7 @@ function ScheduleRow({ job, floorState }: ScheduleRowProps) {
       setPending(true);
       setError(null);
       patchSchedulerJob(slug, patchBody)
+        // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
         .then((res: PatchSchedulerJobResponse) => {
           // Refresh the query so the row reflects server-canonical state
           // (status, next_run, etc.) — the optimistic update we already
@@ -204,6 +206,7 @@ function ScheduleRow({ job, floorState }: ScheduleRowProps) {
     submitPatch({ enabled: next });
   }, [isReadOnly, pending, enabled, submitPatch]);
 
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
   const handleIntervalCommit = useCallback(() => {
     if (isReadOnly || isCron) return;
     if (!floorReady) {

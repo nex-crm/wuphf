@@ -48,6 +48,7 @@ const STATUS_CLEAR_MS = 4000;
  * so we update the status line without polling. Article-scoped actions
  * disable themselves when no article is open.
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
 export default function Pam({ articlePath, onActionDone }: PamProps) {
   const [menu, setMenu] = useState<PamMenuEntry[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);

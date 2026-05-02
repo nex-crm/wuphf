@@ -20,6 +20,7 @@ interface WikiLintProps {
   onNavigate: (path: string | null) => void;
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
 export default function WikiLint({ onNavigate }: WikiLintProps) {
   const [report, setReport] = useState<LintReport | null>(null);
   const [loading, setLoading] = useState(false);

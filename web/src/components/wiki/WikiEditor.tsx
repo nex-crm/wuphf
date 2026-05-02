@@ -138,6 +138,7 @@ function useIsMobileViewport(): boolean {
  * pipeline as `WikiArticle` so wikilinks, tables, and image embeds render
  * identically.
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
 export default function WikiEditor({
   path,
   initialContent,

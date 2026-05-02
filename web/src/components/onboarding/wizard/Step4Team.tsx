@@ -31,6 +31,7 @@ export function TeamStep({ agents, onToggle, onNext, onBack }: TeamStepProps) {
           </div>
         ) : (
           <div className="wiz-team-grid">
+            {/* biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor. */}
             {agents.map((a) => {
               // Lead agent is always included and cannot be unchecked here.
               // The backend also refuses to remove or disable any BuiltIn

@@ -48,6 +48,7 @@ function SectionToggle({
   );
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
 export function Sidebar() {
   const sidebarAgentsOpen = useAppStore((s) => s.sidebarAgentsOpen);
   const toggleSidebarAgents = useAppStore((s) => s.toggleSidebarAgents);

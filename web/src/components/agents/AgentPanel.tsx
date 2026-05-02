@@ -170,6 +170,7 @@ function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
     }
   }
 
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
   async function handleToggleEnabled(next: boolean) {
     if (!canToggle || toggling) return;
     setToggling(true);

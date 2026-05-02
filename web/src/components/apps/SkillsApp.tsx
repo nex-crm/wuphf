@@ -761,6 +761,8 @@ function isTerminalTaskStatus(s: string | undefined): boolean {
   return ["done", "completed", "blocked", "cancelled", "canceled"].includes(s);
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: Existing function length is baselined for a focused follow-up refactor.
 function SkillActions({
   status,
   skillName,
@@ -1336,6 +1338,7 @@ interface SkillPreviewBodyProps {
   onSaved?: (updated: Skill) => void;
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
 function SkillPreviewBody({
   skill,
   onDirtyChange,
@@ -1611,6 +1614,7 @@ function ProposedPreviewBody({ skill }: { skill: Skill }) {
   );
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
 function SkillCard({
   skill,
   onPreview,

@@ -32,6 +32,7 @@ interface MessageBubbleProps {
   onCopyLink?: (id: string) => void;
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
 export function MessageBubble({
   message,
   grouped = false,

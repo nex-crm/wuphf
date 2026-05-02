@@ -83,6 +83,7 @@ function classifyMemberActivity(member: OfficeMember): {
   return { state: "lurking", label: "Idle" };
 }
 
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: Existing function length is baselined for a focused follow-up refactor.
 export function ArtifactsApp() {
   const tasks = useQuery({
     queryKey: ["activity-tasks"],

@@ -16,6 +16,7 @@ type Route =
   | { view: "notebooks"; agentSlug: string | null; entrySlug: string | null }
   | { view: "reviews" };
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
 function parseHash(hash: string): Route {
   const cleaned = hash.replace(/^#\/?/, "");
   const parts = cleaned.split("/").filter(Boolean);
@@ -53,6 +54,7 @@ function parseHash(hash: string): Route {
   return { view: "channel", channel: "general" };
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
 function stateToHash(state: {
   currentApp: string | null;
   currentChannel: string;
@@ -130,6 +132,7 @@ export function useHashRouter() {
 
   // Apply current hash on mount and when it changes
   useEffect(() => {
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
     function applyHash() {
       if (ignoreNextHashChange.current) {
         ignoreNextHashChange.current = false;

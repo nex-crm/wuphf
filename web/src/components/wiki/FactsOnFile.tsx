@@ -105,6 +105,7 @@ export default function FactsOnFile({ kind, slug }: FactsOnFileProps) {
       ) : (
         <>
           <ol className="wk-facts-items">
+            {/* biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor. */}
             {visibleFacts.map((f) => {
               const validity = formatValidity(f);
               return (

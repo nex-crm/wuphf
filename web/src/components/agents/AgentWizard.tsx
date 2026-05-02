@@ -47,6 +47,7 @@ interface AgentWizardProps {
   onCreated?: () => void;
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
 export function AgentWizard({ open, onClose, onCreated }: AgentWizardProps) {
   const [mode, setMode] = useState<WizardMode>("describe");
   const [prompt, setPrompt] = useState("");

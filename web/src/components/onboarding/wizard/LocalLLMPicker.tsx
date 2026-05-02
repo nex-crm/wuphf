@@ -118,6 +118,7 @@ export function LocalLLMPicker({ selected, onSelect }: LocalLLMPickerProps) {
       )}
       {!loading && (
         <div className="runtime-grid">
+          {/* biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor. */}
           {LOCAL_PROVIDER_LABELS.map((meta) => {
             const s = byKind.get(meta.kind);
             // When `s` is undefined the status probe didn't return a

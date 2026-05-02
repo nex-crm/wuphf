@@ -52,6 +52,7 @@ export default function EntityBriefBar({
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
     (async () => {
       try {
         const rows = await fetchBriefs();
@@ -164,6 +165,7 @@ export default function EntityBriefBar({
   );
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
 function formatRelativeTime(iso: string): string {
   const t = Date.parse(iso);
   if (Number.isNaN(t)) return iso;
