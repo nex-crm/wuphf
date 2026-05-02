@@ -60,44 +60,12 @@ describe("<ResolveContradictionModal>", () => {
     expect(pickA.querySelector(".wk-spinner")).toBeTruthy();
     expect(pickB.querySelector(".wk-spinner")).toBeNull();
     expect(pickA.textContent).toContain("Resolving");
-    // Pick buttons are disabled; cancel remains available because it aborts
-    // the in-flight request before closing the modal.
+    // All three pick buttons are disabled; cancel is also disabled while
+    // the request is in flight so the user can't drop the modal mid-write.
     expect(pickA).toBeDisabled();
     expect(pickB).toBeDisabled();
     expect(screen.getByTestId("wk-resolve-pick-both")).toBeDisabled();
-    expect(screen.getByTestId("wk-resolve-cancel")).not.toBeDisabled();
-  });
-
-  it("aborts the in-flight request when cancel closes the modal", async () => {
-    let signal: AbortSignal | undefined;
-    vi.spyOn(wikiApi, "resolveContradiction").mockImplementation(
-      (_args, options) => {
-        signal = options?.signal;
-        return new Promise(() => {
-          /* never resolves */
-        });
-      },
-    );
-    const onClose = vi.fn();
-
-    render(
-      <ResolveContradictionModal
-        finding={FINDING}
-        findingIdx={0}
-        reportDate="2026-04-22"
-        onClose={onClose}
-        onResolved={vi.fn()}
-      />,
-    );
-
-    fireEvent.click(screen.getByTestId("wk-resolve-pick-a"));
-    await waitFor(() => expect(signal).toBeDefined());
-    expect(signal?.aborted).toBe(false);
-
-    fireEvent.click(screen.getByTestId("wk-resolve-cancel"));
-
-    expect(signal?.aborted).toBe(true);
-    expect(onClose).toHaveBeenCalled();
+    expect(screen.getByTestId("wk-resolve-cancel")).toBeDisabled();
   });
 
   it("surfaces errors inline (no toast) and re-enables the buttons", async () => {

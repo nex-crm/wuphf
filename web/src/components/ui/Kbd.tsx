@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
 
+import { keyedByOccurrence } from "../../lib/reactKeys";
+
 /**
  * Shared keyboard-key badge. Renders real <kbd> semantics so assistive
  * tech announces the key, and uses a single visual treatment across the
@@ -45,29 +47,26 @@ export function KbdSequence({
   const chords: string[][] = Array.isArray(keys[0])
     ? (keys as string[][])
     : [keys as string[]];
-  const chordKeys = new Map<string, number>();
-  const keyKeys = new Map<string, number>();
-  const uniqueKey = (seen: Map<string, number>, value: string) => {
-    const occurrence = seen.get(value) ?? 0;
-    seen.set(value, occurrence + 1);
-    return occurrence === 0 ? value : `${value}-${occurrence}`;
-  };
   return (
     <span className={`kbd-sequence ${className}`.trim()}>
-      {chords.map((chord, i) => (
-        <span key={uniqueKey(chordKeys, chord.join("+"))} className="kbd-chord">
-          {i > 0 && (
-            <span className="kbd-then" aria-hidden="true">
-              then
-            </span>
-          )}
-          {chord.map((k) => (
-            <Kbd key={uniqueKey(keyKeys, k)} size={size} variant={variant}>
-              {k}
-            </Kbd>
-          ))}
-        </span>
-      ))}
+      {keyedByOccurrence(chords, (chord) => chord.join("+")).map(
+        ({ key: chordKey, value: chord, index: i }) => (
+          <span key={chordKey} className="kbd-chord">
+            {i > 0 && (
+              <span className="kbd-then" aria-hidden="true">
+                then
+              </span>
+            )}
+            {keyedByOccurrence(chord, (k) => k).map(
+              ({ key: keyKey, value: k }) => (
+                <Kbd key={keyKey} size={size} variant={variant}>
+                  {k}
+                </Kbd>
+              ),
+            )}
+          </span>
+        ),
+      )}
     </span>
   );
 }

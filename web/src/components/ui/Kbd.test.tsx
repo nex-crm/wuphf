@@ -1,7 +1,19 @@
 import { render } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { Kbd, KbdSequence, MOD_KEY } from "./Kbd";
+
+function hasDuplicateKeyWarning(calls: unknown[][]) {
+  return calls.some((args) =>
+    args.some((arg) =>
+      String(arg).includes("Encountered two children with the same key"),
+    ),
+  );
+}
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe("<Kbd>", () => {
   it("renders a semantic <kbd> with the base .kbd class", () => {
@@ -76,6 +88,14 @@ describe("<KbdSequence>", () => {
     const { container } = render(<KbdSequence keys={[["g"], ["g"]]} />);
     const then = container.querySelector(".kbd-then");
     expect(then?.getAttribute("aria-hidden")).toBe("true");
+  });
+
+  it("renders duplicate suffix-shaped keys without duplicate React keys", () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { container } = render(<KbdSequence keys={["K", "K", "K#1"]} />);
+
+    expect(container.querySelectorAll("kbd")).toHaveLength(3);
+    expect(hasDuplicateKeyWarning(errorSpy.mock.calls)).toBe(false);
   });
 });
 

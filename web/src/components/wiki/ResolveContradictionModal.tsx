@@ -1,6 +1,6 @@
 // biome-ignore-all lint/a11y/useAriaPropsSupportedByRole: Passive metadata uses accessible labels queried by screen-reader tests; visual text remains unchanged.
 // biome-ignore-all lint/a11y/useKeyWithClickEvents: Pointer handler is paired with an existing modal, image, or routed-control keyboard path; preserving current interaction model.
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { type LintFinding, resolveContradiction } from "../../api/wiki";
 import { showNotice } from "../ui/Toast";
@@ -28,17 +28,6 @@ interface ResolveContradictionModalProps {
   onResolved: () => void;
 }
 
-function resolveErrorMessage(err: unknown) {
-  return err instanceof Error
-    ? err.message
-    : "Failed to resolve contradiction.";
-}
-
-function resolvedNotice(commitSha: string) {
-  const shortSha = commitSha.slice(0, 7);
-  return shortSha ? `Resolved. Commit ${shortSha}.` : "Resolved.";
-}
-
 export default function ResolveContradictionModal({
   finding,
   findingIdx,
@@ -58,72 +47,55 @@ export default function ResolveContradictionModal({
   );
   const [error, setError] = useState<string | null>(null);
   const backdropRef = useRef<HTMLDivElement>(null);
-  const abortControllerRef = useRef<AbortController | null>(null);
 
-  const closeAfterAbort = useCallback(() => {
-    abortControllerRef.current?.abort();
-    abortControllerRef.current = null;
-    onClose();
-  }, [onClose]);
-
-  // Escape key aborts any in-flight resolution and closes.
+  // Escape key closes without submitting.
   useEffect(() => {
     function onKeyDown(ev: KeyboardEvent) {
       if (ev.key === "Escape") {
-        closeAfterAbort();
+        onClose();
       }
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [closeAfterAbort]);
+  }, [onClose]);
 
-  // Click outside (on backdrop) aborts any in-flight resolution and closes.
+  // Click outside (on backdrop) closes without submitting.
   function handleBackdropClick(ev: React.MouseEvent<HTMLDivElement>) {
     if (ev.target === backdropRef.current) {
-      closeAfterAbort();
+      onClose();
     }
   }
 
   async function handlePick(winner: "A" | "B" | "Both") {
-    abortControllerRef.current?.abort();
-    const controller = new AbortController();
-    abortControllerRef.current = controller;
     setError(null);
     setSubmitting(true);
     setPendingWinner(winner);
     try {
-      const res = await resolveContradiction(
-        {
-          report_date: reportDate,
-          finding_idx: findingIdx,
-          finding,
-          winner,
-        },
-        { signal: controller.signal },
-      );
+      const res = await resolveContradiction({
+        report_date: reportDate,
+        finding_idx: findingIdx,
+        finding,
+        winner,
+      });
       // There is no commit-viewer route today, so the sha rides inside the
       // toast copy in mono-style rather than as a link (spec §4). Short
       // sha mirrors git's default display width.
-      showNotice(resolvedNotice(res.commit_sha || ""), "success");
-      if (abortControllerRef.current === controller) {
-        abortControllerRef.current = null;
-      }
+      const shortSha = (res.commit_sha || "").slice(0, 7);
+      showNotice(
+        shortSha ? `Resolved. Commit ${shortSha}.` : "Resolved.",
+        "success",
+      );
       onResolved();
       // WikiLint refreshes on success, which unmounts this modal. Return
       // early so we don't setState on an unmounted component (React 18
       // tolerates it today, but it's a latent footgun).
       return;
     } catch (err: unknown) {
-      if (controller.signal.aborted) {
-        return;
-      }
-      setError(resolveErrorMessage(err));
+      setError(
+        err instanceof Error ? err.message : "Failed to resolve contradiction.",
+      );
       setSubmitting(false);
       setPendingWinner(null);
-    } finally {
-      if (abortControllerRef.current === controller) {
-        abortControllerRef.current = null;
-      }
     }
   }
 
@@ -232,7 +204,8 @@ export default function ResolveContradictionModal({
             type="button"
             className="wk-editor-cancel"
             data-testid="wk-resolve-cancel"
-            onClick={closeAfterAbort}
+            onClick={onClose}
+            disabled={submitting}
           >
             Cancel
           </button>
