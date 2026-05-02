@@ -17,6 +17,7 @@ vi.mock("../../../api/workspaces", async () => {
 import { useCreateWorkspace } from "../../../api/workspaces";
 
 const useCreateWorkspaceMock = vi.mocked(useCreateWorkspace);
+let restoreLocation: (() => void) | null = null;
 
 function renderModal(open = true) {
   const onClose = vi.fn();
@@ -40,6 +41,8 @@ describe("<CreateWorkspaceModal>", () => {
   });
   afterEach(() => {
     vi.clearAllMocks();
+    restoreLocation?.();
+    restoreLocation = null;
   });
 
   it("renders nothing when closed", () => {
@@ -123,12 +126,12 @@ describe("<CreateWorkspaceModal>", () => {
       value: { assign },
       writable: true,
     });
-    afterEach(() => {
+    restoreLocation = () => {
       Object.defineProperty(window, "location", {
         value: originalLocation,
         writable: true,
       });
-    });
+    };
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     useCreateWorkspaceMock.mockImplementation(((opts?: any) => ({

@@ -1,4 +1,4 @@
-import { type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
 import {
@@ -34,9 +34,10 @@ interface SystemSchedulesPanelProps {
  */
 export function SystemSchedulesPanel({ jobs }: SystemSchedulesPanelProps) {
   const rows = useMemo(() => filterSchedulerRows(jobs), [jobs]);
-  // floors: slug → min_floor_minutes, populated from the API on mount.
-  // Stored in a ref so updates don't trigger a re-render of every row.
-  const floorsRef = useRef<Record<string, number>>({});
+  // floors: slug -> min_floor_minutes, populated from the API on mount.
+  // This is state, not a ref, so rows re-render once broker-canonical floors
+  // arrive and validation cannot silently use a stale default.
+  const [floors, setFloors] = useState<Record<string, number>>({});
 
   useEffect(() => {
     let aborted = false;
@@ -47,7 +48,7 @@ export function SystemSchedulesPanel({ jobs }: SystemSchedulesPanelProps) {
         for (const s of specs) {
           map[s.slug] = s.min_floor_minutes;
         }
-        floorsRef.current = map;
+        setFloors(map);
       })
       .catch((err: unknown) => {
         if (aborted) return;
@@ -81,7 +82,7 @@ export function SystemSchedulesPanel({ jobs }: SystemSchedulesPanelProps) {
         <ScheduleRow
           key={job.slug ?? job.id}
           job={job}
-          floorsRef={floorsRef}
+          floor={floors[job.slug ?? ""] ?? DEFAULT_FLOOR_MINUTES}
         />
       ))}
     </section>
@@ -105,17 +106,16 @@ function filterSchedulerRows(jobs: SchedulerJob[]): SchedulerJob[] {
 
 interface ScheduleRowProps {
   job: SchedulerJob;
-  floorsRef: RefObject<Record<string, number>>;
+  floor: number;
 }
 
-function ScheduleRow({ job, floorsRef }: ScheduleRowProps) {
+function ScheduleRow({ job, floor }: ScheduleRowProps) {
   const queryClient = useQueryClient();
   const slug = job.slug ?? "";
   const isReadOnly = READ_ONLY_SLUGS.has(slug);
   const isCron = typeof job.schedule_expr === "string" && job.schedule_expr;
   const isInterval = typeof job.interval_minutes === "number";
 
-  const floor = floorsRef.current[slug] ?? DEFAULT_FLOOR_MINUTES;
   const defaultInterval = job.interval_minutes ?? 0;
   const initialOverride = job.interval_override ?? 0;
   const initialEnabled = job.enabled !== false; // missing → assume enabled
@@ -473,12 +473,13 @@ function ToggleSwitch({
         style={{
           position: "absolute",
           top: 2,
-          left: enabled ? 18 : 2,
+          left: 2,
           width: 16,
           height: 16,
           background: "#fff",
           borderRadius: "50%",
-          transition: "left 0.15s",
+          transform: enabled ? "translateX(16px)" : "translateX(0)",
+          transition: "transform 0.15s",
           boxShadow: "0 1px 2px rgba(0,0,0,0.2)",
         }}
       />

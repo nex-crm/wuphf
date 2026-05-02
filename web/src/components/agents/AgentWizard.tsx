@@ -159,7 +159,11 @@ export function AgentWizard({ open, onClose, onCreated }: AgentWizardProps) {
   if (!open) return null;
 
   return (
-    <div className="agent-wizard-overlay" onClick={handleOverlayClick}>
+    <div
+      className="agent-wizard-overlay"
+      role="presentation"
+      onClick={handleOverlayClick}
+    >
       <div className="agent-wizard-modal card">
         <div className="agent-wizard-title">Create agent</div>
 
