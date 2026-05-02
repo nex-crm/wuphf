@@ -9,10 +9,6 @@
 # Format: one path (relative to repo root) per line. Comments start with #.
 # Blank lines and trailing whitespace ignored.
 
-# Tier 1 — refactor targets in the active migration (see plan)
-cmd/wuphf/channel.go                          # Phase 2: split into channel_<concern>.go siblings
-internal/team/broker.go                       # Phase 3: extract sse/auth/rate_limit/wiki/telemetry/web_proxy/publish
-
 # Other current offenders — to be addressed in follow-up PRs after Phase 1-9
 # baseline is in place. Each line documents the intended approach.
 internal/teammcp/server.go                    # vertical slice along tool families
