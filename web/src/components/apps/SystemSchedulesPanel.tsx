@@ -189,7 +189,7 @@ function ScheduleRow({ job, floorsRef }: ScheduleRowProps) {
         })
         .finally(() => setPending(false));
     },
-    [slug, isReadOnly, job, queryClient, initialOverride, defaultInterval],
+    [slug, isReadOnly, job, queryClient, defaultInterval],
   );
 
   const handleToggle = useCallback(() => {

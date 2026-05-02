@@ -222,6 +222,7 @@ export function TaskDetailModal({ task, onClose }: TaskDetailModalProps) {
   const [overrideReason, setOverrideReason] = useState("");
 
   useEffect(() => {
+    void task.id;
     setSelectedOwner((task.owner ?? "").trim());
     setErrorMsg(null);
     setOverrideReason("");
@@ -637,7 +638,10 @@ function MemoryWorkflowSection({ workflow }: { workflow: TaskMemoryWorkflow }) {
       )}
       <dl className="task-detail-meta">
         {rows
-          .filter(([, value]) => value != null && value !== "")
+          .filter(
+            ([, value]) =>
+              value !== null && value !== undefined && value !== "",
+          )
           .map(([key, value]) => (
             <div key={key} className="task-detail-meta-row">
               <dt>{key}</dt>
@@ -707,7 +711,7 @@ function formatWorkflowStep(step?: TaskMemoryWorkflowStepState): string | null {
     step.status
       ? displayMemoryStatus(normalizeMemoryStatus(step.status))
       : null,
-    step.count != null && step.count > 0
+    step.count !== null && step.count !== undefined && step.count > 0
       ? `${step.count} item${step.count === 1 ? "" : "s"}`
       : null,
     step.actor ? `@${step.actor}` : null,

@@ -396,6 +396,8 @@ export function AgentPanel() {
   // instantly un-selected it and the panel never mounted (React #31 guard
   // e2e regression).
   useEffect(() => {
+    void currentChannel;
+    void currentApp;
     close();
   }, [currentChannel, currentApp, close]);
 

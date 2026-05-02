@@ -1547,7 +1547,6 @@ type DangerAction = "reset" | "shred";
 function DangerZoneSection() {
   const [open, setOpen] = useState<DangerAction | null>(null);
   const [busy, setBusy] = useState(false);
-  const queryClient = useQueryClient();
   const shred = useShredAction();
 
   const handleReset = async () => {

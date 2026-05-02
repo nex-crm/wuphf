@@ -33,7 +33,7 @@ const STUB_GENERAL: QueryAnswer = {
   latency_ms: 5,
 }
 
-const STUB_PARTIAL: QueryAnswer = {
+const _STUB_PARTIAL: QueryAnswer = {
   ...STUB_ANSWER,
   coverage: 'partial',
   sources_cited: [],
@@ -79,7 +79,7 @@ describe('<CitedAnswer>', () => {
     // match the body text that happens to share prose with the excerpt.
     const sourcesList = document.querySelector('.wk-sources ol')
     expect(sourcesList).toBeTruthy()
-    expect(sourcesList!.textContent).toContain('Sarah Jones is VP')
+    expect(sourcesList?.textContent).toContain('Sarah Jones is VP')
   })
 
   it('preserves citation numbering when some sources are uncited (gap case)', async () => {
