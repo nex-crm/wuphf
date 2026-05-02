@@ -62,6 +62,8 @@ jobs:
           # The file-size ratchet compares the current allowlist to the PR
           # base. Keep enough history for `git merge-base HEAD origin/<base>`.
           fetch-depth: 0
+      - name: File-size ratchet self-test
+        run: bash scripts/check-file-size-self-test.sh
       - name: File-size budget (CONTRIBUTING.md)
         # Warn at 800 LOC, fail at 1500 LOC unless allowlisted in
         # scripts/file-size-allowlist.txt. The allowlist is forward-only
