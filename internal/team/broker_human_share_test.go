@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 func TestHumanInviteAcceptIsOneUseAndCreatesSession(t *testing.T) {
@@ -66,5 +67,33 @@ func TestHumanMeAcceptsSessionCookie(t *testing.T) {
 	}
 	if !bytes.Contains(rec.Body.Bytes(), []byte(`"display_name":"Mira"`)) {
 		t.Fatalf("me body missing Mira: %s", rec.Body.String())
+	}
+}
+
+func TestHumanMeRejectsExpiredSessionServerSide(t *testing.T) {
+	b := newTestBroker(t)
+	token, _, err := b.createHumanInvite()
+	if err != nil {
+		t.Fatalf("create invite: %v", err)
+	}
+	sessionToken, session, err := b.acceptHumanInvite(token, "Mira", "browser", "100.64.0.2:1234")
+	if err != nil {
+		t.Fatalf("accept invite: %v", err)
+	}
+
+	b.mu.Lock()
+	for i := range b.humanSessions {
+		if b.humanSessions[i].ID == session.ID {
+			b.humanSessions[i].ExpiresAt = time.Now().Add(-time.Hour).UTC().Format(time.RFC3339)
+		}
+	}
+	b.mu.Unlock()
+
+	req := httptest.NewRequest(http.MethodGet, "/humans/me", nil)
+	req.AddCookie(&http.Cookie{Name: humanSessionCookie, Value: sessionToken})
+	rec := httptest.NewRecorder()
+	b.handleHumanMe(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("me status = %d, want 401 body=%s", rec.Code, rec.Body.String())
 	}
 }

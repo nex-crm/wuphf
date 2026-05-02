@@ -134,6 +134,7 @@ type humanSession struct {
 	Device      string `json:"device,omitempty"`
 	RemoteAddr  string `json:"remote_addr,omitempty"`
 	CreatedAt   string `json:"created_at"`
+	ExpiresAt   string `json:"expires_at"`
 	RevokedAt   string `json:"revoked_at,omitempty"`
 	LastSeenAt  string `json:"last_seen_at,omitempty"`
 }

@@ -338,6 +338,10 @@ func shareProxyHandler(brokerURL, brokerToken string) http.Handler {
 		if targetPath == "" {
 			targetPath = "/"
 		}
+		if !shareProxyPathAllowed(targetPath) {
+			http.Error(w, `{"error":"host_only"}`, http.StatusForbidden)
+			return
+		}
 		target := brokerURL + targetPath
 		if r.URL.RawQuery != "" {
 			target += "?" + r.URL.RawQuery
@@ -387,6 +391,31 @@ func shareProxyHandler(brokerURL, brokerToken string) http.Handler {
 		}
 		_, _ = io.Copy(w, resp.Body)
 	})
+}
+
+func shareProxyPathAllowed(path string) bool {
+	path = "/" + strings.TrimLeft(path, "/")
+	if path == "/web-token" {
+		return false
+	}
+	for _, prefix := range []string{
+		"/admin/",
+		"/workspaces/",
+		"/workspace/",
+		"/upgrade",
+		"/reset",
+		"/config",
+		"/nex/register",
+		"/image-providers",
+		"/notebook/",
+		"/humans/invites",
+		"/humans/sessions",
+	} {
+		if path == strings.TrimRight(prefix, "/") || strings.HasPrefix(path, prefix) {
+			return false
+		}
+	}
+	return true
 }
 
 func shareStaticHandler() http.Handler {
