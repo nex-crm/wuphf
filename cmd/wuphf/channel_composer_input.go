@@ -187,6 +187,7 @@ func (m channelModel) updateThread(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.threadInputHistory.Record(m.threadInput, m.threadInputPos)
 			m.threadInput = nil
 			m.threadInputPos = 0
+			m.updateThreadOverlays()
 			m.posting = true
 			return m, postToChannel(text, m.threadPanelID, m.activeChannel)
 		}

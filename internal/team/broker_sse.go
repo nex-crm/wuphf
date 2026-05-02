@@ -358,6 +358,10 @@ func (b *Broker) handleAgentStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Accel-Buffering", "no")
 
 	stream := b.AgentStream(slug)
+	if stream == nil {
+		http.Error(w, "agent stream not found", http.StatusNotFound)
+		return
+	}
 
 	// Replay recent history so the client sees context immediately.
 	history := stream.recent()

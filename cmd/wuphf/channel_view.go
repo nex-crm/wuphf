@@ -23,7 +23,7 @@ func (m channelModel) View() string {
 		return "Loading..."
 	}
 
-	layout := channelui.ComputeLayout(m.width, m.height, m.threadPanelOpen && !m.isOneOnOne(), m.sidebarCollapsed || m.isOneOnOne())
+	layout := m.currentLayout()
 	workspaceState := m.currentWorkspaceUIState()
 
 	// ── Sidebar ──────────────────────────────────────────────────────
@@ -111,9 +111,12 @@ func (m channelModel) View() string {
 	// Composer
 	typingAgents := channelui.TypingAgentsFromMembers(m.members)
 	liveActivities := channelui.LiveActivityFromMembers(m.members)
-	composerStr := renderComposer(mainW, m.input, m.inputPos, m.composerTargetLabel(),
-		m.replyToID, typingAgents, liveActivities, activePending, m.selectedOption, m.composerHint(m.composerTargetLabel(), m.replyToID, activePending),
-		m.focus == focusMain, m.tickFrame)
+	composerStr := ""
+	if m.activeApp == channelui.OfficeAppMessages || m.memberDraft != nil {
+		composerStr = renderComposer(mainW, m.input, m.inputPos, m.composerTargetLabel(),
+			m.replyToID, typingAgents, liveActivities, activePending, m.selectedOption, m.composerHint(m.composerTargetLabel(), m.replyToID, activePending),
+			m.focus == focusMain, m.tickFrame)
+	}
 	if m.memberDraft != nil {
 		composerStr = renderComposer(mainW, m.input, m.inputPos, memberDraftComposerLabel(*m.memberDraft),
 			"", typingAgents, nil, nil, 0, m.composerHint(memberDraftComposerLabel(*m.memberDraft), "", nil), m.focus == focusMain, m.tickFrame)

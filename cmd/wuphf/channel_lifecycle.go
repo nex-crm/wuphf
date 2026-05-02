@@ -41,7 +41,7 @@ func killTeamSession() {
 	defer cancel()
 	// Kill tmux session (kills all agent processes in all panes/windows)
 	_ = exec.CommandContext(ctx, "tmux", "-L", "wuphf", "kill-session", "-t", "wuphf-team").Run()
-	// Stop the broker
+	// Ping the broker to verify it's still reachable (best-effort).
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, brokerURL("/health"), nil)
 	if err != nil {
 		return

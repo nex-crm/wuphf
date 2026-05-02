@@ -91,6 +91,7 @@ type Broker struct {
 	factSubscribers         map[int]chan EntityFactRecordedEvent
 	wikiSectionsSubscribers map[int]chan WikiSectionsUpdatedEvent
 	wikiWorker              *WikiWorker
+	wikiOnce                sync.Once
 	wikiIndex               *WikiIndex
 	wikiExtractor           *Extractor
 	wikiDLQ                 *DLQ
@@ -108,12 +109,18 @@ type Broker struct {
 	nextSubscriberID        int
 	agentStreams            map[string]*agentStreamBuffer
 	mu                      sync.Mutex
+	officeMemberMutationMu  sync.Mutex
+	stateWriteMu            sync.Mutex
+	stateWriteSeq           atomic.Uint64
+	stateWriteApplied       atomic.Uint64
 	// configMu serializes handleConfig POST reads/writes so concurrent
 	// /config calls don't corrupt ~/.wuphf/config.json. config.Save uses
 	// os.WriteFile (O_TRUNC) without locking, so two parallel POSTs can
 	// produce a truncated/overlaid file.
 	configMu           sync.Mutex
 	server             *http.Server
+	lifecycleCtx       context.Context
+	lifecycleCancel    context.CancelFunc
 	token              string          // shared secret for authenticating requests
 	addr               string          // actual listen address (useful when port=0)
 	webUIOrigins       []string        // allowed CORS origins for web UI (set by ServeWebUI)
@@ -254,6 +261,7 @@ func NewBrokerAt(statePath string) *Broker {
 	if strings.TrimSpace(statePath) == "" {
 		panic("team.NewBrokerAt: statePath must not be empty (use defaultBrokerStatePath() if no explicit path)")
 	}
+	lifecycleCtx, lifecycleCancel := context.WithCancel(context.Background())
 	b := &Broker{
 		channelStore:        channel.NewStore(),
 		token:               generateToken(),
@@ -276,7 +284,9 @@ func NewBrokerAt(statePath string) *Broker {
 		agentRateLimitWindow:   defaultAgentRateLimitWindow,
 		agentRateLimitRequests: defaultAgentRateLimitRequestsPerWindow,
 
-		statePath: statePath,
+		statePath:       statePath,
+		lifecycleCtx:    lifecycleCtx,
+		lifecycleCancel: lifecycleCancel,
 	}
 	if !skipBrokerStateLoadOnConstruct {
 		_ = b.loadState()
@@ -340,6 +350,9 @@ func (b *Broker) Start() error {
 	b.startMemoryWorkflowReconcilerLoop(ctx)
 	if err := b.StartOnPort(brokeraddr.ResolvePort()); err != nil {
 		cancel()
+		if b.lifecycleCancel != nil {
+			b.lifecycleCancel()
+		}
 		return err
 	}
 	return nil
@@ -530,6 +543,9 @@ func (b *Broker) Stop() {
 		b.stopOnce.Do(func() {
 			close(b.stopCh)
 		})
+	}
+	if b.lifecycleCancel != nil {
+		b.lifecycleCancel()
 	}
 	if b.server != nil {
 		_ = b.server.Close()

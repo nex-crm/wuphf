@@ -26,7 +26,7 @@ import (
 //	  "reply_to":      ""
 //	}
 //
-// Side-effects (all atomic; one of them failing fails the whole call):
+// Side-effects (sequence stops on first failure; earlier writes persist):
 //   1. RecordSignals — one office signal under "channel_bridge"
 //   2. RecordDecision — one "bridge_channel" decision referencing the signal
 //   3. PostAutomationMessage — the summary lands in target_channel as a
@@ -87,11 +87,7 @@ func (b *Broker) handleBridge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	b.mu.Lock()
-	sourceExists := b.findChannelLocked(source) != nil
-	targetExists := b.findChannelLocked(target) != nil
-	b.mu.Unlock()
-	if !sourceExists || !targetExists {
+	if !b.bridgeChannelsExist(source, target) {
 		http.Error(w, "channel not found", http.StatusNotFound)
 		return
 	}
@@ -129,6 +125,10 @@ func (b *Broker) handleBridge(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "failed to record bridge decision", http.StatusInternalServerError)
 		return
 	}
+	if !b.bridgeChannelsExist(source, target) {
+		http.Error(w, "channel not found", http.StatusNotFound)
+		return
+	}
 	content := summary + fmt.Sprintf("\n\nCEO bridged this context from #%s to help #%s.", source, target)
 	msg, _, err := b.PostAutomationMessage(
 		"wuphf",
@@ -156,4 +156,10 @@ func (b *Broker) handleBridge(w http.ResponseWriter, r *http.Request) {
 		"decision_id": decision.ID,
 		"signal_ids":  signalIDs,
 	})
+}
+
+func (b *Broker) bridgeChannelsExist(source, target string) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.findChannelLocked(source) != nil && b.findChannelLocked(target) != nil
 }

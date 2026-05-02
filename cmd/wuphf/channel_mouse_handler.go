@@ -23,7 +23,7 @@ import (
 // once the hit-tester says where you clicked."
 
 func (m channelModel) handleMouseMsg(msg tea.MouseMsg) (channelModel, tea.Cmd) {
-	layout := channelui.ComputeLayout(m.width, m.height, m.threadPanelOpen, m.sidebarCollapsed)
+	layout := m.currentLayout()
 	inSidebar := layout.ShowSidebar && msg.X < layout.SidebarW
 	switch msg.Button {
 	case tea.MouseButtonWheelUp:
@@ -79,22 +79,26 @@ func (m channelModel) handleMouseMsg(msg tea.MouseMsg) (channelModel, tea.Cmd) {
 				return m, nil
 			case "autocomplete":
 				if idx, ok := channelui.PopupActionIndex(action.Value); ok {
-					for m.autocomplete.SelectedIndex() != idx {
+					for i := 0; i < m.autocomplete.Len() && m.autocomplete.SelectedIndex() != idx; i++ {
 						m.autocomplete.Next()
 					}
-					if name := m.autocomplete.Accept(); name != "" {
-						next, cmd := m.runActiveCommand("/" + name)
-						return next.(channelModel), cmd
+					if m.autocomplete.SelectedIndex() == idx {
+						if name := m.autocomplete.Accept(); name != "" {
+							next, cmd := m.runActiveCommand("/" + name)
+							return next.(channelModel), cmd
+						}
 					}
 				}
 				return m, nil
 			case "mention":
 				if idx, ok := channelui.PopupActionIndex(action.Value); ok {
-					for m.mention.SelectedIndex() != idx {
+					for i := 0; i < m.mention.Len() && m.mention.SelectedIndex() != idx; i++ {
 						m.mention.Next()
 					}
-					if mention := m.mention.Accept(); mention != "" {
-						m.insertAcceptedMention(mention)
+					if m.mention.SelectedIndex() == idx {
+						if mention := m.mention.Accept(); mention != "" {
+							m.insertAcceptedMention(mention)
+						}
 					}
 				}
 				return m, nil

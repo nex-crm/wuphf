@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"strconv"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -30,7 +31,10 @@ func (m channelModel) handleTelegramDiscoverMsg(msg telegramDiscoverMsg) (channe
 
 	// Merge discovered groups with existing manifest channels
 	allGroups := msg.groups
-	manifest, _ := company.LoadManifest()
+	manifest, err := company.LoadManifest()
+	if err != nil {
+		log.Printf("telegram: load manifest while merging discovered groups: %v", err)
+	}
 	for _, ch := range manifest.Channels {
 		if ch.Surface == nil || ch.Surface.Provider != "telegram" || ch.Surface.RemoteID == "" || ch.Surface.RemoteID == "0" {
 			continue
@@ -44,7 +48,11 @@ func (m channelModel) handleTelegramDiscoverMsg(msg telegramDiscoverMsg) (channe
 			}
 		}
 		if !found {
-			chatID, _ := strconv.ParseInt(ch.Surface.RemoteID, 10, 64)
+			chatID, err := strconv.ParseInt(ch.Surface.RemoteID, 10, 64)
+			if err != nil {
+				log.Printf("telegram: skip malformed remote id %q for channel %q: %v", ch.Surface.RemoteID, ch.Name, err)
+				continue
+			}
 			if chatID != 0 {
 				title := ch.Surface.RemoteTitle
 				if title == "" {

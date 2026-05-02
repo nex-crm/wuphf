@@ -47,8 +47,9 @@ func (b *Broker) MemberProviderBinding(slug string) provider.ProviderBinding {
 	return m.Provider
 }
 
-// MemberProviderKind returns the effective runtime kind for the given slug,
-// falling back to the global runtime when the member has no explicit binding.
+// MemberProviderKind returns the per-member runtime kind for the given slug,
+// or "" if the member does not exist or has no explicit binding. Callers
+// should fall back to the global runtime when the return value is empty.
 // Used by the launcher's dispatch switch so each agent can run on its own
 // provider (e.g., one Codex agent + one Claude Code agent in the same team).
 func (b *Broker) MemberProviderKind(slug string) string {

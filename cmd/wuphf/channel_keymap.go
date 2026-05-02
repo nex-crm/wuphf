@@ -340,6 +340,7 @@ func (m channelModel) handleKeyMsg(msg tea.KeyMsg) (channelModel, tea.Cmd) {
 
 			m.input = nil
 			m.inputPos = 0
+			m.updateInputOverlays()
 			m.notice = ""
 			m.posting = true
 			return m, postToChannel(text, m.replyToID, m.activeChannel)

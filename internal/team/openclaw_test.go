@@ -22,6 +22,7 @@ type fakeOCClient struct {
 	createNextKey string // key returned by the next SessionsCreate call; auto-incremented if empty
 	createCounter int
 	createErr     error
+	subscribeHook func()
 	events        chan openclaw.ClientEvent
 	sendErr       error
 	nextSendErrs  []error // drained FIFO if non-empty
@@ -56,7 +57,11 @@ func (f *fakeOCClient) SessionsSend(ctx context.Context, key, msg, idem string) 
 func (f *fakeOCClient) SessionsMessagesSubscribe(ctx context.Context, key string) error {
 	f.mu.Lock()
 	f.subscribed = append(f.subscribed, key)
+	hook := f.subscribeHook
 	f.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
 	return nil
 }
 

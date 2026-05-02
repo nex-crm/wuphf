@@ -83,6 +83,15 @@ func brokerStateShouldSnapshot(state brokerState) bool {
 	return brokerStateActivityScore(state) > 0
 }
 
+type brokerStateWrite struct {
+	seq          uint64
+	path         string
+	snapshotPath string
+	remove       bool
+	data         []byte
+	snapshot     bool
+}
+
 func (b *Broker) loadState() error {
 	if b.statePath == "" {
 		// Direct &Broker{} literal in a unit test that exercises only
@@ -160,27 +169,31 @@ func (b *Broker) loadState() error {
 }
 
 func (b *Broker) saveLocked() error {
+	write, err := b.prepareBrokerStateWriteLocked()
+	if err != nil {
+		return err
+	}
+	return b.writeBrokerState(write)
+}
+
+func (b *Broker) prepareBrokerStateWriteLocked() (brokerStateWrite, error) {
 	if b.statePath == "" {
 		// A direct &Broker{} literal (no NewBrokerAt/NewBroker) reaching the
 		// persistence path means a test wired in-memory state but accidentally
 		// triggered a save — without this guard the empty path would silently
 		// resolve to "" + cwd-adjacent files. Fail loudly so the caller fixes
 		// the construction site instead of corrupting the test workdir.
-		return errors.New("broker: saveLocked requires a non-empty statePath; construct via NewBrokerAt(path)")
+		return brokerStateWrite{}, errors.New("broker: saveLocked requires a non-empty statePath; construct via NewBrokerAt(path)")
 	}
 	path := b.statePath
-	snapshotPath := b.stateSnapshotPath()
-	if len(b.messages) == 0 && len(b.agentIssues) == 0 && len(b.tasks) == 0 && len(activeRequests(b.requests)) == 0 && len(b.actions) == 0 && len(b.signals) == 0 && len(b.decisions) == 0 && len(b.watchdogs) == 0 && len(b.policies) == 0 && len(b.scheduler) == 0 && len(b.skills) == 0 && len(b.sharedMemory) == 0 && isDefaultChannelState(b.channels) && isDefaultOfficeMemberState(b.members) && b.counter == 0 && b.notificationSince == "" && b.insightsSince == "" && usageStateIsZero(b.usage) && b.sessionMode == SessionModeOffice && b.oneOnOneAgent == DefaultOneOnOneAgent {
-		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
-		if err := os.Remove(snapshotPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
-		return nil
+	write := brokerStateWrite{
+		seq:          b.stateWriteSeq.Add(1),
+		path:         path,
+		snapshotPath: b.stateSnapshotPath(),
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
+	if b.isDefaultBrokerStateLocked() {
+		write.remove = true
+		return write, nil
 	}
 	var channelStoreRaw json.RawMessage
 	if b.channelStore != nil {
@@ -219,17 +232,80 @@ func (b *Broker) saveLocked() error {
 	}
 	data, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
+		return brokerStateWrite{}, err
+	}
+	write.data = data
+	write.snapshot = brokerStateShouldSnapshot(state)
+	return write, nil
+}
+
+func (b *Broker) writeBrokerState(write brokerStateWrite) error {
+	if write.path == "" {
+		return errors.New("broker: writeBrokerState requires a non-empty path")
+	}
+	b.stateWriteMu.Lock()
+	defer b.stateWriteMu.Unlock()
+	if write.seq != b.stateWriteSeq.Load() && b.stateWriteApplied.Load() >= write.seq {
+		return nil
+	}
+	if write.remove {
+		if err := os.Remove(write.path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		b.markBrokerStateWriteApplied(write.seq)
+		if err := os.Remove(write.snapshotPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(write.path), 0o700); err != nil {
 		return err
 	}
-	if err := atomicWriteFile(path, data); err != nil {
+	if err := atomicWriteFile(write.path, write.data); err != nil {
 		return err
 	}
-	if brokerStateShouldSnapshot(state) {
-		if err := atomicWriteFile(snapshotPath, data); err != nil {
+	b.markBrokerStateWriteApplied(write.seq)
+	if write.snapshot {
+		if err := atomicWriteFile(write.snapshotPath, write.data); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func (b *Broker) markBrokerStateWriteApplied(seq uint64) {
+	for {
+		current := b.stateWriteApplied.Load()
+		if seq <= current {
+			return
+		}
+		if b.stateWriteApplied.CompareAndSwap(current, seq) {
+			return
+		}
+	}
+}
+
+func (b *Broker) isDefaultBrokerStateLocked() bool {
+	return len(b.messages) == 0 &&
+		len(b.agentIssues) == 0 &&
+		len(b.tasks) == 0 &&
+		len(activeRequests(b.requests)) == 0 &&
+		len(b.actions) == 0 &&
+		len(b.signals) == 0 &&
+		len(b.decisions) == 0 &&
+		len(b.watchdogs) == 0 &&
+		len(b.policies) == 0 &&
+		len(b.scheduler) == 0 &&
+		len(b.skills) == 0 &&
+		len(b.sharedMemory) == 0 &&
+		isDefaultChannelState(b.channels) &&
+		isDefaultOfficeMemberState(b.members) &&
+		b.counter == 0 &&
+		b.notificationSince == "" &&
+		b.insightsSince == "" &&
+		usageStateIsZero(b.usage) &&
+		b.sessionMode == SessionModeOffice &&
+		b.oneOnOneAgent == DefaultOneOnOneAgent
 }
 
 // atomicWriteFile writes data to path atomically by creating a uniquely-named

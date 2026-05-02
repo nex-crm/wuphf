@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/nex-crm/wuphf/internal/company"
 )
@@ -54,9 +55,11 @@ func (b *Broker) capturePaneActivity(slugOverride string) map[string]string {
 	b.mu.Unlock()
 
 	for _, check := range checks {
-		paneOut, err := exec.CommandContext(context.Background(), "tmux", "-L", "wuphf", "capture-pane",
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		paneOut, err := exec.CommandContext(ctx, "tmux", "-L", "wuphf", "capture-pane",
 			"-p", "-J",
 			"-t", check.target).CombinedOutput()
+		cancel()
 		if err != nil {
 			continue
 		}

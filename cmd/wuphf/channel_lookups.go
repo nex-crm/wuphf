@@ -31,7 +31,7 @@ func (m channelModel) findRequestByID(id string) (channelui.Interview, bool) {
 	return channelui.Interview{}, false
 }
 
-func (m channelModel) focusRequest(req channelui.Interview, notice string) (tea.Model, tea.Cmd) {
+func (m channelModel) focusRequest(req channelui.Interview, notice string) (channelModel, tea.Cmd) {
 	if req.Blocking || req.Required {
 		m.activeApp = channelui.OfficeAppMessages
 	} else {
@@ -48,7 +48,7 @@ func (m channelModel) focusRequest(req channelui.Interview, notice string) (tea.
 	return m, tea.Batch(pollRequests(m.activeChannel))
 }
 
-func (m channelModel) answerRequest(req channelui.Interview) (tea.Model, tea.Cmd) {
+func (m channelModel) answerRequest(req channelui.Interview) (channelModel, tea.Cmd) {
 	if req.Blocking || req.Required {
 		m.activeApp = channelui.OfficeAppMessages
 	} else {

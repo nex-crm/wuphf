@@ -192,9 +192,21 @@ func (b *Broker) Requests(channel string, includeResolved bool) []humanInterview
 		if !includeResolved && !requestIsActive(req) {
 			continue
 		}
-		out = append(out, req)
+		out = append(out, cloneHumanInterview(req))
 	}
 	return out
+}
+
+func cloneHumanInterview(req humanInterview) humanInterview {
+	clone := req
+	if len(req.Options) > 0 {
+		clone.Options = append([]interviewOption(nil), req.Options...)
+	}
+	if req.Answered != nil {
+		answer := *req.Answered
+		clone.Answered = &answer
+	}
+	return clone
 }
 
 func (b *Broker) HasPendingInterview() bool {

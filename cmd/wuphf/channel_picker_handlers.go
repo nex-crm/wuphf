@@ -69,7 +69,7 @@ func (m channelModel) handlePickerSelectMsg(msg tui.PickerSelectMsg) (channelMod
 				m.activeApp = channelui.OfficeAppCalendar
 				m.notice = "Viewing the office calendar."
 				m.syncSidebarCursorToActive()
-				return m, nil
+				return m, pollOfficeLedger()
 			}
 		case strings.HasPrefix(msg.Value, "session:1o1:"):
 			agent := strings.TrimSpace(strings.TrimPrefix(msg.Value, "session:1o1:"))
@@ -379,12 +379,12 @@ func (m channelModel) handlePickerSelectMsg(msg tui.PickerSelectMsg) (channelMod
 		case "focus":
 			if req, ok := m.findRequestByID(reqID); ok {
 				next, cmd := m.focusRequest(req, "Focused request "+req.ID)
-				return next.(channelModel), cmd
+				return next, cmd
 			}
 		case "answer":
 			if req, ok := m.findRequestByID(reqID); ok {
 				next, cmd := m.answerRequest(req)
-				return next.(channelModel), cmd
+				return next, cmd
 			}
 		case "dismiss", "snooze", "cancel":
 			if req, ok := m.findRequestByID(reqID); ok {

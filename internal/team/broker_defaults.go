@@ -156,8 +156,12 @@ func (b *Broker) ensureDefaultChannelsLocked() {
 		}
 	}
 	if !hasGeneral {
-		b.channels = append(defaultTeamChannels(), b.channels...)
-		return
+		for _, def := range defaultTeamChannels() {
+			if def.Slug == "general" {
+				b.channels = append([]teamChannel{def}, b.channels...)
+				break
+			}
+		}
 	}
 	// Merge surface metadata from manifest into existing channels
 	// (handles case where state was saved without surfaces by an older binary)
@@ -301,8 +305,6 @@ func (b *Broker) normalizeLoadedStateLocked() {
 		if requestIsHumanInterview(b.requests[i]) {
 			b.requests[i].Blocking = false
 			b.requests[i].Required = false
-		} else if b.requests[i].Blocking {
-			b.requests[i].Blocking = true
 		}
 		if strings.TrimSpace(b.requests[i].UpdatedAt) == "" {
 			b.requests[i].UpdatedAt = b.requests[i].CreatedAt
@@ -310,9 +312,6 @@ func (b *Broker) normalizeLoadedStateLocked() {
 		b.scheduleRequestLifecycleLocked(&b.requests[i])
 	}
 	for i := range b.tasks {
-		if strings.TrimSpace(b.tasks[i].Channel) == "" {
-			b.tasks[i].Channel = "general"
-		}
 		normalizeTaskPlan(&b.tasks[i])
 		syncTaskMemoryWorkflow(&b.tasks[i], "")
 		b.ensureTaskOwnerChannelMembershipLocked(b.tasks[i].Channel, b.tasks[i].Owner)

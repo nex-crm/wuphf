@@ -15,10 +15,9 @@ import (
 // site asked for this split: parser/applier separation so each action
 // (create, update, remove) is reviewable in isolation.
 //
-// The HTTP entrypoint (handleOfficeMembers) only routes by method +
-// action. Each action's body lives in its own helper that holds b.mu
-// and returns (responseBody, status, err). The HTTP handler does
-// nothing but encode/serve.
+// The HTTP entrypoint (handleOfficeMembers) only routes by method + action.
+// Each mutation helper takes b.mu only for in-memory reads/writes; OpenClaw and
+// persistence I/O run outside the broker lock.
 
 type officeMemberListEntry struct {
 	officeMember
@@ -43,6 +42,21 @@ type officeMemberMutationBody struct {
 	Provider       *provider.ProviderBinding `json:"provider,omitempty"`
 }
 
+type officeMemberMutationResult struct {
+	payload map[string]any
+	events  []officeChangeEvent
+	write   brokerStateWrite
+}
+
+type officeMemberMutationError struct {
+	status  int
+	message string
+}
+
+func newOfficeMemberMutationError(status int, message string) *officeMemberMutationError {
+	return &officeMemberMutationError{status: status, message: message}
+}
+
 func (b *Broker) handleOfficeMembers(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
@@ -59,7 +73,7 @@ func (b *Broker) serveOfficeMemberList(w http.ResponseWriter) {
 	now := time.Now()
 	members := make([]officeMemberListEntry, 0, len(b.members))
 	for _, member := range b.members {
-		entry := officeMemberListEntry{officeMember: member}
+		entry := officeMemberListEntry{officeMember: cloneOfficeMemberForRead(member)}
 		if snapshot, ok := b.activity[member.Slug]; ok {
 			entry.Status = snapshot.Status
 			entry.Activity = snapshot.Activity
@@ -95,8 +109,25 @@ func (b *Broker) OfficeMembers() []officeMember {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	out := make([]officeMember, len(b.members))
-	copy(out, b.members)
+	for i, member := range b.members {
+		out[i] = cloneOfficeMemberForRead(member)
+	}
 	return out
+}
+
+func cloneOfficeMemberForRead(member officeMember) officeMember {
+	clone := member
+	if len(member.Expertise) > 0 {
+		clone.Expertise = append([]string(nil), member.Expertise...)
+	}
+	if len(member.AllowedTools) > 0 {
+		clone.AllowedTools = append([]string(nil), member.AllowedTools...)
+	}
+	if member.Provider.Openclaw != nil {
+		openclaw := *member.Provider.Openclaw
+		clone.Provider.Openclaw = &openclaw
+	}
+	return clone
 }
 
 func (b *Broker) serveOfficeMemberMutation(w http.ResponseWriter, r *http.Request) {
@@ -112,37 +143,58 @@ func (b *Broker) serveOfficeMemberMutation(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	b.mu.Lock()
-	defer b.mu.Unlock()
+	b.officeMemberMutationMu.Lock()
+	defer b.officeMemberMutationMu.Unlock()
+
+	var result officeMemberMutationResult
+	var mutationErr *officeMemberMutationError
 	switch action {
 	case "create":
-		b.createOfficeMemberLocked(w, r, slug, body)
+		result, mutationErr = b.createOfficeMember(r, slug, body)
 	case "update":
-		b.updateOfficeMemberLocked(w, r, slug, body)
+		result, mutationErr = b.updateOfficeMember(r, slug, body)
 	case "remove":
-		b.removeOfficeMemberLocked(w, r, slug)
+		result, mutationErr = b.removeOfficeMember(r, slug)
 	default:
 		http.Error(w, "unknown action", http.StatusBadRequest)
+		return
+	}
+	if mutationErr != nil {
+		http.Error(w, mutationErr.message, mutationErr.status)
+		return
+	}
+	if err := b.writeBrokerState(result.write); err != nil {
+		http.Error(w, "failed to persist broker state", http.StatusInternalServerError)
+		return
+	}
+	b.publishOfficeChanges(result.events)
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(result.payload)
+}
+
+func (b *Broker) publishOfficeChanges(events []officeChangeEvent) {
+	if len(events) == 0 {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, evt := range events {
+		b.publishOfficeChangeLocked(evt)
 	}
 }
 
-// createOfficeMemberLocked persists a new office member, registers any
-// openclaw bridge subscription up front (so a half-configured member is
-// never persisted), seeds the new hire into every non-DM channel's
-// roster, and clears any stale Disabled entry from a prior lifecycle.
-//
-// Caller must hold b.mu.
-func (b *Broker) createOfficeMemberLocked(w http.ResponseWriter, r *http.Request, slug string, body officeMemberMutationBody) {
+// createOfficeMember persists a new office member, registers any openclaw
+// bridge subscription up front (so a half-configured member is never
+// persisted), seeds the new hire into every non-DM channel's roster, and clears
+// any stale Disabled entry from a prior lifecycle.
+func (b *Broker) createOfficeMember(r *http.Request, slug string, body officeMemberMutationBody) (officeMemberMutationResult, *officeMemberMutationError) {
 	now := time.Now().UTC().Format(time.RFC3339)
+	var bridge *OpenclawBridge
 
-	if b.findMemberLocked(slug) != nil {
-		http.Error(w, "member already exists", http.StatusConflict)
-		return
-	}
 	if body.Provider != nil {
 		if err := provider.ValidateKind(body.Provider.Kind); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
+			return officeMemberMutationResult{}, newOfficeMemberMutationError(http.StatusBadRequest, err.Error())
 		}
 	}
 	member := officeMember{
@@ -170,10 +222,15 @@ func (b *Broker) createOfficeMemberLocked(w http.ResponseWriter, r *http.Request
 		if member.Provider.Openclaw == nil {
 			member.Provider.Openclaw = &provider.OpenclawProviderBinding{}
 		}
-		bridge := b.openclawBridgeLocked()
+		b.mu.Lock()
+		alreadyExists := b.findMemberLocked(slug) != nil
+		bridge = b.openclawBridgeLocked()
+		b.mu.Unlock()
+		if alreadyExists {
+			return officeMemberMutationResult{}, newOfficeMemberMutationError(http.StatusConflict, "member already exists")
+		}
 		if bridge == nil {
-			http.Error(w, "openclaw bridge not active; cannot create openclaw member", http.StatusServiceUnavailable)
-			return
+			return officeMemberMutationResult{}, newOfficeMemberMutationError(http.StatusServiceUnavailable, "openclaw bridge not active; cannot create openclaw member")
 		}
 		if member.Provider.Openclaw.SessionKey == "" {
 			agentID := member.Provider.Openclaw.AgentID
@@ -183,17 +240,32 @@ func (b *Broker) createOfficeMemberLocked(w http.ResponseWriter, r *http.Request
 			label := fmt.Sprintf("wuphf-%s-%d", slug, time.Now().UnixNano())
 			key, err := bridge.CreateSession(r.Context(), agentID, label)
 			if err != nil {
-				http.Error(w, fmt.Sprintf("openclaw sessions.create: %v", err), http.StatusBadGateway)
-				return
+				return officeMemberMutationResult{}, newOfficeMemberMutationError(http.StatusBadGateway, fmt.Sprintf("openclaw sessions.create: %v", err))
 			}
 			member.Provider.Openclaw.SessionKey = key
 		}
 		if err := bridge.AttachSlug(r.Context(), slug, member.Provider.Openclaw.SessionKey); err != nil {
-			http.Error(w, fmt.Sprintf("openclaw subscribe: %v", err), http.StatusBadGateway)
-			return
+			return officeMemberMutationResult{}, newOfficeMemberMutationError(http.StatusBadGateway, fmt.Sprintf("openclaw subscribe: %v", err))
+		}
+	} else {
+		b.mu.Lock()
+		alreadyExists := b.findMemberLocked(slug) != nil
+		b.mu.Unlock()
+		if alreadyExists {
+			return officeMemberMutationResult{}, newOfficeMemberMutationError(http.StatusConflict, "member already exists")
 		}
 	}
 
+	b.mu.Lock()
+	if b.findMemberLocked(slug) != nil {
+		b.mu.Unlock()
+		if member.Provider.Kind == provider.KindOpenclaw && bridge != nil && member.Provider.Openclaw != nil {
+			if err := bridge.DetachSession(r.Context(), slug, member.Provider.Openclaw.SessionKey); err != nil {
+				go bridge.postSystemMessage(fmt.Sprintf("agent %q create-conflict: detach warning: %v", slug, err))
+			}
+		}
+		return officeMemberMutationResult{}, newOfficeMemberMutationError(http.StatusConflict, "member already exists")
+	}
 	b.members = append(b.members, member)
 	b.memberIndex[member.Slug] = len(b.members) - 1
 	// Add the new hire to every non-DM channel's Members list so they
@@ -247,31 +319,120 @@ func (b *Broker) createOfficeMemberLocked(w http.ResponseWriter, r *http.Request
 			updatedChannels = append(updatedChannels, b.channels[i].Slug)
 		}
 	}
-	if err := b.saveLocked(); err != nil {
-		http.Error(w, "failed to persist broker state", http.StatusInternalServerError)
-		return
+	write, err := b.prepareBrokerStateWriteLocked()
+	if err != nil {
+		b.mu.Unlock()
+		return officeMemberMutationResult{}, newOfficeMemberMutationError(http.StatusInternalServerError, "failed to persist broker state")
 	}
-	b.publishOfficeChangeLocked(officeChangeEvent{Kind: "member_created", Slug: slug})
+	b.mu.Unlock()
+	events := []officeChangeEvent{{Kind: "member_created", Slug: slug}}
 	// Notify SSE subscribers that these channels' rosters changed so
 	// the UI sidebar refreshes without requiring a separate trigger.
 	for _, chSlug := range updatedChannels {
-		b.publishOfficeChangeLocked(officeChangeEvent{Kind: "channel_updated", Slug: chSlug})
+		events = append(events, officeChangeEvent{Kind: "channel_updated", Slug: chSlug})
 	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{"member": member})
+	return officeMemberMutationResult{
+		payload: map[string]any{"member": member},
+		events:  events,
+		write:   write,
+	}, nil
 }
 
-// updateOfficeMemberLocked applies a partial update to an existing
-// office member. Provider switches reconcile the openclaw bridge
-// subscription before mutating member.Provider so an attach failure
-// preserves the previous state.
-//
-// Caller must hold b.mu.
-func (b *Broker) updateOfficeMemberLocked(w http.ResponseWriter, r *http.Request, slug string, body officeMemberMutationBody) {
+// updateOfficeMember applies a partial update to an existing office member.
+// Provider switches reconcile the openclaw bridge subscription before mutating
+// member.Provider so an attach failure preserves the previous state.
+func (b *Broker) updateOfficeMember(r *http.Request, slug string, body officeMemberMutationBody) (officeMemberMutationResult, *officeMemberMutationError) {
+	var oldBinding provider.ProviderBinding
+	var newBinding provider.ProviderBinding
+	var providerChanged bool
+	var bridge *OpenclawBridge
+
+	b.mu.Lock()
 	member := b.findMemberLocked(slug)
 	if member == nil {
-		http.Error(w, "member not found", http.StatusNotFound)
-		return
+		b.mu.Unlock()
+		return officeMemberMutationResult{}, newOfficeMemberMutationError(http.StatusNotFound, "member not found")
+	}
+	if body.Provider != nil {
+		if err := provider.ValidateKind(body.Provider.Kind); err != nil {
+			b.mu.Unlock()
+			return officeMemberMutationResult{}, newOfficeMemberMutationError(http.StatusBadRequest, err.Error())
+		}
+		oldBinding = member.Provider
+		newBinding = *body.Provider
+		providerChanged = true
+		bridge = b.openclawBridgeLocked()
+	}
+	b.mu.Unlock()
+
+	if providerChanged {
+		fromOpenclaw := oldBinding.Kind == provider.KindOpenclaw
+		toOpenclaw := newBinding.Kind == provider.KindOpenclaw
+		oldSessionKey := ""
+		if oldBinding.Openclaw != nil {
+			oldSessionKey = oldBinding.Openclaw.SessionKey
+		}
+		newSessionKey := ""
+
+		if toOpenclaw {
+			if bridge == nil {
+				return officeMemberMutationResult{}, newOfficeMemberMutationError(http.StatusServiceUnavailable, "openclaw bridge not active; cannot switch agent to openclaw")
+			}
+			if newBinding.Openclaw == nil {
+				newBinding.Openclaw = &provider.OpenclawProviderBinding{}
+			}
+			if newBinding.Openclaw.SessionKey == "" {
+				agentID := newBinding.Openclaw.AgentID
+				if agentID == "" {
+					agentID = "main"
+				}
+				label := fmt.Sprintf("wuphf-%s-%d", slug, time.Now().UnixNano())
+				key, err := bridge.CreateSession(r.Context(), agentID, label)
+				if err != nil {
+					return officeMemberMutationResult{}, newOfficeMemberMutationError(http.StatusBadGateway, fmt.Sprintf("openclaw sessions.create: %v", err))
+				}
+				newBinding.Openclaw.SessionKey = key
+			}
+			newSessionKey = newBinding.Openclaw.SessionKey
+		}
+
+		// Attach BEFORE detaching the old session so an attach failure
+		// preserves the previous subscription rather than leaving the
+		// agent silently disconnected. Order matters for openclaw→
+		// openclaw swaps in particular: detach-first plus a failed
+		// attach would return 502 with member.Provider still pointing
+		// at the old binding but no live subscription on the gateway.
+		if toOpenclaw {
+			if err := bridge.AttachSlug(r.Context(), slug, newBinding.Openclaw.SessionKey); err != nil {
+				return officeMemberMutationResult{}, newOfficeMemberMutationError(http.StatusBadGateway, fmt.Sprintf("openclaw subscribe: %v", err))
+			}
+		}
+
+		if fromOpenclaw && bridge != nil && oldSessionKey != "" {
+			// Detach old session from subscriptions. Best-effort; log via
+			// the bridge's own system-message channel on failure. The
+			// daemon-side session lingers (no sessions.end method); user
+			// can prune via the OpenClaw CLI if they care.
+			if err := bridge.DetachSession(r.Context(), slug, oldSessionKey); err != nil {
+				go bridge.postSystemMessage(fmt.Sprintf("agent %q provider-switch: detach warning: %v", slug, err))
+			}
+		}
+
+		if toOpenclaw && newSessionKey == "" {
+			return officeMemberMutationResult{}, newOfficeMemberMutationError(http.StatusBadGateway, "openclaw subscribe: missing session key")
+		}
+	}
+
+	b.mu.Lock()
+	member = b.findMemberLocked(slug)
+	if member == nil {
+		b.mu.Unlock()
+		if providerChanged && newBinding.Kind == provider.KindOpenclaw && bridge != nil && newBinding.Openclaw != nil {
+			if err := bridge.DetachSession(r.Context(), slug, newBinding.Openclaw.SessionKey); err != nil {
+				go bridge.postSystemMessage(fmt.Sprintf("agent %q update-conflict: detach warning: %v", slug, err))
+			}
+		}
+		return officeMemberMutationResult{}, newOfficeMemberMutationError(http.StatusNotFound, "member not found")
 	}
 	if body.Name != "" {
 		member.Name = strings.TrimSpace(body.Name)
@@ -291,113 +452,64 @@ func (b *Broker) updateOfficeMemberLocked(w http.ResponseWriter, r *http.Request
 	if body.AllowedTools != nil {
 		member.AllowedTools = normalizeStringList(body.AllowedTools)
 	}
-	if body.Provider != nil {
-		if err := provider.ValidateKind(body.Provider.Kind); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		oldBinding := member.Provider
-		newBinding := *body.Provider
-
-		// Provider switch: reconcile the bridge state best-effort. We
-		// don't block the update on gateway failures — the persisted
-		// binding is the new truth, and a leaked old session is
-		// recoverable via `openclaw sessions list` out-of-band.
-		bridge := b.openclawBridgeLocked()
-
-		fromOpenclaw := oldBinding.Kind == provider.KindOpenclaw
-		toOpenclaw := newBinding.Kind == provider.KindOpenclaw
-
-		if toOpenclaw {
-			if bridge == nil {
-				http.Error(w, "openclaw bridge not active; cannot switch agent to openclaw", http.StatusServiceUnavailable)
-				return
-			}
-			if newBinding.Openclaw == nil {
-				newBinding.Openclaw = &provider.OpenclawProviderBinding{}
-			}
-			if newBinding.Openclaw.SessionKey == "" {
-				agentID := newBinding.Openclaw.AgentID
-				if agentID == "" {
-					agentID = "main"
-				}
-				label := fmt.Sprintf("wuphf-%s-%d", member.Slug, time.Now().UnixNano())
-				key, err := bridge.CreateSession(r.Context(), agentID, label)
-				if err != nil {
-					http.Error(w, fmt.Sprintf("openclaw sessions.create: %v", err), http.StatusBadGateway)
-					return
-				}
-				newBinding.Openclaw.SessionKey = key
-			}
-		}
-
-		// Attach BEFORE detaching the old session so an attach failure
-		// preserves the previous subscription rather than leaving the
-		// agent silently disconnected. Order matters for openclaw→
-		// openclaw swaps in particular: detach-first plus a failed
-		// attach would return 502 with member.Provider still pointing
-		// at the old binding but no live subscription on the gateway.
-		if toOpenclaw {
-			if err := bridge.AttachSlug(r.Context(), member.Slug, newBinding.Openclaw.SessionKey); err != nil {
-				http.Error(w, fmt.Sprintf("openclaw subscribe: %v", err), http.StatusBadGateway)
-				return
-			}
-		}
-
-		if fromOpenclaw && bridge != nil {
-			// Detach old session from subscriptions. Best-effort; log via
-			// the bridge's own system-message channel on failure. The
-			// daemon-side session lingers (no sessions.end method); user
-			// can prune via the OpenClaw CLI if they care.
-			if err := bridge.DetachSlug(r.Context(), member.Slug); err != nil {
-				go bridge.postSystemMessage(fmt.Sprintf("agent %q provider-switch: detach warning: %v", member.Slug, err))
-			}
-		}
-
+	if providerChanged {
 		member.Provider = newBinding
 	}
 	applyOfficeMemberDefaults(member)
-	if err := b.saveLocked(); err != nil {
-		http.Error(w, "failed to persist broker state", http.StatusInternalServerError)
-		return
+	write, err := b.prepareBrokerStateWriteLocked()
+	if err != nil {
+		b.mu.Unlock()
+		return officeMemberMutationResult{}, newOfficeMemberMutationError(http.StatusInternalServerError, "failed to persist broker state")
 	}
-	// Match the create/remove paths so SSE subscribers learn about
-	// updated member metadata (provider switch, name changes,
-	// channel reassignment) instead of waiting for a full reload.
-	b.publishOfficeChangeLocked(officeChangeEvent{Kind: "member_updated", Slug: slug})
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{"member": member})
+	responseMember := *member
+	b.mu.Unlock()
+	// Match the create/remove paths so SSE subscribers learn about updated
+	// member metadata (provider switch, name changes, channel reassignment)
+	// instead of waiting for a full reload.
+	return officeMemberMutationResult{
+		payload: map[string]any{"member": responseMember},
+		events:  []officeChangeEvent{{Kind: "member_updated", Slug: slug}},
+		write:   write,
+	}, nil
 }
 
-// removeOfficeMemberLocked deletes an office member, releases owned
-// tasks, removes the slug from all non-DM channels' Members + Disabled
-// lists, and best-effort detaches any openclaw subscription.
-//
-// Caller must hold b.mu.
-func (b *Broker) removeOfficeMemberLocked(w http.ResponseWriter, r *http.Request, slug string) {
+// removeOfficeMember deletes an office member, releases owned tasks, removes
+// the slug from all non-DM channels' Members + Disabled lists, and best-effort
+// detaches any openclaw subscription.
+func (b *Broker) removeOfficeMember(r *http.Request, slug string) (officeMemberMutationResult, *officeMemberMutationError) {
 	now := time.Now().UTC().Format(time.RFC3339)
 
+	b.mu.Lock()
 	member := b.findMemberLocked(slug)
 	if member == nil {
-		http.Error(w, "member not found", http.StatusNotFound)
-		return
+		b.mu.Unlock()
+		return officeMemberMutationResult{}, newOfficeMemberMutationError(http.StatusNotFound, "member not found")
 	}
 	if member.BuiltIn || slug == "ceo" {
-		http.Error(w, "cannot remove built-in member", http.StatusBadRequest)
-		return
+		b.mu.Unlock()
+		return officeMemberMutationResult{}, newOfficeMemberMutationError(http.StatusBadRequest, "cannot remove built-in member")
 	}
+	memberSnapshot := *member
+	bridge := b.openclawBridgeLocked()
+	b.mu.Unlock()
+
 	// If the member was bridged to OpenClaw, unsubscribe from the
 	// gateway. Best-effort: member removal must succeed even when
 	// the gateway is unreachable. We do NOT call sessions.end because
 	// the current daemon doesn't expose that method — the session
 	// lingers daemon-side and the user can clean it up via the
 	// OpenClaw CLI if they want to reclaim the slot.
-	if member.Provider.Kind == provider.KindOpenclaw {
-		if bridge := b.openclawBridgeLocked(); bridge != nil {
-			if err := bridge.DetachSlug(r.Context(), member.Slug); err != nil {
-				go bridge.postSystemMessage(fmt.Sprintf("agent %q removed: detach warning: %v", member.Slug, err))
-			}
+	if memberSnapshot.Provider.Kind == provider.KindOpenclaw && bridge != nil {
+		if err := bridge.DetachSlug(r.Context(), memberSnapshot.Slug); err != nil {
+			go bridge.postSystemMessage(fmt.Sprintf("agent %q removed: detach warning: %v", memberSnapshot.Slug, err))
 		}
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	member = b.findMemberLocked(slug)
+	if member == nil {
+		return officeMemberMutationResult{}, newOfficeMemberMutationError(http.StatusNotFound, "member not found")
 	}
 	filteredMembers := b.members[:0]
 	for _, existing := range b.members {
@@ -451,14 +563,17 @@ func (b *Broker) removeOfficeMemberLocked(w http.ResponseWriter, r *http.Request
 			b.tasks[i].UpdatedAt = now
 		}
 	}
-	if err := b.saveLocked(); err != nil {
-		http.Error(w, "failed to persist broker state", http.StatusInternalServerError)
-		return
+	write, err := b.prepareBrokerStateWriteLocked()
+	if err != nil {
+		return officeMemberMutationResult{}, newOfficeMemberMutationError(http.StatusInternalServerError, "failed to persist broker state")
 	}
-	b.publishOfficeChangeLocked(officeChangeEvent{Kind: "member_removed", Slug: slug})
+	events := []officeChangeEvent{{Kind: "member_removed", Slug: slug}}
 	for _, chSlug := range removedChannels {
-		b.publishOfficeChangeLocked(officeChangeEvent{Kind: "channel_updated", Slug: chSlug})
+		events = append(events, officeChangeEvent{Kind: "channel_updated", Slug: chSlug})
 	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+	return officeMemberMutationResult{
+		payload: map[string]any{"ok": true},
+		events:  events,
+		write:   write,
+	}, nil
 }

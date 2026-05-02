@@ -24,16 +24,22 @@ type sidebarItem struct {
 }
 
 func (m channelModel) sidebarItemAt(y int) (sidebarItem, bool) {
+	items := m.sidebarItems()
+	if len(items) == 0 {
+		return sidebarItem{}, false
+	}
 	lines := 0
 	lines++ // blank
 	lines++ // WUPHF
 	lines++ // subtitle
 	lines++ // blank
 	lines++ // Channels header
-	items := m.sidebarItems()
 	channelCount := len(m.channels)
 	if channelCount == 0 {
 		channelCount = 1
+	}
+	if channelCount > len(items) {
+		channelCount = len(items)
 	}
 	for i := 0; i < channelCount; i++ {
 		if y == lines {

@@ -37,18 +37,16 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
-	"time"
 )
 
 // generateToken returns a cryptographically random hex token.
 func generateToken() string {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
-		// Fallback: this should never happen on modern systems.
-		return fmt.Sprintf("wuphf-%d", time.Now().UnixNano())
+		// crypto/rand failing means the broker cannot issue a secure token.
+		panic("crypto/rand.Read failed: " + err.Error())
 	}
 	return hex.EncodeToString(b)
 }

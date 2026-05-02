@@ -28,15 +28,13 @@ func (b *Broker) ensureWikiWorker() {
 	if config.ResolveMemoryBackend("") != config.MemoryBackendMarkdown {
 		return
 	}
-	b.mu.Lock()
-	if b.wikiWorker != nil {
-		b.mu.Unlock()
-		return
-	}
-	b.mu.Unlock()
+	b.wikiOnce.Do(b.initWikiWorker)
+}
 
+func (b *Broker) initWikiWorker() {
 	repo := NewRepo()
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	lifecycleCtx := b.brokerLifecycleContext()
+	ctx, cancel := context.WithTimeout(lifecycleCtx, 30*time.Second)
 	defer cancel()
 
 	if err := repo.Init(ctx); err != nil {
@@ -60,7 +58,7 @@ func (b *Broker) ensureWikiWorker() {
 	idx := NewWikiIndex(repo.Root())
 
 	worker := NewWikiWorkerWithIndex(repo, b, idx)
-	worker.Start(context.Background())
+	worker.Start(lifecycleCtx)
 
 	// Wire the extraction loop: artifact commits → extract_entities_lite →
 	// WikiIndex. DLQ lives under <wiki>/.dlq/. Extractor failures never
@@ -74,7 +72,7 @@ func (b *Broker) ensureWikiWorker() {
 	b.wikiIndex = idx
 	b.wikiExtractor = extractor
 	b.wikiDLQ = dlq
-	b.readLog = NewReadLog(WikiRootDir())
+	b.readLog = NewReadLog(repo.Root())
 	b.mu.Unlock()
 
 	// Skill status reconciliation: now that the wiki worker is wired,
@@ -90,7 +88,7 @@ func (b *Broker) ensureWikiWorker() {
 	// the reconcile finishes. If reconcile fails the index is empty but
 	// readable — it will self-heal on the next ReconcilePath call.
 	go func() {
-		bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		bgCtx, cancel := context.WithTimeout(lifecycleCtx, 5*time.Minute)
 		defer cancel()
 		if err := idx.ReconcileFromMarkdown(bgCtx); err != nil {
 			log.Printf("wiki_index: boot reconcile failed: %v", err)
@@ -103,17 +101,26 @@ func (b *Broker) ensureWikiWorker() {
 	// "09:00" local time). Empty string disables the cron (useful in tests).
 	// The goroutine is cancelled by the background context when the broker
 	// shuts down.
-	b.startLintCron(context.Background(), idx, worker)
+	b.startLintCron(lifecycleCtx, idx, worker)
 
 	// Stage A skill-compile cron. Walks the wiki and asks the LLM to extract
 	// candidate skills. Cron runs at WUPHF_SKILL_COMPILE_INTERVAL (default
 	// 30m); cooldown gates back-to-back ticks via WUPHF_SKILL_COMPILE_COOLDOWN
 	// (default 25m). Set the interval to "0" or "disabled" to silence the cron.
-	b.startSkillCompileCron(context.Background())
-	b.startSkillCompileEventListener(context.Background())
+	b.startSkillCompileCron(lifecycleCtx)
+	b.startSkillCompileEventListener(lifecycleCtx)
 
 	// Stage B synthesizer: lazily constructed alongside the Stage A scanner so
 	// the compile cron drives both passes from a single trigger. Tests can
 	// inject a fake via SetSkillSynthesizer.
 	b.ensureSkillSynthesizer()
+}
+
+func (b *Broker) brokerLifecycleContext() context.Context {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.lifecycleCtx == nil {
+		b.lifecycleCtx, b.lifecycleCancel = context.WithCancel(context.Background())
+	}
+	return b.lifecycleCtx
 }

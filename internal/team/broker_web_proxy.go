@@ -29,6 +29,17 @@ import (
 // are wired here for the same reason: this is the file that defines what
 // the public web UI port serves.
 
+var hopByHopHeaders = map[string]struct{}{
+	"connection":          {},
+	"keep-alive":          {},
+	"proxy-authenticate":  {},
+	"proxy-authorization": {},
+	"te":                  {},
+	"trailer":             {},
+	"transfer-encoding":   {},
+	"upgrade":             {},
+}
+
 func (b *Broker) ServeWebUI(port int) error {
 	b.webUIOrigins = []string{
 		fmt.Sprintf("http://localhost:%d", port),
@@ -170,7 +181,11 @@ func (b *Broker) webUIProxyHandler(brokerURL, stripPrefix string) http.Handler {
 		}
 		defer resp.Body.Close()
 
+		skipHeaders := responseHeadersToSkip(resp.Header)
 		for k, v := range resp.Header {
+			if _, skip := skipHeaders[strings.ToLower(k)]; skip {
+				continue
+			}
 			for _, vv := range v {
 				w.Header().Add(k, vv)
 			}
@@ -196,4 +211,18 @@ func (b *Broker) webUIProxyHandler(brokerURL, stripPrefix string) http.Handler {
 		}
 		_, _ = io.Copy(w, resp.Body)
 	})
+}
+
+func responseHeadersToSkip(header http.Header) map[string]struct{} {
+	skip := make(map[string]struct{}, len(hopByHopHeaders))
+	for name := range hopByHopHeaders {
+		skip[name] = struct{}{}
+	}
+	for _, token := range strings.Split(header.Get("Connection"), ",") {
+		token = strings.ToLower(strings.TrimSpace(token))
+		if token != "" {
+			skip[token] = struct{}{}
+		}
+	}
+	return skip
 }

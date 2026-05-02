@@ -95,7 +95,7 @@ func TestMain(m *testing.M) {
 	if rc == 0 && os.Getenv("WUPHF_GOLEAK") != "" {
 		if err := goleak.Find(
 			// runtime/trace background goroutine; not ours.
-			goleak.IgnoreTopFunction("runtime.gopark"),
+			goleak.IgnoreAnyFunction("runtime/trace.(*tracer).goStart"),
 			// HTTP/2 idle conn keep-alive workers from net/http transport.
 			goleak.IgnoreAnyFunction("net/http.(*http2ClientConnReadLoop).run"),
 			goleak.IgnoreAnyFunction("net/http.(*persistConn).readLoop"),

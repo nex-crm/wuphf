@@ -589,8 +589,16 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 			return m, nil
 		}
 		if parts[1] == "retire" {
+			if len(parts) < 3 {
+				m.notice = "Usage: /agent retire <slug>"
+				return m, nil
+			}
 			m.posting = true
 			return m, mutateOfficeMember("remove", parts[2], "")
+		}
+		if len(parts) < 3 {
+			m.notice = "Usage: /agent <add|remove|disable|enable> <slug>, /agent create, /agent edit <slug>, or /agent prompt <request>"
+			return m, nil
 		}
 		m.posting = true
 		return m, mutateChannelMember(m.activeChannel, parts[1], parts[2])

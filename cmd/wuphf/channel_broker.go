@@ -983,7 +983,10 @@ func applyProviderSelection(providerName string) tea.Cmd {
 			return channelInitDoneMsg{err: errors.New("choose a provider")}
 		}
 
-		cfg, _ := config.Load()
+		cfg, err := config.Load()
+		if err != nil {
+			return channelInitDoneMsg{err: fmt.Errorf("load config: %w", err)}
+		}
 		currentProvider := config.ResolveLLMProvider("")
 		cfg.LLMProvider = providerName
 		if err := config.Save(cfg); err != nil {

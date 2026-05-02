@@ -29,6 +29,7 @@ var reservedChannelSlugs = map[string]bool{
 	"nex":    true,
 	"you":    true,
 	"human":  true,
+	"ceo":    true,
 }
 
 func (b *Broker) canAccessChannelLocked(slug, channel string) bool {
@@ -75,7 +76,7 @@ func (b *Broker) channelMemberEnabledLocked(channel, slug string) bool {
 	}
 	ch := b.findChannelLocked(channel)
 	if ch == nil {
-		return false
+		return true
 	}
 	for _, disabled := range ch.Disabled {
 		if disabled == slug {

@@ -104,6 +104,10 @@ func (m MentionModel) SelectedIndex() int {
 	return m.selected
 }
 
+func (m MentionModel) Len() int {
+	return len(m.matches)
+}
+
 func (m *MentionModel) Dismiss() {
 	m.visible = false
 	m.selected = 0
