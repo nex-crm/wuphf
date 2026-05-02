@@ -179,6 +179,33 @@ export function resolvePortraitSprite(slug: string): KnownAvatarSprite {
   return buildProceduralOfficePortrait(normalized);
 }
 
+export function paintPixelAvatarData(
+  data: Uint8ClampedArray,
+  sprite: readonly (readonly number[])[],
+  palette: Record<number, Rgb>,
+  cols: number,
+): void {
+  for (let r = 0; r < sprite.length; r++) {
+    for (let c = 0; c < cols; c++) {
+      const px = sprite[r]?.[c] ?? 0;
+      const idx = (r * cols + c) * 4;
+      if (px === 0) {
+        data[idx] = 0;
+        data[idx + 1] = 0;
+        data[idx + 2] = 0;
+        data[idx + 3] = 0;
+        continue;
+      }
+
+      const rgb = palette[px] ?? ([128, 128, 128] as const);
+      data[idx] = rgb[0];
+      data[idx + 1] = rgb[1];
+      data[idx + 2] = rgb[2];
+      data[idx + 3] = 255;
+    }
+  }
+}
+
 /**
  * Paint a pixel-art agent avatar into an existing canvas element.
  * Known agents render from the generated avatar catalog; everything else gets
@@ -206,25 +233,6 @@ export function drawPixelAvatar(
   if (!ctx) return;
 
   const imgData = ctx.createImageData(cols, rows);
-  for (let r = 0; r < rows; r++) {
-    for (let c = 0; c < cols; c++) {
-      const px = sprite[r][c];
-      const idx = (r * cols + c) * 4;
-      if (px === 0) {
-        imgData.data[idx] = 0;
-        imgData.data[idx + 1] = 0;
-        imgData.data[idx + 2] = 0;
-        imgData.data[idx + 3] = 0;
-        continue;
-      }
-
-      const rgb = palette[px] ?? ([128, 128, 128] as const);
-      imgData.data[idx] = rgb[0];
-      imgData.data[idx + 1] = rgb[1];
-      imgData.data[idx + 2] = rgb[2];
-      imgData.data[idx + 3] = 255;
-    }
-  }
-
+  paintPixelAvatarData(imgData.data, sprite, palette, cols);
   ctx.putImageData(imgData, 0, 0);
 }

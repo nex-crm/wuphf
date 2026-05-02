@@ -10,6 +10,7 @@ import {
 } from "../../api/client";
 import { formatRelativeTime } from "../../lib/format";
 import { showNotice } from "../ui/Toast";
+import { isCadenceSchedulerJob } from "./schedulerJobClassification";
 
 const DEFAULT_FLOOR_MINUTES = 5;
 
@@ -91,12 +92,7 @@ export function SystemSchedulesPanel({ jobs }: SystemSchedulesPanelProps) {
  * they belong in the timeline view below.
  */
 function filterSchedulerRows(jobs: SchedulerJob[]): SchedulerJob[] {
-  return jobs.filter(
-    (j) =>
-      j.system_managed ||
-      typeof j.interval_minutes === "number" ||
-      typeof j.schedule_expr === "string",
-  );
+  return jobs.filter(isCadenceSchedulerJob);
 }
 
 interface ScheduleRowProps {

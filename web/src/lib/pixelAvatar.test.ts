@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import { resolveKnownPortraitSprite } from "./avatarSprites.generated";
-import { getAgentColor, resolvePortraitSprite } from "./pixelAvatar";
+import {
+  getAgentColor,
+  paintPixelAvatarData,
+  resolvePortraitSprite,
+} from "./pixelAvatar";
 
 describe("pixel avatar sprite resolution", () => {
   it("maps operation-created agent slugs into the generated avatar catalog", () => {
@@ -68,5 +72,16 @@ describe("pixel avatar sprite resolution", () => {
     expect(getAgentColor("builder")).toBe(getAgentColor("eng"));
     expect(getAgentColor("growth")).toBe(getAgentColor("gtm"));
     expect(getAgentColor("operator")).toBe(getAgentColor("nex"));
+  });
+
+  it("treats missing cells in short sprite rows as transparent", () => {
+    const data = new Uint8ClampedArray(2 * 2 * 4);
+
+    paintPixelAvatarData(data, [[1], [0, 1]], { 1: [10, 20, 30] }, 2);
+
+    expect(Array.from(data.slice(0, 4))).toEqual([10, 20, 30, 255]);
+    expect(Array.from(data.slice(4, 8))).toEqual([0, 0, 0, 0]);
+    expect(Array.from(data.slice(8, 12))).toEqual([0, 0, 0, 0]);
+    expect(Array.from(data.slice(12, 16))).toEqual([10, 20, 30, 255]);
   });
 });

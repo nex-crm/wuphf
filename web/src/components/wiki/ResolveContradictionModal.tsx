@@ -48,20 +48,20 @@ export default function ResolveContradictionModal({
   const [error, setError] = useState<string | null>(null);
   const backdropRef = useRef<HTMLDivElement>(null);
 
-  // Escape key closes without submitting.
+  // Escape closes only while no write is in flight.
   useEffect(() => {
     function onKeyDown(ev: KeyboardEvent) {
-      if (ev.key === "Escape") {
+      if (ev.key === "Escape" && !submitting) {
         onClose();
       }
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onClose]);
+  }, [onClose, submitting]);
 
-  // Click outside (on backdrop) closes without submitting.
+  // Click outside (on backdrop) closes only while no write is in flight.
   function handleBackdropClick(ev: React.MouseEvent<HTMLDivElement>) {
-    if (ev.target === backdropRef.current) {
+    if (ev.target === backdropRef.current && !submitting) {
       onClose();
     }
   }
