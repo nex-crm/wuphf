@@ -85,6 +85,9 @@ func (a *WikiArchiver) Sweep(ctx context.Context) (SweepResult, error) {
 		if werr != nil {
 			return werr
 		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		// Skip hidden entries and non-catalog subtrees (inbox = raw ingests,
 		// skills = generated output). These are not lifecycle-managed articles.
 		if d.IsDir() {
@@ -162,6 +165,9 @@ func (a *WikiArchiver) Sweep(ctx context.Context) (SweepResult, error) {
 	var result SweepResult
 	result.Skipped = skipped
 	for _, c := range toArchive {
+		if ctx.Err() != nil {
+			return result, ctx.Err()
+		}
 		if err := a.archiveOne(ctx, c.relPath, c.content, cutoffDays); err != nil {
 			if errors.Is(err, errArchiveCandidateChanged) {
 				result.Skipped++
