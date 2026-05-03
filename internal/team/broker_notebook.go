@@ -162,13 +162,8 @@ func (b *Broker) handleNotebookWrite(w http.ResponseWriter, r *http.Request) {
 			Path:      body.Path,
 			CommitSHA: sha,
 		})
-		if recordErr != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": recordErr.Error()})
-			return
-		}
-		if !found {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "task not found"})
-			return
+		if recordErr != nil || !found {
+			log.Printf("notebook: write committed but task memory capture not recorded (task_id=%q, found=%v, err=%v)", taskID, found, recordErr)
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{

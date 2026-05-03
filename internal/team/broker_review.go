@@ -277,13 +277,8 @@ func (b *Broker) handleNotebookPromote(w http.ResponseWriter, r *http.Request) {
 			PromotionID: promotion.ID,
 			State:       string(promotion.State),
 		})
-		if recordErr != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": recordErr.Error()})
-			return
-		}
-		if !found {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "task not found"})
-			return
+		if recordErr != nil || !found {
+			log.Printf("notebook: promotion submitted but task memory promotion not recorded (task_id=%q, promotion_id=%q, found=%v, err=%v)", taskID, promotion.ID, found, recordErr)
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
