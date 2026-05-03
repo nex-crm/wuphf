@@ -90,6 +90,33 @@ async function scrollMetrics(section: Locator): Promise<{
   });
 }
 
+async function waitForScrollSettle(section: Locator): Promise<void> {
+  await section.evaluate(
+    (el) =>
+      new Promise<void>((resolve) => {
+        let lastScrollTop = el.scrollTop;
+        let stableFrames = 0;
+        let frames = 0;
+
+        const check = () => {
+          frames += 1;
+          const currentScrollTop = el.scrollTop;
+          stableFrames =
+            currentScrollTop === lastScrollTop ? stableFrames + 1 : 0;
+          lastScrollTop = currentScrollTop;
+
+          if (stableFrames >= 2 || frames >= 20) {
+            resolve();
+            return;
+          }
+          requestAnimationFrame(check);
+        };
+
+        requestAnimationFrame(check);
+      }),
+  );
+}
+
 async function expectWheelCanReach(
   page: Page,
   section: Locator,
@@ -117,6 +144,7 @@ async function expectWheelCanReach(
   await section.hover();
   for (let i = 0; i < 8; i += 1) {
     await page.mouse.wheel(0, 1600);
+    await waitForScrollSettle(section);
     const current = await scrollMetrics(section);
     if (current.scrollTop + current.clientHeight >= current.scrollHeight - 2) {
       break;
