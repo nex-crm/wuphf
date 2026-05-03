@@ -1,11 +1,14 @@
 package team
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/nex-crm/wuphf/internal/company"
 )
 
 // Regression for the title-collision bug: SlugifyTelegramTitle is title-only,
@@ -72,6 +75,61 @@ func TestCreateTelegramChannelRejectsNonTelegramSurface(t *testing.T) {
 	}
 	if ch := b.findChannelLocked("standup"); ch == nil || ch.Surface != nil {
 		t.Fatalf("connect into non-telegram channel: surface mutated: %+v", ch)
+	}
+}
+
+// Regression for the "unknown members" bug: the manifest lists agents like
+// "planner", "executor", "reviewer" that may not yet be adopted as broker
+// members. Before the fix, createTelegramChannel passed all manifest slugs
+// to createChannelLocked, which rejected any unadopted slug with a 404.
+// After the fix, unadopted slugs are silently dropped and the connect
+// succeeds with only the adopted members.
+func TestCreateTelegramChannelSkipsUnadoptedManifestMembers(t *testing.T) {
+	b := newTestBroker(t)
+	defer b.Stop()
+
+	// Simulate a broker that was seeded with a custom member set — only "ceo".
+	// "planner" and "executor" are desired-state in the manifest but have not
+	// yet been adopted (e.g. the office was bootstrapped from a custom
+	// blueprint, or agents haven't connected yet).
+	b.mu.Lock()
+	b.members = []officeMember{{Slug: "ceo", Name: "CEO", BuiltIn: true}}
+	b.memberIndex = nil // force lazy rebuild on next findMemberLocked
+	b.mu.Unlock()
+
+	// Write a manifest that lists "planner" and "executor" as desired members.
+	manifestPath := filepath.Join(t.TempDir(), "company.json")
+	raw, err := json.Marshal(company.Manifest{
+		Lead: "ceo",
+		Members: []company.MemberSpec{
+			{Slug: "planner"},
+			{Slug: "executor"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manifestPath, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WUPHF_COMPANY_FILE", manifestPath)
+
+	// The connect must succeed — no "unknown members" error — even though
+	// "planner" and "executor" are not adopted in the broker.
+	ch, err := b.createTelegramChannel("standup", "Standup", 100, "group")
+	if err != nil {
+		t.Fatalf("createTelegramChannel with unadopted manifest members: unexpected error: %v", err)
+	}
+	if ch == nil {
+		t.Fatal("createTelegramChannel returned nil channel")
+	}
+
+	// Unadopted slugs must be absent from the channel — only "ceo" (always
+	// prepended by createChannelLocked) should be present.
+	for _, slug := range ch.Members {
+		if slug == "planner" || slug == "executor" {
+			t.Errorf("channel members contain unadopted slug %q: %v", slug, ch.Members)
+		}
 	}
 }
 
