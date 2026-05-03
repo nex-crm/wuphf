@@ -120,6 +120,7 @@ func (b *Broker) handleNotebookWrite(w http.ResponseWriter, r *http.Request) {
 	}
 	var body struct {
 		Slug          string `json:"slug"`
+		TaskID        string `json:"task_id"`
 		Path          string `json:"path"`
 		Content       string `json:"content"`
 		Mode          string `json:"mode"`
@@ -127,6 +128,11 @@ func (b *Broker) handleNotebookWrite(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, `{"error":"invalid json"}`, http.StatusBadRequest)
+		return
+	}
+	taskID := strings.TrimSpace(body.TaskID)
+	if taskID != "" && !b.notebookTaskExists(taskID) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "task not found"})
 		return
 	}
 	sha, n, err := worker.NotebookWrite(r.Context(), body.Slug, body.Path, body.Content, body.Mode, body.CommitMessage)
@@ -148,6 +154,17 @@ func (b *Broker) handleNotebookWrite(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		}
 		return
+	}
+	if taskID != "" {
+		_, found, _, recordErr := b.RecordTaskMemoryCapture(taskID, body.Slug, MemoryWorkflowArtifact{
+			Backend:   "markdown",
+			Source:    "notebook",
+			Path:      body.Path,
+			CommitSHA: sha,
+		})
+		if recordErr != nil || !found {
+			log.Printf("notebook: write committed but task memory capture not recorded (task_id=%q, found=%v, err=%v)", taskID, found, recordErr)
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"path":          body.Path,
@@ -419,7 +436,8 @@ func (b *Broker) handleNotebookCatalog(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleNotebookSearch runs a literal substring search scoped to one agent.
+// handleNotebookSearch runs a literal substring search scoped to one agent, or
+// to every notebook shelf when slug=all.
 //
 //	GET /notebook/search?slug={slug}&q={pattern}
 func (b *Broker) handleNotebookSearch(w http.ResponseWriter, r *http.Request) {
@@ -442,16 +460,107 @@ func (b *Broker) handleNotebookSearch(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "q is required"})
 		return
 	}
-	hits, err := worker.NotebookSearch(slug, pattern)
-	if err != nil {
-		if isNotebookValidationError(err) {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-			return
-		}
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	taskID := strings.TrimSpace(r.URL.Query().Get("task_id"))
+	if taskID != "" && !b.notebookTaskExists(taskID) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "task not found"})
 		return
 	}
+	var hits []WikiSearchHit
+	if strings.EqualFold(slug, "all") {
+		searchSlugs, err := b.notebookSearchSlugs(worker)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		for _, searchSlug := range searchSlugs {
+			slugHits, err := worker.NotebookSearch(searchSlug, pattern)
+			if err != nil {
+				if isNotebookValidationError(err) {
+					writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+					return
+				}
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				return
+			}
+			hits = append(hits, slugHits...)
+		}
+	} else {
+		slugHits, err := worker.NotebookSearch(slug, pattern)
+		if err != nil {
+			if isNotebookValidationError(err) {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		hits = slugHits
+	}
+	if taskID != "" {
+		actor := strings.TrimSpace(r.URL.Query().Get("actor"))
+		citations := make([]ContextCitation, 0, len(hits))
+		for _, hit := range hits {
+			citations = append(citations, ContextCitation{
+				Backend:   "markdown",
+				Source:    "notebook",
+				Path:      hit.Path,
+				LineStart: hit.Line,
+				LineEnd:   hit.Line,
+				Snippet:   hit.Snippet,
+			})
+		}
+		_, found, _, recordErr := b.RecordTaskMemoryLookup(taskID, actor, pattern, citations)
+		if recordErr != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": recordErr.Error()})
+			return
+		}
+		if !found {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "task not found"})
+			return
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"hits": hits})
+}
+
+func (b *Broker) notebookTaskExists(taskID string) bool {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return true
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, task := range b.tasks {
+		if task.ID == taskID {
+			return true
+		}
+	}
+	return false
+}
+
+func (b *Broker) notebookSearchSlugs(worker *WikiWorker) ([]string, error) {
+	seen := map[string]struct{}{}
+	if worker != nil {
+		notebookSlugs, err := worker.AgentsWithNotebooks()
+		if err != nil {
+			return nil, err
+		}
+		for _, slug := range notebookSlugs {
+			if trimmed := strings.TrimSpace(slug); trimmed != "" {
+				seen[trimmed] = struct{}{}
+			}
+		}
+	}
+	for _, member := range b.OfficeMembers() {
+		if trimmed := strings.TrimSpace(member.Slug); trimmed != "" {
+			seen[trimmed] = struct{}{}
+		}
+	}
+	slugs := make([]string, 0, len(seen))
+	for slug := range seen {
+		slugs = append(slugs, slug)
+	}
+	sort.Strings(slugs)
+	return slugs, nil
 }
 
 // isNotebookValidationError returns true for errors produced by the notebook
