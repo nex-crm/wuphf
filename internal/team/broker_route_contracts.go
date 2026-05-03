@@ -1,6 +1,9 @@
 package team
 
-import "net/http"
+import (
+	"net/http"
+	"strings"
+)
 
 const (
 	// RouteMethodAny marks legacy routes that do not enforce a method yet.
@@ -262,10 +265,38 @@ func (b *Broker) registerTaskRoutes(mux *http.ServeMux) {
 
 func (b *Broker) routeHandler(route brokerRoute) http.HandlerFunc {
 	handler := route.handler(b)
+	if allowedMethods, enforce := routeAllowedMethods(route.contract.Method); enforce {
+		next := handler
+		handler = func(w http.ResponseWriter, r *http.Request) {
+			for _, method := range allowedMethods {
+				if r.Method == method {
+					next(w, r)
+					return
+				}
+			}
+			w.Header().Set("Allow", strings.Join(allowedMethods, ", "))
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	}
 	switch route.contract.Auth {
 	case RouteAuthBearer:
 		return b.withAuth(handler)
 	default:
 		return handler
 	}
+}
+
+func routeAllowedMethods(contractMethod string) ([]string, bool) {
+	contractMethod = strings.TrimSpace(contractMethod)
+	if contractMethod == "" || contractMethod == RouteMethodAny {
+		return nil, false
+	}
+	parts := strings.Split(contractMethod, "|")
+	allowed := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if method := strings.TrimSpace(part); method != "" {
+			allowed = append(allowed, method)
+		}
+	}
+	return allowed, len(allowed) > 0
 }

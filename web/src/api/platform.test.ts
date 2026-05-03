@@ -15,8 +15,19 @@ describe("platform api client", () => {
   it("getHealth calls the health contract", async () => {
     const response: api.HealthResponse = {
       status: "ok",
+      session_mode: "team",
+      one_on_one_agent: "",
+      focus_mode: false,
       provider: "openai",
       provider_model: "gpt-5.2",
+      memory_backend: "nex",
+      memory_backend_active: "nex",
+      memory_backend_ready: true,
+      nex_connected: true,
+      build: {
+        version: "0.84.0",
+        build_timestamp: "2026-05-02T12:00:00Z",
+      },
     };
     const getSpy = vi.spyOn(client, "get").mockResolvedValue(response);
 
@@ -37,8 +48,25 @@ describe("platform api client", () => {
 
   it("getUsage calls the usage contract", async () => {
     const response: api.UsageData = {
-      total: { cost_usd: 1.23, total_tokens: 1200 },
-      session: { total_tokens: 1200 },
+      total: {
+        input_tokens: 700,
+        output_tokens: 400,
+        cache_read_tokens: 100,
+        cache_creation_tokens: 0,
+        total_tokens: 1200,
+        cost_usd: 1.23,
+        requests: 2,
+      },
+      session: {
+        input_tokens: 700,
+        output_tokens: 400,
+        cache_read_tokens: 100,
+        cache_creation_tokens: 0,
+        total_tokens: 1200,
+        cost_usd: 1.23,
+        requests: 2,
+      },
+      since: "2026-05-02T12:00:00Z",
     };
     const getSpy = vi.spyOn(client, "get").mockResolvedValue(response);
 

@@ -139,10 +139,44 @@ The examples below assume `wuphf` is on your `PATH`. If you just built the binar
 
 ```bash
 wuphf init          # First-time setup
+wuphf share         # Invite one co-founder over Tailscale/WireGuard
 wuphf shred         # Delete workspace state and reopen onboarding
 wuphf --1o1         # 1:1 with the CEO
 wuphf --1o1 cro     # 1:1 with a specific agent
 ```
+
+## Share With a Co-founder
+
+Prerequisite: both machines are on the same Tailscale or WireGuard network.
+
+```bash
+wuphf share
+```
+
+Send the printed `/join` URL to one co-founder. The invite is one use, expires after 24 hours, and the shared web listener only starts on a private-network address by default. Public interfaces are blocked unless you pass an explicit unsafe override.
+
+For the full founder-to-founder walkthrough, see [Share WUPHF With a Co-founder](docs/tutorials/share-with-cofounder.md).
+
+## Publishing skills
+
+Once a team-authored skill exists at `team/skills/<slug>.md`, you can publish it to the public agent-skill commons or pull a community skill back into your wiki. Publish opens a real PR via `gh`; install fetches a public raw `SKILL.md` and installs it as an active skill in the local team wiki.
+
+```bash
+# Publish your team's deploy skill to the Anthropic skills marketplace
+wuphf skills publish deploy-frontend --to anthropics
+
+# Dry-run the same publish to inspect the manifest + PR body without opening the PR
+wuphf skills publish deploy-frontend --to anthropics --dry-run
+
+# Publish to a custom GitHub repo (optionally pinning a non-main branch)
+wuphf skills publish deploy-frontend --to github:nex-crm/wuphf-skills
+wuphf skills publish deploy-frontend --to github:nex-crm/wuphf-skills@master
+
+# Pull a community skill into your team's wiki
+wuphf skills install web-research --from anthropics
+```
+
+Supported hubs: `anthropics`, `lobehub`, or any `github:owner/repo[@branch]`. Custom GitHub hubs default to `main` unless a branch is specified. Publish requires `gh auth login` first; install only needs network access since it fetches public raw URLs.
 
 ## What You Should See
 

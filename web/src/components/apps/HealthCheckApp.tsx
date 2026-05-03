@@ -40,10 +40,42 @@ export function HealthCheckApp() {
   }
 
   const status = data?.status ?? "unknown";
-  const agents = data?.agents ?? {};
-  const agentSlugs = Object.keys(agents).sort();
-
   const isHealthy = status === "ok" || status === "healthy";
+  const providerLabel = [data?.provider, data?.provider_model]
+    .filter(Boolean)
+    .join(" / ");
+  const sessionLabel =
+    data?.session_mode === "one_on_one" && data.one_on_one_agent
+      ? `${data.session_mode} / ${data.one_on_one_agent}`
+      : data?.session_mode;
+  const memoryLabel = data?.memory_backend_active || data?.memory_backend;
+  const runtimeItems = [
+    {
+      label: "Session",
+      value: sessionLabel || "unknown",
+      active: Boolean(data?.session_mode),
+    },
+    {
+      label: "Provider",
+      value: providerLabel || "unknown",
+      active: Boolean(data?.provider),
+    },
+    {
+      label: "Memory",
+      value: memoryLabel || "none",
+      active: Boolean(data?.memory_backend_ready),
+    },
+    {
+      label: "Nex",
+      value: data?.nex_connected ? "connected" : "disconnected",
+      active: Boolean(data?.nex_connected),
+    },
+    {
+      label: "Build",
+      value: data?.build?.version ?? "unknown",
+      active: Boolean(data?.build?.version),
+    },
+  ];
 
   return (
     <>
@@ -85,69 +117,63 @@ export function HealthCheckApp() {
         </div>
       </div>
 
-      {/* Agent health */}
-      {agentSlugs.length > 0 && (
-        <>
-          <div
-            style={{
-              fontSize: 11,
-              fontWeight: 600,
-              textTransform: "uppercase",
-              letterSpacing: "0.05em",
-              color: "var(--text-tertiary)",
-              padding: "8px 0 6px",
-            }}
-          >
-            Agents ({agentSlugs.length})
-          </div>
-          {agentSlugs.map((slug) => {
-            const agentInfo = agents[slug] as
-              | Record<string, unknown>
-              | undefined;
-            const agentStatus = agentInfo?.status as string | undefined;
-            const agentHealthy =
-              agentStatus === "ok" ||
-              agentStatus === "healthy" ||
-              agentStatus === "active";
-
-            return (
-              <div
-                key={slug}
-                className="app-card"
-                style={{
-                  marginBottom: 6,
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                }}
-              >
-                <span
-                  className={`status-dot ${agentHealthy ? "active" : ""}`}
-                />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 500, fontSize: 13 }}>{slug}</div>
-                  {agentStatus ? (
-                    <div className="app-card-meta">{agentStatus}</div>
-                  ) : null}
-                </div>
-              </div>
-            );
-          })}
-        </>
-      )}
-
-      {agentSlugs.length === 0 && (
+      <div
+        style={{
+          fontSize: 11,
+          fontWeight: 600,
+          textTransform: "uppercase",
+          letterSpacing: "0.05em",
+          color: "var(--text-tertiary)",
+          padding: "8px 0 6px",
+        }}
+      >
+        Runtime
+      </div>
+      {runtimeItems.map((item) => (
         <div
+          key={item.label}
+          className="app-card"
           style={{
-            padding: "20px 0",
-            textAlign: "center",
-            color: "var(--text-tertiary)",
-            fontSize: 13,
+            marginBottom: 6,
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
           }}
         >
-          No agent health data available.
+          <span className={`status-dot ${item.active ? "active" : ""}`} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontWeight: 500, fontSize: 13 }}>{item.label}</div>
+            <div
+              className="app-card-meta"
+              style={{
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {item.value}
+            </div>
+          </div>
         </div>
-      )}
+      ))}
+
+      {data?.focus_mode ? (
+        <div
+          className="app-card"
+          style={{
+            marginTop: 12,
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+          }}
+        >
+          <span className="status-dot active" />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontWeight: 500, fontSize: 13 }}>Focus Mode</div>
+            <div className="app-card-meta">enabled</div>
+          </div>
+        </div>
+      ) : null}
     </>
   );
 }

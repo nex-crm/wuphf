@@ -76,7 +76,7 @@ func (b *Broker) handleGetTasks(w http.ResponseWriter, r *http.Request) {
 		StatusFilter: strings.TrimSpace(r.URL.Query().Get("status")),
 		MySlug:       strings.TrimSpace(r.URL.Query().Get("my_slug")),
 		ViewerSlug:   strings.TrimSpace(r.URL.Query().Get("viewer_slug")),
-		Channel:      r.URL.Query().Get("channel"),
+		Channel:      strings.TrimSpace(r.URL.Query().Get("channel")),
 		AllChannels:  strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("all_channels")), "true"),
 		IncludeDone:  strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("include_done")), "true"),
 	})

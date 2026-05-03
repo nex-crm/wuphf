@@ -12,6 +12,8 @@
 !/docs/evals/**
 !/docs/experiments/
 !/docs/experiments/**
+!/docs/tutorials/
+!/docs/tutorials/**
 !/docs/REVOPS_TEST_PLAN.md
 !/docs/CODE-QUALITY.md
 !/docs/surfaces.md
