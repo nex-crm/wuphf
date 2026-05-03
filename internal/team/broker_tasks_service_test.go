@@ -130,6 +130,100 @@ func TestAckTaskRejectsInvalidOwnerAndMissingTask(t *testing.T) {
 	}
 }
 
+func TestMutateTaskCreatesAndCompletesTask(t *testing.T) {
+	b := newTestBroker(t)
+	b.channels = []teamChannel{
+		{Slug: "general", Name: "general", Members: []string{"pm"}},
+	}
+
+	created, err := b.MutateTask(TaskPostRequest{
+		Action:    "create",
+		Channel:   "general",
+		Title:     "Write the plan",
+		Owner:     "alice",
+		CreatedBy: "pm",
+	})
+	if err != nil {
+		t.Fatalf("MutateTask create: %v", err)
+	}
+	if created.Task.ID == "" {
+		t.Fatal("expected task id")
+	}
+	if created.Task.Status != "in_progress" {
+		t.Fatalf("created status: want in_progress, got %q", created.Task.Status)
+	}
+	if len(b.tasks) != 1 || b.tasks[0].ID != created.Task.ID {
+		t.Fatalf("expected broker state to include created task, got %+v", b.tasks)
+	}
+
+	updated, err := b.MutateTask(TaskPostRequest{
+		Action:    "complete",
+		ID:        created.Task.ID,
+		Channel:   "general",
+		CreatedBy: "pm",
+	})
+	if err != nil {
+		t.Fatalf("MutateTask complete: %v", err)
+	}
+	if updated.Task.Status != "done" {
+		t.Fatalf("updated status: want done, got %q", updated.Task.Status)
+	}
+	if b.tasks[0].Status != "done" {
+		t.Fatalf("expected broker state to be updated, got %+v", b.tasks[0])
+	}
+}
+
+func TestMutateTaskReturnsTypedErrors(t *testing.T) {
+	b := newTestBroker(t)
+	b.channels = []teamChannel{
+		{Slug: "general", Name: "general", Members: []string{"pm"}},
+		{Slug: "private", Name: "private", Members: []string{"ceo"}},
+	}
+	b.tasks = []teamTask{
+		{ID: "task-1", Channel: "general", Title: "Task", Owner: "alice", Status: "open"},
+	}
+
+	cases := []struct {
+		name string
+		req  TaskPostRequest
+		kind TaskMutationErrorKind
+	}{
+		{
+			name: "missing create title",
+			req:  TaskPostRequest{Action: "create", Channel: "general", CreatedBy: "pm"},
+			kind: TaskMutationInvalid,
+		},
+		{
+			name: "channel access denied",
+			req:  TaskPostRequest{Action: "create", Channel: "private", Title: "Secret", CreatedBy: "pm"},
+			kind: TaskMutationForbidden,
+		},
+		{
+			name: "missing task",
+			req:  TaskPostRequest{Action: "claim", ID: "missing", Channel: "general", Owner: "alice", CreatedBy: "pm"},
+			kind: TaskMutationNotFound,
+		},
+		{
+			name: "unknown action",
+			req:  TaskPostRequest{Action: "bogus", ID: "task-1", Channel: "general", CreatedBy: "pm"},
+			kind: TaskMutationInvalid,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := b.MutateTask(tc.req)
+			var mutationErr *TaskMutationError
+			if !errors.As(err, &mutationErr) {
+				t.Fatalf("expected TaskMutationError, got %v", err)
+			}
+			if mutationErr.Kind != tc.kind {
+				t.Fatalf("kind: want %q, got %q", tc.kind, mutationErr.Kind)
+			}
+		})
+	}
+}
+
 func assertTaskIDs(t *testing.T, tasks []teamTask, want []string) {
 	t.Helper()
 	got := make([]string, 0, len(tasks))
