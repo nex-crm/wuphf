@@ -7,6 +7,8 @@ const {
   readHistory,
   pushHistory,
   resolveLeadSlug,
+  unknownSlashCommandMessage,
+  handleSlashCommand,
   askPrefix,
   COMPOSER_HISTORY_LIMIT,
 } = __test__;
@@ -94,5 +96,25 @@ describe("askPrefix", () => {
   it("defaults to @ceo", () => {
     expect(askPrefix(undefined)).toBe("@ceo ");
     expect(askPrefix("")).toBe("@ceo ");
+  });
+});
+
+describe("unknown slash commands", () => {
+  it("names the command and points to help", () => {
+    expect(unknownSlashCommandMessage("/object list")).toBe(
+      "Unknown command: /object. Try /help.",
+    );
+  });
+
+  it("are consumed instead of sent as chat messages", () => {
+    const sendAsMessage = vi.fn();
+
+    const consumed = handleSlashCommand("/object list", {
+      leadSlug: "ceo",
+      sendAsMessage,
+    });
+
+    expect(consumed).toBe(true);
+    expect(sendAsMessage).not.toHaveBeenCalled();
   });
 });
