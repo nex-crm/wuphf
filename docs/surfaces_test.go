@@ -85,7 +85,7 @@ func architectureDomains(t *testing.T, md string) map[string]bool {
 	domains := make(map[string]bool)
 	lines := strings.Split(md, "\n")
 	inMatrix := false
-	for _, line := range lines {
+	for i, line := range lines {
 		trimmed := strings.TrimSpace(line)
 		switch {
 		case strings.HasPrefix(trimmed, "| Domain | Owns |"):
@@ -94,6 +94,10 @@ func architectureDomains(t *testing.T, md string) map[string]bool {
 		case !inMatrix:
 			continue
 		case trimmed == "":
+			next := nextNonEmptyLine(lines, i+1)
+			if strings.HasPrefix(next, "|") {
+				t.Fatalf("unexpected blank line inside domain matrix at line %d before %q", i+1, next)
+			}
 			return domains
 		case strings.HasPrefix(trimmed, "|---"):
 			continue
@@ -116,7 +120,7 @@ func parityMatrixRows(t *testing.T, md string) [][]string {
 	lines := strings.Split(md, "\n")
 	inMatrix := false
 	var rows [][]string
-	for _, line := range lines {
+	for i, line := range lines {
 		trimmed := strings.TrimSpace(line)
 		switch {
 		case trimmed == parityMatrixHeader:
@@ -125,6 +129,10 @@ func parityMatrixRows(t *testing.T, md string) [][]string {
 		case !inMatrix:
 			continue
 		case trimmed == "":
+			next := nextNonEmptyLine(lines, i+1)
+			if strings.HasPrefix(next, "|") {
+				t.Fatalf("unexpected blank line inside capability parity matrix at line %d before %q", i+1, next)
+			}
 			return rows
 		case strings.HasPrefix(trimmed, "|---"):
 			continue
@@ -139,6 +147,15 @@ func parityMatrixRows(t *testing.T, md string) [][]string {
 		rows = append(rows, cells)
 	}
 	return rows
+}
+
+func nextNonEmptyLine(lines []string, start int) string {
+	for _, line := range lines[start:] {
+		if trimmed := strings.TrimSpace(line); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }
 
 func markdownCells(line string) []string {

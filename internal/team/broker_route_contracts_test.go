@@ -195,6 +195,26 @@ func TestRegisterTaskRoutesProtectsBearerRoutes(t *testing.T) {
 	}
 }
 
+func TestRouteHandlerRejectsWrongMethodWithValidBearer(t *testing.T) {
+	b := newTestBroker(t)
+	b.token = "route-contract-token"
+	mux := http.NewServeMux()
+	b.registerPlatformRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodGet, "/upgrade/run", nil)
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	rec := httptest.NewRecorder()
+
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("want 405 for authenticated wrong method, got %d", rec.Code)
+	}
+	if allow := rec.Header().Get("Allow"); allow != http.MethodPost {
+		t.Fatalf("Allow: want %q, got %q", http.MethodPost, allow)
+	}
+}
+
 func routeContractsByPath(routes []RouteContract) map[string]RouteContract {
 	out := make(map[string]RouteContract, len(routes))
 	for _, route := range routes {

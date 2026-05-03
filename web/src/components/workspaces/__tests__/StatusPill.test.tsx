@@ -49,12 +49,25 @@ function renderPill(usage?: UsageData, override?: string) {
   );
 }
 
+function usageData(totalTokens: number): UsageData {
+  const totals = {
+    input_tokens: totalTokens,
+    output_tokens: 0,
+    cache_read_tokens: 0,
+    cache_creation_tokens: 0,
+    total_tokens: totalTokens,
+    cost_usd: 0,
+    requests: totalTokens > 0 ? 1 : 0,
+  };
+  return {
+    total: totals,
+    session: totals,
+  };
+}
+
 describe("<StatusPill>", () => {
   beforeEach(() => {
-    getUsageMock.mockResolvedValue({
-      total: { cost_usd: 0, total_tokens: 12_400 },
-      session: { total_tokens: 12_400 },
-    });
+    getUsageMock.mockResolvedValue(usageData(12_400));
   });
   afterEach(() => {
     vi.clearAllMocks();
@@ -75,7 +88,7 @@ describe("<StatusPill>", () => {
       "main",
     );
 
-    renderPill({ session: { total_tokens: 1_200 } });
+    renderPill(usageData(1_200));
 
     const pill = screen.getByTestId("workspace-status-pill");
     expect(pill.textContent).toContain("main");
@@ -97,7 +110,7 @@ describe("<StatusPill>", () => {
       "main",
     );
 
-    renderPill({ session: { total_tokens: 2_500_000 } });
+    renderPill(usageData(2_500_000));
     expect(screen.getByTestId("workspace-status-pill").textContent).toContain(
       "2.5M",
     );
@@ -105,7 +118,7 @@ describe("<StatusPill>", () => {
 
   it("uses the override workspace name when provided", () => {
     setListData([], undefined);
-    renderPill({ session: { total_tokens: 0 } }, "demo-launch");
+    renderPill(usageData(0), "demo-launch");
 
     expect(screen.getByTestId("workspace-status-pill").textContent).toContain(
       "demo-launch",
@@ -114,7 +127,7 @@ describe("<StatusPill>", () => {
 
   it("falls back to 'main' when no active workspace is reported", () => {
     setListData([], undefined);
-    renderPill({ session: { total_tokens: 50 } });
+    renderPill(usageData(50));
 
     expect(screen.getByTestId("workspace-status-pill").textContent).toContain(
       "main",
