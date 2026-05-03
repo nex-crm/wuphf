@@ -59,6 +59,15 @@ func TestStubProvider_EmptyText(t *testing.T) {
 	}
 }
 
+func TestStubProvider_CancelledContext(t *testing.T) {
+	p := NewStubProvider()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := p.Embed(ctx, "deploy prod pipeline smoke tests"); err != context.Canceled {
+		t.Fatalf("cancelled context: got %v want %v", err, context.Canceled)
+	}
+}
+
 func TestStubProvider_BatchPreservesOrder(t *testing.T) {
 	p := NewStubProvider()
 	texts := []string{"first", "second", "third"}

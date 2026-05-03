@@ -102,23 +102,16 @@ func TestOpenAIProvider_AuthHeader(t *testing.T) {
 }
 
 func TestOpenAIProvider_ContextTimeout(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		// Block long enough that the context-supplied deadline fires.
-		time.Sleep(100 * time.Millisecond)
-		w.WriteHeader(http.StatusOK)
-	}))
-	t.Cleanup(server.Close)
-
 	provider := &openAIProvider{
 		apiKey:     "test-key",
-		baseURL:    server.URL,
+		baseURL:    "https://example.invalid",
 		model:      "text-embedding-3-small",
 		dimension:  defaultOpenAIDim,
-		httpClient: &http.Client{Timeout: 5 * time.Second},
+		httpClient: &http.Client{Transport: contextErrorRoundTripper{}},
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
-	defer cancel()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
 
 	_, err := provider.Embed(ctx, "hello")
 	if err == nil {
@@ -127,6 +120,12 @@ func TestOpenAIProvider_ContextTimeout(t *testing.T) {
 	if !strings.Contains(err.Error(), "context") && !strings.Contains(err.Error(), "deadline") {
 		t.Errorf("expected context-related error, got %v", err)
 	}
+}
+
+type contextErrorRoundTripper struct{}
+
+func (contextErrorRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	return nil, req.Context().Err()
 }
 
 func TestOpenAIProvider_NonOKStatus(t *testing.T) {
@@ -205,6 +204,9 @@ func TestOpenAIProvider_RealEnvSkipped(t *testing.T) {
 	// pure skip — it documents the contract.
 	if k := strings.TrimSpace(envGet("OPENAI_API_KEY")); k != "" {
 		t.Skip("OPENAI_API_KEY is set: a separate live-integration test should cover the real endpoint")
+	}
+	if k := strings.TrimSpace(envGet("VOYAGE_API_KEY")); k != "" {
+		t.Skip("VOYAGE_API_KEY is set: a separate live-integration test should cover the real endpoint")
 	}
 	if got := NewDefault().Name(); got != "local-stub" {
 		t.Errorf("expected stub fallback in CI, got %q", got)

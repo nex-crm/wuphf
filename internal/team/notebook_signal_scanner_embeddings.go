@@ -101,7 +101,13 @@ func (s *NotebookSignalScanner) clusterNotebookEntriesByEmbedding(ctx context.Co
 		return nil
 	}
 
-	clusters, _ := embedding.ClusterByCosineWithSkipped(clusterEntries, threshold)
+	clusters, skipped := embedding.ClusterByCosineWithSkipped(clusterEntries, threshold)
+	if len(skipped) > 0 {
+		slog.Warn("notebook_embedding_skipped_dimension_mismatch",
+			"skipped", len(skipped),
+			"model", s.embeddingProvider.Name(),
+			"expected_dim", s.embeddingProvider.Dimension())
+	}
 
 	out := make([]notebookCluster, 0, len(clusters))
 	for _, c := range clusters {
@@ -161,26 +167,37 @@ func (s *NotebookSignalScanner) embedAllWithCache(ctx context.Context, texts []s
 		return out
 	}
 
-	missTexts := make([]string, len(misses))
-	for i, m := range misses {
-		missTexts[i] = m.text
+	uniqueIndex := make(map[string]int, len(misses))
+	uniqueMissTexts := make([]string, 0, len(misses))
+	indicesByUnique := make([][]int, 0, len(misses))
+	for _, m := range misses {
+		if idx, ok := uniqueIndex[m.text]; ok {
+			indicesByUnique[idx] = append(indicesByUnique[idx], m.index)
+			continue
+		}
+		uniqueIndex[m.text] = len(uniqueMissTexts)
+		uniqueMissTexts = append(uniqueMissTexts, m.text)
+		indicesByUnique = append(indicesByUnique, []int{m.index})
 	}
-	vectors, err := s.embeddingProvider.EmbedBatch(ctx, missTexts)
-	s.recordCacheMiss(len(misses))
+
+	vectors, err := s.embeddingProvider.EmbedBatch(ctx, uniqueMissTexts)
+	s.recordCacheMiss(len(uniqueMissTexts))
 	if err != nil {
 		slog.Warn("notebook_embedding_batch_failed",
-			"err", err, "model", model, "texts", len(misses))
+			"err", err, "model", model, "texts", len(uniqueMissTexts))
 		return out
 	}
-	if len(vectors) != len(misses) {
+	if len(vectors) != len(uniqueMissTexts) {
 		slog.Warn("notebook_embedding_batch_mismatch",
-			"got", len(vectors), "want", len(misses), "model", model)
+			"got", len(vectors), "want", len(uniqueMissTexts), "model", model)
 		return out
 	}
-	for i, m := range misses {
-		out[m.index] = vectors[i]
-		_ = s.embeddingCache.Set(m.text, model, vectors[i])
-		s.recordEmbedCall(m.text)
+	for i, text := range uniqueMissTexts {
+		for _, originalIndex := range indicesByUnique[i] {
+			out[originalIndex] = vectors[i]
+		}
+		_ = s.embeddingCache.Set(text, model, vectors[i])
+		s.recordEmbedCall(text)
 	}
 	return out
 }

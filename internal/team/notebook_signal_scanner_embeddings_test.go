@@ -14,8 +14,10 @@ import (
 // to specific assertions without depending on the FNV-bucket arithmetic
 // inside the production stub provider.
 type stableEmbeddingProvider struct {
-	dim     int
-	vectors map[string][]float32
+	dim         int
+	vectors     map[string][]float32
+	batchCalls  int
+	batchInputs int
 }
 
 func (p *stableEmbeddingProvider) Name() string   { return "test-stable" }
@@ -33,6 +35,8 @@ func (p *stableEmbeddingProvider) Embed(_ context.Context, text string) ([]float
 }
 
 func (p *stableEmbeddingProvider) EmbedBatch(ctx context.Context, texts []string) ([][]float32, error) {
+	p.batchCalls++
+	p.batchInputs += len(texts)
 	out := make([][]float32, len(texts))
 	for i, t := range texts {
 		v, err := p.Embed(ctx, t)
@@ -171,6 +175,39 @@ func TestNotebookSignalScanner_EmbeddingPath_CacheHitsNoOp(t *testing.T) {
 	}
 	if hitsAfterSecond < 3 {
 		t.Errorf("hits: got %d want >=3", hitsAfterSecond)
+	}
+}
+
+func TestNotebookSignalScanner_EmbeddingPath_DedupesBatchMisses(t *testing.T) {
+	b, _, teardown := newNotebookScannerHarness(t)
+	defer teardown()
+
+	bodyA := "embedding cache duplicate alpha"
+	bodyB := "embedding cache duplicate beta"
+	provider := newStableEmbeddingProvider(t, map[string][]float32{
+		bodyA: {1, 0.05, 0.05, 0.02},
+		bodyB: {0.95, 0.1, 0.07, 0.05},
+	})
+
+	scanner := NewNotebookSignalScanner(b)
+	scanner.SetEmbeddingProvider(provider)
+	scanner.SetEmbeddingCache(embedding.NewCache(filepath.Join(t.TempDir(), "cache.jsonl")))
+
+	got := scanner.embedAllWithCache(context.Background(), []string{bodyA, bodyA, bodyB})
+	if len(got) != 3 {
+		t.Fatalf("vectors: got %d want 3", len(got))
+	}
+	if provider.batchCalls != 1 {
+		t.Fatalf("batch calls: got %d want 1", provider.batchCalls)
+	}
+	if provider.batchInputs != 2 {
+		t.Fatalf("batch inputs: got %d want 2 unique texts", provider.batchInputs)
+	}
+	if calls := atomic.LoadInt64(&b.skillCompileMetrics.EmbeddingCallsTotal); calls != 2 {
+		t.Fatalf("embedding calls: got %d want 2 unique texts", calls)
+	}
+	if misses := atomic.LoadInt64(&b.skillCompileMetrics.EmbeddingCacheMissesTotal); misses != 2 {
+		t.Fatalf("cache misses: got %d want 2 unique texts", misses)
 	}
 }
 

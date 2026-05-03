@@ -51,12 +51,18 @@ func (p *stubProvider) Dimension() int { return stubDim }
 // each token into a fixed-dim bucket, sums occurrences, and L2-normalises
 // the result. Returns an error on empty text so callers can't smuggle
 // a zero-vector through to the cluster layer.
-func (p *stubProvider) Embed(_ context.Context, text string) ([]float32, error) {
+func (p *stubProvider) Embed(ctx context.Context, text string) ([]float32, error) {
 	if strings.TrimSpace(text) == "" {
 		return nil, errors.New("embedding: stub: empty text")
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	v := make([]float32, stubDim)
 	tokens := stubTokenise(text)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if len(tokens) == 0 {
 		// Tokenless text (e.g. all punctuation) still needs a deterministic
 		// vector so callers don't see different errors for empty vs. punct.
@@ -66,6 +72,9 @@ func (p *stubProvider) Embed(_ context.Context, text string) ([]float32, error) 
 		return L2Normalise(v), nil
 	}
 	for _, tok := range tokens {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		idx := stubBucket(tok)
 		v[idx]++
 	}
@@ -124,5 +133,5 @@ func stubTokenise(s string) []string {
 func stubBucket(s string) int {
 	h := fnv.New32a()
 	_, _ = h.Write([]byte(s))
-	return int(h.Sum32()) % stubDim
+	return int(h.Sum32() % uint32(stubDim))
 }

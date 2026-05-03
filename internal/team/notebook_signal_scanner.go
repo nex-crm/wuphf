@@ -70,8 +70,8 @@ func NewNotebookSignalScanner(b *Broker) *NotebookSignalScanner {
 
 // SetEmbeddingProvider replaces the embedding provider — primarily a
 // test seam so unit tests can dependency-inject a deterministic stub
-// without touching env vars. Passing nil restores the auto-default on
-// the next Scan call.
+// without touching env vars. Passing nil disables embedding-based
+// clustering for this scanner until a non-nil provider is set.
 func (s *NotebookSignalScanner) SetEmbeddingProvider(p embedding.Provider) {
 	if s == nil {
 		return
