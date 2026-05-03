@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -97,6 +98,20 @@ func TestHubURL_GithubScheme(t *testing.T) {
 	}
 }
 
+// TestHubURL_GithubScheme_BranchOverride validates the branch override escape
+// hatch for custom repos whose default branch is not main.
+func TestHubURL_GithubScheme_BranchOverride(t *testing.T) {
+	t.Parallel()
+	got, err := skillpublish.HubURL("github:nex-crm/wuphf-skills@master", "review-pr")
+	if err != nil {
+		t.Fatalf("HubURL: %v", err)
+	}
+	want := "https://raw.githubusercontent.com/nex-crm/wuphf-skills/master/skills/review-pr/SKILL.md"
+	if got != want {
+		t.Fatalf("HubURL github scheme branch:\n got: %s\nwant: %s", got, want)
+	}
+}
+
 // TestHubURL_Unknown ensures we surface a clear error for unknown hubs.
 func TestHubURL_Unknown(t *testing.T) {
 	t.Parallel()
@@ -168,6 +183,7 @@ func TestSanitizeHubLabel(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"anthropics", "anthropics"},
 		{"github:nex-crm/wuphf-skills", "github-nex-crm-wuphf-skills"},
+		{"github:nex-crm/wuphf-skills@master", "github-nex-crm-wuphf-skills-master"},
 		{"  Lobehub  ", "lobehub"},
 	}
 	for _, tc := range cases {
@@ -284,6 +300,24 @@ func TestFetchURL_RejectsRedirectOffGitHub(t *testing.T) {
 	}
 }
 
+// TestFetchURL_RejectsOversizedPayload ensures the size guard refuses, rather
+// than truncates, oversized skill payloads.
+func TestFetchURL_RejectsOversizedPayload(t *testing.T) {
+	tooLarge := strings.Repeat("x", 4*1024*1024+1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, tooLarge)
+	}))
+	defer srv.Close()
+
+	_, err := fetchURL(context.Background(), srv.URL+"/skills/x/SKILL.md")
+	if err == nil {
+		t.Fatal("expected oversized payload error, got nil")
+	}
+	if !strings.Contains(err.Error(), "response body exceeds") {
+		t.Errorf("expected size error, got %q", err.Error())
+	}
+}
+
 // TestPostBrokerSkill_4xxSurfacesBody pins the error-shape: a 4xx from
 // the broker should bubble up with the response body so the user can see
 // the broker's actual rejection reason (e.g. "name already exists" or
@@ -333,5 +367,18 @@ func TestBuildPublishPRBody(t *testing.T) {
 		if !strings.Contains(body, c) {
 			t.Fatalf("publish PR body missing %q\nbody: %s", c, body)
 		}
+	}
+}
+
+func TestReorderFlagsFirst_BoolFlagDoesNotConsumePositional(t *testing.T) {
+	t.Parallel()
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	fs.Bool("dry-run", false, "")
+	fs.String("to", "", "")
+
+	got := reorderFlagsFirst(fs, []string{"--dry-run", "deploy-frontend", "--to", "anthropics"})
+	want := []string{"--dry-run", "--to", "anthropics", "deploy-frontend"}
+	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("reorderFlagsFirst:\n got: %#v\nwant: %#v", got, want)
 	}
 }

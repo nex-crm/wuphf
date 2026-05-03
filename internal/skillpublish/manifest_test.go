@@ -184,6 +184,18 @@ func TestHubURL_GithubScheme(t *testing.T) {
 	}
 }
 
+func TestHubURL_GithubScheme_BranchOverride(t *testing.T) {
+	t.Parallel()
+	got, err := HubURL("github:nex-crm/wuphf-skills@master", "review-pr")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := "https://raw.githubusercontent.com/nex-crm/wuphf-skills/master/skills/review-pr/SKILL.md"
+	if got != want {
+		t.Fatalf("HubURL github scheme branch:\n got: %s\nwant: %s", got, want)
+	}
+}
+
 func TestHubURL_Unknown(t *testing.T) {
 	t.Parallel()
 	if _, err := HubURL("bogushub", "x"); err == nil {
@@ -198,6 +210,8 @@ func TestHubURL_GithubScheme_Malformed(t *testing.T) {
 		"github:owner",
 		"github:owner/",
 		"github:/repo",
+		"github:owner/repo/extra",
+		"github:owner/repo@",
 	}
 	for _, hub := range cases {
 		if _, err := HubURL(hub, "name"); err == nil {
@@ -279,6 +293,9 @@ func TestHubBaseBranch(t *testing.T) {
 	t.Parallel()
 	if got := HubBaseBranch("anthropics"); got != "main" {
 		t.Fatalf("HubBaseBranch: got %s want main", got)
+	}
+	if got := HubBaseBranch("github:owner/repo@master"); got != "master" {
+		t.Fatalf("HubBaseBranch github override: got %s want master", got)
 	}
 }
 

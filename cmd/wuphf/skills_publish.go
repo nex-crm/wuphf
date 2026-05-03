@@ -86,7 +86,7 @@ func printSkillsHelp() {
 	fmt.Fprintln(os.Stderr, "  wuphf skills publish <slug-or-path> --to <hub>     Open a PR with this skill")
 	fmt.Fprintln(os.Stderr, "  wuphf skills install <name> --from <hub>           Pull a skill into your wiki")
 	fmt.Fprintln(os.Stderr, "")
-	fmt.Fprintln(os.Stderr, "Hubs: anthropics, lobehub, github:owner/repo")
+	fmt.Fprintln(os.Stderr, "Hubs: anthropics, lobehub, github:owner/repo[@branch]")
 }
 
 // ── publish ────────────────────────────────────────────────────────────────
@@ -101,7 +101,7 @@ func printSkillsHelp() {
 //  5. Either dry-run print, or shell out to `gh` to open the PR.
 func runSkillsPublish(args []string) {
 	fs := flag.NewFlagSet("skills publish", flag.ContinueOnError)
-	to := fs.String("to", "", "Destination hub: anthropics, lobehub, or github:owner/repo")
+	to := fs.String("to", "", "Destination hub: anthropics, lobehub, or github:owner/repo[@branch]")
 	dryRun := fs.Bool("dry-run", false, "Print the manifest + would-be PR body, do not open the PR")
 	message := fs.String("message", "", "Optional addition to the PR body (defaults to the skill description)")
 	ghTokenFlag := fs.String("github-token", "", "Override gh's saved token; falls back to GH_TOKEN env when blank")
@@ -112,12 +112,12 @@ func runSkillsPublish(args []string) {
 		fmt.Fprintln(os.Stderr, "Usage:")
 		fmt.Fprintln(os.Stderr, "  wuphf skills publish <slug>          --to anthropics")
 		fmt.Fprintln(os.Stderr, "  wuphf skills publish team/skills/x.md --to lobehub")
-		fmt.Fprintln(os.Stderr, "  wuphf skills publish <slug>          --to github:owner/repo")
+		fmt.Fprintln(os.Stderr, "  wuphf skills publish <slug>          --to github:owner/repo[@branch]")
 		fmt.Fprintln(os.Stderr, "")
 		fmt.Fprintln(os.Stderr, "Flags:")
 		fs.PrintDefaults()
 	}
-	if err := fs.Parse(reorderFlagsFirst(args)); err != nil {
+	if err := fs.Parse(reorderFlagsFirst(fs, args)); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			os.Exit(0)
 		}
@@ -354,7 +354,7 @@ func publishViaGH(p publishParams) (string, error) {
 		"pr", "create",
 		"--repo", p.hubRepo,
 		"--base", p.baseBranch,
-		"--head", p.branch,
+		"--head", authUser+":"+p.branch,
 		"--title", p.prTitle,
 		"--body", p.prBody,
 	)
@@ -524,7 +524,7 @@ func indentBlock(s, prefix string) string {
 // runSkillsInstall handles `wuphf skills install`. Reverse of publish.
 func runSkillsInstall(args []string) {
 	fs := flag.NewFlagSet("skills install", flag.ContinueOnError)
-	from := fs.String("from", "", "Source hub: anthropics, lobehub, or github:owner/repo")
+	from := fs.String("from", "", "Source hub: anthropics, lobehub, or github:owner/repo[@branch]")
 	channel := fs.String("channel", "general", "Channel to log the install event into")
 	fs.SetOutput(os.Stderr)
 	fs.Usage = func() {
@@ -532,12 +532,12 @@ func runSkillsInstall(args []string) {
 		fmt.Fprintln(os.Stderr, "")
 		fmt.Fprintln(os.Stderr, "Usage:")
 		fmt.Fprintln(os.Stderr, "  wuphf skills install <name> --from anthropics")
-		fmt.Fprintln(os.Stderr, "  wuphf skills install <name> --from github:owner/repo")
+		fmt.Fprintln(os.Stderr, "  wuphf skills install <name> --from github:owner/repo[@branch]")
 		fmt.Fprintln(os.Stderr, "")
 		fmt.Fprintln(os.Stderr, "Flags:")
 		fs.PrintDefaults()
 	}
-	if err := fs.Parse(reorderFlagsFirst(args)); err != nil {
+	if err := fs.Parse(reorderFlagsFirst(fs, args)); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			os.Exit(0)
 		}
@@ -654,7 +654,15 @@ func fetchURL(ctx context.Context, rawURL string) ([]byte, error) {
 	if res.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("HTTP %d from %s", res.StatusCode, rawURL)
 	}
-	return io.ReadAll(io.LimitReader(res.Body, 4*1024*1024))
+	const maxSkillBytes = 4 * 1024 * 1024
+	buf, err := io.ReadAll(io.LimitReader(res.Body, maxSkillBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(buf) > maxSkillBytes {
+		return nil, fmt.Errorf("response body exceeds %d bytes: %s", maxSkillBytes, rawURL)
+	}
+	return buf, nil
 }
 
 // postBrokerSkill posts to the local broker's /skills endpoint, mirroring the
@@ -696,7 +704,7 @@ func postBrokerSkill(ctx context.Context, payload map[string]any) error {
 // The reorder is deliberately conservative — anything past `--` stays in
 // place, and unknown flag-looking tokens are still treated as flags so the
 // downstream Parse can produce a friendly error message.
-func reorderFlagsFirst(args []string) []string {
+func reorderFlagsFirst(fs *flag.FlagSet, args []string) []string {
 	flags := []string{}
 	positional := []string{}
 	i := 0
@@ -708,12 +716,11 @@ func reorderFlagsFirst(args []string) []string {
 		}
 		if strings.HasPrefix(a, "-") && a != "-" {
 			flags = append(flags, a)
-			// If the flag is in `--key=value` form or is a `-h` style
-			// boolean, no value-arg follows. Otherwise, eagerly consume
-			// the next token. We can't introspect the FlagSet from here,
-			// so we apply the standard heuristic: if the next token does
-			// not itself start with `-`, treat it as the value.
-			if !strings.Contains(a, "=") && i+1 < len(args) {
+			// If the flag is in `--key=value` form or is a boolean flag,
+			// no value-arg follows. For value flags, eagerly consume the
+			// next token so Go's stdlib flag parser still accepts
+			// `wuphf skills publish slug --to anthropics`.
+			if !strings.Contains(a, "=") && !flagIsBool(fs, a) && i+1 < len(args) {
 				next := args[i+1]
 				if !strings.HasPrefix(next, "-") {
 					flags = append(flags, next)
@@ -729,12 +736,30 @@ func reorderFlagsFirst(args []string) []string {
 	return append(flags, positional...)
 }
 
+type boolFlag interface {
+	IsBoolFlag() bool
+}
+
+func flagIsBool(fs *flag.FlagSet, token string) bool {
+	name := strings.TrimLeft(token, "-")
+	if idx := strings.Index(name, "="); idx >= 0 {
+		name = name[:idx]
+	}
+	f := fs.Lookup(name)
+	if f == nil {
+		return false
+	}
+	bf, ok := f.Value.(boolFlag)
+	return ok && bf.IsBoolFlag()
+}
+
 // sanitizeHubLabel returns a hub label suitable for `created_by="hub:<label>"`.
-// `github:owner/repo` collapses to `github-owner-repo` so the broker sees a
-// stable identifier per source.
+// `github:owner/repo@branch` collapses to `github-owner-repo-branch` so the
+// broker sees a stable identifier per source.
 func sanitizeHubLabel(hub string) string {
 	hub = strings.TrimSpace(hub)
 	hub = strings.ReplaceAll(hub, ":", "-")
 	hub = strings.ReplaceAll(hub, "/", "-")
+	hub = strings.ReplaceAll(hub, "@", "-")
 	return strings.ToLower(hub)
 }
