@@ -94,7 +94,7 @@ func printSubcommandHelp(sub string) {
 		fmt.Fprintln(os.Stderr, "  wuphf log <taskID>            Show one task in detail")
 		fmt.Fprintln(os.Stderr, "  wuphf log --agent eng         Filter to one agent")
 	case "share":
-		fmt.Fprintln(os.Stderr, "wuphf share — invite one co-founder to this office")
+		fmt.Fprintln(os.Stderr, "wuphf share — invite one team member to this office")
 		fmt.Fprintln(os.Stderr, "")
 		fmt.Fprintln(os.Stderr, "Starts a private-network web listener and prints a one-use invite URL.")
 		fmt.Fprintln(os.Stderr, "Prerequisite: both machines are on the same Tailscale or WireGuard network.")
@@ -191,7 +191,7 @@ func initWorkspaces() {
 // When the broker already exists it wires it immediately; otherwise the
 // launcher runs the hook as soon as it constructs the broker and before it
 // starts serving requests.
-func wireBrokerWorkspaces(l *team.Launcher) {
+func wireBrokerWorkspaces(l *team.Launcher, extra ...func(*team.Broker)) {
 	if l == nil {
 		return
 	}
@@ -202,6 +202,11 @@ func wireBrokerWorkspaces(l *team.Launcher) {
 		b.SetWorkspaceOrchestrator(brokerOrchestratorAdapter{})
 		b.SetLauncherDrainer(l)
 		b.SetAdminPauseExitFn(os.Exit)
+		for _, fn := range extra {
+			if fn != nil {
+				fn(b)
+			}
+		}
 	}
 	l.SetBrokerConfigurator(configure)
 	b := l.Broker()
@@ -251,7 +256,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  %s shred        Burn the workspace down and reopen onboarding\n", appName)
 		fmt.Fprintf(os.Stderr, "  %s import --from legacy  Import from a running external orchestrator (auto-detect)\n", appName)
 		fmt.Fprintf(os.Stderr, "  %s log          Show what your agents actually did (task receipts)\n", appName)
-		fmt.Fprintf(os.Stderr, "  %s share        Invite one co-founder over a private network\n", appName)
+		fmt.Fprintf(os.Stderr, "  %s share        Invite one team member over a private network\n", appName)
 		fmt.Fprintf(os.Stderr, "  %s memory migrate --from {nex,gbrain}  Port legacy memory into the team wiki\n", appName)
 		fmt.Fprintf(os.Stderr, "  %s workspace ...  Manage multiple isolated WUPHF workspaces\n", appName)
 		fmt.Fprintf(os.Stderr, "  %s skills publish <slug-or-path> --to <hub>    Publish a team skill to a public hub\n", appName)
@@ -661,11 +666,14 @@ func runWeb(args []string, packSlug string, unsafe bool, webPort int, opusCEO bo
 	}
 	l.SetFocusMode(!collabMode)
 	l.SetNoOpen(noOpen)
+	shareController := newWebShareController(webPort)
 	if err := l.PreflightWeb(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
-	wireBrokerWorkspaces(l)
+	wireBrokerWorkspaces(l, func(b *team.Broker) {
+		b.SetWebShareController(shareController.start, shareController.status, shareController.stop)
+	})
 	fmt.Printf("Launching %s web view (%d agents)... the browser is the office now.\n", l.PackName(), l.AgentCount())
 	if err := l.LaunchWeb(webPort); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)

@@ -63,6 +63,20 @@ export function ReadyStep({
         </ul>
       </div>
 
+      <div className="wizard-panel">
+        <p className="wizard-panel-title">Access after setup</p>
+        <div style={{ display: "grid", gap: 10, fontSize: 13 }}>
+          <div>
+            <strong>You:</strong> use Access &amp; Health to check the live
+            connection and see the SSH/LAN/Tailscale path for this browser.
+          </div>
+          <div>
+            <strong>Team member:</strong> open Access &amp; Health when you want
+            to create, copy, refresh, or stop a scoped team-member invite.
+          </div>
+        </div>
+      </div>
+
       {submitError ? (
         <div
           role="alert"

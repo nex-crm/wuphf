@@ -75,6 +75,14 @@ func TestShareJoinFlowEndToEnd(t *testing.T) {
 		t.Fatalf("join request: %v", err)
 	}
 	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("join form status = %d, want 200", resp.StatusCode)
+	}
+	resp, err = client.PostForm(shareSrv.URL+"/join/"+invite.Token, nil)
+	if err != nil {
+		t.Fatalf("join submit: %v", err)
+	}
+	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusFound {
 		t.Fatalf("join status = %d, want 302", resp.StatusCode)
 	}
@@ -102,7 +110,7 @@ func TestShareJoinFlowEndToEnd(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("me status = %d body=%s", resp.StatusCode, string(body))
 	}
-	if !containsAll(string(body), `"display_name":"Co-founder"`, `"human_slug":"co-founder"`) {
+	if !containsAll(string(body), `"display_name":"Team member"`, `"human_slug":"team-member"`) {
 		t.Fatalf("unexpected me body: %s", string(body))
 	}
 }
@@ -124,7 +132,7 @@ func TestShareProxyDoesNotExposeBrokerToken(t *testing.T) {
 	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
 		return http.ErrUseLastResponse
 	}}
-	joinResp, err := client.Get(shareSrv.URL + "/join/" + invite.Token)
+	joinResp, err := client.PostForm(shareSrv.URL+"/join/"+invite.Token, nil)
 	if err != nil {
 		t.Fatalf("join request: %v", err)
 	}
@@ -167,7 +175,7 @@ func TestShareProxyDoesNotForwardBrokerToken(t *testing.T) {
 				t.Fatalf("session check did not include cookie: %v", err)
 			}
 			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"human_slug":"co-founder"}`))
+			_, _ = w.Write([]byte(`{"human_slug":"team-member"}`))
 		case "/messages":
 			proxiedAuth = r.Header.Get("Authorization")
 			w.WriteHeader(http.StatusOK)
@@ -216,7 +224,7 @@ func TestShareProxyStampsHumanActor(t *testing.T) {
 	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
 		return http.ErrUseLastResponse
 	}}
-	joinResp, err := client.Get(shareSrv.URL + "/join/" + invite.Token)
+	joinResp, err := client.PostForm(shareSrv.URL+"/join/"+invite.Token, nil)
 	if err != nil {
 		t.Fatalf("join request: %v", err)
 	}
@@ -247,8 +255,8 @@ func TestShareProxyStampsHumanActor(t *testing.T) {
 		}
 	}
 
-	postJSONWithCookies("/api/messages", `{"from":"you","channel":"general","content":"cofounder hello"}`)
-	postJSONWithCookies("/api/actions", `{"kind":"manual","actor":"you","summary":"cofounder did work"}`)
+	postJSONWithCookies("/api/messages", `{"from":"you","channel":"general","content":"team member hello"}`)
+	postJSONWithCookies("/api/actions", `{"kind":"manual","actor":"you","summary":"team member did work"}`)
 
 	messagesReq, err := http.NewRequest(http.MethodGet, "http://"+b.Addr()+"/messages?channel=general", nil)
 	if err != nil {
@@ -271,15 +279,15 @@ func TestShareProxyStampsHumanActor(t *testing.T) {
 	}
 	foundMessage := false
 	for _, msg := range messagesPayload.Messages {
-		if msg.Content == "cofounder hello" {
+		if msg.Content == "team member hello" {
 			foundMessage = true
-			if msg.From != "human:co-founder" {
-				t.Fatalf("message from = %q, want human:co-founder", msg.From)
+			if msg.From != "human:team-member" {
+				t.Fatalf("message from = %q, want human:team-member", msg.From)
 			}
 		}
 	}
 	if !foundMessage {
-		t.Fatalf("posted cofounder message not found: %+v", messagesPayload.Messages)
+		t.Fatalf("posted team member message not found: %+v", messagesPayload.Messages)
 	}
 
 	actionsReq, err := http.NewRequest(http.MethodGet, "http://"+b.Addr()+"/actions", nil)
@@ -303,15 +311,15 @@ func TestShareProxyStampsHumanActor(t *testing.T) {
 	}
 	foundAction := false
 	for _, action := range actionsPayload.Actions {
-		if action.Summary == "cofounder did work" {
+		if action.Summary == "team member did work" {
 			foundAction = true
-			if action.Actor != "human:co-founder" {
-				t.Fatalf("action actor = %q, want human:co-founder", action.Actor)
+			if action.Actor != "human:team-member" {
+				t.Fatalf("action actor = %q, want human:team-member", action.Actor)
 			}
 		}
 	}
 	if !foundAction {
-		t.Fatalf("posted cofounder action not found: %+v", actionsPayload.Actions)
+		t.Fatalf("posted team member action not found: %+v", actionsPayload.Actions)
 	}
 }
 

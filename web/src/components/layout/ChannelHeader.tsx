@@ -1,4 +1,5 @@
 import { useChannels } from "../../hooks/useChannels";
+import { SIDEBAR_APPS } from "../../lib/constants";
 import type { Theme } from "../../stores/app";
 import { useAppStore } from "../../stores/app";
 
@@ -14,6 +15,10 @@ function themeLabel(t: Theme): string {
   return "Nex Light";
 }
 
+function appTitle(app: string): string {
+  return SIDEBAR_APPS.find((item) => item.id === app)?.name ?? app;
+}
+
 export function ChannelHeader() {
   const currentChannel = useAppStore((s) => s.currentChannel);
   const currentApp = useAppStore((s) => s.currentApp);
@@ -23,9 +28,7 @@ export function ChannelHeader() {
   const { data: channels = [] } = useChannels();
 
   const channel = channels.find((c) => c.slug === currentChannel);
-  const title = currentApp
-    ? currentApp.charAt(0).toUpperCase() + currentApp.slice(1)
-    : `# ${currentChannel}`;
+  const title = currentApp ? appTitle(currentApp) : `# ${currentChannel}`;
   const desc = currentApp ? "" : channel?.description || "";
   const targetTheme = nextTheme(theme);
 

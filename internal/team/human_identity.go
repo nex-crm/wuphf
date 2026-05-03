@@ -11,7 +11,7 @@ package team
 //	human <human@wuphf.local>
 //
 // That worked for a one-person team but collapsed for two. With multiple
-// humans editing the wiki (founder + cofounder, say) `git log` could not
+// humans editing the wiki (host + team member, say) `git log` could not
 // tell them apart.
 //
 // Design

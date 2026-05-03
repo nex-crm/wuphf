@@ -684,10 +684,10 @@ func TestNotificationTargetsForDMChannelAcceptsHumanSlugSender(t *testing.T) {
 		Content: "Check this component",
 	})
 	if len(delayed) != 0 {
-		t.Fatalf("expected no delayed targets for cofounder DM, got %+v", delayed)
+		t.Fatalf("expected no delayed targets for team-member DM, got %+v", delayed)
 	}
 	if len(immediate) != 1 || immediate[0].Slug != "fe" {
-		t.Fatalf("expected fe target for cofounder DM, got %+v", immediate)
+		t.Fatalf("expected fe target for team-member DM, got %+v", immediate)
 	}
 }
 
