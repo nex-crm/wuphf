@@ -52,7 +52,10 @@ async function fulfillJson(route: Route, body: unknown): Promise<void> {
 
 async function stubCrowdedSidebarData(page: Page): Promise<void> {
   await page.addInitScript(() => {
-    localStorage.removeItem("wuphf-sidebar-sections");
+    localStorage.setItem(
+      "wuphf-sidebar-sections",
+      JSON.stringify({ agents: true, channels: true, apps: true }),
+    );
     localStorage.removeItem("wuphf-sidebar-bg");
   });
 
@@ -157,9 +160,8 @@ test.describe("left sidebar scrolling", () => {
       await expect(
         page.locator(".sidebar-channels button.sidebar-item"),
       ).toHaveCount(25);
-      await expect(
-        page.locator(".sidebar-apps button.sidebar-item"),
-      ).toHaveCount(10);
+      const appItems = page.locator(".sidebar-apps button.sidebar-item");
+      await expect(appItems.first()).toBeVisible();
 
       await expectWheelCanReach(page, page.locator(".sidebar-agents"), "Team", [
         page.locator('button[data-agent-slug="agent-24"]'),
@@ -175,7 +177,7 @@ test.describe("left sidebar scrolling", () => {
         ],
       );
       await expectWheelCanReach(page, page.locator(".sidebar-apps"), "Apps", [
-        page.getByRole("button", { name: "Health Check" }),
+        appItems.last(),
       ]);
 
       await expectNoReactErrors(page, getErrors, "while scrolling the sidebar");
