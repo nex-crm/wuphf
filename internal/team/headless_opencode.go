@@ -131,6 +131,16 @@ func (l *Launcher) runHeadlessOpencodeTurn(ctx context.Context, slug string, not
 	}
 	l.updateHeadlessProgress(slug, "active", "thinking", "reviewing work packet", metrics)
 
+	// Live-chat relay surfaces the model's user-facing text to the
+	// channel at sentence/paragraph boundaries during the turn. Opencode
+	// emits one `text` event type for the assistant's spoken output;
+	// piping it through the relay is what turns the agent's reply from
+	// a single end-of-turn post into a visible live conversation.
+	target := firstNonEmpty(channel...)
+	relay := newHeadlessLiveChatRelay(l, slug, target, notification, func(line string) {
+		appendHeadlessCodexLog(slug, line)
+	})
+
 	var firstEventAt, firstTextAt, firstToolAt time.Time
 	textStarted := false
 	var lastError string
@@ -159,7 +169,9 @@ func (l *Launcher) runHeadlessOpencodeTurn(ctx context.Context, slug string, not
 				l.updateHeadlessProgress(slug, "active", "text", "drafting response", metrics)
 			}
 			pushStream(ev.Text)
+			relay.OnText(ev.Text)
 		case "tool_use":
+			relay.Flush()
 			if firstToolAt.IsZero() {
 				firstToolAt = time.Now()
 				metrics.FirstToolMs = durationMillis(startedAt, firstToolAt)
@@ -245,9 +257,9 @@ func (l *Launcher) runHeadlessOpencodeTurn(ctx context.Context, slug string, not
 		summary = "reply ready · " + summary
 	}
 	l.updateHeadlessProgress(slug, "idle", "idle", summary, metrics)
+	relay.Flush()
 	if text != "" {
 		appendHeadlessCodexLog(slug, "opencode_result: "+text)
-		target := firstNonEmpty(channel...)
 		msg, posted, err := l.postHeadlessFinalMessageIfSilent(slug, target, notification, text, startedAt)
 		if err != nil {
 			appendHeadlessCodexLog(slug, "opencode_fallback-post-error: "+err.Error())

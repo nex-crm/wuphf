@@ -136,6 +136,18 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 	}
 	l.updateHeadlessProgress(slug, "active", "thinking", "reviewing work packet", metrics)
 
+	// Live-chat relay streams the agent's user-facing `text` output to the
+	// channel as it's generated, so a long turn doesn't sit silent until the
+	// final summary. Claude's `thinking` blocks are intentionally not piped:
+	// those are private chain-of-thought, not "items that concern the user
+	// and other agents". The model's `text` output is what the agent has
+	// chosen to surface, and the relay's sentence/paragraph flush boundaries
+	// keep the channel from being flooded with mid-token chunks.
+	target := firstNonEmpty(channel...)
+	relay := newHeadlessLiveChatRelay(l, slug, target, notification, func(line string) {
+		appendHeadlessClaudeLog(slug, line)
+	})
+
 	var firstEventAt time.Time
 	var firstTextAt time.Time
 	var firstToolAt time.Time
@@ -158,7 +170,9 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 				textStarted = true
 				l.updateHeadlessProgress(slug, "active", "text", "drafting response", metrics)
 			}
+			relay.OnText(event.Text)
 		case "tool_use":
+			relay.Flush()
 			if firstToolAt.IsZero() {
 				firstToolAt = time.Now()
 				metrics.FirstToolMs = durationMillis(startedAt, firstToolAt)
@@ -218,9 +232,9 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 	if l.broker != nil {
 		l.broker.RecordAgentUsage(slug, l.headlessClaudeModel(slug), result.Usage)
 	}
+	relay.Flush()
 	if text := strings.TrimSpace(result.FinalMessage); text != "" {
 		appendHeadlessClaudeLog(slug, "result: "+text)
-		target := firstNonEmpty(channel...)
 		msg, posted, err := l.postHeadlessFinalMessageIfSilent(slug, target, notification, text, startedAt)
 		if err != nil {
 			appendHeadlessClaudeLog(slug, "fallback-post-error: "+err.Error())
