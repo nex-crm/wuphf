@@ -38,6 +38,9 @@ func TestHumanInviteAcceptIsOneUseAndCreatesSession(t *testing.T) {
 	if accepted.Session.DisplayName != "Mira" || accepted.Session.HumanSlug != "mira" {
 		t.Fatalf("session identity = %+v", accepted.Session)
 	}
+	if bytes.Contains(rec.Body.Bytes(), []byte("remote_addr")) {
+		t.Fatalf("accept response exposed remote address: %s", rec.Body.String())
+	}
 	if len(rec.Result().Cookies()) == 0 {
 		t.Fatalf("accept did not set a session cookie")
 	}
@@ -56,7 +59,7 @@ func TestHumanMeAcceptsSessionCookie(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create invite: %v", err)
 	}
-	sessionToken, _, err := b.acceptHumanInvite(token, "Mira", "browser", "100.64.0.2:1234")
+	sessionToken, _, err := b.acceptHumanInvite(token, "Mira", "browser")
 	if err != nil {
 		t.Fatalf("accept invite: %v", err)
 	}
@@ -79,7 +82,7 @@ func TestHumanMeRejectsExpiredSessionServerSide(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create invite: %v", err)
 	}
-	sessionToken, session, err := b.acceptHumanInvite(token, "Mira", "browser", "100.64.0.2:1234")
+	sessionToken, session, err := b.acceptHumanInvite(token, "Mira", "browser")
 	if err != nil {
 		t.Fatalf("accept invite: %v", err)
 	}
@@ -107,7 +110,7 @@ func TestResetClearsHumanShareState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create invite: %v", err)
 	}
-	if _, _, err := b.acceptHumanInvite(token, "Mira", "browser", "100.64.0.2:1234"); err != nil {
+	if _, _, err := b.acceptHumanInvite(token, "Mira", "browser"); err != nil {
 		t.Fatalf("accept invite: %v", err)
 	}
 
@@ -126,7 +129,7 @@ func TestHumanSessionAuthIsScopedToShareRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create invite: %v", err)
 	}
-	sessionToken, _, err := b.acceptHumanInvite(token, "Mira", "browser", "100.64.0.2:1234")
+	sessionToken, _, err := b.acceptHumanInvite(token, "Mira", "browser")
 	if err != nil {
 		t.Fatalf("accept invite: %v", err)
 	}
@@ -191,7 +194,7 @@ func TestHumanEventsFilterNotebookMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create invite: %v", err)
 	}
-	sessionToken, _, err := b.acceptHumanInvite(token, "Mira", "browser", "100.64.0.2:1234")
+	sessionToken, _, err := b.acceptHumanInvite(token, "Mira", "browser")
 	if err != nil {
 		t.Fatalf("accept invite: %v", err)
 	}

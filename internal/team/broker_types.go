@@ -132,7 +132,6 @@ type humanSession struct {
 	HumanSlug   string `json:"human_slug"`
 	DisplayName string `json:"display_name"`
 	Device      string `json:"device,omitempty"`
-	RemoteAddr  string `json:"remote_addr,omitempty"`
 	CreatedAt   string `json:"created_at"`
 	ExpiresAt   string `json:"expires_at"`
 	RevokedAt   string `json:"revoked_at,omitempty"`

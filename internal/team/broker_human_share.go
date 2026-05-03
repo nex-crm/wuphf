@@ -15,6 +15,7 @@ import (
 
 const (
 	humanInviteTTL      = 24 * time.Hour
+	humanSessionTTL     = 7 * 24 * time.Hour
 	humanSessionCookie  = "wuphf_human_session"
 	humanShareEventFrom = "system"
 	humanLastSeenFlush  = time.Minute
@@ -35,7 +36,6 @@ type humanSessionResponse struct {
 	HumanSlug   string `json:"human_slug"`
 	DisplayName string `json:"display_name"`
 	Device      string `json:"device,omitempty"`
-	RemoteAddr  string `json:"remote_addr,omitempty"`
 	CreatedAt   string `json:"created_at"`
 	ExpiresAt   string `json:"expires_at"`
 	RevokedAt   string `json:"revoked_at,omitempty"`
@@ -89,7 +89,7 @@ func (b *Broker) handleHumanInviteAccept(w http.ResponseWriter, r *http.Request)
 		writeShareError(w, http.StatusBadRequest, "invalid_json", "Invalid invite request.", "Reload the invite link and try again.")
 		return
 	}
-	sessionToken, session, err := b.acceptHumanInvite(body.Token, body.DisplayName, body.Device, r.RemoteAddr)
+	sessionToken, session, err := b.acceptHumanInvite(body.Token, body.DisplayName, body.Device)
 	if err != nil {
 		code := "invite_invalid"
 		status := http.StatusBadRequest
@@ -162,9 +162,13 @@ func (b *Broker) createHumanInvite() (string, humanInvite, error) {
 	if err != nil {
 		return "", humanInvite{}, err
 	}
+	id, err := randomID(8)
+	if err != nil {
+		return "", humanInvite{}, err
+	}
 	now := time.Now().UTC()
 	invite := humanInvite{
-		ID:        "invite-" + randomID(8),
+		ID:        "invite-" + id,
 		TokenHash: hashShareToken(token),
 		CreatedAt: now.Format(time.RFC3339),
 		ExpiresAt: now.Add(humanInviteTTL).Format(time.RFC3339),
@@ -179,7 +183,7 @@ func (b *Broker) createHumanInvite() (string, humanInvite, error) {
 	return token, invite, nil
 }
 
-func (b *Broker) acceptHumanInvite(token, displayName, device, remoteAddr string) (string, humanSession, error) {
+func (b *Broker) acceptHumanInvite(token, displayName, device string) (string, humanSession, error) {
 	token = strings.TrimSpace(token)
 	if token == "" {
 		return "", humanSession{}, errHumanInviteExpiredOrUsed
@@ -187,6 +191,10 @@ func (b *Broker) acceptHumanInvite(token, displayName, device, remoteAddr string
 	now := time.Now().UTC()
 	tokenHash := hashShareToken(token)
 	sessionToken, err := randomToken("wphfs")
+	if err != nil {
+		return "", humanSession{}, err
+	}
+	sessionID, err := randomID(8)
 	if err != nil {
 		return "", humanSession{}, err
 	}
@@ -212,15 +220,14 @@ func (b *Broker) acceptHumanInvite(token, displayName, device, remoteAddr string
 		invite.AcceptedAt = now.Format(time.RFC3339)
 		invite.AcceptedBy = slug
 		session := humanSession{
-			ID:          "session-" + randomID(8),
+			ID:          "session-" + sessionID,
 			TokenHash:   hashShareToken(sessionToken),
 			InviteID:    invite.ID,
 			HumanSlug:   slug,
 			DisplayName: displayName,
 			Device:      strings.TrimSpace(device),
-			RemoteAddr:  strings.TrimSpace(remoteAddr),
 			CreatedAt:   now.Format(time.RFC3339),
-			ExpiresAt:   now.Add(7 * 24 * time.Hour).Format(time.RFC3339),
+			ExpiresAt:   now.Add(humanSessionTTL).Format(time.RFC3339),
 			LastSeenAt:  now.Format(time.RFC3339),
 		}
 		b.humanSessions = append(b.humanSessions, session)
@@ -311,7 +318,7 @@ func sessionExpiresAt(s humanSession) time.Time {
 	if created.IsZero() {
 		created = time.Now().UTC()
 	}
-	return created.Add(7 * 24 * time.Hour)
+	return created.Add(humanSessionTTL)
 }
 
 func humanInviteToResponse(invite humanInvite) humanInviteResponse {
@@ -332,7 +339,6 @@ func humanSessionToResponse(session humanSession) humanSessionResponse {
 		HumanSlug:   session.HumanSlug,
 		DisplayName: session.DisplayName,
 		Device:      session.Device,
-		RemoteAddr:  session.RemoteAddr,
 		CreatedAt:   session.CreatedAt,
 		ExpiresAt:   sessionExpiresAt(session).Format(time.RFC3339),
 		RevokedAt:   session.RevokedAt,
@@ -357,15 +363,15 @@ func randomToken(prefix string) (string, error) {
 	return prefix + "_" + hex.EncodeToString(buf), nil
 }
 
-func randomID(n int) string {
+func randomID(n int) (string, error) {
 	if n <= 0 {
 		n = 8
 	}
 	buf := make([]byte, n)
 	if _, err := rand.Read(buf); err != nil {
-		return fmt.Sprintf("%d", time.Now().UnixNano())
+		return "", err
 	}
-	return hex.EncodeToString(buf)
+	return hex.EncodeToString(buf), nil
 }
 
 func hashShareToken(token string) string {
