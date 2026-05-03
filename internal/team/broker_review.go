@@ -224,6 +224,7 @@ func (b *Broker) handleNotebookPromote(w http.ResponseWriter, r *http.Request) {
 	}
 	var body struct {
 		MySlug         string `json:"my_slug"`
+		TaskID         string `json:"task_id"`
 		SourcePath     string `json:"source_path"`
 		TargetWikiPath string `json:"target_wiki_path"`
 		Rationale      string `json:"rationale"`
@@ -231,6 +232,11 @@ func (b *Broker) handleNotebookPromote(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+		return
+	}
+	taskID := strings.TrimSpace(body.TaskID)
+	if taskID != "" && !b.notebookTaskExists(taskID) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "task not found"})
 		return
 	}
 	// Pre-flight: target must not already exist (state machine re-checks
@@ -263,6 +269,23 @@ func (b *Broker) handleNotebookPromote(w http.ResponseWriter, r *http.Request) {
 		ActorSlug: promotion.SourceSlug,
 		Timestamp: promotion.CreatedAt.Format(time.RFC3339),
 	})
+	if taskID != "" {
+		_, found, _, recordErr := b.RecordTaskMemoryPromotion(taskID, promotion.SourceSlug, MemoryWorkflowArtifact{
+			Backend:     "markdown",
+			Source:      "promotion",
+			Path:        promotion.TargetPath,
+			PromotionID: promotion.ID,
+			State:       string(promotion.State),
+		})
+		if recordErr != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": recordErr.Error()})
+			return
+		}
+		if !found {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "task not found"})
+			return
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"promotion_id":  promotion.ID,
 		"reviewer_slug": promotion.ReviewerSlug,
