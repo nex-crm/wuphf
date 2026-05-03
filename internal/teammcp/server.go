@@ -8,6 +8,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/nex-crm/wuphf/internal/action"
+	"github.com/nex-crm/wuphf/internal/config"
 	"github.com/nex-crm/wuphf/internal/team"
 )
 
@@ -64,8 +65,8 @@ func Run(ctx context.Context) error {
 // nex/gbrain installs expose the legacy team_memory_* tools; `none` skips
 // them entirely. Both tool sets NEVER coexist — agents see exactly one.
 func registerSharedMemoryTools(server *mcp.Server) {
-	switch strings.TrimSpace(os.Getenv("WUPHF_MEMORY_BACKEND")) {
-	case "markdown":
+	switch config.ResolveMemoryBackend("") {
+	case config.MemoryBackendMarkdown:
 		mcp.AddTool(server, officeWriteTool(
 			"team_wiki_write",
 			"Write directly to the canonical team wiki git repo. Use this for already-approved canonical edits, bootstrap/admin updates, or explicit human requests. For agent-authored working notes, observations, draft playbooks, and proposed new wiki knowledge, write to notebook_write first and submit with notebook_promote so the review gate runs. The content you pass becomes the article bytes; this tool does not rewrite for you. Picks author identity from my_slug so git log shows which agent wrote each article. Images are supported via standard markdown: embed a remote URL with `![alt text](https://example.com/diagram.png)` and the wiki renderer will show it inline. Use images you found on the web while researching the article; do not upload bytes — only reference URLs.",
@@ -108,7 +109,7 @@ func registerSharedMemoryTools(server *mcp.Server) {
 			"resolve_contradiction",
 			"Resolve a contradiction finding from a prior run_lint call. winner must be A (first fact wins), B (second fact wins), or Both (acknowledge both as valid).",
 		), handleResolveContradiction)
-	case "none":
+	case config.MemoryBackendNone:
 		// Nothing — user explicitly disabled shared memory.
 	default:
 		// nex / gbrain (default): legacy tool set unchanged.

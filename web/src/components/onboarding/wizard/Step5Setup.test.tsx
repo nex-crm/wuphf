@@ -6,7 +6,7 @@ vi.mock("../../../api/client", () => ({
 }));
 
 import { SetupStep } from "./Step5Setup";
-import type { MemoryBackend, PrereqResult } from "./types";
+import type { PrereqResult } from "./types";
 
 interface Overrides {
   prereqs?: PrereqResult[];
@@ -14,10 +14,6 @@ interface Overrides {
   prereqsError?: string;
   runtimePriority?: string[];
   apiKeys?: Record<string, string>;
-  memoryBackend?: MemoryBackend;
-  nexApiKey?: string;
-  gbrainOpenAIKey?: string;
-  gbrainAnthropicKey?: string;
   localProvider?: string;
   onSelectLocalProvider?: (kind: string) => void;
 }
@@ -29,10 +25,6 @@ function setupProps(overrides: Overrides = {}) {
     prereqsError = "",
     runtimePriority = [],
     apiKeys = {},
-    memoryBackend = "markdown",
-    nexApiKey = "",
-    gbrainOpenAIKey = "",
-    gbrainAnthropicKey = "",
     localProvider = "",
     onSelectLocalProvider = () => {},
   } = overrides;
@@ -50,16 +42,6 @@ function setupProps(overrides: Overrides = {}) {
     apiKeyState: {
       values: apiKeys,
       onChange: () => {},
-    },
-    memoryState: {
-      backend: memoryBackend as MemoryBackend,
-      onChangeBackend: () => {},
-      nexApiKey,
-      onChangeNexApiKey: () => {},
-      gbrainOpenAIKey,
-      onChangeGBrainOpenAIKey: () => {},
-      gbrainAnthropicKey,
-      onChangeGBrainAnthropicKey: () => {},
     },
     localLLMState: {
       provider: localProvider,
@@ -111,41 +93,12 @@ describe("SetupStep — canContinue gate", () => {
     expect(screen.getByRole("button", { name: ctaName })).toBeEnabled();
   });
 
-  it("disables Continue when GBrain is selected without an OpenAI key — even with an installed runtime", () => {
-    renderSetup({
-      prereqs: [{ name: "claude", required: true, found: true }],
-      runtimePriority: ["Claude Code"],
-      memoryBackend: "gbrain",
-      gbrainOpenAIKey: "",
-    });
-    expect(screen.getByRole("button", { name: ctaName })).toBeDisabled();
-  });
-
-  it("re-enables Continue once the GBrain OpenAI key is filled in", () => {
-    renderSetup({
-      prereqs: [{ name: "claude", required: true, found: true }],
-      runtimePriority: ["Claude Code"],
-      memoryBackend: "gbrain",
-      gbrainOpenAIKey: "sk-openai",
-    });
-    expect(screen.getByRole("button", { name: ctaName })).toBeEnabled();
-  });
 });
 
 describe("SetupStep — surfaces", () => {
   it("renders the prereqs error banner when detection fails", () => {
     renderSetup({ prereqsError: "exec: command not found" });
     expect(screen.getByTestId("prereqs-error-banner")).toBeInTheDocument();
-  });
-
-  it("hides the Nex API key panel unless memoryBackend === 'nex'", () => {
-    const { rerender } = renderSetup({ memoryBackend: "markdown" });
-    expect(
-      screen.queryByTestId("wizard-nex-api-key-panel"),
-    ).not.toBeInTheDocument();
-
-    rerender(<SetupStep {...setupProps({ memoryBackend: "nex" })} />);
-    expect(screen.getByTestId("wizard-nex-api-key-panel")).toBeInTheDocument();
   });
 
   it("toggling the local-LLM tile off clears localProvider via callback", () => {
