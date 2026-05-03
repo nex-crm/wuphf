@@ -128,7 +128,7 @@ func routeOpenclawMentionsLoop(ctx context.Context, broker *Broker, bridge *Open
 			// Only route human-authored messages; agent cross-talk flows
 			// through the bridge via explicit sends from handler code, not
 			// by re-dispatching every agent message to the gateway.
-			if msg.From != "you" && msg.From != "human" {
+			if !isHumanMessageSender(msg.From) {
 				continue
 			}
 

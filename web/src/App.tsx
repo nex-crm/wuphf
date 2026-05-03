@@ -18,6 +18,7 @@ import { SettingsApp } from "./components/apps/SettingsApp";
 import { SkillsApp } from "./components/apps/SkillsApp";
 import { TasksApp } from "./components/apps/TasksApp";
 import { ThreadsApp } from "./components/apps/ThreadsApp";
+import { TelegramConnectHost } from "./components/integrations/TelegramConnectModal";
 import { Shell } from "./components/layout/Shell";
 import { UpgradeBanner } from "./components/layout/UpgradeBanner";
 import { Composer } from "./components/messages/Composer";
@@ -106,6 +107,7 @@ class ErrorBoundary extends Component<
             {this.state.error.stack}
           </pre>
           <button
+            type="button"
             onClick={() => this.setState({ error: null })}
             style={{
               marginTop: 12,
@@ -391,6 +393,7 @@ export default function App() {
       <ToastContainer />
       <ConfirmHost />
       <ProviderSwitcherHost />
+      <TelegramConnectHost />
     </ErrorBoundary>
   );
 }

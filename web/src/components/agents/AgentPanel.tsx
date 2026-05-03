@@ -2,8 +2,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Xmark } from "iconoir-react";
 
-import type { OfficeMember, TaskLogSummary } from "../../api/client";
-import { createDM, listAgentLogTasks, post } from "../../api/client";
+import type { OfficeMember } from "../../api/client";
+import { createDM, post } from "../../api/client";
+import { listAgentLogTasks, type TaskLogSummary } from "../../api/tasks";
 import { useAgentStream } from "../../hooks/useAgentStream";
 import { useDefaultHarness } from "../../hooks/useConfig";
 import { useChannelMembers, useOfficeMembers } from "../../hooks/useMembers";
@@ -170,6 +171,7 @@ function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
     }
   }
 
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
   async function handleToggleEnabled(next: boolean) {
     if (!canToggle || toggling) return;
     setToggling(true);
@@ -266,12 +268,13 @@ function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
                 style={{ marginLeft: -2 }}
               />
             </div>
-            {agent.role && (
+            {agent.role ? (
               <span className="agent-panel-role">{agent.role}</span>
-            )}
+            ) : null}
           </div>
         </div>
         <button
+          type="button"
           className="agent-panel-close"
           onClick={onClose}
           aria-label="Close agent panel"
@@ -297,18 +300,18 @@ function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
               </div>
             ) : null;
           })()}
-          {agent.status && (
+          {agent.status ? (
             <div className="agent-panel-info-row">
               <span className="agent-panel-info-label">status</span>
               <span className="agent-panel-info-value">{agent.status}</span>
             </div>
-          )}
-          {agent.task && (
+          ) : null}
+          {agent.task ? (
             <div className="agent-panel-info-row">
               <span className="agent-panel-info-label">task</span>
               <span className="agent-panel-info-value">{agent.task}</span>
             </div>
-          )}
+          ) : null}
         </div>
       </div>
 
@@ -338,6 +341,7 @@ function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
       {/* Primary actions */}
       <div className="agent-panel-actions">
         <button
+          type="button"
           className="btn btn-primary btn-sm"
           onClick={handleOpenDM}
           disabled={dmLoading}
@@ -345,6 +349,7 @@ function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
           {dmLoading ? "Opening..." : "Open DM"}
         </button>
         <button
+          type="button"
           className="btn btn-ghost btn-sm"
           onClick={() => setView(view === "logs" ? "stream" : "logs")}
         >
@@ -356,6 +361,7 @@ function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
       {canRemove && (
         <div className="agent-panel-actions-stack">
           <button
+            type="button"
             className="btn btn-ghost btn-sm"
             onClick={handleRemove}
             disabled={removing}
@@ -396,6 +402,8 @@ export function AgentPanel() {
   // instantly un-selected it and the panel never mounted (React #31 guard
   // e2e regression).
   useEffect(() => {
+    void currentChannel;
+    void currentApp;
     close();
   }, [currentChannel, currentApp, close]);
 

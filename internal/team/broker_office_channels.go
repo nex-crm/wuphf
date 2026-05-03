@@ -12,7 +12,6 @@ import (
 	"github.com/nex-crm/wuphf/internal/channel"
 	"github.com/nex-crm/wuphf/internal/config"
 	"github.com/nex-crm/wuphf/internal/nex"
-	"github.com/nex-crm/wuphf/internal/provider"
 )
 
 func (b *Broker) handleCompany(w http.ResponseWriter, r *http.Request) {
@@ -583,400 +582,8 @@ func (b *Broker) handleNexRegister(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// TODO(broker-split): this 380-line handler mixes parsing, validation,
-// channel-membership maintenance, and persistence. Faithful monolithic
-// relocation for now — split into parser/applier in a follow-up pass.
-func (b *Broker) handleOfficeMembers(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case http.MethodGet:
-		b.mu.Lock()
-		type officeMemberResponse struct {
-			officeMember
-			Status       string `json:"status,omitempty"`
-			Activity     string `json:"activity,omitempty"`
-			Detail       string `json:"detail,omitempty"`
-			Task         string `json:"task,omitempty"`
-			LiveActivity string `json:"liveActivity,omitempty"`
-			LastTime     string `json:"lastTime,omitempty"`
-		}
-		now := time.Now()
-		members := make([]officeMemberResponse, 0, len(b.members))
-		for _, member := range b.members {
-			entry := officeMemberResponse{officeMember: member}
-			if snapshot, ok := b.activity[member.Slug]; ok {
-				entry.Status = snapshot.Status
-				entry.Activity = snapshot.Activity
-				entry.Detail = snapshot.Detail
-				entry.LiveActivity = snapshot.Detail
-				entry.Task = snapshot.Detail
-				entry.LastTime = snapshot.LastTime
-			}
-			if entry.Status == "" && b.lastTaggedAt != nil {
-				if taggedAt, ok := b.lastTaggedAt[member.Slug]; ok && now.Sub(taggedAt) < 60*time.Second {
-					entry.Status = "active"
-					entry.Activity = "queued"
-					entry.Detail = "active"
-					entry.LiveActivity = "active"
-					entry.Task = "active"
-					entry.LastTime = taggedAt.UTC().Format(time.RFC3339)
-				}
-			}
-			if entry.Status == "" {
-				entry.Status = "idle"
-			}
-			if entry.Activity == "" {
-				entry.Activity = "idle"
-			}
-			members = append(members, entry)
-		}
-		b.mu.Unlock()
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"members": members})
-	case http.MethodPost:
-		var body struct {
-			Action         string                    `json:"action"`
-			Slug           string                    `json:"slug"`
-			Name           string                    `json:"name"`
-			Role           string                    `json:"role"`
-			Expertise      []string                  `json:"expertise"`
-			Personality    string                    `json:"personality"`
-			PermissionMode string                    `json:"permission_mode"`
-			AllowedTools   []string                  `json:"allowed_tools"`
-			CreatedBy      string                    `json:"created_by"`
-			Provider       *provider.ProviderBinding `json:"provider,omitempty"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			http.Error(w, "invalid json", http.StatusBadRequest)
-			return
-		}
-		action := strings.TrimSpace(body.Action)
-		slug := normalizeChannelSlug(body.Slug)
-		if slug == "" {
-			http.Error(w, "slug required", http.StatusBadRequest)
-			return
-		}
-		now := time.Now().UTC().Format(time.RFC3339)
-
-		b.mu.Lock()
-		defer b.mu.Unlock()
-		switch action {
-		case "create":
-			if b.findMemberLocked(slug) != nil {
-				http.Error(w, "member already exists", http.StatusConflict)
-				return
-			}
-			if body.Provider != nil {
-				if err := provider.ValidateKind(body.Provider.Kind); err != nil {
-					http.Error(w, err.Error(), http.StatusBadRequest)
-					return
-				}
-			}
-			member := officeMember{
-				Slug:           slug,
-				Name:           strings.TrimSpace(body.Name),
-				Role:           strings.TrimSpace(body.Role),
-				Expertise:      normalizeStringList(body.Expertise),
-				Personality:    strings.TrimSpace(body.Personality),
-				PermissionMode: strings.TrimSpace(body.PermissionMode),
-				AllowedTools:   normalizeStringList(body.AllowedTools),
-				CreatedBy:      strings.TrimSpace(body.CreatedBy),
-				CreatedAt:      now,
-			}
-			if body.Provider != nil {
-				member.Provider = *body.Provider
-			}
-			applyOfficeMemberDefaults(&member)
-
-			// For openclaw agents, reach the gateway BEFORE we persist: if the
-			// caller didn't supply a session key, auto-create one; either way,
-			// attach the bridge subscription. If the gateway is unreachable we
-			// fail the whole create so we don't persist a half-configured
-			// member that can't actually talk.
-			if member.Provider.Kind == provider.KindOpenclaw {
-				if member.Provider.Openclaw == nil {
-					member.Provider.Openclaw = &provider.OpenclawProviderBinding{}
-				}
-				bridge := b.openclawBridgeLocked()
-				if bridge == nil {
-					http.Error(w, "openclaw bridge not active; cannot create openclaw member", http.StatusServiceUnavailable)
-					return
-				}
-				if member.Provider.Openclaw.SessionKey == "" {
-					agentID := member.Provider.Openclaw.AgentID
-					if agentID == "" {
-						agentID = "main"
-					}
-					label := fmt.Sprintf("wuphf-%s-%d", slug, time.Now().UnixNano())
-					key, err := bridge.CreateSession(r.Context(), agentID, label)
-					if err != nil {
-						http.Error(w, fmt.Sprintf("openclaw sessions.create: %v", err), http.StatusBadGateway)
-						return
-					}
-					member.Provider.Openclaw.SessionKey = key
-				}
-				if err := bridge.AttachSlug(r.Context(), slug, member.Provider.Openclaw.SessionKey); err != nil {
-					http.Error(w, fmt.Sprintf("openclaw subscribe: %v", err), http.StatusBadGateway)
-					return
-				}
-			}
-
-			b.members = append(b.members, member)
-			b.memberIndex[member.Slug] = len(b.members) - 1
-			// Add the new hire to every non-DM channel's Members list so they
-			// can actually POST replies. canAccessChannelLocked enforces
-			// ch.Members for every non-CEO agent sender; without this, a
-			// wizard-hired specialist can be tagged and dispatched but its
-			// reply is 403'd with "channel access denied" and the user sees
-			// nothing. DM channels are intentionally skipped — DMs encode
-			// the target agent in the slug and go through a different
-			// membership gate.
-			//
-			// Policy note: this is broader than normalizeLoadedStateLocked's
-			// seed (which only fills #general). A wizard hire joins every
-			// topical channel by default; admins can narrow via
-			// /channel-members action=remove afterwards. The rationale is
-			// that an office member who can't post to any non-default
-			// channel without a second configuration step violates the
-			// principle of least surprise — the hire UI does not surface a
-			// channel-scope picker, so the implicit default has to be
-			// "office-wide."
-			//
-			// We also clear any stale Disabled entry for this slug. A fresh
-			// hire shouldn't inherit a mute left over from a prior lifecycle.
-			updatedChannels := make([]string, 0, len(b.channels))
-			for i := range b.channels {
-				if b.channels[i].isDM() {
-					continue
-				}
-				mutated := false
-				if !containsString(b.channels[i].Members, slug) {
-					b.channels[i].Members = uniqueSlugs(append(b.channels[i].Members, slug))
-					mutated = true
-				}
-				if containsString(b.channels[i].Disabled, slug) {
-					// Allocate a fresh slice instead of reusing the
-					// backing array via [:0]+append. The in-place form
-					// is safe but reads as if it could clobber the
-					// range — readability over one extra alloc on a
-					// rare re-hire path.
-					next := make([]string, 0, len(b.channels[i].Disabled))
-					for _, d := range b.channels[i].Disabled {
-						if d != slug {
-							next = append(next, d)
-						}
-					}
-					b.channels[i].Disabled = next
-					mutated = true
-				}
-				if mutated {
-					b.channels[i].UpdatedAt = now
-					updatedChannels = append(updatedChannels, b.channels[i].Slug)
-				}
-			}
-			if err := b.saveLocked(); err != nil {
-				http.Error(w, "failed to persist broker state", http.StatusInternalServerError)
-				return
-			}
-			b.publishOfficeChangeLocked(officeChangeEvent{Kind: "member_created", Slug: slug})
-			// Notify SSE subscribers that these channels' rosters changed so
-			// the UI sidebar refreshes without requiring a separate trigger.
-			for _, chSlug := range updatedChannels {
-				b.publishOfficeChangeLocked(officeChangeEvent{Kind: "channel_updated", Slug: chSlug})
-			}
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]any{"member": member})
-		case "update":
-			member := b.findMemberLocked(slug)
-			if member == nil {
-				http.Error(w, "member not found", http.StatusNotFound)
-				return
-			}
-			if body.Name != "" {
-				member.Name = strings.TrimSpace(body.Name)
-			}
-			if body.Role != "" {
-				member.Role = strings.TrimSpace(body.Role)
-			}
-			if body.Expertise != nil {
-				member.Expertise = normalizeStringList(body.Expertise)
-			}
-			if body.Personality != "" {
-				member.Personality = strings.TrimSpace(body.Personality)
-			}
-			if body.PermissionMode != "" {
-				member.PermissionMode = strings.TrimSpace(body.PermissionMode)
-			}
-			if body.AllowedTools != nil {
-				member.AllowedTools = normalizeStringList(body.AllowedTools)
-			}
-			if body.Provider != nil {
-				if err := provider.ValidateKind(body.Provider.Kind); err != nil {
-					http.Error(w, err.Error(), http.StatusBadRequest)
-					return
-				}
-				oldBinding := member.Provider
-				newBinding := *body.Provider
-
-				// Provider switch: reconcile the bridge state best-effort. We
-				// don't block the update on gateway failures — the persisted
-				// binding is the new truth, and a leaked old session is
-				// recoverable via `openclaw sessions list` out-of-band.
-				bridge := b.openclawBridgeLocked()
-
-				fromOpenclaw := oldBinding.Kind == provider.KindOpenclaw
-				toOpenclaw := newBinding.Kind == provider.KindOpenclaw
-
-				if toOpenclaw {
-					if bridge == nil {
-						http.Error(w, "openclaw bridge not active; cannot switch agent to openclaw", http.StatusServiceUnavailable)
-						return
-					}
-					if newBinding.Openclaw == nil {
-						newBinding.Openclaw = &provider.OpenclawProviderBinding{}
-					}
-					if newBinding.Openclaw.SessionKey == "" {
-						agentID := newBinding.Openclaw.AgentID
-						if agentID == "" {
-							agentID = "main"
-						}
-						label := fmt.Sprintf("wuphf-%s-%d", member.Slug, time.Now().UnixNano())
-						key, err := bridge.CreateSession(r.Context(), agentID, label)
-						if err != nil {
-							http.Error(w, fmt.Sprintf("openclaw sessions.create: %v", err), http.StatusBadGateway)
-							return
-						}
-						newBinding.Openclaw.SessionKey = key
-					}
-				}
-
-				// Attach BEFORE detaching the old session so an attach failure
-				// preserves the previous subscription rather than leaving the
-				// agent silently disconnected. Order matters for openclaw→
-				// openclaw swaps in particular: detach-first plus a failed
-				// attach would return 502 with member.Provider still pointing
-				// at the old binding but no live subscription on the gateway.
-				if toOpenclaw {
-					if err := bridge.AttachSlug(r.Context(), member.Slug, newBinding.Openclaw.SessionKey); err != nil {
-						http.Error(w, fmt.Sprintf("openclaw subscribe: %v", err), http.StatusBadGateway)
-						return
-					}
-				}
-
-				if fromOpenclaw && bridge != nil {
-					// Detach old session from subscriptions. Best-effort; log via
-					// the bridge's own system-message channel on failure. The
-					// daemon-side session lingers (no sessions.end method); user
-					// can prune via the OpenClaw CLI if they care.
-					if err := bridge.DetachSlug(r.Context(), member.Slug); err != nil {
-						go bridge.postSystemMessage(fmt.Sprintf("agent %q provider-switch: detach warning: %v", member.Slug, err))
-					}
-				}
-
-				member.Provider = newBinding
-			}
-			applyOfficeMemberDefaults(member)
-			if err := b.saveLocked(); err != nil {
-				http.Error(w, "failed to persist broker state", http.StatusInternalServerError)
-				return
-			}
-			// Match the create/remove paths so SSE subscribers learn about
-			// updated member metadata (provider switch, name changes,
-			// channel reassignment) instead of waiting for a full reload.
-			b.publishOfficeChangeLocked(officeChangeEvent{Kind: "member_updated", Slug: slug})
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]any{"member": member})
-		case "remove":
-			member := b.findMemberLocked(slug)
-			if member == nil {
-				http.Error(w, "member not found", http.StatusNotFound)
-				return
-			}
-			if member.BuiltIn || slug == "ceo" {
-				http.Error(w, "cannot remove built-in member", http.StatusBadRequest)
-				return
-			}
-			// If the member was bridged to OpenClaw, unsubscribe from the
-			// gateway. Best-effort: member removal must succeed even when
-			// the gateway is unreachable. We do NOT call sessions.end because
-			// the current daemon doesn't expose that method — the session
-			// lingers daemon-side and the user can clean it up via the
-			// OpenClaw CLI if they want to reclaim the slot.
-			if member.Provider.Kind == provider.KindOpenclaw {
-				if bridge := b.openclawBridgeLocked(); bridge != nil {
-					if err := bridge.DetachSlug(r.Context(), member.Slug); err != nil {
-						go bridge.postSystemMessage(fmt.Sprintf("agent %q removed: detach warning: %v", member.Slug, err))
-					}
-				}
-			}
-			filteredMembers := b.members[:0]
-			for _, existing := range b.members {
-				if existing.Slug != slug {
-					filteredMembers = append(filteredMembers, existing)
-				}
-			}
-			b.members = filteredMembers
-			b.rebuildMemberIndexLocked()
-			// Symmetry with action:create — skip DM channels (they encode
-			// their target in the slug and go through a different
-			// membership gate) and emit a channel_updated event per
-			// actually-mutated channel so SSE subscribers refresh the
-			// roster. Without this, the UI sidebar gets a half-signal
-			// lifecycle (create emits channel_updated, remove does not).
-			removedChannels := make([]string, 0, len(b.channels))
-			for i := range b.channels {
-				if b.channels[i].isDM() {
-					continue
-				}
-				mutated := false
-				if containsString(b.channels[i].Members, slug) {
-					next := make([]string, 0, len(b.channels[i].Members))
-					for _, existing := range b.channels[i].Members {
-						if existing != slug {
-							next = append(next, existing)
-						}
-					}
-					b.channels[i].Members = next
-					mutated = true
-				}
-				if containsString(b.channels[i].Disabled, slug) {
-					next := make([]string, 0, len(b.channels[i].Disabled))
-					for _, existing := range b.channels[i].Disabled {
-						if existing != slug {
-							next = append(next, existing)
-						}
-					}
-					b.channels[i].Disabled = next
-					mutated = true
-				}
-				if mutated {
-					b.channels[i].UpdatedAt = now
-					removedChannels = append(removedChannels, b.channels[i].Slug)
-				}
-			}
-			for i := range b.tasks {
-				if b.tasks[i].Owner == slug {
-					b.tasks[i].Owner = ""
-					b.tasks[i].Status = "open"
-					b.tasks[i].UpdatedAt = now
-				}
-			}
-			if err := b.saveLocked(); err != nil {
-				http.Error(w, "failed to persist broker state", http.StatusInternalServerError)
-				return
-			}
-			b.publishOfficeChangeLocked(officeChangeEvent{Kind: "member_removed", Slug: slug})
-			for _, chSlug := range removedChannels {
-				b.publishOfficeChangeLocked(officeChangeEvent{Kind: "channel_updated", Slug: chSlug})
-			}
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
-		default:
-			http.Error(w, "unknown action", http.StatusBadRequest)
-		}
-	default:
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-	}
-}
+// handleOfficeMembers and the action handlers (create/update/remove)
+// moved to broker_office_members.go.
 
 func (b *Broker) handleGenerateMember(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -1096,54 +703,18 @@ func (b *Broker) handleChannels(w http.ResponseWriter, r *http.Request) {
 		}
 		switch action {
 		case "create":
-			if slug == "" {
-				http.Error(w, "slug required", http.StatusBadRequest)
-				return
-			}
-			if reservedChannelSlugs[slug] {
-				// Reject slugs that canAccessChannelLocked treats as universally
-				// trusted senders. Without this gate, a user-created channel
-				// named e.g. "system" would let every trusted-sender slug read
-				// + post in it without an explicit Members entry — defeating
-				// the membership check the rest of the auth path relies on.
-				http.Error(w, "slug is reserved", http.StatusBadRequest)
-				return
-			}
-			if b.findChannelLocked(slug) != nil {
-				http.Error(w, "channel already exists", http.StatusConflict)
-				return
-			}
-			members, missing := validateMembers(body.Members)
-			if missing != "" {
-				http.Error(w, "unknown members: "+missing, http.StatusNotFound)
-				return
-			}
-			members = append([]string{"ceo"}, members...)
-			if creator := normalizeChannelSlug(body.CreatedBy); creator != "" && creator != "ceo" && b.findMemberLocked(creator) != nil {
-				members = append(members, creator)
-			}
-			ch := teamChannel{
-				Slug:        slug,
-				Name:        strings.TrimSpace(body.Name),
-				Description: strings.TrimSpace(body.Description),
-				Members:     uniqueSlugs(members),
+			ch, cerr := b.createChannelLocked(channelCreateInput{
+				Slug:        body.Slug,
+				Name:        body.Name,
+				Description: body.Description,
+				Members:     body.Members,
+				CreatedBy:   body.CreatedBy,
 				Surface:     body.Surface,
-				CreatedBy:   strings.TrimSpace(body.CreatedBy),
-				CreatedAt:   now,
-				UpdatedAt:   now,
-			}
-			if ch.Name == "" {
-				ch.Name = slug
-			}
-			if ch.Description == "" {
-				ch.Description = defaultTeamChannelDescription(ch.Slug, ch.Name)
-			}
-			b.channels = append(b.channels, ch)
-			if err := b.saveLocked(); err != nil {
-				http.Error(w, "failed to persist broker state", http.StatusInternalServerError)
+			})
+			if cerr != nil {
+				http.Error(w, cerr.Msg, cerr.Code)
 				return
 			}
-			b.publishOfficeChangeLocked(officeChangeEvent{Kind: "channel_created", Slug: slug})
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{"channel": ch})
 		case "update":
@@ -1251,6 +822,110 @@ func (b *Broker) handleChannels(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// channelCreateInput is the input shape for createChannelLocked. It mirrors
+// the bits of the POST /channels body that drive a "create" action so the
+// Telegram-connect handler (and any future integration handler) can reuse the
+// canonical create path without re-implementing the validation rules.
+type channelCreateInput struct {
+	Slug        string
+	Name        string
+	Description string
+	Members     []string
+	CreatedBy   string
+	Surface     *channelSurface
+}
+
+// channelCreateError pairs an HTTP status with a user-facing message so the
+// caller can write it back through http.Error without rebuilding the
+// status-code → message mapping in every handler.
+type channelCreateError struct {
+	Code int
+	Msg  string
+}
+
+func (e *channelCreateError) Error() string { return e.Msg }
+
+// createChannelLocked is the canonical channel-create path. It validates the
+// slug, applies the reserved-slug guard, validates members against
+// b.findMemberLocked, prepends "ceo", optionally adds the creator, persists,
+// and publishes the change event. Caller MUST hold b.mu.
+//
+// All of this used to be inlined in handleChannels' "create" case; pulling it
+// out lets the Telegram-connect web flow share the exact same validation
+// rather than reimplementing them and drifting (the original copy in
+// handleTelegramConnect skipped member validation, the reserved-slug guard,
+// and the creator-self-add — all silent gaps that this consolidation closes).
+func (b *Broker) createChannelLocked(in channelCreateInput) (*teamChannel, *channelCreateError) {
+	// Validate the raw slug before normalizing — normalizeChannelSlug rewrites
+	// "" / whitespace to "general" and would have skipped the "slug required"
+	// branch entirely, falling through to "channel already exists" because
+	// #general always exists. Surface the missing-slug case as 400 with a
+	// useful message instead.
+	if strings.TrimSpace(in.Slug) == "" {
+		return nil, &channelCreateError{Code: http.StatusBadRequest, Msg: "slug required"}
+	}
+	slug := normalizeChannelSlug(in.Slug)
+	if slug == "" {
+		return nil, &channelCreateError{Code: http.StatusBadRequest, Msg: "slug required"}
+	}
+	if reservedChannelSlugs[slug] {
+		return nil, &channelCreateError{Code: http.StatusBadRequest, Msg: "slug is reserved"}
+	}
+	if b.findChannelLocked(slug) != nil {
+		return nil, &channelCreateError{Code: http.StatusConflict, Msg: "channel already exists"}
+	}
+
+	requested := uniqueSlugs(in.Members)
+	validated := make([]string, 0, len(requested))
+	var missing []string
+	for _, m := range requested {
+		if b.findMemberLocked(m) == nil {
+			missing = append(missing, m)
+			continue
+		}
+		validated = append(validated, m)
+	}
+	if len(missing) > 0 {
+		return nil, &channelCreateError{
+			Code: http.StatusNotFound,
+			Msg:  "unknown members: " + strings.Join(missing, ", "),
+		}
+	}
+
+	final := append([]string{"ceo"}, validated...)
+	// CreatedBy is an actor slug, not a channel slug. normalizeChannelSlug
+	// rewrites "" to "general", which would silently auto-add a real office
+	// member named "general" as a channel member whenever CreatedBy was
+	// empty. normalizeActorSlug preserves "" so the guard below short-circuits.
+	if creator := normalizeActorSlug(in.CreatedBy); creator != "" && creator != "ceo" && b.findMemberLocked(creator) != nil {
+		final = append(final, creator)
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	ch := teamChannel{
+		Slug:        slug,
+		Name:        strings.TrimSpace(in.Name),
+		Description: strings.TrimSpace(in.Description),
+		Members:     uniqueSlugs(final),
+		Surface:     in.Surface,
+		CreatedBy:   strings.TrimSpace(in.CreatedBy),
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	if ch.Name == "" {
+		ch.Name = slug
+	}
+	if ch.Description == "" {
+		ch.Description = defaultTeamChannelDescription(ch.Slug, ch.Name)
+	}
+	b.channels = append(b.channels, ch)
+	if err := b.saveLocked(); err != nil {
+		return nil, &channelCreateError{Code: http.StatusInternalServerError, Msg: "failed to persist broker state"}
+	}
+	b.publishOfficeChangeLocked(officeChangeEvent{Kind: "channel_created", Slug: slug})
+	return &b.channels[len(b.channels)-1], nil
+}
+
 // handleCreateDM creates or returns an existing DM channel.
 // POST /channels/dm — body: {members: ["human", "engineering"], type: "direct"|"group"}
 func (b *Broker) handleCreateDM(w http.ResponseWriter, r *http.Request) {
@@ -1273,7 +948,7 @@ func (b *Broker) handleCreateDM(w http.ResponseWriter, r *http.Request) {
 	// Validate: at least one member must be "human" (no agent-to-agent DMs).
 	hasHuman := false
 	for _, m := range body.Members {
-		if m == "human" || m == "you" {
+		if isHumanMessageSender(m) {
 			hasHuman = true
 			break
 		}
@@ -1318,7 +993,7 @@ func (b *Broker) handleCreateDM(w http.ResponseWriter, r *http.Request) {
 			// Normalize: find the non-human member for the slug.
 			agentSlug := ""
 			for _, m := range body.Members {
-				if m != "human" && m != "you" {
+				if !isHumanMessageSender(m) {
 					agentSlug = m
 					break
 				}
@@ -1654,4 +1329,57 @@ func (b *Broker) handleMembers(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"channel": channel, "members": list})
+}
+
+func (b *Broker) EnabledMembers(channel string) []string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.sessionMode == SessionModeOneOnOne {
+		return []string{b.oneOnOneAgent}
+	}
+	channel = normalizeChannelSlug(channel)
+	if channel == "" {
+		channel = "general"
+	}
+	if ch := b.findChannelLocked(channel); ch != nil {
+		return b.enabledChannelMembersLocked(channel, ch.Members)
+	}
+	return nil
+}
+
+// DisabledMembers returns the slugs explicitly disabled for a channel —
+// members who were present in ch.Members at some point but have been muted
+// for this channel. Callers use this to distinguish "never added" (which an
+// explicit @-tag can bypass) from "deliberately muted" (which an @-tag must
+// respect — muting an agent is the user's explicit intent to silence them).
+func (b *Broker) DisabledMembers(channel string) []string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	channel = normalizeChannelSlug(channel)
+	if channel == "" {
+		channel = "general"
+	}
+	ch := b.findChannelLocked(channel)
+	if ch == nil || len(ch.Disabled) == 0 {
+		return nil
+	}
+	return append([]string(nil), ch.Disabled...)
+}
+
+// SurfaceChannels returns all channels that have a surface configured for the given provider.
+func (b *Broker) SurfaceChannels(provider string) []teamChannel {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	var out []teamChannel
+	for _, ch := range b.channels {
+		if ch.Surface != nil && ch.Surface.Provider == provider {
+			cp := ch
+			cp.Members = append([]string(nil), ch.Members...)
+			cp.Disabled = append([]string(nil), ch.Disabled...)
+			s := *ch.Surface
+			cp.Surface = &s
+			out = append(out, cp)
+		}
+	}
+	return out
 }

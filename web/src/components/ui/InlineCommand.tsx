@@ -131,7 +131,7 @@ export function InlineCommand({
         />
         <span>{command}</span>
       </button>
-      {open && destructive && (
+      {open && destructive ? (
         <WipeModal
           title={destructive.title}
           severity={destructive.severity || "critical"}
@@ -143,7 +143,7 @@ export function InlineCommand({
             if (!busy) setOpen(false);
           }}
         />
-      )}
+      ) : null}
     </>
   );
 }

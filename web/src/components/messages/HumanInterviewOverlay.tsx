@@ -103,16 +103,16 @@ function BlockingInterview({
         <div className="interview-meta">
           <span className="badge badge-yellow">BLOCKING</span>
           <span className="interview-from">@{request.from || "agent"}</span>
-          {request.channel && (
+          {request.channel ? (
             <span className="interview-channel">in #{request.channel}</span>
-          )}
+          ) : null}
         </div>
         <h2 id="interview-title" className="interview-title">
           {request.title && request.title !== "Request"
             ? request.title
             : "Human decision requested"}
         </h2>
-        {isEnhanceInterview && enhancesSlug && (
+        {isEnhanceInterview && enhancesSlug ? (
           <div
             className="interview-enhance-banner"
             role="note"
@@ -145,11 +145,11 @@ function BlockingInterview({
               . Enhance it or approve anyway.
             </span>
           </div>
-        )}
+        ) : null}
         <p className="interview-question">{request.question}</p>
-        {request.context && (
+        {request.context ? (
           <p className="interview-context">{request.context}</p>
-        )}
+        ) : null}
         {options.length > 0 ? (
           <div className="interview-actions">
             {options.map((opt) => (

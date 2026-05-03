@@ -64,6 +64,7 @@ export function AgentList() {
 
               return (
                 <button
+                  type="button"
                   key={agent.slug}
                   data-agent-slug={agent.slug}
                   className={`sidebar-agent${isDMActive ? " active" : ""}`}
@@ -86,9 +87,9 @@ export function AgentList() {
                     <span className="sidebar-agent-name">
                       {agent.name || agent.slug}
                     </span>
-                    {agent.task && (
+                    {agent.task ? (
                       <span className="sidebar-agent-task">{agent.task}</span>
-                    )}
+                    ) : null}
                   </div>
                   <span className={`status-dot ${ac.dotClass}`} />
                 </button>
@@ -96,6 +97,7 @@ export function AgentList() {
             })
           )}
           <button
+            type="button"
             className="sidebar-item sidebar-add-btn"
             onClick={wizard.show}
             title="Create a new agent"

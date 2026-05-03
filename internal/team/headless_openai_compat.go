@@ -109,6 +109,16 @@ func (l *Launcher) runHeadlessOpenAICompatTurn(ctx context.Context, slug string,
 	modelOverride := strings.TrimSpace(l.broker.MemberProviderBinding(slug).Model)
 	streamFn := provider.NewOpenAICompatStreamFnWithCtxAndModel(ctx, kind, modelOverride)
 
+	// Live-chat relay streams the model's user-facing text to the channel
+	// at sentence/paragraph boundaries, so the room sees the agent's reply
+	// taking shape rather than waiting for the final summary post. The
+	// state machine's pushLiveText / onToolUseChunk paths drive
+	// relay.OnText / relay.Flush internally; without a relay attached
+	// those calls are no-ops and only the final post lands in the channel.
+	relay := newHeadlessLiveChatRelay(l, slug, target, notification, func(line string) {
+		appendHeadlessCodexLog(slug, line)
+	})
+
 	// All policy-bearing per-turn state is owned by openAICompatTurnState
 	// (see openai_compat_turn_state.go). The state machine is
 	// independently unit-tested via openai_compat_turn_state_test.go.
@@ -120,7 +130,12 @@ func (l *Launcher) runHeadlessOpenAICompatTurn(ctx context.Context, slug string,
 		// machine stays oblivious.
 		stream:  agentStream,
 		metrics: &metrics,
-	})
+	}, relay)
+	// Defer the flush so the loop's `if err != nil { return err }` and
+	// other early exits still surface the trailing buffered sentence.
+	// The explicit flushes before the partial-post and final-post hooks
+	// stay — they're idempotent once the buffer is drained.
+	defer state.flushLiveChat()
 
 	// taskID is unique per turn so the Receipts panel groups each
 	// agent's turn into its own row. Format mirrors agent.nextTaskID.
@@ -179,6 +194,7 @@ func (l *Launcher) runHeadlessOpenAICompatTurn(ctx context.Context, slug string,
 		// produced when maxIters tripped) before propagating the error,
 		// so the user sees something on-channel rather than a silent
 		// failure. Without this, finalText is computed and discarded.
+		state.flushLiveChat()
 		if text := strings.TrimSpace(finalText); text != "" {
 			if msg, posted, postErr := l.postHeadlessFinalMessageIfSilent(slug, target, notification, text, startedAt); postErr != nil {
 				appendHeadlessCodexLog(slug, kind+"_partial-post-error: "+postErr.Error())
@@ -214,6 +230,7 @@ func (l *Launcher) runHeadlessOpenAICompatTurn(ctx context.Context, slug string,
 	}
 	l.updateHeadlessProgress(slug, "idle", "idle", summary, metrics)
 
+	state.flushLiveChat()
 	if text != "" && state.shouldPostFinalText() {
 		// Suppress when the agent already posted via team_broadcast /
 		// reply / etc this turn. Posting finalText here would

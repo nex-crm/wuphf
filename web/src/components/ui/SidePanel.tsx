@@ -72,7 +72,7 @@ export function SidePanel({
     if (panel) {
       const focusables =
         panel.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR);
-      const first = focusables[0];
+      const [first] = focusables;
       if (first) {
         first.focus();
       } else {
@@ -89,7 +89,7 @@ export function SidePanel({
         e.preventDefault();
         return;
       }
-      const first = focusables[0];
+      const [first] = focusables;
       const last = focusables[focusables.length - 1];
       if (e.shiftKey && document.activeElement === first) {
         e.preventDefault();

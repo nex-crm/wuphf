@@ -70,8 +70,26 @@ func (b *Broker) writeSkillProposalLocked(spec teamSkill) (*teamSkill, error) {
 
 	// --- Step 3: Pre-lock dedup ---
 	if existing := b.findSkillByNameLocked(name); existing != nil {
-		slog.Debug("writeSkillProposalLocked: skill already exists, skipping",
-			"name", name, "existing_status", existing.Status)
+		// Backfill missing source_article on existing skills. Stage A skills
+		// created before the provenance fix landed will not heal otherwise:
+		// the dedup short-circuit returns before Step 4 ever copies
+		// spec.SourceArticle into the new struct, so /skills and the
+		// rendered SKILL.md stay permanently empty until the skill is
+		// deleted and recreated.
+		incoming := strings.TrimSpace(spec.SourceArticle)
+		if existing.SourceArticle == "" && incoming != "" {
+			existing.SourceArticle = incoming
+			existing.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+			slog.Info("skill_proposal: backfilled source_article on existing dedup",
+				"name", name, "source_article", incoming)
+			if err := b.saveLocked(); err != nil {
+				slog.Warn("skill_proposal: saveLocked after source_article backfill failed",
+					"name", name, "err", err)
+			}
+		} else {
+			slog.Debug("writeSkillProposalLocked: skill already exists, skipping",
+				"name", name, "existing_status", existing.Status)
+		}
 		return existing, nil
 	}
 
@@ -98,6 +116,7 @@ func (b *Broker) writeSkillProposalLocked(spec teamSkill) (*teamSkill, error) {
 		Description:         strings.TrimSpace(spec.Description),
 		Content:             strings.TrimSpace(spec.Content),
 		CreatedBy:           createdBy,
+		SourceArticle:       strings.TrimSpace(spec.SourceArticle),
 		Channel:             channel,
 		Tags:                append([]string(nil), spec.Tags...),
 		Trigger:             strings.TrimSpace(spec.Trigger),

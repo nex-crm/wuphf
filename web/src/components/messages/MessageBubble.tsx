@@ -32,6 +32,7 @@ interface MessageBubbleProps {
   onCopyLink?: (id: string) => void;
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
 export function MessageBubble({
   message,
   grouped = false,
@@ -43,18 +44,22 @@ export function MessageBubble({
 }: MessageBubbleProps) {
   const currentChannel = useAppStore((s) => s.currentChannel);
   const { data: members = [] } = useOfficeMembers();
-  const isHuman = message.from === "you" || message.from === "human";
+  const isHuman =
+    message.from === "you" ||
+    message.from === "human" ||
+    message.from.startsWith("human:");
+  const isLocalUser = message.from === "you";
+  const cofounderDisplayName =
+    isHuman && !isLocalUser
+      ? message.from.startsWith("human:")
+        ? message.from.slice("human:".length).replace(/-/g, " ") || "co-founder"
+        : "Human"
+      : null;
   const agent = members.find((m) => m.slug === message.from);
   const defaultHarness = useDefaultHarness();
   const harness = !isHuman
     ? resolveHarness(agent?.provider, defaultHarness)
     : null;
-
-  // Status messages — compact
-  if (message.content?.startsWith("[STATUS]")) {
-    const statusText = message.content.replace(/^\[STATUS\]\s*/, "");
-    return <div className="message-status animate-fade">{statusText}</div>;
-  }
 
   const usageTotal = message.usage
     ? (message.usage.total_tokens ??
@@ -95,6 +100,12 @@ export function MessageBubble({
     [isHuman, message.content, knownSlugs],
   );
 
+  // Status messages — compact
+  if (message.content?.startsWith("[STATUS]")) {
+    const statusText = message.content.replace(/^\[STATUS\]\s*/, "");
+    return <div className="message-status animate-fade">{statusText}</div>;
+  }
+
   return (
     <div
       className={`message animate-fade${grouped ? " message-grouped" : ""}${isReply ? " message-reply" : ""}`}
@@ -119,18 +130,20 @@ export function MessageBubble({
             : undefined
         }
       >
-        {isHuman ? (
+        {isLocalUser ? (
           "You"
+        ) : cofounderDisplayName ? (
+          cofounderDisplayName.slice(0, 1).toUpperCase()
         ) : (
           <>
             <PixelAvatar slug={message.from} size={24} />
-            {harness && (
+            {harness ? (
               <HarnessBadge
                 kind={harness}
                 size={14}
                 className="harness-badge-on-avatar"
               />
-            )}
+            ) : null}
           </>
         )}
       </div>
@@ -140,7 +153,9 @@ export function MessageBubble({
         {/* Header */}
         <div className="message-header">
           <span className="message-author">
-            {isHuman ? "You" : agent?.name || message.from}
+            {isLocalUser
+              ? "You"
+              : cofounderDisplayName || agent?.name || message.from}
           </span>
           {isHuman ? (
             <span className="badge badge-neutral">human</span>
@@ -178,6 +193,7 @@ export function MessageBubble({
           <div className="message-reactions">
             {reactions.map((r) => (
               <button
+                type="button"
                 key={r.emoji}
                 className="reaction-pill"
                 onClick={() => {
@@ -198,11 +214,14 @@ export function MessageBubble({
             opens the thread panel where the full chain is browsable. */}
         {replyCount > 0 && onOpenThread && (
           <button
+            type="button"
             className="inline-thread-toggle"
             onClick={() => onOpenThread(message.id)}
             title="Open thread"
           >
             <svg
+              aria-hidden="true"
+              focusable="false"
               width="12"
               height="12"
               viewBox="0 0 24 24"
@@ -221,20 +240,23 @@ export function MessageBubble({
 
       {/* Hover actions — reply in thread, quote, copy link. Absolutely
           positioned so they don't change the bubble's flow layout. */}
-      {(onOpenThread || onQuoteReply || onCopyLink) && (
+      {onOpenThread || onQuoteReply || onCopyLink ? (
         <div
           className="message-hover-actions"
           role="toolbar"
           aria-label="Message actions"
         >
-          {onOpenThread && (
+          {onOpenThread ? (
             <button
+              type="button"
               className="message-hover-btn"
               onClick={() => onOpenThread(message.id)}
               title="Reply in thread"
               aria-label="Reply in thread"
             >
               <svg
+                aria-hidden="true"
+                focusable="false"
                 width="14"
                 height="14"
                 viewBox="0 0 24 24"
@@ -247,15 +269,18 @@ export function MessageBubble({
                 <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
               </svg>
             </button>
-          )}
-          {onQuoteReply && (
+          ) : null}
+          {onQuoteReply ? (
             <button
+              type="button"
               className="message-hover-btn"
               onClick={() => onQuoteReply(message)}
               title="Quote-reply"
               aria-label="Quote-reply"
             >
               <svg
+                aria-hidden="true"
+                focusable="false"
                 width="14"
                 height="14"
                 viewBox="0 0 24 24"
@@ -269,15 +294,18 @@ export function MessageBubble({
                 <path d="m16 16-5-5 5-5" />
               </svg>
             </button>
-          )}
-          {onCopyLink && (
+          ) : null}
+          {onCopyLink ? (
             <button
+              type="button"
               className="message-hover-btn"
               onClick={() => onCopyLink(message.id)}
               title="Copy link"
               aria-label="Copy link"
             >
               <svg
+                aria-hidden="true"
+                focusable="false"
                 width="14"
                 height="14"
                 viewBox="0 0 24 24"
@@ -291,9 +319,9 @@ export function MessageBubble({
                 <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.72-1.71" />
               </svg>
             </button>
-          )}
+          ) : null}
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

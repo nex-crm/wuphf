@@ -15,9 +15,10 @@ export async function initApi(): Promise<void> {
   try {
     const r = await fetch("/api-token");
     const data = await r.json();
-    token = data.token;
-    if (data.broker_url) {
-      brokerDirect = String(data.broker_url).replace(/\/+$/, "");
+    const { token: nextToken, broker_url: brokerUrl } = data;
+    token = nextToken;
+    if (brokerUrl) {
+      brokerDirect = String(brokerUrl).replace(/\/+$/, "");
     }
     useProxy = true;
   } catch {
@@ -25,7 +26,8 @@ export async function initApi(): Promise<void> {
     try {
       const r = await fetch(`${brokerDirect}/web-token`);
       const data = await r.json();
-      token = data.token;
+      const { token: nextToken } = data;
+      token = nextToken;
     } catch {
       // broker unreachable — will fail on first request
     }
@@ -108,6 +110,10 @@ function authHeaders(): Record<string, string> {
   return h;
 }
 
+interface RequestOptions {
+  signal?: AbortSignal;
+}
+
 export async function get<T = unknown>(
   path: string,
   params?: Record<string, string | number | boolean | null | undefined>,
@@ -155,11 +161,13 @@ export async function getText(
 export async function post<T = unknown>(
   path: string,
   body?: unknown,
+  options: RequestOptions = {},
 ): Promise<T> {
   const r = await fetch(baseURL() + path, {
     method: "POST",
     headers: authHeaders(),
     body: JSON.stringify(body),
+    signal: options.signal,
   });
   if (!r.ok) {
     const text = (await r.text().catch(() => "")).trim();
@@ -521,258 +529,6 @@ export function cancelRequest(id: string) {
   return post("/requests", { action: "cancel", id });
 }
 
-// ── Health ──
-
-export function getHealth() {
-  return get<{
-    status: string;
-    provider?: string;
-    provider_model?: string;
-    agents?: Record<string, unknown>;
-  }>("/health");
-}
-
-// /version returns the build-info baked into the running broker binary
-// (set at link time via -ldflags `-X .../buildinfo.Version=...`). For an
-// upgrade-vs-latest comparison, call /upgrade-check instead — it pairs this
-// with the npm-registry latest in a single round trip and is what the
-// in-app upgrade banner consumes.
-export interface VersionInfo {
-  version: string;
-  // Always populated by the backend (defaults to "unknown" when no
-  // BuildTimestamp ldflag was set — see internal/buildinfo).
-  build_timestamp: string;
-}
-
-export function getVersion() {
-  return get<VersionInfo>("/version");
-}
-
-// ── Tasks ──
-
-export interface TaskMemoryWorkflowCitation {
-  backend?: string;
-  source?: string;
-  source_id?: string;
-  path?: string;
-  page_id?: string;
-  chunk_id?: string;
-  source_url?: string;
-  line_start?: number;
-  line_end?: number;
-  title?: string;
-  snippet?: string;
-  score?: number;
-  stale?: boolean;
-  retrieved_at?: string;
-}
-
-export interface TaskMemoryWorkflowArtifact {
-  backend?: string;
-  source?: string;
-  path?: string;
-  page_id?: string;
-  promotion_id?: string;
-  entity_kind?: string;
-  entity_slug?: string;
-  playbook_slug?: string;
-  title?: string;
-  skip_reason?: string;
-  snippet?: string;
-  commit_sha?: string;
-  state?: string;
-  recorded_at?: string;
-  updated_at?: string;
-  missing?: boolean;
-}
-
-export interface TaskMemoryWorkflowStepState {
-  required?: boolean;
-  status?: string;
-  actor?: string;
-  query?: string;
-  completed_at?: string;
-  updated_at?: string;
-  count?: number;
-}
-
-export interface TaskMemoryWorkflowOverride {
-  actor: string;
-  reason: string;
-  timestamp: string;
-}
-
-export interface TaskMemoryWorkflowPartialError {
-  step?: string;
-  code?: string;
-  message?: string;
-  detail?: string;
-  timestamp?: string;
-}
-
-export interface TaskMemoryWorkflow {
-  required: boolean;
-  status?: string;
-  requirement_reason?: string;
-  required_steps?: string[];
-  lookup?: TaskMemoryWorkflowStepState;
-  capture?: TaskMemoryWorkflowStepState;
-  promote?: TaskMemoryWorkflowStepState;
-  citations?: TaskMemoryWorkflowCitation[];
-  captures?: TaskMemoryWorkflowArtifact[];
-  promotions?: TaskMemoryWorkflowArtifact[];
-  override?: TaskMemoryWorkflowOverride;
-  partial_errors?: Array<string | TaskMemoryWorkflowPartialError>;
-  created_at?: string;
-  updated_at?: string;
-  completed_at?: string;
-}
-
-export interface Task {
-  id: string;
-  title: string;
-  description?: string;
-  details?: string;
-  status: string;
-  owner?: string;
-  created_by?: string;
-  channel?: string;
-  thread_id?: string;
-  task_type?: string;
-  pipeline_id?: string;
-  pipeline_stage?: string;
-  execution_mode?: string;
-  review_state?: string;
-  source_signal_id?: string;
-  source_decision_id?: string;
-  worktree_path?: string;
-  worktree_branch?: string;
-  depends_on?: string[];
-  blocked?: boolean;
-  acked_at?: string;
-  due_at?: string;
-  follow_up_at?: string;
-  reminder_at?: string;
-  recheck_at?: string;
-  created_at?: string;
-  updated_at?: string;
-  memory_workflow?: TaskMemoryWorkflow;
-}
-
-export interface CreateTaskInput {
-  title: string;
-  assignee: string;
-  details?: string;
-  task_type?: string;
-  execution_mode?: string;
-  depends_on?: string[];
-}
-
-export interface CreateTasksResponse {
-  tasks: Task[];
-}
-
-/**
- * Create one or more tasks via the /task-plan endpoint. Used by surfaces
- * that hand off work (e.g. Suggest changes on a skill proposal creates a
- * "Revise skill" task assigned to the lead).
- */
-export function createTasks(
-  tasks: CreateTaskInput[],
-  opts?: { channel?: string; createdBy?: string },
-): Promise<CreateTasksResponse> {
-  return post<CreateTasksResponse>("/task-plan", {
-    channel: opts?.channel || "general",
-    created_by: opts?.createdBy || "human",
-    tasks,
-  });
-}
-
-export function reassignTask(
-  taskId: string,
-  newOwner: string,
-  channel: string,
-  actor = "human",
-) {
-  return post<{ task: Task }>("/tasks", {
-    action: "reassign",
-    id: taskId,
-    owner: newOwner,
-    channel: channel || "general",
-    created_by: actor,
-  });
-}
-
-export type TaskStatusAction =
-  | "release"
-  | "review"
-  | "block"
-  | "complete"
-  | "cancel";
-
-export interface UpdateTaskStatusOptions {
-  memoryWorkflowOverride?: boolean;
-  memoryWorkflowOverrideActor?: string;
-  memoryWorkflowOverrideReason?: string;
-  overrideReason?: string;
-}
-
-export function updateTaskStatus(
-  taskId: string,
-  action: TaskStatusAction,
-  channel: string,
-  actor = "human",
-  options?: UpdateTaskStatusOptions,
-) {
-  const body: Record<string, string | boolean> = {
-    action,
-    id: taskId,
-    channel: channel || "general",
-    created_by: actor,
-  };
-  if (options?.memoryWorkflowOverride) {
-    body.memory_workflow_override = true;
-    body.memory_workflow_override_actor =
-      options.memoryWorkflowOverrideActor || actor;
-  }
-  const overrideReason =
-    options?.memoryWorkflowOverrideReason || options?.overrideReason;
-  if (overrideReason) {
-    body.memory_workflow_override_reason = overrideReason;
-    body.override_reason = overrideReason;
-  }
-  return post<{ task: Task }>("/tasks", body);
-}
-
-export function getTasks(
-  channel: string,
-  opts?: { includeDone?: boolean; status?: string; mySlug?: string },
-) {
-  const params: Record<string, string> = {
-    viewer_slug: "human",
-    channel: channel || "general",
-  };
-  if (opts?.includeDone) params.include_done = "true";
-  if (opts?.status) params.status = opts.status;
-  if (opts?.mySlug) params.my_slug = opts.mySlug;
-  return get<{ tasks: Task[] }>("/tasks", params);
-}
-
-export function getOfficeTasks(opts?: {
-  includeDone?: boolean;
-  status?: string;
-  mySlug?: string;
-}) {
-  const params: Record<string, string> = {
-    viewer_slug: "human",
-    all_channels: "true",
-  };
-  if (opts?.includeDone) params.include_done = "true";
-  if (opts?.status) params.status = opts.status;
-  if (opts?.mySlug) params.my_slug = opts.mySlug;
-  return get<{ tasks: Task[] }>("/tasks", params);
-}
-
 // ── Signals / Decisions / Watchdogs / Actions ──
 
 export function getSignals() {
@@ -889,9 +645,7 @@ export interface SystemCronSpec {
  * hardcoded mirror constant.
  */
 export async function getSystemCronSpecs(): Promise<SystemCronSpec[]> {
-  const res = await get<{ specs: SystemCronSpec[] }>(
-    "/scheduler/system-specs",
-  );
+  const res = await get<{ specs: SystemCronSpec[] }>("/scheduler/system-specs");
   return res.specs ?? [];
 }
 
@@ -1107,10 +861,10 @@ export interface UndoRejectSkillResponse {
 }
 
 export function undoRejectSkill(
-  token: string,
+  undoToken: string,
 ): Promise<UndoRejectSkillResponse> {
   return post<UndoRejectSkillResponse>(`/skills/reject/undo`, {
-    undo_token: token,
+    undo_token: undoToken,
   });
 }
 
@@ -1137,62 +891,6 @@ export function patchSkill(
     `/skills/${encodeURIComponent(name)}/patch`,
     body,
   );
-}
-
-// ── Usage ──
-
-export interface AgentUsage {
-  input_tokens: number;
-  output_tokens: number;
-  cache_read_tokens: number;
-  cost_usd: number;
-}
-
-export interface UsageData {
-  total?: { cost_usd: number; total_tokens?: number };
-  session?: { total_tokens: number };
-  agents?: Record<string, AgentUsage>;
-}
-
-export function getUsage() {
-  return get<UsageData>("/usage");
-}
-
-// ── Agent Logs ──
-// Mirrors internal/agent/task_log_reader.go. The broker's /agent-logs
-// returns task summaries by default and tool-call entries when `task` is set.
-
-export interface TaskLogSummary {
-  taskId: string;
-  agentSlug: string;
-  toolCallCount: number;
-  firstToolAt?: number;
-  lastToolAt?: number;
-  hasError?: boolean;
-  sizeBytes: number;
-}
-
-export interface TaskLogEntry {
-  task_id: string;
-  agent_slug: string;
-  tool_name: string;
-  params?: Record<string, unknown>;
-  result?: string;
-  error?: string;
-  started_at?: number;
-  completed_at?: number;
-}
-
-export function listAgentLogTasks(opts?: { limit?: number }) {
-  const params: Record<string, string> = {};
-  if (opts?.limit) params.limit = String(opts.limit);
-  return get<{ tasks: TaskLogSummary[] }>("/agent-logs", params);
-}
-
-export function getAgentLogEntries(taskId: string) {
-  return get<{ task: string; entries: TaskLogEntry[] }>("/agent-logs", {
-    task: taskId,
-  });
 }
 
 // ── Memory ──
@@ -1325,8 +1023,8 @@ export function getConfig() {
   return get<ConfigSnapshot>("/config");
 }
 
-export function updateConfig(patch: ConfigUpdate) {
-  return post<{ status: string }>("/config", patch);
+export function updateConfig(configPatch: ConfigUpdate) {
+  return post<{ status: string }>("/config", configPatch);
 }
 
 // Doctor endpoint — one entry per registered local OpenAI-compatible
@@ -1399,27 +1097,65 @@ export function shredWorkspace() {
   return postWithTimeout<WorkspaceWipeResult>("/workspace/shred", {}, 20_000);
 }
 
-// UpgradeRunResult mirrors broker.upgradeRunResult — keep field names in
-// sync with internal/team/broker.go so a future rename here surfaces a TS
-// error against the canonical wire shape. install_method is optional
-// because the UI also synthesises a result on transport failure (network
-// error / timeout before reaching the broker), where no real method has
-// been observed; the broker itself always sets one of the union members.
-export interface UpgradeRunResult {
+// ── Telegram /connect wizard ──
+// These mirror the TUI's `/connect telegram` flow but drive it from the web.
+// Pass an explicit `token` to override what the broker has on disk; pass an
+// empty string to use the saved token from config / WUPHF_TELEGRAM_BOT_TOKEN.
+
+export interface TelegramVerifyResponse {
   ok: boolean;
-  install_method?: "global" | "local" | "unknown";
-  command?: string;
-  working_dir?: string;
-  output?: string;
+  bot_name?: string;
   error?: string;
-  timed_out?: boolean;
 }
 
-// runUpgrade triggers `npm install [-g] wuphf@latest` on the host that the
-// broker is running on. The 130s timeout is just above the broker-side
-// upgradeRunTimeout (120s) so the client gives the server enough room to
-// surface its own deadline error instead of failing first with a generic
-// "fetch timed out".
-export function runUpgrade() {
-  return postWithTimeout<UpgradeRunResult>("/upgrade/run", {}, 130_000);
+export interface TelegramGroup {
+  // chat_id comes from Go's int64 on the wire. Telegram's API docs say chat
+  // IDs may have at most 52 significant bits — exactly inside JS's
+  // Number.MAX_SAFE_INTEGER (53 bits). Today's supergroup IDs (~13 digits)
+  // are well below that, so a plain `number` is safe. If Telegram ever
+  // widens past 52 bits this needs to become a string (or bigint with an
+  // explicit serialiser) to avoid silent precision loss on the round-trip.
+  chat_id: number;
+  title: string;
+  type: string;
+}
+
+export interface TelegramDiscoverResponse {
+  groups: TelegramGroup[];
+}
+
+export interface TelegramConnectResponse {
+  channel_slug: string;
+  group_title: string;
+}
+
+export function verifyTelegramBot(telegramToken: string, signal?: AbortSignal) {
+  return post<TelegramVerifyResponse>(
+    "/telegram/verify",
+    { token: telegramToken },
+    { signal },
+  );
+}
+
+export function discoverTelegramChats(
+  telegramToken: string,
+  signal?: AbortSignal,
+) {
+  return post<TelegramDiscoverResponse>(
+    "/telegram/discover",
+    { token: telegramToken },
+    { signal },
+  );
+}
+
+export function connectTelegramChannel(
+  opts: {
+    token?: string;
+    chat_id: number;
+    title?: string;
+    type?: string;
+  },
+  signal?: AbortSignal,
+) {
+  return post<TelegramConnectResponse>("/telegram/connect", opts, { signal });
 }

@@ -366,7 +366,7 @@ func (b *notificationContextBuilder) ResponseInstructionForTarget(msg channelMes
 	lead := b.targeter.LeadSlug()
 	if slug == lead {
 		from := strings.TrimSpace(msg.From)
-		isFromHuman := from == "" || from == "you" || from == "human" || from == "nex"
+		isFromHuman := isHumanMessageSender(from) || from == "nex"
 		if !isFromHuman {
 			return fmt.Sprintf("You are @%s. A specialist just finished a lane. If the build is still underway, any task is open or in review, or the next lane is obvious, act now: approve/release review items, create the next owned team_task records, and only then stop. On a human build/ship/end-to-end request, if you approve or close an engineering/execution slice and the product is not yet runnable end to end, you MUST leave at least one engineering or execution lane active before you stop; do not let the company drift into GTM-only, rubric-only, or evaluation-only work while the build is still incomplete. Before you say a task is approved, closed, back in progress, reassigned, or blocked, you MUST make the matching team_task or team_plan call first; channel narration alone does not change durable state. If the task mutation fails, say that it failed and do not claim the state changed. Before creating any new task, inspect Active tasks in this packet: if a live task already covers that lane, reuse or update that task instead of creating an overlapping duplicate with a new title. Stay quiet only when the human already has what they need AND there is no remaining office work or obvious follow-up.", slug)
 		}
@@ -464,7 +464,7 @@ func (b *notificationContextBuilder) BuildMessageWorkPacket(msg channelMessage, 
 				if _, inThread := threadIDs[strings.TrimSpace(tm.ID)]; !inThread {
 					continue
 				}
-				if tm.From != "" && tm.From != "you" && tm.From != "human" && tm.From != "nex" && tm.From != slug {
+				if !isHumanMessageSender(tm.From) && tm.From != "nex" && tm.From != slug {
 					activeAgents[tm.From] = struct{}{}
 				}
 			}

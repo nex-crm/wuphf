@@ -111,9 +111,9 @@ export function Autocomplete({
         >
           <span className="autocomplete-item-icon">{item.icon}</span>
           <span className="autocomplete-item-label">{item.label}</span>
-          {item.desc && (
+          {item.desc ? (
             <span className="autocomplete-item-desc">{item.desc}</span>
-          )}
+          ) : null}
         </button>
       ))}
     </div>

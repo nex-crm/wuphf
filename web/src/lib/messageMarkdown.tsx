@@ -76,8 +76,9 @@ interface MdParent {
 export function mentionRemarkPlugin() {
   return function plugin() {
     return function transformer(tree: unknown) {
+      // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
       walk(tree as MdAnyNode, (parent) => {
-        const children = parent.children;
+        const { children } = parent;
         for (let i = 0; i < children.length; i++) {
           const child = children[i];
           if (
@@ -85,7 +86,7 @@ export function mentionRemarkPlugin() {
             typeof (child as MdTextNode).value !== "string"
           )
             continue;
-          const value = (child as MdTextNode).value;
+          const { value } = child as MdTextNode;
           if (!value.includes("@")) continue;
 
           const replacements = buildMentionReplacements(value);
@@ -105,7 +106,7 @@ function buildMentionReplacements(value: string): MdAnyNode[] {
   const out: MdAnyNode[] = [];
   let cursor = 0;
   for (const m of matches) {
-    const slug = m[1];
+    const [, slug] = m;
     if (!slug) continue;
     // The regex captures one optional prefix char (boundary). Find the actual
     // '@' position so we slice the surrounding text correctly.
@@ -140,7 +141,7 @@ function buildMentionReplacements(value: string): MdAnyNode[] {
 
 function walk(node: MdAnyNode, onParent: (parent: MdParent) => void) {
   const maybeParent = node as { children?: MdAnyNode[]; type?: string };
-  const children = maybeParent.children;
+  const { children } = maybeParent;
   if (!Array.isArray(children)) return;
   // Don't transform text inside link nodes:
   //  - the user wrote link text deliberately; chipping @slug there would surprise them

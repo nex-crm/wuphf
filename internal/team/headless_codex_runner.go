@@ -151,6 +151,25 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 		FirstToolMs:  -1,
 	}
 	l.updateHeadlessProgress(slug, "active", "thinking", "reviewing work packet", metrics)
+
+	// Live-chat relay surfaces the model's user-facing text to the channel
+	// at sentence/paragraph boundaries while the turn is still running.
+	// Codex doesn't expose a separate `thinking` event type — its `text`
+	// stream is the assistant's spoken output, which is exactly the
+	// surface "items that concern the user and other agents" should land
+	// on. Tool calls flush the buffer so a partial sentence doesn't get
+	// stranded across tool invocations.
+	target := firstNonEmpty(channel...)
+	relay := newHeadlessLiveChatRelay(l, slug, target, notification, func(line string) {
+		appendHeadlessCodexLog(slug, line)
+	})
+	// Defer the flush so error/parseErr exit paths still surface the
+	// trailing buffered sentence. The explicit Flush before the final
+	// post stays — once the buffer is empty, the deferred call is a
+	// no-op. Without this, a turn that streams "checking the database…"
+	// and then dies in cmd.Wait() loses that user-facing breadcrumb.
+	defer relay.Flush()
+
 	var firstEventAt time.Time
 	var firstTextAt time.Time
 	var firstToolAt time.Time
@@ -170,7 +189,9 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 				textStarted = true
 				l.updateHeadlessProgress(slug, "active", "text", "drafting response", metrics)
 			}
+			relay.OnText(event.Text)
 		case "tool_use":
+			relay.Flush()
 			if firstToolAt.IsZero() {
 				firstToolAt = time.Now()
 				metrics.FirstToolMs = durationMillis(startedAt, firstToolAt)
@@ -202,11 +223,11 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 			appendHeadlessCodexLog(slug, "stderr: "+detail)
 			l.updateHeadlessProgress(slug, "error", "error", truncate(detail, 180), metrics)
 			if isCodexAuthError(detail) && l.broker != nil {
-				target := firstNonEmpty(channel...)
-				if strings.TrimSpace(target) == "" {
-					target = "general"
+				sysTarget := target
+				if strings.TrimSpace(sysTarget) == "" {
+					sysTarget = "general"
 				}
-				l.broker.PostSystemMessage(target,
+				l.broker.PostSystemMessage(sysTarget,
 					fmt.Sprintf("@%s hit an auth error talking to the model (%s). Run `codex login` on this machine, or set OPENAI_API_KEY, then retry.", slug, truncate(detail, 180)),
 					"error",
 				)
@@ -245,9 +266,9 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 	if l.broker != nil && (result.Usage.InputTokens != 0 || result.Usage.OutputTokens != 0 || result.Usage.CacheReadTokens != 0 || result.Usage.CacheCreationTokens != 0 || result.Usage.CostUSD != 0) {
 		l.broker.RecordAgentUsage(slug, config.ResolveCodexModel(l.cwd), result.Usage)
 	}
+	relay.Flush()
 	if text := strings.TrimSpace(firstNonEmpty(result.FinalMessage, result.LastPlainLine)); text != "" {
 		appendHeadlessCodexLog(slug, "result: "+text)
-		target := firstNonEmpty(channel...)
 		msg, posted, err := l.postHeadlessFinalMessageIfSilent(slug, target, notification, text, startedAt)
 		if err != nil {
 			appendHeadlessCodexLog(slug, "fallback-post-error: "+err.Error())

@@ -876,6 +876,23 @@ func (b *Broker) handleWikiWrite(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// sanitizeReader validates a ?reader= query param before writing it to
+// reads.jsonl. Returns the original value when it is safe, or "" to suppress
+// tracking when it is not. Allowed: lowercase letters, digits, hyphens,
+// underscores, max 64 chars. The special value ReaderHuman ("web") passes.
+func sanitizeReader(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || len(raw) > 64 {
+		return ""
+	}
+	for _, ch := range raw {
+		if !((ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '-' || ch == '_') {
+			return ""
+		}
+	}
+	return raw
+}
+
 // handleWikiRead returns raw article bytes.
 //
 //	GET /wiki/read?path=team/people/nazz.md
@@ -898,6 +915,16 @@ func (b *Broker) handleWikiRead(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 		return
+	}
+	// Track agent reads. The ?reader= param is set by the MCP layer using
+	// WUPHF_AGENT_SLUG. Human reads go through /wiki/article, not here.
+	// Return 400 if the caller passes the reserved human reader ("web"):
+	// an agent slug named "web" would silently inflate human_read_count.
+	if raw := r.URL.Query().Get("reader"); raw == ReaderHuman {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": `reader "web" is reserved for human browser access`})
+		return
+	} else if reader := sanitizeReader(raw); reader != "" {
+		b.WikiReadLog().Append(relPath, reader)
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	_, _ = w.Write(bytes)
@@ -968,7 +995,9 @@ func (b *Broker) handleWikiCatalog(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"wiki backend is not active"}`, http.StatusServiceUnavailable)
 		return
 	}
-	entries, err := worker.Repo().BuildCatalog(r.Context())
+	sortParam := strings.TrimSpace(r.URL.Query().Get("sort"))
+	includeArchived := r.URL.Query().Get("include_archived") == "true"
+	entries, err := worker.Repo().BuildCatalog(r.Context(), sortParam, b.WikiReadLog(), includeArchived)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -1000,12 +1029,126 @@ func (b *Broker) handleWikiArticle(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	meta, err := worker.Repo().BuildArticle(r.Context(), relPath)
+	reader := sanitizeReader(r.URL.Query().Get("reader"))
+	meta, err := worker.Repo().BuildArticle(r.Context(), relPath, reader, b.WikiReadLog())
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 		return
 	}
+	// Ghost brief handling: in Demand mode, fire synthesis on first open when
+	// facts meet the threshold. In both modes, always surface in-flight state
+	// so the "generating..." badge works regardless of how synthesis was triggered.
+	if meta.Ghost {
+		if synth := b.EntitySynthesizer(); synth != nil {
+			// Derive kind and slug from "team/{kind}/{slug}.md".
+			parts := strings.SplitN(strings.TrimPrefix(relPath, "team/"), "/", 2)
+			if len(parts) == 2 {
+				kind := EntityKind(parts[0])
+				slug := strings.TrimSuffix(parts[1], ".md")
+				if synth.Mode() == SynthesisModeDemand {
+					if factLog := b.FactLog(); factLog != nil {
+						if facts, _ := factLog.List(kind, slug); len(facts) >= synth.Threshold() {
+							if _, enqErr := synth.EnqueueSynthesis(kind, slug, ArchivistAuthor); enqErr != nil && !errors.Is(enqErr, ErrSynthesisQueueSaturated) && !errors.Is(enqErr, ErrSynthesizerStopped) {
+								log.Printf("wiki: demand-pull enqueue %s/%s: %v", kind, slug, enqErr)
+							}
+						}
+					}
+				}
+				// Always reflect in-flight state — auto-mode syntheses triggered at
+				// ingest also benefit from the badge.
+				meta.SynthesisQueued = synth.IsInflightOrQueued(kind, slug)
+			}
+		}
+	}
 	writeJSON(w, http.StatusOK, meta)
+}
+
+// handleWikiArchiveSweep runs one WikiArchiver.Sweep synchronously and
+// returns the SweepResult as JSON. POST is required because this endpoint
+// mutates state (archives articles, commits to git).
+//
+//	POST /wiki/archive/sweep
+func (b *Broker) handleWikiArchiveSweep(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	worker := b.WikiWorker()
+	if worker == nil {
+		http.Error(w, `{"error":"wiki backend is not active"}`, http.StatusServiceUnavailable)
+		return
+	}
+	b.archiveSweepMu.Lock()
+	defer b.archiveSweepMu.Unlock()
+	// Cap the manual sweep with the same 10-minute timeout as the scheduled
+	// path — prevents a hung git process holding archiveSweepMu indefinitely
+	// if the caller holds the connection open.
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Minute)
+	defer cancel()
+	archiver := NewWikiArchiver(worker.Repo(), b.WikiReadLog(), 0)
+	result, err := archiver.Sweep(ctx)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	worker.NotifyArchived(ctx, result.ArchivedPaths)
+	writeJSON(w, http.StatusOK, result)
+}
+
+// startArchiveSweepLoop runs WikiArchiver.Sweep on the wiki-archive-sweep
+// cron schedule (default: daily, MinFloor: 60 min).
+func (b *Broker) startArchiveSweepLoop(ctx context.Context) {
+	const defaultInterval = 1440 * time.Minute
+	go func() {
+		for {
+			enabled, interval := b.SchedulerJobControl("wiki-archive-sweep", defaultInterval)
+			now := time.Now().UTC()
+			b.updateSchedulerHeartbeat("wiki-archive-sweep", "Wiki archive sweep",
+				int(interval/time.Minute), now.Add(interval),
+				disabledOrSleeping(enabled), "")
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(interval):
+			}
+			if !enabled {
+				continue
+			}
+			runStatus := b.runArchiveSweepTick()
+			b.updateSchedulerHeartbeat("wiki-archive-sweep", "Wiki archive sweep",
+				int(interval/time.Minute), time.Now().UTC().Add(interval),
+				"sleeping", runStatus)
+		}
+	}()
+}
+
+func (b *Broker) runArchiveSweepTick() string {
+	worker := b.WikiWorker()
+	if worker == nil {
+		return "inactive"
+	}
+	b.archiveSweepMu.Lock()
+	defer b.archiveSweepMu.Unlock()
+	// 10 minutes is generous for 500 eligible articles at ~1s/commit.
+	// Without a timeout a hung git process holds archiveSweepMu forever,
+	// blocking the POST /wiki/archive/sweep handler with no escape.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	archiver := NewWikiArchiver(worker.Repo(), b.WikiReadLog(), 0)
+	result, err := archiver.Sweep(ctx)
+	if err != nil {
+		log.Printf("wiki archive: sweep error: %v", err)
+		return "error"
+	}
+	if result.Archived > 0 || result.Errors > 0 {
+		log.Printf("wiki archive: sweep complete — archived=%d skipped=%d errors=%d",
+			result.Archived, result.Skipped, result.Errors)
+	}
+	worker.NotifyArchived(ctx, result.ArchivedPaths)
+	if result.Errors > 0 {
+		return "error"
+	}
+	return "ok"
 }
 
 // handleWikiAudit returns the cross-article commit log for audit / compliance.

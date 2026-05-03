@@ -81,7 +81,9 @@ See [`docs/surfaces.md`](docs/surfaces.md) for the canonical feature × surface 
 - Body lines ≤ 100 chars.
 - Always branch + draft PR. Never push to `main`.
 - PR description must include: net LOC delta, file-size allowlist diff (if applicable), bug-hunt findings (refactor PRs).
-- Run `bash scripts/test-go.sh` and the web build before marking ready.
+- Run `bash scripts/test-go.sh`, `bash scripts/test-web.sh`, and
+  `cd web && bun run build` before marking ready when the PR touches those
+  areas.
 - Never `--no-verify`. If a hook fails, the hook is doing its job.
 
 ## Refactor expectations

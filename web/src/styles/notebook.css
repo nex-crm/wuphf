@@ -889,6 +889,7 @@
 /* Avatars — reuse pixel-art canvas convention. */
 .notebook-surface canvas {
   image-rendering: pixelated;
+  /* biome-ignore lint/suspicious/noDuplicateProperties: Pixel-art fallback targets engines with different crisp-rendering support. */
   image-rendering: -moz-crisp-edges;
   image-rendering: crisp-edges;
 }

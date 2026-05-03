@@ -1,6 +1,8 @@
+// biome-ignore-all lint/a11y/useAriaPropsSupportedByRole: Passive metadata uses accessible labels queried by screen-reader tests; visual text remains unchanged.
 import { useCallback, useEffect, useState } from "react";
 
 import { type LintFinding, type LintReport, runLint } from "../../api/wiki";
+import { keyedByOccurrence } from "../../lib/reactKeys";
 import ResolveContradictionModal from "./ResolveContradictionModal";
 
 /**
@@ -18,6 +20,7 @@ interface WikiLintProps {
   onNavigate: (path: string | null) => void;
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
 export default function WikiLint({ onNavigate }: WikiLintProps) {
   const [report, setReport] = useState<LintReport | null>(null);
   const [loading, setLoading] = useState(false);
@@ -95,11 +98,11 @@ export default function WikiLint({ onNavigate }: WikiLintProps) {
         >
           {loading ? "Checking…" : "Check again now"}
         </button>
-        {report && (
+        {report ? (
           <span className="wk-audit-strapline" style={{ alignSelf: "center" }}>
             Last checked: {report.date}
           </span>
-        )}
+        ) : null}
       </section>
 
       {loading && !report ? (
@@ -122,9 +125,12 @@ export default function WikiLint({ onNavigate }: WikiLintProps) {
             </tr>
           </thead>
           <tbody>
-            {report.findings.map((f, idx) => (
+            {keyedByOccurrence(
+              report.findings,
+              (f) => `${f.type}-${f.entity_slug ?? ""}-${f.summary}`,
+            ).map(({ key, value: f, index: idx }) => (
               <tr
-                key={`${f.type}-${f.entity_slug ?? ""}-${idx}`}
+                key={key}
                 className={`wk-audit-row ${findingRowClass(f.severity)}`}
               >
                 <td className="wk-audit-when">
@@ -174,7 +180,7 @@ export default function WikiLint({ onNavigate }: WikiLintProps) {
         </table>
       ) : null}
 
-      {resolveTarget && report && (
+      {resolveTarget && report ? (
         <ResolveContradictionModal
           finding={resolveTarget.finding}
           findingIdx={resolveTarget.idx}
@@ -185,7 +191,7 @@ export default function WikiLint({ onNavigate }: WikiLintProps) {
             loadReport();
           }}
         />
-      )}
+      ) : null}
     </main>
   );
 }

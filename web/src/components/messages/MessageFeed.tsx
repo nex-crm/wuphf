@@ -25,6 +25,7 @@ type FeedElement =
       replies: ThreadMessage[];
     };
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
 export function MessageFeed() {
   const currentChannel = useAppStore((s) => s.currentChannel);
   const setActiveThreadId = useAppStore((s) => s.setActiveThreadId);
@@ -164,6 +165,7 @@ export function MessageFeed() {
 
   return (
     <div className="messages" ref={containerRef}>
+      {/* biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor. */}
       {elements.map((el) => {
         if (el.type === "date") {
           return (
@@ -198,6 +200,8 @@ export function MessageFeed() {
                 aria-controls={`thread-${parentId}-replies`}
               >
                 <svg
+                  aria-hidden="true"
+                  focusable="false"
                   className="thread-collapse-chevron"
                   width="10"
                   height="10"

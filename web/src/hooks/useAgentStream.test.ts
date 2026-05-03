@@ -20,8 +20,9 @@ describe("appendStreamLine", () => {
     let nextId = 1;
     for (const chunk of ["I'm ", "the ", "planner — ", "what next?"]) {
       const result = appendStreamLine(lines, chunk, undefined, nextId);
-      lines = result.lines;
-      if (result.usedId) nextId += 1;
+      const { lines: nextLines, usedId } = result;
+      lines = nextLines;
+      if (usedId) nextId += 1;
     }
     expect(lines).toHaveLength(1);
     expect(lines[0].data).toBe("I'm the planner — what next?");
@@ -96,8 +97,9 @@ describe("appendStreamLine", () => {
         isStructured ? { i } : undefined,
         nextId,
       );
-      lines = result.lines;
-      if (result.usedId) nextId += 1;
+      const { lines: nextLines, usedId } = result;
+      lines = nextLines;
+      if (usedId) nextId += 1;
     }
     expect(lines.length).toBeLessThanOrEqual(50);
   });

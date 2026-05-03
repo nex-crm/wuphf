@@ -32,13 +32,13 @@ export function ThreadPanel() {
   // returns both in the same list because thread_id matches either id or
   // reply_to.
   const { parent, replies } = useMemo(() => {
-    let parent: Message | null = null;
-    const replies: Message[] = [];
+    let threadParent: Message | null = null;
+    const threadReplies: Message[] = [];
     for (const m of messages) {
-      if (m.id === activeThreadId) parent = m;
-      else if (m.reply_to) replies.push(m);
+      if (m.id === activeThreadId) threadParent = m;
+      else if (m.reply_to) threadReplies.push(m);
     }
-    return { parent, replies };
+    return { parent: threadParent, replies: threadReplies };
   }, [messages, activeThreadId]);
 
   // Auto-scroll to the bottom when a new reply arrives. Anchoring at the
@@ -116,19 +116,22 @@ export function ThreadPanel() {
   if (!activeThreadId) return null;
 
   return (
-    <div className="thread-panel open" role="complementary" aria-label="Thread">
+    <aside className="thread-panel open" aria-label="Thread">
       <div className="thread-panel-header">
         <div className="thread-panel-title-group">
           <span className="thread-panel-title">Thread</span>
           <span className="thread-panel-channel">#{currentChannel}</span>
         </div>
         <button
+          type="button"
           className="thread-panel-close"
           onClick={() => setActiveThreadId(null)}
           aria-label="Close thread"
           title="Close (Esc)"
         >
           <svg
+            aria-hidden="true"
+            focusable="false"
             width="16"
             height="16"
             viewBox="0 0 24 24"
@@ -145,16 +148,16 @@ export function ThreadPanel() {
       </div>
 
       <div ref={messagesRef} className="thread-panel-body">
-        {parent && (
+        {parent ? (
           <div className="thread-panel-parent">
             <MessageBubble message={parent} />
           </div>
-        )}
-        {replies.length > 0 && (
+        ) : null}
+        {replies.length > 0 ? (
           <div className="thread-panel-replies-count">
             {replies.length} {replies.length === 1 ? "reply" : "replies"}
           </div>
-        )}
+        ) : null}
         {replies.length === 0 ? (
           <div className="thread-panel-empty">
             No replies yet. Start the conversation below.
@@ -178,9 +181,11 @@ export function ThreadPanel() {
           offers a dismiss. This mirrors Slack's "Replying to …" affordance
           and makes the active reply_to target visible. */}
       <div className="composer">
-        {quoting && (
+        {quoting ? (
           <div className="thread-quote-chip">
             <svg
+              aria-hidden="true"
+              focusable="false"
               width="12"
               height="12"
               viewBox="0 0 24 24"
@@ -200,12 +205,15 @@ export function ThreadPanel() {
               {truncate(quoting.content, 60)}
             </span>
             <button
+              type="button"
               className="thread-quote-dismiss"
               onClick={() => setQuoting(null)}
               aria-label="Cancel quote"
               title="Cancel quote"
             >
               <svg
+                aria-hidden="true"
+                focusable="false"
                 width="12"
                 height="12"
                 viewBox="0 0 24 24"
@@ -220,7 +228,7 @@ export function ThreadPanel() {
               </svg>
             </button>
           </div>
-        )}
+        ) : null}
         <div className="composer-inner">
           <textarea
             ref={textareaRef}
@@ -243,12 +251,15 @@ export function ThreadPanel() {
             rows={1}
           />
           <button
+            type="button"
             className="composer-send"
             disabled={!text.trim() || sendReply.isPending}
             onClick={handleSend}
             aria-label="Send reply"
           >
             <svg
+              aria-hidden="true"
+              focusable="false"
               width="16"
               height="16"
               viewBox="0 0 24 24"
@@ -264,7 +275,7 @@ export function ThreadPanel() {
           </button>
         </div>
       </div>
-    </div>
+    </aside>
   );
 }
 

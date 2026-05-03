@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
 
+import { keyedByOccurrence } from "../../lib/reactKeys";
+
 /**
  * Shared keyboard-key badge. Renders real <kbd> semantics so assistive
  * tech announces the key, and uses a single visual treatment across the
@@ -47,20 +49,24 @@ export function KbdSequence({
     : [keys as string[]];
   return (
     <span className={`kbd-sequence ${className}`.trim()}>
-      {chords.map((chord, i) => (
-        <span key={i} className="kbd-chord">
-          {i > 0 && (
-            <span className="kbd-then" aria-hidden="true">
-              then
-            </span>
-          )}
-          {chord.map((k, j) => (
-            <Kbd key={j} size={size} variant={variant}>
-              {k}
-            </Kbd>
-          ))}
-        </span>
-      ))}
+      {keyedByOccurrence(chords, (chord) => chord.join("+")).map(
+        ({ key: chordKey, value: chord, index: i }) => (
+          <span key={chordKey} className="kbd-chord">
+            {i > 0 && (
+              <span className="kbd-then" aria-hidden="true">
+                then
+              </span>
+            )}
+            {keyedByOccurrence(chord, (k) => k).map(
+              ({ key: keyKey, value: k }) => (
+                <Kbd key={keyKey} size={size} variant={variant}>
+                  {k}
+                </Kbd>
+              ),
+            )}
+          </span>
+        ),
+      )}
     </span>
   );
 }

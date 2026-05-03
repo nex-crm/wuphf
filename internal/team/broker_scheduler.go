@@ -453,6 +453,12 @@ func systemCronSpecs() []systemCronSpec {
 			MinFloor:        5,
 		},
 		{
+			Slug:            "wiki-archive-sweep",
+			Label:           "Wiki archive sweep",
+			DefaultInterval: func() int { return 1440 }, // daily
+			MinFloor:        60,
+		},
+		{
 			Slug:            "task_follow_up",
 			Label:           "Task follow-up reminders",
 			DefaultInterval: func() int { return config.ResolveTaskFollowUpInterval() },

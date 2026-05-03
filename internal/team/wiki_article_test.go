@@ -148,7 +148,7 @@ func TestBuildArticle_Backlinks(t *testing.T) {
 		}
 	}
 
-	meta, err := repo.BuildArticle(ctx, "team/people/b.md")
+	meta, err := repo.BuildArticle(ctx, "team/people/b.md", "", nil)
 	if err != nil {
 		t.Fatalf("BuildArticle: %v", err)
 	}
@@ -220,7 +220,7 @@ func TestBuildArticle_NotFound(t *testing.T) {
 	if err := repo.Init(context.Background()); err != nil {
 		t.Fatalf("Init: %v", err)
 	}
-	_, err := repo.BuildArticle(context.Background(), "team/people/ghost.md")
+	_, err := repo.BuildArticle(context.Background(), "team/people/ghost.md", "", nil)
 	if err == nil {
 		t.Fatal("BuildArticle on missing article: want error, got nil")
 	}
@@ -237,7 +237,7 @@ func TestBuildArticle_RejectsBadPath(t *testing.T) {
 		"not-team/x.md",
 	}
 	for _, p := range bad {
-		if _, err := repo.BuildArticle(context.Background(), p); err == nil {
+		if _, err := repo.BuildArticle(context.Background(), p, "", nil); err == nil {
 			t.Errorf("BuildArticle(%q): want error, got nil", p)
 		}
 	}
@@ -276,7 +276,7 @@ func TestBuildCatalog_ExcludesInbox(t *testing.T) {
 		t.Fatalf("write inbox file: %v", err)
 	}
 
-	entries, err := repo.BuildCatalog(ctx)
+	entries, err := repo.BuildCatalog(ctx, "", nil, false)
 	if err != nil {
 		t.Fatalf("BuildCatalog: %v", err)
 	}
@@ -297,6 +297,162 @@ func TestBuildCatalog_ExcludesInbox(t *testing.T) {
 	}
 }
 
+// BuildArticle with a readLog and non-empty reader records the read and populates stats.
+func TestBuildArticle_ReadTracking(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	root := t.TempDir()
+	backup := filepath.Join(t.TempDir(), "bak")
+	repo := NewRepoAt(root, backup)
+	ctx := context.Background()
+	if err := repo.Init(ctx); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	if _, _, err := repo.Commit(ctx, "ceo", "team/people/nazz.md", "# Nazz\n\nFounder.\n", "create", "add nazz"); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+
+	rl := NewReadLog(root)
+	meta, err := repo.BuildArticle(ctx, "team/people/nazz.md", "web", rl)
+	if err != nil {
+		t.Fatalf("BuildArticle: %v", err)
+	}
+
+	if meta.HumanReadCount != 1 {
+		t.Errorf("HumanReadCount: want 1, got %d", meta.HumanReadCount)
+	}
+	if meta.AgentReadCount != 0 {
+		t.Errorf("AgentReadCount: want 0, got %d", meta.AgentReadCount)
+	}
+	if meta.LastRead == nil {
+		t.Error("LastRead should be non-nil after human read")
+	}
+	if meta.DaysUnread != 0 {
+		t.Errorf("DaysUnread: want 0 for just-read article, got %d", meta.DaysUnread)
+	}
+}
+
+// BuildCatalog with a readLog joins read stats onto catalog entries.
+func TestBuildCatalog_ReadTracking(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	root := t.TempDir()
+	backup := filepath.Join(t.TempDir(), "bak")
+	repo := NewRepoAt(root, backup)
+	ctx := context.Background()
+	if err := repo.Init(ctx); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	articles := []struct{ slug, path, content string }{
+		{"ceo", "team/people/alice.md", "# Alice\n\nHello.\n"},
+		{"pm", "team/people/bob.md", "# Bob\n\nHi.\n"},
+	}
+	for _, a := range articles {
+		if _, _, err := repo.Commit(ctx, a.slug, a.path, a.content, "create", "add "+a.path); err != nil {
+			t.Fatalf("Commit %s: %v", a.path, err)
+		}
+	}
+
+	rl := NewReadLog(root)
+	// Alice read by a human and an agent; Bob never read.
+	rl.Append("team/people/alice.md", "web")
+	rl.Append("team/people/alice.md", "slack-agent")
+
+	entries, err := repo.BuildCatalog(ctx, "", rl, false)
+	if err != nil {
+		t.Fatalf("BuildCatalog: %v", err)
+	}
+
+	byPath := map[string]CatalogEntry{}
+	for _, e := range entries {
+		byPath[e.Path] = e
+	}
+
+	alice := byPath["team/people/alice.md"]
+	if alice.HumanReadCount != 1 {
+		t.Errorf("alice HumanReadCount: want 1, got %d", alice.HumanReadCount)
+	}
+	if alice.AgentReadCount != 1 {
+		t.Errorf("alice AgentReadCount: want 1, got %d", alice.AgentReadCount)
+	}
+	if alice.LastRead == nil {
+		t.Error("alice LastRead should be non-nil")
+	}
+
+	bob := byPath["team/people/bob.md"]
+	if bob.HumanReadCount != 0 || bob.AgentReadCount != 0 {
+		t.Errorf("bob counts: want 0/0, got %d/%d", bob.HumanReadCount, bob.AgentReadCount)
+	}
+	if bob.LastRead != nil {
+		t.Error("bob LastRead should be nil (never read)")
+	}
+}
+
+// BuildCatalog with sort=last_read puts unread articles first.
+func TestBuildCatalog_SortLastRead(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	root := t.TempDir()
+	backup := filepath.Join(t.TempDir(), "bak")
+	repo := NewRepoAt(root, backup)
+	ctx := context.Background()
+	if err := repo.Init(ctx); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	for _, slug := range []string{"alice", "bob"} {
+		path := "team/people/" + slug + ".md"
+		if _, _, err := repo.Commit(ctx, "ceo", path, "# "+slug+"\n", "create", "add "+path); err != nil {
+			t.Fatalf("Commit: %v", err)
+		}
+	}
+
+	rl := NewReadLog(root)
+	// Only alice has been read.
+	rl.Append("team/people/alice.md", "web")
+
+	entries, err := repo.BuildCatalog(ctx, "last_read", rl, false)
+	if err != nil {
+		t.Fatalf("BuildCatalog: %v", err)
+	}
+	if len(entries) < 2 {
+		t.Fatalf("expected 2 entries, got %d", len(entries))
+	}
+	// Bob (unread) must sort before alice (read).
+	if entries[0].Path != "team/people/bob.md" {
+		t.Errorf("sort=last_read: want unread article first, got %s", entries[0].Path)
+	}
+}
+
+// BuildArticle with nil readLog does not populate read stats (no panic).
+func TestBuildArticle_NilReadLog(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	root := t.TempDir()
+	backup := filepath.Join(t.TempDir(), "bak")
+	repo := NewRepoAt(root, backup)
+	ctx := context.Background()
+	if err := repo.Init(ctx); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	if _, _, err := repo.Commit(ctx, "ceo", "team/people/solo.md", "# Solo\n\nAlone.\n", "create", "add solo"); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+	meta, err := repo.BuildArticle(ctx, "team/people/solo.md", "web", nil)
+	if err != nil {
+		t.Fatalf("BuildArticle with nil readLog: %v", err)
+	}
+	if meta.HumanReadCount != 0 || meta.AgentReadCount != 0 {
+		t.Error("nil readLog should leave counts at zero")
+	}
+	if meta.LastRead != nil {
+		t.Error("nil readLog should leave LastRead nil")
+	}
+}
+
 // BuildArticle with no backlinks returns an empty slice (non-nil, JSON-friendly).
 func TestBuildArticle_NoBacklinks(t *testing.T) {
 	if testing.Short() {
@@ -312,7 +468,7 @@ func TestBuildArticle_NoBacklinks(t *testing.T) {
 	if _, _, err := repo.Commit(ctx, "ceo", "team/people/solo.md", "# Solo\n\nAlone.\n", "create", "add solo"); err != nil {
 		t.Fatalf("Commit: %v", err)
 	}
-	meta, err := repo.BuildArticle(ctx, "team/people/solo.md")
+	meta, err := repo.BuildArticle(ctx, "team/people/solo.md", "", nil)
 	if err != nil {
 		t.Fatalf("BuildArticle: %v", err)
 	}
@@ -321,5 +477,98 @@ func TestBuildArticle_NoBacklinks(t *testing.T) {
 	}
 	if len(meta.Backlinks) != 0 {
 		t.Errorf("Backlinks len = %d, want 0", len(meta.Backlinks))
+	}
+}
+
+// TestBuildArticle_Ghost covers ICP Example 3 (below-threshold ghost):
+// a ghost brief returns Ghost=true, SynthesisQueued is not set by BuildArticle.
+func TestBuildArticle_Ghost(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	root := t.TempDir()
+	backup := filepath.Join(t.TempDir(), "bak")
+	repo := NewRepoAt(root, backup)
+	ctx := context.Background()
+	if err := repo.Init(ctx); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	ghostContent := "---\nslug: acme-corp\nkind: company\nghost: true\ncreated_at: 2026-05-01T00:00:00Z\n---\n\n# Acme Corp\n\n## Signals\n\n_No facts synthesized yet._\n"
+	if _, _, err := repo.Commit(ctx, "archivist", "team/company/acme-corp.md", ghostContent, "create", "ghost brief"); err != nil {
+		t.Fatalf("Commit ghost: %v", err)
+	}
+
+	meta, err := repo.BuildArticle(ctx, "team/company/acme-corp.md", "", nil)
+	if err != nil {
+		t.Fatalf("BuildArticle: %v", err)
+	}
+	if !meta.Ghost {
+		t.Error("Ghost = false, want true")
+	}
+	// BuildArticle itself never sets SynthesisQueued — the handler does.
+	if meta.SynthesisQueued {
+		t.Error("SynthesisQueued = true, want false (set by handler, not BuildArticle)")
+	}
+}
+
+// TestBuildArticle_NonGhost verifies Ghost=false for a regular synthesized brief.
+func TestBuildArticle_NonGhost(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	root := t.TempDir()
+	backup := filepath.Join(t.TempDir(), "bak")
+	repo := NewRepoAt(root, backup)
+	ctx := context.Background()
+	if err := repo.Init(ctx); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	realContent := "---\nslug: acme-corp\nkind: company\nlast_synthesized_sha: abc1234\n---\n\n# Acme Corp\n\nReal brief.\n"
+	if _, _, err := repo.Commit(ctx, "archivist", "team/company/acme-corp.md", realContent, "create", "real brief"); err != nil {
+		t.Fatalf("Commit real: %v", err)
+	}
+
+	meta, err := repo.BuildArticle(ctx, "team/company/acme-corp.md", "", nil)
+	if err != nil {
+		t.Fatalf("BuildArticle: %v", err)
+	}
+	if meta.Ghost {
+		t.Error("Ghost = true, want false for synthesized brief")
+	}
+}
+
+// TestParseGhostFrontmatter covers the ghost field parser.
+func TestParseGhostFrontmatter(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  bool
+	}{
+		{"ghost true", "---\nslug: x\nghost: true\n---\n\n# X\n", true},
+		{"ghost false explicit", "---\nslug: x\nghost: false\n---\n\n# X\n", false},
+		{"no ghost key", "---\nslug: x\n---\n\n# X\n", false},
+		{"no frontmatter", "# X\n\nNo frontmatter.", false},
+		{"malformed frontmatter", "---\nno closing fence\n# X\n", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := parseGhostFrontmatter(tc.input); got != tc.want {
+				t.Errorf("parseGhostFrontmatter: got %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestResolveSynthesisModeFromEnv checks that the env var is read correctly.
+func TestResolveSynthesisModeFromEnv(t *testing.T) {
+	t.Setenv("WUPHF_ENTITY_SYNTHESIS_MODE", "demand")
+	if got := resolveSynthesisModeFromEnv(); got != SynthesisModeDemand {
+		t.Errorf("got %v, want SynthesisModeDemand", got)
+	}
+	t.Setenv("WUPHF_ENTITY_SYNTHESIS_MODE", "")
+	if got := resolveSynthesisModeFromEnv(); got != SynthesisModeAuto {
+		t.Errorf("got %v, want SynthesisModeAuto", got)
 	}
 }

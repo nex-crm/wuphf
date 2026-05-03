@@ -7,26 +7,32 @@ import {
   type CompileResponse,
   type CompileResult,
   compileSkills,
-  createTasks,
   disableSkill,
   enableSkill,
-  getOfficeTasks,
   getSkillsList,
   invokeSkill,
-  patchSkill,
   rejectSkill,
   restoreArchivedSkill,
   type Skill,
   type SkillStatus,
-  type Task,
   undoRejectSkill,
 } from "../../api/client";
+import { createTasks, getOfficeTasks, type Task } from "../../api/tasks";
 import { useTeamLeadSlug } from "../../hooks/useConfig";
 import { useOfficeMembers } from "../../hooks/useMembers";
 import { useAppStore } from "../../stores/app";
+import { confirm as confirmDialog } from "../ui/ConfirmDialog";
 import { LightningIcon } from "../ui/LightningIcon";
 import { SidePanel } from "../ui/SidePanel";
 import { showNotice, showUndoToast } from "../ui/Toast";
+import { OwnersChip } from "./skills/OwnersChip";
+import {
+  ProposedPreviewBody,
+  SkillPreviewBody,
+} from "./skills/SkillPreviewBody";
+import { STATUS_BADGE_CLASS } from "./skills/status";
+
+export { OwnersChip } from "./skills/OwnersChip";
 
 type CompileState = "idle" | "compiling" | "done";
 
@@ -126,45 +132,12 @@ function CompileButton({
   );
 }
 
-interface OwnersChipProps {
-  slugs?: string[];
-}
-
-/**
- * Small pill rendering the agent slugs that own a skill. Empty/missing
- * slugs render as "lead-routable" (italic, dim) to make ownership status
- * legible at a glance without the user squinting at a missing field.
- */
-export function OwnersChip({ slugs }: OwnersChipProps) {
-  const list = (slugs ?? []).filter((s) => s.trim().length > 0);
-  if (list.length === 0) {
-    return (
-      <span
-        className="owners-chip owners-chip--lead"
-        title="Lead-routable: any agent can route through the team lead"
-      >
-        lead-routable
-      </span>
-    );
-  }
-  return (
-    <span
-      className="owners-chip"
-      title={`Scoped to: ${list.map((s) => `@${s}`).join(", ")}`}
-    >
-      {list.map((s) => `@${s}`).join(", ")}
-    </span>
-  );
-}
-
 export function SkillsApp() {
   const queryClient = useQueryClient();
   const [previewSkill, setPreviewSkill] = useState<Skill | null>(null);
   const [previewDirty, setPreviewDirty] = useState(false);
-  // Pause the 30s background refetch while the editor is open. Otherwise
-  // a refetch can replace the previewed skill mid-edit, swap the closed-
-  // over `originalContent` under the user, and invalidate the patchSkill
-  // old_string. The editor still reflects fresh data on next open.
+  // Pause background refetch while the editor is open so it cannot replace
+  // `originalContent` mid-edit and break patchSkill old_string matching.
   const previewOpen = previewSkill !== null;
   const { data, isLoading, error } = useQuery({
     queryKey: ["skills", "all"],
@@ -176,11 +149,8 @@ export function SkillsApp() {
   const [compileState, setCompileState] = useState<CompileState>("idle");
   const [ownerFilter, setOwnerFilter] = useState<OwnerFilterValue>("all");
 
-  // Hydrate filter from localStorage on mount, validated against the
-  // current office. If the saved slug no longer maps to a member (agent
-  // removed), drop back to "all" instead of rendering an empty list with
-  // no error message. We wait for officeMembers to resolve so a still-
-  // loading roster doesn't wipe a valid filter.
+  // Hydrate filter after officeMembers loads; if the saved slug no longer
+  // exists, fall back to "all" instead of rendering an empty owner result.
   useEffect(() => {
     if (officeMembers === undefined) return;
     const stored = readOwnerFilter();
@@ -226,20 +196,22 @@ export function SkillsApp() {
     setPreviewDirty(false);
   }, []);
 
-  // Closes the SidePanel; prompts the user to confirm when there are
-  // unsaved edits (proposed skills can be edited inline). The browser
-  // confirm() is fine here — we already use it elsewhere for danger-zone
-  // confirmations, and the destructive consequence (lost edits) maps cleanly
-  // onto the binary OK/Cancel UX.
   const handlePreviewClose = useCallback(() => {
+    const closePreview = () => {
+      setPreviewSkill(null);
+      setPreviewDirty(false);
+    };
     if (previewDirty) {
-      const ok = window.confirm(
-        "You have unsaved edits. Discard them and close?",
-      );
-      if (!ok) return;
+      confirmDialog({
+        title: "Discard edits?",
+        message: "You have unsaved edits. Discard them and close?",
+        confirmLabel: "Discard",
+        danger: true,
+        onConfirm: closePreview,
+      });
+      return;
     }
-    setPreviewSkill(null);
-    setPreviewDirty(false);
+    closePreview();
   }, [previewDirty]);
 
   const handlePreviewSaved = useCallback(
@@ -710,13 +682,6 @@ function ArchivedSection({
   );
 }
 
-const STATUS_BADGE_CLASS: Record<SkillStatus, string> = {
-  active: "badge badge-green",
-  proposed: "badge badge-yellow",
-  disabled: "badge badge-neutral",
-  archived: "badge badge-muted",
-};
-
 function SkillProvenance({ articles }: { articles: string[] }) {
   if (articles.length === 0) return null;
   return (
@@ -761,6 +726,8 @@ function isTerminalTaskStatus(s: string | undefined): boolean {
   return ["done", "completed", "blocked", "cancelled", "canceled"].includes(s);
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: Existing function length is baselined for a focused follow-up refactor.
 function SkillActions({
   status,
   skillName,
@@ -881,9 +848,7 @@ function SkillActions({
 
   const handleDisable = useCallback(() => {
     if (!skillName) return;
-    // Don't let archive/disable race with a live invoke. The polling
-    // skill_run task is still settling — disabling here would hide the
-    // chip the user is watching and mask the run result.
+    // Do not hide the live run chip while the polling task is still settling.
     if (invokePhase !== "idle") return;
     setActionPending(true);
     disableSkill(skillName)
@@ -1328,289 +1293,7 @@ function SuggestChangesExpander({
   );
 }
 
-interface SkillPreviewBodyProps {
-  skill: Skill;
-  /** Notifies the parent panel when the editor has unsaved changes. */
-  onDirtyChange?: (dirty: boolean) => void;
-  /** Called after a successful save with the updated skill. */
-  onSaved?: (updated: Skill) => void;
-}
-
-function SkillPreviewBody({
-  skill,
-  onDirtyChange,
-  onSaved,
-}: SkillPreviewBodyProps) {
-  const owners = skill.owner_agents ?? [];
-  const isProposed = skill.status === "proposed";
-
-  // baseline = the content the editor is "based on" (the last server-known
-  // state). It only updates when the user opens a different skill OR
-  // explicitly saves. Comparing draft against baseline determines dirty
-  // state; comparing against `skill.content` would let a background
-  // refetch silently overwrite the user's typing.
-  const [baseline, setBaseline] = useState(skill.content ?? "");
-  const [draft, setDraft] = useState(skill.content ?? "");
-  const [saving, setSaving] = useState(false);
-
-  // Reset baseline + draft when the user navigates to a DIFFERENT skill.
-  // Keyed on skill.name only so post-save updates to skill.content (from
-  // the parent passing back the updated Skill) don't blow away chars the
-  // user typed in the gap between save resolution and effect run.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: see comment
-  useEffect(() => {
-    const next = skill.content ?? "";
-    setBaseline(next);
-    setDraft(next);
-    onDirtyChange?.(false);
-  }, [skill.name]);
-
-  const dirty = isProposed && draft !== baseline;
-
-  // Keep the parent informed of dirty-state so the SidePanel close path
-  // can prompt for unsaved edits.
-  useEffect(() => {
-    onDirtyChange?.(dirty);
-  }, [dirty, onDirtyChange]);
-
-  const handleSave = useCallback(() => {
-    if (!(isProposed && dirty && skill.name)) return;
-    setSaving(true);
-    // Snapshot the draft we're committing — a chained edit landing while
-    // the request is in flight would otherwise change `draft` under us
-    // and confuse the post-save baseline.
-    const committed = draft;
-    const oldString = baseline;
-    patchSkill(skill.name, {
-      old_string: oldString,
-      new_string: committed,
-      replace_all: false,
-    })
-      .then((res) => {
-        showNotice("Saved.", "success");
-        // Sync baseline to the saved body BEFORE notifying the parent. If
-        // the user typed more chars while the request was in flight they
-        // remain in `draft`, the dirty flag flips back on, and the
-        // editor naturally surfaces the new unsaved delta — instead of
-        // the parent's effect resetting `draft` and silently losing them.
-        setBaseline(committed);
-        const updated: Skill = res.skill ?? { ...skill, content: committed };
-        onSaved?.(updated);
-      })
-      .catch((e: Error) => {
-        showNotice(`Couldn't save: ${e.message}`, "error");
-      })
-      .finally(() => setSaving(false));
-  }, [isProposed, dirty, skill, baseline, draft, onSaved]);
-
-  const handleRevert = useCallback(() => {
-    setDraft(baseline);
-  }, [baseline]);
-
-  return (
-    <div
-      style={{
-        fontSize: 13,
-        lineHeight: 1.55,
-        color: "var(--text)",
-      }}
-    >
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          flexWrap: "wrap",
-          marginBottom: 12,
-        }}
-      >
-        <OwnersChip slugs={owners} />
-        {skill.status ? (
-          <span className={STATUS_BADGE_CLASS[skill.status]}>
-            {skill.status}
-          </span>
-        ) : null}
-      </div>
-      {skill.description ? (
-        <p style={{ marginTop: 0, marginBottom: 12 }}>{skill.description}</p>
-      ) : null}
-      {skill.trigger ? (
-        <p
-          style={{
-            marginTop: 0,
-            marginBottom: 12,
-            color: "var(--text-secondary)",
-            fontStyle: "italic",
-          }}
-        >
-          Trigger: {skill.trigger}
-        </p>
-      ) : null}
-
-      {isProposed ? (
-        <>
-          <label
-            htmlFor="skill-body-editor"
-            style={{
-              display: "block",
-              fontSize: 12,
-              fontWeight: 500,
-              color: "var(--text-secondary)",
-              marginBottom: 6,
-            }}
-          >
-            SKILL.md body
-            <span
-              style={{
-                fontWeight: 400,
-                color: "var(--text-tertiary)",
-                marginLeft: 6,
-              }}
-            >
-              (frontmatter is read-only in v1)
-            </span>
-          </label>
-          <textarea
-            id="skill-body-editor"
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            disabled={saving}
-            spellCheck={false}
-            aria-label={`Edit body for ${skill.name}`}
-            style={{
-              width: "100%",
-              minHeight: 240,
-              maxHeight: "60vh",
-              padding: 12,
-              background: "var(--bg-warm, var(--neutral-50))",
-              border: "1px solid var(--border)",
-              borderRadius: 6,
-              fontFamily: "var(--font-mono)",
-              fontSize: 12,
-              lineHeight: 1.5,
-              color: "var(--text)",
-              resize: "vertical",
-              boxSizing: "border-box",
-            }}
-          />
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "flex-end",
-              gap: 8,
-              marginTop: 8,
-            }}
-          >
-            {dirty ? (
-              <span
-                aria-live="polite"
-                style={{
-                  fontSize: 12,
-                  color: "var(--text-tertiary)",
-                  marginRight: "auto",
-                }}
-              >
-                Unsaved changes.
-              </span>
-            ) : null}
-            <button
-              type="button"
-              className="btn-text"
-              onClick={handleRevert}
-              disabled={saving || !dirty}
-            >
-              Revert
-            </button>
-            <button
-              type="button"
-              className="btn btn-primary btn-sm"
-              onClick={handleSave}
-              disabled={saving || !dirty}
-              aria-label={`Save edits to ${skill.name}`}
-            >
-              {saving ? "Saving..." : "Save"}
-            </button>
-          </div>
-          <p
-            style={{
-              marginTop: 12,
-              marginBottom: 0,
-              fontSize: 12,
-              color: "var(--text-tertiary)",
-            }}
-          >
-            Saving leaves this proposal pending. Approve or reject from the
-            interview to promote it.
-          </p>
-        </>
-      ) : skill.content ? (
-        <pre
-          style={{
-            background: "var(--bg-warm, var(--neutral-50))",
-            border: "1px solid var(--border)",
-            borderRadius: 6,
-            padding: 12,
-            fontSize: 12,
-            fontFamily: "var(--font-mono)",
-            whiteSpace: "pre-wrap",
-            wordBreak: "break-word",
-            margin: 0,
-          }}
-        >
-          {skill.content}
-        </pre>
-      ) : (
-        <div style={{ color: "var(--text-tertiary)", fontSize: 13 }}>
-          No body content available.
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ProposedPreviewBody({ skill }: { skill: Skill }) {
-  const body = skill.content ?? "";
-  const truncated = body.length > 500 ? `${body.slice(0, 500)}…` : body;
-  if (!(truncated || skill.description || skill.trigger)) return null;
-  return (
-    <div
-      style={{
-        marginTop: 4,
-        marginBottom: 8,
-        paddingLeft: 10,
-        borderLeft: "3px solid var(--neutral-200, #cfd1d2)",
-      }}
-    >
-      {skill.trigger ? (
-        <div
-          style={{
-            fontSize: 12,
-            color: "var(--text-secondary)",
-            fontStyle: "italic",
-            marginBottom: 6,
-          }}
-        >
-          Trigger: {skill.trigger}
-        </div>
-      ) : null}
-      {truncated ? (
-        <div
-          style={{
-            fontSize: 12,
-            color: "var(--text-secondary)",
-            whiteSpace: "pre-wrap",
-            fontFamily: "var(--font-mono)",
-            lineHeight: 1.5,
-          }}
-        >
-          {truncated}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
 function SkillCard({
   skill,
   onPreview,

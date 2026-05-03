@@ -1,4 +1,4 @@
-import { expect, type Page, test } from "@playwright/test";
+import { expect, type Page, type Route, test } from "@playwright/test";
 
 // Fresh-install onboarding smoke. Assumes wuphf was started WITHOUT a
 // pre-seeded ~/.wuphf/onboarded.json, so App.tsx routes to the Wizard
@@ -53,6 +53,104 @@ async function expectNoReactErrors(
     errors,
     `Uncaught errors ${context}:\n  ${errors.join("\n  ")}`,
   ).toHaveLength(0);
+}
+
+const BLUEPRINT_FIXTURE = {
+  templates: [
+    {
+      id: "niche-crm",
+      name: "Niche CRM",
+      description: "Build and launch a focused CRM.",
+      emoji: "🎯",
+      agents: [
+        {
+          slug: "ceo",
+          name: "CEO",
+          role: "lead",
+          checked: true,
+          built_in: true,
+        },
+        {
+          slug: "gtm-lead",
+          name: "GTM Lead",
+          role: "go-to-market",
+          checked: true,
+        },
+        {
+          slug: "designer",
+          name: "Designer",
+          role: "design",
+          checked: true,
+        },
+      ],
+      tasks: [
+        {
+          id: "draft-launch-plan",
+          name: "Draft launch plan",
+          description: "Plan the first customer loop.",
+          prompt: "Draft a launch plan for the first customer loop.",
+        },
+      ],
+    },
+  ],
+};
+
+const PREREQS_FIXTURE = [
+  {
+    name: "claude",
+    required: false,
+    found: true,
+    ok: true,
+    version: "claude test fixture",
+  },
+  { name: "codex", required: false, found: false, ok: false },
+  { name: "opencode", required: false, found: false, ok: false },
+  { name: "cursor", required: false, found: false, ok: false },
+  { name: "windsurf", required: false, found: false, ok: false },
+];
+
+async function fulfillJson(route: Route, body: unknown): Promise<void> {
+  await route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify(body),
+  });
+}
+
+async function stubDeterministicWizardEndpoints(
+  page: Page,
+  captures: {
+    config: Record<string, unknown> | null;
+    complete: Record<string, unknown> | null;
+  },
+): Promise<void> {
+  await page.route("**/onboarding/state*", (route) =>
+    fulfillJson(route, { onboarded: false }),
+  );
+  await page.route("**/onboarding/blueprints*", (route) =>
+    fulfillJson(route, BLUEPRINT_FIXTURE),
+  );
+  await page.route("**/onboarding/prereqs*", (route) =>
+    fulfillJson(route, PREREQS_FIXTURE),
+  );
+  await page.route("**/config*", async (route) => {
+    if (route.request().method() === "POST") {
+      captures.config = route.request().postDataJSON() as Record<
+        string,
+        unknown
+      >;
+    }
+    await fulfillJson(route, { ok: true });
+  });
+  await page.route("**/onboarding/complete*", async (route) => {
+    if (route.request().method() === "POST") {
+      captures.complete = route.request().postDataJSON() as Record<
+        string,
+        unknown
+      >;
+    }
+    await fulfillJson(route, { ok: true });
+  });
 }
 
 // The wizard flow is welcome → identity → templates. Fill the two required
@@ -139,5 +237,132 @@ test.describe("wuphf onboarding wizard smoke", () => {
       count,
       "expected ≥1 preset blueprint card — embedded templates may have failed to load",
     ).toBeGreaterThan(0);
+  });
+
+  test("completes welcome → identity → templates → team → setup → task → ready", async ({
+    page,
+  }) => {
+    const getErrors = collectReactErrors(page);
+    const captures: {
+      config: Record<string, unknown> | null;
+      complete: Record<string, unknown> | null;
+    } = { config: null, complete: null };
+    await stubDeterministicWizardEndpoints(page, captures);
+
+    await page.goto("/");
+    await waitForReactMount(page);
+
+    await expect(page.locator(".wizard-step").first()).toBeVisible({
+      timeout: 10_000,
+    });
+    await page.locator(".wizard-step button.btn-primary").first().click();
+
+    await expect(page.getByText("Tell us about this office")).toBeVisible();
+    await page.locator("#wiz-company").fill("E2E Full Flow Co");
+    await page.locator("#wiz-description").fill("Deterministic wizard path");
+    await page.locator("#wiz-priority").fill("Launch the first customer loop");
+    await page.locator(".wizard-step button.btn-primary").first().click();
+
+    await expect(page.getByText("What should your office run?")).toBeVisible();
+    const templateTile = page
+      .locator(".template-card")
+      .filter({ hasText: "Niche CRM" })
+      .first();
+    await expect(templateTile).toBeVisible({ timeout: 10_000 });
+    await templateTile.click();
+    await page.locator(".wizard-step button.btn-primary").first().click();
+
+    await expect(page.getByText("Your team")).toBeVisible();
+    await expect(page.getByText("GTM Lead")).toBeVisible();
+    await page.locator(".wizard-step button.btn-primary").first().click();
+
+    const claudeTile = page.getByTestId("setup-runtime-tile-Claude Code");
+    await expect(claudeTile).toBeVisible({ timeout: 10_000 });
+    await expect(claudeTile).toHaveAttribute("aria-pressed", "true");
+    await page.locator(".wizard-step button.btn-primary").first().click();
+
+    await expect(page.locator("#wiz-task-input")).toBeVisible();
+    await page.getByRole("button", { name: /Draft launch plan/i }).click();
+    await expect(page.locator("#wiz-task-input")).toHaveValue(
+      "Draft a launch plan for the first customer loop.",
+    );
+    await page.locator(".wizard-step button.btn-primary").first().click();
+
+    await expect(page.getByText("You're set")).toBeVisible();
+    await expect(page.getByText("LLM runtime")).toBeVisible();
+    await page.getByTestId("onboarding-submit-button").click();
+
+    await expect
+      .poll(() => (captures.complete === null ? "pending" : "done"))
+      .toBe("done");
+
+    if (!(captures.config && captures.complete)) {
+      throw new Error("expected config and complete payloads to be captured");
+    }
+    expect(captures.config).toMatchObject({
+      memory_backend: "markdown",
+      llm_provider: "claude-code",
+      llm_provider_priority: ["claude-code"],
+    });
+    expect(captures.complete).toMatchObject({
+      company: "E2E Full Flow Co",
+      description: "Deterministic wizard path",
+      priority: "Launch the first customer loop",
+      runtime: "Claude Code",
+      runtime_priority: ["Claude Code"],
+      memory_backend: "markdown",
+      blueprint: "niche-crm",
+      task: "Draft a launch plan for the first customer loop.",
+      skip_task: false,
+    });
+    expect(captures.complete.agents).toEqual(["ceo", "gtm-lead", "designer"]);
+    await expectNoReactErrors(page, getErrors, "completing all wizard steps");
+  });
+
+  test("switching from a blueprint to from-scratch clears suggested task text", async ({
+    page,
+  }) => {
+    const captures = { config: null, complete: null };
+    await stubDeterministicWizardEndpoints(page, captures);
+
+    await page.goto("/");
+    await waitForReactMount(page);
+    await advanceToTemplatesStep(page);
+
+    await page
+      .locator(".template-card")
+      .filter({ hasText: "Niche CRM" })
+      .first()
+      .click();
+    await page.locator(".wizard-step button.btn-primary").first().click();
+    await page.locator(".wizard-step button.btn-primary").first().click();
+    await page.locator(".wizard-step button.btn-primary").first().click();
+
+    const launchPlanSuggestion = page.getByRole("button", {
+      name: /Draft launch plan/i,
+    });
+    await launchPlanSuggestion.click();
+    await expect(page.locator("#wiz-task-input")).toHaveValue(
+      "Draft a launch plan for the first customer loop.",
+    );
+    await launchPlanSuggestion.click();
+    await expect(page.locator("#wiz-task-input")).toHaveValue(
+      "Draft a launch plan for the first customer loop.",
+    );
+
+    await page.getByRole("button", { exact: true, name: "Back" }).click();
+    await page.getByRole("button", { exact: true, name: "Back" }).click();
+    await page.getByRole("button", { exact: true, name: "Back" }).click();
+    await expect(page.getByText("What should your office run?")).toBeVisible();
+
+    await page.getByRole("button", { name: /Start from scratch/i }).click();
+    await page.locator(".wizard-step button.btn-primary").first().click();
+    await page.locator(".wizard-step button.btn-primary").first().click();
+    await page.locator(".wizard-step button.btn-primary").first().click();
+
+    await expect(page.locator("#wiz-task-input")).toHaveValue("");
+    await expect(
+      page.getByRole("button", { name: /Draft launch plan/i }),
+    ).toHaveCount(0);
   });
 });

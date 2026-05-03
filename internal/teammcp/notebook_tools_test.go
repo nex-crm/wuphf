@@ -108,6 +108,7 @@ func TestHandleTeamNotebookWrite(t *testing.T) {
 
 	res, _, err := handleTeamNotebookWrite(context.Background(), nil, TeamNotebookWriteArgs{
 		ArticlePath: "agents/pm/notebook/x.md",
+		TaskID:      "task-1",
 		Mode:        "create",
 		Content:     "# x\nbody\n",
 		CommitMsg:   "draft x",
@@ -123,6 +124,9 @@ func TestHandleTeamNotebookWrite(t *testing.T) {
 	}
 	if !strings.Contains(auth.lastBody, "\"slug\":\"pm\"") {
 		t.Fatalf("expected slug=pm in body, got %s", auth.lastBody)
+	}
+	if !strings.Contains(auth.lastBody, "\"task_id\":\"task-1\"") {
+		t.Fatalf("expected task_id in body, got %s", auth.lastBody)
 	}
 	if !strings.Contains(auth.lastAuth, "Bearer test-token") {
 		t.Fatalf("expected auth header, got %q", auth.lastAuth)
@@ -281,12 +285,16 @@ func TestHandleTeamNotebookSearch(t *testing.T) {
 	_, _, err := handleTeamNotebookSearch(context.Background(), nil, TeamNotebookSearchArgs{
 		TargetSlug: "pm",
 		Pattern:    "Retro",
+		TaskID:     "task-1",
 	})
 	if err != nil {
 		t.Fatalf("handler: %v", err)
 	}
 	if !strings.Contains(auth.lastRaw, "slug=pm") || !strings.Contains(auth.lastRaw, "q=Retro") {
 		t.Fatalf("expected slug+q query params, got %q", auth.lastRaw)
+	}
+	if !strings.Contains(auth.lastRaw, "task_id=task-1") || !strings.Contains(auth.lastRaw, "actor=pm") {
+		t.Fatalf("expected task workflow query params, got %q", auth.lastRaw)
 	}
 }
 
@@ -343,6 +351,7 @@ func TestHandleTeamNotebookPromote_Happy(t *testing.T) {
 
 	res, _, err := handleTeamNotebookPromote(context.Background(), nil, TeamNotebookPromoteArgs{
 		SourcePath:     "agents/pm/notebook/retro.md",
+		TaskID:         "task-1",
 		TargetWikiPath: "team/playbooks/retro.md",
 		Rationale:      "canonical",
 	})
@@ -357,6 +366,9 @@ func TestHandleTeamNotebookPromote_Happy(t *testing.T) {
 	}
 	if !strings.Contains(auth.lastBody, "\"my_slug\":\"pm\"") {
 		t.Fatalf("expected my_slug in body: %s", auth.lastBody)
+	}
+	if !strings.Contains(auth.lastBody, "\"task_id\":\"task-1\"") {
+		t.Fatalf("expected task_id in body: %s", auth.lastBody)
 	}
 	if !strings.Contains(auth.lastBody, "\"target_wiki_path\":\"team/playbooks/retro.md\"") {
 		t.Fatalf("expected target path in body: %s", auth.lastBody)

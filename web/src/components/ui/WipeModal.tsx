@@ -116,6 +116,7 @@ export function WipeModal({
   const enabled = !busy && value.trim().toLowerCase() === WIPE_CONFIRM_PHRASE;
   const titleId = useId();
   const bodyId = useId();
+  const inputId = useId();
   const inputRef = useRef<HTMLInputElement | null>(null);
   // Track where the press started so accidental drag-out from the input to
   // the backdrop (common while selecting the displayed phrase to copy) does
@@ -168,10 +169,11 @@ export function WipeModal({
         <div id={bodyId} style={styles.body}>
           {intro}
         </div>
-        <label style={styles.inputLabel}>
+        <label htmlFor={inputId} style={styles.inputLabel}>
           Type <code>{WIPE_CONFIRM_PHRASE}</code> to confirm
         </label>
         <input
+          id={inputId}
           ref={inputRef}
           type="text"
           style={styles.input}
@@ -195,7 +197,7 @@ export function WipeModal({
             onClick={enabled ? onConfirm : undefined}
             disabled={!enabled}
           >
-            {busy ? "Working…" : confirmLabel}
+            {busy === true ? "Working…" : String(confirmLabel)}
           </button>
         </div>
       </div>

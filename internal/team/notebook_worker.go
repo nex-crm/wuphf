@@ -196,6 +196,16 @@ func (w *WikiWorker) AgentsWithNotebooks() ([]string, error) {
 	return out, nil
 }
 
+// EnsureNotebookDirs creates the on-disk notebook shelf for each roster slug.
+// It commits only .gitkeep files, never sample content, so a fresh office has
+// visible per-agent notebooks without pretending any agent has written notes.
+func (w *WikiWorker) EnsureNotebookDirs(ctx context.Context, slugs []string) (string, error) {
+	if w == nil || w.repo == nil {
+		return "", ErrWorkerStopped
+	}
+	return w.repo.EnsureNotebookDirs(ctx, slugs)
+}
+
 // NotebookRead returns raw entry bytes for any agent's notebook. Cross-agent
 // reads are intentional: notebooks are private-by-convention, not by access
 // control.
@@ -372,6 +382,67 @@ func (r *Repo) CommitNotebook(ctx context.Context, slug, relPath, content, mode,
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.commitNotebookLocked(ctx, slug, relPath, content, mode, message)
+}
+
+// EnsureNotebookDirs materializes agents/{slug}/notebook/.gitkeep for every
+// valid slug and commits the shelves as bootstrap metadata. It is idempotent
+// and intentionally writes no notebook entries.
+func (r *Repo) EnsureNotebookDirs(ctx context.Context, slugs []string) (string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	seen := make(map[string]struct{}, len(slugs))
+	markers := make([]string, 0, len(slugs))
+	for _, raw := range slugs {
+		slug := strings.TrimSpace(raw)
+		if slug == "" {
+			continue
+		}
+		if _, ok := seen[slug]; ok {
+			continue
+		}
+		seen[slug] = struct{}{}
+		if err := validateNotebookSlug(slug); err != nil {
+			continue
+		}
+		rel := filepath.ToSlash(filepath.Join("agents", slug, "notebook", ".gitkeep"))
+		full := filepath.Join(r.root, rel)
+		if _, err := os.Stat(full); err == nil {
+			markers = append(markers, rel)
+			continue
+		} else if err != nil && !os.IsNotExist(err) {
+			return "", fmt.Errorf("notebook: stat shelf %s: %w", rel, err)
+		}
+		if err := os.MkdirAll(filepath.Dir(full), 0o700); err != nil {
+			return "", fmt.Errorf("notebook: mkdir shelf %s: %w", filepath.Dir(full), err)
+		}
+		if err := os.WriteFile(full, []byte(""), 0o600); err != nil {
+			return "", fmt.Errorf("notebook: write shelf marker %s: %w", rel, err)
+		}
+		markers = append(markers, rel)
+	}
+	if len(markers) == 0 {
+		return "", nil
+	}
+	args := append([]string{"add", "--"}, markers...)
+	if out, err := r.runGitLocked(ctx, "wuphf-bootstrap", args...); err != nil {
+		return "", fmt.Errorf("notebook: git add shelves: %w: %s", err, out)
+	}
+	cachedDiff, err := r.runGitLocked(ctx, "system", "diff", "--cached", "--name-only")
+	if err != nil {
+		return "", fmt.Errorf("notebook: git diff --cached: %w", err)
+	}
+	if strings.TrimSpace(cachedDiff) == "" {
+		return "", nil
+	}
+	if out, err := r.runGitLocked(ctx, "wuphf-bootstrap", "commit", "-q", "-m", "notebook: initialize agent shelves"); err != nil {
+		return "", fmt.Errorf("notebook: git commit shelves: %w: %s", err, out)
+	}
+	sha, err := r.runGitLocked(ctx, "system", "rev-parse", "--short", "HEAD")
+	if err != nil {
+		return "", fmt.Errorf("notebook: resolve HEAD sha: %w", err)
+	}
+	return strings.TrimSpace(sha), nil
 }
 
 // validateNotebookWritePath enforces that the path lives under

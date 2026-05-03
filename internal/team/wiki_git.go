@@ -42,6 +42,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -66,6 +67,8 @@ var ErrRepoCorrupt = errors.New("wiki: repo integrity check failed")
 // ErrBackupMissing is returned by RestoreFromBackup when no backup mirror
 // exists to restore from.
 var ErrBackupMissing = errors.New("wiki: backup mirror does not exist")
+
+var errArchiveCandidateChanged = errors.New("wiki archive: candidate changed during sweep")
 
 // CommitRef is a lightweight git log entry for a single article.
 type CommitRef struct {
@@ -341,6 +344,122 @@ func (r *Repo) Commit(ctx context.Context, slug, relPath, content, mode, message
 	return strings.TrimSpace(sha), bytesWritten, nil
 }
 
+// CommitArchive writes a tombstone at relPath and the full original content
+// at archivePath (.archive/<relPath>), then commits both files in a single
+// git commit under the archivist identity. Used by WikiArchiver.Sweep.
+//
+// relPath must be a valid team/ article path and archivePath must live under
+// .archive/. Both are validated before any file is written.
+//
+// Returns the commit SHA. Returns ("", nil) when there was nothing to commit
+// (both files were already identical to what's on disk).
+func (r *Repo) CommitArchive(ctx context.Context, relPath, tombstone, archivePath, archiveContent, message string) (string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if err := validateArticlePath(relPath); err != nil {
+		return "", err
+	}
+	relPath = filepath.ToSlash(filepath.Clean(strings.TrimSpace(relPath)))
+	cleanArchivePath, err := validateArchivePath(archivePath)
+	if err != nil {
+		return "", err
+	}
+	archivePath = cleanArchivePath
+
+	fullOrig := filepath.Join(r.root, filepath.FromSlash(relPath))
+	current, err := os.ReadFile(fullOrig)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", errArchiveCandidateChanged
+		}
+		return "", fmt.Errorf("wiki archive: read current article: %w", err)
+	}
+	if string(current) != archiveContent {
+		return "", errArchiveCandidateChanged
+	}
+
+	// Write archive content FIRST so that on a crash between the two writes,
+	// RecoverDirtyTree commits the archive file while the original article is
+	// still intact on disk. Writing tombstone first would destroy the original
+	// before the archive is persisted.
+	fullArchive := filepath.Join(r.root, filepath.FromSlash(archivePath))
+	if err := os.MkdirAll(filepath.Dir(fullArchive), 0o700); err != nil {
+		return "", fmt.Errorf("wiki archive: mkdir archive: %w", err)
+	}
+	if err := os.WriteFile(fullArchive, []byte(archiveContent), 0o600); err != nil {
+		return "", fmt.Errorf("wiki archive: write archive: %w", err)
+	}
+
+	// Write tombstone at original path only after archive is safely on disk.
+	// If any subsequent git operation fails, restore the original content so
+	// the article is not silently lost.
+	if err := os.MkdirAll(filepath.Dir(fullOrig), 0o700); err != nil {
+		return "", fmt.Errorf("wiki archive: mkdir orig: %w", err)
+	}
+	if err := os.WriteFile(fullOrig, []byte(tombstone), 0o600); err != nil {
+		return "", fmt.Errorf("wiki archive: write tombstone: %w", err)
+	}
+
+	// restoreOrig reverts all on-disk and staged changes on partial failure:
+	//   1. Restore the live article so the tombstone is never permanently
+	//      committed without a corresponding archive copy.
+	//   2. Remove the archive copy so RecoverDirtyTree cannot auto-commit
+	//      a partial archive state on the next startup.
+	//   3. Unstage any changes git add may have introduced — prevents the
+	//      same RecoverDirtyTree auto-commit path.
+	restoreOrig := func() {
+		if werr := os.WriteFile(fullOrig, []byte(archiveContent), 0o600); werr != nil {
+			log.Printf("wiki archive: WARN restore %s after failure: %v", relPath, werr)
+		}
+		if werr := os.Remove(fullArchive); werr != nil && !errors.Is(werr, os.ErrNotExist) {
+			log.Printf("wiki archive: WARN remove archive %s after failure: %v", archivePath, werr)
+		}
+		if _, werr := r.runGitLocked(ctx, "system", "reset", "HEAD", "--"); werr != nil {
+			log.Printf("wiki archive: WARN git reset after failure: %v", werr)
+		}
+	}
+
+	if err := r.regenerateIndexLocked(); err != nil {
+		restoreOrig()
+		return "", fmt.Errorf("wiki archive: index regen: %w", err)
+	}
+
+	if out, err := r.runGitLocked(ctx, ArchivistAuthor, "add", "--",
+		relPath, archivePath, "index/all.md"); err != nil {
+		restoreOrig()
+		return "", fmt.Errorf("wiki archive: git add: %w: %s", err, out)
+	}
+
+	cached, err := r.runGitLocked(ctx, ArchivistAuthor, "diff", "--cached", "--name-only")
+	if err != nil {
+		restoreOrig()
+		return "", fmt.Errorf("wiki archive: git diff --cached: %w", err)
+	}
+	if strings.TrimSpace(cached) == "" {
+		head, err := r.runGitLocked(ctx, "system", "rev-parse", "--short", "HEAD")
+		if err != nil {
+			restoreOrig()
+			return "", fmt.Errorf("wiki archive: resolve HEAD: %w", err)
+		}
+		return strings.TrimSpace(head), nil
+	}
+
+	msg := strings.TrimSpace(message)
+	if msg == "" {
+		msg = fmt.Sprintf("archivist: archive %s", relPath)
+	}
+	if out, err := r.runGitLocked(ctx, ArchivistAuthor, "commit", "-q", "-m", msg); err != nil {
+		restoreOrig()
+		return "", fmt.Errorf("wiki archive: git commit: %w: %s", err, out)
+	}
+	sha, err := r.runGitLocked(ctx, ArchivistAuthor, "rev-parse", "--short", "HEAD")
+	if err != nil {
+		return "", fmt.Errorf("wiki archive: resolve HEAD sha: %w", err)
+	}
+	return strings.TrimSpace(sha), nil
+}
+
 // CommitBootstrap stages every untracked / modified path under team/ and
 // commits the whole pile as author `wuphf-bootstrap`. It is idempotent: if
 // nothing is dirty, it returns ("", nil) without creating an empty commit.
@@ -580,6 +699,11 @@ func (r *Repo) regenerateIndexLocked() error {
 			return err
 		}
 		rel = filepath.ToSlash(rel)
+		// Exclude archived tombstones from the index so agents consuming
+		// index/all.md don't follow links to archived content.
+		if content, cerr := os.ReadFile(path); cerr == nil && parseFrontmatterBool(string(content), "archived") {
+			return nil
+		}
 		entries = append(entries, entry{
 			relPath: rel,
 			dir:     filepath.ToSlash(filepath.Dir(rel)),
@@ -814,16 +938,19 @@ func searchArticles(repo *Repo, pattern string) ([]WikiSearchHit, error) {
 		if len(hits) >= maxHits {
 			return filepath.SkipDir
 		}
-		f, err := os.Open(path)
-		if err != nil {
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return nil //nolint:nilerr // non-fatal: skip unreadable file (race with delete)
+		}
+		// Skip archived tombstones — they are no longer active wiki content.
+		if parseFrontmatterBool(string(data), "archived") {
 			return nil
 		}
-		defer func() { _ = f.Close() }()
-		scanner := bufio.NewScanner(f)
-		scanner.Buffer(make([]byte, 64*1024), 1024*1024)
-		lineNo := 0
 		rel, _ := filepath.Rel(repo.root, path)
 		rel = filepath.ToSlash(rel)
+		scanner := bufio.NewScanner(strings.NewReader(string(data)))
+		scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+		lineNo := 0
 		for scanner.Scan() {
 			lineNo++
 			line := scanner.Text()
@@ -869,6 +996,30 @@ func validateArticlePath(relPath string) error {
 		return fmt.Errorf("wiki: article path must end with .md; got %q", relPath)
 	}
 	return nil
+}
+
+func validateArchivePath(relPath string) (string, error) {
+	relPath = strings.TrimSpace(relPath)
+	if relPath == "" {
+		return "", fmt.Errorf("wiki: archive_path is required")
+	}
+	if filepath.IsAbs(relPath) {
+		return "", fmt.Errorf("wiki: archive path must be relative; got %q", relPath)
+	}
+	clean := filepath.ToSlash(filepath.Clean(relPath))
+	if strings.HasPrefix(clean, "../") || strings.Contains(clean, "/../") || clean == ".." {
+		return "", fmt.Errorf("wiki: archive path must not contain ..; got %q", relPath)
+	}
+	if !strings.HasPrefix(clean, ".archive/") {
+		return "", fmt.Errorf("wiki: archive path must be within .archive/; got %q", relPath)
+	}
+	if strings.HasPrefix(clean, "team/") {
+		return "", fmt.Errorf("wiki: archive path must not be within team/; got %q", relPath)
+	}
+	if !strings.HasSuffix(strings.ToLower(clean), ".md") {
+		return "", fmt.Errorf("wiki: archive path must end with .md; got %q", relPath)
+	}
+	return clean, nil
 }
 
 // extractArticleTitle returns the first level-1 heading in the file, or the

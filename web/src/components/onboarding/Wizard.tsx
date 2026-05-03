@@ -1,1832 +1,45 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
-import {
-  get,
-  getLocalProvidersStatus,
-  type LocalProviderStatus,
-  post,
-} from "../../api/client";
-import { ONBOARDING_COPY } from "../../lib/constants";
+import { get, post } from "../../api/client";
 import { useAppStore } from "../../stores/app";
-import { Kbd, MOD_KEY } from "../ui/Kbd";
 import "../../styles/onboarding.css";
 
-/* ═══════════════════════════════════════════
-   Types
-   ═══════════════════════════════════════════ */
-
-interface BlueprintTemplate {
-  id: string;
-  name: string;
-  description: string;
-  emoji?: string;
-  agents?: BlueprintAgent[];
-}
-
-interface BlueprintAgent {
-  slug: string;
-  name: string;
-  role: string;
-  emoji?: string;
-  checked?: boolean;
-  // built_in marks the lead agent — always included, never removable.
-  // The backend also refuses to disable or remove a BuiltIn member, so
-  // even if someone bypassed this UI, the broker would reject the write.
-  built_in?: boolean;
-}
-
-interface TaskTemplate {
-  id: string;
-  name: string;
-  description: string;
-  emoji?: string;
-  prompt?: string;
-}
-
-type WizardStep =
-  | "welcome"
-  | "templates"
-  | "identity"
-  | "team"
-  | "setup"
-  | "task"
-  | "ready";
-
-// Step order: company info before blueprint. The blueprint picker is a
-// decision about how the office starts; it makes more sense after the
-// user has anchored who they are than as the very first question.
-// `ready` is the final-step readiness summary matching the TUI's InitDone
-// phase (see internal/tui/init_flow.go readinessChecks()) — shows the user
-// exactly what's configured before we submit.
-const STEP_ORDER: readonly WizardStep[] = [
-  "welcome",
-  "identity",
-  "templates",
-  "team",
-  "setup",
-  "task",
-  "ready",
-] as const;
-
-// Each runtime has a display label, the binary name the broker's prereqs
-// check looks for, a canonical install page to link to when missing, and
-// — for the runtimes the broker can actually dispatch agents to — the
-// provider id the broker expects on POST /config.
-interface RuntimeSpec {
-  label: string;
-  binary: string;
-  installUrl: string;
-  provider: "claude-code" | "codex" | "opencode" | null;
-}
-
-const RUNTIMES: readonly RuntimeSpec[] = [
-  {
-    label: "Claude Code",
-    binary: "claude",
-    installUrl: "https://claude.ai/code",
-    provider: "claude-code",
-  },
-  {
-    label: "Codex",
-    binary: "codex",
-    installUrl: "https://github.com/openai/codex",
-    provider: "codex",
-  },
-  {
-    label: "Opencode",
-    binary: "opencode",
-    installUrl: "https://opencode.ai",
-    provider: "opencode",
-  },
-  {
-    label: "Cursor",
-    binary: "cursor",
-    installUrl: "https://cursor.com/",
-    provider: null,
-  },
-  {
-    label: "Windsurf",
-    binary: "windsurf",
-    installUrl: "https://codeium.com/windsurf",
-    provider: null,
-  },
-] as const;
-
-interface PrereqResult {
-  name: string;
-  required: boolean;
-  found: boolean;
-  ok?: boolean;
-  version?: string;
-  install_url?: string;
-}
-
-// runtimeIsReady centralizes the "should this runtime label count as a
-// configured LLM?" predicate used at the SetupStep gate, the keyboard
-// gate, and the ReadyStep summary. Three call sites had drifted apart
-// once already (see PR #367 review) — keeping the rule in one place
-// stops the next drift in its tracks.
-//
-// Rules:
-//   - Unknown labels (not in RUNTIMES) never count.
-//   - Runtimes with provider:null (Cursor/Windsurf) NEVER count, in
-//     either branch. finishOnboarding silently drops them from
-//     providerPriority, so a Cursor-only selection would let the gate
-//     pass and /config would persist no llm_provider.
-//   - With a non-null provider AND prereqs detection succeeded, the
-//     runtime's binary must be on PATH (detection.found).
-//   - With a non-null provider AND prereqs detection FAILED
-//     (prereqsError truthy), trust the user's selection.
-function runtimeIsReady(
-  label: string,
-  prereqs: PrereqResult[],
-  prereqsError: string,
-): boolean {
-  const spec = RUNTIMES.find((r) => r.label === label);
-  if (!spec || spec.provider === null) return false;
-  if (prereqsError) return true;
-  return Boolean(detectedBinary(prereqs, spec.binary)?.found);
-}
-
-// "Start from scratch" starter roster. Mirrors scratchFoundingTeamBlueprint
-// in internal/team/broker_onboarding.go — the broker seeds these exact slugs
-// when the wizard POSTs blueprint:null. Kept in sync manually; backend is the
-// source of truth, this is just the Team-step preview so users don't see an
-// empty roster before confirming.
-const SCRATCH_FOUNDING_TEAM: readonly BlueprintAgent[] = [
-  { slug: "ceo", name: "CEO", role: "lead", checked: true, built_in: true },
-  { slug: "gtm-lead", name: "GTM Lead", role: "go-to-market", checked: true },
-  {
-    slug: "founding-engineer",
-    name: "Founding Engineer",
-    role: "engineering",
-    checked: true,
-  },
-  { slug: "pm", name: "Product Manager", role: "product", checked: true },
-  { slug: "designer", name: "Designer", role: "design", checked: true },
-];
-
-// Display overrides for blueprints. Backend names/descriptions are long-form
-// ("Bookkeeping and Invoicing Service", "Template for a bookkeeping operation
-// that handles recurring books..."). For the onboarding picker we want short,
-// scannable copy and visible categorization. Overrides are keyed by blueprint
-// id (see templates/operations/*/blueprint.yaml). If a blueprint isn't in the
-// map we fall back to the backend name + description, so new blueprints still
-// render without frontend changes.
-type BlueprintCategoryKey = "services" | "media" | "product";
-
-interface BlueprintDisplay {
-  category: BlueprintCategoryKey;
-  shortDescription: string;
-  icon: string;
-}
-
-const BLUEPRINT_CATEGORIES: ReadonlyArray<{
-  key: BlueprintCategoryKey;
-  label: string;
-  hint: string;
-}> = [
-  {
-    key: "services",
-    label: "Services",
-    hint: "Client work, done by your office",
-  },
-  {
-    key: "media",
-    label: "Media & Community",
-    hint: "Content or community as the business",
-  },
-  { key: "product", label: "Products", hint: "Software you build and sell" },
-] as const;
-
-const BLUEPRINT_DISPLAY: Record<string, BlueprintDisplay> = {
-  "bookkeeping-invoicing-service": {
-    category: "services",
-    shortDescription: "Books · invoices · monthly close",
-    icon: "📊",
-  },
-  "local-business-ai-package": {
-    category: "services",
-    shortDescription: "Intake · booking · follow-up",
-    icon: "🏪",
-  },
-  "multi-agent-workflow-consulting": {
-    category: "services",
-    shortDescription: "Client engagements · workflow delivery",
-    icon: "💼",
-  },
-  "niche-crm": {
-    category: "product",
-    shortDescription: "Build & launch a focused CRM",
-    icon: "🎯",
-  },
-  "paid-discord-community": {
-    category: "media",
-    shortDescription: "Moderation · onboarding · engagement",
-    icon: "💬",
-  },
-  "youtube-factory": {
-    category: "media",
-    shortDescription: "Script · film · publish · analyze",
-    icon: "📹",
-  },
-};
-
-// API_KEY_FIELDS: each provider's auth has two valid paths — log in via
-// the provider's CLI (claude login, codex login, etc.) or paste an API
-// key here. The wizard defaults to CLI login because it's the existing
-// primary path for most users; clicking "Use API key" reveals the
-// password input so users can paste a key without it being on screen
-// the whole time.
-const API_KEY_FIELDS = [
-  {
-    key: "ANTHROPIC_API_KEY",
-    label: "Anthropic",
-    hint: "Powers Claude-based agents",
-    cliLoginCmd: "claude login",
-  },
-  {
-    key: "OPENAI_API_KEY",
-    label: "OpenAI",
-    hint: "Powers GPT-based agents",
-    cliLoginCmd: "codex login",
-  },
-  {
-    key: "GOOGLE_API_KEY",
-    label: "Google",
-    hint: "Powers Gemini-based agents",
-    cliLoginCmd: "gcloud auth application-default login",
-  },
-] as const;
-
-type MemoryBackend = "markdown" | "nex" | "gbrain" | "none";
-
-const MEMORY_BACKEND_OPTIONS: ReadonlyArray<{
-  value: MemoryBackend;
-  label: string;
-  hint: string;
-}> = [
-  {
-    value: "markdown",
-    label: "Team wiki (default)",
-    hint: 'A living knowledge graph for your team. Agents record typed facts as git commits, the LLM rewrites briefs under the "archivist" identity, and every claim has a citation. `/lookup` answers questions with sources. `/lint` flags contradictions, orphans, and stale facts. File-over-app, `git clone`-able, no API key needed.',
-  },
-  {
-    value: "nex",
-    label: "Nex",
-    hint: "Hosted memory graph that streams in HubSpot, Slack, Gmail, Calendar, and more — your tools become entities agents already know. Free tier available; needs NEX_API_KEY.",
-  },
-  {
-    value: "gbrain",
-    label: "GBrain",
-    hint: "Local graph over Postgres. Needs an LLM key for embeddings.",
-  },
-  {
-    value: "none",
-    label: "None",
-    hint: "Skip shared memory. Agents work with only per-turn context.",
-  },
-] as const;
-
-/* ═══════════════════════════════════════════
-   Arrow icon reused across buttons
-   ═══════════════════════════════════════════ */
-
-function ArrowIcon() {
-  return (
-    <svg
-      width="14"
-      height="14"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M5 12h14" />
-      <path d="m12 5 7 7-7 7" />
-    </svg>
-  );
-}
-
-function CheckIcon() {
-  return (
-    <svg
-      width="12"
-      height="12"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="3"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <polyline points="20 6 9 17 4 12" />
-    </svg>
-  );
-}
-
-/**
- * Inline Enter-key hint for primary CTAs. Purely decorative — the real
- * Enter handling lives at the Wizard level so it works from anywhere on
- * the step, not just when the button has focus. Pass `modifier` (e.g.
- * ⌘/Ctrl) when the step binds ⌘+Enter instead of plain Enter.
- */
-function EnterHint({ modifier }: { modifier?: string } = {}) {
-  return (
-    <span className="kbd-hint" aria-hidden="true">
-      {modifier && (
-        <Kbd size="sm" variant="inverse">
-          {modifier}
-        </Kbd>
-      )}
-      <Kbd size="sm" variant="inverse">
-        ↵
-      </Kbd>
-    </span>
-  );
-}
-
-/* ═══════════════════════════════════════════
-   Sub-components
-   ═══════════════════════════════════════════ */
-
-function ProgressDots({
-  current,
-  steps,
-}: {
-  current: WizardStep;
-  steps: readonly WizardStep[];
-}) {
-  return (
-    <div className="wizard-progress">
-      {steps.map((step) => (
-        <div
-          key={step}
-          className={`wizard-progress-dot ${step === current ? "active" : "inactive"}`}
-        />
-      ))}
-    </div>
-  );
-}
-
-/* ─── Step 1: Welcome ─── */
-
-interface WelcomeStepProps {
-  onNext: () => void;
-}
-
-function WelcomeStep({ onNext }: WelcomeStepProps) {
-  return (
-    <div className="wizard-step">
-      <div className="wizard-hero">
-        <div className="wizard-eyebrow">
-          <span className="status-dot active pulse" />
-          Ready to set up
-        </div>
-        <h1 className="wizard-headline">{ONBOARDING_COPY.step1_headline}</h1>
-        <p className="wizard-subhead">{ONBOARDING_COPY.step1_subhead}</p>
-      </div>
-      <div style={{ display: "flex", justifyContent: "center" }}>
-        <button className="btn btn-primary" onClick={onNext}>
-          {ONBOARDING_COPY.step1_cta}
-          <ArrowIcon />
-          <EnterHint />
-        </button>
-      </div>
-    </div>
-  );
-}
-
-/* ─── Step 2: Templates ─── */
-
-interface TemplatesStepProps {
-  templates: BlueprintTemplate[];
-  loading: boolean;
-  selected: string | null;
-  onSelect: (id: string | null) => void;
-  onNext: () => void;
-  onBack: () => void;
-}
-
-function TemplatesStep({
-  templates,
-  loading,
-  selected,
-  onSelect,
-  onNext,
-  onBack,
-}: TemplatesStepProps) {
-  // Group templates by display category. Unknown blueprint ids (not in the
-  // frontend catalog) land in a catch-all "Other" bucket so new backend
-  // templates still render, just without the short-description and icon
-  // treatment.
-  const grouped = new Map<
-    BlueprintCategoryKey | "other",
-    BlueprintTemplate[]
-  >();
-  for (const t of templates) {
-    const display = BLUEPRINT_DISPLAY[t.id];
-    const key: BlueprintCategoryKey | "other" = display?.category ?? "other";
-    const list = grouped.get(key) ?? [];
-    list.push(t);
-    grouped.set(key, list);
-  }
-
-  const renderTile = (t: BlueprintTemplate) => {
-    const display = BLUEPRINT_DISPLAY[t.id];
-    const icon = display?.icon ?? t.emoji;
-    const desc = display?.shortDescription ?? t.description;
-    return (
-      <button
-        key={t.id}
-        className={`template-card ${selected === t.id ? "selected" : ""}`}
-        onClick={() => onSelect(t.id)}
-        type="button"
-      >
-        {icon && <div className="template-card-emoji">{icon}</div>}
-        <div className="template-card-name">{t.name}</div>
-        <div className="template-card-desc">{desc}</div>
-      </button>
-    );
-  };
-
-  return (
-    <div className="wizard-step">
-      <div className="wizard-hero">
-        <div className="wizard-eyebrow">
-          <span className="status-dot active pulse" />
-          Start with a preset, or build from scratch
-        </div>
-        <h1 className="wizard-headline">What should your office run?</h1>
-        <p className="wizard-subhead">
-          Pick the shape of work. We&apos;ll assemble the team, channels, and
-          first tasks around it. You can change anything later.
-        </p>
-      </div>
-
-      {loading ? (
-        <div className="wizard-panel">
-          <div
-            style={{
-              color: "var(--text-tertiary)",
-              fontSize: 13,
-              textAlign: "center",
-              padding: 20,
-            }}
-          >
-            Loading blueprints&hellip;
-          </div>
-        </div>
-      ) : (
-        <>
-          {BLUEPRINT_CATEGORIES.map((cat) => {
-            const items = grouped.get(cat.key) ?? [];
-            if (items.length === 0) return null;
-            return (
-              <div key={cat.key} className="wizard-panel template-group">
-                <div className="template-group-head">
-                  <p className="template-group-label">{cat.label}</p>
-                  <p className="template-group-hint">{cat.hint}</p>
-                </div>
-                <div className="template-grid">{items.map(renderTile)}</div>
-              </div>
-            );
-          })}
-
-          {(grouped.get("other") ?? []).length > 0 && (
-            <div className="wizard-panel template-group">
-              <div className="template-group-head">
-                <p className="template-group-label">Other</p>
-              </div>
-              <div className="template-grid">
-                {(grouped.get("other") ?? []).map(renderTile)}
-              </div>
-            </div>
-          )}
-
-          <div className="template-from-scratch">
-            <button
-              className={`template-from-scratch-btn ${selected === null ? "selected" : ""}`}
-              onClick={() => onSelect(null)}
-              type="button"
-            >
-              <span className="template-from-scratch-icon">+</span>
-              Start from scratch
-              <span className="template-from-scratch-sub">
-                5-person founding team: CEO, GTM Lead, Founding Engineer, PM,
-                Designer
-              </span>
-            </button>
-          </div>
-        </>
-      )}
-
-      <div className="wizard-nav">
-        <button className="btn btn-ghost" onClick={onBack} type="button">
-          Back
-        </button>
-        <button className="btn btn-primary" onClick={onNext} type="button">
-          Review the team
-          <ArrowIcon />
-          <EnterHint />
-        </button>
-      </div>
-    </div>
-  );
-}
-
-/* ─── Step 3: Identity ─── */
-
-// NexSignupStatus tracks the state of the optional in-wizard Nex
-// registration sub-flow. 'hidden' means the user hasn't opened the
-// affordance yet; 'open' means they're entering their email; 'submitting'
-// is the in-flight POST to /nex/register; 'ok' shows a green "sent, check
-// your inbox" hint; 'fallback' flips to the external-link version when
-// nex-cli is not installed (the broker responds 502 with ErrNotInstalled).
-type NexSignupStatus = "hidden" | "open" | "submitting" | "ok" | "fallback";
-
-interface IdentityStepProps {
-  company: string;
-  description: string;
-  priority: string;
-  nexEmail: string;
-  nexSignupStatus: NexSignupStatus;
-  nexSignupError: string;
-  onChangeCompany: (v: string) => void;
-  onChangeDescription: (v: string) => void;
-  onChangePriority: (v: string) => void;
-  onChangeNexEmail: (v: string) => void;
-  onSubmitNexSignup: () => void;
-  onOpenNexSignup: () => void;
-  onNext: () => void;
-  onBack: () => void;
-}
-
-function IdentityStep({
-  company,
-  description,
-  priority,
-  nexEmail,
-  nexSignupStatus,
-  nexSignupError,
-  onChangeCompany,
-  onChangeDescription,
-  onChangePriority,
-  onChangeNexEmail,
-  onSubmitNexSignup,
-  onOpenNexSignup,
-  onNext,
-  onBack,
-}: IdentityStepProps) {
-  const canContinue =
-    company.trim().length > 0 && description.trim().length > 0;
-
-  return (
-    <div className="wizard-step">
-      <div className="wizard-panel">
-        <p className="wizard-panel-title">Tell us about this office</p>
-        <div className="form-group">
-          <label className="label" htmlFor="wiz-company">
-            Company or project name{" "}
-            <span style={{ color: "var(--red)" }}>*</span>
-          </label>
-          <input
-            className="input"
-            id="wiz-company"
-            placeholder="Acme Operations, or your real project name"
-            autoComplete="organization"
-            value={company}
-            onChange={(e) => onChangeCompany(e.target.value)}
-          />
-        </div>
-        <div className="form-group">
-          <label className="label" htmlFor="wiz-description">
-            One-liner description <span style={{ color: "var(--red)" }}>*</span>
-          </label>
-          <input
-            className="input"
-            id="wiz-description"
-            placeholder="What real business or workflow should this office run?"
-            value={description}
-            onChange={(e) => onChangeDescription(e.target.value)}
-          />
-        </div>
-        <div className="form-group">
-          <label className="label" htmlFor="wiz-priority">
-            Top priority right now
-          </label>
-          <input
-            className="input"
-            id="wiz-priority"
-            placeholder="Win the first real customer loop"
-            value={priority}
-            onChange={(e) => onChangePriority(e.target.value)}
-          />
-        </div>
-      </div>
-
-      {nexSignupStatus === "hidden" ? (
-        <div className="wiz-nex-trigger">
-          <button
-            type="button"
-            className="wiz-nex-trigger-link"
-            onClick={onOpenNexSignup}
-          >
-            Don&apos;t have a Nex account? Sign up here.
-          </button>
-        </div>
-      ) : (
-        <NexSignupPanel
-          email={nexEmail}
-          status={nexSignupStatus}
-          error={nexSignupError}
-          onChangeEmail={onChangeNexEmail}
-          onSubmit={onSubmitNexSignup}
-        />
-      )}
-
-      <div className="wizard-nav">
-        <button className="btn btn-ghost" onClick={onBack} type="button">
-          Back
-        </button>
-        <button
-          className="btn btn-primary"
-          onClick={onNext}
-          disabled={!canContinue}
-          type="button"
-        >
-          Choose a blueprint
-          <ArrowIcon />
-          <EnterHint />
-        </button>
-      </div>
-    </div>
-  );
-}
-
-/* ─── Nex signup affordance (rendered inside IdentityStep) ─── */
-
-interface NexSignupPanelProps {
-  email: string;
-  status: NexSignupStatus;
-  error: string;
-  onChangeEmail: (v: string) => void;
-  onSubmit: () => void;
-}
-
-// NexSignupPanel is the optional "don't have a Nex account yet?"
-// affordance. It's compact by default (one-line link) so users with a key
-// already aren't distracted. The primary path calls /nex/register on the
-// broker, which shells out to `nex-cli setup <email>`. If nex-cli isn't
-// installed, the broker returns 502 with ErrNotInstalled and we flip to
-// the external-link fallback (open nex.ai/register + paste key on Setup
-// step). Matches the TUI's InitNexRegister phase in init_flow.go.
-function NexSignupPanel({
-  email,
-  status,
-  error,
-  onChangeEmail,
-  onSubmit,
-}: NexSignupPanelProps) {
-  return (
-    <div className="wizard-panel wiz-nex-signup">
-      <p className="wizard-panel-title">Sign up for Nex (optional)</p>
-      <p
-        style={{
-          fontSize: 12,
-          color: "var(--text-secondary)",
-          margin: "-8px 0 12px 0",
-        }}
-      >
-        {status === "fallback"
-          ? "nex-cli is not installed on this machine. Register in your browser, then paste the key on the Setup step."
-          : "Register an email to get a free Nex API key. Powers shared memory, entity briefs, and integrations. You can also paste an existing key on the Setup step."}
-      </p>
-
-      {status === "fallback" ? (
-        <a
-          className="btn btn-secondary"
-          href="https://nex.ai/register"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Open nex.ai/register
-          <ArrowIcon />
-        </a>
-      ) : status === "ok" ? (
-        <p className="wiz-nex-ok" role="status">
-          Check your inbox at {email} for the Nex API key, then paste it on the
-          Setup step.
-        </p>
-      ) : (
-        <div className="form-group" style={{ margin: 0 }}>
-          <label className="label" htmlFor="wiz-nex-email">
-            Email
-          </label>
-          <div style={{ display: "flex", gap: 8 }}>
-            <input
-              className="input"
-              id="wiz-nex-email"
-              type="email"
-              placeholder="you@example.com"
-              value={email}
-              onChange={(e) => onChangeEmail(e.target.value)}
-              onKeyDown={(e) => {
-                if (
-                  e.key === "Enter" &&
-                  status !== "submitting" &&
-                  email.trim().length > 0
-                ) {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  onSubmit();
-                }
-              }}
-              disabled={status === "submitting"}
-              style={{ flex: 1 }}
-            />
-            <button
-              className="btn btn-primary"
-              type="button"
-              onClick={onSubmit}
-              disabled={status === "submitting" || email.trim().length === 0}
-            >
-              {status === "submitting" ? "Registering..." : "Register"}
-            </button>
-          </div>
-          {error && (
-            <p
-              style={{ color: "var(--red)", fontSize: 12, marginTop: 6 }}
-              role="alert"
-            >
-              {error}
-            </p>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-/* ─── Step 4: Team Review ─── */
-
-interface TeamStepProps {
-  agents: BlueprintAgent[];
-  onToggle: (slug: string) => void;
-  onNext: () => void;
-  onBack: () => void;
-}
-
-function TeamStep({ agents, onToggle, onNext, onBack }: TeamStepProps) {
-  return (
-    <div className="wizard-step">
-      <div className="wizard-panel">
-        <p className="wizard-panel-title">Your team</p>
-        <p
-          style={{
-            fontSize: 12,
-            color: "var(--text-secondary)",
-            margin: "-8px 0 12px 0",
-          }}
-        >
-          These are the specialists your blueprint assembled. Toggle anyone you
-          don&apos;t need.
-        </p>
-
-        {agents.length === 0 ? (
-          <div className="wiz-team-empty">
-            No teammates yet. Go back and pick a blueprint, or open the office
-            and add agents from the team panel.
-          </div>
-        ) : (
-          <div className="wiz-team-grid">
-            {agents.map((a) => {
-              // Lead agent is always included and cannot be unchecked here.
-              // The backend also refuses to remove or disable any BuiltIn
-              // member, so this is UI belt + server-side braces.
-              const locked = a.built_in === true;
-              return (
-                <button
-                  key={a.slug}
-                  className={`wiz-team-tile ${a.checked ? "selected" : ""} ${locked ? "locked" : ""}`}
-                  onClick={() => !locked && onToggle(a.slug)}
-                  type="button"
-                  disabled={locked}
-                  aria-disabled={locked}
-                  title={locked ? "Lead agent — always included" : undefined}
-                >
-                  <div className="wiz-team-check">
-                    {a.checked && <CheckIcon />}
-                  </div>
-                  <div>
-                    {a.emoji && (
-                      <span style={{ marginRight: 6 }}>{a.emoji}</span>
-                    )}
-                    <span className="wiz-team-name">{a.name}</span>
-                    {locked && (
-                      <span className="wiz-team-lead-badge" aria-label="Lead">
-                        Lead
-                      </span>
-                    )}
-                    {a.role && <div className="wiz-team-role">{a.role}</div>}
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      <div className="wizard-nav">
-        <button className="btn btn-ghost" onClick={onBack} type="button">
-          Back
-        </button>
-        <button className="btn btn-primary" onClick={onNext} type="button">
-          Continue
-          <ArrowIcon />
-          <EnterHint />
-        </button>
-      </div>
-    </div>
-  );
-}
-
-/* ─── Local LLM picker (revealed when "Run a local model" tile is on) ─── */
-
-const LOCAL_PROVIDER_LABELS: ReadonlyArray<{
-  kind: string;
-  label: string;
-  blurb: string;
-}> = [
-  { kind: "mlx-lm", label: "MLX-LM", blurb: "macOS · Apple Silicon" },
-  { kind: "ollama", label: "Ollama", blurb: "macOS / Linux" },
-  { kind: "exo", label: "Exo", blurb: "Multi-device pool" },
-];
-
-interface LocalLLMPickerProps {
-  // selected: kind that the user picked here, if any. Stored in wizard
-  // state so the parent can flip the active llm_provider on Continue
-  // without committing to /config until the user explicitly says so.
-  selected: string;
-  onSelect: (kind: string) => void;
-}
-
-// LocalLLMPicker is the second-step grid of mlx-lm / ollama / exo
-// tiles. The parent reveals it when the "Run a local model" tile in
-// the primary runtime grid is on, so it reads as a peer of the cloud
-// CLIs rather than a tucked-away "advanced" toggle.
-function LocalLLMPicker({ selected, onSelect }: LocalLLMPickerProps) {
-  const [status, setStatus] = useState<LocalProviderStatus[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [fetchError, setFetchError] = useState<string>("");
-
-  useEffect(() => {
-    let alive = true;
-    setLoading(true);
-    setFetchError("");
-    getLocalProvidersStatus()
-      .then((data) => {
-        if (!alive) return;
-        setStatus(data ?? []);
-      })
-      .catch((err: unknown) => {
-        if (!alive) return;
-        // Surfaced inline below the tiles so a 401 / 5xx / missing
-        // endpoint isn't silently rendered as "every runtime is
-        // platform_supported but not installed". Lets users distinguish
-        // "the broker can't reach detection" from "you have nothing
-        // installed".
-        const msg = err instanceof Error ? err.message : String(err);
-        setFetchError(msg);
-      })
-      .finally(() => {
-        if (alive) setLoading(false);
-      });
-    return () => {
-      alive = false;
-    };
-  }, []);
-
-  const byKind = new Map<string, LocalProviderStatus>();
-  for (const s of status) byKind.set(s.kind, s);
-
-  return (
-    <div
-      data-testid="onboarding-local-llm-picker"
-      style={{
-        marginTop: 12,
-        marginLeft: 12,
-        paddingLeft: 16,
-        borderLeft: "2px solid var(--accent, #b88efb)",
-      }}
-    >
-      <p
-        style={{
-          fontSize: 12,
-          fontWeight: 600,
-          color: "var(--text)",
-          margin: "0 0 4px 0",
-        }}
-      >
-        Pick a local runtime
-      </p>
-      <p
-        style={{
-          fontSize: 12,
-          color: "var(--text-secondary)",
-          margin: "0 0 10px 0",
-        }}
-      >
-        No cloud key required. Best on macOS or Linux. Need install commands?
-        See <strong>Settings → Local LLMs</strong> after onboarding for the
-        doctor panel with copy-paste shell snippets.
-      </p>
-
-      {loading && (
-        <div
-          style={{
-            fontSize: 12,
-            color: "var(--text-tertiary)",
-            padding: "4px 0",
-          }}
-        >
-          Detecting local runtimes…
-        </div>
-      )}
-      {!loading && fetchError && (
-        <div
-          data-testid="onboarding-local-llm-fetch-error"
-          style={{
-            fontSize: 12,
-            color: "var(--danger-500, #c33)",
-            padding: "6px 8px",
-            background: "var(--danger-50, #fee)",
-            border: "1px solid var(--danger-200, #fcc)",
-            borderRadius: 4,
-            marginBottom: 8,
-          }}
-        >
-          Couldn't reach the broker to check installed runtimes:{" "}
-          <code style={{ fontFamily: "var(--font-mono)" }}>{fetchError}</code>.
-          You can still pick a runtime — install/start commands live in{" "}
-          <strong>Settings → Local LLMs</strong> after onboarding.
-        </div>
-      )}
-      {!loading && (
-        <div className="runtime-grid">
-          {LOCAL_PROVIDER_LABELS.map((meta) => {
-            const s = byKind.get(meta.kind);
-            // When `s` is undefined the status probe didn't return a
-            // record for this kind — either the broker is unreachable
-            // (fetchError set) or the response was malformed. In that
-            // "unknown" state we fall OPEN so the banner copy ("you
-            // can still pick a runtime — install commands live in
-            // Settings") matches what the UI actually does. The
-            // agent-turn surface and the Settings doctor card will
-            // catch a real install gap later with a clear error;
-            // here we just don't trap the user.
-            //
-            // When `s` IS defined we trust it: a tile is selectable
-            // only when the platform supports the runtime AND the
-            // binary is on PATH. Selecting an un-installed runtime
-            // would land the user in a shell where every agent turn
-            // fails connection-refused, so we route them to Settings
-            // instead of letting them commit to a broken default.
-            const statusKnown = s !== undefined;
-            const installed = statusKnown ? Boolean(s.binary_installed) : true;
-            const running = Boolean(s?.reachable);
-            const supported = statusKnown ? s.platform_supported : true;
-            const selectable = supported && installed;
-            const isSelected = selected === meta.kind;
-            const classes = [
-              "runtime-tile",
-              isSelected ? "selected" : "",
-              selectable ? "" : "disabled",
-            ]
-              .filter(Boolean)
-              .join(" ");
-            const statusText = !statusKnown
-              ? "Status unknown — verify in Settings"
-              : !supported
-                ? "Not supported on this OS"
-                : running
-                  ? "Running"
-                  : installed
-                    ? "Installed (server not started)"
-                    : "Not installed — install via Settings";
-            return (
-              <button
-                key={meta.kind}
-                type="button"
-                className={classes}
-                onClick={() => {
-                  if (!selectable) return;
-                  onSelect(isSelected ? "" : meta.kind);
-                }}
-                disabled={!selectable}
-                aria-pressed={isSelected}
-                data-testid={`onboarding-local-llm-tile-${meta.kind}`}
-              >
-                <div className="runtime-tile-head">
-                  <span
-                    className={`runtime-tile-status ${running ? "installed" : ""}`}
-                    aria-hidden="true"
-                  />
-                  {meta.label}
-                </div>
-                <div className="runtime-tile-meta">
-                  {meta.blurb} · {statusText}
-                </div>
-              </button>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ApiKeyRow renders one provider's CLI-login-vs-API-key choice. Default
-// path is CLI login (most users have one of claude/codex/gcloud logged
-// in already from the runtime grid above); clicking "Use API key"
-// reveals the password input so users can paste without exposing the
-// key the whole time. If the user has any value typed in, the input
-// stays open even after toggling away — we don't drop their key.
-interface ApiKeyRowProps {
-  field: (typeof API_KEY_FIELDS)[number];
-  value: string;
-  onChange: (v: string) => void;
-}
-
-export function ApiKeyRow({ field, value, onChange }: ApiKeyRowProps) {
-  const [showInput, setShowInput] = useState<boolean>(value.length > 0);
-  const useApiKey = showInput || value.length > 0;
-  return (
-    <div className="key-row" data-testid={`api-key-row-${field.key}`}>
-      <div className="key-label-wrap">
-        <span className="key-label">{field.label}</span>
-        <span className="key-hint">{field.hint}</span>
-      </div>
-      <div
-        className="key-input-wrap"
-        style={{ display: "flex", flexDirection: "column", gap: 6 }}
-      >
-        <div style={{ display: "flex", gap: 8 }}>
-          <button
-            type="button"
-            className={`runtime-tile ${!useApiKey ? "selected" : ""}`}
-            onClick={() => {
-              setShowInput(false);
-              if (value) onChange("");
-            }}
-            data-testid={`api-key-cli-${field.key}`}
-            style={{ padding: "6px 10px", fontSize: 12, minWidth: 0 }}
-          >
-            Use CLI login
-          </button>
-          <button
-            type="button"
-            className={`runtime-tile ${useApiKey ? "selected" : ""}`}
-            onClick={() => setShowInput(true)}
-            data-testid={`api-key-paste-${field.key}`}
-            style={{ padding: "6px 10px", fontSize: 12, minWidth: 0 }}
-          >
-            Use API key
-          </button>
-        </div>
-        {!useApiKey && (
-          <p
-            style={{
-              fontSize: 11,
-              color: "var(--text-tertiary)",
-              margin: 0,
-              fontFamily: "var(--font-mono)",
-            }}
-          >
-            Run <code>{field.cliLoginCmd}</code> in a terminal — agents pick up
-            the session automatically.
-          </p>
-        )}
-        {useApiKey && (
-          <input
-            className="input"
-            type="password"
-            placeholder={field.key}
-            value={value}
-            onChange={(e) => onChange(e.target.value)}
-            autoComplete="off"
-            data-testid={`api-key-input-${field.key}`}
-          />
-        )}
-      </div>
-    </div>
-  );
-}
-
-/* ─── Step 5: Setup ─── */
-
-interface SetupStepProps {
-  prereqs: PrereqResult[];
-  prereqsLoading: boolean;
-  prereqsError: string;
-  runtimePriority: string[];
-  onToggleRuntime: (label: string) => void;
-  onReorderRuntime: (label: string, direction: -1 | 1) => void;
-  apiKeys: Record<string, string>;
-  onChangeApiKey: (key: string, value: string) => void;
-  memoryBackend: MemoryBackend;
-  onChangeMemoryBackend: (value: MemoryBackend) => void;
-  nexApiKey: string;
-  onChangeNexApiKey: (v: string) => void;
-  gbrainOpenAIKey: string;
-  onChangeGBrainOpenAIKey: (v: string) => void;
-  gbrainAnthropicKey: string;
-  onChangeGBrainAnthropicKey: (v: string) => void;
-  // Local-LLM opt-in chosen here; submitted with the rest of the wizard
-  // payload at /onboarding/complete and applied to llm_provider so the
-  // user's selection takes effect on first agent turn.
-  localProvider: string;
-  onSelectLocalProvider: (kind: string) => void;
-  onNext: () => void;
-  onBack: () => void;
-}
-
-function detectedBinary(
-  prereqs: PrereqResult[],
-  binary: string,
-): PrereqResult | undefined {
-  return prereqs.find((p) => p.name === binary);
-}
-
-function SetupStep({
-  prereqs,
-  prereqsLoading,
-  prereqsError,
-  runtimePriority,
-  onToggleRuntime,
-  onReorderRuntime,
-  apiKeys,
-  onChangeApiKey,
-  memoryBackend,
-  onChangeMemoryBackend,
-  nexApiKey,
-  onChangeNexApiKey,
-  gbrainOpenAIKey,
-  onChangeGBrainOpenAIKey,
-  gbrainAnthropicKey,
-  onChangeGBrainAnthropicKey,
-  localProvider,
-  onSelectLocalProvider,
-  onNext,
-  onBack,
-}: SetupStepProps) {
-  // localModeOn governs whether the second-step LocalLLMPicker is
-  // shown beneath the runtime grid. Initialised from the parent's
-  // localProvider so re-entering the step preserves the user's
-  // earlier "I want a local model" choice. Toggling the meta-tile
-  // off clears localProvider via onSelectLocalProvider("").
-  const [localModeOn, setLocalModeOn] = useState<boolean>(localProvider !== "");
-
-  // Any priority slot that satisfies runtimeIsReady satisfies the gate.
-  const hasInstalledSelection = runtimePriority.some((label) =>
-    runtimeIsReady(label, prereqs, prereqsError),
-  );
-  const hasAnyApiKey = Object.values(apiKeys).some((v) => v.trim().length > 0);
-  // GBrain requires an OpenAI key to function — the TUI gates on this in
-  // InitGBrainOpenAIKey (see internal/tui/init_flow.go:215). Mirror the
-  // gate here so the wizard doesn't let users commit an unusable config.
-  const gbrainSelected = memoryBackend === "gbrain";
-  const gbrainOpenAIMissing =
-    gbrainSelected && gbrainOpenAIKey.trim().length === 0;
-  // Picking a local LLM is an alternative path — once selected the user
-  // doesn't need a cloud CLI installed or any cloud API key set.
-  const hasLocalProvider = localProvider.trim().length > 0;
-  const canContinue =
-    (hasInstalledSelection || hasAnyApiKey || hasLocalProvider) &&
-    !gbrainOpenAIMissing;
-
-  return (
-    <div className="wizard-step">
-      <div className="wizard-panel">
-        <p className="wizard-panel-title">How should agents run?</p>
-        <p
-          style={{
-            fontSize: 12,
-            color: "var(--text-secondary)",
-            margin: "-8px 0 12px 0",
-          }}
-        >
-          Pick the CLIs you have installed. Each CLI&apos;s login handles its
-          own provider auth, so no API keys are needed. Select multiple to set a
-          fallback order — if the first one fails, agents fall through to the
-          next.
-        </p>
-
-        {prereqsLoading ? (
-          <div
-            style={{
-              color: "var(--text-tertiary)",
-              fontSize: 13,
-              padding: "8px 0",
-            }}
-          >
-            Checking which CLIs are installed&hellip;
-          </div>
-        ) : prereqsError ? (
-          <div
-            data-testid="prereqs-error-banner"
-            role="alert"
-            style={{
-              fontSize: 12,
-              color: "var(--danger-500, #c33)",
-              padding: "10px 12px",
-              background: "var(--danger-50, #fee)",
-              border: "1px solid var(--danger-200, #fcc)",
-              borderRadius: 6,
-              marginBottom: 12,
-            }}
-          >
-            Could not detect installed CLIs:{" "}
-            <code style={{ fontFamily: "var(--font-mono)" }}>
-              {prereqsError}
-            </code>
-            . You can still select a runtime below or add an API key to
-            continue.
-          </div>
-        ) : null}
-        {prereqsLoading ? null : (
-          <div className="runtime-grid">
-            {RUNTIMES.map((spec) => {
-              const detection = detectedBinary(prereqs, spec.binary);
-              const installed = Boolean(detection?.found);
-              const selectable = installed || Boolean(prereqsError);
-              const priorityIdx = runtimePriority.indexOf(spec.label);
-              const selected = priorityIdx >= 0;
-              const classes = [
-                "runtime-tile",
-                selected ? "selected" : "",
-                selectable ? "" : "disabled",
-              ]
-                .filter(Boolean)
-                .join(" ");
-              return (
-                <button
-                  key={spec.label}
-                  className={classes}
-                  data-testid={`setup-runtime-tile-${spec.label}`}
-                  onClick={() => {
-                    if (!selectable) return;
-                    onToggleRuntime(spec.label);
-                  }}
-                  type="button"
-                  disabled={!selectable}
-                  aria-disabled={!selectable}
-                  aria-pressed={selected}
-                  title={
-                    installed
-                      ? detection?.version
-                        ? `${spec.label} — ${detection.version}`
-                        : spec.label
-                      : prereqsError
-                        ? `${spec.label} — detection failed, select if installed`
-                        : `${spec.label} — not installed`
-                  }
-                >
-                  {selected && (
-                    <span
-                      className="runtime-priority-badge"
-                      aria-label={`Priority ${priorityIdx + 1}`}
-                    >
-                      {priorityIdx + 1}
-                    </span>
-                  )}
-                  <div className="runtime-tile-head">
-                    <span
-                      className={`runtime-tile-status ${installed ? "installed" : ""}`}
-                      aria-hidden="true"
-                    />
-                    {spec.label}
-                  </div>
-                  <div className="runtime-tile-meta">
-                    {installed ? (
-                      detection?.version ? (
-                        detection.version
-                      ) : (
-                        "Installed"
-                      )
-                    ) : prereqsError ? (
-                      "Select if installed"
-                    ) : (
-                      <>
-                        Not installed{" · "}
-                        <a
-                          className="runtime-tile-install-link"
-                          href={spec.installUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          install
-                        </a>
-                      </>
-                    )}
-                  </div>
-                </button>
-              );
-            })}
-            {/* Run a local model — peer tile alongside the cloud CLIs.
-                Selecting it reveals the second-step picker (LocalLLMPicker)
-                below the grid. The dot stays grey because there's no single
-                binary to detect; the picker resolves which runtime is
-                actually running. */}
-            <button
-              type="button"
-              className={["runtime-tile", localModeOn ? "selected" : ""]
-                .filter(Boolean)
-                .join(" ")}
-              onClick={() => {
-                const next = !localModeOn;
-                setLocalModeOn(next);
-                if (!next) onSelectLocalProvider("");
-              }}
-              aria-pressed={localModeOn}
-              data-testid="onboarding-local-llm-toggle"
-              title="Run a local model on this machine"
-            >
-              <div className="runtime-tile-head">
-                <span className="runtime-tile-status" aria-hidden="true" />
-                Run a local model
-              </div>
-              <div className="runtime-tile-meta">
-                {localProvider
-                  ? (LOCAL_PROVIDER_LABELS.find((m) => m.kind === localProvider)
-                      ?.label ?? "selected")
-                  : "MLX-LM, Ollama, or Exo"}
-              </div>
-            </button>
-          </div>
-        )}
-
-        {localModeOn && (
-          <LocalLLMPicker
-            selected={localProvider}
-            onSelect={onSelectLocalProvider}
-          />
-        )}
-
-        {runtimePriority.length > 1 && (
-          <div className="runtime-priority-controls">
-            <p className="runtime-priority-title">Fallback order</p>
-            <p className="runtime-priority-hint">
-              Agents try these in order. Drop a local model into the chain so a
-              cloud quota hit falls through to your machine instead of
-              pay-as-you-go billing. Use the arrows to reorder.
-            </p>
-            {runtimePriority.map((label, idx) => (
-              <div key={label} className="runtime-priority-row">
-                <span className="runtime-priority-row-rank">#{idx + 1}</span>
-                <span className="runtime-priority-row-label">{label}</span>
-                <button
-                  type="button"
-                  className="runtime-priority-btn"
-                  onClick={() => onReorderRuntime(label, -1)}
-                  disabled={idx === 0}
-                  aria-label={`Move ${label} up`}
-                >
-                  ↑
-                </button>
-                <button
-                  type="button"
-                  className="runtime-priority-btn"
-                  onClick={() => onReorderRuntime(label, 1)}
-                  disabled={idx === runtimePriority.length - 1}
-                  aria-label={`Move ${label} down`}
-                >
-                  ↓
-                </button>
-                <button
-                  type="button"
-                  className="runtime-priority-btn"
-                  onClick={() => onToggleRuntime(label)}
-                  aria-label={`Remove ${label}`}
-                >
-                  ✕
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-
-        <div
-          style={{
-            marginTop: 16,
-            paddingTop: 16,
-            borderTop: "1px solid var(--border)",
-          }}
-        >
-          <p
-            style={{
-              fontSize: 13,
-              fontWeight: 600,
-              margin: "0 0 4px 0",
-              color: "var(--text)",
-            }}
-          >
-            API keys{" "}
-            {hasInstalledSelection ? "(optional fallback)" : "(required)"}
-          </p>
-          <p
-            style={{
-              fontSize: 12,
-              color: "var(--text-secondary)",
-              margin: "0 0 12px 0",
-            }}
-          >
-            {hasInstalledSelection
-              ? "Only used if every selected CLI fails. Leave blank to rely on the CLI login."
-              : "No installed CLI selected. Add at least one key so agents can reason."}
-          </p>
-          {API_KEY_FIELDS.map((field) => (
-            <ApiKeyRow
-              key={field.key}
-              field={field}
-              value={apiKeys[field.key] ?? ""}
-              onChange={(v) => onChangeApiKey(field.key, v)}
-            />
-          ))}
-        </div>
-      </div>
-
-      <div className="wizard-panel">
-        <p className="wizard-panel-title">Organizational memory</p>
-        <p
-          style={{
-            fontSize: 12,
-            color: "var(--text-secondary)",
-            margin: "-8px 0 12px 0",
-          }}
-        >
-          Where agents store shared context, relationships, and learnings across
-          sessions. You can change this later in Settings or via{" "}
-          <code>--memory-backend</code>.
-        </p>
-        <div className="runtime-grid">
-          {MEMORY_BACKEND_OPTIONS.map((opt) => (
-            <button
-              key={opt.value}
-              className={`runtime-tile ${memoryBackend === opt.value ? "selected" : ""}`}
-              onClick={() => onChangeMemoryBackend(opt.value)}
-              type="button"
-              title={opt.hint}
-            >
-              <div style={{ fontWeight: 600 }}>{opt.label}</div>
-              <div
-                style={{
-                  fontSize: 11,
-                  color: "var(--text-tertiary)",
-                  marginTop: 4,
-                  fontWeight: 400,
-                }}
-              >
-                {opt.hint}
-              </div>
-            </button>
-          ))}
-        </div>
-
-        {gbrainSelected && (
-          <div className="wiz-backend-keys">
-            <p className="wiz-backend-keys-title">GBrain keys</p>
-            <p className="wiz-backend-keys-hint">
-              GBrain uses OpenAI for embeddings (required) and optionally
-              Anthropic for reasoning.
-            </p>
-            <div className="form-group">
-              <label className="label" htmlFor="wiz-gbrain-openai">
-                OpenAI API key <span style={{ color: "var(--red)" }}>*</span>
-              </label>
-              <input
-                className="input"
-                id="wiz-gbrain-openai"
-                type="password"
-                placeholder="sk-..."
-                value={gbrainOpenAIKey}
-                onChange={(e) => onChangeGBrainOpenAIKey(e.target.value)}
-                autoComplete="off"
-              />
-              {gbrainOpenAIMissing && (
-                <p style={{ color: "var(--red)", fontSize: 11, marginTop: 4 }}>
-                  Required: GBrain can&apos;t create embeddings without an
-                  OpenAI key.
-                </p>
-              )}
-            </div>
-            <div className="form-group" style={{ marginBottom: 0 }}>
-              <label className="label" htmlFor="wiz-gbrain-anthropic">
-                Anthropic API key{" "}
-                <span style={{ fontSize: 11, color: "var(--text-tertiary)" }}>
-                  (optional)
-                </span>
-              </label>
-              <input
-                className="input"
-                id="wiz-gbrain-anthropic"
-                type="password"
-                placeholder="sk-ant-..."
-                value={gbrainAnthropicKey}
-                onChange={(e) => onChangeGBrainAnthropicKey(e.target.value)}
-                autoComplete="off"
-              />
-            </div>
-          </div>
-        )}
-      </div>
-
-      {memoryBackend === "nex" && (
-        // Only show the Nex API key panel when the chosen memory backend
-        // actually needs it. Team wiki, GBrain, and "None" don't talk to
-        // Nex's hosted memory — surfacing the input would suggest the
-        // user has a missing piece when they don't.
-        <div className="wizard-panel" data-testid="wizard-nex-api-key-panel">
-          <p className="wizard-panel-title">Nex API key</p>
-          <p
-            style={{
-              fontSize: 12,
-              color: "var(--text-secondary)",
-              margin: "-8px 0 12px 0",
-            }}
-          >
-            Unlocks the hosted memory graph plus managed integrations (HubSpot,
-            Slack, Gmail, Calendar, …) so agents can read your tools without you
-            wiring each one up. You can skip this and paste later from Settings.
-            Don&apos;t have one? Sign up on the Identity step above.
-          </p>
-          <div className="form-group" style={{ marginBottom: 0 }}>
-            <label className="label" htmlFor="wiz-nex-api-key">
-              Nex API key{" "}
-              <span style={{ fontSize: 11, color: "var(--text-tertiary)" }}>
-                (optional, paste if you have one)
-              </span>
-            </label>
-            <input
-              className="input"
-              id="wiz-nex-api-key"
-              type="password"
-              placeholder="nex-..."
-              value={nexApiKey}
-              onChange={(e) => onChangeNexApiKey(e.target.value)}
-              autoComplete="off"
-            />
-          </div>
-        </div>
-      )}
-
-      <div className="wizard-nav">
-        <button className="btn btn-ghost" onClick={onBack} type="button">
-          Back
-        </button>
-        <button
-          className="btn btn-primary"
-          onClick={onNext}
-          disabled={!canContinue}
-          type="button"
-        >
-          {ONBOARDING_COPY.step2_cta}
-          <ArrowIcon />
-          <EnterHint />
-        </button>
-      </div>
-    </div>
-  );
-}
-
-/* ─── Step 6: First Task ─── */
-
-interface TaskStepProps {
-  taskTemplates: TaskTemplate[];
-  selectedTaskTemplate: string | null;
-  onSelectTaskTemplate: (id: string | null) => void;
-  taskText: string;
-  onChangeTaskText: (v: string) => void;
-  onNext: () => void;
-  onSkip: () => void;
-  onBack: () => void;
-  submitting: boolean;
-}
-
-function TaskStep({
-  taskTemplates,
-  selectedTaskTemplate,
-  onSelectTaskTemplate,
-  taskText,
-  onChangeTaskText,
-  onNext,
-  onSkip,
-  onBack,
-  submitting,
-}: TaskStepProps) {
-  return (
-    <div className="wizard-step">
-      <div className="wizard-hero">
-        <h1 className="wizard-headline" style={{ fontSize: 28 }}>
-          {ONBOARDING_COPY.step3_title}
-        </h1>
-        {taskTemplates.length > 0 && (
-          <p className="wizard-subhead">
-            Type your own first task, or pick from the blueprint&apos;s
-            suggested sequence below.
-          </p>
-        )}
-      </div>
-
-      <div>
-        <textarea
-          className="task-textarea task-textarea-primary"
-          id="wiz-task-input"
-          placeholder={ONBOARDING_COPY.step3_placeholder}
-          value={taskText}
-          onChange={(e) => onChangeTaskText(e.target.value)}
-        />
-        <p className="task-textarea-hint">
-          <Kbd size="sm">↵</Kbd> new line · <Kbd size="sm">{MOD_KEY}</Kbd>
-          <Kbd size="sm">↵</Kbd> review setup
-        </p>
-      </div>
-
-      {taskTemplates.length > 0 && (
-        <div className="task-suggestions">
-          <p className="task-suggestions-label">
-            Suggested sequence for this blueprint
-          </p>
-          <div className="task-suggestions-list">
-            {taskTemplates.map((t, idx) => {
-              const isSelected = selectedTaskTemplate === t.id;
-              return (
-                <button
-                  key={t.id}
-                  className={`task-suggestion ${isSelected ? "selected" : ""}`}
-                  onClick={() => {
-                    const nextId = isSelected ? null : t.id;
-                    onSelectTaskTemplate(nextId);
-                    if (nextId) {
-                      onChangeTaskText(t.prompt ?? t.name);
-                    }
-                  }}
-                  type="button"
-                >
-                  <span className="task-suggestion-num">{idx + 1}</span>
-                  <span className="task-suggestion-name">{t.name}</span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      <div className="wizard-nav">
-        <button className="btn btn-ghost" onClick={onBack} type="button">
-          Back
-        </button>
-        <div className="wizard-nav-right">
-          <button
-            className="task-skip"
-            onClick={onSkip}
-            disabled={submitting}
-            type="button"
-          >
-            {ONBOARDING_COPY.step3_skip}
-          </button>
-          <button className="btn btn-primary" onClick={onNext} type="button">
-            Review setup
-            <ArrowIcon />
-            <EnterHint modifier={MOD_KEY} />
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ─── Step 7: Readiness Summary ─── */
-
-// ReadinessStatus mirrors the TUI's three-state readiness color mapping
-// (see internal/tui/init_flow.go readinessStatusColor): 'ready' = green
-// check, 'next' = blue warning (follow-up needed), 'missing' = red.
-type ReadinessStatus = "ready" | "next" | "missing";
-
-interface ReadinessCheck {
-  label: string;
-  status: ReadinessStatus;
-  detail: string;
-}
-
-interface ReadyStepProps {
-  checks: ReadinessCheck[];
-  taskText: string;
-  submitting: boolean;
-  submitError: string;
-  onSkip: () => void;
-  onSubmit: () => void;
-  onBack: () => void;
-}
-
-// ReadyStep is the six-item final review matching the TUI's InitDone
-// readinessChecks() view. It's honest: a missing Nex key is not papered
-// over, and GBrain+no-OpenAI-key would show a red "missing" row (though
-// the Setup step blocks continuing in that case, so users shouldn't get
-// here with it).
-function ReadyStep({
-  checks,
-  taskText,
-  submitting,
-  submitError,
-  onSkip,
-  onSubmit,
-  onBack,
-}: ReadyStepProps) {
-  return (
-    <div className="wizard-step">
-      <div className="wizard-hero">
-        <h1 className="wizard-headline" style={{ fontSize: 28 }}>
-          You&apos;re set
-        </h1>
-        <p className="wizard-subhead">
-          Here&apos;s what&apos;s configured. Anything with a{" "}
-          <span className="readiness-glyph-inline missing">!</span> or{" "}
-          <span className="readiness-glyph-inline next">—</span> can be fixed
-          later from Settings.
-        </p>
-      </div>
-
-      <div className="wizard-panel readiness-panel">
-        <ul className="readiness-list">
-          {checks.map((check) => (
-            <li key={check.label} className="readiness-item">
-              <span
-                className={`readiness-glyph ${check.status}`}
-                aria-hidden="true"
-              >
-                {check.status === "ready"
-                  ? "✓"
-                  : check.status === "next"
-                    ? "—"
-                    : "!"}
-              </span>
-              <div className="readiness-body">
-                <div className="readiness-label">{check.label}</div>
-                <div className="readiness-detail">{check.detail}</div>
-              </div>
-            </li>
-          ))}
-        </ul>
-      </div>
-
-      {submitError && (
-        <div
-          role="alert"
-          data-testid="onboarding-submit-error"
-          style={{
-            fontSize: 13,
-            color: "var(--danger-500, #c33)",
-            padding: "12px 14px",
-            background: "var(--danger-50, #fee)",
-            border: "1px solid var(--danger-200, #fcc)",
-            borderRadius: 6,
-          }}
-        >
-          <strong>Could not start the office:</strong> {submitError}. Check that
-          your CLI runtime is installed and try again, or go back to adjust your
-          setup.
-        </div>
-      )}
-
-      <div className="wizard-nav">
-        <button className="btn btn-ghost" onClick={onBack} type="button">
-          Back
-        </button>
-        <div className="wizard-nav-right">
-          <button
-            className="btn btn-primary"
-            data-testid="onboarding-submit-button"
-            onClick={taskText.trim().length === 0 ? onSkip : onSubmit}
-            disabled={submitting}
-            type="button"
-          >
-            {submitting
-              ? "Starting..."
-              : submitError
-                ? "Retry"
-                : ONBOARDING_COPY.step3_cta}
-            {!submitting && taskText.trim().length > 0 && <EnterHint />}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
+// ApiKeyRow is re-exported here for back-compat with onboarding/ApiKeyRow.test.tsx.
+export { ApiKeyRow } from "./wizard/ApiKeyRow";
+
+import { ProgressDots } from "./wizard/components";
+import {
+  LOCAL_PROVIDER_LABELS,
+  RUNTIMES,
+  SCRATCH_FOUNDING_TEAM,
+  STEP_ORDER,
+} from "./wizard/constants";
+import {
+  canSetupContinue,
+  detectedBinary,
+  runtimeIsReady,
+} from "./wizard/runtime-helpers";
+import { WelcomeStep } from "./wizard/Step1Welcome";
+import { TemplatesStep } from "./wizard/Step2Templates";
+import { IdentityStep } from "./wizard/Step3Identity";
+import { TeamStep } from "./wizard/Step4Team";
+import { SetupStep } from "./wizard/Step5Setup";
+import { TaskStep } from "./wizard/Step6Task";
+import { ReadyStep } from "./wizard/Step7Ready";
+import type {
+  BlueprintAgent,
+  BlueprintTemplate,
+  NexSignupStatus,
+  PrereqResult,
+  ReadinessCheck,
+  ReadinessStatus,
+  TaskTemplate,
+  WizardStep,
+} from "./wizard/types";
+
+// runtimeIsReady + detectedBinary moved to wizard/runtime-helpers.ts.
+// ArrowIcon, CheckIcon, EnterHint, ProgressDots moved to wizard/components.tsx.
+// Step components extracted to wizard/Step1Welcome.tsx through Step7Ready.tsx.
 /* ═══════════════════════════════════════════
    Main Wizard
    ═══════════════════════════════════════════ */
@@ -1835,6 +48,7 @@ interface WizardProps {
   onComplete?: () => void;
 }
 
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: Existing function length is baselined for a focused follow-up refactor.
 export function Wizard({ onComplete }: WizardProps) {
   const setOnboardingComplete = useAppStore((s) => s.setOnboardingComplete);
 
@@ -1887,21 +101,6 @@ export function Wizard({ onComplete }: WizardProps) {
   // applied as llm_provider on /onboarding/complete.
   const [localProvider, setLocalProvider] = useState<string>("");
   const [apiKeys, setApiKeys] = useState<Record<string, string>>({});
-  // Matches MEMORY_BACKEND_OPTIONS[0] (the "Markdown (default)" tile) and the
-  // server-side `config.ResolveMemoryBackend` default. Shipping 'nex' here
-  // contradicted the label and meant a user who clicked through got a
-  // different backend than the one marked default.
-  const [memoryBackend, setMemoryBackend] = useState<MemoryBackend>("markdown");
-  // Nex API key (maps to `api_key` on /config). Parity with TUI's InitAPIKey
-  // phase. Kept separate from `apiKeys` because the latter is the per-runtime
-  // fallback set (Anthropic/OpenAI/Google) while this one unlocks hosted
-  // memory and managed integrations. Empty = skipped, not an error.
-  const [nexApiKey, setNexApiKey] = useState("");
-  // GBrain-specific key inputs. Only rendered when memoryBackend === 'gbrain'.
-  // Mirrors the TUI's InitGBrainOpenAIKey (required) + InitGBrainAnthropKey
-  // (optional) phases.
-  const [gbrainOpenAIKey, setGbrainOpenAIKey] = useState("");
-  const [gbrainAnthropicKey, setGbrainAnthropicKey] = useState("");
 
   // Step 6: first task
   const [taskTemplates, setTaskTemplates] = useState<TaskTemplate[]>([]);
@@ -1909,6 +108,7 @@ export function Wizard({ onComplete }: WizardProps) {
     string | null
   >(null);
   const [taskText, setTaskText] = useState("");
+  const taskTextAutofilled = useRef(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
 
@@ -1950,6 +150,7 @@ export function Wizard({ onComplete }: WizardProps) {
         setRuntimePriority((current) => {
           if (current.length > 0) return current;
           const firstInstalled = RUNTIMES.find((spec) => {
+            if (spec.provider === null) return false;
             const det = list.find((p) => p.name === spec.binary);
             return Boolean(det?.found);
           });
@@ -2031,6 +232,16 @@ export function Wizard({ onComplete }: WizardProps) {
   // the task step showed ~26 tiles of unrelated work — including tasks from
   // blueprints the user never picked.
   useEffect(() => {
+    // Clear suggestion-derived text when the blueprint changes. Track this
+    // separately from selectedTaskTemplate because re-clicking a suggestion
+    // intentionally deselects the tile while leaving its autofilled text in
+    // place for editing.
+    if (taskTextAutofilled.current) {
+      setTaskText("");
+      taskTextAutofilled.current = false;
+    }
+    setSelectedTaskTemplate(null);
+
     if (selectedBlueprint === null) {
       // "Start from scratch" — preview the same 5-agent founding team the
       // broker seeds via scratchFoundingTeamBlueprint. Keep the slugs and
@@ -2050,18 +261,8 @@ export function Wizard({ onComplete }: WizardProps) {
     } else {
       setAgents([]);
     }
-    const bpTasks = (bp as unknown as { tasks?: TaskTemplate[] } | undefined)
-      ?.tasks;
+    const bpTasks = bp?.tasks;
     setTaskTemplates(Array.isArray(bpTasks) ? bpTasks : []);
-    // Clear any task-template selection and suggestion-derived text when the
-    // blueprint changes. Without this, switching from (say) Consulting to
-    // YouTube Factory leaves "Turn the directive..." stuck in the textarea —
-    // nonsensical in the new context. User-typed custom text is preserved,
-    // since selectedTaskTemplate is null for that path.
-    setSelectedTaskTemplate((prevSel) => {
-      if (prevSel !== null) setTaskText("");
-      return null;
-    });
   }, [selectedBlueprint, blueprints]);
 
   // Navigation helpers
@@ -2155,20 +356,11 @@ export function Wizard({ onComplete }: WizardProps) {
   // useMemo because the surface is small (6 checks) and recomputation only
   // happens when one of these inputs changes. Matches the TUI's six-item
   // list in init_flow.go readinessChecks().
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
   const readinessChecks: ReadinessCheck[] = (() => {
     const checks: ReadinessCheck[] = [];
 
-    // 1. Nex API key
-    const hasNexKey = nexApiKey.trim().length > 0;
-    checks.push({
-      label: "Nex API key",
-      status: hasNexKey ? "ready" : "next",
-      detail: hasNexKey
-        ? "Configured. Hosted memory and integrations unlocked."
-        : "Skipped. Paste a key later from Settings to enable hosted memory.",
-    });
-
-    // 2. Tmux / web session. The web app doesn't need tmux — that's the
+    // 1. Tmux / web session. The web app doesn't need tmux — that's the
     // TUI's office runtime. Surface it as a positive "web session" rather
     // than flagging a missing dependency.
     checks.push({
@@ -2195,7 +387,7 @@ export function Wizard({ onComplete }: WizardProps) {
     // RUNTIMES, so picking MLX-LM/Ollama/Exo as primary made the
     // summary report a missing LLM right before /config persisted a
     // perfectly valid local provider.
-    const primaryLabel = runtimePriority[0];
+    const [primaryLabel] = runtimePriority;
     const primaryLocal = primaryLabel
       ? LOCAL_PROVIDER_LABELS.find((m) => m.label === primaryLabel)
       : undefined;
@@ -2241,37 +433,11 @@ export function Wizard({ onComplete }: WizardProps) {
       });
     }
 
-    // 4. Memory backend
-    const memoryLabel =
-      MEMORY_BACKEND_OPTIONS.find((o) => o.value === memoryBackend)?.label ??
-      memoryBackend;
-    let memoryStatus: ReadinessStatus = "ready";
-    let memoryDetail = memoryLabel;
-    if (memoryBackend === "gbrain") {
-      if (gbrainOpenAIKey.trim().length === 0) {
-        memoryStatus = "missing";
-        memoryDetail = "GBrain selected but OpenAI key is missing.";
-      } else {
-        memoryDetail = "GBrain with OpenAI embeddings.";
-      }
-    } else if (memoryBackend === "nex") {
-      if (!hasNexKey) {
-        memoryStatus = "next";
-        memoryDetail =
-          "Nex selected — add a Nex API key to enable hosted memory.";
-      } else {
-        memoryDetail = "Hosted memory via Nex.";
-      }
-    } else if (memoryBackend === "markdown") {
-      memoryDetail = "Git-native team wiki in ~/.wuphf/wiki.";
-    } else {
-      memoryStatus = "next";
-      memoryDetail = "No shared memory — agents only see per-turn context.";
-    }
+    // 4. Memory backend — always markdown (built-in, no configuration needed)
     checks.push({
       label: "Memory backend",
-      status: memoryStatus,
-      detail: memoryDetail,
+      status: "ready",
+      detail: "Git-native team wiki in ~/.wuphf/wiki.",
     });
 
     // 5. Blueprint
@@ -2291,10 +457,9 @@ export function Wizard({ onComplete }: WizardProps) {
     }
 
     // 6. Integrations count
-    const keyCount =
-      Object.values(apiKeys).filter((v) => v.trim().length > 0).length +
-      (gbrainOpenAIKey.trim().length > 0 ? 1 : 0) +
-      (gbrainAnthropicKey.trim().length > 0 ? 1 : 0);
+    const keyCount = Object.values(apiKeys).filter(
+      (v) => v.trim().length > 0,
+    ).length;
     checks.push({
       label: "Integrations",
       status: keyCount > 0 ? "ready" : "next",
@@ -2309,6 +474,7 @@ export function Wizard({ onComplete }: WizardProps) {
 
   // Complete onboarding
   const finishOnboarding = useCallback(
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
     async (skipTask: boolean) => {
       setSubmitting(true);
       setSubmitError("");
@@ -2338,46 +504,19 @@ export function Wizard({ onComplete }: WizardProps) {
         // broker's /config endpoint is the canonical persistence surface
         // for config.APIKey, OpenAIAPIKey, AnthropicAPIKey, etc.
         const configPayload: Record<string, unknown> = {
-          memory_backend: memoryBackend,
+          memory_backend: "markdown",
         };
         if (providerPriority.length > 0) {
-          // First entry is the active provider; the full ordered list
-          // is the fallback chain. The user controls the order via the
-          // arrow buttons — if they move a local kind to slot 0 it
-          // becomes the primary; if they keep it last it's the
-          // out-of-credits fallback.
           configPayload.llm_provider = providerPriority[0];
           configPayload.llm_provider_priority = providerPriority;
         }
-        // Nex API key (optional — empty string not sent so we don't clobber
-        // an existing value with a blank one).
-        const trimmedNex = nexApiKey.trim();
-        if (trimmedNex.length > 0) {
-          configPayload.api_key = trimmedNex;
-        }
-        // GBrain-conditional keys. Only forwarded when GBrain is the active
-        // backend; other backends don't need these and sending would
-        // overwrite any user-configured values on GET.
-        if (memoryBackend === "gbrain") {
-          const trimmedOAI = gbrainOpenAIKey.trim();
-          if (trimmedOAI.length > 0) {
-            configPayload.openai_api_key = trimmedOAI;
-          }
-          const trimmedAnthropic = gbrainAnthropicKey.trim();
-          if (trimmedAnthropic.length > 0) {
-            configPayload.anthropic_api_key = trimmedAnthropic;
-          }
-        }
-        // Generic per-provider API keys from the fallback grid. Legacy
-        // env-var-style keys (ANTHROPIC_API_KEY, OPENAI_API_KEY, GOOGLE_API_KEY)
-        // mapped to the broker's config field names. Google key has no
-        // /config field yet — drop it silently rather than fail.
+        // Generic per-provider API keys from the fallback grid.
         const genericAnthropic = (apiKeys.ANTHROPIC_API_KEY ?? "").trim();
-        if (genericAnthropic.length > 0 && memoryBackend !== "gbrain") {
+        if (genericAnthropic.length > 0) {
           configPayload.anthropic_api_key = genericAnthropic;
         }
         const genericOpenAI = (apiKeys.OPENAI_API_KEY ?? "").trim();
-        if (genericOpenAI.length > 0 && memoryBackend !== "gbrain") {
+        if (genericOpenAI.length > 0) {
           configPayload.openai_api_key = genericOpenAI;
         }
         const genericGemini = (apiKeys.GOOGLE_API_KEY ?? "").trim();
@@ -2403,7 +542,7 @@ export function Wizard({ onComplete }: WizardProps) {
           priority,
           runtime: primaryRuntime,
           runtime_priority: runtimePriority,
-          memory_backend: memoryBackend,
+          memory_backend: "markdown",
           blueprint: selectedBlueprint,
           agents: agents.filter((a) => a.checked).map((a) => a.slug),
           api_keys: apiKeys,
@@ -2426,13 +565,9 @@ export function Wizard({ onComplete }: WizardProps) {
       description,
       priority,
       runtimePriority,
-      memoryBackend,
       selectedBlueprint,
       agents,
       apiKeys,
-      nexApiKey,
-      gbrainOpenAIKey,
-      gbrainAnthropicKey,
       taskText,
       setOnboardingComplete,
       onComplete,
@@ -2445,6 +580,7 @@ export function Wizard({ onComplete }: WizardProps) {
   // The NexSignupPanel handles its own Enter inside the email input via an
   // onKeyDown below, so we bail out when that's the focused target.
   useEffect(() => {
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") {
         closeNexSignup();
@@ -2469,24 +605,13 @@ export function Wizard({ onComplete }: WizardProps) {
 
       const canIdentityContinue =
         company.trim().length > 0 && description.trim().length > 0;
-      const hasInstalledSelection = runtimePriority.some((label) =>
-        runtimeIsReady(label, prereqs, prereqsError),
-      );
-      const hasAnyApiKey = Object.values(apiKeys).some(
-        (v) => v.trim().length > 0,
-      );
-      // Keyboard gate must mirror SetupStep's own canContinue logic
-      // (line ~1176): a keyboard-only user who picks just `mlx-lm` /
-      // `ollama` / `exo` should be able to advance with Enter even
-      // though they didn't install a cloud CLI or paste an API key.
-      // Without this, the primary-CTA enabled state and the Enter
-      // gate disagreed — visually advanceable, keyboardly stuck.
-      const hasLocalProvider = localProvider.trim().length > 0;
-      const gbrainOpenAIMissing =
-        memoryBackend === "gbrain" && gbrainOpenAIKey.trim().length === 0;
-      const canSetupContinue =
-        (hasInstalledSelection || hasAnyApiKey || hasLocalProvider) &&
-        !gbrainOpenAIMissing;
+      const setupCanContinue = canSetupContinue({
+        runtimePriority,
+        prereqs,
+        prereqsError,
+        apiKeys,
+        localProvider,
+      });
 
       switch (step) {
         case "welcome":
@@ -2508,7 +633,7 @@ export function Wizard({ onComplete }: WizardProps) {
           nextStep();
           return;
         case "setup":
-          if (canSetupContinue) {
+          if (setupCanContinue) {
             e.preventDefault();
             nextStep();
           }
@@ -2540,14 +665,13 @@ export function Wizard({ onComplete }: WizardProps) {
     prereqs,
     prereqsError,
     apiKeys,
-    memoryBackend,
-    gbrainOpenAIKey,
     submitting,
     taskText,
     goTo,
     nextStep,
     finishOnboarding,
     closeNexSignup,
+    localProvider,
   ]);
 
   return (
@@ -2600,24 +724,24 @@ export function Wizard({ onComplete }: WizardProps) {
 
         {step === "setup" && (
           <SetupStep
-            prereqs={prereqs}
-            prereqsLoading={prereqsLoading}
-            prereqsError={prereqsError}
-            runtimePriority={runtimePriority}
-            onToggleRuntime={toggleRuntime}
-            onReorderRuntime={reorderRuntime}
-            apiKeys={apiKeys}
-            onChangeApiKey={handleApiKeyChange}
-            memoryBackend={memoryBackend}
-            onChangeMemoryBackend={setMemoryBackend}
-            nexApiKey={nexApiKey}
-            onChangeNexApiKey={setNexApiKey}
-            gbrainOpenAIKey={gbrainOpenAIKey}
-            onChangeGBrainOpenAIKey={setGbrainOpenAIKey}
-            gbrainAnthropicKey={gbrainAnthropicKey}
-            onChangeGBrainAnthropicKey={setGbrainAnthropicKey}
-            localProvider={localProvider}
-            onSelectLocalProvider={selectLocalProvider}
+            prereqStatus={{
+              items: prereqs,
+              loading: prereqsLoading,
+              error: prereqsError,
+            }}
+            runtimeSelection={{
+              priority: runtimePriority,
+              onToggle: toggleRuntime,
+              onReorder: reorderRuntime,
+            }}
+            apiKeyState={{
+              values: apiKeys,
+              onChange: handleApiKeyChange,
+            }}
+            localLLMState={{
+              provider: localProvider,
+              onSelectProvider: selectLocalProvider,
+            }}
             onNext={nextStep}
             onBack={prevStep}
           />
@@ -2628,12 +752,22 @@ export function Wizard({ onComplete }: WizardProps) {
             taskTemplates={taskTemplates}
             selectedTaskTemplate={selectedTaskTemplate}
             onSelectTaskTemplate={setSelectedTaskTemplate}
+            onApplyTaskTemplate={(id, text) => {
+              setSelectedTaskTemplate(id);
+              setTaskText(text);
+              taskTextAutofilled.current = true;
+            }}
             taskText={taskText}
-            onChangeTaskText={setTaskText}
+            onChangeTaskText={(text) => {
+              setTaskText(text);
+              setSelectedTaskTemplate(null);
+              taskTextAutofilled.current = false;
+            }}
             onNext={nextStep}
             onSkip={() => {
               setTaskText("");
               setSelectedTaskTemplate(null);
+              taskTextAutofilled.current = false;
               nextStep();
             }}
             onBack={prevStep}

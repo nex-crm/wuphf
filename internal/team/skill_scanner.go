@@ -408,14 +408,30 @@ func (s *SkillScanner) loadTombstone() (slugs, sources map[string]bool) {
 // specToTeamSkill folds a SkillFrontmatter + body + source article into the
 // teamSkill shape that writeSkillProposalLocked expects. Only the fields the
 // frontmatter actually carries get set; the helper fills in defaults.
+//
+// sourceArticle threads the wiki-relative path of the article that drove the
+// proposal so the wiki provenance chain (notebook → wiki → skill) survives
+// onto the in-memory record and the rendered SKILL.md frontmatter. Per the
+// "archivist is a commit-author name, not an agent" decision (see
+// project_entity_briefs_v1_2.md) we leave CreatedBy = archivist on the
+// Stage A path. Drift detection, the UI source link, and read-based
+// staleness all key off SourceArticle.
 func specToTeamSkill(fm SkillFrontmatter, body, sourceArticle string) teamSkill {
 	wuphf := fm.Metadata.Wuphf
+	// Prefer the explicit sourceArticle argument; fall back to the first
+	// frontmatter source_article entry so existing callers that route
+	// provenance through the frontmatter still work.
+	src := strings.TrimSpace(sourceArticle)
+	if src == "" && len(wuphf.SourceArticles) > 0 {
+		src = strings.TrimSpace(wuphf.SourceArticles[0])
+	}
 	return teamSkill{
 		Name:               fm.Name,
 		Title:              wuphf.Title,
 		Description:        fm.Description,
 		Content:            body,
 		CreatedBy:          stringOr(wuphf.CreatedBy, "archivist"),
+		SourceArticle:      src,
 		Channel:            "general",
 		Tags:               append([]string(nil), wuphf.Tags...),
 		Trigger:            wuphf.Trigger,

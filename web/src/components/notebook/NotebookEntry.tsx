@@ -1,3 +1,4 @@
+// biome-ignore-all lint/a11y/useValidAnchor: Anchor is intercepted by the app router or markdown renderer while preserving href fallback behavior.
 import { useCallback, useState } from "react";
 
 import {
@@ -116,9 +117,9 @@ export default function NotebookEntryView({
       {showDraftStamp && <DraftStamp />}
 
       <h1 className="nb-entry-title">{entry.title}</h1>
-      {entry.subtitle && (
+      {entry.subtitle ? (
         <div className="nb-entry-subtitle">{entry.subtitle}</div>
-      )}
+      ) : null}
 
       <ByLineStrip
         authorSlug={entry.agent_slug}
@@ -130,12 +131,12 @@ export default function NotebookEntryView({
 
       <EntryBody markdown={entry.body_md} onWikiNavigate={onNavigateWiki} />
 
-      {entry.promoted_back && (
+      {entry.promoted_back ? (
         <PromotedBackCallout
           link={entry.promoted_back}
           onNavigate={onNavigateWiki}
         />
-      )}
+      ) : null}
 
       <InlineReviewThread
         reviewerSlug={entry.reviewer_slug}
@@ -148,11 +149,11 @@ export default function NotebookEntryView({
         pending={pending}
         onPromote={handlePromote}
       />
-      {promoteError && (
+      {promoteError ? (
         <p className="nb-error" role="alert">
           Could not submit: {promoteError}
         </p>
-      )}
+      ) : null}
 
       <PosterityLine
         authorSlug={entry.agent_slug}

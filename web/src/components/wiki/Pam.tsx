@@ -48,6 +48,7 @@ const STATUS_CLEAR_MS = 4000;
  * so we update the status line without polling. Article-scoped actions
  * disable themselves when no article is open.
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
 export default function Pam({ articlePath, onActionDone }: PamProps) {
   const [menu, setMenu] = useState<PamMenuEntry[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -68,6 +69,14 @@ export default function Pam({ articlePath, onActionDone }: PamProps) {
   const activeJobIdRef = useRef<number | null>(null);
   const menuRef = useRef<PamMenuEntry[] | null>(menu);
   const onActionDoneRef = useRef<(() => void) | undefined>(onActionDone);
+
+  const scheduleClear = useCallback(() => {
+    if (statusTimerRef.current) clearTimeout(statusTimerRef.current);
+    statusTimerRef.current = setTimeout(() => {
+      setStatus({ kind: "idle" });
+    }, STATUS_CLEAR_MS);
+  }, []);
+
   useEffect(() => {
     activeJobIdRef.current = activeJobId;
   }, [activeJobId]);
@@ -108,7 +117,7 @@ export default function Pam({ articlePath, onActionDone }: PamProps) {
   // `started` event fired between POST and the next effect pass.
   useEffect(() => {
     const unsub = subscribePamEvents((evt: PamActionEvent) => {
-      const current = activeJobIdRef.current;
+      const { current } = activeJobIdRef;
       if (current === null || evt.job_id !== current) return;
       if (evt.kind === "started") {
         setStatus({
@@ -140,7 +149,7 @@ export default function Pam({ articlePath, onActionDone }: PamProps) {
       unsub();
     };
     // scheduleClear is stable (useCallback with empty deps) — safe to omit.
-  }, []);
+  }, [scheduleClear]);
 
   // Close menu on outside click so it doesn't linger when the user moves
   // on. Keep it simple: single global listener, cleaned up on unmount.
@@ -169,13 +178,6 @@ export default function Pam({ articlePath, onActionDone }: PamProps) {
       menuElRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]');
     firstItem?.focus();
   }, [menuOpen]);
-
-  const scheduleClear = useCallback(() => {
-    if (statusTimerRef.current) clearTimeout(statusTimerRef.current);
-    statusTimerRef.current = setTimeout(() => {
-      setStatus({ kind: "idle" });
-    }, STATUS_CLEAR_MS);
-  }, []);
 
   const closeMenuAndRefocus = useCallback(() => {
     setMenuOpen(false);
@@ -215,9 +217,11 @@ export default function Pam({ articlePath, onActionDone }: PamProps) {
       ).filter((el) => !el.disabled);
       if (items.length === 0) return;
       e.preventDefault();
-      const activeIndex = items.findIndex(
-        (el) => el === document.activeElement,
-      );
+      const { activeElement } = document;
+      const activeIndex =
+        activeElement instanceof HTMLButtonElement
+          ? items.indexOf(activeElement)
+          : -1;
       const nextIndex =
         e.key === "ArrowDown"
           ? (activeIndex + 1 + items.length) % items.length
@@ -246,7 +250,7 @@ export default function Pam({ articlePath, onActionDone }: PamProps) {
       </button>
       <div className="pam-desk" aria-hidden="true" />
 
-      {menuOpen && (
+      {menuOpen ? (
         <div
           ref={menuElRef}
           className="pam-menu"
@@ -282,7 +286,7 @@ export default function Pam({ articlePath, onActionDone }: PamProps) {
             ))
           )}
         </div>
-      )}
+      ) : null}
 
       {status.kind !== "idle" && (
         <div

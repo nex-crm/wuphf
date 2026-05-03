@@ -128,6 +128,31 @@ func TestSynthesizeOnce_BasicWritesProposal(t *testing.T) {
 	}
 }
 
+func TestSynthesizeOnce_EmptyProviderResponseSkipsCandidate(t *testing.T) {
+	b := newTestBroker(t)
+	prov := &stubLLMProvider{
+		queue: []stubLLMResponse{{}},
+	}
+	cand := SkillCandidate{
+		Source:               SourceSelfHealResolved,
+		SuggestedName:        "handle-capability-gap",
+		SuggestedDescription: "How to resolve a capability gap.",
+		SignalCount:          1,
+	}
+	synth := newSynthWithCandidates(t, b, prov, []SkillCandidate{cand})
+
+	res, err := synth.SynthesizeOnce(context.Background(), "manual")
+	if err != nil {
+		t.Fatalf("SynthesizeOnce: %v", err)
+	}
+	if res.CandidatesScanned != 1 {
+		t.Fatalf("CandidatesScanned: got %d, want 1", res.CandidatesScanned)
+	}
+	if res.Synthesized != 0 || res.Deduped != 0 || res.RejectedByGuard != 0 || len(res.Errors) != 0 {
+		t.Fatalf("empty provider response should be a quiet skip, got %+v", res)
+	}
+}
+
 func TestSynthesizeOnce_DedupAgainstExisting(t *testing.T) {
 	b := newTestBroker(t)
 	// Pre-seed an existing skill with the same slug.

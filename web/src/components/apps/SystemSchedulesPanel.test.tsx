@@ -1,16 +1,25 @@
 import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
-
-import { ToastContainer } from "../ui/Toast";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { SchedulerJob } from "../../api/client";
+import { ToastContainer } from "../ui/Toast";
 
-const MOCK_SPECS = [
-  { slug: "nex-insights", min_floor_minutes: 30, default_interval_minutes: 30, description: "Nex insights" },
-  { slug: "task_recheck", min_floor_minutes: 5, default_interval_minutes: 5, description: "Task recheck cadence" },
-];
+const MOCK_SPECS = vi.hoisted(() => [
+  {
+    slug: "nex-insights",
+    min_floor_minutes: 30,
+    default_interval_minutes: 30,
+    description: "Nex insights",
+  },
+  {
+    slug: "task_recheck",
+    min_floor_minutes: 5,
+    default_interval_minutes: 5,
+    description: "Task recheck cadence",
+  },
+]);
 
 vi.mock("../../api/client", async () => {
   const actual =
@@ -19,7 +28,7 @@ vi.mock("../../api/client", async () => {
     );
   return {
     ...actual,
-    patchSchedulerJob: vi.fn(),
+    patchSchedulerJob: vi.fn().mockResolvedValue({ job: {} }),
     getSystemCronSpecs: vi.fn().mockResolvedValue(MOCK_SPECS),
     runSchedulerJob: vi.fn().mockResolvedValue({
       triggered: true,
@@ -31,6 +40,19 @@ vi.mock("../../api/client", async () => {
 
 import * as clientMod from "../../api/client";
 import { SystemSchedulesPanel } from "./SystemSchedulesPanel";
+
+beforeEach(() => {
+  vi.mocked(clientMod.getSystemCronSpecs).mockReset();
+  vi.mocked(clientMod.getSystemCronSpecs).mockResolvedValue(MOCK_SPECS);
+  vi.mocked(clientMod.patchSchedulerJob).mockReset();
+  vi.mocked(clientMod.patchSchedulerJob).mockResolvedValue({ job: {} });
+  vi.mocked(clientMod.runSchedulerJob).mockReset();
+  vi.mocked(clientMod.runSchedulerJob).mockResolvedValue({
+    triggered: true,
+    slug: "task_recheck",
+    at: new Date().toISOString(),
+  });
+});
 
 function wrap(ui: ReactNode) {
   const qc = new QueryClient({
@@ -49,6 +71,14 @@ function wrapWithToast(ui: ReactNode) {
       <ToastContainer />
     </QueryClientProvider>
   );
+}
+
+async function waitForIntervalInput(name: RegExp) {
+  const input = screen.getByRole("spinbutton", { name });
+  await waitFor(() => {
+    expect(input).not.toBeDisabled();
+  });
+  return input;
 }
 
 const baseSystemJob: SchedulerJob = {
@@ -192,7 +222,29 @@ describe("<SystemSchedulesPanel> toggle round-trip", () => {
 });
 
 describe("<SystemSchedulesPanel> interval validation", () => {
-  it("blocks PATCH when override is below the per-cron floor", () => {
+  it("blocks interval PATCH while scheduler floors are still loading", () => {
+    const patchMock = vi.mocked(clientMod.patchSchedulerJob);
+    patchMock.mockClear();
+    vi.mocked(clientMod.getSystemCronSpecs).mockReturnValueOnce(
+      new Promise(() => {}),
+    );
+
+    render(wrap(<SystemSchedulesPanel jobs={[insightsJob]} />));
+
+    const input = screen.getByRole("spinbutton", {
+      name: /Interval in minutes for Nex insights/i,
+    });
+    expect(input).toBeDisabled();
+    fireEvent.change(input, { target: { value: "10" } });
+    fireEvent.blur(input);
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      /Scheduler floors are still loading/i,
+    );
+    expect(patchMock).not.toHaveBeenCalled();
+  });
+
+  it("blocks PATCH when override is below the per-cron floor", async () => {
     const patchMock = vi.mocked(clientMod.patchSchedulerJob);
     patchMock.mockClear();
 
@@ -201,6 +253,9 @@ describe("<SystemSchedulesPanel> interval validation", () => {
 
     const input = screen.getByRole("spinbutton", {
       name: /Interval in minutes for Nex insights/i,
+    });
+    await waitFor(() => {
+      expect(input).toHaveAttribute("min", "30");
     });
     fireEvent.change(input, { target: { value: "10" } });
     fireEvent.blur(input);
@@ -211,15 +266,15 @@ describe("<SystemSchedulesPanel> interval validation", () => {
     expect(patchMock).not.toHaveBeenCalled();
   });
 
-  it("rejects empty / blank overrides without hitting the network", () => {
+  it("rejects empty / blank overrides without hitting the network", async () => {
     const patchMock = vi.mocked(clientMod.patchSchedulerJob);
     patchMock.mockClear();
 
     render(wrap(<SystemSchedulesPanel jobs={[baseSystemJob]} />));
 
-    const input = screen.getByRole("spinbutton", {
-      name: /Interval in minutes for Task recheck cadence/i,
-    });
+    const input = await waitForIntervalInput(
+      /Interval in minutes for Task recheck cadence/i,
+    );
     fireEvent.change(input, { target: { value: "" } });
     fireEvent.blur(input);
 
@@ -227,15 +282,15 @@ describe("<SystemSchedulesPanel> interval validation", () => {
     expect(patchMock).not.toHaveBeenCalled();
   });
 
-  it("rejects negative overrides without hitting the network", () => {
+  it("rejects negative overrides without hitting the network", async () => {
     const patchMock = vi.mocked(clientMod.patchSchedulerJob);
     patchMock.mockClear();
 
     render(wrap(<SystemSchedulesPanel jobs={[baseSystemJob]} />));
 
-    const input = screen.getByRole("spinbutton", {
-      name: /Interval in minutes for Task recheck cadence/i,
-    });
+    const input = await waitForIntervalInput(
+      /Interval in minutes for Task recheck cadence/i,
+    );
     fireEvent.change(input, { target: { value: "-5" } });
     fireEvent.blur(input);
 
@@ -255,9 +310,9 @@ describe("<SystemSchedulesPanel> interval validation", () => {
     // task_recheck default 10, floor 5. Try 20.
     render(wrap(<SystemSchedulesPanel jobs={[baseSystemJob]} />));
 
-    const input = screen.getByRole("spinbutton", {
-      name: /Interval in minutes for Task recheck cadence/i,
-    });
+    const input = await waitForIntervalInput(
+      /Interval in minutes for Task recheck cadence/i,
+    );
     fireEvent.change(input, { target: { value: "20" } });
     fireEvent.blur(input);
 
@@ -284,9 +339,9 @@ describe("<SystemSchedulesPanel> interval validation", () => {
 
     render(wrap(<SystemSchedulesPanel jobs={[overriddenJob]} />));
 
-    const input = screen.getByRole("spinbutton", {
-      name: /Interval in minutes for Task recheck cadence/i,
-    });
+    const input = await waitForIntervalInput(
+      /Interval in minutes for Task recheck cadence/i,
+    );
     fireEvent.change(input, { target: { value: "10" } });
     fireEvent.blur(input);
 

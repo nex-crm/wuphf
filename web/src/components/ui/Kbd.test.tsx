@@ -1,7 +1,19 @@
 import { render } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { Kbd, KbdSequence, MOD_KEY } from "./Kbd";
+
+function hasDuplicateKeyWarning(calls: unknown[][]) {
+  return calls.some((args) =>
+    args.some((arg) =>
+      String(arg).includes("Encountered two children with the same key"),
+    ),
+  );
+}
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe("<Kbd>", () => {
   it("renders a semantic <kbd> with the base .kbd class", () => {
@@ -57,7 +69,10 @@ describe("<KbdSequence>", () => {
   it("propagates size to every rendered <kbd>", () => {
     const { container } = render(<KbdSequence keys={["⌘", "K"]} size="sm" />);
     const kbds = container.querySelectorAll("kbd");
-    kbds.forEach((k) => expect(k.className).toContain("kbd-sm"));
+    expect(kbds).toHaveLength(2);
+    for (const kbd of kbds) {
+      expect(kbd.className).toContain("kbd-sm");
+    }
   });
 
   it("propagates inverse variant to every rendered <kbd>", () => {
@@ -65,13 +80,24 @@ describe("<KbdSequence>", () => {
       <KbdSequence keys={["⌘", "K"]} variant="inverse" />,
     );
     const kbds = container.querySelectorAll("kbd");
-    kbds.forEach((k) => expect(k.className).toContain("kbd-inverse"));
+    expect(kbds).toHaveLength(2);
+    for (const kbd of kbds) {
+      expect(kbd.className).toContain("kbd-inverse");
+    }
   });
 
   it('marks the "then" separator aria-hidden so screen readers skip it', () => {
     const { container } = render(<KbdSequence keys={[["g"], ["g"]]} />);
     const then = container.querySelector(".kbd-then");
     expect(then?.getAttribute("aria-hidden")).toBe("true");
+  });
+
+  it("renders duplicate suffix-shaped keys without duplicate React keys", () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { container } = render(<KbdSequence keys={["K", "K", "K#1"]} />);
+
+    expect(container.querySelectorAll("kbd")).toHaveLength(3);
+    expect(hasDuplicateKeyWarning(errorSpy.mock.calls)).toBe(false);
   });
 });
 

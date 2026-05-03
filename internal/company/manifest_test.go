@@ -2,11 +2,13 @@ package company
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/nex-crm/wuphf/internal/config"
@@ -494,4 +496,110 @@ func operationFixtureIDs(t *testing.T, repoRoot string) []string {
 	}
 	sort.Strings(ids)
 	return ids
+}
+
+// Discriminating concurrency test for UpdateManifest. Without the package
+// mutex, two goroutines that both Load + append + Save can race: each reads
+// the same on-disk manifest, each appends a distinct channel, and the slower
+// SaveManifest overwrites the faster one's row. This test fires N parallel
+// updates at distinct channel slugs and asserts every one of them ends up
+// in the file.
+func TestUpdateManifestSerializesAppends(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("WUPHF_RUNTIME_HOME", t.TempDir())
+	path := filepath.Join(t.TempDir(), "company.json")
+	t.Setenv("WUPHF_COMPANY_FILE", path)
+
+	const n = 32
+	var wg sync.WaitGroup
+	wg.Add(n)
+	errs := make(chan error, n)
+	for i := 0; i < n; i++ {
+		i := i
+		go func() {
+			defer wg.Done()
+			err := UpdateManifest(func(m *Manifest) error {
+				m.Channels = append(m.Channels, ChannelSpec{
+					Slug: fmt.Sprintf("race-%d", i),
+					Name: fmt.Sprintf("Race %d", i),
+				})
+				return nil
+			})
+			if err != nil {
+				errs <- err
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatalf("UpdateManifest: %v", err)
+	}
+
+	final, err := LoadManifest()
+	if err != nil {
+		t.Fatalf("LoadManifest: %v", err)
+	}
+	got := make(map[string]struct{}, n)
+	for _, ch := range final.Channels {
+		if strings.HasPrefix(ch.Slug, "race-") {
+			got[ch.Slug] = struct{}{}
+		}
+	}
+	if len(got) != n {
+		t.Fatalf("expected %d race-* channels in manifest, got %d (slugs: %v)",
+			n, len(got), keys(got))
+	}
+}
+
+func keys(m map[string]struct{}) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// Discriminating regression for the panic recovery added to UpdateManifest.
+// Without the deferred recover, a panic from inside the mutate callback
+// would propagate out of any HTTP handler goroutine and crash the broker.
+// Asserts the panic surfaces as an error instead.
+func TestUpdateManifestRecoversFromMutatePanic(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("WUPHF_RUNTIME_HOME", t.TempDir())
+	path := filepath.Join(t.TempDir(), "company.json")
+	t.Setenv("WUPHF_COMPANY_FILE", path)
+
+	err := UpdateManifest(func(m *Manifest) error {
+		panic("boom in mutate")
+	})
+	if err == nil {
+		t.Fatal("expected error from panicking mutate, got nil")
+	}
+	if !strings.Contains(err.Error(), "panic in mutate") {
+		t.Fatalf("expected wrapped panic message, got %v", err)
+	}
+
+	// Lock must be released so the next caller can proceed.
+	if err := UpdateManifest(func(m *Manifest) error {
+		m.Channels = append(m.Channels, ChannelSpec{Slug: "post-panic"})
+		return nil
+	}); err != nil {
+		t.Fatalf("UpdateManifest after panic: %v", err)
+	}
+	final, err := LoadManifest()
+	if err != nil {
+		t.Fatalf("LoadManifest: %v", err)
+	}
+	found := false
+	for _, ch := range final.Channels {
+		if ch.Slug == "post-panic" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("post-panic update did not land — lock leaked or save skipped")
+	}
 }

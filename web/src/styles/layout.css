@@ -1,3 +1,4 @@
+/* biome-ignore-all lint/style/noDescendingSpecificity: Layout CSS is organized by surface sections; selector order is intentional and visually covered by app tests/build. */
 /* ═══════════════════════════════════════════════════════════════
    Layout — Office shell, sidebar, channel header, thread panel
    Ported from index.legacy.html
@@ -17,8 +18,8 @@
   display: flex;
   flex-direction: column;
   height: 100vh;
-  /* Each section sizes to its content (no inner scrollbars) — the
-     whole sidebar scrolls only if total content exceeds viewport. */
+  /* Open list sections own their scroll regions. The root remains a fallback
+     scroll container for windows too short to fit the fixed sidebar chrome. */
   overflow-y: auto;
   overflow-x: hidden;
   transition: width 0.22s ease;
@@ -389,6 +390,7 @@ html[data-theme="nex"]
 
 .sidebar-section {
   padding: 8px var(--sidebar-pad-x) 0;
+  flex-shrink: 0;
 }
 .sidebar-section + .sidebar-section,
 .sidebar-agents + .sidebar-section,
@@ -768,32 +770,35 @@ html[data-theme="nex"]
   display: flex;
   flex-direction: column;
   min-height: 0;
+  overflow: hidden;
 }
 .sidebar-scroll-wrap.is-agents {
-  flex: 0 0 auto;
-  max-height: none;
+  flex: 1 1 auto;
+  max-height: 100%;
   border-bottom: 1px solid var(--border);
 }
 .sidebar-collapsible {
   display: grid;
   grid-template-rows: 1fr;
   transition: grid-template-rows 0.2s ease;
+  flex: 1 1 0;
   min-height: 0;
 }
 .sidebar-collapsible:not(.is-open) {
   grid-template-rows: 0fr;
+  flex: 0 0 auto;
 }
 .sidebar-collapsible > * {
   min-height: 0;
   overflow: hidden;
 }
 .sidebar-scroll-wrap.is-channels {
-  flex: 0 0 auto;
-  max-height: none;
+  flex: 1 1 auto;
+  max-height: 100%;
 }
 .sidebar-scroll-wrap.is-apps {
-  flex: 0 0 auto;
-  max-height: none;
+  flex: 1 1 auto;
+  max-height: 100%;
 }
 .sidebar-scroll-wrap::after {
   content: "";
@@ -820,10 +825,11 @@ html[data-theme="nex"]
 
 .sidebar-agents {
   padding: 4px var(--sidebar-pad-x) 4px;
-  flex: 0 0 auto;
+  flex: 1 1 auto;
   min-height: 0;
-  overflow-y: visible;
-  overflow-x: visible;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
 }
 .sidebar-agents .sidebar-add-btn,
 .sidebar-channels .sidebar-add-btn {
@@ -893,15 +899,19 @@ html[data-theme="nex"]
 
 .sidebar-channels {
   padding: 4px var(--sidebar-pad-x) 4px;
-  flex: 0 0 auto;
+  flex: 1 1 auto;
   min-height: 0;
-  overflow-y: visible;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
 }
 .sidebar-apps {
   padding: 4px var(--sidebar-pad-x) 4px;
-  flex: 0 0 auto;
+  flex: 1 1 auto;
   min-height: 0;
-  overflow-y: visible;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
 }
 
 /* Minimal hover-reveal scrollbars for sidebar scroll regions. */
@@ -957,12 +967,14 @@ html[data-theme="nex"]
   font-size: 10px;
   color: var(--text-tertiary);
   font-family: var(--font-mono);
+  flex-shrink: 0;
 }
 .sidebar-hint {
   padding: 0 16px 6px;
   font-size: 10px;
   color: var(--text-secondary);
   font-style: italic;
+  flex-shrink: 0;
 }
 
 /* ─── Usage panel ─── */
@@ -982,6 +994,7 @@ html[data-theme="nex"]
   color: var(--text-secondary);
   font-family: var(--font-sans);
   text-align: left;
+  flex-shrink: 0;
 }
 .usage-toggle:hover {
   color: var(--text);
@@ -995,6 +1008,7 @@ html[data-theme="nex"]
 .usage-panel {
   display: none;
   padding: 4px 8px 8px;
+  flex-shrink: 0;
 }
 .usage-panel.open {
   display: block;

@@ -27,7 +27,8 @@ class FakeEventSource {
     FakeEventSource.lastURL = url;
   }
   addEventListener(name: string, fn: EventListener) {
-    (this.listeners[name] ??= []).push(fn);
+    this.listeners[name] ??= [];
+    this.listeners[name].push(fn);
   }
   removeEventListener(name: string, fn: EventListener) {
     const arr = this.listeners[name];
@@ -65,9 +66,11 @@ describe("SSE dead-path fix", () => {
 
   it("subscribeEditLog opens /events (not /wiki/stream)", () => {
     const unsub = subscribeEditLog(() => {});
-    expect(FakeEventSource.lastURL).not.toBeNull();
-    expect(FakeEventSource.lastURL!).not.toContain("/wiki/stream");
-    expect(FakeEventSource.lastURL!).toMatch(/\/events(\?|$)/);
+    const { lastURL } = FakeEventSource;
+    expect(lastURL).not.toBeNull();
+    if (!lastURL) throw new Error("Expected EventSource URL to be captured");
+    expect(lastURL).not.toContain("/wiki/stream");
+    expect(lastURL).toMatch(/\/events(\?|$)/);
     unsub();
   });
 
@@ -75,7 +78,8 @@ describe("SSE dead-path fix", () => {
     const handler = vi.fn();
     const unsub = subscribeEditLog(handler);
     expect(created).toHaveLength(1);
-    const src = created[0];
+    const [src] = created;
+    if (!src) throw new Error("Expected EventSource to be created");
     // Broker sends an onmessage for the heartbeat `ready` event — handler
     // MUST NOT fire for that. Only the named `wiki:write` event counts.
     src.emit("message", { type: "ready" });
@@ -92,16 +96,19 @@ describe("SSE dead-path fix", () => {
 
   it("subscribeNotebookEvents opens /events (not /notebooks/stream)", () => {
     const unsub = subscribeNotebookEvents(() => {});
-    expect(FakeEventSource.lastURL).not.toBeNull();
-    expect(FakeEventSource.lastURL!).not.toContain("/notebooks/stream");
-    expect(FakeEventSource.lastURL!).toMatch(/\/events(\?|$)/);
+    const { lastURL } = FakeEventSource;
+    expect(lastURL).not.toBeNull();
+    if (!lastURL) throw new Error("Expected EventSource URL to be captured");
+    expect(lastURL).not.toContain("/notebooks/stream");
+    expect(lastURL).toMatch(/\/events(\?|$)/);
     unsub();
   });
 
   it("subscribeNotebookEvents wires both notebook:write and review:state_change listeners", () => {
     const handler = vi.fn();
     const unsub = subscribeNotebookEvents(handler);
-    const src = created[0];
+    const [src] = created;
+    if (!src) throw new Error("Expected EventSource to be created");
     src.emit("notebook:write", {
       slug: "pm",
       path: "agents/pm/notebook/foo.md",
