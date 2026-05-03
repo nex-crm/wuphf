@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -96,6 +97,38 @@ func TestNotebookWriteHappyPath(t *testing.T) {
 	pub.mu.Unlock()
 	if wikiCount != 0 {
 		t.Fatalf("expected 0 wiki events, got %d", wikiCount)
+	}
+}
+
+func TestEnsureNotebookDirsStagesExistingShelfMarker(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "wiki")
+	backup := filepath.Join(t.TempDir(), "wiki.bak")
+	repo := NewRepoAt(root, backup)
+	if err := repo.Init(context.Background()); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	rel := filepath.Join("agents", "pm", "notebook", ".gitkeep")
+	full := filepath.Join(root, rel)
+	if err := os.MkdirAll(filepath.Dir(full), 0o700); err != nil {
+		t.Fatalf("mkdir existing shelf: %v", err)
+	}
+	if err := os.WriteFile(full, nil, 0o600); err != nil {
+		t.Fatalf("write existing shelf: %v", err)
+	}
+
+	sha, err := repo.EnsureNotebookDirs(context.Background(), []string{"pm"})
+	if err != nil {
+		t.Fatalf("ensure notebook dirs: %v", err)
+	}
+	if sha == "" {
+		t.Fatal("expected existing untracked shelf to be committed")
+	}
+	out, err := exec.Command("git", "-C", root, "ls-files", filepath.ToSlash(rel)).Output()
+	if err != nil {
+		t.Fatalf("git ls-files: %v", err)
+	}
+	if strings.TrimSpace(string(out)) != filepath.ToSlash(rel) {
+		t.Fatalf("expected shelf marker tracked, got %q", string(out))
 	}
 }
 
