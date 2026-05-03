@@ -56,7 +56,7 @@ func (l *Launcher) deliverMessageNotification(msg channelMessage) {
 	// the cooldown window from a different sender or in a different
 	// channel. Per-(recipient, sender, channel) keeps the loop-breaker
 	// behaviour while letting genuinely unrelated traffic through.
-	isHumanOrCEO := msg.From == "you" || msg.From == "human" || msg.From == "nex" || msg.From == l.targeter().LeadSlug()
+	isHumanOrCEO := isHumanMessageSender(msg.From) || msg.From == "nex" || msg.From == l.targeter().LeadSlug()
 	cooldown := agentNotifyCooldownAgent
 	if isHumanOrCEO {
 		cooldown = agentNotifyCooldown
@@ -93,7 +93,7 @@ func (l *Launcher) deliverMessageNotification(msg channelMessage) {
 	// Mark implicit public-channel routing targets as active so the UI can show
 	// the ephemeral "X is thinking..." indicator. DMs suppress this signal.
 	isDM, _ := l.isChannelDM(normalizeChannelSlug(msg.Channel))
-	if l.broker != nil && len(immediate) > 0 && (msg.From == "you" || msg.From == "human") && !l.isOneOnOne() && !isDM && len(msg.Tagged) == 0 {
+	if l.broker != nil && len(immediate) > 0 && isHumanMessageSender(msg.From) && !l.isOneOnOne() && !isDM && len(msg.Tagged) == 0 {
 		slugs := make([]string, 0, len(immediate))
 		for _, t := range immediate {
 			slugs = append(slugs, t.Slug)

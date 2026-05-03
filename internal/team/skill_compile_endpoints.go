@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -84,6 +85,14 @@ type skillCompileStatsResponse struct {
 	StageBProposalsTotal          int64                          `json:"stage_b_proposals_total"`
 	CounterNudgesFiredTotal       int64                          `json:"counter_nudges_fired_total"`
 	CounterPerAgent               map[string]SkillCounterMetrics `json:"counter_per_agent,omitempty"`
+	SelfHealCandidatesScanned     int64                          `json:"self_heal_candidates_scanned"`
+	SelfHealSkillsSynthesized     int64                          `json:"self_heal_skills_synthesized"`
+	SelfHealLLMRejections         int64                          `json:"self_heal_llm_rejections"`
+	// Embedding pipeline telemetry (Stage B semantic clustering).
+	EmbeddingCallsTotal       int64   `json:"embedding_calls_total"`
+	EmbeddingCacheHitsTotal   int64   `json:"embedding_cache_hits_total"`
+	EmbeddingCacheMissesTotal int64   `json:"embedding_cache_misses_total"`
+	EmbeddingCostUsd          float64 `json:"embedding_cost_usd"`
 }
 
 // handleGetSkillCompileStats returns a snapshot of the compile metrics.
@@ -107,6 +116,15 @@ func (b *Broker) handleGetSkillCompileStats(w http.ResponseWriter, r *http.Reque
 		LastTickDurationMs:            snap.LastTickDurationMs,
 		StageBProposalsTotal:          snap.StageBProposalsTotal,
 		CounterNudgesFiredTotal:       snap.CounterNudgesFiredTotal,
+		SelfHealCandidatesScanned:     snap.SelfHealCandidatesScanned,
+		SelfHealSkillsSynthesized:     snap.SelfHealSkillsSynthesized,
+		SelfHealLLMRejections:         snap.SelfHealLLMRejections,
+		EmbeddingCallsTotal:           snap.EmbeddingCallsTotal,
+		EmbeddingCacheHitsTotal:       snap.EmbeddingCacheHitsTotal,
+		EmbeddingCacheMissesTotal:     snap.EmbeddingCacheMissesTotal,
+		// snap is a value-copy already loaded atomically by snapshotSkillCompileMetrics —
+		// no atomic load needed on the local copy, just convert the bits.
+		EmbeddingCostUsd: math.Float64frombits(snap.EmbeddingCostUsdBits),
 	}
 	if counter != nil {
 		resp.CounterPerAgent = counter.Stats()

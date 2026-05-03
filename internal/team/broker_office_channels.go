@@ -948,7 +948,7 @@ func (b *Broker) handleCreateDM(w http.ResponseWriter, r *http.Request) {
 	// Validate: at least one member must be "human" (no agent-to-agent DMs).
 	hasHuman := false
 	for _, m := range body.Members {
-		if m == "human" || m == "you" {
+		if isHumanMessageSender(m) {
 			hasHuman = true
 			break
 		}
@@ -993,7 +993,7 @@ func (b *Broker) handleCreateDM(w http.ResponseWriter, r *http.Request) {
 			// Normalize: find the non-human member for the slug.
 			agentSlug := ""
 			for _, m := range body.Members {
-				if m != "human" && m != "you" {
+				if !isHumanMessageSender(m) {
 					agentSlug = m
 					break
 				}

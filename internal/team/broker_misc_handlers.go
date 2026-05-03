@@ -186,7 +186,7 @@ func (b *Broker) handleResetDM(w http.ResponseWriter, r *http.Request) {
 			filtered = append(filtered, msg)
 			continue
 		}
-		isHuman := msg.From == "you" || msg.From == "human"
+		isHuman := isHumanMessageSender(msg.From)
 		isAgent := msg.From == agent
 		if isHuman {
 			// Only drop human messages that are part of THIS agent's thread:
@@ -212,7 +212,7 @@ func (b *Broker) handleResetDM(w http.ResponseWriter, r *http.Request) {
 			// preserved — only the human↔agent thread is being reset.
 			taggedHuman := false
 			for _, t := range msg.Tagged {
-				if t == "you" || t == "human" {
+				if isHumanMessageSender(t) {
 					taggedHuman = true
 					break
 				}
@@ -339,6 +339,9 @@ func (b *Broker) handleActions(w http.ResponseWriter, r *http.Request) {
 		if strings.TrimSpace(body.Kind) == "" || strings.TrimSpace(body.Summary) == "" {
 			http.Error(w, "kind and summary required", http.StatusBadRequest)
 			return
+		}
+		if actor, ok := requestActorFromContext(r.Context()); ok && actor.Kind == requestActorKindHuman {
+			body.Actor = humanMessageSender(actor.Slug)
 		}
 		if err := b.RecordAction(
 			body.Kind,

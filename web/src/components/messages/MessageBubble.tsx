@@ -44,7 +44,17 @@ export function MessageBubble({
 }: MessageBubbleProps) {
   const currentChannel = useAppStore((s) => s.currentChannel);
   const { data: members = [] } = useOfficeMembers();
-  const isHuman = message.from === "you" || message.from === "human";
+  const isHuman =
+    message.from === "you" ||
+    message.from === "human" ||
+    message.from.startsWith("human:");
+  const isLocalUser = message.from === "you";
+  const cofounderDisplayName =
+    isHuman && !isLocalUser
+      ? message.from.startsWith("human:")
+        ? message.from.slice("human:".length).replace(/-/g, " ") || "co-founder"
+        : "Human"
+      : null;
   const agent = members.find((m) => m.slug === message.from);
   const defaultHarness = useDefaultHarness();
   const harness = !isHuman
@@ -120,8 +130,10 @@ export function MessageBubble({
             : undefined
         }
       >
-        {isHuman ? (
+        {isLocalUser ? (
           "You"
+        ) : cofounderDisplayName ? (
+          cofounderDisplayName.slice(0, 1).toUpperCase()
         ) : (
           <>
             <PixelAvatar slug={message.from} size={24} />
@@ -141,7 +153,9 @@ export function MessageBubble({
         {/* Header */}
         <div className="message-header">
           <span className="message-author">
-            {isHuman ? "You" : agent?.name || message.from}
+            {isLocalUser
+              ? "You"
+              : cofounderDisplayName || agent?.name || message.from}
           </span>
           {isHuman ? (
             <span className="badge badge-neutral">human</span>

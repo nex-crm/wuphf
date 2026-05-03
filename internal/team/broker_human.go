@@ -103,6 +103,9 @@ func (b *Broker) handleWikiWriteHuman(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	identity := brokerHumanIdentityRegistry().Local()
+	if actor, ok := requestActorFromContext(r.Context()); ok && actor.Kind == requestActorKindHuman {
+		identity = humanIdentityFromActor(actor)
+	}
 	sha, n, err := worker.EnqueueHumanAs(
 		r.Context(), identity, body.Path, body.Content, body.CommitMessage, body.ExpectedSHA,
 	)
