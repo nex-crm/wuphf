@@ -247,10 +247,7 @@ func firstActiveHumanInterview(requests []humanInterview) *humanInterview {
 }
 
 func humanSenderMayCancelInterviews(sender string) bool {
-	if isHumanMessageSender(sender) {
-		return true
-	}
-	return false
+	return isHumanMessageSender(sender)
 }
 
 func (b *Broker) cancelRequestLocked(req *humanInterview, actor, reason string) {
