@@ -38,7 +38,7 @@ export type AgentUsage = UsageTotals;
 
 export interface UsageData {
   total: UsageTotals;
-  session: UsageTotals;
+  session?: UsageTotals;
   agents?: Record<string, AgentUsage>;
   since?: string;
 }
