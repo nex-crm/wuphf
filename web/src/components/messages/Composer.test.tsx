@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { Message } from "../../api/client";
 import { __test__ } from "./Composer";
 
 const {
@@ -8,6 +9,8 @@ const {
   pushHistory,
   resolveLeadSlug,
   askPrefix,
+  latestMessageIdFromQueryData,
+  emptyMessagesQueryData,
   COMPOSER_HISTORY_LIMIT,
 } = __test__;
 
@@ -94,5 +97,25 @@ describe("askPrefix", () => {
   it("defaults to @ceo", () => {
     expect(askPrefix(undefined)).toBe("@ceo ");
     expect(askPrefix("")).toBe("@ceo ");
+  });
+});
+
+describe("/clear query helpers", () => {
+  it("uses the newest cached message id as the clear marker", () => {
+    const messages = [{ id: "msg-1" }, { id: "msg-2" }] as Message[];
+
+    expect(latestMessageIdFromQueryData({ messages })).toBe("msg-2");
+  });
+
+  it("empties cached messages without dropping other query fields", () => {
+    const data = {
+      messages: [{ id: "msg-1" }] as Message[],
+      extra: "kept",
+    };
+
+    expect(emptyMessagesQueryData(data)).toEqual({
+      messages: [],
+      extra: "kept",
+    });
   });
 });
