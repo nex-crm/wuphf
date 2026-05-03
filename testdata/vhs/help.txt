@@ -11,6 +11,8 @@ Usage:
   wuphf log          Show what your agents actually did (task receipts)
   wuphf memory migrate --from {nex,gbrain}  Port legacy memory into the team wiki
   wuphf workspace ...  Manage multiple isolated WUPHF workspaces
+  wuphf skills publish <slug-or-path> --to <hub>    Publish a team skill to a public hub
+  wuphf skills install <name> --from <hub>  Pull a public skill into the team wiki
   wuphf --cmd <cmd>  Run a command non-interactively
 
 Flags:
@@ -44,5 +46,3 @@ Flags:
         LLM provider override for this run (claude-code, codex, opencode)
   --threads-collapsed
         Start with threads collapsed (default: expanded)
-  --tui
-        Launch with tmux TUI instead of the web UI
