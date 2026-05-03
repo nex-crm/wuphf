@@ -124,12 +124,11 @@ func TestCreateTelegramChannelSkipsUnadoptedManifestMembers(t *testing.T) {
 		t.Fatal("createTelegramChannel returned nil channel")
 	}
 
-	// Unadopted slugs must be absent from the channel — only "ceo" (always
-	// prepended by createChannelLocked) should be present.
-	for _, slug := range ch.Members {
-		if slug == "planner" || slug == "executor" {
-			t.Errorf("channel members contain unadopted slug %q: %v", slug, ch.Members)
-		}
+	// Unadopted slugs must be absent and the exact adopted set must match.
+	// Checking only for absence would let a broken path that returns an empty
+	// member list pass silently.
+	if len(ch.Members) != 1 || ch.Members[0] != "ceo" {
+		t.Fatalf("expected channel members [ceo], got %v", ch.Members)
 	}
 }
 
