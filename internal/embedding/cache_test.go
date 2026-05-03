@@ -71,6 +71,35 @@ func TestCache_ModelKeyedSeparately(t *testing.T) {
 	}
 }
 
+func TestCache_ScopedByNamespaceAndDimension(t *testing.T) {
+	c := NewCache(filepath.Join(t.TempDir(), "embeddings.jsonl"))
+	if err := c.SetScoped("text", "same-model", "openai|https://api.openai.com", []float32{1, 2}); err != nil {
+		t.Fatalf("set openai: %v", err)
+	}
+	if err := c.SetScoped("text", "same-model", "openai|http://localhost:8080", []float32{3, 4}); err != nil {
+		t.Fatalf("set local: %v", err)
+	}
+	if err := c.SetScoped("text", "same-model", "openai|https://api.openai.com", []float32{5, 6, 7}); err != nil {
+		t.Fatalf("set dim: %v", err)
+	}
+
+	hosted, ok := c.GetScoped("text", "same-model", "openai|https://api.openai.com", 2)
+	if !ok {
+		t.Fatal("expected hosted dim-2 hit")
+	}
+	local, ok := c.GetScoped("text", "same-model", "openai|http://localhost:8080", 2)
+	if !ok {
+		t.Fatal("expected local dim-2 hit")
+	}
+	hostedDim3, ok := c.GetScoped("text", "same-model", "openai|https://api.openai.com", 3)
+	if !ok {
+		t.Fatal("expected hosted dim-3 hit")
+	}
+	if hosted[0] == local[0] || hosted[0] == hostedDim3[0] {
+		t.Fatalf("expected namespace and dimension to isolate cache rows, got hosted=%v local=%v hostedDim3=%v", hosted, local, hostedDim3)
+	}
+}
+
 func TestCache_DisabledPathIsNoOp(t *testing.T) {
 	c := NewCache("")
 	if err := c.Set("anything", "any-model", []float32{1, 2}); err != nil {

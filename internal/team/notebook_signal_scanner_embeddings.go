@@ -147,6 +147,8 @@ func (s *NotebookSignalScanner) embedAllWithCache(ctx context.Context, texts []s
 		return out
 	}
 	model := s.embeddingProvider.Name()
+	cacheNamespace := embedding.ProviderCacheNamespace(s.embeddingProvider)
+	cacheDimension := s.embeddingProvider.Dimension()
 
 	type pending struct {
 		text  string
@@ -155,7 +157,7 @@ func (s *NotebookSignalScanner) embedAllWithCache(ctx context.Context, texts []s
 	var misses []pending
 
 	for i, t := range texts {
-		if v, ok := s.embeddingCache.Get(t, model); ok {
+		if v, ok := s.embeddingCache.GetScoped(t, model, cacheNamespace, cacheDimension); ok {
 			out[i] = v
 			s.recordCacheHit()
 			continue
@@ -196,7 +198,7 @@ func (s *NotebookSignalScanner) embedAllWithCache(ctx context.Context, texts []s
 		for _, originalIndex := range indicesByUnique[i] {
 			out[originalIndex] = vectors[i]
 		}
-		_ = s.embeddingCache.Set(text, model, vectors[i])
+		_ = s.embeddingCache.SetScoped(text, model, cacheNamespace, vectors[i])
 		s.recordEmbedCall(text)
 	}
 	return out

@@ -97,5 +97,11 @@ func (p *voyageProvider) EmbedBatch(ctx context.Context, texts []string) ([][]fl
 // Dimension returns the underlying provider's vector length.
 func (p *voyageProvider) Dimension() int { return p.inner.Dimension() }
 
+// CacheNamespace includes the Voyage backend URL to prevent cross-backend
+// cache reuse when VOYAGE_BASE_URL changes.
+func (p *voyageProvider) CacheNamespace() string {
+	return "voyage|" + strings.TrimRight(p.inner.baseURL, "/")
+}
+
 // Name is the stable cache + telemetry identifier.
 func (p *voyageProvider) Name() string { return "voyage-" + p.model }

@@ -1,8 +1,8 @@
 package embedding
 
 // cache.go is a JSONL append-only cache for embeddings. Keyed by SHA-256
-// of the input text + provider name so a model swap invalidates rows
-// without manual cleanup.
+// of the input text, provider name, backend namespace, and vector dimension
+// so provider/backend/dimension swaps invalidate rows without manual cleanup.
 //
 // The cache is intentionally "dumb": load on first miss, in-memory map
 // for hits, append the new row to disk for misses. Size is capped at
@@ -12,7 +12,7 @@ package embedding
 //
 // File layout (one JSON object per line):
 //
-//	{"sha256":"<hex>","model":"openai-text-embedding-3-small","vector":[...]}
+//	{"sha256":"<hex>","model":"openai-text-embedding-3-small","namespace":"openai|https://api.openai.com","dimension":1536,"vector":[...]}
 //
 // Concurrency: a single sync.RWMutex guards the map + file handle. The
 // underlying append is sync.OnceFunc-style: each Set takes the write
@@ -37,6 +37,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -50,9 +51,11 @@ const maxCacheBytes = 10 * 1024 * 1024
 
 // cacheRow is the JSONL record shape. Reused for both reads and writes.
 type cacheRow struct {
-	SHA256 string    `json:"sha256"`
-	Model  string    `json:"model"`
-	Vector []float32 `json:"vector"`
+	SHA256    string    `json:"sha256"`
+	Model     string    `json:"model"`
+	Namespace string    `json:"namespace,omitempty"`
+	Dimension int       `json:"dimension,omitempty"`
+	Vector    []float32 `json:"vector"`
 }
 
 // Cache is the JSONL-backed embedding cache. Construct via NewCache or
@@ -62,7 +65,7 @@ type Cache struct {
 
 	mu          sync.RWMutex
 	loaded      bool
-	rows        map[string][]float32 // key: sha256 + "@" + model
+	rows        map[string][]float32
 	bytesOnDisk int64
 }
 
@@ -108,6 +111,13 @@ func HashText(text string) string {
 // A nil receiver returns a miss — convenient for "cache is optional"
 // call sites.
 func (c *Cache) Get(text, model string) ([]float32, bool) {
+	return c.GetScoped(text, model, "", 0)
+}
+
+// GetScoped returns a cached vector for the fully-scoped cache key. Namespace
+// should identify the provider backend; dimension should be the expected vector
+// length.
+func (c *Cache) GetScoped(text, model, namespace string, dimension int) ([]float32, bool) {
 	if c == nil || c.path == "" {
 		return nil, false
 	}
@@ -117,7 +127,7 @@ func (c *Cache) Get(text, model string) ([]float32, bool) {
 		// exceed the size cap).
 		return nil, false
 	}
-	key := cacheKey(text, model)
+	key := cacheKey(text, model, namespace, dimension)
 	c.mu.RLock()
 	v, ok := c.rows[key]
 	c.mu.RUnlock()
@@ -137,6 +147,16 @@ func (c *Cache) Get(text, model string) ([]float32, bool) {
 // Errors are returned but never block the caller — the embedding
 // pipeline must keep working even when the cache file is unwritable.
 func (c *Cache) Set(text, model string, vector []float32) error {
+	return c.set(text, model, "", 0, vector)
+}
+
+// SetScoped stores vector with a backend namespace and vector-dimension
+// fingerprint so incompatible providers cannot reuse each other's rows.
+func (c *Cache) SetScoped(text, model, namespace string, vector []float32) error {
+	return c.set(text, model, namespace, len(vector), vector)
+}
+
+func (c *Cache) set(text, model, namespace string, dimension int, vector []float32) error {
 	if c == nil || c.path == "" {
 		return nil
 	}
@@ -160,11 +180,13 @@ func (c *Cache) Set(text, model string, vector []float32) error {
 		}
 	}
 
-	key := cacheKey(text, model)
+	key := cacheKey(text, model, namespace, dimension)
 	row := cacheRow{
-		SHA256: HashText(text),
-		Model:  model,
-		Vector: vector,
+		SHA256:    HashText(text),
+		Model:     model,
+		Namespace: namespace,
+		Dimension: dimension,
+		Vector:    vector,
 	}
 	raw, err := json.Marshal(row)
 	if err != nil {
@@ -255,7 +277,7 @@ func (c *Cache) ensureLoaded() error {
 		if row.SHA256 == "" || row.Model == "" || len(row.Vector) == 0 {
 			continue
 		}
-		c.rows[row.SHA256+"@"+row.Model] = row.Vector
+		c.rows[cacheKeyFromHash(row.SHA256, row.Model, row.Namespace, row.Dimension)] = row.Vector
 	}
 	if err := scanner.Err(); err != nil && !errors.Is(err, io.EOF) {
 		return fmt.Errorf("embedding: cache: read: %w", err)
@@ -263,12 +285,15 @@ func (c *Cache) ensureLoaded() error {
 	return nil
 }
 
-// cacheKey is the in-memory map key. We keep model in the key so that
-// switching models invalidates the in-memory rows; on disk every row
-// already records its model so a re-load filters correctly even after
-// an env change.
-func cacheKey(text, model string) string {
-	return HashText(text) + "@" + model
+// cacheKey is the in-memory map key. It includes backend namespace and vector
+// dimension so OpenAI-compatible endpoints or model-dimension overrides cannot
+// reuse each other's rows.
+func cacheKey(text, model, namespace string, dimension int) string {
+	return cacheKeyFromHash(HashText(text), model, namespace, dimension)
+}
+
+func cacheKeyFromHash(hash, model, namespace string, dimension int) string {
+	return hash + "@" + model + "@" + namespace + "@" + strconv.Itoa(dimension)
 }
 
 // Stats are read-only counters useful for telemetry. Not used in the

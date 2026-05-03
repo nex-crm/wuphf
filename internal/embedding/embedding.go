@@ -34,9 +34,10 @@
 //
 // # Cache
 //
-// Embeddings are stable for a (text, model) pair, so callers should cache.
-// The package ships a JSONL append-only cache (Cache in cache.go) keyed by
-// SHA-256 of the input text. Default cache file is
+// Embeddings are stable for a (text, provider backend, model, dimension) tuple,
+// so callers should cache with that full namespace. The package ships a JSONL
+// append-only cache (Cache in cache.go) keyed by SHA-256 of the input text plus
+// provider/model/dimension metadata. Default cache file is
 //
 //	$WUPHF_HOME/.wuphf/cache/embeddings.jsonl
 //
@@ -79,6 +80,22 @@ type Provider interface {
 	// field. Examples: "voyage-voyage-3-large", "openai-text-embedding-3-small",
 	// "local-stub".
 	Name() string
+}
+
+type cacheNamespaceProvider interface {
+	CacheNamespace() string
+}
+
+// ProviderCacheNamespace returns the cache namespace for provider. Providers
+// that do not expose backend details fall back to Name().
+func ProviderCacheNamespace(provider Provider) string {
+	if provider == nil {
+		return ""
+	}
+	if p, ok := provider.(cacheNamespaceProvider); ok {
+		return p.CacheNamespace()
+	}
+	return provider.Name()
 }
 
 // Cosine returns the cosine similarity of two vectors. Both must be the

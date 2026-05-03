@@ -65,6 +65,12 @@ func newOpenAIProvider(apiKey string) Provider {
 // stay valid across model changes.
 func (p *openAIProvider) Name() string { return "openai-" + p.model }
 
+// CacheNamespace includes the backend URL because OpenAI-compatible endpoints
+// can share a model name while returning incompatible vector spaces.
+func (p *openAIProvider) CacheNamespace() string {
+	return "openai|" + strings.TrimRight(p.baseURL, "/")
+}
+
 // Dimension returns the expected vector length. Mismatches between the
 // configured dimension and a returned vector raise an error from Embed so
 // the cluster layer's sanity checks fire.

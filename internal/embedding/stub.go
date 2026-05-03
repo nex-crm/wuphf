@@ -44,6 +44,9 @@ func NewStubProvider() Provider { return &stubProvider{} }
 // Name is "local-stub" so cache rows + log lines clearly mark stub data.
 func (p *stubProvider) Name() string { return "local-stub" }
 
+// CacheNamespace is stable because the stub has no external backend.
+func (p *stubProvider) CacheNamespace() string { return p.Name() }
+
 // Dimension is the fixed vector length.
 func (p *stubProvider) Dimension() int { return stubDim }
 

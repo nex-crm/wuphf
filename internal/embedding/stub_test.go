@@ -99,9 +99,18 @@ func TestStubProvider_OverlappingTextsClusterTogether(t *testing.T) {
 	// being a real signal.
 	p := NewStubProvider()
 	ctx := context.Background()
-	a, _ := p.Embed(ctx, "deploy prod pipeline smoke tests toggle flipping")
-	b, _ := p.Embed(ctx, "deploy prod pipeline smoke tests toggle flipping today")
-	c, _ := p.Embed(ctx, "marketing launch eyebrow copy rewrite founders")
+	a, err := p.Embed(ctx, "deploy prod pipeline smoke tests toggle flipping")
+	if err != nil {
+		t.Fatalf("a: %v", err)
+	}
+	b, err := p.Embed(ctx, "deploy prod pipeline smoke tests toggle flipping today")
+	if err != nil {
+		t.Fatalf("b: %v", err)
+	}
+	c, err := p.Embed(ctx, "marketing launch eyebrow copy rewrite founders")
+	if err != nil {
+		t.Fatalf("c: %v", err)
+	}
 	if Cosine(a, b) < 0.8 {
 		t.Errorf("near-identical texts: cosine %v want >=0.8", Cosine(a, b))
 	}
