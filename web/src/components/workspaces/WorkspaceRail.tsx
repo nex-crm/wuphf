@@ -518,7 +518,20 @@ export function WorkspaceRail({
             </button>
             {showTooltip ? (
               <div role="tooltip" style={styles.tooltip}>
-                <div style={{ fontWeight: 600 }}>{ws.name}</div>
+                <div style={{ fontWeight: 600 }}>
+                  {ws.company_name ?? ws.name}
+                </div>
+                {ws.company_name && ws.company_name !== ws.name ? (
+                  <div
+                    style={{
+                      fontSize: 11,
+                      color: "var(--neutral-500)",
+                      marginTop: 1,
+                    }}
+                  >
+                    {ws.name}
+                  </div>
+                ) : null}
                 <div
                   style={{
                     fontSize: 11,
