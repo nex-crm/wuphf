@@ -46,6 +46,3 @@ Flags:
   --provider
         LLM provider override for this run (claude-code, codex, opencode)
   --threads-collapsed
-        Start with threads collapsed (default: expanded)
-  --tui
-        Launch with tmux TUI instead of the web UI
