@@ -103,6 +103,14 @@ func printSubcommandHelp(sub string) {
 		// only touches workspace.go.
 		printWorkspaceHelp()
 		return
+	case "skills":
+		fmt.Fprintln(os.Stderr, "wuphf skills — publish/install team skills against public hubs")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "Usage:")
+		fmt.Fprintln(os.Stderr, "  wuphf skills publish <slug-or-path> --to <hub>     Open a PR with this skill")
+		fmt.Fprintln(os.Stderr, "  wuphf skills install <name> --from <hub>           Pull a skill into your wiki")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "Hubs: anthropics, lobehub, github:owner/repo")
 	case "upgrade":
 		fmt.Fprintln(os.Stderr, "wuphf upgrade — check npm for a newer wuphf and show the changelog")
 		fmt.Fprintln(os.Stderr, "")
@@ -231,6 +239,8 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  %s log          Show what your agents actually did (task receipts)\n", appName)
 		fmt.Fprintf(os.Stderr, "  %s memory migrate --from {nex,gbrain}  Port legacy memory into the team wiki\n", appName)
 		fmt.Fprintf(os.Stderr, "  %s workspace ...  Manage multiple isolated WUPHF workspaces\n", appName)
+		fmt.Fprintf(os.Stderr, "  %s skills publish <slug> --to <hub>    Publish a team skill to a public hub\n", appName)
+		fmt.Fprintf(os.Stderr, "  %s skills install <name> --from <hub>  Pull a public skill into the team wiki\n", appName)
 		fmt.Fprintf(os.Stderr, "  %s --cmd <cmd>  Run a command non-interactively\n", appName)
 		fmt.Fprintf(os.Stderr, "\nFlags:\n")
 		printVisibleFlags(os.Stderr)
@@ -337,7 +347,10 @@ func main() {
 
 	if len(args) > 0 {
 		sub := args[0]
-		if subcommandWantsHelp(args[1:]) {
+		// `skills` owns its own per-verb help routing (publish/install have
+		// flag-set-level docs), so we never short-circuit to the family
+		// help when there is a verb between `skills` and `--help`.
+		if sub != "skills" && subcommandWantsHelp(args[1:]) {
 			printSubcommandHelp(sub)
 			return
 		}
@@ -382,6 +395,8 @@ func main() {
 			return
 		case "workspace", "ws":
 			runWorkspace(args[1:])
+		case "skills":
+			runSkillsCmd(args[1:])
 			return
 		}
 	}
