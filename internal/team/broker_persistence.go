@@ -70,6 +70,8 @@ func brokerStateActivityScore(state brokerState) int {
 	score += len(state.Decisions) * 4
 	score += len(state.Skills) * 2
 	score += len(state.Policies)
+	score += len(state.HumanInvites) * 2
+	score += len(state.HumanSessions) * 2
 	for _, ns := range state.SharedMemory {
 		score += len(ns)
 	}

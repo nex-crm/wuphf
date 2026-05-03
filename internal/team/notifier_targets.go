@@ -289,7 +289,7 @@ func (l *Launcher) isChannelDMRaw(channelSlug string) (isDM bool, agentTarget st
 			if ok {
 				members := cs.Members(ch.ID)
 				for _, m := range members {
-					if m.Slug != "human" && m.Slug != "you" {
+					if !isHumanMessageSender(m.Slug) {
 						return true, m.Slug
 					}
 				}
@@ -307,7 +307,7 @@ func (l *Launcher) notificationTargetsForMessage(msg channelMessage) (immediate 
 	// DMs are isolated: only the target agent gets notified, never CEO or others.
 	if ch := normalizeChannelSlug(msg.Channel); IsDMSlug(ch) {
 		agentSlug := DMTargetAgent(ch)
-		if agentSlug == msg.From {
+		if !isHumanMessageSender(msg.From) && agentSlug == msg.From {
 			return nil, nil // agent's own message, don't echo back
 		}
 		if target, ok := targetMap[agentSlug]; ok {
@@ -318,7 +318,7 @@ func (l *Launcher) notificationTargetsForMessage(msg channelMessage) (immediate 
 	// Also check the new Store-based DM format.
 	if ch := normalizeChannelSlug(msg.Channel); !IsDMSlug(ch) {
 		if isDM, agentSlug := l.isChannelDM(ch); isDM {
-			if agentSlug == msg.From {
+			if !isHumanMessageSender(msg.From) && agentSlug == msg.From {
 				return nil, nil
 			}
 			if target, ok := targetMap[agentSlug]; ok {
