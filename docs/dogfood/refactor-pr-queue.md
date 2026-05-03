@@ -9,7 +9,8 @@
 | TASK-000 | tasks | Name task HTTP request/response envelopes and register task routes | backend | done | `internal/team/broker_tasks_contracts.go`, task route registry test, focused `internal/team` route/task tests |
 | TASK-WEB-001 | tasks | Move Web task contract out of catch-all API client | frontend | done | `web/src/api/tasks.ts`, `web/src/api/tasks.test.ts`, updated task consumers |
 | TASK-001A | tasks | Extract typed task list and ack services behind task routes | backend | done | `TaskListRequest`, `Broker.ListTasks`, `Broker.AckTask`, `internal/team/broker_tasks_service_test.go`, route contract update |
-| TASK-001 | tasks | Extract create/update service methods | backend | planned | broker task tests, route tests, task detail smoke |
+| TASK-001 | tasks | Extract task POST mutation service | backend | done | `Broker.MutateTask`, `TaskMutationError`, service tests, existing task route tests |
+| TASK-002 | tasks | Split `MutateTask` internals into narrower create/update helpers | backend | planned | broker task tests, mutation service tests |
 | REVIEW-001 | reviews | Define review queue/list/detail/action contract | backend + TUI | planned | review tests, Web parity check, TUI renderer test |
 | WIKI-001 | wiki | Name wiki search/read/write contract | backend + Web | planned | wiki route tests, Web API tests, search modal check |
 | WS-001 | workspaces | Document route-family ownership and service boundary | backend + CLI | planned | workspace broker tests, CLI workspace tests |
