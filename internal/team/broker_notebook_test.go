@@ -451,6 +451,56 @@ func TestBrokerNotebookSearchAllRecordsTaskMemoryLookup(t *testing.T) {
 	}
 }
 
+func TestBrokerNotebookSearchRejectsMissingTaskBeforeDiscovery(t *testing.T) {
+	srv, b, teardown := newNotebookTestServer(t)
+	defer teardown()
+	corruptAgentsDir(t, b.WikiWorker().Repo())
+
+	req, _ := authReq(http.MethodGet, srv.URL+"/notebook/search?slug=all&q=Renewal&task_id=missing", nil, b.Token())
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusNotFound {
+		body, _ := io.ReadAll(res.Body)
+		t.Fatalf("expected 404 before notebook discovery, got %d: %s", res.StatusCode, string(body))
+	}
+}
+
+func TestBrokerNotebookSearchAllSurfacesDiscoveryFailure(t *testing.T) {
+	srv, b, teardown := newNotebookTestServer(t)
+	defer teardown()
+	corruptAgentsDir(t, b.WikiWorker().Repo())
+
+	req, _ := authReq(http.MethodGet, srv.URL+"/notebook/search?slug=all&q=Renewal", nil, b.Token())
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	defer res.Body.Close()
+	body, _ := io.ReadAll(res.Body)
+	if res.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("expected 500 for notebook discovery failure, got %d: %s", res.StatusCode, string(body))
+	}
+	if !strings.Contains(string(body), "read agents dir") {
+		t.Fatalf("expected discovery error in response, got %s", string(body))
+	}
+}
+
+func corruptAgentsDir(t *testing.T, repo *Repo) {
+	t.Helper()
+	agentsPath := filepath.Join(repo.Root(), "agents")
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+	if err := os.RemoveAll(agentsPath); err != nil {
+		t.Fatalf("remove agents dir: %v", err)
+	}
+	if err := os.WriteFile(agentsPath, []byte("not a directory"), 0o600); err != nil {
+		t.Fatalf("write agents file: %v", err)
+	}
+}
+
 func TestEnsureBridgedMemberInitializesNotebookAfterUnlock(t *testing.T) {
 	_, b, teardown := newNotebookTestServer(t)
 	defer teardown()

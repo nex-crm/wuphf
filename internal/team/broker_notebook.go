@@ -460,9 +460,19 @@ func (b *Broker) handleNotebookSearch(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "q is required"})
 		return
 	}
+	taskID := strings.TrimSpace(r.URL.Query().Get("task_id"))
+	if taskID != "" && !b.notebookTaskExists(taskID) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "task not found"})
+		return
+	}
 	var hits []WikiSearchHit
 	if strings.EqualFold(slug, "all") {
-		for _, searchSlug := range b.notebookSearchSlugs(worker) {
+		searchSlugs, err := b.notebookSearchSlugs(worker)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		for _, searchSlug := range searchSlugs {
 			slugHits, err := worker.NotebookSearch(searchSlug, pattern)
 			if err != nil {
 				if isNotebookValidationError(err) {
@@ -486,7 +496,7 @@ func (b *Broker) handleNotebookSearch(w http.ResponseWriter, r *http.Request) {
 		}
 		hits = slugHits
 	}
-	if taskID := strings.TrimSpace(r.URL.Query().Get("task_id")); taskID != "" {
+	if taskID != "" {
 		actor := strings.TrimSpace(r.URL.Query().Get("actor"))
 		citations := make([]ContextCitation, 0, len(hits))
 		for _, hit := range hits {
@@ -527,20 +537,22 @@ func (b *Broker) notebookTaskExists(taskID string) bool {
 	return false
 }
 
-func (b *Broker) notebookSearchSlugs(worker *WikiWorker) []string {
+func (b *Broker) notebookSearchSlugs(worker *WikiWorker) ([]string, error) {
 	seen := map[string]struct{}{}
 	if worker != nil {
-		if notebookSlugs, err := worker.AgentsWithNotebooks(); err == nil {
-			for _, slug := range notebookSlugs {
-				if strings.TrimSpace(slug) != "" {
-					seen[slug] = struct{}{}
-				}
+		notebookSlugs, err := worker.AgentsWithNotebooks()
+		if err != nil {
+			return nil, err
+		}
+		for _, slug := range notebookSlugs {
+			if trimmed := strings.TrimSpace(slug); trimmed != "" {
+				seen[trimmed] = struct{}{}
 			}
 		}
 	}
 	for _, member := range b.OfficeMembers() {
-		if strings.TrimSpace(member.Slug) != "" {
-			seen[member.Slug] = struct{}{}
+		if trimmed := strings.TrimSpace(member.Slug); trimmed != "" {
+			seen[trimmed] = struct{}{}
 		}
 	}
 	slugs := make([]string, 0, len(seen))
@@ -548,7 +560,7 @@ func (b *Broker) notebookSearchSlugs(worker *WikiWorker) []string {
 		slugs = append(slugs, slug)
 	}
 	sort.Strings(slugs)
-	return slugs
+	return slugs, nil
 }
 
 // isNotebookValidationError returns true for errors produced by the notebook
