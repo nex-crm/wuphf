@@ -155,14 +155,15 @@ wuphf skills publish deploy-frontend --to anthropics
 # Dry-run the same publish to inspect the manifest + PR body without opening the PR
 wuphf skills publish deploy-frontend --to anthropics --dry-run
 
-# Publish to a custom GitHub repo (e.g. your org's private fork of anthropics/skills)
+# Publish to a custom GitHub repo (optionally pinning a non-main branch)
 wuphf skills publish deploy-frontend --to github:nex-crm/wuphf-skills
+wuphf skills publish deploy-frontend --to github:nex-crm/wuphf-skills@master
 
 # Pull a community skill into your team's wiki
 wuphf skills install web-research --from anthropics
 ```
 
-Supported hubs: `anthropics`, `lobehub`, or any `github:owner/repo`. Publish requires `gh auth login` first; install only needs network access since it fetches public raw URLs.
+Supported hubs: `anthropics`, `lobehub`, or any `github:owner/repo[@branch]`. Custom GitHub hubs default to `main` unless a branch is specified. Publish requires `gh auth login` first; install only needs network access since it fetches public raw URLs.
 
 ## What You Should See
 

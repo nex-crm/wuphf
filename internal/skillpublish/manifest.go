@@ -1,6 +1,6 @@
 // Package skillpublish carries the pure logic for turning a compiled WUPHF
 // skill into a publishable manifest for one of the public agent-skill hubs
-// (anthropics/skills, lobehub, or any github:owner/repo fork).
+// (anthropics/skills, lobehub, or any github:owner/repo[@branch] fork).
 //
 // All identifiers and URL templates live in this package so adding a new hub
 // is a single map entry plus one switch arm — no CLI plumbing required.
@@ -26,7 +26,7 @@ type Hub string
 const (
 	HubAnthropics Hub = "anthropics"
 	HubLobeHub    Hub = "lobehub"
-	// HubGitHubPrefix marks a one-off `github:owner/repo` target. The full
+	// HubGitHubPrefix marks a one-off `github:owner/repo[@branch]` target. The full
 	// hub string keeps the prefix attached so callers can pass it through
 	// unmodified — `IsGitHubScheme` is the canonical detector.
 	HubGitHubPrefix = "github:"
@@ -37,25 +37,27 @@ const (
 // detect it via IsGitHubScheme.
 var KnownHubs = []Hub{HubAnthropics, HubLobeHub}
 
-// IsGitHubScheme reports whether the hub string is a `github:owner/repo`
+// IsGitHubScheme reports whether the hub string is a `github:owner/repo[@branch]`
 // target rather than a named registry.
 func IsGitHubScheme(hub string) bool {
 	return strings.HasPrefix(strings.TrimSpace(hub), HubGitHubPrefix)
 }
 
-// ParseGitHubScheme splits a `github:owner/repo` hub string into (owner, repo).
-// Returns an error when the scheme is malformed.
-func ParseGitHubScheme(hub string) (owner, repo string, err error) {
+// ParseGitHubScheme splits a `github:owner/repo[@branch]` hub string into
+// (owner, repo, branch). Branch is optional; callers fall back to their hub
+// default when it is blank.
+func ParseGitHubScheme(hub string) (owner, repo, branch string, err error) {
 	hub = strings.TrimSpace(hub)
 	if !IsGitHubScheme(hub) {
-		return "", "", fmt.Errorf("skillpublish: not a github: scheme: %q", hub)
+		return "", "", "", fmt.Errorf("skillpublish: not a github: scheme: %q", hub)
 	}
 	body := strings.TrimPrefix(hub, HubGitHubPrefix)
-	parts := strings.SplitN(body, "/", 2)
-	if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
-		return "", "", fmt.Errorf("skillpublish: github scheme must be github:owner/repo, got %q", hub)
+	repoPart, branch, hasBranch := strings.Cut(body, "@")
+	parts := strings.Split(repoPart, "/")
+	if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" || (hasBranch && strings.TrimSpace(branch) == "") {
+		return "", "", "", fmt.Errorf("skillpublish: github scheme must be github:owner/repo[@branch], got %q", hub)
 	}
-	return strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]), nil
+	return strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]), strings.TrimSpace(branch), nil
 }
 
 // Manifest is the wire-shape WUPHF emits per published skill. Frontmatter
@@ -175,8 +177,8 @@ func sanitizeSourceSegment(in string) string {
 }
 
 // HubURL returns the canonical raw-content base URL for a published skill on
-// the named hub. For the `github:owner/repo` scheme, this returns the raw
-// URL pointing at the default-branch (`main`) copy of the SKILL.md.
+// the named hub. For the `github:owner/repo[@branch]` scheme, this returns the
+// raw URL pointing at the selected branch copy of the SKILL.md.
 //
 // The returned URL is suitable for `wuphf skills install` — drop in `name`
 // and the install path will fetch a public, unauthenticated raw markdown
@@ -187,13 +189,16 @@ func HubURL(hub, name string) (string, error) {
 		return "", errors.New("skillpublish: name is required")
 	}
 	if IsGitHubScheme(hub) {
-		owner, repo, err := ParseGitHubScheme(hub)
+		owner, repo, branch, err := ParseGitHubScheme(hub)
 		if err != nil {
 			return "", err
 		}
+		if branch == "" {
+			branch = "main"
+		}
 		return fmt.Sprintf(
-			"https://raw.githubusercontent.com/%s/%s/main/skills/%s/SKILL.md",
-			url.PathEscape(owner), url.PathEscape(repo), url.PathEscape(name),
+			"https://raw.githubusercontent.com/%s/%s/%s/skills/%s/SKILL.md",
+			url.PathEscape(owner), url.PathEscape(repo), url.PathEscape(branch), url.PathEscape(name),
 		), nil
 	}
 	switch Hub(strings.TrimSpace(hub)) {
@@ -210,7 +215,7 @@ func HubURL(hub, name string) (string, error) {
 			url.PathEscape(name),
 		), nil
 	default:
-		return "", fmt.Errorf("skillpublish: unknown hub %q (known: anthropics, lobehub, github:owner/repo)", hub)
+		return "", fmt.Errorf("skillpublish: unknown hub %q (known: anthropics, lobehub, github:owner/repo[@branch])", hub)
 	}
 }
 
@@ -233,15 +238,16 @@ func HubFilePath(hub, name string) (string, error) {
 	case HubLobeHub:
 		return fmt.Sprintf("agents/%s.md", name), nil
 	default:
-		return "", fmt.Errorf("skillpublish: unknown hub %q (known: anthropics, lobehub, github:owner/repo)", hub)
+		return "", fmt.Errorf("skillpublish: unknown hub %q (known: anthropics, lobehub, github:owner/repo[@branch])", hub)
 	}
 }
 
 // HubRepo returns the `owner/repo` slug for the hub. Used by `gh pr create`
-// and PR-URL templates. github:owner/repo schemes round-trip unchanged.
+// and PR-URL templates. github:owner/repo[@branch] schemes drop the optional
+// branch because GitHub repository slugs are always owner/repo.
 func HubRepo(hub string) (string, error) {
 	if IsGitHubScheme(hub) {
-		owner, repo, err := ParseGitHubScheme(hub)
+		owner, repo, _, err := ParseGitHubScheme(hub)
 		if err != nil {
 			return "", err
 		}
@@ -253,7 +259,7 @@ func HubRepo(hub string) (string, error) {
 	case HubLobeHub:
 		return "lobehub/lobe-chat-agents", nil
 	default:
-		return "", fmt.Errorf("skillpublish: unknown hub %q (known: anthropics, lobehub, github:owner/repo)", hub)
+		return "", fmt.Errorf("skillpublish: unknown hub %q (known: anthropics, lobehub, github:owner/repo[@branch])", hub)
 	}
 }
 
@@ -263,6 +269,12 @@ func HubRepo(hub string) (string, error) {
 // made the call site look configurable when it wasn't — clearer to
 // switch when a real divergence appears.
 func HubBaseBranch(hub string) string {
+	if IsGitHubScheme(hub) {
+		_, _, branch, err := ParseGitHubScheme(hub)
+		if err == nil && branch != "" {
+			return branch
+		}
+	}
 	switch Hub(hub) {
 	case HubAnthropics, HubLobeHub:
 		return "main"
