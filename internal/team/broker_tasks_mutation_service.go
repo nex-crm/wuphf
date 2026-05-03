@@ -96,6 +96,9 @@ func reconcileTaskReviewState(task *teamTask, action string) {
 		return
 	}
 	if !taskNeedsStructuredReview(task) {
+		// For new create actions, leave task.ReviewState empty so downstream logic
+		// can detect an uninitialized state; other actions or pre-set values
+		// normalize to not_required when taskNeedsStructuredReview is false.
 		if strings.TrimSpace(task.ReviewState) != "" || !strings.EqualFold(strings.TrimSpace(action), "create") {
 			task.ReviewState = "not_required"
 		}
