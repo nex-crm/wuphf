@@ -3,6 +3,7 @@ package team
 import (
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -46,7 +47,8 @@ func taskMutationError(kind TaskMutationErrorKind, message string, cause error) 
 func writeTaskMutationHTTPError(w http.ResponseWriter, err error) {
 	var mutationErr *TaskMutationError
 	if !errors.As(err, &mutationErr) {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		log.Printf("task mutation: unexpected error: %v", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 
@@ -64,6 +66,19 @@ func writeTaskMutationHTTPError(w http.ResponseWriter, err error) {
 		status = http.StatusInternalServerError
 	}
 	http.Error(w, mutationErr.Message, status)
+}
+
+func trimTaskDependencies(deps []string) []string {
+	if len(deps) == 0 {
+		return nil
+	}
+	trimmedDeps := make([]string, 0, len(deps))
+	for _, dep := range deps {
+		if trimmed := strings.TrimSpace(dep); trimmed != "" {
+			trimmedDeps = append(trimmedDeps, trimmed)
+		}
+	}
+	return trimmedDeps
 }
 
 func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
@@ -171,7 +186,7 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 			SourceDecisionID: strings.TrimSpace(body.SourceDecisionID),
 			WorktreePath:     strings.TrimSpace(body.WorktreePath),
 			WorktreeBranch:   strings.TrimSpace(body.WorktreeBranch),
-			DependsOn:        body.DependsOn,
+			DependsOn:        trimTaskDependencies(body.DependsOn),
 			CreatedAt:        now,
 			UpdatedAt:        now,
 		}

@@ -2,6 +2,7 @@ package team
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 )
 
@@ -19,5 +20,7 @@ func (b *Broker) handlePostTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(result)
+	if err := json.NewEncoder(w).Encode(result); err != nil {
+		log.Printf("tasks post: encode response: %v", err)
+	}
 }

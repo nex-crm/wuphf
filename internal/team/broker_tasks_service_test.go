@@ -173,6 +173,147 @@ func TestMutateTaskCreatesAndCompletesTask(t *testing.T) {
 	}
 }
 
+func TestMutateTaskReusesExistingTask(t *testing.T) {
+	b := newTestBroker(t)
+	b.channels = []teamChannel{
+		{Slug: "general", Name: "general", Members: []string{"pm"}},
+	}
+	b.tasks = []teamTask{
+		{ID: "task-1", Channel: "general", Title: "Write the plan", Owner: "alice", Status: "open"},
+	}
+
+	got, err := b.MutateTask(TaskPostRequest{
+		Action:    "create",
+		Channel:   "general",
+		Title:     " Write the plan ",
+		Details:   " Updated details ",
+		Owner:     "alice",
+		CreatedBy: "pm",
+	})
+	if err != nil {
+		t.Fatalf("MutateTask create reuse: %v", err)
+	}
+	if got.Task.ID != "task-1" {
+		t.Fatalf("expected reusable task id task-1, got %q", got.Task.ID)
+	}
+	if len(b.tasks) != 1 {
+		t.Fatalf("expected reusable task without appending, got %+v", b.tasks)
+	}
+	if b.tasks[0].Details != "Updated details" {
+		t.Fatalf("expected reused task details to update, got %q", b.tasks[0].Details)
+	}
+}
+
+func TestMutateTaskTrimsDependenciesAndBlocksUnresolved(t *testing.T) {
+	b := newTestBroker(t)
+	b.channels = []teamChannel{
+		{Slug: "general", Name: "general", Members: []string{"pm"}},
+	}
+	b.tasks = []teamTask{
+		{ID: "parent-done", Channel: "general", Title: "Parent", Status: "done"},
+	}
+
+	got, err := b.MutateTask(TaskPostRequest{
+		Action:    "create",
+		Channel:   "general",
+		Title:     "Blocked child",
+		Owner:     "alice",
+		CreatedBy: "pm",
+		DependsOn: []string{" parent-done ", " ", " missing-parent "},
+	})
+	if err != nil {
+		t.Fatalf("MutateTask create with dependencies: %v", err)
+	}
+	if got.Task.Status != "open" || !got.Task.Blocked {
+		t.Fatalf("expected unresolved dependency to block open task, got status=%q blocked=%v", got.Task.Status, got.Task.Blocked)
+	}
+	if len(got.Task.DependsOn) != 2 {
+		t.Fatalf("expected empty dependency entries to be removed, got %+v", got.Task.DependsOn)
+	}
+	assertTaskIDs(t, []teamTask{{ID: got.Task.DependsOn[0]}, {ID: got.Task.DependsOn[1]}}, []string{"parent-done", "missing-parent"})
+}
+
+func TestMutateTaskAppliesStateActions(t *testing.T) {
+	cases := []struct {
+		name        string
+		task        teamTask
+		req         TaskPostRequest
+		wantStatus  string
+		wantOwner   string
+		wantBlocked bool
+	}{
+		{
+			name:       "claim",
+			task:       teamTask{ID: "task-1", Channel: "general", Title: "Task", Status: "open"},
+			req:        TaskPostRequest{Action: "claim", Owner: "alice"},
+			wantStatus: "in_progress",
+			wantOwner:  "alice",
+		},
+		{
+			name:       "reassign",
+			task:       teamTask{ID: "task-1", Channel: "general", Title: "Task", Owner: "alice", Status: "in_progress"},
+			req:        TaskPostRequest{Action: "reassign", Owner: "bob"},
+			wantStatus: "in_progress",
+			wantOwner:  "bob",
+		},
+		{
+			name:        "block",
+			task:        teamTask{ID: "task-1", Channel: "general", Title: "Task", Owner: "alice", Status: "in_progress"},
+			req:         TaskPostRequest{Action: "block", Details: "waiting on input"},
+			wantStatus:  "blocked",
+			wantOwner:   "alice",
+			wantBlocked: true,
+		},
+		{
+			name:       "resume",
+			task:       teamTask{ID: "task-1", Channel: "general", Title: "Task", Owner: "alice", Status: "blocked", Blocked: true},
+			req:        TaskPostRequest{Action: "resume", Details: "ready again"},
+			wantStatus: "in_progress",
+			wantOwner:  "alice",
+		},
+		{
+			name:       "release",
+			task:       teamTask{ID: "task-1", Channel: "general", Title: "Task", Owner: "alice", Status: "in_progress"},
+			req:        TaskPostRequest{Action: "release"},
+			wantStatus: "open",
+		},
+		{
+			name:       "cancel",
+			task:       teamTask{ID: "task-1", Channel: "general", Title: "Task", Owner: "alice", Status: "in_progress", Blocked: true},
+			req:        TaskPostRequest{Action: "cancel"},
+			wantStatus: "canceled",
+			wantOwner:  "alice",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			b := newTestBroker(t)
+			b.channels = []teamChannel{
+				{Slug: "general", Name: "general", Members: []string{"pm"}},
+			}
+			b.tasks = []teamTask{tc.task}
+			tc.req.ID = "task-1"
+			tc.req.Channel = "general"
+			tc.req.CreatedBy = "pm"
+
+			got, err := b.MutateTask(tc.req)
+			if err != nil {
+				t.Fatalf("MutateTask %s: %v", tc.req.Action, err)
+			}
+			if got.Task.Status != tc.wantStatus {
+				t.Fatalf("status: want %q, got %q", tc.wantStatus, got.Task.Status)
+			}
+			if got.Task.Owner != tc.wantOwner {
+				t.Fatalf("owner: want %q, got %q", tc.wantOwner, got.Task.Owner)
+			}
+			if got.Task.Blocked != tc.wantBlocked {
+				t.Fatalf("blocked: want %v, got %v", tc.wantBlocked, got.Task.Blocked)
+			}
+		})
+	}
+}
+
 func TestMutateTaskReturnsTypedErrors(t *testing.T) {
 	b := newTestBroker(t)
 	b.channels = []teamChannel{
