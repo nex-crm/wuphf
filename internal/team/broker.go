@@ -620,8 +620,7 @@ func (b *Broker) Stop() {
 // Caller must hold b.mu.
 func (b *Broker) senderMayAutoPromoteLocked(from string) bool {
 	from = normalizeActorSlug(from)
-	switch from {
-	case "", "you", "human":
+	if isHumanMessageSender(from) {
 		return true
 	}
 	return b.findMemberLocked(from) != nil

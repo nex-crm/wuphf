@@ -22,10 +22,12 @@ import (
 //   - Cancellation: r.Context().Done() — every loop checks it first.
 
 func (b *Broker) handleEvents(w http.ResponseWriter, r *http.Request) {
-	if !b.requestHasBrokerAuth(r) {
+	actor, ok := b.requestActorFromRequest(r)
+	if !ok {
 		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 		return
 	}
+	r = requestWithActor(r, actor)
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -107,7 +109,13 @@ func (b *Broker) handleEvents(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		case evt, ok := <-notebookEvents:
-			if !ok || writeEvent("notebook:write", evt) != nil {
+			if !ok {
+				return
+			}
+			if actor.Kind == requestActorKindHuman {
+				continue
+			}
+			if writeEvent("notebook:write", evt) != nil {
 				return
 			}
 		case evt, ok := <-entityEvents:

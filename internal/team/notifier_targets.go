@@ -412,7 +412,7 @@ func (l *Launcher) notificationTargetsForMessage(msg channelMessage) (immediate 
 	// when explicitly tagged by CEO or human. No cross-agent chatter.
 	if l.isFocusModeEnabled() {
 		switch {
-		case msg.From == "you" || msg.From == "human" || msg.Kind == "automation" || msg.From == "nex":
+		case isHumanMessageSender(msg.From) || msg.Kind == "automation" || msg.From == "nex":
 			// When the human explicitly @tags one or more specialists, deliver directly
 			// to those specialists only. CEO does not need to re-route explicit assignments —
 			// the specialist is already awake and acting. CEO only sees untagged human messages
@@ -460,7 +460,7 @@ func (l *Launcher) notificationTargetsForMessage(msg channelMessage) (immediate 
 
 	// Collaborative mode: all agents can see domain-relevant messages
 	switch {
-	case msg.From == "you" || msg.From == "human" || msg.Kind == "automation" || msg.From == "nex":
+	case isHumanMessageSender(msg.From) || msg.Kind == "automation" || msg.From == "nex":
 		// @all: notify every agent immediately.
 		if containsSlug(msg.Tagged, "all") {
 			addImmediate(lead)

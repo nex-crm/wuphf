@@ -36,7 +36,7 @@ func (b *Broker) canAccessChannelLocked(slug, channel string) bool {
 	slug = normalizeActorSlug(slug)
 	channel = normalizeChannelSlug(channel)
 	if b.sessionMode == SessionModeOneOnOne {
-		if slug == "" || slug == "you" || slug == "human" {
+		if isHumanMessageSender(slug) {
 			return true
 		}
 		return slug == b.oneOnOneAgent
@@ -44,7 +44,7 @@ func (b *Broker) canAccessChannelLocked(slug, channel string) bool {
 	// NOTE: any new entry added here MUST also be added to
 	// reservedChannelSlugs above so the channel-create handler keeps the
 	// invariant "no user channel can shadow a trusted sender slug".
-	if slug == "" || slug == "you" || slug == "human" || slug == "nex" || slug == "system" {
+	if isHumanMessageSender(slug) || slug == "nex" || slug == "system" {
 		return true
 	}
 	if slug == "ceo" {

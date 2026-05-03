@@ -68,6 +68,9 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
+	if actor, ok := requestActorFromContext(r.Context()); ok && actor.Kind == requestActorKindHuman {
+		body.From = humanMessageSender(actor.Slug)
+	}
 
 	b.mu.Lock()
 	if firstBlockingRequest(b.requests) != nil {
@@ -134,7 +137,7 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	// explicit tag), spawning two turns with nearly identical answers.
 	tagged := uniqueSlugs(body.Tagged)
 	sender := normalizeActorSlug(body.From)
-	isHuman := sender == "" || sender == "you" || sender == "human"
+	isHuman := isHumanMessageSender(sender)
 	leadSlug := officeLeadSlugFrom(b.members)
 	mentionedSlugs := extractMentionedSlugs(body.Content)
 	leadExplicitlyTagged := leadSlug != "" && containsString(tagged, leadSlug)
@@ -175,15 +178,15 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	// routing (specialist → lead only) already handles that path, and
 	// auto-tagging agent replies causes broadcast loops.
 	replyTo := strings.TrimSpace(body.ReplyTo)
-	isHumanSender := sender == "" || sender == "you" || sender == "human"
+	isHumanSender := isHumanMessageSender(sender)
 	if replyTo != "" && isHumanSender {
 		threadRoot := replyTo
 		threadParticipants := []string{}
 		for _, existing := range b.messages {
 			inThread := existing.ID == threadRoot || existing.ReplyTo == threadRoot
 			if inThread && existing.From != body.From {
-				// Include agents (skip "you"/"human" — they see via the web UI poll)
-				if existing.From != "you" && existing.From != "human" && b.findMemberLocked(existing.From) != nil {
+				// Include agents; humans see via the web UI poll.
+				if !isHumanMessageSender(existing.From) && b.findMemberLocked(existing.From) != nil {
 					threadParticipants = append(threadParticipants, existing.From)
 				}
 			}
@@ -233,7 +236,7 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	total := len(b.messages)
 
 	// Track which agents were tagged — they should show "typing" immediately
-	if len(msg.Tagged) > 0 && (msg.From == "you" || msg.From == "human") {
+	if len(msg.Tagged) > 0 && isHumanMessageSender(msg.From) {
 		if b.lastTaggedAt == nil {
 			b.lastTaggedAt = make(map[string]time.Time)
 		}
@@ -243,7 +246,7 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Clear typing indicator when an agent posts a reply
-	if msg.From != "you" && msg.From != "human" && b.lastTaggedAt != nil {
+	if !isHumanMessageSender(msg.From) && b.lastTaggedAt != nil {
 		delete(b.lastTaggedAt, msg.From)
 	}
 

@@ -42,7 +42,7 @@ func (m channelModel) handleChannelMsg(msg channelMsg) (channelModel, tea.Cmd) {
 			m.lastAgentContent = make(map[string]string)
 		}
 		for _, bm := range addedMessages {
-			if bm.From != "" && bm.From != "you" && bm.From != "human" && bm.Content != "" {
+			if !channelui.IsHumanSender(bm.From) && bm.Content != "" {
 				snippet := strings.TrimSpace(bm.Content)
 				if len([]rune(snippet)) > 38 {
 					runes := []rune(snippet)

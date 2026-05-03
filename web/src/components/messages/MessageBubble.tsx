@@ -44,7 +44,10 @@ export function MessageBubble({
 }: MessageBubbleProps) {
   const currentChannel = useAppStore((s) => s.currentChannel);
   const { data: members = [] } = useOfficeMembers();
-  const isHuman = message.from === "you" || message.from === "human";
+  const isHuman =
+    message.from === "you" ||
+    message.from === "human" ||
+    message.from.startsWith("human:");
   const agent = members.find((m) => m.slug === message.from);
   const defaultHarness = useDefaultHarness();
   const harness = !isHuman

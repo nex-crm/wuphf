@@ -62,8 +62,8 @@ func generateToken() string {
 // broker_workspaces_test.go covers both call sites.
 func (b *Broker) withAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if b.requestHasBrokerAuth(r) {
-			next(w, r)
+		if actor, ok := b.requestActorFromRequest(r); ok {
+			next(w, requestWithActor(r, actor))
 			return
 		}
 		// Honor the documented JSON contract: http.Error sets text/plain

@@ -247,12 +247,10 @@ func firstActiveHumanInterview(requests []humanInterview) *humanInterview {
 }
 
 func humanSenderMayCancelInterviews(sender string) bool {
-	switch normalizeActorSlug(sender) {
-	case "", "you", "human":
+	if isHumanMessageSender(sender) {
 		return true
-	default:
-		return false
 	}
+	return false
 }
 
 func (b *Broker) cancelRequestLocked(req *humanInterview, actor, reason string) {

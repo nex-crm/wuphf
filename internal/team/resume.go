@@ -22,7 +22,7 @@ var staleUnansweredThreshold = time.Hour
 // source (not an agent). Only agent replies count as "answers".
 func isHumanOrSystemSender(from string) bool {
 	f := strings.ToLower(strings.TrimSpace(from))
-	return f == "you" || f == "human" || f == "nex" || f == "system" || f == ""
+	return isHumanMessageSender(f) || f == "nex" || f == "system"
 }
 
 // findUnansweredMessages returns the subset of humanMsgs that have received no

@@ -305,7 +305,7 @@ func newShareHandler(brokerURL, brokerToken string, onJoin func()) http.Handler 
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]string{"token": "", "broker_url": ""})
 	})
-	mux.Handle("/api/", shareProxyHandler(brokerURL, brokerToken))
+	mux.Handle("/api/", shareProxyHandler(brokerURL))
 	mux.Handle("/", shareStaticHandler())
 	return mux
 }
@@ -328,7 +328,7 @@ func shareRequestHasSession(r *http.Request, brokerURL string) bool {
 	return resp.StatusCode == http.StatusOK
 }
 
-func shareProxyHandler(brokerURL, brokerToken string) http.Handler {
+func shareProxyHandler(brokerURL string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !shareRequestHasSession(r, brokerURL) {
 			http.Error(w, `{"error":"session_required"}`, http.StatusUnauthorized)
@@ -351,7 +351,6 @@ func shareProxyHandler(brokerURL, brokerToken string) http.Handler {
 			http.Error(w, "proxy error", http.StatusBadGateway)
 			return
 		}
-		req.Header.Set("Authorization", "Bearer "+brokerToken)
 		req.Header.Set("Content-Type", r.Header.Get("Content-Type"))
 		req.Header.Set("Cookie", r.Header.Get("Cookie"))
 		client := http.DefaultClient
