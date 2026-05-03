@@ -2,6 +2,7 @@ package team
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -129,47 +130,34 @@ func (b *Broker) handleTaskAck(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	var body struct {
-		ID      string `json:"id"`
-		Channel string `json:"channel"`
-		Slug    string `json:"slug"`
-	}
+	var body TaskAckRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
-	taskID := strings.TrimSpace(body.ID)
-	slug := strings.TrimSpace(body.Slug)
-	channel := normalizeChannelSlug(body.Channel)
-	if channel == "" {
-		channel = "general"
-	}
-	if taskID == "" || slug == "" {
+	result, err := b.AckTask(body)
+	if errors.Is(err, errTaskAckInvalid) {
 		http.Error(w, "id and slug required", http.StatusBadRequest)
 		return
 	}
-
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	for i := range b.tasks {
-		if b.tasks[i].ID == taskID && normalizeChannelSlug(b.tasks[i].Channel) == channel {
-			if b.tasks[i].Owner != slug {
-				http.Error(w, "only the task owner can ack", http.StatusForbidden)
-				return
-			}
-			now := time.Now().UTC().Format(time.RFC3339)
-			b.tasks[i].AckedAt = now
-			b.tasks[i].UpdatedAt = now
-			if err := b.saveLocked(); err != nil {
-				http.Error(w, "failed to persist", http.StatusInternalServerError)
-				return
-			}
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]any{"task": b.tasks[i]})
-			return
-		}
+	if errors.Is(err, errTaskAckOwnerOnly) {
+		http.Error(w, "only the task owner can ack", http.StatusForbidden)
+		return
 	}
-	http.Error(w, "task not found", http.StatusNotFound)
+	if errors.Is(err, errTaskNotFound) {
+		http.Error(w, "task not found", http.StatusNotFound)
+		return
+	}
+	if errors.Is(err, errTaskPersistFailed) {
+		http.Error(w, "failed to persist", http.StatusInternalServerError)
+		return
+	}
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(result)
 }
 
 func (b *Broker) EnsureTask(channel, title, details, owner, createdBy, threadID string, dependsOn ...string) (teamTask, bool, error) {

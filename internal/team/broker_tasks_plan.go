@@ -13,18 +13,7 @@ func (b *Broker) handleTaskPlan(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	var body struct {
-		Channel   string `json:"channel"`
-		CreatedBy string `json:"created_by"`
-		Tasks     []struct {
-			Title         string   `json:"title"`
-			Assignee      string   `json:"assignee"`
-			Details       string   `json:"details"`
-			TaskType      string   `json:"task_type"`
-			ExecutionMode string   `json:"execution_mode"`
-			DependsOn     []string `json:"depends_on"`
-		} `json:"tasks"`
-	}
+	var body TaskPlanRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
@@ -164,7 +153,7 @@ func (b *Broker) handleTaskPlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{"tasks": created})
+	_ = json.NewEncoder(w).Encode(TaskListResponse{Tasks: created})
 }
 
 type plannedTaskInput struct {

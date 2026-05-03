@@ -2,9 +2,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
+import { getOfficeMembers, type OfficeMember } from "../../api/client";
 import {
-  getOfficeMembers,
-  type OfficeMember,
   reassignTask,
   type Task,
   type TaskMemoryWorkflow,
@@ -14,7 +13,7 @@ import {
   type TaskMemoryWorkflowStepState,
   type TaskStatusAction,
   updateTaskStatus,
-} from "../../api/client";
+} from "../../api/tasks";
 import { formatRelativeTime } from "../../lib/format";
 import { keyedByOccurrence } from "../../lib/reactKeys";
 import { confirm } from "../ui/ConfirmDialog";

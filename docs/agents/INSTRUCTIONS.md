@@ -69,6 +69,8 @@ Use this profile for the Wuphf public repo and its worktrees.
 go build -o wuphf ./cmd/wuphf
 bash scripts/test-go.sh
 bash scripts/test-go.sh ./internal/team
+bash scripts/test-web.sh
+bash scripts/test-web.sh web/src/path/to/file.test.ts
 ```
 
 Web UI commands run from `web/`:
@@ -78,10 +80,13 @@ bun install
 bun run dev
 bun run build
 bunx tsc --noEmit
-bun test
 ```
 
-Always use `bun` / `bunx` for JavaScript tooling in this repo.
+Always use `bun` / `bunx` for JavaScript tooling in this repo. Web unit and
+component tests run through Vitest. Use `bash scripts/test-web.sh` for the full
+Web suite and `bash scripts/test-web.sh web/src/path/to/file.test.ts` for
+focused Web tests; do not use `bun test` inside `web/`, because that invokes
+Bun's native test runner instead of the repo's Vitest setup.
 
 ### PR And Hooks
 

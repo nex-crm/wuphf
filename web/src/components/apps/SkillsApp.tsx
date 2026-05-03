@@ -7,19 +7,17 @@ import {
   type CompileResponse,
   type CompileResult,
   compileSkills,
-  createTasks,
   disableSkill,
   enableSkill,
-  getOfficeTasks,
   getSkillsList,
   invokeSkill,
   rejectSkill,
   restoreArchivedSkill,
   type Skill,
   type SkillStatus,
-  type Task,
   undoRejectSkill,
 } from "../../api/client";
+import { createTasks, getOfficeTasks, type Task } from "../../api/tasks";
 import { useTeamLeadSlug } from "../../hooks/useConfig";
 import { useOfficeMembers } from "../../hooks/useMembers";
 import { useAppStore } from "../../stores/app";

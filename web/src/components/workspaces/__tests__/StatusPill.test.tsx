@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { UsageData } from "../../../api/client";
+import type { UsageData } from "../../../api/platform";
 import type { Workspace, WorkspaceListResponse } from "../../../api/workspaces";
 import { StatusPill } from "../StatusPill";
 
@@ -15,15 +15,15 @@ vi.mock("../../../api/workspaces", async (importOriginal) => {
   };
 });
 
-vi.mock("../../../api/client", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../../api/client")>();
+vi.mock("../../../api/platform", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../api/platform")>();
   return {
     ...actual,
     getUsage: vi.fn(),
   };
 });
 
-import { getUsage } from "../../../api/client";
+import { getUsage } from "../../../api/platform";
 import { useWorkspacesList } from "../../../api/workspaces";
 
 const useWorkspacesListMock = vi.mocked(useWorkspacesList);

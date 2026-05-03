@@ -15,8 +15,13 @@
 !/docs/REVOPS_TEST_PLAN.md
 !/docs/CODE-QUALITY.md
 !/docs/surfaces.md
+!/docs/surfaces_test.go
 !/docs/adr/
 !/docs/adr/**
+!/docs/architecture/
+!/docs/architecture/**
+!/docs/dogfood/
+!/docs/dogfood/**
 /termwright-artifacts/
 .worktrees/
 .vexp/

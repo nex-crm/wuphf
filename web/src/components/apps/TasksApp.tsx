@@ -3,7 +3,8 @@
 import { type DragEvent, useCallback, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { getOfficeTasks, post, type Task } from "../../api/client";
+import { post } from "../../api/client";
+import { getOfficeTasks, type Task } from "../../api/tasks";
 import { formatRelativeTime } from "../../lib/format";
 import { showNotice } from "../ui/Toast";
 import { TaskDetailModal, taskMemoryWorkflowBadge } from "./TaskDetailModal";

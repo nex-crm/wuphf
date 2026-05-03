@@ -80,17 +80,7 @@ func (b *Broker) handleTaskMemoryWorkflow(w http.ResponseWriter, r *http.Request
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	var body struct {
-		Action     string                   `json:"action"`
-		Event      string                   `json:"event"`
-		TaskID     string                   `json:"task_id"`
-		Actor      string                   `json:"actor"`
-		Query      string                   `json:"query"`
-		Citations  []ContextCitation        `json:"citations"`
-		Artifact   MemoryWorkflowArtifact   `json:"artifact"`
-		Artifacts  []MemoryWorkflowArtifact `json:"artifacts"`
-		SkipReason string                   `json:"skip_reason"`
-	}
+	var body TaskMemoryWorkflowRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
@@ -152,7 +142,7 @@ func (b *Broker) handleTaskMemoryWorkflow(w http.ResponseWriter, r *http.Request
 		http.Error(w, "task not found", http.StatusNotFound)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"task": task, "updated": changed})
+	writeJSON(w, http.StatusOK, TaskMemoryWorkflowResponse{Task: task, Updated: changed})
 }
 
 func validatedMemoryWorkflowArtifacts(action string, artifact MemoryWorkflowArtifact, artifacts []MemoryWorkflowArtifact, skipReason string) ([]MemoryWorkflowArtifact, error) {
@@ -185,5 +175,5 @@ func (b *Broker) handleTaskMemoryWorkflowReconcile(w http.ResponseWriter, r *htt
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"report": report})
+	writeJSON(w, http.StatusOK, TaskMemoryWorkflowReconcileResponse{Report: report})
 }

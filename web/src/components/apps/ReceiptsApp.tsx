@@ -6,7 +6,7 @@ import {
   listAgentLogTasks,
   type TaskLogEntry,
   type TaskLogSummary,
-} from "../../api/client";
+} from "../../api/tasks";
 import { keyedByOccurrence } from "../../lib/reactKeys";
 
 export function ReceiptsApp() {

@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 
-import { getHealth } from "../../api/client";
+import { getHealth } from "../../api/platform";
 
 export function HealthCheckApp() {
   const { data, isLoading, error } = useQuery({
