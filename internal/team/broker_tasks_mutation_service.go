@@ -125,6 +125,7 @@ func reconcileTaskReviewState(task *teamTask, action string) {
 
 func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 	action := strings.TrimSpace(body.Action)
+	actor := strings.TrimSpace(body.CreatedBy)
 	now := time.Now().UTC().Format(time.RFC3339)
 	channel := normalizeChannelSlug(body.Channel)
 	if channel == "" {
@@ -137,10 +138,10 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 		if b.findChannelLocked(channel) == nil {
 			return TaskResponse{}, taskMutationError(TaskMutationNotFound, "channel not found", nil)
 		}
-		if strings.TrimSpace(body.Title) == "" || strings.TrimSpace(body.CreatedBy) == "" {
+		if strings.TrimSpace(body.Title) == "" || actor == "" {
 			return TaskResponse{}, taskMutationError(TaskMutationInvalid, "title and created_by required", nil)
 		}
-		if !b.canAccessChannelLocked(body.CreatedBy, channel) {
+		if !b.canAccessChannelLocked(actor, channel) {
 			return TaskResponse{}, taskMutationError(TaskMutationForbidden, "channel access denied", nil)
 		}
 
@@ -204,7 +205,7 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 				rollbackTask()
 				return TaskResponse{}, taskMutationError(TaskMutationWorktreeFailed, "failed to manage task worktree", err)
 			}
-			b.appendActionLocked("task_updated", "office", channel, strings.TrimSpace(body.CreatedBy), truncateSummary(existing.Title+" ["+existing.Status+"]", 140), existing.ID)
+			b.appendActionLocked("task_updated", "office", channel, actor, truncateSummary(existing.Title+" ["+existing.Status+"]", 140), existing.ID)
 			if err := b.saveLocked(); err != nil {
 				rollbackTask()
 				return TaskResponse{}, taskMutationError(TaskMutationPersistFailed, "failed to persist broker state", err)
@@ -219,7 +220,7 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 			Details:          strings.TrimSpace(body.Details),
 			Owner:            strings.TrimSpace(body.Owner),
 			Status:           "open",
-			CreatedBy:        strings.TrimSpace(body.CreatedBy),
+			CreatedBy:        actor,
 			ThreadID:         strings.TrimSpace(body.ThreadID),
 			TaskType:         strings.TrimSpace(body.TaskType),
 			PipelineID:       strings.TrimSpace(body.PipelineID),
@@ -278,7 +279,7 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 			return TaskResponse{}, taskMutationError(TaskMutationNotFound, "channel not found", nil)
 		}
 		// Authorize against the task's actual channel, not caller-supplied body.Channel.
-		if !b.canAccessChannelLocked(body.CreatedBy, taskChannel) {
+		if !b.canAccessChannelLocked(actor, taskChannel) {
 			return TaskResponse{}, taskMutationError(TaskMutationForbidden, "channel access denied", nil)
 		}
 		appendDetails := false
@@ -417,7 +418,7 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 		if strings.EqualFold(strings.TrimSpace(task.Status), "done") {
 			overrideActor := strings.TrimSpace(body.MemoryWorkflowOverrideActor)
 			if overrideActor == "" {
-				overrideActor = strings.TrimSpace(body.CreatedBy)
+				overrideActor = actor
 			}
 			overrideReason := strings.TrimSpace(body.MemoryWorkflowOverrideReason)
 			if overrideReason == "" {
@@ -445,15 +446,15 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 			rollbackTask()
 			return TaskResponse{}, taskMutationError(TaskMutationWorktreeFailed, "failed to manage task worktree", err)
 		}
-		b.appendActionLocked("task_updated", "office", taskChannel, strings.TrimSpace(body.CreatedBy), truncateSummary(task.Title+" ["+task.Status+"]", 140), task.ID)
+		b.appendActionLocked("task_updated", "office", taskChannel, actor, truncateSummary(task.Title+" ["+task.Status+"]", 140), task.ID)
 		if action == "block" {
-			b.requestCapabilitySelfHealingLocked(task, strings.TrimSpace(body.CreatedBy), body.Details)
+			b.requestCapabilitySelfHealingLocked(task, actor, body.Details)
 		}
 		if reassignTriggered {
-			b.postTaskReassignNotificationsLocked(strings.TrimSpace(body.CreatedBy), task, reassignPrevOwner)
+			b.postTaskReassignNotificationsLocked(actor, task, reassignPrevOwner)
 		}
 		if cancelTriggered {
-			b.postTaskCancelNotificationsLocked(strings.TrimSpace(body.CreatedBy), task, cancelPrevOwner)
+			b.postTaskCancelNotificationsLocked(actor, task, cancelPrevOwner)
 		}
 		if err := b.saveLocked(); err != nil {
 			rollbackTask()
