@@ -104,23 +104,23 @@ function openRequestCount(requests: Array<{ status?: string }>): number {
   }).length;
 }
 
-export function TuiApp() {
+export function ConsoleApp() {
   const currentChannel = useAppStore((s) => s.currentChannel);
   const setCurrentApp = useAppStore((s) => s.setCurrentApp);
   const messages = useMessages(currentChannel);
   const members = useOfficeMembers();
   const tasks = useQuery({
-    queryKey: ["tui-office-tasks"],
+    queryKey: ["console-office-tasks"],
     queryFn: () => getOfficeTasks({ includeDone: true }),
     refetchInterval: 10_000,
   });
   const requests = useQuery({
-    queryKey: ["tui-requests", currentChannel],
+    queryKey: ["console-requests", currentChannel],
     queryFn: () => getRequests(currentChannel),
     refetchInterval: 5_000,
   });
   const commandRegistry = useQuery({
-    queryKey: ["tui-command-registry"],
+    queryKey: ["console-command-registry"],
     queryFn: fetchCommands,
     staleTime: 5 * 60_000,
     retry: 1,
@@ -145,54 +145,57 @@ export function TuiApp() {
   const supportedCount = commandRows.filter((row) => row.webSupported).length;
 
   return (
-    <div className="tui-app" data-testid="tui-app">
-      <header className="tui-header">
-        <div className="tui-title">
-          <Terminal className="tui-title-icon" />
-          <h2>TUI</h2>
+    <div className="console-app" data-testid="console-app">
+      <header className="console-header">
+        <div className="console-title">
+          <Terminal className="console-title-icon" />
+          <h2>Console</h2>
           <span className="badge badge-neutral">web</span>
         </div>
-        <div className="tui-header-meta">
+        <div className="console-header-meta">
           <span>#{currentChannel || "general"}</span>
           <span>{activeMembers.length} active</span>
           <span>{supportedCount} commands</span>
         </div>
       </header>
 
-      <div className="tui-grid">
-        <section className="tui-terminal" aria-label="TUI transcript mirror">
-          <div className="tui-terminal-bar">
+      <div className="console-grid">
+        <section
+          className="console-terminal"
+          aria-label="Console transcript mirror"
+        >
+          <div className="console-terminal-bar">
             <span>wuphf office</span>
             <span>{terminalLines.length} lines</span>
           </div>
-          <div className="tui-terminal-body">
+          <div className="console-terminal-body">
             {terminalLines.length > 0 ? (
               terminalLines.map((line) => (
-                <div className="tui-line" key={line.id}>
-                  <span className="tui-line-time">{line.time}</span>
-                  <span className="tui-line-speaker">{line.speaker}</span>
-                  <span className="tui-line-content">{line.content}</span>
+                <div className="console-line" key={line.id}>
+                  <span className="console-line-time">{line.time}</span>
+                  <span className="console-line-speaker">{line.speaker}</span>
+                  <span className="console-line-content">{line.content}</span>
                 </div>
               ))
             ) : (
-              <div className="tui-line tui-line-muted">
-                <span className="tui-line-time">--:--</span>
-                <span className="tui-line-speaker">system</span>
-                <span className="tui-line-content">#{currentChannel}</span>
+              <div className="console-line console-line-muted">
+                <span className="console-line-time">--:--</span>
+                <span className="console-line-speaker">system</span>
+                <span className="console-line-content">#{currentChannel}</span>
               </div>
             )}
-            <div className="tui-prompt">
+            <div className="console-prompt">
               <span>wuphf:{currentChannel || "general"}$</span>
-              <span className="tui-cursor" aria-hidden="true" />
+              <span className="console-cursor" aria-hidden="true" />
             </div>
           </div>
         </section>
 
-        <aside className="tui-stack">
-          <section className="tui-stat-row" aria-label="TUI queue">
+        <aside className="console-stack">
+          <section className="console-stat-row" aria-label="Console queue">
             <button
               type="button"
-              className="tui-stat"
+              className="console-stat"
               onClick={() => setCurrentApp("tasks")}
             >
               <CheckCircle />
@@ -203,7 +206,7 @@ export function TuiApp() {
             </button>
             <button
               type="button"
-              className="tui-stat"
+              className="console-stat"
               onClick={() => setCurrentApp("requests")}
             >
               <ChatBubble />
@@ -214,13 +217,16 @@ export function TuiApp() {
             </button>
           </section>
 
-          <section className="tui-panel" aria-label="TUI app jump targets">
-            <div className="tui-panel-title">Apps</div>
+          <section
+            className="console-panel"
+            aria-label="Console app jump targets"
+          >
+            <div className="console-panel-title">Apps</div>
             {["tasks", "requests", "threads", "skills", "calendar"].map(
               (app) => (
                 <button
                   type="button"
-                  className="tui-jump"
+                  className="console-jump"
                   key={app}
                   onClick={() => setCurrentApp(app)}
                 >
@@ -231,14 +237,17 @@ export function TuiApp() {
             )}
           </section>
 
-          <section className="tui-panel" aria-label="TUI slash commands">
-            <div className="tui-panel-title">Slash</div>
-            <div className="tui-command-list">
+          <section
+            className="console-panel"
+            aria-label="Console slash commands"
+          >
+            <div className="console-panel-title">Slash</div>
+            <div className="console-command-list">
               {commandRows.slice(0, 12).map((command) => {
                 const content = (
                   <>
-                    <span className="tui-command-name">{command.name}</span>
-                    <span className="tui-command-desc">
+                    <span className="console-command-name">{command.name}</span>
+                    <span className="console-command-desc">
                       {command.description}
                     </span>
                   </>
@@ -247,7 +256,7 @@ export function TuiApp() {
                   return (
                     <button
                       type="button"
-                      className="tui-command"
+                      className="console-command"
                       key={command.name}
                       onClick={() => setCurrentApp(command.appTarget ?? null)}
                     >
@@ -257,7 +266,7 @@ export function TuiApp() {
                 }
                 return (
                   <div
-                    className={`tui-command${command.webSupported ? "" : " tui-command-muted"}`}
+                    className={`console-command${command.webSupported ? "" : " console-command-muted"}`}
                     key={command.name}
                   >
                     {content}

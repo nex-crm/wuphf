@@ -1,4 +1,4 @@
-.tui-app {
+.console-app {
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
@@ -6,7 +6,7 @@
   gap: 14px;
 }
 
-.tui-header {
+.console-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -15,27 +15,27 @@
   border-bottom: 1px solid var(--border);
 }
 
-.tui-title {
+.console-title {
   display: flex;
   align-items: center;
   gap: 10px;
   min-width: 0;
 }
 
-.tui-title h2 {
+.console-title h2 {
   font-size: 18px;
   line-height: 1;
   font-weight: 650;
   letter-spacing: 0;
 }
 
-.tui-title-icon {
+.console-title-icon {
   width: 21px;
   height: 21px;
   color: var(--accent);
 }
 
-.tui-header-meta {
+.console-header-meta {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -46,7 +46,7 @@
   font-family: var(--font-mono);
 }
 
-.tui-header-meta span {
+.console-header-meta span {
   padding: 4px 8px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -54,7 +54,7 @@
   color: var(--text-secondary);
 }
 
-.tui-grid {
+.console-grid {
   flex: 1 1 auto;
   min-height: 0;
   display: grid;
@@ -62,7 +62,7 @@
   gap: 14px;
 }
 
-.tui-terminal {
+.console-terminal {
   min-width: 0;
   min-height: 520px;
   display: flex;
@@ -74,7 +74,7 @@
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 
-.tui-terminal-bar {
+.console-terminal-bar {
   min-height: 38px;
   display: flex;
   align-items: center;
@@ -87,7 +87,7 @@
   font-size: 12px;
 }
 
-.tui-terminal-body {
+.console-terminal-body {
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
@@ -101,36 +101,36 @@
   line-height: 1.5;
 }
 
-.tui-line {
+.console-line {
   display: grid;
   grid-template-columns: 54px minmax(74px, max-content) minmax(0, 1fr);
   gap: 10px;
   min-width: 0;
 }
 
-.tui-line-time {
+.console-line-time {
   color: rgba(237, 244, 208, 0.48);
 }
 
-.tui-line-speaker {
+.console-line-speaker {
   color: #8de8b0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.tui-line-content {
+.console-line-content {
   min-width: 0;
   overflow-wrap: anywhere;
   color: rgba(237, 244, 208, 0.9);
 }
 
-.tui-line-muted .tui-line-speaker,
-.tui-line-muted .tui-line-content {
+.console-line-muted .console-line-speaker,
+.console-line-muted .console-line-content {
   color: rgba(237, 244, 208, 0.56);
 }
 
-.tui-prompt {
+.console-prompt {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -139,20 +139,20 @@
   color: #f0ca68;
 }
 
-.tui-cursor {
+.console-cursor {
   width: 8px;
   height: 15px;
   background: #f0ca68;
-  animation: tui-caret 1.1s steps(2, start) infinite;
+  animation: console-caret 1.1s steps(2, start) infinite;
 }
 
-@keyframes tui-caret {
+@keyframes console-caret {
   50% {
     opacity: 0;
   }
 }
 
-.tui-stack {
+.console-stack {
   min-width: 0;
   min-height: 0;
   display: flex;
@@ -161,22 +161,22 @@
   overflow-y: auto;
 }
 
-.tui-stat-row {
+.console-stat-row {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;
 }
 
-.tui-stat,
-.tui-jump,
-.tui-command {
+.console-stat,
+.console-jump,
+.console-command {
   border: 1px solid var(--border);
   background: var(--bg-card);
   color: var(--text);
   font: inherit;
 }
 
-.tui-stat {
+.console-stat {
   min-height: 74px;
   display: flex;
   align-items: center;
@@ -186,44 +186,44 @@
   cursor: pointer;
 }
 
-.tui-stat:hover,
-.tui-jump:hover,
-.tui-command:hover {
+.console-stat:hover,
+.console-jump:hover,
+.console-command:hover {
   border-color: var(--border-dark);
   background: var(--bg-warm);
 }
 
-.tui-stat svg {
+.console-stat svg {
   width: 20px;
   height: 20px;
   color: var(--accent);
 }
 
-.tui-stat span {
+.console-stat span {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   gap: 2px;
 }
 
-.tui-stat strong {
+.console-stat strong {
   font-size: 20px;
   line-height: 1;
 }
 
-.tui-stat small {
+.console-stat small {
   color: var(--text-tertiary);
   font-size: 11px;
 }
 
-.tui-panel {
+.console-panel {
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--bg-card);
   overflow: hidden;
 }
 
-.tui-panel-title {
+.console-panel-title {
   padding: 10px 12px;
   border-bottom: 1px solid var(--border);
   color: var(--text-tertiary);
@@ -233,7 +233,7 @@
   letter-spacing: 0;
 }
 
-.tui-jump {
+.console-jump {
   width: 100%;
   min-height: 40px;
   display: flex;
@@ -246,26 +246,26 @@
   text-align: left;
 }
 
-.tui-jump:last-child {
+.console-jump:last-child {
   border-bottom-width: 0;
 }
 
-.tui-jump span {
+.console-jump span {
   text-transform: capitalize;
 }
 
-.tui-jump svg {
+.console-jump svg {
   width: 16px;
   height: 16px;
   color: var(--text-tertiary);
 }
 
-.tui-command-list {
+.console-command-list {
   display: flex;
   flex-direction: column;
 }
 
-.tui-command {
+.console-command {
   min-height: 44px;
   display: flex;
   flex-direction: column;
@@ -276,22 +276,22 @@
   text-align: left;
 }
 
-button.tui-command {
+button.console-command {
   cursor: pointer;
 }
 
-.tui-command:last-child {
+.console-command:last-child {
   border-bottom-width: 0;
 }
 
-.tui-command-name {
+.console-command-name {
   color: var(--text);
   font-family: var(--font-mono);
   font-size: 12px;
   font-weight: 650;
 }
 
-.tui-command-desc {
+.console-command-desc {
   width: 100%;
   color: var(--text-tertiary);
   font-size: 11px;
@@ -300,41 +300,41 @@ button.tui-command {
   white-space: nowrap;
 }
 
-.tui-command-muted {
+.console-command-muted {
   opacity: 0.58;
 }
 
 @media (max-width: 920px) {
-  .tui-header {
+  .console-header {
     align-items: flex-start;
     flex-direction: column;
   }
 
-  .tui-header-meta {
+  .console-header-meta {
     justify-content: flex-start;
   }
 
-  .tui-grid {
+  .console-grid {
     grid-template-columns: 1fr;
   }
 
-  .tui-terminal {
+  .console-terminal {
     min-height: 420px;
   }
 }
 
 @media (max-width: 560px) {
-  .tui-line {
+  .console-line {
     grid-template-columns: 48px minmax(58px, max-content) minmax(0, 1fr);
     gap: 7px;
   }
 
-  .tui-terminal-body {
+  .console-terminal-body {
     padding: 12px;
     font-size: 11px;
   }
 
-  .tui-stat-row {
+  .console-stat-row {
     grid-template-columns: 1fr;
   }
 }

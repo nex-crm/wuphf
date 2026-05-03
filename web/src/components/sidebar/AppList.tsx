@@ -30,7 +30,7 @@ const WIKI_SURFACE_APPS = new Set(["wiki", "notebooks", "reviews"]);
 const APP_ICONS: Record<string, ComponentType<{ className?: string }>> = {
   studio: Play,
   wiki: BookStack,
-  tui: Terminal,
+  console: Terminal,
   tasks: CheckCircle,
   requests: ClipboardCheck,
   graph: ShareAndroid,

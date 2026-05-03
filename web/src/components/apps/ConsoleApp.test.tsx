@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { Message, SlashCommandDescriptor } from "../../api/client";
-import { __test__ } from "./TuiApp";
+import { __test__ } from "./ConsoleApp";
 
 const {
   activeTaskCount,
@@ -10,7 +10,7 @@ const {
   terminalLineFromMessage,
 } = __test__;
 
-describe("TuiApp helpers", () => {
+describe("ConsoleApp helpers", () => {
   it("formats message lines for the terminal mirror", () => {
     const line = terminalLineFromMessage({
       from: "ceo",
