@@ -43,9 +43,10 @@ type officeMemberMutationBody struct {
 }
 
 type officeMemberMutationResult struct {
-	payload map[string]any
-	events  []officeChangeEvent
-	write   brokerStateWrite
+	payload            map[string]any
+	events             []officeChangeEvent
+	write              brokerStateWrite
+	ensureNotebookDirs bool
 }
 
 type officeMemberMutationError struct {
@@ -168,6 +169,9 @@ func (b *Broker) serveOfficeMemberMutation(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	b.publishOfficeChanges(result.events)
+	if result.ensureNotebookDirs {
+		b.ensureNotebookDirsForRoster()
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(result.payload)
@@ -332,9 +336,10 @@ func (b *Broker) createOfficeMember(r *http.Request, slug string, body officeMem
 		events = append(events, officeChangeEvent{Kind: "channel_updated", Slug: chSlug})
 	}
 	return officeMemberMutationResult{
-		payload: map[string]any{"member": member},
-		events:  events,
-		write:   write,
+		payload:            map[string]any{"member": member},
+		events:             events,
+		write:              write,
+		ensureNotebookDirs: true,
 	}, nil
 }
 
