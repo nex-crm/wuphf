@@ -2,6 +2,12 @@ package channelui
 
 import "strings"
 
+// IsHumanSender reports whether from is one of the broker's human sender forms.
+func IsHumanSender(from string) bool {
+	from = strings.TrimSpace(from)
+	return from == "" || from == "you" || from == "human" || strings.HasPrefix(from, "human:")
+}
+
 // FilterInsightMessages returns the subset of messages that are
 // automation / context-graph entries — kind "automation" or from the
 // system "nex" sender. Used to populate the insights side panels.
@@ -34,13 +40,10 @@ func LatestHumanFacingMessage(messages []BrokerMessage) *BrokerMessage {
 func CountUniqueAgents(messages []BrokerMessage) int {
 	seen := make(map[string]bool)
 	for _, m := range messages {
-		if m.From == "you" || m.From == "nex" || m.Kind == "automation" {
+		if IsHumanSender(m.From) || m.From == "nex" || m.Kind == "automation" {
 			continue
 		}
 		from := strings.TrimSpace(m.From)
-		if from == "" {
-			continue
-		}
 		seen[from] = true
 	}
 	return len(seen)

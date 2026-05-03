@@ -63,6 +63,8 @@ type Broker struct {
 	focusMode               bool
 	tasks                   []teamTask
 	requests                []humanInterview
+	humanInvites            []humanInvite
+	humanSessions           []humanSession
 	actions                 []officeActionLog
 	signals                 []officeSignalRecord
 	decisions               []officeDecisionRecord
@@ -408,6 +410,10 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/wiki/write", b.requireAuth(b.handleWikiWrite))
 	mux.HandleFunc("/wiki/write-human", b.requireAuth(b.handleWikiWriteHuman))
 	mux.HandleFunc("/humans", b.requireAuth(b.handleHumans))
+	mux.HandleFunc("/humans/me", b.handleHumanMe)
+	mux.HandleFunc("/humans/invites", b.requireAuth(b.handleHumanInvites))
+	mux.HandleFunc("/humans/invites/accept", b.handleHumanInviteAccept)
+	mux.HandleFunc("/humans/sessions", b.requireAuth(b.handleHumanSessions))
 	mux.HandleFunc("/wiki/read", b.requireAuth(b.handleWikiRead))
 	mux.HandleFunc("/wiki/search", b.requireAuth(b.handleWikiSearch))
 	mux.HandleFunc("/wiki/lookup", b.requireAuth(b.handleWikiLookup))
@@ -614,8 +620,7 @@ func (b *Broker) Stop() {
 // Caller must hold b.mu.
 func (b *Broker) senderMayAutoPromoteLocked(from string) bool {
 	from = normalizeActorSlug(from)
-	switch from {
-	case "", "you", "human":
+	if isHumanMessageSender(from) {
 		return true
 	}
 	return b.findMemberLocked(from) != nil
@@ -782,6 +787,8 @@ func (b *Broker) Reset() {
 	b.oneOnOneAgent = agent
 	b.tasks = nil
 	b.requests = nil
+	b.humanInvites = nil
+	b.humanSessions = nil
 	b.actions = nil
 	b.signals = nil
 	b.decisions = nil

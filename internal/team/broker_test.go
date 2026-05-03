@@ -259,6 +259,21 @@ func TestBrokerLoadsLastGoodSnapshotWhenPrimaryStateIsClobbered(t *testing.T) {
 	}
 }
 
+func TestBrokerStateActivityScoreIncludesHumanShareState(t *testing.T) {
+	state := brokerState{
+		HumanInvites: []humanInvite{{ID: "invite-1"}},
+	}
+	if !brokerStateShouldSnapshot(state) {
+		t.Fatal("expected human invite state to be snapshot-worthy")
+	}
+	state = brokerState{
+		HumanSessions: []humanSession{{ID: "session-1"}},
+	}
+	if !brokerStateShouldSnapshot(state) {
+		t.Fatal("expected human session state to be snapshot-worthy")
+	}
+}
+
 func TestBrokerStopIsIdempotent(t *testing.T) {
 	b := newTestBroker(t)
 	b.Stop()
