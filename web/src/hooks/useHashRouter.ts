@@ -29,6 +29,9 @@ function parseHash(hash: string): Route {
   if (parts[0] === "apps" && parts[1]) {
     return { view: "app", app: decodeURIComponent(parts[1]) };
   }
+  if (parts[0] === "tui") {
+    return { view: "app", app: "tui" };
+  }
   if (parts[0] === "threads") {
     return { view: "app", app: "threads" };
   }
@@ -102,6 +105,7 @@ function stateToHash(state: {
  *   #/channels/<slug>            ↔ currentChannel=<slug>, currentApp=null
  *   #/dm/<agent>                 ↔ currentChannel=<agent>__human, channelMeta marked type 'D'
  *   #/apps/<id>                  ↔ currentApp=<id>
+ *   #/tui                        ↔ currentApp='tui'
  *   #/wiki[/<path>]              ↔ currentApp='wiki', wikiPath=<path>
  *   #/notebooks[/<agent>[/<e>]]  ↔ currentApp='notebooks', notebookAgentSlug, notebookEntrySlug
  *   #/reviews                    ↔ currentApp='reviews'

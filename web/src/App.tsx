@@ -18,6 +18,7 @@ import { SettingsApp } from "./components/apps/SettingsApp";
 import { SkillsApp } from "./components/apps/SkillsApp";
 import { TasksApp } from "./components/apps/TasksApp";
 import { ThreadsApp } from "./components/apps/ThreadsApp";
+import { TuiApp } from "./components/apps/TuiApp";
 import { TelegramConnectHost } from "./components/integrations/TelegramConnectModal";
 import { Shell } from "./components/layout/Shell";
 import { UpgradeBanner } from "./components/layout/UpgradeBanner";
@@ -49,6 +50,7 @@ import "./styles/agents.css";
 import "./styles/search.css";
 import "./styles/wiki-shell.css";
 import "./styles/kbd.css";
+import "./styles/tui.css";
 
 // ── Error boundary ─────────────────────────────────────────────
 
@@ -245,6 +247,7 @@ function MainContent() {
       "health-check": HealthCheckApp,
       settings: SettingsApp,
       threads: ThreadsApp,
+      tui: TuiApp,
     };
     const Panel = panels[currentApp];
     return (
