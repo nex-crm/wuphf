@@ -81,6 +81,48 @@ func trimTaskDependencies(deps []string) []string {
 	return trimmedDeps
 }
 
+func markTaskDone(task *teamTask, timestamp string) {
+	if task == nil {
+		return
+	}
+	if !strings.EqualFold(strings.TrimSpace(task.Status), "done") && strings.TrimSpace(task.CompletedAt) == "" {
+		task.CompletedAt = timestamp
+	}
+	task.Status = "done"
+}
+
+func reconcileTaskReviewState(task *teamTask, action string) {
+	if task == nil {
+		return
+	}
+	if !taskNeedsStructuredReview(task) {
+		if strings.TrimSpace(task.ReviewState) != "" || !strings.EqualFold(strings.TrimSpace(action), "create") {
+			task.ReviewState = "not_required"
+		}
+		return
+	}
+
+	switch strings.ToLower(strings.TrimSpace(task.Status)) {
+	case "review":
+		task.ReviewState = "ready_for_review"
+	case "done":
+		switch {
+		case strings.EqualFold(strings.TrimSpace(action), "approve"),
+			strings.EqualFold(strings.TrimSpace(action), "complete"),
+			strings.EqualFold(strings.TrimSpace(task.ReviewState), "approved"):
+			task.ReviewState = "approved"
+		default:
+			task.ReviewState = "ready_for_review"
+		}
+	default:
+		switch strings.TrimSpace(task.ReviewState) {
+		case "pending_review", "ready_for_review", "approved":
+		default:
+			task.ReviewState = "pending_review"
+		}
+	}
+}
+
 func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 	action := strings.TrimSpace(body.Action)
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -94,14 +136,16 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 	if b.findChannelLocked(channel) == nil {
 		return TaskResponse{}, taskMutationError(TaskMutationNotFound, "channel not found", nil)
 	}
+	if action == "create" {
+		if strings.TrimSpace(body.Title) == "" || strings.TrimSpace(body.CreatedBy) == "" {
+			return TaskResponse{}, taskMutationError(TaskMutationInvalid, "title and created_by required", nil)
+		}
+	}
 	if !b.canAccessChannelLocked(body.CreatedBy, channel) {
 		return TaskResponse{}, taskMutationError(TaskMutationForbidden, "channel access denied", nil)
 	}
 
 	if action == "create" {
-		if strings.TrimSpace(body.Title) == "" || strings.TrimSpace(body.CreatedBy) == "" {
-			return TaskResponse{}, taskMutationError(TaskMutationInvalid, "title and created_by required", nil)
-		}
 		mutationSnapshot := snapshotBrokerTaskMutationLocked(b)
 		rollbackTask := func() {
 			mutationSnapshot.restore(b)
@@ -149,6 +193,7 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 			if existing.ThreadID == "" && strings.TrimSpace(body.ThreadID) != "" {
 				existing.ThreadID = strings.TrimSpace(body.ThreadID)
 			}
+			reconcileTaskReviewState(existing, action)
 			syncTaskMemoryWorkflow(existing, now)
 			b.ensureTaskOwnerChannelMembershipLocked(channel, existing.Owner)
 			existing.UpdatedAt = now
@@ -195,6 +240,7 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 		} else if task.Owner != "" {
 			task.Status = "in_progress"
 		}
+		reconcileTaskReviewState(&task, action)
 		syncTaskMemoryWorkflow(&task, now)
 		b.ensureTaskOwnerChannelMembershipLocked(channel, task.Owner)
 		b.queueTaskBehindActiveOwnerLaneLocked(&task)
@@ -275,7 +321,7 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 				task.Blocked = false
 			} else if strings.EqualFold(strings.TrimSpace(task.Status), "review") ||
 				strings.EqualFold(strings.TrimSpace(task.ReviewState), "ready_for_review") {
-				task.Status = "done"
+				markTaskDone(task, now)
 				if taskNeedsStructuredReview(task) {
 					task.ReviewState = "approved"
 				}
@@ -284,14 +330,14 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 				task.Status = "review"
 				task.ReviewState = "ready_for_review"
 			} else {
-				task.Status = "done"
+				markTaskDone(task, now)
 				task.Blocked = false
 			}
 		case "review":
 			task.Status = "review"
 			task.ReviewState = "ready_for_review"
 		case "approve":
-			task.Status = "done"
+			markTaskDone(task, now)
 			task.Blocked = false
 			if taskNeedsStructuredReview(task) {
 				task.ReviewState = "approved"
@@ -363,6 +409,7 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 		if worktreeBranch := strings.TrimSpace(body.WorktreeBranch); worktreeBranch != "" {
 			task.WorktreeBranch = worktreeBranch
 		}
+		reconcileTaskReviewState(task, action)
 		syncTaskMemoryWorkflow(task, now)
 		if strings.EqualFold(strings.TrimSpace(task.Status), "done") {
 			overrideActor := strings.TrimSpace(body.MemoryWorkflowOverrideActor)

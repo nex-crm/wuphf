@@ -168,6 +168,9 @@ func TestMutateTaskCreatesAndCompletesTask(t *testing.T) {
 	if updated.Task.Status != "done" {
 		t.Fatalf("updated status: want done, got %q", updated.Task.Status)
 	}
+	if updated.Task.CompletedAt == "" {
+		t.Fatal("expected completion timestamp")
+	}
 	if b.tasks[0].Status != "done" {
 		t.Fatalf("expected broker state to be updated, got %+v", b.tasks[0])
 	}
@@ -335,6 +338,11 @@ func TestMutateTaskReturnsTypedErrors(t *testing.T) {
 			kind: TaskMutationInvalid,
 		},
 		{
+			name: "missing create actor",
+			req:  TaskPostRequest{Action: "create", Channel: "general", Title: "Task"},
+			kind: TaskMutationInvalid,
+		},
+		{
 			name: "channel access denied",
 			req:  TaskPostRequest{Action: "create", Channel: "private", Title: "Secret", CreatedBy: "pm"},
 			kind: TaskMutationForbidden,
@@ -360,6 +368,71 @@ func TestMutateTaskReturnsTypedErrors(t *testing.T) {
 			}
 			if mutationErr.Kind != tc.kind {
 				t.Fatalf("kind: want %q, got %q", tc.kind, mutationErr.Kind)
+			}
+		})
+	}
+}
+
+func TestMutateTaskReconcilesReviewStateAfterFieldPatches(t *testing.T) {
+	cases := []struct {
+		name       string
+		task       teamTask
+		req        TaskPostRequest
+		wantStatus string
+		wantReview string
+	}{
+		{
+			name: "structured review overrides invalid body state",
+			task: teamTask{
+				ID:            "task-1",
+				Channel:       "general",
+				Title:         "Task",
+				Owner:         "alice",
+				Status:        "in_progress",
+				ExecutionMode: "local_worktree",
+				ReviewState:   "pending_review",
+			},
+			req:        TaskPostRequest{Action: "review", ReviewState: "not_required"},
+			wantStatus: "review",
+			wantReview: "ready_for_review",
+		},
+		{
+			name: "office task ignores stale structured review state",
+			task: teamTask{
+				ID:          "task-1",
+				Channel:     "general",
+				Title:       "Task",
+				Owner:       "alice",
+				Status:      "in_progress",
+				TaskType:    "follow_up",
+				ReviewState: "ready_for_review",
+			},
+			req:        TaskPostRequest{Action: "resume", ReviewState: "approved"},
+			wantStatus: "in_progress",
+			wantReview: "not_required",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			b := newTestBroker(t)
+			b.channels = []teamChannel{
+				{Slug: "general", Name: "general", Members: []string{"pm"}},
+			}
+			b.tasks = []teamTask{tc.task}
+			tc.req.ID = "task-1"
+			tc.req.Channel = "general"
+			tc.req.CreatedBy = "pm"
+
+			got, err := b.MutateTask(tc.req)
+			if err != nil {
+				t.Fatalf("MutateTask %s: %v", tc.req.Action, err)
+			}
+			if got.Task.Status != tc.wantStatus {
+				t.Fatalf("status: want %q, got %q", tc.wantStatus, got.Task.Status)
+			}
+			if got.Task.ReviewState != tc.wantReview {
+				t.Fatalf("review state: want %q, got %q", tc.wantReview, got.Task.ReviewState)
 			}
 		})
 	}
