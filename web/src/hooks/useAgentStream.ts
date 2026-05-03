@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-import { sseURL } from "../api/client";
+import { subscribeAgentStream } from "../lib/agentStreamClient";
 
 export interface StreamLine {
   id: number;
@@ -51,7 +51,6 @@ export function useAgentStream(slug: string | null) {
   const [lines, setLines] = useState<StreamLine[]>([]);
   const [connected, setConnected] = useState(false);
   const counterRef = useRef(0);
-  const sourceRef = useRef<EventSource | null>(null);
 
   useEffect(() => {
     if (!slug) {
@@ -60,48 +59,43 @@ export function useAgentStream(slug: string | null) {
       return;
     }
 
-    const url = sseURL(`/agent-stream/${encodeURIComponent(slug)}`);
-    const source = new EventSource(url);
-    sourceRef.current = source;
-
-    source.onopen = () => setConnected(true);
-
-    source.onmessage = (e) => {
-      let parsed: Record<string, unknown> | undefined;
-      try {
-        parsed = JSON.parse(e.data);
-      } catch {
-        // raw text line
-      }
-
-      setLines((prev) => {
-        const { lines: nextLines, usedId } = appendStreamLine(
-          prev,
-          e.data,
-          parsed,
-          counterRef.current + 1,
-        );
-        if (usedId) {
-          counterRef.current += 1;
+    setLines([]);
+    counterRef.current = 0;
+    const subscription = subscribeAgentStream(slug, {
+      onOpen: () => setConnected(true),
+      onLine: (eventData) => {
+        let parsed: Record<string, unknown> | undefined;
+        try {
+          parsed = JSON.parse(eventData);
+        } catch {
+          // raw text line
         }
-        return nextLines;
-      });
 
-      // Auto-stop on idle
-      if (parsed?.status === "idle" && counterRef.current > 1) {
-        source.close();
-        setConnected(false);
-      }
-    };
+        setLines((prev) => {
+          const { lines: nextLines, usedId } = appendStreamLine(
+            prev,
+            eventData,
+            parsed,
+            counterRef.current + 1,
+          );
+          if (usedId) {
+            counterRef.current += 1;
+          }
+          return nextLines;
+        });
 
-    source.onerror = () => {
-      source.close();
-      setConnected(false);
-    };
+        // Auto-stop on idle
+        if (parsed?.status === "idle" && counterRef.current > 1) {
+          subscription.close();
+          setConnected(false);
+        }
+      },
+      onError: () => setConnected(false),
+      onClose: () => setConnected(false),
+    });
 
     return () => {
-      source.close();
-      sourceRef.current = null;
+      subscription.close();
       setConnected(false);
     };
   }, [slug]);
