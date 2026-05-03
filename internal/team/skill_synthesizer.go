@@ -193,6 +193,9 @@ func (s *SkillSynthesizer) runPass(ctx context.Context, trigger string, start ti
 			continue
 		}
 		if strings.TrimSpace(fm.Name) == "" {
+			if strings.TrimSpace(body) == "" {
+				continue
+			}
 			res.Errors = append(res.Errors, SynthError{
 				CandidateName: cand.SuggestedName,
 				Reason:        "synth: empty name from llm",
@@ -239,6 +242,13 @@ func (s *SkillSynthesizer) runPass(ctx context.Context, trigger string, start ti
 			// this layer is the same severity as the local one.
 			if isStageBGuardError(writeErr) {
 				res.RejectedByGuard++
+				slog.Warn("stage_b_synth_guard_rejected",
+					"source", string(cand.Source),
+					"name", fm.Name,
+					"verdict", string(scan.Verdict),
+					"summary", scan.Summary,
+					"phase", "write",
+				)
 			}
 			res.Errors = append(res.Errors, SynthError{
 				CandidateName: fm.Name,

@@ -11,7 +11,6 @@ package team
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -471,14 +470,12 @@ func TestSynthesizeSkill_NoAPIKey_DegradeGracefully(t *testing.T) {
 
 	prov := NewDefaultStageBLLMProvider(b)
 	cand := selfHealCandidate()
-	_, _, err := prov.SynthesizeSkill(context.Background(), cand, "")
-	if err == nil {
-		t.Fatal("expected disabled-LLM error when no key is set, got nil")
+	fm, body, err := prov.SynthesizeSkill(context.Background(), cand, "")
+	if err != nil {
+		t.Fatalf("disabled LLM should degrade without per-candidate error, got %v", err)
 	}
-	// The disabled path must surface a distinct sentinel so callers and
-	// triage logs can tell "no API key" from "model said no".
-	if !errors.Is(err, errStageBLLMDisabled) {
-		t.Errorf("expected errStageBLLMDisabled, got %q", err.Error())
+	if fm.Name != "" || body != "" {
+		t.Fatalf("disabled LLM should return empty no-op response, got fm=%+v body=%q", fm, body)
 	}
 	// "No API key" must NOT be counted as an LLM rejection — that's a
 	// configuration fact, not a model decision.

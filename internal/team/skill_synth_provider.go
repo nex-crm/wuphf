@@ -140,7 +140,7 @@ func (p *defaultStageBLLMProvider) SynthesizeSkill(ctx context.Context, cand Ski
 	rawResp, callErr := p.callLLM(ctx, systemPrompt, userPrompt)
 	if callErr != nil {
 		if errors.Is(callErr, errStageBLLMDisabled) {
-			return SkillFrontmatter{}, "", errStageBLLMDisabled
+			return SkillFrontmatter{}, "", nil
 		}
 		if cand.Source == SourceSelfHealResolved {
 			atomic.AddInt64(&p.broker.skillCompileMetrics.SelfHealLLMRejections, 1)
