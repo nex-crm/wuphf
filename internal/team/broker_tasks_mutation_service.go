@@ -133,19 +133,17 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.findChannelLocked(channel) == nil {
-		return TaskResponse{}, taskMutationError(TaskMutationNotFound, "channel not found", nil)
-	}
 	if action == "create" {
+		if b.findChannelLocked(channel) == nil {
+			return TaskResponse{}, taskMutationError(TaskMutationNotFound, "channel not found", nil)
+		}
 		if strings.TrimSpace(body.Title) == "" || strings.TrimSpace(body.CreatedBy) == "" {
 			return TaskResponse{}, taskMutationError(TaskMutationInvalid, "title and created_by required", nil)
 		}
-	}
-	if !b.canAccessChannelLocked(body.CreatedBy, channel) {
-		return TaskResponse{}, taskMutationError(TaskMutationForbidden, "channel access denied", nil)
-	}
+		if !b.canAccessChannelLocked(body.CreatedBy, channel) {
+			return TaskResponse{}, taskMutationError(TaskMutationForbidden, "channel access denied", nil)
+		}
 
-	if action == "create" {
 		mutationSnapshot := snapshotBrokerTaskMutationLocked(b)
 		rollbackTask := func() {
 			mutationSnapshot.restore(b)
@@ -273,13 +271,15 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 			mutationSnapshot.restore(b)
 		}
 		taskChannel := normalizeChannelSlug(task.Channel)
-		// Authorize against the task's actual channel, not the channel the
-		// caller put in the body. Without this, a viewer with access to any
-		// channel could mutate any task ID by spoofing body.Channel.
-		if taskChannel != "" && taskChannel != channel {
-			if !b.canAccessChannelLocked(body.CreatedBy, taskChannel) {
-				return TaskResponse{}, taskMutationError(TaskMutationForbidden, "channel access denied", nil)
-			}
+		if taskChannel == "" {
+			taskChannel = channel
+		}
+		if b.findChannelLocked(taskChannel) == nil {
+			return TaskResponse{}, taskMutationError(TaskMutationNotFound, "channel not found", nil)
+		}
+		// Authorize against the task's actual channel, not caller-supplied body.Channel.
+		if !b.canAccessChannelLocked(body.CreatedBy, taskChannel) {
+			return TaskResponse{}, taskMutationError(TaskMutationForbidden, "channel access denied", nil)
 		}
 		appendDetails := false
 		reassignPrevOwner := ""
@@ -408,6 +408,9 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 		}
 		if worktreeBranch := strings.TrimSpace(body.WorktreeBranch); worktreeBranch != "" {
 			task.WorktreeBranch = worktreeBranch
+		}
+		if !strings.EqualFold(strings.TrimSpace(task.Status), "done") {
+			task.CompletedAt = ""
 		}
 		reconcileTaskReviewState(task, action)
 		syncTaskMemoryWorkflow(task, now)

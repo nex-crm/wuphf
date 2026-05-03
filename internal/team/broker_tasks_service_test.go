@@ -247,7 +247,7 @@ func TestMutateTaskAppliesStateActions(t *testing.T) {
 	}{
 		{
 			name:       "claim",
-			task:       teamTask{ID: "task-1", Channel: "general", Title: "Task", Status: "open"},
+			task:       teamTask{ID: "task-1", Channel: "general", Title: "Task", Status: "done", CompletedAt: "2026-05-03T00:00:00Z"},
 			req:        TaskPostRequest{Action: "claim", Owner: "alice"},
 			wantStatus: "in_progress",
 			wantOwner:  "alice",
@@ -313,7 +313,36 @@ func TestMutateTaskAppliesStateActions(t *testing.T) {
 			if got.Task.Blocked != tc.wantBlocked {
 				t.Fatalf("blocked: want %v, got %v", tc.wantBlocked, got.Task.Blocked)
 			}
+			if got.Task.Status != "done" && got.Task.CompletedAt != "" {
+				t.Fatalf("expected completed_at to clear outside done status, got %q", got.Task.CompletedAt)
+			}
 		})
+	}
+}
+
+func TestMutateTaskAuthorizesExistingTaskAgainstActualChannel(t *testing.T) {
+	b := newTestBroker(t)
+	b.channels = []teamChannel{
+		{Slug: "general", Name: "general", Members: []string{"pm"}},
+		{Slug: "private", Name: "private", Members: []string{"ceo"}},
+	}
+	b.tasks = []teamTask{
+		{ID: "task-1", Channel: "private", Title: "Private task", Owner: "alice", Status: "review", ReviewState: "ready_for_review"},
+	}
+
+	got, err := b.MutateTask(TaskPostRequest{
+		Action:    "complete",
+		ID:        "task-1",
+		CreatedBy: "ceo",
+	})
+	if err != nil {
+		t.Fatalf("MutateTask complete with actual channel access: %v", err)
+	}
+	if got.Task.Status != "done" {
+		t.Fatalf("status: want done, got %q", got.Task.Status)
+	}
+	if got.Task.CompletedAt == "" {
+		t.Fatal("expected completion timestamp")
 	}
 }
 
