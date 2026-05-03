@@ -787,6 +787,8 @@ func (b *Broker) Reset() {
 	b.oneOnOneAgent = agent
 	b.tasks = nil
 	b.requests = nil
+	b.humanInvites = nil
+	b.humanSessions = nil
 	b.actions = nil
 	b.signals = nil
 	b.decisions = nil

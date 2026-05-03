@@ -197,7 +197,7 @@ func (b *Broker) handleResetDM(w http.ResponseWriter, r *http.Request) {
 			// preserved — only the human↔agent thread is being reset.
 			taggedHuman := false
 			for _, t := range msg.Tagged {
-				if t == "you" || t == "human" {
+				if isHumanMessageSender(t) {
 					taggedHuman = true
 					break
 				}

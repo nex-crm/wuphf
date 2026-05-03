@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -16,6 +17,7 @@ const (
 	humanInviteTTL      = 24 * time.Hour
 	humanSessionCookie  = "wuphf_human_session"
 	humanShareEventFrom = "system"
+	humanLastSeenFlush  = time.Minute
 )
 
 type humanInviteResponse struct {
@@ -60,7 +62,8 @@ func (b *Broker) handleHumanInvites(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		token, invite, err := b.createHumanInvite()
 		if err != nil {
-			writeShareError(w, http.StatusInternalServerError, "invite_create_failed", "Could not create invite.", err.Error())
+			log.Printf("human invite create failed: %v", err)
+			writeShareError(w, http.StatusInternalServerError, "invite_create_failed", "Could not create invite.", "Check the host logs and try again.")
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
@@ -276,7 +279,14 @@ func (b *Broker) humanSessionFromRequest(r *http.Request) (humanSession, bool) {
 		if !expiresAt.IsZero() && !now.Before(expiresAt) {
 			continue
 		}
+		lastSeen := parseBrokerTimestamp(session.LastSeenAt)
 		session.LastSeenAt = now.Format(time.RFC3339)
+		// LastSeenAt is activity metadata, not part of the auth decision.
+		// Persist it at most once a minute so polling/SSE checks do not turn
+		// every shared UI request into a state-file write.
+		if lastSeen.IsZero() || now.Sub(lastSeen) >= humanLastSeenFlush {
+			_ = b.saveLocked()
+		}
 		return *session, true
 	}
 	return humanSession{}, false

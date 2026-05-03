@@ -101,6 +101,90 @@ func TestHumanMeRejectsExpiredSessionServerSide(t *testing.T) {
 	}
 }
 
+func TestResetClearsHumanShareState(t *testing.T) {
+	b := newTestBroker(t)
+	token, _, err := b.createHumanInvite()
+	if err != nil {
+		t.Fatalf("create invite: %v", err)
+	}
+	if _, _, err := b.acceptHumanInvite(token, "Mira", "browser", "100.64.0.2:1234"); err != nil {
+		t.Fatalf("accept invite: %v", err)
+	}
+
+	b.Reset()
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if len(b.humanInvites) != 0 || len(b.humanSessions) != 0 {
+		t.Fatalf("Reset left share state: invites=%d sessions=%d", len(b.humanInvites), len(b.humanSessions))
+	}
+}
+
+func TestHumanSessionAuthIsScopedToShareRoutes(t *testing.T) {
+	b := newTestBroker(t)
+	token, _, err := b.createHumanInvite()
+	if err != nil {
+		t.Fatalf("create invite: %v", err)
+	}
+	sessionToken, _, err := b.acceptHumanInvite(token, "Mira", "browser", "100.64.0.2:1234")
+	if err != nil {
+		t.Fatalf("accept invite: %v", err)
+	}
+	cookie := &http.Cookie{Name: humanSessionCookie, Value: sessionToken}
+
+	allowed := httptest.NewRequest(http.MethodPost, "/messages", bytes.NewReader([]byte(`{}`)))
+	allowed.AddCookie(cookie)
+	allowedRec := httptest.NewRecorder()
+	called := false
+	b.withAuth(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		actor, ok := requestActorFromContext(r.Context())
+		if !ok || actor.Kind != requestActorKindHuman || actor.Slug != "mira" {
+			t.Fatalf("actor = %+v ok=%v, want human mira", actor, ok)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})(allowedRec, allowed)
+	if !called || allowedRec.Code != http.StatusNoContent {
+		t.Fatalf("allowed human route called=%v status=%d body=%s", called, allowedRec.Code, allowedRec.Body.String())
+	}
+
+	for _, tc := range []struct {
+		method string
+		path   string
+	}{
+		{http.MethodPost, "/office-members"},
+		{http.MethodPost, "/channels"},
+		{http.MethodPost, "/wiki/write"},
+		{http.MethodGet, "/notebook/read"},
+	} {
+		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
+			req := httptest.NewRequest(tc.method, tc.path, nil)
+			req.AddCookie(cookie)
+			rec := httptest.NewRecorder()
+			b.withAuth(func(http.ResponseWriter, *http.Request) {
+				t.Fatalf("handler should not be called for %s %s", tc.method, tc.path)
+			})(rec, req)
+			if rec.Code != http.StatusForbidden {
+				t.Fatalf("status = %d, want 403 body=%s", rec.Code, rec.Body.String())
+			}
+		})
+	}
+
+	brokerReq := httptest.NewRequest(http.MethodPost, "/office-members", nil)
+	brokerReq.Header.Set("Authorization", "Bearer "+b.Token())
+	brokerRec := httptest.NewRecorder()
+	b.withAuth(func(w http.ResponseWriter, r *http.Request) {
+		actor, ok := requestActorFromContext(r.Context())
+		if !ok || actor.Kind != requestActorKindBroker {
+			t.Fatalf("actor = %+v ok=%v, want broker", actor, ok)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})(brokerRec, brokerReq)
+	if brokerRec.Code != http.StatusNoContent {
+		t.Fatalf("broker route status = %d body=%s", brokerRec.Code, brokerRec.Body.String())
+	}
+}
+
 func TestHumanEventsFilterNotebookMetadata(t *testing.T) {
 	b := newTestBroker(t)
 	token, _, err := b.createHumanInvite()

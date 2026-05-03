@@ -9,6 +9,12 @@ This tutorial is for the first real customer profile for co-founder sharing:
 
 This is not a public tunnel flow. WUPHF keeps the broker token on the host machine and only serves the shared office through a private-network listener.
 
+## Single-user remote access
+
+If WUPHF is running on your own server and you are still the only user, do not use `wuphf share` as your primary access path. Keep the normal host web UI and reach it through infrastructure you control, such as SSH port forwarding, Tailscale, WireGuard, or your own LAN tunnel.
+
+Use `wuphf share` when you want to mint a separate co-founder browser session. That session is scoped: it can join the office, send messages, answer requests, and read shared context, but it does not receive the host broker token or private notebook access.
+
 ## Host founder
 
 Start WUPHF as usual:

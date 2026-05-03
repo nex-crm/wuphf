@@ -64,7 +64,7 @@ func (b *Broker) DMPartner(channelSlug string) string {
 		return ""
 	}
 	for _, m := range ch.Members {
-		if m != "human" && m != "you" {
+		if !isHumanMessageSender(m) {
 			return m
 		}
 	}
@@ -77,9 +77,9 @@ func canonicalDMTargetAgent(slug string) string {
 		return ""
 	}
 	switch {
-	case parts[0] == "human" || parts[0] == "you":
+	case isHumanMessageSender(parts[0]):
 		return parts[1]
-	case parts[1] == "human" || parts[1] == "you":
+	case isHumanMessageSender(parts[1]):
 		return parts[0]
 	default:
 		return ""

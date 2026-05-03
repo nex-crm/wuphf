@@ -21,6 +21,10 @@ import (
 
 const shareCookieName = "wuphf_human_session"
 
+const shareBrokerRequestTimeout = 30 * time.Second
+
+var shareHTTPClient = &http.Client{Timeout: shareBrokerRequestTimeout}
+
 type shareOptions struct {
 	bind             string
 	webPort          int
@@ -143,7 +147,7 @@ func createShareInvite(brokerURL, token string) (shareInviteResponse, error) {
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := shareHTTPClient.Do(req)
 	if err != nil {
 		return shareInviteResponse{}, fmt.Errorf("broker unreachable at %s", brokerURL)
 	}
@@ -278,7 +282,7 @@ func newShareHandler(brokerURL, brokerToken string, onJoin func()) http.Handler 
 			return
 		}
 		req.Header.Set("Content-Type", "application/json")
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := shareHTTPClient.Do(req)
 		if err != nil {
 			http.Error(w, "broker unreachable", http.StatusBadGateway)
 			return
@@ -320,7 +324,7 @@ func shareRequestHasSession(r *http.Request, brokerURL string) bool {
 		return false
 	}
 	req.AddCookie(cookie)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := shareHTTPClient.Do(req)
 	if err != nil {
 		return false
 	}
@@ -353,7 +357,7 @@ func shareProxyHandler(brokerURL string) http.Handler {
 		}
 		req.Header.Set("Content-Type", r.Header.Get("Content-Type"))
 		req.Header.Set("Cookie", r.Header.Get("Cookie"))
-		client := http.DefaultClient
+		client := shareHTTPClient
 		if r.Header.Get("Accept") == "text/event-stream" {
 			client = &http.Client{Timeout: 0}
 		}

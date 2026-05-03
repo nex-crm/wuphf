@@ -36,6 +36,13 @@ func TestValidateShareIPBlocksPublicByDefault(t *testing.T) {
 	}
 }
 
+func TestValidateShareIPAllowsPublicWithUnsafeOverride(t *testing.T) {
+	ip := net.ParseIP("8.8.8.8")
+	if err := validateShareIP(ip, shareOptions{unsafePublicBind: true}); err != nil {
+		t.Fatalf("validate public ip with unsafe override: %v", err)
+	}
+}
+
 func TestValidateShareIPAllowsWireGuardPrivateViaResolverOverride(t *testing.T) {
 	ip := net.ParseIP("10.13.0.7")
 	if err := validateShareIP(ip, shareOptions{unsafeLAN: true}); err != nil {

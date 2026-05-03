@@ -160,8 +160,7 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	for _, taggedSlug := range tagged {
-		switch taggedSlug {
-		case "you", "human", "system":
+		if isHumanMessageSender(taggedSlug) || taggedSlug == "system" {
 			continue
 		}
 		if b.findMemberLocked(taggedSlug) == nil {
@@ -709,7 +708,10 @@ func messageBelongsToViewerInbox(msg channelMessage, viewerSlug string, messages
 	switch from {
 	case viewerSlug:
 		return false
-	case "you", "human", "ceo":
+	case "ceo":
+		return true
+	}
+	if isHumanMessageSender(from) {
 		return true
 	}
 	for _, tagged := range msg.Tagged {
@@ -750,8 +752,8 @@ func messageRepliesToViewerThread(msg channelMessage, viewerSlug string, message
 func (b *Broker) isOneOnOneDMMessage(msg channelMessage) bool {
 	agent := b.oneOnOneAgent
 
-	switch msg.From {
-	case "you", "human":
+	switch {
+	case isHumanMessageSender(msg.From):
 		// Human messages: only if untagged (direct conversation) or
 		// explicitly tagging the 1:1 agent.
 		if len(msg.Tagged) == 0 {
@@ -764,20 +766,20 @@ func (b *Broker) isOneOnOneDMMessage(msg channelMessage) bool {
 		}
 		return false
 
-	case agent:
+	case msg.From == agent:
 		// Agent messages: only if untagged (direct reply to human) or
 		// explicitly tagging the human.
 		if len(msg.Tagged) == 0 {
 			return true
 		}
 		for _, t := range msg.Tagged {
-			if t == "you" || t == "human" {
+			if isHumanMessageSender(t) {
 				return true
 			}
 		}
 		return false
 
-	case "system":
+	case msg.From == "system":
 		// System messages: only if they mention the 1:1 agent or human,
 		// or are general system announcements (no routing indicators).
 		if msg.Kind == "routing" {
@@ -892,7 +894,7 @@ func (b *Broker) RecentHumanMessages(limit int) []channelMessage {
 	var human []channelMessage
 	for _, msg := range b.messages {
 		f := strings.ToLower(strings.TrimSpace(msg.From))
-		if f == "you" || f == "human" || f == "nex" {
+		if isHumanMessageSender(f) || f == "nex" {
 			human = append(human, cloneChannelMessageForRead(msg))
 		}
 	}
