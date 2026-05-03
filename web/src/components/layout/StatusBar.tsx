@@ -1,17 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
 
-import { getHealth } from "../../api/client";
+import { getHealth, type HealthResponse } from "../../api/platform";
 import { useOfficeMembers } from "../../hooks/useMembers";
 import { isDMChannel, useAppStore } from "../../stores/app";
 import { Kbd } from "../ui/Kbd";
 import { StatusPill } from "../workspaces/StatusPill";
-
-interface HealthSnapshot {
-  status: string;
-  provider?: string;
-  provider_model?: string;
-  agents?: Record<string, unknown>;
-}
 
 /**
  * Bottom status bar mirroring the legacy IIFE: shows the active channel/app,
@@ -26,9 +19,9 @@ export function StatusBar() {
   const { data: members = [] } = useOfficeMembers();
   const dm = !currentApp ? isDMChannel(currentChannel, channelMeta) : null;
 
-  const { data: health } = useQuery<HealthSnapshot>({
+  const { data: health } = useQuery<HealthResponse>({
     queryKey: ["health"],
-    queryFn: () => getHealth() as Promise<HealthSnapshot>,
+    queryFn: () => getHealth(),
     refetchInterval: 15_000,
     enabled: brokerConnected,
   });

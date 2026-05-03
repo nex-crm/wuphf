@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 
-import { getOfficeTasks } from "../../api/client";
+import { getOfficeTasks } from "../../api/tasks";
 import { useOfficeMembers } from "../../hooks/useMembers";
 import { useRequests } from "../../hooks/useRequests";
 

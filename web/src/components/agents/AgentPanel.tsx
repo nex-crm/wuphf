@@ -2,8 +2,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Xmark } from "iconoir-react";
 
-import type { OfficeMember, TaskLogSummary } from "../../api/client";
-import { createDM, listAgentLogTasks, post } from "../../api/client";
+import type { OfficeMember } from "../../api/client";
+import { createDM, post } from "../../api/client";
+import { listAgentLogTasks, type TaskLogSummary } from "../../api/tasks";
 import { useAgentStream } from "../../hooks/useAgentStream";
 import { useDefaultHarness } from "../../hooks/useConfig";
 import { useChannelMembers, useOfficeMembers } from "../../hooks/useMembers";

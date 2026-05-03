@@ -9,29 +9,7 @@ import (
 )
 
 func (b *Broker) handlePostTask(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Action                       string   `json:"action"`
-		Channel                      string   `json:"channel"`
-		ID                           string   `json:"id"`
-		Title                        string   `json:"title"`
-		Details                      string   `json:"details"`
-		Owner                        string   `json:"owner"`
-		CreatedBy                    string   `json:"created_by"`
-		ThreadID                     string   `json:"thread_id"`
-		TaskType                     string   `json:"task_type"`
-		PipelineID                   string   `json:"pipeline_id"`
-		ExecutionMode                string   `json:"execution_mode"`
-		ReviewState                  string   `json:"review_state"`
-		SourceSignalID               string   `json:"source_signal_id"`
-		SourceDecisionID             string   `json:"source_decision_id"`
-		WorktreePath                 string   `json:"worktree_path"`
-		WorktreeBranch               string   `json:"worktree_branch"`
-		DependsOn                    []string `json:"depends_on"`
-		MemoryWorkflowOverride       bool     `json:"memory_workflow_override"`
-		MemoryWorkflowOverrideActor  string   `json:"memory_workflow_override_actor"`
-		MemoryWorkflowOverrideReason string   `json:"memory_workflow_override_reason"`
-		OverrideReason               string   `json:"override_reason"`
-	}
+	var body TaskPostRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
@@ -128,7 +106,7 @@ func (b *Broker) handlePostTask(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]any{"task": *existing})
+			_ = json.NewEncoder(w).Encode(TaskResponse{Task: *existing})
 			return
 		}
 		b.counter++
@@ -180,7 +158,7 @@ func (b *Broker) handlePostTask(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"task": task})
+		_ = json.NewEncoder(w).Encode(TaskResponse{Task: task})
 		return
 	}
 
@@ -392,7 +370,7 @@ func (b *Broker) handlePostTask(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"task": *task})
+		_ = json.NewEncoder(w).Encode(TaskResponse{Task: *task})
 		return
 	}
 

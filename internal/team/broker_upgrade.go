@@ -22,6 +22,34 @@ import (
 	"github.com/nex-crm/wuphf/internal/upgradecheck"
 )
 
+// UpgradeCheckResponse is the stable success/partial-success JSON response
+// served by GET /upgrade-check.
+type UpgradeCheckResponse struct {
+	Current          string `json:"current"`
+	Latest           string `json:"latest"`
+	UpgradeAvailable bool   `json:"upgrade_available"`
+	IsDevBuild       bool   `json:"is_dev_build"`
+	CompareURL       string `json:"compare_url"`
+	UpgradeCommand   string `json:"upgrade_command"`
+	InstallMethod    string `json:"install_method"`
+	InstallCommand   string `json:"install_command"`
+	Error            string `json:"error,omitempty"`
+}
+
+// UpgradeCheckErrorResponse is the cold-upstream-failure shape from
+// GET /upgrade-check when no latest version is available.
+type UpgradeCheckErrorResponse struct {
+	Current string `json:"current"`
+	Error   string `json:"error"`
+}
+
+// UpgradeChangelogResponse is the stable JSON response served by
+// GET /upgrade-changelog.
+type UpgradeChangelogResponse struct {
+	Commits []upgradecheck.CommitEntry `json:"commits"`
+	Error   string                     `json:"error,omitempty"`
+}
+
 func (b *Broker) handleVersion(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", "GET")
@@ -55,9 +83,9 @@ func (b *Broker) handleUpgradeCheck(w http.ResponseWriter, r *http.Request) {
 	// .catch() already swallows non-2xx silently.
 	if err != nil && res.Latest == "" {
 		w.WriteHeader(http.StatusBadGateway)
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"current": res.Current,
-			"error":   err.Error(),
+		_ = json.NewEncoder(w).Encode(UpgradeCheckErrorResponse{
+			Current: res.Current,
+			Error:   err.Error(),
 		})
 		return
 	}
@@ -69,27 +97,27 @@ func (b *Broker) handleUpgradeCheck(w http.ResponseWriter, r *http.Request) {
 	// filesystem-bound (one Stat for global, walk-up for local), capped
 	// in detectUpgradeInstall by upgradeRunDetectTime.
 	plan := detectUpgradeInstallFn(r.Context())
-	payload := map[string]any{
-		"current":           res.Current,
-		"latest":            res.Latest,
-		"upgrade_available": res.UpgradeAvailable,
-		"is_dev_build":      res.IsDevBuild,
-		"compare_url":       res.CompareURL,
+	payload := UpgradeCheckResponse{
+		Current:          res.Current,
+		Latest:           res.Latest,
+		UpgradeAvailable: res.UpgradeAvailable,
+		IsDevBuild:       res.IsDevBuild,
+		CompareURL:       res.CompareURL,
 		// upgrade_command stays as the canonical "what we'd recommend
 		// in docs" string; install_command is what the click ACTUALLY
 		// runs on this host, so the banner can render the truthful
 		// label. They MAY differ — local installs prefer
 		// `npm install wuphf@latest`.
-		"upgrade_command": res.UpgradeCommand,
-		"install_method":  plan.Method,
-		"install_command": plan.Command,
+		UpgradeCommand: res.UpgradeCommand,
+		InstallMethod:  plan.Method,
+		InstallCommand: plan.Command,
 	}
 	if err != nil {
 		// Partial result (Current AND Latest populated, but something
 		// else failed) — degrade gracefully with 200 + error field
 		// so the banner can render nothing without a console-spamming
 		// 5xx for a non-critical check.
-		payload["error"] = err.Error()
+		payload.Error = err.Error()
 	}
 	_ = json.NewEncoder(w).Encode(payload)
 }
@@ -114,21 +142,21 @@ func (b *Broker) handleUpgradeChangelog(w http.ResponseWriter, r *http.Request) 
 		// path renders one error message instead of branching on
 		// HTTP status.
 		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"commits": []any{},
-			"error":   "from/to must look like v0.79.10 (or 0.79.10)",
+		_ = json.NewEncoder(w).Encode(UpgradeChangelogResponse{
+			Commits: []upgradecheck.CommitEntry{},
+			Error:   "from/to must look like v0.79.10 (or 0.79.10)",
 		})
 		return
 	}
 	entries, err := upgradeChangelogCached(r.Context(), from, to)
 	if err != nil {
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"commits": []any{},
-			"error":   err.Error(),
+		_ = json.NewEncoder(w).Encode(UpgradeChangelogResponse{
+			Commits: []upgradecheck.CommitEntry{},
+			Error:   err.Error(),
 		})
 		return
 	}
-	_ = json.NewEncoder(w).Encode(map[string]any{"commits": entries})
+	_ = json.NewEncoder(w).Encode(UpgradeChangelogResponse{Commits: entries})
 }
 
 // Semver-leaning version param. Accepts an optional `v`, 2-4 dotted numeric

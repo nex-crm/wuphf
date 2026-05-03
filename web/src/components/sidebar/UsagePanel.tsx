@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
-import { getUsage } from "../../api/client";
+import { getUsage } from "../../api/platform";
 import { formatTokens, formatUSD } from "../../lib/format";
 
 export function UsagePanel() {

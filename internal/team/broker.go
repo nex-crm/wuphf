@@ -383,11 +383,8 @@ func (b *Broker) WikiReadLog() *ReadLog {
 // StartOnPort launches the broker on the given port. Use 0 for an OS-assigned port.
 func (b *Broker) StartOnPort(port int) error {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/health", b.handleHealth) // no auth — used for liveness checks
-	mux.HandleFunc("/version", b.handleVersion)
-	mux.HandleFunc("/upgrade-check", b.requireAuth(b.handleUpgradeCheck))
-	mux.HandleFunc("/upgrade-changelog", b.requireAuth(b.handleUpgradeChangelog))
-	mux.HandleFunc("/upgrade/run", b.requireAuth(b.handleUpgradeRun))
+	b.registerPlatformRoutes(mux)
+	b.registerTaskRoutes(mux)
 	mux.HandleFunc("/session-mode", b.requireAuth(b.handleSessionMode))
 	mux.HandleFunc("/focus-mode", b.requireAuth(b.handleFocusMode))
 	mux.HandleFunc("/messages", b.requireAuth(b.handleMessages))
@@ -400,12 +397,6 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/channels/generate", b.requireAuth(b.handleGenerateChannel))
 	mux.HandleFunc("/channel-members", b.requireAuth(b.handleChannelMembers))
 	mux.HandleFunc("/members", b.requireAuth(b.handleMembers))
-	mux.HandleFunc("/tasks", b.requireAuth(b.handleTasks))
-	mux.HandleFunc("/tasks/ack", b.requireAuth(b.handleTaskAck))
-	mux.HandleFunc("/tasks/memory-workflow", b.requireAuth(b.handleTaskMemoryWorkflow))
-	mux.HandleFunc("/tasks/memory-workflow/reconcile", b.requireAuth(b.handleTaskMemoryWorkflowReconcile))
-	mux.HandleFunc("/agent-logs", b.requireAuth(b.handleAgentLogs))
-	mux.HandleFunc("/task-plan", b.requireAuth(b.handleTaskPlan))
 	mux.HandleFunc("/memory", b.requireAuth(b.handleMemory))
 	mux.HandleFunc("/wiki/write", b.requireAuth(b.handleWikiWrite))
 	mux.HandleFunc("/wiki/write-human", b.requireAuth(b.handleWikiWriteHuman))
@@ -464,7 +455,6 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/interview/answer", b.requireAuth(b.handleInterviewAnswer))
 	mux.HandleFunc("/reset", b.requireAuth(b.handleReset))
 	mux.HandleFunc("/reset-dm", b.requireAuth(b.handleResetDM))
-	mux.HandleFunc("/usage", b.requireAuth(b.handleUsage))
 	mux.HandleFunc("/policies", b.requireAuth(b.handlePolicies))
 	mux.HandleFunc("/signals", b.requireAuth(b.handleSignals))
 	mux.HandleFunc("/decisions", b.requireAuth(b.handleDecisions))
@@ -488,7 +478,6 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/telegram/discover", b.requireAuth(b.handleTelegramDiscover))
 	mux.HandleFunc("/telegram/connect", b.requireAuth(b.handleTelegramConnect))
 	mux.HandleFunc("/bridges", b.requireAuth(b.handleBridge))
-	mux.HandleFunc("/queue", b.requireAuth(b.handleQueue))
 	mux.HandleFunc("/company", b.requireAuth(b.handleCompany))
 	mux.HandleFunc("/config", b.requireAuth(b.handleConfig))
 	mux.HandleFunc("/status/local-providers", b.requireAuth(b.handleLocalProvidersStatus))
@@ -512,7 +501,6 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/workspaces/trash", b.withAuth(b.handleWorkspacesTrash))
 	mux.HandleFunc("/workspaces/onboarding", b.withAuth(b.handleWorkspacesOnboarding))
 	mux.HandleFunc("/admin/pause", b.withAuth(b.handleAdminPause))
-	mux.HandleFunc("/web-token", b.handleWebToken)
 	// Onboarding: state/progress/complete + prereqs/templates/validate-key + checklist.
 	// completeFn posts the first task as a human message and seeds the team.
 	onboarding.RegisterRoutes(mux, b.onboardingCompleteFn, b.packSlug, b.requireAuth)

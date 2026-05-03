@@ -11,7 +11,7 @@
  */
 import { useQuery } from "@tanstack/react-query";
 
-import { getUsage, type UsageData } from "../../api/client";
+import { getUsage, type UsageData } from "../../api/platform";
 import { useWorkspacesList, type Workspace } from "../../api/workspaces";
 
 const FIVE_MINUTES_MS = 5 * 60 * 1000;
