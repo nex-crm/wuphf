@@ -5,10 +5,36 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 	"time"
 )
+
+// TestHeadlessRunnersWireLiveChatRelay guards against the regression where
+// headlessLiveChatRelay exists but no production runner actually constructs
+// one. Symptom: agents stay silent during a turn — only the end-of-turn
+// final message lands in the channel, so the room sees a multi-minute gap
+// followed by a single summary post. The relay infrastructure was added
+// but its wire-up to the four runners regressed once before; this test
+// keeps the connection visible at build time.
+func TestHeadlessRunnersWireLiveChatRelay(t *testing.T) {
+	runners := []string{
+		"headless_claude.go",
+		"headless_codex_runner.go",
+		"headless_opencode.go",
+		"headless_openai_compat.go",
+	}
+	for _, file := range runners {
+		data, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatalf("read %s: %v", file, err)
+		}
+		if !strings.Contains(string(data), "newHeadlessLiveChatRelay") {
+			t.Errorf("%s: missing newHeadlessLiveChatRelay wiring — without it the agent goes silent during a turn and only the final summary lands in-channel", file)
+		}
+	}
+}
 
 func TestHeadlessLiveChatRelayPostsStreamedTextToChannel(t *testing.T) {
 	b := newTestBroker(t)

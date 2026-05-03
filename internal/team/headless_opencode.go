@@ -131,6 +131,21 @@ func (l *Launcher) runHeadlessOpencodeTurn(ctx context.Context, slug string, not
 	}
 	l.updateHeadlessProgress(slug, "active", "thinking", "reviewing work packet", metrics)
 
+	// Live-chat relay surfaces the model's user-facing text to the
+	// channel at sentence/paragraph boundaries during the turn. Opencode
+	// emits one `text` event type for the assistant's spoken output;
+	// piping it through the relay is what turns the agent's reply from
+	// a single end-of-turn post into a visible live conversation.
+	target := firstNonEmpty(channel...)
+	relay := newHeadlessLiveChatRelay(l, slug, target, notification, func(line string) {
+		appendHeadlessCodexLog(slug, line)
+	})
+	// Defer the flush so error/scanErr exit paths still surface the
+	// trailing buffered sentence. The explicit Flush before the final
+	// post stays — once the buffer is empty, the deferred call is a
+	// no-op.
+	defer relay.Flush()
+
 	var firstEventAt, firstTextAt, firstToolAt time.Time
 	textStarted := false
 	var lastError string
@@ -159,7 +174,9 @@ func (l *Launcher) runHeadlessOpencodeTurn(ctx context.Context, slug string, not
 				l.updateHeadlessProgress(slug, "active", "text", "drafting response", metrics)
 			}
 			pushStream(ev.Text)
+			relay.OnText(ev.Text)
 		case "tool_use":
+			relay.Flush()
 			if firstToolAt.IsZero() {
 				firstToolAt = time.Now()
 				metrics.FirstToolMs = durationMillis(startedAt, firstToolAt)
@@ -200,11 +217,11 @@ func (l *Launcher) runHeadlessOpencodeTurn(ctx context.Context, slug string, not
 			appendHeadlessCodexLog(slug, "opencode_stderr: "+detail)
 			l.updateHeadlessProgress(slug, "error", "error", truncate(detail, 180), metrics)
 			if isOpencodeAuthError(detail) && l.broker != nil {
-				target := firstNonEmpty(channel...)
-				if strings.TrimSpace(target) == "" {
-					target = "general"
+				sysTarget := target
+				if strings.TrimSpace(sysTarget) == "" {
+					sysTarget = "general"
 				}
-				l.broker.PostSystemMessage(target,
+				l.broker.PostSystemMessage(sysTarget,
 					fmt.Sprintf("@%s hit an auth error talking to the model (%s). Configure your Opencode provider credentials and retry.", slug, truncate(detail, 180)),
 					"error",
 				)
@@ -245,9 +262,9 @@ func (l *Launcher) runHeadlessOpencodeTurn(ctx context.Context, slug string, not
 		summary = "reply ready · " + summary
 	}
 	l.updateHeadlessProgress(slug, "idle", "idle", summary, metrics)
+	relay.Flush()
 	if text != "" {
 		appendHeadlessCodexLog(slug, "opencode_result: "+text)
-		target := firstNonEmpty(channel...)
 		msg, posted, err := l.postHeadlessFinalMessageIfSilent(slug, target, notification, text, startedAt)
 		if err != nil {
 			appendHeadlessCodexLog(slug, "opencode_fallback-post-error: "+err.Error())
