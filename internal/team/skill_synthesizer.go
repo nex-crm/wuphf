@@ -252,6 +252,9 @@ func (s *SkillSynthesizer) runPass(ctx context.Context, trigger string, start ti
 			continue
 		}
 		res.Synthesized++
+		if cand.Source == SourceSelfHealResolved {
+			atomic.AddInt64(&s.broker.skillCompileMetrics.SelfHealSkillsSynthesized, 1)
+		}
 	}
 
 	res.DurationMs = time.Since(start).Milliseconds()

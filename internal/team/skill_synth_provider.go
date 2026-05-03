@@ -9,9 +9,9 @@ package team
 // system prompt + user prompt body framed around the "when blocked by X, do
 // Y" pattern so the synthesized skill is class-first.
 //
-// The actual round-trip degrades gracefully: when neither ANTHROPIC_API_KEY
-// nor OPENAI_API_KEY is set, the provider logs a one-shot warning and
-// returns is_skill=false from every call. It never crashes, never blocks,
+// The actual round-trip degrades gracefully: when no Anthropic/OpenAI key is
+// configured via env or WUPHF config, the provider logs a one-shot warning
+// and returns is_skill=false from every call. It never crashes, never blocks,
 // and never panics on missing credentials.
 
 import (
@@ -31,6 +31,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/nex-crm/wuphf/internal/config"
 )
 
 // embeddedSelfHealSkillCreator is the self-heal-specific synthesis system
@@ -49,10 +51,9 @@ type stageBLLMProvider interface {
 }
 
 // defaultStageBLLMProvider implements stageBLLMProvider using a live HTTP
-// call to either Anthropic (preferred when ANTHROPIC_API_KEY is set) or
-// OpenAI (fallback when OPENAI_API_KEY is set). When neither is set, the
-// provider logs a one-shot warning and returns is_skill=false to keep the
-// pipeline running.
+// call to either Anthropic (preferred when an Anthropic key is configured)
+// or OpenAI (fallback). When neither key is configured, the provider logs a
+// one-shot warning and returns is_skill=false to keep the pipeline running.
 type defaultStageBLLMProvider struct {
 	broker *Broker
 
@@ -139,14 +140,6 @@ func (p *defaultStageBLLMProvider) SynthesizeSkill(ctx context.Context, cand Ski
 	rawResp, callErr := p.callLLM(ctx, systemPrompt, userPrompt)
 	if callErr != nil {
 		if errors.Is(callErr, errStageBLLMDisabled) {
-			// Disabled providers bypass rejection counters: this is a
-			// configuration fact, not a model decision. Surface the
-			// distinction in logs so triage can tell "no API key" from
-			// "model said no".
-			slog.Info("stage_b_synth_llm_disabled",
-				"source", string(cand.Source),
-				"hint", "set ANTHROPIC_API_KEY or OPENAI_API_KEY to enable Stage B synthesis",
-			)
 			return SkillFrontmatter{}, "", errStageBLLMDisabled
 		}
 		if cand.Source == SourceSelfHealResolved {
@@ -192,10 +185,6 @@ func (p *defaultStageBLLMProvider) SynthesizeSkill(ctx context.Context, cand Ski
 			"reason", err.Error(),
 		)
 		return SkillFrontmatter{}, "", fmt.Errorf("stage_b_synth: sanity check: %w", err)
-	}
-
-	if cand.Source == SourceSelfHealResolved {
-		atomic.AddInt64(&p.broker.skillCompileMetrics.SelfHealSkillsSynthesized, 1)
 	}
 
 	fm := SkillFrontmatter{
@@ -460,12 +449,12 @@ var errStageBLLMDisabled = errors.New("stage_b_synth: LLM disabled (no API key)"
 // the caller can treat it as is_skill=false without inflating rejection
 // counters.
 func (p *defaultStageBLLMProvider) callLLM(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
-	anthroKey := strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY"))
-	openaiKey := strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
+	anthroKey := strings.TrimSpace(config.ResolveAnthropicAPIKey())
+	openaiKey := strings.TrimSpace(config.ResolveOpenAIAPIKey())
 
 	if anthroKey == "" && openaiKey == "" {
 		if p.missingKeyWarned.CompareAndSwap(false, true) {
-			slog.Warn("stage_b_synth: ANTHROPIC_API_KEY/OPENAI_API_KEY not set; Stage B LLM synthesis disabled")
+			slog.Warn("stage_b_synth: no Anthropic/OpenAI API key configured; Stage B LLM synthesis disabled")
 		}
 		return "", errStageBLLMDisabled
 	}
@@ -665,9 +654,12 @@ func stripJSONNoise(raw string) string {
 // sources), description must fall in [10, 200] chars, and the body must
 // carry at least one of the expected section headings.
 func validateStageBSynthResponse(source SkillCandidateSource, parsed stageBSynthResponse) error {
-	name := strings.ToLower(strings.TrimSpace(parsed.Name))
+	name := strings.TrimSpace(parsed.Name)
 	if name == "" {
 		return errors.New("name is empty")
+	}
+	if name != strings.ToLower(name) {
+		return fmt.Errorf("name %q must be lowercase kebab-case", name)
 	}
 	if source == SourceSelfHealResolved {
 		if !stageBSelfHealNameRegex.MatchString(name) {

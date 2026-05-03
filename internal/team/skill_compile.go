@@ -200,8 +200,9 @@ func (b *Broker) compileWikiSkills(ctx context.Context, scopePath string, dryRun
 	// run when not in dry-run; the synthesizer writes proposals through the
 	// same unified funnel so dry-run would produce false positives. Counts
 	// fold into the returned ScanResult so callers see one combined number.
-	if !dryRun && b.skillSynthesizer != nil {
-		bRes, bErr := b.skillSynthesizer.SynthesizeOnce(ctx, trigger)
+	if !dryRun {
+		synth := b.ensureSkillSynthesizer()
+		bRes, bErr := synth.SynthesizeOnce(ctx, trigger)
 		if bErr != nil && !errors.Is(bErr, ErrSynthCoalesced) {
 			res.Errors = append(res.Errors, ScanError{
 				Slug:   "stage-b",

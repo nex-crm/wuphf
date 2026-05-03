@@ -15,10 +15,13 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/nex-crm/wuphf/internal/config"
 )
 
 // fakeAnthropicHandler returns a handler that asserts the request looks
@@ -33,6 +36,9 @@ func fakeAnthropicHandler(t *testing.T, callCount *atomic.Int64, replyText strin
 		}
 		if r.Header.Get("anthropic-version") == "" {
 			t.Errorf("expected anthropic-version header, got none")
+		}
+		if r.URL.Path != "/v1/messages" {
+			t.Errorf("expected request path /v1/messages, got %q", r.URL.Path)
 		}
 		body, _ := io.ReadAll(r.Body)
 		var payload struct {
@@ -78,11 +84,10 @@ func withFakeAnthropic(t *testing.T, b *Broker, replyText string) (*defaultStage
 	srv := httptest.NewServer(fakeAnthropicHandler(t, &calls, replyText))
 
 	prov := NewDefaultStageBLLMProvider(b)
-	// Redirect outbound requests to the fake server by swapping the
-	// transport. The fake handler ignores the path, so we just rewrite the
-	// destination wholesale.
+	// Redirect outbound requests to the fake server by swapping scheme/host
+	// only. Preserve path/query so tests still exercise the endpoint contract.
 	prov.httpClient = &http.Client{
-		Transport: rewriteTransport{target: srv.URL},
+		Transport: rewriteTransport{target: srv.URL, base: http.DefaultTransport},
 		Timeout:   srv.Client().Timeout,
 	}
 
@@ -94,15 +99,28 @@ func withFakeAnthropic(t *testing.T, b *Broker, replyText string) (*defaultStage
 // so the handler can still assert on them.
 type rewriteTransport struct {
 	target string
+	base   http.RoundTripper
 }
 
 func (rt rewriteTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	newReq, err := http.NewRequestWithContext(req.Context(), req.Method, rt.target, req.Body)
+	target, err := url.Parse(rt.target)
+	if err != nil {
+		return nil, err
+	}
+	u := *req.URL
+	u.Scheme = target.Scheme
+	u.Host = target.Host
+	newReq, err := http.NewRequestWithContext(req.Context(), req.Method, u.String(), req.Body)
 	if err != nil {
 		return nil, err
 	}
 	newReq.Header = req.Header.Clone()
-	return http.DefaultTransport.RoundTrip(newReq)
+	newReq.Host = target.Host
+	base := rt.base
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	return base.RoundTrip(newReq)
 }
 
 // selfHealCandidate builds a SkillCandidate matching what the SelfHeal
@@ -352,8 +370,8 @@ func TestSynthesizeSkill_SelfHealCandidate_LLMReturnsValidSkill(t *testing.T) {
 	if got := atomic.LoadInt64(&b.skillCompileMetrics.SelfHealCandidatesScanned); got != 1 {
 		t.Errorf("SelfHealCandidatesScanned: got %d want 1", got)
 	}
-	if got := atomic.LoadInt64(&b.skillCompileMetrics.SelfHealSkillsSynthesized); got != 1 {
-		t.Errorf("SelfHealSkillsSynthesized: got %d want 1", got)
+	if got := atomic.LoadInt64(&b.skillCompileMetrics.SelfHealSkillsSynthesized); got != 0 {
+		t.Errorf("SelfHealSkillsSynthesized: got %d want 0 (provider acceptance is not a write)", got)
 	}
 	if got := atomic.LoadInt64(&b.skillCompileMetrics.SelfHealLLMRejections); got != 0 {
 		t.Errorf("SelfHealLLMRejections: got %d want 0", got)
@@ -445,6 +463,9 @@ func TestSynthesizeSkill_SelfHealCandidate_DescriptionTooShort(t *testing.T) {
 
 func TestSynthesizeSkill_NoAPIKey_DegradeGracefully(t *testing.T) {
 	b := newTestBroker(t)
+	t.Setenv("WUPHF_CONFIG_PATH", t.TempDir()+"/config.json")
+	t.Setenv("WUPHF_ANTHROPIC_API_KEY", "")
+	t.Setenv("WUPHF_OPENAI_API_KEY", "")
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	t.Setenv("OPENAI_API_KEY", "")
 
@@ -467,6 +488,36 @@ func TestSynthesizeSkill_NoAPIKey_DegradeGracefully(t *testing.T) {
 	// However the "scanned" counter should fire — we did try.
 	if got := atomic.LoadInt64(&b.skillCompileMetrics.SelfHealCandidatesScanned); got != 1 {
 		t.Errorf("SelfHealCandidatesScanned: got %d want 1", got)
+	}
+}
+
+func TestSynthesizeSkill_UsesConfiguredAnthropicKey(t *testing.T) {
+	b := newTestBroker(t)
+	t.Setenv("WUPHF_CONFIG_PATH", t.TempDir()+"/config.json")
+	t.Setenv("WUPHF_ANTHROPIC_API_KEY", "")
+	t.Setenv("WUPHF_OPENAI_API_KEY", "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
+	if err := config.Save(config.Config{AnthropicAPIKey: "config-anthropic-key"}); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	reply := `{"is_skill": true, "name": "handle-config-key", "description": "when blocked by config auth, use the configured key.", "body": "## When this fires\nA configured key should authenticate Stage B.\n\n## Steps\n1. Resolve the saved key.\n\n## Source incident\ntask-77\n"}`
+	var calls atomic.Int64
+	srv := httptest.NewServer(fakeAnthropicHandler(t, &calls, reply))
+	defer srv.Close()
+
+	prov := NewDefaultStageBLLMProvider(b)
+	prov.httpClient = &http.Client{
+		Transport: rewriteTransport{target: srv.URL},
+		Timeout:   srv.Client().Timeout,
+	}
+
+	if _, _, err := prov.SynthesizeSkill(context.Background(), selfHealCandidate(), ""); err != nil {
+		t.Fatalf("SynthesizeSkill with configured key: %v", err)
+	}
+	if calls.Load() != 1 {
+		t.Errorf("expected configured key to trigger 1 LLM call, got %d", calls.Load())
 	}
 }
 
@@ -531,6 +582,22 @@ func TestValidateStageBSynthResponse_DescriptionTooLong(t *testing.T) {
 	}
 	if err := validateStageBSynthResponse(SourceSelfHealResolved, resp); err == nil {
 		t.Fatal("expected validation error for over-long description")
+	}
+}
+
+func TestValidateStageBSynthResponse_RejectsMixedCaseName(t *testing.T) {
+	resp := stageBSynthResponse{
+		IsSkill:     true,
+		Name:        "Handle-Foo",
+		Description: "when blocked, do the foo dance.",
+		Body:        "## When this fires\nfoo\n## Steps\nbar\n## Source incident\nx\n",
+	}
+	err := validateStageBSynthResponse(SourceSelfHealResolved, resp)
+	if err == nil {
+		t.Fatal("expected validation error for mixed-case name")
+	}
+	if !strings.Contains(err.Error(), "lowercase") {
+		t.Errorf("expected lowercase error, got %q", err.Error())
 	}
 }
 

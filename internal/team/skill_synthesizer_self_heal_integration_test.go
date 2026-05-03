@@ -8,6 +8,8 @@ package team
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -61,6 +63,9 @@ func TestSynthesizer_SelfHealEndToEnd_WritesProposedSkill(t *testing.T) {
 	}
 	if res.CandidatesScanned != 1 {
 		t.Errorf("CandidatesScanned: got %d want 1", res.CandidatesScanned)
+	}
+	if got := atomic.LoadInt64(&b.skillCompileMetrics.SelfHealSkillsSynthesized); got != 1 {
+		t.Errorf("SelfHealSkillsSynthesized: got %d want 1", got)
 	}
 	if prov.calls.Load() != 1 {
 		t.Errorf("LLM calls: got %d want 1", prov.calls.Load())
@@ -159,20 +164,16 @@ func TestSynthesizer_SelfHealEndToEnd_StageBProposalsTotalIncrements(t *testing.
 		UpdatedAt:  now.Format(time.RFC3339),
 	})
 
-	// Wire the synthesizer with a stub LLM that approves the candidate.
-	agg := NewStageBSignalAggregator(b)
-	prov := &stubLLMProvider{
-		queue: []stubLLMResponse{{
-			fm: SkillFrontmatter{
-				Name:        "handle-capability-gap-relay",
-				Description: "when blocked because the relay is missing, discover and add it.",
-			},
-			body: "## When this fires\nA capability_gap blocks deploy.\n\n## Steps\n1. Discover.\n2. Add.\n",
-		}},
-	}
-	synth := NewSkillSynthesizer(b, agg)
-	synth.provider = prov
-	b.SetSkillSynthesizer(synth)
+	reply := `{"is_skill": true, "name": "handle-capability-gap-relay", "description": "when blocked because the relay is missing, discover and add it.", "body": "## When this fires\nA capability_gap blocks deploy.\n\n## Steps\n1. Discover.\n2. Add.\n\n## Source incident\ntask-303\n"}`
+	var calls atomic.Int64
+	srv := httptest.NewServer(fakeAnthropicHandler(t, &calls, reply))
+	defer srv.Close()
+	t.Setenv("ANTHROPIC_API_KEY", "test-key")
+	t.Setenv("OPENAI_API_KEY", "")
+	oldTransport := http.DefaultTransport
+	http.DefaultTransport = rewriteTransport{target: srv.URL, base: oldTransport}
+	t.Cleanup(func() { http.DefaultTransport = oldTransport })
+
 	// Inject a stub Stage A scanner so compileWikiSkills doesn't touch the
 	// real wiki tree.
 	b.SetSkillScanner(NewSkillScanner(b, &instantProvider{}, 100))
@@ -182,5 +183,8 @@ func TestSynthesizer_SelfHealEndToEnd_StageBProposalsTotalIncrements(t *testing.
 	}
 	if got := atomic.LoadInt64(&b.skillCompileMetrics.StageBProposalsTotal); got != 1 {
 		t.Errorf("StageBProposalsTotal: got %d want 1", got)
+	}
+	if calls.Load() != 1 {
+		t.Errorf("LLM calls: got %d want 1", calls.Load())
 	}
 }
