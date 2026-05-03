@@ -163,6 +163,12 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 	relay := newHeadlessLiveChatRelay(l, slug, target, notification, func(line string) {
 		appendHeadlessCodexLog(slug, line)
 	})
+	// Defer the flush so error/parseErr exit paths still surface the
+	// trailing buffered sentence. The explicit Flush before the final
+	// post stays — once the buffer is empty, the deferred call is a
+	// no-op. Without this, a turn that streams "checking the database…"
+	// and then dies in cmd.Wait() loses that user-facing breadcrumb.
+	defer relay.Flush()
 
 	var firstEventAt time.Time
 	var firstTextAt time.Time
@@ -217,11 +223,11 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 			appendHeadlessCodexLog(slug, "stderr: "+detail)
 			l.updateHeadlessProgress(slug, "error", "error", truncate(detail, 180), metrics)
 			if isCodexAuthError(detail) && l.broker != nil {
-				target := firstNonEmpty(channel...)
-				if strings.TrimSpace(target) == "" {
-					target = "general"
+				sysTarget := target
+				if strings.TrimSpace(sysTarget) == "" {
+					sysTarget = "general"
 				}
-				l.broker.PostSystemMessage(target,
+				l.broker.PostSystemMessage(sysTarget,
 					fmt.Sprintf("@%s hit an auth error talking to the model (%s). Run `codex login` on this machine, or set OPENAI_API_KEY, then retry.", slug, truncate(detail, 180)),
 					"error",
 				)

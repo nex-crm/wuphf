@@ -140,6 +140,11 @@ func (l *Launcher) runHeadlessOpencodeTurn(ctx context.Context, slug string, not
 	relay := newHeadlessLiveChatRelay(l, slug, target, notification, func(line string) {
 		appendHeadlessCodexLog(slug, line)
 	})
+	// Defer the flush so error/scanErr exit paths still surface the
+	// trailing buffered sentence. The explicit Flush before the final
+	// post stays — once the buffer is empty, the deferred call is a
+	// no-op.
+	defer relay.Flush()
 
 	var firstEventAt, firstTextAt, firstToolAt time.Time
 	textStarted := false
@@ -212,11 +217,11 @@ func (l *Launcher) runHeadlessOpencodeTurn(ctx context.Context, slug string, not
 			appendHeadlessCodexLog(slug, "opencode_stderr: "+detail)
 			l.updateHeadlessProgress(slug, "error", "error", truncate(detail, 180), metrics)
 			if isOpencodeAuthError(detail) && l.broker != nil {
-				target := firstNonEmpty(channel...)
-				if strings.TrimSpace(target) == "" {
-					target = "general"
+				sysTarget := target
+				if strings.TrimSpace(sysTarget) == "" {
+					sysTarget = "general"
 				}
-				l.broker.PostSystemMessage(target,
+				l.broker.PostSystemMessage(sysTarget,
 					fmt.Sprintf("@%s hit an auth error talking to the model (%s). Configure your Opencode provider credentials and retry.", slug, truncate(detail, 180)),
 					"error",
 				)

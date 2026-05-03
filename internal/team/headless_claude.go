@@ -147,6 +147,11 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 	relay := newHeadlessLiveChatRelay(l, slug, target, notification, func(line string) {
 		appendHeadlessClaudeLog(slug, line)
 	})
+	// Defer the flush so error/parseErr exit paths still surface the
+	// trailing buffered sentence. The explicit Flush before the final
+	// post stays — once the buffer is empty, the deferred call is a
+	// no-op.
+	defer relay.Flush()
 
 	var firstEventAt time.Time
 	var firstTextAt time.Time

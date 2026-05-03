@@ -131,6 +131,11 @@ func (l *Launcher) runHeadlessOpenAICompatTurn(ctx context.Context, slug string,
 		stream:  agentStream,
 		metrics: &metrics,
 	}, relay)
+	// Defer the flush so the loop's `if err != nil { return err }` and
+	// other early exits still surface the trailing buffered sentence.
+	// The explicit flushes before the partial-post and final-post hooks
+	// stay — they're idempotent once the buffer is drained.
+	defer state.flushLiveChat()
 
 	// taskID is unique per turn so the Receipts panel groups each
 	// agent's turn into its own row. Format mirrors agent.nextTaskID.
