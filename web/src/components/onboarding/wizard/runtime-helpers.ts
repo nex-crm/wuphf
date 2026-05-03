@@ -1,5 +1,5 @@
 import { RUNTIMES } from "./constants";
-import type { MemoryBackend, PrereqResult } from "./types";
+import type { PrereqResult } from "./types";
 
 // Find the prereq detection record for a binary (e.g. "claude", "codex").
 // Pure helper used by both runtimeIsReady and the SetupStep tile renderer.
@@ -43,8 +43,6 @@ interface SetupContinueInput {
   prereqsError: string;
   apiKeys: Record<string, string>;
   localProvider: string;
-  memoryBackend: MemoryBackend;
-  gbrainOpenAIKey: string;
 }
 
 export function canSetupContinue({
@@ -53,18 +51,11 @@ export function canSetupContinue({
   prereqsError,
   apiKeys,
   localProvider,
-  memoryBackend,
-  gbrainOpenAIKey,
 }: SetupContinueInput): boolean {
   const hasInstalledSelection = runtimePriority.some((label) =>
     runtimeIsReady(label, prereqs, prereqsError),
   );
   const hasAnyApiKey = Object.values(apiKeys).some((v) => v.trim().length > 0);
   const hasLocalProvider = localProvider.trim().length > 0;
-  const gbrainOpenAIMissing =
-    memoryBackend === "gbrain" && gbrainOpenAIKey.trim().length === 0;
-  return (
-    (hasInstalledSelection || hasAnyApiKey || hasLocalProvider) &&
-    !gbrainOpenAIMissing
-  );
+  return hasInstalledSelection || hasAnyApiKey || hasLocalProvider;
 }
