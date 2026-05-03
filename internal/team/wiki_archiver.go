@@ -29,9 +29,10 @@ const (
 
 // SweepResult summarises a single WikiArchiver.Sweep run.
 type SweepResult struct {
-	Archived int `json:"archived"`
-	Skipped  int `json:"skipped"`
-	Errors   int `json:"errors"`
+	Archived      int      `json:"archived"`
+	Skipped       int      `json:"skipped"`
+	Errors        int      `json:"errors"`
+	ArchivedPaths []string `json:"archived_paths,omitempty"`
 }
 
 // WikiArchiver sweeps team/ for stale articles and moves them to .archive/.
@@ -171,6 +172,7 @@ func (a *WikiArchiver) Sweep(ctx context.Context) (SweepResult, error) {
 			continue
 		}
 		result.Archived++
+		result.ArchivedPaths = append(result.ArchivedPaths, c.relPath)
 	}
 	return result, nil
 }

@@ -1091,6 +1091,7 @@ func (b *Broker) handleWikiArchiveSweep(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	worker.NotifyArchived(ctx, result.ArchivedPaths)
 	writeJSON(w, http.StatusOK, result)
 }
 
@@ -1143,6 +1144,7 @@ func (b *Broker) runArchiveSweepTick() string {
 		log.Printf("wiki archive: sweep complete — archived=%d skipped=%d errors=%d",
 			result.Archived, result.Skipped, result.Errors)
 	}
+	worker.NotifyArchived(ctx, result.ArchivedPaths)
 	if result.Errors > 0 {
 		return "error"
 	}
