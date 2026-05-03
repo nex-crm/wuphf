@@ -664,6 +664,33 @@ func TestNotificationTargetsForDMChannelNewSlugFormat(t *testing.T) {
 	}
 }
 
+func TestNotificationTargetsForDMChannelAcceptsHumanSlugSender(t *testing.T) {
+	b := newTestBroker(t)
+	b.mu.Lock()
+	b.members = []officeMember{
+		{Slug: "ceo", Name: "CEO"},
+		{Slug: "fe", Name: "Frontend Engineer"},
+	}
+	b.mu.Unlock()
+	if _, err := b.ChannelStore().GetOrCreateDirect("fe", "human:mira"); err != nil {
+		t.Fatalf("seed DM channel: %v", err)
+	}
+
+	l := &Launcher{broker: b, focusMode: true}
+	dmSlug := channel.DirectSlug("fe", "human:mira")
+	immediate, delayed := l.notificationTargetsForMessage(channelMessage{
+		From:    "human:mira",
+		Channel: dmSlug,
+		Content: "Check this component",
+	})
+	if len(delayed) != 0 {
+		t.Fatalf("expected no delayed targets for cofounder DM, got %+v", delayed)
+	}
+	if len(immediate) != 1 || immediate[0].Slug != "fe" {
+		t.Fatalf("expected fe target for cofounder DM, got %+v", immediate)
+	}
+}
+
 func TestResponseInstructionForTargetDMChannelNewSlugFormat(t *testing.T) {
 	// New-style deterministic DM slugs should produce the same "messaging you directly"
 	// instruction as legacy dm-* slugs, ensuring specialists respond in DMs.

@@ -247,12 +247,7 @@ func firstActiveHumanInterview(requests []humanInterview) *humanInterview {
 }
 
 func humanSenderMayCancelInterviews(sender string) bool {
-	switch normalizeActorSlug(sender) {
-	case "", "you", "human":
-		return true
-	default:
-		return false
-	}
+	return isHumanMessageSender(sender)
 }
 
 func (b *Broker) cancelRequestLocked(req *humanInterview, actor, reason string) {
@@ -513,6 +508,11 @@ func (b *Broker) handleGetRequestAnswer(w http.ResponseWriter, r *http.Request) 
 }
 
 func (b *Broker) handlePostRequestAnswer(w http.ResponseWriter, r *http.Request) {
+	answerActor := "you"
+	if actor, ok := requestActorFromContext(r.Context()); ok && actor.Kind == requestActorKindHuman {
+		answerActor = humanMessageSender(actor.Slug)
+	}
+
 	var body struct {
 		ID         string `json:"id"`
 		ChoiceID   string `json:"choice_id"`
@@ -632,7 +632,7 @@ func (b *Broker) handlePostRequestAnswer(w http.ResponseWriter, r *http.Request)
 		b.counter++
 		msg := channelMessage{
 			ID:        fmt.Sprintf("msg-%d", b.counter),
-			From:      "you",
+			From:      answerActor,
 			Channel:   normalizeChannelSlug(b.requests[i].Channel),
 			Tagged:    []string{b.requests[i].From},
 			ReplyTo:   strings.TrimSpace(b.requests[i].ReplyTo),
@@ -640,7 +640,7 @@ func (b *Broker) handlePostRequestAnswer(w http.ResponseWriter, r *http.Request)
 		}
 		msg.Content = formatRequestAnswerMessage(b.requests[i], *answer)
 		b.appendMessageLocked(msg)
-		b.appendActionLocked("request_answered", "office", b.requests[i].Channel, "you", truncateSummary(msg.Content, 140), b.requests[i].ID)
+		b.appendActionLocked("request_answered", "office", b.requests[i].Channel, answerActor, truncateSummary(msg.Content, 140), b.requests[i].ID)
 		if err := b.saveLocked(); err != nil {
 			b.mu.Unlock()
 			http.Error(w, "failed to persist broker state", http.StatusInternalServerError)

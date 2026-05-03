@@ -139,10 +139,23 @@ The examples below assume `wuphf` is on your `PATH`. If you just built the binar
 
 ```bash
 wuphf init          # First-time setup
+wuphf share         # Invite one co-founder over Tailscale/WireGuard
 wuphf shred         # Delete workspace state and reopen onboarding
 wuphf --1o1         # 1:1 with the CEO
 wuphf --1o1 cro     # 1:1 with a specific agent
 ```
+
+## Share With a Co-founder
+
+Prerequisite: both machines are on the same Tailscale or WireGuard network.
+
+```bash
+wuphf share
+```
+
+Send the printed `/join` URL to one co-founder. The invite is one use, expires after 24 hours, and the shared web listener only starts on a private-network address by default. Public interfaces are blocked unless you pass an explicit unsafe override.
+
+For the full founder-to-founder walkthrough, see [Share WUPHF With a Co-founder](docs/tutorials/share-with-cofounder.md).
 
 ## Publishing skills
 
