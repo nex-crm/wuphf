@@ -26,7 +26,7 @@ import {
   SidebarExpand,
 } from "iconoir-react";
 
-import { getUsage } from "../../api/client";
+import { getUsage } from "../../api/platform";
 import { SIDEBAR_APPS } from "../../lib/constants";
 import { formatTokens, formatUSD } from "../../lib/format";
 import { useAppStore } from "../../stores/app";

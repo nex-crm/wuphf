@@ -5,12 +5,12 @@ import {
   getActions,
   getDecisions,
   getOfficeMembers,
-  getOfficeTasks,
   getScheduler,
-  getUsage,
   getWatchdogs,
   type OfficeMember,
 } from "../../api/client";
+import { getUsage } from "../../api/platform";
+import { getOfficeTasks } from "../../api/tasks";
 import { formatTokens } from "../../lib/format";
 import { keyedByOccurrence } from "../../lib/reactKeys";
 import { type Insight, InsightsList } from "../activity/InsightsList";

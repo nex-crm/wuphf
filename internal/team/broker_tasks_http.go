@@ -52,10 +52,7 @@ func (b *Broker) handleAgentLogs(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"task":    task,
-			"entries": entries,
-		})
+		_ = json.NewEncoder(w).Encode(AgentLogEntriesResponse{Task: task, Entries: entries})
 		return
 	}
 
@@ -71,65 +68,27 @@ func (b *Broker) handleAgentLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{"tasks": tasks})
+	_ = json.NewEncoder(w).Encode(AgentLogTasksResponse{Tasks: tasks})
 }
 
 func (b *Broker) handleGetTasks(w http.ResponseWriter, r *http.Request) {
-	statusFilter := strings.TrimSpace(r.URL.Query().Get("status"))
-	mySlug := strings.TrimSpace(r.URL.Query().Get("my_slug"))
-	viewerSlug := strings.TrimSpace(r.URL.Query().Get("viewer_slug"))
-	channel := normalizeChannelSlug(r.URL.Query().Get("channel"))
-	allChannels := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("all_channels")), "true")
-	if channel == "" && !allChannels {
-		channel = "general"
-	}
-	includeDone := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("include_done")), "true")
-
-	b.mu.Lock()
-	if !allChannels && !b.canAccessChannelLocked(viewerSlug, channel) {
-		b.mu.Unlock()
+	result, err := b.ListTasks(TaskListRequest{
+		StatusFilter: strings.TrimSpace(r.URL.Query().Get("status")),
+		MySlug:       strings.TrimSpace(r.URL.Query().Get("my_slug")),
+		ViewerSlug:   strings.TrimSpace(r.URL.Query().Get("viewer_slug")),
+		Channel:      r.URL.Query().Get("channel"),
+		AllChannels:  strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("all_channels")), "true"),
+		IncludeDone:  strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("include_done")), "true"),
+	})
+	if errors.Is(err, errTaskChannelAccessDenied) {
 		http.Error(w, "channel access denied", http.StatusForbidden)
 		return
 	}
-	result := make([]teamTask, 0, len(b.tasks))
-	// allChannels=true must NOT bypass channel authorization. Without this
-	// per-task check, an authenticated viewer could enumerate every task in
-	// every channel — including private ones they aren't a member of —
-	// just by passing all_channels=true. Apply the same access predicate
-	// to each candidate channel before letting the task into the response.
-	allChannelsCache := make(map[string]bool)
-	channelAllowed := func(slug string) bool {
-		if !allChannels {
-			return true
-		}
-		if v, ok := allChannelsCache[slug]; ok {
-			return v
-		}
-		v := b.canAccessChannelLocked(viewerSlug, slug)
-		allChannelsCache[slug] = v
-		return v
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
-	for _, task := range b.tasks {
-		taskChannel := normalizeChannelSlug(task.Channel)
-		if !allChannels && taskChannel != channel {
-			continue
-		}
-		if !channelAllowed(taskChannel) {
-			continue
-		}
-		if task.Status == "done" && !includeDone && statusFilter == "" {
-			continue
-		}
-		if statusFilter != "" && task.Status != statusFilter {
-			continue
-		}
-		if mySlug != "" && task.Owner != "" && task.Owner != mySlug {
-			continue
-		}
-		result = append(result, task)
-	}
-	b.mu.Unlock()
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{"channel": channel, "tasks": result})
+	_ = json.NewEncoder(w).Encode(result)
 }

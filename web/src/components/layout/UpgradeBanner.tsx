@@ -7,7 +7,12 @@ import {
   useState,
 } from "react";
 
-import { get, runUpgrade, type UpgradeRunResult } from "../../api/client";
+import {
+  getUpgradeChangelog,
+  getUpgradeCheck,
+  runUpgrade,
+  type UpgradeRunResult,
+} from "../../api/upgrade";
 import {
   type CommitEntry,
   compareVersions,
@@ -32,35 +37,6 @@ const REPO = "nex-crm/wuphf";
 // last said "not now", instead of permanently muting until a new release
 // happens to be the literal-equal version they last clicked-X on.
 const SILENT_UP_TO_KEY = "wuphf-upgrade-silent-up-to";
-
-interface UpgradeCheckResponse {
-  current: string;
-  latest: string;
-  upgrade_available: boolean;
-  is_dev_build: boolean;
-  compare_url?: string;
-  upgrade_command: string;
-  // install_method/install_command are the server's view of what
-  // POST /upgrade/run would ACTUALLY execute on this host (global vs
-  // local install). The chip renders install_command verbatim so the
-  // click target's text never lies. Older brokers omit these fields —
-  // fall back to upgrade_command.
-  install_method?: "global" | "local" | "unknown";
-  install_command?: string;
-  error?: string;
-}
-
-interface UpgradeChangelogResponse {
-  commits?: Array<{
-    type: string;
-    scope: string;
-    description: string;
-    pr: string;
-    sha: string;
-    breaking: boolean;
-  }>;
-  error?: string;
-}
 
 interface ChangelogState {
   loading: boolean;
@@ -145,7 +121,7 @@ export function UpgradeBanner() {
     // the shared client is a follow-up that touches every caller of
     // get() and is out of scope for this PR.
     const ctl = new AbortController();
-    void get<UpgradeCheckResponse>("/upgrade-check")
+    void getUpgradeCheck()
       .then((res) => {
         if (ctl.signal.aborted) return;
         if (res.current) setCurrent(res.current);
@@ -213,10 +189,7 @@ export function UpgradeBanner() {
     if (changelogFetchedRef.current === fetchKey) return;
     const ctl = new AbortController();
     setChangelog({ loading: true, error: null, commits: [], ready: false });
-    void get<UpgradeChangelogResponse>("/upgrade-changelog", {
-      from: fromVersion,
-      to: latest,
-    })
+    void getUpgradeChangelog(fromVersion, latest)
       .then((data) => {
         if (ctl.signal.aborted) return;
         changelogFetchedRef.current = fetchKey;
