@@ -389,7 +389,7 @@ func (b *Broker) handleSkillDisable(w http.ResponseWriter, r *http.Request, name
 	}
 
 	b.mu.Lock()
-	sk := b.findSkillByNameLocked(name)
+	sk := b.findSkillByNameIncludingArchivedLocked(name)
 	if sk == nil {
 		b.mu.Unlock()
 		http.Error(w, "skill not found", http.StatusNotFound)
@@ -400,6 +400,7 @@ func (b *Broker) handleSkillDisable(w http.ResponseWriter, r *http.Request, name
 		http.Error(w, fmt.Sprintf("skill cannot be disabled from status=%s", sk.Status), http.StatusConflict)
 		return
 	}
+	sk.DisabledFromStatus = sk.Status
 	sk.Status = "disabled"
 	sk.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 	skCopy := *sk
@@ -450,7 +451,13 @@ func (b *Broker) handleSkillEnable(w http.ResponseWriter, r *http.Request, name 
 		http.Error(w, fmt.Sprintf("skill cannot be enabled from status=%s", sk.Status), http.StatusConflict)
 		return
 	}
+	if sk.DisabledFromStatus == "proposed" {
+		b.mu.Unlock()
+		http.Error(w, "skill cannot be enabled from status=disabled; proposed skills require approval", http.StatusConflict)
+		return
+	}
 	sk.Status = "active"
+	sk.DisabledFromStatus = ""
 	sk.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 	skCopy := *sk
 
@@ -500,7 +507,13 @@ func (b *Broker) handleSkillRestore(w http.ResponseWriter, r *http.Request, name
 		http.Error(w, fmt.Sprintf("skill cannot be restored from status=%s", sk.Status), http.StatusConflict)
 		return
 	}
+	if existing := b.findSkillByNameLocked(name); existing != nil && existing.ID != sk.ID {
+		b.mu.Unlock()
+		http.Error(w, "skill with this name already exists in a non-archived state", http.StatusConflict)
+		return
+	}
 	sk.Status = "active"
+	sk.DisabledFromStatus = ""
 	sk.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 	skCopy := *sk
 

@@ -407,6 +407,37 @@ func TestSkillArchiveStatusSurvivesRestart(t *testing.T) {
 	}
 }
 
+func TestSkillDisableOriginSurvivesRestart(t *testing.T) {
+	_, b, do := crudTestServer(t)
+	seedProposedSkill(t, b, "proposal-pause")
+
+	resp, body := do(http.MethodPost, "/skills/proposal-pause/disable", map[string]any{})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("disable: status %d, body %s", resp.StatusCode, body)
+	}
+
+	b2 := reloadedBroker(t, b)
+	b2.mu.Lock()
+	var found *teamSkill
+	for i := range b2.skills {
+		if skillSlug(b2.skills[i].Name) == "proposal-pause" {
+			found = &b2.skills[i]
+			break
+		}
+	}
+	b2.mu.Unlock()
+
+	if found == nil {
+		t.Fatal("proposal-pause skill missing from reloaded broker")
+	}
+	if found.Status != "disabled" {
+		t.Errorf("status after restart = %q, want disabled", found.Status)
+	}
+	if found.DisabledFromStatus != "proposed" {
+		t.Errorf("disabled_from_status after restart = %q, want proposed", found.DisabledFromStatus)
+	}
+}
+
 // TestSkillPatchEndpoint_ConflictOnMultipleMatches verifies the 409 path when
 // the old_string matches more than once and replace_all is false.
 func TestSkillPatchEndpoint_ConflictOnMultipleMatches(t *testing.T) {
@@ -508,6 +539,34 @@ func TestSkillDisableEnableRoundTrip(t *testing.T) {
 	if enabled.Skill.Status != "active" {
 		t.Errorf("enable status: got %q, want active", enabled.Skill.Status)
 	}
+	if enabled.Skill.DisabledFromStatus != "" {
+		t.Errorf("disabled_from_status after enable: got %q, want empty", enabled.Skill.DisabledFromStatus)
+	}
+}
+
+func TestSkillDisableProposedCannotBeEnabled(t *testing.T) {
+	t.Parallel()
+	_, b, do := crudTestServer(t)
+	seedProposedSkill(t, b, "approval-required")
+
+	resp, body := do(http.MethodPost, "/skills/approval-required/disable", map[string]any{})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("disable proposed: status %d, body %s", resp.StatusCode, body)
+	}
+	var disabled struct {
+		Skill teamSkill `json:"skill"`
+	}
+	if err := json.Unmarshal(body, &disabled); err != nil {
+		t.Fatalf("disable proposed unmarshal: %v", err)
+	}
+	if disabled.Skill.DisabledFromStatus != "proposed" {
+		t.Errorf("disabled_from_status: got %q, want proposed", disabled.Skill.DisabledFromStatus)
+	}
+
+	resp, body = do(http.MethodPost, "/skills/approval-required/enable", map[string]any{})
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("enable disabled proposal: status %d, want 409; body=%s", resp.StatusCode, body)
+	}
 }
 
 // TestSkillRestoreFromArchive covers the archive → restore round trip and
@@ -581,6 +640,33 @@ func TestSkillRestoreFromArchive(t *testing.T) {
 	}
 }
 
+func TestSkillRestoreRejectsSlugCollision(t *testing.T) {
+	t.Parallel()
+	_, b, do := crudTestServer(t)
+	seedProposedSkill(t, b, "restore-collision")
+	setSkillStatus(t, b, "restore-collision", "archived")
+
+	b.mu.Lock()
+	b.skills = append(b.skills, teamSkill{
+		ID:          "skill-restore-collision-2",
+		Name:        "restore-collision",
+		Title:       "Restore Collision Replacement",
+		Description: "Replacement active skill.",
+		Content:     "Step 1: replace.",
+		CreatedBy:   "archivist",
+		Channel:     "general",
+		Status:      "active",
+		CreatedAt:   "2026-04-29T00:00:00Z",
+		UpdatedAt:   "2026-04-29T00:00:00Z",
+	})
+	b.mu.Unlock()
+
+	resp, body := do(http.MethodPost, "/skills/restore-collision/restore", map[string]any{})
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("restore collision: status %d, want 409; body=%s", resp.StatusCode, body)
+	}
+}
+
 // TestSkillDisableInvalidTransitions enforces the status invariants:
 // - disable requires active or proposed
 // - enable requires disabled
@@ -592,18 +678,15 @@ func TestSkillDisableInvalidTransitions(t *testing.T) {
 	// Disabling an archived skill → 409.
 	seedProposedSkill(t, b, "already-archived")
 	setSkillStatus(t, b, "already-archived", "archived")
-	resp, _ := do(http.MethodPost, "/skills/already-archived/disable", map[string]any{})
-	// Note: archived skills are also hidden by findSkillByNameLocked, so the
-	// caller sees 404 before the status check. Either response (404 or 409)
-	// signals the invalid transition; assert non-2xx.
-	if resp.StatusCode == http.StatusOK {
-		t.Errorf("disabling archived skill should fail; got 200")
+	resp, body := do(http.MethodPost, "/skills/already-archived/disable", map[string]any{})
+	if resp.StatusCode != http.StatusConflict {
+		t.Errorf("disable on archived: status %d, want 409 — body=%s", resp.StatusCode, body)
 	}
 
 	// Enabling an active skill → 409.
 	seedProposedSkill(t, b, "already-active")
 	setSkillStatus(t, b, "already-active", "active")
-	resp, body := do(http.MethodPost, "/skills/already-active/enable", map[string]any{})
+	resp, body = do(http.MethodPost, "/skills/already-active/enable", map[string]any{})
 	if resp.StatusCode != http.StatusConflict {
 		t.Errorf("enable on active: status %d, want 409 — body=%s", resp.StatusCode, body)
 	}
