@@ -614,6 +614,7 @@ jobs:
         run: |
           bunx playwright test \
             tests/smoke.spec.ts \
+            tests/sidebar-scroll.spec.ts \
             tests/chat.spec.ts \
             tests/slash-commands.spec.ts \
             tests/dm.spec.ts \

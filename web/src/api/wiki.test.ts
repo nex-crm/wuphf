@@ -3,7 +3,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as client from "./client";
 import * as api from "./wiki";
 
-// biome-ignore lint/complexity/noExcessiveLinesPerFunction: Existing function length is baselined for a focused follow-up refactor.
 describe("wiki api client", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -31,10 +30,9 @@ describe("wiki api client", () => {
     expect(result).toEqual(article);
   });
 
-  it("fetchArticle falls back to a mock on network error", async () => {
+  it("fetchArticle rethrows the last backend error", async () => {
     vi.spyOn(client, "get").mockRejectedValue(new Error("boom"));
-    const result = await api.fetchArticle("people/customer-x");
-    expect(result.title).toBe("Customer X");
+    await expect(api.fetchArticle("people/customer-x")).rejects.toThrow("boom");
   });
 
   it("fetchArticle resolves a bare slug by trying the standard group dirs", async () => {
@@ -120,22 +118,16 @@ describe("wiki api client", () => {
     expect(result).toEqual(entries);
   });
 
-  it("fetchCatalog falls back to MOCK_CATALOG on error", async () => {
+  it("fetchCatalog returns an empty array on error", async () => {
     vi.spyOn(client, "get").mockRejectedValue(new Error("boom"));
     const result = await api.fetchCatalog();
-    expect(result.length).toBeGreaterThan(0);
+    expect(result).toEqual([]);
   });
 
-  it("fetchHistory returns mock commits on error", async () => {
+  it("fetchHistory returns empty commits on error", async () => {
     vi.spyOn(client, "get").mockRejectedValue(new Error("boom"));
     const result = await api.fetchHistory("people/customer-x");
-    expect(result.commits.length).toBeGreaterThan(0);
-  });
-
-  it("mockArticle generates a fallback article for unknown paths", () => {
-    const result = api.mockArticle("unknown/thing");
-    expect(result.path).toBe("unknown/thing");
-    expect(result.title).toMatch(/Thing/i);
+    expect(result.commits).toEqual([]);
   });
 
   it("fetchCatalog treats a non-array response as empty", async () => {
@@ -151,12 +143,6 @@ describe("wiki api client", () => {
     vi.spyOn(client, "get").mockResolvedValue({ commits });
     const result = await api.fetchHistory("a");
     expect(result.commits).toEqual(commits);
-  });
-
-  it("mockArticle generates the Customer X fixture for the canonical path", () => {
-    const result = api.mockArticle("customer-x");
-    expect(result.title).toBe("Customer X");
-    expect(result.contributors.length).toBeGreaterThan(0);
   });
 
   it("fetchSections returns the server response when the endpoint succeeds", async () => {

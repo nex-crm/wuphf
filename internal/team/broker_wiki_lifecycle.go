@@ -75,6 +75,8 @@ func (b *Broker) initWikiWorker() {
 	b.readLog = NewReadLog(repo.Root())
 	b.mu.Unlock()
 
+	b.ensureNotebookDirsForRoster()
+
 	// Skill status reconciliation: now that the wiki worker is wired,
 	// prefer the on-disk SKILL.md frontmatter status over the potentially
 	// stale broker-state.json snapshot. This closes the race window where a

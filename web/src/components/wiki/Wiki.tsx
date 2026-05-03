@@ -20,6 +20,7 @@ import "../../styles/wiki.css";
 const AUDIT_PATH = "_audit";
 // Reserved pseudo-path for the lint view.
 const LINT_PATH = "_lint";
+type WikiView = "audit" | "lint" | "article" | "catalog";
 
 interface WikiProps {
   /** When set, renders the article view for this path; otherwise renders the catalog. */
@@ -72,15 +73,10 @@ export default function Wiki({
     return () => unsubscribe();
   }, []);
 
-  const isAudit = articlePath === AUDIT_PATH;
-  const isLint = articlePath === LINT_PATH;
-  const view = isAudit
-    ? "audit"
-    : isLint
-      ? "lint"
-      : articlePath
-        ? "article"
-        : "catalog";
+  const view = wikiViewFor(articlePath);
+  const isAudit = view === "audit";
+  const isLint = view === "lint";
+  const editLogHistoryPath = wikiHistoryPath(articlePath, view);
 
   return (
     <div className="wiki-root" data-testid="wiki-root">
@@ -112,7 +108,25 @@ export default function Wiki({
           />
         )}
       </div>
-      {!loading && <EditLogFooter onNavigate={(path) => onNavigate(path)} />}
+      {!loading && (
+        <EditLogFooter
+          historyPath={editLogHistoryPath}
+          onNavigate={(path) => onNavigate(path)}
+        />
+      )}
     </div>
   );
+}
+
+function wikiViewFor(articlePath: string | null | undefined): WikiView {
+  if (articlePath === AUDIT_PATH) return "audit";
+  if (articlePath === LINT_PATH) return "lint";
+  return articlePath ? "article" : "catalog";
+}
+
+function wikiHistoryPath(
+  articlePath: string | null | undefined,
+  view: WikiView,
+): string | null | undefined {
+  return view === "article" ? articlePath : null;
 }

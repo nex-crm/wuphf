@@ -8,6 +8,7 @@ describe("<Wiki>", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     vi.spyOn(api, "subscribeEditLog").mockImplementation(() => () => {});
+    vi.spyOn(api, "fetchHistory").mockResolvedValue({ commits: [] });
   });
 
   it("shows the catalog when no article is selected", async () => {
