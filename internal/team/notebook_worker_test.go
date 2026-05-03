@@ -4,13 +4,14 @@ import (
 	"context"
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/nex-crm/wuphf/internal/gitexec"
 )
 
 // recordingNotebookPublisher captures both wiki and notebook events.
@@ -123,12 +124,12 @@ func TestEnsureNotebookDirsStagesExistingShelfMarker(t *testing.T) {
 	if sha == "" {
 		t.Fatal("expected existing untracked shelf to be committed")
 	}
-	out, err := exec.Command("git", "-C", root, "ls-files", filepath.ToSlash(rel)).Output()
+	out, err := gitexec.Run(context.Background(), root, "ls-files", filepath.ToSlash(rel))
 	if err != nil {
 		t.Fatalf("git ls-files: %v", err)
 	}
-	if strings.TrimSpace(string(out)) != filepath.ToSlash(rel) {
-		t.Fatalf("expected shelf marker tracked, got %q", string(out))
+	if strings.TrimSpace(out) != filepath.ToSlash(rel) {
+		t.Fatalf("expected shelf marker tracked, got %q", out)
 	}
 }
 
