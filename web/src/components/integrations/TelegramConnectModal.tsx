@@ -368,7 +368,7 @@ export function TelegramConnectModal({
                     chat_id: 0,
                     title: "Telegram DM",
                     type: "private",
-                  })
+                  }, "mode")
                 }
               >
                 DM{" "}
