@@ -1,41 +1,17 @@
 import {
   Component,
   type ComponentType,
+  lazy,
   type ReactNode,
+  Suspense,
   useEffect,
   useState,
 } from "react";
 
 import { get, initApi } from "./api/client";
-import { ArtifactsApp } from "./components/apps/ArtifactsApp";
-import { CalendarApp } from "./components/apps/CalendarApp";
-import { ConsoleApp } from "./components/apps/ConsoleApp";
-import { GraphApp } from "./components/apps/GraphApp";
-import { HealthCheckApp } from "./components/apps/HealthCheckApp";
-import { PoliciesApp } from "./components/apps/PoliciesApp";
-import { ReceiptsApp } from "./components/apps/ReceiptsApp";
-import { RequestsApp } from "./components/apps/RequestsApp";
-import { SettingsApp } from "./components/apps/SettingsApp";
-import { SkillsApp } from "./components/apps/SkillsApp";
-import { TasksApp } from "./components/apps/TasksApp";
-import { ThreadsApp } from "./components/apps/ThreadsApp";
-import { TelegramConnectHost } from "./components/integrations/TelegramConnectModal";
-import { Shell } from "./components/layout/Shell";
-import { UpgradeBanner } from "./components/layout/UpgradeBanner";
-import { Composer } from "./components/messages/Composer";
-import { DMView } from "./components/messages/DMView";
-import { InterviewBar } from "./components/messages/InterviewBar";
-import { MessageFeed } from "./components/messages/MessageFeed";
-import { TypingIndicator } from "./components/messages/TypingIndicator";
-import Notebook from "./components/notebook/Notebook";
-import { SplashScreen } from "./components/onboarding/SplashScreen";
-import { Wizard } from "./components/onboarding/Wizard";
-import ReviewQueueKanban from "./components/review/ReviewQueueKanban";
 import { ConfirmHost } from "./components/ui/ConfirmDialog";
 import { ProviderSwitcherHost } from "./components/ui/ProviderSwitcher";
 import { ToastContainer } from "./components/ui/Toast";
-import CitedAnswer from "./components/wiki/CitedAnswer";
-import Wiki from "./components/wiki/Wiki";
 import type { WikiTab } from "./components/wiki/WikiTabs";
 import WikiTabs from "./components/wiki/WikiTabs";
 import { AgentWorkbench } from "./components/workbench/AgentWorkbench";
@@ -53,6 +29,119 @@ import "./styles/wiki-shell.css";
 import "./styles/kbd.css";
 import "./styles/console.css";
 import "@xterm/xterm/css/xterm.css";
+
+const ArtifactsApp = lazy(() =>
+  import("./components/apps/ArtifactsApp").then((m) => ({
+    default: m.ArtifactsApp,
+  })),
+);
+const CalendarApp = lazy(() =>
+  import("./components/apps/CalendarApp").then((m) => ({
+    default: m.CalendarApp,
+  })),
+);
+const ConsoleApp = lazy(() =>
+  import("./components/apps/ConsoleApp").then((m) => ({
+    default: m.ConsoleApp,
+  })),
+);
+const GraphApp = lazy(() =>
+  import("./components/apps/GraphApp").then((m) => ({ default: m.GraphApp })),
+);
+const HealthCheckApp = lazy(() =>
+  import("./components/apps/HealthCheckApp").then((m) => ({
+    default: m.HealthCheckApp,
+  })),
+);
+const PoliciesApp = lazy(() =>
+  import("./components/apps/PoliciesApp").then((m) => ({
+    default: m.PoliciesApp,
+  })),
+);
+const ReceiptsApp = lazy(() =>
+  import("./components/apps/ReceiptsApp").then((m) => ({
+    default: m.ReceiptsApp,
+  })),
+);
+const RequestsApp = lazy(() =>
+  import("./components/apps/RequestsApp").then((m) => ({
+    default: m.RequestsApp,
+  })),
+);
+const SettingsApp = lazy(() =>
+  import("./components/apps/SettingsApp").then((m) => ({
+    default: m.SettingsApp,
+  })),
+);
+const SkillsApp = lazy(() =>
+  import("./components/apps/SkillsApp").then((m) => ({ default: m.SkillsApp })),
+);
+const TasksApp = lazy(() =>
+  import("./components/apps/TasksApp").then((m) => ({ default: m.TasksApp })),
+);
+const ThreadsApp = lazy(() =>
+  import("./components/apps/ThreadsApp").then((m) => ({
+    default: m.ThreadsApp,
+  })),
+);
+const TelegramConnectHost = lazy(() =>
+  import("./components/integrations/TelegramConnectModal").then((m) => ({
+    default: m.TelegramConnectHost,
+  })),
+);
+const Shell = lazy(() =>
+  import("./components/layout/Shell").then((m) => ({ default: m.Shell })),
+);
+const UpgradeBanner = lazy(() =>
+  import("./components/layout/UpgradeBanner").then((m) => ({
+    default: m.UpgradeBanner,
+  })),
+);
+const Composer = lazy(() =>
+  import("./components/messages/Composer").then((m) => ({
+    default: m.Composer,
+  })),
+);
+const DMView = lazy(() =>
+  import("./components/messages/DMView").then((m) => ({ default: m.DMView })),
+);
+const InterviewBar = lazy(() =>
+  import("./components/messages/InterviewBar").then((m) => ({
+    default: m.InterviewBar,
+  })),
+);
+const MessageFeed = lazy(() =>
+  import("./components/messages/MessageFeed").then((m) => ({
+    default: m.MessageFeed,
+  })),
+);
+const TypingIndicator = lazy(() =>
+  import("./components/messages/TypingIndicator").then((m) => ({
+    default: m.TypingIndicator,
+  })),
+);
+const Notebook = lazy(() => import("./components/notebook/Notebook"));
+const SplashScreen = lazy(() =>
+  import("./components/onboarding/SplashScreen").then((m) => ({
+    default: m.SplashScreen,
+  })),
+);
+const Wizard = lazy(() =>
+  import("./components/onboarding/Wizard").then((m) => ({ default: m.Wizard })),
+);
+const ReviewQueueKanban = lazy(
+  () => import("./components/review/ReviewQueueKanban"),
+);
+const CitedAnswer = lazy(() => import("./components/wiki/CitedAnswer"));
+const Wiki = lazy(() => import("./components/wiki/Wiki"));
+
+function PanelFallback() {
+  return (
+    <div className="app-panel-loading" role="status" aria-live="polite">
+      Loading...
+    </div>
+  );
+}
 
 // ── Error boundary ─────────────────────────────────────────────
 
@@ -129,6 +218,26 @@ class ErrorBoundary extends Component<
   }
 }
 
+class NonCriticalBoundary extends Component<
+  { children: ReactNode },
+  { hasError: boolean }
+> {
+  state = { hasError: false };
+
+  static getDerivedStateFromError(): { hasError: boolean } {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: Error, info: { componentStack?: string | null }) {
+    // eslint-disable-next-line no-console
+    console.error("[WUPHF NonCriticalBoundary]", error, info);
+  }
+
+  render() {
+    return this.state.hasError ? null : this.props.children;
+  }
+}
+
 // ── Routed main content ─────────────────────────────────────────
 
 function MainContent() {
@@ -151,7 +260,11 @@ function MainContent() {
   const [articleRefreshNonce, setArticleRefreshNonce] = useState(0);
 
   if (!currentApp && isDMChannel(currentChannel, channelMeta)) {
-    return <DMView />;
+    return (
+      <Suspense fallback={<PanelFallback />}>
+        <DMView />
+      </Suspense>
+    );
   }
 
   // Wiki, Notebooks, and Reviews share one app shell with a tab bar on top.
@@ -167,7 +280,9 @@ function MainContent() {
           }
         />
         <div className="wiki-shell-body">
-          <CitedAnswer query={wikiLookupQuery || ""} />
+          <Suspense fallback={<PanelFallback />}>
+            <CitedAnswer query={wikiLookupQuery || ""} />
+          </Suspense>
         </div>
       </div>
     );
@@ -190,33 +305,35 @@ function MainContent() {
           onPamActionDone={() => setArticleRefreshNonce((n) => n + 1)}
         />
         <div className="wiki-shell-body">
-          {currentApp === "wiki" && (
-            <Wiki
-              articlePath={wikiPath}
-              externalRefreshNonce={articleRefreshNonce}
-              onNavigate={(path) => {
-                if (path === null) {
-                  setWikiPath(null);
-                } else {
+          <Suspense fallback={<PanelFallback />}>
+            {currentApp === "wiki" && (
+              <Wiki
+                articlePath={wikiPath}
+                externalRefreshNonce={articleRefreshNonce}
+                onNavigate={(path) => {
+                  if (path === null) {
+                    setWikiPath(null);
+                  } else {
+                    setWikiPath(path || null);
+                  }
+                }}
+              />
+            )}
+            {currentApp === "notebooks" && (
+              <Notebook
+                agentSlug={notebookAgentSlug}
+                entrySlug={notebookEntrySlug}
+                onOpenCatalog={() => setNotebookRoute(null, null)}
+                onOpenAgent={(slug) => setNotebookRoute(slug, null)}
+                onOpenEntry={(slug, entry) => setNotebookRoute(slug, entry)}
+                onNavigateWiki={(path) => {
+                  setCurrentApp("wiki");
                   setWikiPath(path || null);
-                }
-              }}
-            />
-          )}
-          {currentApp === "notebooks" && (
-            <Notebook
-              agentSlug={notebookAgentSlug}
-              entrySlug={notebookEntrySlug}
-              onOpenCatalog={() => setNotebookRoute(null, null)}
-              onOpenAgent={(slug) => setNotebookRoute(slug, null)}
-              onOpenEntry={(slug, entry) => setNotebookRoute(slug, entry)}
-              onNavigateWiki={(path) => {
-                setCurrentApp("wiki");
-                setWikiPath(path || null);
-              }}
-            />
-          )}
-          {currentApp === "reviews" && <ReviewQueueKanban />}
+                }}
+              />
+            )}
+            {currentApp === "reviews" && <ReviewQueueKanban />}
+          </Suspense>
         </div>
       </div>
     );
@@ -252,7 +369,9 @@ function MainContent() {
     return (
       <div className="app-panel active" data-testid={`app-page-${currentApp}`}>
         {Panel ? (
-          <Panel />
+          <Suspense fallback={<PanelFallback />}>
+            <Panel />
+          </Suspense>
         ) : (
           <div
             style={{
@@ -273,10 +392,16 @@ function MainContent() {
 
   return (
     <>
-      <MessageFeed />
-      <TypingIndicator />
-      <InterviewBar />
-      <Composer />
+      <Suspense fallback={<PanelFallback />}>
+        <MessageFeed />
+      </Suspense>
+      <Suspense fallback={null}>
+        <TypingIndicator />
+        <InterviewBar />
+      </Suspense>
+      <Suspense fallback={null}>
+        <Composer />
+      </Suspense>
     </>
   );
 }
@@ -412,31 +537,47 @@ export default function App() {
       </div>
     );
   } else if (showSplash) {
-    body = <SplashScreen onDone={() => setShowSplash(false)} />;
+    body = (
+      <Suspense fallback={<PanelFallback />}>
+        <SplashScreen onDone={() => setShowSplash(false)} />
+      </Suspense>
+    );
   } else if (!onboardingComplete) {
     body = (
-      <Wizard
-        onComplete={() => {
-          setShowSplash(true);
-        }}
-      />
+      <Suspense fallback={<PanelFallback />}>
+        <Wizard
+          onComplete={() => {
+            setShowSplash(true);
+          }}
+        />
+      </Suspense>
     );
   } else {
     body = (
-      <Shell>
-        <MainContent />
-      </Shell>
+      <Suspense fallback={<PanelFallback />}>
+        <Shell>
+          <MainContent />
+        </Shell>
+      </Suspense>
     );
   }
 
   return (
     <ErrorBoundary>
-      <UpgradeBanner />
+      <NonCriticalBoundary>
+        <Suspense fallback={null}>
+          <UpgradeBanner />
+        </Suspense>
+      </NonCriticalBoundary>
       {body}
       <ToastContainer />
       <ConfirmHost />
       <ProviderSwitcherHost />
-      <TelegramConnectHost />
+      <NonCriticalBoundary>
+        <Suspense fallback={null}>
+          <TelegramConnectHost />
+        </Suspense>
+      </NonCriticalBoundary>
     </ErrorBoundary>
   );
 }

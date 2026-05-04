@@ -511,7 +511,7 @@
      callout on mobile (see media query). */
   margin: 16px 0 16px 0;
   padding: 8px 10px;
-  border-left: 2px solid var(--nb-amber);
+  border: 1px solid var(--nb-amber);
   font-family: var(--nb-display);
   font-size: 17px;
   line-height: 1.35;
@@ -564,7 +564,7 @@
   color: var(--nb-ink-blue);
   line-height: 1.35;
   padding: 8px 10px;
-  border-left: 2px solid var(--nb-amber);
+  border: 1px solid var(--nb-amber);
   transform: rotate(-1deg);
   margin: 14px 0;
 }
@@ -578,7 +578,7 @@
   margin: 24px 0;
   padding: 14px 18px;
   background: rgba(43, 122, 63, 0.08);
-  border-left: 3px solid var(--nb-green-approve);
+  border: 1px solid var(--nb-green-approve);
   border-radius: 4px;
   font-family: var(--nb-chrome);
   font-size: 13px;

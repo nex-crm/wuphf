@@ -225,9 +225,9 @@
   margin: 4px 0 2px;
 }
 .msg-blockquote {
-  border-left: 3px solid var(--accent);
+  border: 1px solid var(--accent);
   background: var(--bg-warm);
-  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  border-radius: var(--radius-sm);
   padding: 8px 12px;
   margin: 6px 0;
   font-size: 13px;
@@ -393,12 +393,12 @@
 /* ─── Human decision/action cards ─── */
 .message-card-human {
   padding: 8px 12px;
-  border-left: 3px solid var(--accent);
+  border: 1px solid var(--accent);
   background: var(--accent-bg);
-  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  border-radius: var(--radius-sm);
 }
 .message-card-human.action {
-  border-left-color: var(--green);
+  border-color: var(--green);
   background: var(--green-bg);
 }
 .message-card-human-icon {
@@ -414,9 +414,9 @@
 /* ─── Automation cards ─── */
 .message-card-auto {
   padding: 8px 12px;
-  border-left: 3px solid var(--yellow);
+  border: 1px solid var(--yellow);
   background: var(--yellow-bg);
-  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  border-radius: var(--radius-sm);
 }
 .message-card-auto-icon {
   font-size: 11px;
@@ -555,7 +555,7 @@
   padding: 6px 10px;
   background: var(--bg);
   border-radius: var(--radius-sm);
-  border-left: 2px solid var(--border);
+  border: 1px solid var(--border);
 }
 .interview-bar-actions {
   display: grid;
@@ -915,9 +915,9 @@ html[data-theme] .interview-bar-actions .btn-primary:hover {
 .stream-card {
   padding: 6px 8px;
   margin: 4px 0;
-  border-left: 2px solid var(--border);
+  border: 1px solid var(--border);
   background: var(--bg);
-  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  border-radius: var(--radius-sm);
 }
 .stream-card-header {
   display: flex;
