@@ -566,10 +566,11 @@ func TestBuildCatalog_PruneScore(t *testing.T) {
 	})
 
 	t.Run("jordan_lower_score_with_agent_reads", func(t *testing.T) {
-		// Jordan: 3 agent reads, last one 7 days ago, no human reads.
-		// denominator = max(0 + 0.3*3, 1.0) = max(0.9, 1.0) = 1.0
+		// Jordan: 4 agent reads, last one 7 days ago, no human reads.
+		// denominator = max(0 + 0.3*4, 1.0) = 1.2
 		// numerator = words * 7
-		// Expect score meaningfully lower than the 45-day case above.
+		// Expect score meaningfully lower than the 45-day case above, and
+		// verify the agent-read weight contributes to the denominator.
 		root := t.TempDir()
 		backup := filepath.Join(t.TempDir(), "bak")
 		repo := NewRepoAt(root, backup)
@@ -579,6 +580,7 @@ func TestBuildCatalog_PruneScore(t *testing.T) {
 		if _, _, err := repo.Commit(ctx, "ceo", "team/playbooks/old-discovery.md", verboseBody, "create", "add verbose"); err != nil {
 			t.Fatalf("Commit: %v", err)
 		}
+		writeReadEvent(t, root, "team/playbooks/old-discovery.md", "slack-agent", time.Now().Add(-10*24*time.Hour))
 		writeReadEvent(t, root, "team/playbooks/old-discovery.md", "slack-agent", time.Now().Add(-9*24*time.Hour))
 		writeReadEvent(t, root, "team/playbooks/old-discovery.md", "slack-agent", time.Now().Add(-8*24*time.Hour))
 		writeReadEvent(t, root, "team/playbooks/old-discovery.md", "slack-agent", time.Now().Add(-7*24*time.Hour))
@@ -595,13 +597,13 @@ func TestBuildCatalog_PruneScore(t *testing.T) {
 				break
 			}
 		}
-		if verbose.AgentReadCount != 3 {
-			t.Errorf("AgentReadCount: want 3, got %d", verbose.AgentReadCount)
+		if verbose.AgentReadCount != 4 {
+			t.Errorf("AgentReadCount: want 4, got %d", verbose.AgentReadCount)
 		}
 		if verbose.DaysUnread < 6 || verbose.DaysUnread > 8 {
 			t.Fatalf("DaysUnread drift: got %d, want ~7", verbose.DaysUnread)
 		}
-		denom := math.Max(0+0.3*3, 1.0)
+		denom := math.Max(0+0.3*float64(verbose.AgentReadCount), 1.0)
 		want := float64(verbose.WordCount*verbose.DaysUnread) / denom
 		if math.Abs(verbose.PruneScore-want) > 0.001 {
 			t.Errorf("Jordan PruneScore: got %f, want %f", verbose.PruneScore, want)
