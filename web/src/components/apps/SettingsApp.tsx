@@ -14,7 +14,6 @@ import {
   type WorkspaceWipeResult,
 } from "../../api/client";
 import { useAppStore } from "../../stores/app";
-import { InlineCommand } from "../ui/InlineCommand";
 import {
   ShredCardSubtitle,
   ShredDeletionsList,
@@ -74,7 +73,6 @@ function GeneralSection({ cfg, save }: SectionProps) {
   const [blueprint, setBlueprint] = useState(cfg.blueprint ?? "");
   const [email, setEmail] = useState(cfg.email ?? "");
   const [devUrl, setDevUrl] = useState(cfg.dev_url ?? "");
-  const runShred = useShredAction();
 
   const onSave = async () => {
     const patch: ConfigUpdate = {
@@ -102,24 +100,10 @@ function GeneralSection({ cfg, save }: SectionProps) {
       <div style={styles.banner}>
         <span style={{ fontSize: 14, flexShrink: 0 }}>{"\u26A0"}</span>
         <div>
-          <strong>
-            Restart required for LLM Provider and Memory Backend changes.{" "}
-          </strong>
-          New values save immediately, but agents already running keep their
-          launch-time settings. Run{" "}
-          <InlineCommand
-            command="wuphf shred"
-            onRun={async () => {
-              await runShred();
-            }}
-            destructive={{
-              title: "Shred this workspace?",
-              severity: "critical",
-              confirmLabel: "Shred workspace",
-              intro: <ShredWarningCopy />,
-            }}
-          />{" "}
-          then relaunch to apply.
+          <strong>Do not shred for provider changes. </strong>
+          LLM Provider changes save immediately and restart agents against the
+          new runtime. Memory Backend changes apply on the next broker restart.
+          Shred is only for wiping the workspace.
         </div>
       </div>
 
@@ -1405,6 +1389,7 @@ export function SettingsApp() {
               const { Icon } = sec;
               return (
                 <button
+                  type="button"
                   key={sec.id}
                   style={styles.navItem(sec.id === section)}
                   onClick={() => setSection(sec.id)}
