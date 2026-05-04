@@ -4,6 +4,7 @@ import {
   createRoute,
   createRouter,
   type RouterHistory,
+  redirect,
 } from "@tanstack/react-router";
 
 import { ROUTE_PATHS } from "../routes/routeRegistry";
@@ -70,10 +71,20 @@ export const reviewsRoute = createRoute({
   path: ROUTE_PATHS.reviews,
 });
 
-// / — index route (defaults to #general)
+// / — index route. Always redirects to /channels/general at the route
+// level so the root never has to render an empty body. Uses redirect()
+// from beforeLoad: this fires before the route mounts, so URL→store
+// race conditions can't observe the index match.
 export const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: ROUTE_PATHS.index,
+  beforeLoad: () => {
+    throw redirect({
+      to: "/channels/$channelSlug",
+      params: { channelSlug: "general" },
+      replace: true,
+    });
+  },
 });
 
 // Route tree

@@ -9,6 +9,7 @@ import { useDefaultHarness } from "../../hooks/useConfig";
 import { useChannelMembers, useOfficeMembers } from "../../hooks/useMembers";
 import { resolveHarness } from "../../lib/harness";
 import { router } from "../../lib/router";
+import { useChannelSlug, useCurrentRoute } from "../../routes/useCurrentRoute";
 import { useAppStore } from "../../stores/app";
 import { confirm } from "../ui/ConfirmDialog";
 import { HarnessBadge } from "../ui/HarnessBadge";
@@ -98,7 +99,7 @@ function LogsSection({ slug }: { slug: string }) {
 
 function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
   const setActiveAgentSlug = useAppStore((s) => s.setActiveAgentSlug);
-  const currentChannel = useAppStore((s) => s.currentChannel);
+  const currentChannel = useChannelSlug() ?? "general";
   const queryClient = useQueryClient();
   const [dmLoading, setDmLoading] = useState(false);
   const [view, setView] = useState<"stream" | "logs">("stream");
@@ -364,8 +365,7 @@ function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
 export function AgentPanel() {
   const activeAgentSlug = useAppStore((s) => s.activeAgentSlug);
   const setActiveAgentSlug = useAppStore((s) => s.setActiveAgentSlug);
-  const currentChannel = useAppStore((s) => s.currentChannel);
-  const currentApp = useAppStore((s) => s.currentApp);
+  const route = useCurrentRoute();
   const { data: members = [] } = useOfficeMembers();
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -374,17 +374,16 @@ export function AgentPanel() {
     [setActiveAgentSlug],
   );
 
-  // Close when user navigates to a different sidebar section. The intent is
-  // "nav away from the agent panel" — driven by currentChannel / currentApp,
-  // NOT by activeAgentSlug itself. The previous version depended on
-  // activeAgentSlug and closed whenever one was set, so clicking any agent
-  // instantly un-selected it and the panel never mounted (React #31 guard
-  // e2e regression).
+  // Close when the user navigates to a different surface. The intent is
+  // "nav away from the agent panel" — driven by route changes, NOT by
+  // activeAgentSlug itself (which would close on every open). Using a
+  // route-id + serialized-params dep matches what URL→store edges
+  // previously gave us via currentChannel / currentApp.
+  const routeKey = `${route.kind}:${JSON.stringify(route)}`;
   useEffect(() => {
-    void currentChannel;
-    void currentApp;
+    void routeKey;
     close();
-  }, [currentChannel, currentApp, close]);
+  }, [routeKey, close]);
 
   // Close on outside click — ignore clicks on sidebar agent items that would
   // just re-open the panel, and ignore clicks inside the panel itself.

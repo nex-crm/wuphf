@@ -3,10 +3,9 @@ import {
   type ComponentType,
   type ReactNode,
   useEffect,
-  useLayoutEffect,
   useState,
 } from "react";
-import { Outlet, useMatches, useNavigate } from "@tanstack/react-router";
+import { Outlet, useMatches } from "@tanstack/react-router";
 
 import { get, initApi } from "../api/client";
 import { ArtifactsApp } from "../components/apps/ArtifactsApp";
@@ -42,9 +41,10 @@ import type { WikiTab } from "../components/wiki/WikiTabs";
 import WikiTabs from "../components/wiki/WikiTabs";
 import { useBrokerEvents } from "../hooks/useBrokerEvents";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
-import { indexRoute, router } from "../lib/router";
-import { isDMChannel, useAppStore } from "../stores/app";
-import { applyMatchToStore, isUnmatchedRoute } from "./routeSync";
+import { router } from "../lib/router";
+import { useAppStore } from "../stores/app";
+import { isUnmatchedRoute } from "./routeSync";
+import { type CurrentRoute, useCurrentRoute } from "./useCurrentRoute";
 
 // ── Error boundary ─────────────────────────────────────────────
 
@@ -175,111 +175,22 @@ function navigateNotebookEntry(
   });
 }
 
-function MainContent() {
-  const currentApp = useAppStore((s) => s.currentApp);
-  const currentChannel = useAppStore((s) => s.currentChannel);
-  const channelMeta = useAppStore((s) => s.channelMeta);
-  const wikiPath = useAppStore((s) => s.wikiPath);
-  const wikiLookupQuery = useAppStore((s) => s.wikiLookupQuery);
-  const notebookAgentSlug = useAppStore((s) => s.notebookAgentSlug);
-  const notebookEntrySlug = useAppStore((s) => s.notebookEntrySlug);
-  // Pam's onActionDone bumps this; Wiki re-fetches article + history when
-  // the prop changes. Lifted up here because Pam lives inside the tab bar
-  // (so her desk can rest on the divider line).
-  const [articleRefreshNonce, setArticleRefreshNonce] = useState(0);
+const APP_PANELS: Record<string, ComponentType> = {
+  tasks: TasksApp,
+  requests: RequestsApp,
+  graph: GraphApp,
+  policies: PoliciesApp,
+  calendar: CalendarApp,
+  skills: SkillsApp,
+  activity: ArtifactsApp,
+  receipts: ReceiptsApp,
+  "health-check": HealthCheckApp,
+  settings: SettingsApp,
+  threads: ThreadsApp,
+  console: ConsoleApp,
+};
 
-  if (!currentApp && isDMChannel(currentChannel, channelMeta)) {
-    return <DMView />;
-  }
-
-  if (currentApp === "wiki-lookup") {
-    return (
-      <div className="wiki-shell">
-        <WikiTabs current="wiki" onSelect={navigateWikiTab} />
-        <div className="wiki-shell-body">
-          <CitedAnswer query={wikiLookupQuery || ""} />
-        </div>
-      </div>
-    );
-  }
-
-  if (
-    currentApp === "wiki" ||
-    currentApp === "notebooks" ||
-    currentApp === "reviews"
-  ) {
-    const pamArticlePath = currentApp === "wiki" ? (wikiPath ?? null) : null;
-
-    return (
-      <div className="wiki-shell">
-        <WikiTabs
-          current={currentApp}
-          onSelect={navigateWikiTab}
-          pamArticlePath={pamArticlePath}
-          onPamActionDone={() => setArticleRefreshNonce((n) => n + 1)}
-        />
-        <div className="wiki-shell-body">
-          {currentApp === "wiki" && (
-            <Wiki
-              articlePath={wikiPath}
-              externalRefreshNonce={articleRefreshNonce}
-              onNavigate={navigateWikiArticle}
-            />
-          )}
-          {currentApp === "notebooks" && (
-            <Notebook
-              agentSlug={notebookAgentSlug}
-              entrySlug={notebookEntrySlug}
-              onOpenCatalog={navigateNotebookCatalog}
-              onOpenAgent={navigateNotebookAgent}
-              onOpenEntry={navigateNotebookEntry}
-              onNavigateWiki={(path) => navigateWikiArticle(path || null)}
-            />
-          )}
-          {currentApp === "reviews" && <ReviewQueueKanban />}
-        </div>
-      </div>
-    );
-  }
-
-  if (currentApp) {
-    const panels: Record<string, ComponentType> = {
-      tasks: TasksApp,
-      requests: RequestsApp,
-      graph: GraphApp,
-      policies: PoliciesApp,
-      calendar: CalendarApp,
-      skills: SkillsApp,
-      activity: ArtifactsApp,
-      receipts: ReceiptsApp,
-      "health-check": HealthCheckApp,
-      settings: SettingsApp,
-      threads: ThreadsApp,
-      console: ConsoleApp,
-    };
-    const Panel = panels[currentApp];
-    return (
-      <div className="app-panel active" data-testid={`app-page-${currentApp}`}>
-        {Panel ? (
-          <Panel />
-        ) : (
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              flex: 1,
-              color: "var(--text-tertiary)",
-              fontSize: 14,
-            }}
-          >
-            Unknown app: {currentApp}
-          </div>
-        )}
-      </div>
-    );
-  }
-
+function ConversationView() {
   return (
     <>
       <MessageFeed />
@@ -290,48 +201,115 @@ function MainContent() {
   );
 }
 
-// ── URL→store hydrator ──────────────────────────────────────────
-//
-// Single source of truth for URL→store hydration: writes the matched
-// route's params/search into the existing Zustand fields atomically.
-// Living at the root means nested route effects don't have to coordinate
-// write order, and a layout-effect commit keeps the store ahead of any
-// child render that observes the slice.
-//
-// The dispatch + atomic-setState logic lives in `./routeSync.ts` so it's
-// independently testable without rendering the whole shell.
+interface WikiSurfaceProps {
+  current: "wiki" | "notebooks" | "reviews";
+  route: CurrentRoute;
+}
 
-function UrlToStoreHydrator() {
-  const matches = useMatches();
-  const navigate = useNavigate();
+function WikiSurface({ current, route }: WikiSurfaceProps) {
+  // Pam's onActionDone bumps this; Wiki re-fetches article + history when
+  // the prop changes. Lifted to the surface so Pam (in the tab bar) can
+  // tell Wiki to re-render without remounting it.
+  const [articleRefreshNonce, setArticleRefreshNonce] = useState(0);
 
-  const leaf = matches.at(-1);
-  const routeId = leaf?.routeId ?? "";
-  // Stringify so the effect only re-fires when params/search structurally
-  // change. useMatches returns fresh references each render, so passing
-  // the live objects as deps would over-fire on every store update that
-  // re-renders RootRoute.
-  const paramsKey = JSON.stringify(leaf?.params ?? {});
-  const searchKey = JSON.stringify(leaf?.search ?? {});
+  const articlePath = route.kind === "wiki-article" ? route.articlePath : null;
+  const pamArticlePath = current === "wiki" ? articlePath : null;
+  const notebookAgentSlug =
+    route.kind === "notebook-agent" || route.kind === "notebook-entry"
+      ? route.agentSlug
+      : null;
+  const notebookEntrySlug =
+    route.kind === "notebook-entry" ? route.entrySlug : null;
 
-  // Index route redirects to the default channel. Doing it in a
-  // layout-effect (rather than a route loader) keeps the route definitions
-  // dependency-free and lets the store stay the single hydration target.
-  useLayoutEffect(() => {
-    if (routeId === indexRoute.id) {
-      void navigate({
-        to: "/channels/$channelSlug",
-        params: { channelSlug: "general" },
-        replace: true,
-      });
-      return;
-    }
-    const params = JSON.parse(paramsKey) as Record<string, string | undefined>;
-    const search = JSON.parse(searchKey) as Record<string, unknown>;
-    applyMatchToStore(routeId, params, search);
-  }, [routeId, paramsKey, searchKey, navigate]);
+  return (
+    <div className="wiki-shell">
+      <WikiTabs
+        current={current}
+        onSelect={navigateWikiTab}
+        pamArticlePath={pamArticlePath}
+        onPamActionDone={() => setArticleRefreshNonce((n) => n + 1)}
+      />
+      <div className="wiki-shell-body">
+        {current === "wiki" && (
+          <Wiki
+            articlePath={articlePath}
+            externalRefreshNonce={articleRefreshNonce}
+            onNavigate={navigateWikiArticle}
+          />
+        )}
+        {current === "notebooks" && (
+          <Notebook
+            agentSlug={notebookAgentSlug}
+            entrySlug={notebookEntrySlug}
+            onOpenCatalog={navigateNotebookCatalog}
+            onOpenAgent={navigateNotebookAgent}
+            onOpenEntry={navigateNotebookEntry}
+            onNavigateWiki={(path) => navigateWikiArticle(path || null)}
+          />
+        )}
+        {current === "reviews" && <ReviewQueueKanban />}
+      </div>
+    </div>
+  );
+}
 
-  return null;
+function AppPanel({ appId }: { appId: string }) {
+  const Panel = APP_PANELS[appId];
+  return (
+    <div className="app-panel active" data-testid={`app-page-${appId}`}>
+      {Panel ? (
+        <Panel />
+      ) : (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            flex: 1,
+            color: "var(--text-tertiary)",
+            fontSize: 14,
+          }}
+        >
+          Unknown app: {appId}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MainContent() {
+  const route = useCurrentRoute();
+
+  switch (route.kind) {
+    case "channel":
+      return <ConversationView />;
+    case "dm":
+      return <DMView />;
+    case "app":
+      return <AppPanel appId={route.appId} />;
+    case "wiki":
+    case "wiki-article":
+      return <WikiSurface current="wiki" route={route} />;
+    case "wiki-lookup":
+      return (
+        <div className="wiki-shell">
+          <WikiTabs current="wiki" onSelect={navigateWikiTab} />
+          <div className="wiki-shell-body">
+            <CitedAnswer query={route.query || ""} />
+          </div>
+        </div>
+      );
+    case "notebook-catalog":
+    case "notebook-agent":
+    case "notebook-entry":
+      return <WikiSurface current="notebooks" route={route} />;
+    case "reviews":
+      return <WikiSurface current="reviews" route={route} />;
+    default:
+      // unknown route — handled by RoutedBody/NotFoundSurface, but
+      // return null defensively if something slips through.
+      return null;
+  }
 }
 
 // ── Not-found surface ──────────────────────────────────────────
@@ -474,16 +452,14 @@ export default function RootRoute() {
     );
   } else {
     body = (
-      <>
-        <UrlToStoreHydrator />
-        <Shell>
-          <RoutedBody />
-          {/* Outlet renders the matched leaf route's default component (an
-              empty <Outlet />), which is invisible. Hydration of the store
-              from the matched route happens in UrlToStoreHydrator above. */}
-          <Outlet />
-        </Shell>
-      </>
+      <Shell>
+        <RoutedBody />
+        {/* Outlet renders the matched leaf route's default component (an
+            empty <Outlet />), which is invisible. The route is the
+            single source of truth for navigation state — RoutedBody
+            reads it via useCurrentRoute. */}
+        <Outlet />
+      </Shell>
     );
   }
 

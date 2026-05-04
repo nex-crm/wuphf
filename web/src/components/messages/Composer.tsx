@@ -23,6 +23,7 @@ import {
   renderMentionTokens,
 } from "../../lib/mentions";
 import { router } from "../../lib/router";
+import { useChannelSlug } from "../../routes/useCurrentRoute";
 import { useAppStore } from "../../stores/app";
 import { confirm } from "../ui/ConfirmDialog";
 import { openProviderSwitcher } from "../ui/ProviderSwitcher";
@@ -150,6 +151,8 @@ interface SlashHandlers {
   sendAsMessage: (text: string) => void;
   /** Clear the visible transcript for the active channel. */
   clearMessages: () => void;
+  /** Active channel slug for slash commands that scope server requests. */
+  channel: string;
 }
 
 interface OutboundMessage {
@@ -221,11 +224,12 @@ function handleSlashCommand(input: string, handlers: SlashHandlers): boolean {
         showNotice("Usage: /lookup <question>", "info");
         return true;
       }
-      const channel = store.currentChannel;
       showNotice("Looking up in wiki…", "info");
-      get("/wiki/lookup", { q: args, channel }).catch((e: Error) => {
-        showNotice(`Wiki lookup failed: ${e.message}`, "error");
-      });
+      get("/wiki/lookup", { q: args, channel: handlers.channel }).catch(
+        (e: Error) => {
+          showNotice(`Wiki lookup failed: ${e.message}`, "error");
+        },
+      );
       return true;
     }
     case "/lint": {
@@ -328,7 +332,7 @@ function handleSlashCommand(input: string, handlers: SlashHandlers): boolean {
       const body: Record<string, string> = {
         action,
         id: taskId,
-        channel: store.currentChannel,
+        channel: handlers.channel,
       };
       if (action === "claim") body.owner = "human";
       if (extra) body.details = extra;
@@ -347,7 +351,7 @@ function handleSlashCommand(input: string, handlers: SlashHandlers): boolean {
       post("/tasks", {
         action: "release",
         id: args.trim(),
-        channel: store.currentChannel,
+        channel: handlers.channel,
       })
         .then(() => showNotice(`Task ${args.trim()} cancelled`, "success"))
         .catch(() => showNotice("Cancel failed", "error"));
@@ -399,7 +403,7 @@ function emptyHistoryState(): HistoryState {
 
 // biome-ignore lint/complexity/noExcessiveLinesPerFunction: Existing function length is baselined for a focused follow-up refactor.
 export function Composer() {
-  const currentChannel = useAppStore((s) => s.currentChannel);
+  const currentChannel = useChannelSlug() ?? "general";
   const setLastMessageId = useAppStore((s) => s.setLastMessageId);
   const setChannelClearMarker = useAppStore((s) => s.setChannelClearMarker);
   const [text, setText] = useState("");
@@ -520,6 +524,7 @@ export function Composer() {
           });
         },
         clearMessages: clearCurrentChannelMessages,
+        channel: currentChannel,
       });
       if (consumed) {
         // Persist the *raw* command to history so Ctrl+P replays `/ask foo`,

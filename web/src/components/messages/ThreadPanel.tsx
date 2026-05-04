@@ -6,6 +6,7 @@ import { postMessage } from "../../api/client";
 import { useOfficeMembers } from "../../hooks/useMembers";
 import { useThreadMessages } from "../../hooks/useMessages";
 import { extractTaggedMentions } from "../../lib/mentions";
+import { useChannelSlug } from "../../routes/useCurrentRoute";
 import { useAppStore } from "../../stores/app";
 import { showNotice } from "../ui/Toast";
 import { MessageBubble } from "./MessageBubble";
@@ -13,7 +14,7 @@ import { MessageBubble } from "./MessageBubble";
 export function ThreadPanel() {
   const activeThreadId = useAppStore((s) => s.activeThreadId);
   const setActiveThreadId = useAppStore((s) => s.setActiveThreadId);
-  const currentChannel = useAppStore((s) => s.currentChannel);
+  const currentChannel = useChannelSlug() ?? "general";
   const [text, setText] = useState("");
   const [quoting, setQuoting] = useState<Message | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);

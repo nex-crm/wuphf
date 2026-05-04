@@ -6,11 +6,11 @@ import {
   getRequests,
 } from "../../api/client";
 import { formatRelativeTime } from "../../lib/format";
-import { useAppStore } from "../../stores/app";
+import { useChannelSlug } from "../../routes/useCurrentRoute";
 import { showNotice } from "../ui/Toast";
 
 export function RequestsApp() {
-  const currentChannel = useAppStore((s) => s.currentChannel);
+  const currentChannel = useChannelSlug() ?? "general";
   const queryClient = useQueryClient();
 
   const { data, isLoading, error } = useQuery({

@@ -22,7 +22,7 @@ import { fetchReviews } from "../../api/notebook";
 import { useOverflow } from "../../hooks/useOverflow";
 import { SIDEBAR_APPS } from "../../lib/constants";
 import { router } from "../../lib/router";
-import { useAppStore } from "../../stores/app";
+import { useChannelSlug, useCurrentApp } from "../../routes/useCurrentRoute";
 
 // Sidebar app id → typed router target. The "wiki" sidebar entry routes to
 // the wiki catalog; notebooks and reviews keep their dedicated routes and
@@ -59,8 +59,8 @@ const APP_ICONS: Record<string, ComponentType<{ className?: string }>> = {
 };
 
 export function AppList() {
-  const currentApp = useAppStore((s) => s.currentApp);
-  const currentChannel = useAppStore((s) => s.currentChannel);
+  const currentApp = useCurrentApp();
+  const currentChannel = useChannelSlug() ?? "general";
 
   const { data: requestsData } = useQuery({
     queryKey: ["requests-badge", currentChannel],

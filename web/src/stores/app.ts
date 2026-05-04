@@ -114,13 +114,9 @@ export interface AppStore {
   brokerConnected: boolean;
   setBrokerConnected: (v: boolean) => void;
 
-  // Navigation
-  currentChannel: string;
-  setCurrentChannel: (ch: string) => void;
-  currentApp: string | null; // null = messages view
-  setCurrentApp: (app: string | null) => void;
-
-  // Channel metadata (DM info, etc.)
+  // Channel metadata (DM info, etc.). Kept in the store because broker
+  // events backfill it asynchronously; navigation, however, is driven
+  // exclusively by the URL — see web/src/routes/useCurrentRoute.ts.
   channelMeta: Record<string, ChannelMeta>;
   setChannelMeta: (slug: string, meta: ChannelMeta) => void;
 
@@ -149,10 +145,6 @@ export interface AppStore {
   // stores `true` so the inline replies hide.
   collapsedThreads: Record<string, boolean>;
   toggleThreadCollapsed: (parentId: string) => void;
-
-  // DM entry: opens the given DM channel and records {type: 'D', agentSlug}
-  // in channelMeta so downstream views can resolve the paired agent.
-  enterDM: (agentSlug: string, channelSlug: string) => void;
 
   // Message polling state
   lastMessageId: string | null;
@@ -195,52 +187,11 @@ export interface AppStore {
   onboardingComplete: boolean;
   setOnboardingComplete: (v: boolean) => void;
   resetForOnboarding: () => void;
-
-  // Wiki
-  wikiPath: string | null;
-  setWikiPath: (path: string | null) => void;
-  wikiLookupQuery: string | null;
-  setWikiLookupQuery: (q: string | null) => void;
-
-  // Notebooks
-  notebookAgentSlug: string | null;
-  notebookEntrySlug: string | null;
-  setNotebookRoute: (
-    agentSlug: string | null,
-    entrySlug: string | null,
-  ) => void;
 }
 
 export const useAppStore = create<AppStore>((set, get) => ({
   brokerConnected: false,
   setBrokerConnected: (v) => set({ brokerConnected: v }),
-
-  currentChannel: "general",
-  setCurrentChannel: (ch) =>
-    set((state) => ({
-      currentChannel: ch,
-      currentApp: null,
-      unreadByChannel: { ...state.unreadByChannel, [ch]: 0 },
-    })),
-  currentApp: null,
-  setCurrentApp: (app) => {
-    if (!app) {
-      const { currentChannel, unreadByChannel } = get();
-      set({
-        currentApp: null,
-        unreadByChannel: { ...unreadByChannel, [currentChannel]: 0 },
-      });
-      return;
-    }
-
-    const { currentChannel, channelMeta } = get();
-    if (isDMChannel(currentChannel, channelMeta)) {
-      set({ currentApp: app, currentChannel: "general" });
-      return;
-    }
-
-    set({ currentApp: app });
-  },
 
   channelMeta: {},
   setChannelMeta: (slug, meta) =>
@@ -320,17 +271,6 @@ export const useAppStore = create<AppStore>((set, get) => ({
       },
     })),
 
-  enterDM: (agentSlug, channelSlug) =>
-    set((s) => ({
-      currentChannel: channelSlug,
-      currentApp: null,
-      channelMeta: {
-        ...s.channelMeta,
-        [channelSlug]: { ...s.channelMeta[channelSlug], type: "D", agentSlug },
-      },
-      unreadByChannel: { ...s.unreadByChannel, [channelSlug]: 0 },
-    })),
-
   lastMessageId: null,
   setLastMessageId: (id) => set({ lastMessageId: id }),
   clearedMessageIdsByChannel: {},
@@ -385,8 +325,6 @@ export const useAppStore = create<AppStore>((set, get) => ({
   setOnboardingComplete: (v) => set({ onboardingComplete: v }),
   resetForOnboarding: () =>
     set({
-      currentChannel: "general",
-      currentApp: null,
       unreadByChannel: {},
       activeThreadId: null,
       lastMessageId: null,
@@ -400,20 +338,5 @@ export const useAppStore = create<AppStore>((set, get) => ({
       // would float over the onboarding flow.
       telegramConnectOpen: false,
       onboardingComplete: false,
-      wikiPath: null,
-      wikiLookupQuery: null,
-      notebookAgentSlug: null,
-      notebookEntrySlug: null,
     }),
-
-  wikiPath: null,
-  setWikiPath: (path) => set({ wikiPath: path }),
-
-  wikiLookupQuery: null,
-  setWikiLookupQuery: (q) => set({ wikiLookupQuery: q }),
-
-  notebookAgentSlug: null,
-  notebookEntrySlug: null,
-  setNotebookRoute: (agentSlug: string | null, entrySlug: string | null) =>
-    set({ notebookAgentSlug: agentSlug, notebookEntrySlug: entrySlug }),
 }));

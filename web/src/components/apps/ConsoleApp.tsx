@@ -13,7 +13,7 @@ import { FALLBACK_SLASH_COMMANDS } from "../../hooks/useCommands";
 import { useOfficeMembers } from "../../hooks/useMembers";
 import { useMessages } from "../../hooks/useMessages";
 import { router } from "../../lib/router";
-import { useAppStore } from "../../stores/app";
+import { useChannelSlug } from "../../routes/useCurrentRoute";
 
 function navigateToApp(appId: string): void {
   void router.navigate({ to: "/apps/$appId", params: { appId } });
@@ -90,8 +90,8 @@ function openRequestCount(requests: Array<{ status?: string }>): number {
 }
 
 export function ConsoleApp() {
-  const currentChannel = useAppStore((s) => s.currentChannel);
-  const channelName = currentChannel || "general";
+  const currentChannel = useChannelSlug() ?? "general";
+  const channelName = currentChannel;
   const [draft, setDraft] = useState("");
   const [localLines, setLocalLines] = useState<TerminalLine[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);

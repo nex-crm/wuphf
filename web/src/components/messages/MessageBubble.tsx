@@ -12,7 +12,7 @@ import {
   messageMarkdownComponents,
   messageRemarkPlugins,
 } from "../../lib/messageMarkdown";
-import { useAppStore } from "../../stores/app";
+import { useChannelSlug } from "../../routes/useCurrentRoute";
 import { HarnessBadge } from "../ui/HarnessBadge";
 import { PixelAvatar } from "../ui/PixelAvatar";
 import { showNotice } from "../ui/Toast";
@@ -42,7 +42,7 @@ export function MessageBubble({
   onQuoteReply,
   onCopyLink,
 }: MessageBubbleProps) {
-  const currentChannel = useAppStore((s) => s.currentChannel);
+  const currentChannel = useChannelSlug() ?? "general";
   const { data: members = [] } = useOfficeMembers();
   const isHuman =
     message.from === "you" ||

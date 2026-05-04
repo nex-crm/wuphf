@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useChannelMembers, useOfficeMembers } from "../../hooks/useMembers";
-import { useAppStore } from "../../stores/app";
+import { useCurrentRoute } from "../../routes/useCurrentRoute";
 import { TypingIndicator } from "./TypingIndicator";
 
 vi.mock("../../hooks/useMembers", () => ({
@@ -10,26 +10,34 @@ vi.mock("../../hooks/useMembers", () => ({
   useChannelMembers: vi.fn(),
 }));
 
+vi.mock("../../routes/useCurrentRoute", () => ({
+  useCurrentRoute: vi.fn(),
+}));
+
 const mockUseOfficeMembers = vi.mocked(useOfficeMembers);
 const mockUseChannelMembers = vi.mocked(useChannelMembers);
+const mockUseCurrentRoute = vi.mocked(useCurrentRoute);
 
 describe("<TypingIndicator>", () => {
   beforeEach(() => {
-    useAppStore.setState({
-      currentChannel: "general",
-      currentApp: null,
-      channelMeta: {},
-    });
     mockUseOfficeMembers.mockReturnValue({ data: [] } as unknown as ReturnType<
       typeof useOfficeMembers
     >);
     mockUseChannelMembers.mockReturnValue({ data: [] } as unknown as ReturnType<
       typeof useChannelMembers
     >);
+    mockUseCurrentRoute.mockReturnValue({
+      kind: "channel",
+      channelSlug: "general",
+    });
   });
 
   it("shows the active DM agent as typing", () => {
-    useAppStore.getState().enterDM("ceo", "ceo__human");
+    mockUseCurrentRoute.mockReturnValue({
+      kind: "dm",
+      agentSlug: "ceo",
+      channelSlug: "ceo__human",
+    });
     mockUseOfficeMembers.mockReturnValue({
       data: [
         { slug: "ceo", name: "CEO", status: "active" },
@@ -47,7 +55,10 @@ describe("<TypingIndicator>", () => {
   });
 
   it("limits public channel typing to channel members", () => {
-    useAppStore.getState().setCurrentChannel("product");
+    mockUseCurrentRoute.mockReturnValue({
+      kind: "channel",
+      channelSlug: "product",
+    });
     mockUseOfficeMembers.mockReturnValue({
       data: [
         { slug: "ceo", name: "CEO", status: "active" },

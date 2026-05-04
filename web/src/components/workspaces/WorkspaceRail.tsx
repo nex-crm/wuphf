@@ -28,7 +28,6 @@ import {
   type Workspace,
 } from "../../api/workspaces";
 import { router } from "../../lib/router";
-import { isDMChannel, useAppStore } from "../../stores/app";
 import { showNotice } from "../ui/Toast";
 import { CreateWorkspaceModal } from "./CreateWorkspaceModal";
 import { useRestoreToast } from "./RestoreToast";
@@ -446,20 +445,18 @@ export function WorkspaceRail({
   const handleClick = useCallback(
     (ws: Workspace) => {
       if (ws.is_active || ws.name === activeName) {
-        // Already here — bring focus back to the office. Restore the
-        // current channel/DM rather than blanking to the index, since the
-        // user explicitly clicked their already-active workspace.
-        const s = useAppStore.getState();
-        const dm = isDMChannel(s.currentChannel, s.channelMeta);
-        if (dm) {
-          void router.navigate({
-            to: "/dm/$agentSlug",
-            params: { agentSlug: dm.agentSlug },
-          });
-        } else {
+        // Already here — bring focus back to the office. If the user is
+        // currently on a non-conversation surface (an app panel, wiki,
+        // notebooks, reviews), drop them back to #general; if they are
+        // already in a conversation, this click is a no-op.
+        const leaf = router.state.matches.at(-1);
+        const onConversation =
+          leaf?.routeId === "/channels/$channelSlug" ||
+          leaf?.routeId === "/dm/$agentSlug";
+        if (!onConversation) {
           void router.navigate({
             to: "/channels/$channelSlug",
-            params: { channelSlug: s.currentChannel || "general" },
+            params: { channelSlug: "general" },
           });
         }
         return;

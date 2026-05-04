@@ -1,6 +1,7 @@
 import { Settings as SettingsIcon, SidebarCollapse } from "iconoir-react";
 
 import { router } from "../../lib/router";
+import { useCurrentApp } from "../../routes/useCurrentRoute";
 import { useAppStore } from "../../stores/app";
 import { AgentList } from "../sidebar/AgentList";
 import { AppList } from "../sidebar/AppList";
@@ -60,7 +61,7 @@ export function Sidebar() {
   const sidebarCollapsed = useAppStore((s) => s.sidebarCollapsed);
   const toggleSidebarCollapsed = useAppStore((s) => s.toggleSidebarCollapsed);
   const sidebarBg = useAppStore((s) => s.sidebarBg);
-  const currentApp = useAppStore((s) => s.currentApp);
+  const currentApp = useCurrentApp();
 
   const asideStyle = sidebarBg ? { background: sidebarBg } : undefined;
 
