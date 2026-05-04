@@ -965,6 +965,9 @@ func searchArticles(repo *Repo, pattern string) ([]WikiSearchHit, error) {
 				}
 			}
 		}
+		if err := scanner.Err(); err != nil {
+			return fmt.Errorf("scan %s: %w", path, err)
+		}
 		return nil
 	})
 	if err != nil {

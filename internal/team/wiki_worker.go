@@ -141,6 +141,12 @@ type wikiWriteRequest struct {
 	// style Edit source flow. v1.5: identity is resolved from the
 	// HumanIdentityRegistry rather than being hard-coded.
 	IsHuman bool
+	// IsArchiveSweep routes WikiArchiver.Sweep through the same drain loop as
+	// ordinary wiki writes. Sweep may perform many commits, so it uses the
+	// request context directly rather than wikiWriteTimeout.
+	IsArchiveSweep bool
+	ArchiveReadLog *ReadLog
+	ArchiveMinAge  time.Duration
 	// ExpectedSHA is consulted by the human write path. Empty means the
 	// caller expects the article not to exist yet (new-article flow).
 	ExpectedSHA string
@@ -155,6 +161,7 @@ type wikiWriteRequest struct {
 type wikiWriteResult struct {
 	SHA          string
 	BytesWritten int
+	SweepResult  SweepResult
 	Err          error
 }
 
@@ -319,6 +326,15 @@ func (w *WikiWorker) process(ctx context.Context, req wikiWriteRequest) {
 	baseCtx := ctx
 	if req.Context != nil {
 		baseCtx = req.Context
+	}
+	if req.IsArchiveSweep {
+		archiver := NewWikiArchiver(w.repo, req.ArchiveReadLog, req.ArchiveMinAge)
+		result, err := archiver.Sweep(baseCtx)
+		if err == nil || archiveSweepHasPartialResult(result) {
+			w.notifyArchived(baseCtx, result.ArchivedPaths)
+		}
+		req.ReplyCh <- wikiWriteResult{SweepResult: result, Err: err}
+		return
 	}
 	writeCtx, cancel := context.WithTimeout(baseCtx, wikiWriteTimeout)
 	defer cancel()
@@ -1085,13 +1101,11 @@ func (b *Broker) handleWikiArchiveSweep(w http.ResponseWriter, r *http.Request) 
 	// if the caller holds the connection open.
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Minute)
 	defer cancel()
-	archiver := NewWikiArchiver(worker.Repo(), b.WikiReadLog(), 0)
-	result, err := archiver.Sweep(ctx)
-	if err != nil {
+	result, err := worker.EnqueueArchiveSweep(ctx, b.WikiReadLog(), 0)
+	if err != nil && isHardArchiveSweepError(err) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	worker.NotifyArchived(ctx, result.ArchivedPaths)
 	writeJSON(w, http.StatusOK, result)
 }
 
@@ -1134,9 +1148,8 @@ func (b *Broker) runArchiveSweepTick() string {
 	// blocking the POST /wiki/archive/sweep handler with no escape.
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
-	archiver := NewWikiArchiver(worker.Repo(), b.WikiReadLog(), 0)
-	result, err := archiver.Sweep(ctx)
-	if err != nil {
+	result, err := worker.EnqueueArchiveSweep(ctx, b.WikiReadLog(), 0)
+	if err != nil && isHardArchiveSweepError(err) {
 		log.Printf("wiki archive: sweep error: %v", err)
 		return "error"
 	}
@@ -1144,7 +1157,6 @@ func (b *Broker) runArchiveSweepTick() string {
 		log.Printf("wiki archive: sweep complete — archived=%d skipped=%d errors=%d",
 			result.Archived, result.Skipped, result.Errors)
 	}
-	worker.NotifyArchived(ctx, result.ArchivedPaths)
 	if result.Errors > 0 {
 		return "error"
 	}
