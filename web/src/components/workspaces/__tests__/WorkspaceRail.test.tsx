@@ -231,6 +231,60 @@ describe("<WorkspaceRail>", () => {
     expect(tooltip.textContent).toContain("paused");
   });
 
+  it("falls back to the workspace name when company_name is missing", () => {
+    const slugOnlyWorkspace: Workspace = {
+      ...demoWorkspace,
+      company_name: "",
+      state: "running",
+    };
+    setListData([mainWorkspace, slugOnlyWorkspace], "main");
+    renderRail();
+
+    const icon = screen.getByTestId("workspace-icon-demo-launch");
+    fireEvent.mouseEnter(icon.parentElement as Element);
+
+    const tooltip = screen.getByRole("tooltip");
+    expect(tooltip.textContent).toContain("demo-launch");
+    expect(tooltip.textContent).not.toContain("Acme Demo");
+    expect(tooltip.textContent).toContain("running");
+  });
+
+  it("falls back to the workspace name when company_name is whitespace", () => {
+    const whitespaceWorkspace: Workspace = {
+      ...demoWorkspace,
+      company_name: "   ",
+      state: "running",
+    };
+    setListData([mainWorkspace, whitespaceWorkspace], "main");
+    renderRail();
+
+    const icon = screen.getByTestId("workspace-icon-demo-launch");
+    fireEvent.mouseEnter(icon.parentElement as Element);
+
+    const tooltip = screen.getByRole("tooltip");
+    expect(tooltip.textContent).toContain("demo-launch");
+    expect(tooltip.textContent).not.toContain("Acme Demo");
+    expect(tooltip.textContent).toContain("running");
+  });
+
+  it("does not duplicate the label when company_name matches name", () => {
+    const sameLabelWorkspace: Workspace = {
+      ...demoWorkspace,
+      company_name: "demo-launch",
+      state: "running",
+    };
+    setListData([mainWorkspace, sameLabelWorkspace], "main");
+    renderRail();
+
+    const icon = screen.getByTestId("workspace-icon-demo-launch");
+    fireEvent.mouseEnter(icon.parentElement as Element);
+
+    const tooltip = screen.getByRole("tooltip");
+    const matches = tooltip.textContent?.match(/demo-launch/g) ?? [];
+    expect(matches).toHaveLength(1);
+    expect(tooltip.textContent).toContain("running");
+  });
+
   it("error-state workspaces show a notice instead of navigating", () => {
     setListData([mainWorkspace, errorWorkspace], "main");
     const navigate = vi.fn();
