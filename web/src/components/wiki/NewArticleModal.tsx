@@ -97,7 +97,7 @@ export default function NewArticleModal({
         expectedSha: "",
       });
       if ("conflict" in result) {
-        setError("An article already exists at that path. Pick a different slug.");
+        setError("An article already exists at that path. Pick a different slug or subfolder.");
         return;
       }
       onCreated(path);

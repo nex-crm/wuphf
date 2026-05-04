@@ -112,15 +112,12 @@ describe("<NewArticleModal>", () => {
     renderModal();
     // Manually bypass sanitizer by mocking — subfolder sanitizes on change,
     // so test the validation path via a leading-dot value injected directly.
-    const input = screen.getByTestId("wk-new-subfolder") as HTMLInputElement;
-    // Set value without firing a sanitized change event
-    Object.defineProperty(input, "value", { writable: true, value: ".hidden" });
-    fireEvent.change(input, { target: { value: ".hidden" } });
+    // fireEvent.change assigns target.value directly, so the sanitizer in onChange
+    // runs and strips the leading dot → empty string → "Subfolder is required".
+    fireEvent.change(screen.getByTestId("wk-new-subfolder"), { target: { value: ".hidden" } });
     fireEvent.change(screen.getByTestId("wk-new-slug"), { target: { value: "doc" } });
     fireEvent.change(screen.getByLabelText(/title/i), { target: { value: "Doc" } });
     fireEvent.click(screen.getByTestId("wk-new-create"));
-    // Sanitizer strips leading dot so value will be empty → "Subfolder is required"
-    // or "must be lowercase" — either proves validation ran.
     expect(await screen.findByRole("alert")).toBeInTheDocument();
   });
 
@@ -152,6 +149,9 @@ describe("<NewArticleModal>", () => {
 
     await waitFor(() =>
       expect(onCreated).toHaveBeenCalledWith("team/people/leadership/new-page.md"),
+    );
+    expect(wikiApi.writeHumanArticle).toHaveBeenCalledWith(
+      expect.objectContaining({ path: "team/people/leadership/new-page.md" }),
     );
   });
 
@@ -241,9 +241,9 @@ describe("<NewArticleModal>", () => {
     expect(screen.getByPlaceholderText(/e.g. playbooks/i)).toBeInTheDocument();
   });
 
-  it("uses the catalog entry's group for the path when no groups exist yet", () => {
+  it("renders without crashing when catalog is empty", () => {
     renderModal([]);
-    // With empty catalog, default group should still render without crash
     expect(screen.getByTestId("wk-new-article-modal")).toBeInTheDocument();
+    expect(screen.getByTestId("wk-new-slug")).toBeInTheDocument();
   });
 });
