@@ -341,6 +341,33 @@ func main() {
 		os.Exit(0)
 	}
 
+	// Handle read-only subcommand help before workspace migrations and PATH
+	// shadow warnings. Help should be side-effect-free even when a user's
+	// local ~/.wuphf state needs repair.
+	args := flag.Args()
+	if len(args) > 0 {
+		sub := args[0]
+		wantsHelp := subcommandWantsHelp(args[1:])
+		// isFamilyHelp additionally catches the bare word "help" (for
+		// example `wuphf skills help`); dash-prefixed help flags are covered
+		// by subcommandWantsHelp above.
+		if sub == "skills" && len(args) > 1 && isFamilyHelp(args[1]) {
+			wantsHelp = true
+		}
+		if wantsHelp {
+			if sub == "skills" {
+				if len(args) > 1 && isFamilyHelp(args[1]) {
+					printSkillsHelp()
+				} else {
+					runSkillsCmd(args[1:])
+				}
+			} else {
+				printSubcommandHelp(sub)
+			}
+			return
+		}
+	}
+
 	// Wire the workspaces orchestrator + run the symmetric-layout migration.
 	// Placed after --help-all and --version early exits so read-only
 	// invocations skip the filesystem migration entirely.
@@ -351,9 +378,6 @@ func main() {
 		runChannelView(*threadsCollapsed, channelui.ResolveInitialOfficeApp(*channelApp), strings.TrimSpace(*channelApp) != "")
 		return
 	}
-
-	// Handle subcommands
-	args := flag.Args()
 
 	// Warn if another wuphf binary is on PATH and may shadow this one. Interactive
 	// only — scripted and stdio-subprocess entrypoints keep their output clean.
@@ -367,13 +391,6 @@ func main() {
 
 	if len(args) > 0 {
 		sub := args[0]
-		// `skills` owns its own per-verb help routing (publish/install have
-		// flag-set-level docs), so we never short-circuit to the family
-		// help when there is a verb between `skills` and `--help`.
-		if sub != "skills" && subcommandWantsHelp(args[1:]) {
-			printSubcommandHelp(sub)
-			return
-		}
 		switch sub {
 		case "mcp-team":
 			if err := teammcp.Run(context.Background()); err != nil {

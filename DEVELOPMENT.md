@@ -3,10 +3,14 @@
 ## Office Build
 
 ```bash
+cd web
+bun install
+bun run build
+cd ..
 go build -o wuphf ./cmd/wuphf
 ```
 
-For normal app usage you do not need Bun. The local office/team MCP tools now run from the main Go binary through the hidden `wuphf mcp-team` subcommand.
+Release and npm binaries already include the web UI assets. Source builds need Bun once to generate `web/dist/`; otherwise the Go binary will show the missing-assets setup page instead of serving raw Vite source files. The local office/team MCP tools now run from the main Go binary through the hidden `wuphf mcp-team` subcommand.
 
 ## First-time setup
 

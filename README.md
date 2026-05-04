@@ -47,11 +47,15 @@ Prefer a global install?
 npm install -g wuphf && wuphf
 ```
 
-Building from source (requires Go):
+Building from source (requires Go and Bun):
 
 ```bash
 git clone https://github.com/nex-crm/wuphf.git
 cd wuphf
+cd web
+bun install
+bun run build
+cd ..
 go build -o wuphf ./cmd/wuphf
 ./wuphf
 ```
@@ -87,13 +91,13 @@ if I say yes. If I am not logged in, just open https://wuphf.team.
 
 | Flag | What it does |
 |------|-------------|
-| `--memory-backend <name>` | Pick the organizational memory backend (`nex`, `gbrain`, `none`) |
+| `--memory-backend <name>` | Pick the organizational memory backend (`markdown`, `nex`, `gbrain`, `none`) |
 | `--no-nex` | Skip the Nex backend (no context graph, no Nex-managed integrations) |
 | `--tui` | Use the tmux TUI instead of the web UI |
 | `--no-open` | Don't auto-open the browser |
 | `--pack <name>` | Pick an agent pack (`starter`, `founding-team`, `coding-team`, `lead-gen-agency`, `revops`) |
 | `--opus-ceo` | Upgrade CEO from Sonnet to Opus |
-| `--provider <name>` | LLM provider override (`claude-code`, `codex`) |
+| `--provider <name>` | LLM provider override (`claude-code`, `codex`, `opencode`) |
 | `--collab` | Start in collaborative mode — all agents see all messages (this is the default) |
 | `--unsafe` | Bypass agent permission checks (local dev only) |
 | `--web-port <n>` | Change the web UI port (default 7891) |

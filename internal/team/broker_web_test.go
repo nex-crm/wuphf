@@ -48,6 +48,30 @@ func TestWebUIProxyHandlerForwardsOnboardingRoutes(t *testing.T) {
 	}
 }
 
+func TestMissingWebAssetsHandlerExplainsSourceBuild(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+
+	missingWebAssetsHandler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.Contains(ct, "text/html") {
+		t.Fatalf("expected text/html content type, got %q", ct)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{
+		"web/dist/index.html",
+		"bun run build",
+		"go build -o wuphf ./cmd/wuphf",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("expected missing-assets page to contain %q, got:\n%s", want, body)
+		}
+	}
+}
+
 func TestWorkspaceShredRouteResetsBrokerWithoutShutdown(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("WUPHF_RUNTIME_HOME", home)
