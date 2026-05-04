@@ -93,11 +93,19 @@ func (b *Broker) handleEvents(w http.ResponseWriter, r *http.Request) {
 
 	heartbeat := time.NewTicker(15 * time.Second)
 	defer heartbeat.Stop()
+	// Poll auth state every second for human sessions so revoked streams
+	// close promptly without waiting for the next event or 15s heartbeat.
+	revokeCheck := time.NewTicker(time.Second)
+	defer revokeCheck.Stop()
 
 	for {
 		select {
 		case <-r.Context().Done():
 			return
+		case <-revokeCheck.C:
+			if !actorStillAuthorized() {
+				return
+			}
 		case msg, ok := <-messages:
 			if !ok || writeEvent("message", map[string]any{"message": msg}) != nil {
 				return

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"strings"
@@ -115,6 +116,12 @@ func (b *Broker) handleHumanSessions(w http.ResponseWriter, r *http.Request) {
 		b.mu.Unlock()
 		writeJSON(w, http.StatusOK, map[string]any{"sessions": sessions})
 	case http.MethodDelete:
+		if actor, ok := requestActorFromContext(r.Context()); ok && actor.Kind != requestActorKindBroker {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = io.WriteString(w, `{"error":"host_only"}`)
+			return
+		}
 		var body struct {
 			ID string `json:"id"`
 		}

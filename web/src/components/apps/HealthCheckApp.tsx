@@ -430,7 +430,7 @@ function TeamMemberSessions({
                   className="btn btn-secondary btn-sm"
                   type="button"
                   onClick={() => onRevokeSession(session.id)}
-                  disabled={isThisSessionRevoking}
+                  disabled={isRevokingSession}
                 >
                   {isThisSessionRevoking ? "Disconnecting" : "Disconnect"}
                 </button>

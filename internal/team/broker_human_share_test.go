@@ -133,6 +133,11 @@ func TestHumanSessionCannotRevokeTeamMemberSessions(t *testing.T) {
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("member revoke status = %d, want 403 body=%s", rec.Code, rec.Body.String())
 	}
+
+	// Confirm no mutation: the session must still be active after the 403.
+	if !b.humanSessionIDActive(session.ID) {
+		t.Fatal("session was revoked despite 403 — authorization check ran after mutation")
+	}
 }
 
 func TestHumanMeRejectsExpiredSessionServerSide(t *testing.T) {
@@ -359,12 +364,14 @@ func TestHumanEventsCloseAfterSessionRevoked(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(b.handleEvents))
 	t.Cleanup(srv.Close)
 
+	// No client-level timeout: we want to distinguish server-closed (EOF) from
+	// client-timed-out. A client timeout would make the test a false positive.
 	req, err := http.NewRequest(http.MethodGet, srv.URL, nil)
 	if err != nil {
 		t.Fatalf("build events request: %v", err)
 	}
 	req.AddCookie(&http.Cookie{Name: humanSessionCookie, Value: sessionToken})
-	resp, err := (&http.Client{Timeout: 2 * time.Second}).Do(req)
+	resp, err := (&http.Client{}).Do(req)
 	if err != nil {
 		t.Fatalf("events request: %v", err)
 	}
@@ -392,6 +399,7 @@ func TestHumanEventsCloseAfterSessionRevoked(t *testing.T) {
 	if err := b.revokeHumanSession(session.ID); err != nil {
 		t.Fatalf("revoke session: %v", err)
 	}
+	// Publish an event so the SSE loop wakes immediately and checks auth.
 	b.PublishWikiEvent(wikiWriteEvent{
 		Path:       "team/shared.md",
 		CommitSHA:  "def456",
@@ -399,7 +407,20 @@ func TestHumanEventsCloseAfterSessionRevoked(t *testing.T) {
 		Timestamp:  time.Now().UTC().Format(time.RFC3339),
 	})
 
-	if line, err := reader.ReadString('\n'); err == nil {
-		t.Fatalf("revoked session kept SSE stream open, next line: %q", line)
+	// Read on a goroutine with an explicit deadline so a broken server-keeps-open
+	// scenario fails the test rather than timing out the client connection.
+	done := make(chan error, 1)
+	go func() {
+		_, err := reader.ReadString('\n')
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("revoked session kept SSE stream open")
+		}
+		// any non-nil error (EOF, connection reset) means the server closed — pass
+	case <-time.After(2 * time.Second):
+		t.Fatal("revoked session SSE stream not closed within 2s")
 	}
 }
