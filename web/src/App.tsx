@@ -9,6 +9,7 @@ import {
 import { get, initApi } from "./api/client";
 import { ArtifactsApp } from "./components/apps/ArtifactsApp";
 import { CalendarApp } from "./components/apps/CalendarApp";
+import { ConsoleApp } from "./components/apps/ConsoleApp";
 import { GraphApp } from "./components/apps/GraphApp";
 import { HealthCheckApp } from "./components/apps/HealthCheckApp";
 import { PoliciesApp } from "./components/apps/PoliciesApp";
@@ -49,6 +50,7 @@ import "./styles/agents.css";
 import "./styles/search.css";
 import "./styles/wiki-shell.css";
 import "./styles/kbd.css";
+import "./styles/console.css";
 import "@xterm/xterm/css/xterm.css";
 
 // ── Error boundary ─────────────────────────────────────────────
@@ -246,10 +248,11 @@ function MainContent() {
       "health-check": HealthCheckApp,
       settings: SettingsApp,
       threads: ThreadsApp,
+      console: ConsoleApp,
     };
     const Panel = panels[currentApp];
     return (
-      <div className="app-panel active">
+      <div className="app-panel active" data-testid={`app-page-${currentApp}`}>
         {Panel ? (
           <Panel />
         ) : (

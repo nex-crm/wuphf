@@ -16,8 +16,9 @@ package team
 //	  ...
 //	]
 //
-// Sorted alphabetically (matches commands.Registry.List). The web filters
-// for webSupported=true; the TUI ignores this endpoint entirely.
+// Sorted alphabetically (matches commands.Registry.List). The web composer
+// filters for webSupported=true; the web Console uses the full payload for
+// CLI-command discovery. The TUI ignores this endpoint entirely.
 
 import (
 	"encoding/json"

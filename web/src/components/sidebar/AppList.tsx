@@ -14,6 +14,7 @@ import {
   Settings,
   ShareAndroid,
   Shield,
+  Terminal,
 } from "iconoir-react";
 
 import { getRequests } from "../../api/client";
@@ -29,6 +30,7 @@ const WIKI_SURFACE_APPS = new Set(["wiki", "notebooks", "reviews"]);
 const APP_ICONS: Record<string, ComponentType<{ className?: string }>> = {
   studio: Play,
   wiki: BookStack,
+  console: Terminal,
   tasks: CheckCircle,
   requests: ClipboardCheck,
   graph: ShareAndroid,

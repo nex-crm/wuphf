@@ -72,13 +72,27 @@ func TestRegisterAllCommands(t *testing.T) {
 	expected := []string{
 		"ask", "search", "remember", "youtube-pack",
 		"object", "record", "note", "task", "list", "rel", "attribute",
-		"agent", "graph", "insights", "calendar", "chat",
-		"config", "detect", "init", "provider",
-		"help", "clear", "quit",
+		"agent", "agents", "graph", "insights", "calendar", "chat",
+		"messages", "inbox", "outbox", "rewind", "insert", "switcher",
+		"switch", "channels", "channel", "queue", "artifacts",
+		"config", "detect", "doctor", "integrate", "init", "provider",
+		"request", "reply", "expand", "collapse", "skill", "reset-dm",
+		"help", "clear", "quit", "lint",
 	}
 	for _, name := range expected {
 		if _, ok := r.Get(name); !ok {
 			t.Errorf("expected command %q to be registered", name)
+		}
+	}
+}
+
+func TestRegisterAllCommandsUsesSingleTokenNames(t *testing.T) {
+	r := NewRegistry()
+	RegisterAllCommands(r)
+
+	for _, cmd := range r.List() {
+		if strings.ContainsAny(cmd.Name, " \t\n") {
+			t.Fatalf("command %q must be single-token; use subcommands in Execute handlers instead", cmd.Name)
 		}
 	}
 }

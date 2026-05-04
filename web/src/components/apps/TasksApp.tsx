@@ -142,6 +142,8 @@ export function TasksApp() {
   if (isLoading) {
     return (
       <div
+        className="tasks-app"
+        data-testid="tasks-app"
         style={{
           padding: "40px 20px",
           textAlign: "center",
@@ -157,6 +159,8 @@ export function TasksApp() {
   if (error) {
     return (
       <div
+        className="tasks-app"
+        data-testid="tasks-app"
         style={{
           padding: "40px 20px",
           textAlign: "center",
@@ -174,6 +178,8 @@ export function TasksApp() {
   if (tasks.length === 0) {
     return (
       <div
+        className="tasks-app"
+        data-testid="tasks-app"
         style={{
           padding: "40px 20px",
           textAlign: "center",
@@ -237,7 +243,7 @@ export function TasksApp() {
     };
 
   return (
-    <>
+    <div className="tasks-app" data-testid="tasks-app">
       <div
         style={{
           padding: "16px 20px 0",
@@ -304,7 +310,7 @@ export function TasksApp() {
           onClose={() => setSelectedTaskId(null)}
         />
       ) : null}
-    </>
+    </div>
   );
 }
 

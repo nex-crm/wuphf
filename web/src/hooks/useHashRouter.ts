@@ -29,6 +29,9 @@ function parseHash(hash: string): Route {
   if (parts[0] === "apps" && parts[1]) {
     return { view: "app", app: decodeURIComponent(parts[1]) };
   }
+  if (parts[0] === "console") {
+    return { view: "app", app: "console" };
+  }
   if (parts[0] === "threads") {
     return { view: "app", app: "threads" };
   }
@@ -102,6 +105,7 @@ function stateToHash(state: {
  *   #/channels/<slug>            ↔ currentChannel=<slug>, currentApp=null
  *   #/dm/<agent>                 ↔ currentChannel=<agent>__human, channelMeta marked type 'D'
  *   #/apps/<id>                  ↔ currentApp=<id>
+ *   #/console                    ↔ currentApp='console'
  *   #/wiki[/<path>]              ↔ currentApp='wiki', wikiPath=<path>
  *   #/notebooks[/<agent>[/<e>]]  ↔ currentApp='notebooks', notebookAgentSlug, notebookEntrySlug
  *   #/reviews                    ↔ currentApp='reviews'
@@ -191,9 +195,9 @@ export function useHashRouter() {
       notebookEntrySlug,
     });
     if (next !== window.location.hash) {
-      ignoreNextHashChange.current = true;
-      // Use replaceState for the initial sync so we don't spam history,
-      // then push afterwards.
+      // replaceState does not emit `hashchange`, so do not arm
+      // ignoreNextHashChange here. Leaving it set causes the next real hash
+      // navigation to be dropped.
       window.history.replaceState(null, "", next);
     }
   }, [

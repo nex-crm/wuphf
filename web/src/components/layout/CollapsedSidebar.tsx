@@ -24,6 +24,7 @@ import {
   ShareAndroid,
   Shield,
   SidebarExpand,
+  Terminal,
 } from "iconoir-react";
 
 import { getUsage } from "../../api/platform";
@@ -36,6 +37,7 @@ import { ChannelList } from "../sidebar/ChannelList";
 const APP_ICONS: Record<string, ComponentType<{ className?: string }>> = {
   studio: Play,
   wiki: BookStack,
+  console: Terminal,
   tasks: CheckCircle,
   requests: ClipboardCheck,
   graph: ShareAndroid,
