@@ -1,6 +1,6 @@
 package agent
 
-// PackSkillSpec defines a skill to pre-seed when a pack is first launched.
+// PackSkillSpec describes a skill entry passed to broker.SeedDefaultSkills.
 type PackSkillSpec struct {
 	Name        string
 	Title       string
