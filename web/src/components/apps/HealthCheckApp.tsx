@@ -27,7 +27,7 @@ function formatSessionTime(value?: string): string {
   });
 }
 
-function selfAccessDetails(hostname: string, origin: string) {
+export function selfAccessDetails(hostname: string, origin: string) {
   const normalizedHost = hostname.trim().toLowerCase();
   if (normalizedHost === "localhost" || normalizedHost === "127.0.0.1") {
     return {
@@ -689,5 +689,3 @@ export function HealthCheckApp() {
     </>
   );
 }
-
-export const __test__ = { selfAccessDetails };

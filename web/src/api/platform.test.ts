@@ -4,6 +4,14 @@ import * as client from "./client";
 import * as api from "./platform";
 
 describe("platform api client", () => {
+  const shareStatus: api.WebShareStatus = {
+    running: true,
+    bind: "100.64.0.2",
+    interface: "tailscale0",
+    invite_url: "http://100.64.0.2:7890/join/tok",
+    expires_at: "2026-05-05T18:00:00Z",
+  };
+
   beforeEach(() => {
     vi.restoreAllMocks();
   });
@@ -74,24 +82,24 @@ describe("platform api client", () => {
     expect(getSpy).toHaveBeenCalledWith("/usage");
   });
 
-  it("calls the web share control contracts", async () => {
-    const status: api.WebShareStatus = {
-      running: true,
-      bind: "100.64.0.2",
-      interface: "tailscale0",
-      invite_url: "http://100.64.0.2:7890/join/tok",
-      expires_at: "2026-05-05T18:00:00Z",
-    };
-    const getSpy = vi.spyOn(client, "get").mockResolvedValue(status);
-    const postSpy = vi.spyOn(client, "post").mockResolvedValue(status);
+  it("getShareStatus calls the share status contract", async () => {
+    const getSpy = vi.spyOn(client, "get").mockResolvedValue(shareStatus);
 
-    await expect(api.getShareStatus()).resolves.toEqual(status);
+    await expect(api.getShareStatus()).resolves.toEqual(shareStatus);
     expect(getSpy).toHaveBeenCalledWith("/share/status");
+  });
 
-    await expect(api.startShare()).resolves.toEqual(status);
+  it("startShare calls the share start contract", async () => {
+    const postSpy = vi.spyOn(client, "post").mockResolvedValue(shareStatus);
+
+    await expect(api.startShare()).resolves.toEqual(shareStatus);
     expect(postSpy).toHaveBeenCalledWith("/share/start", {});
+  });
 
-    await expect(api.stopShare()).resolves.toEqual(status);
+  it("stopShare calls the share stop contract", async () => {
+    const postSpy = vi.spyOn(client, "post").mockResolvedValue(shareStatus);
+
+    await expect(api.stopShare()).resolves.toEqual(shareStatus);
     expect(postSpy).toHaveBeenCalledWith("/share/stop", {});
   });
 });

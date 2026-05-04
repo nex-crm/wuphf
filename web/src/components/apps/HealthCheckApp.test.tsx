@@ -13,7 +13,7 @@ import {
   stopShare,
 } from "../../api/platform";
 import { useAppStore } from "../../stores/app";
-import { __test__, HealthCheckApp } from "./HealthCheckApp";
+import { HealthCheckApp, selfAccessDetails } from "./HealthCheckApp";
 
 vi.mock("../../api/platform", () => ({
   getHealth: vi.fn(),
@@ -145,17 +145,13 @@ describe("HealthCheckApp access and sharing", () => {
   });
 
   it("describes network web access without forcing SSH when already remote", () => {
-    expect(
-      __test__.selfAccessDetails("localhost", "http://localhost:7890"),
-    ).toEqual({
+    expect(selfAccessDetails("localhost", "http://localhost:7890")).toEqual({
       detail:
         "For a server you reach through SSH, keep the tunnel open while you work.",
       code: "ssh -L 7890:localhost:7890 user@server",
       footer: "Then open http://localhost:7890",
     });
-    expect(
-      __test__.selfAccessDetails("100.64.0.2", "http://100.64.0.2:7890"),
-    ).toEqual({
+    expect(selfAccessDetails("100.64.0.2", "http://100.64.0.2:7890")).toEqual({
       detail: "This browser is already connected through the network web UI.",
       code: "http://100.64.0.2:7890",
       footer: "Use team-member invites for scoped shared sessions.",
