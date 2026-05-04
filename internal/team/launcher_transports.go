@@ -7,8 +7,8 @@ package team
 // wire it to one and miss the other.
 //
 // Phase 1: RegisterTransports is the stub. No real adapters are registered yet.
-// The function signature and call sites in Launch/LaunchWeb are established so
-// Phase 2a can add the Telegram wiring in a single diff (one adapter, one line).
+// The function signature and call sites in Launch/LaunchWeb/launchHeadlessCodex
+// are established so Phase 2a can add the Telegram wiring in a single diff.
 //
 // See docs/ADD-A-TRANSPORT.md for the full contributor guide.
 
@@ -17,19 +17,22 @@ import (
 )
 
 // RegisterTransports registers all configured transport adapters against host.
-// Called once per launch after broker.Start() succeeds. Returns a non-nil error
-// only when a required adapter (one whose config is present but invalid) fails
-// to register; optional adapters that are not configured are silently skipped.
+// Called once per launch after broker.Start() succeeds. Returns a cleanup
+// function and an optional error. The cleanup function stops all registered
+// adapters and must be called before broker.Stop() on any early-abort path.
+// It is always non-nil and safe to call even when err is non-nil.
 //
-// Callers (Launch, LaunchWeb) log the error and continue — a misconfigured
+// A non-nil error means a required adapter (one whose config is present but
+// invalid) failed to register; optional adapters that are not configured are
+// silently skipped. Callers log the error and continue — a misconfigured
 // Telegram token should not prevent the office from starting.
-func RegisterTransports(_ transport.Host) error {
+func RegisterTransports(_ transport.Host) (func(), error) {
 	// Phase 2a TODO: check cfg for TELEGRAM_BOT_TOKEN; if set, construct
-	// TelegramTransport and call host.Register (once Host gains that method).
+	// TelegramTransport, start its Run goroutine, and add its Stop to cleanup.
 	//
 	// Phase 3a TODO: check cfg for OpenClaw gateway URL + token; if set,
-	// construct OpenclawBridge adapter and register.
+	// construct OpenclawBridge adapter and add to cleanup.
 	//
 	// Phase 4 TODO: register human-share adapter when share is enabled.
-	return nil
+	return func() {}, nil
 }

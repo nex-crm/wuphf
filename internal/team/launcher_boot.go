@@ -64,7 +64,8 @@ func (l *Launcher) Launch() error {
 		return fmt.Errorf("start broker: %w", err)
 	}
 
-	if err := RegisterTransports(newBrokerTransportHost(l.broker)); err != nil {
+	stopTransports, err := RegisterTransports(newBrokerTransportHost(l.broker))
+	if err != nil {
 		// Non-fatal: a misconfigured optional adapter (e.g. bad Telegram token)
 		// should not prevent the office from starting.
 		fmt.Fprintf(os.Stderr, "warning: transport registration: %v\n", err)
@@ -87,9 +88,8 @@ func (l *Launcher) Launch() error {
 	// Resolve wuphf binary path for the channel view
 	wuphfBinary, _ := os.Executable()
 	if err := os.MkdirAll(filepath.Dir(channelStderrLogPath()), 0o700); err != nil {
-		// Stop the broker we already started so we don't leak a
-		// listener on an aborted Launch. Same unwind reason as the
-		// PID-file failure path in launcher_web.go.
+		// Stop adapters before the broker so they can flush in-flight sends.
+		stopTransports()
 		l.broker.Stop()
 		return fmt.Errorf("prepare channel log dir: %w", err)
 	}
@@ -114,6 +114,7 @@ func (l *Launcher) Launch() error {
 		channelCmd,
 	).Run()
 	if err != nil {
+		stopTransports()
 		l.broker.Stop()
 		return fmt.Errorf("create tmux session: %w", err)
 	}
@@ -217,7 +218,8 @@ func (l *Launcher) launchHeadlessCodex() error {
 		return fmt.Errorf("start broker: %w", err)
 	}
 
-	if err := RegisterTransports(newBrokerTransportHost(l.broker)); err != nil {
+	stopTransports, err := RegisterTransports(newBrokerTransportHost(l.broker))
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "warning: transport registration: %v\n", err)
 	}
 
@@ -227,6 +229,7 @@ func (l *Launcher) launchHeadlessCodex() error {
 		l.broker.SeedDefaultSkills(agent.AppendProductivitySkills(nil))
 	}
 	if err := writeOfficePIDFile(); err != nil {
+		stopTransports()
 		l.broker.Stop()
 		return fmt.Errorf("write office pid: %w", err)
 	}

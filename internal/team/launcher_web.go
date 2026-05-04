@@ -106,19 +106,18 @@ func (l *Launcher) LaunchWeb(webPort int) error {
 		return fmt.Errorf("start broker: %w", err)
 	}
 
-	if err := RegisterTransports(newBrokerTransportHost(l.broker)); err != nil {
+	stopTransports, err := RegisterTransports(newBrokerTransportHost(l.broker))
+	if err != nil {
 		// Non-fatal: a misconfigured optional adapter should not prevent the
 		// web UI from starting.
 		fmt.Fprintf(os.Stderr, "warning: transport registration: %v\n", err)
 	}
 
 	if err := writeOfficePIDFile(); err != nil {
-		// Stop the broker we just started so we don't leave an
-		// orphaned listener bound to the broker port. Without this,
-		// a PID-file write failure (full disk, perms, …) leaves
-		// the broker accepting requests with no PID record — the
-		// next launch can't kill it cleanly.
+		// Stop adapters before the broker so they can flush in-flight sends.
+		stopTransports()
 		l.broker.Stop()
+		_ = clearOfficePIDFile()
 		return fmt.Errorf("write office pid: %w", err)
 	}
 
@@ -141,6 +140,7 @@ func (l *Launcher) LaunchWeb(webPort int) error {
 		// down — leaving the broker accepting requests on a "wuphf has
 		// failed to start" path is worse than a clean exit, and a stale
 		// PID file would block the next launch attempt's writeOfficePID.
+		stopTransports()
 		l.broker.Stop()
 		_ = clearOfficePIDFile()
 		return fmt.Errorf("web UI failed to start: %w\n\nIs port %d already in use? Try: wuphf --web-port %d", err, webPort, webPort+1)
