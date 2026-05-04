@@ -131,9 +131,11 @@ type OfficeBoundTransport interface {
 	// The adapter is responsible for persisting the token across restarts.
 	CreateInvite(ctx context.Context, network string) (inviteURL string, err error)
 
-	// RevokeInvite invalidates the invite identified by inviteID. Active
-	// sessions that were admitted via this invite are terminated by the adapter.
-	// The Host calls [Host.RevokeParticipant] for each affected admitted human.
+	// RevokeInvite invalidates the invite identified by inviteID. The adapter
+	// terminates any active sessions admitted via this invite and calls
+	// [Host.RevokeParticipant] for each affected admitted human before returning.
+	// The Host does not call RevokeParticipant automatically — the adapter is
+	// responsible for the full teardown sequence.
 	RevokeInvite(ctx context.Context, inviteID string) error
 }
 

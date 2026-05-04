@@ -135,6 +135,11 @@ func (f *fakeMemberTransport) CreateSession(_ context.Context, agentID, label st
 func (f *fakeMemberTransport) AttachSlug(slug, sessionKey string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	// Remove stale reverse entry before overwriting, so a slug reassignment
+	// does not leave the old sessionKey mapped to this slug indefinitely.
+	if oldKey, ok := f.slugs[slug]; ok {
+		delete(f.sessions, oldKey)
+	}
 	f.slugs[slug] = sessionKey
 	f.sessions[sessionKey] = slug
 }
@@ -233,20 +238,20 @@ type detachCall struct {
 func (h *fakeHost) ReceiveMessage(_ context.Context, msg Message) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	h.received = append(h.received, msg)
 	if h.receiveErr != nil {
 		return h.receiveErr
 	}
-	h.received = append(h.received, msg)
 	return nil
 }
 
 func (h *fakeHost) UpsertParticipant(_ context.Context, p Participant, b Binding) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	h.upserted = append(h.upserted, upsertCall{p, b})
 	if h.upsertErr != nil {
 		return h.upsertErr
 	}
-	h.upserted = append(h.upserted, upsertCall{p, b})
 	return nil
 }
 

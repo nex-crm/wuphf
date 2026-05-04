@@ -23,7 +23,7 @@ Pick the scope that matches how your integration behaves:
 
 ## Package layout
 
-```
+```text
 internal/team/transport/
   types.go          — Scope, Binding, Participant, Message, Outbound, Health
   transport.go      — Transport, MemberBoundTransport, OfficeBoundTransport, Host interfaces
