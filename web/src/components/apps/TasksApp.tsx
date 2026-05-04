@@ -362,9 +362,6 @@ function TaskCard({
   function handleWorkbenchKeyDown(
     event: React.KeyboardEvent<HTMLButtonElement>,
   ) {
-    if (event.key === "Enter" || event.key === " ") {
-      event.preventDefault();
-    }
     event.stopPropagation();
   }
 
