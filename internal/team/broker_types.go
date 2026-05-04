@@ -106,13 +106,19 @@ type humanInterview struct {
 	Required      bool              `json:"required,omitempty"`
 	Secret        bool              `json:"secret,omitempty"`
 	ReplyTo       string            `json:"reply_to,omitempty"`
-	DueAt         string            `json:"due_at,omitempty"`
-	FollowUpAt    string            `json:"follow_up_at,omitempty"`
-	ReminderAt    string            `json:"reminder_at,omitempty"`
-	RecheckAt     string            `json:"recheck_at,omitempty"`
-	CreatedAt     string            `json:"created_at"`
-	UpdatedAt     string            `json:"updated_at,omitempty"`
-	Answered      *interviewAnswer  `json:"answered,omitempty"`
+	// DedupeKey collapses duplicate POSTs with the same key onto the
+	// existing active request. Used by the action approval gate so a
+	// retry of the same (agent, platform, action_id, connection_key)
+	// tuple does not produce a fresh blocking request each time the
+	// agent loop reconnects.
+	DedupeKey  string           `json:"dedupe_key,omitempty"`
+	DueAt      string           `json:"due_at,omitempty"`
+	FollowUpAt string           `json:"follow_up_at,omitempty"`
+	ReminderAt string           `json:"reminder_at,omitempty"`
+	RecheckAt  string           `json:"recheck_at,omitempty"`
+	CreatedAt  string           `json:"created_at"`
+	UpdatedAt  string           `json:"updated_at,omitempty"`
+	Answered   *interviewAnswer `json:"answered,omitempty"`
 }
 
 type humanInvite struct {

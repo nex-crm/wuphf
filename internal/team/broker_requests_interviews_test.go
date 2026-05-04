@@ -189,6 +189,250 @@ func TestBrokerRequestsLifecycle(t *testing.T) {
 	}
 }
 
+// TestBrokerPostRequestDedupeKeyCollapsesDuplicates locks in the fix
+// for the 117-stacked-approval bug: when an agent retries a mutating
+// external action, every call into the approval gate POSTs /requests
+// with the same dedupe_key. The broker must return the existing
+// active request instead of stacking duplicates.
+func TestBrokerPostRequestDedupeKeyCollapsesDuplicates(t *testing.T) {
+	b := newTestBroker(t)
+	ensureTestMemberAccess(b, "general", "integration-ops", "Integration Ops")
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("failed to start broker: %v", err)
+	}
+	defer b.Stop()
+
+	base := fmt.Sprintf("http://%s", b.Addr())
+	post := func() (string, bool) {
+		t.Helper()
+		body, _ := json.Marshal(map[string]any{
+			"kind":       "approval",
+			"from":       "integration-ops",
+			"channel":    "general",
+			"title":      "Approve gmail action: send",
+			"question":   "@integration-ops wants to send. Approve?",
+			"blocking":   true,
+			"required":   true,
+			"dedupe_key": "action:integration-ops:gmail:gmail_send_email:conn-key",
+		})
+		req, _ := http.NewRequest(http.MethodPost, base+"/requests", bytes.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+b.Token())
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("post request: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			raw, _ := io.ReadAll(resp.Body)
+			t.Fatalf("expected 200, got %d: %s", resp.StatusCode, raw)
+		}
+		var out struct {
+			ID      string `json:"id"`
+			Deduped bool   `json:"deduped"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return out.ID, out.Deduped
+	}
+
+	firstID, firstDeduped := post()
+	if firstID == "" || firstDeduped {
+		t.Fatalf("first post: id=%q deduped=%v (expected fresh request)", firstID, firstDeduped)
+	}
+
+	// Five retries of the same dedupe_key must all collapse onto the
+	// first request — not stack five new ones.
+	for i := 0; i < 5; i++ {
+		id, deduped := post()
+		if id != firstID {
+			t.Fatalf("retry %d: id=%q want %q", i, id, firstID)
+		}
+		if !deduped {
+			t.Fatalf("retry %d: expected deduped=true", i)
+		}
+	}
+
+	// Sanity check via GET /requests: only one pending entry exists.
+	req, _ := http.NewRequest(http.MethodGet, base+"/requests?channel=general", nil)
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	defer resp.Body.Close()
+	var listing struct {
+		Requests []humanInterview `json:"requests"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&listing); err != nil {
+		t.Fatalf("decode listing: %v", err)
+	}
+	if len(listing.Requests) != 1 {
+		t.Fatalf("expected 1 pending request after 6 dedup-keyed POSTs, got %d", len(listing.Requests))
+	}
+	if listing.Requests[0].DedupeKey == "" {
+		t.Fatalf("expected DedupeKey to be persisted, got %+v", listing.Requests[0])
+	}
+}
+
+// TestBrokerPostRequestDedupeKeyRecreatesAfterAnswer pins that once
+// the human answers (or cancels) the original request, a new POST
+// with the same dedupe_key creates a fresh request instead of
+// silently mapping to the now-terminal one.
+func TestBrokerPostRequestDedupeKeyRecreatesAfterAnswer(t *testing.T) {
+	b := newTestBroker(t)
+	ensureTestMemberAccess(b, "general", "ceo", "CEO")
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("failed to start broker: %v", err)
+	}
+	defer b.Stop()
+
+	base := fmt.Sprintf("http://%s", b.Addr())
+	body, _ := json.Marshal(map[string]any{
+		"kind":       "approval",
+		"from":       "ceo",
+		"channel":    "general",
+		"title":      "Approve",
+		"question":   "Approve?",
+		"blocking":   true,
+		"required":   true,
+		"dedupe_key": "action:ceo:gmail:send:k",
+	})
+	post := func() (string, bool) {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodPost, base+"/requests", bytes.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+b.Token())
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("post: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			raw, _ := io.ReadAll(resp.Body)
+			t.Fatalf("expected 200 posting request, got %d: %s", resp.StatusCode, raw)
+		}
+		var out struct {
+			ID      string `json:"id"`
+			Deduped bool   `json:"deduped"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return out.ID, out.Deduped
+	}
+
+	first, _ := post()
+	if first == "" {
+		t.Fatal("expected first request id")
+	}
+
+	// Answer the first request → terminal state.
+	answerBody, _ := json.Marshal(map[string]any{
+		"id":          first,
+		"choice_id":   "approve",
+		"choice_text": "Approve",
+	})
+	req, _ := http.NewRequest(http.MethodPost, base+"/requests/answer", bytes.NewReader(answerBody))
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("answer: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 answering request, got %d", resp.StatusCode)
+	}
+
+	// Same dedupe key after answer → new request, not the terminal one.
+	second, deduped := post()
+	if second == "" || second == first {
+		t.Fatalf("expected fresh request after answer, got first=%q second=%q", first, second)
+	}
+	if deduped {
+		t.Fatal("expected deduped=false for fresh request after answer")
+	}
+}
+
+// TestBrokerPostRequestDedupeKeyRecreatesAfterCancel pins the cancel
+// branch of the terminal-state contract: cancelRequestLocked sets
+// Status="canceled" and requestIsActive returns false for it, so a
+// subsequent POST with the same dedupe_key must create a fresh
+// request rather than silently mapping to the canceled one.
+func TestBrokerPostRequestDedupeKeyRecreatesAfterCancel(t *testing.T) {
+	b := newTestBroker(t)
+	ensureTestMemberAccess(b, "general", "ceo", "CEO")
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("failed to start broker: %v", err)
+	}
+	defer b.Stop()
+
+	base := fmt.Sprintf("http://%s", b.Addr())
+	post := func() (string, bool) {
+		t.Helper()
+		body, _ := json.Marshal(map[string]any{
+			"kind":       "approval",
+			"from":       "ceo",
+			"channel":    "general",
+			"title":      "Approve",
+			"question":   "Approve?",
+			"blocking":   true,
+			"required":   true,
+			"dedupe_key": "action:ceo:gmail:send:k",
+		})
+		req, _ := http.NewRequest(http.MethodPost, base+"/requests", bytes.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+b.Token())
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("post: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			raw, _ := io.ReadAll(resp.Body)
+			t.Fatalf("expected 200 posting request, got %d: %s", resp.StatusCode, raw)
+		}
+		var out struct {
+			ID      string `json:"id"`
+			Deduped bool   `json:"deduped"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return out.ID, out.Deduped
+	}
+
+	first, _ := post()
+	if first == "" {
+		t.Fatal("expected first request id")
+	}
+
+	// Cancel the first request → terminal state.
+	cancelBody, _ := json.Marshal(map[string]any{"action": "cancel", "id": first, "from": "ceo"})
+	req, _ := http.NewRequest(http.MethodPost, base+"/requests", bytes.NewReader(cancelBody))
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("cancel: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 canceling request, got %d", resp.StatusCode)
+	}
+
+	// Same dedupe key after cancel → new request, not the canceled one.
+	second, deduped := post()
+	if second == "" || second == first {
+		t.Fatalf("expected fresh request after cancel, got first=%q second=%q", first, second)
+	}
+	if deduped {
+		t.Fatal("expected deduped=false for fresh request after cancel")
+	}
+}
+
 func TestHumanRequestAnswerUsesSessionActor(t *testing.T) {
 	b := newTestBroker(t)
 	b.mu.Lock()

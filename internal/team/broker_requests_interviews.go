@@ -380,6 +380,7 @@ func (b *Broker) handlePostRequest(w http.ResponseWriter, r *http.Request) {
 		Required      bool              `json:"required"`
 		Secret        bool              `json:"secret"`
 		ReplyTo       string            `json:"reply_to"`
+		DedupeKey     string            `json:"dedupe_key"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
@@ -411,6 +412,36 @@ func (b *Broker) handlePostRequest(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "channel access denied", http.StatusForbidden)
 			return
 		}
+		// Dedupe: if a dedupe_key is set and an active request with the
+		// same key already exists in this channel, return that existing
+		// request instead of stacking a duplicate. Without this, agent
+		// retries of the same external action (or multiple agents
+		// hitting the same gate) pile up dozens of identical pending
+		// approvals — observed as 100+ stacked "Approve gmail action"
+		// requests after a single connect-and-retry sequence.
+		dedupeKey := strings.TrimSpace(body.DedupeKey)
+		if dedupeKey != "" {
+			for i := range b.requests {
+				if !requestIsActive(b.requests[i]) {
+					continue
+				}
+				if normalizeChannelSlug(b.requests[i].Channel) != channel {
+					continue
+				}
+				if strings.TrimSpace(b.requests[i].DedupeKey) != dedupeKey {
+					continue
+				}
+				existing := b.requests[i]
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"request":    existing,
+					"id":         existing.ID,
+					"deduped":    true,
+					"dedupe_key": dedupeKey,
+				})
+				return
+			}
+		}
 		b.counter++
 		req := humanInterview{
 			ID:            fmt.Sprintf("request-%d", b.counter),
@@ -427,6 +458,7 @@ func (b *Broker) handlePostRequest(w http.ResponseWriter, r *http.Request) {
 			Required:      body.Required,
 			Secret:        body.Secret,
 			ReplyTo:       strings.TrimSpace(body.ReplyTo),
+			DedupeKey:     dedupeKey,
 			CreatedAt:     time.Now().UTC().Format(time.RFC3339),
 			UpdatedAt:     time.Now().UTC().Format(time.RFC3339),
 		}
