@@ -373,12 +373,16 @@ function MainContent() {
   }
 
   return (
-    <Suspense fallback={<PanelFallback />}>
-      <MessageFeed />
-      <TypingIndicator />
-      <InterviewBar />
-      <Composer />
-    </Suspense>
+    <>
+      <Suspense fallback={<PanelFallback />}>
+        <MessageFeed />
+        <TypingIndicator />
+        <InterviewBar />
+      </Suspense>
+      <Suspense fallback={null}>
+        <Composer />
+      </Suspense>
+    </>
   );
 }
 
