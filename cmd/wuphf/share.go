@@ -139,7 +139,8 @@ func (c *webShareController) start() (team.WebShareStatus, error) {
 	}
 
 	server := newShareHTTPServer(bind.String(), opts.webPort, brokerURL, token, nil)
-	ln, err := net.Listen("tcp", server.Addr)
+	lc := &net.ListenConfig{}
+	ln, err := lc.Listen(context.Background(), "tcp", server.Addr)
 	if err != nil {
 		c.running = false
 		c.server = nil
