@@ -44,6 +44,12 @@ export const wikiIndexRoute = createRoute({
 export const wikiLookupRoute = createRoute({
   getParentRoute: () => wikiRoute,
   path: "lookup",
+  // Validate the `q` search param at the route boundary so consumers
+  // don't each hand-narrow `unknown`. TanStack lifts the inferred type
+  // through useSearch / useMatch / useMatches.
+  validateSearch: (search: Record<string, unknown>): { q?: string } => ({
+    q: typeof search.q === "string" ? search.q : undefined,
+  }),
 });
 
 export const wikiArticleRoute = createRoute({

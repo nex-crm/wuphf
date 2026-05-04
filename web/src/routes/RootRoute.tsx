@@ -27,10 +27,20 @@ import type { WikiTab } from "../components/wiki/WikiTabs";
 import WikiTabs from "../components/wiki/WikiTabs";
 import { useBrokerEvents } from "../hooks/useBrokerEvents";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
-import { router } from "../lib/router";
+import { rootRoute, router } from "../lib/router";
 import { useAppStore } from "../stores/app";
-import { isUnmatchedRoute } from "./routeSync";
 import { type CurrentRoute, useCurrentRoute } from "./useCurrentRoute";
+
+// Sentinel routeId for the root match — TanStack Router exposes this as
+// `__root__`. Imported via `rootRoute.id` so a future TanStack rename
+// surfaces as a single broken reference instead of a silent string-match
+// drift. Used only by isUnmatchedRoute below.
+const ROOT_ROUTE_ID = rootRoute.id;
+
+/** True for unknown URLs — the kind a not-found surface should catch. */
+function isUnmatchedRoute(routeId: string | undefined): boolean {
+  return !routeId || routeId === ROOT_ROUTE_ID;
+}
 
 // ── Lazy-loaded panels ─────────────────────────────────────────
 //

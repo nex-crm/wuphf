@@ -124,7 +124,11 @@ function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
 
   async function handleOpenDM() {
     setDmLoading(true);
-    // Snapshot the current location so we can revert on broker error.
+    // Snapshot the current location so we can revert on broker error. We
+    // hold the raw href and replay it via router.history.push (not
+    // router.navigate({to}), which expects a route-template path —
+    // passing a concrete href would fail to resolve, especially for
+    // /wiki/lookup?q=… etc.).
     const prevHref = router.state.location.href;
     const optimisticHref = router.buildLocation({
       to: "/dm/$agentSlug",
@@ -140,9 +144,11 @@ function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
       void queryClient.invalidateQueries({ queryKey: ["channels"] });
     } catch (err: unknown) {
       // Only revert if the user hasn't already navigated elsewhere.
+      // Don't re-open the panel on error — the toast tells the user what
+      // happened, and re-opening a panel they may have intentionally
+      // closed during the in-flight request is surprising.
       if (router.state.location.href === optimisticHref) {
-        void router.navigate({ to: prevHref });
-        setActiveAgentSlug(agent.slug);
+        router.history.push(prevHref);
       }
       const message = err instanceof Error ? err.message : "Failed to open DM";
       showNotice(message, "error");

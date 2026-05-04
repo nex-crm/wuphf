@@ -70,13 +70,14 @@ const ROUTE_DERIVERS: Record<string, RouteDeriver> = {
     kind: "wiki-lookup",
     query: typeof search.q === "string" ? search.q : null,
   }),
-  [wikiArticleRoute.id]: (params) => ({
-    kind: "wiki-article",
-    articlePath:
-      typeof params._splat === "string" && params._splat.length > 0
-        ? params._splat
-        : "",
-  }),
+  [wikiArticleRoute.id]: (params) => {
+    // Empty splat (e.g. legacy `#/wiki/` URLs that landed on the
+    // article route) renders the catalog rather than a `wiki-article`
+    // surface with an empty path that would fetch the empty article.
+    const splat = typeof params._splat === "string" ? params._splat : "";
+    if (splat.length === 0) return { kind: "wiki" };
+    return { kind: "wiki-article", articlePath: splat };
+  },
   [notebooksRoute.id]: () => ({ kind: "notebook-catalog" }),
   [notebookAgentRoute.id]: (params) => ({
     kind: "notebook-agent",

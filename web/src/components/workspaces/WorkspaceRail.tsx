@@ -27,7 +27,7 @@ import {
   useWorkspacesList,
   type Workspace,
 } from "../../api/workspaces";
-import { router } from "../../lib/router";
+import { channelRoute, dmRoute, router } from "../../lib/router";
 import { showNotice } from "../ui/Toast";
 import { CreateWorkspaceModal } from "./CreateWorkspaceModal";
 import { useRestoreToast } from "./RestoreToast";
@@ -451,8 +451,7 @@ export function WorkspaceRail({
         // already in a conversation, this click is a no-op.
         const leaf = router.state.matches.at(-1);
         const onConversation =
-          leaf?.routeId === "/channels/$channelSlug" ||
-          leaf?.routeId === "/dm/$agentSlug";
+          leaf?.routeId === channelRoute.id || leaf?.routeId === dmRoute.id;
         if (!onConversation) {
           void router.navigate({
             to: "/channels/$channelSlug",
