@@ -196,14 +196,14 @@ func webShareErrorMessage(err error) string {
 func (c *webShareController) stop() error {
 	c.mu.Lock()
 	server := c.server
-	c.server = nil
-	c.running = false
-	c.inviteURL = ""
-	c.expiresAt = ""
-	c.err = ""
 	c.mu.Unlock()
 
 	if server == nil {
+		c.mu.Lock()
+		c.running = false
+		c.clearInviteLocked()
+		c.err = ""
+		c.mu.Unlock()
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -214,6 +214,14 @@ func (c *webShareController) stop() error {
 		c.mu.Unlock()
 		return err
 	}
+	c.mu.Lock()
+	if c.server == server {
+		c.server = nil
+		c.running = false
+		c.clearInviteLocked()
+		c.err = ""
+	}
+	c.mu.Unlock()
 	return nil
 }
 

@@ -156,9 +156,17 @@ export function HealthCheckApp() {
   };
   const copyInvite = async () => {
     if (!shareInviteURL || typeof navigator === "undefined") return;
-    await navigator.clipboard.writeText(shareInviteURL);
-    setInviteCopied(true);
-    setTimeout(() => setInviteCopied(false), 1600);
+    try {
+      await navigator.clipboard.writeText(shareInviteURL);
+      setShareMutationError("");
+      setInviteCopied(true);
+      setTimeout(() => setInviteCopied(false), 1600);
+    } catch (err) {
+      console.error("Could not copy share invite URL", err);
+      setShareMutationError(
+        "Could not copy invite. Copy it manually from the field.",
+      );
+    }
   };
   const runtimeItems = [
     {
