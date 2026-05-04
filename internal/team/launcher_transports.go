@@ -6,13 +6,12 @@ package team
 // automatically makes it available in both surfaces — you cannot accidentally
 // wire it to one and miss the other.
 //
-// Phase 2a: wires the existing TelegramTransport when a bot token is present.
-// The transport is started in a supervised goroutine; the returned cleanup
-// function cancels it and must be called before broker.Stop() on any abort path.
+// Phase 2b: TelegramTransport satisfies transport.Transport. RegisterTransports
+// constructs a brokerTransportHost and passes it to Run so inbound messages flow
+// through the Host contract instead of writing to the broker directly.
 //
-// Phase 2b will refactor TelegramTransport onto the transport.Transport contract.
-// Phase 3a/3b will do the same for OpenClaw.
-// Phase 4 will do the same for human-share.
+// Phase 3a/3b will wire OpenClaw via MemberBoundTransport.
+// Phase 4 will wire human-share via OfficeBoundTransport.
 //
 // See docs/ADD-A-TRANSPORT.md for the full contributor guide.
 
@@ -47,15 +46,16 @@ func RegisterTransports(b *Broker) (func(), error) {
 		if len(t.ChatMap) == 0 && t.DMChannel == "" {
 			log.Printf("[transport] telegram: token present but no channels connected yet — skipping")
 		} else {
+			host := &brokerTransportHost{broker: b}
 			ctx, cancel := context.WithCancel(context.Background())
 			done := make(chan struct{})
 			stops = append(stops, func() {
 				cancel()
-				<-done // wait for Start to return before broker.Stop()
+				<-done // wait for Run to return before broker.Stop()
 			})
 			go func() {
 				defer close(done)
-				if err := t.Start(ctx); err != nil && ctx.Err() == nil {
+				if err := t.Run(ctx, host); err != nil && ctx.Err() == nil {
 					log.Printf("[transport] telegram: exited with error: %v", err)
 				}
 			}()

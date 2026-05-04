@@ -6,11 +6,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/nex-crm/wuphf/internal/team/transport"
 )
 
 const (
@@ -51,14 +55,18 @@ type telegramAPIResponse struct {
 	Desc   string          `json:"description,omitempty"`
 }
 
+// compile-time assertion: TelegramTransport must satisfy transport.Transport.
+var _ transport.Transport = (*TelegramTransport)(nil)
+
 // TelegramTransport bridges Telegram chats with the office broker.
 // Each mapped Telegram chat corresponds to an office channel with a
-// "telegram" surface. Inbound Telegram messages are posted to the broker;
-// outbound broker messages on surface channels are sent to Telegram.
+// "telegram" surface. Inbound Telegram messages are posted to the broker
+// via transport.Host; outbound broker messages on surface channels are
+// sent to Telegram via Send.
 type TelegramTransport struct {
 	BotToken string
 	Broker   *Broker
-	// ChatMap maps telegram chat_id (as string) -> office channel slug
+	// ChatMap maps telegram chat_id (as string) -> office channel slug.
 	ChatMap map[string]string
 	// DMChannel is the office channel slug for direct messages (private chats).
 	// When set, any private message to the bot routes to this channel.
@@ -67,6 +75,12 @@ type TelegramTransport struct {
 	// If empty, display names are used verbatim as the "from" field.
 	UserMap map[string]string
 	client  *http.Client
+
+	// health fields — written by pollInbound, read by Health(). Protected by mu.
+	mu            sync.Mutex
+	healthState   transport.HealthState
+	lastSuccessAt time.Time
+	lastErr       error
 }
 
 // NewTelegramTransport creates a transport from the broker's surface channels.
@@ -86,19 +100,43 @@ func NewTelegramTransport(broker *Broker, botToken string) *TelegramTransport {
 		}
 	}
 	return &TelegramTransport{
-		BotToken:  botToken,
-		Broker:    broker,
-		ChatMap:   chatMap,
-		DMChannel: dmChannel,
-		UserMap:   make(map[string]string),
-		client:    &http.Client{Timeout: time.Duration(telegramPollTimeout+10) * time.Second},
+		BotToken:    botToken,
+		Broker:      broker,
+		ChatMap:     chatMap,
+		DMChannel:   dmChannel,
+		UserMap:     make(map[string]string),
+		client:      &http.Client{Timeout: time.Duration(telegramPollTimeout+10) * time.Second},
+		healthState: transport.HealthDisconnected,
 	}
 }
 
-// Start begins the bidirectional bridge: polling Telegram for inbound messages
-// and draining the broker's external queue for outbound delivery.
-// It blocks until ctx is cancelled.
-func (t *TelegramTransport) Start(ctx context.Context) error {
+// Name returns "telegram" — the stable adapter name used as AdapterName in
+// every Participant value this transport creates.
+func (t *TelegramTransport) Name() string { return "telegram" }
+
+// Binding declares this adapter as channel-bound. ChannelSlug is left empty
+// because a single TelegramTransport instance can cover multiple channels via
+// ChatMap; the per-message channel is carried in each transport.Message.Binding.
+func (t *TelegramTransport) Binding() transport.Binding {
+	return transport.Binding{Scope: transport.ScopeChannel}
+}
+
+// Health returns a point-in-time snapshot of adapter connectivity. O(1) — reads
+// from cached fields updated by pollInbound.
+func (t *TelegramTransport) Health() transport.Health {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return transport.Health{
+		State:         t.healthState,
+		LastSuccessAt: t.lastSuccessAt,
+		LastError:     t.lastErr,
+	}
+}
+
+// Run starts the bidirectional bridge and blocks until ctx is cancelled. Inbound
+// Telegram messages are delivered to the office via host; outbound broker messages
+// are polled from the broker queue and sent via Send. Implements transport.Transport.
+func (t *TelegramTransport) Run(ctx context.Context, host transport.Host) error {
 	if t.BotToken == "" {
 		return fmt.Errorf("telegram bot token is empty")
 	}
@@ -107,7 +145,7 @@ func (t *TelegramTransport) Start(ctx context.Context) error {
 	}
 
 	errCh := make(chan error, 2)
-	go func() { errCh <- t.pollInbound(ctx) }()
+	go func() { errCh <- t.pollInbound(ctx, host) }()
 	go func() { errCh <- t.drainOutbound(ctx) }()
 	go t.typingLoop(ctx)
 
@@ -119,8 +157,38 @@ func (t *TelegramTransport) Start(ctx context.Context) error {
 	}
 }
 
-// pollInbound long-polls Telegram for new messages and routes them to the broker.
-func (t *TelegramTransport) pollInbound(ctx context.Context) error {
+// Start is a compatibility shim for callers that predate the transport.Transport
+// contract. It creates a brokerTransportHost and delegates to Run.
+func (t *TelegramTransport) Start(ctx context.Context) error {
+	host := &brokerTransportHost{broker: t.Broker}
+	return t.Run(ctx, host)
+}
+
+// Send delivers one outbound message to the Telegram chat mapped to
+// msg.Binding.ChannelSlug. Returns an error if no chat is mapped for that slug
+// or if the Telegram API call fails. Implements transport.Transport.
+func (t *TelegramTransport) Send(ctx context.Context, msg transport.Outbound) error {
+	chatID := t.chatIDForSlug(msg.Binding.ChannelSlug)
+	if chatID == "" {
+		return fmt.Errorf("telegram: no chat mapped for channel %q", msg.Binding.ChannelSlug)
+	}
+	return t.sendMessageHTML(ctx, chatID, msg.Text)
+}
+
+// chatIDForSlug returns the Telegram chat_id string for the given office channel
+// slug, or "" if no mapping exists.
+func (t *TelegramTransport) chatIDForSlug(slug string) string {
+	for chatID, s := range t.ChatMap {
+		if s == slug && chatID != "0" {
+			return chatID
+		}
+	}
+	return ""
+}
+
+// pollInbound long-polls Telegram for new messages and routes them to the office
+// via host. Updates health state on each successful or failed poll cycle.
+func (t *TelegramTransport) pollInbound(ctx context.Context, host transport.Host) error {
 	var offset int64
 	for {
 		select {
@@ -131,7 +199,11 @@ func (t *TelegramTransport) pollInbound(ctx context.Context) error {
 
 		updates, err := t.getUpdates(ctx, offset)
 		if err != nil {
-			fmt.Printf("[telegram] poll error: %v\n", err)
+			t.mu.Lock()
+			t.healthState = transport.HealthDegraded
+			t.lastErr = err
+			t.mu.Unlock()
+			log.Printf("[telegram] poll error: %v", err)
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
@@ -140,6 +212,12 @@ func (t *TelegramTransport) pollInbound(ctx context.Context) error {
 			}
 		}
 
+		t.mu.Lock()
+		t.healthState = transport.HealthConnected
+		t.lastSuccessAt = time.Now()
+		t.lastErr = nil
+		t.mu.Unlock()
+
 		for _, upd := range updates {
 			if upd.UpdateID >= offset {
 				offset = upd.UpdateID + 1
@@ -147,21 +225,63 @@ func (t *TelegramTransport) pollInbound(ctx context.Context) error {
 			if upd.Message == nil {
 				continue
 			}
-			// Record every group/supergroup we see for /connect discovery
+			// Record every group/supergroup we see for /connect discovery.
 			if upd.Message.Chat.Type == "group" || upd.Message.Chat.Type == "supergroup" {
 				t.Broker.RecordTelegramGroup(upd.Message.Chat.ID, upd.Message.Chat.Title)
 			}
 			if upd.Message.Text == "" {
 				continue
 			}
-			fmt.Printf("[telegram] inbound: chat=%d type=%s from=%s text=%q\n",
+			log.Printf("[telegram] inbound: chat=%d type=%s text=%q",
 				upd.Message.Chat.ID, upd.Message.Chat.Type,
-				upd.Message.From.FirstName, upd.Message.Text[:min(len(upd.Message.Text), 50)])
-			if err := t.HandleInbound(upd.Message.Chat.ID, upd.Message.Chat.Type, upd.Message.From, upd.Message.Text); err != nil {
-				fmt.Printf("[telegram] inbound error: %v\n", err)
-				continue
-			}
+				upd.Message.Text[:min(len(upd.Message.Text), 50)])
+			t.routeInbound(ctx, host, upd.Message)
 		}
+	}
+}
+
+// routeInbound resolves the channel for msg, then delivers it to the office via
+// host.UpsertParticipant + host.ReceiveMessage.
+func (t *TelegramTransport) routeInbound(ctx context.Context, host transport.Host, msg *telegramMsg) {
+	chatIDStr := strconv.FormatInt(msg.Chat.ID, 10)
+	channel, ok := t.ChatMap[chatIDStr]
+	if !ok {
+		if msg.Chat.Type == "private" && t.DMChannel != "" {
+			channel = t.DMChannel
+			t.ChatMap[chatIDStr] = t.DMChannel
+		} else {
+			log.Printf("[telegram] inbound: unmapped chat %s", chatIDStr)
+			return
+		}
+	}
+
+	fromName := t.resolveUser(msg.From)
+	key := "0"
+	if msg.From != nil {
+		key = strconv.FormatInt(msg.From.ID, 10)
+	}
+
+	p := transport.Participant{
+		AdapterName: "telegram",
+		Key:         key,
+		DisplayName: fromName,
+		Human:       true,
+	}
+	b := transport.Binding{
+		Scope:       transport.ScopeChannel,
+		ChannelSlug: channel,
+	}
+
+	if err := host.UpsertParticipant(ctx, p, b); err != nil {
+		log.Printf("[telegram] upsert participant key=%s: %v", key, err)
+	}
+	if err := host.ReceiveMessage(ctx, transport.Message{
+		Participant: p,
+		Binding:     b,
+		Text:        msg.Text,
+		ExternalID:  strconv.FormatInt(msg.MessageID, 10),
+	}); err != nil {
+		log.Printf("[telegram] receive message: %v", err)
 	}
 }
 
@@ -186,23 +306,27 @@ func (t *TelegramTransport) drainOutbound(ctx context.Context) error {
 
 		msgs := t.Broker.ExternalQueue("telegram")
 		if len(msgs) > 0 {
-			fmt.Printf("[telegram] outbound queue: %d messages, slugToChat=%v\n", len(msgs), slugToChat)
+			log.Printf("[telegram] outbound queue: %d message(s)", len(msgs))
 		}
 		for _, msg := range msgs {
 			ch := normalizeChannelSlug(msg.Channel)
 			chatID, ok := slugToChat[ch]
 			if !ok {
-				fmt.Printf("[telegram] outbound skip: no chat for channel %q\n", ch)
+				log.Printf("[telegram] outbound skip: no chat for channel %q", ch)
 				continue
 			}
-			// Send typing indicator before the message
+			// Send typing indicator before the message (Telegram-specific UX).
 			if chatIDInt, err := strconv.ParseInt(chatID, 10, 64); err == nil {
 				_ = SendTypingAction(ctx, t.BotToken, chatIDInt)
 			}
-			if err := t.SendToTelegram(ctx, chatID, msg); err != nil {
+			out := transport.Outbound{
+				Binding: transport.Binding{Scope: transport.ScopeChannel, ChannelSlug: ch},
+				Text:    formatTelegramOutbound(msg),
+			}
+			if err := t.Send(ctx, out); err != nil {
 				// Transient send failure — message was already dequeued,
-				// so we log and move on. In a future version we could
-				// implement retry with dead-letter semantics.
+				// so we log and move on.
+				log.Printf("[telegram] outbound send error for %q: %v", ch, err)
 				continue
 			}
 		}

@@ -4,51 +4,62 @@ package team
 // only file in internal/team that imports internal/team/transport — the
 // one-way compile boundary (team → transport) is enforced here.
 //
-// Phase 2a wires the existing TelegramTransport directly against *Broker (not
-// through this Host). The Host and brokerTransportHost are preserved for Phase
-// 2b when TelegramTransport is refactored onto the transport.Transport contract
-// and will call Host.ReceiveMessage / Host.UpsertParticipant instead of writing
-// to the broker directly.
+// Phase 2b wires ReceiveMessage and UpsertParticipant for the channel-bound
+// (Telegram) case. Inbound messages are delivered via PostInboundSurfaceMessage;
+// UpsertParticipant is a no-op for channel-bound adapters because participant
+// attribution is handled inside PostInboundSurfaceMessage by display name.
 //
-// Until Phase 2b, every Host method returns a descriptive stub error so any
-// contributor who wires a new adapter against this Host sees a clear
-// "not yet wired" message rather than a silent no-op.
+// DetachParticipant (phase 3b) and RevokeParticipant (phase 4) remain stubs.
 
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/nex-crm/wuphf/internal/team/transport"
 )
 
 // brokerTransportHost implements transport.Host for the Broker.
-// Constructed in Phase 2b when adapters start using the contract interfaces.
 type brokerTransportHost struct {
 	broker *Broker
 }
 
-// ReceiveMessage delivers an inbound message from an external adapter to the
-// office. Phase 2b TODO: resolve binding → channel, write message to broker
-// under h.broker.mu, deduplicate by (AdapterName+Key+ExternalID).
+// ReceiveMessage delivers an inbound message from a channel-bound adapter to
+// the office by calling PostInboundSurfaceMessage. Returns
+// transport.ErrBindingChannelMissing if the declared channel does not exist.
 func (h *brokerTransportHost) ReceiveMessage(_ context.Context, msg transport.Message) error {
-	return fmt.Errorf("transport: ReceiveMessage not yet implemented (phase 2b): adapter=%q",
-		msg.Participant.AdapterName)
+	_, err := h.broker.PostInboundSurfaceMessage(
+		msg.Participant.DisplayName,
+		msg.Binding.ChannelSlug,
+		msg.Text,
+		msg.Participant.AdapterName,
+	)
+	if err != nil {
+		if strings.Contains(err.Error(), "channel not found") {
+			return &transport.BindingChannelMissingError{ChannelSlug: msg.Binding.ChannelSlug}
+		}
+		return fmt.Errorf("transport: ReceiveMessage: %w", err)
+	}
+	return nil
 }
 
-// UpsertParticipant registers or refreshes an external identity in the broker.
-// Phase 2b TODO: look up (p.AdapterName, p.Key) in broker member store.
-func (h *brokerTransportHost) UpsertParticipant(_ context.Context, p transport.Participant, _ transport.Binding) error {
-	return fmt.Errorf("transport: UpsertParticipant not yet implemented (phase 2b): adapter=%q",
-		p.AdapterName)
+// UpsertParticipant is a no-op for channel-bound adapters (Telegram). Channel-
+// bound participant identity is resolved by display name inside
+// PostInboundSurfaceMessage. Phase 3b will add a real member-store lookup for
+// member-bound adapters (OpenClaw).
+func (h *brokerTransportHost) UpsertParticipant(_ context.Context, _ transport.Participant, _ transport.Binding) error {
+	return nil
 }
 
-// DetachParticipant marks a participant as offline. Phase 2b TODO.
+// DetachParticipant marks a participant as offline. Phase 3b TODO for
+// member-bound adapters (OpenClaw).
 func (h *brokerTransportHost) DetachParticipant(_ context.Context, adapterName, _ string) error {
-	return fmt.Errorf("transport: DetachParticipant not yet implemented (phase 2b): adapter=%q",
+	return fmt.Errorf("transport: DetachParticipant not yet implemented (phase 3b): adapter=%q",
 		adapterName)
 }
 
-// RevokeParticipant removes an admitted human from the broker. Phase 4 TODO.
+// RevokeParticipant removes an admitted human from the broker. Phase 4 TODO
+// for office-bound adapters (human-share).
 func (h *brokerTransportHost) RevokeParticipant(_ context.Context, adapterName, _ string) error {
 	return fmt.Errorf("transport: RevokeParticipant not yet implemented (phase 4): adapter=%q",
 		adapterName)
