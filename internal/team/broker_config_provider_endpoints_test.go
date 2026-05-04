@@ -84,7 +84,8 @@ func TestHandleConfigReportsProviderConfiguredSource(t *testing.T) {
 	}
 
 	t.Setenv("WUPHF_LLM_PROVIDER", "")
-	if rec := configRequest(t, b, http.MethodPost, `{"llm_provider":"codex"}`); rec.Code != http.StatusOK {
+	rec = configRequest(t, b, http.MethodPost, `{"llm_provider":"codex"}`)
+	if rec.Code != http.StatusOK {
 		t.Fatalf("POST seed provider: %d %s", rec.Code, rec.Body.String())
 	}
 	rec = configRequest(t, b, http.MethodGet, "")
