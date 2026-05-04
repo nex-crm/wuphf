@@ -20,7 +20,7 @@ describe("messagesAfterClearMarker", () => {
     ]);
   });
 
-  it("keeps messages when the marker is not in the current page", () => {
-    expect(messagesAfterClearMarker(messages, "missing")).toBe(messages);
+  it("keeps the feed cleared when the marker is not in the current page", () => {
+    expect(messagesAfterClearMarker(messages, "missing")).toEqual([]);
   });
 });

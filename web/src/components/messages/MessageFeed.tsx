@@ -31,7 +31,7 @@ export function messagesAfterClearMarker(
 ): Message[] {
   if (!markerId) return messages;
   const markerIndex = messages.findIndex((m) => m.id === markerId);
-  if (markerIndex === -1) return messages;
+  if (markerIndex === -1) return [];
   return messages.slice(markerIndex + 1);
 }
 
