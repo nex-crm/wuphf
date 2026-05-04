@@ -11,6 +11,11 @@ type Route =
   | { view: "channel"; channel: string }
   | { view: "dm"; agent: string }
   | { view: "app"; app: string }
+  | {
+      view: "workbench";
+      agentSlug: string | null;
+      taskId: string | null;
+    }
   | { view: "wiki"; articlePath: string | null }
   | { view: "wiki-lookup"; query: string }
   | { view: "notebooks"; agentSlug: string | null; entrySlug: string | null }
@@ -27,6 +32,13 @@ function parseHash(hash: string): Route {
     return { view: "dm", agent: decodeURIComponent(parts[1]) };
   }
   if (parts[0] === "apps" && parts[1]) {
+    const app = decodeURIComponent(parts[1]);
+    if (app === "workbench") {
+      const agentSlug = parts[2] ? decodeURIComponent(parts[2]) : null;
+      const taskId =
+        parts[3] === "tasks" && parts[4] ? decodeURIComponent(parts[4]) : null;
+      return { view: "workbench", agentSlug, taskId };
+    }
     return { view: "app", app: decodeURIComponent(parts[1]) };
   }
   if (parts[0] === "console") {
@@ -66,6 +78,8 @@ function stateToHash(state: {
   wikiLookupQuery: string | null;
   notebookAgentSlug: string | null;
   notebookEntrySlug: string | null;
+  workbenchAgentSlug: string | null;
+  workbenchTaskId: string | null;
 }): string {
   if (state.currentApp === "wiki-lookup") {
     return state.wikiLookupQuery
@@ -88,6 +102,16 @@ function stateToHash(state: {
   }
   if (state.currentApp === "reviews") {
     return "#/reviews";
+  }
+  if (state.currentApp === "workbench") {
+    const parts = ["apps", "workbench"];
+    if (state.workbenchAgentSlug) {
+      parts.push(encodeURIComponent(state.workbenchAgentSlug));
+      if (state.workbenchTaskId) {
+        parts.push("tasks", encodeURIComponent(state.workbenchTaskId));
+      }
+    }
+    return `#/${parts.join("/")}`;
   }
   if (state.currentApp) {
     return `#/apps/${encodeURIComponent(state.currentApp)}`;
@@ -128,6 +152,9 @@ export function useHashRouter() {
   const notebookAgentSlug = useAppStore((s) => s.notebookAgentSlug);
   const notebookEntrySlug = useAppStore((s) => s.notebookEntrySlug);
   const setNotebookRoute = useAppStore((s) => s.setNotebookRoute);
+  const workbenchAgentSlug = useAppStore((s) => s.workbenchAgentSlug);
+  const workbenchTaskId = useAppStore((s) => s.workbenchTaskId);
+  const setWorkbenchRoute = useAppStore((s) => s.setWorkbenchRoute);
 
   // Avoid ping-ponging: skip the next hashchange or store-sync when we
   // were the one that caused it.
@@ -148,6 +175,8 @@ export function useHashRouter() {
         enterDM(route.agent, directChannelSlug(route.agent));
       } else if (route.view === "app") {
         setCurrentApp(route.app);
+      } else if (route.view === "workbench") {
+        setWorkbenchRoute(route.agentSlug, route.taskId);
       } else if (route.view === "wiki-lookup") {
         setWikiLookupQuery(route.query);
         setCurrentApp("wiki-lookup");
@@ -177,6 +206,7 @@ export function useHashRouter() {
     setWikiPath,
     setWikiLookupQuery,
     setNotebookRoute,
+    setWorkbenchRoute,
   ]);
 
   // Push store changes back into the hash
@@ -193,6 +223,8 @@ export function useHashRouter() {
       wikiLookupQuery,
       notebookAgentSlug,
       notebookEntrySlug,
+      workbenchAgentSlug,
+      workbenchTaskId,
     });
     if (next !== window.location.hash) {
       // replaceState does not emit `hashchange`, so do not arm
@@ -208,5 +240,7 @@ export function useHashRouter() {
     wikiLookupQuery,
     notebookAgentSlug,
     notebookEntrySlug,
+    workbenchAgentSlug,
+    workbenchTaskId,
   ]);
 }
