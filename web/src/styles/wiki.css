@@ -2335,7 +2335,8 @@
   color: #1264a3;
   border: 1px solid rgba(18, 100, 163, 0.3);
 }
-.wk-synthesis-queued {
+.wk-synthesis-queued,
+.wk-prune-verbose {
   background: rgba(108, 79, 198, 0.1);
   color: #6c4fc6;
   border: 1px solid rgba(108, 79, 198, 0.3);

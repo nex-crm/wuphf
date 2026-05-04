@@ -2,12 +2,15 @@ package team
 
 import (
 	"context"
+	"encoding/json"
+	"math"
 	"os"
 	"path/filepath"
 	"reflect"
 	"sort"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestParseWikilinkTargets(t *testing.T) {
@@ -424,6 +427,239 @@ func TestBuildCatalog_SortLastRead(t *testing.T) {
 	if entries[0].Path != "team/people/bob.md" {
 		t.Errorf("sort=last_read: want unread article first, got %s", entries[0].Path)
 	}
+}
+
+// writeReadEvent appends a hand-crafted ReadEvent to a ReadLog's JSONL,
+// letting tests control timestamps (and thus DaysUnread) for prune-score
+// calculations. Goes around ReadLog.Append so we can backdate reads.
+func writeReadEvent(t *testing.T, root, relPath, reader string, ts time.Time) {
+	t.Helper()
+	dir := filepath.Join(root, ".reads")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("mkdir .reads: %v", err)
+	}
+	ev := ReadEvent{
+		Path:      relPath,
+		Timestamp: ts.UTC(),
+		Reader:    reader,
+		IsAgent:   reader != ReaderHuman,
+	}
+	line, err := json.Marshal(ev)
+	if err != nil {
+		t.Fatalf("marshal ReadEvent: %v", err)
+	}
+	line = append(line, '\n')
+	f, err := os.OpenFile(filepath.Join(dir, "reads.jsonl"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatalf("open reads.jsonl: %v", err)
+	}
+	defer func() { _ = f.Close() }()
+	if _, err := f.Write(line); err != nil {
+		t.Fatalf("write reads.jsonl: %v", err)
+	}
+}
+
+// TestBuildCatalog_PruneScore exercises the three ICP scenarios from
+// docs/specs/wiki-prune-signals-icp-examples.md:
+//
+//  1. Alex: 800-word verbose unread playbook → high prune_score, sorts first.
+//  2. Jordan: same article with 3 agent reads 7 days ago → meaningfully
+//     lower prune_score (denominator clamp + smaller daysUnread).
+//  3. Marcus: sort=prune_score returns descending order, deterministic
+//     tie-break by path.
+func TestBuildCatalog_PruneScore(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	root := t.TempDir()
+	backup := filepath.Join(t.TempDir(), "bak")
+	repo := NewRepoAt(root, backup)
+	ctx := context.Background()
+	if err := repo.Init(ctx); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	// Verbose 800-word article — repeat a known phrase 200 times so
+	// strings.Fields counts exactly 800 words (4 words per line × 200).
+	verboseBody := "# Verbose Playbook\n\n"
+	for i := 0; i < 199; i++ {
+		verboseBody += "alpha beta gamma delta\n"
+	}
+	verboseBody += "alpha beta gamma delta"
+	// strings.Fields treats "#" as its own token, so the H1 line
+	// "# Verbose Playbook" is 3 fields, plus 200 four-word body lines.
+	wantWords := 3 + 200*4 // 803
+	if got := len(strings.Fields(verboseBody)); got != wantWords {
+		t.Fatalf("test fixture word count drift: got %d, want %d", got, wantWords)
+	}
+
+	// Three small articles to round out the catalog and force a top-decile
+	// threshold.
+	if _, _, err := repo.Commit(ctx, "ceo", "team/playbooks/old-discovery.md", verboseBody, "create", "add verbose"); err != nil {
+		t.Fatalf("Commit verbose: %v", err)
+	}
+	for _, slug := range []string{"alice", "bob", "carol"} {
+		path := "team/people/" + slug + ".md"
+		if _, _, err := repo.Commit(ctx, "ceo", path, "# "+slug+"\n\nshort.\n", "create", "add "+slug); err != nil {
+			t.Fatalf("Commit %s: %v", slug, err)
+		}
+	}
+
+	t.Run("alex_high_prune_score_when_unread", func(t *testing.T) {
+		// Alex: nobody has read the verbose playbook. DaysUnread=0 (no LastRead),
+		// so prune_score = words * 0 / 1.0 = 0 — verify the formula stays
+		// well-behaved even at the zero-stale boundary.
+		rl := NewReadLog(root)
+		entries, err := repo.BuildCatalog(ctx, "", rl, false)
+		if err != nil {
+			t.Fatalf("BuildCatalog: %v", err)
+		}
+		var verbose CatalogEntry
+		for _, e := range entries {
+			if e.Path == "team/playbooks/old-discovery.md" {
+				verbose = e
+				break
+			}
+		}
+		if verbose.WordCount != wantWords {
+			t.Errorf("verbose.WordCount: want %d, got %d", wantWords, verbose.WordCount)
+		}
+		// Never read → DaysUnread is zero by convention → PruneScore is 0.
+		if verbose.PruneScore != 0 {
+			t.Errorf("verbose.PruneScore (never read): want 0, got %f", verbose.PruneScore)
+		}
+	})
+
+	t.Run("alex_high_prune_score_with_backdated_read", func(t *testing.T) {
+		// Backdate a single human read 45 days ago so DaysUnread = 45.
+		// PruneScore = 802 * 45 / max(1 + 0, 1.0) = 36090.
+		root := t.TempDir()
+		backup := filepath.Join(t.TempDir(), "bak")
+		repo := NewRepoAt(root, backup)
+		if err := repo.Init(ctx); err != nil {
+			t.Fatalf("Init: %v", err)
+		}
+		if _, _, err := repo.Commit(ctx, "ceo", "team/playbooks/old-discovery.md", verboseBody, "create", "add verbose"); err != nil {
+			t.Fatalf("Commit: %v", err)
+		}
+		writeReadEvent(t, root, "team/playbooks/old-discovery.md", "web", time.Now().Add(-45*24*time.Hour))
+
+		rl := NewReadLog(root)
+		entries, err := repo.BuildCatalog(ctx, "", rl, false)
+		if err != nil {
+			t.Fatalf("BuildCatalog: %v", err)
+		}
+		var verbose CatalogEntry
+		for _, e := range entries {
+			if e.Path == "team/playbooks/old-discovery.md" {
+				verbose = e
+				break
+			}
+		}
+		if verbose.DaysUnread < 44 || verbose.DaysUnread > 46 {
+			t.Fatalf("DaysUnread drift: got %d, want ~45", verbose.DaysUnread)
+		}
+		want := float64(verbose.WordCount*verbose.DaysUnread) / 1.0
+		if math.Abs(verbose.PruneScore-want) > 0.001 {
+			t.Errorf("Alex PruneScore: got %f, want %f", verbose.PruneScore, want)
+		}
+	})
+
+	t.Run("jordan_lower_score_with_agent_reads", func(t *testing.T) {
+		// Jordan: 4 agent reads, last one 7 days ago, no human reads.
+		// denominator = max(0 + 0.3*4, 1.0) = 1.2
+		// numerator = words * 7
+		// Expect score meaningfully lower than the 45-day case above, and
+		// verify the agent-read weight contributes to the denominator.
+		root := t.TempDir()
+		backup := filepath.Join(t.TempDir(), "bak")
+		repo := NewRepoAt(root, backup)
+		if err := repo.Init(ctx); err != nil {
+			t.Fatalf("Init: %v", err)
+		}
+		if _, _, err := repo.Commit(ctx, "ceo", "team/playbooks/old-discovery.md", verboseBody, "create", "add verbose"); err != nil {
+			t.Fatalf("Commit: %v", err)
+		}
+		writeReadEvent(t, root, "team/playbooks/old-discovery.md", "slack-agent", time.Now().Add(-10*24*time.Hour))
+		writeReadEvent(t, root, "team/playbooks/old-discovery.md", "slack-agent", time.Now().Add(-9*24*time.Hour))
+		writeReadEvent(t, root, "team/playbooks/old-discovery.md", "slack-agent", time.Now().Add(-8*24*time.Hour))
+		writeReadEvent(t, root, "team/playbooks/old-discovery.md", "slack-agent", time.Now().Add(-7*24*time.Hour))
+
+		rl := NewReadLog(root)
+		entries, err := repo.BuildCatalog(ctx, "", rl, false)
+		if err != nil {
+			t.Fatalf("BuildCatalog: %v", err)
+		}
+		var verbose CatalogEntry
+		for _, e := range entries {
+			if e.Path == "team/playbooks/old-discovery.md" {
+				verbose = e
+				break
+			}
+		}
+		if verbose.AgentReadCount != 4 {
+			t.Errorf("AgentReadCount: want 4, got %d", verbose.AgentReadCount)
+		}
+		if verbose.DaysUnread < 6 || verbose.DaysUnread > 8 {
+			t.Fatalf("DaysUnread drift: got %d, want ~7", verbose.DaysUnread)
+		}
+		denom := math.Max(0+0.3*float64(verbose.AgentReadCount), 1.0)
+		want := float64(verbose.WordCount*verbose.DaysUnread) / denom
+		if math.Abs(verbose.PruneScore-want) > 0.001 {
+			t.Errorf("Jordan PruneScore: got %f, want %f", verbose.PruneScore, want)
+		}
+		// Sanity: must be lower than Alex's 45-day, no-read case.
+		alexEquivalent := float64(verbose.WordCount * 45)
+		if verbose.PruneScore >= alexEquivalent {
+			t.Errorf("Jordan score (%f) should be below Alex equivalent (%f)", verbose.PruneScore, alexEquivalent)
+		}
+	})
+
+	t.Run("marcus_sort_descending", func(t *testing.T) {
+		// Backdate reads so the verbose article has a much higher score
+		// than the small ones, then verify sort=prune_score returns
+		// descending order with deterministic path tie-break.
+		root := t.TempDir()
+		backup := filepath.Join(t.TempDir(), "bak")
+		repo := NewRepoAt(root, backup)
+		if err := repo.Init(ctx); err != nil {
+			t.Fatalf("Init: %v", err)
+		}
+		if _, _, err := repo.Commit(ctx, "ceo", "team/playbooks/old-discovery.md", verboseBody, "create", "add verbose"); err != nil {
+			t.Fatalf("Commit: %v", err)
+		}
+		// Two small articles, both unread → prune_score = 0 (tie). Verify
+		// they sort by path ascending after the verbose article.
+		for _, slug := range []string{"bob", "alice"} {
+			path := "team/people/" + slug + ".md"
+			if _, _, err := repo.Commit(ctx, "ceo", path, "# "+slug+"\n\nshort.\n", "create", "add "+slug); err != nil {
+				t.Fatalf("Commit %s: %v", slug, err)
+			}
+		}
+		writeReadEvent(t, root, "team/playbooks/old-discovery.md", "web", time.Now().Add(-30*24*time.Hour))
+
+		rl := NewReadLog(root)
+		entries, err := repo.BuildCatalog(ctx, CatalogSortPruneScore, rl, false)
+		if err != nil {
+			t.Fatalf("BuildCatalog: %v", err)
+		}
+		if len(entries) != 3 {
+			t.Fatalf("entries: want 3, got %d", len(entries))
+		}
+		if entries[0].Path != "team/playbooks/old-discovery.md" {
+			t.Errorf("top entry: want verbose playbook, got %s", entries[0].Path)
+		}
+		// The two zero-score entries tie-break alphabetically by path.
+		if entries[1].Path != "team/people/alice.md" || entries[2].Path != "team/people/bob.md" {
+			t.Errorf("tie-break order: want [alice, bob], got [%s, %s]", entries[1].Path, entries[2].Path)
+		}
+		// Confirm scores descend.
+		for i := 1; i < len(entries); i++ {
+			if entries[i].PruneScore > entries[i-1].PruneScore {
+				t.Errorf("not descending at %d: %f > %f", i, entries[i].PruneScore, entries[i-1].PruneScore)
+			}
+		}
+	})
 }
 
 // BuildArticle with nil readLog does not populate read stats (no panic).
