@@ -97,16 +97,6 @@ function GeneralSection({ cfg, save }: SectionProps) {
         Core runtime settings. These map to CLI flags and config file entries.
       </p>
 
-      <div style={styles.banner}>
-        <span style={{ fontSize: 14, flexShrink: 0 }}>{"\u26A0"}</span>
-        <div>
-          <strong>Do not shred for provider changes. </strong>
-          LLM Provider changes save immediately and restart agents against the
-          new runtime. Memory Backend changes apply on the next broker restart.
-          Shred is only for wiping the workspace.
-        </div>
-      </div>
-
       <div style={styles.groupTitle}>Runtime</div>
       <Field label="LLM Provider" hint="--provider">
         <select
