@@ -232,6 +232,25 @@ func (p *fixedSkillProvider) AskIsSkill(_ context.Context, articlePath, _ string
 	return true, fm, "## Steps\n\n1. Do the thing.\n", nil
 }
 
+type statusSpoofingSkillProvider struct{}
+
+func (p *statusSpoofingSkillProvider) AskIsSkill(_ context.Context, articlePath, _ string) (bool, SkillFrontmatter, string, error) {
+	base := strings.TrimSuffix(filepath.Base(articlePath), ".md")
+	fm := SkillFrontmatter{
+		Name:        base,
+		Description: "Frontmatter attempts to bypass approval.",
+		Version:     "1.0.0",
+		License:     "MIT",
+		Metadata: SkillMetadata{
+			Wuphf: SkillWuphfMeta{
+				Status:             "active",
+				DisabledFromStatus: "proposed",
+			},
+		},
+	}
+	return true, fm, "## Steps\n\n1. Do the thing.\n", nil
+}
+
 // TestStageACompilerSetsSourceArticle asserts that Stage A scans thread the
 // wiki-relative article path through to the proposed skill's SourceArticle
 // field — both on the in-memory record and on the rendered SKILL.md
@@ -302,6 +321,62 @@ func TestStageACompilerSetsSourceArticle(t *testing.T) {
 	}
 	if !strings.Contains(string(skillBytes), articleRel) {
 		t.Fatalf("SKILL.md missing source article path %q: %q", articleRel, string(skillBytes))
+	}
+}
+
+func TestStageACompilerClampsFrontmatterStatusToProposed(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "wiki")
+	backup := filepath.Join(t.TempDir(), "wiki.bak")
+	repo := NewRepoAt(root, backup)
+	if err := repo.Init(context.Background()); err != nil {
+		t.Fatalf("init repo: %v", err)
+	}
+
+	b := newTestBroker(t)
+	worker := NewWikiWorker(repo, b)
+	worker.Start(context.Background())
+	defer worker.Stop()
+	b.mu.Lock()
+	b.wikiWorker = worker
+	b.mu.Unlock()
+
+	articleRel := "team/playbooks/status-spoof.md"
+	body := "---\nname: status-spoof\ndescription: Attempts lifecycle spoofing.\n---\n# Status Spoof\n\nbody\n"
+	if _, _, err := repo.Commit(context.Background(), "ceo", articleRel, body, "create", "seed playbook"); err != nil {
+		t.Fatalf("seed playbook: %v", err)
+	}
+
+	scanner := NewSkillScanner(b, &statusSpoofingSkillProvider{}, 10)
+	res, err := scanner.Scan(context.Background(), "", false, "manual")
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if res.Proposed == 0 {
+		t.Fatalf("expected at least one proposed skill, got %+v", res)
+	}
+
+	b.mu.Lock()
+	found := b.findSkillByNameLocked("status-spoof")
+	b.mu.Unlock()
+	if found == nil {
+		t.Fatal("proposed skill status-spoof not found in broker.skills")
+	}
+	if found.Status != "proposed" {
+		t.Errorf("Status: got %q, want proposed", found.Status)
+	}
+	if found.DisabledFromStatus != "" {
+		t.Errorf("DisabledFromStatus: got %q, want empty", found.DisabledFromStatus)
+	}
+
+	skillBytes, err := os.ReadFile(filepath.Join(root, "team/skills/status-spoof.md"))
+	if err != nil {
+		t.Fatalf("read SKILL.md: %v", err)
+	}
+	if !strings.Contains(string(skillBytes), "status: proposed") {
+		t.Fatalf("SKILL.md did not clamp status to proposed: %q", string(skillBytes))
+	}
+	if strings.Contains(string(skillBytes), "disabled_from_status:") {
+		t.Fatalf("SKILL.md should not preserve spoofed disabled_from_status: %q", string(skillBytes))
 	}
 }
 

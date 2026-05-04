@@ -83,6 +83,11 @@ function askPrefix(leadSlug: string | undefined): string {
   return `@${slug} `;
 }
 
+function unknownSlashCommandMessage(command: string): string {
+  const name = command.trim().split(/\s+/)[0] || "/";
+  return `Unknown command: ${name}. Try /help.`;
+}
+
 /** Pick the team-lead slug: configured first, else first built-in agent, else 'ceo'. */
 function resolveLeadSlug(
   configured: string | undefined,
@@ -361,7 +366,8 @@ function handleSlashCommand(input: string, handlers: SlashHandlers): boolean {
       return true;
     }
     default:
-      return false;
+      showNotice(unknownSlashCommandMessage(cmd), "info");
+      return true;
   }
 }
 
@@ -760,6 +766,8 @@ export const __test__ = {
   readHistory,
   writeHistory,
   pushHistory,
+  unknownSlashCommandMessage,
+  handleSlashCommand,
   resolveLeadSlug,
   askPrefix,
   latestMessageIdFromQueryData,

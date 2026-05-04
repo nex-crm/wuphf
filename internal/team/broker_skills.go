@@ -60,6 +60,19 @@ func (b *Broker) findSkillByNameLocked(name string) *teamSkill {
 	return nil
 }
 
+// findSkillByNameIncludingArchivedLocked is the archive-aware sibling of
+// findSkillByNameLocked. It exists so /skills/{name}/restore can locate a
+// skill that the regular lookup intentionally hides. Caller holds b.mu.
+func (b *Broker) findSkillByNameIncludingArchivedLocked(name string) *teamSkill {
+	slug := skillSlug(name)
+	for i := range b.skills {
+		if skillSlug(b.skills[i].Name) == slug {
+			return &b.skills[i]
+		}
+	}
+	return nil
+}
+
 // allocateSkillIDLocked mints a new skill ID derived from the name's slug.
 // If the bare slug-based ID already exists in the broker (active OR archived),
 // a numeric discriminator is appended so create→archive→create cycles can't

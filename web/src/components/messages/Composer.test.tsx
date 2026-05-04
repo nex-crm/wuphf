@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Message } from "../../api/client";
+import * as Toast from "../ui/Toast";
 import { __test__ } from "./Composer";
 
 const {
@@ -8,6 +9,8 @@ const {
   readHistory,
   pushHistory,
   resolveLeadSlug,
+  unknownSlashCommandMessage,
+  handleSlashCommand,
   askPrefix,
   latestMessageIdFromQueryData,
   emptyMessagesQueryData,
@@ -117,5 +120,30 @@ describe("/clear query helpers", () => {
       messages: [],
       extra: "kept",
     });
+  });
+});
+
+describe("unknown slash commands", () => {
+  it("names the command and points to help", () => {
+    expect(unknownSlashCommandMessage("/object list")).toBe(
+      "Unknown command: /object. Try /help.",
+    );
+  });
+
+  it("are consumed instead of sent as chat messages", () => {
+    const sendAsMessage = vi.fn();
+    const showNotice = vi.spyOn(Toast, "showNotice").mockReturnValue();
+
+    const consumed = handleSlashCommand("/object list", {
+      leadSlug: "ceo",
+      sendAsMessage,
+    });
+
+    expect(consumed).toBe(true);
+    expect(sendAsMessage).not.toHaveBeenCalled();
+    expect(showNotice).toHaveBeenCalledWith(
+      "Unknown command: /object. Try /help.",
+      "info",
+    );
   });
 });
