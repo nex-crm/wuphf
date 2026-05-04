@@ -191,13 +191,10 @@ func (l *Launcher) launchHeadlessCodex() error {
 	if err := l.broker.SetSessionMode(l.sessionMode, l.oneOnOne); err != nil {
 		return fmt.Errorf("set session mode: %w", err)
 	}
-	// SetFocusMode + default-skill seed mirror Launch() so that the
-	// broker's focus-mode predicate (used by isFocusModeEnabled) and
-	// the productivity skill set are wired before the broker becomes
-	// reachable. Pre-fix headless launches missed both, leaving
-	// isFocusModeEnabled stuck on l.focusMode regardless of broker
-	// state and the cross-cutting productivity skills (grill-me, tdd,
-	// diagnose) absent.
+	// SetFocusMode mirrors Launch() so that the broker's focus-mode
+	// predicate (used by isFocusModeEnabled) is wired before the broker
+	// becomes reachable. Pre-fix headless launches missed this, leaving
+	// isFocusModeEnabled stuck on l.focusMode regardless of broker state.
 	if err := l.broker.SetFocusMode(l.focusMode); err != nil {
 		return fmt.Errorf("set focus mode: %w", err)
 	}
