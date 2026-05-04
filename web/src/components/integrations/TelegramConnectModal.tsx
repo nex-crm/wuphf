@@ -350,6 +350,14 @@ export function TelegramConnectModal({
               {botName ? `Bot: ${botName}. ` : ""}How do you want to use this
               bot?
             </p>
+            {error && (
+              <div
+                className="wk-editor-banner wk-editor-banner--error"
+                role="alert"
+              >
+                {error}
+              </div>
+            )}
             <div className="wk-editor-actions" style={{ flexDirection: "column", alignItems: "stretch" }}>
               <button
                 type="button"
