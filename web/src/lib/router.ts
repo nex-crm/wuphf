@@ -107,11 +107,11 @@ export const routeTree = rootRoute.addChildren([
 ]);
 
 export function createAppRouter(history: RouterHistory = createHashHistory()) {
-  return createRouter({
-    routeTree,
-    history,
-    defaultPreload: "intent",
-  });
+  // No `defaultPreload`: route panels are React.lazy-loaded and
+  // TanStack's preload-on-intent only preloads route loaders, of which
+  // we have none. Including it would imply hover-preload of the lazy
+  // chunks, which it does not do — chunks load on render.
+  return createRouter({ routeTree, history });
 }
 
 export const router = createAppRouter();

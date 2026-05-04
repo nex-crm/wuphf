@@ -91,7 +91,11 @@ const ROUTE_DERIVERS: Record<string, RouteDeriver> = {
   [reviewsRoute.id]: () => ({ kind: "reviews" }),
 };
 
-function deriveCurrentRoute(
+/**
+ * Pure URL→state dispatch. Exported for unit tests so we can pin the
+ * shape per-route without spinning up a full RouterProvider.
+ */
+export function deriveCurrentRoute(
   routeId: string,
   params: ParamsShape,
   search: SearchShape,
@@ -148,7 +152,15 @@ export function useCurrentApp(): string | null {
       return "notebooks";
     case "reviews":
       return "reviews";
-    default:
+    case "channel":
+    case "dm":
+    case "unknown":
       return null;
+    default: {
+      // Exhaustiveness check — see MainContent's matching switch.
+      const _exhaustive: never = route;
+      void _exhaustive;
+      return null;
+    }
   }
 }

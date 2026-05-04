@@ -125,6 +125,38 @@ describe("useBrokerEvents unread counts", () => {
     expect(useAppStore.getState().unreadByChannel.general).toBe(1);
   });
 
+  it("suppresses unread for the canonical DM channel slug while viewing /dm/<agent>", () => {
+    // The hook hashes /dm/<agent> through directChannelSlug to get the
+    // broker's canonical "<lower>__<higher>" pairing — matching what
+    // the broker emits on `message`. This regression-pins that mapping
+    // for both ordering directions.
+    navigateRouter("/dm/pm");
+    renderHarness();
+    const [source] = FakeEventSource.created;
+
+    act(() => {
+      source.emit("message", {
+        message: { id: "msg-1", channel: "human__pm" },
+      });
+    });
+
+    expect(useAppStore.getState().unreadByChannel.human__pm ?? 0).toBe(0);
+  });
+
+  it("suppresses unread for /dm/<agent> when the agent slug sorts after `human`", () => {
+    navigateRouter("/dm/ceo");
+    renderHarness();
+    const [source] = FakeEventSource.created;
+
+    act(() => {
+      source.emit("message", {
+        message: { id: "msg-1", channel: "ceo__human" },
+      });
+    });
+
+    expect(useAppStore.getState().unreadByChannel.ceo__human ?? 0).toBe(0);
+  });
+
   it("ignores message events without a channel", () => {
     renderHarness();
     const [source] = FakeEventSource.created;

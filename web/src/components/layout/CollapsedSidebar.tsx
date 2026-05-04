@@ -31,8 +31,12 @@ import { getUsage } from "../../api/platform";
 import { SIDEBAR_APPS } from "../../lib/constants";
 import { formatTokens, formatUSD } from "../../lib/format";
 import { router } from "../../lib/router";
+import { WIKI_SURFACE_APP_IDS } from "../../routes/routeRegistry";
 import { useCurrentApp } from "../../routes/useCurrentRoute";
 import { useAppStore } from "../../stores/app";
+
+const WIKI_SURFACE_APPS = new Set<string>(WIKI_SURFACE_APP_IDS);
+
 import { AgentList } from "../sidebar/AgentList";
 import { ChannelList } from "../sidebar/ChannelList";
 
@@ -176,9 +180,7 @@ export function CollapsedSidebar() {
           // since those three share the Wiki app shell via tabs.
           const isActive =
             app.id === "wiki"
-              ? currentApp === "wiki" ||
-                currentApp === "notebooks" ||
-                currentApp === "reviews"
+              ? WIKI_SURFACE_APPS.has(currentApp ?? "")
               : currentApp === app.id;
           return (
             <button

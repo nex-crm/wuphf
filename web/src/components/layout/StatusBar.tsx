@@ -49,8 +49,14 @@ export function StatusBar() {
         return "notebooks";
       case "reviews":
         return "reviews";
-      default:
+      case "unknown":
         return "";
+      default: {
+        // Exhaustiveness check — see MainContent's matching switch.
+        const _exhaustive: never = route;
+        void _exhaustive;
+        return "";
+      }
     }
   })();
   const modeLabel = dm ? "1:1" : "office";

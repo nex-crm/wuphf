@@ -1,21 +1,25 @@
 import { useEffect, useRef } from "react";
 
 import { useMessages } from "../../hooks/useMessages";
-import { useCurrentRoute } from "../../routes/useCurrentRoute";
 import { AgentTerminal } from "../agents/AgentTerminal";
 import { Composer } from "./Composer";
 import { InterviewBar } from "./InterviewBar";
 import { MessageBubble } from "./MessageBubble";
 import { TypingIndicator } from "./TypingIndicator";
 
-export function DMView() {
-  // DMView only mounts under MainContent's `dm` branch in RootRoute, so
-  // a non-DM route shape here is a programming error rather than a
-  // user-reachable state. The "" fallbacks below keep hook order stable
-  // before the kind-check guard renders null.
-  const route = useCurrentRoute();
-  const dmAgentSlug = route.kind === "dm" ? route.agentSlug : "";
-  const channelSlug = route.kind === "dm" ? route.channelSlug : "";
+interface DMViewProps {
+  agentSlug: string;
+  channelSlug: string;
+}
+
+/**
+ * DMView is rendered only when MainContent's route dispatch matches the
+ * `dm` kind. Receiving the agent + channel slugs as props keeps the
+ * route discrimination in one place — and prevents an empty channel
+ * slug from ever reaching useMessages, which would issue a real broker
+ * request for `["messages", ""]`.
+ */
+export function DMView({ agentSlug, channelSlug }: DMViewProps) {
   const { data: messages = [] } = useMessages(channelSlug);
   const messagesRef = useRef<HTMLDivElement>(null);
 
@@ -25,8 +29,6 @@ export function DMView() {
       messagesRef.current.scrollTop = messagesRef.current.scrollHeight;
     }
   }, []);
-
-  if (route.kind !== "dm") return null;
 
   return (
     <>
@@ -62,7 +64,7 @@ export function DMView() {
             overflow: "hidden",
           }}
         >
-          <AgentTerminal slug={dmAgentSlug} title="Live output" />
+          <AgentTerminal slug={agentSlug} title="Live output" />
         </div>
       </div>
     </>

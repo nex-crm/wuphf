@@ -7,7 +7,7 @@ import {
   useEffect,
   useState,
 } from "react";
-import { Outlet, useMatches } from "@tanstack/react-router";
+import { Outlet, useMatches, useRouterState } from "@tanstack/react-router";
 
 import { get, initApi } from "../api/client";
 import { TelegramConnectHost } from "../components/integrations/TelegramConnectModal";
@@ -374,7 +374,9 @@ function MainContent() {
     case "channel":
       return <ConversationView />;
     case "dm":
-      return <DMView />;
+      return (
+        <DMView agentSlug={route.agentSlug} channelSlug={route.channelSlug} />
+      );
     case "app":
       return <AppPanel appId={route.appId} />;
     case "wiki":
@@ -395,10 +397,20 @@ function MainContent() {
       return <WikiSurface current="notebooks" route={route} />;
     case "reviews":
       return <WikiSurface current="reviews" route={route} />;
-    default:
-      // unknown route — handled by RoutedBody/NotFoundSurface, but
-      // return null defensively if something slips through.
+    case "unknown":
+      // Handled by RoutedBody/NotFoundSurface; reaching here means the
+      // not-found check upstream didn't catch a root-only match. Return
+      // null defensively rather than render stale content.
       return null;
+    default: {
+      // Exhaustiveness check: if a new CurrentRoute kind is added
+      // without a case here, TypeScript flags this assignment as the
+      // wider `never` not being assignable, forcing the dispatch to be
+      // updated alongside the union.
+      const _exhaustive: never = route;
+      void _exhaustive;
+      return null;
+    }
   }
 }
 
@@ -441,8 +453,12 @@ function NotFoundSurface({ pathname }: { pathname: string }) {
 function RoutedBody() {
   const matches = useMatches();
   const leaf = matches.at(-1);
+  // useRouterState makes the pathname read reactive: a future refactor
+  // that decouples useMatches from URL changes won't silently leave
+  // NotFoundSurface showing a stale path.
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
   if (isUnmatchedRoute(leaf?.routeId)) {
-    return <NotFoundSurface pathname={router.state.location.pathname} />;
+    return <NotFoundSurface pathname={pathname} />;
   }
   return (
     <Suspense fallback={<LazyPanelFallback />}>

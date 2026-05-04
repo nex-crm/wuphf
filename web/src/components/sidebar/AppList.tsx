@@ -22,6 +22,7 @@ import { fetchReviews } from "../../api/notebook";
 import { useOverflow } from "../../hooks/useOverflow";
 import { SIDEBAR_APPS } from "../../lib/constants";
 import { router } from "../../lib/router";
+import { WIKI_SURFACE_APP_IDS } from "../../routes/routeRegistry";
 import { useChannelSlug, useCurrentApp } from "../../routes/useCurrentRoute";
 
 // Sidebar app id → typed router target. The "wiki" sidebar entry routes to
@@ -40,7 +41,7 @@ function navigateToSidebarApp(appId: string): void {
 
 // Notebooks and reviews render inside the Wiki app shell via tabs, so the
 // 'Wiki' sidebar entry lights up for any of those three currentApp values.
-const WIKI_SURFACE_APPS = new Set(["wiki", "notebooks", "reviews"]);
+const WIKI_SURFACE_APPS = new Set<string>(WIKI_SURFACE_APP_IDS);
 
 const APP_ICONS: Record<string, ComponentType<{ className?: string }>> = {
   studio: Play,

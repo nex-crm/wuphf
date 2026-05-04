@@ -53,80 +53,58 @@ export const ROUTE_PATHS = {
 
 export type RouteKey = keyof typeof ROUTE_PATHS;
 
+/**
+ * Route → URL params it carries. Used to document the URL contract for
+ * each route so a contributor reading the registry can see at a glance
+ * what a route's URL is responsible for. Replaces the old `owns` field
+ * which referenced Zustand store slots that no longer exist.
+ */
 export interface RouteContract {
   key: RouteKey;
   path: (typeof ROUTE_PATHS)[RouteKey];
-  owns: readonly string[];
-  legacyHashExamples: readonly string[];
+  /** URL-derived params for this route; empty when the route has none. */
+  params: readonly string[];
+  /** URL-derived search params for this route; empty when none. */
+  search: readonly string[];
 }
 
 export const ROUTE_CONTRACTS: readonly RouteContract[] = [
-  {
-    key: "index",
-    path: ROUTE_PATHS.index,
-    owns: ["default-route"],
-    legacyHashExamples: ["#/channels/general"],
-  },
+  { key: "index", path: ROUTE_PATHS.index, params: [], search: [] },
   {
     key: "channel",
     path: ROUTE_PATHS.channel,
-    owns: ["currentChannel"],
-    legacyHashExamples: ["#/channels/general", "#/channels/launch"],
+    params: ["channelSlug"],
+    search: [],
   },
-  {
-    key: "dm",
-    path: ROUTE_PATHS.dm,
-    owns: ["dmAgentSlug"],
-    legacyHashExamples: ["#/dm/pm"],
-  },
-  {
-    key: "app",
-    path: ROUTE_PATHS.app,
-    owns: ["currentApp"],
-    legacyHashExamples: ["#/apps/tasks", "#/apps/settings"],
-  },
-  {
-    key: "wiki",
-    path: ROUTE_PATHS.wiki,
-    owns: ["wikiPath"],
-    legacyHashExamples: ["#/wiki"],
-  },
+  { key: "dm", path: ROUTE_PATHS.dm, params: ["agentSlug"], search: [] },
+  { key: "app", path: ROUTE_PATHS.app, params: ["appId"], search: [] },
+  { key: "wiki", path: ROUTE_PATHS.wiki, params: [], search: [] },
   {
     key: "wikiLookup",
     path: ROUTE_PATHS.wikiLookup,
-    owns: ["wikiLookupQuery"],
-    legacyHashExamples: ["#/wiki/lookup?q=renewal"],
+    params: [],
+    search: ["q"],
   },
   {
     key: "wikiArticle",
     path: ROUTE_PATHS.wikiArticle,
-    owns: ["wikiPath"],
-    legacyHashExamples: ["#/wiki/companies/acme"],
+    params: ["_splat"],
+    search: [],
   },
-  {
-    key: "notebooks",
-    path: ROUTE_PATHS.notebooks,
-    owns: ["notebookAgentSlug", "notebookEntrySlug"],
-    legacyHashExamples: ["#/notebooks"],
-  },
+  { key: "notebooks", path: ROUTE_PATHS.notebooks, params: [], search: [] },
   {
     key: "notebookAgent",
     path: ROUTE_PATHS.notebookAgent,
-    owns: ["notebookAgentSlug"],
-    legacyHashExamples: ["#/notebooks/pm"],
+    params: ["agentSlug"],
+    search: [],
   },
   {
     key: "notebookEntry",
     path: ROUTE_PATHS.notebookEntry,
-    owns: ["notebookAgentSlug", "notebookEntrySlug"],
-    legacyHashExamples: ["#/notebooks/pm/handoff"],
+    params: ["agentSlug", "entrySlug"],
+    search: [],
   },
-  {
-    key: "reviews",
-    path: ROUTE_PATHS.reviews,
-    owns: ["currentApp"],
-    legacyHashExamples: ["#/reviews"],
-  },
+  { key: "reviews", path: ROUTE_PATHS.reviews, params: [], search: [] },
 ] as const;
 
 export const SIDEBAR_APP_IDS = SIDEBAR_APPS.map((app) => app.id);

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { directChannelSlug, isDMChannel, useAppStore } from "./app";
+import { directChannelSlug, useAppStore } from "./app";
 
 afterEach(() => {
   useAppStore.setState({
@@ -17,16 +17,12 @@ afterEach(() => {
 });
 
 describe("DM channel helpers", () => {
-  it("uses the broker canonical direct slug", () => {
+  it("uses the broker canonical direct slug for both ordering directions", () => {
+    // Lower lexicographic side comes first; this is what the broker
+    // expects on /dm endpoints and what useBrokerEvents matches against
+    // when suppressing unread for the active DM.
     expect(directChannelSlug("ceo")).toBe("ceo__human");
     expect(directChannelSlug("pm")).toBe("human__pm");
-  });
-
-  it("recognizes canonical and legacy DM slugs", () => {
-    expect(isDMChannel("ceo__human", {})).toEqual({ agentSlug: "ceo" });
-    expect(isDMChannel("human__pm", {})).toEqual({ agentSlug: "pm" });
-    expect(isDMChannel("dm-ceo", {})).toEqual({ agentSlug: "ceo" });
-    expect(isDMChannel("dm-human-ceo", {})).toEqual({ agentSlug: "ceo" });
   });
 
   it("resets non-route session state for a shred flow", () => {

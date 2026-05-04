@@ -57,16 +57,11 @@ function persistSidebarSections(state: SidebarSectionsState): void {
   } catch {}
 }
 
-export interface ChannelMeta {
-  type: "O" | "D" | "G";
-  name?: string;
-  members?: string[];
-  agentSlug?: string;
-}
-
-const LEGACY_DM_SLUG_PREFIX = "dm-";
-const BROKEN_DM_SLUG_PREFIX = "dm-human-";
-
+/**
+ * Build the broker's canonical direct-message channel slug for an agent.
+ * The broker pairs `<lower>__<higher>` for stable ordering across sides;
+ * we pass `humanSlug="human"` to match what `/dm` API endpoints expect.
+ */
 export function directChannelSlug(
   agentSlug: string,
   humanSlug = "human",
@@ -76,49 +71,10 @@ export function directChannelSlug(
   return a > b ? `${b}__${a}` : `${a}__${b}`;
 }
 
-function agentFromDirectSlug(slug: string): string | null {
-  const parts = slug.split("__");
-  if (parts.length !== 2) return null;
-  if (parts[0] === "human" || parts[0] === "you") return parts[1] || null;
-  if (parts[1] === "human" || parts[1] === "you") return parts[0] || null;
-  return null;
-}
-
-/**
- * Resolve a channel slug into DM info, or null if not a DM.
- *
- * Prefers explicit channelMeta (written by enterDM), falls back to the
- * server's canonical `<agent>__human` convention plus both legacy `dm-*`
- * spellings so deep-links and page reloads still classify DMs correctly
- * before metadata is hydrated.
- */
-export function isDMChannel(
-  slug: string,
-  meta: Record<string, ChannelMeta>,
-): { agentSlug: string } | null {
-  const m = meta[slug];
-  if (m?.type === "D" && m.agentSlug) return { agentSlug: m.agentSlug };
-  const directAgent = agentFromDirectSlug(slug);
-  if (directAgent) return { agentSlug: directAgent };
-  if (slug.startsWith(BROKEN_DM_SLUG_PREFIX)) {
-    return { agentSlug: slug.slice(BROKEN_DM_SLUG_PREFIX.length) };
-  }
-  if (slug.startsWith(LEGACY_DM_SLUG_PREFIX)) {
-    return { agentSlug: slug.slice(LEGACY_DM_SLUG_PREFIX.length) };
-  }
-  return null;
-}
-
 export interface AppStore {
   // Connection
   brokerConnected: boolean;
   setBrokerConnected: (v: boolean) => void;
-
-  // Channel metadata (DM info, etc.). Kept in the store because broker
-  // events backfill it asynchronously; navigation, however, is driven
-  // exclusively by the URL — see web/src/routes/useCurrentRoute.ts.
-  channelMeta: Record<string, ChannelMeta>;
-  setChannelMeta: (slug: string, meta: ChannelMeta) => void;
 
   // Theme
   theme: Theme;
@@ -192,10 +148,6 @@ export interface AppStore {
 export const useAppStore = create<AppStore>((set, get) => ({
   brokerConnected: false,
   setBrokerConnected: (v) => set({ brokerConnected: v }),
-
-  channelMeta: {},
-  setChannelMeta: (slug, meta) =>
-    set({ channelMeta: { ...get().channelMeta, [slug]: meta } }),
 
   theme: _storedTheme,
   setTheme: (t) => {

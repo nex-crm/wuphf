@@ -9,8 +9,52 @@ import { useDefaultHarness } from "../../hooks/useConfig";
 import { useChannelMembers, useOfficeMembers } from "../../hooks/useMembers";
 import { resolveHarness } from "../../lib/harness";
 import { router } from "../../lib/router";
-import { useChannelSlug, useCurrentRoute } from "../../routes/useCurrentRoute";
+import {
+  type CurrentRoute,
+  useChannelSlug,
+  useCurrentRoute,
+} from "../../routes/useCurrentRoute";
 import { useAppStore } from "../../stores/app";
+
+/**
+ * Stable identity key for the AgentPanel "close on route change" effect.
+ * Uses an explicit per-kind key instead of JSON.stringify(route) so
+ * adding a new CurrentRoute kind that includes a non-string field can't
+ * silently produce an unstable serialization (and the exhaustiveness
+ * check forces the maintainer to update this helper).
+ */
+function routeIdentityKey(route: CurrentRoute): string {
+  switch (route.kind) {
+    case "channel":
+      return `channel:${route.channelSlug}`;
+    case "dm":
+      return `dm:${route.agentSlug}`;
+    case "app":
+      return `app:${route.appId}`;
+    case "wiki":
+      return "wiki";
+    case "wiki-article":
+      return `wiki-article:${route.articlePath}`;
+    case "wiki-lookup":
+      return `wiki-lookup:${route.query ?? ""}`;
+    case "notebook-catalog":
+      return "notebook-catalog";
+    case "notebook-agent":
+      return `notebook-agent:${route.agentSlug}`;
+    case "notebook-entry":
+      return `notebook-entry:${route.agentSlug}/${route.entrySlug}`;
+    case "reviews":
+      return "reviews";
+    case "unknown":
+      return "unknown";
+    default: {
+      const _exhaustive: never = route;
+      void _exhaustive;
+      return "unknown";
+    }
+  }
+}
+
 import { confirm } from "../ui/ConfirmDialog";
 import { HarnessBadge } from "../ui/HarnessBadge";
 import { PixelAvatar } from "../ui/PixelAvatar";
@@ -124,16 +168,11 @@ function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
 
   async function handleOpenDM() {
     setDmLoading(true);
-    // Snapshot the current location so we can revert on broker error. We
-    // hold the raw href and replay it via router.history.push (not
-    // router.navigate({to}), which expects a route-template path —
-    // passing a concrete href would fail to resolve, especially for
-    // /wiki/lookup?q=… etc.).
-    const prevHref = router.state.location.href;
-    const optimisticHref = router.buildLocation({
-      to: "/dm/$agentSlug",
-      params: { agentSlug: agent.slug },
-    }).href;
+    // Optimistic navigation: take the user to the DM immediately. If
+    // createDM fails we surface a toast and let the user act — we do
+    // not auto-revert. An earlier href-equality guard couldn't tell
+    // whether the user had since back-navigated to the same DM
+    // intentionally, and stomped legit navigation in long-tail timing.
     void router.navigate({
       to: "/dm/$agentSlug",
       params: { agentSlug: agent.slug },
@@ -143,13 +182,6 @@ function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
       await createDM(agent.slug);
       void queryClient.invalidateQueries({ queryKey: ["channels"] });
     } catch (err: unknown) {
-      // Only revert if the user hasn't already navigated elsewhere.
-      // Don't re-open the panel on error — the toast tells the user what
-      // happened, and re-opening a panel they may have intentionally
-      // closed during the in-flight request is surprising.
-      if (router.state.location.href === optimisticHref) {
-        router.history.push(prevHref);
-      }
       const message = err instanceof Error ? err.message : "Failed to open DM";
       showNotice(message, "error");
     } finally {
@@ -382,10 +414,11 @@ export function AgentPanel() {
 
   // Close when the user navigates to a different surface. The intent is
   // "nav away from the agent panel" — driven by route changes, NOT by
-  // activeAgentSlug itself (which would close on every open). Using a
-  // route-id + serialized-params dep matches what URL→store edges
-  // previously gave us via currentChannel / currentApp.
-  const routeKey = `${route.kind}:${JSON.stringify(route)}`;
+  // activeAgentSlug itself (which would close on every open). The
+  // identity key is per-kind explicit (not JSON-stringified) so adding
+  // a non-string field to CurrentRoute can't silently produce a churning
+  // serialization that closes the panel mid-interaction.
+  const routeKey = routeIdentityKey(route);
   useEffect(() => {
     void routeKey;
     close();
