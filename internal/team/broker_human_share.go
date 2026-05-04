@@ -268,6 +268,25 @@ func (b *Broker) revokeHumanSession(id string) error {
 	return errors.New("session not found")
 }
 
+func (b *Broker) humanSessionIDActive(id string) bool {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return false
+	}
+	now := time.Now().UTC()
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for i := range b.humanSessions {
+		session := &b.humanSessions[i]
+		if session.ID != id || session.RevokedAt != "" {
+			continue
+		}
+		expiresAt := sessionExpiresAt(*session)
+		return expiresAt.IsZero() || now.Before(expiresAt)
+	}
+	return false
+}
+
 func (b *Broker) humanSessionFromRequest(r *http.Request) (humanSession, bool) {
 	cookie, err := r.Cookie(humanSessionCookie)
 	if err != nil {

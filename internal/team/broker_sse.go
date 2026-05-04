@@ -65,7 +65,17 @@ func (b *Broker) handleEvents(w http.ResponseWriter, r *http.Request) {
 	pamStarted, pamDone, pamFailed, unsubscribePam := b.SubscribePamActionEvents(64)
 	defer unsubscribePam()
 
+	actorStillAuthorized := func() bool {
+		if actor.Kind != requestActorKindHuman {
+			return true
+		}
+		return b.humanSessionIDActive(actor.SessionID)
+	}
+
 	writeEvent := func(name string, payload any) error {
+		if !actorStillAuthorized() {
+			return fmt.Errorf("human session revoked")
+		}
 		data, err := json.Marshal(payload)
 		if err != nil {
 			return err
@@ -151,6 +161,9 @@ func (b *Broker) handleEvents(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		case <-heartbeat.C:
+			if !actorStillAuthorized() {
+				return
+			}
 			if _, err := fmt.Fprintf(w, ": ping\n\n"); err != nil {
 				return
 			}

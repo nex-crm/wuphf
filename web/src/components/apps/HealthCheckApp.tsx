@@ -387,12 +387,14 @@ function BrokerStatusCard({
 
 function TeamMemberSessions({
   isHost,
+  isRevokingSession,
   onRevokeSession,
   revokeError,
   revokingSessionID,
   sessions,
 }: {
   isHost: boolean;
+  isRevokingSession: boolean;
   onRevokeSession: (sessionID: string) => void;
   revokeError?: string;
   revokingSessionID?: string;
@@ -416,26 +418,29 @@ function TeamMemberSessions({
       {!isHost ? (
         <EmptyCard>Team-member session visibility is host-only.</EmptyCard>
       ) : sessions.length > 0 ? (
-        sessions.map((session) => (
-          <StatusRow
-            key={session.id}
-            action={
-              <button
-                className="btn btn-secondary btn-sm"
-                type="button"
-                onClick={() => onRevokeSession(session.id)}
-                disabled={revokingSessionID === session.id}
-              >
-                {revokingSessionID === session.id
-                  ? "Disconnecting"
-                  : "Disconnect"}
-              </button>
-            }
-            active={true}
-            label={session.display_name || session.human_slug}
-            value={`Last seen ${formatSessionTime(session.last_seen_at)} · expires ${formatSessionTime(session.expires_at)}`}
-          />
-        ))
+        sessions.map((session) => {
+          const isThisSessionRevoking =
+            isRevokingSession && revokingSessionID === session.id;
+          return (
+            <StatusRow
+              key={session.id}
+              action={
+                <button
+                  aria-label={`Disconnect ${session.display_name || session.human_slug}`}
+                  className="btn btn-secondary btn-sm"
+                  type="button"
+                  onClick={() => onRevokeSession(session.id)}
+                  disabled={isThisSessionRevoking}
+                >
+                  {isThisSessionRevoking ? "Disconnecting" : "Disconnect"}
+                </button>
+              }
+              active={true}
+              label={session.display_name || session.human_slug}
+              value={`Last seen ${formatSessionTime(session.last_seen_at)} · expires ${formatSessionTime(session.expires_at)}`}
+            />
+          );
+        })
       ) : (
         <EmptyCard>No active team-member browser sessions.</EmptyCard>
       )}
@@ -747,6 +752,7 @@ export function HealthCheckApp() {
       <BrokerStatusCard isHealthy={isHealthy} status={status} />
       <TeamMemberSessions
         isHost={isHost}
+        isRevokingSession={revokeSessionMutation.isPending}
         onRevokeSession={revokeSession}
         revokeError={revokeSessionError}
         revokingSessionID={revokeSessionMutation.variables}

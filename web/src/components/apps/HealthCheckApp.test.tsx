@@ -133,7 +133,7 @@ describe("HealthCheckApp access and sharing", () => {
     render(wrap(<HealthCheckApp />));
 
     await screen.findByText("Tara");
-    await user.click(screen.getByRole("button", { name: "Disconnect" }));
+    await user.click(screen.getByRole("button", { name: "Disconnect Tara" }));
 
     await waitFor(() =>
       expect(revokeHumanSessionMock).toHaveBeenCalledWith("session-1"),
@@ -143,6 +143,20 @@ describe("HealthCheckApp access and sharing", () => {
         screen.getByText("No active team-member browser sessions."),
       ).toBeInTheDocument(),
     );
+  });
+
+  it("keeps the disconnect action available after a failed revoke", async () => {
+    revokeHumanSessionMock.mockRejectedValueOnce(new Error("network down"));
+    const user = userEvent.setup();
+    render(wrap(<HealthCheckApp />));
+
+    await screen.findByText("Tara");
+    await user.click(screen.getByRole("button", { name: "Disconnect Tara" }));
+
+    expect(await screen.findByText("network down")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Disconnect Tara" }),
+    ).not.toBeDisabled();
   });
 
   it("hides invite controls from team-member sessions", async () => {

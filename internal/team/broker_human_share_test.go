@@ -344,3 +344,62 @@ func TestHumanEventsFilterNotebookMetadata(t *testing.T) {
 		t.Fatalf("human SSE did not receive shared wiki event: %s", stream)
 	}
 }
+
+func TestHumanEventsCloseAfterSessionRevoked(t *testing.T) {
+	b := newTestBroker(t)
+	token, _, err := b.createHumanInvite()
+	if err != nil {
+		t.Fatalf("create invite: %v", err)
+	}
+	sessionToken, session, err := b.acceptHumanInvite(token, "Mira", "browser")
+	if err != nil {
+		t.Fatalf("accept invite: %v", err)
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(b.handleEvents))
+	t.Cleanup(srv.Close)
+
+	req, err := http.NewRequest(http.MethodGet, srv.URL, nil)
+	if err != nil {
+		t.Fatalf("build events request: %v", err)
+	}
+	req.AddCookie(&http.Cookie{Name: humanSessionCookie, Value: sessionToken})
+	resp, err := (&http.Client{Timeout: 2 * time.Second}).Do(req)
+	if err != nil {
+		t.Fatalf("events request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("events status = %d body=%s", resp.StatusCode, string(raw))
+	}
+
+	reader := bufio.NewReader(resp.Body)
+	seenReady := false
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			t.Fatalf("read ready event: %v", err)
+		}
+		if strings.Contains(line, "event: ready") {
+			seenReady = true
+		}
+		if seenReady && strings.TrimSpace(line) == "" {
+			break
+		}
+	}
+
+	if err := b.revokeHumanSession(session.ID); err != nil {
+		t.Fatalf("revoke session: %v", err)
+	}
+	b.PublishWikiEvent(wikiWriteEvent{
+		Path:       "team/shared.md",
+		CommitSHA:  "def456",
+		AuthorSlug: "pm",
+		Timestamp:  time.Now().UTC().Format(time.RFC3339),
+	})
+
+	if line, err := reader.ReadString('\n'); err == nil {
+		t.Fatalf("revoked session kept SSE stream open, next line: %q", line)
+	}
+}
