@@ -9,6 +9,7 @@ import {
   getHumanMe,
   getHumanSessions,
   getShareStatus,
+  revokeHumanSession,
   startShare,
   stopShare,
 } from "../../api/platform";
@@ -20,6 +21,7 @@ vi.mock("../../api/platform", () => ({
   getHumanMe: vi.fn(),
   getHumanSessions: vi.fn(),
   getShareStatus: vi.fn(),
+  revokeHumanSession: vi.fn(),
   startShare: vi.fn(),
   stopShare: vi.fn(),
 }));
@@ -28,6 +30,7 @@ const getHealthMock = vi.mocked(getHealth);
 const getHumanMeMock = vi.mocked(getHumanMe);
 const getHumanSessionsMock = vi.mocked(getHumanSessions);
 const getShareStatusMock = vi.mocked(getShareStatus);
+const revokeHumanSessionMock = vi.mocked(revokeHumanSession);
 const startShareMock = vi.mocked(startShare);
 const stopShareMock = vi.mocked(stopShare);
 
@@ -82,6 +85,7 @@ beforeEach(() => {
     ],
   });
   getShareStatusMock.mockResolvedValue({ running: false });
+  revokeHumanSessionMock.mockResolvedValue({ ok: true });
   startShareMock.mockResolvedValue({
     running: true,
     bind: "100.64.0.2",
@@ -122,6 +126,23 @@ describe("HealthCheckApp access and sharing", () => {
     await user.click(screen.getByRole("button", { name: "Stop sharing" }));
 
     await waitFor(() => expect(stopShareMock).toHaveBeenCalledTimes(1));
+  });
+
+  it("disconnects an active team-member session from the host UI", async () => {
+    const user = userEvent.setup();
+    render(wrap(<HealthCheckApp />));
+
+    await screen.findByText("Tara");
+    await user.click(screen.getByRole("button", { name: "Disconnect" }));
+
+    await waitFor(() =>
+      expect(revokeHumanSessionMock).toHaveBeenCalledWith("session-1"),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByText("No active team-member browser sessions."),
+      ).toBeInTheDocument(),
+    );
   });
 
   it("hides invite controls from team-member sessions", async () => {

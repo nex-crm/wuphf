@@ -76,6 +76,65 @@ func TestHumanMeAcceptsSessionCookie(t *testing.T) {
 	}
 }
 
+func TestHumanSessionsHostCanRevokeSession(t *testing.T) {
+	b := newTestBroker(t)
+	token, _, err := b.createHumanInvite()
+	if err != nil {
+		t.Fatalf("create invite: %v", err)
+	}
+	sessionToken, session, err := b.acceptHumanInvite(token, "Mira", "browser")
+	if err != nil {
+		t.Fatalf("accept invite: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodDelete, "/humans/sessions", strings.NewReader(`{"id":"`+session.ID+`"}`))
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	rec := httptest.NewRecorder()
+	b.requireAuth(b.handleHumanSessions)(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("revoke status = %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/humans/me", nil)
+	req.AddCookie(&http.Cookie{Name: humanSessionCookie, Value: sessionToken})
+	rec = httptest.NewRecorder()
+	b.handleHumanMe(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("revoked session me status = %d, want 401 body=%s", rec.Code, rec.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/humans/sessions", nil)
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	rec = httptest.NewRecorder()
+	b.requireAuth(b.handleHumanSessions)(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("sessions status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"revoked_at"`) {
+		t.Fatalf("sessions body missing revoked_at: %s", rec.Body.String())
+	}
+}
+
+func TestHumanSessionCannotRevokeTeamMemberSessions(t *testing.T) {
+	b := newTestBroker(t)
+	token, _, err := b.createHumanInvite()
+	if err != nil {
+		t.Fatalf("create invite: %v", err)
+	}
+	sessionToken, session, err := b.acceptHumanInvite(token, "Mira", "browser")
+	if err != nil {
+		t.Fatalf("accept invite: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodDelete, "/humans/sessions", strings.NewReader(`{"id":"`+session.ID+`"}`))
+	req.AddCookie(&http.Cookie{Name: humanSessionCookie, Value: sessionToken})
+	rec := httptest.NewRecorder()
+	b.requireAuth(b.handleHumanSessions)(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("member revoke status = %d, want 403 body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestHumanMeRejectsExpiredSessionServerSide(t *testing.T) {
 	b := newTestBroker(t)
 	token, _, err := b.createHumanInvite()

@@ -9,6 +9,7 @@ import {
   type HealthResponse,
   type HumanMe,
   type HumanSession,
+  revokeHumanSession,
   startShare,
   stopShare,
   type WebShareStatus,
@@ -386,20 +387,50 @@ function BrokerStatusCard({
 
 function TeamMemberSessions({
   isHost,
+  onRevokeSession,
+  revokeError,
+  revokingSessionID,
   sessions,
 }: {
   isHost: boolean;
+  onRevokeSession: (sessionID: string) => void;
+  revokeError?: string;
+  revokingSessionID?: string;
   sessions: HumanSession[];
 }) {
   return (
     <>
       <SectionLabel>Team-member sessions ({sessions.length})</SectionLabel>
+      {revokeError ? (
+        <div
+          style={{
+            marginBottom: 8,
+            color: "var(--danger, #b42318)",
+            fontSize: 12,
+            lineHeight: 1.4,
+          }}
+        >
+          {revokeError}
+        </div>
+      ) : null}
       {!isHost ? (
         <EmptyCard>Team-member session visibility is host-only.</EmptyCard>
       ) : sessions.length > 0 ? (
         sessions.map((session) => (
           <StatusRow
             key={session.id}
+            action={
+              <button
+                className="btn btn-secondary btn-sm"
+                type="button"
+                onClick={() => onRevokeSession(session.id)}
+                disabled={revokingSessionID === session.id}
+              >
+                {revokingSessionID === session.id
+                  ? "Disconnecting"
+                  : "Disconnect"}
+              </button>
+            }
             active={true}
             label={session.display_name || session.human_slug}
             value={`Last seen ${formatSessionTime(session.last_seen_at)} · expires ${formatSessionTime(session.expires_at)}`}
@@ -444,11 +475,13 @@ function RuntimeStatusList({
 
 function StatusRow({
   active,
+  action,
   label,
   value,
   style,
 }: {
   active: boolean;
+  action?: ReactNode;
   label: string;
   value: string;
   style?: CSSProperties;
@@ -478,6 +511,7 @@ function StatusRow({
           {value}
         </div>
       </div>
+      {action ? <div style={{ flexShrink: 0 }}>{action}</div> : null}
     </div>
   );
 }
@@ -543,6 +577,7 @@ export function HealthCheckApp() {
   const queryClient = useQueryClient();
   const [inviteCopied, setInviteCopied] = useState(false);
   const [shareMutationError, setShareMutationError] = useState("");
+  const [revokeSessionError, setRevokeSessionError] = useState("");
   const brokerConnected = useAppStore((s) => s.brokerConnected);
   const { data, isLoading, error } = useQuery({
     queryKey: ["health"],
@@ -598,6 +633,28 @@ export function HealthCheckApp() {
       );
     },
   });
+  const revokeSessionMutation = useMutation({
+    mutationFn: (sessionID: string) => revokeHumanSession(sessionID),
+    onMutate: () => {
+      setRevokeSessionError("");
+    },
+    onSuccess: (_result, sessionID) => {
+      queryClient.setQueryData<{ sessions?: HumanSession[] }>(
+        ["humans", "sessions"],
+        (current) => ({
+          sessions: (current?.sessions ?? []).filter(
+            (session) => session.id !== sessionID,
+          ),
+        }),
+      );
+      setRevokeSessionError("");
+    },
+    onError: (err) => {
+      setRevokeSessionError(
+        err instanceof Error ? err.message : "Could not disconnect session.",
+      );
+    },
+  });
 
   if (isLoading) {
     return <LoadingState>Checking health...</LoadingState>;
@@ -650,6 +707,10 @@ export function HealthCheckApp() {
       );
     }
   };
+  const revokeSession = (sessionID: string) => {
+    if (revokeSessionMutation.isPending) return;
+    revokeSessionMutation.mutate(sessionID);
+  };
   const items = runtimeItems(data);
 
   return (
@@ -684,7 +745,13 @@ export function HealthCheckApp() {
       />
 
       <BrokerStatusCard isHealthy={isHealthy} status={status} />
-      <TeamMemberSessions isHost={isHost} sessions={sessions} />
+      <TeamMemberSessions
+        isHost={isHost}
+        onRevokeSession={revokeSession}
+        revokeError={revokeSessionError}
+        revokingSessionID={revokeSessionMutation.variables}
+        sessions={sessions}
+      />
       <RuntimeStatusList focusMode={data?.focus_mode} items={items} />
     </>
   );

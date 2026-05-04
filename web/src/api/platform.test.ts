@@ -102,4 +102,15 @@ describe("platform api client", () => {
     await expect(api.stopShare()).resolves.toEqual(shareStatus);
     expect(postSpy).toHaveBeenCalledWith("/share/stop", {});
   });
+
+  it("revokeHumanSession calls the session revoke contract", async () => {
+    const delSpy = vi.spyOn(client, "del").mockResolvedValue({ ok: true });
+
+    await expect(api.revokeHumanSession("session-1")).resolves.toEqual({
+      ok: true,
+    });
+    expect(delSpy).toHaveBeenCalledWith("/humans/sessions", {
+      id: "session-1",
+    });
+  });
 });
