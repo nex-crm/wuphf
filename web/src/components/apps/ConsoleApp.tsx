@@ -91,6 +91,7 @@ export function ConsoleApp() {
   const [localLines, setLocalLines] = useState<TerminalLine[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
   const terminalBodyRef = useRef<HTMLDivElement>(null);
+  const previousChannelRef = useRef(currentChannel);
   const messages = useMessages(currentChannel);
   const members = useOfficeMembers();
   const tasks = useQuery({
@@ -131,6 +132,12 @@ export function ConsoleApp() {
   const taskCount = activeTaskCount(tasks.data?.tasks ?? []);
   const requestCount = openRequestCount(requests.data?.requests ?? []);
   const commandCount = commandRows.length;
+
+  useEffect(() => {
+    if (previousChannelRef.current === currentChannel) return;
+    previousChannelRef.current = currentChannel;
+    setLocalLines([]);
+  }, [currentChannel]);
 
   useEffect(() => {
     const el = terminalBodyRef.current;
@@ -216,7 +223,9 @@ export function ConsoleApp() {
               <div className="console-line console-line-muted">
                 <span className="console-line-time">--:--</span>
                 <span className="console-line-speaker">system</span>
-                <span className="console-line-content">#{currentChannel}</span>
+                <span className="console-line-content">
+                  #{currentChannel || "general"}
+                </span>
               </div>
             )}
             <form className="console-prompt" onSubmit={submitDraft}>

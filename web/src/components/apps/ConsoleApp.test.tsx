@@ -1,7 +1,41 @@
-import { describe, expect, it } from "vitest";
+import type { ReactNode } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Message, SlashCommandDescriptor } from "../../api/client";
-import { __test__ } from "./ConsoleApp";
+import { useAppStore } from "../../stores/app";
+import { __test__, ConsoleApp } from "./ConsoleApp";
+
+vi.mock("../../api/client", async () => {
+  const actual =
+    await vi.importActual<typeof import("../../api/client")>(
+      "../../api/client",
+    );
+  return {
+    ...actual,
+    fetchCommands: vi.fn().mockResolvedValue([]),
+    getRequests: vi.fn().mockResolvedValue({ requests: [] }),
+  };
+});
+
+vi.mock("../../api/tasks", () => ({
+  getOfficeTasks: vi.fn().mockResolvedValue({ tasks: [] }),
+}));
+
+vi.mock("../../hooks/useMembers", () => ({
+  useOfficeMembers: vi.fn(() => ({ data: [] })),
+}));
+
+vi.mock("../../hooks/useMessages", () => ({
+  useMessages: vi.fn(() => ({ data: [] })),
+}));
 
 const {
   activeTaskCount,
@@ -9,6 +43,20 @@ const {
   openRequestCount,
   terminalLineFromMessage,
 } = __test__;
+
+function wrap(ui: ReactNode) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return <QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>;
+}
+
+beforeEach(() => {
+  useAppStore.setState({
+    currentApp: "console",
+    currentChannel: "general",
+  });
+});
 
 describe("ConsoleApp helpers", () => {
   it("formats message lines for the terminal mirror", () => {
@@ -84,5 +132,35 @@ describe("ConsoleApp helpers", () => {
         { status: "answered" },
       ]),
     ).toBe(2);
+  });
+});
+
+describe("<ConsoleApp>", () => {
+  it("falls back to general when the current channel is blank", () => {
+    useAppStore.setState({ currentChannel: "" });
+
+    render(wrap(<ConsoleApp />));
+
+    expect(screen.getAllByText("#general").length).toBeGreaterThan(1);
+    expect(screen.getByText("wuphf:general$")).toBeInTheDocument();
+  });
+
+  it("clears local prompt echoes when switching channels", async () => {
+    render(wrap(<ConsoleApp />));
+
+    const input = screen.getByTestId("console-input");
+    fireEvent.change(input, { target: { value: "/ask launch plan" } });
+    fireEvent.submit(input.closest("form") as HTMLFormElement);
+
+    expect(screen.getByText("/ask launch plan")).toBeInTheDocument();
+
+    act(() => {
+      useAppStore.getState().setCurrentChannel("launch");
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText("/ask launch plan")).not.toBeInTheDocument();
+    });
+    expect(screen.getByText("wuphf:launch$")).toBeInTheDocument();
   });
 });
