@@ -50,12 +50,10 @@ fi
 # chunks get their component name. If two index files exist (shouldn't
 # happen, but guard for the future) take the largest.
 shopt -s nullglob
-entry_path=""
 entry_bytes=0
 for f in "$dist_assets"/index-*.js; do
   size=$(wc -c < "$f" | tr -d '[:space:]')
   if (( size > entry_bytes )); then
-    entry_path="$f"
     entry_bytes=$size
   fi
 done
