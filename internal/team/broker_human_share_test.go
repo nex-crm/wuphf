@@ -206,6 +206,8 @@ func TestHumanSessionAuthBlocksDMChannelList(t *testing.T) {
 	}{
 		{"/channels", http.StatusNoContent},
 		{"/channels?type=dm", http.StatusForbidden},
+		{"/channels?type=DM", http.StatusForbidden},
+		{"/channels?type=Dm", http.StatusForbidden},
 	} {
 		t.Run(tc.path, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, tc.path, nil)

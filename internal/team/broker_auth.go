@@ -95,7 +95,7 @@ func humanRouteAllowed(r *http.Request) bool {
 	if method == http.MethodGet {
 		switch {
 		case path == "/messages",
-			path == "/channels" && r.URL.Query().Get("type") != "dm",
+			path == "/channels" && !strings.EqualFold(r.URL.Query().Get("type"), "dm"),
 			path == "/office-members",
 			path == "/channel-members",
 			path == "/members",

@@ -70,7 +70,6 @@ type webShareController struct {
 func newWebShareController(webPort int) *webShareController {
 	return &webShareController{
 		opts: shareOptions{
-			bind:    "tailscale",
 			webPort: webPort,
 		},
 	}
@@ -103,9 +102,6 @@ func (c *webShareController) start() (team.WebShareStatus, error) {
 	defer c.mu.Unlock()
 
 	opts := c.opts
-	if opts.bind == "" {
-		opts.bind = "tailscale"
-	}
 	if opts.webPort == 0 {
 		opts.webPort = 7891
 	}
@@ -369,7 +365,7 @@ func resolveShareBind(opts shareOptions) (net.IP, string, error) {
 				continue
 			}
 			validateOpts := opts
-			if want == "wireguard" && isPrivateIP(ip) {
+			if (want == "wireguard" || (want == "" && interfaceLooksLikeWireGuard(name))) && isPrivateIP(ip) {
 				validateOpts.unsafeLAN = true
 			}
 			if err := validateShareIP(ip, validateOpts); err != nil {
@@ -385,6 +381,10 @@ func resolveShareBind(opts shareOptions) (net.IP, string, error) {
 		return nil, "", fmt.Errorf("no WireGuard interface found\n\nFix: start WireGuard, then run `wuphf share --bind wireguard` again")
 	}
 	return nil, "", fmt.Errorf("no usable private interface found")
+}
+
+func interfaceLooksLikeWireGuard(name string) bool {
+	return strings.Contains(name, "wg") || strings.Contains(name, "wireguard") || strings.HasPrefix(name, "utun")
 }
 
 func validateShareIP(ip net.IP, opts shareOptions) error {
@@ -663,6 +663,7 @@ func writeShareSyntheticHostOnlyResponse(w http.ResponseWriter, r *http.Request,
 			"upgrade_command":   "",
 			"install_method":    "unknown",
 			"install_command":   "",
+			"working_dir":       "",
 		})
 		return true
 	case "/workspaces/list":
