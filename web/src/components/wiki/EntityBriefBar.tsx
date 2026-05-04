@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   type BriefSummary,
@@ -31,6 +31,7 @@ export default function EntityBriefBar({
   const [error, setError] = useState<string | null>(null);
   const [state, setState] = useState<BarState>("idle");
   const [pendingOverride, setPendingOverride] = useState<number | null>(null);
+  const latestPendingRef = useRef(0);
 
   const loadBrief = useCallback(async () => {
     try {
@@ -76,28 +77,6 @@ export default function EntityBriefBar({
     };
   }, [kind, slug]);
 
-  useEffect(() => {
-    const unsubscribe = subscribeEntityEvents(
-      kind,
-      slug,
-      () => {
-        // New fact for this entity — bump pending without refetching.
-        setPendingOverride((prev) => {
-          const base = prev ?? brief?.pending_delta ?? 0;
-          return base + 1;
-        });
-      },
-      () => {
-        // Brief was synthesized — clear in-flight state, refetch status,
-        // notify parent so article body + sources refresh.
-        setState("idle");
-        void loadBrief();
-        if (onSynthesized) onSynthesized();
-      },
-    );
-    return unsubscribe;
-  }, [kind, slug, loadBrief, onSynthesized, brief?.pending_delta]);
-
   const handleRefresh = useCallback(async () => {
     setState("synthesizing");
     setError(null);
@@ -116,6 +95,29 @@ export default function EntityBriefBar({
     if (pendingOverride !== null) return pendingOverride;
     return brief?.pending_delta ?? 0;
   }, [pendingOverride, brief?.pending_delta]);
+
+  useEffect(() => {
+    latestPendingRef.current = pending;
+  }, [pending]);
+
+  useEffect(() => {
+    const unsubscribe = subscribeEntityEvents(
+      kind,
+      slug,
+      () => {
+        // New fact for this entity: bump from the latest rendered count.
+        setPendingOverride((prev) => (prev ?? latestPendingRef.current) + 1);
+      },
+      () => {
+        // Brief was synthesized — clear in-flight state, refetch status,
+        // notify parent so article body + sources refresh.
+        setState("idle");
+        void loadBrief();
+        if (onSynthesized) onSynthesized();
+      },
+    );
+    return unsubscribe;
+  }, [kind, slug, loadBrief, onSynthesized]);
 
   if (loading) return null;
 

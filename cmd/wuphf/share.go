@@ -7,16 +7,19 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"html"
 	"io"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	wuphf "github.com/nex-crm/wuphf"
 	"github.com/nex-crm/wuphf/internal/brokeraddr"
+	"github.com/nex-crm/wuphf/internal/team"
 )
 
 const shareCookieName = "wuphf_human_session"
@@ -49,6 +52,177 @@ type shareJSONOutput struct {
 	InviteURL string `json:"invite_url,omitempty"`
 	ExpiresAt string `json:"expires_at,omitempty"`
 	Error     string `json:"error,omitempty"`
+}
+
+type webShareController struct {
+	mu        sync.Mutex
+	opts      shareOptions
+	server    *http.Server
+	running   bool
+	bind      string
+	iface     string
+	brokerURL string
+	inviteURL string
+	expiresAt string
+	err       string
+}
+
+func newWebShareController(webPort int) *webShareController {
+	return &webShareController{
+		opts: shareOptions{
+			webPort: webPort,
+		},
+	}
+}
+
+func (c *webShareController) status() team.WebShareStatus {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.statusLocked()
+}
+
+func (c *webShareController) statusLocked() team.WebShareStatus {
+	return team.WebShareStatus{
+		Running:   c.running,
+		Bind:      c.bind,
+		Interface: c.iface,
+		InviteURL: c.inviteURL,
+		ExpiresAt: c.expiresAt,
+		Error:     c.err,
+	}
+}
+
+func (c *webShareController) clearInviteLocked() {
+	c.inviteURL = ""
+	c.expiresAt = ""
+}
+
+func (c *webShareController) start() (team.WebShareStatus, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	opts := c.opts
+	if opts.webPort == 0 {
+		opts.webPort = 7891
+	}
+	token, err := readBrokerToken()
+	if err != nil {
+		c.err = err.Error()
+		return c.statusLocked(), err
+	}
+	brokerURL := brokeraddr.ResolveBaseURL()
+
+	if c.running && c.server != nil {
+		invite, err := createShareInvite(brokerURL, token)
+		if err != nil {
+			c.err = err.Error()
+			return c.statusLocked(), err
+		}
+		c.brokerURL = brokerURL
+		c.inviteURL = fmt.Sprintf("http://%s:%d/join/%s", c.bind, opts.webPort, invite.Token)
+		c.expiresAt = invite.Invite.ExpiresAt
+		c.err = ""
+		return c.statusLocked(), nil
+	}
+
+	bind, iface, err := resolveShareBind(opts)
+	if err != nil {
+		c.running = false
+		c.server = nil
+		c.clearInviteLocked()
+		c.err = webShareErrorMessage(err)
+		return c.statusLocked(), err
+	}
+	invite, err := createShareInvite(brokerURL, token)
+	if err != nil {
+		c.running = false
+		c.server = nil
+		c.clearInviteLocked()
+		c.err = err.Error()
+		return c.statusLocked(), err
+	}
+
+	server := newShareHTTPServer(bind.String(), opts.webPort, brokerURL, token, nil)
+	lc := &net.ListenConfig{}
+	ln, err := lc.Listen(context.Background(), "tcp", server.Addr)
+	if err != nil {
+		c.running = false
+		c.server = nil
+		c.clearInviteLocked()
+		c.err = fmt.Sprintf("share listener failed on %s: %v", server.Addr, err)
+		return c.statusLocked(), errors.New(c.err)
+	}
+
+	c.server = server
+	c.running = true
+	c.bind = bind.String()
+	c.iface = iface
+	c.brokerURL = brokerURL
+	c.inviteURL = fmt.Sprintf("http://%s:%d/join/%s", c.bind, opts.webPort, invite.Token)
+	c.expiresAt = invite.Invite.ExpiresAt
+	c.err = ""
+
+	go func() {
+		err := server.Serve(ln)
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			c.mu.Lock()
+			if c.server == server {
+				c.running = false
+				c.server = nil
+				c.clearInviteLocked()
+				c.err = err.Error()
+			}
+			c.mu.Unlock()
+		}
+	}()
+
+	return c.statusLocked(), nil
+}
+
+func webShareErrorMessage(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "no private network interface found") {
+		return "No private network interface found.\n\nWUPHF only creates team-member invites over a private network by default. Start Tailscale or WireGuard, then click Create invite again."
+	}
+	if strings.Contains(msg, "no WireGuard interface found") {
+		return "No WireGuard interface found.\n\nStart WireGuard, then click Create invite again."
+	}
+	return msg
+}
+
+func (c *webShareController) stop() error {
+	c.mu.Lock()
+	server := c.server
+	c.mu.Unlock()
+
+	if server == nil {
+		c.mu.Lock()
+		c.running = false
+		c.clearInviteLocked()
+		c.err = ""
+		c.mu.Unlock()
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := server.Shutdown(ctx); err != nil {
+		c.mu.Lock()
+		c.err = err.Error()
+		c.mu.Unlock()
+		return err
+	}
+	c.mu.Lock()
+	if c.server == server {
+		c.server = nil
+		c.running = false
+		c.clearInviteLocked()
+		c.err = ""
+	}
+	c.mu.Unlock()
+	return nil
 }
 
 func runShare(args []string) {
@@ -117,11 +291,11 @@ func runShareServer(opts shareOptions) error {
 		}
 		fmt.Printf("Invite: %s\n", inviteURL)
 		fmt.Println("Expires: 24h, one use")
-		fmt.Println("Waiting for co-founder to join...")
+		fmt.Println("Waiting for team member to join...")
 	}
 	server := newShareHTTPServer(bind.String(), opts.webPort, brokerURL, token, func() {
 		if !opts.jsonOut {
-			fmt.Println("Co-founder joined. Open #general and work together.")
+			fmt.Println("Team member joined. Open #general and work together.")
 		}
 	})
 	return server.ListenAndServe()
@@ -199,7 +373,7 @@ func resolveShareBind(opts shareOptions) (net.IP, string, error) {
 				continue
 			}
 			validateOpts := opts
-			if want == "wireguard" && isPrivateIP(ip) {
+			if (want == "wireguard" || (want == "" && interfaceLooksLikeWireGuard(name))) && isPrivateIP(ip) {
 				validateOpts.unsafeLAN = true
 			}
 			if err := validateShareIP(ip, validateOpts); err != nil {
@@ -215,6 +389,10 @@ func resolveShareBind(opts shareOptions) (net.IP, string, error) {
 		return nil, "", fmt.Errorf("no WireGuard interface found\n\nFix: start WireGuard, then run `wuphf share --bind wireguard` again")
 	}
 	return nil, "", fmt.Errorf("no usable private interface found")
+}
+
+func interfaceLooksLikeWireGuard(name string) bool {
+	return strings.Contains(name, "wg") || strings.Contains(name, "wireguard") || strings.HasPrefix(name, "utun")
 }
 
 func validateShareIP(ip net.IP, opts shareOptions) error {
@@ -270,9 +448,25 @@ func newShareHandler(brokerURL, brokerToken string, onJoin func()) http.Handler 
 			http.Error(w, "invite token required", http.StatusBadRequest)
 			return
 		}
+		if r.Method == http.MethodGet {
+			writeShareJoinPage(w, http.StatusOK, token, "")
+			return
+		}
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if err := r.ParseForm(); err != nil {
+			writeShareJoinPage(w, http.StatusBadRequest, token, "Could not read the form. Reload the invite and try again.")
+			return
+		}
+		displayName := strings.TrimSpace(r.FormValue("display_name"))
+		if displayName == "" {
+			displayName = "Team member"
+		}
 		body := map[string]string{
 			"token":        token,
-			"display_name": "Co-founder",
+			"display_name": displayName,
 			"device":       r.UserAgent(),
 		}
 		raw, _ := json.Marshal(body)
@@ -284,13 +478,19 @@ func newShareHandler(brokerURL, brokerToken string, onJoin func()) http.Handler 
 		req.Header.Set("Content-Type", "application/json")
 		resp, err := shareHTTPClient.Do(req)
 		if err != nil {
-			http.Error(w, "broker unreachable", http.StatusBadGateway)
+			writeShareJoinPage(w, http.StatusBadGateway, token, "WUPHF is not reachable from this invite. Ask the host to restart sharing.")
 			return
 		}
 		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
-			w.WriteHeader(resp.StatusCode)
-			_, _ = io.Copy(w, resp.Body)
+			switch {
+			case resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusGone:
+				writeShareJoinPage(w, http.StatusGone, token, "This invite is no longer valid. Ask the host for a new team-member invite.")
+			case resp.StatusCode >= 500:
+				writeShareJoinPage(w, http.StatusBadGateway, token, "WUPHF could not accept this invite right now. Ask the host to retry sharing.")
+			default:
+				writeShareJoinPage(w, resp.StatusCode, token, "This invite could not be accepted. Ask the host for a fresh team-member invite.")
+			}
 			return
 		}
 		for _, cookie := range resp.Cookies() {
@@ -312,6 +512,56 @@ func newShareHandler(brokerURL, brokerToken string, onJoin func()) http.Handler 
 	mux.Handle("/api/", shareProxyHandler(brokerURL))
 	mux.Handle("/", shareStaticHandler())
 	return mux
+}
+
+func writeShareJoinPage(w http.ResponseWriter, status int, token, errorMessage string) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if status > 0 {
+		w.WriteHeader(status)
+	}
+	errorHTML := ""
+	if strings.TrimSpace(errorMessage) != "" {
+		errorHTML = fmt.Sprintf(`<div class="error">%s</div>`, htmlEscape(errorMessage))
+	}
+	_, _ = fmt.Fprintf(w, `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Join WUPHF</title>
+  <style>
+    :root { color-scheme: light; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #f8f8f9; color: #28292a; }
+    main { width: min(92vw, 460px); background: white; border: 1px solid #e9eaeb; border-radius: 16px; padding: 28px; box-shadow: 0 24px 80px rgba(30, 31, 31, 0.08); }
+    .eyebrow { margin: 0 0 10px; color: #686c6e; font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+    h1 { margin: 0 0 10px; font-size: 28px; line-height: 1.1; letter-spacing: 0; }
+    p { margin: 0 0 20px; color: #575a5c; line-height: 1.55; }
+    label { display: block; margin: 0 0 8px; font-size: 13px; font-weight: 700; }
+    input { width: 100%%; min-height: 46px; border: 1px solid #cfd1d2; border-radius: 10px; padding: 0 12px; font: inherit; }
+    button { width: 100%%; min-height: 46px; margin-top: 14px; border: 0; border-radius: 999px; background: #28292a; color: white; font: inherit; font-weight: 700; cursor: pointer; }
+    .note { margin-top: 18px; font-size: 12px; color: #85898b; }
+    .error { margin: 0 0 16px; padding: 10px 12px; border-radius: 10px; background: #ffeeeb; color: #8c1727; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <main>
+    <p class="eyebrow">Team member invite</p>
+    <h1>Join this WUPHF office</h1>
+    <p>Use the name your teammate should see in messages, requests, and office activity.</p>
+    %s
+    <form method="post" action="/join/%s">
+      <label for="display_name">Display name</label>
+      <input id="display_name" name="display_name" autocomplete="name" placeholder="e.g. Maya" autofocus>
+      <button type="submit">Enter office</button>
+    </form>
+    <p class="note">This creates a scoped team-member browser session. It does not expose the host's broker token.</p>
+  </main>
+</body>
+</html>`, errorHTML, htmlEscape(token))
+}
+
+func htmlEscape(s string) string {
+	return html.EscapeString(s)
 }
 
 func shareRequestHasSession(r *http.Request, brokerURL string) bool {
@@ -341,6 +591,17 @@ func shareProxyHandler(brokerURL string) http.Handler {
 		targetPath := strings.TrimPrefix(r.URL.Path, "/api")
 		if targetPath == "" {
 			targetPath = "/"
+		}
+		if targetPath == "/onboarding/state" {
+			if r.Method != http.MethodGet && r.Method != http.MethodHead {
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			writeShareProxyJSON(w, http.StatusOK, map[string]bool{"onboarded": true})
+			return
+		}
+		if handled := writeShareSyntheticHostOnlyResponse(w, r, targetPath); handled {
+			return
 		}
 		if !shareProxyPathAllowed(targetPath) {
 			http.Error(w, `{"error":"host_only"}`, http.StatusForbidden)
@@ -394,6 +655,51 @@ func shareProxyHandler(brokerURL string) http.Handler {
 		}
 		_, _ = io.Copy(w, resp.Body)
 	})
+}
+
+func writeShareSyntheticHostOnlyResponse(w http.ResponseWriter, r *http.Request, path string) bool {
+	switch path {
+	case "/upgrade-check":
+		if r.Method != http.MethodGet {
+			break
+		}
+		writeShareProxyJSON(w, http.StatusOK, map[string]any{
+			"current":           "dev",
+			"latest":            "dev",
+			"upgrade_available": false,
+			"is_dev_build":      true,
+			"upgrade_command":   "",
+			"install_method":    "unknown",
+			"install_command":   "",
+			"working_dir":       "",
+		})
+		return true
+	case "/workspaces/list":
+		if r.Method != http.MethodGet {
+			break
+		}
+		writeShareProxyJSON(w, http.StatusOK, map[string]any{
+			"workspaces": []any{},
+		})
+		return true
+	case "/config":
+		if r.Method != http.MethodGet {
+			break
+		}
+		writeShareProxyJSON(w, http.StatusOK, map[string]any{
+			"llm_provider":   "claude-code",
+			"memory_backend": "markdown",
+			"team_lead_slug": "ceo",
+		})
+		return true
+	}
+	return false
+}
+
+func writeShareProxyJSON(w http.ResponseWriter, status int, payload any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(payload)
 }
 
 func shareProxyPathAllowed(path string) bool {

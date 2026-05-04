@@ -130,9 +130,12 @@ type Broker struct {
 	server             *http.Server
 	lifecycleCtx       context.Context
 	lifecycleCancel    context.CancelFunc
-	token              string          // shared secret for authenticating requests
-	addr               string          // actual listen address (useful when port=0)
-	webUIOrigins       []string        // allowed CORS origins for web UI (set by ServeWebUI)
+	token              string   // shared secret for authenticating requests
+	addr               string   // actual listen address (useful when port=0)
+	webUIOrigins       []string // allowed CORS origins for web UI (set by ServeWebUI)
+	webShareStart      func() (WebShareStatus, error)
+	webShareStatus     func() WebShareStatus
+	webShareStop       func() error
 	runtimeProvider    string          // "codex" or "claude" — set by launcher
 	packSlug           string          // active agent pack slug ("founding-team", "revops", ...) — set by launcher
 	blankSlateLaunch   bool            // start without a saved blueprint and synthesize the first operation

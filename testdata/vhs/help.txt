@@ -9,7 +9,7 @@ Usage:
   wuphf shred        Burn the workspace down and reopen onboarding
   wuphf import --from legacy  Import from a running external orchestrator (auto-detect)
   wuphf log          Show what your agents actually did (task receipts)
-  wuphf share        Invite one co-founder over a private network
+  wuphf share        Invite one team member over a private network
   wuphf memory migrate --from {nex,gbrain}  Port legacy memory into the team wiki
   wuphf workspace ...  Manage multiple isolated WUPHF workspaces
   wuphf skills publish <slug-or-path> --to <hub>    Publish a team skill to a public hub

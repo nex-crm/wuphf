@@ -1,4 +1,5 @@
 import { useChannels } from "../../hooks/useChannels";
+import { appTitle } from "../../lib/constants";
 import type { Theme } from "../../stores/app";
 import { useAppStore } from "../../stores/app";
 
@@ -23,9 +24,7 @@ export function ChannelHeader() {
   const { data: channels = [] } = useChannels();
 
   const channel = channels.find((c) => c.slug === currentChannel);
-  const title = currentApp
-    ? currentApp.charAt(0).toUpperCase() + currentApp.slice(1)
-    : `# ${currentChannel}`;
+  const title = currentApp ? appTitle(currentApp) : `# ${currentChannel}`;
   const desc = currentApp ? "" : channel?.description || "";
   const targetTheme = nextTheme(theme);
 

@@ -56,8 +56,8 @@ const APP_CASES = [
   },
   {
     app: "health-check",
-    label: "Health Check",
-    content: /Checking health|Could not reach health endpoint|Health Check/i,
+    label: "Access & Health",
+    content: /Checking health|Could not reach health endpoint|Access & Health/i,
   },
 ] as const;
 
