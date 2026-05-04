@@ -155,6 +155,19 @@ func TestCmdAgentPrompt_GeneratesAndCreatesMember(t *testing.T) {
 	if gotBody["action"] != "create" || gotBody["slug"] != "researcher" {
 		t.Fatalf("create body wrong: %+v", gotBody)
 	}
+	if gotBody["name"] != "Researcher" {
+		t.Fatalf("name not forwarded: %+v", gotBody)
+	}
+	if gotBody["role"] != "Research lead" {
+		t.Fatalf("role not forwarded: %+v", gotBody)
+	}
+	expertise, ok := gotBody["expertise"].([]any)
+	if !ok || len(expertise) != 2 || expertise[0] != "research" || expertise[1] != "synthesis" {
+		t.Fatalf("expertise not forwarded: %+v", gotBody)
+	}
+	if gotBody["personality"] != "careful" {
+		t.Fatalf("personality not forwarded: %+v", gotBody)
+	}
 	if gotBody["permission_mode"] != "plan" {
 		t.Fatalf("permission mode not forwarded: %+v", gotBody)
 	}

@@ -134,9 +134,9 @@ export function ConsoleApp() {
 
   useEffect(() => {
     const el = terminalBodyRef.current;
-    if (!el) return;
+    if (!el || visibleTerminalLines.length === 0) return;
     el.scrollTop = el.scrollHeight;
-  });
+  }, [visibleTerminalLines]);
 
   function focusInput(selectionEnd?: number) {
     window.requestAnimationFrame(() => {
