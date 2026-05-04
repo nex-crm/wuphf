@@ -18,24 +18,17 @@ package team
 
 import (
 	"context"
-	"fmt"
 	"log"
-	"os"
 
 	"github.com/nex-crm/wuphf/internal/config"
 )
 
 // RegisterTransports registers all configured transport adapters against the
 // broker. Called once per launch after broker.Start() succeeds. Returns a
-// cleanup function and an optional error. The cleanup function cancels all
-// running adapters and must be called before broker.Stop() on any early-abort
-// path so adapters can flush in-flight sends. It is always non-nil and safe to
-// call even when err is non-nil.
-//
-// A non-nil error means a required adapter (one whose config is present but
-// invalid) failed to start; optional adapters that are not configured are
-// silently skipped. Callers log the error and continue — a misconfigured
-// Telegram token should not prevent the office from starting.
+// cleanup function that cancels all running adapters; always non-nil and safe to
+// call even on the error path. The error return is reserved for future required
+// adapters; all current adapters are optional and log failures rather than
+// returning them.
 func RegisterTransports(b *Broker) (func(), error) {
 	var stops []func()
 	cleanup := func() {
@@ -46,9 +39,9 @@ func RegisterTransports(b *Broker) (func(), error) {
 
 	// Telegram: start if a bot token is configured and the broker has at least
 	// one telegram surface channel. If the token is set but there are no
-	// surface channels yet (user hasn't connected via /connect), skip silently —
-	// the transport will start on the next launch after a channel is connected.
-	token := resolveTelegramToken()
+	// surface channels yet (user hasn't run /connect), skip silently — the
+	// transport will start on the next launch after a channel is connected.
+	token := config.ResolveTelegramBotToken()
 	if token != "" {
 		t := NewTelegramTransport(b, token)
 		if len(t.ChatMap) == 0 && t.DMChannel == "" {
@@ -70,26 +63,3 @@ func RegisterTransports(b *Broker) (func(), error) {
 
 	return cleanup, nil
 }
-
-// resolveTelegramToken returns the bot token from the environment or persisted
-// config. Prefers WUPHF_TELEGRAM_BOT_TOKEN so CI/dev overrides work without
-// touching config.json.
-func resolveTelegramToken() string {
-	if v := os.Getenv("WUPHF_TELEGRAM_BOT_TOKEN"); v != "" {
-		return v
-	}
-	return config.ResolveTelegramBotToken()
-}
-
-// startupTransportError wraps an adapter startup failure with the adapter name
-// so the caller's warning log identifies which transport failed.
-type startupTransportError struct {
-	adapter string
-	err     error
-}
-
-func (e *startupTransportError) Error() string {
-	return fmt.Sprintf("transport %q failed to start: %v", e.adapter, e.err)
-}
-
-func (e *startupTransportError) Unwrap() error { return e.err }
