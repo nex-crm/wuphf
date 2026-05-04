@@ -62,7 +62,7 @@ func (l *Launcher) Launch() error {
 		return fmt.Errorf("start broker: %w", err)
 	}
 
-	stopTransports, err := RegisterTransports(newBrokerTransportHost(l.broker))
+	stopTransports, err := RegisterTransports(l.broker)
 	if err != nil {
 		// Non-fatal: a misconfigured optional adapter (e.g. bad Telegram token)
 		// should not prevent the office from starting.
@@ -202,7 +202,7 @@ func (l *Launcher) launchHeadlessCodex() error {
 		return fmt.Errorf("start broker: %w", err)
 	}
 
-	stopTransports, err := RegisterTransports(newBrokerTransportHost(l.broker))
+	stopTransports, err := RegisterTransports(l.broker)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "warning: transport registration: %v\n", err)
 	}

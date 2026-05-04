@@ -105,7 +105,7 @@ func (l *Launcher) LaunchWeb(webPort int) error {
 		return fmt.Errorf("start broker: %w", err)
 	}
 
-	stopTransports, err := RegisterTransports(newBrokerTransportHost(l.broker))
+	stopTransports, err := RegisterTransports(l.broker)
 	if err != nil {
 		// Non-fatal: a misconfigured optional adapter should not prevent the
 		// web UI from starting.
