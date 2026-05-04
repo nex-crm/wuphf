@@ -38,6 +38,7 @@ import CitedAnswer from "./components/wiki/CitedAnswer";
 import Wiki from "./components/wiki/Wiki";
 import type { WikiTab } from "./components/wiki/WikiTabs";
 import WikiTabs from "./components/wiki/WikiTabs";
+import { AgentWorkbench } from "./components/workbench/AgentWorkbench";
 import { useBrokerEvents } from "./hooks/useBrokerEvents";
 import { useHashRouter } from "./hooks/useHashRouter";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
@@ -141,6 +142,8 @@ function MainContent() {
   const notebookAgentSlug = useAppStore((s) => s.notebookAgentSlug);
   const notebookEntrySlug = useAppStore((s) => s.notebookEntrySlug);
   const setNotebookRoute = useAppStore((s) => s.setNotebookRoute);
+  const workbenchAgentSlug = useAppStore((s) => s.workbenchAgentSlug);
+  const workbenchTaskId = useAppStore((s) => s.workbenchTaskId);
   // Pam's onActionDone bumps this; Wiki re-fetches article + history when
   // the prop changes. Lifted up here because Pam lives inside the tab bar
   // (so her desk can rest on the divider line).
@@ -158,13 +161,9 @@ function MainContent() {
       <div className="wiki-shell">
         <WikiTabs
           current="wiki"
-          onSelect={(tab) => {
-            if (tab === "wiki") setCurrentApp("wiki");
-            else if (tab === "notebooks") {
-              setNotebookRoute(null, null);
-              setCurrentApp("notebooks");
-            } else setCurrentApp("reviews");
-          }}
+          onSelect={(tab) =>
+            selectWikiShellTab(tab, setCurrentApp, setNotebookRoute)
+          }
         />
         <div className="wiki-shell-body">
           <CitedAnswer query={wikiLookupQuery || ""} />
@@ -173,22 +172,7 @@ function MainContent() {
     );
   }
 
-  if (
-    currentApp === "wiki" ||
-    currentApp === "notebooks" ||
-    currentApp === "reviews"
-  ) {
-    const handleTabChange = (tab: WikiTab) => {
-      if (tab === "wiki") {
-        setCurrentApp("wiki");
-      } else if (tab === "notebooks") {
-        setNotebookRoute(null, null);
-        setCurrentApp("notebooks");
-      } else {
-        setCurrentApp("reviews");
-      }
-    };
-
+  if (isWikiShellApp(currentApp)) {
     // Pam only belongs on the wiki surface (notebooks + reviews are
     // separate contexts). When we're not on the wiki tab, articlePath is
     // null so she renders as disabled scenery without actionable state.
@@ -198,7 +182,9 @@ function MainContent() {
       <div className="wiki-shell">
         <WikiTabs
           current={currentApp}
-          onSelect={handleTabChange}
+          onSelect={(tab) =>
+            selectWikiShellTab(tab, setCurrentApp, setNotebookRoute)
+          }
           pamArticlePath={pamArticlePath}
           onPamActionDone={() => setArticleRefreshNonce((n) => n + 1)}
         />
@@ -232,6 +218,16 @@ function MainContent() {
           {currentApp === "reviews" && <ReviewQueueKanban />}
         </div>
       </div>
+    );
+  }
+
+  if (currentApp === "workbench") {
+    return (
+      <WorkbenchPanel
+        agentSlug={workbenchAgentSlug}
+        taskId={workbenchTaskId}
+        onClose={() => setCurrentApp(workbenchTaskId ? "tasks" : null)}
+      />
     );
   }
 
@@ -281,6 +277,40 @@ function MainContent() {
       <Composer />
     </>
   );
+}
+
+function WorkbenchPanel({
+  agentSlug,
+  taskId,
+  onClose,
+}: {
+  agentSlug: string | null;
+  taskId: string | null;
+  onClose: () => void;
+}) {
+  return (
+    <div className="app-panel active">
+      <AgentWorkbench agentSlug={agentSlug} taskId={taskId} onClose={onClose} />
+    </div>
+  );
+}
+
+function isWikiShellApp(app: string | null): app is WikiTab {
+  return app === "wiki" || app === "notebooks" || app === "reviews";
+}
+
+function selectWikiShellTab(
+  tab: WikiTab,
+  setCurrentApp: (app: string | null) => void,
+  setNotebookRoute: (
+    agentSlug: string | null,
+    entrySlug: string | null,
+  ) => void,
+) {
+  if (tab === "notebooks") {
+    setNotebookRoute(null, null);
+  }
+  setCurrentApp(tab === "reviews" ? "reviews" : tab);
 }
 
 // ── App root ────────────────────────────────────────────────────

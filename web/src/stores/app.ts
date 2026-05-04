@@ -119,6 +119,10 @@ export interface AppStore {
   setCurrentChannel: (ch: string) => void;
   currentApp: string | null; // null = messages view
   setCurrentApp: (app: string | null) => void;
+  workbenchAgentSlug: string | null;
+  workbenchTaskId: string | null;
+  openAgentWorkbench: (agentSlug: string, taskId?: string | null) => void;
+  setWorkbenchRoute: (agentSlug: string | null, taskId: string | null) => void;
 
   // Channel metadata (DM info, etc.)
   channelMeta: Record<string, ChannelMeta>;
@@ -241,6 +245,22 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
     set({ currentApp: app });
   },
+  workbenchAgentSlug: null,
+  workbenchTaskId: null,
+  openAgentWorkbench: (agentSlug, taskId = null) =>
+    set({
+      currentApp: "workbench",
+      workbenchAgentSlug: agentSlug,
+      workbenchTaskId: taskId,
+      activeAgentSlug: null,
+    }),
+  setWorkbenchRoute: (agentSlug, taskId) =>
+    set({
+      currentApp: "workbench",
+      workbenchAgentSlug: agentSlug,
+      workbenchTaskId: taskId,
+      activeAgentSlug: null,
+    }),
 
   channelMeta: {},
   setChannelMeta: (slug, meta) =>
@@ -404,6 +424,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
       wikiLookupQuery: null,
       notebookAgentSlug: null,
       notebookEntrySlug: null,
+      workbenchAgentSlug: null,
+      workbenchTaskId: null,
     }),
 
   wikiPath: null,

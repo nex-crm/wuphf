@@ -6,6 +6,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { post } from "../../api/client";
 import { getOfficeTasks, type Task } from "../../api/tasks";
 import { formatRelativeTime } from "../../lib/format";
+import { useAppStore } from "../../stores/app";
 import { showNotice } from "../ui/Toast";
 import { TaskDetailModal, taskMemoryWorkflowBadge } from "./TaskDetailModal";
 
@@ -126,6 +127,7 @@ function useTaskMove() {
 }
 
 export function TasksApp() {
+  const openAgentWorkbench = useAppStore((s) => s.openAgentWorkbench);
   const { data, isLoading, error } = useQuery({
     queryKey: ["office-tasks"],
     queryFn: () => getOfficeTasks({ includeDone: true }),
@@ -290,16 +292,24 @@ export function TasksApp() {
                 <span>{COLUMN_LABEL[status]}</span>
                 <span className="task-column-count">{column.length}</span>
               </div>
-              {column.map((task) => (
-                <TaskCard
-                  key={task.id}
-                  task={task}
-                  isDragging={draggingId === task.id}
-                  onDragStart={handleDragStart(task.id)}
-                  onDragEnd={handleDragEnd}
-                  onOpen={() => setSelectedTaskId(task.id)}
-                />
-              ))}
+              {column.map((task) => {
+                const ownerSlug = task.owner;
+                return (
+                  <TaskCard
+                    key={task.id}
+                    task={task}
+                    isDragging={draggingId === task.id}
+                    onDragStart={handleDragStart(task.id)}
+                    onDragEnd={handleDragEnd}
+                    onOpen={() => setSelectedTaskId(task.id)}
+                    onOpenWorkbench={
+                      ownerSlug && ownerSlug !== HUMAN_SLUG
+                        ? () => openAgentWorkbench(ownerSlug, task.id)
+                        : undefined
+                    }
+                  />
+                );
+              })}
             </div>
           );
         })}
@@ -320,6 +330,7 @@ interface TaskCardProps {
   onDragStart: (event: DragEvent<HTMLDivElement>) => void;
   onDragEnd: (event: DragEvent<HTMLDivElement>) => void;
   onOpen: () => void;
+  onOpenWorkbench?: () => void;
 }
 
 function TaskCard({
@@ -328,6 +339,7 @@ function TaskCard({
   onDragStart,
   onDragEnd,
   onOpen,
+  onOpenWorkbench,
 }: TaskCardProps) {
   const status = normalizeStatus(task.status);
   const timestamp = task.updated_at ?? task.created_at;
@@ -339,6 +351,12 @@ function TaskCard({
       event.preventDefault();
       onOpen();
     }
+  }
+
+  function handleOpenWorkbench(event: React.MouseEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    onOpenWorkbench?.();
   }
 
   return (
@@ -389,6 +407,15 @@ function TaskCard({
             {memoryBadge.label}
           </span>
         )}
+        {onOpenWorkbench ? (
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm task-card-workbench"
+            onClick={handleOpenWorkbench}
+          >
+            Workbench
+          </button>
+        ) : null}
       </div>
     </div>
   );
