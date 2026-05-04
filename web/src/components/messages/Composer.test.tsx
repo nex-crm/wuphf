@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import * as Toast from "../ui/Toast";
 import { __test__ } from "./Composer";
 
 const {
@@ -108,6 +109,7 @@ describe("unknown slash commands", () => {
 
   it("are consumed instead of sent as chat messages", () => {
     const sendAsMessage = vi.fn();
+    const showNotice = vi.spyOn(Toast, "showNotice").mockReturnValue();
 
     const consumed = handleSlashCommand("/object list", {
       leadSlug: "ceo",
@@ -116,5 +118,9 @@ describe("unknown slash commands", () => {
 
     expect(consumed).toBe(true);
     expect(sendAsMessage).not.toHaveBeenCalled();
+    expect(showNotice).toHaveBeenCalledWith(
+      "Unknown command: /object. Try /help.",
+      "info",
+    );
   });
 });
