@@ -1,5 +1,5 @@
 import { useChannels } from "../../hooks/useChannels";
-import { SIDEBAR_APPS } from "../../lib/constants";
+import { appTitle } from "../../lib/constants";
 import type { Theme } from "../../stores/app";
 import { useAppStore } from "../../stores/app";
 
@@ -13,10 +13,6 @@ function themeLabel(t: Theme): string {
   if (t === "noir-gold") return "Noir Gold";
   if (t === "nex-dark") return "Nex Dark";
   return "Nex Light";
-}
-
-function appTitle(app: string): string {
-  return SIDEBAR_APPS.find((item) => item.id === app)?.name ?? app;
 }
 
 export function ChannelHeader() {

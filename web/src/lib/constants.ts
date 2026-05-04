@@ -17,6 +17,13 @@ export const SIDEBAR_APPS = [
   { id: "settings", icon: "\u2699", name: "Settings" },
 ] as const;
 
+export function appTitle(app: string): string {
+  return (
+    SIDEBAR_APPS.find((item) => item.id === app)?.name ??
+    app.replace(/-/g, " ").replace(/\b\w/g, (char) => char.toUpperCase())
+  );
+}
+
 export const ONBOARDING_COPY = {
   step1_headline: "AI employees with a shared brain",
   step1_subhead:

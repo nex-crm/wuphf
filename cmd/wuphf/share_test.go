@@ -138,6 +138,29 @@ func TestShareJoinInvalidInviteReturnsGone(t *testing.T) {
 	}
 }
 
+func TestShareJoinBrokerFailureReturnsBadGateway(t *testing.T) {
+	broker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/humans/invites/accept" {
+			t.Fatalf("unexpected broker request: %s %s", r.Method, r.URL.Path)
+		}
+		http.Error(w, `{"error":"temporarily_unavailable"}`, http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(broker.Close)
+
+	shareSrv := httptest.NewServer(newShareHandler(broker.URL, "broker-token", nil))
+	t.Cleanup(shareSrv.Close)
+
+	resp, err := http.PostForm(shareSrv.URL+"/join/retry-token", nil)
+	if err != nil {
+		t.Fatalf("join submit: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadGateway {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("join status = %d, want 502 body=%s", resp.StatusCode, string(body))
+	}
+}
+
 func TestShareProxyDoesNotExposeBrokerToken(t *testing.T) {
 	b := team.NewBrokerAt(t.TempDir() + "/broker-state.json")
 	if err := b.StartOnPort(0); err != nil {

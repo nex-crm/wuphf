@@ -475,7 +475,14 @@ func newShareHandler(brokerURL, brokerToken string, onJoin func()) http.Handler 
 		}
 		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
-			writeShareJoinPage(w, http.StatusGone, token, "This invite is no longer valid. Ask the host for a new team-member invite.")
+			switch {
+			case resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusGone:
+				writeShareJoinPage(w, http.StatusGone, token, "This invite is no longer valid. Ask the host for a new team-member invite.")
+			case resp.StatusCode >= 500:
+				writeShareJoinPage(w, http.StatusBadGateway, token, "WUPHF could not accept this invite right now. Ask the host to retry sharing.")
+			default:
+				writeShareJoinPage(w, resp.StatusCode, token, "This invite could not be accepted. Ask the host for a fresh team-member invite.")
+			}
 			return
 		}
 		for _, cookie := range resp.Cookies() {

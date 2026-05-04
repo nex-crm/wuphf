@@ -26,6 +26,7 @@ function formatSessionTime(value?: string): string {
 export function HealthCheckApp() {
   const queryClient = useQueryClient();
   const [inviteCopied, setInviteCopied] = useState(false);
+  const [shareMutationError, setShareMutationError] = useState("");
   const brokerConnected = useAppStore((s) => s.brokerConnected);
   const { data, isLoading, error } = useQuery({
     queryKey: ["health"],
@@ -53,14 +54,32 @@ export function HealthCheckApp() {
   });
   const startShareMutation = useMutation({
     mutationFn: () => startShare(),
-    onSuccess: (status) => {
-      queryClient.setQueryData(["share", "status"], status);
+    onMutate: () => {
+      setShareMutationError("");
+    },
+    onSuccess: (share) => {
+      queryClient.setQueryData(["share", "status"], share);
+      setShareMutationError("");
+    },
+    onError: (err) => {
+      setShareMutationError(
+        err instanceof Error ? err.message : "Could not create invite.",
+      );
     },
   });
   const stopShareMutation = useMutation({
     mutationFn: () => stopShare(),
-    onSuccess: (status) => {
-      queryClient.setQueryData(["share", "status"], status);
+    onMutate: () => {
+      setShareMutationError("");
+    },
+    onSuccess: (share) => {
+      queryClient.setQueryData(["share", "status"], share);
+      setShareMutationError("");
+    },
+    onError: (err) => {
+      setShareMutationError(
+        err instanceof Error ? err.message : "Could not stop sharing.",
+      );
     },
   });
 
@@ -119,13 +138,9 @@ export function HealthCheckApp() {
       ? `${data.session_mode} / ${data.one_on_one_agent}`
       : data?.session_mode;
   const memoryLabel = data?.memory_backend_active || data?.memory_backend;
-  const shareError =
-    startShareMutation.data?.error ||
-    stopShareMutation.data?.error ||
-    shareStatus?.error;
   const shareRunning = Boolean(shareStatus?.running);
-  const shareInviteURL =
-    startShareMutation.data?.invite_url || shareStatus?.invite_url || "";
+  const shareError = shareMutationError || shareStatus?.error;
+  const shareInviteURL = shareRunning ? shareStatus?.invite_url || "" : "";
   const shareNetworkLabel = [shareStatus?.interface, shareStatus?.bind]
     .filter(Boolean)
     .join(" / ");
@@ -300,12 +315,12 @@ export function HealthCheckApp() {
                   </button>
                 </div>
               ) : null}
-              {shareNetworkLabel ? (
+              {shareRunning && shareNetworkLabel ? (
                 <div className="app-card-meta" style={{ marginTop: 8 }}>
                   Sharing on {shareNetworkLabel}
                 </div>
               ) : null}
-              {shareStatus?.expires_at ? (
+              {shareRunning && shareStatus?.expires_at ? (
                 <div className="app-card-meta" style={{ marginTop: 4 }}>
                   Invite expires {formatSessionTime(shareStatus.expires_at)}
                 </div>
