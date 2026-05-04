@@ -12,8 +12,18 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Message, SlashCommandDescriptor } from "../../api/client";
 import { FALLBACK_SLASH_COMMANDS } from "../../hooks/useCommands";
 import { useMessages } from "../../hooks/useMessages";
-import { useAppStore } from "../../stores/app";
+import { useChannelSlug } from "../../routes/useCurrentRoute";
 import { __test__, ConsoleApp } from "./ConsoleApp";
+
+// ConsoleApp reads the current channel via useChannelSlug. Mock it so
+// tests can swap the active channel without rendering inside a
+// RouterProvider — useMatches/useChannelSlug otherwise throw outside
+// the router context.
+vi.mock("../../routes/useCurrentRoute", () => ({
+  useChannelSlug: vi.fn(),
+}));
+
+const mockUseChannelSlug = vi.mocked(useChannelSlug);
 
 vi.mock("../../api/client", async () => {
   const actual =
@@ -55,10 +65,7 @@ function wrap(ui: ReactNode) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  useAppStore.setState({
-    currentApp: "console",
-    currentChannel: "general",
-  });
+  mockUseChannelSlug.mockReturnValue("general");
 });
 
 describe("ConsoleApp helpers", () => {
@@ -155,8 +162,8 @@ describe("ConsoleApp helpers", () => {
 });
 
 describe("<ConsoleApp>", () => {
-  it("falls back to general when the current channel is blank", () => {
-    useAppStore.setState({ currentChannel: "" });
+  it("renders the active channel from the URL", () => {
+    mockUseChannelSlug.mockReturnValue("general");
 
     render(wrap(<ConsoleApp />));
 
@@ -166,7 +173,7 @@ describe("<ConsoleApp>", () => {
   });
 
   it("clears local prompt echoes when switching channels", async () => {
-    render(wrap(<ConsoleApp />));
+    const { rerender } = render(wrap(<ConsoleApp />));
 
     const input = screen.getByTestId("console-input");
     fireEvent.change(input, { target: { value: "/ask launch plan" } });
@@ -175,7 +182,8 @@ describe("<ConsoleApp>", () => {
     expect(screen.getByText("/ask launch plan")).toBeInTheDocument();
 
     act(() => {
-      useAppStore.getState().setCurrentChannel("launch");
+      mockUseChannelSlug.mockReturnValue("launch");
+      rerender(wrap(<ConsoleApp />));
     });
 
     await waitFor(() => {

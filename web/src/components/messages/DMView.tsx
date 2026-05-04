@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 
 import { useMessages } from "../../hooks/useMessages";
-import { isDMChannel, useAppStore } from "../../stores/app";
+import { useCurrentRoute } from "../../routes/useCurrentRoute";
 import { AgentTerminal } from "../agents/AgentTerminal";
 import { Composer } from "./Composer";
 import { InterviewBar } from "./InterviewBar";
@@ -9,11 +9,14 @@ import { MessageBubble } from "./MessageBubble";
 import { TypingIndicator } from "./TypingIndicator";
 
 export function DMView() {
-  const currentChannel = useAppStore((s) => s.currentChannel);
-  const channelMeta = useAppStore((s) => s.channelMeta);
-  const dm = isDMChannel(currentChannel, channelMeta);
-  const dmAgentSlug = dm?.agentSlug ?? null;
-  const { data: messages = [] } = useMessages(currentChannel);
+  // DMView only mounts under MainContent's `dm` branch in RootRoute, so
+  // a non-DM route shape here is a programming error rather than a
+  // user-reachable state. The "" fallbacks below keep hook order stable
+  // before the kind-check guard renders null.
+  const route = useCurrentRoute();
+  const dmAgentSlug = route.kind === "dm" ? route.agentSlug : "";
+  const channelSlug = route.kind === "dm" ? route.channelSlug : "";
+  const { data: messages = [] } = useMessages(channelSlug);
   const messagesRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll messages
@@ -22,6 +25,8 @@ export function DMView() {
       messagesRef.current.scrollTop = messagesRef.current.scrollHeight;
     }
   }, []);
+
+  if (route.kind !== "dm") return null;
 
   return (
     <>

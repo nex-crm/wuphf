@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef } from "react";
 import type { Message } from "../../api/client";
 import { useMessages } from "../../hooks/useMessages";
 import { formatDateLabel } from "../../lib/format";
+import { useChannelSlug } from "../../routes/useCurrentRoute";
 import { useAppStore } from "../../stores/app";
 import { MessageBubble } from "./MessageBubble";
 
@@ -37,7 +38,7 @@ export function messagesAfterClearMarker(
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
 export function MessageFeed() {
-  const currentChannel = useAppStore((s) => s.currentChannel);
+  const currentChannel = useChannelSlug() ?? "general";
   const clearMarkerId = useAppStore(
     (s) => s.clearedMessageIdsByChannel[currentChannel] ?? null,
   );

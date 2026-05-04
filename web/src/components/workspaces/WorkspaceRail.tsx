@@ -27,7 +27,7 @@ import {
   useWorkspacesList,
   type Workspace,
 } from "../../api/workspaces";
-import { useAppStore } from "../../stores/app";
+import { channelRoute, dmRoute, router } from "../../lib/router";
 import { showNotice } from "../ui/Toast";
 import { CreateWorkspaceModal } from "./CreateWorkspaceModal";
 import { useRestoreToast } from "./RestoreToast";
@@ -355,7 +355,6 @@ export function WorkspaceRail({
   navigate = defaultNavigate,
 }: WorkspaceRailProps = {}) {
   const { data, isLoading } = useWorkspacesList();
-  const setCurrentApp = useAppStore((s) => s.setCurrentApp);
 
   const [hoveredSlug, setHoveredSlug] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
@@ -446,8 +445,19 @@ export function WorkspaceRail({
   const handleClick = useCallback(
     (ws: Workspace) => {
       if (ws.is_active || ws.name === activeName) {
-        // Already here — bring focus back to the office.
-        setCurrentApp(null);
+        // Already here — bring focus back to the office. If the user is
+        // currently on a non-conversation surface (an app panel, wiki,
+        // notebooks, reviews), drop them back to #general; if they are
+        // already in a conversation, this click is a no-op.
+        const leaf = router.state.matches.at(-1);
+        const onConversation =
+          leaf?.routeId === channelRoute.id || leaf?.routeId === dmRoute.id;
+        if (!onConversation) {
+          void router.navigate({
+            to: "/channels/$channelSlug",
+            params: { channelSlug: "general" },
+          });
+        }
         return;
       }
       if (ws.state === "running") {
@@ -468,7 +478,7 @@ export function WorkspaceRail({
       // starting / stopping — just notify; user will retry.
       showNotice(`Workspace '${ws.name}' is ${ws.state}.`, "info");
     },
-    [activeName, navigate, setCurrentApp],
+    [activeName, navigate],
   );
 
   const openKebab = useCallback((ws: Workspace, x: number, y: number) => {
@@ -597,7 +607,10 @@ export function WorkspaceRail({
             setKebab(null);
           }}
           onSettings={() => {
-            setCurrentApp("settings");
+            void router.navigate({
+              to: "/apps/$appId",
+              params: { appId: "settings" },
+            });
             setKebab(null);
           }}
           onShred={() => {

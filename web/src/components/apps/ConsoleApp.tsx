@@ -12,7 +12,12 @@ import { getOfficeTasks } from "../../api/tasks";
 import { FALLBACK_SLASH_COMMANDS } from "../../hooks/useCommands";
 import { useOfficeMembers } from "../../hooks/useMembers";
 import { useMessages } from "../../hooks/useMessages";
-import { useAppStore } from "../../stores/app";
+import { router } from "../../lib/router";
+import { useChannelSlug } from "../../routes/useCurrentRoute";
+
+function navigateToApp(appId: string): void {
+  void router.navigate({ to: "/apps/$appId", params: { appId } });
+}
 
 interface CommandRow {
   name: string;
@@ -85,9 +90,8 @@ function openRequestCount(requests: Array<{ status?: string }>): number {
 }
 
 export function ConsoleApp() {
-  const currentChannel = useAppStore((s) => s.currentChannel);
-  const channelName = currentChannel || "general";
-  const setCurrentApp = useAppStore((s) => s.setCurrentApp);
+  const currentChannel = useChannelSlug() ?? "general";
+  const channelName = currentChannel;
   const [draft, setDraft] = useState("");
   const [localLines, setLocalLines] = useState<TerminalLine[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -249,7 +253,7 @@ export function ConsoleApp() {
             <button
               type="button"
               className="console-stat"
-              onClick={() => setCurrentApp("tasks")}
+              onClick={() => navigateToApp("tasks")}
             >
               <CheckCircle />
               <span>
@@ -260,7 +264,7 @@ export function ConsoleApp() {
             <button
               type="button"
               className="console-stat"
-              onClick={() => setCurrentApp("requests")}
+              onClick={() => navigateToApp("requests")}
             >
               <ChatBubble />
               <span>

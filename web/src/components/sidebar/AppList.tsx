@@ -21,7 +21,22 @@ import { getRequests } from "../../api/client";
 import { fetchReviews } from "../../api/notebook";
 import { useOverflow } from "../../hooks/useOverflow";
 import { SIDEBAR_APPS } from "../../lib/constants";
-import { useAppStore } from "../../stores/app";
+import { router } from "../../lib/router";
+import { useChannelSlug, useCurrentApp } from "../../routes/useCurrentRoute";
+
+// Sidebar app id → typed router target. The "wiki" sidebar entry routes to
+// the wiki catalog; notebooks and reviews keep their dedicated routes and
+// still light up the Wiki sidebar item via WIKI_SURFACE_APPS.
+function navigateToSidebarApp(appId: string): void {
+  if (appId === "wiki") {
+    void router.navigate({ to: "/wiki" });
+    return;
+  }
+  void router.navigate({
+    to: "/apps/$appId",
+    params: { appId },
+  });
+}
 
 // Notebooks and reviews render inside the Wiki app shell via tabs, so the
 // 'Wiki' sidebar entry lights up for any of those three currentApp values.
@@ -44,9 +59,8 @@ const APP_ICONS: Record<string, ComponentType<{ className?: string }>> = {
 };
 
 export function AppList() {
-  const currentApp = useAppStore((s) => s.currentApp);
-  const setCurrentApp = useAppStore((s) => s.setCurrentApp);
-  const currentChannel = useAppStore((s) => s.currentChannel);
+  const currentApp = useCurrentApp();
+  const currentChannel = useChannelSlug() ?? "general";
 
   const { data: requestsData } = useQuery({
     queryKey: ["requests-badge", currentChannel],
@@ -91,7 +105,7 @@ export function AppList() {
               type="button"
               key={app.id}
               className={`sidebar-item${isActive ? " active" : ""}`}
-              onClick={() => setCurrentApp(app.id)}
+              onClick={() => navigateToSidebarApp(app.id)}
             >
               {Icon ? (
                 <Icon className="sidebar-item-icon" />

@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 
-import { isDMChannel, useAppStore } from "../../stores/app";
+import { useCurrentRoute } from "../../routes/useCurrentRoute";
 import { AgentPanel } from "../agents/AgentPanel";
 import { ThreadPanel } from "../messages/ThreadPanel";
 import { SearchModal } from "../search/SearchModal";
@@ -17,10 +17,8 @@ interface ShellProps {
 }
 
 export function Shell({ children }: ShellProps) {
-  const currentChannel = useAppStore((s) => s.currentChannel);
-  const currentApp = useAppStore((s) => s.currentApp);
-  const channelMeta = useAppStore((s) => s.channelMeta);
-  const inDM = !currentApp && !!isDMChannel(currentChannel, channelMeta);
+  const route = useCurrentRoute();
+  const inDM = route.kind === "dm";
 
   // The WorkspaceRail sits to the left of the existing channel sidebar
   // — both rails are flex children of `.office`. The rail is 56px wide

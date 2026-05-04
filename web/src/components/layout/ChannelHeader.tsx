@@ -1,4 +1,5 @@
 import { useChannels } from "../../hooks/useChannels";
+import { useCurrentRoute } from "../../routes/useCurrentRoute";
 import type { Theme } from "../../stores/app";
 import { useAppStore } from "../../stores/app";
 
@@ -14,19 +15,54 @@ function themeLabel(t: Theme): string {
   return "Nex Light";
 }
 
+function headerTitleAndDesc(
+  route: ReturnType<typeof useCurrentRoute>,
+  channels: { slug: string; description?: string }[],
+): { title: string; desc: string } {
+  if (route.kind === "channel") {
+    const ch = channels.find((c) => c.slug === route.channelSlug);
+    return {
+      title: `# ${route.channelSlug}`,
+      desc: ch?.description || "",
+    };
+  }
+  if (route.kind === "dm") {
+    return { title: `@${route.agentSlug}`, desc: "" };
+  }
+  if (route.kind === "app") {
+    return {
+      title: route.appId.charAt(0).toUpperCase() + route.appId.slice(1),
+      desc: "",
+    };
+  }
+  if (
+    route.kind === "wiki" ||
+    route.kind === "wiki-article" ||
+    route.kind === "wiki-lookup"
+  ) {
+    return { title: "Wiki", desc: "" };
+  }
+  if (
+    route.kind === "notebook-catalog" ||
+    route.kind === "notebook-agent" ||
+    route.kind === "notebook-entry"
+  ) {
+    return { title: "Notebooks", desc: "" };
+  }
+  if (route.kind === "reviews") {
+    return { title: "Reviews", desc: "" };
+  }
+  return { title: "", desc: "" };
+}
+
 export function ChannelHeader() {
-  const currentChannel = useAppStore((s) => s.currentChannel);
-  const currentApp = useAppStore((s) => s.currentApp);
+  const route = useCurrentRoute();
   const setSearchOpen = useAppStore((s) => s.setSearchOpen);
   const theme = useAppStore((s) => s.theme);
   const setTheme = useAppStore((s) => s.setTheme);
   const { data: channels = [] } = useChannels();
 
-  const channel = channels.find((c) => c.slug === currentChannel);
-  const title = currentApp
-    ? currentApp.charAt(0).toUpperCase() + currentApp.slice(1)
-    : `# ${currentChannel}`;
-  const desc = currentApp ? "" : channel?.description || "";
+  const { title, desc } = headerTitleAndDesc(route, channels);
   const targetTheme = nextTheme(theme);
 
   return (

@@ -8,7 +8,9 @@ import { listAgentLogTasks, type TaskLogSummary } from "../../api/tasks";
 import { useDefaultHarness } from "../../hooks/useConfig";
 import { useChannelMembers, useOfficeMembers } from "../../hooks/useMembers";
 import { resolveHarness } from "../../lib/harness";
-import { directChannelSlug, useAppStore } from "../../stores/app";
+import { router } from "../../lib/router";
+import { useChannelSlug, useCurrentRoute } from "../../routes/useCurrentRoute";
+import { useAppStore } from "../../stores/app";
 import { confirm } from "../ui/ConfirmDialog";
 import { HarnessBadge } from "../ui/HarnessBadge";
 import { PixelAvatar } from "../ui/PixelAvatar";
@@ -96,12 +98,8 @@ function LogsSection({ slug }: { slug: string }) {
 }
 
 function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
-  const enterDM = useAppStore((s) => s.enterDM);
   const setActiveAgentSlug = useAppStore((s) => s.setActiveAgentSlug);
-  const currentChannel = useAppStore((s) => s.currentChannel);
-  const currentApp = useAppStore((s) => s.currentApp);
-  const setCurrentChannel = useAppStore((s) => s.setCurrentChannel);
-  const setCurrentApp = useAppStore((s) => s.setCurrentApp);
+  const currentChannel = useChannelSlug() ?? "general";
   const queryClient = useQueryClient();
   const [dmLoading, setDmLoading] = useState(false);
   const [view, setView] = useState<"stream" | "logs">("stream");
@@ -126,21 +124,31 @@ function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
 
   async function handleOpenDM() {
     setDmLoading(true);
-    const optimisticChannel = directChannelSlug(agent.slug);
-    enterDM(agent.slug, optimisticChannel);
+    // Snapshot the current location so we can revert on broker error. We
+    // hold the raw href and replay it via router.history.push (not
+    // router.navigate({to}), which expects a route-template path —
+    // passing a concrete href would fail to resolve, especially for
+    // /wiki/lookup?q=… etc.).
+    const prevHref = router.state.location.href;
+    const optimisticHref = router.buildLocation({
+      to: "/dm/$agentSlug",
+      params: { agentSlug: agent.slug },
+    }).href;
+    void router.navigate({
+      to: "/dm/$agentSlug",
+      params: { agentSlug: agent.slug },
+    });
     setActiveAgentSlug(null);
     try {
-      const result = await createDM(agent.slug);
-      const channel = result.slug || optimisticChannel;
-      if (channel !== optimisticChannel) {
-        enterDM(agent.slug, channel);
-      }
+      await createDM(agent.slug);
       void queryClient.invalidateQueries({ queryKey: ["channels"] });
     } catch (err: unknown) {
-      if (useAppStore.getState().currentChannel === optimisticChannel) {
-        setCurrentChannel(currentChannel);
-        setCurrentApp(currentApp);
-        setActiveAgentSlug(agent.slug);
+      // Only revert if the user hasn't already navigated elsewhere.
+      // Don't re-open the panel on error — the toast tells the user what
+      // happened, and re-opening a panel they may have intentionally
+      // closed during the in-flight request is surprising.
+      if (router.state.location.href === optimisticHref) {
+        router.history.push(prevHref);
       }
       const message = err instanceof Error ? err.message : "Failed to open DM";
       showNotice(message, "error");
@@ -363,8 +371,7 @@ function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
 export function AgentPanel() {
   const activeAgentSlug = useAppStore((s) => s.activeAgentSlug);
   const setActiveAgentSlug = useAppStore((s) => s.setActiveAgentSlug);
-  const currentChannel = useAppStore((s) => s.currentChannel);
-  const currentApp = useAppStore((s) => s.currentApp);
+  const route = useCurrentRoute();
   const { data: members = [] } = useOfficeMembers();
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -373,17 +380,16 @@ export function AgentPanel() {
     [setActiveAgentSlug],
   );
 
-  // Close when user navigates to a different sidebar section. The intent is
-  // "nav away from the agent panel" — driven by currentChannel / currentApp,
-  // NOT by activeAgentSlug itself. The previous version depended on
-  // activeAgentSlug and closed whenever one was set, so clicking any agent
-  // instantly un-selected it and the panel never mounted (React #31 guard
-  // e2e regression).
+  // Close when the user navigates to a different surface. The intent is
+  // "nav away from the agent panel" — driven by route changes, NOT by
+  // activeAgentSlug itself (which would close on every open). Using a
+  // route-id + serialized-params dep matches what URL→store edges
+  // previously gave us via currentChannel / currentApp.
+  const routeKey = `${route.kind}:${JSON.stringify(route)}`;
   useEffect(() => {
-    void currentChannel;
-    void currentApp;
+    void routeKey;
     close();
-  }, [currentChannel, currentApp, close]);
+  }, [routeKey, close]);
 
   // Close on outside click — ignore clicks on sidebar agent items that would
   // just re-open the panel, and ignore clicks inside the panel itself.

@@ -2,7 +2,8 @@ import { useQuery } from "@tanstack/react-query";
 
 import { getHealth, type HealthResponse } from "../../api/platform";
 import { useOfficeMembers } from "../../hooks/useMembers";
-import { isDMChannel, useAppStore } from "../../stores/app";
+import { useCurrentRoute } from "../../routes/useCurrentRoute";
+import { useAppStore } from "../../stores/app";
 import { Kbd } from "../ui/Kbd";
 import { StatusPill } from "../workspaces/StatusPill";
 
@@ -11,13 +12,11 @@ import { StatusPill } from "../workspaces/StatusPill";
  * mode (office vs 1:1), agent count, broker connection, and runtime provider.
  */
 export function StatusBar() {
-  const currentChannel = useAppStore((s) => s.currentChannel);
-  const currentApp = useAppStore((s) => s.currentApp);
-  const channelMeta = useAppStore((s) => s.channelMeta);
+  const route = useCurrentRoute();
   const brokerConnected = useAppStore((s) => s.brokerConnected);
   const setComposerHelpOpen = useAppStore((s) => s.setComposerHelpOpen);
   const { data: members = [] } = useOfficeMembers();
-  const dm = !currentApp ? isDMChannel(currentChannel, channelMeta) : null;
+  const dm = route.kind === "dm" ? { agentSlug: route.agentSlug } : null;
 
   const { data: health } = useQuery<HealthResponse>({
     queryKey: ["health"],
@@ -31,11 +30,29 @@ export function StatusBar() {
       m.slug && m.slug !== "human" && m.slug !== "you" && m.slug !== "system",
   ).length;
 
-  const channelLabel = currentApp
-    ? currentApp
-    : dm
-      ? `@${dm.agentSlug}`
-      : `# ${currentChannel}`;
+  const channelLabel = (() => {
+    switch (route.kind) {
+      case "channel":
+        return `# ${route.channelSlug}`;
+      case "dm":
+        return `@${route.agentSlug}`;
+      case "app":
+        return route.appId;
+      case "wiki":
+      case "wiki-article":
+        return "wiki";
+      case "wiki-lookup":
+        return "wiki-lookup";
+      case "notebook-catalog":
+      case "notebook-agent":
+      case "notebook-entry":
+        return "notebooks";
+      case "reviews":
+        return "reviews";
+      default:
+        return "";
+    }
+  })();
   const modeLabel = dm ? "1:1" : "office";
   const provider = health?.provider;
   const providerModel = health?.provider_model?.trim();
