@@ -105,6 +105,13 @@ func (l *Launcher) LaunchWeb(webPort int) error {
 	if err := l.broker.Start(); err != nil {
 		return fmt.Errorf("start broker: %w", err)
 	}
+
+	if err := RegisterTransports(newBrokerTransportHost(l.broker)); err != nil {
+		// Non-fatal: a misconfigured optional adapter should not prevent the
+		// web UI from starting.
+		fmt.Fprintf(os.Stderr, "warning: transport registration: %v\n", err)
+	}
+
 	if err := writeOfficePIDFile(); err != nil {
 		// Stop the broker we just started so we don't leave an
 		// orphaned listener bound to the broker port. Without this,

@@ -199,6 +199,8 @@ Inside the office, run `/connect openclaw`, paste your gateway URL (default `ws:
 
 WUPHF authenticates to the gateway using an Ed25519 keypair (persisted at `~/.wuphf/openclaw/identity.json`, 0600), signed against the server-issued nonce during every connect. OpenClaw grants zero scopes to token-only clients, so device pairing is mandatory — on loopback the gateway approves silently on first use.
 
+Want to add a new integration? See [docs/ADD-A-TRANSPORT.md](docs/ADD-A-TRANSPORT.md).
+
 ## External Actions
 
 To let agents take real actions (send emails, update CRMs, etc.), WUPHF ships with two action providers. Pick whichever fits your style.

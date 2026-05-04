@@ -64,6 +64,12 @@ func (l *Launcher) Launch() error {
 		return fmt.Errorf("start broker: %w", err)
 	}
 
+	if err := RegisterTransports(newBrokerTransportHost(l.broker)); err != nil {
+		// Non-fatal: a misconfigured optional adapter (e.g. bad Telegram token)
+		// should not prevent the office from starting.
+		fmt.Fprintf(os.Stderr, "warning: transport registration: %v\n", err)
+	}
+
 	// Pre-seed any default skills declared by the pack (idempotent).
 	// Always seed the cross-cutting productivity skills (grill-me, tdd,
 	// diagnose, etc., adapted from github.com/mattpocock/skills) on top of
