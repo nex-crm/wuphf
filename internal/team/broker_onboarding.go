@@ -96,7 +96,8 @@ func (b *Broker) onboardingCompleteFn(task string, skipTask bool, blueprintID st
 
 	// Sync the company name captured during onboarding to the workspace
 	// registry so the rail can display it without a separate API call.
-	if companyName := strings.TrimSpace(companyName); companyName != "" {
+	companyName = strings.TrimSpace(companyName)
+	if companyName != "" {
 		if runtimeHome := config.RuntimeHomeDir(); runtimeHome != "" {
 			if err := workspaces.UpdateCompanyNameByRuntimeHome(runtimeHome, companyName); err != nil {
 				log.Printf("onboarding: sync company name to registry: %v", err)
