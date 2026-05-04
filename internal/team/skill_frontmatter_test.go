@@ -45,7 +45,8 @@ func TestRenderAndParseSkillMarkdown_RoundTrip(t *testing.T) {
 						SourceArticles:       []string{"team/playbooks/retro.md"},
 						SourceSignals:        []string{"team/agents/eng/notebook/retro-notes.md"},
 						CreatedBy:            "archivist",
-						Status:               "proposed",
+						Status:               "disabled",
+						DisabledFromStatus:   "proposed",
 						LastSynthesizedSHA:   "abc1234",
 						LastSynthesizedTs:    "2026-04-28T12:00:00Z",
 						FactCountAtSynthesis: 42,
@@ -138,6 +139,9 @@ func TestRenderAndParseSkillMarkdown_RoundTrip(t *testing.T) {
 			}
 			if w.Status != "" && gw.Status != w.Status {
 				t.Errorf("Wuphf.Status: got %q, want %q", gw.Status, w.Status)
+			}
+			if w.DisabledFromStatus != "" && gw.DisabledFromStatus != w.DisabledFromStatus {
+				t.Errorf("Wuphf.DisabledFromStatus: got %q, want %q", gw.DisabledFromStatus, w.DisabledFromStatus)
 			}
 			if w.LastSynthesizedSHA != "" && gw.LastSynthesizedSHA != w.LastSynthesizedSHA {
 				t.Errorf("Wuphf.LastSynthesizedSHA: got %q, want %q", gw.LastSynthesizedSHA, w.LastSynthesizedSHA)
@@ -254,7 +258,8 @@ func TestTeamSkillToFrontmatter(t *testing.T) {
 		Description:        "Send a daily digest to the team.",
 		Content:            "## Steps\n\n1. Gather.\n2. Send.",
 		CreatedBy:          "archivist",
-		Status:             "proposed",
+		Status:             "disabled",
+		DisabledFromStatus: "proposed",
 		Tags:               []string{"comms", "daily"},
 		Trigger:            "Every morning",
 		WorkflowProvider:   "zapier",
@@ -293,6 +298,9 @@ func TestTeamSkillToFrontmatter(t *testing.T) {
 	if w.Status != sk.Status {
 		t.Errorf("Wuphf.Status: got %q, want %q", w.Status, sk.Status)
 	}
+	if w.DisabledFromStatus != sk.DisabledFromStatus {
+		t.Errorf("Wuphf.DisabledFromStatus: got %q, want %q", w.DisabledFromStatus, sk.DisabledFromStatus)
+	}
 	if w.WorkflowProvider != sk.WorkflowProvider {
 		t.Errorf("Wuphf.WorkflowProvider: got %q, want %q", w.WorkflowProvider, sk.WorkflowProvider)
 	}
@@ -304,5 +312,28 @@ func TestTeamSkillToFrontmatter(t *testing.T) {
 	}
 	if len(w.RelayEventTypes) != len(sk.RelayEventTypes) {
 		t.Errorf("Wuphf.RelayEventTypes len: got %d, want %d", len(w.RelayEventTypes), len(sk.RelayEventTypes))
+	}
+}
+
+func TestSpecToTeamSkillPreservesLifecycleStatusMetadata(t *testing.T) {
+	t.Parallel()
+
+	sk := specToTeamSkill(SkillFrontmatter{
+		Name:        "approval-required",
+		Description: "A proposal paused before approval.",
+		Metadata: SkillMetadata{
+			Wuphf: SkillWuphfMeta{
+				CreatedBy:          "archivist",
+				Status:             "disabled",
+				DisabledFromStatus: "proposed",
+			},
+		},
+	}, "Step 1: wait for approval.", "")
+
+	if sk.Status != "disabled" {
+		t.Errorf("Status: got %q, want disabled", sk.Status)
+	}
+	if sk.DisabledFromStatus != "proposed" {
+		t.Errorf("DisabledFromStatus: got %q, want proposed", sk.DisabledFromStatus)
 	}
 }
