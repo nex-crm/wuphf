@@ -10,7 +10,10 @@ package team
 // constructs a brokerTransportHost and passes it to Run so inbound messages flow
 // through the Host contract instead of writing to the broker directly.
 //
-// Phase 3a/3b will wire OpenClaw via MemberBoundTransport.
+// Phase 3a: OpenClaw bridge is started here via StartOpenclawBridgeFromConfig.
+// It returns (nil, nil) when no openclaw members and no gateway URL are
+// configured, so the integration remains strictly opt-in. Phase 3b will
+// refactor OpenclawBridge onto MemberBoundTransport.
 // Phase 4 will wire human-share via OfficeBoundTransport.
 //
 // See docs/ADD-A-TRANSPORT.md for the full contributor guide.
@@ -63,7 +66,26 @@ func RegisterTransports(b *Broker) (func(), error) {
 		}
 	}
 
-	// Phase 3a TODO: start OpenClaw bridge when gateway URL + token are configured.
+	// OpenClaw: start when openclaw members exist or a gateway URL is configured.
+	// StartOpenclawBridgeFromConfig returns (nil, nil) when neither condition
+	// holds — the bridge is strictly opt-in and its absence is not an error.
+	ocCtx, ocCancel := context.WithCancel(context.Background())
+	bridge, ocErr := StartOpenclawBridgeFromConfig(ocCtx, b)
+	if ocErr != nil {
+		ocCancel()
+		log.Printf("[transport] openclaw: bootstrap error — %v", ocErr)
+	} else if bridge != nil {
+		b.AttachOpenclawBridge(bridge)
+		StartOpenclawRouter(ocCtx, b, bridge)
+		stops = append(stops, func() {
+			ocCancel()
+			bridge.Stop()
+		})
+		log.Printf("[transport] openclaw: started (%d session(s))", len(bridge.SnapshotBindings()))
+	} else {
+		ocCancel()
+	}
+
 	// Phase 4 TODO: start human-share adapter when share is enabled.
 
 	return cleanup, nil
