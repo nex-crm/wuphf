@@ -30,19 +30,47 @@ export const appRoute = createRoute({
   path: ROUTE_PATHS.app,
 });
 
-export const workbenchRoute = createRoute({
+export const tasksRoute = createRoute({
   getParentRoute: () => rootRoute,
-  path: ROUTE_PATHS.workbench,
+  path: ROUTE_PATHS.tasks,
 });
 
-export const workbenchAgentRoute = createRoute({
-  getParentRoute: () => workbenchRoute,
-  path: "$agentSlug",
+export const taskDetailRoute = createRoute({
+  getParentRoute: () => tasksRoute,
+  path: "$taskId",
 });
 
-export const workbenchTaskRoute = createRoute({
-  getParentRoute: () => workbenchAgentRoute,
-  path: "tasks/$taskId",
+export const appTaskDetailRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: ROUTE_PATHS.appTaskDetail,
+});
+
+export const legacyWorkbenchRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: ROUTE_PATHS.legacyWorkbench,
+  beforeLoad: () => {
+    throw redirect({ to: "/tasks", replace: true });
+  },
+});
+
+export const legacyWorkbenchAgentRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: ROUTE_PATHS.legacyWorkbenchAgent,
+  beforeLoad: () => {
+    throw redirect({ to: "/tasks", replace: true });
+  },
+});
+
+export const legacyWorkbenchTaskRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: ROUTE_PATHS.legacyWorkbenchTask,
+  beforeLoad: ({ params }) => {
+    throw redirect({
+      to: "/tasks/$taskId",
+      params: { taskId: params.taskId },
+      replace: true,
+    });
+  },
 });
 
 // Wiki, notebook, and review routes.
@@ -113,9 +141,11 @@ export const routeTree = rootRoute.addChildren([
   indexRoute,
   channelRoute,
   dmRoute,
-  workbenchRoute.addChildren([
-    workbenchAgentRoute.addChildren([workbenchTaskRoute]),
-  ]),
+  tasksRoute.addChildren([taskDetailRoute]),
+  appTaskDetailRoute,
+  legacyWorkbenchRoute,
+  legacyWorkbenchAgentRoute,
+  legacyWorkbenchTaskRoute,
   appRoute,
   wikiRoute.addChildren([wikiIndexRoute, wikiLookupRoute, wikiArticleRoute]),
   notebooksRoute.addChildren([

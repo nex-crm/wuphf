@@ -2,18 +2,18 @@ import { useMatches } from "@tanstack/react-router";
 
 import {
   appRoute,
+  appTaskDetailRoute,
   channelRoute,
   dmRoute,
   notebookAgentRoute,
   notebookEntryRoute,
   notebooksRoute,
   reviewsRoute,
+  taskDetailRoute,
+  tasksRoute,
   wikiArticleRoute,
   wikiIndexRoute,
   wikiLookupRoute,
-  workbenchAgentRoute,
-  workbenchRoute,
-  workbenchTaskRoute,
 } from "../lib/router";
 import { directChannelSlug } from "../stores/app";
 
@@ -31,7 +31,8 @@ export type CurrentRoute =
   | { kind: "channel"; channelSlug: string }
   | { kind: "dm"; agentSlug: string; channelSlug: string }
   | { kind: "app"; appId: string }
-  | { kind: "workbench"; agentSlug: string | null; taskId: string | null }
+  | { kind: "task-board" }
+  | { kind: "task-detail"; taskId: string }
   | { kind: "wiki" }
   | { kind: "wiki-article"; articlePath: string }
   | { kind: "wiki-lookup"; query: string | null }
@@ -59,9 +60,9 @@ type CurrentRouteId =
   | typeof channelRoute.id
   | typeof dmRoute.id
   | typeof appRoute.id
-  | typeof workbenchRoute.id
-  | typeof workbenchAgentRoute.id
-  | typeof workbenchTaskRoute.id
+  | typeof tasksRoute.id
+  | typeof taskDetailRoute.id
+  | typeof appTaskDetailRoute.id
   | typeof wikiIndexRoute.id
   | typeof wikiLookupRoute.id
   | typeof wikiArticleRoute.id
@@ -74,9 +75,9 @@ const CURRENT_ROUTE_IDS = [
   channelRoute.id,
   dmRoute.id,
   appRoute.id,
-  workbenchRoute.id,
-  workbenchAgentRoute.id,
-  workbenchTaskRoute.id,
+  tasksRoute.id,
+  taskDetailRoute.id,
+  appTaskDetailRoute.id,
   wikiIndexRoute.id,
   wikiLookupRoute.id,
   wikiArticleRoute.id,
@@ -106,20 +107,14 @@ const ROUTE_DERIVERS = {
     };
   },
   [appRoute.id]: (params) => ({ kind: "app", appId: params.appId ?? "" }),
-  [workbenchRoute.id]: () => ({
-    kind: "workbench",
-    agentSlug: null,
-    taskId: null,
+  [tasksRoute.id]: () => ({ kind: "task-board" }),
+  [taskDetailRoute.id]: (params) => ({
+    kind: "task-detail",
+    taskId: params.taskId ?? "",
   }),
-  [workbenchAgentRoute.id]: (params) => ({
-    kind: "workbench",
-    agentSlug: params.agentSlug ?? null,
-    taskId: null,
-  }),
-  [workbenchTaskRoute.id]: (params) => ({
-    kind: "workbench",
-    agentSlug: params.agentSlug ?? null,
-    taskId: params.taskId ?? null,
+  [appTaskDetailRoute.id]: (params) => ({
+    kind: "task-detail",
+    taskId: params.taskId ?? "",
   }),
   [wikiIndexRoute.id]: () => ({ kind: "wiki" }),
   [wikiLookupRoute.id]: (_params, search) => ({
@@ -186,7 +181,7 @@ export function useChannelSlug(): string | null {
  * Compatibility shape for code that previously read `currentApp` from
  * the store. Returns:
  *   - an app panel id for /apps/$appId,
- *   - "workbench" for /apps/workbench route variants,
+ *   - "tasks" for /tasks route variants,
  *   - "wiki" for any wiki article or catalog route,
  *   - "wiki-lookup" for /wiki/lookup,
  *   - "notebooks" for any notebook route,
@@ -199,8 +194,9 @@ export function useCurrentApp(): string | null {
   switch (route.kind) {
     case "app":
       return route.appId;
-    case "workbench":
-      return "workbench";
+    case "task-board":
+    case "task-detail":
+      return "tasks";
     case "wiki":
     case "wiki-article":
       return "wiki";

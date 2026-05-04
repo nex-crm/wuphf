@@ -64,18 +64,30 @@ test.describe("canonical route matrix", () => {
     }
   });
 
-  test("workbench route variants mount from URL state", async ({ page }) => {
+  test("task detail route variants mount from URL state", async ({ page }) => {
     for (const route of [
-      "/#/apps/workbench",
-      "/#/apps/workbench/pm",
-      "/#/apps/workbench/pm/tasks/task-7",
+      "/#/tasks",
+      "/#/tasks/task-7",
+      "/#/apps/tasks/task-7",
     ]) {
       await expectCanonicalRoute(page, route, async (p) => {
-        await expect(p.getByLabel("Agent workbench")).toBeVisible({
-          timeout: 10_000,
-        });
+        await expect(p.getByTestId("tasks-app")).toBeVisible();
       });
     }
+  });
+
+  test("legacy workbench URLs redirect to task routes", async ({ page }) => {
+    const getErrors = collectReactErrors(page);
+    await gotoRoute(page, "/#/apps/workbench/pm/tasks/task-7");
+
+    await expect(page).toHaveURL(/#\/tasks\/task-7$/);
+    await expect(page.getByTestId("route-not-found")).toHaveCount(0);
+    await expect(page.getByTestId("tasks-app")).toBeVisible();
+    await expectNoReactErrors(
+      page,
+      getErrors,
+      "while redirecting legacy workbench task route",
+    );
   });
 
   test("wiki, notebook, and review routes mount their first-class surfaces", async ({

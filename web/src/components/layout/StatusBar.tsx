@@ -61,8 +61,9 @@ export function StatusBar() {
         return `@${route.agentSlug}`;
       case "app":
         return appTitle(route.appId);
-      case "workbench":
-        return appTitle("workbench");
+      case "task-board":
+      case "task-detail":
+        return appTitle("tasks");
       case "wiki":
       case "wiki-article":
         return appTitle("wiki");

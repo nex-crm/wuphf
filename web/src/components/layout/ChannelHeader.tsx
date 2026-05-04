@@ -32,8 +32,9 @@ function headerTitleAndDesc(
       return { title: `@${route.agentSlug}`, desc: "" };
     case "app":
       return { title: appTitle(route.appId), desc: "" };
-    case "workbench":
-      return { title: appTitle("workbench"), desc: "" };
+    case "task-board":
+    case "task-detail":
+      return { title: appTitle("tasks"), desc: "" };
     case "wiki":
     case "wiki-article":
     case "wiki-lookup":

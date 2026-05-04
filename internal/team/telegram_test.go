@@ -3,12 +3,15 @@ package team
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	teamTransport "github.com/nex-crm/wuphf/internal/team/transport"
 )
 
 func newTestBrokerWithTelegramChannel(t *testing.T, chatID string) *Broker {
@@ -318,12 +321,12 @@ func TestTelegramSendToTelegramMocked(t *testing.T) {
 
 func TestTelegramStartFailsWithoutToken(t *testing.T) {
 	b := newTestBrokerWithTelegramChannel(t, "-100")
-	transport := NewTelegramTransport(b, "")
+	tr := NewTelegramTransport(b, "")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
-	err := transport.Start(ctx)
+	err := tr.Start(ctx)
 	if err == nil || !strings.Contains(err.Error(), "bot token is empty") {
 		t.Fatalf("expected token error, got %v", err)
 	}
@@ -335,14 +338,124 @@ func TestTelegramStartFailsWithoutChannels(t *testing.T) {
 	b.mu.Lock()
 	b.channels = []teamChannel{{Slug: "general", Name: "general", Members: []string{"ceo"}}}
 	b.mu.Unlock()
-	transport := NewTelegramTransport(b, "fake-token")
+	tr := NewTelegramTransport(b, "fake-token")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
-	err := transport.Start(ctx)
+	err := tr.Start(ctx)
 	if err == nil || !strings.Contains(err.Error(), "no telegram channels") {
 		t.Fatalf("expected no channels error, got %v", err)
+	}
+}
+
+// TestTelegramTransportContractInterface verifies that TelegramTransport correctly
+// implements the transport.Transport contract methods.
+func TestTelegramTransportContractInterface(t *testing.T) {
+	b := newTestBrokerWithTelegramChannel(t, "-100999")
+	tr := NewTelegramTransport(b, "fake-token")
+
+	// Name must be stable and match the AdapterName used in Participants.
+	if tr.Name() != "telegram" {
+		t.Fatalf("Name() = %q, want %q", tr.Name(), "telegram")
+	}
+
+	// Binding must be empty: Telegram is multi-channel so there is no static
+	// ChannelSlug to declare at the transport level.
+	binding := tr.Binding()
+	if binding.ChannelSlug != "" || binding.MemberSlug != "" {
+		t.Fatalf("Binding() should be zero-value for multi-channel adapter, got %+v", binding)
+	}
+
+	// Health before Run returns disconnected (not yet connected).
+	h := tr.Health()
+	if h.State != teamTransport.HealthDisconnected {
+		t.Fatalf("Health().State before Run = %q, want %q", h.State, teamTransport.HealthDisconnected)
+	}
+
+	// Run fails without a token (same guard as Start).
+	noToken := NewTelegramTransport(b, "")
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	host := &brokerTransportHost{broker: b}
+	err := noToken.Run(ctx, host)
+	if err == nil || !strings.Contains(err.Error(), "bot token is empty") {
+		t.Fatalf("Run without token: expected token error, got %v", err)
+	}
+}
+
+// TestTelegramRouteInboundViaHost verifies that routeInbound calls
+// host.UpsertParticipant and host.ReceiveMessage and that ReceiveMessage
+// delivers the message to the broker channel.
+func TestTelegramRouteInboundViaHost(t *testing.T) {
+	b := newTestBrokerWithTelegramChannel(t, "-100999")
+	tr := NewTelegramTransport(b, "fake-token")
+	host := &brokerTransportHost{broker: b}
+
+	msg := &telegramMsg{
+		MessageID: 42,
+		Chat:      telegramChat{ID: -100999, Type: "group", Title: "Test"},
+		From:      &telegramUser{ID: 7, FirstName: "Alice", Username: "alice_dev"},
+		Text:      "hello via host",
+	}
+
+	if err := tr.routeInbound(context.Background(), host, msg); err != nil {
+		t.Fatalf("routeInbound: %v", err)
+	}
+
+	msgs := b.ChannelMessages("telegram-general")
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message in channel, got %d", len(msgs))
+	}
+	if msgs[0].Content != "hello via host" {
+		t.Fatalf("expected content %q, got %q", "hello via host", msgs[0].Content)
+	}
+	if msgs[0].Source != "telegram" {
+		t.Fatalf("expected source=telegram, got %q", msgs[0].Source)
+	}
+}
+
+// TestBrokerTransportHostReceiveMessage verifies that brokerTransportHost.ReceiveMessage
+// delivers a message to the broker via PostInboundSurfaceMessage.
+func TestBrokerTransportHostReceiveMessage(t *testing.T) {
+	b := newTestBrokerWithTelegramChannel(t, "-100777")
+	host := &brokerTransportHost{broker: b}
+
+	err := host.ReceiveMessage(context.Background(), teamTransport.Message{
+		Participant: teamTransport.Participant{AdapterName: "telegram", Key: "42", DisplayName: "Bob", Human: true},
+		Binding:     teamTransport.Binding{Scope: teamTransport.ScopeChannel, ChannelSlug: "telegram-general"},
+		Text:        "host test message",
+		ExternalID:  "msg-1",
+	})
+	if err != nil {
+		t.Fatalf("ReceiveMessage: %v", err)
+	}
+
+	msgs := b.ChannelMessages("telegram-general")
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(msgs))
+	}
+	if msgs[0].Content != "host test message" {
+		t.Fatalf("expected %q, got %q", "host test message", msgs[0].Content)
+	}
+}
+
+// TestBrokerTransportHostReceiveMessageChannelMissing verifies that
+// ReceiveMessage returns ErrBindingChannelMissing for a non-existent channel.
+func TestBrokerTransportHostReceiveMessageChannelMissing(t *testing.T) {
+	b := newTestBrokerWithTelegramChannel(t, "-100777")
+	host := &brokerTransportHost{broker: b}
+
+	err := host.ReceiveMessage(context.Background(), teamTransport.Message{
+		Participant: teamTransport.Participant{AdapterName: "telegram", Key: "1", DisplayName: "X"},
+		Binding:     teamTransport.Binding{Scope: teamTransport.ScopeChannel, ChannelSlug: "does-not-exist"},
+		Text:        "lost",
+	})
+	if err == nil {
+		t.Fatal("expected ErrBindingChannelMissing, got nil")
+	}
+	if !errors.Is(err, teamTransport.ErrBindingChannelMissing) {
+		t.Fatalf("expected ErrBindingChannelMissing, got %v", err)
 	}
 }
 

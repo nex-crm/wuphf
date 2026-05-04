@@ -33,10 +33,6 @@ function navigateToSidebarApp(appId: string): void {
     void router.navigate({ to: "/wiki" });
     return;
   }
-  if (appId === "workbench") {
-    void router.navigate({ to: "/apps/workbench" });
-    return;
-  }
   void router.navigate({
     to: "/apps/$appId",
     params: { appId },
@@ -52,7 +48,6 @@ const APP_ICONS: Record<string, ComponentType<{ className?: string }>> = {
   wiki: BookStack,
   console: Terminal,
   tasks: CheckCircle,
-  workbench: Terminal,
   requests: ClipboardCheck,
   graph: ShareAndroid,
   policies: Shield,

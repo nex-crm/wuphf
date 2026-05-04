@@ -66,7 +66,8 @@ async function expectAppRoute(
   app: (typeof APP_CASES)[number]["app"],
   content: RegExp,
 ): Promise<void> {
-  await expect(page).toHaveURL(new RegExp(`#/apps/${app}$`));
+  const expectedHash = app === "tasks" ? "#/(apps/)?tasks" : `#/apps/${app}`;
+  await expect(page).toHaveURL(new RegExp(`${expectedHash}$`));
   const appPage = page.getByTestId(`app-page-${app}`);
   await expect(appPage).toBeVisible({
     timeout: 10_000,
@@ -150,7 +151,7 @@ test.describe("app route isolation", () => {
 
     await consoleApp.locator('[data-command="/ask"]').click();
     await expect(input).toHaveValue("/ask ");
-    await input.pressSequentially("route-check");
+    await input.fill("/ask route-check");
     await expect(input).toHaveValue("/ask route-check");
     await input.press("Enter");
     await expect(input).toHaveValue("");

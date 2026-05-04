@@ -126,14 +126,22 @@ function useTaskMove() {
   );
 }
 
-function openTaskWorkbench(agentSlug: string, taskId: string): void {
+function openTaskDetailRoute(taskId: string): void {
   void router.navigate({
-    to: "/apps/workbench/$agentSlug/tasks/$taskId",
-    params: { agentSlug, taskId },
+    to: "/tasks/$taskId",
+    params: { taskId },
   });
 }
 
-export function TasksApp() {
+function closeTaskDetailRoute(): void {
+  void router.navigate({ to: "/tasks" });
+}
+
+export function TasksApp({
+  taskId: activeTaskId = null,
+}: {
+  taskId?: string | null;
+}) {
   const { data, isLoading, error } = useQuery({
     queryKey: ["office-tasks"],
     queryFn: () => getOfficeTasks({ includeDone: true }),
@@ -145,7 +153,6 @@ export function TasksApp() {
   const [dragoverStatus, setDragoverStatus] = useState<StatusGroup | null>(
     null,
   );
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
 
   if (isLoading) {
     return (
@@ -203,8 +210,8 @@ export function TasksApp() {
   const grouped = groupTasks(tasks);
   const tasksById = new Map(tasks.map((t) => [t.id, t]));
   const isDragging = draggingId !== null;
-  const selectedTask = selectedTaskId
-    ? (tasksById.get(selectedTaskId) ?? null)
+  const selectedTask = activeTaskId
+    ? (tasksById.get(activeTaskId) ?? null)
     : null;
 
   const handleDragStart =
@@ -249,6 +256,32 @@ export function TasksApp() {
       if (!task) return;
       void moveTask(task, status);
     };
+
+  if (activeTaskId) {
+    return selectedTask ? (
+      <div className="tasks-app" data-testid="tasks-app">
+        <TaskDetailModal
+          task={selectedTask}
+          onClose={closeTaskDetailRoute}
+          presentation="page"
+        />
+      </div>
+    ) : (
+      <div className="tasks-app task-detail-page-empty" data-testid="tasks-app">
+        <div className="task-detail-page-missing">
+          <div className="task-detail-label">Task not found</div>
+          <p>Task #{activeTaskId} is no longer in the office task list.</p>
+          <button
+            type="button"
+            className="btn btn-primary btn-sm"
+            onClick={closeTaskDetailRoute}
+          >
+            Back to tasks
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="tasks-app" data-testid="tasks-app">
@@ -298,34 +331,20 @@ export function TasksApp() {
                 <span>{COLUMN_LABEL[status]}</span>
                 <span className="task-column-count">{column.length}</span>
               </div>
-              {column.map((task) => {
-                const ownerSlug = task.owner;
-                return (
-                  <TaskCard
-                    key={task.id}
-                    task={task}
-                    isDragging={draggingId === task.id}
-                    onDragStart={handleDragStart(task.id)}
-                    onDragEnd={handleDragEnd}
-                    onOpen={() => setSelectedTaskId(task.id)}
-                    onOpenWorkbench={
-                      ownerSlug && ownerSlug !== HUMAN_SLUG
-                        ? () => openTaskWorkbench(ownerSlug, task.id)
-                        : undefined
-                    }
-                  />
-                );
-              })}
+              {column.map((task) => (
+                <TaskCard
+                  key={task.id}
+                  task={task}
+                  isDragging={draggingId === task.id}
+                  onDragStart={handleDragStart(task.id)}
+                  onDragEnd={handleDragEnd}
+                  onOpen={() => openTaskDetailRoute(task.id)}
+                />
+              ))}
             </div>
           );
         })}
       </div>
-      {selectedTask ? (
-        <TaskDetailModal
-          task={selectedTask}
-          onClose={() => setSelectedTaskId(null)}
-        />
-      ) : null}
     </div>
   );
 }
@@ -336,7 +355,6 @@ interface TaskCardProps {
   onDragStart: (event: DragEvent<HTMLDivElement>) => void;
   onDragEnd: (event: DragEvent<HTMLDivElement>) => void;
   onOpen: () => void;
-  onOpenWorkbench?: () => void;
 }
 
 function TaskCard({
@@ -345,7 +363,6 @@ function TaskCard({
   onDragStart,
   onDragEnd,
   onOpen,
-  onOpenWorkbench,
 }: TaskCardProps) {
   const status = normalizeStatus(task.status);
   const timestamp = task.updated_at ?? task.created_at;
@@ -357,18 +374,6 @@ function TaskCard({
       event.preventDefault();
       onOpen();
     }
-  }
-
-  function handleOpenWorkbench(event: React.MouseEvent<HTMLButtonElement>) {
-    event.preventDefault();
-    event.stopPropagation();
-    onOpenWorkbench?.();
-  }
-
-  function handleWorkbenchKeyDown(
-    event: React.KeyboardEvent<HTMLButtonElement>,
-  ) {
-    event.stopPropagation();
   }
 
   return (
@@ -419,16 +424,6 @@ function TaskCard({
             {memoryBadge.label}
           </span>
         )}
-        {onOpenWorkbench ? (
-          <button
-            type="button"
-            className="btn btn-ghost btn-sm task-card-workbench"
-            onClick={handleOpenWorkbench}
-            onKeyDown={handleWorkbenchKeyDown}
-          >
-            Workbench
-          </button>
-        ) : null}
       </div>
     </div>
   );

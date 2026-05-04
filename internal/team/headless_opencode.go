@@ -102,6 +102,7 @@ func (l *Launcher) runHeadlessOpencodeTurn(ctx context.Context, slug string, not
 	}
 
 	var agentStream *agentStreamBuffer
+	taskID := l.agentActiveTaskID(slug)
 	if l.broker != nil {
 		agentStream = l.broker.AgentStream(slug)
 	}
@@ -151,7 +152,7 @@ func (l *Launcher) runHeadlessOpencodeTurn(ctx context.Context, slug string, not
 	var lastError string
 	pushStream := func(line string) {
 		if agentStream != nil && strings.TrimSpace(line) != "" {
-			agentStream.Push(line)
+			agentStream.PushTask(taskID, line)
 		}
 	}
 

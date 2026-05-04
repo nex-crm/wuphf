@@ -3,20 +3,23 @@ import { describe, expect, it } from "vitest";
 
 import {
   appRoute,
+  appTaskDetailRoute,
   channelRoute,
   createAppRouter,
   dmRoute,
   indexRoute,
+  legacyWorkbenchAgentRoute,
+  legacyWorkbenchRoute,
+  legacyWorkbenchTaskRoute,
   notebookAgentRoute,
   notebookEntryRoute,
   notebooksRoute,
   reviewsRoute,
+  taskDetailRoute,
+  tasksRoute,
   wikiArticleRoute,
   wikiIndexRoute,
   wikiLookupRoute,
-  workbenchAgentRoute,
-  workbenchRoute,
-  workbenchTaskRoute,
 } from "../lib/router";
 import {
   APP_PANEL_IDS,
@@ -36,7 +39,6 @@ describe("route registry", () => {
     expect(unique(APP_PANEL_IDS)).toHaveLength(APP_PANEL_IDS.length);
     expect(isAppPanelId("tasks")).toBe(true);
     expect(isAppPanelId("wiki")).toBe(false);
-    expect(isAppPanelId("workbench")).toBe(false);
     expect(isAppPanelId("notebooks")).toBe(false);
   });
 
@@ -65,9 +67,12 @@ describe("TanStack route tree", () => {
     ["/channels/launch", channelRoute.id],
     ["/dm/pm", dmRoute.id],
     ["/apps/tasks", appRoute.id],
-    ["/apps/workbench", workbenchRoute.id],
-    ["/apps/workbench/pm", workbenchAgentRoute.id],
-    ["/apps/workbench/pm/tasks/task-7", workbenchTaskRoute.id],
+    ["/tasks", tasksRoute.id],
+    ["/tasks/task-7", taskDetailRoute.id],
+    ["/apps/tasks/task-7", appTaskDetailRoute.id],
+    ["/apps/workbench", legacyWorkbenchRoute.id],
+    ["/apps/workbench/pm", legacyWorkbenchAgentRoute.id],
+    ["/apps/workbench/pm/tasks/task-7", legacyWorkbenchTaskRoute.id],
     ["/wiki", wikiIndexRoute.id],
     ["/wiki/lookup", wikiLookupRoute.id],
     ["/wiki/companies/acme", wikiArticleRoute.id],

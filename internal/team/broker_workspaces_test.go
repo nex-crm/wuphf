@@ -1108,6 +1108,7 @@ func TestBrokerMuxAuthCoverage(t *testing.T) {
 		"/events",
 		// agent stream + tool event
 		"/agent-stream/anything",
+		"/terminal/agents/anything",
 		"/agent-tool-event",
 		// multi-workspace + admin pause
 		"/workspaces/list",

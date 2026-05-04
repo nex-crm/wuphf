@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   appRoute,
+  appTaskDetailRoute,
   channelRoute,
   dmRoute,
   notebookAgentRoute,
@@ -9,12 +10,11 @@ import {
   notebooksRoute,
   reviewsRoute,
   rootRoute,
+  taskDetailRoute,
+  tasksRoute,
   wikiArticleRoute,
   wikiIndexRoute,
   wikiLookupRoute,
-  workbenchAgentRoute,
-  workbenchRoute,
-  workbenchTaskRoute,
 } from "../lib/router";
 import { type CurrentRoute, deriveCurrentRoute } from "./useCurrentRoute";
 
@@ -68,26 +68,20 @@ describe("deriveCurrentRoute (URL → discriminated union)", () => {
       {},
       { kind: "app", appId: "tasks" },
     ],
+    ["task board", tasksRoute.id, {}, {}, { kind: "task-board" }],
     [
-      "workbench index",
-      workbenchRoute.id,
+      "task detail",
+      taskDetailRoute.id,
+      { taskId: "task-7" },
       {},
-      {},
-      { kind: "workbench", agentSlug: null, taskId: null },
+      { kind: "task-detail", taskId: "task-7" },
     ],
     [
-      "workbench agent",
-      workbenchAgentRoute.id,
-      { agentSlug: "pm" },
+      "app task detail legacy alias",
+      appTaskDetailRoute.id,
+      { taskId: "task-7" },
       {},
-      { kind: "workbench", agentSlug: "pm", taskId: null },
-    ],
-    [
-      "workbench task",
-      workbenchTaskRoute.id,
-      { agentSlug: "pm", taskId: "task-7" },
-      {},
-      { kind: "workbench", agentSlug: "pm", taskId: "task-7" },
+      { kind: "task-detail", taskId: "task-7" },
     ],
     ["wiki index", wikiIndexRoute.id, {}, {}, { kind: "wiki" }],
     [

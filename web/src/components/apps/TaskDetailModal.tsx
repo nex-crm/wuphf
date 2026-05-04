@@ -16,11 +16,13 @@ import {
 } from "../../api/tasks";
 import { formatRelativeTime } from "../../lib/format";
 import { keyedByOccurrence } from "../../lib/reactKeys";
+import { AgentTerminal } from "../agents/AgentTerminal";
 import { confirm } from "../ui/ConfirmDialog";
 
 interface TaskDetailModalProps {
   task: Task;
   onClose: () => void;
+  presentation?: "modal" | "page";
 }
 
 const HUMAN_SLUG = "human";
@@ -209,7 +211,11 @@ export function taskMemoryWorkflowBadge(
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
 // biome-ignore lint/complexity/noExcessiveLinesPerFunction: Existing function length is baselined for a focused follow-up refactor.
-export function TaskDetailModal({ task, onClose }: TaskDetailModalProps) {
+export function TaskDetailModal({
+  task,
+  onClose,
+  presentation = "modal",
+}: TaskDetailModalProps) {
   const queryClient = useQueryClient();
   const { data: memberData } = useQuery({
     queryKey: ["office-members"],
@@ -233,12 +239,13 @@ export function TaskDetailModal({ task, onClose }: TaskDetailModalProps) {
   }, [task.id, task.owner]);
 
   useEffect(() => {
+    if (presentation !== "modal") return;
     function handleKey(e: KeyboardEvent) {
       if (e.key === "Escape") onClose();
     }
     document.addEventListener("keydown", handleKey);
     return () => document.removeEventListener("keydown", handleKey);
-  }, [onClose]);
+  }, [onClose, presentation]);
 
   const assignableMembers = useMemo<OfficeMember[]>(() => {
     const members = memberData?.members ?? [];
@@ -398,6 +405,226 @@ export function TaskDetailModal({ task, onClose }: TaskDetailModalProps) {
   const ownerChanged =
     selectedOwner.trim() !== currentOwner && selectedOwner.trim() !== "";
 
+  const terminalOwner =
+    task.owner && task.owner !== HUMAN_SLUG && task.owner !== "you"
+      ? task.owner
+      : null;
+  const closeLabel = presentation === "page" ? "Back to tasks" : "Close";
+  const content = (
+    <div
+      className={`task-detail-modal card${presentation === "page" ? " task-detail-page-card" : ""}`}
+    >
+      <header className="task-detail-header">
+        <div>
+          <div className="task-detail-id">#{task.id}</div>
+          <h2 className="task-detail-title">{task.title || "Untitled task"}</h2>
+        </div>
+        <button
+          type="button"
+          className="task-detail-close"
+          onClick={onClose}
+          aria-label={closeLabel}
+          title={closeLabel}
+        >
+          {presentation === "page" ? "←" : "×"}
+        </button>
+      </header>
+
+      <section className="task-detail-section">
+        <div className="task-detail-label">Status</div>
+        <div className="task-detail-status">
+          <span
+            className={`task-detail-status-badge status-${currentStatus || "open"}`}
+          >
+            {currentStatus ? currentStatus.replace(/_/g, " ") : "open"}
+          </span>
+          <div className="task-detail-status-actions">
+            <StatusButton
+              action="release"
+              label="Release"
+              busy={statusBusy}
+              disabledFor={["open"]}
+              currentStatus={currentStatus}
+              onClick={handleStatusAction}
+            />
+            <StatusButton
+              action="review"
+              label="Mark review"
+              busy={statusBusy}
+              disabledFor={["review"]}
+              currentStatus={currentStatus}
+              onClick={handleStatusAction}
+            />
+            <StatusButton
+              action="block"
+              label="Block"
+              busy={statusBusy}
+              disabledFor={["blocked"]}
+              currentStatus={currentStatus}
+              onClick={handleStatusAction}
+            />
+            <StatusButton
+              action="complete"
+              label="Mark done"
+              busy={statusBusy}
+              disabledFor={["done"]}
+              currentStatus={currentStatus}
+              onClick={handleStatusAction}
+              disabled={memoryWorkflowNeedsOverride}
+            />
+            <StatusButton
+              action="cancel"
+              label="Won't do"
+              busy={statusBusy}
+              disabledFor={["canceled", "cancelled"]}
+              currentStatus={currentStatus}
+              onClick={handleStatusAction}
+              danger={true}
+            />
+          </div>
+        </div>
+        {memoryWorkflowNeedsOverride && (
+          <div className="task-detail-override">
+            <label
+              className="task-detail-label"
+              htmlFor={`memory-override-${task.id}`}
+            >
+              Override reason
+            </label>
+            <textarea
+              id={`memory-override-${task.id}`}
+              className="task-detail-textarea"
+              value={overrideReason}
+              onChange={(e) => setOverrideReason(e.target.value)}
+              placeholder="Human reason required"
+              rows={3}
+            />
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              onClick={handleMemoryOverrideComplete}
+              disabled={!overrideReason.trim() || statusBusy !== null}
+            >
+              {statusBusy === "complete" ? "..." : "Mark done with override"}
+            </button>
+          </div>
+        )}
+      </section>
+
+      <section className="task-detail-section">
+        <div className="task-detail-label">Ownership</div>
+        <div className="task-detail-ownership">
+          <div className="task-detail-owner-current">
+            <span className="task-detail-owner-badge">
+              {task.owner ? `@${task.owner}` : "(unassigned)"}
+            </span>
+            <span className="task-detail-hint">
+              Reassigning posts to #{task.channel || "general"} and DMs both
+              owners. CEO is cc'd.
+            </span>
+          </div>
+          <div className="task-detail-owner-controls">
+            <select
+              className="task-detail-select"
+              value={selectedOwner}
+              onChange={(e) => setSelectedOwner(e.target.value)}
+              disabled={submitting}
+            >
+              <option value="">(pick an owner)</option>
+              {assignableMembers.map((m) => (
+                <option key={m.slug} value={m.slug}>
+                  {m.name ? `${m.name} — @${m.slug}` : `@${m.slug}`}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              onClick={handleReassign}
+              disabled={!ownerChanged || submitting}
+            >
+              {submitting ? "Reassigning..." : "Reassign"}
+            </button>
+          </div>
+          {errorMsg ? (
+            <div className="task-detail-error">{errorMsg}</div>
+          ) : null}
+        </div>
+      </section>
+
+      {description || details ? (
+        <section className="task-detail-section">
+          {description ? (
+            <>
+              <div className="task-detail-label">Description</div>
+              <div className="task-detail-body">{description}</div>
+            </>
+          ) : null}
+          {details ? (
+            <>
+              <div
+                className="task-detail-label"
+                style={{ marginTop: description ? 12 : 0 }}
+              >
+                Details
+              </div>
+              <div className="task-detail-body">{details}</div>
+            </>
+          ) : null}
+        </section>
+      ) : null}
+
+      {dependsOn.length > 0 && (
+        <section className="task-detail-section">
+          <div className="task-detail-label">Depends on</div>
+          <ul className="task-detail-deps">
+            {dependsOn.map((dep) => (
+              <li key={dep}>#{dep}</li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {hasVisibleMemoryWorkflow(memoryWorkflow) && (
+        <MemoryWorkflowSection workflow={memoryWorkflow} />
+      )}
+
+      {terminalOwner ? (
+        <section className="task-detail-section task-detail-terminal-section">
+          <div className="task-detail-label">Live terminal</div>
+          <AgentTerminal
+            slug={terminalOwner}
+            taskId={task.id}
+            title="Task terminal"
+            emptyLabel="No terminal output for this task yet"
+          />
+        </section>
+      ) : null}
+
+      <section className="task-detail-section">
+        <div className="task-detail-label">Metadata</div>
+        <dl className="task-detail-meta">
+          {metaRows
+            .filter(([, value]) => value !== null && value !== "")
+            .map(([key, value]) => (
+              <div key={key} className="task-detail-meta-row">
+                <dt>{key}</dt>
+                <dd>{value}</dd>
+              </div>
+            ))}
+        </dl>
+      </section>
+    </div>
+  );
+
+  if (presentation === "page") {
+    return (
+      <section className="task-detail-page" aria-label={`Task ${task.id}`}>
+        {content}
+      </section>
+    );
+  }
+
   return (
     <div
       className="task-detail-overlay"
@@ -406,197 +633,7 @@ export function TaskDetailModal({ task, onClose }: TaskDetailModalProps) {
       aria-modal="true"
       aria-label={`Task ${task.id}`}
     >
-      <div className="task-detail-modal card">
-        <header className="task-detail-header">
-          <div>
-            <div className="task-detail-id">#{task.id}</div>
-            <h2 className="task-detail-title">
-              {task.title || "Untitled task"}
-            </h2>
-          </div>
-          <button
-            type="button"
-            className="task-detail-close"
-            onClick={onClose}
-            aria-label="Close"
-          >
-            ×
-          </button>
-        </header>
-
-        <section className="task-detail-section">
-          <div className="task-detail-label">Status</div>
-          <div className="task-detail-status">
-            <span
-              className={`task-detail-status-badge status-${currentStatus || "open"}`}
-            >
-              {currentStatus ? currentStatus.replace(/_/g, " ") : "open"}
-            </span>
-            <div className="task-detail-status-actions">
-              <StatusButton
-                action="release"
-                label="Release"
-                busy={statusBusy}
-                disabledFor={["open"]}
-                currentStatus={currentStatus}
-                onClick={handleStatusAction}
-              />
-              <StatusButton
-                action="review"
-                label="Mark review"
-                busy={statusBusy}
-                disabledFor={["review"]}
-                currentStatus={currentStatus}
-                onClick={handleStatusAction}
-              />
-              <StatusButton
-                action="block"
-                label="Block"
-                busy={statusBusy}
-                disabledFor={["blocked"]}
-                currentStatus={currentStatus}
-                onClick={handleStatusAction}
-              />
-              <StatusButton
-                action="complete"
-                label="Mark done"
-                busy={statusBusy}
-                disabledFor={["done"]}
-                currentStatus={currentStatus}
-                onClick={handleStatusAction}
-                disabled={memoryWorkflowNeedsOverride}
-              />
-              <StatusButton
-                action="cancel"
-                label="Won't do"
-                busy={statusBusy}
-                disabledFor={["canceled", "cancelled"]}
-                currentStatus={currentStatus}
-                onClick={handleStatusAction}
-                danger={true}
-              />
-            </div>
-          </div>
-          {memoryWorkflowNeedsOverride && (
-            <div className="task-detail-override">
-              <label
-                className="task-detail-label"
-                htmlFor={`memory-override-${task.id}`}
-              >
-                Override reason
-              </label>
-              <textarea
-                id={`memory-override-${task.id}`}
-                className="task-detail-textarea"
-                value={overrideReason}
-                onChange={(e) => setOverrideReason(e.target.value)}
-                placeholder="Human reason required"
-                rows={3}
-              />
-              <button
-                type="button"
-                className="btn btn-primary btn-sm"
-                onClick={handleMemoryOverrideComplete}
-                disabled={!overrideReason.trim() || statusBusy !== null}
-              >
-                {statusBusy === "complete" ? "..." : "Mark done with override"}
-              </button>
-            </div>
-          )}
-        </section>
-
-        <section className="task-detail-section">
-          <div className="task-detail-label">Ownership</div>
-          <div className="task-detail-ownership">
-            <div className="task-detail-owner-current">
-              <span className="task-detail-owner-badge">
-                {task.owner ? `@${task.owner}` : "(unassigned)"}
-              </span>
-              <span className="task-detail-hint">
-                Reassigning posts to #{task.channel || "general"} and DMs both
-                owners. CEO is cc'd.
-              </span>
-            </div>
-            <div className="task-detail-owner-controls">
-              <select
-                className="task-detail-select"
-                value={selectedOwner}
-                onChange={(e) => setSelectedOwner(e.target.value)}
-                disabled={submitting}
-              >
-                <option value="">(pick an owner)</option>
-                {assignableMembers.map((m) => (
-                  <option key={m.slug} value={m.slug}>
-                    {m.name ? `${m.name} — @${m.slug}` : `@${m.slug}`}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                className="btn btn-primary btn-sm"
-                onClick={handleReassign}
-                disabled={!ownerChanged || submitting}
-              >
-                {submitting ? "Reassigning..." : "Reassign"}
-              </button>
-            </div>
-            {errorMsg ? (
-              <div className="task-detail-error">{errorMsg}</div>
-            ) : null}
-          </div>
-        </section>
-
-        {description || details ? (
-          <section className="task-detail-section">
-            {description ? (
-              <>
-                <div className="task-detail-label">Description</div>
-                <div className="task-detail-body">{description}</div>
-              </>
-            ) : null}
-            {details ? (
-              <>
-                <div
-                  className="task-detail-label"
-                  style={{ marginTop: description ? 12 : 0 }}
-                >
-                  Details
-                </div>
-                <div className="task-detail-body">{details}</div>
-              </>
-            ) : null}
-          </section>
-        ) : null}
-
-        {dependsOn.length > 0 && (
-          <section className="task-detail-section">
-            <div className="task-detail-label">Depends on</div>
-            <ul className="task-detail-deps">
-              {dependsOn.map((dep) => (
-                <li key={dep}>#{dep}</li>
-              ))}
-            </ul>
-          </section>
-        )}
-
-        {hasVisibleMemoryWorkflow(memoryWorkflow) && (
-          <MemoryWorkflowSection workflow={memoryWorkflow} />
-        )}
-
-        <section className="task-detail-section">
-          <div className="task-detail-label">Metadata</div>
-          <dl className="task-detail-meta">
-            {metaRows
-              .filter(([, value]) => value !== null && value !== "")
-              .map(([key, value]) => (
-                <div key={key} className="task-detail-meta-row">
-                  <dt>{key}</dt>
-                  <dd>{value}</dd>
-                </div>
-              ))}
-          </dl>
-        </section>
-      </div>
+      {content}
     </div>
   );
 }

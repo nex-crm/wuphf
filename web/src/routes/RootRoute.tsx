@@ -108,11 +108,6 @@ const TasksApp = lazy(() =>
     default: m.TasksApp,
   })),
 );
-const AgentWorkbench = lazy(() =>
-  import("../components/workbench").then((m) => ({
-    default: m.AgentWorkbench,
-  })),
-);
 const ThreadsApp = lazy(() =>
   import("../components/apps/ThreadsApp").then((m) => ({
     default: m.ThreadsApp,
@@ -269,41 +264,6 @@ function navigateNotebookEntry(
   });
 }
 
-function navigateWorkbenchSelection(
-  agentSlug: string | null,
-  taskId: string | null,
-): void {
-  if (!agentSlug) {
-    void router.navigate({ to: "/apps/workbench" });
-    return;
-  }
-  if (!taskId) {
-    void router.navigate({
-      to: "/apps/workbench/$agentSlug",
-      params: { agentSlug },
-    });
-    return;
-  }
-  void router.navigate({
-    to: "/apps/workbench/$agentSlug/tasks/$taskId",
-    params: { agentSlug, taskId },
-  });
-}
-
-function navigateWorkbenchClose(hasTask: boolean): void {
-  if (hasTask) {
-    void router.navigate({
-      to: "/apps/$appId",
-      params: { appId: "tasks" },
-    });
-    return;
-  }
-  void router.navigate({
-    to: "/channels/$channelSlug",
-    params: { channelSlug: "general" },
-  });
-}
-
 const APP_PANELS = {
   tasks: TasksApp,
   requests: RequestsApp,
@@ -402,10 +362,19 @@ function UnknownAppPanel({ appId }: { appId: string }) {
 }
 
 function AppPanel({ appId }: { appId: AppPanelId }) {
+  if (appId === "tasks") return <TaskAppPanel taskId={null} />;
   const Panel = APP_PANELS[appId];
   return (
     <div className="app-panel active" data-testid={`app-page-${appId}`}>
       <Panel />
+    </div>
+  );
+}
+
+function TaskAppPanel({ taskId }: { taskId: string | null }) {
+  return (
+    <div className="app-panel active" data-testid="app-page-tasks">
+      <TasksApp taskId={taskId} />
     </div>
   );
 }
@@ -425,15 +394,10 @@ function MainContent() {
         return <UnknownAppPanel appId={route.appId} />;
       }
       return <AppPanel appId={route.appId} />;
-    case "workbench":
-      return (
-        <AgentWorkbench
-          agentSlug={route.agentSlug}
-          taskId={route.taskId}
-          onSelectionChange={navigateWorkbenchSelection}
-          onClose={() => navigateWorkbenchClose(Boolean(route.taskId))}
-        />
-      );
+    case "task-board":
+      return <TaskAppPanel taskId={null} />;
+    case "task-detail":
+      return <TaskAppPanel taskId={route.taskId} />;
     case "wiki":
     case "wiki-article":
       return <WikiSurface current="wiki" route={route} />;

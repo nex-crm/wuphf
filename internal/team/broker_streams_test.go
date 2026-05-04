@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -16,7 +17,7 @@ import (
 // either grow the buffer unboundedly (memory leak) or drop too
 // aggressively (lose visible history).
 func TestAgentStreamBuffer_RecentReturnsBoundedHistory(t *testing.T) {
-	s := &agentStreamBuffer{subs: make(map[int]chan string)}
+	s := &agentStreamBuffer{subs: make(map[int]agentStreamSubscriber)}
 	for i := 0; i < 2100; i++ {
 		s.Push(fmt.Sprintf("line-%d", i))
 	}
@@ -41,6 +42,104 @@ func TestAgentStreamBuffer_RecentReturnsBoundedHistory(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Error("subscriber did not receive Push within 1s")
+	}
+}
+
+func TestAgentStreamBuffer_TaskScopedHistoryAndSubscribers(t *testing.T) {
+	s := &agentStreamBuffer{subs: make(map[int]agentStreamSubscriber)}
+	s.PushTask("task-1", "one")
+	s.PushTask("task-2", "two")
+	s.Push("global")
+
+	if got := strings.Join(s.recentTask("task-1"), ","); got != "one" {
+		t.Fatalf("task-1 recent = %q, want one", got)
+	}
+	if got := strings.Join(s.recent(), ","); got != "one,two,global" {
+		t.Fatalf("all recent = %q", got)
+	}
+
+	taskOne, cancelTaskOne := s.subscribeTask("task-1")
+	defer cancelTaskOne()
+	all, cancelAll := s.subscribe()
+	defer cancelAll()
+	s.PushTask("task-2", "two-live")
+	s.PushTask("task-1", "one-live")
+
+	select {
+	case got := <-all:
+		if got != "two-live" {
+			t.Fatalf("all subscriber first message = %q", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("all subscriber did not receive task-2 line")
+	}
+	select {
+	case got := <-taskOne:
+		if got != "one-live" {
+			t.Fatalf("task subscriber message = %q", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("task subscriber did not receive task-1 line")
+	}
+}
+
+func TestAgentStreamBuffer_TaskHistorySurvivesGlobalEviction(t *testing.T) {
+	s := &agentStreamBuffer{subs: make(map[int]agentStreamSubscriber)}
+	s.PushTask("task-1", "one")
+	for i := 0; i < agentStreamHistoryLimit+1; i++ {
+		s.PushTask("task-2", fmt.Sprintf("two-%d", i))
+	}
+
+	if got := strings.Join(s.recentTask("task-1"), ","); got != "one" {
+		t.Fatalf("task-1 recent = %q, want one", got)
+	}
+	if got := s.recent(); len(got) != agentStreamHistoryLimit {
+		t.Fatalf("global recent length = %d, want %d", len(got), agentStreamHistoryLimit)
+	}
+}
+
+func TestAgentStreamBuffer_SubscribeTaskWithRecentHasNoReplayGap(t *testing.T) {
+	s := &agentStreamBuffer{subs: make(map[int]agentStreamSubscriber)}
+	s.PushTask("task-1", "history\n")
+
+	history, live, cancel := s.subscribeTaskWithRecent("task-1")
+	defer cancel()
+	if got := strings.Join(history, ""); got != "history\n" {
+		t.Fatalf("history = %q, want history line", got)
+	}
+
+	s.PushTask("task-1", "live\n")
+	select {
+	case got := <-live:
+		if got != "live\n" {
+			t.Fatalf("live = %q, want live line", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("subscriber did not receive live line")
+	}
+}
+
+func TestHandleAgentToolEvent_ScopesLineToActiveTask(t *testing.T) {
+	b := newTestBroker(t)
+	task, _, err := b.EnsureTask("general", "Inspect terminal", "Verify tool output", "ceo", "ceo", "")
+	if err != nil {
+		t.Fatalf("EnsureTask: %v", err)
+	}
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/agent-tool-event",
+		strings.NewReader(`{"slug":"ceo","phase":"call","tool":"team_broadcast","args":"{\"text\":\"hi\"}"}`),
+	)
+	rec := httptest.NewRecorder()
+	b.handleAgentToolEvent(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+
+	got := strings.Join(b.AgentStream("ceo").recentTask(task.ID), "\n")
+	if !strings.Contains(got, `"tool":"team_broadcast"`) {
+		t.Fatalf("task-scoped stream missing tool event: %q", got)
 	}
 }
 

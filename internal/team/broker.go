@@ -2,6 +2,7 @@ package team
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -17,6 +18,10 @@ import (
 	"github.com/nex-crm/wuphf/internal/onboarding"
 	"github.com/nex-crm/wuphf/internal/workspace"
 )
+
+// ErrChannelNotFound is returned by PostInboundSurfaceMessage when the
+// declared channel does not exist in the broker.
+var ErrChannelNotFound = errors.New("channel not found")
 
 const BrokerPort = brokeraddr.DefaultPort
 
@@ -491,6 +496,7 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/v1/logs", b.requireAuth(b.handleOTLPLogs))
 	mux.HandleFunc("/events", b.handleEvents)
 	mux.HandleFunc("/agent-stream/", b.requireAuth(b.handleAgentStream))
+	mux.HandleFunc("/terminal/agents/", b.requireAuth(b.handleAgentTerminal))
 	mux.HandleFunc("/agent-tool-event", b.requireAuth(b.handleAgentToolEvent))
 	// Multi-workspace routes (broker_workspaces.go). Every route below is
 	// wrapped through b.withAuth so the design's "every protected route
@@ -756,7 +762,7 @@ func (b *Broker) PostInboundSurfaceMessage(from, channel, content, provider stri
 				channel = dm.Slug
 			}
 		} else {
-			return channelMessage{}, fmt.Errorf("channel not found: %s", channel)
+			return channelMessage{}, fmt.Errorf("%w: %s", ErrChannelNotFound, channel)
 		}
 	}
 	b.counter++

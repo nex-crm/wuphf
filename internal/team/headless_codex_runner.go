@@ -95,6 +95,7 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 	// The ReadCodexJSONStream parser doesn't emit streaming events for exec mode's
 	// item.started/item.completed format, so we pipe raw lines directly.
 	var agentStream *agentStreamBuffer
+	taskID := l.agentActiveTaskID(slug)
 	if l.broker != nil {
 		agentStream = l.broker.AgentStream(slug)
 	}
@@ -112,9 +113,8 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 		r := bufio.NewReader(pr)
 		for {
 			chunk, err := r.ReadString('\n')
-			chunk = strings.TrimRight(chunk, "\r\n")
 			if agentStream != nil && chunk != "" {
-				agentStream.Push(chunk)
+				agentStream.PushTask(taskID, chunk)
 			}
 			if err != nil {
 				if err != io.EOF {

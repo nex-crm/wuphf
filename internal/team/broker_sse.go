@@ -178,6 +178,7 @@ func (b *Broker) handleAgentToolEvent(w http.ResponseWriter, r *http.Request) {
 		Args   string `json:"args,omitempty"`
 		Result string `json:"result,omitempty"`
 		Error  string `json:"error,omitempty"`
+		TaskID string `json:"task_id,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
@@ -192,7 +193,13 @@ func (b *Broker) handleAgentToolEvent(w http.ResponseWriter, r *http.Request) {
 	if stream != nil {
 		line := formatAgentToolEvent(body.Phase, body.Tool, body.Args, body.Result, body.Error)
 		if line != "" {
-			stream.Push(line)
+			taskID := strings.TrimSpace(body.TaskID)
+			if taskID == "" {
+				b.mu.Lock()
+				taskID = b.activeTaskIDForAgentLocked(slug)
+				b.mu.Unlock()
+			}
+			stream.PushTask(taskID, line+"\n")
 		}
 	}
 

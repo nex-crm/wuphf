@@ -261,6 +261,21 @@ export function sseURL(path: string): string {
   return url;
 }
 
+export function websocketURL(path: string): string {
+  const base =
+    useProxy && brokerDirect
+      ? brokerDirect
+      : typeof window === "undefined"
+        ? baseURL()
+        : new URL(baseURL(), window.location.href)
+            .toString()
+            .replace(/\/$/, "");
+  const url = new URL(path, base.endsWith("/") ? base : `${base}/`);
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  if (token) url.searchParams.set("token", token);
+  return url.toString();
+}
+
 // ── Messages ──
 
 export interface Message {
