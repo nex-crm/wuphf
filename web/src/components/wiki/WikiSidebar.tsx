@@ -1,6 +1,6 @@
 // biome-ignore-all lint/a11y/useAriaPropsSupportedByRole: Passive metadata uses accessible labels queried by screen-reader tests; visual text remains unchanged.
 // biome-ignore-all lint/a11y/useKeyWithClickEvents: Pointer handler is paired with an existing modal, image, or routed-control keyboard path; preserving current interaction model.
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import type { DiscoveredSection, WikiCatalogEntry } from "../../api/wiki";
 import { resolveGroupOrder } from "../../lib/groupOrder";
@@ -408,6 +408,12 @@ function TreeFolder({
 }) {
   const [open, setOpen] = useState(true);
   const articleCount = countArticles(node);
+  const containsCurrent = branchContainsCurrent(node, currentKey);
+
+  useEffect(() => {
+    if (containsCurrent) setOpen(true);
+  }, [containsCurrent]);
+
   return (
     <li className="wk-tree-folder">
       <button
@@ -468,6 +474,17 @@ function countArticles(node: WikiTreeNode): number {
   return (
     node.articles.length +
     node.folders.reduce((count, child) => count + countArticles(child), 0)
+  );
+}
+
+function branchContainsCurrent(
+  node: WikiTreeNode,
+  currentKey: string,
+): boolean {
+  if (!currentKey) return false;
+  return (
+    node.articles.some((item) => articlePathKey(item.path) === currentKey) ||
+    node.folders.some((child) => branchContainsCurrent(child, currentKey))
   );
 }
 
