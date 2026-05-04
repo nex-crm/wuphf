@@ -76,9 +76,10 @@ func RegisterTransports(b *Broker) (func(), error) {
 		log.Printf("[transport] openclaw: bootstrap error — %v", ocErr)
 	} else if bridge != nil {
 		b.AttachOpenclawBridge(bridge)
-		StartOpenclawRouter(ocCtx, b, bridge)
+		routerDone := StartOpenclawRouter(ocCtx, b, bridge)
 		stops = append(stops, func() {
 			ocCancel()
+			<-routerDone // wait for router goroutine to exit before bridge.Stop()
 			bridge.Stop()
 		})
 		log.Printf("[transport] openclaw: started (%d session(s))", len(bridge.SnapshotBindings()))
