@@ -18,6 +18,7 @@ import {
 import {
   canSetupContinue,
   detectedBinary,
+  localProviderKindFromRuntimePriority,
   runtimeIsReady,
   runtimeLabelsFromProviderConfig,
 } from "./wizard/runtime-helpers";
@@ -78,13 +79,6 @@ function runtimePriorityFromInstalledPrereqs(list: PrereqResult[]): string[] {
     return Boolean(det?.found);
   });
   return firstInstalled ? [firstInstalled.label] : [];
-}
-
-function localProviderKindFromRuntimePriority(labels: readonly string[]) {
-  return (
-    LOCAL_PROVIDER_LABELS.find((meta) => labels.includes(meta.label))?.kind ??
-    null
-  );
 }
 
 function prereqsBootstrapFromResult(result: PrereqsSettled): PrereqsBootstrap {

@@ -70,6 +70,18 @@ export function runtimeLabelsFromProviderConfig(
   return labels;
 }
 
+export function localProviderKindFromRuntimePriority(
+  labels: readonly string[],
+): string | null {
+  for (const label of labels) {
+    const kind = LOCAL_PROVIDER_LABELS.find(
+      (meta) => meta.label === label,
+    )?.kind;
+    if (kind) return kind;
+  }
+  return null;
+}
+
 interface SetupContinueInput {
   runtimePriority: string[];
   prereqs: PrereqResult[];

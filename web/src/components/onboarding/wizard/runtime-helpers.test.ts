@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { runtimeLabelsFromProviderConfig } from "./runtime-helpers";
+import {
+  localProviderKindFromRuntimePriority,
+  runtimeLabelsFromProviderConfig,
+} from "./runtime-helpers";
 
 describe("runtimeLabelsFromProviderConfig", () => {
   it("prefers an explicit provider before a saved fallback chain", () => {
@@ -28,5 +31,19 @@ describe("runtimeLabelsFromProviderConfig", () => {
         llm_provider_priority: ["ollama", "codex", "ollama", ""],
       }),
     ).toEqual(["Ollama", "Codex"]);
+  });
+});
+
+describe("localProviderKindFromRuntimePriority", () => {
+  it("uses the first local provider in runtime priority order", () => {
+    expect(
+      localProviderKindFromRuntimePriority(["Exo", "Codex", "Ollama"]),
+    ).toBe("exo");
+  });
+
+  it("returns null when the priority contains no local provider", () => {
+    expect(localProviderKindFromRuntimePriority(["Codex", "Claude Code"])).toBe(
+      null,
+    );
   });
 });
