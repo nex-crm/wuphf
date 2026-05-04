@@ -12,6 +12,7 @@ import (
 	"github.com/nex-crm/wuphf/internal/config"
 	"github.com/nex-crm/wuphf/internal/onboarding"
 	"github.com/nex-crm/wuphf/internal/operations"
+	"github.com/nex-crm/wuphf/internal/workspaces"
 )
 
 // onboardingCompleteFn is invoked by the onboarding package when the user
@@ -37,7 +38,7 @@ import (
 // The DefaultManifest roster (ceo/planner/executor/reviewer) is NEVER
 // reached via this path. It remains only as a true-recovery fallback in
 // ensureDefaultOfficeMembersLocked for corrupted/zero-member state.
-func (b *Broker) onboardingCompleteFn(task string, skipTask bool, blueprintID string, selectedAgents []string) error {
+func (b *Broker) onboardingCompleteFn(task string, skipTask bool, blueprintID string, selectedAgents []string, companyName string) error {
 	task = strings.TrimSpace(task)
 	if !skipTask && task == "" {
 		return fmt.Errorf("onboarding: task is required when skip_task=false")
@@ -92,6 +93,17 @@ func (b *Broker) onboardingCompleteFn(task string, skipTask bool, blueprintID st
 	// fail onboarding (the user should land on an empty-but-functional wiki
 	// rather than a broken onboarding flow). Log and move on.
 	b.materializeBlueprintWiki(bp)
+
+	// Sync the company name captured during onboarding to the workspace
+	// registry so the rail can display it without a separate API call.
+	if companyName := strings.TrimSpace(companyName); companyName != "" {
+		if runtimeHome := config.RuntimeHomeDir(); runtimeHome != "" {
+			if err := workspaces.UpdateCompanyNameByRuntimeHome(runtimeHome, companyName); err != nil {
+				log.Printf("onboarding: sync company name to registry: %v", err)
+			}
+		}
+	}
+
 	return nil
 }
 

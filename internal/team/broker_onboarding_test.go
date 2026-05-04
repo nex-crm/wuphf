@@ -53,7 +53,7 @@ func ensureOperationsFallbackFS(t *testing.T) {
 func TestOnboardingCompleteSeedsFromPickedBlueprint(t *testing.T) {
 	ensureOperationsFallbackFS(t)
 	b := newTestBroker(t)
-	if err := b.onboardingCompleteFn("Stand up niche CRM", false, "niche-crm", nil); err != nil {
+	if err := b.onboardingCompleteFn("Stand up niche CRM", false, "niche-crm", nil, ""); err != nil {
 		t.Fatalf("onboardingCompleteFn: %v", err)
 	}
 
@@ -102,7 +102,7 @@ func TestOnboardingCompleteSeedsFromPickedBlueprint(t *testing.T) {
 func TestOnboardingCompleteHonorsAgentFilter(t *testing.T) {
 	ensureOperationsFallbackFS(t)
 	b := newTestBroker(t)
-	if err := b.onboardingCompleteFn("Stand up niche CRM", false, "niche-crm", []string{"ceo", "builder"}); err != nil {
+	if err := b.onboardingCompleteFn("Stand up niche CRM", false, "niche-crm", []string{"ceo", "builder"}, ""); err != nil {
 		t.Fatalf("onboardingCompleteFn: %v", err)
 	}
 
@@ -139,7 +139,7 @@ func TestOnboardingCompleteHonorsAgentFilter(t *testing.T) {
 func TestOnboardingCompleteAgentsEmptySeedsLeadOnly(t *testing.T) {
 	ensureOperationsFallbackFS(t)
 	b := newTestBroker(t)
-	if err := b.onboardingCompleteFn("Stand up niche CRM", false, "niche-crm", []string{}); err != nil {
+	if err := b.onboardingCompleteFn("Stand up niche CRM", false, "niche-crm", []string{}, ""); err != nil {
 		t.Fatalf("onboardingCompleteFn: %v", err)
 	}
 
@@ -175,7 +175,7 @@ func TestOnboardingCompleteAgentsEmptySeedsLeadOnly(t *testing.T) {
 func TestOnboardingCompleteFromScratchSynthesizes(t *testing.T) {
 	ensureOperationsFallbackFS(t)
 	b := newTestBroker(t)
-	if err := b.onboardingCompleteFn("Build an automated customer-support operation", false, "", nil); err != nil {
+	if err := b.onboardingCompleteFn("Build an automated customer-support operation", false, "", nil, ""); err != nil {
 		t.Fatalf("onboardingCompleteFn: %v", err)
 	}
 
@@ -200,7 +200,7 @@ func TestOnboardingCompleteFromScratchSynthesizes(t *testing.T) {
 func TestOnboardingCompleteFromScratchHonorsSelectedFoundingAgents(t *testing.T) {
 	ensureOperationsFallbackFS(t)
 	b := newTestBroker(t)
-	if err := b.onboardingCompleteFn("Build an automated customer-support operation", false, "", []string{"ceo", "founding-engineer"}); err != nil {
+	if err := b.onboardingCompleteFn("Build an automated customer-support operation", false, "", []string{"ceo", "founding-engineer"}, ""); err != nil {
 		t.Fatalf("onboardingCompleteFn: %v", err)
 	}
 
@@ -269,7 +269,7 @@ func TestBlankSlateMembersExplicitLeadOnlySelectionStaysLeadOnly(t *testing.T) {
 func TestOnboardingCompleteSkipTaskSeedsNoKickoff(t *testing.T) {
 	ensureOperationsFallbackFS(t)
 	b := newTestBroker(t)
-	if err := b.onboardingCompleteFn("", true, "niche-crm", nil); err != nil {
+	if err := b.onboardingCompleteFn("", true, "niche-crm", nil, ""); err != nil {
 		t.Fatalf("onboardingCompleteFn: %v", err)
 	}
 
@@ -300,7 +300,7 @@ func TestOnboardingCompleteSkipTaskSeedsNoKickoff(t *testing.T) {
 func TestOnboardingCompleteSkipTaskPersistsTeam(t *testing.T) {
 	ensureOperationsFallbackFS(t)
 	b := newTestBroker(t)
-	if err := b.onboardingCompleteFn("", true, "niche-crm", nil); err != nil {
+	if err := b.onboardingCompleteFn("", true, "niche-crm", nil, ""); err != nil {
 		t.Fatalf("onboardingCompleteFn: %v", err)
 	}
 
@@ -341,7 +341,7 @@ func TestOnboardingCompleteSkipTaskPersistsTeam(t *testing.T) {
 func TestOnboardingCompleteLoadBlueprintErrorReturnsError(t *testing.T) {
 	ensureOperationsFallbackFS(t)
 	b := newTestBroker(t)
-	err := b.onboardingCompleteFn("go", false, "definitely-not-a-real-blueprint", nil)
+	err := b.onboardingCompleteFn("go", false, "definitely-not-a-real-blueprint", nil, "")
 	if err == nil {
 		t.Fatalf("expected error for unknown blueprint, got nil")
 	}
@@ -357,10 +357,10 @@ func TestOnboardingCompleteLoadBlueprintErrorReturnsError(t *testing.T) {
 func TestOnboardingCompleteDedupesDuplicateTaskMessage(t *testing.T) {
 	ensureOperationsFallbackFS(t)
 	b := newTestBroker(t)
-	if err := b.onboardingCompleteFn("hello world", false, "niche-crm", nil); err != nil {
+	if err := b.onboardingCompleteFn("hello world", false, "niche-crm", nil, ""); err != nil {
 		t.Fatalf("first call: %v", err)
 	}
-	if err := b.onboardingCompleteFn("hello world", false, "niche-crm", nil); err != nil {
+	if err := b.onboardingCompleteFn("hello world", false, "niche-crm", nil, ""); err != nil {
 		t.Fatalf("second call: %v", err)
 	}
 
@@ -384,7 +384,7 @@ func TestOnboardingCompleteDedupesDuplicateTaskMessage(t *testing.T) {
 func TestTaskIDsUseBlueprintPrefix(t *testing.T) {
 	ensureOperationsFallbackFS(t)
 	b := newTestBroker(t)
-	if err := b.onboardingCompleteFn("Stand up niche CRM", false, "niche-crm", nil); err != nil {
+	if err := b.onboardingCompleteFn("Stand up niche CRM", false, "niche-crm", nil, ""); err != nil {
 		t.Fatalf("onboardingCompleteFn: %v", err)
 	}
 
@@ -411,7 +411,7 @@ func TestTaskIDsUseBlueprintPrefix(t *testing.T) {
 func TestSeedFromBlueprintNilAgentsKeepsFullRoster(t *testing.T) {
 	ensureOperationsFallbackFS(t)
 	b := newTestBroker(t)
-	if err := b.onboardingCompleteFn("go", false, "niche-crm", nil); err != nil {
+	if err := b.onboardingCompleteFn("go", false, "niche-crm", nil, ""); err != nil {
 		t.Fatalf("onboardingCompleteFn: %v", err)
 	}
 
@@ -487,7 +487,7 @@ func TestOnboardingCompleteEmitsOfficeReseededEvent(t *testing.T) {
 	events, unsubscribe := b.SubscribeOfficeChanges(32)
 	defer unsubscribe()
 
-	if err := b.onboardingCompleteFn("Stand up niche CRM", false, "niche-crm", nil); err != nil {
+	if err := b.onboardingCompleteFn("Stand up niche CRM", false, "niche-crm", nil, ""); err != nil {
 		t.Fatalf("onboardingCompleteFn: %v", err)
 	}
 

@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/nex-crm/wuphf/internal/config"
@@ -279,3 +280,48 @@ func Update(name string, fn func(*Workspace) error) error {
 // ErrWorkspaceNotFound is returned when the named workspace is absent from
 // the registry.
 var ErrWorkspaceNotFound = errors.New("workspaces: workspace not found")
+
+// UpdateCompanyNameByRuntimeHome finds the workspace whose RuntimeHome matches
+// runtimeHome and sets its CompanyName to name. Returns ErrWorkspaceNotFound
+// if no workspace matches. A blank name is a no-op.
+func UpdateCompanyNameByRuntimeHome(runtimeHome, name string) error {
+	runtimeHome = strings.TrimSpace(runtimeHome)
+	name = strings.TrimSpace(name)
+	if runtimeHome == "" || name == "" {
+		return nil
+	}
+	lf, err := acquireLock()
+	if err != nil {
+		return err
+	}
+	defer releaseLock(lf)
+
+	rp, err := registryPath()
+	if err != nil {
+		return err
+	}
+	reg, err := readFile(rp)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return ErrRegistryNotFound
+		}
+		bak := rp + ".bak"
+		reg, err = readFile(bak)
+		if err != nil {
+			return fmt.Errorf("workspaces: read for update: %w", err)
+		}
+	}
+
+	var target *Workspace
+	for _, ws := range reg.Workspaces {
+		if ws.RuntimeHome == runtimeHome {
+			target = ws
+			break
+		}
+	}
+	if target == nil {
+		return ErrWorkspaceNotFound
+	}
+	target.CompanyName = name
+	return writeUnderLock(reg)
+}

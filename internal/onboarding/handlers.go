@@ -19,8 +19,9 @@ import (
 // kickoff task. blueprintID is empty for the "from scratch" path.
 // selectedAgents is nil when no filtering is requested (internal synthesis
 // callers) and may be an empty slice when the wizard user unchecked every
-// agent.
-type CompleteFunc func(task string, skipTask bool, blueprintID string, selectedAgents []string) error
+// agent. companyName is the company or project name captured in the identity
+// step; it is empty when the user skipped or left the field blank.
+type CompleteFunc func(task string, skipTask bool, blueprintID string, selectedAgents []string, companyName string) error
 
 // RegisterRoutes attaches all onboarding HTTP handlers to mux.
 //
@@ -187,8 +188,12 @@ func HandleComplete(w http.ResponseWriter, r *http.Request, completeFn CompleteF
 		return
 	}
 
+	// Extract company name before calling completeFn so the broker can sync it
+	// to the workspace registry as part of its side effects.
+	companyName := onboardingPartialCompanyName(s.Partial)
+
 	if completeFn != nil {
-		if err := completeFn(body.Task, body.SkipTask, strings.TrimSpace(body.Blueprint), body.Agents); err != nil {
+		if err := completeFn(body.Task, body.SkipTask, strings.TrimSpace(body.Blueprint), body.Agents, companyName); err != nil {
 			// Log the full error server-side but return an opaque response to
 			// the client. completeFn may wrap filesystem paths, yaml parse
 			// messages, or other internals that should not leak to HTTP
@@ -200,7 +205,6 @@ func HandleComplete(w http.ResponseWriter, r *http.Request, completeFn CompleteF
 	}
 
 	// Build the completed payload — prepare the response before writing disk.
-	companyName := onboardingPartialCompanyName(s.Partial)
 	completeState(s, companyName)
 
 	if err := Save(s); err != nil {
