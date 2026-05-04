@@ -426,7 +426,8 @@ body {
 
 /* ─── App card (skill scoping additions) ─── */
 .app-card--proposed {
-  border-left: 3px solid var(--yellow);
+  border-color: var(--yellow);
+  background: var(--yellow-bg);
 }
 .app-card--disabled {
   position: relative;

@@ -135,6 +135,17 @@ func requireTeamActionApproval(ctx context.Context, slug, channel string, args T
 
 	options, recommendedID := normalizeHumanRequestOptions("approval", "", nil)
 
+	// Collapse retries onto a single approval. Without this dedupe key,
+	// every agent loop reconnect or retry of the same external-action
+	// call posts a fresh /requests entry, and the human ends up staring
+	// at 100+ stacked "Approve gmail action" cards for the same intent.
+	dedupeKey := fmt.Sprintf("action:%s:%s:%s:%s",
+		strings.ToLower(slug),
+		strings.ToLower(platform),
+		strings.ToLower(actionID),
+		strings.ToLower(strings.TrimSpace(args.ConnectionKey)),
+	)
+
 	var created struct {
 		ID string `json:"id"`
 	}
@@ -149,6 +160,7 @@ func requireTeamActionApproval(ctx context.Context, slug, channel string, args T
 		"recommended_id": recommendedID,
 		"blocking":       true,
 		"required":       true,
+		"dedupe_key":     dedupeKey,
 	}, &created); err != nil {
 		return fmt.Errorf("create approval request: %w", err)
 	}

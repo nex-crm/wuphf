@@ -31,6 +31,8 @@ function routeIdentityKey(route: CurrentRoute): string {
       return `dm:${route.agentSlug}`;
     case "app":
       return `app:${route.appId}`;
+    case "workbench":
+      return `workbench:${route.agentSlug ?? ""}/${route.taskId ?? ""}`;
     case "wiki":
       return "wiki";
     case "wiki-article":
@@ -187,6 +189,14 @@ function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
     } finally {
       setDmLoading(false);
     }
+  }
+
+  function handleOpenWorkbench() {
+    setActiveAgentSlug(null);
+    void router.navigate({
+      to: "/apps/workbench/$agentSlug",
+      params: { agentSlug: agent.slug },
+    });
   }
 
   // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
@@ -365,6 +375,13 @@ function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
           disabled={dmLoading}
         >
           {dmLoading ? "Opening..." : "Open DM"}
+        </button>
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm"
+          onClick={handleOpenWorkbench}
+        >
+          Open workbench
         </button>
         <button
           type="button"

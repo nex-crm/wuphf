@@ -1,4 +1,4 @@
-import { get } from "./client";
+import { get, post } from "./client";
 
 // /version returns the build-info baked into the running broker binary
 // (set at link time via -ldflags `-X .../buildinfo.Version=...`). For an
@@ -45,6 +45,63 @@ export interface UsageData {
 
 export function getHealth() {
   return get<HealthResponse>("/health");
+}
+
+export interface HumanSession {
+  id: string;
+  invite_id: string;
+  human_slug: string;
+  display_name: string;
+  device?: string;
+  created_at: string;
+  expires_at: string;
+  revoked_at?: string;
+  last_seen_at?: string;
+}
+
+export interface HumanMe {
+  human: {
+    id?: string;
+    slug?: string;
+    role?: string;
+    invite_id?: string;
+    human_slug?: string;
+    display_name?: string;
+    device?: string;
+    created_at?: string;
+    expires_at?: string;
+    revoked_at?: string;
+    last_seen_at?: string;
+  };
+}
+
+export function getHumanMe() {
+  return get<HumanMe>("/humans/me");
+}
+
+export function getHumanSessions() {
+  return get<{ sessions?: HumanSession[] }>("/humans/sessions");
+}
+
+export interface WebShareStatus {
+  running: boolean;
+  bind?: string;
+  interface?: string;
+  invite_url?: string;
+  expires_at?: string;
+  error?: string;
+}
+
+export function getShareStatus() {
+  return get<WebShareStatus>("/share/status");
+}
+
+export function startShare() {
+  return post<WebShareStatus>("/share/start", {});
+}
+
+export function stopShare() {
+  return post<WebShareStatus>("/share/stop", {});
 }
 
 export function getVersion() {

@@ -16,8 +16,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-
-	"github.com/nex-crm/wuphf/internal/agent"
 )
 
 // Launch starts a tmux session hosting the channel-view TUI and the shared
@@ -64,15 +62,11 @@ func (l *Launcher) Launch() error {
 		return fmt.Errorf("start broker: %w", err)
 	}
 
-	// Pre-seed any default skills declared by the pack (idempotent).
-	// Always seed the cross-cutting productivity skills (grill-me, tdd,
-	// diagnose, etc., adapted from github.com/mattpocock/skills) on top of
-	// whatever the active pack defines. They're useful for every install,
-	// not just packs that explicitly enumerate them.
-	if l.pack != nil {
-		l.broker.SeedDefaultSkills(agent.AppendProductivitySkills(l.pack.DefaultSkills))
-	} else {
-		l.broker.SeedDefaultSkills(agent.AppendProductivitySkills(nil))
+	stopTransports, err := RegisterTransports(l.broker)
+	if err != nil {
+		// Non-fatal: a misconfigured optional adapter (e.g. bad Telegram token)
+		// should not prevent the office from starting.
+		fmt.Fprintf(os.Stderr, "warning: transport registration: %v\n", err)
 	}
 
 	// Kill any existing session
@@ -81,9 +75,8 @@ func (l *Launcher) Launch() error {
 	// Resolve wuphf binary path for the channel view
 	wuphfBinary, _ := os.Executable()
 	if err := os.MkdirAll(filepath.Dir(channelStderrLogPath()), 0o700); err != nil {
-		// Stop the broker we already started so we don't leak a
-		// listener on an aborted Launch. Same unwind reason as the
-		// PID-file failure path in launcher_web.go.
+		// Stop adapters before the broker so they can flush in-flight sends.
+		stopTransports()
 		l.broker.Stop()
 		return fmt.Errorf("prepare channel log dir: %w", err)
 	}
@@ -108,6 +101,7 @@ func (l *Launcher) Launch() error {
 		channelCmd,
 	).Run()
 	if err != nil {
+		stopTransports()
 		l.broker.Stop()
 		return fmt.Errorf("create tmux session: %w", err)
 	}
@@ -197,25 +191,24 @@ func (l *Launcher) launchHeadlessCodex() error {
 	if err := l.broker.SetSessionMode(l.sessionMode, l.oneOnOne); err != nil {
 		return fmt.Errorf("set session mode: %w", err)
 	}
-	// SetFocusMode + default-skill seed mirror Launch() so that the
-	// broker's focus-mode predicate (used by isFocusModeEnabled) and
-	// the productivity skill set are wired before the broker becomes
-	// reachable. Pre-fix headless launches missed both, leaving
-	// isFocusModeEnabled stuck on l.focusMode regardless of broker
-	// state and the cross-cutting productivity skills (grill-me, tdd,
-	// diagnose) absent.
+	// SetFocusMode mirrors Launch() so that the broker's focus-mode
+	// predicate (used by isFocusModeEnabled) is wired before the broker
+	// becomes reachable. Pre-fix headless launches missed this, leaving
+	// isFocusModeEnabled stuck on l.focusMode regardless of broker state.
 	if err := l.broker.SetFocusMode(l.focusMode); err != nil {
 		return fmt.Errorf("set focus mode: %w", err)
 	}
 	if err := l.broker.Start(); err != nil {
 		return fmt.Errorf("start broker: %w", err)
 	}
-	if l.pack != nil {
-		l.broker.SeedDefaultSkills(agent.AppendProductivitySkills(l.pack.DefaultSkills))
-	} else {
-		l.broker.SeedDefaultSkills(agent.AppendProductivitySkills(nil))
+
+	stopTransports, err := RegisterTransports(l.broker)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: transport registration: %v\n", err)
 	}
+
 	if err := writeOfficePIDFile(); err != nil {
+		stopTransports()
 		l.broker.Stop()
 		return fmt.Errorf("write office pid: %w", err)
 	}

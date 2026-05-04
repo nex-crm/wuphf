@@ -50,7 +50,7 @@ func requestActorFromContext(ctx context.Context) (requestActor, bool) {
 func humanMessageSender(slug string) string {
 	slug = normalizeHumanSessionSlug(slug)
 	if slug == "" {
-		slug = "co-founder"
+		slug = "team-member"
 	}
 	return "human:" + slug
 }
@@ -63,7 +63,7 @@ func isHumanMessageSender(sender string) bool {
 func humanIdentityFromActor(actor requestActor) HumanIdentity {
 	slug := normalizeHumanSessionSlug(actor.Slug)
 	if slug == "" {
-		slug = "co-founder"
+		slug = "team-member"
 	}
 	name := strings.TrimSpace(actor.DisplayName)
 	if name == "" {

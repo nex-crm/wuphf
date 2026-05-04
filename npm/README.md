@@ -43,28 +43,30 @@ Supported platforms: macOS, Linux, and Windows 10+ on x64 or arm64. The native b
 
 | Flag | What it does |
 |------|-------------|
-| `--memory-backend <name>` | Pick the organizational memory backend (`nex`, `gbrain`, `none`) |
+| `--memory-backend <name>` | Pick the organizational memory backend (`markdown`, `nex`, `gbrain`, `none`) |
 | `--no-nex` | Skip the Nex backend (no context graph, no Nex-managed integrations) |
 | `--tui` | Use the tmux TUI instead of the web UI |
 | `--no-open` | Don't auto-open the browser |
 | `--pack <name>` | Pick an agent pack (`starter`, `founding-team`, `coding-team`, `lead-gen-agency`, `revops`) |
 | `--opus-ceo` | Upgrade CEO from Sonnet to Opus |
-| `--provider <name>` | LLM provider override (`claude-code`, `codex`) |
+| `--provider <name>` | LLM provider override (`claude-code`, `codex`, `opencode`) |
 | `--collab` | Start in collaborative mode — all agents see all messages (this is the default) |
 | `--unsafe` | Bypass agent permission checks (local dev only) |
 | `--web-port <n>` | Change the web UI port (default 7891) |
 
 ## Memory: Notebooks and the Wiki
 
-Every agent gets its own **notebook**. The team shares a **wiki**. When a conclusion in an agent's notebook holds up, it gets promoted to the wiki so the whole office benefits. Both are knowledge graphs under the hood, on Garry Tan's GBrain or Nex.
+Every agent gets its own **notebook**. The team shares a **wiki**. New installs get the wiki as a local git repo of markdown articles. Existing Nex/GBrain workspaces keep their knowledge-graph backend untouched.
 
 **Backends for the wiki:**
 
-- `nex` is the default. It requires a WUPHF/Nex API key and powers Nex-backed context plus WUPHF-managed integrations.
+- `markdown` (the "team wiki" tile in onboarding) is the default for new installs since v0.0.6. It stores typed facts, entity briefs, cited lookup answers, and lintable wiki articles in a local git repo at `~/.wuphf/wiki/`. No API key required.
+- `nex` was the previous default. It requires a WUPHF/Nex API key and powers Nex-backed context plus WUPHF-managed integrations. Existing users stay on `nex` via persisted config.
 - `gbrain` mounts `gbrain serve` as the wiki backend.
-- `none` disables the external wiki entirely. Notebooks still work locally.
+- `none` disables the shared wiki entirely. Notebooks still work locally.
 
 ```bash
+wuphf --memory-backend markdown
 wuphf --memory-backend nex
 wuphf --memory-backend gbrain
 wuphf --memory-backend none

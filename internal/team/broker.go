@@ -128,11 +128,16 @@ type Broker struct {
 	// .archive/ copy — silently destroying the original.
 	archiveSweepMu     sync.Mutex
 	server             *http.Server
+	listener           net.Listener
 	lifecycleCtx       context.Context
 	lifecycleCancel    context.CancelFunc
-	token              string          // shared secret for authenticating requests
-	addr               string          // actual listen address (useful when port=0)
-	webUIOrigins       []string        // allowed CORS origins for web UI (set by ServeWebUI)
+	token              string   // shared secret for authenticating requests
+	addr               string   // actual listen address (useful when port=0)
+	webUIOrigins       []string // allowed CORS origins for web UI (set by ServeWebUI)
+	webShareStart      func() (WebShareStatus, error)
+	webShareStatus     func() WebShareStatus
+	webShareStop       func() error
+	brokerRestartMu    sync.Mutex
 	runtimeProvider    string          // "codex" or "claude" — set by launcher
 	packSlug           string          // active agent pack slug ("founding-team", "revops", ...) — set by launcher
 	blankSlateLaunch   bool            // start without a saved blueprint and synthesize the first operation
@@ -521,13 +526,15 @@ func (b *Broker) StartOnPort(port int) error {
 		return err
 	}
 	b.addr = ln.Addr().String()
+	b.listener = ln
 
-	b.server = &http.Server{
+	srv := &http.Server{
 		Addr:        addr,
 		Handler:     b.corsMiddleware(b.rateLimitMiddleware(mux)),
 		ReadTimeout: 5 * time.Second,
 		// No WriteTimeout — SSE streams (agent-stream, events) are open-ended.
 	}
+	b.server = srv
 
 	// Write token to a well-known path so tests and tools can authenticate.
 	// Use /tmp directly (not os.TempDir which varies by OS).
@@ -542,7 +549,7 @@ func (b *Broker) StartOnPort(port int) error {
 	}
 
 	go func() {
-		_ = b.server.Serve(ln)
+		_ = srv.Serve(ln)
 	}()
 	return nil
 }
@@ -557,9 +564,14 @@ func (b *Broker) Stop() {
 	if b.lifecycleCancel != nil {
 		b.lifecycleCancel()
 	}
+	b.brokerRestartMu.Lock()
+	if b.listener != nil {
+		_ = b.listener.Close()
+	}
 	if b.server != nil {
 		_ = b.server.Close()
 	}
+	b.brokerRestartMu.Unlock()
 	b.mu.Lock()
 	synth := b.entitySynthesizer
 	pbSynth := b.playbookSynthesizer

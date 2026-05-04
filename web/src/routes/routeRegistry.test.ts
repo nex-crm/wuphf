@@ -14,6 +14,9 @@ import {
   wikiArticleRoute,
   wikiIndexRoute,
   wikiLookupRoute,
+  workbenchAgentRoute,
+  workbenchRoute,
+  workbenchTaskRoute,
 } from "../lib/router";
 import {
   APP_PANEL_IDS,
@@ -33,6 +36,7 @@ describe("route registry", () => {
     expect(unique(APP_PANEL_IDS)).toHaveLength(APP_PANEL_IDS.length);
     expect(isAppPanelId("tasks")).toBe(true);
     expect(isAppPanelId("wiki")).toBe(false);
+    expect(isAppPanelId("workbench")).toBe(false);
     expect(isAppPanelId("notebooks")).toBe(false);
   });
 
@@ -61,6 +65,9 @@ describe("TanStack route tree", () => {
     ["/channels/launch", channelRoute.id],
     ["/dm/pm", dmRoute.id],
     ["/apps/tasks", appRoute.id],
+    ["/apps/workbench", workbenchRoute.id],
+    ["/apps/workbench/pm", workbenchAgentRoute.id],
+    ["/apps/workbench/pm/tasks/task-7", workbenchTaskRoute.id],
     ["/wiki", wikiIndexRoute.id],
     ["/wiki/lookup", wikiLookupRoute.id],
     ["/wiki/companies/acme", wikiArticleRoute.id],

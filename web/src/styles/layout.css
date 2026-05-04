@@ -22,7 +22,6 @@
      scroll container for windows too short to fit the fixed sidebar chrome. */
   overflow-y: auto;
   overflow-x: hidden;
-  transition: width 0.22s ease;
 }
 
 /* ─── Collapsed rail ─── */
@@ -764,6 +763,23 @@ html[data-theme="nex"]
 .status-bar-conn.disconnected::before {
   background: var(--red);
 }
+.status-bar-conn-retry {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+}
+.status-bar-conn-retry:hover:not(:disabled) {
+  color: var(--red);
+  text-decoration: underline;
+}
+.status-bar-conn-retry:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
 
 .sidebar-scroll-wrap {
   position: relative;
@@ -1060,8 +1076,8 @@ html[data-theme="nex"]
   box-sizing: border-box;
   padding: 0 20px;
   border-bottom: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.8);
-  backdrop-filter: blur(8px);
+  background: var(--bg-card);
+  backdrop-filter: none;
   flex-shrink: 0;
 }
 .channel-title {
@@ -1813,6 +1829,15 @@ html[data-theme="nex"]
 }
 .live-work-section:empty {
   display: none;
+}
+
+.app-panel-loading {
+  display: flex;
+  min-height: 160px;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-tertiary);
+  font-size: 13px;
 }
 
 /* ─── Responsive ─── */

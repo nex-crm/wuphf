@@ -23,7 +23,6 @@ import (
 
 	"golang.org/x/term"
 
-	"github.com/nex-crm/wuphf/internal/agent"
 	"github.com/nex-crm/wuphf/internal/config"
 	"github.com/nex-crm/wuphf/internal/nex"
 	"github.com/nex-crm/wuphf/internal/runtimebin"
@@ -105,25 +104,20 @@ func (l *Launcher) LaunchWeb(webPort int) error {
 	if err := l.broker.Start(); err != nil {
 		return fmt.Errorf("start broker: %w", err)
 	}
-	if err := writeOfficePIDFile(); err != nil {
-		// Stop the broker we just started so we don't leave an
-		// orphaned listener bound to the broker port. Without this,
-		// a PID-file write failure (full disk, perms, …) leaves
-		// the broker accepting requests with no PID record — the
-		// next launch can't kill it cleanly.
-		l.broker.Stop()
-		return fmt.Errorf("write office pid: %w", err)
+
+	stopTransports, err := RegisterTransports(l.broker)
+	if err != nil {
+		// Non-fatal: a misconfigured optional adapter should not prevent the
+		// web UI from starting.
+		fmt.Fprintf(os.Stderr, "warning: transport registration: %v\n", err)
 	}
 
-	// Pre-seed any default skills declared by the pack (idempotent).
-	// Always seed the cross-cutting productivity skills (grill-me, tdd,
-	// diagnose, etc., adapted from github.com/mattpocock/skills) on top of
-	// whatever the active pack defines. They're useful for every install,
-	// not just packs that explicitly enumerate them.
-	if l.pack != nil {
-		l.broker.SeedDefaultSkills(agent.AppendProductivitySkills(l.pack.DefaultSkills))
-	} else {
-		l.broker.SeedDefaultSkills(agent.AppendProductivitySkills(nil))
+	if err := writeOfficePIDFile(); err != nil {
+		// Stop adapters before the broker so they can flush in-flight sends.
+		stopTransports()
+		l.broker.Stop()
+		_ = clearOfficePIDFile()
+		return fmt.Errorf("write office pid: %w", err)
 	}
 
 	l.broker.SetGenerateMemberFn(l.GenerateMemberTemplateFromPrompt)
@@ -134,6 +128,7 @@ func (l *Launcher) LaunchWeb(webPort int) error {
 		// down — leaving the broker accepting requests on a "wuphf has
 		// failed to start" path is worse than a clean exit, and a stale
 		// PID file would block the next launch attempt's writeOfficePID.
+		stopTransports()
 		l.broker.Stop()
 		_ = clearOfficePIDFile()
 		return fmt.Errorf("web UI failed to start: %w\n\nIs port %d already in use? Try: wuphf --web-port %d", err, webPort, webPort+1)

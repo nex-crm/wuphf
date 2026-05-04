@@ -17,7 +17,7 @@ export const APP_PANEL_IDS = [
 
 export type AppPanelId = (typeof APP_PANEL_IDS)[number];
 
-export const FIRST_CLASS_APP_IDS = ["wiki"] as const;
+export const FIRST_CLASS_APP_IDS = ["wiki", "workbench"] as const;
 export type FirstClassAppId = (typeof FIRST_CLASS_APP_IDS)[number];
 
 export const WIKI_SURFACE_APP_IDS = ["wiki", "notebooks", "reviews"] as const;
@@ -42,6 +42,9 @@ export const ROUTE_PATHS = {
   channel: "/channels/$channelSlug",
   dm: "/dm/$agentSlug",
   app: "/apps/$appId",
+  workbench: "/apps/workbench",
+  workbenchAgent: "/apps/workbench/$agentSlug",
+  workbenchTask: "/apps/workbench/$agentSlug/tasks/$taskId",
   wiki: "/wiki",
   wikiLookup: "/wiki/lookup",
   wikiArticle: "/wiki/$",
@@ -78,6 +81,19 @@ export const ROUTE_CONTRACTS: readonly RouteContract[] = [
   },
   { key: "dm", path: ROUTE_PATHS.dm, params: ["agentSlug"], search: [] },
   { key: "app", path: ROUTE_PATHS.app, params: ["appId"], search: [] },
+  { key: "workbench", path: ROUTE_PATHS.workbench, params: [], search: [] },
+  {
+    key: "workbenchAgent",
+    path: ROUTE_PATHS.workbenchAgent,
+    params: ["agentSlug"],
+    search: [],
+  },
+  {
+    key: "workbenchTask",
+    path: ROUTE_PATHS.workbenchTask,
+    params: ["agentSlug", "taskId"],
+    search: [],
+  },
   { key: "wiki", path: ROUTE_PATHS.wiki, params: [], search: [] },
   {
     key: "wikiLookup",

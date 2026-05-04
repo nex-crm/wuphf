@@ -12,6 +12,9 @@ import {
   wikiArticleRoute,
   wikiIndexRoute,
   wikiLookupRoute,
+  workbenchAgentRoute,
+  workbenchRoute,
+  workbenchTaskRoute,
 } from "../lib/router";
 import { type CurrentRoute, deriveCurrentRoute } from "./useCurrentRoute";
 
@@ -64,6 +67,27 @@ describe("deriveCurrentRoute (URL → discriminated union)", () => {
       { appId: "tasks" },
       {},
       { kind: "app", appId: "tasks" },
+    ],
+    [
+      "workbench index",
+      workbenchRoute.id,
+      {},
+      {},
+      { kind: "workbench", agentSlug: null, taskId: null },
+    ],
+    [
+      "workbench agent",
+      workbenchAgentRoute.id,
+      { agentSlug: "pm" },
+      {},
+      { kind: "workbench", agentSlug: "pm", taskId: null },
+    ],
+    [
+      "workbench task",
+      workbenchTaskRoute.id,
+      { agentSlug: "pm", taskId: "task-7" },
+      {},
+      { kind: "workbench", agentSlug: "pm", taskId: "task-7" },
     ],
     ["wiki index", wikiIndexRoute.id, {}, {}, { kind: "wiki" }],
     [

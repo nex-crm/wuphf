@@ -47,11 +47,15 @@ Prefer a global install?
 npm install -g wuphf && wuphf
 ```
 
-Building from source (requires Go):
+Building from source (requires Go and Bun):
 
 ```bash
 git clone https://github.com/nex-crm/wuphf.git
 cd wuphf
+cd web
+bun install
+bun run build
+cd ..
 go build -o wuphf ./cmd/wuphf
 ./wuphf
 ```
@@ -87,13 +91,13 @@ if I say yes. If I am not logged in, just open https://wuphf.team.
 
 | Flag | What it does |
 |------|-------------|
-| `--memory-backend <name>` | Pick the organizational memory backend (`nex`, `gbrain`, `none`) |
+| `--memory-backend <name>` | Pick the organizational memory backend (`markdown`, `nex`, `gbrain`, `none`) |
 | `--no-nex` | Skip the Nex backend (no context graph, no Nex-managed integrations) |
 | `--tui` | Use the tmux TUI instead of the web UI |
 | `--no-open` | Don't auto-open the browser |
 | `--pack <name>` | Pick an agent pack (`starter`, `founding-team`, `coding-team`, `lead-gen-agency`, `revops`) |
 | `--opus-ceo` | Upgrade CEO from Sonnet to Opus |
-| `--provider <name>` | LLM provider override (`claude-code`, `codex`) |
+| `--provider <name>` | LLM provider override (`claude-code`, `codex`, `opencode`) |
 | `--collab` | Start in collaborative mode — all agents see all messages (this is the default) |
 | `--unsafe` | Bypass agent permission checks (local dev only) |
 | `--web-port <n>` | Change the web UI port (default 7891) |
@@ -139,13 +143,13 @@ The examples below assume `wuphf` is on your `PATH`. If you just built the binar
 
 ```bash
 wuphf init          # First-time setup
-wuphf share         # Invite one co-founder over Tailscale/WireGuard
+wuphf share         # Invite one team member over Tailscale/WireGuard
 wuphf shred         # Delete workspace state and reopen onboarding
 wuphf --1o1         # 1:1 with the CEO
 wuphf --1o1 cro     # 1:1 with a specific agent
 ```
 
-## Share With a Co-founder
+## Share With a Team Member
 
 Prerequisite: both machines are on the same Tailscale or WireGuard network.
 
@@ -153,9 +157,9 @@ Prerequisite: both machines are on the same Tailscale or WireGuard network.
 wuphf share
 ```
 
-Send the printed `/join` URL to one co-founder. The invite is one use, expires after 24 hours, and the shared web listener only starts on a private-network address by default. Public interfaces are blocked unless you pass an explicit unsafe override.
+Send the printed `/join` URL to one team member. The invite is one use, expires after 24 hours, and the shared web listener only starts on a private-network address by default. Public interfaces are blocked unless you pass an explicit unsafe override.
 
-For the full founder-to-founder walkthrough, see [Share WUPHF With a Co-founder](docs/tutorials/share-with-cofounder.md).
+For the full walkthrough, see [Share WUPHF With a Team Member](docs/tutorials/share-with-team-member.md).
 
 ## Publishing skills
 
@@ -198,6 +202,8 @@ Already running [OpenClaw](https://openclaw.ai) agents? You can bring them into 
 Inside the office, run `/connect openclaw`, paste your gateway URL (default `ws://127.0.0.1:18789`) and the `gateway.auth.token` from your `~/.openclaw/openclaw.json`, then pick which sessions to bridge. Each becomes a first-class office member you can `@mention`. OpenClaw agents keep running in their own sandbox; WUPHF just gives them a shared office to collaborate in.
 
 WUPHF authenticates to the gateway using an Ed25519 keypair (persisted at `~/.wuphf/openclaw/identity.json`, 0600), signed against the server-issued nonce during every connect. OpenClaw grants zero scopes to token-only clients, so device pairing is mandatory — on loopback the gateway approves silently on first use.
+
+Want to add a new integration? See [docs/ADD-A-TRANSPORT.md](docs/ADD-A-TRANSPORT.md).
 
 ## External Actions
 

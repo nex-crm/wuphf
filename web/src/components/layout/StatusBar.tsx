@@ -1,7 +1,10 @@
+import { useCallback, useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
+import { restartBroker } from "../../api/client";
 import { getHealth, type HealthResponse } from "../../api/platform";
 import { useOfficeMembers } from "../../hooks/useMembers";
+import { appTitle } from "../../lib/constants";
 import { useCurrentRoute } from "../../routes/useCurrentRoute";
 import { useAppStore } from "../../stores/app";
 import { Kbd } from "../ui/Kbd";
@@ -15,6 +18,26 @@ export function StatusBar() {
   const route = useCurrentRoute();
   const brokerConnected = useAppStore((s) => s.brokerConnected);
   const setComposerHelpOpen = useAppStore((s) => s.setComposerHelpOpen);
+
+  const [retrying, setRetrying] = useState(false);
+
+  // Clear the in-progress state once the broker reconnects.
+  useEffect(() => {
+    if (brokerConnected) setRetrying(false);
+  }, [brokerConnected]);
+
+  const handleRestart = useCallback(async () => {
+    setRetrying(true);
+    try {
+      await restartBroker();
+      // 202 received — broker is exiting and will respawn. Keep retrying=true
+      // until brokerConnected flips back via the useEffect above.
+    } catch {
+      // Broker unreachable or spawn failed: reset immediately so the button
+      // is clickable again.
+      setRetrying(false);
+    }
+  }, []);
   const { data: members = [] } = useOfficeMembers();
   const dm = route.kind === "dm" ? { agentSlug: route.agentSlug } : null;
 
@@ -37,10 +60,12 @@ export function StatusBar() {
       case "dm":
         return `@${route.agentSlug}`;
       case "app":
-        return route.appId;
+        return appTitle(route.appId);
+      case "workbench":
+        return appTitle("workbench");
       case "wiki":
       case "wiki-article":
-        return "wiki";
+        return appTitle("wiki");
       case "wiki-lookup":
         return "wiki-lookup";
       case "notebook-catalog":
@@ -101,11 +126,20 @@ export function StatusBar() {
           ) : null}
         </span>
       ) : null}
-      <span
-        className={`status-bar-item status-bar-conn${brokerConnected ? "" : " disconnected"}`}
-      >
-        {brokerConnected ? "connected" : "disconnected"}
-      </span>
+      {brokerConnected ? (
+        <span className="status-bar-item status-bar-conn">connected</span>
+      ) : (
+        <button
+          type="button"
+          className="status-bar-item status-bar-conn status-bar-conn-retry disconnected"
+          onClick={handleRestart}
+          disabled={retrying}
+          title="Click to restart broker"
+          aria-label={retrying ? "Restarting broker…" : "Restart broker"}
+        >
+          {retrying ? "restarting…" : "disconnected"}
+        </button>
+      )}
     </div>
   );
 }

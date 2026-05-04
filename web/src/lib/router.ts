@@ -30,6 +30,21 @@ export const appRoute = createRoute({
   path: ROUTE_PATHS.app,
 });
 
+export const workbenchRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: ROUTE_PATHS.workbench,
+});
+
+export const workbenchAgentRoute = createRoute({
+  getParentRoute: () => workbenchRoute,
+  path: "$agentSlug",
+});
+
+export const workbenchTaskRoute = createRoute({
+  getParentRoute: () => workbenchAgentRoute,
+  path: "tasks/$taskId",
+});
+
 // Wiki, notebook, and review routes.
 export const wikiRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -98,6 +113,9 @@ export const routeTree = rootRoute.addChildren([
   indexRoute,
   channelRoute,
   dmRoute,
+  workbenchRoute.addChildren([
+    workbenchAgentRoute.addChildren([workbenchTaskRoute]),
+  ]),
   appRoute,
   wikiRoute.addChildren([wikiIndexRoute, wikiLookupRoute, wikiArticleRoute]),
   notebooksRoute.addChildren([

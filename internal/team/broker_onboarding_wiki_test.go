@@ -23,7 +23,7 @@ func TestOnboardingCompleteMaterializesWiki(t *testing.T) {
 	t.Setenv("WUPHF_RUNTIME_HOME", tmpHome)
 
 	b := newTestBroker(t)
-	if err := b.onboardingCompleteFn("Stand up niche CRM", false, "niche-crm", nil); err != nil {
+	if err := b.onboardingCompleteFn("Stand up niche CRM", false, "niche-crm", nil, ""); err != nil {
 		t.Fatalf("onboardingCompleteFn: %v", err)
 	}
 
@@ -66,7 +66,7 @@ func TestOnboardingCompleteWikiIsIdempotent(t *testing.T) {
 
 	// First run.
 	b := newTestBroker(t)
-	if err := b.onboardingCompleteFn("Stand up niche CRM", false, "niche-crm", nil); err != nil {
+	if err := b.onboardingCompleteFn("Stand up niche CRM", false, "niche-crm", nil, ""); err != nil {
 		t.Fatalf("first onboardingCompleteFn: %v", err)
 	}
 	wikiRoot := filepath.Join(tmpHome, ".wuphf", "wiki")
@@ -83,7 +83,7 @@ func TestOnboardingCompleteWikiIsIdempotent(t *testing.T) {
 	// the persistence from the first run (matches production behavior
 	// where a CLI restart reads ~/.wuphf/team/broker-state.json).
 	b2 := NewBrokerAt(b.statePath)
-	if err := b2.onboardingCompleteFn("Re-pick niche CRM", false, "niche-crm", nil); err != nil {
+	if err := b2.onboardingCompleteFn("Re-pick niche CRM", false, "niche-crm", nil, ""); err != nil {
 		t.Fatalf("second onboardingCompleteFn: %v", err)
 	}
 
@@ -108,7 +108,7 @@ func TestOnboardingCompleteSynthesizedBlueprintSkipsWiki(t *testing.T) {
 	t.Setenv("WUPHF_RUNTIME_HOME", tmpHome)
 
 	b := newTestBroker(t)
-	if err := b.onboardingCompleteFn("Run a bespoke operation", false, "", nil); err != nil {
+	if err := b.onboardingCompleteFn("Run a bespoke operation", false, "", nil, ""); err != nil {
 		t.Fatalf("onboardingCompleteFn (synthesized): %v", err)
 	}
 

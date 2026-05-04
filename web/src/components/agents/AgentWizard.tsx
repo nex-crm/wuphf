@@ -47,6 +47,12 @@ interface AgentWizardProps {
   onCreated?: () => void;
 }
 
+const AGENT_WIZARD_DIALOG_PROPS = {
+  role: "dialog",
+  "aria-modal": true,
+  "aria-labelledby": "agent-wizard-title",
+} as const;
+
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
 export function AgentWizard({ open, onClose, onCreated }: AgentWizardProps) {
   const [mode, setMode] = useState<WizardMode>("describe");
@@ -166,9 +172,15 @@ export function AgentWizard({ open, onClose, onCreated }: AgentWizardProps) {
   if (!open) return null;
 
   return (
-    <div className="agent-wizard-overlay" onClick={handleOverlayClick}>
-      <div className="agent-wizard-modal card">
-        <div className="agent-wizard-title">Create agent</div>
+    <div
+      className="agent-wizard-overlay"
+      role="presentation"
+      onClick={handleOverlayClick}
+    >
+      <div className="agent-wizard-modal card" {...AGENT_WIZARD_DIALOG_PROPS}>
+        <div className="agent-wizard-title" id="agent-wizard-title">
+          Create agent
+        </div>
 
         {/* Mode toggle */}
         <div className="channel-wizard-tabs" style={{ marginBottom: 16 }}>

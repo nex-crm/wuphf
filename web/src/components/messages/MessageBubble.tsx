@@ -49,10 +49,11 @@ export function MessageBubble({
     message.from === "human" ||
     message.from.startsWith("human:");
   const isLocalUser = message.from === "you";
-  const cofounderDisplayName =
+  const teamMemberDisplayName =
     isHuman && !isLocalUser
       ? message.from.startsWith("human:")
-        ? message.from.slice("human:".length).replace(/-/g, " ") || "co-founder"
+        ? message.from.slice("human:".length).replace(/-/g, " ") ||
+          "team member"
         : "Human"
       : null;
   const agent = members.find((m) => m.slug === message.from);
@@ -132,8 +133,8 @@ export function MessageBubble({
       >
         {isLocalUser ? (
           "You"
-        ) : cofounderDisplayName ? (
-          cofounderDisplayName.slice(0, 1).toUpperCase()
+        ) : teamMemberDisplayName ? (
+          teamMemberDisplayName.slice(0, 1).toUpperCase()
         ) : (
           <>
             <PixelAvatar slug={message.from} size={24} />
@@ -155,7 +156,7 @@ export function MessageBubble({
           <span className="message-author">
             {isLocalUser
               ? "You"
-              : cofounderDisplayName || agent?.name || message.from}
+              : teamMemberDisplayName || agent?.name || message.from}
           </span>
           {isHuman ? (
             <span className="badge badge-neutral">human</span>

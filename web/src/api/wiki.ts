@@ -127,6 +127,18 @@ export interface WikiCatalogEntry {
   days_unread?: number;
   /** True when the entry is an archived tombstone. Only present with ?include_archived=true. */
   archived?: boolean;
+  /**
+   * Whitespace-delimited word count of the article body (frontmatter included).
+   * Drives the `verbose` badge in the catalog grid alongside `prune_score`.
+   */
+  word_count?: number;
+  /**
+   * Derived prune signal — `(word_count * days_unread) / readWeight`. Higher
+   * means more verbose AND staler AND less read. Top-decile entries get a
+   * `verbose` badge; PR 4 will surface a one-click compress action driven
+   * by this score.
+   */
+  prune_score?: number;
 }
 
 /**
@@ -341,10 +353,20 @@ export async function fetchHumans(): Promise<HumanIdentity[]> {
   }
 }
 
+function parseCatalogResponse(res: {
+  articles: WikiCatalogEntry[];
+}): WikiCatalogEntry[] {
+  return Array.isArray(res?.articles) ? res.articles : [];
+}
+
+export async function fetchCatalogStrict(): Promise<WikiCatalogEntry[]> {
+  const res = await get<{ articles: WikiCatalogEntry[] }>("/wiki/catalog");
+  return parseCatalogResponse(res);
+}
+
 export async function fetchCatalog(): Promise<WikiCatalogEntry[]> {
   try {
-    const res = await get<{ articles: WikiCatalogEntry[] }>("/wiki/catalog");
-    return Array.isArray(res?.articles) ? res.articles : [];
+    return await fetchCatalogStrict();
   } catch {
     return [];
   }

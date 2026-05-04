@@ -24,6 +24,7 @@
 !/docs/architecture/**
 !/docs/dogfood/
 !/docs/dogfood/**
+!/docs/ADD-A-TRANSPORT.md
 /termwright-artifacts/
 .worktrees/
 .vexp/

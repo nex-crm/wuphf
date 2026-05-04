@@ -47,7 +47,7 @@ func (b *Broker) ServeWebUI(port int) error {
 	}
 
 	// Resolution order for the web UI assets:
-	//   1. filesystem web/dist/ (local dev after `npm run build`)
+	//   1. filesystem web/dist/ (local dev after `bun run build`)
 	//   2. embedded FS (single-binary installs via curl | bash)
 	exePath, _ := os.Executable()
 	webDir := filepath.Join(filepath.Dir(exePath), "web")
@@ -64,8 +64,10 @@ func (b *Broker) ServeWebUI(port int) error {
 		// No on-disk build; use embedded assets.
 		fileServer = http.FileServer(http.FS(embeddedFS))
 	} else {
-		// Nothing available; serve webDir as-is so 404s come from the actual FS.
-		fileServer = http.FileServer(http.Dir(webDir))
+		// Source checkout without web/dist. Do not serve raw Vite source files:
+		// browsers load /src/main.tsx as text/plain and the page stalls on
+		// "Loading WUPHF". Return an actionable setup page instead.
+		fileServer = missingWebAssetsHandler()
 	}
 	mux := http.NewServeMux()
 	brokerURL := brokeraddr.ResolveBaseURL()
@@ -77,6 +79,10 @@ func (b *Broker) ServeWebUI(port int) error {
 	// Bearer token server-side, so without a Host/RemoteAddr check, a DNS-rebinding
 	// attack against an attacker-controlled hostname that resolves to 127.0.0.1
 	// would ride the token and control the entire office.
+	mux.Handle("/api/share/status", webUIRebindGuard(http.HandlerFunc(b.handleWebShareStatus)))
+	mux.Handle("/api/share/start", webUIRebindGuard(http.HandlerFunc(b.handleWebShareStart)))
+	mux.Handle("/api/share/stop", webUIRebindGuard(http.HandlerFunc(b.handleWebShareStop)))
+	mux.Handle("/api/broker/restart", webUIRebindGuard(http.HandlerFunc(b.handleWebBrokerRestart)))
 	mux.Handle("/api/", webUIRebindGuard(b.webUIProxyHandler(brokerURL, "/api")))
 	mux.Handle("/onboarding/", webUIRebindGuard(b.webUIProxyHandler(brokerURL, "")))
 	// Token endpoint — no auth needed, but we require a same-origin loopback request.
@@ -125,6 +131,42 @@ func (b *Broker) ServeWebUI(port int) error {
 		}
 	}()
 	return nil
+}
+
+func missingWebAssetsHandler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = io.WriteString(w, `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WUPHF web UI assets missing</title>
+  <style>
+    body { margin: 0; font: 16px/1.5 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #1f2933; background: #f5f3ef; }
+    main { max-width: 760px; margin: 10vh auto; padding: 0 24px; }
+    h1 { font-size: 28px; line-height: 1.2; margin: 0 0 12px; }
+    p { margin: 0 0 16px; }
+    pre { overflow-x: auto; padding: 16px; border: 1px solid #d7d0c6; border-radius: 8px; background: #fffaf2; }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>WUPHF web UI assets are missing</h1>
+    <p>This source build did not include <code>web/dist/index.html</code>, and the embedded bundle is empty.</p>
+    <p>Build the frontend bundle before rebuilding the Go binary:</p>
+    <pre><code>cd web
+bun install
+bun run build
+cd ..
+go build -o wuphf ./cmd/wuphf
+./wuphf</code></pre>
+  </main>
+</body>
+</html>`)
+	})
 }
 
 // cacheControlMiddleware sets conservative cache headers on the web UI so

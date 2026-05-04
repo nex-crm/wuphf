@@ -97,7 +97,7 @@ func (b *Broker) handleHumanInviteAccept(w http.ResponseWriter, r *http.Request)
 			code = "invite_expired_or_used"
 			status = http.StatusGone
 		}
-		writeShareError(w, status, code, "This invite is no longer valid.", "Ask the host founder for a new invite.")
+		writeShareError(w, status, code, "This invite is no longer valid.", "Ask the host for a new team-member invite.")
 		return
 	}
 	http.SetCookie(w, humanSessionCookieForToken(sessionToken, sessionExpiresAt(session)))
@@ -146,13 +146,13 @@ func (b *Broker) handleHumanMe(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"human": map[string]string{
 				"slug":         "human",
-				"display_name": "Host founder",
+				"display_name": "Host",
 				"role":         "host",
 			},
 		})
 		return
 	}
-	writeShareError(w, http.StatusUnauthorized, "session_required", "Your session expired.", "Ask the host founder for a new invite.")
+	writeShareError(w, http.StatusUnauthorized, "session_required", "Your session expired.", "Ask the host for a new team-member invite.")
 }
 
 var errHumanInviteExpiredOrUsed = errors.New("invite expired or used")
@@ -200,11 +200,11 @@ func (b *Broker) acceptHumanInvite(token, displayName, device string) (string, h
 	}
 	displayName = strings.TrimSpace(displayName)
 	if displayName == "" {
-		displayName = "Co-founder"
+		displayName = "Team member"
 	}
 	slug := normalizeHumanSessionSlug(displayName)
 	if slug == "" {
-		slug = "co-founder"
+		slug = "team-member"
 	}
 
 	b.mu.Lock()
@@ -351,7 +351,7 @@ func writeShareError(w http.ResponseWriter, status int, code, message, action st
 		Code:    code,
 		Message: message,
 		Action:  action,
-		DocURL:  "https://github.com/nex-crm/wuphf#share-with-a-co-founder",
+		DocURL:  "https://github.com/nex-crm/wuphf#share-with-a-team-member",
 	}})
 }
 

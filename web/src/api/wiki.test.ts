@@ -124,6 +124,11 @@ describe("wiki api client", () => {
     expect(result).toEqual([]);
   });
 
+  it("fetchCatalogStrict surfaces request errors", async () => {
+    vi.spyOn(client, "get").mockRejectedValue(new Error("boom"));
+    await expect(api.fetchCatalogStrict()).rejects.toThrow("boom");
+  });
+
   it("fetchHistory returns empty commits on error", async () => {
     vi.spyOn(client, "get").mockRejectedValue(new Error("boom"));
     const result = await api.fetchHistory("people/customer-x");

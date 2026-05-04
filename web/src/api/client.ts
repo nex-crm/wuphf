@@ -913,7 +913,7 @@ export type LLMProvider =
   | "mlx-lm"
   | "ollama"
   | "exo";
-export type MemoryBackend = "nex" | "gbrain" | "none";
+export type MemoryBackend = "markdown" | "nex" | "gbrain" | "none";
 export type ActionProvider = "auto" | "one" | "composio" | "";
 
 export interface ProviderEndpoint {
@@ -946,6 +946,7 @@ export interface LocalProviderStatus {
 export interface ConfigSnapshot {
   // Runtime
   llm_provider?: LLMProvider;
+  llm_provider_configured?: boolean;
   llm_provider_priority?: string[];
   provider_endpoints?: Record<string, ProviderEndpoint>;
   memory_backend?: MemoryBackend;
@@ -1095,6 +1096,20 @@ export function resetWorkspace() {
 // The broker resets in place after success so onboarding can reopen immediately.
 export function shredWorkspace() {
   return postWithTimeout<WorkspaceWipeResult>("/workspace/shred", {}, 20_000);
+}
+
+// restartBroker asks the host web UI server to restart the broker listener.
+// In same-origin web mode, ServeWebUI handles /api/broker/restart before the
+// generic proxy, so the action still works when the broker HTTP listener is
+// unreachable. The browser's SSE EventSource reconnects automatically once the
+// listener is ready; useBrokerEvents refreshes auth before marking connected.
+export interface BrokerRestartStatus {
+  ok: boolean;
+  url?: string;
+}
+
+export function restartBroker() {
+  return post<BrokerRestartStatus>("/broker/restart");
 }
 
 // ── Telegram /connect wizard ──

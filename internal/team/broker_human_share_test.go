@@ -188,6 +188,41 @@ func TestHumanSessionAuthIsScopedToShareRoutes(t *testing.T) {
 	}
 }
 
+func TestHumanSessionAuthBlocksDMChannelList(t *testing.T) {
+	b := newTestBroker(t)
+	token, _, err := b.createHumanInvite()
+	if err != nil {
+		t.Fatalf("create invite: %v", err)
+	}
+	sessionToken, _, err := b.acceptHumanInvite(token, "Mira", "browser")
+	if err != nil {
+		t.Fatalf("accept invite: %v", err)
+	}
+	cookie := &http.Cookie{Name: humanSessionCookie, Value: sessionToken}
+
+	for _, tc := range []struct {
+		path string
+		want int
+	}{
+		{"/channels", http.StatusNoContent},
+		{"/channels?type=dm", http.StatusForbidden},
+		{"/channels?type=DM", http.StatusForbidden},
+		{"/channels?type=Dm", http.StatusForbidden},
+	} {
+		t.Run(tc.path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			req.AddCookie(cookie)
+			rec := httptest.NewRecorder()
+			b.withAuth(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusNoContent)
+			})(rec, req)
+			if rec.Code != tc.want {
+				t.Fatalf("status = %d, want %d body=%s", rec.Code, tc.want, rec.Body.String())
+			}
+		})
+	}
+}
+
 func TestHumanEventsFilterNotebookMetadata(t *testing.T) {
 	b := newTestBroker(t)
 	token, _, err := b.createHumanInvite()

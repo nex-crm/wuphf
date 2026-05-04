@@ -64,6 +64,20 @@ test.describe("canonical route matrix", () => {
     }
   });
 
+  test("workbench route variants mount from URL state", async ({ page }) => {
+    for (const route of [
+      "/#/apps/workbench",
+      "/#/apps/workbench/pm",
+      "/#/apps/workbench/pm/tasks/task-7",
+    ]) {
+      await expectCanonicalRoute(page, route, async (p) => {
+        await expect(p.getByLabel("Agent workbench")).toBeVisible({
+          timeout: 10_000,
+        });
+      });
+    }
+  });
+
   test("wiki, notebook, and review routes mount their first-class surfaces", async ({
     page,
   }) => {

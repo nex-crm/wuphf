@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import type { DiscoveredSection, WikiCatalogEntry } from "../../api/wiki";
@@ -6,21 +6,21 @@ import WikiSidebar from "./WikiSidebar";
 
 const CATALOG: WikiCatalogEntry[] = [
   {
-    path: "people/nazz",
+    path: "team/people/nazz.md",
     title: "Nazz",
     author_slug: "pm",
     last_edited_ts: new Date().toISOString(),
     group: "people",
   },
   {
-    path: "people/sarah",
+    path: "team/people/sarah.md",
     title: "Sarah",
     author_slug: "ceo",
     last_edited_ts: new Date().toISOString(),
     group: "people",
   },
   {
-    path: "playbooks/churn",
+    path: "team/playbooks/churn.md",
     title: "Churn prevention",
     author_slug: "cmo",
     last_edited_ts: new Date().toISOString(),
@@ -52,7 +52,7 @@ describe("<WikiSidebar> — legacy catalog-grouping path", () => {
     const onNavigate = vi.fn();
     render(<WikiSidebar catalog={CATALOG} onNavigate={onNavigate} />);
     fireEvent.click(screen.getByText("Churn prevention"));
-    expect(onNavigate).toHaveBeenCalledWith("playbooks/churn");
+    expect(onNavigate).toHaveBeenCalledWith("team/playbooks/churn.md");
   });
 
   it("filters articles by the search query", () => {
@@ -117,6 +117,91 @@ describe("<WikiSidebar> — dynamic sections", () => {
           h.closest("[data-section-slug]")?.getAttribute("data-section-slug"),
       ),
     ).toEqual(["people", "playbooks", "retrospectives"]);
+  });
+
+  it("renders nested folders from canonical article paths", () => {
+    const nested: WikiCatalogEntry[] = [
+      ...CATALOG,
+      {
+        path: "team/people/customers/acme.md",
+        title: "Acme",
+        author_slug: "pm",
+        last_edited_ts: new Date().toISOString(),
+        group: "people",
+      },
+    ];
+    const sections: DiscoveredSection[] = [
+      {
+        ...SECTIONS[0],
+        article_paths: [
+          "team/people/nazz.md",
+          "team/people/sarah.md",
+          "team/people/customers/acme.md",
+        ],
+        article_count: 3,
+      },
+    ];
+    render(
+      <WikiSidebar
+        catalog={nested}
+        sections={sections}
+        currentPath="team/people/customers/acme.md"
+        onNavigate={() => {}}
+      />,
+    );
+
+    expect(
+      screen.getByRole("button", { name: /customers 1/i }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Acme").closest("li")).toHaveClass("current");
+  });
+
+  it("reopens a collapsed folder when navigation selects an article inside it", async () => {
+    const nested: WikiCatalogEntry[] = [
+      ...CATALOG,
+      {
+        path: "team/people/customers/acme.md",
+        title: "Acme",
+        author_slug: "pm",
+        last_edited_ts: new Date().toISOString(),
+        group: "people",
+      },
+    ];
+    const sections: DiscoveredSection[] = [
+      {
+        ...SECTIONS[0],
+        article_paths: [
+          "team/people/nazz.md",
+          "team/people/sarah.md",
+          "team/people/customers/acme.md",
+        ],
+        article_count: 3,
+      },
+    ];
+    const { rerender } = render(
+      <WikiSidebar
+        catalog={nested}
+        sections={sections}
+        currentPath={null}
+        onNavigate={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /customers 1/i }));
+    expect(screen.queryByText("Acme")).toBeNull();
+
+    rerender(
+      <WikiSidebar
+        catalog={nested}
+        sections={sections}
+        currentPath="team/people/customers/acme.md"
+        onNavigate={() => {}}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByText("Acme").closest("li")).toHaveClass("current"),
+    );
   });
 
   it("distinguishes schema-declared from discovered sections via class", () => {

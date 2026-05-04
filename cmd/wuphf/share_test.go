@@ -75,6 +75,14 @@ func TestShareJoinFlowEndToEnd(t *testing.T) {
 		t.Fatalf("join request: %v", err)
 	}
 	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("join form status = %d, want 200", resp.StatusCode)
+	}
+	resp, err = client.PostForm(shareSrv.URL+"/join/"+invite.Token, nil)
+	if err != nil {
+		t.Fatalf("join submit: %v", err)
+	}
+	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusFound {
 		t.Fatalf("join status = %d, want 302", resp.StatusCode)
 	}
@@ -102,8 +110,54 @@ func TestShareJoinFlowEndToEnd(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("me status = %d body=%s", resp.StatusCode, string(body))
 	}
-	if !containsAll(string(body), `"display_name":"Co-founder"`, `"human_slug":"co-founder"`) {
+	if !containsAll(string(body), `"display_name":"Team member"`, `"human_slug":"team-member"`) {
 		t.Fatalf("unexpected me body: %s", string(body))
+	}
+}
+
+func TestShareJoinInvalidInviteReturnsGone(t *testing.T) {
+	broker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/humans/invites/accept" {
+			t.Fatalf("unexpected broker request: %s %s", r.Method, r.URL.Path)
+		}
+		http.Error(w, `{"error":"invite_not_found"}`, http.StatusGone)
+	}))
+	t.Cleanup(broker.Close)
+
+	shareSrv := httptest.NewServer(newShareHandler(broker.URL, "broker-token", nil))
+	t.Cleanup(shareSrv.Close)
+
+	resp, err := http.PostForm(shareSrv.URL+"/join/missing-token", nil)
+	if err != nil {
+		t.Fatalf("join submit: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusGone {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("join status = %d, want 410 body=%s", resp.StatusCode, string(body))
+	}
+}
+
+func TestShareJoinBrokerFailureReturnsBadGateway(t *testing.T) {
+	broker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/humans/invites/accept" {
+			t.Fatalf("unexpected broker request: %s %s", r.Method, r.URL.Path)
+		}
+		http.Error(w, `{"error":"temporarily_unavailable"}`, http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(broker.Close)
+
+	shareSrv := httptest.NewServer(newShareHandler(broker.URL, "broker-token", nil))
+	t.Cleanup(shareSrv.Close)
+
+	resp, err := http.PostForm(shareSrv.URL+"/join/retry-token", nil)
+	if err != nil {
+		t.Fatalf("join submit: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadGateway {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("join status = %d, want 502 body=%s", resp.StatusCode, string(body))
 	}
 }
 
@@ -124,7 +178,7 @@ func TestShareProxyDoesNotExposeBrokerToken(t *testing.T) {
 	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
 		return http.ErrUseLastResponse
 	}}
-	joinResp, err := client.Get(shareSrv.URL + "/join/" + invite.Token)
+	joinResp, err := client.PostForm(shareSrv.URL+"/join/"+invite.Token, nil)
 	if err != nil {
 		t.Fatalf("join request: %v", err)
 	}
@@ -157,6 +211,45 @@ func TestShareProxyDoesNotExposeBrokerToken(t *testing.T) {
 	}
 }
 
+func TestShareProxyOnboardingStateOnlyAllowsReadMethods(t *testing.T) {
+	broker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/humans/me" {
+			t.Fatalf("unexpected broker request: %s %s", r.Method, r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"human_slug":"team-member"}`))
+	}))
+	t.Cleanup(broker.Close)
+
+	shareSrv := httptest.NewServer(newShareHandler(broker.URL, "broker-token", nil))
+	t.Cleanup(shareSrv.Close)
+
+	for _, tc := range []struct {
+		method string
+		want   int
+	}{
+		{http.MethodGet, http.StatusOK},
+		{http.MethodHead, http.StatusOK},
+		{http.MethodPost, http.StatusMethodNotAllowed},
+	} {
+		t.Run(tc.method, func(t *testing.T) {
+			req, err := http.NewRequest(tc.method, shareSrv.URL+"/api/onboarding/state", nil)
+			if err != nil {
+				t.Fatalf("build request: %v", err)
+			}
+			req.AddCookie(&http.Cookie{Name: shareCookieName, Value: "valid-session"})
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatalf("state request: %v", err)
+			}
+			_ = resp.Body.Close()
+			if resp.StatusCode != tc.want {
+				t.Fatalf("state status = %d, want %d", resp.StatusCode, tc.want)
+			}
+		})
+	}
+}
+
 func TestShareProxyDoesNotForwardBrokerToken(t *testing.T) {
 	const brokerToken = "host-secret-token"
 	var proxiedAuth string
@@ -167,7 +260,7 @@ func TestShareProxyDoesNotForwardBrokerToken(t *testing.T) {
 				t.Fatalf("session check did not include cookie: %v", err)
 			}
 			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"human_slug":"co-founder"}`))
+			_, _ = w.Write([]byte(`{"human_slug":"team-member"}`))
 		case "/messages":
 			proxiedAuth = r.Header.Get("Authorization")
 			w.WriteHeader(http.StatusOK)
@@ -199,6 +292,20 @@ func TestShareProxyDoesNotForwardBrokerToken(t *testing.T) {
 	}
 }
 
+func TestWebShareControllerClearInviteLocked(t *testing.T) {
+	c := &webShareController{
+		running:   true,
+		inviteURL: "http://example.test/join/old",
+		expiresAt: "2026-05-05T00:00:00Z",
+	}
+
+	c.clearInviteLocked()
+	status := c.statusLocked()
+	if status.InviteURL != "" || status.ExpiresAt != "" {
+		t.Fatalf("status retained invite metadata: %+v", status)
+	}
+}
+
 func TestShareProxyStampsHumanActor(t *testing.T) {
 	b := team.NewBrokerAt(t.TempDir() + "/broker-state.json")
 	if err := b.StartOnPort(0); err != nil {
@@ -216,7 +323,7 @@ func TestShareProxyStampsHumanActor(t *testing.T) {
 	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
 		return http.ErrUseLastResponse
 	}}
-	joinResp, err := client.Get(shareSrv.URL + "/join/" + invite.Token)
+	joinResp, err := client.PostForm(shareSrv.URL+"/join/"+invite.Token, nil)
 	if err != nil {
 		t.Fatalf("join request: %v", err)
 	}
@@ -247,8 +354,8 @@ func TestShareProxyStampsHumanActor(t *testing.T) {
 		}
 	}
 
-	postJSONWithCookies("/api/messages", `{"from":"you","channel":"general","content":"cofounder hello"}`)
-	postJSONWithCookies("/api/actions", `{"kind":"manual","actor":"you","summary":"cofounder did work"}`)
+	postJSONWithCookies("/api/messages", `{"from":"you","channel":"general","content":"team member hello"}`)
+	postJSONWithCookies("/api/actions", `{"kind":"manual","actor":"you","summary":"team member did work"}`)
 
 	messagesReq, err := http.NewRequest(http.MethodGet, "http://"+b.Addr()+"/messages?channel=general", nil)
 	if err != nil {
@@ -271,15 +378,15 @@ func TestShareProxyStampsHumanActor(t *testing.T) {
 	}
 	foundMessage := false
 	for _, msg := range messagesPayload.Messages {
-		if msg.Content == "cofounder hello" {
+		if msg.Content == "team member hello" {
 			foundMessage = true
-			if msg.From != "human:co-founder" {
-				t.Fatalf("message from = %q, want human:co-founder", msg.From)
+			if msg.From != "human:team-member" {
+				t.Fatalf("message from = %q, want human:team-member", msg.From)
 			}
 		}
 	}
 	if !foundMessage {
-		t.Fatalf("posted cofounder message not found: %+v", messagesPayload.Messages)
+		t.Fatalf("posted team member message not found: %+v", messagesPayload.Messages)
 	}
 
 	actionsReq, err := http.NewRequest(http.MethodGet, "http://"+b.Addr()+"/actions", nil)
@@ -303,15 +410,15 @@ func TestShareProxyStampsHumanActor(t *testing.T) {
 	}
 	foundAction := false
 	for _, action := range actionsPayload.Actions {
-		if action.Summary == "cofounder did work" {
+		if action.Summary == "team member did work" {
 			foundAction = true
-			if action.Actor != "human:co-founder" {
-				t.Fatalf("action actor = %q, want human:co-founder", action.Actor)
+			if action.Actor != "human:team-member" {
+				t.Fatalf("action actor = %q, want human:team-member", action.Actor)
 			}
 		}
 	}
 	if !foundAction {
-		t.Fatalf("posted cofounder action not found: %+v", actionsPayload.Actions)
+		t.Fatalf("posted team member action not found: %+v", actionsPayload.Actions)
 	}
 }
 
