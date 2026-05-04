@@ -299,7 +299,8 @@ func TestBrokerPostRequestDedupeKeyRecreatesAfterAnswer(t *testing.T) {
 		"required":   true,
 		"dedupe_key": "action:ceo:gmail:send:k",
 	})
-	post := func() string {
+	post := func() (string, bool) {
+		t.Helper()
 		req, _ := http.NewRequest(http.MethodPost, base+"/requests", bytes.NewReader(body))
 		req.Header.Set("Authorization", "Bearer "+b.Token())
 		req.Header.Set("Content-Type", "application/json")
@@ -308,16 +309,21 @@ func TestBrokerPostRequestDedupeKeyRecreatesAfterAnswer(t *testing.T) {
 			t.Fatalf("post: %v", err)
 		}
 		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			raw, _ := io.ReadAll(resp.Body)
+			t.Fatalf("expected 200 posting request, got %d: %s", resp.StatusCode, raw)
+		}
 		var out struct {
-			ID string `json:"id"`
+			ID      string `json:"id"`
+			Deduped bool   `json:"deduped"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 			t.Fatalf("decode: %v", err)
 		}
-		return out.ID
+		return out.ID, out.Deduped
 	}
 
-	first := post()
+	first, _ := post()
 	if first == "" {
 		t.Fatal("expected first request id")
 	}
@@ -341,9 +347,12 @@ func TestBrokerPostRequestDedupeKeyRecreatesAfterAnswer(t *testing.T) {
 	}
 
 	// Same dedupe key after answer → new request, not the terminal one.
-	second := post()
+	second, deduped := post()
 	if second == "" || second == first {
 		t.Fatalf("expected fresh request after answer, got first=%q second=%q", first, second)
+	}
+	if deduped {
+		t.Fatal("expected deduped=false for fresh request after answer")
 	}
 }
 
@@ -381,6 +390,10 @@ func TestBrokerPostRequestDedupeKeyRecreatesAfterCancel(t *testing.T) {
 			t.Fatalf("post: %v", err)
 		}
 		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			raw, _ := io.ReadAll(resp.Body)
+			t.Fatalf("expected 200 posting request, got %d: %s", resp.StatusCode, raw)
+		}
 		var out struct {
 			ID      string `json:"id"`
 			Deduped bool   `json:"deduped"`
