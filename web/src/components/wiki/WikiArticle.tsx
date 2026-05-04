@@ -284,6 +284,11 @@ export default function WikiArticle({
     const unsubscribe = subscribeEditLog((entry) => {
       if (entry.article_path !== path) return;
       setLiveAgent(entry.who);
+      // Refetch the article body when an out-of-band wiki:write lands for
+      // the currently open article (e.g. background synthesis or a staged
+      // demo write). Without this the live editor's banner updates but the
+      // rendered body stays stale.
+      setRefreshNonce((n) => n + 1);
       if (clearTimer) clearTimeout(clearTimer);
       clearTimer = setTimeout(() => setLiveAgent(null), 10_000);
     });
