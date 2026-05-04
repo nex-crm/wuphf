@@ -1,6 +1,7 @@
 package team
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -40,20 +41,18 @@ func (b *Broker) handleBrokerRestart(w http.ResponseWriter, r *http.Request) {
 }
 
 // execRestart spawns a replacement process then exits the current one.
-// On success this function never returns; on failure it falls back to os.Exit.
+// If spawning fails the current broker keeps running — no downtime on error.
 func (b *Broker) execRestart() {
 	exe, err := os.Executable()
 	if err != nil {
-		log.Printf("broker/restart: get executable: %v — falling back to exit", err)
-		b.adminPauseExit(1)
+		log.Printf("broker/restart: get executable: %v — keeping current process alive", err)
 		return
 	}
-	cmd := exec.Command(exe, os.Args[1:]...) //nolint:gosec // intentional self-restart
+	cmd := exec.CommandContext(context.Background(), exe, os.Args[1:]...) //nolint:gosec // intentional self-restart
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if startErr := cmd.Start(); startErr != nil {
-		log.Printf("broker/restart: spawn replacement: %v — falling back to exit", startErr)
-		b.adminPauseExit(1)
+		log.Printf("broker/restart: spawn replacement: %v — keeping current process alive", startErr)
 		return
 	}
 	b.adminPauseExit(0)

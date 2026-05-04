@@ -11,11 +11,12 @@ export function DisconnectBanner() {
   const [retrying, setRetrying] = useState(false);
   const dismissedForRef = useRef<boolean | null>(null);
 
-  // Track that we previously had a connection
+  // Track that we previously had a connection; also clear retrying state on reconnect.
   useEffect(() => {
     if (brokerConnected) {
       setHadConnection(true);
       setDismissed(false);
+      setRetrying(false);
       dismissedForRef.current = null;
     }
   }, [brokerConnected]);
@@ -31,9 +32,9 @@ export function DisconnectBanner() {
     setRetrying(true);
     try {
       await restartBroker();
+      // 202 received — keep retrying=true until brokerConnected flips back.
     } catch {
-      // Broker unreachable; SSE will reconnect on its own once it's back.
-    } finally {
+      // Broker unreachable: reset immediately so Retry stays clickable.
       setRetrying(false);
     }
   }, []);

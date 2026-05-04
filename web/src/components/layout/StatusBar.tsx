@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import { restartBroker } from "../../api/client";
@@ -22,17 +22,20 @@ export function StatusBar() {
 
   const [retrying, setRetrying] = useState(false);
 
+  // Clear the in-progress state once the broker reconnects.
+  useEffect(() => {
+    if (brokerConnected) setRetrying(false);
+  }, [brokerConnected]);
+
   const handleRestart = useCallback(async () => {
     setRetrying(true);
     try {
       await restartBroker();
-      // Broker accepted the restart — it will exit and respawn.
-      // The SSE EventSource reconnects automatically; clear the
-      // disconnected flag optimistically so the label reflects the
-      // in-progress restart rather than the stale disconnected state.
+      // 202 received — broker is exiting and will respawn. Keep retrying=true
+      // until brokerConnected flips back via the useEffect above.
     } catch {
-      // Broker unreachable: nothing to do, SSE will reconnect on its own.
-    } finally {
+      // Broker unreachable or spawn failed: reset immediately so the button
+      // is clickable again.
       setRetrying(false);
     }
   }, []);
