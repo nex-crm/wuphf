@@ -74,6 +74,24 @@ async function expectAppRoute(
   await expect(appPage).toContainText(content, { timeout: 10_000 });
 }
 
+async function fetchBrokerCommandNames(page: Page): Promise<string[]> {
+  return page.evaluate(async () => {
+    const response = await fetch("/api/commands");
+    if (!response.ok) {
+      throw new Error(`GET /api/commands failed: ${response.status}`);
+    }
+    const commands = (await response.json()) as Array<{ name?: unknown }>;
+    return commands
+      .map((command) => {
+        if (typeof command.name !== "string" || !command.name.trim()) {
+          throw new Error("GET /api/commands returned an invalid command row");
+        }
+        return `/${command.name}`;
+      })
+      .sort((a, b) => a.localeCompare(b));
+  });
+}
+
 test.describe("app route isolation", () => {
   test("each sidebar app renders its own page", async ({ page }) => {
     const getErrors = collectReactErrors(page);
@@ -143,5 +161,34 @@ test.describe("app route isolation", () => {
     ).toBeVisible();
 
     await expectNoReactErrors(page, getErrors, "while using console input");
+  });
+
+  test("console renders every broker command", async ({ page }) => {
+    const getErrors = collectReactErrors(page);
+
+    await page.goto("/#/apps/console");
+    await waitForReactMount(page);
+
+    const expectedCommands = await fetchBrokerCommandNames(page);
+    expect(expectedCommands).toContain("/reset-dm");
+
+    const consoleApp = page.getByTestId("console-app");
+    const rows = consoleApp.locator(".console-command");
+    await expect(rows).toHaveCount(expectedCommands.length, {
+      timeout: 10_000,
+    });
+
+    const renderedCommands = (
+      await rows.evaluateAll((nodes) =>
+        nodes.map((node) => node.getAttribute("data-command") ?? ""),
+      )
+    ).sort((a, b) => a.localeCompare(b));
+
+    expect(renderedCommands).toEqual(expectedCommands);
+    await expectNoReactErrors(
+      page,
+      getErrors,
+      "while rendering console commands",
+    );
   });
 });
