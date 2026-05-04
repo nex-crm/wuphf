@@ -139,11 +139,21 @@ export function HealthCheckApp() {
       : data?.session_mode;
   const memoryLabel = data?.memory_backend_active || data?.memory_backend;
   const shareRunning = Boolean(shareStatus?.running);
+  const shareMutationPending =
+    startShareMutation.isPending || stopShareMutation.isPending;
   const shareError = shareMutationError || shareStatus?.error;
   const shareInviteURL = shareRunning ? shareStatus?.invite_url || "" : "";
   const shareNetworkLabel = [shareStatus?.interface, shareStatus?.bind]
     .filter(Boolean)
     .join(" / ");
+  const startShareInvite = () => {
+    if (shareMutationPending) return;
+    startShareMutation.mutate();
+  };
+  const stopShareInvite = () => {
+    if (shareMutationPending) return;
+    stopShareMutation.mutate();
+  };
   const copyInvite = async () => {
     if (!shareInviteURL || typeof navigator === "undefined") return;
     await navigator.clipboard.writeText(shareInviteURL);
@@ -267,8 +277,8 @@ export function HealthCheckApp() {
                 <button
                   className="btn btn-primary btn-sm"
                   type="button"
-                  onClick={() => startShareMutation.mutate()}
-                  disabled={startShareMutation.isPending}
+                  onClick={startShareInvite}
+                  disabled={shareMutationPending}
                 >
                   {shareRunning ? "Create new invite" : "Create invite"}
                 </button>
@@ -276,8 +286,8 @@ export function HealthCheckApp() {
                   <button
                     className="btn btn-secondary btn-sm"
                     type="button"
-                    onClick={() => stopShareMutation.mutate()}
-                    disabled={stopShareMutation.isPending}
+                    onClick={stopShareInvite}
+                    disabled={shareMutationPending}
                   >
                     Stop sharing
                   </button>
