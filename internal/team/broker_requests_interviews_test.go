@@ -334,6 +334,9 @@ func TestBrokerPostRequestDedupeKeyRecreatesAfterAnswer(t *testing.T) {
 		t.Fatalf("answer: %v", err)
 	}
 	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 answering request, got %d", resp.StatusCode)
+	}
 
 	// Same dedupe key after answer → new request, not the terminal one.
 	second := post()
@@ -399,6 +402,9 @@ func TestBrokerPostRequestDedupeKeyRecreatesAfterCancel(t *testing.T) {
 		t.Fatalf("cancel: %v", err)
 	}
 	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 canceling request, got %d", resp.StatusCode)
+	}
 
 	// Same dedupe key after cancel → new request, not the canceled one.
 	second, deduped := post()
