@@ -1097,14 +1097,18 @@ export function shredWorkspace() {
   return postWithTimeout<WorkspaceWipeResult>("/workspace/shred", {}, 20_000);
 }
 
-// restartBroker asks the broker to spawn a fresh copy of itself and exit.
-// The broker responds with 202 before tearing down, so the promise resolves
-// before the process is replaced. The browser's SSE EventSource reconnects
-// automatically once the new process is ready; useBrokerEvents calls initApi()
-// inside the "ready" handler to refresh the auth token before marking the
-// broker as connected.
+// restartBroker asks the host web UI server to restart the broker listener.
+// In same-origin web mode, ServeWebUI handles /api/broker/restart before the
+// generic proxy, so the action still works when the broker HTTP listener is
+// unreachable. The browser's SSE EventSource reconnects automatically once the
+// listener is ready; useBrokerEvents refreshes auth before marking connected.
+export interface BrokerRestartStatus {
+  ok: boolean;
+  url?: string;
+}
+
 export function restartBroker() {
-  return post<{ ok: boolean; message: string }>("/broker/restart");
+  return post<BrokerRestartStatus>("/broker/restart");
 }
 
 // ── Telegram /connect wizard ──

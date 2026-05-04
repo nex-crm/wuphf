@@ -80,6 +80,7 @@ func (b *Broker) ServeWebUI(port int) error {
 	mux.Handle("/api/share/status", webUIRebindGuard(http.HandlerFunc(b.handleWebShareStatus)))
 	mux.Handle("/api/share/start", webUIRebindGuard(http.HandlerFunc(b.handleWebShareStart)))
 	mux.Handle("/api/share/stop", webUIRebindGuard(http.HandlerFunc(b.handleWebShareStop)))
+	mux.Handle("/api/broker/restart", webUIRebindGuard(http.HandlerFunc(b.handleWebBrokerRestart)))
 	mux.Handle("/api/", webUIRebindGuard(b.webUIProxyHandler(brokerURL, "/api")))
 	mux.Handle("/onboarding/", webUIRebindGuard(b.webUIProxyHandler(brokerURL, "")))
 	// Token endpoint — no auth needed, but we require a same-origin loopback request.
