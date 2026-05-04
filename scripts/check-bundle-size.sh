@@ -18,15 +18,19 @@
 
 set -euo pipefail
 
-# Calibrated against the current minified bundle (~854 KB).
-# Warn band gives ~10% headroom; fail line gives ~40% — past that,
-# something has gone seriously wrong (or a major feature has shipped
-# that warrants raising the ceiling explicitly).
-WARN_KB=950
-# Live agent output renders a full terminal emulator in the web UI. That is
-# intentional product weight, not an accidental import, so the fail line gives
-# this feature room while keeping the ratchet tight around the new bundle.
-FAIL_KB=1300
+# Calibrated against the current minified bundle (~1313 KB on the
+# router-mount branch). Warn band gives ~5–7% headroom; fail line gives
+# ~7% — past that, something has gone seriously wrong or a major
+# feature has shipped that warrants raising the ceiling explicitly.
+WARN_KB=1350
+# Two intentional bumps from earlier ceilings:
+#   1. Live agent output adds a full terminal emulator (xterm).
+#   2. The TanStack Router migration adds the router runtime; until
+#      step 5 of docs/experiments/2026-05-04-web-path-forward.md
+#      lazy-loads heavy panels (Skills, Settings, Graph, Artifacts,
+#      wiki/notebook), the whole route surface ships in one chunk.
+# Both are deliberate product weight, not accidental imports.
+FAIL_KB=1400
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 dist_assets="$repo_root/web/dist/assets"
