@@ -244,6 +244,11 @@ func (s *SkillScanner) Scan(ctx context.Context, scopePath string, dryRun bool, 
 		fm.Metadata.Wuphf.CreatedBy = "archivist"
 		spec := specToTeamSkill(fm, body, c.relPath)
 		spec.CreatedBy = "archivist"
+		// Source-article frontmatter can opt into skill creation, but it is not
+		// authoritative for lifecycle state. Every scanner write enters the
+		// approval workflow as a proposal.
+		spec.Status = "proposed"
+		spec.DisabledFromStatus = ""
 
 		s.broker.mu.Lock()
 		_, writeErr := s.broker.writeSkillProposalLocked(spec)

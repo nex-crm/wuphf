@@ -131,6 +131,7 @@ func (b *Broker) writeSkillProposalLocked(spec teamSkill) (*teamSkill, error) {
 		LastExecutionStatus: strings.TrimSpace(spec.LastExecutionStatus),
 		UsageCount:          0,
 		Status:              status,
+		DisabledFromStatus:  strings.TrimSpace(spec.DisabledFromStatus),
 		CreatedAt:           now,
 		UpdatedAt:           now,
 	}
