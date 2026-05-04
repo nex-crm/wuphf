@@ -50,8 +50,38 @@ interface SearchShape {
 }
 
 type RouteDeriver = (params: ParamsShape, search: SearchShape) => CurrentRoute;
+type CurrentRouteId =
+  | typeof channelRoute.id
+  | typeof dmRoute.id
+  | typeof appRoute.id
+  | typeof wikiIndexRoute.id
+  | typeof wikiLookupRoute.id
+  | typeof wikiArticleRoute.id
+  | typeof notebooksRoute.id
+  | typeof notebookAgentRoute.id
+  | typeof notebookEntryRoute.id
+  | typeof reviewsRoute.id;
 
-const ROUTE_DERIVERS: Record<string, RouteDeriver> = {
+const CURRENT_ROUTE_IDS = [
+  channelRoute.id,
+  dmRoute.id,
+  appRoute.id,
+  wikiIndexRoute.id,
+  wikiLookupRoute.id,
+  wikiArticleRoute.id,
+  notebooksRoute.id,
+  notebookAgentRoute.id,
+  notebookEntryRoute.id,
+  reviewsRoute.id,
+] as const satisfies readonly CurrentRouteId[];
+
+const CURRENT_ROUTE_ID_SET = new Set<string>(CURRENT_ROUTE_IDS);
+
+function isCurrentRouteId(routeId: string): routeId is CurrentRouteId {
+  return CURRENT_ROUTE_ID_SET.has(routeId);
+}
+
+const ROUTE_DERIVERS = {
   [channelRoute.id]: (params) => ({
     kind: "channel",
     channelSlug: params.channelSlug ?? "general",
@@ -89,7 +119,7 @@ const ROUTE_DERIVERS: Record<string, RouteDeriver> = {
     entrySlug: params.entrySlug ?? "",
   }),
   [reviewsRoute.id]: () => ({ kind: "reviews" }),
-};
+} satisfies Record<CurrentRouteId, RouteDeriver>;
 
 /**
  * Pure URL→state dispatch. Exported for unit tests so we can pin the
@@ -100,7 +130,8 @@ export function deriveCurrentRoute(
   params: ParamsShape,
   search: SearchShape,
 ): CurrentRoute {
-  return ROUTE_DERIVERS[routeId]?.(params, search) ?? { kind: "unknown" };
+  if (!isCurrentRouteId(routeId)) return { kind: "unknown" };
+  return ROUTE_DERIVERS[routeId](params, search);
 }
 
 export function useCurrentRoute(): CurrentRoute {

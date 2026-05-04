@@ -1,0 +1,111 @@
+import { expect, type Page, test } from "@playwright/test";
+
+import { APP_PANEL_IDS } from "../../src/routes/routeRegistry";
+import {
+  collectReactErrors,
+  expectNoReactErrors,
+  waitForReactMount,
+} from "./_helpers";
+
+async function gotoRoute(page: Page, route: string): Promise<void> {
+  await page.goto(route);
+  await waitForReactMount(page);
+}
+
+async function expectCanonicalRoute(
+  page: Page,
+  route: string,
+  assertMounted: (targetPage: Page) => Promise<void>,
+): Promise<void> {
+  const getErrors = collectReactErrors(page);
+  await gotoRoute(page, route);
+  await expect(page.getByTestId("route-not-found")).toHaveCount(0);
+  await assertMounted(page);
+  await expectNoReactErrors(page, getErrors, `while rendering ${route}`);
+}
+
+test.describe("canonical route matrix", () => {
+  test("index redirects to the default channel", async ({ page }) => {
+    const getErrors = collectReactErrors(page);
+    await gotoRoute(page, "/");
+
+    await expect(page).toHaveURL(/#\/channels\/general$/);
+    await expect(page.locator(".composer-input")).toHaveAttribute(
+      "placeholder",
+      "Message #general",
+    );
+    await expectNoReactErrors(page, getErrors, "while redirecting /");
+  });
+
+  test("conversation routes mount their message surfaces", async ({ page }) => {
+    await expectCanonicalRoute(page, "/#/channels/general", async (p) => {
+      await expect(p.locator(".composer-input")).toHaveAttribute(
+        "placeholder",
+        "Message #general",
+      );
+    });
+
+    await expectCanonicalRoute(page, "/#/dm/pm", async (p) => {
+      await expect(p.locator(".composer-input")).toHaveAttribute(
+        "placeholder",
+        "Message #human__pm",
+      );
+      await expect(p.getByText("Live output")).toBeVisible();
+    });
+  });
+
+  test("every registered app panel route mounts", async ({ page }) => {
+    for (const appId of APP_PANEL_IDS) {
+      await expectCanonicalRoute(page, `/#/apps/${appId}`, async (p) => {
+        await expect(p.getByTestId(`app-page-${appId}`)).toBeVisible({
+          timeout: 10_000,
+        });
+      });
+    }
+  });
+
+  test("wiki, notebook, and review routes mount their first-class surfaces", async ({
+    page,
+  }) => {
+    await expectCanonicalRoute(page, "/#/wiki", async (p) => {
+      await expect(p.getByTestId("wiki-root")).toBeVisible();
+    });
+
+    await expectCanonicalRoute(page, "/#/wiki/lookup?q=renewal", async (p) => {
+      await expect(p.locator(".wk-cited-answer")).toBeVisible({
+        timeout: 10_000,
+      });
+    });
+
+    await expectCanonicalRoute(page, "/#/wiki/companies/acme", async (p) => {
+      await expect(p.getByTestId("wiki-root")).toBeVisible();
+    });
+
+    await expectCanonicalRoute(page, "/#/notebooks", async (p) => {
+      await expect(p.getByTestId("notebook-surface")).toBeVisible();
+    });
+
+    await expectCanonicalRoute(page, "/#/notebooks/pm", async (p) => {
+      await expect(p.getByTestId("notebook-surface")).toBeVisible();
+    });
+
+    await expectCanonicalRoute(page, "/#/notebooks/pm/handoff", async (p) => {
+      await expect(p.getByTestId("notebook-surface")).toBeVisible();
+    });
+
+    await expectCanonicalRoute(page, "/#/reviews", async (p) => {
+      await expect(p.getByTestId("review-queue-surface")).toBeVisible();
+    });
+  });
+
+  test("dropped legacy aliases and unknown routes render not found", async ({
+    page,
+  }) => {
+    for (const route of ["/#/console", "/#/threads", "/#/missing-route"]) {
+      const getErrors = collectReactErrors(page);
+      await gotoRoute(page, route);
+      await expect(page.getByTestId("route-not-found")).toBeVisible();
+      await expectNoReactErrors(page, getErrors, `while rendering ${route}`);
+    }
+  });
+});

@@ -29,6 +29,7 @@ import { useBrokerEvents } from "../hooks/useBrokerEvents";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import { rootRoute, router } from "../lib/router";
 import { useAppStore } from "../stores/app";
+import { type AppPanelId, isAppPanelId } from "./routeRegistry";
 import { type CurrentRoute, useCurrentRoute } from "./useCurrentRoute";
 
 // Sentinel routeId for the root match — TanStack Router exposes this as
@@ -213,11 +214,9 @@ class ErrorBoundary extends Component<
 
 // ── MainContent ─────────────────────────────────────────────────
 //
-// Reads the current navigation slice from the Zustand store and renders the
-// matching panel. During the router migration, the URL→store hydrator below
-// keeps the store in sync with the matched route, so MainContent can keep
-// its existing store-driven shape until step 4 (drain route fields out of
-// Zustand).
+// Reads the current TanStack route and renders the matching panel. The URL is
+// the single navigation source; route-owned Zustand fields were removed in
+// step 4 of the migration.
 
 function navigateWikiTab(tab: WikiTab): void {
   if (tab === "wiki") {
@@ -265,7 +264,7 @@ function navigateNotebookEntry(
   });
 }
 
-const APP_PANELS: Record<string, ComponentType> = {
+const APP_PANELS = {
   tasks: TasksApp,
   requests: RequestsApp,
   graph: GraphApp,
@@ -278,7 +277,7 @@ const APP_PANELS: Record<string, ComponentType> = {
   settings: SettingsApp,
   threads: ThreadsApp,
   console: ConsoleApp,
-};
+} satisfies Record<AppPanelId, ComponentType>;
 
 function ConversationView() {
   return (
@@ -343,26 +342,30 @@ function WikiSurface({ current, route }: WikiSurfaceProps) {
   );
 }
 
-function AppPanel({ appId }: { appId: string }) {
+function UnknownAppPanel({ appId }: { appId: string }) {
+  return (
+    <div className="app-panel active" data-testid={`app-page-${appId}`}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          flex: 1,
+          color: "var(--text-tertiary)",
+          fontSize: 14,
+        }}
+      >
+        Unknown app: {appId}
+      </div>
+    </div>
+  );
+}
+
+function AppPanel({ appId }: { appId: AppPanelId }) {
   const Panel = APP_PANELS[appId];
   return (
     <div className="app-panel active" data-testid={`app-page-${appId}`}>
-      {Panel ? (
-        <Panel />
-      ) : (
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            flex: 1,
-            color: "var(--text-tertiary)",
-            fontSize: 14,
-          }}
-        >
-          Unknown app: {appId}
-        </div>
-      )}
+      <Panel />
     </div>
   );
 }
@@ -378,6 +381,9 @@ function MainContent() {
         <DMView agentSlug={route.agentSlug} channelSlug={route.channelSlug} />
       );
     case "app":
+      if (!isAppPanelId(route.appId)) {
+        return <UnknownAppPanel appId={route.appId} />;
+      }
       return <AppPanel appId={route.appId} />;
     case "wiki":
     case "wiki-article":
@@ -472,8 +478,8 @@ function RoutedBody() {
 // Owns the boot lifecycle (api-init, onboarding gate, theme css), the app
 // shell, and the global host components. Rendered as the root of the
 // TanStack route tree; matched leaf routes mount via <Outlet />, but their
-// components are intentionally absent: URL→store hydration happens in a
-// single root-level effect so child routes don't fight over write order.
+// components are intentionally absent. RoutedBody reads the matched route and
+// renders the concrete surface, keeping route state centralized here.
 //
 // Critical rules (violations caused the blank-page regression):
 // 1. ALL hooks are called unconditionally at the top. No early returns

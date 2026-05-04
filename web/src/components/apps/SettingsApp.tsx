@@ -13,6 +13,7 @@ import {
   updateConfig,
   type WorkspaceWipeResult,
 } from "../../api/client";
+import { router } from "../../lib/router";
 import { useAppStore } from "../../stores/app";
 import {
   ShredCardSubtitle,
@@ -48,7 +49,11 @@ function useShredAction() {
         return false;
       }
       queryClient.clear();
-      window.history.replaceState(null, "", "#/channels/general");
+      void router.navigate({
+        to: "/channels/$channelSlug",
+        params: { channelSlug: "general" },
+        replace: true,
+      });
       resetForOnboarding();
       showNotice("Workspace shredded. Onboarding reopened.", "success");
       return true;
