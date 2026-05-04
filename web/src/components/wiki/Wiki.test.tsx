@@ -80,7 +80,7 @@ describe("<Wiki>", () => {
       expect(screen.getByTestId("wk-catalog")).toBeInTheDocument(),
     );
 
-    act(() => {
+    await act(async () => {
       sectionHandler?.({
         sections: [
           {
@@ -95,6 +95,7 @@ describe("<Wiki>", () => {
         ],
         timestamp: new Date().toISOString(),
       });
+      await Promise.resolve();
     });
 
     await waitFor(() =>

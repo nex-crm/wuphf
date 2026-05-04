@@ -326,7 +326,6 @@ function buildSectionTree(
         next = { name: segment, key, folders: [], articles: [] };
         folderIndex.set(key, next);
         parent.folders.push(next);
-        parent.folders.sort((a, b) => a.name.localeCompare(b.name));
       }
       parent = next;
     }
