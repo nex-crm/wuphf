@@ -450,7 +450,7 @@ function TreeArticle({
     <li className={current ? "current wk-tree-article" : "wk-tree-article"}>
       <a
         href={`#/wiki/${encodeURI(item.path)}`}
-        className={nested ? "wk-tree-article-link is-nested" : undefined}
+        className={`wk-tree-article-link${nested ? " is-nested" : ""}`}
         title={item.path}
         onClick={(e) => {
           e.preventDefault();
