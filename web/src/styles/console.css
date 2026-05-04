@@ -231,8 +231,10 @@
 }
 
 .console-command-list {
+  max-height: min(62vh, 680px);
   display: flex;
   flex-direction: column;
+  overflow-y: auto;
 }
 
 .console-command {

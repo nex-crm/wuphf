@@ -74,10 +74,10 @@ func TestHandleCommands_ReturnsRegistrySubset(t *testing.T) {
 	// routes today. If you add a handler to the switch, flip its flag in
 	// slash.go and add it here.
 	webSupported := []string{
-		"ask", "search", "remember", "help", "clear", "reset",
+		"ask", "lookup", "lint", "search", "remember", "help", "clear", "reset",
 		"requests", "policies", "skills", "calendar", "tasks",
-		"recover", "threads", "provider", "focus", "collab",
-		"pause", "resume", "1o1", "task", "cancel",
+		"recover", "doctor", "threads", "provider", "focus", "collab",
+		"pause", "resume", "1o1", "task", "cancel", "connect",
 	}
 	for _, name := range webSupported {
 		c, ok := byName[name]
@@ -94,8 +94,11 @@ func TestHandleCommands_ReturnsRegistrySubset(t *testing.T) {
 	// must never leak into the web autocomplete.
 	tuiOnly := []string{
 		"object", "record", "list", "rel", "attribute", "agent",
-		"config", "detect", "init", "graph", "insights",
-		"youtube-pack", "quit", "note", "chat",
+		"config", "detect", "init", "graph", "insights", "messages",
+		"inbox", "outbox", "rewind", "insert", "switcher", "switch",
+		"channels", "channel", "agents", "agent prompt", "queue",
+		"artifacts", "skill", "reply", "expand", "collapse", "reset-dm",
+		"request", "integrate", "youtube-pack", "quit", "note", "chat",
 	}
 	for _, name := range tuiOnly {
 		c, ok := byName[name]

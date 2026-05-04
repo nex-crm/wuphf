@@ -72,9 +72,12 @@ func TestRegisterAllCommands(t *testing.T) {
 	expected := []string{
 		"ask", "search", "remember", "youtube-pack",
 		"object", "record", "note", "task", "list", "rel", "attribute",
-		"agent", "graph", "insights", "calendar", "chat",
-		"config", "detect", "init", "provider",
-		"help", "clear", "quit",
+		"agent", "agents", "agent prompt", "graph", "insights", "calendar", "chat",
+		"messages", "inbox", "outbox", "rewind", "insert", "switcher",
+		"switch", "channels", "channel", "queue", "artifacts",
+		"config", "detect", "doctor", "integrate", "init", "provider",
+		"request", "reply", "expand", "collapse", "skill", "reset-dm",
+		"help", "clear", "quit", "lint",
 	}
 	for _, name := range expected {
 		if _, ok := r.Get(name); !ok {

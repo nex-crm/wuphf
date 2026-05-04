@@ -80,6 +80,7 @@ describe("FALLBACK_SLASH_COMMANDS", () => {
       "/tasks",
       "/requests",
       "/recover",
+      "/doctor",
       "/1o1",
       "/task",
       "/cancel",

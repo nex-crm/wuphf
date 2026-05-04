@@ -43,6 +43,7 @@ export const FALLBACK_SLASH_COMMANDS: SlashCommand[] = [
   { name: "/tasks", desc: "Open task board", icon: "📋" },
   { name: "/requests", desc: "Open requests", icon: "🔔" },
   { name: "/recover", desc: "Health Check view", icon: "🔁" },
+  { name: "/doctor", desc: "Check readiness and runtime health", icon: "🩺" },
   { name: "/1o1", desc: "1:1 with agent", icon: "💬" },
   { name: "/task", desc: "Task actions", icon: "✅" },
   { name: "/cancel", desc: "Cancel a task", icon: "❌" },
@@ -76,6 +77,7 @@ const COMMAND_ICONS: Record<string, string> = {
   tasks: "📋",
   requests: "🔔",
   recover: "🔁",
+  doctor: "🩺",
   "1o1": "💬",
   task: "✅",
   cancel: "❌",
@@ -102,7 +104,7 @@ function toAutocomplete(commands: SlashCommandDescriptor[]): SlashCommand[] {
   return commands
     .filter((c) => c.webSupported)
     .map((c) => ({
-      name: "/" + c.name,
+      name: `/${c.name}`,
       desc: c.description,
       icon: COMMAND_ICONS[c.name] ?? DEFAULT_ICON,
     }));

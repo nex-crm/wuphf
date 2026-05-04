@@ -41,6 +41,11 @@ describe("ConsoleApp helpers", () => {
     const rows = commandRowsFromRegistry([
       { name: "tasks", description: "Open task board", webSupported: true },
       { name: "doctor", description: "Run checks", webSupported: false },
+      {
+        name: "agent prompt",
+        description: "Create a teammate from a prompt",
+        webSupported: false,
+      },
     ] satisfies SlashCommandDescriptor[]);
 
     expect(rows).toEqual([
@@ -52,6 +57,11 @@ describe("ConsoleApp helpers", () => {
       {
         name: "/doctor",
         description: "Run checks",
+        webSupported: false,
+      },
+      {
+        name: "/agent prompt",
+        description: "Create a teammate from a prompt",
         webSupported: false,
       },
     ]);

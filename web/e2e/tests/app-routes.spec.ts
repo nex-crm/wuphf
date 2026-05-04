@@ -126,7 +126,11 @@ test.describe("app route isolation", () => {
     await expect(input).toHaveValue("hello");
     await input.fill("");
 
-    await consoleApp.locator(".console-command", { hasText: "/ask" }).click();
+    await consoleApp.locator('[data-command="/reset-dm"]').click();
+    await expect(input).toHaveValue("/reset-dm ");
+    await input.fill("");
+
+    await consoleApp.locator('[data-command="/ask"]').click();
     await expect(input).toHaveValue("/ask ");
     await input.pressSequentially("route-check");
     await expect(input).toHaveValue("/ask route-check");

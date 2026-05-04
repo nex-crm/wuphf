@@ -129,7 +129,7 @@ export function ConsoleApp() {
   );
   const taskCount = activeTaskCount(tasks.data?.tasks ?? []);
   const requestCount = openRequestCount(requests.data?.requests ?? []);
-  const supportedCount = commandRows.filter((row) => row.webSupported).length;
+  const commandCount = commandRows.length;
 
   function focusInput(selectionEnd?: number) {
     window.requestAnimationFrame(() => {
@@ -185,7 +185,7 @@ export function ConsoleApp() {
         <div className="console-header-meta">
           <span>#{currentChannel || "general"}</span>
           <span>{activeMembers.length} active</span>
-          <span>{supportedCount} commands</span>
+          <span>{commandCount} commands</span>
         </div>
       </header>
 
@@ -263,10 +263,11 @@ export function ConsoleApp() {
           >
             <div className="console-panel-title">Slash</div>
             <div className="console-command-list">
-              {commandRows.slice(0, 12).map((command) => (
+              {commandRows.map((command) => (
                 <button
                   type="button"
-                  className={`console-command${command.webSupported ? "" : " console-command-muted"}`}
+                  className="console-command"
+                  data-command={command.name}
                   key={command.name}
                   onClick={() => insertCommand(command.name)}
                 >
