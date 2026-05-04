@@ -1,5 +1,7 @@
+import { useCallback, useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
+import { restartBroker } from "../../api/client";
 import { getHealth, type HealthResponse } from "../../api/platform";
 import { useOfficeMembers } from "../../hooks/useMembers";
 import { appTitle } from "../../lib/constants";
@@ -17,6 +19,26 @@ export function StatusBar() {
   const channelMeta = useAppStore((s) => s.channelMeta);
   const brokerConnected = useAppStore((s) => s.brokerConnected);
   const setComposerHelpOpen = useAppStore((s) => s.setComposerHelpOpen);
+
+  const [retrying, setRetrying] = useState(false);
+
+  // Clear the in-progress state once the broker reconnects.
+  useEffect(() => {
+    if (brokerConnected) setRetrying(false);
+  }, [brokerConnected]);
+
+  const handleRestart = useCallback(async () => {
+    setRetrying(true);
+    try {
+      await restartBroker();
+      // 202 received — broker is exiting and will respawn. Keep retrying=true
+      // until brokerConnected flips back via the useEffect above.
+    } catch {
+      // Broker unreachable or spawn failed: reset immediately so the button
+      // is clickable again.
+      setRetrying(false);
+    }
+  }, []);
   const { data: members = [] } = useOfficeMembers();
   const dm = !currentApp ? isDMChannel(currentChannel, channelMeta) : null;
 
@@ -79,11 +101,20 @@ export function StatusBar() {
           ) : null}
         </span>
       ) : null}
-      <span
-        className={`status-bar-item status-bar-conn${brokerConnected ? "" : " disconnected"}`}
-      >
-        {brokerConnected ? "connected" : "disconnected"}
-      </span>
+      {brokerConnected ? (
+        <span className="status-bar-item status-bar-conn">connected</span>
+      ) : (
+        <button
+          type="button"
+          className="status-bar-item status-bar-conn status-bar-conn-retry disconnected"
+          onClick={handleRestart}
+          disabled={retrying}
+          title="Click to restart broker"
+          aria-label={retrying ? "Restarting broker…" : "Restart broker"}
+        >
+          {retrying ? "restarting…" : "disconnected"}
+        </button>
+      )}
     </div>
   );
 }

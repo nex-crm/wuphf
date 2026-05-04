@@ -504,6 +504,7 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/workspaces/trash", b.withAuth(b.handleWorkspacesTrash))
 	mux.HandleFunc("/workspaces/onboarding", b.withAuth(b.handleWorkspacesOnboarding))
 	mux.HandleFunc("/admin/pause", b.withAuth(b.handleAdminPause))
+	mux.HandleFunc("/broker/restart", b.requireAuth(b.handleBrokerRestart))
 	// Onboarding: state/progress/complete + prereqs/templates/validate-key + checklist.
 	// completeFn posts the first task as a human message and seeds the team.
 	onboarding.RegisterRoutes(mux, b.onboardingCompleteFn, b.packSlug, b.requireAuth)

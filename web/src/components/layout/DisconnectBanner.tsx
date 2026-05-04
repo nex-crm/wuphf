@@ -1,22 +1,22 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { initApi } from "../../api/client";
+import { restartBroker } from "../../api/client";
 import { useAppStore } from "../../stores/app";
 
 export function DisconnectBanner() {
   const brokerConnected = useAppStore((s) => s.brokerConnected);
-  const setBrokerConnected = useAppStore((s) => s.setBrokerConnected);
 
   const [hadConnection, setHadConnection] = useState(false);
   const [dismissed, setDismissed] = useState(false);
   const [retrying, setRetrying] = useState(false);
   const dismissedForRef = useRef<boolean | null>(null);
 
-  // Track that we previously had a connection
+  // Track that we previously had a connection; also clear retrying state on reconnect.
   useEffect(() => {
     if (brokerConnected) {
       setHadConnection(true);
       setDismissed(false);
+      setRetrying(false);
       dismissedForRef.current = null;
     }
   }, [brokerConnected]);
@@ -31,14 +31,13 @@ export function DisconnectBanner() {
   const handleRetry = useCallback(async () => {
     setRetrying(true);
     try {
-      await initApi();
-      setBrokerConnected(true);
+      await restartBroker();
+      // 202 received — keep retrying=true until brokerConnected flips back.
     } catch {
-      // Still disconnected
-    } finally {
+      // Broker unreachable: reset immediately so Retry stays clickable.
       setRetrying(false);
     }
-  }, [setBrokerConnected]);
+  }, []);
 
   const handleDismiss = useCallback(() => {
     dismissedForRef.current = brokerConnected;

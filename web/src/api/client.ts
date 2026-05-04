@@ -1097,6 +1097,16 @@ export function shredWorkspace() {
   return postWithTimeout<WorkspaceWipeResult>("/workspace/shred", {}, 20_000);
 }
 
+// restartBroker asks the broker to spawn a fresh copy of itself and exit.
+// The broker responds with 202 before tearing down, so the promise resolves
+// before the process is replaced. The browser's SSE EventSource reconnects
+// automatically once the new process is ready; useBrokerEvents calls initApi()
+// inside the "ready" handler to refresh the auth token before marking the
+// broker as connected.
+export function restartBroker() {
+  return post<{ ok: boolean; message: string }>("/broker/restart");
+}
+
 // ── Telegram /connect wizard ──
 // These mirror the TUI's `/connect telegram` flow but drive it from the web.
 // Pass an explicit `token` to override what the broker has on disk; pass an
