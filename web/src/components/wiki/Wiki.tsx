@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   type DiscoveredSection,
   fetchCatalog,
+  fetchCatalogStrict,
   fetchSections,
   subscribeSectionsUpdated,
   type WikiCatalogEntry,
@@ -63,7 +64,7 @@ export default function Wiki({
   }, []);
 
   const refreshCatalog = useCallback(() => {
-    fetchCatalog()
+    fetchCatalogStrict()
       .then((c) => setCatalog(c))
       .catch(() => {
         // Keep the last known catalog; a transient refresh miss should not

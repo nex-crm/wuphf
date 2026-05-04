@@ -63,17 +63,16 @@ describe("<Wiki>", () => {
       sectionHandler = handler;
       return () => {};
     });
-    vi.spyOn(api, "fetchCatalog")
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([
-        {
-          path: "team/templates/brief.md",
-          title: "Brief Template",
-          author_slug: "pm",
-          last_edited_ts: new Date().toISOString(),
-          group: "templates",
-        },
-      ]);
+    vi.spyOn(api, "fetchCatalog").mockResolvedValue([]);
+    vi.spyOn(api, "fetchCatalogStrict").mockResolvedValue([
+      {
+        path: "team/templates/brief.md",
+        title: "Brief Template",
+        author_slug: "pm",
+        last_edited_ts: new Date().toISOString(),
+        group: "templates",
+      },
+    ]);
 
     render(<Wiki articlePath={null} onNavigate={() => {}} />);
     await waitFor(() =>
@@ -101,5 +100,51 @@ describe("<Wiki>", () => {
     await waitFor(() =>
       expect(screen.getAllByText("Brief Template").length).toBeGreaterThan(0),
     );
+  });
+
+  it("keeps the current catalog when a live refresh fails", async () => {
+    let sectionHandler: ((event: api.WikiSectionsUpdatedEvent) => void) | null =
+      null;
+    vi.spyOn(api, "subscribeSectionsUpdated").mockImplementation((handler) => {
+      sectionHandler = handler;
+      return () => {};
+    });
+    vi.spyOn(api, "fetchCatalog").mockResolvedValue([
+      {
+        path: "team/playbooks/pricing.md",
+        title: "Pricing Playbook",
+        author_slug: "pm",
+        last_edited_ts: new Date().toISOString(),
+        group: "playbooks",
+      },
+    ]);
+    vi.spyOn(api, "fetchCatalogStrict").mockRejectedValue(
+      new Error("broker down"),
+    );
+
+    render(<Wiki articlePath={null} onNavigate={() => {}} />);
+    await waitFor(() =>
+      expect(screen.getAllByText("Pricing Playbook").length).toBeGreaterThan(0),
+    );
+
+    await act(async () => {
+      sectionHandler?.({
+        sections: [
+          {
+            slug: "playbooks",
+            title: "Playbooks",
+            article_paths: ["team/playbooks/pricing.md"],
+            article_count: 1,
+            first_seen_ts: new Date().toISOString(),
+            last_update_ts: new Date().toISOString(),
+            from_schema: true,
+          },
+        ],
+        timestamp: new Date().toISOString(),
+      });
+      await Promise.resolve();
+    });
+
+    expect(screen.getAllByText("Pricing Playbook").length).toBeGreaterThan(0);
   });
 });
