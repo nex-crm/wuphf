@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -435,6 +436,54 @@ func TestSkillDisableOriginSurvivesRestart(t *testing.T) {
 	}
 	if found.DisabledFromStatus != "proposed" {
 		t.Errorf("disabled_from_status after restart = %q, want proposed", found.DisabledFromStatus)
+	}
+}
+
+func TestSkillDisableOriginReconcilesFromDisk(t *testing.T) {
+	t.Parallel()
+
+	b := newTestBroker(t)
+	seedProposedSkill(t, b, "proposal-pause-disk")
+	setSkillStatus(t, b, "proposal-pause-disk", "active")
+
+	root := t.TempDir()
+	repo := NewRepoAt(root, filepath.Join(t.TempDir(), "backup"))
+	b.wikiWorker = NewWikiWorker(repo, nil)
+
+	md, err := RenderSkillMarkdown(SkillFrontmatter{
+		Name:        "proposal-pause-disk",
+		Description: "A disabled proposal restored from SKILL metadata.",
+		Metadata: SkillMetadata{
+			Wuphf: SkillWuphfMeta{
+				Status:             "disabled",
+				DisabledFromStatus: "proposed",
+			},
+		},
+	}, "Step 1: wait for approval.")
+	if err != nil {
+		t.Fatalf("RenderSkillMarkdown: %v", err)
+	}
+	skillPath := filepath.Join(root, filepath.FromSlash(skillWikiPath("proposal-pause-disk")))
+	if err := os.MkdirAll(filepath.Dir(skillPath), 0o755); err != nil {
+		t.Fatalf("mkdir skill path: %v", err)
+	}
+	if err := os.WriteFile(skillPath, md, 0o644); err != nil {
+		t.Fatalf("write skill markdown: %v", err)
+	}
+
+	b.reconcileSkillStatusFromDisk()
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	found := b.findSkillByNameLocked("proposal-pause-disk")
+	if found == nil {
+		t.Fatal("proposal-pause-disk skill missing after reconcile")
+	}
+	if found.Status != "disabled" {
+		t.Errorf("status after reconcile = %q, want disabled", found.Status)
+	}
+	if found.DisabledFromStatus != "proposed" {
+		t.Errorf("disabled_from_status after reconcile = %q, want proposed", found.DisabledFromStatus)
 	}
 }
 

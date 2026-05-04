@@ -425,6 +425,10 @@ func specToTeamSkill(fm SkillFrontmatter, body, sourceArticle string) teamSkill 
 	if src == "" && len(wuphf.SourceArticles) > 0 {
 		src = strings.TrimSpace(wuphf.SourceArticles[0])
 	}
+	status := strings.TrimSpace(wuphf.Status)
+	if status == "" {
+		status = "proposed"
+	}
 	return teamSkill{
 		Name:               fm.Name,
 		Title:              wuphf.Title,
@@ -442,7 +446,8 @@ func specToTeamSkill(fm SkillFrontmatter, body, sourceArticle string) teamSkill 
 		RelayID:            wuphf.RelayID,
 		RelayPlatform:      wuphf.RelayPlatform,
 		RelayEventTypes:    append([]string(nil), wuphf.RelayEventTypes...),
-		Status:             "proposed",
+		Status:             status,
+		DisabledFromStatus: strings.TrimSpace(wuphf.DisabledFromStatus),
 	}
 }
 

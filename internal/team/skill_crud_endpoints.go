@@ -902,12 +902,17 @@ func (b *Broker) reconcileSkillStatusFromDisk() {
 		if diskStatus == "" {
 			continue
 		}
+		diskDisabledFromStatus := strings.TrimSpace(fm.Metadata.Wuphf.DisabledFromStatus)
 		if b.skills[i].Status != diskStatus {
 			slog.Info("skill_crud: reconcile status from disk",
 				"name", b.skills[i].Name,
 				"was", b.skills[i].Status,
 				"now", diskStatus)
 			b.skills[i].Status = diskStatus
+			updated = true
+		}
+		if b.skills[i].DisabledFromStatus != diskDisabledFromStatus {
+			b.skills[i].DisabledFromStatus = diskDisabledFromStatus
 			updated = true
 		}
 	}
