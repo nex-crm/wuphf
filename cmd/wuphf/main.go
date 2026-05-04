@@ -356,7 +356,11 @@ func main() {
 		}
 		if wantsHelp {
 			if sub == "skills" {
-				runSkillsCmd(args[1:])
+				if len(args) > 1 && isFamilyHelp(args[1]) {
+					printSkillsHelp()
+				} else {
+					runSkillsCmd(args[1:])
+				}
 			} else {
 				printSubcommandHelp(sub)
 			}
