@@ -65,7 +65,16 @@ func (b *Broker) handleEvents(w http.ResponseWriter, r *http.Request) {
 	pamStarted, pamDone, pamFailed, unsubscribePam := b.SubscribePamActionEvents(64)
 	defer unsubscribePam()
 
+	// revoked is closed immediately when the human session is revoked.
+	// For broker-bearer actors it is nil (select on nil blocks forever — no-op).
+	revoked := b.humanSessionRevokeCh(actor.SessionID)
+
 	writeEvent := func(name string, payload any) error {
+		select {
+		case <-revoked:
+			return fmt.Errorf("human session revoked")
+		default:
+		}
 		data, err := json.Marshal(payload)
 		if err != nil {
 			return err
@@ -87,6 +96,8 @@ func (b *Broker) handleEvents(w http.ResponseWriter, r *http.Request) {
 	for {
 		select {
 		case <-r.Context().Done():
+			return
+		case <-revoked:
 			return
 		case msg, ok := <-messages:
 			if !ok || writeEvent("message", map[string]any{"message": msg}) != nil {
