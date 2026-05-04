@@ -48,8 +48,13 @@ func RegisterTransports(b *Broker) (func(), error) {
 			log.Printf("[transport] telegram: token present but no channels connected yet — skipping")
 		} else {
 			ctx, cancel := context.WithCancel(context.Background())
-			stops = append(stops, cancel)
+			done := make(chan struct{})
+			stops = append(stops, func() {
+				cancel()
+				<-done // wait for Start to return before broker.Stop()
+			})
 			go func() {
+				defer close(done)
 				if err := t.Start(ctx); err != nil && ctx.Err() == nil {
 					log.Printf("[transport] telegram: exited with error: %v", err)
 				}
