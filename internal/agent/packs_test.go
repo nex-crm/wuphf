@@ -99,19 +99,4 @@ func TestRevOpsPack(t *testing.T) {
 	if !hasCEO {
 		t.Error("revops pack missing required 'ceo' agent")
 	}
-	if len(p.DefaultSkills) != 5 {
-		t.Errorf("expected 5 default skills, got %d", len(p.DefaultSkills))
-	}
-	// Every default skill must have non-empty Name, Title, and Content.
-	for i, s := range p.DefaultSkills {
-		if s.Name == "" {
-			t.Errorf("skill[%d]: empty Name", i)
-		}
-		if s.Title == "" {
-			t.Errorf("skill[%d]: empty Title", i)
-		}
-		if s.Content == "" {
-			t.Errorf("skill[%d]: empty Content", i)
-		}
-	}
 }

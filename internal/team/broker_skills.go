@@ -615,10 +615,9 @@ func (b *Broker) appendSkillProposalRequestLocked(skill teamSkill, channel, now 
 	b.requests = append(b.requests, interview)
 }
 
-// SeedDefaultSkills pre-populates the broker with the pack's default skills.
+// SeedDefaultSkills pre-populates the broker with the given skill specs.
 // It is idempotent: skills whose name already exists (by slug) are skipped.
-// Call this after broker.Start() from the Launcher so that the first time a
-// pack is launched the team has its playbooks ready to reference.
+// No production callers remain; tests use it to set up broker skill state.
 func (b *Broker) SeedDefaultSkills(specs []agent.PackSkillSpec) {
 	if len(specs) == 0 {
 		return

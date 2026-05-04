@@ -23,7 +23,6 @@ import (
 
 	"golang.org/x/term"
 
-	"github.com/nex-crm/wuphf/internal/agent"
 	"github.com/nex-crm/wuphf/internal/config"
 	"github.com/nex-crm/wuphf/internal/nex"
 	"github.com/nex-crm/wuphf/internal/runtimebin"
@@ -119,17 +118,6 @@ func (l *Launcher) LaunchWeb(webPort int) error {
 		l.broker.Stop()
 		_ = clearOfficePIDFile()
 		return fmt.Errorf("write office pid: %w", err)
-	}
-
-	// Pre-seed any default skills declared by the pack (idempotent).
-	// Always seed the cross-cutting productivity skills (grill-me, tdd,
-	// diagnose, etc., adapted from github.com/mattpocock/skills) on top of
-	// whatever the active pack defines. They're useful for every install,
-	// not just packs that explicitly enumerate them.
-	if l.pack != nil {
-		l.broker.SeedDefaultSkills(agent.AppendProductivitySkills(l.pack.DefaultSkills))
-	} else {
-		l.broker.SeedDefaultSkills(agent.AppendProductivitySkills(nil))
 	}
 
 	l.broker.SetGenerateMemberFn(l.GenerateMemberTemplateFromPrompt)
