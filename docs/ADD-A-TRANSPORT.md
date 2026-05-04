@@ -29,7 +29,7 @@ internal/team/transport/
   transport.go      — Transport, MemberBoundTransport, OfficeBoundTransport, Host interfaces
   errors.go         — typed sentinel errors + wrapped error types
   webhook_fake_test.go — canonical fake adapters (start here when reading)
-  host_misuse_test.go  — 6 misuse-case tests; your adapter should pass all 6
+  host_misuse_test.go  — 9 tests: 6 misuse paths + compile-time assertions + constant uniqueness checks
 
 internal/team/
   broker_transport.go    — transport.Host implementation (backed by Broker)
@@ -204,7 +204,7 @@ if errors.Is(err, transport.ErrRegistrationConflict) {
 bash scripts/test-go.sh ./internal/team/transport/...
 ```
 
-All 8 tests in `host_misuse_test.go` should be green before opening a PR. The
+All 9 tests in `host_misuse_test.go` should be green before opening a PR. The
 compile-time assertions in `TestFakeAdaptersSatisfyInterfaces` will catch
 missing interface methods immediately.
 

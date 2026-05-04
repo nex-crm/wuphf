@@ -12,6 +12,7 @@ package transport_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	. "github.com/nex-crm/wuphf/internal/team/transport"
@@ -92,32 +93,34 @@ func TestMisuse3_RegistrationConflict(t *testing.T) {
 	}
 }
 
-// TestMisuse4_SendTimeoutSentinel verifies that ErrSendTimeout can be detected
-// with errors.Is. Real enforcement happens in the Host worker; this test ensures
-// the sentinel is correctly defined and testable in adapter code. Pitfall #4.
+// TestMisuse4_SendTimeoutSentinel verifies that ErrSendTimeout survives wrapping
+// with fmt.Errorf. The Host worker wraps it before returning to the adapter, so
+// adapter code that does errors.Is(err, ErrSendTimeout) must match the wrapped form.
+// Pitfall #4.
 func TestMisuse4_SendTimeoutSentinel(t *testing.T) {
 	// Simulate the Host worker wrapping ErrSendTimeout with context.
-	wrapped := ErrSendTimeout
+	wrapped := fmt.Errorf("worker dropped message after 10s: %w", ErrSendTimeout)
 
 	if !errors.Is(wrapped, ErrSendTimeout) {
-		t.Fatalf("errors.Is(ErrSendTimeout): expected true, got false")
+		t.Fatalf("wrapped ErrSendTimeout: errors.Is expected true, got false")
 	}
 	// Confirm it does not accidentally match unrelated sentinels.
 	if errors.Is(wrapped, ErrParticipantUnknown) {
-		t.Fatal("ErrSendTimeout must not match ErrParticipantUnknown")
+		t.Fatal("wrapped ErrSendTimeout must not match ErrParticipantUnknown")
 	}
 }
 
-// TestMisuse5_HealthDegradedSentinel verifies ErrHealthDegraded is correctly
-// defined and errors.Is-matchable. Pitfall #5 — adapter ignoring degraded state.
+// TestMisuse5_HealthDegradedSentinel verifies ErrHealthDegraded survives wrapping
+// with fmt.Errorf. Pitfall #5 — adapter code must detect degraded state via
+// errors.Is even when the Host adds context to the error.
 func TestMisuse5_HealthDegradedSentinel(t *testing.T) {
-	wrapped := ErrHealthDegraded
+	wrapped := fmt.Errorf("host pausing inbound: %w", ErrHealthDegraded)
 
 	if !errors.Is(wrapped, ErrHealthDegraded) {
-		t.Fatalf("errors.Is(ErrHealthDegraded): expected true, got false")
+		t.Fatalf("wrapped ErrHealthDegraded: errors.Is expected true, got false")
 	}
 	if errors.Is(wrapped, ErrAdapterCrashed) {
-		t.Fatal("ErrHealthDegraded must not match ErrAdapterCrashed")
+		t.Fatal("wrapped ErrHealthDegraded must not match ErrAdapterCrashed")
 	}
 }
 

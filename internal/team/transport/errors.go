@@ -14,7 +14,7 @@ var (
 	// adapter did not call [Host.UpsertParticipant] before sending the message.
 	// Remediation: call UpsertParticipant(ctx, p, b) immediately when a new
 	// external identity first contacts the adapter, then retry ReceiveMessage.
-	ErrParticipantUnknown = errors.New("transport: participant unknown — call UpsertParticipant first")
+	ErrParticipantUnknown = errors.New("transport: participant unknown: call UpsertParticipant first")
 
 	// ErrBindingChannelMissing is returned by [Host.ReceiveMessage] or at
 	// adapter registration time when the channel declared in [Binding.ChannelSlug]
@@ -33,13 +33,13 @@ var (
 	// not return within the configured timeout. The message has been dropped.
 	// Remediation: check the adapter's upstream connectivity and reduce message
 	// payload size if the upstream API has a latency limit.
-	ErrSendTimeout = errors.New("transport: send timed out — message dropped")
+	ErrSendTimeout = errors.New("transport: send timed out: message dropped")
 
 	// ErrHealthDegraded is returned by [Host.ReceiveMessage] when the broker
 	// has marked the adapter as degraded (e.g. repeated send failures) and is
 	// refusing further inbound messages until the adapter self-heals. The
 	// adapter should pause polling, run its reconnect logic, and retry.
-	ErrHealthDegraded = errors.New("transport: adapter health degraded — pause and reconnect")
+	ErrHealthDegraded = errors.New("transport: adapter health degraded: pause and reconnect")
 
 	// ErrRegistrationConflict is returned by [Host.UpsertParticipant] when
 	// the (AdapterName, Key) pair maps to a different member slug than already
@@ -58,7 +58,7 @@ type ParticipantUnknownError struct {
 }
 
 func (e *ParticipantUnknownError) Error() string {
-	return fmt.Sprintf("transport: participant unknown for adapter %q key %q — call UpsertParticipant first", e.AdapterName, e.Key)
+	return fmt.Sprintf("transport: participant unknown for adapter %q key %q: call UpsertParticipant first", e.AdapterName, e.Key)
 }
 
 func (e *ParticipantUnknownError) Is(target error) bool {

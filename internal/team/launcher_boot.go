@@ -216,6 +216,11 @@ func (l *Launcher) launchHeadlessCodex() error {
 	if err := l.broker.Start(); err != nil {
 		return fmt.Errorf("start broker: %w", err)
 	}
+
+	if err := RegisterTransports(newBrokerTransportHost(l.broker)); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: transport registration: %v\n", err)
+	}
+
 	if l.pack != nil {
 		l.broker.SeedDefaultSkills(agent.AppendProductivitySkills(l.pack.DefaultSkills))
 	} else {

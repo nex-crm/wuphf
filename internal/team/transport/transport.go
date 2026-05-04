@@ -157,7 +157,9 @@ type Host interface {
 	// writes the message to the broker under the broker mutex, and returns nil
 	// on success. Possible errors: [ErrParticipantUnknown] (adapter forgot to
 	// call UpsertParticipant first), [ErrBindingChannelMissing] (the declared
-	// channel no longer exists), [ErrAdapterCrashed] (broker panic recovered).
+	// channel no longer exists). [ErrAdapterCrashed] (broker panic recovered)
+	// is reserved for Phase 2b when the real dispatch path adds a recover()
+	// wrapper — the Phase 1 stub does not return it.
 	//
 	// Pitfall: always call UpsertParticipant before the first ReceiveMessage
 	// for a new external identity. Skipping this returns ErrParticipantUnknown.
