@@ -10,6 +10,7 @@ import {
 } from "../../api/client";
 import { formatRelativeTime } from "../../lib/format";
 import { showNotice } from "../ui/Toast";
+import { isCadenceSchedulerJob } from "./schedulerJobClassification";
 
 const DEFAULT_FLOOR_MINUTES = 5;
 
@@ -19,6 +20,11 @@ const READ_ONLY_SLUGS = new Set(["one-relay-events"]);
 interface SystemSchedulesPanelProps {
   jobs: SchedulerJob[];
 }
+
+type FloorState =
+  | { status: "loading"; values: Record<string, number> }
+  | { status: "ready"; values: Record<string, number> }
+  | { status: "fallback"; values: Record<string, number> };
 
 /**
  * "System Schedules" section above the timeline-grouped job cards in
@@ -34,10 +40,11 @@ interface SystemSchedulesPanelProps {
  */
 export function SystemSchedulesPanel({ jobs }: SystemSchedulesPanelProps) {
   const rows = useMemo(() => filterSchedulerRows(jobs), [jobs]);
-  // floors: slug -> min_floor_minutes, populated from the API on mount.
-  // This is state, not a ref, so rows re-render once broker-canonical floors
-  // arrive and validation cannot silently use a stale default.
-  const [floors, setFloors] = useState<Record<string, number>>({});
+  // floors: slug → min_floor_minutes, populated from the API on mount.
+  const [floorState, setFloorState] = useState<FloorState>({
+    status: "loading",
+    values: {},
+  });
 
   useEffect(() => {
     let aborted = false;
@@ -48,7 +55,7 @@ export function SystemSchedulesPanel({ jobs }: SystemSchedulesPanelProps) {
         for (const s of specs) {
           map[s.slug] = s.min_floor_minutes;
         }
-        setFloors(map);
+        setFloorState({ status: "ready", values: map });
       })
       .catch((err: unknown) => {
         if (aborted) return;
@@ -56,6 +63,7 @@ export function SystemSchedulesPanel({ jobs }: SystemSchedulesPanelProps) {
           "SystemSchedulesPanel: could not fetch system-specs; falling back to default floor",
           err,
         );
+        setFloorState({ status: "fallback", values: {} });
       });
     return () => {
       aborted = true;
@@ -82,7 +90,7 @@ export function SystemSchedulesPanel({ jobs }: SystemSchedulesPanelProps) {
         <ScheduleRow
           key={job.slug ?? job.id}
           job={job}
-          floor={floors[job.slug ?? ""] ?? DEFAULT_FLOOR_MINUTES}
+          floorState={floorState}
         />
       ))}
     </section>
@@ -96,26 +104,24 @@ export function SystemSchedulesPanel({ jobs }: SystemSchedulesPanelProps) {
  * they belong in the timeline view below.
  */
 function filterSchedulerRows(jobs: SchedulerJob[]): SchedulerJob[] {
-  return jobs.filter(
-    (j) =>
-      j.system_managed ||
-      typeof j.interval_minutes === "number" ||
-      typeof j.schedule_expr === "string",
-  );
+  return jobs.filter(isCadenceSchedulerJob);
 }
 
 interface ScheduleRowProps {
   job: SchedulerJob;
-  floor: number;
+  floorState: FloorState;
 }
 
-function ScheduleRow({ job, floor }: ScheduleRowProps) {
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
+function ScheduleRow({ job, floorState }: ScheduleRowProps) {
   const queryClient = useQueryClient();
   const slug = job.slug ?? "";
   const isReadOnly = READ_ONLY_SLUGS.has(slug);
   const isCron = typeof job.schedule_expr === "string" && job.schedule_expr;
   const isInterval = typeof job.interval_minutes === "number";
 
+  const floorReady = floorState.status !== "loading";
+  const floor = floorState.values[slug] ?? DEFAULT_FLOOR_MINUTES;
   const defaultInterval = job.interval_minutes ?? 0;
   const initialOverride = job.interval_override ?? 0;
   const initialEnabled = job.enabled !== false; // missing → assume enabled
@@ -143,6 +149,7 @@ function ScheduleRow({ job, floor }: ScheduleRowProps) {
       setPending(true);
       setError(null);
       patchSchedulerJob(slug, patchBody)
+        // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
         .then((res: PatchSchedulerJobResponse) => {
           // Refresh the query so the row reflects server-canonical state
           // (status, next_run, etc.) — the optimistic update we already
@@ -189,7 +196,7 @@ function ScheduleRow({ job, floor }: ScheduleRowProps) {
         })
         .finally(() => setPending(false));
     },
-    [slug, isReadOnly, job, queryClient, initialOverride, defaultInterval],
+    [slug, isReadOnly, job, queryClient, defaultInterval],
   );
 
   const handleToggle = useCallback(() => {
@@ -199,8 +206,13 @@ function ScheduleRow({ job, floor }: ScheduleRowProps) {
     submitPatch({ enabled: next });
   }, [isReadOnly, pending, enabled, submitPatch]);
 
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
   const handleIntervalCommit = useCallback(() => {
     if (isReadOnly || isCron) return;
+    if (!floorReady) {
+      setError("Scheduler floors are still loading");
+      return;
+    }
     const trimmed = overrideText.trim();
     if (trimmed === "") {
       setError("Interval is required");
@@ -223,7 +235,15 @@ function ScheduleRow({ job, floor }: ScheduleRowProps) {
       return;
     }
     submitPatch({ interval_override: parsed === defaultInterval ? 0 : parsed });
-  }, [isReadOnly, isCron, overrideText, floor, defaultInterval, submitPatch]);
+  }, [
+    isReadOnly,
+    isCron,
+    floorReady,
+    overrideText,
+    floor,
+    defaultInterval,
+    submitPatch,
+  ]);
 
   const handleRunNow = useCallback(() => {
     if (!slug || runPending) return;
@@ -295,7 +315,7 @@ function ScheduleRow({ job, floor }: ScheduleRowProps) {
         ) : isInterval ? (
           <IntervalPicker
             value={overrideText}
-            disabled={pending}
+            disabled={pending || !floorReady}
             onChange={(v) => {
               setOverrideText(v);
               setError(null);
@@ -473,13 +493,12 @@ function ToggleSwitch({
         style={{
           position: "absolute",
           top: 2,
-          left: 2,
+          left: enabled ? 18 : 2,
           width: 16,
           height: 16,
           background: "#fff",
           borderRadius: "50%",
-          transform: enabled ? "translateX(16px)" : "translateX(0)",
-          transition: "transform 0.15s",
+          transition: "left 0.15s",
           boxShadow: "0 1px 2px rgba(0,0,0,0.2)",
         }}
       />

@@ -241,6 +241,30 @@ func TestWriteSkillProposalLocked_DefaultsStatus(t *testing.T) {
 	}
 }
 
+func TestWriteSkillProposalLocked_PreservesDisabledFromStatus(t *testing.T) {
+	t.Parallel()
+	b := newTestBroker(t)
+
+	spec := skillProposalSpec("paused-proposal", "A paused proposal.", "archivist")
+	spec.Status = "disabled"
+	spec.DisabledFromStatus = "proposed"
+
+	sk, err := callWriteSkillProposalLocked(b, spec)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if sk.Status != "disabled" {
+		t.Errorf("Status: got %q, want disabled", sk.Status)
+	}
+	if sk.DisabledFromStatus != "proposed" {
+		t.Errorf("DisabledFromStatus: got %q, want proposed", sk.DisabledFromStatus)
+	}
+	fm := teamSkillToFrontmatter(*sk)
+	if fm.Metadata.Wuphf.DisabledFromStatus != "proposed" {
+		t.Errorf("frontmatter disabled_from_status: got %q, want proposed", fm.Metadata.Wuphf.DisabledFromStatus)
+	}
+}
+
 // TestWriteSkillProposalLocked_GuardRejectsDangerous covers the trust-ladder
 // gate: a community-trust skill with a dangerous body is rejected outright,
 // the rejection counter is bumped, and no skill is appended to b.skills.

@@ -15,6 +15,21 @@ import (
 	"github.com/nex-crm/wuphf/internal/nex"
 )
 
+// HealthResponse is the stable JSON response served by GET /health.
+type HealthResponse struct {
+	Status              string         `json:"status"`
+	SessionMode         string         `json:"session_mode"`
+	OneOnOneAgent       string         `json:"one_on_one_agent"`
+	FocusMode           bool           `json:"focus_mode"`
+	Provider            string         `json:"provider"`
+	ProviderModel       string         `json:"provider_model"`
+	MemoryBackend       string         `json:"memory_backend"`
+	MemoryBackendActive string         `json:"memory_backend_active"`
+	MemoryBackendReady  bool           `json:"memory_backend_ready"`
+	NexConnected        bool           `json:"nex_connected"`
+	Build               buildinfo.Info `json:"build"`
+}
+
 func (b *Broker) handleHealth(w http.ResponseWriter, r *http.Request) {
 	b.mu.Lock()
 	mode := b.sessionMode
@@ -28,18 +43,18 @@ func (b *Broker) handleHealth(w http.ResponseWriter, r *http.Request) {
 	memoryStatus := ResolveMemoryBackendStatus()
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"status":                "ok",
-		"session_mode":          mode,
-		"one_on_one_agent":      agent,
-		"focus_mode":            focus,
-		"provider":              provider,
-		"provider_model":        resolveProviderModel(provider),
-		"memory_backend":        memoryStatus.SelectedKind,
-		"memory_backend_active": memoryStatus.ActiveKind,
-		"memory_backend_ready":  memoryStatus.ActiveKind != config.MemoryBackendNone,
-		"nex_connected":         memoryStatus.ActiveKind == config.MemoryBackendNex && nex.Connected(),
-		"build":                 buildinfo.Current(),
+	_ = json.NewEncoder(w).Encode(HealthResponse{
+		Status:              "ok",
+		SessionMode:         mode,
+		OneOnOneAgent:       agent,
+		FocusMode:           focus,
+		Provider:            provider,
+		ProviderModel:       resolveProviderModel(provider),
+		MemoryBackend:       memoryStatus.SelectedKind,
+		MemoryBackendActive: memoryStatus.ActiveKind,
+		MemoryBackendReady:  memoryStatus.ActiveKind != config.MemoryBackendNone,
+		NexConnected:        memoryStatus.ActiveKind == config.MemoryBackendNex && nex.Connected(),
+		Build:               buildinfo.Current(),
 	})
 }
 
@@ -171,7 +186,7 @@ func (b *Broker) handleResetDM(w http.ResponseWriter, r *http.Request) {
 			filtered = append(filtered, msg)
 			continue
 		}
-		isHuman := msg.From == "you" || msg.From == "human"
+		isHuman := isHumanMessageSender(msg.From)
 		isAgent := msg.From == agent
 		if isHuman {
 			// Only drop human messages that are part of THIS agent's thread:
@@ -197,7 +212,7 @@ func (b *Broker) handleResetDM(w http.ResponseWriter, r *http.Request) {
 			// preserved — only the human↔agent thread is being reset.
 			taggedHuman := false
 			for _, t := range msg.Tagged {
-				if t == "you" || t == "human" {
+				if isHumanMessageSender(t) {
 					taggedHuman = true
 					break
 				}
@@ -324,6 +339,9 @@ func (b *Broker) handleActions(w http.ResponseWriter, r *http.Request) {
 		if strings.TrimSpace(body.Kind) == "" || strings.TrimSpace(body.Summary) == "" {
 			http.Error(w, "kind and summary required", http.StatusBadRequest)
 			return
+		}
+		if actor, ok := requestActorFromContext(r.Context()); ok && actor.Kind == requestActorKindHuman {
+			body.Actor = humanMessageSender(actor.Slug)
 		}
 		if err := b.RecordAction(
 			body.Kind,

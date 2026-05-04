@@ -21,7 +21,7 @@
 <meta name="twitter:description" content="A collaborative office of AI employees who build and maintain their own knowledge base to never lose context for the tasks you give them.">
 <meta name="twitter:image" content="https://wuphf.team/og-image.png">
 <meta name="twitter:image:alt" content="WUPHF — AI employees with a shared brain. Open-source AI office with channels and a pixel-art team.">
-<meta name="theme-color" content="#1A1610">
+<meta name="theme-color" content="#1b0d2a">
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
 <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
 <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
@@ -80,17 +80,17 @@
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
   :root {
-    --bg: #1A1610;
-    --surface: #242018;
-    --surface-high: #2E2820;
-    --border: #3A3028;
-    --yellow: #ECB22E;
-    --yellow-dark: #C49020;
-    --yellow-glow: rgba(236,178,46,0.15);
-    --green: #5AAA7A;
-    --blue: #5A9AC8;
-    --text: #F0EBD8;
-    --text-muted: #8A7D6A;
+    --bg: #1b0d2a;
+    --surface: #24123a;
+    --surface-high: #2e1647;
+    --border: #612a92;
+    --yellow: #cf72d9;
+    --yellow-dark: #9f4dbf;
+    --yellow-glow: rgba(207,114,217,0.12);
+    --green: #D4DB18;
+    --blue: #ffb3e6;
+    --text: #ffebfc;
+    --text-muted: #a580c0;
     --bg2: var(--surface);
     --bg3: var(--surface-high);
     --yellow-dim: var(--yellow-glow);
@@ -194,13 +194,15 @@
   .hero::before {
     content: '';
     position: absolute; inset: 0;
-    background: repeating-linear-gradient(
-      0deg,
-      transparent,
-      transparent 3px,
-      rgba(0,0,0,0.09) 3px,
-      rgba(0,0,0,0.09) 4px
-    );
+    background:
+      radial-gradient(ellipse 700px 400px at 50% 48%, rgba(207,114,217,0.07) 0%, transparent 70%),
+      repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 3px,
+        rgba(0,0,0,0.09) 3px,
+        rgba(0,0,0,0.09) 4px
+      );
     pointer-events: none; z-index: 1;
   }
 
@@ -1794,7 +1796,7 @@
 
   // ── SPRITE CANVASES ───────────────────────────────────────────────────
   var bodyColors = ['#2D4A7A', '#4A7A2D', '#7A2D4A'];
-  var accentColors = ['#ECB22E', '#5A9AC8', '#5AAA7A'];
+  var accentColors = ['#cf72d9', '#ffb3e6', '#9f4dbf'];
 
   function drawSprite(canvasId, colorBody, colorAccent, frame) {
     var canvas = document.getElementById(canvasId);
@@ -2072,21 +2074,21 @@
         hair:'#1A1610', skin:'#D4B896', shirt:'#2D4A7A', pants:'#1A2A4A',
         faceRight:true, walkFrame:0, animTimer:0,
         state:'IDLE_DESK', stateTimer:5000, arriveState:'IDLE_DESK', arriveWait:5000,
-        destX:8.0, destY:4.0, isAgent:true, agentColor:'#ECB22E', label:'CEO',
+        destX:8.0, destY:4.0, isAgent:true, agentColor:'#cf72d9', label:'CEO',
         chatPartner:null, chatStep:0, chatTimer:0, chatConvo:null,
         patrolStep:0, patrolTimer:0, bubbleTimer: 8000 + Math.random()*8000 },
       { id:'eng',    name:'ENG',    x:10.0, y:3.0, homeX:10.0, homeY:3.0,
         hair:'#2A1A40', skin:'#C4A882', shirt:'#4A2D7A', pants:'#2A1A4A',
         faceRight:false, walkFrame:0, animTimer:0,
         state:'IDLE_DESK', stateTimer:7000, arriveState:'IDLE_DESK', arriveWait:7000,
-        destX:10.0, destY:3.0, isAgent:true, agentColor:'#5A9AC8', label:'ENG',
+        destX:10.0, destY:3.0, isAgent:true, agentColor:'#cf72d9', label:'ENG',
         chatPartner:null, chatStep:0, chatTimer:0, chatConvo:null,
         patrolStep:0, patrolTimer:0, bubbleTimer: 8000 + Math.random()*8000 },
       { id:'cmo',    name:'CMO',    x:3.0, y:5.0, homeX:3.0, homeY:5.0,
         hair:'#4A2010', skin:'#D4A870', shirt:'#7A4A2D', pants:'#3A2010',
         faceRight:true, walkFrame:0, animTimer:0,
         state:'IDLE_DESK', stateTimer:5500, arriveState:'IDLE_DESK', arriveWait:5500,
-        destX:3.0, destY:5.0, isAgent:true, agentColor:'#5AAA7A', label:'CMO',
+        destX:3.0, destY:5.0, isAgent:true, agentColor:'#cf72d9', label:'CMO',
         chatPartner:null, chatStep:0, chatTimer:0, chatConvo:null,
         patrolStep:0, patrolTimer:0, bubbleTimer: 8000 + Math.random()*8000 }
     ];
@@ -2553,11 +2555,11 @@
         var badgeY = nameY - badgeH + 4;
         ctx.fillStyle = ch.agentColor;
         ctx.fillRect(cx - badgeW / 2, badgeY, badgeW, badgeH);
-        ctx.fillStyle = '#1A1610';
+        ctx.fillStyle = '#1b0d2a';
         ctx.font = '6px "Press Start 2P", monospace';
         ctx.fillText(ch.label, cx, badgeY + badgeH - 2);
       } else {
-        ctx.fillStyle = 'rgba(240,235,216,0.88)';
+        ctx.fillStyle = 'rgba(255,235,252,0.88)';
         ctx.font = '6px "Press Start 2P", monospace';
         ctx.fillText(ch.name, cx, nameY);
       }
@@ -2587,26 +2589,26 @@
       var bx3 = pos.x - bw / 2;
       var by3 = headTop - bh - 10;
 
-      ctx.fillStyle = '#F0EBD8';
+      ctx.fillStyle = '#ffebfc';
       ctx.fillRect(bx3, by3, bw, bh);
-      ctx.fillStyle = '#C49020';
-      ctx.strokeStyle = '#C49020';
+      ctx.fillStyle = '#9f4dbf';
+      ctx.strokeStyle = '#9f4dbf';
       ctx.lineWidth = 2;
       ctx.strokeRect(bx3, by3, bw, bh);
 
       // tail
-      ctx.fillStyle = '#F0EBD8';
+      ctx.fillStyle = '#ffebfc';
       ctx.beginPath();
       ctx.moveTo(pos.x - 4, by3 + bh);
       ctx.lineTo(pos.x + 4, by3 + bh);
       ctx.lineTo(pos.x, by3 + bh + 8);
       ctx.closePath();
       ctx.fill();
-      ctx.strokeStyle = '#C49020';
+      ctx.strokeStyle = '#9f4dbf';
       ctx.lineWidth = 1;
       ctx.stroke();
 
-      ctx.fillStyle = '#1A1610';
+      ctx.fillStyle = '#1b0d2a';
       ctx.textAlign = 'center';
       ctx.fillText(b.text, pos.x, by3 + bh - 7);
 
@@ -2690,9 +2692,9 @@
       // ── MICHAEL'S OFFICE WALL AWARDS ─────────────────
       // Plaques on the interior face of the gx=9 glass wall
       var awards = [
-        { gy: 0.55, lines: ['DUNDIE', 'AWARD'], color: '#ECB22E' },
-        { gy: 1.55, lines: ["WORLD'S", 'BEST BOSS'], color: '#ECB22E' },
-        { gy: 2.45, lines: ['MIT', 'LICENSE'], color: '#ECB22E' }
+        { gy: 0.55, lines: ['DUNDIE', 'AWARD'], color: '#cf72d9' },
+        { gy: 1.55, lines: ["WORLD'S", 'BEST BOSS'], color: '#cf72d9' },
+        { gy: 2.45, lines: ['MIT', 'LICENSE'], color: '#cf72d9' }
       ];
       ctx.save();
       ctx.font = '5px "Press Start 2P", monospace';
@@ -2702,7 +2704,7 @@
         var aw = 30, ah = 18;
         var ax = ap.x - aw / 2;
         var ay = ap.y - wallH + 8;
-        ctx.fillStyle = '#1A1610';
+        ctx.fillStyle = '#1b0d2a';
         ctx.fillRect(ax, ay, aw, ah);
         ctx.strokeStyle = a.color;
         ctx.lineWidth = 1.5;
@@ -2729,9 +2731,9 @@
         drawBox(ctx, d[0], d[1], 0.9, 0.6, 10, '#7A5A18', '#5A3C08', '#3A2404');
         // monitor
         var mp = iso(d[0] + 0.35, d[1] + 0.1);
-        ctx.fillStyle = '#1A1610';
+        ctx.fillStyle = '#1b0d2a';
         ctx.fillRect(mp.x - 9, mp.y - 26, 18, 16);
-        ctx.fillStyle = 'rgba(236,178,46,0.28)';
+        ctx.fillStyle = 'rgba(207,114,217,0.28)';
         ctx.fillRect(mp.x - 7, mp.y - 24, 14, 12);
       });
 
@@ -2743,18 +2745,18 @@
       drawBox(ctx, 5.8, 5.0, 0.8, 0.6, 12, '#6A4A14', '#4A3208', '#4A3208');
 
       // Whiteboard
-      drawBox(ctx, 0.05, 4.2, 0.08, 0.8, 20, '#F0EBD8', '#ECB22E', '#C49020');
+      drawBox(ctx, 0.05, 4.2, 0.08, 0.8, 20, '#ffebfc', '#cf72d9', '#9f4dbf');
       var wb = iso(0.1, 4.5);
-      ctx.fillStyle = '#5AAA7A';
+      ctx.fillStyle = '#D4DB18';
       ctx.fillRect(wb.x, wb.y - 30, 3, 2);
       ctx.fillRect(wb.x + 1, wb.y - 26, 2, 2);
-      ctx.fillStyle = '#ECB22E';
+      ctx.fillStyle = '#cf72d9';
       ctx.fillRect(wb.x + 2, wb.y - 22, 4, 2);
 
       // Water cooler
       drawBox(ctx, 7.3, 6.3, 0.3, 0.3, 16, '#5A9AC8', '#3F6C8C', '#3F6C8C');
       var wcTop = iso(7.45, 6.45);
-      ctx.fillStyle = '#ECB22E';
+      ctx.fillStyle = '#cf72d9';
       ctx.fillRect(wcTop.x - 3, wcTop.y - 20, 6, 6);
 
       // ── ROOM LABELS ──────────────────────────────────
@@ -2763,16 +2765,16 @@
       ctx.textAlign = 'center';
 
       var confLabel = iso(1.5, 2.6);
-      ctx.fillStyle = 'rgba(236,178,46,0.75)';
+      ctx.fillStyle = 'rgba(207,114,217,0.75)';
       ctx.fillText('CONF ROOM', confLabel.x, confLabel.y);
 
       var mLabel = iso(10.5, 2.6);
-      ctx.fillStyle = 'rgba(236,178,46,0.75)';
+      ctx.fillStyle = 'rgba(207,114,217,0.75)';
       ctx.fillText("MICHAEL'S", mLabel.x, mLabel.y);
       ctx.fillText('OFFICE', mLabel.x, mLabel.y + 10);
 
       var recLabel = iso(5.5, 6.4);
-      ctx.fillStyle = 'rgba(236,178,46,0.75)';
+      ctx.fillStyle = 'rgba(207,114,217,0.75)';
       ctx.fillText('RECEPTION', recLabel.x, recLabel.y);
 
       ctx.restore();

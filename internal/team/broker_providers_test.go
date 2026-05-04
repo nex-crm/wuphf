@@ -106,6 +106,100 @@ func TestHandleOfficeMembers_UpdateSwitchesProvider(t *testing.T) {
 	}
 }
 
+func TestHandleOfficeMembers_UpdateOpenclawToOpenclawKeepsNewBinding(t *testing.T) {
+	b, fake, ts, token := newBrokerHTTPTestWithFake(t)
+	defer ts.Close()
+
+	create := map[string]any{
+		"action": "create",
+		"slug":   "switcher",
+		"name":   "Switcher",
+		"provider": map[string]any{
+			"kind": provider.KindOpenclaw,
+			"openclaw": map[string]any{
+				"session_key": "agent:test:old",
+			},
+		},
+	}
+	if r := doBrokerPost(t, ts, token, "/office-members", create); r.StatusCode != http.StatusOK {
+		t.Fatalf("create status=%d", r.StatusCode)
+	}
+
+	update := map[string]any{
+		"action": "update",
+		"slug":   "switcher",
+		"provider": map[string]any{
+			"kind": provider.KindOpenclaw,
+			"openclaw": map[string]any{
+				"session_key": "agent:test:new",
+			},
+		},
+	}
+	if r := doBrokerPost(t, ts, token, "/office-members", update); r.StatusCode != http.StatusOK {
+		t.Fatalf("update status=%d", r.StatusCode)
+	}
+
+	b.mu.Lock()
+	m := b.findMemberLocked("switcher")
+	b.mu.Unlock()
+	if m == nil || m.Provider.Openclaw == nil || m.Provider.Openclaw.SessionKey != "agent:test:new" {
+		t.Fatalf("new openclaw binding not persisted: %+v", m)
+	}
+	if got := b.openclawBridge.SnapshotBindings()["switcher"]; got != "agent:test:new" {
+		t.Fatalf("bridge binding = %q, want new session", got)
+	}
+	fake.mu.Lock()
+	unsubscribed := append([]string(nil), fake.unsubscribed...)
+	fake.mu.Unlock()
+	if !containsString(unsubscribed, "agent:test:old") {
+		t.Fatalf("old session was not unsubscribed: %v", unsubscribed)
+	}
+	if containsString(unsubscribed, "agent:test:new") {
+		t.Fatalf("new session was incorrectly unsubscribed: %v", unsubscribed)
+	}
+}
+
+func TestHandleOfficeMembers_CreateOpenclawConflictCleansAttachment(t *testing.T) {
+	b, fake, ts, token := newBrokerHTTPTestWithFake(t)
+	defer ts.Close()
+
+	fake.mu.Lock()
+	fake.subscribeHook = func() {
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		if b.findMemberLocked("race-bot") != nil {
+			return
+		}
+		b.members = append(b.members, officeMember{Slug: "race-bot", Name: "Race Bot"})
+		b.memberIndex["race-bot"] = len(b.members) - 1
+	}
+	fake.mu.Unlock()
+
+	create := map[string]any{
+		"action": "create",
+		"slug":   "race-bot",
+		"name":   "Race Bot",
+		"provider": map[string]any{
+			"kind": provider.KindOpenclaw,
+			"openclaw": map[string]any{
+				"session_key": "agent:test:race",
+			},
+		},
+	}
+	if r := doBrokerPost(t, ts, token, "/office-members", create); r.StatusCode != http.StatusConflict {
+		t.Fatalf("create status=%d, want conflict", r.StatusCode)
+	}
+	if got := b.openclawBridge.SnapshotBindings()["race-bot"]; got != "" {
+		t.Fatalf("conflicted create left bridge binding %q", got)
+	}
+	fake.mu.Lock()
+	unsubscribed := append([]string(nil), fake.unsubscribed...)
+	fake.mu.Unlock()
+	if !containsString(unsubscribed, "agent:test:race") {
+		t.Fatalf("conflicted session was not unsubscribed: %v", unsubscribed)
+	}
+}
+
 func TestHandleOfficeMembers_InvalidProviderKind(t *testing.T) {
 	_, ts, token := newBrokerHTTPTest(t)
 	defer ts.Close()
@@ -197,6 +291,12 @@ func TestRebuildMemberIndex_AfterRemove(t *testing.T) {
 // httptest server, returning the broker, the server, and the auth token.
 func newBrokerHTTPTest(t *testing.T) (*Broker, *httptest.Server, string) {
 	t.Helper()
+	b, _, ts, token := newBrokerHTTPTestWithFake(t)
+	return b, ts, token
+}
+
+func newBrokerHTTPTestWithFake(t *testing.T) (*Broker, *fakeOCClient, *httptest.Server, string) {
+	t.Helper()
 	b := newTestBroker(t)
 	// Attach a fake bridge so handleOfficeMembers can exercise openclaw
 	// create/update/remove paths without dialing a real gateway.
@@ -207,7 +307,7 @@ func newBrokerHTTPTest(t *testing.T) (*Broker, *httptest.Server, string) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/office-members", b.requireAuth(b.handleOfficeMembers))
 	ts := httptest.NewServer(mux)
-	return b, ts, b.Token()
+	return b, fake, ts, b.Token()
 }
 
 func doBrokerPost(t *testing.T, ts *httptest.Server, token, path string, body any) *http.Response {

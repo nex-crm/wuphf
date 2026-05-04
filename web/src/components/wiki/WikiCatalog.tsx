@@ -12,6 +12,7 @@ interface WikiCatalogProps {
   catalog: WikiCatalogEntry[];
   onNavigate: (path: string) => void;
   onOpenAudit?: () => void;
+  catalogSort?: string;
   articlesCount?: number;
   commitsCount?: number;
   agentsCount?: number;
@@ -21,14 +22,24 @@ export default function WikiCatalog({
   catalog,
   onNavigate,
   onOpenAudit,
+  catalogSort = "last_edited_ts",
   articlesCount,
   commitsCount,
   agentsCount,
 }: WikiCatalogProps) {
   const [showNew, setShowNew] = useState(false);
-  const grouped = useMemo(() => groupByGroup(catalog), [catalog]);
+  const grouped = useMemo(
+    () => groupByGroup(catalog, catalogSort),
+    [catalog, catalogSort],
+  );
   const groupOrder = useMemo(
     () => resolveGroupOrder(catalog.map((c) => c.group)),
+    [catalog],
+  );
+  // Top-decile threshold for the "verbose" prune-signal badge. Only positive
+  // scores participate so a sparse catalog can still surface a real outlier.
+  const verboseThreshold = useMemo(
+    () => computeVerboseThreshold(catalog),
     [catalog],
   );
   const stats = useMemo(
@@ -61,7 +72,7 @@ export default function WikiCatalog({
           >
             + New article
           </button>
-          {onOpenAudit && (
+          {onOpenAudit ? (
             <>
               {" · "}
               <button
@@ -75,10 +86,10 @@ export default function WikiCatalog({
                 Audit log
               </button>
             </>
-          )}
+          ) : null}
         </div>
       </header>
-      {showNew && (
+      {showNew ? (
         <NewArticleModal
           catalog={catalog}
           onCancel={() => setShowNew(false)}
@@ -87,7 +98,7 @@ export default function WikiCatalog({
             onNavigate(path);
           }}
         />
-      )}
+      ) : null}
       <div className="wk-catalog-grid">
         {groupOrder.map((group) => {
           const items = grouped[group];
@@ -102,20 +113,27 @@ export default function WikiCatalog({
                 {items.slice(0, 6).map((item) => (
                   <li key={item.path}>
                     <PixelAvatar slug={item.author_slug} size={16} />
-                    <span
+                    <a
                       className="wk-title"
-                      role="link"
-                      tabIndex={0}
-                      onClick={() => onNavigate(item.path)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" || e.key === " ") {
-                          e.preventDefault();
-                          onNavigate(item.path);
-                        }
+                      href={`#/wiki/${item.path}`}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        onNavigate(item.path);
                       }}
                     >
                       {item.title}
-                    </span>
+                      {isVerbose(item, verboseThreshold) && (
+                        <span
+                          className="wk-staleness-badge wk-prune-verbose"
+                          title={`Verbose: ${item.word_count ?? 0} words, ${
+                            item.days_unread ?? 0
+                          } days since last read`}
+                          data-testid="wk-prune-verbose-badge"
+                        >
+                          verbose
+                        </span>
+                      )}
+                    </a>
                     <span className="wk-when">
                       {safeRelative(item.last_edited_ts)}
                     </span>
@@ -130,16 +148,51 @@ export default function WikiCatalog({
   );
 }
 
+/**
+ * computeVerboseThreshold returns the prune_score at the top-decile cutoff
+ * across the catalog. Returns 0 when there is no lower positive boundary,
+ * which lets isolated positive outliers still earn the badge.
+ */
+function computeVerboseThreshold(entries: WikiCatalogEntry[]): number {
+  const sorted = entries
+    .map((entry) => entry.prune_score ?? 0)
+    .filter((score) => score > 0)
+    .sort((a, b) => b - a);
+  if (sorted.length === 0) return 0;
+  // For catalogs < 10 articles floor(n*0.1) is 0, which points at the highest
+  // scorer and means the badge is never shown under strict >. Use at least 1
+  // so the top entry in any non-empty catalog can qualify.
+  const idx = Math.max(1, Math.floor(entries.length * 0.1));
+  const cutoff = sorted[idx] ?? 0;
+  return cutoff;
+}
+
+function isVerbose(entry: WikiCatalogEntry, threshold: number): boolean {
+  const score = entry.prune_score ?? 0;
+  // Strictly greater-than so the boundary entry (exactly at the 90th percentile
+  // cutoff) does not earn the badge — only entries above it do.
+  return score > 0 && score > threshold;
+}
+
 function groupByGroup(
   catalog: WikiCatalogEntry[],
+  catalogSort: string,
 ): Record<string, WikiCatalogEntry[]> {
   const out: Record<string, WikiCatalogEntry[]> = {};
   for (const entry of catalog) {
     if (!out[entry.group]) out[entry.group] = [];
     out[entry.group].push(entry);
   }
-  for (const k of Object.keys(out)) {
-    out[k].sort((a, b) => (a.last_edited_ts < b.last_edited_ts ? 1 : -1));
+  if (!catalogSort || catalogSort === "last_edited_ts") {
+    for (const k of Object.keys(out)) {
+      out[k].sort((a, b) =>
+        a.last_edited_ts < b.last_edited_ts
+          ? 1
+          : a.last_edited_ts > b.last_edited_ts
+            ? -1
+            : 0,
+      );
+    }
   }
   return out;
 }

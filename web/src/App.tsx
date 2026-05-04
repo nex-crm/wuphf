@@ -26,6 +26,8 @@ import "./styles/agents.css";
 import "./styles/search.css";
 import "./styles/wiki-shell.css";
 import "./styles/kbd.css";
+import "./styles/console.css";
+import "@xterm/xterm/css/xterm.css";
 
 const ArtifactsApp = lazy(() =>
   import("./components/apps/ArtifactsApp").then((m) => ({
@@ -35,6 +37,11 @@ const ArtifactsApp = lazy(() =>
 const CalendarApp = lazy(() =>
   import("./components/apps/CalendarApp").then((m) => ({
     default: m.CalendarApp,
+  })),
+);
+const ConsoleApp = lazy(() =>
+  import("./components/apps/ConsoleApp").then((m) => ({
+    default: m.ConsoleApp,
   })),
 );
 const GraphApp = lazy(() =>
@@ -76,27 +83,18 @@ const ThreadsApp = lazy(() =>
     default: m.ThreadsApp,
   })),
 );
-const Notebook = lazy(() => import("./components/notebook/Notebook"));
-const ReviewQueueKanban = lazy(
-  () => import("./components/review/ReviewQueueKanban"),
-);
-const CitedAnswer = lazy(() => import("./components/wiki/CitedAnswer"));
-const Wiki = lazy(() => import("./components/wiki/Wiki"));
-const SplashScreen = lazy(() =>
-  import("./components/onboarding/SplashScreen").then((m) => ({
-    default: m.SplashScreen,
+const TelegramConnectHost = lazy(() =>
+  import("./components/integrations/TelegramConnectModal").then((m) => ({
+    default: m.TelegramConnectHost,
   })),
 );
-const Wizard = lazy(() =>
-  import("./components/onboarding/Wizard").then((m) => ({ default: m.Wizard })),
+const Shell = lazy(() =>
+  import("./components/layout/Shell").then((m) => ({ default: m.Shell })),
 );
 const UpgradeBanner = lazy(() =>
   import("./components/layout/UpgradeBanner").then((m) => ({
     default: m.UpgradeBanner,
   })),
-);
-const Shell = lazy(() =>
-  import("./components/layout/Shell").then((m) => ({ default: m.Shell })),
 );
 const Composer = lazy(() =>
   import("./components/messages/Composer").then((m) => ({
@@ -121,6 +119,20 @@ const TypingIndicator = lazy(() =>
     default: m.TypingIndicator,
   })),
 );
+const Notebook = lazy(() => import("./components/notebook/Notebook"));
+const SplashScreen = lazy(() =>
+  import("./components/onboarding/SplashScreen").then((m) => ({
+    default: m.SplashScreen,
+  })),
+);
+const Wizard = lazy(() =>
+  import("./components/onboarding/Wizard").then((m) => ({ default: m.Wizard })),
+);
+const ReviewQueueKanban = lazy(
+  () => import("./components/review/ReviewQueueKanban"),
+);
+const CitedAnswer = lazy(() => import("./components/wiki/CitedAnswer"));
+const Wiki = lazy(() => import("./components/wiki/Wiki"));
 
 function PanelFallback() {
   return (
@@ -333,10 +345,11 @@ function MainContent() {
       "health-check": HealthCheckApp,
       settings: SettingsApp,
       threads: ThreadsApp,
+      console: ConsoleApp,
     };
     const Panel = panels[currentApp];
     return (
-      <div className="app-panel active">
+      <div className="app-panel active" data-testid={`app-page-${currentApp}`}>
         {Panel ? (
           <Suspense fallback={<PanelFallback />}>
             <Panel />
@@ -493,6 +506,9 @@ export default function App() {
       <ToastContainer />
       <ConfirmHost />
       <ProviderSwitcherHost />
+      <Suspense fallback={null}>
+        <TelegramConnectHost />
+      </Suspense>
     </ErrorBoundary>
   );
 }

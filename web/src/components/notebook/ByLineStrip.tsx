@@ -1,3 +1,4 @@
+// biome-ignore-all lint/a11y/useAriaPropsSupportedByRole: Passive metadata uses accessible labels queried by screen-reader tests; visual text remains unchanged.
 import type { NotebookEntryStatus } from "../../api/notebook";
 import { formatAgentName } from "../../lib/agentName";
 import { formatRelativeTime } from "../../lib/format";

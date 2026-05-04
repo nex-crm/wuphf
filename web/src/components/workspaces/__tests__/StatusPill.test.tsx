@@ -1,8 +1,8 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { UsageData } from "../../../api/client";
+import type { UsageData } from "../../../api/platform";
 import type { Workspace, WorkspaceListResponse } from "../../../api/workspaces";
 import { StatusPill } from "../StatusPill";
 
@@ -15,15 +15,15 @@ vi.mock("../../../api/workspaces", async (importOriginal) => {
   };
 });
 
-vi.mock("../../../api/client", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../../api/client")>();
+vi.mock("../../../api/platform", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../api/platform")>();
   return {
     ...actual,
     getUsage: vi.fn(),
   };
 });
 
-import { getUsage } from "../../../api/client";
+import { getUsage } from "../../../api/platform";
 import { useWorkspacesList } from "../../../api/workspaces";
 
 const useWorkspacesListMock = vi.mocked(useWorkspacesList);
@@ -49,12 +49,25 @@ function renderPill(usage?: UsageData, override?: string) {
   );
 }
 
+function usageData(totalTokens: number): UsageData {
+  const totals = {
+    input_tokens: totalTokens,
+    output_tokens: 0,
+    cache_read_tokens: 0,
+    cache_creation_tokens: 0,
+    total_tokens: totalTokens,
+    cost_usd: 0,
+    requests: totalTokens > 0 ? 1 : 0,
+  };
+  return {
+    total: totals,
+    session: totals,
+  };
+}
+
 describe("<StatusPill>", () => {
   beforeEach(() => {
-    getUsageMock.mockResolvedValue({
-      total: { cost_usd: 0, total_tokens: 12_400 },
-      session: { total_tokens: 12_400 },
-    });
+    getUsageMock.mockResolvedValue(usageData(12_400));
   });
   afterEach(() => {
     vi.clearAllMocks();
@@ -75,7 +88,7 @@ describe("<StatusPill>", () => {
       "main",
     );
 
-    renderPill({ session: { total_tokens: 1_200 } });
+    renderPill(usageData(1_200));
 
     const pill = screen.getByTestId("workspace-status-pill");
     expect(pill.textContent).toContain("main");
@@ -97,7 +110,7 @@ describe("<StatusPill>", () => {
       "main",
     );
 
-    renderPill({ session: { total_tokens: 2_500_000 } });
+    renderPill(usageData(2_500_000));
     expect(screen.getByTestId("workspace-status-pill").textContent).toContain(
       "2.5M",
     );
@@ -105,7 +118,7 @@ describe("<StatusPill>", () => {
 
   it("uses the override workspace name when provided", () => {
     setListData([], undefined);
-    renderPill({ session: { total_tokens: 0 } }, "demo-launch");
+    renderPill(usageData(0), "demo-launch");
 
     expect(screen.getByTestId("workspace-status-pill").textContent).toContain(
       "demo-launch",
@@ -114,7 +127,7 @@ describe("<StatusPill>", () => {
 
   it("falls back to 'main' when no active workspace is reported", () => {
     setListData([], undefined);
-    renderPill({ session: { total_tokens: 50 } });
+    renderPill(usageData(50));
 
     expect(screen.getByTestId("workspace-status-pill").textContent).toContain(
       "main",
@@ -155,5 +168,30 @@ describe("<StatusPill>", () => {
     const pill = screen.getByTestId("workspace-status-pill");
     expect(pill.textContent).toContain("— tokens today");
     expect(pill.textContent).not.toContain("0 tokens today");
+  });
+
+  it("does not leave the loading placeholder when the usage query fails", async () => {
+    setListData(
+      [
+        {
+          name: "main",
+          runtime_home: "/r",
+          broker_port: 7890,
+          web_port: 7891,
+          state: "running",
+          is_active: true,
+        },
+      ],
+      "main",
+    );
+    getUsageMock.mockRejectedValue(new Error("usage unavailable"));
+
+    renderPill();
+
+    const pill = screen.getByTestId("workspace-status-pill");
+    await waitFor(() => {
+      expect(pill.textContent).toContain("0 tokens today");
+    });
+    expect(pill.textContent).not.toContain("— tokens today");
   });
 });

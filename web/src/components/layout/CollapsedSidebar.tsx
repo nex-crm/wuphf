@@ -24,9 +24,10 @@ import {
   ShareAndroid,
   Shield,
   SidebarExpand,
+  Terminal,
 } from "iconoir-react";
 
-import { getUsage } from "../../api/client";
+import { getUsage } from "../../api/platform";
 import { SIDEBAR_APPS } from "../../lib/constants";
 import { formatTokens, formatUSD } from "../../lib/format";
 import { useAppStore } from "../../stores/app";
@@ -36,6 +37,7 @@ import { ChannelList } from "../sidebar/ChannelList";
 const APP_ICONS: Record<string, ComponentType<{ className?: string }>> = {
   studio: Play,
   wiki: BookStack,
+  console: Terminal,
   tasks: CheckCircle,
   requests: ClipboardCheck,
   graph: ShareAndroid,
@@ -51,6 +53,7 @@ const APP_ICONS: Record<string, ComponentType<{ className?: string }>> = {
 type Popover = "team" | "channels" | "usage" | null;
 type HintState = { label: string; y: number } | null;
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
 export function CollapsedSidebar() {
   const toggleCollapsed = useAppStore((s) => s.toggleSidebarCollapsed);
   const currentApp = useAppStore((s) => s.currentApp);
@@ -191,42 +194,44 @@ export function CollapsedSidebar() {
         active={popover === "usage"}
       />
 
-      {popover &&
-        createPortal(
-          <div
-            ref={popoverRef}
-            className={`sidebar-rail-popover sidebar-rail-popover-${popover}`}
-            role="dialog"
-            onMouseEnter={() => openPopover(popover)}
-            onMouseLeave={scheduleClose}
-          >
-            <div className="sidebar-rail-popover-title">
-              {popover === "team"
-                ? "Team"
-                : popover === "channels"
-                  ? "Channels"
-                  : "Usage"}
-            </div>
-            <div className="sidebar-rail-popover-body">
-              {popover === "team" && <AgentList />}
-              {popover === "channels" && <ChannelList />}
-              {popover === "usage" && <UsageBody />}
-            </div>
-          </div>,
-          document.body,
-        )}
+      {popover
+        ? createPortal(
+            <div
+              ref={popoverRef}
+              className={`sidebar-rail-popover sidebar-rail-popover-${popover}`}
+              role="dialog"
+              onMouseEnter={() => openPopover(popover)}
+              onMouseLeave={scheduleClose}
+            >
+              <div className="sidebar-rail-popover-title">
+                {popover === "team"
+                  ? "Team"
+                  : popover === "channels"
+                    ? "Channels"
+                    : "Usage"}
+              </div>
+              <div className="sidebar-rail-popover-body">
+                {popover === "team" ? <AgentList /> : null}
+                {popover === "channels" ? <ChannelList /> : null}
+                {popover === "usage" ? <UsageBody /> : null}
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
 
-      {hint &&
-        createPortal(
-          <div
-            className="sidebar-rail-hint"
-            style={{ top: hint.y }}
-            role="tooltip"
-          >
-            {hint.label}
-          </div>,
-          document.body,
-        )}
+      {hint
+        ? createPortal(
+            <div
+              className="sidebar-rail-hint"
+              style={{ top: hint.y }}
+              role="tooltip"
+            >
+              {hint.label}
+            </div>,
+            document.body,
+          )
+        : null}
     </>
   );
 }

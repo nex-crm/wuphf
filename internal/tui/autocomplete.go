@@ -141,6 +141,10 @@ func (a AutocompleteModel) SelectedIndex() int {
 	return a.selected
 }
 
+func (a AutocompleteModel) Len() int {
+	return len(a.matches)
+}
+
 func (a *AutocompleteModel) Accept() string {
 	if len(a.matches) == 0 {
 		return ""

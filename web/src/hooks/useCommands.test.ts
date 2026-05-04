@@ -80,6 +80,7 @@ describe("FALLBACK_SLASH_COMMANDS", () => {
       "/tasks",
       "/requests",
       "/recover",
+      "/doctor",
       "/1o1",
       "/task",
       "/cancel",
@@ -92,8 +93,13 @@ describe("FALLBACK_SLASH_COMMANDS", () => {
       "/resume",
       "/threads",
       "/provider",
-    ].sort();
-    expect(FALLBACK_SLASH_COMMANDS.map((c) => c.name).sort()).toEqual(expected);
+      "/connect",
+    ].sort((a, b) => a.localeCompare(b));
+    expect(
+      FALLBACK_SLASH_COMMANDS.map((c) => c.name).sort((a, b) =>
+        a.localeCompare(b),
+      ),
+    ).toEqual(expected);
   });
 
   it("never ships an empty icon — every fallback entry has a glyph", () => {

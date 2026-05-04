@@ -24,6 +24,14 @@ const REPORT_WITH_CRITICAL: wikiApi.LintReport = {
   findings: [CRITICAL_FINDING],
 };
 
+function hasDuplicateKeyWarning(calls: unknown[][]) {
+  return calls.some((args) =>
+    args.some((arg) =>
+      String(arg).includes("Encountered two children with the same key"),
+    ),
+  );
+}
+
 describe("<WikiLint>", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -47,6 +55,21 @@ describe("<WikiLint>", () => {
     );
     expect(severityBadge).toBeInTheDocument();
     expect(severityBadge.textContent).toBe("Needs attention");
+  });
+
+  it("renders duplicate finding-shaped rows without duplicate React keys", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(wikiApi, "runLint").mockResolvedValue({
+      date: "2026-04-22",
+      findings: [CRITICAL_FINDING, CRITICAL_FINDING],
+    });
+
+    render(<WikiLint onNavigate={vi.fn()} />);
+
+    expect(await screen.findAllByText(CRITICAL_FINDING.summary)).toHaveLength(
+      2,
+    );
+    expect(hasDuplicateKeyWarning(errorSpy.mock.calls)).toBe(false);
   });
 
   it("clicking Resolve opens modal, picking A calls resolveContradiction with winner=A", async () => {
@@ -73,12 +96,15 @@ describe("<WikiLint>", () => {
     fireEvent.click(pickA);
 
     await waitFor(() =>
-      expect(resolveSpy).toHaveBeenCalledWith({
-        report_date: "2026-04-22",
-        finding_idx: 0,
-        finding: CRITICAL_FINDING,
-        winner: "A",
-      }),
+      expect(resolveSpy).toHaveBeenCalledWith(
+        {
+          report_date: "2026-04-22",
+          finding_idx: 0,
+          finding: CRITICAL_FINDING,
+          winner: "A",
+        },
+        expect.objectContaining({ signal: expect.any(Object) }),
+      ),
     );
   });
 

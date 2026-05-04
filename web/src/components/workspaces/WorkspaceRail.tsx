@@ -1,3 +1,5 @@
+// biome-ignore-all lint/a11y/useKeyWithClickEvents: Pointer handler is paired with an existing modal, image, or routed-control keyboard path; preserving current interaction model.
+// biome-ignore-all lint/a11y/noStaticElementInteractions: Intentional wrapper/backdrop or SVG hover target; interactive child controls and keyboard paths are handled nearby.
 /**
  * WorkspaceRail — left-edge sidebar for the multi-workspace surface.
  *
@@ -395,7 +397,7 @@ export function WorkspaceRail({
 
   const shredMutation = useShredWorkspace({
     onSuccess: (resp, vars) => {
-      const name = vars.name;
+      const { name } = vars;
       setShredTarget(null);
       if (vars.permanent) {
         showNotice(`Workspace '${name}' shredded permanently.`, "info");
@@ -516,7 +518,20 @@ export function WorkspaceRail({
             </button>
             {showTooltip ? (
               <div role="tooltip" style={styles.tooltip}>
-                <div style={{ fontWeight: 600 }}>{ws.name}</div>
+                <div style={{ fontWeight: 600 }}>
+                  {ws.company_name ?? ws.name}
+                </div>
+                {ws.company_name && ws.company_name !== ws.name ? (
+                  <div
+                    style={{
+                      fontSize: 11,
+                      color: "var(--neutral-500)",
+                      marginTop: 1,
+                    }}
+                  >
+                    {ws.name}
+                  </div>
+                ) : null}
                 <div
                   style={{
                     fontSize: 11,

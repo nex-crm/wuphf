@@ -1,8 +1,18 @@
+/* biome-ignore-all lint/style/noDescendingSpecificity: Wiki stylesheet is organized by page region; moving selectors would risk broad visual regressions. */
 /* Wiki surface — scoped to .wiki-root.
  * Aligned to the Nex design system: cyan accent, neutral palette.
  * Keeps Wikipedia IA + editorial serif hierarchy for articles only.
+ * The wk-modal-* / wk-editor-* primitives below are global selectors reused
+ * outside the wiki (e.g. the Telegram /connect wizard, mounted from App.tsx).
+ * The variables they read therefore have to be defined at :root, not on
+ * .wiki-root, or the modal renders with a transparent background and no
+ * border outside the wiki page.
+ *
+ * Each --wk-* below is an alias of an already-global token (--bg, --border,
+ * etc.), so promoting the declarations to :root doesn't change any wiki
+ * rendering — it just makes the aliases resolve everywhere.
  */
-.wiki-root {
+:root {
   --wk-paper: var(--bg);
   --wk-paper-dark: var(--bg-warm);
   --wk-surface: var(--bg-card);
@@ -21,12 +31,14 @@
   --wk-amber-banner: var(--olive-100);
   --wk-code-bg: var(--bg-warm);
   --wk-display: var(--font-sans);
-  --wk-body-serif: "Source Serif 4", ui-serif, Georgia, serif;
+  --wk-body-serif: "Source Serif 4", ui-serif, georgia, serif;
   --wk-chrome: var(--font-sans);
   --wk-mono: var(--font-mono);
   --wk-sidebar-left: 240px;
   --wk-sidebar-right: 280px;
   --wk-article-max: 640px;
+}
+.wiki-root {
   background: var(--wk-paper);
   color: var(--wk-text);
   line-height: 1.6;
@@ -173,7 +185,7 @@
 /* ─── Status banner ─── */
 .wk-status-banner {
   background: var(--wk-amber-banner);
-  border: 1px solid var(--wk-amber);
+  border-left: 4px solid var(--wk-amber);
   padding: 10px 16px;
   margin: 20px 0 24px;
   font-family: var(--wk-chrome);
@@ -356,8 +368,8 @@
   font-style: italic;
   font-size: 15px;
   color: var(--wk-text-muted);
-  padding: 8px 12px;
-  border: 1px solid var(--wk-border);
+  padding: 8px 0 8px 16px;
+  border-left: 3px solid var(--wk-border);
   margin: 0 0 24px;
 }
 .wk-hatnote a {
@@ -1424,7 +1436,7 @@
   margin: 6px 0 8px;
   padding: 8px 10px;
   background: var(--wk-amber-bg);
-  border: 1px solid var(--wk-amber);
+  border-left: 3px solid var(--wk-amber);
   border-radius: var(--radius-sm);
   display: flex;
   align-items: flex-start;
@@ -1562,11 +1574,11 @@
   font-size: 13px;
 }
 .wk-editor-banner--conflict {
-  border-color: var(--wk-amber);
+  border-left: 3px solid var(--wk-amber);
   background: var(--wk-amber-banner);
 }
 .wk-editor-banner--error {
-  border-color: var(--wk-wikilink-broken);
+  border-left: 3px solid var(--wk-wikilink-broken);
 }
 .wk-editor-banner-actions {
   margin-top: 8px;
@@ -1582,7 +1594,7 @@
   cursor: pointer;
 }
 .wk-editor-banner--draft {
-  border-color: var(--wk-amber);
+  border-left: 3px solid var(--wk-amber);
   background: var(--wk-amber-banner);
 }
 .wk-editor-panes {
@@ -1718,7 +1730,7 @@
   background: var(--wk-paper-dark);
 }
 .wk-entity-brief-bar--pending {
-  border-color: var(--wk-amber);
+  border-left: 3px solid var(--wk-amber);
   background: var(--wk-amber-banner);
   color: var(--wk-text);
 }
@@ -1921,10 +1933,10 @@
   background: var(--wk-paper-dark);
 }
 .wk-playbook-badge--compiled {
-  border-color: var(--wk-wikilink);
+  border-left: 3px solid var(--wk-wikilink);
 }
 .wk-playbook-badge--pending {
-  border-color: var(--wk-amber);
+  border-left: 3px solid var(--wk-amber);
   color: var(--wk-text-muted);
   font-style: italic;
 }
@@ -2323,7 +2335,8 @@
   color: #1264a3;
   border: 1px solid rgba(18, 100, 163, 0.3);
 }
-.wk-synthesis-queued {
+.wk-synthesis-queued,
+.wk-prune-verbose {
   background: rgba(108, 79, 198, 0.1);
   color: #6c4fc6;
   border: 1px solid rgba(108, 79, 198, 0.3);

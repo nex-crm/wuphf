@@ -1,3 +1,4 @@
+// biome-ignore-all lint/a11y/useValidAnchor: Anchor is intercepted by the app router or markdown renderer while preserving href fallback behavior.
 /** Wikipedia-style page footer: last-edited line + actions + dim git note. */
 
 interface PageFooterProps {

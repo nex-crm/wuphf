@@ -91,14 +91,14 @@ export function NexSignupPanel({
               {status === "submitting" ? "Registering..." : "Register"}
             </button>
           </div>
-          {error && (
+          {error ? (
             <p
               style={{ color: "var(--red)", fontSize: 12, marginTop: 6 }}
               role="alert"
             >
               {error}
             </p>
-          )}
+          ) : null}
         </div>
       )}
     </div>

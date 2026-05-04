@@ -12,7 +12,7 @@ describe("parseWikiLink", () => {
   for (const entry of fixtures as Fixture[]) {
     it(`handles ${JSON.stringify(entry.input)}`, () => {
       // Arrange
-      const input = entry.input;
+      const { input } = entry;
       // Act
       const result = parseWikiLink(input);
       // Assert

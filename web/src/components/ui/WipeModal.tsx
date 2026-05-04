@@ -169,7 +169,7 @@ export function WipeModal({
         <div id={bodyId} style={styles.body}>
           {intro}
         </div>
-        <label style={styles.inputLabel} htmlFor={inputId}>
+        <label htmlFor={inputId} style={styles.inputLabel}>
           Type <code>{WIPE_CONFIRM_PHRASE}</code> to confirm
         </label>
         <input
@@ -197,7 +197,7 @@ export function WipeModal({
             onClick={enabled ? onConfirm : undefined}
             disabled={!enabled}
           >
-            {busy ? "Working…" : confirmLabel}
+            {busy === true ? "Working…" : String(confirmLabel)}
           </button>
         </div>
       </div>

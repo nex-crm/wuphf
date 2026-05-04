@@ -1,7 +1,10 @@
+// biome-ignore-all lint/a11y/noStaticElementInteractions: Intentional wrapper/backdrop or SVG hover target; interactive child controls and keyboard paths are handled nearby.
+// biome-ignore-all lint/a11y/useKeyWithClickEvents: Backdrop pointer dismissal is paired with a window Escape listener while the modal is open.
 import { useCallback, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { createChannel, generateChannel } from "../../api/client";
+import { useWindowEscape } from "../../hooks/useWindowEscape";
 import { useAppStore } from "../../stores/app";
 
 type WizardMode = "describe" | "manual";
@@ -55,24 +58,27 @@ export function ChannelWizard({ open, onClose }: ChannelWizardProps) {
     [slugEdited],
   );
 
-  function resetState() {
+  const resetState = useCallback(() => {
     setMode("describe");
     setPrompt("");
     setManual(INITIAL_MANUAL);
     setSlugEdited(false);
     setError(null);
-  }
+  }, []);
 
-  function handleCancel() {
+  const handleCancel = useCallback(() => {
+    if (submitting) return;
     resetState();
     onClose();
-  }
+  }, [onClose, resetState, submitting]);
 
   function handleOverlayClick(e: React.MouseEvent) {
     if (e.target === e.currentTarget) {
       handleCancel();
     }
   }
+
+  useWindowEscape(open, handleCancel);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -218,7 +224,7 @@ export function ChannelWizard({ open, onClose }: ChannelWizardProps) {
             </>
           )}
 
-          {error && <div className="channel-wizard-error">{error}</div>}
+          {error ? <div className="channel-wizard-error">{error}</div> : null}
 
           <div className="channel-wizard-footer">
             <button

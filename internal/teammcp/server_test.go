@@ -1501,8 +1501,8 @@ func TestDetectUntaggedMentions(t *testing.T) {
 
 	// @-mention NOT in tagged → flagged
 	got := detectUntaggedMentions("@engineering please write this", nil)
-	if len(got) != 1 || got[0] != "@engineering" {
-		t.Fatalf("expected @engineering flagged, got %v", got)
+	if len(got) != 1 || got[0] != "engineering" {
+		t.Fatalf("expected engineering flagged, got %v", got)
 	}
 
 	// Known non-agent @-references → not flagged
@@ -1516,14 +1516,14 @@ func TestDetectUntaggedMentions(t *testing.T) {
 
 	// Multiple @-mentions, one tagged → only untagged one flagged
 	got = detectUntaggedMentions("@ceo @marketing please coordinate", []string{"ceo"})
-	if len(got) != 1 || got[0] != "@marketing" {
-		t.Fatalf("expected only @marketing untagged, got %v", got)
+	if len(got) != 1 || got[0] != "marketing" {
+		t.Fatalf("expected only marketing untagged, got %v", got)
 	}
 
 	// Trailing punctuation stripped correctly
 	got = detectUntaggedMentions("@marketing, please write a draft.", nil)
-	if len(got) != 1 || got[0] != "@marketing" {
-		t.Fatalf("expected @marketing after stripping punctuation, got %v", got)
+	if len(got) != 1 || got[0] != "marketing" {
+		t.Fatalf("expected marketing after stripping punctuation, got %v", got)
 	}
 }
 

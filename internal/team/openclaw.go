@@ -84,8 +84,8 @@ func (b *OpenclawBridge) HasSlug(slug string) bool {
 // mapping so inbound events route to the right member. Called at startup for
 // every openclaw-bound office member and at runtime from handleOfficeMembers
 // when a new openclaw agent is created. Idempotent: attaching an already-
-// attached slug is a no-op. Callers should hold broker.mu to serialize vs
-// other member mutations; this method takes only the bridge's own mu.
+// attached slug is a no-op. Broker-side member mutations serialize separately;
+// this method takes only the bridge's own mu.
 func (b *OpenclawBridge) AttachSlug(ctx context.Context, slug, sessionKey string) error {
 	if b == nil {
 		return fmt.Errorf("openclaw: nil bridge")
@@ -135,6 +135,39 @@ func (b *OpenclawBridge) DetachSlug(ctx context.Context, slug string) error {
 		return nil
 	}
 	delete(b.keyBySlug, slug)
+	delete(b.slugByKey, sessionKey)
+	delete(b.lastChannelByKey, sessionKey)
+	b.mu.Unlock()
+
+	client := b.getClient()
+	if client == nil {
+		return nil
+	}
+	if err := client.SessionsMessagesUnsubscribe(ctx, sessionKey); err != nil {
+		return fmt.Errorf("openclaw: unsubscribe %q: %w", slug, err)
+	}
+	return nil
+}
+
+// DetachSession unsubscribes a specific session key for slug without disturbing
+// a newer slug binding that may have been attached after this session key.
+func (b *OpenclawBridge) DetachSession(ctx context.Context, slug, sessionKey string) error {
+	if b == nil {
+		return nil
+	}
+	slug = strings.TrimSpace(slug)
+	sessionKey = strings.TrimSpace(sessionKey)
+	if sessionKey == "" {
+		return b.DetachSlug(ctx, slug)
+	}
+	b.mu.Lock()
+	if boundSlug := b.slugByKey[sessionKey]; boundSlug != "" && boundSlug != slug {
+		b.mu.Unlock()
+		return nil
+	}
+	if b.keyBySlug[slug] == sessionKey {
+		delete(b.keyBySlug, slug)
+	}
 	delete(b.slugByKey, sessionKey)
 	delete(b.lastChannelByKey, sessionKey)
 	b.mu.Unlock()

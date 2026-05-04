@@ -4,6 +4,7 @@
 // have no top-level sidebar entries of their own.
 export const SIDEBAR_APPS = [
   { id: "wiki", icon: "\uD83D\uDCD6", name: "Wiki" },
+  { id: "console", icon: ">", name: "Console" },
   { id: "tasks", icon: "\u2705", name: "Tasks" },
   { id: "requests", icon: "\uD83D\uDCCB", name: "Requests" },
   { id: "graph", icon: "\uD83D\uDD78", name: "Graph" },
@@ -17,7 +18,7 @@ export const SIDEBAR_APPS = [
 ] as const;
 
 export const ONBOARDING_COPY = {
-  step1_headline: "Virtual office of AI employees with a shared brain",
+  step1_headline: "AI employees with a shared brain",
   step1_subhead:
     "A collaborative office where AI agents like Claude Code, Codex, and OpenClaw learn your work playbooks, build personalized skills, and execute, 24x7. Each agent backed by its own knowledge graph.",
   step1_cta: "Open the office",

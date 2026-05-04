@@ -6,7 +6,8 @@ import {
   listAgentLogTasks,
   type TaskLogEntry,
   type TaskLogSummary,
-} from "../../api/client";
+} from "../../api/tasks";
+import { keyedByOccurrence } from "../../lib/reactKeys";
 
 export function ReceiptsApp() {
   const [selectedTask, setSelectedTask] = useState<string | null>(null);
@@ -51,13 +52,13 @@ function ReceiptList({
         </div>
       </div>
 
-      {isLoading && (
+      {isLoading ? (
         <div style={{ padding: 20, color: "var(--text-tertiary)" }}>
           Loading...
         </div>
-      )}
+      ) : null}
 
-      {error && (
+      {error ? (
         <div
           style={{
             padding: "40px 20px",
@@ -68,7 +69,7 @@ function ReceiptList({
         >
           Could not load receipts.
         </div>
-      )}
+      ) : null}
 
       {!(isLoading || error) && (
         <TaskTable tasks={data?.tasks ?? []} onSelectTask={onSelectTask} />
@@ -145,7 +146,7 @@ function TaskTable({
                 }}
               >
                 {t.taskId}
-                {t.hasError && (
+                {t.hasError ? (
                   <span
                     title="Contains a tool error"
                     style={{
@@ -156,7 +157,7 @@ function TaskTable({
                   >
                     {"⚠"}
                   </span>
-                )}
+                ) : null}
               </td>
               <td
                 style={{
@@ -208,6 +209,7 @@ function ReceiptDetail({
   });
 
   const entries = data?.entries ?? [];
+  const keyedEntries = keyedTaskLogEntries(entries);
 
   return (
     <>
@@ -237,13 +239,13 @@ function ReceiptDetail({
         </div>
       </div>
 
-      {isLoading && (
+      {isLoading ? (
         <div style={{ padding: "16px 20px", color: "var(--text-tertiary)" }}>
           Loading...
         </div>
-      )}
+      ) : null}
 
-      {error && (
+      {error ? (
         <div
           style={{
             padding: "40px 20px",
@@ -254,7 +256,7 @@ function ReceiptDetail({
         >
           Could not load task trace.
         </div>
-      )}
+      ) : null}
 
       {!(isLoading || error) && entries.length === 0 && (
         <div
@@ -271,12 +273,8 @@ function ReceiptDetail({
 
       {!(isLoading || error) && entries.length > 0 && (
         <div style={{ overflow: "auto", flex: 1, padding: "0 20px 20px" }}>
-          {entries.map((entry, i) => (
-            <EntryRow
-              key={`${entry.started_at ?? 0}-${i}`}
-              index={i}
-              entry={entry}
-            />
+          {keyedEntries.map(({ entry, key }, i) => (
+            <EntryRow key={key} index={i} entry={entry} />
           ))}
         </div>
       )}
@@ -284,9 +282,24 @@ function ReceiptDetail({
   );
 }
 
+function keyedTaskLogEntries(entries: TaskLogEntry[]) {
+  return keyedByOccurrence(entries, (entry) =>
+    [
+      entry.task_id,
+      entry.started_at ?? 0,
+      entry.completed_at ?? 0,
+      entry.agent_slug,
+      entry.tool_name,
+      entry.error ? "error" : "ok",
+    ].join(":"),
+  ).map(({ key, value: entry }) => ({ entry, key }));
+}
+
 function EntryRow({ index, entry }: { index: number; entry: TaskLogEntry }) {
   const isError = Boolean(entry.error);
   const snippet = entry.error || entry.result || "";
+  const displaySnippet =
+    snippet.length > 400 ? `${snippet.slice(0, 400)}…` : snippet;
   return (
     <div
       style={{
@@ -318,11 +331,11 @@ function EntryRow({ index, entry }: { index: number; entry: TaskLogEntry }) {
         >
           {entry.tool_name || "(unknown)"}
         </span>
-        {entry.agent_slug && (
+        {entry.agent_slug ? (
           <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>
             @{entry.agent_slug}
           </span>
-        )}
+        ) : null}
         {typeof entry.completed_at === "number" &&
           typeof entry.started_at === "number" && (
             <span
@@ -337,7 +350,7 @@ function EntryRow({ index, entry }: { index: number; entry: TaskLogEntry }) {
             </span>
           )}
       </div>
-      {snippet && (
+      {snippet ? (
         <div
           style={{
             fontSize: 12,
@@ -347,9 +360,9 @@ function EntryRow({ index, entry }: { index: number; entry: TaskLogEntry }) {
             wordBreak: "break-word",
           }}
         >
-          {snippet.length > 400 ? `${snippet.slice(0, 400)}…` : snippet}
+          {displaySnippet}
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

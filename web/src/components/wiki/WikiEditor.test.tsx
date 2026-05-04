@@ -25,6 +25,7 @@ function setLocalStorageDraft(
   );
 }
 
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: Existing function length is baselined for a focused follow-up refactor.
 describe("<WikiEditor>", () => {
   beforeEach(() => {
     vi.restoreAllMocks();

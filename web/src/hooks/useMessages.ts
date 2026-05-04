@@ -15,7 +15,10 @@ export function useMessages(channel: string, sinceId?: string | null) {
 export function useThreadMessages(channel: string, threadId: string | null) {
   return useQuery({
     queryKey: ["thread-messages", channel, threadId],
-    queryFn: () => getThreadMessages(channel, threadId!),
+    queryFn: () => {
+      if (!threadId) throw new Error("threadId is required");
+      return getThreadMessages(channel, threadId);
+    },
     enabled: !!threadId,
     refetchInterval: 3000,
     select: (data) => data.messages ?? [],

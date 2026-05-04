@@ -106,7 +106,7 @@ export function PoliciesApp() {
       </div>
 
       {/* Inline add form */}
-      {formOpen && (
+      {formOpen ? (
         <div
           style={{
             padding: "8px 20px 12px",
@@ -143,10 +143,10 @@ export function PoliciesApp() {
             </button>
           </div>
         </div>
-      )}
+      ) : null}
 
       {/* Policy list */}
-      {isLoading && (
+      {isLoading ? (
         <div
           style={{
             padding: 20,
@@ -157,9 +157,9 @@ export function PoliciesApp() {
         >
           Loading...
         </div>
-      )}
+      ) : null}
 
-      {error && (
+      {error ? (
         <div
           style={{
             padding: "40px 20px",
@@ -170,7 +170,7 @@ export function PoliciesApp() {
         >
           Failed to load policies.
         </div>
-      )}
+      ) : null}
 
       {!(isLoading || error) && activePolicies.length === 0 && (
         <div

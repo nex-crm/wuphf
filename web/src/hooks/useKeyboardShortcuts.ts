@@ -29,6 +29,7 @@ export function useKeyboardShortcuts() {
   const queryClient = useQueryClient();
 
   useEffect(() => {
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
     function handleKeyDown(e: KeyboardEvent) {
       // Cmd+K or Ctrl+K → command palette
       if ((e.metaKey || e.ctrlKey) && e.key === "k") {

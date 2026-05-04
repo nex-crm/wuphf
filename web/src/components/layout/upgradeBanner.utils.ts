@@ -125,7 +125,7 @@ export function parseCommit(message: string, sha: string): CommitEntry {
   const type = m[1].toLowerCase();
   const scope = (m[2] ?? "").replace(/[()]/g, "");
   const breaking = m[3] === "!";
-  const rest = m[4];
+  const rest = m[4] ?? "";
   return {
     type,
     scope,

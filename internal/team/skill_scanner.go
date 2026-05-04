@@ -244,6 +244,11 @@ func (s *SkillScanner) Scan(ctx context.Context, scopePath string, dryRun bool, 
 		fm.Metadata.Wuphf.CreatedBy = "archivist"
 		spec := specToTeamSkill(fm, body, c.relPath)
 		spec.CreatedBy = "archivist"
+		// Source-article frontmatter can opt into skill creation, but it is not
+		// authoritative for lifecycle state. Every scanner write enters the
+		// approval workflow as a proposal.
+		spec.Status = "proposed"
+		spec.DisabledFromStatus = ""
 
 		s.broker.mu.Lock()
 		_, writeErr := s.broker.writeSkillProposalLocked(spec)
@@ -425,6 +430,10 @@ func specToTeamSkill(fm SkillFrontmatter, body, sourceArticle string) teamSkill 
 	if src == "" && len(wuphf.SourceArticles) > 0 {
 		src = strings.TrimSpace(wuphf.SourceArticles[0])
 	}
+	status := strings.TrimSpace(wuphf.Status)
+	if status == "" {
+		status = "proposed"
+	}
 	return teamSkill{
 		Name:               fm.Name,
 		Title:              wuphf.Title,
@@ -442,7 +451,8 @@ func specToTeamSkill(fm SkillFrontmatter, body, sourceArticle string) teamSkill 
 		RelayID:            wuphf.RelayID,
 		RelayPlatform:      wuphf.RelayPlatform,
 		RelayEventTypes:    append([]string(nil), wuphf.RelayEventTypes...),
-		Status:             "proposed",
+		Status:             status,
+		DisabledFromStatus: strings.TrimSpace(wuphf.DisabledFromStatus),
 	}
 }
 

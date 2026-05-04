@@ -1,6 +1,7 @@
 import { type ReactNode, useMemo, useState } from "react";
 
 import type { StreamLine } from "../../hooks/useAgentStream";
+import { keyedByOccurrence } from "../../lib/reactKeys";
 
 interface StreamLineViewProps {
   line: StreamLine;
@@ -14,19 +15,19 @@ interface StreamLineViewProps {
  * lines, tool calls render as collapsible cards, token totals render as
  * a single line. Everything else falls back to pretty-printed JSON.
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
 export function StreamLineView({ line, compact = false }: StreamLineViewProps) {
-  if (!line.parsed) {
+  const { data, parsed } = line;
+  if (!parsed) {
     // Raw chunks from agentStream.Push (local-LLM streaming text). The
     // useAgentStream hook coalesces consecutive raw events into a
     // single StreamLine, so this branch renders the running model
     // output as a continuous text block \u2014 not one chunk per row.
     // Trailing ellipsis keeps the live-output panel visually capped.
-    const text =
-      line.data.length > 1200 ? `${line.data.slice(0, 1200)}\u2026` : line.data;
+    const text = data.length > 1200 ? `${data.slice(0, 1200)}\u2026` : data;
     return <div className="stream-line stream-line-raw">{text}</div>;
   }
 
-  const parsed = line.parsed;
   const evtType = typeof parsed.type === "string" ? parsed.type : "";
 
   // Skip noise events entirely
@@ -125,13 +126,13 @@ function ClaudeAssistantEvent({
   compact: boolean;
 }) {
   const blocks = messageContentBlocks(parsed);
-  const rendered = blocks
-    .map((block, index) => {
+  const rendered = keyedStreamValues(blocks)
+    .map(({ key, value: block }) => {
       const blockType = stringish(block.type);
       if (blockType === "text") {
         const text = stringish(block.text).trim();
         return text ? (
-          <div key={index} className="cc-thinking">
+          <div key={key} className="cc-thinking">
             {text}
           </div>
         ) : null;
@@ -139,7 +140,7 @@ function ClaudeAssistantEvent({
       if (blockType === "thinking") {
         const text = stringish(block.thinking).trim();
         return text ? (
-          <div key={index} className="stream-card-detail">
+          <div key={key} className="stream-card-detail">
             {text}
           </div>
         ) : null;
@@ -147,7 +148,7 @@ function ClaudeAssistantEvent({
       if (blockType === "tool_use") {
         return (
           <ToolCallCard
-            key={index}
+            key={key}
             item={{
               type: "tool_call",
               name: block.name,
@@ -174,12 +175,12 @@ function ClaudeUserEvent({
   compact: boolean;
 }) {
   const blocks = messageContentBlocks(parsed);
-  const rendered = blocks
-    .map((block, index) => {
+  const rendered = keyedStreamValues(blocks)
+    .map(({ key, value: block }) => {
       if (stringish(block.type) !== "tool_result") return null;
-      const content = block.content;
+      const { content } = block;
       return (
-        <div key={index} className="cc-tool-call">
+        <div key={key} className="cc-tool-call">
           <div className="cc-tool-section-label">Tool result</div>
           <ToolResultContent
             text={stringFromToolContent(content)}
@@ -214,9 +215,9 @@ function ClaudeUserEvent({
 function messageContentBlocks(
   parsed: Record<string, unknown>,
 ): Record<string, unknown>[] {
-  const message = parsed.message;
+  const { message } = parsed;
   if (!message || typeof message !== "object") return [];
-  const content = (message as Record<string, unknown>).content;
+  const { content } = message as Record<string, unknown>;
   if (!Array.isArray(content)) return [];
   return content.filter(
     (block): block is Record<string, unknown> =>
@@ -227,7 +228,7 @@ function messageContentBlocks(
 function codexItemText(item: Record<string, unknown>): string {
   const direct = stringish(item.text).trim();
   if (direct) return direct;
-  const content = item.content;
+  const { content } = item;
   if (!Array.isArray(content)) return "";
   return content
     .map((part) => {
@@ -330,6 +331,7 @@ function ToolCallCard({
     item.error !== null && item.error !== undefined && item.error !== "";
   const errorField = hasError ? item.error : null;
 
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
   const { summaryArg, summaryResult, summaryError } = useMemo(() => {
     const pick = [
       args.content,
@@ -389,7 +391,6 @@ function ToolCallCard({
     }
     return out;
   }, [args]);
-
   return (
     <div className="cc-tool-call">
       <button
@@ -399,7 +400,9 @@ function ToolCallCard({
       >
         <span className={`cc-tool-chevron${open ? " open" : ""}`}>▸</span>
         <span className="cc-tool-name">{toolName}</span>
-        {summaryArg && <span className="cc-tool-summary">{summaryArg}</span>}
+        {summaryArg ? (
+          <span className="cc-tool-summary">{summaryArg}</span>
+        ) : null}
       </button>
       {summaryResult && !open && (
         <div className="cc-tool-result-summary">
@@ -413,7 +416,7 @@ function ToolCallCard({
           {summaryError}
         </div>
       )}
-      {open && (
+      {open ? (
         <div className="cc-tool-body">
           {Object.keys(cleanArgs).length > 0 && (
             <>
@@ -428,21 +431,25 @@ function ToolCallCard({
                 <div className="cc-tool-section-label cc-tool-result-label">
                   {"\u2713 Response"}
                 </div>
-                {result.content.map((c, i) => (
-                  <ToolResultContent key={i} text={c.text} compact={compact} />
+                {keyedStreamValues(result.content).map(({ key, value: c }) => (
+                  <ToolResultContent
+                    key={key}
+                    text={c.text}
+                    compact={compact}
+                  />
                 ))}
               </>
             )}
-          {hasError && (
+          {hasError ? (
             <>
               <div className="cc-tool-section-label cc-tool-error">
                 {"\u2717 Error"}
               </div>
               <ToolErrorContent error={errorField} compact={compact} />
             </>
-          )}
+          ) : null}
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -565,6 +572,8 @@ function GenericEventCard({
       parsed.text ??
       parsed.summary,
   );
+  const displayDetail =
+    detail.length > 300 ? `${detail.slice(0, 300)}\u2026` : detail;
 
   const extras = useMemo<Record<string, unknown>>(() => {
     const out: Record<string, unknown> = {};
@@ -578,7 +587,7 @@ function GenericEventCard({
 
   return (
     <div className="stream-card">
-      {(phase || agent) && (
+      {phase || agent ? (
         <div className="stream-card-header">
           {phase && (
             <span
@@ -589,12 +598,10 @@ function GenericEventCard({
           )}
           {agent && <span className="stream-card-agent">{agent}</span>}
         </div>
-      )}
-      {detail && (
-        <div className="stream-card-detail">
-          {detail.length > 300 ? `${detail.slice(0, 300)}\u2026` : detail}
-        </div>
-      )}
+      ) : null}
+      {detail ? (
+        <div className="stream-card-detail">{displayDetail}</div>
+      ) : null}
       {Object.keys(extras).length > 0 && Object.keys(extras).length <= 8 && (
         <div className="stream-line-json">
           <Value value={extras} depth={0} compact={compact} />
@@ -608,8 +615,23 @@ function stringish(v: unknown): string {
   return typeof v === "string" ? v : "";
 }
 
+function streamBlockKey(value: unknown): string {
+  if (value === null) return "null";
+  if (typeof value !== "object") return String(value);
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return Object.prototype.toString.call(value);
+  }
+}
+
+function keyedStreamValues<T>(values: readonly T[]) {
+  return keyedByOccurrence(values, streamBlockKey);
+}
+
 /* ───── JSON tree primitive (shared by both card and fallback paths) ───── */
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
 function Value({
   value,
   depth,
@@ -653,8 +675,8 @@ function Value({
     return (
       <Collapsible label={`[${value.length}]`} startOpen={depth === 0}>
         <div className="sv-array">
-          {value.map((item, idx) => (
-            <div key={idx} className="sv-array-item">
+          {keyedStreamValues(value).map(({ key, value: item }) => (
+            <div key={key} className="sv-array-item">
               <Value value={item} depth={depth + 1} compact={compact} />
             </div>
           ))}

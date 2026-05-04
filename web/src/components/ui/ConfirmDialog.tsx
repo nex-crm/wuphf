@@ -1,3 +1,4 @@
+// biome-ignore-all lint/a11y/useKeyWithClickEvents: Pointer handler is paired with an existing modal, image, or routed-control keyboard path; preserving current interaction model.
 import { useCallback, useEffect, useState } from "react";
 
 interface ConfirmOptions {
@@ -11,6 +12,7 @@ interface ConfirmOptions {
 }
 
 let requestConfirm: ((opts: ConfirmOptions) => void) | null = null;
+let queuedConfirm: ConfirmOptions | null = null;
 
 /**
  * Imperative confirm, callable from anywhere.
@@ -19,10 +21,9 @@ let requestConfirm: ((opts: ConfirmOptions) => void) | null = null;
  */
 export function confirm(opts: ConfirmOptions) {
   if (!requestConfirm) {
-    // Host never mounted; fall back to native confirm so work isn't silently dropped.
-    if (window.confirm(opts.message)) {
-      void opts.onConfirm();
-    }
+    // Host is not mounted yet. Queue the latest request so the action still
+    // requires the app modal instead of falling back to native confirm().
+    queuedConfirm = opts;
     return;
   }
   requestConfirm(opts);
@@ -45,6 +46,10 @@ export function ConfirmHost() {
       setOpts(o);
       setOpen(true);
     };
+    if (queuedConfirm) {
+      requestConfirm(queuedConfirm);
+      queuedConfirm = null;
+    }
     return () => {
       if (requestConfirm !== null) requestConfirm = null;
     };

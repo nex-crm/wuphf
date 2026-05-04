@@ -1,7 +1,10 @@
+// biome-ignore-all lint/a11y/noStaticElementInteractions: Intentional wrapper/backdrop or SVG hover target; interactive child controls and keyboard paths are handled nearby.
+// biome-ignore-all lint/a11y/useSemanticElements: Existing element is required by layout, drag/drop, or router styling; semantics are documented until a larger markup refactor.
 import { type DragEvent, useCallback, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { getOfficeTasks, post, type Task } from "../../api/client";
+import { post } from "../../api/client";
+import { getOfficeTasks, type Task } from "../../api/tasks";
 import { formatRelativeTime } from "../../lib/format";
 import { showNotice } from "../ui/Toast";
 import { TaskDetailModal, taskMemoryWorkflowBadge } from "./TaskDetailModal";
@@ -139,6 +142,8 @@ export function TasksApp() {
   if (isLoading) {
     return (
       <div
+        className="tasks-app"
+        data-testid="tasks-app"
         style={{
           padding: "40px 20px",
           textAlign: "center",
@@ -154,6 +159,8 @@ export function TasksApp() {
   if (error) {
     return (
       <div
+        className="tasks-app"
+        data-testid="tasks-app"
         style={{
           padding: "40px 20px",
           textAlign: "center",
@@ -171,6 +178,8 @@ export function TasksApp() {
   if (tasks.length === 0) {
     return (
       <div
+        className="tasks-app"
+        data-testid="tasks-app"
         style={{
           padding: "40px 20px",
           textAlign: "center",
@@ -234,7 +243,7 @@ export function TasksApp() {
     };
 
   return (
-    <>
+    <div className="tasks-app" data-testid="tasks-app">
       <div
         style={{
           padding: "16px 20px 0",
@@ -295,13 +304,13 @@ export function TasksApp() {
           );
         })}
       </div>
-      {selectedTask && (
+      {selectedTask ? (
         <TaskDetailModal
           task={selectedTask}
           onClose={() => setSelectedTaskId(null)}
         />
-      )}
-    </>
+      ) : null}
+    </div>
   );
 }
 
@@ -345,7 +354,7 @@ function TaskCard({
       style={{ marginBottom: 8, cursor: "pointer" }}
     >
       <div className="app-card-title">{task.title || "Untitled"}</div>
-      {task.description && (
+      {task.description ? (
         <div
           style={{
             fontSize: 12,
@@ -356,7 +365,7 @@ function TaskCard({
         >
           {task.description.slice(0, 160)}
         </div>
-      )}
+      ) : null}
       <div
         style={{
           display: "flex",
@@ -366,11 +375,15 @@ function TaskCard({
         }}
       >
         <span className={statusBadgeClass(status)}>{COLUMN_LABEL[status]}</span>
-        {task.owner && <span className="app-card-meta">@{task.owner}</span>}
-        {task.channel && <span className="app-card-meta">#{task.channel}</span>}
-        {timestamp && (
+        {task.owner ? (
+          <span className="app-card-meta">@{task.owner}</span>
+        ) : null}
+        {task.channel ? (
+          <span className="app-card-meta">#{task.channel}</span>
+        ) : null}
+        {timestamp ? (
           <span className="app-card-meta">{formatRelativeTime(timestamp)}</span>
-        )}
+        ) : null}
         {memoryBadge && (
           <span className={memoryBadge.className} title={memoryBadge.title}>
             {memoryBadge.label}

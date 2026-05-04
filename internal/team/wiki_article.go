@@ -39,6 +39,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -102,6 +103,17 @@ type CatalogEntry struct {
 	HumanReadCount int        `json:"human_read_count"`
 	AgentReadCount int        `json:"agent_read_count"`
 	DaysUnread     int        `json:"days_unread"`
+	// Archived is true when the entry is a tombstone (frontmatter archived: true).
+	// Only present in responses when ?include_archived=true is passed.
+	Archived bool `json:"archived,omitempty"`
+	// WordCount is the whitespace-delimited word count of the full file
+	// content (frontmatter included). Acceptable at v1 scale and matches
+	// the existing countWords helper used by BuildArticle.
+	WordCount int `json:"word_count"`
+	// PruneScore is a derived signal — (words * daysUnread) / readWeight —
+	// meant to surface verbose AND stale AND under-read articles. Higher
+	// score = more prunable. Zero when the article has no body.
+	PruneScore float64 `json:"prune_score,omitempty"`
 }
 
 // BuildCatalog walks team/ and returns every .md article with title + author +
@@ -112,8 +124,11 @@ type CatalogEntry struct {
 // (oldest-accessed first; never-accessed articles appear first). readLog may
 // be nil, in which case read stats are all zero and sort falls back to path order.
 //
+// Archived tombstones (frontmatter archived: true) are excluded by default.
+// Pass includeArchived=true to include them (for admin/recovery views).
+//
 // Shape matches web/src/api/wiki.ts WikiCatalogEntry.
-func (r *Repo) BuildCatalog(ctx context.Context, sortBy string, readLog *ReadLog) ([]CatalogEntry, error) {
+func (r *Repo) BuildCatalog(ctx context.Context, sortBy string, readLog *ReadLog, includeArchived bool) ([]CatalogEntry, error) {
 	teamDir := r.TeamDir()
 	var entries []CatalogEntry
 
@@ -171,10 +186,17 @@ func (r *Repo) BuildCatalog(ctx context.Context, sortBy string, readLog *ReadLog
 			return fmt.Errorf("read %s: %w", path, err)
 		}
 
+		isArchived := parseFrontmatterBool(string(content), "archived")
+		if isArchived && !includeArchived {
+			return nil
+		}
+
 		entry := CatalogEntry{
-			Path:  rel,
-			Title: extractTitle(content, rel),
-			Group: groupFromPath(rel),
+			Path:      rel,
+			Archived:  isArchived,
+			Title:     extractTitle(content, rel),
+			Group:     groupFromPath(rel),
+			WordCount: countWords(content),
 		}
 		entries = append(entries, entry)
 		return nil
@@ -203,6 +225,28 @@ func (r *Repo) BuildCatalog(ctx context.Context, sortBy string, readLog *ReadLog
 				entries[i].DaysUnread = s.DaysUnread
 			}
 		}
+	}
+
+	// Compute prune score per entry. Higher = more verbose + more stale +
+	// less read. Articles with no body have no signal so PruneScore stays 0.
+	for i := range entries {
+		e := &entries[i]
+		if e.WordCount > 0 {
+			denom := math.Max(float64(e.HumanReadCount)+0.3*float64(e.AgentReadCount), 1.0)
+			e.PruneScore = float64(e.WordCount) * float64(e.DaysUnread) / denom
+		}
+	}
+
+	switch sortBy {
+	case CatalogSortPruneScore:
+		// Descending by prune_score; tie-break by Path for determinism.
+		sort.Slice(entries, func(i, j int) bool {
+			if entries[i].PruneScore == entries[j].PruneScore {
+				return entries[i].Path < entries[j].Path
+			}
+			return entries[i].PruneScore > entries[j].PruneScore
+		})
+		return entries, nil
 	}
 
 	if sortBy == CatalogSortLastRead {

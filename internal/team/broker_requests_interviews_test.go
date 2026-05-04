@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -185,6 +186,75 @@ func TestBrokerRequestsLifecycle(t *testing.T) {
 
 	if b.HasBlockingRequest() {
 		t.Fatal("expected blocking request to clear after answer")
+	}
+}
+
+func TestHumanRequestAnswerUsesSessionActor(t *testing.T) {
+	b := newTestBroker(t)
+	b.mu.Lock()
+	b.requests = append(b.requests, humanInterview{
+		ID:        "request-human",
+		Kind:      "approval",
+		Status:    "pending",
+		From:      "ceo",
+		Channel:   "general",
+		Title:     "Approval needed",
+		Question:  "Ship it?",
+		ReplyTo:   "msg-root",
+		CreatedAt: "2026-01-01T00:00:00Z",
+		UpdatedAt: "2026-01-01T00:00:00Z",
+	})
+	b.mu.Unlock()
+
+	token, _, err := b.createHumanInvite()
+	if err != nil {
+		t.Fatalf("create invite: %v", err)
+	}
+	sessionToken, _, err := b.acceptHumanInvite(token, "Mira", "browser")
+	if err != nil {
+		t.Fatalf("accept invite: %v", err)
+	}
+
+	answerBody, _ := json.Marshal(map[string]any{
+		"id":          "request-human",
+		"choice_text": "Yes",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/requests/answer", bytes.NewReader(answerBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(&http.Cookie{Name: humanSessionCookie, Value: sessionToken})
+	rec := httptest.NewRecorder()
+	b.withAuth(b.handleRequestAnswer)(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("answer status = %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	var foundMessage bool
+	for _, msg := range b.messages {
+		if msg.ReplyTo == "" || msg.Channel != "general" {
+			continue
+		}
+		foundMessage = true
+		if msg.From != "human:mira" {
+			t.Fatalf("answer message from = %q, want human:mira", msg.From)
+		}
+	}
+	if !foundMessage {
+		t.Fatalf("did not find request answer message in %+v", b.messages)
+	}
+	var foundAction bool
+	for _, action := range b.actions {
+		if action.Kind != "request_answered" || action.RelatedID != "request-human" {
+			continue
+		}
+		foundAction = true
+		if action.Actor != "human:mira" {
+			t.Fatalf("answer action actor = %q, want human:mira", action.Actor)
+		}
+	}
+	if !foundAction {
+		t.Fatalf("did not find request_answered action in %+v", b.actions)
 	}
 }
 

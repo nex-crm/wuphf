@@ -68,6 +68,36 @@ describe("<ResolveContradictionModal>", () => {
     expect(screen.getByTestId("wk-resolve-cancel")).toBeDisabled();
   });
 
+  it("does not close from Escape or backdrop while resolving", async () => {
+    vi.spyOn(wikiApi, "resolveContradiction").mockImplementation(
+      () =>
+        new Promise(() => {
+          /* never resolves */
+        }),
+    );
+    const onClose = vi.fn();
+
+    render(
+      <ResolveContradictionModal
+        finding={FINDING}
+        findingIdx={0}
+        reportDate="2026-04-22"
+        onClose={onClose}
+        onResolved={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("wk-resolve-pick-a"));
+    await waitFor(() => {
+      expect(screen.getByTestId("wk-resolve-pick-a")).toBeDisabled();
+    });
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    fireEvent.click(screen.getByTestId("wk-resolve-modal"));
+
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
   it("surfaces errors inline (no toast) and re-enables the buttons", async () => {
     vi.spyOn(wikiApi, "resolveContradiction").mockRejectedValue(
       new Error("broker offline"),

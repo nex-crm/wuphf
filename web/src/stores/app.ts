@@ -157,6 +157,8 @@ export interface AppStore {
   // Message polling state
   lastMessageId: string | null;
   setLastMessageId: (id: string | null) => void;
+  clearedMessageIdsByChannel: Record<string, string>;
+  setChannelClearMarker: (channel: string, messageId: string | null) => void;
   unreadByChannel: Record<string, number>;
   incrementUnread: (channel: string) => void;
   clearUnread: (channel: string) => void;
@@ -178,6 +180,16 @@ export interface AppStore {
   // Help modal — /help slash command surface
   composerHelpOpen: boolean;
   setComposerHelpOpen: (v: boolean) => void;
+
+  // /connect integration wizard. Bare /connect opens the provider picker
+  // (mode = "provider", parity with the TUI's `/connect` 4-option picker).
+  // `/connect telegram` skips the picker and lands on the Telegram token
+  // step (mode = "telegram"). Other modes can be added when more
+  // integrations get web wizards.
+  telegramConnectOpen: boolean;
+  telegramConnectMode: "provider" | "telegram";
+  openConnectWizard: (mode: "provider" | "telegram") => void;
+  setTelegramConnectOpen: (v: boolean) => void;
 
   // Onboarding
   onboardingComplete: boolean;
@@ -321,6 +333,17 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   lastMessageId: null,
   setLastMessageId: (id) => set({ lastMessageId: id }),
+  clearedMessageIdsByChannel: {},
+  setChannelClearMarker: (channel, messageId) => {
+    const ch = channel.trim() || "general";
+    const id = messageId?.trim() || "";
+    set((state) => {
+      const next = { ...state.clearedMessageIdsByChannel };
+      if (id) next[ch] = id;
+      else delete next[ch];
+      return { clearedMessageIdsByChannel: next };
+    });
+  },
   unreadByChannel: {},
   incrementUnread: (channel) => {
     const ch = channel.trim() || "general";
@@ -352,6 +375,12 @@ export const useAppStore = create<AppStore>((set, get) => ({
   composerHelpOpen: false,
   setComposerHelpOpen: (v) => set({ composerHelpOpen: v }),
 
+  telegramConnectOpen: false,
+  telegramConnectMode: "provider",
+  openConnectWizard: (mode) =>
+    set({ telegramConnectOpen: true, telegramConnectMode: mode }),
+  setTelegramConnectOpen: (v) => set({ telegramConnectOpen: v }),
+
   onboardingComplete: false,
   setOnboardingComplete: (v) => set({ onboardingComplete: v }),
   resetForOnboarding: () =>
@@ -361,10 +390,15 @@ export const useAppStore = create<AppStore>((set, get) => ({
       unreadByChannel: {},
       activeThreadId: null,
       lastMessageId: null,
+      clearedMessageIdsByChannel: {},
       activeAgentSlug: null,
       searchOpen: false,
       composerSearchInitialQuery: "",
       composerHelpOpen: false,
+      // Close the /connect wizard during an onboarding reset for the same
+      // reason searchOpen / composerHelpOpen are: any modal left open here
+      // would float over the onboarding flow.
+      telegramConnectOpen: false,
       onboardingComplete: false,
       wikiPath: null,
       wikiLookupQuery: null,

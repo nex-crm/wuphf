@@ -1,5 +1,7 @@
 /** Wikipedia-style tabs at the top of the article (Article / Talk / Edit / History / Raw). */
 
+import { keyedByOccurrence } from "../../lib/reactKeys";
+
 export type HatBarTab = "article" | "talk" | "edit" | "history" | "raw";
 
 interface HatBarProps {
@@ -44,11 +46,13 @@ export default function HatBar({
       })}
       {rightRail && rightRail.length > 0 && (
         <span className="wk-rail-right">
-          {rightRail.map((item, i) => (
-            <span key={`${item}-${i}`}>
-              {i > 0 && <span>•</span>} {item}
-            </span>
-          ))}
+          {keyedByOccurrence(rightRail, (item) => item).map(
+            ({ key, value: item, index: i }) => (
+              <span key={key}>
+                {i > 0 && <span>•</span>} {item}
+              </span>
+            ),
+          )}
         </span>
       )}
     </nav>

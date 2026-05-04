@@ -168,7 +168,8 @@ describe("<WikiSidebar> — dynamic sections", () => {
       />,
     );
     expect(screen.queryByTestId("section-banner")).toBeNull();
-    const retroHeader = screen.getByText(/retrospectives/i).closest("h3")!;
+    const retroHeader = screen.getByText(/retrospectives/i).closest("h3");
+    if (!retroHeader) throw new Error("Expected retrospectives header");
     fireEvent.click(retroHeader);
     expect(screen.getByTestId("section-banner")).toBeInTheDocument();
     expect(screen.getByTestId("section-banner")).toHaveTextContent(
@@ -184,7 +185,8 @@ describe("<WikiSidebar> — dynamic sections", () => {
         onNavigate={() => {}}
       />,
     );
-    const peopleHeader = screen.getByText(/people/i).closest("h3")!;
+    const peopleHeader = screen.getByText(/people/i).closest("h3");
+    if (!peopleHeader) throw new Error("Expected people header");
     fireEvent.click(peopleHeader);
     expect(screen.queryByTestId("section-banner")).toBeNull();
   });

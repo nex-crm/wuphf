@@ -1,3 +1,4 @@
+// biome-ignore-all lint/a11y/useAriaPropsSupportedByRole: Passive metadata uses accessible labels queried by screen-reader tests; visual text remains unchanged.
 import type { ComponentType } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -13,6 +14,7 @@ import {
   Settings,
   ShareAndroid,
   Shield,
+  Terminal,
 } from "iconoir-react";
 
 import { getRequests } from "../../api/client";
@@ -28,6 +30,7 @@ const WIKI_SURFACE_APPS = new Set(["wiki", "notebooks", "reviews"]);
 const APP_ICONS: Record<string, ComponentType<{ className?: string }>> = {
   studio: Play,
   wiki: BookStack,
+  console: Terminal,
   tasks: CheckCircle,
   requests: ClipboardCheck,
   graph: ShareAndroid,
@@ -85,6 +88,7 @@ export function AppList() {
               : currentApp === app.id;
           return (
             <button
+              type="button"
               key={app.id}
               className={`sidebar-item${isActive ? " active" : ""}`}
               onClick={() => setCurrentApp(app.id)}

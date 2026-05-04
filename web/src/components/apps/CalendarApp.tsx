@@ -3,21 +3,12 @@ import { useQuery } from "@tanstack/react-query";
 import { getScheduler, type SchedulerJob } from "../../api/client";
 import { formatRelativeTime } from "../../lib/format";
 import { SystemSchedulesPanel } from "./SystemSchedulesPanel";
+import { isCadenceSchedulerJob } from "./schedulerJobClassification";
 
 /**
- * Decide whether a job belongs in the System Schedules panel (cron-style
- * cadence) or in the timeline (one-shot due_at). Keep this in sync with
- * SystemSchedulesPanel.filterSchedulerRows so we don't double-render.
+ * Calendar shows cadence jobs in the System Schedules panel and one-shot due_at
+ * entries in the timeline.
  */
-function isCadenceJob(job: SchedulerJob): boolean {
-  return (
-    job.system_managed === true ||
-    typeof job.interval_minutes === "number" ||
-    (typeof job.schedule_expr === "string" &&
-      job.schedule_expr.trim().length > 0)
-  );
-}
-
 function groupJobsByDate(jobs: SchedulerJob[]): Record<string, SchedulerJob[]> {
   const groups: Record<string, SchedulerJob[]> = {};
   for (const job of jobs) {
@@ -82,8 +73,8 @@ export function CalendarApp() {
   }
 
   const jobs = data?.jobs ?? [];
-  const cadenceJobs = jobs.filter(isCadenceJob);
-  const timelineJobs = jobs.filter((j) => !isCadenceJob(j));
+  const cadenceJobs = jobs.filter(isCadenceSchedulerJob);
+  const timelineJobs = jobs.filter((j) => !isCadenceSchedulerJob(j));
   const groups = groupJobsByDate(timelineJobs);
   const groupKeys = Object.keys(groups);
 
@@ -192,7 +183,7 @@ function JobCard({ job }: { job: SchedulerJob }) {
         <span className="app-card-title" style={{ marginBottom: 0 }}>
           {job.label || job.name || job.slug || "Job"}
         </span>
-        {job.status && (
+        {job.status ? (
           <span
             className={
               job.status === "active"
@@ -202,9 +193,9 @@ function JobCard({ job }: { job: SchedulerJob }) {
           >
             {job.status.toUpperCase()}
           </span>
-        )}
+        ) : null}
       </div>
-      {job.next_run && (
+      {job.next_run ? (
         <div
           className="app-card-meta"
           style={{
@@ -215,7 +206,7 @@ function JobCard({ job }: { job: SchedulerJob }) {
         >
           {formatRelativeTime(job.next_run)}
         </div>
-      )}
+      ) : null}
       {metaParts.length > 0 && (
         <div className="app-card-meta">{metaParts.join(" \u2022 ")}</div>
       )}

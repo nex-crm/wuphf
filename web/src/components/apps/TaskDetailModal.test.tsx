@@ -3,8 +3,8 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
-import type { Task } from "../../api/client";
-import { getOfficeMembers, updateTaskStatus } from "../../api/client";
+import { getOfficeMembers } from "../../api/client";
+import { type Task, updateTaskStatus } from "../../api/tasks";
 import { TaskDetailModal, taskMemoryWorkflowBadge } from "./TaskDetailModal";
 
 vi.mock("../../api/client", async (importOriginal) => {
@@ -12,6 +12,13 @@ vi.mock("../../api/client", async (importOriginal) => {
   return {
     ...actual,
     getOfficeMembers: vi.fn(),
+  };
+});
+
+vi.mock("../../api/tasks", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../api/tasks")>();
+  return {
+    ...actual,
     updateTaskStatus: vi.fn(),
     reassignTask: vi.fn(),
   };

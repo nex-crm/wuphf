@@ -10,7 +10,6 @@ export { ApiKeyRow } from "./wizard/ApiKeyRow";
 import { ProgressDots } from "./wizard/components";
 import {
   LOCAL_PROVIDER_LABELS,
-  MEMORY_BACKEND_OPTIONS,
   RUNTIMES,
   SCRATCH_FOUNDING_TEAM,
   STEP_ORDER,
@@ -30,7 +29,6 @@ import { ReadyStep } from "./wizard/Step7Ready";
 import type {
   BlueprintAgent,
   BlueprintTemplate,
-  MemoryBackend,
   NexSignupStatus,
   PrereqResult,
   ReadinessCheck,
@@ -50,6 +48,7 @@ interface WizardProps {
   onComplete?: () => void;
 }
 
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: Existing function length is baselined for a focused follow-up refactor.
 export function Wizard({ onComplete }: WizardProps) {
   const setOnboardingComplete = useAppStore((s) => s.setOnboardingComplete);
 
@@ -102,21 +101,6 @@ export function Wizard({ onComplete }: WizardProps) {
   // applied as llm_provider on /onboarding/complete.
   const [localProvider, setLocalProvider] = useState<string>("");
   const [apiKeys, setApiKeys] = useState<Record<string, string>>({});
-  // Matches MEMORY_BACKEND_OPTIONS[0] (the "Markdown (default)" tile) and the
-  // server-side `config.ResolveMemoryBackend` default. Shipping 'nex' here
-  // contradicted the label and meant a user who clicked through got a
-  // different backend than the one marked default.
-  const [memoryBackend, setMemoryBackend] = useState<MemoryBackend>("markdown");
-  // Nex API key (maps to `api_key` on /config). Parity with TUI's InitAPIKey
-  // phase. Kept separate from `apiKeys` because the latter is the per-runtime
-  // fallback set (Anthropic/OpenAI/Google) while this one unlocks hosted
-  // memory and managed integrations. Empty = skipped, not an error.
-  const [nexApiKey, setNexApiKey] = useState("");
-  // GBrain-specific key inputs. Only rendered when memoryBackend === 'gbrain'.
-  // Mirrors the TUI's InitGBrainOpenAIKey (required) + InitGBrainAnthropKey
-  // (optional) phases.
-  const [gbrainOpenAIKey, setGbrainOpenAIKey] = useState("");
-  const [gbrainAnthropicKey, setGbrainAnthropicKey] = useState("");
 
   // Step 6: first task
   const [taskTemplates, setTaskTemplates] = useState<TaskTemplate[]>([]);
@@ -372,20 +356,11 @@ export function Wizard({ onComplete }: WizardProps) {
   // useMemo because the surface is small (6 checks) and recomputation only
   // happens when one of these inputs changes. Matches the TUI's six-item
   // list in init_flow.go readinessChecks().
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
   const readinessChecks: ReadinessCheck[] = (() => {
     const checks: ReadinessCheck[] = [];
 
-    // 1. Nex API key
-    const hasNexKey = nexApiKey.trim().length > 0;
-    checks.push({
-      label: "Nex API key",
-      status: hasNexKey ? "ready" : "next",
-      detail: hasNexKey
-        ? "Configured. Hosted memory and integrations unlocked."
-        : "Skipped. Paste a key later from Settings to enable hosted memory.",
-    });
-
-    // 2. Tmux / web session. The web app doesn't need tmux — that's the
+    // 1. Tmux / web session. The web app doesn't need tmux — that's the
     // TUI's office runtime. Surface it as a positive "web session" rather
     // than flagging a missing dependency.
     checks.push({
@@ -458,37 +433,11 @@ export function Wizard({ onComplete }: WizardProps) {
       });
     }
 
-    // 4. Memory backend
-    const memoryLabel =
-      MEMORY_BACKEND_OPTIONS.find((o) => o.value === memoryBackend)?.label ??
-      memoryBackend;
-    let memoryStatus: ReadinessStatus = "ready";
-    let memoryDetail = memoryLabel;
-    if (memoryBackend === "gbrain") {
-      if (gbrainOpenAIKey.trim().length === 0) {
-        memoryStatus = "missing";
-        memoryDetail = "GBrain selected but OpenAI key is missing.";
-      } else {
-        memoryDetail = "GBrain with OpenAI embeddings.";
-      }
-    } else if (memoryBackend === "nex") {
-      if (!hasNexKey) {
-        memoryStatus = "next";
-        memoryDetail =
-          "Nex selected — add a Nex API key to enable hosted memory.";
-      } else {
-        memoryDetail = "Hosted memory via Nex.";
-      }
-    } else if (memoryBackend === "markdown") {
-      memoryDetail = "Git-native team wiki in ~/.wuphf/wiki.";
-    } else {
-      memoryStatus = "next";
-      memoryDetail = "No shared memory — agents only see per-turn context.";
-    }
+    // 4. Memory backend — always markdown (built-in, no configuration needed)
     checks.push({
       label: "Memory backend",
-      status: memoryStatus,
-      detail: memoryDetail,
+      status: "ready",
+      detail: "Git-native team wiki in ~/.wuphf/wiki.",
     });
 
     // 5. Blueprint
@@ -508,10 +457,9 @@ export function Wizard({ onComplete }: WizardProps) {
     }
 
     // 6. Integrations count
-    const keyCount =
-      Object.values(apiKeys).filter((v) => v.trim().length > 0).length +
-      (gbrainOpenAIKey.trim().length > 0 ? 1 : 0) +
-      (gbrainAnthropicKey.trim().length > 0 ? 1 : 0);
+    const keyCount = Object.values(apiKeys).filter(
+      (v) => v.trim().length > 0,
+    ).length;
     checks.push({
       label: "Integrations",
       status: keyCount > 0 ? "ready" : "next",
@@ -526,6 +474,7 @@ export function Wizard({ onComplete }: WizardProps) {
 
   // Complete onboarding
   const finishOnboarding = useCallback(
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
     async (skipTask: boolean) => {
       setSubmitting(true);
       setSubmitError("");
@@ -555,46 +504,19 @@ export function Wizard({ onComplete }: WizardProps) {
         // broker's /config endpoint is the canonical persistence surface
         // for config.APIKey, OpenAIAPIKey, AnthropicAPIKey, etc.
         const configPayload: Record<string, unknown> = {
-          memory_backend: memoryBackend,
+          memory_backend: "markdown",
         };
         if (providerPriority.length > 0) {
-          // First entry is the active provider; the full ordered list
-          // is the fallback chain. The user controls the order via the
-          // arrow buttons — if they move a local kind to slot 0 it
-          // becomes the primary; if they keep it last it's the
-          // out-of-credits fallback.
           configPayload.llm_provider = providerPriority[0];
           configPayload.llm_provider_priority = providerPriority;
         }
-        // Nex API key (optional — empty string not sent so we don't clobber
-        // an existing value with a blank one).
-        const trimmedNex = nexApiKey.trim();
-        if (trimmedNex.length > 0) {
-          configPayload.api_key = trimmedNex;
-        }
-        // GBrain-conditional keys. Only forwarded when GBrain is the active
-        // backend; other backends don't need these and sending would
-        // overwrite any user-configured values on GET.
-        if (memoryBackend === "gbrain") {
-          const trimmedOAI = gbrainOpenAIKey.trim();
-          if (trimmedOAI.length > 0) {
-            configPayload.openai_api_key = trimmedOAI;
-          }
-          const trimmedAnthropic = gbrainAnthropicKey.trim();
-          if (trimmedAnthropic.length > 0) {
-            configPayload.anthropic_api_key = trimmedAnthropic;
-          }
-        }
-        // Generic per-provider API keys from the fallback grid. Legacy
-        // env-var-style keys (ANTHROPIC_API_KEY, OPENAI_API_KEY, GOOGLE_API_KEY)
-        // mapped to the broker's config field names. Google key has no
-        // /config field yet — drop it silently rather than fail.
+        // Generic per-provider API keys from the fallback grid.
         const genericAnthropic = (apiKeys.ANTHROPIC_API_KEY ?? "").trim();
-        if (genericAnthropic.length > 0 && memoryBackend !== "gbrain") {
+        if (genericAnthropic.length > 0) {
           configPayload.anthropic_api_key = genericAnthropic;
         }
         const genericOpenAI = (apiKeys.OPENAI_API_KEY ?? "").trim();
-        if (genericOpenAI.length > 0 && memoryBackend !== "gbrain") {
+        if (genericOpenAI.length > 0) {
           configPayload.openai_api_key = genericOpenAI;
         }
         const genericGemini = (apiKeys.GOOGLE_API_KEY ?? "").trim();
@@ -620,7 +542,7 @@ export function Wizard({ onComplete }: WizardProps) {
           priority,
           runtime: primaryRuntime,
           runtime_priority: runtimePriority,
-          memory_backend: memoryBackend,
+          memory_backend: "markdown",
           blueprint: selectedBlueprint,
           agents: agents.filter((a) => a.checked).map((a) => a.slug),
           api_keys: apiKeys,
@@ -643,13 +565,9 @@ export function Wizard({ onComplete }: WizardProps) {
       description,
       priority,
       runtimePriority,
-      memoryBackend,
       selectedBlueprint,
       agents,
       apiKeys,
-      nexApiKey,
-      gbrainOpenAIKey,
-      gbrainAnthropicKey,
       taskText,
       setOnboardingComplete,
       onComplete,
@@ -662,6 +580,7 @@ export function Wizard({ onComplete }: WizardProps) {
   // The NexSignupPanel handles its own Enter inside the email input via an
   // onKeyDown below, so we bail out when that's the focused target.
   useEffect(() => {
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") {
         closeNexSignup();
@@ -692,8 +611,6 @@ export function Wizard({ onComplete }: WizardProps) {
         prereqsError,
         apiKeys,
         localProvider,
-        memoryBackend,
-        gbrainOpenAIKey,
       });
 
       switch (step) {
@@ -748,8 +665,6 @@ export function Wizard({ onComplete }: WizardProps) {
     prereqs,
     prereqsError,
     apiKeys,
-    memoryBackend,
-    gbrainOpenAIKey,
     submitting,
     taskText,
     goTo,
@@ -822,16 +737,6 @@ export function Wizard({ onComplete }: WizardProps) {
             apiKeyState={{
               values: apiKeys,
               onChange: handleApiKeyChange,
-            }}
-            memoryState={{
-              backend: memoryBackend,
-              onChangeBackend: setMemoryBackend,
-              nexApiKey,
-              onChangeNexApiKey: setNexApiKey,
-              gbrainOpenAIKey,
-              onChangeGBrainOpenAIKey: setGbrainOpenAIKey,
-              gbrainAnthropicKey,
-              onChangeGBrainAnthropicKey: setGbrainAnthropicKey,
             }}
             localLLMState={{
               provider: localProvider,

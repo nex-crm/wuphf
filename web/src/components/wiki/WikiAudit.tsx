@@ -28,6 +28,7 @@ interface WikiAuditProps {
 
 type AuthorBucket = "all" | "agents" | "system" | string;
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
 export default function WikiAudit({ onNavigate }: WikiAuditProps) {
   const [entries, setEntries] = useState<WikiAuditEntry[] | null>(null);
   const [loading, setLoading] = useState(true);

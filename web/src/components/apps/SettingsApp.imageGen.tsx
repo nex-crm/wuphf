@@ -61,12 +61,23 @@ function StatusDot({ s }: { s: ImageProviderStatus }) {
   );
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
 function ProviderCard({ s }: { s: ImageProviderStatus }) {
   const qc = useQueryClient();
   const [apiKey, setApiKey] = useState("");
   const [baseURL, setBaseURL] = useState(s.base_url ?? "");
   const [model, setModel] = useState(s.default_model ?? "");
   const [showKey, setShowKey] = useState(false);
+  const apiKeyId = `image-provider-${s.kind}-api-key`;
+  const baseUrlId = `image-provider-${s.kind}-base-url`;
+  const modelId = `image-provider-${s.kind}-model`;
+  const capabilityLabel = [
+    s.kind,
+    s.supports_video ? "video" : "",
+    s.implementation_ok ? "" : "stub",
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   const mutation = useMutation({
     mutationFn: () =>
@@ -107,9 +118,7 @@ function ProviderCard({ s }: { s: ImageProviderStatus }) {
             marginLeft: "auto",
           }}
         >
-          {s.kind}
-          {s.supports_video && " · video"}
-          {s.implementation_ok ? "" : " · stub"}
+          {capabilityLabel}
         </span>
       </div>
       <p
@@ -122,7 +131,7 @@ function ProviderCard({ s }: { s: ImageProviderStatus }) {
       >
         {s.blurb}
       </p>
-      {s.setup_hint && (
+      {s.setup_hint ? (
         <p
           style={{
             fontSize: 11,
@@ -135,16 +144,16 @@ function ProviderCard({ s }: { s: ImageProviderStatus }) {
         >
           {s.setup_hint}
         </p>
-      )}
+      ) : null}
 
-      {s.needs_api_key && (
+      {s.needs_api_key ? (
         <div style={{ marginBottom: 10 }}>
-          <label style={labelStyle} htmlFor={`${s.kind}-api-key`}>
+          <label style={labelStyle} htmlFor={apiKeyId}>
             API key {s.api_key_set ? "(set)" : "(unset)"}
           </label>
           <div style={{ display: "flex", gap: 8 }}>
             <input
-              id={`${s.kind}-api-key`}
+              id={apiKeyId}
               type={showKey ? "text" : "password"}
               value={apiKey}
               placeholder={s.api_key_set ? "•••••• (replace)" : "paste here"}
@@ -161,7 +170,7 @@ function ProviderCard({ s }: { s: ImageProviderStatus }) {
             </button>
           </div>
         </div>
-      )}
+      ) : null}
 
       <div
         style={{
@@ -172,11 +181,11 @@ function ProviderCard({ s }: { s: ImageProviderStatus }) {
         }}
       >
         <div>
-          <label style={labelStyle} htmlFor={`${s.kind}-base-url`}>
+          <label style={labelStyle} htmlFor={baseUrlId}>
             Base URL (optional)
           </label>
           <input
-            id={`${s.kind}-base-url`}
+            id={baseUrlId}
             type="text"
             value={baseURL}
             onChange={(e) => setBaseURL(e.target.value)}
@@ -185,11 +194,11 @@ function ProviderCard({ s }: { s: ImageProviderStatus }) {
           />
         </div>
         <div>
-          <label style={labelStyle} htmlFor={`${s.kind}-model`}>
+          <label style={labelStyle} htmlFor={modelId}>
             Default model
           </label>
           <input
-            id={`${s.kind}-model`}
+            id={modelId}
             type="text"
             value={model}
             onChange={(e) => setModel(e.target.value)}

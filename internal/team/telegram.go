@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -682,6 +683,21 @@ func VerifyChat(token string, chatID int64) (string, error) {
 		return "", nil
 	}
 	return chat.Title, nil
+}
+
+var telegramSlugRegexp = regexp.MustCompile(`[^a-z0-9]+`)
+
+// SlugifyTelegramTitle is the canonical slug rule for Telegram-bridged channels.
+// Both the TUI's `/connect telegram` and the web wizard route through this so
+// the two paths can never produce different slugs for the same chat title.
+func SlugifyTelegramTitle(title string) string {
+	slug := strings.ToLower(strings.TrimSpace(title))
+	slug = telegramSlugRegexp.ReplaceAllString(slug, "-")
+	slug = strings.Trim(slug, "-")
+	if slug == "" {
+		slug = "telegram"
+	}
+	return "tg-" + slug
 }
 
 // DiscoverGroupsFromBroker returns groups the transport has seen during polling.

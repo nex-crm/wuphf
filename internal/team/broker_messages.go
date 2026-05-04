@@ -68,6 +68,9 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
+	if actor, ok := requestActorFromContext(r.Context()); ok && actor.Kind == requestActorKindHuman {
+		body.From = humanMessageSender(actor.Slug)
+	}
 
 	b.mu.Lock()
 	if firstBlockingRequest(b.requests) != nil {
@@ -134,7 +137,7 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	// explicit tag), spawning two turns with nearly identical answers.
 	tagged := uniqueSlugs(body.Tagged)
 	sender := normalizeActorSlug(body.From)
-	isHuman := sender == "" || sender == "you" || sender == "human"
+	isHuman := isHumanMessageSender(sender)
 	leadSlug := officeLeadSlugFrom(b.members)
 	mentionedSlugs := extractMentionedSlugs(body.Content)
 	leadExplicitlyTagged := leadSlug != "" && containsString(tagged, leadSlug)
@@ -157,8 +160,7 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	for _, taggedSlug := range tagged {
-		switch taggedSlug {
-		case "you", "human", "system":
+		if isHumanMessageSender(taggedSlug) || taggedSlug == "system" {
 			continue
 		}
 		if b.findMemberLocked(taggedSlug) == nil {
@@ -175,15 +177,15 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	// routing (specialist → lead only) already handles that path, and
 	// auto-tagging agent replies causes broadcast loops.
 	replyTo := strings.TrimSpace(body.ReplyTo)
-	isHumanSender := sender == "" || sender == "you" || sender == "human"
+	isHumanSender := isHumanMessageSender(sender)
 	if replyTo != "" && isHumanSender {
 		threadRoot := replyTo
 		threadParticipants := []string{}
 		for _, existing := range b.messages {
 			inThread := existing.ID == threadRoot || existing.ReplyTo == threadRoot
 			if inThread && existing.From != body.From {
-				// Include agents (skip "you"/"human" — they see via the web UI poll)
-				if existing.From != "you" && existing.From != "human" && b.findMemberLocked(existing.From) != nil {
+				// Include agents; humans see via the web UI poll.
+				if !isHumanMessageSender(existing.From) && b.findMemberLocked(existing.From) != nil {
 					threadParticipants = append(threadParticipants, existing.From)
 				}
 			}
@@ -233,7 +235,7 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	total := len(b.messages)
 
 	// Track which agents were tagged — they should show "typing" immediately
-	if len(msg.Tagged) > 0 && (msg.From == "you" || msg.From == "human") {
+	if len(msg.Tagged) > 0 && isHumanMessageSender(msg.From) {
 		if b.lastTaggedAt == nil {
 			b.lastTaggedAt = make(map[string]time.Time)
 		}
@@ -243,7 +245,7 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Clear typing indicator when an agent posts a reply
-	if msg.From != "you" && msg.From != "human" && b.lastTaggedAt != nil {
+	if !isHumanMessageSender(msg.From) && b.lastTaggedAt != nil {
 		delete(b.lastTaggedAt, msg.From)
 	}
 
@@ -706,7 +708,10 @@ func messageBelongsToViewerInbox(msg channelMessage, viewerSlug string, messages
 	switch from {
 	case viewerSlug:
 		return false
-	case "you", "human", "ceo":
+	case "ceo":
+		return true
+	}
+	if isHumanMessageSender(from) {
 		return true
 	}
 	for _, tagged := range msg.Tagged {
@@ -747,8 +752,8 @@ func messageRepliesToViewerThread(msg channelMessage, viewerSlug string, message
 func (b *Broker) isOneOnOneDMMessage(msg channelMessage) bool {
 	agent := b.oneOnOneAgent
 
-	switch msg.From {
-	case "you", "human":
+	switch {
+	case isHumanMessageSender(msg.From):
 		// Human messages: only if untagged (direct conversation) or
 		// explicitly tagging the 1:1 agent.
 		if len(msg.Tagged) == 0 {
@@ -761,20 +766,20 @@ func (b *Broker) isOneOnOneDMMessage(msg channelMessage) bool {
 		}
 		return false
 
-	case agent:
+	case msg.From == agent:
 		// Agent messages: only if untagged (direct reply to human) or
 		// explicitly tagging the human.
 		if len(msg.Tagged) == 0 {
 			return true
 		}
 		for _, t := range msg.Tagged {
-			if t == "you" || t == "human" {
+			if isHumanMessageSender(t) {
 				return true
 			}
 		}
 		return false
 
-	case "system":
+	case msg.From == "system":
 		// System messages: only if they mention the 1:1 agent or human,
 		// or are general system announcements (no routing indicators).
 		if msg.Kind == "routing" {
@@ -838,4 +843,75 @@ func formatMessageUsageSuffix(usage *messageUsage) string {
 		return ""
 	}
 	return fmt.Sprintf(" [%d tok]", total)
+}
+
+// Messages returns all channel messages (for the Go TUI channel view).
+func (b *Broker) Messages() []channelMessage {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out := make([]channelMessage, len(b.messages))
+	for i, msg := range b.messages {
+		out[i] = cloneChannelMessageForRead(msg)
+	}
+	return out
+}
+
+func (b *Broker) ChannelMessages(channel string) []channelMessage {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	channel = normalizeChannelSlug(channel)
+	if channel == "" {
+		channel = "general"
+	}
+	out := make([]channelMessage, 0, len(b.messages))
+	for _, msg := range b.messages {
+		if normalizeChannelSlug(msg.Channel) == channel {
+			out = append(out, cloneChannelMessageForRead(msg))
+		}
+	}
+	return out
+}
+
+// AllMessages returns a copy of all messages across all channels, ordered by
+// creation time. Use this when the caller needs to search across channels rather
+// than in a single known channel.
+func (b *Broker) AllMessages() []channelMessage {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out := make([]channelMessage, len(b.messages))
+	for i, msg := range b.messages {
+		out[i] = cloneChannelMessageForRead(msg)
+	}
+	return out
+}
+
+// RecentHumanMessages returns up to limit messages sent by a human or
+// human-facing external sender ("you", "human", or "nex"). The returned slice
+// contains the most recent messages in chronological order (earliest first).
+func (b *Broker) RecentHumanMessages(limit int) []channelMessage {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	var human []channelMessage
+	for _, msg := range b.messages {
+		f := strings.ToLower(strings.TrimSpace(msg.From))
+		if isHumanMessageSender(f) || f == "nex" {
+			human = append(human, cloneChannelMessageForRead(msg))
+		}
+	}
+	if len(human) <= limit {
+		return human
+	}
+	return human[len(human)-limit:]
+}
+
+func cloneChannelMessageForRead(msg channelMessage) channelMessage {
+	clone := msg
+	if len(msg.Tagged) > 0 {
+		clone.Tagged = append([]string(nil), msg.Tagged...)
+	}
+	if len(msg.Reactions) > 0 {
+		clone.Reactions = append([]messageReaction(nil), msg.Reactions...)
+	}
+	clone.Usage = cloneMessageUsage(msg.Usage)
+	return clone
 }

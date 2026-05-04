@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 
 import type { Message } from "../../api/client";
 import { useMessages } from "../../hooks/useMessages";
@@ -25,8 +25,22 @@ type FeedElement =
       replies: ThreadMessage[];
     };
 
+export function messagesAfterClearMarker(
+  messages: Message[],
+  markerId: string | null | undefined,
+): Message[] {
+  if (!markerId) return messages;
+  const markerIndex = messages.findIndex((m) => m.id === markerId);
+  if (markerIndex === -1) return [];
+  return messages.slice(markerIndex + 1);
+}
+
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
 export function MessageFeed() {
   const currentChannel = useAppStore((s) => s.currentChannel);
+  const clearMarkerId = useAppStore(
+    (s) => s.clearedMessageIdsByChannel[currentChannel] ?? null,
+  );
   const setActiveThreadId = useAppStore((s) => s.setActiveThreadId);
   const collapsedThreads = useAppStore((s) => s.collapsedThreads);
   const toggleThreadCollapsed = useAppStore((s) => s.toggleThreadCollapsed);
@@ -39,7 +53,11 @@ export function MessageFeed() {
     navigator.clipboard?.writeText(url.toString()).catch(() => {});
   };
 
-  const { data: messages = [], isLoading } = useMessages(currentChannel);
+  const { data: rawMessages = [], isLoading } = useMessages(currentChannel);
+  const messages = useMemo(
+    () => messagesAfterClearMarker(rawMessages, clearMarkerId),
+    [rawMessages, clearMarkerId],
+  );
 
   // Auto-scroll when new messages arrive
   useEffect(() => {
@@ -164,6 +182,7 @@ export function MessageFeed() {
 
   return (
     <div className="messages" ref={containerRef}>
+      {/* biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor. */}
       {elements.map((el) => {
         if (el.type === "date") {
           return (
@@ -198,6 +217,8 @@ export function MessageFeed() {
                 aria-controls={`thread-${parentId}-replies`}
               >
                 <svg
+                  aria-hidden="true"
+                  focusable="false"
                   className="thread-collapse-chevron"
                   width="10"
                   height="10"

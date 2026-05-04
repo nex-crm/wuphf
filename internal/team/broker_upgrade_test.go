@@ -131,10 +131,7 @@ func TestHandleUpgradeChangelog_BadParamMatchesUpstreamErrorShape(t *testing.T) 
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", resp.StatusCode)
 	}
-	var body struct {
-		Commits []any  `json:"commits"`
-		Error   string `json:"error"`
-	}
+	var body UpgradeChangelogResponse
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
@@ -589,15 +586,18 @@ func TestHandleUpgradeCheck_IncludesInstallMethod(t *testing.T) {
 		t.Fatalf("request: %v", err)
 	}
 	defer resp.Body.Close()
-	var body struct {
-		Current        string `json:"current"`
-		Latest         string `json:"latest"`
-		InstallMethod  string `json:"install_method"`
-		InstallCommand string `json:"install_command"`
-		UpgradeCommand string `json:"upgrade_command"`
-	}
+	var body UpgradeCheckResponse
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		t.Fatalf("decode: %v", err)
+	}
+	if body.Current != "0.83.7" {
+		t.Errorf("current=%q want cached current version", body.Current)
+	}
+	if body.Latest != "0.83.10" {
+		t.Errorf("latest=%q want cached latest version", body.Latest)
+	}
+	if !body.UpgradeAvailable {
+		t.Errorf("upgrade_available=false want true")
 	}
 	if body.InstallMethod != "local" {
 		t.Errorf("install_method=%q want local", body.InstallMethod)

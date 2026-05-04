@@ -93,6 +93,20 @@ func printSubcommandHelp(sub string) {
 		fmt.Fprintln(os.Stderr, "  wuphf log                     List recent tasks")
 		fmt.Fprintln(os.Stderr, "  wuphf log <taskID>            Show one task in detail")
 		fmt.Fprintln(os.Stderr, "  wuphf log --agent eng         Filter to one agent")
+	case "share":
+		fmt.Fprintln(os.Stderr, "wuphf share — invite one co-founder to this office")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "Starts a private-network web listener and prints a one-use invite URL.")
+		fmt.Fprintln(os.Stderr, "Prerequisite: both machines are on the same Tailscale or WireGuard network.")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "Usage:")
+		fmt.Fprintln(os.Stderr, "  wuphf share                         Use a Tailscale 100.x address")
+		fmt.Fprintln(os.Stderr, "  wuphf share --bind 100.x.y.z        Bind a specific private address")
+		fmt.Fprintln(os.Stderr, "  wuphf share --bind wireguard        Prefer a WireGuard interface")
+		fmt.Fprintln(os.Stderr, "  wuphf share --json                  Emit invite details for scripts")
+		fmt.Fprintln(os.Stderr, "  wuphf share --unsafe-lan            Allow RFC1918 LAN addresses")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "Public interfaces are blocked by default.")
 	case "mcp-team":
 		fmt.Fprintln(os.Stderr, "wuphf mcp-team — start the team MCP server (used by agents, not humans)")
 		fmt.Fprintln(os.Stderr, "")
@@ -103,6 +117,14 @@ func printSubcommandHelp(sub string) {
 		// only touches workspace.go.
 		printWorkspaceHelp()
 		return
+	case "skills":
+		fmt.Fprintln(os.Stderr, "wuphf skills — publish/install team skills against public hubs")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "Usage:")
+		fmt.Fprintln(os.Stderr, "  wuphf skills publish <slug-or-path> --to <hub>     Open a PR with this skill")
+		fmt.Fprintln(os.Stderr, "  wuphf skills install <name> --from <hub>           Pull a skill into your wiki")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "Hubs: anthropics, lobehub, github:owner/repo[@branch]")
 	case "upgrade":
 		fmt.Fprintln(os.Stderr, "wuphf upgrade — check npm for a newer wuphf and show the changelog")
 		fmt.Fprintln(os.Stderr, "")
@@ -229,8 +251,11 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  %s shred        Burn the workspace down and reopen onboarding\n", appName)
 		fmt.Fprintf(os.Stderr, "  %s import --from legacy  Import from a running external orchestrator (auto-detect)\n", appName)
 		fmt.Fprintf(os.Stderr, "  %s log          Show what your agents actually did (task receipts)\n", appName)
+		fmt.Fprintf(os.Stderr, "  %s share        Invite one co-founder over a private network\n", appName)
 		fmt.Fprintf(os.Stderr, "  %s memory migrate --from {nex,gbrain}  Port legacy memory into the team wiki\n", appName)
 		fmt.Fprintf(os.Stderr, "  %s workspace ...  Manage multiple isolated WUPHF workspaces\n", appName)
+		fmt.Fprintf(os.Stderr, "  %s skills publish <slug-or-path> --to <hub>    Publish a team skill to a public hub\n", appName)
+		fmt.Fprintf(os.Stderr, "  %s skills install <name> --from <hub>  Pull a public skill into the team wiki\n", appName)
 		fmt.Fprintf(os.Stderr, "  %s --cmd <cmd>  Run a command non-interactively\n", appName)
 		fmt.Fprintf(os.Stderr, "\nFlags:\n")
 		printVisibleFlags(os.Stderr)
@@ -337,7 +362,10 @@ func main() {
 
 	if len(args) > 0 {
 		sub := args[0]
-		if subcommandWantsHelp(args[1:]) {
+		// `skills` owns its own per-verb help routing (publish/install have
+		// flag-set-level docs), so we never short-circuit to the family
+		// help when there is a verb between `skills` and `--help`.
+		if sub != "skills" && subcommandWantsHelp(args[1:]) {
 			printSubcommandHelp(sub)
 			return
 		}
@@ -377,11 +405,16 @@ func main() {
 		case "log":
 			runLogCmd(args[1:])
 			return
+		case "share":
+			runShare(args[1:])
+			return
 		case "memory":
 			runMemory(args[1:])
 			return
 		case "workspace", "ws":
 			runWorkspace(args[1:])
+		case "skills":
+			runSkillsCmd(args[1:])
 			return
 		}
 	}

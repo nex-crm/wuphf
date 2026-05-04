@@ -1,16 +1,18 @@
+// biome-ignore-all lint/a11y/noStaticElementInteractions: Intentional wrapper/backdrop or SVG hover target; interactive child controls and keyboard paths are handled nearby.
 import { useQuery } from "@tanstack/react-query";
 
 import {
   getActions,
   getDecisions,
   getOfficeMembers,
-  getOfficeTasks,
   getScheduler,
-  getUsage,
   getWatchdogs,
   type OfficeMember,
 } from "../../api/client";
+import { getUsage } from "../../api/platform";
+import { getOfficeTasks } from "../../api/tasks";
 import { formatTokens } from "../../lib/format";
+import { keyedByOccurrence } from "../../lib/reactKeys";
 import { type Insight, InsightsList } from "../activity/InsightsList";
 import { Timeline, type TimelineEvent } from "../activity/Timeline";
 
@@ -81,6 +83,7 @@ function classifyMemberActivity(member: OfficeMember): {
   return { state: "lurking", label: "Idle" };
 }
 
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: Existing function length is baselined for a focused follow-up refactor.
 export function ArtifactsApp() {
   const tasks = useQuery({
     queryKey: ["activity-tasks"],
@@ -399,27 +402,29 @@ export function ArtifactsApp() {
             {allActions.length === 0 ? (
               <EmptyState>No actions recorded yet.</EmptyState>
             ) : (
-              allActions
-                .slice(0, 12)
-                .map((action, i) => (
-                  <ActivityItem
-                    key={i}
-                    title={
-                      action.summary || action.name || action.title || "Action"
-                    }
-                    body={
-                      action.related_id ? `Related: ${action.related_id}` : ""
-                    }
-                    meta={[
-                      action.channel ? `#${action.channel}` : "",
-                      action.actor ? `@${action.actor}` : "",
-                      action.created_at
-                        ? new Date(action.created_at).toLocaleString()
-                        : "",
-                    ].filter(Boolean)}
-                    kindLabel={action.kind || action.type || "action"}
-                  />
-                ))
+              keyedByOccurrence(
+                allActions.slice(0, 12),
+                (action) =>
+                  `${action.name ?? ""}-${action.title ?? ""}-${action.related_id ?? ""}-${action.summary ?? ""}`,
+              ).map(({ key, value: action }) => (
+                <ActivityItem
+                  key={key}
+                  title={
+                    action.summary || action.name || action.title || "Action"
+                  }
+                  body={
+                    action.related_id ? `Related: ${action.related_id}` : ""
+                  }
+                  meta={[
+                    action.channel ? `#${action.channel}` : "",
+                    action.actor ? `@${action.actor}` : "",
+                    action.created_at
+                      ? new Date(action.created_at).toLocaleString()
+                      : "",
+                  ].filter(Boolean)}
+                  kindLabel={action.kind || action.type || "action"}
+                />
+              ))
             )}
           </ActivitySection>
         </div>
@@ -520,9 +525,7 @@ function StatCard({ kicker, value, copy, anchorId }: StatCardProps) {
       onKeyDown={clickable ? handleKeyDown : undefined}
       role={clickable ? "button" : undefined}
       tabIndex={clickable ? 0 : undefined}
-      aria-label={
-        clickable ? `${kicker}: ${value}. Scroll to details.` : undefined
-      }
+      title={clickable ? `${kicker}: ${value}. Scroll to details.` : undefined}
     >
       <div
         style={{
@@ -565,7 +568,7 @@ function ActivitySection({
         }}
       >
         <div style={{ fontSize: 14, fontWeight: 600 }}>{title}</div>
-        {meta && <div className="app-card-meta">{meta}</div>}
+        {meta ? <div className="app-card-meta">{meta}</div> : null}
       </div>
       {children}
     </section>
@@ -598,7 +601,7 @@ function ActivityItem({
           {title}
         </span>
       </div>
-      {body && (
+      {body ? (
         <div
           style={{
             fontSize: 12,
@@ -608,10 +611,10 @@ function ActivityItem({
         >
           {body}
         </div>
-      )}
-      {meta.length > 0 && (
+      ) : null}
+      {meta.length > 0 ? (
         <div className="app-card-meta">{meta.join(" \u2022 ")}</div>
-      )}
+      ) : null}
     </div>
   );
 }

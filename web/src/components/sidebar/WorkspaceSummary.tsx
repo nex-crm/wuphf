@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 
-import { getOfficeTasks, getUsage } from "../../api/client";
+import { getUsage } from "../../api/platform";
+import { getOfficeTasks } from "../../api/tasks";
 import { useOfficeMembers } from "../../hooks/useMembers";
 
 function formatTokens(n: number): string {

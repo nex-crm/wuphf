@@ -95,7 +95,7 @@ pre-commit:
         [ "$fail" -eq 0 ]
 
 pre-push:
-  # Serial, not parallel: running `go build ./...`, `go vet ./...`, and
+  # Serial, not parallel: running Go tests, web tests, build/vet, and
   # `vhs` concurrently contends for disk/CPU on workstations, and
   # internal/team's wiki worker queue saturates under that load
   # ("playbook: compile write timed out after 10s", "wiki: queue saturated,
@@ -103,6 +103,15 @@ pre-push:
   # Until the wiki worker is bounded-queue-tolerant, keep pre-push serial.
   parallel: false
   commands:
+    go-unit:
+      # Local mirror of CI's Go race split, with each package isolated in
+      # its own `go test` process.
+      run: bash scripts/test-go.sh
+    web-unit:
+      run: |
+        cd web
+        bun run typecheck
+        bun run test
     smoke:
       # internal/team's former test-isolation bugs (shared ~/.wuphf/wiki,
       # worktrees registered against the invoking repo, cross-test state
@@ -111,8 +120,8 @@ pre-push:
       # unscopedWikiRootAllowed off for tests, installs safe stub
       # prepare/cleanup worktree funcs, and skips the NewBroker auto-load
       # so every test starts from a clean slate. Persistence tests opt
-      # back in via reloadedBroker(t). Full-suite testing now lives in
-      # CI (go-test-matrix job) so pre-push stays a ~10s smoke.
+      # back in via reloadedBroker(t). The dedicated `go-unit` hook above
+      # runs the test suite; this smoke remains a fast build/vet guard.
       run: go build ./... && go vet ./...
     build:
       run: go build -o /dev/null ./cmd/wuphf
@@ -130,3 +139,8 @@ pre-push:
       # patterns. Cheap to run (git ls-files + wc -l), so it lives in
       # pre-push alongside the other smoke checks.
       run: bash scripts/check-file-size.sh
+    complexity-baseline:
+      # Keep Biome complexity suppressions forward-only. This lets the
+      # migration baseline land while forcing future broad complexity ignores
+      # to show up as explicit debt diffs.
+      run: bash scripts/check-complexity-baseline.sh

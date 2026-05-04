@@ -1,3 +1,4 @@
+// biome-ignore-all lint/a11y/useKeyWithClickEvents: Pointer handler is paired with an existing modal, image, or routed-control keyboard path; preserving current interaction model.
 /**
  * CreateWorkspaceModal — minimal name-capture modal for new workspace creation.
  *
@@ -112,11 +113,11 @@ export function CreateWorkspaceModal({
   onClose,
 }: CreateWorkspaceModalProps) {
   const titleId = useId();
-  const inputRef = useRef<HTMLInputElement | null>(null);
   const [name, setName] = useState("");
   const [phase, setPhase] = useState<Phase>("form");
   const [stageIdx, setStageIdx] = useState(0);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const slugInputRef = useRef<HTMLInputElement>(null);
 
   const navigateToWorkspace = (ws: Workspace) => {
     window.location.assign(
@@ -139,10 +140,10 @@ export function CreateWorkspaceModal({
     setPhase("form");
     setStageIdx(0);
     setErrorMsg(null);
-    const frame = window.requestAnimationFrame(() => {
-      inputRef.current?.focus();
+    const focusFrame = window.requestAnimationFrame(() => {
+      slugInputRef.current?.focus();
     });
-    return () => window.cancelAnimationFrame(frame);
+    return () => window.cancelAnimationFrame(focusFrame);
   }, [open]);
 
   // Animated stage hints while waiting on /workspaces/create.
@@ -209,7 +210,7 @@ export function CreateWorkspaceModal({
           </label>
           <input
             id={`${titleId}-slug`}
-            ref={inputRef}
+            ref={slugInputRef}
             style={styles.input}
             value={name}
             onChange={(e) => setName(e.target.value.toLowerCase())}

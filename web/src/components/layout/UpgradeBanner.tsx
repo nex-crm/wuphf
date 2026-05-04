@@ -7,7 +7,12 @@ import {
   useState,
 } from "react";
 
-import { get, runUpgrade, type UpgradeRunResult } from "../../api/client";
+import {
+  getUpgradeChangelog,
+  getUpgradeCheck,
+  runUpgrade,
+  type UpgradeRunResult,
+} from "../../api/upgrade";
 import {
   type CommitEntry,
   compareVersions,
@@ -33,35 +38,6 @@ const REPO = "nex-crm/wuphf";
 // happens to be the literal-equal version they last clicked-X on.
 const SILENT_UP_TO_KEY = "wuphf-upgrade-silent-up-to";
 
-interface UpgradeCheckResponse {
-  current: string;
-  latest: string;
-  upgrade_available: boolean;
-  is_dev_build: boolean;
-  compare_url?: string;
-  upgrade_command: string;
-  // install_method/install_command are the server's view of what
-  // POST /upgrade/run would ACTUALLY execute on this host (global vs
-  // local install). The chip renders install_command verbatim so the
-  // click target's text never lies. Older brokers omit these fields —
-  // fall back to upgrade_command.
-  install_method?: "global" | "local" | "unknown";
-  install_command?: string;
-  error?: string;
-}
-
-interface UpgradeChangelogResponse {
-  commits?: Array<{
-    type: string;
-    scope: string;
-    description: string;
-    pr: string;
-    sha: string;
-    breaking: boolean;
-  }>;
-  error?: string;
-}
-
 interface ChangelogState {
   loading: boolean;
   error: string | null;
@@ -78,6 +54,8 @@ type RunState =
   | { phase: "running" }
   | { phase: "done"; result: UpgradeRunResult };
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: Existing function length is baselined for a focused follow-up refactor.
 export function UpgradeBanner() {
   const forced = useMemo(readForcedPair, []);
   // Suppress in dev so local devs aren't nagged by the placeholder VERSION.
@@ -143,7 +121,7 @@ export function UpgradeBanner() {
     // the shared client is a follow-up that touches every caller of
     // get() and is out of scope for this PR.
     const ctl = new AbortController();
-    void get<UpgradeCheckResponse>("/upgrade-check")
+    void getUpgradeCheck()
       .then((res) => {
         if (ctl.signal.aborted) return;
         if (res.current) setCurrent(res.current);
@@ -211,10 +189,7 @@ export function UpgradeBanner() {
     if (changelogFetchedRef.current === fetchKey) return;
     const ctl = new AbortController();
     setChangelog({ loading: true, error: null, commits: [], ready: false });
-    void get<UpgradeChangelogResponse>("/upgrade-changelog", {
-      from: fromVersion,
-      to: latest,
-    })
+    void getUpgradeChangelog(fromVersion, latest)
       .then((data) => {
         if (ctl.signal.aborted) return;
         changelogFetchedRef.current = fetchKey;
@@ -405,7 +380,7 @@ export function UpgradeBanner() {
     // role="region" + an accessible name lets the banner be navigable as a
     // landmark without auto-announcing on every render the way role="status"
     // (a live region) would for what is really an interactive container.
-    <div className={bannerClass} role="region" aria-label="Upgrade available">
+    <section className={bannerClass} aria-label="Upgrade available">
       <div className="upgrade-banner-row">
         <div className="upgrade-banner-content">
           <svg
@@ -525,14 +500,14 @@ export function UpgradeBanner() {
         className="upgrade-banner-changelog"
         hidden={!expanded}
       >
-        {expanded && (
+        {expanded ? (
           <>
-            {changelog.loading && (
+            {changelog.loading ? (
               <div className="upgrade-banner-changelog-status">
                 Loading changes…
               </div>
-            )}
-            {changelog.error && (
+            ) : null}
+            {changelog.error ? (
               <div className="upgrade-banner-changelog-status">
                 Could not load changelog ({changelog.error}).{" "}
                 <a href={compareUrl} target="_blank" rel="noopener noreferrer">
@@ -540,7 +515,7 @@ export function UpgradeBanner() {
                 </a>
                 .
               </div>
-            )}
+            ) : null}
             {!(changelog.loading || changelog.error) &&
               changelog.commits.length === 0 && (
                 <div className="upgrade-banner-changelog-status">
@@ -595,9 +570,9 @@ export function UpgradeBanner() {
               </div>
             ))}
           </>
-        )}
+        ) : null}
       </div>
-    </div>
+    </section>
   );
 }
 

@@ -11,7 +11,7 @@
  */
 import { useQuery } from "@tanstack/react-query";
 
-import { getUsage, type UsageData } from "../../api/client";
+import { getUsage, type UsageData } from "../../api/platform";
 import { useWorkspacesList, type Workspace } from "../../api/workspaces";
 
 const FIVE_MINUTES_MS = 5 * 60 * 1000;
@@ -83,7 +83,7 @@ export function StatusPill({
   // misleading because the broker has not yet replied. Once usage data is
   // available the counter switches to the real number. The override path
   // (tests/storybook) skips this entirely so existing assertions stay stable.
-  const usagePending = !usageOverride && usageQuery.data === undefined;
+  const usagePending = !usageOverride && usageQuery.isLoading;
 
   return (
     <span

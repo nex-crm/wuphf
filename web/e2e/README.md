@@ -1,11 +1,13 @@
 # web/e2e
 
-Playwright smoke tests against the real wuphf web UI. Two specs, two phases:
+Playwright smoke tests against the real wuphf web UI. Specs are split across
+fresh-install and post-onboarding shell phases:
 
 | Spec | Phase | Precondition |
 |---|---|---|
 | `tests/wizard.spec.ts` | fresh install | **no** `~/.wuphf/onboarded.json` — wuphf serves the onboarding wizard |
 | `tests/smoke.spec.ts` | post-onboarding shell | `~/.wuphf/onboarded.json` is **seeded** — wuphf serves the shell, with sidebar + agent panel |
+| `tests/app-routes.spec.ts` | post-onboarding shell | seeded shell; app routes must render independently without leaking into each other |
 
 CI runs both in `.github/workflows/ci.yml :: web-e2e` by booting wuphf twice (once with each precondition).
 
