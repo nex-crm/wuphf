@@ -16,7 +16,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-
 )
 
 // Launch starts a tmux session hosting the channel-view TUI and the shared

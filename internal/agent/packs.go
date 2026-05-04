@@ -12,11 +12,11 @@ type PackSkillSpec struct {
 
 // PackDefinition defines a team of agents that work together.
 type PackDefinition struct {
-	Slug          string
-	Name          string
-	Description   string
-	LeadSlug      string
-	Agents        []AgentConfig
+	Slug        string
+	Name        string
+	Description string
+	LeadSlug    string
+	Agents      []AgentConfig
 }
 
 // legacyPacks retains the old hard-coded pack registry strictly as a
@@ -116,7 +116,6 @@ var legacyPacks = []PackDefinition{
 				PermissionMode: "plan",
 			},
 		},
-
 	},
 }
 
