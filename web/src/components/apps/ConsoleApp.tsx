@@ -1,11 +1,6 @@
-import { useMemo } from "react";
+import { type FormEvent, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import {
-  ChatBubble,
-  CheckCircle,
-  NavArrowRight,
-  Terminal,
-} from "iconoir-react";
+import { ChatBubble, CheckCircle, Terminal } from "iconoir-react";
 
 import {
   fetchCommands,
@@ -23,7 +18,6 @@ interface CommandRow {
   name: string;
   description: string;
   webSupported: boolean;
-  appTarget?: string;
 }
 
 interface TerminalLine {
@@ -33,15 +27,6 @@ interface TerminalLine {
   content: string;
 }
 
-const COMMAND_APP_TARGETS: Record<string, string> = {
-  calendar: "calendar",
-  policies: "policies",
-  requests: "requests",
-  skills: "skills",
-  tasks: "tasks",
-  threads: "threads",
-};
-
 function normalizeCommandName(command: string): string {
   return command.replace(/^\/+/, "").trim().toLowerCase();
 }
@@ -50,15 +35,11 @@ function commandRowsFromRegistry(
   commands: SlashCommandDescriptor[] | undefined,
 ): CommandRow[] {
   if (!commands || commands.length === 0) {
-    return FALLBACK_SLASH_COMMANDS.map((command) => {
-      const name = normalizeCommandName(command.name);
-      return {
-        name: command.name,
-        description: command.desc,
-        webSupported: true,
-        appTarget: COMMAND_APP_TARGETS[name],
-      };
-    });
+    return FALLBACK_SLASH_COMMANDS.map((command) => ({
+      name: command.name,
+      description: command.desc,
+      webSupported: true,
+    }));
   }
   return commands.map((command) => {
     const name = normalizeCommandName(command.name);
@@ -66,7 +47,6 @@ function commandRowsFromRegistry(
       name: `/${name}`,
       description: command.description,
       webSupported: command.webSupported,
-      appTarget: COMMAND_APP_TARGETS[name],
     };
   });
 }
@@ -107,6 +87,9 @@ function openRequestCount(requests: Array<{ status?: string }>): number {
 export function ConsoleApp() {
   const currentChannel = useAppStore((s) => s.currentChannel);
   const setCurrentApp = useAppStore((s) => s.setCurrentApp);
+  const [draft, setDraft] = useState("");
+  const [localLines, setLocalLines] = useState<TerminalLine[]>([]);
+  const inputRef = useRef<HTMLInputElement>(null);
   const messages = useMessages(currentChannel);
   const members = useOfficeMembers();
   const tasks = useQuery({
@@ -134,6 +117,10 @@ export function ConsoleApp() {
     () => commandRowsFromRegistry(commandRegistry.data),
     [commandRegistry.data],
   );
+  const visibleTerminalLines = useMemo(
+    () => [...terminalLines, ...localLines].slice(-18),
+    [terminalLines, localLines],
+  );
   const activeMembers = (members.data ?? []).filter(
     (member) =>
       member.slug !== "human" &&
@@ -143,6 +130,49 @@ export function ConsoleApp() {
   const taskCount = activeTaskCount(tasks.data?.tasks ?? []);
   const requestCount = openRequestCount(requests.data?.requests ?? []);
   const supportedCount = commandRows.filter((row) => row.webSupported).length;
+
+  function focusInput(selectionEnd?: number) {
+    window.requestAnimationFrame(() => {
+      const input = inputRef.current;
+      if (!input) return;
+      input.focus();
+      const end = selectionEnd ?? input.value.length;
+      input.setSelectionRange(end, end);
+    });
+  }
+
+  function insertCommand(commandName: string) {
+    setDraft((current) => {
+      const next = current.trim()
+        ? `${current.trimEnd()} ${commandName} `
+        : `${commandName} `;
+      focusInput(next.length);
+      return next;
+    });
+  }
+
+  function submitDraft(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const content = draft.trim();
+    if (!content) {
+      focusInput();
+      return;
+    }
+    const now = new Date();
+    setLocalLines((lines) =>
+      [
+        ...lines,
+        {
+          id: `local-${now.getTime()}-${content}`,
+          time: terminalTime(now.toISOString()),
+          speaker: "you",
+          content,
+        },
+      ].slice(-8),
+    );
+    setDraft("");
+    focusInput();
+  }
 
   return (
     <div className="console-app" data-testid="console-app">
@@ -166,11 +196,11 @@ export function ConsoleApp() {
         >
           <div className="console-terminal-bar">
             <span>wuphf office</span>
-            <span>{terminalLines.length} lines</span>
+            <span>{visibleTerminalLines.length} lines</span>
           </div>
           <div className="console-terminal-body">
-            {terminalLines.length > 0 ? (
-              terminalLines.map((line) => (
+            {visibleTerminalLines.length > 0 ? (
+              visibleTerminalLines.map((line) => (
                 <div className="console-line" key={line.id}>
                   <span className="console-line-time">{line.time}</span>
                   <span className="console-line-speaker">{line.speaker}</span>
@@ -184,10 +214,20 @@ export function ConsoleApp() {
                 <span className="console-line-content">#{currentChannel}</span>
               </div>
             )}
-            <div className="console-prompt">
+            <form className="console-prompt" onSubmit={submitDraft}>
               <span>wuphf:{currentChannel || "general"}$</span>
-              <span className="console-cursor" aria-hidden="true" />
-            </div>
+              <input
+                ref={inputRef}
+                data-testid="console-input"
+                aria-label="Console input"
+                autoCapitalize="off"
+                autoComplete="off"
+                autoCorrect="off"
+                spellCheck={false}
+                value={draft}
+                onChange={(event) => setDraft(event.currentTarget.value)}
+              />
+            </form>
           </div>
         </section>
 
@@ -219,60 +259,23 @@ export function ConsoleApp() {
 
           <section
             className="console-panel"
-            aria-label="Console app jump targets"
-          >
-            <div className="console-panel-title">Apps</div>
-            {["tasks", "requests", "threads", "skills", "calendar"].map(
-              (app) => (
-                <button
-                  type="button"
-                  className="console-jump"
-                  key={app}
-                  onClick={() => setCurrentApp(app)}
-                >
-                  <span>{app}</span>
-                  <NavArrowRight />
-                </button>
-              ),
-            )}
-          </section>
-
-          <section
-            className="console-panel"
             aria-label="Console slash commands"
           >
             <div className="console-panel-title">Slash</div>
             <div className="console-command-list">
-              {commandRows.slice(0, 12).map((command) => {
-                const content = (
-                  <>
-                    <span className="console-command-name">{command.name}</span>
-                    <span className="console-command-desc">
-                      {command.description}
-                    </span>
-                  </>
-                );
-                if (command.appTarget) {
-                  return (
-                    <button
-                      type="button"
-                      className="console-command"
-                      key={command.name}
-                      onClick={() => setCurrentApp(command.appTarget ?? null)}
-                    >
-                      {content}
-                    </button>
-                  );
-                }
-                return (
-                  <div
-                    className={`console-command${command.webSupported ? "" : " console-command-muted"}`}
-                    key={command.name}
-                  >
-                    {content}
-                  </div>
-                );
-              })}
+              {commandRows.slice(0, 12).map((command) => (
+                <button
+                  type="button"
+                  className={`console-command${command.webSupported ? "" : " console-command-muted"}`}
+                  key={command.name}
+                  onClick={() => insertCommand(command.name)}
+                >
+                  <span className="console-command-name">{command.name}</span>
+                  <span className="console-command-desc">
+                    {command.description}
+                  </span>
+                </button>
+              ))}
             </div>
           </section>
         </aside>

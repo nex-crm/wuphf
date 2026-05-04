@@ -139,17 +139,16 @@
   color: #f0ca68;
 }
 
-.console-cursor {
-  width: 8px;
-  height: 15px;
-  background: #f0ca68;
-  animation: console-caret 1.1s steps(2, start) infinite;
-}
-
-@keyframes console-caret {
-  50% {
-    opacity: 0;
-  }
+.console-prompt input {
+  min-width: 0;
+  flex: 1 1 auto;
+  border: 0;
+  outline: 0;
+  padding: 0;
+  color: #edf4d0;
+  background: transparent;
+  font: inherit;
+  caret-color: #f0ca68;
 }
 
 .console-stack {
@@ -168,7 +167,6 @@
 }
 
 .console-stat,
-.console-jump,
 .console-command {
   border: 1px solid var(--border);
   background: var(--bg-card);
@@ -187,7 +185,6 @@
 }
 
 .console-stat:hover,
-.console-jump:hover,
 .console-command:hover {
   border-color: var(--border-dark);
   background: var(--bg-warm);
@@ -231,33 +228,6 @@
   font-weight: 650;
   text-transform: uppercase;
   letter-spacing: 0;
-}
-
-.console-jump {
-  width: 100%;
-  min-height: 40px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 0 12px;
-  border-width: 0 0 1px;
-  cursor: pointer;
-  text-align: left;
-}
-
-.console-jump:last-child {
-  border-bottom-width: 0;
-}
-
-.console-jump span {
-  text-transform: capitalize;
-}
-
-.console-jump svg {
-  width: 16px;
-  height: 16px;
-  color: var(--text-tertiary);
 }
 
 .console-command-list {

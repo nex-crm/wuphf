@@ -251,7 +251,7 @@ function MainContent() {
     };
     const Panel = panels[currentApp];
     return (
-      <div className="app-panel active">
+      <div className="app-panel active" data-testid={`app-page-${currentApp}`}>
         {Panel ? (
           <Panel />
         ) : (

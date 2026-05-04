@@ -37,7 +37,7 @@ describe("ConsoleApp helpers", () => {
     });
   });
 
-  it("maps broker commands to web rows with app jump targets", () => {
+  it("maps broker commands to insertable command rows", () => {
     const rows = commandRowsFromRegistry([
       { name: "tasks", description: "Open task board", webSupported: true },
       { name: "doctor", description: "Run checks", webSupported: false },
@@ -48,13 +48,11 @@ describe("ConsoleApp helpers", () => {
         name: "/tasks",
         description: "Open task board",
         webSupported: true,
-        appTarget: "tasks",
       },
       {
         name: "/doctor",
         description: "Run checks",
         webSupported: false,
-        appTarget: undefined,
       },
     ]);
   });
