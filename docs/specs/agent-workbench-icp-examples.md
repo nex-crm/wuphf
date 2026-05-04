@@ -28,6 +28,10 @@ Open the WUPHF web UI. These checks assume the workbench route is available at
 #/apps/workbench/<agent-slug>/tasks/<task-id>
 ```
 
+For the task-only validation path in Example 3, render `AgentWorkbench` in a
+test harness with `taskId` set and `agentSlug` unset. The browser URL still uses
+the full workbench route shape.
+
 ## ICP Example 1: Alex Reviews A Long-Running Task
 
 Scenario: Alex opens the workbench from an agent profile to understand what the

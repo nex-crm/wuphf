@@ -123,7 +123,11 @@ function useAgentWorkbenchModel(
 
   useEffect(() => {
     if (taskId || activeTaskId || visibleTasks.length === 0) return;
-    setActiveTaskId(relevantRuns[0]?.taskId ?? visibleTasks[0].id);
+    const visibleTaskIds = new Set(visibleTasks.map((task) => task.id));
+    const nextRunTaskId = relevantRuns.find((run) =>
+      visibleTaskIds.has(run.taskId),
+    )?.taskId;
+    setActiveTaskId(nextRunTaskId ?? visibleTasks[0].id);
   }, [activeTaskId, relevantRuns, taskId, visibleTasks]);
 
   const agent = selectedAgentSlug

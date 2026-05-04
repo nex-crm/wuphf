@@ -359,6 +359,15 @@ function TaskCard({
     onOpenWorkbench?.();
   }
 
+  function handleWorkbenchKeyDown(
+    event: React.KeyboardEvent<HTMLButtonElement>,
+  ) {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+    }
+    event.stopPropagation();
+  }
+
   return (
     <div
       className={className}
@@ -412,6 +421,7 @@ function TaskCard({
             type="button"
             className="btn btn-ghost btn-sm task-card-workbench"
             onClick={handleOpenWorkbench}
+            onKeyDown={handleWorkbenchKeyDown}
           >
             Workbench
           </button>

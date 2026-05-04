@@ -153,6 +153,13 @@ describe("AgentWorkbench", () => {
     listAgentLogTasksMock.mockResolvedValue({
       tasks: [
         {
+          taskId: "task-orphaned",
+          agentSlug: "alpha",
+          toolCallCount: 3,
+          lastToolAt: Date.UTC(2026, 4, 1, 12, 0),
+          sizeBytes: 256,
+        },
+        {
           taskId: "task-456",
           agentSlug: "alpha",
           toolCallCount: 1,
