@@ -145,7 +145,7 @@ var legacyPacks = []PackDefinition{
 				Slug:           "analyst",
 				Name:           "Revenue Analyst",
 				Expertise:      []string{"CRM-hygiene", "data-quality", "lead-scoring", "reporting", "funnel-analysis", "attribution", "forecasting"},
-				Personality:    "Methodical analyst who treats the CRM as a source of truth, not a stale archive. Flags data gaps, builds scoring models, and turns pipeline data into decisions.",
+				Personality:    "Methodical analyst who treats the CRM as a source of truth, not a passive archive. Flags data gaps, builds scoring models, and turns pipeline data into decisions.",
 				PermissionMode: "plan",
 			},
 		},
