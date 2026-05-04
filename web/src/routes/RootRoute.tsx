@@ -1,25 +1,15 @@
 import {
   Component,
   type ComponentType,
+  lazy,
   type ReactNode,
+  Suspense,
   useEffect,
   useState,
 } from "react";
 import { Outlet, useMatches } from "@tanstack/react-router";
 
 import { get, initApi } from "../api/client";
-import { ArtifactsApp } from "../components/apps/ArtifactsApp";
-import { CalendarApp } from "../components/apps/CalendarApp";
-import { ConsoleApp } from "../components/apps/ConsoleApp";
-import { GraphApp } from "../components/apps/GraphApp";
-import { HealthCheckApp } from "../components/apps/HealthCheckApp";
-import { PoliciesApp } from "../components/apps/PoliciesApp";
-import { ReceiptsApp } from "../components/apps/ReceiptsApp";
-import { RequestsApp } from "../components/apps/RequestsApp";
-import { SettingsApp } from "../components/apps/SettingsApp";
-import { SkillsApp } from "../components/apps/SkillsApp";
-import { TasksApp } from "../components/apps/TasksApp";
-import { ThreadsApp } from "../components/apps/ThreadsApp";
 import { TelegramConnectHost } from "../components/integrations/TelegramConnectModal";
 import { Shell } from "../components/layout/Shell";
 import { UpgradeBanner } from "../components/layout/UpgradeBanner";
@@ -28,15 +18,11 @@ import { DMView } from "../components/messages/DMView";
 import { InterviewBar } from "../components/messages/InterviewBar";
 import { MessageFeed } from "../components/messages/MessageFeed";
 import { TypingIndicator } from "../components/messages/TypingIndicator";
-import Notebook from "../components/notebook/Notebook";
 import { SplashScreen } from "../components/onboarding/SplashScreen";
 import { Wizard } from "../components/onboarding/Wizard";
-import ReviewQueueKanban from "../components/review/ReviewQueueKanban";
 import { ConfirmHost } from "../components/ui/ConfirmDialog";
 import { ProviderSwitcherHost } from "../components/ui/ProviderSwitcher";
 import { ToastContainer } from "../components/ui/Toast";
-import CitedAnswer from "../components/wiki/CitedAnswer";
-import Wiki from "../components/wiki/Wiki";
 import type { WikiTab } from "../components/wiki/WikiTabs";
 import WikiTabs from "../components/wiki/WikiTabs";
 import { useBrokerEvents } from "../hooks/useBrokerEvents";
@@ -45,6 +31,100 @@ import { router } from "../lib/router";
 import { useAppStore } from "../stores/app";
 import { isUnmatchedRoute } from "./routeSync";
 import { type CurrentRoute, useCurrentRoute } from "./useCurrentRoute";
+
+// ── Lazy-loaded panels ─────────────────────────────────────────
+//
+// Step 5 of the route migration plan. Each app surface is a route-only
+// component, so it's safe to defer loading until the user actually
+// navigates to that route. App panels carry the bulk of the bundle
+// (xterm in Console, three.js in Graph, the markdown stack in Wiki and
+// Notebook); deferring them keeps the conversation surface — which is
+// what every user lands on — small and fast.
+//
+// The named-export panels need a `.then(m => ({ default: m.X }))` shim
+// because React.lazy's contract requires a module with a default
+// export. Default-exported components (Wiki, Notebook, etc.) load
+// directly.
+
+const ArtifactsApp = lazy(() =>
+  import("../components/apps/ArtifactsApp").then((m) => ({
+    default: m.ArtifactsApp,
+  })),
+);
+const CalendarApp = lazy(() =>
+  import("../components/apps/CalendarApp").then((m) => ({
+    default: m.CalendarApp,
+  })),
+);
+const ConsoleApp = lazy(() =>
+  import("../components/apps/ConsoleApp").then((m) => ({
+    default: m.ConsoleApp,
+  })),
+);
+const GraphApp = lazy(() => import("../components/apps/GraphApp"));
+const HealthCheckApp = lazy(() =>
+  import("../components/apps/HealthCheckApp").then((m) => ({
+    default: m.HealthCheckApp,
+  })),
+);
+const PoliciesApp = lazy(() =>
+  import("../components/apps/PoliciesApp").then((m) => ({
+    default: m.PoliciesApp,
+  })),
+);
+const ReceiptsApp = lazy(() =>
+  import("../components/apps/ReceiptsApp").then((m) => ({
+    default: m.ReceiptsApp,
+  })),
+);
+const RequestsApp = lazy(() =>
+  import("../components/apps/RequestsApp").then((m) => ({
+    default: m.RequestsApp,
+  })),
+);
+const SettingsApp = lazy(() =>
+  import("../components/apps/SettingsApp").then((m) => ({
+    default: m.SettingsApp,
+  })),
+);
+const SkillsApp = lazy(() =>
+  import("../components/apps/SkillsApp").then((m) => ({
+    default: m.SkillsApp,
+  })),
+);
+const TasksApp = lazy(() =>
+  import("../components/apps/TasksApp").then((m) => ({
+    default: m.TasksApp,
+  })),
+);
+const ThreadsApp = lazy(() =>
+  import("../components/apps/ThreadsApp").then((m) => ({
+    default: m.ThreadsApp,
+  })),
+);
+const Notebook = lazy(() => import("../components/notebook/Notebook"));
+const ReviewQueueKanban = lazy(
+  () => import("../components/review/ReviewQueueKanban"),
+);
+const CitedAnswer = lazy(() => import("../components/wiki/CitedAnswer"));
+const Wiki = lazy(() => import("../components/wiki/Wiki"));
+
+function LazyPanelFallback() {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        flex: 1,
+        color: "var(--text-tertiary)",
+        fontSize: 13,
+      }}
+    >
+      Loading…
+    </div>
+  );
+}
 
 // ── Error boundary ─────────────────────────────────────────────
 
@@ -354,7 +434,11 @@ function RoutedBody() {
   if (isUnmatchedRoute(leaf?.routeId)) {
     return <NotFoundSurface pathname={router.state.location.pathname} />;
   }
-  return <MainContent />;
+  return (
+    <Suspense fallback={<LazyPanelFallback />}>
+      <MainContent />
+    </Suspense>
+  );
 }
 
 // ── Root route component ────────────────────────────────────────
