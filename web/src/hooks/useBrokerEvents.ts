@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
-import { sseURL } from "../api/client";
+import { initApi, sseURL } from "../api/client";
 import { useAppStore } from "../stores/app";
 
 function messageChannelFromEvent(event: Event): string | null {
@@ -29,7 +29,13 @@ export function useBrokerEvents(enabled: boolean) {
     if (!ES) return;
 
     const source = new ES(sseURL("/events"));
-    source.addEventListener("ready", () => setBrokerConnected(true));
+    source.addEventListener("ready", () => {
+      // Refresh the module-level auth token before marking the broker as
+      // connected. In direct mode the broker issues a fresh /web-token on
+      // each startup, so subsequent API calls would use a stale bearer if
+      // we don't re-handshake here. initApi() is a no-op in proxy mode.
+      void initApi().finally(() => setBrokerConnected(true));
+    });
     source.addEventListener("message", (event) => {
       const channel = messageChannelFromEvent(event);
       if (channel) {

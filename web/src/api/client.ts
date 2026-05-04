@@ -1100,30 +1100,11 @@ export function shredWorkspace() {
 // restartBroker asks the broker to spawn a fresh copy of itself and exit.
 // The broker responds with 202 before tearing down, so the promise resolves
 // before the process is replaced. The browser's SSE EventSource reconnects
-// automatically once the new process is ready.
-//
-// After the 202 lands, a background loop retries initApi() until the new
-// process is reachable. In proxy mode this re-syncs the stored token; in
-// direct mode it refreshes the bearer so subsequent API calls use the new
-// credential issued by the replacement process.
-export function restartBroker(): Promise<{ ok: boolean; message: string }> {
-  return post<{ ok: boolean; message: string }>("/broker/restart").then(
-    (res) => {
-      const tryRefresh = async () => {
-        for (let i = 0; i < 15; i++) {
-          await new Promise<void>((r) => setTimeout(r, 500));
-          try {
-            await initApi();
-            return;
-          } catch {
-            // new process still starting — keep trying
-          }
-        }
-      };
-      void tryRefresh();
-      return res;
-    },
-  );
+// automatically once the new process is ready; useBrokerEvents calls initApi()
+// inside the "ready" handler to refresh the auth token before marking the
+// broker as connected.
+export function restartBroker() {
+  return post<{ ok: boolean; message: string }>("/broker/restart");
 }
 
 // ── Telegram /connect wizard ──
