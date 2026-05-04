@@ -211,13 +211,13 @@ func (f *fakeOfficeTransport) RevokeInvite(_ context.Context, inviteID string) e
 // called and in what order.
 
 type fakeHost struct {
-	mu                sync.Mutex
-	upserted          []upsertCall
-	received          []Message
-	detached          []detachCall
-	revoked           []detachCall
-	receiveErr        error // if set, returned from ReceiveMessage
-	upsertErr         error // if set, returned from UpsertParticipant
+	mu         sync.Mutex
+	upserted   []upsertCall
+	received   []Message
+	detached   []detachCall
+	revoked    []detachCall
+	receiveErr error // if set, returned from ReceiveMessage
+	upsertErr  error // if set, returned from UpsertParticipant
 }
 
 type upsertCall struct {

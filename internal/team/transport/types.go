@@ -1,7 +1,7 @@
 // Package transport defines the contract between the WUPHF broker and external
 // message adapters (Telegram, OpenClaw, human-share, and future integrations).
 //
-// Architecture summary
+// # Architecture summary
 //
 // The broker is the authority for office state. Adapters are reactive: they
 // emit inbound messages via [Host.ReceiveMessage] and receive outbound messages
@@ -18,7 +18,7 @@
 //   - [OfficeBoundTransport] — office-bound (e.g. human-share). Admitted
 //     humans interact with the whole office, not a single channel or member.
 //
-// Package boundary
+// # Package boundary
 //
 // This package imports only the standard library and external SDKs. It does
 // NOT import internal/team. The broker imports this package and implements

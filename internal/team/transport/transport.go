@@ -8,7 +8,7 @@ import "context"
 // implement [MemberBoundTransport] or [OfficeBoundTransport], which embed
 // Transport.
 //
-// Implementing Transport
+// # Implementing Transport
 //
 // An adapter must:
 //  1. Return a stable, unique name from [Name] (used as the AdapterName key
@@ -73,7 +73,7 @@ type Transport interface {
 // identity becomes an office member (e.g. OpenClaw). The adapter manages
 // session lifecycle; the Host manages member identity in the broker.
 //
-// Implementing MemberBoundTransport
+// # Implementing MemberBoundTransport
 //
 // In addition to [Transport] requirements:
 //  1. Call [Host.UpsertParticipant] when a new session is created or
@@ -110,7 +110,7 @@ type MemberBoundTransport interface {
 // the whole office (e.g. human-share invite links). The adapter manages invite
 // tokens and session cookies; the Host manages admitted-human identity.
 //
-// Implementing OfficeBoundTransport
+// # Implementing OfficeBoundTransport
 //
 // In addition to [Transport] requirements:
 //  1. Call [Host.UpsertParticipant] when a new human is admitted. The Host
