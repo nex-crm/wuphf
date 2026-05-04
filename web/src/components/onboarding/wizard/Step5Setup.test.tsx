@@ -92,7 +92,6 @@ describe("SetupStep — canContinue gate", () => {
     renderSetup({ localProvider: "ollama" });
     expect(screen.getByRole("button", { name: ctaName })).toBeEnabled();
   });
-
 });
 
 describe("SetupStep — surfaces", () => {
