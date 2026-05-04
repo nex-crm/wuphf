@@ -17,7 +17,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/nex-crm/wuphf/internal/agent"
 )
 
 // Launch starts a tmux session hosting the channel-view TUI and the shared
@@ -69,17 +68,6 @@ func (l *Launcher) Launch() error {
 		// Non-fatal: a misconfigured optional adapter (e.g. bad Telegram token)
 		// should not prevent the office from starting.
 		fmt.Fprintf(os.Stderr, "warning: transport registration: %v\n", err)
-	}
-
-	// Pre-seed any default skills declared by the pack (idempotent).
-	// Always seed the cross-cutting productivity skills (grill-me, tdd,
-	// diagnose, etc., adapted from github.com/mattpocock/skills) on top of
-	// whatever the active pack defines. They're useful for every install,
-	// not just packs that explicitly enumerate them.
-	if l.pack != nil {
-		l.broker.SeedDefaultSkills(agent.AppendProductivitySkills(l.pack.DefaultSkills))
-	} else {
-		l.broker.SeedDefaultSkills(agent.AppendProductivitySkills(nil))
 	}
 
 	// Kill any existing session
@@ -223,11 +211,6 @@ func (l *Launcher) launchHeadlessCodex() error {
 		fmt.Fprintf(os.Stderr, "warning: transport registration: %v\n", err)
 	}
 
-	if l.pack != nil {
-		l.broker.SeedDefaultSkills(agent.AppendProductivitySkills(l.pack.DefaultSkills))
-	} else {
-		l.broker.SeedDefaultSkills(agent.AppendProductivitySkills(nil))
-	}
 	if err := writeOfficePIDFile(); err != nil {
 		stopTransports()
 		l.broker.Stop()
