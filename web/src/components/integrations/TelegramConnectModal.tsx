@@ -191,7 +191,7 @@ export function TelegramConnectModal({
       title?: string;
       type?: string;
     },
-    fallbackStep: "pick" | "manual" = "pick",
+    fallbackStep: "mode" | "pick" | "manual" = "pick",
   ) {
     const { id: myReq, signal } = beginRequest();
     setError(null);
