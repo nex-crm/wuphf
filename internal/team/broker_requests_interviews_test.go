@@ -342,6 +342,74 @@ func TestBrokerPostRequestDedupeKeyRecreatesAfterAnswer(t *testing.T) {
 	}
 }
 
+// TestBrokerPostRequestDedupeKeyRecreatesAfterCancel pins the cancel
+// branch of the terminal-state contract: cancelRequestLocked sets
+// Status="canceled" and requestIsActive returns false for it, so a
+// subsequent POST with the same dedupe_key must create a fresh
+// request rather than silently mapping to the canceled one.
+func TestBrokerPostRequestDedupeKeyRecreatesAfterCancel(t *testing.T) {
+	b := newTestBroker(t)
+	ensureTestMemberAccess(b, "general", "ceo", "CEO")
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("failed to start broker: %v", err)
+	}
+	defer b.Stop()
+
+	base := fmt.Sprintf("http://%s", b.Addr())
+	post := func() (string, bool) {
+		t.Helper()
+		body, _ := json.Marshal(map[string]any{
+			"kind":       "approval",
+			"from":       "ceo",
+			"channel":    "general",
+			"title":      "Approve",
+			"question":   "Approve?",
+			"blocking":   true,
+			"required":   true,
+			"dedupe_key": "action:ceo:gmail:send:k",
+		})
+		req, _ := http.NewRequest(http.MethodPost, base+"/requests", bytes.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+b.Token())
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("post: %v", err)
+		}
+		defer resp.Body.Close()
+		var out struct {
+			ID      string `json:"id"`
+			Deduped bool   `json:"deduped"`
+		}
+		_ = json.NewDecoder(resp.Body).Decode(&out)
+		return out.ID, out.Deduped
+	}
+
+	first, _ := post()
+	if first == "" {
+		t.Fatal("expected first request id")
+	}
+
+	// Cancel the first request → terminal state.
+	cancelBody, _ := json.Marshal(map[string]any{"action": "cancel", "id": first, "from": "ceo"})
+	req, _ := http.NewRequest(http.MethodPost, base+"/requests", bytes.NewReader(cancelBody))
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("cancel: %v", err)
+	}
+	resp.Body.Close()
+
+	// Same dedupe key after cancel → new request, not the canceled one.
+	second, deduped := post()
+	if second == "" || second == first {
+		t.Fatalf("expected fresh request after cancel, got first=%q second=%q", first, second)
+	}
+	if deduped {
+		t.Fatal("expected deduped=false for fresh request after cancel")
+	}
+}
+
 func TestHumanRequestAnswerUsesSessionActor(t *testing.T) {
 	b := newTestBroker(t)
 	b.mu.Lock()

@@ -77,15 +77,15 @@ export function RequestsApp() {
 
   const dismissAllNonBlocking = () => {
     if (nonBlockingPending.length === 0) return;
-    Promise.allSettled(nonBlockingPending.map((r) => cancelRequest(r.id)))
-      .then((results) => {
+    Promise.allSettled(nonBlockingPending.map((r) => cancelRequest(r.id))).then(
+      (results) => {
         const failed = results.filter((r) => r.status === "rejected").length;
         if (failed > 0) {
           showNotice(`Dismissed with ${failed} error(s)`, "error");
         }
         queryClient.invalidateQueries({ queryKey: ["requests"] });
-      })
-      .catch((e: Error) => showNotice(`Dismiss failed: ${e.message}`, "error"));
+      },
+    );
   };
 
   if (allRequests.length === 0) {
