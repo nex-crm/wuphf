@@ -20,6 +20,7 @@ import "./AgentWorkbench.css";
 export interface AgentWorkbenchProps {
   agentSlug?: string | null;
   taskId?: string | null;
+  onSelectionChange?: (agentSlug: string | null, taskId: string | null) => void;
   onClose?: () => void;
 }
 
@@ -30,9 +31,17 @@ const WORKFLOW_STEPS = ["lookup", "capture", "promote"] as const;
 export function AgentWorkbench({
   agentSlug = null,
   taskId = null,
+  onSelectionChange,
   onClose,
 }: AgentWorkbenchProps) {
   const model = useAgentWorkbenchModel(agentSlug, taskId);
+  const handleSelectTask = (nextTaskId: string | null) => {
+    model.setActiveTaskId(nextTaskId);
+    onSelectionChange?.(
+      resolveSelectionAgentSlug(nextTaskId, model) ?? model.selectedAgentSlug,
+      nextTaskId,
+    );
+  };
 
   return (
     <section className="awb-shell" aria-label="Agent workbench">
@@ -44,7 +53,7 @@ export function AgentWorkbench({
         loadState={model.loadState}
         onClose={onClose}
       />
-      <WorkbenchBody model={model} onSelectTask={model.setActiveTaskId} />
+      <WorkbenchBody model={model} onSelectTask={handleSelectTask} />
     </section>
   );
 }
@@ -143,6 +152,7 @@ function useAgentWorkbenchModel(
     logsQuery.isLoading || tasksQuery.isLoading,
     logsQuery.isError || tasksQuery.isError,
     selectedAgentSlug,
+    requestedTaskId,
     visibleTasks,
     relevantRuns,
   );
@@ -536,6 +546,19 @@ function resolveAgentSlug(
   return runs[0]?.agentSlug || tasks.find((task) => task.owner)?.owner || null;
 }
 
+function resolveSelectionAgentSlug(
+  taskId: string | null,
+  model: WorkbenchModel,
+): string | null {
+  if (!taskId) return model.selectedAgentSlug;
+  const run = model.relevantRuns.find(
+    (candidate) => candidate.taskId === taskId,
+  );
+  if (run?.agentSlug) return run.agentSlug;
+  const task = model.visibleTasks.find((candidate) => candidate.id === taskId);
+  return task?.owner ?? model.selectedAgentSlug;
+}
+
 function filterRuns(
   runs: TaskLogSummary[],
   agentSlug: string | null,
@@ -583,11 +606,13 @@ function getLoadState(
   loading: boolean,
   error: boolean,
   agentSlug: string | null,
+  taskId: string | null,
   tasks: Task[],
   runs: TaskLogSummary[],
 ): LoadState {
   if (loading) return "loading";
   if (error) return "error";
+  if (taskId && tasks.length === 0 && runs.length === 0) return "empty";
   if (!agentSlug && tasks.length === 0 && runs.length === 0) return "empty";
   return "ready";
 }

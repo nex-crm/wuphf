@@ -176,7 +176,8 @@ describe("AgentWorkbench", () => {
       ],
     });
 
-    renderWorkbench({ agentSlug: "alpha" });
+    const onSelectionChange = vi.fn();
+    renderWorkbench({ agentSlug: "alpha", onSelectionChange });
 
     await screen.findByRole("button", { name: /task-123/i });
     expect(screen.getAllByText("Ship review packet").length).toBeGreaterThan(0);
@@ -185,6 +186,7 @@ describe("AgentWorkbench", () => {
     expect(
       screen.getAllByText("Map onboarding evidence").length,
     ).toBeGreaterThan(0);
+    expect(onSelectionChange).toHaveBeenCalledWith("alpha", "task-123");
   });
 
   it("derives the agent from run data for a task-specific deep link", async () => {
@@ -197,6 +199,30 @@ describe("AgentWorkbench", () => {
     expect(screen.getByText("#task-123")).toBeInTheDocument();
     expect(screen.getByTestId("agent-terminal")).toHaveTextContent(
       "terminal:alpha",
+    );
+  });
+
+  it("derives the agent from task ownership when a task deep link has no run", async () => {
+    const ownerTask: Task = {
+      id: "task-owner",
+      title: "Owner fallback task",
+      status: "todo",
+      owner: "beta",
+    };
+    getOfficeMembersMock.mockResolvedValue({
+      members: [{ slug: "beta", name: "Beta", role: "Builder" }],
+    });
+    getOfficeTasksMock.mockResolvedValue({ tasks: [ownerTask] });
+    listAgentLogTasksMock.mockResolvedValue({ tasks: [] });
+
+    renderWorkbench({ taskId: "task-owner" });
+
+    expect(
+      await screen.findByRole("heading", { level: 2, name: "Beta" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("#task-owner")).toBeInTheDocument();
+    expect(screen.getByTestId("agent-terminal")).toHaveTextContent(
+      "terminal:beta",
     );
   });
 
@@ -270,6 +296,13 @@ describe("AgentWorkbench", () => {
     expect(await screen.findByText("No workbench data")).toBeInTheDocument();
     expect(screen.queryAllByText("Map onboarding evidence").length).toBe(0);
     expect(screen.queryByText("@alpha")).not.toBeInTheDocument();
+  });
+
+  it("shows empty state for a stale task deep link with an explicit agent", async () => {
+    renderWorkbench({ agentSlug: "alpha", taskId: "missing-task" });
+
+    expect(await screen.findByText("No workbench data")).toBeInTheDocument();
+    expect(screen.queryAllByText("Map onboarding evidence").length).toBe(0);
   });
 
   it("shows a polished empty state when no data is available", async () => {

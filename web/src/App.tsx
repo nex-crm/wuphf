@@ -144,6 +144,7 @@ function MainContent() {
   const setNotebookRoute = useAppStore((s) => s.setNotebookRoute);
   const workbenchAgentSlug = useAppStore((s) => s.workbenchAgentSlug);
   const workbenchTaskId = useAppStore((s) => s.workbenchTaskId);
+  const setWorkbenchRoute = useAppStore((s) => s.setWorkbenchRoute);
   // Pam's onActionDone bumps this; Wiki re-fetches article + history when
   // the prop changes. Lifted up here because Pam lives inside the tab bar
   // (so her desk can rest on the divider line).
@@ -226,6 +227,7 @@ function MainContent() {
       <WorkbenchPanel
         agentSlug={workbenchAgentSlug}
         taskId={workbenchTaskId}
+        onSelectionChange={setWorkbenchRoute}
         onClose={() => setCurrentApp(workbenchTaskId ? "tasks" : null)}
       />
     );
@@ -282,15 +284,22 @@ function MainContent() {
 function WorkbenchPanel({
   agentSlug,
   taskId,
+  onSelectionChange,
   onClose,
 }: {
   agentSlug: string | null;
   taskId: string | null;
+  onSelectionChange: (agentSlug: string | null, taskId: string | null) => void;
   onClose: () => void;
 }) {
   return (
     <div className="app-panel active">
-      <AgentWorkbench agentSlug={agentSlug} taskId={taskId} onClose={onClose} />
+      <AgentWorkbench
+        agentSlug={agentSlug}
+        taskId={taskId}
+        onSelectionChange={onSelectionChange}
+        onClose={onClose}
+      />
     </div>
   );
 }

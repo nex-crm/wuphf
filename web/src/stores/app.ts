@@ -252,12 +252,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   workbenchAgentSlug: null,
   workbenchTaskId: null,
   openAgentWorkbench: (agentSlug, taskId = null) =>
-    set({
-      currentApp: "workbench",
-      workbenchAgentSlug: agentSlug,
-      workbenchTaskId: taskId,
-      activeAgentSlug: null,
-    }),
+    get().setWorkbenchRoute(agentSlug, taskId),
   setWorkbenchRoute: (agentSlug, taskId) =>
     set({
       currentApp: "workbench",
