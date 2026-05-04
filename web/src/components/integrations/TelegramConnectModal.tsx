@@ -21,6 +21,7 @@ type Step =
   | "provider"
   | "token"
   | "verifying"
+  | "mode"
   | "discovering"
   | "pick"
   | "manual"
@@ -140,7 +141,7 @@ export function TelegramConnectModal({
     );
   }
 
-  async function verifyAndDiscover(rawToken: string) {
+  async function verify(rawToken: string) {
     const trimmed = rawToken.trim();
     if (!trimmed) {
       setError("Bot token is required.");
@@ -150,16 +151,29 @@ export function TelegramConnectModal({
     setError(null);
     setStep("verifying");
     try {
-      const verify = await verifyTelegramBot(trimmed, signal);
+      const result = await verifyTelegramBot(trimmed, signal);
       if (myReq !== requestIdRef.current) return;
-      if (!verify.ok) {
-        setError(verify.error ?? "Bot verification failed.");
+      if (!result.ok) {
+        setError(result.error ?? "Bot verification failed.");
         setStep("token");
         return;
       }
-      setBotName(verify.bot_name ?? null);
-      setStep("discovering");
-      const found = await discoverTelegramChats(trimmed, signal);
+      setBotName(result.bot_name ?? null);
+      setStep("mode");
+    } catch (e: unknown) {
+      if (myReq !== requestIdRef.current || isAbortError(e)) return;
+      const msg = e instanceof Error ? e.message : String(e);
+      setError(msg);
+      setStep("token");
+    }
+  }
+
+  async function discover() {
+    const { id: myReq, signal } = beginRequest();
+    setError(null);
+    setStep("discovering");
+    try {
+      const found = await discoverTelegramChats(token, signal);
       if (myReq !== requestIdRef.current) return;
       setGroups(found.groups ?? []);
       setStep("pick");
@@ -167,7 +181,7 @@ export function TelegramConnectModal({
       if (myReq !== requestIdRef.current || isAbortError(e)) return;
       const msg = e instanceof Error ? e.message : String(e);
       setError(msg);
-      setStep("token");
+      setStep("mode");
     }
   }
 
@@ -177,7 +191,7 @@ export function TelegramConnectModal({
       title?: string;
       type?: string;
     },
-    fallbackStep: "pick" | "manual" = "pick",
+    fallbackStep: "mode" | "pick" | "manual" = "pick",
   ) {
     const { id: myReq, signal } = beginRequest();
     setError(null);
@@ -295,7 +309,7 @@ export function TelegramConnectModal({
               value={token}
               onChange={(e) => setToken(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === "Enter") void verifyAndDiscover(token);
+                if (e.key === "Enter") void verify(token);
               }}
             />
             {error && (
@@ -311,7 +325,7 @@ export function TelegramConnectModal({
                 type="button"
                 className="wk-editor-save"
                 data-testid="tg-token-submit"
-                onClick={() => void verifyAndDiscover(token)}
+                onClick={() => void verify(token)}
               >
                 Verify
               </button>
@@ -328,6 +342,58 @@ export function TelegramConnectModal({
 
         {step === "verifying" && (
           <p data-testid="tg-step-verifying">Verifying bot token…</p>
+        )}
+
+        {step === "mode" && (
+          <div data-testid="tg-step-mode">
+            <p className="wk-editor-help">
+              {botName ? `Bot: ${botName}. ` : ""}How do you want to use this
+              bot?
+            </p>
+            {error && (
+              <div
+                className="wk-editor-banner wk-editor-banner--error"
+                role="alert"
+              >
+                {error}
+              </div>
+            )}
+            <div className="wk-editor-actions" style={{ flexDirection: "column", alignItems: "stretch" }}>
+              <button
+                type="button"
+                className="wk-editor-save"
+                data-testid="tg-mode-dm"
+                onClick={() =>
+                  void connect({
+                    chat_id: 0,
+                    title: "Telegram DM",
+                    type: "private",
+                  }, "mode")
+                }
+              >
+                DM{" "}
+                <span style={{ opacity: 0.6, fontWeight: "normal" }}>
+                  — messages go straight to the bot inbox
+                </span>
+              </button>
+              <button
+                type="button"
+                className="wk-editor-cancel"
+                data-testid="tg-mode-group"
+                onClick={() => void discover()}
+              >
+                Group chat{" "}
+                <span style={{ opacity: 0.6 }}>— bridge a group or channel</span>
+              </button>
+              <button
+                type="button"
+                className="wk-editor-cancel"
+                onClick={onClose}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
         )}
 
         {step === "discovering" && (
@@ -387,7 +453,7 @@ export function TelegramConnectModal({
                 type="button"
                 className="wk-editor-cancel"
                 data-testid="tg-retry-discover"
-                onClick={() => void verifyAndDiscover(token)}
+                onClick={() => void discover()}
               >
                 Retry discovery
               </button>
@@ -402,16 +468,9 @@ export function TelegramConnectModal({
               <button
                 type="button"
                 className="wk-editor-cancel"
-                data-testid="tg-connect-dm"
-                onClick={() =>
-                  void connect({
-                    chat_id: 0,
-                    title: "Telegram DM",
-                    type: "private",
-                  })
-                }
+                onClick={() => setStep("mode")}
               >
-                Use as DM
+                Back
               </button>
               <button
                 type="button"
