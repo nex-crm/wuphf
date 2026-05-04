@@ -195,9 +195,9 @@ export function useHashRouter() {
       notebookEntrySlug,
     });
     if (next !== window.location.hash) {
-      ignoreNextHashChange.current = true;
-      // Use replaceState for the initial sync so we don't spam history,
-      // then push afterwards.
+      // replaceState does not emit `hashchange`, so do not arm
+      // ignoreNextHashChange here. Leaving it set causes the next real hash
+      // navigation to be dropped.
       window.history.replaceState(null, "", next);
     }
   }, [
