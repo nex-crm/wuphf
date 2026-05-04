@@ -73,4 +73,25 @@ describe("platform api client", () => {
     await expect(api.getUsage()).resolves.toEqual(response);
     expect(getSpy).toHaveBeenCalledWith("/usage");
   });
+
+  it("calls the web share control contracts", async () => {
+    const status: api.WebShareStatus = {
+      running: true,
+      bind: "100.64.0.2",
+      interface: "tailscale0",
+      invite_url: "http://100.64.0.2:7890/join/tok",
+      expires_at: "2026-05-05T18:00:00Z",
+    };
+    const getSpy = vi.spyOn(client, "get").mockResolvedValue(status);
+    const postSpy = vi.spyOn(client, "post").mockResolvedValue(status);
+
+    await expect(api.getShareStatus()).resolves.toEqual(status);
+    expect(getSpy).toHaveBeenCalledWith("/share/status");
+
+    await expect(api.startShare()).resolves.toEqual(status);
+    expect(postSpy).toHaveBeenCalledWith("/share/start", {});
+
+    await expect(api.stopShare()).resolves.toEqual(status);
+    expect(postSpy).toHaveBeenCalledWith("/share/stop", {});
+  });
 });

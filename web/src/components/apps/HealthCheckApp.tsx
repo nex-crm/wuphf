@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { type CSSProperties, type ReactNode, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
@@ -6,8 +6,12 @@ import {
   getHumanMe,
   getHumanSessions,
   getShareStatus,
+  type HealthResponse,
+  type HumanMe,
+  type HumanSession,
   startShare,
   stopShare,
+  type WebShareStatus,
 } from "../../api/platform";
 import { useAppStore } from "../../stores/app";
 
@@ -21,6 +25,518 @@ function formatSessionTime(value?: string): string {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+function selfAccessDetails(hostname: string, origin: string) {
+  const normalizedHost = hostname.trim().toLowerCase();
+  if (normalizedHost === "localhost" || normalizedHost === "127.0.0.1") {
+    return {
+      detail:
+        "For a server you reach through SSH, keep the tunnel open while you work.",
+      code: "ssh -L 7890:localhost:7890 user@server",
+      footer: "Then open http://localhost:7890",
+    };
+  }
+  return {
+    detail: "This browser is already connected through the network web UI.",
+    code: origin,
+    footer: "Use team-member invites for scoped shared sessions.",
+  };
+}
+
+type RuntimeItem = {
+  label: string;
+  value: string;
+  active: boolean;
+};
+
+function SectionLabel({ children }: { children: ReactNode }) {
+  return (
+    <div
+      style={{
+        fontSize: 11,
+        fontWeight: 600,
+        textTransform: "uppercase",
+        letterSpacing: 0,
+        color: "var(--text-tertiary)",
+        padding: "8px 0 6px",
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function LoadingState({ children }: { children: string }) {
+  return (
+    <div
+      style={{
+        padding: "40px 20px",
+        textAlign: "center",
+        color: "var(--text-tertiary)",
+        fontSize: 14,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function AccessCards({
+  brokerConnected,
+  humanLabel,
+  inviteCopied,
+  isHost,
+  selfAccess,
+  shareError,
+  shareInviteURL,
+  shareMutationPending,
+  shareNetworkLabel,
+  shareRunning,
+  shareStatus,
+  onCopyInvite,
+  onStartShareInvite,
+  onStopShareInvite,
+}: {
+  brokerConnected: boolean;
+  humanLabel: string;
+  inviteCopied: boolean;
+  isHost: boolean;
+  selfAccess: ReturnType<typeof selfAccessDetails>;
+  shareError?: string;
+  shareInviteURL: string;
+  shareMutationPending: boolean;
+  shareNetworkLabel: string;
+  shareRunning: boolean;
+  shareStatus?: WebShareStatus;
+  onCopyInvite: () => void;
+  onStartShareInvite: () => void;
+  onStopShareInvite: () => void;
+}) {
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+        gap: 10,
+        marginBottom: 12,
+      }}
+    >
+      <div className="app-card" style={{ minHeight: 126 }}>
+        <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 6 }}>
+          This browser
+        </div>
+        <div className="app-card-meta" style={{ marginBottom: 10 }}>
+          Signed in as {humanLabel}
+        </div>
+        <span
+          className={
+            brokerConnected ? "badge badge-green" : "badge badge-yellow"
+          }
+        >
+          {brokerConnected ? "Live event stream" : "Reconnecting events"}
+        </span>
+      </div>
+
+      <SelfAccessCard selfAccess={selfAccess} />
+      <TeamInviteCard
+        inviteCopied={inviteCopied}
+        isHost={isHost}
+        shareError={shareError}
+        shareInviteURL={shareInviteURL}
+        shareMutationPending={shareMutationPending}
+        shareNetworkLabel={shareNetworkLabel}
+        shareRunning={shareRunning}
+        shareStatus={shareStatus}
+        onCopyInvite={onCopyInvite}
+        onStartShareInvite={onStartShareInvite}
+        onStopShareInvite={onStopShareInvite}
+      />
+    </div>
+  );
+}
+
+function SelfAccessCard({
+  selfAccess,
+}: {
+  selfAccess: ReturnType<typeof selfAccessDetails>;
+}) {
+  return (
+    <div className="app-card" style={{ minHeight: 126 }}>
+      <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 6 }}>
+        Access for you
+      </div>
+      <div className="app-card-meta" style={{ marginBottom: 8 }}>
+        {selfAccess.detail}
+      </div>
+      <code
+        style={{
+          display: "block",
+          padding: "8px 10px",
+          borderRadius: 8,
+          background: "var(--bg-warm)",
+          color: "var(--text)",
+          fontSize: 11,
+          whiteSpace: "normal",
+          wordBreak: "break-word",
+        }}
+      >
+        {selfAccess.code}
+      </code>
+      <div className="app-card-meta" style={{ marginTop: 8 }}>
+        {selfAccess.footer}
+      </div>
+    </div>
+  );
+}
+
+function TeamInviteCard({
+  inviteCopied,
+  isHost,
+  shareError,
+  shareInviteURL,
+  shareMutationPending,
+  shareNetworkLabel,
+  shareRunning,
+  shareStatus,
+  onCopyInvite,
+  onStartShareInvite,
+  onStopShareInvite,
+}: {
+  inviteCopied: boolean;
+  isHost: boolean;
+  shareError?: string;
+  shareInviteURL: string;
+  shareMutationPending: boolean;
+  shareNetworkLabel: string;
+  shareRunning: boolean;
+  shareStatus?: WebShareStatus;
+  onCopyInvite: () => void;
+  onStartShareInvite: () => void;
+  onStopShareInvite: () => void;
+}) {
+  return (
+    <div className="app-card" style={{ minHeight: 126 }}>
+      <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 6 }}>
+        Invite a team member
+      </div>
+      {!isHost ? (
+        <div className="app-card-meta">Team-member invites are host-only.</div>
+      ) : (
+        <HostInviteControls
+          inviteCopied={inviteCopied}
+          shareError={shareError}
+          shareInviteURL={shareInviteURL}
+          shareMutationPending={shareMutationPending}
+          shareNetworkLabel={shareNetworkLabel}
+          shareRunning={shareRunning}
+          shareStatus={shareStatus}
+          onCopyInvite={onCopyInvite}
+          onStartShareInvite={onStartShareInvite}
+          onStopShareInvite={onStopShareInvite}
+        />
+      )}
+    </div>
+  );
+}
+
+function HostInviteControls({
+  inviteCopied,
+  shareError,
+  shareInviteURL,
+  shareMutationPending,
+  shareNetworkLabel,
+  shareRunning,
+  shareStatus,
+  onCopyInvite,
+  onStartShareInvite,
+  onStopShareInvite,
+}: {
+  inviteCopied: boolean;
+  shareError?: string;
+  shareInviteURL: string;
+  shareMutationPending: boolean;
+  shareNetworkLabel: string;
+  shareRunning: boolean;
+  shareStatus?: WebShareStatus;
+  onCopyInvite: () => void;
+  onStartShareInvite: () => void;
+  onStopShareInvite: () => void;
+}) {
+  return (
+    <>
+      <div className="app-card-meta" style={{ marginBottom: 8 }}>
+        Create a one-use private-network invite from this browser.
+      </div>
+      <div
+        style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}
+      >
+        <button
+          className="btn btn-primary btn-sm"
+          type="button"
+          onClick={onStartShareInvite}
+          disabled={shareMutationPending}
+        >
+          {shareRunning ? "Create new invite" : "Create invite"}
+        </button>
+        {shareRunning ? (
+          <button
+            className="btn btn-secondary btn-sm"
+            type="button"
+            onClick={onStopShareInvite}
+            disabled={shareMutationPending}
+          >
+            Stop sharing
+          </button>
+        ) : null}
+      </div>
+      {shareInviteURL ? (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1fr auto",
+            gap: 8,
+            alignItems: "center",
+          }}
+        >
+          <code
+            style={{
+              display: "block",
+              padding: "8px 10px",
+              borderRadius: 8,
+              background: "var(--bg-warm)",
+              color: "var(--text)",
+              fontSize: 11,
+              whiteSpace: "normal",
+              wordBreak: "break-word",
+            }}
+          >
+            {shareInviteURL}
+          </code>
+          <button
+            className="btn btn-secondary btn-sm"
+            type="button"
+            onClick={onCopyInvite}
+          >
+            {inviteCopied ? "Copied" : "Copy"}
+          </button>
+        </div>
+      ) : null}
+      {shareRunning && shareNetworkLabel ? (
+        <div className="app-card-meta" style={{ marginTop: 8 }}>
+          Sharing on {shareNetworkLabel}
+        </div>
+      ) : null}
+      {shareRunning && shareStatus?.expires_at ? (
+        <div className="app-card-meta" style={{ marginTop: 4 }}>
+          Invite expires {formatSessionTime(shareStatus.expires_at)}
+        </div>
+      ) : null}
+      {shareError ? (
+        <div
+          style={{
+            marginTop: 8,
+            color: "var(--danger, #b42318)",
+            fontSize: 12,
+            lineHeight: 1.4,
+            whiteSpace: "pre-wrap",
+          }}
+        >
+          {shareError}
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+function BrokerStatusCard({
+  isHealthy,
+  status,
+}: {
+  isHealthy: boolean;
+  status: string;
+}) {
+  return (
+    <div
+      className="app-card"
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        marginBottom: 12,
+      }}
+    >
+      <span
+        className={`status-dot ${isHealthy ? "active" : ""}`}
+        style={{ width: 10, height: 10 }}
+      />
+      <div>
+        <div style={{ fontWeight: 600, fontSize: 14 }}>Broker Status</div>
+        <div className="app-card-meta">
+          <span
+            className={isHealthy ? "badge badge-green" : "badge badge-yellow"}
+          >
+            {status.toUpperCase()}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TeamMemberSessions({
+  isHost,
+  sessions,
+}: {
+  isHost: boolean;
+  sessions: HumanSession[];
+}) {
+  return (
+    <>
+      <SectionLabel>Team-member sessions ({sessions.length})</SectionLabel>
+      {!isHost ? (
+        <EmptyCard>Team-member session visibility is host-only.</EmptyCard>
+      ) : sessions.length > 0 ? (
+        sessions.map((session) => (
+          <StatusRow
+            key={session.id}
+            active={true}
+            label={session.display_name || session.human_slug}
+            value={`Last seen ${formatSessionTime(session.last_seen_at)} · expires ${formatSessionTime(session.expires_at)}`}
+          />
+        ))
+      ) : (
+        <EmptyCard>No active team-member browser sessions.</EmptyCard>
+      )}
+    </>
+  );
+}
+
+function RuntimeStatusList({
+  focusMode,
+  items,
+}: {
+  focusMode?: boolean;
+  items: RuntimeItem[];
+}) {
+  return (
+    <>
+      <SectionLabel>Runtime</SectionLabel>
+      {items.map((item) => (
+        <StatusRow
+          key={item.label}
+          active={item.active}
+          label={item.label}
+          value={item.value}
+        />
+      ))}
+      {focusMode ? (
+        <StatusRow
+          active={true}
+          label="Focus Mode"
+          value="enabled"
+          style={{ marginTop: 12 }}
+        />
+      ) : null}
+    </>
+  );
+}
+
+function StatusRow({
+  active,
+  label,
+  value,
+  style,
+}: {
+  active: boolean;
+  label: string;
+  value: string;
+  style?: CSSProperties;
+}) {
+  return (
+    <div
+      className="app-card"
+      style={{
+        marginBottom: 6,
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        ...style,
+      }}
+    >
+      <span className={`status-dot ${active ? "active" : ""}`} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontWeight: 500, fontSize: 13 }}>{label}</div>
+        <div
+          className="app-card-meta"
+          style={{
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {value}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EmptyCard({ children }: { children: string }) {
+  return (
+    <div
+      className="app-card"
+      style={{
+        marginBottom: 12,
+        color: "var(--text-tertiary)",
+        fontSize: 13,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function humanDisplayName(human: HumanMe["human"] | undefined): string {
+  return human?.display_name || human?.human_slug || human?.slug || "Host";
+}
+
+function runtimeItems(data: HealthResponse | undefined): RuntimeItem[] {
+  const providerLabel = [data?.provider, data?.provider_model]
+    .filter(Boolean)
+    .join(" / ");
+  const sessionLabel =
+    data?.session_mode === "one_on_one" && data.one_on_one_agent
+      ? `${data.session_mode} / ${data.one_on_one_agent}`
+      : data?.session_mode;
+  const memoryLabel = data?.memory_backend_active || data?.memory_backend;
+  return [
+    {
+      label: "Session",
+      value: sessionLabel || "unknown",
+      active: Boolean(data?.session_mode),
+    },
+    {
+      label: "Provider",
+      value: providerLabel || "unknown",
+      active: Boolean(data?.provider),
+    },
+    {
+      label: "Memory",
+      value: memoryLabel || "none",
+      active: Boolean(data?.memory_backend_ready),
+    },
+    {
+      label: "Nex",
+      value: data?.nex_connected ? "connected" : "disconnected",
+      active: Boolean(data?.nex_connected),
+    },
+    {
+      label: "Build",
+      value: data?.build?.version ?? "unknown",
+      active: Boolean(data?.build?.version),
+    },
+  ];
 }
 
 export function HealthCheckApp() {
@@ -84,33 +600,11 @@ export function HealthCheckApp() {
   });
 
   if (isLoading) {
-    return (
-      <div
-        style={{
-          padding: "40px 20px",
-          textAlign: "center",
-          color: "var(--text-tertiary)",
-          fontSize: 14,
-        }}
-      >
-        Checking health...
-      </div>
-    );
+    return <LoadingState>Checking health...</LoadingState>;
   }
 
   if (error) {
-    return (
-      <div
-        style={{
-          padding: "40px 20px",
-          textAlign: "center",
-          color: "var(--text-tertiary)",
-          fontSize: 14,
-        }}
-      >
-        Could not reach health endpoint.
-      </div>
-    );
+    return <LoadingState>Could not reach health endpoint.</LoadingState>;
   }
 
   const status = data?.status ?? "unknown";
@@ -124,20 +618,8 @@ export function HealthCheckApp() {
       : "http://localhost:7890";
   const hostname =
     typeof window !== "undefined" ? window.location.hostname : "localhost";
-  const remoteTarget =
-    hostname === "localhost" || hostname === "127.0.0.1"
-      ? "http://<server>:7890"
-      : ownOrigin;
-  const humanLabel =
-    human?.display_name || human?.human_slug || human?.slug || "Host";
-  const providerLabel = [data?.provider, data?.provider_model]
-    .filter(Boolean)
-    .join(" / ");
-  const sessionLabel =
-    data?.session_mode === "one_on_one" && data.one_on_one_agent
-      ? `${data.session_mode} / ${data.one_on_one_agent}`
-      : data?.session_mode;
-  const memoryLabel = data?.memory_backend_active || data?.memory_backend;
+  const selfAccess = selfAccessDetails(hostname, ownOrigin);
+  const humanLabel = humanDisplayName(human);
   const shareRunning = Boolean(shareStatus?.running);
   const shareMutationPending =
     startShareMutation.isPending || stopShareMutation.isPending;
@@ -168,33 +650,7 @@ export function HealthCheckApp() {
       );
     }
   };
-  const runtimeItems = [
-    {
-      label: "Session",
-      value: sessionLabel || "unknown",
-      active: Boolean(data?.session_mode),
-    },
-    {
-      label: "Provider",
-      value: providerLabel || "unknown",
-      active: Boolean(data?.provider),
-    },
-    {
-      label: "Memory",
-      value: memoryLabel || "none",
-      active: Boolean(data?.memory_backend_ready),
-    },
-    {
-      label: "Nex",
-      value: data?.nex_connected ? "connected" : "disconnected",
-      active: Boolean(data?.nex_connected),
-    },
-    {
-      label: "Build",
-      value: data?.build?.version ?? "unknown",
-      active: Boolean(data?.build?.version),
-    },
-  ];
+  const items = runtimeItems(data);
 
   return (
     <>
@@ -210,300 +666,28 @@ export function HealthCheckApp() {
         </h3>
       </div>
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-          gap: 10,
-          marginBottom: 12,
-        }}
-      >
-        <div className="app-card" style={{ minHeight: 126 }}>
-          <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 6 }}>
-            This browser
-          </div>
-          <div className="app-card-meta" style={{ marginBottom: 10 }}>
-            Signed in as {humanLabel}
-          </div>
-          <span
-            className={
-              brokerConnected ? "badge badge-green" : "badge badge-yellow"
-            }
-          >
-            {brokerConnected ? "Live event stream" : "Reconnecting events"}
-          </span>
-        </div>
+      <AccessCards
+        brokerConnected={brokerConnected}
+        humanLabel={humanLabel}
+        inviteCopied={inviteCopied}
+        isHost={isHost}
+        selfAccess={selfAccess}
+        shareError={shareError}
+        shareInviteURL={shareInviteURL}
+        shareMutationPending={shareMutationPending}
+        shareNetworkLabel={shareNetworkLabel}
+        shareRunning={shareRunning}
+        shareStatus={shareStatus}
+        onCopyInvite={() => void copyInvite()}
+        onStartShareInvite={startShareInvite}
+        onStopShareInvite={stopShareInvite}
+      />
 
-        <div className="app-card" style={{ minHeight: 126 }}>
-          <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 6 }}>
-            Access for you
-          </div>
-          <div className="app-card-meta" style={{ marginBottom: 8 }}>
-            Keep using the normal WUPHF UI through SSH, LAN, Tailscale, or
-            WireGuard.
-          </div>
-          <code
-            style={{
-              display: "block",
-              padding: "8px 10px",
-              borderRadius: 8,
-              background: "var(--bg-warm)",
-              color: "var(--text)",
-              fontSize: 11,
-              whiteSpace: "normal",
-              wordBreak: "break-word",
-            }}
-          >
-            ssh -L 7890:localhost:7890 user@server
-          </code>
-          <div className="app-card-meta" style={{ marginTop: 8 }}>
-            Then open {remoteTarget}
-          </div>
-        </div>
-
-        <div className="app-card" style={{ minHeight: 126 }}>
-          <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 6 }}>
-            Invite a team member
-          </div>
-          {!isHost ? (
-            <div className="app-card-meta">
-              Team-member invites are host-only.
-            </div>
-          ) : (
-            <>
-              <div className="app-card-meta" style={{ marginBottom: 8 }}>
-                Create a one-use private-network invite from this browser.
-              </div>
-              <div
-                style={{
-                  display: "flex",
-                  gap: 8,
-                  flexWrap: "wrap",
-                  marginBottom: 8,
-                }}
-              >
-                <button
-                  className="btn btn-primary btn-sm"
-                  type="button"
-                  onClick={startShareInvite}
-                  disabled={shareMutationPending}
-                >
-                  {shareRunning ? "Create new invite" : "Create invite"}
-                </button>
-                {shareRunning ? (
-                  <button
-                    className="btn btn-secondary btn-sm"
-                    type="button"
-                    onClick={stopShareInvite}
-                    disabled={shareMutationPending}
-                  >
-                    Stop sharing
-                  </button>
-                ) : null}
-              </div>
-              {shareInviteURL ? (
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "1fr auto",
-                    gap: 8,
-                    alignItems: "center",
-                  }}
-                >
-                  <code
-                    style={{
-                      display: "block",
-                      padding: "8px 10px",
-                      borderRadius: 8,
-                      background: "var(--bg-warm)",
-                      color: "var(--text)",
-                      fontSize: 11,
-                      whiteSpace: "normal",
-                      wordBreak: "break-word",
-                    }}
-                  >
-                    {shareInviteURL}
-                  </code>
-                  <button
-                    className="btn btn-secondary btn-sm"
-                    type="button"
-                    onClick={() => void copyInvite()}
-                  >
-                    {inviteCopied ? "Copied" : "Copy"}
-                  </button>
-                </div>
-              ) : null}
-              {shareRunning && shareNetworkLabel ? (
-                <div className="app-card-meta" style={{ marginTop: 8 }}>
-                  Sharing on {shareNetworkLabel}
-                </div>
-              ) : null}
-              {shareRunning && shareStatus?.expires_at ? (
-                <div className="app-card-meta" style={{ marginTop: 4 }}>
-                  Invite expires {formatSessionTime(shareStatus.expires_at)}
-                </div>
-              ) : null}
-              {shareError ? (
-                <div
-                  style={{
-                    marginTop: 8,
-                    color: "var(--danger, #b42318)",
-                    fontSize: 12,
-                    lineHeight: 1.4,
-                    whiteSpace: "pre-wrap",
-                  }}
-                >
-                  {shareError}
-                </div>
-              ) : null}
-            </>
-          )}
-        </div>
-      </div>
-
-      {/* Overall status */}
-      <div
-        className="app-card"
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 10,
-          marginBottom: 12,
-        }}
-      >
-        <span
-          className={`status-dot ${isHealthy ? "active" : ""}`}
-          style={{ width: 10, height: 10 }}
-        />
-        <div>
-          <div style={{ fontWeight: 600, fontSize: 14 }}>Broker Status</div>
-          <div className="app-card-meta">
-            <span
-              className={isHealthy ? "badge badge-green" : "badge badge-yellow"}
-            >
-              {status.toUpperCase()}
-            </span>
-          </div>
-        </div>
-      </div>
-
-      <div
-        style={{
-          fontSize: 11,
-          fontWeight: 600,
-          textTransform: "uppercase",
-          letterSpacing: "0.05em",
-          color: "var(--text-tertiary)",
-          padding: "8px 0 6px",
-        }}
-      >
-        Team-member sessions ({sessions.length})
-      </div>
-      {!isHost ? (
-        <div
-          className="app-card"
-          style={{
-            marginBottom: 12,
-            color: "var(--text-tertiary)",
-            fontSize: 13,
-          }}
-        >
-          Team-member session visibility is host-only.
-        </div>
-      ) : sessions.length > 0 ? (
-        sessions.map((session) => (
-          <div
-            key={session.id}
-            className="app-card"
-            style={{
-              marginBottom: 6,
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-            }}
-          >
-            <span className="status-dot active" />
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontWeight: 500, fontSize: 13 }}>
-                {session.display_name || session.human_slug}
-              </div>
-              <div className="app-card-meta">
-                Last seen {formatSessionTime(session.last_seen_at)} · expires{" "}
-                {formatSessionTime(session.expires_at)}
-              </div>
-            </div>
-          </div>
-        ))
-      ) : (
-        <div
-          className="app-card"
-          style={{
-            marginBottom: 12,
-            color: "var(--text-tertiary)",
-            fontSize: 13,
-          }}
-        >
-          No active team-member browser sessions.
-        </div>
-      )}
-
-      <div
-        style={{
-          fontSize: 11,
-          fontWeight: 600,
-          textTransform: "uppercase",
-          letterSpacing: "0.05em",
-          color: "var(--text-tertiary)",
-          padding: "8px 0 6px",
-        }}
-      >
-        Runtime
-      </div>
-      {runtimeItems.map((item) => (
-        <div
-          key={item.label}
-          className="app-card"
-          style={{
-            marginBottom: 6,
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-          }}
-        >
-          <span className={`status-dot ${item.active ? "active" : ""}`} />
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontWeight: 500, fontSize: 13 }}>{item.label}</div>
-            <div
-              className="app-card-meta"
-              style={{
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-              }}
-            >
-              {item.value}
-            </div>
-          </div>
-        </div>
-      ))}
-
-      {data?.focus_mode ? (
-        <div
-          className="app-card"
-          style={{
-            marginTop: 12,
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-          }}
-        >
-          <span className="status-dot active" />
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontWeight: 500, fontSize: 13 }}>Focus Mode</div>
-            <div className="app-card-meta">enabled</div>
-          </div>
-        </div>
-      ) : null}
+      <BrokerStatusCard isHealthy={isHealthy} status={status} />
+      <TeamMemberSessions isHost={isHost} sessions={sessions} />
+      <RuntimeStatusList focusMode={data?.focus_mode} items={items} />
     </>
   );
 }
+
+export const __test__ = { selfAccessDetails };
