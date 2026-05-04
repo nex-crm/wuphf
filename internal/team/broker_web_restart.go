@@ -36,6 +36,21 @@ func (b *Broker) RestartBrokerListener() (WebBrokerRestartStatus, error) {
 	b.brokerRestartMu.Lock()
 	defer b.brokerRestartMu.Unlock()
 
+	if b.stopCh != nil {
+		select {
+		case <-b.stopCh:
+			return WebBrokerRestartStatus{}, fmt.Errorf("broker is shutting down")
+		default:
+		}
+	}
+	if b.lifecycleCtx != nil {
+		select {
+		case <-b.lifecycleCtx.Done():
+			return WebBrokerRestartStatus{}, fmt.Errorf("broker is shutting down")
+		default:
+		}
+	}
+
 	if b.server != nil {
 		_ = b.server.Close()
 	}

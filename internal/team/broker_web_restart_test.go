@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -57,6 +58,22 @@ func TestWebBrokerRestartRestartsListener(t *testing.T) {
 	body, _ := io.ReadAll(healthResp.Body)
 	if healthResp.StatusCode != http.StatusOK {
 		t.Fatalf("GET /health status = %d, want %d: %s", healthResp.StatusCode, http.StatusOK, string(body))
+	}
+}
+
+func TestWebBrokerRestartRejectsAfterStop(t *testing.T) {
+	b := newTestBroker(t)
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("StartOnPort: %v", err)
+	}
+	b.Stop()
+
+	_, err := b.RestartBrokerListener()
+	if err == nil {
+		t.Fatal("RestartBrokerListener error = nil, want shutdown error")
+	}
+	if !strings.Contains(err.Error(), "shutting down") {
+		t.Fatalf("RestartBrokerListener error = %q, want shutdown error", err)
 	}
 }
 
