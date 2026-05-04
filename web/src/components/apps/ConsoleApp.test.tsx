@@ -10,6 +10,8 @@ import {
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Message, SlashCommandDescriptor } from "../../api/client";
+import { FALLBACK_SLASH_COMMANDS } from "../../hooks/useCommands";
+import { useMessages } from "../../hooks/useMessages";
 import { useAppStore } from "../../stores/app";
 import { __test__, ConsoleApp } from "./ConsoleApp";
 
@@ -52,6 +54,7 @@ function wrap(ui: ReactNode) {
 }
 
 beforeEach(() => {
+  vi.clearAllMocks();
   useAppStore.setState({
     currentApp: "console",
     currentChannel: "general",
@@ -115,6 +118,22 @@ describe("ConsoleApp helpers", () => {
     ]);
   });
 
+  it("falls back to bundled slash commands when registry data is empty or missing", () => {
+    const expectedRows = FALLBACK_SLASH_COMMANDS.map((command) => ({
+      name: command.name,
+      description: command.desc,
+      webSupported: true,
+    }));
+
+    expect(commandRowsFromRegistry(undefined)).toEqual(expectedRows);
+    expect(commandRowsFromRegistry([])).toEqual(expectedRows);
+    for (const row of expectedRows) {
+      expect(row.name).toMatch(/^\/\S+/);
+      expect(row.description).not.toBe("");
+      expect(row.webSupported).toBe(true);
+    }
+  });
+
   it("counts active tasks and open requests", () => {
     expect(
       activeTaskCount([
@@ -143,6 +162,7 @@ describe("<ConsoleApp>", () => {
 
     expect(screen.getAllByText("#general").length).toBeGreaterThan(1);
     expect(screen.getByText("wuphf:general$")).toBeInTheDocument();
+    expect(vi.mocked(useMessages)).toHaveBeenCalledWith("general");
   });
 
   it("clears local prompt echoes when switching channels", async () => {

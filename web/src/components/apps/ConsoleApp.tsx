@@ -86,13 +86,14 @@ function openRequestCount(requests: Array<{ status?: string }>): number {
 
 export function ConsoleApp() {
   const currentChannel = useAppStore((s) => s.currentChannel);
+  const channelName = currentChannel || "general";
   const setCurrentApp = useAppStore((s) => s.setCurrentApp);
   const [draft, setDraft] = useState("");
   const [localLines, setLocalLines] = useState<TerminalLine[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
   const terminalBodyRef = useRef<HTMLDivElement>(null);
   const previousChannelRef = useRef(currentChannel);
-  const messages = useMessages(currentChannel);
+  const messages = useMessages(channelName);
   const members = useOfficeMembers();
   const tasks = useQuery({
     queryKey: ["console-office-tasks"],
@@ -100,8 +101,8 @@ export function ConsoleApp() {
     refetchInterval: 10_000,
   });
   const requests = useQuery({
-    queryKey: ["console-requests", currentChannel],
-    queryFn: () => getRequests(currentChannel),
+    queryKey: ["console-requests", channelName],
+    queryFn: () => getRequests(channelName),
     refetchInterval: 5_000,
   });
   const commandRegistry = useQuery({
@@ -195,7 +196,7 @@ export function ConsoleApp() {
           <span className="badge badge-neutral">web</span>
         </div>
         <div className="console-header-meta">
-          <span>#{currentChannel || "general"}</span>
+          <span>#{channelName}</span>
           <span>{activeMembers.length} active</span>
           <span>{commandCount} commands</span>
         </div>
@@ -223,13 +224,11 @@ export function ConsoleApp() {
               <div className="console-line console-line-muted">
                 <span className="console-line-time">--:--</span>
                 <span className="console-line-speaker">system</span>
-                <span className="console-line-content">
-                  #{currentChannel || "general"}
-                </span>
+                <span className="console-line-content">#{channelName}</span>
               </div>
             )}
             <form className="console-prompt" onSubmit={submitDraft}>
-              <span>wuphf:{currentChannel || "general"}$</span>
+              <span>wuphf:{channelName}$</span>
               <input
                 ref={inputRef}
                 data-testid="console-input"
