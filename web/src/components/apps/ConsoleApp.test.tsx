@@ -127,9 +127,9 @@ describe("ConsoleApp helpers", () => {
 
     expect(commandRowsFromRegistry(undefined)).toEqual(expectedRows);
     expect(commandRowsFromRegistry([])).toEqual(expectedRows);
-    for (const row of expectedRows) {
+    for (const row of commandRowsFromRegistry(undefined)) {
       expect(row.name).toMatch(/^\/\S+/);
-      expect(row.description).not.toBe("");
+      expect(row.description).toBeTruthy();
       expect(row.webSupported).toBe(true);
     }
   });
