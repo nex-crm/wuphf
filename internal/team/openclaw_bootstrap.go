@@ -93,9 +93,16 @@ func StartOpenclawBridgeFromConfig(ctx context.Context, broker *Broker) (*Opencl
 // StartOpenclawRouter starts the mention+DM routing goroutine. Exported so
 // out-of-package callers (e.g. bridge probes) can opt into the same routing
 // behavior production WUPHF runs via launcher.go. The goroutine exits when
-// ctx is cancelled.
-func StartOpenclawRouter(ctx context.Context, broker *Broker, bridge *OpenclawBridge) {
-	go routeOpenclawMentionsLoop(ctx, broker, bridge)
+// ctx is cancelled. The returned channel is closed when the goroutine has
+// fully exited — callers should block on it before stopping the bridge to
+// avoid races between in-flight broker writes and broker shutdown.
+func StartOpenclawRouter(ctx context.Context, broker *Broker, bridge *OpenclawBridge) <-chan struct{} {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		routeOpenclawMentionsLoop(ctx, broker, bridge)
+	}()
+	return done
 }
 
 // routeOpenclawMentionsLoop subscribes to broker messages and forwards
