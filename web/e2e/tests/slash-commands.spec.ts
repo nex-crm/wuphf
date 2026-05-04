@@ -100,28 +100,32 @@ test.describe("wuphf web slash commands", () => {
     await expectNoReactErrors(page, getErrors, "during /help");
   });
 
-  test('"/clear" Enter clears the composer and shows a confirmation toast', async ({
-    page,
-  }) => {
-    // The web build does not actually wipe broker history; /clear just emits
-    // a "Messages cleared" toast (Composer.tsx:94-96). Asserting the toast
-    // is the closest behavioral analogue — and the failure mode we want to
-    // catch (slash dispatch broken) is identical.
-    //
-    // SearchModal.tsx:446 emits the same toast string. Anchor the locator
-    // on the `.animate-fade` toast container so a future SearchModal that
-    // opens during shell init can't satisfy this assertion accidentally.
+  test('"/clear" Enter clears the visible channel feed', async ({ page }) => {
+    // TUI parity: /clear clears the local transcript view without deleting
+    // broker history. Seed a visible web message, clear, then assert the feed
+    // stays empty from the user's point of view.
     const getErrors = collectReactErrors(page);
 
     await page.goto("/");
     await waitForShellReady(page);
 
+    const payload = `slash clear sentinel ${Date.now()}`;
     const composer = page.locator(".composer-input");
     await composer.click();
+    await composer.fill(payload);
+    await composer.press("Enter");
+
+    const bubble = page.locator(".message", { hasText: payload }).first();
+    await expect(bubble).toBeVisible({ timeout: 10_000 });
+
     await composer.fill("/clear ");
     await composer.press("Enter");
 
     await expect(composer).toHaveValue("", { timeout: 5_000 });
+    await expect(page.locator(".message", { hasText: payload })).toHaveCount(
+      0,
+      { timeout: 5_000 },
+    );
 
     // Toasts auto-dismiss at 4s (Toast.tsx). 3s assertion window is enough
     // for paint and short of the dismiss horizon. Filter on the container

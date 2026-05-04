@@ -157,6 +157,8 @@ export interface AppStore {
   // Message polling state
   lastMessageId: string | null;
   setLastMessageId: (id: string | null) => void;
+  clearedMessageIdsByChannel: Record<string, string>;
+  setChannelClearMarker: (channel: string, messageId: string | null) => void;
   unreadByChannel: Record<string, number>;
   incrementUnread: (channel: string) => void;
   clearUnread: (channel: string) => void;
@@ -331,6 +333,17 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   lastMessageId: null,
   setLastMessageId: (id) => set({ lastMessageId: id }),
+  clearedMessageIdsByChannel: {},
+  setChannelClearMarker: (channel, messageId) => {
+    const ch = channel.trim() || "general";
+    const id = messageId?.trim() || "";
+    set((state) => {
+      const next = { ...state.clearedMessageIdsByChannel };
+      if (id) next[ch] = id;
+      else delete next[ch];
+      return { clearedMessageIdsByChannel: next };
+    });
+  },
   unreadByChannel: {},
   incrementUnread: (channel) => {
     const ch = channel.trim() || "general";
@@ -377,6 +390,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       unreadByChannel: {},
       activeThreadId: null,
       lastMessageId: null,
+      clearedMessageIdsByChannel: {},
       activeAgentSlug: null,
       searchOpen: false,
       composerSearchInitialQuery: "",

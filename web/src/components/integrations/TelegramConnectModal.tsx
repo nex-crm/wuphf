@@ -358,17 +358,23 @@ export function TelegramConnectModal({
                 {error}
               </div>
             )}
-            <div className="wk-editor-actions" style={{ flexDirection: "column", alignItems: "stretch" }}>
+            <div
+              className="wk-editor-actions"
+              style={{ flexDirection: "column", alignItems: "stretch" }}
+            >
               <button
                 type="button"
                 className="wk-editor-save"
                 data-testid="tg-mode-dm"
                 onClick={() =>
-                  void connect({
-                    chat_id: 0,
-                    title: "Telegram DM",
-                    type: "private",
-                  }, "mode")
+                  void connect(
+                    {
+                      chat_id: 0,
+                      title: "Telegram DM",
+                      type: "private",
+                    },
+                    "mode",
+                  )
                 }
               >
                 DM{" "}
@@ -383,7 +389,9 @@ export function TelegramConnectModal({
                 onClick={() => void discover()}
               >
                 Group chat{" "}
-                <span style={{ opacity: 0.6 }}>— bridge a group or channel</span>
+                <span style={{ opacity: 0.6 }}>
+                  — bridge a group or channel
+                </span>
               </button>
               <button
                 type="button"
