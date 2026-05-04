@@ -348,6 +348,9 @@ func main() {
 	if len(args) > 0 {
 		sub := args[0]
 		wantsHelp := subcommandWantsHelp(args[1:])
+		// isFamilyHelp additionally catches the bare word "help" (for
+		// example `wuphf skills help`); dash-prefixed help flags are covered
+		// by subcommandWantsHelp above.
 		if sub == "skills" && len(args) > 1 && isFamilyHelp(args[1]) {
 			wantsHelp = true
 		}

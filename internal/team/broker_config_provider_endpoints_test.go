@@ -82,6 +82,25 @@ func TestHandleConfigReportsProviderConfiguredSource(t *testing.T) {
 	if configured, _ := cfg["llm_provider_configured"].(bool); !configured {
 		t.Fatalf("expected env provider to be reported as configured: %s", rec.Body.String())
 	}
+
+	t.Setenv("WUPHF_LLM_PROVIDER", "")
+	if rec := configRequest(t, b, http.MethodPost, `{"llm_provider":"codex"}`); rec.Code != http.StatusOK {
+		t.Fatalf("POST seed provider: %d %s", rec.Code, rec.Body.String())
+	}
+	rec = configRequest(t, b, http.MethodGet, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET after file provider status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	cfg = map[string]any{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &cfg); err != nil {
+		t.Fatalf("decode GET /config with file provider: %v", err)
+	}
+	if provider, _ := cfg["llm_provider"].(string); provider != "codex" {
+		t.Fatalf("expected file provider codex, got %q", provider)
+	}
+	if configured, _ := cfg["llm_provider_configured"].(bool); !configured {
+		t.Fatalf("expected file provider to be reported as configured: %s", rec.Body.String())
+	}
 }
 
 // TestHandleConfig_ProviderEndpointsRoundTrip is the load-bearing test

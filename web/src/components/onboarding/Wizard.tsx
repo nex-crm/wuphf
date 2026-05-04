@@ -168,6 +168,7 @@ export function Wizard({ onComplete }: WizardProps) {
   // applied as llm_provider on /onboarding/complete.
   const [localProvider, setLocalProvider] = useState<string>("");
   const [apiKeys, setApiKeys] = useState<Record<string, string>>({});
+  const userEditedRuntimeRef = useRef(false);
 
   // Step 6: first task
   const [taskTemplates, setTaskTemplates] = useState<TaskTemplate[]>([]);
@@ -220,17 +221,18 @@ export function Wizard({ onComplete }: WizardProps) {
 
         setPrereqs(prereqState.list);
         setPrereqsError(prereqState.error);
-        if (configState.localProvider) {
-          setLocalProvider(configState.localProvider);
+        if (!userEditedRuntimeRef.current) {
+          if (configState.localProvider) {
+            setLocalProvider(configState.localProvider);
+          }
+          setRuntimePriority((current) =>
+            initialRuntimePriority(
+              current,
+              configState.runtimePriority,
+              prereqState.list,
+            ),
+          );
         }
-
-        setRuntimePriority((current) =>
-          initialRuntimePriority(
-            current,
-            configState.runtimePriority,
-            prereqState.list,
-          ),
-        );
       })
       .finally(() => {
         if (!cancelled) setPrereqsLoading(false);
@@ -242,6 +244,7 @@ export function Wizard({ onComplete }: WizardProps) {
   }, []);
 
   const toggleRuntime = useCallback((label: string) => {
+    userEditedRuntimeRef.current = true;
     setRuntimePriority((prev) => {
       if (prev.includes(label)) return prev.filter((l) => l !== label);
       return [...prev, label];
@@ -269,6 +272,7 @@ export function Wizard({ onComplete }: WizardProps) {
   // to my local Qwen" without paying for the pay-as-you-go tier
   // implicit in a bare API-key fallback.
   const selectLocalProvider = useCallback((kind: string) => {
+    userEditedRuntimeRef.current = true;
     const labels = LOCAL_PROVIDER_LABELS.map((m) => m.label);
     setRuntimePriority((prev) => {
       // Remove any prior local entry first so picking a different
@@ -285,6 +289,7 @@ export function Wizard({ onComplete }: WizardProps) {
   }, []);
 
   const reorderRuntime = useCallback((label: string, direction: -1 | 1) => {
+    userEditedRuntimeRef.current = true;
     setRuntimePriority((prev) => {
       const idx = prev.indexOf(label);
       if (idx < 0) return prev;
