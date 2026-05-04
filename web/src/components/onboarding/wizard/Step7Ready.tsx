@@ -68,11 +68,12 @@ export function ReadyStep({
         <div style={{ display: "grid", gap: 10, fontSize: 13 }}>
           <div>
             <strong>You:</strong> use Access &amp; Health to check the live
-            connection and see the SSH/LAN/Tailscale path for this browser.
+            connection, see the SSH/LAN/Tailscale path, and create, copy,
+            refresh, or stop scoped team-member invites.
           </div>
           <div>
-            <strong>Team member:</strong> open Access &amp; Health when you want
-            to create, copy, refresh, or stop a scoped team-member invite.
+            <strong>Team member:</strong> joins through the invite link you
+            share.
           </div>
         </div>
       </div>

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"html"
 	"io"
 	"net"
 	"net/http"
@@ -92,6 +93,11 @@ func (c *webShareController) statusLocked() team.WebShareStatus {
 	}
 }
 
+func (c *webShareController) clearInviteLocked() {
+	c.inviteURL = ""
+	c.expiresAt = ""
+}
+
 func (c *webShareController) start() (team.WebShareStatus, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -127,6 +133,7 @@ func (c *webShareController) start() (team.WebShareStatus, error) {
 	if err != nil {
 		c.running = false
 		c.server = nil
+		c.clearInviteLocked()
 		c.err = webShareErrorMessage(err)
 		return c.statusLocked(), err
 	}
@@ -134,6 +141,7 @@ func (c *webShareController) start() (team.WebShareStatus, error) {
 	if err != nil {
 		c.running = false
 		c.server = nil
+		c.clearInviteLocked()
 		c.err = err.Error()
 		return c.statusLocked(), err
 	}
@@ -144,6 +152,7 @@ func (c *webShareController) start() (team.WebShareStatus, error) {
 	if err != nil {
 		c.running = false
 		c.server = nil
+		c.clearInviteLocked()
 		c.err = fmt.Sprintf("share listener failed on %s: %v", server.Addr, err)
 		return c.statusLocked(), errors.New(c.err)
 	}
@@ -163,6 +172,8 @@ func (c *webShareController) start() (team.WebShareStatus, error) {
 			c.mu.Lock()
 			if c.server == server {
 				c.running = false
+				c.server = nil
+				c.clearInviteLocked()
 				c.err = err.Error()
 			}
 			c.mu.Unlock()
@@ -430,7 +441,7 @@ func newShareHandler(brokerURL, brokerToken string, onJoin func()) http.Handler 
 			return
 		}
 		if r.Method == http.MethodGet {
-			writeShareJoinPage(w, token, "")
+			writeShareJoinPage(w, http.StatusOK, token, "")
 			return
 		}
 		if r.Method != http.MethodPost {
@@ -438,7 +449,7 @@ func newShareHandler(brokerURL, brokerToken string, onJoin func()) http.Handler 
 			return
 		}
 		if err := r.ParseForm(); err != nil {
-			writeShareJoinPage(w, token, "Could not read the form. Reload the invite and try again.")
+			writeShareJoinPage(w, http.StatusBadRequest, token, "Could not read the form. Reload the invite and try again.")
 			return
 		}
 		displayName := strings.TrimSpace(r.FormValue("display_name"))
@@ -459,12 +470,12 @@ func newShareHandler(brokerURL, brokerToken string, onJoin func()) http.Handler 
 		req.Header.Set("Content-Type", "application/json")
 		resp, err := shareHTTPClient.Do(req)
 		if err != nil {
-			writeShareJoinPage(w, token, "WUPHF is not reachable from this invite. Ask the host to restart sharing.")
+			writeShareJoinPage(w, http.StatusBadGateway, token, "WUPHF is not reachable from this invite. Ask the host to restart sharing.")
 			return
 		}
 		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
-			writeShareJoinPage(w, token, "This invite is no longer valid. Ask the host for a new team-member invite.")
+			writeShareJoinPage(w, http.StatusGone, token, "This invite is no longer valid. Ask the host for a new team-member invite.")
 			return
 		}
 		for _, cookie := range resp.Cookies() {
@@ -488,8 +499,11 @@ func newShareHandler(brokerURL, brokerToken string, onJoin func()) http.Handler 
 	return mux
 }
 
-func writeShareJoinPage(w http.ResponseWriter, token, errorMessage string) {
+func writeShareJoinPage(w http.ResponseWriter, status int, token, errorMessage string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if status > 0 {
+		w.WriteHeader(status)
+	}
 	errorHTML := ""
 	if strings.TrimSpace(errorMessage) != "" {
 		errorHTML = fmt.Sprintf(`<div class="error">%s</div>`, htmlEscape(errorMessage))
@@ -532,8 +546,7 @@ func writeShareJoinPage(w http.ResponseWriter, token, errorMessage string) {
 }
 
 func htmlEscape(s string) string {
-	replacer := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", `"`, "&quot;", "'", "&#39;")
-	return replacer.Replace(s)
+	return html.EscapeString(s)
 }
 
 func shareRequestHasSession(r *http.Request, brokerURL string) bool {
@@ -565,6 +578,10 @@ func shareProxyHandler(brokerURL string) http.Handler {
 			targetPath = "/"
 		}
 		if targetPath == "/onboarding/state" {
+			if r.Method != http.MethodGet && r.Method != http.MethodHead {
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
 			writeShareProxyJSON(w, http.StatusOK, map[string]bool{"onboarded": true})
 			return
 		}

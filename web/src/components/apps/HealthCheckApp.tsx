@@ -133,7 +133,7 @@ export function HealthCheckApp() {
     if (!shareInviteURL || typeof navigator === "undefined") return;
     await navigator.clipboard.writeText(shareInviteURL);
     setInviteCopied(true);
-    window.setTimeout(() => setInviteCopied(false), 1600);
+    setTimeout(() => setInviteCopied(false), 1600);
   };
   const runtimeItems = [
     {
