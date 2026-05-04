@@ -19,6 +19,8 @@ Run [`scripts/bootstrap.sh`](scripts/bootstrap.sh) to install lefthook hooks. Do
 
 Read [`ARCHITECTURE.md`](ARCHITECTURE.md). One page. Read it before you touch core packages.
 
+Adding an external integration (Slack, Discord, Hermes, …)? Read [`docs/ADD-A-TRANSPORT.md`](docs/ADD-A-TRANSPORT.md) first. The transport contract defines the interfaces, errors, registration site, and contributor pitfalls. TTHW ~30 min.
+
 ## File size
 
 | Range | Action |

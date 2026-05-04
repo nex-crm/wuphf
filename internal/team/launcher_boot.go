@@ -64,6 +64,13 @@ func (l *Launcher) Launch() error {
 		return fmt.Errorf("start broker: %w", err)
 	}
 
+	stopTransports, err := RegisterTransports(newBrokerTransportHost(l.broker))
+	if err != nil {
+		// Non-fatal: a misconfigured optional adapter (e.g. bad Telegram token)
+		// should not prevent the office from starting.
+		fmt.Fprintf(os.Stderr, "warning: transport registration: %v\n", err)
+	}
+
 	// Pre-seed any default skills declared by the pack (idempotent).
 	// Always seed the cross-cutting productivity skills (grill-me, tdd,
 	// diagnose, etc., adapted from github.com/mattpocock/skills) on top of
@@ -81,9 +88,8 @@ func (l *Launcher) Launch() error {
 	// Resolve wuphf binary path for the channel view
 	wuphfBinary, _ := os.Executable()
 	if err := os.MkdirAll(filepath.Dir(channelStderrLogPath()), 0o700); err != nil {
-		// Stop the broker we already started so we don't leak a
-		// listener on an aborted Launch. Same unwind reason as the
-		// PID-file failure path in launcher_web.go.
+		// Stop adapters before the broker so they can flush in-flight sends.
+		stopTransports()
 		l.broker.Stop()
 		return fmt.Errorf("prepare channel log dir: %w", err)
 	}
@@ -108,6 +114,7 @@ func (l *Launcher) Launch() error {
 		channelCmd,
 	).Run()
 	if err != nil {
+		stopTransports()
 		l.broker.Stop()
 		return fmt.Errorf("create tmux session: %w", err)
 	}
@@ -210,12 +217,19 @@ func (l *Launcher) launchHeadlessCodex() error {
 	if err := l.broker.Start(); err != nil {
 		return fmt.Errorf("start broker: %w", err)
 	}
+
+	stopTransports, err := RegisterTransports(newBrokerTransportHost(l.broker))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: transport registration: %v\n", err)
+	}
+
 	if l.pack != nil {
 		l.broker.SeedDefaultSkills(agent.AppendProductivitySkills(l.pack.DefaultSkills))
 	} else {
 		l.broker.SeedDefaultSkills(agent.AppendProductivitySkills(nil))
 	}
 	if err := writeOfficePIDFile(); err != nil {
+		stopTransports()
 		l.broker.Stop()
 		return fmt.Errorf("write office pid: %w", err)
 	}
