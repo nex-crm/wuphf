@@ -394,6 +394,8 @@ function MainContent() {
     <>
       <Suspense fallback={<PanelFallback />}>
         <MessageFeed />
+      </Suspense>
+      <Suspense fallback={null}>
         <TypingIndicator />
         <InterviewBar />
       </Suspense>
