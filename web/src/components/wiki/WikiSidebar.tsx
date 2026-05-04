@@ -117,7 +117,12 @@ export default function WikiSidebar({
                     {items.map((item) => (
                       <li
                         key={item.path}
-                        className={currentPath === item.path ? "current" : ""}
+                        className={
+                          articlePathKey(currentPath ?? "") ===
+                          articlePathKey(item.path)
+                            ? "current"
+                            : ""
+                        }
                       >
                         <a
                           href={`#/wiki/${encodeURI(item.path)}`}
@@ -188,6 +193,12 @@ function SectionGroup({
   onNavigate,
   onSectionHeaderClick,
 }: SectionGroupProps) {
+  const tree = useMemo(
+    () => buildSectionTree(section.slug, entries),
+    [section.slug, entries],
+  );
+  const currentKey = articlePathKey(currentPath ?? "");
+
   return (
     <div className="wk-section-group" data-section-slug={section.slug}>
       <h3
@@ -199,7 +210,10 @@ function SectionGroup({
             : "Discovered from articles your team has written"
         }
       >
-        <span className="wk-section-title">{section.slug}</span>
+        <span className="wk-section-title">
+          {section.title || section.slug}
+        </span>
+        <span className="wk-section-count">{section.article_count}</span>
         {!section.from_schema ? (
           <span className="wk-section-marker" aria-label="Discovered section" />
         ) : null}
@@ -209,28 +223,18 @@ function SectionGroup({
           </span>
         ) : null}
       </h3>
-      <ul>
+      <ul className="wk-tree" aria-label={`${section.slug} articles`}>
         {entries.length === 0 ? (
           <li className="wk-section-empty">
             <em>No articles yet</em>
           </li>
         ) : (
-          entries.map((item) => (
-            <li
-              key={item.path}
-              className={currentPath === item.path ? "current" : ""}
-            >
-              <a
-                href={`#/wiki/${encodeURI(item.path)}`}
-                onClick={(e) => {
-                  e.preventDefault();
-                  onNavigate(item.path);
-                }}
-              >
-                {item.title}
-              </a>
-            </li>
-          ))
+          <TreeBranch
+            node={tree}
+            currentKey={currentKey}
+            onNavigate={onNavigate}
+            root={true}
+          />
         )}
       </ul>
     </div>
@@ -283,6 +287,189 @@ function groupCatalog(
     out[entry.group].push(entry);
   }
   return out;
+}
+
+interface WikiTreeNode {
+  name: string;
+  key: string;
+  folders: WikiTreeNode[];
+  articles: WikiCatalogEntry[];
+}
+
+function buildSectionTree(
+  sectionSlug: string,
+  entries: WikiCatalogEntry[],
+): WikiTreeNode {
+  const root: WikiTreeNode = {
+    name: sectionSlug,
+    key: sectionSlug,
+    folders: [],
+    articles: [],
+  };
+  const folderIndex = new Map<string, WikiTreeNode>([[root.key, root]]);
+  const sorted = [...entries].sort((a, b) =>
+    normalizePathKey(a.path).localeCompare(normalizePathKey(b.path)),
+  );
+
+  for (const entry of sorted) {
+    const segments = displayPathSegments(sectionSlug, entry);
+    if (segments.length <= 1) {
+      root.articles.push(entry);
+      continue;
+    }
+    let parent = root;
+    let { key } = root;
+    for (const segment of segments.slice(0, -1)) {
+      key = `${key}/${segment}`;
+      let next = folderIndex.get(key);
+      if (!next) {
+        next = { name: segment, key, folders: [], articles: [] };
+        folderIndex.set(key, next);
+        parent.folders.push(next);
+        parent.folders.sort((a, b) => a.name.localeCompare(b.name));
+      }
+      parent = next;
+    }
+    parent.articles.push(entry);
+  }
+
+  sortTree(root);
+  return root;
+}
+
+function sortTree(node: WikiTreeNode): void {
+  node.folders.sort((a, b) => a.name.localeCompare(b.name));
+  node.articles.sort((a, b) => a.title.localeCompare(b.title));
+  for (const child of node.folders) sortTree(child);
+}
+
+function displayPathSegments(
+  sectionSlug: string,
+  entry: WikiCatalogEntry,
+): string[] {
+  const segments = normalizePathKey(entry.path).split("/").filter(Boolean);
+  if (segments[0] === "team") segments.shift();
+  if (segments[0] === sectionSlug) segments.shift();
+  return segments.length > 0 ? segments : [entry.title];
+}
+
+function normalizePathKey(path: string): string {
+  return path.replace(/^\/+/, "").replace(/\.md$/, "");
+}
+
+function articlePathKey(path: string): string {
+  const normalized = normalizePathKey(path);
+  return normalized.startsWith("team/")
+    ? normalized.slice("team/".length)
+    : normalized;
+}
+
+function TreeBranch({
+  node,
+  currentKey,
+  onNavigate,
+  root = false,
+}: {
+  node: WikiTreeNode;
+  currentKey: string;
+  onNavigate: (path: string) => void;
+  root?: boolean;
+}) {
+  return (
+    <>
+      {node.folders.map((folder) => (
+        <TreeFolder
+          key={folder.key}
+          node={folder}
+          currentKey={currentKey}
+          onNavigate={onNavigate}
+        />
+      ))}
+      {node.articles.map((item) => (
+        <TreeArticle
+          key={item.path}
+          item={item}
+          current={articlePathKey(item.path) === currentKey}
+          onNavigate={onNavigate}
+          nested={!root}
+        />
+      ))}
+    </>
+  );
+}
+
+function TreeFolder({
+  node,
+  currentKey,
+  onNavigate,
+}: {
+  node: WikiTreeNode;
+  currentKey: string;
+  onNavigate: (path: string) => void;
+}) {
+  const [open, setOpen] = useState(true);
+  const articleCount = countArticles(node);
+  return (
+    <li className="wk-tree-folder">
+      <button
+        type="button"
+        className="wk-tree-folder-btn"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <span className="wk-tree-chevron" aria-hidden="true">
+          {open ? "▾" : "▸"}
+        </span>
+        <span className="wk-tree-folder-name">{node.name}</span>
+        <span className="wk-tree-count">{articleCount}</span>
+      </button>
+      {open ? (
+        <ul className="wk-tree-children">
+          <TreeBranch
+            node={node}
+            currentKey={currentKey}
+            onNavigate={onNavigate}
+          />
+        </ul>
+      ) : null}
+    </li>
+  );
+}
+
+function TreeArticle({
+  item,
+  current,
+  onNavigate,
+  nested,
+}: {
+  item: WikiCatalogEntry;
+  current: boolean;
+  onNavigate: (path: string) => void;
+  nested: boolean;
+}) {
+  return (
+    <li className={current ? "current wk-tree-article" : "wk-tree-article"}>
+      <a
+        href={`#/wiki/${encodeURI(item.path)}`}
+        className={nested ? "wk-tree-article-link is-nested" : undefined}
+        title={item.path}
+        onClick={(e) => {
+          e.preventDefault();
+          onNavigate(item.path);
+        }}
+      >
+        <span className="wk-tree-file-dot" aria-hidden="true" />
+        <span className="wk-tree-article-title">{item.title}</span>
+      </a>
+    </li>
+  );
+}
+
+function countArticles(node: WikiTreeNode): number {
+  return (
+    node.articles.length +
+    node.folders.reduce((count, child) => count + countArticles(child), 0)
+  );
 }
 
 /**
