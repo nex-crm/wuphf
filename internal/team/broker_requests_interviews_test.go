@@ -311,7 +311,9 @@ func TestBrokerPostRequestDedupeKeyRecreatesAfterAnswer(t *testing.T) {
 		var out struct {
 			ID string `json:"id"`
 		}
-		_ = json.NewDecoder(resp.Body).Decode(&out)
+		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
 		return out.ID
 	}
 
@@ -383,7 +385,9 @@ func TestBrokerPostRequestDedupeKeyRecreatesAfterCancel(t *testing.T) {
 			ID      string `json:"id"`
 			Deduped bool   `json:"deduped"`
 		}
-		_ = json.NewDecoder(resp.Body).Decode(&out)
+		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
 		return out.ID, out.Deduped
 	}
 
