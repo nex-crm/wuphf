@@ -262,7 +262,7 @@ func TestHandleCompleteDecodesBlueprintAndAgents(t *testing.T) {
 		var gotTask, gotBlueprint string
 		var gotSkipTask bool
 		var gotAgents []string
-		captured := func(task string, skipTask bool, blueprintID string, selectedAgents []string) error {
+		captured := func(task string, skipTask bool, blueprintID string, selectedAgents []string, _ string) error {
 			gotTask = task
 			gotSkipTask = skipTask
 			gotBlueprint = blueprintID
@@ -307,7 +307,7 @@ func TestHandleCompleteBackwardCompatWithLegacyClient(t *testing.T) {
 	withTempHome(t, func(_ string) {
 		var gotBlueprint string
 		var gotAgents []string
-		captured := func(task string, skipTask bool, blueprintID string, selectedAgents []string) error {
+		captured := func(task string, skipTask bool, blueprintID string, selectedAgents []string, _ string) error {
 			gotBlueprint = blueprintID
 			gotAgents = selectedAgents
 			return nil
@@ -340,7 +340,7 @@ func TestHandleCompleteBackwardCompatWithLegacyClient(t *testing.T) {
 func TestHandleCompleteReturns500OnCompleteFnError(t *testing.T) {
 	withTempHome(t, func(_ string) {
 		const secretDetail = "secret-path-/etc/wuphf/state.yaml"
-		failing := func(task string, skipTask bool, blueprintID string, selectedAgents []string) error {
+		failing := func(task string, skipTask bool, blueprintID string, selectedAgents []string, _ string) error {
 			return fmt.Errorf("%s: simulated loader failure for %q", secretDetail, blueprintID)
 		}
 

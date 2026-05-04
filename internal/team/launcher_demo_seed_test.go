@@ -16,7 +16,7 @@ import (
 func TestSkipTaskSeedsWelcomeAndPresence(t *testing.T) {
 	ensureOperationsFallbackFS(t)
 	b := newTestBroker(t)
-	if err := b.onboardingCompleteFn("", true, "niche-crm", nil); err != nil {
+	if err := b.onboardingCompleteFn("", true, "niche-crm", nil, ""); err != nil {
 		t.Fatalf("onboardingCompleteFn: %v", err)
 	}
 
