@@ -19,6 +19,8 @@ afterEach(() => {
     wikiLookupQuery: null,
     notebookAgentSlug: null,
     notebookEntrySlug: null,
+    workbenchAgentSlug: null,
+    workbenchTaskId: null,
   });
 });
 
@@ -120,6 +122,26 @@ describe("channel unread state", () => {
     expect(useAppStore.getState().currentApp).toBeNull();
     expect(useAppStore.getState().unreadByChannel.general).toBe(0);
     expect(useAppStore.getState().unreadByChannel.launch).toBe(1);
+  });
+});
+
+describe("workbench navigation state", () => {
+  it("clears scoped workbench context for generic app navigation", () => {
+    useAppStore.getState().openAgentWorkbench("builder", "task-7");
+
+    expect(useAppStore.getState()).toMatchObject({
+      currentApp: "workbench",
+      workbenchAgentSlug: "builder",
+      workbenchTaskId: "task-7",
+    });
+
+    useAppStore.getState().setCurrentApp("workbench");
+
+    expect(useAppStore.getState()).toMatchObject({
+      currentApp: "workbench",
+      workbenchAgentSlug: null,
+      workbenchTaskId: null,
+    });
   });
 });
 

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import { getOfficeMembers } from "../../api/client";
@@ -68,6 +68,7 @@ function useAgentWorkbenchModel(
   const [activeTaskId, setActiveTaskId] = useState<string | null>(
     taskId ?? null,
   );
+  const previousAgentSlug = useRef(agentSlug);
 
   const logsQuery = useQuery({
     queryKey: ["agent-workbench", "agent-log-tasks"],
@@ -110,8 +111,15 @@ function useAgentWorkbenchModel(
   );
 
   useEffect(() => {
-    setActiveTaskId(taskId ?? null);
-  }, [taskId]);
+    setActiveTaskId((current) => {
+      const nextTaskId = taskId ?? null;
+      if (previousAgentSlug.current === agentSlug && current === nextTaskId) {
+        return current;
+      }
+      previousAgentSlug.current = agentSlug;
+      return nextTaskId;
+    });
+  }, [agentSlug, taskId]);
 
   useEffect(() => {
     if (taskId || activeTaskId || visibleTasks.length === 0) return;
@@ -121,9 +129,12 @@ function useAgentWorkbenchModel(
   const agent = selectedAgentSlug
     ? members.find((member) => member.slug === selectedAgentSlug)
     : null;
-  const selectedRun =
-    relevantRuns.find((run) => run.taskId === selectedTask?.id) ??
-    relevantRuns[0];
+  const requestedTaskId = taskId ?? activeTaskId;
+  const selectedRun = requestedTaskId
+    ? relevantRuns.find((run) => run.taskId === requestedTaskId)
+    : ((selectedTask
+        ? relevantRuns.find((run) => run.taskId === selectedTask.id)
+        : undefined) ?? relevantRuns[0]);
   const loadState = getLoadState(
     logsQuery.isLoading || tasksQuery.isLoading,
     logsQuery.isError || tasksQuery.isError,
@@ -516,6 +527,7 @@ function resolveAgentSlug(
     if (run?.agentSlug) return run.agentSlug;
     const task = tasks.find((candidate) => candidate.id === selectedTaskId);
     if (task?.owner) return task.owner;
+    return null;
   }
   return runs[0]?.agentSlug || tasks.find((task) => task.owner)?.owner || null;
 }
@@ -541,6 +553,7 @@ function filterTasks(
 ): Task[] {
   return tasks.filter((task) => {
     if (taskId && task.id !== taskId) return false;
+    if (agentSlug && !taskId && task.owner !== agentSlug) return false;
     if (agentSlug && task.owner && task.owner !== agentSlug) return false;
     return true;
   });
@@ -558,7 +571,6 @@ function resolveTask(
   return (
     visibleTasks.find((task) => task.id === selectedTaskId) ||
     allTasks.find((task) => task.id === selectedTaskId) ||
-    visibleTasks[0] ||
     null
   );
 }

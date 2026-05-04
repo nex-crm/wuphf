@@ -142,8 +142,13 @@ describe("AgentWorkbench", () => {
       status: "review",
       owner: "alpha",
     };
+    const unownedTask: Task = {
+      id: "task-789",
+      title: "Unowned backlog item",
+      status: "todo",
+    };
     getOfficeTasksMock.mockResolvedValue({
-      tasks: [researchTask, secondTask],
+      tasks: [researchTask, secondTask, unownedTask],
     });
     listAgentLogTasksMock.mockResolvedValue({
       tasks: [
@@ -168,6 +173,7 @@ describe("AgentWorkbench", () => {
 
     await screen.findByRole("button", { name: /task-123/i });
     expect(screen.getAllByText("Ship review packet").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Unowned backlog item")).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: /task-123/i }));
     expect(
       screen.getAllByText("Map onboarding evidence").length,
@@ -185,6 +191,78 @@ describe("AgentWorkbench", () => {
     expect(screen.getByTestId("agent-terminal")).toHaveTextContent(
       "terminal:alpha",
     );
+  });
+
+  it("does not reuse the selected task when switching agents", async () => {
+    const betaTask: Task = {
+      id: "task-beta",
+      title: "Review beta launch",
+      status: "todo",
+      owner: "beta",
+    };
+    getOfficeMembersMock.mockResolvedValue({
+      members: [
+        { slug: "alpha", name: "Alpha", role: "Research" },
+        { slug: "beta", name: "Beta", role: "Builder" },
+      ],
+    });
+    getOfficeTasksMock.mockResolvedValue({ tasks: [researchTask, betaTask] });
+    listAgentLogTasksMock.mockResolvedValue({
+      tasks: [
+        {
+          taskId: "task-123",
+          agentSlug: "alpha",
+          toolCallCount: 4,
+          lastToolAt: Date.UTC(2026, 4, 1, 10, 10),
+          sizeBytes: 2048,
+        },
+        {
+          taskId: "task-beta",
+          agentSlug: "beta",
+          toolCallCount: 2,
+          lastToolAt: Date.UTC(2026, 4, 1, 11, 10),
+          sizeBytes: 1024,
+        },
+      ],
+    });
+
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false },
+      },
+    });
+    const { rerender } = render(
+      <QueryClientProvider client={queryClient}>
+        <AgentWorkbench agentSlug="alpha" />
+      </QueryClientProvider>,
+    );
+
+    expect(
+      (await screen.findAllByText("Map onboarding evidence")).length,
+    ).toBeGreaterThan(0);
+
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <AgentWorkbench agentSlug="beta" />
+      </QueryClientProvider>,
+    );
+
+    expect(
+      (await screen.findAllByText("Review beta launch")).length,
+    ).toBeGreaterThan(0);
+    expect(screen.queryAllByText("Map onboarding evidence").length).toBe(0);
+    expect(screen.getByTestId("agent-terminal")).toHaveTextContent(
+      "terminal:beta",
+    );
+  });
+
+  it("does not guess another agent or task for a stale task deep link", async () => {
+    renderWorkbench({ taskId: "missing-task" });
+
+    expect(await screen.findByText("No workbench data")).toBeInTheDocument();
+    expect(screen.queryAllByText("Map onboarding evidence").length).toBe(0);
+    expect(screen.queryByText("@alpha")).not.toBeInTheDocument();
   });
 
   it("shows a polished empty state when no data is available", async () => {

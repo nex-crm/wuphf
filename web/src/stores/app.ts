@@ -237,13 +237,17 @@ export const useAppStore = create<AppStore>((set, get) => ({
       return;
     }
 
+    const scopedAppState =
+      app === "workbench"
+        ? { workbenchAgentSlug: null, workbenchTaskId: null }
+        : {};
     const { currentChannel, channelMeta } = get();
     if (isDMChannel(currentChannel, channelMeta)) {
-      set({ currentApp: app, currentChannel: "general" });
+      set({ currentApp: app, currentChannel: "general", ...scopedAppState });
       return;
     }
 
-    set({ currentApp: app });
+    set({ currentApp: app, ...scopedAppState });
   },
   workbenchAgentSlug: null,
   workbenchTaskId: null,
