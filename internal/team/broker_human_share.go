@@ -238,6 +238,10 @@ func (b *Broker) acceptHumanInvite(token, displayName, device string) (string, h
 			LastSeenAt:  now.Format(time.RFC3339),
 		}
 		b.humanSessions = append(b.humanSessions, session)
+		if b.humanSessionRevoke == nil {
+			b.humanSessionRevoke = make(map[string]chan struct{})
+		}
+		b.humanSessionRevoke[session.ID] = make(chan struct{})
 		b.counter++
 		b.appendMessageLocked(channelMessage{
 			ID:        fmt.Sprintf("msg-%d", b.counter),
@@ -269,6 +273,10 @@ func (b *Broker) revokeHumanSession(id string) error {
 		}
 		if b.humanSessions[i].RevokedAt == "" {
 			b.humanSessions[i].RevokedAt = now.Format(time.RFC3339)
+			if ch, ok := b.humanSessionRevoke[id]; ok {
+				close(ch)
+				delete(b.humanSessionRevoke, id)
+			}
 		}
 		return b.saveLocked()
 	}
@@ -292,6 +300,18 @@ func (b *Broker) humanSessionIDActive(id string) bool {
 		return expiresAt.IsZero() || now.Before(expiresAt)
 	}
 	return false
+}
+
+// humanSessionRevokeCh returns a channel that is closed when the session is
+// revoked. Returns a nil channel (blocks forever) for broker-bearer actors and
+// for sessions whose revoke channel has already been consumed.
+func (b *Broker) humanSessionRevokeCh(id string) <-chan struct{} {
+	if id == "" {
+		return nil
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.humanSessionRevoke[id]
 }
 
 func (b *Broker) humanSessionFromRequest(r *http.Request) (humanSession, bool) {

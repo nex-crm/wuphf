@@ -65,16 +65,15 @@ func (b *Broker) handleEvents(w http.ResponseWriter, r *http.Request) {
 	pamStarted, pamDone, pamFailed, unsubscribePam := b.SubscribePamActionEvents(64)
 	defer unsubscribePam()
 
-	actorStillAuthorized := func() bool {
-		if actor.Kind != requestActorKindHuman {
-			return true
-		}
-		return b.humanSessionIDActive(actor.SessionID)
-	}
+	// revoked is closed immediately when the human session is revoked.
+	// For broker-bearer actors it is nil (select on nil blocks forever — no-op).
+	revoked := b.humanSessionRevokeCh(actor.SessionID)
 
 	writeEvent := func(name string, payload any) error {
-		if !actorStillAuthorized() {
+		select {
+		case <-revoked:
 			return fmt.Errorf("human session revoked")
+		default:
 		}
 		data, err := json.Marshal(payload)
 		if err != nil {
@@ -93,19 +92,13 @@ func (b *Broker) handleEvents(w http.ResponseWriter, r *http.Request) {
 
 	heartbeat := time.NewTicker(15 * time.Second)
 	defer heartbeat.Stop()
-	// Poll auth state every second for human sessions so revoked streams
-	// close promptly without waiting for the next event or 15s heartbeat.
-	revokeCheck := time.NewTicker(time.Second)
-	defer revokeCheck.Stop()
 
 	for {
 		select {
 		case <-r.Context().Done():
 			return
-		case <-revokeCheck.C:
-			if !actorStillAuthorized() {
-				return
-			}
+		case <-revoked:
+			return
 		case msg, ok := <-messages:
 			if !ok || writeEvent("message", map[string]any{"message": msg}) != nil {
 				return
@@ -169,9 +162,6 @@ func (b *Broker) handleEvents(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		case <-heartbeat.C:
-			if !actorStillAuthorized() {
-				return
-			}
 			if _, err := fmt.Fprintf(w, ": ping\n\n"); err != nil {
 				return
 			}
