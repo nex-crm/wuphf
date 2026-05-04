@@ -66,6 +66,7 @@ func (l *Launcher) runHeadlessOpenAICompatTurn(ctx context.Context, slug string,
 	// repeat calls, so a single lookup is sufficient for both the bridge-
 	// failure notice and the per-chunk pushes in the loop callbacks below.
 	var agentStream *agentStreamBuffer
+	activeTaskID := l.agentActiveTaskID(slug)
 	if l.broker != nil {
 		agentStream = l.broker.AgentStream(slug)
 	}
@@ -81,7 +82,7 @@ func (l *Launcher) runHeadlessOpenAICompatTurn(ctx context.Context, slug string,
 	if bridgeErr != nil {
 		appendHeadlessCodexLog(slug, fmt.Sprintf("openai_compat_mcp-bridge-failed: %v (falling back to text-only)", bridgeErr))
 		if agentStream != nil {
-			agentStream.Push(fmt.Sprintf("[bridge unavailable: %v — replying without tools]", bridgeErr))
+			agentStream.PushTask(activeTaskID, fmt.Sprintf("[bridge unavailable: %v — replying without tools]", bridgeErr))
 		}
 		tools = nil
 	}
@@ -123,8 +124,9 @@ func (l *Launcher) runHeadlessOpenAICompatTurn(ctx context.Context, slug string,
 	// (see openai_compat_turn_state.go). The state machine is
 	// independently unit-tested via openai_compat_turn_state_test.go.
 	state := newOpenAICompatTurnState(&runtimeTurnSinks{
-		l:    l,
-		slug: slug,
+		l:      l,
+		slug:   slug,
+		taskID: activeTaskID,
 		// agentStream may be nil during edge-case launcher setups; the
 		// sink's pushAgentStream short-circuits on nil so the state
 		// machine stays oblivious.

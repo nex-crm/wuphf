@@ -102,7 +102,6 @@ function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
   const currentApp = useAppStore((s) => s.currentApp);
   const setCurrentChannel = useAppStore((s) => s.setCurrentChannel);
   const setCurrentApp = useAppStore((s) => s.setCurrentApp);
-  const openAgentWorkbench = useAppStore((s) => s.openAgentWorkbench);
   const queryClient = useQueryClient();
   const [dmLoading, setDmLoading] = useState(false);
   const [view, setView] = useState<"stream" | "logs">("stream");
@@ -326,13 +325,6 @@ function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
           disabled={dmLoading}
         >
           {dmLoading ? "Opening..." : "Open DM"}
-        </button>
-        <button
-          type="button"
-          className="btn btn-ghost btn-sm"
-          onClick={() => openAgentWorkbench(agent.slug)}
-        >
-          Open workbench
         </button>
         <button
           type="button"

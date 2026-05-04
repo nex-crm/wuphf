@@ -119,10 +119,9 @@ export interface AppStore {
   setCurrentChannel: (ch: string) => void;
   currentApp: string | null; // null = messages view
   setCurrentApp: (app: string | null) => void;
-  workbenchAgentSlug: string | null;
-  workbenchTaskId: string | null;
-  openAgentWorkbench: (agentSlug: string, taskId?: string | null) => void;
-  setWorkbenchRoute: (agentSlug: string | null, taskId: string | null) => void;
+  taskDetailId: string | null;
+  openTaskDetail: (taskId: string) => void;
+  setTaskDetailRoute: (taskId: string | null) => void;
 
   // Channel metadata (DM info, etc.)
   channelMeta: Record<string, ChannelMeta>;
@@ -224,6 +223,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set((state) => ({
       currentChannel: ch,
       currentApp: null,
+      taskDetailId: null,
       unreadByChannel: { ...state.unreadByChannel, [ch]: 0 },
     })),
   currentApp: null,
@@ -232,15 +232,15 @@ export const useAppStore = create<AppStore>((set, get) => ({
       const { currentChannel, unreadByChannel } = get();
       set({
         currentApp: null,
+        taskDetailId: null,
         unreadByChannel: { ...unreadByChannel, [currentChannel]: 0 },
       });
       return;
     }
 
-    const scopedAppState =
-      app === "workbench"
-        ? { workbenchAgentSlug: null, workbenchTaskId: null }
-        : {};
+    const scopedAppState = {
+      taskDetailId: null,
+    };
     const { currentChannel, channelMeta } = get();
     if (isDMChannel(currentChannel, channelMeta)) {
       set({ currentApp: app, currentChannel: "general", ...scopedAppState });
@@ -249,15 +249,12 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
     set({ currentApp: app, ...scopedAppState });
   },
-  workbenchAgentSlug: null,
-  workbenchTaskId: null,
-  openAgentWorkbench: (agentSlug, taskId = null) =>
-    get().setWorkbenchRoute(agentSlug, taskId),
-  setWorkbenchRoute: (agentSlug, taskId) =>
+  taskDetailId: null,
+  openTaskDetail: (taskId) => get().setTaskDetailRoute(taskId),
+  setTaskDetailRoute: (taskId) =>
     set({
-      currentApp: "workbench",
-      workbenchAgentSlug: agentSlug,
-      workbenchTaskId: taskId,
+      currentApp: "tasks",
+      taskDetailId: taskId,
       activeAgentSlug: null,
     }),
 
@@ -343,6 +340,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set((s) => ({
       currentChannel: channelSlug,
       currentApp: null,
+      taskDetailId: null,
       channelMeta: {
         ...s.channelMeta,
         [channelSlug]: { ...s.channelMeta[channelSlug], type: "D", agentSlug },
@@ -406,6 +404,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set({
       currentChannel: "general",
       currentApp: null,
+      taskDetailId: null,
       unreadByChannel: {},
       activeThreadId: null,
       lastMessageId: null,
@@ -423,8 +422,6 @@ export const useAppStore = create<AppStore>((set, get) => ({
       wikiLookupQuery: null,
       notebookAgentSlug: null,
       notebookEntrySlug: null,
-      workbenchAgentSlug: null,
-      workbenchTaskId: null,
     }),
 
   wikiPath: null,

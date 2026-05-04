@@ -551,6 +551,33 @@ func TestBrokerAgentRateLimitExemptsSSEPaths(t *testing.T) {
 	}
 }
 
+func TestBrokerAgentRateLimitCountsTerminalWebsocketPath(t *testing.T) {
+	b := newTestBroker(t)
+	b.agentRateLimitRequests = 2
+	b.agentRateLimitWindow = time.Second
+	handler := b.rateLimitMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	for i := 0; i < 3; i++ {
+		req := httptest.NewRequest(http.MethodGet, "/terminal/agents/ceo", nil)
+		req.RemoteAddr = "127.0.0.1:6666"
+		req.Header.Set("Authorization", "Bearer "+b.Token())
+		req.Header.Set("X-WUPHF-Agent", "ceo")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		resp := rec.Result()
+		resp.Body.Close()
+
+		if i < 2 && resp.StatusCode != http.StatusOK {
+			t.Fatalf("terminal request %d status = %d, want 200", i+1, resp.StatusCode)
+		}
+		if i == 2 && resp.StatusCode != http.StatusTooManyRequests {
+			t.Fatalf("terminal request %d status = %d, want 429", i+1, resp.StatusCode)
+		}
+	}
+}
+
 // TestIsLoopbackRemote verifies the RemoteAddr-side half of the DNS-rebinding
 // guard. Empty and unparseable addresses must fail closed — otherwise a
 // test-only path, or a listener that exposes synthetic RemoteAddr, would
