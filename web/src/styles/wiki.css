@@ -1646,6 +1646,10 @@
   color: var(--wk-text-muted);
   margin: 0;
 }
+.wk-editor-optional {
+  font-weight: 400;
+  color: var(--wk-text-muted);
+}
 .wk-editor-banner {
   padding: 10px 14px;
   border: 1px solid var(--wk-border);
