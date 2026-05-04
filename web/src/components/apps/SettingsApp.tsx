@@ -61,7 +61,6 @@ function useShredAction() {
 
 function GeneralSection({ cfg, save }: SectionProps) {
   const [provider, setProvider] = useState(cfg.llm_provider ?? "ollama");
-  const [memory, setMemory] = useState(cfg.memory_backend ?? "nex");
   const [teamLead, setTeamLead] = useState(cfg.team_lead_slug ?? "");
   const [maxConcurrent, setMaxConcurrent] = useState(
     cfg.max_concurrent_agents ? String(cfg.max_concurrent_agents) : "",
@@ -77,7 +76,6 @@ function GeneralSection({ cfg, save }: SectionProps) {
   const onSave = async () => {
     const patch: ConfigUpdate = {
       llm_provider: provider as ConfigUpdate["llm_provider"],
-      memory_backend: memory as ConfigUpdate["memory_backend"],
       default_format: format,
       blueprint,
       email,
@@ -116,18 +114,6 @@ function GeneralSection({ cfg, save }: SectionProps) {
           </optgroup>
         </select>
       </Field>
-      <Field label="Memory Backend" hint="--memory-backend">
-        <select
-          style={styles.input}
-          value={memory}
-          onChange={(e) => setMemory(e.target.value as typeof memory)}
-        >
-          <option value="nex">Nex</option>
-          <option value="gbrain">GBrain</option>
-          <option value="none">None (local only)</option>
-        </select>
-      </Field>
-
       <div style={{ ...styles.groupTitle, marginTop: 24 }}>Agents</div>
       <Field label="Team Lead" hint="Default agent that leads operations">
         <input
@@ -1005,7 +991,6 @@ function IntervalsSection({ cfg, save }: SectionProps) {
 
 const CLI_FLAGS: [string, string][] = [
   ["--provider <name>", "LLM provider (claude-code, codex, opencode)"],
-  ["--memory-backend <name>", "Memory backend (nex, gbrain, none)"],
   ["--blueprint <id>", "Operation blueprint for this run"],
   ["--tui", "Launch tmux TUI instead of web UI"],
   ["--web-port <port>", "Web UI port (default: 7891)"],
@@ -1027,7 +1012,6 @@ const CLI_FLAGS: [string, string][] = [
 
 const ENV_VARS: [string, string][] = [
   ["WUPHF_LLM_PROVIDER", "LLM provider override"],
-  ["WUPHF_MEMORY_BACKEND", "Memory backend override"],
   ["WUPHF_API_KEY", "Nex API key"],
   ["WUPHF_BROKER_PORT", "Broker port"],
   ["WUPHF_CONFIG_PATH", "Config file path override"],
