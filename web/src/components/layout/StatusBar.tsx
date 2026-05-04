@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import { getHealth, type HealthResponse } from "../../api/platform";
 import { useOfficeMembers } from "../../hooks/useMembers";
+import { appTitle } from "../../lib/constants";
 import { isDMChannel, useAppStore } from "../../stores/app";
 import { Kbd } from "../ui/Kbd";
 import { StatusPill } from "../workspaces/StatusPill";
@@ -32,7 +33,7 @@ export function StatusBar() {
   ).length;
 
   const channelLabel = currentApp
-    ? currentApp
+    ? appTitle(currentApp)
     : dm
       ? `@${dm.agentSlug}`
       : `# ${currentChannel}`;

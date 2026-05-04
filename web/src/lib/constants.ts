@@ -13,9 +13,16 @@ export const SIDEBAR_APPS = [
   { id: "skills", icon: "\u26A1", name: "Skills" },
   { id: "activity", icon: "\uD83D\uDCE6", name: "Activity" },
   { id: "receipts", icon: "\uD83E\uDDFE", name: "Receipts" },
-  { id: "health-check", icon: "\uD83D\uDD0D", name: "Health Check" },
+  { id: "health-check", icon: "\uD83D\uDCF6", name: "Access & Health" },
   { id: "settings", icon: "\u2699", name: "Settings" },
 ] as const;
+
+export function appTitle(app: string): string {
+  return (
+    SIDEBAR_APPS.find((item) => item.id === app)?.name ??
+    app.replace(/-/g, " ").replace(/\b\w/g, (char) => char.toUpperCase())
+  );
+}
 
 export const ONBOARDING_COPY = {
   step1_headline: "AI employees with a shared brain",
