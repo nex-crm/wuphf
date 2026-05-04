@@ -1,5 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
+import { useCallback, useState } from "react";
 
+import { initApi } from "../../api/client";
 import { getHealth, type HealthResponse } from "../../api/platform";
 import { useOfficeMembers } from "../../hooks/useMembers";
 import { appTitle } from "../../lib/constants";
@@ -16,7 +18,22 @@ export function StatusBar() {
   const currentApp = useAppStore((s) => s.currentApp);
   const channelMeta = useAppStore((s) => s.channelMeta);
   const brokerConnected = useAppStore((s) => s.brokerConnected);
+  const setBrokerConnected = useAppStore((s) => s.setBrokerConnected);
   const setComposerHelpOpen = useAppStore((s) => s.setComposerHelpOpen);
+
+  const [retrying, setRetrying] = useState(false);
+
+  const handleRetry = useCallback(async () => {
+    setRetrying(true);
+    try {
+      await initApi();
+      setBrokerConnected(true);
+    } catch {
+      // still disconnected
+    } finally {
+      setRetrying(false);
+    }
+  }, [setBrokerConnected]);
   const { data: members = [] } = useOfficeMembers();
   const dm = !currentApp ? isDMChannel(currentChannel, channelMeta) : null;
 
@@ -79,11 +96,19 @@ export function StatusBar() {
           ) : null}
         </span>
       ) : null}
-      <span
-        className={`status-bar-item status-bar-conn${brokerConnected ? "" : " disconnected"}`}
-      >
-        {brokerConnected ? "connected" : "disconnected"}
-      </span>
+      {brokerConnected ? (
+        <span className="status-bar-item status-bar-conn">connected</span>
+      ) : (
+        <button
+          type="button"
+          className="status-bar-item status-bar-conn status-bar-conn-retry disconnected"
+          onClick={handleRetry}
+          disabled={retrying}
+          title="Click to reconnect"
+        >
+          {retrying ? "retrying…" : "disconnected"}
+        </button>
+      )}
     </div>
   );
 }
