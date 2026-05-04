@@ -136,6 +136,7 @@ describe("unknown slash commands", () => {
 
     const consumed = handleSlashCommand("/object list", {
       leadSlug: "ceo",
+      clearMessages: vi.fn(),
       sendAsMessage,
     });
 
