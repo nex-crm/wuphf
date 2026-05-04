@@ -100,6 +100,15 @@ func (b *Broker) handleSkillsCRUDSubpath(w http.ResponseWriter, r *http.Request)
 	case "reject":
 		b.handleSkillReject(w, r, name)
 		return true
+	case "disable":
+		b.handleSkillDisable(w, r, name)
+		return true
+	case "enable":
+		b.handleSkillEnable(w, r, name)
+		return true
+	case "restore":
+		b.handleSkillRestore(w, r, name)
+		return true
 	}
 	return false
 }
@@ -366,6 +375,169 @@ func (b *Broker) handleSkillArchive(w http.ResponseWriter, r *http.Request, name
 		slog.Warn("handleSkillArchive: saveLocked failed", "name", skCopy.Name, "err", saveErr)
 	}
 	b.mu.Unlock()
+
+	writeJSON(w, http.StatusOK, map[string]any{"skill": skCopy})
+}
+
+// handleSkillDisable flips an active or proposed skill to status=disabled.
+// Disabled is a soft pause: the skill stays in the catalog but is excluded
+// from invocation. Returns 409 if the skill is already disabled or archived.
+func (b *Broker) handleSkillDisable(w http.ResponseWriter, r *http.Request, name string) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	b.mu.Lock()
+	sk := b.findSkillByNameIncludingArchivedLocked(name)
+	if sk == nil {
+		b.mu.Unlock()
+		http.Error(w, "skill not found", http.StatusNotFound)
+		return
+	}
+	if sk.Status != "active" && sk.Status != "proposed" {
+		b.mu.Unlock()
+		http.Error(w, fmt.Sprintf("skill cannot be disabled from status=%s", sk.Status), http.StatusConflict)
+		return
+	}
+	sk.DisabledFromStatus = sk.Status
+	sk.Status = "disabled"
+	sk.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+	skCopy := *sk
+
+	fm := teamSkillToFrontmatter(skCopy)
+	mdBytes, renderErr := RenderSkillMarkdown(fm, skCopy.Content)
+
+	channel := normalizeChannelSlug(skCopy.Channel)
+	if channel == "" {
+		channel = "general"
+	}
+	b.appendActionLocked("skill_update", "office", channel, skCopy.CreatedBy, truncateSummary(skCopy.Title+" [disabled]", 140), skCopy.ID)
+
+	wikiWorker := b.wikiWorker
+	wikiPath := skillWikiPath(skCopy.Name)
+	if saveErr := b.saveLocked(); saveErr != nil {
+		slog.Warn("handleSkillDisable: saveLocked failed", "name", skCopy.Name, "err", saveErr)
+	}
+	b.mu.Unlock()
+
+	if wikiWorker != nil && renderErr == nil {
+		if _, _, err := wikiWorker.Enqueue(context.Background(), skCopy.Name, wikiPath, string(mdBytes), "replace", "wuphf: disable skill "+skCopy.Name); err != nil {
+			slog.Warn("handleSkillDisable: wiki enqueue failed", "name", skCopy.Name, "err", err)
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"skill": skCopy})
+}
+
+// handleSkillEnable flips a disabled skill back to status=active. Returns 409
+// if the skill is not currently disabled (active or archived skills cannot be
+// enabled — archived must be restored first).
+func (b *Broker) handleSkillEnable(w http.ResponseWriter, r *http.Request, name string) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	b.mu.Lock()
+	sk := b.findSkillByNameLocked(name)
+	if sk == nil {
+		b.mu.Unlock()
+		http.Error(w, "skill not found", http.StatusNotFound)
+		return
+	}
+	if sk.Status != "disabled" {
+		b.mu.Unlock()
+		http.Error(w, fmt.Sprintf("skill cannot be enabled from status=%s", sk.Status), http.StatusConflict)
+		return
+	}
+	if sk.DisabledFromStatus == "proposed" {
+		b.mu.Unlock()
+		http.Error(w, "skill cannot be enabled from status=disabled; proposed skills require approval", http.StatusConflict)
+		return
+	}
+	sk.Status = "active"
+	sk.DisabledFromStatus = ""
+	sk.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+	skCopy := *sk
+
+	fm := teamSkillToFrontmatter(skCopy)
+	mdBytes, renderErr := RenderSkillMarkdown(fm, skCopy.Content)
+
+	channel := normalizeChannelSlug(skCopy.Channel)
+	if channel == "" {
+		channel = "general"
+	}
+	b.appendActionLocked("skill_update", "office", channel, skCopy.CreatedBy, truncateSummary(skCopy.Title+" [enabled]", 140), skCopy.ID)
+
+	wikiWorker := b.wikiWorker
+	wikiPath := skillWikiPath(skCopy.Name)
+	if saveErr := b.saveLocked(); saveErr != nil {
+		slog.Warn("handleSkillEnable: saveLocked failed", "name", skCopy.Name, "err", saveErr)
+	}
+	b.mu.Unlock()
+
+	if wikiWorker != nil && renderErr == nil {
+		if _, _, err := wikiWorker.Enqueue(context.Background(), skCopy.Name, wikiPath, string(mdBytes), "replace", "wuphf: enable skill "+skCopy.Name); err != nil {
+			slog.Warn("handleSkillEnable: wiki enqueue failed", "name", skCopy.Name, "err", err)
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"skill": skCopy})
+}
+
+// handleSkillRestore flips an archived skill back to status=active. Uses the
+// archive-aware lookup so the skill is reachable; returns 409 if the skill is
+// not currently archived.
+func (b *Broker) handleSkillRestore(w http.ResponseWriter, r *http.Request, name string) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	b.mu.Lock()
+	sk := b.findSkillByNameIncludingArchivedLocked(name)
+	if sk == nil {
+		b.mu.Unlock()
+		http.Error(w, "skill not found", http.StatusNotFound)
+		return
+	}
+	if sk.Status != "archived" {
+		b.mu.Unlock()
+		http.Error(w, fmt.Sprintf("skill cannot be restored from status=%s", sk.Status), http.StatusConflict)
+		return
+	}
+	if existing := b.findSkillByNameLocked(name); existing != nil && existing.ID != sk.ID {
+		b.mu.Unlock()
+		http.Error(w, "skill with this name already exists in a non-archived state", http.StatusConflict)
+		return
+	}
+	sk.Status = "active"
+	sk.DisabledFromStatus = ""
+	sk.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+	skCopy := *sk
+
+	fm := teamSkillToFrontmatter(skCopy)
+	mdBytes, renderErr := RenderSkillMarkdown(fm, skCopy.Content)
+
+	channel := normalizeChannelSlug(skCopy.Channel)
+	if channel == "" {
+		channel = "general"
+	}
+	b.appendActionLocked("skill_update", "office", channel, skCopy.CreatedBy, truncateSummary(skCopy.Title+" [restored]", 140), skCopy.ID)
+
+	wikiWorker := b.wikiWorker
+	wikiPath := skillWikiPath(skCopy.Name)
+	if saveErr := b.saveLocked(); saveErr != nil {
+		slog.Warn("handleSkillRestore: saveLocked failed", "name", skCopy.Name, "err", saveErr)
+	}
+	b.mu.Unlock()
+
+	if wikiWorker != nil && renderErr == nil {
+		if _, _, err := wikiWorker.Enqueue(context.Background(), skCopy.Name, wikiPath, string(mdBytes), "replace", "wuphf: restore skill "+skCopy.Name); err != nil {
+			slog.Warn("handleSkillRestore: wiki enqueue failed", "name", skCopy.Name, "err", err)
+		}
+	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"skill": skCopy})
 }
