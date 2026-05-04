@@ -93,6 +93,7 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 
 	// Pipe raw stdout to the agent stream for the web UI's live output pane.
 	var agentStream *agentStreamBuffer
+	taskID := l.agentActiveTaskID(slug)
 	if l.broker != nil {
 		agentStream = l.broker.AgentStream(slug)
 	}
@@ -104,7 +105,7 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 		for scanner.Scan() {
 			line := scanner.Text()
 			if agentStream != nil && line != "" {
-				agentStream.Push(line)
+				agentStream.PushTask(taskID, line)
 			}
 		}
 	}()

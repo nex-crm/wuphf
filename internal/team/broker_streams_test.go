@@ -16,7 +16,7 @@ import (
 // either grow the buffer unboundedly (memory leak) or drop too
 // aggressively (lose visible history).
 func TestAgentStreamBuffer_RecentReturnsBoundedHistory(t *testing.T) {
-	s := &agentStreamBuffer{subs: make(map[int]chan string)}
+	s := &agentStreamBuffer{subs: make(map[int]agentStreamSubscriber)}
 	for i := 0; i < 2100; i++ {
 		s.Push(fmt.Sprintf("line-%d", i))
 	}
@@ -41,6 +41,44 @@ func TestAgentStreamBuffer_RecentReturnsBoundedHistory(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Error("subscriber did not receive Push within 1s")
+	}
+}
+
+func TestAgentStreamBuffer_TaskScopedHistoryAndSubscribers(t *testing.T) {
+	s := &agentStreamBuffer{subs: make(map[int]agentStreamSubscriber)}
+	s.PushTask("task-1", "one")
+	s.PushTask("task-2", "two")
+	s.Push("global")
+
+	if got := strings.Join(s.recentTask("task-1"), ","); got != "one" {
+		t.Fatalf("task-1 recent = %q, want one", got)
+	}
+	if got := strings.Join(s.recent(), ","); got != "one,two,global" {
+		t.Fatalf("all recent = %q", got)
+	}
+
+	taskOne, cancelTaskOne := s.subscribeTask("task-1")
+	defer cancelTaskOne()
+	all, cancelAll := s.subscribe()
+	defer cancelAll()
+	s.PushTask("task-2", "two-live")
+	s.PushTask("task-1", "one-live")
+
+	select {
+	case got := <-all:
+		if got != "two-live" {
+			t.Fatalf("all subscriber first message = %q", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("all subscriber did not receive task-2 line")
+	}
+	select {
+	case got := <-taskOne:
+		if got != "one-live" {
+			t.Fatalf("task subscriber message = %q", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("task subscriber did not receive task-1 line")
 	}
 }
 

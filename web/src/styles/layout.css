@@ -1380,7 +1380,51 @@ html[data-theme="nex"]
   }
 }
 
-/* ─── Task detail modal ─── */
+/* ─── Task detail ─── */
+.task-detail-page {
+  min-height: 100%;
+  background: var(--bg);
+  padding: 18px;
+  overflow: auto;
+}
+.task-detail-page-card {
+  width: min(1180px, 100%);
+  max-width: none;
+  max-height: none;
+  min-height: calc(100vh - 132px);
+  margin: 0 auto;
+  box-shadow: none;
+}
+.task-detail-page .task-detail-header {
+  padding: 22px 24px 14px;
+}
+.task-detail-page .task-detail-section {
+  padding: 18px 24px;
+}
+.task-detail-terminal-section .agent-terminal-shell {
+  min-height: 360px;
+}
+.task-detail-terminal-section .agent-terminal-frame {
+  height: 320px;
+}
+.task-detail-page-empty {
+  display: grid;
+  place-items: center;
+  min-height: 100%;
+  padding: 24px;
+}
+.task-detail-page-missing {
+  width: min(420px, 100%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-card);
+  padding: 20px;
+}
+.task-detail-page-missing p {
+  margin: 0 0 14px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
 .task-detail-overlay {
   position: fixed;
   inset: 0;
@@ -1653,6 +1697,15 @@ html[data-theme="nex"]
   .task-detail-modal {
     width: 96%;
     padding: 0;
+  }
+  .task-detail-page {
+    padding: 10px;
+  }
+  .task-detail-page-card {
+    min-height: calc(100vh - 112px);
+  }
+  .task-detail-terminal-section .agent-terminal-frame {
+    height: 260px;
   }
   .task-detail-override {
     grid-template-columns: 1fr;

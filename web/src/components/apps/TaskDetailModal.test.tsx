@@ -24,10 +24,30 @@ vi.mock("../../api/tasks", async (importOriginal) => {
   };
 });
 
+vi.mock("../agents/AgentTerminal", () => ({
+  AgentTerminal: ({
+    slug,
+    taskId,
+    title,
+  }: {
+    slug: string | null;
+    taskId?: string | null;
+    title?: string;
+  }) => (
+    <div data-testid="agent-terminal">
+      {title}:{slug}:{taskId}
+    </div>
+  ),
+}));
+
 const getOfficeMembersMock = vi.mocked(getOfficeMembers);
 const updateTaskStatusMock = vi.mocked(updateTaskStatus);
 
-function renderTaskDetail(task: Task, onClose = vi.fn()) {
+function renderTaskDetail(
+  task: Task,
+  onClose = vi.fn(),
+  presentation: "modal" | "page" = "modal",
+) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
@@ -35,7 +55,11 @@ function renderTaskDetail(task: Task, onClose = vi.fn()) {
     onClose,
     ...render(
       <QueryClientProvider client={queryClient}>
-        <TaskDetailModal task={task} onClose={onClose} />
+        <TaskDetailModal
+          task={task}
+          onClose={onClose}
+          presentation={presentation}
+        />
       </QueryClientProvider>,
     ),
   };
@@ -147,6 +171,30 @@ describe("taskMemoryWorkflowBadge", () => {
 });
 
 describe("TaskDetailModal memory override", () => {
+  it("renders page presentation with a task-scoped terminal for agent-owned work", () => {
+    getOfficeMembersMock.mockResolvedValue({
+      members: [{ slug: "builder", name: "Builder", role: "engineer" }],
+    });
+
+    const task: Task = {
+      id: "task-123",
+      title: "Ship task detail terminal",
+      status: "in_progress",
+      channel: "general",
+      owner: "builder",
+    };
+
+    renderTaskDetail(task, vi.fn(), "page");
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Back to tasks" }),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("agent-terminal")).toHaveTextContent(
+      "Task terminal:builder:task-123",
+    );
+  });
+
   it("keeps the override action visible for satisfied workflows with partial errors", () => {
     getOfficeMembersMock.mockResolvedValue({
       members: [{ slug: "ceo", name: "CEO", role: "lead" }],

@@ -32,7 +32,6 @@ const APP_ICONS: Record<string, ComponentType<{ className?: string }>> = {
   wiki: BookStack,
   console: Terminal,
   tasks: CheckCircle,
-  workbench: Terminal,
   requests: ClipboardCheck,
   graph: ShareAndroid,
   policies: Shield,

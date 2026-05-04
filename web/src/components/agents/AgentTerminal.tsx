@@ -2,20 +2,22 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 
-import { subscribeAgentStream } from "../../lib/agentStreamClient";
+import { createTerminalWriteBuffer } from "../../lib/agentTerminalBuffer";
 import {
-  createTerminalWriteBuffer,
-  formatAgentTerminalChunk,
-} from "../../lib/agentTerminalBuffer";
+  type AgentTerminalSocket,
+  connectAgentTerminal,
+} from "../../lib/agentTerminalSocket";
 
 interface AgentTerminalProps {
   slug: string | null;
+  taskId?: string | null;
   title?: string;
   emptyLabel?: string;
 }
 
 export function AgentTerminal({
   slug,
+  taskId = null,
   title = "Live output",
   emptyLabel = "Waiting for output...",
 }: AgentTerminalProps) {
@@ -76,49 +78,40 @@ export function AgentTerminal({
     terminal.open(host);
     fitAddon.fit();
 
+    let terminalSocket: AgentTerminalSocket | null = null;
+    function sendResize() {
+      terminalSocket?.resize(terminal.cols, terminal.rows);
+    }
+
     const resizeObserver =
       typeof ResizeObserver === "undefined"
         ? null
         : new ResizeObserver(() => {
             fitAddon.fit();
+            sendResize();
           });
     resizeObserver?.observe(host);
 
-    let renderedChunks = 0;
     const buffer = createTerminalWriteBuffer((text) => terminal.write(text));
-    const subscription = subscribeAgentStream(slug, {
+    terminalSocket = connectAgentTerminal(slug, taskId, {
       onOpen: () => setConnectionState(true),
-      onLine: (line) => {
-        let parsed: Record<string, unknown> | undefined;
-        try {
-          parsed = JSON.parse(line);
-        } catch {
-          // Raw terminal output.
-        }
-
-        const formatted = formatAgentTerminalChunk(line);
-        if (formatted) {
-          renderedChunks += 1;
-          setOutputState(true);
-          buffer.enqueue(formatted);
-        }
-
-        if (parsed?.status === "idle" && renderedChunks > 0) {
-          subscription.close();
-          setConnectionState(false);
-        }
+      onData: (data) => {
+        if (!data) return;
+        setOutputState(true);
+        buffer.enqueue(data);
       },
       onError: () => setConnectionState(false),
       onClose: () => setConnectionState(false),
     });
+    sendResize();
 
     return () => {
-      subscription.close();
+      terminalSocket?.close();
       buffer.dispose();
       resizeObserver?.disconnect();
       terminal.dispose();
     };
-  }, [setConnectionState, setOutputState, slug]);
+  }, [setConnectionState, setOutputState, slug, taskId]);
 
   return (
     <div className="agent-terminal-shell">

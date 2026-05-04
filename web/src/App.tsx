@@ -14,7 +14,6 @@ import { ProviderSwitcherHost } from "./components/ui/ProviderSwitcher";
 import { ToastContainer } from "./components/ui/Toast";
 import type { WikiTab } from "./components/wiki/WikiTabs";
 import WikiTabs from "./components/wiki/WikiTabs";
-import { AgentWorkbench } from "./components/workbench/AgentWorkbench";
 import { useBrokerEvents } from "./hooks/useBrokerEvents";
 import { useHashRouter } from "./hooks/useHashRouter";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
@@ -251,9 +250,6 @@ function MainContent() {
   const notebookAgentSlug = useAppStore((s) => s.notebookAgentSlug);
   const notebookEntrySlug = useAppStore((s) => s.notebookEntrySlug);
   const setNotebookRoute = useAppStore((s) => s.setNotebookRoute);
-  const workbenchAgentSlug = useAppStore((s) => s.workbenchAgentSlug);
-  const workbenchTaskId = useAppStore((s) => s.workbenchTaskId);
-  const setWorkbenchRoute = useAppStore((s) => s.setWorkbenchRoute);
   // Pam's onActionDone bumps this; Wiki re-fetches article + history when
   // the prop changes. Lifted up here because Pam lives inside the tab bar
   // (so her desk can rest on the divider line).
@@ -339,17 +335,6 @@ function MainContent() {
     );
   }
 
-  if (currentApp === "workbench") {
-    return (
-      <WorkbenchPanel
-        agentSlug={workbenchAgentSlug}
-        taskId={workbenchTaskId}
-        onSelectionChange={setWorkbenchRoute}
-        onClose={() => setCurrentApp(workbenchTaskId ? "tasks" : null)}
-      />
-    );
-  }
-
   if (currentApp) {
     const panels: Record<string, ComponentType> = {
       tasks: TasksApp,
@@ -403,29 +388,6 @@ function MainContent() {
         <Composer />
       </Suspense>
     </>
-  );
-}
-
-function WorkbenchPanel({
-  agentSlug,
-  taskId,
-  onSelectionChange,
-  onClose,
-}: {
-  agentSlug: string | null;
-  taskId: string | null;
-  onSelectionChange: (agentSlug: string | null, taskId: string | null) => void;
-  onClose: () => void;
-}) {
-  return (
-    <div className="app-panel active">
-      <AgentWorkbench
-        agentSlug={agentSlug}
-        taskId={taskId}
-        onSelectionChange={onSelectionChange}
-        onClose={onClose}
-      />
-    </div>
   );
 }
 

@@ -496,6 +496,7 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/v1/logs", b.requireAuth(b.handleOTLPLogs))
 	mux.HandleFunc("/events", b.handleEvents)
 	mux.HandleFunc("/agent-stream/", b.requireAuth(b.handleAgentStream))
+	mux.HandleFunc("/terminal/agents/", b.requireAuth(b.handleAgentTerminal))
 	mux.HandleFunc("/agent-tool-event", b.requireAuth(b.handleAgentToolEvent))
 	// Multi-workspace routes (broker_workspaces.go). Every route below is
 	// wrapped through b.withAuth so the design's "every protected route

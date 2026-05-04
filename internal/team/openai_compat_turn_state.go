@@ -12,6 +12,7 @@ import (
 type runtimeTurnSinks struct {
 	l       *Launcher
 	slug    string
+	taskID  string
 	stream  *agentStreamBuffer
 	metrics *headlessProgressMetrics
 }
@@ -20,7 +21,7 @@ func (s *runtimeTurnSinks) pushAgentStream(line string) {
 	if s.stream == nil || line == "" {
 		return
 	}
-	s.stream.Push(line)
+	s.stream.PushTask(s.taskID, line)
 }
 
 func (s *runtimeTurnSinks) updateProgressLabel(label string) {

@@ -6,6 +6,7 @@ afterEach(() => {
   useAppStore.setState({
     currentChannel: "general",
     currentApp: null,
+    taskDetailId: null,
     activeThreadId: null,
     lastMessageId: null,
     clearedMessageIdsByChannel: {},
@@ -19,8 +20,6 @@ afterEach(() => {
     wikiLookupQuery: null,
     notebookAgentSlug: null,
     notebookEntrySlug: null,
-    workbenchAgentSlug: null,
-    workbenchTaskId: null,
   });
 });
 
@@ -53,6 +52,7 @@ describe("DM channel helpers", () => {
       wikiLookupQuery: "who owns renewal?",
       notebookAgentSlug: "ceo",
       notebookEntrySlug: "handoff",
+      taskDetailId: "task-1",
     });
 
     useAppStore.getState().resetForOnboarding();
@@ -72,6 +72,7 @@ describe("DM channel helpers", () => {
       wikiLookupQuery: null,
       notebookAgentSlug: null,
       notebookEntrySlug: null,
+      taskDetailId: null,
     });
   });
 });
@@ -97,6 +98,7 @@ describe("channel unread state", () => {
     useAppStore.setState({
       currentChannel: "general",
       currentApp: "tasks",
+      taskDetailId: "task-1",
       unreadByChannel: { general: 2, launch: 3 },
     });
 
@@ -105,6 +107,7 @@ describe("channel unread state", () => {
     expect(useAppStore.getState()).toMatchObject({
       currentChannel: "launch",
       currentApp: null,
+      taskDetailId: null,
     });
     expect(useAppStore.getState().unreadByChannel.launch).toBe(0);
     expect(useAppStore.getState().unreadByChannel.general).toBe(2);
@@ -114,33 +117,37 @@ describe("channel unread state", () => {
     useAppStore.setState({
       currentChannel: "general",
       currentApp: "tasks",
+      taskDetailId: "task-1",
       unreadByChannel: { general: 4, launch: 1 },
     });
 
     useAppStore.getState().setCurrentApp(null);
 
     expect(useAppStore.getState().currentApp).toBeNull();
+    expect(useAppStore.getState().taskDetailId).toBeNull();
     expect(useAppStore.getState().unreadByChannel.general).toBe(0);
     expect(useAppStore.getState().unreadByChannel.launch).toBe(1);
   });
 });
 
-describe("workbench navigation state", () => {
-  it("clears scoped workbench context for generic app navigation", () => {
-    useAppStore.getState().openAgentWorkbench("builder", "task-7");
+describe("task detail navigation state", () => {
+  it("opens task detail as the tasks app route", () => {
+    useAppStore.getState().openTaskDetail("task-7");
 
     expect(useAppStore.getState()).toMatchObject({
-      currentApp: "workbench",
-      workbenchAgentSlug: "builder",
-      workbenchTaskId: "task-7",
+      currentApp: "tasks",
+      taskDetailId: "task-7",
     });
+  });
 
-    useAppStore.getState().setCurrentApp("workbench");
+  it("clears scoped task context for generic app navigation", () => {
+    useAppStore.getState().openTaskDetail("task-7");
+
+    useAppStore.getState().setCurrentApp("tasks");
 
     expect(useAppStore.getState()).toMatchObject({
-      currentApp: "workbench",
-      workbenchAgentSlug: null,
-      workbenchTaskId: null,
+      currentApp: "tasks",
+      taskDetailId: null,
     });
   });
 });

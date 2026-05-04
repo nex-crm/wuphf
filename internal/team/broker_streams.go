@@ -9,33 +9,58 @@ import (
 
 type agentStreamBuffer struct {
 	mu     sync.Mutex
-	lines  []string
-	subs   map[int]chan string
+	lines  []agentStreamLine
+	subs   map[int]agentStreamSubscriber
 	nextID int
 }
 
+type agentStreamLine struct {
+	TaskID string
+	Text   string
+}
+
+type agentStreamSubscriber struct {
+	TaskID string
+	Ch     chan string
+}
+
 func (s *agentStreamBuffer) Push(line string) {
+	s.PushTask("", line)
+}
+
+func (s *agentStreamBuffer) PushTask(taskID, line string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.lines = append(s.lines, line)
+	s.lines = append(s.lines, agentStreamLine{
+		TaskID: strings.TrimSpace(taskID),
+		Text:   line,
+	})
 	if len(s.lines) > 2000 {
 		s.lines = s.lines[len(s.lines)-2000:]
 	}
-	for _, ch := range s.subs {
+	for _, sub := range s.subs {
+		if sub.TaskID != "" && sub.TaskID != strings.TrimSpace(taskID) {
+			continue
+		}
 		select {
-		case ch <- line:
+		case sub.Ch <- line:
 		default:
 		}
 	}
 }
 
 func (s *agentStreamBuffer) subscribe() (<-chan string, func()) {
+	return s.subscribeTask("")
+}
+
+func (s *agentStreamBuffer) subscribeTask(taskID string) (<-chan string, func()) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	id := s.nextID
 	s.nextID++
+	taskID = strings.TrimSpace(taskID)
 	ch := make(chan string, 128)
-	s.subs[id] = ch
+	s.subs[id] = agentStreamSubscriber{TaskID: taskID, Ch: ch}
 	return ch, func() {
 		// Close the channel after removing it from the map so a
 		// consumer blocked on `<-ch` is unparked instead of leaking.
@@ -45,17 +70,27 @@ func (s *agentStreamBuffer) subscribe() (<-chan string, func()) {
 		s.mu.Lock()
 		if existing, ok := s.subs[id]; ok {
 			delete(s.subs, id)
-			close(existing)
+			close(existing.Ch)
 		}
 		s.mu.Unlock()
 	}
 }
 
 func (s *agentStreamBuffer) recent() []string {
+	return s.recentTask("")
+}
+
+func (s *agentStreamBuffer) recentTask(taskID string) []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := make([]string, len(s.lines))
-	copy(out, s.lines)
+	taskID = strings.TrimSpace(taskID)
+	out := make([]string, 0, len(s.lines))
+	for _, line := range s.lines {
+		if taskID != "" && line.TaskID != taskID {
+			continue
+		}
+		out = append(out, line.Text)
+	}
 	return out
 }
 
@@ -69,10 +104,21 @@ func (b *Broker) AgentStream(slug string) *agentStreamBuffer {
 	}
 	s, ok := b.agentStreams[slug]
 	if !ok {
-		s = &agentStreamBuffer{subs: make(map[int]chan string)}
+		s = &agentStreamBuffer{subs: make(map[int]agentStreamSubscriber)}
 		b.agentStreams[slug] = s
 	}
 	return s
+}
+
+func (l *Launcher) agentActiveTaskID(slug string) string {
+	if l == nil {
+		return ""
+	}
+	task := l.agentActiveTask(slug)
+	if task == nil {
+		return ""
+	}
+	return strings.TrimSpace(task.ID)
 }
 
 func (b *Broker) SubscribeMessages(buffer int) (<-chan channelMessage, func()) {
