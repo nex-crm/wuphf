@@ -42,8 +42,6 @@ export const ROUTE_PATHS = {
   channel: "/channels/$channelSlug",
   dm: "/dm/$agentSlug",
   app: "/apps/$appId",
-  consoleAlias: "/console",
-  threadsAlias: "/threads",
   wiki: "/wiki",
   wikiLookup: "/wiki/lookup",
   wikiArticle: "/wiki/$",
@@ -86,18 +84,6 @@ export const ROUTE_CONTRACTS: readonly RouteContract[] = [
     path: ROUTE_PATHS.app,
     owns: ["currentApp"],
     legacyHashExamples: ["#/apps/tasks", "#/apps/settings"],
-  },
-  {
-    key: "consoleAlias",
-    path: ROUTE_PATHS.consoleAlias,
-    owns: ["legacy-alias"],
-    legacyHashExamples: ["#/console"],
-  },
-  {
-    key: "threadsAlias",
-    path: ROUTE_PATHS.threadsAlias,
-    owns: ["legacy-alias"],
-    legacyHashExamples: ["#/threads"],
   },
   {
     key: "wiki",

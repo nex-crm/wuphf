@@ -29,17 +29,6 @@ export const appRoute = createRoute({
   path: ROUTE_PATHS.app,
 });
 
-// /console and /threads — legacy aliases preserved during migration
-export const consoleAliasRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: ROUTE_PATHS.consoleAlias,
-});
-
-export const threadsAliasRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: ROUTE_PATHS.threadsAlias,
-});
-
 // Wiki, notebook, and review routes.
 export const wikiRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -93,8 +82,6 @@ export const routeTree = rootRoute.addChildren([
   channelRoute,
   dmRoute,
   appRoute,
-  consoleAliasRoute,
-  threadsAliasRoute,
   wikiRoute.addChildren([wikiIndexRoute, wikiLookupRoute, wikiArticleRoute]),
   notebooksRoute.addChildren([
     notebookAgentRoute.addChildren([notebookEntryRoute]),

@@ -4,7 +4,6 @@ import { describe, expect, it } from "vitest";
 import {
   appRoute,
   channelRoute,
-  consoleAliasRoute,
   createAppRouter,
   dmRoute,
   indexRoute,
@@ -12,7 +11,6 @@ import {
   notebookEntryRoute,
   notebooksRoute,
   reviewsRoute,
-  threadsAliasRoute,
   wikiArticleRoute,
   wikiIndexRoute,
   wikiLookupRoute,
@@ -63,8 +61,6 @@ describe("TanStack route tree", () => {
     ["/channels/launch", channelRoute.id],
     ["/dm/pm", dmRoute.id],
     ["/apps/tasks", appRoute.id],
-    ["/console", consoleAliasRoute.id],
-    ["/threads", threadsAliasRoute.id],
     ["/wiki", wikiIndexRoute.id],
     ["/wiki/lookup", wikiLookupRoute.id],
     ["/wiki/companies/acme", wikiArticleRoute.id],
@@ -102,5 +98,20 @@ describe("TanStack route tree", () => {
     const href = createAppRouter().history.createHref("/channels/general");
 
     expect(href).toBe("/#/channels/general");
+  });
+
+  it.each([
+    ["/console"],
+    ["/threads"],
+  ])("does not match the dropped legacy alias %s", (path) => {
+    const router = createAppRouter(
+      createMemoryHistory({ initialEntries: ["/"] }),
+    );
+    const leaf = router.matchRoutes(path).at(-1);
+
+    // /console and /threads were temporary aliases during phase 0. They
+    // should now only match the root (no leaf), so the canonical
+    // /apps/console and /apps/threads URLs are the single source of truth.
+    expect(leaf?.routeId).toBe("__root__");
   });
 });
