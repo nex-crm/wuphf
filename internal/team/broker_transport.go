@@ -13,8 +13,8 @@ package team
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/nex-crm/wuphf/internal/team/transport"
 )
@@ -35,7 +35,7 @@ func (h *brokerTransportHost) ReceiveMessage(_ context.Context, msg transport.Me
 		msg.Participant.AdapterName,
 	)
 	if err != nil {
-		if strings.Contains(err.Error(), "channel not found") {
+		if errors.Is(err, ErrChannelNotFound) {
 			return &transport.BindingChannelMissingError{ChannelSlug: msg.Binding.ChannelSlug}
 		}
 		return fmt.Errorf("transport: ReceiveMessage: %w", err)

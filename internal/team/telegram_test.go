@@ -360,10 +360,11 @@ func TestTelegramTransportContractInterface(t *testing.T) {
 		t.Fatalf("Name() = %q, want %q", tr.Name(), "telegram")
 	}
 
-	// Binding must declare channel scope.
+	// Binding must be empty: Telegram is multi-channel so there is no static
+	// ChannelSlug to declare at the transport level.
 	binding := tr.Binding()
-	if binding.Scope != teamTransport.ScopeChannel {
-		t.Fatalf("Binding().Scope = %q, want %q", binding.Scope, teamTransport.ScopeChannel)
+	if binding.ChannelSlug != "" || binding.MemberSlug != "" {
+		t.Fatalf("Binding() should be zero-value for multi-channel adapter, got %+v", binding)
 	}
 
 	// Health before Run returns disconnected (not yet connected).
@@ -398,7 +399,9 @@ func TestTelegramRouteInboundViaHost(t *testing.T) {
 		Text:      "hello via host",
 	}
 
-	tr.routeInbound(context.Background(), host, msg)
+	if err := tr.routeInbound(context.Background(), host, msg); err != nil {
+		t.Fatalf("routeInbound: %v", err)
+	}
 
 	msgs := b.ChannelMessages("telegram-general")
 	if len(msgs) != 1 {

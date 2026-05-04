@@ -2,6 +2,7 @@ package team
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -17,6 +18,10 @@ import (
 	"github.com/nex-crm/wuphf/internal/onboarding"
 	"github.com/nex-crm/wuphf/internal/workspace"
 )
+
+// ErrChannelNotFound is returned by PostInboundSurfaceMessage when the
+// declared channel does not exist in the broker.
+var ErrChannelNotFound = errors.New("channel not found")
 
 const BrokerPort = brokeraddr.DefaultPort
 
@@ -756,7 +761,7 @@ func (b *Broker) PostInboundSurfaceMessage(from, channel, content, provider stri
 				channel = dm.Slug
 			}
 		} else {
-			return channelMessage{}, fmt.Errorf("channel not found: %s", channel)
+			return channelMessage{}, fmt.Errorf("%w: %s", ErrChannelNotFound, channel)
 		}
 	}
 	b.counter++

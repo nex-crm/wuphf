@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -76,6 +77,10 @@ type TelegramTransport struct {
 	UserMap map[string]string
 	client  *http.Client
 
+	// chatMapMu protects ChatMap against concurrent reads from drainOutbound /
+	// typingLoop and writes from routeInbound (learning new DM chats).
+	chatMapMu sync.RWMutex
+
 	// health fields — written by pollInbound, read by Health(). Protected by mu.
 	mu            sync.Mutex
 	healthState   transport.HealthState
@@ -114,11 +119,12 @@ func NewTelegramTransport(broker *Broker, botToken string) *TelegramTransport {
 // every Participant value this transport creates.
 func (t *TelegramTransport) Name() string { return "telegram" }
 
-// Binding declares this adapter as channel-bound. ChannelSlug is left empty
-// because a single TelegramTransport instance can cover multiple channels via
-// ChatMap; the per-message channel is carried in each transport.Message.Binding.
+// Binding returns an empty binding because a single TelegramTransport instance
+// covers multiple channels via ChatMap. There is no single static ChannelSlug
+// to declare here; the per-message channel is carried in each
+// transport.Message.Binding constructed by routeInbound.
 func (t *TelegramTransport) Binding() transport.Binding {
-	return transport.Binding{Scope: transport.ScopeChannel}
+	return transport.Binding{}
 }
 
 // Health returns a point-in-time snapshot of adapter connectivity. O(1) — reads
@@ -144,15 +150,22 @@ func (t *TelegramTransport) Run(ctx context.Context, host transport.Host) error 
 		return fmt.Errorf("no telegram channels configured")
 	}
 
+	ctx2, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	errCh := make(chan error, 2)
-	go func() { errCh <- t.pollInbound(ctx, host) }()
-	go func() { errCh <- t.drainOutbound(ctx) }()
-	go t.typingLoop(ctx)
+	go func() { errCh <- t.pollInbound(ctx2, host) }()
+	go func() { errCh <- t.drainOutbound(ctx2) }()
+	go t.typingLoop(ctx2)
 
 	select {
 	case <-ctx.Done():
-		return ctx.Err()
+		return nil
 	case err := <-errCh:
+		cancel() // stop siblings
+		if ctx.Err() != nil || errors.Is(err, context.Canceled) {
+			return nil
+		}
 		return err
 	}
 }
@@ -178,6 +191,8 @@ func (t *TelegramTransport) Send(ctx context.Context, msg transport.Outbound) er
 // chatIDForSlug returns the Telegram chat_id string for the given office channel
 // slug, or "" if no mapping exists.
 func (t *TelegramTransport) chatIDForSlug(slug string) string {
+	t.chatMapMu.RLock()
+	defer t.chatMapMu.RUnlock()
 	for chatID, s := range t.ChatMap {
 		if s == slug && chatID != "0" {
 			return chatID
@@ -235,24 +250,32 @@ func (t *TelegramTransport) pollInbound(ctx context.Context, host transport.Host
 			log.Printf("[telegram] inbound: chat=%d type=%s text=%q",
 				upd.Message.Chat.ID, upd.Message.Chat.Type,
 				upd.Message.Text[:min(len(upd.Message.Text), 50)])
-			t.routeInbound(ctx, host, upd.Message)
+			if err := t.routeInbound(ctx, host, upd.Message); err != nil {
+				return err
+			}
 		}
 	}
 }
 
 // routeInbound resolves the channel for msg, then delivers it to the office via
-// host.UpsertParticipant + host.ReceiveMessage.
-func (t *TelegramTransport) routeInbound(ctx context.Context, host transport.Host, msg *telegramMsg) {
+// host.UpsertParticipant + host.ReceiveMessage. Returns a non-nil error when
+// the host signals a contract-level failure (e.g. ErrBindingChannelMissing);
+// the caller (pollInbound) propagates this to Run which exits the transport.
+func (t *TelegramTransport) routeInbound(ctx context.Context, host transport.Host, msg *telegramMsg) error {
 	chatIDStr := strconv.FormatInt(msg.Chat.ID, 10)
+
+	t.chatMapMu.Lock()
 	channel, ok := t.ChatMap[chatIDStr]
+	if !ok && msg.Chat.Type == "private" && t.DMChannel != "" {
+		channel = t.DMChannel
+		t.ChatMap[chatIDStr] = t.DMChannel
+		ok = true
+	}
+	t.chatMapMu.Unlock()
+
 	if !ok {
-		if msg.Chat.Type == "private" && t.DMChannel != "" {
-			channel = t.DMChannel
-			t.ChatMap[chatIDStr] = t.DMChannel
-		} else {
-			log.Printf("[telegram] inbound: unmapped chat %s", chatIDStr)
-			return
-		}
+		log.Printf("[telegram] inbound: unmapped chat %s", chatIDStr)
+		return nil
 	}
 
 	fromName := t.resolveUser(msg.From)
@@ -273,7 +296,7 @@ func (t *TelegramTransport) routeInbound(ctx context.Context, host transport.Hos
 	}
 
 	if err := host.UpsertParticipant(ctx, p, b); err != nil {
-		log.Printf("[telegram] upsert participant key=%s: %v", key, err)
+		return fmt.Errorf("telegram upsert participant: %w", err)
 	}
 	if err := host.ReceiveMessage(ctx, transport.Message{
 		Participant: p,
@@ -281,8 +304,9 @@ func (t *TelegramTransport) routeInbound(ctx context.Context, host transport.Hos
 		Text:        msg.Text,
 		ExternalID:  strconv.FormatInt(msg.MessageID, 10),
 	}); err != nil {
-		log.Printf("[telegram] receive message: %v", err)
+		return fmt.Errorf("telegram receive message: %w", err)
 	}
+	return nil
 }
 
 // drainOutbound periodically checks the broker's external queue and sends
@@ -296,6 +320,7 @@ func (t *TelegramTransport) drainOutbound(ctx context.Context) error {
 		}
 
 		// Rebuild reverse map each cycle (picks up dynamically added DM chats)
+		t.chatMapMu.RLock()
 		slugToChat := make(map[string]string, len(t.ChatMap))
 		for chatID, slug := range t.ChatMap {
 			if chatID == "0" {
@@ -303,6 +328,7 @@ func (t *TelegramTransport) drainOutbound(ctx context.Context) error {
 			}
 			slugToChat[slug] = chatID
 		}
+		t.chatMapMu.RUnlock()
 
 		msgs := t.Broker.ExternalQueue("telegram")
 		if len(msgs) > 0 {
@@ -352,7 +378,13 @@ func (t *TelegramTransport) typingLoop(ctx context.Context) {
 		}
 
 		// Send typing to all mapped Telegram chats
+		t.chatMapMu.RLock()
+		chatIDs := make([]string, 0, len(t.ChatMap))
 		for chatIDStr := range t.ChatMap {
+			chatIDs = append(chatIDs, chatIDStr)
+		}
+		t.chatMapMu.RUnlock()
+		for _, chatIDStr := range chatIDs {
 			chatID, err := strconv.ParseInt(chatIDStr, 10, 64)
 			if err != nil {
 				continue
@@ -371,7 +403,9 @@ func (t *TelegramTransport) HandleInbound(chatID int64, chatType string, from *t
 		if (chatType == "private") && t.DMChannel != "" {
 			channel = t.DMChannel
 			// Store the chat ID so we can reply to this user
+			t.chatMapMu.Lock()
 			t.ChatMap[chatIDStr] = t.DMChannel
+			t.chatMapMu.Unlock()
 		} else {
 			return fmt.Errorf("unmapped telegram chat: %s", chatIDStr)
 		}
