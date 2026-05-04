@@ -50,6 +50,7 @@ func (b *Broker) handleWebShareStart(w http.ResponseWriter, r *http.Request) {
 	status, err := b.webShareStart()
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
 		if status.Error == "" {
 			status.Error = err.Error()
 		}
@@ -71,6 +72,7 @@ func (b *Broker) handleWebShareStop(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := b.webShareStop(); err != nil {
 		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
 		status := b.webShareStatus()
 		if status.Error == "" {
 			status.Error = err.Error()

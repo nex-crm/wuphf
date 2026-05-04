@@ -2,6 +2,7 @@ package team
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -60,5 +61,30 @@ func TestWebShareStartRejectsGet(t *testing.T) {
 	b.handleWebShareStart(resp, req)
 	if resp.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("status = %d, want %d", resp.Code, http.StatusMethodNotAllowed)
+	}
+}
+
+func TestWebShareStartFailureReturnsServerError(t *testing.T) {
+	b := &Broker{}
+	b.SetWebShareController(
+		func() (WebShareStatus, error) {
+			return WebShareStatus{}, errors.New("no private network interface found")
+		},
+		func() WebShareStatus { return WebShareStatus{} },
+		func() error { return nil },
+	)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/share/start", nil)
+	resp := httptest.NewRecorder()
+	b.handleWebShareStart(resp, req)
+	if resp.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", resp.Code, http.StatusInternalServerError)
+	}
+	var out WebShareStatus
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if out.Error != "no private network interface found" {
+		t.Fatalf("error = %q, want controller error", out.Error)
 	}
 }
