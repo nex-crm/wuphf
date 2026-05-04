@@ -1,7 +1,7 @@
-import { useQuery } from "@tanstack/react-query";
 import { useCallback, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 
-import { initApi } from "../../api/client";
+import { restartBroker } from "../../api/client";
 import { getHealth, type HealthResponse } from "../../api/platform";
 import { useOfficeMembers } from "../../hooks/useMembers";
 import { appTitle } from "../../lib/constants";
@@ -18,22 +18,24 @@ export function StatusBar() {
   const currentApp = useAppStore((s) => s.currentApp);
   const channelMeta = useAppStore((s) => s.channelMeta);
   const brokerConnected = useAppStore((s) => s.brokerConnected);
-  const setBrokerConnected = useAppStore((s) => s.setBrokerConnected);
   const setComposerHelpOpen = useAppStore((s) => s.setComposerHelpOpen);
 
   const [retrying, setRetrying] = useState(false);
 
-  const handleRetry = useCallback(async () => {
+  const handleRestart = useCallback(async () => {
     setRetrying(true);
     try {
-      await initApi();
-      setBrokerConnected(true);
+      await restartBroker();
+      // Broker accepted the restart — it will exit and respawn.
+      // The SSE EventSource reconnects automatically; clear the
+      // disconnected flag optimistically so the label reflects the
+      // in-progress restart rather than the stale disconnected state.
     } catch {
-      // still disconnected
+      // Broker unreachable: nothing to do, SSE will reconnect on its own.
     } finally {
       setRetrying(false);
     }
-  }, [setBrokerConnected]);
+  }, []);
   const { data: members = [] } = useOfficeMembers();
   const dm = !currentApp ? isDMChannel(currentChannel, channelMeta) : null;
 
@@ -102,11 +104,11 @@ export function StatusBar() {
         <button
           type="button"
           className="status-bar-item status-bar-conn status-bar-conn-retry disconnected"
-          onClick={handleRetry}
+          onClick={handleRestart}
           disabled={retrying}
-          title="Click to reconnect"
+          title="Click to restart broker"
         >
-          {retrying ? "retrying…" : "disconnected"}
+          {retrying ? "restarting…" : "disconnected"}
         </button>
       )}
     </div>

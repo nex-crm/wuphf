@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { initApi } from "../../api/client";
+import { restartBroker } from "../../api/client";
 import { useAppStore } from "../../stores/app";
 
 export function DisconnectBanner() {
   const brokerConnected = useAppStore((s) => s.brokerConnected);
-  const setBrokerConnected = useAppStore((s) => s.setBrokerConnected);
 
   const [hadConnection, setHadConnection] = useState(false);
   const [dismissed, setDismissed] = useState(false);
@@ -31,14 +30,13 @@ export function DisconnectBanner() {
   const handleRetry = useCallback(async () => {
     setRetrying(true);
     try {
-      await initApi();
-      setBrokerConnected(true);
+      await restartBroker();
     } catch {
-      // Still disconnected
+      // Broker unreachable; SSE will reconnect on its own once it's back.
     } finally {
       setRetrying(false);
     }
-  }, [setBrokerConnected]);
+  }, []);
 
   const handleDismiss = useCallback(() => {
     dismissedForRef.current = brokerConnected;
