@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   type AgentRequest,
   answerRequest,
+  cancelRequest,
   getRequests,
 } from "../../api/client";
 import { formatRelativeTime } from "../../lib/format";
@@ -57,6 +58,36 @@ export function RequestsApp() {
     (r) => r.status && r.status !== "open" && r.status !== "pending",
   );
 
+  // Blocking requests are surfaced one at a time so a flood of agent
+  // approvals (e.g. retries of the same external action) cannot bury the
+  // human under a stack of identical cards. The next blocking request
+  // becomes visible as soon as the active one is answered or canceled.
+  const blockingPending = pending.filter((r) => r.blocking);
+  const nonBlockingPending = pending.filter((r) => !r.blocking);
+  const [activeBlocking] = blockingPending;
+  const queuedBlockingCount = Math.max(blockingPending.length - 1, 0);
+
+  const onAnswer = (id: string, choiceId: string) => {
+    answerRequest(id, choiceId)
+      .then(() => {
+        queryClient.invalidateQueries({ queryKey: ["requests"] });
+      })
+      .catch((e: Error) => showNotice(`Answer failed: ${e.message}`, "error"));
+  };
+
+  const dismissAllNonBlocking = () => {
+    if (nonBlockingPending.length === 0) return;
+    Promise.allSettled(nonBlockingPending.map((r) => cancelRequest(r.id)))
+      .then((results) => {
+        const failed = results.filter((r) => r.status === "rejected").length;
+        if (failed > 0) {
+          showNotice(`Dismissed with ${failed} error(s)`, "error");
+        }
+        queryClient.invalidateQueries({ queryKey: ["requests"] });
+      })
+      .catch((e: Error) => showNotice(`Dismiss failed: ${e.message}`, "error"));
+  };
+
   if (allRequests.length === 0) {
     return (
       <div
@@ -74,32 +105,75 @@ export function RequestsApp() {
 
   return (
     <>
-      {pending.length > 0 && (
+      {activeBlocking ? (
         <>
           <div
             style={{
-              fontSize: 13,
-              fontWeight: 600,
-              color: "var(--text-secondary)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 8,
               padding: "8px 0 4px",
             }}
           >
-            Pending ({pending.length})
+            <div
+              style={{
+                fontSize: 13,
+                fontWeight: 600,
+                color: "var(--text-secondary)",
+              }}
+            >
+              Blocking
+            </div>
+            {queuedBlockingCount > 0 ? (
+              <div style={{ fontSize: 12, color: "var(--text-tertiary)" }}>
+                {queuedBlockingCount} more queued
+              </div>
+            ) : null}
           </div>
-          {pending.map((req) => (
+          <RequestItem
+            key={activeBlocking.id}
+            request={activeBlocking}
+            isPending={true}
+            onAnswer={(choiceId) => onAnswer(activeBlocking.id, choiceId)}
+          />
+        </>
+      ) : null}
+
+      {nonBlockingPending.length > 0 && (
+        <>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 8,
+              padding: "8px 0 4px",
+            }}
+          >
+            <div
+              style={{
+                fontSize: 13,
+                fontWeight: 600,
+                color: "var(--text-secondary)",
+              }}
+            >
+              Pending ({nonBlockingPending.length})
+            </div>
+            <button
+              type="button"
+              className="btn btn-sm btn-ghost"
+              onClick={dismissAllNonBlocking}
+            >
+              Dismiss all
+            </button>
+          </div>
+          {nonBlockingPending.map((req) => (
             <RequestItem
               key={req.id}
               request={req}
               isPending={true}
-              onAnswer={(choiceId) => {
-                answerRequest(req.id, choiceId)
-                  .then(() => {
-                    queryClient.invalidateQueries({ queryKey: ["requests"] });
-                  })
-                  .catch((e: Error) =>
-                    showNotice(`Answer failed: ${e.message}`, "error"),
-                  );
-              }}
+              onAnswer={(choiceId) => onAnswer(req.id, choiceId)}
             />
           ))}
         </>
