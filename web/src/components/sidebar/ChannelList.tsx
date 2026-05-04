@@ -1,9 +1,17 @@
 import { type Channel, useChannels } from "../../hooks/useChannels";
 import { useOverflow } from "../../hooks/useOverflow";
+import { router } from "../../lib/router";
 import { useAppStore } from "../../stores/app";
 import { ChannelWizard, useChannelWizard } from "../channels/ChannelWizard";
 import { Kbd, MOD_KEY } from "../ui/Kbd";
 import { SidebarItemLabel } from "./SidebarItemLabel";
+
+function navigateToChannel(channelSlug: string): void {
+  void router.navigate({
+    to: "/channels/$channelSlug",
+    params: { channelSlug },
+  });
+}
 
 function ChannelRow({
   channel,
@@ -63,7 +71,6 @@ function ChannelRow({
 export function ChannelList() {
   const { data: channels = [] } = useChannels();
   const currentChannel = useAppStore((s) => s.currentChannel);
-  const setCurrentChannel = useAppStore((s) => s.setCurrentChannel);
   const currentApp = useAppStore((s) => s.currentApp);
   const unreadByChannel = useAppStore((s) => s.unreadByChannel);
   const wizard = useChannelWizard();
@@ -83,7 +90,7 @@ export function ChannelList() {
                 index={idx}
                 active={isActive}
                 unreadCount={unreadCount}
-                onSelect={setCurrentChannel}
+                onSelect={navigateToChannel}
               />
             );
           })}

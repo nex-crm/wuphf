@@ -27,7 +27,8 @@ import {
   useWorkspacesList,
   type Workspace,
 } from "../../api/workspaces";
-import { useAppStore } from "../../stores/app";
+import { router } from "../../lib/router";
+import { isDMChannel, useAppStore } from "../../stores/app";
 import { showNotice } from "../ui/Toast";
 import { CreateWorkspaceModal } from "./CreateWorkspaceModal";
 import { useRestoreToast } from "./RestoreToast";
@@ -355,7 +356,6 @@ export function WorkspaceRail({
   navigate = defaultNavigate,
 }: WorkspaceRailProps = {}) {
   const { data, isLoading } = useWorkspacesList();
-  const setCurrentApp = useAppStore((s) => s.setCurrentApp);
 
   const [hoveredSlug, setHoveredSlug] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
@@ -446,8 +446,22 @@ export function WorkspaceRail({
   const handleClick = useCallback(
     (ws: Workspace) => {
       if (ws.is_active || ws.name === activeName) {
-        // Already here — bring focus back to the office.
-        setCurrentApp(null);
+        // Already here — bring focus back to the office. Restore the
+        // current channel/DM rather than blanking to the index, since the
+        // user explicitly clicked their already-active workspace.
+        const s = useAppStore.getState();
+        const dm = isDMChannel(s.currentChannel, s.channelMeta);
+        if (dm) {
+          void router.navigate({
+            to: "/dm/$agentSlug",
+            params: { agentSlug: dm.agentSlug },
+          });
+        } else {
+          void router.navigate({
+            to: "/channels/$channelSlug",
+            params: { channelSlug: s.currentChannel || "general" },
+          });
+        }
         return;
       }
       if (ws.state === "running") {
@@ -468,7 +482,7 @@ export function WorkspaceRail({
       // starting / stopping — just notify; user will retry.
       showNotice(`Workspace '${ws.name}' is ${ws.state}.`, "info");
     },
-    [activeName, navigate, setCurrentApp],
+    [activeName, navigate],
   );
 
   const openKebab = useCallback((ws: Workspace, x: number, y: number) => {
@@ -597,7 +611,10 @@ export function WorkspaceRail({
             setKebab(null);
           }}
           onSettings={() => {
-            setCurrentApp("settings");
+            void router.navigate({
+              to: "/apps/$appId",
+              params: { appId: "settings" },
+            });
             setKebab(null);
           }}
           onShred={() => {

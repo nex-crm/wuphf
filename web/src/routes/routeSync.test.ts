@@ -62,11 +62,11 @@ describe("applyMatchToStore (URL → store)", () => {
     const s = useAppStore.getState();
     expect(s.currentChannel).toBe("human__pm");
     expect(s.currentApp).toBeNull();
-    expect(s.channelMeta["human__pm"]).toEqual({
+    expect(s.channelMeta.human__pm).toEqual({
       type: "D",
       agentSlug: "pm",
     });
-    expect(s.unreadByChannel["human__pm"]).toBe(0);
+    expect(s.unreadByChannel.human__pm).toBe(0);
   });
 
   it("hydrates currentApp for /apps/$appId", () => {

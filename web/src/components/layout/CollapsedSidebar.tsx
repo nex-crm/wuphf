@@ -30,9 +30,21 @@ import {
 import { getUsage } from "../../api/platform";
 import { SIDEBAR_APPS } from "../../lib/constants";
 import { formatTokens, formatUSD } from "../../lib/format";
+import { router } from "../../lib/router";
 import { useAppStore } from "../../stores/app";
 import { AgentList } from "../sidebar/AgentList";
 import { ChannelList } from "../sidebar/ChannelList";
+
+function navigateToSidebarApp(appId: string): void {
+  if (appId === "wiki") {
+    void router.navigate({ to: "/wiki" });
+    return;
+  }
+  void router.navigate({
+    to: "/apps/$appId",
+    params: { appId },
+  });
+}
 
 const APP_ICONS: Record<string, ComponentType<{ className?: string }>> = {
   studio: Play,
@@ -57,7 +69,6 @@ type HintState = { label: string; y: number } | null;
 export function CollapsedSidebar() {
   const toggleCollapsed = useAppStore((s) => s.toggleSidebarCollapsed);
   const currentApp = useAppStore((s) => s.currentApp);
-  const setCurrentApp = useAppStore((s) => s.setCurrentApp);
   const [popover, setPopover] = useState<Popover>(null);
   const [hint, setHint] = useState<HintState>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
@@ -120,7 +131,7 @@ export function CollapsedSidebar() {
           type="button"
           className={`sidebar-icon-btn${currentApp === "settings" ? " active" : ""}`}
           aria-label="Settings"
-          onClick={() => setCurrentApp("settings")}
+          onClick={() => navigateToSidebarApp("settings")}
           onMouseEnter={(e) => showHint(e, "Settings")}
           onMouseLeave={hideHint}
         >
@@ -174,7 +185,7 @@ export function CollapsedSidebar() {
               type="button"
               className={`sidebar-icon-btn${isActive ? " active" : ""}`}
               aria-label={app.name}
-              onClick={() => setCurrentApp(app.id)}
+              onClick={() => navigateToSidebarApp(app.id)}
               onMouseEnter={(e) => showHint(e, app.name)}
               onMouseLeave={hideHint}
             >

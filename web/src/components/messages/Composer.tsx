@@ -22,7 +22,8 @@ import {
   parseMentions,
   renderMentionTokens,
 } from "../../lib/mentions";
-import { directChannelSlug, useAppStore } from "../../stores/app";
+import { router } from "../../lib/router";
+import { useAppStore } from "../../stores/app";
 import { confirm } from "../ui/ConfirmDialog";
 import { openProviderSwitcher } from "../ui/ProviderSwitcher";
 import { showNotice } from "../ui/Toast";
@@ -31,6 +32,10 @@ import {
   type AutocompleteItem,
   applyAutocomplete,
 } from "./Autocomplete";
+
+function navigateToApp(appId: string): void {
+  void router.navigate({ to: "/apps/$appId", params: { appId } });
+}
 
 /** How many sent messages to keep in per-channel history. */
 const COMPOSER_HISTORY_LIMIT = 20;
@@ -173,26 +178,26 @@ function handleSlashCommand(input: string, handlers: SlashHandlers): boolean {
       store.setComposerHelpOpen(true);
       return true;
     case "/requests":
-      store.setCurrentApp("requests");
+      navigateToApp("requests");
       return true;
     case "/policies":
-      store.setCurrentApp("policies");
+      navigateToApp("policies");
       return true;
     case "/skills":
-      store.setCurrentApp("skills");
+      navigateToApp("skills");
       return true;
     case "/calendar":
-      store.setCurrentApp("calendar");
+      navigateToApp("calendar");
       return true;
     case "/tasks":
-      store.setCurrentApp("tasks");
+      navigateToApp("tasks");
       return true;
     case "/recover":
     case "/doctor":
-      store.setCurrentApp("health-check");
+      navigateToApp("health-check");
       return true;
     case "/threads":
-      store.setCurrentApp("threads");
+      navigateToApp("threads");
       return true;
     case "/provider":
       openProviderSwitcher();
@@ -224,8 +229,7 @@ function handleSlashCommand(input: string, handlers: SlashHandlers): boolean {
       return true;
     }
     case "/lint": {
-      store.setCurrentApp("wiki");
-      store.setWikiPath("_lint");
+      void router.navigate({ to: "/wiki/$", params: { _splat: "_lint" } });
       return true;
     }
     case "/remember": {
@@ -282,8 +286,10 @@ function handleSlashCommand(input: string, handlers: SlashHandlers): boolean {
         onConfirm: () =>
           post("/reset", {})
             .then(() => {
-              store.setLastMessageId(null);
-              store.setCurrentChannel("general");
+              void router.navigate({
+                to: "/channels/$channelSlug",
+                params: { channelSlug: "general" },
+              });
               showNotice("Office reset", "success");
             })
             .catch((e: Error) =>
@@ -298,9 +304,11 @@ function handleSlashCommand(input: string, handlers: SlashHandlers): boolean {
       }
       const slug = args.trim().toLowerCase();
       createDM(slug)
-        .then((data) => {
-          const ch = data.slug || directChannelSlug(slug);
-          store.enterDM(slug, ch);
+        .then(() => {
+          void router.navigate({
+            to: "/dm/$agentSlug",
+            params: { agentSlug: slug },
+          });
         })
         .catch(() => showNotice(`Agent not found: ${args.trim()}`, "error"));
       return true;

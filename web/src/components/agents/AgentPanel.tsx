@@ -8,7 +8,8 @@ import { listAgentLogTasks, type TaskLogSummary } from "../../api/tasks";
 import { useDefaultHarness } from "../../hooks/useConfig";
 import { useChannelMembers, useOfficeMembers } from "../../hooks/useMembers";
 import { resolveHarness } from "../../lib/harness";
-import { directChannelSlug, useAppStore } from "../../stores/app";
+import { router } from "../../lib/router";
+import { useAppStore } from "../../stores/app";
 import { confirm } from "../ui/ConfirmDialog";
 import { HarnessBadge } from "../ui/HarnessBadge";
 import { PixelAvatar } from "../ui/PixelAvatar";
@@ -96,12 +97,8 @@ function LogsSection({ slug }: { slug: string }) {
 }
 
 function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
-  const enterDM = useAppStore((s) => s.enterDM);
   const setActiveAgentSlug = useAppStore((s) => s.setActiveAgentSlug);
   const currentChannel = useAppStore((s) => s.currentChannel);
-  const currentApp = useAppStore((s) => s.currentApp);
-  const setCurrentChannel = useAppStore((s) => s.setCurrentChannel);
-  const setCurrentApp = useAppStore((s) => s.setCurrentApp);
   const queryClient = useQueryClient();
   const [dmLoading, setDmLoading] = useState(false);
   const [view, setView] = useState<"stream" | "logs">("stream");
@@ -126,20 +123,24 @@ function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
 
   async function handleOpenDM() {
     setDmLoading(true);
-    const optimisticChannel = directChannelSlug(agent.slug);
-    enterDM(agent.slug, optimisticChannel);
+    // Snapshot the current location so we can revert on broker error.
+    const prevHref = router.state.location.href;
+    const optimisticHref = router.buildLocation({
+      to: "/dm/$agentSlug",
+      params: { agentSlug: agent.slug },
+    }).href;
+    void router.navigate({
+      to: "/dm/$agentSlug",
+      params: { agentSlug: agent.slug },
+    });
     setActiveAgentSlug(null);
     try {
-      const result = await createDM(agent.slug);
-      const channel = result.slug || optimisticChannel;
-      if (channel !== optimisticChannel) {
-        enterDM(agent.slug, channel);
-      }
+      await createDM(agent.slug);
       void queryClient.invalidateQueries({ queryKey: ["channels"] });
     } catch (err: unknown) {
-      if (useAppStore.getState().currentChannel === optimisticChannel) {
-        setCurrentChannel(currentChannel);
-        setCurrentApp(currentApp);
+      // Only revert if the user hasn't already navigated elsewhere.
+      if (router.state.location.href === optimisticHref) {
+        void router.navigate({ to: prevHref });
         setActiveAgentSlug(agent.slug);
       }
       const message = err instanceof Error ? err.message : "Failed to open DM";

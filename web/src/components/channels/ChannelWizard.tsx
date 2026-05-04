@@ -5,7 +5,7 @@ import { useQueryClient } from "@tanstack/react-query";
 
 import { createChannel, generateChannel } from "../../api/client";
 import { useWindowEscape } from "../../hooks/useWindowEscape";
-import { useAppStore } from "../../stores/app";
+import { router } from "../../lib/router";
 
 type WizardMode = "describe" | "manual";
 
@@ -41,7 +41,6 @@ export function ChannelWizard({ open, onClose }: ChannelWizardProps) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const setCurrentChannel = useAppStore((s) => s.setCurrentChannel);
   const queryClient = useQueryClient();
 
   const updateManualField = useCallback(
@@ -109,7 +108,10 @@ export function ChannelWizard({ open, onClose }: ChannelWizardProps) {
       await queryClient.invalidateQueries({ queryKey: ["channels"] });
       resetState();
       onClose();
-      setCurrentChannel(newSlug);
+      void router.navigate({
+        to: "/channels/$channelSlug",
+        params: { channelSlug: newSlug },
+      });
     } catch (err: unknown) {
       const message =
         err instanceof Error ? err.message : "Failed to create channel";

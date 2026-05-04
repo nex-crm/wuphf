@@ -3,6 +3,7 @@ import { useQueries, useQuery } from "@tanstack/react-query";
 import { getChannels, getMessages, type Message } from "../../api/client";
 import { useOfficeMembers } from "../../hooks/useMembers";
 import { formatRelativeTime } from "../../lib/format";
+import { router } from "../../lib/router";
 import { useAppStore } from "../../stores/app";
 import { PixelAvatar } from "../ui/PixelAvatar";
 
@@ -19,10 +20,7 @@ interface ThreadRow {
  * reply count so the loudest conversations surface first.
  */
 export function ThreadsApp() {
-  const setCurrentApp = useAppStore((s) => s.setCurrentApp);
-  const setCurrentChannel = useAppStore((s) => s.setCurrentChannel);
   const setActiveThreadId = useAppStore((s) => s.setActiveThreadId);
-  const setLastMessageId = useAppStore((s) => s.setLastMessageId);
   const { data: members = [] } = useOfficeMembers();
 
   const { data: channelsData } = useQuery({
@@ -58,9 +56,10 @@ export function ThreadsApp() {
   threads.sort((a, b) => b.replyCount - a.replyCount);
 
   function openThread(t: ThreadRow) {
-    setCurrentApp(null);
-    setCurrentChannel(t.channel);
-    setLastMessageId(null);
+    void router.navigate({
+      to: "/channels/$channelSlug",
+      params: { channelSlug: t.channel },
+    });
     setActiveThreadId(t.id);
   }
 

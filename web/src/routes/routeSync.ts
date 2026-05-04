@@ -26,9 +26,8 @@ import {
 export const ROOT_ROUTE_ID = rootRoute.id;
 
 // Subset of the navigation slice the URL↔store adapter cares about.
-// Mirrored separately from AppStore so the bridge derivation function
-// stays pure and testable without dragging in setters or unrelated UI
-// state.
+// Mirrored separately from AppStore so deriveNavTarget stays pure and
+// testable without dragging in setters or unrelated UI state.
 export interface NavSlice {
   currentApp: string | null;
   currentChannel: string;
@@ -37,30 +36,6 @@ export interface NavSlice {
   wikiLookupQuery: string | null;
   notebookAgentSlug: string | null;
   notebookEntrySlug: string | null;
-}
-
-export function pickNavSlice(s: AppStore): NavSlice {
-  return {
-    currentApp: s.currentApp,
-    currentChannel: s.currentChannel,
-    channelMeta: s.channelMeta,
-    wikiPath: s.wikiPath,
-    wikiLookupQuery: s.wikiLookupQuery,
-    notebookAgentSlug: s.notebookAgentSlug,
-    notebookEntrySlug: s.notebookEntrySlug,
-  };
-}
-
-export function navSliceEquals(a: NavSlice, b: NavSlice): boolean {
-  return (
-    a.currentApp === b.currentApp &&
-    a.currentChannel === b.currentChannel &&
-    a.channelMeta === b.channelMeta &&
-    a.wikiPath === b.wikiPath &&
-    a.wikiLookupQuery === b.wikiLookupQuery &&
-    a.notebookAgentSlug === b.notebookAgentSlug &&
-    a.notebookEntrySlug === b.notebookEntrySlug
-  );
 }
 
 // ── URL → store ────────────────────────────────────────────────

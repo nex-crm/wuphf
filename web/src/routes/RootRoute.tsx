@@ -44,15 +44,7 @@ import { useBrokerEvents } from "../hooks/useBrokerEvents";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import { indexRoute, router } from "../lib/router";
 import { isDMChannel, useAppStore } from "../stores/app";
-import {
-  applyMatchToStore,
-  deriveNavTarget,
-  fillPath,
-  isUnmatchedRoute,
-  navSliceEquals,
-  navTargetSearchString,
-  pickNavSlice,
-} from "./routeSync";
+import { applyMatchToStore, isUnmatchedRoute } from "./routeSync";
 
 // ── Error boundary ─────────────────────────────────────────────
 
@@ -137,17 +129,60 @@ class ErrorBoundary extends Component<
 // its existing store-driven shape until step 4 (drain route fields out of
 // Zustand).
 
+function navigateWikiTab(tab: WikiTab): void {
+  if (tab === "wiki") {
+    void router.navigate({ to: "/wiki" });
+  } else if (tab === "notebooks") {
+    void router.navigate({ to: "/notebooks" });
+  } else {
+    void router.navigate({ to: "/reviews" });
+  }
+}
+
+function navigateWikiArticle(path: string | null): void {
+  if (path) {
+    void router.navigate({ to: "/wiki/$", params: { _splat: path } });
+  } else {
+    void router.navigate({ to: "/wiki" });
+  }
+}
+
+function navigateNotebookCatalog(): void {
+  void router.navigate({ to: "/notebooks" });
+}
+
+function navigateNotebookAgent(slug: string): void {
+  void router.navigate({
+    to: "/notebooks/$agentSlug",
+    params: { agentSlug: slug },
+  });
+}
+
+function navigateNotebookEntry(
+  agentSlug: string,
+  entrySlug: string | null,
+): void {
+  if (!entrySlug) {
+    void router.navigate({
+      to: "/notebooks/$agentSlug",
+      params: { agentSlug },
+    });
+    return;
+  }
+  void router.navigate({
+    to: "/notebooks/$agentSlug/$entrySlug",
+    params: { agentSlug, entrySlug },
+  });
+}
+
 function MainContent() {
   const currentApp = useAppStore((s) => s.currentApp);
   const currentChannel = useAppStore((s) => s.currentChannel);
   const channelMeta = useAppStore((s) => s.channelMeta);
   const wikiPath = useAppStore((s) => s.wikiPath);
-  const setWikiPath = useAppStore((s) => s.setWikiPath);
   const wikiLookupQuery = useAppStore((s) => s.wikiLookupQuery);
-  const setCurrentApp = useAppStore((s) => s.setCurrentApp);
   const notebookAgentSlug = useAppStore((s) => s.notebookAgentSlug);
   const notebookEntrySlug = useAppStore((s) => s.notebookEntrySlug);
-  const setNotebookRoute = useAppStore((s) => s.setNotebookRoute);
   // Pam's onActionDone bumps this; Wiki re-fetches article + history when
   // the prop changes. Lifted up here because Pam lives inside the tab bar
   // (so her desk can rest on the divider line).
@@ -160,16 +195,7 @@ function MainContent() {
   if (currentApp === "wiki-lookup") {
     return (
       <div className="wiki-shell">
-        <WikiTabs
-          current="wiki"
-          onSelect={(tab) => {
-            if (tab === "wiki") setCurrentApp("wiki");
-            else if (tab === "notebooks") {
-              setNotebookRoute(null, null);
-              setCurrentApp("notebooks");
-            } else setCurrentApp("reviews");
-          }}
-        />
+        <WikiTabs current="wiki" onSelect={navigateWikiTab} />
         <div className="wiki-shell-body">
           <CitedAnswer query={wikiLookupQuery || ""} />
         </div>
@@ -182,24 +208,13 @@ function MainContent() {
     currentApp === "notebooks" ||
     currentApp === "reviews"
   ) {
-    const handleTabChange = (tab: WikiTab) => {
-      if (tab === "wiki") {
-        setCurrentApp("wiki");
-      } else if (tab === "notebooks") {
-        setNotebookRoute(null, null);
-        setCurrentApp("notebooks");
-      } else {
-        setCurrentApp("reviews");
-      }
-    };
-
     const pamArticlePath = currentApp === "wiki" ? (wikiPath ?? null) : null;
 
     return (
       <div className="wiki-shell">
         <WikiTabs
           current={currentApp}
-          onSelect={handleTabChange}
+          onSelect={navigateWikiTab}
           pamArticlePath={pamArticlePath}
           onPamActionDone={() => setArticleRefreshNonce((n) => n + 1)}
         />
@@ -208,26 +223,17 @@ function MainContent() {
             <Wiki
               articlePath={wikiPath}
               externalRefreshNonce={articleRefreshNonce}
-              onNavigate={(path) => {
-                if (path === null) {
-                  setWikiPath(null);
-                } else {
-                  setWikiPath(path || null);
-                }
-              }}
+              onNavigate={navigateWikiArticle}
             />
           )}
           {currentApp === "notebooks" && (
             <Notebook
               agentSlug={notebookAgentSlug}
               entrySlug={notebookEntrySlug}
-              onOpenCatalog={() => setNotebookRoute(null, null)}
-              onOpenAgent={(slug) => setNotebookRoute(slug, null)}
-              onOpenEntry={(slug, entry) => setNotebookRoute(slug, entry)}
-              onNavigateWiki={(path) => {
-                setCurrentApp("wiki");
-                setWikiPath(path || null);
-              }}
+              onOpenCatalog={navigateNotebookCatalog}
+              onOpenAgent={navigateNotebookAgent}
+              onOpenEntry={navigateNotebookEntry}
+              onNavigateWiki={(path) => navigateWikiArticle(path || null)}
             />
           )}
           {currentApp === "reviews" && <ReviewQueueKanban />}
@@ -324,51 +330,6 @@ function UrlToStoreHydrator() {
     const search = JSON.parse(searchKey) as Record<string, unknown>;
     applyMatchToStore(routeId, params, search);
   }, [routeId, paramsKey, searchKey, navigate]);
-
-  return null;
-}
-
-// ── Store→URL bridge ────────────────────────────────────────────
-//
-// Mirrors navigation-relevant store fields back into the router so the URL
-// stays fresh while existing call sites still mutate the store directly
-// (sidebar clicks, slash commands, MainContent's wiki tabs, etc.).
-//
-// Skips the navigate call when the derived URL already matches the current
-// pathname. Safe against loops because the hydrator only writes the store
-// (never the URL), and the bridge subscribes to Zustand directly so it
-// only fires on actual store changes.
-//
-// **Debt**: this bridge is the temporary adapter from step 2 of the router
-// migration. Step 3 replaces every call site with `router.navigate(...)`
-// and deletes the bridge; step 4 deletes the mirrored store fields and
-// the hydrator above.
-
-function StoreToRouterBridge() {
-  const navigate = useNavigate();
-
-  useEffect(() => {
-    let prev = pickNavSlice(useAppStore.getState());
-    const unsubscribe = useAppStore.subscribe((state) => {
-      const next = pickNavSlice(state);
-      if (navSliceEquals(prev, next)) return;
-      prev = next;
-
-      const target = deriveNavTarget(next);
-      const targetPath = fillPath(target);
-      const targetSearch = navTargetSearchString(target);
-      const currentPath = router.state.location.pathname;
-      const currentSearchStr = router.state.location.searchStr;
-      if (
-        decodeURIComponent(currentPath) === decodeURIComponent(targetPath) &&
-        currentSearchStr === targetSearch
-      ) {
-        return;
-      }
-      void navigate({ ...target, replace: true });
-    });
-    return unsubscribe;
-  }, [navigate]);
 
   return null;
 }
@@ -515,7 +476,6 @@ export default function RootRoute() {
     body = (
       <>
         <UrlToStoreHydrator />
-        <StoreToRouterBridge />
         <Shell>
           <RoutedBody />
           {/* Outlet renders the matched leaf route's default component (an
