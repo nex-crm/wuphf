@@ -23,7 +23,10 @@ set -euo pipefail
 # something has gone seriously wrong (or a major feature has shipped
 # that warrants raising the ceiling explicitly).
 WARN_KB=950
-FAIL_KB=1200
+# Live agent output renders a full terminal emulator in the web UI. That is
+# intentional product weight, not an accidental import, so the fail line gives
+# this feature room while keeping the ratchet tight around the new bundle.
+FAIL_KB=1300
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 dist_assets="$repo_root/web/dist/assets"
