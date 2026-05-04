@@ -47,10 +47,8 @@ func (f *fakeChannelTransport) Binding() Binding {
 }
 
 // Run blocks until ctx is cancelled. In a real adapter this is where the
-// long-poll or WebSocket loop lives. The fake accepts an optional inject
-// channel so tests can drive inbound messages.
+// long-poll or WebSocket loop lives.
 func (f *fakeChannelTransport) Run(ctx context.Context, host Host) error {
-	// Fake: nothing to poll. Block until shutdown.
 	<-ctx.Done()
 	return nil
 }
