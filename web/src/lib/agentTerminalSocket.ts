@@ -75,7 +75,7 @@ export function connectAgentTerminal(
     }
   }
 
-  socket.onopen = (event) => {
+  socket.onopen = () => {
     if (closed) return;
     opened = true;
     handlers.onOpen?.();
@@ -84,7 +84,6 @@ export function connectAgentTerminal(
       pendingResize = null;
       sendResize(cols, rows);
     }
-    void event;
   };
   socket.onmessage = (event) => {
     if (closed) return;

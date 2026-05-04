@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -79,6 +80,66 @@ func TestAgentStreamBuffer_TaskScopedHistoryAndSubscribers(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("task subscriber did not receive task-1 line")
+	}
+}
+
+func TestAgentStreamBuffer_TaskHistorySurvivesGlobalEviction(t *testing.T) {
+	s := &agentStreamBuffer{subs: make(map[int]agentStreamSubscriber)}
+	s.PushTask("task-1", "one")
+	for i := 0; i < agentStreamHistoryLimit+1; i++ {
+		s.PushTask("task-2", fmt.Sprintf("two-%d", i))
+	}
+
+	if got := strings.Join(s.recentTask("task-1"), ","); got != "one" {
+		t.Fatalf("task-1 recent = %q, want one", got)
+	}
+	if got := s.recent(); len(got) != agentStreamHistoryLimit {
+		t.Fatalf("global recent length = %d, want %d", len(got), agentStreamHistoryLimit)
+	}
+}
+
+func TestAgentStreamBuffer_SubscribeTaskWithRecentHasNoReplayGap(t *testing.T) {
+	s := &agentStreamBuffer{subs: make(map[int]agentStreamSubscriber)}
+	s.PushTask("task-1", "history\n")
+
+	history, live, cancel := s.subscribeTaskWithRecent("task-1")
+	defer cancel()
+	if got := strings.Join(history, ""); got != "history\n" {
+		t.Fatalf("history = %q, want history line", got)
+	}
+
+	s.PushTask("task-1", "live\n")
+	select {
+	case got := <-live:
+		if got != "live\n" {
+			t.Fatalf("live = %q, want live line", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("subscriber did not receive live line")
+	}
+}
+
+func TestHandleAgentToolEvent_ScopesLineToActiveTask(t *testing.T) {
+	b := newTestBroker(t)
+	task, _, err := b.EnsureTask("general", "Inspect terminal", "Verify tool output", "ceo", "ceo", "")
+	if err != nil {
+		t.Fatalf("EnsureTask: %v", err)
+	}
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/agent-tool-event",
+		strings.NewReader(`{"slug":"ceo","phase":"call","tool":"team_broadcast","args":"{\"text\":\"hi\"}"}`),
+	)
+	rec := httptest.NewRecorder()
+	b.handleAgentToolEvent(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+
+	got := strings.Join(b.AgentStream("ceo").recentTask(task.ID), "\n")
+	if !strings.Contains(got, `"tool":"team_broadcast"`) {
+		t.Fatalf("task-scoped stream missing tool event: %q", got)
 	}
 }
 

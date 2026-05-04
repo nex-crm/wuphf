@@ -72,9 +72,6 @@ func isAgentBucketExemptPath(path string) bool {
 	if strings.HasPrefix(path, "/agent-stream/") {
 		return true
 	}
-	if strings.HasPrefix(path, "/terminal/agents/") {
-		return true
-	}
 	return false
 }
 

@@ -171,7 +171,7 @@ describe("taskMemoryWorkflowBadge", () => {
 });
 
 describe("TaskDetailModal memory override", () => {
-  it("renders page presentation with a task-scoped terminal for agent-owned work", () => {
+  it("renders page presentation with a task-scoped terminal for agent-owned work", async () => {
     getOfficeMembersMock.mockResolvedValue({
       members: [{ slug: "builder", name: "Builder", role: "engineer" }],
     });
@@ -188,7 +188,7 @@ describe("TaskDetailModal memory override", () => {
 
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Back to tasks" }),
+      await screen.findByRole("button", { name: "Back to tasks" }),
     ).toBeInTheDocument();
     expect(screen.getByTestId("agent-terminal")).toHaveTextContent(
       "Task terminal:builder:task-123",

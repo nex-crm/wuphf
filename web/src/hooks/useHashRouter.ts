@@ -27,8 +27,10 @@ function parseHash(hash: string): Route {
   if (parts[0] === "dm" && parts[1]) {
     return { view: "dm", agent: decodeURIComponent(parts[1]) };
   }
-  if (parts[0] === "tasks" && parts[1]) {
-    return { view: "task", taskId: decodeURIComponent(parts[1]) };
+  if (parts[0] === "tasks") {
+    return parts[1]
+      ? { view: "task", taskId: decodeURIComponent(parts[1]) }
+      : { view: "app", app: "tasks" };
   }
   if (parts[0] === "apps" && parts[1]) {
     const app = decodeURIComponent(parts[1]);
@@ -105,6 +107,9 @@ function stateToHash(state: {
   }
   if (state.currentApp === "tasks" && state.taskDetailId) {
     return `#/tasks/${encodeURIComponent(state.taskDetailId)}`;
+  }
+  if (state.currentApp === "tasks") {
+    return "#/tasks";
   }
   if (state.currentApp) {
     return `#/apps/${encodeURIComponent(state.currentApp)}`;

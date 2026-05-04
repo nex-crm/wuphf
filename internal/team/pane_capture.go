@@ -175,7 +175,7 @@ func (l *Launcher) paneCaptureLoop(ctx context.Context, slug, paneTarget string)
 			if len(line) > paneCaptureMaxDiffBytes {
 				line = line[:paneCaptureMaxDiffBytes] + paneCaptureTruncateMarker
 			}
-			stream.PushTask(l.agentActiveTaskID(slug), line)
+			stream.PushTask(l.agentActiveTaskID(slug), line+"\n")
 		}
 		prevLines = nextLines
 	}

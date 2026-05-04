@@ -7,11 +7,19 @@ import (
 	"time"
 )
 
+const (
+	agentStreamHistoryLimit     = 2000
+	agentStreamTaskHistoryLimit = 2000
+	agentStreamTaskBufferLimit  = 64
+)
+
 type agentStreamBuffer struct {
-	mu     sync.Mutex
-	lines  []agentStreamLine
-	subs   map[int]agentStreamSubscriber
-	nextID int
+	mu        sync.Mutex
+	lines     []agentStreamLine
+	taskLines map[string][]string
+	taskOrder []string
+	subs      map[int]agentStreamSubscriber
+	nextID    int
 }
 
 type agentStreamLine struct {
@@ -29,17 +37,21 @@ func (s *agentStreamBuffer) Push(line string) {
 }
 
 func (s *agentStreamBuffer) PushTask(taskID, line string) {
+	taskID = strings.TrimSpace(taskID)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.lines = append(s.lines, agentStreamLine{
-		TaskID: strings.TrimSpace(taskID),
+		TaskID: taskID,
 		Text:   line,
 	})
-	if len(s.lines) > 2000 {
-		s.lines = s.lines[len(s.lines)-2000:]
+	if len(s.lines) > agentStreamHistoryLimit {
+		s.lines = s.lines[len(s.lines)-agentStreamHistoryLimit:]
+	}
+	if taskID != "" {
+		s.pushTaskHistoryLocked(taskID, line)
 	}
 	for _, sub := range s.subs {
-		if sub.TaskID != "" && sub.TaskID != strings.TrimSpace(taskID) {
+		if sub.TaskID != "" && sub.TaskID != taskID {
 			continue
 		}
 		select {
@@ -49,6 +61,25 @@ func (s *agentStreamBuffer) PushTask(taskID, line string) {
 	}
 }
 
+func (s *agentStreamBuffer) pushTaskHistoryLocked(taskID, line string) {
+	if s.taskLines == nil {
+		s.taskLines = make(map[string][]string)
+	}
+	if _, ok := s.taskLines[taskID]; !ok {
+		s.taskOrder = append(s.taskOrder, taskID)
+		for len(s.taskOrder) > agentStreamTaskBufferLimit {
+			evict := s.taskOrder[0]
+			s.taskOrder = s.taskOrder[1:]
+			delete(s.taskLines, evict)
+		}
+	}
+	lines := append(s.taskLines[taskID], line)
+	if len(lines) > agentStreamTaskHistoryLimit {
+		lines = lines[len(lines)-agentStreamTaskHistoryLimit:]
+	}
+	s.taskLines[taskID] = lines
+}
+
 func (s *agentStreamBuffer) subscribe() (<-chan string, func()) {
 	return s.subscribeTask("")
 }
@@ -56,6 +87,17 @@ func (s *agentStreamBuffer) subscribe() (<-chan string, func()) {
 func (s *agentStreamBuffer) subscribeTask(taskID string) (<-chan string, func()) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.subscribeTaskLocked(taskID)
+}
+
+func (s *agentStreamBuffer) subscribeTaskWithRecent(taskID string) ([]string, <-chan string, func()) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ch, unsubscribe := s.subscribeTaskLocked(taskID)
+	return s.recentTaskLocked(taskID), ch, unsubscribe
+}
+
+func (s *agentStreamBuffer) subscribeTaskLocked(taskID string) (<-chan string, func()) {
 	id := s.nextID
 	s.nextID++
 	taskID = strings.TrimSpace(taskID)
@@ -83,12 +125,19 @@ func (s *agentStreamBuffer) recent() []string {
 func (s *agentStreamBuffer) recentTask(taskID string) []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.recentTaskLocked(taskID)
+}
+
+func (s *agentStreamBuffer) recentTaskLocked(taskID string) []string {
 	taskID = strings.TrimSpace(taskID)
+	if taskID != "" {
+		lines := s.taskLines[taskID]
+		out := make([]string, len(lines))
+		copy(out, lines)
+		return out
+	}
 	out := make([]string, 0, len(s.lines))
 	for _, line := range s.lines {
-		if taskID != "" && line.TaskID != taskID {
-			continue
-		}
 		out = append(out, line.Text)
 	}
 	return out
@@ -104,7 +153,10 @@ func (b *Broker) AgentStream(slug string) *agentStreamBuffer {
 	}
 	s, ok := b.agentStreams[slug]
 	if !ok {
-		s = &agentStreamBuffer{subs: make(map[int]agentStreamSubscriber)}
+		s = &agentStreamBuffer{
+			taskLines: make(map[string][]string),
+			subs:      make(map[int]agentStreamSubscriber),
+		}
 		b.agentStreams[slug] = s
 	}
 	return s

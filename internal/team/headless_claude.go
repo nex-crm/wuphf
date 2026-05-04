@@ -105,7 +105,7 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 		for scanner.Scan() {
 			line := scanner.Text()
 			if agentStream != nil && line != "" {
-				agentStream.PushTask(taskID, line)
+				agentStream.PushTask(taskID, line+"\n")
 			}
 		}
 	}()

@@ -113,7 +113,6 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 		r := bufio.NewReader(pr)
 		for {
 			chunk, err := r.ReadString('\n')
-			chunk = strings.TrimRight(chunk, "\r\n")
 			if agentStream != nil && chunk != "" {
 				agentStream.PushTask(taskID, chunk)
 			}

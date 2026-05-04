@@ -1113,7 +1113,8 @@ html[data-theme="nex"]
   flex-direction: column;
   gap: 12px;
 }
-.app-panel:has(.task-board) {
+.app-panel:has(.task-board),
+.app-panel:has(.task-detail-page) {
   padding: 0;
   gap: 0;
   overflow: hidden;
@@ -1401,10 +1402,10 @@ html[data-theme="nex"]
 .task-detail-page .task-detail-section {
   padding: 18px 24px;
 }
-.task-detail-terminal-section .agent-terminal-shell {
+.task-detail-page .task-detail-terminal-section .agent-terminal-shell {
   min-height: 360px;
 }
-.task-detail-terminal-section .agent-terminal-frame {
+.task-detail-page .task-detail-terminal-section .agent-terminal-frame {
   height: 320px;
 }
 .task-detail-page-empty {
@@ -1704,7 +1705,7 @@ html[data-theme="nex"]
   .task-detail-page-card {
     min-height: calc(100vh - 112px);
   }
-  .task-detail-terminal-section .agent-terminal-frame {
+  .task-detail-page .task-detail-terminal-section .agent-terminal-frame {
     height: 260px;
   }
   .task-detail-override {

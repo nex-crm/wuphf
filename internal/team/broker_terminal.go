@@ -1,16 +1,41 @@
 package team
 
 import (
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
+	"time"
 
 	"github.com/gorilla/websocket"
 )
 
+const terminalWriteDeadline = 10 * time.Second
+
 var terminalUpgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool {
+	CheckOrigin: terminalOriginAllowed,
+}
+
+func terminalOriginAllowed(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	origin := strings.TrimSpace(r.Header.Get("Origin"))
+	if origin == "" {
 		return true
-	},
+	}
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	host := u.Hostname()
+	if host == "" {
+		return false
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return strings.EqualFold(host, "localhost")
 }
 
 // handleAgentTerminal upgrades to a websocket terminal feed.
@@ -52,14 +77,15 @@ func (b *Broker) handleAgentTerminal(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	for _, line := range stream.recentTask(taskID) {
-		if err := conn.WriteMessage(websocket.TextMessage, []byte(terminalLine(line))); err != nil {
+	history, lines, unsubscribe := stream.subscribeTaskWithRecent(taskID)
+	defer unsubscribe()
+
+	for _, line := range history {
+		_ = conn.SetWriteDeadline(time.Now().Add(terminalWriteDeadline))
+		if err := conn.WriteMessage(websocket.TextMessage, []byte(line)); err != nil {
 			return
 		}
 	}
-
-	lines, unsubscribe := stream.subscribeTask(taskID)
-	defer unsubscribe()
 
 	for {
 		select {
@@ -71,19 +97,10 @@ func (b *Broker) handleAgentTerminal(w http.ResponseWriter, r *http.Request) {
 			if !ok {
 				return
 			}
-			if err := conn.WriteMessage(websocket.TextMessage, []byte(terminalLine(line))); err != nil {
+			_ = conn.SetWriteDeadline(time.Now().Add(terminalWriteDeadline))
+			if err := conn.WriteMessage(websocket.TextMessage, []byte(line)); err != nil {
 				return
 			}
 		}
 	}
-}
-
-func terminalLine(line string) string {
-	if line == "" {
-		return ""
-	}
-	if strings.ContainsAny(line, "\r\n") {
-		return line
-	}
-	return line + "\r\n"
 }
