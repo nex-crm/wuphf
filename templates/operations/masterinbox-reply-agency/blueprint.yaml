@@ -1,0 +1,189 @@
+id: masterinbox-reply-agency
+name: Master Inbox Reply Agency
+kind: agency_inbox
+description: Automated reply drafting for Master Inbox agency accounts. Agents enrich prospect context, consult playbooks, and draft replies.
+objective: When a prospect message arrives via Master Inbox, enrich the entity, consult playbooks, and draft a contextual reply — all non-destructive (drafts only).
+default_reviewer: ceo
+reviewer_paths:
+  "team/playbooks/**": reply-agent
+  "team/people/**": enrichment-agent
+  "team/policies/**": ceo
+
+starter:
+  lead_slug: ceo
+  general_channel_description: "Command deck for the Master Inbox reply operation."
+  kickoff_prompt: "You are operating a reply-drafting system for a sales agency using Master Inbox. When prospect messages arrive in #inbox, enrich the prospect entity with facts, consult playbooks, and draft contextual replies. All actions are non-destructive — drafts only, never send directly."
+  agents:
+    - slug: ceo
+      emoji: "🎯"
+      name: CEO
+      role: Routes incoming messages, handles escalations, approves policy changes
+      permission_mode: plan
+      checked: true
+      type: lead
+      built_in: true
+    - slug: reply-agent
+      emoji: "✍️"
+      name: Reply Agent
+      role: Drafts contextual replies to incoming prospect messages
+      permission_mode: auto
+      checked: true
+      type: specialist
+      expertise:
+        - Sales email composition
+        - Prospect research
+        - Objection handling
+        - Tone matching
+      personality: Writes concise, personalized replies. Always checks entity context and playbooks before drafting. Never sends directly — always drafts.
+    - slug: enrichment-agent
+      emoji: "🔍"
+      name: Enrichment Agent
+      role: Extracts and records prospect entity facts from messages
+      permission_mode: auto
+      checked: true
+      type: specialist
+      expertise:
+        - Entity extraction
+        - Contact enrichment
+        - Intent classification
+        - Sentiment analysis
+      personality: Records atomic facts about prospects methodically. Never invents information — only records what is directly observed in messages.
+  channels:
+    - slug: inbox
+      name: inbox
+      description: "Incoming prospect messages from Master Inbox"
+      members: [reply-agent, enrichment-agent]
+      surface:
+        provider: masterinbox
+        remote_id: "default"
+    - slug: enrichment
+      name: enrichment
+      description: "Entity enrichment activity and prospect research"
+      members: [enrichment-agent]
+    - slug: playbooks
+      name: playbooks
+      description: "Playbook management and policy discussion"
+      members: [reply-agent]
+  tasks:
+    - channel: inbox
+      owner: enrichment-agent
+      title: "Enrich prospect entities from incoming messages"
+      details: "For each incoming message, extract facts (intent, pricing mentions, objections, company info, sentiment) and record via entity_fact_record. Look up prospect data via masterinbox_get_prospect."
+    - channel: inbox
+      owner: reply-agent
+      title: "Draft replies to incoming prospect messages"
+      details: "After enrichment, read the entity brief, consult playbooks, and draft a reply via masterinbox_draft_reply. Flag escalation triggers (competitor mentions, legal questions, negative sentiment) to CEO."
+    - channel: playbooks
+      owner: reply-agent
+      title: "Maintain reply playbooks"
+      details: "As patterns emerge from prospect messages, update playbooks with new objection responses, pricing guidelines, and tone templates."
+
+bootstrap_config:
+  channel_name: "Master Inbox"
+  channel_slug: "masterinbox"
+  niche: "Automated reply drafting for sales agency inboxes"
+  audience: "Sales agencies using Master Inbox who need faster, context-aware replies"
+  positioning: "AI-drafted replies with richer context than native Master Inbox AI"
+
+stages:
+  - id: ingest
+    name: Ingest
+    engine: automation
+    description: "Receive incoming prospect messages via webhook"
+    exit_criteria: "Message posted to #inbox channel"
+  - id: enrich
+    name: Enrich
+    engine: execution
+    description: "Extract and record prospect entity facts"
+    exit_criteria: "Entity brief updated with new facts"
+  - id: draft
+    name: Draft
+    engine: execution
+    description: "Draft a contextual reply using enriched data and playbooks"
+    exit_criteria: "Draft created in Master Inbox"
+  - id: review
+    name: Review
+    engine: review
+    description: "Human reviews and sends the draft from Master Inbox"
+    exit_criteria: "Draft sent or revised by human"
+
+approval_rules:
+  - id: no-direct-send
+    trigger: public_send_or_publish
+    description: Never send a message directly. All replies must be created as drafts for human review.
+  - id: label-changes
+    trigger: label_mutation
+    description: Label changes are non-destructive and can be applied automatically.
+
+wiki_schema:
+  dirs:
+    - team/playbooks/
+    - team/people/
+    - team/companies/
+    - team/policies/
+  bootstrap:
+    - path: team/playbooks/reply-drafting.md
+      title: "Reply Drafting Playbook"
+      skeleton: |
+        # Reply Drafting Playbook
+
+        ## Tone & Style
+        - Professional but warm
+        - Mirror the prospect's formality level
+        - Keep replies under 150 words unless answering a complex question
+        - Use the prospect's first name
+
+        ## Reply Structure
+        1. Acknowledge what the prospect said (1 sentence)
+        2. Address their question or concern directly
+        3. Clear next step or call-to-action
+
+        ## Common Objections
+        _(Record objection patterns and effective responses here as they emerge)_
+
+        ## Pricing Discussions
+        _(Guidelines for pricing-related replies — what to say, what to defer)_
+
+        ## Escalation Triggers
+        - Competitor mention → flag for CEO review
+        - Legal/contract questions → flag for CEO review
+        - Negative sentiment → flag for CEO review
+        - Budget/authority concerns → flag for CEO review
+    - path: team/policies/reply-safety.md
+      title: "Reply Safety Policy"
+      skeleton: |
+        # Reply Safety Policy
+
+        ## Hard Rules
+        - NEVER send a reply directly — always use draft-message
+        - NEVER promise specific pricing without playbook backing
+        - NEVER make commitments about timelines, features, or contracts
+        - ALWAYS check entity brief before drafting
+
+        ## Soft Rules
+        - Flag uncertainty to CEO rather than guessing
+        - When in doubt, ask a clarifying question instead of answering
+        - Keep the conversation moving — don't let threads go cold
+
+        ## Data Handling
+        - Record facts from every message via entity_fact_record
+        - Never invent or assume facts — only record what was directly stated
+        - Update entity briefs when significant new information arrives
+    - path: team/playbooks/enrichment-guide.md
+      title: "Enrichment Guide"
+      skeleton: |
+        # Enrichment Guide
+
+        ## What to Extract from Each Message
+        - **Intent signals**: buying, evaluating, comparing, complaining, requesting info
+        - **Pricing mentions**: budget, cost concerns, competitor pricing
+        - **Objections**: specific reasons for hesitation
+        - **Company info**: size, industry, tech stack, use case
+        - **Sentiment**: positive, neutral, negative, urgent
+        - **Decision stage**: early research, active evaluation, negotiation, post-sale
+
+        ## Entity Fact Recording
+        - One fact per entity_fact_record call
+        - Use entity_kind: "people" for individual prospects
+        - Use entity_kind: "companies" for company-level facts
+        - Slug format: first-last (e.g., jane-doe) or company-name (e.g., acme-corp)

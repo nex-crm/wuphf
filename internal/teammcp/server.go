@@ -93,6 +93,12 @@ func registerSharedMemoryTools(server *mcp.Server) {
 		// Entity brief tools (v1.2) — fact log + broker-level synthesis.
 		// Same backend gate: entity briefs live in the wiki subtree.
 		registerEntityTools(server)
+		// Master Inbox tools — draft reply, add label, get prospect.
+		// Gated on WUPHF_MASTERINBOX_API_KEY so they only appear when
+		// the Master Inbox bridge is configured.
+		if os.Getenv("WUPHF_MASTERINBOX_API_KEY") != "" {
+			registerMasterInboxTools(server)
+		}
 		// Playbook compilation tools (v1.3) — compile team/playbooks/*.md
 		// into invokable skills + record execution outcomes. Same markdown
 		// substrate, so the backend gate is unchanged.

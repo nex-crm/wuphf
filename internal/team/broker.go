@@ -139,7 +139,8 @@ type Broker struct {
 	runtimeProvider    string          // "codex" or "claude" — set by launcher
 	packSlug           string          // active agent pack slug ("founding-team", "revops", ...) — set by launcher
 	blankSlateLaunch   bool            // start without a saved blueprint and synthesize the first operation
-	openclawBridge     *OpenclawBridge // nil until the bridge attaches itself; used by handleOfficeMembers for live add/remove
+	openclawBridge     *OpenclawBridge          // nil until the bridge attaches itself; used by handleOfficeMembers for live add/remove
+	miTransport        *MasterInboxTransport    // nil until StartMasterInboxBridge; used by webhook handler
 	generateMemberFn   func(prompt string) (generatedMemberTemplate, error)
 	generateChannelFn  func(prompt string) (generatedChannelTemplate, error)
 	policies           []officePolicy // active office operating rules
@@ -362,6 +363,10 @@ func (b *Broker) Start() error {
 	b.startReviewExpiryLoop(ctx)
 	b.startArchiveSweepLoop(ctx)
 	b.startMemoryWorkflowReconcilerLoop(ctx)
+	// Start Master Inbox bridge if configured (env-gated, no-op otherwise).
+	if err := b.StartMasterInboxBridge(ctx); err != nil {
+		log.Printf("[masterinbox] bridge start failed: %v", err)
+	}
 	if err := b.StartOnPort(brokeraddr.ResolvePort()); err != nil {
 		cancel()
 		if b.lifecycleCancel != nil {
@@ -480,6 +485,13 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/telegram/verify", b.requireAuth(b.handleTelegramVerify))
 	mux.HandleFunc("/telegram/discover", b.requireAuth(b.handleTelegramDiscover))
 	mux.HandleFunc("/telegram/connect", b.requireAuth(b.handleTelegramConnect))
+	// Master Inbox integration endpoints. The webhook endpoint is NOT
+	// auth-gated (verified via webhook secret); agent-facing proxy
+	// endpoints require broker auth.
+	mux.HandleFunc("/masterinbox/webhook", b.handleMasterInboxWebhook)
+	mux.HandleFunc("/masterinbox/draft", b.requireAuth(b.handleMasterInboxDraft))
+	mux.HandleFunc("/masterinbox/prospect", b.requireAuth(b.handleMasterInboxProspect))
+	mux.HandleFunc("/masterinbox/label", b.requireAuth(b.handleMasterInboxLabel))
 	mux.HandleFunc("/bridges", b.requireAuth(b.handleBridge))
 	mux.HandleFunc("/company", b.requireAuth(b.handleCompany))
 	mux.HandleFunc("/config", b.requireAuth(b.handleConfig))
