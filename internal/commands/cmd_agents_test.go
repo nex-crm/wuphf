@@ -112,6 +112,57 @@ func TestCmdAgentCreate_PostsToBroker(t *testing.T) {
 	}
 }
 
+func TestCmdAgentPrompt_GeneratesAndCreatesMember(t *testing.T) {
+	var generatedPrompt string
+	var gotBody map[string]any
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/office-members/generate":
+			if r.Method != http.MethodPost {
+				http.Error(w, "wrong method", http.StatusMethodNotAllowed)
+				return
+			}
+			var body map[string]string
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			generatedPrompt = body["prompt"]
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"slug":"researcher","name":"Researcher","role":"Research lead","expertise":["research","synthesis"],"personality":"careful","permission_mode":"plan"}`))
+		case "/office-members":
+			if r.Method != http.MethodPost {
+				http.Error(w, "wrong method", http.StatusMethodNotAllowed)
+				return
+			}
+			_ = json.NewDecoder(r.Body).Decode(&gotBody)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"member":{"slug":"researcher"}}`))
+		default:
+			http.Error(w, "wrong route", http.StatusNotFound)
+		}
+	}))
+	defer ts.Close()
+
+	t.Setenv("WUPHF_TEAM_BROKER_URL", ts.URL)
+	t.Setenv("WUPHF_BROKER_TOKEN", "test-token")
+	t.Setenv("WUPHF_BROKER_TOKEN_FILE", "")
+
+	ctx, out := captureMessages()
+	if err := cmdAgentPrompt(ctx, "deep research teammate"); err != nil {
+		t.Fatalf("cmdAgentPrompt: %v", err)
+	}
+	if generatedPrompt != "deep research teammate" {
+		t.Fatalf("generated prompt wrong: %q", generatedPrompt)
+	}
+	if gotBody["action"] != "create" || gotBody["slug"] != "researcher" {
+		t.Fatalf("create body wrong: %+v", gotBody)
+	}
+	if gotBody["permission_mode"] != "plan" {
+		t.Fatalf("permission mode not forwarded: %+v", gotBody)
+	}
+	if !strings.Contains(strings.Join(*out, "|"), "Created @researcher from prompt") {
+		t.Fatalf("expected prompt create confirmation, got %q", *out)
+	}
+}
+
 func TestCmdAgentRemove_PostsToBroker(t *testing.T) {
 	var gotBody map[string]any
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

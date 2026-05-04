@@ -142,6 +142,7 @@ export function TasksApp() {
   if (isLoading) {
     return (
       <div
+        className="tasks-app"
         data-testid="tasks-app"
         style={{
           padding: "40px 20px",
@@ -158,6 +159,7 @@ export function TasksApp() {
   if (error) {
     return (
       <div
+        className="tasks-app"
         data-testid="tasks-app"
         style={{
           padding: "40px 20px",
@@ -176,6 +178,7 @@ export function TasksApp() {
   if (tasks.length === 0) {
     return (
       <div
+        className="tasks-app"
         data-testid="tasks-app"
         style={{
           padding: "40px 20px",

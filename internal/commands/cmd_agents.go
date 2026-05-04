@@ -14,7 +14,7 @@ import (
 	"github.com/nex-crm/wuphf/internal/provider"
 )
 
-// cmdAgent handles /agent with subcommands: list, <slug>, create, edit, remove
+// cmdAgent handles /agent with subcommands: list, <slug>, prompt, create, edit, remove
 func cmdAgent(ctx *SlashContext, args string) error {
 	args = strings.TrimSpace(args)
 
@@ -31,6 +31,8 @@ func cmdAgent(ctx *SlashContext, args string) error {
 		rest = strings.TrimSpace(args[i+1:])
 	}
 	switch strings.ToLower(head) {
+	case "prompt":
+		return cmdAgentPrompt(ctx, rest)
 	case "create":
 		return cmdAgentCreate(ctx, rest)
 	case "edit":
@@ -56,6 +58,48 @@ func cmdAgent(ctx *SlashContext, args string) error {
 		strings.Join(ma.Config.Expertise, ", "),
 	)
 	ctx.AddMessage("system", info)
+	return nil
+}
+
+type generatedAgentTemplate struct {
+	Slug           string   `json:"slug"`
+	Name           string   `json:"name"`
+	Role           string   `json:"role"`
+	Expertise      []string `json:"expertise"`
+	Personality    string   `json:"personality"`
+	PermissionMode string   `json:"permission_mode"`
+}
+
+func cmdAgentPrompt(ctx *SlashContext, args string) error {
+	prompt := strings.TrimSpace(args)
+	if prompt == "" {
+		ctx.AddMessage("system", "usage: /agent prompt <describe the teammate you want>")
+		return nil
+	}
+	tmpl, err := brokerGenerateOfficeMember(prompt)
+	if err != nil {
+		ctx.AddMessage("system", fmt.Sprintf("Prompt failed: %v", err))
+		return nil
+	}
+	body := map[string]any{
+		"action":     "create",
+		"slug":       tmpl.Slug,
+		"name":       tmpl.Name,
+		"role":       tmpl.Role,
+		"expertise":  tmpl.Expertise,
+		"created_by": "slash",
+	}
+	if strings.TrimSpace(tmpl.Personality) != "" {
+		body["personality"] = tmpl.Personality
+	}
+	if strings.TrimSpace(tmpl.PermissionMode) != "" {
+		body["permission_mode"] = tmpl.PermissionMode
+	}
+	if _, err := brokerPostOfficeMembers(body); err != nil {
+		ctx.AddMessage("system", fmt.Sprintf("Create failed: %v", err))
+		return nil
+	}
+	ctx.AddMessage("system", fmt.Sprintf("Created @%s from prompt.", tmpl.Slug))
 	return nil
 }
 
@@ -227,6 +271,38 @@ func brokerPostOfficeMembers(body map[string]any) (map[string]any, error) {
 	var out map[string]any
 	_ = json.Unmarshal(raw, &out)
 	return out, nil
+}
+
+func brokerGenerateOfficeMember(prompt string) (generatedAgentTemplate, error) {
+	base := resolveBrokerBaseURL()
+	token := resolveBrokerToken()
+	data, err := json.Marshal(map[string]string{"prompt": prompt})
+	if err != nil {
+		return generatedAgentTemplate{}, fmt.Errorf("marshal body: %w", err)
+	}
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, base+"/office-members/generate", bytes.NewReader(data))
+	if err != nil {
+		return generatedAgentTemplate{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return generatedAgentTemplate{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return generatedAgentTemplate{}, fmt.Errorf("broker %s: %s", resp.Status, strings.TrimSpace(string(body)))
+	}
+	var tmpl generatedAgentTemplate
+	if err := json.NewDecoder(resp.Body).Decode(&tmpl); err != nil {
+		return generatedAgentTemplate{}, err
+	}
+	return tmpl, nil
 }
 
 func resolveBrokerBaseURL() string {

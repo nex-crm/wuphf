@@ -1,4 +1,4 @@
-import { type FormEvent, useMemo, useRef, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ChatBubble, CheckCircle, Terminal } from "iconoir-react";
 
@@ -90,6 +90,7 @@ export function ConsoleApp() {
   const [draft, setDraft] = useState("");
   const [localLines, setLocalLines] = useState<TerminalLine[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
+  const terminalBodyRef = useRef<HTMLDivElement>(null);
   const messages = useMessages(currentChannel);
   const members = useOfficeMembers();
   const tasks = useQuery({
@@ -131,6 +132,12 @@ export function ConsoleApp() {
   const requestCount = openRequestCount(requests.data?.requests ?? []);
   const commandCount = commandRows.length;
 
+  useEffect(() => {
+    const el = terminalBodyRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  });
+
   function focusInput(selectionEnd?: number) {
     window.requestAnimationFrame(() => {
       const input = inputRef.current;
@@ -142,13 +149,11 @@ export function ConsoleApp() {
   }
 
   function insertCommand(commandName: string) {
-    setDraft((current) => {
-      const next = current.trim()
-        ? `${current.trimEnd()} ${commandName} `
-        : `${commandName} `;
-      focusInput(next.length);
-      return next;
-    });
+    const next = draft.trim()
+      ? `${draft.trimEnd()} ${commandName} `
+      : `${commandName} `;
+    setDraft(next);
+    focusInput(next.length);
   }
 
   function submitDraft(event: FormEvent<HTMLFormElement>) {
@@ -198,7 +203,7 @@ export function ConsoleApp() {
             <span>wuphf office</span>
             <span>{visibleTerminalLines.length} lines</span>
           </div>
-          <div className="console-terminal-body">
+          <div className="console-terminal-body" ref={terminalBodyRef}>
             {visibleTerminalLines.length > 0 ? (
               visibleTerminalLines.map((line) => (
                 <div className="console-line" key={line.id}>

@@ -96,7 +96,7 @@ func TestHandleCommands_ReturnsRegistrySubset(t *testing.T) {
 		"object", "record", "list", "rel", "attribute", "agent",
 		"config", "detect", "init", "graph", "insights", "messages",
 		"inbox", "outbox", "rewind", "insert", "switcher", "switch",
-		"channels", "channel", "agents", "agent prompt", "queue",
+		"channels", "channel", "agents", "queue",
 		"artifacts", "skill", "reply", "expand", "collapse", "reset-dm",
 		"request", "integrate", "youtube-pack", "quit", "note", "chat",
 	}

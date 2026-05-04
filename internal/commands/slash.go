@@ -42,14 +42,13 @@ func RegisterAllCommands(r *Registry) {
 	r.Register(SlashCommand{Name: "artifacts", Description: "View task logs, approvals, and workflow artifacts"})
 
 	// Agents
-	r.Register(SlashCommand{Name: "agent", Description: "Agent commands (list/details)", Execute: cmdAgent})
+	r.Register(SlashCommand{Name: "agent", Description: "Agent commands (list/details/create/edit/remove/prompt)", Execute: cmdAgent})
 	r.Register(SlashCommand{Name: "agents", Description: "Manage your team"})
-	r.Register(SlashCommand{Name: "agent prompt", Description: "Create a new teammate from a prompt"})
 
 	// Config
 	r.Register(SlashCommand{Name: "config", Description: "Config commands (show/set/path)", Execute: cmdConfig})
 	r.Register(SlashCommand{Name: "detect", Description: "Detect installed AI platforms", Execute: cmdDetect})
-	r.Register(SlashCommand{Name: "doctor", Description: "Check readiness and runtime health", WebSupported: true})
+	r.Register(SlashCommand{Name: "doctor", Description: "Check readiness and runtime health", WebSupported: true, Execute: cmdDoctor})
 	r.Register(SlashCommand{Name: "integrate", Description: "Connect a managed integration"})
 	r.Register(SlashCommand{Name: "init", Description: "Run setup", Execute: cmdInit})
 	r.Register(SlashCommand{Name: "provider", Description: "Switch runtime provider", WebSupported: true, Execute: cmdProvider})

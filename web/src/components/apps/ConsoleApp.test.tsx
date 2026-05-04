@@ -42,8 +42,8 @@ describe("ConsoleApp helpers", () => {
       { name: "tasks", description: "Open task board", webSupported: true },
       { name: "doctor", description: "Run checks", webSupported: false },
       {
-        name: "agent prompt",
-        description: "Create a teammate from a prompt",
+        name: "agent",
+        description: "Agent commands",
         webSupported: false,
       },
     ] satisfies SlashCommandDescriptor[]);
@@ -60,8 +60,8 @@ describe("ConsoleApp helpers", () => {
         webSupported: false,
       },
       {
-        name: "/agent prompt",
-        description: "Create a teammate from a prompt",
+        name: "/agent",
+        description: "Agent commands",
         webSupported: false,
       },
     ]);
