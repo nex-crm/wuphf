@@ -51,13 +51,14 @@ describe("<WikiCatalog>", () => {
 
   it("paints the verbose prune-signal badge on top-decile entries", () => {
     // Ten entries: one obvious outlier (10000) + nine smaller scores.
-    // floor(10 * 0.1) = 1 → cutoff is the second-highest score (500), so
-    // only the top entry sits at-or-above the threshold AND above zero.
+    // floor(10 * 0.1) = 1 → cutoff is the second-highest score (550), so
+    // only the top entry sits strictly above the threshold AND above zero.
+    const now = Date.now();
     const scored: WikiCatalogEntry[] = Array.from({ length: 10 }, (_, i) => ({
       path: `playbooks/p-${i}`,
       title: `Playbook ${i}`,
       author_slug: "pm",
-      last_edited_ts: new Date().toISOString(),
+      last_edited_ts: new Date(now - i * 1000).toISOString(),
       group: "playbooks",
       word_count: 200,
       prune_score: i === 0 ? 10000 : 100 + i * 50,
@@ -65,6 +66,41 @@ describe("<WikiCatalog>", () => {
     render(<WikiCatalog catalog={scored} onNavigate={() => {}} />);
     const badges = screen.getAllByTestId("wk-prune-verbose-badge");
     expect(badges).toHaveLength(1);
+  });
+
+  it("preserves backend ordering for prune-score catalogs", () => {
+    const now = Date.now();
+    const scored: WikiCatalogEntry[] = [
+      {
+        path: "playbooks/high",
+        title: "High prune score",
+        author_slug: "pm",
+        last_edited_ts: new Date(now - 10_000).toISOString(),
+        group: "playbooks",
+        word_count: 200,
+        prune_score: 10000,
+      },
+      {
+        path: "playbooks/recent",
+        title: "Recent lower score",
+        author_slug: "pm",
+        last_edited_ts: new Date(now).toISOString(),
+        group: "playbooks",
+        word_count: 100,
+        prune_score: 1,
+      },
+    ];
+
+    render(
+      <WikiCatalog
+        catalog={scored}
+        catalogSort="prune_score"
+        onNavigate={() => {}}
+      />,
+    );
+
+    const links = screen.getAllByRole("link");
+    expect(links[0]).toHaveTextContent("High prune score");
   });
 
   it("never paints the verbose badge when no entry has a positive score", () => {
@@ -76,6 +112,17 @@ describe("<WikiCatalog>", () => {
     }));
     render(<WikiCatalog catalog={all_zero} onNavigate={() => {}} />);
     expect(screen.queryByTestId("wk-prune-verbose-badge")).toBeNull();
+  });
+
+  it("paints a badge for a positive outlier when the cutoff is zero", () => {
+    const mixed: WikiCatalogEntry[] = CATALOG.map((c, idx) => ({
+      ...c,
+      word_count: 100,
+      prune_score: idx === 0 ? 250 : 0,
+    }));
+    render(<WikiCatalog catalog={mixed} onNavigate={() => {}} />);
+    const badges = screen.getAllByTestId("wk-prune-verbose-badge");
+    expect(badges).toHaveLength(1);
   });
 
   it("uses provided stats in the header", () => {
