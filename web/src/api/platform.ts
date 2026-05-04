@@ -1,4 +1,4 @@
-import { get, post } from "./client";
+import { del, get, post } from "./client";
 
 // /version returns the build-info baked into the running broker binary
 // (set at link time via -ldflags `-X .../buildinfo.Version=...`). For an
@@ -81,6 +81,10 @@ export function getHumanMe() {
 
 export function getHumanSessions() {
   return get<{ sessions?: HumanSession[] }>("/humans/sessions");
+}
+
+export function revokeHumanSession(id: string) {
+  return del<{ ok: boolean }>("/humans/sessions", { id });
 }
 
 export interface WebShareStatus {

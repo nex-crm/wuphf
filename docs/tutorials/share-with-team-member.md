@@ -53,7 +53,7 @@ Use this page to confirm:
 - **This browser:** your current browser session and event-stream status.
 - **Access for you:** the SSH/LAN/Tailscale path for owner access.
 - **Invite a team member:** create, copy, refresh, and stop a scoped team-member invite.
-- **Team-member sessions:** active invited browser sessions.
+- **Team-member sessions:** active invited browser sessions and host disconnect controls.
 - **Broker Status:** whether the local broker is healthy.
 
 If **This browser** says `Live event stream`, the web UI is receiving office updates.
@@ -121,7 +121,9 @@ The team member session cannot:
 
 In **Access & Health**, click **Stop sharing**.
 
-Existing team-member sessions expire automatically. Create a new invite when you want another working session.
+This stops minting invite links, but it does not remove a team member who already joined. To remove an active browser session immediately, use **Team-member sessions** and click **Disconnect** for that person.
+
+Existing team-member sessions also expire automatically. Create a new invite when you want another working session.
 
 ## Troubleshooting
 

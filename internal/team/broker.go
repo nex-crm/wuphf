@@ -70,6 +70,7 @@ type Broker struct {
 	requests                []humanInterview
 	humanInvites            []humanInvite
 	humanSessions           []humanSession
+	humanSessionRevoke      map[string]chan struct{} // session ID → closed on revoke
 	actions                 []officeActionLog
 	signals                 []officeSignalRecord
 	decisions               []officeDecisionRecord
@@ -802,6 +803,7 @@ func (b *Broker) Reset() {
 	b.requests = nil
 	b.humanInvites = nil
 	b.humanSessions = nil
+	b.humanSessionRevoke = nil
 	b.actions = nil
 	b.signals = nil
 	b.decisions = nil

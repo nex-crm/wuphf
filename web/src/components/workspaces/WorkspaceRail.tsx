@@ -529,9 +529,10 @@ export function WorkspaceRail({
             {showTooltip ? (
               <div role="tooltip" style={styles.tooltip}>
                 <div style={{ fontWeight: 600 }}>
-                  {ws.company_name ?? ws.name}
+                  {ws.company_name?.trim() || ws.name}
                 </div>
-                {ws.company_name && ws.company_name !== ws.name ? (
+                {ws.company_name?.trim() &&
+                ws.company_name.trim() !== ws.name ? (
                   <div
                     style={{
                       fontSize: 11,
