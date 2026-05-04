@@ -158,6 +158,37 @@ func TestDiscoverSectionsDiscoveredOnlyAlphabetical(t *testing.T) {
 	}
 }
 
+func TestDiscoverSectionsSkipsSystemSubtrees(t *testing.T) {
+	repo, worker := sectionsTestRepo(t)
+	writeArticle(t, worker, "ceo", "team/people/nazz.md", "# Nazz\n")
+
+	for _, rel := range []string{
+		"team/inbox/raw-import.md",
+		"team/inbox/raw/source.md",
+		"team/skills/customer-refund/SKILL.md",
+		"team/people/.compiled/SKILL.md",
+	} {
+		full := filepath.Join(repo.Root(), filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", rel, err)
+		}
+		if err := os.WriteFile(full, []byte("# system\n"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", rel, err)
+		}
+	}
+
+	sections, err := DiscoverSections(context.Background(), repo, nil)
+	if err != nil {
+		t.Fatalf("DiscoverSections: %v", err)
+	}
+	if len(sections) != 1 || sections[0].Slug != "people" {
+		t.Fatalf("sections=%+v want only people", sections)
+	}
+	if sections[0].ArticleCount != 1 {
+		t.Fatalf("people ArticleCount=%d want 1", sections[0].ArticleCount)
+	}
+}
+
 func TestBlueprintDirToSlug(t *testing.T) {
 	cases := []struct {
 		in, want string

@@ -353,10 +353,20 @@ export async function fetchHumans(): Promise<HumanIdentity[]> {
   }
 }
 
+function parseCatalogResponse(res: {
+  articles: WikiCatalogEntry[];
+}): WikiCatalogEntry[] {
+  return Array.isArray(res?.articles) ? res.articles : [];
+}
+
+export async function fetchCatalogStrict(): Promise<WikiCatalogEntry[]> {
+  const res = await get<{ articles: WikiCatalogEntry[] }>("/wiki/catalog");
+  return parseCatalogResponse(res);
+}
+
 export async function fetchCatalog(): Promise<WikiCatalogEntry[]> {
   try {
-    const res = await get<{ articles: WikiCatalogEntry[] }>("/wiki/catalog");
-    return Array.isArray(res?.articles) ? res.articles : [];
+    return await fetchCatalogStrict();
   } catch {
     return [];
   }

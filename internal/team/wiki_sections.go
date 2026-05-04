@@ -127,6 +127,10 @@ func DiscoverSections(ctx context.Context, repo *Repo, blueprint *operations.Blu
 			return fmt.Errorf("walk %s: %w", path, err)
 		}
 		if d.IsDir() {
+			rel, relErr := filepath.Rel(repo.Root(), path)
+			if relErr == nil && isExcludedWikiSectionDir(filepath.ToSlash(rel)) {
+				return filepath.SkipDir
+			}
 			// Hide compiler-output subtrees (e.g. playbooks/.compiled/**)
 			// so machine-generated SKILL.md files never appear as their
 			// own section entries or inflate counts.
@@ -195,6 +199,10 @@ func DiscoverSections(ctx context.Context, repo *Repo, blueprint *operations.Blu
 	}
 
 	return out, nil
+}
+
+func isExcludedWikiSectionDir(rel string) bool {
+	return rel == "team/inbox" || rel == "team/skills"
 }
 
 // blueprintSectionSlugs extracts the first-segment section slugs from the

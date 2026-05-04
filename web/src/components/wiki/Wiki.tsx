@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import {
   type DiscoveredSection,
   fetchCatalog,
+  fetchCatalogStrict,
   fetchSections,
   subscribeSectionsUpdated,
   type WikiCatalogEntry,
@@ -62,16 +63,27 @@ export default function Wiki({
     };
   }, []);
 
+  const refreshCatalog = useCallback(() => {
+    fetchCatalogStrict()
+      .then((c) => setCatalog(c))
+      .catch(() => {
+        // Keep the last known catalog; a transient refresh miss should not
+        // blank navigation while the live section event is still useful.
+      });
+  }, []);
+
   // Live-update sections when the broker emits wiki:sections_updated.
-  // The event payload carries the full list so no refetch is needed.
+  // The event payload carries the full section list; the article list still
+  // comes from /wiki/catalog, so refresh it after a write-created section.
   useEffect(() => {
     const unsubscribe = subscribeSectionsUpdated((event) => {
       if (Array.isArray(event.sections)) {
         setSections(event.sections);
+        refreshCatalog();
       }
     });
     return () => unsubscribe();
-  }, []);
+  }, [refreshCatalog]);
 
   const view = wikiViewFor(articlePath);
   const isAudit = view === "audit";
