@@ -149,4 +149,24 @@ describe("agent stream client", () => {
 
     expect(events).toEqual(["error", "close"]);
   });
+
+  it("routes factory failures through error and close handlers", () => {
+    const events: string[] = [];
+
+    const subscription = subscribeAgentStream(
+      "builder",
+      {
+        onError: () => events.push("error"),
+        onClose: () => events.push("close"),
+      },
+      {
+        eventSourceFactory: () => {
+          throw new Error("factory failed");
+        },
+      },
+    );
+    subscription.close();
+
+    expect(events).toEqual(["error", "close"]);
+  });
 });

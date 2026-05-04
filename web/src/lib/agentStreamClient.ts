@@ -50,9 +50,17 @@ export function subscribeAgentStream(
     return { close: () => undefined };
   }
 
-  const createSource = options.eventSourceFactory ?? defaultEventSourceFactory;
-  const source = createSource(sseURL(agentStreamPath(trimmedSlug)));
   let closed = false;
+  const createSource = options.eventSourceFactory ?? defaultEventSourceFactory;
+  let source: AgentStreamEventSource;
+  try {
+    source = createSource(sseURL(agentStreamPath(trimmedSlug)));
+  } catch {
+    closed = true;
+    handlers.onError?.();
+    handlers.onClose?.();
+    return { close: () => undefined };
+  }
 
   source.onopen = () => {
     if (!closed) handlers.onOpen?.();
