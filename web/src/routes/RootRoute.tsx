@@ -4,15 +4,9 @@ import {
   type ReactNode,
   useEffect,
   useLayoutEffect,
-  useRef,
   useState,
 } from "react";
-import {
-  Outlet,
-  useMatches,
-  useNavigate,
-  useRouterState,
-} from "@tanstack/react-router";
+import { Outlet, useMatches, useNavigate } from "@tanstack/react-router";
 
 import { get, initApi } from "../api/client";
 import { ArtifactsApp } from "../components/apps/ArtifactsApp";
@@ -57,6 +51,7 @@ import {
   notebookEntryRoute,
   notebooksRoute,
   reviewsRoute,
+  router,
   wikiArticleRoute,
   wikiIndexRoute,
   wikiLookupRoute,
@@ -307,85 +302,82 @@ function MainContent() {
 // Layout-effect timing ensures the store is written before child renders
 // observe a stale slice on the same commit.
 
-function applyMatchToStore(
-  routeId: string,
+interface HydratorSetters {
+  setCurrentApp: (id: string | null) => void;
+  setCurrentChannel: (slug: string) => void;
+  setLastMessageId: (id: string | null) => void;
+  enterDM: (agentSlug: string, channelSlug: string) => void;
+  setWikiPath: (path: string | null) => void;
+  setWikiLookupQuery: (q: string | null) => void;
+  setNotebookRoute: (
+    agentSlug: string | null,
+    entrySlug: string | null,
+  ) => void;
+}
+
+type HydratorFn = (
   params: Record<string, string | undefined>,
   search: Record<string, unknown>,
-  setters: {
-    setCurrentApp: (id: string | null) => void;
-    setCurrentChannel: (slug: string) => void;
-    setLastMessageId: (id: string | null) => void;
-    enterDM: (agentSlug: string, channelSlug: string) => void;
-    setWikiPath: (path: string | null) => void;
-    setWikiLookupQuery: (q: string | null) => void;
-    setNotebookRoute: (
-      agentSlug: string | null,
-      entrySlug: string | null,
-    ) => void;
+  setters: HydratorSetters,
+) => void;
+
+const ROUTE_HYDRATORS: Record<string, HydratorFn> = {
+  [channelRoute.id]: (params, _search, s) => {
+    s.setCurrentApp(null);
+    s.setCurrentChannel(params.channelSlug ?? "general");
+    s.setLastMessageId(null);
   },
-): void {
-  if (routeId === channelRoute.id) {
-    const channelSlug = params.channelSlug ?? "general";
-    setters.setCurrentApp(null);
-    setters.setCurrentChannel(channelSlug);
-    setters.setLastMessageId(null);
-    return;
-  }
-  if (routeId === dmRoute.id) {
+  [dmRoute.id]: (params, _search, s) => {
     const agentSlug = params.agentSlug ?? "";
     if (!agentSlug) return;
-    setters.enterDM(agentSlug, directChannelSlug(agentSlug));
-    setters.setCurrentApp(null);
-    setters.setLastMessageId(null);
-    return;
-  }
-  if (routeId === appRoute.id) {
+    s.enterDM(agentSlug, directChannelSlug(agentSlug));
+    s.setCurrentApp(null);
+    s.setLastMessageId(null);
+  },
+  [appRoute.id]: (params, _search, s) => {
     const appId = params.appId ?? "";
-    if (appId) setters.setCurrentApp(appId);
-    return;
-  }
-  if (routeId === wikiIndexRoute.id) {
-    setters.setCurrentApp("wiki");
-    setters.setWikiPath(null);
-    return;
-  }
-  if (routeId === wikiLookupRoute.id) {
-    const q = typeof search.q === "string" ? search.q : null;
-    setters.setWikiLookupQuery(q);
-    setters.setCurrentApp("wiki-lookup");
-    return;
-  }
-  if (routeId === wikiArticleRoute.id) {
+    if (appId) s.setCurrentApp(appId);
+  },
+  [wikiIndexRoute.id]: (_params, _search, s) => {
+    s.setCurrentApp("wiki");
+    s.setWikiPath(null);
+  },
+  [wikiLookupRoute.id]: (_params, search, s) => {
+    s.setWikiLookupQuery(typeof search.q === "string" ? search.q : null);
+    s.setCurrentApp("wiki-lookup");
+  },
+  [wikiArticleRoute.id]: (params, _search, s) => {
     const splat =
       typeof params._splat === "string" && params._splat.length > 0
         ? params._splat
         : null;
-    setters.setWikiPath(splat);
-    setters.setCurrentApp("wiki");
-    return;
-  }
-  if (routeId === notebooksRoute.id) {
-    setters.setNotebookRoute(null, null);
-    setters.setCurrentApp("notebooks");
-    return;
-  }
-  if (routeId === notebookAgentRoute.id) {
-    setters.setNotebookRoute(params.agentSlug ?? null, null);
-    setters.setCurrentApp("notebooks");
-    return;
-  }
-  if (routeId === notebookEntryRoute.id) {
-    setters.setNotebookRoute(
-      params.agentSlug ?? null,
-      params.entrySlug ?? null,
-    );
-    setters.setCurrentApp("notebooks");
-    return;
-  }
-  if (routeId === reviewsRoute.id) {
-    setters.setCurrentApp("reviews");
-    return;
-  }
+    s.setWikiPath(splat);
+    s.setCurrentApp("wiki");
+  },
+  [notebooksRoute.id]: (_params, _search, s) => {
+    s.setNotebookRoute(null, null);
+    s.setCurrentApp("notebooks");
+  },
+  [notebookAgentRoute.id]: (params, _search, s) => {
+    s.setNotebookRoute(params.agentSlug ?? null, null);
+    s.setCurrentApp("notebooks");
+  },
+  [notebookEntryRoute.id]: (params, _search, s) => {
+    s.setNotebookRoute(params.agentSlug ?? null, params.entrySlug ?? null);
+    s.setCurrentApp("notebooks");
+  },
+  [reviewsRoute.id]: (_params, _search, s) => {
+    s.setCurrentApp("reviews");
+  },
+};
+
+function applyMatchToStore(
+  routeId: string,
+  params: Record<string, string | undefined>,
+  search: Record<string, unknown>,
+  setters: HydratorSetters,
+): void {
+  ROUTE_HYDRATORS[routeId]?.(params, search, setters);
 }
 
 function UrlToStoreHydrator() {
@@ -404,10 +396,12 @@ function UrlToStoreHydrator() {
 
   const leaf = matches.at(-1);
   const routeId = leaf?.routeId ?? "";
-  const params = (leaf?.params as Record<string, string | undefined>) ?? {};
-  const search = (leaf?.search as Record<string, unknown>) ?? {};
-  const paramsKey = JSON.stringify(params);
-  const searchKey = JSON.stringify(search);
+  // Stringify so the effect only re-fires when params/search structurally
+  // change. useMatches returns fresh references each render, so passing
+  // the live objects as deps would over-fire on every store update that
+  // re-renders RootRoute.
+  const paramsKey = JSON.stringify(leaf?.params ?? {});
+  const searchKey = JSON.stringify(leaf?.search ?? {});
 
   // Index route redirects to the default channel. Doing it in a
   // layout-effect (rather than a route loader) keeps the route definitions
@@ -421,6 +415,8 @@ function UrlToStoreHydrator() {
       });
       return;
     }
+    const params = JSON.parse(paramsKey) as Record<string, string | undefined>;
+    const search = JSON.parse(searchKey) as Record<string, unknown>;
     applyMatchToStore(routeId, params, search, {
       setCurrentApp,
       setCurrentChannel,
@@ -430,10 +426,6 @@ function UrlToStoreHydrator() {
       setWikiLookupQuery,
       setNotebookRoute,
     });
-    // The params/search arguments to applyMatchToStore are derived from
-    // matches and re-evaluate on every render; the JSON-stringified deps
-    // ensure the effect only re-fires when the structural value changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     routeId,
     paramsKey,
@@ -493,6 +485,36 @@ interface NavTarget {
   search?: Record<string, string>;
 }
 
+function deriveNotebookTarget(
+  agentSlug: string | null,
+  entrySlug: string | null,
+): NavTarget {
+  if (agentSlug && entrySlug) {
+    return {
+      to: "/notebooks/$agentSlug/$entrySlug",
+      params: { agentSlug, entrySlug },
+    };
+  }
+  if (agentSlug) {
+    return { to: "/notebooks/$agentSlug", params: { agentSlug } };
+  }
+  return { to: "/notebooks" };
+}
+
+function deriveChannelTarget(
+  currentChannel: string,
+  channelMeta: Record<string, ChannelMeta>,
+): NavTarget {
+  const dm = isDMChannel(currentChannel, channelMeta);
+  if (dm) {
+    return { to: "/dm/$agentSlug", params: { agentSlug: dm.agentSlug } };
+  }
+  return {
+    to: "/channels/$channelSlug",
+    params: { channelSlug: currentChannel || "general" },
+  };
+}
+
 function deriveNavTarget(slice: NavSlice): NavTarget {
   if (slice.currentApp === "wiki-lookup") {
     return {
@@ -506,40 +528,18 @@ function deriveNavTarget(slice: NavSlice): NavTarget {
       : { to: "/wiki" };
   }
   if (slice.currentApp === "notebooks") {
-    if (slice.notebookAgentSlug && slice.notebookEntrySlug) {
-      return {
-        to: "/notebooks/$agentSlug/$entrySlug",
-        params: {
-          agentSlug: slice.notebookAgentSlug,
-          entrySlug: slice.notebookEntrySlug,
-        },
-      };
-    }
-    if (slice.notebookAgentSlug) {
-      return {
-        to: "/notebooks/$agentSlug",
-        params: { agentSlug: slice.notebookAgentSlug },
-      };
-    }
-    return { to: "/notebooks" };
+    return deriveNotebookTarget(
+      slice.notebookAgentSlug,
+      slice.notebookEntrySlug,
+    );
   }
   if (slice.currentApp === "reviews") {
     return { to: "/reviews" };
   }
   if (slice.currentApp) {
-    return {
-      to: "/apps/$appId",
-      params: { appId: slice.currentApp },
-    };
+    return { to: "/apps/$appId", params: { appId: slice.currentApp } };
   }
-  const dm = isDMChannel(slice.currentChannel, slice.channelMeta);
-  if (dm) {
-    return { to: "/dm/$agentSlug", params: { agentSlug: dm.agentSlug } };
-  }
-  return {
-    to: "/channels/$channelSlug",
-    params: { channelSlug: slice.currentChannel || "general" },
-  };
+  return deriveChannelTarget(slice.currentChannel, slice.channelMeta);
 }
 
 function fillPath(target: NavTarget): string {
@@ -553,83 +553,70 @@ function fillPath(target: NavTarget): string {
   return path;
 }
 
+function pickNavSlice(s: ReturnType<typeof useAppStore.getState>): NavSlice {
+  return {
+    currentApp: s.currentApp,
+    currentChannel: s.currentChannel,
+    channelMeta: s.channelMeta,
+    wikiPath: s.wikiPath,
+    wikiLookupQuery: s.wikiLookupQuery,
+    notebookAgentSlug: s.notebookAgentSlug,
+    notebookEntrySlug: s.notebookEntrySlug,
+  };
+}
+
+function navSliceEquals(a: NavSlice, b: NavSlice): boolean {
+  return (
+    a.currentApp === b.currentApp &&
+    a.currentChannel === b.currentChannel &&
+    a.channelMeta === b.channelMeta &&
+    a.wikiPath === b.wikiPath &&
+    a.wikiLookupQuery === b.wikiLookupQuery &&
+    a.notebookAgentSlug === b.notebookAgentSlug &&
+    a.notebookEntrySlug === b.notebookEntrySlug
+  );
+}
+
 function StoreToRouterBridge() {
   const navigate = useNavigate();
-  // Select primitives directly so each useEffect dep is referentially stable
-  // across renders. Selecting a synthesized object returns a fresh reference
-  // every render and re-triggers the effect, producing React error #185
-  // (maximum update depth exceeded).
-  const currentApp = useAppStore((s) => s.currentApp);
-  const currentChannel = useAppStore((s) => s.currentChannel);
-  const channelMeta = useAppStore((s) => s.channelMeta);
-  const wikiPath = useAppStore((s) => s.wikiPath);
-  const wikiLookupQuery = useAppStore((s) => s.wikiLookupQuery);
-  const notebookAgentSlug = useAppStore((s) => s.notebookAgentSlug);
-  const notebookEntrySlug = useAppStore((s) => s.notebookEntrySlug);
-  const currentPath = useRouterState({
-    select: (s) => s.location.pathname,
-  });
-  const currentSearch = useRouterState({
-    select: (s) => s.location.searchStr,
-  });
-
-  // Track whether this render saw a URL change (e.g. via page.goto, hash
-  // change, or back/forward) versus a store change. When the URL just
-  // moved, the hydrator's useLayoutEffect will align the store on this
-  // same commit — but the bridge's useEffect can also fire with a stale
-  // store snapshot and incorrectly navigate "back". Skipping bridge work
-  // on URL-driven renders avoids that race; the next render (after the
-  // hydrator has settled the store) will re-evaluate and no-op.
-  const lastPathRef = useRef(currentPath);
-  const lastSearchRef = useRef(currentSearch);
 
   useEffect(() => {
-    const urlChangedThisRender =
-      lastPathRef.current !== currentPath ||
-      lastSearchRef.current !== currentSearch;
-    lastPathRef.current = currentPath;
-    lastSearchRef.current = currentSearch;
-    if (urlChangedThisRender) return;
+    // Subscribe directly to Zustand instead of mirroring the slice into
+    // hook state. This means:
+    //   - The bridge fires only on store changes, never on URL changes.
+    //     URL changes are handled by UrlToStoreHydrator above.
+    //   - There are no useEffect deps that look "unused" because we read
+    //     the live state at fire time (router.state for the URL,
+    //     getState() implicitly via the subscribe callback's argument).
+    //   - When the hydrator writes the same slice that the URL just
+    //     described, the bridge sees no slice change and stays silent;
+    //     no-op writes can't cause it to fire because Zustand store
+    //     actions return new state objects only when fields actually
+    //     change.
+    let prev = pickNavSlice(useAppStore.getState());
+    const unsubscribe = useAppStore.subscribe((state) => {
+      const next = pickNavSlice(state);
+      if (navSliceEquals(prev, next)) return;
+      prev = next;
 
-    // Read fresh store state inside the effect. The closure primitives are
-    // captured at render time, so they may lag a synchronous re-render
-    // triggered by the hydrator's layout effect. getState() always returns
-    // the latest committed value.
-    const s = useAppStore.getState();
-    const slice: NavSlice = {
-      currentApp: s.currentApp,
-      currentChannel: s.currentChannel,
-      channelMeta: s.channelMeta,
-      wikiPath: s.wikiPath,
-      wikiLookupQuery: s.wikiLookupQuery,
-      notebookAgentSlug: s.notebookAgentSlug,
-      notebookEntrySlug: s.notebookEntrySlug,
-    };
-    const target = deriveNavTarget(slice);
-    const targetPath = fillPath(target);
-    const targetSearch =
-      target.search && Object.keys(target.search).length > 0
-        ? `?${new URLSearchParams(target.search).toString()}`
-        : "";
-    if (
-      decodeURIComponent(currentPath) === decodeURIComponent(targetPath) &&
-      currentSearch === targetSearch
-    ) {
-      return;
-    }
-    void navigate({ ...target, replace: true });
-  }, [
-    currentApp,
-    currentChannel,
-    channelMeta,
-    wikiPath,
-    wikiLookupQuery,
-    notebookAgentSlug,
-    notebookEntrySlug,
-    currentPath,
-    currentSearch,
-    navigate,
-  ]);
+      const target = deriveNavTarget(next);
+      const targetPath = fillPath(target);
+      const targetSearch =
+        target.search && Object.keys(target.search).length > 0
+          ? `?${new URLSearchParams(target.search).toString()}`
+          : "";
+      const currentPath = router.state.location.pathname;
+      const currentSearchStr = router.state.location.searchStr;
+      if (
+        decodeURIComponent(currentPath) === decodeURIComponent(targetPath) &&
+        currentSearchStr === targetSearch
+      ) {
+        return;
+      }
+      void navigate({ ...target, replace: true });
+    });
+    return unsubscribe;
+  }, [navigate]);
 
   return null;
 }
