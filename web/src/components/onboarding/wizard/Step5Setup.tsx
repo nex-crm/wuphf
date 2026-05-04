@@ -3,19 +3,14 @@ import { useEffect, useRef, useState } from "react";
 import { ONBOARDING_COPY } from "../../../lib/constants";
 import { ApiKeyRow } from "./ApiKeyRow";
 import { ArrowIcon, EnterHint } from "./components";
-import {
-  API_KEY_FIELDS,
-  LOCAL_PROVIDER_LABELS,
-  MEMORY_BACKEND_OPTIONS,
-  RUNTIMES,
-} from "./constants";
+import { API_KEY_FIELDS, LOCAL_PROVIDER_LABELS, RUNTIMES } from "./constants";
 import { LocalLLMPicker } from "./LocalLLMPicker";
 import {
   canSetupContinue,
   detectedBinary,
   runtimeIsReady,
 } from "./runtime-helpers";
-import type { MemoryBackend, PrereqResult, RuntimeSpec } from "./types";
+import type { PrereqResult, RuntimeSpec } from "./types";
 
 interface PrereqStatus {
   items: PrereqResult[];
@@ -34,17 +29,6 @@ interface ApiKeyState {
   onChange: (key: string, value: string) => void;
 }
 
-interface MemoryState {
-  backend: MemoryBackend;
-  onChangeBackend: (value: MemoryBackend) => void;
-  nexApiKey: string;
-  onChangeNexApiKey: (v: string) => void;
-  gbrainOpenAIKey: string;
-  onChangeGBrainOpenAIKey: (v: string) => void;
-  gbrainAnthropicKey: string;
-  onChangeGBrainAnthropicKey: (v: string) => void;
-}
-
 interface LocalLLMState {
   // Local-LLM opt-in chosen here; submitted with the rest of the wizard
   // payload at /onboarding/complete and applied to llm_provider so the
@@ -57,7 +41,6 @@ interface SetupStepProps {
   prereqStatus: PrereqStatus;
   runtimeSelection: RuntimeSelection;
   apiKeyState: ApiKeyState;
-  memoryState: MemoryState;
   localLLMState: LocalLLMState;
   onNext: () => void;
   onBack: () => void;
@@ -193,121 +176,10 @@ function RuntimeTile({
   );
 }
 
-interface MemoryBackendPanelProps {
-  memoryBackend: MemoryBackend;
-  onChangeMemoryBackend: (value: MemoryBackend) => void;
-  gbrainOpenAIKey: string;
-  onChangeGBrainOpenAIKey: (v: string) => void;
-  gbrainAnthropicKey: string;
-  onChangeGBrainAnthropicKey: (v: string) => void;
-}
-
-function MemoryBackendPanel({
-  memoryBackend,
-  onChangeMemoryBackend,
-  gbrainOpenAIKey,
-  onChangeGBrainOpenAIKey,
-  gbrainAnthropicKey,
-  onChangeGBrainAnthropicKey,
-}: MemoryBackendPanelProps) {
-  const gbrainSelected = memoryBackend === "gbrain";
-  const gbrainOpenAIMissing =
-    gbrainSelected && gbrainOpenAIKey.trim().length === 0;
-
-  return (
-    <div className="wizard-panel">
-      <p className="wizard-panel-title">Organizational memory</p>
-      <p
-        style={{
-          fontSize: 12,
-          color: "var(--text-secondary)",
-          margin: "-8px 0 12px 0",
-        }}
-      >
-        Where agents store shared context, relationships, and learnings across
-        sessions. You can change this later in Settings or via{" "}
-        <code>--memory-backend</code>.
-      </p>
-      <div className="runtime-grid">
-        {MEMORY_BACKEND_OPTIONS.map((opt) => (
-          <button
-            key={opt.value}
-            className={`runtime-tile ${memoryBackend === opt.value ? "selected" : ""}`}
-            onClick={() => onChangeMemoryBackend(opt.value)}
-            aria-pressed={memoryBackend === opt.value}
-            type="button"
-            title={opt.hint}
-          >
-            <div style={{ fontWeight: 600 }}>{opt.label}</div>
-            <div
-              style={{
-                fontSize: 11,
-                color: "var(--text-tertiary)",
-                marginTop: 4,
-                fontWeight: 400,
-              }}
-            >
-              {opt.hint}
-            </div>
-          </button>
-        ))}
-      </div>
-
-      {gbrainSelected ? (
-        <div className="wiz-backend-keys">
-          <p className="wiz-backend-keys-title">GBrain keys</p>
-          <p className="wiz-backend-keys-hint">
-            GBrain uses OpenAI for embeddings (required) and optionally
-            Anthropic for reasoning.
-          </p>
-          <div className="form-group">
-            <label className="label" htmlFor="wiz-gbrain-openai">
-              OpenAI API key <span style={{ color: "var(--red)" }}>*</span>
-            </label>
-            <input
-              className="input"
-              id="wiz-gbrain-openai"
-              type="password"
-              placeholder="sk-..."
-              value={gbrainOpenAIKey}
-              onChange={(e) => onChangeGBrainOpenAIKey(e.target.value)}
-              autoComplete="off"
-            />
-            {gbrainOpenAIMissing ? (
-              <p style={{ color: "var(--red)", fontSize: 11, marginTop: 4 }}>
-                Required: GBrain can&apos;t create embeddings without an OpenAI
-                key.
-              </p>
-            ) : null}
-          </div>
-          <div className="form-group" style={{ marginBottom: 0 }}>
-            <label className="label" htmlFor="wiz-gbrain-anthropic">
-              Anthropic API key{" "}
-              <span style={{ fontSize: 11, color: "var(--text-tertiary)" }}>
-                (optional)
-              </span>
-            </label>
-            <input
-              className="input"
-              id="wiz-gbrain-anthropic"
-              type="password"
-              placeholder="sk-ant-..."
-              value={gbrainAnthropicKey}
-              onChange={(e) => onChangeGBrainAnthropicKey(e.target.value)}
-              autoComplete="off"
-            />
-          </div>
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
 export function SetupStep({
   prereqStatus,
   runtimeSelection,
   apiKeyState,
-  memoryState,
   localLLMState,
   onNext,
   onBack,
@@ -323,16 +195,6 @@ export function SetupStep({
     onReorder: onReorderRuntime,
   } = runtimeSelection;
   const { values: apiKeys, onChange: onChangeApiKey } = apiKeyState;
-  const {
-    backend: memoryBackend,
-    onChangeBackend: onChangeMemoryBackend,
-    nexApiKey,
-    onChangeNexApiKey,
-    gbrainOpenAIKey,
-    onChangeGBrainOpenAIKey,
-    gbrainAnthropicKey,
-    onChangeGBrainAnthropicKey,
-  } = memoryState;
   const { provider: localProvider, onSelectProvider: onSelectLocalProvider } =
     localLLMState;
 
@@ -366,8 +228,6 @@ export function SetupStep({
     prereqsError,
     apiKeys,
     localProvider,
-    memoryBackend,
-    gbrainOpenAIKey,
   });
 
   return (
@@ -552,54 +412,6 @@ export function SetupStep({
           ))}
         </div>
       </div>
-
-      <MemoryBackendPanel
-        memoryBackend={memoryBackend}
-        onChangeMemoryBackend={onChangeMemoryBackend}
-        gbrainOpenAIKey={gbrainOpenAIKey}
-        onChangeGBrainOpenAIKey={onChangeGBrainOpenAIKey}
-        gbrainAnthropicKey={gbrainAnthropicKey}
-        onChangeGBrainAnthropicKey={onChangeGBrainAnthropicKey}
-      />
-
-      {memoryBackend === "nex" && (
-        // Only show the Nex API key panel when the chosen memory backend
-        // actually needs it. Team wiki, GBrain, and "None" don't talk to
-        // Nex's hosted memory — surfacing the input would suggest the
-        // user has a missing piece when they don't.
-        <div className="wizard-panel" data-testid="wizard-nex-api-key-panel">
-          <p className="wizard-panel-title">Nex API key</p>
-          <p
-            style={{
-              fontSize: 12,
-              color: "var(--text-secondary)",
-              margin: "-8px 0 12px 0",
-            }}
-          >
-            Unlocks the hosted memory graph plus managed integrations (HubSpot,
-            Slack, Gmail, Calendar, …) so agents can read your tools without you
-            wiring each one up. You can skip this and paste later from Settings.
-            Don&apos;t have one? Sign up on the Identity step above.
-          </p>
-          <div className="form-group" style={{ marginBottom: 0 }}>
-            <label className="label" htmlFor="wiz-nex-api-key">
-              Nex API key{" "}
-              <span style={{ fontSize: 11, color: "var(--text-tertiary)" }}>
-                (optional during onboarding)
-              </span>
-            </label>
-            <input
-              className="input"
-              id="wiz-nex-api-key"
-              type="password"
-              placeholder="nex-..."
-              value={nexApiKey}
-              onChange={(e) => onChangeNexApiKey(e.target.value)}
-              autoComplete="off"
-            />
-          </div>
-        </div>
-      )}
 
       <div className="wizard-nav">
         <button className="btn btn-ghost" onClick={onBack} type="button">

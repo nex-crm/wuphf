@@ -225,6 +225,8 @@ describe("<WorkspaceRail>", () => {
     fireEvent.mouseEnter(demoIcon.parentElement as Element);
 
     const tooltip = screen.getByRole("tooltip");
+    // company_name shown as primary label; slug shown below when different
+    expect(tooltip.textContent).toContain("Acme Demo");
     expect(tooltip.textContent).toContain("demo-launch");
     expect(tooltip.textContent).toContain("paused");
   });

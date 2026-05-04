@@ -2,6 +2,7 @@ package teammcp
 
 import (
 	"context"
+	"path/filepath"
 	"slices"
 	"testing"
 
@@ -29,6 +30,24 @@ func TestConfigureServerToolsBackendMatrix(t *testing.T) {
 		{
 			name:    "markdown/office",
 			backend: "markdown",
+			mustHave: []string{
+				"team_wiki_read",
+				"team_wiki_write",
+				"team_wiki_search",
+				"team_wiki_list",
+				"notebook_write",
+				"notebook_promote",
+			},
+			mustNotHave: []string{
+				"team_memory_query",
+				"team_memory_write",
+				"team_memory_promote",
+			},
+			commonPresent: []string{"team_broadcast", "team_poll", "context_lookup", "context_capture", "context_promote", "context_health"},
+		},
+		{
+			name:    "default/office",
+			backend: "",
 			mustHave: []string{
 				"team_wiki_read",
 				"team_wiki_write",
@@ -137,6 +156,7 @@ func TestConfigureServerToolsBackendMatrix(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
 			t.Setenv("WUPHF_MEMORY_BACKEND", tc.backend)
+			t.Setenv("WUPHF_CONFIG_PATH", filepath.Join(t.TempDir(), "config.json"))
 
 			channel := "general"
 			if tc.name == "markdown/dm" {

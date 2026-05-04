@@ -346,6 +346,161 @@ func TestEnsureNotebookDirsForRosterCreatesBlankShelves(t *testing.T) {
 	}
 }
 
+func TestBrokerNotebookWriteRecordsTaskMemoryCapture(t *testing.T) {
+	srv, b, teardown := newNotebookTestServer(t)
+	defer teardown()
+	token := b.Token()
+	now := time.Now().UTC().Format(time.RFC3339)
+	b.mu.Lock()
+	b.tasks = []teamTask{{
+		ID:        "task-1",
+		Channel:   "general",
+		Title:     "Research passport process",
+		TaskType:  "process_research",
+		Status:    "in_progress",
+		CreatedBy: "ceo",
+		Owner:     "pm",
+		CreatedAt: now,
+		UpdatedAt: now,
+	}}
+	syncTaskMemoryWorkflow(&b.tasks[0], now)
+	b.mu.Unlock()
+
+	writeBody, _ := json.Marshal(map[string]any{
+		"slug":           "pm",
+		"task_id":        "task-1",
+		"path":           "agents/pm/notebook/passport.md",
+		"content":        "# Passport\n\nReusable process notes.\n",
+		"mode":           "create",
+		"commit_message": "capture passport process",
+	})
+	req, _ := authReq(http.MethodPost, srv.URL+"/notebook/write", bytes.NewReader(writeBody), token)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(res.Body)
+		t.Fatalf("expected 200, got %d: %s", res.StatusCode, string(body))
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	wf := b.tasks[0].MemoryWorkflow
+	if wf == nil || wf.Capture.CompletedAt == "" {
+		t.Fatalf("expected capture workflow to be satisfied, got %+v", wf)
+	}
+	if len(wf.Captures) != 1 || wf.Captures[0].Path != "agents/pm/notebook/passport.md" {
+		t.Fatalf("expected notebook capture artifact, got %+v", wf.Captures)
+	}
+}
+
+func TestBrokerNotebookSearchAllRecordsTaskMemoryLookup(t *testing.T) {
+	srv, b, teardown := newNotebookTestServer(t)
+	defer teardown()
+	token := b.Token()
+	now := time.Now().UTC().Format(time.RFC3339)
+	b.mu.Lock()
+	b.members = []officeMember{{Slug: "pm", Name: "PM"}, {Slug: "ceo", Name: "CEO"}}
+	b.tasks = []teamTask{{
+		ID:        "task-1",
+		Channel:   "general",
+		Title:     "Research passport process",
+		TaskType:  "process_research",
+		Status:    "in_progress",
+		CreatedBy: "ceo",
+		Owner:     "pm",
+		CreatedAt: now,
+		UpdatedAt: now,
+	}}
+	syncTaskMemoryWorkflow(&b.tasks[0], now)
+	b.mu.Unlock()
+	if _, _, err := b.WikiWorker().NotebookWrite(context.Background(), "pm", "agents/pm/notebook/passport.md", "# Passport\n\nRenewal evidence.\n", "create", "capture passport"); err != nil {
+		t.Fatalf("seed notebook: %v", err)
+	}
+
+	req, _ := authReq(http.MethodGet, srv.URL+"/notebook/search?slug=all&q=Renewal&task_id=task-1&actor=pm", nil, token)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(res.Body)
+		t.Fatalf("expected 200, got %d: %s", res.StatusCode, string(body))
+	}
+	var parsed struct {
+		Hits []WikiSearchHit `json:"hits"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&parsed); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(parsed.Hits) != 1 {
+		t.Fatalf("expected one hit, got %+v", parsed.Hits)
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	wf := b.tasks[0].MemoryWorkflow
+	if wf == nil || wf.Lookup.Query != "Renewal" || len(wf.Citations) != 1 {
+		t.Fatalf("expected lookup workflow citation, got %+v", wf)
+	}
+	if wf.Citations[0].Path != "agents/pm/notebook/passport.md" {
+		t.Fatalf("expected notebook citation path, got %+v", wf.Citations[0])
+	}
+}
+
+func TestBrokerNotebookSearchRejectsMissingTaskBeforeDiscovery(t *testing.T) {
+	srv, b, teardown := newNotebookTestServer(t)
+	defer teardown()
+	corruptAgentsDir(t, b.WikiWorker().Repo())
+
+	req, _ := authReq(http.MethodGet, srv.URL+"/notebook/search?slug=all&q=Renewal&task_id=missing", nil, b.Token())
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusNotFound {
+		body, _ := io.ReadAll(res.Body)
+		t.Fatalf("expected 404 before notebook discovery, got %d: %s", res.StatusCode, string(body))
+	}
+}
+
+func TestBrokerNotebookSearchAllSurfacesDiscoveryFailure(t *testing.T) {
+	srv, b, teardown := newNotebookTestServer(t)
+	defer teardown()
+	corruptAgentsDir(t, b.WikiWorker().Repo())
+
+	req, _ := authReq(http.MethodGet, srv.URL+"/notebook/search?slug=all&q=Renewal", nil, b.Token())
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	defer res.Body.Close()
+	body, _ := io.ReadAll(res.Body)
+	if res.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("expected 500 for notebook discovery failure, got %d: %s", res.StatusCode, string(body))
+	}
+	if !strings.Contains(string(body), "read agents dir") {
+		t.Fatalf("expected discovery error in response, got %s", string(body))
+	}
+}
+
+func corruptAgentsDir(t *testing.T, repo *Repo) {
+	t.Helper()
+	agentsPath := filepath.Join(repo.Root(), "agents")
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+	if err := os.RemoveAll(agentsPath); err != nil {
+		t.Fatalf("remove agents dir: %v", err)
+	}
+	if err := os.WriteFile(agentsPath, []byte("not a directory"), 0o600); err != nil {
+		t.Fatalf("write agents file: %v", err)
+	}
+}
+
 func TestEnsureBridgedMemberInitializesNotebookAfterUnlock(t *testing.T) {
 	_, b, teardown := newNotebookTestServer(t)
 	defer teardown()
