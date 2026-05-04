@@ -1,103 +1,11 @@
 import { useEffect, useRef } from "react";
 
 import {
-  type ChannelMeta,
-  directChannelSlug,
-  isDMChannel,
-  useAppStore,
-} from "../stores/app";
-
-type Route =
-  | { view: "channel"; channel: string }
-  | { view: "dm"; agent: string }
-  | { view: "app"; app: string }
-  | { view: "wiki"; articlePath: string | null }
-  | { view: "wiki-lookup"; query: string }
-  | { view: "notebooks"; agentSlug: string | null; entrySlug: string | null }
-  | { view: "reviews" };
-
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
-function parseHash(hash: string): Route {
-  const cleaned = hash.replace(/^#\/?/, "");
-  const parts = cleaned.split("/").filter(Boolean);
-  if (parts[0] === "channels" && parts[1]) {
-    return { view: "channel", channel: decodeURIComponent(parts[1]) };
-  }
-  if (parts[0] === "dm" && parts[1]) {
-    return { view: "dm", agent: decodeURIComponent(parts[1]) };
-  }
-  if (parts[0] === "apps" && parts[1]) {
-    return { view: "app", app: decodeURIComponent(parts[1]) };
-  }
-  if (parts[0] === "console") {
-    return { view: "app", app: "console" };
-  }
-  if (parts[0] === "threads") {
-    return { view: "app", app: "threads" };
-  }
-  if (parts[0] === "wiki" && parts[1] === "lookup") {
-    const params = new URLSearchParams(
-      window.location.search.slice(1) || cleaned.split("?")[1] || "",
-    );
-    const q = params.get("q") || "";
-    return { view: "wiki-lookup", query: decodeURIComponent(q) };
-  }
-  if (parts[0] === "wiki") {
-    const rest = parts.slice(1).map(decodeURIComponent).join("/");
-    return { view: "wiki", articlePath: rest || null };
-  }
-  if (parts[0] === "notebooks") {
-    const agent = parts[1] ? decodeURIComponent(parts[1]) : null;
-    const entry = parts[2] ? decodeURIComponent(parts[2]) : null;
-    return { view: "notebooks", agentSlug: agent, entrySlug: entry };
-  }
-  if (parts[0] === "reviews") {
-    return { view: "reviews" };
-  }
-  return { view: "channel", channel: "general" };
-}
-
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
-function stateToHash(state: {
-  currentApp: string | null;
-  currentChannel: string;
-  channelMeta: Record<string, ChannelMeta>;
-  wikiPath: string | null;
-  wikiLookupQuery: string | null;
-  notebookAgentSlug: string | null;
-  notebookEntrySlug: string | null;
-}): string {
-  if (state.currentApp === "wiki-lookup") {
-    return state.wikiLookupQuery
-      ? `#/wiki/lookup?q=${encodeURIComponent(state.wikiLookupQuery)}`
-      : "#/wiki/lookup";
-  }
-  if (state.currentApp === "wiki") {
-    return state.wikiPath
-      ? `#/wiki/${state.wikiPath.split("/").map(encodeURIComponent).join("/")}`
-      : "#/wiki";
-  }
-  if (state.currentApp === "notebooks") {
-    const parts: string[] = ["notebooks"];
-    if (state.notebookAgentSlug)
-      parts.push(encodeURIComponent(state.notebookAgentSlug));
-    if (state.notebookAgentSlug && state.notebookEntrySlug) {
-      parts.push(encodeURIComponent(state.notebookEntrySlug));
-    }
-    return `#/${parts.join("/")}`;
-  }
-  if (state.currentApp === "reviews") {
-    return "#/reviews";
-  }
-  if (state.currentApp) {
-    return `#/apps/${encodeURIComponent(state.currentApp)}`;
-  }
-  const dm = isDMChannel(state.currentChannel, state.channelMeta);
-  if (dm) {
-    return `#/dm/${encodeURIComponent(dm.agentSlug)}`;
-  }
-  return `#/channels/${encodeURIComponent(state.currentChannel || "general")}`;
-}
+  legacyRouteToStatePatch,
+  legacyStateToHash,
+  parseLegacyHash,
+} from "../routes/legacyHash";
+import { useAppStore } from "../stores/app";
 
 /**
  * Two-way sync between the Zustand app store and the location hash.
@@ -142,26 +50,30 @@ export function useHashRouter() {
         ignoreNextHashChange.current = false;
         return;
       }
-      const route = parseHash(window.location.hash);
+      const route = parseLegacyHash(
+        window.location.hash,
+        window.location.search,
+      );
+      const patch = legacyRouteToStatePatch(route);
       ignoreNextStoreSync.current = true;
-      if (route.view === "dm") {
-        enterDM(route.agent, directChannelSlug(route.agent));
-      } else if (route.view === "app") {
-        setCurrentApp(route.app);
-      } else if (route.view === "wiki-lookup") {
-        setWikiLookupQuery(route.query);
+      if (patch.kind === "dm") {
+        enterDM(patch.agentSlug, patch.channelSlug);
+      } else if (patch.kind === "app") {
+        setCurrentApp(patch.app);
+      } else if (patch.kind === "wiki-lookup") {
+        setWikiLookupQuery(patch.query);
         setCurrentApp("wiki-lookup");
-      } else if (route.view === "wiki") {
-        setWikiPath(route.articlePath);
+      } else if (patch.kind === "wiki") {
+        setWikiPath(patch.articlePath);
         setCurrentApp("wiki");
-      } else if (route.view === "notebooks") {
-        setNotebookRoute(route.agentSlug, route.entrySlug);
+      } else if (patch.kind === "notebooks") {
+        setNotebookRoute(patch.agentSlug, patch.entrySlug);
         setCurrentApp("notebooks");
-      } else if (route.view === "reviews") {
+      } else if (patch.kind === "reviews") {
         setCurrentApp("reviews");
       } else {
         setCurrentApp(null);
-        setCurrentChannel(route.channel);
+        setCurrentChannel(patch.channel);
         setLastMessageId(null);
       }
     }
@@ -185,7 +97,7 @@ export function useHashRouter() {
       ignoreNextStoreSync.current = false;
       return;
     }
-    const next = stateToHash({
+    const next = legacyStateToHash({
       currentApp,
       currentChannel,
       channelMeta,

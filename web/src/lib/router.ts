@@ -1,50 +1,116 @@
 import {
+  createHashHistory,
   createRootRoute,
   createRoute,
   createRouter,
+  type RouterHistory,
 } from "@tanstack/react-router";
 
-// Root route — the app shell wraps everything
+import { ROUTE_PATHS } from "../routes/routeRegistry";
+
+// Root route - the app shell will wrap everything once RouterProvider mounts.
 export const rootRoute = createRootRoute();
 
 // /channels/$channelSlug — main message view
 export const channelRoute = createRoute({
   getParentRoute: () => rootRoute,
-  path: "/channels/$channelSlug",
+  path: ROUTE_PATHS.channel,
+});
+
+// /dm/$agentSlug — direct-message view
+export const dmRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: ROUTE_PATHS.dm,
 });
 
 // /apps/$appId — app panel view (tasks, policies, calendar, etc.)
 export const appRoute = createRoute({
   getParentRoute: () => rootRoute,
-  path: "/apps/$appId",
+  path: ROUTE_PATHS.app,
 });
 
-// /agents/$agentSlug — agent detail panel
-export const agentRoute = createRoute({
+// /console and /threads — legacy aliases preserved during migration
+export const consoleAliasRoute = createRoute({
   getParentRoute: () => rootRoute,
-  path: "/agents/$agentSlug",
+  path: ROUTE_PATHS.consoleAlias,
+});
+
+export const threadsAliasRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: ROUTE_PATHS.threadsAlias,
+});
+
+// Wiki, notebook, and review routes.
+export const wikiRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: ROUTE_PATHS.wiki,
+});
+
+export const wikiIndexRoute = createRoute({
+  getParentRoute: () => wikiRoute,
+  path: "/",
+});
+
+export const wikiLookupRoute = createRoute({
+  getParentRoute: () => wikiRoute,
+  path: "lookup",
+});
+
+export const wikiArticleRoute = createRoute({
+  getParentRoute: () => wikiRoute,
+  path: "$",
+});
+
+export const notebooksRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: ROUTE_PATHS.notebooks,
+});
+
+export const notebookAgentRoute = createRoute({
+  getParentRoute: () => notebooksRoute,
+  path: "$agentSlug",
+});
+
+export const notebookEntryRoute = createRoute({
+  getParentRoute: () => notebookAgentRoute,
+  path: "$entrySlug",
+});
+
+export const reviewsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: ROUTE_PATHS.reviews,
 });
 
 // / — index route (defaults to #general)
 export const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
-  path: "/",
+  path: ROUTE_PATHS.index,
 });
 
 // Route tree
-const routeTree = rootRoute.addChildren([
+export const routeTree = rootRoute.addChildren([
   indexRoute,
   channelRoute,
+  dmRoute,
   appRoute,
-  agentRoute,
+  consoleAliasRoute,
+  threadsAliasRoute,
+  wikiRoute.addChildren([wikiIndexRoute, wikiLookupRoute, wikiArticleRoute]),
+  notebooksRoute.addChildren([
+    notebookAgentRoute.addChildren([notebookEntryRoute]),
+  ]),
+  reviewsRoute,
 ]);
 
-export const router = createRouter({
-  routeTree,
-  defaultPreload: "intent",
-  // Use hash-based routing to match the legacy behavior and work with Go's FileServer
-  // which always serves index.html for all routes
-});
+export function createAppRouter(history: RouterHistory = createHashHistory()) {
+  return createRouter({
+    routeTree,
+    history,
+    defaultPreload: "intent",
+  });
+}
+
+export const router = createAppRouter();
 
 declare module "@tanstack/react-router" {
   interface Register {
