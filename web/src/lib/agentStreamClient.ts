@@ -11,6 +11,8 @@ export interface AgentStreamEventSource {
   onopen: ((event: Event) => void) | null;
   onmessage: ((event: MessageEvent<string>) => void) | null;
   onerror: ((event: Event) => void) | null;
+  // 0 = CONNECTING, 1 = OPEN, 2 = CLOSED. Some test factories omit it,
+  // so the error path treats undefined as terminal instead of reconnectable.
   readyState?: number;
   close: () => void;
 }
@@ -63,7 +65,7 @@ export function subscribeAgentStream(
   source.onerror = () => {
     if (closed) return;
     handlers.onError?.();
-    if (source.readyState === 2) {
+    if (source.readyState === undefined || source.readyState === 2) {
       close();
     }
   };

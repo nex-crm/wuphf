@@ -65,6 +65,19 @@ describe("agent stream client", () => {
     expect(source.closed).toBe(true);
   });
 
+  it("closes immediately without an error when slug is empty", () => {
+    const events: string[] = [];
+
+    const subscription = subscribeAgentStream("  ", {
+      onError: () => events.push("error"),
+      onClose: () => events.push("close"),
+    });
+    subscription.close();
+
+    expect(events).toEqual(["close"]);
+    expect(FakeEventSource.instances).toHaveLength(0);
+  });
+
   it("keeps transient EventSource errors reconnectable", () => {
     const onError = vi.fn();
     subscribeAgentStream(
@@ -99,6 +112,28 @@ describe("agent stream client", () => {
 
     expect(events).toEqual(["error", "close"]);
     expect(source.closed).toBe(true);
+  });
+
+  it("treats errors without readyState as terminal", () => {
+    const events: string[] = [];
+    const sourceWithoutReadyState: AgentStreamEventSource = {
+      onopen: null,
+      onmessage: null,
+      onerror: null,
+      close: () => events.push("source-close"),
+    };
+    subscribeAgentStream(
+      "builder",
+      {
+        onError: () => events.push("error"),
+        onClose: () => events.push("close"),
+      },
+      { eventSourceFactory: () => sourceWithoutReadyState },
+    );
+
+    sourceWithoutReadyState.onerror?.({} as Event);
+
+    expect(events).toEqual(["error", "source-close", "close"]);
   });
 
   it("returns a closed no-op when EventSource is unavailable", () => {

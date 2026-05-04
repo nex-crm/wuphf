@@ -84,14 +84,29 @@ export function AgentTerminal({
           });
     resizeObserver?.observe(host);
 
+    let renderedChunks = 0;
     const buffer = createTerminalWriteBuffer((text) => terminal.write(text));
     const subscription = subscribeAgentStream(slug, {
       onOpen: () => setConnectionState(true),
       onLine: (line) => {
+        let parsed: Record<string, unknown> | undefined;
+        try {
+          parsed = JSON.parse(line);
+        } catch {
+          // Raw terminal output.
+        }
+
         const formatted = formatAgentTerminalChunk(line);
-        if (!formatted) return;
-        setOutputState(true);
-        buffer.enqueue(formatted);
+        if (formatted) {
+          renderedChunks += 1;
+          setOutputState(true);
+          buffer.enqueue(formatted);
+        }
+
+        if (parsed?.status === "idle" && renderedChunks > 0) {
+          subscription.close();
+          setConnectionState(false);
+        }
       },
       onError: () => setConnectionState(false),
       onClose: () => setConnectionState(false),

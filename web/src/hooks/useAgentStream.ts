@@ -51,16 +51,20 @@ export function useAgentStream(slug: string | null) {
   const [lines, setLines] = useState<StreamLine[]>([]);
   const [connected, setConnected] = useState(false);
   const counterRef = useRef(0);
+  const linesRef = useRef<StreamLine[]>([]);
 
   useEffect(() => {
     if (!slug) {
+      linesRef.current = [];
+      counterRef.current = 0;
       setLines([]);
       setConnected(false);
       return;
     }
 
-    setLines([]);
+    linesRef.current = [];
     counterRef.current = 0;
+    setLines([]);
     const subscription = subscribeAgentStream(slug, {
       onOpen: () => setConnected(true),
       onLine: (eventData) => {
@@ -71,18 +75,17 @@ export function useAgentStream(slug: string | null) {
           // raw text line
         }
 
-        setLines((prev) => {
-          const { lines: nextLines, usedId } = appendStreamLine(
-            prev,
-            eventData,
-            parsed,
-            counterRef.current + 1,
-          );
-          if (usedId) {
-            counterRef.current += 1;
-          }
-          return nextLines;
-        });
+        const { lines: nextLines, usedId } = appendStreamLine(
+          linesRef.current,
+          eventData,
+          parsed,
+          counterRef.current + 1,
+        );
+        linesRef.current = nextLines;
+        if (usedId) {
+          counterRef.current += 1;
+        }
+        setLines(nextLines);
 
         // Auto-stop on idle
         if (parsed?.status === "idle" && counterRef.current > 1) {
