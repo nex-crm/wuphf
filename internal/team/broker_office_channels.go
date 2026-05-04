@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -137,19 +138,24 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "failed to read config", http.StatusInternalServerError)
 			return
 		}
+		envLLMProvider := strings.TrimSpace(os.Getenv("WUPHF_LLM_PROVIDER"))
+		configLLMProvider := strings.TrimSpace(cfg.LLMProvider)
+		llmProviderConfigured := (envLLMProvider != "" && config.IsLLMProviderKindAllowed(envLLMProvider)) ||
+			(configLLMProvider != "" && config.IsLLMProviderKindAllowed(configLLMProvider))
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			// Runtime
-			"llm_provider":          config.ResolveLLMProvider(""),
-			"llm_provider_priority": cfg.LLMProviderPriority,
-			"provider_endpoints":    cfg.ProviderEndpoints,
-			"memory_backend":        config.ResolveMemoryBackend(""),
-			"action_provider":       config.ResolveActionProvider(),
-			"team_lead_slug":        cfg.TeamLeadSlug,
-			"max_concurrent_agents": cfg.MaxConcurrent,
-			"default_format":        config.ResolveFormat(""),
-			"default_timeout":       config.ResolveTimeout(""),
-			"blueprint":             cfg.ActiveBlueprint(),
+			"llm_provider":            config.ResolveLLMProvider(""),
+			"llm_provider_configured": llmProviderConfigured,
+			"llm_provider_priority":   cfg.LLMProviderPriority,
+			"provider_endpoints":      cfg.ProviderEndpoints,
+			"memory_backend":          config.ResolveMemoryBackend(""),
+			"action_provider":         config.ResolveActionProvider(),
+			"team_lead_slug":          cfg.TeamLeadSlug,
+			"max_concurrent_agents":   cfg.MaxConcurrent,
+			"default_format":          config.ResolveFormat(""),
+			"default_timeout":         config.ResolveTimeout(""),
+			"blueprint":               cfg.ActiveBlueprint(),
 			// Workspace
 			"email":          cfg.Email,
 			"workspace_id":   cfg.WorkspaceID,

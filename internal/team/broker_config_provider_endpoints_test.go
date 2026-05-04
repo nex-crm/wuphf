@@ -47,6 +47,43 @@ func configRequest(t *testing.T, b *Broker, method, body string) *httptest.Respo
 	return rec
 }
 
+func TestHandleConfigReportsProviderConfiguredSource(t *testing.T) {
+	withWuphfHomeDir(t)
+	t.Setenv("WUPHF_LLM_PROVIDER", "")
+	b := newTestBroker(t)
+
+	rec := configRequest(t, b, http.MethodGet, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var cfg map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &cfg); err != nil {
+		t.Fatalf("decode GET /config: %v", err)
+	}
+	if provider, _ := cfg["llm_provider"].(string); provider != "claude-code" {
+		t.Fatalf("expected default provider claude-code, got %q", provider)
+	}
+	if configured, _ := cfg["llm_provider_configured"].(bool); configured {
+		t.Fatalf("expected default provider to be reported as not configured: %s", rec.Body.String())
+	}
+
+	t.Setenv("WUPHF_LLM_PROVIDER", "codex")
+	rec = configRequest(t, b, http.MethodGet, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET with env status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	cfg = map[string]any{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &cfg); err != nil {
+		t.Fatalf("decode GET /config with env: %v", err)
+	}
+	if provider, _ := cfg["llm_provider"].(string); provider != "codex" {
+		t.Fatalf("expected env provider codex, got %q", provider)
+	}
+	if configured, _ := cfg["llm_provider_configured"].(bool); !configured {
+		t.Fatalf("expected env provider to be reported as configured: %s", rec.Body.String())
+	}
+}
+
 // TestHandleConfig_ProviderEndpointsRoundTrip is the load-bearing test
 // for the Settings UI: the provider_endpoints map must persist through
 // POST → config.json → GET so the Local LLMs section can save and

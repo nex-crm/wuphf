@@ -1,4 +1,4 @@
-import { RUNTIMES } from "./constants";
+import { LOCAL_PROVIDER_LABELS, RUNTIMES } from "./constants";
 import type { PrereqResult } from "./types";
 
 // Find the prereq detection record for a binary (e.g. "claude", "codex").
@@ -35,6 +35,39 @@ export function runtimeIsReady(
   if (!spec || spec.provider === null) return false;
   if (prereqsError) return true;
   return Boolean(detectedBinary(prereqs, spec.binary)?.found);
+}
+
+interface ProviderConfigSnapshot {
+  llm_provider?: string;
+  llm_provider_configured?: boolean;
+  llm_provider_priority?: readonly string[];
+}
+
+// Convert the broker's persisted/effective provider config into wizard labels.
+// The broker always returns an effective llm_provider, even when it is just
+// the install default. Only trust llm_provider when the server says it came
+// from env/config; otherwise let CLI auto-detection choose the first installed
+// runtime so Codex-only machines do not get prefilled with Claude.
+export function runtimeLabelsFromProviderConfig(
+  config: ProviderConfigSnapshot,
+): string[] {
+  const providers = [
+    ...(config.llm_provider_configured ? [config.llm_provider] : []),
+    ...(config.llm_provider_priority ?? []),
+  ];
+  const labels: string[] = [];
+  const seen = new Set<string>();
+  for (const rawProvider of providers) {
+    const provider = rawProvider?.trim().toLowerCase();
+    if (!provider) continue;
+    const label =
+      RUNTIMES.find((runtime) => runtime.provider === provider)?.label ??
+      LOCAL_PROVIDER_LABELS.find((runtime) => runtime.kind === provider)?.label;
+    if (!label || seen.has(label)) continue;
+    seen.add(label);
+    labels.push(label);
+  }
+  return labels;
 }
 
 interface SetupContinueInput {

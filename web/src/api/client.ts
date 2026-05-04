@@ -913,7 +913,7 @@ export type LLMProvider =
   | "mlx-lm"
   | "ollama"
   | "exo";
-export type MemoryBackend = "nex" | "gbrain" | "none";
+export type MemoryBackend = "markdown" | "nex" | "gbrain" | "none";
 export type ActionProvider = "auto" | "one" | "composio" | "";
 
 export interface ProviderEndpoint {
@@ -946,6 +946,7 @@ export interface LocalProviderStatus {
 export interface ConfigSnapshot {
   // Runtime
   llm_provider?: LLMProvider;
+  llm_provider_configured?: boolean;
   llm_provider_priority?: string[];
   provider_endpoints?: Record<string, ProviderEndpoint>;
   memory_backend?: MemoryBackend;

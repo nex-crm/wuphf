@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { get, post } from "../../api/client";
+import type { ConfigSnapshot } from "../../api/client";
+import { get, getConfig, post } from "../../api/client";
 import { useAppStore } from "../../stores/app";
 import "../../styles/onboarding.css";
 
@@ -18,6 +19,7 @@ import {
   canSetupContinue,
   detectedBinary,
   runtimeIsReady,
+  runtimeLabelsFromProviderConfig,
 } from "./wizard/runtime-helpers";
 import { WelcomeStep } from "./wizard/Step1Welcome";
 import { TemplatesStep } from "./wizard/Step2Templates";
@@ -32,7 +34,6 @@ import type {
   NexSignupStatus,
   PrereqResult,
   ReadinessCheck,
-  ReadinessStatus,
   TaskTemplate,
   WizardStep,
 } from "./wizard/types";
@@ -46,6 +47,72 @@ import type {
 
 interface WizardProps {
   onComplete?: () => void;
+}
+
+type PrereqsPayload = { prereqs?: PrereqResult[] } | PrereqResult[];
+type PrereqsSettled = PromiseSettledResult<PrereqsPayload>;
+type ConfigSettled = PromiseSettledResult<ConfigSnapshot>;
+
+interface PrereqsBootstrap {
+  list: PrereqResult[];
+  error: string;
+}
+
+interface ConfigBootstrap {
+  runtimePriority: string[];
+  localProvider: string | null;
+}
+
+function prereqsFromPayload(data: PrereqsPayload): PrereqResult[] {
+  return Array.isArray(data) ? data : (data.prereqs ?? []);
+}
+
+function errorMessage(reason: unknown): string {
+  return reason instanceof Error ? reason.message : String(reason);
+}
+
+function runtimePriorityFromInstalledPrereqs(list: PrereqResult[]): string[] {
+  const firstInstalled = RUNTIMES.find((spec) => {
+    if (spec.provider === null) return false;
+    const det = list.find((p) => p.name === spec.binary);
+    return Boolean(det?.found);
+  });
+  return firstInstalled ? [firstInstalled.label] : [];
+}
+
+function localProviderKindFromRuntimePriority(labels: readonly string[]) {
+  return (
+    LOCAL_PROVIDER_LABELS.find((meta) => labels.includes(meta.label))?.kind ??
+    null
+  );
+}
+
+function prereqsBootstrapFromResult(result: PrereqsSettled): PrereqsBootstrap {
+  if (result.status === "fulfilled") {
+    return { list: prereqsFromPayload(result.value), error: "" };
+  }
+  return { list: [], error: errorMessage(result.reason) };
+}
+
+function configBootstrapFromResult(result: ConfigSettled): ConfigBootstrap {
+  if (result.status !== "fulfilled") {
+    return { runtimePriority: [], localProvider: null };
+  }
+  const runtimePriority = runtimeLabelsFromProviderConfig(result.value);
+  return {
+    runtimePriority,
+    localProvider: localProviderKindFromRuntimePriority(runtimePriority),
+  };
+}
+
+function initialRuntimePriority(
+  current: string[],
+  configured: string[],
+  prereqs: PrereqResult[],
+): string[] {
+  if (current.length > 0) return current;
+  if (configured.length > 0) return configured;
+  return runtimePriorityFromInstalledPrereqs(prereqs);
 }
 
 // biome-ignore lint/complexity/noExcessiveLinesPerFunction: Existing function length is baselined for a focused follow-up refactor.
@@ -91,9 +158,9 @@ export function Wizard({ onComplete }: WizardProps) {
   const [prereqsLoading, setPrereqsLoading] = useState(true);
   const [prereqsError, setPrereqsError] = useState("");
   // Ordered list of runtime labels (matches RUNTIMES[].label). Position in
-  // the array is the fallback priority. Initially empty — we auto-populate
-  // with the first installed CLI once prereqs land so the happy path still
-  // works with zero clicks.
+  // the array is the fallback priority. Initially empty — we prefer explicit
+  // config/launch choices, then auto-populate with the first installed CLI so
+  // the happy path still works with zero clicks.
   const [runtimePriority, setRuntimePriority] = useState<string[]>([]);
   // localProvider is the local OpenAI-compat kind the user opted into in
   // the SetupStep subsection (mlx-lm | ollama | exo | "" for none).
@@ -135,32 +202,35 @@ export function Wizard({ onComplete }: WizardProps) {
     };
   }, []);
 
-  // Fetch prereqs on mount so the runtime picker shows which CLIs are
-  // actually installed. Auto-select the first detected runtime so users
-  // with a single CLI installed don't have to click.
+  // Fetch prereqs + current config on mount so the runtime picker shows which
+  // CLIs are installed while still honoring explicit launch/config choices
+  // such as `wuphf --provider codex`.
   useEffect(() => {
     let cancelled = false;
     setPrereqsLoading(true);
 
-    get<{ prereqs?: PrereqResult[] } | PrereqResult[]>("/onboarding/prereqs")
-      .then((data) => {
+    Promise.allSettled([
+      get<PrereqsPayload>("/onboarding/prereqs"),
+      getConfig(),
+    ])
+      .then(([prereqsResult, configResult]) => {
         if (cancelled) return;
-        const list = Array.isArray(data) ? data : (data.prereqs ?? []);
-        setPrereqs(list);
-        setRuntimePriority((current) => {
-          if (current.length > 0) return current;
-          const firstInstalled = RUNTIMES.find((spec) => {
-            if (spec.provider === null) return false;
-            const det = list.find((p) => p.name === spec.binary);
-            return Boolean(det?.found);
-          });
-          return firstInstalled ? [firstInstalled.label] : [];
-        });
-      })
-      .catch((err: unknown) => {
-        if (cancelled) return;
-        const msg = err instanceof Error ? err.message : String(err);
-        setPrereqsError(msg);
+        const prereqState = prereqsBootstrapFromResult(prereqsResult);
+        const configState = configBootstrapFromResult(configResult);
+
+        setPrereqs(prereqState.list);
+        setPrereqsError(prereqState.error);
+        if (configState.localProvider) {
+          setLocalProvider(configState.localProvider);
+        }
+
+        setRuntimePriority((current) =>
+          initialRuntimePriority(
+            current,
+            configState.runtimePriority,
+            prereqState.list,
+          ),
+        );
       })
       .finally(() => {
         if (!cancelled) setPrereqsLoading(false);
