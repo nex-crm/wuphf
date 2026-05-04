@@ -110,6 +110,7 @@ export function StatusBar() {
           onClick={handleRestart}
           disabled={retrying}
           title="Click to restart broker"
+          aria-label={retrying ? "Restarting broker…" : "Restart broker"}
         >
           {retrying ? "restarting…" : "disconnected"}
         </button>
