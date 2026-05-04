@@ -1,10 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  type QueryClient,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 
 import {
   createDM,
   get,
   getConfig,
+  type Message,
   post,
   postMessage,
   setMemory,
@@ -77,6 +83,11 @@ function askPrefix(leadSlug: string | undefined): string {
   return `@${slug} `;
 }
 
+function unknownSlashCommandMessage(command: string): string {
+  const name = command.trim().split(/\s+/)[0] || "/";
+  return `Unknown command: ${name}. Try /help.`;
+}
+
 /** Pick the team-lead slug: configured first, else first built-in agent, else 'ceo'. */
 function resolveLeadSlug(
   configured: string | undefined,
@@ -91,11 +102,49 @@ function resolveLeadSlug(
   return "ceo";
 }
 
+interface MessagesQueryData {
+  messages?: Message[];
+}
+
+function latestMessageIdFromQueryData(
+  data: MessagesQueryData | undefined,
+): string | null {
+  if (!data?.messages) return null;
+  for (let i = data.messages.length - 1; i >= 0; i--) {
+    const id = data.messages[i]?.id?.trim();
+    if (id) return id;
+  }
+  return null;
+}
+
+function latestCachedMessageId(
+  queryClient: QueryClient,
+  channel: string,
+): string | null {
+  const entries = queryClient.getQueriesData<MessagesQueryData>({
+    queryKey: ["messages", channel],
+  });
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const id = latestMessageIdFromQueryData(entries[i][1]);
+    if (id) return id;
+  }
+  return null;
+}
+
+function emptyMessagesQueryData(
+  data: MessagesQueryData | undefined,
+): MessagesQueryData | undefined {
+  if (!data?.messages) return data;
+  return { ...data, messages: [] };
+}
+
 interface SlashHandlers {
   /** Team lead slug used for `/ask` routing. */
   leadSlug: string | undefined;
   /** Send the given text as a normal message (bypasses slash parsing). */
   sendAsMessage: (text: string) => void;
+  /** Clear the visible transcript for the active channel. */
+  clearMessages: () => void;
 }
 
 interface OutboundMessage {
@@ -118,7 +167,7 @@ function handleSlashCommand(input: string, handlers: SlashHandlers): boolean {
 
   switch (cmd) {
     case "/clear":
-      showNotice("Messages cleared", "info");
+      handlers.clearMessages();
       return true;
     case "/help":
       store.setComposerHelpOpen(true);
@@ -317,7 +366,8 @@ function handleSlashCommand(input: string, handlers: SlashHandlers): boolean {
       return true;
     }
     default:
-      return false;
+      showNotice(unknownSlashCommandMessage(cmd), "info");
+      return true;
   }
 }
 
@@ -342,6 +392,8 @@ function emptyHistoryState(): HistoryState {
 // biome-ignore lint/complexity/noExcessiveLinesPerFunction: Existing function length is baselined for a focused follow-up refactor.
 export function Composer() {
   const currentChannel = useAppStore((s) => s.currentChannel);
+  const setLastMessageId = useAppStore((s) => s.setLastMessageId);
+  const setChannelClearMarker = useAppStore((s) => s.setChannelClearMarker);
   const [text, setText] = useState("");
   const [caret, setCaret] = useState(0);
   const [acItems, setAcItems] = useState<AutocompleteItem[]>([]);
@@ -433,6 +485,18 @@ export function Composer() {
     }
   }, [resetRecall]);
 
+  const clearCurrentChannelMessages = useCallback(() => {
+    const markerId = latestCachedMessageId(queryClient, currentChannel);
+    setLastMessageId(null);
+    setChannelClearMarker(currentChannel, markerId);
+    queryClient.setQueriesData<MessagesQueryData>(
+      { queryKey: ["messages", currentChannel] },
+      emptyMessagesQueryData,
+    );
+    queryClient.invalidateQueries({ queryKey: ["messages", currentChannel] });
+    showNotice("Messages cleared", "info");
+  }, [currentChannel, queryClient, setChannelClearMarker, setLastMessageId]);
+
   const handleSend = useCallback(() => {
     const trimmed = text.trim();
     if (!trimmed || sendMutation.isPending) return;
@@ -447,6 +511,7 @@ export function Composer() {
             tagged: extractTaggedMentions(rewritten, knownSlugs),
           });
         },
+        clearMessages: clearCurrentChannelMessages,
       });
       if (consumed) {
         // Persist the *raw* command to history so Ctrl+P replays `/ask foo`,
@@ -463,7 +528,15 @@ export function Composer() {
       tagged: extractTaggedMentions(trimmed, knownSlugs),
     });
     resetComposer();
-  }, [text, sendMutation, leadSlug, currentChannel, resetComposer, knownSlugs]);
+  }, [
+    text,
+    sendMutation,
+    leadSlug,
+    currentChannel,
+    resetComposer,
+    knownSlugs,
+    clearCurrentChannelMessages,
+  ]);
 
   /**
    * Walk backward through history. On first invocation, snapshot the live
@@ -693,7 +766,11 @@ export const __test__ = {
   readHistory,
   writeHistory,
   pushHistory,
+  unknownSlashCommandMessage,
+  handleSlashCommand,
   resolveLeadSlug,
   askPrefix,
+  latestMessageIdFromQueryData,
+  emptyMessagesQueryData,
   COMPOSER_HISTORY_LIMIT,
 };

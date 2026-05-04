@@ -8,6 +8,7 @@ afterEach(() => {
     currentApp: null,
     activeThreadId: null,
     lastMessageId: null,
+    clearedMessageIdsByChannel: {},
     unreadByChannel: {},
     activeAgentSlug: null,
     searchOpen: false,
@@ -40,6 +41,7 @@ describe("DM channel helpers", () => {
       currentApp: "settings",
       activeThreadId: "thread-1",
       lastMessageId: "msg-1",
+      clearedMessageIdsByChannel: { general: "msg-0" },
       activeAgentSlug: "ceo",
       searchOpen: true,
       composerSearchInitialQuery: "stuck task",
@@ -58,6 +60,7 @@ describe("DM channel helpers", () => {
       currentApp: null,
       activeThreadId: null,
       lastMessageId: null,
+      clearedMessageIdsByChannel: {},
       activeAgentSlug: null,
       searchOpen: false,
       composerSearchInitialQuery: "",
@@ -117,6 +120,27 @@ describe("channel unread state", () => {
     expect(useAppStore.getState().currentApp).toBeNull();
     expect(useAppStore.getState().unreadByChannel.general).toBe(0);
     expect(useAppStore.getState().unreadByChannel.launch).toBe(1);
+  });
+});
+
+describe("channel clear markers", () => {
+  it("stores and removes clear markers by normalized channel", () => {
+    useAppStore.getState().setChannelClearMarker(" launch ", " msg-2 ");
+    useAppStore.getState().setChannelClearMarker("", "msg-general");
+
+    expect(useAppStore.getState().clearedMessageIdsByChannel).toMatchObject({
+      launch: "msg-2",
+      general: "msg-general",
+    });
+
+    useAppStore.getState().setChannelClearMarker("launch", null);
+
+    expect(useAppStore.getState().clearedMessageIdsByChannel.launch).toBe(
+      undefined,
+    );
+    expect(useAppStore.getState().clearedMessageIdsByChannel.general).toBe(
+      "msg-general",
+    );
   });
 });
 

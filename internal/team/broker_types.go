@@ -175,6 +175,7 @@ type teamTask struct {
 	MemoryWorkflow   *MemoryWorkflow `json:"memory_workflow,omitempty"`
 	CreatedAt        string          `json:"created_at"`
 	UpdatedAt        string          `json:"updated_at"`
+	CompletedAt      string          `json:"completed_at,omitempty"`
 }
 
 type channelSurface struct {
@@ -338,6 +339,7 @@ type teamSkill struct {
 	LastExecutionStatus string   `json:"last_execution_status,omitempty"`
 	UsageCount          int      `json:"usage_count"`
 	Status              string   `json:"status"`
+	DisabledFromStatus  string   `json:"disabled_from_status,omitempty"`
 	CreatedAt           string   `json:"created_at"`
 	UpdatedAt           string   `json:"updated_at"`
 }

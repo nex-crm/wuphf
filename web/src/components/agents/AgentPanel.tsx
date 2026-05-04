@@ -5,16 +5,15 @@ import { Xmark } from "iconoir-react";
 import type { OfficeMember } from "../../api/client";
 import { createDM, post } from "../../api/client";
 import { listAgentLogTasks, type TaskLogSummary } from "../../api/tasks";
-import { useAgentStream } from "../../hooks/useAgentStream";
 import { useDefaultHarness } from "../../hooks/useConfig";
 import { useChannelMembers, useOfficeMembers } from "../../hooks/useMembers";
 import { resolveHarness } from "../../lib/harness";
 import { directChannelSlug, useAppStore } from "../../stores/app";
-import { StreamLineView } from "../messages/StreamLineView";
 import { confirm } from "../ui/ConfirmDialog";
 import { HarnessBadge } from "../ui/HarnessBadge";
 import { PixelAvatar } from "../ui/PixelAvatar";
 import { showNotice } from "../ui/Toast";
+import { AgentTerminal } from "./AgentTerminal";
 
 interface AgentPanelViewProps {
   agent: OfficeMember;
@@ -22,34 +21,13 @@ interface AgentPanelViewProps {
 }
 
 function StreamSection({ slug }: { slug: string }) {
-  const { lines, connected } = useAgentStream(slug);
-  const scrollRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (el) {
-      el.scrollTop = el.scrollHeight;
-    }
-  }, []);
-
   return (
     <div className="agent-panel-section">
-      <div className="agent-panel-section-title">Live stream</div>
-      <div className="agent-stream-status">
-        <span
-          className={`status-dot ${connected ? "active pulse" : "lurking"}`}
-        />
-        {connected ? "Connected" : "Disconnected"}
-      </div>
-      <div className="agent-stream-log" ref={scrollRef}>
-        {lines.length === 0 ? (
-          <div className="agent-stream-empty">No output yet</div>
-        ) : (
-          lines.map((line) => (
-            <StreamLineView key={line.id} line={line} compact={true} />
-          ))
-        )}
-      </div>
+      <AgentTerminal
+        slug={slug}
+        title="Live stream"
+        emptyLabel="No output yet"
+      />
     </div>
   );
 }

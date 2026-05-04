@@ -162,6 +162,85 @@
 }
 
 /* ─── Stream log ─── */
+.agent-terminal-shell {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 220px;
+  overflow: hidden;
+  background: #0b0f14;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+}
+
+.agent-terminal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  height: 34px;
+  padding: 0 10px;
+  color: #d8dee9;
+  background: #111827;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 11px;
+}
+
+.agent-terminal-title {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  gap: 6px;
+  font-weight: 600;
+}
+
+.agent-terminal-meta {
+  color: #8b949e;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.agent-terminal-frame {
+  position: relative;
+  flex: 1;
+  min-height: 186px;
+  overflow: hidden;
+}
+
+.agent-terminal-host {
+  width: 100%;
+  height: 100%;
+  min-height: 186px;
+  padding: 8px;
+}
+
+.agent-terminal-host .xterm {
+  height: 100%;
+}
+
+.agent-terminal-empty {
+  position: absolute;
+  inset: 8px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #6b7280;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  pointer-events: none;
+}
+
+.agent-panel-section .agent-terminal-shell {
+  min-height: 300px;
+}
+
+.agent-panel-section .agent-terminal-frame,
+.agent-panel-section .agent-terminal-host {
+  min-height: 266px;
+}
+
 .agent-stream-log {
   font-family: var(--font-mono);
   font-size: 11px;

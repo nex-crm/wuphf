@@ -257,6 +257,33 @@ func (b *Broker) createTelegramChannel(slug, title string, chatID int64, chType 
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
+	// The manifest is desired state; the broker's in-memory member set is
+	// current state. Manifest slugs that haven't been adopted yet (e.g.
+	// "planner", "executor", "reviewer") would cause createChannelLocked to
+	// return "unknown members". Skip them with a log entry so the Telegram
+	// connect succeeds — they join the channel when they are adopted.
+	adopted := make([]string, 0, len(members))
+	for _, m := range members {
+		if b.findMemberLocked(m) != nil {
+			adopted = append(adopted, m)
+		}
+	}
+	if len(adopted) < len(members) {
+		var skipped []string
+		adoptedSet := make(map[string]bool, len(adopted))
+		for _, m := range adopted {
+			adoptedSet[m] = true
+		}
+		for _, m := range members {
+			if !adoptedSet[m] {
+				skipped = append(skipped, m)
+			}
+		}
+		log.Printf("[telegram] connect: skipping %d unadopted member(s): %s",
+			len(skipped), strings.Join(skipped, ", "))
+	}
+	members = adopted
+
 	if existing := b.findChannelLocked(slug); existing != nil {
 		// SlugifyTelegramTitle is title-only, so two distinct Telegram chats
 		// with the same display name collide on slug. If we returned the

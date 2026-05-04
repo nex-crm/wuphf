@@ -51,6 +51,7 @@ import "./styles/search.css";
 import "./styles/wiki-shell.css";
 import "./styles/kbd.css";
 import "./styles/console.css";
+import "@xterm/xterm/css/xterm.css";
 
 // ── Error boundary ─────────────────────────────────────────────
 

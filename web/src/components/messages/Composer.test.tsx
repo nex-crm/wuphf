@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { Message } from "../../api/client";
+import * as Toast from "../ui/Toast";
 import { __test__ } from "./Composer";
 
 const {
@@ -7,7 +9,11 @@ const {
   readHistory,
   pushHistory,
   resolveLeadSlug,
+  unknownSlashCommandMessage,
+  handleSlashCommand,
   askPrefix,
+  latestMessageIdFromQueryData,
+  emptyMessagesQueryData,
   COMPOSER_HISTORY_LIMIT,
 } = __test__;
 
@@ -94,5 +100,51 @@ describe("askPrefix", () => {
   it("defaults to @ceo", () => {
     expect(askPrefix(undefined)).toBe("@ceo ");
     expect(askPrefix("")).toBe("@ceo ");
+  });
+});
+
+describe("/clear query helpers", () => {
+  it("uses the newest cached message id as the clear marker", () => {
+    const messages = [{ id: "msg-1" }, { id: "msg-2" }] as Message[];
+
+    expect(latestMessageIdFromQueryData({ messages })).toBe("msg-2");
+  });
+
+  it("empties cached messages without dropping other query fields", () => {
+    const data = {
+      messages: [{ id: "msg-1" }] as Message[],
+      extra: "kept",
+    };
+
+    expect(emptyMessagesQueryData(data)).toEqual({
+      messages: [],
+      extra: "kept",
+    });
+  });
+});
+
+describe("unknown slash commands", () => {
+  it("names the command and points to help", () => {
+    expect(unknownSlashCommandMessage("/object list")).toBe(
+      "Unknown command: /object. Try /help.",
+    );
+  });
+
+  it("are consumed instead of sent as chat messages", () => {
+    const sendAsMessage = vi.fn();
+    const showNotice = vi.spyOn(Toast, "showNotice").mockReturnValue();
+
+    const consumed = handleSlashCommand("/object list", {
+      leadSlug: "ceo",
+      clearMessages: vi.fn(),
+      sendAsMessage,
+    });
+
+    expect(consumed).toBe(true);
+    expect(sendAsMessage).not.toHaveBeenCalled();
+    expect(showNotice).toHaveBeenCalledWith(
+      "Unknown command: /object. Try /help.",
+      "info",
+    );
   });
 });

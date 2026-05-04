@@ -48,8 +48,11 @@ type SkillWuphfMeta struct {
 	SourceSignals []string `yaml:"source_signals,omitempty"`
 	// CreatedBy is the identity that wrote this proposal ("archivist", agent slug, etc.).
 	CreatedBy string `yaml:"created_by,omitempty"`
-	// Status is one of proposed | active | archived.
+	// Status is one of proposed | active | disabled | archived.
 	Status string `yaml:"status,omitempty"`
+	// DisabledFromStatus records the status a disabled skill came from so
+	// disabled proposals cannot be re-enabled as active without approval.
+	DisabledFromStatus string `yaml:"disabled_from_status,omitempty"`
 	// LastSynthesizedSHA is the repo HEAD SHA at the time of last synthesis.
 	LastSynthesizedSHA string `yaml:"last_synthesized_sha,omitempty"`
 	// LastSynthesizedTs is the RFC3339 timestamp of the last synthesis run.
@@ -179,6 +182,7 @@ func teamSkillToFrontmatter(sk teamSkill) SkillFrontmatter {
 				SourceArticles:     sourceArticles,
 				CreatedBy:          sk.CreatedBy,
 				Status:             sk.Status,
+				DisabledFromStatus: sk.DisabledFromStatus,
 				Tags:               append([]string(nil), sk.Tags...),
 				WorkflowProvider:   sk.WorkflowProvider,
 				WorkflowKey:        sk.WorkflowKey,
