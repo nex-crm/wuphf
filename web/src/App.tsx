@@ -218,6 +218,26 @@ class ErrorBoundary extends Component<
   }
 }
 
+class NonCriticalBoundary extends Component<
+  { children: ReactNode },
+  { hasError: boolean }
+> {
+  state = { hasError: false };
+
+  static getDerivedStateFromError(): { hasError: boolean } {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: Error, info: { componentStack?: string | null }) {
+    // eslint-disable-next-line no-console
+    console.error("[WUPHF NonCriticalBoundary]", error, info);
+  }
+
+  render() {
+    return this.state.hasError ? null : this.props.children;
+  }
+}
+
 // ── Routed main content ─────────────────────────────────────────
 
 function MainContent() {
@@ -542,16 +562,20 @@ export default function App() {
 
   return (
     <ErrorBoundary>
-      <Suspense fallback={null}>
-        <UpgradeBanner />
-      </Suspense>
+      <NonCriticalBoundary>
+        <Suspense fallback={null}>
+          <UpgradeBanner />
+        </Suspense>
+      </NonCriticalBoundary>
       {body}
       <ToastContainer />
       <ConfirmHost />
       <ProviderSwitcherHost />
-      <Suspense fallback={null}>
-        <TelegramConnectHost />
-      </Suspense>
+      <NonCriticalBoundary>
+        <Suspense fallback={null}>
+          <TelegramConnectHost />
+        </Suspense>
+      </NonCriticalBoundary>
     </ErrorBoundary>
   );
 }
