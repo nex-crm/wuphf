@@ -55,6 +55,7 @@ func (b *Broker) requestSelfHealingLocked(agentSlug, taskID string, reason agent
 		Owner:      owner,
 		PipelineID: "incident",
 	}); existing != nil {
+		beforeStatus := existing.Status
 		if existing.Details == "" {
 			existing.Details = details
 		} else if err := appendTaskDetailLocked(existing, selfHealingIncidentUpdate(reason, detail)); err != nil {
@@ -87,6 +88,7 @@ func (b *Broker) requestSelfHealingLocked(agentSlug, taskID string, reason agent
 		if err := b.saveLocked(); err != nil {
 			return teamTask{}, true, err
 		}
+		b.emitTaskTransitionAutoNotebook(existing, beforeStatus, createdBy)
 		return *existing, true, nil
 	}
 
@@ -123,6 +125,7 @@ func (b *Broker) requestSelfHealingLocked(agentSlug, taskID string, reason agent
 	if err := b.saveLocked(); err != nil {
 		return teamTask{}, false, err
 	}
+	b.emitTaskTransitionAutoNotebook(&task, "", createdBy)
 	return task, false, nil
 }
 
