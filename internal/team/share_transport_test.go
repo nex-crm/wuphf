@@ -254,6 +254,7 @@ func TestShareTransportRevokeInviteIdempotent(t *testing.T) {
 
 	runErr := make(chan error, 1)
 	go func() { runErr <- st.Run(ctx, host) }()
+	waitForShareConnected(t, st, runErr)
 
 	token, _, err := b.createHumanInvite()
 	if err != nil {
@@ -323,6 +324,7 @@ func TestShareTransportRevokeInviteAccumulatesErrors(t *testing.T) {
 	defer cancel()
 	runErr := make(chan error, 1)
 	go func() { runErr <- st.Run(ctx, failFirst) }()
+	waitForShareConnected(t, st, runErr)
 
 	err = st.RevokeInvite(ctx, inviteID)
 	if err == nil {
