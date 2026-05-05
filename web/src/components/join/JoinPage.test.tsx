@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -11,11 +11,11 @@ vi.mock("../../api/joinInvite", () => ({
 
 const submitJoinInviteMock = vi.mocked(submitJoinInvite);
 
-beforeEach(() => {
-  vi.clearAllMocks();
-});
-
 describe("JoinPage", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("renders an empty-state when the token is blank", () => {
     render(<JoinPage token="   " />);
     expect(
@@ -101,11 +101,30 @@ describe("JoinPage", () => {
     expect(pendingButton).toBeDisabled();
     expect(pendingButton).toHaveAttribute("aria-busy", "true");
 
-    resolveSubmit({
-      ok: false,
-      code: "invite_invalid",
-      message: "Invite could not be accepted.",
+    await act(async () => {
+      resolveSubmit({
+        ok: false,
+        code: "invite_invalid",
+        message: "Invite could not be accepted.",
+      });
     });
     await screen.findByRole("alert");
+  });
+
+  // submitJoinInvite is contractually never-rejecting (it catches fetch
+  // failures and returns a `network` JoinInviteFailure), but if a future
+  // refactor lets a rejection escape we want JoinPage to recover instead of
+  // hanging the user on a disabled button.
+  it("recovers from an unexpected rejection in submitJoinInvite", async () => {
+    const user = userEvent.setup();
+    submitJoinInviteMock.mockRejectedValueOnce(new Error("boom"));
+    render(<JoinPage token="invite-1" />);
+
+    await user.type(screen.getByLabelText(/display name/i), "Maya");
+    await user.click(screen.getByRole("button", { name: /enter office/i }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /enter office/i })).toBeEnabled();
   });
 });

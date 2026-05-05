@@ -493,11 +493,22 @@ type shareJoinError struct {
 	Message string `json:"message"`
 }
 
+// maxShareJoinBodyBytes caps the unauthenticated POST body so a stranger
+// holding only an invite link cannot exhaust memory by streaming gigabytes
+// into the JSON decoder. 8 KiB is ample for a display_name payload.
+const maxShareJoinBodyBytes = 8 << 10
+
 func handleShareJoinSubmit(w http.ResponseWriter, r *http.Request, brokerURL, token string, onJoin func()) {
 	var submission struct {
 		DisplayName string `json:"display_name"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&submission); err != nil {
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxShareJoinBodyBytes))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&submission); err != nil {
+		writeShareJoinError(w, http.StatusBadRequest, "invalid_request", "We could not read your invite submission. Reload and try again.")
+		return
+	}
+	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		writeShareJoinError(w, http.StatusBadRequest, "invalid_request", "We could not read your invite submission. Reload and try again.")
 		return
 	}

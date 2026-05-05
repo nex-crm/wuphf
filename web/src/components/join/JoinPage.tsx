@@ -60,10 +60,23 @@ export function JoinPage({ token, onAccepted }: JoinPageProps) {
       return;
     }
     setStatus({ kind: "submitting" });
-    const result = await submitJoinInvite({
-      token: trimmedToken,
-      displayName: trimmed,
-    });
+    let result: Awaited<ReturnType<typeof submitJoinInvite>>;
+    try {
+      result = await submitJoinInvite({
+        token: trimmedToken,
+        displayName: trimmed,
+      });
+    } catch (err) {
+      // submitJoinInvite is contractually never-rejecting, so reaching this
+      // branch means a programmer error or a future refactor regression.
+      // Treat it as a generic network failure so the joiner can retry.
+      const message =
+        err instanceof Error && err.message
+          ? `Could not reach WUPHF: ${err.message}`
+          : "Something went wrong submitting the invite. Try again.";
+      setStatus({ kind: "error", code: "network", message });
+      return;
+    }
     if (result.ok) {
       if (onAccepted) {
         onAccepted(result.redirect);

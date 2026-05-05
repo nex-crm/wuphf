@@ -216,6 +216,69 @@ func TestShareJoinMalformedBodyReturnsInvalidRequest(t *testing.T) {
 	}
 }
 
+func TestShareJoinRejectsOversizedBody(t *testing.T) {
+	broker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("broker should not be called for oversized body: %s %s", r.Method, r.URL.Path)
+	}))
+	t.Cleanup(broker.Close)
+
+	shareSrv := httptest.NewServer(newShareHandler(broker.URL, "broker-token", nil))
+	t.Cleanup(shareSrv.Close)
+
+	// Construct a body larger than the 8 KiB cap. The decoder should error
+	// out before ever reaching the broker, so an unauthenticated invite link
+	// cannot be used to stream gigabytes into the share handler.
+	huge := strings.Repeat("a", 16<<10)
+	body := `{"display_name":"` + huge + `"}`
+	req, err := http.NewRequest(http.MethodPost, shareSrv.URL+"/join/abc", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("build oversized request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("oversized request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var errBody struct {
+		Error string `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&errBody); err != nil {
+		t.Fatalf("decode error body: %v", err)
+	}
+	if errBody.Error != "invalid_request" {
+		t.Fatalf("error code = %q, want invalid_request", errBody.Error)
+	}
+}
+
+func TestShareJoinRejectsUnknownFields(t *testing.T) {
+	broker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("broker should not be called when unknown fields are present: %s %s", r.Method, r.URL.Path)
+	}))
+	t.Cleanup(broker.Close)
+
+	shareSrv := httptest.NewServer(newShareHandler(broker.URL, "broker-token", nil))
+	t.Cleanup(shareSrv.Close)
+
+	body := `{"display_name":"Maya","admin":true}`
+	req, err := http.NewRequest(http.MethodPost, shareSrv.URL+"/join/abc", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("unknown-field request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
 func TestShareJoinBrokerFailureReturnsBadGateway(t *testing.T) {
 	broker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/humans/invites/accept" {
