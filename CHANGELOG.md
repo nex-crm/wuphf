@@ -21,6 +21,10 @@ All notable changes to WUPHF will be documented in this file.
 - **`killStaleBroker` now verifies the detected PID's binary path matches `wuphf` before sending SIGKILL.** With workspaces reusing the 7910–7999 range, the previous behavior could have killed an unrelated process bound to a previously-vacated port. Codex outside-voice flagged this as a real safety regression that scope-aware port allocation introduces.
 - **Per-agent opencode config now writes under `<runtime_home>/.wuphf/opencode-configs/<slug>.json` instead of `~/.config/opencode/opencode.<slug>.json`.** Two workspaces with the same agent slug would have raced on the shared opencode config directory; namespacing under runtime home eliminates the collision while preserving the read of the user's base opencode config (themes, providers).
 
+### Deprecated
+
+- **`wuphf --tui` is renamed to `wuphf --legacy-tui`.** The old flag remains as a warning-only alias for now; the legacy bubbletea TUI is slated for removal after the desktop replacement lands.
+
 ### Fixed
 
 - **Workspace endpoints are wired before the web broker starts serving.** Creating a workspace from the web UI no longer hits `503 {"error":"workspaces not configured"}` because `/workspaces/*` routes now receive the orchestrator during broker construction instead of after `LaunchWeb` blocks forever.
@@ -31,7 +35,7 @@ All notable changes to WUPHF will be documented in this file.
 
 ### Changed
 
-- **Headless `claude --print` is now the default dispatch path for both `wuphf` (web) and `wuphf --tui`.** Anthropic re-sanctioned headless CLI reuse in the 2026-04 OpenClaw policy note, and it runs on the user's normal subscription quota — no separate extra-usage charge. Every turn now dispatches as a fresh `claude --print` invocation, matching how the Codex runtime already worked and unifying dispatch across both modes. The previous per-agent long-lived interactive tmux pane path is preserved as an internal fallback primitive (reachable if dispatch ever needs to promote to panes at runtime) but is no longer invoked at startup. tmux is still required for `--tui` since the channel-view TUI runs in tmux; the web UI no longer needs it.
+- **Headless `claude --print` is now the default dispatch path for both `wuphf` (web) and `wuphf --legacy-tui`.** Anthropic re-sanctioned headless CLI reuse in the 2026-04 OpenClaw policy note, and it runs on the user's normal subscription quota — no separate extra-usage charge. Every turn now dispatches as a fresh `claude --print` invocation, matching how the Codex runtime already worked and unifying dispatch across both modes. The previous per-agent long-lived interactive tmux pane path is preserved as an internal fallback primitive (reachable if dispatch ever needs to promote to panes at runtime) but is no longer invoked at startup. tmux is still required for `--legacy-tui` since the channel-view TUI runs in tmux; the web UI no longer needs it.
 - **Pane-fallback messaging updated to reflect the new default.** The stderr banner and `#general` system post no longer frame headless as "extra-usage quota" — it isn't, anymore. Messaging now reads as: pane-backed fallback attempted but unavailable → continuing with the default headless path on your normal subscription.
 - **Inline Enter-key hint on wizard CTAs drops the redundant `Enter` word.** The hint rendered both a `↵` key pill and the word `Enter` next to it — same information twice. Now it's just the pill. On the task step (⌘+Enter), the modifier is rendered as its own pill so the cue stays two key pills instead of one pill plus a string.
 

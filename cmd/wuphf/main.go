@@ -230,7 +230,9 @@ func main() {
 	channelApp := flag.String("channel-app", "", "Start channel view on a specific app (internal)")
 	threadsCollapsed := flag.Bool("threads-collapsed", false, "Start with threads collapsed (default: expanded)")
 	unsafeMode := flag.Bool("unsafe", false, "Bypass all agent permission checks (use for local dev only)")
-	tuiMode := flag.Bool("tui", false, "Launch with tmux TUI instead of the web UI")
+	tuiMode := false
+	flag.BoolVar(&tuiMode, "legacy-tui", false, "Launch with legacy tmux TUI instead of the web UI (deprecated; slated for removal)")
+	flag.BoolVar(&tuiMode, "tui", false, "Deprecated alias for --legacy-tui")
 	webPort := flag.Int("web-port", 7891, "Port for the web UI (default 7891)")
 	brokerPort := flag.Int("broker-port", 0, "Port for the local broker (default 7890)")
 	noNex := flag.Bool("no-nex", false, "Disable Nex completely for this run")
@@ -250,7 +252,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "WUPHF v%s — the terminal office Ryan Howard always wanted.\n\n", buildinfo.Current().Version)
 		fmt.Fprintf(os.Stderr, "Usage:\n")
 		fmt.Fprintf(os.Stderr, "  %s              Launch multi-agent team (web UI on :%d)\n", appName, *webPort)
-		fmt.Fprintf(os.Stderr, "  %s --tui        Launch with tmux TUI instead\n", appName)
+		fmt.Fprintf(os.Stderr, "  %s --legacy-tui  Launch with legacy tmux TUI instead\n", appName)
 		fmt.Fprintf(os.Stderr, "  %s init         Install the latest CLI and save setup defaults\n", appName)
 		fmt.Fprintf(os.Stderr, "  %s upgrade      Check npm for a newer version and show the changelog\n", appName)
 		fmt.Fprintf(os.Stderr, "  %s shred        Burn the workspace down and reopen onboarding\n", appName)
@@ -268,6 +270,11 @@ func main() {
 	}
 
 	flag.Parse()
+
+	passedFlags := map[string]bool{}
+	flag.Visit(func(f *flag.Flag) {
+		passedFlags[f.Name] = true
+	})
 
 	if *helpAll {
 		fmt.Fprintf(os.Stderr, "WUPHF v%s — all flags (including internal):\n\n", buildinfo.Current().Version)
@@ -474,7 +481,10 @@ func main() {
 	// owns the CLI surface.
 
 	// TUI mode: tmux-based interface
-	if *tuiMode {
+	if tuiMode {
+		if passedFlags["tui"] && !passedFlags["legacy-tui"] {
+			fmt.Fprintln(os.Stderr, "warning: --tui is renamed to --legacy-tui. The legacy bubbletea TUI is scheduled for removal; track docs/architecture/desktop-platform.md.")
+		}
 		runTeam(args, selectedBlueprint, *unsafeMode, *oneOnOne, *opusCEO, *collabMode)
 		return
 	}
