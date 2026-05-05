@@ -75,7 +75,7 @@ Wire-shaped types live in `internal/team/api/` and are the source of truth. `web
 
 We don't aim for parity. We aim for **intentional asymmetry**.
 
-See [`docs/surfaces.md`](docs/surfaces.md) for the canonical feature × surface matrix. If you're adding a feature on one surface, decide *and document* whether it should exist on the other. Not every feature should — some are pixel-shaped, some are terminal-shaped.
+If you're adding a feature on one surface, decide *and document* whether it should exist on the other. Not every feature should — some are pixel-shaped, some are terminal-shaped.
 
 ## Commits and PRs
 

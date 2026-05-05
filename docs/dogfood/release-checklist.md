@@ -13,7 +13,6 @@
 - Relevant Web tests pass.
 - Typecheck/build passes for changed Web contracts.
 - File-size and code-quality checks are clean or the PR explains existing debt.
-- Surface parity matrix reflects the shipped capability state.
 
 ## Before Merge
 
