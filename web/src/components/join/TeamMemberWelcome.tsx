@@ -38,7 +38,7 @@ function markDismissed(key: string): void {
 }
 
 export function TeamMemberWelcome() {
-  const { role, human } = useSessionRole();
+  const { role, human, hostDisplayName } = useSessionRole();
   const key = useMemo(() => (human ? dismissalKey(human) : null), [human]);
   const [dismissedThisRender, setDismissedThisRender] = useState(false);
 
@@ -52,6 +52,10 @@ export function TeamMemberWelcome() {
   if (key && hasDismissed(key)) return null;
 
   const displayName = human.display_name?.trim() || "team member";
+  // Possessive form: "Sam" → "Sam's", "Chris" → "Chris's". Names ending in
+  // "s" still get an apostrophe-s — Strunk & White, and easier to read than
+  // "Chris' office" which trips up scan-readers on a small card.
+  const officeLabel = hostDisplayName ? `${hostDisplayName}'s office` : "this office";
 
   return (
     <aside
@@ -61,7 +65,7 @@ export function TeamMemberWelcome() {
     >
       <div className="team-welcome-body">
         <p className="team-welcome-title">
-          You&apos;re in. You joined this office as{" "}
+          You&apos;re in. You joined {officeLabel} as{" "}
           <strong>{displayName}</strong>.
         </p>
         <p className="team-welcome-copy">

@@ -54,6 +54,50 @@ describe("TeamMemberWelcome", () => {
     ).toBeInTheDocument();
   });
 
+  it("uses the host display name in the office label when available", async () => {
+    getHumanMeMock.mockResolvedValue({
+      human: {
+        role: "member",
+        display_name: "Maya",
+        invite_id: "invite-host-1",
+      },
+      host_display_name: "Sam Sender",
+    });
+    render(wrap(<TeamMemberWelcome />));
+
+    const card = await screen.findByLabelText("Team member session welcome");
+    expect(card).toHaveTextContent(/joined Sam Sender's office as/i);
+  });
+
+  it("falls back to 'this office' when host display name is missing", async () => {
+    getHumanMeMock.mockResolvedValue({
+      human: {
+        role: "member",
+        display_name: "Maya",
+        invite_id: "invite-host-2",
+      },
+    });
+    render(wrap(<TeamMemberWelcome />));
+
+    const card = await screen.findByLabelText("Team member session welcome");
+    expect(card).toHaveTextContent(/joined this office as/i);
+  });
+
+  it("falls back to 'this office' when host display name is whitespace", async () => {
+    getHumanMeMock.mockResolvedValue({
+      human: {
+        role: "member",
+        display_name: "Maya",
+        invite_id: "invite-host-3",
+      },
+      host_display_name: "   ",
+    });
+    render(wrap(<TeamMemberWelcome />));
+
+    const card = await screen.findByLabelText("Team member session welcome");
+    expect(card).toHaveTextContent(/joined this office as/i);
+  });
+
   it("does not render for a host session", async () => {
     getHumanMeMock.mockResolvedValue({
       human: {
