@@ -1,11 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
 
-import { getHumanMe, type HumanMe } from "../api/platform";
-
-// Shared key + cadence with HealthCheckApp so TanStack dedupes the
-// /humans/me request. If you change either side, change both.
-const HUMAN_ME_QUERY_KEY = ["humans", "me"] as const;
-const HUMAN_ME_REFETCH_MS = 30_000;
+import {
+  getHumanMe,
+  HUMAN_ME_QUERY_KEY,
+  HUMAN_ME_REFETCH_MS,
+  type HumanMe,
+} from "../api/platform";
 
 export type SessionRole = "host" | "member" | "unknown";
 

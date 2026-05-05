@@ -2036,13 +2036,13 @@ html[data-theme="nex"]
   font-weight: 500;
   border-radius: 6px;
   border: 1px solid var(--border-strong);
-  background: var(--bg-elev, #fff);
+  background: var(--bg-card);
   color: var(--text);
   cursor: pointer;
   transition: background 0.12s;
 }
 .team-welcome-dismiss:hover {
-  background: var(--accent-bg-strong, rgba(0, 0, 0, 0.04));
+  background: var(--accent-bg-strong);
 }
 .team-welcome-dismiss:focus-visible {
   outline: 2px solid var(--accent);

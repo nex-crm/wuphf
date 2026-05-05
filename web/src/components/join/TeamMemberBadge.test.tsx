@@ -8,6 +8,8 @@ import { TeamMemberBadge } from "./TeamMemberBadge";
 
 vi.mock("../../api/platform", () => ({
   getHumanMe: vi.fn(),
+  HUMAN_ME_QUERY_KEY: ["humans", "me"] as const,
+  HUMAN_ME_REFETCH_MS: 30_000,
 }));
 
 const getHumanMeMock = vi.mocked(getHumanMe);
