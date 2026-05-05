@@ -12,7 +12,7 @@ import {
   messageMarkdownComponents,
   messageRemarkPlugins,
 } from "../../lib/messageMarkdown";
-import { useAppStore } from "../../stores/app";
+import { useChannelSlug } from "../../routes/useCurrentRoute";
 import { HarnessBadge } from "../ui/HarnessBadge";
 import { PixelAvatar } from "../ui/PixelAvatar";
 import { showNotice } from "../ui/Toast";
@@ -42,7 +42,7 @@ export function MessageBubble({
   onQuoteReply,
   onCopyLink,
 }: MessageBubbleProps) {
-  const currentChannel = useAppStore((s) => s.currentChannel);
+  const currentChannel = useChannelSlug() ?? "general";
   const { data: members = [] } = useOfficeMembers();
   const isHuman =
     message.from === "you" ||
@@ -52,7 +52,8 @@ export function MessageBubble({
   const teamMemberDisplayName =
     isHuman && !isLocalUser
       ? message.from.startsWith("human:")
-        ? message.from.slice("human:".length).replace(/-/g, " ") || "team member"
+        ? message.from.slice("human:".length).replace(/-/g, " ") ||
+          "team member"
         : "Human"
       : null;
   const agent = members.find((m) => m.slug === message.from);

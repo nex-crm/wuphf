@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { getChannels } from "../api/client";
+import { router } from "../lib/router";
 import { useAppStore } from "../stores/app";
 
 /**
@@ -21,10 +22,7 @@ function isTypingTarget(target: EventTarget | null): boolean {
 export function useKeyboardShortcuts() {
   const setSearchOpen = useAppStore((s) => s.setSearchOpen);
   const setActiveAgentSlug = useAppStore((s) => s.setActiveAgentSlug);
-  const setActiveThreadId = useAppStore((s) => s.setActiveThreadId);
-  const setCurrentApp = useAppStore((s) => s.setCurrentApp);
-  const setCurrentChannel = useAppStore((s) => s.setCurrentChannel);
-  const setLastMessageId = useAppStore((s) => s.setLastMessageId);
+  const setActiveThread = useAppStore((s) => s.setActiveThread);
   const setComposerHelpOpen = useAppStore((s) => s.setComposerHelpOpen);
   const queryClient = useQueryClient();
 
@@ -72,9 +70,10 @@ export function useKeyboardShortcuts() {
         const ch = channels[idx];
         if (!ch) return;
         e.preventDefault();
-        setCurrentApp(null);
-        setCurrentChannel(ch.slug);
-        setLastMessageId(null);
+        void router.navigate({
+          to: "/channels/$channelSlug",
+          params: { channelSlug: ch.slug },
+        });
         return;
       }
 
@@ -109,8 +108,8 @@ export function useKeyboardShortcuts() {
           setActiveAgentSlug(null);
           return;
         }
-        if (state.activeThreadId) {
-          setActiveThreadId(null);
+        if (state.activeThread) {
+          setActiveThread(null);
           return;
         }
       }
@@ -121,10 +120,7 @@ export function useKeyboardShortcuts() {
   }, [
     setSearchOpen,
     setActiveAgentSlug,
-    setActiveThreadId,
-    setCurrentApp,
-    setCurrentChannel,
-    setLastMessageId,
+    setActiveThread,
     setComposerHelpOpen,
     queryClient,
   ]);

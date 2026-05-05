@@ -12,11 +12,17 @@ export function useOfficeMembers() {
   });
 }
 
-export function useChannelMembers(channel: string) {
+export function useChannelMembers(channel: string | null) {
+  // `channel` is allowed to be null so callers reachable from off-conversation
+  // routes (e.g. AgentPanel mounted in Shell) don't have to invent a stub
+  // channel just to satisfy this signature. With no channel there is no
+  // membership to fetch — react-query keeps the query idle and the caller
+  // gets the default `data: []` shape.
   return useQuery({
-    queryKey: ["channel-members", channel],
-    queryFn: () => getMembers(channel),
+    queryKey: ["channel-members", channel ?? ""],
+    queryFn: () => getMembers(channel ?? ""),
     refetchInterval: 5000,
+    enabled: typeof channel === "string" && channel.length > 0,
     select: (data) => data.members ?? [],
   });
 }

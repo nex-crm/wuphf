@@ -91,7 +91,6 @@ describe("FALLBACK_SLASH_COMMANDS", () => {
       "/collab",
       "/pause",
       "/resume",
-      "/threads",
       "/provider",
       "/connect",
     ].sort((a, b) => a.localeCompare(b));

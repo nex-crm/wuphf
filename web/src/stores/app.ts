@@ -57,16 +57,11 @@ function persistSidebarSections(state: SidebarSectionsState): void {
   } catch {}
 }
 
-export interface ChannelMeta {
-  type: "O" | "D" | "G";
-  name?: string;
-  members?: string[];
-  agentSlug?: string;
-}
-
-const LEGACY_DM_SLUG_PREFIX = "dm-";
-const BROKEN_DM_SLUG_PREFIX = "dm-human-";
-
+/**
+ * Build the broker's canonical direct-message channel slug for an agent.
+ * The broker pairs `<lower>__<higher>` for stable ordering across sides;
+ * we pass `humanSlug="human"` to match what `/dm` API endpoints expect.
+ */
 export function directChannelSlug(
   agentSlug: string,
   humanSlug = "human",
@@ -76,56 +71,10 @@ export function directChannelSlug(
   return a > b ? `${b}__${a}` : `${a}__${b}`;
 }
 
-function agentFromDirectSlug(slug: string): string | null {
-  const parts = slug.split("__");
-  if (parts.length !== 2) return null;
-  if (parts[0] === "human" || parts[0] === "you") return parts[1] || null;
-  if (parts[1] === "human" || parts[1] === "you") return parts[0] || null;
-  return null;
-}
-
-/**
- * Resolve a channel slug into DM info, or null if not a DM.
- *
- * Prefers explicit channelMeta (written by enterDM), falls back to the
- * server's canonical `<agent>__human` convention plus both legacy `dm-*`
- * spellings so deep-links and page reloads still classify DMs correctly
- * before metadata is hydrated.
- */
-export function isDMChannel(
-  slug: string,
-  meta: Record<string, ChannelMeta>,
-): { agentSlug: string } | null {
-  const m = meta[slug];
-  if (m?.type === "D" && m.agentSlug) return { agentSlug: m.agentSlug };
-  const directAgent = agentFromDirectSlug(slug);
-  if (directAgent) return { agentSlug: directAgent };
-  if (slug.startsWith(BROKEN_DM_SLUG_PREFIX)) {
-    return { agentSlug: slug.slice(BROKEN_DM_SLUG_PREFIX.length) };
-  }
-  if (slug.startsWith(LEGACY_DM_SLUG_PREFIX)) {
-    return { agentSlug: slug.slice(LEGACY_DM_SLUG_PREFIX.length) };
-  }
-  return null;
-}
-
 export interface AppStore {
   // Connection
   brokerConnected: boolean;
   setBrokerConnected: (v: boolean) => void;
-
-  // Navigation
-  currentChannel: string;
-  setCurrentChannel: (ch: string) => void;
-  currentApp: string | null; // null = messages view
-  setCurrentApp: (app: string | null) => void;
-  taskDetailId: string | null;
-  openTaskDetail: (taskId: string) => void;
-  setTaskDetailRoute: (taskId: string | null) => void;
-
-  // Channel metadata (DM info, etc.)
-  channelMeta: Record<string, ChannelMeta>;
-  setChannelMeta: (slug: string, meta: ChannelMeta) => void;
 
   // Theme
   theme: Theme;
@@ -143,19 +92,26 @@ export interface AppStore {
   sidebarBg: string | null;
   setSidebarBg: (color: string | null) => void;
 
-  // Thread panel
-  activeThreadId: string | null;
-  setActiveThreadId: (id: string | null) => void;
+  // Thread panel — captures the originating channel alongside the message id
+  // so that replies posted while the user has navigated away from the channel
+  // (e.g. into /apps/console) still land in the channel where the thread
+  // started, instead of the URL's current fallback channel.
+  activeThread: { id: string; channelSlug: string } | null;
+  setActiveThread: (thread: { id: string; channelSlug: string } | null) => void;
+
+  // Last channel/dm the user visited. Held as a session-scoped fallback so
+  // off-conversation surfaces (Console, Requests, sidebar request badge) can
+  // surface the user's working channel rather than always defaulting to
+  // #general when `useChannelSlug()` is null. Updated from the route effect
+  // in MainContent.
+  lastConversationalChannel: string | null;
+  setLastConversationalChannel: (channelSlug: string | null) => void;
 
   // Per-thread collapsed state in the main feed. The key is the parent
   // message id. Default is expanded (entry absent or false); toggling
   // stores `true` so the inline replies hide.
   collapsedThreads: Record<string, boolean>;
   toggleThreadCollapsed: (parentId: string) => void;
-
-  // DM entry: opens the given DM channel and records {type: 'D', agentSlug}
-  // in channelMeta so downstream views can resolve the paired agent.
-  enterDM: (agentSlug: string, channelSlug: string) => void;
 
   // Message polling state
   lastMessageId: string | null;
@@ -198,69 +154,11 @@ export interface AppStore {
   onboardingComplete: boolean;
   setOnboardingComplete: (v: boolean) => void;
   resetForOnboarding: () => void;
-
-  // Wiki
-  wikiPath: string | null;
-  setWikiPath: (path: string | null) => void;
-  wikiLookupQuery: string | null;
-  setWikiLookupQuery: (q: string | null) => void;
-
-  // Notebooks
-  notebookAgentSlug: string | null;
-  notebookEntrySlug: string | null;
-  setNotebookRoute: (
-    agentSlug: string | null,
-    entrySlug: string | null,
-  ) => void;
 }
 
 export const useAppStore = create<AppStore>((set, get) => ({
   brokerConnected: false,
   setBrokerConnected: (v) => set({ brokerConnected: v }),
-
-  currentChannel: "general",
-  setCurrentChannel: (ch) =>
-    set((state) => ({
-      currentChannel: ch,
-      currentApp: null,
-      taskDetailId: null,
-      unreadByChannel: { ...state.unreadByChannel, [ch]: 0 },
-    })),
-  currentApp: null,
-  setCurrentApp: (app) => {
-    if (!app) {
-      const { currentChannel, unreadByChannel } = get();
-      set({
-        currentApp: null,
-        taskDetailId: null,
-        unreadByChannel: { ...unreadByChannel, [currentChannel]: 0 },
-      });
-      return;
-    }
-
-    const scopedAppState = {
-      taskDetailId: null,
-    };
-    const { currentChannel, channelMeta } = get();
-    if (isDMChannel(currentChannel, channelMeta)) {
-      set({ currentApp: app, currentChannel: "general", ...scopedAppState });
-      return;
-    }
-
-    set({ currentApp: app, ...scopedAppState });
-  },
-  taskDetailId: null,
-  openTaskDetail: (taskId) => get().setTaskDetailRoute(taskId),
-  setTaskDetailRoute: (taskId) =>
-    set({
-      currentApp: "tasks",
-      taskDetailId: taskId,
-      activeAgentSlug: null,
-    }),
-
-  channelMeta: {},
-  setChannelMeta: (slug, meta) =>
-    set({ channelMeta: { ...get().channelMeta, [slug]: meta } }),
 
   theme: _storedTheme,
   setTheme: (t) => {
@@ -324,8 +222,14 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set({ sidebarBg: color });
   },
 
-  activeThreadId: null,
-  setActiveThreadId: (id) => set({ activeThreadId: id }),
+  activeThread: null,
+  setActiveThread: (thread) => set({ activeThread: thread }),
+
+  lastConversationalChannel: null,
+  setLastConversationalChannel: (channelSlug) => {
+    if (get().lastConversationalChannel === channelSlug) return;
+    set({ lastConversationalChannel: channelSlug });
+  },
 
   collapsedThreads: {},
   toggleThreadCollapsed: (parentId) =>
@@ -334,18 +238,6 @@ export const useAppStore = create<AppStore>((set, get) => ({
         ...s.collapsedThreads,
         [parentId]: !s.collapsedThreads[parentId],
       },
-    })),
-
-  enterDM: (agentSlug, channelSlug) =>
-    set((s) => ({
-      currentChannel: channelSlug,
-      currentApp: null,
-      taskDetailId: null,
-      channelMeta: {
-        ...s.channelMeta,
-        [channelSlug]: { ...s.channelMeta[channelSlug], type: "D", agentSlug },
-      },
-      unreadByChannel: { ...s.unreadByChannel, [channelSlug]: 0 },
     })),
 
   lastMessageId: null,
@@ -402,14 +294,12 @@ export const useAppStore = create<AppStore>((set, get) => ({
   setOnboardingComplete: (v) => set({ onboardingComplete: v }),
   resetForOnboarding: () =>
     set({
-      currentChannel: "general",
-      currentApp: null,
-      taskDetailId: null,
       unreadByChannel: {},
-      activeThreadId: null,
+      activeThread: null,
       lastMessageId: null,
       clearedMessageIdsByChannel: {},
       activeAgentSlug: null,
+      lastConversationalChannel: null,
       searchOpen: false,
       composerSearchInitialQuery: "",
       composerHelpOpen: false,
@@ -418,20 +308,5 @@ export const useAppStore = create<AppStore>((set, get) => ({
       // would float over the onboarding flow.
       telegramConnectOpen: false,
       onboardingComplete: false,
-      wikiPath: null,
-      wikiLookupQuery: null,
-      notebookAgentSlug: null,
-      notebookEntrySlug: null,
     }),
-
-  wikiPath: null,
-  setWikiPath: (path) => set({ wikiPath: path }),
-
-  wikiLookupQuery: null,
-  setWikiLookupQuery: (q) => set({ wikiLookupQuery: q }),
-
-  notebookAgentSlug: null,
-  notebookEntrySlug: null,
-  setNotebookRoute: (agentSlug: string | null, entrySlug: string | null) =>
-    set({ notebookAgentSlug: agentSlug, notebookEntrySlug: entrySlug }),
 }));

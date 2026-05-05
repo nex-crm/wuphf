@@ -2,7 +2,35 @@ import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { initApi, sseURL } from "../api/client";
-import { useAppStore } from "../stores/app";
+import { directChannelSlug, useAppStore } from "../stores/app";
+
+function activeBrokerChannel(): string | null {
+  // SSE handler runs outside the React tree. Parse window.location.hash
+  // directly so we don't depend on the TanStack router being started in
+  // unit tests (the router's matches stay at their initial empty state
+  // until a RouterProvider mounts). Hash is the source of truth for
+  // hash-history navigation anyway, so the runtime read agrees.
+  if (typeof window === "undefined") return null;
+  const { hash } = window.location;
+  const rawPath = hash.startsWith("#/")
+    ? hash.slice(2)
+    : hash.replace(/^#/, "");
+  // TanStack hash-history can append a search-string after the hash
+  // path (e.g. `#/channels/general?modal=settings`). Strip it before
+  // segment parsing so the channel slug isn't silently smuggled into
+  // the next segment as `general?modal=settings`, which would make the
+  // active-channel check fail and unread counts climb while the user
+  // is staring at the channel.
+  const [path] = rawPath.split("?");
+  const segs = path.split("/").filter(Boolean);
+  if (segs[0] === "channels" && segs[1]) {
+    return decodeURIComponent(segs[1]);
+  }
+  if (segs[0] === "dm" && segs[1]) {
+    return directChannelSlug(decodeURIComponent(segs[1]));
+  }
+  return null;
+}
 
 function messageChannelFromEvent(event: Event): string | null {
   if (!("data" in event) || typeof event.data !== "string") return null;
@@ -40,7 +68,7 @@ export function useBrokerEvents(enabled: boolean) {
       const channel = messageChannelFromEvent(event);
       if (channel) {
         const state = useAppStore.getState();
-        if (state.currentApp === null && state.currentChannel === channel) {
+        if (activeBrokerChannel() === channel) {
           state.clearUnread(channel);
         } else {
           state.incrementUnread(channel);

@@ -1,17 +1,17 @@
 package team
 
 // openclaw_transport.go implements transport.MemberBoundTransport on
-// OpenclawBridge. This is the Phase 3b adapter contract — Name/Binding/Run/
-// Send/Health satisfy the base Transport interface; AttachSlug, DetachSlug,
-// and CreateSession satisfy the member-bound extension. The contract-level
-// AttachSlug/DetachSlug are defined in openclaw.go alongside their
-// synchronous error-returning siblings (AttachSlugAndSubscribe /
-// DetachSlugAndUnsubscribe) used by HTTP handlers.
+// OpenclawBridge. Name/Binding/Run/Send/Health satisfy the base Transport
+// interface; AttachSlug, DetachSlug, and CreateSession satisfy the
+// member-bound extension. The contract-level AttachSlug/DetachSlug are defined
+// in openclaw.go alongside their synchronous error-returning siblings
+// (AttachSlugAndSubscribe / DetachSlugAndUnsubscribe) used by HTTP handlers.
 //
-// Phase 4 will move the launcher's StartOpenclawBridgeFromConfig wiring onto
-// the Host contract via Run(); for now Run() is a thin shim around the
-// existing supervised loop so RegisterTransports can treat the bridge like
-// any other Transport implementation.
+// Run is the host-driven entrypoint: it stores the supplied transport.Host on
+// the bridge before Start so handleClientEvent routes inbound messages through
+// host.ReceiveMessage. The legacy Start entrypoint remains for probe binaries
+// and integration tests, in which case postBridgeMessage falls back to writing
+// to the broker directly.
 
 import (
 	"context"
@@ -42,14 +42,18 @@ func (b *OpenclawBridge) Binding() transport.Binding {
 }
 
 // Run starts the supervised bridge and blocks until ctx is cancelled. The
-// host parameter is currently unused — Phase 4 will route inbound assistant
-// messages through host.ReceiveMessage instead of the direct broker call in
-// handleClientEvent. For now Run preserves the existing supervised-loop
-// behavior so RegisterTransports can drive both lifecycle paths uniformly.
-func (b *OpenclawBridge) Run(ctx context.Context, _ transport.Host) error {
+// host is attached before Start so handleClientEvent routes inbound assistant
+// messages through host.ReceiveMessage instead of writing to the broker
+// directly. A nil host is rejected so a misconfigured launcher fails loudly
+// rather than silently degrading to the legacy broker entrypoint.
+func (b *OpenclawBridge) Run(ctx context.Context, host transport.Host) error {
 	if b == nil {
 		return fmt.Errorf("openclaw: nil bridge")
 	}
+	if host == nil {
+		return fmt.Errorf("openclaw: Run requires a non-nil host")
+	}
+	b.host.Store(&host)
 	if err := b.Start(ctx); err != nil {
 		return err
 	}

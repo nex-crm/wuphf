@@ -6,7 +6,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { post } from "../../api/client";
 import { getOfficeTasks, type Task } from "../../api/tasks";
 import { formatRelativeTime } from "../../lib/format";
-import { useAppStore } from "../../stores/app";
+import { router } from "../../lib/router";
 import { showNotice } from "../ui/Toast";
 import { TaskDetailModal, taskMemoryWorkflowBadge } from "./TaskDetailModal";
 
@@ -126,10 +126,22 @@ function useTaskMove() {
   );
 }
 
-export function TasksApp() {
-  const taskDetailId = useAppStore((s) => s.taskDetailId);
-  const openTaskDetail = useAppStore((s) => s.openTaskDetail);
-  const setTaskDetailRoute = useAppStore((s) => s.setTaskDetailRoute);
+function openTaskDetailRoute(taskId: string): void {
+  void router.navigate({
+    to: "/tasks/$taskId",
+    params: { taskId },
+  });
+}
+
+function closeTaskDetailRoute(): void {
+  void router.navigate({ to: "/tasks" });
+}
+
+export function TasksApp({
+  taskId: activeTaskId = null,
+}: {
+  taskId?: string | null;
+}) {
   const { data, isLoading, error } = useQuery({
     queryKey: ["office-tasks"],
     queryFn: () => getOfficeTasks({ includeDone: true }),
@@ -198,8 +210,8 @@ export function TasksApp() {
   const grouped = groupTasks(tasks);
   const tasksById = new Map(tasks.map((t) => [t.id, t]));
   const isDragging = draggingId !== null;
-  const selectedTask = taskDetailId
-    ? (tasksById.get(taskDetailId) ?? null)
+  const selectedTask = activeTaskId
+    ? (tasksById.get(activeTaskId) ?? null)
     : null;
 
   const handleDragStart =
@@ -245,12 +257,12 @@ export function TasksApp() {
       void moveTask(task, status);
     };
 
-  if (taskDetailId) {
+  if (activeTaskId) {
     return selectedTask ? (
       <div className="tasks-app" data-testid="tasks-app">
         <TaskDetailModal
           task={selectedTask}
-          onClose={() => setTaskDetailRoute(null)}
+          onClose={closeTaskDetailRoute}
           presentation="page"
         />
       </div>
@@ -258,11 +270,11 @@ export function TasksApp() {
       <div className="tasks-app task-detail-page-empty" data-testid="tasks-app">
         <div className="task-detail-page-missing">
           <div className="task-detail-label">Task not found</div>
-          <p>Task #{taskDetailId} is no longer in the office task list.</p>
+          <p>Task #{activeTaskId} is no longer in the office task list.</p>
           <button
             type="button"
             className="btn btn-primary btn-sm"
-            onClick={() => setTaskDetailRoute(null)}
+            onClick={closeTaskDetailRoute}
           >
             Back to tasks
           </button>
@@ -326,7 +338,7 @@ export function TasksApp() {
                   isDragging={draggingId === task.id}
                   onDragStart={handleDragStart(task.id)}
                   onDragEnd={handleDragEnd}
-                  onOpen={() => openTaskDetail(task.id)}
+                  onOpen={() => openTaskDetailRoute(task.id)}
                 />
               ))}
             </div>

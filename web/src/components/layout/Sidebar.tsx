@@ -1,5 +1,7 @@
 import { Settings as SettingsIcon, SidebarCollapse } from "iconoir-react";
 
+import { router } from "../../lib/router";
+import { useCurrentApp } from "../../routes/useCurrentRoute";
 import { useAppStore } from "../../stores/app";
 import { AgentList } from "../sidebar/AgentList";
 import { AppList } from "../sidebar/AppList";
@@ -59,8 +61,7 @@ export function Sidebar() {
   const sidebarCollapsed = useAppStore((s) => s.sidebarCollapsed);
   const toggleSidebarCollapsed = useAppStore((s) => s.toggleSidebarCollapsed);
   const sidebarBg = useAppStore((s) => s.sidebarBg);
-  const currentApp = useAppStore((s) => s.currentApp);
-  const setCurrentApp = useAppStore((s) => s.setCurrentApp);
+  const currentApp = useCurrentApp();
 
   const asideStyle = sidebarBg ? { background: sidebarBg } : undefined;
 
@@ -90,7 +91,12 @@ export function Sidebar() {
                 className={`sidebar-icon-btn${currentApp === "settings" ? " active" : ""}`}
                 aria-label="Open settings"
                 title="Settings"
-                onClick={() => setCurrentApp("settings")}
+                onClick={() =>
+                  router.navigate({
+                    to: "/apps/$appId",
+                    params: { appId: "settings" },
+                  })
+                }
               >
                 <SettingsIcon />
               </button>

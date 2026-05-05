@@ -1,19 +1,23 @@
 import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import {
-  act,
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-} from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Message, SlashCommandDescriptor } from "../../api/client";
 import { FALLBACK_SLASH_COMMANDS } from "../../hooks/useCommands";
 import { useMessages } from "../../hooks/useMessages";
-import { useAppStore } from "../../stores/app";
+import { useFallbackChannelSlug } from "../../routes/useCurrentRoute";
 import { __test__, ConsoleApp } from "./ConsoleApp";
+
+// ConsoleApp reads its channel from useFallbackChannelSlug (URL channel
+// first, then last-visited fallback). Mock it so tests can swap the
+// active channel without rendering inside a RouterProvider — useMatches
+// would otherwise throw outside the router context.
+vi.mock("../../routes/useCurrentRoute", () => ({
+  useFallbackChannelSlug: vi.fn(),
+}));
+
+const mockUseFallbackChannelSlug = vi.mocked(useFallbackChannelSlug);
 
 vi.mock("../../api/client", async () => {
   const actual =
@@ -55,10 +59,7 @@ function wrap(ui: ReactNode) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  useAppStore.setState({
-    currentApp: "console",
-    currentChannel: "general",
-  });
+  mockUseFallbackChannelSlug.mockReturnValue("general");
 });
 
 describe("ConsoleApp helpers", () => {
@@ -155,9 +156,7 @@ describe("ConsoleApp helpers", () => {
 });
 
 describe("<ConsoleApp>", () => {
-  it("falls back to general when the current channel is blank", () => {
-    useAppStore.setState({ currentChannel: "" });
-
+  it("renders the active channel from the URL", () => {
     render(wrap(<ConsoleApp />));
 
     expect(screen.getAllByText("#general").length).toBeGreaterThan(1);
@@ -166,7 +165,7 @@ describe("<ConsoleApp>", () => {
   });
 
   it("clears local prompt echoes when switching channels", async () => {
-    render(wrap(<ConsoleApp />));
+    const { rerender } = render(wrap(<ConsoleApp />));
 
     const input = screen.getByTestId("console-input");
     fireEvent.change(input, { target: { value: "/ask launch plan" } });
@@ -174,9 +173,10 @@ describe("<ConsoleApp>", () => {
 
     expect(screen.getByText("/ask launch plan")).toBeInTheDocument();
 
-    act(() => {
-      useAppStore.getState().setCurrentChannel("launch");
-    });
+    // RTL's `rerender` already wraps the render in `act` internally,
+    // so an explicit `act(() => ...)` here would be redundant.
+    mockUseFallbackChannelSlug.mockReturnValue("launch");
+    rerender(wrap(<ConsoleApp />));
 
     await waitFor(() => {
       expect(screen.queryByText("/ask launch plan")).not.toBeInTheDocument();

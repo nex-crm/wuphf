@@ -8,11 +8,38 @@ import { type NotebookSearchHit, searchNotebook } from "../../api/notebook";
 import { searchWiki, type WikiSearchHit } from "../../api/wiki";
 import { useChannels } from "../../hooks/useChannels";
 import { useOfficeMembers } from "../../hooks/useMembers";
+import { router } from "../../lib/router";
 import { useAppStore } from "../../stores/app";
 import { SLASH_COMMANDS } from "../messages/Autocomplete";
 import { Kbd } from "../ui/Kbd";
 import { openProviderSwitcher } from "../ui/ProviderSwitcher";
 import { showNotice } from "../ui/Toast";
+
+function navigateToChannel(channelSlug: string): void {
+  void router.navigate({
+    to: "/channels/$channelSlug",
+    params: { channelSlug },
+  });
+}
+
+function navigateToApp(appId: string): void {
+  void router.navigate({ to: "/apps/$appId", params: { appId } });
+}
+
+function navigateToWikiArticle(path: string): void {
+  void router.navigate({ to: "/wiki/$", params: { _splat: path } });
+}
+
+function navigateToNotebookEntry(agentSlug: string, entrySlug: string): void {
+  void router.navigate({
+    to: "/notebooks/$agentSlug/$entrySlug",
+    params: { agentSlug, entrySlug },
+  });
+}
+
+function navigateToNotebookCatalog(): void {
+  void router.navigate({ to: "/notebooks" });
+}
 
 interface PaletteItem {
   id: string;
@@ -76,13 +103,7 @@ function parseNotebookPath(
 export function SearchModal() {
   const searchOpen = useAppStore((s) => s.searchOpen);
   const setSearchOpen = useAppStore((s) => s.setSearchOpen);
-  const setCurrentChannel = useAppStore((s) => s.setCurrentChannel);
-  const setCurrentApp = useAppStore((s) => s.setCurrentApp);
   const setActiveAgentSlug = useAppStore((s) => s.setActiveAgentSlug);
-  const enterDM = useAppStore((s) => s.enterDM);
-  const setLastMessageId = useAppStore((s) => s.setLastMessageId);
-  const setWikiPath = useAppStore((s) => s.setWikiPath);
-  const setNotebookRoute = useAppStore((s) => s.setNotebookRoute);
   const composerSearchInitialQuery = useAppStore(
     (s) => s.composerSearchInitialQuery,
   );
@@ -219,9 +240,7 @@ export function SearchModal() {
         desc: ch.description,
         meta: `#${ch.slug}`,
         run: () => {
-          setCurrentApp(null);
-          setCurrentChannel(ch.slug);
-          setLastMessageId(null);
+          navigateToChannel(ch.slug);
           close();
         },
       });
@@ -261,13 +280,7 @@ export function SearchModal() {
         label: c.name,
         desc: c.desc,
         run: () => {
-          dispatchPaletteCommand(c.name, {
-            setCurrentApp,
-            setCurrentChannel,
-            setLastMessageId,
-            setSearchOpen,
-            enterDM,
-          });
+          dispatchPaletteCommand(c.name, { setSearchOpen });
           close();
         },
       });
@@ -286,9 +299,7 @@ export function SearchModal() {
           label: `${hit.from}: ${snippet}`,
           desc: `#${hit.matchedChannel} · ${formatTime(hit.timestamp)}`,
           run: () => {
-            setCurrentApp(null);
-            setCurrentChannel(hit.matchedChannel);
-            setLastMessageId(null);
+            navigateToChannel(hit.matchedChannel);
             close();
           },
         });
@@ -303,8 +314,7 @@ export function SearchModal() {
           desc: hit.snippet.trim().slice(0, 120),
           meta: `L${hit.line}`,
           run: () => {
-            setCurrentApp("wiki");
-            setWikiPath(hit.path);
+            navigateToWikiArticle(hit.path);
             close();
           },
         });
@@ -321,9 +331,10 @@ export function SearchModal() {
           desc: hit.snippet.trim().slice(0, 120),
           meta: `L${hit.line}`,
           run: () => {
-            setCurrentApp("notebooks");
             if (parsed) {
-              setNotebookRoute(parsed.agent, parsed.entry);
+              navigateToNotebookEntry(parsed.agent, parsed.entry);
+            } else {
+              navigateToNotebookCatalog();
             }
             close();
           },
@@ -339,14 +350,8 @@ export function SearchModal() {
     messageHits,
     wikiHits,
     notebookHits,
-    setCurrentApp,
-    setCurrentChannel,
     setActiveAgentSlug,
-    setLastMessageId,
     setSearchOpen,
-    setWikiPath,
-    setNotebookRoute,
-    enterDM,
     close,
   ]);
 
@@ -505,11 +510,7 @@ export function SearchModal() {
 }
 
 interface CommandDeps {
-  setCurrentApp: (id: string | null) => void;
-  setCurrentChannel: (slug: string) => void;
-  setLastMessageId: (id: string | null) => void;
   setSearchOpen: (open: boolean) => void;
-  enterDM: (agentSlug: string, channelSlug: string) => void;
 }
 
 function dispatchPaletteCommand(name: string, deps: CommandDeps) {
@@ -531,26 +532,23 @@ function dispatchPaletteCommand(name: string, deps: CommandDeps) {
       deps.setSearchOpen(true);
       return;
     case "/requests":
-      deps.setCurrentApp("requests");
+      navigateToApp("requests");
       return;
     case "/policies":
-      deps.setCurrentApp("policies");
+      navigateToApp("policies");
       return;
     case "/skills":
-      deps.setCurrentApp("skills");
+      navigateToApp("skills");
       return;
     case "/calendar":
-      deps.setCurrentApp("calendar");
+      navigateToApp("calendar");
       return;
     case "/tasks":
-      deps.setCurrentApp("tasks");
+      navigateToApp("tasks");
       return;
     case "/recover":
     case "/doctor":
-      deps.setCurrentApp("health-check");
-      return;
-    case "/threads":
-      deps.setCurrentApp("threads");
+      navigateToApp("health-check");
       return;
     case "/provider":
       openProviderSwitcher();
@@ -584,8 +582,7 @@ function dispatchPaletteCommand(name: string, deps: CommandDeps) {
     case "/reset":
       post("/reset", {})
         .then(() => {
-          deps.setLastMessageId(null);
-          deps.setCurrentChannel("general");
+          navigateToChannel("general");
           showNotice("Office reset", "success");
         })
         .catch((e: Error) => showNotice(`Reset failed: ${e.message}`, "error"));
