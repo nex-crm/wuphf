@@ -92,13 +92,10 @@ func TestPostMessage_TriggersAutoNotebookWriter(t *testing.T) {
 	// not produce a writer event.
 	b.PostSystemMessage("general", "system msg", "system")
 
-	// Wait for the agent message to flow through.
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if len(stub.snapshot()) > 0 {
-			break
-		}
-		time.Sleep(5 * time.Millisecond)
+	waitCtx, waitCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer waitCancel()
+	if err := writer.WaitForCondition(waitCtx, func() bool { return len(stub.snapshot()) >= 1 }); err != nil {
+		t.Fatalf("waiting for writer event: %v", err)
 	}
 	calls := stub.snapshot()
 	if len(calls) != 1 {

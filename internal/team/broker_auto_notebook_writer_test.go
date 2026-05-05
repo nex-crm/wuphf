@@ -44,16 +44,19 @@ func brokerWithAutoNotebookWriter(t *testing.T) (*Broker, func()) {
 
 func waitForNotebookEntry(t *testing.T, b *Broker, slug string) []NotebookEntry {
 	t.Helper()
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		entries, err := b.wikiWorker.NotebookList(slug)
-		if err == nil && len(entries) > 0 {
-			return entries
-		}
-		time.Sleep(20 * time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := b.autoNotebookWriter.WaitForCondition(ctx, func() bool {
+		entries, listErr := b.wikiWorker.NotebookList(slug)
+		return listErr == nil && len(entries) > 0
+	}); err != nil {
+		t.Fatalf("no notebook entries appeared for slug=%s: %v", slug, err)
 	}
-	t.Fatalf("no notebook entries appeared for slug=%s", slug)
-	return nil
+	entries, err := b.wikiWorker.NotebookList(slug)
+	if err != nil {
+		t.Fatalf("NotebookList(%s): %v", slug, err)
+	}
+	return entries
 }
 
 // Real broker + real WikiWorker. PostMessage from the ceo agent must produce a
@@ -85,27 +88,35 @@ func TestAutoNotebookWriter_HumanMessage_DoesNotLandOnShelf(t *testing.T) {
 	b, teardown := brokerWithAutoNotebookWriter(t)
 	defer teardown()
 
+	// Post a sentinel agent message AFTER the human one so we have a
+	// deterministic signal that the writer pipeline drained: when the agent
+	// entry lands on the ceo shelf, every prior PostMessage hook has already
+	// run to completion. If the human PostMessage incorrectly produced a
+	// shelf entry, NotebookList for any non-ceo agent will be non-empty.
 	if _, err := b.PostMessage("human", "general", "hi from a human", nil, ""); err != nil {
-		t.Fatalf("PostMessage: %v", err)
+		t.Fatalf("PostMessage human: %v", err)
 	}
-
-	// Give the writer a chance to (incorrectly) write something. We expect no
-	// entries at all on any shelf.
-	time.Sleep(150 * time.Millisecond)
+	if !b.IsAgentMemberSlug("ceo") {
+		t.Skip("default manifest missing 'ceo'; cannot drain via agent sentinel")
+	}
+	if _, err := b.PostMessage("ceo", "general", "drain sentinel", nil, ""); err != nil {
+		t.Fatalf("PostMessage ceo sentinel: %v", err)
+	}
+	waitForNotebookEntry(t, b, "ceo")
 
 	slugs, err := b.wikiWorker.AgentsWithNotebooks()
 	if err != nil {
 		t.Fatalf("AgentsWithNotebooks: %v", err)
 	}
 	for _, s := range slugs {
+		if s == "ceo" {
+			continue
+		}
 		entries, _ := b.wikiWorker.NotebookList(s)
 		if len(entries) > 0 {
 			t.Fatalf("human message produced an entry on %s shelf", s)
 		}
 	}
-	// Roster filter runs at the broker hook site (lock-free predicate) before
-	// the writer ever sees the event, so the writer's NonRoster counter stays
-	// 0. The "no entries on any shelf" assertion above is the binding check.
 }
 
 // Two consecutive identical messages collapse to one shelf entry via the LRU.
@@ -124,17 +135,12 @@ func TestAutoNotebookWriter_DuplicatePostMessageDeduped(t *testing.T) {
 		t.Fatalf("PostMessage 2: %v", err)
 	}
 
-	// Wait a beat to ensure the second event has been processed and (we hope)
-	// dropped by dedupe.
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if b.autoNotebookWriter.Counters().Deduped >= 1 {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if b.autoNotebookWriter.Counters().Deduped < 1 {
-		t.Fatalf("expected dedupe to fire on identical repost")
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := b.autoNotebookWriter.WaitForCondition(ctx, func() bool {
+		return b.autoNotebookWriter.Counters().Deduped >= 1
+	}); err != nil {
+		t.Fatalf("expected dedupe to fire on identical repost: %v", err)
 	}
 	entries, _ := b.wikiWorker.NotebookList("ceo")
 	if len(entries) != 1 {

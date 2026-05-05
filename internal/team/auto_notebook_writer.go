@@ -92,9 +92,23 @@ type AutoNotebookWriter struct {
 	wiki   autoNotebookWriterClient
 	roster autoNotebookRoster
 	queue  chan autoNotebookEvent
+	// stopCh signals shutdown without closing w.queue. Closing the queue
+	// would race with concurrent Handle() callers that already cleared the
+	// running.Load() fast-path check and panic on send-to-closed-chan.
+	// CodeRabbit-flagged race fixed by leaving the queue intact and tearing
+	// down via this dedicated signal channel instead.
+	stopCh chan struct{}
 
 	mu      sync.Mutex
 	buckets map[string]*autoNotebookDedupeBucket
+
+	// progressMu + progressCond fan out a "something was processed" signal so
+	// tests can wait deterministically on a counter or a notebook entry
+	// without resorting to sleep loops (the repo's check-no-new-sleeps lint
+	// blocks them in tests, and this is the same pattern as scheduler.go's
+	// manual clock — push state changes, never poll real time).
+	progressMu   sync.Mutex
+	progressCond *sync.Cond
 
 	running atomic.Bool
 	done    chan struct{}
@@ -120,13 +134,16 @@ type autoNotebookDedupeBucket struct {
 // processing. Either argument may be nil for tests; nil wiki disables writes,
 // nil roster disables the membership filter.
 func NewAutoNotebookWriter(wiki autoNotebookWriterClient, roster autoNotebookRoster) *AutoNotebookWriter {
-	return &AutoNotebookWriter{
+	w := &AutoNotebookWriter{
 		wiki:    wiki,
 		roster:  roster,
 		queue:   make(chan autoNotebookEvent, autoNotebookQueueSize),
+		stopCh:  make(chan struct{}),
 		buckets: make(map[string]*autoNotebookDedupeBucket),
 		done:    make(chan struct{}),
 	}
+	w.progressCond = sync.NewCond(&w.progressMu)
+	return w
 }
 
 // Start launches the drain goroutine. Idempotent: a second call is a no-op.
@@ -140,14 +157,25 @@ func (w *AutoNotebookWriter) Start(ctx context.Context) {
 	go w.run(ctx)
 }
 
-// Stop closes the queue and waits up to timeout for the drain goroutine to
+// Stop signals the drain goroutine to exit and waits up to timeout for it to
 // finish. Idempotent. Returns even if the deadline elapses with events still
 // in flight — caller may inspect counters to detect drops.
+//
+// Implementation note: w.queue is intentionally NOT closed. Concurrent
+// Handle() callers may already be past the running.Load() fast-path check
+// when Stop runs, and a send-to-closed-chan would panic. Closing stopCh and
+// letting run() bail on it covers shutdown without that hazard. The queue
+// itself becomes garbage once all references are gone.
 func (w *AutoNotebookWriter) Stop(timeout time.Duration) {
 	if w == nil || !w.running.Swap(false) {
 		return
 	}
-	close(w.queue)
+	close(w.stopCh)
+	// Wake any test waiters parked on progressCond so they observe the
+	// stopped state and bail out of WaitForCondition without timing out.
+	w.progressMu.Lock()
+	w.progressCond.Broadcast()
+	w.progressMu.Unlock()
 	if timeout <= 0 {
 		<-w.done
 		return
@@ -188,13 +216,74 @@ func (w *AutoNotebookWriter) Handle(evt autoNotebookEvent) {
 	} else {
 		evt.Timestamp = evt.Timestamp.UTC()
 	}
+	// stopCh closes before the queue would (which it never does); selecting
+	// on it first lets a Handle racing with Stop bail out cleanly instead of
+	// blocking or — worse, with the old close(queue) implementation — sending
+	// on a closed channel.
 	select {
+	case <-w.stopCh:
+		return
+	default:
+	}
+	select {
+	case <-w.stopCh:
 	case w.queue <- evt:
 		w.enqueued.Add(1)
 	default:
 		w.queueSaturated.Add(1)
 		log.Printf("auto_notebook_writer: queue saturated, dropping event slug=%s kind=%s", evt.Slug, evt.Kind)
+		w.signalProgress()
 	}
+}
+
+// signalProgress fans out a "something happened" notification so tests can
+// wait deterministically without sleep loops. Cheap: cond.Broadcast on an
+// uncontended mutex is essentially a memory barrier when nobody is parked.
+func (w *AutoNotebookWriter) signalProgress() {
+	w.progressMu.Lock()
+	w.progressCond.Broadcast()
+	w.progressMu.Unlock()
+}
+
+// WaitForCondition blocks until predicate returns true, ctx is cancelled, or
+// the writer stops. Returns ctx.Err() on timeout/cancel and nil on success.
+// Test-only entry point — production code never waits on the writer.
+func (w *AutoNotebookWriter) WaitForCondition(ctx context.Context, predicate func() bool) error {
+	if w == nil {
+		return nil
+	}
+	if predicate() {
+		return nil
+	}
+	cancelWatcher := make(chan struct{})
+	defer close(cancelWatcher)
+	go func() {
+		select {
+		case <-ctx.Done():
+			w.progressMu.Lock()
+			w.progressCond.Broadcast()
+			w.progressMu.Unlock()
+		case <-cancelWatcher:
+		}
+	}()
+	w.progressMu.Lock()
+	defer w.progressMu.Unlock()
+	for !predicate() {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if !w.running.Load() {
+			// Writer has been stopped. Re-check predicate one last time
+			// (a final event may have been processed before shutdown) and
+			// return whatever the predicate says.
+			if predicate() {
+				return nil
+			}
+			return ErrWorkerStopped
+		}
+		w.progressCond.Wait()
+	}
+	return nil
 }
 
 func (w *AutoNotebookWriter) run(ctx context.Context) {
@@ -203,28 +292,29 @@ func (w *AutoNotebookWriter) run(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case evt, ok := <-w.queue:
-			if !ok {
-				return
-			}
+		case <-w.stopCh:
+			return
+		case evt := <-w.queue:
 			w.process(ctx, evt)
 		}
 	}
 }
 
 func (w *AutoNotebookWriter) process(ctx context.Context, evt autoNotebookEvent) {
+	defer w.signalProgress()
 	body := renderAutoNotebookSection(evt)
 	if autoNotebookContainsSecret(body) {
 		w.redacted.Add(1)
 		log.Printf("auto_notebook_writer: secret pattern matched, dropping event slug=%s kind=%s", evt.Slug, evt.Kind)
 		return
 	}
-	// Dedupe key is the raw content + transition delta, not the rendered body
-	// — two events with identical message text but different timestamps render
-	// differently, and we want them to collapse into a single shelf entry per
-	// decision 4A. Including the kind+status pair distinguishes a status churn
-	// from a chat repeat.
-	dedupeBasis := string(evt.Kind) + "|" + evt.BeforeStatus + "→" + evt.AfterStatus + "|" + strings.TrimSpace(evt.Content)
+	// Dedupe key folds in the full transition identity — kind, before/after
+	// status, owning task, and trimmed content — not just content. Without
+	// TaskID two distinct tasks owned by the same agent and sharing a title
+	// (or two consecutive transitions on the same task) would collapse into
+	// one shelf entry. Decision 4A pinned per-(slug, day) sha256(content);
+	// "content" here is the dedupe basis, not the rendered body.
+	dedupeBasis := string(evt.Kind) + "|" + evt.TaskID + "|" + evt.BeforeStatus + "→" + evt.AfterStatus + "|" + strings.TrimSpace(evt.Content)
 	if w.isDuplicate(evt.Slug, evt.Timestamp, dedupeBasis) {
 		w.deduped.Add(1)
 		return
