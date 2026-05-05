@@ -37,6 +37,7 @@ func (b *Broker) BlockTask(taskID, actor, reason string) (teamTask, bool, error)
 		if err := rejectFalseLocalWorktreeBlock(task, reason); err != nil {
 			return *task, false, err
 		}
+		beforeStatus := task.Status
 		if reason != "" {
 			switch existing := strings.TrimSpace(task.Details); {
 			case existing == "":
@@ -60,6 +61,7 @@ func (b *Broker) BlockTask(taskID, actor, reason string) (teamTask, bool, error)
 		if err := b.saveLocked(); err != nil {
 			return teamTask{}, false, err
 		}
+		b.emitTaskTransitionAutoNotebook(task, beforeStatus, actor)
 		return *task, true, nil
 	}
 
@@ -86,6 +88,7 @@ func (b *Broker) ResumeTask(taskID, actor, reason string) (teamTask, bool, error
 		if task.ID != id {
 			continue
 		}
+		beforeStatus := task.Status
 		changed := false
 		if task.Blocked {
 			task.Blocked = false
@@ -120,6 +123,7 @@ func (b *Broker) ResumeTask(taskID, actor, reason string) (teamTask, bool, error
 		if err := b.saveLocked(); err != nil {
 			return teamTask{}, false, err
 		}
+		b.emitTaskTransitionAutoNotebook(task, beforeStatus, actor)
 		return *task, true, nil
 	}
 
@@ -180,6 +184,7 @@ func (b *Broker) EnsureTask(channel, title, details, owner, createdBy, threadID 
 		Owner:    strings.TrimSpace(owner),
 	}); existing != nil {
 		now := time.Now().UTC().Format(time.RFC3339)
+		beforeStatus := existing.Status
 		if existing.Details == "" && strings.TrimSpace(details) != "" {
 			existing.Details = strings.TrimSpace(details)
 		}
@@ -206,6 +211,7 @@ func (b *Broker) EnsureTask(channel, title, details, owner, createdBy, threadID 
 		if err := b.saveLocked(); err != nil {
 			return teamTask{}, false, err
 		}
+		b.emitTaskTransitionAutoNotebook(existing, beforeStatus, createdBy)
 		return *existing, true, nil
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -243,6 +249,7 @@ func (b *Broker) EnsureTask(channel, title, details, owner, createdBy, threadID 
 	if err := b.saveLocked(); err != nil {
 		return teamTask{}, false, err
 	}
+	b.emitTaskTransitionAutoNotebook(&task, "", createdBy)
 	return task, false, nil
 }
 

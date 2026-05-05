@@ -100,6 +100,7 @@ type Broker struct {
 	wikiSectionsSubscribers map[int]chan WikiSectionsUpdatedEvent
 	wikiWorker              *WikiWorker
 	wikiOnce                sync.Once
+	autoNotebookWriter      *AutoNotebookWriter
 	wikiIndex               *WikiIndex
 	wikiExtractor           *Extractor
 	wikiDLQ                 *DLQ
@@ -591,6 +592,7 @@ func (b *Broker) Stop() {
 	pbSynth := b.playbookSynthesizer
 	pamDisp := b.pamDispatcher
 	compressor := b.wikiCompressor
+	autoWriter := b.autoNotebookWriter
 	b.mu.Unlock()
 	if synth != nil {
 		synth.Stop()
@@ -603,6 +605,9 @@ func (b *Broker) Stop() {
 	}
 	if compressor != nil {
 		compressor.Stop()
+	}
+	if autoWriter != nil {
+		autoWriter.Stop(2 * time.Second)
 	}
 }
 
@@ -623,6 +628,79 @@ func (b *Broker) Stop() {
 // Returns an error if the port cannot be bound (e.g. already in use).
 // Web UI server (ServeWebUI, cacheControlMiddleware, webUIProxyHandler)
 // moved to broker_web_proxy.go.
+
+// emitTaskTransitionAutoNotebook is the canonical seam for the OV2A locked
+// hook: a single after-saveLocked task-transition event, emitted from
+// MutateTask, BlockTask, ResumeTask, EnsureTask, and the self-healing path.
+// Caller passes the pre-mutation status snapshot; the writer records the
+// before/after pair and routes the entry to the task owner's shelf.
+//
+// Caller must hold b.mu. Roster filtering happens here (lock-free predicate)
+// because the writer cannot re-enter b.mu — see isAgentMemberSlugLocked.
+func (b *Broker) emitTaskTransitionAutoNotebook(task *teamTask, beforeStatus, actor string) {
+	if b == nil || b.autoNotebookWriter == nil || task == nil {
+		return
+	}
+	owner := strings.TrimSpace(task.Owner)
+	if owner == "" {
+		// No owner means no shelf to land on. Skipping here avoids feeding
+		// the writer an event it would just drop and keeps counters clean.
+		return
+	}
+	if !b.isAgentMemberSlugLocked(owner) {
+		return
+	}
+	b.autoNotebookWriter.Handle(autoNotebookEvent{
+		Kind:         AutoNotebookEventTaskTransitioned,
+		Slug:         owner,
+		Actor:        strings.TrimSpace(actor),
+		Channel:      normalizeChannelSlug(task.Channel),
+		TaskID:       task.ID,
+		TaskTitle:    task.Title,
+		BeforeStatus: strings.TrimSpace(beforeStatus),
+		AfterStatus:  strings.TrimSpace(task.Status),
+		Content:      strings.TrimSpace(task.Title),
+		Timestamp:    time.Now().UTC(),
+	})
+}
+
+// IsAgentMemberSlug returns true when `slug` matches a registered office
+// member and is not a human/system slug. Acquires b.mu — DO NOT call from a
+// path that already holds it; use isAgentMemberSlugLocked instead.
+func (b *Broker) IsAgentMemberSlug(slug string) bool {
+	if b == nil {
+		return false
+	}
+	slug = normalizeActorSlug(slug)
+	if slug == "" || isHumanMessageSender(slug) {
+		return false
+	}
+	switch slug {
+	case "system", "nex":
+		return false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.findMemberLocked(slug) != nil
+}
+
+// isAgentMemberSlugLocked is the hook-site variant: it assumes b.mu is held.
+// Used by the auto-notebook writer hooks to filter senders without re-entering
+// the broker's mutex (which would deadlock).
+func (b *Broker) isAgentMemberSlugLocked(slug string) bool {
+	if b == nil {
+		return false
+	}
+	slug = normalizeActorSlug(slug)
+	if slug == "" || isHumanMessageSender(slug) {
+		return false
+	}
+	switch slug {
+	case "system", "nex":
+		return false
+	}
+	return b.findMemberLocked(slug) != nil
+}
 
 // senderMayAutoPromoteLocked reports whether a `from` value is allowed to have
 // its @slug body text auto-promoted into the tagged array. Allowlist shape:
