@@ -1,4 +1,11 @@
-import { type FormEvent, useEffect, useId, useRef, useState } from "react";
+import {
+  type FormEvent,
+  type ReactNode,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+} from "react";
 
 import {
   type JoinInviteErrorCode,
@@ -145,7 +152,7 @@ export function JoinPage({ token, onAccepted }: JoinPageProps) {
   );
 }
 
-function JoinShell({ children }: { children: React.ReactNode }) {
+function JoinShell({ children }: { children: ReactNode }) {
   return (
     <div className="join-page">
       <main className="join-card">{children}</main>
