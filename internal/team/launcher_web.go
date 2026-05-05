@@ -19,6 +19,7 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/term"
@@ -65,16 +66,56 @@ func (l *Launcher) PreflightWeb() error {
 	return nil
 }
 
-// LaunchWeb starts the broker, web UI server, and background agents without tmux.
-func (l *Launcher) LaunchWeb(webPort int) error {
-	// Offer to wire Nex when the user hasn't opted out and nex-cli isn't yet
-	// installed. `nex setup` handles detection and wiring for us — we just
-	// surface the prompt.
-	l.maybeOfferNex()
+// WebHandle is the result of StartWeb. It exposes the resolved URLs and
+// a Shutdown method for callers that own process lifetime — primarily the
+// future cmd/wuphf-desktop Wails shell, where the WebView container (not a
+// blocking select{}) decides when the broker tears down. The blocking
+// CLI path keeps using LaunchWeb.
+type WebHandle struct {
+	WebURL    string // http://127.0.0.1:<webPort> served by ServeWebUI
+	BrokerURL string // http://127.0.0.1:<brokerPort> for the API/SSE/WebSocket transport
 
+	launcher       *Launcher
+	stopTransports func()
+	shutdownOnce   sync.Once
+}
+
+// Shutdown tears down everything StartWeb brought up: transports first
+// (so in-flight sends flush), then broker (which closes both API and web
+// UI listeners — see Broker.Stop), then the headless context, then the
+// office PID file. Idempotent. ctx is reserved for future use; today
+// shutdown is best-effort and does not block on a deadline.
+func (h *WebHandle) Shutdown(_ context.Context) error {
+	if h == nil || h.launcher == nil {
+		return nil
+	}
+	h.shutdownOnce.Do(func() {
+		if h.stopTransports != nil {
+			h.stopTransports()
+		}
+		if h.launcher.broker != nil {
+			h.launcher.broker.Stop()
+		}
+		if h.launcher.headless.cancel != nil {
+			h.launcher.headless.cancel()
+		}
+		_ = clearOfficePIDFile()
+	})
+	return nil
+}
+
+// StartWeb boots the broker, web UI listener, and background agents
+// without blocking. The caller (CLI's LaunchWeb or the desktop shell)
+// owns process lifetime. Use the returned WebHandle.Shutdown to tear
+// everything down cleanly.
+//
+// StartWeb is the single source of truth for boot order: anything LaunchWeb
+// does after this point is purely user-facing presentation (printed URLs,
+// browser auto-open, blocking on a signal).
+func (l *Launcher) StartWeb(_ context.Context, webPort int) (*WebHandle, error) {
 	mcpConfig, err := l.ensureMCPConfig()
 	if err != nil {
-		return fmt.Errorf("prepare mcp config: %w", err)
+		return nil, fmt.Errorf("prepare mcp config: %w", err)
 	}
 	l.mcpConfig = mcpConfig
 	l.webMode = true
@@ -96,13 +137,13 @@ func (l *Launcher) LaunchWeb(webPort int) error {
 		})
 	}
 	if err := l.broker.SetSessionMode(l.sessionMode, l.oneOnOne); err != nil {
-		return fmt.Errorf("set session mode: %w", err)
+		return nil, fmt.Errorf("set session mode: %w", err)
 	}
 	if err := l.broker.SetFocusMode(l.focusMode); err != nil {
-		return fmt.Errorf("set focus mode: %w", err)
+		return nil, fmt.Errorf("set focus mode: %w", err)
 	}
 	if err := l.broker.Start(); err != nil {
-		return fmt.Errorf("start broker: %w", err)
+		return nil, fmt.Errorf("start broker: %w", err)
 	}
 
 	stopTransports, err := RegisterTransports(l.broker)
@@ -117,7 +158,7 @@ func (l *Launcher) LaunchWeb(webPort int) error {
 		stopTransports()
 		l.broker.Stop()
 		_ = clearOfficePIDFile()
-		return fmt.Errorf("write office pid: %w", err)
+		return nil, fmt.Errorf("write office pid: %w", err)
 	}
 
 	l.broker.SetGenerateMemberFn(l.GenerateMemberTemplateFromPrompt)
@@ -131,7 +172,7 @@ func (l *Launcher) LaunchWeb(webPort int) error {
 		stopTransports()
 		l.broker.Stop()
 		_ = clearOfficePIDFile()
-		return fmt.Errorf("web UI failed to start: %w\n\nIs port %d already in use? Try: wuphf --web-port %d", err, webPort, webPort+1)
+		return nil, fmt.Errorf("web UI failed to start: %w\n\nIs port %d already in use? Try: wuphf --web-port %d", err, webPort, webPort+1)
 	}
 
 	// Default path: headless `claude --print` per turn. Anthropic re-sanctioned
@@ -165,10 +206,35 @@ func (l *Launcher) LaunchWeb(webPort int) error {
 	// resolve to ::1 first on IPv6-preferring setups, while ServeWebUI binds
 	// only to 127.0.0.1 — that mismatch reproduces ERR_CONNECTION_REFUSED
 	// even after the probe succeeds.
-	webAddr := fmt.Sprintf("127.0.0.1:%d", webPort)
-	webURL := fmt.Sprintf("http://%s", webAddr)
-	fmt.Printf("\n  Web UI:  %s\n", webURL)
-	fmt.Printf("  Broker:  %s\n", l.BrokerBaseURL())
+	webURL := fmt.Sprintf("http://127.0.0.1:%d", webPort)
+
+	return &WebHandle{
+		WebURL:         webURL,
+		BrokerURL:      l.BrokerBaseURL(),
+		launcher:       l,
+		stopTransports: stopTransports,
+	}, nil
+}
+
+// LaunchWeb starts the broker, web UI server, and background agents without
+// tmux, then blocks until the process is signalled. Used by the CLI flow
+// (`wuphf` with no `--legacy-tui`). Desktop and embedded callers should
+// use StartWeb directly so they own process lifetime.
+func (l *Launcher) LaunchWeb(webPort int) error {
+	// Offer to wire Nex when the user hasn't opted out and nex-cli isn't yet
+	// installed. `nex setup` handles detection and wiring for us — we just
+	// surface the prompt. The offer is interactive, so it stays out of
+	// StartWeb (which is also called by the desktop shell, where stdin
+	// prompting is wrong).
+	l.maybeOfferNex()
+
+	handle, err := l.StartWeb(context.Background(), webPort)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("\n  Web UI:  %s\n", handle.WebURL)
+	fmt.Printf("  Broker:  %s\n", handle.BrokerURL)
 	fmt.Printf("  Press Ctrl+C to stop.\n\n")
 
 	if !l.noOpen {
@@ -179,10 +245,11 @@ func (l *Launcher) LaunchWeb(webPort int) error {
 		// generous ceiling: in practice the listener is up in milliseconds.
 		// Skip the open if the listener never came up — opening a dead URL
 		// just produces a confusing error page in the user's first second.
+		webAddr := fmt.Sprintf("127.0.0.1:%d", webPort)
 		if waitForWebReady(webAddr, 5*time.Second) {
-			openBrowser(webURL)
+			openBrowser(handle.WebURL)
 		} else {
-			fmt.Printf("  Web UI did not become reachable at %s within 5s; skipping browser auto-open.\n", webURL)
+			fmt.Printf("  Web UI did not become reachable at %s within 5s; skipping browser auto-open.\n", handle.WebURL)
 		}
 	}
 

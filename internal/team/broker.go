@@ -135,6 +135,8 @@ type Broker struct {
 	archiveSweepMu     sync.Mutex
 	server             *http.Server
 	listener           net.Listener
+	webUIServer        *http.Server // tracked so Stop() can close the web UI listener too
+	webUIListener      net.Listener
 	lifecycleCtx       context.Context
 	lifecycleCancel    context.CancelFunc
 	token              string   // shared secret for authenticating requests
@@ -577,6 +579,12 @@ func (b *Broker) Stop() {
 	}
 	if b.server != nil {
 		_ = b.server.Close()
+	}
+	if b.webUIListener != nil {
+		_ = b.webUIListener.Close()
+	}
+	if b.webUIServer != nil {
+		_ = b.webUIServer.Close()
 	}
 	b.brokerRestartMu.Unlock()
 	b.mu.Lock()

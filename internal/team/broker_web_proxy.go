@@ -125,6 +125,10 @@ func (b *Broker) ServeWebUI(port int) error {
 		return fmt.Errorf("web UI: listen on %s: %w", addr, err)
 	}
 	srv := &http.Server{Handler: mux}
+	b.brokerRestartMu.Lock()
+	b.webUIServer = srv
+	b.webUIListener = ln
+	b.brokerRestartMu.Unlock()
 	go func() {
 		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Printf("broker web UI proxy: serve on :%d: %v", port, err)
