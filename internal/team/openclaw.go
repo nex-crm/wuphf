@@ -64,6 +64,12 @@ type OpenclawBridge struct {
 	// each offline episode posts exactly one notice (not one per 5-minute
 	// supervise tick).
 	noticedOffline bool
+
+	// healthMu guards the health snapshot fields. Kept separate from mu so
+	// Health() can read without contending with map updates on hot paths.
+	healthMu      sync.RWMutex
+	lastSuccessAt time.Time
+	lastError     error
 }
 
 // HasSlug reports whether the given slug is bound to a bridged OpenClaw
@@ -80,20 +86,61 @@ func (b *OpenclawBridge) HasSlug(slug string) bool {
 	return ok
 }
 
-// AttachSlug subscribes the bridge to a session and registers the slug→key
-// mapping so inbound events route to the right member. Called at startup for
-// every openclaw-bound office member and at runtime from handleOfficeMembers
-// when a new openclaw agent is created. Idempotent: attaching an already-
-// attached slug is a no-op. Broker-side member mutations serialize separately;
-// this method takes only the bridge's own mu.
-func (b *OpenclawBridge) AttachSlug(ctx context.Context, slug, sessionKey string) error {
+// AttachSlug binds an office member slug to a session key. It updates the
+// bridge's slug→key and key→slug maps so inbound events route to the right
+// member. The contract requires no error/ctx return: callers that need to
+// surface subscribe failures (HTTP handlers) must use [AttachSlugAndSubscribe]
+// instead. AttachSlug performs a best-effort async subscribe via the bridge's
+// stored ctx so the contract-level call still establishes the gateway
+// subscription, but failures are logged via system message rather than
+// returned. Idempotent: re-attaching the same pair is a no-op.
+func (b *OpenclawBridge) AttachSlug(slug, sessionKey string) {
+	if b == nil {
+		return
+	}
+	slug = strings.TrimSpace(slug)
+	sessionKey = strings.TrimSpace(sessionKey)
+	if slug == "" || sessionKey == "" {
+		return
+	}
+	b.mu.Lock()
+	bridgeCtx := b.ctx
+	currentKey, alreadyBound := b.keyBySlug[slug]
+	if alreadyBound && currentKey == sessionKey {
+		b.mu.Unlock()
+		return
+	}
+	if alreadyBound && currentKey != sessionKey {
+		delete(b.slugByKey, currentKey)
+		delete(b.lastChannelByKey, currentKey)
+	}
+	b.slugByKey[sessionKey] = slug
+	b.keyBySlug[slug] = sessionKey
+	b.mu.Unlock()
+
+	client := b.getClient()
+	if client == nil || bridgeCtx == nil {
+		return
+	}
+	go func() {
+		if err := client.SessionsMessagesSubscribe(bridgeCtx, sessionKey); err != nil && bridgeCtx.Err() == nil {
+			b.postSystemMessage(fmt.Sprintf("subscribe @%s failed: %v", slug, err))
+		}
+	}()
+}
+
+// AttachSlugAndSubscribe is the synchronous, error-returning variant used by
+// HTTP handlers that need to fail the request when the gateway subscription
+// fails. Updates the slug→key/key→slug maps and synchronously subscribes via
+// the supplied ctx. Idempotent: re-attaching the same pair is a no-op.
+func (b *OpenclawBridge) AttachSlugAndSubscribe(ctx context.Context, slug, sessionKey string) error {
 	if b == nil {
 		return fmt.Errorf("openclaw: nil bridge")
 	}
 	slug = strings.TrimSpace(slug)
 	sessionKey = strings.TrimSpace(sessionKey)
 	if slug == "" || sessionKey == "" {
-		return fmt.Errorf("openclaw: AttachSlug requires non-empty slug and sessionKey")
+		return fmt.Errorf("openclaw: AttachSlugAndSubscribe requires non-empty slug and sessionKey")
 	}
 	b.mu.RLock()
 	existingKey, already := b.keyBySlug[slug]
@@ -102,28 +149,67 @@ func (b *OpenclawBridge) AttachSlug(ctx context.Context, slug, sessionKey string
 		return nil
 	}
 	client := b.getClient()
-	if client != nil {
-		if err := client.SessionsMessagesSubscribe(ctx, sessionKey); err != nil {
-			return fmt.Errorf("openclaw: subscribe %q: %w", slug, err)
-		}
+	if client == nil {
+		return fmt.Errorf("openclaw: no active client for %q", slug)
+	}
+	if err := client.SessionsMessagesSubscribe(ctx, sessionKey); err != nil {
+		return fmt.Errorf("openclaw: subscribe %q: %w", slug, err)
 	}
 	b.mu.Lock()
-	if already && existingKey != sessionKey {
-		delete(b.slugByKey, existingKey)
-		delete(b.lastChannelByKey, existingKey)
+	defer b.mu.Unlock()
+	currentKey, currentlyBound := b.keyBySlug[slug]
+	if currentlyBound && currentKey == sessionKey {
+		return nil
+	}
+	if currentlyBound && currentKey != sessionKey {
+		delete(b.slugByKey, currentKey)
+		delete(b.lastChannelByKey, currentKey)
 	}
 	b.slugByKey[sessionKey] = slug
 	b.keyBySlug[slug] = sessionKey
-	b.mu.Unlock()
 	return nil
 }
 
-// DetachSlug unsubscribes and removes the slug from bridge maps. Best-effort
-// on the network call: if the gateway is unreachable we still clear local
-// state so the slug frees up; the returned error informs the caller that the
-// remote session may be leaked. Used by handleOfficeMembers on member remove
-// and by provider-switch flows when a member migrates off openclaw.
-func (b *OpenclawBridge) DetachSlug(ctx context.Context, slug string) error {
+// DetachSlug removes the binding between slug and its session key. The
+// contract requires no error/ctx return: callers that need to surface
+// unsubscribe failures must use [DetachSlugAndUnsubscribe] instead. DetachSlug
+// performs a best-effort async unsubscribe via the bridge's stored ctx;
+// failures are logged via system message rather than returned.
+func (b *OpenclawBridge) DetachSlug(slug string) {
+	if b == nil {
+		return
+	}
+	slug = strings.TrimSpace(slug)
+	b.mu.Lock()
+	sessionKey := b.keyBySlug[slug]
+	if sessionKey == "" {
+		b.mu.Unlock()
+		return
+	}
+	delete(b.keyBySlug, slug)
+	delete(b.slugByKey, sessionKey)
+	delete(b.lastChannelByKey, sessionKey)
+	bridgeCtx := b.ctx
+	b.mu.Unlock()
+
+	client := b.getClient()
+	if client == nil || bridgeCtx == nil {
+		return
+	}
+	go func() {
+		if err := client.SessionsMessagesUnsubscribe(bridgeCtx, sessionKey); err != nil && bridgeCtx.Err() == nil {
+			b.postSystemMessage(fmt.Sprintf("unsubscribe @%s failed: %v", slug, err))
+		}
+	}()
+}
+
+// DetachSlugAndUnsubscribe is the synchronous, error-returning variant used by
+// HTTP handlers. Local state is always cleared so the slug frees up regardless
+// of network outcome; the returned error informs the caller that the remote
+// session may be leaked. Returns an error when no bridge client is connected
+// so the caller can surface the failed remote teardown rather than silently
+// orphan the upstream subscription.
+func (b *OpenclawBridge) DetachSlugAndUnsubscribe(ctx context.Context, slug string) error {
 	if b == nil {
 		return nil
 	}
@@ -141,7 +227,7 @@ func (b *OpenclawBridge) DetachSlug(ctx context.Context, slug string) error {
 
 	client := b.getClient()
 	if client == nil {
-		return nil
+		return fmt.Errorf("openclaw: no active client for %q", slug)
 	}
 	if err := client.SessionsMessagesUnsubscribe(ctx, sessionKey); err != nil {
 		return fmt.Errorf("openclaw: unsubscribe %q: %w", slug, err)
@@ -158,7 +244,7 @@ func (b *OpenclawBridge) DetachSession(ctx context.Context, slug, sessionKey str
 	slug = strings.TrimSpace(slug)
 	sessionKey = strings.TrimSpace(sessionKey)
 	if sessionKey == "" {
-		return b.DetachSlug(ctx, slug)
+		return b.DetachSlugAndUnsubscribe(ctx, slug)
 	}
 	b.mu.Lock()
 	if boundSlug := b.slugByKey[sessionKey]; boundSlug != "" && boundSlug != slug {
@@ -301,6 +387,7 @@ func (b *OpenclawBridge) supervise() {
 		b.noticedOffline = false
 		err := b.runOnce()
 		if err != nil && !errors.Is(err, context.Canceled) {
+			b.recordHealthFailure(err)
 			if b.breaker != nil {
 				b.breaker.RecordFailure()
 			}
@@ -379,6 +466,7 @@ func (b *OpenclawBridge) runOnce() error {
 	if b.backoff != nil {
 		b.backoff.Reset()
 	}
+	b.recordHealthSuccess()
 
 	events := client.Events()
 	for {
@@ -541,4 +629,20 @@ func (b *OpenclawBridge) postSystemMessage(text string) {
 		return
 	}
 	b.broker.PostSystemMessage("general", "[openclaw] "+text, "openclaw")
+}
+
+// recordHealthSuccess updates the cached health snapshot after a successful
+// runOnce establishes a session and clears any prior error.
+func (b *OpenclawBridge) recordHealthSuccess() {
+	b.healthMu.Lock()
+	b.lastSuccessAt = time.Now()
+	b.lastError = nil
+	b.healthMu.Unlock()
+}
+
+// recordHealthFailure caches the most recent error so Health() can surface it.
+func (b *OpenclawBridge) recordHealthFailure(err error) {
+	b.healthMu.Lock()
+	b.lastError = err
+	b.healthMu.Unlock()
 }

@@ -248,7 +248,7 @@ func (b *Broker) createOfficeMember(r *http.Request, slug string, body officeMem
 			}
 			member.Provider.Openclaw.SessionKey = key
 		}
-		if err := bridge.AttachSlug(r.Context(), slug, member.Provider.Openclaw.SessionKey); err != nil {
+		if err := bridge.AttachSlugAndSubscribe(r.Context(), slug, member.Provider.Openclaw.SessionKey); err != nil {
 			return officeMemberMutationResult{}, newOfficeMemberMutationError(http.StatusBadGateway, fmt.Sprintf("openclaw subscribe: %v", err))
 		}
 	} else {
@@ -408,7 +408,7 @@ func (b *Broker) updateOfficeMember(r *http.Request, slug string, body officeMem
 		// attach would return 502 with member.Provider still pointing
 		// at the old binding but no live subscription on the gateway.
 		if toOpenclaw {
-			if err := bridge.AttachSlug(r.Context(), slug, newBinding.Openclaw.SessionKey); err != nil {
+			if err := bridge.AttachSlugAndSubscribe(r.Context(), slug, newBinding.Openclaw.SessionKey); err != nil {
 				return officeMemberMutationResult{}, newOfficeMemberMutationError(http.StatusBadGateway, fmt.Sprintf("openclaw subscribe: %v", err))
 			}
 		}
@@ -505,7 +505,7 @@ func (b *Broker) removeOfficeMember(r *http.Request, slug string) (officeMemberM
 	// lingers daemon-side and the user can clean it up via the
 	// OpenClaw CLI if they want to reclaim the slot.
 	if memberSnapshot.Provider.Kind == provider.KindOpenclaw && bridge != nil {
-		if err := bridge.DetachSlug(r.Context(), memberSnapshot.Slug); err != nil {
+		if err := bridge.DetachSlugAndUnsubscribe(r.Context(), memberSnapshot.Slug); err != nil {
 			go bridge.postSystemMessage(fmt.Sprintf("agent %q removed: detach warning: %v", memberSnapshot.Slug, err))
 		}
 	}
