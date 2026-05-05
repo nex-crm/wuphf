@@ -4,27 +4,30 @@ package team
 // only file in internal/team that imports internal/team/transport — the
 // one-way compile boundary (team → transport) is enforced here.
 //
-// ReceiveMessage and UpsertParticipant route to PostInboundSurfaceMessage for
-// channel-bound (Telegram) adapters; UpsertParticipant is a no-op there because
-// participant attribution is handled inside PostInboundSurfaceMessage by
-// display name. The share adapter takes the same no-op path: admitted-human
-// identity already exists in the broker as a humanSession before the adapter
-// fires the contract call, so UpsertParticipant just confirms the contract
-// without duplicating broker state.
+// ReceiveMessage routes inbound channel-bound traffic to PostInboundSurfaceMessage.
+//
+// UpsertParticipant flips per-member presence on for member-bound bindings
+// (binding.Scope == ScopeMember and binding.MemberSlug non-empty). Channel-bound
+// (Telegram) and office-bound (share) bindings are presence-irrelevant and take
+// a no-op path: telegram participants aren't members, and admitted-human
+// presence is tracked separately via humanSession.LastSeenAt + RevokedAt.
+//
+// DetachParticipant flips per-member presence off by reverse-looking-up the
+// adapter+key pair against the slug map populated on UpsertParticipant. The
+// bridge has already cleared its own slug binding by the time this fires, so
+// the broker maintains its own reverse map (broker_presence.go) — the host
+// cannot ask the bridge.
 //
 // RevokeParticipant routes the office-bound (human-share) revoke flow to
 // Broker.revokeHumanSession so an adapter calling Host.RevokeParticipant after
 // an invite is revoked tears down the corresponding session.
-//
-// DetachParticipant routes the member-bound (openclaw) detach flow to a
-// session-end notice. The broker has no per-member presence flag today, so the
-// hook validates the call and returns nil — future presence work plugs in
-// here without further adapter changes.
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/nex-crm/wuphf/internal/team/transport"
 )
@@ -53,31 +56,63 @@ func (h *brokerTransportHost) ReceiveMessage(_ context.Context, msg transport.Me
 	return nil
 }
 
-// UpsertParticipant registers an external identity. For channel-bound adapters
-// (Telegram) participant attribution is handled inside PostInboundSurfaceMessage
-// by display name, so the call is a no-op. For the office-bound share adapter
-// the admitted-human record already exists in the broker as a humanSession by
-// the time this fires (see broker_human_share.handleHumanInviteAccept), so the
-// contract is satisfied without a duplicate broker write. Member-bound
-// adapters (OpenClaw) take the same no-op path until the broker grows a
-// per-member registration store.
-func (h *brokerTransportHost) UpsertParticipant(_ context.Context, _ transport.Participant, _ transport.Binding) error {
+// UpsertParticipant registers an external identity. For member-bound bindings
+// (openclaw today, future member-bound adapters tomorrow) the call flips the
+// slug's presence on and stamps LastSeenAt. Channel-bound (Telegram)
+// participants and office-bound (share) admitted humans are presence-irrelevant
+// here: telegram attribution lives in PostInboundSurfaceMessage by display
+// name, and humanSession owns admitted-human presence via its own LastSeenAt.
+//
+// A nil broker is rejected so a misconfigured host fails loudly rather than
+// silently dropping presence updates. A binding without ScopeMember/MemberSlug
+// is treated as "no member to mark online" and returns nil — the contract is
+// satisfied; nothing to do.
+func (h *brokerTransportHost) UpsertParticipant(_ context.Context, p transport.Participant, b transport.Binding) error {
+	if h == nil || h.broker == nil {
+		return errors.New("transport: UpsertParticipant: nil broker")
+	}
+	if b.Scope != transport.ScopeMember {
+		return nil
+	}
+	slug := strings.TrimSpace(b.MemberSlug)
+	if slug == "" {
+		return nil
+	}
+	adapter := strings.TrimSpace(p.AdapterName)
+	if adapter == "" {
+		return fmt.Errorf("transport: UpsertParticipant: empty AdapterName for slug %q", slug)
+	}
+	key := strings.TrimSpace(p.Key)
+	if key == "" {
+		return fmt.Errorf("transport: UpsertParticipant: empty Key for slug %q (adapter=%q)", slug, adapter)
+	}
+	h.broker.mu.Lock()
+	h.broker.markMemberPresenceOnlineLocked(slug, adapter, key, time.Now())
+	h.broker.mu.Unlock()
 	return nil
 }
 
-// DetachParticipant marks a participant as offline. Recognized adapters
-// (openclaw) take a no-op success path: the bridge has already cleared its
-// own slug binding by the time this is called and the broker has no
-// per-member presence flag yet. Wiring the call site now means future
-// presence work can extend this without touching adapters. An unknown
-// adapterName is rejected so a misnamed call surfaces loudly rather than
-// silently no-op'ing.
+// DetachParticipant marks a participant offline. Resolves slug from the
+// (adapter, key) pair via the reverse map populated on UpsertParticipant. The
+// bridge has already cleared its own slug↔key binding by the time this fires,
+// so the broker cannot ask the bridge — it owns its own reverse lookup. An
+// unknown (adapter, key) pair is not an error: it just means the host never
+// saw an UpsertParticipant for that pair (e.g. the adapter sends Detach on
+// shutdown for a session that never produced a message).
+//
+// LastSeenAt is preserved on flip-off so the API can render "last seen 5m
+// ago"; only Online flips. An unknown adapterName is rejected to keep
+// misnamed calls visible. A nil broker is rejected so a misconfigured host
+// fails loudly rather than silently dropping detach updates.
 func (h *brokerTransportHost) DetachParticipant(_ context.Context, adapterName, key string) error {
 	if h == nil || h.broker == nil {
 		return errors.New("transport: DetachParticipant: nil broker")
 	}
 	switch adapterName {
 	case openclawAdapterName:
+		h.broker.mu.Lock()
+		h.broker.markMemberPresenceOfflineByKeyLocked(adapterName, key)
+		h.broker.mu.Unlock()
 		return nil
 	default:
 		return fmt.Errorf("transport: DetachParticipant: unsupported adapter %q (key=%q)", adapterName, key)

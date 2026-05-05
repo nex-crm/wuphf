@@ -61,7 +61,9 @@ type Broker struct {
 	messages                []channelMessage
 	agentIssues             []agentIssueRecord
 	members                 []officeMember
-	memberIndex             map[string]int // slug → index into members; guarded by mu
+	memberIndex             map[string]int                  // slug → index into members; guarded by mu
+	memberPresence          map[string]memberPresenceRecord // slug → presence; guarded by mu, populated via brokerTransportHost
+	presenceKeyToSlug       map[string]string               // "adapter:key" → slug; guarded by mu
 	channels                []teamChannel
 	sessionMode             string
 	oneOnOneAgent           string
@@ -327,6 +329,8 @@ func NewBrokerAt(statePath string) *Broker {
 		entitySubscribers:   make(map[int]chan EntityBriefSynthesizedEvent),
 		factSubscribers:     make(map[int]chan EntityFactRecordedEvent),
 		agentStreams:        make(map[string]*agentStreamBuffer),
+		memberPresence:      make(map[string]memberPresenceRecord),
+		presenceKeyToSlug:   make(map[string]string),
 		rateLimitBuckets:    make(map[string]ipRateLimitBucket),
 		rateLimitWindow:     defaultRateLimitWindow,
 		rateLimitRequests:   defaultRateLimitRequestsPerWindow,

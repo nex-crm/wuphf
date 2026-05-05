@@ -27,6 +27,15 @@ type officeMemberListEntry struct {
 	Task         string `json:"task,omitempty"`
 	LiveActivity string `json:"liveActivity,omitempty"`
 	LastTime     string `json:"lastTime,omitempty"`
+	// Online + LastSeenAt are presence fields populated from b.memberPresence
+	// (broker_presence.go), distinct from Status/Activity above which describe
+	// "is the agent processing right now". Online tracks "does the adapter
+	// still have a live session for this slug"; LastSeenAt is preserved on
+	// flip-off so the UI can render "last seen 5m ago" for offline members.
+	// Both are zero-valued for members that no adapter has ever upserted
+	// (e.g. the built-in CEO without an openclaw provider).
+	Online     bool   `json:"online,omitempty"`
+	LastSeenAt string `json:"last_seen_at,omitempty"`
 }
 
 type officeMemberMutationBody struct {
@@ -98,6 +107,10 @@ func (b *Broker) serveOfficeMemberList(w http.ResponseWriter) {
 		}
 		if entry.Activity == "" {
 			entry.Activity = "idle"
+		}
+		if presence, ok := b.presenceForSlugLocked(member.Slug); ok {
+			entry.Online = presence.Online
+			entry.LastSeenAt = presence.LastSeenAt.UTC().Format(time.RFC3339)
 		}
 		members = append(members, entry)
 	}
