@@ -86,9 +86,20 @@ func TestDetectEntropyHitsRespectsMinLength(t *testing.T) {
 }
 
 func TestDetectEntropyHitsIgnoresPathsAndURLs(t *testing.T) {
-	body := "/var/folders/35/363ddkgs5qn7d4tl8mm25bhw0000gn/T/TestWriteHeadlessOpencodeMCPConfigLogsBaseConfigParseFailure3800235317/001/.config/opencode/opencode.json https://example.com/callback/ABC123def456GHI789"
+	body := `/var/folders/35/363ddkgs5qn7d4tl8mm25bhw0000gn/T/TestWriteHeadlessOpencodeMCPConfigLogsBaseConfigParseFailure3800235317/001/.config/opencode/opencode.json https://example.com/callback/ABC123def456GHI789 C:\Users\runner\AppData\Local\Temp\TestBuildArtifact3800235317\config\secrets.json`
 	if hits := detectEntropyHits(body); len(hits) != 0 {
 		t.Fatalf("expected no entropy hits for paths/URLs, got %+v", hits)
+	}
+}
+
+func TestDetectEntropyHitsAllowsLeadingSlashCredentials(t *testing.T) {
+	token := "/aP3xQ7rB2kL9mN4vW8yZ1cF6jH0sT5uE"
+	hits := detectEntropyHits("credential " + token)
+	if len(hits) == 0 {
+		t.Fatalf("expected entropy hit for leading-slash token")
+	}
+	if !strings.Contains(hits[0].Token, token) {
+		t.Fatalf("expected hit token to contain %q, got %q", token, hits[0].Token)
 	}
 }
 

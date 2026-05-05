@@ -1201,48 +1201,39 @@ func (b *Broker) handleMembers(w http.ResponseWriter, r *http.Request) {
 		lastTime    string
 		disabled    bool
 	}
+	isOneOnOne := b.sessionMode == SessionModeOneOnOne
+	oneOnOneSlug := b.oneOnOneAgent
+	memberProfiles := make(map[string]memberView, len(b.members))
+	for _, member := range b.members {
+		memberProfiles[normalizeChannelSlug(member.Slug)] = memberView{name: member.Name, role: member.Role}
+	}
 	members := make(map[string]memberView)
 	if ch := b.findChannelLocked(channel); ch != nil {
 		for _, member := range ch.Members {
-			if b.sessionMode == SessionModeOneOnOne && member != b.oneOnOneAgent {
+			if isOneOnOne && member != oneOnOneSlug {
 				continue
 			}
 			info := memberView{disabled: containsString(ch.Disabled, member)}
-			if office := b.findMemberLocked(member); office != nil {
-				info.name = office.Name
-				info.role = office.Role
+			if office, ok := memberProfiles[normalizeChannelSlug(member)]; ok {
+				info.name = office.name
+				info.role = office.role
 			}
 			members[member] = info
 		}
 	}
+	lastMessages := make([]channelMessage, 0)
 	for _, msg := range b.messages {
-		msg = sanitizeChannelMessageSecrets(msg)
 		if normalizeChannelSlug(msg.Channel) != channel {
 			continue
 		}
-		if b.sessionMode == SessionModeOneOnOne && msg.From != b.oneOnOneAgent {
+		if isOneOnOne && msg.From != oneOnOneSlug {
 			continue
 		}
 		if msg.Kind == "automation" || msg.From == "nex" {
 			continue
 		}
-		content := msg.Content
-		if len(content) > 80 {
-			content = content[:80]
-		}
-		info := members[msg.From]
-		info.lastMessage = content
-		info.lastTime = msg.Timestamp
-		if info.name == "" {
-			if office := b.findMemberLocked(msg.From); office != nil {
-				info.name = office.Name
-				info.role = office.Role
-			}
-		}
-		members[msg.From] = info
+		lastMessages = append(lastMessages, msg)
 	}
-	isOneOnOne := b.sessionMode == SessionModeOneOnOne
-	oneOnOneSlug := b.oneOnOneAgent
 	taggedAt := make(map[string]time.Time, len(b.lastTaggedAt))
 	for slug, ts := range b.lastTaggedAt {
 		taggedAt[slug] = ts
@@ -1252,6 +1243,24 @@ func (b *Broker) handleMembers(w http.ResponseWriter, r *http.Request) {
 		activity[slug] = snapshot
 	}
 	b.mu.Unlock()
+
+	for _, msg := range lastMessages {
+		msg = sanitizeChannelMessageSecrets(msg)
+		content := msg.Content
+		if len(content) > 80 {
+			content = content[:80]
+		}
+		info := members[msg.From]
+		info.lastMessage = content
+		info.lastTime = msg.Timestamp
+		if info.name == "" {
+			if office, ok := memberProfiles[normalizeChannelSlug(msg.From)]; ok {
+				info.name = office.name
+				info.role = office.role
+			}
+		}
+		members[msg.From] = info
+	}
 
 	type memberEntry struct {
 		Slug         string `json:"slug"`

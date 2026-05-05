@@ -162,7 +162,7 @@ func (b *Broker) CreateWatchdogAlert(kind, channel, targetType, targetID, owner,
 		alert := &b.watchdogs[i]
 		if alert.Kind == strings.TrimSpace(kind) && alert.Channel == channel && alert.TargetType == strings.TrimSpace(targetType) && alert.TargetID == strings.TrimSpace(targetID) && strings.TrimSpace(alert.Status) != "resolved" {
 			alert.Owner = strings.TrimSpace(owner)
-			alert.Summary = strings.TrimSpace(summary)
+			alert.Summary = redactSecretsInText(strings.TrimSpace(summary))
 			alert.UpdatedAt = now
 			if err := b.saveLocked(); err != nil {
 				return watchdogAlert{}, false, err
@@ -179,7 +179,7 @@ func (b *Broker) CreateWatchdogAlert(kind, channel, targetType, targetID, owner,
 		TargetID:   strings.TrimSpace(targetID),
 		Owner:      strings.TrimSpace(owner),
 		Status:     "active",
-		Summary:    strings.TrimSpace(summary),
+		Summary:    redactSecretsInText(strings.TrimSpace(summary)),
 		CreatedAt:  now,
 		UpdatedAt:  now,
 	}

@@ -280,10 +280,11 @@ func (b *Broker) handleSignals(w http.ResponseWriter, r *http.Request) {
 	}
 	b.mu.Lock()
 	signals := make([]officeSignalRecord, len(b.signals))
-	for i, sig := range b.signals {
+	copy(signals, b.signals)
+	b.mu.Unlock()
+	for i, sig := range signals {
 		signals[i] = sanitizeOfficeSignalRecord(sig)
 	}
-	b.mu.Unlock()
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"signals": signals})
 }
@@ -295,10 +296,11 @@ func (b *Broker) handleDecisions(w http.ResponseWriter, r *http.Request) {
 	}
 	b.mu.Lock()
 	decisions := make([]officeDecisionRecord, len(b.decisions))
-	for i, dec := range b.decisions {
+	copy(decisions, b.decisions)
+	b.mu.Unlock()
+	for i, dec := range decisions {
 		decisions[i] = sanitizeOfficeDecisionRecord(dec)
 	}
-	b.mu.Unlock()
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"decisions": decisions})
 }
@@ -321,10 +323,11 @@ func (b *Broker) handleActions(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		b.mu.Lock()
 		actions := make([]officeActionLog, len(b.actions))
-		for i, action := range b.actions {
+		copy(actions, b.actions)
+		b.mu.Unlock()
+		for i, action := range actions {
 			actions[i] = sanitizeOfficeActionLog(action)
 		}
-		b.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{"actions": actions})
 	case http.MethodPost:
