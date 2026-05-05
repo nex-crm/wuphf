@@ -1,6 +1,10 @@
 import { create } from "zustand";
 
-import { computePillState, type PillState } from "../lib/agentEventTimer";
+import {
+  __internal as agentEventTimerInternal,
+  computePillState,
+  type PillState,
+} from "../lib/agentEventTimer";
 
 export type Theme = "nex" | "nex-dark" | "noir-gold";
 
@@ -36,7 +40,7 @@ export interface StoredActivitySnapshot extends AgentActivitySnapshot {
   haloUntilMs: number;
 }
 
-const HALO_DECAY_MS = 600;
+const { HALO_DECAY_MS } = agentEventTimerInternal;
 
 const _storedTheme = ((): Theme => {
   try {

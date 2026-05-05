@@ -45,6 +45,9 @@ export interface PillStateInput {
  *   1. `kind === "stuck"` -> "stuck" (overrides everything).
  *   2. `nowMs < haloUntilMs` -> "halo" (recent event glow).
  *   3. Within hold window -> "holding". Routine = 60s, milestone = 120s.
+ *      `kind === undefined` (or any future unrecognised kind) is treated
+ *      as "routine" so we never crash on a snapshot that pre-dates the
+ *      classifier.
  *   4. Within dim phase that follows hold (next 60s) -> "dim".
  *   5. Otherwise -> "idle".
  */

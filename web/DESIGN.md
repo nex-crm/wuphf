@@ -33,8 +33,8 @@ the row's secondary text slot. The pill never causes row reflow.
 | -------- | ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------- |
 | halo     | Brief drop-shadow glow (`--bubble-halo-radius`) in state color           | Within ~600ms of a new event arriving                                              |
 | holding  | Full opacity, normal weight                                              | Within hold window — routine 60s, milestone 120s                                   |
-| dim      | Opacity 0.7                                                              | Hold expired but within 120s of last event                                         |
-| idle     | Opacity 0.5, italic                                                      | More than 120s since last event; copy comes from `officeIdleDictionary.ts`         |
+| dim      | Opacity 0.7                                                              | Hold expired, still in the 60s dim window — routine 60–120s, milestone 120–180s   |
+| idle     | Opacity 0.5, italic                                                      | After the dim window — routine >120s, milestone >180s; copy from `officeIdleDictionary.ts` |
 | stuck    | 1px `--bubble-stuck` border, `--bubble-stuck` text, weight 600           | Backend emits `kind=stuck`; user cannot dismiss client-side                        |
 
 ### Motion budget

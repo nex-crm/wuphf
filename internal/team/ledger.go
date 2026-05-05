@@ -244,6 +244,19 @@ func (b *Broker) markAgentStuckClearedFromWatchdogLocked(alert watchdogAlert) {
 	if snap.Kind != "stuck" {
 		return
 	}
+	// If another active watchdog still claims this owner, leave the pill
+	// stuck. The just-resolved alert is already marked "resolved" in
+	// b.watchdogs by resolveWatchdogAlertsLocked, so the scan will skip it
+	// and only catch genuinely active siblings. b.watchdogs is bounded so
+	// the linear scan cost is negligible.
+	for _, w := range b.watchdogs {
+		if strings.TrimSpace(w.Status) == "resolved" {
+			continue
+		}
+		if normalizeChannelSlug(w.Owner) == slug {
+			return
+		}
+	}
 	snap.Kind = "routine"
 	snap.LastTime = time.Now().UTC().Format(time.RFC3339)
 	b.activity[slug] = snap

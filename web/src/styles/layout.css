@@ -1997,6 +1997,9 @@ html[data-theme="nex"]
    See web/DESIGN.md and the agent-event-bubbles design doc.
    ─────────────────────────────────────────────────────────────── */
 .sidebar-agent-pill {
+  /* block, not inline — text-overflow/max-width/overflow only apply to
+     a box, otherwise long activity strings spill past the slot. */
+  display: block;
   font-size: 10px;
   color: var(--text-tertiary);
   overflow: hidden;

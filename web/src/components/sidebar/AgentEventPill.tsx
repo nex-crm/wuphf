@@ -151,16 +151,21 @@ export function AgentEventPill({
   // Stuck transition assertive announcement — fire ONCE per stuck text so
   // the screen reader doesn't shout the same blocker every tick. The ref
   // resets to null when state leaves "stuck", so re-stuck triggers a fresh
-  // announcement on a new event.
-  let stuckAnnouncement: string | null = null;
-  if (pillState === "stuck") {
-    if (lastAnnouncedStuckRef.current !== text) {
-      stuckAnnouncement = text;
-      lastAnnouncedStuckRef.current = text;
+  // announcement on a new event. Computed in render (no mutation), then
+  // synced to the ref in an effect to satisfy React's render purity.
+  const stuckAnnouncement =
+    pillState === "stuck" && lastAnnouncedStuckRef.current !== text
+      ? text
+      : null;
+  useEffect(() => {
+    if (pillState === "stuck") {
+      if (stuckAnnouncement !== null) {
+        lastAnnouncedStuckRef.current = text;
+      }
+      return;
     }
-  } else if (lastAnnouncedStuckRef.current !== null) {
     lastAnnouncedStuckRef.current = null;
-  }
+  }, [pillState, stuckAnnouncement, text]);
 
   return (
     <>
