@@ -69,20 +69,14 @@ func TestStartWebStartAndShutdown(t *testing.T) {
 		t.Fatalf("Shutdown: %v", err)
 	}
 
-	// After shutdown the listener should be gone. New dials must fail. Allow
-	// up to 1s for the runtime to release the port — graceful close is fast
-	// in practice but the kernel can lag on some systems.
-	deadline := time.Now().Add(1 * time.Second)
-	for {
-		conn, err := net.DialTimeout("tcp", addr, 200*time.Millisecond)
-		if err != nil {
-			break
-		}
+	// After Shutdown returns, broker.Stop has called Close on the web UI
+	// listener synchronously. The shutdown contract is "no new connections
+	// after this point" — a single dial that hits the closed listener (or
+	// a no-listener port) is the deterministic signal we want.
+	conn, err := net.DialTimeout("tcp", addr, 500*time.Millisecond)
+	if err == nil {
 		_ = conn.Close()
-		if time.Now().After(deadline) {
-			t.Fatalf("expected dial %s to fail after shutdown", addr)
-		}
-		time.Sleep(50 * time.Millisecond)
+		t.Fatalf("expected dial %s to fail after shutdown", addr)
 	}
 
 	// Idempotent: a second Shutdown is a no-op, not a panic.
