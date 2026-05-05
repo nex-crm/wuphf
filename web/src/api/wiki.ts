@@ -422,6 +422,72 @@ export async function fetchAuditLog(
   }
 }
 
+// ── Maintenance assistant API ────────────────────────────────────────────────
+
+export type WikiMaintenanceAction =
+  | "summarize"
+  | "add_citation"
+  | "extract_facts"
+  | "resolve_contradiction"
+  | "split_long_page"
+  | "link_related"
+  | "refresh_stale";
+
+export interface WikiMaintenanceEvidence {
+  kind: "wiki_article" | "fact" | "lint_finding" | "edit_log";
+  label: string;
+  path?: string;
+  snippet?: string;
+}
+
+export interface WikiMaintenanceFactProposal {
+  subject: string;
+  predicate: string;
+  object: string;
+  confidence: number;
+  source_line?: number;
+}
+
+export interface WikiMaintenanceDiff {
+  proposed_content?: string;
+  added?: string[];
+  removed?: string[];
+}
+
+export interface WikiMaintenanceSuggestion {
+  action: WikiMaintenanceAction;
+  title: string;
+  description?: string;
+  diff?: WikiMaintenanceDiff;
+  facts?: WikiMaintenanceFactProposal[];
+  evidence?: WikiMaintenanceEvidence[];
+  /** Present when action === "resolve_contradiction" — wires into the existing modal. */
+  lint_finding?: LintFinding;
+  lint_report_date?: string;
+  lint_finding_idx?: number;
+  expected_sha?: string;
+  /** True when no suggestion was warranted; UI shows a friendly empty state. */
+  skipped?: boolean;
+  skipped_reason?: string;
+}
+
+/**
+ * POST /wiki/maintenance/suggest — compute a suggestion for one (action, path)
+ * pair. The broker never auto-writes; the suggestion is ephemeral and the
+ * caller must apply it through the normal /wiki/write-human path on accept.
+ */
+export async function fetchMaintenanceSuggestion(
+  action: WikiMaintenanceAction,
+  path: string,
+  options: { signal?: AbortSignal } = {},
+): Promise<WikiMaintenanceSuggestion> {
+  return await post<WikiMaintenanceSuggestion>(
+    "/wiki/maintenance/suggest",
+    { action, path },
+    options,
+  );
+}
+
 // ── Lint API ──────────────────────────────────────────────────────────────────
 
 /**
