@@ -178,6 +178,12 @@ func (b *Broker) loadState() error {
 	for i := range b.actions {
 		b.actions[i] = sanitizeOfficeActionLog(b.actions[i])
 	}
+	for i := range b.signals {
+		b.signals[i] = sanitizeOfficeSignalRecord(b.signals[i])
+	}
+	for i := range b.decisions {
+		b.decisions[i] = sanitizeOfficeDecisionRecord(b.decisions[i])
+	}
 	// b.ensureDefaultChannelsLocked() // channels come from saved state
 	b.ensureDefaultOfficeMembersLocked()
 	b.normalizeLoadedStateLocked()
@@ -233,6 +239,14 @@ func (b *Broker) prepareBrokerStateWriteLocked() (brokerStateWrite, error) {
 	for i, req := range b.requests {
 		requests[i] = sanitizeHumanInterview(req)
 	}
+	signals := make([]officeSignalRecord, len(b.signals))
+	for i, sig := range b.signals {
+		signals[i] = sanitizeOfficeSignalRecord(sig)
+	}
+	decisions := make([]officeDecisionRecord, len(b.decisions))
+	for i, dec := range b.decisions {
+		decisions[i] = sanitizeOfficeDecisionRecord(dec)
+	}
 	state := brokerState{
 		ChannelStore:      channelStoreRaw,
 		Messages:          messages,
@@ -245,8 +259,8 @@ func (b *Broker) prepareBrokerStateWriteLocked() (brokerStateWrite, error) {
 		Tasks:             b.tasks,
 		Requests:          requests,
 		Actions:           actions,
-		Signals:           b.signals,
-		Decisions:         b.decisions,
+		Signals:           signals,
+		Decisions:         decisions,
 		Watchdogs:         b.watchdogs,
 		Policies:          b.policies,
 		Scheduler:         b.scheduler,

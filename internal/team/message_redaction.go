@@ -58,6 +58,18 @@ func sanitizeHumanInterview(req humanInterview) humanInterview {
 	return req
 }
 
+func sanitizeOfficeSignalRecord(sig officeSignalRecord) officeSignalRecord {
+	sig.Title = redactSecretsInText(sig.Title)
+	sig.Content = redactSecretsInText(sig.Content)
+	return sig
+}
+
+func sanitizeOfficeDecisionRecord(dec officeDecisionRecord) officeDecisionRecord {
+	dec.Summary = redactSecretsInText(dec.Summary)
+	dec.Reason = redactSecretsInText(dec.Reason)
+	return dec
+}
+
 func appendRedactionReasons(existing []string, incoming []string) []string {
 	if len(incoming) == 0 {
 		return existing
