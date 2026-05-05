@@ -91,6 +91,9 @@ interface SourcePaneProps {
   content: string;
   setContent: (next: string) => void;
   textareaRef: React.RefObject<HTMLTextAreaElement | null>;
+  /** Catalog passed through to the rich editor for the mention picker
+   *  and broken-link detection. The textarea path doesn't use it. */
+  catalog: WikiCatalogEntry[];
 }
 
 /**
@@ -104,6 +107,7 @@ function SourcePane({
   content,
   setContent,
   textareaRef,
+  catalog,
 }: SourcePaneProps) {
   const labelText = `Article source (${path})`;
   return (
@@ -136,7 +140,11 @@ function SourcePane({
             data-testid="wk-editor-rich"
             aria-labelledby="wk-editor-source-label"
           >
-            <RichWikiEditor content={content} onChange={setContent} />
+            <RichWikiEditor
+              content={content}
+              onChange={setContent}
+              catalog={catalog}
+            />
           </div>
         </Suspense>
       ) : (
@@ -342,6 +350,7 @@ export default function WikiEditor({
             content={content}
             setContent={setContent}
             textareaRef={textareaRef}
+            catalog={catalog}
           />
         ) : null}
         {showPreview ? (
@@ -417,7 +426,18 @@ export default function WikiEditor({
       </div>
       <p className="wk-editor-help">
         Plain markdown. <code>[[slug]]</code> creates a wikilink. Saved as
-        commit author <strong>Human &lt;human@wuphf.local&gt;</strong>.
+        commit author <strong>Human &lt;human@wuphf.local&gt;</strong>.{" "}
+        {editorMode === "rich" ? (
+          <>
+            Type <code>/</code> for inserts; <code>@</code> opens the mention
+            picker.
+          </>
+        ) : (
+          <>
+            Toggle <strong>Rich</strong> for slash commands and the mention
+            picker.
+          </>
+        )}
       </p>
     </div>
   );
