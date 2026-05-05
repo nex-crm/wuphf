@@ -67,12 +67,20 @@ func (b *Broker) initWikiWorker() {
 	extractor := NewExtractor(brokerQueryProvider{}, worker, dlq, idx)
 	worker.SetExtractor(extractor)
 
+	// Roster filter is applied at the broker hook sites (under b.mu) via
+	// isAgentMemberSlugLocked, so the writer itself takes nil here — passing
+	// the broker as roster would deadlock when Handle is called from inside a
+	// b.mu critical section.
+	autoWriter := NewAutoNotebookWriter(worker, nil)
+	autoWriter.Start(lifecycleCtx)
+
 	b.mu.Lock()
 	b.wikiWorker = worker
 	b.wikiIndex = idx
 	b.wikiExtractor = extractor
 	b.wikiDLQ = dlq
 	b.readLog = NewReadLog(repo.Root())
+	b.autoNotebookWriter = autoWriter
 	b.mu.Unlock()
 
 	b.ensureNotebookDirsForRoster()

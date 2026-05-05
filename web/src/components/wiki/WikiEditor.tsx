@@ -1,9 +1,9 @@
 // biome-ignore-all lint/a11y/useAriaPropsSupportedByRole: Passive metadata uses accessible labels queried by screen-reader tests; visual text remains unchanged.
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 
 import type { WikiCatalogEntry } from "../../api/wiki";
-import { type WriteHumanConflict, writeHumanArticle } from "../../api/wiki";
+import { useWikiEditorController } from "../../hooks/useWikiEditorController";
 import {
   buildMarkdownComponents,
   buildRehypePlugins,
@@ -29,62 +29,6 @@ interface WikiEditorProps {
   onCancel: () => void;
 }
 
-/** Draft envelope persisted to localStorage. */
-interface DraftPayload {
-  content: string;
-  summary: string;
-  saved_at: string;
-}
-
-const DRAFT_KEY_PREFIX = "wuphf:draft:";
-const AUTOSAVE_DEBOUNCE_MS = 750;
-const MOBILE_BREAKPOINT_PX = 768;
-
-function draftKey(path: string): string {
-  return `${DRAFT_KEY_PREFIX}${path}`;
-}
-
-function readDraft(path: string): DraftPayload | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = window.localStorage.getItem(draftKey(path));
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as Partial<DraftPayload>;
-    if (
-      typeof parsed.content !== "string" ||
-      typeof parsed.saved_at !== "string"
-    ) {
-      return null;
-    }
-    return {
-      content: parsed.content,
-      summary: typeof parsed.summary === "string" ? parsed.summary : "",
-      saved_at: parsed.saved_at,
-    };
-  } catch {
-    return null;
-  }
-}
-
-function writeDraft(path: string, payload: DraftPayload): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(draftKey(path), JSON.stringify(payload));
-  } catch {
-    // Out of quota / disabled storage — silently skip, in-memory state
-    // still protects the user for the session.
-  }
-}
-
-function clearDraft(path: string): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.removeItem(draftKey(path));
-  } catch {
-    // Ignore — storage unavailable.
-  }
-}
-
 function formatAgo(isoOrMs: string): string {
   const t =
     typeof isoOrMs === "string" && isoOrMs.length > 0
@@ -102,43 +46,14 @@ function formatAgo(isoOrMs: string): string {
   return `${days}d ago`;
 }
 
-/** Narrow viewport detector — mobile layout collapses split view to tabs. */
-function useIsMobileViewport(): boolean {
-  const getMatch = (): boolean => {
-    if (typeof window === "undefined" || !window.matchMedia) return false;
-    return window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT_PX - 1}px)`)
-      .matches;
-  };
-  const [isMobile, setIsMobile] = useState<boolean>(getMatch);
-  useEffect(() => {
-    if (typeof window === "undefined" || !window.matchMedia) return;
-    const mq = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT_PX - 1}px)`);
-    const update = () => setIsMobile(mq.matches);
-    update();
-    // Safari <14 only supports addListener.
-    if (typeof mq.addEventListener === "function") {
-      mq.addEventListener("change", update);
-      return () => mq.removeEventListener("change", update);
-    }
-    mq.addListener(update);
-    return () => mq.removeListener(update);
-  }, []);
-  return isMobile;
-}
-
 /**
  * Plain-markdown editor with autosaved drafts and a live preview pane.
  *
- * Autosave: debounced writes to localStorage keyed by article path. On
- * re-open, if the stored draft is newer than the server's last_edited_ts,
- * a yellow banner offers [Restore] / [Discard].
- *
- * Preview: "Preview" toggle flips into split view (desktop) or tab
- * switcher (<768px viewport). The preview uses the same remark/rehype
- * pipeline as `WikiArticle` so wikilinks, tables, and image embeds render
- * identically.
+ * Editor state (draft restore/discard, autosave debounce, save, conflict
+ * reload, mobile source/preview toggle) lives in `useWikiEditorController`
+ * so the upcoming rich editor can share the same state machine. This
+ * component owns presentation only: textarea, preview pane, banners.
  */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
 export default function WikiEditor({
   path,
   initialContent,
@@ -148,115 +63,35 @@ export default function WikiEditor({
   onSaved,
   onCancel,
 }: WikiEditorProps) {
-  const [content, setContent] = useState(initialContent);
-  const [commitMessage, setCommitMessage] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [conflict, setConflict] = useState<WriteHumanConflict | null>(null);
-  const [draft, setDraft] = useState<DraftPayload | null>(null);
-  const [previewOn, setPreviewOn] = useState(false);
-  const [mobileView, setMobileView] = useState<"source" | "preview">("source");
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const isMobile = useIsMobileViewport();
 
-  // On mount / when the article changes, reset editor state AND check
-  // localStorage for a draft newer than server's last_edited_ts.
-  useEffect(() => {
-    setContent(initialContent);
-    setCommitMessage("");
-    setError(null);
-    setConflict(null);
-    const stored = readDraft(path);
-    if (!stored) {
-      setDraft(null);
-      return;
-    }
-    // If the server has a newer edit than the draft, the draft is stale
-    // (someone saved the article after the user left the editor); discard.
-    const serverTs = serverLastEditedTs ? Date.parse(serverLastEditedTs) : NaN;
-    const draftTs = Date.parse(stored.saved_at);
-    if (
-      Number.isFinite(serverTs) &&
-      Number.isFinite(draftTs) &&
-      serverTs >= draftTs
-    ) {
-      clearDraft(path);
-      setDraft(null);
-      return;
-    }
-    // Only surface the banner when the draft diverges from the fresh server
-    // content; otherwise it's noise.
-    if (stored.content === initialContent) {
-      setDraft(null);
-      return;
-    }
-    setDraft(stored);
-  }, [path, initialContent, serverLastEditedTs]);
-
-  // Debounced autosave. Anchors on `content` + `commitMessage` and writes
-  // after AUTOSAVE_DEBOUNCE_MS of quiescence. Skip writing if nothing has
-  // diverged from the server-supplied content — no point polluting storage.
-  useEffect(() => {
-    if (content === initialContent && commitMessage === "") return;
-    const handle = window.setTimeout(() => {
-      writeDraft(path, {
-        content,
-        summary: commitMessage,
-        saved_at: new Date().toISOString(),
-      });
-    }, AUTOSAVE_DEBOUNCE_MS);
-    return () => window.clearTimeout(handle);
-  }, [path, content, commitMessage, initialContent]);
-
-  const handleRestoreDraft = useCallback(() => {
-    if (!draft) return;
-    setContent(draft.content);
-    setCommitMessage(draft.summary);
-    setDraft(null);
-  }, [draft]);
-
-  const handleDiscardDraft = useCallback(() => {
-    clearDraft(path);
-    setDraft(null);
-  }, [path]);
-
-  async function handleSave() {
-    if (saving) return;
-    setError(null);
-    setConflict(null);
-    if (!content.trim()) {
-      setError("Article content cannot be empty.");
-      return;
-    }
-    setSaving(true);
-    try {
-      const result = await writeHumanArticle({
-        path,
-        content,
-        commitMessage: commitMessage.trim() || `human: update ${path}`,
-        expectedSha,
-      });
-      if ("conflict" in result) {
-        // Keep the draft — user's work should survive a conflict round-trip.
-        setConflict(result);
-        return;
-      }
-      // Saved OK — the draft is now redundant.
-      clearDraft(path);
-      setDraft(null);
-      onSaved(result.commit_sha);
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Save failed.");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  function handleReloadConflict() {
-    if (!conflict) return;
-    setContent(conflict.current_content);
-    onSaved(conflict.current_sha);
-  }
+  const {
+    content,
+    setContent,
+    commitMessage,
+    setCommitMessage,
+    saving,
+    error,
+    conflict,
+    draft,
+    previewOn,
+    setPreviewOn,
+    mobileView,
+    setMobileView,
+    isMobile,
+    showSource,
+    showPreview,
+    handleRestoreDraft,
+    handleDiscardDraft,
+    handleSave,
+    handleReloadConflict,
+  } = useWikiEditorController({
+    path,
+    initialContent,
+    expectedSha,
+    serverLastEditedTs,
+    onSaved,
+  });
 
   const catalogSlugs = useMemo(
     () => new Set(catalog.map((c) => c.path)),
@@ -272,9 +107,6 @@ export default function WikiEditor({
     () => buildMarkdownComponents({ resolver }),
     [resolver],
   );
-
-  const showSource = !(previewOn && isMobile) || mobileView === "source";
-  const showPreview = previewOn && (!isMobile || mobileView === "preview");
 
   return (
     <div

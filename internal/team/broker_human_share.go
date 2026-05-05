@@ -1,6 +1,7 @@
 package team
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -21,6 +22,45 @@ const (
 	humanShareEventFrom = "system"
 	humanLastSeenFlush  = time.Minute
 )
+
+// humanAdmitHookFn fires after acceptHumanInvite succeeds and the new session
+// is persisted. The office-bound share adapter installs this hook in
+// ShareTransport.Run so it can call Host.UpsertParticipant for the admitted
+// human — closing the v1 lifecycle gap where only the revoke half flowed
+// through the transport host. Hook signature accepts only exported scalars so
+// share_transport.go does not need to reach into humanSession internals.
+type humanAdmitHookFn func(ctx context.Context, sessionID, slug, displayName string)
+
+// SetHumanAdmitHook installs (or clears, when hook is nil) the per-broker
+// callback fired after handleHumanInviteAccept admits a session. Called from
+// ShareTransport.Run on adapter startup and shutdown. The pointer is read
+// atomically on the HTTP hot path; passing nil is the documented way for the
+// adapter to detach on shutdown.
+func (b *Broker) SetHumanAdmitHook(hook humanAdmitHookFn) {
+	if b == nil {
+		return
+	}
+	if hook == nil {
+		b.humanAdmitHook.Store(nil)
+		return
+	}
+	b.humanAdmitHook.Store(&hook)
+}
+
+// fireHumanAdmitHook invokes the installed hook with the new session, if any.
+// Called from handleHumanInviteAccept *after* persistence succeeds so an
+// adapter cannot observe a session that was rolled back by a save failure. A
+// nil hook (no adapter registered, or shutdown in progress) is a silent no-op.
+func (b *Broker) fireHumanAdmitHook(ctx context.Context, session humanSession) {
+	if b == nil {
+		return
+	}
+	hp := b.humanAdmitHook.Load()
+	if hp == nil {
+		return
+	}
+	(*hp)(ctx, session.ID, session.HumanSlug, session.DisplayName)
+}
 
 type humanInviteResponse struct {
 	ID         string `json:"id"`
@@ -102,6 +142,11 @@ func (b *Broker) handleHumanInviteAccept(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	http.SetCookie(w, humanSessionCookieForToken(sessionToken, sessionExpiresAt(session)))
+	// Notify the office-bound share adapter so it can call
+	// Host.UpsertParticipant for the admitted human. Fired after persistence
+	// succeeds (acceptHumanInvite returned no error) so a rolled-back invite
+	// never produces a phantom upsert.
+	b.fireHumanAdmitHook(r.Context(), session)
 	writeJSON(w, http.StatusOK, map[string]any{"session": humanSessionToResponse(session)})
 }
 
@@ -257,6 +302,59 @@ func (b *Broker) acceptHumanInvite(token, displayName, device string) (string, h
 		return sessionToken, session, nil
 	}
 	return "", humanSession{}, errHumanInviteExpiredOrUsed
+}
+
+// RevokeHumanInvite marks the invite RevokedAt (so no further accepts can
+// admit a new session against it) and returns the IDs of sessions that were
+// still active under this invite at revoke time. It does NOT revoke the
+// sessions themselves — that belongs to the caller (typically
+// transport.Host.RevokeParticipant via the OfficeBoundTransport adapter), so
+// the same per-session teardown path runs whether triggered through the
+// adapter or directly via revokeHumanSession.
+//
+// Returns an error when the invite is unknown or when persisting the mutation
+// fails. On a save failure the in-memory mutation is rolled back so a restart
+// will not see a half-revoked state — without this rollback an attacker who
+// still has the invite token could re-join after the next restart because the
+// persisted state would still show the invite live. An already-revoked invite
+// is a no-op success that returns any sessions still active under it.
+func (b *Broker) RevokeHumanInvite(inviteID string) ([]string, error) {
+	inviteID = strings.TrimSpace(inviteID)
+	if inviteID == "" {
+		return nil, errors.New("invite id required")
+	}
+	now := time.Now().UTC()
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	idx := -1
+	for i := range b.humanInvites {
+		if b.humanInvites[i].ID == inviteID {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return nil, errors.New("invite not found")
+	}
+	prevRevokedAt := b.humanInvites[idx].RevokedAt
+	if prevRevokedAt == "" {
+		b.humanInvites[idx].RevokedAt = now.Format(time.RFC3339)
+	}
+	var affected []string
+	for i := range b.humanSessions {
+		s := &b.humanSessions[i]
+		if s.InviteID != inviteID || s.RevokedAt != "" {
+			continue
+		}
+		affected = append(affected, s.ID)
+	}
+	if err := b.saveLocked(); err != nil {
+		// Roll back the in-memory mutation so a restart cannot see a state
+		// where the invite was marked revoked in memory but never persisted.
+		b.humanInvites[idx].RevokedAt = prevRevokedAt
+		return nil, fmt.Errorf("share: RevokeHumanInvite save: %w", err)
+	}
+	return affected, nil
 }
 
 func (b *Broker) revokeHumanSession(id string) error {

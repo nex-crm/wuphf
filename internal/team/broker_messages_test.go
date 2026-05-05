@@ -2,6 +2,7 @@ package team
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -9,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/nex-crm/wuphf/internal/agent"
 )
@@ -49,6 +51,58 @@ func TestPostMessage_SetsTimestampAndChannel(t *testing.T) {
 	all := b.Messages()
 	if len(all) == 0 || all[len(all)-1].ID != got.ID {
 		t.Errorf("posted message not visible in b.Messages()")
+	}
+}
+
+// TestPostMessage_TriggersAutoNotebookWriter pins the locked PR-1 hook (2A):
+// every roster-agent PostMessage feeds exactly one event into the auto-notebook
+// writer, while non-roster senders (humans, system) are filtered at ingress.
+// Uses a stub writer client to keep the assertion focused on the hook seam.
+func TestPostMessage_TriggersAutoNotebookWriter(t *testing.T) {
+	b := newTestBroker(t)
+	b.mu.Lock()
+	b.members = append(b.members, officeMember{Slug: "ceo", Name: "CEO", Role: "lead"})
+	for i := range b.channels {
+		if b.channels[i].Slug == "general" {
+			b.channels[i].Members = append(b.channels[i].Members, "ceo", "human")
+		}
+	}
+	b.mu.Unlock()
+
+	stub := &fakeNotebookClient{}
+	// Broker pre-filters via isAgentMemberSlugLocked before calling Handle,
+	// so the writer's roster is unused on the production code path; pass nil
+	// here to avoid re-entering b.mu inside Handle.
+	writer := NewAutoNotebookWriter(stub, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	writer.Start(ctx)
+	t.Cleanup(func() { cancel(); writer.Stop(time.Second) })
+
+	b.mu.Lock()
+	b.autoNotebookWriter = writer
+	b.mu.Unlock()
+
+	if _, err := b.PostMessage("ceo", "general", "agent message", nil, ""); err != nil {
+		t.Fatalf("PostMessage agent: %v", err)
+	}
+	if _, err := b.PostMessage("human", "general", "human message", nil, ""); err != nil {
+		t.Fatalf("PostMessage human: %v", err)
+	}
+	// Process the system path: PostSystemMessage bypasses PostMessage and must
+	// not produce a writer event.
+	b.PostSystemMessage("general", "system msg", "system")
+
+	waitCtx, waitCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer waitCancel()
+	if err := writer.WaitForCondition(waitCtx, func() bool { return len(stub.snapshot()) >= 1 }); err != nil {
+		t.Fatalf("waiting for writer event: %v", err)
+	}
+	calls := stub.snapshot()
+	if len(calls) != 1 {
+		t.Fatalf("expected exactly 1 notebook write (only the agent message); got %d", len(calls))
+	}
+	if calls[0].Slug != "ceo" {
+		t.Fatalf("expected slug=ceo, got %q", calls[0].Slug)
 	}
 }
 

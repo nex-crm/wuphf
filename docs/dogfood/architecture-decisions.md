@@ -10,8 +10,8 @@
   task -> local_worktree -> checks -> review -> draft_pr -> CI -> human gate.
 - Domain service methods should own business behavior. HTTP handlers adapt
   request parsing, auth, status codes, and JSON encoding to those methods.
-- Web and TUI surfaces render shared contracts unless a row in
-  `docs/surfaces.md` documents an intentional gap.
+- Web and TUI surfaces render shared contracts unless a domain owner documents
+  an intentional gap in the relevant code or docs.
 - Web unit and component tests run through Vitest via
   `bash scripts/test-web.sh` for the full suite and
   `bash scripts/test-web.sh web/src/path/to/file.test.ts` for focused runs.
