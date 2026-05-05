@@ -138,6 +138,56 @@ func TestDrainStreamLinesReturnsEOFAsNil(t *testing.T) {
 	}
 }
 
+// TestDrainStreamLinesTruncatesLineBeyondLimit covers the byte-budget side
+// of the contract: a line larger than maxLineBytes must (a) deliver a
+// prefix capped at maxLineBytes, (b) silently drain the rest of that line
+// from the upstream reader (no wedge, no second delivery), and (c) leave
+// subsequent lines intact and uncorrupted.
+func TestDrainStreamLinesTruncatesLineBeyondLimit(t *testing.T) {
+	t.Parallel()
+
+	const limit = 1024
+	body := strings.Repeat("x", limit*4) // 4x the cap
+	src := body + "\n" + "after\n"
+
+	r := strings.NewReader(src)
+	done := make(chan struct{})
+	var got []string
+	go func() {
+		defer close(done)
+		_ = DrainStreamLinesWithLimit(r, limit, func(line string) {
+			got = append(got, line)
+		})
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("DrainStreamLinesWithLimit wedged on oversized line — truncate-and-drain regression")
+	}
+
+	if len(got) != 2 {
+		t.Fatalf("expected 2 lines (truncated prefix + after), got %d: %v", len(got), got)
+	}
+	if len(got[0]) != limit {
+		t.Fatalf("truncated prefix len: got %d, want %d", len(got[0]), limit)
+	}
+	if got[1] != "after\n" {
+		t.Fatalf("post-truncation line: got %q, want %q", got[1], "after\n")
+	}
+}
+
+func TestDrainStreamLinesWithLimitRejectsNonPositive(t *testing.T) {
+	t.Parallel()
+
+	if err := DrainStreamLinesWithLimit(strings.NewReader("a\n"), 0, func(string) {}); err == nil {
+		t.Fatal("expected error for zero limit, got nil")
+	}
+	if err := DrainStreamLinesWithLimit(strings.NewReader("a\n"), -1, func(string) {}); err == nil {
+		t.Fatal("expected error for negative limit, got nil")
+	}
+}
+
 // io.MultiReader to a closed reader: ensure the helper doesn't loop on a
 // reader that drips bytes and then returns io.EOF without a final \n.
 func TestDrainStreamLinesDripFeed(t *testing.T) {

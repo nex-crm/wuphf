@@ -53,6 +53,12 @@ func TestReadCodexJSONStreamOversizedLine(t *testing.T) {
 	if !sawDelta {
 		t.Fatal("oversized text delta was not delivered to onEvent")
 	}
+	// FinalMessage is the runner's authoritative output. A regression that
+	// drops state.deltaText during final assembly would still pass the
+	// onEvent check above, so assert the assembled length explicitly.
+	if len(result.FinalMessage) != huge {
+		t.Fatalf("FinalMessage length: got %d, want %d", len(result.FinalMessage), huge)
+	}
 	if result.Usage.InputTokens != 7 || result.Usage.OutputTokens != 3 {
 		t.Fatalf("post-oversized usage not parsed: %+v", result.Usage)
 	}
