@@ -109,10 +109,13 @@ function SourcePane({
   return (
     <div className="wk-editor-pane wk-editor-pane--source">
       <label
+        id="wk-editor-source-label"
         className="wk-editor-label"
-        // The textarea only mounts in source mode, so `htmlFor` must drop
-        // when rich is active. The rich wrapper carries an `aria-label`
-        // instead so screen readers can still identify the editor surface.
+        // The textarea only mounts in source mode, so `htmlFor` only points
+        // to it when relevant. In rich mode the wrapper uses
+        // `aria-labelledby` against this label's id so the visible text
+        // both labels the editor *and* clicks through, instead of being a
+        // detached caption with a duplicated `aria-label`.
         htmlFor={editorMode === "source" ? "wk-editor-textarea" : undefined}
       >
         {labelText}
@@ -131,7 +134,7 @@ function SourcePane({
           <div
             className="wk-editor-rich"
             data-testid="wk-editor-rich"
-            aria-label={labelText}
+            aria-labelledby="wk-editor-source-label"
           >
             <RichWikiEditor content={content} onChange={setContent} />
           </div>

@@ -47,34 +47,43 @@ async function roundTrip(initial: string): Promise<string> {
   // Milkdown still needs a DOM root even when we never render a view —
   // happy-dom provides one. The editor never paints because we tear it
   // down before any view code runs, but `make` requires the slot.
+  //
+  // The root must always be removed even if `Editor.make().create()`
+  // rejects, otherwise an init failure on the first test would leak an
+  // orphan <div> into document.body for every subsequent test in the
+  // file. Outer try/finally guarantees cleanup regardless of where
+  // construction fails.
   const root = document.createElement("div");
   document.body.appendChild(root);
-  const editor = await Editor.make()
-    .config((ctx) => {
-      ctx.set(defaultValueCtx, initial);
-      ctx.update(remarkPluginsCtx, (prev) => [
-        ...prev,
-        {
-          plugin: wikiLinkRemarkPlugin(() => true),
-          options: {},
-        },
-      ]);
-      ctx.update(remarkStringifyOptionsCtx, (prev) => ({
-        ...prev,
-        ...STRINGIFY_DEFAULTS,
-      }));
-      // The editor only attaches a view when `rootCtx` is provided. We
-      // skip that — `getMarkdown` reads from the editor state directly,
-      // so a headless editor is sufficient for round-trip purposes.
-    })
-    .use(commonmark)
-    .use(gfm)
-    .create();
   try {
-    const md = editor.action(getMarkdown());
-    return postProcessWikilinks(md);
+    const editor = await Editor.make()
+      .config((ctx) => {
+        ctx.set(defaultValueCtx, initial);
+        ctx.update(remarkPluginsCtx, (prev) => [
+          ...prev,
+          {
+            plugin: wikiLinkRemarkPlugin(() => true),
+            options: {},
+          },
+        ]);
+        ctx.update(remarkStringifyOptionsCtx, (prev) => ({
+          ...prev,
+          ...STRINGIFY_DEFAULTS,
+        }));
+        // The editor only attaches a view when `rootCtx` is provided. We
+        // skip that — `getMarkdown` reads from the editor state directly,
+        // so a headless editor is sufficient for round-trip purposes.
+      })
+      .use(commonmark)
+      .use(gfm)
+      .create();
+    try {
+      const md = editor.action(getMarkdown());
+      return postProcessWikilinks(md);
+    } finally {
+      await editor.destroy();
+    }
   } finally {
-    await editor.destroy();
     root.remove();
   }
 }

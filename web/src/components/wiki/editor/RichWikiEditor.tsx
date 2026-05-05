@@ -79,6 +79,12 @@ function RichWikiEditorInner({ content, onChange }: RichWikiEditorProps) {
         ctx.get(listenerCtx).markdownUpdated((_, md, prev) => {
           if (md === prev) return;
           const canonical = postProcessWikilinks(md);
+          // The external-content effect sets `lastEmittedRef.current = content`
+          // *before* dispatching `replaceAll`, so the listener fires with the
+          // value we just pushed. Skip emitting onChange in that case — the
+          // canonical form is identical to what the controller already holds,
+          // and a redundant onChange would race with autosave/draft state.
+          if (canonical === lastEmittedRef.current) return;
           lastEmittedRef.current = canonical;
           onChangeRef.current(canonical);
         });
