@@ -171,6 +171,18 @@ export function MessageBubble({
               {formatTokens(usageTotal)} tok
             </span>
           )}
+          {Boolean(message.redacted) && (
+            <span
+              className="badge badge-neutral"
+              title={
+                message.redaction_reasons?.length
+                  ? `Redacted: ${message.redaction_reasons.join(", ")}`
+                  : "Redacted sensitive information"
+              }
+            >
+              redacted
+            </span>
+          )}
         </div>
 
         {/* Text — humans render mention chips via safe ReactNode children;

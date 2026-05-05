@@ -13,7 +13,7 @@ func (b *Broker) appendActionWithRefsLocked(kind, source, channel, actor, summar
 		Source:     strings.TrimSpace(source),
 		Channel:    normalizeChannelSlug(channel),
 		Actor:      strings.TrimSpace(actor),
-		Summary:    strings.TrimSpace(summary),
+		Summary:    redactSecretsInText(strings.TrimSpace(summary)),
 		RelatedID:  strings.TrimSpace(relatedID),
 		SignalIDs:  append([]string(nil), signalIDs...),
 		DecisionID: strings.TrimSpace(decisionID),

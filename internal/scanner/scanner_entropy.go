@@ -94,6 +94,9 @@ func entropyTokenize(s string) []string {
 // (e.g., English words, numeric-only IDs, hyphen-sentence fragments).
 // Real keys use a mix of letters + digits / base64 / hex.
 func isPlausibleSecretCharset(s string) bool {
+	if strings.HasPrefix(s, "/") || strings.Contains(s, `\`) || strings.Contains(s, "://") {
+		return false
+	}
 	var hasLetter, hasDigit bool
 	for _, r := range s {
 		if unicode.IsLetter(r) {

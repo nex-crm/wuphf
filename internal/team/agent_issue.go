@@ -34,6 +34,7 @@ func (b *Broker) ReportAgentIssue(agentSlug, targetChannel, replyTo, detail stri
 	if !classification.Visible {
 		return channelMessage{}, agentIssueRecord{}, false, nil
 	}
+	safeDetail := redactSecretsInText(detail)
 
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -61,7 +62,7 @@ func (b *Broker) ReportAgentIssue(agentSlug, targetChannel, replyTo, detail stri
 	}
 
 	taskID := b.activeTaskIDForAgentLocked(agentSlug)
-	key := normalizedAgentIssueKey(agentSlug, channel, detail)
+	key := normalizedAgentIssueKey(agentSlug, channel, safeDetail)
 	now := time.Now().UTC().Format(time.RFC3339)
 	for i := range b.agentIssues {
 		issue := &b.agentIssues[i]
@@ -74,7 +75,7 @@ func (b *Broker) ReportAgentIssue(agentSlug, targetChannel, replyTo, detail stri
 			issue.TaskID = taskID
 		}
 		if classification.CapabilityGap && !classification.HumanAction {
-			b.ensureSelfHealApprovalRequestLocked(issue, classification, detail)
+			b.ensureSelfHealApprovalRequestLocked(issue, classification, safeDetail)
 		}
 		if err := b.saveLocked(); err != nil {
 			return channelMessage{}, *issue, false, err
@@ -89,7 +90,7 @@ func (b *Broker) ReportAgentIssue(agentSlug, targetChannel, replyTo, detail stri
 		Agent:         agentSlug,
 		Channel:       channel,
 		ReplyTo:       strings.TrimSpace(replyTo),
-		Detail:        detail,
+		Detail:        safeDetail,
 		NormalizedKey: key,
 		Severity:      classification.Severity,
 		TaskID:        taskID,
@@ -105,16 +106,16 @@ func (b *Broker) ReportAgentIssue(agentSlug, targetChannel, replyTo, detail stri
 		Channel:   channel,
 		Kind:      agentIssueMessageKind,
 		EventID:   issue.ID,
-		Content:   "Issue: " + truncate(detail, 600),
+		Content:   "Issue: " + truncate(safeDetail, 600),
 		ReplyTo:   strings.TrimSpace(replyTo),
 		Timestamp: now,
 	}
 	b.agentIssues = append(b.agentIssues, issue)
 	issuePtr := &b.agentIssues[len(b.agentIssues)-1]
-	b.appendMessageLocked(msg)
+	msg = b.appendMessageLocked(msg)
 	b.appendActionLocked("agent_issue", "office", channel, agentSlug, truncateSummary(msg.Content, 140), issue.ID)
 	if classification.CapabilityGap && !classification.HumanAction {
-		b.ensureSelfHealApprovalRequestLocked(issuePtr, classification, detail)
+		b.ensureSelfHealApprovalRequestLocked(issuePtr, classification, safeDetail)
 	}
 	if err := b.saveLocked(); err != nil {
 		return channelMessage{}, *issuePtr, false, err
@@ -129,8 +130,17 @@ func (b *Broker) AgentIssues() []agentIssueRecord {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	out := make([]agentIssueRecord, len(b.agentIssues))
-	copy(out, b.agentIssues)
+	for i, issue := range b.agentIssues {
+		out[i] = sanitizeAgentIssueRecord(issue)
+	}
 	return out
+}
+
+func sanitizeAgentIssueRecord(issue agentIssueRecord) agentIssueRecord {
+	issue.Detail = redactSecretsInText(issue.Detail)
+	issue.NormalizedKey = normalizedAgentIssueKey(issue.Agent, issue.Channel, issue.Detail)
+	issue.SelfHealError = redactSecretsInText(issue.SelfHealError)
+	return issue
 }
 
 func (b *Broker) pruneAgentIssuesByChannelLocked(channelSlug string) {
@@ -290,6 +300,7 @@ func (b *Broker) ensureSelfHealApprovalRequestLocked(issue *agentIssueRecord, cl
 		UpdatedAt:     now,
 	}
 	req.Options, req.RecommendedID = normalizeRequestOptions(req.Kind, req.RecommendedID, req.Options)
+	req = sanitizeHumanInterview(req)
 	b.scheduleRequestLifecycleLocked(&req)
 	b.requests = append(b.requests, req)
 	b.pendingInterview = firstBlockingRequest(b.requests)

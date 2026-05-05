@@ -35,20 +35,27 @@ type messageReaction struct {
 }
 
 type channelMessage struct {
-	ID          string            `json:"id"`
-	From        string            `json:"from"`
-	Channel     string            `json:"channel,omitempty"`
-	Kind        string            `json:"kind,omitempty"`
-	Source      string            `json:"source,omitempty"`
-	SourceLabel string            `json:"source_label,omitempty"`
-	EventID     string            `json:"event_id,omitempty"`
-	Title       string            `json:"title,omitempty"`
-	Content     string            `json:"content"`
-	Tagged      []string          `json:"tagged"`
-	ReplyTo     string            `json:"reply_to,omitempty"`
-	Timestamp   string            `json:"timestamp"`
-	Usage       *messageUsage     `json:"usage,omitempty"`
-	Reactions   []messageReaction `json:"reactions,omitempty"`
+	ID          string `json:"id"`
+	From        string `json:"from"`
+	Channel     string `json:"channel,omitempty"`
+	Kind        string `json:"kind,omitempty"`
+	Source      string `json:"source,omitempty"`
+	SourceLabel string `json:"source_label,omitempty"`
+	EventID     string `json:"event_id,omitempty"`
+	Title       string `json:"title,omitempty"`
+	Content     string `json:"content"`
+	// Redacted, RedactionCount, and RedactionReasons describe secret
+	// redactions applied before chat content reached storage, APIs, external
+	// transports, or future agent context. The raw values are intentionally
+	// not retained.
+	Redacted         bool              `json:"redacted,omitempty"`
+	RedactionCount   int               `json:"redaction_count,omitempty"`
+	RedactionReasons []string          `json:"redaction_reasons,omitempty"`
+	Tagged           []string          `json:"tagged"`
+	ReplyTo          string            `json:"reply_to,omitempty"`
+	Timestamp        string            `json:"timestamp"`
+	Usage            *messageUsage     `json:"usage,omitempty"`
+	Reactions        []messageReaction `json:"reactions,omitempty"`
 }
 
 type agentIssueRecord struct {

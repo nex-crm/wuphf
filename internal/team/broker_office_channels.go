@@ -1216,6 +1216,7 @@ func (b *Broker) handleMembers(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	for _, msg := range b.messages {
+		msg = sanitizeChannelMessageSecrets(msg)
 		if normalizeChannelSlug(msg.Channel) != channel {
 			continue
 		}

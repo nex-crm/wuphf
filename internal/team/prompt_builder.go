@@ -91,6 +91,7 @@ func (p *promptBuilder) Build(slug string) string {
 		sb.WriteString("- team_broadcast: Send a normal direct chat reply into the 1:1 conversation\n")
 		sb.WriteString("- human_message: Send an emphasized report, recommendation, or action card directly to the human when you want it to stand out\n")
 		sb.WriteString("- human_interview: Ask the human a cancelable interview question; it never blocks chat, and dismiss/send cancels it\n\n")
+		sb.WriteString(secretHandlingPromptRule())
 		if noNex {
 			sb.WriteString("Nex tools are disabled for this run. Base your work on the conversation and direct human answers only.\n\n")
 		} else {
@@ -149,6 +150,7 @@ func (p *promptBuilder) Build(slug string) string {
 		sb.WriteString("All team_*, human_*, and mcp__wuphf-office__* tools listed above are ALREADY registered. Call them directly. Do NOT use ToolSearch/select: to look them up — that wastes a full turn.\n")
 		sb.WriteString("Do not read unrelated files (MEMORY.md, arbitrary docs) unless the current packet's task requires it. Every tool call pays full turn cost.\n")
 		sb.WriteString("Emit at most one team_broadcast per turn unless you are deliberately crossing channels. Never re-post the same content in different wording.\n\n")
+		sb.WriteString(secretHandlingPromptRule())
 		if markdownMemory {
 			sb.WriteString(markdownKnowledgeMemoryBlock())
 			sb.WriteString(renderPriorLearningsBlock(p.learningSnapshot(slug)))
@@ -276,6 +278,7 @@ func (p *promptBuilder) Build(slug string) string {
 		sb.WriteString("All team_*, human_*, and mcp__wuphf-office__* tools listed above are ALREADY registered. Call them directly. Do NOT use ToolSearch/select: to look them up — that wastes a full turn.\n")
 		sb.WriteString("Do not read unrelated files (MEMORY.md, arbitrary docs) unless the current packet's task requires it. Every tool call pays full turn cost.\n")
 		sb.WriteString("Emit at most one team_broadcast per turn unless you are deliberately crossing channels. Never re-post the same content in different wording.\n\n")
+		sb.WriteString(secretHandlingPromptRule())
 		if markdownMemory {
 			sb.WriteString(markdownKnowledgeMemoryBlock())
 			sb.WriteString(renderPriorLearningsBlock(p.learningSnapshot(slug)))
@@ -356,6 +359,10 @@ func markdownKnowledgeToolBlock() string {
 		"- team_learning_search: Search typed prior learnings before repeating substantial work. Prefer scoped search by playbook, file, task, or repo when available; treat source/trust/confidence as evidence quality.\n" +
 		"- team_learning_record: Record a durable typed learning only when it would save future work or prevent a repeat mistake. Use user-stated only when the human explicitly said it; otherwise choose observed, inferred, execution, synthesis, cross-agent, or cross-model with an honest confidence.\n" +
 		"- team_wiki_write: Direct canonical wiki writes only for already-approved edits, bootstrap/admin maintenance, or explicit human requests. Do not bypass notebook_promote for new agent-authored knowledge.\n"
+}
+
+func secretHandlingPromptRule() string {
+	return "SECRET HANDLING: Never print, quote, transform, partially reveal, summarize, or reformat API keys, tokens, passwords, private keys, bearer tokens, cookies, webhook URLs, or other credentials. If you encounter one, say that sensitive information was detected and use the approved Settings/secret input flow; do not put the value in chat, tool arguments intended for chat, task titles, summaries, logs, or memory.\n\n"
 }
 
 func markdownKnowledgeMemoryBlock() string {

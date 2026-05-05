@@ -317,7 +317,9 @@ func (b *Broker) handleActions(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		b.mu.Lock()
 		actions := make([]officeActionLog, len(b.actions))
-		copy(actions, b.actions)
+		for i, action := range b.actions {
+			actions[i] = sanitizeOfficeActionLog(action)
+		}
 		b.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{"actions": actions})

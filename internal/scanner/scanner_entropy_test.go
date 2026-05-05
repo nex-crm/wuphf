@@ -85,6 +85,13 @@ func TestDetectEntropyHitsRespectsMinLength(t *testing.T) {
 	}
 }
 
+func TestDetectEntropyHitsIgnoresPathsAndURLs(t *testing.T) {
+	body := "/var/folders/35/363ddkgs5qn7d4tl8mm25bhw0000gn/T/TestWriteHeadlessOpencodeMCPConfigLogsBaseConfigParseFailure3800235317/001/.config/opencode/opencode.json https://example.com/callback/ABC123def456GHI789"
+	if hits := detectEntropyHits(body); len(hits) != 0 {
+		t.Fatalf("expected no entropy hits for paths/URLs, got %+v", hits)
+	}
+}
+
 func TestRedactSecretsEntropyTopsUpBeyondPatterns(t *testing.T) {
 	// A random-looking assignment that doesn't match any known pattern.
 	// Use a high-entropy token: base64 of 40 random bytes.

@@ -283,6 +283,9 @@ export interface Message {
   from: string;
   channel: string;
   content: string;
+  redacted?: boolean;
+  redaction_count?: number;
+  redaction_reasons?: string[];
   timestamp: string;
   reply_to?: string;
   thread_id?: string;

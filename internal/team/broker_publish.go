@@ -16,9 +16,11 @@ package team
 // All entries require the caller to hold b.mu — the *Locked suffix
 // is the contract.
 
-func (b *Broker) appendMessageLocked(msg channelMessage) {
+func (b *Broker) appendMessageLocked(msg channelMessage) channelMessage {
+	msg = sanitizeChannelMessageSecrets(msg)
 	b.messages = append(b.messages, msg)
 	b.publishMessageLocked(msg)
+	return msg
 }
 
 func (b *Broker) publishMessageLocked(msg channelMessage) {
@@ -31,6 +33,7 @@ func (b *Broker) publishMessageLocked(msg channelMessage) {
 }
 
 func (b *Broker) publishActionLocked(action officeActionLog) {
+	action = sanitizeOfficeActionLog(action)
 	for _, ch := range b.actionSubscribers {
 		select {
 		case ch <- action:
@@ -40,6 +43,7 @@ func (b *Broker) publishActionLocked(action officeActionLog) {
 }
 
 func (b *Broker) publishActivityLocked(activity agentActivitySnapshot) {
+	activity.Detail = redactSecretsInText(activity.Detail)
 	for _, ch := range b.activitySubscribers {
 		select {
 		case ch <- activity:

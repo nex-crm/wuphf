@@ -38,6 +38,7 @@ func (s *agentStreamBuffer) Push(line string) {
 
 func (s *agentStreamBuffer) PushTask(taskID, line string) {
 	taskID = strings.TrimSpace(taskID)
+	line = redactSecretsInText(line)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.lines = append(s.lines, agentStreamLine{
@@ -350,7 +351,7 @@ func (b *Broker) UpdateAgentActivity(update agentActivitySnapshot) {
 		current.Activity = update.Activity
 	}
 	if update.Detail != "" {
-		current.Detail = update.Detail
+		current.Detail = redactSecretsInText(update.Detail)
 	}
 	if update.LastTime != "" {
 		current.LastTime = update.LastTime

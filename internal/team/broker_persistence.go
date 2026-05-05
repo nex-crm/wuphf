@@ -159,12 +159,24 @@ func (b *Broker) loadState() error {
 	// match Store lookups keyed by "engineering__human".
 	for i := range b.messages {
 		b.messages[i].Channel = channel.MigrateDMSlugString(b.messages[i].Channel)
+		b.messages[i] = sanitizeChannelMessageSecrets(b.messages[i])
+	}
+	for i := range b.agentIssues {
+		b.agentIssues[i] = sanitizeAgentIssueRecord(b.agentIssues[i])
 	}
 	for i := range b.tasks {
 		b.tasks[i].Channel = channel.MigrateDMSlugString(b.tasks[i].Channel)
 	}
 	for i := range b.requests {
 		b.requests[i].Channel = channel.MigrateDMSlugString(b.requests[i].Channel)
+		b.requests[i] = sanitizeHumanInterview(b.requests[i])
+	}
+	if b.pendingInterview != nil {
+		pending := sanitizeHumanInterview(*b.pendingInterview)
+		b.pendingInterview = &pending
+	}
+	for i := range b.actions {
+		b.actions[i] = sanitizeOfficeActionLog(b.actions[i])
 	}
 	// b.ensureDefaultChannelsLocked() // channels come from saved state
 	b.ensureDefaultOfficeMembersLocked()
@@ -205,18 +217,34 @@ func (b *Broker) prepareBrokerStateWriteLocked() (brokerStateWrite, error) {
 			channelStoreRaw = raw
 		}
 	}
+	messages := make([]channelMessage, len(b.messages))
+	for i, msg := range b.messages {
+		messages[i] = sanitizeChannelMessageSecrets(msg)
+	}
+	actions := make([]officeActionLog, len(b.actions))
+	for i, action := range b.actions {
+		actions[i] = sanitizeOfficeActionLog(action)
+	}
+	agentIssues := make([]agentIssueRecord, len(b.agentIssues))
+	for i, issue := range b.agentIssues {
+		agentIssues[i] = sanitizeAgentIssueRecord(issue)
+	}
+	requests := make([]humanInterview, len(b.requests))
+	for i, req := range b.requests {
+		requests[i] = sanitizeHumanInterview(req)
+	}
 	state := brokerState{
 		ChannelStore:      channelStoreRaw,
-		Messages:          b.messages,
-		AgentIssues:       b.agentIssues,
+		Messages:          messages,
+		AgentIssues:       agentIssues,
 		Members:           b.members,
 		Channels:          b.channels,
 		SessionMode:       b.sessionMode,
 		OneOnOneAgent:     b.oneOnOneAgent,
 		FocusMode:         b.focusMode,
 		Tasks:             b.tasks,
-		Requests:          b.requests,
-		Actions:           b.actions,
+		Requests:          requests,
+		Actions:           actions,
 		Signals:           b.signals,
 		Decisions:         b.decisions,
 		Watchdogs:         b.watchdogs,
@@ -229,7 +257,7 @@ func (b *Broker) prepareBrokerStateWriteLocked() (brokerStateWrite, error) {
 		Counter:           b.counter,
 		NotificationSince: b.notificationSince,
 		InsightsSince:     b.insightsSince,
-		PendingInterview:  firstBlockingRequest(b.requests),
+		PendingInterview:  firstBlockingRequest(requests),
 		Usage: func() teamUsageState {
 			usage := b.usage
 			usage.Session = usageTotals{}
