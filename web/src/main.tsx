@@ -4,6 +4,7 @@ import { RouterProvider } from "@tanstack/react-router";
 
 import { rootRoute, router } from "./lib/router";
 import RootRoute from "./routes/RootRoute";
+import { JoinPage } from "./components/join/JoinPage";
 import "./styles/shadcn.css";
 import "./styles/global.css";
 import "./styles/layout.css";
@@ -55,14 +56,32 @@ function showFatalError(title: string, detail: string) {
   document.body.appendChild(box);
 }
 
+// Team-member invite acceptance lives at /?invite=<token>. The share
+// handler redirects /join/<token> here. Mount JoinPage instead of the
+// main app so the joiner doesn't need a broker token to render the form.
+function inviteTokenFromLocation(): string | null {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const raw = params.get("invite");
+    return raw ? raw.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
 try {
   const root = document.getElementById("root");
   if (!root) {
     throw new Error("#root element not found in DOM");
   }
+  const inviteToken = inviteTokenFromLocation();
   createRoot(root).render(
     <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} />
+      {inviteToken ? (
+        <JoinPage token={inviteToken} />
+      ) : (
+        <RouterProvider router={router} />
+      )}
     </QueryClientProvider>,
   );
   window.__wuphfBootDone?.();

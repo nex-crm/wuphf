@@ -7,10 +7,10 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"html"
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -448,58 +448,18 @@ func newShareHandler(brokerURL, brokerToken string, onJoin func()) http.Handler 
 			http.Error(w, "invite token required", http.StatusBadRequest)
 			return
 		}
-		if r.Method == http.MethodGet {
-			writeShareJoinPage(w, http.StatusOK, token, "")
-			return
-		}
-		if r.Method != http.MethodPost {
+		switch r.Method {
+		case http.MethodGet:
+			// Hand off to the React app. The SPA reads ?invite=<token> on
+			// boot and renders the JoinPage. Redirecting (instead of
+			// proxying index.html under /join/) keeps the SPA's relative
+			// asset URLs working without a path rewrite.
+			http.Redirect(w, r, "/?invite="+url.QueryEscape(token), http.StatusFound)
+		case http.MethodPost:
+			handleShareJoinSubmit(w, r, brokerURL, token, onJoin)
+		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
 		}
-		if err := r.ParseForm(); err != nil {
-			writeShareJoinPage(w, http.StatusBadRequest, token, "Could not read the form. Reload the invite and try again.")
-			return
-		}
-		displayName := strings.TrimSpace(r.FormValue("display_name"))
-		if displayName == "" {
-			displayName = "Team member"
-		}
-		body := map[string]string{
-			"token":        token,
-			"display_name": displayName,
-			"device":       r.UserAgent(),
-		}
-		raw, _ := json.Marshal(body)
-		req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, brokerURL+"/humans/invites/accept", bytes.NewReader(raw))
-		if err != nil {
-			http.Error(w, "invite failed", http.StatusBadGateway)
-			return
-		}
-		req.Header.Set("Content-Type", "application/json")
-		resp, err := shareHTTPClient.Do(req)
-		if err != nil {
-			writeShareJoinPage(w, http.StatusBadGateway, token, "WUPHF is not reachable from this invite. Ask the host to restart sharing.")
-			return
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			switch {
-			case resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusGone:
-				writeShareJoinPage(w, http.StatusGone, token, "This invite is no longer valid. Ask the host for a new team-member invite.")
-			case resp.StatusCode >= 500:
-				writeShareJoinPage(w, http.StatusBadGateway, token, "WUPHF could not accept this invite right now. Ask the host to retry sharing.")
-			default:
-				writeShareJoinPage(w, resp.StatusCode, token, "This invite could not be accepted. Ask the host for a fresh team-member invite.")
-			}
-			return
-		}
-		for _, cookie := range resp.Cookies() {
-			http.SetCookie(w, cookie)
-		}
-		if onJoin != nil {
-			onJoin()
-		}
-		http.Redirect(w, r, "/#/channels/general", http.StatusFound)
 	})
 	mux.HandleFunc("/api-token", func(w http.ResponseWriter, r *http.Request) {
 		if !shareRequestHasSession(r, brokerURL) {
@@ -514,54 +474,72 @@ func newShareHandler(brokerURL, brokerToken string, onJoin func()) http.Handler 
 	return mux
 }
 
-func writeShareJoinPage(w http.ResponseWriter, status int, token, errorMessage string) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if status > 0 {
-		w.WriteHeader(status)
+// handleShareJoinSubmit accepts a JSON {display_name} body, exchanges it with
+// the broker for a human session cookie, and returns a JSON envelope the
+// React JoinPage consumes. Errors map to a stable error code so the client
+// can render specific copy per state without re-parsing prose.
+func handleShareJoinSubmit(w http.ResponseWriter, r *http.Request, brokerURL, token string, onJoin func()) {
+	var submission struct {
+		DisplayName string `json:"display_name"`
 	}
-	errorHTML := ""
-	if strings.TrimSpace(errorMessage) != "" {
-		errorHTML = fmt.Sprintf(`<div class="error">%s</div>`, htmlEscape(errorMessage))
+	if err := json.NewDecoder(r.Body).Decode(&submission); err != nil {
+		writeShareJoinError(w, http.StatusBadRequest, "invalid_request", "We could not read your invite submission. Reload and try again.")
+		return
 	}
-	_, _ = fmt.Fprintf(w, `<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Join WUPHF</title>
-  <style>
-    :root { color-scheme: light; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-    body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #f8f8f9; color: #28292a; }
-    main { width: min(92vw, 460px); background: white; border: 1px solid #e9eaeb; border-radius: 16px; padding: 28px; box-shadow: 0 24px 80px rgba(30, 31, 31, 0.08); }
-    .eyebrow { margin: 0 0 10px; color: #686c6e; font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
-    h1 { margin: 0 0 10px; font-size: 28px; line-height: 1.1; letter-spacing: 0; }
-    p { margin: 0 0 20px; color: #575a5c; line-height: 1.55; }
-    label { display: block; margin: 0 0 8px; font-size: 13px; font-weight: 700; }
-    input { width: 100%%; min-height: 46px; border: 1px solid #cfd1d2; border-radius: 10px; padding: 0 12px; font: inherit; }
-    button { width: 100%%; min-height: 46px; margin-top: 14px; border: 0; border-radius: 999px; background: #28292a; color: white; font: inherit; font-weight: 700; cursor: pointer; }
-    .note { margin-top: 18px; font-size: 12px; color: #85898b; }
-    .error { margin: 0 0 16px; padding: 10px 12px; border-radius: 10px; background: #ffeeeb; color: #8c1727; font-size: 13px; }
-  </style>
-</head>
-<body>
-  <main>
-    <p class="eyebrow">Team member invite</p>
-    <h1>Join this WUPHF office</h1>
-    <p>Use the name your teammate should see in messages, requests, and office activity.</p>
-    %s
-    <form method="post" action="/join/%s">
-      <label for="display_name">Display name</label>
-      <input id="display_name" name="display_name" autocomplete="name" placeholder="e.g. Maya" autofocus>
-      <button type="submit">Enter office</button>
-    </form>
-    <p class="note">This creates a scoped team-member browser session. It does not expose the host's broker token.</p>
-  </main>
-</body>
-</html>`, errorHTML, htmlEscape(token))
+	displayName := strings.TrimSpace(submission.DisplayName)
+	if displayName == "" {
+		displayName = "Team member"
+	}
+	payload, _ := json.Marshal(map[string]string{
+		"token":        token,
+		"display_name": displayName,
+		"device":       r.UserAgent(),
+	})
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, brokerURL+"/humans/invites/accept", bytes.NewReader(payload))
+	if err != nil {
+		writeShareJoinError(w, http.StatusBadGateway, "broker_unreachable", "WUPHF is not reachable from this invite. Ask the host to restart sharing.")
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := shareHTTPClient.Do(req)
+	if err != nil {
+		writeShareJoinError(w, http.StatusBadGateway, "broker_unreachable", "WUPHF is not reachable from this invite. Ask the host to restart sharing.")
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		switch {
+		case resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusGone:
+			writeShareJoinError(w, http.StatusGone, "invite_expired_or_used", "This invite is no longer valid. Ask the host for a new team-member invite.")
+		case resp.StatusCode >= 500:
+			writeShareJoinError(w, http.StatusBadGateway, "broker_failed", "WUPHF could not accept this invite right now. Ask the host to retry sharing.")
+		default:
+			writeShareJoinError(w, resp.StatusCode, "invite_invalid", "This invite could not be accepted. Ask the host for a fresh team-member invite.")
+		}
+		return
+	}
+	for _, cookie := range resp.Cookies() {
+		http.SetCookie(w, cookie)
+	}
+	if onJoin != nil {
+		onJoin()
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"ok":           true,
+		"redirect":     "/#/channels/general",
+		"display_name": displayName,
+	})
 }
 
-func htmlEscape(s string) string {
-	return html.EscapeString(s)
+func writeShareJoinError(w http.ResponseWriter, status int, code, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"error":   code,
+		"message": message,
+	})
 }
 
 func shareRequestHasSession(r *http.Request, brokerURL string) bool {

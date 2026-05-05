@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"net"
@@ -11,6 +12,33 @@ import (
 
 	"github.com/nex-crm/wuphf/internal/team"
 )
+
+// joinSubmit posts a JSON invite-acceptance to the share server. Tests use
+// this to exercise the same path the React JoinPage takes.
+func joinSubmit(t *testing.T, client *http.Client, baseURL, token, displayName string) *http.Response {
+	t.Helper()
+	if client == nil {
+		client = http.DefaultClient
+	}
+	body := []byte("{}")
+	if displayName != "" {
+		raw, err := json.Marshal(map[string]string{"display_name": displayName})
+		if err != nil {
+			t.Fatalf("marshal join body: %v", err)
+		}
+		body = raw
+	}
+	req, err := http.NewRequest(http.MethodPost, baseURL+"/join/"+token, bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("build join request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("join submit: %v", err)
+	}
+	return resp
+}
 
 func TestValidateShareIPAllowsTailscaleByDefault(t *testing.T) {
 	ip := net.ParseIP("100.82.14.6")
@@ -67,24 +95,34 @@ func TestShareJoinFlowEndToEnd(t *testing.T) {
 	}))
 	t.Cleanup(shareSrv.Close)
 
-	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
+	noFollow := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
 		return http.ErrUseLastResponse
 	}}
-	resp, err := client.Get(shareSrv.URL + "/join/" + invite.Token)
+	resp, err := noFollow.Get(shareSrv.URL + "/join/" + invite.Token)
 	if err != nil {
 		t.Fatalf("join request: %v", err)
 	}
 	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("join form status = %d, want 200", resp.StatusCode)
-	}
-	resp, err = client.PostForm(shareSrv.URL+"/join/"+invite.Token, nil)
-	if err != nil {
-		t.Fatalf("join submit: %v", err)
-	}
-	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusFound {
-		t.Fatalf("join status = %d, want 302", resp.StatusCode)
+		t.Fatalf("join GET status = %d, want 302", resp.StatusCode)
+	}
+	if loc := resp.Header.Get("Location"); loc != "/?invite="+invite.Token {
+		t.Fatalf("join GET redirect = %q, want /?invite=%s", loc, invite.Token)
+	}
+	resp = joinSubmit(t, nil, shareSrv.URL, invite.Token, "")
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("join status = %d, want 200", resp.StatusCode)
+	}
+	var submitBody struct {
+		OK       bool   `json:"ok"`
+		Redirect string `json:"redirect"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&submitBody); err != nil {
+		t.Fatalf("decode join response: %v", err)
+	}
+	if !submitBody.OK || submitBody.Redirect != "/#/channels/general" {
+		t.Fatalf("unexpected join body: %+v", submitBody)
 	}
 	if !joined {
 		t.Fatalf("join callback was not called")
@@ -127,14 +165,20 @@ func TestShareJoinInvalidInviteReturnsGone(t *testing.T) {
 	shareSrv := httptest.NewServer(newShareHandler(broker.URL, "broker-token", nil))
 	t.Cleanup(shareSrv.Close)
 
-	resp, err := http.PostForm(shareSrv.URL+"/join/missing-token", nil)
-	if err != nil {
-		t.Fatalf("join submit: %v", err)
-	}
+	resp := joinSubmit(t, nil, shareSrv.URL, "missing-token", "")
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusGone {
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("join status = %d, want 410 body=%s", resp.StatusCode, string(body))
+	}
+	var errBody struct {
+		Error string `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&errBody); err != nil {
+		t.Fatalf("decode error body: %v", err)
+	}
+	if errBody.Error != "invite_expired_or_used" {
+		t.Fatalf("error code = %q, want invite_expired_or_used", errBody.Error)
 	}
 }
 
@@ -150,10 +194,7 @@ func TestShareJoinBrokerFailureReturnsBadGateway(t *testing.T) {
 	shareSrv := httptest.NewServer(newShareHandler(broker.URL, "broker-token", nil))
 	t.Cleanup(shareSrv.Close)
 
-	resp, err := http.PostForm(shareSrv.URL+"/join/retry-token", nil)
-	if err != nil {
-		t.Fatalf("join submit: %v", err)
-	}
+	resp := joinSubmit(t, nil, shareSrv.URL, "retry-token", "")
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusBadGateway {
 		body, _ := io.ReadAll(resp.Body)
@@ -175,13 +216,7 @@ func TestShareProxyDoesNotExposeBrokerToken(t *testing.T) {
 	shareSrv := httptest.NewServer(newShareHandler("http://"+b.Addr(), b.Token(), nil))
 	t.Cleanup(shareSrv.Close)
 
-	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
-		return http.ErrUseLastResponse
-	}}
-	joinResp, err := client.PostForm(shareSrv.URL+"/join/"+invite.Token, nil)
-	if err != nil {
-		t.Fatalf("join request: %v", err)
-	}
+	joinResp := joinSubmit(t, nil, shareSrv.URL, invite.Token, "")
 	_ = joinResp.Body.Close()
 	cookies := joinResp.Cookies()
 	if len(cookies) == 0 {
@@ -320,13 +355,7 @@ func TestShareProxyStampsHumanActor(t *testing.T) {
 	shareSrv := httptest.NewServer(newShareHandler("http://"+b.Addr(), b.Token(), nil))
 	t.Cleanup(shareSrv.Close)
 
-	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
-		return http.ErrUseLastResponse
-	}}
-	joinResp, err := client.PostForm(shareSrv.URL+"/join/"+invite.Token, nil)
-	if err != nil {
-		t.Fatalf("join request: %v", err)
-	}
+	joinResp := joinSubmit(t, nil, shareSrv.URL, invite.Token, "")
 	_ = joinResp.Body.Close()
 	cookies := joinResp.Cookies()
 	if len(cookies) == 0 {
