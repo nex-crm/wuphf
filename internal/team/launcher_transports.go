@@ -93,7 +93,29 @@ func RegisterTransports(b *Broker) (func(), error) {
 		log.Printf("[transport] openclaw: started (%d session(s))", len(bridge.SnapshotBindings()))
 	}
 
-	// Future: wire human-share adapter via OfficeBoundTransport.
+	// Human-share: always registered. The adapter wraps the in-process
+	// invite/session surface in broker_human_share.go so RegisterTransports
+	// owns the OfficeBoundTransport lifecycle alongside Telegram and OpenClaw.
+	// urlBuilder is nil here because the launcher does not know the share
+	// controller's bind address (the share controller lives in cmd/wuphf and
+	// boots independently); CreateInvite returns the relative "/join/<token>"
+	// path until the share controller adopts the adapter and supplies a
+	// builder.
+	share := NewShareTransport(b, nil)
+	shareCtx, shareCancel := context.WithCancel(context.Background())
+	shareDone := make(chan struct{})
+	shareHost := &brokerTransportHost{broker: b}
+	go func() {
+		defer close(shareDone)
+		if err := share.Run(shareCtx, shareHost); err != nil && shareCtx.Err() == nil {
+			log.Printf("[transport] share: exited with error: %v", err)
+		}
+	}()
+	stops = append(stops, func() {
+		shareCancel()
+		<-shareDone
+	})
+	log.Printf("[transport] share: registered (human-share)")
 
 	return cleanup, nil
 }

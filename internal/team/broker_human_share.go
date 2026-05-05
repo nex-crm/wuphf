@@ -259,6 +259,53 @@ func (b *Broker) acceptHumanInvite(token, displayName, device string) (string, h
 	return "", humanSession{}, errHumanInviteExpiredOrUsed
 }
 
+// RevokeHumanInvite marks the invite RevokedAt (so no further accepts can
+// admit a new session against it) and returns the IDs of sessions that were
+// still active under this invite at revoke time. It does NOT revoke the
+// sessions themselves — that belongs to the caller (typically
+// transport.Host.RevokeParticipant via the OfficeBoundTransport adapter), so
+// the same per-session teardown path runs whether triggered through the
+// adapter or directly via revokeHumanSession.
+//
+// Returns an error only when the invite is unknown; an already-revoked invite
+// is a no-op success that still returns any sessions still active under it
+// (caller can decide whether to retry teardown).
+func (b *Broker) RevokeHumanInvite(inviteID string) ([]string, error) {
+	inviteID = strings.TrimSpace(inviteID)
+	if inviteID == "" {
+		return nil, errors.New("invite id required")
+	}
+	now := time.Now().UTC()
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	found := false
+	for i := range b.humanInvites {
+		if b.humanInvites[i].ID != inviteID {
+			continue
+		}
+		found = true
+		if b.humanInvites[i].RevokedAt == "" {
+			b.humanInvites[i].RevokedAt = now.Format(time.RFC3339)
+		}
+		break
+	}
+	if !found {
+		return nil, errors.New("invite not found")
+	}
+	var affected []string
+	for i := range b.humanSessions {
+		s := &b.humanSessions[i]
+		if s.InviteID != inviteID || s.RevokedAt != "" {
+			continue
+		}
+		affected = append(affected, s.ID)
+	}
+	if err := b.saveLocked(); err != nil {
+		return affected, err
+	}
+	return affected, nil
+}
+
 func (b *Broker) revokeHumanSession(id string) error {
 	id = strings.TrimSpace(id)
 	if id == "" {
