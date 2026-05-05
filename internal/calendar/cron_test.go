@@ -21,6 +21,8 @@ func TestMatches_DOMandDOW_ORWhenBothRestricted(t *testing.T) {
 	}{
 		{"first of month, not Monday", time.Date(2026, 3, 1, 9, 0, 0, 0, time.UTC), true},
 		{"Monday, not first of month", time.Date(2026, 3, 2, 9, 0, 0, 0, time.UTC), true},
+		// 2026-06-01 is both the 1st and a Monday; both fields match, OR still true.
+		{"both dom and dow match", time.Date(2026, 6, 1, 9, 0, 0, 0, time.UTC), true},
 		{"neither dom nor dow", time.Date(2026, 3, 3, 9, 0, 0, 0, time.UTC), false},
 		{"correct day, wrong hour", time.Date(2026, 3, 2, 8, 0, 0, 0, time.UTC), false},
 		{"correct day, wrong minute", time.Date(2026, 3, 2, 9, 30, 0, 0, time.UTC), false},
