@@ -14,18 +14,29 @@ import (
 
 // fakeHost captures every ReceiveMessage call so tests can assert the bridge
 // routes inbound assistant events through transport.Host with the expected
-// Participant + Binding fields.
+// Participant + Binding fields. Each ReceiveMessage call also signals on
+// `received` so callers can wait deterministically without polling.
 type fakeHost struct {
 	mu       sync.Mutex
-	received []transport.Message
+	messages []transport.Message
 	err      error
+	received chan struct{}
+}
+
+func newFakeHost() *fakeHost {
+	return &fakeHost{received: make(chan struct{}, 8)}
 }
 
 func (h *fakeHost) ReceiveMessage(_ context.Context, msg transport.Message) error {
 	h.mu.Lock()
-	defer h.mu.Unlock()
-	h.received = append(h.received, msg)
-	return h.err
+	h.messages = append(h.messages, msg)
+	err := h.err
+	h.mu.Unlock()
+	select {
+	case h.received <- struct{}{}:
+	default:
+	}
+	return err
 }
 
 func (h *fakeHost) UpsertParticipant(context.Context, transport.Participant, transport.Binding) error {
@@ -39,9 +50,39 @@ func (h *fakeHost) RevokeParticipant(context.Context, string, string) error { re
 func (h *fakeHost) snapshot() []transport.Message {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	out := make([]transport.Message, len(h.received))
-	copy(out, h.received)
+	out := make([]transport.Message, len(h.messages))
+	copy(out, h.messages)
 	return out
+}
+
+// waitForFakeOCSubscribe blocks until the fake openclaw client has recorded at
+// least one Subscribe call or the deadline fires. The fakeOCClient already
+// exposes a subscribeHook; install one that closes a channel so callers can
+// rendezvous deterministically instead of polling fake.subscribed in a loop.
+func waitForFakeOCSubscribe(t *testing.T, fake *fakeOCClient, timeout time.Duration) {
+	t.Helper()
+	subscribed := make(chan struct{}, 1)
+	fake.mu.Lock()
+	prior := fake.subscribeHook
+	fake.subscribeHook = func() {
+		if prior != nil {
+			prior()
+		}
+		select {
+		case subscribed <- struct{}{}:
+		default:
+		}
+	}
+	already := len(fake.subscribed) > 0
+	fake.mu.Unlock()
+	if already {
+		return
+	}
+	select {
+	case <-subscribed:
+	case <-time.After(timeout):
+		t.Fatalf("fake openclaw never received Subscribe within %s", timeout)
+	}
 }
 
 // TestPostBridgeMessageRoutesToHost confirms that when a transport.Host is
@@ -54,7 +95,7 @@ func TestPostBridgeMessageRoutesToHost(t *testing.T) {
 	broker := newTestBroker(t)
 	bindings := []config.OpenclawBridgeBinding{{SessionKey: "k-host", Slug: "openclaw-host"}}
 	bridge := NewOpenclawBridge(broker, fake, bindings)
-	host := &fakeHost{}
+	host := newFakeHost()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -62,18 +103,9 @@ func TestPostBridgeMessageRoutesToHost(t *testing.T) {
 	runErr := make(chan error, 1)
 	go func() { runErr <- bridge.Run(ctx, host) }()
 
-	// Wait until the supervised loop subscribes the seeded binding so the
+	// Block until the supervised loop subscribes the seeded binding so the
 	// assistant event is not racing the initial subscribe.
-	deadline := time.Now().Add(500 * time.Millisecond)
-	for time.Now().Before(deadline) {
-		fake.mu.Lock()
-		ready := len(fake.subscribed) > 0
-		fake.mu.Unlock()
-		if ready {
-			break
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
+	waitForFakeOCSubscribe(t, fake, time.Second)
 
 	beforeBroker := len(broker.AllMessages())
 
@@ -88,14 +120,12 @@ func TestPostBridgeMessageRoutesToHost(t *testing.T) {
 		},
 	}
 
-	// Poll until ReceiveMessage is observed; bounded so a regression that
-	// silently routes through the broker fails fast.
-	hostDeadline := time.Now().Add(500 * time.Millisecond)
-	for time.Now().Before(hostDeadline) {
-		if len(host.snapshot()) > 0 {
-			break
-		}
-		time.Sleep(5 * time.Millisecond)
+	// Wait for ReceiveMessage; bounded so a regression that silently routes
+	// through the broker fails fast rather than hitting the test timeout.
+	select {
+	case <-host.received:
+	case <-time.After(time.Second):
+		t.Fatalf("host.ReceiveMessage was not called within 1s; broker had %d msgs", len(broker.AllMessages())-beforeBroker)
 	}
 
 	got := host.snapshot()
@@ -172,17 +202,8 @@ func TestRegisterTransportsShutdownOrdering(t *testing.T) {
 		t.Fatalf("RegisterTransports: %v", err)
 	}
 
-	// Wait until the bridge has subscribed so we know Run actually started.
-	deadline := time.Now().Add(500 * time.Millisecond)
-	for time.Now().Before(deadline) {
-		fake.mu.Lock()
-		ready := len(fake.subscribed) > 0
-		fake.mu.Unlock()
-		if ready {
-			break
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
+	// Block until the bridge has subscribed so we know Run actually started.
+	waitForFakeOCSubscribe(t, fake, time.Second)
 
 	done := make(chan struct{})
 	go func() {
