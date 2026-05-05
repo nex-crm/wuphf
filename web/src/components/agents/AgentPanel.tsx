@@ -145,7 +145,7 @@ function LogsSection({ slug }: { slug: string }) {
   );
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor; off-conversation safety gate added one branch.
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
 function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
   const setActiveAgentSlug = useAppStore((s) => s.setActiveAgentSlug);
   // Read the URL channel directly — no fallback to "general" or last-visited
