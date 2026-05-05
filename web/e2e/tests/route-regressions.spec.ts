@@ -374,13 +374,17 @@ test.describe("PR #634 review pins", () => {
 
     // Append a synthetic query string to the hash. Avoids `page.goto`
     // round-trips so the channel's unread state isn't reset by a fresh
-    // mount.
+    // mount. The SSE handler reads `window.location.hash` at the moment
+    // a message arrives (not on hashchange), so all we need is for the
+    // hash mutation to be observable in-page before the broker post —
+    // wait deterministically for that property instead of a fixed
+    // sleep (which is both flaky and forbidden by repo memory).
     await page.evaluate(() => {
       window.location.hash = "#/channels/general?probe=1";
     });
-    // Give the SSE handler a tick to observe the new hash before the
-    // next message lands.
-    await page.waitForTimeout(50);
+    await page.waitForFunction(
+      () => window.location.hash === "#/channels/general?probe=1",
+    );
 
     const payload = `unread-suppression probe ${Date.now()}`;
     const post = await page.request.post("/api/messages", {

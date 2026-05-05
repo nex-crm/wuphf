@@ -8,8 +8,8 @@
 # numbers. This file is forward-only during the migration: entries can become
 # stale and be removed, but new entries require an explicit debt diff.
 
-web/src/components/agents/AgentPanel.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
-web/src/components/agents/AgentPanel.tsx|lint/complexity/noExcessiveCognitiveComplexity|2|Existing cognitive complexity is baselined for a focused follow-up refactor.
+web/src/components/agents/AgentPanel.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|AgentPanelView — off-conversation toggle/channel guard added in PR #634; baselined pending the follow-up panel-extraction refactor.
+web/src/components/agents/AgentPanel.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|handleToggleEnabled — existing cognitive complexity is baselined for a focused follow-up refactor.
 web/src/components/agents/AgentWizard.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
 web/src/components/apps/ArtifactsApp.tsx|lint/complexity/noExcessiveLinesPerFunction|1|Existing function length is baselined for a focused follow-up refactor.
 web/src/components/apps/GraphApp.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
@@ -26,7 +26,6 @@ web/src/components/apps/SystemSchedulesPanel.tsx|lint/complexity/noExcessiveCogn
 web/src/components/apps/TaskDetailModal.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
 web/src/components/apps/TaskDetailModal.tsx|lint/complexity/noExcessiveCognitiveComplexity|2|Existing cognitive complexity is baselined for a focused follow-up refactor.
 web/src/components/apps/TaskDetailModal.tsx|lint/complexity/noExcessiveLinesPerFunction|1|Existing function length is baselined for a focused follow-up refactor.
-web/src/components/apps/ThreadsApp.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
 web/src/components/layout/CollapsedSidebar.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
 web/src/components/layout/Sidebar.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
 web/src/components/layout/UpgradeBanner.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.

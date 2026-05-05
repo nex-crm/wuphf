@@ -199,9 +199,6 @@ function handleSlashCommand(input: string, handlers: SlashHandlers): boolean {
     case "/doctor":
       navigateToApp("health-check");
       return true;
-    case "/threads":
-      navigateToApp("threads");
-      return true;
     case "/provider":
       openProviderSwitcher();
       return true;

@@ -379,27 +379,44 @@ function TaskAppPanel({ taskId }: { taskId: string | null }) {
 }
 
 /**
- * Tracks the user's last-visited conversation channel (channel/dm route)
- * into Zustand. Off-conversation surfaces (ConsoleApp, RequestsApp,
- * sidebar request badge) read this so they keep pointing at the user's
- * working channel instead of silently snapping to `"general"` whenever
- * the URL transitions to `/apps/...` or `/wiki/...`. The store guards
- * against redundant writes, so this effect is cheap to run on every
- * route change.
+ * On every conversation-route mount: (1) record the channel as the
+ * `lastConversationalChannel` fallback so off-conversation surfaces
+ * (ConsoleApp, RequestsApp, sidebar request badge) keep pointing at
+ * the user's working channel; (2) clear the unread badge for that
+ * channel — the legacy `setCurrentChannel` / `enterDM` callers used to
+ * zero `unreadByChannel[ch]` as part of the same atomic write, and
+ * removing them without porting the clear left badges sticky until the
+ * next inbound message happened to land. The store guards against
+ * redundant writes, so the effect is cheap to re-run.
+ *
+ * The deps narrow on the slug values rather than the wide `route`
+ * object identity to avoid re-firing for unrelated route field
+ * changes (e.g. wiki splat updates) — the effect only cares about
+ * channel/dm transitions, and re-clearing a 0-count unread is a no-op
+ * but pointless work.
  */
 function useTrackLastConversationalChannel(route: CurrentRoute): void {
   const setLastConversationalChannel = useAppStore(
     (s) => s.setLastConversationalChannel,
   );
+  const clearUnread = useAppStore((s) => s.clearUnread);
+  const channelSlug =
+    route.kind === "channel" || route.kind === "dm" ? route.channelSlug : null;
   useEffect(() => {
-    if (route.kind === "channel" || route.kind === "dm") {
-      setLastConversationalChannel(route.channelSlug);
+    if (channelSlug) {
+      setLastConversationalChannel(channelSlug);
+      clearUnread(channelSlug);
     }
-  }, [route, setLastConversationalChannel]);
+  }, [channelSlug, setLastConversationalChannel, clearUnread]);
 }
 
 function MainContent() {
   const route = useCurrentRoute();
+  // Reactive pathname read so the unknown-variant branch below renders
+  // the same shape RoutedBody does (`/foo`, no leading `#`) — see LOW 6
+  // in PR #634 round-4 review. Reading window.location.hash directly
+  // would mix prefixes across the two not-found code paths.
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
   useTrackLastConversationalChannel(route);
 
   switch (route.kind) {
@@ -442,7 +459,7 @@ function MainContent() {
       // aren't wired into CURRENT_ROUTE_IDS (e.g. a newly-added route a
       // contributor forgot to register). Render the same not-found surface
       // here so the shell doesn't go blank in that case.
-      return <NotFoundSurface pathname={window.location.hash || "/"} />;
+      return <NotFoundSurface pathname={pathname} />;
     default: {
       // Exhaustiveness check: if a new CurrentRoute kind is added
       // without a case here, TypeScript flags this assignment as the

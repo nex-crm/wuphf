@@ -550,9 +550,6 @@ function dispatchPaletteCommand(name: string, deps: CommandDeps) {
     case "/doctor":
       navigateToApp("health-check");
       return;
-    case "/threads":
-      navigateToApp("threads");
-      return;
     case "/provider":
       openProviderSwitcher();
       return;

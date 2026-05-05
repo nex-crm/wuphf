@@ -15,6 +15,11 @@ import {
   useCurrentRoute,
 } from "../../routes/useCurrentRoute";
 import { useAppStore } from "../../stores/app";
+import { confirm } from "../ui/ConfirmDialog";
+import { HarnessBadge } from "../ui/HarnessBadge";
+import { PixelAvatar } from "../ui/PixelAvatar";
+import { showNotice } from "../ui/Toast";
+import { AgentTerminal } from "./AgentTerminal";
 
 /**
  * Stable identity key for the AgentPanel "close on route change" effect.
@@ -58,12 +63,6 @@ function routeIdentityKey(route: CurrentRoute): string {
     }
   }
 }
-
-import { confirm } from "../ui/ConfirmDialog";
-import { HarnessBadge } from "../ui/HarnessBadge";
-import { PixelAvatar } from "../ui/PixelAvatar";
-import { showNotice } from "../ui/Toast";
-import { AgentTerminal } from "./AgentTerminal";
 
 interface AgentPanelViewProps {
   agent: OfficeMember;
@@ -145,7 +144,7 @@ function LogsSection({ slug }: { slug: string }) {
   );
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: AgentPanelView — off-conversation toggle/channel guard added in PR #634; baselined pending the follow-up panel-extraction refactor.
 function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
   const setActiveAgentSlug = useAppStore((s) => s.setActiveAgentSlug);
   // Read the URL channel directly — no fallback to "general" or last-visited
@@ -204,7 +203,7 @@ function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
     }
   }
 
-  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: handleToggleEnabled — existing cognitive complexity is baselined for a focused follow-up refactor.
   async function handleToggleEnabled(next: boolean) {
     // canToggle already gates currentChannel, but re-check here so the
     // post body is provably non-null and TypeScript narrows. The toggle
