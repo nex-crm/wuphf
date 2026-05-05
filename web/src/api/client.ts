@@ -396,8 +396,23 @@ export interface OfficeMember {
   disabled?: boolean;
 }
 
+/**
+ * Lane A piggybacks `humanHasPosted` onto the existing `/office-members`
+ * payload (eng decision A5/P1) — additive `meta` field. When the backend
+ * has not yet shipped Lane A, `meta` is absent and consumers default
+ * `humanHasPosted` to `false` to avoid flashing the first-run nudge.
+ */
+export interface OfficeMembersMeta {
+  humanHasPosted?: boolean;
+}
+
+export interface OfficeMembersResponse {
+  members: OfficeMember[];
+  meta?: OfficeMembersMeta;
+}
+
 export function getOfficeMembers() {
-  return get<{ members: OfficeMember[] }>("/office-members");
+  return get<OfficeMembersResponse>("/office-members");
 }
 
 export interface GeneratedAgentTemplate {
