@@ -339,8 +339,14 @@ func (b *Broker) hasUnresolvedDepsLocked(task *teamTask) bool {
 // unblockDependentsLocked checks all blocked tasks and unblocks those whose
 // dependencies are now resolved. For each newly unblocked task, it appends a
 // "task_unblocked" action so the launcher can deliver a notification to the owner.
-func (b *Broker) unblockDependentsLocked(completedTaskID string) {
+//
+// Returns the list of cascade transitions that the caller must publish to the
+// auto-notebook writer AFTER its own saveLocked succeeds. Emitting under
+// b.mu before the persist would leak notebook entries for transitions the
+// broker subsequently rolled back on save failure (CodeRabbit, major).
+func (b *Broker) unblockDependentsLocked(completedTaskID string) []pendingTaskTransition {
 	now := time.Now().UTC().Format(time.RFC3339)
+	var pending []pendingTaskTransition
 	for i := range b.tasks {
 		if !b.tasks[i].Blocked {
 			continue
@@ -375,13 +381,13 @@ func (b *Broker) unblockDependentsLocked(completedTaskID string) {
 				truncateSummary(b.tasks[i].Title+" unblocked by "+completedTaskID, 140),
 				b.tasks[i].ID,
 			)
-			// Caller (MutateTask / lifecycle) holds b.mu and persists via its
-			// own saveLocked, so we don't write here — but every other status
-			// mutation in this PR emits a transition event, and the cascade
-			// path needs to match or PR 3's clustering signal will be skewed.
-			b.emitTaskTransitionAutoNotebook(&b.tasks[i], beforeStatus, "system")
+			pending = append(pending, pendingTaskTransition{
+				taskID:       b.tasks[i].ID,
+				beforeStatus: beforeStatus,
+			})
 		}
 	}
+	return pending
 }
 
 type taskReuseMatch struct {
