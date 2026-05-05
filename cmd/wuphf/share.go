@@ -120,7 +120,13 @@ func (c *webShareController) clearInviteLocked() {
 // the legacy HTTP path against the broker. The absolute URL formula is
 // identical in both branches so the user-facing link does not depend on which
 // path produced it. Caller must hold c.mu.
-func (c *webShareController) issueInviteLocked(ctx context.Context, bind string, port int, brokerURL, brokerToken string) (string, string, error) {
+//
+// brokerTokenFn is invoked lazily — only when the HTTP fallback path is taken.
+// This keeps the in-process adapter path independent of broker-token-file
+// availability: a missing or unreadable token file no longer blocks invite
+// creation when an adapter handle is registered. The fn shape (rather than a
+// pre-read string) makes the lazy contract explicit at every call site.
+func (c *webShareController) issueInviteLocked(ctx context.Context, bind string, port int, brokerURL string, brokerTokenFn func() (string, error)) (string, string, error) {
 	if c.broker != nil {
 		if st := c.broker.ShareTransport(); st != nil {
 			st.SetURLBuilder(func(token string) string {
@@ -132,6 +138,10 @@ func (c *webShareController) issueInviteLocked(ctx context.Context, bind string,
 			}
 			return details.URL, details.ExpiresAt, nil
 		}
+	}
+	brokerToken, err := brokerTokenFn()
+	if err != nil {
+		return "", "", err
 	}
 	invite, err := createShareInvite(brokerURL, brokerToken)
 	if err != nil {
@@ -155,15 +165,14 @@ func (c *webShareController) start() (team.WebShareStatus, error) {
 	if opts.webPort == 0 {
 		opts.webPort = 7891
 	}
-	token, err := readBrokerToken()
-	if err != nil {
-		c.err = err.Error()
-		return c.statusLocked(), err
-	}
 	brokerURL := brokeraddr.ResolveBaseURL()
 
 	if c.running && c.server != nil {
-		inviteURL, expiresAt, err := c.issueInviteLocked(context.Background(), c.bind, opts.webPort, brokerURL, token)
+		// readBrokerToken is passed by reference so the running branch only
+		// pays the file I/O when issueInviteLocked actually falls back to the
+		// HTTP path (i.e. the adapter handle is missing). With the adapter
+		// registered, a fresh invite mints with no token-file read.
+		inviteURL, expiresAt, err := c.issueInviteLocked(context.Background(), c.bind, opts.webPort, brokerURL, readBrokerToken)
 		if err != nil {
 			c.err = err.Error()
 			return c.statusLocked(), err
@@ -175,6 +184,15 @@ func (c *webShareController) start() (team.WebShareStatus, error) {
 		return c.statusLocked(), nil
 	}
 
+	// Fresh start: the token is needed for newShareHTTPServer regardless of
+	// which invite-creation path issueInviteLocked picks, so read it once here
+	// and reuse the value via a constant closure for the invite path.
+	token, err := readBrokerToken()
+	if err != nil {
+		c.err = err.Error()
+		return c.statusLocked(), err
+	}
+
 	bind, iface, err := resolveShareBind(opts)
 	if err != nil {
 		c.running = false
@@ -183,7 +201,7 @@ func (c *webShareController) start() (team.WebShareStatus, error) {
 		c.err = webShareErrorMessage(err)
 		return c.statusLocked(), err
 	}
-	inviteURL, expiresAt, err := c.issueInviteLocked(context.Background(), bind.String(), opts.webPort, brokerURL, token)
+	inviteURL, expiresAt, err := c.issueInviteLocked(context.Background(), bind.String(), opts.webPort, brokerURL, func() (string, error) { return token, nil })
 	if err != nil {
 		c.running = false
 		c.server = nil

@@ -115,9 +115,16 @@ func RegisterTransports(b *Broker) (func(), error) {
 		}
 	}()
 	stops = append(stops, func() {
+		// Reverse install order: unpublish the transport handle BEFORE
+		// cancelling Run. The reverse order would let a concurrent controller
+		// fetch the still-published ShareTransport and mint an invite in the
+		// gap between Run's defer clearing the admit hook and SetShareTransport
+		// publishing nil — that invite's eventual accept would fire no host
+		// UpsertParticipant. Unpublishing first forces the controller into the
+		// HTTP fallback path immediately, while the admit hook is still live.
+		b.SetShareTransport(nil)
 		shareCancel()
 		<-shareDone
-		b.SetShareTransport(nil)
 	})
 	log.Printf("[transport] share: registered (human-share)")
 

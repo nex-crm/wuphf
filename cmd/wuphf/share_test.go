@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -571,8 +572,15 @@ func TestWebShareControllerIssueInviteUsesAdapter(t *testing.T) {
 	c := newWebShareController(7891)
 	c.SetBroker(b)
 
+	// brokerTokenFn deliberately errors so the test fails loudly if the
+	// adapter branch silently regresses into the HTTP fallback. The adapter
+	// path must never call this fn.
+	tokenFn := func() (string, error) {
+		t.Fatal("brokerTokenFn invoked: adapter path must not read the broker token")
+		return "", nil
+	}
 	c.mu.Lock()
-	url, expiresAt, err := c.issueInviteLocked(context.Background(), "10.0.0.5", 7891, "http://broker.invalid", "ignored-token")
+	url, expiresAt, err := c.issueInviteLocked(context.Background(), "10.0.0.5", 7891, "http://broker.invalid", tokenFn)
 	c.mu.Unlock()
 	if err != nil {
 		t.Fatalf("issueInviteLocked: %v", err)
@@ -611,8 +619,9 @@ func TestWebShareControllerIssueInviteFallsBackToHTTP(t *testing.T) {
 
 	c := newWebShareController(7891)
 	// Intentionally no SetBroker — exercises the HTTP fallback branch.
+	tokenFn := func() (string, error) { return "broker-token", nil }
 	c.mu.Lock()
-	url, expiresAt, err := c.issueInviteLocked(context.Background(), "192.168.1.10", 7891, srv.URL, "broker-token")
+	url, expiresAt, err := c.issueInviteLocked(context.Background(), "192.168.1.10", 7891, srv.URL, tokenFn)
 	c.mu.Unlock()
 	if err != nil {
 		t.Fatalf("issueInviteLocked: %v", err)
@@ -624,5 +633,21 @@ func TestWebShareControllerIssueInviteFallsBackToHTTP(t *testing.T) {
 	}
 	if expiresAt != wantExpiresAt {
 		t.Errorf("expiresAt = %q, want %q", expiresAt, wantExpiresAt)
+	}
+}
+
+// TestWebShareControllerIssueInviteHTTPFallbackPropagatesTokenError confirms
+// that when the adapter handle is absent and the lazy token getter fails, the
+// error is surfaced rather than swallowed. Locks in the contract that
+// issueInviteLocked treats brokerTokenFn errors as terminal for the HTTP path.
+func TestWebShareControllerIssueInviteHTTPFallbackPropagatesTokenError(t *testing.T) {
+	c := newWebShareController(7891)
+	tokenErr := errors.New("token file unreadable")
+	tokenFn := func() (string, error) { return "", tokenErr }
+	c.mu.Lock()
+	_, _, err := c.issueInviteLocked(context.Background(), "10.0.0.5", 7891, "http://broker.invalid", tokenFn)
+	c.mu.Unlock()
+	if !errors.Is(err, tokenErr) {
+		t.Fatalf("issueInviteLocked error: got %v, want %v wrapped", err, tokenErr)
 	}
 }
