@@ -356,6 +356,7 @@ func (b *Broker) unblockDependentsLocked(completedTaskID string) {
 			continue
 		}
 		if !b.hasUnresolvedDepsLocked(&b.tasks[i]) {
+			beforeStatus := b.tasks[i].Status
 			b.tasks[i].Blocked = false
 			if strings.TrimSpace(b.tasks[i].Owner) != "" {
 				b.tasks[i].Status = "in_progress"
@@ -374,6 +375,11 @@ func (b *Broker) unblockDependentsLocked(completedTaskID string) {
 				truncateSummary(b.tasks[i].Title+" unblocked by "+completedTaskID, 140),
 				b.tasks[i].ID,
 			)
+			// Caller (MutateTask / lifecycle) holds b.mu and persists via its
+			// own saveLocked, so we don't write here — but every other status
+			// mutation in this PR emits a transition event, and the cascade
+			// path needs to match or PR 3's clustering signal will be skewed.
+			b.emitTaskTransitionAutoNotebook(&b.tasks[i], beforeStatus, "system")
 		}
 	}
 }
