@@ -40,6 +40,11 @@ jobs:
       - name: Install commitlint
         run: bun install --frozen-lockfile
 
+      - name: Lint PR title
+        if: github.event_name == 'pull_request'
+        run: |
+          echo "${{ github.event.pull_request.title }}" | bunx --bun commitlint --verbose
+
       - name: Lint commits
         run: |
           set -euo pipefail
