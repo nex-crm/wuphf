@@ -255,17 +255,30 @@ export default function WikiEditor({
 
   // Per-article editor mode — persists across sessions so a user who picks
   // Rich on a page they edit often gets it back next time without resetting.
-  const [editorMode, setEditorMode] = useState<EditorMode>(() =>
-    readEditorMode(path),
-  );
+  //
+  // The mode is keyed to `path` *synchronously*: when the parent navigates
+  // to a different article, the new article's stored mode must apply on
+  // the very first render. A previous version held mode in `useState` and
+  // reset it via `useEffect`, which left mode one render behind path —
+  // a `rich -> source` navigation would mount Milkdown for one paint
+  // before correcting itself. Storing `{ path, mode }` lets us detect the
+  // stale snapshot and read storage inline when it doesn't match.
+  const [storedMode, setStoredMode] = useState<{
+    path: string;
+    mode: EditorMode;
+  }>(() => ({ path, mode: readEditorMode(path) }));
+  const editorMode: EditorMode =
+    storedMode.path === path ? storedMode.mode : readEditorMode(path);
   useEffect(() => {
-    setEditorMode(readEditorMode(path));
+    setStoredMode({ path, mode: readEditorMode(path) });
   }, [path]);
   const toggleEditorMode = useCallback(() => {
-    setEditorMode((prev) => {
-      const next: EditorMode = prev === "rich" ? "source" : "rich";
+    setStoredMode((prev) => {
+      const current: EditorMode =
+        prev.path === path ? prev.mode : readEditorMode(path);
+      const next: EditorMode = current === "rich" ? "source" : "rich";
       writeEditorMode(path, next);
-      return next;
+      return { path, mode: next };
     });
   }, [path]);
 

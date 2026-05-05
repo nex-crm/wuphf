@@ -15,7 +15,15 @@
  *
  * Detection is by URL prefix `#/wiki/`, which `wikiLinkRemarkPlugin`
  * deterministically assigns. Standard external links survive untouched.
+ *
+ * The constructed `[[slug|display]]` candidate is validated with
+ * `parseWikiLinkInner` before emission so labels containing pipe chars,
+ * `..`, leading `/`, or control bytes (which the wikilink grammar
+ * rejects) fall back to the original markdown link instead of being
+ * rewritten into syntax the next parse would discard as literal text.
  */
+
+import { parseWikiLinkInner } from "../../../lib/wikilink";
 
 const WIKI_URL_RE = /\[([^\]\n]+)\]\(#\/wiki\/([^\s)]+?)(?:\s+"[^"]*")?\)/g;
 
@@ -39,7 +47,15 @@ function rewriteWikilinks(segment: string): string {
         // emit corrupt wikilink syntax.
         return match;
       }
-      return slug === display ? `[[${slug}]]` : `[[${slug}|${display}]]`;
+      // Validate against the wikilink grammar before rewriting. A label
+      // containing pipes (e.g. `[A | B](#/wiki/foo)`) or a slug with
+      // path traversal would otherwise emit `[[foo|A | B]]`, which
+      // `parseWikiLinkInner` rejects on the next read — so the link
+      // would degrade into literal text after one save. Falling back to
+      // the standard markdown link keeps the round-trip lossless.
+      const inner = slug === display ? slug : `${slug}|${display}`;
+      if (!parseWikiLinkInner(inner)) return match;
+      return `[[${inner}]]`;
     },
   );
 }

@@ -94,4 +94,25 @@ describe("postProcessWikilinks", () => {
       "[[alex]] wrote `[bob](#/wiki/bob)` then [[carol]].",
     );
   });
+
+  // Guard against rewrites the wikilink grammar would reject on next parse.
+  // The bare markdown link survives so the round-trip is lossless even when
+  // the label or slug contains characters wikilinks cannot represent.
+
+  it("leaves a link with a pipe in the display label as a standard link", () => {
+    // `[[foo|A | B]]` would parse with two pipes — parseWikiLinkInner
+    // returns null. Round-trip must keep the standard link intact.
+    const md = "See [A | B](#/wiki/foo) here.";
+    expect(postProcessWikilinks(md)).toBe(md);
+  });
+
+  it("leaves a link whose slug contains path traversal as a standard link", () => {
+    const md = "See [escape](#/wiki/../etc/passwd) here.";
+    expect(postProcessWikilinks(md)).toBe(md);
+  });
+
+  it("leaves a link whose slug starts with / as a standard link", () => {
+    const md = "See [absolute](#/wiki//root) here.";
+    expect(postProcessWikilinks(md)).toBe(md);
+  });
 });
