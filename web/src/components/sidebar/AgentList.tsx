@@ -68,16 +68,13 @@ export function AgentList() {
               const isFirst = agent.slug === firstAgentSlug;
 
               return (
-                <div
-                  key={agent.slug}
-                  className="sidebar-agent-row"
-                  data-agent-slug={agent.slug}
-                >
+                <div key={agent.slug} className="sidebar-agent-row">
                   <button
                     type="button"
                     className={`sidebar-agent${isDMActive ? " active" : ""}`}
                     title={`${agent.name} — ${ac.label}`}
                     onClick={() => setActiveAgentSlug(agent.slug)}
+                    data-agent-slug={agent.slug}
                   >
                     <span className="sidebar-agent-avatar avatar-with-harness">
                       <PixelAvatar
