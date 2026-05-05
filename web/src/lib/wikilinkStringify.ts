@@ -15,7 +15,11 @@
  * pipelines, etc.) round-trips wiki-links cleanly.
  */
 import type { Link } from "mdast";
-import type { Options as StringifyOptions } from "mdast-util-to-markdown";
+import type {
+  Handle,
+  Options as StringifyOptions,
+} from "mdast-util-to-markdown";
+import { defaultHandlers } from "mdast-util-to-markdown";
 import type { Plugin } from "unified";
 
 /**
@@ -36,37 +40,27 @@ export const STRINGIFY_DEFAULTS: StringifyOptions = {
  * tagged with `data-wikilink="true"`. Falls through to the default link
  * handler for ordinary links.
  */
-export const wikilinkStringifyHandler = {
-  link(
-    node: Link,
-    _: unknown,
-    state: {
-      containerPhrasing: (
-        node: Link,
-        options: { before: string; after: string },
-      ) => string;
-    },
-  ): string {
-    const isWikilink =
-      node.data?.hProperties &&
-      (node.data.hProperties as Record<string, unknown>)["data-wikilink"] ===
-        "true";
+export const wikilinkStringifyHandler: { link: Handle } = {
+  link(node, parent, state, info): string {
+    const link = node as Link;
+    const hProps = link.data?.hProperties as
+      | Record<string, unknown>
+      | undefined;
+    const isWikilink = hProps?.["data-wikilink"] === "true";
 
     if (!isWikilink) {
-      return state.containerPhrasing(node, { before: "[", after: "]" });
+      return defaultHandlers.link(link, parent, state, info);
     }
 
-    const slug = (node.data?.hProperties as Record<string, unknown>)[
-      "data-slug"
-    ] as string | undefined;
-
+    const slug = hProps?.["data-slug"] as string | undefined;
     if (!slug) {
       // Degenerate case — should not happen with valid wikilinks emitted
-      // by `wikilinkRemarkPlugin`. Fall through rather than silently drop.
-      return state.containerPhrasing(node, { before: "[", after: "]" });
+      // by `wikilinkRemarkPlugin`. Fall back to default link rendering so
+      // the URL is preserved rather than silently dropped.
+      return defaultHandlers.link(link, parent, state, info);
     }
 
-    const childText = node.children
+    const childText = link.children
       .map((c) => ("value" in c ? (c as { value: string }).value : ""))
       .join("");
 

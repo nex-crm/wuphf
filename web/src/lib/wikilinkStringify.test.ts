@@ -106,6 +106,36 @@ describe("wiki links", () => {
   });
 });
 
+// ─── standard markdown links — must NOT be hijacked by the wiki-link handler ─
+
+describe("standard markdown links", () => {
+  it("plain [text](url) link survives round-trip with the handler", async () => {
+    const result = normalise(
+      await roundTrip("See [the docs](https://example.com) for details.\n"),
+    );
+    expect(result).toBe("See [the docs](https://example.com) for details.");
+  });
+
+  it("link with title survives", async () => {
+    const result = normalise(
+      await roundTrip('See [Home](https://example.com "Homepage") today.\n'),
+    );
+    expect(result).toContain("[Home]");
+    expect(result).toContain("https://example.com");
+    expect(result).toContain("Homepage");
+  });
+
+  it("wiki-link and standard link in the same paragraph both survive", async () => {
+    const result = normalise(
+      await roundTrip(
+        "See [[alex]] and [the docs](https://docs.example.com) here.\n",
+      ),
+    );
+    expect(result).toContain("[[alex]]");
+    expect(result).toContain("[the docs](https://docs.example.com)");
+  });
+});
+
 // ─── GFM structures the wiki actively uses ─────────────────────────────────
 
 describe("GFM tables", () => {
