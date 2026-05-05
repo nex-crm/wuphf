@@ -103,17 +103,16 @@ func (b *OpenclawBridge) AttachSlug(slug, sessionKey string) {
 	if slug == "" || sessionKey == "" {
 		return
 	}
-	b.mu.RLock()
-	existingKey, already := b.keyBySlug[slug]
+	b.mu.Lock()
 	bridgeCtx := b.ctx
-	b.mu.RUnlock()
-	if already && existingKey == sessionKey {
+	currentKey, alreadyBound := b.keyBySlug[slug]
+	if alreadyBound && currentKey == sessionKey {
+		b.mu.Unlock()
 		return
 	}
-	b.mu.Lock()
-	if already && existingKey != sessionKey {
-		delete(b.slugByKey, existingKey)
-		delete(b.lastChannelByKey, existingKey)
+	if alreadyBound && currentKey != sessionKey {
+		delete(b.slugByKey, currentKey)
+		delete(b.lastChannelByKey, currentKey)
 	}
 	b.slugByKey[sessionKey] = slug
 	b.keyBySlug[slug] = sessionKey
@@ -150,19 +149,24 @@ func (b *OpenclawBridge) AttachSlugAndSubscribe(ctx context.Context, slug, sessi
 		return nil
 	}
 	client := b.getClient()
-	if client != nil {
-		if err := client.SessionsMessagesSubscribe(ctx, sessionKey); err != nil {
-			return fmt.Errorf("openclaw: subscribe %q: %w", slug, err)
-		}
+	if client == nil {
+		return fmt.Errorf("openclaw: no active client for %q", slug)
+	}
+	if err := client.SessionsMessagesSubscribe(ctx, sessionKey); err != nil {
+		return fmt.Errorf("openclaw: subscribe %q: %w", slug, err)
 	}
 	b.mu.Lock()
-	if already && existingKey != sessionKey {
-		delete(b.slugByKey, existingKey)
-		delete(b.lastChannelByKey, existingKey)
+	defer b.mu.Unlock()
+	currentKey, currentlyBound := b.keyBySlug[slug]
+	if currentlyBound && currentKey == sessionKey {
+		return nil
+	}
+	if currentlyBound && currentKey != sessionKey {
+		delete(b.slugByKey, currentKey)
+		delete(b.lastChannelByKey, currentKey)
 	}
 	b.slugByKey[sessionKey] = slug
 	b.keyBySlug[slug] = sessionKey
-	b.mu.Unlock()
 	return nil
 }
 
@@ -200,9 +204,11 @@ func (b *OpenclawBridge) DetachSlug(slug string) {
 }
 
 // DetachSlugAndUnsubscribe is the synchronous, error-returning variant used by
-// HTTP handlers. Best-effort on the network call: local state is always
-// cleared so the slug frees up; the returned error informs the caller that
-// the remote session may be leaked.
+// HTTP handlers. Local state is always cleared so the slug frees up regardless
+// of network outcome; the returned error informs the caller that the remote
+// session may be leaked. Returns an error when no bridge client is connected
+// so the caller can surface the failed remote teardown rather than silently
+// orphan the upstream subscription.
 func (b *OpenclawBridge) DetachSlugAndUnsubscribe(ctx context.Context, slug string) error {
 	if b == nil {
 		return nil
@@ -221,7 +227,7 @@ func (b *OpenclawBridge) DetachSlugAndUnsubscribe(ctx context.Context, slug stri
 
 	client := b.getClient()
 	if client == nil {
-		return nil
+		return fmt.Errorf("openclaw: no active client for %q", slug)
 	}
 	if err := client.SessionsMessagesUnsubscribe(ctx, sessionKey); err != nil {
 		return fmt.Errorf("openclaw: unsubscribe %q: %w", slug, err)
