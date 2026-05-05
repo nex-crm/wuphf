@@ -167,6 +167,12 @@ export function useWikiEditorController(
   const [mobileView, setMobileView] = useState<MobileView>("source");
   const isMobile = useIsMobileViewport();
 
+  // Track the SHA we expect to overwrite separately from the prop. After a
+  // successful save or a conflict reload we promote the new SHA locally so a
+  // follow-up save from the same controller instance does not race the parent's
+  // refetch and re-conflict against the version we just wrote.
+  const [currentExpectedSha, setCurrentExpectedSha] = useState(expectedSha);
+
   // On mount / when the article changes, reset editor state AND check
   // localStorage for a draft newer than server's last_edited_ts.
   useEffect(() => {
@@ -174,6 +180,7 @@ export function useWikiEditorController(
     setCommitMessage("");
     setError(null);
     setConflict(null);
+    setCurrentExpectedSha(expectedSha);
     const stored = readDraft(path);
     if (!stored) {
       setDraft(null);
@@ -199,7 +206,7 @@ export function useWikiEditorController(
       return;
     }
     setDraft(stored);
-  }, [path, initialContent, serverLastEditedTs]);
+  }, [path, initialContent, serverLastEditedTs, expectedSha]);
 
   // Debounced autosave. Anchors on `content` + `commitMessage` and writes
   // after AUTOSAVE_DEBOUNCE_MS of quiescence. Skip writing if nothing has
@@ -242,16 +249,27 @@ export function useWikiEditorController(
         path,
         content,
         commitMessage: commitMessage.trim() || `human: update ${path}`,
-        expectedSha,
+        expectedSha: currentExpectedSha,
       });
       if ("conflict" in result) {
-        // Keep the draft — user's work should survive a conflict round-trip.
+        // Persist the in-memory edit synchronously: a 409 can land before
+        // the autosave debounce fires, and `handleReloadConflict` will
+        // overwrite `content` with the server copy. Without this write,
+        // the user's unsaved work is unrecoverable after reload.
+        writeDraft(path, {
+          content,
+          summary: commitMessage,
+          saved_at: new Date().toISOString(),
+        });
         setConflict(result);
         return;
       }
       // Saved OK — the draft is now redundant.
       clearDraft(path);
       setDraft(null);
+      // Promote the new SHA locally so an immediate follow-up save uses it
+      // without waiting on the parent's refetch + rerender.
+      setCurrentExpectedSha(result.commit_sha);
       onSaved(result.commit_sha);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Save failed.");
@@ -263,7 +281,7 @@ export function useWikiEditorController(
     content,
     commitMessage,
     path,
-    expectedSha,
+    currentExpectedSha,
     onSaved,
     writeHumanArticle,
   ]);
@@ -274,6 +292,8 @@ export function useWikiEditorController(
     // changes initialContent, and the path/initialContent effect resets the
     // conflict back to null. Clearing locally would race with that reset.
     setContent(conflict.current_content);
+    // Promote locally so an immediate follow-up save uses the new SHA.
+    setCurrentExpectedSha(conflict.current_sha);
     onSaved(conflict.current_sha);
   }, [conflict, onSaved]);
 

@@ -454,6 +454,108 @@ describe("useWikiEditorController — conflict reload", () => {
     expect(result.current.content).toBe("# Sam\n\nRemote wins.\n");
     expect(onSaved).toHaveBeenCalledWith("remotesha");
   });
+
+  it("persists the in-memory edit synchronously when a 409 fires before the autosave debounce", async () => {
+    vi.useRealTimers();
+    const writeHumanArticle = vi.fn().mockResolvedValue(makeConflict());
+    const { result } = renderHook(() =>
+      useWikiEditorController({
+        path: PATH,
+        initialContent: INITIAL,
+        expectedSha: SHA,
+        onSaved: vi.fn(),
+        writeHumanArticle,
+      }),
+    );
+
+    // Edit and save before AUTOSAVE_DEBOUNCE_MS would have fired. Without
+    // the synchronous persist on conflict, the user's edit is unrecoverable
+    // once `handleReloadConflict` overwrites `content`.
+    act(() => result.current.setContent("# Sam\n\nUnsaved local edit.\n"));
+    await act(async () => {
+      await result.current.handleSave();
+    });
+
+    const persisted = readDraft(PATH);
+    expect(persisted?.content).toBe("# Sam\n\nUnsaved local edit.\n");
+
+    act(() => result.current.handleReloadConflict());
+
+    // After reload, the draft is still in storage so the user can restore it.
+    expect(readDraft(PATH)?.content).toBe("# Sam\n\nUnsaved local edit.\n");
+  });
+
+  it("uses the promoted SHA on a follow-up save after reload", async () => {
+    vi.useRealTimers();
+    const writeHumanArticle = vi
+      .fn()
+      .mockResolvedValueOnce(makeConflict())
+      .mockResolvedValueOnce(makeOk("postreloadsha"));
+    const { result } = renderHook(() =>
+      useWikiEditorController({
+        path: PATH,
+        initialContent: INITIAL,
+        expectedSha: SHA,
+        onSaved: vi.fn(),
+        writeHumanArticle,
+      }),
+    );
+
+    act(() => result.current.setContent("# Sam\n\nLocal edit.\n"));
+    await act(async () => {
+      await result.current.handleSave();
+    });
+
+    expect(writeHumanArticle).toHaveBeenLastCalledWith(
+      expect.objectContaining({ expectedSha: SHA }),
+    );
+
+    act(() => result.current.handleReloadConflict());
+
+    // Edit again so the second save is non-empty and hits the network mock.
+    act(() => result.current.setContent("# Sam\n\nFresh edit on top.\n"));
+    await act(async () => {
+      await result.current.handleSave();
+    });
+
+    // The follow-up save must use the SHA promoted by reload, not the stale
+    // prop value, otherwise the parent's slow refetch causes a deterministic
+    // re-conflict.
+    expect(writeHumanArticle).toHaveBeenLastCalledWith(
+      expect.objectContaining({ expectedSha: "remotesha" }),
+    );
+  });
+
+  it("promotes the new SHA locally after a successful save so a follow-up save uses it", async () => {
+    vi.useRealTimers();
+    const writeHumanArticle = vi
+      .fn()
+      .mockResolvedValueOnce(makeOk("firstsha"))
+      .mockResolvedValueOnce(makeOk("secondsha"));
+    const { result } = renderHook(() =>
+      useWikiEditorController({
+        path: PATH,
+        initialContent: INITIAL,
+        expectedSha: SHA,
+        onSaved: vi.fn(),
+        writeHumanArticle,
+      }),
+    );
+
+    act(() => result.current.setContent("# Sam\n\nFirst edit.\n"));
+    await act(async () => {
+      await result.current.handleSave();
+    });
+
+    act(() => result.current.setContent("# Sam\n\nSecond edit.\n"));
+    await act(async () => {
+      await result.current.handleSave();
+    });
+
+    expect(writeHumanArticle).toHaveBeenLastCalledWith(
+      expect.objectContaining({ expectedSha: "firstsha" }),
+    );
+  });
 });
 
 describe("useWikiEditorController — preview pane visibility", () => {
