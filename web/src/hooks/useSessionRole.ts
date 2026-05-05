@@ -12,11 +12,11 @@ export type SessionRole = "host" | "member" | "unknown";
 export interface SessionInfo {
   role: SessionRole;
   human: HumanMe["human"] | undefined;
-  isLoading: boolean;
+  isPending: boolean;
 }
 
 export function useSessionRole(): SessionInfo {
-  const { data, isLoading } = useQuery({
+  const { data, isPending } = useQuery({
     queryKey: HUMAN_ME_QUERY_KEY,
     queryFn: () => getHumanMe(),
     refetchInterval: HUMAN_ME_REFETCH_MS,
@@ -28,5 +28,5 @@ export function useSessionRole(): SessionInfo {
       : human?.role === "member"
         ? "member"
         : "unknown";
-  return { role, human, isLoading };
+  return { role, human, isPending };
 }
