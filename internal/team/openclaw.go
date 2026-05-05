@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -72,36 +74,11 @@ type OpenclawBridge struct {
 	lastSuccessAt time.Time
 	lastError     error
 
-	// hostMu guards host. Set once by Run() before the supervised loop calls
-	// handleClientEvent; reads are O(1) on the hot inbound path. When nil,
-	// postBridgeMessage falls back to the direct broker entrypoint so legacy
-	// callers (probes, tests) that drive the bridge via Start() continue to work.
-	hostMu sync.RWMutex
-	host   transport.Host
-}
-
-// attachHost binds a transport.Host to the bridge. Called by Run() before the
-// supervised loop starts so handleClientEvent can route inbound assistant
-// messages through the host contract instead of writing to the broker
-// directly. Idempotent: repeated calls overwrite the host pointer atomically.
-func (b *OpenclawBridge) attachHost(h transport.Host) {
-	if b == nil {
-		return
-	}
-	b.hostMu.Lock()
-	b.host = h
-	b.hostMu.Unlock()
-}
-
-// getHost returns the currently attached transport.Host, or nil when the
-// bridge is being driven via Start() instead of Run().
-func (b *OpenclawBridge) getHost() transport.Host {
-	if b == nil {
-		return nil
-	}
-	b.hostMu.RLock()
-	defer b.hostMu.RUnlock()
-	return b.host
+	// host is set once by Run before the supervised loop starts. A nil load
+	// means the bridge was driven via Start (probes, integration tests) rather
+	// than Run, in which case postBridgeMessage falls back to the direct broker
+	// entrypoint.
+	host atomic.Pointer[transport.Host]
 }
 
 // HasSlug reports whether the given slug is bound to a bridged OpenClaw
@@ -651,12 +628,11 @@ func (b *OpenclawBridge) postBridgeMessage(slug, channel, sessionKey, text strin
 	if channel == "" {
 		channel = "general"
 	}
-	if host := b.getHost(); host != nil {
-		ctx := b.ctx
-		if ctx == nil {
-			ctx = context.Background()
-		}
-		err := host.ReceiveMessage(ctx, transport.Message{
+	b.mu.RLock()
+	ctx := b.ctx
+	b.mu.RUnlock()
+	if hp := b.host.Load(); hp != nil {
+		err := (*hp).ReceiveMessage(ctx, transport.Message{
 			Participant: transport.Participant{
 				AdapterName: openclawAdapterName,
 				Key:         sessionKey,
@@ -669,7 +645,7 @@ func (b *OpenclawBridge) postBridgeMessage(slug, channel, sessionKey, text strin
 			},
 			Text: text,
 		})
-		if err != nil && b.ctx != nil && b.ctx.Err() == nil {
+		if err != nil && ctx != nil && ctx.Err() == nil {
 			b.postSystemMessage(fmt.Sprintf("inbound from @%s: %v", slug, err))
 		}
 		return
@@ -677,7 +653,9 @@ func (b *OpenclawBridge) postBridgeMessage(slug, channel, sessionKey, text strin
 	if b.broker == nil {
 		return
 	}
-	_, _ = b.broker.PostInboundSurfaceMessage(slug, channel, text, "openclaw")
+	if _, err := b.broker.PostInboundSurfaceMessage(slug, channel, text, "openclaw"); err != nil {
+		log.Printf("[openclaw] postBridgeMessage: broker rejected message for @%s in #%s: %v", slug, channel, err)
+	}
 }
 
 // postSystemMessage posts a `system`-authored notice into #general.

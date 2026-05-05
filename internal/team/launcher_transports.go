@@ -6,16 +6,10 @@ package team
 // automatically makes it available in both surfaces — you cannot accidentally
 // wire it to one and miss the other.
 //
-// Phase 2b: TelegramTransport satisfies transport.Transport. RegisterTransports
-// constructs a brokerTransportHost and passes it to Run so inbound messages flow
-// through the Host contract instead of writing to the broker directly.
-//
-// Phase 4: OpenClaw bridge is built here via BuildOpenclawBridgeFromConfig and
-// driven via OpenclawBridge.Run with the same brokerTransportHost so inbound
-// assistant messages flow through host.ReceiveMessage. The build returns
-// (nil, nil) when no openclaw members and no gateway URL are configured, so
-// the integration remains strictly opt-in. Future phases will wire human-share
-// via OfficeBoundTransport.
+// Each adapter is driven via Run(ctx, host) on a per-transport goroutine using
+// a shared brokerTransportHost so inbound messages flow through the Host
+// contract instead of writing to the broker directly. Adapters whose
+// configuration is absent are skipped silently; their absence is not an error.
 //
 // See docs/ADD-A-TRANSPORT.md for the full contributor guide.
 
@@ -67,11 +61,7 @@ func RegisterTransports(b *Broker) (func(), error) {
 		}
 	}
 
-	// OpenClaw: build when openclaw members exist or a gateway URL is configured.
-	// BuildOpenclawBridgeFromConfig returns (nil, nil) when neither condition
-	// holds — the bridge is strictly opt-in and its absence is not an error.
-	// Drive via Run(ctx, host) so inbound assistant messages flow through the
-	// transport.Host contract rather than writing to the broker directly.
+	// OpenClaw: opt-in when members exist or a gateway URL is configured.
 	bridge, ocErr := BuildOpenclawBridgeFromConfig(b)
 	if ocErr != nil {
 		log.Printf("[transport] openclaw: bootstrap error — %v", ocErr)

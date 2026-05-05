@@ -88,10 +88,11 @@ func BuildOpenclawBridgeFromConfig(broker *Broker) (*OpenclawBridge, error) {
 	return NewOpenclawBridgeWithDialer(broker, nil, dialer, bindings), nil
 }
 
-// StartOpenclawBridgeFromConfig is the legacy direct-Start entrypoint kept for
-// probe binaries and integration tests that drive the bridge without the
-// host-driven Run() path. The production launcher uses [BuildOpenclawBridgeFromConfig]
-// + [OpenclawBridge.Run] instead so inbound messages flow through transport.Host.
+// StartOpenclawBridgeFromConfig builds the bridge and Starts it directly,
+// bypassing transport.Host attachment. Inbound messages route via
+// broker.PostInboundSurfaceMessage rather than host.ReceiveMessage. Use
+// [BuildOpenclawBridgeFromConfig] + [OpenclawBridge.Run] to opt into the
+// host-driven path.
 func StartOpenclawBridgeFromConfig(ctx context.Context, broker *Broker) (*OpenclawBridge, error) {
 	bridge, err := BuildOpenclawBridgeFromConfig(broker)
 	if err != nil || bridge == nil {
