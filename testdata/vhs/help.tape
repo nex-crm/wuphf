@@ -19,8 +19,8 @@ Hide
 Type "clear"
 Enter
 Sleep 300ms
+Show
 Type "/tmp/wuphf-vhs --help"
 Enter
 Sleep 800ms
-Show
 Sleep 500ms
