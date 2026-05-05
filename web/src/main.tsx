@@ -2,9 +2,9 @@ import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { RouterProvider } from "@tanstack/react-router";
 
+import { JoinPage } from "./components/join/JoinPage";
 import { rootRoute, router } from "./lib/router";
 import RootRoute from "./routes/RootRoute";
-import { JoinPage } from "./components/join/JoinPage";
 import "./styles/shadcn.css";
 import "./styles/global.css";
 import "./styles/layout.css";

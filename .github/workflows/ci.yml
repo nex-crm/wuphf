@@ -100,6 +100,10 @@ jobs:
         # entries and growth of current offenders fail against the PR base.
         # Skips generated files, tests, and documented fixture/vendor dirs.
         run: bash scripts/check-file-size.sh
+      - name: Wails import boundary self-test
+        run: bash scripts/check-wails-boundary-self-test.sh
+      - name: Wails import boundary
+        run: bash scripts/check-wails-boundary.sh
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # ratchet:actions/setup-go@v6
         with:
           go-version-file: go.mod

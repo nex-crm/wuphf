@@ -60,16 +60,24 @@ describe("<NewArticleModal>", () => {
 
   it("shows path preview without subfolder", () => {
     renderModal();
-    fireEvent.change(screen.getByTestId("wk-new-slug"), { target: { value: "sam-lee" } });
+    fireEvent.change(screen.getByTestId("wk-new-slug"), {
+      target: { value: "sam-lee" },
+    });
     // Path text is inside <code> inside <p> — query the code element directly.
     expect(screen.getByText("team/people/sam-lee.md")).toBeInTheDocument();
   });
 
   it("shows path preview with subfolder", () => {
     renderModal();
-    fireEvent.change(screen.getByTestId("wk-new-subfolder"), { target: { value: "leadership" } });
-    fireEvent.change(screen.getByTestId("wk-new-slug"), { target: { value: "sam-lee" } });
-    expect(screen.getByText("team/people/leadership/sam-lee.md")).toBeInTheDocument();
+    fireEvent.change(screen.getByTestId("wk-new-subfolder"), {
+      target: { value: "leadership" },
+    });
+    fireEvent.change(screen.getByTestId("wk-new-slug"), {
+      target: { value: "sam-lee" },
+    });
+    expect(
+      screen.getByText("team/people/leadership/sam-lee.md"),
+    ).toBeInTheDocument();
   });
 
   it("sanitizes slug input to lowercase slug characters", () => {
@@ -89,23 +97,35 @@ describe("<NewArticleModal>", () => {
   it("blocks create when slug is empty", async () => {
     renderModal();
     fireEvent.click(screen.getByTestId("wk-new-create"));
-    expect(await screen.findByRole("alert")).toHaveTextContent(/slug is required/i);
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /slug is required/i,
+    );
   });
 
   it("blocks create when title is empty", async () => {
     renderModal();
-    fireEvent.change(screen.getByTestId("wk-new-slug"), { target: { value: "sam-lee" } });
+    fireEvent.change(screen.getByTestId("wk-new-slug"), {
+      target: { value: "sam-lee" },
+    });
     fireEvent.click(screen.getByTestId("wk-new-create"));
-    expect(await screen.findByRole("alert")).toHaveTextContent(/title is required/i);
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /title is required/i,
+    );
   });
 
   it("blocks create when path already exists in catalog", async () => {
     renderModal();
     // Default group is "people"; "alex" → team/people/alex.md which is in BASE_CATALOG.
-    fireEvent.change(screen.getByTestId("wk-new-slug"), { target: { value: "alex" } });
-    fireEvent.change(screen.getByLabelText(/title/i), { target: { value: "Alex Duplicate" } });
+    fireEvent.change(screen.getByTestId("wk-new-slug"), {
+      target: { value: "alex" },
+    });
+    fireEvent.change(screen.getByLabelText(/title/i), {
+      target: { value: "Alex Duplicate" },
+    });
     fireEvent.click(screen.getByTestId("wk-new-create"));
-    expect(await screen.findByRole("alert")).toHaveTextContent(/already exists/i);
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /already exists/i,
+    );
   });
 
   it("blocks create when subfolder segment is invalid", async () => {
@@ -114,22 +134,38 @@ describe("<NewArticleModal>", () => {
     // so test the validation path via a leading-dot value injected directly.
     // fireEvent.change assigns target.value directly, so the sanitizer in onChange
     // runs and strips the leading dot → empty string → "Subfolder is required".
-    fireEvent.change(screen.getByTestId("wk-new-subfolder"), { target: { value: ".hidden" } });
-    fireEvent.change(screen.getByTestId("wk-new-slug"), { target: { value: "doc" } });
-    fireEvent.change(screen.getByLabelText(/title/i), { target: { value: "Doc" } });
+    fireEvent.change(screen.getByTestId("wk-new-subfolder"), {
+      target: { value: ".hidden" },
+    });
+    fireEvent.change(screen.getByTestId("wk-new-slug"), {
+      target: { value: "doc" },
+    });
+    fireEvent.change(screen.getByLabelText(/title/i), {
+      target: { value: "Doc" },
+    });
     fireEvent.click(screen.getByTestId("wk-new-create"));
     expect(await screen.findByRole("alert")).toBeInTheDocument();
   });
 
   it("calls writeHumanArticle and onCreated on success", async () => {
     const { onCreated } = renderModal();
-    vi.spyOn(wikiApi, "writeHumanArticle").mockResolvedValue({ path: "team/people/new-page.md", commit_sha: "abc123", bytes_written: 10 });
+    vi.spyOn(wikiApi, "writeHumanArticle").mockResolvedValue({
+      path: "team/people/new-page.md",
+      commit_sha: "abc123",
+      bytes_written: 10,
+    });
 
-    fireEvent.change(screen.getByTestId("wk-new-slug"), { target: { value: "new-page" } });
-    fireEvent.change(screen.getByLabelText(/title/i), { target: { value: "New Page" } });
+    fireEvent.change(screen.getByTestId("wk-new-slug"), {
+      target: { value: "new-page" },
+    });
+    fireEvent.change(screen.getByLabelText(/title/i), {
+      target: { value: "New Page" },
+    });
     fireEvent.click(screen.getByTestId("wk-new-create"));
 
-    await waitFor(() => expect(onCreated).toHaveBeenCalledWith("team/people/new-page.md"));
+    await waitFor(() =>
+      expect(onCreated).toHaveBeenCalledWith("team/people/new-page.md"),
+    );
     expect(wikiApi.writeHumanArticle).toHaveBeenCalledWith(
       expect.objectContaining({
         path: "team/people/new-page.md",
@@ -140,15 +176,27 @@ describe("<NewArticleModal>", () => {
 
   it("calls writeHumanArticle with subfolder in path", async () => {
     const { onCreated } = renderModal();
-    vi.spyOn(wikiApi, "writeHumanArticle").mockResolvedValue({ path: "team/people/new-page.md", commit_sha: "abc123", bytes_written: 10 });
+    vi.spyOn(wikiApi, "writeHumanArticle").mockResolvedValue({
+      path: "team/people/new-page.md",
+      commit_sha: "abc123",
+      bytes_written: 10,
+    });
 
-    fireEvent.change(screen.getByTestId("wk-new-subfolder"), { target: { value: "leadership" } });
-    fireEvent.change(screen.getByTestId("wk-new-slug"), { target: { value: "new-page" } });
-    fireEvent.change(screen.getByLabelText(/title/i), { target: { value: "New Page" } });
+    fireEvent.change(screen.getByTestId("wk-new-subfolder"), {
+      target: { value: "leadership" },
+    });
+    fireEvent.change(screen.getByTestId("wk-new-slug"), {
+      target: { value: "new-page" },
+    });
+    fireEvent.change(screen.getByLabelText(/title/i), {
+      target: { value: "New Page" },
+    });
     fireEvent.click(screen.getByTestId("wk-new-create"));
 
     await waitFor(() =>
-      expect(onCreated).toHaveBeenCalledWith("team/people/leadership/new-page.md"),
+      expect(onCreated).toHaveBeenCalledWith(
+        "team/people/leadership/new-page.md",
+      ),
     );
     expect(wikiApi.writeHumanArticle).toHaveBeenCalledWith(
       expect.objectContaining({ path: "team/people/leadership/new-page.md" }),
@@ -157,34 +205,57 @@ describe("<NewArticleModal>", () => {
 
   it("shows a conflict error when the server returns a conflict", async () => {
     renderModal();
-    vi.spyOn(wikiApi, "writeHumanArticle").mockResolvedValue({ conflict: true } as never);
+    vi.spyOn(wikiApi, "writeHumanArticle").mockResolvedValue({
+      conflict: true,
+    } as never);
 
-    fireEvent.change(screen.getByTestId("wk-new-slug"), { target: { value: "new-page" } });
-    fireEvent.change(screen.getByLabelText(/title/i), { target: { value: "New Page" } });
+    fireEvent.change(screen.getByTestId("wk-new-slug"), {
+      target: { value: "new-page" },
+    });
+    fireEvent.change(screen.getByLabelText(/title/i), {
+      target: { value: "New Page" },
+    });
     fireEvent.click(screen.getByTestId("wk-new-create"));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(/already exists/i);
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /already exists/i,
+    );
   });
 
   it("shows an error when writeHumanArticle throws", async () => {
     renderModal();
-    vi.spyOn(wikiApi, "writeHumanArticle").mockRejectedValue(new Error("Network error"));
+    vi.spyOn(wikiApi, "writeHumanArticle").mockRejectedValue(
+      new Error("Network error"),
+    );
 
-    fireEvent.change(screen.getByTestId("wk-new-slug"), { target: { value: "new-page" } });
-    fireEvent.change(screen.getByLabelText(/title/i), { target: { value: "New Page" } });
+    fireEvent.change(screen.getByTestId("wk-new-slug"), {
+      target: { value: "new-page" },
+    });
+    fireEvent.change(screen.getByLabelText(/title/i), {
+      target: { value: "New Page" },
+    });
     fireEvent.click(screen.getByTestId("wk-new-create"));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(/network error/i);
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /network error/i,
+    );
   });
 
   it("disables buttons while submitting", async () => {
     renderModal();
     vi.spyOn(wikiApi, "writeHumanArticle").mockImplementation(
-      () => new Promise(() => { /* never resolves */ }),
+      () =>
+        new Promise(() => {
+          /* never resolves */
+        }),
     );
 
-    fireEvent.change(screen.getByTestId("wk-new-slug"), { target: { value: "new-page" } });
-    fireEvent.change(screen.getByLabelText(/title/i), { target: { value: "New Page" } });
+    fireEvent.change(screen.getByTestId("wk-new-slug"), {
+      target: { value: "new-page" },
+    });
+    fireEvent.change(screen.getByLabelText(/title/i), {
+      target: { value: "New Page" },
+    });
     fireEvent.click(screen.getByTestId("wk-new-create"));
 
     await waitFor(() =>
@@ -198,14 +269,30 @@ describe("<NewArticleModal>", () => {
     fireEvent.click(screen.getByText(/cancel/i));
     expect(onCancel).toHaveBeenCalledOnce();
   });
+});
+
+describe("<NewArticleModal> templates and sections", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
 
   it("generates person template body", async () => {
     renderModal();
-    vi.spyOn(wikiApi, "writeHumanArticle").mockResolvedValue({ path: "x", commit_sha: "abc", bytes_written: 1 });
+    vi.spyOn(wikiApi, "writeHumanArticle").mockResolvedValue({
+      path: "x",
+      commit_sha: "abc",
+      bytes_written: 1,
+    });
 
-    fireEvent.change(screen.getByTestId("wk-new-template"), { target: { value: "person" } });
-    fireEvent.change(screen.getByTestId("wk-new-slug"), { target: { value: "sarah" } });
-    fireEvent.change(screen.getByLabelText(/title/i), { target: { value: "Sarah Chen" } });
+    fireEvent.change(screen.getByTestId("wk-new-template"), {
+      target: { value: "person" },
+    });
+    fireEvent.change(screen.getByTestId("wk-new-slug"), {
+      target: { value: "sarah" },
+    });
+    fireEvent.change(screen.getByLabelText(/title/i), {
+      target: { value: "Sarah Chen" },
+    });
     fireEvent.click(screen.getByTestId("wk-new-create"));
 
     await waitFor(() =>
@@ -219,11 +306,21 @@ describe("<NewArticleModal>", () => {
 
   it("generates decision template body", async () => {
     renderModal();
-    vi.spyOn(wikiApi, "writeHumanArticle").mockResolvedValue({ path: "x", commit_sha: "abc", bytes_written: 1 });
+    vi.spyOn(wikiApi, "writeHumanArticle").mockResolvedValue({
+      path: "x",
+      commit_sha: "abc",
+      bytes_written: 1,
+    });
 
-    fireEvent.change(screen.getByTestId("wk-new-template"), { target: { value: "decision" } });
-    fireEvent.change(screen.getByTestId("wk-new-slug"), { target: { value: "use-sqlite" } });
-    fireEvent.change(screen.getByLabelText(/title/i), { target: { value: "Use SQLite" } });
+    fireEvent.change(screen.getByTestId("wk-new-template"), {
+      target: { value: "decision" },
+    });
+    fireEvent.change(screen.getByTestId("wk-new-slug"), {
+      target: { value: "use-sqlite" },
+    });
+    fireEvent.change(screen.getByLabelText(/title/i), {
+      target: { value: "Use SQLite" },
+    });
     fireEvent.click(screen.getByTestId("wk-new-create"));
 
     await waitFor(() =>
@@ -237,7 +334,9 @@ describe("<NewArticleModal>", () => {
 
   it("shows the custom section input when '+ New section' is selected", () => {
     renderModal();
-    fireEvent.change(screen.getByLabelText(/section/i), { target: { value: "__custom__" } });
+    fireEvent.change(screen.getByLabelText(/section/i), {
+      target: { value: "__custom__" },
+    });
     expect(screen.getByPlaceholderText(/e.g. playbooks/i)).toBeInTheDocument();
   });
 

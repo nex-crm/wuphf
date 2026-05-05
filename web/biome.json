@@ -23,6 +23,18 @@
       "!**/*.generated.tsx"
     ]
   },
+  "overrides": [
+    {
+      "includes": ["src/desktop/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": "off"
+          }
+        }
+      }
+    }
+  ],
   "formatter": {
     "enabled": true,
     "indentStyle": "space",
@@ -61,6 +73,27 @@
       "style": {
         "noEnum": "error",
         "noImplicitBoolean": "error",
+        "noRestrictedImports": {
+          "level": "error",
+          "options": {
+            "paths": {
+              "@wails/runtime": "Wails runtime imports are reserved for web/src/desktop/. App data must use loopback HTTP/SSE/WebSocket.",
+              "@wailsapp/runtime": "Wails runtime imports are reserved for web/src/desktop/. App data must use loopback HTTP/SSE/WebSocket.",
+              "wails-bindings": "Wails bindings are reserved for web/src/desktop/. App data must use loopback HTTP/SSE/WebSocket."
+            },
+            "patterns": [
+              {
+                "group": [
+                  "@wails/runtime/**",
+                  "@wailsapp/runtime/**",
+                  "wails-bindings/**",
+                  "wailsjs/**"
+                ],
+                "message": "Wails imports are reserved for web/src/desktop/. App data must use loopback HTTP/SSE/WebSocket."
+              }
+            ]
+          }
+        },
         "useObjectSpread": "error",
         "noCommonJs": "error",
         "noUselessElse": "error",
