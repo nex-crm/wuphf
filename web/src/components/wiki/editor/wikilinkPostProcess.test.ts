@@ -17,8 +17,8 @@ describe("postProcessWikilinks", () => {
 
   it("decodes percent-encoded slugs", () => {
     expect(
-      postProcessWikilinks("Owner: [people/alex](#/wiki/people/alex)."),
-    ).toBe("Owner: [[people/alex]].");
+      postProcessWikilinks("Owner: [Alex Chen](#/wiki/Alex%20Chen)."),
+    ).toBe("Owner: [[Alex Chen]].");
   });
 
   it("rewrites every wikilink in a paragraph", () => {

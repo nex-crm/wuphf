@@ -79,24 +79,26 @@ async function roundTrip(initial: string): Promise<string> {
   }
 }
 
+// Each test asserts full normalised equality (`toBe`) — looser substring
+// checks would let regressions like list-flattening or table-shape change
+// slip through.
+//
+// Where Milkdown deterministically *normalises* the source (loose-form
+// nested lists, padded table cells), the test uses an explicit canonical
+// expected value. That IS the round-trip contract: edits settle on the
+// canonical shape after one save and remain stable thereafter.
+
 // ─── headings + paragraphs ─────────────────────────────────────────────────
 
 describe("RichWikiEditor round-trip — headings + paragraphs", () => {
   it("preserves an H1 + paragraph", async () => {
-    const out = normalise(
-      await roundTrip("# Alex Chen\n\nEngineering lead.\n"),
-    );
-    expect(out).toContain("# Alex Chen");
-    expect(out).toContain("Engineering lead.");
+    const md = "# Alex Chen\n\nEngineering lead.\n";
+    expect(normalise(await roundTrip(md))).toBe(normalise(md));
   });
 
   it("preserves H2/H3 hierarchy", async () => {
-    const out = normalise(
-      await roundTrip("## Role\n\n### Background\n\nDetails here.\n"),
-    );
-    expect(out).toContain("## Role");
-    expect(out).toContain("### Background");
-    expect(out).toContain("Details here.");
+    const md = "## Role\n\n### Background\n\nDetails here.\n";
+    expect(normalise(await roundTrip(md))).toBe(normalise(md));
   });
 });
 
@@ -104,31 +106,28 @@ describe("RichWikiEditor round-trip — headings + paragraphs", () => {
 
 describe("RichWikiEditor round-trip — inline emphasis", () => {
   it("preserves bold + italic + inline code", async () => {
-    const out = normalise(
-      await roundTrip("Mix of **bold**, _italic_, and `inline code`.\n"),
-    );
-    expect(out).toContain("**bold**");
-    expect(out).toContain("_italic_");
-    expect(out).toContain("`inline code`");
+    const md = "Mix of **bold**, _italic_, and `inline code`.\n";
+    expect(normalise(await roundTrip(md))).toBe(normalise(md));
   });
 });
 
 // ─── lists + checklists ────────────────────────────────────────────────────
+//
+// Milkdown's commonmark serializer renders nested and checklist lists in
+// loose form (a blank line between siblings). Content survives intact,
+// structure is preserved, and the shape stabilises after one save.
 
 describe("RichWikiEditor round-trip — lists", () => {
-  it("preserves bullet list with nested items", async () => {
-    const out = normalise(
-      await roundTrip("- Parent\n  - Child A\n  - Child B\n"),
-    );
-    expect(out).toContain("Parent");
-    expect(out).toContain("Child A");
-    expect(out).toContain("Child B");
+  it("preserves bullet list with nested items in canonical loose form", async () => {
+    const md = "- Parent\n  - Child A\n  - Child B\n";
+    const canonical = "- Parent\n\n  - Child A\n\n  - Child B\n";
+    expect(normalise(await roundTrip(md))).toBe(normalise(canonical));
   });
 
-  it("preserves GFM checklist", async () => {
-    const out = normalise(await roundTrip("- [x] Done\n- [ ] Todo\n"));
-    expect(out).toContain("[x] Done");
-    expect(out).toContain("[ ] Todo");
+  it("preserves GFM checklist in canonical loose form", async () => {
+    const md = "- [x] Done\n- [ ] Todo\n";
+    const canonical = "- [x] Done\n\n- [ ] Todo\n";
+    expect(normalise(await roundTrip(md))).toBe(normalise(canonical));
   });
 });
 
@@ -136,33 +135,26 @@ describe("RichWikiEditor round-trip — lists", () => {
 
 describe("RichWikiEditor round-trip — code blocks", () => {
   it("preserves fenced code with language", async () => {
-    const out = normalise(
-      await roundTrip("```typescript\nconst x = 1;\n```\n"),
-    );
-    expect(out).toContain("```typescript");
-    expect(out).toContain("const x = 1;");
+    const md = "```typescript\nconst x = 1;\n```\n";
+    expect(normalise(await roundTrip(md))).toBe(normalise(md));
   });
 
-  it("preserves multi-line code body", async () => {
-    const out = normalise(
-      await roundTrip('```go\nfunc main() {\n\tfmt.Println("hi")\n}\n```\n'),
-    );
-    expect(out).toContain("func main()");
-    expect(out).toContain("fmt.Println");
+  it("preserves multi-line code body with tabs and quotes", async () => {
+    const md = '```go\nfunc main() {\n\tfmt.Println("hi")\n}\n```\n';
+    expect(normalise(await roundTrip(md))).toBe(normalise(md));
   });
 });
 
 // ─── GFM tables ────────────────────────────────────────────────────────────
+//
+// Milkdown aligns columns and pads cells to the widest entry. That's
+// canonical GFM table output and stabilises on first save.
 
 describe("RichWikiEditor round-trip — tables", () => {
-  it("preserves a simple table", async () => {
-    const out = normalise(
-      await roundTrip("| Name | Role |\n| --- | --- |\n| Alex | Eng |\n"),
-    );
-    expect(out).toContain("Name");
-    expect(out).toContain("Role");
-    expect(out).toContain("Alex");
-    expect(out).toContain("|");
+  it("preserves a simple table with canonical column padding", async () => {
+    const md = "| Name | Role |\n| --- | --- |\n| Alex | Eng |\n";
+    const canonical = "| Name | Role |\n| ---- | ---- |\n| Alex | Eng  |\n";
+    expect(normalise(await roundTrip(md))).toBe(normalise(canonical));
   });
 });
 
@@ -170,24 +162,18 @@ describe("RichWikiEditor round-trip — tables", () => {
 
 describe("RichWikiEditor round-trip — wiki-links", () => {
   it("preserves [[slug]]", async () => {
-    const out = normalise(await roundTrip("See [[alex]] for details.\n"));
-    expect(out).toContain("[[alex]]");
+    const md = "See [[alex]] for details.\n";
+    expect(normalise(await roundTrip(md))).toBe(normalise(md));
   });
 
   it("preserves [[slug|Display]]", async () => {
-    const out = normalise(
-      await roundTrip("See [[people/alex|Alex Chen]] for details.\n"),
-    );
-    expect(out).toContain("[[people/alex|Alex Chen]]");
+    const md = "See [[people/alex|Alex Chen]] for details.\n";
+    expect(normalise(await roundTrip(md))).toBe(normalise(md));
   });
 
   it("preserves multiple wiki-links in one paragraph", async () => {
-    const out = normalise(
-      await roundTrip("[[alex]] works with [[sarah]] on [[project-x]].\n"),
-    );
-    expect(out).toContain("[[alex]]");
-    expect(out).toContain("[[sarah]]");
-    expect(out).toContain("[[project-x]]");
+    const md = "[[alex]] works with [[sarah]] on [[project-x]].\n";
+    expect(normalise(await roundTrip(md))).toBe(normalise(md));
   });
 });
 
@@ -195,19 +181,12 @@ describe("RichWikiEditor round-trip — wiki-links", () => {
 
 describe("RichWikiEditor round-trip — standard links", () => {
   it("preserves [text](url)", async () => {
-    const out = normalise(
-      await roundTrip("See [the docs](https://example.com) for details.\n"),
-    );
-    expect(out).toContain("[the docs](https://example.com)");
+    const md = "See [the docs](https://example.com) for details.\n";
+    expect(normalise(await roundTrip(md))).toBe(normalise(md));
   });
 
   it("preserves wiki-link and standard link in the same paragraph", async () => {
-    const out = normalise(
-      await roundTrip(
-        "See [[alex]] and [the docs](https://docs.example.com) here.\n",
-      ),
-    );
-    expect(out).toContain("[[alex]]");
-    expect(out).toContain("[the docs](https://docs.example.com)");
+    const md = "See [[alex]] and [the docs](https://docs.example.com) here.\n";
+    expect(normalise(await roundTrip(md))).toBe(normalise(md));
   });
 });
