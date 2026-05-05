@@ -1,4 +1,3 @@
-import { Kbd } from "../../ui/Kbd";
 import { STEP_ORDER } from "./constants";
 import type { WizardStep } from "./types";
 
@@ -50,19 +49,36 @@ export function CheckIcon() {
  * the step, not just when the button has focus. Pass `modifier` (e.g.
  * ⌘/Ctrl) when the step binds ⌘+Enter instead of plain Enter.
  */
+function ReturnIcon() {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 12 12"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M9 3v3.5a1.5 1.5 0 0 1-1.5 1.5H3" />
+      <path d="M5 6L3 8l2 2" />
+    </svg>
+  );
+}
+
 export function EnterHint({ modifier }: { modifier?: string } = {}) {
   return (
     <span className="kbd-hint" aria-hidden="true">
-      {modifier ? (
-        <Kbd size="sm" variant="inverse">
-          {modifier}
-        </Kbd>
-      ) : null}
-      <Kbd size="sm" variant="inverse">
-        ↵
-      </Kbd>
+      {modifier ? <span className="kbd-hint-mod">{modifier}</span> : null}
+      <ReturnIcon />
     </span>
   );
+}
+
+export function BtnLabel({ children }: { children: React.ReactNode }) {
+  return <span className="btn-label">{children}</span>;
 }
 
 export function ProgressDots({

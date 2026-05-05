@@ -57,42 +57,40 @@ afterEach(() => {
 describe("Wizard keyboard advancement", () => {
   it("Enter on the welcome step advances to the Identity step", async () => {
     render(<Wizard onComplete={vi.fn()} />);
-    // Welcome CTA is visible
-    expect(screen.getByText(/Open the office/i)).toBeInTheDocument();
+    // Welcome CTA is visible — the welcome step's primary button.
+    expect(
+      screen.getByRole("button", { name: /Continue/i }),
+    ).toBeInTheDocument();
 
     pressEnterOn(window);
 
     // Identity step renders its company input
     await waitFor(() => {
-      expect(
-        screen.getByLabelText(/Company or project name/i),
-      ).toBeInTheDocument();
+      expect(screen.getByLabelText(/Office name/i)).toBeInTheDocument();
     });
   });
 
   it("Enter on the identity step is blocked when company + description are empty", async () => {
     render(<Wizard onComplete={vi.fn()} />);
     pressEnterOn(window); // welcome → identity
-    await waitFor(() => screen.getByLabelText(/Company or project name/i));
+    await waitFor(() => screen.getByLabelText(/Office name/i));
 
     // Press Enter with empty fields — must NOT advance.
     pressEnterOn(window);
 
     // Still on identity — company input still visible
-    expect(
-      screen.getByLabelText(/Company or project name/i),
-    ).toBeInTheDocument();
+    expect(screen.getByLabelText(/Office name/i)).toBeInTheDocument();
   });
 
   it("Enter advances identity once company + description are filled", async () => {
     render(<Wizard onComplete={vi.fn()} />);
     pressEnterOn(window); // → identity
-    await waitFor(() => screen.getByLabelText(/Company or project name/i));
+    await waitFor(() => screen.getByLabelText(/Office name/i));
 
-    fireEvent.change(screen.getByLabelText(/Company or project name/i), {
+    fireEvent.change(screen.getByLabelText(/Office name/i), {
       target: { value: "Acme" },
     });
-    fireEvent.change(screen.getByLabelText(/One-liner description/i), {
+    fireEvent.change(screen.getByLabelText(/Short description/i), {
       target: { value: "We do things" },
     });
 
@@ -102,7 +100,7 @@ describe("Wizard keyboard advancement", () => {
     // templates headline.
     await waitFor(() => {
       expect(
-        screen.getByText(/What should your office run\?/i),
+        screen.getByText(/What should your office run/i),
       ).toBeInTheDocument();
     });
   });
@@ -114,9 +112,7 @@ describe("Wizard keyboard advancement", () => {
     pressEnterOn(window);
 
     await waitFor(() => {
-      expect(
-        screen.getByLabelText(/Company or project name/i),
-      ).toBeInTheDocument();
+      expect(screen.getByLabelText(/Office name/i)).toBeInTheDocument();
     });
 
     cleanup();
@@ -127,7 +123,7 @@ describe("Wizard keyboard advancement", () => {
 
     await waitFor(() => {
       expect(
-        screen.getByText(/What should your office run\?/i),
+        screen.getByText(/What should your office run/i),
       ).toBeInTheDocument();
     });
   });
@@ -135,13 +131,13 @@ describe("Wizard keyboard advancement", () => {
   it("does not advance when Enter is pressed on a focused <button> (Back/Skip stay intact)", async () => {
     render(<Wizard onComplete={vi.fn()} />);
     pressEnterOn(window); // welcome → identity
-    await waitFor(() => screen.getByLabelText(/Company or project name/i));
+    await waitFor(() => screen.getByLabelText(/Office name/i));
 
     // Fill fields
-    fireEvent.change(screen.getByLabelText(/Company or project name/i), {
+    fireEvent.change(screen.getByLabelText(/Office name/i), {
       target: { value: "Acme" },
     });
-    fireEvent.change(screen.getByLabelText(/One-liner description/i), {
+    fireEvent.change(screen.getByLabelText(/Short description/i), {
       target: { value: "We do things" },
     });
 
@@ -153,9 +149,7 @@ describe("Wizard keyboard advancement", () => {
     // We did NOT advance to templates because Enter on a button is a bail.
     // (The button's own onClick would fire on real click, not on synthetic
     // Enter dispatched to window with a BUTTON target.)
-    expect(
-      screen.getByLabelText(/Company or project name/i),
-    ).toBeInTheDocument();
+    expect(screen.getByLabelText(/Office name/i)).toBeInTheDocument();
   });
 
   it("guards against key repeat on the ready step (hold-Enter no longer double-submits)", async () => {
@@ -165,12 +159,12 @@ describe("Wizard keyboard advancement", () => {
     // steps in, then verify post is never called twice for the same press.
     render(<Wizard onComplete={vi.fn()} />);
     pressEnterOn(window); // → identity
-    await waitFor(() => screen.getByLabelText(/Company or project name/i));
+    await waitFor(() => screen.getByLabelText(/Office name/i));
 
-    fireEvent.change(screen.getByLabelText(/Company or project name/i), {
+    fireEvent.change(screen.getByLabelText(/Office name/i), {
       target: { value: "Acme" },
     });
-    fireEvent.change(screen.getByLabelText(/One-liner description/i), {
+    fireEvent.change(screen.getByLabelText(/Short description/i), {
       target: { value: "We do things" },
     });
 
@@ -183,43 +177,8 @@ describe("Wizard keyboard advancement", () => {
     // but not have double-jumped past templates.
     await waitFor(() => {
       expect(
-        screen.getByText(/What should your office run\?/i),
+        screen.getByText(/What should your office run/i),
       ).toBeInTheDocument();
     });
-  });
-
-  it("Enter in the Nex signup email submits the panel instead of advancing the step", async () => {
-    render(<Wizard onComplete={vi.fn()} />);
-    pressEnterOn(window); // → identity
-    await waitFor(() => screen.getByLabelText(/Company or project name/i));
-
-    // Fill fields so the identity gate would normally allow advancement
-    fireEvent.change(screen.getByLabelText(/Company or project name/i), {
-      target: { value: "Acme" },
-    });
-    fireEvent.change(screen.getByLabelText(/One-liner description/i), {
-      target: { value: "We do things" },
-    });
-
-    // Open the Nex signup panel
-    const trigger = screen.getByText(/Don.?t have a Nex account/i);
-    fireEvent.click(trigger);
-
-    const emailInput = await waitFor(() => screen.getByLabelText("Email"));
-    fireEvent.change(emailInput, { target: { value: "me@example.com" } });
-
-    // Pressing Enter inside the email field should call /nex/register and
-    // should NOT advance to the templates step.
-    fireEvent.keyDown(emailInput, { key: "Enter" });
-
-    await waitFor(() => {
-      expect(postMock).toHaveBeenCalledWith("/nex/register", {
-        email: "me@example.com",
-      });
-    });
-    // Still on the identity step
-    expect(
-      screen.getByLabelText(/Company or project name/i),
-    ).toBeInTheDocument();
   });
 });

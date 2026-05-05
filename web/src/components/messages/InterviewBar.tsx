@@ -85,13 +85,13 @@ export function InterviewBar() {
   // Reset transient UI state when the active request changes. Keyed on
   // current?.id so cycling between queued requests (or replacing the
   // active one with a fresh broker push) clears textMode / customText /
-  // compareOpen — without this dep, compareOpen=true from one card
-  // leaks into the next.
+  // compareOpen before state from one card leaks into the next.
+  const currentId = current?.id ?? null;
   useEffect(() => {
     setTextMode(null);
     setCustomText("");
     setCompareOpen(false);
-  }, []);
+  }, [currentId]);
 
   useEffect(() => {
     if (textMode && textareaRef.current) {
@@ -362,7 +362,9 @@ export function InterviewBar() {
           onPick={handleOption}
         />
       ) : options.length > 0 ? (
-        <div className="interview-bar-actions">
+        <div
+          className={`interview-bar-actions${options.length <= 2 ? " interview-bar-actions-inline" : ""}`}
+        >
           {options.map((opt, i) => (
             <button
               key={opt.id}

@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import type { AgentRequest } from "../../api/client";
@@ -232,5 +232,36 @@ describe("<InterviewBar> approval UX", () => {
     expect(
       screen.getByText("background information from the agent"),
     ).toBeInTheDocument();
+  });
+
+  it("resets text mode when the active request changes", () => {
+    const needsText: AgentRequest = {
+      id: "request-text",
+      from: "growthops",
+      channel: "general",
+      kind: "interview",
+      status: "pending",
+      question: "What should we say?",
+      options: [{ id: "custom", label: "Custom", requires_text: true }],
+      blocking: false,
+      created_at: "2026-05-06T00:00:00Z",
+    };
+    const nextRequest: AgentRequest = {
+      ...needsText,
+      id: "request-next",
+      question: "Approve the new plan?",
+      options: [{ id: "approve", label: "Approve" }],
+    };
+
+    setPending([needsText]);
+    const { rerender } = render(wrap(<InterviewBar />));
+    fireEvent.click(screen.getByRole("button", { name: /Custom/i }));
+    expect(screen.getByRole("textbox")).toBeInTheDocument();
+
+    setPending([nextRequest]);
+    rerender(wrap(<InterviewBar />));
+
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(screen.getByText("Approve the new plan?")).toBeInTheDocument();
   });
 });

@@ -19,6 +19,7 @@ export const STEP_ORDER: readonly WizardStep[] = [
   "templates",
   "team",
   "setup",
+  "nex",
   "task",
   "ready",
 ] as const;

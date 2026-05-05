@@ -60,10 +60,10 @@ function renderSetup(overrides: Overrides = {}) {
   return render(<SetupStep {...setupProps(overrides)} />);
 }
 
-// Step 5's CTA text is `ONBOARDING_COPY.step2_cta` ("Ready"). Match
+// Step 5's CTA text is `ONBOARDING_COPY.step2_cta` ("Continue"). Match
 // from the start of the accessible name so tile buttons that happen to
 // contain the word elsewhere don't false-match.
-const ctaName = /^Ready/;
+const ctaName = /^Continue/;
 
 describe("SetupStep — canContinue gate", () => {
   it("disables Continue when no runtime, no API key, no local provider", () => {

@@ -256,10 +256,9 @@ test.describe("wuphf onboarding wizard smoke", () => {
     });
     await page.locator(".wizard-step button.btn-primary").first().click();
 
-    await expect(page.getByText("Tell us about this office")).toBeVisible();
+    await expect(page.getByText("Name your office")).toBeVisible();
     await page.locator("#wiz-company").fill("E2E Full Flow Co");
     await page.locator("#wiz-description").fill("Deterministic wizard path");
-    await page.locator("#wiz-priority").fill("Launch the first customer loop");
     await page.locator(".wizard-step button.btn-primary").first().click();
 
     await expect(page.getByText("What should your office run?")).toBeVisible();
@@ -271,7 +270,7 @@ test.describe("wuphf onboarding wizard smoke", () => {
     await templateTile.click();
     await page.locator(".wizard-step button.btn-primary").first().click();
 
-    await expect(page.getByText("Your team")).toBeVisible();
+    await expect(page.getByText("Meet your team")).toBeVisible();
     await expect(page.getByText("GTM Lead")).toBeVisible();
     await page.locator(".wizard-step button.btn-primary").first().click();
 
@@ -280,6 +279,10 @@ test.describe("wuphf onboarding wizard smoke", () => {
     await expect(claudeTile).toHaveAttribute("aria-pressed", "true");
     await page.locator(".wizard-step button.btn-primary").first().click();
 
+    // Nex registration is now its own step between setup and task — skip it
+    // for the deterministic happy-path test (covered separately by unit tests).
+    await page.getByRole("button", { name: /^Skip$/ }).click();
+
     await expect(page.locator("#wiz-task-input")).toBeVisible();
     await page.getByRole("button", { name: /Draft launch plan/i }).click();
     await expect(page.locator("#wiz-task-input")).toHaveValue(
@@ -287,7 +290,7 @@ test.describe("wuphf onboarding wizard smoke", () => {
     );
     await page.locator(".wizard-step button.btn-primary").first().click();
 
-    await expect(page.getByText("You're set")).toBeVisible();
+    await expect(page.getByText("Ready to launch")).toBeVisible();
     await expect(page.getByText("LLM runtime")).toBeVisible();
     await page.getByTestId("onboarding-submit-button").click();
 
@@ -306,7 +309,6 @@ test.describe("wuphf onboarding wizard smoke", () => {
     expect(captures.complete).toMatchObject({
       company: "E2E Full Flow Co",
       description: "Deterministic wizard path",
-      priority: "Launch the first customer loop",
       runtime: "Claude Code",
       runtime_priority: ["Claude Code"],
       memory_backend: "markdown",
@@ -333,9 +335,11 @@ test.describe("wuphf onboarding wizard smoke", () => {
       .filter({ hasText: "Niche CRM" })
       .first()
       .click();
+    // templates → team → setup → nex (skip) → task
     await page.locator(".wizard-step button.btn-primary").first().click();
     await page.locator(".wizard-step button.btn-primary").first().click();
     await page.locator(".wizard-step button.btn-primary").first().click();
+    await page.getByRole("button", { name: /^Skip$/ }).click();
 
     const launchPlanSuggestion = page.getByRole("button", {
       name: /Draft launch plan/i,
@@ -349,15 +353,19 @@ test.describe("wuphf onboarding wizard smoke", () => {
       "Draft a launch plan for the first customer loop.",
     );
 
+    // task → nex → setup → team → templates (4 Backs to undo skip + 3 forward steps)
+    await page.getByRole("button", { exact: true, name: "Back" }).click();
     await page.getByRole("button", { exact: true, name: "Back" }).click();
     await page.getByRole("button", { exact: true, name: "Back" }).click();
     await page.getByRole("button", { exact: true, name: "Back" }).click();
     await expect(page.getByText("What should your office run?")).toBeVisible();
 
     await page.getByRole("button", { name: /Start from scratch/i }).click();
+    // templates → team → setup → nex (skip) → task
     await page.locator(".wizard-step button.btn-primary").first().click();
     await page.locator(".wizard-step button.btn-primary").first().click();
     await page.locator(".wizard-step button.btn-primary").first().click();
+    await page.getByRole("button", { name: /^Skip$/ }).click();
 
     await expect(page.locator("#wiz-task-input")).toHaveValue("");
     await expect(

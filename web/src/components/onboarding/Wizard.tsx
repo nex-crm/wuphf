@@ -37,6 +37,7 @@ import { TemplatesStep } from "./wizard/Step2Templates";
 import { IdentityStep } from "./wizard/Step3Identity";
 import { TeamStep } from "./wizard/Step4Team";
 import { SetupStep } from "./wizard/Step5Setup";
+import { NexStep } from "./wizard/Step6Nex";
 import { TaskStep } from "./wizard/Step6Task";
 import { ReadyStep } from "./wizard/Step7Ready";
 import type {
@@ -197,7 +198,7 @@ export function Wizard({ onComplete }: WizardProps) {
   // nex.ai/register, key pasted on the Setup step).
   const [nexEmail, setNexEmail] = useState("");
   const [nexSignupStatus, setNexSignupStatus] =
-    useState<NexSignupStatus>("hidden");
+    useState<NexSignupStatus>("open");
   const [nexSignupError, setNexSignupError] = useState("");
 
   // Step 4: team
@@ -224,7 +225,13 @@ export function Wizard({ onComplete }: WizardProps) {
   const [apiKeys, setApiKeys] = useState<Record<string, string>>({});
   // If we restored runtime choices from a draft, mark as user-edited so
   // the prereq bootstrap effect doesn't overwrite them with defaults.
-  const userEditedRuntimeRef = useRef(initialDraft !== null);
+  // Only treat the draft as edited when it actually carried a runtime —
+  // an empty draft (welcome-step bail) shouldn't suppress auto-detect on
+  // the next visit, otherwise the no-clicks happy path silently breaks.
+  const userEditedRuntimeRef = useRef(
+    initialDraft !== null &&
+      (seed.runtimePriority.length > 0 || seed.localProvider !== ""),
+  );
 
   // Step 6: first task
   const [taskTemplates, setTaskTemplates] = useState<TaskTemplate[]>([]);
@@ -451,14 +458,6 @@ export function Wizard({ onComplete }: WizardProps) {
     setApiKeys((prev) => ({ ...prev, [key]: value }));
   }, []);
 
-  // Open the in-wizard Nex signup affordance. A separate handler (not just
-  // `setNexSignupStatus('open')` inline) keeps the error/email state reset in
-  // one place — reopening after a failed attempt shouldn't leak the old error.
-  const openNexSignup = useCallback(() => {
-    setNexSignupError("");
-    setNexSignupStatus("open");
-  }, []);
-
   // Submit the email to /nex/register. On success: mark status 'ok' so the
   // UI tells the user to check their inbox. On ErrNotInstalled (502 from the
   // broker when nex-cli isn't on PATH): flip to 'fallback' — the user gets an
@@ -486,20 +485,6 @@ export function Wizard({ onComplete }: WizardProps) {
       setNexSignupError(msg);
     }
   }, [nexEmail]);
-
-  // Close the Nex signup panel via Escape — keeps the outer Escape handler
-  // in `useKeyboardShortcuts` free to act on app-level panels without
-  // fighting the wizard's internal affordance.
-  const closeNexSignup = useCallback(() => {
-    if (
-      nexSignupStatus === "open" ||
-      nexSignupStatus === "ok" ||
-      nexSignupStatus === "fallback"
-    ) {
-      setNexSignupStatus("hidden");
-      setNexSignupError("");
-    }
-  }, [nexSignupStatus]);
 
   // Compute readiness checks. Runs at render time for the 'ready' step — no
   // useMemo because the surface is small (6 checks) and recomputation only
@@ -753,7 +738,12 @@ export function Wizard({ onComplete }: WizardProps) {
     // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") {
-        closeNexSignup();
+        // Escape on the optional Nex step skips it; on other steps it's a
+        // no-op (outer keyboard shortcuts can act on app-level panels).
+        if (step === "nex") {
+          e.preventDefault();
+          nextStep();
+        }
         return;
       }
       if (e.key !== "Enter") return;
@@ -767,8 +757,16 @@ export function Wizard({ onComplete }: WizardProps) {
       // Don't hijack Enter on interactive controls — Enter on a focused
       // Back button should go back, not advance; Enter on a runtime
       // reorder button should reorder, not advance.
+      // Exception: template-card buttons should let Enter advance the step
+      // (preventDefault stops the native toggle so the card stays selected).
       const tag = target?.tagName;
-      if (tag === "BUTTON" || tag === "A" || tag === "SELECT") return;
+      const isTemplateCard =
+        target?.classList?.contains("template-card") ?? false;
+      if (
+        (tag === "BUTTON" || tag === "A" || tag === "SELECT") &&
+        !isTemplateCard
+      )
+        return;
       const inTextarea = tag === "TEXTAREA";
       const isSubmitCombo = e.metaKey || e.ctrlKey;
       if (inTextarea && !isSubmitCombo) return;
@@ -808,6 +806,24 @@ export function Wizard({ onComplete }: WizardProps) {
             nextStep();
           }
           return;
+        case "nex":
+          // Mirror the step's primary CTA: register if the user has typed an
+          // email, advance otherwise. This prevents a user from typing an
+          // address, tabbing away, then pressing Enter and skipping signup.
+          // While a registration is in flight the press is a no-op so a
+          // stray Enter can't race the API call and skip the step.
+          e.preventDefault();
+          if (nexSignupStatus === "submitting") {
+            return;
+          }
+          if (nexSignupStatus === "ok" || nexSignupStatus === "fallback") {
+            nextStep();
+          } else if (nexEmail.trim().length > 0) {
+            submitNexSignup();
+          } else {
+            nextStep();
+          }
+          return;
         case "task":
           if (isSubmitCombo) {
             e.preventDefault();
@@ -840,8 +856,10 @@ export function Wizard({ onComplete }: WizardProps) {
     goTo,
     nextStep,
     finishOnboarding,
-    closeNexSignup,
     localProvider,
+    nexEmail,
+    nexSignupStatus,
+    submitNexSignup,
   ]);
 
   // Debounced persistence of the non-secret draft. extractDraftableState
@@ -868,6 +886,9 @@ export function Wizard({ onComplete }: WizardProps) {
     setCompany("");
     setDescription("");
     setPriority("");
+    setNexEmail("");
+    setNexSignupStatus("open");
+    setNexSignupError("");
     setRuntimePriority([]);
     setLocalProvider("");
     setApiKeys({});
@@ -936,15 +957,9 @@ export function Wizard({ onComplete }: WizardProps) {
             company={company}
             description={description}
             priority={priority}
-            nexEmail={nexEmail}
-            nexSignupStatus={nexSignupStatus}
-            nexSignupError={nexSignupError}
             onChangeCompany={setCompany}
             onChangeDescription={setDescription}
             onChangePriority={setPriority}
-            onChangeNexEmail={setNexEmail}
-            onSubmitNexSignup={submitNexSignup}
-            onOpenNexSignup={openNexSignup}
             onNext={nextStep}
             onBack={prevStep}
           />
@@ -983,6 +998,18 @@ export function Wizard({ onComplete }: WizardProps) {
               selectedBlueprint,
               blueprints,
             )}
+            onNext={nextStep}
+            onBack={prevStep}
+          />
+        )}
+
+        {step === "nex" && (
+          <NexStep
+            email={nexEmail}
+            status={nexSignupStatus}
+            error={nexSignupError}
+            onChangeEmail={setNexEmail}
+            onSubmit={submitNexSignup}
             onNext={nextStep}
             onBack={prevStep}
           />
