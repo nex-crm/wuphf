@@ -616,6 +616,7 @@ jobs:
             tests/smoke.spec.ts \
             tests/app-routes.spec.ts \
             tests/route-matrix.spec.ts \
+            tests/route-regressions.spec.ts \
             tests/sidebar-scroll.spec.ts \
             tests/chat.spec.ts \
             tests/slash-commands.spec.ts \
