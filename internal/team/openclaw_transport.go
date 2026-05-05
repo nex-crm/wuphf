@@ -42,14 +42,15 @@ func (b *OpenclawBridge) Binding() transport.Binding {
 }
 
 // Run starts the supervised bridge and blocks until ctx is cancelled. The
-// host parameter is currently unused — Phase 4 will route inbound assistant
-// messages through host.ReceiveMessage instead of the direct broker call in
-// handleClientEvent. For now Run preserves the existing supervised-loop
-// behavior so RegisterTransports can drive both lifecycle paths uniformly.
-func (b *OpenclawBridge) Run(ctx context.Context, _ transport.Host) error {
+// host is attached before Start so handleClientEvent routes inbound assistant
+// messages through host.ReceiveMessage instead of writing to the broker
+// directly. Callers that drive the bridge via Start (probes, integration
+// tests) bypass the host and fall back to the legacy broker entrypoint.
+func (b *OpenclawBridge) Run(ctx context.Context, host transport.Host) error {
 	if b == nil {
 		return fmt.Errorf("openclaw: nil bridge")
 	}
+	b.attachHost(host)
 	if err := b.Start(ctx); err != nil {
 		return err
 	}

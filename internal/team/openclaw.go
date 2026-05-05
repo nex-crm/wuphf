@@ -12,6 +12,7 @@ import (
 
 	"github.com/nex-crm/wuphf/internal/config"
 	"github.com/nex-crm/wuphf/internal/openclaw"
+	"github.com/nex-crm/wuphf/internal/team/transport"
 )
 
 var defaultOpenclawRetryDelays = []time.Duration{1 * time.Second, 5 * time.Second, 30 * time.Second}
@@ -70,6 +71,37 @@ type OpenclawBridge struct {
 	healthMu      sync.RWMutex
 	lastSuccessAt time.Time
 	lastError     error
+
+	// hostMu guards host. Set once by Run() before the supervised loop calls
+	// handleClientEvent; reads are O(1) on the hot inbound path. When nil,
+	// postBridgeMessage falls back to the direct broker entrypoint so legacy
+	// callers (probes, tests) that drive the bridge via Start() continue to work.
+	hostMu sync.RWMutex
+	host   transport.Host
+}
+
+// attachHost binds a transport.Host to the bridge. Called by Run() before the
+// supervised loop starts so handleClientEvent can route inbound assistant
+// messages through the host contract instead of writing to the broker
+// directly. Idempotent: repeated calls overwrite the host pointer atomically.
+func (b *OpenclawBridge) attachHost(h transport.Host) {
+	if b == nil {
+		return
+	}
+	b.hostMu.Lock()
+	b.host = h
+	b.hostMu.Unlock()
+}
+
+// getHost returns the currently attached transport.Host, or nil when the
+// bridge is being driven via Start() instead of Run().
+func (b *OpenclawBridge) getHost() transport.Host {
+	if b == nil {
+		return nil
+	}
+	b.hostMu.RLock()
+	defer b.hostMu.RUnlock()
+	return b.host
 }
 
 // HasSlug reports whether the given slug is bound to a bridged OpenClaw
@@ -520,7 +552,7 @@ func (b *OpenclawBridge) handleClientEvent(evt openclaw.ClientEvent) {
 			if channel == "" {
 				channel = "general"
 			}
-			b.postBridgeMessage(slug, channel, text)
+			b.postBridgeMessage(slug, channel, evt.SessionMessage.SessionKey, text)
 		}
 	case openclaw.EventKindChanged:
 		if evt.SessionsChanged != nil && evt.SessionsChanged.Reason == "ended" {
@@ -611,14 +643,39 @@ func (b *OpenclawBridge) OnOfficeMessage(ctx context.Context, slug, channel, mes
 	return lastErr
 }
 
-// postBridgeMessage posts a bridged-agent chat message into the given channel
-// via the same broker entrypoint telegram.go uses for incoming chat.
-func (b *OpenclawBridge) postBridgeMessage(slug, channel, text string) {
-	if b.broker == nil {
-		return
-	}
+// postBridgeMessage posts a bridged-agent chat message into the given channel.
+// Prefers the transport.Host contract (set by Run) so the host owns the
+// per-transport worker boundary; falls back to the direct broker entrypoint
+// when the bridge is being driven via Start (probes, integration tests).
+func (b *OpenclawBridge) postBridgeMessage(slug, channel, sessionKey, text string) {
 	if channel == "" {
 		channel = "general"
+	}
+	if host := b.getHost(); host != nil {
+		ctx := b.ctx
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		err := host.ReceiveMessage(ctx, transport.Message{
+			Participant: transport.Participant{
+				AdapterName: openclawAdapterName,
+				Key:         sessionKey,
+				DisplayName: slug,
+			},
+			Binding: transport.Binding{
+				Scope:       transport.ScopeMember,
+				MemberSlug:  slug,
+				ChannelSlug: channel,
+			},
+			Text: text,
+		})
+		if err != nil && b.ctx != nil && b.ctx.Err() == nil {
+			b.postSystemMessage(fmt.Sprintf("inbound from @%s: %v", slug, err))
+		}
+		return
+	}
+	if b.broker == nil {
+		return
 	}
 	_, _ = b.broker.PostInboundSurfaceMessage(slug, channel, text, "openclaw")
 }
