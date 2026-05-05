@@ -267,9 +267,12 @@ func (b *Broker) acceptHumanInvite(token, displayName, device string) (string, h
 // the same per-session teardown path runs whether triggered through the
 // adapter or directly via revokeHumanSession.
 //
-// Returns an error only when the invite is unknown; an already-revoked invite
-// is a no-op success that still returns any sessions still active under it
-// (caller can decide whether to retry teardown).
+// Returns an error when the invite is unknown or when persisting the mutation
+// fails. On a save failure the in-memory mutation is rolled back so a restart
+// will not see a half-revoked state — without this rollback an attacker who
+// still has the invite token could re-join after the next restart because the
+// persisted state would still show the invite live. An already-revoked invite
+// is a no-op success that returns any sessions still active under it.
 func (b *Broker) RevokeHumanInvite(inviteID string) ([]string, error) {
 	inviteID = strings.TrimSpace(inviteID)
 	if inviteID == "" {
@@ -278,19 +281,19 @@ func (b *Broker) RevokeHumanInvite(inviteID string) ([]string, error) {
 	now := time.Now().UTC()
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	found := false
+	idx := -1
 	for i := range b.humanInvites {
-		if b.humanInvites[i].ID != inviteID {
-			continue
+		if b.humanInvites[i].ID == inviteID {
+			idx = i
+			break
 		}
-		found = true
-		if b.humanInvites[i].RevokedAt == "" {
-			b.humanInvites[i].RevokedAt = now.Format(time.RFC3339)
-		}
-		break
 	}
-	if !found {
+	if idx < 0 {
 		return nil, errors.New("invite not found")
+	}
+	prevRevokedAt := b.humanInvites[idx].RevokedAt
+	if prevRevokedAt == "" {
+		b.humanInvites[idx].RevokedAt = now.Format(time.RFC3339)
 	}
 	var affected []string
 	for i := range b.humanSessions {
@@ -301,7 +304,10 @@ func (b *Broker) RevokeHumanInvite(inviteID string) ([]string, error) {
 		affected = append(affected, s.ID)
 	}
 	if err := b.saveLocked(); err != nil {
-		return affected, err
+		// Roll back the in-memory mutation so a restart cannot see a state
+		// where the invite was marked revoked in memory but never persisted.
+		b.humanInvites[idx].RevokedAt = prevRevokedAt
+		return nil, fmt.Errorf("share: RevokeHumanInvite save: %w", err)
 	}
 	return affected, nil
 }

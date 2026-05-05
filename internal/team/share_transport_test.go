@@ -2,6 +2,7 @@ package team
 
 import (
 	"context"
+	"errors"
 	"runtime"
 	"strings"
 	"sync"
@@ -13,20 +14,37 @@ import (
 // TestShareTransportRunRequiresHost confirms Run rejects a nil host so a
 // misconfigured launcher fails loudly instead of silently degrading.
 func TestShareTransportRunRequiresHost(t *testing.T) {
-	st := NewShareTransport(newTestBroker(t), nil)
+	st := NewShareTransport(newTestBroker(t), RelativeJoinURL)
 	err := st.Run(context.Background(), nil)
 	if err == nil {
 		t.Fatal("Run(nil host) returned nil error; want guard error")
 	}
 }
 
+// TestNewShareTransportRequiresBuilder confirms a nil JoinURLBuilder panics on
+// construction. The launcher must pass an explicit builder (RelativeJoinURL
+// for the degenerate case) so future contract consumers cannot get a silent
+// relative-path URL where they expected an absolute one.
+func TestNewShareTransportRequiresBuilder(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("NewShareTransport(_, nil) did not panic")
+		}
+	}()
+	_ = NewShareTransport(newTestBroker(t), nil)
+}
+
 // TestShareTransportNameAndBinding pins the stable adapter identity and scope
 // declaration. Changing either is a contract break — admitted-human identity
-// is keyed off shareAdapterName across restarts.
+// is keyed off shareAdapterName across restarts. The name must also be a
+// valid Go identifier per Transport.Name() (no hyphens, no spaces).
 func TestShareTransportNameAndBinding(t *testing.T) {
-	st := NewShareTransport(newTestBroker(t), nil)
-	if got, want := st.Name(), "human-share"; got != want {
+	st := NewShareTransport(newTestBroker(t), RelativeJoinURL)
+	if got, want := st.Name(), "share"; got != want {
 		t.Errorf("Name(): got %q want %q", got, want)
+	}
+	if strings.ContainsAny(st.Name(), "- ") {
+		t.Errorf("Name() %q must be a valid Go identifier (no hyphens, no spaces)", st.Name())
 	}
 	binding := st.Binding()
 	if binding.Scope != transport.ScopeOffice {
@@ -37,13 +55,13 @@ func TestShareTransportNameAndBinding(t *testing.T) {
 	}
 }
 
-// TestShareTransportCreateInviteFallback verifies CreateInvite returns a
-// relative /join/<token> path when no urlBuilder is injected. This is the
-// path the launcher takes today; production wiring of an absolute URL will
-// arrive when the share controller adopts the adapter.
-func TestShareTransportCreateInviteFallback(t *testing.T) {
+// TestShareTransportCreateInviteRelativeBuilder verifies the degenerate
+// RelativeJoinURL builder produces /join/<token>. This is the path the
+// launcher takes today; an absolute-URL builder will arrive when the share
+// controller adopts the adapter.
+func TestShareTransportCreateInviteRelativeBuilder(t *testing.T) {
 	b := newTestBroker(t)
-	st := NewShareTransport(b, nil)
+	st := NewShareTransport(b, RelativeJoinURL)
 	got, err := st.CreateInvite(context.Background(), "tailscale")
 	if err != nil {
 		t.Fatalf("CreateInvite: %v", err)
@@ -90,7 +108,7 @@ func TestShareTransportCreateInviteUsesBuilder(t *testing.T) {
 // teardown that the OfficeBoundTransport contract requires.
 func TestShareTransportRevokeInviteFansOutToHost(t *testing.T) {
 	b := newTestBroker(t)
-	st := NewShareTransport(b, nil)
+	st := NewShareTransport(b, RelativeJoinURL)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -125,8 +143,8 @@ func TestShareTransportRevokeInviteFansOutToHost(t *testing.T) {
 		t.Fatalf("host.RevokeParticipant call count: got %d want %d", got, want)
 	}
 	call := host.revokeCalls()[0]
-	if call.adapter != "human-share" {
-		t.Errorf("RevokeParticipant adapter: got %q want %q", call.adapter, "human-share")
+	if call.adapter != shareAdapterName {
+		t.Errorf("RevokeParticipant adapter: got %q want %q", call.adapter, shareAdapterName)
 	}
 	if call.key != session.ID {
 		t.Errorf("RevokeParticipant key: got %q want %q", call.key, session.ID)
@@ -153,17 +171,144 @@ func TestShareTransportRevokeInviteFansOutToHost(t *testing.T) {
 // broker error for an unknown invite ID rather than silently succeeding.
 func TestShareTransportRevokeInviteUnknown(t *testing.T) {
 	b := newTestBroker(t)
-	st := NewShareTransport(b, nil)
+	st := NewShareTransport(b, RelativeJoinURL)
 	err := st.RevokeInvite(context.Background(), "invite-does-not-exist")
 	if err == nil {
 		t.Fatal("RevokeInvite(unknown) returned nil; want error")
 	}
 }
 
-// TestBrokerTransportHostRevokeParticipantHumanShare confirms the host stub
-// added in this slice routes human-share keys to revokeHumanSession and
-// rejects unknown adapter names.
-func TestBrokerTransportHostRevokeParticipantHumanShare(t *testing.T) {
+// TestShareTransportRevokeInviteWithoutRun pins the silent-success branch in
+// RevokeInvite: when Run has never been called, host.Load() returns nil and
+// the broker-level revoke must still happen. Guards against a refactor that
+// reorders the broker call after the nil-host check (which would skip the
+// invite revoke entirely when Run is not yet up).
+func TestShareTransportRevokeInviteWithoutRun(t *testing.T) {
+	b := newTestBroker(t)
+	st := NewShareTransport(b, RelativeJoinURL)
+
+	if _, _, err := b.createHumanInvite(); err != nil {
+		t.Fatalf("createHumanInvite: %v", err)
+	}
+	inviteID := lastHumanInviteID(b)
+
+	if err := st.RevokeInvite(context.Background(), inviteID); err != nil {
+		t.Fatalf("RevokeInvite without Run: %v", err)
+	}
+	if !inviteRevoked(b, inviteID) {
+		t.Errorf("invite %q not marked revoked despite RevokeInvite returning nil", inviteID)
+	}
+}
+
+// TestShareTransportRevokeInviteIdempotent calls RevokeInvite twice on the
+// same invite. The second call must succeed and not re-fan-out to the host —
+// the affected-sessions list returned by Broker.RevokeHumanInvite is empty on
+// a second call (the only session was already revoked), so host.
+// RevokeParticipant must not be invoked again. Guards the retry contract that
+// RevokeInvite's docstring describes.
+func TestShareTransportRevokeInviteIdempotent(t *testing.T) {
+	b := newTestBroker(t)
+	st := NewShareTransport(b, RelativeJoinURL)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	host := &recordingHost{broker: b}
+
+	runErr := make(chan error, 1)
+	go func() { runErr <- st.Run(ctx, host) }()
+
+	token, _, err := b.createHumanInvite()
+	if err != nil {
+		t.Fatalf("createHumanInvite: %v", err)
+	}
+	inviteID := lastHumanInviteID(b)
+	if _, _, err := b.acceptHumanInvite(token, "Mira", ""); err != nil {
+		t.Fatalf("acceptHumanInvite: %v", err)
+	}
+
+	if err := st.RevokeInvite(ctx, inviteID); err != nil {
+		t.Fatalf("RevokeInvite #1: %v", err)
+	}
+	firstCallCount := len(host.revokeCalls())
+
+	if err := st.RevokeInvite(ctx, inviteID); err != nil {
+		t.Fatalf("RevokeInvite #2: %v", err)
+	}
+	if got := len(host.revokeCalls()); got != firstCallCount {
+		t.Errorf("RevokeInvite #2 fanned out again: call count went %d -> %d", firstCallCount, got)
+	}
+
+	cancel()
+	if err := <-runErr; err != nil {
+		t.Fatalf("Run returned: %v", err)
+	}
+}
+
+// TestShareTransportRevokeInviteAccumulatesErrors verifies that when more than
+// one session is admitted under a single invite (impossible via the current
+// acceptHumanInvite single-accept rule, but exercised here by appending a
+// second session directly to broker state) a host error on the first session
+// does not stop the second from being revoked, and both errors are returned
+// via errors.Join. Without this loop guard a partial fan-out would leave
+// later sessions live under a revoked invite.
+func TestShareTransportRevokeInviteAccumulatesErrors(t *testing.T) {
+	b := newTestBroker(t)
+	st := NewShareTransport(b, RelativeJoinURL)
+
+	token, _, err := b.createHumanInvite()
+	if err != nil {
+		t.Fatalf("createHumanInvite: %v", err)
+	}
+	inviteID := lastHumanInviteID(b)
+	if _, _, err := b.acceptHumanInvite(token, "Mira", ""); err != nil {
+		t.Fatalf("acceptHumanInvite: %v", err)
+	}
+	// Inject a second session under the same invite so we can exercise a
+	// multi-session fan-out. Bypasses acceptHumanInvite's single-accept rule
+	// because the production code today never produces this state — we test
+	// the loop semantics, not the broker policy.
+	b.mu.Lock()
+	b.humanSessions = append(b.humanSessions, humanSession{
+		ID:        "session-injected",
+		InviteID:  inviteID,
+		HumanSlug: "extra",
+	})
+	if b.humanSessionRevoke == nil {
+		b.humanSessionRevoke = make(map[string]chan struct{})
+	}
+	b.humanSessionRevoke["session-injected"] = make(chan struct{})
+	b.mu.Unlock()
+
+	failFirst := &erroringHost{
+		broker:   b,
+		failOnce: errors.New("synthetic revoke failure"),
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	runErr := make(chan error, 1)
+	go func() { runErr <- st.Run(ctx, failFirst) }()
+
+	err = st.RevokeInvite(ctx, inviteID)
+	if err == nil {
+		t.Fatal("RevokeInvite returned nil; want joined error")
+	}
+	if !strings.Contains(err.Error(), "synthetic revoke failure") {
+		t.Errorf("RevokeInvite error %v should include first-call failure", err)
+	}
+	if got := len(failFirst.revokeCalls()); got != 2 {
+		t.Errorf("RevokeParticipant call count: got %d want 2 (loop must continue past first error)", got)
+	}
+
+	cancel()
+	if err := <-runErr; err != nil {
+		t.Fatalf("Run returned: %v", err)
+	}
+}
+
+// TestBrokerTransportHostRevokeParticipantShare confirms the host stub added
+// in this slice routes share-adapter keys to revokeHumanSession and rejects
+// unknown adapter names.
+func TestBrokerTransportHostRevokeParticipantShare(t *testing.T) {
 	b := newTestBroker(t)
 	host := &brokerTransportHost{broker: b}
 
@@ -176,7 +321,7 @@ func TestBrokerTransportHostRevokeParticipantHumanShare(t *testing.T) {
 		t.Fatalf("acceptHumanInvite: %v", err)
 	}
 
-	if err := host.RevokeParticipant(context.Background(), "human-share", session.ID); err != nil {
+	if err := host.RevokeParticipant(context.Background(), shareAdapterName, session.ID); err != nil {
 		t.Fatalf("RevokeParticipant: %v", err)
 	}
 	if b.humanSessionIDActive(session.ID) {
@@ -195,7 +340,7 @@ func TestBrokerTransportHostRevokeParticipantHumanShare(t *testing.T) {
 // in stops a future refactor from making Send error and breaking outbound
 // office broadcasts.
 func TestShareTransportSendIsNoop(t *testing.T) {
-	st := NewShareTransport(newTestBroker(t), nil)
+	st := NewShareTransport(newTestBroker(t), RelativeJoinURL)
 	if err := st.Send(context.Background(), transport.Outbound{Text: "hello"}); err != nil {
 		t.Errorf("Send returned %v; want nil for human-share", err)
 	}
@@ -203,7 +348,7 @@ func TestShareTransportSendIsNoop(t *testing.T) {
 
 // TestShareTransportHealthBeforeRun pins the pre-Run health state.
 func TestShareTransportHealthBeforeRun(t *testing.T) {
-	st := NewShareTransport(newTestBroker(t), nil)
+	st := NewShareTransport(newTestBroker(t), RelativeJoinURL)
 	if got := st.Health().State; got != transport.HealthDisconnected {
 		t.Errorf("Health() before Run: got %q want %q", got, transport.HealthDisconnected)
 	}
@@ -215,7 +360,7 @@ func TestShareTransportHealthBeforeRun(t *testing.T) {
 // so a regression that always reports Disconnected would silently degrade the
 // UI).
 func TestShareTransportHealthAfterRun(t *testing.T) {
-	st := NewShareTransport(newTestBroker(t), nil)
+	st := NewShareTransport(newTestBroker(t), RelativeJoinURL)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	if err := st.Run(ctx, &recordingHost{}); err != nil {
@@ -264,6 +409,45 @@ func (h *recordingHost) RevokeParticipant(ctx context.Context, adapterName, key 
 }
 
 func (h *recordingHost) revokeCalls() []revokeCall {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	out := make([]revokeCall, len(h.revoked))
+	copy(out, h.revoked)
+	return out
+}
+
+// erroringHost returns failOnce as the error from the first RevokeParticipant
+// call, then delegates subsequent calls to the broker. Used to verify the
+// fan-out loop continues past errors and accumulates them via errors.Join.
+type erroringHost struct {
+	broker   *Broker
+	failOnce error
+	mu       sync.Mutex
+	revoked  []revokeCall
+}
+
+func (h *erroringHost) ReceiveMessage(_ context.Context, _ transport.Message) error { return nil }
+func (h *erroringHost) UpsertParticipant(_ context.Context, _ transport.Participant, _ transport.Binding) error {
+	return nil
+}
+func (h *erroringHost) DetachParticipant(_ context.Context, _, _ string) error { return nil }
+
+func (h *erroringHost) RevokeParticipant(ctx context.Context, adapterName, key string) error {
+	h.mu.Lock()
+	h.revoked = append(h.revoked, revokeCall{adapter: adapterName, key: key})
+	first := h.failOnce
+	h.failOnce = nil
+	h.mu.Unlock()
+	if first != nil {
+		return first
+	}
+	if h.broker == nil {
+		return nil
+	}
+	return (&brokerTransportHost{broker: h.broker}).RevokeParticipant(ctx, adapterName, key)
+}
+
+func (h *erroringHost) revokeCalls() []revokeCall {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	out := make([]revokeCall, len(h.revoked))

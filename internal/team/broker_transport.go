@@ -48,16 +48,17 @@ func (h *brokerTransportHost) ReceiveMessage(_ context.Context, msg transport.Me
 
 // UpsertParticipant is a no-op for channel-bound adapters (Telegram). Channel-
 // bound participant identity is resolved by display name inside
-// PostInboundSurfaceMessage. Phase 3b will add a real member-store lookup for
-// member-bound adapters (OpenClaw).
+// PostInboundSurfaceMessage. A real member-store lookup for member-bound
+// adapters (OpenClaw) is not yet wired here.
 func (h *brokerTransportHost) UpsertParticipant(_ context.Context, _ transport.Participant, _ transport.Binding) error {
 	return nil
 }
 
-// DetachParticipant marks a participant as offline. Phase 3b TODO for
-// member-bound adapters (OpenClaw).
+// DetachParticipant marks a participant as offline. Not yet implemented for
+// member-bound adapters (OpenClaw); inbound calls return an explicit
+// unsupported error so a misconfigured caller fails loudly.
 func (h *brokerTransportHost) DetachParticipant(_ context.Context, adapterName, _ string) error {
-	return fmt.Errorf("transport: DetachParticipant not yet implemented (phase 3b): adapter=%q",
+	return fmt.Errorf("transport: DetachParticipant not yet implemented: adapter=%q",
 		adapterName)
 }
 

@@ -96,12 +96,12 @@ func RegisterTransports(b *Broker) (func(), error) {
 	// Human-share: always registered. The adapter wraps the in-process
 	// invite/session surface in broker_human_share.go so RegisterTransports
 	// owns the OfficeBoundTransport lifecycle alongside Telegram and OpenClaw.
-	// urlBuilder is nil here because the launcher does not know the share
-	// controller's bind address (the share controller lives in cmd/wuphf and
-	// boots independently); CreateInvite returns the relative "/join/<token>"
-	// path until the share controller adopts the adapter and supplies a
-	// builder.
-	share := NewShareTransport(b, nil)
+	// RelativeJoinURL is the explicit degenerate builder used here because the
+	// launcher does not know the share controller's bind address (the share
+	// controller lives in cmd/wuphf and boots independently). When the share
+	// controller adopts the adapter for invite creation it will supply an
+	// absolute-URL builder via NewShareTransport.
+	share := NewShareTransport(b, RelativeJoinURL)
 	shareCtx, shareCancel := context.WithCancel(context.Background())
 	shareDone := make(chan struct{})
 	shareHost := &brokerTransportHost{broker: b}
