@@ -1990,6 +1990,104 @@ html[data-theme="nex"]
   opacity: 0;
 }
 
+/* ─── Agent event pill ───────────────────────────────────────────
+   Replaces the secondary `.sidebar-agent-task` text line per agent
+   row. Inherits typography from .sidebar-agent-task (10px,
+   --text-tertiary). State drives chrome via `data-state`.
+   See web/DESIGN.md and the agent-event-bubbles design doc.
+   ─────────────────────────────────────────────────────────────── */
+.sidebar-agent-pill {
+  /* block, not inline — text-overflow/max-width/overflow only apply to
+     a box, otherwise long activity strings spill past the slot. */
+  display: block;
+  font-size: 10px;
+  color: var(--text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 140px;
+  /* Compositor-only properties (opacity, transform, filter) are the only
+     things we transition. Layout-bound props are forbidden here. */
+  opacity: 1;
+  transform: translateZ(0);
+  filter: none;
+  transition: none;
+  will-change: opacity, filter;
+}
+
+.sidebar-agent-pill[data-state="halo"] {
+  /* Halo glow uses filter (compositor-friendly) instead of box-shadow on
+     the layout-affecting border edge. */
+  filter: drop-shadow(0 0 var(--bubble-halo-radius) var(--bubble-talking));
+}
+
+.sidebar-agent-pill[data-state="holding"] {
+  opacity: 1;
+}
+
+.sidebar-agent-pill[data-state="dim"] {
+  opacity: 0.7;
+}
+
+.sidebar-agent-pill[data-state="idle"] {
+  opacity: 0.5;
+  font-style: italic;
+}
+
+.sidebar-agent-pill[data-state="stuck"] {
+  /* Bordered chrome is structural — it carries the stuck signal under
+     reduced-motion where halo and opacity transitions are suppressed. */
+  border: 1px solid var(--bubble-stuck);
+  border-radius: 4px;
+  padding: 0 4px;
+  color: var(--bubble-stuck);
+  font-weight: 600;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .sidebar-agent-pill {
+    transition:
+      opacity var(--bubble-idle-dim-duration) ease-out,
+      filter var(--bubble-halo-duration) ease-out;
+  }
+  .sidebar-agent-pill[data-state="halo"] {
+    transition:
+      opacity var(--bubble-pulse-fade-in) ease-out,
+      filter var(--bubble-halo-duration) ease-out;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-agent-pill {
+    transition: none;
+  }
+  .sidebar-agent-pill[data-state="halo"] {
+    /* No halo glow under reduced motion. Border on stuck still renders
+       because it is structural, not motion. */
+    filter: none;
+  }
+}
+
+/* Disconnect grace: dim every agent row and surface a "Reconnecting…" tag at
+   the bottom of the rail. Polling continues underneath so state recovers
+   automatically; this just makes the loss-of-liveness visible to the user. */
+.sidebar-agents:has(.sidebar-agents-reconnecting) .sidebar-agent {
+  opacity: 0.7;
+  transition: opacity 200ms ease-out;
+}
+.sidebar-agents-reconnecting {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  padding: 6px 8px 4px;
+  text-align: center;
+  font-style: italic;
+}
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-agents:has(.sidebar-agents-reconnecting) .sidebar-agent {
+    transition: none;
+  }
+}
+
 /*
  * Team-member session surfaces.
  *
