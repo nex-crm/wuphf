@@ -1,19 +1,26 @@
 import { useEffect, useRef } from "react";
 
 import { useMessages } from "../../hooks/useMessages";
-import { isDMChannel, useAppStore } from "../../stores/app";
 import { AgentTerminal } from "../agents/AgentTerminal";
 import { Composer } from "./Composer";
 import { InterviewBar } from "./InterviewBar";
 import { MessageBubble } from "./MessageBubble";
 import { TypingIndicator } from "./TypingIndicator";
 
-export function DMView() {
-  const currentChannel = useAppStore((s) => s.currentChannel);
-  const channelMeta = useAppStore((s) => s.channelMeta);
-  const dm = isDMChannel(currentChannel, channelMeta);
-  const dmAgentSlug = dm?.agentSlug ?? null;
-  const { data: messages = [] } = useMessages(currentChannel);
+interface DMViewProps {
+  agentSlug: string;
+  channelSlug: string;
+}
+
+/**
+ * DMView is rendered only when MainContent's route dispatch matches the
+ * `dm` kind. Receiving the agent + channel slugs as props keeps the
+ * route discrimination in one place — and prevents an empty channel
+ * slug from ever reaching useMessages, which would issue a real broker
+ * request for `["messages", ""]`.
+ */
+export function DMView({ agentSlug, channelSlug }: DMViewProps) {
+  const { data: messages = [] } = useMessages(channelSlug);
   const messagesRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll messages
@@ -57,7 +64,7 @@ export function DMView() {
             overflow: "hidden",
           }}
         >
-          <AgentTerminal slug={dmAgentSlug} title="Live output" />
+          <AgentTerminal slug={agentSlug} title="Live output" />
         </div>
       </div>
     </>

@@ -21,11 +21,16 @@ import { getRequests } from "../../api/client";
 import { fetchReviews } from "../../api/notebook";
 import { useOverflow } from "../../hooks/useOverflow";
 import { SIDEBAR_APPS } from "../../lib/constants";
-import { useAppStore } from "../../stores/app";
+import { navigateToSidebarApp } from "../../lib/sidebarNav";
+import { WIKI_SURFACE_APP_IDS } from "../../routes/routeRegistry";
+import {
+  useCurrentApp,
+  useFallbackChannelSlug,
+} from "../../routes/useCurrentRoute";
 
 // Notebooks and reviews render inside the Wiki app shell via tabs, so the
 // 'Wiki' sidebar entry lights up for any of those three currentApp values.
-const WIKI_SURFACE_APPS = new Set(["wiki", "notebooks", "reviews"]);
+const WIKI_SURFACE_APPS = new Set<string>(WIKI_SURFACE_APP_IDS);
 
 const APP_ICONS: Record<string, ComponentType<{ className?: string }>> = {
   studio: Play,
@@ -44,9 +49,12 @@ const APP_ICONS: Record<string, ComponentType<{ className?: string }>> = {
 };
 
 export function AppList() {
-  const currentApp = useAppStore((s) => s.currentApp);
-  const setCurrentApp = useAppStore((s) => s.setCurrentApp);
-  const currentChannel = useAppStore((s) => s.currentChannel);
+  const currentApp = useCurrentApp();
+  // The Requests badge uses the channel-scoped /requests endpoint. Read
+  // the last-visited channel here so the badge reflects the user's
+  // working channel even while they're parked on a non-conversation
+  // surface (apps, wiki, notebooks).
+  const currentChannel = useFallbackChannelSlug();
 
   const { data: requestsData } = useQuery({
     queryKey: ["requests-badge", currentChannel],
@@ -91,7 +99,7 @@ export function AppList() {
               type="button"
               key={app.id}
               className={`sidebar-item${isActive ? " active" : ""}`}
-              onClick={() => setCurrentApp(app.id)}
+              onClick={() => navigateToSidebarApp(app.id)}
             >
               {Icon ? (
                 <Icon className="sidebar-item-icon" />

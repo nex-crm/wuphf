@@ -5,6 +5,13 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { useAppStore } from "../stores/app";
 import { useBrokerEvents } from "./useBrokerEvents";
 
+function navigateRouter(pathname: string): void {
+  // The hook parses window.location.hash to decide whether the active
+  // route already covers an emitted broker channel, so set the hash
+  // directly. Matches what hash-history navigation produces at runtime.
+  window.location.hash = `#${pathname}`;
+}
+
 class FakeEventSource {
   static created: FakeEventSource[] = [];
   listeners: Record<string, EventListener[]> = {};
@@ -57,21 +64,14 @@ describe("useBrokerEvents unread counts", () => {
     FakeEventSource.created = [];
     (globalThis as { EventSource: unknown }).EventSource =
       FakeEventSource as unknown as typeof EventSource;
-    useAppStore.setState({
-      currentChannel: "general",
-      currentApp: null,
-      unreadByChannel: {},
-    });
+    useAppStore.setState({ unreadByChannel: {} });
+    navigateRouter("/channels/general");
   });
 
   afterEach(() => {
     (globalThis as { EventSource: unknown }).EventSource = originalEventSource;
-    useAppStore.setState({
-      currentChannel: "general",
-      currentApp: null,
-      unreadByChannel: {},
-      brokerConnected: false,
-    });
+    useAppStore.setState({ unreadByChannel: {}, brokerConnected: false });
+    navigateRouter("/channels/general");
   });
 
   it("counts message events for another channel, including thread replies", () => {
@@ -108,11 +108,8 @@ describe("useBrokerEvents unread counts", () => {
   });
 
   it("counts messages for the selected channel while an app is open", () => {
-    useAppStore.setState({
-      currentChannel: "general",
-      currentApp: "tasks",
-      unreadByChannel: {},
-    });
+    navigateRouter("/apps/tasks");
+    useAppStore.setState({ unreadByChannel: {} });
     renderHarness();
     const [source] = FakeEventSource.created;
 
@@ -126,6 +123,38 @@ describe("useBrokerEvents unread counts", () => {
     });
 
     expect(useAppStore.getState().unreadByChannel.general).toBe(1);
+  });
+
+  it("suppresses unread for the canonical DM channel slug while viewing /dm/<agent>", () => {
+    // The hook hashes /dm/<agent> through directChannelSlug to get the
+    // broker's canonical "<lower>__<higher>" pairing — matching what
+    // the broker emits on `message`. This regression-pins that mapping
+    // for both ordering directions.
+    navigateRouter("/dm/pm");
+    renderHarness();
+    const [source] = FakeEventSource.created;
+
+    act(() => {
+      source.emit("message", {
+        message: { id: "msg-1", channel: "human__pm" },
+      });
+    });
+
+    expect(useAppStore.getState().unreadByChannel.human__pm ?? 0).toBe(0);
+  });
+
+  it("suppresses unread for /dm/<agent> when the agent slug sorts after `human`", () => {
+    navigateRouter("/dm/ceo");
+    renderHarness();
+    const [source] = FakeEventSource.created;
+
+    act(() => {
+      source.emit("message", {
+        message: { id: "msg-1", channel: "ceo__human" },
+      });
+    });
+
+    expect(useAppStore.getState().unreadByChannel.ceo__human ?? 0).toBe(0);
   });
 
   it("ignores message events without a channel", () => {

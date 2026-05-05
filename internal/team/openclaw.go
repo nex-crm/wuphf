@@ -4,14 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/nex-crm/wuphf/internal/config"
 	"github.com/nex-crm/wuphf/internal/openclaw"
+	"github.com/nex-crm/wuphf/internal/team/transport"
 )
 
 var defaultOpenclawRetryDelays = []time.Duration{1 * time.Second, 5 * time.Second, 30 * time.Second}
@@ -70,6 +73,12 @@ type OpenclawBridge struct {
 	healthMu      sync.RWMutex
 	lastSuccessAt time.Time
 	lastError     error
+
+	// host is set once by Run before the supervised loop starts. A nil load
+	// means the bridge was driven via Start (probes, integration tests) rather
+	// than Run, in which case postBridgeMessage falls back to the direct broker
+	// entrypoint.
+	host atomic.Pointer[transport.Host]
 }
 
 // HasSlug reports whether the given slug is bound to a bridged OpenClaw
@@ -520,7 +529,7 @@ func (b *OpenclawBridge) handleClientEvent(evt openclaw.ClientEvent) {
 			if channel == "" {
 				channel = "general"
 			}
-			b.postBridgeMessage(slug, channel, text)
+			b.postBridgeMessage(slug, channel, evt.SessionMessage.SessionKey, text)
 		}
 	case openclaw.EventKindChanged:
 		if evt.SessionsChanged != nil && evt.SessionsChanged.Reason == "ended" {
@@ -611,16 +620,50 @@ func (b *OpenclawBridge) OnOfficeMessage(ctx context.Context, slug, channel, mes
 	return lastErr
 }
 
-// postBridgeMessage posts a bridged-agent chat message into the given channel
-// via the same broker entrypoint telegram.go uses for incoming chat.
-func (b *OpenclawBridge) postBridgeMessage(slug, channel, text string) {
-	if b.broker == nil {
-		return
-	}
+// postBridgeMessage posts a bridged-agent chat message into the given channel.
+// Prefers the transport.Host contract (set by Run) so the host owns the
+// per-transport worker boundary; falls back to the direct broker entrypoint
+// when the bridge is being driven via Start (probes, integration tests).
+func (b *OpenclawBridge) postBridgeMessage(slug, channel, sessionKey, text string) {
 	if channel == "" {
 		channel = "general"
 	}
-	_, _ = b.broker.PostInboundSurfaceMessage(slug, channel, text, "openclaw")
+	b.mu.RLock()
+	ctx := b.ctx
+	b.mu.RUnlock()
+	if hp := b.host.Load(); hp != nil {
+		host := *hp
+		participant := transport.Participant{
+			AdapterName: openclawAdapterName,
+			Key:         sessionKey,
+			DisplayName: slug,
+		}
+		binding := transport.Binding{
+			Scope:       transport.ScopeMember,
+			MemberSlug:  slug,
+			ChannelSlug: channel,
+		}
+		if err := host.UpsertParticipant(ctx, participant, binding); err != nil {
+			if ctx != nil && ctx.Err() == nil {
+				b.postSystemMessage(fmt.Sprintf("upsert @%s: %v", slug, err))
+			}
+			return
+		}
+		if err := host.ReceiveMessage(ctx, transport.Message{
+			Participant: participant,
+			Binding:     binding,
+			Text:        text,
+		}); err != nil && ctx != nil && ctx.Err() == nil {
+			b.postSystemMessage(fmt.Sprintf("inbound from @%s: %v", slug, err))
+		}
+		return
+	}
+	if b.broker == nil {
+		return
+	}
+	if _, err := b.broker.PostInboundSurfaceMessage(slug, channel, text, "openclaw"); err != nil {
+		log.Printf("[openclaw] postBridgeMessage: broker rejected message for @%s in #%s: %v", slug, channel, err)
+	}
 }
 
 // postSystemMessage posts a `system`-authored notice into #general.

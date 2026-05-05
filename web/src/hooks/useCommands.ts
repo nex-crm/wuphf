@@ -54,7 +54,6 @@ export const FALLBACK_SLASH_COMMANDS: SlashCommand[] = [
   { name: "/collab", desc: "Switch to collaborative mode", icon: "🤝" },
   { name: "/pause", desc: "Pause all agents", icon: "⏸" },
   { name: "/resume", desc: "Resume all agents", icon: "▶" },
-  { name: "/threads", desc: "See every active thread", icon: "🧵" },
   { name: "/provider", desc: "Switch runtime provider", icon: "⚙" },
   { name: "/connect", desc: "Connect a Telegram chat", icon: "🔌" },
 ];

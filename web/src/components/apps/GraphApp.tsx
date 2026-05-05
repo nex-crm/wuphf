@@ -24,7 +24,7 @@ import {
   fetchEntityGraphAll,
   type GraphAllResponse,
 } from "../../api/entity";
-import { useAppStore } from "../../stores/app";
+import { router } from "../../lib/router";
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -218,8 +218,6 @@ function runSimulation(
 
 // biome-ignore lint/complexity/noExcessiveLinesPerFunction: Existing function length is baselined for a focused follow-up refactor.
 export function GraphApp() {
-  const setCurrentApp = useAppStore((s) => s.setCurrentApp);
-  const setWikiPath = useAppStore((s) => s.setWikiPath);
   const containerRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ width: 800, height: 600 });
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
@@ -296,13 +294,12 @@ export function GraphApp() {
     return counts;
   }, [simResult]);
 
-  const handleNodeClick = useCallback(
-    (node: SimNode) => {
-      setCurrentApp("wiki");
-      setWikiPath(`team/${node.kind}/${node.slug}.md`);
-    },
-    [setCurrentApp, setWikiPath],
-  );
+  const handleNodeClick = useCallback((node: SimNode) => {
+    void router.navigate({
+      to: "/wiki/$",
+      params: { _splat: `team/${node.kind}/${node.slug}.md` },
+    });
+  }, []);
 
   const totalNodes = simResult?.nodes.length ?? 0;
   const totalEdges = simResult?.edges.length ?? 0;

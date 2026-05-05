@@ -20,7 +20,7 @@ import {
 import { createTasks, getOfficeTasks, type Task } from "../../api/tasks";
 import { useTeamLeadSlug } from "../../hooks/useConfig";
 import { useOfficeMembers } from "../../hooks/useMembers";
-import { useAppStore } from "../../stores/app";
+import { router } from "../../lib/router";
 import { confirm as confirmDialog } from "../ui/ConfirmDialog";
 import { LightningIcon } from "../ui/LightningIcon";
 import { SidePanel } from "../ui/SidePanel";
@@ -741,7 +741,6 @@ function SkillActions({
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [actionPending, setActionPending] = useState(false);
   const queryClient = useQueryClient();
-  const setCurrentApp = useAppStore((s) => s.setCurrentApp);
 
   const isPolling = invokePhase === "running";
   const { data: officeTasks } = useQuery({
@@ -790,8 +789,11 @@ function SkillActions({
 
   const handleViewTask = useCallback(() => {
     if (!activeTaskId) return;
-    setCurrentApp("tasks");
-  }, [activeTaskId, setCurrentApp]);
+    void router.navigate({
+      to: "/apps/$appId",
+      params: { appId: "tasks" },
+    });
+  }, [activeTaskId]);
 
   const handleResetInvoke = useCallback(() => {
     setInvokePhase("idle");
