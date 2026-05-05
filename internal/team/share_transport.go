@@ -13,20 +13,20 @@ package team
 // that the adapter (not the Host) drives the per-session teardown after invite
 // revocation.
 //
-// v1 lifecycle invariant: only the revoke half of the OfficeBoundTransport
-// admit/revoke pair is wired through the transport host. Admit happens via the
-// in-process /humans/invites/accept HTTP handler, which calls
-// Broker.acceptHumanInvite directly; the transport host's UpsertParticipant is
-// never invoked for share-admitted humans. This is intentional — admitted
-// humans poll the broker via /api/* routes rather than through the transport
-// contract — but a future phase that wants Host.ReceiveMessage for share
-// participants must close this gap by also calling Host.UpsertParticipant from
-// the accept path.
+// Admit lifecycle: Run installs Broker.SetHumanAdmitHook so every successful
+// invite acceptance via the in-process /humans/invites/accept HTTP handler
+// fans out to Host.UpsertParticipant for the new admitted human. The hook is
+// cleared on Run exit so a stale closure cannot keep firing after shutdown.
+// With both halves of admit/revoke flowing through the transport host,
+// Host.ReceiveMessage for share participants is no longer blocked on a
+// missing UpsertParticipant call — admitted humans are first-class
+// transport.Host participants.
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"sync/atomic"
 	"time"
 
@@ -86,15 +86,15 @@ func (s *ShareTransport) Binding() transport.Binding {
 	return transport.Binding{Scope: transport.ScopeOffice}
 }
 
-// Run stores the host atomically and blocks until ctx is cancelled. The
-// human-share surface is in-process — the existing handlers in
-// broker_human_share.go drive accept directly, so Run does not subscribe to
-// anything external. A nil host is rejected so a misconfigured launcher fails
-// loudly rather than silently degrading.
+// Run stores the host atomically, installs the broker's human-admit hook so
+// the in-process accept handler fans out to Host.UpsertParticipant, and then
+// blocks until ctx is cancelled. The human-share surface is in-process — the
+// existing handlers in broker_human_share.go drive accept directly — so Run
+// does not subscribe to anything external. A nil host is rejected so a
+// misconfigured launcher fails loudly rather than silently degrading.
 //
-// See the file header for the v1 lifecycle invariant: only the revoke half of
-// the OfficeBoundTransport admit/revoke pair flows through the transport host
-// today.
+// The admit hook is cleared on Run exit so a stale closure (capturing the now-
+// stopped host) cannot keep firing if a second adapter installs itself later.
 func (s *ShareTransport) Run(ctx context.Context, host transport.Host) error {
 	if s == nil {
 		return fmt.Errorf("share: nil transport")
@@ -104,8 +104,43 @@ func (s *ShareTransport) Run(ctx context.Context, host transport.Host) error {
 	}
 	s.host.Store(&host)
 	s.startedAt.Store(time.Now().UnixNano())
+	if s.broker != nil {
+		s.broker.SetHumanAdmitHook(s.onHumanAdmit)
+		defer s.broker.SetHumanAdmitHook(nil)
+	}
 	<-ctx.Done()
 	return nil
+}
+
+// onHumanAdmit forwards a successful invite acceptance to Host.UpsertParticipant
+// so the admitted human becomes a first-class transport.Host participant. The
+// host pointer is read via the same atomic the rest of the adapter uses; if
+// Run has not yet stored the pointer (or the adapter is mid-shutdown) the call
+// is a silent no-op — the broker-level humanSession already exists either way.
+//
+// Errors from the host are logged rather than returned: the broker has already
+// persisted the session and replied 200 to the HTTP caller by the time this
+// fires, so an upsert failure cannot be surfaced to the human anymore. Logging
+// keeps it visible without inventing a synthetic admit-failure path.
+func (s *ShareTransport) onHumanAdmit(ctx context.Context, sessionID, slug, displayName string) {
+	if s == nil {
+		return
+	}
+	hp := s.host.Load()
+	if hp == nil {
+		return
+	}
+	host := *hp
+	participant := transport.Participant{
+		AdapterName: shareAdapterName,
+		Key:         sessionID,
+		DisplayName: displayName,
+		Human:       true,
+	}
+	binding := transport.Binding{Scope: transport.ScopeOffice, MemberSlug: slug}
+	if err := host.UpsertParticipant(ctx, participant, binding); err != nil && (ctx == nil || ctx.Err() == nil) {
+		log.Printf("[transport] share: UpsertParticipant for %s: %v", sessionID, err)
+	}
 }
 
 // Send is a no-op for the human-share adapter. Office-wide messages reach
