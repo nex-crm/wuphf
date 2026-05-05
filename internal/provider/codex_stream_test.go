@@ -27,3 +27,33 @@ func TestReadCodexJSONStreamParsesUsage(t *testing.T) {
 		t.Fatalf("unexpected cache usage: %+v", result.Usage)
 	}
 }
+
+// TestReadCodexJSONStreamOversizedLine is the wedge regression. A single
+// JSONL event larger than the prior 4 MiB scanner buffer must drain
+// cleanly and the trailing usage event must still parse. Under the prior
+// bufio.Scanner this would have aborted at the oversized line.
+func TestReadCodexJSONStreamOversizedLine(t *testing.T) {
+	const huge = 5*1024*1024 + 41
+	body := strings.Repeat("x", huge)
+
+	raw := strings.Join([]string{
+		`{"type":"response.output_text.delta","delta":"` + body + `"}`,
+		`{"type":"response.completed","response":{"usage":{"input_tokens":7,"output_tokens":3}}}`,
+	}, "\n")
+
+	var sawDelta bool
+	result, err := ReadCodexJSONStream(strings.NewReader(raw), func(evt CodexStreamEvent) {
+		if evt.Type == "text" && len(evt.Text) == huge {
+			sawDelta = true
+		}
+	})
+	if err != nil {
+		t.Fatalf("oversized-line ReadCodexJSONStream: %v", err)
+	}
+	if !sawDelta {
+		t.Fatal("oversized text delta was not delivered to onEvent")
+	}
+	if result.Usage.InputTokens != 7 || result.Usage.OutputTokens != 3 {
+		t.Fatalf("post-oversized usage not parsed: %+v", result.Usage)
+	}
+}

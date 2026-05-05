@@ -38,6 +38,43 @@ func TestReadOpencodeJSONStreamCollectsTextChunks(t *testing.T) {
 	}
 }
 
+// TestReadOpencodeJSONStreamOversizedLine is the wedge regression. A
+// single text-event line larger than the prior 4 MiB scanner buffer
+// must drain cleanly, the oversized chunk must be delivered to onEvent,
+// and a normal step_finish event after it must still parse. Under the
+// prior bufio.Scanner this would have aborted at the oversized line.
+func TestReadOpencodeJSONStreamOversizedLine(t *testing.T) {
+	const huge = 5*1024*1024 + 11
+	body := strings.Repeat("y", huge)
+
+	stream := strings.Join([]string{
+		`{"type":"text","part":{"text":"` + body + `"}}`,
+		`{"type":"step_finish"}`,
+	}, "\n")
+
+	var sawHuge, sawFinish bool
+	res, err := ReadOpencodeJSONStream(strings.NewReader(stream), func(ev OpencodeStreamEvent) {
+		if ev.Type == "text" && len(ev.Text) == huge {
+			sawHuge = true
+		}
+		if ev.Type == "step_finish" {
+			sawFinish = true
+		}
+	})
+	if err != nil {
+		t.Fatalf("oversized-line ReadOpencodeJSONStream: %v", err)
+	}
+	if !sawHuge {
+		t.Fatal("oversized text chunk was not delivered to onEvent")
+	}
+	if !sawFinish {
+		t.Fatal("step_finish after oversized line was not delivered")
+	}
+	if len(res.FinalMessage) != huge {
+		t.Fatalf("FinalMessage length: got %d, want %d", len(res.FinalMessage), huge)
+	}
+}
+
 func TestReadOpencodeJSONStreamSurfacesToolUseAndResult(t *testing.T) {
 	stream := strings.Join([]string{
 		`{"type":"tool_use","part":{"toolName":"team_wiki_write","callID":"abc123"}}`,
