@@ -71,32 +71,25 @@ func startWriter(t *testing.T, client autoNotebookWriterClient, roster autoNoteb
 	return w
 }
 
-func waitForCalls(t *testing.T, client *fakeNotebookClient, n int) []fakeNotebookCall {
+func waitForCalls(t *testing.T, w *AutoNotebookWriter, client *fakeNotebookClient, n int) []fakeNotebookCall {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if len(client.snapshot()) >= n {
-			break
-		}
-		time.Sleep(5 * time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := w.WaitForCondition(ctx, func() bool {
+		return len(client.snapshot()) >= n
+	}); err != nil {
+		t.Fatalf("waiting for %d calls: %v (got %d)", n, err, len(client.snapshot()))
 	}
-	calls := client.snapshot()
-	if len(calls) < n {
-		t.Fatalf("expected at least %d calls, got %d", n, len(calls))
-	}
-	return calls
+	return client.snapshot()
 }
 
-func waitForCounter(t *testing.T, get func() int64, want int64) {
+func waitForCounter(t *testing.T, w *AutoNotebookWriter, get func() int64, want int64) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if get() >= want {
-			return
-		}
-		time.Sleep(5 * time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := w.WaitForCondition(ctx, func() bool { return get() >= want }); err != nil {
+		t.Fatalf("counter never reached %d: %v (got %d)", want, err, get())
 	}
-	t.Fatalf("counter never reached %d (got %d)", want, get())
 }
 
 func TestAutoNotebookWriter_HandleEnqueuesAndWrites(t *testing.T) {
@@ -112,7 +105,7 @@ func TestAutoNotebookWriter_HandleEnqueuesAndWrites(t *testing.T) {
 		Timestamp: time.Date(2026, 5, 5, 13, 14, 15, 0, time.UTC),
 	})
 
-	calls := waitForCalls(t, client, 1)
+	calls := waitForCalls(t, w, client, 1)
 	if calls[0].Slug != "ceo" {
 		t.Fatalf("slug: got %q want ceo", calls[0].Slug)
 	}
@@ -141,7 +134,7 @@ func TestAutoNotebookWriter_RosterFilterDropsNonAgents(t *testing.T) {
 	w.Handle(autoNotebookEvent{Kind: AutoNotebookEventMessagePosted, Slug: "human:nazz", Content: "hi"})
 	w.Handle(autoNotebookEvent{Kind: AutoNotebookEventMessagePosted, Slug: "ceo", Content: "yo"})
 
-	calls := waitForCalls(t, client, 1)
+	calls := waitForCalls(t, w, client, 1)
 	if len(calls) != 1 {
 		t.Fatalf("only the agent message should land; got %d", len(calls))
 	}
@@ -166,8 +159,8 @@ func TestAutoNotebookWriter_DedupeWithinDay(t *testing.T) {
 	evt2.Timestamp = evt.Timestamp.Add(2 * time.Second)
 	w.Handle(evt2)
 
-	waitForCalls(t, client, 1)
-	waitForCounter(t, func() int64 { return w.Counters().Deduped }, 1)
+	waitForCalls(t, w, client, 1)
+	waitForCounter(t, w, func() int64 { return w.Counters().Deduped }, 1)
 	if got := len(client.snapshot()); got != 1 {
 		t.Fatalf("expected exactly 1 write, got %d", got)
 	}
@@ -191,7 +184,7 @@ func TestAutoNotebookWriter_DedupePerDayBucket(t *testing.T) {
 	w.Handle(day1)
 	w.Handle(day2)
 
-	calls := waitForCalls(t, client, 2)
+	calls := waitForCalls(t, w, client, 2)
 	if len(calls) != 2 {
 		t.Fatalf("expected 2 writes (different day buckets), got %d", len(calls))
 	}
@@ -212,7 +205,7 @@ func TestAutoNotebookWriter_RedactsSecretContent(t *testing.T) {
 		Content: "found a stripe key " + fakeKey + " in the logs",
 	})
 
-	waitForCounter(t, func() int64 { return w.Counters().Redacted }, 1)
+	waitForCounter(t, w, func() int64 { return w.Counters().Redacted }, 1)
 	if got := len(client.snapshot()); got != 0 {
 		t.Fatalf("expected zero writes after redaction, got %d", got)
 	}
@@ -235,7 +228,7 @@ func TestAutoNotebookWriter_TaskTransitionUsesOwnerShelf(t *testing.T) {
 		Timestamp:    time.Date(2026, 5, 5, 13, 14, 15, 0, time.UTC),
 	})
 
-	calls := waitForCalls(t, client, 1)
+	calls := waitForCalls(t, w, client, 1)
 	if calls[0].Slug != "eng" {
 		t.Fatalf("expected owner shelf 'eng', got %q", calls[0].Slug)
 	}
@@ -318,7 +311,7 @@ func TestAutoNotebookWriter_WriteFailureCountedNotPropagated(t *testing.T) {
 		Content: "transient error",
 	})
 
-	waitForCounter(t, func() int64 { return w.Counters().WriteFailed }, 1)
+	waitForCounter(t, w, func() int64 { return w.Counters().WriteFailed }, 1)
 	if w.Counters().Written != 0 {
 		t.Fatalf("written counter should stay 0; got %d", w.Counters().Written)
 	}
