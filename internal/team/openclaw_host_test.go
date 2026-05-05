@@ -14,21 +14,40 @@ import (
 
 // fakeHost captures every ReceiveMessage call so tests can assert the bridge
 // routes inbound assistant events through transport.Host with the expected
-// Participant + Binding fields. Each ReceiveMessage call also signals on
-// `received` so callers can wait deterministically without polling.
+// Participant + Binding fields. It enforces the Host contract: ReceiveMessage
+// returns transport.ErrParticipantUnknown until UpsertParticipant has been
+// called for the participant, so a regression that drops the upsert call would
+// surface as a test failure rather than a silent contract violation. Each
+// ReceiveMessage call also signals on `received` so callers can wait
+// deterministically without polling.
 type fakeHost struct {
 	mu       sync.Mutex
 	messages []transport.Message
+	upserted map[string]struct{}
 	err      error
 	received chan struct{}
 }
 
 func newFakeHost() *fakeHost {
-	return &fakeHost{received: make(chan struct{}, 8)}
+	return &fakeHost{
+		upserted: make(map[string]struct{}),
+		received: make(chan struct{}, 8),
+	}
+}
+
+// participantKey is the shape used to detect "did you call UpsertParticipant
+// for this identity yet?". \x00 separator avoids any chance of collision
+// between adapter names and keys.
+func participantKey(p transport.Participant) string {
+	return p.AdapterName + "\x00" + p.Key
 }
 
 func (h *fakeHost) ReceiveMessage(_ context.Context, msg transport.Message) error {
 	h.mu.Lock()
+	if _, ok := h.upserted[participantKey(msg.Participant)]; !ok {
+		h.mu.Unlock()
+		return transport.ErrParticipantUnknown
+	}
 	h.messages = append(h.messages, msg)
 	err := h.err
 	h.mu.Unlock()
@@ -39,7 +58,10 @@ func (h *fakeHost) ReceiveMessage(_ context.Context, msg transport.Message) erro
 	return err
 }
 
-func (h *fakeHost) UpsertParticipant(context.Context, transport.Participant, transport.Binding) error {
+func (h *fakeHost) UpsertParticipant(_ context.Context, p transport.Participant, _ transport.Binding) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.upserted[participantKey(p)] = struct{}{}
 	return nil
 }
 

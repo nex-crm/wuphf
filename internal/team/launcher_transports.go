@@ -67,20 +67,27 @@ func RegisterTransports(b *Broker) (func(), error) {
 		log.Printf("[transport] openclaw: bootstrap error — %v", ocErr)
 	} else if bridge != nil {
 		b.AttachOpenclawBridge(bridge)
-		ocCtx, ocCancel := context.WithCancel(context.Background())
-		routerDone := StartOpenclawRouter(ocCtx, b, bridge)
+		// Router and bridge get independent contexts so the cleanup can drain
+		// the router (in-flight broker writes) before cancelling the bridge.
+		// Sharing one context would let bridge.Run trigger b.Stop() while the
+		// router still has messages mid-flight — exactly the race the
+		// StartOpenclawRouter doc warns against.
+		routerCtx, routerCancel := context.WithCancel(context.Background())
+		bridgeCtx, bridgeCancel := context.WithCancel(context.Background())
+		routerDone := StartOpenclawRouter(routerCtx, b, bridge)
 		runDone := make(chan struct{})
 		host := &brokerTransportHost{broker: b}
 		go func() {
 			defer close(runDone)
-			if err := bridge.Run(ocCtx, host); err != nil && ocCtx.Err() == nil {
+			if err := bridge.Run(bridgeCtx, host); err != nil && bridgeCtx.Err() == nil {
 				log.Printf("[transport] openclaw: exited with error: %v", err)
 			}
 		}()
 		stops = append(stops, func() {
-			ocCancel()
-			<-routerDone // wait for router goroutine to exit before tearing down
-			<-runDone    // bridge.Run returns after Stop; ensures clean broker shutdown
+			routerCancel()
+			<-routerDone // drain router before tearing down the bridge
+			bridgeCancel()
+			<-runDone // bridge.Run returns after Stop; ensures clean broker shutdown
 			b.AttachOpenclawBridge(nil)
 		})
 		log.Printf("[transport] openclaw: started (%d session(s))", len(bridge.SnapshotBindings()))
