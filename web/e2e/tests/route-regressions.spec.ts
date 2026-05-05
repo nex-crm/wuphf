@@ -318,15 +318,18 @@ test.describe("PR #634 review pins", () => {
     await expectNoReactErrors(page, getErrors, "header/status parity");
   });
 
-  test("NotFoundSurface link uses the typed router (no hardcoded #/ fallback)", async ({
+  test("NotFoundSurface link routes to #general (smoke, not an epicentric pin)", async ({
     page,
   }) => {
-    // Repro: the previous NotFoundSurface had `href="#/channels/general"`
-    // hardcoded. Future routing-strategy changes (e.g. moving off hash
-    // history) would silently break the link. Replacing with a typed
-    // <Link> means the resolved href is whatever the router decides.
-    // We assert against the rendered href so a regression to
-    // string-literal would fail instead of silently routing nowhere.
+    // NOTE: this is a smoke check on the not-found "Go to #general"
+    // affordance, NOT a regression pin. The fix in this PR swapped a
+    // hardcoded `<a href="#/channels/general">` for a typed
+    // `<Link to="/channels/$channelSlug">`, but under hash history both
+    // forms resolve to the same href — verified empirically by running
+    // this test against the pre-fix tree (it passes there too). The
+    // future-proofing benefit (router-strategy independence) is outside
+    // the matrix this spec exercises. Keeping the test for surface
+    // coverage of the not-found affordance itself.
     const getErrors = collectReactErrors(page);
     await page.goto("/#/missing-route");
     const notFound = page.getByTestId("route-not-found");
