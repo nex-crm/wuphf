@@ -172,11 +172,15 @@ export function AgentEventPill({
       <span className="sidebar-agent-pill" data-state={pillState} title={text}>
         {text}
       </span>
-      {stuckAnnouncement !== null ? (
-        <span className="sr-only" aria-live="assertive" aria-atomic="true">
-          {`${slug} blocked: ${stuckAnnouncement}`}
-        </span>
-      ) : null}
+      {/* Live region stays mounted at all times. Some screen readers skip
+          announcements when the region is conditionally inserted with
+          content already present, so we keep the container in the DOM and
+          swap only the text content on transition. */}
+      <span className="sr-only" aria-live="assertive" aria-atomic="true">
+        {stuckAnnouncement !== null
+          ? `${slug} blocked: ${stuckAnnouncement}`
+          : ""}
+      </span>
     </>
   );
 }

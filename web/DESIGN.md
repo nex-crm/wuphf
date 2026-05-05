@@ -68,8 +68,10 @@ at the same line forever.
 
 ### Pill content rules
 
-- SSE event snapshots win. The pill renders `snapshot.detail`, falling
-  back to `snapshot.activity`.
+- SSE event snapshots win. The pill renders `snapshot.activity` (the
+  short scannable headline), falling back to `snapshot.detail` only
+  when activity is absent. The richer `detail` text is reserved for
+  the planned Tier 2 hover peek card.
 - `member.task` is a one-shot initial-paint seed only — used before the
   first SSE event arrives.
 - When no event has ever arrived and the agent is idle, the pill renders
