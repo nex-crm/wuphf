@@ -1,5 +1,6 @@
 import {
   createContext,
+  type ReactNode,
   useContext,
   useEffect,
   useMemo,
@@ -38,7 +39,7 @@ function useNowMs(): number {
 }
 
 interface TickProviderProps {
-  children: React.ReactNode;
+  children: ReactNode;
 }
 
 /**
@@ -137,16 +138,18 @@ export function AgentEventPill({
   const idleMs = snapshot ? Math.max(0, nowMs - snapshot.receivedAtMs) : 0;
   const idleCopy = pickIdleCopy({ slug, role: agentRole, idleMs });
 
-  const text = truncate(
-    pillTextFor(
-      pillState,
-      snapshot?.activity,
-      snapshot?.detail,
-      idleCopy,
-      fallbackTask,
-      Boolean(snapshot),
-    ),
+  const fullText = pillTextFor(
+    pillState,
+    snapshot?.activity,
+    snapshot?.detail,
+    idleCopy,
+    fallbackTask,
+    Boolean(snapshot),
   );
+  // Visible text is truncated to keep the rail compact; the title tooltip
+  // and the screen-reader announcement use the full string so neither is
+  // doubly clipped (CSS already caps the visible text at max-width:140px).
+  const text = truncate(fullText);
 
   // Stuck transition assertive announcement — fire ONCE per stuck text so
   // the screen reader doesn't shout the same blocker every tick. The ref
@@ -154,22 +157,26 @@ export function AgentEventPill({
   // announcement on a new event. Computed in render (no mutation), then
   // synced to the ref in an effect to satisfy React's render purity.
   const stuckAnnouncement =
-    pillState === "stuck" && lastAnnouncedStuckRef.current !== text
-      ? text
+    pillState === "stuck" && lastAnnouncedStuckRef.current !== fullText
+      ? fullText
       : null;
   useEffect(() => {
     if (pillState === "stuck") {
       if (stuckAnnouncement !== null) {
-        lastAnnouncedStuckRef.current = text;
+        lastAnnouncedStuckRef.current = fullText;
       }
       return;
     }
     lastAnnouncedStuckRef.current = null;
-  }, [pillState, stuckAnnouncement, text]);
+  }, [pillState, stuckAnnouncement, fullText]);
 
   return (
     <>
-      <span className="sidebar-agent-pill" data-state={pillState} title={text}>
+      <span
+        className="sidebar-agent-pill"
+        data-state={pillState}
+        title={fullText}
+      >
         {text}
       </span>
       {/* Live region stays mounted at all times. Some screen readers skip
