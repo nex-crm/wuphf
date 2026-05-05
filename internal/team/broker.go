@@ -132,22 +132,29 @@ type Broker struct {
 	// background cron tick could both archive the same articles, with the
 	// second sweep reading tombstone content (written by the first) into the
 	// .archive/ copy — silently destroying the original.
-	archiveSweepMu     sync.Mutex
-	server             *http.Server
-	listener           net.Listener
-	lifecycleCtx       context.Context
-	lifecycleCancel    context.CancelFunc
-	token              string   // shared secret for authenticating requests
-	addr               string   // actual listen address (useful when port=0)
-	webUIOrigins       []string // allowed CORS origins for web UI (set by ServeWebUI)
-	webShareStart      func() (WebShareStatus, error)
-	webShareStatus     func() WebShareStatus
-	webShareStop       func() error
-	brokerRestartMu    sync.Mutex
-	runtimeProvider    string          // "codex" or "claude" — set by launcher
-	packSlug           string          // active agent pack slug ("founding-team", "revops", ...) — set by launcher
-	blankSlateLaunch   bool            // start without a saved blueprint and synthesize the first operation
-	openclawBridge     *OpenclawBridge // nil until the bridge attaches itself; used by handleOfficeMembers for live add/remove
+	archiveSweepMu   sync.Mutex
+	server           *http.Server
+	listener         net.Listener
+	lifecycleCtx     context.Context
+	lifecycleCancel  context.CancelFunc
+	token            string   // shared secret for authenticating requests
+	addr             string   // actual listen address (useful when port=0)
+	webUIOrigins     []string // allowed CORS origins for web UI (set by ServeWebUI)
+	webShareStart    func() (WebShareStatus, error)
+	webShareStatus   func() WebShareStatus
+	webShareStop     func() error
+	brokerRestartMu  sync.Mutex
+	runtimeProvider  string          // "codex" or "claude" — set by launcher
+	packSlug         string          // active agent pack slug ("founding-team", "revops", ...) — set by launcher
+	blankSlateLaunch bool            // start without a saved blueprint and synthesize the first operation
+	openclawBridge   *OpenclawBridge // nil until the bridge attaches itself; used by handleOfficeMembers for live add/remove
+	// humanAdmitHook fires once per successful invite acceptance so the
+	// office-bound share adapter can call Host.UpsertParticipant for the new
+	// admitted human. Stored atomically so the HTTP hot path can read without
+	// contending on b.mu. Installed and cleared by ShareTransport.Run; nil
+	// when no adapter is registered (e.g. legacy launches that bypass
+	// RegisterTransports).
+	humanAdmitHook     atomic.Pointer[humanAdmitHookFn]
 	generateMemberFn   func(prompt string) (generatedMemberTemplate, error)
 	generateChannelFn  func(prompt string) (generatedChannelTemplate, error)
 	policies           []officePolicy // active office operating rules

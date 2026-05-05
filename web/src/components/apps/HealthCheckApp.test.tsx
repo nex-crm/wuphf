@@ -24,6 +24,8 @@ vi.mock("../../api/platform", () => ({
   revokeHumanSession: vi.fn(),
   startShare: vi.fn(),
   stopShare: vi.fn(),
+  HUMAN_ME_QUERY_KEY: ["humans", "me"] as const,
+  HUMAN_ME_REFETCH_MS: 30_000,
 }));
 
 const getHealthMock = vi.mocked(getHealth);

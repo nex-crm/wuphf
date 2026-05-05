@@ -75,6 +75,11 @@ export interface HumanMe {
   };
 }
 
+// Shared TanStack Query identity for /humans/me. Both useSessionRole and
+// HealthCheckApp must import these so the cache dedupes a single poll cycle.
+export const HUMAN_ME_QUERY_KEY = ["humans", "me"] as const;
+export const HUMAN_ME_REFETCH_MS = 30_000;
+
 export function getHumanMe() {
   return get<HumanMe>("/humans/me");
 }
