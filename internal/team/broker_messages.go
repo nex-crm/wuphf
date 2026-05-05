@@ -461,6 +461,20 @@ func (b *Broker) PostMessage(from, channel, content string, tagged []string, rep
 	if err := b.saveLocked(); err != nil {
 		return channelMessage{}, err
 	}
+	// 2A: every roster-agent PostMessage triggers one notebook event. Roster
+	// filter is applied here under b.mu (lock-free predicate); calling Handle
+	// itself never re-enters b.mu, so this is safe to do while still locked.
+	// Handle is non-blocking per decision S3A.
+	if b.autoNotebookWriter != nil && b.isAgentMemberSlugLocked(msg.From) {
+		b.autoNotebookWriter.Handle(autoNotebookEvent{
+			Kind:      AutoNotebookEventMessagePosted,
+			Slug:      msg.From,
+			Actor:     msg.From,
+			Channel:   msg.Channel,
+			Content:   msg.Content,
+			Timestamp: time.Now().UTC(),
+		})
+	}
 	return msg, nil
 }
 
