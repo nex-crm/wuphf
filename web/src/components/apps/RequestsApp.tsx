@@ -7,11 +7,15 @@ import {
   getRequests,
 } from "../../api/client";
 import { formatRelativeTime } from "../../lib/format";
-import { useChannelSlug } from "../../routes/useCurrentRoute";
+import { useFallbackChannelSlug } from "../../routes/useCurrentRoute";
 import { showNotice } from "../ui/Toast";
 
 export function RequestsApp() {
-  const currentChannel = useChannelSlug() ?? "general";
+  // /apps/requests is reachable from any route, so the channel must come
+  // from the last-visited conversation rather than the URL's null
+  // channelSlug → "general" collapse that would otherwise hide the user's
+  // pending requests in their working channel.
+  const currentChannel = useFallbackChannelSlug();
   const queryClient = useQueryClient();
 
   const { data, isLoading, error } = useQuery({

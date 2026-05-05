@@ -6,15 +6,20 @@ import { postMessage } from "../../api/client";
 import { useOfficeMembers } from "../../hooks/useMembers";
 import { useThreadMessages } from "../../hooks/useMessages";
 import { extractTaggedMentions } from "../../lib/mentions";
-import { useChannelSlug } from "../../routes/useCurrentRoute";
 import { useAppStore } from "../../stores/app";
 import { showNotice } from "../ui/Toast";
 import { MessageBubble } from "./MessageBubble";
 
 export function ThreadPanel() {
-  const activeThreadId = useAppStore((s) => s.activeThreadId);
-  const setActiveThreadId = useAppStore((s) => s.setActiveThreadId);
-  const currentChannel = useChannelSlug() ?? "general";
+  const activeThread = useAppStore((s) => s.activeThread);
+  const setActiveThread = useAppStore((s) => s.setActiveThread);
+  // Channel is captured at thread-open time and stored on activeThread so
+  // replies posted while the user has navigated away from the originating
+  // channel still land in the right place. Reading useChannelSlug() here
+  // would silently route replies to the URL's current channel (or
+  // "general") whenever the panel outlived the originating route.
+  const activeThreadId = activeThread?.id ?? null;
+  const currentChannel = activeThread?.channelSlug ?? "general";
   const [text, setText] = useState("");
   const [quoting, setQuoting] = useState<Message | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -53,11 +58,15 @@ export function ThreadPanel() {
 
   // Reset the quote chip when the panel closes OR when the user switches
   // to a different thread. Persisting the quote would mean a stale reply_to
-  // fires against the wrong thread on the next send.
+  // fires against the wrong thread on the next send. activeThreadId is
+  // referenced via `void` so biome's useExhaustiveDependencies accepts
+  // the dep as in-body — the dep IS the trigger for this reset, dropping
+  // it would silently leak drafts across threads.
   useEffect(() => {
+    void activeThreadId;
     setQuoting(null);
     setText("");
-  }, []);
+  }, [activeThreadId]);
 
   // Focus the composer on open so users can start typing immediately.
   useEffect(() => {
@@ -70,12 +79,12 @@ export function ThreadPanel() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape" && activeThreadId) {
-        setActiveThreadId(null);
+        setActiveThread(null);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [activeThreadId, setActiveThreadId]);
+  }, [activeThreadId, setActiveThread]);
 
   // The thread target is the quoted reply if the user clicked "quote" on a
   // specific reply; otherwise it's the parent. Broker thread semantics
@@ -126,7 +135,7 @@ export function ThreadPanel() {
         <button
           type="button"
           className="thread-panel-close"
-          onClick={() => setActiveThreadId(null)}
+          onClick={() => setActiveThread(null)}
           aria-label="Close thread"
           title="Close (Esc)"
         >

@@ -12,7 +12,6 @@ export const APP_PANEL_IDS = [
   "settings",
   "skills",
   "tasks",
-  "threads",
 ] as const;
 
 export type AppPanelId = (typeof APP_PANEL_IDS)[number];

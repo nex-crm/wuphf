@@ -608,10 +608,35 @@ export function WorkspaceRail({
             setKebab(null);
           }}
           onSettings={() => {
-            void router.navigate({
-              to: "/apps/$appId",
-              params: { appId: "settings" },
-            });
+            // The kebab menu opens for `kebab.workspace`, which may not
+            // be the workspace the user is currently in. Routing through
+            // the SPA's local router would always open this workspace's
+            // settings page, which is wrong (and can land edits in the
+            // wrong workspace). When the kebab targets a different
+            // workspace, page-reload to that broker's /apps/settings
+            // instead — same protocol the workspace icon uses for
+            // switching tabs.
+            const isCurrent =
+              kebab.workspace.is_active === true ||
+              kebab.workspace.name === activeName;
+            if (isCurrent) {
+              void router.navigate({
+                to: "/apps/$appId",
+                params: { appId: "settings" },
+              });
+            } else if (
+              kebab.workspace.state === "running" &&
+              kebab.workspace.web_port
+            ) {
+              navigate(
+                `http://localhost:${kebab.workspace.web_port}/#/apps/settings`,
+              );
+            } else {
+              showNotice(
+                `Workspace '${kebab.workspace.name}' is ${kebab.workspace.state}; resume it before opening Settings.`,
+                "info",
+              );
+            }
             setKebab(null);
           }}
           onShred={() => {

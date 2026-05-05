@@ -4,11 +4,12 @@ import { directChannelSlug, useAppStore } from "./app";
 
 afterEach(() => {
   useAppStore.setState({
-    activeThreadId: null,
+    activeThread: null,
     lastMessageId: null,
     clearedMessageIdsByChannel: {},
     unreadByChannel: {},
     activeAgentSlug: null,
+    lastConversationalChannel: null,
     searchOpen: false,
     composerSearchInitialQuery: "",
     composerHelpOpen: false,
@@ -27,10 +28,11 @@ describe("DM channel helpers", () => {
 
   it("resets non-route session state for a shred flow", () => {
     useAppStore.setState({
-      activeThreadId: "thread-1",
+      activeThread: { id: "thread-1", channelSlug: "engineering" },
       lastMessageId: "msg-1",
       clearedMessageIdsByChannel: { general: "msg-0" },
       activeAgentSlug: "ceo",
+      lastConversationalChannel: "engineering",
       searchOpen: true,
       composerSearchInitialQuery: "stuck task",
       composerHelpOpen: true,
@@ -40,10 +42,11 @@ describe("DM channel helpers", () => {
     useAppStore.getState().resetForOnboarding();
 
     expect(useAppStore.getState()).toMatchObject({
-      activeThreadId: null,
+      activeThread: null,
       lastMessageId: null,
       clearedMessageIdsByChannel: {},
       activeAgentSlug: null,
+      lastConversationalChannel: null,
       searchOpen: false,
       composerSearchInitialQuery: "",
       composerHelpOpen: false,

@@ -15,6 +15,7 @@ import {
   notebookEntryRoute,
   notebooksRoute,
   reviewsRoute,
+  rootRoute,
   taskDetailRoute,
   tasksRoute,
   wikiArticleRoute,
@@ -123,7 +124,23 @@ describe("TanStack route tree", () => {
 
     // /console and /threads were temporary aliases during phase 0. They
     // should now only match the root (no leaf), so the canonical
-    // /apps/console and /apps/threads URLs are the single source of truth.
-    expect(leaf?.routeId).toBe("__root__");
+    // /apps/console URL is the single source of truth (and /apps/threads
+    // is no longer a recognized app panel — see APP_PANEL_IDS).
+    expect(leaf?.routeId).toBe(rootRoute.id);
+  });
+
+  it("treats /apps/threads as an unknown app panel", () => {
+    // After `threads` was removed from APP_PANEL_IDS, the URL still
+    // matches the generic `/apps/$appId` route — the router has no
+    // opinion on which app ids are first-party. MainContent
+    // narrows via isAppPanelId() and renders UnknownAppPanel for
+    // anything that fails the check.
+    const router = createAppRouter(
+      createMemoryHistory({ initialEntries: ["/"] }),
+    );
+    const leaf = router.matchRoutes("/apps/threads").at(-1);
+
+    expect(leaf?.routeId).toBe(appRoute.id);
+    expect((leaf?.params as { appId?: string })?.appId).toBe("threads");
   });
 });

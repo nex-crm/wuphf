@@ -1,29 +1,23 @@
 import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import {
-  act,
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-} from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Message, SlashCommandDescriptor } from "../../api/client";
 import { FALLBACK_SLASH_COMMANDS } from "../../hooks/useCommands";
 import { useMessages } from "../../hooks/useMessages";
-import { useChannelSlug } from "../../routes/useCurrentRoute";
+import { useFallbackChannelSlug } from "../../routes/useCurrentRoute";
 import { __test__, ConsoleApp } from "./ConsoleApp";
 
-// ConsoleApp reads the current channel via useChannelSlug. Mock it so
-// tests can swap the active channel without rendering inside a
-// RouterProvider — useMatches/useChannelSlug otherwise throw outside
-// the router context.
+// ConsoleApp reads its channel from useFallbackChannelSlug (URL channel
+// first, then last-visited fallback). Mock it so tests can swap the
+// active channel without rendering inside a RouterProvider — useMatches
+// would otherwise throw outside the router context.
 vi.mock("../../routes/useCurrentRoute", () => ({
-  useChannelSlug: vi.fn(),
+  useFallbackChannelSlug: vi.fn(),
 }));
 
-const mockUseChannelSlug = vi.mocked(useChannelSlug);
+const mockUseFallbackChannelSlug = vi.mocked(useFallbackChannelSlug);
 
 vi.mock("../../api/client", async () => {
   const actual =
@@ -65,7 +59,7 @@ function wrap(ui: ReactNode) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockUseChannelSlug.mockReturnValue("general");
+  mockUseFallbackChannelSlug.mockReturnValue("general");
 });
 
 describe("ConsoleApp helpers", () => {
@@ -163,8 +157,6 @@ describe("ConsoleApp helpers", () => {
 
 describe("<ConsoleApp>", () => {
   it("renders the active channel from the URL", () => {
-    mockUseChannelSlug.mockReturnValue("general");
-
     render(wrap(<ConsoleApp />));
 
     expect(screen.getAllByText("#general").length).toBeGreaterThan(1);
@@ -181,10 +173,10 @@ describe("<ConsoleApp>", () => {
 
     expect(screen.getByText("/ask launch plan")).toBeInTheDocument();
 
-    act(() => {
-      mockUseChannelSlug.mockReturnValue("launch");
-      rerender(wrap(<ConsoleApp />));
-    });
+    // RTL's `rerender` already wraps the render in `act` internally,
+    // so an explicit `act(() => ...)` here would be redundant.
+    mockUseFallbackChannelSlug.mockReturnValue("launch");
+    rerender(wrap(<ConsoleApp />));
 
     await waitFor(() => {
       expect(screen.queryByText("/ask launch plan")).not.toBeInTheDocument();

@@ -13,7 +13,7 @@ import { FALLBACK_SLASH_COMMANDS } from "../../hooks/useCommands";
 import { useOfficeMembers } from "../../hooks/useMembers";
 import { useMessages } from "../../hooks/useMessages";
 import { router } from "../../lib/router";
-import { useChannelSlug } from "../../routes/useCurrentRoute";
+import { useFallbackChannelSlug } from "../../routes/useCurrentRoute";
 
 function navigateToApp(appId: string): void {
   void router.navigate({ to: "/apps/$appId", params: { appId } });
@@ -90,7 +90,11 @@ function openRequestCount(requests: Array<{ status?: string }>): number {
 }
 
 export function ConsoleApp() {
-  const currentChannel = useChannelSlug() ?? "general";
+  // Off-conversation routes (e.g. /apps/console opened from #engineering)
+  // need to keep pointing at the user's working channel rather than
+  // snapping to "general". useFallbackChannelSlug threads the URL channel
+  // first, then the last-visited channel, then "general".
+  const currentChannel = useFallbackChannelSlug();
   const channelName = currentChannel;
   const [draft, setDraft] = useState("");
   const [localLines, setLocalLines] = useState<TerminalLine[]>([]);

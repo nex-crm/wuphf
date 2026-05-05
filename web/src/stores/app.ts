@@ -92,9 +92,20 @@ export interface AppStore {
   sidebarBg: string | null;
   setSidebarBg: (color: string | null) => void;
 
-  // Thread panel
-  activeThreadId: string | null;
-  setActiveThreadId: (id: string | null) => void;
+  // Thread panel — captures the originating channel alongside the message id
+  // so that replies posted while the user has navigated away from the channel
+  // (e.g. into /apps/console) still land in the channel where the thread
+  // started, instead of the URL's current fallback channel.
+  activeThread: { id: string; channelSlug: string } | null;
+  setActiveThread: (thread: { id: string; channelSlug: string } | null) => void;
+
+  // Last channel/dm the user visited. Held as a session-scoped fallback so
+  // off-conversation surfaces (Console, Requests, sidebar request badge) can
+  // surface the user's working channel rather than always defaulting to
+  // #general when `useChannelSlug()` is null. Updated from the route effect
+  // in MainContent.
+  lastConversationalChannel: string | null;
+  setLastConversationalChannel: (channelSlug: string | null) => void;
 
   // Per-thread collapsed state in the main feed. The key is the parent
   // message id. Default is expanded (entry absent or false); toggling
@@ -211,8 +222,14 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set({ sidebarBg: color });
   },
 
-  activeThreadId: null,
-  setActiveThreadId: (id) => set({ activeThreadId: id }),
+  activeThread: null,
+  setActiveThread: (thread) => set({ activeThread: thread }),
+
+  lastConversationalChannel: null,
+  setLastConversationalChannel: (channelSlug) => {
+    if (get().lastConversationalChannel === channelSlug) return;
+    set({ lastConversationalChannel: channelSlug });
+  },
 
   collapsedThreads: {},
   toggleThreadCollapsed: (parentId) =>
@@ -278,10 +295,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
   resetForOnboarding: () =>
     set({
       unreadByChannel: {},
-      activeThreadId: null,
+      activeThread: null,
       lastMessageId: null,
       clearedMessageIdsByChannel: {},
       activeAgentSlug: null,
+      lastConversationalChannel: null,
       searchOpen: false,
       composerSearchInitialQuery: "",
       composerHelpOpen: false,

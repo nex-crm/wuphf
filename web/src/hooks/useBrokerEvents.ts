@@ -12,7 +12,16 @@ function activeBrokerChannel(): string | null {
   // hash-history navigation anyway, so the runtime read agrees.
   if (typeof window === "undefined") return null;
   const { hash } = window.location;
-  const path = hash.startsWith("#/") ? hash.slice(2) : hash.replace(/^#/, "");
+  const rawPath = hash.startsWith("#/")
+    ? hash.slice(2)
+    : hash.replace(/^#/, "");
+  // TanStack hash-history can append a search-string after the hash
+  // path (e.g. `#/channels/general?modal=settings`). Strip it before
+  // segment parsing so the channel slug isn't silently smuggled into
+  // the next segment as `general?modal=settings`, which would make the
+  // active-channel check fail and unread counts climb while the user
+  // is staring at the channel.
+  const [path] = rawPath.split("?");
   const segs = path.split("/").filter(Boolean);
   if (segs[0] === "channels" && segs[1]) {
     return decodeURIComponent(segs[1]);

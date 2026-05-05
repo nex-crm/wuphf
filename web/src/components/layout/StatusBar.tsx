@@ -53,6 +53,10 @@ export function StatusBar() {
       m.slug && m.slug !== "human" && m.slug !== "you" && m.slug !== "system",
   ).length;
 
+  // Mirrors ChannelHeader.headerTitleAndDesc — the two surfaces should
+  // present the same user-facing title for the same route. wiki-lookup
+  // shares the Wiki app title; notebooks/reviews are capitalized to
+  // match the header copy.
   const channelLabel = (() => {
     switch (route.kind) {
       case "channel":
@@ -66,15 +70,14 @@ export function StatusBar() {
         return appTitle("tasks");
       case "wiki":
       case "wiki-article":
-        return appTitle("wiki");
       case "wiki-lookup":
-        return "wiki-lookup";
+        return appTitle("wiki");
       case "notebook-catalog":
       case "notebook-agent":
       case "notebook-entry":
-        return "notebooks";
+        return "Notebooks";
       case "reviews":
-        return "reviews";
+        return "Reviews";
       case "unknown":
         return "";
       default: {

@@ -21,23 +21,12 @@ import { getRequests } from "../../api/client";
 import { fetchReviews } from "../../api/notebook";
 import { useOverflow } from "../../hooks/useOverflow";
 import { SIDEBAR_APPS } from "../../lib/constants";
-import { router } from "../../lib/router";
+import { navigateToSidebarApp } from "../../lib/sidebarNav";
 import { WIKI_SURFACE_APP_IDS } from "../../routes/routeRegistry";
-import { useChannelSlug, useCurrentApp } from "../../routes/useCurrentRoute";
-
-// Sidebar app id → typed router target. The "wiki" sidebar entry routes to
-// the wiki catalog; notebooks and reviews keep their dedicated routes and
-// still light up the Wiki sidebar item via WIKI_SURFACE_APPS.
-function navigateToSidebarApp(appId: string): void {
-  if (appId === "wiki") {
-    void router.navigate({ to: "/wiki" });
-    return;
-  }
-  void router.navigate({
-    to: "/apps/$appId",
-    params: { appId },
-  });
-}
+import {
+  useCurrentApp,
+  useFallbackChannelSlug,
+} from "../../routes/useCurrentRoute";
 
 // Notebooks and reviews render inside the Wiki app shell via tabs, so the
 // 'Wiki' sidebar entry lights up for any of those three currentApp values.
@@ -61,7 +50,11 @@ const APP_ICONS: Record<string, ComponentType<{ className?: string }>> = {
 
 export function AppList() {
   const currentApp = useCurrentApp();
-  const currentChannel = useChannelSlug() ?? "general";
+  // The Requests badge uses the channel-scoped /requests endpoint. Read
+  // the last-visited channel here so the badge reflects the user's
+  // working channel even while they're parked on a non-conversation
+  // surface (apps, wiki, notebooks).
+  const currentChannel = useFallbackChannelSlug();
 
   const { data: requestsData } = useQuery({
     queryKey: ["requests-badge", currentChannel],

@@ -42,7 +42,7 @@ export function MessageFeed() {
   const clearMarkerId = useAppStore(
     (s) => s.clearedMessageIdsByChannel[currentChannel] ?? null,
   );
-  const setActiveThreadId = useAppStore((s) => s.setActiveThreadId);
+  const setActiveThread = useAppStore((s) => s.setActiveThread);
   const collapsedThreads = useAppStore((s) => s.collapsedThreads);
   const toggleThreadCollapsed = useAppStore((s) => s.toggleThreadCollapsed);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -206,7 +206,9 @@ export function MessageFeed() {
               message={el.parent.message}
               grouped={el.parent.grouped}
               replyCount={el.replies.length}
-              onOpenThread={(id) => setActiveThreadId(id)}
+              onOpenThread={(id) =>
+                setActiveThread({ id, channelSlug: currentChannel })
+              }
               onCopyLink={copyMessageLink}
             />
             {hasReplies && (
@@ -245,7 +247,9 @@ export function MessageFeed() {
                     message={r.message}
                     grouped={r.grouped}
                     isReply={true}
-                    onOpenThread={(id) => setActiveThreadId(id)}
+                    onOpenThread={(id) =>
+                      setActiveThread({ id, channelSlug: currentChannel })
+                    }
                     onCopyLink={copyMessageLink}
                   />
                 ))}

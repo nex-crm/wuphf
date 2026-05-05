@@ -20,7 +20,7 @@ interface ThreadRow {
  * reply count so the loudest conversations surface first.
  */
 export function ThreadsApp() {
-  const setActiveThreadId = useAppStore((s) => s.setActiveThreadId);
+  const setActiveThread = useAppStore((s) => s.setActiveThread);
   const { data: members = [] } = useOfficeMembers();
 
   const { data: channelsData } = useQuery({
@@ -60,7 +60,7 @@ export function ThreadsApp() {
       to: "/channels/$channelSlug",
       params: { channelSlug: t.channel },
     });
-    setActiveThreadId(t.id);
+    setActiveThread({ id: t.id, channelSlug: t.channel });
   }
 
   return (

@@ -7,7 +7,12 @@ import {
   useEffect,
   useState,
 } from "react";
-import { Outlet, useMatches, useRouterState } from "@tanstack/react-router";
+import {
+  Link,
+  Outlet,
+  useMatches,
+  useRouterState,
+} from "@tanstack/react-router";
 
 import { get, initApi } from "../api/client";
 import { TelegramConnectHost } from "../components/integrations/TelegramConnectModal";
@@ -106,11 +111,6 @@ const SkillsApp = lazy(() =>
 const TasksApp = lazy(() =>
   import("../components/apps/TasksApp").then((m) => ({
     default: m.TasksApp,
-  })),
-);
-const ThreadsApp = lazy(() =>
-  import("../components/apps/ThreadsApp").then((m) => ({
-    default: m.ThreadsApp,
   })),
 );
 const Notebook = lazy(() => import("../components/notebook/Notebook"));
@@ -275,7 +275,6 @@ const APP_PANELS = {
   receipts: ReceiptsApp,
   "health-check": HealthCheckApp,
   settings: SettingsApp,
-  threads: ThreadsApp,
   console: ConsoleApp,
 } satisfies Record<AppPanelId, ComponentType>;
 
@@ -379,8 +378,29 @@ function TaskAppPanel({ taskId }: { taskId: string | null }) {
   );
 }
 
+/**
+ * Tracks the user's last-visited conversation channel (channel/dm route)
+ * into Zustand. Off-conversation surfaces (ConsoleApp, RequestsApp,
+ * sidebar request badge) read this so they keep pointing at the user's
+ * working channel instead of silently snapping to `"general"` whenever
+ * the URL transitions to `/apps/...` or `/wiki/...`. The store guards
+ * against redundant writes, so this effect is cheap to run on every
+ * route change.
+ */
+function useTrackLastConversationalChannel(route: CurrentRoute): void {
+  const setLastConversationalChannel = useAppStore(
+    (s) => s.setLastConversationalChannel,
+  );
+  useEffect(() => {
+    if (route.kind === "channel" || route.kind === "dm") {
+      setLastConversationalChannel(route.channelSlug);
+    }
+  }, [route, setLastConversationalChannel]);
+}
+
 function MainContent() {
   const route = useCurrentRoute();
+  useTrackLastConversationalChannel(route);
 
   switch (route.kind) {
     case "channel":
@@ -417,10 +437,12 @@ function MainContent() {
     case "reviews":
       return <WikiSurface current="reviews" route={route} />;
     case "unknown":
-      // Handled by RoutedBody/NotFoundSurface; reaching here means the
-      // not-found check upstream didn't catch a root-only match. Return
-      // null defensively rather than render stale content.
-      return null;
+      // RoutedBody catches root-only matches via isUnmatchedRoute, but
+      // useCurrentRoute can also return `unknown` for matched leaves that
+      // aren't wired into CURRENT_ROUTE_IDS (e.g. a newly-added route a
+      // contributor forgot to register). Render the same not-found surface
+      // here so the shell doesn't go blank in that case.
+      return <NotFoundSurface pathname={window.location.hash || "/"} />;
     default: {
       // Exhaustiveness check: if a new CurrentRoute kind is added
       // without a case here, TypeScript flags this assignment as the
@@ -462,9 +484,13 @@ function NotFoundSurface({ pathname }: { pathname: string }) {
       <span>
         No route matches <code>{pathname}</code>.
       </span>
-      <a href="#/channels/general" style={{ color: "var(--text-secondary)" }}>
+      <Link
+        to="/channels/$channelSlug"
+        params={{ channelSlug: "general" }}
+        style={{ color: "var(--text-secondary)" }}
+      >
         Go to #general
-      </a>
+      </Link>
     </div>
   );
 }

@@ -3,10 +3,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { useChannelSlug } from "../../routes/useCurrentRoute";
+import { useFallbackChannelSlug } from "../../routes/useCurrentRoute";
 
 vi.mock("../../routes/useCurrentRoute", () => ({
-  useChannelSlug: vi.fn(),
+  useFallbackChannelSlug: vi.fn(),
 }));
 
 vi.mock("../../api/client", async () => {
@@ -25,7 +25,7 @@ vi.mock("../../api/client", async () => {
 import * as clientMod from "../../api/client";
 import { RequestsApp } from "./RequestsApp";
 
-const mockUseChannelSlug = vi.mocked(useChannelSlug);
+const mockUseFallbackChannelSlug = vi.mocked(useFallbackChannelSlug);
 
 function wrap(ui: ReactNode) {
   const qc = new QueryClient({
@@ -36,7 +36,7 @@ function wrap(ui: ReactNode) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockUseChannelSlug.mockReturnValue("general");
+  mockUseFallbackChannelSlug.mockReturnValue("general");
 });
 
 const blockingApprovalOption = {

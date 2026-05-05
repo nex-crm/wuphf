@@ -145,9 +145,14 @@ function LogsSection({ slug }: { slug: string }) {
   );
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor; off-conversation safety gate added one branch.
 function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
   const setActiveAgentSlug = useAppStore((s) => s.setActiveAgentSlug);
-  const currentChannel = useChannelSlug() ?? "general";
+  // Read the URL channel directly — no fallback to "general" or last-visited
+  // here. The Enable/disable toggle below would otherwise silently flip the
+  // agent's membership in a channel the user isn't actually looking at,
+  // which is destructive. Off-conversation routes hide the toggle entirely.
+  const currentChannel = useChannelSlug();
   const queryClient = useQueryClient();
   const [dmLoading, setDmLoading] = useState(false);
   const [view, setView] = useState<"stream" | "logs">("stream");
@@ -155,8 +160,11 @@ function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
   const [removing, setRemoving] = useState(false);
   const defaultHarness = useDefaultHarness();
 
-  // Derive the per-channel enabled state. An agent is "enabled" in the current
-  // channel when it appears in /members and is not flagged disabled.
+  // Derive the per-channel enabled state. An agent is "enabled" in the
+  // current channel when it appears in /members and is not flagged
+  // disabled. useChannelMembers stays disabled when `currentChannel` is
+  // null, so this query and the toggle UI below are hidden in lockstep
+  // off conversation routes.
   const { data: channelMembers = [] } = useChannelMembers(currentChannel);
   const channelEntry = channelMembers.find((m) => m.slug === agent.slug);
   const enabled = Boolean(channelEntry) && channelEntry?.disabled !== true;
@@ -168,7 +176,10 @@ function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
   // predate the BuiltIn field getting serialized.
   const isLead = agent.built_in === true || agent.slug === "ceo";
   const canRemove = !isLead;
-  const canToggle = !isLead;
+  // The toggle is per-channel; off conversation routes there is no channel
+  // to scope the action to, so we hide the toggle entirely rather than
+  // dispatch against a stale fallback channel.
+  const canToggle = !isLead && currentChannel !== null;
 
   async function handleOpenDM() {
     setDmLoading(true);
@@ -195,7 +206,12 @@ function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
 
   // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
   async function handleToggleEnabled(next: boolean) {
-    if (!canToggle || toggling) return;
+    // canToggle already gates currentChannel, but re-check here so the
+    // post body is provably non-null and TypeScript narrows. The toggle
+    // UI is unmounted off conversation routes, so this branch only
+    // protects against a future caller wiring this handler somewhere
+    // else.
+    if (!canToggle || toggling || currentChannel === null) return;
     setToggling(true);
     try {
       // Broker's `enable` action only lifts the Disabled flag — it doesn't
@@ -236,8 +252,13 @@ function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
         try {
           await post("/office-members", { action: "remove", slug: agent.slug });
           await queryClient.invalidateQueries({ queryKey: ["office-members"] });
+          // Removing from /office-members affects every channel-members
+          // list. Invalidate the whole `channel-members` key so each cached
+          // channel refreshes — narrowing this to `currentChannel` would
+          // skip refetching when the panel is open off a conversation
+          // route, leaving the sidebar showing the removed agent.
           await queryClient.invalidateQueries({
-            queryKey: ["channel-members", currentChannel],
+            queryKey: ["channel-members"],
           });
           showNotice(`${label} removed`, "success");
           onClose();
@@ -337,8 +358,12 @@ function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
         </div>
       </div>
 
-      {/* Enable/disable — controls whether this agent participates in #{currentChannel} */}
-      {canToggle && (
+      {/* Enable/disable — controls whether this agent participates in
+          the current conversation channel. Off conversation routes (apps,
+          wiki, notebooks, …) `currentChannel` is null so this whole
+          section is hidden, since the toggle would otherwise hit the
+          broker against a stale fallback channel. */}
+      {canToggle && currentChannel ? (
         <div className="agent-panel-section">
           <div className="agent-panel-stat">
             <span className="agent-panel-stat-label">
@@ -358,7 +383,7 @@ function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
             </label>
           </div>
         </div>
-      )}
+      ) : null}
 
       {/* Primary actions */}
       <div className="agent-panel-actions">
@@ -424,6 +449,11 @@ export function AgentPanel() {
   // serialization that closes the panel mid-interaction.
   const routeKey = routeIdentityKey(route);
   useEffect(() => {
+    // routeKey is referenced via the `void` so biome's
+    // useExhaustiveDependencies sees it used in-body and accepts the dep.
+    // The dep IS the trigger for this effect — re-firing only when the
+    // matched route identity changes — so dropping it would break the
+    // close-on-navigation contract.
     void routeKey;
     close();
   }, [routeKey, close]);

@@ -15,7 +15,7 @@ import {
   wikiIndexRoute,
   wikiLookupRoute,
 } from "../lib/router";
-import { directChannelSlug } from "../stores/app";
+import { directChannelSlug, useAppStore } from "../stores/app";
 
 /**
  * Discriminated union describing the matched leaf route. Replaces the
@@ -175,6 +175,22 @@ export function useChannelSlug(): string | null {
   if (route.kind === "channel") return route.channelSlug;
   if (route.kind === "dm") return route.channelSlug;
   return null;
+}
+
+/**
+ * Channel slug consumers that work outside conversation routes (Console,
+ * Requests, sidebar request badge) should use this hook so they keep
+ * pointing at the user's last-visited channel rather than silently
+ * collapsing to `"general"` whenever the URL is on `/apps/...` or
+ * `/wiki/...`. Falls through to `"general"` only on a cold start where
+ * the user has not yet visited any conversation route.
+ */
+export function useFallbackChannelSlug(): string {
+  const route = useCurrentRoute();
+  const lastChannel = useAppStore((s) => s.lastConversationalChannel);
+  if (route.kind === "channel") return route.channelSlug;
+  if (route.kind === "dm") return route.channelSlug;
+  return lastChannel ?? "general";
 }
 
 /**
