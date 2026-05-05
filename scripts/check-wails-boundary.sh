@@ -18,7 +18,9 @@ if ! command -v rg >/dev/null 2>&1; then
   exit 1
 fi
 
+# shellcheck disable=SC2016 # Backticks are literal regex tokens, not command substitution.
 go_import_pattern='(^|[[:space:]])([[:alpha:]_][[:alnum:]_]*|\.|_)?[[:space:]]*["`]github\.com/wailsapp/wails/v[23](/[^"`[:space:]]*)?["`]'
+# shellcheck disable=SC2016 # Backticks are literal regex tokens, not command substitution.
 ts_import_pattern='(from[[:space:]]*|import[[:space:]]*(\([[:space:]]*)?|require[[:space:]]*\([[:space:]]*|export[^"`'\'';]*from[[:space:]]*)["`'\''](@wails/runtime|@wailsapp/runtime|wails-bindings)(/[^"`'\''[:space:]]*)?["`'\'']|(from[[:space:]]*|import[[:space:]]*(\([[:space:]]*)?|require[[:space:]]*\([[:space:]]*|export[^"`'\'';]*from[[:space:]]*)["`'\'']wailsjs/[^"`'\''[:space:]]+["`'\'']'
 
 hits="$(
