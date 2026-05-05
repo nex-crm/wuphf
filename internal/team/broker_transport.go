@@ -4,12 +4,15 @@ package team
 // only file in internal/team that imports internal/team/transport — the
 // one-way compile boundary (team → transport) is enforced here.
 //
-// Phase 2b wires ReceiveMessage and UpsertParticipant for the channel-bound
-// (Telegram) case. Inbound messages are delivered via PostInboundSurfaceMessage;
-// UpsertParticipant is a no-op for channel-bound adapters because participant
-// attribution is handled inside PostInboundSurfaceMessage by display name.
+// ReceiveMessage and UpsertParticipant route to PostInboundSurfaceMessage for
+// channel-bound (Telegram) adapters; UpsertParticipant is a no-op there because
+// participant attribution is handled inside PostInboundSurfaceMessage by
+// display name.
 //
-// DetachParticipant (phase 3b) and RevokeParticipant (phase 4) remain stubs.
+// RevokeParticipant routes the office-bound (human-share) revoke flow to
+// Broker.revokeHumanSession so an adapter calling Host.RevokeParticipant after
+// an invite is revoked tears down the corresponding session. Member-bound
+// DetachParticipant remains a stub until the openclaw lifecycle adds it.
 
 import (
 	"context"
@@ -45,22 +48,36 @@ func (h *brokerTransportHost) ReceiveMessage(_ context.Context, msg transport.Me
 
 // UpsertParticipant is a no-op for channel-bound adapters (Telegram). Channel-
 // bound participant identity is resolved by display name inside
-// PostInboundSurfaceMessage. Phase 3b will add a real member-store lookup for
-// member-bound adapters (OpenClaw).
+// PostInboundSurfaceMessage. A real member-store lookup for member-bound
+// adapters (OpenClaw) is not yet wired here.
 func (h *brokerTransportHost) UpsertParticipant(_ context.Context, _ transport.Participant, _ transport.Binding) error {
 	return nil
 }
 
-// DetachParticipant marks a participant as offline. Phase 3b TODO for
-// member-bound adapters (OpenClaw).
+// DetachParticipant marks a participant as offline. Not yet implemented for
+// member-bound adapters (OpenClaw); inbound calls return an explicit
+// unsupported error so a misconfigured caller fails loudly.
 func (h *brokerTransportHost) DetachParticipant(_ context.Context, adapterName, _ string) error {
-	return fmt.Errorf("transport: DetachParticipant not yet implemented (phase 3b): adapter=%q",
+	return fmt.Errorf("transport: DetachParticipant not yet implemented: adapter=%q",
 		adapterName)
 }
 
-// RevokeParticipant removes an admitted human from the broker. Phase 4 TODO
-// for office-bound adapters (human-share).
-func (h *brokerTransportHost) RevokeParticipant(_ context.Context, adapterName, _ string) error {
-	return fmt.Errorf("transport: RevokeParticipant not yet implemented (phase 4): adapter=%q",
-		adapterName)
+// RevokeParticipant removes an admitted human from the broker. For the
+// office-bound human-share adapter the key is a humanSession.ID and the
+// implementation routes to Broker.revokeHumanSession so the session is marked
+// revoked and any active wait channels are closed. Other adapter names are
+// rejected so a misnamed call surfaces loudly rather than silently no-op'ing.
+func (h *brokerTransportHost) RevokeParticipant(_ context.Context, adapterName, key string) error {
+	if h == nil || h.broker == nil {
+		return errors.New("transport: RevokeParticipant: nil broker")
+	}
+	switch adapterName {
+	case shareAdapterName:
+		if err := h.broker.revokeHumanSession(key); err != nil {
+			return fmt.Errorf("transport: RevokeParticipant %s/%s: %w", adapterName, key, err)
+		}
+		return nil
+	default:
+		return fmt.Errorf("transport: RevokeParticipant: unsupported adapter %q (key=%q)", adapterName, key)
+	}
 }
