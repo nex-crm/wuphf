@@ -53,7 +53,7 @@ beforeEach(() => {
     composerHelpOpen: false,
     searchOpen: false,
     activeAgentSlug: null,
-    activeThreadId: null,
+    activeThread: null,
     onboardingComplete: true,
   });
 });

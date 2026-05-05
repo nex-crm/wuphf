@@ -8,12 +8,12 @@ vi.mock("../../hooks/useChannels", () => ({
   useChannels: () => ({ data: [] }),
 }));
 
+vi.mock("../../routes/useCurrentRoute", () => ({
+  useCurrentRoute: () => ({ kind: "channel", channelSlug: "general" }),
+}));
+
 afterEach(() => {
-  useAppStore.setState({
-    currentApp: null,
-    currentChannel: "general",
-    theme: "nex",
-  });
+  useAppStore.setState({ theme: "nex" });
   document.documentElement.setAttribute("data-theme", "nex");
 });
 

@@ -15,14 +15,16 @@ import (
 // used instead of dialing the real gateway. Never set in production paths.
 var openclawBootstrapDialer openclawDialer
 
-// StartOpenclawBridgeFromConfig reads persisted OpenClaw bridge bindings from
-// config and, if any are configured, dials the gateway and starts a supervised
+// BuildOpenclawBridgeFromConfig reads persisted OpenClaw bridge bindings from
+// config and, if any are configured, constructs (but does not Start) an
 // OpenclawBridge. Returns (nil, nil) when no bindings are configured so callers
 // can treat the integration as strictly opt-in.
 //
-// The returned bridge's Stop should be called at shutdown to drain the event
-// loop and close the gateway connection cleanly.
-func StartOpenclawBridgeFromConfig(ctx context.Context, broker *Broker) (*OpenclawBridge, error) {
+// Build is the host-driven entrypoint: callers (the launcher) own the bridge
+// lifecycle via [OpenclawBridge.Run], which attaches a transport.Host before
+// the supervised loop starts. The legacy [StartOpenclawBridgeFromConfig] wraps
+// Build + Start for callers that drive the bridge directly (probes, tests).
+func BuildOpenclawBridgeFromConfig(broker *Broker) (*OpenclawBridge, error) {
 	if broker == nil {
 		return nil, fmt.Errorf("openclaw bootstrap: broker is required")
 	}
@@ -60,7 +62,7 @@ func StartOpenclawBridgeFromConfig(ctx context.Context, broker *Broker) (*Opencl
 		bridged = append(bridged, bridgedSlug{Slug: m.Slug, SessionKey: m.Provider.Openclaw.SessionKey})
 	}
 
-	// Decide whether to start the bridge. We start it when EITHER there are
+	// Decide whether to build the bridge. We build it when EITHER there are
 	// already openclaw members (the classic case) OR the gateway is reachable
 	// via configured URL + token (so /office-members POST can live-hire a new
 	// openclaw agent without requiring a pre-existing one). Without this, the
@@ -83,7 +85,19 @@ func StartOpenclawBridgeFromConfig(ctx context.Context, broker *Broker) (*Opencl
 	for _, b := range bridged {
 		bindings = append(bindings, config.OpenclawBridgeBinding{Slug: b.Slug, SessionKey: b.SessionKey})
 	}
-	bridge := NewOpenclawBridgeWithDialer(broker, nil, dialer, bindings)
+	return NewOpenclawBridgeWithDialer(broker, nil, dialer, bindings), nil
+}
+
+// StartOpenclawBridgeFromConfig builds the bridge and Starts it directly,
+// bypassing transport.Host attachment. Inbound messages route via
+// broker.PostInboundSurfaceMessage rather than host.ReceiveMessage. Use
+// [BuildOpenclawBridgeFromConfig] + [OpenclawBridge.Run] to opt into the
+// host-driven path.
+func StartOpenclawBridgeFromConfig(ctx context.Context, broker *Broker) (*OpenclawBridge, error) {
+	bridge, err := BuildOpenclawBridgeFromConfig(broker)
+	if err != nil || bridge == nil {
+		return bridge, err
+	}
 	if err := bridge.Start(ctx); err != nil {
 		return nil, fmt.Errorf("openclaw bridge start: %w", err)
 	}

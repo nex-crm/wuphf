@@ -12,11 +12,9 @@ import "../../styles/notebook.css";
 /**
  * Route root for the `/notebooks` surface. Applies `.notebook-surface` so
  * tokens stay scoped, owns the SSE subscription, and dispatches between
- * bookshelf / agent / entry views.
- *
- * The app's top-level hash router writes to `notebookAgentSlug` +
- * `notebookEntrySlug` in the Zustand store; this component reads both and
- * calls the passed navigation handlers.
+ * bookshelf / agent / entry views. Receives `agentSlug` / `entrySlug`
+ * from the parent route's params and calls the passed navigation
+ * handlers when the user opens a different view.
  */
 
 interface NotebookProps {

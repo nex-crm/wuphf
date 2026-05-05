@@ -6,15 +6,10 @@ package team
 // automatically makes it available in both surfaces — you cannot accidentally
 // wire it to one and miss the other.
 //
-// Phase 2b: TelegramTransport satisfies transport.Transport. RegisterTransports
-// constructs a brokerTransportHost and passes it to Run so inbound messages flow
-// through the Host contract instead of writing to the broker directly.
-//
-// Phase 3a: OpenClaw bridge is started here via StartOpenclawBridgeFromConfig.
-// It returns (nil, nil) when no openclaw members and no gateway URL are
-// configured, so the integration remains strictly opt-in. Phase 3b will
-// refactor OpenclawBridge onto MemberBoundTransport.
-// Phase 4 will wire human-share via OfficeBoundTransport.
+// Each adapter is driven via Run(ctx, host) on a per-transport goroutine using
+// a shared brokerTransportHost so inbound messages flow through the Host
+// contract instead of writing to the broker directly. Adapters whose
+// configuration is absent are skipped silently; their absence is not an error.
 //
 // See docs/ADD-A-TRANSPORT.md for the full contributor guide.
 
@@ -66,28 +61,39 @@ func RegisterTransports(b *Broker) (func(), error) {
 		}
 	}
 
-	// OpenClaw: start when openclaw members exist or a gateway URL is configured.
-	// StartOpenclawBridgeFromConfig returns (nil, nil) when neither condition
-	// holds — the bridge is strictly opt-in and its absence is not an error.
-	ocCtx, ocCancel := context.WithCancel(context.Background())
-	bridge, ocErr := StartOpenclawBridgeFromConfig(ocCtx, b)
+	// OpenClaw: opt-in when members exist or a gateway URL is configured.
+	bridge, ocErr := BuildOpenclawBridgeFromConfig(b)
 	if ocErr != nil {
-		ocCancel()
 		log.Printf("[transport] openclaw: bootstrap error — %v", ocErr)
 	} else if bridge != nil {
 		b.AttachOpenclawBridge(bridge)
-		routerDone := StartOpenclawRouter(ocCtx, b, bridge)
+		// Router and bridge get independent contexts so the cleanup can drain
+		// the router (in-flight broker writes) before cancelling the bridge.
+		// Sharing one context would let bridge.Run trigger b.Stop() while the
+		// router still has messages mid-flight — exactly the race the
+		// StartOpenclawRouter doc warns against.
+		routerCtx, routerCancel := context.WithCancel(context.Background())
+		bridgeCtx, bridgeCancel := context.WithCancel(context.Background())
+		routerDone := StartOpenclawRouter(routerCtx, b, bridge)
+		runDone := make(chan struct{})
+		host := &brokerTransportHost{broker: b}
+		go func() {
+			defer close(runDone)
+			if err := bridge.Run(bridgeCtx, host); err != nil && bridgeCtx.Err() == nil {
+				log.Printf("[transport] openclaw: exited with error: %v", err)
+			}
+		}()
 		stops = append(stops, func() {
-			ocCancel()
-			<-routerDone // wait for router goroutine to exit before bridge.Stop()
-			bridge.Stop()
+			routerCancel()
+			<-routerDone // drain router before tearing down the bridge
+			bridgeCancel()
+			<-runDone // bridge.Run returns after Stop; ensures clean broker shutdown
+			b.AttachOpenclawBridge(nil)
 		})
 		log.Printf("[transport] openclaw: started (%d session(s))", len(bridge.SnapshotBindings()))
-	} else {
-		ocCancel()
 	}
 
-	// Phase 4 TODO: start human-share adapter when share is enabled.
+	// Future: wire human-share adapter via OfficeBoundTransport.
 
 	return cleanup, nil
 }

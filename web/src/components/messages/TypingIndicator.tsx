@@ -1,12 +1,15 @@
 import { useChannelMembers, useOfficeMembers } from "../../hooks/useMembers";
-import { isDMChannel, useAppStore } from "../../stores/app";
+import { useCurrentRoute } from "../../routes/useCurrentRoute";
 
 export function TypingIndicator() {
-  const currentChannel = useAppStore((s) => s.currentChannel);
-  const channelMeta = useAppStore((s) => s.channelMeta);
+  const route = useCurrentRoute();
+  const currentChannel =
+    route.kind === "channel" || route.kind === "dm"
+      ? route.channelSlug
+      : "general";
+  const dm = route.kind === "dm" ? { agentSlug: route.agentSlug } : null;
   const { data: members = [] } = useOfficeMembers();
   const { data: channelMembers = [] } = useChannelMembers(currentChannel);
-  const dm = isDMChannel(currentChannel, channelMeta);
   const channelMemberSlugs = new Set(channelMembers.map((m) => m.slug));
 
   const active = members.filter((m) => {

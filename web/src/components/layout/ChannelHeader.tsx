@@ -1,5 +1,6 @@
 import { useChannels } from "../../hooks/useChannels";
 import { appTitle } from "../../lib/constants";
+import { useCurrentRoute } from "../../routes/useCurrentRoute";
 import type { Theme } from "../../stores/app";
 import { useAppStore } from "../../stores/app";
 
@@ -15,17 +16,53 @@ function themeLabel(t: Theme): string {
   return "Nex Light";
 }
 
+function headerTitleAndDesc(
+  route: ReturnType<typeof useCurrentRoute>,
+  channels: { slug: string; description?: string }[],
+): { title: string; desc: string } {
+  switch (route.kind) {
+    case "channel": {
+      const ch = channels.find((c) => c.slug === route.channelSlug);
+      return {
+        title: `# ${route.channelSlug}`,
+        desc: ch?.description || "",
+      };
+    }
+    case "dm":
+      return { title: `@${route.agentSlug}`, desc: "" };
+    case "app":
+      return { title: appTitle(route.appId), desc: "" };
+    case "task-board":
+    case "task-detail":
+      return { title: appTitle("tasks"), desc: "" };
+    case "wiki":
+    case "wiki-article":
+    case "wiki-lookup":
+      return { title: appTitle("wiki"), desc: "" };
+    case "notebook-catalog":
+    case "notebook-agent":
+    case "notebook-entry":
+      return { title: "Notebooks", desc: "" };
+    case "reviews":
+      return { title: "Reviews", desc: "" };
+    case "unknown":
+      return { title: "", desc: "" };
+    default: {
+      const _exhaustive: never = route;
+      void _exhaustive;
+      return { title: "", desc: "" };
+    }
+  }
+}
+
 export function ChannelHeader() {
-  const currentChannel = useAppStore((s) => s.currentChannel);
-  const currentApp = useAppStore((s) => s.currentApp);
+  const route = useCurrentRoute();
   const setSearchOpen = useAppStore((s) => s.setSearchOpen);
   const theme = useAppStore((s) => s.theme);
   const setTheme = useAppStore((s) => s.setTheme);
   const { data: channels = [] } = useChannels();
 
-  const channel = channels.find((c) => c.slug === currentChannel);
-  const title = currentApp ? appTitle(currentApp) : `# ${currentChannel}`;
-  const desc = currentApp ? "" : channel?.description || "";
+  const { title, desc } = headerTitleAndDesc(route, channels);
   const targetTheme = nextTheme(theme);
 
   return (
