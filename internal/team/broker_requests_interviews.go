@@ -628,7 +628,7 @@ func (b *Broker) handlePostRequestAnswer(w http.ResponseWriter, r *http.Request)
 		b.requests[i].RecheckAt = ""
 		b.requests[i].DueAt = ""
 		b.completeSchedulerJobsLocked("request", b.requests[i].ID, b.requests[i].Channel)
-		b.unblockDependentsLocked(b.requests[i].ID)
+		pendingCascade := b.unblockDependentsLocked(b.requests[i].ID)
 		b.pendingInterview = firstBlockingRequest(b.requests)
 		b.unblockTasksForAnsweredRequestLocked(b.requests[i])
 
@@ -678,6 +678,7 @@ func (b *Broker) handlePostRequestAnswer(w http.ResponseWriter, r *http.Request)
 			http.Error(w, "failed to persist broker state", http.StatusInternalServerError)
 			return
 		}
+		b.flushPendingAutoNotebookTransitionsLocked(pendingCascade, "system")
 		b.mu.Unlock()
 
 		w.Header().Set("Content-Type", "application/json")

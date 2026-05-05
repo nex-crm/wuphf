@@ -630,6 +630,11 @@ func (b *Broker) Stop() {
 //
 // Caller must hold b.mu. Roster filtering happens here (lock-free predicate)
 // because the writer cannot re-enter b.mu — see isAgentMemberSlugLocked.
+//
+// No-op transitions (beforeStatus == afterStatus) are short-circuited at the
+// source: the writer would also drop them via NoopTransition, but pruning
+// here avoids the enqueue + roster lookup on a path where many of the
+// existing call sites can legitimately be called with no actual delta.
 func (b *Broker) emitTaskTransitionAutoNotebook(task *teamTask, beforeStatus, actor string) {
 	if b == nil || b.autoNotebookWriter == nil || task == nil {
 		return
@@ -638,6 +643,11 @@ func (b *Broker) emitTaskTransitionAutoNotebook(task *teamTask, beforeStatus, ac
 	if owner == "" {
 		// No owner means no shelf to land on. Skipping here avoids feeding
 		// the writer an event it would just drop and keeps counters clean.
+		return
+	}
+	beforeTrimmed := strings.TrimSpace(beforeStatus)
+	afterTrimmed := strings.TrimSpace(task.Status)
+	if strings.EqualFold(beforeTrimmed, afterTrimmed) {
 		return
 	}
 	if !b.isAgentMemberSlugLocked(owner) {
@@ -650,11 +660,40 @@ func (b *Broker) emitTaskTransitionAutoNotebook(task *teamTask, beforeStatus, ac
 		Channel:      normalizeChannelSlug(task.Channel),
 		TaskID:       task.ID,
 		TaskTitle:    task.Title,
-		BeforeStatus: strings.TrimSpace(beforeStatus),
-		AfterStatus:  strings.TrimSpace(task.Status),
+		BeforeStatus: beforeTrimmed,
+		AfterStatus:  afterTrimmed,
 		Content:      strings.TrimSpace(task.Title),
 		Timestamp:    time.Now().UTC(),
 	})
+}
+
+// pendingTaskTransition captures a status delta that an under-mutex helper
+// (e.g. unblockDependentsLocked) wants to publish, but only AFTER the caller
+// has persisted via saveLocked. Without this two-step, a saveLocked failure
+// would still leak notebook entries for transitions the broker rolled back.
+type pendingTaskTransition struct {
+	taskID       string
+	beforeStatus string
+}
+
+// flushPendingAutoNotebookTransitionsLocked publishes a batch of cascade
+// transitions to the writer using the current status of each task in
+// b.tasks. Caller holds b.mu and has just successfully saveLocked'd. The
+// per-event no-op guard inside emitTaskTransitionAutoNotebook handles the
+// case where a subsequent mutation reverted the status back to its prior
+// value before we got here.
+func (b *Broker) flushPendingAutoNotebookTransitionsLocked(pending []pendingTaskTransition, actor string) {
+	if b == nil || len(pending) == 0 {
+		return
+	}
+	for _, p := range pending {
+		for i := range b.tasks {
+			if b.tasks[i].ID == p.taskID {
+				b.emitTaskTransitionAutoNotebook(&b.tasks[i], p.beforeStatus, actor)
+				break
+			}
+		}
+	}
 }
 
 // IsAgentMemberSlug returns true when `slug` matches a registered office
