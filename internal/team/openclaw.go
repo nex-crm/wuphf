@@ -632,20 +632,28 @@ func (b *OpenclawBridge) postBridgeMessage(slug, channel, sessionKey, text strin
 	ctx := b.ctx
 	b.mu.RUnlock()
 	if hp := b.host.Load(); hp != nil {
-		err := (*hp).ReceiveMessage(ctx, transport.Message{
-			Participant: transport.Participant{
-				AdapterName: openclawAdapterName,
-				Key:         sessionKey,
-				DisplayName: slug,
-			},
-			Binding: transport.Binding{
-				Scope:       transport.ScopeMember,
-				MemberSlug:  slug,
-				ChannelSlug: channel,
-			},
-			Text: text,
-		})
-		if err != nil && ctx != nil && ctx.Err() == nil {
+		host := *hp
+		participant := transport.Participant{
+			AdapterName: openclawAdapterName,
+			Key:         sessionKey,
+			DisplayName: slug,
+		}
+		binding := transport.Binding{
+			Scope:       transport.ScopeMember,
+			MemberSlug:  slug,
+			ChannelSlug: channel,
+		}
+		if err := host.UpsertParticipant(ctx, participant, binding); err != nil {
+			if ctx != nil && ctx.Err() == nil {
+				b.postSystemMessage(fmt.Sprintf("upsert @%s: %v", slug, err))
+			}
+			return
+		}
+		if err := host.ReceiveMessage(ctx, transport.Message{
+			Participant: participant,
+			Binding:     binding,
+			Text:        text,
+		}); err != nil && ctx != nil && ctx.Err() == nil {
 			b.postSystemMessage(fmt.Sprintf("inbound from @%s: %v", slug, err))
 		}
 		return

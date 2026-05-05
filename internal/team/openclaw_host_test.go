@@ -90,7 +90,8 @@ func TestPostBridgeMessageRoutesToHost(t *testing.T) {
 
 	// Poll until ReceiveMessage is observed; bounded so a regression that
 	// silently routes through the broker fails fast.
-	for time.Now().Add(500 * time.Millisecond).After(time.Now()) {
+	hostDeadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(hostDeadline) {
 		if len(host.snapshot()) > 0 {
 			break
 		}
@@ -163,7 +164,7 @@ func TestRegisterTransportsShutdownOrdering(t *testing.T) {
 
 	fake := newFakeOC()
 	openclawBootstrapDialer = func(context.Context) (openclawClient, error) { return fake, nil }
-	defer func() { openclawBootstrapDialer = nil }()
+	t.Cleanup(func() { openclawBootstrapDialer = nil })
 
 	broker := newTestBroker(t)
 	stop, err := RegisterTransports(broker)

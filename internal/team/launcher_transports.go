@@ -81,6 +81,7 @@ func RegisterTransports(b *Broker) (func(), error) {
 			ocCancel()
 			<-routerDone // wait for router goroutine to exit before tearing down
 			<-runDone    // bridge.Run returns after Stop; ensures clean broker shutdown
+			b.AttachOpenclawBridge(nil)
 		})
 		log.Printf("[transport] openclaw: started (%d session(s))", len(bridge.SnapshotBindings()))
 	}
