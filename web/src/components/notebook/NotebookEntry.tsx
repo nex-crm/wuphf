@@ -89,7 +89,7 @@ export default function NotebookEntryView({
     >
       <nav className="nb-crumb" aria-label="Breadcrumb">
         <a
-          href="#/apps/notebooks"
+          href="#/notebooks"
           onClick={(e) => {
             if (onNavigateCatalog) {
               e.preventDefault();

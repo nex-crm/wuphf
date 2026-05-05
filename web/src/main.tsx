@@ -1,20 +1,35 @@
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { RouterProvider } from "@tanstack/react-router";
 
-import App from "./App";
+import { rootRoute, router } from "./lib/router";
+import RootRoute from "./routes/RootRoute";
+import "./styles/shadcn.css";
+import "./styles/global.css";
+import "./styles/layout.css";
+import "./styles/messages.css";
+import "./styles/agents.css";
+import "./styles/search.css";
+import "./styles/wiki-shell.css";
+import "./styles/kbd.css";
+import "./styles/console.css";
+import "@xterm/xterm/css/xterm.css";
 
-// Hoisted out of App() so hooks called *during* App's render (e.g.
-// useKeyboardShortcuts → useQueryClient) find a client. Previously the
-// provider lived inside App's return tree, which meant any useQueryClient
-// call at the top of App threw "No QueryClient set" before the provider
-// got a chance to mount.
+// Attach the root route's component at startup. Defining the component
+// inside `lib/router.ts` would create a circular import: RootRoute reads
+// route ids from `lib/router` to dispatch URL→store hydration, and
+// `lib/router` would in turn import RootRoute. Attaching here keeps the
+// router module dependency-free of route components.
+rootRoute.update({ component: RootRoute });
+
+// Hoisted out of the React tree so hooks called during the first render
+// (e.g. useKeyboardShortcuts → useQueryClient) find a client immediately.
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: { retry: 1, staleTime: 2000 },
   },
 });
 
-// Signal boot-done to the index.html fatal-error handler when main.tsx loads.
 declare global {
   interface Window {
     __wuphfBootDone?: () => void;
@@ -47,20 +62,15 @@ try {
   }
   createRoot(root).render(
     <QueryClientProvider client={queryClient}>
-      <App />
+      <RouterProvider router={router} />
     </QueryClientProvider>,
   );
-  // Tell the HTML-level timeout handler that we're alive.
   window.__wuphfBootDone?.();
 } catch (err) {
   const message = err instanceof Error ? err.message : String(err);
   const stack = err instanceof Error && err.stack ? err.stack : "";
   showFatalError("React failed to mount", `${message}\n\n${stack}`);
-  // Suppress the 10s watchdog in index.html — its generic "Boot timeout"
-  // overlay would otherwise fire on top of this specific error and hide
-  // the actionable signal.
   window.__wuphfBootDone?.();
-  // Also log so `$B console` picks it up
   // eslint-disable-next-line no-console
   console.error("[WUPHF boot]", err);
 }

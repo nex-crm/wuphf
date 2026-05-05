@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 
 import {
   collectReactErrors,
@@ -19,12 +19,13 @@ import {
 //   3. Submitting empty token shows an inline validation error.
 //   4. Verify failure (broker says ok:false) keeps the user on the token step
 //      with an editable input and an inline error banner.
-//   5. Verify success advances to discovery and renders the picker step.
+//   5. Verify success advances to mode selection, then group mode discovers
+//      chats and renders the picker step.
 //   6. Empty group list shows "no groups" copy + retry/manual/dm controls.
 //   7. Picking a group fires POST /telegram/connect with the right body and
 //      lands on the done step showing the new channel slug.
 //   8. Manual chat ID flow validates the input and posts an integer chat_id.
-//   9. "Use as DM" posts chat_id=0.
+//   9. Choosing DM mode posts chat_id=0.
 //  10. Connect failure keeps the picker step active with the error visible.
 //  10b. Modal renders with a visible card surface (regression: wk-* CSS
 //       variables must resolve outside `.wiki-root`).
@@ -95,7 +96,7 @@ const connectFail = {
 // Open the Telegram wizard directly via `/connect telegram` so the tests
 // don't have to click through the provider picker first. The bare-`/connect`
 // path that lands on the provider picker has its own dedicated test below.
-async function openTelegramWizard(page: import("@playwright/test").Page) {
+async function openTelegramWizard(page: Page) {
   const composer = page.locator(".composer-input");
   await composer.click();
   // Trailing space defeats the autocomplete picker so Enter dispatches the
@@ -107,6 +108,22 @@ async function openTelegramWizard(page: import("@playwright/test").Page) {
     timeout: 5_000,
   });
   await expect(page.getByTestId("tg-step-token")).toBeVisible();
+}
+
+async function verifyTokenToMode(page: Page, token = "123456:ABC") {
+  await page.getByTestId("tg-token-input").fill(token);
+  await page.getByTestId("tg-token-submit").click();
+  await expect(page.getByTestId("tg-step-mode")).toBeVisible({
+    timeout: 5_000,
+  });
+}
+
+async function verifyTokenAndOpenGroupPicker(page: Page, token = "123456:ABC") {
+  await verifyTokenToMode(page, token);
+  await page.getByTestId("tg-mode-group").click();
+  await expect(page.getByTestId("tg-step-pick")).toBeVisible({
+    timeout: 5_000,
+  });
 }
 
 test.describe("wuphf web /connect Telegram wizard", () => {
@@ -233,12 +250,7 @@ test.describe("wuphf web /connect Telegram wizard", () => {
     });
 
     await openTelegramWizard(page);
-    await page.getByTestId("tg-token-input").fill("123456:ABC");
-    await page.getByTestId("tg-token-submit").click();
-
-    await expect(page.getByTestId("tg-step-pick")).toBeVisible({
-      timeout: 5_000,
-    });
+    await verifyTokenAndOpenGroupPicker(page);
     await expect(page.getByTestId("tg-group-list")).toBeVisible();
 
     await page.getByTestId("tg-group--123456").click();
@@ -269,17 +281,16 @@ test.describe("wuphf web /connect Telegram wizard", () => {
     );
 
     await openTelegramWizard(page);
-    await page.getByTestId("tg-token-input").fill("123456:ABC");
-    await page.getByTestId("tg-token-submit").click();
-
-    await expect(page.getByTestId("tg-step-pick")).toBeVisible({
-      timeout: 5_000,
-    });
+    await verifyTokenAndOpenGroupPicker(page);
     await expect(page.getByTestId("tg-retry-discover")).toBeVisible();
     await expect(page.getByTestId("tg-manual-chat-id")).toBeVisible();
-    await expect(page.getByTestId("tg-connect-dm")).toBeVisible();
+    await page.getByText("Back", { exact: true }).click();
+    await expect(page.getByTestId("tg-step-mode")).toBeVisible();
+    await expect(page.getByTestId("tg-mode-dm")).toBeVisible();
   });
+});
 
+test.describe("wuphf web /connect Telegram wizard connect modes", () => {
   test("[8] manual chat ID validates and posts integer chat_id", async ({
     page,
   }) => {
@@ -298,11 +309,7 @@ test.describe("wuphf web /connect Telegram wizard", () => {
     });
 
     await openTelegramWizard(page);
-    await page.getByTestId("tg-token-input").fill("123456:ABC");
-    await page.getByTestId("tg-token-submit").click();
-    await expect(page.getByTestId("tg-step-pick")).toBeVisible({
-      timeout: 5_000,
-    });
+    await verifyTokenAndOpenGroupPicker(page);
 
     await page.getByTestId("tg-manual-chat-id").click();
     await expect(page.getByTestId("tg-step-manual")).toBeVisible();
@@ -345,11 +352,7 @@ test.describe("wuphf web /connect Telegram wizard", () => {
     );
 
     await openTelegramWizard(page);
-    await page.getByTestId("tg-token-input").fill("123456:ABC");
-    await page.getByTestId("tg-token-submit").click();
-    await expect(page.getByTestId("tg-step-pick")).toBeVisible({
-      timeout: 5_000,
-    });
+    await verifyTokenAndOpenGroupPicker(page);
 
     await page.getByTestId("tg-manual-chat-id").click();
     await page.getByTestId("tg-manual-id-input").fill("-5093020979");
@@ -359,14 +362,11 @@ test.describe("wuphf web /connect Telegram wizard", () => {
     await expect(page.getByRole("alert")).toContainText(/chat not found/i);
   });
 
-  test('[9] "Use as DM" posts chat_id=0', async ({ page }) => {
+  test("[9] choosing DM mode posts chat_id=0", async ({ page }) => {
     await page.goto("/");
     await waitForShellReady(page);
 
     await page.route("**/telegram/verify", (route) => route.fulfill(verifyOK));
-    await page.route("**/telegram/discover", (route) =>
-      route.fulfill(discoverEmpty),
-    );
 
     let connectBody: { chat_id?: number; type?: string } | null = null;
     await page.route("**/telegram/connect", async (route, req) => {
@@ -375,13 +375,8 @@ test.describe("wuphf web /connect Telegram wizard", () => {
     });
 
     await openTelegramWizard(page);
-    await page.getByTestId("tg-token-input").fill("123456:ABC");
-    await page.getByTestId("tg-token-submit").click();
-    await expect(page.getByTestId("tg-step-pick")).toBeVisible({
-      timeout: 5_000,
-    });
-
-    await page.getByTestId("tg-connect-dm").click();
+    await verifyTokenToMode(page);
+    await page.getByTestId("tg-mode-dm").click();
     await expect(page.getByTestId("tg-step-done")).toBeVisible({
       timeout: 5_000,
     });
@@ -404,18 +399,16 @@ test.describe("wuphf web /connect Telegram wizard", () => {
     );
 
     await openTelegramWizard(page);
-    await page.getByTestId("tg-token-input").fill("123456:ABC");
-    await page.getByTestId("tg-token-submit").click();
-    await expect(page.getByTestId("tg-step-pick")).toBeVisible({
-      timeout: 5_000,
-    });
+    await verifyTokenAndOpenGroupPicker(page);
 
     await page.getByTestId("tg-group--123456").click();
 
     await expect(page.getByTestId("tg-step-pick")).toBeVisible();
     await expect(page.getByRole("alert")).toContainText(/chat not found/i);
   });
+});
 
+test.describe("wuphf web /connect Telegram wizard regressions", () => {
   test("[10b] modal renders with a visible card surface (regression: wk-* CSS vars must resolve outside .wiki-root)", async ({
     page,
   }) => {
@@ -452,18 +445,20 @@ test.describe("wuphf web /connect Telegram wizard", () => {
         cardBorderWidth: cs.borderTopWidth,
       };
     });
-    expect(styles, "modal DOM should be present").not.toBeNull();
+    if (!styles) {
+      throw new Error("modal DOM should be present");
+    }
     // Backdrop must dim the page (non-zero alpha) and be position:fixed.
-    expect(styles!.backdropPosition).toBe("fixed");
-    expect(styles!.backdropBg).not.toBe("rgba(0, 0, 0, 0)");
-    expect(styles!.backdropBg).not.toBe("transparent");
+    expect(styles.backdropPosition).toBe("fixed");
+    expect(styles.backdropBg).not.toBe("rgba(0, 0, 0, 0)");
+    expect(styles.backdropBg).not.toBe("transparent");
     // Card must have an opaque background — the original bug had this as
     // rgba(0,0,0,0) because var(--wk-paper) didn't resolve.
-    expect(styles!.cardBg).not.toBe("rgba(0, 0, 0, 0)");
-    expect(styles!.cardBg).not.toBe("transparent");
+    expect(styles.cardBg).not.toBe("rgba(0, 0, 0, 0)");
+    expect(styles.cardBg).not.toBe("transparent");
     // Card must have a visible border (non-zero width). Original bug:
     // border-width was 0px because var(--wk-border) didn't resolve.
-    expect(styles!.cardBorderWidth).not.toBe("0px");
+    expect(styles.cardBorderWidth).not.toBe("0px");
   });
 
   test("[10c] verify the wizard renders styled when opened from a non-wiki route (regression)", async ({
@@ -533,6 +528,10 @@ test.describe("wuphf web /connect Telegram wizard", () => {
 
     await page.getByTestId("tg-token-input").fill("123456:GOOD");
     await page.getByTestId("tg-token-submit").click();
+    await expect(page.getByTestId("tg-step-mode")).toBeVisible({
+      timeout: 5_000,
+    });
+    await page.getByTestId("tg-mode-group").click();
     await expect(page.getByTestId("tg-step-pick")).toBeVisible({
       timeout: 5_000,
     });

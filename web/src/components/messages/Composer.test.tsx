@@ -138,6 +138,7 @@ describe("unknown slash commands", () => {
       leadSlug: "ceo",
       clearMessages: vi.fn(),
       sendAsMessage,
+      channel: "general",
     });
 
     expect(consumed).toBe(true);

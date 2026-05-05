@@ -3,6 +3,7 @@ import { useDefaultHarness } from "../../hooks/useConfig";
 import { useOfficeMembers } from "../../hooks/useMembers";
 import { useOverflow } from "../../hooks/useOverflow";
 import { resolveHarness } from "../../lib/harness";
+import { useCurrentRoute } from "../../routes/useCurrentRoute";
 import { useAppStore } from "../../stores/app";
 import { AgentWizard, useAgentWizard } from "../agents/AgentWizard";
 import { HarnessBadge } from "../ui/HarnessBadge";
@@ -32,8 +33,8 @@ function classifyActivity(member: OfficeMember | undefined) {
 export function AgentList() {
   const { data: members = [] } = useOfficeMembers();
   const setActiveAgentSlug = useAppStore((s) => s.setActiveAgentSlug);
-  const currentChannel = useAppStore((s) => s.currentChannel);
-  const channelMeta = useAppStore((s) => s.channelMeta);
+  const route = useCurrentRoute();
+  const activeDmAgent = route.kind === "dm" ? route.agentSlug : null;
   const wizard = useAgentWizard();
   const overflowRef = useOverflow<HTMLDivElement>();
   const defaultHarness = useDefaultHarness();
@@ -57,9 +58,7 @@ export function AgentList() {
           ) : (
             agents.map((agent) => {
               const ac = classifyActivity(agent);
-              const meta = channelMeta[currentChannel];
-              const isDMActive =
-                meta?.type === "D" && meta.agentSlug === agent.slug;
+              const isDMActive = activeDmAgent === agent.slug;
               const harness = resolveHarness(agent.provider, defaultHarness);
 
               return (

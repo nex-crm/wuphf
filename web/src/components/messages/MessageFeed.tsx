@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef } from "react";
 import type { Message } from "../../api/client";
 import { useMessages } from "../../hooks/useMessages";
 import { formatDateLabel } from "../../lib/format";
+import { useChannelSlug } from "../../routes/useCurrentRoute";
 import { useAppStore } from "../../stores/app";
 import { MessageBubble } from "./MessageBubble";
 
@@ -37,11 +38,11 @@ export function messagesAfterClearMarker(
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
 export function MessageFeed() {
-  const currentChannel = useAppStore((s) => s.currentChannel);
+  const currentChannel = useChannelSlug() ?? "general";
   const clearMarkerId = useAppStore(
     (s) => s.clearedMessageIdsByChannel[currentChannel] ?? null,
   );
-  const setActiveThreadId = useAppStore((s) => s.setActiveThreadId);
+  const setActiveThread = useAppStore((s) => s.setActiveThread);
   const collapsedThreads = useAppStore((s) => s.collapsedThreads);
   const toggleThreadCollapsed = useAppStore((s) => s.toggleThreadCollapsed);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -205,7 +206,9 @@ export function MessageFeed() {
               message={el.parent.message}
               grouped={el.parent.grouped}
               replyCount={el.replies.length}
-              onOpenThread={(id) => setActiveThreadId(id)}
+              onOpenThread={(id) =>
+                setActiveThread({ id, channelSlug: currentChannel })
+              }
               onCopyLink={copyMessageLink}
             />
             {hasReplies && (
@@ -244,7 +247,9 @@ export function MessageFeed() {
                     message={r.message}
                     grouped={r.grouped}
                     isReply={true}
-                    onOpenThread={(id) => setActiveThreadId(id)}
+                    onOpenThread={(id) =>
+                      setActiveThread({ id, channelSlug: currentChannel })
+                    }
                     onCopyLink={copyMessageLink}
                   />
                 ))}

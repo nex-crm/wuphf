@@ -29,16 +29,19 @@ vi.mock("../channels/ChannelWizard", () => ({
   useChannelWizard: () => ({ open: false, show: () => {}, hide: () => {} }),
 }));
 
+// ChannelList uses useCurrentRoute to mark the active row. The route
+// shape is irrelevant for the badge/unread tests; stub a non-conversation
+// route so no row appears active.
+vi.mock("../../routes/useCurrentRoute", () => ({
+  useCurrentRoute: () => ({ kind: "unknown" }),
+}));
+
 import { useChannels } from "../../hooks/useChannels";
 
 const useChannelsMock = vi.mocked(useChannels);
 
 afterEach(() => {
-  useAppStore.setState({
-    currentChannel: "general",
-    currentApp: null,
-    unreadByChannel: {},
-  });
+  useAppStore.setState({ unreadByChannel: {} });
 });
 
 function setChannels(count: number) {

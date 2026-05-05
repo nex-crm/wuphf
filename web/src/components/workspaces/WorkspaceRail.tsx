@@ -27,7 +27,7 @@ import {
   useWorkspacesList,
   type Workspace,
 } from "../../api/workspaces";
-import { useAppStore } from "../../stores/app";
+import { channelRoute, dmRoute, router } from "../../lib/router";
 import { showNotice } from "../ui/Toast";
 import { CreateWorkspaceModal } from "./CreateWorkspaceModal";
 import { useRestoreToast } from "./RestoreToast";
@@ -355,7 +355,6 @@ export function WorkspaceRail({
   navigate = defaultNavigate,
 }: WorkspaceRailProps = {}) {
   const { data, isLoading } = useWorkspacesList();
-  const setCurrentApp = useAppStore((s) => s.setCurrentApp);
 
   const [hoveredSlug, setHoveredSlug] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
@@ -446,8 +445,19 @@ export function WorkspaceRail({
   const handleClick = useCallback(
     (ws: Workspace) => {
       if (ws.is_active || ws.name === activeName) {
-        // Already here — bring focus back to the office.
-        setCurrentApp(null);
+        // Already here — bring focus back to the office. If the user is
+        // currently on a non-conversation surface (an app panel, wiki,
+        // notebooks, reviews), drop them back to #general; if they are
+        // already in a conversation, this click is a no-op.
+        const leaf = router.state.matches.at(-1);
+        const onConversation =
+          leaf?.routeId === channelRoute.id || leaf?.routeId === dmRoute.id;
+        if (!onConversation) {
+          void router.navigate({
+            to: "/channels/$channelSlug",
+            params: { channelSlug: "general" },
+          });
+        }
         return;
       }
       if (ws.state === "running") {
@@ -468,7 +478,7 @@ export function WorkspaceRail({
       // starting / stopping — just notify; user will retry.
       showNotice(`Workspace '${ws.name}' is ${ws.state}.`, "info");
     },
-    [activeName, navigate, setCurrentApp],
+    [activeName, navigate],
   );
 
   const openKebab = useCallback((ws: Workspace, x: number, y: number) => {
@@ -598,7 +608,35 @@ export function WorkspaceRail({
             setKebab(null);
           }}
           onSettings={() => {
-            setCurrentApp("settings");
+            // The kebab menu opens for `kebab.workspace`, which may not
+            // be the workspace the user is currently in. Routing through
+            // the SPA's local router would always open this workspace's
+            // settings page, which is wrong (and can land edits in the
+            // wrong workspace). When the kebab targets a different
+            // workspace, page-reload to that broker's /apps/settings
+            // instead — same protocol the workspace icon uses for
+            // switching tabs.
+            const isCurrent =
+              kebab.workspace.is_active === true ||
+              kebab.workspace.name === activeName;
+            if (isCurrent) {
+              void router.navigate({
+                to: "/apps/$appId",
+                params: { appId: "settings" },
+              });
+            } else if (
+              kebab.workspace.state === "running" &&
+              kebab.workspace.web_port
+            ) {
+              navigate(
+                `http://localhost:${kebab.workspace.web_port}/#/apps/settings`,
+              );
+            } else {
+              showNotice(
+                `Workspace '${kebab.workspace.name}' is ${kebab.workspace.state}; resume it before opening Settings.`,
+                "info",
+              );
+            }
             setKebab(null);
           }}
           onShred={() => {

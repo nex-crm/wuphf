@@ -5,7 +5,8 @@ import { restartBroker } from "../../api/client";
 import { getHealth, type HealthResponse } from "../../api/platform";
 import { useOfficeMembers } from "../../hooks/useMembers";
 import { appTitle } from "../../lib/constants";
-import { isDMChannel, useAppStore } from "../../stores/app";
+import { useCurrentRoute } from "../../routes/useCurrentRoute";
+import { useAppStore } from "../../stores/app";
 import { Kbd } from "../ui/Kbd";
 import { StatusPill } from "../workspaces/StatusPill";
 
@@ -14,9 +15,7 @@ import { StatusPill } from "../workspaces/StatusPill";
  * mode (office vs 1:1), agent count, broker connection, and runtime provider.
  */
 export function StatusBar() {
-  const currentChannel = useAppStore((s) => s.currentChannel);
-  const currentApp = useAppStore((s) => s.currentApp);
-  const channelMeta = useAppStore((s) => s.channelMeta);
+  const route = useCurrentRoute();
   const brokerConnected = useAppStore((s) => s.brokerConnected);
   const setComposerHelpOpen = useAppStore((s) => s.setComposerHelpOpen);
 
@@ -40,7 +39,7 @@ export function StatusBar() {
     }
   }, []);
   const { data: members = [] } = useOfficeMembers();
-  const dm = !currentApp ? isDMChannel(currentChannel, channelMeta) : null;
+  const dm = route.kind === "dm" ? { agentSlug: route.agentSlug } : null;
 
   const { data: health } = useQuery<HealthResponse>({
     queryKey: ["health"],
@@ -54,11 +53,41 @@ export function StatusBar() {
       m.slug && m.slug !== "human" && m.slug !== "you" && m.slug !== "system",
   ).length;
 
-  const channelLabel = currentApp
-    ? appTitle(currentApp)
-    : dm
-      ? `@${dm.agentSlug}`
-      : `# ${currentChannel}`;
+  // Mirrors ChannelHeader.headerTitleAndDesc — the two surfaces should
+  // present the same user-facing title for the same route. wiki-lookup
+  // shares the Wiki app title; notebooks/reviews are capitalized to
+  // match the header copy.
+  const channelLabel = (() => {
+    switch (route.kind) {
+      case "channel":
+        return `# ${route.channelSlug}`;
+      case "dm":
+        return `@${route.agentSlug}`;
+      case "app":
+        return appTitle(route.appId);
+      case "task-board":
+      case "task-detail":
+        return appTitle("tasks");
+      case "wiki":
+      case "wiki-article":
+      case "wiki-lookup":
+        return appTitle("wiki");
+      case "notebook-catalog":
+      case "notebook-agent":
+      case "notebook-entry":
+        return "Notebooks";
+      case "reviews":
+        return "Reviews";
+      case "unknown":
+        return "";
+      default: {
+        // Exhaustiveness check — see MainContent's matching switch.
+        const _exhaustive: never = route;
+        void _exhaustive;
+        return "";
+      }
+    }
+  })();
   const modeLabel = dm ? "1:1" : "office";
   const provider = health?.provider;
   const providerModel = health?.provider_model?.trim();

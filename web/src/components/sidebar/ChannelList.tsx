@@ -1,9 +1,18 @@
 import { type Channel, useChannels } from "../../hooks/useChannels";
 import { useOverflow } from "../../hooks/useOverflow";
+import { router } from "../../lib/router";
+import { useCurrentRoute } from "../../routes/useCurrentRoute";
 import { useAppStore } from "../../stores/app";
 import { ChannelWizard, useChannelWizard } from "../channels/ChannelWizard";
 import { Kbd, MOD_KEY } from "../ui/Kbd";
 import { SidebarItemLabel } from "./SidebarItemLabel";
+
+function navigateToChannel(channelSlug: string): void {
+  void router.navigate({
+    to: "/channels/$channelSlug",
+    params: { channelSlug },
+  });
+}
 
 function ChannelRow({
   channel,
@@ -62,19 +71,18 @@ function ChannelRow({
 
 export function ChannelList() {
   const { data: channels = [] } = useChannels();
-  const currentChannel = useAppStore((s) => s.currentChannel);
-  const setCurrentChannel = useAppStore((s) => s.setCurrentChannel);
-  const currentApp = useAppStore((s) => s.currentApp);
+  const route = useCurrentRoute();
   const unreadByChannel = useAppStore((s) => s.unreadByChannel);
   const wizard = useChannelWizard();
   const overflowRef = useOverflow<HTMLDivElement>();
+  const activeChannelSlug = route.kind === "channel" ? route.channelSlug : null;
 
   return (
     <>
       <div className="sidebar-scroll-wrap is-channels">
         <div className="sidebar-channels" ref={overflowRef}>
           {channels.map((ch, idx) => {
-            const isActive = currentChannel === ch.slug && !currentApp;
+            const isActive = activeChannelSlug === ch.slug;
             const unreadCount = unreadByChannel[ch.slug] ?? 0;
             return (
               <ChannelRow
@@ -83,7 +91,7 @@ export function ChannelList() {
                 index={idx}
                 active={isActive}
                 unreadCount={unreadCount}
-                onSelect={setCurrentChannel}
+                onSelect={navigateToChannel}
               />
             );
           })}

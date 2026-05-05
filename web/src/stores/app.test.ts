@@ -1,78 +1,56 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { directChannelSlug, isDMChannel, useAppStore } from "./app";
+import { directChannelSlug, useAppStore } from "./app";
 
 afterEach(() => {
   useAppStore.setState({
-    currentChannel: "general",
-    currentApp: null,
-    taskDetailId: null,
-    activeThreadId: null,
+    activeThread: null,
     lastMessageId: null,
     clearedMessageIdsByChannel: {},
     unreadByChannel: {},
     activeAgentSlug: null,
+    lastConversationalChannel: null,
     searchOpen: false,
     composerSearchInitialQuery: "",
     composerHelpOpen: false,
     onboardingComplete: false,
-    wikiPath: null,
-    wikiLookupQuery: null,
-    notebookAgentSlug: null,
-    notebookEntrySlug: null,
   });
 });
 
 describe("DM channel helpers", () => {
-  it("uses the broker canonical direct slug", () => {
+  it("uses the broker canonical direct slug for both ordering directions", () => {
+    // Lower lexicographic side comes first; this is what the broker
+    // expects on /dm endpoints and what useBrokerEvents matches against
+    // when suppressing unread for the active DM.
     expect(directChannelSlug("ceo")).toBe("ceo__human");
     expect(directChannelSlug("pm")).toBe("human__pm");
   });
 
-  it("recognizes canonical and legacy DM slugs", () => {
-    expect(isDMChannel("ceo__human", {})).toEqual({ agentSlug: "ceo" });
-    expect(isDMChannel("human__pm", {})).toEqual({ agentSlug: "pm" });
-    expect(isDMChannel("dm-ceo", {})).toEqual({ agentSlug: "ceo" });
-    expect(isDMChannel("dm-human-ceo", {})).toEqual({ agentSlug: "ceo" });
-  });
-
-  it("resets navigation and onboarding state for a shred flow", () => {
+  it("resets non-route session state for a shred flow", () => {
     useAppStore.setState({
-      currentChannel: "ceo__human",
-      currentApp: "settings",
-      activeThreadId: "thread-1",
+      activeThread: { id: "thread-1", channelSlug: "engineering" },
       lastMessageId: "msg-1",
       clearedMessageIdsByChannel: { general: "msg-0" },
       activeAgentSlug: "ceo",
+      lastConversationalChannel: "engineering",
       searchOpen: true,
       composerSearchInitialQuery: "stuck task",
       composerHelpOpen: true,
       onboardingComplete: true,
-      wikiPath: "companies/acme",
-      wikiLookupQuery: "who owns renewal?",
-      notebookAgentSlug: "ceo",
-      notebookEntrySlug: "handoff",
-      taskDetailId: "task-1",
     });
 
     useAppStore.getState().resetForOnboarding();
 
     expect(useAppStore.getState()).toMatchObject({
-      currentChannel: "general",
-      currentApp: null,
-      activeThreadId: null,
+      activeThread: null,
       lastMessageId: null,
       clearedMessageIdsByChannel: {},
       activeAgentSlug: null,
+      lastConversationalChannel: null,
       searchOpen: false,
       composerSearchInitialQuery: "",
       composerHelpOpen: false,
       onboardingComplete: false,
-      wikiPath: null,
-      wikiLookupQuery: null,
-      notebookAgentSlug: null,
-      notebookEntrySlug: null,
-      taskDetailId: null,
     });
   });
 });
@@ -92,63 +70,6 @@ describe("channel unread state", () => {
 
     expect(useAppStore.getState().unreadByChannel.launch).toBe(0);
     expect(useAppStore.getState().unreadByChannel.general).toBe(1);
-  });
-
-  it("clears a channel when navigating to its message view", () => {
-    useAppStore.setState({
-      currentChannel: "general",
-      currentApp: "tasks",
-      taskDetailId: "task-1",
-      unreadByChannel: { general: 2, launch: 3 },
-    });
-
-    useAppStore.getState().setCurrentChannel("launch");
-
-    expect(useAppStore.getState()).toMatchObject({
-      currentChannel: "launch",
-      currentApp: null,
-      taskDetailId: null,
-    });
-    expect(useAppStore.getState().unreadByChannel.launch).toBe(0);
-    expect(useAppStore.getState().unreadByChannel.general).toBe(2);
-  });
-
-  it("clears the current channel when returning from an app to messages", () => {
-    useAppStore.setState({
-      currentChannel: "general",
-      currentApp: "tasks",
-      taskDetailId: "task-1",
-      unreadByChannel: { general: 4, launch: 1 },
-    });
-
-    useAppStore.getState().setCurrentApp(null);
-
-    expect(useAppStore.getState().currentApp).toBeNull();
-    expect(useAppStore.getState().taskDetailId).toBeNull();
-    expect(useAppStore.getState().unreadByChannel.general).toBe(0);
-    expect(useAppStore.getState().unreadByChannel.launch).toBe(1);
-  });
-});
-
-describe("task detail navigation state", () => {
-  it("opens task detail as the tasks app route", () => {
-    useAppStore.getState().openTaskDetail("task-7");
-
-    expect(useAppStore.getState()).toMatchObject({
-      currentApp: "tasks",
-      taskDetailId: "task-7",
-    });
-  });
-
-  it("clears scoped task context for generic app navigation", () => {
-    useAppStore.getState().openTaskDetail("task-7");
-
-    useAppStore.getState().setCurrentApp("tasks");
-
-    expect(useAppStore.getState()).toMatchObject({
-      currentApp: "tasks",
-      taskDetailId: null,
-    });
   });
 });
 
