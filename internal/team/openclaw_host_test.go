@@ -177,6 +177,10 @@ func TestPostBridgeMessageRoutesToHost(t *testing.T) {
 		t.Errorf("Binding.ChannelSlug: got %q want %q", msg.Binding.ChannelSlug, "general")
 	}
 
+	if delta := len(broker.AllMessages()) - beforeBroker; delta != 0 {
+		t.Fatalf("broker fallback unexpectedly received %d message(s); host path must not double-deliver", delta)
+	}
+
 	cancel()
 	select {
 	case err := <-runErr:
