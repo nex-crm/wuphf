@@ -619,4 +619,38 @@ describe("useWikiEditorController — path change", () => {
     expect(result.current.error).toBeNull();
     expect(result.current.conflict).toBeNull();
   });
+
+  it("does NOT wipe in-progress edits on a prop-only expectedSha refresh", async () => {
+    vi.useRealTimers();
+    const writeHumanArticle = vi.fn().mockResolvedValue(makeOk("freshsha"));
+    const { result, rerender } = renderHook(
+      (props: { expectedSha: string }) =>
+        useWikiEditorController({
+          path: PATH,
+          initialContent: INITIAL,
+          expectedSha: props.expectedSha,
+          onSaved: vi.fn(),
+          writeHumanArticle,
+        }),
+      { initialProps: { expectedSha: SHA } },
+    );
+
+    act(() => result.current.setContent("# Sam\n\nIn-progress edit.\n"));
+    act(() => result.current.setCommitMessage("wip"));
+
+    // Parent refreshes the SHA prop without a path or initialContent change
+    // (e.g. an unrelated metadata refetch). The user's edit must survive.
+    rerender({ expectedSha: "freshsha" });
+
+    expect(result.current.content).toBe("# Sam\n\nIn-progress edit.\n");
+    expect(result.current.commitMessage).toBe("wip");
+
+    // The new SHA still propagates to local state — a save uses it.
+    await act(async () => {
+      await result.current.handleSave();
+    });
+    expect(writeHumanArticle).toHaveBeenLastCalledWith(
+      expect.objectContaining({ expectedSha: "freshsha" }),
+    );
+  });
 });

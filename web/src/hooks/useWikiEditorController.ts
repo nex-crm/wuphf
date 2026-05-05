@@ -175,12 +175,14 @@ export function useWikiEditorController(
 
   // On mount / when the article changes, reset editor state AND check
   // localStorage for a draft newer than server's last_edited_ts.
+  // Intentionally does NOT depend on `expectedSha`: a prop-only SHA refresh
+  // (e.g. after a save round-trip) must not wipe an in-progress edit on the
+  // same article. SHA resync lives in its own effect below.
   useEffect(() => {
     setContent(initialContent);
     setCommitMessage("");
     setError(null);
     setConflict(null);
-    setCurrentExpectedSha(expectedSha);
     const stored = readDraft(path);
     if (!stored) {
       setDraft(null);
@@ -206,7 +208,14 @@ export function useWikiEditorController(
       return;
     }
     setDraft(stored);
-  }, [path, initialContent, serverLastEditedTs, expectedSha]);
+  }, [path, initialContent, serverLastEditedTs]);
+
+  // Keep the local SHA in sync with the prop without coupling to the body
+  // reset above. Fires on prop-only SHA refreshes (parent received a new
+  // commit_sha) and on article switch (since the parent passes a new SHA).
+  useEffect(() => {
+    setCurrentExpectedSha(expectedSha);
+  }, [expectedSha]);
 
   // Debounced autosave. Anchors on `content` + `commitMessage` and writes
   // after AUTOSAVE_DEBOUNCE_MS of quiescence. Skip writing if nothing has
