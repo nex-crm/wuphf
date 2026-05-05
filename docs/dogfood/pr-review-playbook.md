@@ -6,7 +6,7 @@
 2. Contract drift between Go handlers, Web API types, and TUI renderers.
 3. Missing tests at service, route, or renderer boundaries.
 4. Ownership conflicts across domain, Web, TUI, shared API, and docs files.
-5. Documentation gaps in `docs/surfaces.md` and architecture guides.
+5. Documentation gaps in architecture guides.
 
 ## Agent PR Expectations
 

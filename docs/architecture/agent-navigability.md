@@ -34,7 +34,7 @@ Each domain should converge on the same shape:
 
 Use this sequence when adding or refactoring behavior:
 
-1. Read the row in [`docs/surfaces.md`](../surfaces.md) and the domain row above.
+1. Read the domain row above.
 2. Identify the service method that should own the behavior. If none exists,
    extract one before expanding the handler.
 3. Add typed request/response structs next to the service boundary or in the
@@ -46,8 +46,6 @@ Use this sequence when adding or refactoring behavior:
    or partial.
 7. Add or update service tests, route tests, and renderer tests named in the
    domain row.
-8. Update [`docs/surfaces.md`](../surfaces.md) if the capability, shared API,
-   renderer state, gaps, or tests changed.
 
 ## Ownership Rules
 
