@@ -632,7 +632,17 @@ func TestBrokerNotebookSearchRequiresSlugAndPattern(t *testing.T) {
 }
 
 func TestBrokerNotebookServiceUnavailable(t *testing.T) {
-	// No worker attached — every handler should 503.
+	// Block wiki init so ensureWikiWorker (called by requireWikiWorker
+	// inside each handler) cannot bring the worker up. Pre-fix this test
+	// relied on "wikiWorker is nil" being a permanent state; post-fix the
+	// handlers retry init, so we have to actively prevent success to
+	// observe the 503 path.
+	home := t.TempDir()
+	t.Setenv("WUPHF_RUNTIME_HOME", home)
+	t.Setenv("WUPHF_MEMORY_BACKEND", "markdown")
+	if err := os.WriteFile(filepath.Join(home, ".wuphf"), []byte("not a dir"), 0o600); err != nil {
+		t.Fatalf("plant blocker: %v", err)
+	}
 	b := newTestBroker(t)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/notebook/write", b.handleNotebookWrite)

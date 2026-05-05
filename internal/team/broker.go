@@ -99,7 +99,8 @@ type Broker struct {
 	factSubscribers         map[int]chan EntityFactRecordedEvent
 	wikiSectionsSubscribers map[int]chan WikiSectionsUpdatedEvent
 	wikiWorker              *WikiWorker
-	wikiOnce                sync.Once
+	wikiInitMu              sync.Mutex
+	wikiInitErr             error
 	autoNotebookWriter      *AutoNotebookWriter
 	wikiIndex               *WikiIndex
 	wikiExtractor           *Extractor
