@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net"
@@ -555,4 +556,73 @@ func containsAll(s string, wants ...string) bool {
 		}
 	}
 	return true
+}
+
+// TestWebShareControllerIssueInviteUsesAdapter confirms the controller routes
+// invite creation through the registered ShareTransport when an in-process
+// broker handle is available. The test broker is never started as an HTTP
+// server, so any fallback to createShareInvite would fail with a transport
+// error — a successful URL therefore proves the adapter path executed.
+func TestWebShareControllerIssueInviteUsesAdapter(t *testing.T) {
+	b := team.NewBrokerAt(t.TempDir() + "/broker-state.json")
+	st := team.NewShareTransport(b, team.RelativeJoinURL)
+	b.SetShareTransport(st)
+
+	c := newWebShareController(7891)
+	c.SetBroker(b)
+
+	c.mu.Lock()
+	url, expiresAt, err := c.issueInviteLocked(context.Background(), "10.0.0.5", 7891, "http://broker.invalid", "ignored-token")
+	c.mu.Unlock()
+	if err != nil {
+		t.Fatalf("issueInviteLocked: %v", err)
+	}
+
+	wantPrefix := "http://10.0.0.5:7891/join/"
+	if !strings.HasPrefix(url, wantPrefix) {
+		t.Errorf("invite URL = %q, want prefix %q (controller did not honor SetURLBuilder)", url, wantPrefix)
+	}
+	if url == wantPrefix {
+		t.Error("invite URL has empty token")
+	}
+	if expiresAt == "" {
+		t.Error("ExpiresAt empty: broker did not return invite metadata via adapter")
+	}
+}
+
+// TestWebShareControllerIssueInviteFallsBackToHTTP confirms that when no
+// in-process broker handle is available (the standalone `wuphf share`
+// subcommand path), issueInviteLocked uses the HTTP createShareInvite call.
+// We verify by pointing the controller at an httptest server that mimics the
+// broker's POST /humans/invites response shape.
+func TestWebShareControllerIssueInviteFallsBackToHTTP(t *testing.T) {
+	const wantToken = "fallback-token-xyz"
+	const wantExpiresAt = "2026-05-06T00:00:00Z"
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/humans/invites" || r.Method != http.MethodPost {
+			http.Error(w, "unexpected", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"token":"` + wantToken + `","invite":{"id":"inv-1","expires_at":"` + wantExpiresAt + `"}}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	c := newWebShareController(7891)
+	// Intentionally no SetBroker — exercises the HTTP fallback branch.
+	c.mu.Lock()
+	url, expiresAt, err := c.issueInviteLocked(context.Background(), "192.168.1.10", 7891, srv.URL, "broker-token")
+	c.mu.Unlock()
+	if err != nil {
+		t.Fatalf("issueInviteLocked: %v", err)
+	}
+
+	want := "http://192.168.1.10:7891/join/" + wantToken
+	if url != want {
+		t.Errorf("invite URL = %q, want %q", url, want)
+	}
+	if expiresAt != wantExpiresAt {
+		t.Errorf("expiresAt = %q, want %q", expiresAt, wantExpiresAt)
+	}
 }

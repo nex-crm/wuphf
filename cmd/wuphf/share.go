@@ -65,6 +65,13 @@ type webShareController struct {
 	inviteURL string
 	expiresAt string
 	err       string
+	// broker is the in-process broker handle, set via SetBroker before the
+	// controller's first start(). When non-nil and the broker has registered
+	// a ShareTransport, start() routes invite creation through the adapter so
+	// admit + revoke + invite-create all flow through the same surface. When
+	// nil (e.g. the standalone `wuphf share` subcommand has no in-process
+	// broker), start() falls back to the legacy HTTP path.
+	broker *team.Broker
 }
 
 func newWebShareController(webPort int) *webShareController {
@@ -73,6 +80,16 @@ func newWebShareController(webPort int) *webShareController {
 			webPort: webPort,
 		},
 	}
+}
+
+// SetBroker installs the in-process broker handle. Idempotent. Passing nil
+// clears the handle so the controller falls back to the HTTP invite path.
+// Called by main.go after the broker is up but before the controller's first
+// start() invocation.
+func (c *webShareController) SetBroker(b *team.Broker) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.broker = b
 }
 
 func (c *webShareController) status() team.WebShareStatus {
@@ -97,6 +114,39 @@ func (c *webShareController) clearInviteLocked() {
 	c.expiresAt = ""
 }
 
+// issueInviteLocked returns a fresh invite URL and its RFC3339 expiry. When an
+// in-process broker handle with a registered ShareTransport is available it
+// goes through the adapter (CreateInviteDetailed); otherwise it falls back to
+// the legacy HTTP path against the broker. The absolute URL formula is
+// identical in both branches so the user-facing link does not depend on which
+// path produced it. Caller must hold c.mu.
+func (c *webShareController) issueInviteLocked(ctx context.Context, bind string, port int, brokerURL, brokerToken string) (string, string, error) {
+	if c.broker != nil {
+		if st := c.broker.ShareTransport(); st != nil {
+			st.SetURLBuilder(func(token string) string {
+				return shareJoinURL(bind, port, token)
+			})
+			details, err := st.CreateInviteDetailed(ctx)
+			if err != nil {
+				return "", "", err
+			}
+			return details.URL, details.ExpiresAt, nil
+		}
+	}
+	invite, err := createShareInvite(brokerURL, brokerToken)
+	if err != nil {
+		return "", "", err
+	}
+	return shareJoinURL(bind, port, invite.Token), invite.Invite.ExpiresAt, nil
+}
+
+// shareJoinURL is the canonical "http://<bind>:<port>/join/<token>" formatter
+// used by both the adapter and HTTP invite paths so the user-facing URL shape
+// stays in one place.
+func shareJoinURL(bind string, port int, token string) string {
+	return fmt.Sprintf("http://%s:%d/join/%s", bind, port, token)
+}
+
 func (c *webShareController) start() (team.WebShareStatus, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -113,14 +163,14 @@ func (c *webShareController) start() (team.WebShareStatus, error) {
 	brokerURL := brokeraddr.ResolveBaseURL()
 
 	if c.running && c.server != nil {
-		invite, err := createShareInvite(brokerURL, token)
+		inviteURL, expiresAt, err := c.issueInviteLocked(context.Background(), c.bind, opts.webPort, brokerURL, token)
 		if err != nil {
 			c.err = err.Error()
 			return c.statusLocked(), err
 		}
 		c.brokerURL = brokerURL
-		c.inviteURL = fmt.Sprintf("http://%s:%d/join/%s", c.bind, opts.webPort, invite.Token)
-		c.expiresAt = invite.Invite.ExpiresAt
+		c.inviteURL = inviteURL
+		c.expiresAt = expiresAt
 		c.err = ""
 		return c.statusLocked(), nil
 	}
@@ -133,7 +183,7 @@ func (c *webShareController) start() (team.WebShareStatus, error) {
 		c.err = webShareErrorMessage(err)
 		return c.statusLocked(), err
 	}
-	invite, err := createShareInvite(brokerURL, token)
+	inviteURL, expiresAt, err := c.issueInviteLocked(context.Background(), bind.String(), opts.webPort, brokerURL, token)
 	if err != nil {
 		c.running = false
 		c.server = nil
@@ -158,8 +208,8 @@ func (c *webShareController) start() (team.WebShareStatus, error) {
 	c.bind = bind.String()
 	c.iface = iface
 	c.brokerURL = brokerURL
-	c.inviteURL = fmt.Sprintf("http://%s:%d/join/%s", c.bind, opts.webPort, invite.Token)
-	c.expiresAt = invite.Invite.ExpiresAt
+	c.inviteURL = inviteURL
+	c.expiresAt = expiresAt
 	c.err = ""
 
 	go func() {
@@ -269,7 +319,7 @@ func runShareServer(opts shareOptions) error {
 	if err != nil {
 		return err
 	}
-	inviteURL := fmt.Sprintf("http://%s:%d/join/%s", bind.String(), opts.webPort, invite.Token)
+	inviteURL := shareJoinURL(bind.String(), opts.webPort, invite.Token)
 	out := shareJSONOutput{
 		OK:        true,
 		Bind:      bind.String(),

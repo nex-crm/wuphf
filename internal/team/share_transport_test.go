@@ -659,3 +659,115 @@ func inviteRevoked(b *Broker, inviteID string) bool {
 	}
 	return false
 }
+
+// TestShareTransportSetURLBuilderOverridesConstructor confirms the override
+// builder installed via SetURLBuilder wins over the constructor builder when
+// CreateInvite runs. Guards the contract that the in-process share controller
+// can upgrade from RelativeJoinURL to an absolute URL once it knows its bind
+// address without reconstructing the transport.
+func TestShareTransportSetURLBuilderOverridesConstructor(t *testing.T) {
+	b := newTestBroker(t)
+	st := NewShareTransport(b, RelativeJoinURL)
+	st.SetURLBuilder(func(token string) string {
+		return "http://10.0.0.5:7891/join/" + token
+	})
+	got, err := st.CreateInvite(context.Background(), "")
+	if err != nil {
+		t.Fatalf("CreateInvite: %v", err)
+	}
+	if !strings.HasPrefix(got, "http://10.0.0.5:7891/join/") {
+		t.Errorf("CreateInvite: got %q, want override builder's prefix", got)
+	}
+}
+
+// TestShareTransportSetURLBuilderNilClearsOverride confirms passing nil to
+// SetURLBuilder restores the constructor builder. Lets the controller detach
+// cleanly on shutdown without leaving a stale closure that captures a now-
+// invalid bind address.
+func TestShareTransportSetURLBuilderNilClearsOverride(t *testing.T) {
+	b := newTestBroker(t)
+	st := NewShareTransport(b, RelativeJoinURL)
+	st.SetURLBuilder(func(token string) string { return "http://x/" + token })
+	st.SetURLBuilder(nil)
+	got, err := st.CreateInvite(context.Background(), "")
+	if err != nil {
+		t.Fatalf("CreateInvite: %v", err)
+	}
+	if !strings.HasPrefix(got, "/join/") {
+		t.Errorf("after SetURLBuilder(nil), got %q, want fallback to RelativeJoinURL", got)
+	}
+}
+
+// TestShareTransportCreateInviteDetailedReturnsBrokerMetadata confirms the
+// detailed variant surfaces the broker-issued invite ID and RFC3339 expiry
+// alongside the URL — fields the in-process controller needs to render its
+// "expires in 24h" hint without parsing the URL itself.
+func TestShareTransportCreateInviteDetailedReturnsBrokerMetadata(t *testing.T) {
+	b := newTestBroker(t)
+	st := NewShareTransport(b, RelativeJoinURL)
+	st.SetURLBuilder(func(token string) string { return "http://office/join/" + token })
+
+	details, err := st.CreateInviteDetailed(context.Background())
+	if err != nil {
+		t.Fatalf("CreateInviteDetailed: %v", err)
+	}
+	if !strings.HasPrefix(details.URL, "http://office/join/") {
+		t.Errorf("URL: got %q, want override prefix", details.URL)
+	}
+	if details.InviteID == "" {
+		t.Error("InviteID: empty, broker should have minted one")
+	}
+	if details.ExpiresAt == "" {
+		t.Error("ExpiresAt: empty, broker should have set RFC3339 timestamp")
+	}
+	if got := lastHumanInviteID(b); got != details.InviteID {
+		t.Errorf("InviteID mismatch: got %q, broker last %q", details.InviteID, got)
+	}
+}
+
+// TestBrokerShareTransportAccessor confirms SetShareTransport / ShareTransport
+// round-trip the registered handle and tolerate nil clears. The in-process
+// share controller relies on this accessor to obtain the adapter without a
+// separate plumbing channel.
+func TestBrokerShareTransportAccessor(t *testing.T) {
+	b := newTestBroker(t)
+	if got := b.ShareTransport(); got != nil {
+		t.Errorf("ShareTransport before SetShareTransport: got %v, want nil", got)
+	}
+	st := NewShareTransport(b, RelativeJoinURL)
+	b.SetShareTransport(st)
+	if got := b.ShareTransport(); got != st {
+		t.Errorf("ShareTransport after SetShareTransport: got %p, want %p", got, st)
+	}
+	b.SetShareTransport(nil)
+	if got := b.ShareTransport(); got != nil {
+		t.Errorf("ShareTransport after SetShareTransport(nil): got %v, want nil", got)
+	}
+}
+
+// TestRegisterTransportsRegistersShareHandle confirms RegisterTransports
+// publishes the constructed *ShareTransport on the broker so the in-process
+// controller can find it. Without this the controller's adapter path silently
+// degrades to the legacy HTTP path.
+func TestRegisterTransportsRegistersShareHandle(t *testing.T) {
+	b := newTestBroker(t)
+	if got := b.ShareTransport(); got != nil {
+		t.Fatalf("precondition: ShareTransport should be nil before RegisterTransports, got %v", got)
+	}
+	stop, err := RegisterTransports(b)
+	if err != nil {
+		t.Fatalf("RegisterTransports: %v", err)
+	}
+	t.Cleanup(stop)
+
+	st := b.ShareTransport()
+	if st == nil {
+		t.Fatal("ShareTransport: nil after RegisterTransports — share handle was not published")
+	}
+	// Cleanup must clear the handle so a subsequent RegisterTransports cycle
+	// starts from a known-empty state.
+	stop()
+	if got := b.ShareTransport(); got != nil {
+		t.Errorf("ShareTransport after cleanup: got %v, want nil", got)
+	}
+}
