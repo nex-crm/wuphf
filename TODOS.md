@@ -188,6 +188,60 @@ Tracking work that is deliberately deferred from the current branch. Each item n
 
 ---
 
+### 18. Wiki worker queue depth monitoring + alert thresholds (post-PR 1 notebook auto-writer)
+
+**What:** Instrument `wiki_worker.go` to emit queue depth and time-in-queue metrics, plus a warn log at 80% of the 64-buffer capacity. Track the dropped-event counter from `auto_notebook_writer.go` alongside.
+
+**Why:** PR 1 of the notebook-wiki-promise effort adds a new write source (every agent message + every task transition) that competes with real wiki, artifact, fact, lint, playbook, and learning writes through the same shared queue. Codex flagged this as the most likely operational failure mode. Without observability we discover starvation only when a real wiki write fails or times out.
+
+**Pros:** Confirms PR 1 didn't quietly DoS real wiki writes. Gives a concrete signal for tuning the auto-writer's enqueue capacity or for triggering the OV7B event-log migration (TODO #20).
+
+**Cons:** Adds a small metrics surface; needs to land somewhere in the existing analytics path.
+
+**Context:** PR 1 design doc: `~/.gstack/projects/nex-crm-wuphf/najmuzzaman-main-design-20260505-131620-notebook-wiki-promise.md`. Eng review: same dir, dated 2026-05-05. Decision OV7A locked the per-event commit model with bounded enqueue; finding #8 from the Codex outside voice is the underlying concern.
+
+**Depends on / blocked by:** PR 1 must ship first (introduces the new write source).
+
+**Trigger to revisit:** First week of real PR 1 traffic, OR if any real wiki write ever times out.
+
+---
+
+### 19. Premise #3 closure design pass: memory workflow gate auto-satisfaction or removal
+
+**What:** Fresh `/office-hours` design pass on closing the memory workflow gate semantically. Today the gate requires `lookup + capture + promote` all satisfied to mark a task complete (`memory_workflow.go:398`). The eng review had originally planned to satisfy it inline from the auto-writer, but Codex flagged two killers: (a) the gate needs all three steps, not just capture; (b) calling `RecordTaskMemoryCapture` inline holds `b.mu` and would deadlock with the broker API path.
+
+**Why:** Premise #3 of the notebook-wiki-promise design says "kill the narrow `process_research` filter so the gate applies to all tasks, auto-satisfied by the writer." With OV3A we deferred this from PR 1 because the implementation path was wrong. Two possible exit ramps: (1) auto-satisfy all three steps deterministically with proper locking (raw helper holding existing lock + queueing the file write async); (2) kill the gate entirely — once writes are deterministic the gate is dead weight, but we lose its override-tracking and partial-error surfaces.
+
+**Pros:** Closes premise #3 honestly. Either direction simplifies the broker.
+
+**Cons:** A real design pass, not a one-line filter removal. Potentially touches `memory_workflow.go`, `broker_tasks_memory_workflow.go`, and `memory_workflow_reconciler.go`.
+
+**Context:** Notebook-wiki-promise design doc PR 8 row was originally "5-line filter removal at memory_workflow.go:212-227." Codex outside voice (2026-05-05) showed why that's wrong. Locked decisions OV3A, OV3B (rejected), OV3D (deadlock).
+
+**Depends on / blocked by:** PR 1 + PR 2 should ship first so we can observe the writer's real behavior before deciding which exit ramp is right.
+
+**Trigger to revisit:** After PRs 1, 2, 3 ship and the auto-writer behavior is observable in real WUPHF traffic.
+
+---
+
+### 20. Evaluate event-log architecture migration after notebook-wiki-promise PR 1 screenshot test
+
+**What:** After PR 1 ships and one full WUPHF session populates shelves, evaluate whether the per-event direct-commit model (OV7A) creates the predicted problems: wiki worker queue saturation, NotebookSignalScanner garbage on noisy files, PR 3 clustering quality. If yes, plan migration to the alternative architecture (OV7B): append-only event log per agent (`agents/{slug}/notebook/.events.jsonl`) plus a renderer pass that materializes markdown files on cadence or on-demand.
+
+**Why:** Codex outside voice (2026-05-05, finding #11) argued the event-log architecture is fundamentally simpler than per-event commits and avoids problems PRs 3-6 will have to unwind. We chose OV7A for PR 1 because it gives instant visible shelf fill (the screenshot is the demand test). If the prediction holds, the migration option needs to be alive, not re-derived from scratch.
+
+**Pros:** Far fewer git commits (1/min batched vs 1/event). Lighter long-term cost as agent activity scales. Cleaner separation between durable raw stream and rendered surface.
+
+**Cons:** Bigger refactor than designing it right once. Migration must preserve existing markdown files or accept that historical writes stay in the original layout.
+
+**Context:** Notebook-wiki-promise design 2026-05-05. OV7A vs OV7B in the eng review. Codex flagged OV7B as the simpler architecture; we picked OV7A for the demo path with this TODO as the safety net.
+
+**Depends on / blocked by:** PR 1 must ship and one full session must populate shelves. TODO #18's queue-depth metric is a leading signal.
+
+**Trigger to revisit:** After the screenshot post in founder channel + one week of PR 1 production traffic, OR if TODO #18 alerts fire repeatedly, OR if PR 3 ranking quality is poor.
+
+---
+
 ## Deferred
 
 Items with known fixes but out of scope for this branch. Each names the trigger that would unblock revisiting.
