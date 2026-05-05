@@ -2,6 +2,7 @@ package team
 
 import (
 	"context"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -97,6 +98,13 @@ func TestShareTransportRevokeInviteFansOutToHost(t *testing.T) {
 
 	runErr := make(chan error, 1)
 	go func() { runErr <- st.Run(ctx, host) }()
+
+	// Wait for Run to store the host before calling RevokeInvite; without
+	// this, RevokeInvite may see a nil host pointer and silently skip the
+	// per-session fan-out, making the test a false positive.
+	for st.Health().State != transport.HealthConnected {
+		runtime.Gosched()
+	}
 
 	token, _, err := b.createHumanInvite()
 	if err != nil {
