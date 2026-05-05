@@ -7,9 +7,51 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/nex-crm/wuphf/internal/team/transport"
 )
+
+// shareTestRunDeadline bounds the polling rendezvous and Run-return waits in
+// share-transport tests. Each test should complete in milliseconds; a 2s cap
+// keeps a real regression visible as a fast Fatal rather than a CI timeout.
+const shareTestRunDeadline = 2 * time.Second
+
+// waitForShareConnected polls st.Health() until it reports HealthConnected,
+// failing the test with a deterministic message if the deadline elapses or if
+// Run exited early. Used to rendezvous with the goroutine running st.Run
+// before exercising RevokeInvite — the host pointer is published in the same
+// atomic store that flips Health to Connected, so this is the right gate.
+func waitForShareConnected(t *testing.T, st *ShareTransport, runErr <-chan error) {
+	t.Helper()
+	deadline := time.Now().Add(shareTestRunDeadline)
+	for st.Health().State != transport.HealthConnected {
+		select {
+		case err := <-runErr:
+			t.Fatalf("Run returned before HealthConnected: %v", err)
+		default:
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for HealthConnected after %s", shareTestRunDeadline)
+		}
+		runtime.Gosched()
+	}
+}
+
+// awaitRunReturn drains runErr after a test cancels its context, with a
+// bounded timeout so a hung Run surfaces as a Fatal rather than the Go test
+// framework's default 10-minute timeout.
+func awaitRunReturn(t *testing.T, runErr <-chan error) {
+	t.Helper()
+	select {
+	case err := <-runErr:
+		if err != nil {
+			t.Fatalf("Run returned: %v", err)
+		}
+	case <-time.After(shareTestRunDeadline):
+		t.Fatalf("Run did not return within %s after cancel", shareTestRunDeadline)
+	}
+}
 
 // TestShareTransportRunRequiresHost confirms Run rejects a nil host so a
 // misconfigured launcher fails loudly instead of silently degrading.
@@ -120,9 +162,7 @@ func TestShareTransportRevokeInviteFansOutToHost(t *testing.T) {
 	// Wait for Run to store the host before calling RevokeInvite; without
 	// this, RevokeInvite may see a nil host pointer and silently skip the
 	// per-session fan-out, making the test a false positive.
-	for st.Health().State != transport.HealthConnected {
-		runtime.Gosched()
-	}
+	waitForShareConnected(t, st, runErr)
 
 	token, _, err := b.createHumanInvite()
 	if err != nil {
@@ -162,9 +202,7 @@ func TestShareTransportRevokeInviteFansOutToHost(t *testing.T) {
 	}
 
 	cancel()
-	if err := <-runErr; err != nil {
-		t.Fatalf("Run returned: %v", err)
-	}
+	awaitRunReturn(t, runErr)
 }
 
 // TestShareTransportRevokeInviteUnknown asserts RevokeInvite surfaces the
@@ -239,9 +277,7 @@ func TestShareTransportRevokeInviteIdempotent(t *testing.T) {
 	}
 
 	cancel()
-	if err := <-runErr; err != nil {
-		t.Fatalf("Run returned: %v", err)
-	}
+	awaitRunReturn(t, runErr)
 }
 
 // TestShareTransportRevokeInviteAccumulatesErrors verifies that when more than
@@ -300,9 +336,7 @@ func TestShareTransportRevokeInviteAccumulatesErrors(t *testing.T) {
 	}
 
 	cancel()
-	if err := <-runErr; err != nil {
-		t.Fatalf("Run returned: %v", err)
-	}
+	awaitRunReturn(t, runErr)
 }
 
 // TestBrokerTransportHostRevokeParticipantShare confirms the host stub added
