@@ -105,10 +105,17 @@ function SourcePane({
   setContent,
   textareaRef,
 }: SourcePaneProps) {
+  const labelText = `Article source (${path})`;
   return (
     <div className="wk-editor-pane wk-editor-pane--source">
-      <label className="wk-editor-label" htmlFor="wk-editor-textarea">
-        Article source ({path})
+      <label
+        className="wk-editor-label"
+        // The textarea only mounts in source mode, so `htmlFor` must drop
+        // when rich is active. The rich wrapper carries an `aria-label`
+        // instead so screen readers can still identify the editor surface.
+        htmlFor={editorMode === "source" ? "wk-editor-textarea" : undefined}
+      >
+        {labelText}
       </label>
       {editorMode === "rich" ? (
         <Suspense
@@ -121,7 +128,11 @@ function SourcePane({
             </div>
           }
         >
-          <div className="wk-editor-rich" data-testid="wk-editor-rich">
+          <div
+            className="wk-editor-rich"
+            data-testid="wk-editor-rich"
+            aria-label={labelText}
+          >
             <RichWikiEditor content={content} onChange={setContent} />
           </div>
         </Suspense>
@@ -378,10 +389,14 @@ export default function WikiEditor({
           type="button"
           className={`wk-editor-mode-toggle${editorMode === "rich" ? " is-on" : ""}`}
           data-testid="wk-editor-mode-toggle"
+          // Visible label names the *current* mode so it agrees with
+          // `aria-pressed`. Screen readers announce e.g. "Rich, pressed"
+          // when rich is active rather than the contradictory pairing of
+          // "Source, pressed" the previous implementation produced.
           aria-pressed={editorMode === "rich"}
           onClick={toggleEditorMode}
         >
-          {editorMode === "rich" ? "Source" : "Rich"}
+          {editorMode === "rich" ? "Rich" : "Source"}
         </button>
       </div>
       <p className="wk-editor-help">

@@ -91,12 +91,19 @@ function RichWikiEditorInner({ content, onChange }: RichWikiEditorProps) {
   // Push external content changes (conflict reload, draft restore) back
   // into Milkdown. Skip when `content` matches what we just emitted —
   // otherwise every keystroke would trigger a self-replaceAll loop.
+  //
+  // Mark the value as "seen" *before* dispatching the transaction. The
+  // markdownUpdated listener fires synchronously inside `editor.action`
+  // and writes the canonical (post-processed) markdown into the ref; if
+  // we wrote `content` afterward, we'd overwrite that canonical value
+  // with the raw input and the next render would re-trigger replaceAll,
+  // resetting the ProseMirror cursor on every external update.
   useEffect(() => {
     if (content === lastEmittedRef.current) return;
     const editor = get();
     if (!editor) return;
-    editor.action(replaceAll(content));
     lastEmittedRef.current = content;
+    editor.action(replaceAll(content));
   }, [content, get]);
 
   return <Milkdown />;

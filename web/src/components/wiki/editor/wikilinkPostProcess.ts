@@ -7,10 +7,11 @@
  * save through the rich editor would silently corrupt wikilink syntax.
  *
  * This module rewrites those standard links back to `[[slug]]` /
- * `[[slug|Display]]` form. It works on the markdown string after Milkdown
- * serialization, so it cannot be confused by surrounding whitespace, lists,
- * or table cells — the regex matches the exact `[text](#/wiki/...)` shape
- * in any context.
+ * `[[slug|Display]]` form. It runs on the markdown string after Milkdown
+ * serialization. Code spans and fenced code blocks are skipped so an
+ * article that documents wikilink syntax verbatim (e.g. a how-to page
+ * teaching `[foo](`#/wiki/bar`)`) does not get its examples silently
+ * rewritten on every save.
  *
  * Detection is by URL prefix `#/wiki/`, which `wikiLinkRemarkPlugin`
  * deterministically assigns. Standard external links survive untouched.
@@ -18,19 +19,37 @@
 
 const WIKI_URL_RE = /\[([^\]\n]+)\]\(#\/wiki\/([^\s)]+?)(?:\s+"[^"]*")?\)/g;
 
-export function postProcessWikilinks(markdown: string): string {
-  return markdown.replace(
+/**
+ * Matches fenced code blocks (``` … ```) and inline code spans (` … `).
+ * Used to split markdown so the wikilink rewrite skips verbatim regions.
+ * Fenced blocks are matched first (longer alternative) to avoid an inline
+ * span from greedily consuming a fenced opener.
+ */
+const CODE_SEGMENT_RE = /(`{3,}[\s\S]*?`{3,}|`[^`\n]+`)/g;
+
+function rewriteWikilinks(segment: string): string {
+  return segment.replace(
     WIKI_URL_RE,
-    (_match, display: string, encoded: string) => {
+    (match, display: string, encoded: string) => {
       let slug: string;
       try {
         slug = decodeURI(encoded);
       } catch {
         // Malformed escape — leave the standard link in place rather than
         // emit corrupt wikilink syntax.
-        return _match;
+        return match;
       }
       return slug === display ? `[[${slug}]]` : `[[${slug}|${display}]]`;
     },
   );
+}
+
+export function postProcessWikilinks(markdown: string): string {
+  // String.split with a capturing group preserves the matched code regions
+  // at odd indices. Even indices are non-code prose where rewrite is safe.
+  const parts = markdown.split(CODE_SEGMENT_RE);
+  for (let i = 0; i < parts.length; i += 2) {
+    parts[i] = rewriteWikilinks(parts[i]);
+  }
+  return parts.join("");
 }

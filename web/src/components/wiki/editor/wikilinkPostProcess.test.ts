@@ -68,4 +68,30 @@ describe("postProcessWikilinks", () => {
       "| Owner | Status |\n| --- | --- |\n| [[alex]] | Active |\n",
     );
   });
+
+  it("does not rewrite wikilink-shaped text inside an inline code span", () => {
+    const md = "Use the syntax `[alex](#/wiki/alex)` to link.";
+    expect(postProcessWikilinks(md)).toBe(md);
+  });
+
+  it("does not rewrite wikilink-shaped text inside a fenced code block", () => {
+    const md = "```markdown\n[alex](#/wiki/alex)\n```\n";
+    expect(postProcessWikilinks(md)).toBe(md);
+  });
+
+  it("rewrites prose wikilinks even when a code block is present elsewhere", () => {
+    const md =
+      "See [alex](#/wiki/alex) below.\n\n```markdown\n[bob](#/wiki/bob)\n```\n";
+    expect(postProcessWikilinks(md)).toBe(
+      "See [[alex]] below.\n\n```markdown\n[bob](#/wiki/bob)\n```\n",
+    );
+  });
+
+  it("rewrites prose wikilinks separated by an inline code span", () => {
+    const md =
+      "[alex](#/wiki/alex) wrote `[bob](#/wiki/bob)` then [carol](#/wiki/carol).";
+    expect(postProcessWikilinks(md)).toBe(
+      "[[alex]] wrote `[bob](#/wiki/bob)` then [[carol]].",
+    );
+  });
 });
