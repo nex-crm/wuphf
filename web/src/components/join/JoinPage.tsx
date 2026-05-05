@@ -1,19 +1,23 @@
 import { type FormEvent, useEffect, useId, useRef, useState } from "react";
 
-import { submitJoinInvite } from "../../api/joinInvite";
+import {
+  type JoinInviteErrorCode,
+  submitJoinInvite,
+} from "../../api/joinInvite";
 import "./join.css";
+
+type ErrorCode = JoinInviteErrorCode | "name_required";
 
 interface JoinPageProps {
   token: string;
-  // Indirection so tests can replace the redirect with a spy.
+  // Test-only seam: replaces the production window.location.assign call.
   onAccepted?: (redirectTo: string) => void;
 }
 
 type Status =
   | { kind: "idle" }
   | { kind: "submitting" }
-  | { kind: "error"; code: string; message: string }
-  | { kind: "accepted" };
+  | { kind: "error"; code: ErrorCode; message: string };
 
 export function JoinPage({ token, onAccepted }: JoinPageProps) {
   const nameId = useId();
@@ -61,7 +65,6 @@ export function JoinPage({ token, onAccepted }: JoinPageProps) {
       displayName: trimmed,
     });
     if (result.ok) {
-      setStatus({ kind: "accepted" });
       if (onAccepted) {
         onAccepted(result.redirect);
         return;

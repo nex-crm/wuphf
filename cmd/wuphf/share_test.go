@@ -182,6 +182,40 @@ func TestShareJoinInvalidInviteReturnsGone(t *testing.T) {
 	}
 }
 
+func TestShareJoinMalformedBodyReturnsInvalidRequest(t *testing.T) {
+	broker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("broker should not be called for malformed body: %s %s", r.Method, r.URL.Path)
+	}))
+	t.Cleanup(broker.Close)
+
+	shareSrv := httptest.NewServer(newShareHandler(broker.URL, "broker-token", nil))
+	t.Cleanup(shareSrv.Close)
+
+	req, err := http.NewRequest(http.MethodPost, shareSrv.URL+"/join/abc", strings.NewReader("not json"))
+	if err != nil {
+		t.Fatalf("build malformed request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("malformed request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want 400 body=%s", resp.StatusCode, string(body))
+	}
+	var errBody struct {
+		Error string `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&errBody); err != nil {
+		t.Fatalf("decode error body: %v", err)
+	}
+	if errBody.Error != "invalid_request" {
+		t.Fatalf("error code = %q, want invalid_request", errBody.Error)
+	}
+}
+
 func TestShareJoinBrokerFailureReturnsBadGateway(t *testing.T) {
 	broker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/humans/invites/accept" {

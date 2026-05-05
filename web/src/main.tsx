@@ -56,31 +56,23 @@ function showFatalError(title: string, detail: string) {
   document.body.appendChild(box);
 }
 
-// Team-member invite acceptance lives at /?invite=<token>. The share
-// handler redirects /join/<token> here. Mount JoinPage instead of the
-// main app so the joiner doesn't need a broker token to render the form.
-function inviteTokenFromLocation(): string | null {
-  try {
-    const params = new URLSearchParams(window.location.search);
-    const raw = params.get("invite");
-    return raw ? raw.trim() : null;
-  } catch {
-    return null;
-  }
-}
-
 try {
   const root = document.getElementById("root");
   if (!root) {
     throw new Error("#root element not found in DOM");
   }
-  const inviteToken = inviteTokenFromLocation();
+  // The share handler redirects /join/<token> to /?invite=<token> so the
+  // SPA's relative asset URLs need no path rewrite. A present-but-empty
+  // value means the link was truncated; pass it through so JoinPage can
+  // show the missing-token state instead of mounting the main app.
+  const rawInvite = new URLSearchParams(window.location.search).get("invite");
+  const inviteToken = rawInvite === null ? null : rawInvite.trim();
   createRoot(root).render(
     <QueryClientProvider client={queryClient}>
-      {inviteToken ? (
-        <JoinPage token={inviteToken} />
-      ) : (
+      {inviteToken === null ? (
         <RouterProvider router={router} />
+      ) : (
+        <JoinPage token={inviteToken} />
       )}
     </QueryClientProvider>,
   );

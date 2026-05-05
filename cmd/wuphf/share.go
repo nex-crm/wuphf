@@ -450,10 +450,8 @@ func newShareHandler(brokerURL, brokerToken string, onJoin func()) http.Handler 
 		}
 		switch r.Method {
 		case http.MethodGet:
-			// Hand off to the React app. The SPA reads ?invite=<token> on
-			// boot and renders the JoinPage. Redirecting (instead of
-			// proxying index.html under /join/) keeps the SPA's relative
-			// asset URLs working without a path rewrite.
+			// Redirect (rather than serve index.html under /join/) so the
+			// SPA's relative asset URLs do not need a path rewrite.
 			http.Redirect(w, r, "/?invite="+url.QueryEscape(token), http.StatusFound)
 		case http.MethodPost:
 			handleShareJoinSubmit(w, r, brokerURL, token, onJoin)
@@ -474,10 +472,27 @@ func newShareHandler(brokerURL, brokerToken string, onJoin func()) http.Handler 
 	return mux
 }
 
-// handleShareJoinSubmit accepts a JSON {display_name} body, exchanges it with
-// the broker for a human session cookie, and returns a JSON envelope the
-// React JoinPage consumes. Errors map to a stable error code so the client
-// can render specific copy per state without re-parsing prose.
+// shareJoinRedirect is the post-acceptance landing path for a freshly
+// invited team member. Lives next to the broker exchange so renaming the
+// route updates the response shape in one place.
+const shareJoinRedirect = "/#/channels/general"
+
+// shareJoinSuccess and shareJoinError mirror the joiner-side
+// JoinInviteSuccess/JoinInviteFailure types in
+// web/src/api/joinInvite.ts. Keep the JSON tags and the field set in sync
+// with that file. Error codes are the closed set the React client
+// recognises; anything else collapses to "unknown" client-side.
+type shareJoinSuccess struct {
+	OK          bool   `json:"ok"`
+	Redirect    string `json:"redirect"`
+	DisplayName string `json:"display_name"`
+}
+
+type shareJoinError struct {
+	Error   string `json:"error"`
+	Message string `json:"message"`
+}
+
 func handleShareJoinSubmit(w http.ResponseWriter, r *http.Request, brokerURL, token string, onJoin func()) {
 	var submission struct {
 		DisplayName string `json:"display_name"`
@@ -490,11 +505,15 @@ func handleShareJoinSubmit(w http.ResponseWriter, r *http.Request, brokerURL, to
 	if displayName == "" {
 		displayName = "Team member"
 	}
-	payload, _ := json.Marshal(map[string]string{
+	payload, err := json.Marshal(map[string]string{
 		"token":        token,
 		"display_name": displayName,
 		"device":       r.UserAgent(),
 	})
+	if err != nil {
+		writeShareJoinError(w, http.StatusInternalServerError, "invalid_request", "WUPHF could not encode your invite submission.")
+		return
+	}
 	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, brokerURL+"/humans/invites/accept", bytes.NewReader(payload))
 	if err != nil {
 		writeShareJoinError(w, http.StatusBadGateway, "broker_unreachable", "WUPHF is not reachable from this invite. Ask the host to restart sharing.")
@@ -526,20 +545,17 @@ func handleShareJoinSubmit(w http.ResponseWriter, r *http.Request, brokerURL, to
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"ok":           true,
-		"redirect":     "/#/channels/general",
-		"display_name": displayName,
+	_ = json.NewEncoder(w).Encode(shareJoinSuccess{
+		OK:          true,
+		Redirect:    shareJoinRedirect,
+		DisplayName: displayName,
 	})
 }
 
 func writeShareJoinError(w http.ResponseWriter, status int, code, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]string{
-		"error":   code,
-		"message": message,
-	})
+	_ = json.NewEncoder(w).Encode(shareJoinError{Error: code, Message: message})
 }
 
 func shareRequestHasSession(r *http.Request, brokerURL string) bool {

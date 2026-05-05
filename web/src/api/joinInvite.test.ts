@@ -118,4 +118,26 @@ describe("submitJoinInvite", () => {
       expect(result.code).toBe("unknown");
     }
   });
+
+  it("tells the joiner to reload when the server returns 200 with an unreadable body", async () => {
+    // The broker may have already set the session cookie before the body
+    // got mangled — the user is potentially in, but cannot be told yes.
+    fetchMock.mockResolvedValue(
+      new Response("not json", {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    const result = await submitJoinInvite({
+      token: "abc",
+      displayName: "Maya",
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("unknown");
+      expect(result.message).toMatch(/reload/i);
+    }
+  });
 });

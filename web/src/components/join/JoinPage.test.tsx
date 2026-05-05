@@ -23,6 +23,13 @@ describe("JoinPage", () => {
     ).toBeInTheDocument();
   });
 
+  it("renders an empty-state when the token is the empty string", () => {
+    render(<JoinPage token="" />);
+    expect(
+      screen.getByText("Invite link is missing its token"),
+    ).toBeInTheDocument();
+  });
+
   it("requires a display name before submitting", async () => {
     const user = userEvent.setup();
     render(<JoinPage token="invite-1" />);

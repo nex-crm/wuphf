@@ -1,10 +1,6 @@
-// Joiner-side invite acceptance. The host machine's share handler accepts
-// the JSON body, exchanges it for a human session cookie, and returns
-// either {ok, redirect, display_name} or {error, message}.
-//
-// This module deliberately does not use the regular `/api/*` proxy: the
-// joiner has no broker token and no session cookie yet, so the request
-// must hit the share handler's `/join/<token>` endpoint directly.
+// The joiner has no broker token or session cookie yet, so requests cannot
+// flow through the authenticated `/api/*` share proxy — they must hit the
+// share handler's `/join/<token>` endpoint directly.
 
 export type JoinInviteErrorCode =
   | "invite_expired_or_used"
@@ -14,6 +10,16 @@ export type JoinInviteErrorCode =
   | "invalid_request"
   | "network"
   | "unknown";
+
+// Keep this set in sync with cmd/wuphf/share.go writeShareJoinError. Codes
+// not present here collapse to "unknown" on the client.
+const SERVER_ERROR_CODES: ReadonlySet<JoinInviteErrorCode> = new Set([
+  "invite_expired_or_used",
+  "invite_invalid",
+  "broker_unreachable",
+  "broker_failed",
+  "invalid_request",
+]);
 
 export interface JoinInviteSuccess {
   ok: true;
@@ -51,11 +57,7 @@ export async function submitJoinInvite({
     });
   } catch (err) {
     if (signal?.aborted) {
-      return {
-        ok: false,
-        code: "network",
-        message: "Cancelled.",
-      };
+      return { ok: false, code: "network", message: "Cancelled." };
     }
     return {
       ok: false,
@@ -67,27 +69,57 @@ export async function submitJoinInvite({
     };
   }
 
-  let body: unknown;
+  return interpretJoinResponse(response);
+}
+
+async function interpretJoinResponse(
+  response: Response,
+): Promise<JoinInviteResult> {
+  let body: unknown = null;
   try {
     body = await response.json();
   } catch {
     body = null;
   }
 
-  if (response.ok && isSuccessBody(body)) {
+  const record =
+    body && typeof body === "object" ? (body as Record<string, unknown>) : null;
+
+  if (
+    response.ok &&
+    record?.ok === true &&
+    typeof record.redirect === "string" &&
+    typeof record.display_name === "string"
+  ) {
     return {
       ok: true,
-      redirect: body.redirect,
-      display_name: body.display_name,
+      redirect: record.redirect,
+      display_name: record.display_name,
     };
   }
 
-  if (isErrorBody(body)) {
+  // The broker may have already set a session cookie before the response
+  // body got mangled. Tell the joiner to reload rather than show "unknown".
+  if (response.ok && body === null) {
     return {
       ok: false,
-      code: normalizeErrorCode(body.error),
-      message: body.message,
+      code: "unknown",
+      message:
+        "WUPHF accepted the invite but the response was unreadable. Reload — you may already be in.",
     };
+  }
+
+  if (
+    record &&
+    typeof record.error === "string" &&
+    typeof record.message === "string"
+  ) {
+    const code: JoinInviteErrorCode = SERVER_ERROR_CODES.has(
+      record.error as JoinInviteErrorCode,
+    )
+      ? (record.error as JoinInviteErrorCode)
+      : "unknown";
+    return { ok: false, code, message: record.message };
   }
 
   return {
@@ -95,37 +127,4 @@ export async function submitJoinInvite({
     code: "unknown",
     message: `WUPHF returned an unexpected response (${response.status}). Ask the host for a new invite.`,
   };
-}
-
-function isSuccessBody(
-  body: unknown,
-): body is { ok: true; redirect: string; display_name: string } {
-  if (!body || typeof body !== "object") return false;
-  const record = body as Record<string, unknown>;
-  return (
-    record.ok === true &&
-    typeof record.redirect === "string" &&
-    typeof record.display_name === "string"
-  );
-}
-
-function isErrorBody(
-  body: unknown,
-): body is { error: string; message: string } {
-  if (!body || typeof body !== "object") return false;
-  const record = body as Record<string, unknown>;
-  return typeof record.error === "string" && typeof record.message === "string";
-}
-
-function normalizeErrorCode(raw: string): JoinInviteErrorCode {
-  switch (raw) {
-    case "invite_expired_or_used":
-    case "invite_invalid":
-    case "broker_unreachable":
-    case "broker_failed":
-    case "invalid_request":
-      return raw;
-    default:
-      return "unknown";
-  }
 }
