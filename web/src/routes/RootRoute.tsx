@@ -68,6 +68,11 @@ const ArtifactsApp = lazy(() =>
     default: m.ArtifactsApp,
   })),
 );
+const OfficeOverviewApp = lazy(() =>
+  import("../components/apps/OfficeOverviewApp").then((m) => ({
+    default: m.OfficeOverviewApp,
+  })),
+);
 const CalendarApp = lazy(() =>
   import("../components/apps/CalendarApp").then((m) => ({
     default: m.CalendarApp,
@@ -273,6 +278,7 @@ const APP_PANELS = {
   calendar: CalendarApp,
   skills: SkillsApp,
   activity: ArtifactsApp,
+  overview: OfficeOverviewApp,
   receipts: ReceiptsApp,
   "health-check": HealthCheckApp,
   settings: SettingsApp,
