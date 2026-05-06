@@ -104,6 +104,7 @@ type Broker struct {
 	autoNotebookWriter      *AutoNotebookWriter
 	humanWikiWriter         *HumanWikiIntentWriter
 	demandIndex             *NotebookDemandIndex
+	channelIntentDispatcher *ChannelIntentDispatcher
 	wikiIndex               *WikiIndex
 	wikiExtractor           *Extractor
 	wikiDLQ                 *DLQ
@@ -616,6 +617,7 @@ func (b *Broker) Stop() {
 	compressor := b.wikiCompressor
 	autoWriter := b.autoNotebookWriter
 	humanWikiWriter := b.humanWikiWriter
+	channelIntent := b.channelIntentDispatcher
 	b.mu.Unlock()
 	if synth != nil {
 		synth.Stop()
@@ -634,6 +636,9 @@ func (b *Broker) Stop() {
 	}
 	if humanWikiWriter != nil {
 		humanWikiWriter.Stop(2 * time.Second)
+	}
+	if channelIntent != nil {
+		channelIntent.Stop(2 * time.Second)
 	}
 }
 

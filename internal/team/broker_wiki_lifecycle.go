@@ -124,6 +124,16 @@ func (b *Broker) initWikiWorker() {
 		demandIdx = nil
 	}
 
+	// PR 5 (notebook-wiki-promise): channel intent dispatcher classifies
+	// question-form context-asks ("who has context on …") and feeds
+	// cross-agent notebook hits into the demand index as
+	// DemandSignalChannelContextAsk events. Dispatcher is started here so
+	// the goroutine is alive before the first PostMessage hook can fire.
+	// The optional reply path is OFF by default; toggle with
+	// WUPHF_CHANNEL_INTENT_REPLY=true.
+	channelIntent := NewChannelIntentDispatcher(b)
+	channelIntent.Start(lifecycleCtx)
+
 	b.mu.Lock()
 	b.wikiWorker = worker
 	b.wikiIndex = idx
@@ -133,6 +143,7 @@ func (b *Broker) initWikiWorker() {
 	b.autoNotebookWriter = autoWriter
 	b.humanWikiWriter = humanWiki
 	b.demandIndex = demandIdx
+	b.channelIntentDispatcher = channelIntent
 	b.mu.Unlock()
 	// Init succeeded; clear any cached failure so future calls don't surface
 	// stale errors from a previous attempt.

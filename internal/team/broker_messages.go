@@ -262,6 +262,12 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	if b.humanWikiWriter != nil && isHumanMessageSender(msg.From) {
 		b.humanWikiWriter.Handle(msg)
 	}
+	// PR 5: channel intent classifier. Fires for ALL senders (human OR
+	// agent) — context-asks happen in any channel message form. The
+	// classifier's question-form filter, evaluated inside the dispatcher
+	// goroutine, restricts the actual demand recording to genuine
+	// interrogative phrases. Handle is a non-blocking enqueue.
+	b.dispatchChannelIntentAsync(msg)
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
@@ -488,6 +494,13 @@ func (b *Broker) PostMessage(from, channel, content string, tagged []string, rep
 	// goroutine never re-enters b.mu, so calling it under the lock is safe.
 	if b.humanWikiWriter != nil && isHumanMessageSender(msg.From) {
 		b.humanWikiWriter.Handle(msg)
+	}
+	// PR 5: channel intent dispatcher fires for ALL senders. Same lock
+	// invariants as PR 2's Handle: the dispatcher's queue-send is non-
+	// blocking and its goroutine never re-enters b.mu, so calling it
+	// under b.mu is safe.
+	if b.channelIntentDispatcher != nil {
+		b.channelIntentDispatcher.Handle(msg)
 	}
 	return msg, nil
 }
