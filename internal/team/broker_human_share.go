@@ -191,7 +191,11 @@ func (b *Broker) handleHumanMe(w http.ResponseWriter, r *http.Request) {
 	}
 	session, ok := b.humanSessionFromRequest(r)
 	if ok {
-		writeJSON(w, http.StatusOK, map[string]any{"human": humanSessionToResponse(session)})
+		body := map[string]any{"human": humanSessionToResponse(session)}
+		if name := resolveHostDisplayName(); name != "" {
+			body["host_display_name"] = name
+		}
+		writeJSON(w, http.StatusOK, body)
 		return
 	}
 	if b.requestHasBrokerAuth(r) {
@@ -205,6 +209,19 @@ func (b *Broker) handleHumanMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeShareError(w, http.StatusUnauthorized, "session_required", "Your session expired.", "Ask the host for a new team-member invite.")
+}
+
+// resolveHostDisplayName returns the host's local git identity name so the
+// joiner welcome card can read "You joined Sam's office" instead of "this
+// office". Falls back to "" when only the FallbackHumanIdentity is available
+// (fresh install, no `git config user.name`) so the web client keeps its
+// generic copy and we never surface the literal "wuphf" placeholder.
+func resolveHostDisplayName() string {
+	id := brokerHumanIdentityRegistry().Local()
+	if id.Email == FallbackHumanIdentity.Email {
+		return ""
+	}
+	return strings.TrimSpace(id.Name)
 }
 
 var errHumanInviteExpiredOrUsed = errors.New("invite expired or used")

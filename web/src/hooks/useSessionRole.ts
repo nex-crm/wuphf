@@ -12,6 +12,7 @@ export type SessionRole = "host" | "member" | "unknown";
 export interface SessionInfo {
   role: SessionRole;
   human: HumanMe["human"] | undefined;
+  hostDisplayName: string | undefined;
   isPending: boolean;
 }
 
@@ -22,11 +23,12 @@ export function useSessionRole(): SessionInfo {
     refetchInterval: HUMAN_ME_REFETCH_MS,
   });
   const human = data?.human;
+  const hostDisplayName = data?.host_display_name?.trim() || undefined;
   const role: SessionRole =
     human?.role === "host"
       ? "host"
       : human?.role === "member"
         ? "member"
         : "unknown";
-  return { role, human, isPending };
+  return { role, human, hostDisplayName, isPending };
 }

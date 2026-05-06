@@ -229,6 +229,17 @@ type Broker struct {
 	workspaces       workspaceOrchestrator
 	launcherDrain    launcherDrainer
 	adminPauseExitFn func(int)
+
+	// humanHasPosted flips true the first time any human-authored message
+	// lands in the broker (across any channel). Drives the office sidebar's
+	// first-run nudge: the rail shows "→ tag @<agent> in #general" until
+	// the human sends their first message in any channel, then the nudge
+	// dismisses for good. Surface point: /office-members?meta.humanHasPosted.
+	//
+	// Bootstrap: NewBrokerAt scans the loaded message history once at startup
+	// (cheap — bounded by the persisted message slice). After that the field
+	// only ever flips false → true, never back. Guarded by b.mu.
+	humanHasPosted bool
 }
 
 func stringSliceContainsFold(values []string, want string) bool {
@@ -323,6 +334,7 @@ func NewBrokerAt(statePath string) *Broker {
 	b.ensureDefaultOfficeMembersLocked()
 	b.ensureDefaultChannelsLocked()
 	b.normalizeLoadedStateLocked()
+	b.bootstrapHumanHasPostedLocked()
 	b.mu.Unlock()
 	b.stopCh = make(chan struct{})
 	if activityWatchdogEnabled {
