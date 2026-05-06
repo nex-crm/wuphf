@@ -67,6 +67,13 @@ func (h *brokerTransportHost) ReceiveMessage(_ context.Context, msg transport.Me
 // silently dropping presence updates. A binding without ScopeMember/MemberSlug
 // is treated as "no member to mark online" and returns nil — the contract is
 // satisfied; nothing to do.
+//
+// Adapter validation mirrors DetachParticipant's allowlist: only adapters that
+// also have a valid detach path are accepted at member scope. Without this
+// symmetry, a non-openclaw member-scope upsert would set online=true with no
+// way to ever clear it (DetachParticipant would error on the unknown adapter
+// name), leaving a permanent stale "online" indicator. New member-bound
+// adapters must be added to BOTH switches together.
 func (h *brokerTransportHost) UpsertParticipant(_ context.Context, p transport.Participant, b transport.Binding) error {
 	if h == nil || h.broker == nil {
 		return errors.New("transport: UpsertParticipant: nil broker")
@@ -87,6 +94,12 @@ func (h *brokerTransportHost) UpsertParticipant(_ context.Context, p transport.P
 	adapter := strings.TrimSpace(p.AdapterName)
 	if adapter == "" {
 		return fmt.Errorf("transport: UpsertParticipant: empty AdapterName for slug %q", slug)
+	}
+	switch adapter {
+	case openclawAdapterName:
+		// recognized member-bound adapter; falls through
+	default:
+		return fmt.Errorf("transport: UpsertParticipant: unsupported adapter %q at member scope (slug=%q)", adapter, slug)
 	}
 	key := strings.TrimSpace(p.Key)
 	if key == "" {

@@ -141,6 +141,32 @@ func TestHostDetachParticipantUnknownKeyIsNoop(t *testing.T) {
 	}
 }
 
+// TestHostUpsertParticipantUnknownAdapterErrorsAtMemberScope asserts that an
+// adapter without a matching DetachParticipant allowlist entry is rejected at
+// member scope. Without this symmetry an Upsert could set online=true with no
+// valid detach path, leaving a permanent stale "online" indicator. The
+// allowlists in Upsert and Detach must move together — this test fails first
+// when a future adapter is added to one without the other.
+func TestHostUpsertParticipantUnknownAdapterErrorsAtMemberScope(t *testing.T) {
+	b := newTestBroker(t)
+	host := &brokerTransportHost{broker: b}
+	err := host.UpsertParticipant(context.Background(),
+		transport.Participant{AdapterName: "future-bound", Key: "k"},
+		transport.Binding{Scope: transport.ScopeMember, MemberSlug: "eng"},
+	)
+	if err == nil {
+		t.Fatal("UpsertParticipant with unknown adapter at member scope: got nil, want error")
+	}
+	if !strings.Contains(err.Error(), "unsupported adapter") {
+		t.Errorf("error message missing context: %v", err)
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if len(b.memberPresence) != 0 {
+		t.Errorf("memberPresence got rows from a rejected upsert: %d", len(b.memberPresence))
+	}
+}
+
 // TestHostDetachParticipantUnknownAdapterErrors asserts that a misnamed
 // adapter (typo, version skew) surfaces loudly instead of silently dropping
 // the call. A silent no-op here would mask a regression where an adapter is
