@@ -848,6 +848,11 @@ function StatusButton({
 function TaskStreamSection({ slug, taskId }: { slug: string; taskId: string }) {
   const { lines, connected } = useAgentStream(slug, taskId);
   const scrollRef = useRef<HTMLDivElement>(null);
+  // appendStreamLine merges consecutive raw chunks into the last line's
+  // `data` without growing the array, so depending on length alone would
+  // freeze the scroll while a model is still streaming text. Track the
+  // last line's id+data so coalesced updates retrigger the effect too.
+  const lastLine = lines[lines.length - 1];
 
   // Stick to bottom only when the user is already near it, so scrolling
   // back through history isn't disrupted by every new line.
@@ -859,7 +864,7 @@ function TaskStreamSection({ slug, taskId }: { slug: string; taskId: string }) {
     if (distanceFromBottom < 32) {
       el.scrollTop = el.scrollHeight;
     }
-  }, [lines.length]);
+  }, [lines.length, lastLine?.id, lastLine?.data]);
 
   return (
     <div>
