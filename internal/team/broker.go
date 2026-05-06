@@ -151,6 +151,9 @@ type Broker struct {
 	webShareStart    func() (WebShareStatus, error)
 	webShareStatus   func() WebShareStatus
 	webShareStop     func() error
+	webTunnelStart   func() (WebTunnelStatus, error)
+	webTunnelStatus  func() WebTunnelStatus
+	webTunnelStop    func() error
 	brokerRestartMu  sync.Mutex
 	runtimeProvider  string          // "codex" or "claude" — set by launcher
 	packSlug         string          // active agent pack slug ("founding-team", "revops", ...) — set by launcher

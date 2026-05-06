@@ -662,6 +662,19 @@ html[data-theme="nex"]
   line-height: 1.5;
   white-space: pre-wrap;
 }
+.confirm-details {
+  margin: -10px 0 18px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+.confirm-details ul {
+  margin: 0;
+  padding-left: 18px;
+}
+.confirm-details li + li {
+  margin-top: 4px;
+}
 .confirm-actions {
   display: flex;
   gap: 8px;

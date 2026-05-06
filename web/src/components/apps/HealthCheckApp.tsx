@@ -6,6 +6,7 @@ import {
   getHumanMe,
   getHumanSessions,
   getShareStatus,
+  getTunnelStatus,
   type HealthResponse,
   HUMAN_ME_QUERY_KEY,
   HUMAN_ME_REFETCH_MS,
@@ -13,10 +14,14 @@ import {
   type HumanSession,
   revokeHumanSession,
   startShare,
+  startTunnel,
   stopShare,
+  stopTunnel,
   type WebShareStatus,
+  type WebTunnelStatus,
 } from "../../api/platform";
 import { useAppStore } from "../../stores/app";
+import { confirm } from "../ui/ConfirmDialog";
 
 function formatSessionTime(value?: string): string {
   if (!value) return "never";
@@ -97,9 +102,18 @@ function AccessCards({
   shareNetworkLabel,
   shareRunning,
   shareStatus,
+  tunnelInviteCopied,
+  tunnelInviteURL,
+  tunnelError,
+  tunnelMutationPending,
+  tunnelRunning,
+  tunnelStatus,
   onCopyInvite,
+  onCopyTunnelInvite,
   onStartShareInvite,
+  onStartTunnelInvite,
   onStopShareInvite,
+  onStopTunnelInvite,
 }: {
   brokerConnected: boolean;
   humanLabel: string;
@@ -112,9 +126,18 @@ function AccessCards({
   shareNetworkLabel: string;
   shareRunning: boolean;
   shareStatus?: WebShareStatus;
+  tunnelInviteCopied: boolean;
+  tunnelInviteURL: string;
+  tunnelError?: string;
+  tunnelMutationPending: boolean;
+  tunnelRunning: boolean;
+  tunnelStatus?: WebTunnelStatus;
   onCopyInvite: () => void;
+  onCopyTunnelInvite: () => void;
   onStartShareInvite: () => void;
+  onStartTunnelInvite: () => void;
   onStopShareInvite: () => void;
+  onStopTunnelInvite: () => void;
 }) {
   return (
     <div
@@ -154,6 +177,18 @@ function AccessCards({
         onCopyInvite={onCopyInvite}
         onStartShareInvite={onStartShareInvite}
         onStopShareInvite={onStopShareInvite}
+      />
+      <TunnelInviteCard
+        inviteCopied={tunnelInviteCopied}
+        isHost={isHost}
+        tunnelError={tunnelError}
+        tunnelInviteURL={tunnelInviteURL}
+        tunnelMutationPending={tunnelMutationPending}
+        tunnelRunning={tunnelRunning}
+        tunnelStatus={tunnelStatus}
+        onCopyInvite={onCopyTunnelInvite}
+        onStartTunnelInvite={onStartTunnelInvite}
+        onStopTunnelInvite={onStopTunnelInvite}
       />
     </div>
   );
@@ -346,6 +381,165 @@ function HostInviteControls({
           }}
         >
           {shareError}
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+function TunnelInviteCard({
+  inviteCopied,
+  isHost,
+  tunnelError,
+  tunnelInviteURL,
+  tunnelMutationPending,
+  tunnelRunning,
+  tunnelStatus,
+  onCopyInvite,
+  onStartTunnelInvite,
+  onStopTunnelInvite,
+}: {
+  inviteCopied: boolean;
+  isHost: boolean;
+  tunnelError?: string;
+  tunnelInviteURL: string;
+  tunnelMutationPending: boolean;
+  tunnelRunning: boolean;
+  tunnelStatus?: WebTunnelStatus;
+  onCopyInvite: () => void;
+  onStartTunnelInvite: () => void;
+  onStopTunnelInvite: () => void;
+}) {
+  return (
+    <div className="app-card" style={{ minHeight: 126 }}>
+      <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 6 }}>
+        Public tunnel invite
+      </div>
+      {!isHost ? (
+        <div className="app-card-meta">Public tunnels are host-only.</div>
+      ) : (
+        <HostTunnelControls
+          inviteCopied={inviteCopied}
+          tunnelError={tunnelError}
+          tunnelInviteURL={tunnelInviteURL}
+          tunnelMutationPending={tunnelMutationPending}
+          tunnelRunning={tunnelRunning}
+          tunnelStatus={tunnelStatus}
+          onCopyInvite={onCopyInvite}
+          onStartTunnelInvite={onStartTunnelInvite}
+          onStopTunnelInvite={onStopTunnelInvite}
+        />
+      )}
+    </div>
+  );
+}
+
+function HostTunnelControls({
+  inviteCopied,
+  tunnelError,
+  tunnelInviteURL,
+  tunnelMutationPending,
+  tunnelRunning,
+  tunnelStatus,
+  onCopyInvite,
+  onStartTunnelInvite,
+  onStopTunnelInvite,
+}: {
+  inviteCopied: boolean;
+  tunnelError?: string;
+  tunnelInviteURL: string;
+  tunnelMutationPending: boolean;
+  tunnelRunning: boolean;
+  tunnelStatus?: WebTunnelStatus;
+  onCopyInvite: () => void;
+  onStartTunnelInvite: () => void;
+  onStopTunnelInvite: () => void;
+}) {
+  return (
+    <>
+      <div className="app-card-meta" style={{ marginBottom: 8 }}>
+        For teammates outside your private network. Bringing the tunnel up takes
+        about 10 seconds.
+      </div>
+      <div
+        style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}
+      >
+        <button
+          className="btn btn-primary btn-sm"
+          type="button"
+          onClick={onStartTunnelInvite}
+          disabled={tunnelMutationPending}
+        >
+          {tunnelMutationPending && !tunnelRunning
+            ? "Starting tunnel..."
+            : tunnelRunning
+              ? "Create new invite"
+              : "Start public tunnel"}
+        </button>
+        {tunnelRunning ? (
+          <button
+            className="btn btn-secondary btn-sm"
+            type="button"
+            onClick={onStopTunnelInvite}
+            disabled={tunnelMutationPending}
+          >
+            Stop tunnel
+          </button>
+        ) : null}
+      </div>
+      {tunnelInviteURL ? (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1fr auto",
+            gap: 8,
+            alignItems: "center",
+          }}
+        >
+          <code
+            style={{
+              display: "block",
+              padding: "8px 10px",
+              borderRadius: 8,
+              background: "var(--bg-warm)",
+              color: "var(--text)",
+              fontSize: 11,
+              whiteSpace: "normal",
+              wordBreak: "break-word",
+            }}
+          >
+            {tunnelInviteURL}
+          </code>
+          <button
+            className="btn btn-secondary btn-sm"
+            type="button"
+            onClick={onCopyInvite}
+          >
+            {inviteCopied ? "Copied" : "Copy"}
+          </button>
+        </div>
+      ) : null}
+      {tunnelRunning && tunnelStatus?.public_url ? (
+        <div className="app-card-meta" style={{ marginTop: 8 }}>
+          Tunnel: {tunnelStatus.public_url}
+        </div>
+      ) : null}
+      {tunnelRunning && tunnelStatus?.expires_at ? (
+        <div className="app-card-meta" style={{ marginTop: 4 }}>
+          Invite expires {formatSessionTime(tunnelStatus.expires_at)}
+        </div>
+      ) : null}
+      {tunnelError ? (
+        <div
+          style={{
+            marginTop: 8,
+            color: "var(--danger, #b42318)",
+            fontSize: 12,
+            lineHeight: 1.4,
+            whiteSpace: "pre-wrap",
+          }}
+        >
+          {tunnelError}
         </div>
       ) : null}
     </>
@@ -580,6 +774,124 @@ function runtimeItems(data: HealthResponse | undefined): RuntimeItem[] {
   ];
 }
 
+// useTunnelControls owns every piece of state, query, and mutation for the
+// public-tunnel flow (status polling, start/stop mutations, copy-to-
+// clipboard, the disclaimer modal trigger). Lifted out of HealthCheckApp so
+// that component stays under biome's 200-line per-function lint, and so the
+// share-invite vs tunnel-invite paths read as parallel chunks instead of one
+// 250-line function.
+function useTunnelControls(isHost: boolean) {
+  const queryClient = useQueryClient();
+  const [tunnelInviteCopied, setTunnelInviteCopied] = useState(false);
+  const [tunnelMutationError, setTunnelMutationError] = useState("");
+  const { data: tunnelStatus } = useQuery({
+    queryKey: ["share", "tunnel", "status"],
+    queryFn: () => getTunnelStatus(),
+    refetchInterval: 10_000,
+    enabled: isHost,
+  });
+  const startTunnelMutation = useMutation({
+    mutationFn: () => startTunnel(),
+    onMutate: () => setTunnelMutationError(""),
+    onSuccess: (tunnel) => {
+      queryClient.setQueryData(["share", "tunnel", "status"], tunnel);
+      setTunnelMutationError("");
+    },
+    onError: (err) => {
+      setTunnelMutationError(
+        err instanceof Error ? err.message : "Could not start tunnel.",
+      );
+    },
+  });
+  const stopTunnelMutation = useMutation({
+    mutationFn: () => stopTunnel(),
+    onMutate: () => setTunnelMutationError(""),
+    onSuccess: (tunnel) => {
+      queryClient.setQueryData(["share", "tunnel", "status"], tunnel);
+      setTunnelMutationError("");
+    },
+    onError: (err) => {
+      setTunnelMutationError(
+        err instanceof Error ? err.message : "Could not stop tunnel.",
+      );
+    },
+  });
+
+  const tunnelRunning = Boolean(tunnelStatus?.running);
+  const tunnelMutationPending =
+    startTunnelMutation.isPending || stopTunnelMutation.isPending;
+  const tunnelInviteURL = tunnelRunning ? tunnelStatus?.invite_url || "" : "";
+  const tunnelError = tunnelMutationError || tunnelStatus?.error;
+
+  const startTunnelInvite = () => {
+    if (tunnelMutationPending) return;
+    // Re-clicking once a tunnel is already up just mints a fresh invite
+    // against the same public URL — no point asking for the disclaimer
+    // again, the URL is already exposed.
+    if (tunnelRunning) {
+      startTunnelMutation.mutate();
+      return;
+    }
+    confirm({
+      title: "Start a public tunnel?",
+      message:
+        "This opens a Cloudflare Quick Tunnel that publishes your WUPHF web UI on the public internet so a teammate can join from any browser.",
+      details: (
+        <ul>
+          <li>
+            <strong>Anyone with the link can attempt to join</strong> until you
+            stop the tunnel — treat the URL like a password.
+          </li>
+          <li>
+            Send the invite link only through a private channel. Don't post it
+            in shared Slack/Discord rooms or anywhere it could be indexed.
+          </li>
+          <li>
+            The invite token is one-use and expires in 24 hours, but the tunnel
+            itself stays open until you click <em>Stop tunnel</em>.
+          </li>
+          <li>
+            Cloudflare terminates TLS at the edge; traffic between Cloudflare
+            and this machine runs over an outbound-only encrypted tunnel.
+          </li>
+        </ul>
+      ),
+      confirmLabel: "Start tunnel",
+      cancelLabel: "Cancel",
+      onConfirm: () => startTunnelMutation.mutate(),
+    });
+  };
+  const stopTunnelInvite = () => {
+    if (tunnelMutationPending) return;
+    stopTunnelMutation.mutate();
+  };
+  const copyTunnelInvite = async () => {
+    if (!tunnelInviteURL || typeof navigator === "undefined") return;
+    try {
+      await navigator.clipboard.writeText(tunnelInviteURL);
+      setTunnelMutationError("");
+      setTunnelInviteCopied(true);
+      setTimeout(() => setTunnelInviteCopied(false), 1600);
+    } catch (err) {
+      console.error("Could not copy tunnel invite URL", err);
+      setTunnelMutationError(
+        "Could not copy invite. Copy it manually from the field.",
+      );
+    }
+  };
+  return {
+    tunnelStatus,
+    tunnelRunning,
+    tunnelInviteURL,
+    tunnelInviteCopied,
+    tunnelMutationPending,
+    tunnelError,
+    startTunnelInvite,
+    stopTunnelInvite,
+    copyTunnelInvite,
+  };
+}
+
 export function HealthCheckApp() {
   const queryClient = useQueryClient();
   const [inviteCopied, setInviteCopied] = useState(false);
@@ -610,6 +922,7 @@ export function HealthCheckApp() {
     refetchInterval: 10_000,
     enabled: isHost,
   });
+  const tunnel = useTunnelControls(isHost);
   const startShareMutation = useMutation({
     mutationFn: () => startShare(),
     onMutate: () => {
@@ -746,9 +1059,18 @@ export function HealthCheckApp() {
         shareNetworkLabel={shareNetworkLabel}
         shareRunning={shareRunning}
         shareStatus={shareStatus}
+        tunnelInviteCopied={tunnel.tunnelInviteCopied}
+        tunnelInviteURL={tunnel.tunnelInviteURL}
+        tunnelError={tunnel.tunnelError}
+        tunnelMutationPending={tunnel.tunnelMutationPending}
+        tunnelRunning={tunnel.tunnelRunning}
+        tunnelStatus={tunnel.tunnelStatus}
         onCopyInvite={() => void copyInvite()}
+        onCopyTunnelInvite={() => void tunnel.copyTunnelInvite()}
         onStartShareInvite={startShareInvite}
+        onStartTunnelInvite={tunnel.startTunnelInvite}
         onStopShareInvite={stopShareInvite}
+        onStopTunnelInvite={tunnel.stopTunnelInvite}
       />
 
       <BrokerStatusCard isHealthy={isHealthy} status={status} />

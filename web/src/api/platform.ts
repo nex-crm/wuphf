@@ -118,6 +118,35 @@ export function stopShare() {
   return post<WebShareStatus>("/share/stop", {});
 }
 
+// WebTunnelStatus mirrors team.WebTunnelStatus on the Go side. The tunnel
+// controller spawns `cloudflared` to publish a one-off TryCloudflare URL
+// pointing at a loopback share server, so non-technical hosts can hand a
+// teammate a link without setting up Tailscale or an SSH tunnel.
+//
+// `cloudflared_missing` is a separate flag (rather than an error string the
+// UI sniffs) so a future error-message tweak does not silently switch the
+// disclaimer back to a generic failure card.
+export interface WebTunnelStatus {
+  running: boolean;
+  public_url?: string;
+  invite_url?: string;
+  expires_at?: string;
+  error?: string;
+  cloudflared_missing?: boolean;
+}
+
+export function getTunnelStatus() {
+  return get<WebTunnelStatus>("/share/tunnel/status");
+}
+
+export function startTunnel() {
+  return post<WebTunnelStatus>("/share/tunnel/start", {});
+}
+
+export function stopTunnel() {
+  return post<WebTunnelStatus>("/share/tunnel/stop", {});
+}
+
 export function getVersion() {
   return get<VersionInfo>("/version");
 }

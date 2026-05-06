@@ -694,6 +694,7 @@ func runWeb(args []string, packSlug string, unsafe bool, webPort int, opusCEO bo
 	l.SetFocusMode(!collabMode)
 	l.SetNoOpen(noOpen)
 	shareController := newWebShareController(webPort)
+	tunnelController := newWebTunnelController()
 	if err := l.PreflightWeb(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
@@ -701,6 +702,8 @@ func runWeb(args []string, packSlug string, unsafe bool, webPort int, opusCEO bo
 	wireBrokerWorkspaces(l, func(b *team.Broker) {
 		shareController.SetBroker(b)
 		b.SetWebShareController(shareController.start, shareController.status, shareController.stop)
+		tunnelController.SetBroker(b)
+		b.SetWebTunnelController(tunnelController.start, tunnelController.status, tunnelController.stop)
 	})
 	fmt.Printf("Launching %s web view (%d agents)... the browser is the office now.\n", l.PackName(), l.AgentCount())
 	if err := l.LaunchWeb(webPort); err != nil {

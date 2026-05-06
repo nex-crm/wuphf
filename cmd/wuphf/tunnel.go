@@ -1,0 +1,441 @@
+package main
+
+import (
+	"bufio"
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"os/exec"
+	"regexp"
+	"runtime"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/nex-crm/wuphf/internal/brokeraddr"
+	"github.com/nex-crm/wuphf/internal/team"
+)
+
+// cloudflaredURLPattern matches the public hostname cloudflared emits to
+// stderr after spinning up a TryCloudflare tunnel. The hostname is a hyphen-
+// separated set of lowercase words plus digits, e.g.
+// "https://winter-soft-banana-42.trycloudflare.com". Anchoring on the scheme
+// avoids matching the bare "trycloudflare.com" the binary prints in
+// onboarding banners with no URL attached.
+var cloudflaredURLPattern = regexp.MustCompile(`https://[a-z0-9][a-z0-9-]*\.trycloudflare\.com`)
+
+// cloudflaredStartTimeout is how long start() waits for cloudflared to print
+// a public URL before considering the launch failed. 45s is generous —
+// Cloudflare's bring-up usually completes in 5–15s but home networks behind
+// CGNAT can take longer to negotiate the QUIC path.
+const cloudflaredStartTimeout = 45 * time.Second
+
+// cloudflaredStopTimeout is the grace period for a clean Shutdown before we
+// SIGKILL.
+const cloudflaredStopTimeout = 5 * time.Second
+
+// cloudflaredMissingMessage is the user-facing error when the binary is not
+// on PATH. We deliberately do NOT auto-download it — silently fetching a
+// signed binary into ~/.wuphf is exactly the class of "what is this thing,
+// my AV is yelling" support load the user asked us to avoid. Instead, give
+// install commands per OS so the host can copy-paste once.
+func cloudflaredMissingMessage() string {
+	var install string
+	switch runtime.GOOS {
+	case "darwin":
+		install = "  brew install cloudflared"
+	case "windows":
+		install = "  winget install --id Cloudflare.cloudflared"
+	case "linux":
+		install = "  See https://github.com/cloudflare/cloudflared#installing-cloudflared"
+	default:
+		install = "  See https://github.com/cloudflare/cloudflared#installing-cloudflared"
+	}
+	return "cloudflared is not installed.\n\n" +
+		"WUPHF uses Cloudflare's free Quick Tunnel (no account required) to give\n" +
+		"your teammate a secure public URL. Install it once with:\n\n" +
+		install + "\n\n" +
+		"Then click \"Start public tunnel\" again."
+}
+
+// webTunnelController owns the cloudflared subprocess and a loopback share
+// HTTP server it forwards to. Lifecycle is host-only and serialized by mu.
+// start() is idempotent — re-clicking after a successful start mints a fresh
+// invite without restarting cloudflared — and stop() tears everything down
+// so a subsequent start re-runs cleanly.
+type webTunnelController struct {
+	mu       sync.Mutex
+	binary   string // override path for tests; falls back to PATH lookup
+	server   *http.Server
+	listener net.Listener
+	cmd      *exec.Cmd
+	cancel   context.CancelFunc
+	// stopGuard is closed by stop() to signal the wait-goroutine that the
+	// teardown was intentional and it should not flip running/err state.
+	stopGuard chan struct{}
+	running   bool
+	publicURL string
+	inviteURL string
+	expiresAt string
+	err       string
+	missing   bool
+	broker    *team.Broker
+}
+
+func newWebTunnelController() *webTunnelController {
+	return &webTunnelController{}
+}
+
+// SetBroker installs the in-process broker handle. Required before start():
+// the tunnel uses ShareTransport to mint invite tokens the same way the
+// private-network share path does, so admit/revoke flow through one surface.
+func (c *webTunnelController) SetBroker(b *team.Broker) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.broker = b
+}
+
+func (c *webTunnelController) status() team.WebTunnelStatus {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.statusLocked()
+}
+
+func (c *webTunnelController) statusLocked() team.WebTunnelStatus {
+	return team.WebTunnelStatus{
+		Running:            c.running,
+		PublicURL:          c.publicURL,
+		InviteURL:          c.inviteURL,
+		ExpiresAt:          c.expiresAt,
+		Error:              c.err,
+		CloudflaredMissing: c.missing,
+	}
+}
+
+func (c *webTunnelController) clearInviteLocked() {
+	c.inviteURL = ""
+	c.expiresAt = ""
+}
+
+func (c *webTunnelController) start() (team.WebTunnelStatus, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// Re-clicking "Start public tunnel" while one is already up should mint a
+	// fresh invite against the existing public URL rather than tearing the
+	// tunnel down and back up — same shape as webShareController.start().
+	if c.running && c.cmd != nil && c.publicURL != "" {
+		inviteURL, expiresAt, err := c.mintInviteLocked(c.publicURL)
+		if err != nil {
+			c.err = err.Error()
+			return c.statusLocked(), err
+		}
+		c.inviteURL = inviteURL
+		c.expiresAt = expiresAt
+		c.err = ""
+		return c.statusLocked(), nil
+	}
+
+	if c.broker == nil {
+		err := errors.New("tunnel controller has no broker handle")
+		c.err = err.Error()
+		return c.statusLocked(), err
+	}
+
+	binary := c.binary
+	if binary == "" {
+		path, lookErr := exec.LookPath("cloudflared")
+		if lookErr != nil {
+			c.missing = true
+			c.err = cloudflaredMissingMessage()
+			c.running = false
+			return c.statusLocked(), errors.New(c.err)
+		}
+		binary = path
+	}
+	c.missing = false
+
+	// Loopback listener on a random port. cloudflared dials this address
+	// outbound; the fact that we never bind to a routable interface is what
+	// keeps the service local-only when the tunnel is stopped.
+	listenCfg := &net.ListenConfig{}
+	ln, err := listenCfg.Listen(context.Background(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		c.err = fmt.Sprintf("tunnel loopback listener failed: %v", err)
+		return c.statusLocked(), errors.New(c.err)
+	}
+	loopbackAddr := ln.Addr().String()
+	brokerURL := brokeraddr.ResolveBaseURL()
+	brokerToken, err := readBrokerToken()
+	if err != nil {
+		_ = ln.Close()
+		c.err = err.Error()
+		return c.statusLocked(), err
+	}
+	server := &http.Server{
+		Addr:              loopbackAddr,
+		Handler:           newShareHandler(brokerURL, brokerToken, nil),
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cmd := exec.CommandContext(ctx, binary,
+		"tunnel",
+		"--no-autoupdate",
+		"--url", "http://"+loopbackAddr,
+		"--metrics", "127.0.0.1:0",
+	)
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		cancel()
+		_ = ln.Close()
+		c.err = fmt.Sprintf("cloudflared stderr pipe failed: %v", err)
+		return c.statusLocked(), errors.New(c.err)
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		cancel()
+		_ = ln.Close()
+		c.err = fmt.Sprintf("cloudflared stdout pipe failed: %v", err)
+		return c.statusLocked(), errors.New(c.err)
+	}
+	if err := cmd.Start(); err != nil {
+		cancel()
+		_ = ln.Close()
+		c.err = fmt.Sprintf("cloudflared failed to start: %v", err)
+		return c.statusLocked(), errors.New(c.err)
+	}
+
+	go func() {
+		if err := server.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			c.mu.Lock()
+			defer c.mu.Unlock()
+			if c.server == server {
+				c.err = fmt.Sprintf("tunnel loopback server failed: %v", err)
+				c.running = false
+				c.clearInviteLocked()
+				c.publicURL = ""
+			}
+		}
+	}()
+
+	urlCh := make(chan string, 1)
+	tailCh := make(chan []string, 1)
+	go scanCloudflaredOutput(stderr, urlCh, tailCh)
+	// Drain stdout so a chatty cloudflared can't stall on a full pipe;
+	// recent versions emit little here, so noop the bytes.
+	go func() { _, _ = io.Copy(io.Discard, stdout) }()
+
+	publicURL, tail, perr := waitForTunnelURL(ctx, urlCh, tailCh, cloudflaredStartTimeout)
+	if perr != nil {
+		cancel()
+		_ = cmd.Wait()
+		_ = ln.Close()
+		msg := perr.Error()
+		if len(tail) > 0 {
+			msg += "\n\nLast cloudflared output:\n" + strings.Join(tail, "\n")
+		}
+		c.err = msg
+		c.running = false
+		return c.statusLocked(), errors.New(msg)
+	}
+
+	c.cmd = cmd
+	c.cancel = cancel
+	c.server = server
+	c.listener = ln
+	c.publicURL = publicURL
+	c.running = true
+	c.stopGuard = make(chan struct{})
+
+	// Mint the first invite against the freshly-published public URL.
+	inviteURL, expiresAt, ierr := c.mintInviteLocked(publicURL)
+	if ierr != nil {
+		// Tunnel is up but the invite call failed. Surface the error but
+		// keep the tunnel running — a retry can mint a new invite without
+		// re-spinning cloudflared.
+		c.err = ierr.Error()
+		return c.statusLocked(), ierr
+	}
+	c.inviteURL = inviteURL
+	c.expiresAt = expiresAt
+	c.err = ""
+
+	// Watch the subprocess for unexpected exit. If it crashes, flip Running
+	// off so the next status poll surfaces the failure.
+	stopGuard := c.stopGuard
+	go func() {
+		err := cmd.Wait()
+		select {
+		case <-stopGuard:
+			// stop() already handled teardown; nothing to do.
+			return
+		default:
+		}
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		if c.cmd != cmd {
+			return
+		}
+		c.running = false
+		c.cmd = nil
+		c.cancel = nil
+		c.publicURL = ""
+		c.clearInviteLocked()
+		if c.server != nil {
+			shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), cloudflaredStopTimeout)
+			_ = c.server.Shutdown(shutdownCtx)
+			cancelShutdown()
+			c.server = nil
+			c.listener = nil
+		}
+		if err != nil && !errors.Is(err, context.Canceled) {
+			c.err = fmt.Sprintf("cloudflared exited unexpectedly: %v", err)
+		}
+	}()
+
+	return c.statusLocked(), nil
+}
+
+// mintInviteLocked issues a fresh invite token via the registered share
+// transport and formats the joiner-facing URL against the tunnel's public
+// origin. Caller must hold c.mu.
+func (c *webTunnelController) mintInviteLocked(publicURL string) (string, string, error) {
+	if c.broker == nil {
+		return "", "", errors.New("tunnel controller has no broker handle")
+	}
+	st := c.broker.ShareTransport()
+	if st == nil {
+		return "", "", errors.New("share transport is not registered; tunnel cannot mint invites")
+	}
+	st.SetURLBuilder(func(token string) string {
+		return tunnelJoinURL(publicURL, token)
+	})
+	details, err := st.CreateInviteDetailed(context.Background())
+	if err != nil {
+		return "", "", err
+	}
+	return details.URL, details.ExpiresAt, nil
+}
+
+// tunnelJoinURL is the canonical "<public-base>/join/<token>" formatter.
+// Lives next to shareJoinURL so the join-path shape stays in one place even
+// though the host part comes from cloudflared instead of a network bind.
+func tunnelJoinURL(publicURL, token string) string {
+	return strings.TrimRight(publicURL, "/") + "/join/" + token
+}
+
+func (c *webTunnelController) stop() error {
+	c.mu.Lock()
+	cmd := c.cmd
+	cancel := c.cancel
+	server := c.server
+	ln := c.listener
+	stopGuard := c.stopGuard
+	c.cmd = nil
+	c.cancel = nil
+	c.server = nil
+	c.listener = nil
+	c.stopGuard = nil
+	c.running = false
+	c.publicURL = ""
+	c.clearInviteLocked()
+	c.err = ""
+	c.mu.Unlock()
+
+	if stopGuard != nil {
+		close(stopGuard)
+	}
+	if cancel != nil {
+		cancel()
+	}
+	if cmd != nil && cmd.Process != nil {
+		// CommandContext's cancel() sends SIGKILL on most platforms; give
+		// Wait a brief deadline so we don't block the UI thread on a stuck
+		// child.
+		done := make(chan struct{})
+		go func() {
+			_ = cmd.Wait()
+			close(done)
+		}()
+		select {
+		case <-done:
+		case <-time.After(cloudflaredStopTimeout):
+			_ = cmd.Process.Kill()
+			<-done
+		}
+	}
+	if server != nil {
+		shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), cloudflaredStopTimeout)
+		_ = server.Shutdown(shutdownCtx)
+		cancelShutdown()
+	}
+	if ln != nil {
+		_ = ln.Close()
+	}
+	return nil
+}
+
+// scanCloudflaredOutput reads cloudflared's stderr line by line, sends the
+// first matching public URL on urlCh, and on EOF (or scanner error) returns
+// the trailing lines on tailCh so callers can quote them in an error
+// message. Lines are kept short to bound memory.
+func scanCloudflaredOutput(r io.Reader, urlCh chan<- string, tailCh chan<- []string) {
+	const tailMax = 8
+	tail := make([]string, 0, tailMax)
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+	urlSent := false
+	for scanner.Scan() {
+		line := scanner.Text()
+		tail = append(tail, line)
+		if len(tail) > tailMax {
+			tail = tail[len(tail)-tailMax:]
+		}
+		if !urlSent {
+			if match := cloudflaredURLPattern.FindString(line); match != "" {
+				select {
+				case urlCh <- match:
+				default:
+				}
+				urlSent = true
+			}
+		}
+	}
+	tailCopy := make([]string, len(tail))
+	copy(tailCopy, tail)
+	select {
+	case tailCh <- tailCopy:
+	default:
+	}
+}
+
+// waitForTunnelURL blocks until cloudflared publishes a URL, the context is
+// cancelled (subprocess died), or the timeout elapses.
+func waitForTunnelURL(ctx context.Context, urlCh <-chan string, tailCh <-chan []string, timeout time.Duration) (string, []string, error) {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case url, ok := <-urlCh:
+		if !ok || url == "" {
+			return "", drainTail(tailCh), errors.New("cloudflared exited before publishing a tunnel URL")
+		}
+		return url, nil, nil
+	case <-timer.C:
+		return "", drainTail(tailCh), fmt.Errorf("cloudflared did not publish a tunnel URL within %s", timeout)
+	case <-ctx.Done():
+		return "", drainTail(tailCh), errors.New("cloudflared was cancelled before publishing a tunnel URL")
+	}
+}
+
+func drainTail(tailCh <-chan []string) []string {
+	select {
+	case tail := <-tailCh:
+		return tail
+	case <-time.After(250 * time.Millisecond):
+		return nil
+	}
+}
