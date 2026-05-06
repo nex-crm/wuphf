@@ -351,8 +351,14 @@ func fixSymlinkMissing() error {
 	if err != nil {
 		return err
 	}
-	// If it already exists and points at the right place, nothing to do.
-	if info, lerr := os.Lstat(symlinkPath); lerr == nil && info.Mode()&os.ModeSymlink != 0 {
+	info, lerr := os.Lstat(symlinkPath)
+	if lerr == nil {
+		if info.Mode()&os.ModeSymlink == 0 {
+			// Regular file or directory — partial-migration case, refuse to clobber.
+			return fmt.Errorf("%w: ~/.wuphf is a regular path, not a symlink — see docs/multi-workspace.md",
+				ErrManualFixRequired)
+		}
+		// It's a symlink; check whether it already points at the right place.
 		if cur, rerr := os.Readlink(symlinkPath); rerr == nil &&
 			filepath.Clean(cur) == filepath.Clean(expectedTarget) {
 			return nil
@@ -360,12 +366,6 @@ func fixSymlinkMissing() error {
 	}
 	if _, err := os.Stat(expectedTarget); err != nil {
 		return fmt.Errorf("symlink:missing: target %s does not exist: %w", expectedTarget, err)
-	}
-	// If ~/.wuphf already exists as a regular file or directory, that's the
-	// partial-migration case — refuse to clobber user data (mirrors fixSymlinkWrong).
-	if info, lerr := os.Lstat(symlinkPath); lerr == nil && info.Mode()&os.ModeSymlink == 0 {
-		return fmt.Errorf("%w: ~/.wuphf is a regular path, not a symlink — see docs/multi-workspace.md",
-			ErrManualFixRequired)
 	}
 	if err := os.Symlink(expectedTarget, symlinkPath); err != nil {
 		return fmt.Errorf("symlink:missing: create %s → %s: %w", symlinkPath, expectedTarget, err)
@@ -399,7 +399,7 @@ func fixSymlinkWrong() error {
 	if _, err := os.Stat(expectedTarget); err != nil {
 		return fmt.Errorf("symlink:wrong: target %s does not exist: %w", expectedTarget, err)
 	}
-	if err := os.Symlink(expectedTarget, symlinkPath); err != nil && !errors.Is(err, os.ErrExist) {
+	if err := os.Symlink(expectedTarget, symlinkPath); err != nil {
 		return fmt.Errorf("symlink:wrong: recreate %s → %s: %w", symlinkPath, expectedTarget, err)
 	}
 	return nil
