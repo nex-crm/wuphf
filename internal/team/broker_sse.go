@@ -366,13 +366,18 @@ func decodeToolEventField(raw string) any {
 
 // handleAgentStream serves a per-agent stdout SSE stream.
 // Recent lines are replayed as initial history, then new lines are pushed live.
-// Path: /agent-stream/{slug}
+// Path: /agent-stream/{slug}?task={taskID}
+//
+// When ?task= is supplied the stream is scoped to that task: history replay
+// uses the per-task buffer and live subscription only emits lines tagged with
+// the matching taskID. Omit ?task= to subscribe to the agent's full stream.
 func (b *Broker) handleAgentStream(w http.ResponseWriter, r *http.Request) {
 	slug := strings.TrimPrefix(r.URL.Path, "/agent-stream/")
 	if slug == "" {
 		http.Error(w, "missing agent slug", http.StatusBadRequest)
 		return
 	}
+	taskID := strings.TrimSpace(r.URL.Query().Get("task"))
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
@@ -389,8 +394,19 @@ func (b *Broker) handleAgentStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Replay recent history so the client sees context immediately.
-	history := stream.recent()
+	// Replay recent history so the client sees context immediately. When a
+	// task scope is provided we replay + subscribe atomically so live events
+	// arriving between snapshot and subscribe aren't dropped.
+	var history []string
+	var lines <-chan string
+	var unsubscribe func()
+	if taskID != "" {
+		history, lines, unsubscribe = stream.subscribeTaskWithRecent(taskID)
+	} else {
+		history = stream.recent()
+		lines, unsubscribe = stream.subscribe()
+	}
+	defer unsubscribe()
 	for _, line := range history {
 		if _, err := fmt.Fprintf(w, "data: %s\n\n", line); err != nil {
 			return
@@ -403,9 +419,6 @@ func (b *Broker) handleAgentStream(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	flusher.Flush()
-
-	lines, unsubscribe := stream.subscribe()
-	defer unsubscribe()
 
 	heartbeat := time.NewTicker(15 * time.Second)
 	defer heartbeat.Stop()

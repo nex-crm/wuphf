@@ -53,9 +53,9 @@ function isUnmatchedRoute(routeId: string | undefined): boolean {
 // Step 5 of the route migration plan. Each app surface is a route-only
 // component, so it's safe to defer loading until the user actually
 // navigates to that route. App panels carry the bulk of the bundle
-// (xterm in Console, three.js in Graph, the markdown stack in Wiki and
-// Notebook); deferring them keeps the conversation surface — which is
-// what every user lands on — small and fast.
+// (three.js in Graph, the markdown stack in Wiki and Notebook);
+// deferring them keeps the conversation surface — which is what every
+// user lands on — small and fast.
 //
 // The named-export panels need a `.then(m => ({ default: m.X }))` shim
 // because React.lazy's contract requires a module with a default
