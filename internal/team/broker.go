@@ -466,6 +466,7 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/notebook/catalog", b.requireAuth(b.handleNotebookCatalog))
 	mux.HandleFunc("/notebook/search", b.requireAuth(b.handleNotebookSearch))
 	mux.HandleFunc("/notebook/promote", b.requireAuth(b.handleNotebookPromote))
+	mux.HandleFunc("/notebook/review-candidates", b.requireAuth(b.handleNotebookReviewCandidates))
 	mux.HandleFunc("/review/list", b.requireAuth(b.handleReviewList))
 	mux.HandleFunc("/review/", b.requireAuth(b.handleReviewSubpath))
 	mux.HandleFunc("/entity/fact", b.requireAuth(b.handleEntityFact))
