@@ -122,22 +122,24 @@ export function AgentEventPeek({
     return () => document.removeEventListener("mousedown", onMouseDown);
   }, [open, anchorRef, onClose]);
 
-  if (!(open && current)) return null;
+  if (!open) return null;
 
-  const isStuck = current.kind === "stuck";
-  const currentLabel = kindLabel(current.kind);
+  const isStuck = current?.kind === "stuck";
+  const currentLabel = current ? kindLabel(current.kind) : null;
   const showDetailBlock =
+    !!current &&
     typeof current.detail === "string" &&
     current.detail.length > 0 &&
     current.detail !== current.activity;
 
   // Recent list: if stuck, prepend the current as a "BLOCKED:" pin,
-  // then show up to 6 history entries.
+  // then show up to 6 history entries. Both branches require a current
+  // snapshot, so the list collapses on the no-activity empty state.
   const recentEntries: Array<{
     entry: StoredActivitySnapshot;
     prefix?: string;
   }> = [];
-  if (isStuck) {
+  if (isStuck && current) {
     recentEntries.push({ entry: current, prefix: "BLOCKED:" });
   }
   for (const h of history) {
@@ -145,6 +147,7 @@ export function AgentEventPeek({
     recentEntries.push({ entry: h });
   }
   const showRecentBlock = recentEntries.length > 0;
+  const showEmptyState = !current;
 
   const avatarLetter = agentName.charAt(0).toUpperCase();
 
@@ -177,23 +180,33 @@ export function AgentEventPeek({
         )}
       </div>
 
-      {/* State chip + relative time */}
-      <div className="sidebar-agent-peek-state-row">
-        <span
-          className="sidebar-agent-peek-state-chip"
-          data-kind={currentLabel}
-        >
-          {currentLabel}
-        </span>
-        <span className="sidebar-agent-peek-time">
-          {formatRelative(current.receivedAtMs, now)}
-        </span>
-      </div>
+      {/* State chip + relative time — only when we have a snapshot */}
+      {current && currentLabel ? (
+        <div className="sidebar-agent-peek-state-row">
+          <span
+            className="sidebar-agent-peek-state-chip"
+            data-kind={currentLabel}
+          >
+            {currentLabel}
+          </span>
+          <span className="sidebar-agent-peek-time">
+            {formatRelative(current.receivedAtMs, now)}
+          </span>
+        </div>
+      ) : null}
 
       {/* Current thought */}
-      {showDetailBlock ? (
+      {showDetailBlock && current ? (
         <div id={`peek-current-${slug}`} className="sidebar-agent-peek-detail">
           {current.detail}
+        </div>
+      ) : null}
+
+      {/* Empty state — no SSE event has arrived for this agent yet */}
+      {showEmptyState ? (
+        <div className="sidebar-agent-peek-empty" data-testid="peek-empty">
+          No activity yet. This agent has not streamed an event since the
+          office opened.
         </div>
       ) : null}
 

@@ -2365,6 +2365,16 @@ html[data-theme="nex"]
   mask-image: linear-gradient(to bottom, black 60%, transparent 100%);
 }
 
+/* Empty-state line — shown only when no SSE event has arrived for this
+   agent yet. Sits where the state row + detail block would normally render. */
+.sidebar-agent-peek-empty {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-tertiary);
+  padding: 0 16px 12px;
+  font-style: italic;
+}
+
 /* RECENT header + scrollable list */
 .sidebar-agent-peek-recent-section {
   display: flex;

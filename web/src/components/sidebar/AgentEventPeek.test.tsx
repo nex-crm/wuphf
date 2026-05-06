@@ -76,7 +76,7 @@ describe("<AgentEventPeek> render", () => {
     expect(container.firstChild).toBeNull();
   });
 
-  it("renders nothing when open=true but current=undefined", () => {
+  it("renders the empty-state when open=true but no snapshot has arrived yet", () => {
     const anchorRef = makeAnchorRef();
     render(
       <AgentEventPeek
@@ -85,7 +85,19 @@ describe("<AgentEventPeek> render", () => {
         current={undefined}
       />,
     );
-    expect(document.querySelector(".sidebar-agent-peek")).toBeNull();
+    // Dialog itself still mounts so the chevron's aria-controls target
+    // resolves and the user gets a visible response to the click.
+    expect(document.querySelector(".sidebar-agent-peek")).not.toBeNull();
+    // Header still renders (agent name + role).
+    expect(screen.getByText(defaultProps.agentName)).toBeDefined();
+    // Empty-state line carries the "no activity yet" copy.
+    expect(screen.getByTestId("peek-empty")).toBeDefined();
+    // State row, detail, recent list all collapse — no snapshot to render.
+    expect(document.querySelector(".sidebar-agent-peek-state-row")).toBeNull();
+    expect(document.querySelector(".sidebar-agent-peek-detail")).toBeNull();
+    expect(
+      document.querySelector(".sidebar-agent-peek-recent-section"),
+    ).toBeNull();
   });
 
   it("renders the current-thought block when detail differs from activity", () => {
