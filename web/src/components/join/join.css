@@ -1,0 +1,109 @@
+/* JoinPage — invite acceptance landing.
+   Standalone layout: this view is the entire page when the SPA boots
+   from /?invite=<token>; no sidebar, no shell chrome. */
+
+.join-page {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  background: var(--neutral-10, #f8f8f9);
+  color: var(--neutral-900, #28292a);
+  padding: 32px 16px;
+}
+
+.join-card {
+  width: min(92vw, 460px);
+  background: white;
+  border: 1px solid var(--neutral-100, #e9eaeb);
+  border-radius: 16px;
+  padding: 28px;
+  box-shadow: 0 24px 80px rgba(30, 31, 31, 0.08);
+}
+
+.join-eyebrow {
+  margin: 0 0 10px;
+  color: var(--neutral-500, #686c6e);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.join-heading {
+  margin: 0 0 10px;
+  font-size: 28px;
+  line-height: 1.1;
+  letter-spacing: 0;
+}
+
+.join-copy {
+  margin: 0 0 20px;
+  color: var(--neutral-600, #575a5c);
+  line-height: 1.55;
+}
+
+.join-error {
+  margin: 0 0 16px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #ffeeeb;
+  color: #8c1727;
+  font-size: 13px;
+}
+
+.join-form {
+  display: flex;
+  flex-direction: column;
+}
+
+.join-label {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.join-input {
+  width: 100%;
+  min-height: 46px;
+  border: 1px solid var(--neutral-200, #cfd1d2);
+  border-radius: 10px;
+  padding: 0 12px;
+  font: inherit;
+  background: white;
+  color: inherit;
+}
+
+.join-input[aria-invalid="true"] {
+  border-color: #d23a47;
+  outline: 2px solid rgba(210, 58, 71, 0.18);
+  outline-offset: 1px;
+}
+
+.join-input:focus-visible {
+  outline: 2px solid var(--cyan-400, #00ccff);
+  outline-offset: 1px;
+}
+
+.join-submit {
+  width: 100%;
+  min-height: 46px;
+  margin-top: 14px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--neutral-900, #28292a);
+  color: white;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.join-submit:disabled {
+  opacity: 0.7;
+  cursor: progress;
+}
+
+.join-note {
+  margin-top: 18px;
+  font-size: 12px;
+  color: var(--neutral-400, #85898b);
+}

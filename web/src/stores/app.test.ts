@@ -1,6 +1,6 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { directChannelSlug, useAppStore } from "./app";
+import { directChannelSlug, selectPillState, useAppStore } from "./app";
 
 afterEach(() => {
   useAppStore.setState({
@@ -14,6 +14,8 @@ afterEach(() => {
     composerSearchInitialQuery: "",
     composerHelpOpen: false,
     onboardingComplete: false,
+    agentActivitySnapshots: {},
+    isReconnecting: false,
   });
 });
 
@@ -91,6 +93,124 @@ describe("channel clear markers", () => {
     expect(useAppStore.getState().clearedMessageIdsByChannel.general).toBe(
       "msg-general",
     );
+  });
+});
+
+describe("recordActivitySnapshot", () => {
+  let nowSpy: ReturnType<typeof vi.spyOn> | null = null;
+
+  beforeEach(() => {
+    let t = 1_700_000_000_000;
+    nowSpy = vi.spyOn(Date, "now").mockImplementation(() => t);
+    // Each call advances the clock by 1s so successive snapshots have
+    // distinct receivedAtMs / haloUntilMs values that the test can assert.
+    nowSpy.mockImplementation(() => {
+      const v = t;
+      t += 1000;
+      return v;
+    });
+  });
+
+  afterEach(() => {
+    nowSpy?.mockRestore();
+  });
+
+  it("stores the snapshot, stamps receivedAtMs, and sets haloUntilMs forward by ~600ms", () => {
+    useAppStore.getState().recordActivitySnapshot({
+      slug: "tess",
+      activity: "drafting reply",
+      kind: "routine",
+    });
+
+    const snap = useAppStore.getState().agentActivitySnapshots.tess;
+    expect(snap.activity).toBe("drafting reply");
+    expect(snap.kind).toBe("routine");
+    expect(snap.haloUntilMs - snap.receivedAtMs).toBe(600);
+  });
+
+  it("bumps haloUntilMs on each routine event so the halo reblooms", () => {
+    useAppStore
+      .getState()
+      .recordActivitySnapshot({ slug: "tess", kind: "routine" });
+    const first =
+      useAppStore.getState().agentActivitySnapshots.tess.haloUntilMs;
+
+    useAppStore
+      .getState()
+      .recordActivitySnapshot({ slug: "tess", kind: "routine" });
+    const second =
+      useAppStore.getState().agentActivitySnapshots.tess.haloUntilMs;
+
+    expect(second).toBeGreaterThan(first);
+  });
+
+  it("does NOT bump haloUntilMs on stuck snapshots — stuck must not visually read as alive", () => {
+    useAppStore
+      .getState()
+      .recordActivitySnapshot({ slug: "rita", kind: "routine" });
+    const beforeStuck =
+      useAppStore.getState().agentActivitySnapshots.rita.haloUntilMs;
+
+    useAppStore.getState().recordActivitySnapshot({
+      slug: "rita",
+      kind: "stuck",
+      activity: "stuck on terraform lock",
+    });
+
+    const afterStuck = useAppStore.getState().agentActivitySnapshots.rita;
+    expect(afterStuck.haloUntilMs).toBe(beforeStuck);
+    expect(afterStuck.kind).toBe("stuck");
+    expect(afterStuck.activity).toBe("stuck on terraform lock");
+  });
+
+  it("ignores snapshots with an empty or missing slug", () => {
+    useAppStore.getState().recordActivitySnapshot({
+      slug: "",
+      activity: "noise",
+    });
+    expect(useAppStore.getState().agentActivitySnapshots).toEqual({});
+  });
+});
+
+describe("selectPillState", () => {
+  it("returns idle when no snapshot exists for the slug", () => {
+    expect(
+      selectPillState({ agentActivitySnapshots: {} }, "ghost", Date.now()),
+    ).toBe("idle");
+  });
+
+  it("returns stuck when the snapshot kind is stuck", () => {
+    const now = 1_700_000_000_000;
+    const state = {
+      agentActivitySnapshots: {
+        rita: {
+          slug: "rita",
+          kind: "stuck" as const,
+          receivedAtMs: now - 1000,
+          haloUntilMs: now - 1000,
+        },
+      },
+    };
+    expect(selectPillState(state, "rita", now)).toBe("stuck");
+  });
+});
+
+describe("setIsReconnecting", () => {
+  it("only emits a state change when the value actually flips", () => {
+    const sub = vi.fn();
+    const unsub = useAppStore.subscribe(sub);
+    try {
+      useAppStore.getState().setIsReconnecting(false);
+      expect(sub).not.toHaveBeenCalled();
+
+      useAppStore.getState().setIsReconnecting(true);
+      expect(sub).toHaveBeenCalledTimes(1);
+
+      useAppStore.getState().setIsReconnecting(true);
+      expect(sub).toHaveBeenCalledTimes(1);
+    } finally {
+      unsub();
+    }
   });
 });
 

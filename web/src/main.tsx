@@ -4,6 +4,7 @@ import { RouterProvider } from "@tanstack/react-router";
 
 import { rootRoute, router } from "./lib/router";
 import RootRoute from "./routes/RootRoute";
+import { JoinPage } from "./components/join/JoinPage";
 import "./styles/shadcn.css";
 import "./styles/global.css";
 import "./styles/layout.css";
@@ -60,9 +61,19 @@ try {
   if (!root) {
     throw new Error("#root element not found in DOM");
   }
+  // The share handler redirects /join/<token> to /?invite=<token> so the
+  // SPA's relative asset URLs need no path rewrite. A present-but-empty
+  // value means the link was truncated; pass it through so JoinPage can
+  // show the missing-token state instead of mounting the main app.
+  const rawInvite = new URLSearchParams(window.location.search).get("invite");
+  const inviteToken = rawInvite === null ? null : rawInvite.trim();
   createRoot(root).render(
     <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} />
+      {inviteToken === null ? (
+        <RouterProvider router={router} />
+      ) : (
+        <JoinPage token={inviteToken} />
+      )}
     </QueryClientProvider>,
   );
   window.__wuphfBootDone?.();

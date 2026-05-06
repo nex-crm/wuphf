@@ -1989,3 +1989,186 @@ html[data-theme="nex"]
   cursor: pointer;
   opacity: 0;
 }
+
+/* ─── Agent event pill ───────────────────────────────────────────
+   Replaces the secondary `.sidebar-agent-task` text line per agent
+   row. Inherits typography from .sidebar-agent-task (10px,
+   --text-tertiary). State drives chrome via `data-state`.
+   See web/DESIGN.md and the agent-event-bubbles design doc.
+   ─────────────────────────────────────────────────────────────── */
+.sidebar-agent-pill {
+  /* block, not inline — text-overflow/max-width/overflow only apply to
+     a box, otherwise long activity strings spill past the slot. */
+  display: block;
+  font-size: 10px;
+  color: var(--text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 140px;
+  /* Compositor-only properties (opacity, transform, filter) are the only
+     things we transition. Layout-bound props are forbidden here. */
+  opacity: 1;
+  transform: translateZ(0);
+  filter: none;
+  transition: none;
+  will-change: opacity, filter;
+}
+
+.sidebar-agent-pill[data-state="halo"] {
+  /* Halo glow uses filter (compositor-friendly) instead of box-shadow on
+     the layout-affecting border edge. */
+  filter: drop-shadow(0 0 var(--bubble-halo-radius) var(--bubble-talking));
+}
+
+.sidebar-agent-pill[data-state="holding"] {
+  opacity: 1;
+}
+
+.sidebar-agent-pill[data-state="dim"] {
+  opacity: 0.7;
+}
+
+.sidebar-agent-pill[data-state="idle"] {
+  opacity: 0.5;
+  font-style: italic;
+}
+
+.sidebar-agent-pill[data-state="stuck"] {
+  /* Bordered chrome is structural — it carries the stuck signal under
+     reduced-motion where halo and opacity transitions are suppressed. */
+  border: 1px solid var(--bubble-stuck);
+  border-radius: 4px;
+  padding: 0 4px;
+  color: var(--bubble-stuck);
+  font-weight: 600;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .sidebar-agent-pill {
+    transition:
+      opacity var(--bubble-idle-dim-duration) ease-out,
+      filter var(--bubble-halo-duration) ease-out;
+  }
+  .sidebar-agent-pill[data-state="halo"] {
+    transition:
+      opacity var(--bubble-pulse-fade-in) ease-out,
+      filter var(--bubble-halo-duration) ease-out;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-agent-pill {
+    transition: none;
+  }
+  .sidebar-agent-pill[data-state="halo"] {
+    /* No halo glow under reduced motion. Border on stuck still renders
+       because it is structural, not motion. */
+    filter: none;
+  }
+}
+
+/* Disconnect grace: dim every agent row and surface a "Reconnecting…" tag at
+   the bottom of the rail. Polling continues underneath so state recovers
+   automatically; this just makes the loss-of-liveness visible to the user. */
+.sidebar-agents:has(.sidebar-agents-reconnecting) .sidebar-agent {
+  opacity: 0.7;
+  transition: opacity 200ms ease-out;
+}
+.sidebar-agents-reconnecting {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  padding: 6px 8px 4px;
+  text-align: center;
+  font-style: italic;
+}
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-agents:has(.sidebar-agents-reconnecting) .sidebar-agent {
+    transition: none;
+  }
+}
+
+/*
+ * Team-member session surfaces.
+ *
+ * Rendered only when /humans/me reports role === "member" — host sessions
+ * never see these. The welcome card is one-shot per invite (dismissal
+ * persists in localStorage), the badge is permanent for the session so the
+ * joiner is never confused which office they are in.
+ */
+.team-welcome {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  margin: 12px 16px 0;
+  padding: 14px 16px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--accent-bg);
+  color: var(--text);
+}
+.team-welcome-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.team-welcome-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.team-welcome-copy {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+.team-welcome-dismiss {
+  flex-shrink: 0;
+  align-self: center;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: 6px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-card);
+  color: var(--text);
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.team-welcome-dismiss:hover {
+  background: var(--accent-bg-strong);
+}
+.team-welcome-dismiss:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (max-width: 640px) {
+  .team-welcome {
+    flex-direction: column;
+    align-items: stretch;
+    margin: 10px 10px 0;
+  }
+  .team-welcome-dismiss {
+    align-self: flex-end;
+  }
+}
+
+.team-member-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+  background: var(--accent-bg);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  white-space: nowrap;
+}

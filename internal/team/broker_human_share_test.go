@@ -168,6 +168,80 @@ func TestHumanMeRejectsExpiredSessionServerSide(t *testing.T) {
 	}
 }
 
+func TestHumanMeIncludesHostDisplayNameForMemberSessions(t *testing.T) {
+	dir := t.TempDir()
+	reg := NewHumanIdentityRegistryAt(dir)
+	id, _ := buildIdentity("Sam Sender", "sam@example.com")
+	reg.mu.Lock()
+	reg.localCache = &id
+	reg.mu.Unlock()
+	setHumanIdentityRegistry(reg)
+	t.Cleanup(func() { setHumanIdentityRegistry(NewHumanIdentityRegistry()) })
+
+	b := newTestBroker(t)
+	token, _, err := b.createHumanInvite()
+	if err != nil {
+		t.Fatalf("create invite: %v", err)
+	}
+	sessionToken, _, err := b.acceptHumanInvite(token, "Mira", "browser")
+	if err != nil {
+		t.Fatalf("accept invite: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/humans/me", nil)
+	req.AddCookie(&http.Cookie{Name: humanSessionCookie, Value: sessionToken})
+	rec := httptest.NewRecorder()
+	b.handleHumanMe(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("me status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var got struct {
+		Human           humanSessionResponse `json:"human"`
+		HostDisplayName string               `json:"host_display_name"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode me: %v", err)
+	}
+	if got.HostDisplayName != "Sam Sender" {
+		t.Fatalf("host_display_name = %q, want %q (body=%s)", got.HostDisplayName, "Sam Sender", rec.Body.String())
+	}
+	if got.Human.DisplayName != "Mira" {
+		t.Fatalf("human.display_name = %q, want Mira", got.Human.DisplayName)
+	}
+}
+
+func TestHumanMeOmitsHostDisplayNameWhenIdentityIsFallback(t *testing.T) {
+	dir := t.TempDir()
+	reg := NewHumanIdentityRegistryAt(dir)
+	fallback := FallbackHumanIdentity
+	reg.mu.Lock()
+	reg.localCache = &fallback
+	reg.mu.Unlock()
+	setHumanIdentityRegistry(reg)
+	t.Cleanup(func() { setHumanIdentityRegistry(NewHumanIdentityRegistry()) })
+
+	b := newTestBroker(t)
+	token, _, err := b.createHumanInvite()
+	if err != nil {
+		t.Fatalf("create invite: %v", err)
+	}
+	sessionToken, _, err := b.acceptHumanInvite(token, "Mira", "browser")
+	if err != nil {
+		t.Fatalf("accept invite: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/humans/me", nil)
+	req.AddCookie(&http.Cookie{Name: humanSessionCookie, Value: sessionToken})
+	rec := httptest.NewRecorder()
+	b.handleHumanMe(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("me status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	if bytes.Contains(rec.Body.Bytes(), []byte(`"host_display_name"`)) {
+		t.Fatalf("expected host_display_name omitted on fallback identity, got: %s", rec.Body.String())
+	}
+}
+
 func TestResetClearsHumanShareState(t *testing.T) {
 	b := newTestBroker(t)
 	token, _, err := b.createHumanInvite()

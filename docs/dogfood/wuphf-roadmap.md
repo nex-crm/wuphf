@@ -23,7 +23,6 @@
 
 ## Evidence Of Progress
 
-- `docs/surfaces.md` rows stay current in feature PRs.
 - Each new domain method has service-level and route-level tests.
 - Task completion evidence includes changed files, checks run, logs, branch,
   risks, and next human action.
