@@ -74,6 +74,12 @@ func TestHumanMeAcceptsSessionCookie(t *testing.T) {
 	if !bytes.Contains(rec.Body.Bytes(), []byte(`"display_name":"Mira"`)) {
 		t.Fatalf("me body missing Mira: %s", rec.Body.String())
 	}
+	// useSessionRole on the web client branches on human.role. Without this
+	// field the joiner welcome card and sidebar badge fall back to "unknown"
+	// and never render — the bug PR #661 shipped silently.
+	if !bytes.Contains(rec.Body.Bytes(), []byte(`"role":"member"`)) {
+		t.Fatalf("me body missing role:member, welcome card will not render: %s", rec.Body.String())
+	}
 }
 
 func TestHumanSessionsHostCanRevokeSession(t *testing.T) {

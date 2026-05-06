@@ -103,6 +103,10 @@ type humanSessionResponse struct {
 	InviteID    string `json:"invite_id"`
 	HumanSlug   string `json:"human_slug"`
 	DisplayName string `json:"display_name"`
+	// Role is hardcoded to "member" so the joiner web client can branch on
+	// useSessionRole().role without a second roundtrip. The host placeholder
+	// returned from /humans/me uses the same field with value "host".
+	Role        string `json:"role"`
 	Device      string `json:"device,omitempty"`
 	CreatedAt   string `json:"created_at"`
 	ExpiresAt   string `json:"expires_at"`
@@ -526,6 +530,7 @@ func humanSessionToResponse(session humanSession) humanSessionResponse {
 		InviteID:    session.InviteID,
 		HumanSlug:   session.HumanSlug,
 		DisplayName: session.DisplayName,
+		Role:        "member",
 		Device:      session.Device,
 		CreatedAt:   session.CreatedAt,
 		ExpiresAt:   sessionExpiresAt(session).Format(time.RFC3339),
