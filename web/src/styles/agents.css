@@ -537,6 +537,232 @@
   height: 320px;
 }
 
+/* ─── Agent Profile Panel ─── */
+.agent-profile-panel {
+  /* Inherits .agent-panel layout; adds a scrollable body */
+}
+
+.agent-profile-body {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.agent-profile-section {
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.agent-profile-section-title {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-tertiary);
+  margin-bottom: 8px;
+  font-family: var(--font-mono);
+}
+
+.agent-profile-empty {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  font-style: italic;
+  padding: 2px 0;
+}
+
+.agent-profile-role-text,
+.agent-profile-current-task {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+/* Status badge */
+.agent-profile-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--text-tertiary);
+  text-transform: lowercase;
+}
+
+.agent-profile-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--neutral-400);
+  flex-shrink: 0;
+}
+
+.agent-profile-status-badge.active .agent-profile-status-dot {
+  background: var(--green);
+}
+
+.agent-profile-status-badge.paused .agent-profile-status-dot {
+  background: var(--yellow);
+}
+
+/* List (skills, runs, tasks) */
+.agent-profile-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.agent-profile-list-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text);
+  min-height: 26px;
+}
+
+.agent-profile-skill-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-profile-badge {
+  font-size: 9px;
+  padding: 1px 6px;
+  flex-shrink: 0;
+}
+
+/* Channels chips */
+.agent-profile-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.agent-profile-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: var(--radius-full);
+  font-size: 11px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    color 0.15s;
+  font-family: var(--font-sans);
+}
+
+.agent-profile-chip:hover {
+  background: var(--accent-bg);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* Run items */
+.agent-profile-run-item {
+  width: 100%;
+}
+
+.agent-profile-run-btn,
+.agent-profile-task-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  gap: 8px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 3px 0;
+  text-align: left;
+  transition: color 0.15s;
+  font-family: var(--font-sans);
+  color: var(--text);
+}
+
+.agent-profile-run-btn:hover,
+.agent-profile-task-btn:hover {
+  color: var(--accent);
+}
+
+.agent-profile-run-id {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: inherit;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 180px;
+}
+
+.agent-profile-run-meta {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.agent-profile-task-title {
+  font-size: 12px;
+  color: inherit;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.agent-profile-see-all {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--accent);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  font-family: var(--font-sans);
+  transition: opacity 0.15s;
+}
+
+.agent-profile-see-all:hover {
+  opacity: 0.75;
+}
+
+/* Permissions / runtime grid */
+.agent-profile-permissions {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.agent-profile-perm-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.agent-profile-perm-label {
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  min-width: 72px;
+  flex-shrink: 0;
+}
+
+.agent-profile-perm-value {
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ─── Responsive ─── */
 @media (max-width: 768px) {
   .agent-panel {

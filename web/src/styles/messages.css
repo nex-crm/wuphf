@@ -142,6 +142,32 @@
   font-size: 13px;
   font-weight: 600;
 }
+
+/* Clickable avatar / author for agent messages — opens profile panel */
+.message-avatar-btn {
+  cursor: pointer;
+  border: none;
+  transition: opacity 0.15s;
+}
+.message-avatar-btn:hover {
+  opacity: 0.75;
+}
+.message-author-btn {
+  font-size: 13px;
+  font-weight: 600;
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: var(--text);
+  font-family: var(--font-sans);
+  transition: color 0.15s;
+}
+.message-author-btn:hover {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
 .message-time {
   font-size: 11px;
   color: var(--text-tertiary);
