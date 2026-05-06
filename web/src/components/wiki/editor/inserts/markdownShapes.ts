@@ -132,6 +132,25 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+/**
+ * Append a block fragment (fact, decision, related, etc.) to the document
+ * tail with a single blank line separator. Used in place of
+ * `tr.insertText(\\n${block})` because ProseMirror keeps inserted text
+ * inside the active paragraph node — fenced blocks would round-trip as
+ * literal backticks rather than dedicated block nodes. Routing block
+ * inserts through the controller's `pushContent` re-parses the markdown
+ * at the document level so fenced blocks land as real block nodes.
+ */
+export function appendBlockToTail(markdown: string, block: string): string {
+  const trimmedBlock = block.replace(/^\s+|\s+$/g, "");
+  if (trimmedBlock.length === 0) return markdown;
+  const trimmedDoc = markdown.replace(/\s+$/, "");
+  if (trimmedDoc.length === 0) {
+    return `${trimmedBlock}\n`;
+  }
+  return `${trimmedDoc}\n\n${trimmedBlock}\n`;
+}
+
 export interface FactDraft {
   subject: string;
   predicate: string;

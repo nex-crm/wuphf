@@ -48,7 +48,10 @@ function dispatchKey<T>(
   key: string,
   state: MenuKeyNavArgs<T>,
 ): (() => void) | null {
-  if (key === "Escape") return () => state.onClose();
+  // Tab is treated as Escape so focusing-out of the editor closes the
+  // floating menu instead of leaving it mounted with a live keydown
+  // listener.
+  if (key === "Escape" || key === "Tab") return () => state.onClose();
   const len = state.items.length;
   if (len === 0) return null;
   if (key === "ArrowDown") {

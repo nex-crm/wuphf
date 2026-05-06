@@ -9,9 +9,13 @@
  *   - On commit, delete the trigger range from ProseMirror and either:
  *       a) insert markdown at the caret, or
  *       b) open the appropriate dialog (which inserts on confirm).
- *   - For citations, also append the footnote definition to the document
- *     tail through the controller's `setContent`. This is the only path
- *     that writes outside the caret position; everything else is local.
+ *   - For citations, the inline reference goes at the caret and the
+ *     footnote definition is appended to the document tail via
+ *     `pushContent` (re-parses at the document level).
+ *   - Fact / decision / related blocks are also appended via
+ *     `pushContent`, not inserted with `tr.insertText`, because
+ *     ProseMirror would otherwise keep the fenced markdown as inline
+ *     text inside the active paragraph and break the round-trip.
  *
  * The controller stays UI-framework-agnostic — it accepts the editor
  * view ref + the controller-level setContent + the catalog and exposes
@@ -22,6 +26,7 @@ import { useCallback, useState } from "react";
 import type { EditorView } from "@milkdown/prose/view";
 
 import {
+  appendBlockToTail,
   appendCitationDefinition,
   type BuiltCitation,
   buildWikilink,
@@ -46,6 +51,10 @@ export interface MentionPickerState {
   categoryFilter: import("./mentionCatalog").MentionCategory | null;
   /** Heading rendered at the top of the picker. */
   heading: string;
+  /** Caret-anchored screen position to render the picker at. Stashed
+   *  from the active trigger before it is consumed so the picker shows
+   *  near where the user was typing rather than a hardcoded corner. */
+  position: { top: number; left: number };
 }
 
 export interface UseInsertControllerArgs {
@@ -54,8 +63,11 @@ export interface UseInsertControllerArgs {
   /** Controller-level setter so we can append citation definitions to the
    *  document tail without going through ProseMirror. */
   pushContent: (next: string) => void;
-  /** The latest content held by the controller. */
-  currentContent: string;
+  /** Reads the latest content held by the controller. We pass a getter
+   *  rather than a snapshot string so the citation appender always sees
+   *  the live document state at confirm time, not whatever value the
+   *  React tree happened to render with when the dialog opened. */
+  getCurrentContent: () => string;
 }
 
 export interface InsertController {
@@ -141,23 +153,33 @@ export function useInsertController(
         consumeTrigger(active, "");
         openDialog(kind, mention);
       };
+      // Anchor any mention-picker dialog at the trigger's caret rect so
+      // the picker shows where the user was typing — not a hardcoded
+      // viewport corner.
+      const pickerPosition = {
+        top: active.rect.bottom + 4,
+        left: active.rect.left,
+      };
       switch (action) {
         case "wiki-link":
           openWithEmptyConsume("mention-picker", {
             categoryFilter: null,
             heading: "Link wiki page",
+            position: pickerPosition,
           });
           break;
         case "task-ref":
           openWithEmptyConsume("mention-picker", {
             categoryFilter: "tasks",
             heading: "Insert task reference",
+            position: pickerPosition,
           });
           break;
         case "agent-mention":
           openWithEmptyConsume("mention-picker", {
             categoryFilter: "agents",
             heading: "Insert agent mention",
+            position: pickerPosition,
           });
           break;
         case "citation":
@@ -214,10 +236,10 @@ export function useInsertController(
       // most-recent canonical content the editor has emitted so the
       // append doesn't race with an in-flight markdownUpdated tick.
       // ProseMirror's transaction has already settled by the time the
-      // callback fires, so `args.currentContent` reflects the
-      // post-insert state when the controller is wired correctly.
+      // callback fires, so the live getter reflects the post-insert
+      // state when the controller is wired correctly.
       const next = appendCitationDefinition(
-        args.currentContent,
+        args.getCurrentContent(),
         built.definition,
       );
       args.pushContent(next);
@@ -227,14 +249,14 @@ export function useInsertController(
 
   const insertBlock = useCallback(
     (block: string) => {
-      const view = args.getView();
-      if (!view) {
-        closeDialog();
-        return;
-      }
-      // Block inserts (fact / decision / related) need to start on a new
-      // line so the surrounding paragraph doesn't absorb the fence.
-      insertAtSelection(view, `\n${block}`);
+      // Block inserts (fact / decision / related) must be parsed at the
+      // document level — `tr.insertText` would keep fenced markdown as
+      // inline text inside the current paragraph, so the next serialize
+      // would emit literal backticks instead of a block node. Routing
+      // through `pushContent` re-parses the markdown and produces real
+      // block nodes for the round trip.
+      const next = appendBlockToTail(args.getCurrentContent(), block);
+      args.pushContent(next);
       closeDialog();
     },
     [args, closeDialog],

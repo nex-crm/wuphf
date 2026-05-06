@@ -26,6 +26,7 @@ import { wikiLinkRemarkPlugin } from "../../../../lib/wikilink";
 import { STRINGIFY_DEFAULTS } from "../../../../lib/wikilinkStringify";
 import { postProcessWikilinks } from "../wikilinkPostProcess";
 import {
+  appendBlockToTail,
   appendCitationDefinition,
   buildCitation,
   buildDecisionBlock,
@@ -197,6 +198,28 @@ describe("appendCitationDefinition", () => {
     );
     expect(out.endsWith("\n")).toBe(true);
     expect(out.endsWith("\n\n")).toBe(false);
+  });
+});
+
+describe("appendBlockToTail", () => {
+  it("appends a block separated by a blank line", () => {
+    const out = appendBlockToTail("Body.\n", "```fact\nx\n```\n");
+    expect(out).toBe("Body.\n\n```fact\nx\n```\n");
+  });
+
+  it("returns just the block when the document is empty", () => {
+    const out = appendBlockToTail("", "```fact\nx\n```\n");
+    expect(out).toBe("```fact\nx\n```\n");
+  });
+
+  it("ignores empty blocks", () => {
+    const out = appendBlockToTail("Body.\n", "");
+    expect(out).toBe("Body.\n");
+  });
+
+  it("collapses any trailing whitespace before the separator", () => {
+    const out = appendBlockToTail("Body.\n\n\n", "```fact\nx\n```");
+    expect(out).toBe("Body.\n\n```fact\nx\n```\n");
   });
 });
 

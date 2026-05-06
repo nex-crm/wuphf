@@ -59,6 +59,12 @@ export function CitationDialog({
       data-testid="wk-citation-dialog-backdrop"
       role="dialog"
       aria-modal="true"
+      onKeyDown={(e) => {
+        if (e.key === "Escape") {
+          e.stopPropagation();
+          onCancel();
+        }
+      }}
     >
       <form
         className="wk-modal wk-insert-dialog"

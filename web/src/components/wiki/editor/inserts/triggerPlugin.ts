@@ -107,7 +107,9 @@ function triggerStateEquals(
     a.to === b.to &&
     a.query === b.query &&
     a.rect.top === b.rect.top &&
-    a.rect.left === b.rect.left
+    a.rect.left === b.rect.left &&
+    a.rect.bottom === b.rect.bottom &&
+    a.rect.right === b.rect.right
   );
 }
 
@@ -124,8 +126,9 @@ function computeTriggerState(
   // large paragraphs.
   const parentOffset = $pos.parentOffset;
   if (parentOffset === 0) return null;
+  const windowStart = Math.max(0, parentOffset - 200);
   const text = $pos.parent.textBetween(
-    Math.max(0, parentOffset - 200),
+    windowStart,
     parentOffset,
     undefined,
     "￼",
@@ -146,15 +149,18 @@ function computeTriggerState(
   if (triggerIdx === -1 || !trigger) return null;
   // The trigger must be at the start of the paragraph or preceded by
   // whitespace, so a `/` inside `http://` or an email's `@` does not
-  // pop the menu. When `triggerIdx === 0`, the scan reached the start of
-  // the 200-char window — that's "start of paragraph" since the window
-  // is anchored at `parentOffset - text.length` and we never look past
-  // a non-trigger non-whitespace character (the loop breaks first).
+  // pop the menu. When `triggerIdx === 0`, the scan hit the start of the
+  // 200-char lookback window. If the window starts mid-paragraph
+  // (windowStart > 0) we cannot prove the trigger is whitespace-preceded,
+  // so reject — otherwise a `/` exactly 200 chars before the caret inside
+  // a long URL would spuriously activate the menu.
   if (triggerIdx > 0) {
     const charBeforeTrigger = text[triggerIdx - 1];
     if (charBeforeTrigger !== " " && charBeforeTrigger !== "\t") {
       return null;
     }
+  } else if (windowStart > 0) {
+    return null;
   }
   const query = text.slice(triggerIdx + 1);
   // Position state in document coordinates. `from` is the position of

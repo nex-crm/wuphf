@@ -58,6 +58,7 @@ export function SlashMenu({
         data-testid="wk-slash-menu-empty"
         style={floatingStyle(position)}
         role="listbox"
+        aria-label="Insert action"
       >
         <div className="wk-insert-menu__empty">No matching actions</div>
       </div>,

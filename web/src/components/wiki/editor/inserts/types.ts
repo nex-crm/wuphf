@@ -84,7 +84,7 @@ export function filterSlashActions(query: string): SlashActionDef[] {
   return SLASH_ACTIONS.filter((a) => {
     if (a.title.toLowerCase().includes(q)) return true;
     if (a.description.toLowerCase().includes(q)) return true;
-    return a.keywords.some((k) => k.includes(q));
+    return a.keywords.some((k) => k.toLowerCase().includes(q));
   });
 }
 

@@ -202,7 +202,7 @@ export default function RichWikiEditor({
       contentRef.current = next;
       onChange(next);
     },
-    currentContent: contentRef.current,
+    getCurrentContent: () => contentRef.current,
   });
   // The controller owns the trigger state so a single source feeds both
   // the floating menus and the action handlers.
@@ -218,17 +218,31 @@ export default function RichWikiEditor({
     return out;
   }, [catalog]);
 
+  // Precompute the set of catalog paths once per catalog change so the
+  // broken-link resolver is O(1) per lookup. Each entry contributes both
+  // its raw path and the `${path}.md` variant so a slug typed without
+  // the `.md` extension (the common case) still resolves.
+  const catalogPathSet = useMemo<Set<string> | null>(() => {
+    if (!catalog) return null;
+    const set = new Set<string>();
+    for (const e of catalog) {
+      set.add(e.path);
+      set.add(`${e.path}.md`);
+    }
+    return set;
+  }, [catalog]);
+
   const resolver = useCallback(
     (slug: string) => {
-      if (!catalog) return true; // No catalog -> no detection signal.
-      return catalog.some((e) => e.path === slug || e.path === `${slug}.md`);
+      if (!catalogPathSet) return true; // No catalog -> no detection signal.
+      return catalogPathSet.has(slug) || catalogPathSet.has(`${slug}.md`);
     },
-    [catalog],
+    [catalogPathSet],
   );
 
   const brokenLinks = useMemo(
-    () => (catalog ? findBrokenWikilinks(content, resolver) : []),
-    [catalog, content, resolver],
+    () => (catalogPathSet ? findBrokenWikilinks(content, resolver) : []),
+    [catalogPathSet, content, resolver],
   );
 
   const showSlashMenu =
@@ -279,7 +293,7 @@ export default function RichWikiEditor({
           <MentionMenu
             items={mentionItems}
             query=""
-            position={{ top: 120, left: 120 }}
+            position={insertController.mentionPickerState.position}
             categoryFilter={insertController.mentionPickerState.categoryFilter}
             heading={insertController.mentionPickerState.heading}
             onSelect={insertController.onMentionSelect}

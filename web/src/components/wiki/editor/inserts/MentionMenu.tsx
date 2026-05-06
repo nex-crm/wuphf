@@ -80,6 +80,7 @@ export function MentionMenu({
         data-testid="wk-mention-menu-empty"
         style={floatingStyle(position)}
         role="listbox"
+        aria-label={heading ?? "Insert mention"}
       >
         <div className="wk-insert-menu__empty">No matches</div>
       </div>,
@@ -87,7 +88,10 @@ export function MentionMenu({
     );
   }
 
-  let runningIdx = 0;
+  // Precompute slug -> flat index so the render is pure (no mutable
+  // counter walked across the grouped map). Order matches `flat`, which
+  // is what `useMenuKeyNav` uses for keyboard navigation.
+  const slugToFlatIdx = new Map(flat.map((item, i) => [item.slug, i]));
   return createPortal(
     <div
       className="wk-insert-menu wk-insert-menu--mention"
@@ -106,8 +110,7 @@ export function MentionMenu({
           </div>
           <ul className="wk-insert-menu__list">
             {g.items.map((item) => {
-              const idx = runningIdx;
-              runningIdx += 1;
+              const idx = slugToFlatIdx.get(item.slug) ?? 0;
               return (
                 <li
                   key={item.slug}

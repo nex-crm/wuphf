@@ -9,7 +9,12 @@
 
 import { parseWikiLinkInner } from "../../../../lib/wikilink";
 
-const CODE_SEGMENT_RE = /(`{3,}[\s\S]*?`{3,}|`[^`\n]+`)/g;
+// Matches fenced blocks (``` or ~~~ of length 3+) and inline code spans
+// (any run of one or more backticks, balanced on both sides). Without the
+// tilde-fence and multi-backtick branches, valid Markdown code that wraps
+// `[[wikilink]]` examples would still be scanned and produce false
+// unresolved-link warnings.
+const CODE_SEGMENT_RE = /(`{3,}[\s\S]*?`{3,}|~{3,}[\s\S]*?~{3,}|`+[^`\n]*`+)/g;
 const WIKILINK_RE = /\[\[([^\]\n]+)\]\]/g;
 
 export interface BrokenLink {

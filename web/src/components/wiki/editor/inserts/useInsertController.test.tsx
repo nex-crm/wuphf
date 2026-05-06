@@ -49,7 +49,7 @@ describe("useInsertController", () => {
             NonNullable<Parameters<typeof useInsertController>[0]["getView"]>
           >,
         pushContent,
-        currentContent: "Body of article.\n",
+        getCurrentContent: () => "Body of article.\n",
       }),
     );
 
@@ -78,7 +78,7 @@ describe("useInsertController", () => {
             NonNullable<Parameters<typeof useInsertController>[0]["getView"]>
           >,
         pushContent,
-        currentContent: "Body of article.\n",
+        getCurrentContent: () => "Body of article.\n",
       }),
     );
 
@@ -105,7 +105,7 @@ describe("useInsertController", () => {
             NonNullable<Parameters<typeof useInsertController>[0]["getView"]>
           >,
         pushContent,
-        currentContent: "x",
+        getCurrentContent: () => "x",
       }),
     );
 
@@ -125,16 +125,20 @@ describe("useInsertController", () => {
     // No write yet — the dialog is open but nothing is inserted.
     expect(view.state.tr.insertText).not.toHaveBeenCalled();
     expect(pushContent).not.toHaveBeenCalled();
-    // Confirm.
+    // Confirm. Block inserts go through pushContent (re-parsed at the
+    // document level) so a fenced block round-trips as a real block
+    // node — `tr.insertText` would keep it as inline text inside the
+    // current paragraph and break serialization.
     act(() => {
       result.current.onFactConfirm(
         "```fact\nsubject: a\npredicate: b\nobject: c\n```\n",
       );
     });
-    expect(view.state.tr.insertText).toHaveBeenCalled();
-    const text = view.state.tr.insertText.mock.calls[0][0] as string;
-    expect(text).toContain("```fact");
-    expect(text).toContain("subject: a");
+    expect(view.state.tr.insertText).not.toHaveBeenCalled();
+    expect(pushContent).toHaveBeenCalled();
+    const next = pushContent.mock.calls[0][0] as string;
+    expect(next).toContain("```fact");
+    expect(next).toContain("subject: a");
   });
 
   it("inserts a wikilink at the trigger range when the @ picker is used", () => {
@@ -147,7 +151,7 @@ describe("useInsertController", () => {
             NonNullable<Parameters<typeof useInsertController>[0]["getView"]>
           >,
         pushContent,
-        currentContent: "x",
+        getCurrentContent: () => "x",
       }),
     );
 
@@ -185,7 +189,7 @@ describe("useInsertController", () => {
             NonNullable<Parameters<typeof useInsertController>[0]["getView"]>
           >,
         pushContent,
-        currentContent: "x",
+        getCurrentContent: () => "x",
       }),
     );
 
@@ -216,7 +220,7 @@ describe("useInsertController", () => {
             NonNullable<Parameters<typeof useInsertController>[0]["getView"]>
           >,
         pushContent,
-        currentContent: "x",
+        getCurrentContent: () => "x",
       }),
     );
 
@@ -245,7 +249,7 @@ describe("useInsertController", () => {
             NonNullable<Parameters<typeof useInsertController>[0]["getView"]>
           >,
         pushContent,
-        currentContent: "x",
+        getCurrentContent: () => "x",
       }),
     );
 

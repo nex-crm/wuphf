@@ -6,7 +6,7 @@
  * markdown block and hands it back to the controller.
  */
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { buildRelatedBlock } from "./markdownShapes";
 import {
@@ -30,6 +30,13 @@ export function RelatedDialog({
   const [query, setQuery] = useState("");
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const queryRef = useRef<HTMLInputElement | null>(null);
+
+  // Auto-focus the search input on mount, matching CitationDialog,
+  // DecisionDialog, and FactDialog so all four dialogs share the same
+  // first-input focus behavior.
+  useEffect(() => {
+    queryRef.current?.focus();
+  }, []);
 
   const filtered = useMemo(
     () => searchMentionItems(items, query, 200),
@@ -62,6 +69,12 @@ export function RelatedDialog({
       data-testid="wk-related-dialog-backdrop"
       role="dialog"
       aria-modal="true"
+      onKeyDown={(e) => {
+        if (e.key === "Escape") {
+          e.stopPropagation();
+          onCancel();
+        }
+      }}
     >
       <div
         className="wk-modal wk-insert-dialog"

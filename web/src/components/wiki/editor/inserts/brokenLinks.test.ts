@@ -39,4 +39,16 @@ describe("findBrokenWikilinks", () => {
     const broken = findBrokenWikilinks(md, () => false);
     expect(broken.map((b) => b.slug)).toEqual(["good"]);
   });
+
+  it("ignores wikilinks inside tilde-fenced code blocks", () => {
+    const md = "Real [[alex]].\n\n~~~\n[[ghost]]\n~~~\n";
+    const broken = findBrokenWikilinks(md, (s) => s === "alex");
+    expect(broken).toEqual([]);
+  });
+
+  it("ignores wikilinks inside multi-backtick inline spans", () => {
+    const md = "Use ``[[ghost]]`` for examples. Real [[alex]].";
+    const broken = findBrokenWikilinks(md, (s) => s === "alex");
+    expect(broken).toEqual([]);
+  });
 });

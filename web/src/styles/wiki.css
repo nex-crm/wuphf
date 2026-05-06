@@ -2429,7 +2429,9 @@
 /* ─── Rich-editor inserts (Phase 3 PR 6) ─────────────────────────────────── */
 
 .wk-rich-editor-host {
-  position: relative;
+  /* `display: contents` removes the host's own box, so a positioning
+     property would have nothing to apply to. Floating menus portal to
+     `document.body` with explicit fixed coordinates. */
   display: contents;
 }
 
