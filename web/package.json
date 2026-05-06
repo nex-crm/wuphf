@@ -17,6 +17,15 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
+    "@milkdown/core": "^7.20.0",
+    "@milkdown/ctx": "^7.20.0",
+    "@milkdown/plugin-listener": "^7.20.0",
+    "@milkdown/preset-commonmark": "^7.20.0",
+    "@milkdown/preset-gfm": "^7.20.0",
+    "@milkdown/prose": "^7.20.0",
+    "@milkdown/react": "^7.20.0",
+    "@milkdown/transformer": "^7.20.0",
+    "@milkdown/utils": "^7.20.0",
     "@tanstack/react-query": "^5.80.7",
     "@tanstack/react-router": "^1.121.3",
     "@xterm/addon-fit": "^0.11.0",

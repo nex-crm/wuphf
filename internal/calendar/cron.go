@@ -116,14 +116,24 @@ func (cs CronSchedule) matches(t time.Time) bool {
 	if len(cs.Hours) > 0 && !contains(cs.Hours, t.Hour()) {
 		return false
 	}
-	if len(cs.DaysOfMonth) > 0 && !contains(cs.DaysOfMonth, t.Day()) {
-		return false
-	}
 	if len(cs.Months) > 0 && !contains(cs.Months, int(t.Month())) {
 		return false
 	}
-	if len(cs.DaysOfWeek) > 0 && !contains(cs.DaysOfWeek, int(t.Weekday())) {
-		return false
+	domRestricted := len(cs.DaysOfMonth) > 0
+	dowRestricted := len(cs.DaysOfWeek) > 0
+	switch {
+	case domRestricted && dowRestricted:
+		if !contains(cs.DaysOfMonth, t.Day()) && !contains(cs.DaysOfWeek, int(t.Weekday())) {
+			return false
+		}
+	case domRestricted:
+		if !contains(cs.DaysOfMonth, t.Day()) {
+			return false
+		}
+	case dowRestricted:
+		if !contains(cs.DaysOfWeek, int(t.Weekday())) {
+			return false
+		}
 	}
 	return true
 }

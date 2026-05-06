@@ -18,7 +18,6 @@
 
 ## Coordination Notes
 
-- Each PR updates `docs/surfaces.md`.
 - Shared API/type files need one coordinating owner.
 - TUI and Web agents should not invent behavior that is not visible in the
   contract row.
