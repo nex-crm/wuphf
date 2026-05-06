@@ -108,6 +108,13 @@ func signalWeight(s PromotionDemandSignal) float64 {
 	return 0
 }
 
+// PromotionDemandSignalLabel is the exported alias of signalLabel. PR 4
+// (teammcp.team_notebook_review) needs the rendered label string for the
+// CEO-facing JSON, and the teammcp package can't see unexported helpers.
+func PromotionDemandSignalLabel(s PromotionDemandSignal) string {
+	return signalLabel(s)
+}
+
 // signalLabel renders a PromotionDemandSignal as a stable string for snapshot
 // comparisons and rationale strings.
 func signalLabel(s PromotionDemandSignal) string {
