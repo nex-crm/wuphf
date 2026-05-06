@@ -2171,3 +2171,206 @@ html[data-theme="nex"]
   border-radius: 999px;
   white-space: nowrap;
 }
+
+/* ─── Collapsible section primitive ────────────────────────────
+   Drop-in section with a clickable header that toggles its body.
+   Used by the agent workbench in DMView. Header chrome stays
+   constant whether open or closed so the page reflow is local
+   to the section body.
+   ────────────────────────────────────────────────────────────── */
+.collapsible-section {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  overflow: hidden;
+}
+
+.collapsible-section-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 12px;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+  color: var(--text);
+  text-align: left;
+}
+
+.collapsible-section-header:hover {
+  background: var(--bg-warm);
+}
+
+.collapsible-section-chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+}
+
+.collapsible-section-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+}
+
+.collapsible-section-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+}
+
+.collapsible-section-body {
+  padding: 10px 12px 12px;
+  border-top: 1px solid var(--border-light);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.collapsible-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 9px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+
+.collapsible-meta-muted {
+  font-family: var(--font-mono);
+  color: var(--text-tertiary);
+}
+
+/* ─── DM workbench layout ──────────────────────────────────────
+   DMView arranges the agent workbench as the page body and a chat
+   drawer pinned to the bottom. The drawer is collapsed by default
+   to keep the workbench front-and-center; expanding it covers most
+   of the viewport so chat history is reachable without leaving the
+   surface.
+   ────────────────────────────────────────────────────────────── */
+.dm-workbench {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.dm-workbench-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.dm-chat-drawer {
+  position: relative;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border);
+  background: var(--bg-card);
+  max-height: 38vh;
+  transition: max-height 0.18s ease-out;
+}
+
+.dm-chat-drawer.is-expanded {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 5;
+  max-height: 80vh;
+  height: 80vh;
+  box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.12);
+}
+
+.dm-chat-drawer-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 14px;
+  border: 0;
+  background: var(--bg-warm);
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  font: inherit;
+  color: var(--text-secondary);
+}
+
+.dm-chat-drawer-toggle:hover {
+  color: var(--text);
+}
+
+.dm-chat-drawer-toggle-label {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.dm-chat-drawer-toggle-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-tertiary);
+}
+
+.dm-chat-drawer-body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+
+.dm-chat-messages {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 20px;
+}
+
+.dm-chat-preview {
+  padding: 8px 20px 0;
+  flex-shrink: 0;
+  max-height: 110px;
+  overflow: hidden;
+}
+
+.dm-chat-preview-empty {
+  color: var(--text-tertiary);
+  font-size: 12px;
+  font-style: italic;
+}
+
+@media (max-width: 768px) {
+  .dm-chat-drawer {
+    max-height: 50vh;
+  }
+  .dm-chat-drawer.is-expanded {
+    max-height: 92vh;
+    height: 92vh;
+  }
+}

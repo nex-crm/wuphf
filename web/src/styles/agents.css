@@ -411,6 +411,115 @@
   border-radius: var(--radius-sm);
 }
 
+/* ─── Agent workbench pane ─────────────────────────────────────
+   The workbench surface inside DMView. Composes CollapsibleSection
+   sections (active tasks, live terminal, recent activity, recent
+   tasks). The pane scrolls; sections collapse independently to
+   keep dense screens scannable.
+   ────────────────────────────────────────────────────────────── */
+.agent-workbench-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px 18px 18px;
+  height: 100%;
+  overflow-y: auto;
+  background: var(--bg);
+}
+
+.agent-workbench-empty {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  font-style: italic;
+  padding: 6px 4px;
+}
+
+.agent-workbench-task-list,
+.agent-workbench-run-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.agent-workbench-task-row,
+.agent-workbench-run-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font: inherit;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
+}
+
+.agent-workbench-task-row:hover,
+.agent-workbench-run-row:hover {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+
+.agent-workbench-task-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-workbench-task-meta,
+.agent-workbench-run-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  flex-shrink: 0;
+}
+
+.agent-workbench-run-id {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The shared `.agent-stream-log` caps height at 300px for the right-rail
+   AgentPanel. Inside the workbench the section has the whole pane to
+   stretch into, so we override and let the log fill the available space
+   (with a sensible floor so an empty stream still shows a meaningful
+   panel). */
+.agent-workbench-stream {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 240px;
+}
+.agent-workbench-stream-log {
+  flex: 1;
+  max-height: none;
+  min-height: 220px;
+  height: 320px;
+}
+
 /* ─── Responsive ─── */
 @media (max-width: 768px) {
   .agent-panel {
@@ -420,5 +529,13 @@
   .agent-wizard-modal {
     margin: 16px;
     max-width: none;
+  }
+
+  .agent-workbench-pane {
+    padding: 12px 12px 14px;
+  }
+
+  .agent-workbench-stream-log {
+    height: 260px;
   }
 }
