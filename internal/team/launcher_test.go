@@ -1987,13 +1987,19 @@ func TestResponseInstructionForTargetDMChannelRespondsHelpfully(t *testing.T) {
 		t.Errorf("DM instruction should indicate direct message, got %q", dmInstr)
 	}
 
-	// Non-DM without @tag — should still stay quiet (existing behavior preserved)
+	// Non-DM without @tag — should invite an in-character chime-in, not the
+	// strict DM "messaging you directly" treatment. The agent is woken because
+	// the topic brushes their domain; the prompt asks for a short alive reply
+	// when they have one, and to skip otherwise.
 	channelInstr := l.responseInstructionForTarget(channelMessage{
 		From:    "you",
 		Channel: "general",
 	}, "engineering")
-	if !strings.Contains(channelInstr, "Stay quiet") {
-		t.Errorf("non-DM untagged should stay quiet, got %q", channelInstr)
+	if strings.Contains(channelInstr, "messaging you directly") {
+		t.Errorf("non-DM should not get DM-direct guidance, got %q", channelInstr)
+	}
+	if !strings.Contains(channelInstr, "in-character") || !strings.Contains(channelInstr, "Skip the turn only if") {
+		t.Errorf("non-DM untagged should get chime-in-with-personality default, got %q", channelInstr)
 	}
 
 	// DM with agent slug mismatch — wrong agent should not get DM instruction
