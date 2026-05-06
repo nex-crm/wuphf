@@ -398,8 +398,12 @@ export interface OfficeMember {
    * Transport-presence flag: true when an adapter session is currently live for
    * this member. Distinct from `status`/`activity` (which reflect "is the
    * agent processing right now") — `online` reflects "is the adapter
-   * reachable at all". Always present (no omitempty on the Go side) so
-   * "false" and "missing field" cannot be confused.
+   * reachable at all".
+   *
+   * Always present on the wire (no omitempty on the Go side) — the broker will
+   * never omit this field. The TypeScript `?:` is kept for defensive
+   * compatibility with older server versions and test fixtures that pre-date
+   * this field; consumers must treat `undefined` identically to `false`.
    */
   online?: boolean;
   /**
