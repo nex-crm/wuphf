@@ -192,6 +192,112 @@ func TestPostBridgeMessageRoutesToHost(t *testing.T) {
 	}
 }
 
+// TestDetachSlugCallsHostDetachParticipant confirms the bridge fires
+// Host.DetachParticipant for the bound sessionKey when DetachSlug runs under
+// a host-driven Run. Guards the slice-C contract closure: every detach path
+// in the bridge must funnel through notifyHostDetached so future presence
+// work hooks one place, not three.
+func TestDetachSlugCallsHostDetachParticipant(t *testing.T) {
+	fake := newFakeOC()
+	broker := newTestBroker(t)
+	bindings := []config.OpenclawBridgeBinding{{SessionKey: "k-detach", Slug: "openclaw-detach"}}
+	bridge := NewOpenclawBridge(broker, fake, bindings)
+	host := newRecordingDetachHost()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	runErr := make(chan error, 1)
+	go func() { runErr <- bridge.Run(ctx, host) }()
+	waitForFakeOCSubscribe(t, fake, time.Second)
+
+	bridge.DetachSlug("openclaw-detach")
+
+	select {
+	case <-host.detached:
+	case <-time.After(time.Second):
+		t.Fatalf("host.DetachParticipant was not called within 1s")
+	}
+
+	got := host.detachSnapshot()
+	if len(got) != 1 {
+		t.Fatalf("DetachParticipant call count: got %d want 1", len(got))
+	}
+	if got[0].adapter != openclawAdapterName {
+		t.Errorf("DetachParticipant adapter: got %q want %q", got[0].adapter, openclawAdapterName)
+	}
+	if got[0].key != "k-detach" {
+		t.Errorf("DetachParticipant key: got %q want %q", got[0].key, "k-detach")
+	}
+
+	cancel()
+	select {
+	case err := <-runErr:
+		if err != nil && !errors.Is(err, context.Canceled) {
+			t.Fatalf("Run returned: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Run did not return after cancel")
+	}
+}
+
+// TestDetachSlugAndUnsubscribeCallsHostDetachParticipant covers the
+// HTTP-handler detach path. notifyHostDetached fires before the synchronous
+// unsubscribe so a later unsubscribe error does not gate the host
+// notification (the host should learn the session is gone even if the gateway
+// teardown fails).
+func TestDetachSlugAndUnsubscribeCallsHostDetachParticipant(t *testing.T) {
+	fake := newFakeOC()
+	broker := newTestBroker(t)
+	bindings := []config.OpenclawBridgeBinding{{SessionKey: "k-detach-sync", Slug: "openclaw-detach-sync"}}
+	bridge := NewOpenclawBridge(broker, fake, bindings)
+	host := newRecordingDetachHost()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	runErr := make(chan error, 1)
+	go func() { runErr <- bridge.Run(ctx, host) }()
+	waitForFakeOCSubscribe(t, fake, time.Second)
+
+	if err := bridge.DetachSlugAndUnsubscribe(ctx, "openclaw-detach-sync"); err != nil {
+		t.Fatalf("DetachSlugAndUnsubscribe: %v", err)
+	}
+
+	select {
+	case <-host.detached:
+	case <-time.After(time.Second):
+		t.Fatalf("host.DetachParticipant was not called within 1s")
+	}
+	if got := host.detachSnapshot(); len(got) != 1 || got[0].key != "k-detach-sync" {
+		t.Fatalf("DetachParticipant calls: %+v", got)
+	}
+
+	cancel()
+	select {
+	case err := <-runErr:
+		if err != nil && !errors.Is(err, context.Canceled) {
+			t.Fatalf("Run returned: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Run did not return after cancel")
+	}
+}
+
+// TestBrokerTransportHostDetachParticipantOpenclaw pins the host
+// implementation: openclaw routes to a no-op success and an unknown adapter
+// surfaces an explicit unsupported-adapter error rather than silently
+// no-op'ing (which would mask a launcher misconfiguration).
+func TestBrokerTransportHostDetachParticipantOpenclaw(t *testing.T) {
+	b := newTestBroker(t)
+	host := &brokerTransportHost{broker: b}
+
+	if err := host.DetachParticipant(context.Background(), openclawAdapterName, "any-key"); err != nil {
+		t.Errorf("DetachParticipant(openclaw): got %v want nil", err)
+	}
+	if err := host.DetachParticipant(context.Background(), "made-up", "key"); err == nil {
+		t.Error("DetachParticipant(unknown adapter) returned nil; want unsupported-adapter error")
+	}
+}
+
 // TestOpenclawBridgeRunRequiresHost confirms Run rejects a nil host so a
 // misconfigured launcher fails loudly instead of silently degrading to the
 // legacy broker entrypoint.
@@ -242,4 +348,47 @@ func TestRegisterTransportsShutdownOrdering(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("RegisterTransports cleanup did not return within 2s; router or Run goroutine deadlocked")
 	}
+}
+
+// recordingDetachHost extends fakeHost-style recording to DetachParticipant so
+// the slice-C tests can rendezvous on host calls without polling. Embeds a
+// channel so callers wait on the first detach deterministically.
+type recordingDetachHost struct {
+	mu       sync.Mutex
+	calls    []detachCall
+	detached chan struct{}
+}
+
+type detachCall struct {
+	adapter string
+	key     string
+}
+
+func newRecordingDetachHost() *recordingDetachHost {
+	return &recordingDetachHost{detached: make(chan struct{}, 8)}
+}
+
+func (h *recordingDetachHost) ReceiveMessage(context.Context, transport.Message) error { return nil }
+func (h *recordingDetachHost) UpsertParticipant(context.Context, transport.Participant, transport.Binding) error {
+	return nil
+}
+func (h *recordingDetachHost) RevokeParticipant(context.Context, string, string) error { return nil }
+
+func (h *recordingDetachHost) DetachParticipant(_ context.Context, adapterName, key string) error {
+	h.mu.Lock()
+	h.calls = append(h.calls, detachCall{adapter: adapterName, key: key})
+	h.mu.Unlock()
+	select {
+	case h.detached <- struct{}{}:
+	default:
+	}
+	return nil
+}
+
+func (h *recordingDetachHost) detachSnapshot() []detachCall {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	out := make([]detachCall, len(h.calls))
+	copy(out, h.calls)
+	return out
 }
