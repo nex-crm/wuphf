@@ -241,3 +241,106 @@ func TestOfficeMembersListIncludesPresence(t *testing.T) {
 		t.Errorf("last_seen_at not RFC3339: %v (got %q)", err, ceo.LastSeenAt)
 	}
 }
+
+// TestOfficeMembersListSerializesOnlineFalseExplicitly asserts that members
+// without a presence record (and detached members) serialize with an explicit
+// `online: false` rather than omitting the field. Clients must be able to
+// distinguish "offline" from "field missing because the build is older" — the
+// difference matters for any UI that wants to render an offline indicator
+// rather than silently no-op when presence data is absent.
+func TestOfficeMembersListSerializesOnlineFalseExplicitly(t *testing.T) {
+	b := newTestBroker(t)
+
+	rec := httptest.NewRecorder()
+	b.serveOfficeMemberList(rec)
+	if rec.Code != 200 {
+		t.Fatalf("status: got %d, want 200", rec.Code)
+	}
+
+	// Decode into a generic shape so we can assert on the JSON key's presence,
+	// not just the Go zero value (which a typed decode would hide).
+	var raw struct {
+		Members []map[string]any `json:"members"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&raw); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(raw.Members) == 0 {
+		t.Fatal("no members in response")
+	}
+	for _, m := range raw.Members {
+		online, ok := m["online"]
+		if !ok {
+			t.Errorf("member %q: missing `online` key — omitempty regression on offline members", m["slug"])
+			continue
+		}
+		if online != false {
+			t.Errorf("member %q: online=%v, want false (no Upsert was issued)", m["slug"], online)
+		}
+	}
+}
+
+// TestHostUpsertCanonicalizesNonCanonicalSlug asserts that a binding arriving
+// with a mixed-case or trim-required MemberSlug keys the presence record
+// under the same canonical slug the /office-members read path uses. Without
+// this canonicalization, an "Eng" Upsert would create an orphan presence row
+// the API never reads, and the member would render as offline despite an
+// active session.
+func TestHostUpsertCanonicalizesNonCanonicalSlug(t *testing.T) {
+	b := newTestBroker(t)
+	host := &brokerTransportHost{broker: b}
+
+	if err := host.UpsertParticipant(context.Background(),
+		transport.Participant{AdapterName: openclawAdapterName, Key: "session-1"},
+		transport.Binding{Scope: transport.ScopeMember, MemberSlug: "  Eng  "},
+	); err != nil {
+		t.Fatalf("UpsertParticipant: %v", err)
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if _, ok := b.memberPresence["eng"]; !ok {
+		gotKeys := make([]string, 0, len(b.memberPresence))
+		for k := range b.memberPresence {
+			gotKeys = append(gotKeys, k)
+		}
+		t.Errorf("memberPresence missing canonical key %q (got keys: %v)", "eng", gotKeys)
+	}
+	if _, ok := b.memberPresence["  Eng  "]; ok {
+		t.Errorf("memberPresence contains uncanonicalized key %q — canonicalization regressed", "  Eng  ")
+	}
+}
+
+// TestResetClearsPresenceMaps asserts that /workspace/reset clears the
+// presence maps so the rebuilt default roster does not surface stale `online`
+// or `last_seen_at` from the prior session. Without this guard, a reset
+// followed by a fresh launch shows lingering "online" indicators until
+// another adapter detach/upsert arrives or the process restarts.
+func TestResetClearsPresenceMaps(t *testing.T) {
+	b := newTestBroker(t)
+	host := &brokerTransportHost{broker: b}
+
+	if err := host.UpsertParticipant(context.Background(),
+		transport.Participant{AdapterName: openclawAdapterName, Key: "session-x"},
+		transport.Binding{Scope: transport.ScopeMember, MemberSlug: "ceo"},
+	); err != nil {
+		t.Fatalf("UpsertParticipant: %v", err)
+	}
+	b.mu.Lock()
+	if _, ok := b.memberPresence["ceo"]; !ok {
+		b.mu.Unlock()
+		t.Fatal("precondition: presence record not stored")
+	}
+	b.mu.Unlock()
+
+	b.Reset()
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if len(b.memberPresence) != 0 {
+		t.Errorf("memberPresence after Reset: got %d rows, want 0", len(b.memberPresence))
+	}
+	if len(b.presenceKeyToSlug) != 0 {
+		t.Errorf("presenceKeyToSlug after Reset: got %d rows, want 0", len(b.presenceKeyToSlug))
+	}
+}

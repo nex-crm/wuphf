@@ -40,14 +40,24 @@ type memberPresenceRecord struct {
 // markMemberPresenceOnline records that an adapter session is now live for slug.
 // Caller must already hold b.mu. Updates both maps so a follow-up
 // DetachParticipant (which only carries adapter+key) can resolve the slug.
+//
+// The slug is canonicalized via normalizeChannelSlug to match findMemberLocked's
+// canonicalization (broker.go:1084) so a binding that arrives as "Eng" or
+// " eng " keys the presence record under the same "eng" the /office-members
+// read path uses. Without this canonicalization, a non-canonical Upsert would
+// create an orphan row that the API never reads and the member would render
+// as offline despite an active session. The TrimSpace + empty-check above the
+// normalize call guards against normalizeChannelSlug's "general" fallback for
+// empty inputs — an empty MemberSlug on the binding is "no member to mark
+// online", not "mark the general channel".
 func (b *Broker) markMemberPresenceOnlineLocked(slug, adapterName, sessionKey string, at time.Time) {
 	if b == nil {
 		return
 	}
-	slug = strings.TrimSpace(slug)
-	if slug == "" {
+	if strings.TrimSpace(slug) == "" {
 		return
 	}
+	slug = normalizeChannelSlug(slug)
 	if b.memberPresence == nil {
 		b.memberPresence = make(map[string]memberPresenceRecord)
 	}

@@ -74,10 +74,16 @@ func (h *brokerTransportHost) UpsertParticipant(_ context.Context, p transport.P
 	if b.Scope != transport.ScopeMember {
 		return nil
 	}
-	slug := strings.TrimSpace(b.MemberSlug)
-	if slug == "" {
+	// Trim and reject empty before canonicalizing: normalizeChannelSlug falls
+	// back to "general" on empty input, which would silently mark the general
+	// channel as online for an empty MemberSlug binding. The helper applies
+	// the same canonicalization on its end, but doing it here too keeps the
+	// empty-check above the adapter/key validation so the error messages
+	// report a non-empty slug.
+	if strings.TrimSpace(b.MemberSlug) == "" {
 		return nil
 	}
+	slug := normalizeChannelSlug(b.MemberSlug)
 	adapter := strings.TrimSpace(p.AdapterName)
 	if adapter == "" {
 		return fmt.Errorf("transport: UpsertParticipant: empty AdapterName for slug %q", slug)

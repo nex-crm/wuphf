@@ -976,6 +976,8 @@ func (b *Broker) Reset() {
 	b.scheduler = nil
 	b.pendingInterview = nil
 	b.activity = make(map[string]agentActivitySnapshot)
+	b.memberPresence = make(map[string]memberPresenceRecord)
+	b.presenceKeyToSlug = make(map[string]string)
 	b.counter = 0
 	b.notificationSince = ""
 	b.insightsSince = ""

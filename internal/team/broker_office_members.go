@@ -32,9 +32,13 @@ type officeMemberListEntry struct {
 	// "is the agent processing right now". Online tracks "does the adapter
 	// still have a live session for this slug"; LastSeenAt is preserved on
 	// flip-off so the UI can render "last seen 5m ago" for offline members.
-	// Both are zero-valued for members that no adapter has ever upserted
-	// (e.g. the built-in CEO without an openclaw provider).
-	Online     bool   `json:"online,omitempty"`
+	//
+	// Online has no omitempty: detached members must serialize as `online:false`
+	// so clients can reliably distinguish "offline" from "field missing because
+	// the member has no presence record at all". LastSeenAt keeps omitempty
+	// because empty-string is a real distinct state ("we have never seen this
+	// member online") that the UI renders differently from a stale timestamp.
+	Online     bool   `json:"online"`
 	LastSeenAt string `json:"last_seen_at,omitempty"`
 }
 
