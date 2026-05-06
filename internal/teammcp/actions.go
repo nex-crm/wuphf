@@ -744,7 +744,11 @@ func handleTeamActionRelayActivate(ctx context.Context, _ *mcp.CallToolRequest, 
 }
 
 func handleTeamActionRelayEvents(ctx context.Context, _ *mcp.CallToolRequest, args TeamActionRelayEventsArgs) (*mcp.CallToolResult, any, error) {
-	result, err := externalActionProvider.ListRelayEvents(ctx, action.RelayEventsOptions{
+	provider, err := selectedActionProvider(action.CapabilityRelayEvents)
+	if err != nil {
+		return toolError(err), nil, nil
+	}
+	result, err := provider.ListRelayEvents(ctx, action.RelayEventsOptions{
 		Limit:     args.Limit,
 		Page:      args.Page,
 		Platform:  args.Platform,
