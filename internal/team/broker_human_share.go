@@ -106,12 +106,12 @@ type humanSessionResponse struct {
 	// Role is hardcoded to "member" so the joiner web client can branch on
 	// useSessionRole().role without a second roundtrip. The host placeholder
 	// returned from /humans/me uses the same field with value "host".
-	Role        string `json:"role"`
-	Device      string `json:"device,omitempty"`
-	CreatedAt   string `json:"created_at"`
-	ExpiresAt   string `json:"expires_at"`
-	RevokedAt   string `json:"revoked_at,omitempty"`
-	LastSeenAt  string `json:"last_seen_at,omitempty"`
+	Role       string `json:"role"`
+	Device     string `json:"device,omitempty"`
+	CreatedAt  string `json:"created_at"`
+	ExpiresAt  string `json:"expires_at"`
+	RevokedAt  string `json:"revoked_at,omitempty"`
+	LastSeenAt string `json:"last_seen_at,omitempty"`
 }
 
 type shareError struct {
