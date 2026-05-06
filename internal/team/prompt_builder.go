@@ -192,6 +192,8 @@ func (p *promptBuilder) Build(slug string) string {
 		sb.WriteString("7. Use human_message for direct human-facing output, human_interview for cancelable clarifications, and team_request for blocking decisions\n")
 		if markdownMemory {
 			sb.WriteString("8. When you lock a durable decision, write it to your notebook first and submit notebook_promote if it should become canonical wiki knowledge\n")
+			sb.WriteString("8b. Use team_notebook_review to see which notebook entries have earned promotion demand from cross-agent searches and channel context-asks. The tool surfaces candidates ranked by multi-agent convergence — review and approve those with the highest demand rather than scanning shelves manually. Calling the tool is itself a demand signal, so use it when you are actually curating, not as background polling.\n")
+			sb.WriteString("8c. When another agent or the human explicitly asks you to preserve something for the team, OR when team_notebook_review surfaces an entry with high demand, call notebook_promote in the same turn before you claim it is stored. The reviewer model is the quality gate — the broker auto-writes; you curate.\n")
 		} else if noNex {
 			sb.WriteString("8. Summarize final decisions clearly in-channel\n")
 		} else {
@@ -329,6 +331,7 @@ func (p *promptBuilder) Build(slug string) string {
 		}
 		if markdownMemory {
 			sb.WriteString("12. Use wuphf_wiki_lookup, team_wiki_search, or notebook_search when prior knowledge matters. Store your own durable working notes with notebook_write and submit notebook_promote when they should become canonical.\n")
+			sb.WriteString("12b. When another agent or the human explicitly asks you to preserve something for the team, OR when your own scan reveals a notebook entry that is clearly high-demand (cross-agent searches converging on it, repeated context-asks), call notebook_promote in the same turn before you claim it is stored. The reviewer model is the quality gate — the broker auto-writes; you curate.\n")
 			sb.WriteString("13. Once you have posted the needed update for the current packet, stop. A later pushed notification will wake you again if more is needed.\n\n")
 		} else if noNex {
 			sb.WriteString("12. Don't fake outside memory. Surface uncertainty in-channel and keep outcomes explicit in-thread.\n")
@@ -354,7 +357,7 @@ func (p *promptBuilder) Build(slug string) string {
 func markdownKnowledgeToolBlock() string {
 	return "- notebook_write: Save your own working notes, rough observations, draft decisions, draft playbooks, and task learnings at agents/{my_slug}/notebook/{date-or-topic}.md. This is the default write path for agent-authored knowledge.\n" +
 		"- notebook_promote: Submit a durable notebook entry for reviewer approval into the team wiki. Use this when the team should rely on the note as canonical knowledge.\n" +
-		"- notebook_read / notebook_list / notebook_search: Inspect agent notebooks for fresh working context before asking someone to repeat themselves.\n" +
+		"- notebook_read / notebook_list / notebook_search: Inspect agent notebooks for fresh working context before asking someone to repeat themselves. Cross-agent searches (looking at another agent's shelf) are tracked as promotion-demand signals — if their entry answers your question, the promotion pipeline scores it higher and surfaces it for review, so actually search instead of guessing.\n" +
 		"- team_wiki_read / team_wiki_search / team_wiki_list / wuphf_wiki_lookup: Read the canonical shared wiki.\n" +
 		"- team_learning_search: Search typed prior learnings before repeating substantial work. Prefer scoped search by playbook, file, task, or repo when available; treat source/trust/confidence as evidence quality.\n" +
 		"- team_learning_record: Record a durable typed learning only when it would save future work or prevent a repeat mistake. Use user-stated only when the human explicitly said it; otherwise choose observed, inferred, execution, synthesis, cross-agent, or cross-model with an honest confidence.\n" +
