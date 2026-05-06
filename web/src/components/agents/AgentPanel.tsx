@@ -21,6 +21,7 @@ import { confirm } from "../ui/ConfirmDialog";
 import { HarnessBadge } from "../ui/HarnessBadge";
 import { PixelAvatar } from "../ui/PixelAvatar";
 import { showNotice } from "../ui/Toast";
+import { AgentProfilePanel } from "./AgentProfilePanel";
 
 /**
  * Stable identity key for the AgentPanel "close on route change" effect.
@@ -189,6 +190,7 @@ function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
   const [view, setView] = useState<"stream" | "logs">("stream");
   const [toggling, setToggling] = useState(false);
   const [removing, setRemoving] = useState(false);
+  const [showProfile, setShowProfile] = useState(false);
   const defaultHarness = useDefaultHarness();
 
   // Derive the per-channel enabled state. An agent is "enabled" in the
@@ -199,6 +201,11 @@ function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
   const { data: channelMembers = [] } = useChannelMembers(currentChannel);
   const channelEntry = channelMembers.find((m) => m.slug === agent.slug);
   const enabled = Boolean(channelEntry) && channelEntry?.disabled !== true;
+
+  // All hooks called. Now it is safe to branch on profile mode.
+  if (showProfile) {
+    return <AgentProfilePanel agent={agent} onClose={onClose} />;
+  }
 
   // Broker rejects remove / disable for any `built_in` member (lead agent).
   // Use `!== true` (not `!agent.built_in`) so an absent field isn't silently
@@ -432,6 +439,14 @@ function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
           onClick={() => setView(view === "logs" ? "stream" : "logs")}
         >
           {view === "logs" ? "Live stream" : "View logs"}
+        </button>
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm"
+          onClick={() => setShowProfile(true)}
+          aria-label={`View full profile for ${agent.name || agent.slug}`}
+        >
+          Profile
         </button>
       </div>
 
