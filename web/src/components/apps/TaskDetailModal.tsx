@@ -591,7 +591,7 @@ export function TaskDetailModal({
       )}
 
       {terminalOwner ? (
-        <section className="task-detail-section task-detail-terminal-section">
+        <section className="task-detail-section task-detail-stream-section">
           <div className="task-detail-label">Live stream</div>
           <TaskStreamSection slug={terminalOwner} taskId={task.id} />
         </section>

@@ -95,11 +95,16 @@ export function DMView({ agentSlug, channelSlug }: DMViewProps) {
               fontSize: 13,
               fontWeight: 600,
             }}
+            role="status"
+            aria-live="polite"
           >
             <span
               className={`status-dot ${connected ? "active pulse" : "lurking"}`}
+              aria-hidden="true"
             />
-            <span>Live output</span>
+            <span>
+              Live output ({connected ? "connected" : "disconnected"})
+            </span>
           </div>
           <div
             ref={streamRef}

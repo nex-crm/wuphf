@@ -43,7 +43,7 @@ vi.mock("../messages/StreamLineView", () => ({
   }: {
     line: { parsed?: { slug?: string; taskId?: string } };
   }) => (
-    <div data-testid="agent-terminal">
+    <div data-testid="agent-stream">
       {line.parsed?.slug}:{line.parsed?.taskId}
     </div>
   ),
@@ -199,7 +199,7 @@ describe("TaskDetailModal memory override", () => {
     expect(
       await screen.findByRole("button", { name: "Back to tasks" }),
     ).toBeInTheDocument();
-    expect(screen.getByTestId("agent-terminal")).toHaveTextContent(
+    expect(screen.getByTestId("agent-stream")).toHaveTextContent(
       "builder:task-123",
     );
   });

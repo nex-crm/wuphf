@@ -1402,7 +1402,7 @@ html[data-theme="nex"]
 .task-detail-page .task-detail-section {
   padding: 18px 24px;
 }
-.task-detail-page .task-detail-terminal-section .agent-stream-log {
+.task-detail-page .task-detail-stream-section .agent-stream-log {
   min-height: 320px;
   max-height: 480px;
 }
@@ -1703,7 +1703,7 @@ html[data-theme="nex"]
   .task-detail-page-card {
     min-height: calc(100vh - 112px);
   }
-  .task-detail-page .task-detail-terminal-section .agent-stream-log {
+  .task-detail-page .task-detail-stream-section .agent-stream-log {
     min-height: 220px;
     max-height: 320px;
   }
