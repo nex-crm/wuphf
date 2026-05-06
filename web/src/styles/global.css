@@ -341,6 +341,109 @@ body {
   background: var(--yellow-bg);
   color: var(--yellow);
 }
+.badge-orange {
+  background: var(--warning-200);
+  color: var(--warning-500);
+}
+
+/* ─── Approval context (Variant B layout, shared between InterviewBar and HumanInterviewOverlay) ─── */
+/* The approval card has three semantically distinct content blocks and visual
+   weight must follow that order: Why (prose, primary text), Details (inset
+   panel, the decision-relevant payload — labels muted, values prominent),
+   Footer (operational metadata at secondary text weight, AA contrast). */
+.approval-context {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0 0 4px;
+}
+.approval-why {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text);
+}
+.approval-details {
+  margin: 0;
+  padding: 12px 14px;
+  /* overlay-soft is theme-aware: rgba(0,0,0,0.04) in light, rgba(255,255,255,0.04)
+     in dark. Gives the inset panel a perceptible recess on both themes without
+     hardcoding two backgrounds. --bg-warm collapses against --bg-card at dark
+     theme contrast 1.04:1, so the panel would otherwise vanish. */
+  background: var(--overlay-soft);
+  border: 1px solid var(--border-dark, var(--border));
+  border-radius: var(--radius-md);
+  display: grid;
+  gap: 6px;
+}
+.approval-details-row {
+  display: grid;
+  grid-template-columns: 64px 1fr;
+  gap: 10px;
+  align-items: baseline;
+  font-size: 14px;
+  line-height: 1.45;
+  margin: 0;
+}
+.approval-details-label {
+  /* text-secondary, not text-tertiary, so the label clears WCAG AA on the
+     inset surface in dark mode. Hierarchy still reads via font-weight + the
+     narrow column. */
+  color: var(--text-secondary);
+  font-weight: 500;
+  margin: 0;
+}
+.approval-details-value {
+  color: var(--text);
+  margin: 0;
+  word-break: break-word;
+}
+.approval-details-value .mono {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+}
+.approval-truncated {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--warning-100, var(--bg-warm));
+  color: var(--warning-500);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  vertical-align: 1px;
+}
+.approval-empty {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+  font-style: italic;
+}
+.approval-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+.approval-footer-row {
+  white-space: nowrap;
+}
+.approval-footer-row .mono {
+  font-family: var(--font-mono);
+  font-size: 0.95em;
+}
+@media (max-width: 480px) {
+  .approval-details-row {
+    grid-template-columns: 56px 1fr;
+    gap: 8px;
+  }
+  .approval-footer-row {
+    white-space: normal;
+  }
+}
 .badge-muted {
   background: var(--bg-warm);
   color: var(--text-tertiary);
