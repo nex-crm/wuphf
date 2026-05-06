@@ -30,10 +30,25 @@ describe("resolveObjectRoute", () => {
       kind: "wiki-page",
       path: "people/nazz",
     });
-    // Matches the live WikiLink contract: encodeURI keeps `/`.
+    // Per-segment encodeURIComponent keeps `/` separators intact for
+    // nested slugs like `people/nazz`.
     expect(route.href).toBe("#/wiki/people/nazz");
     expect(route.label).toBe("Wiki: people/nazz");
     expect(route.appAction).toEqual({ app: "wiki" });
+  });
+
+  it("encodes reserved characters in wiki-page segments so the hash router cannot misparse them", () => {
+    const route = resolveObjectRoute({
+      kind: "wiki-page",
+      path: "concepts/foo?bar#baz&qux",
+    });
+    // `?`, `#`, and `&` would otherwise be parsed as query/fragment
+    // boundaries by `createHashHistory`. Per-segment encoding fixes
+    // it without losing the `/` separator.
+    expect(route.href).toBe("#/wiki/concepts/foo%3Fbar%23baz%26qux");
+    expect(route.href).not.toContain("?bar");
+    expect(route.href).not.toContain("#baz");
+    expect(route.label).toBe("Wiki: concepts/foo?bar#baz&qux");
   });
 
   it("resolves a workbench-item to the task route and surfaces its kind", () => {

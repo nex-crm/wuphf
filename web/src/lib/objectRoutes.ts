@@ -101,10 +101,13 @@ export function resolveObjectRoute(ref: ObjectRef): ObjectRouteResolution {
     }
     case "wiki-page": {
       if (!ref.path) return missingIdFallback("path", "wiki-page");
-      // Match the existing wiki link contract: encodeURI preserves the
-      // path separators inside the slug (e.g. `people/nazz`).
+      // Preserve `/` separators in nested slugs (e.g. `people/nazz`)
+      // while still encoding reserved characters like `?`, `#`, `&`
+      // per segment so the hash router cannot mistake them for query
+      // strings or fragments.
+      const encodedPath = ref.path.split("/").map(encodeURIComponent).join("/");
       return {
-        href: `#/wiki/${encodeURI(ref.path)}`,
+        href: `#/wiki/${encodedPath}`,
         label: `Wiki: ${ref.path}`,
         appAction: { app: "wiki" },
       };
