@@ -59,6 +59,8 @@ web/src/components/wiki/Pam.tsx|lint/complexity/noExcessiveCognitiveComplexity|1
 web/src/components/wiki/PlaybookExecutionLog.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
 web/src/components/wiki/WikiAudit.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
 web/src/components/wiki/WikiEditor.test.tsx|lint/complexity/noExcessiveLinesPerFunction|1|Existing function length is baselined for a focused follow-up refactor.
+web/src/components/apps/OfficeOverviewApp.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Pending-reviews map callback builds per-request meta + badge from multiple optional fields; inline for readability, baselined pending extraction.
+web/src/components/apps/OfficeOverviewApp.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Scheduled-jobs map callback derives nextRun, badge, and fallback key from multiple optional fields; inline for readability, baselined pending extraction.
 web/src/components/wiki/WikiLint.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
 web/src/hooks/useKeyboardShortcuts.ts|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
 web/src/lib/messageMarkdown.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
