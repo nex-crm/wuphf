@@ -16,6 +16,13 @@ import {
   STEP_ORDER,
 } from "./wizard/constants";
 import {
+  clearDraft,
+  consumeStaleBannerDays,
+  loadDraft,
+  seedFromDraft,
+} from "./wizard/onboardingDraft";
+import { OnboardingBanners } from "./wizard/ResumeBanner";
+import {
   canSetupContinue,
   detectedBinary,
   localProviderKindFromRuntimePriority,
@@ -38,6 +45,7 @@ import type {
   TaskTemplate,
   WizardStep,
 } from "./wizard/types";
+import { useOnboardingDraftSync } from "./wizard/useOnboardingDraftSync";
 
 // runtimeIsReady + detectedBinary moved to wizard/runtime-helpers.ts.
 // ArrowIcon, CheckIcon, EnterHint, ProgressDots moved to wizard/components.tsx.
@@ -121,20 +129,37 @@ export function Wizard({ onComplete }: WizardProps) {
     ? STEP_ORDER.filter((s) => s !== "identity")
     : STEP_ORDER;
 
+  // Resume support: load any saved draft once on first render. Captured
+  // into a ref so the useState initializers below can seed from it
+  // without re-running loadDraft on every render. The stale-banner flag
+  // is consumed at the same time so it only ever shows once.
+  const initialDraftRef = useRef(loadDraft());
+  const initialDraft = initialDraftRef.current;
+  const seed = seedFromDraft(initialDraft);
+  const [hasSavedDraft, setHasSavedDraft] = useState<boolean>(
+    initialDraft !== null,
+  );
+  const [showResumeBanner, setShowResumeBanner] = useState<boolean>(
+    initialDraft !== null,
+  );
+  const [staleBannerDays, setStaleBannerDays] = useState<number | null>(() =>
+    consumeStaleBannerDays(),
+  );
+
   // Navigation
-  const [step, setStep] = useState<WizardStep>("welcome");
+  const [step, setStep] = useState<WizardStep>(seed.step);
 
   // Step 2: templates
   const [blueprints, setBlueprints] = useState<BlueprintTemplate[]>([]);
   const [blueprintsLoading, setBlueprintsLoading] = useState(true);
   const [selectedBlueprint, setSelectedBlueprint] = useState<string | null>(
-    null,
+    seed.selectedBlueprint,
   );
 
   // Step 3: identity
-  const [company, setCompany] = useState("");
-  const [description, setDescription] = useState("");
-  const [priority, setPriority] = useState("");
+  const [company, setCompany] = useState(seed.company);
+  const [description, setDescription] = useState(seed.description);
+  const [priority, setPriority] = useState(seed.priority);
   // Optional in-wizard Nex registration. Mirrors the TUI's InitNexRegister
   // phase — we POST /nex/register which shells out to `nex-cli setup <email>`.
   // If nex-cli isn't installed we flip to `fallback` (external link to
@@ -155,21 +180,27 @@ export function Wizard({ onComplete }: WizardProps) {
   // the array is the fallback priority. Initially empty — we prefer explicit
   // config/launch choices, then auto-populate with the first installed CLI so
   // the happy path still works with zero clicks.
-  const [runtimePriority, setRuntimePriority] = useState<string[]>([]);
+  const [runtimePriority, setRuntimePriority] = useState<string[]>(
+    seed.runtimePriority,
+  );
   // localProvider is the local OpenAI-compat kind the user opted into in
   // the SetupStep subsection (mlx-lm | ollama | exo | "" for none).
   // When non-empty, it overrides whatever cloud CLI was selected and is
   // applied as llm_provider on /onboarding/complete.
-  const [localProvider, setLocalProvider] = useState<string>("");
+  const [localProvider, setLocalProvider] = useState<string>(
+    seed.localProvider,
+  );
   const [apiKeys, setApiKeys] = useState<Record<string, string>>({});
-  const userEditedRuntimeRef = useRef(false);
+  // If we restored runtime choices from a draft, mark as user-edited so
+  // the prereq bootstrap effect doesn't overwrite them with defaults.
+  const userEditedRuntimeRef = useRef(initialDraft !== null);
 
   // Step 6: first task
   const [taskTemplates, setTaskTemplates] = useState<TaskTemplate[]>([]);
   const [selectedTaskTemplate, setSelectedTaskTemplate] = useState<
     string | null
-  >(null);
-  const [taskText, setTaskText] = useState("");
+  >(seed.selectedTaskTemplate);
+  const [taskText, setTaskText] = useState(seed.taskText);
   const taskTextAutofilled = useRef(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
@@ -300,7 +331,19 @@ export function Wizard({ onComplete }: WizardProps) {
   // blueprint only. Previously we flattened tasks across every blueprint, so
   // the task step showed ~26 tiles of unrelated work — including tasks from
   // blueprints the user never picked.
+  // Resume guard: on the very first render after restoring a draft, the
+  // selectedBlueprint state arrives non-null and would otherwise wipe the
+  // restored taskText / selectedTaskTemplate. Skip exactly one run.
+  const skipFirstBlueprintEffect = useRef(initialDraft !== null);
   useEffect(() => {
+    if (skipFirstBlueprintEffect.current) {
+      skipFirstBlueprintEffect.current = false;
+      const bp = blueprints.find((b) => b.id === selectedBlueprint);
+      if (selectedBlueprint !== null && bp?.tasks) {
+        setTaskTemplates(bp.tasks);
+      }
+      return;
+    }
     // Clear suggestion-derived text when the blueprint changes. Track this
     // separately from selectedTaskTemplate because re-clicking a suggestion
     // intentionally deselects the tile while leaving its autofilled text in
@@ -626,6 +669,9 @@ export function Wizard({ onComplete }: WizardProps) {
         return;
       }
 
+      // Onboarding succeeded — discard the resumeable draft so a return
+      // visit lands on the post-setup app, not a half-filled wizard.
+      clearDraft();
       setOnboardingComplete(true);
       onComplete?.();
     },
@@ -743,13 +789,58 @@ export function Wizard({ onComplete }: WizardProps) {
     localProvider,
   ]);
 
+  // Debounced persistence of the non-secret draft. extractDraftableState
+  // is a pure mapper inside the hook; secret-bearing fields like
+  // apiKeys are never passed in or read.
+  useOnboardingDraftSync({
+    step,
+    selectedBlueprint,
+    company,
+    description,
+    priority,
+    runtimePriority,
+    localProvider,
+    selectedTaskTemplate,
+    taskText,
+  });
+
+  const resetDraft = useCallback(() => {
+    clearDraft();
+    setHasSavedDraft(false);
+    setShowResumeBanner(false);
+    setStep("welcome");
+    setSelectedBlueprint(null);
+    setCompany("");
+    setDescription("");
+    setPriority("");
+    setRuntimePriority([]);
+    setLocalProvider("");
+    setApiKeys({});
+    setSelectedTaskTemplate(null);
+    setTaskText("");
+    userEditedRuntimeRef.current = false;
+    taskTextAutofilled.current = false;
+  }, []);
+
   return (
     <div className="wizard-container">
       <div className="wizard-body">
         <ProgressDots current={step} steps={activeSteps} />
 
+        <OnboardingBanners
+          resumeDraft={showResumeBanner ? initialDraft : null}
+          staleBannerDays={staleBannerDays}
+          onResetResume={resetDraft}
+          onDismissResume={() => setShowResumeBanner(false)}
+          onDismissStale={() => setStaleBannerDays(null)}
+        />
+
         {step === "welcome" && (
-          <WelcomeStep onNext={() => goTo(activeSteps[1] ?? "templates")} />
+          <WelcomeStep
+            onNext={() => goTo(activeSteps[1] ?? "templates")}
+            hasSavedDraft={hasSavedDraft}
+            onResetDraft={resetDraft}
+          />
         )}
 
         {step === "templates" && (
