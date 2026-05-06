@@ -1,5 +1,5 @@
 // biome-ignore-all lint/a11y/useValidAnchor: Anchor is intercepted by the app router or markdown renderer while preserving href fallback behavior.
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import type { PluggableList } from "unified";
 
@@ -15,6 +15,7 @@ import {
   type WikiArticle as WikiArticleT,
   type WikiCatalogEntry,
   type WikiHistoryCommit,
+  type WikiMaintenanceAction,
 } from "../../api/wiki";
 import { formatAgentName } from "../../lib/agentName";
 import { keyedByOccurrence } from "../../lib/reactKeys";
@@ -648,13 +649,25 @@ function ArticleRightSidebar({
   onNavigate: (path: string) => void;
   onMaintenanceApplied: () => void;
 }) {
-  // Consume the WikiLint "Suggest fix" hand-off exactly once per mount of
-  // this article. If WikiLint parked a target with a matching slug in the
-  // last minute, the assistant opens pre-focused on that action.
-  const initialMaintenanceAction = useMemo(
-    () => consumeMaintenanceTarget(article.path),
-    [article.path],
-  );
+  // Consume the WikiLint "Suggest fix" hand-off exactly once per article
+  // path. The consume call removes the slot from sessionStorage, so it is a
+  // side effect — running it inside useMemo would let React 19 strict mode
+  // double-invoke it and lose the hand-off (the first call clears the slot;
+  // the second sees nothing). We do the consume inside a useEffect guarded
+  // by a ref so the result is captured by the first mount and not undone
+  // by strict-mode's intentional double-invoke.
+  const [initialMaintenanceAction, setInitialMaintenanceAction] = useState<
+    WikiMaintenanceAction | undefined
+  >(undefined);
+  const consumedForPathRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (consumedForPathRef.current === article.path) return;
+    consumedForPathRef.current = article.path;
+    const target = consumeMaintenanceTarget(article.path) ?? undefined;
+    if (target) {
+      setInitialMaintenanceAction(target);
+    }
+  }, [article.path]);
   return (
     <aside className="wk-right-sidebar">
       <TocBox entries={toc} />

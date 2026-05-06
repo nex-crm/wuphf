@@ -15,11 +15,25 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 )
 
 type maintenanceSuggestRequest struct {
 	Action MaintenanceAction `json:"action"`
 	Path   string            `json:"path"`
+}
+
+// isSupportedMaintenanceAction returns true when the action is one of the
+// finite set the assistant knows how to handle. Reused at the broker boundary
+// so unsupported actions fail as 400s instead of falling through to the
+// assistant's "unknown action" 500 error.
+func isSupportedMaintenanceAction(a MaintenanceAction) bool {
+	for _, known := range AllMaintenanceActions {
+		if known == a {
+			return true
+		}
+	}
+	return false
 }
 
 func (b *Broker) handleWikiMaintenanceSuggest(w http.ResponseWriter, r *http.Request) {
@@ -37,12 +51,18 @@ func (b *Broker) handleWikiMaintenanceSuggest(w http.ResponseWriter, r *http.Req
 		http.Error(w, fmt.Sprintf("invalid body: %v", err), http.StatusBadRequest)
 		return
 	}
+	req.Path = strings.TrimSpace(req.Path)
+	req.Action = MaintenanceAction(strings.TrimSpace(string(req.Action)))
 	if req.Path == "" {
 		http.Error(w, "path is required", http.StatusBadRequest)
 		return
 	}
 	if req.Action == "" {
 		http.Error(w, "action is required", http.StatusBadRequest)
+		return
+	}
+	if !isSupportedMaintenanceAction(req.Action) {
+		http.Error(w, fmt.Sprintf("unsupported action: %q", req.Action), http.StatusBadRequest)
 		return
 	}
 

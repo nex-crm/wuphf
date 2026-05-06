@@ -45,6 +45,50 @@ func TestHandleWikiMaintenanceSuggest_NoWiki(t *testing.T) {
 	}
 }
 
+// TestHandleWikiMaintenanceSuggest_RejectsUnsupportedAction returns 400 for
+// actions outside the finite enum so client typos do not get treated as
+// server errors. The error body echoes the bad action name.
+func TestHandleWikiMaintenanceSuggest_RejectsUnsupportedAction(t *testing.T) {
+	worker, cleanup := newMaintenanceFixture(t)
+	defer cleanup()
+	seedArticle(t, worker, "team/people/sarah-chen.md", "# Sarah\n\nshort.\n")
+
+	b := newTestBroker(t)
+	b.mu.Lock()
+	b.wikiWorker = worker
+	b.mu.Unlock()
+
+	srv := httptest.NewServer(http.HandlerFunc(b.handleWikiMaintenanceSuggest))
+	defer srv.Close()
+
+	cases := []struct {
+		name string
+		body string
+	}{
+		{"typo action", `{"action":"summarise","path":"team/people/sarah-chen.md"}`},
+		{"whitespace only", `{"action":"   ","path":"team/people/sarah-chen.md"}`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			resp, err := http.Post(srv.URL, "application/json",
+				bytes.NewBufferString(c.body))
+			if err != nil {
+				t.Fatalf("post: %v", err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Fatalf("status: want 400, got %d", resp.StatusCode)
+			}
+			buf := make([]byte, 256)
+			n, _ := resp.Body.Read(buf)
+			body := string(buf[:n])
+			if c.name == "typo action" && !strings.Contains(body, "summarise") {
+				t.Fatalf("error body should echo the bad action; got %q", body)
+			}
+		})
+	}
+}
+
 // TestHandleWikiMaintenanceSuggest_E2E exercises the full handler with a
 // real WikiWorker — verifies the JSON response shape matches what the
 // frontend's WikiMaintenanceSuggestion type expects.

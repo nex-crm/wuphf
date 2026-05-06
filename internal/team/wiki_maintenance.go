@@ -25,6 +25,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -159,7 +160,16 @@ func (m *MaintenanceAssistant) Suggest(ctx context.Context, action MaintenanceAc
 		return MaintenanceSuggestion{}, fmt.Errorf("read article: %w", err)
 	}
 
-	sha, _ := m.worker.repo.HeadSHA(ctx)
+	// HeadSHA seeds ExpectedSHA on every suggestion; the write-human path
+	// uses it as the optimistic-concurrency guard. Silently swallowing the
+	// error here would emit suggestions with ExpectedSHA == "" — and the
+	// editor convention treats an empty expected SHA as "no guard," which
+	// would let a concurrent edit be overwritten on accept. Surface the
+	// error and abort instead of producing a stale-safe-looking suggestion.
+	sha, err := m.worker.repo.HeadSHA(ctx)
+	if err != nil {
+		return MaintenanceSuggestion{}, fmt.Errorf("read head sha: %w", err)
+	}
 
 	switch action {
 	case MaintActionSummarize:
@@ -403,11 +413,12 @@ func (m *MaintenanceAssistant) suggestLinkRelated(ctx context.Context, path, bod
 	added := strings.Split(strings.TrimRight(block, "\n"), "\n")
 
 	evidence := make([]MaintenanceEvidence, 0, len(related))
+	sourceNs := entityNamespaceFromPath(path)
 	for _, slug := range related {
 		evidence = append(evidence, MaintenanceEvidence{
 			Kind:  "wiki_article",
 			Label: slug,
-			Path:  slug,
+			Path:  m.resolveEntityPath(slug, sourceNs),
 		})
 	}
 
@@ -715,11 +726,20 @@ func insertAfterTitle(body, block string) (string, []string, []string) {
 	return strings.Join(out, "\n"), blockLines, nil
 }
 
+// truncateChars trims the string to at most n runes (not bytes) so that
+// multibyte content — CJK, accented Latin, emoji — never produces invalid
+// UTF-8 from a mid-rune slice. Trailing punctuation/whitespace is stripped
+// before the ellipsis so the visible output stays clean.
 func truncateChars(s string, n int) string {
-	if len(s) <= n {
+	if n <= 0 {
+		return ""
+	}
+	runes := []rune(s)
+	if len(runes) <= n {
 		return s
 	}
-	return strings.TrimRight(s[:n], " ,.;:") + "…"
+	truncated := strings.TrimRight(string(runes[:n]), " ,.;:")
+	return truncated + "…"
 }
 
 func hasHeading(body, name string) bool {
@@ -742,6 +762,85 @@ func extractH2Headings(body string) []string {
 		}
 	}
 	return out
+}
+
+// entityNamespaces lists the entity-bearing top-level wiki folders, in
+// fallback order. resolveEntityPath probes them when a slug's namespace is
+// unknown.
+var entityNamespaces = []string{"people", "companies", "customers"}
+
+// entityNamespaceFromPath returns the namespace ("people", "companies",
+// "customers") for an article path, or "" when the path is not under one of
+// those folders.
+func entityNamespaceFromPath(path string) string {
+	p := strings.TrimPrefix(strings.TrimPrefix(path, "team/"), "/")
+	parts := strings.SplitN(p, "/", 2)
+	if len(parts) < 2 {
+		return ""
+	}
+	for _, ns := range entityNamespaces {
+		if parts[0] == ns {
+			return ns
+		}
+	}
+	return ""
+}
+
+// resolveEntityPath maps a bare entity slug to a navigable wiki path
+// ("team/<namespace>/<slug>.md"). When the slug is already shaped like a
+// path it is normalized and returned. Otherwise the worker filesystem is
+// probed across known namespaces (preferring sourceNs when set) so the
+// result actually points at an article that exists. When nothing matches
+// the source namespace is used as the best-effort fallback so the link is
+// at least well-formed; an empty namespace falls back to "companies".
+func (m *MaintenanceAssistant) resolveEntityPath(slug, sourceNs string) string {
+	slug = strings.TrimSpace(slug)
+	if slug == "" {
+		return ""
+	}
+	// Already path-shaped (contains a slash) — normalize to team/<...>.md.
+	if strings.Contains(slug, "/") {
+		p := strings.TrimPrefix(slug, "team/")
+		if !strings.HasSuffix(p, ".md") {
+			p += ".md"
+		}
+		return "team/" + p
+	}
+
+	// Probe namespaces in order, preferring the source article's namespace.
+	probeOrder := make([]string, 0, len(entityNamespaces))
+	if sourceNs != "" {
+		probeOrder = append(probeOrder, sourceNs)
+	}
+	for _, ns := range entityNamespaces {
+		if ns == sourceNs {
+			continue
+		}
+		probeOrder = append(probeOrder, ns)
+	}
+	if m.worker != nil {
+		for _, ns := range probeOrder {
+			candidate := "team/" + ns + "/" + slug + ".md"
+			if _, err := m.worker.ReadArticle(candidate); err == nil {
+				return candidate
+			} else if !os.IsNotExist(err) {
+				// Non-existence we silently skip; surface only unexpected
+				// errors via continued probing — if every probe fails we
+				// fall through to the namespace-fallback below.
+				continue
+			}
+		}
+	}
+
+	// Nothing matched on disk. Fall back to a well-formed path under the
+	// source namespace (or "companies" when there is none) so navigation
+	// at least lands on a sensible "create page" surface rather than a
+	// bare slug that resolves nowhere.
+	fallbackNs := sourceNs
+	if fallbackNs == "" {
+		fallbackNs = "companies"
+	}
+	return "team/" + fallbackNs + "/" + slug + ".md"
 }
 
 // slugFromPath maps a wiki article path to its entity slug for paths under
@@ -813,11 +912,21 @@ func extractTriples(subject, body string) []MaintenanceFactProposal {
 	return out
 }
 
-// lastEditedTimeFromBody scans the article for a `last_edited_ts:` frontmatter
-// field. Returns zero value if not found.
+// lastEditedTimeFromBody scans the article frontmatter for a `last_edited_ts:`
+// field. Returns zero value if the article has no frontmatter, the field is
+// absent, or the timestamp cannot be parsed. Scanning is bounded to the
+// frontmatter so a body changelog mentioning `last_edited_ts:` never
+// accidentally reads as a recent edit.
 func lastEditedTimeFromBody(body string) time.Time {
-	for _, ln := range strings.Split(body, "\n") {
+	lines := strings.Split(body, "\n")
+	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
+		return time.Time{}
+	}
+	for _, ln := range lines[1:] {
 		t := strings.TrimSpace(ln)
+		if t == "---" {
+			break
+		}
 		const prefix = "last_edited_ts:"
 		if !strings.HasPrefix(t, prefix) {
 			continue

@@ -1,6 +1,8 @@
+import { StrictMode, useEffect, useRef, useState } from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { WikiMaintenanceAction } from "../../api/wiki";
 import * as wikiApi from "../../api/wiki";
 import {
   consumeMaintenanceTarget,
@@ -178,7 +180,7 @@ describe("<WikiMaintenanceAssistant>", () => {
     fireEvent.click(screen.getByTestId("wk-maint-reject"));
 
     const stored = window.localStorage.getItem(
-      "wuphf:wiki-maint:rejected:abc1234:summarize",
+      "wuphf:wiki-maint:rejected:team/people/sarah-chen.md:summarize",
     );
     expect(stored).not.toBeNull();
     expect(Number(stored)).toBeGreaterThan(0);
@@ -186,7 +188,7 @@ describe("<WikiMaintenanceAssistant>", () => {
 
   it("Snoozed actions render disabled with a 'snoozed' label", () => {
     window.localStorage.setItem(
-      "wuphf:wiki-maint:rejected:abc1234:add_citation",
+      "wuphf:wiki-maint:rejected:team/people/sarah-chen.md:add_citation",
       String(Date.now()),
     );
     render(
@@ -297,6 +299,124 @@ describe("<WikiMaintenanceAssistant> — content shapes", () => {
   });
 });
 
+describe("<WikiMaintenanceAssistant> — snooze + path scoping", () => {
+  it("Snoozed actions stay snoozed across SHA changes for the same article", () => {
+    // Reject was recorded for the article path; switching SHA must not
+    // un-snooze the action — the user's "no, do not bug me" decision is
+    // about the page, not the commit.
+    window.localStorage.setItem(
+      "wuphf:wiki-maint:rejected:team/people/sarah-chen.md:summarize",
+      String(Date.now()),
+    );
+    const { rerender } = render(
+      <WikiMaintenanceAssistant
+        articlePath="team/people/sarah-chen.md"
+        articleSha="sha-A"
+        onApplied={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("wk-maint-open"));
+    expect(screen.getByTestId("wk-maint-action-summarize")).toBeDisabled();
+
+    rerender(
+      <WikiMaintenanceAssistant
+        articlePath="team/people/sarah-chen.md"
+        articleSha="sha-B"
+        onApplied={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("wk-maint-action-summarize")).toBeDisabled();
+  });
+
+  it("articlePath change clears suggestion state and ignores stale responses", async () => {
+    let resolveA: (s: wikiApi.WikiMaintenanceSuggestion) => void = () => {};
+    const pendingA = new Promise<wikiApi.WikiMaintenanceSuggestion>((r) => {
+      resolveA = r;
+    });
+    const fetchSpy = vi
+      .spyOn(wikiApi, "fetchMaintenanceSuggestion")
+      .mockImplementationOnce(() => pendingA)
+      .mockResolvedValueOnce({
+        ...SAMPLE_SUGGESTION,
+        description: "B suggestion",
+      });
+
+    const { rerender } = render(
+      <WikiMaintenanceAssistant
+        articlePath="team/people/article-a.md"
+        articleSha="sha-A"
+        onApplied={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("wk-maint-open"));
+    fireEvent.click(screen.getByTestId("wk-maint-action-summarize"));
+    expect(screen.getByTestId("wk-maint-loading")).toBeInTheDocument();
+
+    // Navigate to article B before A's request has resolved.
+    rerender(
+      <WikiMaintenanceAssistant
+        articlePath="team/people/article-b.md"
+        articleSha="sha-B"
+        onApplied={vi.fn()}
+      />,
+    );
+    // No active action on the new path.
+    expect(screen.queryByTestId("wk-maint-suggestion")).toBeNull();
+    expect(screen.queryByTestId("wk-maint-loading")).toBeNull();
+
+    // Resolve A's response — must be ignored because the path changed.
+    resolveA({ ...SAMPLE_SUGGESTION, description: "A response (stale)" });
+    await Promise.resolve();
+    expect(screen.queryByText(/A response \(stale\)/)).toBeNull();
+
+    // Activating an action on B fetches fresh against B.
+    fireEvent.click(screen.getByTestId("wk-maint-action-summarize"));
+    await waitFor(() =>
+      expect(screen.getByText(/B suggestion/)).toBeInTheDocument(),
+    );
+    expect(fetchSpy).toHaveBeenLastCalledWith(
+      "summarize",
+      "team/people/article-b.md",
+    );
+  });
+});
+
+// Mirrors WikiArticle's ArticleRightSidebar consume pattern: a ref-guarded
+// effect that captures the hand-off on first mount-per-path so React 19
+// StrictMode's intentional double-invoke does not clear the slot before
+// state has had a chance to record it.
+function ConsumerHarness({ articlePath }: { articlePath: string }) {
+  const [target, setTarget] = useState<WikiMaintenanceAction | undefined>(
+    undefined,
+  );
+  const consumedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (consumedRef.current === articlePath) return;
+    consumedRef.current = articlePath;
+    const next = consumeMaintenanceTarget(articlePath) ?? undefined;
+    if (next) setTarget(next);
+  }, [articlePath]);
+  return <div data-testid="harness-target">{target ?? "none"}</div>;
+}
+
+describe("WikiArticle hand-off consumption", () => {
+  it("StrictMode double-render does not lose the hand-off", async () => {
+    requestMaintenanceTarget("sarah-chen", "summarize");
+    render(
+      <StrictMode>
+        <ConsumerHarness articlePath="team/people/sarah-chen.md" />
+      </StrictMode>,
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("harness-target").textContent).toBe(
+        "summarize",
+      ),
+    );
+    // After consumption the slot is empty so a fresh mount sees nothing.
+    expect(window.sessionStorage.getItem("wuphf:wiki-maint:target")).toBeNull();
+  });
+});
+
 describe("maintenanceTarget hand-off", () => {
   beforeEach(() => {
     if (typeof window !== "undefined") {
@@ -314,6 +434,10 @@ describe("maintenanceTarget hand-off", () => {
   it("consume returns null on slug mismatch and clears the slot", () => {
     requestMaintenanceTarget("sarah-chen", "resolve_contradiction");
     expect(consumeMaintenanceTarget("team/people/other.md")).toBeNull();
+    // Slot is cleared even on mismatch so a later correct-slug consume
+    // does not surface a stale hand-off.
+    expect(window.sessionStorage.getItem("wuphf:wiki-maint:target")).toBeNull();
+    expect(consumeMaintenanceTarget("team/people/sarah-chen.md")).toBeNull();
   });
 
   it("consume returns null after the TTL", () => {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   fetchMaintenanceSuggestion,
@@ -96,18 +96,23 @@ const ACTIONS: readonly ActionMeta[] = [
 const REJECT_KEY_PREFIX = "wuphf:wiki-maint:rejected:";
 const REJECT_TTL_MS = 24 * 60 * 60 * 1000;
 
-function rejectKey(sha: string, action: WikiMaintenanceAction): string {
-  return `${REJECT_KEY_PREFIX}${sha || "unknown"}:${action}`;
+// rejectKey scopes snoozes by article path. Article paths are stable across
+// edits, so a "no, do not bug me" decision sticks even after the article is
+// re-saved (which would change the commit SHA). Empty paths fall back to
+// "unknown" so the call is at least well-formed; in practice the assistant
+// is rendered with a real article path.
+function rejectKey(articlePath: string, action: WikiMaintenanceAction): string {
+  return `${REJECT_KEY_PREFIX}${articlePath || "unknown"}:${action}`;
 }
 
 function isRejectedRecently(
-  sha: string,
+  articlePath: string,
   action: WikiMaintenanceAction,
   now: number,
 ): boolean {
   if (typeof window === "undefined") return false;
   try {
-    const raw = window.localStorage.getItem(rejectKey(sha, action));
+    const raw = window.localStorage.getItem(rejectKey(articlePath, action));
     if (!raw) return false;
     const ts = Number(raw);
     if (!Number.isFinite(ts)) return false;
@@ -117,21 +122,27 @@ function isRejectedRecently(
   }
 }
 
-function computeSuppressed(sha: string): Set<WikiMaintenanceAction> {
+function computeSuppressed(articlePath: string): Set<WikiMaintenanceAction> {
   const now = Date.now();
   const out = new Set<WikiMaintenanceAction>();
   for (const meta of ACTIONS) {
-    if (isRejectedRecently(sha, meta.action, now)) {
+    if (isRejectedRecently(articlePath, meta.action, now)) {
       out.add(meta.action);
     }
   }
   return out;
 }
 
-function recordRejection(sha: string, action: WikiMaintenanceAction): void {
+function recordRejection(
+  articlePath: string,
+  action: WikiMaintenanceAction,
+): void {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(rejectKey(sha, action), String(Date.now()));
+    window.localStorage.setItem(
+      rejectKey(articlePath, action),
+      String(Date.now()),
+    );
   } catch {
     // localStorage quota / disabled — best effort only.
   }
@@ -168,7 +179,25 @@ export default function WikiMaintenanceAssistant({
   // Re-evaluate the rejection list on every render. The check is a handful
   // of localStorage reads per article — cheap enough that memoization would
   // hide the real bug class (stale "snoozed" badges that don't refresh).
-  const suppressed = computeSuppressed(articleSha);
+  const suppressed = computeSuppressed(articlePath);
+
+  // Track in-flight suggestion requests by the path they were fired against.
+  // When articlePath changes we ignore any pending response that comes back
+  // with the wrong path — otherwise the sidebar could render article A's
+  // diff while the user is already viewing article B.
+  const requestPathRef = useRef(articlePath);
+
+  // Reset per-action state and bump the request guard when the article
+  // changes. Without this, a user opening an action on article A and then
+  // navigating to article B would see A's cached suggestion (lines below
+  // skip the refetch when an existing entry is present) — and an Accept
+  // would write A's content to B's path.
+  useEffect(() => {
+    requestPathRef.current = articlePath;
+    setSuggestions({});
+    setActiveAction(initialAction ?? null);
+    setApplyState(null);
+  }, [articlePath, initialAction]);
 
   // Open the panel when an external trigger sets initialAction (e.g. WikiLint's
   // "Suggest fix" button hands us a contradiction). Synchronizing in an effect
@@ -183,17 +212,20 @@ export default function WikiMaintenanceAssistant({
 
   const requestSuggestion = useCallback(
     async (action: WikiMaintenanceAction) => {
+      const requestedFor = articlePath;
       setSuggestions((prev) => ({
         ...prev,
         [action]: { loading: true, suggestion: null, error: null },
       }));
       try {
         const s = await fetchMaintenanceSuggestion(action, articlePath);
+        if (requestPathRef.current !== requestedFor) return;
         setSuggestions((prev) => ({
           ...prev,
           [action]: { loading: false, suggestion: s, error: null },
         }));
       } catch (err: unknown) {
+        if (requestPathRef.current !== requestedFor) return;
         const msg =
           err instanceof Error ? err.message : "Failed to compute suggestion";
         setSuggestions((prev) => ({
@@ -221,7 +253,7 @@ export default function WikiMaintenanceAssistant({
   };
 
   const handleReject = (action: WikiMaintenanceAction) => {
-    recordRejection(articleSha, action);
+    recordRejection(articlePath, action);
     setSuggestions((prev) => ({ ...prev, [action]: undefined }));
     setActiveAction(null);
   };
