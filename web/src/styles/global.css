@@ -136,6 +136,9 @@
   --bubble-pulse-fade-in: 150ms;
   --bubble-text-crossfade: 180ms;
   --bubble-idle-dim-duration: 600ms;
+
+  /* Popover shadow — used by the Tier 2 hover peek card. */
+  --shadow-popover: 0 8px 24px -8px rgba(0, 0, 0, 0.32);
 }
 
 html {
@@ -490,6 +493,23 @@ body {
   position: absolute;
   right: -3px;
   bottom: -3px;
+  pointer-events: none;
+}
+
+/* Transport-presence indicator on agent avatars. Sits at top-right so it
+   does not collide with the harness badge at bottom-right. Rendered only
+   when the member's `online` flag is true (see AgentList SidebarAgentRow);
+   absence of the dot encodes "offline OR never connected" — the peek card
+   surfaces the distinction via "Last seen". */
+.online-badge {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--green, #03a04c);
+  box-shadow: 0 0 0 1.5px var(--bg-card, #fff);
   pointer-events: none;
 }
 
