@@ -333,6 +333,149 @@ func TestPromptBuilder_LeadIncludesActivePoliciesSorted(t *testing.T) {
 	}
 }
 
+func TestMarkdownKnowledgeToolBlock_HumanRememberAutoRoutingNote(t *testing.T) {
+	// PR 7 edit 1: the team_wiki_write description must warn agents that the
+	// broker auto-routes human "remember this" / "save to wiki" phrases so
+	// they do not duplicate the write. PR 2 originally added this copy; PR 7
+	// keeps it as a regression gate.
+	block := markdownKnowledgeToolBlock()
+	for _, want := range []string{
+		"remember this",
+		"save to wiki",
+		"do NOT re-route",
+	} {
+		if !strings.Contains(block, want) {
+			t.Errorf("markdownKnowledgeToolBlock missing human auto-routing fragment %q", want)
+		}
+	}
+}
+
+func TestMarkdownKnowledgeToolBlock_NotebookSearchDemandSignalNote(t *testing.T) {
+	// PR 7 edit 2: cross-agent notebook searches are demand signals.
+	block := markdownKnowledgeToolBlock()
+	for _, want := range []string{
+		"Cross-agent searches",
+		"promotion-demand",
+	} {
+		if !strings.Contains(block, want) {
+			t.Errorf("markdownKnowledgeToolBlock missing demand-signal fragment %q", want)
+		}
+	}
+}
+
+func TestPromptBuilder_CEORuleMentionsTeamNotebookReview(t *testing.T) {
+	// PR 7 edit 3: the CEO prompt must mention team_notebook_review and the
+	// "calling the tool is itself a demand signal" caveat.
+	pb := &promptBuilder{
+		isOneOnOne:  func() bool { return false },
+		isFocusMode: func() bool { return false },
+		packName:    func() string { return "WUPHF Office" },
+		leadSlug:    func() string { return "ceo" },
+		members: func() []officeMember {
+			return []officeMember{
+				{Slug: "ceo", Name: "CEO"},
+				{Slug: "fe", Name: "Frontend"},
+			}
+		},
+		policies:       func() []officePolicy { return nil },
+		nameFor:        func(slug string) string { return slug },
+		markdownMemory: true,
+	}
+	got := pb.Build("ceo")
+	for _, want := range []string{
+		"team_notebook_review",
+		"multi-agent convergence",
+		"demand signal",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("CEO prompt missing team_notebook_review fragment %q", want)
+		}
+	}
+}
+
+func TestPromptBuilder_NonCEOOmitsTeamNotebookReview(t *testing.T) {
+	// PR 7 edit 3 is CEO-only. Specialist prompts must not include
+	// team_notebook_review (it is not in their tool set).
+	pb := &promptBuilder{
+		isOneOnOne:  func() bool { return false },
+		isFocusMode: func() bool { return false },
+		packName:    func() string { return "WUPHF Office" },
+		leadSlug:    func() string { return "ceo" },
+		members: func() []officeMember {
+			return []officeMember{
+				{Slug: "ceo", Name: "CEO"},
+				{Slug: "fe", Name: "Frontend"},
+			}
+		},
+		policies:       func() []officePolicy { return nil },
+		nameFor:        func(slug string) string { return slug },
+		markdownMemory: true,
+	}
+	got := pb.Build("fe")
+	if strings.Contains(got, "team_notebook_review") {
+		t.Fatalf("specialist prompt must not mention team_notebook_review (CEO-only tool)")
+	}
+}
+
+func TestPromptBuilder_PromoteWhenAskedBehavior(t *testing.T) {
+	// PR 7 edit 4: both CEO and specialist prompts must tell agents to call
+	// notebook_promote in the same turn when explicitly asked.
+	mk := func(slug string) *promptBuilder {
+		return &promptBuilder{
+			isOneOnOne:  func() bool { return false },
+			isFocusMode: func() bool { return false },
+			packName:    func() string { return "WUPHF Office" },
+			leadSlug:    func() string { return "ceo" },
+			members: func() []officeMember {
+				return []officeMember{
+					{Slug: "ceo", Name: "CEO"},
+					{Slug: "fe", Name: "Frontend"},
+				}
+			},
+			policies:       func() []officePolicy { return nil },
+			nameFor:        func(s string) string { return s },
+			markdownMemory: true,
+		}
+	}
+	for _, slug := range []string{"ceo", "fe"} {
+		got := mk(slug).Build(slug)
+		if !strings.Contains(got, "notebook_promote in the same turn") {
+			t.Errorf("%s prompt missing promote-when-asked instruction", slug)
+		}
+		if !strings.Contains(got, "broker auto-writes; you curate") {
+			t.Errorf("%s prompt missing broker-curates framing", slug)
+		}
+	}
+}
+
+func TestPromptBuilder_RegressionNotebookPromoteStillPresent(t *testing.T) {
+	// Regression: existing notebook_promote guidance line must still appear
+	// in both the CEO rule 8 and the specialist rule 12.
+	pb := &promptBuilder{
+		isOneOnOne:  func() bool { return false },
+		isFocusMode: func() bool { return false },
+		packName:    func() string { return "WUPHF Office" },
+		leadSlug:    func() string { return "ceo" },
+		members: func() []officeMember {
+			return []officeMember{
+				{Slug: "ceo", Name: "CEO"},
+				{Slug: "fe", Name: "Frontend"},
+			}
+		},
+		policies:       func() []officePolicy { return nil },
+		nameFor:        func(slug string) string { return slug },
+		markdownMemory: true,
+	}
+	ceoPrompt := pb.Build("ceo")
+	if !strings.Contains(ceoPrompt, "submit notebook_promote if it should become canonical wiki knowledge") {
+		t.Fatalf("CEO prompt regression: original notebook_promote rule 8 missing")
+	}
+	fePrompt := pb.Build("fe")
+	if !strings.Contains(fePrompt, "submit notebook_promote when they should become canonical") {
+		t.Fatalf("specialist prompt regression: original notebook_promote rule 12 missing")
+	}
+}
+
 func TestPromptBuilder_DeterministicOrderingFromMembers(t *testing.T) {
 	// PLAN.md trap-adjacent: prompt cache hits depend on byte-identical
 	// output across runs. The promptBuilder must sort its own members
