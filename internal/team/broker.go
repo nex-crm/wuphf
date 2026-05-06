@@ -155,7 +155,14 @@ type Broker struct {
 	// contending on b.mu. Installed and cleared by ShareTransport.Run; nil
 	// when no adapter is registered (e.g. legacy launches that bypass
 	// RegisterTransports).
-	humanAdmitHook     atomic.Pointer[humanAdmitHookFn]
+	humanAdmitHook atomic.Pointer[humanAdmitHookFn]
+	// shareTransport is the registered office-bound share adapter, set by
+	// RegisterTransports when wiring is enabled. The in-process share
+	// controller looks this up to route invite creation through the adapter
+	// (so admit + revoke + invite-create all flow through the same surface)
+	// instead of the legacy HTTP path. Atomic so the controller's read does
+	// not contend with adapter registration on a different goroutine.
+	shareTransport     atomic.Pointer[ShareTransport]
 	generateMemberFn   func(prompt string) (generatedMemberTemplate, error)
 	generateChannelFn  func(prompt string) (generatedChannelTemplate, error)
 	policies           []officePolicy // active office operating rules

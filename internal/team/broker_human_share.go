@@ -47,6 +47,33 @@ func (b *Broker) SetHumanAdmitHook(hook humanAdmitHookFn) {
 	b.humanAdmitHook.Store(&hook)
 }
 
+// SetShareTransport registers (or clears, when t is nil) the office-bound
+// share adapter so the in-process share controller can route invite creation
+// through it. Called by RegisterTransports during launcher boot and cleared on
+// shutdown. Stored atomically because the controller reads it on its start
+// path while RegisterTransports may still be installing other adapters.
+func (b *Broker) SetShareTransport(t *ShareTransport) {
+	if b == nil {
+		return
+	}
+	if t == nil {
+		b.shareTransport.Store(nil)
+		return
+	}
+	b.shareTransport.Store(t)
+}
+
+// ShareTransport returns the registered office-bound share adapter, or nil
+// when no adapter has been registered yet. Used by the in-process share
+// controller to obtain a handle for invite creation; callers must tolerate a
+// nil return and fall back to their legacy path.
+func (b *Broker) ShareTransport() *ShareTransport {
+	if b == nil {
+		return nil
+	}
+	return b.shareTransport.Load()
+}
+
 // fireHumanAdmitHook invokes the installed hook with the new session, if any.
 // Called from handleHumanInviteAccept *after* persistence succeeds so an
 // adapter cannot observe a session that was rolled back by a save failure. A
