@@ -42,6 +42,13 @@ export interface StoredActivitySnapshot extends AgentActivitySnapshot {
 
 const { HALO_DECAY_MS } = agentEventTimerInternal;
 
+/**
+ * Cap on per-slug history depth in agentActivityHistory. The Tier 2 hover
+ * peek surfaces the most recent ≤6 prior events; the buffer holds 8 so the
+ * peek has a small forward margin if display rules change.
+ */
+export const MAX_AGENT_HISTORY = 8;
+
 const _storedTheme = ((): Theme => {
   try {
     const v = localStorage.getItem("wuphf-theme");
@@ -197,6 +204,11 @@ export interface AppStore {
 
   // Agent activity (SSE-driven event bubbles)
   agentActivitySnapshots: Record<string, StoredActivitySnapshot>;
+  // Per-slug ring buffer of prior snapshots, newest-first, capped at
+  // MAX_AGENT_HISTORY. Powers the Tier 2 hover-peek "Recent" list. The
+  // current snapshot lives in agentActivitySnapshots; history holds only
+  // what was previously current and got displaced by a newer event.
+  agentActivityHistory: Record<string, StoredActivitySnapshot[]>;
   recordActivitySnapshot: (snap: AgentActivitySnapshot) => void;
 
   // SSE reconnect grace — true after the EventSource has stayed in a
@@ -341,6 +353,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   setTelegramConnectOpen: (v) => set({ telegramConnectOpen: v }),
 
   agentActivitySnapshots: {},
+  agentActivityHistory: {},
   recordActivitySnapshot: (snap) => {
     if (typeof snap?.slug !== "string" || snap.slug.length === 0) return;
     const { slug } = snap;
@@ -355,6 +368,14 @@ export const useAppStore = create<AppStore>((set, get) => ({
         snap.kind === "stuck"
           ? (previous?.haloUntilMs ?? 0)
           : now + HALO_DECAY_MS;
+      // Push the previous current snapshot onto the per-slug history ring
+      // buffer (newest-first). The current snapshot itself stays in
+      // agentActivitySnapshots; history holds only displaced events. First
+      // event for a slug leaves history untouched (no previous to keep).
+      const prevHistory = state.agentActivityHistory[slug] ?? [];
+      const nextHistory = previous
+        ? [previous, ...prevHistory].slice(0, MAX_AGENT_HISTORY)
+        : prevHistory;
       return {
         agentActivitySnapshots: {
           ...state.agentActivitySnapshots,
@@ -363,6 +384,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
             receivedAtMs: now,
             haloUntilMs,
           },
+        },
+        agentActivityHistory: {
+          ...state.agentActivityHistory,
+          [slug]: nextHistory,
         },
       };
     });
@@ -417,4 +442,24 @@ export function selectPillState(
     kind: snapshot.kind,
     haloUntilMs: snapshot.haloUntilMs,
   });
+}
+
+export interface AgentPeekData {
+  current: StoredActivitySnapshot | undefined;
+  history: StoredActivitySnapshot[];
+}
+
+/**
+ * Read the current snapshot + per-slug history for the Tier 2 hover peek.
+ * Returns an empty history array (not undefined) when nothing has streamed
+ * past for that slug yet, so consumers can `.map` without a guard.
+ */
+export function selectAgentPeek(
+  state: Pick<AppStore, "agentActivitySnapshots" | "agentActivityHistory">,
+  slug: string,
+): AgentPeekData {
+  return {
+    current: state.agentActivitySnapshots[slug],
+    history: state.agentActivityHistory[slug] ?? [],
+  };
 }
