@@ -2,7 +2,7 @@
 
 ## Context
 
-Wuphf today is a Go single-binary that serves a React/Vite web UI from `web/dist` (embedded via `//go:embed all:web/dist` in `embed.go`) and exposes the broker over HTTP+SSE on `127.0.0.1:7891` (`internal/team/broker_web_proxy.go ServeWebUI`). The default user path is `npx wuphf` → npm shim downloads the platform binary → binary launches the broker → browser auto-opens to the local web UI. A bubbletea TUI (`cmd/wuphf/channel*.go` + `cmd/wuphf/channelui/` ≈ 17k LOC) remains as `--tui` opt-in; tmux is also used as an *internal* per-agent process backend (`internal/team/pane*.go`, `tmux_runner.go` ≈ 3.7k LOC).
+Wuphf today is a Go single-binary that serves a React/Vite web UI from `web/dist` (embedded via `//go:embed all:web/dist` in `embed.go`) and exposes the broker over HTTP + SSE + WebSocket on `127.0.0.1:7891` (`internal/team/broker_web_proxy.go ServeWebUI`, `internal/team/broker_terminal.go`). The default user path is `npx wuphf` → npm shim downloads the platform binary → binary launches the broker → browser auto-opens to the local web UI. A bubbletea TUI (`cmd/wuphf/channel*.go` + `cmd/wuphf/channelui/` ≈ 26k LOC) remains as `--tui` opt-in; tmux is also used as an *internal* per-agent process backend (`internal/team/pane*.go`, `tmux_runner.go` ≈ 3.7k LOC).
 
 The user has set the next direction:
 
@@ -19,21 +19,21 @@ The intended outcome: a polished desktop app on three OSes with measurable perfo
 
 ### Architecture (single picture)
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────┐
 │ Wails v2 Desktop Shell  (Go)                                │
 │   • native window, tray, notifications, deep-link, updater  │
 │   • spawns broker in-process, embeds web/dist               │
 │   • OS verbs gated to allowlisted package                   │
 └──────────────────────────┬──────────────────────────────────┘
-                           │  loopback HTTP + SSE
+                           │  loopback HTTP + SSE + WebSocket
                            ▼
                 ┌──────────────────────┐
                 │ Broker (existing)    │   same binary as today,
                 │ /api/*  /api/events  │   reused unchanged
                 └──────────────────────┘
                            ▲
-                           │  loopback HTTP + SSE  (mode 1)
+                           │  loopback HTTP + SSE + WebSocket  (mode 1)
                 ┌──────────────────────┐
                 │ Browser → web/dist   │   `npx wuphf` path
                 └──────────────────────┘
@@ -44,7 +44,7 @@ The intended outcome: a polished desktop app on three OSes with measurable perfo
 - `cmd/wuphf` — headless binary (today's binary, unchanged). Used by `npx wuphf`, MCP, CI, `--cmd`. Continues to serve the web UI on `127.0.0.1:7891` for mode 1 (browser).
 - `cmd/wuphf-desktop` — new Wails v2 entry point. Embeds the broker package in-process, hosts the WebView pointing at `web/dist`, exposes OS verbs through Wails events.
 
-**Same `web/dist` bundle in both modes.** App-data traffic is HTTP + SSE in both modes (in mode 2 the WebView still talks to the in-process broker on a loopback port — no Wails bindings for app data). The discipline that prevents drift is **machine-enforced**: see "Lint enforcement" below.
+**Same `web/dist` bundle in both modes.** App-data traffic is HTTP + SSE + WebSocket on loopback in both modes; the agent terminal already uses WebSocket through `web/src/lib/agentTerminalSocket.ts`. In mode 2 the WebView still talks to the in-process broker on a loopback port — no Wails bindings for app data. The discipline that prevents drift is **machine-enforced**: see "Lint enforcement" below.
 
 ### Why Wails v2
 
@@ -53,44 +53,68 @@ Cloud is off the roadmap, so the cloud-portability tax that justifies Tauri/Elec
 - One language (Go) for the shell + broker; TS for UI; no Rust, no Node main process.
 - Smallest install, smallest RSS, fastest dev cycle for a Go-shop.
 - The risk that contributors reach for Go↔JS bindings as a shortcut is **closed by lint** (below), not by trust.
-- We retain the option to revisit cloud later: because we held HTTP+SSE for *app data* and only let Wails events handle OS verbs, the React UI plus broker package can be lifted into a hosted deployment without rewriting feature code.
+- We retain the option to revisit cloud later: because we held HTTP + SSE + WebSocket for *app data* and only let Wails events handle OS verbs, the React UI plus broker package can be lifted into a hosted deployment without rewriting feature code.
 
 ### Lint enforcement (the discipline rule, machine-checked)
 
-Two rules that together prevent the "Wails shortcut" failure mode:
+Three rules together prevent the "Wails shortcut" failure mode:
 
 1. **Go side** — `depguard` rule in `.golangci.yml`: `github.com/wailsapp/wails/v2/...` and `github.com/wailsapp/wails/v3/...` may be imported **only** by files under `desktop/oswails/`. All broker, agent, transport, and team code is forbidden from importing Wails. The `desktop/oswails/` package surface is small and reviewed line-by-line.
-2. **TS side** — Biome `noRestrictedImports` rule: `@wails/runtime`, `@wailsapp/runtime`, `wails-bindings` may be imported **only** under `web/src/desktop/`. All other web code (queries, mutations, components, stores) goes through `web/src/api/client.ts` (HTTP + SSE).
+2. **TS side** — Biome `noRestrictedImports` rule: `@wails/runtime`, `@wailsapp/runtime`, `wails-bindings` may be imported **only** under `web/src/desktop/`. All other web code (queries, mutations, components, stores) goes through `web/src/api/client.ts` (HTTP + SSE + WebSocket).
+3. **Generated/import boundary side** — `scripts/check-wails-boundary.sh` runs in CI alongside depguard and Biome. Wails v2 can generate `wailsjs/...` imports outside `web/src/`, while `web/package.json` runs Biome only on `src/`, so `noRestrictedImports` is not enough by itself. The script must scan generated and checked-in paths for Wails imports outside `desktop/oswails/` and `web/src/desktop/` and fail the build.
 
-Both rules ship in Phase 1 alongside the first Wails scaffold; CI fails on violation.
+All three rules ship before product Wails code; CI fails on violation.
+
+### Desktop launcher contract
+
+The existing `LaunchWeb` path blocks forever and owns browser-mode concerns: Nex onboarding, browser opening, stale broker cleanup, and PID files. That is wrong for a Wails shell. Add a sibling API:
+
+```go
+StartWeb(ctx, opts) -> {webURL, brokerURL, token, shutdown func()}
+```
+
+Wails calls `StartWeb`; the npm-shim/browser path keeps `LaunchWeb`. Both share a smaller `serve()` core so readiness, shutdown, restart, port conflict, and browser/desktop coexistence tests cover the same broker lifecycle.
+
+### Desktop bootstrap and security model
+
+Define the desktop bootstrap before Wails product UI work:
+
+- Port allocation: fixed vs dynamic, and coexistence with `internal/workspaces/ports.go`.
+- Token delivery: environment variable, local handshake, or IPC, with `/api-token` behavior specified for desktop mode.
+- WebView origin: prefer same-origin loopback (`http://127.0.0.1:N`) over `wails://` unless a later security review proves a safer bootstrap.
+- Transport contract: HTTP, SSE, and WebSocket stay on loopback; Wails events are only for OS verbs.
+
+### Desktop release/versioning
+
+Desktop releases use a separate `desktop-release` workflow with its own version cadence and update channels (`stable` / `beta`). Signing/notarization, updater manifests, and installer assets must not ride every `main` auto-release. The headless `cmd/wuphf` binary continues on the existing npm + GitHub Releases path.
 
 ### TUI deprecation arc (phased)
 
 | Release | Action |
 |---|---|
 | v0.X.0 (Phase 1, ~wk 3) | Rename `--tui` → `--legacy-tui`. `--tui` stays as alias with a one-line stderr warning. CHANGELOG `Deprecated`. |
-| v0.Y.0 (Phase 3, ~wk 8) | `--legacy-tui` exits non-zero unless `WUPHF_LEGACY_TUI_ACK=1` is set. CHANGELOG `Deprecated (hard)`. |
-| v0.Z.0 (Phase 4, ~wk 11) | Delete `cmd/wuphf/channel*.go` and `cmd/wuphf/channelui/` (≈17k LOC). Delete `runChannelView` and `runTeam` from `cmd/wuphf/main.go`. CHANGELOG `Removed`. |
+| v0.Y.0 (Phase 4, after desktop installers are green) | `--legacy-tui` exits non-zero unless `WUPHF_LEGACY_TUI_ACK=1` is set. CHANGELOG `Deprecated (hard)`. |
+| v0.Z.0 (Phase 4, ~wk 11) | Delete `cmd/wuphf/channel*.go` and `cmd/wuphf/channelui/` (≈26k LOC). Delete `runChannelView` and `runTeam` from `cmd/wuphf/main.go`. CHANGELOG `Removed`. |
 
 **Keep** `internal/team/pane_*.go` and `tmux_runner.go`. These are tmux-as-process-backend (per-agent stdio capture), used optionally by web mode (`startPaneCaptureLoops`). On Windows the codepath is already dormant. Add `docs/PANE-BACKEND.md` documenting that this surface is *backend, not UI*, so future contributors don't conflate it with the deprecated TUI.
 
-**Web parity gate before deletion** (Phase 3 audit, against `cmd/wuphf/channel_commands_registry_test.go` and `cmd/wuphf/channelui/manifest.go`):
+**Web parity gate before deletion** (Phase 3 audit, against TUI apps in `cmd/wuphf/channelui/sidebar_apps.go` and slash commands in `internal/commands/slash.go`):
 
 - Slash commands registry — every entry has a web composer hook
 - @-mention picker (port from `channel_insert_search*`)
 - Composer history (port from `composer_history*`)
-- Cmd/Ctrl-K command palette (new in web)
-- Keybindings panel (new in web)
+- Cmd/Ctrl-K command palette (already shipped; verify parity)
+- Keybindings panel
 - Tray badge for "needs you" mailbox count
 
 ### Folding in business-musings competitive deltas
 
 Three product surfaces land in the desktop v1 because they reinforce the "shared brain" thesis without expanding scope. The fourth (coding lanes) is OSS-differentiating per the MBA review and is included to back the dogfooding flywheel.
 
-1. **Cabinet-style memory UX** (Phase 3) — promote `web/src/components/wiki/*` and `notebook/` to a primary nav lane; citation hover-cards on every cited claim; per-article history using existing `EditLogFooter`; human edit-and-promote flow on notebook→wiki.
-2. **Sandcastle-style run records** (Phase 3) — every agent wake produces a durable receipt: prompt, tools, approvals, files changed, cost, status. Promote `web/src/components/apps/ReceiptsApp.tsx` to top-level "Run Log". Existing skeleton at `internal/agent/task_log_reader.go` and `internal/team/broker_otlp_usage.go`.
-3. **Claude-Squad-style coding lanes** (Phase 3) — per-agent lane in `web/src/components/agents/AgentPanel.tsx` with worktree state, attach/steer button (existing headless ctx in `launcher_web.go`), diff and PR-handoff. Surfaces inside the office, does not become a new product.
-4. **OpenHands-style credibility** (Phase 2 → ongoing) — wire the scaffolded `evals/harness/` runner; expose nightly pass rates + perf SLOs in CI; ship the testing harness below.
+1. **Cabinet-style memory UX** (Phase 3) — add citation hover-cards on cited claims; surface per-article history using existing `EditLogFooter`; keep human edit-and-promote flow on notebook→wiki. Wiki and notebook routes already exist.
+2. **Sandcastle-style run records** (Phase 3) — enrich receipt/run-record schema with tools, approvals, files changed, cost, and status. Receipts already exists as a top-level route; this work improves the record, not navigation.
+3. **Claude-Squad-style coding lanes** (Phase 3) — extend `AgentPanel` with worktree state, attach/steer, diff, and PR-handoff. The panel already exists; this adds lane depth inside the office.
+4. **OpenHands-style credibility** (Phase 2 → ongoing) — wire the scaffolded `evals/harness/` runner; expose nightly pass rates + perf SLOs in CI; keep SLOs advisory until macOS/Windows baselines exist.
 
 ### Testing harness with quantitative SLOs
 
@@ -128,21 +152,29 @@ Auto-update adds ≈1–2 weeks vs. Tauri's first-party updater. Ship in Phase 2
 
 `cmd/wuphf` headless binary continues to ship via npm shim and GitHub Releases tarballs (today's path, unchanged). Desktop app is a separate distribution: GitHub Releases + `nex.ai/download`, with Homebrew cask + winget submissions in Phase 4.
 
+**Release strategy:** Desktop releases use a separate `desktop-release` workflow with their own cadence and `stable` / `beta` update channels. The headless `cmd/wuphf` binary continues on the existing auto-release path via npm + GitHub Releases. Signing/notarization, updater manifests, and installer assets are excluded from routine `main` auto-releases so desktop release failures do not block normal headless releases.
+
 ### Phasing (11 weeks)
+
+Hard constraints:
+
+- Do **not** hard-fail `--legacy-tui` before desktop installers are green on macOS, Windows, and Linux.
+- Do **not** make SLOs PR-blocking before macOS and Windows baselines exist.
+- Packaging/signing precedes auto-update; desktop smoke precedes both.
 
 | Wk | Phase | Work |
 |---|---|---|
-| 1 | 1. Foundation | New `cmd/wuphf-desktop` Wails v2 scaffold; `desktop/oswails/` package boundary; `depguard` + Biome `noRestrictedImports` rules in CI; document broker contract in `docs/BROKER-CONTRACT.md`. |
-| 2 | 1. Foundation | Wails app embeds broker in-process, serves `web/dist`, opens WebView. Single-instance lock, deep-link `wuphf://`. Sidecar→in-process toggle proven against existing tests. |
-| 3 | 1. Foundation | `cmd/wuphfbench` lands; 4 SLOs as advisory CI checks. Rename `--tui` → `--legacy-tui` (alias retained, warning emitted). CHANGELOG `Deprecated`. |
-| 4 | 2. OS integration | Tray, native notifications (route through existing `internal/team/notifier_*`), dock badge, autostart, deep-link routing. Windows full `go test` (was smoke). |
-| 5 | 2. OS integration | macOS notarization end-to-end. Windows Trusted Signing live. Linux AppImage + `.deb` signed/published. Sparkle/NSIS auto-update on test channel. |
-| 6 | 2. Web parity | Audit + close gaps for TUI deletion: composer history, command palette, keybindings panel, mention picker, tray-badge mailbox. |
-| 7 | 3. Cabinet UX | Wiki/notebook promoted to primary nav; citation hover-cards; per-article history surface using `EditLogFooter`. |
-| 8 | 3. Receipts + lanes | Run Log promotion (Sandcastle-style receipts); per-agent coding lanes in `AgentPanel`. `--legacy-tui` now exits non-zero without ack. CHANGELOG `Deprecated (hard)`. |
-| 9 | 3. Eval runner | Wire `evals/harness/` runner. Bench SLOs go from advisory to PR-blocking. Nightly eval-pass-rate badge on `main`. |
-| 10 | 4. Full matrix | `macos-14` + `windows-2022` full `go test` runners. `desktop-smoke` Playwright job green on all 3 OSes. `flake-rate.sh` live. |
-| 11 | 4. Cut over | Delete `cmd/wuphf/channel*.go` + `cmd/wuphf/channelui/` (≈17k LOC). Remove `runChannelView`/`runTeam`. Ship Wuphf desktop v1 on `nex.ai/download`. CHANGELOG `Removed`. Submit Homebrew cask + winget. |
+| 1 | 1. Launcher contract | `StartWeb()` returning `{webURL, brokerURL, token, shutdown}` lands in `internal/team/`. Tests cover start/stop/restart/port conflict/coexistence. Lands before any Wails code. |
+| 2 | 1. Bootstrap + security | Document and implement desktop bootstrap: port, token, origin, `/api-token`, and coexistence with `internal/workspaces/ports.go`. WebSocket on loopback is part of the contract. |
+| 3 | 1. Lint guardrails + TUI rename | depguard + `scripts/check-wails-boundary.sh` with negative fixtures. Rename `--tui` → `--legacy-tui` (alias + warning). CHANGELOG `Deprecated`. |
+| 4 | 1. Hello-world Wails | Signed hello-world Wails artifact + update manifest, end-to-end CI on macOS/Windows/Linux. No product code. Catches signing pain early. |
+| 5 | 2. Wails shell on broker | `cmd/wuphf-desktop` calls `StartWeb()`, hosts WebView, deep-link `wuphf://`, single-instance lock. |
+| 6 | 2. Native OS verbs | Tray, native notifications via `desktop/oswails/` Wails API, dock badge, autostart. `internal/team/notifier_*` remains agent wake/routing machinery, not OS notification delivery. |
+| 7 | 2. `cmd/wuphfbench` advisory | SLOs land as advisory CI checks. Baselines collected on macOS/Windows/Linux. |
+| 8 | 3. Web parity audit | Audit against `cmd/wuphf/channelui/sidebar_apps.go` and `internal/commands/slash.go`. Fill real gaps; skip already-shipped items such as receipts, wiki/notebooks/reviews, and Cmd/Ctrl-K. |
+| 9 | 3. Citation hover + run-record enrichment | Cabinet/Sandcastle deltas: hover-cards on cited claims; receipt schema additions for tools/approvals/files changed. |
+| 10 | 4. Full matrix + desktop smoke | `macos-14` + `windows-2022` full Go test runners. `desktop-smoke` Playwright green on all three OSes. SLOs flip from advisory to required only after baselines exist. |
+| 11 | 4. Cut over | `--legacy-tui` hard-fails only after installers ship green. Delete `cmd/wuphf/channel*.go` + `cmd/wuphf/channelui/` (≈26k LOC). Ship desktop v1 on `nex.ai/download`. Submit Homebrew cask + winget. |
 
 ### Risks and explicit cuts
 
@@ -173,11 +205,13 @@ Auto-update adds ≈1–2 weeks vs. Tauri's first-party updater. Ship in Phase 2
 **Modified:**
 - `cmd/wuphf/main.go` — rename `--tui` → `--legacy-tui`; eventually delete `runChannelView`/`runTeam`
 - `internal/team/broker_web_proxy.go` — codify broker contract (port, `/api-token`, DNS-rebinding guard) as the single transport
-- `internal/team/launcher_web.go` — adapt `LaunchWeb` to support in-process embed for Wails desktop
-- `web/src/api/client.ts` — single HTTP+SSE client for both modes
+- `internal/team/launcher_web.go` — add `StartWeb(ctx, opts) -> {webURL, brokerURL, token, shutdown}` next to existing `LaunchWeb`
+- `internal/workspaces/ports.go` — define browser/desktop port coexistence rules
+- `web/src/api/client.ts` — single HTTP + SSE + WebSocket client for both modes
 - `.golangci.yml` — add `depguard` rule for Wails import boundary
 - `web/biome.json` — add `noRestrictedImports` for `@wails/*`
 - `.github/workflows/ci.yml` — Windows smoke → real test job; add `desktop-smoke`; add macOS in Phase 4
+- `.github/workflows/desktop-release.yml` — separate desktop release cadence, signing, updater manifests, and stable/beta channels
 - `scripts/check-bundle-size.sh` — extend to track installer sizes per-OS
 
 **New:**
@@ -186,8 +220,11 @@ Auto-update adds ≈1–2 weeks vs. Tauri's first-party updater. Ship in Phase 2
 - `web/src/desktop/` — only TS dir allowed to import `@wails/*`
 - `cmd/wuphfbench/main.go` — quantitative SLO driver
 - `web/e2e-desktop/` — Playwright specs for Wails shell smoke
-- `docs/BROKER-CONTRACT.md` — single source of truth for the broker HTTP+SSE contract
+- `docs/BROKER-CONTRACT.md` — single source of truth for the broker HTTP + SSE + WebSocket contract
+- `docs/DESKTOP-BOOTSTRAP.md` — desktop port, token, origin, and `/api-token` contract
+- `docs/DESKTOP-RELEASE.md` — desktop release cadence, channels, signing, updater manifests, and installer assets
 - `docs/PANE-BACKEND.md` — clarifies tmux-as-process-backend ≠ deprecated TUI
+- `scripts/check-wails-boundary.sh` — Wails import boundary guard, including generated `wailsjs/...` imports
 - `scripts/flake-rate.sh` — flaky-test isolation
 - `tests/flaky/` — quarantine list
 
@@ -196,7 +233,7 @@ Auto-update adds ≈1–2 weeks vs. Tauri's first-party updater. Ship in Phase 2
 End-to-end checks before declaring v1 ready:
 
 1. `bash scripts/test-go.sh` and `bash scripts/test-web.sh` green on `ubuntu-latest`, `macos-14`, `windows-2022`.
-2. `cmd/wuphfbench` reports SLOs within budget on all three OSes; CI gate flips from advisory to required.
+2. `cmd/wuphfbench` reports SLOs within budget on all three OSes; CI gate flips from advisory to required only after macOS and Windows baselines exist.
 3. `desktop-smoke` Playwright suite green on all three OSes (cold start + tray + notification + deep-link + auto-update self-test).
 4. Manual: `npx wuphf` (mode 1) and `Wuphf.app/.msi/.AppImage` (mode 2) both serve the same UI and pass the same chat→receipt→wiki flow.
 5. `--legacy-tui` exits non-zero without `WUPHF_LEGACY_TUI_ACK=1`. After deletion in Phase 4, `--legacy-tui` is unrecognized and `--tui` is gone.
@@ -206,11 +243,11 @@ End-to-end checks before declaring v1 ready:
 
 ---
 
-## Appendix A — Codex Review Corrections (2026-05-05)
+## Appendix A — Codex Review Log (2026-05-05)
 
-The plan above was reviewed by `codex exec` (gpt-5.5, read-only repo access) against the actual codebase. The corrections below override the plan where they conflict.
+The plan was reviewed by `codex exec` (gpt-5.5, read-only repo access) against the actual codebase. The main body above has been updated with these corrections; this appendix remains only as a review log.
 
-### Factual corrections to the plan
+### Factual corrections folded into the main body
 
 1. **App-data transport is not HTTP+SSE-only.** The agent terminal already uses **WebSocket** (`web/src/lib/agentTerminalSocket.ts`, `web/src/api/client.ts:264`, `internal/team/broker_terminal.go`). The lint invariant must be "HTTP/SSE/WebSocket on loopback for app data" — not HTTP+SSE only. Wails events stay forbidden for app data.
 2. **Desktop WebView ↔ broker bootstrap is not a no-op.** `web/src/api/client.ts:14 initApi()` expects same-origin `/api-token` or falls back to `http://localhost:7890`. The plan must specify whether the desktop WebView points at the in-process `ServeWebUI` loopback (preserving same-origin) or adds a new desktop bootstrap path. **Decision: same-origin loopback** — Wails' `assetserver` exposes the broker's HTTP listener so `initApi()` works unchanged.
@@ -225,7 +262,7 @@ The plan above was reviewed by `codex exec` (gpt-5.5, read-only repo access) aga
    Phase 3 work for these surfaces collapses to **citation hover-cards + history affordances + run-record schema enrichment**, not "promote to nav".
 6. **`internal/team/notifier_*` is agent wake/routing machinery, not OS notifications.** Native OS notifications go through Wails' notification API in `desktop/oswails/` — they do not route through `notifier_*`.
 
-### Highest-leverage things missing from the plan
+### Highest-leverage requirements folded into the main body
 
 1. **Define a real desktop launcher contract.** Today's `LaunchWeb` blocks forever, offers Nex onboarding, opens a browser, kills stale brokers, and writes PID files — none of that fits a Wails shell. Add a sibling: `StartWeb(ctx, opts) -> {webURL, brokerURL, token, shutdown func()}`. Wails calls `StartWeb`; the existing `LaunchWeb` keeps doing the npm-shim path. Both share a smaller `serve()` core.
 2. **Define the desktop bootstrap/security model explicitly.** Fixed vs allocated port; token delivery (env var? handshake? IPC?); WebView origin (`http://127.0.0.1:N` vs `wails://`); `/api-token` behavior; coexistence with browser/workspace ports from `internal/workspaces/ports.go`.
@@ -237,9 +274,9 @@ The plan above was reviewed by `codex exec` (gpt-5.5, read-only repo access) aga
 2. **In-process lifecycle will regress on shutdown/restart.** **Mitigate:** add tests for the `StartWeb` contract — start, readiness, stop, restart, port conflict, "browser mode already running" coexistence. Land before Wails UI work.
 3. **Auto-update/signing will eat the schedule.** **Mitigate:** ship a signed *hello-world Wails artifact* with a working update manifest in CI **before** Phase 2 product integration. Catch keychain/notarization/cert problems on a no-stakes binary.
 
-### Phasing corrections
+### Phasing review notes
 
-The phasing is mis-sequenced. Updated order:
+The review noted the original phasing was mis-sequenced and recommended this order, now reflected in the main body:
 
 | Wk | Phase | Work |
 |---|---|---|
