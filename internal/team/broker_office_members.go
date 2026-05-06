@@ -101,9 +101,19 @@ func (b *Broker) serveOfficeMemberList(w http.ResponseWriter) {
 		}
 		members = append(members, entry)
 	}
+	humanHasPosted := b.humanHasPosted
 	b.mu.Unlock()
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{"members": members})
+	// meta is a sibling object on /office-members so the frontend's existing
+	// members poll can read durable office-level signals without an extra
+	// request. humanHasPosted drives the first-run "tag @agent" nudge —
+	// see the Broker.humanHasPosted field doc for the lifecycle.
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"members": members,
+		"meta": map[string]any{
+			"humanHasPosted": humanHasPosted,
+		},
+	})
 }
 
 func (b *Broker) OfficeMembers() []officeMember {

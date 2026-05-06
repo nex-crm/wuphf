@@ -161,6 +161,7 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 			SourceSignalID:   strings.TrimSpace(body.SourceSignalID),
 			SourceDecisionID: strings.TrimSpace(body.SourceDecisionID),
 		}); existing != nil {
+			beforeStatus := existing.Status
 			if details := strings.TrimSpace(body.Details); details != "" {
 				existing.Details = details
 			}
@@ -213,6 +214,7 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 				rollbackTask()
 				return TaskResponse{}, taskMutationError(TaskMutationPersistFailed, "failed to persist broker state", err)
 			}
+			b.emitTaskTransitionAutoNotebook(existing, beforeStatus, actor)
 			return TaskResponse{Task: *existing}, nil
 		}
 		b.counter++
@@ -261,6 +263,9 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 			rollbackTask()
 			return TaskResponse{}, taskMutationError(TaskMutationPersistFailed, "failed to persist broker state", err)
 		}
+		// Treat creation as a transition from "" → task.Status so the owner's
+		// shelf records the moment a task lands in their lane.
+		b.emitTaskTransitionAutoNotebook(&task, "", actor)
 		return TaskResponse{Task: task}, nil
 	}
 
@@ -290,6 +295,7 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 		reassignTriggered := false
 		cancelTriggered := false
 		cancelPrevOwner := ""
+		beforeStatus := task.Status
 		switch action {
 		case "claim", "assign":
 			if strings.TrimSpace(body.Owner) == "" {
@@ -441,8 +447,9 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 		}
 		// Any terminal status releases waiting dependents. isTerminalTeamTaskStatus
 		// matches hasUnresolvedDepsLocked so cancelled parents do not orphan dependents.
+		var pendingCascade []pendingTaskTransition
 		if isTerminalTeamTaskStatus(task.Status) {
-			b.unblockDependentsLocked(task.ID)
+			pendingCascade = b.unblockDependentsLocked(task.ID)
 		}
 		b.scheduleTaskLifecycleLocked(task)
 		if err := b.syncTaskWorktreeLocked(task); err != nil {
@@ -463,6 +470,8 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 			rollbackTask()
 			return TaskResponse{}, taskMutationError(TaskMutationPersistFailed, "failed to persist broker state", err)
 		}
+		b.emitTaskTransitionAutoNotebook(task, beforeStatus, actor)
+		b.flushPendingAutoNotebookTransitionsLocked(pendingCascade, "system")
 		return TaskResponse{Task: *task}, nil
 	}
 

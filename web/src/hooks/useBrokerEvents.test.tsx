@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, render } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useAppStore } from "../stores/app";
 import { useBrokerEvents } from "./useBrokerEvents";
@@ -16,6 +16,12 @@ class FakeEventSource {
   static created: FakeEventSource[] = [];
   listeners: Record<string, EventListener[]> = {};
   onerror: (() => void) | null = null;
+  // Mirror the EventSource constants so `source.readyState !== source.OPEN`
+  // checks behave the way the production code expects in tests.
+  readonly CONNECTING = 0;
+  readonly OPEN = 1;
+  readonly CLOSED = 2;
+  readyState = 1; // default OPEN; tests flip to CLOSED to simulate disconnect
 
   constructor(_url: string) {
     FakeEventSource.created.push(this);
@@ -38,6 +44,12 @@ class FakeEventSource {
   emitRaw(name: string, data: string) {
     const event = new MessageEvent(name, { data });
     for (const fn of this.listeners[name] ?? []) fn(event);
+  }
+
+  triggerError() {
+    if (typeof this.onerror === "function") {
+      this.onerror();
+    }
   }
 }
 
@@ -213,5 +225,161 @@ describe("useBrokerEvents unread counts", () => {
     });
 
     expect(useAppStore.getState().unreadByChannel).toEqual({});
+  });
+});
+
+describe("useBrokerEvents activity stream", () => {
+  const originalEventSource = globalThis.EventSource;
+
+  beforeEach(() => {
+    FakeEventSource.created = [];
+    (globalThis as { EventSource: unknown }).EventSource =
+      FakeEventSource as unknown as typeof EventSource;
+    useAppStore.setState({
+      agentActivitySnapshots: {},
+      isReconnecting: false,
+    });
+    navigateRouter("/channels/general");
+  });
+
+  afterEach(() => {
+    (globalThis as { EventSource: unknown }).EventSource = originalEventSource;
+    useAppStore.setState({
+      agentActivitySnapshots: {},
+      isReconnecting: false,
+      brokerConnected: false,
+    });
+  });
+
+  it("invalidates office-members AND records the snapshot on activity", () => {
+    // CRITICAL REGRESSION: cache invalidation MUST keep firing after the
+    // snapshot-store wiring lands. Tracking the invalidate call confirms
+    // downstream surfaces (workspace presence, channel members) still
+    // refresh.
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <BrokerEventsHarness />
+      </QueryClientProvider>,
+    );
+    const [source] = FakeEventSource.created;
+
+    act(() => {
+      source.emit("activity", {
+        slug: "tess",
+        status: "active",
+        activity: "drafting reply",
+        kind: "routine",
+      });
+    });
+
+    const invalidatedKeys = invalidateSpy.mock.calls.map(
+      (call) => (call[0] as { queryKey?: unknown[] }).queryKey?.[0],
+    );
+    expect(invalidatedKeys).toContain("office-members");
+    expect(invalidatedKeys).toContain("channel-members");
+
+    const snap = useAppStore.getState().agentActivitySnapshots.tess;
+    expect(snap).toBeDefined();
+    expect(snap.activity).toBe("drafting reply");
+    expect(snap.kind).toBe("routine");
+    expect(typeof snap.receivedAtMs).toBe("number");
+  });
+
+  it("invalidates the cache even when the activity payload is malformed", () => {
+    // A throw inside the snapshot-record path must not prevent the
+    // existing cache invalidation from running — that would silently
+    // freeze every member-list surface.
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <BrokerEventsHarness />
+      </QueryClientProvider>,
+    );
+    const [source] = FakeEventSource.created;
+
+    act(() => {
+      source.emitRaw("activity", "{not-json");
+    });
+
+    const keys = invalidateSpy.mock.calls.map(
+      (call) => (call[0] as { queryKey?: unknown[] }).queryKey?.[0],
+    );
+    expect(keys).toContain("office-members");
+    expect(useAppStore.getState().agentActivitySnapshots).toEqual({});
+    warnSpy.mockRestore();
+  });
+});
+
+describe("useBrokerEvents disconnect grace", () => {
+  const originalEventSource = globalThis.EventSource;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    FakeEventSource.created = [];
+    (globalThis as { EventSource: unknown }).EventSource =
+      FakeEventSource as unknown as typeof EventSource;
+    useAppStore.setState({ isReconnecting: false });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    (globalThis as { EventSource: unknown }).EventSource = originalEventSource;
+    useAppStore.setState({ isReconnecting: false, brokerConnected: false });
+  });
+
+  it("flips isReconnecting after 5s of sustained CLOSED readyState", () => {
+    renderHarness();
+    const [source] = FakeEventSource.created;
+
+    act(() => {
+      source.readyState = source.CLOSED;
+      source.triggerError();
+    });
+
+    // 4.5s in — still inside the grace window.
+    act(() => {
+      vi.advanceTimersByTime(4500);
+    });
+    expect(useAppStore.getState().isReconnecting).toBe(false);
+
+    // Past the 5s threshold — now we treat it as a sustained disconnect.
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(useAppStore.getState().isReconnecting).toBe(true);
+  });
+
+  it("does not flip isReconnecting when the connection reopens within the grace window", () => {
+    renderHarness();
+    const [source] = FakeEventSource.created;
+
+    act(() => {
+      source.readyState = source.CLOSED;
+      source.triggerError();
+    });
+
+    // Connection comes back at 3s — open event clears the grace timer.
+    act(() => {
+      vi.advanceTimersByTime(3000);
+      source.readyState = source.OPEN;
+      const event = new Event("open");
+      for (const fn of source.listeners.open ?? []) fn(event);
+    });
+
+    // Past the original 5s window — grace was cleared, so still false.
+    act(() => {
+      vi.advanceTimersByTime(3000);
+    });
+    expect(useAppStore.getState().isReconnecting).toBe(false);
   });
 });
