@@ -24,14 +24,24 @@ interface Position {
 const PEEK_WIDTH = 320;
 const PEEK_OFFSET = 8;
 
+const PEEK_VIEWPORT_MARGIN = 8;
+
 function computePosition(anchor: HTMLElement): Position {
   const { top, right, left: rectLeft } = anchor.getBoundingClientRect();
   const rightEdge = right + PEEK_OFFSET + PEEK_WIDTH;
   // Flip to left if the peek would extend beyond the right viewport edge.
-  const left =
+  const rawLeft =
     rightEdge > window.innerWidth
       ? rectLeft - PEEK_OFFSET - PEEK_WIDTH
       : right + PEEK_OFFSET;
+  // Clamp to viewport-safe bounds — the flip alone can still produce a
+  // negative left on narrow viewports.
+  const minLeft = PEEK_VIEWPORT_MARGIN;
+  const maxLeft = Math.max(
+    minLeft,
+    window.innerWidth - PEEK_WIDTH - PEEK_VIEWPORT_MARGIN,
+  );
+  const left = Math.min(Math.max(rawLeft, minLeft), maxLeft);
   return { top, left };
 }
 
@@ -107,19 +117,20 @@ export function AgentEventPeek({
     return () => el?.removeEventListener("keydown", onKeyDown);
   }, [open, onClose, onOpenWorkspace]);
 
-  // Outside mousedown → close.
+  // Outside pointerdown → close. pointerdown unifies mouse + touch + pen so
+  // tap-outside dismissal works on touch devices too.
   useEffect(() => {
     if (!open) return;
 
-    function onMouseDown(e: MouseEvent) {
+    function onPointerDown(e: PointerEvent) {
       const target = e.target as Node;
       if (dialogRef.current?.contains(target)) return;
       if (anchorRef.current?.contains(target)) return;
       onClose();
     }
 
-    document.addEventListener("mousedown", onMouseDown);
-    return () => document.removeEventListener("mousedown", onMouseDown);
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
   }, [open, anchorRef, onClose]);
 
   if (!open) return null;
@@ -205,8 +216,8 @@ export function AgentEventPeek({
       {/* Empty state — no SSE event has arrived for this agent yet */}
       {showEmptyState ? (
         <div className="sidebar-agent-peek-empty" data-testid="peek-empty">
-          No activity yet. This agent has not streamed an event since the
-          office opened.
+          No activity yet. This agent has not streamed an event since the office
+          opened.
         </div>
       ) : null}
 

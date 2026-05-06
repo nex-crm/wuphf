@@ -74,7 +74,7 @@ function SidebarAgentRow({
       <button
         type="button"
         className={`sidebar-agent${isDMActive ? " active" : ""}`}
-        title={`${agent.name} — ${ac.label}`}
+        title={`${displayName} — ${ac.label}`}
         onClick={() => {
           // Tier 3 escalation: "quick activation always wins" per the plan.
           // Close any open Tier 2 peek so the workspace is the only surface

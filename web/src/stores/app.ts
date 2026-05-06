@@ -449,6 +449,13 @@ export interface AgentPeekData {
   history: StoredActivitySnapshot[];
 }
 
+// Stable empty-history reference so selectAgentPeek does not allocate a fresh
+// array on every call. Important if the selector is later subscribed via
+// Zustand — equal references avoid spurious re-renders.
+const EMPTY_AGENT_HISTORY: readonly StoredActivitySnapshot[] = Object.freeze(
+  [],
+);
+
 /**
  * Read the current snapshot + per-slug history for the Tier 2 hover peek.
  * Returns an empty history array (not undefined) when nothing has streamed
@@ -460,6 +467,8 @@ export function selectAgentPeek(
 ): AgentPeekData {
   return {
     current: state.agentActivitySnapshots[slug],
-    history: state.agentActivityHistory[slug] ?? [],
+    history:
+      state.agentActivityHistory[slug] ??
+      (EMPTY_AGENT_HISTORY as StoredActivitySnapshot[]),
   };
 }

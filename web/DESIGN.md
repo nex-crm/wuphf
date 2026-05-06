@@ -95,7 +95,7 @@ so it floats above the sidebar without causing row reflow.
 
 ### Structure
 
-```
+```text
 .sidebar-agent-peek [role="dialog"]
 ├── .sidebar-agent-peek-header
 │   ├── .sidebar-agent-peek-avatar       24×24 CSS-driven circle, first letter

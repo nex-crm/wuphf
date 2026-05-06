@@ -235,23 +235,25 @@ describe("<AgentEventPeek> render", () => {
   it("renders correctly under prefers-reduced-motion: reduce (smoke)", () => {
     // Mock matchMedia to report reduced motion.
     const original = window.matchMedia;
-    window.matchMedia = (query: string) => ({
-      matches: query === "(prefers-reduced-motion: reduce)",
-      media: query,
-      onchange: null,
-      addListener: vi.fn(),
-      removeListener: vi.fn(),
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      dispatchEvent: vi.fn(),
-    });
+    try {
+      window.matchMedia = (query: string) => ({
+        matches: query === "(prefers-reduced-motion: reduce)",
+        media: query,
+        onchange: null,
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      });
 
-    const anchorRef = makeAnchorRef();
-    render(<AgentEventPeek {...defaultProps} anchorRef={anchorRef} />);
-    // The dialog must still be present — CSS handles the motion suppression.
-    expect(document.querySelector(".sidebar-agent-peek")).not.toBeNull();
-
-    window.matchMedia = original;
+      const anchorRef = makeAnchorRef();
+      render(<AgentEventPeek {...defaultProps} anchorRef={anchorRef} />);
+      // The dialog must still be present — CSS handles the motion suppression.
+      expect(document.querySelector(".sidebar-agent-peek")).not.toBeNull();
+    } finally {
+      window.matchMedia = original;
+    }
   });
 });
 
@@ -288,7 +290,7 @@ describe("<AgentEventPeek> interaction and accessibility", () => {
     expect(onOpenWorkspace).toHaveBeenCalledOnce();
   });
 
-  it("calls onClose on outside mousedown and does NOT close on inside mousedown", () => {
+  it("calls onClose on outside pointerdown and does NOT close on inside pointerdown", () => {
     const anchorRef = makeAnchorRef();
     const onClose = vi.fn();
     render(
@@ -299,13 +301,13 @@ describe("<AgentEventPeek> interaction and accessibility", () => {
       />,
     );
 
-    // Mousedown inside the dialog — should NOT close.
+    // Pointerdown inside the dialog — should NOT close.
     const dialog = document.querySelector(".sidebar-agent-peek") as HTMLElement;
-    fireEvent.mouseDown(dialog);
+    fireEvent.pointerDown(dialog);
     expect(onClose).not.toHaveBeenCalled();
 
-    // Mousedown outside — should close.
-    fireEvent.mouseDown(document.body);
+    // Pointerdown outside — should close.
+    fireEvent.pointerDown(document.body);
     expect(onClose).toHaveBeenCalledOnce();
   });
 

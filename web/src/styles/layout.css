@@ -939,6 +939,7 @@ html[data-theme="nex"]
   color: var(--text-tertiary);
   cursor: pointer;
   opacity: 0;
+  pointer-events: none;
   transition: opacity 120ms ease-out;
   border-radius: var(--radius-sm);
 }
@@ -946,6 +947,7 @@ html[data-theme="nex"]
 .sidebar-agent-row:focus-within .sidebar-agent-peek-trigger,
 .sidebar-agent-peek-trigger[aria-expanded="true"] {
   opacity: 1;
+  pointer-events: auto;
 }
 .sidebar-agent-peek-trigger:hover {
   color: var(--text);
