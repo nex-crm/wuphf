@@ -463,6 +463,7 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/wiki/sections", b.requireAuth(b.handleWikiSections))
 	mux.HandleFunc("/wiki/lint/run", b.requireAuth(b.handleLintRun))
 	mux.HandleFunc("/wiki/lint/resolve", b.requireAuth(b.handleLintResolve))
+	mux.HandleFunc("/wiki/maintenance/suggest", b.requireAuth(b.handleWikiMaintenanceSuggest))
 	mux.HandleFunc("/wiki/extract/replay", b.requireAuth(b.handleWikiExtractReplay))
 	mux.HandleFunc("/wiki/dlq", b.requireAuth(b.handleWikiDLQ))
 	mux.HandleFunc("/wiki/compress", b.requireAuth(b.handleWikiCompress))
