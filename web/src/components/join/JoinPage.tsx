@@ -13,7 +13,40 @@ import {
 } from "../../api/joinInvite";
 import "./join.css";
 
-type ErrorCode = JoinInviteErrorCode | "name_required";
+type ErrorCode = JoinInviteErrorCode | "name_required" | "passcode_missing";
+
+// callSubmitJoinInvite wraps the never-rejecting submitJoinInvite so the
+// (defensive) try/catch lives outside JoinPage.handleSubmit and the latter
+// stays under biome's per-function complexity ceiling. Returns null when
+// the catch ran — the caller has already stamped the status.
+async function callSubmitJoinInvite(
+  token: string,
+  displayName: string,
+  passcode: string,
+  setStatus: (status: {
+    kind: "error";
+    code: ErrorCode;
+    message: string;
+  }) => void,
+): Promise<Awaited<ReturnType<typeof submitJoinInvite>> | null> {
+  try {
+    return await submitJoinInvite({
+      token,
+      displayName,
+      passcode: passcode || undefined,
+    });
+  } catch (err) {
+    // submitJoinInvite is contractually never-rejecting, so reaching this
+    // branch means a programmer error or a future refactor regression.
+    // Treat it as a generic network failure so the joiner can retry.
+    const message =
+      err instanceof Error && err.message
+        ? `Could not reach WUPHF: ${err.message}`
+        : "Something went wrong submitting the invite. Try again.";
+    setStatus({ kind: "error", code: "network", message });
+    return null;
+  }
+}
 
 interface JoinPageProps {
   token: string;
@@ -28,14 +61,29 @@ type Status =
 
 export function JoinPage({ token, onAccepted }: JoinPageProps) {
   const nameId = useId();
+  const passcodeId = useId();
   const errorId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
+  const passcodeInputRef = useRef<HTMLInputElement>(null);
   const [displayName, setDisplayName] = useState("");
+  const [passcode, setPasscode] = useState("");
+  // passcodeRequired flips on the first time the server returns
+  // passcode_required and stays on for the rest of the session — the host
+  // doesn't switch a tunnel from "passcode-needed" to "no passcode" without
+  // a tunnel restart, and re-hiding the field would lose what the joiner
+  // already typed.
+  const [passcodeRequired, setPasscodeRequired] = useState(false);
   const [status, setStatus] = useState<Status>({ kind: "idle" });
 
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
+
+  useEffect(() => {
+    if (passcodeRequired) {
+      passcodeInputRef.current?.focus();
+    }
+  }, [passcodeRequired]);
 
   const trimmedToken = token.trim();
   if (!trimmedToken) {
@@ -54,9 +102,9 @@ export function JoinPage({ token, onAccepted }: JoinPageProps) {
   const errorMessage = status.kind === "error" ? status.message : null;
   const errorCode = status.kind === "error" ? status.code : null;
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (submitting) return;
+  function validateLocally():
+    | { ok: true; trimmed: string; trimmedPasscode: string }
+    | { ok: false } {
     const trimmed = displayName.trim();
     if (!trimmed) {
       setStatus({
@@ -64,26 +112,33 @@ export function JoinPage({ token, onAccepted }: JoinPageProps) {
         code: "name_required",
         message: "Add a display name so the team knows who is joining.",
       });
-      return;
+      return { ok: false };
     }
-    setStatus({ kind: "submitting" });
-    let result: Awaited<ReturnType<typeof submitJoinInvite>>;
-    try {
-      result = await submitJoinInvite({
-        token: trimmedToken,
-        displayName: trimmed,
+    const trimmedPasscode = passcode.trim();
+    if (passcodeRequired && !trimmedPasscode) {
+      setStatus({
+        kind: "error",
+        code: "passcode_missing",
+        message: "Enter the passcode your host gave you.",
       });
-    } catch (err) {
-      // submitJoinInvite is contractually never-rejecting, so reaching this
-      // branch means a programmer error or a future refactor regression.
-      // Treat it as a generic network failure so the joiner can retry.
-      const message =
-        err instanceof Error && err.message
-          ? `Could not reach WUPHF: ${err.message}`
-          : "Something went wrong submitting the invite. Try again.";
-      setStatus({ kind: "error", code: "network", message });
-      return;
+      return { ok: false };
     }
+    return { ok: true, trimmed, trimmedPasscode };
+  }
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (submitting) return;
+    const validated = validateLocally();
+    if (!validated.ok) return;
+    setStatus({ kind: "submitting" });
+    const result = await callSubmitJoinInvite(
+      trimmedToken,
+      validated.trimmed,
+      validated.trimmedPasscode,
+      setStatus,
+    );
+    if (!result) return;
     if (result.ok) {
       if (onAccepted) {
         onAccepted(result.redirect);
@@ -91,6 +146,14 @@ export function JoinPage({ token, onAccepted }: JoinPageProps) {
       }
       window.location.assign(result.redirect);
       return;
+    }
+    if (result.code === "passcode_required") {
+      // Surface the passcode field on first refusal. Clear any stale
+      // passcode value so the joiner does not re-submit the same wrong
+      // digits silently — they have to re-enter, which the spec for
+      // "wrong passcode" calls for anyway.
+      setPasscodeRequired(true);
+      setPasscode("");
     }
     setStatus({ kind: "error", code: result.code, message: result.message });
   }
@@ -133,6 +196,38 @@ export function JoinPage({ token, onAccepted }: JoinPageProps) {
           aria-invalid={errorCode === "name_required"}
           aria-describedby={errorMessage ? errorId : undefined}
         />
+        {passcodeRequired ? (
+          <>
+            <label htmlFor={passcodeId} className="join-label">
+              Passcode
+            </label>
+            <input
+              ref={passcodeInputRef}
+              id={passcodeId}
+              name="passcode"
+              // inputMode + numeric keyboard on phones, but type=text so
+              // password managers don't auto-fill garbage. autoComplete=off
+              // so the browser does not memo a 6-digit string as an
+              // address-book entry.
+              inputMode="numeric"
+              pattern="[0-9]*"
+              autoComplete="one-time-code"
+              placeholder="6-digit code from the host"
+              className="join-input"
+              value={passcode}
+              onChange={(event) =>
+                setPasscode(event.target.value.replace(/\D/g, ""))
+              }
+              disabled={submitting}
+              aria-invalid={
+                errorCode === "passcode_required" ||
+                errorCode === "passcode_missing"
+              }
+              aria-describedby={errorMessage ? errorId : undefined}
+              maxLength={12}
+            />
+          </>
+        ) : null}
         <button
           type="submit"
           className="join-submit"

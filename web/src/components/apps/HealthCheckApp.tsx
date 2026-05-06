@@ -519,6 +519,34 @@ function HostTunnelControls({
           </button>
         </div>
       ) : null}
+      {tunnelRunning && tunnelStatus?.passcode ? (
+        <div
+          style={{
+            marginTop: 8,
+            padding: "8px 10px",
+            borderRadius: 8,
+            background: "var(--bg-warm)",
+            border: "1px solid var(--border)",
+          }}
+        >
+          <div
+            className="app-card-meta"
+            style={{ marginBottom: 4, fontWeight: 600 }}
+          >
+            Passcode (read it out separately)
+          </div>
+          <code
+            style={{
+              fontSize: 18,
+              letterSpacing: 4,
+              fontWeight: 700,
+              color: "var(--text)",
+            }}
+          >
+            {tunnelStatus.passcode}
+          </code>
+        </div>
+      ) : null}
       {tunnelRunning && tunnelStatus?.public_url ? (
         <div className="app-card-meta" style={{ marginTop: 8 }}>
           Tunnel: {tunnelStatus.public_url}
@@ -839,16 +867,17 @@ function useTunnelControls(isHost: boolean) {
       details: (
         <ul>
           <li>
-            <strong>Anyone with the link can attempt to join</strong> until you
-            stop the tunnel — treat the URL like a password.
+            <strong>The link AND a 6-digit passcode</strong> are both required
+            to join — a leaked URL alone cannot redeem the invite.
           </li>
           <li>
-            Send the invite link only through a private channel. Don't post it
-            in shared Slack/Discord rooms or anywhere it could be indexed.
+            Send the URL and the passcode through{" "}
+            <strong>different channels</strong> (e.g. URL via Slack, passcode
+            read aloud). Don't paste both into the same shared room.
           </li>
           <li>
-            The invite token is one-use and expires in 24 hours, but the tunnel
-            itself stays open until you click <em>Stop tunnel</em>.
+            The invite is one-use and expires in 24 hours. The tunnel stays open
+            until you click <em>Stop tunnel</em>.
           </li>
           <li>
             Cloudflare terminates TLS at the edge; traffic between Cloudflare

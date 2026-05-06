@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -505,15 +506,35 @@ func isPrivateIP(ip net.IP) bool {
 	return v4[0] == 10 || (v4[0] == 172 && v4[1] >= 16 && v4[1] <= 31) || (v4[0] == 192 && v4[1] == 168)
 }
 
+// shareHandlerConfig is the dial-tone for the unauthenticated /join/ HTTP
+// surface. brokerURL + brokerToken are required (the handler proxies the
+// authenticated invite-accept call to the broker on the joiner's behalf).
+// onJoin is the host-side join notification (printed on the wuphf share
+// terminal). joinGate and rateLimiter are tunnel-only hardening; both nil
+// in network-share mode preserves Phase 1 behaviour byte-for-byte.
+type shareHandlerConfig struct {
+	BrokerURL   string
+	BrokerToken string
+	OnJoin      func()
+	JoinGate    joinGateFn
+	RateLimiter *joinRateLimiter
+}
+
 func newShareHTTPServer(bind string, port int, brokerURL, brokerToken string, onJoin func()) *http.Server {
 	return &http.Server{
-		Addr:              fmt.Sprintf("%s:%d", bind, port),
-		Handler:           newShareHandler(brokerURL, brokerToken, onJoin),
+		Addr: fmt.Sprintf("%s:%d", bind, port),
+		Handler: newShareHandler(shareHandlerConfig{
+			BrokerURL:   brokerURL,
+			BrokerToken: brokerToken,
+			OnJoin:      onJoin,
+		}),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 }
 
-func newShareHandler(brokerURL, brokerToken string, onJoin func()) http.Handler {
+func newShareHandler(cfg shareHandlerConfig) http.Handler {
+	brokerURL := cfg.BrokerURL
+	onJoin := cfg.OnJoin
 	mux := http.NewServeMux()
 	mux.HandleFunc("/join/", func(w http.ResponseWriter, r *http.Request) {
 		token := strings.TrimPrefix(r.URL.Path, "/join/")
@@ -527,7 +548,21 @@ func newShareHandler(brokerURL, brokerToken string, onJoin func()) http.Handler 
 			// SPA's relative asset URLs do not need a path rewrite.
 			http.Redirect(w, r, "/?invite="+url.QueryEscape(token), http.StatusFound)
 		case http.MethodPost:
-			handleShareJoinSubmit(w, r, brokerURL, token, onJoin)
+			if cfg.RateLimiter != nil {
+				ip := extractJoinSourceIP(r)
+				if !cfg.RateLimiter.allow(ip) {
+					// Conservative HTTP signalling: 429 + Retry-After so
+					// well-behaved clients back off. The message is
+					// joiner-friendly; the structured `error` code lets the
+					// React JoinPage suppress the passcode field while the
+					// limit is in force.
+					w.Header().Set("Retry-After", "60")
+					writeShareJoinError(w, http.StatusTooManyRequests, "rate_limited",
+						"Too many join attempts from this network. Wait a minute and try again.")
+					return
+				}
+			}
+			handleShareJoinSubmit(w, r, brokerURL, token, onJoin, cfg.JoinGate)
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
@@ -571,9 +606,14 @@ type shareJoinError struct {
 // into the JSON decoder. 8 KiB is ample for a display_name payload.
 const maxShareJoinBodyBytes = 8 << 10
 
-func handleShareJoinSubmit(w http.ResponseWriter, r *http.Request, brokerURL, token string, onJoin func()) {
+func handleShareJoinSubmit(w http.ResponseWriter, r *http.Request, brokerURL, token string, onJoin func(), gate joinGateFn) {
 	var submission struct {
 		DisplayName string `json:"display_name"`
+		// Passcode is the second factor for tunnel-mode invites. Empty in
+		// network-share mode (and on the first submit when the joiner has
+		// not been told a passcode is required) — the gate is responsible
+		// for distinguishing "missing" from "wrong" without leaking which.
+		Passcode string `json:"passcode,omitempty"`
 	}
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxShareJoinBodyBytes))
 	dec.DisallowUnknownFields()
@@ -584,6 +624,28 @@ func handleShareJoinSubmit(w http.ResponseWriter, r *http.Request, brokerURL, to
 	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		writeShareJoinError(w, http.StatusBadRequest, "invalid_request", "We could not read your invite submission. Reload and try again.")
 		return
+	}
+	if gate != nil {
+		if gateErr := gate(token, submission.Passcode); gateErr != nil {
+			// Audit log: the host's terminal sees one line per failed
+			// passcode attempt so suspicious activity is visible without
+			// having to scrape proxy logs. Token is not logged in full —
+			// a 6-char prefix is enough to correlate without making the
+			// log file an oracle for stolen tokens.
+			tokenPrefix := token
+			if len(tokenPrefix) > 6 {
+				tokenPrefix = tokenPrefix[:6]
+			}
+			log.Printf("tunnel: passcode rejected (%s) for invite %s… from %s", gateErr, tokenPrefix, extractJoinSourceIP(r))
+			// 401 Unauthorized so the JoinPage flips into the
+			// "show passcode field + retry" state without retrying the
+			// rate-limit bucket on the next attempt — see writeShareJoinError.
+			// Always send the same user-facing message regardless of which
+			// sentinel fired so attackers cannot tell "wrong passcode" from
+			// "no passcode registered for this token" by inspection.
+			writeShareJoinError(w, http.StatusUnauthorized, "passcode_required", shareJoinPasscodeRequiredMessage)
+			return
+		}
 	}
 	displayName := strings.TrimSpace(submission.DisplayName)
 	if displayName == "" {

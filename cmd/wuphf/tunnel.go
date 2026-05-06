@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -120,14 +121,32 @@ type webTunnelController struct {
 	starting  bool
 	publicURL string
 	inviteURL string
-	expiresAt string
-	err       string
-	missing   bool
-	broker    *team.Broker
+	// inviteToken is the token portion of inviteURL (the bit after /join/).
+	// Tracked separately so the join handler can identify the most-recent
+	// invite without re-parsing the URL on every request.
+	inviteToken string
+	// passcode is the second factor displayed next to inviteURL. Rotates
+	// with each minted invite; the gate accepts only this passcode for
+	// the current inviteToken.
+	passcode string
+	// passcodes maps every still-redeemable invite token to its passcode.
+	// Old tokens linger here until the tunnel is stopped — that is fine
+	// because (a) the broker independently expires tokens after 24h and
+	// (b) joiners who already grabbed a stale URL may legitimately submit
+	// before the host clicks "Create new invite".
+	passcodes   map[string]string
+	expiresAt   string
+	err         string
+	missing     bool
+	broker      *team.Broker
+	rateLimiter *joinRateLimiter
 }
 
 func newWebTunnelController() *webTunnelController {
-	return &webTunnelController{}
+	return &webTunnelController{
+		passcodes:   make(map[string]string),
+		rateLimiter: newJoinRateLimiter(),
+	}
 }
 
 // SetBroker installs the in-process broker handle. Required before start():
@@ -150,6 +169,7 @@ func (c *webTunnelController) statusLocked() team.WebTunnelStatus {
 		Running:            c.running,
 		PublicURL:          c.publicURL,
 		InviteURL:          c.inviteURL,
+		Passcode:           c.passcode,
 		ExpiresAt:          c.expiresAt,
 		Error:              c.err,
 		CloudflaredMissing: c.missing,
@@ -158,6 +178,8 @@ func (c *webTunnelController) statusLocked() team.WebTunnelStatus {
 
 func (c *webTunnelController) clearInviteLocked() {
 	c.inviteURL = ""
+	c.inviteToken = ""
+	c.passcode = ""
 	c.expiresAt = ""
 }
 
@@ -169,12 +191,13 @@ func (c *webTunnelController) start() (team.WebTunnelStatus, error) {
 	// tunnel down and back up — same shape as webShareController.start().
 	if c.running && c.cmd != nil && c.publicURL != "" {
 		defer c.mu.Unlock()
-		inviteURL, expiresAt, err := c.mintInviteLocked(c.publicURL)
+		inviteURL, passcode, expiresAt, err := c.mintInviteLocked(c.publicURL)
 		if err != nil {
 			c.err = err.Error()
 			return c.statusLocked(), err
 		}
 		c.inviteURL = inviteURL
+		c.passcode = passcode
 		c.expiresAt = expiresAt
 		c.err = ""
 		return c.statusLocked(), nil
@@ -228,8 +251,14 @@ func (c *webTunnelController) start() (team.WebTunnelStatus, error) {
 		return c.statusLocked(), err
 	}
 	server := &http.Server{
-		Addr:              loopbackAddr,
-		Handler:           newShareHandler(brokerURL, brokerToken, nil),
+		Addr: loopbackAddr,
+		Handler: newShareHandler(shareHandlerConfig{
+			BrokerURL:   brokerURL,
+			BrokerToken: brokerToken,
+			OnJoin:      nil,
+			JoinGate:    c.joinGate,
+			RateLimiter: c.rateLimiter,
+		}),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
@@ -341,9 +370,10 @@ func (c *webTunnelController) start() (team.WebTunnelStatus, error) {
 	c.publicURL = publicURL
 	c.running = true
 	c.stopGuard = make(chan struct{})
+	log.Printf("tunnel: cloudflared up at %s", publicURL)
 
 	// Mint the first invite against the freshly-published public URL.
-	inviteURL, expiresAt, ierr := c.mintInviteLocked(publicURL)
+	inviteURL, passcode, expiresAt, ierr := c.mintInviteLocked(publicURL)
 	if ierr != nil {
 		// Tunnel is up but the invite call failed. Surface the error but
 		// keep the tunnel running — a retry can mint a new invite without
@@ -353,6 +383,7 @@ func (c *webTunnelController) start() (team.WebTunnelStatus, error) {
 		return c.statusLocked(), ierr
 	}
 	c.inviteURL = inviteURL
+	c.passcode = passcode
 	c.expiresAt = expiresAt
 	c.err = ""
 
@@ -384,6 +415,7 @@ func (c *webTunnelController) start() (team.WebTunnelStatus, error) {
 		c.publicURL = ""
 		c.server = nil
 		c.listener = nil
+		c.passcodes = make(map[string]string)
 		c.clearInviteLocked()
 		if err != nil && !errors.Is(err, context.Canceled) {
 			c.err = fmt.Sprintf("cloudflared exited unexpectedly: %v", err)
@@ -401,29 +433,74 @@ func (c *webTunnelController) start() (team.WebTunnelStatus, error) {
 }
 
 // mintInviteLocked issues a fresh invite token via the registered share
-// transport and formats the joiner-facing URL against the tunnel's public
-// origin. Caller must hold c.mu.
+// transport, generates a one-off passcode for it, and formats the joiner-
+// facing URL against the tunnel's public origin. Side-effect: registers
+// (token -> passcode) in c.passcodes so the share-handler joinGate can
+// verify subsequent /join POSTs. Caller must hold c.mu.
+//
+// Returns (inviteURL, passcode, expiresAt, err).
 //
 // Uses CreateInviteDetailedWithBuilder so the tunnel-URL builder is bound
-// atomically to this single call — the network-share path can run a parallel
-// SetURLBuilder/CreateInviteDetailed pair without overwriting our builder
-// mid-flight. SetURLBuilder is intentionally NOT used here; it would
-// recreate the very race the atomic-builder API exists to prevent.
-func (c *webTunnelController) mintInviteLocked(publicURL string) (string, string, error) {
+// atomically to this single invite-creation — the network-share path can
+// run a parallel call against the same ShareTransport without overwriting
+// our builder mid-flight. SetURLBuilder is intentionally NOT used here; it
+// would recreate the very race the atomic-builder API exists to prevent.
+func (c *webTunnelController) mintInviteLocked(publicURL string) (string, string, string, error) {
 	if c.broker == nil {
-		return "", "", errors.New("tunnel controller has no broker handle")
+		return "", "", "", errors.New("tunnel controller has no broker handle")
 	}
 	st := c.broker.ShareTransport()
 	if st == nil {
-		return "", "", errors.New("share transport is not registered; tunnel cannot mint invites")
+		return "", "", "", errors.New("share transport is not registered; tunnel cannot mint invites")
 	}
+	// Capture the token via the URL builder closure: CreateInviteDetailedWithBuilder
+	// returns the formatted URL, not the bare token, and we need the bare
+	// token to key the passcode map.
+	var capturedToken string
 	details, err := st.CreateInviteDetailedWithBuilder(context.Background(), func(token string) string {
+		capturedToken = token
 		return tunnelJoinURL(publicURL, token)
 	})
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
-	return details.URL, details.ExpiresAt, nil
+	passcode, err := generatePasscode()
+	if err != nil {
+		return "", "", "", fmt.Errorf("tunnel: generate passcode: %w", err)
+	}
+	if c.passcodes == nil {
+		c.passcodes = make(map[string]string)
+	}
+	c.passcodes[capturedToken] = passcode
+	c.inviteToken = capturedToken
+	tokenPrefix := capturedToken
+	if len(tokenPrefix) > 6 {
+		tokenPrefix = tokenPrefix[:6]
+	}
+	log.Printf("tunnel: invite minted token=%s… expires=%s", tokenPrefix, details.ExpiresAt)
+	return details.URL, passcode, details.ExpiresAt, nil
+}
+
+// joinGate is the share-handler hook. It enforces:
+//   - the invite token must be one this tunnel issued (an attacker who
+//     guesses or steals a network-share token cannot redeem it through the
+//     tunnel),
+//   - the supplied passcode must match the one we minted alongside the
+//     token (constant-time compare).
+//
+// Both failure modes return the SAME error message via errJoinPasscodeRequired
+// to avoid leaking which condition was hit.
+func (c *webTunnelController) joinGate(token, supplied string) error {
+	c.mu.Lock()
+	expected, ok := c.passcodes[token]
+	c.mu.Unlock()
+	if !ok {
+		return errJoinPasscodeRequired
+	}
+	if !constantTimeCompare(supplied, expected) {
+		return errJoinPasscodeInvalid
+	}
+	return nil
 }
 
 // tunnelJoinURL is the canonical "<public-base>/join/<token>" formatter.
@@ -440,6 +517,7 @@ func (c *webTunnelController) stop() error {
 	server := c.server
 	ln := c.listener
 	stopGuard := c.stopGuard
+	wasRunning := c.running
 	c.cmd = nil
 	c.cancel = nil
 	c.server = nil
@@ -447,9 +525,13 @@ func (c *webTunnelController) stop() error {
 	c.stopGuard = nil
 	c.running = false
 	c.publicURL = ""
+	c.passcodes = make(map[string]string)
 	c.clearInviteLocked()
 	c.err = ""
 	c.mu.Unlock()
+	if wasRunning {
+		log.Printf("tunnel: stopped")
+	}
 
 	if stopGuard != nil {
 		close(stopGuard)
