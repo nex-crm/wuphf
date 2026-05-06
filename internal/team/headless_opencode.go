@@ -213,6 +213,7 @@ func (l *Launcher) runHeadlessOpencodeTurn(ctx context.Context, slug string, not
 			))
 			appendHeadlessCodexLog(slug, "opencode_stderr: "+detail)
 			l.updateHeadlessProgress(slug, "error", "error", truncate(detail, 180), metrics)
+			emitHeadlessTerminal(agentStream, HeadlessProviderOpencode, slug, taskID, "", detail, metrics, nil)
 			if isOpencodeAuthError(detail) && l.broker != nil {
 				sysTarget := target
 				if strings.TrimSpace(sysTarget) == "" {
@@ -231,11 +232,13 @@ func (l *Launcher) runHeadlessOpencodeTurn(ctx context.Context, slug string, not
 			durationMillis(startedAt, firstTextAt),
 			err.Error(),
 		))
+		emitHeadlessTerminal(agentStream, HeadlessProviderOpencode, slug, taskID, "", err.Error(), metrics, nil)
 		return err
 	}
 	if scanErr != nil {
 		metrics.TotalMs = time.Since(startedAt).Milliseconds()
 		l.updateHeadlessProgress(slug, "error", "error", truncate(scanErr.Error(), 180), metrics)
+		emitHeadlessTerminal(agentStream, HeadlessProviderOpencode, slug, taskID, "", scanErr.Error(), metrics, nil)
 		return scanErr
 	}
 
@@ -256,6 +259,7 @@ func (l *Launcher) runHeadlessOpencodeTurn(ctx context.Context, slug string, not
 		summary = "reply ready · " + summary
 	}
 	l.updateHeadlessProgress(slug, "idle", "idle", summary, metrics)
+	emitHeadlessTerminal(agentStream, HeadlessProviderOpencode, slug, taskID, summary, "", metrics, nil)
 	relay.Flush()
 	if text != "" {
 		appendHeadlessCodexLog(slug, "opencode_result: "+text)

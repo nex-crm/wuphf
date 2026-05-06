@@ -91,10 +91,6 @@
 .message-reply .message-time {
   font-size: 10.5px;
 }
-.message-reply .message-token-badge {
-  font-size: 10px;
-  padding: 0 5px;
-}
 .message-reply .message-text {
   /* Readability is non-negotiable. Match parent size; tighten leading
      one notch so the reply feels dense without being cramped. */
@@ -149,18 +145,6 @@
 .message-time {
   font-size: 11px;
   color: var(--text-tertiary);
-}
-.message-token-badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 1px 6px;
-  border-radius: 999px;
-  background: rgba(18, 100, 163, 0.08);
-  border: 1px solid rgba(18, 100, 163, 0.18);
-  color: var(--accent);
-  font-size: 11px;
-  font-weight: 600;
-  font-family: var(--font-mono);
 }
 .message-text {
   font-size: 14px;
@@ -808,12 +792,6 @@ html[data-theme] .interview-bar-actions .btn-primary:hover {
 }
 
 /* ─── Stream event cards (CC style) ─── */
-.cc-token-line {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--text-tertiary);
-  padding: 4px 0;
-}
 .cc-thinking {
   font-family: var(--font-mono);
   font-size: 11px;

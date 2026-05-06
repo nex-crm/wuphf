@@ -242,6 +242,42 @@ Tracking work that is deliberately deferred from the current branch. Each item n
 
 ---
 
+### 19. BLOCKING badge fails WCAG AA in nex-dark theme
+
+**What:** The existing `.badge-yellow` (used by the BLOCKING pill on every blocking interview/approval card and inline InterviewBar) renders as `--yellow #ce6b09` on `--yellow-bg #fbf5dc` regardless of theme. In `nex-dark` that pairing is 3.35:1, below the AA threshold of 4.5:1 for normal text. The new `.badge-orange` introduced for EXTERNAL ACTION uses `--warning-500/--warning-200` which clears AA at 5.10:1 in both themes.
+
+**Why:** The BLOCKING pill is the primary stop-and-read signal across every approval surface. Failing AA in dark mode means low-vision users on the dark theme may miss it on a fast scan. Surfaced during plan-design-review (2026-05-06) Pass 6 contrast audit and verified by `node` luminance computation.
+
+**Pros:** A few-token change in `web/public/themes/nex-dark.css` (override `--yellow-bg` to a darker surface or `--yellow` to a lighter foreground) restores AA. Same fix could re-tone the badge so it stops looking like a chip from the light theme dropped onto a dark surface.
+
+**Cons:** Need to verify the new pairing does not regress the InterviewBar agent rail or other usage sites (every place `--yellow`/`--yellow-bg` is referenced — `grep` is the audit tool).
+
+**Context:** Plan-design-review on `feat/notebook-auto-writer-pr1` (2026-05-06) introduced `.badge-orange` for the new EXTERNAL ACTION pill via `var(--warning-200)`/`var(--warning-500)`. While verifying that pairing in dark mode I computed the existing BLOCKING badge contrast and found it pre-existing-broken. Not introduced by this PR; deliberately not fixed here to keep the change focused. See `~/.gstack/projects/nex-crm-wuphf/designs/approval-card-hierarchy-20260506/verify.html` for live side-by-side.
+
+**Depends on / blocked by:** None.
+
+**Trigger to revisit:** Next theme/tokens pass, OR an a11y-driven sweep, OR a user/customer report.
+
+---
+
+### 20. requireTeamActionApproval timeout + reject branches are untested
+
+**What:** `requireTeamActionApproval` in `internal/teammcp/actions.go` has three terminal branches: approve (covered indirectly), timeout (`actionApprovalTimeout` = 30 min, no test), and human-rejected (returns an error wrapping the choice ID, no test). The polling loop reads from a real broker via `brokerGetJSON`; testing the timeout/reject paths requires either a broker mock or a test refactor that injects the poll function as a dependency.
+
+**Why:** Pre-existing test debt surfaced by plan-eng-review (2026-05-06) Section 3 coverage diagram. Two production code branches with zero unit coverage. If a future refactor changes the rejection error format (e.g., from "human rejected X on Y" to a structured error), no test catches it. If the timeout duration is accidentally typoed (30 minutes → 30 seconds), no test catches that either.
+
+**Pros:** Adds confidence to the most error-prone branches. Forces a clean separation between the polling-IO and the decision logic.
+
+**Cons:** Refactor surface: pull broker polling behind an interface (`approvalPoller` with `Poll(ctx, requestID) (Answer, error)`), inject into `requireTeamActionApproval`, mock in tests. ~2 hours including the test cases. Modest change to a security-critical function — review carefully.
+
+**Context:** Surfaced during plan-eng-review on `feat/notebook-auto-writer-pr1` (2026-05-06) Section 3 (Test review). The PR that surfaced this added 30+ tests across spec building, dedupe key, and contract enforcement, but explicitly deferred timeout/reject coverage as out of scope for a UI/data-shape fix. The function signature is `func requireTeamActionApproval(ctx context.Context, slug, channel string, args TeamActionExecuteArgs) error`.
+
+**Depends on / blocked by:** None. The refactor is independent of any in-flight work.
+
+**Trigger to revisit:** Next time someone touches `requireTeamActionApproval` for any reason, OR a CSO/security audit pass on the approval gate, OR an incident where an approval times out and the error message is unclear.
+
+---
+
 ## Deferred
 
 Items with known fixes but out of scope for this branch. Each names the trigger that would unblock revisiting.
