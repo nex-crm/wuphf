@@ -188,6 +188,45 @@ func TestFollowUpMessageDelivery(t *testing.T) {
 	}
 }
 
+func TestHumanMessageDelivery(t *testing.T) {
+	dir := t.TempDir()
+	sessions := NewSessionStoreAt(dir)
+	queues := NewMessageQueues()
+	tools := NewToolRegistry()
+
+	svc := NewAgentService(
+		WithToolRegistry(tools),
+		WithSessionStore(sessions),
+		WithQueues(queues),
+	)
+
+	cfg := AgentConfig{
+		Slug: "human-test",
+		Name: "Human Test",
+	}
+	svc.Create(cfg)
+
+	if err := svc.HumanMessage("human-test", "are you stuck?"); err != nil {
+		t.Fatalf("HumanMessage: %v", err)
+	}
+
+	if !queues.HasHuman("human-test") {
+		t.Error("expected human message in human-priority queue")
+	}
+	if queues.HasFollowUp("human-test") {
+		t.Error("human message must not leak into follow-up queue")
+	}
+
+	msg, ok := queues.DrainHuman("human-test")
+	if !ok || msg != "are you stuck?" {
+		t.Errorf("DrainHuman = (%q, %v), want (\"are you stuck?\", true)", msg, ok)
+	}
+
+	if err := svc.HumanMessage("nope", "x"); err == nil {
+		t.Error("expected error for nonexistent agent")
+	}
+}
+
 func TestSubscribeUnsubscribe(t *testing.T) {
 	dir := t.TempDir()
 	sessions := NewSessionStoreAt(dir)
