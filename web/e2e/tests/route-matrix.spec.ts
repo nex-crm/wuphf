@@ -50,7 +50,11 @@ test.describe("canonical route matrix", () => {
         "placeholder",
         "Message #human__pm",
       );
-      await expect(p.getByText("Live output")).toBeVisible();
+      // The DM workbench surfaces the agent's SSE feed under a "Live stream"
+      // collapsible section (see AgentWorkbenchPane). The title is the
+      // user-visible affordance proving the stream surface mounted on the
+      // DM route.
+      await expect(p.getByText("Live stream")).toBeVisible();
     });
   });
 

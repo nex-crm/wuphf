@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"path/filepath"
 	"time"
 
 	"github.com/nex-crm/wuphf/internal/config"
@@ -104,6 +105,50 @@ func (b *Broker) initWikiWorker() {
 	autoWriter := NewAutoNotebookWriter(worker, nil)
 	autoWriter.Start(lifecycleCtx)
 
+	// PR 2: human "remember" intent classifier → direct team_wiki_write.
+	// Lifecycle mirrors AutoNotebookWriter. The writer is started before the
+	// broker mutex is taken, so the goroutine is alive by the time the
+	// PostMessage hook can fire.
+	humanWiki := NewHumanWikiIntentWriter(worker)
+	humanWiki.Start(lifecycleCtx)
+
+	// PR 3 (notebook-wiki-promise): demand index aggregates cross-agent
+	// notebook search hits and other demand signals (PRs 4 & 5) into a
+	// rolling-window score per entry. JSONL log lives under
+	// <wiki_root>/.promotion-demand/events.jsonl. A failed init is non-fatal:
+	// hooks no-op when the index is nil.
+	demandLogPath := filepath.Join(repo.Root(), ".promotion-demand", "events.jsonl")
+	demandIdx, demandErr := NewNotebookDemandIndex(demandLogPath)
+	if demandErr != nil {
+		log.Printf("wiki: promotion demand index init failed: %v", demandErr)
+		demandIdx = nil
+	}
+
+	// PR 5 (notebook-wiki-promise): channel intent dispatcher classifies
+	// question-form context-asks ("who has context on …") and feeds
+	// cross-agent notebook hits into the demand index as
+	// DemandSignalChannelContextAsk events. Dispatcher is started here so
+	// the goroutine is alive before the first PostMessage hook can fire.
+	// The optional reply path is OFF by default; toggle with
+	// WUPHF_CHANNEL_INTENT_REPLY=true.
+	channelIntent := NewChannelIntentDispatcher(b)
+	channelIntent.Start(lifecycleCtx)
+
+	// PR 6 (notebook-wiki-promise): periodic sweep that drains the demand
+	// index into the review log on adaptive cadence. Constructed here so
+	// the sweep can capture the demand index and wiki worker references
+	// at startup time and never re-enter b.mu from its goroutine. The
+	// review log is wired lazily via b.ReviewLog(); the escalator's
+	// callback resolves it on each tick so a sweep that starts before
+	// the review log lands picks it up automatically.
+	var sweep *PromotionSweep
+	if demandIdx != nil {
+		escalator := newDemandIndexEscalator(demandIdx, b.ReviewLog, worker)
+		counter := newAutoWriterNotebookCounter(autoWriter)
+		sweep = NewPromotionSweep(escalator, counter, promotionSweepConfigFromEnv())
+		sweep.Start(lifecycleCtx)
+	}
+
 	b.mu.Lock()
 	b.wikiWorker = worker
 	b.wikiIndex = idx
@@ -111,6 +156,10 @@ func (b *Broker) initWikiWorker() {
 	b.wikiDLQ = dlq
 	b.readLog = NewReadLog(repo.Root())
 	b.autoNotebookWriter = autoWriter
+	b.humanWikiWriter = humanWiki
+	b.demandIndex = demandIdx
+	b.channelIntentDispatcher = channelIntent
+	b.promotionSweep = sweep
 	b.mu.Unlock()
 	// Init succeeded; clear any cached failure so future calls don't surface
 	// stale errors from a previous attempt.

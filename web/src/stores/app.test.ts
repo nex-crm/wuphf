@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { directChannelSlug, selectPillState, useAppStore } from "./app";
+import {
+  directChannelSlug,
+  MAX_AGENT_HISTORY,
+  selectAgentPeek,
+  selectPillState,
+  useAppStore,
+} from "./app";
 
 afterEach(() => {
   useAppStore.setState({
@@ -15,6 +21,7 @@ afterEach(() => {
     composerHelpOpen: false,
     onboardingComplete: false,
     agentActivitySnapshots: {},
+    agentActivityHistory: {},
     isReconnecting: false,
   });
 });
@@ -169,6 +176,119 @@ describe("recordActivitySnapshot", () => {
       activity: "noise",
     });
     expect(useAppStore.getState().agentActivitySnapshots).toEqual({});
+  });
+
+  it("first event for a slug leaves history empty (nothing displaced yet)", () => {
+    useAppStore.getState().recordActivitySnapshot({
+      slug: "tess",
+      activity: "merging branch",
+      kind: "routine",
+    });
+
+    expect(useAppStore.getState().agentActivityHistory.tess ?? []).toEqual([]);
+    expect(useAppStore.getState().agentActivitySnapshots.tess.activity).toBe(
+      "merging branch",
+    );
+  });
+
+  it("each subsequent event prepends the displaced previous snapshot to history (newest-first)", () => {
+    const store = useAppStore.getState();
+    store.recordActivitySnapshot({ slug: "tess", activity: "first" });
+    store.recordActivitySnapshot({ slug: "tess", activity: "second" });
+    store.recordActivitySnapshot({ slug: "tess", activity: "third" });
+
+    const history = useAppStore.getState().agentActivityHistory.tess;
+    expect(history.map((h) => h.activity)).toEqual(["second", "first"]);
+    expect(useAppStore.getState().agentActivitySnapshots.tess.activity).toBe(
+      "third",
+    );
+  });
+
+  it("caps history at MAX_AGENT_HISTORY entries (oldest evicted)", () => {
+    const store = useAppStore.getState();
+    // Fire MAX_AGENT_HISTORY + 3 events. After event N, the current is in
+    // agentActivitySnapshots and the previous N-1 sit in history capped at
+    // MAX_AGENT_HISTORY.
+    for (let i = 0; i < MAX_AGENT_HISTORY + 3; i += 1) {
+      store.recordActivitySnapshot({
+        slug: "ava",
+        activity: `evt-${i}`,
+        kind: "routine",
+      });
+    }
+
+    const history = useAppStore.getState().agentActivityHistory.ava;
+    expect(history.length).toBe(MAX_AGENT_HISTORY);
+    // Newest displaced is the most recent prior current — evt-(N-2) where
+    // N = MAX_AGENT_HISTORY + 3 (the still-current value is evt-(N-1)).
+    const expectedNewest = `evt-${MAX_AGENT_HISTORY + 1}`;
+    expect(history[0].activity).toBe(expectedNewest);
+    // Tail is the oldest survivor: total fired = MAX_AGENT_HISTORY + 3, the
+    // current absorbs 1, so MAX_AGENT_HISTORY + 2 displaced events compete
+    // for MAX_AGENT_HISTORY slots — oldest 2 fall off, leaving evt-2 at tail.
+    expect(history[history.length - 1].activity).toBe("evt-2");
+  });
+
+  it("history is per-slug and does not leak between agents", () => {
+    const store = useAppStore.getState();
+    store.recordActivitySnapshot({ slug: "tess", activity: "tess-1" });
+    store.recordActivitySnapshot({ slug: "ava", activity: "ava-1" });
+    store.recordActivitySnapshot({ slug: "tess", activity: "tess-2" });
+
+    const tessHistory = useAppStore.getState().agentActivityHistory.tess;
+    const avaHistory = useAppStore.getState().agentActivityHistory.ava ?? [];
+    expect(tessHistory.map((h) => h.activity)).toEqual(["tess-1"]);
+    expect(avaHistory).toEqual([]);
+  });
+
+  it("history records the full StoredActivitySnapshot (with receivedAtMs/haloUntilMs preserved)", () => {
+    const store = useAppStore.getState();
+    store.recordActivitySnapshot({ slug: "sam", activity: "first" });
+    const firstStamped = useAppStore.getState().agentActivitySnapshots.sam;
+    store.recordActivitySnapshot({ slug: "sam", activity: "second" });
+
+    const [displaced] = useAppStore.getState().agentActivityHistory.sam;
+    expect(displaced.activity).toBe("first");
+    expect(displaced.receivedAtMs).toBe(firstStamped.receivedAtMs);
+    expect(displaced.haloUntilMs).toBe(firstStamped.haloUntilMs);
+  });
+});
+
+describe("selectAgentPeek", () => {
+  it("returns undefined current and empty history for an unknown slug", () => {
+    const result = selectAgentPeek(
+      { agentActivitySnapshots: {}, agentActivityHistory: {} },
+      "ghost",
+    );
+    expect(result).toEqual({ current: undefined, history: [] });
+  });
+
+  it("returns the current snapshot plus its newest-first history", () => {
+    const now = 1_700_000_000_000;
+    const state = {
+      agentActivitySnapshots: {
+        tess: {
+          slug: "tess",
+          activity: "now",
+          receivedAtMs: now,
+          haloUntilMs: now + 600,
+        },
+      },
+      agentActivityHistory: {
+        tess: [
+          {
+            slug: "tess",
+            activity: "prev",
+            receivedAtMs: now - 1000,
+            haloUntilMs: now - 400,
+          },
+        ],
+      },
+    };
+    expect(selectAgentPeek(state, "tess")).toEqual({
+      current: state.agentActivitySnapshots.tess,
+      history: state.agentActivityHistory.tess,
+    });
   });
 });
 

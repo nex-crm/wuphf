@@ -460,6 +460,29 @@ func (b *Broker) handleNotebookSearch(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "task not found"})
 		return
 	}
+	// PR 3 (notebook-wiki-promise): cross-agent search hits feed the demand
+	// index. Searcher slug comes from the standard X-WUPHF-Agent header (the
+	// MCP server sets this on every outbound call). Per-owner hit slices are
+	// kept separate so a slug=all search records one demand event per
+	// (entry, owner) pair, not one aggregate.
+	searcherSlug := strings.TrimSpace(r.Header.Get(agentRateLimitHeader))
+	hitsByOwner := map[string][]string{}
+	recordOwnerHit := func(ownerSlug string, slugHits []WikiSearchHit) {
+		if ownerSlug == "" || len(slugHits) == 0 {
+			return
+		}
+		seen := map[string]struct{}{}
+		paths := hitsByOwner[ownerSlug]
+		for _, h := range slugHits {
+			if _, dup := seen[h.Path]; dup {
+				continue
+			}
+			seen[h.Path] = struct{}{}
+			paths = append(paths, h.Path)
+		}
+		hitsByOwner[ownerSlug] = paths
+	}
+
 	var hits []WikiSearchHit
 	if strings.EqualFold(slug, "all") {
 		searchSlugs, err := b.notebookSearchSlugs(worker)
@@ -477,6 +500,7 @@ func (b *Broker) handleNotebookSearch(w http.ResponseWriter, r *http.Request) {
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 				return
 			}
+			recordOwnerHit(searchSlug, slugHits)
 			hits = append(hits, slugHits...)
 		}
 	} else {
@@ -489,6 +513,7 @@ func (b *Broker) handleNotebookSearch(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
+		recordOwnerHit(slug, slugHits)
 		hits = slugHits
 	}
 	if taskID != "" {
@@ -515,6 +540,15 @@ func (b *Broker) handleNotebookSearch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"hits": hits})
+
+	// Fire-and-forget demand recording AFTER the response is written. This
+	// runs outside b.mu (the handler never acquired it). recordNotebookDemandAsync
+	// no-ops on missing index, empty slugs, or self-search.
+	if searcherSlug != "" {
+		for ownerSlug, paths := range hitsByOwner {
+			b.recordNotebookDemandAsync(ownerSlug, paths, searcherSlug)
+		}
+	}
 }
 
 func (b *Broker) notebookTaskExists(taskID string) bool {
