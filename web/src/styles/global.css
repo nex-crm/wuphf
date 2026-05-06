@@ -496,6 +496,23 @@ body {
   pointer-events: none;
 }
 
+/* Transport-presence indicator on agent avatars. Sits at top-right so it
+   does not collide with the harness badge at bottom-right. Rendered only
+   when the member's `online` flag is true (see AgentList SidebarAgentRow);
+   absence of the dot encodes "offline OR never connected" — the peek card
+   surfaces the distinction via "Last seen". */
+.online-badge {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--green, #03a04c);
+  box-shadow: 0 0 0 1.5px var(--bg-card, #fff);
+  pointer-events: none;
+}
+
 /* ─── Status Dot ─── */
 .status-dot {
   width: 6px;

@@ -2302,6 +2302,25 @@ html[data-theme="nex"]
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.sidebar-agent-peek-presence {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+.sidebar-agent-peek-presence[data-state="online"] {
+  color: var(--green-dark, var(--text-secondary));
+}
+.sidebar-agent-peek-presence-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--green, #03a04c);
+  flex-shrink: 0;
+}
 .sidebar-agent-peek-blocked-chip {
   flex-shrink: 0;
   font-size: 9px;

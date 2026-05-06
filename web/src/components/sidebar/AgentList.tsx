@@ -95,6 +95,22 @@ function SidebarAgentRow({
             size={10}
             className="harness-badge-on-avatar"
           />
+          {/* Transport-presence dot. Top-right corner so it does not collide
+              with the harness badge at bottom-right. Hidden entirely when the
+              member has never been upserted (built-ins without an adapter)
+              so we do not invent an "offline" state for members that never
+              had a connection concept. */}
+          {agent.online ? (
+            // Decorative: the same presence state is conveyed textually in
+            // the peek card ("Online" / "Last seen Xm ago"), so the badge
+            // itself is hidden from assistive tech to avoid announcing the
+            // same fact on every row.
+            <span
+              className="online-badge"
+              data-testid={`online-badge-${agent.slug}`}
+              aria-hidden="true"
+            />
+          ) : null}
         </span>
         <div className="sidebar-agent-wrap">
           <span className="sidebar-agent-name">{displayName}</span>
@@ -143,6 +159,8 @@ function SidebarAgentRow({
           peek.close();
           onSelect(agent.slug);
         }}
+        online={agent.online}
+        lastSeenAt={agent.last_seen_at}
       />
       {isFirst && showNudge ? (
         <span className="sidebar-agent-nudge" data-testid="first-run-nudge">
