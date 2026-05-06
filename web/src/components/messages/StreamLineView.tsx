@@ -12,8 +12,8 @@ interface StreamLineViewProps {
 /**
  * Renders one SSE line from the agent stream. Understands the broker's
  * OpenAI-Responses-style events — agent messages render as dim thinking
- * lines, tool calls render as collapsible cards, token totals render as
- * a single line. Everything else falls back to pretty-printed JSON.
+ * lines, tool calls render as collapsible cards. Everything else falls
+ * back to pretty-printed JSON.
  */
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
 export function StreamLineView({ line, compact = false }: StreamLineViewProps) {
@@ -39,10 +39,8 @@ export function StreamLineView({ line, compact = false }: StreamLineViewProps) {
     return null;
   }
 
-  // Token total line for turn/response completed
+  // Suppress per-turn completion frames — they used to render a token total.
   if (evtType === "turn.completed" || evtType === "response.completed") {
-    const tokens = renderTokens(parsed);
-    if (tokens) return <div className="cc-token-line">{tokens}</div>;
     return null;
   }
 
@@ -261,49 +259,6 @@ function stringFromToolContent(content: unknown): string {
     return JSON.stringify(content);
   }
   return "";
-}
-
-function renderTokens(parsed: Record<string, unknown>): string | null {
-  const u = extractUsage(parsed);
-  if (!u) return null;
-  const inTok = toNum(u.input_tokens);
-  const outTok = toNum(u.output_tokens);
-  const cacheRead = toNum(
-    u.cached_input_tokens ?? u.cache_read_input_tokens ?? u.cache_read_tokens,
-  );
-  const cacheCreate = toNum(
-    u.cache_creation_input_tokens ?? u.cache_creation_tokens,
-  );
-  const total = inTok + outTok + cacheRead + cacheCreate;
-  if (total === 0) return null;
-  const parts = [`${formatTokens(inTok)} in`, `${formatTokens(outTok)} out`];
-  if (cacheRead > 0) parts.push(`${formatTokens(cacheRead)} cache read`);
-  if (cacheCreate > 0) parts.push(`${formatTokens(cacheCreate)} cache write`);
-  return `\u2500\u2500 ${formatTokens(total)} tokens (${parts.join(", ")})`;
-}
-
-function extractUsage(
-  parsed: Record<string, unknown>,
-): Record<string, unknown> | null {
-  const candidates: unknown[] = [
-    parsed.usage,
-    (parsed.response as Record<string, unknown> | undefined)?.usage,
-    (parsed.turn as Record<string, unknown> | undefined)?.usage,
-  ];
-  for (const c of candidates) {
-    if (c && typeof c === "object") return c as Record<string, unknown>;
-  }
-  return null;
-}
-
-function toNum(v: unknown): number {
-  return typeof v === "number" && Number.isFinite(v) ? v : 0;
-}
-
-function formatTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
-  return String(n);
 }
 
 const ARG_SKIP = new Set(["my_slug", "new_topic", "viewer_slug", "tagged"]);
