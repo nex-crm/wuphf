@@ -450,6 +450,105 @@ func TestHandleBlueprintsMarksLeadBuiltIn(t *testing.T) {
 	})
 }
 
+// TestHandleBlueprintsExposesPackPreviewMetadata verifies the new
+// pack-library fields surface on the wire. The wizard's pack library
+// reads outcome, category, channels, skills, wiki_scaffold,
+// first_tasks, requirements, and example_artifacts to render the
+// detail panel before commit. Backward compatibility: the fields are
+// additive — the same response still satisfies the older lead/built_in
+// contract verified by TestHandleBlueprintsMarksLeadBuiltIn.
+func TestHandleBlueprintsExposesPackPreviewMetadata(t *testing.T) {
+	withTempHome(t, func(_ string) {
+		withOperationsFallbackFS(t)
+
+		req := httptest.NewRequest(http.MethodGet, "/onboarding/blueprints", nil)
+		w := httptest.NewRecorder()
+		HandleBlueprints(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("status: got %d\nbody: %s", w.Code, w.Body.String())
+		}
+
+		var resp struct {
+			Templates []struct {
+				ID                    string `json:"id"`
+				Outcome               string `json:"outcome"`
+				Category              string `json:"category"`
+				EstimatedSetupMinutes int    `json:"estimated_setup_minutes"`
+				Channels              []struct {
+					Slug    string `json:"slug"`
+					Name    string `json:"name"`
+					Purpose string `json:"purpose"`
+				} `json:"channels"`
+				Skills []struct {
+					Name    string `json:"name"`
+					Purpose string `json:"purpose"`
+				} `json:"skills"`
+				WikiScaffold []struct {
+					Path  string `json:"path"`
+					Title string `json:"title"`
+				} `json:"wiki_scaffold"`
+				FirstTasks []struct {
+					ID             string `json:"id"`
+					Title          string `json:"title"`
+					Prompt         string `json:"prompt"`
+					ExpectedOutput string `json:"expected_output"`
+				} `json:"first_tasks"`
+				Requirements []struct {
+					Kind     string `json:"kind"`
+					Name     string `json:"name"`
+					Required bool   `json:"required"`
+				} `json:"requirements"`
+				ExampleArtifacts []struct {
+					Title string `json:"title"`
+				} `json:"example_artifacts"`
+			} `json:"templates"`
+		}
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+
+		var found bool
+		for _, tpl := range resp.Templates {
+			if tpl.ID != "bookkeeping-invoicing-service" {
+				continue
+			}
+			found = true
+			if tpl.Outcome == "" {
+				t.Error("expected outcome to be populated for bookkeeping pack")
+			}
+			if tpl.Category != "services" {
+				t.Errorf("expected category=services, got %q", tpl.Category)
+			}
+			if tpl.EstimatedSetupMinutes <= 0 {
+				t.Errorf("expected estimated_setup_minutes > 0, got %d", tpl.EstimatedSetupMinutes)
+			}
+			if len(tpl.Channels) == 0 {
+				t.Error("expected at least one channel on the wire")
+			}
+			if len(tpl.Skills) == 0 {
+				t.Error("expected at least one skill on the wire")
+			}
+			if len(tpl.FirstTasks) == 0 {
+				t.Fatal("expected at least one first_task on the wire")
+			}
+			ft := tpl.FirstTasks[0]
+			if ft.Title == "" || ft.Prompt == "" || ft.ExpectedOutput == "" {
+				t.Errorf("first_task fields incomplete: %+v", ft)
+			}
+			if len(tpl.Requirements) == 0 {
+				t.Error("expected at least one requirement on the wire")
+			}
+			if len(tpl.WikiScaffold) == 0 {
+				t.Error("expected wiki_scaffold to be derived from wiki_schema bootstrap")
+			}
+		}
+		if !found {
+			t.Fatalf("bookkeeping-invoicing-service not found in response: %+v", resp.Templates)
+		}
+	})
+}
+
 // TestHandleChecklistDoneMarksItem verifies that POST /onboarding/checklist/{id}/done
 // marks the item and persists it.
 func TestHandleChecklistDoneMarksItem(t *testing.T) {

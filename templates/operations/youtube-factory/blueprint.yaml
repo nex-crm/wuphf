@@ -1,8 +1,45 @@
 id: youtube-factory
 name: YouTube Factory
 kind: media_business
+category: media
+outcome: "Script, film, publish, and analyze a recurring YouTube channel."
 description: Template for a repeatable video-led business with human-gated external side effects.
 objective: Build and run a repeatable video operation with durable planning, reusable workflows, integration-backed execution, and explicit human approvals at external side effects.
+estimated_setup_minutes: 7
+first_tasks:
+  - id: ten-video-slate
+    title: "Plan the first 10-video slate"
+    prompt: |
+      Plan the first 10-video slate for the channel. For each video give: a working title, the audience, the promise, the hook, and the call to action. Group by series so the channel reads as a coherent body of work, not 10 disconnected ideas.
+    expected_output: "A 10-row table grouped by series, each row with title, audience, promise, hook, and CTA."
+  - id: research-to-script
+    title: "Turn research notes into a video script"
+    prompt: |
+      Take a topic I will paste in and turn it into a 5-minute video script. Open with a strong hook, deliver three concrete points with examples, and close with a single takeaway. Mark on-camera vs voice-over and any b-roll callouts.
+    expected_output: "A 5-minute script with hook, three sections, b-roll markers, and an on-camera/voice-over column."
+skills:
+  - name: "Topic research"
+    purpose: "Turn a niche question into research notes worth filming."
+  - name: "Scriptwriting"
+    purpose: "Write conversational, performance-ready scripts with strong hooks."
+  - name: "Production planning"
+    purpose: "Plan shoots, edits, and publish gates with explicit approval points."
+requirements:
+  - kind: api-key
+    name: "ANTHROPIC_API_KEY or OPENAI_API_KEY"
+    required: true
+    detail: "Powers the research, script, and editor agents."
+  - kind: runtime
+    name: "Claude Code or Codex CLI"
+    required: true
+    detail: "Runs the agent loops locally."
+example_artifacts:
+  - kind: plan
+    title: "10-video content slate"
+  - kind: script
+    title: "Long-form video script"
+  - kind: report
+    title: "Per-video performance review"
 default_reviewer: ceo
 reviewer_paths:
   "team/research/**": research-lead

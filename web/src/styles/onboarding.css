@@ -610,9 +610,312 @@
 .template-card:focus-visible,
 .runtime-tile:focus-visible,
 .wiz-team-tile:focus-visible,
-.task-suggestion:focus-visible {
+.task-suggestion:focus-visible,
+.pack-card:focus-visible,
+.pack-filter-chip:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+
+/* ─── Pack Library (Step 2) ─── */
+.pack-library {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.pack-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.pack-filter-chip {
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    border-color 0.15s,
+    background 0.15s,
+    color 0.15s;
+}
+
+.pack-filter-chip:hover {
+  border-color: var(--border-dark);
+  color: var(--text);
+}
+
+.pack-filter-chip.active {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+  color: var(--text);
+}
+
+.pack-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+  align-items: stretch;
+}
+
+.pack-empty {
+  padding: 20px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  color: var(--text-tertiary);
+  text-align: center;
+}
+
+.pack-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  cursor: pointer;
+  text-align: left;
+  font-family: var(--font-sans);
+  transition:
+    border-color 0.15s,
+    background 0.15s;
+}
+
+.pack-card:hover {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+
+.pack-card.selected,
+.pack-card.open {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+
+.pack-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pack-card-icon {
+  font-size: 18px;
+}
+
+.pack-card-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.pack-card-outcome {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.pack-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.pack-card-meta-item {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.pack-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+}
+
+.pack-detail-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.pack-detail-eyebrow {
+  margin: 0 0 4px 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.pack-detail-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.pack-detail-outcome {
+  margin: 4px 0 0 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.pack-detail-close {
+  padding: 4px 10px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.pack-detail-close:hover {
+  border-color: var(--border-dark);
+  color: var(--text);
+}
+
+.pack-detail-description {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.pack-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.pack-detail-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+}
+
+.pack-detail-section-title {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.pack-detail-section-empty {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  font-style: italic;
+}
+
+.pack-detail-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pack-detail-list li {
+  font-size: 12px;
+  color: var(--text);
+  line-height: 1.5;
+}
+
+.pack-detail-name {
+  font-weight: 600;
+}
+
+.pack-detail-role {
+  color: var(--text-secondary);
+}
+
+.pack-detail-path {
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.pack-detail-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+  background: var(--accent-bg);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  vertical-align: middle;
+}
+
+.pack-detail-tag-optional {
+  color: var(--text-tertiary);
+  background: transparent;
+  border-color: var(--border);
+}
+
+.pack-detail-task {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pack-detail-expected {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.pack-detail-expected-label {
+  color: var(--text-tertiary);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 10px;
+}
+
+.pack-detail-empty {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  text-align: center;
+}
+
+.pack-detail-cta {
+  display: flex;
+  justify-content: flex-end;
+}
+
+@media (max-width: 640px) {
+  .pack-detail-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* ─── Task Suggestions (step 6) ─── */
