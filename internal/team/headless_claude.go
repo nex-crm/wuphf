@@ -206,6 +206,7 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 			detail,
 		))
 		l.updateHeadlessProgress(slug, "error", "error", truncate(detail, 180), metrics)
+		emitHeadlessTerminal(agentStream, HeadlessProviderClaude, slug, taskID, "", detail, metrics, claudeUsageToTokenUsage(result.Usage))
 		return fmt.Errorf("%w: %s", err, detail)
 	}
 	if parseErr != nil {
@@ -218,6 +219,7 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 			parseErr.Error(),
 		))
 		l.updateHeadlessProgress(slug, "error", "error", truncate(parseErr.Error(), 180), metrics)
+		emitHeadlessTerminal(agentStream, HeadlessProviderClaude, slug, taskID, "", parseErr.Error(), metrics, claudeUsageToTokenUsage(result.Usage))
 		return parseErr
 	}
 
@@ -236,6 +238,7 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 		summary = "reply ready · " + summary
 	}
 	l.updateHeadlessProgress(slug, "idle", "idle", summary, metrics)
+	emitHeadlessTerminal(agentStream, HeadlessProviderClaude, slug, taskID, summary, "", metrics, claudeUsageToTokenUsage(result.Usage))
 	if l.broker != nil {
 		l.broker.RecordAgentUsage(slug, l.headlessClaudeModel(slug), result.Usage)
 	}
@@ -268,6 +271,18 @@ func (l *Launcher) headlessClaudeMaxTurns(slug string) string {
 		return "30"
 	}
 	return "15"
+}
+
+// claudeUsageToTokenUsage adapts the provider-level ClaudeUsage record
+// into the runner-agnostic envelope HeadlessEvent expects. Cost and
+// cache-token fields are dropped: the wire shape only carries
+// input/output for now, and adding more fields here would force a wire
+// change for every runner.
+func claudeUsageToTokenUsage(u provider.ClaudeUsage) *headlessTokenUsage {
+	if u.InputTokens == 0 && u.OutputTokens == 0 {
+		return nil
+	}
+	return &headlessTokenUsage{InputTokens: u.InputTokens, OutputTokens: u.OutputTokens}
 }
 
 func (l *Launcher) buildHeadlessClaudeEnv(slug string) []string {
