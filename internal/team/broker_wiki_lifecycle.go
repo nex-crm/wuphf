@@ -134,6 +134,21 @@ func (b *Broker) initWikiWorker() {
 	channelIntent := NewChannelIntentDispatcher(b)
 	channelIntent.Start(lifecycleCtx)
 
+	// PR 6 (notebook-wiki-promise): periodic sweep that drains the demand
+	// index into the review log on adaptive cadence. Constructed here so
+	// the sweep can capture the demand index and wiki worker references
+	// at startup time and never re-enter b.mu from its goroutine. The
+	// review log is wired lazily via b.ReviewLog(); the escalator's
+	// callback resolves it on each tick so a sweep that starts before
+	// the review log lands picks it up automatically.
+	var sweep *PromotionSweep
+	if demandIdx != nil {
+		escalator := newDemandIndexEscalator(demandIdx, b.ReviewLog, worker)
+		counter := newAutoWriterNotebookCounter(autoWriter)
+		sweep = NewPromotionSweep(escalator, counter, promotionSweepConfigFromEnv())
+		sweep.Start(lifecycleCtx)
+	}
+
 	b.mu.Lock()
 	b.wikiWorker = worker
 	b.wikiIndex = idx
@@ -144,6 +159,7 @@ func (b *Broker) initWikiWorker() {
 	b.humanWikiWriter = humanWiki
 	b.demandIndex = demandIdx
 	b.channelIntentDispatcher = channelIntent
+	b.promotionSweep = sweep
 	b.mu.Unlock()
 	// Init succeeded; clear any cached failure so future calls don't surface
 	// stale errors from a previous attempt.
