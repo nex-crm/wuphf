@@ -1,0 +1,26 @@
+{
+  "_comment": "Pinned cloudflared release that wuphf bundles for the public-tunnel feature. To bump: pick a release tag from https://github.com/cloudflare/cloudflared/releases, copy the SHA256 values from that release's notes, and update both fields in lockstep. Never bump version without bumping sha256 — the install will refuse to run an unverified binary.",
+  "version": "2026.3.0",
+  "platforms": {
+    "darwin-amd64": {
+      "asset": "cloudflared-darwin-amd64.tgz",
+      "sha256": "b91dbec79a3e3809d5508b96d8b0bdfbf3ad7d51f858200228fa3e57100580d9"
+    },
+    "darwin-arm64": {
+      "asset": "cloudflared-darwin-arm64.tgz",
+      "sha256": "633cee0fd41fd2020e17498beecc54811bf4fc99f891c080dc9343eb0f449c60"
+    },
+    "linux-amd64": {
+      "asset": "cloudflared-linux-amd64",
+      "sha256": "4a9e50e6d6d798e90fcd01933151a90bf7edd99a0a55c28ad18f2e16263a5c30"
+    },
+    "linux-arm64": {
+      "asset": "cloudflared-linux-arm64",
+      "sha256": "0755ba4cbab59980e6148367fcf53a8f3ec85a97deefd63c2420cf7850769bee"
+    },
+    "windows-amd64": {
+      "asset": "cloudflared-windows-amd64.exe",
+      "sha256": "59b12880b24af581cf5b1013db601c7d843b9b097e9c78aa5957c7f39f741885"
+    }
+  }
+}

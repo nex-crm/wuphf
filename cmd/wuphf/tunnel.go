@@ -8,7 +8,9 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
@@ -38,27 +40,59 @@ const cloudflaredStartTimeout = 45 * time.Second
 const cloudflaredStopTimeout = 5 * time.Second
 
 // cloudflaredMissingMessage is the user-facing error when the binary is not
-// on PATH. We deliberately do NOT auto-download it — silently fetching a
-// signed binary into ~/.wuphf is exactly the class of "what is this thing,
-// my AV is yelling" support load the user asked us to avoid. Instead, give
-// install commands per OS so the host can copy-paste once.
+// next to the wuphf executable AND not on PATH. The npm postinstall ships
+// cloudflared into the same directory as the wuphf binary so this path
+// almost never fires for npm users; it shows up for `go install` users and
+// for npm users whose corp proxy blocked the github.com download. The
+// recovery hint covers both: reinstall from npm (refreshes the bundle), or
+// install cloudflared via the platform package manager.
 func cloudflaredMissingMessage() string {
-	var install string
+	var manual string
 	switch runtime.GOOS {
 	case "darwin":
-		install = "  brew install cloudflared"
+		manual = "  brew install cloudflared"
 	case "windows":
-		install = "  winget install --id Cloudflare.cloudflared"
-	case "linux":
-		install = "  See https://github.com/cloudflare/cloudflared#installing-cloudflared"
+		manual = "  winget install --id Cloudflare.cloudflared"
 	default:
-		install = "  See https://github.com/cloudflare/cloudflared#installing-cloudflared"
+		manual = "  See https://github.com/cloudflare/cloudflared#installing-cloudflared"
 	}
 	return "cloudflared is not installed.\n\n" +
-		"WUPHF uses Cloudflare's free Quick Tunnel (no account required) to give\n" +
-		"your teammate a secure public URL. Install it once with:\n\n" +
-		install + "\n\n" +
+		"WUPHF normally bundles cloudflared with the npm install. If you see this,\n" +
+		"either the bundle download was blocked (corp proxy / offline install) or\n" +
+		"you installed wuphf via `go install` and we did not stage it.\n\n" +
+		"Fix: reinstall wuphf with `npm install -g wuphf@latest`, or install\n" +
+		"cloudflared manually:\n\n" +
+		manual + "\n\n" +
 		"Then click \"Start public tunnel\" again."
+}
+
+// findCloudflared returns the path to a usable cloudflared binary. Search
+// order is: bundled-next-to-wuphf, then PATH. The bundled lookup is first
+// because npm postinstall stages a SHA256-verified release into the same
+// directory as the wuphf binary, and a system-installed cloudflared on
+// PATH may be older / unsigned / config-clobbered. Returns the empty
+// string + non-nil error when neither location resolves.
+func findCloudflared() (string, error) {
+	binaryName := "cloudflared"
+	if runtime.GOOS == "windows" {
+		binaryName = "cloudflared.exe"
+	}
+	if exe, err := os.Executable(); err == nil {
+		// Resolve symlinks (e.g. brew links wuphf to opt/wuphf/bin/wuphf
+		// from a Cellar path) so the sibling lookup hits the real install
+		// dir, not the link tree.
+		if real, errEval := filepath.EvalSymlinks(exe); errEval == nil {
+			exe = real
+		}
+		candidate := filepath.Join(filepath.Dir(exe), binaryName)
+		if info, statErr := os.Stat(candidate); statErr == nil && !info.IsDir() {
+			return candidate, nil
+		}
+	}
+	if path, err := exec.LookPath("cloudflared"); err == nil {
+		return path, nil
+	}
+	return "", errors.New("cloudflared not found")
 }
 
 // webTunnelController owns the cloudflared subprocess and a loopback share
@@ -147,7 +181,7 @@ func (c *webTunnelController) start() (team.WebTunnelStatus, error) {
 
 	binary := c.binary
 	if binary == "" {
-		path, lookErr := exec.LookPath("cloudflared")
+		path, lookErr := findCloudflared()
 		if lookErr != nil {
 			c.missing = true
 			c.err = cloudflaredMissingMessage()
