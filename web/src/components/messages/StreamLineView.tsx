@@ -28,6 +28,14 @@ export function StreamLineView({ line, compact = false }: StreamLineViewProps) {
     return <div className="stream-line stream-line-raw">{text}</div>;
   }
 
+  // HeadlessEvent envelope: provider-agnostic, runner-emitted typed
+  // event. Wire shape mirrors internal/team/headless_event.go's struct.
+  // Branch first so the discriminator wins over provider-native `type`
+  // routes below (e.g. `assistant`, `mcp_tool_event`).
+  if (parsed.kind === "headless_event") {
+    return <HeadlessEventView parsed={parsed} />;
+  }
+
   const evtType = typeof parsed.type === "string" ? parsed.type : "";
 
   // Skip noise events entirely
@@ -114,6 +122,58 @@ export function StreamLineView({ line, compact = false }: StreamLineViewProps) {
 
   // Fallback: structured event with type/phase/agent + detail + extras
   return <GenericEventCard parsed={parsed} compact={compact} />;
+}
+
+// HeadlessEventView renders the typed HeadlessEvent envelope emitted by
+// each runner at terminal phases (idle / error). The wire shape comes
+// from internal/team/headless_event.go (HeadlessEvent struct). A2-MVP
+// only emits idle and error; the rendering branches keep the layout
+// minimal because future slices (text / tool_use / tool_result) will
+// reuse this component, and a maximalist v1 design would lock those
+// future variants into chrome that won't fit.
+function HeadlessEventView({ parsed }: { parsed: Record<string, unknown> }) {
+  const eventType = stringish(parsed.type);
+  const provider = stringish(parsed.provider);
+  const text = stringish(parsed.text);
+  const detail = stringish(parsed.detail);
+  const summary = (text || detail).trim();
+  const metrics =
+    parsed.metrics && typeof parsed.metrics === "object"
+      ? (parsed.metrics as Record<string, unknown>)
+      : null;
+
+  if (eventType === "idle") {
+    return (
+      <div className="stream-card stream-card-idle">
+        <div className="stream-card-header">
+          <span className="stream-card-phase stream-phase-idle">idle</span>
+          {provider && <span className="stream-card-agent">{provider}</span>}
+        </div>
+        {summary && <div className="stream-card-detail">{summary}</div>}
+        {metrics && (
+          <div className="stream-line-json">
+            <Value value={metrics} depth={0} compact={true} />
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (eventType === "error") {
+    return (
+      <div className="stream-card stream-card-error">
+        <div className="stream-card-header">
+          <span className="stream-card-phase stream-phase-error">error</span>
+          {provider && <span className="stream-card-agent">{provider}</span>}
+        </div>
+        {summary && <div className="cc-tool-error-text">{summary}</div>}
+      </div>
+    );
+  }
+
+  // Unknown HeadlessEvent type — fall back to the generic card so future
+  // variants render something useful before they earn a dedicated branch.
+  return <GenericEventCard parsed={parsed} compact={false} />;
 }
 
 function ClaudeAssistantEvent({
