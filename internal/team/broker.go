@@ -103,6 +103,7 @@ type Broker struct {
 	wikiInitErr             error
 	autoNotebookWriter      *AutoNotebookWriter
 	humanWikiWriter         *HumanWikiIntentWriter
+	demandIndex             *NotebookDemandIndex
 	wikiIndex               *WikiIndex
 	wikiExtractor           *Extractor
 	wikiDLQ                 *DLQ
