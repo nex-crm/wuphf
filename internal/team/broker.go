@@ -102,6 +102,7 @@ type Broker struct {
 	wikiInitMu              sync.Mutex
 	wikiInitErr             error
 	autoNotebookWriter      *AutoNotebookWriter
+	humanWikiWriter         *HumanWikiIntentWriter
 	wikiIndex               *WikiIndex
 	wikiExtractor           *Extractor
 	wikiDLQ                 *DLQ
@@ -612,6 +613,7 @@ func (b *Broker) Stop() {
 	pamDisp := b.pamDispatcher
 	compressor := b.wikiCompressor
 	autoWriter := b.autoNotebookWriter
+	humanWikiWriter := b.humanWikiWriter
 	b.mu.Unlock()
 	if synth != nil {
 		synth.Stop()
@@ -627,6 +629,9 @@ func (b *Broker) Stop() {
 	}
 	if autoWriter != nil {
 		autoWriter.Stop(2 * time.Second)
+	}
+	if humanWikiWriter != nil {
+		humanWikiWriter.Stop(2 * time.Second)
 	}
 }
 

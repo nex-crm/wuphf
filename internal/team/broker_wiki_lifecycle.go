@@ -104,6 +104,13 @@ func (b *Broker) initWikiWorker() {
 	autoWriter := NewAutoNotebookWriter(worker, nil)
 	autoWriter.Start(lifecycleCtx)
 
+	// PR 2: human "remember" intent classifier → direct team_wiki_write.
+	// Lifecycle mirrors AutoNotebookWriter. The writer is started before the
+	// broker mutex is taken, so the goroutine is alive by the time the
+	// PostMessage hook can fire.
+	humanWiki := NewHumanWikiIntentWriter(worker)
+	humanWiki.Start(lifecycleCtx)
+
 	b.mu.Lock()
 	b.wikiWorker = worker
 	b.wikiIndex = idx
@@ -111,6 +118,7 @@ func (b *Broker) initWikiWorker() {
 	b.wikiDLQ = dlq
 	b.readLog = NewReadLog(repo.Root())
 	b.autoNotebookWriter = autoWriter
+	b.humanWikiWriter = humanWiki
 	b.mu.Unlock()
 	// Init succeeded; clear any cached failure so future calls don't surface
 	// stale errors from a previous attempt.
