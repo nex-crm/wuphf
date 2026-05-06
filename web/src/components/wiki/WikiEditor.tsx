@@ -1,5 +1,13 @@
 // biome-ignore-all lint/a11y/useAriaPropsSupportedByRole: Passive metadata uses accessible labels queried by screen-reader tests; visual text remains unchanged.
-import { useCallback, useMemo, useRef } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import ReactMarkdown from "react-markdown";
 
 import type { WikiCatalogEntry } from "../../api/wiki";
@@ -9,6 +17,143 @@ import {
   buildRehypePlugins,
   buildRemarkPlugins,
 } from "../../lib/wikiMarkdownConfig";
+
+/**
+ * Milkdown lives in a lazy chunk (~100kB gzipped). Users who never toggle
+ * Rich mode never download it.
+ */
+const RichWikiEditor = lazy(() => import("./editor/RichWikiEditor"));
+
+type EditorMode = "source" | "rich";
+const EDITOR_MODE_KEY_PREFIX = "wuphf:editor-mode:";
+
+function readEditorMode(path: string): EditorMode {
+  if (typeof window === "undefined") return "source";
+  try {
+    const raw = window.localStorage.getItem(EDITOR_MODE_KEY_PREFIX + path);
+    return raw === "rich" ? "rich" : "source";
+  } catch {
+    return "source";
+  }
+}
+
+function writeEditorMode(path: string, mode: EditorMode): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(EDITOR_MODE_KEY_PREFIX + path, mode);
+  } catch {
+    // Storage disabled / out of quota — toggle still works for the session.
+  }
+}
+
+interface MobileTabsProps {
+  mobileView: "source" | "preview";
+  setMobileView: (next: "source" | "preview") => void;
+}
+
+function MobileTabs({ mobileView, setMobileView }: MobileTabsProps) {
+  return (
+    <div
+      className="wk-editor-mobile-tabs"
+      role="tablist"
+      data-testid="wk-editor-mobile-tabs"
+    >
+      <button
+        type="button"
+        role="tab"
+        aria-selected={mobileView === "source"}
+        className={`wk-editor-mobile-tab${mobileView === "source" ? " is-active" : ""}`}
+        onClick={() => setMobileView("source")}
+        data-testid="wk-editor-mobile-source"
+      >
+        Source
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={mobileView === "preview"}
+        className={
+          "wk-editor-mobile-tab" +
+          (mobileView === "preview" ? " is-active" : "")
+        }
+        onClick={() => setMobileView("preview")}
+        data-testid="wk-editor-mobile-preview"
+      >
+        Preview
+      </button>
+    </div>
+  );
+}
+
+interface SourcePaneProps {
+  path: string;
+  editorMode: EditorMode;
+  content: string;
+  setContent: (next: string) => void;
+  textareaRef: React.RefObject<HTMLTextAreaElement | null>;
+}
+
+/**
+ * The left/source pane swaps between the textarea and the lazy Milkdown
+ * surface based on `editorMode`. Pulled out of `WikiEditor` so the parent
+ * stays under Biome's cognitive-complexity ceiling.
+ */
+function SourcePane({
+  path,
+  editorMode,
+  content,
+  setContent,
+  textareaRef,
+}: SourcePaneProps) {
+  const labelText = `Article source (${path})`;
+  return (
+    <div className="wk-editor-pane wk-editor-pane--source">
+      <label
+        id="wk-editor-source-label"
+        className="wk-editor-label"
+        // The textarea only mounts in source mode, so `htmlFor` only points
+        // to it when relevant. In rich mode the wrapper uses
+        // `aria-labelledby` against this label's id so the visible text
+        // both labels the editor *and* clicks through, instead of being a
+        // detached caption with a duplicated `aria-label`.
+        htmlFor={editorMode === "source" ? "wk-editor-textarea" : undefined}
+      >
+        {labelText}
+      </label>
+      {editorMode === "rich" ? (
+        <Suspense
+          fallback={
+            <div
+              className="wk-editor-rich-fallback"
+              data-testid="wk-editor-rich-loading"
+            >
+              Loading rich editor…
+            </div>
+          }
+        >
+          <div
+            className="wk-editor-rich"
+            data-testid="wk-editor-rich"
+            aria-labelledby="wk-editor-source-label"
+          >
+            <RichWikiEditor content={content} onChange={setContent} />
+          </div>
+        </Suspense>
+      ) : (
+        <textarea
+          id="wk-editor-textarea"
+          ref={textareaRef}
+          className="wk-editor-textarea"
+          data-testid="wk-editor-textarea"
+          value={content}
+          onChange={(e) => setContent(e.target.value)}
+          spellCheck={true}
+          rows={28}
+        />
+      )}
+    </div>
+  );
+}
 
 interface WikiEditorProps {
   /** Target article path, e.g. `team/people/nazz.md`. */
@@ -108,6 +253,35 @@ export default function WikiEditor({
     [resolver],
   );
 
+  // Per-article editor mode — persists across sessions so a user who picks
+  // Rich on a page they edit often gets it back next time without resetting.
+  //
+  // The mode is keyed to `path` *synchronously*: when the parent navigates
+  // to a different article, the new article's stored mode must apply on
+  // the very first render. A previous version held mode in `useState` and
+  // reset it via `useEffect`, which left mode one render behind path —
+  // a `rich -> source` navigation would mount Milkdown for one paint
+  // before correcting itself. Storing `{ path, mode }` lets us detect the
+  // stale snapshot and read storage inline when it doesn't match.
+  const [storedMode, setStoredMode] = useState<{
+    path: string;
+    mode: EditorMode;
+  }>(() => ({ path, mode: readEditorMode(path) }));
+  const editorMode: EditorMode =
+    storedMode.path === path ? storedMode.mode : readEditorMode(path);
+  useEffect(() => {
+    setStoredMode({ path, mode: readEditorMode(path) });
+  }, [path]);
+  const toggleEditorMode = useCallback(() => {
+    setStoredMode((prev) => {
+      const current: EditorMode =
+        prev.path === path ? prev.mode : readEditorMode(path);
+      const next: EditorMode = current === "rich" ? "source" : "rich";
+      writeEditorMode(path, next);
+      return { path, mode: next };
+    });
+  }, [path]);
+
   return (
     <div
       className={`wk-editor${previewOn ? " wk-editor--with-preview" : ""}`}
@@ -158,56 +332,17 @@ export default function WikiEditor({
         </div>
       )}
       {previewOn && isMobile ? (
-        <div
-          className="wk-editor-mobile-tabs"
-          role="tablist"
-          data-testid="wk-editor-mobile-tabs"
-        >
-          <button
-            type="button"
-            role="tab"
-            aria-selected={mobileView === "source"}
-            className={
-              "wk-editor-mobile-tab" +
-              (mobileView === "source" ? " is-active" : "")
-            }
-            onClick={() => setMobileView("source")}
-            data-testid="wk-editor-mobile-source"
-          >
-            Source
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={mobileView === "preview"}
-            className={
-              "wk-editor-mobile-tab" +
-              (mobileView === "preview" ? " is-active" : "")
-            }
-            onClick={() => setMobileView("preview")}
-            data-testid="wk-editor-mobile-preview"
-          >
-            Preview
-          </button>
-        </div>
+        <MobileTabs mobileView={mobileView} setMobileView={setMobileView} />
       ) : null}
       <div className="wk-editor-panes">
         {showSource ? (
-          <div className="wk-editor-pane wk-editor-pane--source">
-            <label className="wk-editor-label" htmlFor="wk-editor-textarea">
-              Article source ({path})
-            </label>
-            <textarea
-              id="wk-editor-textarea"
-              ref={textareaRef}
-              className="wk-editor-textarea"
-              data-testid="wk-editor-textarea"
-              value={content}
-              onChange={(e) => setContent(e.target.value)}
-              spellCheck={true}
-              rows={28}
-            />
-          </div>
+          <SourcePane
+            path={path}
+            editorMode={editorMode}
+            content={content}
+            setContent={setContent}
+            textareaRef={textareaRef}
+          />
         ) : null}
         {showPreview ? (
           <div
@@ -265,6 +400,19 @@ export default function WikiEditor({
           onClick={() => setPreviewOn((v) => !v)}
         >
           {previewOn ? "Hide preview" : "Preview"}
+        </button>
+        <button
+          type="button"
+          className={`wk-editor-mode-toggle${editorMode === "rich" ? " is-on" : ""}`}
+          data-testid="wk-editor-mode-toggle"
+          // Visible label names the *current* mode so it agrees with
+          // `aria-pressed`. Screen readers announce e.g. "Rich, pressed"
+          // when rich is active rather than the contradictory pairing of
+          // "Source, pressed" the previous implementation produced.
+          aria-pressed={editorMode === "rich"}
+          onClick={toggleEditorMode}
+        >
+          {editorMode === "rich" ? "Rich" : "Source"}
         </button>
       </div>
       <p className="wk-editor-help">

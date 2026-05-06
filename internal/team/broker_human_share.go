@@ -1,6 +1,7 @@
 package team
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -21,6 +22,45 @@ const (
 	humanShareEventFrom = "system"
 	humanLastSeenFlush  = time.Minute
 )
+
+// humanAdmitHookFn fires after acceptHumanInvite succeeds and the new session
+// is persisted. The office-bound share adapter installs this hook in
+// ShareTransport.Run so it can call Host.UpsertParticipant for the admitted
+// human — closing the v1 lifecycle gap where only the revoke half flowed
+// through the transport host. Hook signature accepts only exported scalars so
+// share_transport.go does not need to reach into humanSession internals.
+type humanAdmitHookFn func(ctx context.Context, sessionID, slug, displayName string)
+
+// SetHumanAdmitHook installs (or clears, when hook is nil) the per-broker
+// callback fired after handleHumanInviteAccept admits a session. Called from
+// ShareTransport.Run on adapter startup and shutdown. The pointer is read
+// atomically on the HTTP hot path; passing nil is the documented way for the
+// adapter to detach on shutdown.
+func (b *Broker) SetHumanAdmitHook(hook humanAdmitHookFn) {
+	if b == nil {
+		return
+	}
+	if hook == nil {
+		b.humanAdmitHook.Store(nil)
+		return
+	}
+	b.humanAdmitHook.Store(&hook)
+}
+
+// fireHumanAdmitHook invokes the installed hook with the new session, if any.
+// Called from handleHumanInviteAccept *after* persistence succeeds so an
+// adapter cannot observe a session that was rolled back by a save failure. A
+// nil hook (no adapter registered, or shutdown in progress) is a silent no-op.
+func (b *Broker) fireHumanAdmitHook(ctx context.Context, session humanSession) {
+	if b == nil {
+		return
+	}
+	hp := b.humanAdmitHook.Load()
+	if hp == nil {
+		return
+	}
+	(*hp)(ctx, session.ID, session.HumanSlug, session.DisplayName)
+}
 
 type humanInviteResponse struct {
 	ID         string `json:"id"`
@@ -102,6 +142,11 @@ func (b *Broker) handleHumanInviteAccept(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	http.SetCookie(w, humanSessionCookieForToken(sessionToken, sessionExpiresAt(session)))
+	// Notify the office-bound share adapter so it can call
+	// Host.UpsertParticipant for the admitted human. Fired after persistence
+	// succeeds (acceptHumanInvite returned no error) so a rolled-back invite
+	// never produces a phantom upsert.
+	b.fireHumanAdmitHook(r.Context(), session)
 	writeJSON(w, http.StatusOK, map[string]any{"session": humanSessionToResponse(session)})
 }
 
@@ -146,7 +191,11 @@ func (b *Broker) handleHumanMe(w http.ResponseWriter, r *http.Request) {
 	}
 	session, ok := b.humanSessionFromRequest(r)
 	if ok {
-		writeJSON(w, http.StatusOK, map[string]any{"human": humanSessionToResponse(session)})
+		body := map[string]any{"human": humanSessionToResponse(session)}
+		if name := resolveHostDisplayName(); name != "" {
+			body["host_display_name"] = name
+		}
+		writeJSON(w, http.StatusOK, body)
 		return
 	}
 	if b.requestHasBrokerAuth(r) {
@@ -160,6 +209,19 @@ func (b *Broker) handleHumanMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeShareError(w, http.StatusUnauthorized, "session_required", "Your session expired.", "Ask the host for a new team-member invite.")
+}
+
+// resolveHostDisplayName returns the host's local git identity name so the
+// joiner welcome card can read "You joined Sam's office" instead of "this
+// office". Falls back to "" when only the FallbackHumanIdentity is available
+// (fresh install, no `git config user.name`) so the web client keeps its
+// generic copy and we never surface the literal "wuphf" placeholder.
+func resolveHostDisplayName() string {
+	id := brokerHumanIdentityRegistry().Local()
+	if id.Email == FallbackHumanIdentity.Email {
+		return ""
+	}
+	return strings.TrimSpace(id.Name)
 }
 
 var errHumanInviteExpiredOrUsed = errors.New("invite expired or used")
