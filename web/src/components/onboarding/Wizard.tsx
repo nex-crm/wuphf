@@ -130,11 +130,12 @@ export function Wizard({ onComplete }: WizardProps) {
     : STEP_ORDER;
 
   // Resume support: load any saved draft once on first render. Captured
-  // into a ref so the useState initializers below can seed from it
-  // without re-running loadDraft on every render. The stale-banner flag
-  // is consumed at the same time so it only ever shows once.
-  const initialDraftRef = useRef(loadDraft());
-  const initialDraft = initialDraftRef.current;
+  // via a useState lazy initializer so loadDraft (which has side effects
+  // like clearing stale drafts and setting the session-storage banner
+  // flag) runs exactly once on mount rather than on every render. The
+  // stale-banner flag is consumed at the same time so it only ever shows
+  // once.
+  const [initialDraft] = useState(() => loadDraft());
   const seed = seedFromDraft(initialDraft);
   const [hasSavedDraft, setHasSavedDraft] = useState<boolean>(
     initialDraft !== null,

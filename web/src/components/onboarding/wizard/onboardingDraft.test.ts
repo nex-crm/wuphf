@@ -119,6 +119,47 @@ describe("save/load round-trip", () => {
   });
 });
 
+describe("saveDraft defensive whitelist", () => {
+  it("strips secret-bearing fields even when bypassing extractDraftableState", () => {
+    // Simulate a future caller that builds an OnboardingDraft-shaped
+    // object directly and smuggles secrets onto it. The storage-boundary
+    // re-projection inside saveDraft must drop them.
+    const tainted = {
+      version: CURRENT_VERSION,
+      step: "setup",
+      selectedBlueprint: null,
+      company: "Acme",
+      description: "",
+      priority: "",
+      runtimePriority: ["Claude Code"],
+      localProvider: "",
+      selectedTaskTemplate: null,
+      taskText: "",
+      savedAt: new Date().toISOString(),
+      // Fields that must never reach storage.
+      apiKeys: {
+        ANTHROPIC_API_KEY: "sk-test-placeholder",
+        OPENAI_API_KEY: "sk-test-placeholder",
+      },
+      nexEmail: "user@example.com",
+    };
+
+    saveDraft(tainted as unknown as Parameters<typeof saveDraft>[0]);
+    const raw = window.localStorage.getItem(LOCAL_STORAGE_KEY) ?? "";
+
+    expect(raw).not.toContain("sk-test-placeholder");
+    expect(raw).not.toContain("apiKeys");
+    expect(raw).not.toContain("ANTHROPIC_API_KEY");
+    expect(raw).not.toContain("OPENAI_API_KEY");
+    expect(raw).not.toContain("nexEmail");
+    expect(raw).not.toContain("user@example.com");
+
+    const reloaded = loadDraft();
+    expect(reloaded?.company).toBe("Acme");
+    expect(reloaded?.runtimePriority).toEqual(["Claude Code"]);
+  });
+});
+
 describe("loadDraft validation", () => {
   it("returns null for version mismatch and clears storage", () => {
     window.localStorage.setItem(

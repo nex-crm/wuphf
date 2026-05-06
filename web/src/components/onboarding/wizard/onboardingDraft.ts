@@ -74,6 +74,29 @@ export function extractDraftableState(
   };
 }
 
+// sanitizeDraft re-projects an OnboardingDraft to exactly the whitelisted
+// schema before it crosses the storage boundary. This is the second
+// layer of the secret-exclusion guarantee: even if a future caller
+// bypasses extractDraftableState and hands saveDraft an object with
+// extra fields (an `apiKeys` smuggled onto the draft, etc.), the call
+// site below will strip them. version is forced to CURRENT_VERSION so a
+// caller cannot persist a stale schema marker either.
+function sanitizeDraft(draft: OnboardingDraft): OnboardingDraft {
+  return {
+    version: CURRENT_VERSION,
+    step: draft.step,
+    selectedBlueprint: draft.selectedBlueprint,
+    company: draft.company,
+    description: draft.description,
+    priority: draft.priority,
+    runtimePriority: [...draft.runtimePriority],
+    localProvider: draft.localProvider,
+    selectedTaskTemplate: draft.selectedTaskTemplate,
+    taskText: draft.taskText,
+    savedAt: draft.savedAt,
+  };
+}
+
 function isStringOrNull(value: unknown): value is string | null {
   return value === null || typeof value === "string";
 }
@@ -175,8 +198,11 @@ export function loadDraft(): OnboardingDraft | null {
 export function saveDraft(draft: OnboardingDraft): void {
   const storage = safeStorage();
   if (!storage) return;
+  // Re-project to the whitelist at the storage boundary so secrets
+  // cannot leak even if a future caller bypasses extractDraftableState.
+  const sanitized = sanitizeDraft(draft);
   try {
-    storage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(draft));
+    storage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(sanitized));
   } catch {
     // QuotaExceededError, SecurityError (private mode), etc. — onboarding
     // is more important than persistence; swallow silently.
