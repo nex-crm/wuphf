@@ -55,22 +55,28 @@ func TestHostUpsertParticipantMarksMemberOnline(t *testing.T) {
 // record. Telegram attribution lives in PostInboundSurfaceMessage by display
 // name; admitted humans have their own LastSeenAt on humanSession. Touching
 // memberPresence for either would lie about who is an office member.
+//
+// Each case constructs its own broker so a leak in case N cannot inflate
+// memberPresence for case N+1 — failures bisect to the responsible case
+// instead of cascading. The "member with empty slug" case uses
+// openclawAdapterName (not shareAdapterName) because the intent is a
+// member-scope binding with an empty slug; share is office-scope by contract.
 func TestHostUpsertParticipantSkipsNonMemberScope(t *testing.T) {
-	b := newTestBroker(t)
-	host := &brokerTransportHost{broker: b}
-
 	cases := []struct {
 		name    string
+		adapter string
 		binding transport.Binding
 	}{
-		{"office (share)", transport.Binding{Scope: transport.ScopeOffice, MemberSlug: "team-member"}},
-		{"channel (telegram)", transport.Binding{Scope: transport.ScopeChannel, ChannelSlug: "general"}},
-		{"member with empty slug", transport.Binding{Scope: transport.ScopeMember, MemberSlug: ""}},
+		{"office (share)", shareAdapterName, transport.Binding{Scope: transport.ScopeOffice, MemberSlug: "team-member"}},
+		{"channel (telegram)", "telegram", transport.Binding{Scope: transport.ScopeChannel, ChannelSlug: "general"}},
+		{"member with empty slug", openclawAdapterName, transport.Binding{Scope: transport.ScopeMember, MemberSlug: ""}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			b := newTestBroker(t)
+			host := &brokerTransportHost{broker: b}
 			err := host.UpsertParticipant(context.Background(),
-				transport.Participant{AdapterName: shareAdapterName, Key: "session-x", DisplayName: "x"},
+				transport.Participant{AdapterName: tc.adapter, Key: "session-x", DisplayName: "x"},
 				tc.binding,
 			)
 			if err != nil {
