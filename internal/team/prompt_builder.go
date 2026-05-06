@@ -166,8 +166,7 @@ func (p *promptBuilder) Build(slug string) string {
 			sb.WriteString("\n")
 		}
 		sb.WriteString("Tagged agents are expected to respond.\n\n")
-		sb.WriteString("== OFFICE VIBE ==\n")
-		sb.WriteString("This is a real team. Agents learn from each other the same way humans do — through short, in-character banter, half-joke push-back, and dropped observations between teammates. Don't suppress that. Real ideas usually fall out of riffing, not out of formal rounds. Keep replies short and alive; skip filler and pure acknowledgements.\n\n")
+		sb.WriteString(officeVibeBlock())
 		if p.isFocusMode() {
 			sb.WriteString("== DELEGATION MODE ==\n")
 			sb.WriteString("You are the routing hub. Specialists only act when you or the human explicitly @tag them.\n")
@@ -295,8 +294,8 @@ func (p *promptBuilder) Build(slug string) string {
 			sb.WriteString("\n")
 		}
 		sb.WriteString("Tag agents with @slug. Tagged agents must respond.\n")
-		sb.WriteString("\n== OFFICE VIBE ==\n")
-		sb.WriteString("This is a real team. Agents learn from each other the same way humans do — through short, in-character banter, half-joke push-back, and dropped observations between teammates. Don't suppress that. Real ideas usually fall out of riffing, not out of formal rounds. Keep replies short and alive; skip filler and pure acknowledgements.\n\n")
+		sb.WriteString("\n")
+		sb.WriteString(officeVibeBlock())
 		if p.isFocusMode() {
 			sb.WriteString("== DELEGATION MODE ==\n")
 			sb.WriteString("Delegation mode is enabled.\n")
@@ -435,6 +434,11 @@ func clipPromptText(s string, max int) string {
 		return s[:max]
 	}
 	return strings.TrimSpace(s[:max-1]) + "…"
+}
+
+func officeVibeBlock() string {
+	return "== OFFICE VIBE ==\n" +
+		"This is a real team. Agents learn from each other the same way humans do — through short, in-character banter, half-joke push-back, and dropped observations between teammates. Don't suppress that. Real ideas usually fall out of riffing, not out of formal rounds. Keep replies short and alive; skip filler and pure acknowledgements.\n\n"
 }
 
 func headlessSandboxNote() string {

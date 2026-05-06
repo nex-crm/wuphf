@@ -361,7 +361,7 @@ func (b *notificationContextBuilder) RelevantTaskForTarget(msg channelMessage, s
 
 // ResponseInstructionForTarget returns the per-agent guidance string
 // appended to a notification. Branches: lead-from-human, lead-from-
-// specialist, DM, tagged, owns-matching-task, default-stay-quiet.
+// specialist, DM, tagged, owns-matching-task, default-domain-chime-in.
 func (b *notificationContextBuilder) ResponseInstructionForTarget(msg channelMessage, slug string) string {
 	lead := b.targeter.LeadSlug()
 	if slug == lead {
