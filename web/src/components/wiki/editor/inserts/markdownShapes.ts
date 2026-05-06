@@ -212,7 +212,7 @@ export function buildDecisionBlock(draft: DecisionDraft): string {
   ];
   if (draft.alternatives && draft.alternatives.length > 0) {
     const filtered = draft.alternatives
-      .map((a) => a.trim())
+      .map((a) => escapeBlockValue(a))
       .filter((a) => a.length > 0);
     if (filtered.length > 0) {
       lines.push(`alternatives: ${filtered.join(", ")}`);

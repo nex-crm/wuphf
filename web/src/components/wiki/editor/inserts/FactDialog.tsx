@@ -81,6 +81,7 @@ export function FactDialog({
       data-testid="wk-fact-dialog-backdrop"
       role="dialog"
       aria-modal="true"
+      aria-labelledby="wk-fact-dialog-title"
       onKeyDown={(e) => {
         if (e.key === "Escape") {
           e.stopPropagation();
@@ -93,7 +94,9 @@ export function FactDialog({
         data-testid="wk-fact-dialog"
         onSubmit={handleProceedToPreview}
       >
-        <h2>{stage === "edit" ? "Add fact" : "Review fact"}</h2>
+        <h2 id="wk-fact-dialog-title">
+          {stage === "edit" ? "Add fact" : "Review fact"}
+        </h2>
 
         {stage === "edit" ? (
           <>

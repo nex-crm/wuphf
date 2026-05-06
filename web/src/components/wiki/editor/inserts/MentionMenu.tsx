@@ -62,8 +62,8 @@ export function MentionMenu({
   const [activeIdx, setActiveIdx] = useState(0);
 
   useEffect(() => {
-    if (activeIdx >= flat.length) setActiveIdx(Math.max(0, flat.length - 1));
-  }, [flat.length, activeIdx]);
+    setActiveIdx((prev) => Math.min(prev, Math.max(0, flat.length - 1)));
+  }, [flat.length]);
 
   useMenuKeyNav<MentionItem>({
     items: flat,

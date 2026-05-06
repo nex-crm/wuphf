@@ -196,6 +196,18 @@ export default function RichWikiEditor({
     contentRef.current = content;
   }, [content]);
 
+  // Wrap the raw onChange so editor-originated edits also sync contentRef.
+  // Without this, plain typing bypasses the ref until the controlled
+  // `content` prop round-trips through the parent, leaving a window where
+  // a concurrent confirm reads stale markdown.
+  const handleEditorChange = useCallback(
+    (next: string) => {
+      contentRef.current = next;
+      onChange(next);
+    },
+    [onChange],
+  );
+
   const insertController = useInsertController({
     getView: () => viewRef.current,
     pushContent: (next) => {
@@ -255,7 +267,7 @@ export default function RichWikiEditor({
       <div className="wk-rich-editor-host">
         <RichWikiEditorInner
           content={content}
-          onChange={onChange}
+          onChange={handleEditorChange}
           setTrigger={setTrigger}
           setView={setView}
         />
@@ -302,7 +314,7 @@ export default function RichWikiEditor({
         ) : null}
         {insertController.dialog === "citation" ? (
           <CitationDialog
-            currentMarkdown={contentRef.current}
+            currentMarkdown={content}
             onConfirm={insertController.onCitationConfirm}
             onCancel={insertController.closeDialog}
           />

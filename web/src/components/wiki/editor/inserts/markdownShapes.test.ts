@@ -273,9 +273,12 @@ describe("buildFactBlock", () => {
       // Adversarial input: try to terminate the enclosing fence.
       object: "evil ``` payload",
     });
-    // The literal triple-backtick payload has been replaced.
-    expect(block).not.toMatch(/^```\nsubject: alex/);
-    expect(block.split("```").length).toBe(3); // exactly the opener + closer
+    // The embedded triple-backtick must be escaped so the fence has
+    // exactly one opener and one closer (split produces 3 parts).
+    expect(block.split("```").length).toBe(3); // opener + closer only
+    // No bare ``` on a line by itself inside the block content.
+    const lines = block.split("\n").slice(1, -2); // strip opener/closer
+    expect(lines.every((l) => l !== "```")).toBe(true);
   });
 
   it("survives round-trip through Milkdown", async () => {

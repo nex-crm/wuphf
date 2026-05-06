@@ -73,6 +73,7 @@ export function DecisionDialog({
       data-testid="wk-decision-dialog-backdrop"
       role="dialog"
       aria-modal="true"
+      aria-labelledby="wk-decision-dialog-title"
       onKeyDown={(e) => {
         if (e.key === "Escape") {
           e.stopPropagation();
@@ -85,7 +86,7 @@ export function DecisionDialog({
         data-testid="wk-decision-dialog"
         onSubmit={handleSubmit}
       >
-        <h2>Insert decision block</h2>
+        <h2 id="wk-decision-dialog-title">Insert decision block</h2>
         <label htmlFor="wk-decision-title" className="wk-editor-label">
           Title
         </label>
@@ -137,10 +138,9 @@ export function DecisionDialog({
         ) : null}
         <div className="wk-insert-dialog__actions">
           <button
-            type="button"
+            type="submit"
             data-testid="wk-decision-confirm"
             className="wk-editor-save"
-            onClick={() => handleSubmit()}
           >
             Insert decision
           </button>

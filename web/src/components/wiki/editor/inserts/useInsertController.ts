@@ -94,9 +94,11 @@ export interface InsertController {
   onRelatedConfirm: (block: string) => void;
 }
 
-export function useInsertController(
-  args: UseInsertControllerArgs,
-): InsertController {
+export function useInsertController({
+  getView,
+  pushContent,
+  getCurrentContent,
+}: UseInsertControllerArgs): InsertController {
   const [trigger, setTriggerState] = useState<TriggerState | null>(null);
   const [dialog, setDialog] = useState<DialogKind | null>(null);
   const [mentionPickerState, setMentionPickerState] =
@@ -130,12 +132,12 @@ export function useInsertController(
    */
   const consumeTrigger = useCallback(
     (active: TriggerState, replacement: string) => {
-      const view = args.getView();
+      const view = getView();
       if (!view) return;
       replaceRange(view, active.from, active.to, replacement);
       setTriggerState(null);
     },
-    [args],
+    [getView],
   );
 
   const onSlashSelect = useCallback(
@@ -201,7 +203,7 @@ export function useInsertController(
 
   const onMentionSelect = useCallback(
     (item: MentionItem) => {
-      const view = args.getView();
+      const view = getView();
       if (!view) return;
       const link = buildWikilink(item.slug, item.title);
       if (!link) return;
@@ -218,12 +220,12 @@ export function useInsertController(
       insertAtSelection(view, link);
       closeDialog();
     },
-    [args, trigger, dialog, closeDialog],
+    [getView, trigger, dialog, closeDialog],
   );
 
   const onCitationConfirm = useCallback(
     (built: BuiltCitation) => {
-      const view = args.getView();
+      const view = getView();
       if (!view) {
         closeDialog();
         return;
@@ -239,12 +241,12 @@ export function useInsertController(
       // callback fires, so the live getter reflects the post-insert
       // state when the controller is wired correctly.
       const next = appendCitationDefinition(
-        args.getCurrentContent(),
+        getCurrentContent(),
         built.definition,
       );
-      args.pushContent(next);
+      pushContent(next);
     },
-    [args, closeDialog],
+    [getView, getCurrentContent, pushContent, closeDialog],
   );
 
   const insertBlock = useCallback(
@@ -255,11 +257,11 @@ export function useInsertController(
       // would emit literal backticks instead of a block node. Routing
       // through `pushContent` re-parses the markdown and produces real
       // block nodes for the round trip.
-      const next = appendBlockToTail(args.getCurrentContent(), block);
-      args.pushContent(next);
+      const next = appendBlockToTail(getCurrentContent(), block);
+      pushContent(next);
       closeDialog();
     },
-    [args, closeDialog],
+    [getCurrentContent, pushContent, closeDialog],
   );
 
   const onFactConfirm = useCallback(

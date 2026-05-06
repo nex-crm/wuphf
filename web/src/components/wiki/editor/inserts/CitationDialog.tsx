@@ -106,10 +106,9 @@ export function CitationDialog({
         ) : null}
         <div className="wk-insert-dialog__actions">
           <button
-            type="button"
+            type="submit"
             data-testid="wk-citation-confirm"
             className="wk-editor-save"
-            onClick={() => handleSubmit()}
           >
             Insert citation
           </button>
