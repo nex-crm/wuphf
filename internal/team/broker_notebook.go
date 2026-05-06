@@ -113,9 +113,8 @@ func (b *Broker) handleNotebookWrite(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	worker := b.WikiWorker()
+	worker := b.requireWikiWorker(w, "notebook")
 	if worker == nil {
-		http.Error(w, `{"error":"notebook backend is not active"}`, http.StatusServiceUnavailable)
 		return
 	}
 	var body struct {
@@ -186,9 +185,8 @@ func (b *Broker) handleNotebookRead(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	worker := b.WikiWorker()
+	worker := b.requireWikiWorker(w, "notebook")
 	if worker == nil {
-		http.Error(w, `{"error":"notebook backend is not active"}`, http.StatusServiceUnavailable)
 		return
 	}
 	path := strings.TrimSpace(r.URL.Query().Get("path"))
@@ -233,9 +231,8 @@ func (b *Broker) handleNotebookList(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	worker := b.WikiWorker()
+	worker := b.requireWikiWorker(w, "notebook")
 	if worker == nil {
-		http.Error(w, `{"error":"notebook backend is not active"}`, http.StatusServiceUnavailable)
 		return
 	}
 	slug := strings.TrimSpace(r.URL.Query().Get("slug"))
@@ -279,9 +276,8 @@ func (b *Broker) handleNotebookCatalog(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	worker := b.WikiWorker()
+	worker := b.requireWikiWorker(w, "notebook")
 	if worker == nil {
-		http.Error(w, `{"error":"notebook backend is not active"}`, http.StatusServiceUnavailable)
 		return
 	}
 
@@ -445,9 +441,8 @@ func (b *Broker) handleNotebookSearch(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	worker := b.WikiWorker()
+	worker := b.requireWikiWorker(w, "notebook")
 	if worker == nil {
-		http.Error(w, `{"error":"notebook backend is not active"}`, http.StatusServiceUnavailable)
 		return
 	}
 	slug := strings.TrimSpace(r.URL.Query().Get("slug"))

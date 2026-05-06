@@ -2,7 +2,10 @@ package team
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log"
+	"net/http"
 	"time"
 
 	"github.com/nex-crm/wuphf/internal/config"
@@ -21,14 +24,39 @@ import (
 // know what happens during the markdown-backend cold start.
 
 // ensureWikiWorker initializes the markdown-backend wiki worker when the
-// resolved memory backend is "markdown". Runs once. Never crashes the
-// broker on wiki init failure — the worker is advisory; writes simply fail
-// with ErrWorkerStopped until a user runs `wuphf` with git installed.
+// resolved memory backend is "markdown". Idempotent on success; on failure
+// (git missing, fsck + backup double-fault, etc.) it logs and returns so
+// the next caller can retry. Never crashes the broker — the worker is
+// advisory; writes simply fail with ErrWorkerStopped until init succeeds.
+//
+// Retry semantics matter: a transient repo.Init failure (e.g. parent dir
+// permissions flap, git temporarily missing from PATH) used to consume
+// sync.Once and leave wikiWorker permanently nil. Now any caller can
+// retry — handlers in broker_notebook.go / broker_review.go invoke this
+// before checking WikiWorker so a 503 self-heals on the next request.
 func (b *Broker) ensureWikiWorker() {
 	if config.ResolveMemoryBackend("") != config.MemoryBackendMarkdown {
 		return
 	}
-	b.wikiOnce.Do(b.initWikiWorker)
+	b.wikiInitMu.Lock()
+	defer b.wikiInitMu.Unlock()
+	b.mu.Lock()
+	already := b.wikiWorker != nil
+	b.mu.Unlock()
+	if already {
+		return
+	}
+	b.initWikiWorker()
+}
+
+// WikiInitErr returns the most recent ensureWikiWorker error, or nil if
+// the worker is up or has not yet been attempted. Used by /health and by
+// 503 responses so the underlying init failure is visible to operators
+// instead of buried in broker stdout.
+func (b *Broker) WikiInitErr() error {
+	b.wikiInitMu.Lock()
+	defer b.wikiInitMu.Unlock()
+	return b.wikiInitErr
 }
 
 func (b *Broker) initWikiWorker() {
@@ -38,6 +66,7 @@ func (b *Broker) initWikiWorker() {
 	defer cancel()
 
 	if err := repo.Init(ctx); err != nil {
+		b.wikiInitErr = fmt.Errorf("repo init: %w", err)
 		log.Printf("wiki: init failed, markdown backend unavailable: %v", err)
 		return
 	}
@@ -50,6 +79,7 @@ func (b *Broker) initWikiWorker() {
 	if err := repo.Fsck(ctx); err != nil {
 		log.Printf("wiki: fsck failed (%v); attempting restore from backup", err)
 		if restoreErr := repo.RestoreFromBackup(ctx); restoreErr != nil {
+			b.wikiInitErr = fmt.Errorf("fsck and backup restore failed: %w", errors.Join(err, restoreErr))
 			log.Printf("wiki: double-fault (repo corrupt + backup missing): %v", restoreErr)
 			return
 		}
@@ -82,6 +112,9 @@ func (b *Broker) initWikiWorker() {
 	b.readLog = NewReadLog(repo.Root())
 	b.autoNotebookWriter = autoWriter
 	b.mu.Unlock()
+	// Init succeeded; clear any cached failure so future calls don't surface
+	// stale errors from a previous attempt.
+	b.wikiInitErr = nil
 
 	b.ensureNotebookDirsForRoster()
 
@@ -124,6 +157,47 @@ func (b *Broker) initWikiWorker() {
 	// the compile cron drives both passes from a single trigger. Tests can
 	// inject a fake via SetSkillSynthesizer.
 	b.ensureSkillSynthesizer()
+}
+
+// requireWikiWorker is the standard retry-and-503 helper for HTTP handlers
+// that need a live wiki worker. It calls ensureWikiWorker (which retries
+// init if a prior attempt failed), returns the worker on success, and
+// writes a 503 with the underlying init error on failure. Handlers should
+// short-circuit when this returns nil. The error label distinguishes
+// notebook vs review surfaces in the JSON body.
+func (b *Broker) requireWikiWorker(w http.ResponseWriter, label string) *WikiWorker {
+	b.ensureWikiWorker()
+	worker := b.WikiWorker()
+	if worker != nil {
+		return worker
+	}
+	msg := label + " backend is not active"
+	if err := b.WikiInitErr(); err != nil {
+		msg = msg + ": " + err.Error()
+	}
+	writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": msg})
+	return nil
+}
+
+// requireReviewLog mirrors requireWikiWorker for the /review/* surface:
+// retries the wiki + review-log init chain so a transient startup failure
+// no longer leaves promotion endpoints permanently 503. Returns nil after
+// writing the 503 when either layer is still down.
+func (b *Broker) requireReviewLog(w http.ResponseWriter) *ReviewLog {
+	if b.requireWikiWorker(w, "review") == nil {
+		return nil
+	}
+	b.ensureReviewLog()
+	rl := b.ReviewLog()
+	if rl != nil {
+		return rl
+	}
+	msg := "review backend is not active"
+	if err := b.WikiInitErr(); err != nil {
+		msg = msg + ": " + err.Error()
+	}
+	writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": msg})
+	return nil
 }
 
 func (b *Broker) brokerLifecycleContext() context.Context {
