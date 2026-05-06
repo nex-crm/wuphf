@@ -1,6 +1,16 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { appendStreamLine, type StreamLine } from "./useAgentStream";
+import {
+  agentStreamURL,
+  appendStreamLine,
+  type StreamLine,
+} from "./useAgentStream";
+
+vi.mock("../api/client", () => ({
+  // Mirror the real sseURL contract: append ?token=… unconditionally so
+  // the agentStreamURL caller has to merge query strings safely.
+  sseURL: (path: string) => `http://broker${path}?token=ABC`,
+}));
 
 describe("appendStreamLine", () => {
   it("starts a new raw line when the buffer is empty", () => {
@@ -82,6 +92,31 @@ describe("appendStreamLine", () => {
     expect(lines[0].data).toBe("Hello world");
     expect(lines[1].parsed).toBeDefined();
     expect(usedId).toBe(true);
+  });
+
+  it("merges task into the URL with & when sseURL already added ?token=", () => {
+    // Regression: an earlier version produced
+    // `…/agent-stream/ceo?task=task-1?token=ABC`, so the query parser
+    // folded the token into the task value and auth silently broke
+    // for every task-scoped subscription. Guard the contract: if the
+    // base URL already contains '?', the task param uses '&'.
+    const url = agentStreamURL("ceo", "task-1");
+    expect(url).toBe("http://broker/agent-stream/ceo?token=ABC&task=task-1");
+  });
+
+  it("returns the bare base URL when no taskId is provided", () => {
+    expect(agentStreamURL("ceo", null)).toBe(
+      "http://broker/agent-stream/ceo?token=ABC",
+    );
+    expect(agentStreamURL("ceo", "  ")).toBe(
+      "http://broker/agent-stream/ceo?token=ABC",
+    );
+  });
+
+  it("encodes slug and task to keep odd characters from breaking the URL", () => {
+    expect(agentStreamURL("a/b", "t&1")).toBe(
+      "http://broker/agent-stream/a%2Fb?token=ABC&task=t%261",
+    );
   });
 
   it("trims to MAX_LINES (50) on overflow", () => {

@@ -33,11 +33,16 @@ export function DMView({ agentSlug, channelSlug }: DMViewProps) {
     }
   }, []);
 
-  // Auto-scroll stream
+  // Auto-scroll stream — but only when the user is already near the bottom,
+  // so a reader scrolled back through history isn't yanked away by every
+  // new line that lands.
   // biome-ignore lint/correctness/useExhaustiveDependencies: re-run on every new line so the log auto-scrolls.
   useEffect(() => {
-    if (streamRef.current) {
-      streamRef.current.scrollTop = streamRef.current.scrollHeight;
+    const el = streamRef.current;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    if (distanceFromBottom < 32) {
+      el.scrollTop = el.scrollHeight;
     }
   }, [lines.length]);
 

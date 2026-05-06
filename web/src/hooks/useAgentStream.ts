@@ -47,14 +47,17 @@ export function appendStreamLine(
   };
 }
 
-function agentStreamURL(slug: string, taskId: string | null): string {
-  const params = new URLSearchParams();
+// agentStreamURL builds the SSE URL for an agent's live output, optionally
+// scoped to a single task. We must call sseURL on the bare path and append
+// `task=` AFTER, because sseURL appends `?token=…` unconditionally; if the
+// path already had `?task=…`, the result would be `?task=…?token=…` and the
+// query parser would fold the token into the task value, breaking auth.
+export function agentStreamURL(slug: string, taskId: string | null): string {
+  const base = sseURL(`/agent-stream/${encodeURIComponent(slug)}`);
   const trimmed = taskId?.trim();
-  if (trimmed) params.set("task", trimmed);
-  const qs = params.toString();
-  return sseURL(
-    `/agent-stream/${encodeURIComponent(slug)}${qs ? `?${qs}` : ""}`,
-  );
+  if (!trimmed) return base;
+  const sep = base.includes("?") ? "&" : "?";
+  return `${base}${sep}task=${encodeURIComponent(trimmed)}`;
 }
 
 export function useAgentStream(
@@ -64,14 +67,21 @@ export function useAgentStream(
   const [lines, setLines] = useState<StreamLine[]>([]);
   const [connected, setConnected] = useState(false);
   const counterRef = useRef(0);
+  const linesRef = useRef<StreamLine[]>([]);
   const sourceRef = useRef<EventSource | null>(null);
 
   useEffect(() => {
     if (!slug) {
+      linesRef.current = [];
+      counterRef.current = 0;
       setLines([]);
       setConnected(false);
       return;
     }
+
+    linesRef.current = [];
+    counterRef.current = 0;
+    setLines([]);
 
     const url = agentStreamURL(slug, taskId);
     const source = new EventSource(url);
@@ -87,18 +97,22 @@ export function useAgentStream(
         // raw text line
       }
 
-      setLines((prev) => {
-        const { lines: nextLines, usedId } = appendStreamLine(
-          prev,
-          e.data,
-          parsed,
-          counterRef.current + 1,
-        );
-        if (usedId) {
-          counterRef.current += 1;
-        }
-        return nextLines;
-      });
+      // Compute the next state outside the setLines updater. React 18+
+      // Strict Mode runs updaters twice in dev and the scheduler can
+      // replay them on bail-outs; mutating refs inside the updater would
+      // double-bump counters. linesRef mirrors state so we still see the
+      // latest snapshot here (the closure's `lines` is stale across many
+      // SSE events without re-running the effect).
+      const nextId = counterRef.current + 1;
+      const { lines: nextLines, usedId } = appendStreamLine(
+        linesRef.current,
+        e.data,
+        parsed,
+        nextId,
+      );
+      linesRef.current = nextLines;
+      if (usedId) counterRef.current = nextId;
+      setLines(nextLines);
 
       // Auto-stop on idle
       if (parsed?.status === "idle" && counterRef.current > 1) {
@@ -108,7 +122,10 @@ export function useAgentStream(
     };
 
     source.onerror = () => {
-      source.close();
+      // Don't hard-close on transient errors — EventSource auto-reconnects
+      // with back-off and Last-Event-ID. Only flip the indicator so the
+      // UI shows "Disconnected" until the browser reopens the stream.
+      // The useEffect cleanup closes on slug/taskId change or unmount.
       setConnected(false);
     };
 

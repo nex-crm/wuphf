@@ -74,10 +74,14 @@ function StreamSection({ slug }: { slug: string }) {
   const { lines, connected } = useAgentStream(slug);
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  // Stick to bottom only when the user is already near it, so scrolling
+  // back through history isn't disrupted by every new line.
   // biome-ignore lint/correctness/useExhaustiveDependencies: re-run on every new line so the log auto-scrolls.
   useEffect(() => {
     const el = scrollRef.current;
-    if (el) {
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    if (distanceFromBottom < 32) {
       el.scrollTop = el.scrollHeight;
     }
   }, [lines.length]);
