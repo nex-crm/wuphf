@@ -302,7 +302,9 @@
   background: var(--bg);
   font-size: 12px;
   cursor: pointer;
-  transition: all 0.15s;
+  transition:
+    background var(--duration-base, 0.15s),
+    border-color var(--duration-base, 0.15s);
 }
 .reaction-pill:hover {
   background: var(--accent-bg);
@@ -675,7 +677,9 @@ html[data-theme] .interview-bar-actions .btn-primary:hover {
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   cursor: pointer;
-  transition: all 0.15s;
+  transition:
+    background var(--duration-base, 0.15s),
+    border-color var(--duration-base, 0.15s);
   text-align: left;
   font-family: var(--font-sans);
   color: var(--text);
@@ -1218,7 +1222,7 @@ html[data-theme] .interview-bar-actions .btn-primary:hover {
   color: var(--text);
 }
 .message-hover-btn:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
   outline-offset: 1px;
 }
 
@@ -1251,7 +1255,7 @@ html[data-theme] .interview-bar-actions .btn-primary:hover {
   color: var(--text);
 }
 .thread-collapse-toggle:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
   outline-offset: 1px;
 }
 .thread-collapse-chevron {
@@ -1259,4 +1263,14 @@ html[data-theme] .interview-bar-actions .btn-primary:hover {
 }
 .thread-group-collapsed .thread-collapse-toggle {
   color: var(--accent);
+}
+
+/* ─── Feed loading / empty states ─── */
+.messages-loading-label {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  color: var(--empty-state-color, var(--text-tertiary));
+  font-size: var(--empty-state-size, 13px);
 }

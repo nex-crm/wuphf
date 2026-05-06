@@ -45,7 +45,7 @@
     // 10s Boot-timeout watchdog, or users lose the actionable signal. Any
     // fatal also flips bootDone so the watchdog is a no-op once a diagnostic
     // has already surfaced.
-    (function() {
+    (() => {
       var BOOT_TIMEOUT_MS = 10000;
       var bootDone = false;
 
@@ -71,7 +71,7 @@
         bootDone = true;
       }
 
-      window.addEventListener('error', function(e) {
+      window.addEventListener('error', (e) => {
         showFatal(
           'Uncaught error: ' + (e.message || 'unknown'),
           (e.filename ? e.filename + ':' + e.lineno + ':' + e.colno + '\n' : '') +
@@ -79,7 +79,7 @@
         );
       });
 
-      window.addEventListener('unhandledrejection', function(e) {
+      window.addEventListener('unhandledrejection', (e) => {
         var reason = e.reason;
         var detail = '';
         if (reason) {
@@ -90,7 +90,7 @@
         showFatal('Unhandled promise rejection', detail);
       });
 
-      window.__wuphfBootDone = function() { bootDone = true; };
+      window.__wuphfBootDone = () => { bootDone = true; };
 
       // Collect diagnostics from what we can see at watchdog fire time — the
       // specific error is gone by now (nothing caught it) so give the user
@@ -128,7 +128,7 @@
       }
 
       // If app hasn't rendered anything after 10s, show a timeout error
-      setTimeout(function() {
+      setTimeout(() => {
         if (bootDone) return;
         // Another handler already surfaced a specific error — don't replace it.
         if (document.getElementById('fatal-error')) return;

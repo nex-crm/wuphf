@@ -55,7 +55,9 @@ export function TeamMemberWelcome() {
   // Possessive form: "Sam" → "Sam's", "Chris" → "Chris's". Names ending in
   // "s" still get an apostrophe-s — Strunk & White, and easier to read than
   // "Chris' office" which trips up scan-readers on a small card.
-  const officeLabel = hostDisplayName ? `${hostDisplayName}'s office` : "this office";
+  const officeLabel = hostDisplayName
+    ? `${hostDisplayName}'s office`
+    : "this office";
 
   return (
     <aside

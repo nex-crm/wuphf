@@ -154,10 +154,13 @@
   font: inherit;
 }
 
-.pam-menu-item:hover,
+.pam-menu-item:hover {
+  background: var(--wk-amber-bg);
+}
 .pam-menu-item:focus-visible {
   background: var(--wk-amber-bg);
-  outline: none;
+  outline: var(--focus-ring-width) solid var(--wk-amber);
+  outline-offset: -2px;
 }
 
 .pam-menu-item[disabled] {

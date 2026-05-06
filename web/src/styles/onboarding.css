@@ -614,8 +614,8 @@
 .pack-card:focus-visible,
 .pack-filter-chip:focus-visible,
 .pack-detail-close:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
 }
 
 /* ─── Pack Library (Step 2) ─── */
