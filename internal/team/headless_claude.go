@@ -1,7 +1,6 @@
 package team
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"io"
@@ -99,15 +98,17 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 	}
 	pr, pw := io.Pipe()
 	teedStdout := io.TeeReader(stdout, pw)
+	// Reader-based drain: an oversized provider line that exceeds any fixed
+	// scanner buffer must not stop the loop, since stopping leaves the tee
+	// pipe undrained and wedges cmd.Wait() on backpressure. Mirrors the
+	// pattern used by the codex runner tee. See provider.DrainStreamLines
+	// for the underlying contract.
 	go func() {
-		scanner := bufio.NewScanner(pr)
-		scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
-		for scanner.Scan() {
-			line := scanner.Text()
-			if agentStream != nil && line != "" {
-				agentStream.PushTask(taskID, line+"\n")
+		_ = provider.DrainStreamLines(pr, func(chunk string) {
+			if agentStream != nil && chunk != "" {
+				agentStream.PushTask(taskID, chunk)
 			}
-		}
+		})
 	}()
 
 	var stderr strings.Builder

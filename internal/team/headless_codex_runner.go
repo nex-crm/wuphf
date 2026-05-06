@@ -9,7 +9,6 @@ package team
 // can stay focused on entry points + types.
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"io"
@@ -101,27 +100,19 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 	}
 	pr, pw := io.Pipe()
 	teedStdout := io.TeeReader(stdout, pw)
-	// Pipe every raw line from the provider (codex/claude) to the web UI's live stream.
-	// No filtering — the user sees everything the agent sees.
-	// bufio.Reader rather than bufio.Scanner: a single line larger
-	// than the scanner buffer returns false from Scan() and stops
-	// the loop, leaving io.TeeReader's writes blocked on a full
-	// pipe. Reader.ReadString('\n') keeps draining indefinitely
-	// (oversize lines come back as one or more chunks), so the tee
-	// path can never wedge regardless of provider output.
+	// Pipe every raw line from the provider to the web UI's live stream.
+	// No filtering — the user sees everything the agent sees. The reader-
+	// based drain in provider.DrainStreamLines guarantees an oversized
+	// line cannot stop the loop, so io.TeeReader cannot wedge cmd.Wait
+	// regardless of provider output size.
 	go func() {
-		r := bufio.NewReader(pr)
-		for {
-			chunk, err := r.ReadString('\n')
+		err := provider.DrainStreamLines(pr, func(chunk string) {
 			if agentStream != nil && chunk != "" {
 				agentStream.PushTask(taskID, chunk)
 			}
-			if err != nil {
-				if err != io.EOF {
-					appendHeadlessCodexLog(slug, "stream-drain-error: "+err.Error())
-				}
-				return
-			}
+		})
+		if err != nil {
+			appendHeadlessCodexLog(slug, "stream-drain-error: "+err.Error())
 		}
 	}()
 

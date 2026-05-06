@@ -1,9 +1,7 @@
 package team
 
 import (
-	"bufio"
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -199,11 +197,9 @@ func (l *Launcher) runHeadlessOpencodeTurn(ctx context.Context, slug string, not
 			}
 		}
 	})
-	if scanErr != nil && errors.Is(scanErr, bufio.ErrTooLong) {
-		// A single >4 MiB line would block cmd.Wait() on pipe backpressure
-		// forever; kill the child so Wait returns promptly.
-		terminateHeadlessProcess(cmd)
-	}
+	// provider.ReadOpencodeJSONStream now uses a reader-based drain, so a
+	// single oversized output line cannot wedge cmd.Wait on backpressure.
+	// The previous SIGKILL fallback for bufio.ErrTooLong is therefore gone.
 
 	if err := cmd.Wait(); err != nil {
 		detail := strings.TrimSpace(stderr.String())
@@ -240,9 +236,6 @@ func (l *Launcher) runHeadlessOpencodeTurn(ctx context.Context, slug string, not
 	if scanErr != nil {
 		metrics.TotalMs = time.Since(startedAt).Milliseconds()
 		l.updateHeadlessProgress(slug, "error", "error", truncate(scanErr.Error(), 180), metrics)
-		if errors.Is(scanErr, bufio.ErrTooLong) {
-			return fmt.Errorf("opencode output line exceeded 4 MiB buffer; aborted")
-		}
 		return scanErr
 	}
 
