@@ -75,7 +75,13 @@ function SidebarAgentRow({
         type="button"
         className={`sidebar-agent${isDMActive ? " active" : ""}`}
         title={`${agent.name} — ${ac.label}`}
-        onClick={() => onSelect(agent.slug)}
+        onClick={() => {
+          // Tier 3 escalation: "quick activation always wins" per the plan.
+          // Close any open Tier 2 peek so the workspace is the only surface
+          // visible after the tap, instead of two competing per-agent UIs.
+          peek.close();
+          onSelect(agent.slug);
+        }}
         data-agent-slug={agent.slug}
       >
         <span className="sidebar-agent-avatar avatar-with-harness">

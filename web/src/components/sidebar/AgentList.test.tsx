@@ -93,7 +93,9 @@ function setMembers(members: OfficeMember[]) {
   } as unknown as ReturnType<typeof useOfficeMembers>);
 }
 
-function defaultPeekState(overrides: Partial<{ isOpen: boolean }> = {}) {
+function defaultPeekState(
+  overrides: Partial<ReturnType<typeof useAgentEventPeek>> = {},
+) {
   return {
     isOpen: false,
     current: undefined,
@@ -308,6 +310,33 @@ describe("<AgentList>", () => {
     );
     expect(chevron).not.toBeNull();
     expect(chevron?.hasAttribute("data-agent-slug")).toBe(false);
+  });
+
+  it("clicking the row (Tier 3 escalation) closes any open peek before navigating", () => {
+    // Plan §Disclosure tiers: "Quick activation always wins; the long-press
+    // threshold is what differentiates peek from navigate." If peek is open
+    // when the user taps the row, the workspace should be the only surface
+    // visible after the tap — close the peek as part of escalation.
+    const close = vi.fn();
+    const setActiveAgentSlug = vi.fn();
+    useAppStore.setState({ setActiveAgentSlug });
+    useAgentEventPeekMock.mockImplementation(() =>
+      defaultPeekState({ isOpen: true, close }),
+    );
+
+    setMembers([
+      { slug: "tess", name: "Tess", role: "engineer", task: "watching tests" },
+    ]);
+
+    const { container } = renderList();
+    const row = container.querySelector(
+      'button[data-agent-slug="tess"]',
+    ) as HTMLButtonElement;
+    expect(row).not.toBeNull();
+    fireEvent.click(row);
+
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(setActiveAgentSlug).toHaveBeenCalledWith("tess");
   });
 
   it("clicking the chevron does NOT call setActiveAgentSlug (e.stopPropagation)", () => {
