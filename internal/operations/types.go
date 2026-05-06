@@ -25,13 +25,13 @@ type Blueprint struct {
 	// scaffold, first tasks, and provider requirements for a pack
 	// before committing. Optional — older blueprints without these
 	// fields still load and degrade gracefully in the UI.
-	Outcome                string                  `json:"outcome,omitempty" yaml:"outcome,omitempty"`
-	Category               string                  `json:"category,omitempty" yaml:"category,omitempty"`
-	FirstTasks             []BlueprintFirstTask    `json:"first_tasks,omitempty" yaml:"first_tasks,omitempty"`
-	Skills                 []BlueprintSkill        `json:"skills,omitempty" yaml:"skills,omitempty"`
-	Requirements           []BlueprintRequirement  `json:"requirements,omitempty" yaml:"requirements,omitempty"`
-	EstimatedSetupMinutes  int                     `json:"estimated_setup_minutes,omitempty" yaml:"estimated_setup_minutes,omitempty"`
-	ExampleArtifacts       []BlueprintExampleAsset `json:"example_artifacts,omitempty" yaml:"example_artifacts,omitempty"`
+	Outcome               string                  `json:"outcome,omitempty" yaml:"outcome,omitempty"`
+	Category              string                  `json:"category,omitempty" yaml:"category,omitempty"`
+	FirstTasks            []BlueprintFirstTask    `json:"first_tasks,omitempty" yaml:"first_tasks,omitempty"`
+	Skills                []BlueprintSkill        `json:"skills,omitempty" yaml:"skills,omitempty"`
+	Requirements          []BlueprintRequirement  `json:"requirements,omitempty" yaml:"requirements,omitempty"`
+	EstimatedSetupMinutes int                     `json:"estimated_setup_minutes,omitempty" yaml:"estimated_setup_minutes,omitempty"`
+	ExampleArtifacts      []BlueprintExampleAsset `json:"example_artifacts,omitempty" yaml:"example_artifacts,omitempty"`
 
 	// DefaultReviewer is the agent slug that approves promotions by default.
 	// The sentinel value "human-only" disables agent approval entirely and

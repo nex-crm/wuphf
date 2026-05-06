@@ -420,7 +420,7 @@ function PackDetailPanel({
       <div className="pack-detail-cta">
         <button
           type="button"
-          className="btn btn-primary"
+          className="btn btn-secondary"
           onClick={onChoose}
           disabled={selected}
         >
