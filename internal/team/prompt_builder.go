@@ -358,7 +358,7 @@ func markdownKnowledgeToolBlock() string {
 		"- team_wiki_read / team_wiki_search / team_wiki_list / wuphf_wiki_lookup: Read the canonical shared wiki.\n" +
 		"- team_learning_search: Search typed prior learnings before repeating substantial work. Prefer scoped search by playbook, file, task, or repo when available; treat source/trust/confidence as evidence quality.\n" +
 		"- team_learning_record: Record a durable typed learning only when it would save future work or prevent a repeat mistake. Use user-stated only when the human explicitly said it; otherwise choose observed, inferred, execution, synthesis, cross-agent, or cross-model with an honest confidence.\n" +
-		"- team_wiki_write: Direct canonical wiki writes only for already-approved edits, bootstrap/admin maintenance, or explicit human requests. Do not bypass notebook_promote for new agent-authored knowledge.\n"
+		"- team_wiki_write: Direct canonical wiki writes only for already-approved edits, bootstrap/admin maintenance, or explicit human requests. Do not bypass notebook_promote for new agent-authored knowledge. When a human says \"remember this\", \"save to wiki\", \"save to KB\", \"write this down\", \"add to wiki\", \"wiki this\", \"save to memory\", or \"this is canonical\", the broker writes that message to the team wiki automatically — do NOT re-route it through team_wiki_write yourself, and do NOT acknowledge that you saved it; the human's own message is the canonical source.\n"
 }
 
 func markdownKnowledgeMemoryBlock() string {

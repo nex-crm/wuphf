@@ -256,6 +256,13 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	b.mu.Unlock()
 
+	// PR 2: human "remember" intent. Hook fires AFTER b.mu.Unlock() and ONLY
+	// for human senders. Handle is a non-blocking enqueue; the classifier and
+	// the wiki write run in the writer goroutine, never re-entering b.mu.
+	if b.humanWikiWriter != nil && isHumanMessageSender(msg.From) {
+		b.humanWikiWriter.Handle(msg)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"id":    msg.ID,
@@ -474,6 +481,13 @@ func (b *Broker) PostMessage(from, channel, content string, tagged []string, rep
 			Content:   msg.Content,
 			Timestamp: time.Now().UTC(),
 		})
+	}
+	// PR 2: when a human posts via PostMessage (non-HTTP entry points such as
+	// integration tests and a small set of in-process callers), the same
+	// remember-intent hook fires. Handle is non-blocking and the writer
+	// goroutine never re-enters b.mu, so calling it under the lock is safe.
+	if b.humanWikiWriter != nil && isHumanMessageSender(msg.From) {
+		b.humanWikiWriter.Handle(msg)
 	}
 	return msg, nil
 }
