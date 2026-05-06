@@ -412,7 +412,19 @@ func (b *Broker) handleAgentStream(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	// If no history, send a connected event so the client knows the stream is live.
+	// Replay-end boundary marker. The frontend listens for this named SSE
+	// event to flip its `phase` ref from "replay" to "live" so behaviors
+	// keyed on parsed events (e.g. closing the EventSource on a HeadlessEvent
+	// idle) only fire for live entries — replayed idle from the history
+	// buffer must NOT silently kill the connection. Default `data:` lines
+	// (both history and live) continue to land on `onmessage` so existing
+	// consumers keep working without any code change.
+	if _, err := fmt.Fprintf(w, "event: replay-end\ndata: {}\n\n"); err != nil {
+		return
+	}
+	// If no history, also send a connected marker so the client knows the
+	// stream is live. Kept after the replay-end boundary so its ordering
+	// relative to real entries is unambiguous.
 	if len(history) == 0 {
 		if _, err := fmt.Fprintf(w, "data: [connected]\n\n"); err != nil {
 			return

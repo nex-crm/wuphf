@@ -60,6 +60,14 @@ export function agentStreamURL(slug: string, taskId: string | null): string {
   return `${base}${sep}task=${encodeURIComponent(trimmed)}`;
 }
 
+// StreamPhase tracks whether the SSE source is still serving the recent-
+// history replay or has crossed into live entries. The broker sends a
+// named `event: replay-end` SSE entry between the two; any consumer
+// branching on parsed-event content (e.g. closing the source on idle)
+// must gate on phase === "live" so a replayed terminal event from the
+// history buffer cannot silently kill the live connection.
+export type StreamPhase = "replay" | "live";
+
 export function useAgentStream(
   slug: string | null,
   taskId: string | null = null,
@@ -68,12 +76,14 @@ export function useAgentStream(
   const [connected, setConnected] = useState(false);
   const counterRef = useRef(0);
   const linesRef = useRef<StreamLine[]>([]);
+  const phaseRef = useRef<StreamPhase>("replay");
   const sourceRef = useRef<EventSource | null>(null);
 
   useEffect(() => {
     if (!slug) {
       linesRef.current = [];
       counterRef.current = 0;
+      phaseRef.current = "replay";
       setLines([]);
       setConnected(false);
       return;
@@ -81,6 +91,7 @@ export function useAgentStream(
 
     linesRef.current = [];
     counterRef.current = 0;
+    phaseRef.current = "replay";
     setLines([]);
 
     const url = agentStreamURL(slug, taskId);
@@ -88,6 +99,15 @@ export function useAgentStream(
     sourceRef.current = source;
 
     source.onopen = () => setConnected(true);
+
+    // The broker emits one `event: replay-end` after history catch-up.
+    // EventSource fires it on the named-event channel, not onmessage —
+    // keep this listener even when the body is empty so the phase ref
+    // flips before the first live entry arrives.
+    const replayEndListener = () => {
+      phaseRef.current = "live";
+    };
+    source.addEventListener("replay-end", replayEndListener);
 
     source.onmessage = (e) => {
       let parsed: Record<string, unknown> | undefined;
@@ -114,8 +134,21 @@ export function useAgentStream(
       if (usedId) counterRef.current = nextId;
       setLines(nextLines);
 
-      // Auto-stop on idle
-      if (parsed?.status === "idle" && counterRef.current > 1) {
+      // Auto-stop on idle, but only when this is a LIVE HeadlessEvent
+      // idle — never a replayed one. Two guards:
+      //   1. phaseRef === "live": before the broker's replay-end marker,
+      //      every entry is history. Closing on a replayed idle would
+      //      silently kill the live stream the moment a user opens the
+      //      stream view for an agent that just went idle.
+      //   2. parsed.kind === "headless_event": the runner-emitted
+      //      typed envelope. Other JSON shapes (raw provider events,
+      //      mcp_tool_event audit lines, pane-capture noise) may carry
+      //      unrelated `status` strings and must not trigger close.
+      if (
+        phaseRef.current === "live" &&
+        parsed?.kind === "headless_event" &&
+        parsed?.status === "idle"
+      ) {
         source.close();
         setConnected(false);
       }
@@ -130,6 +163,7 @@ export function useAgentStream(
     };
 
     return () => {
+      source.removeEventListener("replay-end", replayEndListener);
       source.close();
       sourceRef.current = null;
       setConnected(false);

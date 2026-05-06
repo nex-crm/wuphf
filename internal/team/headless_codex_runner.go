@@ -213,6 +213,7 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 			))
 			appendHeadlessCodexLog(slug, "stderr: "+detail)
 			l.updateHeadlessProgress(slug, "error", "error", truncate(detail, 180), metrics)
+			emitHeadlessTerminal(agentStream, HeadlessProviderCodex, slug, taskID, "", detail, metrics, codexUsageToTokenUsage(result.Usage))
 			if isCodexAuthError(detail) && l.broker != nil {
 				sysTarget := target
 				if strings.TrimSpace(sysTarget) == "" {
@@ -232,11 +233,13 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 			durationMillis(startedAt, firstToolAt),
 			err.Error(),
 		))
+		emitHeadlessTerminal(agentStream, HeadlessProviderCodex, slug, taskID, "", err.Error(), metrics, codexUsageToTokenUsage(result.Usage))
 		return err
 	}
 	if parseErr != nil {
 		metrics.TotalMs = time.Since(startedAt).Milliseconds()
 		l.updateHeadlessProgress(slug, "error", "error", truncate(parseErr.Error(), 180), metrics)
+		emitHeadlessTerminal(agentStream, HeadlessProviderCodex, slug, taskID, "", parseErr.Error(), metrics, codexUsageToTokenUsage(result.Usage))
 		return parseErr
 	}
 	metrics.TotalMs = time.Since(startedAt).Milliseconds()
@@ -254,6 +257,7 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 		summary = "reply ready · " + summary
 	}
 	l.updateHeadlessProgress(slug, "idle", "idle", summary, metrics)
+	emitHeadlessTerminal(agentStream, HeadlessProviderCodex, slug, taskID, summary, "", metrics, codexUsageToTokenUsage(result.Usage))
 	if l.broker != nil && (result.Usage.InputTokens != 0 || result.Usage.OutputTokens != 0 || result.Usage.CacheReadTokens != 0 || result.Usage.CacheCreationTokens != 0 || result.Usage.CostUSD != 0) {
 		l.broker.RecordAgentUsage(slug, config.ResolveCodexModel(l.cwd), result.Usage)
 	}
@@ -268,6 +272,16 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 		}
 	}
 	return nil
+}
+
+// codexUsageToTokenUsage adapts the Codex provider's ClaudeUsage record
+// (yes — Codex shares the ClaudeUsage envelope) into the runner-agnostic
+// shape HeadlessEvent expects.
+func codexUsageToTokenUsage(u provider.ClaudeUsage) *headlessTokenUsage {
+	if u.InputTokens == 0 && u.OutputTokens == 0 {
+		return nil
+	}
+	return &headlessTokenUsage{InputTokens: u.InputTokens, OutputTokens: u.OutputTokens}
 }
 
 func (l *Launcher) headlessCodexNeedsDangerousBypass(slug string) bool {

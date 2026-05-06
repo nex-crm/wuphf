@@ -1,9 +1,11 @@
-import { describe, expect, it, vi } from "vitest";
+import { act, renderHook } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   agentStreamURL,
   appendStreamLine,
   type StreamLine,
+  useAgentStream,
 } from "./useAgentStream";
 
 vi.mock("../api/client", () => ({
@@ -11,6 +13,59 @@ vi.mock("../api/client", () => ({
   // the agentStreamURL caller has to merge query strings safely.
   sseURL: (path: string) => `http://broker${path}?token=ABC`,
 }));
+
+// MockEventSource is a minimal EventSource stand-in that lets the test
+// push named events (replay-end) and onmessage entries directly. JSDOM
+// does not ship an EventSource implementation, and patching window
+// globals makes the tests robust to the hook's underlying EventSource
+// reference.
+class MockEventSource {
+  static instances: MockEventSource[] = [];
+  url: string;
+  onopen: ((this: EventSource, ev: Event) => unknown) | null = null;
+  onmessage: ((this: EventSource, ev: MessageEvent) => unknown) | null = null;
+  onerror: ((this: EventSource, ev: Event) => unknown) | null = null;
+  closed = false;
+  private listeners = new Map<string, Set<(ev: MessageEvent) => unknown>>();
+
+  constructor(url: string | URL) {
+    this.url = String(url);
+    MockEventSource.instances.push(this);
+  }
+
+  addEventListener(name: string, fn: (ev: MessageEvent) => unknown) {
+    let bucket = this.listeners.get(name);
+    if (!bucket) {
+      bucket = new Set();
+      this.listeners.set(name, bucket);
+    }
+    bucket.add(fn);
+  }
+
+  removeEventListener(name: string, fn: (ev: MessageEvent) => unknown) {
+    this.listeners.get(name)?.delete(fn);
+  }
+
+  dispatchData(data: string) {
+    if (this.onmessage)
+      this.onmessage.call(
+        this as unknown as EventSource,
+        new MessageEvent("message", { data }),
+      );
+  }
+
+  dispatchNamed(name: string, data: string) {
+    const bucket = this.listeners.get(name);
+    if (!bucket) return;
+    for (const fn of bucket) {
+      fn(new MessageEvent(name, { data }));
+    }
+  }
+
+  close() {
+    this.closed = true;
+  }
+}
 
 describe("appendStreamLine", () => {
   it("starts a new raw line when the buffer is empty", () => {
@@ -137,5 +192,82 @@ describe("appendStreamLine", () => {
       if (usedId) nextId += 1;
     }
     expect(lines.length).toBeLessThanOrEqual(50);
+  });
+});
+
+describe("useAgentStream phase + idle behavior", () => {
+  beforeEach(() => {
+    MockEventSource.instances = [];
+    (global as unknown as { EventSource: typeof MockEventSource }).EventSource =
+      MockEventSource;
+  });
+
+  afterEach(() => {
+    delete (global as unknown as { EventSource?: typeof MockEventSource })
+      .EventSource;
+  });
+
+  it("does NOT close the EventSource when an idle event arrives during replay", () => {
+    // Regression: pre-fix, the hook closed on any parsed.status === "idle"
+    // past the first counter tick — meaning a HeadlessEvent idle from the
+    // recent-history buffer would silently kill the live stream the moment
+    // the user opened the viewer for an agent that just went idle. With
+    // the replay-end boundary in place, the hook must hold the connection
+    // open until phase flips to "live".
+    const { result } = renderHook(() => useAgentStream("ceo"));
+    const [source] = MockEventSource.instances;
+    expect(source).toBeDefined();
+    if (!source) return;
+
+    // Replay phase: dispatch a HeadlessEvent idle through the history
+    // pipe. Phase ref is still "replay" (broker has not yet sent the
+    // boundary), so the hook must NOT close.
+    act(() => {
+      source.dispatchData(
+        JSON.stringify({
+          kind: "headless_event",
+          type: "idle",
+          status: "idle",
+          provider: "claude",
+        }),
+      );
+    });
+    expect(source.closed).toBe(false);
+    expect(result.current.lines.length).toBeGreaterThan(0);
+
+    // Cross the boundary into live, then a NEW idle. Now the hook
+    // must close — the live HeadlessEvent idle is the legitimate
+    // turn-end signal.
+    act(() => {
+      source.dispatchNamed("replay-end", "{}");
+      source.dispatchData(
+        JSON.stringify({
+          kind: "headless_event",
+          type: "idle",
+          status: "idle",
+          provider: "claude",
+        }),
+      );
+    });
+    expect(source.closed).toBe(true);
+  });
+
+  it("ignores non-headless_event JSON entries with a status field", () => {
+    // The agent stream carries multiple event shapes today (raw provider
+    // chunks, mcp_tool_event audit lines, pane-capture noise). Only the
+    // typed HeadlessEvent envelope is allowed to drive auto-close — a
+    // foreign JSON object that happens to carry status:"idle" must not.
+    renderHook(() => useAgentStream("ceo"));
+    const [source] = MockEventSource.instances;
+    expect(source).toBeDefined();
+    if (!source) return;
+
+    act(() => {
+      source.dispatchNamed("replay-end", "{}");
+      source.dispatchData(
+        JSON.stringify({ type: "result", status: "idle", note: "not us" }),
+      );
+    });
+    expect(source.closed).toBe(false);
   });
 });
