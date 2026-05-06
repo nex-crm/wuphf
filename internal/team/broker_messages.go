@@ -392,7 +392,11 @@ func (b *Broker) bootstrapHumanHasPostedLocked() {
 		return
 	}
 	for _, msg := range b.messages {
-		if isHumanMessageSender(msg.From) {
+		// Mirror the empty-From guard in appendMessageLocked:
+		// isHumanMessageSender("") returns true (legacy), so an empty
+		// From field must be rejected here too or a corrupted/legacy
+		// persisted message would falsely flip the bit on restart.
+		if strings.TrimSpace(msg.From) != "" && isHumanMessageSender(msg.From) {
 			b.humanHasPosted = true
 			return
 		}
