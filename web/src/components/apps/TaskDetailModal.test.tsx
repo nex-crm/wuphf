@@ -24,18 +24,27 @@ vi.mock("../../api/tasks", async (importOriginal) => {
   };
 });
 
-vi.mock("../agents/AgentTerminal", () => ({
-  AgentTerminal: ({
-    slug,
-    taskId,
-    title,
+vi.mock("../../hooks/useAgentStream", () => ({
+  useAgentStream: (slug: string | null, taskId: string | null = null) => ({
+    lines: [
+      {
+        id: 1,
+        data: JSON.stringify({ slug, taskId }),
+        parsed: { slug, taskId },
+      },
+    ],
+    connected: true,
+  }),
+}));
+
+vi.mock("../messages/StreamLineView", () => ({
+  StreamLineView: ({
+    line,
   }: {
-    slug: string | null;
-    taskId?: string | null;
-    title?: string;
+    line: { parsed?: { slug?: string; taskId?: string } };
   }) => (
     <div data-testid="agent-terminal">
-      {title}:{slug}:{taskId}
+      {line.parsed?.slug}:{line.parsed?.taskId}
     </div>
   ),
 }));
@@ -191,7 +200,7 @@ describe("TaskDetailModal memory override", () => {
       await screen.findByRole("button", { name: "Back to tasks" }),
     ).toBeInTheDocument();
     expect(screen.getByTestId("agent-terminal")).toHaveTextContent(
-      "Task terminal:builder:task-123",
+      "builder:task-123",
     );
   });
 

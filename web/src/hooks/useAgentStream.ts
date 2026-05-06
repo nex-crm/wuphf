@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-import { subscribeAgentStream } from "../lib/agentStreamClient";
+import { sseURL } from "../api/client";
 
 export interface StreamLine {
   id: number;
@@ -47,61 +47,77 @@ export function appendStreamLine(
   };
 }
 
-export function useAgentStream(slug: string | null) {
+function agentStreamURL(slug: string, taskId: string | null): string {
+  const params = new URLSearchParams();
+  const trimmed = taskId?.trim();
+  if (trimmed) params.set("task", trimmed);
+  const qs = params.toString();
+  return sseURL(
+    `/agent-stream/${encodeURIComponent(slug)}${qs ? `?${qs}` : ""}`,
+  );
+}
+
+export function useAgentStream(
+  slug: string | null,
+  taskId: string | null = null,
+) {
   const [lines, setLines] = useState<StreamLine[]>([]);
   const [connected, setConnected] = useState(false);
   const counterRef = useRef(0);
-  const linesRef = useRef<StreamLine[]>([]);
+  const sourceRef = useRef<EventSource | null>(null);
 
   useEffect(() => {
     if (!slug) {
-      linesRef.current = [];
-      counterRef.current = 0;
       setLines([]);
       setConnected(false);
       return;
     }
 
-    linesRef.current = [];
-    counterRef.current = 0;
-    setLines([]);
-    const subscription = subscribeAgentStream(slug, {
-      onOpen: () => setConnected(true),
-      onLine: (eventData) => {
-        let parsed: Record<string, unknown> | undefined;
-        try {
-          parsed = JSON.parse(eventData);
-        } catch {
-          // raw text line
-        }
+    const url = agentStreamURL(slug, taskId);
+    const source = new EventSource(url);
+    sourceRef.current = source;
 
+    source.onopen = () => setConnected(true);
+
+    source.onmessage = (e) => {
+      let parsed: Record<string, unknown> | undefined;
+      try {
+        parsed = JSON.parse(e.data);
+      } catch {
+        // raw text line
+      }
+
+      setLines((prev) => {
         const { lines: nextLines, usedId } = appendStreamLine(
-          linesRef.current,
-          eventData,
+          prev,
+          e.data,
           parsed,
           counterRef.current + 1,
         );
-        linesRef.current = nextLines;
         if (usedId) {
           counterRef.current += 1;
         }
-        setLines(nextLines);
+        return nextLines;
+      });
 
-        // Auto-stop on idle
-        if (parsed?.status === "idle" && counterRef.current > 1) {
-          subscription.close();
-          setConnected(false);
-        }
-      },
-      onError: () => setConnected(false),
-      onClose: () => setConnected(false),
-    });
+      // Auto-stop on idle
+      if (parsed?.status === "idle" && counterRef.current > 1) {
+        source.close();
+        setConnected(false);
+      }
+    };
 
-    return () => {
-      subscription.close();
+    source.onerror = () => {
+      source.close();
       setConnected(false);
     };
-  }, [slug]);
+
+    return () => {
+      source.close();
+      sourceRef.current = null;
+      setConnected(false);
+    };
+  }, [slug, taskId]);
 
   return { lines, connected };
 }

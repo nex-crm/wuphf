@@ -5,6 +5,7 @@ import { Xmark } from "iconoir-react";
 import type { OfficeMember } from "../../api/client";
 import { createDM, post } from "../../api/client";
 import { listAgentLogTasks, type TaskLogSummary } from "../../api/tasks";
+import { useAgentStream } from "../../hooks/useAgentStream";
 import { useDefaultHarness } from "../../hooks/useConfig";
 import { useChannelMembers, useOfficeMembers } from "../../hooks/useMembers";
 import { resolveHarness } from "../../lib/harness";
@@ -15,11 +16,11 @@ import {
   useCurrentRoute,
 } from "../../routes/useCurrentRoute";
 import { useAppStore } from "../../stores/app";
+import { StreamLineView } from "../messages/StreamLineView";
 import { confirm } from "../ui/ConfirmDialog";
 import { HarnessBadge } from "../ui/HarnessBadge";
 import { PixelAvatar } from "../ui/PixelAvatar";
 import { showNotice } from "../ui/Toast";
-import { AgentTerminal } from "./AgentTerminal";
 
 /**
  * Stable identity key for the AgentPanel "close on route change" effect.
@@ -70,13 +71,35 @@ interface AgentPanelViewProps {
 }
 
 function StreamSection({ slug }: { slug: string }) {
+  const { lines, connected } = useAgentStream(slug);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-run on every new line so the log auto-scrolls.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el) {
+      el.scrollTop = el.scrollHeight;
+    }
+  }, [lines.length]);
+
   return (
     <div className="agent-panel-section">
-      <AgentTerminal
-        slug={slug}
-        title="Live stream"
-        emptyLabel="No output yet"
-      />
+      <div className="agent-panel-section-title">Live stream</div>
+      <div className="agent-stream-status">
+        <span
+          className={`status-dot ${connected ? "active pulse" : "lurking"}`}
+        />
+        {connected ? "Connected" : "Disconnected"}
+      </div>
+      <div className="agent-stream-log" ref={scrollRef}>
+        {lines.length === 0 ? (
+          <div className="agent-stream-empty">No output yet</div>
+        ) : (
+          lines.map((line) => (
+            <StreamLineView key={line.id} line={line} compact={true} />
+          ))
+        )}
+      </div>
     </div>
   );
 }

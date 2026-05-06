@@ -1,10 +1,11 @@
 import { useEffect, useRef } from "react";
 
+import { useAgentStream } from "../../hooks/useAgentStream";
 import { useMessages } from "../../hooks/useMessages";
-import { AgentTerminal } from "../agents/AgentTerminal";
 import { Composer } from "./Composer";
 import { InterviewBar } from "./InterviewBar";
 import { MessageBubble } from "./MessageBubble";
+import { StreamLineView } from "./StreamLineView";
 import { TypingIndicator } from "./TypingIndicator";
 
 interface DMViewProps {
@@ -21,7 +22,9 @@ interface DMViewProps {
  */
 export function DMView({ agentSlug, channelSlug }: DMViewProps) {
   const { data: messages = [] } = useMessages(channelSlug);
+  const { lines, connected } = useAgentStream(agentSlug);
   const messagesRef = useRef<HTMLDivElement>(null);
+  const streamRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll messages
   useEffect(() => {
@@ -29,6 +32,14 @@ export function DMView({ agentSlug, channelSlug }: DMViewProps) {
       messagesRef.current.scrollTop = messagesRef.current.scrollHeight;
     }
   }, []);
+
+  // Auto-scroll stream
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-run on every new line so the log auto-scrolls.
+  useEffect(() => {
+    if (streamRef.current) {
+      streamRef.current.scrollTop = streamRef.current.scrollHeight;
+    }
+  }, [lines.length]);
 
   return (
     <>
@@ -64,7 +75,44 @@ export function DMView({ agentSlug, channelSlug }: DMViewProps) {
             overflow: "hidden",
           }}
         >
-          <AgentTerminal slug={agentSlug} title="Live output" />
+          <div
+            style={{
+              padding: "8px 12px",
+              borderBottom: "1px solid var(--border)",
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              fontSize: 13,
+              fontWeight: 600,
+            }}
+          >
+            <span
+              className={`status-dot ${connected ? "active pulse" : "lurking"}`}
+            />
+            <span>Live output</span>
+          </div>
+          <div
+            ref={streamRef}
+            style={{
+              flex: 1,
+              overflowY: "auto",
+              padding: 8,
+              fontFamily: "var(--font-mono)",
+              fontSize: 11,
+              lineHeight: 1.5,
+              color: "var(--text-secondary)",
+            }}
+          >
+            {lines.length === 0 ? (
+              <div style={{ color: "var(--text-tertiary)", padding: 8 }}>
+                {connected ? "Waiting for output..." : "Stream idle"}
+              </div>
+            ) : (
+              lines.map((line) => (
+                <StreamLineView key={line.id} line={line} compact={true} />
+              ))
+            )}
+          </div>
         </div>
       </div>
     </>
