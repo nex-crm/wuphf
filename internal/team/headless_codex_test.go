@@ -1220,6 +1220,9 @@ func TestEnqueueHeadlessCodexTurnRecordHumanPreemptsActiveTurn(t *testing.T) {
 	if got := len(queue); got != 1 || queue[0].Prompt != "stop, what about the X bug?" {
 		t.Fatalf("expected human turn to be queued for the worker to pick up, got %#v", queue)
 	}
+	if !queue[0].FromHuman {
+		t.Error("expected FromHuman flag to survive the preemption path")
+	}
 }
 
 func TestWakeLeadAfterSpecialistFallsBackToCompletedTaskUpdateWhenNoBroadcast(t *testing.T) {
