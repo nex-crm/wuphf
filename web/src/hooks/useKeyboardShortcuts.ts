@@ -20,6 +20,7 @@ function isTypingTarget(target: EventTarget | null): boolean {
 
 /** Global keyboard shortcuts matching legacy behavior. */
 export function useKeyboardShortcuts() {
+  const setCommandPaletteOpen = useAppStore((s) => s.setCommandPaletteOpen);
   const setSearchOpen = useAppStore((s) => s.setSearchOpen);
   const setActiveAgentSlug = useAppStore((s) => s.setActiveAgentSlug);
   const setActiveThread = useAppStore((s) => s.setActiveThread);
@@ -33,7 +34,7 @@ export function useKeyboardShortcuts() {
       if ((e.metaKey || e.ctrlKey) && e.key === "k") {
         e.preventDefault();
         const state = useAppStore.getState();
-        setSearchOpen(!state.searchOpen);
+        setCommandPaletteOpen(!state.commandPaletteOpen);
         return;
       }
 
@@ -100,6 +101,10 @@ export function useKeyboardShortcuts() {
           setComposerHelpOpen(false);
           return;
         }
+        if (state.commandPaletteOpen) {
+          setCommandPaletteOpen(false);
+          return;
+        }
         if (state.searchOpen) {
           setSearchOpen(false);
           return;
@@ -118,6 +123,7 @@ export function useKeyboardShortcuts() {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [
+    setCommandPaletteOpen,
     setSearchOpen,
     setActiveAgentSlug,
     setActiveThread,

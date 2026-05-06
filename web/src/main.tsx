@@ -11,6 +11,7 @@ import "./styles/layout.css";
 import "./styles/messages.css";
 import "./styles/agents.css";
 import "./styles/search.css";
+import "./styles/command.css";
 import "./styles/wiki-shell.css";
 import "./styles/kbd.css";
 import "./styles/console.css";
