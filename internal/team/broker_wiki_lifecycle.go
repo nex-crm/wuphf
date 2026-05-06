@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"path/filepath"
 	"time"
 
 	"github.com/nex-crm/wuphf/internal/config"
@@ -111,6 +112,18 @@ func (b *Broker) initWikiWorker() {
 	humanWiki := NewHumanWikiIntentWriter(worker)
 	humanWiki.Start(lifecycleCtx)
 
+	// PR 3 (notebook-wiki-promise): demand index aggregates cross-agent
+	// notebook search hits and other demand signals (PRs 4 & 5) into a
+	// rolling-window score per entry. JSONL log lives under
+	// <wiki_root>/.promotion-demand/events.jsonl. A failed init is non-fatal:
+	// hooks no-op when the index is nil.
+	demandLogPath := filepath.Join(repo.Root(), ".promotion-demand", "events.jsonl")
+	demandIdx, demandErr := NewNotebookDemandIndex(demandLogPath)
+	if demandErr != nil {
+		log.Printf("wiki: promotion demand index init failed: %v", demandErr)
+		demandIdx = nil
+	}
+
 	b.mu.Lock()
 	b.wikiWorker = worker
 	b.wikiIndex = idx
@@ -119,6 +132,7 @@ func (b *Broker) initWikiWorker() {
 	b.readLog = NewReadLog(repo.Root())
 	b.autoNotebookWriter = autoWriter
 	b.humanWikiWriter = humanWiki
+	b.demandIndex = demandIdx
 	b.mu.Unlock()
 	// Init succeeded; clear any cached failure so future calls don't surface
 	// stale errors from a previous attempt.
