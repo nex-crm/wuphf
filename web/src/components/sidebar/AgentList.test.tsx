@@ -406,4 +406,40 @@ describe("<AgentList>", () => {
     );
     expect(chevron3?.getAttribute("aria-expanded")).toBe("true");
   });
+
+  // ─── presence badge ──────────────────────────────────────────────────────
+  it("renders the online badge on rows whose member has online=true", () => {
+    setMembers([
+      {
+        slug: "tess",
+        name: "Tess",
+        role: "engineer",
+        online: true,
+        last_seen_at: "2026-05-07T00:00:00Z",
+      },
+      {
+        slug: "ava",
+        name: "Ava",
+        role: "designer",
+        online: false,
+        last_seen_at: "2026-05-06T22:00:00Z",
+      },
+      // Built-in member without an adapter session — no presence record at all.
+      // The badge must not render and the absence of an "offline" marker is
+      // intentional: not-connected and never-connected are the same shape on
+      // the avatar, only differentiated inside the peek card.
+      { slug: "devon", name: "Devon", role: "engineer" },
+    ]);
+
+    const { container } = renderList();
+    expect(
+      container.querySelector('[data-testid="online-badge-tess"]'),
+    ).not.toBeNull();
+    expect(
+      container.querySelector('[data-testid="online-badge-ava"]'),
+    ).toBeNull();
+    expect(
+      container.querySelector('[data-testid="online-badge-devon"]'),
+    ).toBeNull();
+  });
 });
