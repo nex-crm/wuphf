@@ -136,6 +136,9 @@
   --bubble-pulse-fade-in: 150ms;
   --bubble-text-crossfade: 180ms;
   --bubble-idle-dim-duration: 600ms;
+
+  /* Popover shadow — used by the Tier 2 hover peek card. */
+  --shadow-popover: 0 8px 24px -8px rgba(0, 0, 0, 0.32);
 }
 
 html {
