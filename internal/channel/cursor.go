@@ -4,16 +4,16 @@ package channel
 import "fmt"
 
 // GetMember returns the ChannelMember for a given channel+slug pair.
-func (s *Store) GetMember(channelID, slug string) (*ChannelMember, bool) {
+func (s *Store) GetMember(channelID, slug string) (ChannelMember, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	for i := range s.members {
 		if s.members[i].ChannelID == channelID && s.members[i].Slug == slug {
-			return &s.members[i], true
+			return s.members[i], true
 		}
 	}
-	return nil, false
+	return ChannelMember{}, false
 }
 
 // MarkRead advances the LastReadID cursor for a channel member.

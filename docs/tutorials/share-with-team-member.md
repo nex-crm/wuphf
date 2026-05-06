@@ -86,7 +86,9 @@ The team member opens the invite URL in a browser:
 http://100.82.14.6:7891/join/wphf_...
 ```
 
-They will see a short join screen. They enter the display name teammates should see in messages and office activity.
+The browser is redirected to the WUPHF web UI in invite-acceptance mode. They see a short join screen and enter the display name teammates should see in messages and office activity.
+
+The join screen surfaces specific copy when the invite is no longer accepting joiners — for example "This invite is no longer valid" if the host already revoked it or someone else accepted it first — so the team member can ask for a fresh invite without guessing.
 
 After submitting, WUPHF redirects them to:
 

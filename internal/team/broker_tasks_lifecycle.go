@@ -37,6 +37,7 @@ func (b *Broker) BlockTask(taskID, actor, reason string) (teamTask, bool, error)
 		if err := rejectFalseLocalWorktreeBlock(task, reason); err != nil {
 			return *task, false, err
 		}
+		beforeStatus := task.Status
 		if reason != "" {
 			switch existing := strings.TrimSpace(task.Details); {
 			case existing == "":
@@ -60,6 +61,7 @@ func (b *Broker) BlockTask(taskID, actor, reason string) (teamTask, bool, error)
 		if err := b.saveLocked(); err != nil {
 			return teamTask{}, false, err
 		}
+		b.emitTaskTransitionAutoNotebook(task, beforeStatus, actor)
 		return *task, true, nil
 	}
 
@@ -86,6 +88,7 @@ func (b *Broker) ResumeTask(taskID, actor, reason string) (teamTask, bool, error
 		if task.ID != id {
 			continue
 		}
+		beforeStatus := task.Status
 		changed := false
 		if task.Blocked {
 			task.Blocked = false
@@ -120,6 +123,7 @@ func (b *Broker) ResumeTask(taskID, actor, reason string) (teamTask, bool, error
 		if err := b.saveLocked(); err != nil {
 			return teamTask{}, false, err
 		}
+		b.emitTaskTransitionAutoNotebook(task, beforeStatus, actor)
 		return *task, true, nil
 	}
 
@@ -180,6 +184,7 @@ func (b *Broker) EnsureTask(channel, title, details, owner, createdBy, threadID 
 		Owner:    strings.TrimSpace(owner),
 	}); existing != nil {
 		now := time.Now().UTC().Format(time.RFC3339)
+		beforeStatus := existing.Status
 		if existing.Details == "" && strings.TrimSpace(details) != "" {
 			existing.Details = strings.TrimSpace(details)
 		}
@@ -206,6 +211,7 @@ func (b *Broker) EnsureTask(channel, title, details, owner, createdBy, threadID 
 		if err := b.saveLocked(); err != nil {
 			return teamTask{}, false, err
 		}
+		b.emitTaskTransitionAutoNotebook(existing, beforeStatus, createdBy)
 		return *existing, true, nil
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -243,6 +249,7 @@ func (b *Broker) EnsureTask(channel, title, details, owner, createdBy, threadID 
 	if err := b.saveLocked(); err != nil {
 		return teamTask{}, false, err
 	}
+	b.emitTaskTransitionAutoNotebook(&task, "", createdBy)
 	return task, false, nil
 }
 
@@ -332,8 +339,14 @@ func (b *Broker) hasUnresolvedDepsLocked(task *teamTask) bool {
 // unblockDependentsLocked checks all blocked tasks and unblocks those whose
 // dependencies are now resolved. For each newly unblocked task, it appends a
 // "task_unblocked" action so the launcher can deliver a notification to the owner.
-func (b *Broker) unblockDependentsLocked(completedTaskID string) {
+//
+// Returns the list of cascade transitions that the caller must publish to the
+// auto-notebook writer AFTER its own saveLocked succeeds. Emitting under
+// b.mu before the persist would leak notebook entries for transitions the
+// broker subsequently rolled back on save failure (CodeRabbit, major).
+func (b *Broker) unblockDependentsLocked(completedTaskID string) []pendingTaskTransition {
 	now := time.Now().UTC().Format(time.RFC3339)
+	var pending []pendingTaskTransition
 	for i := range b.tasks {
 		if !b.tasks[i].Blocked {
 			continue
@@ -349,6 +362,7 @@ func (b *Broker) unblockDependentsLocked(completedTaskID string) {
 			continue
 		}
 		if !b.hasUnresolvedDepsLocked(&b.tasks[i]) {
+			beforeStatus := b.tasks[i].Status
 			b.tasks[i].Blocked = false
 			if strings.TrimSpace(b.tasks[i].Owner) != "" {
 				b.tasks[i].Status = "in_progress"
@@ -367,8 +381,13 @@ func (b *Broker) unblockDependentsLocked(completedTaskID string) {
 				truncateSummary(b.tasks[i].Title+" unblocked by "+completedTaskID, 140),
 				b.tasks[i].ID,
 			)
+			pending = append(pending, pendingTaskTransition{
+				taskID:       b.tasks[i].ID,
+				beforeStatus: beforeStatus,
+			})
 		}
 	}
+	return pending
 }
 
 type taskReuseMatch struct {
