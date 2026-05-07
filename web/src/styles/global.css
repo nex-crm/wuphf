@@ -122,6 +122,23 @@
   --radius-lg: 16px;
   --radius-xl: 20px;
   --radius-full: 9999px;
+
+  /* Agent event bubble — state colors. Used by .sidebar-agent-pill states. */
+  --bubble-shipping: #2a8f4c; /* shipping events — green */
+  --bubble-plotting: #5a6bc8; /* plotting/thinking events — slate blue */
+  --bubble-talking: #ecb22e; /* talking/responding events — WUPHF yellow */
+  --bubble-stuck: #c8542a; /* stuck/blocked events — warm orange */
+  --bubble-idle: var(--text-tertiary); /* idle bar fallback */
+
+  /* Agent event bubble — dynamics. */
+  --bubble-halo-radius: 4px;
+  --bubble-halo-duration: 600ms;
+  --bubble-pulse-fade-in: 150ms;
+  --bubble-text-crossfade: 180ms;
+  --bubble-idle-dim-duration: 600ms;
+
+  /* Popover shadow — used by the Tier 2 hover peek card. */
+  --shadow-popover: 0 8px 24px -8px rgba(0, 0, 0, 0.32);
 }
 
 html {
@@ -327,6 +344,109 @@ body {
   background: var(--yellow-bg);
   color: var(--yellow);
 }
+.badge-orange {
+  background: var(--warning-200);
+  color: var(--warning-500);
+}
+
+/* ─── Approval context (Variant B layout, shared between InterviewBar and HumanInterviewOverlay) ─── */
+/* The approval card has three semantically distinct content blocks and visual
+   weight must follow that order: Why (prose, primary text), Details (inset
+   panel, the decision-relevant payload — labels muted, values prominent),
+   Footer (operational metadata at secondary text weight, AA contrast). */
+.approval-context {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0 0 4px;
+}
+.approval-why {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text);
+}
+.approval-details {
+  margin: 0;
+  padding: 12px 14px;
+  /* overlay-soft is theme-aware: rgba(0,0,0,0.04) in light, rgba(255,255,255,0.04)
+     in dark. Gives the inset panel a perceptible recess on both themes without
+     hardcoding two backgrounds. --bg-warm collapses against --bg-card at dark
+     theme contrast 1.04:1, so the panel would otherwise vanish. */
+  background: var(--overlay-soft);
+  border: 1px solid var(--border-dark, var(--border));
+  border-radius: var(--radius-md);
+  display: grid;
+  gap: 6px;
+}
+.approval-details-row {
+  display: grid;
+  grid-template-columns: 64px 1fr;
+  gap: 10px;
+  align-items: baseline;
+  font-size: 14px;
+  line-height: 1.45;
+  margin: 0;
+}
+.approval-details-label {
+  /* text-secondary, not text-tertiary, so the label clears WCAG AA on the
+     inset surface in dark mode. Hierarchy still reads via font-weight + the
+     narrow column. */
+  color: var(--text-secondary);
+  font-weight: 500;
+  margin: 0;
+}
+.approval-details-value {
+  color: var(--text);
+  margin: 0;
+  word-break: break-word;
+}
+.approval-details-value .mono {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+}
+.approval-truncated {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--warning-100, var(--bg-warm));
+  color: var(--warning-500);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  vertical-align: 1px;
+}
+.approval-empty {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+  font-style: italic;
+}
+.approval-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+.approval-footer-row {
+  white-space: nowrap;
+}
+.approval-footer-row .mono {
+  font-family: var(--font-mono);
+  font-size: 0.95em;
+}
+@media (max-width: 480px) {
+  .approval-details-row {
+    grid-template-columns: 56px 1fr;
+    gap: 8px;
+  }
+  .approval-footer-row {
+    white-space: normal;
+  }
+}
 .badge-muted {
   background: var(--bg-warm);
   color: var(--text-tertiary);
@@ -373,6 +493,23 @@ body {
   position: absolute;
   right: -3px;
   bottom: -3px;
+  pointer-events: none;
+}
+
+/* Transport-presence indicator on agent avatars. Sits at top-right so it
+   does not collide with the harness badge at bottom-right. Rendered only
+   when the member's `online` flag is true (see AgentList SidebarAgentRow);
+   absence of the dot encodes "offline OR never connected" — the peek card
+   surfaces the distinction via "Last seen". */
+.online-badge {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--green, #03a04c);
+  box-shadow: 0 0 0 1.5px var(--bg-card, #fff);
   pointer-events: none;
 }
 

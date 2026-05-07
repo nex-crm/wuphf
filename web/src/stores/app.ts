@@ -1,6 +1,53 @@
 import { create } from "zustand";
 
+import {
+  __internal as agentEventTimerInternal,
+  computePillState,
+  type PillState,
+} from "../lib/agentEventTimer";
+
 export type Theme = "nex" | "nex-dark" | "noir-gold";
+
+/**
+ * Snapshot payload for the SSE "activity" event. Lane A may not yet emit
+ * `kind`; consumers must default to "routine". Lane A omits the field when
+ * the classifier hasn't run, which is acceptable.
+ */
+export interface AgentActivitySnapshot {
+  slug: string;
+  status?: string;
+  activity?: string;
+  detail?: string;
+  lastTime?: string;
+  totalMs?: number;
+  firstEventMs?: number;
+  firstTextMs?: number;
+  firstToolMs?: number;
+  kind?: "routine" | "milestone" | "stuck";
+}
+
+/**
+ * Stored snapshot — extends the wire payload with client-side timestamps used
+ * to drive halo decay and idle/dim transitions.
+ */
+export interface StoredActivitySnapshot extends AgentActivitySnapshot {
+  /** Wall-clock ms when this snapshot was received by the client. */
+  receivedAtMs: number;
+  /**
+   * Wall-clock ms after which the halo glow expires. Stuck snapshots leave
+   * this at the previous value (no false halo on stuck).
+   */
+  haloUntilMs: number;
+}
+
+const { HALO_DECAY_MS } = agentEventTimerInternal;
+
+/**
+ * Cap on per-slug history depth in agentActivityHistory. The Tier 2 hover
+ * peek surfaces the most recent ≤6 prior events; the buffer holds 8 so the
+ * peek has a small forward margin if display rules change.
+ */
+export const MAX_AGENT_HISTORY = 8;
 
 const _storedTheme = ((): Theme => {
   try {
@@ -154,6 +201,21 @@ export interface AppStore {
   onboardingComplete: boolean;
   setOnboardingComplete: (v: boolean) => void;
   resetForOnboarding: () => void;
+
+  // Agent activity (SSE-driven event bubbles)
+  agentActivitySnapshots: Record<string, StoredActivitySnapshot>;
+  // Per-slug ring buffer of prior snapshots, newest-first, capped at
+  // MAX_AGENT_HISTORY. Powers the Tier 2 hover-peek "Recent" list. The
+  // current snapshot lives in agentActivitySnapshots; history holds only
+  // what was previously current and got displaced by a newer event.
+  agentActivityHistory: Record<string, StoredActivitySnapshot[]>;
+  recordActivitySnapshot: (snap: AgentActivitySnapshot) => void;
+
+  // SSE reconnect grace — true after the EventSource has stayed in a
+  // not-OPEN state for >5s. Drives the row-dim + bottom-of-rail
+  // "Reconnecting…" indicator (eng decision A3).
+  isReconnecting: boolean;
+  setIsReconnecting: (v: boolean) => void;
 }
 
 export const useAppStore = create<AppStore>((set, get) => ({
@@ -290,6 +352,53 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set({ telegramConnectOpen: true, telegramConnectMode: mode }),
   setTelegramConnectOpen: (v) => set({ telegramConnectOpen: v }),
 
+  agentActivitySnapshots: {},
+  agentActivityHistory: {},
+  recordActivitySnapshot: (snap) => {
+    if (typeof snap?.slug !== "string" || snap.slug.length === 0) return;
+    const { slug } = snap;
+    const now = Date.now();
+    set((state) => {
+      const previous = state.agentActivitySnapshots[slug];
+      // Stuck snapshots must NOT bump the halo window — a stuck transition
+      // would otherwise visually read as "alive" via the halo glow. Preserve
+      // the previous haloUntilMs (or default to a past value if none) so the
+      // halo state derives correctly via computePillState.
+      const haloUntilMs =
+        snap.kind === "stuck"
+          ? (previous?.haloUntilMs ?? 0)
+          : now + HALO_DECAY_MS;
+      // Push the previous current snapshot onto the per-slug history ring
+      // buffer (newest-first). The current snapshot itself stays in
+      // agentActivitySnapshots; history holds only displaced events. First
+      // event for a slug leaves history untouched (no previous to keep).
+      const prevHistory = state.agentActivityHistory[slug] ?? [];
+      const nextHistory = previous
+        ? [previous, ...prevHistory].slice(0, MAX_AGENT_HISTORY)
+        : prevHistory;
+      return {
+        agentActivitySnapshots: {
+          ...state.agentActivitySnapshots,
+          [slug]: {
+            ...snap,
+            receivedAtMs: now,
+            haloUntilMs,
+          },
+        },
+        agentActivityHistory: {
+          ...state.agentActivityHistory,
+          [slug]: nextHistory,
+        },
+      };
+    });
+  },
+
+  isReconnecting: false,
+  setIsReconnecting: (v) => {
+    if (get().isReconnecting === v) return;
+    set({ isReconnecting: v });
+  },
+
   onboardingComplete: false,
   setOnboardingComplete: (v) => set({ onboardingComplete: v }),
   resetForOnboarding: () =>
@@ -310,3 +419,56 @@ export const useAppStore = create<AppStore>((set, get) => ({
       onboardingComplete: false,
     }),
 }));
+
+/**
+ * Derive the current pill state for an agent slug at `nowMs`. When no
+ * snapshot exists for that slug yet, returns "idle" so the pill renders the
+ * Office-voice fallback copy. Pure function: relies entirely on the store
+ * snapshot and the injected `nowMs`, so the same call site is deterministic
+ * under test.
+ */
+export function selectPillState(
+  state: Pick<AppStore, "agentActivitySnapshots">,
+  slug: string,
+  nowMs: number,
+): PillState {
+  const snapshot = state.agentActivitySnapshots[slug];
+  if (!snapshot) {
+    return "idle";
+  }
+  return computePillState({
+    lastEventMs: snapshot.receivedAtMs,
+    nowMs,
+    kind: snapshot.kind,
+    haloUntilMs: snapshot.haloUntilMs,
+  });
+}
+
+export interface AgentPeekData {
+  current: StoredActivitySnapshot | undefined;
+  history: StoredActivitySnapshot[];
+}
+
+// Stable empty-history reference so selectAgentPeek does not allocate a fresh
+// array on every call. Important if the selector is later subscribed via
+// Zustand — equal references avoid spurious re-renders.
+const EMPTY_AGENT_HISTORY: readonly StoredActivitySnapshot[] = Object.freeze(
+  [],
+);
+
+/**
+ * Read the current snapshot + per-slug history for the Tier 2 hover peek.
+ * Returns an empty history array (not undefined) when nothing has streamed
+ * past for that slug yet, so consumers can `.map` without a guard.
+ */
+export function selectAgentPeek(
+  state: Pick<AppStore, "agentActivitySnapshots" | "agentActivityHistory">,
+  slug: string,
+): AgentPeekData {
+  return {
+    current: state.agentActivitySnapshots[slug],
+    history:
+      state.agentActivityHistory[slug] ??
+      (EMPTY_AGENT_HISTORY as StoredActivitySnapshot[]),
+  };
+}

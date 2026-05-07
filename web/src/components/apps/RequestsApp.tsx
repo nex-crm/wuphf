@@ -8,6 +8,7 @@ import {
 } from "../../api/client";
 import { formatRelativeTime } from "../../lib/format";
 import { useFallbackChannelSlug } from "../../routes/useCurrentRoute";
+import { RedactedBadge } from "../ui/RedactedBadge";
 import { showNotice } from "../ui/Toast";
 
 export function RequestsApp() {
@@ -248,14 +249,9 @@ function RequestItem({ request, isPending, onAnswer }: RequestItemProps) {
         {request.blocking ? (
           <span className="badge badge-yellow">BLOCKING</span>
         ) : null}
-        {Boolean(request.redacted) && (
-          <span
-            className="badge badge-neutral"
-            title={redactionBadgeTitle(request)}
-          >
-            redacted
-          </span>
-        )}
+        {request.redacted ? (
+          <RedactedBadge reasons={request.redaction_reasons} />
+        ) : null}
       </div>
 
       {request.title && request.title !== "Request" && (
@@ -310,10 +306,4 @@ function RequestItem({ request, isPending, onAnswer }: RequestItemProps) {
       )}
     </div>
   );
-}
-
-function redactionBadgeTitle(request: AgentRequest): string {
-  return request.redaction_reasons?.length
-    ? `Redacted: ${request.redaction_reasons.join(", ")}`
-    : "Redacted sensitive information";
 }

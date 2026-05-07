@@ -20,6 +20,7 @@
 //     fatal and cannot be soft-failed — that path exists to catch tampering.
 
 const { downloadBinary } = require("./download-binary");
+const { downloadCloudflared } = require("./download-cloudflared");
 
 if (process.env.WUPHF_SKIP_POSTINSTALL === "1") {
   process.stderr.write(
@@ -28,7 +29,34 @@ if (process.env.WUPHF_SKIP_POSTINSTALL === "1") {
   process.exit(0);
 }
 
-downloadBinary().catch((err) => {
+// Cloudflared is BEST-EFFORT: a failure here must not block the wuphf
+// install, because tunnels are an optional feature and a corp proxy that
+// blocks github.com release assets shouldn't make `npm install wuphf` fail
+// outright. The runtime path in cmd/wuphf/tunnel.go already returns a clear
+// "cloudflared is not installed" message when the user clicks Start tunnel,
+// so a soft failure here just defers the install hint to that moment.
+//
+// Skip via WUPHF_SKIP_CLOUDFLARED=1 for offline builds and air-gapped CI
+// images that prefer to ship without the bundled tunnel binary.
+async function tryDownloadCloudflared() {
+  if (process.env.WUPHF_SKIP_CLOUDFLARED === "1") {
+    process.stderr.write(
+      "wuphf: cloudflared bundling skipped via WUPHF_SKIP_CLOUDFLARED=1\n",
+    );
+    return;
+  }
+  try {
+    await downloadCloudflared();
+  } catch (err) {
+    const message = err && err.message ? err.message : String(err);
+    process.stderr.write(
+      `wuphf: cloudflared bundle failed (${message}).\n` +
+        `wuphf: continuing — the Public Tunnel feature will surface a missing-binary error at runtime.\n`,
+    );
+  }
+}
+
+downloadBinary().then(tryDownloadCloudflared).catch((err) => {
   const message = err && err.message ? err.message : String(err);
   const isIntegrityFailure =
     message.includes("SHA256 mismatch") ||

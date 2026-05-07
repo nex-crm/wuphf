@@ -1,8 +1,6 @@
 package provider
 
 import (
-	"bufio"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -139,13 +137,10 @@ func runOpencodeOnce(systemPrompt, prompt, cwd string, onLine func(string)) (str
 		return "", err
 	}
 
+	// readOpencodeStream uses DrainStreamLines, so an oversized line cannot
+	// wedge cmd.Wait on stdout pipe backpressure. The previous SIGKILL
+	// fallback for bufio.ErrTooLong is gone with the underlying scanner.
 	output, readErr := readOpencodeStream(stdout, onLine)
-	if readErr != nil && errors.Is(readErr, bufio.ErrTooLong) {
-		// A single >4 MiB line would block cmd.Wait() on pipe backpressure
-		// forever; kill the child so Wait returns and the caller sees a
-		// clean error.
-		_ = cmd.Process.Kill()
-	}
 	if err := cmd.Wait(); err != nil {
 		detail := strings.TrimSpace(stderr.String())
 		if detail != "" {
@@ -165,12 +160,16 @@ func runOpencodeOnce(systemPrompt, prompt, cwd string, onLine func(string)) (str
 
 // readOpencodeStream reads plain-text lines from r, forwarding each line to
 // onLine as it arrives, and returns the combined output.
+//
+// Drained via DrainStreamLines so a single oversized output line never wedges
+// the cmd's stdout pipe — the previous bufio.Scanner with a 4 MiB cap would
+// abort the read on ErrTooLong and indirectly wedge cmd.Wait until the caller
+// sent SIGKILL. With the reader-based drain, oversized lines are forwarded
+// intact and the child process exits cleanly.
 func readOpencodeStream(r io.Reader, onLine func(string)) (string, error) {
 	var sb strings.Builder
-	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
-	for scanner.Scan() {
-		line := scanner.Text()
+	err := DrainStreamLines(r, func(raw string) {
+		line := strings.TrimRight(raw, "\r\n")
 		if sb.Len() > 0 {
 			sb.WriteByte('\n')
 		}
@@ -178,11 +177,8 @@ func readOpencodeStream(r io.Reader, onLine func(string)) (string, error) {
 		if onLine != nil {
 			onLine(line)
 		}
-	}
-	if err := scanner.Err(); err != nil {
-		if errors.Is(err, bufio.ErrTooLong) {
-			return sb.String(), fmt.Errorf("opencode output line exceeded 4 MiB buffer: %w", err)
-		}
+	})
+	if err != nil {
 		return sb.String(), fmt.Errorf("read opencode stream: %w", err)
 	}
 	return sb.String(), nil

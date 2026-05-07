@@ -1,5 +1,7 @@
 package team
 
+import "strings"
+
 // Pub/sub fanout to broker subscribers. Owns:
 //   - appendMessageLocked: convenience wrapper that persists +
 //     publishes a channel message in one step
@@ -20,6 +22,16 @@ func (b *Broker) appendMessageLocked(msg channelMessage) channelMessage {
 	msg = sanitizeChannelMessageSecrets(msg)
 	b.messages = append(b.messages, msg)
 	b.publishMessageLocked(msg)
+	// First-run nudge dismissal: track the very first human-authored message
+	// so the office sidebar can drop the "→ tag @<agent> in #general" hint.
+	// Once true the field stays true for the lifetime of the broker (and
+	// across restarts, because the message log is persisted and rescanned
+	// on bootstrap). System and agent messages do not flip the bit. Empty
+	// From is rejected explicitly: isHumanMessageSender("") returns true for
+	// historical reasons but a missing sender is not proof of a real human.
+	if !b.humanHasPosted && strings.TrimSpace(msg.From) != "" && isHumanMessageSender(msg.From) {
+		b.humanHasPosted = true
+	}
 	return msg
 }
 

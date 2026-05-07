@@ -168,6 +168,12 @@ func (b *Broker) loadState() error {
 		b.tasks[i].Channel = channel.MigrateDMSlugString(b.tasks[i].Channel)
 		b.tasks[i] = sanitizeTeamTask(b.tasks[i])
 	}
+	for i := range b.watchdogs {
+		b.watchdogs[i] = sanitizeWatchdogAlert(b.watchdogs[i])
+	}
+	for i := range b.scheduler {
+		b.scheduler[i] = sanitizeSchedulerJob(b.scheduler[i])
+	}
 	for i := range b.requests {
 		b.requests[i].Channel = channel.MigrateDMSlugString(b.requests[i].Channel)
 		b.requests[i] = sanitizeHumanInterview(b.requests[i])
@@ -184,12 +190,6 @@ func (b *Broker) loadState() error {
 	}
 	for i := range b.decisions {
 		b.decisions[i] = sanitizeOfficeDecisionRecord(b.decisions[i])
-	}
-	for i := range b.watchdogs {
-		b.watchdogs[i] = sanitizeWatchdogAlert(b.watchdogs[i])
-	}
-	for i := range b.scheduler {
-		b.scheduler[i] = sanitizeSchedulerJob(b.scheduler[i])
 	}
 	// b.ensureDefaultChannelsLocked() // channels come from saved state
 	b.ensureDefaultOfficeMembersLocked()

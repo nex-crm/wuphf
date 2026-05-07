@@ -61,7 +61,9 @@ type Broker struct {
 	messages                []channelMessage
 	agentIssues             []agentIssueRecord
 	members                 []officeMember
-	memberIndex             map[string]int // slug → index into members; guarded by mu
+	memberIndex             map[string]int                  // slug → index into members; guarded by mu
+	memberPresence          map[string]memberPresenceRecord // slug → presence; guarded by mu, populated via brokerTransportHost
+	presenceKeyToSlug       map[string]string               // "adapter:key" → slug; guarded by mu
 	channels                []teamChannel
 	sessionMode             string
 	oneOnOneAgent           string
@@ -99,7 +101,13 @@ type Broker struct {
 	factSubscribers         map[int]chan EntityFactRecordedEvent
 	wikiSectionsSubscribers map[int]chan WikiSectionsUpdatedEvent
 	wikiWorker              *WikiWorker
-	wikiOnce                sync.Once
+	wikiInitMu              sync.Mutex
+	wikiInitErr             error
+	autoNotebookWriter      *AutoNotebookWriter
+	humanWikiWriter         *HumanWikiIntentWriter
+	demandIndex             *NotebookDemandIndex
+	channelIntentDispatcher *ChannelIntentDispatcher
+	promotionSweep          *PromotionSweep
 	wikiIndex               *WikiIndex
 	wikiExtractor           *Extractor
 	wikiDLQ                 *DLQ
@@ -132,22 +140,39 @@ type Broker struct {
 	// background cron tick could both archive the same articles, with the
 	// second sweep reading tombstone content (written by the first) into the
 	// .archive/ copy — silently destroying the original.
-	archiveSweepMu     sync.Mutex
-	server             *http.Server
-	listener           net.Listener
-	lifecycleCtx       context.Context
-	lifecycleCancel    context.CancelFunc
-	token              string   // shared secret for authenticating requests
-	addr               string   // actual listen address (useful when port=0)
-	webUIOrigins       []string // allowed CORS origins for web UI (set by ServeWebUI)
-	webShareStart      func() (WebShareStatus, error)
-	webShareStatus     func() WebShareStatus
-	webShareStop       func() error
-	brokerRestartMu    sync.Mutex
-	runtimeProvider    string          // "codex" or "claude" — set by launcher
-	packSlug           string          // active agent pack slug ("founding-team", "revops", ...) — set by launcher
-	blankSlateLaunch   bool            // start without a saved blueprint and synthesize the first operation
-	openclawBridge     *OpenclawBridge // nil until the bridge attaches itself; used by handleOfficeMembers for live add/remove
+	archiveSweepMu   sync.Mutex
+	server           *http.Server
+	listener         net.Listener
+	lifecycleCtx     context.Context
+	lifecycleCancel  context.CancelFunc
+	token            string   // shared secret for authenticating requests
+	addr             string   // actual listen address (useful when port=0)
+	webUIOrigins     []string // allowed CORS origins for web UI (set by ServeWebUI)
+	webShareStart    func() (WebShareStatus, error)
+	webShareStatus   func() WebShareStatus
+	webShareStop     func() error
+	webTunnelStart   func() (WebTunnelStatus, error)
+	webTunnelStatus  func() WebTunnelStatus
+	webTunnelStop    func() error
+	brokerRestartMu  sync.Mutex
+	runtimeProvider  string          // "codex" or "claude" — set by launcher
+	packSlug         string          // active agent pack slug ("founding-team", "revops", ...) — set by launcher
+	blankSlateLaunch bool            // start without a saved blueprint and synthesize the first operation
+	openclawBridge   *OpenclawBridge // nil until the bridge attaches itself; used by handleOfficeMembers for live add/remove
+	// humanAdmitHook fires once per successful invite acceptance so the
+	// office-bound share adapter can call Host.UpsertParticipant for the new
+	// admitted human. Stored atomically so the HTTP hot path can read without
+	// contending on b.mu. Installed and cleared by ShareTransport.Run; nil
+	// when no adapter is registered (e.g. legacy launches that bypass
+	// RegisterTransports).
+	humanAdmitHook atomic.Pointer[humanAdmitHookFn]
+	// shareTransport is the registered office-bound share adapter, set by
+	// RegisterTransports when wiring is enabled. The in-process share
+	// controller looks this up to route invite creation through the adapter
+	// (so admit + revoke + invite-create all flow through the same surface)
+	// instead of the legacy HTTP path. Atomic so the controller's read does
+	// not contend with adapter registration on a different goroutine.
+	shareTransport     atomic.Pointer[ShareTransport]
 	generateMemberFn   func(prompt string) (generatedMemberTemplate, error)
 	generateChannelFn  func(prompt string) (generatedChannelTemplate, error)
 	policies           []officePolicy // active office operating rules
@@ -221,6 +246,17 @@ type Broker struct {
 	workspaces       workspaceOrchestrator
 	launcherDrain    launcherDrainer
 	adminPauseExitFn func(int)
+
+	// humanHasPosted flips true the first time any human-authored message
+	// lands in the broker (across any channel). Drives the office sidebar's
+	// first-run nudge: the rail shows "→ tag @<agent> in #general" until
+	// the human sends their first message in any channel, then the nudge
+	// dismisses for good. Surface point: /office-members?meta.humanHasPosted.
+	//
+	// Bootstrap: NewBrokerAt scans the loaded message history once at startup
+	// (cheap — bounded by the persisted message slice). After that the field
+	// only ever flips false → true, never back. Guarded by b.mu.
+	humanHasPosted bool
 }
 
 func stringSliceContainsFold(values []string, want string) bool {
@@ -296,6 +332,8 @@ func NewBrokerAt(statePath string) *Broker {
 		entitySubscribers:   make(map[int]chan EntityBriefSynthesizedEvent),
 		factSubscribers:     make(map[int]chan EntityFactRecordedEvent),
 		agentStreams:        make(map[string]*agentStreamBuffer),
+		memberPresence:      make(map[string]memberPresenceRecord),
+		presenceKeyToSlug:   make(map[string]string),
 		rateLimitBuckets:    make(map[string]ipRateLimitBucket),
 		rateLimitWindow:     defaultRateLimitWindow,
 		rateLimitRequests:   defaultRateLimitRequestsPerWindow,
@@ -315,6 +353,7 @@ func NewBrokerAt(statePath string) *Broker {
 	b.ensureDefaultOfficeMembersLocked()
 	b.ensureDefaultChannelsLocked()
 	b.normalizeLoadedStateLocked()
+	b.bootstrapHumanHasPostedLocked()
 	b.mu.Unlock()
 	b.stopCh = make(chan struct{})
 	if activityWatchdogEnabled {
@@ -427,6 +466,7 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/wiki/sections", b.requireAuth(b.handleWikiSections))
 	mux.HandleFunc("/wiki/lint/run", b.requireAuth(b.handleLintRun))
 	mux.HandleFunc("/wiki/lint/resolve", b.requireAuth(b.handleLintResolve))
+	mux.HandleFunc("/wiki/maintenance/suggest", b.requireAuth(b.handleWikiMaintenanceSuggest))
 	mux.HandleFunc("/wiki/extract/replay", b.requireAuth(b.handleWikiExtractReplay))
 	mux.HandleFunc("/wiki/dlq", b.requireAuth(b.handleWikiDLQ))
 	mux.HandleFunc("/wiki/compress", b.requireAuth(b.handleWikiCompress))
@@ -436,6 +476,7 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/notebook/catalog", b.requireAuth(b.handleNotebookCatalog))
 	mux.HandleFunc("/notebook/search", b.requireAuth(b.handleNotebookSearch))
 	mux.HandleFunc("/notebook/promote", b.requireAuth(b.handleNotebookPromote))
+	mux.HandleFunc("/notebook/review-candidates", b.requireAuth(b.handleNotebookReviewCandidates))
 	mux.HandleFunc("/review/list", b.requireAuth(b.handleReviewList))
 	mux.HandleFunc("/review/", b.requireAuth(b.handleReviewSubpath))
 	mux.HandleFunc("/entity/fact", b.requireAuth(b.handleEntityFact))
@@ -497,7 +538,6 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/v1/logs", b.requireAuth(b.handleOTLPLogs))
 	mux.HandleFunc("/events", b.handleEvents)
 	mux.HandleFunc("/agent-stream/", b.requireAuth(b.handleAgentStream))
-	mux.HandleFunc("/terminal/agents/", b.requireAuth(b.handleAgentTerminal))
 	mux.HandleFunc("/agent-tool-event", b.requireAuth(b.handleAgentToolEvent))
 	// Multi-workspace routes (broker_workspaces.go). Every route below is
 	// wrapped through b.withAuth so the design's "every protected route
@@ -584,6 +624,10 @@ func (b *Broker) Stop() {
 	pbSynth := b.playbookSynthesizer
 	pamDisp := b.pamDispatcher
 	compressor := b.wikiCompressor
+	autoWriter := b.autoNotebookWriter
+	humanWikiWriter := b.humanWikiWriter
+	channelIntent := b.channelIntentDispatcher
+	promotionSweep := b.promotionSweep
 	b.mu.Unlock()
 	if synth != nil {
 		synth.Stop()
@@ -596,6 +640,18 @@ func (b *Broker) Stop() {
 	}
 	if compressor != nil {
 		compressor.Stop()
+	}
+	if autoWriter != nil {
+		autoWriter.Stop(2 * time.Second)
+	}
+	if humanWikiWriter != nil {
+		humanWikiWriter.Stop(2 * time.Second)
+	}
+	if channelIntent != nil {
+		channelIntent.Stop(2 * time.Second)
+	}
+	if promotionSweep != nil {
+		promotionSweep.Stop(2 * time.Second)
 	}
 }
 
@@ -616,6 +672,118 @@ func (b *Broker) Stop() {
 // Returns an error if the port cannot be bound (e.g. already in use).
 // Web UI server (ServeWebUI, cacheControlMiddleware, webUIProxyHandler)
 // moved to broker_web_proxy.go.
+
+// emitTaskTransitionAutoNotebook is the canonical seam for the OV2A locked
+// hook: a single after-saveLocked task-transition event, emitted from
+// MutateTask, BlockTask, ResumeTask, EnsureTask, and the self-healing path.
+// Caller passes the pre-mutation status snapshot; the writer records the
+// before/after pair and routes the entry to the task owner's shelf.
+//
+// Caller must hold b.mu. Roster filtering happens here (lock-free predicate)
+// because the writer cannot re-enter b.mu — see isAgentMemberSlugLocked.
+//
+// No-op transitions (beforeStatus == afterStatus) are short-circuited at the
+// source: the writer would also drop them via NoopTransition, but pruning
+// here avoids the enqueue + roster lookup on a path where many of the
+// existing call sites can legitimately be called with no actual delta.
+func (b *Broker) emitTaskTransitionAutoNotebook(task *teamTask, beforeStatus, actor string) {
+	if b == nil || b.autoNotebookWriter == nil || task == nil {
+		return
+	}
+	owner := strings.TrimSpace(task.Owner)
+	if owner == "" {
+		// No owner means no shelf to land on. Skipping here avoids feeding
+		// the writer an event it would just drop and keeps counters clean.
+		return
+	}
+	beforeTrimmed := strings.TrimSpace(beforeStatus)
+	afterTrimmed := strings.TrimSpace(task.Status)
+	if strings.EqualFold(beforeTrimmed, afterTrimmed) {
+		return
+	}
+	if !b.isAgentMemberSlugLocked(owner) {
+		return
+	}
+	b.autoNotebookWriter.Handle(autoNotebookEvent{
+		Kind:         AutoNotebookEventTaskTransitioned,
+		Slug:         owner,
+		Actor:        strings.TrimSpace(actor),
+		Channel:      normalizeChannelSlug(task.Channel),
+		TaskID:       task.ID,
+		TaskTitle:    task.Title,
+		BeforeStatus: beforeTrimmed,
+		AfterStatus:  afterTrimmed,
+		Content:      strings.TrimSpace(task.Title),
+		Timestamp:    time.Now().UTC(),
+	})
+}
+
+// pendingTaskTransition captures a status delta that an under-mutex helper
+// (e.g. unblockDependentsLocked) wants to publish, but only AFTER the caller
+// has persisted via saveLocked. Without this two-step, a saveLocked failure
+// would still leak notebook entries for transitions the broker rolled back.
+type pendingTaskTransition struct {
+	taskID       string
+	beforeStatus string
+}
+
+// flushPendingAutoNotebookTransitionsLocked publishes a batch of cascade
+// transitions to the writer using the current status of each task in
+// b.tasks. Caller holds b.mu and has just successfully saveLocked'd. The
+// per-event no-op guard inside emitTaskTransitionAutoNotebook handles the
+// case where a subsequent mutation reverted the status back to its prior
+// value before we got here.
+func (b *Broker) flushPendingAutoNotebookTransitionsLocked(pending []pendingTaskTransition, actor string) {
+	if b == nil || len(pending) == 0 {
+		return
+	}
+	for _, p := range pending {
+		for i := range b.tasks {
+			if b.tasks[i].ID == p.taskID {
+				b.emitTaskTransitionAutoNotebook(&b.tasks[i], p.beforeStatus, actor)
+				break
+			}
+		}
+	}
+}
+
+// IsAgentMemberSlug returns true when `slug` matches a registered office
+// member and is not a human/system slug. Acquires b.mu — DO NOT call from a
+// path that already holds it; use isAgentMemberSlugLocked instead.
+func (b *Broker) IsAgentMemberSlug(slug string) bool {
+	if b == nil {
+		return false
+	}
+	slug = normalizeActorSlug(slug)
+	if slug == "" || isHumanMessageSender(slug) {
+		return false
+	}
+	switch slug {
+	case "system", "nex":
+		return false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.findMemberLocked(slug) != nil
+}
+
+// isAgentMemberSlugLocked is the hook-site variant: it assumes b.mu is held.
+// Used by the auto-notebook writer hooks to filter senders without re-entering
+// the broker's mutex (which would deadlock).
+func (b *Broker) isAgentMemberSlugLocked(slug string) bool {
+	if b == nil {
+		return false
+	}
+	slug = normalizeActorSlug(slug)
+	if slug == "" || isHumanMessageSender(slug) {
+		return false
+	}
+	switch slug {
+	case "system", "nex":
+		return false
+	}
+	return b.findMemberLocked(slug) != nil
+}
 
 // senderMayAutoPromoteLocked reports whether a `from` value is allowed to have
 // its @slug body text auto-promoted into the tagged array. Allowlist shape:
@@ -812,6 +980,8 @@ func (b *Broker) Reset() {
 	b.scheduler = nil
 	b.pendingInterview = nil
 	b.activity = make(map[string]agentActivitySnapshot)
+	b.memberPresence = make(map[string]memberPresenceRecord)
+	b.presenceKeyToSlug = make(map[string]string)
 	b.counter = 0
 	b.notificationSince = ""
 	b.insightsSince = ""

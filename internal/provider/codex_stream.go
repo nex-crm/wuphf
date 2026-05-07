@@ -1,7 +1,6 @@
 package provider
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -77,6 +76,9 @@ type codexStreamState struct {
 
 // ReadCodexJSONStream consumes Codex CLI JSONL output, normalizes streaming events, and
 // reconstructs the best available final assistant message.
+//
+// Drained via DrainStreamLines so a single oversized JSONL line never wedges
+// the cmd's stdout pipe and never aborts parsing of subsequent lines.
 func ReadCodexJSONStream(r io.Reader, onEvent func(CodexStreamEvent)) (CodexStreamResult, error) {
 	var result CodexStreamResult
 	state := codexStreamState{
@@ -87,18 +89,16 @@ func ReadCodexJSONStream(r io.Reader, onEvent func(CodexStreamEvent)) (CodexStre
 		toolFinished:        make(map[string]struct{}),
 	}
 
-	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
+	err := DrainStreamLines(r, func(raw string) {
+		line := strings.TrimSpace(raw)
 		if line == "" {
-			continue
+			return
 		}
 
 		var event codexJSONEvent
-		if err := json.Unmarshal([]byte(line), &event); err != nil {
+		if jsonErr := json.Unmarshal([]byte(line), &event); jsonErr != nil {
 			result.LastPlainLine = line
-			continue
+			return
 		}
 
 		if detail := strings.TrimSpace(extractCodexError(event)); detail != "" {
@@ -125,8 +125,8 @@ func ReadCodexJSONStream(r io.Reader, onEvent func(CodexStreamEvent)) (CodexStre
 				state.completedMessages = append(state.completedMessages, text)
 			}
 		}
-	}
-	if err := scanner.Err(); err != nil {
+	})
+	if err != nil {
 		return result, fmt.Errorf("read codex json stream: %w", err)
 	}
 

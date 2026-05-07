@@ -27,6 +27,19 @@ type officeMemberListEntry struct {
 	Task         string `json:"task,omitempty"`
 	LiveActivity string `json:"liveActivity,omitempty"`
 	LastTime     string `json:"lastTime,omitempty"`
+	// Online + LastSeenAt are presence fields populated from b.memberPresence
+	// (broker_presence.go), distinct from Status/Activity above which describe
+	// "is the agent processing right now". Online tracks "does the adapter
+	// still have a live session for this slug"; LastSeenAt is preserved on
+	// flip-off so the UI can render "last seen 5m ago" for offline members.
+	//
+	// Online has no omitempty: detached members must serialize as `online:false`
+	// so clients can reliably distinguish "offline" from "field missing because
+	// the member has no presence record at all". LastSeenAt keeps omitempty
+	// because empty-string is a real distinct state ("we have never seen this
+	// member online") that the UI renders differently from a stale timestamp.
+	Online     bool   `json:"online"`
+	LastSeenAt string `json:"last_seen_at,omitempty"`
 }
 
 type officeMemberMutationBody struct {
@@ -99,11 +112,25 @@ func (b *Broker) serveOfficeMemberList(w http.ResponseWriter) {
 		if entry.Activity == "" {
 			entry.Activity = "idle"
 		}
+		if presence, ok := b.presenceForSlugLocked(member.Slug); ok {
+			entry.Online = presence.Online
+			entry.LastSeenAt = presence.LastSeenAt.UTC().Format(time.RFC3339)
+		}
 		members = append(members, entry)
 	}
+	humanHasPosted := b.humanHasPosted
 	b.mu.Unlock()
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{"members": members})
+	// meta is a sibling object on /office-members so the frontend's existing
+	// members poll can read durable office-level signals without an extra
+	// request. humanHasPosted drives the first-run "tag @agent" nudge —
+	// see the Broker.humanHasPosted field doc for the lifecycle.
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"members": members,
+		"meta": map[string]any{
+			"humanHasPosted": humanHasPosted,
+		},
+	})
 }
 
 func (b *Broker) OfficeMembers() []officeMember {

@@ -5,7 +5,7 @@ import type { Message } from "../../api/client";
 import { toggleReaction } from "../../api/client";
 import { useDefaultHarness } from "../../hooks/useConfig";
 import { useOfficeMembers } from "../../hooks/useMembers";
-import { formatTime, formatTokens } from "../../lib/format";
+import { formatTime } from "../../lib/format";
 import { resolveHarness } from "../../lib/harness";
 import { renderMentions } from "../../lib/mentions";
 import {
@@ -15,6 +15,7 @@ import {
 import { useChannelSlug } from "../../routes/useCurrentRoute";
 import { HarnessBadge } from "../ui/HarnessBadge";
 import { PixelAvatar } from "../ui/PixelAvatar";
+import { RedactedBadge } from "../ui/RedactedBadge";
 import { showNotice } from "../ui/Toast";
 
 interface MessageBubbleProps {
@@ -61,14 +62,6 @@ export function MessageBubble({
   const harness = !isHuman
     ? resolveHarness(agent?.provider, defaultHarness)
     : null;
-
-  const usageTotal = message.usage
-    ? (message.usage.total_tokens ??
-      (message.usage.input_tokens ?? 0) +
-        (message.usage.output_tokens ?? 0) +
-        (message.usage.cache_read_tokens ?? 0) +
-        (message.usage.cache_creation_tokens ?? 0))
-    : 0;
 
   const reactions = message.reactions
     ? Array.isArray(message.reactions)
@@ -166,10 +159,8 @@ export function MessageBubble({
           <span className="message-time" title={message.timestamp}>
             {formatTime(message.timestamp)}
           </span>
-          {usageTotal > 0 && (
-            <span className="message-token-badge">
-              {formatTokens(usageTotal)} tok
-            </span>
+          {Boolean(message.redacted) && (
+            <RedactedBadge reasons={message.redaction_reasons} />
           )}
           {Boolean(message.redacted) && (
             <span

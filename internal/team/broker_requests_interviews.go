@@ -630,9 +630,9 @@ func (b *Broker) handlePostRequestAnswer(w http.ResponseWriter, r *http.Request)
 		b.requests[i].RecheckAt = ""
 		b.requests[i].DueAt = ""
 		b.completeSchedulerJobsLocked("request", b.requests[i].ID, b.requests[i].Channel)
-		b.unblockDependentsLocked(b.requests[i].ID)
+		pendingCascade := b.unblockDependentsLocked(b.requests[i].ID)
 		b.pendingInterview = firstBlockingRequest(b.requests)
-		b.unblockTasksForAnsweredRequestLocked(b.requests[i])
+		pendingCascade = append(pendingCascade, b.unblockTasksForAnsweredRequestLocked(b.requests[i])...)
 
 		// Skill proposal callback: accept activates the skill, reject archives it.
 		if b.requests[i].Kind == "skill_proposal" {
@@ -680,6 +680,7 @@ func (b *Broker) handlePostRequestAnswer(w http.ResponseWriter, r *http.Request)
 			http.Error(w, "failed to persist broker state", http.StatusInternalServerError)
 			return
 		}
+		b.flushPendingAutoNotebookTransitionsLocked(pendingCascade, "system")
 		b.mu.Unlock()
 
 		w.Header().Set("Content-Type", "application/json")
@@ -690,11 +691,12 @@ func (b *Broker) handlePostRequestAnswer(w http.ResponseWriter, r *http.Request)
 	http.Error(w, "request not found", http.StatusNotFound)
 }
 
-func (b *Broker) unblockTasksForAnsweredRequestLocked(req humanInterview) {
+func (b *Broker) unblockTasksForAnsweredRequestLocked(req humanInterview) []pendingTaskTransition {
 	reqID := strings.TrimSpace(req.ID)
 	if reqID == "" {
-		return
+		return nil
 	}
+	var pending []pendingTaskTransition
 	now := time.Now().UTC().Format(time.RFC3339)
 	answerText := strings.TrimSpace(reqAnswerSummary(req.Answered))
 	for i := range b.tasks {
@@ -714,6 +716,7 @@ func (b *Broker) unblockTasksForAnsweredRequestLocked(req humanInterview) {
 		// needs.
 		stillBlocked := b.hasUnresolvedDepsLocked(task)
 		if !stillBlocked {
+			beforeStatus := task.Status
 			task.Blocked = false
 			if strings.EqualFold(strings.TrimSpace(task.Status), "blocked") {
 				if strings.TrimSpace(task.Owner) != "" {
@@ -723,6 +726,10 @@ func (b *Broker) unblockTasksForAnsweredRequestLocked(req humanInterview) {
 				}
 			}
 			b.queueTaskBehindActiveOwnerLaneLocked(task)
+			pending = append(pending, pendingTaskTransition{
+				taskID:       task.ID,
+				beforeStatus: beforeStatus,
+			})
 		}
 		if answerText != "" && !strings.Contains(task.Details, answerText) {
 			task.Details = strings.TrimSpace(task.Details)
@@ -743,6 +750,7 @@ func (b *Broker) unblockTasksForAnsweredRequestLocked(req humanInterview) {
 			)
 		}
 	}
+	return pending
 }
 
 // taskMentionsRequestID returns true when haystack contains needle as a

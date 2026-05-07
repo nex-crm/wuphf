@@ -378,8 +378,21 @@ func (b *Broker) maybeCreateApprovedSelfHealTaskLocked(req humanInterview) {
 		}
 		return
 	}
+	// requestSelfHealingLocked may return an overflow-merge task — when the
+	// agent is at the per-agent cap and this issue's failing TaskID has no
+	// self-heal of its own, the incident is merged into a different
+	// (agent, taskID) self-heal task. Bind to it either way so the dedupe
+	// gates above fire (otherwise the human is re-prompted and the same
+	// incident is re-merged on every iteration), but record the overflow in
+	// SelfHealError so the divergence between issue.TaskID and the linked
+	// task's TaskID is observable instead of silent.
+	expectedTitle := selfHealingTaskTitle(issue.Agent, issue.TaskID)
 	issue.SelfHealTaskID = task.ID
-	issue.SelfHealError = ""
+	if task.Title == expectedTitle {
+		issue.SelfHealError = ""
+	} else {
+		issue.SelfHealError = fmt.Sprintf("merged into agent self-heal overflow lane (%s)", task.ID)
+	}
 	issue.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 }
 

@@ -300,6 +300,27 @@ func (s *AgentService) FollowUp(slug, message string) error {
 	return nil
 }
 
+// HumanMessage pushes a high-priority message from a real person into the
+// agent's queue. It always interrupts any in-flight LLM or tool work so the
+// agent absorbs the human's message before resuming any prior agent-originated
+// task. Use this for chat (channel or DM) messages, whether the agent was
+// tagged or not — the human takes priority over agent-to-agent follow-ups.
+func (s *AgentService) HumanMessage(slug, message string) error {
+	s.mu.Lock()
+	ma, err := s.requireAgent(slug)
+	if err != nil {
+		s.mu.Unlock()
+		return err
+	}
+	s.queues.Human(slug, message)
+	s.mu.Unlock()
+	if ma.Loop.IsBusy() {
+		ma.Loop.Interrupt()
+	}
+	s.EnsureRunning(slug)
+	return nil
+}
+
 // EnsureRunning starts an idempotent worker that drives the agent loop immediately.
 // The worker exits as soon as the agent is idle and has no queued messages.
 func (s *AgentService) EnsureRunning(slug string) {

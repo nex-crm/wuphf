@@ -13,9 +13,12 @@ import {
   type SkillSimilarRef,
 } from "../../api/client";
 import { useRequests } from "../../hooks/useRequests";
+import { parseApprovalContext } from "../../lib/parseApprovalContext";
 import { SkillCompareView } from "../apps/SkillCompareView";
+import { RedactedBadge } from "../ui/RedactedBadge";
 import { SidePanel } from "../ui/SidePanel";
 import { showNotice } from "../ui/Toast";
+import { ApprovalContextView } from "./ApprovalContextView";
 
 /**
  * Inline interview bar shown above the Composer. Mirrors the TUI behavior:
@@ -229,14 +232,12 @@ export function InterviewBar() {
         <span className="badge badge-yellow">
           {current.blocking ? "BLOCKING" : "INTERVIEW"}
         </span>
-        {Boolean(current.redacted) && (
-          <span
-            className="badge badge-neutral"
-            title={redactionBadgeTitle(current)}
-          >
-            redacted
-          </span>
-        )}
+        {current.kind === "approval" ? (
+          <span className="badge badge-orange">EXTERNAL ACTION</span>
+        ) : null}
+        {current.redacted ? (
+          <RedactedBadge reasons={current.redaction_reasons} />
+        ) : null}
         <span className="interview-bar-from">
           @{current.from || "agent"} asks
         </span>
@@ -289,9 +290,15 @@ export function InterviewBar() {
             .replace(/\*\*/g, "")
             .replace(/^\s*\d+\.\s*/, "")}
         </div>
-        {current.context ? (
-          <div className="interview-bar-context">{current.context}</div>
-        ) : null}
+        {(() => {
+          if (current.kind === "approval") {
+            const parsed = parseApprovalContext(current.context);
+            if (parsed) return <ApprovalContextView parsed={parsed} />;
+          }
+          return current.context ? (
+            <div className="interview-bar-context">{current.context}</div>
+          ) : null;
+        })()}
 
         {ambiguousRef ? (
           <SimilarBanner
@@ -489,12 +496,6 @@ function fallbackCandidateFromRequest(
     description: req.question?.split("\n\n")[1] || "",
     content: req.context || "",
   };
-}
-
-function redactionBadgeTitle(request: AgentRequest): string {
-  return request.redaction_reasons?.length
-    ? `Redacted: ${request.redaction_reasons.join(", ")}`
-    : "Redacted sensitive information";
 }
 
 interface SimilarBannerProps {

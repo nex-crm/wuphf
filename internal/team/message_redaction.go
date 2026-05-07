@@ -1,6 +1,7 @@
 package team
 
 import (
+	"encoding/json"
 	"strings"
 
 	"github.com/nex-crm/wuphf/internal/scanner"
@@ -40,31 +41,32 @@ func sanitizeChannelMessageSecrets(msg channelMessage) channelMessage {
 func sanitizeHumanInterview(req humanInterview) humanInterview {
 	redactionCount := req.RedactionCount
 	reasons := append([]string(nil), req.RedactionReasons...)
-	redact := func(text string) string {
-		res := scanner.RedactSecretsForDisplay(text)
-		if res.Matches() == 0 {
+
+	applyField := func(s string) string {
+		res := scanner.RedactSecretsForDisplay(s)
+		if res.Matches() > 0 {
+			redactionCount += res.Matches()
+			reasons = appendRedactionReasons(reasons, res.ReasonLabels())
 			return res.Content
 		}
-		redactionCount += res.Matches()
-		reasons = appendRedactionReasons(reasons, res.ReasonLabels())
-		return res.Content
+		return s
 	}
 
-	req.Title = redact(req.Title)
-	req.Question = redact(req.Question)
-	req.Context = redact(req.Context)
+	req.Title = applyField(req.Title)
+	req.Question = applyField(req.Question)
+	req.Context = applyField(req.Context)
 	if len(req.Options) > 0 {
 		req.Options = append([]interviewOption(nil), req.Options...)
 		for i := range req.Options {
-			req.Options[i].Label = redact(req.Options[i].Label)
-			req.Options[i].Description = redact(req.Options[i].Description)
-			req.Options[i].TextHint = redact(req.Options[i].TextHint)
+			req.Options[i].Label = applyField(req.Options[i].Label)
+			req.Options[i].Description = applyField(req.Options[i].Description)
+			req.Options[i].TextHint = applyField(req.Options[i].TextHint)
 		}
 	}
 	if req.Answered != nil {
 		answer := *req.Answered
-		answer.ChoiceText = redact(answer.ChoiceText)
-		answer.CustomText = redact(answer.CustomText)
+		answer.ChoiceText = applyField(answer.ChoiceText)
+		answer.CustomText = applyField(answer.CustomText)
 		req.Answered = &answer
 	}
 	if redactionCount > 0 || len(reasons) > 0 {
@@ -103,9 +105,45 @@ func sanitizeSchedulerJob(job schedulerJob) schedulerJob {
 	job.ScheduleExpr = redactSecretsInText(job.ScheduleExpr)
 	job.WorkflowKey = redactSecretsInText(job.WorkflowKey)
 	job.SkillName = redactSecretsInText(job.SkillName)
-	job.Payload = redactSecretsInText(job.Payload)
+	job.Payload = sanitizeSchedulerPayload(job.Payload)
 	job.LastRunStatus = redactSecretsInText(job.LastRunStatus)
 	return job
+}
+
+func sanitizeSchedulerPayload(payload string) string {
+	trimmed := strings.TrimSpace(payload)
+	if trimmed == "" {
+		return payload
+	}
+	var value any
+	if err := json.Unmarshal([]byte(trimmed), &value); err != nil {
+		return redactSecretsInText(payload)
+	}
+	value = sanitizeJSONStrings(value)
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return redactSecretsInText(payload)
+	}
+	return string(raw)
+}
+
+func sanitizeJSONStrings(value any) any {
+	switch v := value.(type) {
+	case string:
+		return redactSecretsInText(v)
+	case []any:
+		for i := range v {
+			v[i] = sanitizeJSONStrings(v[i])
+		}
+		return v
+	case map[string]any:
+		for key, item := range v {
+			v[key] = sanitizeJSONStrings(item)
+		}
+		return v
+	default:
+		return value
+	}
 }
 
 func appendRedactionReasons(existing []string, incoming []string) []string {

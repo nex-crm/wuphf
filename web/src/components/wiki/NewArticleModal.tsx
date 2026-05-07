@@ -60,7 +60,7 @@ export default function NewArticleModal({
   const resolvedSubfolder = subfolder.trim();
 
   const path = useMemo(() => {
-    if (!resolvedGroup || !slug) return "";
+    if (!(resolvedGroup && slug)) return "";
     const parts = ["team", resolvedGroup];
     if (resolvedSubfolder) parts.push(resolvedSubfolder);
     parts.push(`${slug}.md`);
@@ -71,20 +71,34 @@ export default function NewArticleModal({
     setError(null);
 
     const groupErr = validateSegment(resolvedGroup, "Section");
-    if (groupErr) { setError(groupErr); return; }
+    if (groupErr) {
+      setError(groupErr);
+      return;
+    }
 
     if (resolvedSubfolder) {
       const subErr = validateSegment(resolvedSubfolder, "Subfolder");
-      if (subErr) { setError(subErr); return; }
+      if (subErr) {
+        setError(subErr);
+        return;
+      }
     }
 
     const slugErr = validateSegment(slug, "Slug");
-    if (slugErr) { setError(slugErr); return; }
+    if (slugErr) {
+      setError(slugErr);
+      return;
+    }
 
-    if (!title.trim()) { setError("Title is required."); return; }
+    if (!title.trim()) {
+      setError("Title is required.");
+      return;
+    }
 
     if (existingPaths.has(path)) {
-      setError("An article already exists at that path. Pick a different slug or subfolder.");
+      setError(
+        "An article already exists at that path. Pick a different slug or subfolder.",
+      );
       return;
     }
 
@@ -97,12 +111,16 @@ export default function NewArticleModal({
         expectedSha: "",
       });
       if ("conflict" in result) {
-        setError("An article already exists at that path. Pick a different slug or subfolder.");
+        setError(
+          "An article already exists at that path. Pick a different slug or subfolder.",
+        );
         return;
       }
       onCreated(path);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Failed to create article.");
+      setError(
+        err instanceof Error ? err.message : "Failed to create article.",
+      );
     } finally {
       setSubmitting(false);
     }
@@ -155,7 +173,9 @@ export default function NewArticleModal({
           placeholder="e.g. engineering"
           value={subfolder}
           onChange={(e) =>
-            setSubfolder(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "-"))
+            setSubfolder(
+              e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "-"),
+            )
           }
         />
 
@@ -209,7 +229,10 @@ export default function NewArticleModal({
         ) : null}
 
         {error ? (
-          <div className="wk-editor-banner wk-editor-banner--error" role="alert">
+          <div
+            className="wk-editor-banner wk-editor-banner--error"
+            role="alert"
+          >
             {error}
           </div>
         ) : null}
