@@ -488,7 +488,14 @@ func (c *webTunnelController) stop() error {
 // first matching public URL on urlCh, and on EOF (or scanner error) returns
 // the trailing lines on tailCh so callers can quote them in an error
 // message. Lines are kept short to bound memory.
+//
+// Closes urlCh on exit. This goroutine is the sole sender, so closing here
+// is safe — and waitForTunnelURL treats a closed-without-URL channel as
+// "cloudflared exited before publishing a URL", returning fast instead of
+// burning the full cloudflaredStartTimeout. Without the close, a crash
+// during bring-up made start() wait the full 45s before giving up.
 func scanCloudflaredOutput(r io.Reader, urlCh chan<- string, tailCh chan<- []string) {
+	defer close(urlCh)
 	const tailMax = 8
 	tail := make([]string, 0, tailMax)
 	scanner := bufio.NewScanner(r)
