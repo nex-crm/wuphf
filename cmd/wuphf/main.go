@@ -483,7 +483,7 @@ func main() {
 	// TUI mode: tmux-based interface
 	if tuiMode {
 		if passedFlags["tui"] && !passedFlags["legacy-tui"] {
-			fmt.Fprintln(os.Stderr, "warning: --tui is renamed to --legacy-tui. The legacy bubbletea TUI is scheduled for removal; track docs/architecture/desktop-platform.md.")
+			fmt.Fprintln(os.Stderr, "warning: --tui is renamed to --legacy-tui. The legacy bubbletea TUI is scheduled for removal; track https://github.com/nex-crm/wuphf/issues/651.")
 		}
 		runTeam(args, selectedBlueprint, *unsafeMode, *oneOnOne, *opusCEO, *collabMode)
 		return
