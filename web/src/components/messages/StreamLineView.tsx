@@ -177,7 +177,7 @@ function HeadlessEventView({ parsed }: { parsed: Record<string, unknown> }) {
     // provider chunks (today's wire) and HeadlessEvent text (A3+)
     // looks visually consistent. Empty text is dropped at the runner
     // boundary; we still guard here because old captures may exist.
-    if (!text) return null;
+    if (!text.trim()) return null;
     return <div className="cc-thinking">{text}</div>;
   }
 
@@ -195,14 +195,14 @@ function HeadlessEventView({ parsed }: { parsed: Record<string, unknown> }) {
           arguments: eventType === "tool_use" ? parsed.detail : undefined,
           result: eventType === "tool_result" ? parsed.text : undefined,
         }}
-        compact={false}
+        compact={compact}
       />
     );
   }
 
   // Unknown HeadlessEvent type — fall back to the generic card so future
   // variants render something useful before they earn a dedicated branch.
-  return <GenericEventCard parsed={parsed} compact={false} />;
+  return <GenericEventCard parsed={parsed} compact={compact} />;
 }
 
 function ClaudeAssistantEvent({

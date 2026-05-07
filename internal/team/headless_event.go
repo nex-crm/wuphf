@@ -241,7 +241,7 @@ func emitHeadlessToolUse(stream *agentStreamBuffer, turnID, provider, slug, task
 // emitHeadlessToolResult pushes a tool_result-phase HeadlessEvent. text is
 // the truncated result summary the runner already prepares for logs.
 func emitHeadlessToolResult(stream *agentStreamBuffer, turnID, provider, slug, taskID, toolName, text, rawType string) {
-	if stream == nil {
+	if stream == nil || strings.TrimSpace(toolName) == "" {
 		return
 	}
 	pushHeadlessEvent(stream, HeadlessEvent{
