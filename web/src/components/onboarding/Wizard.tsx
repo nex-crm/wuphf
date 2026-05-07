@@ -15,6 +15,7 @@ import {
   SCRATCH_FOUNDING_TEAM,
   STEP_ORDER,
 } from "./wizard/constants";
+import { OutcomeSummary } from "./wizard/OutcomeSummary";
 import {
   clearDraft,
   consumeStaleBannerDays,
@@ -48,6 +49,19 @@ import type {
   WizardStep,
 } from "./wizard/types";
 import { useOnboardingDraftSync } from "./wizard/useOnboardingDraftSync";
+
+// OutcomeMeta captures the wizard state at the moment /onboarding/complete
+// succeeds. The backend only returns {"ok":true}; this snapshot is the
+// source of truth for the post-completion summary screen.
+interface OutcomeMeta {
+  agents: BlueprintAgent[];
+  selectedBlueprint: string | null;
+  blueprints: BlueprintTemplate[];
+  primaryRuntime: string;
+  taskText: string;
+  taskSkipped: boolean;
+  apiKeyCount: number;
+}
 
 // runtimeIsReady + detectedBinary moved to wizard/runtime-helpers.ts.
 // ArrowIcon, CheckIcon, EnterHint, ProgressDots moved to wizard/components.tsx.
@@ -211,6 +225,12 @@ export function Wizard({ onComplete }: WizardProps) {
   const taskTextAutofilled = useRef(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
+
+  // Outcome summary — shown after /onboarding/complete succeeds.
+  // The wizard stays mounted so the user can read what was created before
+  // entering the office. onComplete() is called when they click "Go to the office".
+  const [showOutcome, setShowOutcome] = useState(false);
+  const [outcomeMeta, setOutcomeMeta] = useState<OutcomeMeta | null>(null);
 
   // Fetch blueprints on mount
   useEffect(() => {
@@ -680,11 +700,29 @@ export function Wizard({ onComplete }: WizardProps) {
         return;
       }
 
+      // Capture what was submitted before calling onComplete — the outcome
+      // summary screen needs these values to describe what was created.
+      const apiKeyCount = Object.values(apiKeys).filter(
+        (v) => v.trim().length > 0,
+      ).length;
+      setOutcomeMeta({
+        agents,
+        selectedBlueprint,
+        blueprints,
+        primaryRuntime: runtimePriority[0] ?? "",
+        taskText,
+        taskSkipped: skipTask,
+        apiKeyCount,
+      });
+
       // Onboarding succeeded — discard the resumeable draft so a return
       // visit lands on the post-setup app, not a half-filled wizard.
       clearDraft();
       setOnboardingComplete(true);
-      onComplete?.();
+      // Show the outcome summary screen instead of immediately entering the
+      // office. The user clicks "Go to the office" to call onComplete().
+      setShowOutcome(true);
+      setSubmitting(false);
     },
     [
       company,
@@ -697,10 +735,10 @@ export function Wizard({ onComplete }: WizardProps) {
       runtimePriority,
       selectedBlueprint,
       agents,
+      blueprints,
       apiKeys,
       taskText,
       setOnboardingComplete,
-      onComplete,
     ],
   );
 
@@ -836,6 +874,28 @@ export function Wizard({ onComplete }: WizardProps) {
     userEditedRuntimeRef.current = false;
     taskTextAutofilled.current = false;
   }, []);
+
+  // Outcome summary — rendered in place of the wizard steps after
+  // /onboarding/complete succeeds. The user reads what was created and
+  // then clicks "Go to the office" which calls onComplete().
+  if (showOutcome && outcomeMeta !== null) {
+    return (
+      <div className="wizard-container">
+        <div className="wizard-body">
+          <OutcomeSummary
+            agents={outcomeMeta.agents}
+            selectedBlueprint={outcomeMeta.selectedBlueprint}
+            blueprints={outcomeMeta.blueprints}
+            primaryRuntime={outcomeMeta.primaryRuntime}
+            taskText={outcomeMeta.taskText}
+            taskSkipped={outcomeMeta.taskSkipped}
+            apiKeyCount={outcomeMeta.apiKeyCount}
+            onEnter={() => onComplete?.()}
+          />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="wizard-container">
