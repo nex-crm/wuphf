@@ -822,7 +822,7 @@ func (b *Broker) ExternalQueue(provider string) []channelMessage {
 			continue
 		}
 		b.externalDelivered[msg.ID] = struct{}{}
-		out = append(out, msg)
+		out = append(out, cloneChannelMessageForRead(msg))
 	}
 	return out
 }
@@ -942,7 +942,7 @@ func (b *Broker) PostInboundSurfaceMessage(from, channel, content, provider stri
 		Content:     strings.TrimSpace(content),
 		Timestamp:   time.Now().UTC().Format(time.RFC3339),
 	}
-	b.appendMessageLocked(msg)
+	msg = b.appendMessageLocked(msg)
 	// Mark as already delivered so it doesn't bounce back to the same surface
 	if b.externalDelivered == nil {
 		b.externalDelivered = make(map[string]struct{})

@@ -612,6 +612,7 @@ func (b *Broker) appendSkillProposalRequestLocked(skill teamSkill, channel, now 
 		{ID: "accept", Label: "Accept"},
 		{ID: "reject", Label: "Reject"},
 	})
+	interview = sanitizeHumanInterview(interview)
 	b.requests = append(b.requests, interview)
 }
 
