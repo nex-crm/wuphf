@@ -176,6 +176,8 @@ describe("<AgentProfilePanel>", () => {
   });
 
   it("renders recent runs when log tasks are available", async () => {
+    // The API is called with agentSlug so the server filters; the mock
+    // returns only the current agent's runs, matching real server behavior.
     listAgentLogTasksMock.mockResolvedValue({
       tasks: [
         {
@@ -185,13 +187,6 @@ describe("<AgentProfilePanel>", () => {
           hasError: false,
           sizeBytes: 1000,
         },
-        {
-          taskId: "task-other",
-          agentSlug: "reviewer",
-          toolCallCount: 2,
-          hasError: false,
-          sizeBytes: 500,
-        },
       ],
     });
 
@@ -200,8 +195,11 @@ describe("<AgentProfilePanel>", () => {
     await waitFor(() => {
       expect(screen.getByText("task-abc-123")).toBeInTheDocument();
     });
-    // Other agent's run should not appear
-    expect(screen.queryByText("task-other")).not.toBeInTheDocument();
+    // Verify the API was called with the agent-scoped params
+    expect(listAgentLogTasksMock).toHaveBeenCalledWith({
+      limit: 8,
+      agentSlug: "planner",
+    });
     // "See all activity" link should render
     expect(screen.getByText("See all activity")).toBeInTheDocument();
   });
