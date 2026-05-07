@@ -21,10 +21,10 @@ export function normalizeStatus(raw: string): string {
 export function classifyMember(
   member: OfficeMember,
 ): { state: "shipping" | "plotting"; label: string } {
-  if (member.status === "shipping" || member.task) {
-    return { state: "shipping", label: "Shipping" };
+  if (member.status === "plotting") {
+    return { state: "plotting", label: "Plotting" };
   }
-  return { state: "plotting", label: "Plotting" };
+  return { state: "shipping", label: "Shipping" };
 }
 
 /**
