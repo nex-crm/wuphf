@@ -1,6 +1,9 @@
 package main
 
 import (
+	"encoding/json"
+	"io"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -110,15 +113,79 @@ func TestExtractJoinSourceIPIgnoresCFOnNonLoopback(t *testing.T) {
 // can sweep the trycloudflare URL space and learn which tokens are live by
 // the response copy alone.
 func TestPasscodeRequiredAndInvalidProduceSameUserMessage(t *testing.T) {
-	if !strings.EqualFold(shareJoinPasscodeRequiredMessage, shareJoinPasscodeRequiredMessage) {
-		t.Fatal("constant should equal itself; unreachable")
+	// Run an actual /join POST through the share handler with a stub gate
+	// that returns each sentinel in turn, then assert the two responses
+	// are byte-identical (status, error code, and message). A future
+	// refactor that accidentally lets one sentinel surface a different
+	// user-facing message would let an attacker fingerprint live tokens
+	// by sweeping the trycloudflare URL space — this test is the only
+	// thing pinning that invariant mechanically.
+	type wireResponse struct {
+		Status int
+		Body   string
 	}
-	// We assert by inspection that exactly one user-facing string covers
-	// both paths: handleShareJoinSubmit calls
-	// writeShareJoinError(..., "passcode_required", shareJoinPasscodeRequiredMessage)
-	// regardless of which sentinel the gate returned. The two error
-	// sentinels exist so audit logs can distinguish them, but neither
-	// sentinel's .Error() string flows to the client.
+	captureGateResponse := func(t *testing.T, gateErr error) wireResponse {
+		t.Helper()
+		srv := httptest.NewServer(newShareHandler(shareHandlerConfig{
+			BrokerURL: "http://unused.invalid",
+			JoinGate: func(_, _ string) error {
+				return gateErr
+			},
+		}))
+		t.Cleanup(srv.Close)
+		req, err := http.NewRequest(
+			http.MethodPost,
+			srv.URL+"/join/some-token",
+			strings.NewReader(`{"display_name":"Maya"}`),
+		)
+		if err != nil {
+			t.Fatalf("build request: %v", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("do request: %v", err)
+		}
+		defer resp.Body.Close()
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		return wireResponse{Status: resp.StatusCode, Body: string(body)}
+	}
+
+	required := captureGateResponse(t, errJoinPasscodeRequired)
+	invalid := captureGateResponse(t, errJoinPasscodeInvalid)
+
+	if required.Status != http.StatusUnauthorized {
+		t.Errorf("required: status=%d want 401", required.Status)
+	}
+	if invalid.Status != http.StatusUnauthorized {
+		t.Errorf("invalid: status=%d want 401", invalid.Status)
+	}
+	if required.Body != invalid.Body {
+		t.Fatalf("indistinguishability invariant broken:\nrequired: %s\ninvalid:  %s",
+			required.Body, invalid.Body)
+	}
+
+	// Sanity: the body actually contains the canonical message + code.
+	var decoded struct {
+		Error   string `json:"error"`
+		Message string `json:"message"`
+	}
+	if err := json.NewDecoder(strings.NewReader(required.Body)).Decode(&decoded); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if decoded.Error != "passcode_required" {
+		t.Errorf("error code = %q, want passcode_required", decoded.Error)
+	}
+	if decoded.Message != shareJoinPasscodeRequiredMessage {
+		t.Errorf("message = %q, want shareJoinPasscodeRequiredMessage", decoded.Message)
+	}
+
+	// The internal sentinels must still differ so the audit log can
+	// distinguish "unknown token" from "wrong passcode" without leaking
+	// to the wire.
 	if errJoinPasscodeRequired.Error() == errJoinPasscodeInvalid.Error() {
 		t.Fatal("internal sentinels collapsed; audit trail loses fidelity")
 	}

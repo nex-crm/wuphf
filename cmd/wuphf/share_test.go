@@ -93,8 +93,7 @@ func TestShareJoinFlowEndToEnd(t *testing.T) {
 	}
 	joined := false
 	shareSrv := httptest.NewServer(newShareHandler(shareHandlerConfig{
-		BrokerURL:   "http://" + b.Addr(),
-		BrokerToken: b.Token(),
+		BrokerURL: "http://" + b.Addr(),
 		OnJoin: func() {
 			joined = true
 		},
@@ -168,7 +167,7 @@ func TestShareJoinInvalidInviteReturnsGone(t *testing.T) {
 	}))
 	t.Cleanup(broker.Close)
 
-	shareSrv := httptest.NewServer(newShareHandler(shareHandlerConfig{BrokerURL: broker.URL, BrokerToken: "broker-token"}))
+	shareSrv := httptest.NewServer(newShareHandler(shareHandlerConfig{BrokerURL: broker.URL}))
 	t.Cleanup(shareSrv.Close)
 
 	resp := joinSubmit(t, nil, shareSrv.URL, "missing-token", "")
@@ -194,7 +193,7 @@ func TestShareJoinMalformedBodyReturnsInvalidRequest(t *testing.T) {
 	}))
 	t.Cleanup(broker.Close)
 
-	shareSrv := httptest.NewServer(newShareHandler(shareHandlerConfig{BrokerURL: broker.URL, BrokerToken: "broker-token"}))
+	shareSrv := httptest.NewServer(newShareHandler(shareHandlerConfig{BrokerURL: broker.URL}))
 	t.Cleanup(shareSrv.Close)
 
 	req, err := http.NewRequest(http.MethodPost, shareSrv.URL+"/join/abc", strings.NewReader("not json"))
@@ -228,7 +227,7 @@ func TestShareJoinRejectsOversizedBody(t *testing.T) {
 	}))
 	t.Cleanup(broker.Close)
 
-	shareSrv := httptest.NewServer(newShareHandler(shareHandlerConfig{BrokerURL: broker.URL, BrokerToken: "broker-token"}))
+	shareSrv := httptest.NewServer(newShareHandler(shareHandlerConfig{BrokerURL: broker.URL}))
 	t.Cleanup(shareSrv.Close)
 
 	// Construct a body larger than the 8 KiB cap. The decoder should error
@@ -266,7 +265,7 @@ func TestShareJoinRejectsUnknownFields(t *testing.T) {
 	}))
 	t.Cleanup(broker.Close)
 
-	shareSrv := httptest.NewServer(newShareHandler(shareHandlerConfig{BrokerURL: broker.URL, BrokerToken: "broker-token"}))
+	shareSrv := httptest.NewServer(newShareHandler(shareHandlerConfig{BrokerURL: broker.URL}))
 	t.Cleanup(shareSrv.Close)
 
 	body := `{"display_name":"Maya","admin":true}`
@@ -294,7 +293,7 @@ func TestShareJoinBrokerFailureReturnsBadGateway(t *testing.T) {
 	}))
 	t.Cleanup(broker.Close)
 
-	shareSrv := httptest.NewServer(newShareHandler(shareHandlerConfig{BrokerURL: broker.URL, BrokerToken: "broker-token"}))
+	shareSrv := httptest.NewServer(newShareHandler(shareHandlerConfig{BrokerURL: broker.URL}))
 	t.Cleanup(shareSrv.Close)
 
 	resp := joinSubmit(t, nil, shareSrv.URL, "retry-token", "")
@@ -316,7 +315,7 @@ func TestShareProxyDoesNotExposeBrokerToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create invite: %v", err)
 	}
-	shareSrv := httptest.NewServer(newShareHandler(shareHandlerConfig{BrokerURL: "http://" + b.Addr(), BrokerToken: b.Token()}))
+	shareSrv := httptest.NewServer(newShareHandler(shareHandlerConfig{BrokerURL: "http://" + b.Addr()}))
 	t.Cleanup(shareSrv.Close)
 
 	joinResp := joinSubmit(t, nil, shareSrv.URL, invite.Token, "")
@@ -359,7 +358,7 @@ func TestShareProxyOnboardingStateOnlyAllowsReadMethods(t *testing.T) {
 	}))
 	t.Cleanup(broker.Close)
 
-	shareSrv := httptest.NewServer(newShareHandler(shareHandlerConfig{BrokerURL: broker.URL, BrokerToken: "broker-token"}))
+	shareSrv := httptest.NewServer(newShareHandler(shareHandlerConfig{BrokerURL: broker.URL}))
 	t.Cleanup(shareSrv.Close)
 
 	for _, tc := range []struct {
@@ -409,7 +408,7 @@ func TestShareProxyDoesNotForwardBrokerToken(t *testing.T) {
 	}))
 	t.Cleanup(broker.Close)
 
-	shareSrv := httptest.NewServer(newShareHandler(shareHandlerConfig{BrokerURL: broker.URL, BrokerToken: brokerToken}))
+	shareSrv := httptest.NewServer(newShareHandler(shareHandlerConfig{BrokerURL: broker.URL}))
 	t.Cleanup(shareSrv.Close)
 
 	req, err := http.NewRequest(http.MethodGet, shareSrv.URL+"/api/messages", nil)
@@ -455,7 +454,7 @@ func TestShareProxyStampsHumanActor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create invite: %v", err)
 	}
-	shareSrv := httptest.NewServer(newShareHandler(shareHandlerConfig{BrokerURL: "http://" + b.Addr(), BrokerToken: b.Token()}))
+	shareSrv := httptest.NewServer(newShareHandler(shareHandlerConfig{BrokerURL: "http://" + b.Addr()}))
 	t.Cleanup(shareSrv.Close)
 
 	joinResp := joinSubmit(t, nil, shareSrv.URL, invite.Token, "")

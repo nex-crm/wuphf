@@ -60,13 +60,14 @@ func generatePasscode() (string, error) {
 // constantTimeCompare returns true iff a and b are equal as byte slices,
 // without leaking the first differing index through timing. Used by
 // joinGateFn implementations to compare the supplied passcode against the
-// stored one — equal-length compare so an attacker cannot use response
-// time to learn the passcode prefix.
+// stored one. When the lengths differ we still run a same-length dummy
+// compare sized to the stored secret (b), so an attacker cannot learn the
+// stored length from the response time of a too-short submission — a bare
+// `[]byte(a)` dummy would process len(a) bytes, leaking len(b).
 func constantTimeCompare(a, b string) bool {
 	if len(a) != len(b) {
-		// Still run the compare on a same-length pair so the early-return
-		// path takes the same wall-clock as the unequal-length path.
-		_ = subtle.ConstantTimeCompare([]byte(a), []byte(a))
+		dummy := make([]byte, len(b))
+		_ = subtle.ConstantTimeCompare(dummy, dummy)
 		return false
 	}
 	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1

@@ -250,11 +250,15 @@ func (c *webTunnelController) start() (team.WebTunnelStatus, error) {
 		c.err = err.Error()
 		return c.statusLocked(), err
 	}
+	// brokerToken is read above only because readBrokerToken's failure mode
+	// is the same one we want to surface here (broker not running). The
+	// share HTTP handler itself doesn't need the token — see the doc on
+	// shareHandlerConfig.
+	_ = brokerToken
 	server := &http.Server{
 		Addr: loopbackAddr,
 		Handler: newShareHandler(shareHandlerConfig{
 			BrokerURL:   brokerURL,
-			BrokerToken: brokerToken,
 			OnJoin:      nil,
 			JoinGate:    c.joinGate,
 			RateLimiter: c.rateLimiter,
@@ -463,6 +467,16 @@ func (c *webTunnelController) mintInviteLocked(publicURL string) (string, string
 	})
 	if err != nil {
 		return "", "", "", err
+	}
+	// CreateInviteDetailedWithBuilder is contractually expected to call the
+	// builder exactly once on success; guard against a future refactor that
+	// returns success without invoking it. Without this check we'd register
+	// c.passcodes[""] = passcode and the joinGate would key off the empty
+	// string forever — the join handler rejects empty tokens at 400 so the
+	// security posture is fail-closed, but the symptom is a silently-broken
+	// invite. Better to fail the start() with a clear error.
+	if capturedToken == "" {
+		return "", "", "", errors.New("tunnel: invite builder was not called; token capture failed")
 	}
 	passcode, err := generatePasscode()
 	if err != nil {

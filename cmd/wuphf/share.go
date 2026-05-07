@@ -507,26 +507,32 @@ func isPrivateIP(ip net.IP) bool {
 }
 
 // shareHandlerConfig is the dial-tone for the unauthenticated /join/ HTTP
-// surface. brokerURL + brokerToken are required (the handler proxies the
-// authenticated invite-accept call to the broker on the joiner's behalf).
-// onJoin is the host-side join notification (printed on the wuphf share
-// terminal). joinGate and rateLimiter are tunnel-only hardening; both nil
-// in network-share mode preserves Phase 1 behaviour byte-for-byte.
+// surface. BrokerURL is required (the handler proxies the invite-accept
+// call to the broker on the joiner's behalf — the broker accepts based on
+// the invite token in the body, not a bearer token, so no broker token is
+// needed here). OnJoin is the host-side join notification (printed on the
+// wuphf share terminal). JoinGate and RateLimiter are tunnel-only
+// hardening; both nil in network-share mode preserves Phase 1 behaviour
+// byte-for-byte.
 type shareHandlerConfig struct {
 	BrokerURL   string
-	BrokerToken string
 	OnJoin      func()
 	JoinGate    joinGateFn
 	RateLimiter *joinRateLimiter
 }
 
 func newShareHTTPServer(bind string, port int, brokerURL, brokerToken string, onJoin func()) *http.Server {
+	// brokerToken is part of the legacy signature; it's used elsewhere in
+	// this file (see runShareServer) but the share HTTP handler itself has
+	// no use for it because the join POST sends the invite token in the
+	// body and the broker's /humans/invites/accept endpoint accepts on
+	// that alone. Drop it on the way into the handler config.
+	_ = brokerToken
 	return &http.Server{
 		Addr: fmt.Sprintf("%s:%d", bind, port),
 		Handler: newShareHandler(shareHandlerConfig{
-			BrokerURL:   brokerURL,
-			BrokerToken: brokerToken,
-			OnJoin:      onJoin,
+			BrokerURL: brokerURL,
+			OnJoin:    onJoin,
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
 	}

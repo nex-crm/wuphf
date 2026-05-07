@@ -205,10 +205,15 @@ export function JoinPage({ token, onAccepted }: JoinPageProps) {
               ref={passcodeInputRef}
               id={passcodeId}
               name="passcode"
-              // inputMode + numeric keyboard on phones, but type=text so
-              // password managers don't auto-fill garbage. autoComplete=off
-              // so the browser does not memo a 6-digit string as an
-              // address-book entry.
+              // inputMode=numeric brings up the digit pad on phones; we
+              // keep type=text (the default) so password managers don't
+              // try to memo it as a normal credential.
+              // autoComplete="one-time-code" is the WHATWG token for SMS
+              // OTP autofill on iOS Safari and Android Chrome — if the
+              // host reads the passcode out over the phone the joiner
+              // taps once instead of typing it. The convenience win
+              // outweighs the autofill risk because the OTP-token hint
+              // is scoped to a single submission, not stored.
               inputMode="numeric"
               pattern="[0-9]*"
               autoComplete="one-time-code"
