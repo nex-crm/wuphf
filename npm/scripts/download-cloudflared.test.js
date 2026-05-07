@@ -10,6 +10,7 @@ const { describe, test, expect, afterEach } = require("bun:test");
 const path = require("node:path");
 const {
   detectManifestKey,
+  downloadCloudflared,
   loadManifest,
   targetBinaryFilename,
 } = require("./download-cloudflared");
@@ -50,7 +51,7 @@ describe("detectManifestKey", () => {
     setPlatform("win32", "x64");
     expect(detectManifestKey()).toBe("windows-amd64");
   });
-  test("returns windows-arm64 key but manifest has no entry, so install is silently skipped", () => {
+  test("returns windows-arm64 key but manifest has no entry, so install is silently skipped", async () => {
     setPlatform("win32", "arm64");
     // cloudflared has no published windows-arm64 asset; the bundler skips
     // silently and the runtime surfaces a clear "missing" error if the
@@ -60,6 +61,11 @@ describe("detectManifestKey", () => {
     // downloadCloudflared() falls through the "no entry" branch.
     const manifest = loadManifest();
     expect(manifest.platforms["windows-arm64"]).toBeUndefined();
+    // Direct assertion of the silent-skip contract: downloadCloudflared
+    // returns null without touching the network. If a future refactor
+    // turns this branch into an error or starts a fetch, the test fails
+    // here instead of silently letting the regression through.
+    expect(await downloadCloudflared({ silent: true })).toBeNull();
   });
 });
 
@@ -95,12 +101,20 @@ describe("loadManifest", () => {
     }
   });
 
-  test("manifest path resolves to a real file in the published package", () => {
+  test("manifest is included in the published package.json files array", () => {
     // download-cloudflared.js is published; the JSON sits next to it and
     // MUST be in package.json `files`. If it isn't, postinstall fails on
-    // a freshly-installed npm package because require() blows up.
-    const expected = path.join(__dirname, "cloudflared.json");
+    // a freshly-installed npm package because require() blows up. Verify
+    // the file is present in the checkout AND listed in the publish
+    // manifest — fs.existsSync alone catches neither a packaging
+    // regression nor a stale checkout.
     const fs = require("node:fs");
+    const expected = path.join(__dirname, "cloudflared.json");
     expect(fs.existsSync(expected)).toBe(true);
+    const pkg = JSON.parse(
+      fs.readFileSync(path.join(__dirname, "..", "package.json"), "utf8"),
+    );
+    expect(Array.isArray(pkg.files)).toBe(true);
+    expect(pkg.files).toContain("scripts/cloudflared.json");
   });
 });

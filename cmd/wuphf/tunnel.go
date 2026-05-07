@@ -111,6 +111,13 @@ type webTunnelController struct {
 	// teardown was intentional and it should not flip running/err state.
 	stopGuard chan struct{}
 	running   bool
+	// starting is true between the moment start() commits the in-flight
+	// cmd/server/listener under c.mu and the moment waitForTunnelURL
+	// completes. Concurrent start() callers see it and refuse rather than
+	// spawning a second cloudflared. stop() observes c.cmd != nil and
+	// nulls everything as usual; the in-flight start() detects the null
+	// when it re-acquires the lock and returns cancelled.
+	starting  bool
 	publicURL string
 	inviteURL string
 	expiresAt string
@@ -156,12 +163,12 @@ func (c *webTunnelController) clearInviteLocked() {
 
 func (c *webTunnelController) start() (team.WebTunnelStatus, error) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 
 	// Re-clicking "Start public tunnel" while one is already up should mint a
 	// fresh invite against the existing public URL rather than tearing the
 	// tunnel down and back up — same shape as webShareController.start().
 	if c.running && c.cmd != nil && c.publicURL != "" {
+		defer c.mu.Unlock()
 		inviteURL, expiresAt, err := c.mintInviteLocked(c.publicURL)
 		if err != nil {
 			c.err = err.Error()
@@ -173,7 +180,15 @@ func (c *webTunnelController) start() (team.WebTunnelStatus, error) {
 		return c.statusLocked(), nil
 	}
 
+	// Serialize concurrent starts: a second click while cloudflared is
+	// still coming up MUST NOT spawn a second subprocess.
+	if c.starting {
+		defer c.mu.Unlock()
+		return c.statusLocked(), errors.New("tunnel start is already in progress; wait or click Stop to cancel")
+	}
+
 	if c.broker == nil {
+		defer c.mu.Unlock()
 		err := errors.New("tunnel controller has no broker handle")
 		c.err = err.Error()
 		return c.statusLocked(), err
@@ -183,6 +198,7 @@ func (c *webTunnelController) start() (team.WebTunnelStatus, error) {
 	if binary == "" {
 		path, lookErr := findCloudflared()
 		if lookErr != nil {
+			defer c.mu.Unlock()
 			c.missing = true
 			c.err = cloudflaredMissingMessage()
 			c.running = false
@@ -198,6 +214,7 @@ func (c *webTunnelController) start() (team.WebTunnelStatus, error) {
 	listenCfg := &net.ListenConfig{}
 	ln, err := listenCfg.Listen(context.Background(), "tcp", "127.0.0.1:0")
 	if err != nil {
+		defer c.mu.Unlock()
 		c.err = fmt.Sprintf("tunnel loopback listener failed: %v", err)
 		return c.statusLocked(), errors.New(c.err)
 	}
@@ -206,6 +223,7 @@ func (c *webTunnelController) start() (team.WebTunnelStatus, error) {
 	brokerToken, err := readBrokerToken()
 	if err != nil {
 		_ = ln.Close()
+		defer c.mu.Unlock()
 		c.err = err.Error()
 		return c.statusLocked(), err
 	}
@@ -226,6 +244,7 @@ func (c *webTunnelController) start() (team.WebTunnelStatus, error) {
 	if err != nil {
 		cancel()
 		_ = ln.Close()
+		defer c.mu.Unlock()
 		c.err = fmt.Sprintf("cloudflared stderr pipe failed: %v", err)
 		return c.statusLocked(), errors.New(c.err)
 	}
@@ -233,12 +252,14 @@ func (c *webTunnelController) start() (team.WebTunnelStatus, error) {
 	if err != nil {
 		cancel()
 		_ = ln.Close()
+		defer c.mu.Unlock()
 		c.err = fmt.Sprintf("cloudflared stdout pipe failed: %v", err)
 		return c.statusLocked(), errors.New(c.err)
 	}
 	if err := cmd.Start(); err != nil {
 		cancel()
 		_ = ln.Close()
+		defer c.mu.Unlock()
 		c.err = fmt.Sprintf("cloudflared failed to start: %v", err)
 		return c.statusLocked(), errors.New(c.err)
 	}
@@ -263,24 +284,60 @@ func (c *webTunnelController) start() (team.WebTunnelStatus, error) {
 	// recent versions emit little here, so noop the bytes.
 	go func() { _, _ = io.Copy(io.Discard, stdout) }()
 
+	// Commit the in-flight resources to c.* under the lock so a concurrent
+	// stop() can find and tear them down. Then release the lock around the
+	// (up to 45s) waitForTunnelURL call so status() polls and stop() clicks
+	// from the UI don't block on c.mu.
+	c.starting = true
+	c.cmd = cmd
+	c.cancel = cancel
+	c.server = server
+	c.listener = ln
+	c.mu.Unlock()
+
 	publicURL, tail, perr := waitForTunnelURL(ctx, urlCh, tailCh, cloudflaredStartTimeout)
+
+	c.mu.Lock()
+	c.starting = false
+
+	// stop() observed the in-flight resources during the wait and tore
+	// them down. Don't double-free; just report cancelled.
+	if c.cmd != cmd {
+		defer c.mu.Unlock()
+		return c.statusLocked(), errors.New("tunnel start was cancelled")
+	}
+
 	if perr != nil {
+		// Wait failed (timeout, cmd died early, ctx cancelled). Cancel,
+		// then release c.mu before the cmd.Wait + ln.Close cleanup so a
+		// hung pipe drain can't block status() callers under the same
+		// lock-window invariant the watcher goroutine already follows.
 		cancel()
-		_ = cmd.Wait()
-		_ = ln.Close()
+		c.cmd = nil
+		c.cancel = nil
+		cleanupServer := c.server
+		c.server = nil
+		cleanupLn := c.listener
+		c.listener = nil
+		c.running = false
 		msg := perr.Error()
 		if len(tail) > 0 {
 			msg += "\n\nLast cloudflared output:\n" + strings.Join(tail, "\n")
 		}
 		c.err = msg
-		c.running = false
-		return c.statusLocked(), errors.New(msg)
+		c.mu.Unlock()
+		_ = cmd.Wait()
+		if cleanupServer != nil {
+			shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), cloudflaredStopTimeout)
+			_ = cleanupServer.Shutdown(shutdownCtx)
+			cancelShutdown()
+		}
+		if cleanupLn != nil {
+			_ = cleanupLn.Close()
+		}
+		return team.WebTunnelStatus{Error: msg}, errors.New(msg)
 	}
 
-	c.cmd = cmd
-	c.cancel = cancel
-	c.server = server
-	c.listener = ln
 	c.publicURL = publicURL
 	c.running = true
 	c.stopGuard = make(chan struct{})
@@ -291,6 +348,7 @@ func (c *webTunnelController) start() (team.WebTunnelStatus, error) {
 		// Tunnel is up but the invite call failed. Surface the error but
 		// keep the tunnel running — a retry can mint a new invite without
 		// re-spinning cloudflared.
+		defer c.mu.Unlock()
 		c.err = ierr.Error()
 		return c.statusLocked(), ierr
 	}
@@ -338,6 +396,7 @@ func (c *webTunnelController) start() (team.WebTunnelStatus, error) {
 		}
 	}()
 
+	defer c.mu.Unlock()
 	return c.statusLocked(), nil
 }
 

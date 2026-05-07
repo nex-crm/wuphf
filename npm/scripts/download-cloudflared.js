@@ -81,21 +81,28 @@ function targetBinaryPath() {
 const fetchToFileTimeoutMs = 120_000;
 
 async function fetchToFile(url, dest) {
+  // The timeout must stay armed across BOTH the fetch handshake AND the
+  // body read. fetch() resolves once response headers arrive, so a peer
+  // that sends headers and then stalls the body would still hang the
+  // postinstall indefinitely if we cleared the timer right after fetch
+  // returned. We clear it only after the file has been fully written.
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), fetchToFileTimeoutMs);
-  let res;
   try {
-    res = await fetch(url, { redirect: "follow", signal: controller.signal });
+    const res = await fetch(url, {
+      redirect: "follow",
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      throw new Error(
+        `Download failed: ${res.status} ${res.statusText} (${url})`,
+      );
+    }
+    const buf = Buffer.from(await res.arrayBuffer());
+    await fsp.writeFile(dest, buf);
   } finally {
     clearTimeout(timer);
   }
-  if (!res.ok) {
-    throw new Error(
-      `Download failed: ${res.status} ${res.statusText} (${url})`,
-    );
-  }
-  const buf = Buffer.from(await res.arrayBuffer());
-  await fsp.writeFile(dest, buf);
 }
 
 async function sha256OfFile(filePath) {
