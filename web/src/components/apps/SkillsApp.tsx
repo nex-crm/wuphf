@@ -280,7 +280,11 @@ export function SkillsApp() {
     <>
       <div
         style={{
-          padding: "0 0 12px",
+          // The .app-panel's top padding is zeroed for skills surfaces
+          // (so the sticky OwnerFilterBar can land flush at the scroll
+          // top). Re-add the inset here so the heading still has air
+          // when scrolled to the top.
+          padding: "20px 0 12px",
           borderBottom: "1px solid var(--border)",
           marginBottom: 16,
           display: "flex",
@@ -452,19 +456,16 @@ function OwnerFilterBar({
         display: "flex",
         alignItems: "center",
         gap: 8,
-        // Pull the filter UP into the gap left by the parent's sticky
-        // page header (Settings → Skills section heading + hr), then
-        // pad the bg back down so the controls sit where they used to.
-        // Net effect: the filter's opaque background covers the seam
-        // between the page header and the filter, so cards no longer
-        // peek through when scrolling.
-        marginTop: -32,
         marginBottom: 14,
         position: "sticky",
         top: 0,
         zIndex: 20,
         background: "var(--bg, var(--bg-card, #fff))",
-        padding: "32px 0 12px",
+        // Padding extends the opaque bg fully across the row so cards
+        // can't peek through when scrolling under it. The .app-panel's
+        // top padding is zeroed for skills surfaces (in layout.css)
+        // so this row sits flush at the scroll-container edge.
+        padding: "12px 0",
         boxShadow: "0 6px 8px -8px rgba(0, 0, 0, 0.25)",
       }}
     >

@@ -425,6 +425,16 @@
   padding: 4px 0 8px;
 }
 
+/* When the SkillsApp surface is showing, kill the .app-panel's top
+   padding so the sticky OwnerFilterBar lands FLUSH at the top of the
+   scroll container. Without this, the panel's default 20px top padding
+   sits ABOVE the filter when stuck — and cards scrolling up bleed
+   through that 20px band. The horizontal padding stays on the panel;
+   only top is zeroed. */
+.app-panel:has(.pixel-skill-card-grid) {
+  padding-top: 0;
+}
+
 /* Wrapper holds the flipper + the action row. The flipper itself drives
    the card aspect ratio so the front and back share footprint while the
    surrounding actions sit underneath. */
