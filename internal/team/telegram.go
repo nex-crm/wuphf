@@ -190,18 +190,31 @@ func (t *TelegramTransport) Start(ctx context.Context) error {
 // A "typing" action is sent immediately before the message body so chats see
 // the same UX they got under the prior in-adapter outbound loop: a brief
 // typing bubble, then the formatted message. Sending typing fails silently —
-// it is a UX nicety, not a delivery prerequisite, and surfacing the error
-// would just translate every Send into two error paths.
+// it is a UX nicety, not a delivery prerequisite. The typing call is bounded
+// by typingActionMaxLatency rather than the parent ctx because the parent's
+// own timeout is sized for the actual message API call (see
+// SendTypingAction's 30s timeout) — without the tighter cap, a hung
+// chat-action endpoint would gate every Send by the full upstream timeout
+// and serialize into queue backlog on the per-tick dispatcher.
 func (t *TelegramTransport) Send(ctx context.Context, msg transport.Outbound) error {
 	chatID := t.chatIDForSlug(msg.Binding.ChannelSlug)
 	if chatID == "" {
 		return fmt.Errorf("telegram: no chat mapped for channel %q", msg.Binding.ChannelSlug)
 	}
 	if chatIDInt, parseErr := strconv.ParseInt(chatID, 10, 64); parseErr == nil {
-		_ = SendTypingAction(ctx, t.BotToken, chatIDInt)
+		typingCtx, cancelTyping := context.WithTimeout(ctx, typingActionMaxLatency)
+		_ = SendTypingAction(typingCtx, t.BotToken, chatIDInt)
+		cancelTyping()
 	}
 	return t.sendMessageHTML(ctx, chatID, msg.Text)
 }
+
+// typingActionMaxLatency caps the per-Send typing call so a degraded
+// chat-action endpoint cannot gate message delivery. 2s is generous for
+// Telegram's chat-action under healthy conditions and short enough that a
+// stalled action does not cascade into outbound-queue backlog under the
+// per-tick dispatcher cadence.
+const typingActionMaxLatency = 2 * time.Second
 
 // FormatOutbound converts a broker channelMessage to a transport.Outbound for
 // the per-transport dispatcher (broker_outbound_dispatch.go). Returns ok=false

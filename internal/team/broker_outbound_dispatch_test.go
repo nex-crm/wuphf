@@ -106,9 +106,13 @@ func TestOutboundDispatcherFormatsAndSendsEachQueuedMessage(t *testing.T) {
 func TestOutboundDispatcherLogsButContinuesOnSendError(t *testing.T) {
 	b := newTestBroker(t)
 	seedSurfaceMessage(t, b, "general", "fail-me")
-	// Second message arrives on a later poll cycle.
+	// Second message is enqueued only after the first fail completes — see
+	// the failedOnce signal below — so its arrival on a later poll cycle is
+	// guaranteed by ordering, not by sleep duration.
 
-	var deliveredOK atomic.Int32
+	failedOnce := make(chan struct{})
+	delivered := make(chan struct{}, 1)
+	var failedOnceClosed atomic.Bool
 	formatter := func(msg channelMessage) (transport.Outbound, bool) {
 		return transport.Outbound{
 			Binding: transport.Binding{Scope: transport.ScopeChannel, ChannelSlug: msg.Channel},
@@ -117,9 +121,14 @@ func TestOutboundDispatcherLogsButContinuesOnSendError(t *testing.T) {
 	}
 	sender := func(_ context.Context, out transport.Outbound) error {
 		if out.Text == "fail-me" {
+			// Close-once guard so a second fail (e.g. requeue under load)
+			// does not panic on the closed channel.
+			if failedOnceClosed.CompareAndSwap(false, true) {
+				close(failedOnce)
+			}
 			return errors.New("simulated transient send failure")
 		}
-		deliveredOK.Add(1)
+		delivered <- struct{}{}
 		return nil
 	}
 
@@ -131,19 +140,20 @@ func TestOutboundDispatcherLogsButContinuesOnSendError(t *testing.T) {
 		close(loopDone)
 	}()
 
-	// Wait for the first poll-and-fail cycle, then queue a deliverable
-	// message. The dispatcher must still be alive to pick it up.
-	time.Sleep(outboundDispatchInterval + 200*time.Millisecond)
+	// Wait for the first poll-and-fail to complete deterministically before
+	// seeding the deliverable message. Decouples the test from the
+	// production polling cadence.
+	select {
+	case <-failedOnce:
+	case <-time.After(5 * time.Second):
+		t.Fatal("dispatcher did not call sender for fail-me within 5s")
+	}
 	seedSurfaceMessage(t, b, "general", "deliver-me")
 
-	deadline := time.After(3 * outboundDispatchInterval)
-	for deliveredOK.Load() != 1 {
-		select {
-		case <-deadline:
-			t.Fatalf("dispatcher stopped after a send error (deliveredOK=%d)", deliveredOK.Load())
-		default:
-			time.Sleep(50 * time.Millisecond)
-		}
+	select {
+	case <-delivered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("dispatcher stopped after a send error (deliver-me never sent)")
 	}
 	cancel()
 	<-loopDone
