@@ -118,7 +118,7 @@ export function MessageBubble({
           type="button"
           className="message-avatar avatar-with-harness message-avatar-btn"
           data-agent-slug={message.from}
-          aria-label={`View profile of ${agent?.name || message.from}`}
+          aria-label={`Open agent panel for ${agent?.name || message.from}`}
           onClick={() => setActiveAgentSlug(message.from)}
         >
           <PixelAvatar slug={message.from} size={24} />
@@ -157,6 +157,7 @@ export function MessageBubble({
               type="button"
               className="message-author message-author-btn"
               data-agent-slug={message.from}
+              aria-label={`Open agent panel for ${agent?.name || message.from}`}
               onClick={() => setActiveAgentSlug(message.from)}
             >
               {agent?.name || message.from}

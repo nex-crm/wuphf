@@ -1,4 +1,3 @@
-import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Xmark } from "iconoir-react";
 
@@ -135,13 +134,6 @@ function RecentRunsSection({
 }: RecentRunsSectionProps) {
   const agentRuns = runs.filter((r) => r.agentSlug === agentSlug).slice(0, 8);
 
-  function handleRunClick(taskId: string) {
-    // Navigate to the activity app; task detail opens from there.
-    void router.navigate({ to: "/apps/$appId", params: { appId: "activity" } });
-    // Shallow timeout so panel can close before navigation
-    void taskId;
-  }
-
   if (loading) {
     return (
       <div className="agent-profile-section">
@@ -166,7 +158,12 @@ function RecentRunsSection({
               <button
                 type="button"
                 className="agent-profile-run-btn"
-                onClick={() => handleRunClick(r.taskId)}
+                onClick={() =>
+                  void router.navigate({
+                    to: "/apps/$appId",
+                    params: { appId: "activity" },
+                  })
+                }
               >
                 <span className="agent-profile-run-id">{r.taskId}</span>
                 <span className="agent-profile-run-meta">
@@ -346,26 +343,11 @@ export function AgentProfilePanel({ agent, onClose }: AgentProfilePanelProps) {
     refetchInterval: 30_000,
   });
 
-  const [runs, setRuns] = useState<TaskLogSummary[]>([]);
-  const [runsLoading, setRunsLoading] = useState(true);
-
-  useEffect(() => {
-    let cancelled = false;
-    setRunsLoading(true);
-    listAgentLogTasks({ limit: 100 })
-      .then((data) => {
-        if (!cancelled) {
-          setRuns(data.tasks ?? []);
-          setRunsLoading(false);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setRunsLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const { data: runs = [], isLoading: runsLoading } = useQuery({
+    queryKey: ["agent-log-tasks", { limit: 100 }],
+    queryFn: () => listAgentLogTasks({ limit: 100 }).then((r) => r.tasks ?? []),
+    refetchInterval: 30_000,
+  });
 
   const statusClass = agent.status === "active" ? "active pulse" : "lurking";
 
