@@ -130,6 +130,11 @@ export interface WebTunnelStatus {
   running: boolean;
   public_url?: string;
   invite_url?: string;
+  // Phase 2 hardening: numeric passcode the host reads to the joiner
+  // out-of-band. Empty when the tunnel is not running. Required by the
+  // share handler's joinGate before the broker is asked to admit the
+  // invite — see cmd/wuphf/share_join_guard.go.
+  passcode?: string;
   expires_at?: string;
   error?: string;
   cloudflared_missing?: boolean;

@@ -21,6 +21,12 @@ type WebTunnelStatus struct {
 	// InviteURL is PublicURL + "/join/<token>". Empty until both the
 	// tunnel and a fresh invite token are ready.
 	InviteURL string `json:"invite_url,omitempty"`
+	// Passcode is the second-factor numeric string the joiner must enter
+	// before the broker accepts their invite. Phase 2 hardening: the
+	// invite URL alone (e.g. accidentally pasted into a public Slack) is
+	// no longer sufficient to redeem the invite. Empty in network-share
+	// mode.
+	Passcode  string `json:"passcode,omitempty"`
 	ExpiresAt string `json:"expires_at,omitempty"`
 	Error     string `json:"error,omitempty"`
 	// CloudflaredMissing flips on when the tunnel binary is not on PATH so
