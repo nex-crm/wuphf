@@ -1,0 +1,7 @@
+# One Go test pattern per line. Each entry is appended to:
+#   go test -count=1 <entry>
+#
+# Example:
+#   ./internal/team/... -run ^TestSomethingFlaky$
+#
+# Leave this list empty until CI shows non-deterministic failures over 3+ runs.
