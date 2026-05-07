@@ -4,7 +4,6 @@ import { deriveBreadcrumbs } from "../../hooks/useObjectBreadcrumb";
 import { useRecordRecentObject } from "../../hooks/useRecentObjects";
 import { useChannels } from "../../hooks/useChannels";
 import { appTitle } from "../../lib/constants";
-import { resolveObjectRoute } from "../../lib/objectRoutes";
 import { useCurrentRoute } from "../../routes/useCurrentRoute";
 import type { Theme } from "../../stores/app";
 import { useAppStore } from "../../stores/app";
@@ -112,10 +111,7 @@ export function ChannelHeader() {
   useEffect(() => {
     const ref = routeToObjectRef(route);
     if (ref) {
-      const resolution = resolveObjectRoute(ref);
-      if (!resolution.fallback) {
-        recordRecent(ref);
-      }
+      recordRecent(ref);
     }
   }, [route, recordRecent]);
 

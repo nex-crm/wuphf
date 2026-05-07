@@ -20,17 +20,16 @@ describe("deriveBreadcrumbs", () => {
     expect(deriveBreadcrumbs(route)).toEqual([]);
   });
 
-  it("returns [Agents, @agent] for dm routes", () => {
+  it("returns [@agent] for dm routes (no invalid #/dm parent)", () => {
     const route: CurrentRoute = {
       kind: "dm",
       agentSlug: "gaia",
       channelSlug: "gaia__human",
     };
     const crumbs = deriveBreadcrumbs(route);
-    expect(crumbs).toHaveLength(2);
-    expect(crumbs[0].label).toBe("Agents");
-    expect(crumbs[1].label).toContain("gaia");
-    expect(crumbs[1].href).toContain("gaia");
+    expect(crumbs).toHaveLength(1);
+    expect(crumbs[0].label).toContain("gaia");
+    expect(crumbs[0].href).toContain("gaia");
   });
 
   it("returns [Tasks] for task-board route", () => {

@@ -28,10 +28,7 @@ export function deriveBreadcrumbs(route: CurrentRoute): BreadcrumbItem[] {
   switch (route.kind) {
     case "dm": {
       const res = resolveObjectRoute({ kind: "agent", slug: route.agentSlug });
-      return [
-        { label: "Agents", href: "#/dm" },
-        breadcrumbItem(res, `@${route.agentSlug}`),
-      ];
+      return [breadcrumbItem(res, `@${route.agentSlug}`)];
     }
     case "task-board": {
       return [{ label: "Tasks", href: "#/tasks" }];
