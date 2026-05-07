@@ -420,6 +420,11 @@ func (c *webTunnelController) start() (team.WebTunnelStatus, error) {
 		c.server = nil
 		c.listener = nil
 		c.passcodes = make(map[string]string)
+		// Each tunnel session is its own share window — give the next
+		// start() a fresh per-IP bucket map so a joiner who burned their
+		// burst on the previous invite isn't throttled when the host
+		// rotates the tunnel and shares a new URL with them.
+		c.rateLimiter = newJoinRateLimiter()
 		c.clearInviteLocked()
 		if err != nil && !errors.Is(err, context.Canceled) {
 			c.err = fmt.Sprintf("cloudflared exited unexpectedly: %v", err)
@@ -559,6 +564,10 @@ func (c *webTunnelController) stop() error {
 	c.running = false
 	c.publicURL = ""
 	c.passcodes = make(map[string]string)
+	// Same fresh-bucket-per-session reasoning as the watcher-goroutine
+	// teardown path above: a joiner whose IP burned the burst on the
+	// previous invite gets a clean slate on the next Start.
+	c.rateLimiter = newJoinRateLimiter()
 	c.clearInviteLocked()
 	c.err = ""
 	c.mu.Unlock()
