@@ -913,3 +913,37 @@
   color: var(--text-secondary);
   margin-top: 2px;
 }
+
+.wizard-resume-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  margin: 0 auto 16px;
+  max-width: 680px;
+  border: 1px solid var(--border, rgba(0, 0, 0, 0.08));
+  border-radius: 8px;
+  background: var(--surface-1, rgba(0, 0, 0, 0.02));
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.wizard-resume-banner > span {
+  flex: 1;
+  min-width: 0;
+}
+
+.link-btn {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: var(--accent, #2563eb);
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.link-btn:hover,
+.link-btn:focus-visible {
+  color: var(--accent-hover, #1d4ed8);
+}

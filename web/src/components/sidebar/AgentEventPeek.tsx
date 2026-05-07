@@ -14,6 +14,11 @@ export interface AgentEventPeekProps {
   anchorRef: React.RefObject<HTMLElement | null>;
   onClose: () => void;
   onOpenWorkspace: () => void;
+  /** Transport-presence flag from /office-members. Drives the connection-state
+   *  indicator below the role line. */
+  online?: boolean;
+  /** RFC3339 timestamp of last UpsertParticipant. Empty when never observed. */
+  lastSeenAt?: string;
 }
 
 interface Position {
@@ -51,6 +56,41 @@ function kindLabel(kind: StoredActivitySnapshot["kind"]): string {
   return "routine";
 }
 
+// PresenceRow renders the connection-state line under the role. Three states:
+//  - online === true                         → "Online" with green dot
+//  - !online && lastSeenAt parses cleanly    → "Last seen Xm ago"
+//  - everything else (never observed)        → null
+// Built-in members without an adapter (e.g. CEO with no openclaw provider)
+// hit the third branch — showing them as "offline" would be misleading.
+// Extracted from AgentEventPeek so the parent component's cognitive
+// complexity score stays under the biome cap.
+function PresenceRow({
+  online,
+  lastSeenAt,
+  nowMs,
+}: {
+  online?: boolean;
+  lastSeenAt?: string;
+  nowMs: number;
+}): React.ReactElement | null {
+  if (online) {
+    return (
+      <span className="sidebar-agent-peek-presence" data-state="online">
+        <span className="sidebar-agent-peek-presence-dot" aria-hidden="true" />
+        Online
+      </span>
+    );
+  }
+  if (!lastSeenAt) return null;
+  const lastMs = Date.parse(lastSeenAt);
+  if (Number.isNaN(lastMs)) return null;
+  return (
+    <span className="sidebar-agent-peek-presence" data-state="offline">
+      Last seen {formatRelative(lastMs, nowMs)}
+    </span>
+  );
+}
+
 export function AgentEventPeek({
   slug,
   agentName,
@@ -61,6 +101,8 @@ export function AgentEventPeek({
   anchorRef,
   onClose,
   onOpenWorkspace,
+  online,
+  lastSeenAt,
 }: AgentEventPeekProps) {
   const [now, setNow] = useState<number>(() => Date.now());
   const [pos, setPos] = useState<Position>({ top: 0, left: 0 });
@@ -185,6 +227,7 @@ export function AgentEventPeek({
           {!!agentRole && (
             <span className="sidebar-agent-peek-role">{agentRole}</span>
           )}
+          <PresenceRow online={online} lastSeenAt={lastSeenAt} nowMs={now} />
         </div>
         {isStuck && (
           <span className="sidebar-agent-peek-blocked-chip">BLOCKED</span>

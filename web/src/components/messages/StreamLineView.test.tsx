@@ -105,6 +105,55 @@ describe("<StreamLineView>", () => {
     expect(screen.getByText(/permission denied/)).toBeInTheDocument();
   });
 
+  it("renders a HeadlessEvent idle envelope as an idle status card", () => {
+    // Pin the discriminator-first routing: when parsed.kind === "headless_event"
+    // the view must render the typed envelope and not fall through to the
+    // provider-native branches (assistant/mcp_tool_event/...).
+    render(
+      <StreamLineView
+        line={{
+          id: 1,
+          data: "",
+          parsed: {
+            kind: "headless_event",
+            type: "idle",
+            provider: "claude",
+            agent: "ceo",
+            text: "reply ready · ttft 90ms",
+            status: "idle",
+            metrics: { total_ms: 1500, first_text_ms: 90 },
+          },
+        }}
+      />,
+    );
+    expect(screen.getByText("idle")).toBeInTheDocument();
+    expect(screen.getByText("claude")).toBeInTheDocument();
+    expect(screen.getByText(/reply ready/)).toBeInTheDocument();
+  });
+
+  it("renders a HeadlessEvent error envelope with the failure detail", () => {
+    render(
+      <StreamLineView
+        line={{
+          id: 1,
+          data: "",
+          parsed: {
+            kind: "headless_event",
+            type: "error",
+            provider: "codex",
+            agent: "eng",
+            text: "auth: 401 unauthorized",
+            detail: "auth: 401 unauthorized",
+            status: "error",
+          },
+        }}
+      />,
+    );
+    expect(screen.getByText("error")).toBeInTheDocument();
+    expect(screen.getByText("codex")).toBeInTheDocument();
+    expect(screen.getByText("auth: 401 unauthorized")).toBeInTheDocument();
+  });
+
   it("renders Codex completed message content arrays", () => {
     render(
       <StreamLineView

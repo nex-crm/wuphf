@@ -360,3 +360,73 @@ describe("<AgentEventPeek> interaction and accessibility", () => {
     expect(dialog.getAttribute("aria-describedby")).toBeNull();
   });
 });
+
+// ─── presence row ────────────────────────────────────────────────────────────
+
+describe("<AgentEventPeek> presence row", () => {
+  it("renders 'Online' with the green dot when online=true", () => {
+    const anchorRef = makeAnchorRef();
+    render(
+      <AgentEventPeek {...defaultProps} anchorRef={anchorRef} online={true} />,
+    );
+    const presence = document.querySelector(
+      ".sidebar-agent-peek-presence",
+    ) as HTMLElement;
+    expect(presence).not.toBeNull();
+    expect(presence.dataset.state).toBe("online");
+    expect(presence.textContent).toContain("Online");
+    expect(
+      document.querySelector(".sidebar-agent-peek-presence-dot"),
+    ).not.toBeNull();
+  });
+
+  it("renders 'Last seen' relative time when offline with a parseable timestamp", () => {
+    const anchorRef = makeAnchorRef();
+    const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+    render(
+      <AgentEventPeek
+        {...defaultProps}
+        anchorRef={anchorRef}
+        online={false}
+        lastSeenAt={fiveMinAgo}
+      />,
+    );
+    const presence = document.querySelector(
+      ".sidebar-agent-peek-presence",
+    ) as HTMLElement;
+    expect(presence).not.toBeNull();
+    expect(presence.dataset.state).toBe("offline");
+    expect(presence.textContent).toMatch(/Last seen \d+m ago/);
+    // Green dot is intentionally absent in the offline state — color encodes
+    // a live transport, not historical activity.
+    expect(
+      document.querySelector(".sidebar-agent-peek-presence-dot"),
+    ).toBeNull();
+  });
+
+  it("omits the presence row entirely when offline with no last_seen_at (never observed)", () => {
+    const anchorRef = makeAnchorRef();
+    render(
+      <AgentEventPeek
+        {...defaultProps}
+        anchorRef={anchorRef}
+        online={false}
+        lastSeenAt=""
+      />,
+    );
+    expect(document.querySelector(".sidebar-agent-peek-presence")).toBeNull();
+  });
+
+  it("omits the presence row when last_seen_at is unparseable", () => {
+    const anchorRef = makeAnchorRef();
+    render(
+      <AgentEventPeek
+        {...defaultProps}
+        anchorRef={anchorRef}
+        online={false}
+        lastSeenAt="not-a-timestamp"
+      />,
+    );
+    expect(document.querySelector(".sidebar-agent-peek-presence")).toBeNull();
+  });
+});
