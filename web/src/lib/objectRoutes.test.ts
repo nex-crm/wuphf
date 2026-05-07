@@ -93,6 +93,35 @@ describe("resolveObjectRoute", () => {
     expect(route.fallback?.reason).toBe("missing_id");
     expect(route.fallback?.message).toContain("task");
   });
+
+  it.each([
+    { kind: "run" as const, ref: { kind: "run" as const, id: "" } },
+    {
+      kind: "wiki-page" as const,
+      ref: { kind: "wiki-page" as const, path: "" },
+    },
+    {
+      kind: "workbench-item" as const,
+      ref: {
+        kind: "workbench-item" as const,
+        id: "",
+        itemKind: "approval",
+      },
+    },
+    {
+      kind: "artifact" as const,
+      ref: { kind: "artifact" as const, id: "" },
+    },
+  ])("returns a missing_id fallback when a required field is empty for $kind", ({
+    kind,
+    ref,
+  }) => {
+    const route = resolveObjectRoute(ref);
+    expect(route.href).toBe("#/");
+    expect(route.fallback?.reason).toBe("missing_id");
+    expect(route.fallback?.message).toContain(kind);
+    expect(route.appAction).toBeUndefined();
+  });
 });
 
 describe("resolveUnknownObjectRoute", () => {
