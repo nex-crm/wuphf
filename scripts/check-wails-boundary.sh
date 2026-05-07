@@ -50,6 +50,7 @@ hits="$(
     --glob '!desktop/wailsjs/**' \
     --glob '!web/wailsjs/**' \
     --glob '!**/*.md' \
+    --glob '!scripts/check-wails-boundary-self-test.sh' \
     -e "$go_import_pattern" \
     -e "$ts_import_pattern" \
     .
