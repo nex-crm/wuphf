@@ -1251,3 +1251,99 @@
 .link-btn:focus-visible {
   color: var(--accent-hover, #1d4ed8);
 }
+
+/* Company scan AnalysisStep */
+.analysis-scanning {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 24px 0;
+}
+
+.analysis-spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--border);
+  border-top-color: var(--purple, #7c3aed);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.analysis-status-text {
+  font-size: 15px;
+  color: var(--text-secondary, #666);
+}
+
+.analysis-done-flash {
+  color: var(--text, #1a1a1a);
+  font-weight: 500;
+}
+
+.analysis-reveal {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 0;
+}
+
+.analysis-caption {
+  margin-top: 16px;
+  font-size: 13px;
+  color: var(--text-secondary, #888);
+  font-style: italic;
+}
+
+.reveal-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  animation: reveal-item 0.3s ease-out both;
+  animation-delay: calc(var(--i) * 120ms);
+}
+
+@keyframes reveal-item {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.reveal-check {
+  color: var(--green, #22c55e);
+  font-weight: 600;
+}
+
+.reveal-article {
+  font-family: monospace;
+  font-size: 12px;
+  color: var(--text-secondary, #555);
+}
+
+.reveal-fact {
+  color: var(--text-secondary, #555);
+}
+
+.unread-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--purple, #7c3aed);
+  flex-shrink: 0;
+}
+
+.label-optional {
+  font-size: 11px;
+  color: var(--text-tertiary, #999);
+  font-weight: normal;
+  margin-left: 4px;
+}
+
+.form-group-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}

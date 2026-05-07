@@ -71,6 +71,10 @@ type Config struct {
 	CompanyGoals        string `json:"company_goals,omitempty"`
 	CompanySize         string `json:"company_size,omitempty"`
 	CompanyPriority     string `json:"company_priority,omitempty"`
+	OwnerName           string `json:"owner_name,omitempty"`
+	OwnerRole           string `json:"owner_role,omitempty"`
+	CompanyWebsite      string `json:"company_website,omitempty"`
+	PendingCompanySeed  bool   `json:"pending_company_seed,omitempty"`
 
 	OpenclawBridges    []OpenclawBridgeBinding `json:"openclaw_bridges,omitempty"`
 	OpenclawGatewayURL string                  `json:"openclaw_gateway_url,omitempty"`
@@ -616,6 +620,16 @@ func CompanyContextBlock() string {
 	}
 	if priority := strings.TrimSpace(cfg.CompanyPriority); priority != "" {
 		sb.WriteString(fmt.Sprintf("Immediate priority: %s\n", priority))
+	}
+	if website := strings.TrimSpace(cfg.CompanyWebsite); website != "" {
+		sb.WriteString(fmt.Sprintf("Website: %s\n", website))
+	}
+	if name := strings.TrimSpace(cfg.OwnerName); name != "" {
+		sb.WriteString(fmt.Sprintf("Owner: %s", name))
+		if role := strings.TrimSpace(cfg.OwnerRole); role != "" {
+			sb.WriteString(fmt.Sprintf(" (%s)", role))
+		}
+		sb.WriteString("\n")
 	}
 	sb.WriteString("\n")
 	return sb.String()
