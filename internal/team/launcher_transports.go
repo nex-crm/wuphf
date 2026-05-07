@@ -47,14 +47,27 @@ func RegisterTransports(b *Broker) (func(), error) {
 			host := &brokerTransportHost{broker: b}
 			ctx, cancel := context.WithCancel(context.Background())
 			done := make(chan struct{})
+			dispatchDone := make(chan struct{})
 			stops = append(stops, func() {
 				cancel()
-				<-done // wait for Run to return before broker.Stop()
+				<-done         // wait for Run to return before broker.Stop()
+				<-dispatchDone // and the outbound dispatcher's goroutine
 			})
 			go func() {
 				defer close(done)
 				if err := t.Run(ctx, host); err != nil && ctx.Err() == nil {
 					log.Printf("[transport] telegram: exited with error: %v", err)
+				}
+			}()
+			// Host-driven outbound dispatcher. Runs alongside Run rather than
+			// inside it so the goroutine lifecycle is owned by the Host, per the
+			// Transport.Send contract intent. FormatOutbound + Send live on the
+			// adapter; the dispatcher just polls the broker queue and wires the
+			// two together.
+			go func() {
+				defer close(dispatchDone)
+				if err := runOutboundDispatcher(ctx, b, t.Name(), t.FormatOutbound, t.Send); err != nil && ctx.Err() == nil {
+					log.Printf("[transport] telegram: outbound dispatcher exited: %v", err)
 				}
 			}()
 			log.Printf("[transport] telegram: started (%d group(s), dm=%v)", len(t.ChatMap), t.DMChannel != "")
