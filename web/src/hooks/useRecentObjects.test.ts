@@ -80,4 +80,19 @@ describe("readRecentObjects", () => {
     store.set("wuphf-recent-objects", "NOT_JSON{{{{");
     expect(readRecentObjects()).toEqual([]);
   });
+
+  it("drops parseable entries with invalid shape", () => {
+    store.set(
+      "wuphf-recent-objects",
+      JSON.stringify([
+        {
+          ref: { kind: "agent", slug: "gaia" },
+          href: 123,
+          label: null,
+          visitedAtMs: Date.now(),
+        },
+      ]),
+    );
+    expect(readRecentObjects()).toEqual([]);
+  });
 });

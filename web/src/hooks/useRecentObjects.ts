@@ -28,13 +28,15 @@ function safeRead(): RecentObjectEntry[] {
     if (!raw) return [];
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return [];
-    // Light validation: each entry must have ref.kind and visitedAtMs.
     return parsed.filter(
       (item): item is RecentObjectEntry =>
         typeof item === "object" &&
         item !== null &&
-        typeof (item as RecentObjectEntry).ref?.kind === "string" &&
-        typeof (item as RecentObjectEntry).visitedAtMs === "number",
+        typeof (item as { label?: unknown }).label === "string" &&
+        typeof (item as { href?: unknown }).href === "string" &&
+        typeof (item as { visitedAtMs?: unknown }).visitedAtMs === "number" &&
+        Number.isFinite((item as { visitedAtMs: number }).visitedAtMs) &&
+        typeof (item as { ref?: { kind?: unknown } }).ref?.kind === "string",
     );
   } catch {
     return [];

@@ -76,6 +76,19 @@ function routeToObjectRef(
       return { kind: "task", id: route.taskId };
     case "wiki-article":
       return { kind: "wiki-page", path: route.articlePath };
+    case "app":
+      if (route.appId === "settings") {
+        return { kind: "settings-section", section: "workspace" };
+      }
+      if (
+        route.appId === "providers" ||
+        route.appId === "team" ||
+        route.appId === "workspace" ||
+        route.appId === "skills"
+      ) {
+        return { kind: "settings-section", section: route.appId as "providers" | "team" | "workspace" | "skills" };
+      }
+      return null;
     case "notebook-entry":
       return null; // notebook entries are draft surfaces, not canonical objects
     default:

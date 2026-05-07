@@ -82,12 +82,13 @@ export function deriveBreadcrumbs(route: CurrentRoute): BreadcrumbItem[] {
       return [{ label: "Reviews", href: "#/reviews" }];
     }
     case "app": {
-      const res = resolveObjectRoute({
-        kind: "settings-section",
-        section: isSettingsSection(route.appId) ? route.appId : "workspace",
-      });
-      if (route.appId === "settings") {
-        return [breadcrumbItem(res, "Settings")];
+      if (route.appId === "settings" || isSettingsSection(route.appId)) {
+        const section = route.appId === "settings" ? "workspace" : route.appId;
+        const res = resolveObjectRoute({ kind: "settings-section", section: section as "providers" | "team" | "workspace" | "skills" });
+        return [{
+          label: route.appId === "settings" ? "Settings" : (res.fallback ? appLabel(route.appId) : res.label),
+          href: res.href,
+        }];
       }
       // Generic app — one segment with the app title.
       return [{ label: appLabel(route.appId), href: `#/apps/${route.appId}` }];
