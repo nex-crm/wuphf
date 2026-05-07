@@ -68,7 +68,7 @@ func SeedCompanyContext(ctx context.Context, input CompanySeedInput) (*CompanySe
 	// 2. Extract file content
 	for _, path := range input.FilePaths {
 		data, err := os.ReadFile(path)
-		defer os.Remove(path)
+		defer func() { _ = os.Remove(path) }()
 		if err != nil {
 			result.Warnings = append(result.Warnings, fmt.Sprintf("read file %s: %v", path, err))
 			continue
@@ -294,7 +294,7 @@ func atomicWrite(wikiRoot, relPath string, data []byte) error {
 	if err := os.MkdirAll(tempDir, 0o755); err != nil {
 		return fmt.Errorf("operations: atomicWrite tempdir %q: %w", tempDir, err)
 	}
-	defer os.RemoveAll(tempDir)
+	defer func() { _ = os.RemoveAll(tempDir) }()
 
 	stagePath := filepath.Join(tempDir, relPath)
 	if err := os.MkdirAll(filepath.Dir(stagePath), 0o755); err != nil {

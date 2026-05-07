@@ -765,7 +765,7 @@ func handleUploadContext(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		_, _ = io.Copy(out, f)
-		out.Close()
+		_ = out.Close()
 		f.Close()
 		paths = append(paths, dst)
 	}
