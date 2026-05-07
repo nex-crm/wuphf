@@ -171,6 +171,35 @@ function HeadlessEventView({ parsed }: { parsed: Record<string, unknown> }) {
     );
   }
 
+  if (eventType === "text") {
+    // Text events render as the same dim "thinking" block the
+    // provider-native paths use, so a stream containing both raw
+    // provider chunks (today's wire) and HeadlessEvent text (A3+)
+    // looks visually consistent. Empty text is dropped at the runner
+    // boundary; we still guard here because old captures may exist.
+    if (!text) return null;
+    return <div className="cc-thinking">{text}</div>;
+  }
+
+  if (eventType === "tool_use" || eventType === "tool_result") {
+    // Reuse the existing ToolCallCard so HeadlessEvent tool entries
+    // get the same collapsible chrome as the provider-native paths.
+    // Wire mapping: HeadlessEvent.tool_name -> name, .detail -> args
+    // for tool_use, .text -> result for tool_result.
+    const toolName = stringish(parsed.tool_name) || "tool";
+    return (
+      <ToolCallCard
+        item={{
+          type: "tool_call",
+          name: toolName,
+          arguments: eventType === "tool_use" ? parsed.detail : undefined,
+          result: eventType === "tool_result" ? parsed.text : undefined,
+        }}
+        compact={false}
+      />
+    );
+  }
+
   // Unknown HeadlessEvent type — fall back to the generic card so future
   // variants render something useful before they earn a dedicated branch.
   return <GenericEventCard parsed={parsed} compact={false} />;

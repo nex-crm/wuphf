@@ -1,8 +1,12 @@
 package team
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -160,12 +164,20 @@ type headlessTokenUsage struct {
 // and the timeline event stay aligned. Provider is the wire-format
 // constant (HeadlessProviderClaude, etc).
 func emitHeadlessTerminal(stream *agentStreamBuffer, provider, slug, taskID, summary, errDetail string, metrics headlessProgressMetrics, usage *headlessTokenUsage) {
+	emitHeadlessTerminalWithTurn(stream, "", provider, slug, taskID, summary, errDetail, metrics, usage)
+}
+
+// emitHeadlessTerminalWithTurn is the turn-aware variant of
+// emitHeadlessTerminal. Pass the same turnID used for the per-phase
+// emits so all events from one turn carry a stable correlation key.
+func emitHeadlessTerminalWithTurn(stream *agentStreamBuffer, turnID, provider, slug, taskID, summary, errDetail string, metrics headlessProgressMetrics, usage *headlessTokenUsage) {
 	if stream == nil {
 		return
 	}
 	event := HeadlessEvent{
 		Provider: provider,
 		Agent:    slug,
+		TurnID:   strings.TrimSpace(turnID),
 		TaskID:   strings.TrimSpace(taskID),
 		Metrics:  headlessProgressEventMetrics(metrics, usage),
 	}
@@ -180,4 +192,88 @@ func emitHeadlessTerminal(stream *agentStreamBuffer, provider, slug, taskID, sum
 		event.Text = summary
 	}
 	pushHeadlessEvent(stream, event)
+}
+
+// emitHeadlessText pushes a text-phase HeadlessEvent. text is the
+// user-facing chunk the model just produced. rawType is the underlying
+// provider event name (e.g. "content_block_delta", "response.output_text.delta")
+// — empty when the runner cannot supply one.
+//
+// Empty text is dropped so trivially-empty text-deltas (provider noise
+// during preamble) don't pollute the timeline.
+func emitHeadlessText(stream *agentStreamBuffer, turnID, provider, slug, taskID, text, rawType string) {
+	if stream == nil || strings.TrimSpace(text) == "" {
+		return
+	}
+	pushHeadlessEvent(stream, HeadlessEvent{
+		Type:     HeadlessEventTypeText,
+		Provider: provider,
+		Agent:    slug,
+		TurnID:   strings.TrimSpace(turnID),
+		TaskID:   strings.TrimSpace(taskID),
+		Text:     text,
+		Status:   "active",
+		RawType:  rawType,
+	})
+}
+
+// emitHeadlessToolUse pushes a tool_use-phase HeadlessEvent. toolInput is
+// the JSON-serialized arguments string the runner already builds (kept as
+// string so the wire shape is stable across providers that pre-stream
+// arguments differently).
+func emitHeadlessToolUse(stream *agentStreamBuffer, turnID, provider, slug, taskID, toolName, toolInput, rawType string) {
+	if stream == nil || strings.TrimSpace(toolName) == "" {
+		return
+	}
+	pushHeadlessEvent(stream, HeadlessEvent{
+		Type:     HeadlessEventTypeToolUse,
+		Provider: provider,
+		Agent:    slug,
+		TurnID:   strings.TrimSpace(turnID),
+		TaskID:   strings.TrimSpace(taskID),
+		ToolName: strings.TrimSpace(toolName),
+		Detail:   toolInput,
+		Status:   "active",
+		RawType:  rawType,
+	})
+}
+
+// emitHeadlessToolResult pushes a tool_result-phase HeadlessEvent. text is
+// the truncated result summary the runner already prepares for logs.
+func emitHeadlessToolResult(stream *agentStreamBuffer, turnID, provider, slug, taskID, toolName, text, rawType string) {
+	if stream == nil {
+		return
+	}
+	pushHeadlessEvent(stream, HeadlessEvent{
+		Type:     HeadlessEventTypeToolResult,
+		Provider: provider,
+		Agent:    slug,
+		TurnID:   strings.TrimSpace(turnID),
+		TaskID:   strings.TrimSpace(taskID),
+		ToolName: strings.TrimSpace(toolName),
+		Text:     text,
+		Status:   "active",
+		RawType:  rawType,
+	})
+}
+
+// turnIDCounter is a process-local fallback when crypto/rand fails (it
+// almost never does). Combined with a per-process-start nanosecond it
+// keeps generated IDs unique even when the system entropy source is
+// briefly unavailable.
+var turnIDCounter atomic.Uint64
+
+// newHeadlessTurnID returns a short, opaque correlation ID for one
+// runner turn. Callers attach this to every HeadlessEvent they emit so
+// downstream consumers can group events from the same turn without
+// pattern-matching on text content. Format is implementation-detail —
+// hex string today; treat as opaque.
+func newHeadlessTurnID() string {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err == nil {
+		return hex.EncodeToString(b[:])
+	}
+	// crypto/rand failure is rare on supported platforms; fall back to
+	// the atomic counter so we never block a turn for a missing ID.
+	return fmt.Sprintf("ctr-%d-%d", time.Now().UnixNano(), turnIDCounter.Add(1))
 }

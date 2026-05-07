@@ -112,6 +112,106 @@ func TestEmitHeadlessTerminalIdleAndError(t *testing.T) {
 	}
 }
 
+// TestEmitHeadlessTextDropsEmptyAndCarriesTurn pins the per-phase text
+// emit contract: empty text is silently dropped (so trivially-empty
+// stream noise during preamble doesn't pollute the timeline), but a
+// text chunk carries kind="headless_event", type="text", the turn
+// correlation key, and the runner-supplied raw_type for debug tooling.
+func TestEmitHeadlessTextDropsEmptyAndCarriesTurn(t *testing.T) {
+	stream := &agentStreamBuffer{subs: make(map[int]agentStreamSubscriber)}
+
+	// Empty / whitespace-only text must not produce an event.
+	emitHeadlessText(stream, "turn-1", HeadlessProviderClaude, "ceo", "task-1", "", "claude.text")
+	emitHeadlessText(stream, "turn-1", HeadlessProviderClaude, "ceo", "task-1", "   ", "claude.text")
+	if got := stream.recentTask("task-1"); len(got) != 0 {
+		t.Fatalf("empty text must be dropped, got %d lines: %v", len(got), got)
+	}
+
+	emitHeadlessText(stream, "turn-1", HeadlessProviderClaude, "ceo", "task-1", "shipping the update", "claude.text")
+	got := stream.recentTask("task-1")
+	if len(got) != 1 {
+		t.Fatalf("expected 1 text event, got %d: %v", len(got), got)
+	}
+	var event HeadlessEvent
+	if err := json.Unmarshal([]byte(strings.TrimRight(got[0], "\n")), &event); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if event.Type != HeadlessEventTypeText {
+		t.Fatalf("type: want text, got %q", event.Type)
+	}
+	if event.TurnID != "turn-1" {
+		t.Fatalf("turn id missing: %+v", event)
+	}
+	if event.RawType != "claude.text" {
+		t.Fatalf("raw_type missing: %+v", event)
+	}
+	if event.Status != "active" {
+		t.Fatalf("status: want active, got %q", event.Status)
+	}
+}
+
+// TestEmitHeadlessToolUseAndToolResult pins the tool-phase wire shape:
+// tool_use carries the tool name + serialized arguments; tool_result
+// carries the truncated summary text. Both variants share the same
+// turn id so a downstream consumer can correlate call -> result.
+func TestEmitHeadlessToolUseAndToolResult(t *testing.T) {
+	stream := &agentStreamBuffer{subs: make(map[int]agentStreamSubscriber)}
+
+	emitHeadlessToolUse(stream, "turn-2", HeadlessProviderCodex, "eng", "task-7", "team_broadcast", `{"channel":"general","content":"shipped"}`, "response.function_call.delta")
+	emitHeadlessToolResult(stream, "turn-2", HeadlessProviderCodex, "eng", "task-7", "team_broadcast", "Posted to #general as @eng", "response.function_call_result")
+
+	// Empty tool name must be silently dropped — the runner's stream
+	// callback can't always tag a name (Codex pre-streams arguments
+	// before the name lands in the same chunk), and we don't want a
+	// nameless tool_use polluting the timeline.
+	emitHeadlessToolUse(stream, "turn-2", HeadlessProviderCodex, "eng", "task-7", "", "{}", "")
+
+	lines := stream.recentTask("task-7")
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 events (tool_use + tool_result), got %d: %v", len(lines), lines)
+	}
+	var use, res HeadlessEvent
+	if err := json.Unmarshal([]byte(strings.TrimRight(lines[0], "\n")), &use); err != nil {
+		t.Fatalf("tool_use decode: %v", err)
+	}
+	if err := json.Unmarshal([]byte(strings.TrimRight(lines[1], "\n")), &res); err != nil {
+		t.Fatalf("tool_result decode: %v", err)
+	}
+	if use.Type != HeadlessEventTypeToolUse || res.Type != HeadlessEventTypeToolResult {
+		t.Fatalf("types: %+v %+v", use, res)
+	}
+	if use.TurnID != "turn-2" || res.TurnID != "turn-2" {
+		t.Fatalf("correlation lost: %+v %+v", use, res)
+	}
+	if use.ToolName != "team_broadcast" || res.ToolName != "team_broadcast" {
+		t.Fatalf("tool name: %+v %+v", use, res)
+	}
+	if use.Detail == "" {
+		t.Fatalf("tool_use Detail must carry serialized arguments: %+v", use)
+	}
+	if res.Text == "" {
+		t.Fatalf("tool_result Text must carry summary: %+v", res)
+	}
+}
+
+// TestNewHeadlessTurnIDIsUnique pins the contract: every call returns a
+// distinct opaque ID. The runner uses this to correlate text/tool events
+// from the same turn — two turns colliding would silently merge their
+// timelines. crypto/rand-backed; collision is astronomically unlikely.
+func TestNewHeadlessTurnIDIsUnique(t *testing.T) {
+	seen := make(map[string]struct{}, 100)
+	for i := 0; i < 100; i++ {
+		id := newHeadlessTurnID()
+		if id == "" {
+			t.Fatalf("turn id %d empty", i)
+		}
+		if _, dup := seen[id]; dup {
+			t.Fatalf("turn id %d collided: %q", i, id)
+		}
+		seen[id] = struct{}{}
+	}
+}
+
 // TestHeadlessProgressEventMetricsDropsSentinels pins the "-1 means
 // not measured" sentinel handling. Sentinels must not leak onto the
 // wire as negative numbers — JSON omitempty zeros are how the frontend
