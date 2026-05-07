@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/nex-crm/wuphf/internal/brokeraddr"
 	"github.com/nex-crm/wuphf/internal/channel"
+	"github.com/nex-crm/wuphf/internal/config"
 	"github.com/nex-crm/wuphf/internal/onboarding"
 	"github.com/nex-crm/wuphf/internal/workspace"
 )
@@ -387,6 +389,12 @@ func (b *Broker) ChannelStore() *channel.Store {
 // Start launches the broker on the configured localhost port.
 func (b *Broker) Start() error {
 	b.ensureWikiWorker()
+	// Seed company context from previous onboarding skip, if pending.
+	if cfg, err := config.Load(); err == nil && cfg.PendingCompanySeed {
+		cfg.PendingCompanySeed = false
+		_ = config.Save(cfg)
+		go b.runCompanySeedJob(cfg)
+	}
 	b.ensureWikiSectionsCache()
 	b.ensureReviewLog()
 	b.ensureEntitySynthesizer()
@@ -555,7 +563,7 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/admin/pause", b.withAuth(b.handleAdminPause))
 	// Onboarding: state/progress/complete + prereqs/templates/validate-key + checklist.
 	// completeFn posts the first task as a human message and seeds the team.
-	onboarding.RegisterRoutes(mux, b.onboardingCompleteFn, b.packSlug, b.requireAuth)
+	onboarding.RegisterRoutes(mux, b.onboardingCompleteFn, b.packSlug, b.requireAuth, filepath.Join(config.RuntimeHomeDir(), ".wuphf", "wiki"))
 	// Workspace wipes: POST /workspace/reset (narrow) and /workspace/shred (full).
 	// After a successful wipe, b.Reset clears live in-memory broker state so the
 	// broker stays up without repersisting stale messages back onto disk.
@@ -955,6 +963,17 @@ func (b *Broker) PostInboundSurfaceMessage(from, channel, content, provider stri
 		return channelMessage{}, err
 	}
 	return msg, nil
+}
+
+// Purge clears all tasks from the broker's in-memory state and flushes
+// the empty list to disk. Tests that inject task fixtures with StartOnPort
+// should call this in t.Cleanup to prevent in-progress fixtures from leaking
+// via background saves or shared notification paths after the test exits.
+func (b *Broker) Purge() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.tasks = nil
+	_ = b.saveLocked()
 }
 
 func (b *Broker) Reset() {
