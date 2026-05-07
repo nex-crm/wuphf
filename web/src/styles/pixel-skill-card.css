@@ -227,9 +227,11 @@
   /* Canvas inside is sprite-native pixels; CSS scales it up cleanly. */
   width: 144px;
   height: 144px;
-  image-rendering: pixelated;
-  /* biome-ignore lint/suspicious/noDuplicateProperties: Pixel-art fallback. */
   image-rendering: crisp-edges;
+  /* `pixelated` is declared last so modern browsers that recognize both
+     keywords use it; `crisp-edges` above is the fallback for older Firefox. */
+  /* biome-ignore lint/suspicious/noDuplicateProperties: Pixel-art fallback. */
+  image-rendering: pixelated;
   position: relative;
   z-index: 1;
   filter: drop-shadow(2px 2px 0 rgba(0, 0, 0, 0.35));
@@ -447,10 +449,11 @@
   padding-right: var(--psc-px);
   padding-bottom: var(--psc-px);
   perspective: 1400px;
-  /* Cap repaint scope to each card's bounding box so scanlines + grayscale
-     filter + scroll on a grid of 20+ cards don't trigger full-canvas
-     repaints. Pure perf insurance. */
-  contain: paint;
+  /* Cap layout/style scope to each card so scanlines + grayscale filter +
+     scroll on a grid of 20+ cards don't trigger full-canvas relayout.
+     Avoid `contain: paint` here — it would clip the focus-ring
+     pseudo-element which paints 6px outside the flipper. */
+  contain: layout style;
 }
 
 /* Focus ring uses doubled ink-edge + cardstock layers so it reads as
