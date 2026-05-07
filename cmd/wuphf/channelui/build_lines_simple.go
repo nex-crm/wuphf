@@ -33,6 +33,9 @@ func BuildRequestLines(requests []Interview, contentWidth int) []RenderedLine {
 		if req.Required {
 			metaParts = append(metaParts, "required")
 		}
+		if req.Redacted {
+			metaParts = append(metaParts, "redacted")
+		}
 		meta := strings.Join(metaParts, " · ")
 		lines = append(lines, RenderedLine{Text: ""})
 		lines = append(lines, RenderedLine{Text: "  " + RequestKindPill(req.Kind) + " " + title.Render(req.Question), RequestID: req.ID})

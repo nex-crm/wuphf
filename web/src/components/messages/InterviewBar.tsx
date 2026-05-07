@@ -229,6 +229,14 @@ export function InterviewBar() {
         <span className="badge badge-yellow">
           {current.blocking ? "BLOCKING" : "INTERVIEW"}
         </span>
+        {Boolean(current.redacted) && (
+          <span
+            className="badge badge-neutral"
+            title={redactionBadgeTitle(current)}
+          >
+            redacted
+          </span>
+        )}
         <span className="interview-bar-from">
           @{current.from || "agent"} asks
         </span>
@@ -481,6 +489,12 @@ function fallbackCandidateFromRequest(
     description: req.question?.split("\n\n")[1] || "",
     content: req.context || "",
   };
+}
+
+function redactionBadgeTitle(request: AgentRequest): string {
+  return request.redaction_reasons?.length
+    ? `Redacted: ${request.redaction_reasons.join(", ")}`
+    : "Redacted sensitive information";
 }
 
 interface SimilarBannerProps {

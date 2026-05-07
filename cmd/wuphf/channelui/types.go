@@ -115,25 +115,28 @@ type InterviewOption struct {
 // scheduling fields (DueAt, FollowUpAt, ReminderAt, RecheckAt) drive the
 // calendar view and the "needs your attention" banner.
 type Interview struct {
-	ID            string            `json:"id"`
-	Kind          string            `json:"kind,omitempty"`
-	Status        string            `json:"status,omitempty"`
-	From          string            `json:"from"`
-	Channel       string            `json:"channel"`
-	Title         string            `json:"title,omitempty"`
-	Question      string            `json:"question"`
-	Context       string            `json:"context"`
-	Options       []InterviewOption `json:"options"`
-	RecommendedID string            `json:"recommended_id"`
-	Blocking      bool              `json:"blocking,omitempty"`
-	Required      bool              `json:"required,omitempty"`
-	Secret        bool              `json:"secret,omitempty"`
-	ReplyTo       string            `json:"reply_to,omitempty"`
-	CreatedAt     string            `json:"created_at"`
-	DueAt         string            `json:"due_at,omitempty"`
-	FollowUpAt    string            `json:"follow_up_at,omitempty"`
-	ReminderAt    string            `json:"reminder_at,omitempty"`
-	RecheckAt     string            `json:"recheck_at,omitempty"`
+	ID               string            `json:"id"`
+	Kind             string            `json:"kind,omitempty"`
+	Status           string            `json:"status,omitempty"`
+	From             string            `json:"from"`
+	Channel          string            `json:"channel"`
+	Title            string            `json:"title,omitempty"`
+	Question         string            `json:"question"`
+	Context          string            `json:"context"`
+	Options          []InterviewOption `json:"options"`
+	RecommendedID    string            `json:"recommended_id"`
+	Blocking         bool              `json:"blocking,omitempty"`
+	Required         bool              `json:"required,omitempty"`
+	Secret           bool              `json:"secret,omitempty"`
+	ReplyTo          string            `json:"reply_to,omitempty"`
+	Redacted         bool              `json:"redacted,omitempty"`
+	RedactionCount   int               `json:"redaction_count,omitempty"`
+	RedactionReasons []string          `json:"redaction_reasons,omitempty"`
+	CreatedAt        string            `json:"created_at"`
+	DueAt            string            `json:"due_at,omitempty"`
+	FollowUpAt       string            `json:"follow_up_at,omitempty"`
+	ReminderAt       string            `json:"reminder_at,omitempty"`
+	RecheckAt        string            `json:"recheck_at,omitempty"`
 }
 
 // TitleOrQuestion returns Title if non-blank, else Question. Used by

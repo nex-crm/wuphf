@@ -148,3 +148,23 @@ describe("<RequestsApp> non-blocking dismiss-all", () => {
     expect(cancelSpy).toHaveBeenCalledWith("request-101");
   });
 });
+
+describe("<RequestsApp> redaction metadata", () => {
+  it("shows a redacted badge for scrubbed requests", async () => {
+    vi.mocked(clientMod.getRequests).mockResolvedValueOnce({
+      requests: [
+        {
+          ...makeNonBlockingRequest("request-redacted", "credential review"),
+          redacted: true,
+          redaction_count: 1,
+          redaction_reasons: ["openai"],
+        },
+      ],
+    });
+
+    render(wrap(<RequestsApp />));
+
+    const badge = await screen.findByText("redacted");
+    expect(badge).toHaveAttribute("title", "Redacted: openai");
+  });
+});

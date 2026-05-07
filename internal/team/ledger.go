@@ -37,11 +37,12 @@ func officeSignalDedupeKey(signal officeSignal) string {
 			strings.TrimSpace(signal.ID),
 		}, "::")
 	}
+	content := redactSecretsInText(strings.TrimSpace(signal.Content))
 	return strings.Join([]string{
 		strings.TrimSpace(signal.Source),
 		channel,
 		strings.TrimSpace(signal.Kind),
-		truncateSummary(strings.ToLower(strings.TrimSpace(signal.Content)), 140),
+		truncateSummary(strings.ToLower(content), 140),
 	}, "::")
 }
 

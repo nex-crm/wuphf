@@ -8,8 +8,14 @@ import (
 
 func (b *Broker) DueSchedulerJobs() []schedulerJob {
 	b.mu.Lock()
-	defer b.mu.Unlock()
-	return append([]schedulerJob(nil), b.dueSchedulerJobsLocked(time.Now().UTC())...)
+	due := b.dueSchedulerJobsLocked(time.Now().UTC())
+	out := make([]schedulerJob, len(due))
+	copy(out, due)
+	b.mu.Unlock()
+	for i, job := range out {
+		out[i] = sanitizeSchedulerJob(job)
+	}
+	return out
 }
 
 // SchedulerJobControl returns (enabled, effective interval) for the named
@@ -63,7 +69,6 @@ func (b *Broker) UpdateSchedulerJobState(slug string, nextRun time.Time, status 
 
 func (b *Broker) FindTask(channel, taskID string) (teamTask, bool) {
 	b.mu.Lock()
-	defer b.mu.Unlock()
 	channel = normalizeChannelSlug(channel)
 	if channel == "" {
 		channel = "general"
@@ -73,15 +78,16 @@ func (b *Broker) FindTask(channel, taskID string) (teamTask, bool) {
 			continue
 		}
 		if strings.TrimSpace(task.ID) == strings.TrimSpace(taskID) {
-			return task, true
+			b.mu.Unlock()
+			return sanitizeTeamTask(task), true
 		}
 	}
+	b.mu.Unlock()
 	return teamTask{}, false
 }
 
 func (b *Broker) FindRequest(channel, requestID string) (humanInterview, bool) {
 	b.mu.Lock()
-	defer b.mu.Unlock()
 	channel = normalizeChannelSlug(channel)
 	if channel == "" {
 		channel = "general"
@@ -95,9 +101,11 @@ func (b *Broker) FindRequest(channel, requestID string) (humanInterview, bool) {
 			continue
 		}
 		if strings.TrimSpace(req.ID) == strings.TrimSpace(requestID) {
-			return req, true
+			b.mu.Unlock()
+			return cloneHumanInterview(req), true
 		}
 	}
+	b.mu.Unlock()
 	return humanInterview{}, false
 }
 

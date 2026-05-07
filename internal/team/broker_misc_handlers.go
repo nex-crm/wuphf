@@ -314,6 +314,9 @@ func (b *Broker) handleWatchdogs(w http.ResponseWriter, r *http.Request) {
 	alerts := make([]watchdogAlert, len(b.watchdogs))
 	copy(alerts, b.watchdogs)
 	b.mu.Unlock()
+	for i, alert := range alerts {
+		alerts[i] = sanitizeWatchdogAlert(alert)
+	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"watchdogs": alerts})
 }

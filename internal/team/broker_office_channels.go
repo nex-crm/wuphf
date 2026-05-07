@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/nex-crm/wuphf/internal/channel"
 	"github.com/nex-crm/wuphf/internal/config"
@@ -1246,10 +1247,7 @@ func (b *Broker) handleMembers(w http.ResponseWriter, r *http.Request) {
 
 	for _, msg := range lastMessages {
 		msg = sanitizeChannelMessageSecrets(msg)
-		content := msg.Content
-		if len(content) > 80 {
-			content = content[:80]
-		}
+		content := truncateMemberLastMessagePreview(msg.Content, 80)
 		info := members[msg.From]
 		info.lastMessage = content
 		info.lastTime = msg.Timestamp
@@ -1345,6 +1343,34 @@ func (b *Broker) handleMembers(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"channel": channel, "members": list})
+}
+
+func truncateMemberLastMessagePreview(content string, maxRunes int) string {
+	if maxRunes <= 0 {
+		return ""
+	}
+	if utf8.RuneCountInString(content) <= maxRunes {
+		return content
+	}
+	cut := len(content)
+	count := 0
+	for i := range content {
+		if count == maxRunes {
+			cut = i
+			break
+		}
+		count++
+	}
+	preview := content[:cut]
+	if markerStart := strings.LastIndex(preview, "["); markerStart >= 0 {
+		tail := content[markerStart:cut]
+		if strings.HasPrefix("[REDACTED", tail) || strings.HasPrefix(tail, "[REDACTED") {
+			if markerEnd := strings.Index(content[markerStart:], "]"); markerEnd < 0 || markerStart+markerEnd+1 > cut {
+				preview = strings.TrimRight(preview[:markerStart], " \t\r\n")
+			}
+		}
+	}
+	return preview
 }
 
 func (b *Broker) EnabledMembers(channel string) []string {

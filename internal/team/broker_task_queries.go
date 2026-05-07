@@ -7,7 +7,6 @@ import (
 
 func (b *Broker) ChannelTasks(channel string) []teamTask {
 	b.mu.Lock()
-	defer b.mu.Unlock()
 	channel = normalizeChannelSlug(channel)
 	if channel == "" {
 		channel = "general"
@@ -18,6 +17,10 @@ func (b *Broker) ChannelTasks(channel string) []teamTask {
 			out = append(out, task)
 		}
 	}
+	b.mu.Unlock()
+	for i, task := range out {
+		out[i] = sanitizeTeamTask(task)
+	}
 	return out
 }
 
@@ -25,9 +28,12 @@ func (b *Broker) ChannelTasks(channel string) []teamTask {
 // caller needs to search across channels rather than in a single known channel.
 func (b *Broker) AllTasks() []teamTask {
 	b.mu.Lock()
-	defer b.mu.Unlock()
 	out := make([]teamTask, len(b.tasks))
 	copy(out, b.tasks)
+	b.mu.Unlock()
+	for i, task := range out {
+		out[i] = sanitizeTeamTask(task)
+	}
 	return out
 }
 
@@ -35,7 +41,6 @@ func (b *Broker) AllTasks() []teamTask {
 // status (anything except "done", "completed", "canceled", or "cancelled").
 func (b *Broker) InFlightTasks() []teamTask {
 	b.mu.Lock()
-	defer b.mu.Unlock()
 	out := make([]teamTask, 0)
 	for _, task := range b.tasks {
 		if task.Owner == "" {
@@ -47,6 +52,10 @@ func (b *Broker) InFlightTasks() []teamTask {
 		}
 		out = append(out, task)
 	}
+	b.mu.Unlock()
+	for i, task := range out {
+		out[i] = sanitizeTeamTask(task)
+	}
 	return out
 }
 
@@ -54,7 +63,6 @@ func (b *Broker) InFlightTasks() []teamTask {
 // and were created more than the given duration ago.
 func (b *Broker) UnackedTasks(timeout time.Duration) []teamTask {
 	b.mu.Lock()
-	defer b.mu.Unlock()
 	cutoff := time.Now().UTC().Add(-timeout)
 	out := make([]teamTask, 0)
 	for _, task := range b.tasks {
@@ -68,6 +76,10 @@ func (b *Broker) UnackedTasks(timeout time.Duration) []teamTask {
 		if created.Before(cutoff) {
 			out = append(out, task)
 		}
+	}
+	b.mu.Unlock()
+	for i, task := range out {
+		out[i] = sanitizeTeamTask(task)
 	}
 	return out
 }

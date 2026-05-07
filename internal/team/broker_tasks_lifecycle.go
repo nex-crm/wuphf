@@ -172,7 +172,8 @@ func (b *Broker) EnsureTask(channel, title, details, owner, createdBy, threadID 
 	if !b.canAccessChannelLocked(createdBy, channel) {
 		return teamTask{}, false, fmt.Errorf("channel access denied")
 	}
-	title = strings.TrimSpace(title)
+	title = redactSecretsInText(strings.TrimSpace(title))
+	details = redactSecretsInText(strings.TrimSpace(details))
 	if existing := b.findReusableTaskLocked(taskReuseMatch{
 		Channel:  channel,
 		Title:    title,
@@ -180,8 +181,8 @@ func (b *Broker) EnsureTask(channel, title, details, owner, createdBy, threadID 
 		Owner:    strings.TrimSpace(owner),
 	}); existing != nil {
 		now := time.Now().UTC().Format(time.RFC3339)
-		if existing.Details == "" && strings.TrimSpace(details) != "" {
-			existing.Details = strings.TrimSpace(details)
+		if existing.Details == "" && details != "" {
+			existing.Details = details
 		}
 		if existing.Owner == "" && strings.TrimSpace(owner) != "" {
 			existing.Owner = strings.TrimSpace(owner)
@@ -203,10 +204,11 @@ func (b *Broker) EnsureTask(channel, title, details, owner, createdBy, threadID 
 		if err := b.syncTaskWorktreeLocked(existing); err != nil {
 			return teamTask{}, false, err
 		}
+		*existing = sanitizeTeamTask(*existing)
 		if err := b.saveLocked(); err != nil {
 			return teamTask{}, false, err
 		}
-		return *existing, true, nil
+		return sanitizeTeamTask(*existing), true, nil
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	b.counter++
@@ -214,7 +216,7 @@ func (b *Broker) EnsureTask(channel, title, details, owner, createdBy, threadID 
 		ID:        fmt.Sprintf("task-%d", b.counter),
 		Channel:   channel,
 		Title:     title,
-		Details:   strings.TrimSpace(details),
+		Details:   details,
 		Owner:     strings.TrimSpace(owner),
 		Status:    "open",
 		CreatedBy: strings.TrimSpace(createdBy),
@@ -238,12 +240,13 @@ func (b *Broker) EnsureTask(channel, title, details, owner, createdBy, threadID 
 	if err := b.syncTaskWorktreeLocked(&task); err != nil {
 		return teamTask{}, false, err
 	}
+	task = sanitizeTeamTask(task)
 	b.tasks = append(b.tasks, task)
 	b.appendActionLocked("task_created", "office", channel, createdBy, truncateSummary(task.Title, 140), task.ID)
 	if err := b.saveLocked(); err != nil {
 		return teamTask{}, false, err
 	}
-	return task, false, nil
+	return sanitizeTeamTask(task), false, nil
 }
 
 // AppendTaskDetail appends non-duplicate detail text to an existing task without
@@ -256,7 +259,7 @@ func (b *Broker) AppendTaskDetail(taskID, actor, detail string) (teamTask, error
 	if id == "" {
 		return teamTask{}, fmt.Errorf("task id required")
 	}
-	detail = strings.TrimSpace(detail)
+	detail = redactSecretsInText(strings.TrimSpace(detail))
 	if detail == "" {
 		return teamTask{}, fmt.Errorf("detail required")
 	}
@@ -276,7 +279,7 @@ func (b *Broker) AppendTaskDetail(taskID, actor, detail string) (teamTask, error
 		if err := b.saveLocked(); err != nil {
 			return teamTask{}, err
 		}
-		return *task, nil
+		return sanitizeTeamTask(*task), nil
 	}
 
 	return teamTask{}, fmt.Errorf("task not found")
@@ -286,7 +289,7 @@ func appendTaskDetailLocked(task *teamTask, detail string) error {
 	if task == nil {
 		return fmt.Errorf("task required")
 	}
-	detail = strings.TrimSpace(detail)
+	detail = redactSecretsInText(strings.TrimSpace(detail))
 	if detail == "" {
 		return fmt.Errorf("detail required")
 	}

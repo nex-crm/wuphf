@@ -38,22 +38,39 @@ func sanitizeChannelMessageSecrets(msg channelMessage) channelMessage {
 }
 
 func sanitizeHumanInterview(req humanInterview) humanInterview {
-	req.Title = redactSecretsInText(req.Title)
-	req.Question = redactSecretsInText(req.Question)
-	req.Context = redactSecretsInText(req.Context)
+	redactionCount := req.RedactionCount
+	reasons := append([]string(nil), req.RedactionReasons...)
+	redact := func(text string) string {
+		res := scanner.RedactSecretsForDisplay(text)
+		if res.Matches() == 0 {
+			return res.Content
+		}
+		redactionCount += res.Matches()
+		reasons = appendRedactionReasons(reasons, res.ReasonLabels())
+		return res.Content
+	}
+
+	req.Title = redact(req.Title)
+	req.Question = redact(req.Question)
+	req.Context = redact(req.Context)
 	if len(req.Options) > 0 {
 		req.Options = append([]interviewOption(nil), req.Options...)
 		for i := range req.Options {
-			req.Options[i].Label = redactSecretsInText(req.Options[i].Label)
-			req.Options[i].Description = redactSecretsInText(req.Options[i].Description)
-			req.Options[i].TextHint = redactSecretsInText(req.Options[i].TextHint)
+			req.Options[i].Label = redact(req.Options[i].Label)
+			req.Options[i].Description = redact(req.Options[i].Description)
+			req.Options[i].TextHint = redact(req.Options[i].TextHint)
 		}
 	}
 	if req.Answered != nil {
 		answer := *req.Answered
-		answer.ChoiceText = redactSecretsInText(answer.ChoiceText)
-		answer.CustomText = redactSecretsInText(answer.CustomText)
+		answer.ChoiceText = redact(answer.ChoiceText)
+		answer.CustomText = redact(answer.CustomText)
 		req.Answered = &answer
+	}
+	if redactionCount > 0 || len(reasons) > 0 {
+		req.Redacted = true
+		req.RedactionCount = redactionCount
+		req.RedactionReasons = reasons
 	}
 	return req
 }
@@ -68,6 +85,27 @@ func sanitizeOfficeDecisionRecord(dec officeDecisionRecord) officeDecisionRecord
 	dec.Summary = redactSecretsInText(dec.Summary)
 	dec.Reason = redactSecretsInText(dec.Reason)
 	return dec
+}
+
+func sanitizeTeamTask(task teamTask) teamTask {
+	task.Title = redactSecretsInText(task.Title)
+	task.Details = redactSecretsInText(task.Details)
+	return task
+}
+
+func sanitizeWatchdogAlert(alert watchdogAlert) watchdogAlert {
+	alert.Summary = redactSecretsInText(alert.Summary)
+	return alert
+}
+
+func sanitizeSchedulerJob(job schedulerJob) schedulerJob {
+	job.Label = redactSecretsInText(job.Label)
+	job.ScheduleExpr = redactSecretsInText(job.ScheduleExpr)
+	job.WorkflowKey = redactSecretsInText(job.WorkflowKey)
+	job.SkillName = redactSecretsInText(job.SkillName)
+	job.Payload = redactSecretsInText(job.Payload)
+	job.LastRunStatus = redactSecretsInText(job.LastRunStatus)
+	return job
 }
 
 func appendRedactionReasons(existing []string, incoming []string) []string {

@@ -51,6 +51,9 @@ func RenderInterviewCard(interview Interview, selected int, phaseTitle string, w
 	if interview.Secret {
 		headerBits = append(headerBits, AccentPill("private", "#6D28D9"))
 	}
+	if interview.Redacted {
+		headerBits = append(headerBits, SubtlePill("redacted", "#E5E7EB", "#374151"))
+	}
 	lines := []string{
 		strings.Join(headerBits, "  "),
 		titleStyle.Render(title),

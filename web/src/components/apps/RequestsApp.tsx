@@ -248,6 +248,14 @@ function RequestItem({ request, isPending, onAnswer }: RequestItemProps) {
         {request.blocking ? (
           <span className="badge badge-yellow">BLOCKING</span>
         ) : null}
+        {Boolean(request.redacted) && (
+          <span
+            className="badge badge-neutral"
+            title={redactionBadgeTitle(request)}
+          >
+            redacted
+          </span>
+        )}
       </div>
 
       {request.title && request.title !== "Request" && (
@@ -302,4 +310,10 @@ function RequestItem({ request, isPending, onAnswer }: RequestItemProps) {
       )}
     </div>
   );
+}
+
+function redactionBadgeTitle(request: AgentRequest): string {
+  return request.redaction_reasons?.length
+    ? `Redacted: ${request.redaction_reasons.join(", ")}`
+    : "Redacted sensitive information";
 }

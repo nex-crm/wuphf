@@ -61,16 +61,12 @@ func TestAgentStreamBufferRedactsSecretsFromHistoryAndSubscribers(t *testing.T) 
 		t.Fatalf("task history missing redaction marker: %q", history)
 	}
 
-	select {
-	case got := <-out:
-		if strings.Contains(got, secret) {
-			t.Fatalf("subscriber leaked secret: %q", got)
-		}
-		if !strings.Contains(got, "[REDACTED]") {
-			t.Fatalf("subscriber missing redaction marker: %q", got)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("subscriber did not receive redacted stream line")
+	got := <-out
+	if strings.Contains(got, secret) {
+		t.Fatalf("subscriber leaked secret: %q", got)
+	}
+	if !strings.Contains(got, "[REDACTED]") {
+		t.Fatalf("subscriber missing redaction marker: %q", got)
 	}
 }
 
@@ -262,16 +258,12 @@ func TestBrokerMessageSubscribersReceiveRedactedMessages(t *testing.T) {
 		t.Fatalf("PostMessage: %v", err)
 	}
 
-	select {
-	case got := <-msgs:
-		if strings.Contains(got.Content, secret) {
-			t.Fatalf("subscribed message leaked secret: %+v", got)
-		}
-		if !got.Redacted || got.RedactionCount != 1 {
-			t.Fatalf("subscribed message missing redaction metadata: %+v", got)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for subscribed message")
+	got := <-msgs
+	if strings.Contains(got.Content, secret) {
+		t.Fatalf("subscribed message leaked secret: %+v", got)
+	}
+	if !got.Redacted || got.RedactionCount != 1 {
+		t.Fatalf("subscribed message missing redaction metadata: %+v", got)
 	}
 }
 
@@ -359,6 +351,29 @@ func TestBrokerActivitySubscribersReceiveUpdates(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for subscribed activity")
+	}
+}
+
+func TestBrokerActivitySubscribersReceiveRedactedActivityFields(t *testing.T) {
+	b := newTestBroker(t)
+	updates, unsubscribe := b.SubscribeActivity(4)
+	defer unsubscribe()
+	secret := "sk-" + strings.Repeat("A", 24)
+
+	b.UpdateAgentActivity(agentActivitySnapshot{
+		Slug:     "ceo",
+		Status:   "active",
+		Activity: "tool " + secret,
+		Detail:   "running " + secret,
+		LastTime: time.Now().UTC().Format(time.RFC3339),
+	})
+
+	got := <-updates
+	if strings.Contains(got.Activity+got.Detail, secret) {
+		t.Fatalf("activity update leaked secret: %+v", got)
+	}
+	if !strings.Contains(got.Activity, "[REDACTED]") || !strings.Contains(got.Detail, "[REDACTED]") {
+		t.Fatalf("activity update missing redaction markers: %+v", got)
 	}
 }
 

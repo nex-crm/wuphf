@@ -166,6 +166,7 @@ func (b *Broker) loadState() error {
 	}
 	for i := range b.tasks {
 		b.tasks[i].Channel = channel.MigrateDMSlugString(b.tasks[i].Channel)
+		b.tasks[i] = sanitizeTeamTask(b.tasks[i])
 	}
 	for i := range b.requests {
 		b.requests[i].Channel = channel.MigrateDMSlugString(b.requests[i].Channel)
@@ -183,6 +184,12 @@ func (b *Broker) loadState() error {
 	}
 	for i := range b.decisions {
 		b.decisions[i] = sanitizeOfficeDecisionRecord(b.decisions[i])
+	}
+	for i := range b.watchdogs {
+		b.watchdogs[i] = sanitizeWatchdogAlert(b.watchdogs[i])
+	}
+	for i := range b.scheduler {
+		b.scheduler[i] = sanitizeSchedulerJob(b.scheduler[i])
 	}
 	// b.ensureDefaultChannelsLocked() // channels come from saved state
 	b.ensureDefaultOfficeMembersLocked()
@@ -235,6 +242,10 @@ func (b *Broker) prepareBrokerStateWriteLocked() (brokerStateWrite, error) {
 	for i, issue := range b.agentIssues {
 		agentIssues[i] = sanitizeAgentIssueRecord(issue)
 	}
+	tasks := make([]teamTask, len(b.tasks))
+	for i, task := range b.tasks {
+		tasks[i] = sanitizeTeamTask(task)
+	}
 	requests := make([]humanInterview, len(b.requests))
 	for i, req := range b.requests {
 		requests[i] = sanitizeHumanInterview(req)
@@ -247,6 +258,14 @@ func (b *Broker) prepareBrokerStateWriteLocked() (brokerStateWrite, error) {
 	for i, dec := range b.decisions {
 		decisions[i] = sanitizeOfficeDecisionRecord(dec)
 	}
+	watchdogs := make([]watchdogAlert, len(b.watchdogs))
+	for i, alert := range b.watchdogs {
+		watchdogs[i] = sanitizeWatchdogAlert(alert)
+	}
+	scheduler := make([]schedulerJob, len(b.scheduler))
+	for i, job := range b.scheduler {
+		scheduler[i] = sanitizeSchedulerJob(job)
+	}
 	state := brokerState{
 		ChannelStore:      channelStoreRaw,
 		Messages:          messages,
@@ -256,14 +275,14 @@ func (b *Broker) prepareBrokerStateWriteLocked() (brokerStateWrite, error) {
 		SessionMode:       b.sessionMode,
 		OneOnOneAgent:     b.oneOnOneAgent,
 		FocusMode:         b.focusMode,
-		Tasks:             b.tasks,
+		Tasks:             tasks,
 		Requests:          requests,
 		Actions:           actions,
 		Signals:           signals,
 		Decisions:         decisions,
-		Watchdogs:         b.watchdogs,
+		Watchdogs:         watchdogs,
 		Policies:          b.policies,
-		Scheduler:         b.scheduler,
+		Scheduler:         scheduler,
 		Skills:            b.skills,
 		HumanInvites:      b.humanInvites,
 		HumanSessions:     b.humanSessions,

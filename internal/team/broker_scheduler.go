@@ -104,6 +104,7 @@ func (b *Broker) scheduleJob(job schedulerJob) error {
 }
 
 func (b *Broker) scheduleJobLocked(job schedulerJob) error {
+	job = sanitizeSchedulerJob(job)
 	for i := range b.scheduler {
 		if !schedulerJobMatches(b.scheduler[i], job) {
 			continue
@@ -368,6 +369,9 @@ func (b *Broker) handleScheduler(w http.ResponseWriter, r *http.Request) {
 			jobs = append(jobs, job)
 		}
 		b.mu.Unlock()
+		for i, job := range jobs {
+			jobs[i] = sanitizeSchedulerJob(job)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{"jobs": jobs})
 	case http.MethodPost:
@@ -507,14 +511,14 @@ func (b *Broker) registerSystemCrons() {
 			if !existing.SystemManaged {
 				existing.Enabled = true
 			}
-			existing.Label = spec.Label
+			existing.Label = redactSecretsInText(spec.Label)
 			existing.SystemManaged = true
 			existing.IntervalMinutes = defaultInterval
 			continue
 		}
 		b.scheduler = append(b.scheduler, schedulerJob{
 			Slug:            spec.Slug,
-			Label:           spec.Label,
+			Label:           redactSecretsInText(spec.Label),
 			IntervalMinutes: defaultInterval,
 			Status:          "scheduled",
 			SystemManaged:   true,
@@ -534,6 +538,8 @@ func (b *Broker) registerSystemCrons() {
 func (b *Broker) updateSchedulerHeartbeat(slug, label string, intervalMinutes int, nextRun time.Time, status string, runStatus string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	label = redactSecretsInText(strings.TrimSpace(label))
+	runStatus = redactSecretsInText(strings.TrimSpace(runStatus))
 	now := time.Now().UTC().Format(time.RFC3339)
 	for i := range b.scheduler {
 		if b.scheduler[i].Slug != slug {
@@ -575,6 +581,7 @@ func (b *Broker) updateSchedulerHeartbeat(slug, label string, intervalMinutes in
 		job.LastRunStatus = runStatus
 	}
 	job = normalizeSchedulerJob(job)
+	job = sanitizeSchedulerJob(job)
 	b.scheduler = append(b.scheduler, job)
 	_ = b.saveLocked()
 }

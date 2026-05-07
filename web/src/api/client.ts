@@ -505,6 +505,9 @@ export interface AgentRequest {
   status?: string;
   blocking?: boolean;
   required?: boolean;
+  redacted?: boolean;
+  redaction_count?: number;
+  redaction_reasons?: string[];
   recommended_id?: string;
   created_at?: string;
   updated_at?: string;

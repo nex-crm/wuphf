@@ -127,6 +127,8 @@ func reconcileTaskReviewState(task *teamTask, action string) {
 }
 
 func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
+	body.Title = redactSecretsInText(strings.TrimSpace(body.Title))
+	body.Details = redactSecretsInText(strings.TrimSpace(body.Details))
 	action := strings.TrimSpace(body.Action)
 	actor := strings.TrimSpace(body.CreatedBy)
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -141,7 +143,7 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 		if b.findChannelLocked(channel) == nil {
 			return TaskResponse{}, taskMutationError(TaskMutationNotFound, "channel not found", nil)
 		}
-		if strings.TrimSpace(body.Title) == "" || actor == "" {
+		if body.Title == "" || actor == "" {
 			return TaskResponse{}, taskMutationError(TaskMutationInvalid, "title and created_by required", nil)
 		}
 		if !b.canAccessChannelLocked(actor, channel) {
@@ -154,14 +156,14 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 		}
 		if existing := b.findReusableTaskLocked(taskReuseMatch{
 			Channel:          channel,
-			Title:            strings.TrimSpace(body.Title),
+			Title:            body.Title,
 			ThreadID:         strings.TrimSpace(body.ThreadID),
 			Owner:            strings.TrimSpace(body.Owner),
 			PipelineID:       strings.TrimSpace(body.PipelineID),
 			SourceSignalID:   strings.TrimSpace(body.SourceSignalID),
 			SourceDecisionID: strings.TrimSpace(body.SourceDecisionID),
 		}); existing != nil {
-			if details := strings.TrimSpace(body.Details); details != "" {
+			if details := body.Details; details != "" {
 				existing.Details = details
 			}
 			if owner := strings.TrimSpace(body.Owner); owner != "" {
@@ -208,19 +210,20 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 				rollbackTask()
 				return TaskResponse{}, taskMutationError(TaskMutationWorktreeFailed, "failed to manage task worktree", err)
 			}
+			*existing = sanitizeTeamTask(*existing)
 			b.appendActionLocked("task_updated", "office", channel, actor, truncateSummary(existing.Title+" ["+existing.Status+"]", 140), existing.ID)
 			if err := b.saveLocked(); err != nil {
 				rollbackTask()
 				return TaskResponse{}, taskMutationError(TaskMutationPersistFailed, "failed to persist broker state", err)
 			}
-			return TaskResponse{Task: *existing}, nil
+			return TaskResponse{Task: sanitizeTeamTask(*existing)}, nil
 		}
 		b.counter++
 		task := teamTask{
 			ID:               fmt.Sprintf("task-%d", b.counter),
 			Channel:          channel,
-			Title:            strings.TrimSpace(body.Title),
-			Details:          strings.TrimSpace(body.Details),
+			Title:            body.Title,
+			Details:          body.Details,
 			Owner:            strings.TrimSpace(body.Owner),
 			Status:           "open",
 			CreatedBy:        actor,
@@ -255,13 +258,14 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 			rollbackTask()
 			return TaskResponse{}, taskMutationError(TaskMutationWorktreeFailed, "failed to manage task worktree", err)
 		}
+		task = sanitizeTeamTask(task)
 		b.tasks = append(b.tasks, task)
 		b.appendActionLocked("task_created", "office", channel, task.CreatedBy, truncateSummary(task.Title, 140), task.ID)
 		if err := b.saveLocked(); err != nil {
 			rollbackTask()
 			return TaskResponse{}, taskMutationError(TaskMutationPersistFailed, "failed to persist broker state", err)
 		}
-		return TaskResponse{Task: task}, nil
+		return TaskResponse{Task: sanitizeTeamTask(task)}, nil
 	}
 
 	requestedID := strings.TrimSpace(body.ID)
@@ -379,14 +383,14 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 		default:
 			return TaskResponse{}, taskMutationError(TaskMutationInvalid, "unknown action", nil)
 		}
-		if strings.TrimSpace(body.Details) != "" {
+		if body.Details != "" {
 			if appendDetails {
 				if err := appendTaskDetailLocked(task, body.Details); err != nil {
 					rollbackTask()
 					return TaskResponse{}, taskMutationError(TaskMutationInvalid, err.Error(), err)
 				}
 			} else {
-				task.Details = strings.TrimSpace(body.Details)
+				task.Details = body.Details
 			}
 		}
 		if taskType := strings.TrimSpace(body.TaskType); taskType != "" {
@@ -449,6 +453,7 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 			rollbackTask()
 			return TaskResponse{}, taskMutationError(TaskMutationWorktreeFailed, "failed to manage task worktree", err)
 		}
+		*task = sanitizeTeamTask(*task)
 		b.appendActionLocked("task_updated", "office", taskChannel, actor, truncateSummary(task.Title+" ["+task.Status+"]", 140), task.ID)
 		if action == "block" {
 			b.requestCapabilitySelfHealingLocked(task, actor, body.Details)
@@ -463,7 +468,7 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 			rollbackTask()
 			return TaskResponse{}, taskMutationError(TaskMutationPersistFailed, "failed to persist broker state", err)
 		}
-		return TaskResponse{Task: *task}, nil
+		return TaskResponse{Task: sanitizeTeamTask(*task)}, nil
 	}
 
 	return TaskResponse{}, taskMutationError(TaskMutationNotFound, "task not found", nil)

@@ -22,9 +22,9 @@ func (b *Broker) ListTasks(req TaskListRequest) (TaskListResponse, error) {
 	includeDone := req.IncludeDone
 
 	b.mu.Lock()
-	defer b.mu.Unlock()
 
 	if !allChannels && !b.canAccessChannelLocked(viewerSlug, channel) {
+		b.mu.Unlock()
 		return TaskListResponse{}, errTaskChannelAccessDenied
 	}
 
@@ -65,6 +65,10 @@ func (b *Broker) ListTasks(req TaskListRequest) (TaskListResponse, error) {
 		}
 		result = append(result, task)
 	}
+	b.mu.Unlock()
+	for i, task := range result {
+		result[i] = sanitizeTeamTask(task)
+	}
 
 	return TaskListResponse{Channel: channel, Tasks: result}, nil
 }
@@ -93,7 +97,7 @@ func (b *Broker) AckTask(req TaskAckRequest) (TaskResponse, error) {
 			if err := b.saveLocked(); err != nil {
 				return TaskResponse{}, fmt.Errorf("%w: %w", errTaskPersistFailed, err)
 			}
-			return TaskResponse{Task: b.tasks[i]}, nil
+			return TaskResponse{Task: sanitizeTeamTask(b.tasks[i])}, nil
 		}
 	}
 	return TaskResponse{}, errTaskNotFound

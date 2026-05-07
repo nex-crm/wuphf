@@ -99,20 +99,23 @@ type interviewAnswer struct {
 }
 
 type humanInterview struct {
-	ID            string            `json:"id"`
-	Kind          string            `json:"kind,omitempty"`
-	Status        string            `json:"status,omitempty"`
-	From          string            `json:"from"`
-	Channel       string            `json:"channel,omitempty"`
-	Title         string            `json:"title,omitempty"`
-	Question      string            `json:"question"`
-	Context       string            `json:"context,omitempty"`
-	Options       []interviewOption `json:"options,omitempty"`
-	RecommendedID string            `json:"recommended_id,omitempty"`
-	Blocking      bool              `json:"blocking,omitempty"`
-	Required      bool              `json:"required,omitempty"`
-	Secret        bool              `json:"secret,omitempty"`
-	ReplyTo       string            `json:"reply_to,omitempty"`
+	ID               string            `json:"id"`
+	Kind             string            `json:"kind,omitempty"`
+	Status           string            `json:"status,omitempty"`
+	From             string            `json:"from"`
+	Channel          string            `json:"channel,omitempty"`
+	Title            string            `json:"title,omitempty"`
+	Question         string            `json:"question"`
+	Context          string            `json:"context,omitempty"`
+	Options          []interviewOption `json:"options,omitempty"`
+	RecommendedID    string            `json:"recommended_id,omitempty"`
+	Blocking         bool              `json:"blocking,omitempty"`
+	Required         bool              `json:"required,omitempty"`
+	Secret           bool              `json:"secret,omitempty"`
+	ReplyTo          string            `json:"reply_to,omitempty"`
+	Redacted         bool              `json:"redacted,omitempty"`
+	RedactionCount   int               `json:"redaction_count,omitempty"`
+	RedactionReasons []string          `json:"redaction_reasons,omitempty"`
 	// DedupeKey collapses duplicate POSTs with the same key onto the
 	// existing active request. Used by the action approval gate so a
 	// retry of the same (agent, platform, action_id, connection_key)

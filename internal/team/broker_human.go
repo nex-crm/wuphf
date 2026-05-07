@@ -178,7 +178,6 @@ func (b *Broker) handleHumans(w http.ResponseWriter, r *http.Request) {
 
 func (b *Broker) Requests(channel string, includeResolved bool) []humanInterview {
 	b.mu.Lock()
-	defer b.mu.Unlock()
 	channel = normalizeChannelSlug(channel)
 	if channel == "" {
 		channel = "general"
@@ -195,7 +194,11 @@ func (b *Broker) Requests(channel string, includeResolved bool) []humanInterview
 		if !includeResolved && !requestIsActive(req) {
 			continue
 		}
-		out = append(out, cloneHumanInterview(req))
+		out = append(out, req)
+	}
+	b.mu.Unlock()
+	for i, req := range out {
+		out[i] = cloneHumanInterview(req)
 	}
 	return out
 }

@@ -43,6 +43,7 @@ func (b *Broker) publishActionLocked(action officeActionLog) {
 }
 
 func (b *Broker) publishActivityLocked(activity agentActivitySnapshot) {
+	activity.Activity = redactSecretsInText(activity.Activity)
 	activity.Detail = redactSecretsInText(activity.Detail)
 	for _, ch := range b.activitySubscribers {
 		select {

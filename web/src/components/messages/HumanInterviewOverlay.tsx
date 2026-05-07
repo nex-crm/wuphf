@@ -103,6 +103,14 @@ function BlockingInterview({
         <div className="interview-meta">
           <span className="badge badge-yellow">BLOCKING</span>
           <span className="interview-from">@{request.from || "agent"}</span>
+          {Boolean(request.redacted) && (
+            <span
+              className="badge badge-neutral"
+              title={redactionBadgeTitle(request)}
+            >
+              redacted
+            </span>
+          )}
           {request.channel ? (
             <span className="interview-channel">in #{request.channel}</span>
           ) : null}
@@ -189,4 +197,10 @@ function BlockingInterview({
       </div>
     </div>
   );
+}
+
+function redactionBadgeTitle(request: AgentRequest): string {
+  return request.redaction_reasons?.length
+    ? `Redacted: ${request.redaction_reasons.join(", ")}`
+    : "Redacted sensitive information";
 }

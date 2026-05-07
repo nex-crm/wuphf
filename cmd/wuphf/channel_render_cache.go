@@ -492,6 +492,11 @@ func (s stateHasher) addRequests(requests []channelui.Interview) {
 		s.addBool(req.Blocking)
 		s.addBool(req.Required)
 		s.addBool(req.Secret)
+		s.addBool(req.Redacted)
+		s.addInt(req.RedactionCount)
+		for _, reason := range req.RedactionReasons {
+			s.add(reason)
+		}
 		for _, opt := range req.Options {
 			s.add(opt.ID, opt.Label, opt.Description)
 		}

@@ -348,7 +348,7 @@ func (b *Broker) UpdateAgentActivity(update agentActivitySnapshot) {
 		current.Status = update.Status
 	}
 	if update.Activity != "" {
-		current.Activity = update.Activity
+		current.Activity = redactSecretsInText(update.Activity)
 	}
 	if update.Detail != "" {
 		current.Detail = redactSecretsInText(update.Detail)
