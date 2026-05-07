@@ -89,15 +89,15 @@ func sanitizeOfficeDecisionRecord(dec officeDecisionRecord) officeDecisionRecord
 	return dec
 }
 
+func sanitizeWatchdogAlert(alert watchdogAlert) watchdogAlert {
+	alert.Summary = redactSecretsInText(alert.Summary)
+	return alert
+}
+
 func sanitizeTeamTask(task teamTask) teamTask {
 	task.Title = redactSecretsInText(task.Title)
 	task.Details = redactSecretsInText(task.Details)
 	return task
-}
-
-func sanitizeWatchdogAlert(alert watchdogAlert) watchdogAlert {
-	alert.Summary = redactSecretsInText(alert.Summary)
-	return alert
 }
 
 func sanitizeSchedulerJob(job schedulerJob) schedulerJob {
