@@ -123,6 +123,9 @@ func (b *Broker) loadState() error {
 	b.oneOnOneAgent = state.OneOnOneAgent
 	b.focusMode = state.FocusMode
 	b.tasks = state.Tasks
+	if b.tasks == nil {
+		b.tasks = []teamTask{}
+	}
 	b.requests = state.Requests
 	b.humanInvites = state.HumanInvites
 	b.humanSessions = state.HumanSessions
