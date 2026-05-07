@@ -267,6 +267,11 @@ html[data-theme] body .sidebar-rail-popover .sidebar-agent-name {
   background: var(--overlay-soft);
   color: var(--text);
 }
+.sidebar.sidebar-collapsed .sidebar-icon-btn:focus-visible,
+.sidebar.sidebar-collapsed .sidebar-rail-bottom:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+}
 .sidebar.sidebar-collapsed .sidebar-icon-btn.active,
 .sidebar.sidebar-collapsed .sidebar-icon-btn.active:hover,
 .sidebar.sidebar-collapsed .sidebar-rail-bottom.active,
@@ -336,12 +341,18 @@ html[data-theme="nex"]
   justify-content: center;
   border-radius: 6px;
   color: var(--text-secondary);
-  transition: all 0.15s;
+  transition:
+    background var(--duration-base, 0.15s),
+    color var(--duration-base, 0.15s);
   flex-shrink: 0;
 }
 .sidebar-icon-btn:hover {
   background: rgba(0, 0, 0, 0.04);
   color: var(--text);
+}
+.sidebar-icon-btn:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
 }
 .sidebar-icon-btn.active {
   background: var(--accent-bg);
@@ -380,11 +391,17 @@ html[data-theme="nex"]
   justify-content: center;
   border-radius: 6px;
   color: var(--text-secondary);
-  transition: all 0.15s;
+  transition:
+    background var(--duration-base, 0.15s),
+    color var(--duration-base, 0.15s);
 }
 .sidebar-btn:hover {
   background: var(--bg);
   color: var(--text);
+}
+.sidebar-btn:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
 }
 
 .sidebar-section {
@@ -426,6 +443,11 @@ html[data-theme="nex"]
 .sidebar-section-toggle:hover {
   color: var(--text);
 }
+.sidebar-section-toggle:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+  border-radius: 4px;
+}
 
 .sidebar-item {
   display: flex;
@@ -438,7 +460,11 @@ html[data-theme="nex"]
   border: none;
   background: transparent;
   cursor: pointer;
-  transition: all 0.15s;
+  /* Scope transitions to compositor-safe properties only — avoids layout
+     recalculations on hover that can shift adjacent content. */
+  transition:
+    background var(--duration-base, 0.15s),
+    color var(--duration-base, 0.15s);
   color: var(--text-secondary);
   font-family: var(--font-sans);
   text-align: left;
@@ -498,6 +524,12 @@ html[data-theme="nex"]
   border-radius: 9px;
 }
 .sidebar-item:hover {
+  background: rgba(0, 0, 0, 0.04);
+  color: var(--text);
+}
+.sidebar-item:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
   background: rgba(0, 0, 0, 0.04);
   color: var(--text);
 }
@@ -586,7 +618,9 @@ html[data-theme="nex"]
   border-radius: var(--radius-md);
   background: var(--bg);
   cursor: pointer;
-  transition: all 0.15s;
+  transition:
+    background var(--duration-base, 0.15s),
+    border-color var(--duration-base, 0.15s);
   font-family: var(--font-sans);
   text-align: left;
   width: 100%;
@@ -595,6 +629,11 @@ html[data-theme="nex"]
 .provider-option:hover {
   border-color: var(--accent);
   background: var(--accent-bg);
+}
+.provider-option:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+  border-color: var(--accent);
 }
 .provider-option.active {
   border-color: var(--accent);
@@ -884,13 +923,21 @@ html[data-theme="nex"]
   border: none;
   background: transparent;
   cursor: pointer;
-  transition: all 0.15s;
+  transition:
+    background var(--duration-base, 0.15s),
+    color var(--duration-base, 0.15s);
   color: var(--text-secondary);
   font-family: var(--font-sans);
   text-align: left;
   position: relative;
 }
 .sidebar-agent:hover {
+  background: rgba(0, 0, 0, 0.04);
+  color: var(--text);
+}
+.sidebar-agent:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
   background: rgba(0, 0, 0, 0.04);
   color: var(--text);
 }
@@ -1076,6 +1123,11 @@ html[data-theme="nex"]
 }
 .usage-toggle:hover {
   color: var(--text);
+}
+.usage-toggle:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+  border-radius: 4px;
 }
 .usage-toggle svg {
   transition: transform 0.2s;
@@ -1549,6 +1601,10 @@ html[data-theme="nex"]
   background: var(--bg-warm);
   color: var(--text);
 }
+.task-detail-close:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+}
 .task-detail-section {
   padding: 16px 20px;
   border-bottom: 1px solid var(--border);
@@ -1825,6 +1881,10 @@ html[data-theme="nex"]
 .thread-panel-close:hover {
   background: var(--bg);
 }
+.thread-panel-close:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+}
 .thread-panel-body {
   flex: 1;
   overflow-y: auto;
@@ -1903,6 +1963,134 @@ html[data-theme="nex"]
 .thread-quote-dismiss:hover {
   background: var(--bg);
   color: var(--text);
+}
+
+/* ─── Breadcrumb ─── */
+.breadcrumb {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  min-width: 0;
+}
+.breadcrumb-segment {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+.breadcrumb-sep {
+  color: var(--text-tertiary);
+  padding: 0 2px;
+  font-weight: 400;
+}
+.breadcrumb-link {
+  color: var(--text-secondary);
+  text-decoration: none;
+  border-radius: 4px;
+  padding: 1px 4px;
+  transition: color 0.12s, background 0.12s;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+  display: inline-block;
+}
+.breadcrumb-link:hover {
+  color: var(--text);
+  background: var(--bg-warm);
+}
+.breadcrumb-link-active {
+  color: var(--text);
+  font-weight: 600;
+}
+.breadcrumb-leaf {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.breadcrumb-copy-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: var(--text-tertiary);
+  border-radius: 4px;
+  padding: 0;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s, color 0.12s, background 0.12s;
+}
+.breadcrumb:hover .breadcrumb-copy-btn,
+.breadcrumb-leaf:hover .breadcrumb-copy-btn {
+  opacity: 1;
+  pointer-events: auto;
+}
+.breadcrumb-copy-btn:hover {
+  color: var(--text);
+  background: var(--bg-warm);
+}
+.breadcrumb-copy-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* ─── Recent objects (sidebar panel) ─── */
+.recent-objects {
+  padding: 6px 0 4px;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.recent-objects-title {
+  padding: 6px var(--sidebar-pad-x) 4px;
+  margin-bottom: 0;
+}
+.recent-objects-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 2px 0;
+}
+.recent-objects-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 22px;
+  text-decoration: none;
+  font-size: 12px;
+  color: var(--text-secondary);
+  border-radius: 0;
+  transition: background 0.12s, color 0.12s;
+  white-space: nowrap;
+  overflow: hidden;
+  border: none;
+  background: transparent;
+}
+.recent-objects-item:hover {
+  background: var(--bg-warm);
+  color: var(--text);
+}
+.recent-objects-icon {
+  flex-shrink: 0;
+  opacity: 0.6;
+  color: var(--text-tertiary);
+}
+.recent-objects-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
 }
 
 /* ─── DM Banner ─── */
@@ -2025,6 +2213,10 @@ html[data-theme="nex"]
 }
 .sidebar-color-swatch:hover {
   transform: scale(1.08);
+}
+.sidebar-color-swatch:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
 }
 .sidebar-color-swatch.is-active {
   box-shadow: 0 0 0 2px var(--accent, var(--text));
@@ -2762,10 +2954,13 @@ html[data-theme="nex"]
   width: 100%;
   font: inherit;
 }
-.theme-switcher-option:hover,
+.theme-switcher-option:hover {
+  background: var(--bg-warm);
+}
 .theme-switcher-option:focus-visible {
   background: var(--bg-warm);
-  outline: none;
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 .theme-switcher-option.is-active {
   background: var(--accent-bg);

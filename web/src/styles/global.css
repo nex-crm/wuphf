@@ -139,6 +139,41 @@
 
   /* Popover shadow — used by the Tier 2 hover peek card. */
   --shadow-popover: 0 8px 24px -8px rgba(0, 0, 0, 0.32);
+
+  /* ─── Focus ring ─── */
+  /* Single source-of-truth: all interactive elements use this token so
+     keyboard navigation is always visible and consistent across themes.
+     Offset keeps the ring outside the element border, not overlapping it. */
+  --focus-ring-color: var(--accent);
+  --focus-ring-offset: 2px;
+  --focus-ring-width: 2px;
+
+  /* ─── Spacing scale ─── */
+  /* Consistent spacing prevents scattered hardcoded values. */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+
+  /* ─── Typography scale ─── */
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-base: 13px;
+  --text-md: 14px;
+  --text-lg: 15px;
+  --text-xl: 17px;
+  --text-2xl: 20px;
+
+  /* ─── Transition durations ─── */
+  --duration-fast: 0.12s;
+  --duration-base: 0.15s;
+  --duration-slow: 0.2s;
+
+  /* ─── Empty / loading state ─── */
+  --empty-state-color: var(--text-tertiary);
+  --empty-state-size: 13px;
 }
 
 html {
@@ -149,6 +184,34 @@ body {
   background: var(--bg);
   color: var(--text);
   min-height: 100vh;
+}
+
+/* ─── Global focus-visible baseline ─── */
+/* Keyboard-only focus ring that doesn't fire on mouse clicks.
+   All focusable elements get a consistent ring; component stylesheets may
+   narrow the offset for elements that need inside-border positioning. */
+:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+}
+
+/* Suppress the native ring for elements whose :hover state already provides
+   a strong enough signal (e.g. icon buttons that show a filled background).
+   Each of those components adds its own :focus-visible override below. */
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* ─── Empty / loading state utilities ─── */
+.empty-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--empty-state-color);
+  font-size: var(--empty-state-size);
+}
+.empty-state--padded {
+  padding: 32px 20px;
 }
 
 /* ─── Animations ─── */
@@ -200,12 +263,23 @@ body {
   font-weight: 500;
   border: none;
   cursor: pointer;
-  transition: all 0.2s;
+  /* Scope to compositor-safe properties — `transform` for the lift and
+     `background/color/filter` for state; avoids layout recalcs on hover. */
+  transition:
+    background var(--duration-slow, 0.2s),
+    color var(--duration-slow, 0.2s),
+    filter var(--duration-slow, 0.2s),
+    transform var(--duration-slow, 0.2s),
+    box-shadow var(--duration-slow, 0.2s);
   text-decoration: none;
   min-height: 44px;
 }
 .btn:not(.btn-sm):not(:disabled):hover {
   transform: translateY(-1px);
+}
+.btn:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
 }
 .btn:disabled {
   opacity: 0.4;
@@ -267,6 +341,10 @@ body {
 .btn-text:hover:not(:disabled) {
   text-decoration: underline;
   color: var(--text);
+}
+.btn-text:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
 }
 .btn-text:disabled {
   opacity: 0.5;

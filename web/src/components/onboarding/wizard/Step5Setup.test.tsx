@@ -5,7 +5,8 @@ vi.mock("../../../api/client", () => ({
   getLocalProvidersStatus: vi.fn().mockResolvedValue([]),
 }));
 
-import { SetupStep } from "./Step5Setup";
+import type { PackPreviewRequirement } from "./packPreview";
+import { PackRequirementsPanel, SetupStep } from "./Step5Setup";
 import type { PrereqResult } from "./types";
 
 interface Overrides {
@@ -15,6 +16,7 @@ interface Overrides {
   runtimePriority?: string[];
   apiKeys?: Record<string, string>;
   localProvider?: string;
+  packRequirements?: PackPreviewRequirement[];
   onSelectLocalProvider?: (kind: string) => void;
 }
 
@@ -26,6 +28,7 @@ function setupProps(overrides: Overrides = {}) {
     runtimePriority = [],
     apiKeys = {},
     localProvider = "",
+    packRequirements = [],
     onSelectLocalProvider = () => {},
   } = overrides;
   return {
@@ -47,6 +50,7 @@ function setupProps(overrides: Overrides = {}) {
       provider: localProvider,
       onSelectProvider: onSelectLocalProvider,
     },
+    packRequirements,
     onNext: () => {},
     onBack: () => {},
   };
@@ -121,5 +125,213 @@ describe("SetupStep — surfaces", () => {
       "false",
     );
     expect(screen.queryByTestId("onboarding-local-llm-picker")).toBeNull();
+  });
+});
+
+describe("SetupStep — pack requirements panel hidden without requirements", () => {
+  it("does not render requirements panel when packRequirements is empty", () => {
+    renderSetup({ packRequirements: [] });
+    expect(
+      screen.queryByTestId("pack-requirements-panel"),
+    ).not.toBeInTheDocument();
+  });
+});
+
+// ─── PackRequirementsPanel unit tests ───────────────────────────────────────
+
+function renderReqPanel(
+  requirements: PackPreviewRequirement[],
+  opts: {
+    prereqs?: PrereqResult[];
+    prereqsError?: string;
+    runtimePriority?: string[];
+    apiKeys?: Record<string, string>;
+  } = {},
+) {
+  return render(
+    <PackRequirementsPanel
+      requirements={requirements}
+      prereqs={opts.prereqs ?? []}
+      prereqsError={opts.prereqsError ?? ""}
+      runtimePriority={opts.runtimePriority ?? []}
+      apiKeys={opts.apiKeys ?? {}}
+    />,
+  );
+}
+
+describe("PackRequirementsPanel — empty state", () => {
+  it("renders nothing when requirements array is empty", () => {
+    const { container } = renderReqPanel([]);
+    expect(container.firstChild).toBeNull();
+  });
+});
+
+describe("PackRequirementsPanel — required vs optional labels", () => {
+  const requirements: PackPreviewRequirement[] = [
+    { kind: "runtime", name: "Claude Code", required: true },
+    { kind: "api-key", name: "Anthropic", required: false },
+  ];
+
+  it("shows required badge for required items", () => {
+    renderReqPanel(requirements);
+    expect(screen.getByTestId("pack-req-badge-Claude Code")).toHaveTextContent(
+      "required",
+    );
+  });
+
+  it("shows optional badge for optional items", () => {
+    renderReqPanel(requirements);
+    expect(screen.getByTestId("pack-req-badge-Anthropic")).toHaveTextContent(
+      "optional",
+    );
+  });
+
+  it("renders a row for every requirement", () => {
+    renderReqPanel(requirements);
+    expect(screen.getByTestId("pack-req-row-Claude Code")).toBeInTheDocument();
+    expect(screen.getByTestId("pack-req-row-Anthropic")).toBeInTheDocument();
+  });
+});
+
+describe("PackRequirementsPanel — runtime readiness dots", () => {
+  const req: PackPreviewRequirement = {
+    kind: "runtime",
+    name: "Claude Code",
+    required: true,
+  };
+
+  it("shows ok dot when runtime is in priority and installed", () => {
+    renderReqPanel([req], {
+      prereqs: [{ name: "claude", required: true, found: true }],
+      runtimePriority: ["Claude Code"],
+    });
+    expect(screen.getByTestId("pack-req-row-Claude Code")).toHaveAttribute(
+      "data-readiness",
+      "ok",
+    );
+  });
+
+  it("shows missing dot when runtime is not in priority", () => {
+    renderReqPanel([req], {
+      prereqs: [{ name: "claude", required: true, found: true }],
+      runtimePriority: [],
+    });
+    expect(screen.getByTestId("pack-req-row-Claude Code")).toHaveAttribute(
+      "data-readiness",
+      "missing",
+    );
+  });
+
+  it("shows missing dot when runtime is in priority but not installed", () => {
+    renderReqPanel([req], {
+      prereqs: [{ name: "claude", required: true, found: false }],
+      runtimePriority: ["Claude Code"],
+    });
+    expect(screen.getByTestId("pack-req-row-Claude Code")).toHaveAttribute(
+      "data-readiness",
+      "missing",
+    );
+  });
+
+  it("shows ok dot when prereqsError truthy and runtime is selected (detection bypass)", () => {
+    renderReqPanel([req], {
+      prereqs: [],
+      prereqsError: "detection failed",
+      runtimePriority: ["Claude Code"],
+    });
+    expect(screen.getByTestId("pack-req-row-Claude Code")).toHaveAttribute(
+      "data-readiness",
+      "ok",
+    );
+  });
+});
+
+describe("PackRequirementsPanel — Provider Doctor link", () => {
+  it("shows Provider Doctor link when a required runtime is missing", () => {
+    renderReqPanel([{ kind: "runtime", name: "Claude Code", required: true }], {
+      prereqs: [],
+      runtimePriority: [],
+    });
+    expect(screen.getByTestId("pack-req-doctor-hint")).toBeInTheDocument();
+    expect(screen.getByTestId("pack-req-doctor-link")).toBeInTheDocument();
+  });
+
+  it("does not show Provider Doctor link when all required runtimes are ready", () => {
+    renderReqPanel([{ kind: "runtime", name: "Claude Code", required: true }], {
+      prereqs: [{ name: "claude", required: true, found: true }],
+      runtimePriority: ["Claude Code"],
+    });
+    expect(
+      screen.queryByTestId("pack-req-doctor-hint"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("does not show Provider Doctor link for optional missing runtimes", () => {
+    renderReqPanel(
+      [{ kind: "runtime", name: "Claude Code", required: false }],
+      { prereqs: [], runtimePriority: [] },
+    );
+    expect(
+      screen.queryByTestId("pack-req-doctor-hint"),
+    ).not.toBeInTheDocument();
+  });
+});
+
+describe("PackRequirementsPanel — no API key values in UI", () => {
+  it("shows api-key requirement name without revealing the key value", () => {
+    renderReqPanel([{ kind: "api-key", name: "Anthropic", required: true }], {
+      apiKeys: { ANTHROPIC_API_KEY: "sk-super-secret" },
+    });
+    // The name label is visible
+    expect(screen.getByTestId("pack-req-row-Anthropic")).toBeInTheDocument();
+    // The secret value must not appear anywhere in the DOM
+    expect(screen.queryByText("sk-super-secret")).not.toBeInTheDocument();
+  });
+});
+
+describe("PackRequirementsPanel — api-key readiness", () => {
+  it("shows ok dot when the matching api key is filled", () => {
+    renderReqPanel([{ kind: "api-key", name: "Anthropic", required: true }], {
+      apiKeys: { ANTHROPIC_API_KEY: "sk-x" },
+    });
+    expect(screen.getByTestId("pack-req-row-Anthropic")).toHaveAttribute(
+      "data-readiness",
+      "ok",
+    );
+  });
+
+  it("shows missing dot when the matching api key is empty", () => {
+    renderReqPanel([{ kind: "api-key", name: "Anthropic", required: true }], {
+      apiKeys: {},
+    });
+    expect(screen.getByTestId("pack-req-row-Anthropic")).toHaveAttribute(
+      "data-readiness",
+      "missing",
+    );
+  });
+});
+
+describe("PackRequirementsPanel — local-tool and unknown kind", () => {
+  it("shows unknown readiness for local-tool requirements", () => {
+    renderReqPanel([{ kind: "local-tool", name: "ffmpeg", required: true }]);
+    expect(screen.getByTestId("pack-req-row-ffmpeg")).toHaveAttribute(
+      "data-readiness",
+      "unknown",
+    );
+  });
+
+  it("shows unknown readiness for unrecognized kind (cast as unknown kind)", () => {
+    // Cast to exercise the fallback branch in requirementReadiness.
+    renderReqPanel([
+      {
+        kind: "local-tool" as const,
+        name: "Google Drive",
+        required: false,
+      },
+    ]);
+    expect(screen.getByTestId("pack-req-row-Google Drive")).toHaveAttribute(
+      "data-readiness",
+      "unknown",
+    );
   });
 });
