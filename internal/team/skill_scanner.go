@@ -161,7 +161,7 @@ func (s *SkillScanner) Scan(ctx context.Context, scopePath string, dryRun bool, 
 	if strings.TrimSpace(scopePath) != "" {
 		// Sanitize scopePath: must stay under team/.
 		clean := filepath.Clean(strings.TrimPrefix(strings.TrimSpace(scopePath), "/"))
-		if strings.Contains(clean, "..") || (clean != scanWalkRoot && !strings.HasPrefix(clean, scanWalkRoot+"/")) {
+		if strings.HasPrefix(clean, "..") || (clean != scanWalkRoot && !strings.HasPrefix(clean, scanWalkRoot+"/")) {
 			return res, fmt.Errorf("skill_scanner: scope_path %q must be under team/", scopePath)
 		}
 		walkRoot = filepath.Join(wikiRoot, clean)
