@@ -291,11 +291,20 @@ test.describe("PR #634 review pins", () => {
 
     for (const { route, label } of surfaces) {
       await page.goto(route);
-      await expect(page.locator(".channel-title")).toBeVisible({
-        timeout: 10_000,
-      });
+      // Phase 5 PR 2: navigation refresh replaced the plain .channel-title span
+      // with a breadcrumb nav for object routes (wiki, notebooks, reviews). The
+      // canonical section title is now the last .breadcrumb-link-active; fall
+      // back to .channel-title for channel/unknown routes that still use it.
+      const breadcrumbLeaf = page.locator(".breadcrumb-link-active");
+      const channelTitle = page.locator(".channel-title");
+      const hasBreadcrumb = await breadcrumbLeaf.isVisible({ timeout: 10_000 }).catch(() => false);
+      await (hasBreadcrumb
+        ? expect(breadcrumbLeaf).toBeVisible({ timeout: 10_000 })
+        : expect(channelTitle).toBeVisible({ timeout: 10_000 }));
       const headerText = (
-        await page.locator(".channel-title").textContent()
+        hasBreadcrumb
+          ? await breadcrumbLeaf.textContent()
+          : await channelTitle.textContent()
       )?.trim();
       // The status bar layout is: <StatusPill /> <channelLabel /> <modeLabel />
       // where StatusPill is also `.status-bar-item` (workspace pill). The
