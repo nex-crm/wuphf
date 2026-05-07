@@ -1011,6 +1011,56 @@ func TestBrokerResumeTaskPreservesDetailsWithoutMarker(t *testing.T) {
 	}
 }
 
+// TestBrokerUnblockDependentsStripsRateLimitMarker covers the second
+// Blocked→false transition path: when a dependency completion clears the
+// blocked flag, a stale rate-limit marker would otherwise survive in
+// Details, the watchdog's externalWorkflowRetryAfter check would re-detect
+// it on the next tick, and ResumeTask's existing strip would fire — but
+// before this test was added, ResumeTask only stripped on the
+// blocked-true→false transition, so a marker present after
+// unblockDependentsLocked would persist indefinitely. The fix strips both
+// at the source (unblockDependentsLocked) and unconditionally in
+// ResumeTask, so either path now closes the loop.
+func TestBrokerUnblockDependentsStripsRateLimitMarker(t *testing.T) {
+	b := newTestBroker(t)
+	ensureTestMemberAccess(b, "client-loop", "operator", "Operator")
+	ensureTestMemberAccess(b, "client-loop", "builder", "Builder")
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	b.tasks = []teamTask{
+		{
+			ID: "task-parent", Channel: "client-loop", Title: "Prereq",
+			Owner: "builder", Status: "done", CreatedBy: "operator",
+			TaskType: "feature", ExecutionMode: "local_worktree",
+			ReviewState: "approved", CreatedAt: now, UpdatedAt: now,
+		},
+		{
+			ID: "task-child", Channel: "client-loop", Title: "Dependent kickoff",
+			Owner: "builder", Status: "blocked", Blocked: true,
+			CreatedBy: "operator", TaskType: "feature", ExecutionMode: "live_external",
+			DependsOn: []string{"task-parent"},
+			Details:   "Original goal: ship dependent kickoff.\n429 RESOURCE_EXHAUSTED. Retry after 2026-04-15T22:00:29.610Z.",
+			CreatedAt: now, UpdatedAt: now,
+		},
+	}
+
+	b.mu.Lock()
+	b.unblockDependentsLocked("task-parent")
+	got := append([]teamTask(nil), b.tasks...)
+	b.mu.Unlock()
+
+	child := got[1]
+	if child.Blocked {
+		t.Fatalf("expected child task to be unblocked after dependency completion, got blocked=true")
+	}
+	if externalRetryAfterPattern.MatchString(child.Details) {
+		t.Fatalf("dependency-unblock did not strip the stale rate-limit marker: %q", child.Details)
+	}
+	if !strings.Contains(child.Details, "Original goal: ship dependent kickoff.") {
+		t.Fatalf("dependency-unblock should preserve pre-block context, got %q", child.Details)
+	}
+}
+
 func TestBrokerResumeTaskQueuesBehindExistingExclusiveOwnerLane(t *testing.T) {
 	b := newTestBroker(t)
 	ensureTestMemberAccess(b, "client-loop", "operator", "Operator")

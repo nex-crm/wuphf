@@ -90,12 +90,20 @@ func (b *Broker) ResumeTask(taskID, actor, reason string) (teamTask, bool, error
 		}
 		beforeStatus := task.Status
 		changed := false
+		// Strip the stale rate-limit marker on every ResumeTask call, not
+		// only when this call flips Blocked from true to false. A different
+		// code path (e.g. unblockDependentsLocked, capability self-healing)
+		// may have already cleared Blocked while leaving the marker in
+		// Details; without the unconditional strip the watchdog's
+		// externalWorkflowRetryAfter check would still detect the stale
+		// timestamp on its next tick and re-enter the resume loop. The
+		// strip is a no-op when no marker is present.
+		if cleaned := stripExternalRetryMarker(task.Details); cleaned != task.Details {
+			task.Details = cleaned
+			changed = true
+		}
 		if task.Blocked {
 			task.Blocked = false
-			// Strip the stale rate-limit marker so the watchdog's
-			// externalWorkflowRetryAfter check cannot re-enter the
-			// resume loop after the task is re-blocked for a new reason.
-			task.Details = stripExternalRetryMarker(task.Details)
 			changed = true
 		}
 		if strings.EqualFold(strings.TrimSpace(task.Status), "blocked") {
@@ -368,6 +376,11 @@ func (b *Broker) unblockDependentsLocked(completedTaskID string) []pendingTaskTr
 		if !b.hasUnresolvedDepsLocked(&b.tasks[i]) {
 			beforeStatus := b.tasks[i].Status
 			b.tasks[i].Blocked = false
+			// Mirror the strip in ResumeTask: if the dependent task was
+			// also rate-limited at some earlier point, the stale marker
+			// in Details would otherwise trigger the watchdog resume loop
+			// even though the dependency completion already unblocked it.
+			b.tasks[i].Details = stripExternalRetryMarker(b.tasks[i].Details)
 			if strings.TrimSpace(b.tasks[i].Owner) != "" {
 				b.tasks[i].Status = "in_progress"
 			} else {
