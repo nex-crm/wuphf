@@ -221,7 +221,13 @@ export function JoinPage({ token, onAccepted }: JoinPageProps) {
               className="join-input"
               value={passcode}
               onChange={(event) =>
-                setPasscode(event.target.value.replace(/\D/g, ""))
+                // Clamp to the server's 6-digit shape: strip non-digits
+                // first, then slice. A pasted longer numeric string would
+                // otherwise pad maxLength up to 6 but a chained
+                // event.target.value of "1234567890" with non-digits
+                // mixed in could exceed it on browsers that don't
+                // honor maxLength for programmatic value writes.
+                setPasscode(event.target.value.replace(/\D/g, "").slice(0, 6))
               }
               disabled={submitting}
               aria-invalid={
@@ -229,7 +235,7 @@ export function JoinPage({ token, onAccepted }: JoinPageProps) {
                 errorCode === "passcode_missing"
               }
               aria-describedby={errorMessage ? errorId : undefined}
-              maxLength={12}
+              maxLength={6}
             />
           </>
         ) : null}

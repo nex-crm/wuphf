@@ -499,16 +499,29 @@ func (c *webTunnelController) mintInviteLocked(publicURL string) (string, string
 //   - the invite token must be one this tunnel issued (an attacker who
 //     guesses or steals a network-share token cannot redeem it through the
 //     tunnel),
+//   - a non-empty passcode must be supplied,
 //   - the supplied passcode must match the one we minted alongside the
 //     token (constant-time compare).
 //
-// Both failure modes return the SAME error message via errJoinPasscodeRequired
-// to avoid leaking which condition was hit.
+// Internally the three failure modes use distinct sentinels so the audit
+// log in share.go can attribute attempts (unknown token / no passcode /
+// wrong passcode), but the wire response collapses to one shape — see
+// shareJoinPasscodeRequiredMessage and the indistinguishability test.
 func (c *webTunnelController) joinGate(token, supplied string) error {
 	c.mu.Lock()
 	expected, ok := c.passcodes[token]
 	c.mu.Unlock()
 	if !ok {
+		return errJoinPasscodeRequired
+	}
+	// Distinguish "joiner submitted nothing" from "joiner submitted the
+	// wrong code". Both produce identical wire responses (the gate's
+	// indistinguishability invariant), but the audit log loses fidelity
+	// if both paths return the same sentinel — operators investigating
+	// suspicious traffic want to tell brute-force attempts (many
+	// non-empty mismatches) apart from the legitimate "joiner forgot
+	// to type the passcode and clicked submit" case.
+	if strings.TrimSpace(supplied) == "" {
 		return errJoinPasscodeRequired
 	}
 	if !constantTimeCompare(supplied, expected) {

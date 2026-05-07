@@ -52,3 +52,21 @@ func TestTunnelJoinGateLengthMismatchIsRejection(t *testing.T) {
 		t.Fatalf("joinGate len-mismatch err=%v want errJoinPasscodeInvalid", err)
 	}
 }
+
+// TestTunnelJoinGateEmptyPasscodeIsRequiredNotInvalid pins the audit-log
+// distinction the share handler relies on: an empty passcode against a
+// known token reports "required" (joiner forgot to type it), not
+// "invalid" (joiner submitted a wrong code). Both still produce the
+// same wire response — the indistinguishability invariant — but the
+// internal sentinels differ so operators can tell brute-force attempts
+// apart from a click-through-without-passcode.
+func TestTunnelJoinGateEmptyPasscodeIsRequiredNotInvalid(t *testing.T) {
+	c := newWebTunnelController()
+	c.passcodes["tok-1"] = "835291"
+	for _, supplied := range []string{"", "   "} {
+		err := c.joinGate("tok-1", supplied)
+		if !errors.Is(err, errJoinPasscodeRequired) {
+			t.Fatalf("joinGate(%q) = %v, want errJoinPasscodeRequired", supplied, err)
+		}
+	}
+}
