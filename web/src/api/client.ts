@@ -547,9 +547,6 @@ export interface AgentRequest {
   metadata?: InterviewMetadata;
   /** Full candidate spec on enhance_skill_proposal interviews. */
   enhance_candidate?: Skill;
-  redacted?: boolean;
-  redaction_count?: number;
-  redaction_reasons?: string[];
 }
 
 export function getRequests(channel: string) {
