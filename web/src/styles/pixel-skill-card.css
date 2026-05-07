@@ -1,0 +1,621 @@
+/* ─── Pixel Pokémon-style Skill Cards ──────────────────────────────────
+ *
+ * Visual language: 90s Pokémon TCG card transformed into 8/16-bit pixel
+ * art. The outer frame has a small (14px) corner radius to read as a
+ * real card; everything inside the frame stays sharp and snaps to the
+ * 4px pixel grid.
+ *
+ *   --psc-px         base pixel unit (4px)
+ *   --psc-frame-*    type-tinted gradient that wraps the card body
+ *   --psc-art-*      static gradient inside the art window
+ *
+ * Each card has a `data-type` attribute that selects a Pokémon-flavored
+ * type palette. Status maps to type:
+ *   active   → ELECTRIC (yellow/amber)
+ *   proposed → PSYCHIC  (magenta/purple) + NEEDS REVIEW stamp
+ *   disabled → DARK     (slate/gray)
+ *   archived → STEEL    (silver, dimmed)
+ * ──────────────────────────────────────────────────────────────────── */
+
+:root {
+  --psc-px: 4px;
+  --psc-bg-card: #f7e9c7; /* aged cardstock */
+  --psc-bg-window: #fcf2da;
+  --psc-ink: #2b1d0e; /* dark sepia ink for text */
+  --psc-ink-muted: #6b573a;
+  --psc-flip-easing: cubic-bezier(0.16, 1, 0.3, 1); /* ease-out-expo */
+  --psc-button-easing: cubic-bezier(0.165, 0.84, 0.44, 1); /* ease-out-quart */
+}
+
+/* ── Type palettes ── */
+.pixel-skill-card[data-type="electric"] {
+  --psc-frame-a: #ffd54a;
+  --psc-frame-b: #f5a51a;
+  --psc-frame-edge: #5e3b00;
+  --psc-art-a: #fff7c2;
+  --psc-art-b: #f6d36b;
+  --psc-energy: #ffcc00;
+  --psc-energy-ink: #5e3b00;
+}
+.pixel-skill-card[data-type="psychic"] {
+  --psc-frame-a: #d9a4ff;
+  --psc-frame-b: #8a4fd6;
+  --psc-frame-edge: #2c0a55;
+  --psc-art-a: #f4e4ff;
+  --psc-art-b: #c896ee;
+  --psc-energy: #b266ff;
+  --psc-energy-ink: #2c0a55;
+}
+.pixel-skill-card[data-type="dark"] {
+  --psc-frame-a: #6c7480;
+  --psc-frame-b: #2f3640;
+  --psc-frame-edge: #0a0d12;
+  --psc-art-a: #c4cdd6;
+  --psc-art-b: #6b7380;
+  --psc-energy: #5a6470;
+  --psc-energy-ink: #0a0d12;
+}
+.pixel-skill-card[data-type="steel"] {
+  --psc-frame-a: #d9dde2;
+  --psc-frame-b: #8e96a0;
+  --psc-frame-edge: #2a2f37;
+  --psc-art-a: #ecf0f4;
+  --psc-art-b: #b4bbc4;
+  --psc-energy: #9aa3ad;
+  --psc-energy-ink: #2a2f37;
+}
+
+/* ── Flipper container (3D transform for the card flip) ──────────────
+ *
+ * The wrap holds the flipper; the flipper holds front + back. Rotating
+ * the flipper around Y reveals the back. Aspect ratio is locked at the
+ * standard Pokémon TCG card proportion (63 × 88mm = 1 : 1.40) so the
+ * front and back share the same footprint regardless of content height. */
+.pixel-skill-card-flipper {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 63 / 88;
+  transform-style: preserve-3d;
+  transition: transform 0.7s var(--psc-flip-easing);
+  /* perspective is set on the parent .pixel-skill-card-wrap (per CSS spec,
+     perspective applies to the children of the element it's set on). The
+     wrap's 1400px value is the canonical one. */
+}
+.pixel-skill-card-wrap.is-flipped .pixel-skill-card-flipper {
+  transform: rotateY(180deg);
+}
+@media (prefers-reduced-motion: reduce) {
+  .pixel-skill-card-flipper {
+    transition: none;
+  }
+}
+
+/* ── Base card frame (front + back share these) ───────────────────── */
+.pixel-skill-card {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  font-family: "VT323", "Geist Mono", ui-monospace, monospace;
+  color: var(--psc-ink);
+  background: linear-gradient(
+    180deg,
+    var(--psc-frame-a) 0%,
+    var(--psc-frame-b) 100%
+  );
+  padding: var(--psc-px);
+  /* Real Pokémon TCG cards have rounded corners (~3mm radius on a 63mm
+     card). We round the OUTER frame slightly while keeping all interior
+     rectangles sharp — that fusion gives it the "real card transformed
+     into pixel art" feel. */
+  border-radius: 14px;
+  box-shadow:
+    inset 0 0 0 var(--psc-px) var(--psc-frame-edge),
+    inset 0 0 0 calc(var(--psc-px) * 2) var(--psc-frame-a),
+    0 0 0 1px var(--psc-frame-edge),
+    var(--psc-px) calc(var(--psc-px) + 2px) 0 0 rgba(0, 0, 0, 0.45);
+  image-rendering: pixelated;
+  -webkit-font-smoothing: none;
+  text-align: left;
+  margin: 0;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  overflow: hidden;
+}
+.pixel-skill-card--back {
+  transform: rotateY(180deg);
+}
+
+/* Faint scanline overlay across the whole card for CRT feel. */
+.pixel-skill-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    0deg,
+    rgba(0, 0, 0, 0.06) 0,
+    rgba(0, 0, 0, 0.06) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+  mix-blend-mode: multiply;
+  opacity: 0.7;
+  border-radius: inherit;
+}
+
+/* ── Header row: name + byline ── */
+.pixel-skill-card__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 10px 5px;
+  background: var(--psc-frame-a);
+  border-bottom: var(--psc-px) solid var(--psc-frame-edge);
+}
+.pixel-skill-card__name {
+  font-family: "Press Start 2P", "VT323", monospace;
+  font-size: 13px;
+  line-height: 1.25;
+  letter-spacing: 0.5px;
+  color: var(--psc-ink);
+  text-shadow: 1px 1px 0 rgba(255, 255, 255, 0.45);
+  overflow-wrap: anywhere;
+  word-break: normal;
+  flex: 1 1 auto;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+/* Byline used to be VT323 14px @ 0.85 opacity — at the size of a real
+   author chip on a TCG card and on a busy frame, it disappeared. Bump
+   to full ink color, drop the opacity, lift the size. */
+.pixel-skill-card__byline {
+  font-family: "VT323", monospace;
+  font-size: 16px;
+  letter-spacing: 0.4px;
+  color: var(--psc-ink);
+  text-shadow: 1px 1px 0 rgba(255, 255, 255, 0.55);
+  white-space: nowrap;
+  flex: 0 0 auto;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Art window ── */
+.pixel-skill-card__art {
+  flex: 0 0 auto;
+  position: relative;
+  margin: 8px 8px 0;
+  padding: 8px;
+  background: linear-gradient(
+    135deg,
+    var(--psc-art-a) 0%,
+    var(--psc-art-b) 50%,
+    var(--psc-art-a) 100%
+  );
+  border: var(--psc-px) solid var(--psc-frame-edge);
+  /* Inner pixel bevel — light top/left, dark bottom/right. */
+  box-shadow:
+    inset 1px 1px 0 rgba(255, 255, 255, 0.6),
+    inset -1px -1px 0 rgba(0, 0, 0, 0.35);
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+  min-height: 168px;
+  overflow: hidden;
+}
+.pixel-skill-card__art-floor {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 18px;
+  background: repeating-linear-gradient(
+    90deg,
+    rgba(0, 0, 0, 0.18) 0 4px,
+    transparent 4px 8px
+  );
+  pointer-events: none;
+}
+.pixel-skill-card__portrait {
+  /* Canvas inside is sprite-native pixels; CSS scales it up cleanly. */
+  width: 144px;
+  height: 144px;
+  image-rendering: pixelated;
+  /* biome-ignore lint/suspicious/noDuplicateProperties: Pixel-art fallback. */
+  image-rendering: crisp-edges;
+  position: relative;
+  z-index: 1;
+  filter: drop-shadow(2px 2px 0 rgba(0, 0, 0, 0.35));
+}
+
+/* ── Stat strip (just under the art) ── */
+/* Marked up as a <dl> so screen readers announce "Status: Active,
+   Owners: @ceo" instead of bare values. Visual layout is unchanged. */
+.pixel-skill-card__stats {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px 6px;
+  margin: 0 8px;
+  background: var(--psc-bg-window);
+  border-left: var(--psc-px) solid var(--psc-frame-edge);
+  border-right: var(--psc-px) solid var(--psc-frame-edge);
+  font-size: 14px;
+  color: var(--psc-ink-muted);
+  font-family: "VT323", monospace;
+  letter-spacing: 0.5px;
+}
+.pixel-skill-card__stats-row {
+  display: contents;
+}
+.pixel-skill-card__stats dd {
+  margin: 0;
+}
+.pixel-skill-card__visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ── Body: flavor (real skill.description) ── */
+/* The body grows to fill remaining card height with `flex: 1 1 auto`,
+   then scrolls vertically when the description is longer than the
+   available space. Aspect-ratio still locks the card footprint, so the
+   grid stays tidy; the description just gains an internal scrollbar
+   when it would otherwise be cropped. */
+.pixel-skill-card__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0 8px 8px;
+  padding: 10px 12px 12px;
+  background: var(--psc-bg-window);
+  border: var(--psc-px) solid var(--psc-frame-edge);
+  border-top-width: 0;
+  font-size: 16px;
+  line-height: 1.4;
+  color: var(--psc-ink);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* Pixel-art-friendly scrollbar — small, sepia, no chrome flourish. */
+  scrollbar-width: thin;
+  scrollbar-color: var(--psc-frame-edge) transparent;
+}
+.pixel-skill-card__body::-webkit-scrollbar {
+  width: 6px;
+}
+.pixel-skill-card__body::-webkit-scrollbar-thumb {
+  background: var(--psc-frame-edge);
+}
+.pixel-skill-card__body::-webkit-scrollbar-track {
+  background: transparent;
+}
+.pixel-skill-card__flavor {
+  margin: 0;
+  font-family: "VT323", "Geist Mono", monospace;
+  font-size: 17px;
+  line-height: 1.35;
+  color: var(--psc-ink);
+  letter-spacing: 0.2px;
+}
+
+/* Trigger row sits between the stats strip and the flavor text. Promoted
+   from the back face so the catalog-scan use case ("which one fires on
+   cron?") doesn't pay a 700ms flip per card. */
+.pixel-skill-card__trigger-row {
+  flex: 0 0 auto;
+  margin: 0 8px;
+  padding: 8px 10px;
+  background: var(--psc-bg-window);
+  border-left: var(--psc-px) solid var(--psc-frame-edge);
+  border-right: var(--psc-px) solid var(--psc-frame-edge);
+  border-top: 1px dashed rgba(43, 29, 14, 0.3);
+  font-family: "VT323", monospace;
+}
+.pixel-skill-card__trigger-label {
+  display: block;
+  font-size: 12px;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--psc-ink-muted);
+  margin-bottom: 1px;
+}
+.pixel-skill-card__trigger-value {
+  font-size: 15px;
+  line-height: 1.3;
+  color: var(--psc-ink);
+  letter-spacing: 0.2px;
+  /* Triggers fit on one or two lines in the seed data; long ones flow
+     into the scrolling body below rather than getting clamped here. */
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+
+/* ── Footer (front face — only renders when skill.source is present) ── */
+.pixel-skill-card__footer {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 6px 10px;
+  margin: 0 8px 8px;
+  background: var(--psc-frame-b);
+  border: var(--psc-px) solid var(--psc-frame-edge);
+  border-top-width: 0;
+  font-family: "VT323", monospace;
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.92);
+  text-shadow: 1px 1px 0 rgba(0, 0, 0, 0.5);
+}
+.pixel-skill-card__set {
+  font-family: "Press Start 2P", monospace;
+  font-size: 9px;
+  letter-spacing: 0.5px;
+  flex: 0 0 auto;
+}
+
+/* "NEEDS REVIEW" stamp on proposed cards. Replaces the old holo shimmer
+   which mis-coded "needs your decision" as "rare/foil". This is closer
+   to a real "1ST EDITION" stamp on TCG cards: angled, ink-faded, sits
+   on top of the art rather than animating across it. */
+.pixel-skill-card__stamp {
+  position: absolute;
+  top: 12px;
+  right: 10px;
+  z-index: 2;
+  padding: 4px 8px;
+  font-family: "Press Start 2P", monospace;
+  font-size: 9px;
+  line-height: 1.25;
+  letter-spacing: 0.5px;
+  color: #c2185b;
+  background: rgba(255, 255, 255, 0.85);
+  border: 2px solid #c2185b;
+  text-align: center;
+  transform: rotate(-8deg);
+  text-shadow: 1px 1px 0 rgba(255, 255, 255, 0.6);
+  /* Faded-ink texture so it reads as a stamp, not a notification badge. */
+  box-shadow: 1px 1px 0 rgba(194, 24, 91, 0.3);
+}
+
+/* Dim archived cards but keep them legible. */
+.pixel-skill-card[data-type="steel"] {
+  filter: grayscale(0.35);
+  opacity: 0.85;
+}
+
+/* The action row uses the wider app's modern type system (sans-serif,
+   small radius). The card chrome is sepia bitmap typography. To keep
+   them from reading as two design systems welded together, give the
+   actions clear separation: bigger gap, a faint divider, and explicit
+   sans-serif so the contrast feels intentional rather than accidental. */
+.pixel-skill-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 20px;
+  padding-top: 14px;
+  align-items: center;
+  border-top: 1px solid var(--border, rgba(43, 29, 14, 0.15));
+  font-family: var(--font-sans);
+  font-size: 12px;
+}
+
+/* ── Grid of cards in SkillsApp ── */
+.pixel-skill-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 28px 22px;
+  align-items: start;
+  padding: 4px 0 8px;
+}
+
+/* Wrapper holds the flipper + the action row. The flipper itself drives
+   the card aspect ratio so the front and back share footprint while the
+   surrounding actions sit underneath. */
+.pixel-skill-card-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  width: 320px;
+  max-width: 100%;
+  padding-right: var(--psc-px);
+  padding-bottom: var(--psc-px);
+  perspective: 1400px;
+  /* Cap repaint scope to each card's bounding box so scanlines + grayscale
+     filter + scroll on a grid of 20+ cards don't trigger full-canvas
+     repaints. Pure perf insurance. */
+  contain: paint;
+}
+
+/* Focus ring uses doubled ink-edge + cardstock layers so it reads as
+   "selected" against every type palette without picking a hue side.
+   Cardstock-tinted near-white (--psc-bg-card) avoids pure #fff. */
+.pixel-skill-card-wrap:focus-within .pixel-skill-card-flipper::before {
+  content: "";
+  position: absolute;
+  inset: -6px;
+  border-radius: 18px;
+  pointer-events: none;
+  box-shadow:
+    0 0 0 2px var(--psc-frame-edge),
+    0 0 0 4px var(--psc-bg-card);
+  z-index: 5;
+}
+
+/* Flip control row — present on BOTH front and back in the same slot
+   (above the footer on front, above nothing on back) so users develop
+   muscle memory for where the toggle lives. */
+.pixel-skill-card__flip-bar {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: center;
+  padding: 4px 8px 0;
+}
+.pixel-skill-card__flip {
+  width: 100%;
+  /* Touch-friendly hit area: ~36px desktop / ~44px coarse-pointer. */
+  min-height: 36px;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.5);
+  color: var(--psc-frame-edge);
+  font-family: "Press Start 2P", monospace;
+  font-size: 9px;
+  letter-spacing: 0.5px;
+  border: var(--psc-px) solid var(--psc-frame-edge);
+  cursor: pointer;
+  text-shadow: 1px 1px 0 rgba(255, 255, 255, 0.55);
+  box-shadow:
+    inset 1px 1px 0 rgba(255, 255, 255, 0.6),
+    inset -1px -1px 0 rgba(0, 0, 0, 0.25);
+  transition:
+    background 120ms var(--psc-button-easing),
+    transform 80ms var(--psc-button-easing);
+}
+.pixel-skill-card__flip:hover {
+  background: rgba(255, 255, 255, 0.75);
+}
+.pixel-skill-card__flip:active {
+  transform: translate(1px, 1px);
+}
+@media (pointer: coarse) {
+  .pixel-skill-card__flip {
+    min-height: 44px;
+  }
+}
+
+/* ── Back face ─────────────────────────────────────────────────────── */
+.pixel-skill-card--back .pixel-skill-card__header {
+  justify-content: center;
+  padding: 8px 10px;
+}
+.pixel-skill-card__back-eyebrow {
+  font-family: "Press Start 2P", monospace;
+  font-size: 10px;
+  letter-spacing: 1px;
+  color: var(--psc-ink);
+  text-shadow: 1px 1px 0 rgba(255, 255, 255, 0.45);
+}
+.pixel-skill-card__back-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 8px 8px 0;
+  padding: 12px 14px 12px;
+  background: var(--psc-bg-window);
+  border: var(--psc-px) solid var(--psc-frame-edge);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  font-family: "VT323", "Geist Mono", monospace;
+  scrollbar-width: thin;
+  scrollbar-color: var(--psc-frame-edge) transparent;
+}
+.pixel-skill-card__back-body::-webkit-scrollbar {
+  width: 6px;
+}
+.pixel-skill-card__back-body::-webkit-scrollbar-thumb {
+  background: var(--psc-frame-edge);
+}
+.pixel-skill-card__back-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+.pixel-skill-card__back-title {
+  margin: 0 0 2px;
+  font-family: "Press Start 2P", monospace;
+  font-size: 13px;
+  line-height: 1.25;
+  letter-spacing: 0.4px;
+  color: var(--psc-ink);
+}
+.pixel-skill-card__back-name {
+  margin: 0 0 12px;
+  padding: 0 0 8px;
+  font-family: "VT323", monospace;
+  font-size: 14px;
+  letter-spacing: 0.3px;
+  color: var(--psc-ink-muted);
+  border-bottom: 1px dashed rgba(43, 29, 14, 0.3);
+}
+.pixel-skill-card__detail-list {
+  margin: 0;
+  font-family: "VT323", monospace;
+  font-size: 16px;
+  line-height: 1.35;
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 6px 10px;
+}
+.pixel-skill-card__detail-row {
+  display: contents;
+}
+/* Labels use VT323 at uppercase + 1.5px tracking instead of 8px Press
+   Start 2P. The bitmap font at 8px reads as decoration; this reads as a
+   real label against the 16px VT323 value. */
+.pixel-skill-card__detail-row dt {
+  font-family: "VT323", monospace;
+  font-size: 13px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--psc-ink-muted);
+  align-self: start;
+  padding-top: 2px;
+}
+.pixel-skill-card__detail-row dd {
+  margin: 0;
+  font-size: 17px;
+  line-height: 1.3;
+  color: var(--psc-ink);
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+.pixel-skill-card__back-cta {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px 10px;
+}
+.pixel-skill-card__back-button {
+  width: 100%;
+  min-height: 38px;
+  padding: 10px;
+  background: var(--psc-energy);
+  color: var(--psc-energy-ink);
+  font-family: "Press Start 2P", monospace;
+  font-size: 10px;
+  letter-spacing: 0.5px;
+  border: var(--psc-px) solid var(--psc-frame-edge);
+  cursor: pointer;
+  text-shadow: 1px 1px 0 rgba(255, 255, 255, 0.4);
+  /* Pressed-button bevel — light top/left, dark bottom/right. */
+  box-shadow:
+    inset 1px 1px 0 rgba(255, 255, 255, 0.6),
+    inset -1px -1px 0 rgba(0, 0, 0, 0.35);
+  transition:
+    filter 120ms var(--psc-button-easing),
+    transform 80ms var(--psc-button-easing);
+}
+.pixel-skill-card__back-button:hover {
+  filter: brightness(1.06);
+}
+.pixel-skill-card__back-button:active {
+  transform: translate(1px, 1px);
+}
+@media (pointer: coarse) {
+  .pixel-skill-card__back-button {
+    min-height: 44px;
+  }
+}

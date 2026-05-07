@@ -239,11 +239,12 @@ describe("<SkillsApp> SidePanel editor", () => {
 
     render(wrap(<SkillsApp />));
 
-    // Active cards don't surface the View full link in v1; the SidePanel
-    // is reachable only on proposed cards. So the editor textarea must
-    // not be in the DOM.
+    // The PixelSkillCard renders the skill name on both the front header
+    // and the back-face detail panel, so we expect at least one match.
+    // The point of the test is that the editor textarea must not mount
+    // for active skills — the SidePanel preview is reachable but read-only.
     await waitFor(() => {
-      expect(screen.getByText("live-skill")).toBeInTheDocument();
+      expect(screen.getAllByText("live-skill").length).toBeGreaterThan(0);
     });
     expect(
       screen.queryByRole("textbox", { name: /Edit body/i }),
