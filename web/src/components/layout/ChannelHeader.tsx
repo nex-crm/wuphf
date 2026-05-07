@@ -1,8 +1,14 @@
+import { useEffect } from "react";
+
+import { deriveBreadcrumbs } from "../../hooks/useObjectBreadcrumb";
+import { useRecordRecentObject } from "../../hooks/useRecentObjects";
 import { useChannels } from "../../hooks/useChannels";
 import { appTitle } from "../../lib/constants";
+import { resolveObjectRoute } from "../../lib/objectRoutes";
 import { useCurrentRoute } from "../../routes/useCurrentRoute";
 import type { Theme } from "../../stores/app";
 import { useAppStore } from "../../stores/app";
+import { Breadcrumb } from "./Breadcrumb";
 
 function nextTheme(t: Theme): Theme {
   if (t === "noir-gold") return "nex";
@@ -55,21 +61,62 @@ function headerTitleAndDesc(
   }
 }
 
+/**
+ * Derive an ObjectRef for the current route to record in recent-objects.
+ * Returns null for routes that aren't discrete navigable objects (channels,
+ * wiki catalog, etc.) or for the "unknown" sentinel.
+ */
+function routeToObjectRef(
+  route: ReturnType<typeof useCurrentRoute>,
+): Parameters<ReturnType<typeof useRecordRecentObject>>[0] | null {
+  switch (route.kind) {
+    case "dm":
+      return { kind: "agent", slug: route.agentSlug };
+    case "task-detail":
+      return { kind: "task", id: route.taskId };
+    case "wiki-article":
+      return { kind: "wiki-page", path: route.articlePath };
+    case "notebook-entry":
+      return null; // notebook entries are draft surfaces, not canonical objects
+    default:
+      return null;
+  }
+}
+
 export function ChannelHeader() {
   const route = useCurrentRoute();
   const setSearchOpen = useAppStore((s) => s.setSearchOpen);
   const theme = useAppStore((s) => s.theme);
   const setTheme = useAppStore((s) => s.setTheme);
   const { data: channels = [] } = useChannels();
+  const recordRecent = useRecordRecentObject();
 
   const { title, desc } = headerTitleAndDesc(route, channels);
   const targetTheme = nextTheme(theme);
+  const breadcrumbItems = deriveBreadcrumbs(route);
+
+  // Record navigations to discrete objects in the recent-objects list.
+  useEffect(() => {
+    const ref = routeToObjectRef(route);
+    if (ref) {
+      const resolution = resolveObjectRoute(ref);
+      if (!resolution.fallback) {
+        recordRecent(ref);
+      }
+    }
+  }, [route, recordRecent]);
 
   return (
     <div className="channel-header">
-      <div style={{ display: "flex", alignItems: "center" }}>
-        <span className="channel-title">{title}</span>
-        {desc ? <span className="channel-desc">{desc}</span> : null}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0, flex: 1 }}>
+        {breadcrumbItems.length > 0 ? (
+          <Breadcrumb items={breadcrumbItems} />
+        ) : (
+          <>
+            <span className="channel-title">{title}</span>
+            {desc ? <span className="channel-desc">{desc}</span> : null}
+          </>
+        )}
       </div>
       <div className="channel-actions">
         <button
