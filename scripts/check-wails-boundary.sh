@@ -49,6 +49,7 @@ hits="$(
     --glob '!wailsjs/**' \
     --glob '!desktop/wailsjs/**' \
     --glob '!web/wailsjs/**' \
+    --glob '!**/*.md' \
     -e "$go_import_pattern" \
     -e "$ts_import_pattern" \
     .
