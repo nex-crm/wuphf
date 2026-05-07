@@ -224,7 +224,7 @@ describe("<StreamLineView>", () => {
     expect(screen.getByText("Bash ×2")).toBeInTheDocument();
     expect(screen.getByText("Read ×3")).toBeInTheDocument();
     // Text byte stat
-    expect(screen.getByText("1,420 chars")).toBeInTheDocument();
+    expect(screen.getByText("1,420 bytes")).toBeInTheDocument();
     // Token stat (500 + 300 = 800)
     expect(screen.getByText("800 tok")).toBeInTheDocument();
   });

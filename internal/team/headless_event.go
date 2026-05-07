@@ -73,7 +73,7 @@ type HeadlessEvent struct {
 	Metrics   *HeadlessEventMetrics   `json:"metrics,omitempty"`
 	RawType   string                  `json:"raw_type,omitempty"`
 	ToolCalls []HeadlessManifestEntry `json:"tool_calls,omitempty"`
-	TextLen   int                     `json:"text_len,omitempty"`
+	TextLen   *int                    `json:"text_len,omitempty"`
 }
 
 // HeadlessManifestEntry is one tool in a manifest event's ToolCalls list.
@@ -312,7 +312,7 @@ func emitHeadlessManifest(stream *agentStreamBuffer, turnID, provider, slug, tas
 		TaskID:    strings.TrimSpace(taskID),
 		Status:    status,
 		ToolCalls: calls,
-		TextLen:   textLen,
+		TextLen:   &textLen,
 		Metrics:   headlessProgressEventMetrics(metrics, usage),
 	})
 }

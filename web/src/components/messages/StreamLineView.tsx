@@ -241,11 +241,11 @@ function HeadlessEventView({
             );
           })}
           {textLen !== null && textLen > 0 && (
-            <span className="stream-manifest-stat">{textLen.toLocaleString()} chars</span>
+            <span className="stream-manifest-stat">{textLen.toLocaleString("en-US")} bytes</span>
           )}
           {inputTokens !== null && outputTokens !== null && (
             <span className="stream-manifest-stat">
-              {(inputTokens + outputTokens).toLocaleString()} tok
+              {(inputTokens + outputTokens).toLocaleString("en-US")} tok
             </span>
           )}
         </div>

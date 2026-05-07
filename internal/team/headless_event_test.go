@@ -246,8 +246,12 @@ func TestEmitHeadlessManifestAggregatesAndSorts(t *testing.T) {
 	if ev.Status != "idle" {
 		t.Fatalf("status: want idle, got %q", ev.Status)
 	}
-	if ev.TextLen != 1420 {
-		t.Fatalf("text_len: want 1420, got %d", ev.TextLen)
+	if ev.TextLen == nil || *ev.TextLen != 1420 {
+		v := 0
+		if ev.TextLen != nil {
+			v = *ev.TextLen
+		}
+		t.Fatalf("text_len: want 1420, got %d", v)
 	}
 	if ev.Metrics == nil || ev.Metrics.TotalMs != 2000 || ev.Metrics.InputTokens != 500 {
 		t.Fatalf("metrics: %+v", ev.Metrics)
@@ -314,8 +318,12 @@ func TestEmitHeadlessManifestEmptyTools(t *testing.T) {
 	if len(ev.ToolCalls) != 0 {
 		t.Fatalf("ToolCalls must be empty for no-tool turn, got %+v", ev.ToolCalls)
 	}
-	if ev.TextLen != 850 {
-		t.Fatalf("text_len: want 850, got %d", ev.TextLen)
+	if ev.TextLen == nil || *ev.TextLen != 850 {
+		v := 0
+		if ev.TextLen != nil {
+			v = *ev.TextLen
+		}
+		t.Fatalf("text_len: want 850, got %d", v)
 	}
 	// Verify omitempty strips tool_calls from JSON
 	raw := strings.TrimRight(lines[0], "\n")
@@ -334,6 +342,32 @@ func TestEmitHeadlessManifestNilStreamIsSafe(t *testing.T) {
 	}()
 	emitHeadlessManifest(nil, "t", HeadlessProviderClaude, "ceo", "task-1", "",
 		[]string{"Read"}, 100, headlessProgressMetrics{}, nil)
+}
+
+// TestEmitHeadlessManifestFiltersEmptyToolNames verifies that blank or
+// whitespace-only tool names in the accumulator slice are silently
+// dropped before counting. Opencode normalises missing names to "tool"
+// before appending, but other callers could pass raw provider names
+// that arrive empty; the filter ensures they don't inflate the count.
+func TestEmitHeadlessManifestFiltersEmptyToolNames(t *testing.T) {
+	stream := &agentStreamBuffer{subs: make(map[int]agentStreamSubscriber)}
+	toolNames := []string{"Read", "", "  ", "Edit", ""}
+	emitHeadlessManifest(stream, "turn-f1", HeadlessProviderClaude, "ceo", "task-f", "",
+		toolNames, 0, headlessProgressMetrics{}, nil)
+	lines := stream.recentTask("task-f")
+	if len(lines) != 1 {
+		t.Fatalf("expected 1 manifest event, got %d", len(lines))
+	}
+	var ev HeadlessEvent
+	if err := json.Unmarshal([]byte(strings.TrimRight(lines[0], "\n")), &ev); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(ev.ToolCalls) != 2 {
+		t.Fatalf("want 2 tool entries (Read, Edit), got %d: %+v", len(ev.ToolCalls), ev.ToolCalls)
+	}
+	if ev.ToolCalls[0].ToolName != "Edit" || ev.ToolCalls[1].ToolName != "Read" {
+		t.Fatalf("expected alphabetical [Edit, Read], got %+v", ev.ToolCalls)
+	}
 }
 
 // TestHeadlessProgressEventMetricsDropsSentinels pins the "-1 means
