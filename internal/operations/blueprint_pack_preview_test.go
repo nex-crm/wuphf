@@ -57,6 +57,9 @@ func TestLoadBlueprintPackPreviewMetadata(t *testing.T) {
 			if len(bp.Requirements) == 0 {
 				t.Fatalf("blueprint %q declares no requirements — pack library expects at least one", id)
 			}
+			if bp.EstimatedSetupMinutes <= 0 {
+				t.Fatalf("blueprint %q declares invalid estimated_setup_minutes %d", id, bp.EstimatedSetupMinutes)
+			}
 			for _, req := range bp.Requirements {
 				switch req.Kind {
 				case "runtime", "api-key", "local-tool":

@@ -555,7 +555,7 @@ func summarizeBlueprint(bp operations.Blueprint) blueprintSummary {
 	}
 	for _, c := range bp.Starter.Channels {
 		slug := strings.TrimSpace(c.Slug)
-		if slug == "" {
+		if slug == "" || strings.Contains(slug, "{{") {
 			continue
 		}
 		s.Channels = append(s.Channels, blueprintChannelSummary{

@@ -52,7 +52,7 @@ export interface BlueprintFirstTask {
 export type BlueprintRequirementKind = "runtime" | "api-key" | "local-tool";
 
 export interface BlueprintRequirement {
-  kind: BlueprintRequirementKind | string;
+  kind?: BlueprintRequirementKind | (string & {});
   name: string;
   required?: boolean;
   detail?: string;
