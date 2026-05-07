@@ -50,7 +50,7 @@ describe("detectManifestKey", () => {
     setPlatform("win32", "x64");
     expect(detectManifestKey()).toBe("windows-amd64");
   });
-  test("returns null for unsupported (windows arm64) so install does not abort", () => {
+  test("returns windows-arm64 key but manifest has no entry, so install is silently skipped", () => {
     setPlatform("win32", "arm64");
     // cloudflared has no published windows-arm64 asset; the bundler skips
     // silently and the runtime surfaces a clear "missing" error if the

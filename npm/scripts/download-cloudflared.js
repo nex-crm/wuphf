@@ -48,10 +48,11 @@ function loadManifest() {
 }
 
 // Translate Node's process.platform / process.arch into the cloudflared
-// manifest key. Returns null for combinations cloudflared does not publish
-// (notably Windows ARM64 and Linux 386) so callers can skip the download
-// without erroring — the runtime error surface in the Go controller already
-// covers "missing cloudflared".
+// manifest key. Returns null when the arch/platform is unrecognised (e.g.
+// Linux 386). For known-but-unpublished combinations like Windows ARM64 it
+// returns the key ("windows-arm64") so downloadCloudflared() can fall through
+// the "no manifest entry" branch — keeping the error surface in the Go
+// controller where cloudflared is actually required.
 function detectManifestKey() {
   const osMap = { darwin: "darwin", linux: "linux", win32: "windows" };
   const archMap = { x64: "amd64", arm64: "arm64" };

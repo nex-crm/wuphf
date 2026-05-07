@@ -9,8 +9,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/nex-crm/wuphf/cmd/wuphf/channelui"
@@ -695,6 +697,20 @@ func runWeb(args []string, packSlug string, unsafe bool, webPort int, opusCEO bo
 	l.SetNoOpen(noOpen)
 	shareController := newWebShareController(webPort)
 	tunnelController := newWebTunnelController()
+
+	// Clean up tunnel/share subprocesses when the process receives SIGINT or
+	// SIGTERM. Without this, cloudflared is left running as an orphan after
+	// Ctrl+C — especially problematic on Windows where child processes are not
+	// automatically reaped.
+	go func() {
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+		<-sigCh
+		shareController.stop()
+		tunnelController.stop()
+		os.Exit(0)
+	}()
+
 	if err := l.PreflightWeb(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)

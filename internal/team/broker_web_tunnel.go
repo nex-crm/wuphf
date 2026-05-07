@@ -39,7 +39,11 @@ func (b *Broker) SetWebTunnelController(start func() (WebTunnelStatus, error), s
 	b.webTunnelStop = stop
 }
 
-func (b *Broker) handleWebTunnelStatus(w http.ResponseWriter, _ *http.Request) {
+func (b *Broker) handleWebTunnelStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	if b.webTunnelStatus == nil {
 		_ = json.NewEncoder(w).Encode(WebTunnelStatus{})
