@@ -25,12 +25,8 @@ import { confirm as confirmDialog } from "../ui/ConfirmDialog";
 import { LightningIcon } from "../ui/LightningIcon";
 import { SidePanel } from "../ui/SidePanel";
 import { showNotice, showUndoToast } from "../ui/Toast";
-import { OwnersChip } from "./skills/OwnersChip";
-import {
-  ProposedPreviewBody,
-  SkillPreviewBody,
-} from "./skills/SkillPreviewBody";
-import { STATUS_BADGE_CLASS } from "./skills/status";
+import { PixelSkillCard } from "./skills/PixelSkillCard";
+import { SkillPreviewBody } from "./skills/SkillPreviewBody";
 
 export { OwnersChip } from "./skills/OwnersChip";
 
@@ -284,7 +280,11 @@ export function SkillsApp() {
     <>
       <div
         style={{
-          padding: "0 0 12px",
+          // The .app-panel's top padding is zeroed for skills surfaces
+          // (so the sticky OwnerFilterBar can land flush at the scroll
+          // top). Re-add the inset here so the heading still has air
+          // when scrolled to the top.
+          padding: "20px 0 12px",
           borderBottom: "1px solid var(--border)",
           marginBottom: 16,
           display: "flex",
@@ -459,9 +459,14 @@ function OwnerFilterBar({
         marginBottom: 14,
         position: "sticky",
         top: 0,
-        zIndex: 5,
-        background: "var(--bg-card, #fff)",
-        paddingBottom: 8,
+        zIndex: 20,
+        background: "var(--bg, var(--bg-card, #fff))",
+        // Padding extends the opaque bg fully across the row so cards
+        // can't peek through when scrolling under it. The .app-panel's
+        // top padding is zeroed for skills surfaces (in layout.css)
+        // so this row sits flush at the scroll-container edge.
+        padding: "12px 0",
+        boxShadow: "0 6px 8px -8px rgba(0, 0, 0, 0.25)",
       }}
     >
       <label
@@ -532,7 +537,7 @@ function SkillSection({
         <StatusDot status={status} />
         {title} ({count})
       </div>
-      {children}
+      <div className="pixel-skill-card-grid">{children}</div>
     </section>
   );
 }
@@ -596,14 +601,16 @@ function DisabledSection({
             Nothing disabled. You can pause a skill anytime by clicking Disable.
           </div>
         ) : (
-          skills.map((skill) => (
-            <SkillCard
-              key={skill.name}
-              skill={skill}
-              onPreview={onPreview}
-              leadSlug={leadSlug}
-            />
-          ))
+          <div className="pixel-skill-card-grid">
+            {skills.map((skill) => (
+              <SkillCard
+                key={skill.name}
+                skill={skill}
+                onPreview={onPreview}
+                leadSlug={leadSlug}
+              />
+            ))}
+          </div>
         )
       ) : null}
     </section>
@@ -668,14 +675,16 @@ function ArchivedSection({
             No archived skills.
           </div>
         ) : (
-          skills.map((skill) => (
-            <SkillCard
-              key={skill.name}
-              skill={skill}
-              onPreview={onPreview}
-              leadSlug={leadSlug}
-            />
-          ))
+          <div className="pixel-skill-card-grid">
+            {skills.map((skill) => (
+              <SkillCard
+                key={skill.name}
+                skill={skill}
+                onPreview={onPreview}
+                leadSlug={leadSlug}
+              />
+            ))}
+          </div>
         )
       ) : null}
     </section>
@@ -1295,7 +1304,6 @@ function SuggestChangesExpander({
   );
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
 function SkillCard({
   skill,
   onPreview,
@@ -1307,76 +1315,27 @@ function SkillCard({
 }) {
   const status = deriveStatus(skill);
   const sourceArticles = skill.metadata?.wuphf?.source_articles ?? [];
-  const isArchived = status === "archived";
-  const isDisabled = status === "disabled";
   const isProposed = status === "proposed";
-  const cardSlugId = `skill-${skill.name || "untitled"}-name`;
   const [suggestOpen, setSuggestOpen] = useState(false);
 
+  // The pixel card chrome paints name/description/owners/status as a
+  // Pokémon-style trading card. Below the card we keep the workaday bits
+  // — proposed-only similarity hint, "View full SKILL.md", provenance,
+  // and the action button row — so the existing flows (approve, reject,
+  // suggest, archive, invoke) stay completely intact.
   return (
-    <article
-      className={[
-        "app-card",
-        isProposed ? "app-card--proposed" : "",
-        isDisabled ? "app-card--disabled" : "",
-      ]
-        .filter(Boolean)
-        .join(" ")}
-      aria-labelledby={cardSlugId}
-      style={{
-        marginBottom: 8,
-        opacity: isArchived ? 0.6 : 1,
-      }}
-    >
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          marginBottom: 4,
-          flexWrap: "wrap",
-        }}
-      >
-        <LightningIcon size={16} />
-        <span
-          className="app-card-title"
-          id={cardSlugId}
-          style={{ marginBottom: 0 }}
-        >
-          {skill.name || "Untitled"}
-        </span>
-        <span className={STATUS_BADGE_CLASS[status]}>{status}</span>
-        {isProposed ? (
-          <span className="badge badge-yellow" style={{ marginLeft: 6 }}>
-            AI-suggested
-          </span>
-        ) : null}
-        <OwnersChip slugs={skill.owner_agents} />
-      </div>
-
-      {skill.description ? (
-        <div
-          style={{
-            fontSize: 13,
-            color: "var(--text-secondary)",
-            marginBottom: 6,
-            lineHeight: 1.45,
-          }}
-        >
-          {skill.description}
-        </div>
-      ) : null}
-
-      {isProposed ? (
+    <PixelSkillCard
+      skill={skill}
+      onPreview={() => onPreview(skill)}
+      actions={
         <>
-          {skill.similar_to_existing ? (
-            <div
+          {isProposed && skill.similar_to_existing ? (
+            <span
               style={{
                 display: "inline-flex",
                 alignItems: "center",
                 gap: 6,
                 padding: "3px 8px",
-                marginBottom: 8,
                 background: "var(--bg-warm, var(--neutral-50))",
                 border: "1px solid var(--border)",
                 borderRadius: 4,
@@ -1390,59 +1349,38 @@ function SkillCard({
               <strong style={{ fontFamily: "var(--font-mono)" }}>
                 {skill.similar_to_existing.slug}
               </strong>
-            </div>
+            </span>
           ) : null}
-          <ProposedPreviewBody skill={skill} />
-          <SkillProvenance articles={sourceArticles} />
+          {isProposed ? <SkillProvenance articles={sourceArticles} /> : null}
+          <button
+            type="button"
+            onClick={() => onPreview(skill)}
+            className="btn-text"
+            style={{
+              padding: "2px 0",
+              fontSize: 12,
+              color: "var(--accent, #1264a3)",
+            }}
+            aria-label={`View SKILL.md for ${skill.name}`}
+          >
+            View SKILL.md →
+          </button>
+          <SkillActions
+            status={status}
+            skillName={skill.name}
+            onSuggestChanges={
+              isProposed ? () => setSuggestOpen((v) => !v) : undefined
+            }
+          />
+          {isProposed && suggestOpen ? (
+            <SuggestChangesExpander
+              skillName={skill.name}
+              leadSlug={leadSlug}
+              onClose={() => setSuggestOpen(false)}
+            />
+          ) : null}
         </>
-      ) : null}
-
-      {skill.source && !isProposed ? (
-        <div className="app-card-meta" style={{ marginBottom: 8 }}>
-          Source: {skill.source}
-        </div>
-      ) : null}
-
-      <button
-        type="button"
-        onClick={() => onPreview(skill)}
-        className="btn-text"
-        style={{
-          padding: "2px 0",
-          fontSize: 12,
-          color: "var(--accent, #1264a3)",
-          marginBottom: 4,
-        }}
-        aria-label={`View SKILL.md for ${skill.name}`}
-      >
-        View SKILL.md →
-      </button>
-
-      <div
-        style={{
-          display: "flex",
-          gap: 8,
-          marginTop: 10,
-          alignItems: "center",
-          flexWrap: "wrap",
-        }}
-      >
-        <SkillActions
-          status={status}
-          skillName={skill.name}
-          onSuggestChanges={
-            isProposed ? () => setSuggestOpen((v) => !v) : undefined
-          }
-        />
-      </div>
-
-      {isProposed && suggestOpen ? (
-        <SuggestChangesExpander
-          skillName={skill.name}
-          leadSlug={leadSlug}
-          onClose={() => setSuggestOpen(false)}
-        />
-      ) : null}
-    </article>
+      }
+    />
   );
 }
