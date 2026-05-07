@@ -1,0 +1,10 @@
+Why: Sending a welcome note to a new user.
+
+What this will do:
+• To: alex@nex.ai
+• Subject: Welcome to Nex
+• Body: Hi Alex, welcome aboard! Looking forward to working with you. -Nazz
+
+Action: GMAIL_SEND_EMAIL via Gmail
+Account: live::gmail::default::abc123
+Channel: #general

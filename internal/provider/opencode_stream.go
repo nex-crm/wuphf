@@ -1,7 +1,6 @@
 package provider
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -60,12 +59,12 @@ type opencodeRawPart struct {
 // Lines that do not decode as JSON (banners, warnings printed before the
 // stream opens, fallbacks from older opencode builds) are surfaced as plain
 // "text" events so no agent output is silently dropped.
+//
+// Drained via DrainStreamLines so a single oversized JSONL line never wedges
+// the cmd's stdout pipe and never aborts parsing of subsequent lines.
 func ReadOpencodeJSONStream(r io.Reader, onEvent func(OpencodeStreamEvent)) (OpencodeStreamResult, error) {
 	var result OpencodeStreamResult
 	var text strings.Builder
-
-	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 
 	emit := func(ev OpencodeStreamEvent) {
 		if onEvent != nil {
@@ -73,11 +72,11 @@ func ReadOpencodeJSONStream(r io.Reader, onEvent func(OpencodeStreamEvent)) (Ope
 		}
 	}
 
-	for scanner.Scan() {
-		line := scanner.Text()
+	err := DrainStreamLines(r, func(raw string) {
+		line := strings.TrimRight(raw, "\r\n")
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" {
-			continue
+			return
 		}
 
 		// Cheap JSON-object detector before we pay for json.Unmarshal —
@@ -92,22 +91,22 @@ func ReadOpencodeJSONStream(r io.Reader, onEvent func(OpencodeStreamEvent)) (Ope
 
 		if !strings.HasPrefix(trimmed, "{") {
 			appendPlain()
-			continue
+			return
 		}
 
 		var ev opencodeRawEvent
-		if err := json.Unmarshal([]byte(trimmed), &ev); err != nil {
+		if jsonErr := json.Unmarshal([]byte(trimmed), &ev); jsonErr != nil {
 			// Forward malformed/unrecognised JSON as plain text rather than
 			// dropping it on the floor. Mirrors the shim behavior in #313.
 			appendPlain()
-			continue
+			return
 		}
 
 		switch ev.Type {
 		case "text":
 			chunk := ev.Part.Text
 			if chunk == "" {
-				continue
+				return
 			}
 			text.WriteString(chunk)
 			emit(OpencodeStreamEvent{Type: "text", Text: chunk, Detail: chunk, Raw: line})
@@ -135,8 +134,8 @@ func ReadOpencodeJSONStream(r io.Reader, onEvent func(OpencodeStreamEvent)) (Ope
 			// diagnose without us having to enumerate every minor's schema.
 			emit(OpencodeStreamEvent{Type: ev.Type, Raw: line})
 		}
-	}
-	if err := scanner.Err(); err != nil {
+	})
+	if err != nil {
 		return result, fmt.Errorf("read opencode json stream: %w", err)
 	}
 

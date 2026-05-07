@@ -160,6 +160,13 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 			"Return the canonical runtime snapshot for this direct session, including tasks, pending human requests, recovery summary, and runtime capabilities.",
 		), handleTeamRuntimeState)
 
+		// CEO-only: in 1:1 / DM mode the CEO can still call review to see
+		// the office's promotion candidates from a private chat. Same lead
+		// gate as the office and DM branches below.
+		if slug == "" || slug == "ceo" {
+			registerNotebookReviewTool(server)
+		}
+
 		if hasActionProvider() {
 			registerActionTools(server)
 		}
@@ -197,6 +204,9 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 			"Invoke a named team skill. When the human's request matches an available skill, call this BEFORE replying — do not freelance. Bumps the skill's usage, logs a skill_invocation to the channel, and returns the skill's canonical step-by-step content for you to follow.",
 		), handleTeamSkillRun)
 		registerSkillAuthoringTools(server)
+		if isLead {
+			registerNotebookReviewTool(server)
+		}
 		if hasActionProvider() {
 			registerActionTools(server)
 		}
@@ -335,6 +345,7 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 			"team_member",
 			"Create or remove an office-wide member. Only create new members when the human explicitly wants to expand the team.",
 		), handleTeamMember)
+		registerNotebookReviewTool(server)
 	}
 }
 

@@ -699,6 +699,7 @@ func runWeb(args []string, packSlug string, unsafe bool, webPort int, opusCEO bo
 		os.Exit(1)
 	}
 	wireBrokerWorkspaces(l, func(b *team.Broker) {
+		shareController.SetBroker(b)
 		b.SetWebShareController(shareController.start, shareController.status, shareController.stop)
 	})
 	fmt.Printf("Launching %s web view (%d agents)... the browser is the office now.\n", l.PackName(), l.AgentCount())

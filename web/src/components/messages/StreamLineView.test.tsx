@@ -105,6 +105,98 @@ describe("<StreamLineView>", () => {
     expect(screen.getByText(/permission denied/)).toBeInTheDocument();
   });
 
+  it("renders a HeadlessEvent idle envelope as an idle status card", () => {
+    // Pin the discriminator-first routing: when parsed.kind === "headless_event"
+    // the view must render the typed envelope and not fall through to the
+    // provider-native branches (assistant/mcp_tool_event/...).
+    render(
+      <StreamLineView
+        line={{
+          id: 1,
+          data: "",
+          parsed: {
+            kind: "headless_event",
+            type: "idle",
+            provider: "claude",
+            agent: "ceo",
+            text: "reply ready · ttft 90ms",
+            status: "idle",
+            metrics: { total_ms: 1500, first_text_ms: 90 },
+          },
+        }}
+      />,
+    );
+    expect(screen.getByText("idle")).toBeInTheDocument();
+    expect(screen.getByText("claude")).toBeInTheDocument();
+    expect(screen.getByText(/reply ready/)).toBeInTheDocument();
+  });
+
+  it("renders a HeadlessEvent error envelope with the failure detail", () => {
+    render(
+      <StreamLineView
+        line={{
+          id: 1,
+          data: "",
+          parsed: {
+            kind: "headless_event",
+            type: "error",
+            provider: "codex",
+            agent: "eng",
+            text: "auth: 401 unauthorized",
+            detail: "auth: 401 unauthorized",
+            status: "error",
+          },
+        }}
+      />,
+    );
+    expect(screen.getByText("error")).toBeInTheDocument();
+    expect(screen.getByText("codex")).toBeInTheDocument();
+    expect(screen.getByText("auth: 401 unauthorized")).toBeInTheDocument();
+  });
+
+  it("renders a HeadlessEvent text envelope as a thinking block", () => {
+    render(
+      <StreamLineView
+        line={{
+          id: 1,
+          data: "",
+          parsed: {
+            kind: "headless_event",
+            type: "text",
+            provider: "claude",
+            agent: "ceo",
+            text: "Shipping the update now",
+            status: "active",
+            turn_id: "abc123",
+          },
+        }}
+      />,
+    );
+    expect(screen.getByText("Shipping the update now")).toBeInTheDocument();
+  });
+
+  it("renders a HeadlessEvent tool_use envelope as a tool call card", () => {
+    render(
+      <StreamLineView
+        line={{
+          id: 1,
+          data: "",
+          parsed: {
+            kind: "headless_event",
+            type: "tool_use",
+            provider: "codex",
+            agent: "eng",
+            tool_name: "team_broadcast",
+            detail: '{"channel":"general","content":"Done"}',
+            status: "active",
+            turn_id: "xyz789",
+          },
+        }}
+      />,
+    );
+    expect(screen.getByText("team_broadcast")).toBeInTheDocument();
+  });
+
   it("renders Codex completed message content arrays", () => {
     render(
       <StreamLineView

@@ -1,5 +1,5 @@
 // biome-ignore-all lint/a11y/useValidAnchor: Anchor is intercepted by the app router or markdown renderer while preserving href fallback behavior.
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import type { PluggableList } from "unified";
 
@@ -15,6 +15,7 @@ import {
   type WikiArticle as WikiArticleT,
   type WikiCatalogEntry,
   type WikiHistoryCommit,
+  type WikiMaintenanceAction,
 } from "../../api/wiki";
 import { formatAgentName } from "../../lib/agentName";
 import { keyedByOccurrence } from "../../lib/reactKeys";
@@ -33,6 +34,7 @@ import EntityRelatedPanel from "./EntityRelatedPanel";
 import FactsOnFile from "./FactsOnFile";
 import HatBar, { type HatBarTab } from "./HatBar";
 import Hatnote from "./Hatnote";
+import { consumeMaintenanceTarget } from "./maintenanceTarget";
 import PageFooter from "./PageFooter";
 import PageStatsPanel from "./PageStatsPanel";
 import PlaybookExecutionLog from "./PlaybookExecutionLog";
@@ -44,6 +46,7 @@ import Sources from "./Sources";
 import TeamLearningPanel from "./TeamLearningPanel";
 import TocBox, { type TocEntry } from "./TocBox";
 import WikiEditor from "./WikiEditor";
+import WikiMaintenanceAssistant from "./WikiMaintenanceAssistant";
 
 const STALENESS_STALE_DAYS = 30;
 const STALENESS_AGING_DAYS = 7;
@@ -421,6 +424,7 @@ export default function WikiArticle({
         article={article}
         toc={toc}
         onNavigate={onNavigate}
+        onMaintenanceApplied={() => setRefreshNonce((n) => n + 1)}
       />
     </>
   );
@@ -638,11 +642,32 @@ function ArticleRightSidebar({
   article,
   toc,
   onNavigate,
+  onMaintenanceApplied,
 }: {
   article: WikiArticleT;
   toc: TocEntry[];
   onNavigate: (path: string) => void;
+  onMaintenanceApplied: () => void;
 }) {
+  // Consume the WikiLint "Suggest fix" hand-off exactly once per article
+  // path. The consume call removes the slot from sessionStorage, so it is a
+  // side effect — running it inside useMemo would let React 19 strict mode
+  // double-invoke it and lose the hand-off (the first call clears the slot;
+  // the second sees nothing). We do the consume inside a useEffect guarded
+  // by a ref so the result is captured by the first mount and not undone
+  // by strict-mode's intentional double-invoke.
+  const [initialMaintenanceAction, setInitialMaintenanceAction] = useState<
+    WikiMaintenanceAction | undefined
+  >(undefined);
+  const consumedForPathRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (consumedForPathRef.current === article.path) return;
+    consumedForPathRef.current = article.path;
+    const target = consumeMaintenanceTarget(article.path) ?? undefined;
+    if (target) {
+      setInitialMaintenanceAction(target);
+    }
+  }, [article.path]);
   return (
     <aside className="wk-right-sidebar">
       <TocBox entries={toc} />
@@ -652,6 +677,12 @@ function ArticleRightSidebar({
         wordCount={article.word_count}
         created={article.last_edited_ts}
         lastEdit={article.last_edited_ts}
+      />
+      <WikiMaintenanceAssistant
+        articlePath={article.path}
+        articleSha={article.commit_sha ?? ""}
+        onApplied={onMaintenanceApplied}
+        initialAction={initialMaintenanceAction ?? undefined}
       />
       <CiteThisPagePanel slug={article.path} />
       <ReferencedBy backlinks={article.backlinks} onNavigate={onNavigate} />

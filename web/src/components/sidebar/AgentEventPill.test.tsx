@@ -124,4 +124,23 @@ describe("<AgentEventPill>", () => {
     const pill = container.querySelector(".sidebar-agent-pill");
     expect(pill?.textContent?.length ?? 0).toBeGreaterThan(0);
   });
+
+  it("does NOT carry aria-haspopup or aria-expanded — the chevron sibling owns the dialog trigger", () => {
+    // Separation of concerns pin: the pill is a passive Tier 1 status
+    // surface. The Tier 2 hover peek is owned by the chevron button
+    // rendered as a sibling in <SidebarAgentRow>. Putting popup ARIA on
+    // both surfaces would lie to assistive tech about which control
+    // opens the peek.
+    const { container } = render(
+      <AgentEventPill
+        slug="devon"
+        agentRole="engineer"
+        fallbackTask="reading channel context"
+      />,
+    );
+    const pill = container.querySelector(".sidebar-agent-pill");
+    expect(pill).not.toBeNull();
+    expect(pill?.hasAttribute("aria-haspopup")).toBe(false);
+    expect(pill?.hasAttribute("aria-expanded")).toBe(false);
+  });
 });
