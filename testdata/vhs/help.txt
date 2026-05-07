@@ -3,7 +3,7 @@ WUPHF vdev — the terminal office Ryan Howard always wanted.
 
 Usage:
   wuphf              Launch multi-agent team (web UI on :7891)
-  wuphf --tui        Launch with tmux TUI instead
+  wuphf --legacy-tui  Launch with legacy tmux TUI instead
   wuphf init         Install the latest CLI and save setup defaults
   wuphf upgrade      Check npm for a newer version and show the changelog
   wuphf shred        Burn the workspace down and reopen onboarding
@@ -33,6 +33,8 @@ Flags:
         Output format (text, json) (default "text")
   --from-scratch
         Start without a saved blueprint and synthesize the first operation from the directive
+  --legacy-tui
+        Launch with legacy tmux TUI instead of the web UI (deprecated; slated for removal)
   --memory-backend
         Memory backend for organizational context (nex, gbrain, none)
   --no-nex
@@ -44,5 +46,3 @@ Flags:
   --pack
         Operation blueprint ID (legacy pack alias supported)
   --provider
-        LLM provider override for this run (claude-code, codex, opencode)
-  --threads-collapsed
