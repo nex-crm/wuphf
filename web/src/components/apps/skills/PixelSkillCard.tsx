@@ -57,7 +57,12 @@ function formatLongDate(iso?: string): string | null {
   if (!iso) return null;
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return null;
+  // Pin to UTC: skill timestamps come from the broker as UTC and we want
+  // every viewer to see the same calendar day regardless of their local
+  // zone. Without timeZone:"UTC" a midnight-Z timestamp would render as
+  // the previous day for anyone west of UTC.
   return date.toLocaleDateString("en-US", {
+    timeZone: "UTC",
     month: "short",
     day: "numeric",
     year: "numeric",

@@ -599,14 +599,16 @@ function DisabledSection({
             Nothing disabled. You can pause a skill anytime by clicking Disable.
           </div>
         ) : (
-          skills.map((skill) => (
-            <SkillCard
-              key={skill.name}
-              skill={skill}
-              onPreview={onPreview}
-              leadSlug={leadSlug}
-            />
-          ))
+          <div className="pixel-skill-card-grid">
+            {skills.map((skill) => (
+              <SkillCard
+                key={skill.name}
+                skill={skill}
+                onPreview={onPreview}
+                leadSlug={leadSlug}
+              />
+            ))}
+          </div>
         )
       ) : null}
     </section>
@@ -671,14 +673,16 @@ function ArchivedSection({
             No archived skills.
           </div>
         ) : (
-          skills.map((skill) => (
-            <SkillCard
-              key={skill.name}
-              skill={skill}
-              onPreview={onPreview}
-              leadSlug={leadSlug}
-            />
-          ))
+          <div className="pixel-skill-card-grid">
+            {skills.map((skill) => (
+              <SkillCard
+                key={skill.name}
+                skill={skill}
+                onPreview={onPreview}
+                leadSlug={leadSlug}
+              />
+            ))}
+          </div>
         )
       ) : null}
     </section>
