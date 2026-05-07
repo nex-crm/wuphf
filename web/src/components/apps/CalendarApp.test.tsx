@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { SchedulerJob } from "../../api/client";
 import type { Task } from "../../api/tasks";
@@ -78,6 +78,17 @@ function mondayOfThisWeek(): string {
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
+
+const FIXED_DATE = new Date("2025-06-16T12:00:00Z"); // a stable Monday
+
+beforeAll(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(FIXED_DATE);
+});
+
+afterAll(() => {
+  vi.useRealTimers();
+});
 
 beforeEach(() => {
   mockTasksData.data = [];
@@ -343,18 +354,19 @@ describe("CalendarApp — week navigation", () => {
   });
 
   it("navigates to the next week on clicking Next week", async () => {
+    // Place the task in the next week so the grid is visible after navigation
     mockTasksData.data = [
       makeTask({
         id: "t-next",
         title: "Next week task",
         owner: "agent-a",
-        due_at: daysFromToday(0),
+        due_at: daysFromToday(7),
       }),
     ];
     wrap(<CalendarApp />);
     const nextBtn = screen.getByLabelText("Next week");
     await userEvent.click(nextBtn);
-    // Grid should still render (week header changed)
+    // Grid should render because the task falls in the navigated week
     const grid = await screen.findByTestId("week-grid");
     expect(grid).toBeTruthy();
   });
@@ -436,14 +448,24 @@ describe("CalendarApp — week boundary (Sunday/Monday)", () => {
     expect(cols.length).toBe(8);
   });
 
-  it("Monday of week derived correctly regardless of current day", () => {
-    // Derive Monday programmatically and check it is in the header text
+  it("Monday of week derived correctly regardless of current day", async () => {
+    // Derive Monday programmatically and check it appears in the first day header
     const monday = mondayOfThisWeek();
     const dayNum = new Date(`${monday}T00:00:00Z`).getUTCDate();
+    mockTasksData.data = [
+      makeTask({
+        id: "t-boundary2",
+        title: "Boundary task 2",
+        owner: "agent-a",
+        due_at: daysFromToday(0),
+      }),
+    ];
     wrap(<CalendarApp />);
-    const appEl = screen.getByTestId("calendar-app");
-    // The day number should appear somewhere in the calendar header
-    expect(appEl.textContent).toMatch(new RegExp(String(dayNum)));
+    await screen.findByTestId("week-grid");
+    // columnheaders: index 0 is the empty agent label, index 1 is the first day (Monday)
+    const headers = screen.getAllByRole("columnheader");
+    // The Monday day header (index 1) should contain the day number
+    expect(headers[1].textContent).toContain(String(dayNum));
   });
 });
 

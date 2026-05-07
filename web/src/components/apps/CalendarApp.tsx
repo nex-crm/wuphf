@@ -1,4 +1,3 @@
-// biome-ignore-all lint/a11y/useKeyWithClickEvents: Calendar cells and task chips are navigable via explicit link/button children; div click handlers handle supplemental pointer shortcuts.
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
@@ -118,6 +117,7 @@ type ViewMode = "week" | "agenda";
  * scheduler jobs in a distinct visual treatment.
  * Unscheduled tasks appear in a bottom tray; unassigned tasks get their own
  * swimlane.
+ * An agenda/list view is available via the header toggle (recommended on narrow viewports).
  */
 export function CalendarApp() {
   const today = new Date();
@@ -550,8 +550,8 @@ interface AgendaViewProps {
 }
 
 /**
- * Agenda view — linear day-by-day list. Used automatically on mobile (toggle)
- * and available on desktop via the view switcher.
+ * Agenda view — linear day-by-day list. Available via the header toggle
+ * (recommended on narrow viewports).
  */
 function AgendaView({
   dayKeys,
@@ -634,6 +634,7 @@ function TaskChip({ task, compact = false }: TaskChipProps) {
   return (
     <a
       href={route.href}
+      aria-label={`${task.title} — ${label}`}
       title={`${task.title} — ${label}`}
       data-testid={`task-chip-${task.id}`}
       style={{
@@ -666,7 +667,10 @@ function TaskChip({ task, compact = false }: TaskChipProps) {
           verticalAlign: "middle",
         }}
       />
-      {task.title}
+      <span>{task.title}</span>
+      <span style={{ marginLeft: 4, fontSize: 10, color: "var(--text-tertiary)" }}>
+        · {label}
+      </span>
     </a>
   );
 }
