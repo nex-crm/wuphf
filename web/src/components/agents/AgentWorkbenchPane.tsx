@@ -2,12 +2,12 @@ import { useEffect, useMemo, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import {
-  getOfficeTasks,
   listAgentLogTasks,
   type Task,
   type TaskLogSummary,
 } from "../../api/tasks";
 import { useAgentStream } from "../../hooks/useAgentStream";
+import { useOfficeTasks } from "../../hooks/useOfficeTasks";
 import { formatRelativeTime } from "../../lib/format";
 import { router } from "../../lib/router";
 import { StreamLineView } from "../messages/StreamLineView";
@@ -44,11 +44,7 @@ function openTaskDetail(taskId: string): void {
 }
 
 export function AgentWorkbenchPane({ agentSlug }: AgentWorkbenchPaneProps) {
-  const { data: tasksData } = useQuery({
-    queryKey: ["office-tasks"],
-    queryFn: () => getOfficeTasks({ includeDone: true }),
-    refetchInterval: 10_000,
-  });
+  const { data: tasks = [] } = useOfficeTasks();
   // Office-wide run log is not server-side filterable by agent, so we fetch a
   // wide window and trim client-side. 80 was small enough that an active
   // neighbour could starve this agent's recent runs out of the response;
@@ -60,8 +56,7 @@ export function AgentWorkbenchPane({ agentSlug }: AgentWorkbenchPaneProps) {
   });
 
   const { activeTasks, recentTasks } = useMemo(() => {
-    const allTasks = tasksData?.tasks ?? [];
-    const owned = allTasks.filter((task) => task.owner === agentSlug);
+    const owned = tasks.filter((task) => task.owner === agentSlug);
     const active: Task[] = [];
     const recent: Task[] = [];
     for (const task of owned) {
@@ -71,7 +66,7 @@ export function AgentWorkbenchPane({ agentSlug }: AgentWorkbenchPaneProps) {
     active.sort(compareByRecency);
     recent.sort(compareByRecency);
     return { activeTasks: active, recentTasks: recent.slice(0, 8) };
-  }, [tasksData, agentSlug]);
+  }, [tasks, agentSlug]);
 
   const recentRuns = useMemo(() => {
     const runs = runsData?.tasks ?? [];
