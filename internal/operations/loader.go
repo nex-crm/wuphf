@@ -72,7 +72,79 @@ func normalizeBlueprint(templateID string, blueprint Blueprint) Blueprint {
 	blueprint.EmployeeBlueprints = appendUniqueTemplateIDs(blueprint.EmployeeBlueprints, starterEmployeeBlueprintIDs(blueprint.Starter.Agents)...)
 	blueprint.DefaultReviewer = strings.TrimSpace(blueprint.DefaultReviewer)
 	blueprint.ReviewerPaths = normalizeReviewerPaths(blueprint.ReviewerPaths)
+	blueprint.Outcome = strings.TrimSpace(blueprint.Outcome)
+	blueprint.Category = strings.TrimSpace(strings.ToLower(blueprint.Category))
+	blueprint.FirstTasks = normalizeFirstTasks(blueprint.FirstTasks)
+	blueprint.Skills = normalizeBlueprintSkills(blueprint.Skills)
+	blueprint.Requirements = normalizeBlueprintRequirements(blueprint.Requirements)
+	blueprint.ExampleArtifacts = normalizeExampleArtifacts(blueprint.ExampleArtifacts)
+	if blueprint.EstimatedSetupMinutes < 0 {
+		blueprint.EstimatedSetupMinutes = 0
+	}
 	return blueprint
+}
+
+func normalizeFirstTasks(tasks []BlueprintFirstTask) []BlueprintFirstTask {
+	out := make([]BlueprintFirstTask, 0, len(tasks))
+	for _, task := range tasks {
+		task.ID = normalizeTemplateID(task.ID)
+		task.Title = strings.TrimSpace(task.Title)
+		task.Prompt = strings.TrimSpace(task.Prompt)
+		task.ExpectedOutput = strings.TrimSpace(task.ExpectedOutput)
+		if task.ID == "" && task.Title == "" {
+			continue
+		}
+		if task.ID == "" {
+			task.ID = normalizeTemplateID(task.Title)
+		}
+		out = append(out, task)
+	}
+	return out
+}
+
+func normalizeBlueprintSkills(skills []BlueprintSkill) []BlueprintSkill {
+	out := make([]BlueprintSkill, 0, len(skills))
+	for _, skill := range skills {
+		skill.Name = strings.TrimSpace(skill.Name)
+		skill.Purpose = strings.TrimSpace(skill.Purpose)
+		if skill.Name == "" {
+			continue
+		}
+		out = append(out, skill)
+	}
+	return out
+}
+
+func normalizeBlueprintRequirements(reqs []BlueprintRequirement) []BlueprintRequirement {
+	out := make([]BlueprintRequirement, 0, len(reqs))
+	for _, req := range reqs {
+		req.Kind = strings.TrimSpace(strings.ToLower(req.Kind))
+		req.Name = strings.TrimSpace(req.Name)
+		req.Detail = strings.TrimSpace(req.Detail)
+		if req.Name == "" {
+			continue
+		}
+		// Default to "runtime" so an unkinded entry still renders
+		// rather than being silently dropped on the wire.
+		if req.Kind == "" {
+			req.Kind = "runtime"
+		}
+		out = append(out, req)
+	}
+	return out
+}
+
+func normalizeExampleArtifacts(items []BlueprintExampleAsset) []BlueprintExampleAsset {
+	out := make([]BlueprintExampleAsset, 0, len(items))
+	for _, item := range items {
+		item.Kind = strings.TrimSpace(item.Kind)
+		item.Title = strings.TrimSpace(item.Title)
+		if item.Title == "" {
+			continue
+		}
+		out = append(out, item)
+	}
+	return out
 }
 
 func normalizeReviewerPaths(rules ReviewerPathMap) ReviewerPathMap {

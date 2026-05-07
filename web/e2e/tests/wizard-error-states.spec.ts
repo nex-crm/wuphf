@@ -41,11 +41,11 @@ async function advanceToSetupStep(page: Page) {
   await page.locator("#wiz-company").fill("E2E Error States");
   await page.locator("#wiz-description").fill("Wizard error path test");
   await page.locator(".wizard-step button.btn-primary").first().click();
-  // templates → team. Wizard.tsx renders one .template-card per
+  // templates → team. The pack-library renders one .pack-card per
   // blueprint plus a separate "From scratch" button; click the first
   // real card so we exercise the seeded path, not the from-scratch
   // fallback.
-  const templateTile = page.locator(".template-card").first();
+  const templateTile = page.locator(".pack-card").first();
   if (await templateTile.count()) {
     await templateTile.click();
   }

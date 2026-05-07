@@ -20,6 +20,19 @@ type Blueprint struct {
 	Workflows          []WorkflowTemplate      `json:"workflows,omitempty" yaml:"workflows,omitempty"`
 	WikiSchema         *BlueprintWikiSchema    `json:"wiki_schema,omitempty" yaml:"wiki_schema,omitempty"`
 
+	// PackPreview metadata. Surfaced by the onboarding wizard's pack
+	// library so a new user can see the agents, channels, skills, wiki
+	// scaffold, first tasks, and provider requirements for a pack
+	// before committing. Optional — older blueprints without these
+	// fields still load and degrade gracefully in the UI.
+	Outcome               string                  `json:"outcome,omitempty" yaml:"outcome,omitempty"`
+	Category              string                  `json:"category,omitempty" yaml:"category,omitempty"`
+	FirstTasks            []BlueprintFirstTask    `json:"first_tasks,omitempty" yaml:"first_tasks,omitempty"`
+	Skills                []BlueprintSkill        `json:"skills,omitempty" yaml:"skills,omitempty"`
+	Requirements          []BlueprintRequirement  `json:"requirements,omitempty" yaml:"requirements,omitempty"`
+	EstimatedSetupMinutes int                     `json:"estimated_setup_minutes,omitempty" yaml:"estimated_setup_minutes,omitempty"`
+	ExampleArtifacts      []BlueprintExampleAsset `json:"example_artifacts,omitempty" yaml:"example_artifacts,omitempty"`
+
 	// DefaultReviewer is the agent slug that approves promotions by default.
 	// The sentinel value "human-only" disables agent approval entirely and
 	// forces a human click in the web UI. Falls back to "ceo" if empty.
@@ -49,6 +62,41 @@ type BlueprintWikiBootstrapItem struct {
 	Path     string `json:"path" yaml:"path"`
 	Title    string `json:"title,omitempty" yaml:"title,omitempty"`
 	Skeleton string `json:"skeleton,omitempty" yaml:"skeleton,omitempty"`
+}
+
+// BlueprintFirstTask is a suggested first prompt the wizard can show
+// before commit and (later) post into the pack's first channel after
+// setup. Prompts are author-written, not LLM-generated.
+type BlueprintFirstTask struct {
+	ID             string `json:"id" yaml:"id"`
+	Title          string `json:"title" yaml:"title"`
+	Prompt         string `json:"prompt,omitempty" yaml:"prompt,omitempty"`
+	ExpectedOutput string `json:"expected_output,omitempty" yaml:"expected_output,omitempty"`
+}
+
+// BlueprintSkill names a skill the pack expects to use. The wizard
+// surfaces these so users see what the agents will know how to do
+// before they commit; skill discovery and binding happens later.
+type BlueprintSkill struct {
+	Name    string `json:"name" yaml:"name"`
+	Purpose string `json:"purpose,omitempty" yaml:"purpose,omitempty"`
+}
+
+// BlueprintRequirement declares an external dependency a pack expects.
+// Kind is one of "runtime", "api-key", or "local-tool". Required=false
+// means the pack can run without it but a feature degrades.
+type BlueprintRequirement struct {
+	Kind     string `json:"kind" yaml:"kind"`
+	Name     string `json:"name" yaml:"name"`
+	Required bool   `json:"required" yaml:"required,omitempty"`
+	Detail   string `json:"detail,omitempty" yaml:"detail,omitempty"`
+}
+
+// BlueprintExampleAsset names a representative artifact the pack
+// produces, used for previews in the pack library detail panel.
+type BlueprintExampleAsset struct {
+	Kind  string `json:"kind" yaml:"kind"`
+	Title string `json:"title" yaml:"title"`
 }
 
 type StarterPlan struct {

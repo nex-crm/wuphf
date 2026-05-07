@@ -187,7 +187,7 @@ test.describe("wuphf onboarding wizard smoke", () => {
   }) => {
     // Verifies the wizard state machine actually transitions. Flow is:
     // welcome → identity (company + description required) → templates.
-    // Assert via `.wizard-panel` on the templates step.
+    // Assert via `.pack-library` on the templates step.
     const getErrors = collectReactErrors(page);
 
     await page.goto("/");
@@ -195,8 +195,8 @@ test.describe("wuphf onboarding wizard smoke", () => {
 
     await advanceToTemplatesStep(page);
 
-    // Templates step renders `.wizard-panel` (welcome + identity have different markers).
-    await expect(page.locator(".wizard-panel").first()).toBeVisible({
+    // Templates step renders `.pack-library` (welcome + identity have different markers).
+    await expect(page.locator(".pack-library").first()).toBeVisible({
       timeout: 10_000,
     });
     await expectNoReactErrors(page, getErrors, "advancing wizard");
@@ -220,18 +220,17 @@ test.describe("wuphf onboarding wizard smoke", () => {
 
     await advanceToTemplatesStep(page);
 
-    // Wait for at least one template grid (the blueprint picker now
-    // renders one grid per category group — Services, Media & Community,
-    // Products — so `.template-grid` is not unique). We rely on
-    // `.template-card` instead as the unit of a rendered blueprint.
-    const cards = page.locator(".template-card");
+    // The new pack-library picker renders one `.pack-card` per blueprint
+    // (with a separate "Start from scratch" affordance below the grid).
+    // We rely on `.pack-card` as the unit of a rendered blueprint.
+    const cards = page.locator(".pack-card");
     await expect(cards.first()).toBeVisible({ timeout: 10_000 });
 
     // The pre-embed bug rendered exactly zero preset cards — only the
-    // separate "Start from scratch" button (which is NOT a .template-card
-    // in the grouped layout). So requiring ≥1 card is the regression
-    // guard: if embedded templates fail to load, the grouped layout
-    // would still render the from-scratch button but produce zero cards.
+    // separate "Start from scratch" button (which is NOT a .pack-card).
+    // So requiring ≥1 card is the regression guard: if embedded
+    // templates fail to load, the layout would still render the
+    // from-scratch button but produce zero pack cards.
     const count = await cards.count();
     expect(
       count,
@@ -265,7 +264,7 @@ test.describe("wuphf onboarding wizard smoke", () => {
 
     await expect(page.getByText("What should your office run?")).toBeVisible();
     const templateTile = page
-      .locator(".template-card")
+      .locator(".pack-card")
       .filter({ hasText: "Niche CRM" })
       .first();
     await expect(templateTile).toBeVisible({ timeout: 10_000 });
@@ -330,7 +329,7 @@ test.describe("wuphf onboarding wizard smoke", () => {
     await advanceToTemplatesStep(page);
 
     await page
-      .locator(".template-card")
+      .locator(".pack-card")
       .filter({ hasText: "Niche CRM" })
       .first()
       .click();
