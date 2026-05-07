@@ -406,11 +406,11 @@ func TestNotificationContext_ResponseInstruction_TaggedTriggersTaggedGuidance(t 
 	}
 }
 
-func TestNotificationContext_ResponseInstruction_UntaggedNonOwnerStaysQuiet(t *testing.T) {
+func TestNotificationContext_ResponseInstruction_UntaggedNonOwnerInvitedToChimeIn(t *testing.T) {
 	b := newTestNotifyContextBuilder(t)
 	got := b.ResponseInstructionForTarget(channelMessage{Channel: "general"}, "eng")
-	if !strings.Contains(got, "Stay quiet") {
-		t.Errorf("expected stay-quiet default for untagged non-owner; got %q", got)
+	if !strings.Contains(got, "in-character") || !strings.Contains(got, "Skip the turn only if") {
+		t.Errorf("expected chime-in-with-personality default for untagged non-owner; got %q", got)
 	}
 }
 

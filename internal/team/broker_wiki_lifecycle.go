@@ -2,7 +2,11 @@ package team
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log"
+	"net/http"
+	"path/filepath"
 	"time"
 
 	"github.com/nex-crm/wuphf/internal/config"
@@ -21,14 +25,39 @@ import (
 // know what happens during the markdown-backend cold start.
 
 // ensureWikiWorker initializes the markdown-backend wiki worker when the
-// resolved memory backend is "markdown". Runs once. Never crashes the
-// broker on wiki init failure — the worker is advisory; writes simply fail
-// with ErrWorkerStopped until a user runs `wuphf` with git installed.
+// resolved memory backend is "markdown". Idempotent on success; on failure
+// (git missing, fsck + backup double-fault, etc.) it logs and returns so
+// the next caller can retry. Never crashes the broker — the worker is
+// advisory; writes simply fail with ErrWorkerStopped until init succeeds.
+//
+// Retry semantics matter: a transient repo.Init failure (e.g. parent dir
+// permissions flap, git temporarily missing from PATH) used to consume
+// sync.Once and leave wikiWorker permanently nil. Now any caller can
+// retry — handlers in broker_notebook.go / broker_review.go invoke this
+// before checking WikiWorker so a 503 self-heals on the next request.
 func (b *Broker) ensureWikiWorker() {
 	if config.ResolveMemoryBackend("") != config.MemoryBackendMarkdown {
 		return
 	}
-	b.wikiOnce.Do(b.initWikiWorker)
+	b.wikiInitMu.Lock()
+	defer b.wikiInitMu.Unlock()
+	b.mu.Lock()
+	already := b.wikiWorker != nil
+	b.mu.Unlock()
+	if already {
+		return
+	}
+	b.initWikiWorker()
+}
+
+// WikiInitErr returns the most recent ensureWikiWorker error, or nil if
+// the worker is up or has not yet been attempted. Used by /health and by
+// 503 responses so the underlying init failure is visible to operators
+// instead of buried in broker stdout.
+func (b *Broker) WikiInitErr() error {
+	b.wikiInitMu.Lock()
+	defer b.wikiInitMu.Unlock()
+	return b.wikiInitErr
 }
 
 func (b *Broker) initWikiWorker() {
@@ -38,6 +67,7 @@ func (b *Broker) initWikiWorker() {
 	defer cancel()
 
 	if err := repo.Init(ctx); err != nil {
+		b.wikiInitErr = fmt.Errorf("repo init: %w", err)
 		log.Printf("wiki: init failed, markdown backend unavailable: %v", err)
 		return
 	}
@@ -50,6 +80,7 @@ func (b *Broker) initWikiWorker() {
 	if err := repo.Fsck(ctx); err != nil {
 		log.Printf("wiki: fsck failed (%v); attempting restore from backup", err)
 		if restoreErr := repo.RestoreFromBackup(ctx); restoreErr != nil {
+			b.wikiInitErr = fmt.Errorf("fsck and backup restore failed: %w", errors.Join(err, restoreErr))
 			log.Printf("wiki: double-fault (repo corrupt + backup missing): %v", restoreErr)
 			return
 		}
@@ -74,6 +105,50 @@ func (b *Broker) initWikiWorker() {
 	autoWriter := NewAutoNotebookWriter(worker, nil)
 	autoWriter.Start(lifecycleCtx)
 
+	// PR 2: human "remember" intent classifier → direct team_wiki_write.
+	// Lifecycle mirrors AutoNotebookWriter. The writer is started before the
+	// broker mutex is taken, so the goroutine is alive by the time the
+	// PostMessage hook can fire.
+	humanWiki := NewHumanWikiIntentWriter(worker)
+	humanWiki.Start(lifecycleCtx)
+
+	// PR 3 (notebook-wiki-promise): demand index aggregates cross-agent
+	// notebook search hits and other demand signals (PRs 4 & 5) into a
+	// rolling-window score per entry. JSONL log lives under
+	// <wiki_root>/.promotion-demand/events.jsonl. A failed init is non-fatal:
+	// hooks no-op when the index is nil.
+	demandLogPath := filepath.Join(repo.Root(), ".promotion-demand", "events.jsonl")
+	demandIdx, demandErr := NewNotebookDemandIndex(demandLogPath)
+	if demandErr != nil {
+		log.Printf("wiki: promotion demand index init failed: %v", demandErr)
+		demandIdx = nil
+	}
+
+	// PR 5 (notebook-wiki-promise): channel intent dispatcher classifies
+	// question-form context-asks ("who has context on …") and feeds
+	// cross-agent notebook hits into the demand index as
+	// DemandSignalChannelContextAsk events. Dispatcher is started here so
+	// the goroutine is alive before the first PostMessage hook can fire.
+	// The optional reply path is OFF by default; toggle with
+	// WUPHF_CHANNEL_INTENT_REPLY=true.
+	channelIntent := NewChannelIntentDispatcher(b)
+	channelIntent.Start(lifecycleCtx)
+
+	// PR 6 (notebook-wiki-promise): periodic sweep that drains the demand
+	// index into the review log on adaptive cadence. Constructed here so
+	// the sweep can capture the demand index and wiki worker references
+	// at startup time and never re-enter b.mu from its goroutine. The
+	// review log is wired lazily via b.ReviewLog(); the escalator's
+	// callback resolves it on each tick so a sweep that starts before
+	// the review log lands picks it up automatically.
+	var sweep *PromotionSweep
+	if demandIdx != nil {
+		escalator := newDemandIndexEscalator(demandIdx, b.ReviewLog, worker)
+		counter := newAutoWriterNotebookCounter(autoWriter)
+		sweep = NewPromotionSweep(escalator, counter, promotionSweepConfigFromEnv())
+		sweep.Start(lifecycleCtx)
+	}
+
 	b.mu.Lock()
 	b.wikiWorker = worker
 	b.wikiIndex = idx
@@ -81,7 +156,14 @@ func (b *Broker) initWikiWorker() {
 	b.wikiDLQ = dlq
 	b.readLog = NewReadLog(repo.Root())
 	b.autoNotebookWriter = autoWriter
+	b.humanWikiWriter = humanWiki
+	b.demandIndex = demandIdx
+	b.channelIntentDispatcher = channelIntent
+	b.promotionSweep = sweep
 	b.mu.Unlock()
+	// Init succeeded; clear any cached failure so future calls don't surface
+	// stale errors from a previous attempt.
+	b.wikiInitErr = nil
 
 	b.ensureNotebookDirsForRoster()
 
@@ -124,6 +206,47 @@ func (b *Broker) initWikiWorker() {
 	// the compile cron drives both passes from a single trigger. Tests can
 	// inject a fake via SetSkillSynthesizer.
 	b.ensureSkillSynthesizer()
+}
+
+// requireWikiWorker is the standard retry-and-503 helper for HTTP handlers
+// that need a live wiki worker. It calls ensureWikiWorker (which retries
+// init if a prior attempt failed), returns the worker on success, and
+// writes a 503 with the underlying init error on failure. Handlers should
+// short-circuit when this returns nil. The error label distinguishes
+// notebook vs review surfaces in the JSON body.
+func (b *Broker) requireWikiWorker(w http.ResponseWriter, label string) *WikiWorker {
+	b.ensureWikiWorker()
+	worker := b.WikiWorker()
+	if worker != nil {
+		return worker
+	}
+	msg := label + " backend is not active"
+	if err := b.WikiInitErr(); err != nil {
+		msg = msg + ": " + err.Error()
+	}
+	writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": msg})
+	return nil
+}
+
+// requireReviewLog mirrors requireWikiWorker for the /review/* surface:
+// retries the wiki + review-log init chain so a transient startup failure
+// no longer leaves promotion endpoints permanently 503. Returns nil after
+// writing the 503 when either layer is still down.
+func (b *Broker) requireReviewLog(w http.ResponseWriter) *ReviewLog {
+	if b.requireWikiWorker(w, "review") == nil {
+		return nil
+	}
+	b.ensureReviewLog()
+	rl := b.ReviewLog()
+	if rl != nil {
+		return rl
+	}
+	msg := "review backend is not active"
+	if err := b.WikiInitErr(); err != nil {
+		msg = msg + ": " + err.Error()
+	}
+	writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": msg})
+	return nil
 }
 
 func (b *Broker) brokerLifecycleContext() context.Context {

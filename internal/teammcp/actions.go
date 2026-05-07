@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"golang.org/x/text/cases"
@@ -116,22 +117,7 @@ func requireTeamActionApproval(ctx context.Context, slug, channel string, args T
 		return nil
 	}
 
-	platform := strings.TrimSpace(args.Platform)
-	if platform == "" {
-		platform = "unknown"
-	}
-	actionID := strings.TrimSpace(args.ActionID)
-	if actionID == "" {
-		actionID = "unknown"
-	}
-
-	title := fmt.Sprintf("Approve %s action: %s", platform, actionID)
-	question := fmt.Sprintf("@%s wants to execute %s on %s. Approve?", slug, actionID, platform)
-	contextBlob := fmt.Sprintf("platform: %s\naction_id: %s\nconnection_key: %s\nfrom: @%s\nchannel: %s\ndry_run: false",
-		platform, actionID, strings.TrimSpace(args.ConnectionKey), slug, channel)
-	if summary := strings.TrimSpace(args.Summary); summary != "" {
-		contextBlob += "\nsummary: " + summary
-	}
+	spec := buildActionApprovalSpec(slug, channel, args)
 
 	options, recommendedID := normalizeHumanRequestOptions("approval", "", nil)
 
@@ -139,12 +125,7 @@ func requireTeamActionApproval(ctx context.Context, slug, channel string, args T
 	// every agent loop reconnect or retry of the same external-action
 	// call posts a fresh /requests entry, and the human ends up staring
 	// at 100+ stacked "Approve gmail action" cards for the same intent.
-	dedupeKey := fmt.Sprintf("action:%s:%s:%s:%s",
-		strings.ToLower(slug),
-		strings.ToLower(platform),
-		strings.ToLower(actionID),
-		strings.ToLower(strings.TrimSpace(args.ConnectionKey)),
-	)
+	dedupeKey := actionApprovalDedupeKey(slug, args)
 
 	var created struct {
 		ID string `json:"id"`
@@ -153,9 +134,9 @@ func requireTeamActionApproval(ctx context.Context, slug, channel string, args T
 		"kind":           "approval",
 		"channel":        channel,
 		"from":           slug,
-		"title":          title,
-		"question":       question,
-		"context":        contextBlob,
+		"title":          spec.Title,
+		"question":       spec.Question,
+		"context":        spec.Context,
 		"options":        options,
 		"recommended_id": recommendedID,
 		"blocking":       true,
@@ -171,6 +152,15 @@ func requireTeamActionApproval(ctx context.Context, slug, channel string, args T
 	timeout := time.After(actionApprovalTimeout)
 	ticker := time.NewTicker(actionApprovalPollInterval)
 	defer ticker.Stop()
+
+	platform := strings.TrimSpace(args.Platform)
+	if platform == "" {
+		platform = "unknown"
+	}
+	actionID := strings.TrimSpace(args.ActionID)
+	if actionID == "" {
+		actionID = "unknown"
+	}
 
 	for {
 		select {
@@ -208,6 +198,375 @@ func requireTeamActionApproval(ctx context.Context, slug, channel string, args T
 			return fmt.Errorf("human rejected %s on %s: %s", actionID, platform, reason)
 		}
 	}
+}
+
+// actionApprovalDedupeKey collapses retries of the same external-action
+// call onto one approval request. Keyed on agent + platform + action_id +
+// connection so an in-flight retry by the agent loop folds onto the
+// existing pending approval instead of stacking duplicates. Pure for
+// testability — the broker dedupes on whatever string this function
+// returns.
+func actionApprovalDedupeKey(slug string, args TeamActionExecuteArgs) string {
+	return fmt.Sprintf("action:%s:%s:%s:%s",
+		strings.ToLower(strings.TrimSpace(slug)),
+		strings.ToLower(strings.TrimSpace(args.Platform)),
+		strings.ToLower(strings.TrimSpace(args.ActionID)),
+		strings.ToLower(strings.TrimSpace(args.ConnectionKey)),
+	)
+}
+
+// actionApprovalSpec is the structured payload of an external-action
+// approval card. Split out from requireTeamActionApproval so the body
+// composition can be unit-tested without a live broker. Before this
+// existed, the approval card said only "Approve gmail action:
+// GMAIL_SEND_EMAIL" with a context blob of internal jargon — the human
+// had no way to see who the email was going to or what was inside it.
+type actionApprovalSpec struct {
+	Title    string
+	Question string
+	Context  string
+}
+
+// buildActionApprovalSpec composes the title, question, and context the
+// human sees in the approval card. The shape:
+//
+//	Title:    "Send Email via Gmail"
+//	Question: "@growthops wants to send email via Gmail. Approve?"
+//	Context:  Why: <agent summary, if provided>
+//	          What this will do:
+//	          • To: alex@nex.ai
+//	          • Subject: Welcome
+//	          • Body: Hi Alex, welcome to ...
+//	          Action: GMAIL_SEND_EMAIL via Gmail
+//	          Account: <connection_key>
+//	          Channel: #general
+//
+// The "What this will do" block is only included when at least one
+// recognized payload field exists. The human can refuse without leaving
+// the card because every decision-relevant field appears here.
+func buildActionApprovalSpec(slug, channel string, args TeamActionExecuteArgs) actionApprovalSpec {
+	platform := strings.TrimSpace(args.Platform)
+	if platform == "" {
+		platform = "unknown"
+	}
+	actionID := strings.TrimSpace(args.ActionID)
+	if actionID == "" {
+		actionID = "unknown"
+	}
+
+	verb := actionVerbLabel(platform, actionID)
+	platformLabel := platformDisplay(platform)
+	title := titleCaser.String(verb) + " via " + platformLabel
+	question := fmt.Sprintf("@%s wants to %s via %s. Approve?", slug, verb, platformLabel)
+
+	// Agent-controlled fields are sanitized before injection so a malicious
+	// payload cannot forge structural sections in the rendered context.
+	// Without this the parser's first-match-wins regexes would let the agent
+	// inject a fake "What this will do" block + footer, displaying one
+	// action while the broker executes a different one — a confused-deputy
+	// approval bypass that defeats the entire reason this gate exists.
+	safeActionID := sanitizeContextValue(actionID)
+	safeSummary := sanitizeContextValue(strings.TrimSpace(args.Summary))
+	safeConnection := sanitizeContextValue(strings.TrimSpace(args.ConnectionKey))
+
+	var b strings.Builder
+	if safeSummary != "" {
+		b.WriteString("Why: ")
+		b.WriteString(safeSummary)
+		b.WriteString("\n\n")
+	}
+	if details := summarizeActionPayload(args); details != "" {
+		b.WriteString("What this will do:\n")
+		b.WriteString(details)
+		b.WriteString("\n\n")
+	}
+	b.WriteString("Action: ")
+	b.WriteString(safeActionID)
+	b.WriteString(" via ")
+	b.WriteString(platformLabel)
+	if safeConnection != "" {
+		b.WriteString("\nAccount: ")
+		b.WriteString(safeConnection)
+	}
+	if ch := strings.TrimSpace(channel); ch != "" {
+		b.WriteString("\nChannel: #")
+		b.WriteString(ch)
+	}
+
+	return actionApprovalSpec{
+		Title:    title,
+		Question: question,
+		Context:  strings.TrimRight(b.String(), "\n"),
+	}
+}
+
+// sanitizeContextValue collapses any control character or structural
+// delimiter the approval-card parser keys off of into safe inline text.
+// Specifically: every newline variant becomes a space (so a forged
+// "Action:" embedded in agent input cannot land at a line start, where
+// the parser's `^Action:\s+` regex would match it), the bullet glyph
+// becomes a middle dot (so a forged `• Label: value` cannot pose as a
+// row inside the "What this will do" block), and runs of whitespace
+// collapse to single spaces. Output stays as a single visible line, so
+// when an agent tries to forge structure the human sees one long
+// rambling sentence instead of authoritative-looking sections — a
+// secondary visual signal that something is off.
+func sanitizeContextValue(s string) string {
+	if s == "" {
+		return s
+	}
+	r := strings.NewReplacer(
+		"\r\n", " ",
+		"\n", " ",
+		"\r", " ",
+		" ", " ",
+		" ", " ",
+		"•", "·", // U+2022 BULLET → U+00B7 MIDDLE DOT
+	)
+	cleaned := r.Replace(s)
+	return strings.Join(strings.Fields(cleaned), " ")
+}
+
+// actionVerbLabel turns "GMAIL_SEND_EMAIL" into the lowercased verb phrase
+// "send email" so it can be slotted into both a title-cased title
+// ("Send Email via Gmail") and a sentence-cased question ("...wants to
+// send email via Gmail"). The platform prefix is stripped when present so
+// the verb does not awkwardly repeat the platform name.
+func actionVerbLabel(platform, actionID string) string {
+	id := strings.ToLower(strings.TrimSpace(actionID))
+	if id == "" {
+		return "run an action"
+	}
+	tokens := strings.FieldsFunc(id, actionIDSeparator)
+	if len(tokens) > 1 {
+		first := tokens[0]
+		drop := false
+		if first == strings.ToLower(strings.TrimSpace(platform)) {
+			drop = true
+		} else {
+			switch first {
+			case "gmail", "hubspot", "slack", "slackbot", "googlecalendar",
+				"calendar", "stripe", "linear", "notion", "github",
+				"googledrive", "drive", "docs", "sheets", "slides",
+				"intercom", "zendesk", "salesforce", "asana", "trello",
+				"airtable", "discord", "twitter", "x":
+				drop = true
+			}
+		}
+		if drop {
+			tokens = tokens[1:]
+		}
+	}
+	if len(tokens) == 0 {
+		return "run an action"
+	}
+	return strings.Join(tokens, " ")
+}
+
+// platformDisplay turns a kebab-cased provider slug into its human form.
+// "google-calendar" → "Google Calendar"; "hubspot" → "HubSpot".
+func platformDisplay(platform string) string {
+	platform = strings.TrimSpace(platform)
+	if platform == "" {
+		return "Unknown"
+	}
+	parts := strings.FieldsFunc(strings.ReplaceAll(platform, "_", "-"),
+		func(r rune) bool { return r == '-' })
+	if len(parts) == 0 {
+		return "Unknown"
+	}
+	for i, p := range parts {
+		switch p {
+		case "hubspot":
+			parts[i] = "HubSpot"
+		case "github":
+			parts[i] = "GitHub"
+		case "slackbot":
+			parts[i] = "Slack"
+		case "googlecalendar":
+			parts[i] = "Google Calendar"
+		case "googledrive":
+			parts[i] = "Google Drive"
+		default:
+			parts[i] = titleCaser.String(p)
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
+// payloadFieldOrder is the priority list of payload keys we surface in
+// the approval card, top to bottom. Each entry maps a payload key (any
+// of the synonyms ship together) to the label the human sees. The first
+// match per label wins so synonyms like to/recipient/recipients do not
+// double up.
+var payloadFieldOrder = []struct {
+	Keys  []string
+	Label string
+}{
+	{[]string{"to", "recipient", "recipients", "recipient_email", "user_id"}, "To"},
+	{[]string{"cc"}, "CC"},
+	{[]string{"bcc"}, "BCC"},
+	{[]string{"from", "sender"}, "From"},
+	{[]string{"subject"}, "Subject"},
+	{[]string{"channel", "channel_id"}, "Channel"},
+	{[]string{"thread_ts", "thread_id"}, "Thread"},
+	{[]string{"text", "message", "body", "content", "html_body"}, "Body"},
+	{[]string{"title", "name"}, "Title"},
+	{[]string{"summary", "description"}, "Description"},
+	{[]string{"url", "link"}, "URL"},
+	{[]string{"event_id", "calendar_event_id"}, "Event"},
+	{[]string{"start_time", "start"}, "Starts"},
+	{[]string{"end_time", "end"}, "Ends"},
+	{[]string{"amount", "price"}, "Amount"},
+	{[]string{"currency"}, "Currency"},
+	{[]string{"query", "q"}, "Query"},
+}
+
+// payloadRedactedKeys are field names we never surface in the approval
+// card — the human does not need to see their own credentials to decide
+// whether to approve, and a leaky log is one OS clipboard away from a
+// support ticket.
+var payloadRedactedKeys = map[string]struct{}{
+	"password":      {},
+	"passwd":        {},
+	"secret":        {},
+	"api_key":       {},
+	"access_token":  {},
+	"refresh_token": {},
+	"token":         {},
+	"client_secret": {},
+	"private_key":   {},
+}
+
+// summarizeActionPayload renders a bulleted list of decision-relevant
+// payload fields from args.Data, args.PathVariables, and
+// args.QueryParameters. Long values are clipped, multi-line bodies are
+// flattened, and redacted keys are skipped entirely. Returns an empty
+// string when none of the recognized fields are present.
+func summarizeActionPayload(args TeamActionExecuteArgs) string {
+	type field struct {
+		Label string
+		Value string
+	}
+	var fields []field
+	seen := make(map[string]bool, len(payloadFieldOrder))
+
+	sources := []map[string]any{args.Data, args.PathVariables, args.QueryParameters}
+	for _, entry := range payloadFieldOrder {
+		if seen[entry.Label] {
+			continue
+		}
+		for _, key := range entry.Keys {
+			if _, redacted := payloadRedactedKeys[key]; redacted {
+				continue
+			}
+			value, ok := lookupPayloadValue(sources, key)
+			if !ok {
+				continue
+			}
+			rendered := formatPayloadValue(value)
+			if rendered == "" {
+				continue
+			}
+			fields = append(fields, field{Label: entry.Label, Value: rendered})
+			seen[entry.Label] = true
+			break
+		}
+	}
+
+	if len(fields) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for _, f := range fields {
+		b.WriteString("• ")
+		b.WriteString(f.Label)
+		b.WriteString(": ")
+		b.WriteString(f.Value)
+		b.WriteString("\n")
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// lookupPayloadValue checks each source map for the given key and
+// returns the first hit. Comparison is case-insensitive on the key so
+// providers that ship "Subject" or "TO" still match.
+func lookupPayloadValue(sources []map[string]any, key string) (any, bool) {
+	lowered := strings.ToLower(key)
+	for _, src := range sources {
+		if src == nil {
+			continue
+		}
+		if v, ok := src[key]; ok {
+			return v, true
+		}
+		for k, v := range src {
+			if strings.ToLower(k) == lowered {
+				return v, true
+			}
+		}
+	}
+	return nil, false
+}
+
+// payloadValueClipLen is the soft cap on a single payload value we render
+// in the approval card, measured in RUNES (not bytes) so multi-byte
+// characters like CJK or emoji do not get sliced mid-codepoint into
+// invalid UTF-8. Email bodies routinely run thousands of bytes; the
+// human only needs the first sentence to recognize the message.
+const payloadValueClipLen = 240
+
+// formatPayloadValue renders any payload value as a single, clipped
+// string. Arrays become comma-separated lists; structured values fall
+// back to JSON. Internal whitespace is collapsed so multi-line bodies
+// do not break the bulleted list. Truncation is rune-aware: a CJK
+// character at position 240 will not produce a half-glyph and a tofu
+// box on the rendered card.
+func formatPayloadValue(v any) string {
+	raw := payloadValueString(v)
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	raw = strings.Join(strings.Fields(raw), " ")
+	if utf8.RuneCountInString(raw) > payloadValueClipLen {
+		runes := []rune(raw)
+		raw = string(runes[:payloadValueClipLen]) + "…"
+	}
+	return raw
+}
+
+func payloadValueString(v any) string {
+	switch t := v.(type) {
+	case nil:
+		return ""
+	case string:
+		return t
+	case []string:
+		return strings.Join(t, ", ")
+	case []any:
+		parts := make([]string, 0, len(t))
+		for _, item := range t {
+			if s := payloadValueString(item); strings.TrimSpace(s) != "" {
+				parts = append(parts, strings.TrimSpace(s))
+			}
+		}
+		return strings.Join(parts, ", ")
+	case bool:
+		if t {
+			return "true"
+		}
+		return "false"
+	case float64:
+		return strings.TrimRight(strings.TrimRight(fmt.Sprintf("%.6f", t), "0"), ".")
+	case int, int64:
+		return fmt.Sprintf("%d", t)
+	}
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return fmt.Sprintf("%v", v)
+	}
+	return string(raw)
 }
 
 var (
@@ -744,7 +1103,11 @@ func handleTeamActionRelayActivate(ctx context.Context, _ *mcp.CallToolRequest, 
 }
 
 func handleTeamActionRelayEvents(ctx context.Context, _ *mcp.CallToolRequest, args TeamActionRelayEventsArgs) (*mcp.CallToolResult, any, error) {
-	result, err := externalActionProvider.ListRelayEvents(ctx, action.RelayEventsOptions{
+	provider, err := selectedActionProvider(action.CapabilityRelayEvents)
+	if err != nil {
+		return toolError(err), nil, nil
+	}
+	result, err := provider.ListRelayEvents(ctx, action.RelayEventsOptions{
 		Limit:     args.Limit,
 		Page:      args.Page,
 		Platform:  args.Platform,

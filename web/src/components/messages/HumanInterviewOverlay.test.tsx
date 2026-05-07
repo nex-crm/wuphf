@@ -100,6 +100,102 @@ describe("<HumanInterviewOverlay>", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("renders the EXTERNAL ACTION badge and Variant B layout for approval-kind requests", () => {
+    const req = makeRequest({
+      kind: "approval",
+      title: "Send Email via Gmail",
+      question: "@growthops wants to send email via Gmail. Approve?",
+      context: [
+        "Why: Sending welcome note.",
+        "",
+        "What this will do:",
+        "• To: alex@nex.ai",
+        "• Subject: Welcome to Nex",
+        "• Body: Hi Alex, welcome aboard!",
+        "",
+        "Action: GMAIL_SEND_EMAIL via Gmail",
+        "Account: live::gmail::default::abc123",
+        "Channel: #general",
+      ].join("\n"),
+      options: [
+        { id: "approve", label: "Approve" },
+        { id: "reject", label: "Reject" },
+      ],
+      recommended_id: "approve",
+    });
+    useRequestsMock.mockReturnValue({ blockingPending: req, pending: [req] });
+    render(wrap(<HumanInterviewOverlay />));
+
+    expect(screen.getByText("EXTERNAL ACTION")).toBeInTheDocument();
+    expect(screen.getByText("BLOCKING")).toBeInTheDocument();
+    expect(screen.getByText("Send Email via Gmail")).toBeInTheDocument();
+    // Why surface
+    expect(screen.getByText("Sending welcome note.")).toBeInTheDocument();
+    // Details inset: each label/value is a <dt>/<dd> pair
+    expect(screen.getByText("To")).toBeInTheDocument();
+    expect(screen.getByText("alex@nex.ai")).toBeInTheDocument();
+    expect(screen.getByText("Subject")).toBeInTheDocument();
+    expect(screen.getByText("Welcome to Nex")).toBeInTheDocument();
+    expect(screen.getByText("Body")).toBeInTheDocument();
+    expect(screen.getByText("Hi Alex, welcome aboard!")).toBeInTheDocument();
+    // Footer
+    expect(screen.getByText(/GMAIL_SEND_EMAIL via Gmail/)).toBeInTheDocument();
+    expect(
+      screen.getByText("live::gmail::default::abc123"),
+    ).toBeInTheDocument();
+  });
+
+  it("renders the (truncated) chip when a detail value ends with the ellipsis", () => {
+    const req = makeRequest({
+      kind: "approval",
+      title: "Send Email via Gmail",
+      context: [
+        "What this will do:",
+        "• To: alex@nex.ai",
+        "• Body: Hi Alex this is a very long body…",
+        "",
+        "Action: GMAIL_SEND_EMAIL via Gmail",
+        "Channel: #general",
+      ].join("\n"),
+    });
+    useRequestsMock.mockReturnValue({ blockingPending: req, pending: [req] });
+    render(wrap(<HumanInterviewOverlay />));
+    expect(screen.getByText("(truncated)")).toBeInTheDocument();
+  });
+
+  it("renders the empty fallback when neither Why nor details are present", () => {
+    const req = makeRequest({
+      kind: "approval",
+      title: "Refresh OAuth Token via Gmail",
+      context: [
+        "Action: GMAIL_REFRESH_TOKEN via Gmail",
+        "Channel: #general",
+      ].join("\n"),
+    });
+    useRequestsMock.mockReturnValue({ blockingPending: req, pending: [req] });
+    render(wrap(<HumanInterviewOverlay />));
+    expect(
+      screen.getByText(/No additional details available/i),
+    ).toBeInTheDocument();
+  });
+
+  it("falls back to plain pre-wrap context for legacy/non-approval requests", () => {
+    const req = makeRequest({
+      kind: "interview",
+      title: "Pricing call?",
+      context: "platform: gmail\naction_id: GMAIL_SEND_EMAIL",
+    });
+    useRequestsMock.mockReturnValue({ blockingPending: req, pending: [req] });
+    render(wrap(<HumanInterviewOverlay />));
+
+    expect(screen.queryByText("EXTERNAL ACTION")).not.toBeInTheDocument();
+    const ctx = screen.getByText((_, el) => {
+      if (!el || el.tagName.toLowerCase() !== "p") return false;
+      return (el.textContent ?? "").startsWith("platform: gmail");
+    });
+    expect(ctx.getAttribute("style") ?? "").toContain("pre-wrap");
+  });
+
   it("styles the recommended option with btn-primary class", () => {
     const req = makeRequest({
       kind: "enhance_skill_proposal",
