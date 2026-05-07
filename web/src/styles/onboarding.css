@@ -919,6 +919,158 @@
   }
 }
 
+/* ─── Pack Requirements Panel (Step 5 — Setup) ─── */
+.pack-requirements-panel {
+  padding: 16px 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.pack-req-header {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pack-req-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.pack-req-subtitle {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.pack-req-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pack-req-group-label {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.pack-req-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  border: 1px solid var(--border);
+}
+
+.pack-req-dot {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--border-dark);
+}
+
+.pack-req-dot--ok {
+  background: var(--success, #22c55e);
+}
+
+.pack-req-dot--missing {
+  background: var(--warning, #f59e0b);
+}
+
+.pack-req-dot--unknown {
+  background: var(--border-dark);
+}
+
+.pack-req-body {
+  flex: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.pack-req-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.pack-req-kind {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.pack-req-detail {
+  font-size: 11px;
+  color: var(--text-secondary);
+  flex-basis: 100%;
+}
+
+.pack-req-badge {
+  flex-shrink: 0;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.pack-req-badge--required {
+  color: var(--danger, #b42318);
+  background: var(--danger-50, #fee);
+  border: 1px solid var(--danger-200, #fcc);
+}
+
+.pack-req-badge--optional {
+  color: var(--text-tertiary);
+  background: transparent;
+  border: 1px solid var(--border);
+}
+
+.pack-req-doctor-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  background: var(--warning-50, #fffbeb);
+  border: 1px solid var(--warning-200, #fde68a);
+  font-size: 12px;
+  color: var(--text);
+  line-height: 1.5;
+}
+
+.pack-req-doctor-icon {
+  flex-shrink: 0;
+  color: var(--warning, #f59e0b);
+  font-size: 13px;
+}
+
+.pack-req-doctor-link {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.pack-req-doctor-link:hover {
+  color: var(--accent-dark, var(--accent));
+}
+
 /* ─── Task Suggestions (step 6) ─── */
 .task-suggestions {
   background: var(--bg-card);

@@ -22,6 +22,8 @@ import {
   loadDraft,
   seedFromDraft,
 } from "./wizard/onboardingDraft";
+import type { PackPreviewRequirement } from "./wizard/packPreview";
+import { adaptPackPreview } from "./wizard/packPreview";
 import { OnboardingBanners } from "./wizard/ResumeBanner";
 import {
   canSetupContinue,
@@ -88,6 +90,20 @@ interface ConfigBootstrap {
 
 function prereqsFromPayload(data: PrereqsPayload): PrereqResult[] {
   return Array.isArray(data) ? data : (data.prereqs ?? []);
+}
+
+// Derive pack requirements from the selected blueprint for the SetupStep
+// requirements panel. Returns an empty array when no blueprint is selected
+// (scratch) or when the blueprint declares no requirements, so the panel
+// stays hidden in those cases.
+function derivePackRequirements(
+  selectedBlueprint: string | null,
+  blueprints: BlueprintTemplate[],
+): PackPreviewRequirement[] {
+  if (!selectedBlueprint) return [];
+  const bp = blueprints.find((b) => b.id === selectedBlueprint);
+  if (!bp) return [];
+  return adaptPackPreview(bp).requirements;
 }
 
 function errorMessage(reason: unknown): string {
@@ -963,6 +979,10 @@ export function Wizard({ onComplete }: WizardProps) {
               provider: localProvider,
               onSelectProvider: selectLocalProvider,
             }}
+            packRequirements={derivePackRequirements(
+              selectedBlueprint,
+              blueprints,
+            )}
             onNext={nextStep}
             onBack={prevStep}
           />
