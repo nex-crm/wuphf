@@ -33,7 +33,7 @@ export function StreamLineView({ line, compact = false }: StreamLineViewProps) {
   // Branch first so the discriminator wins over provider-native `type`
   // routes below (e.g. `assistant`, `mcp_tool_event`).
   if (parsed.kind === "headless_event") {
-    return <HeadlessEventView parsed={parsed} />;
+    return <HeadlessEventView parsed={parsed} compact={compact} />;
   }
 
   const evtType = typeof parsed.type === "string" ? parsed.type : "";
@@ -131,7 +131,13 @@ export function StreamLineView({ line, compact = false }: StreamLineViewProps) {
 // minimal because future slices (text / tool_use / tool_result) will
 // reuse this component, and a maximalist v1 design would lock those
 // future variants into chrome that won't fit.
-function HeadlessEventView({ parsed }: { parsed: Record<string, unknown> }) {
+function HeadlessEventView({
+  parsed,
+  compact,
+}: {
+  parsed: Record<string, unknown>;
+  compact: boolean;
+}) {
   const eventType = stringish(parsed.type);
   const provider = stringish(parsed.provider);
   const text = stringish(parsed.text);
@@ -171,9 +177,38 @@ function HeadlessEventView({ parsed }: { parsed: Record<string, unknown> }) {
     );
   }
 
+  if (eventType === "text") {
+    // Text events render as the same dim "thinking" block the
+    // provider-native paths use, so a stream containing both raw
+    // provider chunks (today's wire) and HeadlessEvent text (A3+)
+    // looks visually consistent. Empty text is dropped at the runner
+    // boundary; we still guard here because old captures may exist.
+    if (!text.trim()) return null;
+    return <div className="cc-thinking">{text}</div>;
+  }
+
+  if (eventType === "tool_use" || eventType === "tool_result") {
+    // Reuse the existing ToolCallCard so HeadlessEvent tool entries
+    // get the same collapsible chrome as the provider-native paths.
+    // Wire mapping: HeadlessEvent.tool_name -> name, .detail -> args
+    // for tool_use, .text -> result for tool_result.
+    const toolName = stringish(parsed.tool_name) || "tool";
+    return (
+      <ToolCallCard
+        item={{
+          type: "tool_call",
+          name: toolName,
+          arguments: eventType === "tool_use" ? parsed.detail : undefined,
+          result: eventType === "tool_result" ? parsed.text : undefined,
+        }}
+        compact={compact}
+      />
+    );
+  }
+
   // Unknown HeadlessEvent type — fall back to the generic card so future
   // variants render something useful before they earn a dedicated branch.
-  return <GenericEventCard parsed={parsed} compact={false} />;
+  return <GenericEventCard parsed={parsed} compact={compact} />;
 }
 
 function ClaudeAssistantEvent({
