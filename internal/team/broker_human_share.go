@@ -47,6 +47,33 @@ func (b *Broker) SetHumanAdmitHook(hook humanAdmitHookFn) {
 	b.humanAdmitHook.Store(&hook)
 }
 
+// SetShareTransport registers (or clears, when t is nil) the office-bound
+// share adapter so the in-process share controller can route invite creation
+// through it. Called by RegisterTransports during launcher boot and cleared on
+// shutdown. Stored atomically because the controller reads it on its start
+// path while RegisterTransports may still be installing other adapters.
+func (b *Broker) SetShareTransport(t *ShareTransport) {
+	if b == nil {
+		return
+	}
+	if t == nil {
+		b.shareTransport.Store(nil)
+		return
+	}
+	b.shareTransport.Store(t)
+}
+
+// ShareTransport returns the registered office-bound share adapter, or nil
+// when no adapter has been registered yet. Used by the in-process share
+// controller to obtain a handle for invite creation; callers must tolerate a
+// nil return and fall back to their legacy path.
+func (b *Broker) ShareTransport() *ShareTransport {
+	if b == nil {
+		return nil
+	}
+	return b.shareTransport.Load()
+}
+
 // fireHumanAdmitHook invokes the installed hook with the new session, if any.
 // Called from handleHumanInviteAccept *after* persistence succeeds so an
 // adapter cannot observe a session that was rolled back by a save failure. A
@@ -76,11 +103,15 @@ type humanSessionResponse struct {
 	InviteID    string `json:"invite_id"`
 	HumanSlug   string `json:"human_slug"`
 	DisplayName string `json:"display_name"`
-	Device      string `json:"device,omitempty"`
-	CreatedAt   string `json:"created_at"`
-	ExpiresAt   string `json:"expires_at"`
-	RevokedAt   string `json:"revoked_at,omitempty"`
-	LastSeenAt  string `json:"last_seen_at,omitempty"`
+	// Role is hardcoded to "member" so the joiner web client can branch on
+	// useSessionRole().role without a second roundtrip. The host placeholder
+	// returned from /humans/me uses the same field with value "host".
+	Role       string `json:"role"`
+	Device     string `json:"device,omitempty"`
+	CreatedAt  string `json:"created_at"`
+	ExpiresAt  string `json:"expires_at"`
+	RevokedAt  string `json:"revoked_at,omitempty"`
+	LastSeenAt string `json:"last_seen_at,omitempty"`
 }
 
 type shareError struct {
@@ -499,6 +530,7 @@ func humanSessionToResponse(session humanSession) humanSessionResponse {
 		InviteID:    session.InviteID,
 		HumanSlug:   session.HumanSlug,
 		DisplayName: session.DisplayName,
+		Role:        "member",
 		Device:      session.Device,
 		CreatedAt:   session.CreatedAt,
 		ExpiresAt:   sessionExpiresAt(session).Format(time.RFC3339),

@@ -1,14 +1,18 @@
+import { useRef } from "react";
+
 import type { OfficeMember } from "../../api/client";
+import { useAgentEventPeek } from "../../hooks/useAgentEventPeek";
 import { useDefaultHarness } from "../../hooks/useConfig";
 import { useFirstRunNudge } from "../../hooks/useFirstRunNudge";
 import { useOfficeMembers } from "../../hooks/useMembers";
 import { useOverflow } from "../../hooks/useOverflow";
-import { resolveHarness } from "../../lib/harness";
+import { type HarnessKind, resolveHarness } from "../../lib/harness";
 import { useCurrentRoute } from "../../routes/useCurrentRoute";
 import { useAppStore } from "../../stores/app";
 import { AgentWizard, useAgentWizard } from "../agents/AgentWizard";
 import { HarnessBadge } from "../ui/HarnessBadge";
 import { PixelAvatar } from "../ui/PixelAvatar";
+import { AgentEventPeek } from "./AgentEventPeek";
 import { AgentEventPill, AgentEventTickProvider } from "./AgentEventPill";
 
 function classifyActivity(member: OfficeMember | undefined) {
@@ -30,6 +34,141 @@ function classifyActivity(member: OfficeMember | undefined) {
   if (status === "active")
     return { state: "talking", label: "talking", dotClass: "active pulse" };
   return { state: "lurking", label: "lurking", dotClass: "lurking" };
+}
+
+interface SidebarAgentRowProps {
+  agent: OfficeMember;
+  isDMActive: boolean;
+  isFirst: boolean;
+  showNudge: boolean;
+  defaultHarness: HarnessKind;
+  onSelect: (slug: string) => void;
+}
+
+/**
+ * Row body extracted into its own component so the per-row hook
+ * (`useAgentEventPeek`) is called once per row instead of inside a `.map`
+ * loop in the parent — React forbids hooks in loops directly.
+ */
+function SidebarAgentRow({
+  agent,
+  isDMActive,
+  isFirst,
+  showNudge,
+  defaultHarness,
+  onSelect,
+}: SidebarAgentRowProps) {
+  const peek = useAgentEventPeek(agent.slug);
+  const anchorRef = useRef<HTMLDivElement>(null);
+  const ac = classifyActivity(agent);
+  const harness = resolveHarness(agent.provider, defaultHarness);
+  const displayName = agent.name || agent.slug;
+
+  return (
+    <div
+      className="sidebar-agent-row"
+      ref={anchorRef}
+      {...peek.hoverHandlers}
+      {...peek.longPressHandlers}
+    >
+      <button
+        type="button"
+        className={`sidebar-agent${isDMActive ? " active" : ""}`}
+        title={`${displayName} — ${ac.label}`}
+        onClick={() => {
+          // Tier 3 escalation: "quick activation always wins" per the plan.
+          // Close any open Tier 2 peek so the workspace is the only surface
+          // visible after the tap, instead of two competing per-agent UIs.
+          peek.close();
+          onSelect(agent.slug);
+        }}
+        data-agent-slug={agent.slug}
+      >
+        <span className="sidebar-agent-avatar avatar-with-harness">
+          <PixelAvatar
+            slug={agent.slug}
+            size={24}
+            className="pixel-avatar-sidebar"
+          />
+          <HarnessBadge
+            kind={harness}
+            size={10}
+            className="harness-badge-on-avatar"
+          />
+          {/* Transport-presence dot. Top-right corner so it does not collide
+              with the harness badge at bottom-right. Hidden entirely when the
+              member has never been upserted (built-ins without an adapter)
+              so we do not invent an "offline" state for members that never
+              had a connection concept. */}
+          {agent.online ? (
+            // Decorative: the same presence state is conveyed textually in
+            // the peek card ("Online" / "Last seen Xm ago"), so the badge
+            // itself is hidden from assistive tech to avoid announcing the
+            // same fact on every row.
+            <span
+              className="online-badge"
+              data-testid={`online-badge-${agent.slug}`}
+              aria-hidden="true"
+            />
+          ) : null}
+        </span>
+        <div className="sidebar-agent-wrap">
+          <span className="sidebar-agent-name">{displayName}</span>
+          <AgentEventPill
+            slug={agent.slug}
+            agentRole={agent.role}
+            fallbackTask={agent.task}
+          />
+        </div>
+        <span className={`status-dot ${ac.dotClass}`} />
+      </button>
+      <button
+        type="button"
+        className="sidebar-agent-peek-trigger"
+        aria-haspopup="dialog"
+        aria-expanded={peek.isOpen}
+        aria-controls={`agent-peek-${agent.slug}`}
+        aria-label={`Recent activity for ${displayName}`}
+        onClick={(e) => {
+          e.stopPropagation();
+          peek.toggle();
+        }}
+        data-testid={`peek-trigger-${agent.slug}`}
+      >
+        <svg width="8" height="8" viewBox="0 0 8 8" aria-hidden="true">
+          <path
+            d="M2 1 L6 4 L2 7"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      </button>
+      <AgentEventPeek
+        slug={agent.slug}
+        agentName={displayName}
+        agentRole={agent.role}
+        open={peek.isOpen}
+        current={peek.current}
+        history={peek.history}
+        anchorRef={anchorRef}
+        onClose={peek.close}
+        onOpenWorkspace={() => {
+          peek.close();
+          onSelect(agent.slug);
+        }}
+        online={agent.online}
+        lastSeenAt={agent.last_seen_at}
+      />
+      {isFirst && showNudge ? (
+        <span className="sidebar-agent-nudge" data-testid="first-run-nudge">
+          {`→ tag @${agent.slug} in #general`}
+        </span>
+      ) : null}
+    </div>
+  );
 }
 
 export function AgentList() {
@@ -61,56 +200,17 @@ export function AgentList() {
               No agents online
             </div>
           ) : (
-            agents.map((agent) => {
-              const ac = classifyActivity(agent);
-              const isDMActive = activeDmAgent === agent.slug;
-              const harness = resolveHarness(agent.provider, defaultHarness);
-              const isFirst = agent.slug === firstAgentSlug;
-
-              return (
-                <div key={agent.slug} className="sidebar-agent-row">
-                  <button
-                    type="button"
-                    className={`sidebar-agent${isDMActive ? " active" : ""}`}
-                    title={`${agent.name} — ${ac.label}`}
-                    onClick={() => setActiveAgentSlug(agent.slug)}
-                    data-agent-slug={agent.slug}
-                  >
-                    <span className="sidebar-agent-avatar avatar-with-harness">
-                      <PixelAvatar
-                        slug={agent.slug}
-                        size={24}
-                        className="pixel-avatar-sidebar"
-                      />
-                      <HarnessBadge
-                        kind={harness}
-                        size={10}
-                        className="harness-badge-on-avatar"
-                      />
-                    </span>
-                    <div className="sidebar-agent-wrap">
-                      <span className="sidebar-agent-name">
-                        {agent.name || agent.slug}
-                      </span>
-                      <AgentEventPill
-                        slug={agent.slug}
-                        agentRole={agent.role}
-                        fallbackTask={agent.task}
-                      />
-                    </div>
-                    <span className={`status-dot ${ac.dotClass}`} />
-                  </button>
-                  {isFirst && showNudge ? (
-                    <span
-                      className="sidebar-agent-nudge"
-                      data-testid="first-run-nudge"
-                    >
-                      {`→ tag @${agent.slug} in #general`}
-                    </span>
-                  ) : null}
-                </div>
-              );
-            })
+            agents.map((agent) => (
+              <SidebarAgentRow
+                key={agent.slug}
+                agent={agent}
+                isDMActive={activeDmAgent === agent.slug}
+                isFirst={agent.slug === firstAgentSlug}
+                showNudge={showNudge}
+                defaultHarness={defaultHarness}
+                onSelect={setActiveAgentSlug}
+              />
+            ))
           )}
           <button
             type="button"
