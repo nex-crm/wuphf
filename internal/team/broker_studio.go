@@ -31,7 +31,11 @@ var externalRetryAfterPattern = regexp.MustCompile(`(?i)retry after ([0-9]{4}-[0
 // resumed. Without stripping, a stale timestamp left in Details is detected
 // by externalWorkflowRetryAfter on the next scheduler tick, re-resuming the
 // task and re-delivering it to the CEO — producing an infinite loop.
-var externalRetryAfterLinePattern = regexp.MustCompile(`(?im)^[^\n]*(?:429[^\n]*|retry after [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.+-]+Z?)[^\n]*$\n?`)
+//
+// The `\b429\b` word boundary keeps the 429-status branch from matching
+// substrings like "4290 items" or "v4.29" that legitimate task Details may
+// contain. The retry-after branch is already tightly anchored to RFC3339.
+var externalRetryAfterLinePattern = regexp.MustCompile(`(?im)^[^\n]*(?:\b429\b[^\n]*|retry after [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.+-]+Z?)[^\n]*$\n?`)
 
 // stripExternalRetryMarker removes rate-limit lines from a task Details string
 // so stale retry-after timestamps cannot re-trigger the watchdog resume loop.

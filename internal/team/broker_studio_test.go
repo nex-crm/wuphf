@@ -676,3 +676,55 @@ func mustJSON(t *testing.T, value any) string {
 	}
 	return string(raw)
 }
+
+// TestStripExternalRetryMarkerScope guards the regex against two failure
+// modes: it must strip real rate-limit markers (the bug we were fixing) but
+// must NOT strip lines that merely contain "429" as a substring inside other
+// numbers/words. The 429 branch is anchored with \b on both sides; this test
+// fixes that contract so a future "make the regex looser" change has to
+// confront the tradeoff explicitly.
+func TestStripExternalRetryMarkerScope(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "strips standalone 429 status line",
+			in:   "429 RESOURCE_EXHAUSTED. Retry after 2026-04-15T22:00:29.610Z.",
+			want: "",
+		},
+		{
+			name: "strips retry-after timestamp line",
+			in:   "Retry after 2026-04-15T22:00:29.610Z",
+			want: "",
+		},
+		{
+			name: "preserves 4290 substring",
+			in:   "completed 4290 items in batch",
+			want: "completed 4290 items in batch",
+		},
+		{
+			name: "preserves v4.29 version reference",
+			in:   "rolled out v4.29 upgrade notes",
+			want: "rolled out v4.29 upgrade notes",
+		},
+		{
+			name: "preserves issue reference 1429",
+			in:   "see issue 1429 for context",
+			want: "see issue 1429 for context",
+		},
+		{
+			name: "strips 429 line but keeps surrounding context",
+			in:   "Original goal: ship the kickoff send.\n429 RESOURCE_EXHAUSTED. Retry after 2026-04-15T22:00:29.610Z.\nNotes follow.",
+			want: "Original goal: ship the kickoff send.\nNotes follow.",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := stripExternalRetryMarker(tc.in)
+			if got != tc.want {
+				t.Errorf("stripExternalRetryMarker(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
