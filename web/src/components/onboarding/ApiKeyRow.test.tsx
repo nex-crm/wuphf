@@ -19,7 +19,7 @@ describe("<ApiKeyRow>", () => {
   it("defaults to CLI login and hides the password input", () => {
     render(<ApiKeyRow field={FIELD} value="" onChange={vi.fn()} />);
     expect(screen.getByTestId("api-key-cli-ANTHROPIC_API_KEY")).toHaveClass(
-      /selected/,
+      "active",
     );
     expect(screen.getByText(/claude login/)).toBeInTheDocument();
     expect(
@@ -31,7 +31,7 @@ describe("<ApiKeyRow>", () => {
     render(<ApiKeyRow field={FIELD} value="" onChange={vi.fn()} />);
     fireEvent.click(screen.getByTestId("api-key-paste-ANTHROPIC_API_KEY"));
     expect(screen.getByTestId("api-key-paste-ANTHROPIC_API_KEY")).toHaveClass(
-      /selected/,
+      "active",
     );
     expect(
       screen.getByTestId("api-key-input-ANTHROPIC_API_KEY"),
@@ -70,7 +70,7 @@ describe("<ApiKeyRow>", () => {
       "sk-existing",
     );
     expect(screen.getByTestId("api-key-paste-ANTHROPIC_API_KEY")).toHaveClass(
-      /selected/,
+      "active",
     );
   });
 });

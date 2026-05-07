@@ -1,8 +1,8 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import { TemplatesStep } from "./Step2Templates";
 import { BLUEPRINT_CATEGORIES } from "./constants";
+import { TemplatesStep } from "./Step2Templates";
 import type { BlueprintTemplate } from "./types";
 
 function makeTemplates(): BlueprintTemplate[] {
@@ -102,9 +102,7 @@ describe("TemplatesStep", () => {
     const mediaLabel =
       BLUEPRINT_CATEGORIES.find((c) => c.key === "media")?.label ??
       "Media & Community";
-    expect(
-      screen.getByRole("tab", { name: mediaLabel }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: mediaLabel })).toBeInTheDocument();
     // "Other" chip surfaces because Mystery Op has no category.
     expect(screen.getByRole("tab", { name: "Other" })).toBeInTheDocument();
 
@@ -245,7 +243,9 @@ describe("TemplatesStep", () => {
     );
     const nav = document.querySelector(".wizard-nav") as HTMLElement;
     fireEvent.click(within(nav).getByRole("button", { name: /Back/i }));
-    fireEvent.click(within(nav).getByRole("button", { name: /Review/i }));
+    fireEvent.click(
+      within(nav).getByRole("button", { name: /Review the team/i }),
+    );
     expect(onBack).toHaveBeenCalledTimes(1);
     expect(onNext).toHaveBeenCalledTimes(1);
   });

@@ -225,6 +225,17 @@ body {
     transform: translateY(0);
   }
 }
+
+@keyframes fade-out {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+}
 @keyframes pulse-dot {
   0%,
   100% {
@@ -288,10 +299,14 @@ body {
 .btn-primary {
   background: var(--accent);
   color: white;
-  padding: 10px 24px;
+  padding: 12px 24px;
   border-radius: var(--radius-full);
   font-size: 14px;
   box-shadow: 0 1px 3px rgba(159, 77, 191, 0.18);
+}
+.btn-primary:has(.btn-label) {
+  padding: 0;
+  gap: 0;
 }
 .btn-primary:hover {
   background: var(--accent-warm);
@@ -304,9 +319,9 @@ body {
   font-size: 14px;
 }
 .btn-ghost {
-  background: var(--accent-bg);
-  color: var(--accent);
-  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-secondary);
+  border: none;
   padding: 10px 20px;
   border-radius: var(--radius-full);
   font-size: 14px;
@@ -718,7 +733,13 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .skill-suggest-expander,
   .side-panel,
-  .animate-fade {
+  .animate-fade,
+  .local-llm-reveal,
+  .local-llm-reveal.open,
+  .task-suggestion,
+  .launch-screen,
+  .launch-screen-out,
+  .launch-spinner {
     /* biome-ignore lint/complexity/noImportantStyles: Reduced-motion override must beat animation declarations. */
     animation: none !important;
     /* biome-ignore lint/complexity/noImportantStyles: Reduced-motion override must beat transition declarations. */

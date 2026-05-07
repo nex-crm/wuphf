@@ -89,6 +89,7 @@ export type WizardStep =
   | "identity"
   | "team"
   | "setup"
+  | "nex"
   | "task"
   | "ready";
 
@@ -122,12 +123,7 @@ export interface BlueprintDisplay {
 
 export type MemoryBackend = "markdown" | "nex" | "gbrain" | "none";
 
-export type NexSignupStatus =
-  | "hidden"
-  | "open"
-  | "submitting"
-  | "ok"
-  | "fallback";
+export type NexSignupStatus = "open" | "submitting" | "ok" | "fallback";
 
 export type ReadinessStatus = "ready" | "next" | "missing";
 

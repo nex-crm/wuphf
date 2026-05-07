@@ -151,6 +151,9 @@ test.describe("Wizard error states", () => {
     }
     await page.locator(".wizard-step button.btn-primary").first().click();
 
+    // setup → nex: skip the optional Nex registration step
+    await page.getByRole("button", { name: /^Skip$/ }).click();
+
     // task → ready (skip the freeform task)
     await page.locator(".wizard-step button.btn-primary").first().click();
 

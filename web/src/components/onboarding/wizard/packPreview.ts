@@ -91,7 +91,8 @@ const OUTCOME_FALLBACK_LIMIT = 80;
 function isKnownCategory(value: string | undefined): value is PackCategory {
   return (
     !!value &&
-    (value === "other" || KNOWN_CATEGORIES.includes(value as BlueprintCategoryKey))
+    (value === "other" ||
+      KNOWN_CATEGORIES.includes(value as BlueprintCategoryKey))
   );
 }
 

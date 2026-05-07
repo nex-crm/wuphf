@@ -306,7 +306,10 @@ html[data-theme="nex"]
   --top-panel-h: 56px;
   --sidebar-pad-x: 12px;
   --bottom-panel-h: 36px;
-  --rail-popover-left: 64px;
+  /* 120px = workspace-rail (56px) + sidebar-rail (~56px) + 8px gap. Hardcoded
+     because the underlying rails are not yet token-driven; revisit when
+     workspace-rail-w / sidebar-w land as CSS vars. */
+  --rail-popover-left: 120px;
 }
 
 .sidebar-header {
@@ -317,7 +320,6 @@ html[data-theme="nex"]
   height: var(--top-panel-h);
   box-sizing: border-box;
   padding: 0 14px;
-  border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
 
@@ -470,7 +472,8 @@ html[data-theme="nex"]
   text-align: left;
   overflow: hidden;
 }
-.sidebar-item > span:not(.sidebar-badge):not(:first-child) {
+.sidebar-item
+  > span:not(.sidebar-badge):not(:first-child):not(.sidebar-shortcut) {
   flex: 1;
   min-width: 0;
   white-space: nowrap;
@@ -2990,4 +2993,46 @@ html[data-theme="nex"]
 .theme-switcher-option-check {
   color: var(--accent);
   font-weight: 700;
+}
+
+/* Workspace rail icon hover */
+.workspace-rail-icon {
+  transition: filter 200ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+@media (hover: hover) and (pointer: fine) {
+  .workspace-rail-icon:hover {
+    filter: brightness(1.25);
+  }
+}
+.workspace-rail-icon:active {
+  filter: brightness(0.85);
+  transition-duration: 100ms;
+}
+
+/* Workspace rail add-button hover */
+.workspace-rail-add {
+  border-radius: 8px;
+  border: 1px dashed var(--neutral-500);
+  background: transparent;
+  color: var(--neutral-300);
+  font-family: var(--font-sans);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition:
+    border-color 200ms cubic-bezier(0.23, 1, 0.32, 1),
+    color 200ms cubic-bezier(0.23, 1, 0.32, 1),
+    background 200ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+@media (hover: hover) and (pointer: fine) {
+  .workspace-rail-add:hover {
+    border-color: var(--neutral-300);
+    color: var(--neutral-100);
+    background: rgba(255, 255, 255, 0.06);
+  }
+}
+.workspace-rail-add:active {
+  background: rgba(255, 255, 255, 0.1);
+  transition-duration: 100ms;
 }
