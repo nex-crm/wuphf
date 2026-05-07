@@ -5,8 +5,9 @@ import {
   computePillState,
   type PillState,
 } from "../lib/agentEventTimer";
+import { DEFAULT_THEME, isTheme, type Theme } from "../lib/themes";
 
-export type Theme = "nex" | "nex-dark" | "noir-gold";
+export type { Theme };
 
 /**
  * Snapshot payload for the SSE "activity" event. Lane A may not yet emit
@@ -52,9 +53,9 @@ export const MAX_AGENT_HISTORY = 8;
 const _storedTheme = ((): Theme => {
   try {
     const v = localStorage.getItem("wuphf-theme");
-    if (v === "nex" || v === "nex-dark" || v === "noir-gold") return v;
+    if (isTheme(v)) return v;
   } catch {}
-  return "nex";
+  return DEFAULT_THEME;
 })();
 if (typeof document !== "undefined") {
   document.documentElement.setAttribute("data-theme", _storedTheme);
