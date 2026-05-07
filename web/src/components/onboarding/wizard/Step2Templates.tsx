@@ -58,12 +58,16 @@ export function TemplatesStep({
 
   // Auto-open the detail panel for the currently-selected pack so a
   // user who returns to this step (Back from Team) sees their pick
-  // already expanded.
+  // already expanded. previews is read for the validity guard only —
+  // it is not a trigger dep so a parent re-creating the array cannot
+  // re-open a panel the user explicitly closed.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: previews intentionally omitted as trigger; void read below satisfies the linter
   useEffect(() => {
+    void previews;
     if (selected && previews.some((p) => p.id === selected)) {
       setOpenId(selected);
     }
-  }, [selected, previews]);
+  }, [selected]);
 
   // Drop the "other" filter if the underlying data no longer has any
   // unknown blueprints. Without this the chip can stick after a

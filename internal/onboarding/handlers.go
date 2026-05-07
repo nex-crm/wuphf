@@ -576,25 +576,38 @@ func summarizeBlueprint(bp operations.Blueprint) blueprintSummary {
 		})
 	}
 	for _, ft := range bp.FirstTasks {
+		id := strings.TrimSpace(ft.ID)
+		title := strings.TrimSpace(ft.Title)
+		if id == "" || title == "" {
+			continue
+		}
 		s.FirstTasks = append(s.FirstTasks, blueprintFirstTaskSummary{
-			ID:             ft.ID,
-			Title:          ft.Title,
-			Prompt:         ft.Prompt,
-			ExpectedOutput: ft.ExpectedOutput,
+			ID:             id,
+			Title:          title,
+			Prompt:         strings.TrimSpace(ft.Prompt),
+			ExpectedOutput: strings.TrimSpace(ft.ExpectedOutput),
 		})
 	}
 	for _, sk := range bp.Skills {
+		name := strings.TrimSpace(sk.Name)
+		if name == "" {
+			continue
+		}
 		s.Skills = append(s.Skills, blueprintSkillSummary{
-			Name:    sk.Name,
-			Purpose: sk.Purpose,
+			Name:    name,
+			Purpose: strings.TrimSpace(sk.Purpose),
 		})
 	}
 	for _, req := range bp.Requirements {
+		name := strings.TrimSpace(req.Name)
+		if name == "" {
+			continue
+		}
 		s.Requirements = append(s.Requirements, blueprintRequirementEntry{
-			Kind:     req.Kind,
-			Name:     req.Name,
+			Kind:     strings.TrimSpace(req.Kind),
+			Name:     name,
 			Required: req.Required,
-			Detail:   req.Detail,
+			Detail:   strings.TrimSpace(req.Detail),
 		})
 	}
 	if bp.WikiSchema != nil {
@@ -610,9 +623,13 @@ func summarizeBlueprint(bp operations.Blueprint) blueprintSummary {
 		}
 	}
 	for _, ex := range bp.ExampleArtifacts {
+		title := strings.TrimSpace(ex.Title)
+		if title == "" {
+			continue
+		}
 		s.ExampleArtifacts = append(s.ExampleArtifacts, blueprintExampleSummary{
-			Kind:  ex.Kind,
-			Title: ex.Title,
+			Kind:  strings.TrimSpace(ex.Kind),
+			Title: title,
 		})
 	}
 	return s

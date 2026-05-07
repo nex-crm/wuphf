@@ -2,6 +2,7 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { TemplatesStep } from "./Step2Templates";
+import { BLUEPRINT_CATEGORIES } from "./constants";
 import type { BlueprintTemplate } from "./types";
 
 function makeTemplates(): BlueprintTemplate[] {
@@ -98,8 +99,11 @@ describe("TemplatesStep", () => {
     const allChip = screen.getByRole("tab", { name: "All" });
     expect(allChip).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("tab", { name: "Services" })).toBeInTheDocument();
+    const mediaLabel =
+      BLUEPRINT_CATEGORIES.find((c) => c.key === "media")?.label ??
+      "Media & Community";
     expect(
-      screen.getByRole("tab", { name: "Media & Community" }),
+      screen.getByRole("tab", { name: mediaLabel }),
     ).toBeInTheDocument();
     // "Other" chip surfaces because Mystery Op has no category.
     expect(screen.getByRole("tab", { name: "Other" })).toBeInTheDocument();

@@ -88,7 +88,7 @@ type BlueprintSkill struct {
 type BlueprintRequirement struct {
 	Kind     string `json:"kind" yaml:"kind"`
 	Name     string `json:"name" yaml:"name"`
-	Required bool   `json:"required,omitempty" yaml:"required,omitempty"`
+	Required bool   `json:"required" yaml:"required,omitempty"`
 	Detail   string `json:"detail,omitempty" yaml:"detail,omitempty"`
 }
 

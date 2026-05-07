@@ -1,6 +1,7 @@
 package operations
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,6 +26,9 @@ func TestLoadBlueprintPackPreviewMetadata(t *testing.T) {
 			if strings.TrimSpace(bp.Outcome) == "" {
 				t.Fatalf("blueprint %q is missing outcome — pack library cards need it", id)
 			}
+			// Allowed categories mirror BLUEPRINT_CATEGORIES in
+			// web/src/components/onboarding/wizard/constants.ts.
+			// Update both if a new category is added.
 			switch bp.Category {
 			case "services", "media", "product":
 			default:
@@ -165,7 +169,7 @@ func mirrorEmployeeFixture(dst, src, id string) error {
 	}
 	for _, entry := range entries {
 		if entry.IsDir() {
-			continue
+			return fmt.Errorf("mirrorEmployeeFixture: unexpected subdirectory %q in %s (only flat files are supported)", entry.Name(), srcDir)
 		}
 		raw, err := os.ReadFile(filepath.Join(srcDir, entry.Name()))
 		if err != nil {
