@@ -1,8 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 
 import { getUsage } from "../../api/platform";
-import { getOfficeTasks } from "../../api/tasks";
 import { useOfficeMembers } from "../../hooks/useMembers";
+import { useOfficeTasks } from "../../hooks/useOfficeTasks";
 
 function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -16,11 +16,7 @@ function formatTokens(n: number): string {
  */
 export function WorkspaceSummary() {
   const { data: members = [] } = useOfficeMembers();
-  const { data: tasksData } = useQuery({
-    queryKey: ["office-tasks"],
-    queryFn: () => getOfficeTasks({ includeDone: false }),
-    refetchInterval: 30_000,
-  });
+  const { data: tasks = [] } = useOfficeTasks();
   const { data: usage } = useQuery({
     queryKey: ["usage"],
     queryFn: () => getUsage(),
@@ -32,9 +28,15 @@ export function WorkspaceSummary() {
     return (m.status || "").toLowerCase() === "active";
   }).length;
 
-  const openTasks = (tasksData?.tasks ?? []).filter((t) => {
-    const s = (t.status || "").toLowerCase();
-    return s && s !== "done" && s !== "completed";
+  const openTasks = tasks.filter((t) => {
+    const s = (t.status ?? "").toLowerCase();
+    return (
+      s !== "" &&
+      s !== "done" &&
+      s !== "completed" &&
+      s !== "canceled" &&
+      s !== "cancelled"
+    );
   }).length;
 
   const parts: string[] = [

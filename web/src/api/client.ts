@@ -394,10 +394,40 @@ export interface OfficeMember {
   built_in?: boolean;
   /** Per-channel disabled state when the list is sourced from `/members?channel=…`. */
   disabled?: boolean;
+  /**
+   * Transport-presence flag: true when an adapter session is currently live for
+   * this member. Distinct from `status`/`activity` (which reflect "is the
+   * agent processing right now") — `online` reflects "is the adapter
+   * reachable at all". Always present (no omitempty on the Go side) so
+   * "false" and "missing field" cannot be confused.
+   */
+  online?: boolean;
+  /**
+   * RFC3339 timestamp of the most recent UpsertParticipant for this slug.
+   * Empty when no adapter has ever upserted (e.g. built-in members without an
+   * openclaw provider) — the consumer should treat empty as "never observed"
+   * and not render a "last seen" line.
+   */
+  last_seen_at?: string;
+}
+
+/**
+ * Lane A piggybacks `humanHasPosted` onto the existing `/office-members`
+ * payload (eng decision A5/P1) — additive `meta` field. When the backend
+ * has not yet shipped Lane A, `meta` is absent and consumers default
+ * `humanHasPosted` to `false` to avoid flashing the first-run nudge.
+ */
+export interface OfficeMembersMeta {
+  humanHasPosted?: boolean;
+}
+
+export interface OfficeMembersResponse {
+  members: OfficeMember[];
+  meta?: OfficeMembersMeta;
 }
 
 export function getOfficeMembers() {
-  return get<{ members: OfficeMember[] }>("/office-members");
+  return get<OfficeMembersResponse>("/office-members");
 }
 
 export interface GeneratedAgentTemplate {

@@ -57,6 +57,45 @@ func TestQueues_HasMessages(t *testing.T) {
 	if !q.HasMessages("agent1") {
 		t.Error("expected HasMessages true after FollowUp")
 	}
+	q.DrainFollowUp("agent1")
+	q.Human("agent1", "hi")
+	if !q.HasMessages("agent1") {
+		t.Error("expected HasMessages true after Human")
+	}
+	if !q.HasHuman("agent1") {
+		t.Error("expected HasHuman true after Human")
+	}
+	q.DrainHuman("agent1")
+	if q.HasMessages("agent1") {
+		t.Error("expected no messages after draining human queue")
+	}
+}
+
+func TestQueues_HumanFIFOIndependentOfFollowUp(t *testing.T) {
+	q := NewMessageQueues()
+	q.FollowUp("agent1", "follow1")
+	q.Human("agent1", "human1")
+	q.FollowUp("agent1", "follow2")
+	q.Human("agent1", "human2")
+
+	// Human queue drains in arrival order, separate from follow-up.
+	if msg, ok := q.DrainHuman("agent1"); !ok || msg != "human1" {
+		t.Errorf("DrainHuman #1 = (%q, %v), want (\"human1\", true)", msg, ok)
+	}
+	if msg, ok := q.DrainHuman("agent1"); !ok || msg != "human2" {
+		t.Errorf("DrainHuman #2 = (%q, %v), want (\"human2\", true)", msg, ok)
+	}
+	if _, ok := q.DrainHuman("agent1"); ok {
+		t.Error("expected DrainHuman empty after both drains")
+	}
+
+	// Follow-up queue is untouched by Human draining.
+	if msg, ok := q.DrainFollowUp("agent1"); !ok || msg != "follow1" {
+		t.Errorf("DrainFollowUp #1 = (%q, %v), want (\"follow1\", true)", msg, ok)
+	}
+	if msg, ok := q.DrainFollowUp("agent1"); !ok || msg != "follow2" {
+		t.Errorf("DrainFollowUp #2 = (%q, %v), want (\"follow2\", true)", msg, ok)
+	}
 }
 
 func TestQueues_ConcurrentSteerDrain(t *testing.T) {

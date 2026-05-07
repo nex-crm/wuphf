@@ -13,9 +13,11 @@ import {
   type SkillSimilarRef,
 } from "../../api/client";
 import { useRequests } from "../../hooks/useRequests";
+import { parseApprovalContext } from "../../lib/parseApprovalContext";
 import { SkillCompareView } from "../apps/SkillCompareView";
 import { SidePanel } from "../ui/SidePanel";
 import { showNotice } from "../ui/Toast";
+import { ApprovalContextView } from "./ApprovalContextView";
 
 /**
  * Inline interview bar shown above the Composer. Mirrors the TUI behavior:
@@ -229,6 +231,9 @@ export function InterviewBar() {
         <span className="badge badge-yellow">
           {current.blocking ? "BLOCKING" : "INTERVIEW"}
         </span>
+        {current.kind === "approval" ? (
+          <span className="badge badge-orange">EXTERNAL ACTION</span>
+        ) : null}
         <span className="interview-bar-from">
           @{current.from || "agent"} asks
         </span>
@@ -281,9 +286,15 @@ export function InterviewBar() {
             .replace(/\*\*/g, "")
             .replace(/^\s*\d+\.\s*/, "")}
         </div>
-        {current.context ? (
-          <div className="interview-bar-context">{current.context}</div>
-        ) : null}
+        {(() => {
+          if (current.kind === "approval") {
+            const parsed = parseApprovalContext(current.context);
+            if (parsed) return <ApprovalContextView parsed={parsed} />;
+          }
+          return current.context ? (
+            <div className="interview-bar-context">{current.context}</div>
+          ) : null;
+        })()}
 
         {ambiguousRef ? (
           <SimilarBanner

@@ -13,20 +13,20 @@ package team
 // that the adapter (not the Host) drives the per-session teardown after invite
 // revocation.
 //
-// v1 lifecycle invariant: only the revoke half of the OfficeBoundTransport
-// admit/revoke pair is wired through the transport host. Admit happens via the
-// in-process /humans/invites/accept HTTP handler, which calls
-// Broker.acceptHumanInvite directly; the transport host's UpsertParticipant is
-// never invoked for share-admitted humans. This is intentional — admitted
-// humans poll the broker via /api/* routes rather than through the transport
-// contract — but a future phase that wants Host.ReceiveMessage for share
-// participants must close this gap by also calling Host.UpsertParticipant from
-// the accept path.
+// Admit lifecycle: Run installs Broker.SetHumanAdmitHook so every successful
+// invite acceptance via the in-process /humans/invites/accept HTTP handler
+// fans out to Host.UpsertParticipant for the new admitted human. The hook is
+// cleared on Run exit so a stale closure cannot keep firing after shutdown.
+// With both halves of admit/revoke flowing through the transport host,
+// Host.ReceiveMessage for share participants is no longer blocked on a
+// missing UpsertParticipant call — admitted humans are first-class
+// transport.Host participants.
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"sync/atomic"
 	"time"
 
@@ -53,12 +53,21 @@ func RelativeJoinURL(token string) string { return "/join/" + token }
 
 // ShareTransport adapts the broker's human-share surface to the
 // transport.OfficeBoundTransport contract. It holds no state of its own beyond
-// the broker reference, the URL builder, and the host pointer set by Run.
+// the broker reference, the URL builders, and the host pointer set by Run.
+//
+// Two URL builders exist: the immutable constructor builder (urlBuilder) and
+// an optional override (urlBuilderOverride) that the in-process share
+// controller installs once it knows its bind address. CreateInvite reads the
+// override first; absent an override it falls back to the constructor builder.
+// This split keeps the constructor builder (typically RelativeJoinURL) safe as
+// a default while letting the controller upgrade to absolute URLs without a
+// re-construction dance.
 type ShareTransport struct {
-	broker     *Broker
-	urlBuilder JoinURLBuilder
-	host       atomic.Pointer[transport.Host]
-	startedAt  atomic.Int64 // unix nanos; zero before Run, set on Run entry
+	broker             *Broker
+	urlBuilder         JoinURLBuilder
+	urlBuilderOverride atomic.Pointer[JoinURLBuilder]
+	host               atomic.Pointer[transport.Host]
+	startedAt          atomic.Int64 // unix nanos; zero before Run, set on Run entry
 }
 
 // Compile-time assertion that ShareTransport satisfies OfficeBoundTransport.
@@ -76,6 +85,21 @@ func NewShareTransport(broker *Broker, urlBuilder JoinURLBuilder) *ShareTranspor
 	return &ShareTransport{broker: broker, urlBuilder: urlBuilder}
 }
 
+// SetURLBuilder installs an override URL builder. Passing nil clears the
+// override so CreateInvite falls back to the constructor builder. Atomic so
+// the broker hot path that calls CreateInvite does not contend with the
+// controller installing the override on start.
+func (s *ShareTransport) SetURLBuilder(b JoinURLBuilder) {
+	if s == nil {
+		return
+	}
+	if b == nil {
+		s.urlBuilderOverride.Store(nil)
+		return
+	}
+	s.urlBuilderOverride.Store(&b)
+}
+
 // Name returns the stable adapter identifier.
 func (s *ShareTransport) Name() string { return shareAdapterName }
 
@@ -86,15 +110,15 @@ func (s *ShareTransport) Binding() transport.Binding {
 	return transport.Binding{Scope: transport.ScopeOffice}
 }
 
-// Run stores the host atomically and blocks until ctx is cancelled. The
-// human-share surface is in-process — the existing handlers in
-// broker_human_share.go drive accept directly, so Run does not subscribe to
-// anything external. A nil host is rejected so a misconfigured launcher fails
-// loudly rather than silently degrading.
+// Run stores the host atomically, installs the broker's human-admit hook so
+// the in-process accept handler fans out to Host.UpsertParticipant, and then
+// blocks until ctx is cancelled. The human-share surface is in-process — the
+// existing handlers in broker_human_share.go drive accept directly — so Run
+// does not subscribe to anything external. A nil host is rejected so a
+// misconfigured launcher fails loudly rather than silently degrading.
 //
-// See the file header for the v1 lifecycle invariant: only the revoke half of
-// the OfficeBoundTransport admit/revoke pair flows through the transport host
-// today.
+// The admit hook is cleared on Run exit so a stale closure (capturing the now-
+// stopped host) cannot keep firing if a second adapter installs itself later.
 func (s *ShareTransport) Run(ctx context.Context, host transport.Host) error {
 	if s == nil {
 		return fmt.Errorf("share: nil transport")
@@ -104,8 +128,43 @@ func (s *ShareTransport) Run(ctx context.Context, host transport.Host) error {
 	}
 	s.host.Store(&host)
 	s.startedAt.Store(time.Now().UnixNano())
+	if s.broker != nil {
+		s.broker.SetHumanAdmitHook(s.onHumanAdmit)
+		defer s.broker.SetHumanAdmitHook(nil)
+	}
 	<-ctx.Done()
 	return nil
+}
+
+// onHumanAdmit forwards a successful invite acceptance to Host.UpsertParticipant
+// so the admitted human becomes a first-class transport.Host participant. The
+// host pointer is read via the same atomic the rest of the adapter uses; if
+// Run has not yet stored the pointer (or the adapter is mid-shutdown) the call
+// is a silent no-op — the broker-level humanSession already exists either way.
+//
+// Errors from the host are logged rather than returned: the broker has already
+// persisted the session and replied 200 to the HTTP caller by the time this
+// fires, so an upsert failure cannot be surfaced to the human anymore. Logging
+// keeps it visible without inventing a synthetic admit-failure path.
+func (s *ShareTransport) onHumanAdmit(ctx context.Context, sessionID, slug, displayName string) {
+	if s == nil {
+		return
+	}
+	hp := s.host.Load()
+	if hp == nil {
+		return
+	}
+	host := *hp
+	participant := transport.Participant{
+		AdapterName: shareAdapterName,
+		Key:         sessionID,
+		DisplayName: displayName,
+		Human:       true,
+	}
+	binding := transport.Binding{Scope: transport.ScopeOffice, MemberSlug: slug}
+	if err := host.UpsertParticipant(ctx, participant, binding); err != nil && (ctx == nil || ctx.Err() == nil) {
+		log.Printf("[transport] share: UpsertParticipant for %s: %v", sessionID, err)
+	}
 }
 
 // Send is a no-op for the human-share adapter. Office-wide messages reach
@@ -138,10 +197,13 @@ func (s *ShareTransport) Health() transport.Health {
 }
 
 // CreateInvite creates a new human-share invite via Broker.createHumanInvite
-// and returns the join URL produced by the injected JoinURLBuilder. The
-// network argument is part of the OfficeBoundTransport contract but
-// ShareTransport ignores it: URL construction is controlled by the builder,
-// which the share controller selects based on its own bind logic.
+// and returns the join URL produced by the active JoinURLBuilder. The override
+// builder (set via SetURLBuilder) wins over the constructor builder so the
+// in-process share controller can upgrade from RelativeJoinURL to an absolute
+// URL once its bind address is known. The network argument is part of the
+// OfficeBoundTransport contract but ShareTransport ignores it: URL
+// construction is controlled by the builder, which the share controller
+// selects based on its own bind logic.
 func (s *ShareTransport) CreateInvite(_ context.Context, _ string) (string, error) {
 	if s == nil || s.broker == nil {
 		return "", fmt.Errorf("share: CreateInvite: nil broker")
@@ -150,7 +212,45 @@ func (s *ShareTransport) CreateInvite(_ context.Context, _ string) (string, erro
 	if err != nil {
 		return "", fmt.Errorf("share: CreateInvite: %w", err)
 	}
-	return s.urlBuilder(token), nil
+	builder := s.urlBuilder
+	if override := s.urlBuilderOverride.Load(); override != nil {
+		builder = *override
+	}
+	return builder(token), nil
+}
+
+// ShareInviteDetails carries the join URL and broker-issued metadata for a
+// freshly created invite. Callers that need more than the URL (e.g. the
+// in-process share controller surfacing the expiry timestamp) should prefer
+// CreateInviteDetailed over CreateInvite. ExpiresAt is the same RFC3339 string
+// the broker stores so callers cannot drift in formatting.
+type ShareInviteDetails struct {
+	URL       string
+	InviteID  string
+	ExpiresAt string
+}
+
+// CreateInviteDetailed creates an invite and returns the join URL plus
+// broker-issued metadata (invite ID and RFC3339 expiry). Identical to
+// CreateInvite for URL construction; see CreateInvite for the override
+// precedence rule.
+func (s *ShareTransport) CreateInviteDetailed(_ context.Context) (ShareInviteDetails, error) {
+	if s == nil || s.broker == nil {
+		return ShareInviteDetails{}, fmt.Errorf("share: CreateInviteDetailed: nil broker")
+	}
+	token, invite, err := s.broker.createHumanInvite()
+	if err != nil {
+		return ShareInviteDetails{}, fmt.Errorf("share: CreateInviteDetailed: %w", err)
+	}
+	builder := s.urlBuilder
+	if override := s.urlBuilderOverride.Load(); override != nil {
+		builder = *override
+	}
+	return ShareInviteDetails{
+		URL:       builder(token),
+		InviteID:  invite.ID,
+		ExpiresAt: invite.ExpiresAt,
+	}, nil
 }
 
 // RevokeInvite revokes the invite and every session it admitted. Per the

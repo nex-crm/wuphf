@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { type LintFinding, type LintReport, runLint } from "../../api/wiki";
 import { keyedByOccurrence } from "../../lib/reactKeys";
+import { requestMaintenanceTarget } from "./maintenanceTarget";
 import ResolveContradictionModal from "./ResolveContradictionModal";
 
 /**
@@ -161,18 +162,11 @@ export default function WikiLint({ onNavigate }: WikiLintProps) {
                 </td>
                 <td className="wk-audit-msg">{f.summary}</td>
                 <td>
-                  {f.type === "contradictions" && f.resolve_actions ? (
-                    <button
-                      type="button"
-                      className="wk-editor-save"
-                      style={{ padding: "4px 10px", fontSize: 12 }}
-                      onClick={() => setResolveTarget({ finding: f, idx })}
-                    >
-                      Resolve
-                    </button>
-                  ) : (
-                    <span aria-hidden="true">—</span>
-                  )}
+                  <FindingActionCell
+                    finding={f}
+                    onResolve={() => setResolveTarget({ finding: f, idx })}
+                    onNavigate={onNavigate}
+                  />
                 </td>
               </tr>
             ))}
@@ -193,6 +187,57 @@ export default function WikiLint({ onNavigate }: WikiLintProps) {
         />
       ) : null}
     </main>
+  );
+}
+
+interface FindingActionCellProps {
+  finding: LintFinding;
+  onResolve: () => void;
+  onNavigate: (path: string | null) => void;
+}
+
+function FindingActionCell({
+  finding,
+  onResolve,
+  onNavigate,
+}: FindingActionCellProps) {
+  if (finding.type !== "contradictions" || !finding.resolve_actions) {
+    return <span aria-hidden="true">—</span>;
+  }
+  return (
+    <div style={{ display: "flex", gap: 6 }}>
+      <button
+        type="button"
+        className="wk-editor-save"
+        style={{ padding: "4px 10px", fontSize: 12 }}
+        onClick={onResolve}
+      >
+        Resolve
+      </button>
+      {finding.entity_slug ? (
+        <button
+          type="button"
+          className="wk-related-link"
+          style={{
+            background: "none",
+            border: "none",
+            padding: "4px 6px",
+            cursor: "pointer",
+            fontSize: 12,
+          }}
+          data-testid="wk-lint-suggest-fix"
+          onClick={() => {
+            requestMaintenanceTarget(
+              finding.entity_slug ?? "",
+              "resolve_contradiction",
+            );
+            onNavigate(finding.entity_slug ?? null);
+          }}
+        >
+          Suggest fix
+        </button>
+      ) : null}
+    </div>
   );
 }
 

@@ -1133,6 +1133,98 @@ func TestEnqueueHeadlessCodexTurnRecordAllowsRetryBehindActiveAgentTask(t *testi
 	}
 }
 
+func TestEnqueueHeadlessCodexTurnRecordHumanBypassesLeadQueueCap(t *testing.T) {
+	l := newHeadlessLauncherForTest(t)
+	l.pack = &agent.PackDefinition{LeadSlug: "ceo"}
+	l.headless.workers["ceo"] = true
+	// Lead queue is already at the cap (1 pending) with an agent-originated
+	// turn. Without the human bypass, a follow-up human chat would be dropped
+	// with "queue-drop: lead queue at cap" — the exact symptom reported.
+	l.headless.queues["ceo"] = []headlessCodexTurn{{
+		Prompt:     "agent-originated catchup",
+		EnqueuedAt: time.Now(),
+	}}
+
+	l.enqueueHeadlessCodexTurnRecord("ceo", headlessCodexTurn{
+		Prompt:     "wait, what are you doing?",
+		FromHuman:  true,
+		EnqueuedAt: time.Now(),
+	})
+
+	queue := l.headless.queues["ceo"]
+	if got := len(queue); got != 1 {
+		t.Fatalf("expected human turn to replace pending lead turn (cap=1), got %d", got)
+	}
+	if got := queue[0].Prompt; got != "wait, what are you doing?" {
+		t.Fatalf("expected human turn at the head of the queue, got %q", got)
+	}
+	if !queue[0].FromHuman {
+		t.Error("expected FromHuman flag to be preserved on the queued turn")
+	}
+}
+
+func TestEnqueueHeadlessCodexTurnRecordHumanBypassesLeadQueueHold(t *testing.T) {
+	l := newHeadlessLauncherForTest(t)
+	l.pack = &agent.PackDefinition{LeadSlug: "ceo"}
+	// A specialist is still active. An agent-originated lead turn would be
+	// deferred via deferredLead; a human chat must skip the hold and queue
+	// immediately so the lead absorbs the message right away.
+	l.headless.active["eng"] = &headlessCodexActiveTurn{
+		Turn:      headlessCodexTurn{Prompt: "specialist still working"},
+		StartedAt: time.Now(),
+	}
+
+	l.enqueueHeadlessCodexTurnRecord("ceo", headlessCodexTurn{
+		Prompt:     "are you still on this?",
+		FromHuman:  true,
+		EnqueuedAt: time.Now(),
+	})
+
+	if l.headless.deferredLead != nil {
+		t.Error("human turn must not be parked on deferredLead")
+	}
+	queue := l.headless.queues["ceo"]
+	if got := len(queue); got != 1 {
+		t.Fatalf("expected human turn to enqueue past the lead hold, got %d", got)
+	}
+	if got := queue[0].Prompt; got != "are you still on this?" {
+		t.Fatalf("expected human prompt at head of lead queue, got %q", got)
+	}
+}
+
+func TestEnqueueHeadlessCodexTurnRecordHumanPreemptsActiveTurn(t *testing.T) {
+	l := newHeadlessLauncherForTest(t)
+	l.pack = &agent.PackDefinition{LeadSlug: "ceo"}
+	l.headless.workers["eng"] = true
+
+	cancelled := false
+	// An active turn that is well below the staleness/min-age floors —
+	// without the human bypass, it would never be cancelled by a follow-up
+	// enqueue.
+	l.headless.active["eng"] = &headlessCodexActiveTurn{
+		Turn:      headlessCodexTurn{Prompt: "agent-originated work in progress"},
+		StartedAt: time.Now(),
+		Cancel:    func() { cancelled = true },
+	}
+
+	l.enqueueHeadlessCodexTurnRecord("eng", headlessCodexTurn{
+		Prompt:     "stop, what about the X bug?",
+		FromHuman:  true,
+		EnqueuedAt: time.Now(),
+	})
+
+	if !cancelled {
+		t.Fatal("expected human-priority turn to preempt the active turn regardless of staleness")
+	}
+	queue := l.headless.queues["eng"]
+	if got := len(queue); got != 1 || queue[0].Prompt != "stop, what about the X bug?" {
+		t.Fatalf("expected human turn to be queued for the worker to pick up, got %#v", queue)
+	}
+	if !queue[0].FromHuman {
+		t.Error("expected FromHuman flag to survive the preemption path")
+	}
+}
+
 func TestWakeLeadAfterSpecialistFallsBackToCompletedTaskUpdateWhenNoBroadcast(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 

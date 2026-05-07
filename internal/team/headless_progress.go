@@ -17,6 +17,12 @@ func (l *Launcher) updateHeadlessProgress(slug string, status string, activity s
 	if l == nil || l.broker == nil {
 		return
 	}
+	// Classify the event once, broker-side, before publishing. The frontend
+	// reads snapshot.Kind directly to drive bubble visuals (routine pulse vs
+	// milestone hold vs the broker-only "stuck" escalation). Idle/done events
+	// fall through as "routine" — they're not user-visible noise to highlight,
+	// just state changes.
+	kind := classifyActivityKind(activity, status, detail)
 	l.broker.UpdateAgentActivity(agentActivitySnapshot{
 		Slug:         slug,
 		Status:       strings.TrimSpace(status),
@@ -27,6 +33,7 @@ func (l *Launcher) updateHeadlessProgress(slug string, status string, activity s
 		FirstEventMs: metrics.FirstEventMs,
 		FirstTextMs:  metrics.FirstTextMs,
 		FirstToolMs:  metrics.FirstToolMs,
+		Kind:         kind,
 	})
 }
 
