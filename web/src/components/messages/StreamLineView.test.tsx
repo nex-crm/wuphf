@@ -197,6 +197,60 @@ describe("<StreamLineView>", () => {
     expect(screen.getByText("team_broadcast")).toBeInTheDocument();
   });
 
+  it("renders a HeadlessEvent manifest with tool badges and stats", () => {
+    render(
+      <StreamLineView
+        line={{
+          id: 1,
+          data: "",
+          parsed: {
+            kind: "headless_event",
+            type: "manifest",
+            provider: "claude",
+            agent: "ceo",
+            turn_id: "abc123",
+            status: "idle",
+            text_len: 1420,
+            tool_calls: [
+              { tool_name: "Bash", count: 2 },
+              { tool_name: "Read", count: 3 },
+            ],
+            metrics: { total_ms: 2000, input_tokens: 500, output_tokens: 300 },
+          },
+        }}
+      />,
+    );
+    // Tool badges appear with count suffix when count > 1
+    expect(screen.getByText("Bash ×2")).toBeInTheDocument();
+    expect(screen.getByText("Read ×3")).toBeInTheDocument();
+    // Text byte stat
+    expect(screen.getByText("1,420 chars")).toBeInTheDocument();
+    // Token stat (500 + 300 = 800)
+    expect(screen.getByText("800 tok")).toBeInTheDocument();
+  });
+
+  it("renders a HeadlessEvent manifest with no tools as null", () => {
+    const { container } = render(
+      <StreamLineView
+        line={{
+          id: 1,
+          data: "",
+          parsed: {
+            kind: "headless_event",
+            type: "manifest",
+            provider: "codex",
+            agent: "eng",
+            turn_id: "t1",
+            status: "idle",
+            text_len: 0,
+          },
+        }}
+      />,
+    );
+    // Zero tools + zero textLen → hasStats false → renders nothing
+    expect(container.firstChild).toBeNull();
+  });
+
   it("renders Codex completed message content arrays", () => {
     render(
       <StreamLineView

@@ -212,6 +212,110 @@ func TestNewHeadlessTurnIDIsUnique(t *testing.T) {
 	}
 }
 
+// TestEmitHeadlessManifestAggregatesAndSorts pins the per-turn manifest
+// emit contract: tool names are deduplicated with per-tool counts, the
+// list is sorted alphabetically so wire output is deterministic, and the
+// event carries the same turn/task correlation IDs as per-phase events.
+func TestEmitHeadlessManifestAggregatesAndSorts(t *testing.T) {
+	stream := &agentStreamBuffer{subs: make(map[int]agentStreamSubscriber)}
+	metrics := headlessProgressMetrics{TotalMs: 2000, FirstTextMs: 80}
+
+	// Read called 3 times, Edit called 1 time, Bash called 2 times — expect
+	// Bash×2, Edit×1, Read×3 in alphabetical order.
+	toolNames := []string{"Read", "Bash", "Edit", "Read", "Bash", "Read"}
+	emitHeadlessManifest(stream, "turn-m1", HeadlessProviderClaude, "ceo", "task-99",
+		toolNames, 1420, metrics, &headlessTokenUsage{InputTokens: 500, OutputTokens: 300})
+
+	lines := stream.recentTask("task-99")
+	if len(lines) != 1 {
+		t.Fatalf("expected 1 manifest event, got %d: %v", len(lines), lines)
+	}
+	var ev HeadlessEvent
+	if err := json.Unmarshal([]byte(strings.TrimRight(lines[0], "\n")), &ev); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if ev.Kind != HeadlessEventKind {
+		t.Fatalf("kind: want %q, got %q", HeadlessEventKind, ev.Kind)
+	}
+	if ev.Type != HeadlessEventTypeManifest {
+		t.Fatalf("type: want manifest, got %q", ev.Type)
+	}
+	if ev.TurnID != "turn-m1" {
+		t.Fatalf("turn_id: want turn-m1, got %q", ev.TurnID)
+	}
+	if ev.Status != "idle" {
+		t.Fatalf("status: want idle, got %q", ev.Status)
+	}
+	if ev.TextLen != 1420 {
+		t.Fatalf("text_len: want 1420, got %d", ev.TextLen)
+	}
+	if ev.Metrics == nil || ev.Metrics.TotalMs != 2000 || ev.Metrics.InputTokens != 500 {
+		t.Fatalf("metrics: %+v", ev.Metrics)
+	}
+
+	// Verify dedup + sort
+	want := []HeadlessManifestEntry{
+		{ToolName: "Bash", Count: 2},
+		{ToolName: "Edit", Count: 1},
+		{ToolName: "Read", Count: 3},
+	}
+	if len(ev.ToolCalls) != len(want) {
+		t.Fatalf("tool_calls length: want %d, got %d: %+v", len(want), len(ev.ToolCalls), ev.ToolCalls)
+	}
+	for i, w := range want {
+		g := ev.ToolCalls[i]
+		if g.ToolName != w.ToolName || g.Count != w.Count {
+			t.Fatalf("tool_calls[%d]: want %+v, got %+v", i, w, g)
+		}
+	}
+}
+
+// TestEmitHeadlessManifestEmptyTools verifies a turn with no tool calls
+// still emits a manifest with zero-length ToolCalls (omitted from wire
+// JSON due to omitempty) but still carries TextLen and Metrics.
+func TestEmitHeadlessManifestEmptyTools(t *testing.T) {
+	stream := &agentStreamBuffer{subs: make(map[int]agentStreamSubscriber)}
+	metrics := headlessProgressMetrics{TotalMs: 500}
+
+	emitHeadlessManifest(stream, "turn-m2", HeadlessProviderCodex, "eng", "task-1",
+		nil, 850, metrics, nil)
+
+	lines := stream.recentTask("task-1")
+	if len(lines) != 1 {
+		t.Fatalf("expected 1 manifest event even with no tools, got %d", len(lines))
+	}
+	var ev HeadlessEvent
+	if err := json.Unmarshal([]byte(strings.TrimRight(lines[0], "\n")), &ev); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if ev.Type != HeadlessEventTypeManifest {
+		t.Fatalf("type: want manifest, got %q", ev.Type)
+	}
+	if len(ev.ToolCalls) != 0 {
+		t.Fatalf("ToolCalls must be empty for no-tool turn, got %+v", ev.ToolCalls)
+	}
+	if ev.TextLen != 850 {
+		t.Fatalf("text_len: want 850, got %d", ev.TextLen)
+	}
+	// Verify omitempty strips tool_calls from JSON
+	raw := strings.TrimRight(lines[0], "\n")
+	if strings.Contains(raw, `"tool_calls"`) {
+		t.Fatalf("tool_calls must be omitted from JSON when empty: %s", raw)
+	}
+}
+
+// TestEmitHeadlessManifestNilStreamIsSafe verifies the nil-stream guard
+// so runners don't need a conditional around every emit call.
+func TestEmitHeadlessManifestNilStreamIsSafe(t *testing.T) {
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("emitHeadlessManifest on nil stream panicked: %v", r)
+		}
+	}()
+	emitHeadlessManifest(nil, "t", HeadlessProviderClaude, "ceo", "task-1",
+		[]string{"Read"}, 100, headlessProgressMetrics{}, nil)
+}
+
 // TestHeadlessProgressEventMetricsDropsSentinels pins the "-1 means
 // not measured" sentinel handling. Sentinels must not leak onto the
 // wire as negative numbers — JSON omitempty zeros are how the frontend

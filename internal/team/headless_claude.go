@@ -160,6 +160,8 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 	var firstToolAt time.Time
 	textStarted := false
 	turnID := newHeadlessTurnID()
+	var turnToolNames []string
+	var turnTextLen int
 
 	result, parseErr := provider.ReadClaudeJSONStream(teedStdout, func(event provider.ClaudeStreamEvent) {
 		if firstEventAt.IsZero() {
@@ -179,6 +181,7 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 				l.updateHeadlessProgress(slug, "active", "text", "drafting response", metrics)
 			}
 			relay.OnText(event.Text)
+			turnTextLen += len(event.Text)
 			emitHeadlessText(agentStream, turnID, HeadlessProviderClaude, slug, taskID, event.Text, "claude.text")
 		case "tool_use":
 			relay.Flush()
@@ -188,6 +191,7 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 			}
 			appendHeadlessClaudeLog(slug, fmt.Sprintf("tool_use: %s %s", event.ToolName, truncate(event.ToolInput, 120)))
 			l.updateHeadlessProgress(slug, "active", "tool_use", fmt.Sprintf("running %s", strings.TrimSpace(event.ToolName)), metrics)
+			turnToolNames = append(turnToolNames, event.ToolName)
 			emitHeadlessToolUse(agentStream, turnID, HeadlessProviderClaude, slug, taskID, event.ToolName, event.ToolInput, "claude.tool_use")
 		case "tool_result":
 			appendHeadlessClaudeLog(slug, "tool_result: "+truncate(event.Text, 140))
@@ -211,6 +215,7 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 		))
 		l.updateHeadlessProgress(slug, "error", "error", truncate(detail, 180), metrics)
 		emitHeadlessTerminalWithTurn(agentStream, turnID, HeadlessProviderClaude, slug, taskID, "", detail, metrics, claudeUsageToTokenUsage(result.Usage))
+		emitHeadlessManifest(agentStream, turnID, HeadlessProviderClaude, slug, taskID, turnToolNames, turnTextLen, metrics, claudeUsageToTokenUsage(result.Usage))
 		return fmt.Errorf("%w: %s", err, detail)
 	}
 	if parseErr != nil {
@@ -224,6 +229,7 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 		))
 		l.updateHeadlessProgress(slug, "error", "error", truncate(parseErr.Error(), 180), metrics)
 		emitHeadlessTerminalWithTurn(agentStream, turnID, HeadlessProviderClaude, slug, taskID, "", parseErr.Error(), metrics, claudeUsageToTokenUsage(result.Usage))
+		emitHeadlessManifest(agentStream, turnID, HeadlessProviderClaude, slug, taskID, turnToolNames, turnTextLen, metrics, claudeUsageToTokenUsage(result.Usage))
 		return parseErr
 	}
 
@@ -243,6 +249,7 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 	}
 	l.updateHeadlessProgress(slug, "idle", "idle", summary, metrics)
 	emitHeadlessTerminalWithTurn(agentStream, turnID, HeadlessProviderClaude, slug, taskID, summary, "", metrics, claudeUsageToTokenUsage(result.Usage))
+	emitHeadlessManifest(agentStream, turnID, HeadlessProviderClaude, slug, taskID, turnToolNames, turnTextLen, metrics, claudeUsageToTokenUsage(result.Usage))
 	if l.broker != nil {
 		l.broker.RecordAgentUsage(slug, l.headlessClaudeModel(slug), result.Usage)
 	}

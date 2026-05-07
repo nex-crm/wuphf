@@ -990,6 +990,35 @@ html[data-theme] .interview-bar-actions .btn-primary:hover {
   white-space: pre-wrap;
 }
 
+.stream-card-manifest {
+  opacity: 0.8;
+}
+.stream-phase-manifest {
+  color: var(--text-tertiary);
+  background: var(--bg-secondary, var(--bg));
+}
+.stream-manifest-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+.stream-manifest-tool-badge {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--accent-bg);
+  color: var(--accent);
+  white-space: nowrap;
+}
+.stream-manifest-stat {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
 /* ─── Composer ─── */
 .composer {
   padding: 12px 24px 16px;
