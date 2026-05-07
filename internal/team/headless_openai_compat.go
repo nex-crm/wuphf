@@ -199,7 +199,7 @@ func (l *Launcher) runHeadlessOpenAICompatTurn(ctx context.Context, slug string,
 		metrics.TotalMs = time.Since(startedAt).Milliseconds()
 		l.updateHeadlessProgress(slug, "error", "error", truncate(err.Error(), 180), metrics)
 		emitHeadlessTerminalWithTurn(agentStream, turnID, HeadlessProviderOpenAICompat, slug, activeTaskID, "", err.Error(), metrics, claudeUsageToTokenUsage(turnUsage))
-		emitHeadlessManifest(agentStream, turnID, HeadlessProviderOpenAICompat, slug, activeTaskID, turnToolNames, turnTextLen, metrics, claudeUsageToTokenUsage(turnUsage))
+		emitHeadlessManifest(agentStream, turnID, HeadlessProviderOpenAICompat, slug, activeTaskID, err.Error(), turnToolNames, turnTextLen, metrics, claudeUsageToTokenUsage(turnUsage))
 		return err
 	}
 	if streamErr != "" {
@@ -211,7 +211,7 @@ func (l *Launcher) runHeadlessOpenAICompatTurn(ctx context.Context, slug string,
 		))
 		l.updateHeadlessProgress(slug, "error", "error", truncate(streamErr, 180), metrics)
 		emitHeadlessTerminalWithTurn(agentStream, turnID, HeadlessProviderOpenAICompat, slug, activeTaskID, "", streamErr, metrics, claudeUsageToTokenUsage(turnUsage))
-		emitHeadlessManifest(agentStream, turnID, HeadlessProviderOpenAICompat, slug, activeTaskID, turnToolNames, turnTextLen, metrics, claudeUsageToTokenUsage(turnUsage))
+		emitHeadlessManifest(agentStream, turnID, HeadlessProviderOpenAICompat, slug, activeTaskID, streamErr, turnToolNames, turnTextLen, metrics, claudeUsageToTokenUsage(turnUsage))
 		// Post any partial output (e.g. the cap-hit marker the loop
 		// produced when maxIters tripped) before propagating the error,
 		// so the user sees something on-channel rather than a silent
@@ -252,7 +252,7 @@ func (l *Launcher) runHeadlessOpenAICompatTurn(ctx context.Context, slug string,
 	}
 	l.updateHeadlessProgress(slug, "idle", "idle", summary, metrics)
 	emitHeadlessTerminalWithTurn(agentStream, turnID, HeadlessProviderOpenAICompat, slug, activeTaskID, summary, "", metrics, claudeUsageToTokenUsage(turnUsage))
-	emitHeadlessManifest(agentStream, turnID, HeadlessProviderOpenAICompat, slug, activeTaskID, turnToolNames, turnTextLen, metrics, claudeUsageToTokenUsage(turnUsage))
+	emitHeadlessManifest(agentStream, turnID, HeadlessProviderOpenAICompat, slug, activeTaskID, "", turnToolNames, turnTextLen, metrics, claudeUsageToTokenUsage(turnUsage))
 
 	state.flushLiveChat()
 	if text != "" && state.shouldPostFinalText() {

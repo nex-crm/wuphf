@@ -219,7 +219,10 @@ function HeadlessEventView({
       metrics && typeof metrics.output_tokens === "number"
         ? metrics.output_tokens
         : null;
-    const hasStats = toolCalls.length > 0 || (textLen !== null && textLen > 0) || inputTokens !== null;
+    const hasStats =
+      toolCalls.length > 0 ||
+      (textLen !== null && textLen > 0) ||
+      (inputTokens !== null && outputTokens !== null);
     if (!hasStats) return null;
     return (
       <div className="stream-card stream-card-manifest">

@@ -215,7 +215,7 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 		))
 		l.updateHeadlessProgress(slug, "error", "error", truncate(detail, 180), metrics)
 		emitHeadlessTerminalWithTurn(agentStream, turnID, HeadlessProviderClaude, slug, taskID, "", detail, metrics, claudeUsageToTokenUsage(result.Usage))
-		emitHeadlessManifest(agentStream, turnID, HeadlessProviderClaude, slug, taskID, turnToolNames, turnTextLen, metrics, claudeUsageToTokenUsage(result.Usage))
+		emitHeadlessManifest(agentStream, turnID, HeadlessProviderClaude, slug, taskID, detail, turnToolNames, turnTextLen, metrics, claudeUsageToTokenUsage(result.Usage))
 		return fmt.Errorf("%w: %s", err, detail)
 	}
 	if parseErr != nil {
@@ -229,7 +229,7 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 		))
 		l.updateHeadlessProgress(slug, "error", "error", truncate(parseErr.Error(), 180), metrics)
 		emitHeadlessTerminalWithTurn(agentStream, turnID, HeadlessProviderClaude, slug, taskID, "", parseErr.Error(), metrics, claudeUsageToTokenUsage(result.Usage))
-		emitHeadlessManifest(agentStream, turnID, HeadlessProviderClaude, slug, taskID, turnToolNames, turnTextLen, metrics, claudeUsageToTokenUsage(result.Usage))
+		emitHeadlessManifest(agentStream, turnID, HeadlessProviderClaude, slug, taskID, parseErr.Error(), turnToolNames, turnTextLen, metrics, claudeUsageToTokenUsage(result.Usage))
 		return parseErr
 	}
 
@@ -249,7 +249,7 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 	}
 	l.updateHeadlessProgress(slug, "idle", "idle", summary, metrics)
 	emitHeadlessTerminalWithTurn(agentStream, turnID, HeadlessProviderClaude, slug, taskID, summary, "", metrics, claudeUsageToTokenUsage(result.Usage))
-	emitHeadlessManifest(agentStream, turnID, HeadlessProviderClaude, slug, taskID, turnToolNames, turnTextLen, metrics, claudeUsageToTokenUsage(result.Usage))
+	emitHeadlessManifest(agentStream, turnID, HeadlessProviderClaude, slug, taskID, "", turnToolNames, turnTextLen, metrics, claudeUsageToTokenUsage(result.Usage))
 	if l.broker != nil {
 		l.broker.RecordAgentUsage(slug, l.headlessClaudeModel(slug), result.Usage)
 	}

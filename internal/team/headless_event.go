@@ -285,7 +285,7 @@ func emitHeadlessToolResult(stream *agentStreamBuffer, turnID, provider, slug, t
 // event emitted during the turn. Both may be zero for turns that produced
 // no tools or no text — the manifest is still emitted so consumers see a
 // consistent turn boundary.
-func emitHeadlessManifest(stream *agentStreamBuffer, turnID, provider, slug, taskID string, toolNames []string, textLen int, metrics headlessProgressMetrics, usage *headlessTokenUsage) {
+func emitHeadlessManifest(stream *agentStreamBuffer, turnID, provider, slug, taskID, errDetail string, toolNames []string, textLen int, metrics headlessProgressMetrics, usage *headlessTokenUsage) {
 	if stream == nil {
 		return
 	}
@@ -300,13 +300,17 @@ func emitHeadlessManifest(stream *agentStreamBuffer, turnID, provider, slug, tas
 		calls = append(calls, HeadlessManifestEntry{ToolName: name, Count: count})
 	}
 	sort.Slice(calls, func(i, j int) bool { return calls[i].ToolName < calls[j].ToolName })
+	status := "idle"
+	if strings.TrimSpace(errDetail) != "" {
+		status = "error"
+	}
 	pushHeadlessEvent(stream, HeadlessEvent{
 		Type:      HeadlessEventTypeManifest,
 		Provider:  provider,
 		Agent:     slug,
 		TurnID:    strings.TrimSpace(turnID),
 		TaskID:    strings.TrimSpace(taskID),
-		Status:    "idle",
+		Status:    status,
 		ToolCalls: calls,
 		TextLen:   textLen,
 		Metrics:   headlessProgressEventMetrics(metrics, usage),

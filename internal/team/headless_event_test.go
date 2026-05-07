@@ -223,7 +223,7 @@ func TestEmitHeadlessManifestAggregatesAndSorts(t *testing.T) {
 	// Read called 3 times, Edit called 1 time, Bash called 2 times — expect
 	// Bash×2, Edit×1, Read×3 in alphabetical order.
 	toolNames := []string{"Read", "Bash", "Edit", "Read", "Bash", "Read"}
-	emitHeadlessManifest(stream, "turn-m1", HeadlessProviderClaude, "ceo", "task-99",
+	emitHeadlessManifest(stream, "turn-m1", HeadlessProviderClaude, "ceo", "task-99", "",
 		toolNames, 1420, metrics, &headlessTokenUsage{InputTokens: 500, OutputTokens: 300})
 
 	lines := stream.recentTask("task-99")
@@ -270,6 +270,26 @@ func TestEmitHeadlessManifestAggregatesAndSorts(t *testing.T) {
 	}
 }
 
+// TestEmitHeadlessManifestErrorTurnStatus verifies that a non-empty errDetail
+// flips the manifest status to "error" so consumers can distinguish failed
+// turns without also reading the preceding idle/error event.
+func TestEmitHeadlessManifestErrorTurnStatus(t *testing.T) {
+	stream := &agentStreamBuffer{subs: make(map[int]agentStreamSubscriber)}
+	emitHeadlessManifest(stream, "turn-err", HeadlessProviderCodex, "eng", "task-e", "auth: 401",
+		nil, 0, headlessProgressMetrics{TotalMs: 300}, nil)
+	lines := stream.recentTask("task-e")
+	if len(lines) != 1 {
+		t.Fatalf("expected 1 manifest event, got %d", len(lines))
+	}
+	var ev HeadlessEvent
+	if err := json.Unmarshal([]byte(strings.TrimRight(lines[0], "\n")), &ev); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if ev.Status != "error" {
+		t.Fatalf("status: want error on non-empty errDetail, got %q", ev.Status)
+	}
+}
+
 // TestEmitHeadlessManifestEmptyTools verifies a turn with no tool calls
 // still emits a manifest with zero-length ToolCalls (omitted from wire
 // JSON due to omitempty) but still carries TextLen and Metrics.
@@ -277,7 +297,7 @@ func TestEmitHeadlessManifestEmptyTools(t *testing.T) {
 	stream := &agentStreamBuffer{subs: make(map[int]agentStreamSubscriber)}
 	metrics := headlessProgressMetrics{TotalMs: 500}
 
-	emitHeadlessManifest(stream, "turn-m2", HeadlessProviderCodex, "eng", "task-1",
+	emitHeadlessManifest(stream, "turn-m2", HeadlessProviderCodex, "eng", "task-1", "",
 		nil, 850, metrics, nil)
 
 	lines := stream.recentTask("task-1")
@@ -312,7 +332,7 @@ func TestEmitHeadlessManifestNilStreamIsSafe(t *testing.T) {
 			t.Fatalf("emitHeadlessManifest on nil stream panicked: %v", r)
 		}
 	}()
-	emitHeadlessManifest(nil, "t", HeadlessProviderClaude, "ceo", "task-1",
+	emitHeadlessManifest(nil, "t", HeadlessProviderClaude, "ceo", "task-1", "",
 		[]string{"Read"}, 100, headlessProgressMetrics{}, nil)
 }
 
