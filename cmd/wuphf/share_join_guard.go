@@ -85,6 +85,11 @@ type joinRateLimiter struct {
 	burst       int
 	interval    time.Duration
 	lastSweepAt time.Time
+	// now is the clock the limiter reads. Defaults to time.Now; tests
+	// substitute a controllable closure so refill semantics can be
+	// exercised without sleeping (CONTRIBUTING.md hard-bans new time.Sleep
+	// in tests, and a sleep-loop here flakes anyway).
+	now func() time.Time
 }
 
 type joinRateBucket struct {
@@ -104,6 +109,7 @@ func newJoinRateLimiter() *joinRateLimiter {
 		buckets:  make(map[string]*joinRateBucket),
 		burst:    joinRateBurst,
 		interval: joinRateInterval,
+		now:      time.Now,
 	}
 }
 
@@ -117,7 +123,11 @@ func (l *joinRateLimiter) allow(ip string) bool {
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	now := time.Now()
+	clock := l.now
+	if clock == nil {
+		clock = time.Now
+	}
+	now := clock()
 	l.gcLocked(now)
 	bucket, ok := l.buckets[ip]
 	if !ok {

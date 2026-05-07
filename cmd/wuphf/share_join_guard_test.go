@@ -61,10 +61,15 @@ func TestJoinRateLimiterBlocksAfterBurst(t *testing.T) {
 }
 
 func TestJoinRateLimiterRefillsOverTime(t *testing.T) {
+	// Drive an injected clock so the refill semantics are exercised
+	// deterministically — CONTRIBUTING.md hard-bans new time.Sleep in
+	// tests, and a sleep-loop here would flake under load anyway.
+	clock := time.Unix(0, 0)
 	rl := &joinRateLimiter{
 		buckets:  make(map[string]*joinRateBucket),
 		burst:    1,
 		interval: 10 * time.Millisecond,
+		now:      func() time.Time { return clock },
 	}
 	if !rl.allow("ip") {
 		t.Fatal("first attempt blocked")
@@ -72,7 +77,7 @@ func TestJoinRateLimiterRefillsOverTime(t *testing.T) {
 	if rl.allow("ip") {
 		t.Fatal("second attempt should be blocked before refill")
 	}
-	time.Sleep(15 * time.Millisecond)
+	clock = clock.Add(15 * time.Millisecond)
 	if !rl.allow("ip") {
 		t.Fatal("post-refill attempt blocked")
 	}
