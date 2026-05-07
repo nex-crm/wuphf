@@ -706,8 +706,8 @@ func runWeb(args []string, packSlug string, unsafe bool, webPort int, opusCEO bo
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 		<-sigCh
-		shareController.stop()
-		tunnelController.stop()
+		_ = shareController.stop()
+		_ = tunnelController.stop()
 		os.Exit(0)
 	}()
 
