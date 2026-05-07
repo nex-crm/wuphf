@@ -13,7 +13,7 @@ func (b *Broker) appendActionWithRefsLocked(kind, source, channel, actor, summar
 		Source:     strings.TrimSpace(source),
 		Channel:    normalizeChannelSlug(channel),
 		Actor:      strings.TrimSpace(actor),
-		Summary:    strings.TrimSpace(summary),
+		Summary:    redactSecretsInText(strings.TrimSpace(summary)),
 		RelatedID:  strings.TrimSpace(relatedID),
 		SignalIDs:  append([]string(nil), signalIDs...),
 		DecisionID: strings.TrimSpace(decisionID),
@@ -89,8 +89,8 @@ func (b *Broker) RecordSignals(signals []officeSignal) ([]officeSignalRecord, er
 			Source:        strings.TrimSpace(signal.Source),
 			SourceRef:     strings.TrimSpace(signal.ID),
 			Kind:          strings.TrimSpace(signal.Kind),
-			Title:         strings.TrimSpace(signal.Title),
-			Content:       strings.TrimSpace(signal.Content),
+			Title:         redactSecretsInText(strings.TrimSpace(signal.Title)),
+			Content:       redactSecretsInText(strings.TrimSpace(signal.Content)),
 			Channel:       channel,
 			Owner:         strings.TrimSpace(signal.Owner),
 			Confidence:    strings.TrimSpace(signal.Confidence),
@@ -124,8 +124,8 @@ func (b *Broker) RecordDecision(kind, channel, summary, reason, owner string, si
 		ID:            fmt.Sprintf("decision-%d", len(b.decisions)+1),
 		Kind:          strings.TrimSpace(kind),
 		Channel:       channel,
-		Summary:       strings.TrimSpace(summary),
-		Reason:        strings.TrimSpace(reason),
+		Summary:       redactSecretsInText(strings.TrimSpace(summary)),
+		Reason:        redactSecretsInText(strings.TrimSpace(reason)),
 		Owner:         strings.TrimSpace(owner),
 		SignalIDs:     append([]string(nil), signalIDs...),
 		RequiresHuman: requiresHuman,
@@ -162,7 +162,7 @@ func (b *Broker) CreateWatchdogAlert(kind, channel, targetType, targetID, owner,
 		alert := &b.watchdogs[i]
 		if alert.Kind == strings.TrimSpace(kind) && alert.Channel == channel && alert.TargetType == strings.TrimSpace(targetType) && alert.TargetID == strings.TrimSpace(targetID) && strings.TrimSpace(alert.Status) != "resolved" {
 			alert.Owner = strings.TrimSpace(owner)
-			alert.Summary = strings.TrimSpace(summary)
+			alert.Summary = redactSecretsInText(strings.TrimSpace(summary))
 			alert.UpdatedAt = now
 			if err := b.saveLocked(); err != nil {
 				return watchdogAlert{}, false, err
@@ -179,7 +179,7 @@ func (b *Broker) CreateWatchdogAlert(kind, channel, targetType, targetID, owner,
 		TargetID:   strings.TrimSpace(targetID),
 		Owner:      strings.TrimSpace(owner),
 		Status:     "active",
-		Summary:    strings.TrimSpace(summary),
+		Summary:    redactSecretsInText(strings.TrimSpace(summary)),
 		CreatedAt:  now,
 		UpdatedAt:  now,
 	}

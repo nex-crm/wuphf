@@ -34,14 +34,35 @@ func TestAgentStreamBuffer_RecentReturnsBoundedHistory(t *testing.T) {
 	// Subscribers must observe live writes.
 	out, cancel := s.subscribe()
 	defer cancel()
-	go s.Push("live-line")
-	select {
-	case msg := <-out:
-		if msg != "live-line" {
-			t.Errorf("subscriber received %q, want live-line", msg)
-		}
-	case <-time.After(time.Second):
-		t.Error("subscriber did not receive Push within 1s")
+	s.Push("live-line")
+	msg := <-out
+	if msg != "live-line" {
+		t.Errorf("subscriber received %q, want live-line", msg)
+	}
+}
+
+func TestAgentStreamBufferRedactsSecretsFromHistoryAndSubscribers(t *testing.T) {
+	s := &agentStreamBuffer{subs: make(map[int]agentStreamSubscriber)}
+	secret := "sk-" + strings.Repeat("C", 24)
+
+	out, cancel := s.subscribeTask("task-1")
+	defer cancel()
+	s.PushTask("task-1", "streamed key: "+secret+"\n")
+
+	history := strings.Join(s.recentTask("task-1"), "")
+	if strings.Contains(history, secret) {
+		t.Fatalf("task history leaked secret: %q", history)
+	}
+	if !strings.Contains(history, "[REDACTED]") {
+		t.Fatalf("task history missing redaction marker: %q", history)
+	}
+
+	got := <-out
+	if strings.Contains(got, secret) {
+		t.Fatalf("subscriber leaked secret: %q", got)
+	}
+	if !strings.Contains(got, "[REDACTED]") {
+		t.Fatalf("subscriber missing redaction marker: %q", got)
 	}
 }
 
@@ -65,21 +86,11 @@ func TestAgentStreamBuffer_TaskScopedHistoryAndSubscribers(t *testing.T) {
 	s.PushTask("task-2", "two-live")
 	s.PushTask("task-1", "one-live")
 
-	select {
-	case got := <-all:
-		if got != "two-live" {
-			t.Fatalf("all subscriber first message = %q", got)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("all subscriber did not receive task-2 line")
+	if got := <-all; got != "two-live" {
+		t.Fatalf("all subscriber first message = %q", got)
 	}
-	select {
-	case got := <-taskOne:
-		if got != "one-live" {
-			t.Fatalf("task subscriber message = %q", got)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("task subscriber did not receive task-1 line")
+	if got := <-taskOne; got != "one-live" {
+		t.Fatalf("task subscriber message = %q", got)
 	}
 }
 
@@ -109,13 +120,8 @@ func TestAgentStreamBuffer_SubscribeTaskWithRecentHasNoReplayGap(t *testing.T) {
 	}
 
 	s.PushTask("task-1", "live\n")
-	select {
-	case got := <-live:
-		if got != "live\n" {
-			t.Fatalf("live = %q, want live line", got)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("subscriber did not receive live line")
+	if got := <-live; got != "live\n" {
+		t.Fatalf("live = %q, want live line", got)
 	}
 }
 
@@ -213,13 +219,28 @@ func TestBrokerMessageSubscribersReceivePostedMessages(t *testing.T) {
 		t.Fatalf("PostMessage: %v", err)
 	}
 
-	select {
-	case got := <-msgs:
-		if got.ID != want.ID || got.Content != want.Content {
-			t.Fatalf("unexpected subscribed message: %+v", got)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for subscribed message")
+	got := <-msgs
+	if got.ID != want.ID || got.Content != want.Content {
+		t.Fatalf("unexpected subscribed message: %+v", got)
+	}
+}
+
+func TestBrokerMessageSubscribersReceiveRedactedMessages(t *testing.T) {
+	b := newTestBroker(t)
+	msgs, unsubscribe := b.SubscribeMessages(4)
+	defer unsubscribe()
+	secret := "sk-" + strings.Repeat("D", 24)
+
+	if _, err := b.PostMessage("ceo", "general", "model key: "+secret, nil, ""); err != nil {
+		t.Fatalf("PostMessage: %v", err)
+	}
+
+	got := <-msgs
+	if strings.Contains(got.Content, secret) {
+		t.Fatalf("subscribed message leaked secret: %+v", got)
+	}
+	if !got.Redacted || got.RedactionCount != 1 {
+		t.Fatalf("subscribed message missing redaction metadata: %+v", got)
 	}
 }
 
@@ -232,13 +253,8 @@ func TestBrokerActionSubscribersReceiveTaskLifecycle(t *testing.T) {
 		t.Fatalf("EnsureTask: %v", err)
 	}
 
-	select {
-	case got := <-actions:
-		if got.Kind != "task_created" {
-			t.Fatalf("expected task_created action, got %+v", got)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for subscribed action")
+	if got := <-actions; got.Kind != "task_created" {
+		t.Fatalf("expected task_created action, got %+v", got)
 	}
 }
 
@@ -375,13 +391,9 @@ func TestBrokerActivitySubscribersReceiveUpdates(t *testing.T) {
 		LastTime: time.Now().UTC().Format(time.RFC3339),
 	})
 
-	select {
-	case got := <-updates:
-		if got.Slug != "ceo" || got.Activity != "tool_use" || got.Detail != "running rg" {
-			t.Fatalf("unexpected activity update: %+v", got)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for subscribed activity")
+	got := <-updates
+	if got.Slug != "ceo" || got.Activity != "tool_use" || got.Detail != "running rg" {
+		t.Fatalf("unexpected activity update: %+v", got)
 	}
 }
 
