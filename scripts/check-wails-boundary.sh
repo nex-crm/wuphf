@@ -32,6 +32,7 @@ go_import_pattern='(^|[[:space:]])([[:alpha:]_][[:alnum:]_]*|\.|_)?[[:space:]]*[
 # shellcheck disable=SC2016 # Backticks are literal regex tokens, not command substitution.
 ts_import_pattern='(from[[:space:]]*|import[[:space:]]*(\([[:space:]]*)?|require[[:space:]]*\([[:space:]]*|export[^"`'\'';]*from[[:space:]]*)["`'\''](@wails/runtime|@wailsapp/runtime|wails-bindings)(/[^"`'\''[:space:]]*)?["`'\'']|(from[[:space:]]*|import[[:space:]]*(\([[:space:]]*)?|require[[:space:]]*\([[:space:]]*|export[^"`'\'';]*from[[:space:]]*)["`'\'']wailsjs/[^"`'\''[:space:]]+["`'\'']'
 
+set +e
 hits="$(
   cd "$repo_root"
   rg \
@@ -50,8 +51,15 @@ hits="$(
     --glob '!web/wailsjs/**' \
     -e "$go_import_pattern" \
     -e "$ts_import_pattern" \
-    . || true
+    .
 )"
+rg_status=$?
+set -e
+
+if [[ $rg_status -gt 1 ]]; then
+  echo "::error::wails-boundary check failed to execute ripgrep." >&2
+  exit 1
+fi
 
 if [[ -n "$hits" ]]; then
   echo "::error::Wails imports are only allowed in desktop/oswails/ and web/src/desktop/." >&2
