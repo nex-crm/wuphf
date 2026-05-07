@@ -18,11 +18,11 @@ func TestSeedCompanyContext(t *testing.T) {
 	validJSON := `{"company_name":"Acme","description":"B2B SaaS","industry":"SaaS","audience":"Ops teams","goals":"Launch Q3","key_facts":["Fact 1","Fact 2"]}`
 
 	tests := []struct {
-		name               string
-		input              func(wikiRoot string) CompanySeedInput
-		wantCompanyMD      bool
-		wantOwnerMD        bool
-		wantReadme         bool
+		name                string
+		input               func(wikiRoot string) CompanySeedInput
+		wantCompanyMD       bool
+		wantOwnerMD         bool
+		wantReadme          bool
 		wantWarningContains string
 	}{
 		{
