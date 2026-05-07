@@ -304,8 +304,17 @@ func (c *webTunnelController) start() (team.WebTunnelStatus, error) {
 			if c.server == server {
 				c.err = fmt.Sprintf("tunnel loopback server failed: %v", err)
 				c.running = false
-				c.clearInviteLocked()
 				c.publicURL = ""
+				// Mirror the watcher-goroutine + stop() teardown: when
+				// the loopback server dies, the cloudflared subprocess
+				// is still running but cannot reach the broker, so the
+				// session is unusable. Reset c.passcodes and the IP
+				// rate limiter so a subsequent Start (which the user
+				// will need to click manually) gets a clean slate
+				// instead of inheriting the dead session's buckets.
+				c.passcodes = make(map[string]string)
+				c.rateLimiter = newJoinRateLimiter()
+				c.clearInviteLocked()
 			}
 		}
 	}()
@@ -465,8 +474,17 @@ func (c *webTunnelController) mintInviteLocked(publicURL string) (string, string
 	// Capture the token via the URL builder closure: CreateInviteDetailedWithBuilder
 	// returns the formatted URL, not the bare token, and we need the bare
 	// token to key the passcode map.
+	//
+	// mintInviteLocked runs under c.mu, so a stalled broker call would
+	// hold the mutex and block status() / stop() / re-clicks of Start.
+	// Cap the broker call with a tight deadline — invite creation is an
+	// in-process function call to the broker today, so a healthy mint is
+	// sub-millisecond; 10s is a generous ceiling on a hung broker before
+	// we surface the error to the UI rather than freeze the tunnel card.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 	var capturedToken string
-	details, err := st.CreateInviteDetailedWithBuilder(context.Background(), func(token string) string {
+	details, err := st.CreateInviteDetailedWithBuilder(ctx, func(token string) string {
 		capturedToken = token
 		return tunnelJoinURL(publicURL, token)
 	})
