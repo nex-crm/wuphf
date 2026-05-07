@@ -1,7 +1,5 @@
-import { useQuery } from "@tanstack/react-query";
-
-import { getOfficeTasks } from "../../api/tasks";
 import { useOfficeMembers } from "../../hooks/useMembers";
+import { useOfficeTasks } from "../../hooks/useOfficeTasks";
 import { useRequests } from "../../hooks/useRequests";
 
 /**
@@ -10,11 +8,7 @@ import { useRequests } from "../../hooks/useRequests";
  */
 export function RuntimeStrip() {
   const { data: members = [] } = useOfficeMembers();
-  const { data: tasksData } = useQuery({
-    queryKey: ["office-tasks"],
-    queryFn: () => getOfficeTasks({ includeDone: false }),
-    refetchInterval: 15_000,
-  });
+  const { data: tasks = [] } = useOfficeTasks();
   const { pending } = useRequests();
 
   const active = members.filter((m) => {
@@ -22,8 +16,8 @@ export function RuntimeStrip() {
     return (m.status || "").toLowerCase() === "active";
   }).length;
 
-  const blocked = (tasksData?.tasks ?? []).filter((t) => {
-    const s = (t.status || "").toLowerCase();
+  const blocked = tasks.filter((t) => {
+    const s = (t.status ?? "").toLowerCase();
     return s === "blocked" || t.blocked === true;
   }).length;
 
