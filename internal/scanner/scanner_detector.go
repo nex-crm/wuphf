@@ -101,6 +101,36 @@ func (r RedactionResult) Matches() int {
 	return r.PatternHits + r.EntropyHits
 }
 
+// ReasonLabels returns stable human/API-facing labels for the redaction
+// reasons. Pattern hits use their catalog name; entropy hits collapse to the
+// generic "entropy" label so callers never expose token details.
+func (r RedactionResult) ReasonLabels() []string {
+	labels := make([]string, 0, len(r.Reasons))
+	seen := make(map[string]struct{}, len(r.Reasons))
+	for _, reason := range r.Reasons {
+		label := strings.TrimSpace(reason.Name)
+		if label == "" {
+			label = strings.TrimSpace(reason.Kind)
+		}
+		if label == "" {
+			continue
+		}
+		if _, ok := seen[label]; ok {
+			continue
+		}
+		seen[label] = struct{}{}
+		labels = append(labels, label)
+	}
+	return labels
+}
+
+// RedactSecretsForDisplay scrubs secrets from text that may be shown in chat,
+// logs, streams, notifications, or model-visible history. It reuses the same
+// detector as file ingestion so Wuphf has one secret catalog.
+func RedactSecretsForDisplay(content string) RedactionResult {
+	return redactSecretsDetailed(content)
+}
+
 // redactSecrets scrubs known-format tokens first, then sweeps the
 // remainder with the Shannon-entropy heuristic. Returns the redacted
 // content, the total hit count, and a breakdown the caller can log.

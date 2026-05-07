@@ -92,6 +92,7 @@ func (r *headlessLiveChatRelay) postText(text string) {
 		return
 	}
 	text = strings.TrimSpace(text)
+	text = redactSecretsInText(text)
 	if text == "" || text == r.lastPosted || looksUnparsedToolCall(text) {
 		return
 	}

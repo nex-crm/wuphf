@@ -351,7 +351,7 @@ func (b *Broker) handleGetRequests(w http.ResponseWriter, r *http.Request) {
 		if !includeResolved && !requestIsActive(req) {
 			continue
 		}
-		requests = append(requests, req)
+		requests = append(requests, cloneHumanInterview(req))
 	}
 	pending := firstBlockingRequest(requests)
 	b.mu.Unlock()
@@ -431,7 +431,7 @@ func (b *Broker) handlePostRequest(w http.ResponseWriter, r *http.Request) {
 				if strings.TrimSpace(b.requests[i].DedupeKey) != dedupeKey {
 					continue
 				}
-				existing := b.requests[i]
+				existing := cloneHumanInterview(b.requests[i])
 				w.Header().Set("Content-Type", "application/json")
 				_ = json.NewEncoder(w).Encode(map[string]any{
 					"request":    existing,
@@ -474,6 +474,7 @@ func (b *Broker) handlePostRequest(w http.ResponseWriter, r *http.Request) {
 		if req.Title == "" {
 			req.Title = "Request"
 		}
+		req = sanitizeHumanInterview(req)
 		b.scheduleRequestLifecycleLocked(&req)
 		b.requests = append(b.requests, req)
 		b.pendingInterview = firstBlockingRequest(b.requests)
@@ -500,7 +501,7 @@ func (b *Broker) handlePostRequest(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]any{"request": b.requests[i]})
+			_ = json.NewEncoder(w).Encode(map[string]any{"request": cloneHumanInterview(b.requests[i])})
 			return
 		}
 		http.Error(w, "request not found", http.StatusNotFound)
@@ -616,11 +617,12 @@ func (b *Broker) handlePostRequestAnswer(w http.ResponseWriter, r *http.Request)
 		}
 		answer := &interviewAnswer{
 			ChoiceID:   choiceID,
-			ChoiceText: choiceText,
-			CustomText: customText,
+			ChoiceText: redactSecretsInText(choiceText),
+			CustomText: redactSecretsInText(customText),
 			AnsweredAt: time.Now().UTC().Format(time.RFC3339),
 		}
 		b.requests[i].Answered = answer
+		b.requests[i] = sanitizeHumanInterview(b.requests[i])
 		b.requests[i].Status = "answered"
 		b.requests[i].UpdatedAt = answer.AnsweredAt
 		b.requests[i].ReminderAt = ""
@@ -671,7 +673,7 @@ func (b *Broker) handlePostRequestAnswer(w http.ResponseWriter, r *http.Request)
 			Timestamp: time.Now().UTC().Format(time.RFC3339),
 		}
 		msg.Content = formatRequestAnswerMessage(b.requests[i], *answer)
-		b.appendMessageLocked(msg)
+		msg = b.appendMessageLocked(msg)
 		b.appendActionLocked("request_answered", "office", b.requests[i].Channel, answerActor, truncateSummary(msg.Content, 140), b.requests[i].ID)
 		if err := b.saveLocked(); err != nil {
 			b.mu.Unlock()

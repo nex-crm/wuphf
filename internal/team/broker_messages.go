@@ -231,7 +231,7 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 		ReplyTo:   replyTo,
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	}
-	b.appendMessageLocked(msg)
+	msg = b.appendMessageLocked(msg)
 	total := len(b.messages)
 
 	// Track which agents were tagged — they should show "typing" immediately
@@ -469,7 +469,7 @@ func (b *Broker) PostMessage(from, channel, content string, tagged []string, rep
 		ReplyTo:   strings.TrimSpace(replyTo),
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	}
-	b.appendMessageLocked(msg)
+	msg = b.appendMessageLocked(msg)
 	// Clear typing indicator — agent has replied
 	if b.lastTaggedAt != nil {
 		delete(b.lastTaggedAt, msg.From)
@@ -516,7 +516,7 @@ func (b *Broker) PostAutomationMessage(from, channel, title, content, eventID, s
 	if strings.TrimSpace(eventID) != "" {
 		for _, existing := range b.messages {
 			if existing.EventID != "" && existing.EventID == strings.TrimSpace(eventID) {
-				return existing, true, nil
+				return cloneChannelMessageForRead(existing), true, nil
 			}
 		}
 	}
@@ -550,7 +550,7 @@ func (b *Broker) PostAutomationMessage(from, channel, title, content, eventID, s
 		msg.From = "nex"
 	}
 
-	b.appendMessageLocked(msg)
+	msg = b.appendMessageLocked(msg)
 	if err := b.saveLocked(); err != nil {
 		return channelMessage{}, false, err
 	}
@@ -585,6 +585,7 @@ func (b *Broker) CreateRequest(req humanInterview) (humanInterview, error) {
 	if strings.TrimSpace(req.Title) == "" {
 		req.Title = "Request"
 	}
+	req = sanitizeHumanInterview(req)
 	b.requests = append(b.requests, req)
 	b.pendingInterview = firstBlockingRequest(b.requests)
 	b.appendActionLocked("request_created", "office", channel, req.From, truncateSummary(req.Title+" "+req.Question, 140), req.ID)
@@ -689,14 +690,7 @@ func (b *Broker) handleGetMessages(w http.ResponseWriter, r *http.Request) {
 	// race the JSON encoder running after we drop the lock.
 	result := make([]channelMessage, len(messages))
 	for i, m := range messages {
-		clone := m
-		if len(m.Tagged) > 0 {
-			clone.Tagged = append([]string(nil), m.Tagged...)
-		}
-		if len(m.Reactions) > 0 {
-			clone.Reactions = append([]messageReaction(nil), m.Reactions...)
-		}
-		result[i] = clone
+		result[i] = cloneChannelMessageForRead(m)
 	}
 	b.mu.Unlock()
 
@@ -870,6 +864,7 @@ func FormatChannelView(messages []channelMessage) string {
 
 	var sb strings.Builder
 	for _, m := range messages {
+		m = sanitizeChannelMessageSecrets(m)
 		ts := m.Timestamp
 		if len(ts) > 19 {
 			ts = ts[11:19]
@@ -982,6 +977,9 @@ func cloneChannelMessageForRead(msg channelMessage) channelMessage {
 	if len(msg.Reactions) > 0 {
 		clone.Reactions = append([]messageReaction(nil), msg.Reactions...)
 	}
+	if len(msg.RedactionReasons) > 0 {
+		clone.RedactionReasons = append([]string(nil), msg.RedactionReasons...)
+	}
 	clone.Usage = cloneMessageUsage(msg.Usage)
-	return clone
+	return sanitizeChannelMessageSecrets(clone)
 }

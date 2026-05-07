@@ -35,20 +35,27 @@ type messageReaction struct {
 }
 
 type channelMessage struct {
-	ID          string            `json:"id"`
-	From        string            `json:"from"`
-	Channel     string            `json:"channel,omitempty"`
-	Kind        string            `json:"kind,omitempty"`
-	Source      string            `json:"source,omitempty"`
-	SourceLabel string            `json:"source_label,omitempty"`
-	EventID     string            `json:"event_id,omitempty"`
-	Title       string            `json:"title,omitempty"`
-	Content     string            `json:"content"`
-	Tagged      []string          `json:"tagged"`
-	ReplyTo     string            `json:"reply_to,omitempty"`
-	Timestamp   string            `json:"timestamp"`
-	Usage       *messageUsage     `json:"usage,omitempty"`
-	Reactions   []messageReaction `json:"reactions,omitempty"`
+	ID          string `json:"id"`
+	From        string `json:"from"`
+	Channel     string `json:"channel,omitempty"`
+	Kind        string `json:"kind,omitempty"`
+	Source      string `json:"source,omitempty"`
+	SourceLabel string `json:"source_label,omitempty"`
+	EventID     string `json:"event_id,omitempty"`
+	Title       string `json:"title,omitempty"`
+	Content     string `json:"content"`
+	// Redacted, RedactionCount, and RedactionReasons describe secret
+	// redactions applied before chat content reached storage, APIs, external
+	// transports, or future agent context. The raw values are intentionally
+	// not retained.
+	Redacted         bool              `json:"redacted,omitempty"`
+	RedactionCount   int               `json:"redaction_count,omitempty"`
+	RedactionReasons []string          `json:"redaction_reasons,omitempty"`
+	Tagged           []string          `json:"tagged"`
+	ReplyTo          string            `json:"reply_to,omitempty"`
+	Timestamp        string            `json:"timestamp"`
+	Usage            *messageUsage     `json:"usage,omitempty"`
+	Reactions        []messageReaction `json:"reactions,omitempty"`
 }
 
 type agentIssueRecord struct {
@@ -111,14 +118,20 @@ type humanInterview struct {
 	// retry of the same (agent, platform, action_id, connection_key)
 	// tuple does not produce a fresh blocking request each time the
 	// agent loop reconnects.
-	DedupeKey  string           `json:"dedupe_key,omitempty"`
-	DueAt      string           `json:"due_at,omitempty"`
-	FollowUpAt string           `json:"follow_up_at,omitempty"`
-	ReminderAt string           `json:"reminder_at,omitempty"`
-	RecheckAt  string           `json:"recheck_at,omitempty"`
-	CreatedAt  string           `json:"created_at"`
-	UpdatedAt  string           `json:"updated_at,omitempty"`
-	Answered   *interviewAnswer `json:"answered,omitempty"`
+	// Redacted is set true when sanitizeHumanInterview stripped at least one
+	// secret from any field. The UI surfaces a badge so humans know the
+	// question/context/options they are reading has been partially censored.
+	Redacted         bool             `json:"redacted,omitempty"`
+	RedactionCount   int              `json:"redaction_count,omitempty"`
+	RedactionReasons []string         `json:"redaction_reasons,omitempty"`
+	DedupeKey        string           `json:"dedupe_key,omitempty"`
+	DueAt            string           `json:"due_at,omitempty"`
+	FollowUpAt       string           `json:"follow_up_at,omitempty"`
+	ReminderAt       string           `json:"reminder_at,omitempty"`
+	RecheckAt        string           `json:"recheck_at,omitempty"`
+	CreatedAt        string           `json:"created_at"`
+	UpdatedAt        string           `json:"updated_at,omitempty"`
+	Answered         *interviewAnswer `json:"answered,omitempty"`
 }
 
 type humanInvite struct {
