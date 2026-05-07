@@ -235,6 +235,10 @@ func runClaudeAttempt(ch chan<- agent.StreamChunk, prompt string, systemPrompt s
 	}
 
 	if err := scanner.Err(); err != nil {
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+		_ = cmd.Wait()
 		result.exitErr = fmt.Errorf("scan: %w", err)
 		result.stderr = strings.TrimSpace(stderrBuf.String())
 		return result
