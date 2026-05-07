@@ -118,6 +118,12 @@ type humanInterview struct {
 	// retry of the same (agent, platform, action_id, connection_key)
 	// tuple does not produce a fresh blocking request each time the
 	// agent loop reconnects.
+	// Redacted is set true when sanitizeHumanInterview stripped at least one
+	// secret from any field. The UI surfaces a badge so humans know the
+	// question/context/options they are reading has been partially censored.
+	Redacted         bool     `json:"redacted,omitempty"`
+	RedactionCount   int      `json:"redaction_count,omitempty"`
+	RedactionReasons []string `json:"redaction_reasons,omitempty"`
 	DedupeKey  string           `json:"dedupe_key,omitempty"`
 	DueAt      string           `json:"due_at,omitempty"`
 	FollowUpAt string           `json:"follow_up_at,omitempty"`

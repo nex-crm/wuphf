@@ -38,22 +38,40 @@ func sanitizeChannelMessageSecrets(msg channelMessage) channelMessage {
 }
 
 func sanitizeHumanInterview(req humanInterview) humanInterview {
-	req.Title = redactSecretsInText(req.Title)
-	req.Question = redactSecretsInText(req.Question)
-	req.Context = redactSecretsInText(req.Context)
+	redactionCount := req.RedactionCount
+	reasons := append([]string(nil), req.RedactionReasons...)
+
+	applyField := func(s string) string {
+		res := scanner.RedactSecretsForDisplay(s)
+		if res.Matches() > 0 {
+			redactionCount += res.Matches()
+			reasons = appendRedactionReasons(reasons, res.ReasonLabels())
+			return res.Content
+		}
+		return s
+	}
+
+	req.Title = applyField(req.Title)
+	req.Question = applyField(req.Question)
+	req.Context = applyField(req.Context)
 	if len(req.Options) > 0 {
 		req.Options = append([]interviewOption(nil), req.Options...)
 		for i := range req.Options {
-			req.Options[i].Label = redactSecretsInText(req.Options[i].Label)
-			req.Options[i].Description = redactSecretsInText(req.Options[i].Description)
-			req.Options[i].TextHint = redactSecretsInText(req.Options[i].TextHint)
+			req.Options[i].Label = applyField(req.Options[i].Label)
+			req.Options[i].Description = applyField(req.Options[i].Description)
+			req.Options[i].TextHint = applyField(req.Options[i].TextHint)
 		}
 	}
 	if req.Answered != nil {
 		answer := *req.Answered
-		answer.ChoiceText = redactSecretsInText(answer.ChoiceText)
-		answer.CustomText = redactSecretsInText(answer.CustomText)
+		answer.ChoiceText = applyField(answer.ChoiceText)
+		answer.CustomText = applyField(answer.CustomText)
 		req.Answered = &answer
+	}
+	if redactionCount > 0 || len(reasons) > 0 {
+		req.Redacted = true
+		req.RedactionCount = redactionCount
+		req.RedactionReasons = reasons
 	}
 	return req
 }

@@ -248,6 +248,18 @@ function RequestItem({ request, isPending, onAnswer }: RequestItemProps) {
         {request.blocking ? (
           <span className="badge badge-yellow">BLOCKING</span>
         ) : null}
+        {request.redacted ? (
+          <span
+            className="badge badge-neutral"
+            title={
+              request.redaction_reasons?.length
+                ? `Redacted: ${request.redaction_reasons.join(", ")}`
+                : "Sensitive information was redacted from this request"
+            }
+          >
+            redacted
+          </span>
+        ) : null}
       </div>
 
       {request.title && request.title !== "Request" && (

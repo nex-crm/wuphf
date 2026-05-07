@@ -106,6 +106,18 @@ function BlockingInterview({
           {request.channel ? (
             <span className="interview-channel">in #{request.channel}</span>
           ) : null}
+          {request.redacted ? (
+            <span
+              className="badge badge-neutral"
+              title={
+                request.redaction_reasons?.length
+                  ? `Redacted: ${request.redaction_reasons.join(", ")}`
+                  : "Sensitive information was redacted from this request"
+              }
+            >
+              redacted
+            </span>
+          ) : null}
         </div>
         <h2 id="interview-title" className="interview-title">
           {request.title && request.title !== "Request"
