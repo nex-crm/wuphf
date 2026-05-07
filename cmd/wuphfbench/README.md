@@ -30,10 +30,11 @@ local artifacts and should not be committed.
 
 ## Probes
 
-`cold-start` launches `wuphf --no-open` on fresh loopback ports for each
-iteration, polls the web proxy at `/api/health`, records launch-to-HTTP-200,
-and tears the process down before the next iteration. The default is 20
-iterations.
+`cold-start` launches `wuphf --no-open --no-nex` (with `WUPHF_NO_NEX=1`) on
+fresh loopback ports for each iteration, polls the web proxy at `/api/health`,
+records launch-to-HTTP-200, and tears the process down before the next
+iteration. The default is 20 iterations. To reproduce manually, pass the same
+flags: `wuphf --no-open --no-nex --web-port <port> --broker-port <port>`.
 
 `ipc-latency` launches one broker/web proxy pair, waits for `/api/health`, then
 issues sequential `GET /api/health` requests through a `net/http` client. The

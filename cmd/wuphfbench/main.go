@@ -158,19 +158,39 @@ func itersForProbe(probe string, requested int) int {
 func runColdStartProbe(binary string, iters int) (benchResult, error) {
 	raw := make([]float64, 0, iters)
 	for i := 0; i < iters; i++ {
-		start := time.Now()
-		proc, endpoint, err := startWuphf(binary)
+		elapsed, err := coldStartOnce(binary)
 		if err != nil {
 			return benchResult{}, err
 		}
-		readyErr := waitForHealth(context.Background(), endpoint, proc, startupTimeout)
-		proc.stop()
-		if readyErr != nil {
-			return benchResult{}, readyErr
-		}
-		raw = append(raw, millisSince(start))
+		raw = append(raw, elapsed)
 	}
 	return summarize("cold-start", iters, raw), nil
+}
+
+// coldStartOnce launches wuphf, waits for /api/health, records the elapsed
+// time (excluding teardown), then stops the process. It retries up to 3 times
+// on port-in-use errors to tolerate the TOCTOU window between freeLoopbackPort
+// and cmd.Start.
+func coldStartOnce(binary string) (float64, error) {
+	const maxAttempts = 3
+	var lastErr error
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		start := time.Now()
+		proc, endpoint, err := startWuphf(binary)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		readyErr := waitForHealth(context.Background(), endpoint, proc, startupTimeout)
+		elapsed := millisSince(start)
+		proc.stop()
+		if readyErr != nil {
+			lastErr = readyErr
+			continue
+		}
+		return elapsed, nil
+	}
+	return 0, fmt.Errorf("cold-start failed after %d attempts: %w", maxAttempts, lastErr)
 }
 
 func runIPCLatencyProbe(binary string, iters int) (benchResult, error) {
