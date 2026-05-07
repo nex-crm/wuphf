@@ -913,6 +913,55 @@ html[data-theme="nex"]
   pointer-events: none;
 }
 
+/* Tier 2 hover peek — chevron trigger.
+   The trigger is a sibling of the row button (nested <button> would be
+   invalid HTML), absolutely positioned inside the .sidebar-agent-row
+   wrapper. It sits between the pill end and the status-dot:
+   - status-dot is at right ~10-12px (row padding 10px + 6px dot)
+   - chevron sits at right 24px (10px row padding + 6px dot + 8px gap),
+     leaving ~6px between the chevron and the status-dot. */
+.sidebar-agent-row {
+  position: relative;
+}
+.sidebar-agent-peek-trigger {
+  position: absolute;
+  top: 50%;
+  right: 24px;
+  transform: translateY(-50%);
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease-out;
+  border-radius: var(--radius-sm);
+}
+.sidebar-agent-row:hover .sidebar-agent-peek-trigger,
+.sidebar-agent-row:focus-within .sidebar-agent-peek-trigger,
+.sidebar-agent-peek-trigger[aria-expanded="true"] {
+  opacity: 1;
+  pointer-events: auto;
+}
+.sidebar-agent-peek-trigger:hover {
+  color: var(--text);
+}
+.sidebar-agent-peek-trigger:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-agent-peek-trigger {
+    transition: none;
+  }
+}
+
 .sidebar-channels {
   padding: 4px var(--sidebar-pad-x) 4px;
   flex: 1 1 auto;
@@ -1402,11 +1451,9 @@ html[data-theme="nex"]
 .task-detail-page .task-detail-section {
   padding: 18px 24px;
 }
-.task-detail-page .task-detail-terminal-section .agent-terminal-shell {
-  min-height: 360px;
-}
-.task-detail-page .task-detail-terminal-section .agent-terminal-frame {
-  height: 320px;
+.task-detail-page .task-detail-stream-section .agent-stream-log {
+  min-height: 320px;
+  max-height: 480px;
 }
 .task-detail-page-empty {
   display: grid;
@@ -1705,8 +1752,9 @@ html[data-theme="nex"]
   .task-detail-page-card {
     min-height: calc(100vh - 112px);
   }
-  .task-detail-page .task-detail-terminal-section .agent-terminal-frame {
-    height: 260px;
+  .task-detail-page .task-detail-stream-section .agent-stream-log {
+    min-height: 220px;
+    max-height: 320px;
   }
   .task-detail-override {
     grid-template-columns: 1fr;
@@ -2158,6 +2206,271 @@ html[data-theme="nex"]
   }
 }
 
+/* ─── Tier 2 hover peek ──────────────────────────────────────────
+   Presentational popover anchored to an agent rail row. Rendered via
+   createPortal to document.body so it floats above the sidebar without
+   triggering row reflow. Position is set by AgentEventPeek via inline
+   style; width/max-height are structural CSS.
+   See web/DESIGN.md "Tier 2 hover peek" section.
+   ─────────────────────────────────────────────────────────────── */
+.sidebar-agent-peek {
+  position: fixed;
+  width: 320px;
+  max-height: 360px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-popover);
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  outline: none;
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.sidebar-agent-peek[data-stuck="true"] {
+  border-color: var(--bubble-stuck);
+}
+
+/* Open animation — slide up from 6px below the anchor. */
+@media (prefers-reduced-motion: no-preference) {
+  .sidebar-agent-peek {
+    animation: peek-in 0.14s ease-out;
+  }
+}
+@keyframes peek-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-agent-peek {
+    animation: none;
+    transition: none;
+  }
+}
+
+/* Header strip */
+.sidebar-agent-peek-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px 6px;
+  flex-shrink: 0;
+}
+.sidebar-agent-peek-avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--accent-bg);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  user-select: none;
+}
+.sidebar-agent-peek-identity {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
+}
+.sidebar-agent-peek-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sidebar-agent-peek-role {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sidebar-agent-peek-presence {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+.sidebar-agent-peek-presence[data-state="online"] {
+  color: var(--green-dark, var(--text-secondary));
+}
+.sidebar-agent-peek-presence-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--green, #03a04c);
+  flex-shrink: 0;
+}
+.sidebar-agent-peek-blocked-chip {
+  flex-shrink: 0;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--bubble-stuck);
+  border: 1px solid var(--bubble-stuck);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-family: var(--font-mono);
+}
+
+/* State chip + relative time row */
+.sidebar-agent-peek-state-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px 8px;
+  flex-shrink: 0;
+}
+.sidebar-agent-peek-state-chip {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  font-family: var(--font-mono);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+.sidebar-agent-peek-state-chip[data-kind="routine"] {
+  color: var(--bubble-plotting);
+  background: rgba(90, 107, 200, 0.1);
+}
+.sidebar-agent-peek-state-chip[data-kind="milestone"] {
+  color: var(--bubble-shipping);
+  background: rgba(42, 143, 76, 0.1);
+}
+.sidebar-agent-peek-state-chip[data-kind="stuck"] {
+  color: var(--bubble-stuck);
+  background: rgba(200, 84, 42, 0.1);
+}
+.sidebar-agent-peek-time {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+}
+
+/* Current thought block — detail text, 3-line clamp with bottom fade */
+.sidebar-agent-peek-detail {
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.45;
+  padding: 0 12px 10px;
+  flex-shrink: 0;
+  /* 3-line clamp */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  /* Bottom fade via mask for the last line */
+  -webkit-mask-image: linear-gradient(to bottom, black 60%, transparent 100%);
+  mask-image: linear-gradient(to bottom, black 60%, transparent 100%);
+}
+
+/* Empty-state line — shown only when no SSE event has arrived for this
+   agent yet. Sits where the state row + detail block would normally render. */
+.sidebar-agent-peek-empty {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-tertiary);
+  padding: 0 16px 12px;
+  font-style: italic;
+}
+
+/* RECENT header + scrollable list */
+.sidebar-agent-peek-recent-section {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-top: 1px solid var(--border-light);
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+.sidebar-agent-peek-recent-header {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  padding: 7px 12px 4px;
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+}
+.sidebar-agent-peek-recent {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 4px;
+  overflow-y: auto;
+  flex: 1 1 auto;
+}
+.sidebar-agent-peek-recent-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 12px;
+}
+.sidebar-agent-peek-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.sidebar-agent-peek-dot[data-kind="routine"] {
+  background: var(--bubble-plotting);
+}
+.sidebar-agent-peek-dot[data-kind="milestone"] {
+  background: var(--bubble-shipping);
+}
+.sidebar-agent-peek-dot[data-kind="stuck"] {
+  background: var(--bubble-stuck);
+}
+.sidebar-agent-peek-recent-text {
+  font-size: 11px;
+  color: var(--text-secondary);
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sidebar-agent-peek-recent-time {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+/* Footer — plain text, not a button. Enter key drives the action. */
+.sidebar-agent-peek-footer {
+  border-top: 1px solid var(--border-light);
+  padding: 6px 12px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  user-select: none;
+}
+
 .team-member-badge {
   display: inline-flex;
   align-items: center;
@@ -2171,4 +2484,207 @@ html[data-theme="nex"]
   border: 1px solid var(--border);
   border-radius: 999px;
   white-space: nowrap;
+}
+
+/* ─── Collapsible section primitive ────────────────────────────
+   Drop-in section with a clickable header that toggles its body.
+   Used by the agent workbench in DMView. Header chrome stays
+   constant whether open or closed so the page reflow is local
+   to the section body.
+   ────────────────────────────────────────────────────────────── */
+.collapsible-section {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  overflow: hidden;
+}
+
+.collapsible-section-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 12px;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+  color: var(--text);
+  text-align: left;
+}
+
+.collapsible-section-header:hover {
+  background: var(--bg-warm);
+}
+
+.collapsible-section-chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+}
+
+.collapsible-section-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+}
+
+.collapsible-section-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+}
+
+.collapsible-section-body {
+  padding: 10px 12px 12px;
+  border-top: 1px solid var(--border-light);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.collapsible-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 9px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+
+.collapsible-meta-muted {
+  font-family: var(--font-mono);
+  color: var(--text-tertiary);
+}
+
+/* ─── DM workbench layout ──────────────────────────────────────
+   DMView arranges the agent workbench as the page body and a chat
+   drawer pinned to the bottom. The drawer is collapsed by default
+   to keep the workbench front-and-center; expanding it covers most
+   of the viewport so chat history is reachable without leaving the
+   surface.
+   ────────────────────────────────────────────────────────────── */
+.dm-workbench {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.dm-workbench-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.dm-chat-drawer {
+  position: relative;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border);
+  background: var(--bg-card);
+  max-height: 38vh;
+  transition: max-height 0.18s ease-out;
+}
+
+.dm-chat-drawer.is-expanded {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 5;
+  max-height: 80vh;
+  height: 80vh;
+  box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.12);
+}
+
+.dm-chat-drawer-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 14px;
+  border: 0;
+  background: var(--bg-warm);
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  font: inherit;
+  color: var(--text-secondary);
+}
+
+.dm-chat-drawer-toggle:hover {
+  color: var(--text);
+}
+
+.dm-chat-drawer-toggle-label {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.dm-chat-drawer-toggle-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-tertiary);
+}
+
+.dm-chat-drawer-body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+
+.dm-chat-messages {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 20px;
+}
+
+.dm-chat-preview {
+  padding: 8px 20px 0;
+  flex-shrink: 0;
+  max-height: 110px;
+  overflow: hidden;
+}
+
+.dm-chat-preview-empty {
+  color: var(--text-tertiary);
+  font-size: 12px;
+  font-style: italic;
+}
+
+@media (max-width: 768px) {
+  .dm-chat-drawer {
+    max-height: 50vh;
+  }
+  .dm-chat-drawer.is-expanded {
+    max-height: 92vh;
+    height: 92vh;
+  }
 }

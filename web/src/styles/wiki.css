@@ -2425,3 +2425,150 @@
   color: #6c4fc6;
   border: 1px solid rgba(108, 79, 198, 0.3);
 }
+
+/* ─── Rich-editor inserts (Phase 3 PR 6) ─────────────────────────────────── */
+
+.wk-rich-editor-host {
+  /* `display: contents` removes the host's own box, so a positioning
+     property would have nothing to apply to. Floating menus portal to
+     `document.body` with explicit fixed coordinates. */
+  display: contents;
+}
+
+.wk-insert-menu {
+  background: var(--wk-paper);
+  border: 1px solid var(--wk-border);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+  min-width: 280px;
+  max-width: 360px;
+  max-height: 360px;
+  overflow-y: auto;
+  font-family: var(--wk-chrome);
+  font-size: 13px;
+}
+.wk-insert-menu--mention {
+  min-width: 320px;
+}
+.wk-insert-menu--empty {
+  padding: 12px 16px;
+}
+.wk-insert-menu__heading {
+  padding: 8px 12px 4px;
+  font-weight: 600;
+  color: var(--wk-text);
+  border-bottom: 1px solid var(--wk-border-light);
+}
+.wk-insert-menu__group {
+  padding: 4px 0;
+}
+.wk-insert-menu__group + .wk-insert-menu__group {
+  border-top: 1px solid var(--wk-border-light);
+}
+.wk-insert-menu__group-label {
+  padding: 4px 12px 2px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--wk-text-tertiary);
+}
+.wk-insert-menu__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.wk-insert-menu__item {
+  margin: 0;
+}
+.wk-insert-menu__item.is-active .wk-insert-menu__btn,
+.wk-insert-menu__btn:hover {
+  background: var(--wk-amber-banner);
+}
+.wk-insert-menu__btn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  padding: 8px 12px;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+.wk-insert-menu__title {
+  font-weight: 600;
+  color: var(--wk-text);
+}
+.wk-insert-menu__desc {
+  font-size: 12px;
+  color: var(--wk-text-muted);
+}
+.wk-insert-menu__empty {
+  padding: 8px 12px;
+  color: var(--wk-text-muted);
+  font-style: italic;
+}
+
+.wk-insert-dialog {
+  width: min(540px, 92vw);
+}
+.wk-insert-dialog__hint {
+  margin: 0 0 4px;
+  font-size: 12px;
+  color: var(--wk-text-muted);
+}
+.wk-insert-dialog__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.wk-insert-dialog__preview {
+  background: var(--wk-code-bg);
+  border: 1px solid var(--wk-border);
+  padding: 10px 12px;
+  font-family: var(--wk-mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+  margin: 6px 0;
+  max-height: 220px;
+  overflow: auto;
+}
+.wk-insert-dialog__pickers {
+  max-height: 280px;
+  overflow-y: auto;
+  border: 1px solid var(--wk-border-light);
+  margin: 6px 0;
+}
+.wk-related-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.wk-related-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+.wk-related-row:hover {
+  background: var(--wk-amber-banner);
+}
+.wk-related-row__title {
+  font-weight: 500;
+}
+.wk-related-row__slug {
+  font-family: var(--wk-mono);
+  font-size: 11px;
+  color: var(--wk-text-tertiary);
+}
+
+.wk-editor-banner--warn {
+  background: var(--wk-amber-banner);
+  border-left: 3px solid var(--wk-amber);
+  color: var(--wk-text);
+}

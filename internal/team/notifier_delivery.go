@@ -230,21 +230,39 @@ func (l *Launcher) sendChannelUpdate(target notificationTarget, msg channelMessa
 		channel = "general"
 	}
 	notification := ""
+	humanPrefix := ""
+	fromHuman := isHumanMessageSender(msg.From)
+	if fromHuman {
+		// Front-load a directive so the model treats the human chat as a
+		// preemption signal: absorb the message before resuming any prior
+		// task, then decide whether to abandon, give a status update, or
+		// queue the request for later. The same priority semantics are
+		// enforced in the queue (FromHuman bypasses the hold/cap and forces
+		// preemption) so the model and the dispatcher stay in agreement.
+		humanPrefix = "[HUMAN-PRIORITY] A real person just messaged you. Stop, absorb this message before continuing any prior task, then decide which is appropriate: (a) abandon the prior task and address the human directly, (b) give a brief status update if they are asking what you're doing, or (c) acknowledge and queue their request for after the current task. Human messages take priority over agent-to-agent follow-ups.\n---\n"
+	}
 	if l.isOneOnOne() {
 		notification = fmt.Sprintf(
-			"[New from @%s]: %s\n%s Reply using team_broadcast with my_slug \"%s\" and channel \"%s\" reply_to_id \"%s\". Once you have posted the needed reply, STOP and wait for the next pushed notification.",
-			msg.From, truncate(msg.Content, 1000), l.responseInstructionForTarget(msg, target.Slug), target.Slug, channel, msg.ID,
+			"%s[New from @%s]: %s\n%s Reply using team_broadcast with my_slug \"%s\" and channel \"%s\" reply_to_id \"%s\". Once you have posted the needed reply, STOP and wait for the next pushed notification.",
+			humanPrefix, msg.From, truncate(msg.Content, 1000), l.responseInstructionForTarget(msg, target.Slug), target.Slug, channel, msg.ID,
 		)
 	} else {
 		packet := l.buildMessageWorkPacket(msg, target.Slug)
 		notification = fmt.Sprintf(
-			"%s\n---\n[New from @%s]: %s\n%s This packet is your complete context — do NOT call team_poll or team_tasks. Just do the work and reply via team_broadcast with my_slug \"%s\", channel \"%s\", reply_to_id \"%s\". Once you have posted the needed update, STOP and wait for the next pushed notification.",
-			packet, msg.From, truncate(msg.Content, 1000), l.responseInstructionForTarget(msg, target.Slug), target.Slug, channel, msg.ID,
+			"%s%s\n---\n[New from @%s]: %s\n%s This packet is your complete context — do NOT call team_poll or team_tasks. Just do the work and reply via team_broadcast with my_slug \"%s\", channel \"%s\", reply_to_id \"%s\". Once you have posted the needed update, STOP and wait for the next pushed notification.",
+			humanPrefix, packet, msg.From, truncate(msg.Content, 1000), l.responseInstructionForTarget(msg, target.Slug), target.Slug, channel, msg.ID,
 		)
 	}
 
 	if l.targeter().ShouldUseHeadlessForTarget(target) {
-		l.enqueueHeadlessCodexTurn(target.Slug, headlessSandboxNote()+notification, channel)
+		prompt := headlessSandboxNote() + notification
+		l.enqueueHeadlessCodexTurnRecord(target.Slug, headlessCodexTurn{
+			Prompt:     prompt,
+			Channel:    channel,
+			TaskID:     headlessCodexTaskID(prompt),
+			FromHuman:  fromHuman,
+			EnqueuedAt: time.Now(),
+		})
 		return
 	}
 	l.paneDispatch().Enqueue(target.Slug, target.PaneTarget, notification)
