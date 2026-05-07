@@ -90,8 +90,20 @@ function routeToObjectRef(
       return null;
     case "notebook-entry":
       return null; // notebook entries are draft surfaces, not canonical objects
-    default:
+    case "task-board":
+    case "wiki":
+    case "wiki-lookup":
+    case "notebook-catalog":
+    case "notebook-agent":
+    case "reviews":
+    case "channel":
+    case "unknown":
       return null;
+    default: {
+      const _exhaustive: never = route;
+      void _exhaustive;
+      return null;
+    }
   }
 }
 

@@ -28,8 +28,8 @@ describe("deriveBreadcrumbs", () => {
     };
     const crumbs = deriveBreadcrumbs(route);
     expect(crumbs).toHaveLength(1);
-    expect(crumbs[0].label).toContain("gaia");
-    expect(crumbs[0].href).toContain("gaia");
+    expect(crumbs[0].label).toBe("Agent: gaia");
+    expect(crumbs[0].href).toBe("#/dm/gaia");
   });
 
   it("returns [Tasks] for task-board route", () => {
@@ -45,8 +45,8 @@ describe("deriveBreadcrumbs", () => {
     const crumbs = deriveBreadcrumbs(route);
     expect(crumbs).toHaveLength(2);
     expect(crumbs[0].label).toBe("Tasks");
-    expect(crumbs[1].label).toContain("abc-123");
-    expect(crumbs[1].href).toContain("abc-123");
+    expect(crumbs[1].label).toBe("Task: abc-123");
+    expect(crumbs[1].href).toBe("#/tasks/abc-123");
   });
 
   it("returns [Wiki] for wiki catalog route", () => {
@@ -64,8 +64,8 @@ describe("deriveBreadcrumbs", () => {
     const crumbs = deriveBreadcrumbs(route);
     expect(crumbs).toHaveLength(2);
     expect(crumbs[0].label).toBe("Wiki");
-    expect(crumbs[1].label).toContain("people/nazz");
-    expect(crumbs[1].href).toContain("people");
+    expect(crumbs[1].label).toBe("Wiki: people/nazz");
+    expect(crumbs[1].href).toBe("#/wiki/people/nazz");
   });
 
   it("returns [Wiki] for wiki-lookup route", () => {
@@ -117,7 +117,7 @@ describe("deriveBreadcrumbs", () => {
     const route: CurrentRoute = { kind: "app", appId: "settings" };
     const crumbs = deriveBreadcrumbs(route);
     expect(crumbs).toHaveLength(1);
-    expect(crumbs[0].label).toContain("Settings");
+    expect(crumbs[0].label).toBe("Settings");
   });
 
   it("returns [Console] for console app route", () => {

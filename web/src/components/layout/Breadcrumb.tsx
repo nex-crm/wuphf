@@ -9,7 +9,7 @@
  * Phase 5 PR 2 — app navigation refresh.
  */
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { BreadcrumbItem } from "../../hooks/useObjectBreadcrumb";
 
@@ -50,6 +50,15 @@ export function Breadcrumb({ items }: BreadcrumbProps) {
 
 function BreadcrumbLeaf({ item }: { item: BreadcrumbItem }) {
   const [copied, setCopied] = useState(false);
+  const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (resetTimerRef.current !== null) {
+        clearTimeout(resetTimerRef.current);
+      }
+    };
+  }, []);
 
   const handleCopy = useCallback(async () => {
     try {
@@ -58,7 +67,13 @@ function BreadcrumbLeaf({ item }: { item: BreadcrumbItem }) {
       const url = `${window.location.origin}${window.location.pathname}${item.href}`;
       await navigator.clipboard.writeText(url);
       setCopied(true);
-      setTimeout(() => setCopied(false), 1800);
+      if (resetTimerRef.current !== null) {
+        clearTimeout(resetTimerRef.current);
+      }
+      resetTimerRef.current = setTimeout(() => {
+        setCopied(false);
+        resetTimerRef.current = null;
+      }, 1800);
     } catch {
       // Clipboard not available (non-HTTPS, deny permission). Silently ignore.
     }
