@@ -26,19 +26,22 @@ type BrokerMessageUsage struct {
 // The shape mirrors the broker's JSON contract so it round-trips
 // directly through encoding/json without an intermediate DTO.
 type BrokerMessage struct {
-	ID          string              `json:"id"`
-	From        string              `json:"from"`
-	Kind        string              `json:"kind,omitempty"`
-	Source      string              `json:"source,omitempty"`
-	SourceLabel string              `json:"source_label,omitempty"`
-	EventID     string              `json:"event_id,omitempty"`
-	Title       string              `json:"title,omitempty"`
-	Content     string              `json:"content"`
-	Tagged      []string            `json:"tagged"`
-	ReplyTo     string              `json:"reply_to"`
-	Timestamp   string              `json:"timestamp"`
-	Usage       *BrokerMessageUsage `json:"usage,omitempty"`
-	Reactions   []BrokerReaction    `json:"reactions,omitempty"`
+	ID               string              `json:"id"`
+	From             string              `json:"from"`
+	Kind             string              `json:"kind,omitempty"`
+	Source           string              `json:"source,omitempty"`
+	SourceLabel      string              `json:"source_label,omitempty"`
+	EventID          string              `json:"event_id,omitempty"`
+	Title            string              `json:"title,omitempty"`
+	Content          string              `json:"content"`
+	Redacted         bool                `json:"redacted,omitempty"`
+	RedactionCount   int                 `json:"redaction_count,omitempty"`
+	RedactionReasons []string            `json:"redaction_reasons,omitempty"`
+	Tagged           []string            `json:"tagged"`
+	ReplyTo          string              `json:"reply_to"`
+	Timestamp        string              `json:"timestamp"`
+	Usage            *BrokerMessageUsage `json:"usage,omitempty"`
+	Reactions        []BrokerReaction    `json:"reactions,omitempty"`
 }
 
 // RenderedLine is a single line of pre-styled output destined for the

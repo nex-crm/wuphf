@@ -8,6 +8,7 @@ import {
 } from "../../api/client";
 import { useRequests } from "../../hooks/useRequests";
 import { parseApprovalContext } from "../../lib/parseApprovalContext";
+import { RedactedBadge } from "../ui/RedactedBadge";
 import { showNotice } from "../ui/Toast";
 import { ApprovalContextView } from "./ApprovalContextView";
 
@@ -114,6 +115,9 @@ function BlockingInterview({
           <span className="interview-from">@{request.from || "agent"}</span>
           {request.channel ? (
             <span className="interview-channel">in #{request.channel}</span>
+          ) : null}
+          {request.redacted ? (
+            <RedactedBadge reasons={request.redaction_reasons} />
           ) : null}
         </div>
         <h2 id="interview-title" className="interview-title">

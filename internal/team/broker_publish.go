@@ -18,7 +18,8 @@ import "strings"
 // All entries require the caller to hold b.mu — the *Locked suffix
 // is the contract.
 
-func (b *Broker) appendMessageLocked(msg channelMessage) {
+func (b *Broker) appendMessageLocked(msg channelMessage) channelMessage {
+	msg = sanitizeChannelMessageSecrets(msg)
 	b.messages = append(b.messages, msg)
 	b.publishMessageLocked(msg)
 	// First-run nudge dismissal: track the very first human-authored message
@@ -31,6 +32,7 @@ func (b *Broker) appendMessageLocked(msg channelMessage) {
 	if !b.humanHasPosted && strings.TrimSpace(msg.From) != "" && isHumanMessageSender(msg.From) {
 		b.humanHasPosted = true
 	}
+	return msg
 }
 
 func (b *Broker) publishMessageLocked(msg channelMessage) {
@@ -43,6 +45,7 @@ func (b *Broker) publishMessageLocked(msg channelMessage) {
 }
 
 func (b *Broker) publishActionLocked(action officeActionLog) {
+	action = sanitizeOfficeActionLog(action)
 	for _, ch := range b.actionSubscribers {
 		select {
 		case ch <- action:
@@ -52,6 +55,8 @@ func (b *Broker) publishActionLocked(action officeActionLog) {
 }
 
 func (b *Broker) publishActivityLocked(activity agentActivitySnapshot) {
+	activity.Activity = redactSecretsInText(activity.Activity)
+	activity.Detail = redactSecretsInText(activity.Detail)
 	for _, ch := range b.activitySubscribers {
 		select {
 		case ch <- activity:

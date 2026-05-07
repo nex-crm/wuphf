@@ -15,6 +15,7 @@ import {
 import { useChannelSlug } from "../../routes/useCurrentRoute";
 import { HarnessBadge } from "../ui/HarnessBadge";
 import { PixelAvatar } from "../ui/PixelAvatar";
+import { RedactedBadge } from "../ui/RedactedBadge";
 import { showNotice } from "../ui/Toast";
 
 interface MessageBubbleProps {
@@ -158,6 +159,9 @@ export function MessageBubble({
           <span className="message-time" title={message.timestamp}>
             {formatTime(message.timestamp)}
           </span>
+          {Boolean(message.redacted) && (
+            <RedactedBadge reasons={message.redaction_reasons} />
+          )}
         </div>
 
         {/* Text — humans render mention chips via safe ReactNode children;
