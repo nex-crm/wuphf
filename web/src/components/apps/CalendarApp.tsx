@@ -152,9 +152,14 @@ export function CalendarApp() {
     return groupTasksByWeek(tasksResult.data, weekStart);
   }, [tasksResult.data, weekStart, dayKeys]);
 
-  const schedulerJobs = schedulerResult.data?.jobs ?? [];
-  const oneShotJobs = schedulerJobs.filter((j) => !isCadenceSchedulerJob(j));
-  const cadenceJobs = schedulerJobs.filter(isCadenceSchedulerJob);
+  const schedulerJobsData = schedulerResult.data?.jobs;
+  const { oneShotJobs, cadenceJobs } = useMemo(() => {
+    const jobs = schedulerJobsData ?? [];
+    return {
+      oneShotJobs: jobs.filter((j) => !isCadenceSchedulerJob(j)),
+      cadenceJobs: jobs.filter(isCadenceSchedulerJob),
+    };
+  }, [schedulerJobsData]);
   const schedulerByDay = useMemo(
     () => groupSchedulerJobsByDay(oneShotJobs, dayKeys),
     [oneShotJobs, dayKeys],
