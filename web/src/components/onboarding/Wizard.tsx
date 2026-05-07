@@ -24,11 +24,13 @@ import {
 } from "./wizard/runtime-helpers";
 import { WelcomeStep } from "./wizard/Step1Welcome";
 import { TemplatesStep } from "./wizard/Step2Templates";
+import { AnalysisStep } from "./wizard/Step3bAnalysis";
 import { IdentityStep } from "./wizard/Step3Identity";
 import { TeamStep } from "./wizard/Step4Team";
 import { SetupStep } from "./wizard/Step5Setup";
 import { TaskStep } from "./wizard/Step6Task";
 import { ReadyStep } from "./wizard/Step7Ready";
+import type { OSScanResponse } from "../../api/onboarding";
 import type {
   BlueprintAgent,
   BlueprintTemplate,
@@ -135,6 +137,10 @@ export function Wizard({ onComplete }: WizardProps) {
   const [company, setCompany] = useState("");
   const [description, setDescription] = useState("");
   const [priority, setPriority] = useState("");
+  const [website, setWebsite] = useState("");
+  const [ownerName, setOwnerName] = useState("");
+  const [ownerRole, setOwnerRole] = useState("");
+  const [scanResult, setScanResult] = useState<OSScanResponse | null>(null);
   // Optional in-wizard Nex registration. Mirrors the TUI's InitNexRegister
   // phase — we POST /nex/register which shells out to `nex-cli setup <email>`.
   // If nex-cli isn't installed we flip to `fallback` (external link to
@@ -609,6 +615,10 @@ export function Wizard({ onComplete }: WizardProps) {
           company,
           description,
           priority,
+          website,
+          owner_name: ownerName,
+          owner_role: ownerRole,
+          scan_completed: scanResult !== null,
           runtime: primaryRuntime,
           runtime_priority: runtimePriority,
           memory_backend: "markdown",
@@ -633,6 +643,10 @@ export function Wizard({ onComplete }: WizardProps) {
       company,
       description,
       priority,
+      website,
+      ownerName,
+      ownerRole,
+      scanResult,
       runtimePriority,
       selectedBlueprint,
       agents,
@@ -771,14 +785,41 @@ export function Wizard({ onComplete }: WizardProps) {
             nexEmail={nexEmail}
             nexSignupStatus={nexSignupStatus}
             nexSignupError={nexSignupError}
+            website={website}
+            ownerName={ownerName}
+            ownerRole={ownerRole}
             onChangeCompany={setCompany}
             onChangeDescription={setDescription}
             onChangePriority={setPriority}
             onChangeNexEmail={setNexEmail}
             onSubmitNexSignup={submitNexSignup}
             onOpenNexSignup={openNexSignup}
-            onNext={nextStep}
+            onChangeWebsite={setWebsite}
+            onChangeOwnerName={setOwnerName}
+            onChangeOwnerRole={setOwnerRole}
+            onNext={() => {
+              if (website.trim() || ownerName.trim()) {
+                setStep("analysis");
+              } else {
+                nextStep();
+              }
+            }}
             onBack={prevStep}
+          />
+        )}
+
+        {step === "analysis" && (
+          <AnalysisStep
+            website={website}
+            ownerName={ownerName}
+            ownerRole={ownerRole}
+            onDone={(result) => {
+              setScanResult(result);
+              setStep("templates");
+            }}
+            onSkip={() => {
+              setStep("templates");
+            }}
           />
         )}
 

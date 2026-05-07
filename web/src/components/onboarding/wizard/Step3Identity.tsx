@@ -9,12 +9,18 @@ interface IdentityStepProps {
   nexEmail: string;
   nexSignupStatus: NexSignupStatus;
   nexSignupError: string;
+  website: string;
+  ownerName: string;
+  ownerRole: string;
   onChangeCompany: (v: string) => void;
   onChangeDescription: (v: string) => void;
   onChangePriority: (v: string) => void;
   onChangeNexEmail: (v: string) => void;
   onSubmitNexSignup: () => void;
   onOpenNexSignup: () => void;
+  onChangeWebsite: (v: string) => void;
+  onChangeOwnerName: (v: string) => void;
+  onChangeOwnerRole: (v: string) => void;
   onNext: () => void;
   onBack: () => void;
 }
@@ -26,12 +32,18 @@ export function IdentityStep({
   nexEmail,
   nexSignupStatus,
   nexSignupError,
+  website,
+  ownerName,
+  ownerRole,
   onChangeCompany,
   onChangeDescription,
   onChangePriority,
   onChangeNexEmail,
   onSubmitNexSignup,
   onOpenNexSignup,
+  onChangeWebsite,
+  onChangeOwnerName,
+  onChangeOwnerRole,
   onNext,
   onBack,
 }: IdentityStepProps) {
@@ -80,6 +92,47 @@ export function IdentityStep({
             onChange={(e) => onChangePriority(e.target.value)}
           />
         </div>
+        <div className="form-group">
+          <label className="label" htmlFor="wiz-website">
+            Company website <span className="label-optional">(optional)</span>
+          </label>
+          <input
+            className="input"
+            id="wiz-website"
+            type="url"
+            placeholder="https://acme.com"
+            autoComplete="url"
+            value={website}
+            onChange={(e) => onChangeWebsite(e.target.value)}
+          />
+        </div>
+        <div className="form-group form-group-row">
+          <div className="form-group">
+            <label className="label" htmlFor="wiz-owner-name">
+              Your name <span className="label-optional">(optional)</span>
+            </label>
+            <input
+              className="input"
+              id="wiz-owner-name"
+              placeholder="Nazz Mohammad"
+              autoComplete="name"
+              value={ownerName}
+              onChange={(e) => onChangeOwnerName(e.target.value)}
+            />
+          </div>
+          <div className="form-group">
+            <label className="label" htmlFor="wiz-owner-role">
+              Your role <span className="label-optional">(optional)</span>
+            </label>
+            <input
+              className="input"
+              id="wiz-owner-role"
+              placeholder="Founder, CTO..."
+              value={ownerRole}
+              onChange={(e) => onChangeOwnerRole(e.target.value)}
+            />
+          </div>
+        </div>
       </div>
 
       {nexSignupStatus === "hidden" ? (
@@ -112,7 +165,7 @@ export function IdentityStep({
           disabled={!canContinue}
           type="button"
         >
-          Choose a blueprint
+          Continue
           <ArrowIcon />
           <EnterHint />
         </button>

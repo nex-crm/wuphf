@@ -10,6 +10,9 @@ interface Overrides {
   nexEmail?: string;
   nexSignupStatus?: "hidden" | "open" | "submitting" | "ok" | "fallback";
   nexSignupError?: string;
+  website?: string;
+  ownerName?: string;
+  ownerRole?: string;
 }
 
 function renderIdentity(
@@ -21,6 +24,9 @@ function renderIdentity(
     onChangeNexEmail: (v: string) => void;
     onSubmitNexSignup: () => void;
     onOpenNexSignup: () => void;
+    onChangeWebsite: (v: string) => void;
+    onChangeOwnerName: (v: string) => void;
+    onChangeOwnerRole: (v: string) => void;
     onNext: () => void;
     onBack: () => void;
   }> = {},
@@ -32,12 +38,18 @@ function renderIdentity(
     nexEmail: "",
     nexSignupStatus: "hidden" as const,
     nexSignupError: "",
+    website: "",
+    ownerName: "",
+    ownerRole: "",
     onChangeCompany: callbacks.onChangeCompany ?? (() => {}),
     onChangeDescription: callbacks.onChangeDescription ?? (() => {}),
     onChangePriority: callbacks.onChangePriority ?? (() => {}),
     onChangeNexEmail: callbacks.onChangeNexEmail ?? (() => {}),
     onSubmitNexSignup: callbacks.onSubmitNexSignup ?? (() => {}),
     onOpenNexSignup: callbacks.onOpenNexSignup ?? (() => {}),
+    onChangeWebsite: callbacks.onChangeWebsite ?? (() => {}),
+    onChangeOwnerName: callbacks.onChangeOwnerName ?? (() => {}),
+    onChangeOwnerRole: callbacks.onChangeOwnerRole ?? (() => {}),
     onNext: callbacks.onNext ?? (() => {}),
     onBack: callbacks.onBack ?? (() => {}),
     ...overrides,
@@ -53,26 +65,26 @@ function renderIdentity(
 describe("IdentityStep", () => {
   it("disables Continue when company or description are empty", () => {
     const { rerenderWith } = renderIdentity({ company: "", description: "" });
-    const cta = screen.getByRole("button", { name: /Choose a blueprint/i });
+    const cta = screen.getByRole("button", { name: /Continue/i });
     expect(cta).toBeDisabled();
 
     rerenderWith({ company: "Acme", description: "" });
     expect(
-      screen.getByRole("button", { name: /Choose a blueprint/i }),
+      screen.getByRole("button", { name: /Continue/i }),
     ).toBeDisabled();
   });
 
   it("enables Continue once both company and description are non-empty", () => {
     renderIdentity({ company: "Acme", description: "We sell things" });
     expect(
-      screen.getByRole("button", { name: /Choose a blueprint/i }),
+      screen.getByRole("button", { name: /Continue/i }),
     ).toBeEnabled();
   });
 
   it("treats whitespace-only inputs as empty (trim gate)", () => {
     renderIdentity({ company: "   ", description: "  " });
     expect(
-      screen.getByRole("button", { name: /Choose a blueprint/i }),
+      screen.getByRole("button", { name: /Continue/i }),
     ).toBeDisabled();
   });
 
