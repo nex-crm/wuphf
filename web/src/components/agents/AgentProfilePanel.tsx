@@ -282,7 +282,7 @@ function PermissionsSection({ agent }: { agent: OfficeMember }) {
         <div className="agent-profile-perm-row">
           <span className="agent-profile-perm-label">built-in</span>
           <span className="agent-profile-perm-value">
-            {agent.built_in ? "yes" : "no"}
+            {isLead ? "yes" : "no"}
           </span>
         </div>
       </div>
