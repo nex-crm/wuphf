@@ -13,7 +13,7 @@ set -euo pipefail
 RUNS=5
 THRESHOLD="${FLAKE_RATE_THRESHOLD:-0.20}"
 
-script_dir="${BASH_SOURCE[0]%/*}"
+script_dir="$(dirname -- "${BASH_SOURCE[0]}")"
 repo_root="$(cd -- "$script_dir/.." && pwd)"
 quarantine_file="${FLAKE_QUARANTINE_FILE:-$repo_root/tests/flaky/quarantine.txt}"
 dry_run=false
