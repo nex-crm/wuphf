@@ -70,6 +70,23 @@ func sanitizeOfficeDecisionRecord(dec officeDecisionRecord) officeDecisionRecord
 	return dec
 }
 
+func sanitizeWatchdogAlert(alert watchdogAlert) watchdogAlert {
+	alert.Summary = redactSecretsInText(alert.Summary)
+	return alert
+}
+
+func sanitizeTeamTask(task teamTask) teamTask {
+	task.Title = redactSecretsInText(task.Title)
+	task.Details = redactSecretsInText(task.Details)
+	return task
+}
+
+func sanitizeSchedulerJob(job schedulerJob) schedulerJob {
+	job.Label = redactSecretsInText(job.Label)
+	job.Payload = redactSecretsInText(job.Payload)
+	return job
+}
+
 func appendRedactionReasons(existing []string, incoming []string) []string {
 	if len(incoming) == 0 {
 		return existing
