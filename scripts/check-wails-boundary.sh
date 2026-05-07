@@ -18,6 +18,15 @@ if ! command -v rg >/dev/null 2>&1; then
   exit 1
 fi
 
+# The Ubuntu 22.04 apt ripgrep is built without PCRE2 support.
+# Verify before proceeding so the check fails loudly rather than silently
+# passing with no matches (an empty scan is indistinguishable from a clean repo).
+if ! rg --pcre2-version >/dev/null 2>&1; then
+  echo "ripgrep is installed but was built without PCRE2 support" >&2
+  echo "Install a PCRE2-enabled ripgrep (e.g. via cargo or ubuntu-24.04 apt)." >&2
+  exit 1
+fi
+
 # shellcheck disable=SC2016 # Backticks are literal regex tokens, not command substitution.
 go_import_pattern='(^|[[:space:]])([[:alpha:]_][[:alnum:]_]*|\.|_)?[[:space:]]*["`]github\.com/wailsapp/wails/v[23](/[^"`[:space:]]*)?["`]'
 # shellcheck disable=SC2016 # Backticks are literal regex tokens, not command substitution.
