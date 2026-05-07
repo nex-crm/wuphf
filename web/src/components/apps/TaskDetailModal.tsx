@@ -1,5 +1,5 @@
 // biome-ignore-all lint/a11y/useKeyWithClickEvents: Pointer handler is paired with an existing modal, image, or routed-control keyboard path; preserving current interaction model.
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { getOfficeMembers, type OfficeMember } from "../../api/client";
@@ -14,9 +14,10 @@ import {
   type TaskStatusAction,
   updateTaskStatus,
 } from "../../api/tasks";
+import { useAgentStream } from "../../hooks/useAgentStream";
 import { formatRelativeTime } from "../../lib/format";
 import { keyedByOccurrence } from "../../lib/reactKeys";
-import { AgentTerminal } from "../agents/AgentTerminal";
+import { StreamLineView } from "../messages/StreamLineView";
 import { confirm } from "../ui/ConfirmDialog";
 
 interface TaskDetailModalProps {
@@ -590,14 +591,9 @@ export function TaskDetailModal({
       )}
 
       {terminalOwner ? (
-        <section className="task-detail-section task-detail-terminal-section">
-          <div className="task-detail-label">Live terminal</div>
-          <AgentTerminal
-            slug={terminalOwner}
-            taskId={task.id}
-            title="Task terminal"
-            emptyLabel="No terminal output for this task yet"
-          />
+        <section className="task-detail-section task-detail-stream-section">
+          <div className="task-detail-label">Live stream</div>
+          <TaskStreamSection slug={terminalOwner} taskId={task.id} />
         </section>
       ) : null}
 
@@ -846,5 +842,49 @@ function StatusButton({
     >
       {buttonLabel}
     </button>
+  );
+}
+
+function TaskStreamSection({ slug, taskId }: { slug: string; taskId: string }) {
+  const { lines, connected } = useAgentStream(slug, taskId);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  // appendStreamLine merges consecutive raw chunks into the last line's
+  // `data` without growing the array, so depending on length alone would
+  // freeze the scroll while a model is still streaming text. Track the
+  // last line's id+data so coalesced updates retrigger the effect too.
+  const lastLine = lines[lines.length - 1];
+
+  // Stick to bottom only when the user is already near it, so scrolling
+  // back through history isn't disrupted by every new line.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-run on every new line so the log auto-scrolls.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    if (distanceFromBottom < 32) {
+      el.scrollTop = el.scrollHeight;
+    }
+  }, [lines.length, lastLine?.id, lastLine?.data]);
+
+  return (
+    <div>
+      <div className="agent-stream-status">
+        <span
+          className={`status-dot ${connected ? "active pulse" : "lurking"}`}
+        />
+        {connected ? "Connected" : "Disconnected"}
+      </div>
+      <div className="agent-stream-log" ref={scrollRef}>
+        {lines.length === 0 ? (
+          <div className="agent-stream-empty">
+            No stream output for this task yet
+          </div>
+        ) : (
+          lines.map((line) => (
+            <StreamLineView key={line.id} line={line} compact={true} />
+          ))
+        )}
+      </div>
+    </div>
   );
 }

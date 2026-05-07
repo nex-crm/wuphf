@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/nex-crm/wuphf/internal/agent"
 )
@@ -127,6 +128,48 @@ func TestCreateOpencodeCLIStreamFnSurfacesMissingBinaryError(t *testing.T) {
 	}
 }
 
+// TestRunOpencodeOnceOversizedLine is the runner-level wedge regression.
+// A real subprocess writes a >5 MiB line to stdout and then a normal
+// line and exits 0. Under the prior bufio.Scanner the parent's stream
+// reader would stop at ErrTooLong, leave the stdout pipe full, and
+// cmd.Wait would never return without an external SIGKILL. With the
+// shared DrainStreamLines helper the parent drains both lines and the
+// child exits cleanly.
+//
+// We bound the test in real wall time as the canary — if cmd.Wait
+// wedges, this test will hit Go's per-test timeout instead of returning
+// promptly.
+func TestRunOpencodeOnceOversizedLine(t *testing.T) {
+	recordFile := t.TempDir() + "/opencode-record.jsonl"
+	cwd := t.TempDir()
+
+	restore := stubOpencodeRuntime(t, recordFile, "oversized-line", cwd)
+	defer restore()
+
+	done := make(chan struct{})
+	var (
+		out string
+		err error
+	)
+	go func() {
+		out, err = RunOpencodeOneShot("sys", "do the thing", cwd)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(15 * time.Second):
+		t.Fatal("RunOpencodeOneShot wedged on >5 MiB stdout line — Scanner regression")
+	}
+
+	if err != nil {
+		t.Fatalf("RunOpencodeOneShot: %v", err)
+	}
+	if !strings.Contains(out, "shipped the update") {
+		t.Fatalf("trailing line missing from output (oversized line ate it): out len=%d", len(out))
+	}
+}
+
 func readOpencodeHelperRecords(t *testing.T, path string) []opencodeHelperRecord {
 	t.Helper()
 	raw, err := os.ReadFile(path)
@@ -215,6 +258,21 @@ func TestOpencodeHelperProcess(t *testing.T) {
 	case "auth-error":
 		_, _ = os.Stderr.WriteString("error: unauthorized\n")
 		os.Exit(1)
+	case "oversized-line":
+		// Wedge regression: write a single >5 MiB line followed by a normal
+		// line. Under the prior bufio.Scanner the parent runner would have
+		// stopped reading at ErrTooLong, leaving stdout pipe backpressure
+		// blocking cmd.Wait. With DrainStreamLines the parent must drain
+		// the full huge line and the trailing line, and the child must
+		// exit cleanly without SIGKILL.
+		const huge = 5*1024*1024 + 7
+		buf := make([]byte, huge)
+		for i := range buf {
+			buf[i] = 'z'
+		}
+		_, _ = os.Stdout.Write(buf)
+		_, _ = os.Stdout.WriteString("\nshipped the update\n")
+		os.Exit(0)
 	default:
 		t.Fatalf("unknown helper scenario: %s", os.Getenv("OPENCODE_TEST_SCENARIO"))
 	}

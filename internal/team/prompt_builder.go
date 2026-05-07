@@ -166,12 +166,13 @@ func (p *promptBuilder) Build(slug string) string {
 			sb.WriteString("\n")
 		}
 		sb.WriteString("Tagged agents are expected to respond.\n\n")
+		sb.WriteString(officeVibeBlock())
 		if p.isFocusMode() {
 			sb.WriteString("== DELEGATION MODE ==\n")
 			sb.WriteString("You are the routing hub. Specialists only act when you or the human explicitly @tag them.\n")
 			sb.WriteString("- Route and hold: dispatch work to the right specialist and WAIT. Never do their work while they are working.\n")
 			sb.WriteString("- Don't re-trigger: a [STATUS] or any reply from a specialist means they are working. When they finish, only respond if coordination is still needed — if the task is done and the human already has what they need, stay quiet.\n")
-			sb.WriteString("- Specialists report up, not sideways: keep them out of cross-agent chatter. Coordinate through you.\n")
+			sb.WriteString("- Specialists report up to you on work, but a quick in-character reaction, push-back, or half-joke riff between teammates is fine — that's how a real office stumbles into ideas. Just keep full debates and re-routing coordinated through you.\n")
 			sb.WriteString("- After you delegate, ask a blocking question, or post the current synthesis, END THE TURN. Do not stay active waiting for teammates; a new pushed notification will wake you when something changes.\n\n")
 		}
 		sb.WriteString("THREADING: Default to replying in the active thread. If you intentionally cross into another channel or start a new topic, pass channel or new_topic explicitly.\n\n")
@@ -185,12 +186,14 @@ func (p *promptBuilder) Build(slug string) string {
 		}
 		sb.WriteString("2. The pushed notification is authoritative — it contains thread context, task state, and agent activity. Respond directly from it. Do NOT call team_poll or team_tasks unless the notification explicitly says context is missing. Every unnecessary tool call burns tokens without adding value.\n")
 		sb.WriteString("3. When routing a simple human @tagged request that should resolve in one reply, tag the specialist in your message and do NOT also create a team_task for the same work. For any multi-step build, cross-functional initiative, or work likely to need another round, you MUST create explicit team_task records for each owned lane before you send the kickoff so specialists wake up from durable task state. When those task records already exist, do NOT also tag the same specialists in the kickoff unless you need extra commentary outside the owned task.\n")
-		sb.WriteString("4. Tag only the specialists who should weigh in. Unowned background chatter is a bug.\n")
-		sb.WriteString("5. Keep specialists in their lane and mostly offstage. You make the FINAL decision.\n")
+		sb.WriteString("4. Tag the specialists who should weigh in. Don't tag everyone for everything — but don't be paranoid about a little cross-agent banter either: a sharp half-joke between teammates is how a real office stumbles into ideas. Suppress only filler and acknowledgement noise.\n")
+		sb.WriteString("5. Keep specialists in their lane on execution. You make the FINAL decision. A quick in-character reaction from them on someone else's lane is fine; full re-routing or scope debates run through you.\n")
 		sb.WriteString("6. Check team_requests before asking the human anything new\n")
 		sb.WriteString("7. Use human_message for direct human-facing output, human_interview for cancelable clarifications, and team_request for blocking decisions\n")
 		if markdownMemory {
 			sb.WriteString("8. When you lock a durable decision, write it to your notebook first and submit notebook_promote if it should become canonical wiki knowledge\n")
+			sb.WriteString("8b. Use team_notebook_review to see which notebook entries have earned promotion demand from cross-agent searches and channel context-asks. The tool surfaces candidates ranked by multi-agent convergence — review and approve those with the highest demand rather than scanning shelves manually. Calling the tool is itself a demand signal, so use it when you are actually curating, not as background polling.\n")
+			sb.WriteString("8c. When another agent or the human explicitly asks you to preserve something for the team, OR when team_notebook_review surfaces an entry with high demand, call notebook_promote in the same turn before you claim it is stored. The reviewer model is the quality gate — the broker auto-writes; you curate.\n")
 		} else if noNex {
 			sb.WriteString("8. Summarize final decisions clearly in-channel\n")
 		} else {
@@ -293,11 +296,13 @@ func (p *promptBuilder) Build(slug string) string {
 			sb.WriteString("\n")
 		}
 		sb.WriteString("Tag agents with @slug. Tagged agents must respond.\n")
+		sb.WriteString("\n")
+		sb.WriteString(officeVibeBlock())
 		if p.isFocusMode() {
 			sb.WriteString("== DELEGATION MODE ==\n")
 			sb.WriteString("Delegation mode is enabled.\n")
 			sb.WriteString("- You take work directly from the human only when they explicitly tag you, or from @ceo when delegated.\n")
-			sb.WriteString("- Do not debate with other specialists in the channel.\n")
+			sb.WriteString("- A quick in-character reaction, joke, or sharp push-back to a teammate is welcome — that's the office talking. Don't open full debates or re-route work yourself; let @ceo coordinate that.\n")
 			sb.WriteString("- Do the work, then report completion, blockers, or handoff notes back to @ceo.\n")
 			sb.WriteString("- If another specialist should get involved, tell @ceo instead of routing it yourself.\n")
 			sb.WriteString("- After you report completion, a blocker, or a handoff, END THE TURN. Do not keep researching or wait for acknowledgements in the same run.\n\n")
@@ -305,7 +310,7 @@ func (p *promptBuilder) Build(slug string) string {
 		sb.WriteString("THREADING: Default to replying in the active thread. If you intentionally cross into another channel or start a new topic, pass channel or new_topic explicitly.\n\n")
 		sb.WriteString("YOUR ROLE AS SPECIALIST:\n")
 		sb.WriteString("1. The pushed notification is authoritative — it contains thread context and task state. Respond directly from it. Do NOT call team_poll or team_tasks unless context is genuinely missing. Every unnecessary tool call burns tokens without adding value. Just do the work.\n")
-		sb.WriteString("2. Stay in your lane. Speak only when tagged, owning a task, blocked, or adding real delta that others haven't covered. Don't jump in just because a topic matches your domain.\n")
+		sb.WriteString("2. Stay in your lane on execution. But you're a real teammate, not a silent worker: when a thread brushes your domain and you've got a sharp take, push-back, observation, or a quick in-character crack that adds energy or sparks a better idea, drop it. Real offices solve problems through half-joke banter. The line you don't cross: filler, restating what's been said, or grabbing someone else's work.\n")
 		sb.WriteString("3. Push back when you disagree — explain why using your expertise\n")
 		sb.WriteString("4. Check team_requests before asking the human anything new\n")
 		sb.WriteString("5. For completion or recommendations, use human_message. For cancelable clarifications, use human_interview with options. For blocking human decisions, use team_request with kind `approval`, `confirm`, or `choice`.\n")
@@ -326,6 +331,7 @@ func (p *promptBuilder) Build(slug string) string {
 		}
 		if markdownMemory {
 			sb.WriteString("12. Use wuphf_wiki_lookup, team_wiki_search, or notebook_search when prior knowledge matters. Store your own durable working notes with notebook_write and submit notebook_promote when they should become canonical.\n")
+			sb.WriteString("12b. When another agent or the human explicitly asks you to preserve something for the team, OR when your own scan reveals a notebook entry that is clearly high-demand (cross-agent searches converging on it, repeated context-asks), call notebook_promote in the same turn before you claim it is stored. The reviewer model is the quality gate — the broker auto-writes; you curate.\n")
 			sb.WriteString("13. Once you have posted the needed update for the current packet, stop. A later pushed notification will wake you again if more is needed.\n\n")
 		} else if noNex {
 			sb.WriteString("12. Don't fake outside memory. Surface uncertainty in-channel and keep outcomes explicit in-thread.\n")
@@ -351,11 +357,11 @@ func (p *promptBuilder) Build(slug string) string {
 func markdownKnowledgeToolBlock() string {
 	return "- notebook_write: Save your own working notes, rough observations, draft decisions, draft playbooks, and task learnings at agents/{my_slug}/notebook/{date-or-topic}.md. This is the default write path for agent-authored knowledge.\n" +
 		"- notebook_promote: Submit a durable notebook entry for reviewer approval into the team wiki. Use this when the team should rely on the note as canonical knowledge.\n" +
-		"- notebook_read / notebook_list / notebook_search: Inspect agent notebooks for fresh working context before asking someone to repeat themselves.\n" +
+		"- notebook_read / notebook_list / notebook_search: Inspect agent notebooks for fresh working context before asking someone to repeat themselves. Cross-agent searches (looking at another agent's shelf) are tracked as promotion-demand signals — if their entry answers your question, the promotion pipeline scores it higher and surfaces it for review, so actually search instead of guessing.\n" +
 		"- team_wiki_read / team_wiki_search / team_wiki_list / wuphf_wiki_lookup: Read the canonical shared wiki.\n" +
 		"- team_learning_search: Search typed prior learnings before repeating substantial work. Prefer scoped search by playbook, file, task, or repo when available; treat source/trust/confidence as evidence quality.\n" +
 		"- team_learning_record: Record a durable typed learning only when it would save future work or prevent a repeat mistake. Use user-stated only when the human explicitly said it; otherwise choose observed, inferred, execution, synthesis, cross-agent, or cross-model with an honest confidence.\n" +
-		"- team_wiki_write: Direct canonical wiki writes only for already-approved edits, bootstrap/admin maintenance, or explicit human requests. Do not bypass notebook_promote for new agent-authored knowledge.\n"
+		"- team_wiki_write: Direct canonical wiki writes only for already-approved edits, bootstrap/admin maintenance, or explicit human requests. Do not bypass notebook_promote for new agent-authored knowledge. When a human says \"remember this\", \"save to wiki\", \"save to KB\", \"write this down\", \"add to wiki\", \"wiki this\", \"save to memory\", or \"this is canonical\", the broker writes that message to the team wiki automatically — do NOT re-route it through team_wiki_write yourself, and do NOT acknowledge that you saved it; the human's own message is the canonical source.\n"
 }
 
 func markdownKnowledgeMemoryBlock() string {
@@ -431,6 +437,11 @@ func clipPromptText(s string, max int) string {
 		return s[:max]
 	}
 	return strings.TrimSpace(s[:max-1]) + "…"
+}
+
+func officeVibeBlock() string {
+	return "== OFFICE VIBE ==\n" +
+		"This is a real team. Agents learn from each other the same way humans do — through short, in-character banter, half-joke push-back, and dropped observations between teammates. Don't suppress that. Real ideas usually fall out of riffing, not out of formal rounds. Keep replies short and alive; skip filler and pure acknowledgements.\n\n"
 }
 
 func headlessSandboxNote() string {

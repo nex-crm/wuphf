@@ -2,9 +2,9 @@ import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { RouterProvider } from "@tanstack/react-router";
 
+import { JoinPage } from "./components/join/JoinPage";
 import { rootRoute, router } from "./lib/router";
 import RootRoute from "./routes/RootRoute";
-import { JoinPage } from "./components/join/JoinPage";
 import "./styles/shadcn.css";
 import "./styles/global.css";
 import "./styles/layout.css";
@@ -14,7 +14,6 @@ import "./styles/search.css";
 import "./styles/wiki-shell.css";
 import "./styles/kbd.css";
 import "./styles/console.css";
-import "@xterm/xterm/css/xterm.css";
 
 // Attach the root route's component at startup. Defining the component
 // inside `lib/router.ts` would create a circular import: RootRoute reads

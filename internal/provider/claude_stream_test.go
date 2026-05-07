@@ -58,3 +58,38 @@ func TestReadClaudeJSONStream_ZeroCostStillParsesTokens(t *testing.T) {
 		t.Errorf("CostUSD: got %f, want 0", result.Usage.CostUSD)
 	}
 }
+
+// TestReadClaudeJSONStream_OversizedTextBlock is the wedge regression. A
+// single assistant message with a >2 MiB text block must parse cleanly,
+// and a normal result event after it must still be observed. Under the
+// prior bufio.Scanner with a 1 MiB token limit this would have aborted
+// at the oversized line and silently lost the result event behind it.
+func TestReadClaudeJSONStream_OversizedTextBlock(t *testing.T) {
+	const huge = 2*1024*1024 + 17
+	body := strings.Repeat("x", huge)
+
+	lines := []string{
+		`{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"` + body + `"}]}}`,
+		`{"type":"result","subtype":"success","result":"ok","usage":{"input_tokens":42,"output_tokens":7,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}`,
+	}
+	input := strings.Join(lines, "\n")
+
+	var sawText bool
+	result, err := ReadClaudeJSONStream(strings.NewReader(input), func(evt ClaudeStreamEvent) {
+		if evt.Type == "text" && len(evt.Text) == huge {
+			sawText = true
+		}
+	})
+	if err != nil {
+		t.Fatalf("oversized-line ReadClaudeJSONStream: %v", err)
+	}
+	if !sawText {
+		t.Fatal("oversized text block was not delivered to onEvent")
+	}
+	if result.Usage.InputTokens != 42 || result.Usage.OutputTokens != 7 {
+		t.Fatalf("post-oversized result not parsed: %+v", result.Usage)
+	}
+	if result.FinalMessage != "ok" {
+		t.Fatalf("FinalMessage: got %q, want %q", result.FinalMessage, "ok")
+	}
+}

@@ -2,10 +2,19 @@ package agent
 
 import "sync"
 
-// MessageQueues manages per-agent steer and follow-up message queues.
+// MessageQueues manages per-agent message queues.
+//
+// Three queues are maintained per agent:
+//
+//   - steerQueues:    system-level course corrections (e.g. team-lead delegations)
+//   - humanQueues:    high-priority messages from a real person; drained before
+//     follow-ups so the agent absorbs human input before resuming
+//     any prior agent-originated task
+//   - followUpQueues: ordinary agent-to-agent follow-ups
 type MessageQueues struct {
 	mu             sync.Mutex
 	steerQueues    map[string][]string
+	humanQueues    map[string][]string
 	followUpQueues map[string][]string
 }
 
@@ -13,6 +22,7 @@ type MessageQueues struct {
 func NewMessageQueues() *MessageQueues {
 	return &MessageQueues{
 		steerQueues:    make(map[string][]string),
+		humanQueues:    make(map[string][]string),
 		followUpQueues: make(map[string][]string),
 	}
 }
@@ -22,6 +32,15 @@ func (q *MessageQueues) Steer(agentSlug, message string) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	q.steerQueues[agentSlug] = append(q.steerQueues[agentSlug], message)
+}
+
+// Human enqueues a human-priority message for the given agent. Drained before
+// follow-ups so a person's input is absorbed before the agent resumes any
+// prior agent-originated task.
+func (q *MessageQueues) Human(agentSlug, message string) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.humanQueues[agentSlug] = append(q.humanQueues[agentSlug], message)
 }
 
 // FollowUp enqueues a follow-up message for the given agent.
@@ -42,6 +61,20 @@ func (q *MessageQueues) DrainSteer(agentSlug string) (string, bool) {
 	}
 	msg := msgs[0]
 	q.steerQueues[agentSlug] = msgs[1:]
+	return msg, true
+}
+
+// DrainHuman removes and returns the front human-priority message for the agent.
+// Returns ("", false) if the queue is empty.
+func (q *MessageQueues) DrainHuman(agentSlug string) (string, bool) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	msgs := q.humanQueues[agentSlug]
+	if len(msgs) == 0 {
+		return "", false
+	}
+	msg := msgs[0]
+	q.humanQueues[agentSlug] = msgs[1:]
 	return msg, true
 }
 
@@ -66,6 +99,13 @@ func (q *MessageQueues) HasSteer(agentSlug string) bool {
 	return len(q.steerQueues[agentSlug]) > 0
 }
 
+// HasHuman reports whether the agent has any human-priority messages queued.
+func (q *MessageQueues) HasHuman(agentSlug string) bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return len(q.humanQueues[agentSlug]) > 0
+}
+
 // HasFollowUp reports whether the agent has any follow-up messages queued.
 func (q *MessageQueues) HasFollowUp(agentSlug string) bool {
 	q.mu.Lock()
@@ -73,7 +113,8 @@ func (q *MessageQueues) HasFollowUp(agentSlug string) bool {
 	return len(q.followUpQueues[agentSlug]) > 0
 }
 
-// HasMessages reports whether the agent has any queued messages (steer or follow-up).
+// HasMessages reports whether the agent has any queued messages (steer, human,
+// or follow-up).
 func (q *MessageQueues) HasMessages(agentSlug string) bool {
-	return q.HasSteer(agentSlug) || q.HasFollowUp(agentSlug)
+	return q.HasSteer(agentSlug) || q.HasHuman(agentSlug) || q.HasFollowUp(agentSlug)
 }

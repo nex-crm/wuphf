@@ -1,16 +1,22 @@
 // biome-ignore-all lint/a11y/noStaticElementInteractions: Intentional wrapper/backdrop or SVG hover target; interactive child controls and keyboard paths are handled nearby.
 // biome-ignore-all lint/a11y/useSemanticElements: Existing element is required by layout, drag/drop, or router styling; semantics are documented until a larger markup refactor.
 import { type DragEvent, useCallback, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 
 import { post } from "../../api/client";
-import { getOfficeTasks, type Task } from "../../api/tasks";
+import type { Task } from "../../api/tasks";
+import { useOfficeTasks } from "../../hooks/useOfficeTasks";
 import { formatRelativeTime } from "../../lib/format";
 import { router } from "../../lib/router";
+import {
+  groupTasksByStatus,
+  normalizeTaskStatus,
+  type TaskStatus,
+} from "../../lib/taskProjections";
 import { showNotice } from "../ui/Toast";
 import { TaskDetailModal, taskMemoryWorkflowBadge } from "./TaskDetailModal";
 
-const STATUS_ORDER = [
+const STATUS_ORDER: readonly TaskStatus[] = [
   "in_progress",
   "open",
   "review",
@@ -18,9 +24,9 @@ const STATUS_ORDER = [
   "blocked",
   "done",
   "canceled",
-] as const;
+];
 
-type StatusGroup = (typeof STATUS_ORDER)[number];
+type StatusGroup = TaskStatus;
 
 const DND_MIME = "application/x-wuphf-task-id";
 const HUMAN_SLUG = "human";
@@ -35,15 +41,6 @@ const COLUMN_LABEL: Record<StatusGroup, string> = {
   canceled: "won't do",
 };
 
-function normalizeStatus(raw: string): StatusGroup {
-  const s = raw.toLowerCase().replace(/[\s-]+/g, "_");
-  if (s === "completed") return "done";
-  if (s === "in_review") return "review";
-  if (s === "cancelled") return "canceled";
-  if ((STATUS_ORDER as readonly string[]).includes(s)) return s as StatusGroup;
-  return "open";
-}
-
 function statusBadgeClass(status: StatusGroup): string {
   if (status === "done") return "badge badge-green";
   if (status === "in_progress" || status === "review")
@@ -51,23 +48,6 @@ function statusBadgeClass(status: StatusGroup): string {
   if (status === "blocked") return "badge badge-yellow";
   if (status === "canceled") return "badge badge-muted";
   return "badge badge-accent";
-}
-
-function groupTasks(tasks: Task[]): Record<StatusGroup, Task[]> {
-  const groups: Record<StatusGroup, Task[]> = {
-    in_progress: [],
-    open: [],
-    review: [],
-    pending: [],
-    blocked: [],
-    done: [],
-    canceled: [],
-  };
-  for (const task of tasks) {
-    const status = normalizeStatus(task.status);
-    groups[status].push(task);
-  }
-  return groups;
 }
 
 /**
@@ -107,7 +87,7 @@ function useTaskMove() {
 
   return useCallback(
     async (task: Task, toStatus: StatusGroup) => {
-      const fromStatus = normalizeStatus(task.status);
+      const fromStatus = normalizeTaskStatus(task.status);
       if (fromStatus === toStatus) return;
 
       const body = buildMoveBody(task, toStatus);
@@ -142,11 +122,7 @@ export function TasksApp({
 }: {
   taskId?: string | null;
 }) {
-  const { data, isLoading, error } = useQuery({
-    queryKey: ["office-tasks"],
-    queryFn: () => getOfficeTasks({ includeDone: true }),
-    refetchInterval: 10_000,
-  });
+  const { data, isLoading, error } = useOfficeTasks();
 
   const moveTask = useTaskMove();
   const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -188,7 +164,7 @@ export function TasksApp({
     );
   }
 
-  const tasks = data?.tasks ?? [];
+  const tasks = data ?? [];
 
   if (tasks.length === 0) {
     return (
@@ -207,7 +183,7 @@ export function TasksApp({
     );
   }
 
-  const grouped = groupTasks(tasks);
+  const grouped = groupTasksByStatus(tasks);
   const tasksById = new Map(tasks.map((t) => [t.id, t]));
   const isDragging = draggingId !== null;
   const selectedTask = activeTaskId
@@ -364,7 +340,7 @@ function TaskCard({
   onDragEnd,
   onOpen,
 }: TaskCardProps) {
-  const status = normalizeStatus(task.status);
+  const status = normalizeTaskStatus(task.status);
   const timestamp = task.updated_at ?? task.created_at;
   const className = `app-card task-card${isDragging ? " dragging" : ""}`;
   const memoryBadge = taskMemoryWorkflowBadge(task.memory_workflow);
