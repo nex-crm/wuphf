@@ -17,8 +17,18 @@ func (b *Broker) Actions() []officeActionLog {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	out := make([]officeActionLog, len(b.actions))
-	copy(out, b.actions)
+	for i, action := range b.actions {
+		out[i] = sanitizeOfficeActionLog(action)
+	}
 	return out
+}
+
+func sanitizeOfficeActionLog(action officeActionLog) officeActionLog {
+	action.Summary = redactSecretsInText(action.Summary)
+	if len(action.SignalIDs) > 0 {
+		action.SignalIDs = append([]string(nil), action.SignalIDs...)
+	}
+	return action
 }
 
 func (b *Broker) Signals() []officeSignalRecord {

@@ -94,6 +94,9 @@ func entropyTokenize(s string) []string {
 // (e.g., English words, numeric-only IDs, hyphen-sentence fragments).
 // Real keys use a mix of letters + digits / base64 / hex.
 func isPlausibleSecretCharset(s string) bool {
+	if isPathLikeToken(s) || strings.Contains(s, `\`) || isSchemeURI(s) {
+		return false
+	}
 	var hasLetter, hasDigit bool
 	for _, r := range s {
 		if unicode.IsLetter(r) {
@@ -109,6 +112,29 @@ func isPlausibleSecretCharset(s string) bool {
 		}
 	}
 	return hasLetter && hasDigit
+}
+
+func isPathLikeToken(s string) bool {
+	return strings.HasPrefix(s, "/") && strings.Count(s, "/") >= 2
+}
+
+func isSchemeURI(s string) bool {
+	idx := strings.Index(s, "://")
+	if idx <= 0 || idx > 16 {
+		return false
+	}
+	for i, r := range s[:idx] {
+		if i == 0 {
+			if !unicode.IsLetter(r) {
+				return false
+			}
+			continue
+		}
+		if !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '+' && r != '-' && r != '.' {
+			return false
+		}
+	}
+	return true
 }
 
 // EntropyHit reports a single high-entropy token plus its measured bits.
