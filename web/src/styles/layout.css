@@ -1995,7 +1995,9 @@ html[data-theme="nex"]
   text-decoration: none;
   border-radius: 4px;
   padding: 1px 4px;
-  transition: color 0.12s, background 0.12s;
+  transition:
+    color 0.12s,
+    background 0.12s;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2030,7 +2032,10 @@ html[data-theme="nex"]
   padding: 0;
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.12s, color 0.12s, background 0.12s;
+  transition:
+    opacity 0.12s,
+    color 0.12s,
+    background 0.12s;
 }
 .breadcrumb:hover .breadcrumb-copy-btn,
 .breadcrumb-leaf:hover .breadcrumb-copy-btn {
@@ -2073,7 +2078,9 @@ html[data-theme="nex"]
   font-size: 12px;
   color: var(--text-secondary);
   border-radius: 0;
-  transition: background 0.12s, color 0.12s;
+  transition:
+    background 0.12s,
+    color 0.12s;
   white-space: nowrap;
   overflow: hidden;
   border: none;
@@ -2321,6 +2328,87 @@ html[data-theme="nex"]
     /* No halo glow under reduced motion. Border on stuck still renders
        because it is structural, not motion. */
     filter: none;
+  }
+}
+
+/* ─── First-run nudge — retro pixel speech bubble ────────────────
+   Sits below the first agent row to point new users at the
+   primary action. Previous rendering inherited the body text
+   color and produced black-on-purple (~3:1) on the Nex sidebar.
+   Replaced with an NES-style dialog box: high-contrast olive
+   fill, near-black body text, sharp pixel-stepped border via
+   stacked zero-blur box-shadows, and a chunky pixel tail
+   pointing up-left toward the agent avatar.
+   ─────────────────────────────────────────────────────────────── */
+.sidebar-agent-nudge {
+  display: inline-block;
+  position: relative;
+  margin: 6px 16px 10px 40px;
+  padding: 6px 10px 6px 10px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  line-height: 1.2;
+  color: var(--neutral-950);
+  background: var(--olive-200);
+  /* Pixel border: zero-blur shadows on each cardinal side give
+     the classic 8-bit dialog silhouette without border-radius.
+     The bottom drop-shadow adds CRT-style depth on the purple
+     sidebar. */
+  box-shadow:
+    -2px 0 0 0 var(--neutral-950),
+    2px 0 0 0 var(--neutral-950),
+    0 -2px 0 0 var(--neutral-950),
+    0 2px 0 0 var(--neutral-950),
+    0 4px 0 0 rgba(0, 0, 0, 0.35);
+  /* Anchored to the avatar via translateX so the tail visually
+     points at the agent on the row above. */
+  z-index: 1;
+}
+
+/* Pixel tail — two stacked 4×4 blocks step up-left from the
+   bubble top edge toward the avatar. Each block is yellow with
+   black side borders; the upper block also paints its own top
+   border so the staircase reads as a solid outlined arrow. */
+.sidebar-agent-nudge::before {
+  content: "";
+  position: absolute;
+  top: -4px;
+  left: 10px;
+  width: 4px;
+  height: 4px;
+  background: var(--olive-200);
+  box-shadow:
+    -2px 0 0 0 var(--neutral-950),
+    2px 0 0 0 var(--neutral-950);
+}
+.sidebar-agent-nudge::after {
+  content: "";
+  position: absolute;
+  top: -8px;
+  left: 6px;
+  width: 4px;
+  height: 4px;
+  background: var(--olive-200);
+  box-shadow:
+    -2px 0 0 0 var(--neutral-950),
+    2px 0 0 0 var(--neutral-950),
+    0 -2px 0 0 var(--neutral-950);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .sidebar-agent-nudge {
+    animation: sidebar-agent-nudge-bob 1.6s ease-in-out infinite;
+  }
+}
+@keyframes sidebar-agent-nudge-bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-2px);
   }
 }
 
