@@ -95,6 +95,11 @@
 .search-result:hover {
   background: var(--bg-warm);
 }
+.search-result:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: -2px;
+  background: var(--bg-warm);
+}
 .search-result:last-child {
   border-bottom: none;
 }
@@ -290,13 +295,19 @@
   font-weight: 500;
   color: var(--text-secondary);
   cursor: pointer;
-  transition: all 0.15s;
+  transition:
+    background var(--duration-base, 0.15s),
+    color var(--duration-base, 0.15s);
 }
 .channel-wizard-tab:first-child {
   border-right: 1px solid var(--border);
 }
 .channel-wizard-tab:hover {
   background: var(--bg-warm);
+}
+.channel-wizard-tab:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: -2px;
 }
 .channel-wizard-tab.active {
   background: var(--accent-bg);

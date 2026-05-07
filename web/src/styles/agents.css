@@ -93,11 +93,19 @@
   border-radius: 6px;
   color: var(--text-secondary);
   flex-shrink: 0;
-  transition: all 0.15s;
+  /* Use specific properties instead of `all` to prevent unintended dimension
+     transitions on hover that could shift surrounding layout. */
+  transition:
+    background var(--duration-base, 0.15s),
+    color var(--duration-base, 0.15s);
 }
 .agent-panel-close:hover {
   background: var(--bg);
   color: var(--text);
+}
+.agent-panel-close:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
 }
 
 .agent-panel-section {
@@ -392,8 +400,11 @@
   transition: border-color 0.2s;
   cursor: pointer;
 }
-.agent-wizard-field select:focus {
+.agent-wizard-field select:focus,
+.agent-wizard-field select:focus-visible {
   border-color: var(--accent);
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
 }
 
 .agent-wizard-footer {
@@ -468,6 +479,12 @@
 .agent-workbench-run-row:hover {
   border-color: var(--accent);
   background: var(--accent-bg);
+}
+.agent-workbench-task-row:focus-visible,
+.agent-workbench-run-row:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+  border-color: var(--accent);
 }
 
 .agent-workbench-task-title {

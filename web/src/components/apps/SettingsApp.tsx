@@ -624,9 +624,7 @@ function LocalLLMsSection({ cfg, save }: SectionProps) {
       </div>
 
       {isLoading ? (
-        <div style={{ color: "var(--text-tertiary)", fontSize: 13 }}>
-          Detecting installed runtimes…
-        </div>
+        <div className="app-panel-loading">Detecting installed runtimes…</div>
       ) : null}
       {error ? (
         <div style={{ color: "var(--danger-500, #c33)", fontSize: 13 }}>
