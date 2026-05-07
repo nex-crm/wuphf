@@ -84,7 +84,7 @@ for entry in "${entries[@]}"; do
   passes=0
   fails=0
   for ((run = 1; run <= RUNS; run++)); do
-    if (cd "$repo_root" && go test -count=1 "${test_args[@]}") >/dev/null 2>&1; then
+    if (cd "$repo_root" && go test -timeout 120s -count=1 "${test_args[@]}") 1>/dev/null; then
       passes=$((passes + 1))
     else
       fails=$((fails + 1))
