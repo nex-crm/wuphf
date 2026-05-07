@@ -639,7 +639,7 @@ func TestBuildResumePacketSpecSectionMessagesLabel(t *testing.T) {
 // resumeInFlightWork branched on webMode alone — TUI has webMode=false, so it
 // fell through to agentPaneTargets() which computes pane addresses without
 // verifying they exist, and the resulting tmux send-keys commands silently
-// failed. Users restarting `wuphf --tui` with in-flight work lost resumption.
+// failed. Users restarting `wuphf --legacy-tui` with in-flight work lost resumption.
 func TestResumeInFlightWorkTUIClaudeRoutesHeadless(t *testing.T) {
 	setHeadlessWakeLeadFn(t, func(_ *Launcher, _ string) {})
 	// Stub the per-turn runner so spawned workers don't shell out to a real
