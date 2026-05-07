@@ -42,9 +42,9 @@ vi.mock("../../hooks/useMessages", () => ({
 }));
 
 vi.mock("../../hooks/useCommands", async () => {
-  const actual = await vi.importActual<typeof import("../../hooks/useCommands")>(
-    "../../hooks/useCommands",
-  );
+  const actual = await vi.importActual<
+    typeof import("../../hooks/useCommands")
+  >("../../hooks/useCommands");
   return {
     ...actual,
     useCommands: () => actual.FALLBACK_SLASH_COMMANDS,
@@ -58,9 +58,10 @@ vi.mock("./MessageBubble", () => ({
 }));
 
 vi.mock("../../api/client", async () => {
-  const actual = await vi.importActual<typeof import("../../api/client")>(
-    "../../api/client",
-  );
+  const actual =
+    await vi.importActual<typeof import("../../api/client")>(
+      "../../api/client",
+    );
   return {
     ...actual,
     getConfig: vi.fn().mockResolvedValue({ team_lead_slug: "ceo" }),
@@ -146,5 +147,24 @@ describe("ThreadPanel autocomplete popovers", () => {
 
     fireEvent.change(textarea, { target: { value: "/clear extra" } });
     expect(document.querySelector(".autocomplete.open")).toBeNull();
+  });
+
+  it("Escape inside an open autocomplete does not bubble to close the thread panel", () => {
+    render(wrap(<ThreadPanel />));
+
+    const textarea = screen.getByPlaceholderText(
+      "Reply to thread…",
+    ) as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: "/" } });
+    expect(document.querySelector(".autocomplete.open")).not.toBeNull();
+
+    fireEvent.keyDown(textarea, { key: "Escape" });
+
+    // The window-level "Escape closes the panel" handler must not fire when
+    // the autocomplete branch consumes the event. CodeRabbit flagged the
+    // missing stopPropagation in PR #702.
+    expect(useAppStore.getState().activeThread).not.toBeNull();
+    // Draft preserved (closing the panel would also reset text to "").
+    expect(textarea.value).toBe("/");
   });
 });

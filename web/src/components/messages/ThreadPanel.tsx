@@ -277,7 +277,11 @@ export function ThreadPanel() {
           return true;
         }
         case "Escape":
+          // Escape consumed by the autocomplete branch must not bubble to
+          // the window-level keydown handler, which would close the entire
+          // thread panel and discard the draft.
           e.preventDefault();
+          e.stopPropagation();
           setAcItems([]);
           return true;
         default:
@@ -296,7 +300,10 @@ export function ThreadPanel() {
         return;
       }
       if (e.key === "Escape" && quoting) {
+        // Same reason as the autocomplete branch: cancel the quote chip
+        // without also asking the global handler to close the thread.
         e.preventDefault();
+        e.stopPropagation();
         setQuoting(null);
       }
     },
