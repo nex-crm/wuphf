@@ -122,17 +122,12 @@ function ChannelsSection({
 }
 
 interface RecentRunsSectionProps {
-  agentSlug: string;
   runs: TaskLogSummary[];
   loading: boolean;
 }
 
-function RecentRunsSection({
-  agentSlug,
-  runs,
-  loading,
-}: RecentRunsSectionProps) {
-  const agentRuns = runs.filter((r) => r.agentSlug === agentSlug).slice(0, 8);
+function RecentRunsSection({ runs, loading }: RecentRunsSectionProps) {
+  const agentRuns = runs;
 
   if (loading) {
     return (
@@ -344,8 +339,11 @@ export function AgentProfilePanel({ agent, onClose }: AgentProfilePanelProps) {
   });
 
   const { data: runs = [], isLoading: runsLoading } = useQuery({
-    queryKey: ["agent-log-tasks", { limit: 100 }],
-    queryFn: () => listAgentLogTasks({ limit: 100 }).then((r) => r.tasks ?? []),
+    queryKey: ["agent-log-tasks", agent.slug],
+    queryFn: () =>
+      listAgentLogTasks({ limit: 8, agentSlug: agent.slug }).then(
+        (r) => r.tasks ?? [],
+      ),
     refetchInterval: 30_000,
   });
 
@@ -414,7 +412,7 @@ export function AgentProfilePanel({ agent, onClose }: AgentProfilePanelProps) {
         ) : null}
 
         {/* Current task */}
-        {agent.task ? (
+        {agent.task && agent.status === "active" ? (
           <div className="agent-profile-section">
             <SectionTitle>current task</SectionTitle>
             <p className="agent-profile-current-task">{agent.task}</p>
@@ -431,11 +429,7 @@ export function AgentProfilePanel({ agent, onClose }: AgentProfilePanelProps) {
         <ChannelsSection agentSlug={agent.slug} channels={channels} />
 
         {/* Recent runs */}
-        <RecentRunsSection
-          agentSlug={agent.slug}
-          runs={runs}
-          loading={runsLoading}
-        />
+        <RecentRunsSection runs={runs} loading={runsLoading} />
 
         {/* Recent tasks (artifacts) */}
         <RecentArtifactsSection agentSlug={agent.slug} tasks={allTasks} />

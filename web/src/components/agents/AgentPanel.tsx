@@ -528,7 +528,7 @@ export function AgentPanel() {
 
   return (
     <div ref={panelRef} style={{ display: "contents" }}>
-      <AgentPanelView agent={agent} onClose={close} />
+      <AgentPanelView key={activeAgentSlug} agent={agent} onClose={close} />
     </div>
   );
 }

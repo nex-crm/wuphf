@@ -145,6 +145,9 @@
 
 /* Clickable avatar / author for agent messages — opens profile panel */
 .message-avatar-btn {
+  background: transparent;
+  padding: 0;
+  border-radius: 8px;
   cursor: pointer;
   border: none;
   transition: opacity 0.15s;
@@ -155,7 +158,6 @@
 .message-avatar-btn:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
-  border-radius: 8px;
   opacity: 1;
 }
 .message-author-btn {
