@@ -2,6 +2,7 @@ package team
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -9,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/nex-crm/wuphf/internal/agent"
 )
@@ -125,6 +127,58 @@ func TestFormatChannelViewRedactsSecrets(t *testing.T) {
 	}
 	if !strings.Contains(got, "[REDACTED]") {
 		t.Fatalf("formatted channel view missing redaction marker: %q", got)
+	}
+}
+
+// TestPostMessage_TriggersAutoNotebookWriter pins the locked PR-1 hook (2A):
+// every roster-agent PostMessage feeds exactly one event into the auto-notebook
+// writer, while non-roster senders (humans, system) are filtered at ingress.
+// Uses a stub writer client to keep the assertion focused on the hook seam.
+func TestPostMessage_TriggersAutoNotebookWriter(t *testing.T) {
+	b := newTestBroker(t)
+	b.mu.Lock()
+	b.members = append(b.members, officeMember{Slug: "ceo", Name: "CEO", Role: "lead"})
+	for i := range b.channels {
+		if b.channels[i].Slug == "general" {
+			b.channels[i].Members = append(b.channels[i].Members, "ceo", "human")
+		}
+	}
+	b.mu.Unlock()
+
+	stub := &fakeNotebookClient{}
+	// Broker pre-filters via isAgentMemberSlugLocked before calling Handle,
+	// so the writer's roster is unused on the production code path; pass nil
+	// here to avoid re-entering b.mu inside Handle.
+	writer := NewAutoNotebookWriter(stub, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	writer.Start(ctx)
+	t.Cleanup(func() { cancel(); writer.Stop(time.Second) })
+
+	b.mu.Lock()
+	b.autoNotebookWriter = writer
+	b.mu.Unlock()
+
+	if _, err := b.PostMessage("ceo", "general", "agent message", nil, ""); err != nil {
+		t.Fatalf("PostMessage agent: %v", err)
+	}
+	if _, err := b.PostMessage("human", "general", "human message", nil, ""); err != nil {
+		t.Fatalf("PostMessage human: %v", err)
+	}
+	// Process the system path: PostSystemMessage bypasses PostMessage and must
+	// not produce a writer event.
+	b.PostSystemMessage("general", "system msg", "system")
+
+	waitCtx, waitCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer waitCancel()
+	if err := writer.WaitForCondition(waitCtx, func() bool { return len(stub.snapshot()) >= 1 }); err != nil {
+		t.Fatalf("waiting for writer event: %v", err)
+	}
+	calls := stub.snapshot()
+	if len(calls) != 1 {
+		t.Fatalf("expected exactly 1 notebook write (only the agent message); got %d", len(calls))
+	}
+	if calls[0].Slug != "ceo" {
+		t.Fatalf("expected slug=ceo, got %q", calls[0].Slug)
 	}
 }
 
@@ -1076,6 +1130,119 @@ func TestFocusModeRouting_CollaborativeUntaggedWakesLead(t *testing.T) {
 	// channel message goes through the lead. Lock that contract here.
 	if len(immediate) != 1 || immediate[0].Slug != "ceo" {
 		t.Fatalf("collaborative mode untagged: expected exactly [ceo], got %v", immediate)
+	}
+}
+
+// TestHumanHasPosted_FlipsOnFirstHumanMessageAndStays locks the broker-side
+// signal that drives the office sidebar's first-run nudge dismissal. Three
+// invariants:
+//
+//  1. Fresh broker reports humanHasPosted=false.
+//  2. Agent-only and system messages do NOT flip the bit.
+//  3. Once a human posts in any channel the bit flips true and STAYS true,
+//     even after subsequent messages from agents.
+func TestHumanHasPosted_FlipsOnFirstHumanMessageAndStays(t *testing.T) {
+	b := newTestBroker(t)
+	b.mu.Lock()
+	b.members = append(b.members, officeMember{Slug: "ceo", Name: "CEO", Role: "lead"})
+	b.members = append(b.members, officeMember{Slug: "tess", Name: "Tess", Role: "engineer"})
+	for i := range b.channels {
+		if b.channels[i].Slug == "general" {
+			b.channels[i].Members = uniqueSlugs(append(b.channels[i].Members, "ceo", "tess"))
+		}
+	}
+	b.mu.Unlock()
+
+	if b.HumanHasPosted() {
+		t.Fatal("fresh broker must report humanHasPosted=false")
+	}
+
+	// Agent-authored message must not flip the bit.
+	if _, err := b.PostMessage("tess", "general", "agent saying hello", nil, ""); err != nil {
+		t.Fatalf("PostMessage(tess): %v", err)
+	}
+	if b.HumanHasPosted() {
+		t.Fatal("humanHasPosted must stay false after agent-only traffic")
+	}
+
+	// System message must not flip the bit either.
+	b.PostSystemMessage("general", "system note", "system")
+	if b.HumanHasPosted() {
+		t.Fatal("humanHasPosted must stay false after system message")
+	}
+
+	// First human message flips the bit.
+	if _, err := b.PostMessage("human:najm", "general", "hi from a human", nil, ""); err != nil {
+		t.Fatalf("PostMessage(human): %v", err)
+	}
+	if !b.HumanHasPosted() {
+		t.Fatal("humanHasPosted must flip true on first human-authored message")
+	}
+
+	// Subsequent agent traffic must not flip the bit back.
+	if _, err := b.PostMessage("tess", "general", "agent reply", nil, ""); err != nil {
+		t.Fatalf("PostMessage(tess after human): %v", err)
+	}
+	if !b.HumanHasPosted() {
+		t.Fatal("humanHasPosted must stay true once flipped (no flip-back)")
+	}
+}
+
+// TestOfficeMembersListIncludesHumanHasPostedMeta locks the wire contract on
+// /office-members: the response is { members: [...], meta: { humanHasPosted } }.
+// Lane B/C consumers depend on the exact shape; renaming or moving the field
+// breaks the first-run nudge dismissal.
+func TestOfficeMembersListIncludesHumanHasPostedMeta(t *testing.T) {
+	b := newTestBroker(t)
+	b.mu.Lock()
+	b.members = append(b.members, officeMember{Slug: "ceo", Name: "CEO", Role: "lead"})
+	for i := range b.channels {
+		if b.channels[i].Slug == "general" {
+			b.channels[i].Members = uniqueSlugs(append(b.channels[i].Members, "ceo"))
+		}
+	}
+	b.mu.Unlock()
+
+	// Pre-flight: humanHasPosted must default to false in the response.
+	rec := httptest.NewRecorder()
+	b.handleOfficeMembers(rec, httptest.NewRequest(http.MethodGet, "/office-members", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	var pre struct {
+		Members []map[string]any `json:"members"`
+		Meta    struct {
+			HumanHasPosted bool `json:"humanHasPosted"`
+		} `json:"meta"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &pre); err != nil {
+		t.Fatalf("decode pre: %v (body=%s)", err, rec.Body.String())
+	}
+	if pre.Meta.HumanHasPosted {
+		t.Fatal("expected meta.humanHasPosted=false on a fresh broker")
+	}
+	if len(pre.Members) == 0 {
+		t.Fatal("expected at least one member in the response (default roster)")
+	}
+
+	// Post a human message. The next /office-members call must report
+	// meta.humanHasPosted=true.
+	if _, err := b.PostMessage("human:najm", "general", "hello office", nil, ""); err != nil {
+		t.Fatalf("PostMessage(human): %v", err)
+	}
+
+	rec2 := httptest.NewRecorder()
+	b.handleOfficeMembers(rec2, httptest.NewRequest(http.MethodGet, "/office-members", nil))
+	var post struct {
+		Meta struct {
+			HumanHasPosted bool `json:"humanHasPosted"`
+		} `json:"meta"`
+	}
+	if err := json.Unmarshal(rec2.Body.Bytes(), &post); err != nil {
+		t.Fatalf("decode post: %v (body=%s)", err, rec2.Body.String())
+	}
+	if !post.Meta.HumanHasPosted {
+		t.Fatal("expected meta.humanHasPosted=true after a human-authored POST")
 	}
 }
 

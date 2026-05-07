@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 
-import type { OfficeMember } from "../api/client";
+import type { OfficeMember, OfficeMembersMeta } from "../api/client";
 import { getMembers, getOfficeMembers } from "../api/client";
 
 export function useOfficeMembers() {
@@ -8,7 +8,28 @@ export function useOfficeMembers() {
     queryKey: ["office-members"],
     queryFn: () => getOfficeMembers(),
     refetchInterval: 5000,
-    select: (data) => data.members ?? [],
+    select: (data) =>
+      (data.members ?? []).map((m) => {
+        const trimmed = m.task?.trim();
+        // Normalise at the source: coerce whitespace-only task strings to
+        // undefined so every consumer gets a clean value without defensive
+        // .trim() calls downstream.
+        return trimmed ? { ...m, task: trimmed } : { ...m, task: undefined };
+      }),
+  });
+}
+
+/**
+ * Returns the `meta` payload from `/office-members` (Lane A: humanHasPosted).
+ * Reuses the same query key as `useOfficeMembers` so both hooks share a single
+ * cached request — there is no extra network round-trip.
+ */
+export function useOfficeMembersMeta() {
+  return useQuery({
+    queryKey: ["office-members"],
+    queryFn: () => getOfficeMembers(),
+    refetchInterval: 5000,
+    select: (data): OfficeMembersMeta | undefined => data.meta,
   });
 }
 

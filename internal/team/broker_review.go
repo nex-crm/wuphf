@@ -217,9 +217,8 @@ func (b *Broker) handleNotebookPromote(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	rl := b.ReviewLog()
+	rl := b.requireReviewLog(w)
 	if rl == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "review backend is not active"})
 		return
 	}
 	var body struct {
@@ -302,9 +301,8 @@ func (b *Broker) handleReviewList(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	rl := b.ReviewLog()
+	rl := b.requireReviewLog(w)
 	if rl == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "review backend is not active"})
 		return
 	}
 	scope := strings.TrimSpace(r.URL.Query().Get("scope"))
@@ -419,9 +417,8 @@ func markdownExcerpt(body, fallback string) string {
 // Keeping one handler avoids adding six mux entries when the verbs are
 // fully enumerable and share a lot of boilerplate.
 func (b *Broker) handleReviewSubpath(w http.ResponseWriter, r *http.Request) {
-	rl := b.ReviewLog()
+	rl := b.requireReviewLog(w)
 	if rl == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "review backend is not active"})
 		return
 	}
 	// Trim the leading /review/ and split the remainder.

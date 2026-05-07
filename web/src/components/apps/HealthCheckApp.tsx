@@ -7,6 +7,8 @@ import {
   getHumanSessions,
   getShareStatus,
   type HealthResponse,
+  HUMAN_ME_QUERY_KEY,
+  HUMAN_ME_REFETCH_MS,
   type HumanMe,
   type HumanSession,
   revokeHumanSession,
@@ -590,9 +592,9 @@ export function HealthCheckApp() {
     refetchInterval: 10_000,
   });
   const { data: me } = useQuery({
-    queryKey: ["humans", "me"],
+    queryKey: HUMAN_ME_QUERY_KEY,
     queryFn: () => getHumanMe(),
-    refetchInterval: 30_000,
+    refetchInterval: HUMAN_ME_REFETCH_MS,
   });
   const human = me?.human;
   const isHost = human?.role === "host";

@@ -3,6 +3,7 @@ import { Settings as SettingsIcon, SidebarCollapse } from "iconoir-react";
 import { router } from "../../lib/router";
 import { useCurrentApp } from "../../routes/useCurrentRoute";
 import { useAppStore } from "../../stores/app";
+import { TeamMemberBadge } from "../join/TeamMemberBadge";
 import { AgentList } from "../sidebar/AgentList";
 import { AppList } from "../sidebar/AppList";
 import { ChannelList } from "../sidebar/ChannelList";
@@ -76,6 +77,7 @@ export function Sidebar() {
         <>
           <div className="sidebar-header">
             <span className="sidebar-logo">WUPHF</span>
+            <TeamMemberBadge />
             <div className="sidebar-header-actions">
               <button
                 type="button"

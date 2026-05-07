@@ -11,6 +11,29 @@ import (
 
 const selfHealingTaskTitlePrefix = "Self-heal "
 
+// maxActiveSelfHealsPerAgent caps how many non-terminal self-heal tasks can
+// exist for a single agent. Once an agent is at the cap, additional
+// self-heal requests merge their incident detail into the most recently
+// updated active self-heal instead of opening a new task. This prevents the
+// (agent, taskID) dedupe key from leaking N self-heal entries when an agent
+// fails on N distinct original task IDs.
+//
+// Override with WUPHF_SELF_HEAL_MAX_ACTIVE_PER_AGENT (>0) for installs with
+// taller per-agent repair lanes.
+const defaultMaxActiveSelfHealsPerAgent = 3
+
+var maxActiveSelfHealsPerAgent = clampSelfHealCap(envIntDefault("WUPHF_SELF_HEAL_MAX_ACTIVE_PER_AGENT", defaultMaxActiveSelfHealsPerAgent))
+
+// clampSelfHealCap rejects non-positive overrides. A cap of 0 or less would
+// silently disable the per-agent cap and reintroduce the explosion this fix
+// is meant to prevent.
+func clampSelfHealCap(n int) int {
+	if n <= 0 {
+		return defaultMaxActiveSelfHealsPerAgent
+	}
+	return n
+}
+
 func (l *Launcher) requestSelfHealing(agentSlug, taskID string, reason agent.EscalationReason, detail string) (teamTask, bool, error) {
 	if l == nil || l.broker == nil {
 		return teamTask{}, false, nil
@@ -49,15 +72,28 @@ func (b *Broker) requestSelfHealingLocked(agentSlug, taskID string, reason agent
 		return teamTask{}, false, fmt.Errorf("channel access denied")
 	}
 
-	if existing := b.findReusableTaskLocked(taskReuseMatch{
+	existing := b.findReusableTaskLocked(taskReuseMatch{
 		Channel:    channel,
 		Title:      title,
 		Owner:      owner,
 		PipelineID: "incident",
-	}); existing != nil {
+	})
+	mergeOverflow := false
+	if existing == nil {
+		if overflow := b.findOverflowSelfHealForAgentLocked(agentSlug); overflow != nil {
+			existing = overflow
+			mergeOverflow = true
+		}
+	}
+	if existing != nil {
+		beforeStatus := existing.Status
+		incidentBody := selfHealingIncidentUpdate(reason, detail)
+		if mergeOverflow {
+			incidentBody = selfHealingOverflowIncidentUpdate(taskID, reason, detail)
+		}
 		if existing.Details == "" {
 			existing.Details = details
-		} else if err := appendTaskDetailLocked(existing, selfHealingIncidentUpdate(reason, detail)); err != nil {
+		} else if err := appendTaskDetailLocked(existing, incidentBody); err != nil {
 			return teamTask{}, true, err
 		}
 		if existing.Owner == "" && owner != "" {
@@ -87,6 +123,7 @@ func (b *Broker) requestSelfHealingLocked(agentSlug, taskID string, reason agent
 		if err := b.saveLocked(); err != nil {
 			return teamTask{}, true, err
 		}
+		b.emitTaskTransitionAutoNotebook(existing, beforeStatus, createdBy)
 		return *existing, true, nil
 	}
 
@@ -123,6 +160,7 @@ func (b *Broker) requestSelfHealingLocked(agentSlug, taskID string, reason agent
 	if err := b.saveLocked(); err != nil {
 		return teamTask{}, false, err
 	}
+	b.emitTaskTransitionAutoNotebook(&task, "", createdBy)
 	return task, false, nil
 }
 
@@ -266,6 +304,76 @@ func selfHealingTaskDetails(agentSlug, taskID string, reason agent.EscalationRea
 		"5. Repair the missing capability first, then resume or requeue the original workflow with a concrete verification step. A self-heal that only reports the blocker is incomplete.",
 		"6. Treat learning as a post-repair review: propose a skill or update a wiki/playbook only when the workaround is durable and reusable. Include the trigger, failure signature, recovery step, verification signal, and any tool/provider/channel constraints. If nothing reusable was learned, leave skills unchanged.",
 		"7. Do not mark this self-healing task complete until the original task is unblocked, resumed/requeued with a clearer owner/cut line, or explicitly blocked behind a human decision.",
+	}, "\n")
+}
+
+// findOverflowSelfHealForAgentLocked returns the most recently updated
+// active self-heal task for agentSlug when the agent's active count is at
+// or above maxActiveSelfHealsPerAgent. Returns nil when the cap is
+// disabled (<=0) or the agent is below the cap.
+func (b *Broker) findOverflowSelfHealForAgentLocked(agentSlug string) *teamTask {
+	if b == nil {
+		return nil
+	}
+	limit := maxActiveSelfHealsPerAgent
+	if limit <= 0 {
+		return nil
+	}
+	agentSlug = strings.TrimSpace(agentSlug)
+	if agentSlug == "" {
+		return nil
+	}
+	// selfHealingTaskTitle always emits a space after the agent slug
+	// ("Self-heal @<agent> on <id>" or "Self-heal @<agent> runtime failure"),
+	// so anchoring on "@<slug> " prevents prefix-overlap collisions
+	// (e.g. agent "eng" matching a "@engineering" title).
+	titleNeedle := "@" + agentSlug + " "
+	var most *teamTask
+	count := 0
+	for i := range b.tasks {
+		task := &b.tasks[i]
+		if !isSelfHealingTaskTitle(task.Title) {
+			continue
+		}
+		if isTerminalTeamTaskStatus(task.Status) {
+			continue
+		}
+		if !strings.Contains(task.Title, titleNeedle) {
+			continue
+		}
+		count++
+		if most == nil || task.UpdatedAt > most.UpdatedAt {
+			most = task
+		}
+	}
+	if count < limit {
+		return nil
+	}
+	return most
+}
+
+// selfHealingOverflowIncidentUpdate is selfHealingIncidentUpdate with an
+// extra "Original task" line so a merged overflow incident keeps a pointer
+// back to the failing taskID it came from. Without this we lose the link
+// between the merged incident and the task that triggered it.
+func selfHealingOverflowIncidentUpdate(originalTaskID string, reason agent.EscalationReason, detail string) string {
+	trigger := strings.TrimSpace(string(reason))
+	if trigger == "" {
+		trigger = "unknown"
+	}
+	detail = strings.TrimSpace(detail)
+	if detail == "" {
+		detail = "no detail provided"
+	}
+	originalTaskID = strings.TrimSpace(originalTaskID)
+	if originalTaskID == "" {
+		originalTaskID = "unknown"
+	}
+	return strings.Join([]string{
+		"Latest incident (merged from per-agent self-heal overflow):",
+		fmt.Sprintf("- Original task: %s", originalTaskID),
+		fmt.Sprintf("- Trigger: %s", trigger),
+		fmt.Sprintf("- Detail: %s", detail),
 	}, "\n")
 }
 

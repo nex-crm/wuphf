@@ -256,6 +256,14 @@ type agentActivitySnapshot struct {
 	FirstEventMs int64  `json:"firstEventMs,omitempty"`
 	FirstTextMs  int64  `json:"firstTextMs,omitempty"`
 	FirstToolMs  int64  `json:"firstToolMs,omitempty"`
+	// Kind tags the activity event for the frontend bubble UI:
+	//   "routine"   — ordinary in-flight progress
+	//   "milestone" — user-visible progress worth highlighting (build/test, error, deploy)
+	//   "stuck"     — emitted by the watchdog or stale-while-active reaper
+	// The classifier in headless_activity_classifier.go assigns "routine"|"milestone".
+	// "stuck" is set only by the broker's reaper / watchdog hooks. Empty means the
+	// caller did not classify (treated as "routine" by the frontend).
+	Kind string `json:"kind,omitempty"`
 }
 
 type officeSignalRecord struct {

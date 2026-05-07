@@ -12,8 +12,8 @@ interface StreamLineViewProps {
 /**
  * Renders one SSE line from the agent stream. Understands the broker's
  * OpenAI-Responses-style events — agent messages render as dim thinking
- * lines, tool calls render as collapsible cards, token totals render as
- * a single line. Everything else falls back to pretty-printed JSON.
+ * lines, tool calls render as collapsible cards. Everything else falls
+ * back to pretty-printed JSON.
  */
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
 export function StreamLineView({ line, compact = false }: StreamLineViewProps) {
@@ -28,6 +28,14 @@ export function StreamLineView({ line, compact = false }: StreamLineViewProps) {
     return <div className="stream-line stream-line-raw">{text}</div>;
   }
 
+  // HeadlessEvent envelope: provider-agnostic, runner-emitted typed
+  // event. Wire shape mirrors internal/team/headless_event.go's struct.
+  // Branch first so the discriminator wins over provider-native `type`
+  // routes below (e.g. `assistant`, `mcp_tool_event`).
+  if (parsed.kind === "headless_event") {
+    return <HeadlessEventView parsed={parsed} />;
+  }
+
   const evtType = typeof parsed.type === "string" ? parsed.type : "";
 
   // Skip noise events entirely
@@ -39,10 +47,8 @@ export function StreamLineView({ line, compact = false }: StreamLineViewProps) {
     return null;
   }
 
-  // Token total line for turn/response completed
+  // Suppress per-turn completion frames — they used to render a token total.
   if (evtType === "turn.completed" || evtType === "response.completed") {
-    const tokens = renderTokens(parsed);
-    if (tokens) return <div className="cc-token-line">{tokens}</div>;
     return null;
   }
 
@@ -116,6 +122,58 @@ export function StreamLineView({ line, compact = false }: StreamLineViewProps) {
 
   // Fallback: structured event with type/phase/agent + detail + extras
   return <GenericEventCard parsed={parsed} compact={compact} />;
+}
+
+// HeadlessEventView renders the typed HeadlessEvent envelope emitted by
+// each runner at terminal phases (idle / error). The wire shape comes
+// from internal/team/headless_event.go (HeadlessEvent struct). A2-MVP
+// only emits idle and error; the rendering branches keep the layout
+// minimal because future slices (text / tool_use / tool_result) will
+// reuse this component, and a maximalist v1 design would lock those
+// future variants into chrome that won't fit.
+function HeadlessEventView({ parsed }: { parsed: Record<string, unknown> }) {
+  const eventType = stringish(parsed.type);
+  const provider = stringish(parsed.provider);
+  const text = stringish(parsed.text);
+  const detail = stringish(parsed.detail);
+  const summary = (text || detail).trim();
+  const metrics =
+    parsed.metrics && typeof parsed.metrics === "object"
+      ? (parsed.metrics as Record<string, unknown>)
+      : null;
+
+  if (eventType === "idle") {
+    return (
+      <div className="stream-card stream-card-idle">
+        <div className="stream-card-header">
+          <span className="stream-card-phase stream-phase-idle">idle</span>
+          {provider && <span className="stream-card-agent">{provider}</span>}
+        </div>
+        {summary && <div className="stream-card-detail">{summary}</div>}
+        {metrics && (
+          <div className="stream-line-json">
+            <Value value={metrics} depth={0} compact={true} />
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (eventType === "error") {
+    return (
+      <div className="stream-card stream-card-error">
+        <div className="stream-card-header">
+          <span className="stream-card-phase stream-phase-error">error</span>
+          {provider && <span className="stream-card-agent">{provider}</span>}
+        </div>
+        {summary && <div className="cc-tool-error-text">{summary}</div>}
+      </div>
+    );
+  }
+
+  // Unknown HeadlessEvent type — fall back to the generic card so future
+  // variants render something useful before they earn a dedicated branch.
+  return <GenericEventCard parsed={parsed} compact={false} />;
 }
 
 function ClaudeAssistantEvent({
@@ -261,49 +319,6 @@ function stringFromToolContent(content: unknown): string {
     return JSON.stringify(content);
   }
   return "";
-}
-
-function renderTokens(parsed: Record<string, unknown>): string | null {
-  const u = extractUsage(parsed);
-  if (!u) return null;
-  const inTok = toNum(u.input_tokens);
-  const outTok = toNum(u.output_tokens);
-  const cacheRead = toNum(
-    u.cached_input_tokens ?? u.cache_read_input_tokens ?? u.cache_read_tokens,
-  );
-  const cacheCreate = toNum(
-    u.cache_creation_input_tokens ?? u.cache_creation_tokens,
-  );
-  const total = inTok + outTok + cacheRead + cacheCreate;
-  if (total === 0) return null;
-  const parts = [`${formatTokens(inTok)} in`, `${formatTokens(outTok)} out`];
-  if (cacheRead > 0) parts.push(`${formatTokens(cacheRead)} cache read`);
-  if (cacheCreate > 0) parts.push(`${formatTokens(cacheCreate)} cache write`);
-  return `\u2500\u2500 ${formatTokens(total)} tokens (${parts.join(", ")})`;
-}
-
-function extractUsage(
-  parsed: Record<string, unknown>,
-): Record<string, unknown> | null {
-  const candidates: unknown[] = [
-    parsed.usage,
-    (parsed.response as Record<string, unknown> | undefined)?.usage,
-    (parsed.turn as Record<string, unknown> | undefined)?.usage,
-  ];
-  for (const c of candidates) {
-    if (c && typeof c === "object") return c as Record<string, unknown>;
-  }
-  return null;
-}
-
-function toNum(v: unknown): number {
-  return typeof v === "number" && Number.isFinite(v) ? v : 0;
-}
-
-function formatTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
-  return String(n);
 }
 
 const ARG_SKIP = new Set(["my_slug", "new_topic", "viewer_slug", "tagged"]);

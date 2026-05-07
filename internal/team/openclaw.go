@@ -201,6 +201,8 @@ func (b *OpenclawBridge) DetachSlug(slug string) {
 	bridgeCtx := b.ctx
 	b.mu.Unlock()
 
+	b.notifyHostDetached(bridgeCtx, slug, sessionKey)
+
 	client := b.getClient()
 	if client == nil || bridgeCtx == nil {
 		return
@@ -210,6 +212,29 @@ func (b *OpenclawBridge) DetachSlug(slug string) {
 			b.postSystemMessage(fmt.Sprintf("unsubscribe @%s failed: %v", slug, err))
 		}
 	}()
+}
+
+// notifyHostDetached fires Host.DetachParticipant for sessionKey when the
+// bridge is host-driven. Best-effort: a host error is logged via system
+// message but does not stall further teardown. Skipped silently when no host
+// is attached (legacy Start mode for probes / integration tests). Centralised
+// so all three Detach* paths funnel through the same call site — adding a
+// fourth detach path means adding one notifyHostDetached call, not three.
+func (b *OpenclawBridge) notifyHostDetached(ctx context.Context, slug, sessionKey string) {
+	if b == nil || sessionKey == "" {
+		return
+	}
+	hp := b.host.Load()
+	if hp == nil {
+		return
+	}
+	host := *hp
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := host.DetachParticipant(ctx, openclawAdapterName, sessionKey); err != nil && ctx.Err() == nil {
+		b.postSystemMessage(fmt.Sprintf("detach @%s: %v", slug, err))
+	}
 }
 
 // DetachSlugAndUnsubscribe is the synchronous, error-returning variant used by
@@ -233,6 +258,8 @@ func (b *OpenclawBridge) DetachSlugAndUnsubscribe(ctx context.Context, slug stri
 	delete(b.slugByKey, sessionKey)
 	delete(b.lastChannelByKey, sessionKey)
 	b.mu.Unlock()
+
+	b.notifyHostDetached(ctx, slug, sessionKey)
 
 	client := b.getClient()
 	if client == nil {
@@ -266,6 +293,8 @@ func (b *OpenclawBridge) DetachSession(ctx context.Context, slug, sessionKey str
 	delete(b.slugByKey, sessionKey)
 	delete(b.lastChannelByKey, sessionKey)
 	b.mu.Unlock()
+
+	b.notifyHostDetached(ctx, slug, sessionKey)
 
 	client := b.getClient()
 	if client == nil {

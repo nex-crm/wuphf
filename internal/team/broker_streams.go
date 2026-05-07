@@ -374,6 +374,15 @@ func (b *Broker) UpdateAgentActivity(update agentActivitySnapshot) {
 	if update.FirstToolMs > 0 {
 		current.FirstToolMs = update.FirstToolMs
 	}
+	// Kind is set per-event by the classifier in headless_progress.go, or
+	// explicitly by the reaper / watchdog hooks for "stuck". An empty Kind
+	// here means the caller did not classify (e.g. legacy code paths) — we
+	// leave the previous Kind in place rather than wiping it, so a stuck
+	// agent does not silently flip back to routine on a status-only update
+	// that omits Kind.
+	if update.Kind != "" {
+		current.Kind = update.Kind
+	}
 	b.activity[slug] = current
 	b.publishActivityLocked(current)
 	b.mu.Unlock()
@@ -493,14 +502,38 @@ var activityWatchdogEnabled = true
 // prevents the specialist from being dispatched again.
 const staleActivityThreshold = 5 * time.Minute
 
-// reapStaleActivityLocked transitions any agent whose LastTime is older than
-// staleActivityThreshold from "active"/"thinking"/"tool_use" back to "idle".
-// Must be called with b.mu held. Returns the slugs that were reset so the
-// caller can emit activity-change events after releasing the lock.
+// stuckThresholdSeconds is how long an active agent can go without any new
+// activity event before the reaper marks it Kind="stuck" (without changing
+// Status — the next real event clears the stuck flag). Far below
+// staleActivityThreshold so the human gets a stuck signal in the office well
+// before the safety reset to idle fires. See ICP tutorial 2 (Marcus): 90s is
+// calibrated for "long terraform plan stalled on remote-state lock" rhythm.
+//
+// TODO: tune from dogfood — start at 90s, measure false-positive rate.
+const stuckThresholdSeconds = 90
+
+// reapStaleActivityLocked walks the activity map and emits two kinds of
+// follow-up snapshots when an agent's LastTime has aged past a threshold:
+//
+//  1. Stuck-while-active (>= stuckThresholdSeconds, < staleActivityThreshold):
+//     the agent is still nominally "active"/"thinking"/"tool_use" but has gone
+//     quiet long enough that the human in the office should be alerted. We
+//     stamp Kind="stuck" without changing Status — the next real event from
+//     the agent flips Kind back to whatever the classifier returns. Emitted
+//     once per stuck transition (re-emitting every reaper tick would spam the
+//     SSE stream and re-trigger frontend assertive announcements).
+//
+//  2. Stale-active reset (>= staleActivityThreshold): the long-standing
+//     safety net. Treat the agent as crashed and force it back to idle so
+//     the CEO's "Already active in this thread" re-route guard releases.
+//
+// Must be called with b.mu held. Returns the snapshots that need to be
+// published to subscribers after the caller releases the lock.
 func (b *Broker) reapStaleActivityLocked(now time.Time) []agentActivitySnapshot {
 	if len(b.activity) == 0 {
 		return nil
 	}
+	stuckThreshold := time.Duration(stuckThresholdSeconds) * time.Second
 	var reset []agentActivitySnapshot
 	for slug, snap := range b.activity {
 		status := strings.ToLower(strings.TrimSpace(snap.Status))
@@ -512,15 +545,27 @@ func (b *Broker) reapStaleActivityLocked(now time.Time) []agentActivitySnapshot 
 			// Unparseable LastTime means we cannot age the entry safely; leave it.
 			continue
 		}
-		if now.Sub(lastTime) < staleActivityThreshold {
-			continue
+		age := now.Sub(lastTime)
+		switch {
+		case age >= staleActivityThreshold:
+			snap.Status = "idle"
+			snap.Activity = "idle"
+			snap.Detail = "stale activity reaped (no progress for " + staleActivityThreshold.String() + ")"
+			snap.LastTime = now.UTC().Format(time.RFC3339)
+			// Reaping back to idle clears any prior stuck flag — the
+			// agent is no longer claiming to be working.
+			snap.Kind = "routine"
+			b.activity[slug] = snap
+			reset = append(reset, snap)
+		case age >= stuckThreshold && snap.Kind != "stuck":
+			// First time crossing the stuck line: emit a stuck snapshot
+			// without otherwise mutating Status/Activity/Detail. The
+			// frontend uses Kind=="stuck" to escalate the pill chrome
+			// and fire the assertive aria-live announcement.
+			snap.Kind = "stuck"
+			b.activity[slug] = snap
+			reset = append(reset, snap)
 		}
-		snap.Status = "idle"
-		snap.Activity = "idle"
-		snap.Detail = "stale activity reaped (no progress for " + staleActivityThreshold.String() + ")"
-		snap.LastTime = now.UTC().Format(time.RFC3339)
-		b.activity[slug] = snap
-		reset = append(reset, snap)
 	}
 	return reset
 }

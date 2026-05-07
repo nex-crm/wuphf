@@ -57,7 +57,11 @@ func RenderWeekGrid(store *CalendarStore, weekStart time.Time) string {
 	}
 	daySlots := make([][]daySlot, 7)
 	for _, ev := range events {
-		dayIdx := int(ev.ScheduledAt.Sub(weekStart).Hours() / 24)
+		evLocal := ev.ScheduledAt.In(weekStart.Location())
+		evMidnight := time.Date(evLocal.Year(), evLocal.Month(), evLocal.Day(), 0, 0, 0, 0, weekStart.Location())
+		startMidnight := time.Date(weekStart.Year(), weekStart.Month(), weekStart.Day(), 0, 0, 0, 0, weekStart.Location())
+		// Round to nearest day to absorb DST-induced 23/25-hour days.
+		dayIdx := int((evMidnight.Sub(startMidnight) + 12*time.Hour) / (24 * time.Hour))
 		if dayIdx < 0 || dayIdx >= 7 {
 			continue
 		}

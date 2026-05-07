@@ -303,6 +303,81 @@ func TestReapStaleActivityLocked(t *testing.T) {
 	}
 }
 
+// TestReapStaleActivityLocked_StuckEmissionForActiveAgent locks the new
+// stuck-while-active path: an active agent that has gone quiet for >=
+// stuckThresholdSeconds (90s) but less than the safety reset (5m) gets a
+// Kind="stuck" snapshot without losing its current Status/Activity/Detail.
+// CRITICAL REGRESSION coverage: the existing "stale -> idle" path must still
+// fire for agents past staleActivityThreshold even after the stuck branch
+// landed.
+func TestReapStaleActivityLocked_StuckEmissionForActiveAgent(t *testing.T) {
+	b := newTestBroker(t)
+	now := time.Now().UTC()
+	stuckCandidate := now.Add(-time.Duration(stuckThresholdSeconds+5) * time.Second).Format(time.RFC3339)
+	stale := now.Add(-10 * time.Minute).Format(time.RFC3339)
+	fresh := now.Add(-1 * time.Second).Format(time.RFC3339)
+
+	b.activity = map[string]agentActivitySnapshot{
+		"stuck-rita": {
+			Slug: "stuck-rita", Status: "active", Activity: "tool_use",
+			Detail: "planning compute module", LastTime: stuckCandidate,
+		},
+		"reset-target": {
+			Slug: "reset-target", Status: "thinking", Activity: "thinking",
+			LastTime: stale,
+		},
+		"fresh-tess": {
+			Slug: "fresh-tess", Status: "active", Activity: "tool_use",
+			Detail: "running gh pr view", LastTime: fresh,
+		},
+	}
+
+	b.mu.Lock()
+	reset := b.reapStaleActivityLocked(now)
+	b.mu.Unlock()
+
+	// Expect exactly two emissions: stuck-rita (newly stuck) + reset-target
+	// (stale-reset to idle). fresh-tess is well below both thresholds.
+	if len(reset) != 2 {
+		t.Fatalf("expected 2 emissions (1 stuck + 1 idle reset), got %d: %+v", len(reset), reset)
+	}
+
+	stuckSnap := b.activity["stuck-rita"]
+	if stuckSnap.Kind != "stuck" {
+		t.Errorf("stuck-rita Kind = %q, want stuck", stuckSnap.Kind)
+	}
+	if stuckSnap.Status != "active" {
+		t.Errorf("stuck-rita Status = %q, want active (reaper must not change Status during stuck transition)", stuckSnap.Status)
+	}
+	if stuckSnap.Detail != "planning compute module" {
+		t.Errorf("stuck-rita Detail = %q, want preserved original detail", stuckSnap.Detail)
+	}
+
+	resetSnap := b.activity["reset-target"]
+	if resetSnap.Status != "idle" {
+		t.Errorf("reset-target Status = %q, want idle (REGRESSION: existing reaper must still fire)", resetSnap.Status)
+	}
+	if resetSnap.Kind != "routine" {
+		t.Errorf("reset-target Kind = %q, want routine (idle reset clears any prior stuck flag)", resetSnap.Kind)
+	}
+
+	freshSnap := b.activity["fresh-tess"]
+	if freshSnap.Kind == "stuck" {
+		t.Errorf("fresh-tess should not be stuck (well under threshold); got Kind=%q", freshSnap.Kind)
+	}
+
+	// Second tick must not re-emit stuck-rita (would spam SSE + repeatedly
+	// trigger frontend assertive announcements). It should also not emit
+	// fresh-tess (still fresh). reset-target is now Status=idle so it's
+	// excluded from the active-set entirely.
+	b.mu.Lock()
+	resetAgain := b.reapStaleActivityLocked(now)
+	b.mu.Unlock()
+	if len(resetAgain) != 0 {
+		t.Errorf("second reaper tick should be quiet for already-stuck agent, got %d emissions", len(resetAgain))
+	}
+}
+
 func TestBrokerActivitySubscribersReceiveUpdates(t *testing.T) {
 	b := newTestBroker(t)
 	updates, unsubscribe := b.SubscribeActivity(4)

@@ -32,6 +32,11 @@ const (
 	defaultMaxErrorRetries = 3
 )
 
+// humanInterruptDirective is injected as a system entry when a human message
+// preempts the agent's prior task. It tells the model to absorb the human
+// message before doing anything else.
+const humanInterruptDirective = "A human just sent you a message. Stop and absorb it before continuing any prior task. Decide which is appropriate: (a) abandon the prior task and address the human directly, (b) give a brief status update if they are asking what you're doing, or (c) acknowledge and queue their request for after the current task. Human messages take priority over agent-to-agent follow-ups."
+
 // EventHandler is a callback for agent loop events.
 type EventHandler func(args ...any)
 
@@ -410,8 +415,23 @@ func (l *AgentLoop) buildContext() error {
 		})
 	}
 
-	// Drain follow-up message and append as user entry.
-	if msg, ok := l.queues.DrainFollowUp(slug); ok {
+	// Human messages take priority over agent-originated follow-ups: a person
+	// who interjects while the agent is mid-task should be absorbed first, and
+	// the agent decides whether to stop, give a status update, or queue the
+	// prior task for later.
+	if msg, ok := l.queues.DrainHuman(slug); ok {
+		l.state.CurrentTask = msg
+		l.state.TaskID = nextTaskID(slug)
+		l.lastCompactionAt = 0
+		l.appendSession(SessionEntry{
+			Type:    "system",
+			Content: humanInterruptDirective,
+		})
+		l.appendSession(SessionEntry{
+			Type:    "user",
+			Content: "[HUMAN] " + msg,
+		})
+	} else if msg, ok := l.queues.DrainFollowUp(slug); ok {
 		l.state.CurrentTask = msg
 		l.state.TaskID = nextTaskID(slug)
 		l.lastCompactionAt = 0

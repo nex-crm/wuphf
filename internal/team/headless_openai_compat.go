@@ -182,6 +182,7 @@ func (l *Launcher) runHeadlessOpenAICompatTurn(ctx context.Context, slug string,
 	if err != nil {
 		metrics.TotalMs = time.Since(startedAt).Milliseconds()
 		l.updateHeadlessProgress(slug, "error", "error", truncate(err.Error(), 180), metrics)
+		emitHeadlessTerminal(agentStream, HeadlessProviderOpenAICompat, slug, activeTaskID, "", err.Error(), metrics, claudeUsageToTokenUsage(turnUsage))
 		return err
 	}
 	if streamErr != "" {
@@ -192,6 +193,7 @@ func (l *Launcher) runHeadlessOpenAICompatTurn(ctx context.Context, slug string,
 			iterationsUsed, streamErr,
 		))
 		l.updateHeadlessProgress(slug, "error", "error", truncate(streamErr, 180), metrics)
+		emitHeadlessTerminal(agentStream, HeadlessProviderOpenAICompat, slug, activeTaskID, "", streamErr, metrics, claudeUsageToTokenUsage(turnUsage))
 		// Post any partial output (e.g. the cap-hit marker the loop
 		// produced when maxIters tripped) before propagating the error,
 		// so the user sees something on-channel rather than a silent
@@ -231,6 +233,7 @@ func (l *Launcher) runHeadlessOpenAICompatTurn(ctx context.Context, slug string,
 		summary = "reply ready · " + summary
 	}
 	l.updateHeadlessProgress(slug, "idle", "idle", summary, metrics)
+	emitHeadlessTerminal(agentStream, HeadlessProviderOpenAICompat, slug, activeTaskID, summary, "", metrics, claudeUsageToTokenUsage(turnUsage))
 
 	state.flushLiveChat()
 	if text != "" && state.shouldPostFinalText() {

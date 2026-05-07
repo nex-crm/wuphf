@@ -73,7 +73,17 @@ export interface HumanMe {
     revoked_at?: string;
     last_seen_at?: string;
   };
+  // host_display_name is the host's local git-config name. The broker only
+  // emits it for member sessions when a real identity is registered, so the
+  // welcome card can swap "this office" for "Sam's office" without leaking
+  // the literal "wuphf" fallback when no identity is set.
+  host_display_name?: string;
 }
+
+// Shared TanStack Query identity for /humans/me. Both useSessionRole and
+// HealthCheckApp must import these so the cache dedupes a single poll cycle.
+export const HUMAN_ME_QUERY_KEY = ["humans", "me"] as const;
+export const HUMAN_ME_REFETCH_MS = 30_000;
 
 export function getHumanMe() {
   return get<HumanMe>("/humans/me");
