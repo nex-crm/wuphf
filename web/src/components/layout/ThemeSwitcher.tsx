@@ -1,35 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
-import type { Theme } from "../../stores/app";
+import { type Theme, THEMES } from "../../lib/themes";
 import { useAppStore } from "../../stores/app";
-
-interface ThemeOption {
-  id: Theme;
-  name: string;
-  desc: string;
-  swatch: { primary: string; accent: string; surface: string };
-}
-
-const THEME_OPTIONS: ThemeOption[] = [
-  {
-    id: "nex",
-    name: "Nex Light",
-    desc: "Clean light. Cyan accents.",
-    swatch: { primary: "#612a92", accent: "#9f4dbf", surface: "#ffffff" },
-  },
-  {
-    id: "nex-dark",
-    name: "Nex Dark",
-    desc: "Low-glare dark.",
-    swatch: { primary: "#0f0f12", accent: "#9f4dbf", surface: "#1a1a1f" },
-  },
-  {
-    id: "noir-gold",
-    name: "Noir Gold",
-    desc: "Black, gold leaf.",
-    swatch: { primary: "#0a0a0a", accent: "#d4af37", surface: "#161616" },
-  },
-];
 
 interface ThemeSwitcherProps {
   className?: string;
@@ -66,7 +38,7 @@ export function ThemeSwitcher({ className }: ThemeSwitcherProps) {
     setOpen(false);
   }
 
-  const current = THEME_OPTIONS.find((o) => o.id === theme) ?? THEME_OPTIONS[0];
+  const current = THEMES.find((o) => o.id === theme) ?? THEMES[0];
 
   return (
     <div
@@ -113,7 +85,7 @@ export function ThemeSwitcher({ className }: ThemeSwitcherProps) {
         >
           <div className="theme-switcher-title">Theme</div>
           <div className="theme-switcher-options">
-            {THEME_OPTIONS.map((opt) => {
+            {THEMES.map((opt) => {
               const isActive = opt.id === theme;
               return (
                 <button

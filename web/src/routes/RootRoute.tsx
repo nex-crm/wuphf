@@ -33,6 +33,7 @@ import WikiTabs from "../components/wiki/WikiTabs";
 import { useBrokerEvents } from "../hooks/useBrokerEvents";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import { rootRoute, router } from "../lib/router";
+import { getTheme } from "../lib/themes";
 import { useAppStore } from "../stores/app";
 import { type AppPanelId, isAppPanelId } from "./routeRegistry";
 import { type CurrentRoute, useCurrentRoute } from "./useCurrentRoute";
@@ -556,16 +557,17 @@ export default function RootRoute() {
   useBrokerEvents(apiReady);
 
   useEffect(() => {
+    const href = getTheme(theme).cssPath;
     const existing = document.getElementById(
       "theme-css",
     ) as HTMLLinkElement | null;
     if (existing) {
-      existing.href = `/themes/${theme}.css`;
+      existing.href = href;
     } else {
       const el = document.createElement("link");
       el.id = "theme-css";
       el.rel = "stylesheet";
-      el.href = `/themes/${theme}.css`;
+      el.href = href;
       document.head.appendChild(el);
     }
   }, [theme]);
