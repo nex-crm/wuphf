@@ -7,6 +7,7 @@ import {
   cancelRequest,
 } from "../../api/client";
 import { useRequests } from "../../hooks/useRequests";
+import { RedactedBadge } from "../ui/RedactedBadge";
 import { showNotice } from "../ui/Toast";
 
 /**
@@ -107,16 +108,7 @@ function BlockingInterview({
             <span className="interview-channel">in #{request.channel}</span>
           ) : null}
           {request.redacted ? (
-            <span
-              className="badge badge-neutral"
-              title={
-                request.redaction_reasons?.length
-                  ? `Redacted: ${request.redaction_reasons.join(", ")}`
-                  : "Sensitive information was redacted from this request"
-              }
-            >
-              redacted
-            </span>
+            <RedactedBadge reasons={request.redaction_reasons} />
           ) : null}
         </div>
         <h2 id="interview-title" className="interview-title">

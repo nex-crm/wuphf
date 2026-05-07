@@ -15,6 +15,7 @@ import {
 import { useChannelSlug } from "../../routes/useCurrentRoute";
 import { HarnessBadge } from "../ui/HarnessBadge";
 import { PixelAvatar } from "../ui/PixelAvatar";
+import { RedactedBadge } from "../ui/RedactedBadge";
 import { showNotice } from "../ui/Toast";
 
 interface MessageBubbleProps {
@@ -172,16 +173,7 @@ export function MessageBubble({
             </span>
           )}
           {Boolean(message.redacted) && (
-            <span
-              className="badge badge-neutral"
-              title={
-                message.redaction_reasons?.length
-                  ? `Redacted: ${message.redaction_reasons.join(", ")}`
-                  : "Redacted sensitive information"
-              }
-            >
-              redacted
-            </span>
+            <RedactedBadge reasons={message.redaction_reasons} />
           )}
         </div>
 

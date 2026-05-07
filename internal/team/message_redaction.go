@@ -101,7 +101,7 @@ func sanitizeTeamTask(task teamTask) teamTask {
 
 func sanitizeSchedulerJob(job schedulerJob) schedulerJob {
 	job.Label = redactSecretsInText(job.Label)
-	job.Payload = redactSecretsInText(job.Payload)
+	// Payload is JSON parsed at runtime; redacting it would corrupt the structure.
 	return job
 }
 
