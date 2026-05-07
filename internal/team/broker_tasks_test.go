@@ -923,16 +923,22 @@ func TestBrokerResumeTaskUnblocksAndSchedulesOwnerLane(t *testing.T) {
 // a stale "Retry after <ts>" line is left in task.Details after the first
 // resume. The fix: ResumeTask must call stripExternalRetryMarker so the
 // marker cannot be detected on the next scheduler tick.
+//
+// Also asserts pre-block context that does NOT contain a parseable
+// retry-after timestamp survives the resume — over-stripping would silently
+// destroy operator notes on every Blocked→false transition (manual unblocks,
+// dependency releases, capability self-healing, not just cooldown recovery).
 func TestBrokerResumeTaskStripsRateLimitMarker(t *testing.T) {
 	b := newTestBroker(t)
 	ensureTestMemberAccess(b, "client-loop", "operator", "Operator")
 	ensureTestMemberAccess(b, "client-loop", "builder", "Builder")
 
-	const rateLimitDetails = "429 RESOURCE_EXHAUSTED. Retry after 2026-04-15T22:00:29.610Z."
+	const preBlockContext = "Investigate ticket SUP-4290 about login failures"
+	const rateLimitLine = "429 RESOURCE_EXHAUSTED. Retry after 2026-04-15T22:00:29.610Z."
 	task, _, err := b.EnsurePlannedTask(plannedTaskInput{
 		Channel:       "client-loop",
 		Title:         "Retry kickoff send",
-		Details:       rateLimitDetails,
+		Details:       preBlockContext + "\n" + rateLimitLine,
 		Owner:         "builder",
 		CreatedBy:     "operator",
 		TaskType:      "follow_up",
@@ -957,6 +963,51 @@ func TestBrokerResumeTaskStripsRateLimitMarker(t *testing.T) {
 	// externalWorkflowRetryAfter check cannot re-trigger the resume loop.
 	if externalRetryAfterPattern.MatchString(resumed.Details) {
 		t.Fatalf("stale rate-limit marker still present in Details after resume: %q", resumed.Details)
+	}
+	// The pre-block operator context must survive — it has no parseable
+	// retry-after timestamp, so over-stripping would be a regression.
+	if !strings.Contains(resumed.Details, preBlockContext) {
+		t.Fatalf("expected resume to preserve pre-block context %q in Details, got %q", preBlockContext, resumed.Details)
+	}
+}
+
+// TestBrokerResumeTaskPreservesDetailsWithoutMarker asserts that a task
+// resume on a non-cooldown path (operator manual unblock, dependency-resolved
+// release, capability self-healing) does not touch Details when there is no
+// rate-limit marker present. Strip is scoped to the actual loop trigger.
+func TestBrokerResumeTaskPreservesDetailsWithoutMarker(t *testing.T) {
+	b := newTestBroker(t)
+	ensureTestMemberAccess(b, "client-loop", "operator", "Operator")
+	ensureTestMemberAccess(b, "client-loop", "builder", "Builder")
+
+	const detailsNoMarker = "queued behind active lane on task-4290; awaiting dependency resolution"
+	task, _, err := b.EnsurePlannedTask(plannedTaskInput{
+		Channel:   "client-loop",
+		Title:     "Dependent kickoff",
+		Details:   detailsNoMarker,
+		Owner:     "builder",
+		CreatedBy: "operator",
+		TaskType:  "follow_up",
+	})
+	if err != nil {
+		t.Fatalf("ensure planned task: %v", err)
+	}
+	if _, changed, err := b.BlockTask(task.ID, "operator", "Manual hold"); err != nil || !changed {
+		t.Fatalf("block task: %v changed=%v", err, changed)
+	}
+	resumed, _, err := b.ResumeTask(task.ID, "operator", "Manual unblock")
+	if err != nil {
+		t.Fatalf("resume task: %v", err)
+	}
+	// Block/Resume append their own reason text to Details (existing behavior);
+	// what matters here is that strip did not destroy the pre-block context
+	// and that the substring "task-4290" containing "429" survives the
+	// strip's predicate (which requires a parseable retry-after timestamp).
+	if !strings.Contains(resumed.Details, detailsNoMarker) {
+		t.Fatalf("resume dropped pre-block context: got %q", resumed.Details)
+	}
+	if externalRetryAfterPattern.MatchString(resumed.Details) {
+		t.Fatalf("resume should not introduce a retry-after marker: got %q", resumed.Details)
 	}
 }
 

@@ -677,12 +677,12 @@ func mustJSON(t *testing.T, value any) string {
 	return string(raw)
 }
 
-// TestStripExternalRetryMarkerScope guards the regex against two failure
-// modes: it must strip real rate-limit markers (the bug we were fixing) but
-// must NOT strip lines that merely contain "429" as a substring inside other
-// numbers/words. The 429 branch is anchored with \b on both sides; this test
-// fixes that contract so a future "make the regex looser" change has to
-// confront the tradeoff explicitly.
+// TestStripExternalRetryMarkerScope locks in the predicate-driven strip
+// behavior: a line is removed only when externalRetryAfterPattern matches it
+// (i.e. it contains a parseable RFC3339 retry-after timestamp — the same
+// condition the watchdog uses to re-resume). The cases here include both
+// happy-path strips and the false-positive substrings that motivated the
+// switch from a bare-`429` matcher to the predicate pattern.
 func TestStripExternalRetryMarkerScope(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -690,17 +690,32 @@ func TestStripExternalRetryMarkerScope(t *testing.T) {
 		want string
 	}{
 		{
-			name: "strips standalone 429 status line",
+			name: "strips 429 line with retry-after timestamp",
 			in:   "429 RESOURCE_EXHAUSTED. Retry after 2026-04-15T22:00:29.610Z.",
 			want: "",
 		},
 		{
-			name: "strips retry-after timestamp line",
+			name: "strips bare retry-after timestamp line",
 			in:   "Retry after 2026-04-15T22:00:29.610Z",
 			want: "",
 		},
 		{
-			name: "preserves 4290 substring",
+			name: "preserves bare 429 line without a timestamp (cannot re-trigger watchdog)",
+			in:   "429 RESOURCE_EXHAUSTED",
+			want: "429 RESOURCE_EXHAUSTED",
+		},
+		{
+			name: "preserves SUP-4290 ticket reference",
+			in:   "Investigate ticket SUP-4290 about login failures",
+			want: "Investigate ticket SUP-4290 about login failures",
+		},
+		{
+			name: "preserves task-4290 lane reference",
+			in:   "queued behind active lane on task-4290",
+			want: "queued behind active lane on task-4290",
+		},
+		{
+			name: "preserves 4290 line count",
 			in:   "completed 4290 items in batch",
 			want: "completed 4290 items in batch",
 		},
@@ -715,9 +730,24 @@ func TestStripExternalRetryMarkerScope(t *testing.T) {
 			want: "see issue 1429 for context",
 		},
 		{
-			name: "strips 429 line but keeps surrounding context",
+			name: "strips marker line but preserves surrounding context",
 			in:   "Original goal: ship the kickoff send.\n429 RESOURCE_EXHAUSTED. Retry after 2026-04-15T22:00:29.610Z.\nNotes follow.",
 			want: "Original goal: ship the kickoff send.\nNotes follow.",
+		},
+		{
+			name: "preserves separate 429 line when timestamp is on its own line",
+			in:   "429 RESOURCE_EXHAUSTED\nRetry after 2026-04-15T22:00:29.610Z",
+			want: "429 RESOURCE_EXHAUSTED",
+		},
+		{
+			name: "documented limitation: same-line operator context is dropped together with marker",
+			in:   "Cannot send: 429 RESOURCE_EXHAUSTED. Retry after 2026-04-15T22:00:29.610Z. Owner: refresh OAuth.",
+			want: "",
+		},
+		{
+			name: "empty in, empty out",
+			in:   "",
+			want: "",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
