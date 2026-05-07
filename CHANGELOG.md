@@ -27,6 +27,10 @@ All notable changes to WUPHF will be documented in this file.
 
 - **Closed a confused-deputy bypass in the human approval gate.** Agent-controlled fields (`Summary`, `ConnectionKey`, `ActionID`) now flow through `sanitizeContextValue` before they enter the approval card's context string. Without this, a prompt-injected agent could craft a `Summary` containing fake `What this will do:` / `Action:` / `Channel:` sections at line starts; the web parser's first-match-wins regexes would surface the FORGED structure to the human, hiding the real action. The sanitizer collapses every newline variant (LF, CRLF, U+2028, U+2029) to a space and replaces the bullet glyph U+2022 with the middle dot U+00B7, so forged section headers cannot land at a line start where the parser's `^Section:` regexes match. The forged tokens still appear as inline text inside the rendered Why — visible to the human as a long run-on sentence that looks suspicious by construction. Adversarial regression tests (`TestBuildActionApprovalSpecRejectsForgedSummary`, `TestBuildActionApprovalSpecRejectsForgedConnectionKey`) pin the defense.
 
+### Deprecated
+
+- **`wuphf --tui` is renamed to `wuphf --legacy-tui`.** The old flag remains as a warning-only alias for now; the legacy bubbletea TUI is slated for removal after the desktop replacement lands.
+
 ### Fixed
 
 - **Workspace endpoints are wired before the web broker starts serving.** Creating a workspace from the web UI no longer hits `503 {"error":"workspaces not configured"}` because `/workspaces/*` routes now receive the orchestrator during broker construction instead of after `LaunchWeb` blocks forever.
@@ -38,7 +42,7 @@ All notable changes to WUPHF will be documented in this file.
 
 ### Changed
 
-- **Headless `claude --print` is now the default dispatch path for both `wuphf` (web) and `wuphf --tui`.** Anthropic re-sanctioned headless CLI reuse in the 2026-04 OpenClaw policy note, and it runs on the user's normal subscription quota — no separate extra-usage charge. Every turn now dispatches as a fresh `claude --print` invocation, matching how the Codex runtime already worked and unifying dispatch across both modes. The previous per-agent long-lived interactive tmux pane path is preserved as an internal fallback primitive (reachable if dispatch ever needs to promote to panes at runtime) but is no longer invoked at startup. tmux is still required for `--tui` since the channel-view TUI runs in tmux; the web UI no longer needs it.
+- **Headless `claude --print` is now the default dispatch path for both `wuphf` (web) and `wuphf --legacy-tui`.** Anthropic re-sanctioned headless CLI reuse in the 2026-04 OpenClaw policy note, and it runs on the user's normal subscription quota — no separate extra-usage charge. Every turn now dispatches as a fresh `claude --print` invocation, matching how the Codex runtime already worked and unifying dispatch across both modes. The previous per-agent long-lived interactive tmux pane path is preserved as an internal fallback primitive (reachable if dispatch ever needs to promote to panes at runtime) but is no longer invoked at startup. tmux is still required for `--legacy-tui` since the channel-view TUI runs in tmux; the web UI no longer needs it.
 - **Pane-fallback messaging updated to reflect the new default.** The stderr banner and `#general` system post no longer frame headless as "extra-usage quota" — it isn't, anymore. Messaging now reads as: pane-backed fallback attempted but unavailable → continuing with the default headless path on your normal subscription.
 - **Inline Enter-key hint on wizard CTAs drops the redundant `Enter` word.** The hint rendered both a `↵` key pill and the word `Enter` next to it — same information twice. Now it's just the pill. On the task step (⌘+Enter), the modifier is rendered as its own pill so the cue stays two key pills instead of one pill plus a string.
 
