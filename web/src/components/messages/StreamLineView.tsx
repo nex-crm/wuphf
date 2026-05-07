@@ -33,7 +33,7 @@ export function StreamLineView({ line, compact = false }: StreamLineViewProps) {
   // Branch first so the discriminator wins over provider-native `type`
   // routes below (e.g. `assistant`, `mcp_tool_event`).
   if (parsed.kind === "headless_event") {
-    return <HeadlessEventView parsed={parsed} />;
+    return <HeadlessEventView parsed={parsed} compact={compact} />;
   }
 
   const evtType = typeof parsed.type === "string" ? parsed.type : "";
@@ -131,7 +131,13 @@ export function StreamLineView({ line, compact = false }: StreamLineViewProps) {
 // minimal because future slices (text / tool_use / tool_result) will
 // reuse this component, and a maximalist v1 design would lock those
 // future variants into chrome that won't fit.
-function HeadlessEventView({ parsed }: { parsed: Record<string, unknown> }) {
+function HeadlessEventView({
+  parsed,
+  compact,
+}: {
+  parsed: Record<string, unknown>;
+  compact: boolean;
+}) {
   const eventType = stringish(parsed.type);
   const provider = stringish(parsed.provider);
   const text = stringish(parsed.text);
