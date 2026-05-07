@@ -15,7 +15,10 @@ import {
 } from "../../api/client";
 import { getOfficeTasks, type Task } from "../../api/tasks";
 import { formatRelativeTime } from "../../lib/format";
+import { isAgentActive, normalizeStatus, taskMeta } from "../../lib/officeStatus";
 import { router } from "../../lib/router";
+import { ActiveTasksPanel } from "./shared/ActiveTasksPanel";
+import { AgentPulsePanel } from "./shared/AgentPulsePanel";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -88,39 +91,8 @@ function goToHealthCheck(): void {
 
 // ── Data helpers ───────────────────────────────────────────────────
 
-function classifyMember(member: OfficeMember): "active" | "idle" {
-  if (
-    member.status === "shipping" ||
-    member.status === "plotting" ||
-    member.task
-  ) {
-    return "active";
-  }
-  return "idle";
-}
-
-function normalizeStatus(raw: string): string {
-  const s = raw.toLowerCase().replace(/[\s-]+/g, "_");
-  if (s === "completed") return "done";
-  if (s === "in_review") return "review";
-  if (s === "cancelled") return "canceled";
-  return s;
-}
-
 function providerIsUnhealthy(p: LocalProviderStatus): boolean {
   return p.probed && !p.reachable;
-}
-
-function taskMeta(t: Task): string {
-  return (
-    [
-      t.channel ? `#${t.channel}` : "",
-      t.owner ? `@${t.owner}` : "",
-      t.updated_at ? formatRelativeTime(t.updated_at) : "",
-    ]
-      .filter(Boolean)
-      .join(" · ") || ""
-  );
 }
 
 function taskBadgeClass(status: string): string {
@@ -184,10 +156,7 @@ function useOverviewData(): OverviewData {
     (t) => normalizeStatus(t.status) === "blocked",
   );
 
-  const activeAgents = allMembers.filter(
-    (m) =>
-      m.slug !== "human" && m.slug !== "you" && classifyMember(m) === "active",
-  );
+  const activeAgents = allMembers.filter(isAgentActive);
 
   const pendingRequests = allRequests.filter(
     (r) => !r.status || r.status === "open" || r.status === "pending",
@@ -251,24 +220,13 @@ function ActiveRunsSection({ tasks, isLoading }: ActiveRunsSectionProps) {
     >
       {isLoading ? (
         <SkeletonRows count={3} />
-      ) : tasks.length === 0 ? (
-        <EmptyState action={{ label: "Go to tasks", onClick: goToTasks }}>
-          No tasks are running right now.
-        </EmptyState>
       ) : (
-        tasks
-          .slice(0, 5)
-          .map((t) => (
-            <OverviewCard
-              key={t.id}
-              label={t.title || t.id}
-              body={t.description?.slice(0, 100)}
-              meta={taskMeta(t) || undefined}
-              badge={normalizeStatus(t.status).replace(/_/g, " ")}
-              badgeClass="badge badge-accent"
-              onClick={() => goToTask(t.id)}
-            />
-          ))
+        <ActiveTasksPanel
+          tasks={tasks}
+          limit={5}
+          onTaskClick={goToTask}
+          emptyLabel="No tasks are running right now."
+        />
       )}
     </OverviewSection>
   );
@@ -293,22 +251,14 @@ function BlockedTasksSection({ tasks, isLoading }: BlockedTasksSectionProps) {
     >
       {isLoading ? (
         <SkeletonRows count={2} />
-      ) : tasks.length === 0 ? (
-        <EmptyState>Nothing is blocked. Agents are moving freely.</EmptyState>
       ) : (
-        tasks
-          .slice(0, 5)
-          .map((t) => (
-            <OverviewCard
-              key={t.id}
-              label={t.title || t.id}
-              body={t.description?.slice(0, 100)}
-              meta={taskMeta(t) || undefined}
-              badge="blocked"
-              badgeClass="badge badge-yellow"
-              onClick={() => goToTask(t.id)}
-            />
-          ))
+        <ActiveTasksPanel
+          tasks={tasks}
+          badgeClass="badge badge-yellow"
+          limit={5}
+          onTaskClick={goToTask}
+          emptyLabel="Nothing is blocked. Agents are moving freely."
+        />
       )}
     </OverviewSection>
   );
@@ -331,35 +281,8 @@ function AgentsWorkingSection({
     >
       {isLoading ? (
         <SkeletonRows count={3} />
-      ) : agents.length === 0 ? (
-        <EmptyState>No agents are visibly active right now.</EmptyState>
       ) : (
-        agents.slice(0, 6).map((m) => (
-          <div
-            key={m.slug}
-            className="app-card"
-            style={{
-              marginBottom: 6,
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-            }}
-          >
-            <span
-              className={`status-dot ${m.status === "shipping" ? "shipping" : "plotting"}`}
-            />
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontWeight: 600, fontSize: 13 }}>
-                {m.name || m.slug}
-              </div>
-              {m.task ? (
-                <div className="app-card-meta" style={{ marginTop: 1 }}>
-                  {m.task}
-                </div>
-              ) : null}
-            </div>
-          </div>
-        ))
+        <AgentPulsePanel agents={agents} limit={6} />
       )}
     </OverviewSection>
   );

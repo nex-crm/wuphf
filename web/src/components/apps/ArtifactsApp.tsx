@@ -7,14 +7,16 @@ import {
   getOfficeMembers,
   getScheduler,
   getWatchdogs,
-  type OfficeMember,
 } from "../../api/client";
 import { getUsage } from "../../api/platform";
 import { getOfficeTasks } from "../../api/tasks";
 import { formatTokens } from "../../lib/format";
+import { isAgentActive, normalizeStatus } from "../../lib/officeStatus";
 import { keyedByOccurrence } from "../../lib/reactKeys";
 import { type Insight, InsightsList } from "../activity/InsightsList";
 import { Timeline, type TimelineEvent } from "../activity/Timeline";
+import { ActiveTasksPanel } from "./shared/ActiveTasksPanel";
+import { AgentPulsePanel } from "./shared/AgentPulsePanel";
 
 /** Minimal action/decision/watchdog shapes from the untyped endpoints. */
 interface ActionRecord {
@@ -66,22 +68,6 @@ interface SchedulerJobRaw {
   due_at?: string;
 }
 
-function normalizeStatus(raw: string): string {
-  const s = raw.toLowerCase().replace(/[\s-]+/g, "_");
-  if (s === "completed") return "done";
-  return s;
-}
-
-function classifyMemberActivity(member: OfficeMember): {
-  state: string;
-  label: string;
-} {
-  if (member.status === "shipping" || member.task)
-    return { state: "shipping", label: "Shipping" };
-  if (member.status === "plotting")
-    return { state: "plotting", label: "Plotting" };
-  return { state: "lurking", label: "Idle" };
-}
 
 // biome-ignore lint/complexity/noExcessiveLinesPerFunction: Existing function length is baselined for a focused follow-up refactor.
 export function ArtifactsApp() {
@@ -172,12 +158,7 @@ export function ArtifactsApp() {
   const blockedTasks = allTasks.filter(
     (t) => normalizeStatus(t.status) === "blocked",
   );
-  const liveAgents = allMembers.filter(
-    (m) =>
-      m.slug !== "human" &&
-      m.slug !== "you" &&
-      classifyMemberActivity(m).state !== "lurking",
-  );
+  const liveAgents = allMembers.filter(isAgentActive);
 
   allActions.sort((a, b) =>
     String(b.created_at ?? "").localeCompare(String(a.created_at ?? "")),
@@ -340,59 +321,18 @@ export function ArtifactsApp() {
             title="Active lanes"
             meta={`${activeTasks.length} open or moving`}
           >
-            {activeTasks.length === 0 ? (
-              <EmptyState>No active lanes right now.</EmptyState>
-            ) : (
-              activeTasks
-                .slice(0, 10)
-                .map((task) => (
-                  <ActivityItem
-                    key={task.id}
-                    title={task.title || task.id || "Untitled task"}
-                    body={task.description ?? ""}
-                    meta={[
-                      task.channel ? `#${task.channel}` : "",
-                      task.owner ? `@${task.owner}` : "",
-                    ].filter(Boolean)}
-                    kindLabel={normalizeStatus(task.status).replace(/_/g, " ")}
-                  />
-                ))
-            )}
+            <ActiveTasksPanel
+              tasks={activeTasks}
+              limit={10}
+              emptyLabel="No active lanes right now."
+            />
           </ActivitySection>
 
           <ActivitySection
             title="Agent pulse"
             meta={`${liveAgents.length} active right now`}
           >
-            {liveAgents.length === 0 ? (
-              <EmptyState>No agents are visibly moving right now.</EmptyState>
-            ) : (
-              liveAgents.slice(0, 10).map((member) => {
-                const activity = classifyMemberActivity(member);
-                return (
-                  <div
-                    key={member.slug}
-                    className="app-card"
-                    style={{
-                      marginBottom: 6,
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 8,
-                    }}
-                  >
-                    <span className={`status-dot ${activity.state}`} />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontWeight: 600, fontSize: 13 }}>
-                        {member.name || member.slug}
-                      </div>
-                      <div className="app-card-meta">
-                        {member.task || activity.label}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })
-            )}
+            <AgentPulsePanel agents={liveAgents} limit={10} />
           </ActivitySection>
 
           <ActivitySection
