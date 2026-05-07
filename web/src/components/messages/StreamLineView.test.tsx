@@ -154,6 +154,49 @@ describe("<StreamLineView>", () => {
     expect(screen.getByText("auth: 401 unauthorized")).toBeInTheDocument();
   });
 
+  it("renders a HeadlessEvent text envelope as a thinking block", () => {
+    render(
+      <StreamLineView
+        line={{
+          id: 1,
+          data: "",
+          parsed: {
+            kind: "headless_event",
+            type: "text",
+            provider: "claude",
+            agent: "ceo",
+            text: "Shipping the update now",
+            status: "active",
+            turn_id: "abc123",
+          },
+        }}
+      />,
+    );
+    expect(screen.getByText("Shipping the update now")).toBeInTheDocument();
+  });
+
+  it("renders a HeadlessEvent tool_use envelope as a tool call card", () => {
+    render(
+      <StreamLineView
+        line={{
+          id: 1,
+          data: "",
+          parsed: {
+            kind: "headless_event",
+            type: "tool_use",
+            provider: "codex",
+            agent: "eng",
+            tool_name: "team_broadcast",
+            detail: '{"channel":"general","content":"Done"}',
+            status: "active",
+            turn_id: "xyz789",
+          },
+        }}
+      />,
+    );
+    expect(screen.getByText("team_broadcast")).toBeInTheDocument();
+  });
+
   it("renders Codex completed message content arrays", () => {
     render(
       <StreamLineView
