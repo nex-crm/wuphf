@@ -174,6 +174,11 @@
   text-decoration: underline;
   text-underline-offset: 2px;
 }
+.message-author-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
 .message-time {
   font-size: 11px;
   color: var(--text-tertiary);
