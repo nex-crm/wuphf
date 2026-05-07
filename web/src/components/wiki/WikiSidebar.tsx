@@ -5,6 +5,12 @@ import { useEffect, useMemo, useState } from "react";
 import type { DiscoveredSection, WikiCatalogEntry } from "../../api/wiki";
 import { resolveGroupOrder } from "../../lib/groupOrder";
 
+export interface SidebarSkill {
+  name: string;
+  title?: string;
+  status?: string;
+}
+
 /** Left-rail thematic dir groups + Tools section + search. */
 
 interface WikiSidebarProps {
@@ -23,6 +29,8 @@ interface WikiSidebarProps {
   onNavigateAudit?: () => void;
   /** Optional lint opener — rendered as a footer link when provided. */
   onNavigateLint?: () => void;
+  /** Skills to show as a dedicated Skills section below wiki sections. */
+  skills?: SidebarSkill[];
 }
 
 // Sections first seen within this window render a "new" indicator. 7 days
@@ -37,6 +45,7 @@ export default function WikiSidebar({
   onNavigate,
   onNavigateAudit,
   onNavigateLint,
+  skills,
 }: WikiSidebarProps) {
   const [query, setQuery] = useState("");
   const [bannerSlug, setBannerSlug] = useState<string | null>(null);
@@ -140,6 +149,13 @@ export default function WikiSidebar({
               );
             })}
       </div>
+      {skills && skills.length > 0 ? (
+        <SkillsNavSection
+          skills={skills}
+          currentPath={currentPath}
+          onNavigate={onNavigate}
+        />
+      ) : null}
       {onNavigateAudit ? (
         <div className="wk-sidebar-audit">
           <button
@@ -485,6 +501,101 @@ function branchContainsCurrent(
   return (
     node.articles.some((item) => articlePathKey(item.path) === currentKey) ||
     node.folders.some((child) => branchContainsCurrent(child, currentKey))
+  );
+}
+
+function SkillsNavSection({
+  skills,
+  currentPath,
+  onNavigate,
+}: {
+  skills: SidebarSkill[];
+  currentPath?: string | null;
+  onNavigate: (path: string) => void;
+}) {
+  const [expanded, setExpanded] = useState(true);
+  const currentKey = articlePathKey(currentPath ?? "");
+
+  const activeSkills = skills.filter((s) => !s.status || s.status === "active");
+  const otherSkills = skills.filter((s) => s.status && s.status !== "active");
+  const sorted = [
+    ...activeSkills.sort((a, b) => (a.name || "").localeCompare(b.name || "")),
+    ...otherSkills.sort((a, b) => (a.name || "").localeCompare(b.name || "")),
+  ];
+
+  return (
+    <div
+      className="wk-section-group"
+      data-section-slug="skills"
+      style={{
+        borderTop: "1px solid var(--border-subtle, var(--neutral-200))",
+        paddingTop: 8,
+        marginTop: 4,
+      }}
+    >
+      <h3
+        className="wk-section-header wk-section-schema"
+        style={{ cursor: "pointer" }}
+        onClick={() => setExpanded((v) => !v)}
+        aria-expanded={expanded}
+      >
+        <span className="wk-section-title">Skills</span>
+        <span className="wk-section-count">{skills.length}</span>
+        <span
+          aria-hidden="true"
+          style={{
+            marginLeft: "auto",
+            fontSize: 10,
+            transition: "transform 0.15s",
+            transform: expanded ? "rotate(90deg)" : "rotate(0deg)",
+          }}
+        >
+          {"▶"}
+        </span>
+      </h3>
+      {expanded ? (
+        <ul className="wk-tree" aria-label="Skills">
+          {sorted.map((skill) => {
+            const path = `team/skills/${skill.name}.md`;
+            const current = currentKey === articlePathKey(path);
+            return (
+              <li
+                key={skill.name}
+                className={
+                  current ? "current wk-tree-article" : "wk-tree-article"
+                }
+              >
+                <a
+                  href={`#/wiki/${encodeURI(path)}`}
+                  className="wk-tree-article-link"
+                  title={skill.name}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    onNavigate(path);
+                  }}
+                >
+                  <span className="wk-tree-file-dot" aria-hidden="true" />
+                  <span className="wk-tree-article-title">
+                    {skill.title || skill.name}
+                  </span>
+                  {skill.status && skill.status !== "active" ? (
+                    <span
+                      style={{
+                        fontSize: 10,
+                        color: "var(--text-tertiary)",
+                        marginLeft: 4,
+                      }}
+                    >
+                      {skill.status}
+                    </span>
+                  ) : null}
+                </a>
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
+    </div>
   );
 }
 

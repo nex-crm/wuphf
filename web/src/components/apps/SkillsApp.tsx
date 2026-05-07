@@ -1393,20 +1393,6 @@ function SkillCard({
             </div>
           ) : null}
           <ProposedPreviewBody skill={skill} />
-          <button
-            type="button"
-            onClick={() => onPreview(skill)}
-            className="btn-text"
-            style={{
-              padding: "2px 0",
-              fontSize: 12,
-              color: "var(--accent, #1264a3)",
-              marginBottom: 8,
-            }}
-            aria-label={`View full SKILL.md for ${skill.name}`}
-          >
-            View full SKILL.md →
-          </button>
           <SkillProvenance articles={sourceArticles} />
         </>
       ) : null}
@@ -1416,6 +1402,21 @@ function SkillCard({
           Source: {skill.source}
         </div>
       ) : null}
+
+      <button
+        type="button"
+        onClick={() => onPreview(skill)}
+        className="btn-text"
+        style={{
+          padding: "2px 0",
+          fontSize: 12,
+          color: "var(--accent, #1264a3)",
+          marginBottom: 4,
+        }}
+        aria-label={`View SKILL.md for ${skill.name}`}
+      >
+        View SKILL.md →
+      </button>
 
       <div
         style={{

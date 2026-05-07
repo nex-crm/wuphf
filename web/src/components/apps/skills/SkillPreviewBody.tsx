@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { patchSkill, type Skill } from "../../../api/client";
+import { fetchArticle } from "../../../api/wiki";
 import { showNotice } from "../../ui/Toast";
 import { OwnersChip } from "./OwnersChip";
 import { STATUS_BADGE_CLASS } from "./status";
@@ -104,7 +105,10 @@ export function SkillPreviewBody({
           onSave={handleSave}
         />
       ) : (
-        <SkillReadonlyBody content={skill.content} />
+        <SkillFullContent
+          skillName={skill.name}
+          fallbackContent={skill.content}
+        />
       )}
     </section>
   );
@@ -271,30 +275,69 @@ function SkillBodyEditor({
   );
 }
 
-function SkillReadonlyBody({ content }: { content?: string }) {
-  if (!content) {
+function SkillFullContent({
+  skillName,
+  fallbackContent,
+}: {
+  skillName: string;
+  fallbackContent?: string;
+}) {
+  const [content, setContent] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    setContent(null);
+    fetchArticle(`team/skills/${skillName}.md`)
+      .then((article) => setContent(article.content))
+      .catch(() => setContent(fallbackContent ?? null))
+      .finally(() => setLoading(false));
+  }, [skillName, fallbackContent]);
+
+  if (loading) {
     return (
-      <div style={{ color: "var(--text-tertiary)", fontSize: 13 }}>
-        No body content available.
+      <div
+        style={{
+          color: "var(--text-tertiary)",
+          fontSize: 13,
+          padding: "12px 0",
+        }}
+      >
+        Loading SKILL.md…
       </div>
     );
   }
+
   return (
-    <pre
-      style={{
-        background: "var(--bg-warm, var(--neutral-50))",
-        border: "1px solid var(--border)",
-        borderRadius: 6,
-        padding: 12,
-        fontSize: 12,
-        fontFamily: "var(--font-mono)",
-        whiteSpace: "pre-wrap",
-        wordBreak: "break-word",
-        margin: 0,
-      }}
-    >
-      {content}
-    </pre>
+    <>
+      <div
+        style={{
+          fontSize: 12,
+          fontWeight: 500,
+          color: "var(--text-secondary)",
+          marginBottom: 6,
+        }}
+      >
+        SKILL.md
+      </div>
+      <pre
+        style={{
+          background: "var(--bg-warm, var(--neutral-50))",
+          border: "1px solid var(--border)",
+          borderRadius: 6,
+          padding: 12,
+          fontSize: 12,
+          fontFamily: "var(--font-mono)",
+          whiteSpace: "pre-wrap",
+          wordBreak: "break-word",
+          margin: 0,
+          maxHeight: "70vh",
+          overflowY: "auto",
+        }}
+      >
+        {content ?? "No content available."}
+      </pre>
+    </>
   );
 }
 

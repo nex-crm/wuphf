@@ -109,7 +109,7 @@ describe("<SkillsApp> SidePanel editor", () => {
     render(wrap(<SkillsApp />));
 
     const viewFull = await screen.findByRole("button", {
-      name: /View full SKILL\.md/i,
+      name: /View SKILL\.md/i,
     });
     fireEvent.click(viewFull);
 
@@ -141,7 +141,7 @@ describe("<SkillsApp> SidePanel editor", () => {
     render(wrap(<SkillsApp />));
 
     const viewFull = await screen.findByRole("button", {
-      name: /View full SKILL\.md/i,
+      name: /View SKILL\.md/i,
     });
     fireEvent.click(viewFull);
 
@@ -193,7 +193,7 @@ describe("<SkillsApp> SidePanel editor", () => {
     render(wrap(<SkillsApp />));
 
     const viewFull = await screen.findByRole("button", {
-      name: /View full SKILL\.md/i,
+      name: /View SKILL\.md/i,
     });
     fireEvent.click(viewFull);
 
