@@ -10,7 +10,7 @@
 
 set -euo pipefail
 
-RUNS=5
+RUNS="${FLAKE_RUNS:-5}"
 THRESHOLD="${FLAKE_RATE_THRESHOLD:-0.20}"
 
 script_dir="$(dirname -- "${BASH_SOURCE[0]}")"
@@ -59,7 +59,7 @@ while IFS= read -r line || [[ -n "$line" ]]; do
   if [[ "$line" =~ ^[[:space:]]*$ || "$line" =~ ^[[:space:]]*# ]]; then
     continue
   fi
-  entries+=("$line")
+  entries+=("${line%$'\r'}")
 done < "$quarantine_file"
 
 if ((${#entries[@]} == 0)); then
