@@ -88,7 +88,10 @@ describe("loadManifest", () => {
       const entry = manifest.platforms[key];
       expect(entry).toBeDefined();
       expect(entry.asset).toMatch(/^cloudflared-/);
-      expect(entry.sha256).toMatch(/^[0-9a-f]{64}$/);
+      // Case-insensitive: download-cloudflared.js compares hashes after
+      // .toLowerCase() on both sides, so an uppercase-hex manifest entry is
+      // semantically valid; this assertion must match.
+      expect(entry.sha256).toMatch(/^[0-9a-f]{64}$/i);
     }
   });
 

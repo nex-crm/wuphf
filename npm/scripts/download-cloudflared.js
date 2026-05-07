@@ -73,8 +73,22 @@ function targetBinaryPath() {
   return path.join(__dirname, "..", "bin", targetBinaryFilename());
 }
 
+// fetchToFileTimeoutMs caps how long a single download attempt can hang
+// before the postinstall step gives up. Without this, a slow or unresponsive
+// GitHub release CDN would block `npm install` indefinitely with no recovery
+// path. 120s is generous — Cloudflare's release tarball is ~30MB, so even a
+// 2 Mbps connection finishes well inside the budget.
+const fetchToFileTimeoutMs = 120_000;
+
 async function fetchToFile(url, dest) {
-  const res = await fetch(url, { redirect: "follow" });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), fetchToFileTimeoutMs);
+  let res;
+  try {
+    res = await fetch(url, { redirect: "follow", signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
   if (!res.ok) {
     throw new Error(
       `Download failed: ${res.status} ${res.statusText} (${url})`,
@@ -153,17 +167,24 @@ async function downloadCloudflared({ silent = false } = {}) {
       );
     }
 
+    // Atomic placement: stage the binary at "<target>.tmp" then rename over
+    // the final path. If the install is interrupted (Ctrl+C, OOM-kill,
+    // power loss) midway through copy/chmod/codesign, `findCloudflared`
+    // would otherwise pick up a half-written file on next launch and fail
+    // with a confusing exec-format error. `fs.rename` is atomic on POSIX
+    // and stagingPath is sibling to target, so EXDEV cannot apply here.
+    const stagingPath = `${target}.tmp`;
     if (asset.endsWith(".tgz")) {
       extractTgz(downloadPath, tmpDir, silent);
       const extracted = path.join(tmpDir, "cloudflared");
-      await fsp.copyFile(extracted, target);
+      await fsp.copyFile(extracted, stagingPath);
     } else {
       // linux + windows assets are already raw binaries.
-      await fsp.copyFile(downloadPath, target);
+      await fsp.copyFile(downloadPath, stagingPath);
     }
 
     if (process.platform !== "win32") {
-      await fsp.chmod(target, 0o755);
+      await fsp.chmod(stagingPath, 0o755);
     }
 
     // macOS 15+ invalidates the upstream ad-hoc signature after copy+chmod
@@ -171,13 +192,18 @@ async function downloadCloudflared({ silent = false } = {}) {
     // first `Start tunnel` click does not fail with code-signing errors.
     if (process.platform === "darwin") {
       try {
-        execFileSync("codesign", ["--force", "--sign", "-", target], {
+        execFileSync("codesign", ["--force", "--sign", "-", stagingPath], {
           stdio: "ignore",
         });
       } catch {
         // codesign is best-effort.
       }
     }
+
+    // Atomic move into the final path. After this returns, target either
+    // is the fully-prepared binary or is the previous version; never a
+    // half-written file.
+    await fsp.rename(stagingPath, target);
 
     if (!silent) {
       process.stderr.write(

@@ -310,24 +310,31 @@ func (c *webTunnelController) start() (team.WebTunnelStatus, error) {
 		default:
 		}
 		c.mu.Lock()
-		defer c.mu.Unlock()
 		if c.cmd != cmd {
+			c.mu.Unlock()
 			return
 		}
+		// Capture server/listener before releasing the lock; do the
+		// blocking Shutdown OUTSIDE the lock so a hung in-flight
+		// loopback connection cannot freeze status() / start() / stop()
+		// callers waiting on c.mu for the full cloudflaredStopTimeout
+		// window.
+		server := c.server
 		c.running = false
 		c.cmd = nil
 		c.cancel = nil
 		c.publicURL = ""
+		c.server = nil
+		c.listener = nil
 		c.clearInviteLocked()
-		if c.server != nil {
-			shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), cloudflaredStopTimeout)
-			_ = c.server.Shutdown(shutdownCtx)
-			cancelShutdown()
-			c.server = nil
-			c.listener = nil
-		}
 		if err != nil && !errors.Is(err, context.Canceled) {
 			c.err = fmt.Sprintf("cloudflared exited unexpectedly: %v", err)
+		}
+		c.mu.Unlock()
+		if server != nil {
+			shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), cloudflaredStopTimeout)
+			_ = server.Shutdown(shutdownCtx)
+			cancelShutdown()
 		}
 	}()
 
@@ -337,6 +344,12 @@ func (c *webTunnelController) start() (team.WebTunnelStatus, error) {
 // mintInviteLocked issues a fresh invite token via the registered share
 // transport and formats the joiner-facing URL against the tunnel's public
 // origin. Caller must hold c.mu.
+//
+// Uses CreateInviteDetailedWithBuilder so the tunnel-URL builder is bound
+// atomically to this single call — the network-share path can run a parallel
+// SetURLBuilder/CreateInviteDetailed pair without overwriting our builder
+// mid-flight. SetURLBuilder is intentionally NOT used here; it would
+// recreate the very race the atomic-builder API exists to prevent.
 func (c *webTunnelController) mintInviteLocked(publicURL string) (string, string, error) {
 	if c.broker == nil {
 		return "", "", errors.New("tunnel controller has no broker handle")
@@ -345,10 +358,9 @@ func (c *webTunnelController) mintInviteLocked(publicURL string) (string, string
 	if st == nil {
 		return "", "", errors.New("share transport is not registered; tunnel cannot mint invites")
 	}
-	st.SetURLBuilder(func(token string) string {
+	details, err := st.CreateInviteDetailedWithBuilder(context.Background(), func(token string) string {
 		return tunnelJoinURL(publicURL, token)
 	})
-	details, err := st.CreateInviteDetailed(context.Background())
 	if err != nil {
 		return "", "", err
 	}

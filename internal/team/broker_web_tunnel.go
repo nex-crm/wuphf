@@ -41,6 +41,7 @@ func (b *Broker) SetWebTunnelController(start func() (WebTunnelStatus, error), s
 
 func (b *Broker) handleWebTunnelStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
@@ -54,6 +55,7 @@ func (b *Broker) handleWebTunnelStatus(w http.ResponseWriter, r *http.Request) {
 
 func (b *Broker) handleWebTunnelStart(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
@@ -76,6 +78,7 @@ func (b *Broker) handleWebTunnelStart(w http.ResponseWriter, r *http.Request) {
 
 func (b *Broker) handleWebTunnelStop(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}

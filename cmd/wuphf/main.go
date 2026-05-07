@@ -705,10 +705,17 @@ func runWeb(args []string, packSlug string, unsafe bool, webPort int, opusCEO bo
 	go func() {
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
-		<-sigCh
+		sig := <-sigCh
 		_ = shareController.stop()
 		_ = tunnelController.stop()
-		os.Exit(0)
+		// POSIX convention: a process killed by signal N exits with 128+N
+		// so process supervisors (systemd, npm, foreman) can distinguish a
+		// clean exit from an interrupted run. os.Exit(0) here would mask
+		// Ctrl+C as success in any caller that checks $?.
+		if s, ok := sig.(syscall.Signal); ok {
+			os.Exit(128 + int(s))
+		}
+		os.Exit(1)
 	}()
 
 	if err := l.PreflightWeb(); err != nil {
