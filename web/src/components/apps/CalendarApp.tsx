@@ -14,8 +14,6 @@ import {
   UNASSIGNED_BUCKET,
   UNSCHEDULED_BUCKET,
 } from "../../lib/taskProjections";
-import { SystemSchedulesPanel } from "./SystemSchedulesPanel";
-import { isCadenceSchedulerJob } from "./schedulerJobClassification";
 
 // ── Week helpers ──────────────────────────────────────────────────────────────
 
@@ -153,16 +151,9 @@ export function CalendarApp() {
   }, [tasksResult.data, weekStart, dayKeys]);
 
   const schedulerJobsData = schedulerResult.data?.jobs;
-  const { oneShotJobs, cadenceJobs } = useMemo(() => {
-    const jobs = schedulerJobsData ?? [];
-    return {
-      oneShotJobs: jobs.filter((j) => !isCadenceSchedulerJob(j)),
-      cadenceJobs: jobs.filter(isCadenceSchedulerJob),
-    };
-  }, [schedulerJobsData]);
   const schedulerByDay = useMemo(
-    () => groupSchedulerJobsByDay(oneShotJobs, dayKeys),
-    [oneShotJobs, dayKeys],
+    () => groupSchedulerJobsByDay(schedulerJobsData ?? [], dayKeys),
+    [schedulerJobsData, dayKeys],
   );
 
   const unscheduledTasks = tasksByWeek[UNSCHEDULED_BUCKET] ?? [];
@@ -199,13 +190,6 @@ export function CalendarApp() {
           setViewMode((m) => (m === "week" ? "agenda" : "week"))
         }
       />
-
-      {/* System cadence schedules */}
-      {cadenceJobs.length > 0 && (
-        <div style={{ marginBottom: 12 }}>
-          <SystemSchedulesPanel jobs={cadenceJobs} />
-        </div>
-      )}
 
       {isLoading ? (
         <LoadingState />
@@ -416,12 +400,12 @@ function WeekGrid({
         </thead>
 
         <tbody>
-          {/* Scheduler row */}
+          {/* System scheduler row */}
           {hasSchedulerJobs && (
             <tr>
               <td style={rowLabelCellStyle}>
                 <span style={{ fontSize: 10, color: "var(--text-tertiary)" }}>
-                  SCHEDULES
+                  system
                 </span>
               </td>
               {dayKeys.map((k) => (
