@@ -26,6 +26,20 @@ import (
 // header back to the client. (?i) makes the prefix case-insensitive.
 var externalRetryAfterPattern = regexp.MustCompile(`(?i)retry after ([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.+-]+Z?)`)
 
+// externalRetryAfterLinePattern matches a full line containing a rate-limit
+// marker so it can be stripped from task Details when a blocked task is
+// resumed. Without stripping, a stale timestamp left in Details is detected
+// by externalWorkflowRetryAfter on the next scheduler tick, re-resuming the
+// task and re-delivering it to the CEO — producing an infinite loop.
+var externalRetryAfterLinePattern = regexp.MustCompile(`(?im)^[^\n]*(?:429[^\n]*|retry after [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.+-]+Z?)[^\n]*$\n?`)
+
+// stripExternalRetryMarker removes rate-limit lines from a task Details string
+// so stale retry-after timestamps cannot re-trigger the watchdog resume loop.
+func stripExternalRetryMarker(details string) string {
+	stripped := externalRetryAfterLinePattern.ReplaceAllString(details, "")
+	return strings.TrimSpace(stripped)
+}
+
 // externalWorkflowRetryAfter extracts a retry-at timestamp from an
 // external workflow provider's error message. Returns (zero, false)
 // when err is nil, when the pattern doesn't match, or when the

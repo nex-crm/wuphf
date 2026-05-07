@@ -92,6 +92,10 @@ func (b *Broker) ResumeTask(taskID, actor, reason string) (teamTask, bool, error
 		changed := false
 		if task.Blocked {
 			task.Blocked = false
+			// Strip the stale rate-limit marker so the watchdog's
+			// externalWorkflowRetryAfter check cannot re-enter the
+			// resume loop after the task is re-blocked for a new reason.
+			task.Details = stripExternalRetryMarker(task.Details)
 			changed = true
 		}
 		if strings.EqualFold(strings.TrimSpace(task.Status), "blocked") {

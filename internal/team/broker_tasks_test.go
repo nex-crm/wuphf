@@ -918,6 +918,48 @@ func TestBrokerResumeTaskUnblocksAndSchedulesOwnerLane(t *testing.T) {
 	}
 }
 
+// TestBrokerResumeTaskStripsRateLimitMarker guards against the phantom
+// notification loop where the watchdog re-resumes a task indefinitely because
+// a stale "Retry after <ts>" line is left in task.Details after the first
+// resume. The fix: ResumeTask must call stripExternalRetryMarker so the
+// marker cannot be detected on the next scheduler tick.
+func TestBrokerResumeTaskStripsRateLimitMarker(t *testing.T) {
+	b := newTestBroker(t)
+	ensureTestMemberAccess(b, "client-loop", "operator", "Operator")
+	ensureTestMemberAccess(b, "client-loop", "builder", "Builder")
+
+	const rateLimitDetails = "429 RESOURCE_EXHAUSTED. Retry after 2026-04-15T22:00:29.610Z."
+	task, _, err := b.EnsurePlannedTask(plannedTaskInput{
+		Channel:       "client-loop",
+		Title:         "Retry kickoff send",
+		Details:       rateLimitDetails,
+		Owner:         "builder",
+		CreatedBy:     "operator",
+		TaskType:      "follow_up",
+		ExecutionMode: "live_external",
+	})
+	if err != nil {
+		t.Fatalf("ensure planned task: %v", err)
+	}
+	if _, changed, err := b.BlockTask(task.ID, "watchdog", "Provider cooldown"); err != nil || !changed {
+		t.Fatalf("block task: %v changed=%v", err, changed)
+	}
+
+	resumed, _, err := b.ResumeTask(task.ID, "watchdog", "Retry window passed")
+	if err != nil {
+		t.Fatalf("resume task: %v", err)
+	}
+	if resumed.Blocked {
+		t.Fatalf("expected task to be unblocked after resume, got blocked=true")
+	}
+
+	// The rate-limit marker must be gone so the watchdog's
+	// externalWorkflowRetryAfter check cannot re-trigger the resume loop.
+	if externalRetryAfterPattern.MatchString(resumed.Details) {
+		t.Fatalf("stale rate-limit marker still present in Details after resume: %q", resumed.Details)
+	}
+}
+
 func TestBrokerResumeTaskQueuesBehindExistingExclusiveOwnerLane(t *testing.T) {
 	b := newTestBroker(t)
 	ensureTestMemberAccess(b, "client-loop", "operator", "Operator")
