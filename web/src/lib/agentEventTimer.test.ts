@@ -115,6 +115,78 @@ describe("computePillState", () => {
   });
 });
 
+describe("dim-state transitions (prefers-reduced-motion smoke)", () => {
+  // The timer and pure derivation are motion-agnostic: CSS applies the
+  // reduced-motion guard, not JS. These tests pin the JS behaviour so that
+  // when prefers-reduced-motion:reduce is active in a real browser, the
+  // data-state attribute still reaches "dim" / "idle" at the right moment
+  // and the CSS media query has something correct to act on.
+
+  const BASE = 2_000_000;
+
+  it("routine event: returns dim at ROUTINE_HOLD_MS + 1ms", () => {
+    expect(
+      computePillState({
+        lastEventMs: BASE,
+        nowMs: BASE + 60_000 + 1,
+        kind: "routine",
+      }),
+    ).toBe("dim");
+  });
+
+  it("routine event: returns idle at ROUTINE_HOLD_MS + DIM_WINDOW_MS + 1ms", () => {
+    expect(
+      computePillState({
+        lastEventMs: BASE,
+        nowMs: BASE + 60_000 + 60_000 + 1,
+        kind: "routine",
+      }),
+    ).toBe("idle");
+  });
+
+  it("milestone event: returns dim at MILESTONE_HOLD_MS + 1ms", () => {
+    expect(
+      computePillState({
+        lastEventMs: BASE,
+        nowMs: BASE + 120_000 + 1,
+        kind: "milestone",
+      }),
+    ).toBe("dim");
+  });
+
+  it("milestone event: returns idle at MILESTONE_HOLD_MS + DIM_WINDOW_MS + 1ms", () => {
+    expect(
+      computePillState({
+        lastEventMs: BASE,
+        nowMs: BASE + 120_000 + 60_000 + 1,
+        kind: "milestone",
+      }),
+    ).toBe("idle");
+  });
+
+  it("TICK_INTERVAL_MS boundary: state is still holding at exact hold expiry, flips to dim on next tick", () => {
+    const TICK = 1_000;
+
+    // At the exact hold boundary: holding (sinceEvent === holdMs, <= holds)
+    expect(
+      computePillState({
+        lastEventMs: BASE,
+        nowMs: BASE + 60_000,
+        kind: "routine",
+      }),
+    ).toBe("holding");
+
+    // One tick later: crosses into dim
+    expect(
+      computePillState({
+        lastEventMs: BASE,
+        nowMs: BASE + 60_000 + TICK,
+        kind: "routine",
+      }),
+    ).toBe("dim");
+  });
+});
+
 describe("startEventTimer", () => {
   beforeEach(() => {
     vi.useFakeTimers();

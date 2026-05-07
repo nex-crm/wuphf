@@ -93,11 +93,7 @@ function pillTextFor(
     return snapshotActivity ?? snapshotDetail ?? "stuck";
   }
   if (state === "idle") {
-    if (
-      !hasSnapshot &&
-      typeof fallbackTask === "string" &&
-      fallbackTask.trim()
-    ) {
+    if (!hasSnapshot && fallbackTask) {
       return fallbackTask;
     }
     return idleCopy;

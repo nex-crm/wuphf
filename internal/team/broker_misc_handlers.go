@@ -41,6 +41,15 @@ func (b *Broker) handleHealth(w http.ResponseWriter, r *http.Request) {
 		provider = config.ResolveLLMProvider("")
 	}
 	memoryStatus := ResolveMemoryBackendStatus()
+	// MemoryBackendReady must reflect *runtime* readiness, not just config:
+	// the markdown backend can resolve to "active" yet have b.wikiWorker
+	// == nil because repo.Init failed at startup. Without this gate,
+	// /health reported ready while every /notebook/* and /review/* call
+	// returned 503, masking the failure from operators and the web UI.
+	ready := memoryStatus.ActiveKind != config.MemoryBackendNone
+	if memoryStatus.ActiveKind == config.MemoryBackendMarkdown {
+		ready = b.WikiWorker() != nil
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(HealthResponse{
@@ -52,7 +61,7 @@ func (b *Broker) handleHealth(w http.ResponseWriter, r *http.Request) {
 		ProviderModel:       resolveProviderModel(provider),
 		MemoryBackend:       memoryStatus.SelectedKind,
 		MemoryBackendActive: memoryStatus.ActiveKind,
-		MemoryBackendReady:  memoryStatus.ActiveKind != config.MemoryBackendNone,
+		MemoryBackendReady:  ready,
 		NexConnected:        memoryStatus.ActiveKind == config.MemoryBackendNex && nex.Connected(),
 		Build:               buildinfo.Current(),
 	})
