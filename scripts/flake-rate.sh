@@ -46,7 +46,7 @@ if [[ ! -f "$quarantine_file" ]]; then
 fi
 
 if ! awk -v threshold="$THRESHOLD" 'BEGIN {
-  if (threshold !~ /^[0-9]+([.][0-9]+)?$/ || threshold < 0 || threshold > 1) {
+  if (threshold !~ /^[0-9]*\.?[0-9]+$/ || threshold + 0 < 0 || threshold + 0 > 1) {
     exit 1
   }
 }'; then
