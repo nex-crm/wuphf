@@ -147,11 +147,14 @@ export function JoinPage({ token, onAccepted }: JoinPageProps) {
       window.location.assign(result.redirect);
       return;
     }
-    if (result.code === "passcode_required") {
-      // Surface the passcode field on first refusal. Clear any stale
-      // passcode value so the joiner does not re-submit the same wrong
-      // digits silently — they have to re-enter, which the spec for
-      // "wrong passcode" calls for anyway.
+    // First refusal: surface the passcode field. Clear the stored
+    // value (it was empty anyway since the field was hidden, but
+    // explicit zero-state is harmless here). On *subsequent*
+    // refusals we leave whatever the joiner typed alone — wiping it
+    // forces them to retype six digits to fix a single-digit typo,
+    // which is hostile UX and the security gate already rate-limits
+    // attempts via the share-handler token bucket.
+    if (result.code === "passcode_required" && !passcodeRequired) {
       setPasscodeRequired(true);
       setPasscode("");
     }
@@ -194,7 +197,14 @@ export function JoinPage({ token, onAccepted }: JoinPageProps) {
           onChange={(event) => setDisplayName(event.target.value)}
           disabled={submitting}
           aria-invalid={errorCode === "name_required"}
-          aria-describedby={errorMessage ? errorId : undefined}
+          // Only attach aria-describedby when the error actually targets
+          // THIS field. With both name + passcode visible, a generic
+          // "errorMessage ? errorId : undefined" makes a screen reader
+          // announce passcode-targeted errors while the user is on the
+          // name field (and vice-versa).
+          aria-describedby={
+            errorMessage && errorCode === "name_required" ? errorId : undefined
+          }
         />
         {passcodeRequired ? (
           <>
@@ -234,7 +244,15 @@ export function JoinPage({ token, onAccepted }: JoinPageProps) {
                 errorCode === "passcode_required" ||
                 errorCode === "passcode_missing"
               }
-              aria-describedby={errorMessage ? errorId : undefined}
+              // Same per-field rule as the name input — only describe
+              // the passcode field when the live error targets it.
+              aria-describedby={
+                errorMessage &&
+                (errorCode === "passcode_required" ||
+                  errorCode === "passcode_missing")
+                  ? errorId
+                  : undefined
+              }
               maxLength={6}
             />
           </>

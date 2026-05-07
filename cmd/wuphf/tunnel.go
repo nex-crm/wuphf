@@ -514,17 +514,23 @@ func (c *webTunnelController) joinGate(token, supplied string) error {
 	if !ok {
 		return errJoinPasscodeRequired
 	}
-	// Distinguish "joiner submitted nothing" from "joiner submitted the
-	// wrong code". Both produce identical wire responses (the gate's
-	// indistinguishability invariant), but the audit log loses fidelity
-	// if both paths return the same sentinel — operators investigating
-	// suspicious traffic want to tell brute-force attempts (many
-	// non-empty mismatches) apart from the legitimate "joiner forgot
-	// to type the passcode and clicked submit" case.
-	if strings.TrimSpace(supplied) == "" {
+	// Trim once and use the canonicalised value for BOTH the emptiness
+	// check AND the constant-time compare. Without this, a programmatic
+	// caller submitting "835291 " (trailing space) would hit the
+	// "wrong passcode" path even though the digits match — the bundled
+	// React client strips non-digits before submit, so this is
+	// unreachable from the UI, but the gate is what enforces the shape.
+	//
+	// Distinguishing "joiner submitted nothing" from "joiner submitted
+	// wrong digits" is intentional: both produce the same wire response
+	// (the indistinguishability invariant), but the audit log loses
+	// fidelity if both collapse to one sentinel — operators want to tell
+	// brute-force attempts apart from a click-through-without-passcode.
+	trimmed := strings.TrimSpace(supplied)
+	if trimmed == "" {
 		return errJoinPasscodeRequired
 	}
-	if !constantTimeCompare(supplied, expected) {
+	if !constantTimeCompare(trimmed, expected) {
 		return errJoinPasscodeInvalid
 	}
 	return nil
