@@ -49,7 +49,7 @@ export default function Wiki({
 
   useEffect(() => {
     let cancelled = false;
-    // Parallel fetch: catalog, sections, and skills are all independent.
+    // Parallel fetch: catalog and sections are independent.
     Promise.all([fetchCatalog(), fetchSections()])
       .then(([c, s]) => {
         if (cancelled) return;
@@ -65,8 +65,10 @@ export default function Wiki({
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
     getSkillsList("all")
       .then((res) => {
+        if (cancelled) return;
         setSidebarSkills(
           (res.skills ?? []).map((s) => ({
             name: s.name,
@@ -78,6 +80,9 @@ export default function Wiki({
       .catch(() => {
         // Skills section is additive — a failure here should not break the wiki.
       });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const refreshCatalog = useCallback(() => {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { patchSkill, type Skill } from "../../../api/client";
 import { fetchArticle } from "../../../api/wiki";
@@ -284,15 +284,31 @@ function SkillFullContent({
 }) {
   const [content, setContent] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  // Capture fallback in a ref so changing it never re-triggers a fresh fetch;
+  // it is only used as an error fallback, not a fetch trigger.
+  const fallbackRef = useRef(fallbackContent);
+  useEffect(() => {
+    fallbackRef.current = fallbackContent;
+  }, [fallbackContent]);
 
   useEffect(() => {
+    let cancelled = false;
     setLoading(true);
     setContent(null);
     fetchArticle(`team/skills/${skillName}.md`)
-      .then((article) => setContent(article.content))
-      .catch(() => setContent(fallbackContent ?? null))
-      .finally(() => setLoading(false));
-  }, [skillName, fallbackContent]);
+      .then((article) => {
+        if (!cancelled) setContent(article.content);
+      })
+      .catch(() => {
+        if (!cancelled) setContent(fallbackRef.current ?? null);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [skillName]);
 
   if (loading) {
     return (

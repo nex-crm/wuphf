@@ -148,14 +148,14 @@ export default function WikiSidebar({
                 </div>
               );
             })}
+        {skills && skills.length > 0 ? (
+          <SkillsNavSection
+            skills={skills}
+            currentPath={currentPath}
+            onNavigate={onNavigate}
+          />
+        ) : null}
       </div>
-      {skills && skills.length > 0 ? (
-        <SkillsNavSection
-          skills={skills}
-          currentPath={currentPath}
-          onNavigate={onNavigate}
-        />
-      ) : null}
       {onNavigateAudit ? (
         <div className="wk-sidebar-audit">
           <button
@@ -516,23 +516,17 @@ function SkillsNavSection({
   const [expanded, setExpanded] = useState(true);
   const currentKey = articlePathKey(currentPath ?? "");
 
-  const activeSkills = skills.filter((s) => !s.status || s.status === "active");
-  const otherSkills = skills.filter((s) => s.status && s.status !== "active");
-  const sorted = [
-    ...activeSkills.sort((a, b) => (a.name || "").localeCompare(b.name || "")),
-    ...otherSkills.sort((a, b) => (a.name || "").localeCompare(b.name || "")),
-  ];
+  const sorted = useMemo(() => {
+    const active = skills.filter((s) => !s.status || s.status === "active");
+    const other = skills.filter((s) => s.status && s.status !== "active");
+    return [
+      ...active.sort((a, b) => (a.name || "").localeCompare(b.name || "")),
+      ...other.sort((a, b) => (a.name || "").localeCompare(b.name || "")),
+    ];
+  }, [skills]);
 
   return (
-    <div
-      className="wk-section-group"
-      data-section-slug="skills"
-      style={{
-        borderTop: "1px solid var(--border-subtle, var(--neutral-200))",
-        paddingTop: 8,
-        marginTop: 4,
-      }}
-    >
+    <div className="wk-section-group" data-section-slug="skills">
       <h3
         className="wk-section-header wk-section-schema"
         style={{ cursor: "pointer" }}
