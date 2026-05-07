@@ -335,7 +335,8 @@ export function AgentProfilePanel({ agent, onClose }: AgentProfilePanelProps) {
 
   const { data: channels = [] } = useQuery({
     queryKey: ["channels"],
-    queryFn: () => getChannels().then((r) => r.channels ?? []),
+    queryFn: () => getChannels(),
+    select: (data) => data.channels ?? [],
     refetchInterval: 30_000,
   });
 
