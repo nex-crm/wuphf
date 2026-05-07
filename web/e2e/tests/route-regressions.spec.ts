@@ -291,12 +291,9 @@ test.describe("PR #634 review pins", () => {
 
     for (const { route, label } of surfaces) {
       await page.goto(route);
-      await expect(page.locator(".channel-title")).toBeVisible({
-        timeout: 10_000,
-      });
-      const headerText = (
-        await page.locator(".channel-title").textContent()
-      )?.trim();
+      const breadcrumbLeaf = page.locator(".breadcrumb-link-active");
+      await expect(breadcrumbLeaf).toBeVisible({ timeout: 10_000 });
+      const headerText = (await breadcrumbLeaf.textContent())?.trim();
       // The status bar layout is: <StatusPill /> <channelLabel /> <modeLabel />
       // where StatusPill is also `.status-bar-item` (workspace pill). The
       // route label is the SECOND .status-bar-item — pin to that index

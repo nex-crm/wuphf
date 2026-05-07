@@ -136,7 +136,7 @@ export function CollapsedSidebar() {
         <button
           type="button"
           className={`sidebar-icon-btn${popover === "team" ? " is-open" : ""}`}
-          aria-label="Team"
+          aria-label="Agents"
           aria-haspopup="dialog"
           aria-expanded={popover === "team"}
           onMouseEnter={() => openPopover("team")}
@@ -207,7 +207,7 @@ export function CollapsedSidebar() {
             >
               <div className="sidebar-rail-popover-title">
                 {popover === "team"
-                  ? "Team"
+                  ? "Agents"
                   : popover === "channels"
                     ? "Channels"
                     : "Usage"}

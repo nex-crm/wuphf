@@ -1905,6 +1905,134 @@ html[data-theme="nex"]
   color: var(--text);
 }
 
+/* ─── Breadcrumb ─── */
+.breadcrumb {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  min-width: 0;
+}
+.breadcrumb-segment {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+.breadcrumb-sep {
+  color: var(--text-tertiary);
+  padding: 0 2px;
+  font-weight: 400;
+}
+.breadcrumb-link {
+  color: var(--text-secondary);
+  text-decoration: none;
+  border-radius: 4px;
+  padding: 1px 4px;
+  transition: color 0.12s, background 0.12s;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+  display: inline-block;
+}
+.breadcrumb-link:hover {
+  color: var(--text);
+  background: var(--bg-warm);
+}
+.breadcrumb-link-active {
+  color: var(--text);
+  font-weight: 600;
+}
+.breadcrumb-leaf {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.breadcrumb-copy-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: var(--text-tertiary);
+  border-radius: 4px;
+  padding: 0;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s, color 0.12s, background 0.12s;
+}
+.breadcrumb:hover .breadcrumb-copy-btn,
+.breadcrumb-leaf:hover .breadcrumb-copy-btn {
+  opacity: 1;
+  pointer-events: auto;
+}
+.breadcrumb-copy-btn:hover {
+  color: var(--text);
+  background: var(--bg-warm);
+}
+.breadcrumb-copy-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* ─── Recent objects (sidebar panel) ─── */
+.recent-objects {
+  padding: 6px 0 4px;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.recent-objects-title {
+  padding: 6px var(--sidebar-pad-x) 4px;
+  margin-bottom: 0;
+}
+.recent-objects-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 2px 0;
+}
+.recent-objects-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 22px;
+  text-decoration: none;
+  font-size: 12px;
+  color: var(--text-secondary);
+  border-radius: 0;
+  transition: background 0.12s, color 0.12s;
+  white-space: nowrap;
+  overflow: hidden;
+  border: none;
+  background: transparent;
+}
+.recent-objects-item:hover {
+  background: var(--bg-warm);
+  color: var(--text);
+}
+.recent-objects-icon {
+  flex-shrink: 0;
+  opacity: 0.6;
+  color: var(--text-tertiary);
+}
+.recent-objects-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
 /* ─── DM Banner ─── */
 .dm-banner {
   display: none;
