@@ -121,17 +121,17 @@ type humanInterview struct {
 	// Redacted is set true when sanitizeHumanInterview stripped at least one
 	// secret from any field. The UI surfaces a badge so humans know the
 	// question/context/options they are reading has been partially censored.
-	Redacted         bool     `json:"redacted,omitempty"`
-	RedactionCount   int      `json:"redaction_count,omitempty"`
-	RedactionReasons []string `json:"redaction_reasons,omitempty"`
-	DedupeKey  string           `json:"dedupe_key,omitempty"`
-	DueAt      string           `json:"due_at,omitempty"`
-	FollowUpAt string           `json:"follow_up_at,omitempty"`
-	ReminderAt string           `json:"reminder_at,omitempty"`
-	RecheckAt  string           `json:"recheck_at,omitempty"`
-	CreatedAt  string           `json:"created_at"`
-	UpdatedAt  string           `json:"updated_at,omitempty"`
-	Answered   *interviewAnswer `json:"answered,omitempty"`
+	Redacted         bool             `json:"redacted,omitempty"`
+	RedactionCount   int              `json:"redaction_count,omitempty"`
+	RedactionReasons []string         `json:"redaction_reasons,omitempty"`
+	DedupeKey        string           `json:"dedupe_key,omitempty"`
+	DueAt            string           `json:"due_at,omitempty"`
+	FollowUpAt       string           `json:"follow_up_at,omitempty"`
+	ReminderAt       string           `json:"reminder_at,omitempty"`
+	RecheckAt        string           `json:"recheck_at,omitempty"`
+	CreatedAt        string           `json:"created_at"`
+	UpdatedAt        string           `json:"updated_at,omitempty"`
+	Answered         *interviewAnswer `json:"answered,omitempty"`
 }
 
 type humanInvite struct {
