@@ -234,6 +234,17 @@ type ShareInviteDetails struct {
 // broker-issued metadata (invite ID and RFC3339 expiry). Identical to
 // CreateInvite for URL construction; see CreateInvite for the override
 // precedence rule.
+//
+// CONCURRENCY NOTE: when more than one in-process controller can mint
+// invites against the same ShareTransport instance (e.g. the network-share
+// controller and the public-tunnel controller running side-by-side),
+// callers MUST use CreateInviteDetailedWithBuilder instead. This method
+// reads the override builder via SetURLBuilder, which is a separate atomic
+// operation from invite creation and can be raced — a tunnel that calls
+// SetURLBuilder(tunnelJoinURL) immediately followed by CreateInviteDetailed
+// can have its builder overwritten by a parallel share path's
+// SetURLBuilder(shareJoinURL), producing an invite URL with the wrong
+// origin.
 func (s *ShareTransport) CreateInviteDetailed(_ context.Context) (ShareInviteDetails, error) {
 	if s == nil || s.broker == nil {
 		return ShareInviteDetails{}, fmt.Errorf("share: CreateInviteDetailed: nil broker")
@@ -245,6 +256,33 @@ func (s *ShareTransport) CreateInviteDetailed(_ context.Context) (ShareInviteDet
 	builder := s.urlBuilder
 	if override := s.urlBuilderOverride.Load(); override != nil {
 		builder = *override
+	}
+	return ShareInviteDetails{
+		URL:       builder(token),
+		InviteID:  invite.ID,
+		ExpiresAt: invite.ExpiresAt,
+	}, nil
+}
+
+// CreateInviteDetailedWithBuilder is the race-free variant: the URL builder
+// is bound atomically to this single invite-creation, never touching the
+// shared urlBuilderOverride field. Concurrent callers each see their own
+// builder applied to their own token. Use this from any code path that may
+// run alongside another controller that also mints invites against the
+// same ShareTransport instance.
+//
+// A nil builder is rejected so a misuse fails loudly rather than silently
+// substituting an empty string for the URL.
+func (s *ShareTransport) CreateInviteDetailedWithBuilder(_ context.Context, builder JoinURLBuilder) (ShareInviteDetails, error) {
+	if s == nil || s.broker == nil {
+		return ShareInviteDetails{}, fmt.Errorf("share: CreateInviteDetailedWithBuilder: nil broker")
+	}
+	if builder == nil {
+		return ShareInviteDetails{}, fmt.Errorf("share: CreateInviteDetailedWithBuilder: nil builder")
+	}
+	token, invite, err := s.broker.createHumanInvite()
+	if err != nil {
+		return ShareInviteDetails{}, fmt.Errorf("share: CreateInviteDetailedWithBuilder: %w", err)
 	}
 	return ShareInviteDetails{
 		URL:       builder(token),

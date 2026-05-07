@@ -9,8 +9,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/nex-crm/wuphf/cmd/wuphf/channelui"
@@ -694,6 +696,28 @@ func runWeb(args []string, packSlug string, unsafe bool, webPort int, opusCEO bo
 	l.SetFocusMode(!collabMode)
 	l.SetNoOpen(noOpen)
 	shareController := newWebShareController(webPort)
+	tunnelController := newWebTunnelController()
+
+	// Clean up tunnel/share subprocesses when the process receives SIGINT or
+	// SIGTERM. Without this, cloudflared is left running as an orphan after
+	// Ctrl+C — especially problematic on Windows where child processes are not
+	// automatically reaped.
+	go func() {
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+		sig := <-sigCh
+		_ = shareController.stop()
+		_ = tunnelController.stop()
+		// POSIX convention: a process killed by signal N exits with 128+N
+		// so process supervisors (systemd, npm, foreman) can distinguish a
+		// clean exit from an interrupted run. os.Exit(0) here would mask
+		// Ctrl+C as success in any caller that checks $?.
+		if s, ok := sig.(syscall.Signal); ok {
+			os.Exit(128 + int(s))
+		}
+		os.Exit(1)
+	}()
+
 	if err := l.PreflightWeb(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
@@ -701,6 +725,8 @@ func runWeb(args []string, packSlug string, unsafe bool, webPort int, opusCEO bo
 	wireBrokerWorkspaces(l, func(b *team.Broker) {
 		shareController.SetBroker(b)
 		b.SetWebShareController(shareController.start, shareController.status, shareController.stop)
+		tunnelController.SetBroker(b)
+		b.SetWebTunnelController(tunnelController.start, tunnelController.status, tunnelController.stop)
 	})
 	fmt.Printf("Launching %s web view (%d agents)... the browser is the office now.\n", l.PackName(), l.AgentCount())
 	if err := l.LaunchWeb(webPort); err != nil {

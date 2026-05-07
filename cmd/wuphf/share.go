@@ -129,10 +129,15 @@ func (c *webShareController) clearInviteLocked() {
 func (c *webShareController) issueInviteLocked(ctx context.Context, bind string, port int, brokerURL string, brokerTokenFn func() (string, error)) (string, string, error) {
 	if c.broker != nil {
 		if st := c.broker.ShareTransport(); st != nil {
-			st.SetURLBuilder(func(token string) string {
+			// Bind the URL builder atomically to this invite-creation. Using
+			// SetURLBuilder + CreateInviteDetailed as separate calls races
+			// with the public-tunnel controller (cmd/wuphf/tunnel.go), which
+			// also mints invites against the same ShareTransport instance —
+			// concurrent calls could swap each other's builders mid-flight
+			// and hand a teammate a URL with the wrong origin.
+			details, err := st.CreateInviteDetailedWithBuilder(ctx, func(token string) string {
 				return shareJoinURL(bind, port, token)
 			})
-			details, err := st.CreateInviteDetailed(ctx)
 			if err != nil {
 				return "", "", err
 			}

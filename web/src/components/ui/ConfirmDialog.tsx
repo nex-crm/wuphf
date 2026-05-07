@@ -1,9 +1,15 @@
 // biome-ignore-all lint/a11y/useKeyWithClickEvents: Pointer handler is paired with an existing modal, image, or routed-control keyboard path; preserving current interaction model.
-import { useCallback, useEffect, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useState } from "react";
 
 interface ConfirmOptions {
   title?: string;
   message: string;
+  /**
+   * Optional rich body rendered below `message`. Use when the disclaimer
+   * needs structure (e.g. a bulleted list of risks for the public-tunnel
+   * warning) that a plain string would otherwise force into one paragraph.
+   */
+  details?: ReactNode;
   confirmLabel?: string;
   cancelLabel?: string;
   /** Red "danger" styling for destructive actions. */
@@ -93,6 +99,9 @@ export function ConfirmHost() {
       <div className="confirm-card card">
         <h3 className="confirm-title">{opts.title || "Are you sure?"}</h3>
         <p className="confirm-message">{opts.message}</p>
+        {opts.details ? (
+          <div className="confirm-details">{opts.details}</div>
+        ) : null}
         <div className="confirm-actions">
           <button
             type="button"

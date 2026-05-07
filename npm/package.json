@@ -7,7 +7,9 @@
   },
   "files": [
     "bin/wuphf.js",
+    "scripts/cloudflared.json",
     "scripts/download-binary.js",
+    "scripts/download-cloudflared.js",
     "scripts/postinstall.js",
     "scripts/version-check.js",
     "README.md"
