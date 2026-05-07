@@ -109,7 +109,7 @@ OS integration detail.
 |---|---|---|---|
 | HTTP | `/api/*` on the web UI listener | stripped path on broker API listener | `internal/team/broker_web_proxy.go`, `internal/team/broker.go`, `web/src/api/client.ts` |
 | SSE | `/api/events` on the web UI listener | `/events` on broker API listener | `internal/team/broker_sse.go`, `web/src/hooks/useBrokerEvents.ts`, `web/src/api/*` subscribers |
-| WebSocket | broker loopback URL from `/api-token` | `/terminal/agents/{slug}` | `internal/team/broker_terminal.go`, `web/src/lib/agentTerminalSocket.ts`, `web/src/api/client.ts:264` |
+| WebSocket | broker loopback URL from `/api-token` | `/terminal/agents/{slug}` | `internal/team/broker_terminal.go`, `web/src/lib/agentTerminalSocket.ts`, `web/src/api/client.ts (websocketURL)` |
 
 HTTP requests use the same-origin proxy. `web/src/api/client.ts` keeps
 `apiBase` as `/api` in proxy mode, so `get`, `post`, `put`, `patch`, and
@@ -164,7 +164,7 @@ WebSocket is the terminal transport. `internal/team/broker.go` registers
 ```
 
 `web/src/lib/agentTerminalSocket.ts` builds that path and calls
-`websocketURL()` from `web/src/api/client.ts:264`. In current proxy mode,
+`websocketURL()` from `web/src/api/client.ts (websocketURL)`. In current proxy mode,
 `websocketURL()` uses the `broker_url` returned by `/api-token`, changes
 `http` to `ws`, and appends the token as a `token` query parameter. That means
 the terminal socket is loopback app data on the broker API listener, not a
