@@ -88,7 +88,7 @@ function statusLabel(status: string): string {
 
 // ── Scheduler helpers ─────────────────────────────────────────────────────────
 
-/** Group one-shot scheduler jobs by the day their `next_run` falls on. */
+/** Group scheduler jobs by the day their `next_run` falls on. */
 function groupSchedulerJobsByDay(
   jobs: SchedulerJob[],
   dayKeys: string[],
@@ -116,7 +116,6 @@ type ViewMode = "week" | "agenda";
  *
  * Desktop: week grid with agent swimlanes, day columns, task chips, and
  * scheduler jobs in a distinct visual treatment.
- * Mobile: agenda/list mode toggled automatically below 640px via JS state.
  * Unscheduled tasks appear in a bottom tray; unassigned tasks get their own
  * swimlane.
  */
@@ -168,7 +167,7 @@ export function CalendarApp() {
   }, [tasksByAgent]);
 
   const isLoading = tasksResult.isLoading || schedulerResult.isLoading;
-  const hasError = tasksResult.error || schedulerResult.error;
+  const hasError = !!tasksResult.error;
 
   const goToPrevWeek = () => setWeekStart((w) => addDays(w, -7));
   const goToNextWeek = () => setWeekStart((w) => addDays(w, 7));
@@ -321,7 +320,7 @@ interface WeekGridProps {
 
 /**
  * Week grid: each row is an agent swimlane, each column is a day.
- * Scheduler one-shot jobs appear in a separate row at the top with a clock
+ * Scheduler jobs appear in a separate system row at the top with a clock
  * badge so they are visually distinct from task due dates.
  */
 function WeekGrid({
@@ -333,9 +332,7 @@ function WeekGrid({
   unscheduledTasks,
   today,
 }: WeekGridProps) {
-  const hasTasks = agentSlugs.some(
-    (slug) => (tasksByAgent[slug]?.length ?? 0) > 0,
-  );
+  const hasTasks = dayKeys.some((k) => (tasksByWeek[k]?.length ?? 0) > 0);
   const hasSchedulerJobs = dayKeys.some(
     (k) => (schedulerByDay[k]?.length ?? 0) > 0,
   );
