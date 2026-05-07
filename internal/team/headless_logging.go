@@ -58,7 +58,7 @@ func appendHeadlessCodexLog(slug string, line string) {
 		return
 	}
 	defer func() { _ = f.Close() }()
-	_, _ = fmt.Fprintf(f, "[%s] %s\n", time.Now().Format(time.RFC3339), strings.TrimSpace(line))
+	_, _ = fmt.Fprintf(f, "[%s] %s\n", time.Now().Format(time.RFC3339), redactSecretsInText(strings.TrimSpace(line)))
 }
 
 func appendHeadlessCodexLatency(slug string, line string) {
@@ -71,7 +71,7 @@ func appendHeadlessCodexLatency(slug string, line string) {
 		return
 	}
 	defer func() { _ = f.Close() }()
-	_, _ = fmt.Fprintf(f, "[%s] agent=%s %s\n", time.Now().Format(time.RFC3339), strings.TrimSpace(slug), strings.TrimSpace(line))
+	_, _ = fmt.Fprintf(f, "[%s] agent=%s %s\n", time.Now().Format(time.RFC3339), strings.TrimSpace(slug), redactSecretsInText(strings.TrimSpace(line)))
 }
 
 func appendHeadlessClaudeLog(slug string, line string) {
@@ -84,7 +84,7 @@ func appendHeadlessClaudeLog(slug string, line string) {
 		return
 	}
 	defer func() { _ = f.Close() }()
-	_, _ = fmt.Fprintf(f, "[%s] %s\n", time.Now().Format(time.RFC3339), strings.TrimSpace(line))
+	_, _ = fmt.Fprintf(f, "[%s] %s\n", time.Now().Format(time.RFC3339), redactSecretsInText(strings.TrimSpace(line)))
 }
 
 func appendHeadlessClaudeLatency(slug string, line string) {
@@ -97,5 +97,5 @@ func appendHeadlessClaudeLatency(slug string, line string) {
 		return
 	}
 	defer func() { _ = f.Close() }()
-	_, _ = fmt.Fprintf(f, "[%s] agent=%s %s\n", time.Now().Format(time.RFC3339), strings.TrimSpace(slug), strings.TrimSpace(line))
+	_, _ = fmt.Fprintf(f, "[%s] agent=%s %s\n", time.Now().Format(time.RFC3339), strings.TrimSpace(slug), redactSecretsInText(strings.TrimSpace(line)))
 }

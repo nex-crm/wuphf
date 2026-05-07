@@ -283,6 +283,9 @@ export interface Message {
   from: string;
   channel: string;
   content: string;
+  redacted?: boolean;
+  redaction_count?: number;
+  redaction_reasons?: string[];
   timestamp: string;
   reply_to?: string;
   thread_id?: string;
@@ -541,6 +544,9 @@ export interface AgentRequest {
   metadata?: InterviewMetadata;
   /** Full candidate spec on enhance_skill_proposal interviews. */
   enhance_candidate?: Skill;
+  redacted?: boolean;
+  redaction_count?: number;
+  redaction_reasons?: string[];
 }
 
 export function getRequests(channel: string) {
