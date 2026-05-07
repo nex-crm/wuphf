@@ -1,10 +1,13 @@
 # Go binary
 /wuphf
+/wuphfbench
+/wuphfbench.exe
 /nex
 /bridge
 /wuphf-oc-probe
 
 # Local artifacts
+/bench/results/
 /docs/*
 !/docs/specs/
 !/docs/specs/**
