@@ -452,18 +452,19 @@ function OwnerFilterBar({
         display: "flex",
         alignItems: "center",
         gap: 8,
+        // Pull the filter UP into the gap left by the parent's sticky
+        // page header (Settings → Skills section heading + hr), then
+        // pad the bg back down so the controls sit where they used to.
+        // Net effect: the filter's opaque background covers the seam
+        // between the page header and the filter, so cards no longer
+        // peek through when scrolling.
+        marginTop: -32,
         marginBottom: 14,
         position: "sticky",
-        // -1px lifts the bg edge above the previous sibling so cards
-        // scrolling up don't peek through the seam between the heading
-        // and the filter row.
-        top: -1,
+        top: 0,
         zIndex: 20,
         background: "var(--bg, var(--bg-card, #fff))",
-        // padding-top covers the same seam from the inside.
-        padding: "10px 0 10px",
-        // Bottom shadow gives the filter a subtle "shelf" so users can
-        // see content scrolling under it.
+        padding: "32px 0 12px",
         boxShadow: "0 6px 8px -8px rgba(0, 0, 0, 0.25)",
       }}
     >
