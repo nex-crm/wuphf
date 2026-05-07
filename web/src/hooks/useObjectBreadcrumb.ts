@@ -88,7 +88,7 @@ export function deriveBreadcrumbs(route: CurrentRoute): BreadcrumbItem[] {
         }];
       }
       // Generic app — one segment with the app title.
-      return [{ label: appLabel(route.appId), href: `#/apps/${route.appId}` }];
+      return [{ label: appLabel(route.appId), href: `#/apps/${encodeURIComponent(route.appId)}` }];
     }
     case "channel":
     case "unknown":
