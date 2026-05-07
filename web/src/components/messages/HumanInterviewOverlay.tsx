@@ -7,7 +7,9 @@ import {
   cancelRequest,
 } from "../../api/client";
 import { useRequests } from "../../hooks/useRequests";
+import { parseApprovalContext } from "../../lib/parseApprovalContext";
 import { showNotice } from "../ui/Toast";
+import { ApprovalContextView } from "./ApprovalContextView";
 
 /**
  * Global blocking-request overlay. Always renders the first blocking pending
@@ -91,6 +93,10 @@ function BlockingInterview({
   const enhancesSlug = isEnhanceInterview
     ? (request.metadata?.enhances_slug as string | undefined)
     : undefined;
+  const isApproval = request.kind === "approval";
+  const parsedApproval = isApproval
+    ? parseApprovalContext(request.context)
+    : null;
 
   return (
     <div
@@ -102,6 +108,9 @@ function BlockingInterview({
       <div className="interview-card">
         <div className="interview-meta">
           <span className="badge badge-yellow">BLOCKING</span>
+          {isApproval ? (
+            <span className="badge badge-orange">EXTERNAL ACTION</span>
+          ) : null}
           <span className="interview-from">@{request.from || "agent"}</span>
           {request.channel ? (
             <span className="interview-channel">in #{request.channel}</span>
@@ -147,8 +156,12 @@ function BlockingInterview({
           </div>
         ) : null}
         <p className="interview-question">{request.question}</p>
-        {request.context ? (
-          <p className="interview-context">{request.context}</p>
+        {parsedApproval ? (
+          <ApprovalContextView parsed={parsedApproval} />
+        ) : request.context ? (
+          <p className="interview-context" style={{ whiteSpace: "pre-wrap" }}>
+            {request.context}
+          </p>
         ) : null}
         {options.length > 0 ? (
           <div className="interview-actions">

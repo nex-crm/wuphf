@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/nex-crm/wuphf/internal/agent"
 )
 
 // TestHeadlessRunnersWireLiveChatRelay guards against the regression where
@@ -417,6 +419,80 @@ func TestApprovedAgentIssueSelfHealFailureSurfacesToChat(t *testing.T) {
 	}
 	if got := msgs[0]; got.From != "system" || got.Kind != agentIssueMessageKind || !strings.Contains(got.Content, "could not be created") {
 		t.Fatalf("unexpected surfaced failure message: %+v", got)
+	}
+}
+
+// TestMaybeCreateApprovedSelfHealTask_OverflowMarksError guards that when an
+// approved self-heal request lands at the per-agent cap and merges into
+// another self-heal lane, the issue records the divergence in
+// SelfHealError. Without this marker, the issue would silently link to a
+// task whose original TaskID is unrelated, with no observable signal of the
+// overflow merge.
+func TestMaybeCreateApprovedSelfHealTask_OverflowMarksError(t *testing.T) {
+	b := newTestBroker(t)
+	l := &Launcher{broker: b}
+	ensureTestMemberAccess(b, "general", "eng", "Engineer")
+
+	// Pin @eng at the cap with self-heal tasks for taskIDs the issue does
+	// not match. The approved request below carries a fresh TaskID, so the
+	// exact-reuse path misses and we fall into overflow merge.
+	for i := 0; i < maxActiveSelfHealsPerAgent; i++ {
+		l.postEscalation("eng", fmt.Sprintf("eng-pre-%d", i), agent.EscalationStuck, "earlier")
+	}
+	if got := countActiveSelfHealsForAgent(b, "eng"); got != maxActiveSelfHealsPerAgent {
+		t.Fatalf("setup: expected @eng pinned at cap (%d), got %d", maxActiveSelfHealsPerAgent, got)
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	b.mu.Lock()
+	b.requests = append(b.requests, humanInterview{
+		ID:        "request-overflow-1",
+		Kind:      "approval",
+		Status:    "answered",
+		From:      "system",
+		Channel:   "general",
+		Title:     "Approve self-heal",
+		Question:  "Proceed?",
+		CreatedAt: now,
+		UpdatedAt: now,
+		Answered:  &interviewAnswer{ChoiceID: "approve", AnsweredAt: now},
+	})
+	b.agentIssues = append(b.agentIssues, agentIssueRecord{
+		ID:                "issue-overflow-1",
+		Agent:             "eng",
+		Channel:           "general",
+		TaskID:            "eng-fresh-1",
+		Detail:            "browser access is not available",
+		NormalizedKey:     normalizedAgentIssueKey("eng", "general", "browser access is not available"),
+		ApprovalRequestID: "request-overflow-1",
+		Count:             1,
+		CreatedAt:         now,
+		UpdatedAt:         now,
+	})
+	b.maybeCreateApprovedSelfHealTaskLocked(b.requests[len(b.requests)-1])
+	b.mu.Unlock()
+
+	if got := countActiveSelfHealsForAgent(b, "eng"); got != maxActiveSelfHealsPerAgent {
+		t.Fatalf("active count must stay at cap after overflow merge, got %d", got)
+	}
+	issues := b.AgentIssues()
+	if len(issues) != 1 {
+		t.Fatalf("expected one issue, got %+v", issues)
+	}
+	got := issues[0]
+	if got.SelfHealTaskID == "" {
+		t.Fatalf("expected SelfHealTaskID to bind to the overflow lane, got empty")
+	}
+	if !strings.Contains(got.SelfHealError, "merged into agent self-heal overflow lane") {
+		t.Fatalf("expected SelfHealError to record overflow merge, got %q", got.SelfHealError)
+	}
+	// The bound task must NOT be the issue's own would-be title — it is the
+	// overflow target.
+	expectedTitle := selfHealingTaskTitle("eng", "eng-fresh-1")
+	for _, task := range b.AllTasks() {
+		if task.ID == got.SelfHealTaskID && task.Title == expectedTitle {
+			t.Fatalf("overflow case must not bind to the issue's own self-heal title, got task=%+v", task)
+		}
 	}
 }
 

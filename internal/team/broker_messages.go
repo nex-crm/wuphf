@@ -256,6 +256,19 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	b.mu.Unlock()
 
+	// PR 2: human "remember" intent. Hook fires AFTER b.mu.Unlock() and ONLY
+	// for human senders. Handle is a non-blocking enqueue; the classifier and
+	// the wiki write run in the writer goroutine, never re-entering b.mu.
+	if b.humanWikiWriter != nil && isHumanMessageSender(msg.From) {
+		b.humanWikiWriter.Handle(msg)
+	}
+	// PR 5: channel intent classifier. Fires for ALL senders (human OR
+	// agent) — context-asks happen in any channel message form. The
+	// classifier's question-form filter, evaluated inside the dispatcher
+	// goroutine, restricts the actual demand recording to genuine
+	// interrogative phrases. Handle is a non-blocking enqueue.
+	b.dispatchChannelIntentAsync(msg)
+
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"id":    msg.ID,
@@ -379,7 +392,11 @@ func (b *Broker) bootstrapHumanHasPostedLocked() {
 		return
 	}
 	for _, msg := range b.messages {
-		if isHumanMessageSender(msg.From) {
+		// Mirror the empty-From guard in appendMessageLocked:
+		// isHumanMessageSender("") returns true (legacy), so an empty
+		// From field must be rejected here too or a corrupted/legacy
+		// persisted message would falsely flip the bit on restart.
+		if strings.TrimSpace(msg.From) != "" && isHumanMessageSender(msg.From) {
 			b.humanHasPosted = true
 			return
 		}
@@ -474,6 +491,20 @@ func (b *Broker) PostMessage(from, channel, content string, tagged []string, rep
 			Content:   msg.Content,
 			Timestamp: time.Now().UTC(),
 		})
+	}
+	// PR 2: when a human posts via PostMessage (non-HTTP entry points such as
+	// integration tests and a small set of in-process callers), the same
+	// remember-intent hook fires. Handle is non-blocking and the writer
+	// goroutine never re-enters b.mu, so calling it under the lock is safe.
+	if b.humanWikiWriter != nil && isHumanMessageSender(msg.From) {
+		b.humanWikiWriter.Handle(msg)
+	}
+	// PR 5: channel intent dispatcher fires for ALL senders. Same lock
+	// invariants as PR 2's Handle: the dispatcher's queue-send is non-
+	// blocking and its goroutine never re-enters b.mu, so calling it
+	// under b.mu is safe.
+	if b.channelIntentDispatcher != nil {
+		b.channelIntentDispatcher.Handle(msg)
 	}
 	return msg, nil
 }

@@ -8,7 +8,14 @@ export function useOfficeMembers() {
     queryKey: ["office-members"],
     queryFn: () => getOfficeMembers(),
     refetchInterval: 5000,
-    select: (data) => data.members ?? [],
+    select: (data) =>
+      (data.members ?? []).map((m) => {
+        const trimmed = m.task?.trim();
+        // Normalise at the source: coerce whitespace-only task strings to
+        // undefined so every consumer gets a clean value without defensive
+        // .trim() calls downstream.
+        return trimmed ? { ...m, task: trimmed } : { ...m, task: undefined };
+      }),
   });
 }
 

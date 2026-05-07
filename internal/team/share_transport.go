@@ -53,12 +53,21 @@ func RelativeJoinURL(token string) string { return "/join/" + token }
 
 // ShareTransport adapts the broker's human-share surface to the
 // transport.OfficeBoundTransport contract. It holds no state of its own beyond
-// the broker reference, the URL builder, and the host pointer set by Run.
+// the broker reference, the URL builders, and the host pointer set by Run.
+//
+// Two URL builders exist: the immutable constructor builder (urlBuilder) and
+// an optional override (urlBuilderOverride) that the in-process share
+// controller installs once it knows its bind address. CreateInvite reads the
+// override first; absent an override it falls back to the constructor builder.
+// This split keeps the constructor builder (typically RelativeJoinURL) safe as
+// a default while letting the controller upgrade to absolute URLs without a
+// re-construction dance.
 type ShareTransport struct {
-	broker     *Broker
-	urlBuilder JoinURLBuilder
-	host       atomic.Pointer[transport.Host]
-	startedAt  atomic.Int64 // unix nanos; zero before Run, set on Run entry
+	broker             *Broker
+	urlBuilder         JoinURLBuilder
+	urlBuilderOverride atomic.Pointer[JoinURLBuilder]
+	host               atomic.Pointer[transport.Host]
+	startedAt          atomic.Int64 // unix nanos; zero before Run, set on Run entry
 }
 
 // Compile-time assertion that ShareTransport satisfies OfficeBoundTransport.
@@ -74,6 +83,21 @@ func NewShareTransport(broker *Broker, urlBuilder JoinURLBuilder) *ShareTranspor
 		panic("team: NewShareTransport: urlBuilder is required (use RelativeJoinURL for the degenerate case)")
 	}
 	return &ShareTransport{broker: broker, urlBuilder: urlBuilder}
+}
+
+// SetURLBuilder installs an override URL builder. Passing nil clears the
+// override so CreateInvite falls back to the constructor builder. Atomic so
+// the broker hot path that calls CreateInvite does not contend with the
+// controller installing the override on start.
+func (s *ShareTransport) SetURLBuilder(b JoinURLBuilder) {
+	if s == nil {
+		return
+	}
+	if b == nil {
+		s.urlBuilderOverride.Store(nil)
+		return
+	}
+	s.urlBuilderOverride.Store(&b)
 }
 
 // Name returns the stable adapter identifier.
@@ -173,10 +197,13 @@ func (s *ShareTransport) Health() transport.Health {
 }
 
 // CreateInvite creates a new human-share invite via Broker.createHumanInvite
-// and returns the join URL produced by the injected JoinURLBuilder. The
-// network argument is part of the OfficeBoundTransport contract but
-// ShareTransport ignores it: URL construction is controlled by the builder,
-// which the share controller selects based on its own bind logic.
+// and returns the join URL produced by the active JoinURLBuilder. The override
+// builder (set via SetURLBuilder) wins over the constructor builder so the
+// in-process share controller can upgrade from RelativeJoinURL to an absolute
+// URL once its bind address is known. The network argument is part of the
+// OfficeBoundTransport contract but ShareTransport ignores it: URL
+// construction is controlled by the builder, which the share controller
+// selects based on its own bind logic.
 func (s *ShareTransport) CreateInvite(_ context.Context, _ string) (string, error) {
 	if s == nil || s.broker == nil {
 		return "", fmt.Errorf("share: CreateInvite: nil broker")
@@ -185,7 +212,45 @@ func (s *ShareTransport) CreateInvite(_ context.Context, _ string) (string, erro
 	if err != nil {
 		return "", fmt.Errorf("share: CreateInvite: %w", err)
 	}
-	return s.urlBuilder(token), nil
+	builder := s.urlBuilder
+	if override := s.urlBuilderOverride.Load(); override != nil {
+		builder = *override
+	}
+	return builder(token), nil
+}
+
+// ShareInviteDetails carries the join URL and broker-issued metadata for a
+// freshly created invite. Callers that need more than the URL (e.g. the
+// in-process share controller surfacing the expiry timestamp) should prefer
+// CreateInviteDetailed over CreateInvite. ExpiresAt is the same RFC3339 string
+// the broker stores so callers cannot drift in formatting.
+type ShareInviteDetails struct {
+	URL       string
+	InviteID  string
+	ExpiresAt string
+}
+
+// CreateInviteDetailed creates an invite and returns the join URL plus
+// broker-issued metadata (invite ID and RFC3339 expiry). Identical to
+// CreateInvite for URL construction; see CreateInvite for the override
+// precedence rule.
+func (s *ShareTransport) CreateInviteDetailed(_ context.Context) (ShareInviteDetails, error) {
+	if s == nil || s.broker == nil {
+		return ShareInviteDetails{}, fmt.Errorf("share: CreateInviteDetailed: nil broker")
+	}
+	token, invite, err := s.broker.createHumanInvite()
+	if err != nil {
+		return ShareInviteDetails{}, fmt.Errorf("share: CreateInviteDetailed: %w", err)
+	}
+	builder := s.urlBuilder
+	if override := s.urlBuilderOverride.Load(); override != nil {
+		builder = *override
+	}
+	return ShareInviteDetails{
+		URL:       builder(token),
+		InviteID:  invite.ID,
+		ExpiresAt: invite.ExpiresAt,
+	}, nil
 }
 
 // RevokeInvite revokes the invite and every session it admitted. Per the

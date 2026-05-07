@@ -361,7 +361,7 @@ func (b *notificationContextBuilder) RelevantTaskForTarget(msg channelMessage, s
 
 // ResponseInstructionForTarget returns the per-agent guidance string
 // appended to a notification. Branches: lead-from-human, lead-from-
-// specialist, DM, tagged, owns-matching-task, default-stay-quiet.
+// specialist, DM, tagged, owns-matching-task, default-domain-chime-in.
 func (b *notificationContextBuilder) ResponseInstructionForTarget(msg channelMessage, slug string) string {
 	lead := b.targeter.LeadSlug()
 	if slug == lead {
@@ -388,7 +388,7 @@ func (b *notificationContextBuilder) ResponseInstructionForTarget(msg channelMes
 		}
 		return fmt.Sprintf("You are @%s. You already own matching work. Reply only with concrete progress or a blocker; do not re-triage the thread.", slug)
 	}
-	return fmt.Sprintf("You are @%s. Stay quiet unless you are directly tagged, you own the active work, or you can unblock it. Prefer not to reply.", slug)
+	return fmt.Sprintf("You are @%s. You were woken because the thread brushes your domain. If you have a sharp in-character take, a push-back from your expertise, a quick observation, or a one-line crack that adds energy, drop it — short. Office banter and half-joke riffs are how real teams stumble into ideas, so don't suppress yours when something genuine lands. Skip the turn only if you truly have nothing to add; do not reply just to acknowledge.", slug)
 }
 
 // BuildMessageWorkPacket returns the work packet a notified agent receives
