@@ -392,7 +392,9 @@ func (b *Broker) Start() error {
 	// Seed company context from previous onboarding skip, if pending.
 	if cfg, err := config.Load(); err == nil && cfg.PendingCompanySeed {
 		cfg.PendingCompanySeed = false
-		_ = config.Save(cfg)
+		if err := config.Save(cfg); err != nil {
+			log.Printf("broker: failed to clear PendingCompanySeed: %v", err)
+		}
 		go b.runCompanySeedJob(cfg)
 	}
 	b.ensureWikiSectionsCache()

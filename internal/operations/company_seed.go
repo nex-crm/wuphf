@@ -68,12 +68,10 @@ func SeedCompanyContext(ctx context.Context, input CompanySeedInput) (*CompanySe
 
 	// 2. Extract file content
 	for _, path := range input.FilePaths {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			result.Warnings = append(result.Warnings, fmt.Sprintf("read file %s: %v", path, err))
-			continue
-		}
-		var text string
+		var (
+			text string
+			err  error
+		)
 		if strings.HasSuffix(strings.ToLower(path), ".pdf") {
 			text, err = extractPDF(ctx, path)
 			if err != nil {
@@ -81,6 +79,11 @@ func SeedCompanyContext(ctx context.Context, input CompanySeedInput) (*CompanySe
 				continue
 			}
 		} else {
+			data, readErr := os.ReadFile(path)
+			if readErr != nil {
+				result.Warnings = append(result.Warnings, fmt.Sprintf("read file %s: %v", path, readErr))
+				continue
+			}
 			text = string(data)
 		}
 		if len(text) > 8*1024 {
@@ -112,13 +115,8 @@ func SeedCompanyContext(ctx context.Context, input CompanySeedInput) (*CompanySe
 		result.ArticlesWritten = append(result.ArticlesWritten, "team/about/owner.md")
 	}
 
-	// If no content, return early (README and owner written as applicable)
-	content := contentBuf.String()
-	if strings.TrimSpace(content) == "" && input.Completer == nil {
-		return result, nil
-	}
-
 	// 6. LLM extraction (skip if no completer or no content)
+	content := contentBuf.String()
 	if input.Completer != nil && strings.TrimSpace(content) != "" {
 		if len(content) > 32*1024 {
 			content = content[:32*1024]
@@ -154,12 +152,12 @@ func SeedCompanyContext(ctx context.Context, input CompanySeedInput) (*CompanySe
 
 // assertPublicHost resolves host and rejects loopback, private, and
 // link-local addresses to prevent SSRF against local services or metadata APIs.
-func assertPublicHost(host string) error {
+func assertPublicHost(ctx context.Context, host string) error {
 	hostname, _, err := net.SplitHostPort(host)
 	if err != nil {
 		hostname = host
 	}
-	addrs, err := net.LookupHost(hostname)
+	addrs, err := net.DefaultResolver.LookupHost(ctx, hostname)
 	if err != nil {
 		return fmt.Errorf("cannot resolve %q: %w", hostname, err)
 	}
@@ -183,13 +181,13 @@ func fetchURL(ctx context.Context, urlStr string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("fetch URL parse: %w", err)
 	}
-	if err := assertPublicHost(u.Host); err != nil {
+	if err := assertPublicHost(ctx, u.Host); err != nil {
 		return "", err
 	}
 	client := &http.Client{
 		Timeout: 10 * time.Second,
 		CheckRedirect: func(req *http.Request, _ []*http.Request) error {
-			return assertPublicHost(req.URL.Host)
+			return assertPublicHost(req.Context(), req.URL.Host)
 		},
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, urlStr, nil)

@@ -823,7 +823,11 @@ export function Wizard({ onComplete }: WizardProps) {
         case "identity":
           if (canIdentityContinue) {
             e.preventDefault();
-            nextStep();
+            if (website.trim() || ownerName.trim()) {
+              goTo("analysis");
+            } else {
+              nextStep();
+            }
           }
           return;
         case "team":

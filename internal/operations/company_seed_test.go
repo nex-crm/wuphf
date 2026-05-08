@@ -2,6 +2,7 @@ package operations
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,6 +15,23 @@ func (m mockCompleter) Complete(_ context.Context, _ string) (string, error) {
 	return m.response, nil
 }
 
+// mustTempFile creates a temp file with the given content and returns its path.
+// Panics on any setup error so table-driven tests fail loudly on bad setups.
+func mustTempFile(pattern, content string) string {
+	f, err := os.CreateTemp("", pattern)
+	if err != nil {
+		panic(fmt.Sprintf("mustTempFile CreateTemp: %v", err))
+	}
+	if _, err := f.WriteString(content); err != nil {
+		_ = f.Close()
+		panic(fmt.Sprintf("mustTempFile WriteString: %v", err))
+	}
+	if err := f.Close(); err != nil {
+		panic(fmt.Sprintf("mustTempFile Close: %v", err))
+	}
+	return f.Name()
+}
+
 func TestSeedCompanyContext(t *testing.T) {
 	validJSON := `{"company_name":"Acme","description":"B2B SaaS","industry":"SaaS","audience":"Ops teams","goals":"Launch Q3","key_facts":["Fact 1","Fact 2"]}`
 
@@ -22,6 +40,7 @@ func TestSeedCompanyContext(t *testing.T) {
 		input               func(wikiRoot string) CompanySeedInput
 		wantCompanyMD       bool
 		wantOwnerMD         bool
+		wantOwnerContent    []string // substrings that must appear in owner.md
 		wantReadme          bool
 		wantWarningContains string
 	}{
@@ -33,13 +52,7 @@ func TestSeedCompanyContext(t *testing.T) {
 					OwnerRole: "CEO",
 					Completer: mockCompleter{response: validJSON},
 					WikiRoot:  wikiRoot,
-					// Provide content via a temp text file so LLM extraction fires.
-					FilePaths: func() []string {
-						f, _ := os.CreateTemp("", "wuphf-seed-*.txt")
-						f.WriteString("Acme is a B2B SaaS company.")
-						f.Close()
-						return []string{f.Name()}
-					}(),
+					FilePaths: []string{mustTempFile("wuphf-seed-*.txt", "Acme is a B2B SaaS company.")},
 				}
 			},
 			wantCompanyMD: true,
@@ -53,12 +66,7 @@ func TestSeedCompanyContext(t *testing.T) {
 				return CompanySeedInput{
 					Completer: mockCompleter{response: fenced},
 					WikiRoot:  wikiRoot,
-					FilePaths: func() []string {
-						f, _ := os.CreateTemp("", "wuphf-seed-*.txt")
-						f.WriteString("Acme builds software.")
-						f.Close()
-						return []string{f.Name()}
-					}(),
+					FilePaths: []string{mustTempFile("wuphf-seed-*.txt", "Acme builds software.")},
 				}
 			},
 			wantCompanyMD: true,
@@ -92,12 +100,7 @@ func TestSeedCompanyContext(t *testing.T) {
 				return CompanySeedInput{
 					Completer: mockCompleter{response: validJSON},
 					WikiRoot:  wikiRoot,
-					FilePaths: func() []string {
-						f, _ := os.CreateTemp("", "wuphf-seed-*.txt")
-						f.WriteString("Some company content.")
-						f.Close()
-						return []string{f.Name()}
-					}(),
+					FilePaths: []string{mustTempFile("wuphf-seed-*.txt", "Some company content.")},
 				}
 			},
 			wantReadme:    true,
@@ -113,19 +116,16 @@ func TestSeedCompanyContext(t *testing.T) {
 					WikiRoot:  wikiRoot,
 				}
 			},
-			wantReadme:  true,
-			wantOwnerMD: true,
+			wantReadme:       true,
+			wantOwnerMD:      true,
+			wantOwnerContent: []string{"Alice", "CEO"},
 		},
 		{
 			name: "pdftotext not found",
 			input: func(wikiRoot string) CompanySeedInput {
-				// Create a fake .pdf file so the extension check triggers.
-				f, _ := os.CreateTemp("", "wuphf-seed-*.pdf")
-				f.WriteString("%PDF fake")
-				f.Close()
 				return CompanySeedInput{
 					WikiRoot:  wikiRoot,
-					FilePaths: []string{f.Name()},
+					FilePaths: []string{mustTempFile("wuphf-seed-*.pdf", "%PDF fake")},
 				}
 			},
 			wantReadme:          true,
@@ -174,18 +174,16 @@ func TestSeedCompanyContext(t *testing.T) {
 				}
 			}
 
-			// For owner name test, verify content.
-			if tc.name == "owner name provided" && tc.wantOwnerMD {
+			if len(tc.wantOwnerContent) > 0 && tc.wantOwnerMD {
 				data, err := os.ReadFile(ownerPath)
 				if err != nil {
 					t.Fatalf("read owner.md: %v", err)
 				}
-				content := string(data)
-				if !strings.Contains(content, "Alice") {
-					t.Errorf("owner.md missing name Alice, got: %s", content)
-				}
-				if !strings.Contains(content, "CEO") {
-					t.Errorf("owner.md missing role CEO, got: %s", content)
+				got := string(data)
+				for _, want := range tc.wantOwnerContent {
+					if !strings.Contains(got, want) {
+						t.Errorf("owner.md missing %q, got: %s", want, got)
+					}
 				}
 			}
 		})

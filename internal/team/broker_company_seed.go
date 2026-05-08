@@ -31,6 +31,14 @@ func (b *Broker) runCompanySeedJob(cfg config.Config) {
 	result, err := operations.SeedCompanyContext(ctx, input)
 	if err != nil {
 		log.Printf("broker: company seed failed: %v", err)
+		b.configMu.Lock()
+		if c, loadErr := config.Load(); loadErr == nil {
+			c.PendingCompanySeed = true
+			if saveErr := config.Save(c); saveErr != nil {
+				log.Printf("broker: company seed: failed to re-arm pending flag: %v", saveErr)
+			}
+		}
+		b.configMu.Unlock()
 		return
 	}
 	for _, w := range result.Warnings {

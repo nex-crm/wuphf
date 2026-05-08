@@ -787,7 +787,12 @@ func handleUploadContext(w http.ResponseWriter, r *http.Request) {
 			_ = os.RemoveAll(dir)
 			continue
 		}
-		_, _ = io.Copy(out, f)
+		if _, err := io.Copy(out, f); err != nil {
+			_ = out.Close()
+			f.Close()
+			_ = os.RemoveAll(dir)
+			continue
+		}
 		_ = out.Close()
 		f.Close()
 		paths = append(paths, dst)
