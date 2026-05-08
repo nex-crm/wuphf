@@ -9,6 +9,7 @@ import "../../styles/onboarding.css";
 // ApiKeyRow is re-exported here for back-compat with onboarding/ApiKeyRow.test.tsx.
 export { ApiKeyRow } from "./wizard/ApiKeyRow";
 
+import type { OSScanResponse } from "../../api/onboarding";
 import { ProgressDots } from "./wizard/components";
 import {
   LOCAL_PROVIDER_LABELS,
@@ -16,6 +17,7 @@ import {
   SCRATCH_FOUNDING_TEAM,
   STEP_ORDER,
 } from "./wizard/constants";
+import { FirstTaskScreen } from "./wizard/FirstTaskScreen";
 import { OutcomeSummary } from "./wizard/OutcomeSummary";
 import {
   clearDraft,
@@ -33,7 +35,6 @@ import {
   runtimeIsReady,
   runtimeLabelsFromProviderConfig,
 } from "./wizard/runtime-helpers";
-import { FirstTaskScreen } from "./wizard/FirstTaskScreen";
 import { WelcomeStep } from "./wizard/Step1Welcome";
 import { TemplatesStep } from "./wizard/Step2Templates";
 import { AnalysisStep } from "./wizard/Step3bAnalysis";
@@ -43,7 +44,6 @@ import { SetupStep } from "./wizard/Step5Setup";
 import { NexStep } from "./wizard/Step6Nex";
 import { TaskStep } from "./wizard/Step6Task";
 import { ReadyStep } from "./wizard/Step7Ready";
-import type { OSScanResponse } from "../../api/onboarding";
 import type {
   BlueprintAgent,
   BlueprintTemplate,
