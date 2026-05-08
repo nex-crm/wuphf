@@ -975,7 +975,9 @@ func (b *Broker) Purge() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.tasks = nil
-	_ = b.saveLocked()
+	if err := b.saveLocked(); err != nil {
+		log.Printf("broker: Purge: save failed: %v", err)
+	}
 }
 
 func (b *Broker) Reset() {

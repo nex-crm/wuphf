@@ -295,11 +295,17 @@ type extractionPayload struct {
 // parseExtraction strips JSON fences from the raw LLM output and unmarshals it.
 func parseExtraction(raw string) (CompanyProfile, []string, error) {
 	raw = strings.TrimSpace(raw)
-	raw = strings.TrimPrefix(raw, "```json")
-	raw = strings.TrimPrefix(raw, "```")
-	raw = strings.TrimSpace(raw)
-	if idx := strings.LastIndex(raw, "```"); idx != -1 {
-		raw = raw[:idx]
+	// Strip common LLM JSON fence opening (```json, ```JSON, ``` etc.).
+	// Find the first newline to drop the entire opening fence line.
+	if strings.HasPrefix(raw, "```") {
+		if nl := strings.IndexByte(raw, '\n'); nl != -1 {
+			raw = raw[nl+1:]
+		} else {
+			raw = raw[3:]
+		}
+		if idx := strings.LastIndex(raw, "```"); idx != -1 {
+			raw = raw[:idx]
+		}
 	}
 	raw = strings.TrimSpace(raw)
 

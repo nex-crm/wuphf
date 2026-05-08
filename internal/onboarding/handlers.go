@@ -198,7 +198,9 @@ func HandleComplete(w http.ResponseWriter, r *http.Request, completeFn CompleteF
 			if website != "" || ownerName != "" || ownerRole != "" {
 				cfg.PendingCompanySeed = !body.ScanCompleted
 			}
-			_ = config.Save(cfg)
+			if err := config.Save(cfg); err != nil {
+				log.Printf("onboarding: complete: failed to persist company fields: %v", err)
+			}
 		}
 	}
 
@@ -762,6 +764,11 @@ func handleUploadContext(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "parse form failed", http.StatusBadRequest)
 		return
 	}
+	defer func() {
+		if r.MultipartForm != nil {
+			_ = r.MultipartForm.RemoveAll()
+		}
+	}()
 	files := r.MultipartForm.File["files"]
 	if len(files) == 0 {
 		http.Error(w, "no files uploaded", http.StatusBadRequest)

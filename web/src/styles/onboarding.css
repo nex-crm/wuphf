@@ -1944,6 +1944,15 @@
   to   { opacity: 1; transform: translateY(0); }
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .analysis-spinner {
+    animation: none;
+  }
+  .reveal-item {
+    animation: none;
+  }
+}
+
 .reveal-check {
   color: var(--green, #22c55e);
   font-weight: 600;

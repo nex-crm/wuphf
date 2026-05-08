@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"log"
 	"strings"
 	"time"
 
@@ -66,7 +67,9 @@ func saveCompanyProfile(profile operations.CompanyProfile, ownerName, ownerRole 
 	}
 	cfg.OwnerName = ownerName
 	cfg.OwnerRole = ownerRole
-	_ = config.Save(cfg)
+	if err := config.Save(cfg); err != nil {
+		log.Printf("tui: save company profile: %v", err)
+	}
 }
 
 // splitFilePaths splits a comma-separated list of file paths and expands
