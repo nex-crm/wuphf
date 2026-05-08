@@ -248,6 +248,10 @@ export function Wizard({ onComplete }: WizardProps) {
   // screen before entering the office so the user can choose to watch live.
   const [showFirstTask, setShowFirstTask] = useState(false);
   const [submittedTaskText, setSubmittedTaskText] = useState("");
+  // Synchronous gate so rapid clicks cannot fire onComplete more than once.
+  // A ref is used (not state) because it updates immediately and avoids a
+  // re-render before the guard takes effect.
+  const firstTaskActedRef = useRef(false);
 
   // Outcome summary — shown after /onboarding/complete succeeds.
   // The wizard stays mounted so the user can read what was created before
@@ -917,13 +921,19 @@ export function Wizard({ onComplete }: WizardProps) {
           <FirstTaskScreen
             taskText={submittedTaskText}
             onWatchTask={async () => {
+              if (firstTaskActedRef.current) return;
+              firstTaskActedRef.current = true;
               try {
                 await router.navigate({ to: "/tasks" });
               } finally {
                 onComplete?.();
               }
             }}
-            onSkipToOffice={() => onComplete?.()}
+            onSkipToOffice={() => {
+              if (firstTaskActedRef.current) return;
+              firstTaskActedRef.current = true;
+              onComplete?.();
+            }}
           />
         </div>
       </div>
