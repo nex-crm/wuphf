@@ -5,7 +5,7 @@ import type { Message } from "../../api/client";
 import { toggleReaction } from "../../api/client";
 import { useDefaultHarness } from "../../hooks/useConfig";
 import { useOfficeMembers } from "../../hooks/useMembers";
-import { formatTime, formatTokens } from "../../lib/format";
+import { formatTime } from "../../lib/format";
 import { resolveHarness } from "../../lib/harness";
 import { renderMentions } from "../../lib/mentions";
 import {
@@ -13,8 +13,10 @@ import {
   messageRemarkPlugins,
 } from "../../lib/messageMarkdown";
 import { useChannelSlug } from "../../routes/useCurrentRoute";
+import { useAppStore } from "../../stores/app";
 import { HarnessBadge } from "../ui/HarnessBadge";
 import { PixelAvatar } from "../ui/PixelAvatar";
+import { RedactedBadge } from "../ui/RedactedBadge";
 import { showNotice } from "../ui/Toast";
 
 interface MessageBubbleProps {
@@ -44,6 +46,7 @@ export function MessageBubble({
 }: MessageBubbleProps) {
   const currentChannel = useChannelSlug() ?? "general";
   const { data: members = [] } = useOfficeMembers();
+  const setActiveAgentSlug = useAppStore((s) => s.setActiveAgentSlug);
   const isHuman =
     message.from === "you" ||
     message.from === "human" ||
@@ -61,14 +64,6 @@ export function MessageBubble({
   const harness = !isHuman
     ? resolveHarness(agent?.provider, defaultHarness)
     : null;
-
-  const usageTotal = message.usage
-    ? (message.usage.total_tokens ??
-      (message.usage.input_tokens ?? 0) +
-        (message.usage.output_tokens ?? 0) +
-        (message.usage.cache_read_tokens ?? 0) +
-        (message.usage.cache_creation_tokens ?? 0))
-    : 0;
 
   const reactions = message.reactions
     ? Array.isArray(message.reactions)
@@ -118,46 +113,62 @@ export function MessageBubble({
       data-author-slug={message.from}
     >
       {/* Avatar */}
-      <div
-        className={`message-avatar${isHuman ? "" : " avatar-with-harness"}`}
-        style={
-          isHuman
-            ? {
-                background: "var(--bg-warm)",
-                color: "var(--text-secondary)",
-                fontSize: 12,
-                fontWeight: 600,
-              }
-            : undefined
-        }
-      >
-        {isLocalUser ? (
-          "You"
-        ) : teamMemberDisplayName ? (
-          teamMemberDisplayName.slice(0, 1).toUpperCase()
-        ) : (
-          <>
-            <PixelAvatar slug={message.from} size={24} />
-            {harness ? (
-              <HarnessBadge
-                kind={harness}
-                size={14}
-                className="harness-badge-on-avatar"
-              />
-            ) : null}
-          </>
-        )}
-      </div>
+      {!isHuman ? (
+        <button
+          type="button"
+          className="message-avatar avatar-with-harness message-avatar-btn"
+          data-agent-slug={message.from}
+          aria-label={`Open agent panel for ${agent?.name || message.from}`}
+          onClick={() => setActiveAgentSlug(message.from)}
+        >
+          <PixelAvatar slug={message.from} size={24} />
+          {harness ? (
+            <HarnessBadge
+              kind={harness}
+              size={14}
+              className="harness-badge-on-avatar"
+            />
+          ) : null}
+        </button>
+      ) : (
+        <div
+          className="message-avatar"
+          style={{
+            background: "var(--bg-warm)",
+            color: "var(--text-secondary)",
+            fontSize: 12,
+            fontWeight: 600,
+          }}
+        >
+          {isLocalUser
+            ? "You"
+            : teamMemberDisplayName
+              ? teamMemberDisplayName.slice(0, 1).toUpperCase()
+              : null}
+        </div>
+      )}
 
       {/* Content */}
       <div className="message-content">
         {/* Header */}
         <div className="message-header">
-          <span className="message-author">
-            {isLocalUser
-              ? "You"
-              : teamMemberDisplayName || agent?.name || message.from}
-          </span>
+          {!isHuman ? (
+            <button
+              type="button"
+              className="message-author message-author-btn"
+              data-agent-slug={message.from}
+              aria-label={`Open agent panel for ${agent?.name || message.from}`}
+              onClick={() => setActiveAgentSlug(message.from)}
+            >
+              {agent?.name || message.from}
+            </button>
+          ) : (
+            <span className="message-author">
+              {isLocalUser
+                ? "You"
+                : teamMemberDisplayName || agent?.name || message.from}
+            </span>
+          )}
           {isHuman ? (
             <span className="badge badge-neutral">human</span>
           ) : agent?.role ? (
@@ -166,10 +177,8 @@ export function MessageBubble({
           <span className="message-time" title={message.timestamp}>
             {formatTime(message.timestamp)}
           </span>
-          {usageTotal > 0 && (
-            <span className="message-token-badge">
-              {formatTokens(usageTotal)} tok
-            </span>
+          {Boolean(message.redacted) && (
+            <RedactedBadge reasons={message.redaction_reasons} />
           )}
         </div>
 

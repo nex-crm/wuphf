@@ -1,8 +1,45 @@
 id: multi-agent-workflow-consulting
 name: Multi-Agent Workflow Consulting
 kind: consulting
+category: services
+outcome: "Client engagements that ship multi-agent workflows."
 description: Template for a consulting operation that designs and implements multi-agent workflows for clients.
 objective: Help clients design, deploy, and maintain agent workflows with explicit approvals and durable evidence.
+estimated_setup_minutes: 6
+first_tasks:
+  - id: scoping-questionnaire
+    title: "Draft a workflow scoping questionnaire"
+    prompt: |
+      Draft a scoping questionnaire for a new consulting engagement that designs an agent workflow. Cover: target outcome, current process, owners, data sources, approval points, and the smallest viable first slice. Keep it under 12 questions.
+    expected_output: "A 10-12 question scoping document grouped by outcome, current state, data, and approvals."
+  - id: workflow-spec-template
+    title: "Write a workflow specification template"
+    prompt: |
+      Write a reusable template for specifying a multi-agent workflow. Include sections for: trigger, inputs, agents involved, side effects, approval gates, success metric, and rollback plan.
+    expected_output: "A markdown template with each section and a one-line example for an inbound-lead workflow."
+skills:
+  - name: "Workflow design"
+    purpose: "Map a client process into agents, channels, and approval gates."
+  - name: "Engagement scoping"
+    purpose: "Translate a goal into a phased delivery plan with explicit milestones."
+  - name: "Delivery review"
+    purpose: "Run evidence-backed reviews of every workflow before handing it off."
+requirements:
+  - kind: api-key
+    name: "ANTHROPIC_API_KEY or OPENAI_API_KEY"
+    required: true
+    detail: "Powers the architect, builder, and reviewer agents."
+  - kind: runtime
+    name: "Claude Code or Codex CLI"
+    required: true
+    detail: "Runs the agent loops locally."
+example_artifacts:
+  - kind: spec
+    title: "Workflow specification document"
+  - kind: deliverable
+    title: "Client engagement summary"
+  - kind: review
+    title: "Workflow handoff checklist"
 default_reviewer: ceo
 reviewer_paths:
   "team/systems/**": workflow-architect

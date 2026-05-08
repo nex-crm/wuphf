@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -90,8 +92,11 @@ func TestShareJoinFlowEndToEnd(t *testing.T) {
 		t.Fatalf("create invite: %v", err)
 	}
 	joined := false
-	shareSrv := httptest.NewServer(newShareHandler("http://"+b.Addr(), b.Token(), func() {
-		joined = true
+	shareSrv := httptest.NewServer(newShareHandler(shareHandlerConfig{
+		BrokerURL: "http://" + b.Addr(),
+		OnJoin: func() {
+			joined = true
+		},
 	}))
 	t.Cleanup(shareSrv.Close)
 
@@ -162,7 +167,7 @@ func TestShareJoinInvalidInviteReturnsGone(t *testing.T) {
 	}))
 	t.Cleanup(broker.Close)
 
-	shareSrv := httptest.NewServer(newShareHandler(broker.URL, "broker-token", nil))
+	shareSrv := httptest.NewServer(newShareHandler(shareHandlerConfig{BrokerURL: broker.URL}))
 	t.Cleanup(shareSrv.Close)
 
 	resp := joinSubmit(t, nil, shareSrv.URL, "missing-token", "")
@@ -188,7 +193,7 @@ func TestShareJoinMalformedBodyReturnsInvalidRequest(t *testing.T) {
 	}))
 	t.Cleanup(broker.Close)
 
-	shareSrv := httptest.NewServer(newShareHandler(broker.URL, "broker-token", nil))
+	shareSrv := httptest.NewServer(newShareHandler(shareHandlerConfig{BrokerURL: broker.URL}))
 	t.Cleanup(shareSrv.Close)
 
 	req, err := http.NewRequest(http.MethodPost, shareSrv.URL+"/join/abc", strings.NewReader("not json"))
@@ -222,7 +227,7 @@ func TestShareJoinRejectsOversizedBody(t *testing.T) {
 	}))
 	t.Cleanup(broker.Close)
 
-	shareSrv := httptest.NewServer(newShareHandler(broker.URL, "broker-token", nil))
+	shareSrv := httptest.NewServer(newShareHandler(shareHandlerConfig{BrokerURL: broker.URL}))
 	t.Cleanup(shareSrv.Close)
 
 	// Construct a body larger than the 8 KiB cap. The decoder should error
@@ -260,7 +265,7 @@ func TestShareJoinRejectsUnknownFields(t *testing.T) {
 	}))
 	t.Cleanup(broker.Close)
 
-	shareSrv := httptest.NewServer(newShareHandler(broker.URL, "broker-token", nil))
+	shareSrv := httptest.NewServer(newShareHandler(shareHandlerConfig{BrokerURL: broker.URL}))
 	t.Cleanup(shareSrv.Close)
 
 	body := `{"display_name":"Maya","admin":true}`
@@ -288,7 +293,7 @@ func TestShareJoinBrokerFailureReturnsBadGateway(t *testing.T) {
 	}))
 	t.Cleanup(broker.Close)
 
-	shareSrv := httptest.NewServer(newShareHandler(broker.URL, "broker-token", nil))
+	shareSrv := httptest.NewServer(newShareHandler(shareHandlerConfig{BrokerURL: broker.URL}))
 	t.Cleanup(shareSrv.Close)
 
 	resp := joinSubmit(t, nil, shareSrv.URL, "retry-token", "")
@@ -310,7 +315,7 @@ func TestShareProxyDoesNotExposeBrokerToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create invite: %v", err)
 	}
-	shareSrv := httptest.NewServer(newShareHandler("http://"+b.Addr(), b.Token(), nil))
+	shareSrv := httptest.NewServer(newShareHandler(shareHandlerConfig{BrokerURL: "http://" + b.Addr()}))
 	t.Cleanup(shareSrv.Close)
 
 	joinResp := joinSubmit(t, nil, shareSrv.URL, invite.Token, "")
@@ -353,7 +358,7 @@ func TestShareProxyOnboardingStateOnlyAllowsReadMethods(t *testing.T) {
 	}))
 	t.Cleanup(broker.Close)
 
-	shareSrv := httptest.NewServer(newShareHandler(broker.URL, "broker-token", nil))
+	shareSrv := httptest.NewServer(newShareHandler(shareHandlerConfig{BrokerURL: broker.URL}))
 	t.Cleanup(shareSrv.Close)
 
 	for _, tc := range []struct {
@@ -403,7 +408,7 @@ func TestShareProxyDoesNotForwardBrokerToken(t *testing.T) {
 	}))
 	t.Cleanup(broker.Close)
 
-	shareSrv := httptest.NewServer(newShareHandler(broker.URL, brokerToken, nil))
+	shareSrv := httptest.NewServer(newShareHandler(shareHandlerConfig{BrokerURL: broker.URL}))
 	t.Cleanup(shareSrv.Close)
 
 	req, err := http.NewRequest(http.MethodGet, shareSrv.URL+"/api/messages", nil)
@@ -449,7 +454,7 @@ func TestShareProxyStampsHumanActor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create invite: %v", err)
 	}
-	shareSrv := httptest.NewServer(newShareHandler("http://"+b.Addr(), b.Token(), nil))
+	shareSrv := httptest.NewServer(newShareHandler(shareHandlerConfig{BrokerURL: "http://" + b.Addr()}))
 	t.Cleanup(shareSrv.Close)
 
 	joinResp := joinSubmit(t, nil, shareSrv.URL, invite.Token, "")
@@ -555,4 +560,97 @@ func containsAll(s string, wants ...string) bool {
 		}
 	}
 	return true
+}
+
+// TestWebShareControllerIssueInviteUsesAdapter confirms the controller routes
+// invite creation through the registered ShareTransport when an in-process
+// broker handle is available. The test broker is never started as an HTTP
+// server, so any fallback to createShareInvite would fail with a transport
+// error — a successful URL therefore proves the adapter path executed.
+func TestWebShareControllerIssueInviteUsesAdapter(t *testing.T) {
+	b := team.NewBrokerAt(t.TempDir() + "/broker-state.json")
+	st := team.NewShareTransport(b, team.RelativeJoinURL)
+	b.SetShareTransport(st)
+
+	c := newWebShareController(7891)
+	c.SetBroker(b)
+
+	// brokerTokenFn deliberately errors so the test fails loudly if the
+	// adapter branch silently regresses into the HTTP fallback. The adapter
+	// path must never call this fn.
+	tokenFn := func() (string, error) {
+		t.Fatal("brokerTokenFn invoked: adapter path must not read the broker token")
+		return "", nil
+	}
+	c.mu.Lock()
+	url, expiresAt, err := c.issueInviteLocked(context.Background(), "10.0.0.5", 7891, "http://broker.invalid", tokenFn)
+	c.mu.Unlock()
+	if err != nil {
+		t.Fatalf("issueInviteLocked: %v", err)
+	}
+
+	wantPrefix := "http://10.0.0.5:7891/join/"
+	if !strings.HasPrefix(url, wantPrefix) {
+		t.Errorf("invite URL = %q, want prefix %q (controller did not honor SetURLBuilder)", url, wantPrefix)
+	}
+	if url == wantPrefix {
+		t.Error("invite URL has empty token")
+	}
+	if expiresAt == "" {
+		t.Error("ExpiresAt empty: broker did not return invite metadata via adapter")
+	}
+}
+
+// TestWebShareControllerIssueInviteFallsBackToHTTP confirms that when no
+// in-process broker handle is available (the standalone `wuphf share`
+// subcommand path), issueInviteLocked uses the HTTP createShareInvite call.
+// We verify by pointing the controller at an httptest server that mimics the
+// broker's POST /humans/invites response shape.
+func TestWebShareControllerIssueInviteFallsBackToHTTP(t *testing.T) {
+	const wantToken = "fallback-token-xyz"
+	const wantExpiresAt = "2026-05-06T00:00:00Z"
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/humans/invites" || r.Method != http.MethodPost {
+			http.Error(w, "unexpected", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"token":"` + wantToken + `","invite":{"id":"inv-1","expires_at":"` + wantExpiresAt + `"}}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	c := newWebShareController(7891)
+	// Intentionally no SetBroker — exercises the HTTP fallback branch.
+	tokenFn := func() (string, error) { return "broker-token", nil }
+	c.mu.Lock()
+	url, expiresAt, err := c.issueInviteLocked(context.Background(), "192.168.1.10", 7891, srv.URL, tokenFn)
+	c.mu.Unlock()
+	if err != nil {
+		t.Fatalf("issueInviteLocked: %v", err)
+	}
+
+	want := "http://192.168.1.10:7891/join/" + wantToken
+	if url != want {
+		t.Errorf("invite URL = %q, want %q", url, want)
+	}
+	if expiresAt != wantExpiresAt {
+		t.Errorf("expiresAt = %q, want %q", expiresAt, wantExpiresAt)
+	}
+}
+
+// TestWebShareControllerIssueInviteHTTPFallbackPropagatesTokenError confirms
+// that when the adapter handle is absent and the lazy token getter fails, the
+// error is surfaced rather than swallowed. Locks in the contract that
+// issueInviteLocked treats brokerTokenFn errors as terminal for the HTTP path.
+func TestWebShareControllerIssueInviteHTTPFallbackPropagatesTokenError(t *testing.T) {
+	c := newWebShareController(7891)
+	tokenErr := errors.New("token file unreadable")
+	tokenFn := func() (string, error) { return "", tokenErr }
+	c.mu.Lock()
+	_, _, err := c.issueInviteLocked(context.Background(), "10.0.0.5", 7891, "http://broker.invalid", tokenFn)
+	c.mu.Unlock()
+	if !errors.Is(err, tokenErr) {
+		t.Fatalf("issueInviteLocked error: got %v, want %v wrapped", err, tokenErr)
+	}
 }

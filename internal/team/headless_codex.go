@@ -116,6 +116,12 @@ type headlessCodexTurn struct {
 	TaskID     string
 	Attempts   int
 	EnqueuedAt time.Time
+	// FromHuman marks turns originating from a real person's chat message
+	// (channel post or DM, tagged or not). Human-originated turns bypass
+	// the lead queue-hold, the lead queue cap, the same-task dedup drop,
+	// and the staleness/min-age preemption floors so the agent absorbs
+	// the human input before resuming any prior agent-originated work.
+	FromHuman bool
 }
 
 type headlessCodexActiveTurn struct {

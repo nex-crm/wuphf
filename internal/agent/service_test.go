@@ -188,6 +188,45 @@ func TestFollowUpMessageDelivery(t *testing.T) {
 	}
 }
 
+func TestHumanMessageDelivery(t *testing.T) {
+	dir := t.TempDir()
+	sessions := NewSessionStoreAt(dir)
+	queues := NewMessageQueues()
+	tools := NewToolRegistry()
+
+	svc := NewAgentService(
+		WithToolRegistry(tools),
+		WithSessionStore(sessions),
+		WithQueues(queues),
+	)
+
+	cfg := AgentConfig{
+		Slug: "human-test",
+		Name: "Human Test",
+	}
+	svc.Create(cfg)
+
+	if err := svc.HumanMessage("human-test", "are you stuck?"); err != nil {
+		t.Fatalf("HumanMessage: %v", err)
+	}
+
+	if !queues.HasHuman("human-test") {
+		t.Error("expected human message in human-priority queue")
+	}
+	if queues.HasFollowUp("human-test") {
+		t.Error("human message must not leak into follow-up queue")
+	}
+
+	msg, ok := queues.DrainHuman("human-test")
+	if !ok || msg != "are you stuck?" {
+		t.Errorf("DrainHuman = (%q, %v), want (\"are you stuck?\", true)", msg, ok)
+	}
+
+	if err := svc.HumanMessage("nope", "x"); err == nil {
+		t.Error("expected error for nonexistent agent")
+	}
+}
+
 func TestSubscribeUnsubscribe(t *testing.T) {
 	dir := t.TempDir()
 	sessions := NewSessionStoreAt(dir)
@@ -478,6 +517,88 @@ func TestListAgents(t *testing.T) {
 	}
 	if list[1].Config.Slug != "b-agent" {
 		t.Errorf("expected second agent 'b-agent', got %q", list[1].Config.Slug)
+	}
+}
+
+func TestAgentSnapshotsDoNotAliasConfig(t *testing.T) {
+	svc := newTestService(t, nil)
+
+	_, err := svc.Create(AgentConfig{
+		Slug:         "snapshot-agent",
+		Name:         "Snapshot Agent",
+		Expertise:    []string{"backend"},
+		Tools:        []string{"search"},
+		AllowedTools: []string{"read_file"},
+		Budget:       &BudgetLimit{MaxTokens: 1000, MaxCostUsd: 1.5},
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	got, ok := svc.Get("snapshot-agent")
+	if !ok {
+		t.Fatal("expected agent from Get")
+	}
+	got.Config.Expertise[0] = "mutated"
+	got.Config.Tools[0] = "mutated"
+	got.Config.AllowedTools[0] = "mutated"
+	got.Config.Budget.MaxTokens = 1
+	got.State.Config.Expertise[0] = "mutated"
+	got.State.Config.Tools[0] = "mutated"
+	got.State.Config.AllowedTools[0] = "mutated"
+	got.State.Config.Budget.MaxTokens = 2
+
+	list := svc.List()
+	if len(list) != 1 {
+		t.Fatalf("expected 1 agent, got %d", len(list))
+	}
+	assertSnapshotConfigUnchanged(t, list[0].Config)
+	assertSnapshotConfigUnchanged(t, list[0].State.Config)
+
+	list[0].Config.Expertise[0] = "mutated-again"
+	list[0].Config.Tools[0] = "mutated-again"
+	list[0].Config.AllowedTools[0] = "mutated-again"
+	list[0].Config.Budget.MaxTokens = 3
+	list[0].State.Config.Expertise[0] = "mutated-again"
+	list[0].State.Config.Tools[0] = "mutated-again"
+	list[0].State.Config.AllowedTools[0] = "mutated-again"
+	list[0].State.Config.Budget.MaxTokens = 4
+
+	state, ok := svc.GetState("snapshot-agent")
+	if !ok {
+		t.Fatal("expected agent state")
+	}
+	assertSnapshotConfigUnchanged(t, state.Config)
+	state.Config.Expertise[0] = "mutated-state"
+	state.Config.Tools[0] = "mutated-state"
+	state.Config.AllowedTools[0] = "mutated-state"
+	state.Config.Budget.MaxTokens = 5
+
+	got, ok = svc.Get("snapshot-agent")
+	if !ok {
+		t.Fatal("expected agent from Get")
+	}
+	assertSnapshotConfigUnchanged(t, got.Config)
+	assertSnapshotConfigUnchanged(t, got.State.Config)
+}
+
+func assertSnapshotConfigUnchanged(t *testing.T, cfg AgentConfig) {
+	t.Helper()
+
+	if len(cfg.Expertise) != 1 || cfg.Expertise[0] != "backend" {
+		t.Errorf("expected expertise to remain [backend], got %v", cfg.Expertise)
+	}
+	if len(cfg.Tools) != 1 || cfg.Tools[0] != "search" {
+		t.Errorf("expected tools to remain [search], got %v", cfg.Tools)
+	}
+	if len(cfg.AllowedTools) != 1 || cfg.AllowedTools[0] != "read_file" {
+		t.Errorf("expected allowed tools to remain [read_file], got %v", cfg.AllowedTools)
+	}
+	if cfg.Budget == nil {
+		t.Fatal("expected budget")
+	}
+	if cfg.Budget.MaxTokens != 1000 {
+		t.Errorf("expected budget max tokens to remain 1000, got %d", cfg.Budget.MaxTokens)
 	}
 }
 

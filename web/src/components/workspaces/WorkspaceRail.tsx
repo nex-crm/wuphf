@@ -18,7 +18,9 @@
  * The SPA only ever talks to its served broker. Lifecycle calls go
  * through that broker; cross-broker orchestration happens server-side.
  */
+
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Plus } from "iconoir-react";
 
 import {
   usePauseWorkspace,
@@ -47,28 +49,58 @@ interface ResumeState {
   workspace: Workspace;
 }
 
+// Returns relative luminance per WCAG 2.1 (sRGB inputs 0-255). Expects a
+// 7-char `#rrggbb` hex; anything else (3-char shorthand, named colour, CSS
+// var) falls back to a neutral mid-grey so the contrast helper still picks
+// a sane foreground instead of NaN.
+function relativeLuminance(hex: string): number {
+  if (hex.length !== 7 || !hex.startsWith("#")) return 0.5;
+  const r = Number.parseInt(hex.slice(1, 3), 16) / 255;
+  const g = Number.parseInt(hex.slice(3, 5), 16) / 255;
+  const b = Number.parseInt(hex.slice(5, 7), 16) / 255;
+  if (Number.isNaN(r) || Number.isNaN(g) || Number.isNaN(b)) return 0.5;
+  const lin = (c: number) =>
+    c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+}
+
+// Pick white or near-black for the workspace initial so the WCAG AA
+// 4.5:1 contrast threshold is met regardless of the palette colour.
+function readableTextOn(hex: string): string {
+  return relativeLuminance(hex) < 0.4 ? "white" : "#1a1a1a";
+}
+
 const styles = {
   rail: {
     width: 56,
     flexShrink: 0,
-    background: "var(--neutral-900)",
-    borderRight: "1px solid var(--border)",
+    background: "var(--workspace-rail-bg, #0a0a0a)",
+    borderRight:
+      "1px solid var(--workspace-rail-border, rgba(255, 255, 255, 0.1))",
     display: "flex" as const,
     flexDirection: "column" as const,
     alignItems: "center" as const,
-    padding: "10px 0",
-    gap: 6,
+    padding: "14px 0",
+    gap: 14,
     height: "100vh",
     overflowY: "auto" as const,
-    color: "var(--neutral-100)",
+    color: "var(--workspace-rail-fg, var(--neutral-100))",
   },
-  icon: (active: boolean, paused: boolean): React.CSSProperties => ({
+  icon: (
+    active: boolean,
+    paused: boolean,
+    bg: string,
+  ): React.CSSProperties => ({
     width: 36,
     height: 36,
     borderRadius: 8,
     border: active ? "2px solid var(--accent)" : "2px solid transparent",
-    background: paused ? "var(--neutral-700)" : "var(--neutral-600)",
-    color: paused ? "var(--neutral-300)" : "white",
+    background: paused
+      ? "var(--workspace-rail-icon-paused-bg, rgba(255,255,255,0.08))"
+      : bg,
+    color: paused
+      ? "var(--workspace-rail-icon-paused-fg, rgba(255,255,255,0.55))"
+      : readableTextOn(bg),
     fontWeight: 700,
     fontSize: 13,
     fontFamily: "var(--font-sans)",
@@ -78,7 +110,6 @@ const styles = {
     cursor: "pointer",
     position: "relative",
     opacity: paused ? 0.65 : 1,
-    transition: "transform 0.12s, border-color 0.12s, opacity 0.12s",
   }),
   iconRow: {
     position: "relative" as const,
@@ -107,14 +138,9 @@ const styles = {
   addButton: {
     width: 36,
     height: 36,
-    borderRadius: 8,
-    border: "1px dashed var(--neutral-500)",
-    background: "transparent",
-    color: "var(--neutral-300)",
     cursor: "pointer",
     fontSize: 18,
     lineHeight: 1,
-    fontFamily: "var(--font-sans)",
   },
   tooltip: {
     position: "absolute" as const,
@@ -198,6 +224,27 @@ function relativeFromNow(ts?: string | null): string {
 function workspaceInitial(name: string): string {
   const ch = name.replace(/[^a-z0-9]/gi, "")[0] ?? "?";
   return ch.toUpperCase();
+}
+
+// Palette of similar-brightness hues — picked from the design system tokens'
+// 500-band so workspace tiles feel like siblings, not a rainbow.
+const WORKSPACE_PALETTE = [
+  "#069de4", // cyan-500
+  "#9f4dbf", // purple
+  "#e0833e", // amber
+  "#3aa76d", // green
+  "#e25c7a", // rose
+  "#5a7bd9", // indigo
+  "#d4a017", // ochre
+  "#4cb6ad", // teal
+];
+
+function workspaceColor(name: string): string {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
+  }
+  return WORKSPACE_PALETTE[hash % WORKSPACE_PALETTE.length];
 }
 
 interface WorkspaceRailProps {
@@ -510,12 +557,13 @@ export function WorkspaceRail({
           >
             <button
               type="button"
+              className="workspace-rail-icon"
               data-testid={`workspace-icon-${ws.name}`}
               data-state={ws.state}
               data-active={active ? "true" : "false"}
               aria-label={`Switch to workspace ${ws.name} (${ws.state})`}
               aria-current={active ? "page" : undefined}
-              style={styles.icon(active, paused)}
+              style={styles.icon(active, paused, workspaceColor(ws.name))}
               title={`${ws.name} · ${ws.state}`}
               onClick={() => handleClick(ws)}
               onContextMenu={(e) => {
@@ -560,12 +608,13 @@ export function WorkspaceRail({
 
       <button
         type="button"
+        className="workspace-rail-add"
         data-testid="workspace-add-button"
         aria-label="Create workspace"
         style={styles.addButton}
         onClick={() => setCreateOpen(true)}
       >
-        +
+        <Plus width={16} height={16} strokeWidth={2} />
       </button>
 
       <CreateWorkspaceModal

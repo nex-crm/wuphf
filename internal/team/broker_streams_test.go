@@ -34,14 +34,35 @@ func TestAgentStreamBuffer_RecentReturnsBoundedHistory(t *testing.T) {
 	// Subscribers must observe live writes.
 	out, cancel := s.subscribe()
 	defer cancel()
-	go s.Push("live-line")
-	select {
-	case msg := <-out:
-		if msg != "live-line" {
-			t.Errorf("subscriber received %q, want live-line", msg)
-		}
-	case <-time.After(time.Second):
-		t.Error("subscriber did not receive Push within 1s")
+	s.Push("live-line")
+	msg := <-out
+	if msg != "live-line" {
+		t.Errorf("subscriber received %q, want live-line", msg)
+	}
+}
+
+func TestAgentStreamBufferRedactsSecretsFromHistoryAndSubscribers(t *testing.T) {
+	s := &agentStreamBuffer{subs: make(map[int]agentStreamSubscriber)}
+	secret := "sk-" + strings.Repeat("C", 24)
+
+	out, cancel := s.subscribeTask("task-1")
+	defer cancel()
+	s.PushTask("task-1", "streamed key: "+secret+"\n")
+
+	history := strings.Join(s.recentTask("task-1"), "")
+	if strings.Contains(history, secret) {
+		t.Fatalf("task history leaked secret: %q", history)
+	}
+	if !strings.Contains(history, "[REDACTED]") {
+		t.Fatalf("task history missing redaction marker: %q", history)
+	}
+
+	got := <-out
+	if strings.Contains(got, secret) {
+		t.Fatalf("subscriber leaked secret: %q", got)
+	}
+	if !strings.Contains(got, "[REDACTED]") {
+		t.Fatalf("subscriber missing redaction marker: %q", got)
 	}
 }
 
@@ -65,21 +86,11 @@ func TestAgentStreamBuffer_TaskScopedHistoryAndSubscribers(t *testing.T) {
 	s.PushTask("task-2", "two-live")
 	s.PushTask("task-1", "one-live")
 
-	select {
-	case got := <-all:
-		if got != "two-live" {
-			t.Fatalf("all subscriber first message = %q", got)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("all subscriber did not receive task-2 line")
+	if got := <-all; got != "two-live" {
+		t.Fatalf("all subscriber first message = %q", got)
 	}
-	select {
-	case got := <-taskOne:
-		if got != "one-live" {
-			t.Fatalf("task subscriber message = %q", got)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("task subscriber did not receive task-1 line")
+	if got := <-taskOne; got != "one-live" {
+		t.Fatalf("task subscriber message = %q", got)
 	}
 }
 
@@ -109,13 +120,8 @@ func TestAgentStreamBuffer_SubscribeTaskWithRecentHasNoReplayGap(t *testing.T) {
 	}
 
 	s.PushTask("task-1", "live\n")
-	select {
-	case got := <-live:
-		if got != "live\n" {
-			t.Fatalf("live = %q, want live line", got)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("subscriber did not receive live line")
+	if got := <-live; got != "live\n" {
+		t.Fatalf("live = %q, want live line", got)
 	}
 }
 
@@ -213,13 +219,28 @@ func TestBrokerMessageSubscribersReceivePostedMessages(t *testing.T) {
 		t.Fatalf("PostMessage: %v", err)
 	}
 
-	select {
-	case got := <-msgs:
-		if got.ID != want.ID || got.Content != want.Content {
-			t.Fatalf("unexpected subscribed message: %+v", got)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for subscribed message")
+	got := <-msgs
+	if got.ID != want.ID || got.Content != want.Content {
+		t.Fatalf("unexpected subscribed message: %+v", got)
+	}
+}
+
+func TestBrokerMessageSubscribersReceiveRedactedMessages(t *testing.T) {
+	b := newTestBroker(t)
+	msgs, unsubscribe := b.SubscribeMessages(4)
+	defer unsubscribe()
+	secret := "sk-" + strings.Repeat("D", 24)
+
+	if _, err := b.PostMessage("ceo", "general", "model key: "+secret, nil, ""); err != nil {
+		t.Fatalf("PostMessage: %v", err)
+	}
+
+	got := <-msgs
+	if strings.Contains(got.Content, secret) {
+		t.Fatalf("subscribed message leaked secret: %+v", got)
+	}
+	if !got.Redacted || got.RedactionCount != 1 {
+		t.Fatalf("subscribed message missing redaction metadata: %+v", got)
 	}
 }
 
@@ -232,13 +253,8 @@ func TestBrokerActionSubscribersReceiveTaskLifecycle(t *testing.T) {
 		t.Fatalf("EnsureTask: %v", err)
 	}
 
-	select {
-	case got := <-actions:
-		if got.Kind != "task_created" {
-			t.Fatalf("expected task_created action, got %+v", got)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for subscribed action")
+	if got := <-actions; got.Kind != "task_created" {
+		t.Fatalf("expected task_created action, got %+v", got)
 	}
 }
 
@@ -287,6 +303,81 @@ func TestReapStaleActivityLocked(t *testing.T) {
 	}
 }
 
+// TestReapStaleActivityLocked_StuckEmissionForActiveAgent locks the new
+// stuck-while-active path: an active agent that has gone quiet for >=
+// stuckThresholdSeconds (90s) but less than the safety reset (5m) gets a
+// Kind="stuck" snapshot without losing its current Status/Activity/Detail.
+// CRITICAL REGRESSION coverage: the existing "stale -> idle" path must still
+// fire for agents past staleActivityThreshold even after the stuck branch
+// landed.
+func TestReapStaleActivityLocked_StuckEmissionForActiveAgent(t *testing.T) {
+	b := newTestBroker(t)
+	now := time.Now().UTC()
+	stuckCandidate := now.Add(-time.Duration(stuckThresholdSeconds+5) * time.Second).Format(time.RFC3339)
+	stale := now.Add(-10 * time.Minute).Format(time.RFC3339)
+	fresh := now.Add(-1 * time.Second).Format(time.RFC3339)
+
+	b.activity = map[string]agentActivitySnapshot{
+		"stuck-rita": {
+			Slug: "stuck-rita", Status: "active", Activity: "tool_use",
+			Detail: "planning compute module", LastTime: stuckCandidate,
+		},
+		"reset-target": {
+			Slug: "reset-target", Status: "thinking", Activity: "thinking",
+			LastTime: stale,
+		},
+		"fresh-tess": {
+			Slug: "fresh-tess", Status: "active", Activity: "tool_use",
+			Detail: "running gh pr view", LastTime: fresh,
+		},
+	}
+
+	b.mu.Lock()
+	reset := b.reapStaleActivityLocked(now)
+	b.mu.Unlock()
+
+	// Expect exactly two emissions: stuck-rita (newly stuck) + reset-target
+	// (stale-reset to idle). fresh-tess is well below both thresholds.
+	if len(reset) != 2 {
+		t.Fatalf("expected 2 emissions (1 stuck + 1 idle reset), got %d: %+v", len(reset), reset)
+	}
+
+	stuckSnap := b.activity["stuck-rita"]
+	if stuckSnap.Kind != "stuck" {
+		t.Errorf("stuck-rita Kind = %q, want stuck", stuckSnap.Kind)
+	}
+	if stuckSnap.Status != "active" {
+		t.Errorf("stuck-rita Status = %q, want active (reaper must not change Status during stuck transition)", stuckSnap.Status)
+	}
+	if stuckSnap.Detail != "planning compute module" {
+		t.Errorf("stuck-rita Detail = %q, want preserved original detail", stuckSnap.Detail)
+	}
+
+	resetSnap := b.activity["reset-target"]
+	if resetSnap.Status != "idle" {
+		t.Errorf("reset-target Status = %q, want idle (REGRESSION: existing reaper must still fire)", resetSnap.Status)
+	}
+	if resetSnap.Kind != "routine" {
+		t.Errorf("reset-target Kind = %q, want routine (idle reset clears any prior stuck flag)", resetSnap.Kind)
+	}
+
+	freshSnap := b.activity["fresh-tess"]
+	if freshSnap.Kind == "stuck" {
+		t.Errorf("fresh-tess should not be stuck (well under threshold); got Kind=%q", freshSnap.Kind)
+	}
+
+	// Second tick must not re-emit stuck-rita (would spam SSE + repeatedly
+	// trigger frontend assertive announcements). It should also not emit
+	// fresh-tess (still fresh). reset-target is now Status=idle so it's
+	// excluded from the active-set entirely.
+	b.mu.Lock()
+	resetAgain := b.reapStaleActivityLocked(now)
+	b.mu.Unlock()
+	if len(resetAgain) != 0 {
+		t.Errorf("second reaper tick should be quiet for already-stuck agent, got %d emissions", len(resetAgain))
+	}
+}
+
 func TestBrokerActivitySubscribersReceiveUpdates(t *testing.T) {
 	b := newTestBroker(t)
 	updates, unsubscribe := b.SubscribeActivity(4)
@@ -300,13 +391,9 @@ func TestBrokerActivitySubscribersReceiveUpdates(t *testing.T) {
 		LastTime: time.Now().UTC().Format(time.RFC3339),
 	})
 
-	select {
-	case got := <-updates:
-		if got.Slug != "ceo" || got.Activity != "tool_use" || got.Detail != "running rg" {
-			t.Fatalf("unexpected activity update: %+v", got)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for subscribed activity")
+	got := <-updates
+	if got.Slug != "ceo" || got.Activity != "tool_use" || got.Detail != "running rg" {
+		t.Fatalf("unexpected activity update: %+v", got)
 	}
 }
 

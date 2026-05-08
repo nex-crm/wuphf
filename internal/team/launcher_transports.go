@@ -47,14 +47,27 @@ func RegisterTransports(b *Broker) (func(), error) {
 			host := &brokerTransportHost{broker: b}
 			ctx, cancel := context.WithCancel(context.Background())
 			done := make(chan struct{})
+			dispatchDone := make(chan struct{})
 			stops = append(stops, func() {
 				cancel()
-				<-done // wait for Run to return before broker.Stop()
+				<-done         // wait for Run to return before broker.Stop()
+				<-dispatchDone // and the outbound dispatcher's goroutine
 			})
 			go func() {
 				defer close(done)
 				if err := t.Run(ctx, host); err != nil && ctx.Err() == nil {
 					log.Printf("[transport] telegram: exited with error: %v", err)
+				}
+			}()
+			// Host-driven outbound dispatcher. Runs alongside Run rather than
+			// inside it so the goroutine lifecycle is owned by the Host, per the
+			// Transport.Send contract intent. FormatOutbound + Send live on the
+			// adapter; the dispatcher just polls the broker queue and wires the
+			// two together.
+			go func() {
+				defer close(dispatchDone)
+				if err := runOutboundDispatcher(ctx, b, t.Name(), t.FormatOutbound, t.Send); err != nil && ctx.Err() == nil {
+					log.Printf("[transport] telegram: outbound dispatcher exited: %v", err)
 				}
 			}()
 			log.Printf("[transport] telegram: started (%d group(s), dm=%v)", len(t.ChatMap), t.DMChannel != "")
@@ -96,12 +109,15 @@ func RegisterTransports(b *Broker) (func(), error) {
 	// Human-share: always registered. The adapter wraps the in-process
 	// invite/session surface in broker_human_share.go so RegisterTransports
 	// owns the OfficeBoundTransport lifecycle alongside Telegram and OpenClaw.
-	// RelativeJoinURL is the explicit degenerate builder used here because the
-	// launcher does not know the share controller's bind address (the share
-	// controller lives in cmd/wuphf and boots independently). When the share
-	// controller adopts the adapter for invite creation it will supply an
-	// absolute-URL builder via NewShareTransport.
+	// RelativeJoinURL is the constructor builder; the in-process share
+	// controller (cmd/wuphf/share.go) installs an absolute-URL builder via
+	// ShareTransport.SetURLBuilder once it knows its bind address. The
+	// constructor builder remains the safe default for any caller that reads
+	// CreateInvite before the controller has started. Registering the handle
+	// on the broker via SetShareTransport lets the controller obtain the
+	// adapter without a separate plumbing channel.
 	share := NewShareTransport(b, RelativeJoinURL)
+	b.SetShareTransport(share)
 	shareCtx, shareCancel := context.WithCancel(context.Background())
 	shareDone := make(chan struct{})
 	shareHost := &brokerTransportHost{broker: b}
@@ -112,6 +128,14 @@ func RegisterTransports(b *Broker) (func(), error) {
 		}
 	}()
 	stops = append(stops, func() {
+		// Reverse install order: unpublish the transport handle BEFORE
+		// cancelling Run. The reverse order would let a concurrent controller
+		// fetch the still-published ShareTransport and mint an invite in the
+		// gap between Run's defer clearing the admit hook and SetShareTransport
+		// publishing nil — that invite's eventual accept would fire no host
+		// UpsertParticipant. Unpublishing first forces the controller into the
+		// HTTP fallback path immediately, while the admit hook is still live.
+		b.SetShareTransport(nil)
 		shareCancel()
 		<-shareDone
 	})

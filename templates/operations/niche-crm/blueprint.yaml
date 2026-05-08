@@ -1,8 +1,45 @@
 id: niche-crm
 name: Niche CRM
 kind: product_gtm
+category: product
+outcome: "Build and launch a focused CRM for a specific niche."
 description: Template for a focused CRM product that can be built and taken to market.
 objective: Build a niche CRM, prove the workflow, and run the product and GTM loops together.
+estimated_setup_minutes: 7
+first_tasks:
+  - id: niche-positioning-brief
+    title: "Write a positioning brief for the CRM niche"
+    prompt: |
+      Write a positioning brief for a CRM aimed at a specific niche I will pick during the call. Capture: who the user is, the painful workflow they have today, what their tooling looks like, what an MVP must do on day one, and what we will refuse to build.
+    expected_output: "A one-page positioning brief with five sections, each grounded in concrete user behavior."
+  - id: mvp-cut-list
+    title: "Cut a 2-week MVP scope"
+    prompt: |
+      Cut a 2-week MVP scope for the CRM. List the three smallest features that prove the core workflow, the data model they need, and the user-visible result. Then list two features explicitly cut to v2 and why.
+    expected_output: "A scoped MVP list with three in-scope features and two cuts, each with a one-line rationale."
+skills:
+  - name: "Niche research"
+    purpose: "Validate the workflow pain in the chosen segment before writing code."
+  - name: "Product spec"
+    purpose: "Translate the painful workflow into the smallest shippable product slice."
+  - name: "GTM loop"
+    purpose: "Run a focused GTM loop that turns design partners into a repeatable funnel."
+requirements:
+  - kind: api-key
+    name: "ANTHROPIC_API_KEY or OPENAI_API_KEY"
+    required: true
+    detail: "Powers the founder, builder, growth, and reviewer agents."
+  - kind: runtime
+    name: "Claude Code or Codex CLI"
+    required: true
+    detail: "Runs the agent loops locally and edits the codebase."
+example_artifacts:
+  - kind: brief
+    title: "Positioning brief"
+  - kind: spec
+    title: "MVP scope document"
+  - kind: plan
+    title: "Design-partner outreach plan"
 default_reviewer: ceo
 reviewer_paths:
   "team/product/**": builder

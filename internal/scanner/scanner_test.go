@@ -231,6 +231,24 @@ func TestScannerRedactsSecrets(t *testing.T) {
 	}
 }
 
+func TestRedactSecretsForDisplayReturnsReasonLabels(t *testing.T) {
+	secret := "sk-" + strings.Repeat("A", 24)
+	res := RedactSecretsForDisplay("model key: " + secret)
+
+	if res.Matches() != 1 {
+		t.Fatalf("expected one redaction, got %d (%+v)", res.Matches(), res)
+	}
+	if strings.Contains(res.Content, secret) {
+		t.Fatalf("redacted content leaked secret: %q", res.Content)
+	}
+	if !strings.Contains(res.Content, "[REDACTED]") {
+		t.Fatalf("expected redaction marker in %q", res.Content)
+	}
+	if got := strings.Join(res.ReasonLabels(), ","); got != "openai" {
+		t.Fatalf("reason labels = %q, want openai", got)
+	}
+}
+
 // --- Slugify tests ---
 
 func TestScannerSlugifyRoot(t *testing.T) {

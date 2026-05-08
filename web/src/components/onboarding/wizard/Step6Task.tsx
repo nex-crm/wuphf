@@ -1,6 +1,6 @@
 import { ONBOARDING_COPY } from "../../../lib/constants";
 import { Kbd, MOD_KEY } from "../../ui/Kbd";
-import { ArrowIcon, EnterHint } from "./components";
+import { BtnLabel, EnterHint } from "./components";
 import type { TaskTemplate } from "./types";
 
 interface TaskStepProps {
@@ -31,66 +31,61 @@ export function TaskStep({
   return (
     <div className="wizard-step">
       <div className="wizard-hero">
-        <h1 className="wizard-headline" style={{ fontSize: 28 }}>
-          {ONBOARDING_COPY.step3_title}
+        <h1 className="wizard-headline wizard-headline-sm">
+          {ONBOARDING_COPY.step7_headline}
         </h1>
-        {taskTemplates.length > 0 && (
-          <p className="wizard-subhead">
-            Type your own first task, or pick from the blueprint&apos;s
-            suggested sequence below.
+        <p className="wizard-subhead">{ONBOARDING_COPY.step7_subhead}</p>
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+        <div className="task-textarea-wrap">
+          <textarea
+            className="task-textarea-inner task-textarea-primary"
+            id="wiz-task-input"
+            aria-label="First task"
+            aria-describedby="wiz-task-input-hint"
+            placeholder={ONBOARDING_COPY.step7_placeholder}
+            value={taskText}
+            onChange={(e) => onChangeTaskText(e.target.value)}
+          />
+          <p className="task-textarea-hint" id="wiz-task-input-hint">
+            <Kbd size="sm">↵</Kbd> new line · <Kbd size="sm">{MOD_KEY}</Kbd>
+            <Kbd size="sm">↵</Kbd> review setup
           </p>
+        </div>
+
+        {taskTemplates.length > 0 && (
+          <div className="task-suggestions">
+            <p className="task-suggestions-label">
+              Suggested sequence for this blueprint
+            </p>
+            <div className="task-suggestions-list">
+              {taskTemplates.map((t, idx) => {
+                const isSelected = selectedTaskTemplate === t.id;
+                return (
+                  <button
+                    key={t.id}
+                    className={`task-suggestion ${isSelected ? "selected" : ""}`}
+                    aria-pressed={isSelected}
+                    onClick={() => {
+                      const nextId = isSelected ? null : t.id;
+                      if (nextId) {
+                        onApplyTaskTemplate(nextId, t.prompt ?? t.name);
+                      } else {
+                        onSelectTaskTemplate(null);
+                      }
+                    }}
+                    type="button"
+                  >
+                    <span className="task-suggestion-num">{idx + 1}</span>
+                    <span className="task-suggestion-name">{t.name}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         )}
       </div>
-
-      <div>
-        <label className="label" htmlFor="wiz-task-input">
-          First task
-        </label>
-        <textarea
-          className="task-textarea task-textarea-primary"
-          id="wiz-task-input"
-          aria-describedby="wiz-task-input-hint"
-          placeholder={ONBOARDING_COPY.step3_placeholder}
-          value={taskText}
-          onChange={(e) => onChangeTaskText(e.target.value)}
-        />
-        <p className="task-textarea-hint" id="wiz-task-input-hint">
-          <Kbd size="sm">↵</Kbd> new line · <Kbd size="sm">{MOD_KEY}</Kbd>
-          <Kbd size="sm">↵</Kbd> review setup
-        </p>
-      </div>
-
-      {taskTemplates.length > 0 && (
-        <div className="task-suggestions">
-          <p className="task-suggestions-label">
-            Suggested sequence for this blueprint
-          </p>
-          <div className="task-suggestions-list">
-            {taskTemplates.map((t, idx) => {
-              const isSelected = selectedTaskTemplate === t.id;
-              return (
-                <button
-                  key={t.id}
-                  className={`task-suggestion ${isSelected ? "selected" : ""}`}
-                  aria-pressed={isSelected}
-                  onClick={() => {
-                    const nextId = isSelected ? null : t.id;
-                    if (nextId) {
-                      onApplyTaskTemplate(nextId, t.prompt ?? t.name);
-                    } else {
-                      onSelectTaskTemplate(null);
-                    }
-                  }}
-                  type="button"
-                >
-                  <span className="task-suggestion-num">{idx + 1}</span>
-                  <span className="task-suggestion-name">{t.name}</span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
 
       <div className="wizard-nav">
         <button className="btn btn-ghost" onClick={onBack} type="button">
@@ -103,11 +98,10 @@ export function TaskStep({
             disabled={submitting}
             type="button"
           >
-            {ONBOARDING_COPY.step3_skip}
+            {ONBOARDING_COPY.step7_skip}
           </button>
           <button className="btn btn-primary" onClick={onNext} type="button">
-            Review setup
-            <ArrowIcon />
+            <BtnLabel>{ONBOARDING_COPY.step7_cta}</BtnLabel>
             <EnterHint modifier={MOD_KEY} />
           </button>
         </div>

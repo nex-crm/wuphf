@@ -1,8 +1,49 @@
 id: local-business-ai-package
 name: Local Business AI Package
 kind: local_service
+category: services
+outcome: "Intake, booking, and follow-up for local-business clients."
 description: Template for an AI package that helps local businesses automate intake, booking, follow-up, and reporting.
 objective: Help local businesses automate intake, booking, follow-up, and reporting with durable evidence and clear approval gates.
+estimated_setup_minutes: 5
+first_tasks:
+  - id: scope-discovery-call
+    title: "Outline the discovery call for a new local-business client"
+    prompt: |
+      Outline a 30-minute discovery call for a local home-services business that wants AI to handle inbound leads. Capture: current intake channels, response time, who books, what gets dropped, and what counts as a successful job. Keep questions short and conversational.
+    expected_output: "A 30-minute discovery agenda with grouped question banks and a closing summary template."
+  - id: lead-followup-cadence
+    title: "Design a lead follow-up cadence"
+    prompt: |
+      Design a 3-touch follow-up cadence for a lead that requested a quote and went silent. Include channel (SMS or email), timing, and the actual message text. Keep tone friendly and direct, no urgency manipulation.
+    expected_output: "A cadence table with timing, channel, and copy for each touch."
+skills:
+  - name: "Intake triage"
+    purpose: "Route inbound requests to the right workflow and surface the missing fields."
+  - name: "Booking and scheduling"
+    purpose: "Hold, confirm, and rebook appointments with the client's calendar."
+  - name: "Customer follow-up"
+    purpose: "Run polite, evidence-backed nudges across SMS and email."
+requirements:
+  - kind: api-key
+    name: "ANTHROPIC_API_KEY or OPENAI_API_KEY"
+    required: true
+    detail: "Powers the planner, builder, and client-success agents."
+  - kind: runtime
+    name: "Claude Code or Codex CLI"
+    required: true
+    detail: "Runs the agent loops locally."
+  - kind: local-tool
+    name: "Calendar integration"
+    required: false
+    detail: "Optional. Connect later to enable live booking."
+example_artifacts:
+  - kind: playbook
+    title: "Discovery call agenda"
+  - kind: template
+    title: "Lead follow-up cadence"
+  - kind: dashboard
+    title: "Weekly delivery scorecard"
 default_reviewer: ceo
 reviewer_paths:
   "team/delivery/**": builder

@@ -1,18 +1,62 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type QueryClient,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 
-import type { Message } from "../../api/client";
-import { postMessage } from "../../api/client";
+import { getConfig, type Message, postMessage } from "../../api/client";
+import { useCommands } from "../../hooks/useCommands";
 import { useOfficeMembers } from "../../hooks/useMembers";
 import { useThreadMessages } from "../../hooks/useMessages";
 import { extractTaggedMentions } from "../../lib/mentions";
+import { handleSlashCommand, resolveLeadSlug } from "../../lib/slashCommands";
 import { useAppStore } from "../../stores/app";
 import { showNotice } from "../ui/Toast";
+import {
+  Autocomplete,
+  type AutocompleteItem,
+  applyAutocomplete,
+} from "./Autocomplete";
 import { MessageBubble } from "./MessageBubble";
 
+interface MessagesQueryData {
+  messages?: Message[];
+}
+
+function latestCachedMessageId(
+  queryClient: QueryClient,
+  channel: string,
+): string | null {
+  const entries = queryClient.getQueriesData<MessagesQueryData>({
+    queryKey: ["messages", channel],
+  });
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const [, data] = entries[i];
+    const messages = data?.messages;
+    if (!messages) continue;
+    for (let j = messages.length - 1; j >= 0; j--) {
+      const id = messages[j]?.id?.trim();
+      if (id) return id;
+    }
+  }
+  return null;
+}
+
+function emptyMessagesQueryData(
+  data: MessagesQueryData | undefined,
+): MessagesQueryData | undefined {
+  if (!data?.messages) return data;
+  return { ...data, messages: [] };
+}
+
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: Composer wiring fans out into mutation, autocomplete, and slash-command branches that share state.
 export function ThreadPanel() {
   const activeThread = useAppStore((s) => s.activeThread);
   const setActiveThread = useAppStore((s) => s.setActiveThread);
+  const setLastMessageId = useAppStore((s) => s.setLastMessageId);
+  const setChannelClearMarker = useAppStore((s) => s.setChannelClearMarker);
   // Channel is captured at thread-open time and stored on activeThread so
   // replies posted while the user has navigated away from the originating
   // channel still land in the right place. Reading useChannelSlug() here
@@ -21,12 +65,27 @@ export function ThreadPanel() {
   const activeThreadId = activeThread?.id ?? null;
   const currentChannel = activeThread?.channelSlug ?? "general";
   const [text, setText] = useState("");
+  const [caret, setCaret] = useState(0);
+  const [acItems, setAcItems] = useState<AutocompleteItem[]>([]);
+  const [acIdx, setAcIdx] = useState(0);
   const [quoting, setQuoting] = useState<Message | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
+  const { data: cfg } = useQuery({
+    queryKey: ["config"],
+    queryFn: getConfig,
+    staleTime: 60_000,
+  });
   const { data: members = [] } = useOfficeMembers();
   const knownSlugs = useMemo(() => members.map((m) => m.slug), [members]);
+  const leadSlug = useMemo(
+    () => resolveLeadSlug(cfg?.team_lead_slug, members),
+    [cfg?.team_lead_slug, members],
+  );
+  // Broker-backed slash-command registry; same source the channel composer
+  // reads. Falls back to a hardcoded list if the broker is unreachable.
+  const commands = useCommands();
 
   const { data: messages = [] } = useThreadMessages(
     currentChannel,
@@ -66,6 +125,9 @@ export function ThreadPanel() {
     void activeThreadId;
     setQuoting(null);
     setText("");
+    setCaret(0);
+    setAcItems([]);
+    setAcIdx(0);
   }, [activeThreadId]);
 
   // Focus the composer on open so users can start typing immediately.
@@ -95,13 +157,15 @@ export function ThreadPanel() {
   const replyTarget = quoting?.id ?? activeThreadId ?? undefined;
 
   const sendReply = useMutation({
-    mutationFn: (content: string) =>
-      postMessage(
-        content,
-        currentChannel,
-        replyTarget,
-        extractTaggedMentions(content, knownSlugs),
-      ),
+    mutationFn: ({
+      content,
+      tagged,
+      target,
+    }: {
+      content: string;
+      tagged: string[];
+      target: string | undefined;
+    }) => postMessage(content, currentChannel, target, tagged),
     onSuccess: () => {
       setText("");
       setQuoting(null);
@@ -117,11 +181,134 @@ export function ThreadPanel() {
     },
   });
 
-  const handleSend = () => {
+  const sendThreadMessage = useCallback(
+    (content: string) => {
+      sendReply.mutate({
+        content,
+        tagged: extractTaggedMentions(content, knownSlugs),
+        target: replyTarget,
+      });
+    },
+    [sendReply, knownSlugs, replyTarget],
+  );
+
+  const clearParentChannelMessages = useCallback(() => {
+    const markerId = latestCachedMessageId(queryClient, currentChannel);
+    setLastMessageId(null);
+    setChannelClearMarker(currentChannel, markerId);
+    queryClient.setQueriesData<MessagesQueryData>(
+      { queryKey: ["messages", currentChannel] },
+      emptyMessagesQueryData,
+    );
+    queryClient.invalidateQueries({ queryKey: ["messages", currentChannel] });
+    showNotice("Messages cleared", "info");
+  }, [currentChannel, queryClient, setChannelClearMarker, setLastMessageId]);
+
+  const handleSend = useCallback(() => {
     const trimmed = text.trim();
     if (!trimmed || sendReply.isPending) return;
-    sendReply.mutate(trimmed);
-  };
+
+    if (trimmed.startsWith("/")) {
+      const consumed = handleSlashCommand(trimmed, {
+        leadSlug,
+        sendAsMessage: sendThreadMessage,
+        clearMessages: clearParentChannelMessages,
+        channel: currentChannel,
+      });
+      if (consumed) {
+        setText("");
+        setQuoting(null);
+        return;
+      }
+    }
+
+    sendThreadMessage(trimmed);
+  }, [
+    text,
+    sendReply.isPending,
+    leadSlug,
+    sendThreadMessage,
+    clearParentChannelMessages,
+    currentChannel,
+  ]);
+
+  const pickAutocomplete = useCallback(
+    (item: AutocompleteItem) => {
+      const next = applyAutocomplete(text, caret, item);
+      setText(next.text);
+      requestAnimationFrame(() => {
+        const el = textareaRef.current;
+        if (!el) return;
+        el.focus();
+        el.setSelectionRange(next.caret, next.caret);
+        setCaret(next.caret);
+      });
+    },
+    [text, caret],
+  );
+
+  const handleAcItems = useCallback((items: AutocompleteItem[]) => {
+    setAcItems(items);
+    setAcIdx((idx) => Math.min(idx, Math.max(items.length - 1, 0)));
+  }, []);
+
+  const syncCaret = useCallback(() => {
+    const el = textareaRef.current;
+    if (el) setCaret(el.selectionStart ?? 0);
+  }, []);
+
+  const handleAutocompleteKey = useCallback(
+    (e: React.KeyboardEvent): boolean => {
+      if (acItems.length === 0) return false;
+      switch (e.key) {
+        case "ArrowDown":
+          e.preventDefault();
+          setAcIdx((i) => (i + 1) % acItems.length);
+          return true;
+        case "ArrowUp":
+          e.preventDefault();
+          setAcIdx((i) => (i - 1 + acItems.length) % acItems.length);
+          return true;
+        case "Enter":
+        case "Tab": {
+          e.preventDefault();
+          const pick = acItems[acIdx] ?? acItems[0];
+          if (pick) pickAutocomplete(pick);
+          return true;
+        }
+        case "Escape":
+          // Escape consumed by the autocomplete branch must not bubble to
+          // the window-level keydown handler, which would close the entire
+          // thread panel and discard the draft.
+          e.preventDefault();
+          e.stopPropagation();
+          setAcItems([]);
+          return true;
+        default:
+          return false;
+      }
+    },
+    [acItems, acIdx, pickAutocomplete],
+  );
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (handleAutocompleteKey(e)) return;
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        handleSend();
+        return;
+      }
+      if (e.key === "Escape" && quoting) {
+        // Same reason as the autocomplete branch: cancel the quote chip
+        // without also asking the global handler to close the thread.
+        e.preventDefault();
+        e.stopPropagation();
+        setQuoting(null);
+      }
+    },
+    [handleAutocompleteKey, handleSend, quoting],
+  );
 
   if (!activeThreadId) return null;
 
@@ -239,6 +426,14 @@ export function ThreadPanel() {
             </button>
           </div>
         ) : null}
+        <Autocomplete
+          value={text}
+          caret={caret}
+          selectedIdx={acIdx}
+          onItems={handleAcItems}
+          onPick={pickAutocomplete}
+          commands={commands}
+        />
         <div className="composer-inner">
           <textarea
             ref={textareaRef}
@@ -247,17 +442,13 @@ export function ThreadPanel() {
               quoting ? `Reply to @${quoting.from}…` : "Reply to thread…"
             }
             value={text}
-            onChange={(e) => setText(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                handleSend();
-              }
-              if (e.key === "Escape" && quoting) {
-                e.preventDefault();
-                setQuoting(null);
-              }
+            onChange={(e) => {
+              setText(e.target.value);
+              setCaret(e.target.selectionStart ?? 0);
             }}
+            onKeyDown={handleKeyDown}
+            onKeyUp={syncCaret}
+            onClick={syncCaret}
             rows={1}
           />
           <button

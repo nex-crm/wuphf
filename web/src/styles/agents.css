@@ -93,11 +93,19 @@
   border-radius: 6px;
   color: var(--text-secondary);
   flex-shrink: 0;
-  transition: all 0.15s;
+  /* Use specific properties instead of `all` to prevent unintended dimension
+     transitions on hover that could shift surrounding layout. */
+  transition:
+    background var(--duration-base, 0.15s),
+    color var(--duration-base, 0.15s);
 }
 .agent-panel-close:hover {
   background: var(--bg);
   color: var(--text);
+}
+.agent-panel-close:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
 }
 
 .agent-panel-section {
@@ -162,85 +170,6 @@
 }
 
 /* ─── Stream log ─── */
-.agent-terminal-shell {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-height: 220px;
-  overflow: hidden;
-  background: #0b0f14;
-  border: 1px solid var(--border-light);
-  border-radius: var(--radius-sm);
-}
-
-.agent-terminal-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  height: 34px;
-  padding: 0 10px;
-  color: #d8dee9;
-  background: #111827;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  font-size: 11px;
-}
-
-.agent-terminal-title {
-  display: inline-flex;
-  align-items: center;
-  min-width: 0;
-  gap: 6px;
-  font-weight: 600;
-}
-
-.agent-terminal-meta {
-  color: #8b949e;
-  font-family: var(--font-mono);
-  font-size: 10px;
-  text-transform: uppercase;
-}
-
-.agent-terminal-frame {
-  position: relative;
-  flex: 1;
-  min-height: 186px;
-  overflow: hidden;
-}
-
-.agent-terminal-host {
-  width: 100%;
-  height: 100%;
-  min-height: 186px;
-  padding: 8px;
-}
-
-.agent-terminal-host .xterm {
-  height: 100%;
-}
-
-.agent-terminal-empty {
-  position: absolute;
-  inset: 8px;
-  z-index: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #6b7280;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  pointer-events: none;
-}
-
-.agent-panel-section .agent-terminal-shell {
-  min-height: 300px;
-}
-
-.agent-panel-section .agent-terminal-frame,
-.agent-panel-section .agent-terminal-host {
-  min-height: 266px;
-}
-
 .agent-stream-log {
   font-family: var(--font-mono);
   font-size: 11px;
@@ -471,8 +400,11 @@
   transition: border-color 0.2s;
   cursor: pointer;
 }
-.agent-wizard-field select:focus {
+.agent-wizard-field select:focus,
+.agent-wizard-field select:focus-visible {
   border-color: var(--accent);
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
 }
 
 .agent-wizard-footer {
@@ -490,6 +422,352 @@
   border-radius: var(--radius-sm);
 }
 
+/* ─── Agent workbench pane ─────────────────────────────────────
+   The workbench surface inside DMView. Composes CollapsibleSection
+   sections (active tasks, live terminal, recent activity, recent
+   tasks). The pane scrolls; sections collapse independently to
+   keep dense screens scannable.
+   ────────────────────────────────────────────────────────────── */
+.agent-workbench-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px 18px 18px;
+  height: 100%;
+  overflow-y: auto;
+  background: var(--bg);
+}
+
+.agent-workbench-empty {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  font-style: italic;
+  padding: 6px 4px;
+}
+
+.agent-workbench-task-list,
+.agent-workbench-run-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.agent-workbench-task-row,
+.agent-workbench-run-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font: inherit;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
+}
+
+.agent-workbench-task-row:hover,
+.agent-workbench-run-row:hover {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+.agent-workbench-task-row:focus-visible,
+.agent-workbench-run-row:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+  border-color: var(--accent);
+}
+
+.agent-workbench-task-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-workbench-task-meta,
+.agent-workbench-run-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  flex-shrink: 0;
+}
+
+.agent-workbench-run-id {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The shared `.agent-stream-log` caps height at 300px for the right-rail
+   AgentPanel. Inside the workbench the section has the whole pane to
+   stretch into, so we override and let the log fill the available space
+   (with a sensible floor so an empty stream still shows a meaningful
+   panel). */
+.agent-workbench-stream {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 240px;
+}
+.agent-workbench-stream-log {
+  flex: 1;
+  max-height: none;
+  min-height: 220px;
+  height: 320px;
+}
+
+/* ─── Agent Profile Panel ─── */
+.agent-profile-panel {
+  /* Inherits .agent-panel layout; adds a scrollable body */
+}
+
+.agent-profile-body {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.agent-profile-section {
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.agent-profile-section-title {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-tertiary);
+  margin-bottom: 8px;
+  font-family: var(--font-mono);
+}
+
+.agent-profile-empty {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  font-style: italic;
+  padding: 2px 0;
+}
+
+.agent-profile-role-text,
+.agent-profile-current-task {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+/* Status badge */
+.agent-profile-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--text-tertiary);
+  text-transform: lowercase;
+}
+
+.agent-profile-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--neutral-400);
+  flex-shrink: 0;
+}
+
+.agent-profile-status-badge.active .agent-profile-status-dot {
+  background: var(--green);
+}
+
+.agent-profile-status-badge.paused .agent-profile-status-dot {
+  background: var(--yellow);
+}
+
+/* List (skills, runs, tasks) */
+.agent-profile-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.agent-profile-list-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text);
+  min-height: 26px;
+}
+
+.agent-profile-skill-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-profile-badge {
+  font-size: 9px;
+  padding: 1px 6px;
+  flex-shrink: 0;
+}
+
+/* Channels chips */
+.agent-profile-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.agent-profile-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: var(--radius-full);
+  font-size: 11px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    color 0.15s;
+  font-family: var(--font-sans);
+}
+
+.agent-profile-chip:hover {
+  background: var(--accent-bg);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* Run items */
+.agent-profile-run-item {
+  width: 100%;
+}
+
+.agent-profile-run-row,
+.agent-profile-task-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  gap: 8px;
+  padding: 3px 0;
+  font-family: var(--font-sans);
+  color: var(--text);
+}
+
+.agent-profile-task-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  transition: color 0.15s;
+}
+
+.agent-profile-task-btn:hover {
+  color: var(--accent);
+}
+
+.agent-profile-run-id {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: inherit;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 180px;
+}
+
+.agent-profile-run-meta {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.agent-profile-task-title {
+  font-size: 12px;
+  color: inherit;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.agent-profile-see-all {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--accent);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  font-family: var(--font-sans);
+  transition: opacity 0.15s;
+}
+
+.agent-profile-see-all:hover {
+  opacity: 0.75;
+}
+
+/* Permissions / runtime grid */
+.agent-profile-permissions {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.agent-profile-perm-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.agent-profile-perm-label {
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  min-width: 72px;
+  flex-shrink: 0;
+}
+
+.agent-profile-perm-value {
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ─── Responsive ─── */
 @media (max-width: 768px) {
   .agent-panel {
@@ -499,5 +777,13 @@
   .agent-wizard-modal {
     margin: 16px;
     max-width: none;
+  }
+
+  .agent-workbench-pane {
+    padding: 12px 12px 14px;
+  }
+
+  .agent-workbench-stream-log {
+    height: 260px;
   }
 }

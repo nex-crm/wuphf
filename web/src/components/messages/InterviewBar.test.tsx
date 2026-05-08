@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import type { AgentRequest } from "../../api/client";
@@ -165,5 +165,103 @@ describe("<InterviewBar> enhance UX", () => {
     setPending([clean]);
     render(wrap(<InterviewBar />));
     expect(screen.queryByText(/Similar to/)).not.toBeInTheDocument();
+  });
+});
+
+describe("<InterviewBar> approval UX", () => {
+  it("renders EXTERNAL ACTION badge and structured details for approval kind", () => {
+    const approval: AgentRequest = {
+      id: "request-99",
+      from: "growthops",
+      channel: "general",
+      kind: "approval",
+      status: "pending",
+      title: "Send Email via Gmail",
+      question: "@growthops wants to send email via Gmail. Approve?",
+      context: [
+        "Why: Sending welcome note.",
+        "",
+        "What this will do:",
+        "• To: alex@nex.ai",
+        "• Subject: Welcome to Nex",
+        "• Body: Hi Alex, welcome aboard!",
+        "",
+        "Action: GMAIL_SEND_EMAIL via Gmail",
+        "Account: live::gmail::default::abc123",
+        "Channel: #general",
+      ].join("\n"),
+      options: [
+        { id: "approve", label: "Approve" },
+        { id: "reject", label: "Reject" },
+      ],
+      recommended_id: "approve",
+      blocking: true,
+      created_at: "2026-05-06T00:00:00Z",
+    };
+    setPending([approval]);
+    render(wrap(<InterviewBar />));
+
+    expect(screen.getByText("EXTERNAL ACTION")).toBeInTheDocument();
+    expect(screen.getByText("BLOCKING")).toBeInTheDocument();
+    expect(screen.getByText("Sending welcome note.")).toBeInTheDocument();
+    expect(screen.getByText("alex@nex.ai")).toBeInTheDocument();
+    expect(screen.getByText("Welcome to Nex")).toBeInTheDocument();
+    expect(
+      screen.getByText("live::gmail::default::abc123"),
+    ).toBeInTheDocument();
+  });
+
+  it("falls back to plain context for non-approval requests in the bar", () => {
+    const interview: AgentRequest = {
+      id: "request-100",
+      from: "growthops",
+      channel: "general",
+      kind: "interview",
+      status: "pending",
+      title: "Need direction",
+      question: "Which path should we take?",
+      context: "background information from the agent",
+      options: [{ id: "yes", label: "Yes" }],
+      blocking: false,
+      created_at: "2026-05-06T00:00:00Z",
+    };
+    setPending([interview]);
+    render(wrap(<InterviewBar />));
+
+    expect(screen.queryByText("EXTERNAL ACTION")).not.toBeInTheDocument();
+    expect(
+      screen.getByText("background information from the agent"),
+    ).toBeInTheDocument();
+  });
+
+  it("resets text mode when the active request changes", () => {
+    const needsText: AgentRequest = {
+      id: "request-text",
+      from: "growthops",
+      channel: "general",
+      kind: "interview",
+      status: "pending",
+      question: "What should we say?",
+      options: [{ id: "custom", label: "Custom", requires_text: true }],
+      blocking: false,
+      created_at: "2026-05-06T00:00:00Z",
+    };
+    const nextRequest: AgentRequest = {
+      ...needsText,
+      id: "request-next",
+      question: "Approve the new plan?",
+      options: [{ id: "approve", label: "Approve" }],
+    };
+
+    setPending([needsText]);
+    const { rerender } = render(wrap(<InterviewBar />));
+    fireEvent.click(screen.getByRole("button", { name: /Custom/i }));
+    expect(screen.getByRole("textbox")).toBeInTheDocument();
+
+    setPending([nextRequest]);
+    rerender(wrap(<InterviewBar />));
+
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(screen.getByText("Approve the new plan?")).toBeInTheDocument();
   });
 });

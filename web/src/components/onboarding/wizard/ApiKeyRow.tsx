@@ -2,13 +2,6 @@ import { useState } from "react";
 
 import type { API_KEY_FIELDS } from "./constants";
 
-// ApiKeyRow renders one provider's CLI-login-vs-API-key choice. Default
-// path is CLI login (most users have one of claude/codex/gcloud logged
-// in already from the runtime grid above); clicking "Use API key"
-// reveals the password input so users can paste without exposing the
-// key the whole time. If the user has any value typed in, the input
-// stays open even after toggling away — we don't drop their key.
-
 interface ApiKeyRowProps {
   field: (typeof API_KEY_FIELDS)[number];
   value: string;
@@ -18,6 +11,7 @@ interface ApiKeyRowProps {
 export function ApiKeyRow({ field, value, onChange }: ApiKeyRowProps) {
   const [showInput, setShowInput] = useState<boolean>(value.length > 0);
   const useApiKey = showInput || value.length > 0;
+  const panelId = `api-key-panel-${field.key}`;
   return (
     <div className="key-row" data-testid={`api-key-row-${field.key}`}>
       <div className="key-label-wrap">
@@ -34,60 +28,80 @@ export function ApiKeyRow({ field, value, onChange }: ApiKeyRowProps) {
       </div>
       <div
         className="key-input-wrap"
-        style={{ display: "flex", flexDirection: "column", gap: 6 }}
+        style={{ display: "flex", flexDirection: "column", gap: 8 }}
       >
-        <div style={{ display: "flex", gap: 8 }}>
+        <div
+          className="key-tabs"
+          role="tablist"
+          aria-label={`${field.label} auth method`}
+        >
           <button
             type="button"
-            className={`runtime-tile ${!useApiKey ? "selected" : ""}`}
+            role="tab"
+            className={`key-tab ${!useApiKey ? "active" : ""}`}
             onClick={() => {
               setShowInput(false);
               if (value) onChange("");
             }}
-            aria-pressed={!useApiKey}
+            aria-selected={!useApiKey}
+            aria-controls={panelId}
+            tabIndex={!useApiKey ? 0 : -1}
             data-testid={`api-key-cli-${field.key}`}
-            style={{ padding: "6px 10px", fontSize: 12, minWidth: 0 }}
           >
-            Use CLI login
+            CLI login
           </button>
           <button
             type="button"
-            className={`runtime-tile ${useApiKey ? "selected" : ""}`}
+            role="tab"
+            className={`key-tab ${useApiKey ? "active" : ""}`}
             onClick={() => setShowInput(true)}
-            aria-pressed={useApiKey}
+            aria-selected={useApiKey}
+            aria-controls={panelId}
+            tabIndex={useApiKey ? 0 : -1}
             data-testid={`api-key-paste-${field.key}`}
-            style={{ padding: "6px 10px", fontSize: 12, minWidth: 0 }}
           >
-            Use API key
+            API key
           </button>
         </div>
-        {!useApiKey && (
-          <p
-            style={{
-              fontSize: 11,
-              color: "var(--text-tertiary)",
-              margin: 0,
-              fontFamily: "var(--font-mono)",
-            }}
-          >
-            Run <code>{field.cliLoginCmd}</code> in a terminal — agents pick up
-            the session automatically.
-          </p>
-        )}
-        {useApiKey ? (
-          <input
-            id={`api-key-input-${field.key}`}
-            className="input"
-            type="password"
-            placeholder={field.key}
-            value={value}
-            onChange={(e) => onChange(e.target.value)}
-            autoComplete="off"
-            aria-labelledby={`api-key-label-${field.key}`}
-            aria-describedby={`api-key-hint-${field.key}`}
-            data-testid={`api-key-input-${field.key}`}
-          />
-        ) : null}
+        <div
+          id={panelId}
+          role="tabpanel"
+          aria-labelledby={
+            useApiKey
+              ? `api-key-paste-${field.key}`
+              : `api-key-cli-${field.key}`
+          }
+        >
+          {!useApiKey && (
+            <p
+              style={{
+                fontSize: 12,
+                lineHeight: 1.45,
+                minHeight: 36,
+                color: "var(--text-secondary)",
+                margin: 0,
+              }}
+            >
+              Run <code>{field.cliLoginCmd}</code> in a terminal — agents pick
+              up the session automatically.
+            </p>
+          )}
+          {useApiKey ? (
+            <input
+              id={`api-key-input-${field.key}`}
+              className="input"
+              type="password"
+              style={{ height: 36 }}
+              placeholder={field.key}
+              value={value}
+              onChange={(e) => onChange(e.target.value)}
+              autoComplete="off"
+              aria-labelledby={`api-key-label-${field.key}`}
+              aria-describedby={`api-key-hint-${field.key}`}
+              data-testid={`api-key-input-${field.key}`}
+            />
+          ) : null}
+        </div>
       </div>
     </div>
   );

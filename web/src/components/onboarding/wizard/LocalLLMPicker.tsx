@@ -58,34 +58,9 @@ export function LocalLLMPicker({ selected, onSelect }: LocalLLMPickerProps) {
     <div
       data-testid="onboarding-local-llm-picker"
       style={{
-        marginTop: 12,
-        marginLeft: 12,
-        paddingLeft: 16,
-        borderLeft: "2px solid var(--accent, #b88efb)",
+        padding: "8px 16px 16px",
       }}
     >
-      <p
-        style={{
-          fontSize: 12,
-          fontWeight: 600,
-          color: "var(--text)",
-          margin: "0 0 4px 0",
-        }}
-      >
-        Pick a local runtime
-      </p>
-      <p
-        style={{
-          fontSize: 12,
-          color: "var(--text-secondary)",
-          margin: "0 0 10px 0",
-        }}
-      >
-        No cloud key required. Best on macOS or Linux. Need install commands?
-        See <strong>Settings → Local LLMs</strong> after onboarding for the
-        doctor panel with copy-paste shell snippets.
-      </p>
-
       {loading ? (
         <div
           style={{
@@ -117,7 +92,7 @@ export function LocalLLMPicker({ selected, onSelect }: LocalLLMPickerProps) {
         </div>
       )}
       {!loading && (
-        <div className="runtime-grid">
+        <div className="runtime-grid runtime-grid-local">
           {/* biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor. */}
           {LOCAL_PROVIDER_LABELS.map((meta) => {
             const s = byKind.get(meta.kind);
@@ -172,6 +147,12 @@ export function LocalLLMPicker({ selected, onSelect }: LocalLLMPickerProps) {
                 aria-pressed={isSelected}
                 data-testid={`onboarding-local-llm-tile-${meta.kind}`}
               >
+                <span
+                  className={["provider-priority", isSelected ? "active" : ""]
+                    .filter(Boolean)
+                    .join(" ")}
+                  aria-hidden="true"
+                />
                 <div className="runtime-tile-head">
                   <span
                     className={`runtime-tile-status ${running ? "installed" : ""}`}
@@ -187,6 +168,18 @@ export function LocalLLMPicker({ selected, onSelect }: LocalLLMPickerProps) {
           })}
         </div>
       )}
+      <p
+        style={{
+          fontSize: 12,
+          color: "var(--text-secondary)",
+          margin: "12px 0 0 0",
+        }}
+      >
+        No cloud key required. Best on macOS or Linux.
+        <br />
+        Need install commands? See <strong>Settings → Local LLMs</strong> after
+        onboarding.
+      </p>
     </div>
   );
 }

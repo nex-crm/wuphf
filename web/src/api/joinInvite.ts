@@ -8,6 +8,15 @@ export type JoinInviteErrorCode =
   | "broker_unreachable"
   | "broker_failed"
   | "invalid_request"
+  // Phase 2 hardening: tunnel-mode invites require a second-factor passcode
+  // the host reads out-of-band. The server returns this code on both
+  // missing and wrong passcodes (deliberately indistinguishable on the
+  // wire — see cmd/wuphf/share_join_guard.go).
+  | "passcode_required"
+  // Phase 2 hardening: the share server clamps brute-force attempts at the
+  // unauthenticated /join POST. The JoinPage renders this distinctly so the
+  // joiner knows to wait, not retry immediately.
+  | "rate_limited"
   | "network"
   | "unknown";
 
@@ -19,6 +28,8 @@ const SERVER_ERROR_CODES: ReadonlySet<JoinInviteErrorCode> = new Set([
   "broker_unreachable",
   "broker_failed",
   "invalid_request",
+  "passcode_required",
+  "rate_limited",
 ]);
 
 export interface JoinInviteSuccess {
@@ -38,20 +49,33 @@ export type JoinInviteResult = JoinInviteSuccess | JoinInviteFailure;
 interface SubmitOptions {
   token: string;
   displayName: string;
+  // Optional second-factor passcode for tunnel-mode invites. Empty/undefined
+  // for network-share invites and on the first submit when the joiner has
+  // not yet been told a passcode is required — the server will respond with
+  // `passcode_required` and the JoinPage will surface a passcode field.
+  passcode?: string;
   signal?: AbortSignal;
 }
 
 export async function submitJoinInvite({
   token,
   displayName,
+  passcode,
   signal,
 }: SubmitOptions): Promise<JoinInviteResult> {
+  // Trim any whitespace pasted in by the joiner so a stray space at the end
+  // of the digits does not collide with the constant-time compare on the
+  // server side.
+  const trimmedPasscode =
+    typeof passcode === "string" ? passcode.trim() : undefined;
+  const body: Record<string, string> = { display_name: displayName };
+  if (trimmedPasscode) body.passcode = trimmedPasscode;
   let response: Response;
   try {
     response = await fetch(`/join/${encodeURIComponent(token)}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ display_name: displayName }),
+      body: JSON.stringify(body),
       credentials: "same-origin",
       signal,
     });

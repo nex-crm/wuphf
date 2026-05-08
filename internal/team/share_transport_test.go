@@ -370,6 +370,111 @@ func TestBrokerTransportHostRevokeParticipantShare(t *testing.T) {
 	}
 }
 
+// TestShareTransportRunInstallsAdmitHook is the slice-C contract test:
+// when ShareTransport.Run is live and the broker accepts a human invite, the
+// admit hook fires Host.UpsertParticipant once with the new session's
+// (adapter, key) pair and the admitted display name. Closes the v1 lifecycle
+// gap where only RevokeParticipant flowed through the host.
+func TestShareTransportRunInstallsAdmitHook(t *testing.T) {
+	b := newTestBroker(t)
+	st := NewShareTransport(b, RelativeJoinURL)
+	host := newRecordingUpsertHost()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	runErr := make(chan error, 1)
+	go func() { runErr <- st.Run(ctx, host) }()
+	waitForShareConnected(t, st, runErr)
+
+	token, _, err := b.createHumanInvite()
+	if err != nil {
+		t.Fatalf("createHumanInvite: %v", err)
+	}
+	_, session, err := b.acceptHumanInvite(token, "Devon", "")
+	if err != nil {
+		t.Fatalf("acceptHumanInvite: %v", err)
+	}
+
+	// acceptHumanInvite is the broker-internal helper; the production HTTP
+	// path also fires the hook. Drive it explicitly here so the test does not
+	// need an HTTP server up.
+	b.fireHumanAdmitHook(ctx, session)
+
+	select {
+	case <-host.upserted:
+	case <-time.After(time.Second):
+		t.Fatalf("host.UpsertParticipant was not called within 1s")
+	}
+
+	calls := host.upsertSnapshot()
+	if len(calls) != 1 {
+		t.Fatalf("UpsertParticipant call count: got %d want 1", len(calls))
+	}
+	got := calls[0]
+	if got.participant.AdapterName != shareAdapterName {
+		t.Errorf("AdapterName: got %q want %q", got.participant.AdapterName, shareAdapterName)
+	}
+	if got.participant.Key != session.ID {
+		t.Errorf("Key: got %q want %q", got.participant.Key, session.ID)
+	}
+	if got.participant.DisplayName != "Devon" {
+		t.Errorf("DisplayName: got %q want %q", got.participant.DisplayName, "Devon")
+	}
+	if !got.participant.Human {
+		t.Errorf("Human: got false want true (admitted humans must be marked Human=true)")
+	}
+	if got.binding.Scope != transport.ScopeOffice {
+		t.Errorf("Scope: got %q want %q", got.binding.Scope, transport.ScopeOffice)
+	}
+	if got.binding.MemberSlug != session.HumanSlug {
+		t.Errorf("MemberSlug: got %q want %q", got.binding.MemberSlug, session.HumanSlug)
+	}
+
+	cancel()
+	awaitRunReturn(t, runErr)
+}
+
+// TestShareTransportAdmitHookClearedOnRunExit confirms the admit hook is
+// removed when Run returns so a stale closure cannot keep firing against a
+// stopped host. Without this teardown a second adapter installed later would
+// see the old pointer and would (silently) double-fire.
+func TestShareTransportAdmitHookClearedOnRunExit(t *testing.T) {
+	b := newTestBroker(t)
+	st := NewShareTransport(b, RelativeJoinURL)
+	host := newRecordingUpsertHost()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	runErr := make(chan error, 1)
+	go func() { runErr <- st.Run(ctx, host) }()
+	waitForShareConnected(t, st, runErr)
+
+	cancel()
+	awaitRunReturn(t, runErr)
+
+	// After Run returns, fireHumanAdmitHook should be a silent no-op.
+	b.fireHumanAdmitHook(context.Background(), humanSession{ID: "session-after-stop", HumanSlug: "after"})
+
+	if got := len(host.upsertSnapshot()); got != 0 {
+		t.Errorf("UpsertParticipant called after Run exit: got %d calls want 0", got)
+	}
+}
+
+// TestShareTransportAdmitHookSilentWhenNoHost asserts the adapter does not
+// crash if the admit hook fires after host.Load() returns nil (e.g. a teardown
+// race where SetHumanAdmitHook(nil) has not yet completed). The hook is
+// installed inside Run after host.Store, so this should be a near-impossible
+// race in practice — the test pins the defensive nil check anyway because
+// transitive failure (panic in an HTTP handler goroutine) would crash the
+// broker process.
+func TestShareTransportAdmitHookSilentWhenNoHost(t *testing.T) {
+	b := newTestBroker(t)
+	st := NewShareTransport(b, RelativeJoinURL)
+
+	// Manually invoke onHumanAdmit without ever calling Run; host pointer is nil.
+	st.onHumanAdmit(context.Background(), "session-1", "slug", "Display")
+	// Reaching here without panic is the assertion.
+}
+
 // TestShareTransportSendIsNoop pins the no-op Send semantics. Office-bound
 // human-share has no external network to push to (admitted humans poll the
 // broker directly), so Send accepts the message and returns nil. Locking this
@@ -491,6 +596,48 @@ func (h *erroringHost) revokeCalls() []revokeCall {
 	return out
 }
 
+// recordingUpsertHost records every UpsertParticipant call for the slice-C
+// admit-hook tests. ReceiveMessage / DetachParticipant / RevokeParticipant are
+// no-ops; the share admit path only needs UpsertParticipant.
+type recordingUpsertHost struct {
+	mu       sync.Mutex
+	calls    []upsertCall
+	upserted chan struct{}
+}
+
+type upsertCall struct {
+	participant transport.Participant
+	binding     transport.Binding
+}
+
+func newRecordingUpsertHost() *recordingUpsertHost {
+	return &recordingUpsertHost{upserted: make(chan struct{}, 8)}
+}
+
+func (h *recordingUpsertHost) ReceiveMessage(context.Context, transport.Message) error { return nil }
+
+func (h *recordingUpsertHost) UpsertParticipant(_ context.Context, p transport.Participant, b transport.Binding) error {
+	h.mu.Lock()
+	h.calls = append(h.calls, upsertCall{participant: p, binding: b})
+	h.mu.Unlock()
+	select {
+	case h.upserted <- struct{}{}:
+	default:
+	}
+	return nil
+}
+
+func (h *recordingUpsertHost) DetachParticipant(context.Context, string, string) error { return nil }
+func (h *recordingUpsertHost) RevokeParticipant(context.Context, string, string) error { return nil }
+
+func (h *recordingUpsertHost) upsertSnapshot() []upsertCall {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	out := make([]upsertCall, len(h.calls))
+	copy(out, h.calls)
+	return out
+}
+
 // lastHumanInviteID returns the most recently created invite ID. Test-only.
 func lastHumanInviteID(b *Broker) string {
 	b.mu.Lock()
@@ -511,4 +658,116 @@ func inviteRevoked(b *Broker, inviteID string) bool {
 		}
 	}
 	return false
+}
+
+// TestShareTransportSetURLBuilderOverridesConstructor confirms the override
+// builder installed via SetURLBuilder wins over the constructor builder when
+// CreateInvite runs. Guards the contract that the in-process share controller
+// can upgrade from RelativeJoinURL to an absolute URL once it knows its bind
+// address without reconstructing the transport.
+func TestShareTransportSetURLBuilderOverridesConstructor(t *testing.T) {
+	b := newTestBroker(t)
+	st := NewShareTransport(b, RelativeJoinURL)
+	st.SetURLBuilder(func(token string) string {
+		return "http://10.0.0.5:7891/join/" + token
+	})
+	got, err := st.CreateInvite(context.Background(), "")
+	if err != nil {
+		t.Fatalf("CreateInvite: %v", err)
+	}
+	if !strings.HasPrefix(got, "http://10.0.0.5:7891/join/") {
+		t.Errorf("CreateInvite: got %q, want override builder's prefix", got)
+	}
+}
+
+// TestShareTransportSetURLBuilderNilClearsOverride confirms passing nil to
+// SetURLBuilder restores the constructor builder. Lets the controller detach
+// cleanly on shutdown without leaving a stale closure that captures a now-
+// invalid bind address.
+func TestShareTransportSetURLBuilderNilClearsOverride(t *testing.T) {
+	b := newTestBroker(t)
+	st := NewShareTransport(b, RelativeJoinURL)
+	st.SetURLBuilder(func(token string) string { return "http://x/" + token })
+	st.SetURLBuilder(nil)
+	got, err := st.CreateInvite(context.Background(), "")
+	if err != nil {
+		t.Fatalf("CreateInvite: %v", err)
+	}
+	if !strings.HasPrefix(got, "/join/") {
+		t.Errorf("after SetURLBuilder(nil), got %q, want fallback to RelativeJoinURL", got)
+	}
+}
+
+// TestShareTransportCreateInviteDetailedReturnsBrokerMetadata confirms the
+// detailed variant surfaces the broker-issued invite ID and RFC3339 expiry
+// alongside the URL — fields the in-process controller needs to render its
+// "expires in 24h" hint without parsing the URL itself.
+func TestShareTransportCreateInviteDetailedReturnsBrokerMetadata(t *testing.T) {
+	b := newTestBroker(t)
+	st := NewShareTransport(b, RelativeJoinURL)
+	st.SetURLBuilder(func(token string) string { return "http://office/join/" + token })
+
+	details, err := st.CreateInviteDetailed(context.Background())
+	if err != nil {
+		t.Fatalf("CreateInviteDetailed: %v", err)
+	}
+	if !strings.HasPrefix(details.URL, "http://office/join/") {
+		t.Errorf("URL: got %q, want override prefix", details.URL)
+	}
+	if details.InviteID == "" {
+		t.Error("InviteID: empty, broker should have minted one")
+	}
+	if details.ExpiresAt == "" {
+		t.Error("ExpiresAt: empty, broker should have set RFC3339 timestamp")
+	}
+	if got := lastHumanInviteID(b); got != details.InviteID {
+		t.Errorf("InviteID mismatch: got %q, broker last %q", details.InviteID, got)
+	}
+}
+
+// TestBrokerShareTransportAccessor confirms SetShareTransport / ShareTransport
+// round-trip the registered handle and tolerate nil clears. The in-process
+// share controller relies on this accessor to obtain the adapter without a
+// separate plumbing channel.
+func TestBrokerShareTransportAccessor(t *testing.T) {
+	b := newTestBroker(t)
+	if got := b.ShareTransport(); got != nil {
+		t.Errorf("ShareTransport before SetShareTransport: got %v, want nil", got)
+	}
+	st := NewShareTransport(b, RelativeJoinURL)
+	b.SetShareTransport(st)
+	if got := b.ShareTransport(); got != st {
+		t.Errorf("ShareTransport after SetShareTransport: got %p, want %p", got, st)
+	}
+	b.SetShareTransport(nil)
+	if got := b.ShareTransport(); got != nil {
+		t.Errorf("ShareTransport after SetShareTransport(nil): got %v, want nil", got)
+	}
+}
+
+// TestRegisterTransportsRegistersShareHandle confirms RegisterTransports
+// publishes the constructed *ShareTransport on the broker so the in-process
+// controller can find it. Without this the controller's adapter path silently
+// degrades to the legacy HTTP path.
+func TestRegisterTransportsRegistersShareHandle(t *testing.T) {
+	b := newTestBroker(t)
+	if got := b.ShareTransport(); got != nil {
+		t.Fatalf("precondition: ShareTransport should be nil before RegisterTransports, got %v", got)
+	}
+	stop, err := RegisterTransports(b)
+	if err != nil {
+		t.Fatalf("RegisterTransports: %v", err)
+	}
+	t.Cleanup(stop)
+
+	st := b.ShareTransport()
+	if st == nil {
+		t.Fatal("ShareTransport: nil after RegisterTransports — share handle was not published")
+	}
+	// Cleanup must clear the handle so a subsequent RegisterTransports cycle
+	// starts from a known-empty state.
+	stop()
+	if got := b.ShareTransport(); got != nil {
+		t.Errorf("ShareTransport after cleanup: got %v, want nil", got)
+	}
 }

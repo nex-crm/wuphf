@@ -1,7 +1,6 @@
 package provider
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -36,28 +35,28 @@ type ClaudeStreamResult struct {
 
 // ReadClaudeJSONStream consumes Claude CLI stream-json output and normalizes it
 // into text, thinking, tool, and error events.
+//
+// Drained via DrainStreamLines so a single oversized JSONL line never wedges
+// the cmd's stdout pipe and never aborts parsing of subsequent lines.
 func ReadClaudeJSONStream(r io.Reader, onEvent func(ClaudeStreamEvent)) (ClaudeStreamResult, error) {
 	var result ClaudeStreamResult
 	var text strings.Builder
 
-	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-
-	for scanner.Scan() {
-		line := scanner.Text()
+	err := DrainStreamLines(r, func(raw string) {
+		line := strings.TrimRight(raw, "\r\n")
 		if strings.TrimSpace(line) == "" {
-			continue
+			return
 		}
 
 		var msg claudeStreamMsg
-		if err := json.Unmarshal([]byte(line), &msg); err != nil {
-			continue
+		if jsonErr := json.Unmarshal([]byte(line), &msg); jsonErr != nil {
+			return
 		}
 
 		switch msg.Type {
 		case "assistant":
 			if msg.Message == nil {
-				continue
+				return
 			}
 			for _, block := range msg.Message.Content {
 				switch block.Type {
@@ -157,8 +156,8 @@ func ReadClaudeJSONStream(r io.Reader, onEvent func(ClaudeStreamEvent)) (ClaudeS
 				}
 			}
 		}
-	}
-	if err := scanner.Err(); err != nil {
+	})
+	if err != nil {
 		return result, fmt.Errorf("read claude json stream: %w", err)
 	}
 

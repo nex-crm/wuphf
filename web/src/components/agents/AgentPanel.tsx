@@ -5,6 +5,7 @@ import { Xmark } from "iconoir-react";
 import type { OfficeMember } from "../../api/client";
 import { createDM, post } from "../../api/client";
 import { listAgentLogTasks, type TaskLogSummary } from "../../api/tasks";
+import { useAgentStream } from "../../hooks/useAgentStream";
 import { useDefaultHarness } from "../../hooks/useConfig";
 import { useChannelMembers, useOfficeMembers } from "../../hooks/useMembers";
 import { resolveHarness } from "../../lib/harness";
@@ -15,11 +16,12 @@ import {
   useCurrentRoute,
 } from "../../routes/useCurrentRoute";
 import { useAppStore } from "../../stores/app";
+import { StreamLineView } from "../messages/StreamLineView";
 import { confirm } from "../ui/ConfirmDialog";
 import { HarnessBadge } from "../ui/HarnessBadge";
 import { PixelAvatar } from "../ui/PixelAvatar";
 import { showNotice } from "../ui/Toast";
-import { AgentTerminal } from "./AgentTerminal";
+import { AgentProfilePanel } from "./AgentProfilePanel";
 
 /**
  * Stable identity key for the AgentPanel "close on route change" effect.
@@ -70,13 +72,44 @@ interface AgentPanelViewProps {
 }
 
 function StreamSection({ slug }: { slug: string }) {
+  const { lines, connected } = useAgentStream(slug);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  // appendStreamLine merges consecutive raw chunks into the last line's
+  // `data` without growing the array, so depending on length alone would
+  // freeze the scroll while a model is still streaming text. Track the
+  // last line's id+data so coalesced updates retrigger the effect too.
+  const lastLine = lines[lines.length - 1];
+
+  // Stick to bottom only when the user is already near it, so scrolling
+  // back through history isn't disrupted by every new line.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-run on every new line so the log auto-scrolls.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    if (distanceFromBottom < 32) {
+      el.scrollTop = el.scrollHeight;
+    }
+  }, [lines.length, lastLine?.id, lastLine?.data]);
+
   return (
     <div className="agent-panel-section">
-      <AgentTerminal
-        slug={slug}
-        title="Live stream"
-        emptyLabel="No output yet"
-      />
+      <div className="agent-panel-section-title">Live stream</div>
+      <div className="agent-stream-status">
+        <span
+          className={`status-dot ${connected ? "active pulse" : "lurking"}`}
+        />
+        {connected ? "Connected" : "Disconnected"}
+      </div>
+      <div className="agent-stream-log" ref={scrollRef}>
+        {lines.length === 0 ? (
+          <div className="agent-stream-empty">No output yet</div>
+        ) : (
+          lines.map((line) => (
+            <StreamLineView key={line.id} line={line} compact={true} />
+          ))
+        )}
+      </div>
     </div>
   );
 }
@@ -157,6 +190,7 @@ function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
   const [view, setView] = useState<"stream" | "logs">("stream");
   const [toggling, setToggling] = useState(false);
   const [removing, setRemoving] = useState(false);
+  const [showProfile, setShowProfile] = useState(false);
   const defaultHarness = useDefaultHarness();
 
   // Derive the per-channel enabled state. An agent is "enabled" in the
@@ -167,6 +201,11 @@ function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
   const { data: channelMembers = [] } = useChannelMembers(currentChannel);
   const channelEntry = channelMembers.find((m) => m.slug === agent.slug);
   const enabled = Boolean(channelEntry) && channelEntry?.disabled !== true;
+
+  // All hooks called. Now it is safe to branch on profile mode.
+  if (showProfile) {
+    return <AgentProfilePanel agent={agent} onClose={onClose} />;
+  }
 
   // Broker rejects remove / disable for any `built_in` member (lead agent).
   // Use `!== true` (not `!agent.built_in`) so an absent field isn't silently
@@ -401,6 +440,14 @@ function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
         >
           {view === "logs" ? "Live stream" : "View logs"}
         </button>
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm"
+          onClick={() => setShowProfile(true)}
+          aria-label={`View full profile for ${agent.name || agent.slug}`}
+        >
+          Profile
+        </button>
       </div>
 
       {/* Destructive — shown only when the broker will accept a remove */}
@@ -481,7 +528,7 @@ export function AgentPanel() {
 
   return (
     <div ref={panelRef} style={{ display: "contents" }}>
-      <AgentPanelView agent={agent} onClose={close} />
+      <AgentPanelView key={activeAgentSlug} agent={agent} onClose={close} />
     </div>
   );
 }

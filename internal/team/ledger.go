@@ -13,7 +13,7 @@ func (b *Broker) appendActionWithRefsLocked(kind, source, channel, actor, summar
 		Source:     strings.TrimSpace(source),
 		Channel:    normalizeChannelSlug(channel),
 		Actor:      strings.TrimSpace(actor),
-		Summary:    strings.TrimSpace(summary),
+		Summary:    redactSecretsInText(strings.TrimSpace(summary)),
 		RelatedID:  strings.TrimSpace(relatedID),
 		SignalIDs:  append([]string(nil), signalIDs...),
 		DecisionID: strings.TrimSpace(decisionID),
@@ -89,8 +89,8 @@ func (b *Broker) RecordSignals(signals []officeSignal) ([]officeSignalRecord, er
 			Source:        strings.TrimSpace(signal.Source),
 			SourceRef:     strings.TrimSpace(signal.ID),
 			Kind:          strings.TrimSpace(signal.Kind),
-			Title:         strings.TrimSpace(signal.Title),
-			Content:       strings.TrimSpace(signal.Content),
+			Title:         redactSecretsInText(strings.TrimSpace(signal.Title)),
+			Content:       redactSecretsInText(strings.TrimSpace(signal.Content)),
 			Channel:       channel,
 			Owner:         strings.TrimSpace(signal.Owner),
 			Confidence:    strings.TrimSpace(signal.Confidence),
@@ -124,8 +124,8 @@ func (b *Broker) RecordDecision(kind, channel, summary, reason, owner string, si
 		ID:            fmt.Sprintf("decision-%d", len(b.decisions)+1),
 		Kind:          strings.TrimSpace(kind),
 		Channel:       channel,
-		Summary:       strings.TrimSpace(summary),
-		Reason:        strings.TrimSpace(reason),
+		Summary:       redactSecretsInText(strings.TrimSpace(summary)),
+		Reason:        redactSecretsInText(strings.TrimSpace(reason)),
 		Owner:         strings.TrimSpace(owner),
 		SignalIDs:     append([]string(nil), signalIDs...),
 		RequiresHuman: requiresHuman,
@@ -162,7 +162,7 @@ func (b *Broker) CreateWatchdogAlert(kind, channel, targetType, targetID, owner,
 		alert := &b.watchdogs[i]
 		if alert.Kind == strings.TrimSpace(kind) && alert.Channel == channel && alert.TargetType == strings.TrimSpace(targetType) && alert.TargetID == strings.TrimSpace(targetID) && strings.TrimSpace(alert.Status) != "resolved" {
 			alert.Owner = strings.TrimSpace(owner)
-			alert.Summary = strings.TrimSpace(summary)
+			alert.Summary = redactSecretsInText(strings.TrimSpace(summary))
 			alert.UpdatedAt = now
 			if err := b.saveLocked(); err != nil {
 				return watchdogAlert{}, false, err
@@ -179,7 +179,7 @@ func (b *Broker) CreateWatchdogAlert(kind, channel, targetType, targetID, owner,
 		TargetID:   strings.TrimSpace(targetID),
 		Owner:      strings.TrimSpace(owner),
 		Status:     "active",
-		Summary:    strings.TrimSpace(summary),
+		Summary:    redactSecretsInText(strings.TrimSpace(summary)),
 		CreatedAt:  now,
 		UpdatedAt:  now,
 	}
@@ -187,10 +187,80 @@ func (b *Broker) CreateWatchdogAlert(kind, channel, targetType, targetID, owner,
 	if len(b.watchdogs) > 120 {
 		b.watchdogs = append([]watchdogAlert(nil), b.watchdogs[len(b.watchdogs)-120:]...)
 	}
+	// Mirror the alert into the agent's activity snapshot so the office rail
+	// shows the stuck escalation immediately (no need to wait for the 90s
+	// stale-while-active reaper). Owner is the agent slug for task/request
+	// alerts. Best-effort: an alert without a known agent owner (e.g. stuck
+	// on a system target) just doesn't surface a pill change.
+	b.markAgentStuckFromWatchdogLocked(record)
 	if err := b.saveLocked(); err != nil {
 		return watchdogAlert{}, false, err
 	}
 	return record, false, nil
+}
+
+// markAgentStuckFromWatchdogLocked stamps the alert's Owner activity snapshot
+// with Kind="stuck" and republishes it. Caller must hold b.mu. No-op when the
+// owner is empty or has no live activity entry yet.
+func (b *Broker) markAgentStuckFromWatchdogLocked(alert watchdogAlert) {
+	slug := normalizeChannelSlug(alert.Owner)
+	if slug == "" {
+		return
+	}
+	snap, ok := b.activity[slug]
+	if !ok {
+		// No prior activity for this agent — synthesize a minimal snapshot
+		// so the rail still surfaces the stuck signal. Status stays empty
+		// (would otherwise lie about agent state); the frontend keys off
+		// Kind=="stuck" for the chrome.
+		snap = agentActivitySnapshot{Slug: slug}
+	}
+	if snap.Kind == "stuck" {
+		return
+	}
+	snap.Kind = "stuck"
+	if alert.Summary != "" {
+		snap.Detail = alert.Summary
+	}
+	snap.LastTime = time.Now().UTC().Format(time.RFC3339)
+	b.activity[slug] = snap
+	b.publishActivityLocked(snap)
+}
+
+// markAgentStuckClearedFromWatchdogLocked is the inverse hook for the clear
+// path in resolveWatchdogAlertsLocked. It does NOT invent a new "clear" Kind:
+// the alert resolution is itself treated as a routine status update so the
+// pill drops the bordered chrome and waits for the next real activity event
+// to repopulate live state. Caller must hold b.mu.
+func (b *Broker) markAgentStuckClearedFromWatchdogLocked(alert watchdogAlert) {
+	slug := normalizeChannelSlug(alert.Owner)
+	if slug == "" {
+		return
+	}
+	snap, ok := b.activity[slug]
+	if !ok {
+		return
+	}
+	if snap.Kind != "stuck" {
+		return
+	}
+	// If another active watchdog still claims this owner, leave the pill
+	// stuck. The just-resolved alert is already marked "resolved" in
+	// b.watchdogs by resolveWatchdogAlertsLocked, so the scan will skip it
+	// and only catch genuinely active siblings. b.watchdogs is bounded so
+	// the linear scan cost is negligible.
+	for _, w := range b.watchdogs {
+		if strings.TrimSpace(w.Status) == "resolved" {
+			continue
+		}
+		if normalizeChannelSlug(w.Owner) == slug {
+			return
+		}
+	}
+	snap.Kind = "routine"
+	snap.LastTime = time.Now().UTC().Format(time.RFC3339)
+	b.activity[slug] = snap
+	b.publishActivityLocked(snap)
 }
 
 func (b *Broker) resolveWatchdogAlertsLocked(targetType, targetID, channel string) {
@@ -211,5 +281,9 @@ func (b *Broker) resolveWatchdogAlertsLocked(targetType, targetID, channel strin
 		}
 		alert.Status = "resolved"
 		alert.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+		// Drop the stuck flag from the agent's activity snapshot so the
+		// rail pill stops escalating. We do not try to repaint live
+		// status here — the next real event from the agent owns that.
+		b.markAgentStuckClearedFromWatchdogLocked(*alert)
 	}
 }

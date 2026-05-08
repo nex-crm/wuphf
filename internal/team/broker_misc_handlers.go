@@ -41,6 +41,15 @@ func (b *Broker) handleHealth(w http.ResponseWriter, r *http.Request) {
 		provider = config.ResolveLLMProvider("")
 	}
 	memoryStatus := ResolveMemoryBackendStatus()
+	// MemoryBackendReady must reflect *runtime* readiness, not just config:
+	// the markdown backend can resolve to "active" yet have b.wikiWorker
+	// == nil because repo.Init failed at startup. Without this gate,
+	// /health reported ready while every /notebook/* and /review/* call
+	// returned 503, masking the failure from operators and the web UI.
+	ready := memoryStatus.ActiveKind != config.MemoryBackendNone
+	if memoryStatus.ActiveKind == config.MemoryBackendMarkdown {
+		ready = b.WikiWorker() != nil
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(HealthResponse{
@@ -52,7 +61,7 @@ func (b *Broker) handleHealth(w http.ResponseWriter, r *http.Request) {
 		ProviderModel:       resolveProviderModel(provider),
 		MemoryBackend:       memoryStatus.SelectedKind,
 		MemoryBackendActive: memoryStatus.ActiveKind,
-		MemoryBackendReady:  memoryStatus.ActiveKind != config.MemoryBackendNone,
+		MemoryBackendReady:  ready,
 		NexConnected:        memoryStatus.ActiveKind == config.MemoryBackendNex && nex.Connected(),
 		Build:               buildinfo.Current(),
 	})
@@ -282,6 +291,9 @@ func (b *Broker) handleSignals(w http.ResponseWriter, r *http.Request) {
 	signals := make([]officeSignalRecord, len(b.signals))
 	copy(signals, b.signals)
 	b.mu.Unlock()
+	for i, sig := range signals {
+		signals[i] = sanitizeOfficeSignalRecord(sig)
+	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"signals": signals})
 }
@@ -295,6 +307,9 @@ func (b *Broker) handleDecisions(w http.ResponseWriter, r *http.Request) {
 	decisions := make([]officeDecisionRecord, len(b.decisions))
 	copy(decisions, b.decisions)
 	b.mu.Unlock()
+	for i, dec := range decisions {
+		decisions[i] = sanitizeOfficeDecisionRecord(dec)
+	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"decisions": decisions})
 }
@@ -319,6 +334,9 @@ func (b *Broker) handleActions(w http.ResponseWriter, r *http.Request) {
 		actions := make([]officeActionLog, len(b.actions))
 		copy(actions, b.actions)
 		b.mu.Unlock()
+		for i, action := range actions {
+			actions[i] = sanitizeOfficeActionLog(action)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{"actions": actions})
 	case http.MethodPost:

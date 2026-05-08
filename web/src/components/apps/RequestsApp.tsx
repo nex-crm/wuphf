@@ -8,6 +8,7 @@ import {
 } from "../../api/client";
 import { formatRelativeTime } from "../../lib/format";
 import { useFallbackChannelSlug } from "../../routes/useCurrentRoute";
+import { RedactedBadge } from "../ui/RedactedBadge";
 import { showNotice } from "../ui/Toast";
 
 export function RequestsApp() {
@@ -247,6 +248,9 @@ function RequestItem({ request, isPending, onAnswer }: RequestItemProps) {
         ) : null}
         {request.blocking ? (
           <span className="badge badge-yellow">BLOCKING</span>
+        ) : null}
+        {request.redacted ? (
+          <RedactedBadge reasons={request.redaction_reasons} />
         ) : null}
       </div>
 

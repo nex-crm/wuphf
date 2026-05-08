@@ -1,7 +1,6 @@
 package team
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"io"
@@ -99,15 +98,17 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 	}
 	pr, pw := io.Pipe()
 	teedStdout := io.TeeReader(stdout, pw)
+	// Reader-based drain: an oversized provider line that exceeds any fixed
+	// scanner buffer must not stop the loop, since stopping leaves the tee
+	// pipe undrained and wedges cmd.Wait() on backpressure. Mirrors the
+	// pattern used by the codex runner tee. See provider.DrainStreamLines
+	// for the underlying contract.
 	go func() {
-		scanner := bufio.NewScanner(pr)
-		scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
-		for scanner.Scan() {
-			line := scanner.Text()
-			if agentStream != nil && line != "" {
-				agentStream.PushTask(taskID, line+"\n")
+		_ = provider.DrainStreamLines(pr, func(chunk string) {
+			if agentStream != nil && chunk != "" {
+				agentStream.PushTask(taskID, chunk)
 			}
-		}
+		})
 	}()
 
 	var stderr strings.Builder
@@ -158,6 +159,9 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 	var firstTextAt time.Time
 	var firstToolAt time.Time
 	textStarted := false
+	turnID := newHeadlessTurnID()
+	var turnToolNames []string
+	var turnTextLen int
 
 	result, parseErr := provider.ReadClaudeJSONStream(teedStdout, func(event provider.ClaudeStreamEvent) {
 		if firstEventAt.IsZero() {
@@ -177,6 +181,8 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 				l.updateHeadlessProgress(slug, "active", "text", "drafting response", metrics)
 			}
 			relay.OnText(event.Text)
+			turnTextLen += len(event.Text)
+			emitHeadlessText(agentStream, turnID, HeadlessProviderClaude, slug, taskID, event.Text, "claude.text")
 		case "tool_use":
 			relay.Flush()
 			if firstToolAt.IsZero() {
@@ -185,9 +191,12 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 			}
 			appendHeadlessClaudeLog(slug, fmt.Sprintf("tool_use: %s %s", event.ToolName, truncate(event.ToolInput, 120)))
 			l.updateHeadlessProgress(slug, "active", "tool_use", fmt.Sprintf("running %s", strings.TrimSpace(event.ToolName)), metrics)
+			turnToolNames = append(turnToolNames, event.ToolName)
+			emitHeadlessToolUse(agentStream, turnID, HeadlessProviderClaude, slug, taskID, event.ToolName, event.ToolInput, "claude.tool_use")
 		case "tool_result":
 			appendHeadlessClaudeLog(slug, "tool_result: "+truncate(event.Text, 140))
 			l.updateHeadlessProgress(slug, "active", "tool_result", truncate(event.Text, 140), metrics)
+			emitHeadlessToolResult(agentStream, turnID, HeadlessProviderClaude, slug, taskID, event.ToolName, event.Text, "claude.tool_result")
 		case "error":
 			appendHeadlessClaudeLog(slug, "stream_error: "+event.Detail)
 			l.updateHeadlessProgress(slug, "error", "error", truncate(event.Detail, 180), metrics)
@@ -205,6 +214,8 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 			detail,
 		))
 		l.updateHeadlessProgress(slug, "error", "error", truncate(detail, 180), metrics)
+		emitHeadlessTerminalWithTurn(agentStream, turnID, HeadlessProviderClaude, slug, taskID, "", detail, metrics, claudeUsageToTokenUsage(result.Usage))
+		emitHeadlessManifest(agentStream, turnID, HeadlessProviderClaude, slug, taskID, detail, turnToolNames, turnTextLen, metrics, claudeUsageToTokenUsage(result.Usage))
 		return fmt.Errorf("%w: %s", err, detail)
 	}
 	if parseErr != nil {
@@ -217,6 +228,8 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 			parseErr.Error(),
 		))
 		l.updateHeadlessProgress(slug, "error", "error", truncate(parseErr.Error(), 180), metrics)
+		emitHeadlessTerminalWithTurn(agentStream, turnID, HeadlessProviderClaude, slug, taskID, "", parseErr.Error(), metrics, claudeUsageToTokenUsage(result.Usage))
+		emitHeadlessManifest(agentStream, turnID, HeadlessProviderClaude, slug, taskID, parseErr.Error(), turnToolNames, turnTextLen, metrics, claudeUsageToTokenUsage(result.Usage))
 		return parseErr
 	}
 
@@ -235,6 +248,8 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 		summary = "reply ready · " + summary
 	}
 	l.updateHeadlessProgress(slug, "idle", "idle", summary, metrics)
+	emitHeadlessTerminalWithTurn(agentStream, turnID, HeadlessProviderClaude, slug, taskID, summary, "", metrics, claudeUsageToTokenUsage(result.Usage))
+	emitHeadlessManifest(agentStream, turnID, HeadlessProviderClaude, slug, taskID, "", turnToolNames, turnTextLen, metrics, claudeUsageToTokenUsage(result.Usage))
 	if l.broker != nil {
 		l.broker.RecordAgentUsage(slug, l.headlessClaudeModel(slug), result.Usage)
 	}
@@ -267,6 +282,18 @@ func (l *Launcher) headlessClaudeMaxTurns(slug string) string {
 		return "30"
 	}
 	return "15"
+}
+
+// claudeUsageToTokenUsage adapts the provider-level ClaudeUsage record
+// into the runner-agnostic envelope HeadlessEvent expects. Cost and
+// cache-token fields are dropped: the wire shape only carries
+// input/output for now, and adding more fields here would force a wire
+// change for every runner.
+func claudeUsageToTokenUsage(u provider.ClaudeUsage) *headlessTokenUsage {
+	if u.InputTokens == 0 && u.OutputTokens == 0 {
+		return nil
+	}
+	return &headlessTokenUsage{InputTokens: u.InputTokens, OutputTokens: u.OutputTokens}
 }
 
 func (l *Launcher) buildHeadlessClaudeEnv(slug string) []string {

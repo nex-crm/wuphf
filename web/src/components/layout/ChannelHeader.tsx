@@ -1,20 +1,13 @@
+import { useEffect } from "react";
+
+import { deriveBreadcrumbs } from "../../hooks/useObjectBreadcrumb";
+import { useRecordRecentObject } from "../../hooks/useRecentObjects";
 import { useChannels } from "../../hooks/useChannels";
 import { appTitle } from "../../lib/constants";
 import { useCurrentRoute } from "../../routes/useCurrentRoute";
-import type { Theme } from "../../stores/app";
 import { useAppStore } from "../../stores/app";
-
-function nextTheme(t: Theme): Theme {
-  if (t === "noir-gold") return "nex";
-  if (t === "nex") return "nex-dark";
-  return "noir-gold";
-}
-
-function themeLabel(t: Theme): string {
-  if (t === "noir-gold") return "Noir Gold";
-  if (t === "nex-dark") return "Nex Dark";
-  return "Nex Light";
-}
+import { Breadcrumb } from "./Breadcrumb";
+import { ThemeSwitcher } from "./ThemeSwitcher";
 
 function headerTitleAndDesc(
   route: ReturnType<typeof useCurrentRoute>,
@@ -55,81 +48,84 @@ function headerTitleAndDesc(
   }
 }
 
+/**
+ * Derive an ObjectRef for the current route to record in recent-objects.
+ * Returns null for routes that aren't discrete navigable objects (channels,
+ * wiki catalog, etc.) or for the "unknown" sentinel.
+ */
+function routeToObjectRef(
+  route: ReturnType<typeof useCurrentRoute>,
+): Parameters<ReturnType<typeof useRecordRecentObject>>[0] | null {
+  switch (route.kind) {
+    case "dm":
+      return { kind: "agent", slug: route.agentSlug };
+    case "task-detail":
+      return { kind: "task", id: route.taskId };
+    case "wiki-article":
+      return { kind: "wiki-page", path: route.articlePath };
+    case "app":
+      if (route.appId === "settings") {
+        return { kind: "settings-section", section: "workspace" };
+      }
+      if (
+        route.appId === "providers" ||
+        route.appId === "team" ||
+        route.appId === "workspace" ||
+        route.appId === "skills"
+      ) {
+        return { kind: "settings-section", section: route.appId as "providers" | "team" | "workspace" | "skills" };
+      }
+      return null;
+    case "notebook-entry":
+      return null; // notebook entries are draft surfaces, not canonical objects
+    case "task-board":
+    case "wiki":
+    case "wiki-lookup":
+    case "notebook-catalog":
+    case "notebook-agent":
+    case "reviews":
+    case "channel":
+    case "unknown":
+      return null;
+    default: {
+      const _exhaustive: never = route;
+      void _exhaustive;
+      return null;
+    }
+  }
+}
+
 export function ChannelHeader() {
   const route = useCurrentRoute();
   const setSearchOpen = useAppStore((s) => s.setSearchOpen);
-  const theme = useAppStore((s) => s.theme);
-  const setTheme = useAppStore((s) => s.setTheme);
   const { data: channels = [] } = useChannels();
+  const recordRecent = useRecordRecentObject();
 
   const { title, desc } = headerTitleAndDesc(route, channels);
-  const targetTheme = nextTheme(theme);
+  const breadcrumbItems = deriveBreadcrumbs(route);
+
+  // Record navigations to discrete objects in the recent-objects list.
+  useEffect(() => {
+    const ref = routeToObjectRef(route);
+    if (ref) {
+      recordRecent(ref);
+    }
+  }, [route, recordRecent]);
 
   return (
     <div className="channel-header">
-      <div style={{ display: "flex", alignItems: "center" }}>
-        <span className="channel-title">{title}</span>
-        {desc ? <span className="channel-desc">{desc}</span> : null}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0, flex: 1 }}>
+        {breadcrumbItems.length > 0 ? (
+          <Breadcrumb items={breadcrumbItems} />
+        ) : (
+          <>
+            <span className="channel-title">{title}</span>
+            {desc ? <span className="channel-desc">{desc}</span> : null}
+          </>
+        )}
       </div>
       <div className="channel-actions">
-        <button
-          type="button"
-          className="sidebar-btn"
-          title={`Switch theme to ${themeLabel(targetTheme)}`}
-          aria-label={`Switch theme to ${themeLabel(targetTheme)}`}
-          onClick={() => setTheme(targetTheme)}
-        >
-          {targetTheme === "noir-gold" ? (
-            // Sparkle / star — switch to the gold theme
-            <svg
-              aria-hidden="true"
-              focusable="false"
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M12 3l1.8 5.5H19l-4.6 3.4 1.8 5.6L12 14l-4.2 3.5 1.8-5.6L5 8.5h5.2L12 3z" />
-            </svg>
-          ) : targetTheme === "nex" ? (
-            // Sun — switch to the light theme
-            <svg
-              aria-hidden="true"
-              focusable="false"
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <circle cx="12" cy="12" r="4" />
-              <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
-            </svg>
-          ) : (
-            // Moon — switch to the dark theme
-            <svg
-              aria-hidden="true"
-              focusable="false"
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
-            </svg>
-          )}
-        </button>
+        <ThemeSwitcher />
         <button
           type="button"
           className="sidebar-btn"

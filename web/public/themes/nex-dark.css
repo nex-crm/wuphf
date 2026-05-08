@@ -5,43 +5,43 @@
    This file only overrides the semantic token layer.
    ═══════════════════════════════════════════════════════════════ */
 
-@import url('./nex.css');
+@import url("./nex.css");
 
 html[data-theme="nex-dark"] {
   /* ── Ramp overrides (reuse same palette, just reference different stops) ── */
 
   /* ── Overlays flipped for dark surface ── */
-  --overlay-soft:         rgba(255, 255, 255, 0.04);
-  --overlay:              rgba(255, 255, 255, 0.08);
-  --overlay-strong:       rgba(255, 255, 255, 0.16);
-  --scrim:                rgba(0, 0, 0, 0.7);
-  --overlay-white-soft:   rgba(255, 255, 255, 0.06);
-  --overlay-white:        rgba(255, 255, 255, 0.12);
+  --overlay-soft: rgba(255, 255, 255, 0.04);
+  --overlay: rgba(255, 255, 255, 0.08);
+  --overlay-strong: rgba(255, 255, 255, 0.16);
+  --scrim: rgba(0, 0, 0, 0.7);
+  --overlay-white-soft: rgba(255, 255, 255, 0.06);
+  --overlay-white: rgba(255, 255, 255, 0.12);
   --overlay-white-strong: rgba(255, 255, 255, 0.32);
 
   /* ── Semantic aliases ── */
-  --bg:             #111213;
-  --bg-warm:        #191a1b;
-  --bg-subtle:      #0d0e0f;
-  --bg-card:        #151617;
-  --text:           #e9eaeb;
+  --bg: #111213;
+  --bg-warm: #191a1b;
+  --bg-subtle: #0d0e0f;
+  --bg-card: #151617;
+  --text: #e9eaeb;
   --text-secondary: #aeb1b2;
-  --text-tertiary:  #686c6e;
-  --text-disabled:  #434647;
+  --text-tertiary: #686c6e;
+  --text-disabled: #434647;
 
   /* accent stays the same purple/tertiary */
 
-  --border:         #1e2022;
-  --border-light:   #171819;
-  --border-dark:    #2a2d2f;
-  --border-strong:  #434647;
+  --border: #1e2022;
+  --border-light: #171819;
+  --border-dark: #2a2d2f;
+  --border-strong: #434647;
 
   /* ── Sidebar – keep purple but use a deeper shade ── */
-  --nex-sidebar:             #4a1f70;
-  --nex-sidebar-hover:       rgba(255, 255, 255, 0.08);
-  --nex-sidebar-active:      var(--olive-400);
-  --nex-sidebar-text:        rgba(255, 255, 255, 0.65);
-  --nex-sidebar-text-active: #FFFFFF;
+  --nex-sidebar: #4a1f70;
+  --nex-sidebar-hover: rgba(255, 255, 255, 0.08);
+  --nex-sidebar-active: var(--olive-400);
+  --nex-sidebar-text: rgba(255, 255, 255, 0.65);
+  --nex-sidebar-text-active: #ffffff;
 }
 
 /* ── Override hard-coded message text color (not a CSS variable in nex.css) ── */

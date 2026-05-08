@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // mockStreamFn returns a StreamFn that yields a single text chunk.
@@ -59,6 +60,50 @@ func newTestLoop(t *testing.T, streamFn StreamFn) (*AgentLoop, string) {
 
 	loop := NewAgentLoop(config, tools, sessions, queues, streamFn, nil, nil)
 	return loop, dir
+}
+
+func TestStreamLLMReceiveStopsOnCancel(t *testing.T) {
+	streamStarted := make(chan struct{}, 1)
+	streamFn := func(msgs []Message, tools []AgentTool) <-chan StreamChunk {
+		select {
+		case streamStarted <- struct{}{}:
+		default:
+		}
+		return make(chan StreamChunk)
+	}
+	loop, _ := newTestLoop(t, streamFn)
+	loop.queues.FollowUp("test-agent", "cancel the blocked stream")
+	loop.Start()
+
+	if err := loop.Tick(); err != nil {
+		t.Fatalf("build context tick: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- loop.Tick()
+	}()
+
+	select {
+	case <-streamStarted:
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for stream to start")
+	}
+
+	loop.Stop()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("stream tick returned error: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("stream tick did not return after cancellation")
+	}
+
+	if state := loop.GetState(); state.Phase != PhaseIdle {
+		t.Fatalf("phase after cancellation = %s, want %s", state.Phase, PhaseIdle)
+	}
 }
 
 func TestFullTickCycle(t *testing.T) {
@@ -208,6 +253,83 @@ func TestSteerInjectsSystemMessage(t *testing.T) {
 		for _, e := range entries {
 			t.Logf("  entry: type=%s content=%q", e.Type, e.Content)
 		}
+	}
+}
+
+func TestBuildContextDrainsHumanBeforeFollowUp(t *testing.T) {
+	loop, _ := newTestLoop(t, mockStreamFn("ack"))
+
+	// Simulate a busy agent already working on an agent-originated follow-up
+	// when a human chimes in. The human message should preempt: the next
+	// build_context tick must absorb the human, not the queued follow-up.
+	loop.queues.FollowUp("test-agent", "previously queued agent task")
+	loop.queues.Human("test-agent", "wait, what are you doing?")
+	loop.Start()
+
+	if err := loop.Tick(); err != nil {
+		t.Fatalf("tick 1: %v", err)
+	}
+
+	state := loop.GetState()
+	if got := state.CurrentTask; got != "wait, what are you doing?" {
+		t.Errorf("CurrentTask = %q, want the human message", got)
+	}
+
+	entries, err := loop.sessions.GetHistory(state.SessionID, 0, "")
+	if err != nil {
+		t.Fatalf("get history: %v", err)
+	}
+
+	var sawDirective, sawHuman, sawFollowUp bool
+	for _, e := range entries {
+		switch {
+		case e.Type == "system" && e.Content == humanInterruptDirective:
+			sawDirective = true
+		case e.Type == "user" && e.Content == "[HUMAN] wait, what are you doing?":
+			sawHuman = true
+		case e.Type == "user" && e.Content == "previously queued agent task":
+			sawFollowUp = true
+		}
+	}
+	if !sawDirective {
+		t.Error("expected absorb-first system directive in session")
+	}
+	if !sawHuman {
+		t.Error("expected [HUMAN]-prefixed user entry in session")
+	}
+	if sawFollowUp {
+		t.Error("queued follow-up must stay queued, not be drained alongside the human")
+	}
+
+	if !loop.queues.HasFollowUp("test-agent") {
+		t.Error("follow-up queue should still hold the deferred agent task")
+	}
+}
+
+func TestHumanMessageInterruptsBusyLoop(t *testing.T) {
+	loop, _ := newTestLoop(t, mockStreamFn("ack"))
+	// Force the loop into a busy phase with a registered cancelFunc, mirroring
+	// what streamLLM sets up. We don't need a real LLM call — just need to
+	// verify Interrupt fires and clears the cancelFunc.
+	loop.Start()
+
+	_, cancel := context.WithCancel(context.Background())
+	loop.mu.Lock()
+	loop.cancelFunc = cancel
+	loop.setPhase(PhaseStreamLLM)
+	loop.mu.Unlock()
+
+	if !loop.IsBusy() {
+		t.Fatal("loop should be busy after entering PhaseStreamLLM")
+	}
+	if !loop.Interrupt() {
+		t.Fatal("Interrupt should report success when a cancelFunc is set")
+	}
+	loop.mu.Lock()
+	cancelStillSet := loop.cancelFunc != nil
+	loop.mu.Unlock()
+	if cancelStillSet {
+		t.Error("Interrupt must clear cancelFunc")
 	}
 }
 

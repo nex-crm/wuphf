@@ -11,6 +11,56 @@ export interface BlueprintTemplate {
   emoji?: string;
   agents?: BlueprintAgent[];
   tasks?: TaskTemplate[];
+  // Pack-library wire fields. The broker surfaces these from the
+  // operation blueprint yaml; older binaries omit them entirely. The
+  // adapter in packPreview.ts handles missing fields by returning empty
+  // arrays so the detail panel still renders.
+  outcome?: string;
+  category?: string;
+  estimated_setup_minutes?: number;
+  channels?: BlueprintChannel[];
+  skills?: BlueprintSkill[];
+  wiki_scaffold?: BlueprintWikiScaffoldEntry[];
+  first_tasks?: BlueprintFirstTask[];
+  requirements?: BlueprintRequirement[];
+  example_artifacts?: BlueprintExampleArtifact[];
+}
+
+export interface BlueprintChannel {
+  slug: string;
+  name?: string;
+  purpose?: string;
+}
+
+export interface BlueprintSkill {
+  name: string;
+  purpose?: string;
+}
+
+export interface BlueprintWikiScaffoldEntry {
+  path: string;
+  title?: string;
+}
+
+export interface BlueprintFirstTask {
+  id: string;
+  title: string;
+  prompt?: string;
+  expected_output?: string;
+}
+
+export type BlueprintRequirementKind = "runtime" | "api-key" | "local-tool";
+
+export interface BlueprintRequirement {
+  kind?: BlueprintRequirementKind | (string & {});
+  name: string;
+  required?: boolean;
+  detail?: string;
+}
+
+export interface BlueprintExampleArtifact {
+  kind?: string;
+  title: string;
 }
 
 export interface BlueprintAgent {
@@ -37,8 +87,10 @@ export type WizardStep =
   | "welcome"
   | "templates"
   | "identity"
+  | "analysis"
   | "team"
   | "setup"
+  | "nex"
   | "task"
   | "ready";
 
@@ -72,12 +124,7 @@ export interface BlueprintDisplay {
 
 export type MemoryBackend = "markdown" | "nex" | "gbrain" | "none";
 
-export type NexSignupStatus =
-  | "hidden"
-  | "open"
-  | "submitting"
-  | "ok"
-  | "fallback";
+export type NexSignupStatus = "open" | "submitting" | "ok" | "fallback";
 
 export type ReadinessStatus = "ready" | "next" | "missing";
 

@@ -1,4 +1,3 @@
-import { ArrowIcon } from "./components";
 import type { NexSignupStatus } from "./types";
 
 // NexSignupPanel is the optional "don't have a Nex account yet?"
@@ -26,19 +25,42 @@ export function NexSignupPanel({
   onSubmit,
 }: NexSignupPanelProps) {
   return (
-    <div className="wizard-panel wiz-nex-signup">
-      <p className="wizard-panel-title">Sign up for Nex (optional)</p>
-      <p
-        style={{
-          fontSize: 12,
-          color: "var(--text-secondary)",
-          margin: "-8px 0 12px 0",
-        }}
-      >
-        {status === "fallback"
-          ? "nex-cli is not installed on this machine. Register in your browser, then paste the key on the Setup step."
-          : "Register an email to get a free Nex API key. Powers shared memory, entity briefs, and integrations. You can also paste an existing key on the Setup step."}
-      </p>
+    <div
+      className="wizard-panel wiz-nex-signup"
+      style={{ display: "flex", flexDirection: "column", gap: 24 }}
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {status !== "fallback" && status !== "ok" && (
+          <p
+            style={{
+              fontSize: 14,
+              fontWeight: 600,
+              color: "var(--text)",
+              margin: 0,
+            }}
+          >
+            Register an email to get a free Nex API key
+          </p>
+        )}
+        <p
+          style={{
+            fontSize: 13,
+            color: "var(--text-secondary)",
+            margin: 0,
+          }}
+        >
+          {status === "fallback" ? (
+            "nex-cli is not installed on this machine. Register in your browser, then paste the key from Settings → Integrations after launch."
+          ) : (
+            <>
+              Powers shared memory, entity briefs, and integrations.
+              <br />
+              You can also paste an existing key from Settings → Integrations
+              once the office is open.
+            </>
+          )}
+        </p>
+      </div>
 
       {status === "fallback" ? (
         <a
@@ -48,49 +70,37 @@ export function NexSignupPanel({
           rel="noopener noreferrer"
         >
           Open nex.ai/register
-          <ArrowIcon />
         </a>
       ) : status === "ok" ? (
         <p className="wiz-nex-ok" role="status">
-          Check your inbox at {email} for the Nex API key, then paste it on the
-          Setup step.
+          Check your inbox at {email} for the Nex API key, then paste it from
+          Settings → Integrations once the office is open.
         </p>
       ) : (
         <div className="form-group" style={{ margin: 0 }}>
           <label className="label" htmlFor="wiz-nex-email">
             Email
           </label>
-          <div style={{ display: "flex", gap: 8 }}>
-            <input
-              className="input"
-              id="wiz-nex-email"
-              type="email"
-              placeholder="you@example.com"
-              value={email}
-              onChange={(e) => onChangeEmail(e.target.value)}
-              onKeyDown={(e) => {
-                if (
-                  e.key === "Enter" &&
-                  status !== "submitting" &&
-                  email.trim().length > 0
-                ) {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  onSubmit();
-                }
-              }}
-              disabled={status === "submitting"}
-              style={{ flex: 1 }}
-            />
-            <button
-              className="btn btn-primary"
-              type="button"
-              onClick={onSubmit}
-              disabled={status === "submitting" || email.trim().length === 0}
-            >
-              {status === "submitting" ? "Registering..." : "Register"}
-            </button>
-          </div>
+          <input
+            className="input"
+            id="wiz-nex-email"
+            type="email"
+            placeholder="you@example.com"
+            value={email}
+            onChange={(e) => onChangeEmail(e.target.value)}
+            onKeyDown={(e) => {
+              if (
+                e.key === "Enter" &&
+                status !== "submitting" &&
+                email.trim().length > 0
+              ) {
+                e.preventDefault();
+                e.stopPropagation();
+                onSubmit();
+              }
+            }}
+            disabled={status === "submitting"}
+          />
           {error ? (
             <p
               style={{ color: "var(--red)", fontSize: 12, marginTop: 6 }}

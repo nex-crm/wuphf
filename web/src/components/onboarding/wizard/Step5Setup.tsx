@@ -5,6 +5,7 @@ import { ApiKeyRow } from "./ApiKeyRow";
 import { ArrowIcon, EnterHint } from "./components";
 import { API_KEY_FIELDS, LOCAL_PROVIDER_LABELS, RUNTIMES } from "./constants";
 import { LocalLLMPicker } from "./LocalLLMPicker";
+import type { PackPreviewRequirement } from "./packPreview";
 import {
   canSetupContinue,
   detectedBinary,
@@ -42,6 +43,10 @@ interface SetupStepProps {
   runtimeSelection: RuntimeSelection;
   apiKeyState: ApiKeyState;
   localLLMState: LocalLLMState;
+  // Requirements derived from the selected pack. Empty array means
+  // "no pack selected" or "pack has no declared requirements" — both
+  // result in the panel being hidden entirely.
+  packRequirements: PackPreviewRequirement[];
   onNext: () => void;
   onBack: () => void;
 }
@@ -52,6 +57,199 @@ interface RuntimeTileProps {
   prereqsError: string;
   runtimePriority: string[];
   onToggleRuntime: (label: string) => void;
+}
+
+// PROVIDER_DOCTOR_PATH is the in-app route for the health & access panel.
+// We link to it from the requirements panel when a required runtime is missing
+// so the user can verify their install without leaving the flow.
+const PROVIDER_DOCTOR_PATH = "/apps/health-check";
+
+// Maps a requirement name to the matching RUNTIMES entry label so we can
+// check whether the user has that runtime installed and selected.
+function runtimeLabelForRequirement(name: string): string | undefined {
+  const nameLower = name.toLowerCase();
+  return RUNTIMES.find(
+    (r) => r.label.toLowerCase() === nameLower || r.binary === nameLower,
+  )?.label;
+}
+
+// Maps a requirement name to the matching API_KEY_FIELDS entry so we can
+// tell whether the user has provided a key for that provider.
+function apiKeyFieldForRequirement(name: string): string | undefined {
+  const nameLower = name.toLowerCase();
+  return API_KEY_FIELDS.find(
+    (f) =>
+      f.label.toLowerCase() === nameLower ||
+      f.key.toLowerCase() === nameLower ||
+      // e.g. "anthropic_api_key" matches "ANTHROPIC_API_KEY"
+      f.key.toLowerCase() === name.toUpperCase(),
+  )?.key;
+}
+
+type ReqReadiness = "ok" | "missing" | "unknown";
+
+function requirementReadiness(
+  req: PackPreviewRequirement,
+  prereqs: PrereqResult[],
+  prereqsError: string,
+  runtimePriority: string[],
+  apiKeys: Record<string, string>,
+): ReqReadiness {
+  if (req.kind === "runtime") {
+    const label = runtimeLabelForRequirement(req.name);
+    if (!label) return "unknown";
+    const selected = runtimePriority.includes(label);
+    if (!selected) return "missing";
+    return runtimeIsReady(label, prereqs, prereqsError) ? "ok" : "missing";
+  }
+  if (req.kind === "api-key") {
+    // We deliberately do NOT check the key value — only whether the field
+    // has been filled. This never exposes key material in the UI.
+    const fieldKey = apiKeyFieldForRequirement(req.name);
+    if (!fieldKey) return "unknown";
+    const filled = (apiKeys[fieldKey] ?? "").trim().length > 0;
+    return filled ? "ok" : "missing";
+  }
+  // local-tool and unrecognized kinds: we cannot detect them reliably,
+  // so show as "unknown" (neutral) rather than blocking.
+  return "unknown";
+}
+
+interface RequirementRowProps {
+  req: PackPreviewRequirement;
+  readiness: ReqReadiness;
+}
+
+function RequirementRow({ req, readiness }: RequirementRowProps) {
+  const statusDot =
+    readiness === "ok" ? "ok" : readiness === "missing" ? "missing" : "unknown";
+  const badgeLabel = req.required ? "required" : "optional";
+  const badgeClass = req.required
+    ? "pack-req-badge pack-req-badge--required"
+    : "pack-req-badge pack-req-badge--optional";
+  const kindLabel: Record<string, string> = {
+    runtime: "CLI",
+    "api-key": "API key",
+    "local-tool": "tool",
+  };
+  const kindText = kindLabel[req.kind] ?? req.kind;
+
+  return (
+    <div
+      className="pack-req-row"
+      data-testid={`pack-req-row-${req.name}`}
+      data-readiness={readiness}
+    >
+      <span
+        className={`pack-req-dot pack-req-dot--${statusDot}`}
+        aria-hidden="true"
+      />
+      <div className="pack-req-body">
+        <span className="pack-req-name">{req.name}</span>
+        <span className="pack-req-kind">{kindText}</span>
+        {req.detail ? (
+          <span className="pack-req-detail">{req.detail}</span>
+        ) : null}
+      </div>
+      <span className={badgeClass} data-testid={`pack-req-badge-${req.name}`}>
+        {badgeLabel}
+      </span>
+    </div>
+  );
+}
+
+interface PackRequirementsPanelProps {
+  requirements: PackPreviewRequirement[];
+  prereqs: PrereqResult[];
+  prereqsError: string;
+  runtimePriority: string[];
+  apiKeys: Record<string, string>;
+}
+
+export function PackRequirementsPanel({
+  requirements,
+  prereqs,
+  prereqsError,
+  runtimePriority,
+  apiKeys,
+}: PackRequirementsPanelProps) {
+  if (requirements.length === 0) return null;
+
+  const rows = requirements.map((req) => ({
+    req,
+    readiness: requirementReadiness(
+      req,
+      prereqs,
+      prereqsError,
+      runtimePriority,
+      apiKeys,
+    ),
+  }));
+
+  // Show the Provider Doctor link when any REQUIRED runtime is missing so the
+  // user can verify their installs. Optional gaps are informational only.
+  const hasRequiredRuntimeMissing = rows.some(
+    (r) =>
+      r.req.required && r.req.kind === "runtime" && r.readiness === "missing",
+  );
+
+  const requiredRows = rows.filter((r) => r.req.required);
+  const optionalRows = rows.filter((r) => !r.req.required);
+
+  return (
+    <div
+      className="pack-requirements-panel"
+      data-testid="pack-requirements-panel"
+    >
+      <div className="pack-req-header">
+        <p className="pack-req-title">Pack requirements</p>
+        <p className="pack-req-subtitle">
+          What this pack needs to run. Check off any gaps before finishing
+          setup.
+        </p>
+      </div>
+
+      {requiredRows.length > 0 && (
+        <div className="pack-req-group">
+          <p className="pack-req-group-label">Required</p>
+          {requiredRows.map(({ req, readiness }) => (
+            <RequirementRow key={req.name} req={req} readiness={readiness} />
+          ))}
+        </div>
+      )}
+
+      {optionalRows.length > 0 && (
+        <div className="pack-req-group">
+          <p className="pack-req-group-label">Optional</p>
+          {optionalRows.map(({ req, readiness }) => (
+            <RequirementRow key={req.name} req={req} readiness={readiness} />
+          ))}
+        </div>
+      )}
+
+      {hasRequiredRuntimeMissing && (
+        <div
+          className="pack-req-doctor-hint"
+          data-testid="pack-req-doctor-hint"
+        >
+          <span className="pack-req-doctor-icon" aria-hidden="true">
+            ⚠
+          </span>
+          <span>
+            A required runtime is not ready.{" "}
+            <a
+              href={PROVIDER_DOCTOR_PATH}
+              className="pack-req-doctor-link"
+              data-testid="pack-req-doctor-link"
+            >
+              Open Provider Doctor
+            </a>{" "}
+            to check your install.
+          </span>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function runtimeTileTitle(
@@ -181,6 +379,7 @@ export function SetupStep({
   runtimeSelection,
   apiKeyState,
   localLLMState,
+  packRequirements,
   onNext,
   onBack,
 }: SetupStepProps) {
@@ -412,6 +611,16 @@ export function SetupStep({
           ))}
         </div>
       </div>
+
+      {packRequirements.length > 0 && (
+        <PackRequirementsPanel
+          requirements={packRequirements}
+          prereqs={prereqs}
+          prereqsError={prereqsError}
+          runtimePriority={runtimePriority}
+          apiKeys={apiKeys}
+        />
+      )}
 
       <div className="wizard-nav">
         <button className="btn btn-ghost" onClick={onBack} type="button">

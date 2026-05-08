@@ -12,8 +12,8 @@ interface StreamLineViewProps {
 /**
  * Renders one SSE line from the agent stream. Understands the broker's
  * OpenAI-Responses-style events — agent messages render as dim thinking
- * lines, tool calls render as collapsible cards, token totals render as
- * a single line. Everything else falls back to pretty-printed JSON.
+ * lines, tool calls render as collapsible cards. Everything else falls
+ * back to pretty-printed JSON.
  */
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
 export function StreamLineView({ line, compact = false }: StreamLineViewProps) {
@@ -28,6 +28,14 @@ export function StreamLineView({ line, compact = false }: StreamLineViewProps) {
     return <div className="stream-line stream-line-raw">{text}</div>;
   }
 
+  // HeadlessEvent envelope: provider-agnostic, runner-emitted typed
+  // event. Wire shape mirrors internal/team/headless_event.go's struct.
+  // Branch first so the discriminator wins over provider-native `type`
+  // routes below (e.g. `assistant`, `mcp_tool_event`).
+  if (parsed.kind === "headless_event") {
+    return <HeadlessEventView parsed={parsed} compact={compact} />;
+  }
+
   const evtType = typeof parsed.type === "string" ? parsed.type : "";
 
   // Skip noise events entirely
@@ -39,10 +47,8 @@ export function StreamLineView({ line, compact = false }: StreamLineViewProps) {
     return null;
   }
 
-  // Token total line for turn/response completed
+  // Suppress per-turn completion frames — they used to render a token total.
   if (evtType === "turn.completed" || evtType === "response.completed") {
-    const tokens = renderTokens(parsed);
-    if (tokens) return <div className="cc-token-line">{tokens}</div>;
     return null;
   }
 
@@ -115,6 +121,140 @@ export function StreamLineView({ line, compact = false }: StreamLineViewProps) {
   }
 
   // Fallback: structured event with type/phase/agent + detail + extras
+  return <GenericEventCard parsed={parsed} compact={compact} />;
+}
+
+// HeadlessEventView renders the typed HeadlessEvent envelope emitted by
+// each runner. The wire shape comes from internal/team/headless_event.go
+// (HeadlessEvent struct). A4 adds the "manifest" type — a per-turn
+// completion summary with tool-call counts and text byte stats.
+function HeadlessEventView({
+  parsed,
+  compact,
+}: {
+  parsed: Record<string, unknown>;
+  compact: boolean;
+}) {
+  const eventType = stringish(parsed.type);
+  const provider = stringish(parsed.provider);
+  const text = stringish(parsed.text);
+  const detail = stringish(parsed.detail);
+  const summary = (text || detail).trim();
+  const metrics =
+    parsed.metrics && typeof parsed.metrics === "object"
+      ? (parsed.metrics as Record<string, unknown>)
+      : null;
+
+  if (eventType === "idle") {
+    return (
+      <div className="stream-card stream-card-idle">
+        <div className="stream-card-header">
+          <span className="stream-card-phase stream-phase-idle">idle</span>
+          {provider && <span className="stream-card-agent">{provider}</span>}
+        </div>
+        {summary && <div className="stream-card-detail">{summary}</div>}
+        {metrics && (
+          <div className="stream-line-json">
+            <Value value={metrics} depth={0} compact={true} />
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (eventType === "error") {
+    return (
+      <div className="stream-card stream-card-error">
+        <div className="stream-card-header">
+          <span className="stream-card-phase stream-phase-error">error</span>
+          {provider && <span className="stream-card-agent">{provider}</span>}
+        </div>
+        {summary && <div className="cc-tool-error-text">{summary}</div>}
+      </div>
+    );
+  }
+
+  if (eventType === "text") {
+    // Text events render as the same dim "thinking" block the
+    // provider-native paths use, so a stream containing both raw
+    // provider chunks (today's wire) and HeadlessEvent text (A3+)
+    // looks visually consistent. Empty text is dropped at the runner
+    // boundary; we still guard here because old captures may exist.
+    if (!text.trim()) return null;
+    return <div className="cc-thinking">{text}</div>;
+  }
+
+  if (eventType === "tool_use" || eventType === "tool_result") {
+    // Reuse the existing ToolCallCard so HeadlessEvent tool entries
+    // get the same collapsible chrome as the provider-native paths.
+    // Wire mapping: HeadlessEvent.tool_name -> name, .detail -> args
+    // for tool_use, .text -> result for tool_result.
+    const toolName = stringish(parsed.tool_name) || "tool";
+    return (
+      <ToolCallCard
+        item={{
+          type: "tool_call",
+          name: toolName,
+          arguments: eventType === "tool_use" ? parsed.detail : undefined,
+          result: eventType === "tool_result" ? parsed.text : undefined,
+        }}
+        compact={compact}
+      />
+    );
+  }
+
+  if (eventType === "manifest") {
+    // manifest is a per-turn completion record emitted after idle/error.
+    // Render as a compact summary row: tool badges + text bytes + tokens.
+    const toolCalls = Array.isArray(parsed.tool_calls)
+      ? (parsed.tool_calls as Array<Record<string, unknown>>)
+      : [];
+    const textLen =
+      typeof parsed.text_len === "number" ? parsed.text_len : null;
+    const inputTokens =
+      metrics && typeof metrics.input_tokens === "number"
+        ? metrics.input_tokens
+        : null;
+    const outputTokens =
+      metrics && typeof metrics.output_tokens === "number"
+        ? metrics.output_tokens
+        : null;
+    const hasStats =
+      toolCalls.length > 0 ||
+      (textLen !== null && textLen > 0) ||
+      (inputTokens !== null && outputTokens !== null);
+    if (!hasStats) return null;
+    return (
+      <div className="stream-card stream-card-manifest">
+        <div className="stream-card-header">
+          <span className="stream-card-phase stream-phase-manifest">turn</span>
+          {provider && <span className="stream-card-agent">{provider}</span>}
+        </div>
+        <div className="stream-manifest-stats">
+          {toolCalls.map((tc) => {
+            const name = stringish(tc.tool_name) || "tool";
+            const count = typeof tc.count === "number" ? tc.count : 1;
+            return (
+              <span key={name} className="stream-manifest-tool-badge">
+                {count > 1 ? `${name} ×${count}` : name}
+              </span>
+            );
+          })}
+          {textLen !== null && textLen > 0 && (
+            <span className="stream-manifest-stat">{textLen.toLocaleString("en-US")} bytes</span>
+          )}
+          {inputTokens !== null && outputTokens !== null && (
+            <span className="stream-manifest-stat">
+              {(inputTokens + outputTokens).toLocaleString("en-US")} tok
+            </span>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // Unknown HeadlessEvent type — fall back to the generic card so future
+  // variants render something useful before they earn a dedicated branch.
   return <GenericEventCard parsed={parsed} compact={compact} />;
 }
 
@@ -261,49 +401,6 @@ function stringFromToolContent(content: unknown): string {
     return JSON.stringify(content);
   }
   return "";
-}
-
-function renderTokens(parsed: Record<string, unknown>): string | null {
-  const u = extractUsage(parsed);
-  if (!u) return null;
-  const inTok = toNum(u.input_tokens);
-  const outTok = toNum(u.output_tokens);
-  const cacheRead = toNum(
-    u.cached_input_tokens ?? u.cache_read_input_tokens ?? u.cache_read_tokens,
-  );
-  const cacheCreate = toNum(
-    u.cache_creation_input_tokens ?? u.cache_creation_tokens,
-  );
-  const total = inTok + outTok + cacheRead + cacheCreate;
-  if (total === 0) return null;
-  const parts = [`${formatTokens(inTok)} in`, `${formatTokens(outTok)} out`];
-  if (cacheRead > 0) parts.push(`${formatTokens(cacheRead)} cache read`);
-  if (cacheCreate > 0) parts.push(`${formatTokens(cacheCreate)} cache write`);
-  return `\u2500\u2500 ${formatTokens(total)} tokens (${parts.join(", ")})`;
-}
-
-function extractUsage(
-  parsed: Record<string, unknown>,
-): Record<string, unknown> | null {
-  const candidates: unknown[] = [
-    parsed.usage,
-    (parsed.response as Record<string, unknown> | undefined)?.usage,
-    (parsed.turn as Record<string, unknown> | undefined)?.usage,
-  ];
-  for (const c of candidates) {
-    if (c && typeof c === "object") return c as Record<string, unknown>;
-  }
-  return null;
-}
-
-function toNum(v: unknown): number {
-  return typeof v === "number" && Number.isFinite(v) ? v : 0;
-}
-
-function formatTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
-  return String(n);
 }
 
 const ARG_SKIP = new Set(["my_slug", "new_topic", "viewer_slug", "tagged"]);

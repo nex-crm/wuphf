@@ -64,7 +64,8 @@
 }
 
 .wiki-tab:focus-visible {
-  outline: 2px solid var(--accent, #1264a3);
+  outline: var(--focus-ring-width, 2px) solid
+    var(--focus-ring-color, var(--accent, #1264a3));
   outline-offset: -2px;
 }
 

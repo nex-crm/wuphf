@@ -62,10 +62,31 @@ func (b *Broker) handleAgentLogs(w http.ResponseWriter, r *http.Request) {
 			limit = n
 		}
 	}
-	tasks, err := agent.ListRecentTasks(root, limit)
+	agentFilter := strings.TrimSpace(r.URL.Query().Get("agent"))
+
+	// When filtering by agent we over-fetch so the limit applies after the
+	// filter, not before — otherwise a busy office with many other agents can
+	// exhaust the window before the requested agent's runs appear.
+	scanLimit := limit
+	if agentFilter != "" {
+		scanLimit = 500
+	}
+	tasks, err := agent.ListRecentTasks(root, scanLimit)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
+	}
+	if agentFilter != "" {
+		filtered := tasks[:0]
+		for _, t := range tasks {
+			if t.AgentSlug == agentFilter {
+				filtered = append(filtered, t)
+				if len(filtered) == limit {
+					break
+				}
+			}
+		}
+		tasks = filtered
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(AgentLogTasksResponse{Tasks: tasks})

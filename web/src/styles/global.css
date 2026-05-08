@@ -122,6 +122,58 @@
   --radius-lg: 16px;
   --radius-xl: 20px;
   --radius-full: 9999px;
+
+  /* Agent event bubble — state colors. Used by .sidebar-agent-pill states. */
+  --bubble-shipping: #2a8f4c; /* shipping events — green */
+  --bubble-plotting: #5a6bc8; /* plotting/thinking events — slate blue */
+  --bubble-talking: #ecb22e; /* talking/responding events — WUPHF yellow */
+  --bubble-stuck: #c8542a; /* stuck/blocked events — warm orange */
+  --bubble-idle: var(--text-tertiary); /* idle bar fallback */
+
+  /* Agent event bubble — dynamics. */
+  --bubble-halo-radius: 4px;
+  --bubble-halo-duration: 600ms;
+  --bubble-pulse-fade-in: 150ms;
+  --bubble-text-crossfade: 180ms;
+  --bubble-idle-dim-duration: 600ms;
+
+  /* Popover shadow — used by the Tier 2 hover peek card. */
+  --shadow-popover: 0 8px 24px -8px rgba(0, 0, 0, 0.32);
+
+  /* ─── Focus ring ─── */
+  /* Single source-of-truth: all interactive elements use this token so
+     keyboard navigation is always visible and consistent across themes.
+     Offset keeps the ring outside the element border, not overlapping it. */
+  --focus-ring-color: var(--accent);
+  --focus-ring-offset: 2px;
+  --focus-ring-width: 2px;
+
+  /* ─── Spacing scale ─── */
+  /* Consistent spacing prevents scattered hardcoded values. */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+
+  /* ─── Typography scale ─── */
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-base: 13px;
+  --text-md: 14px;
+  --text-lg: 15px;
+  --text-xl: 17px;
+  --text-2xl: 20px;
+
+  /* ─── Transition durations ─── */
+  --duration-fast: 0.12s;
+  --duration-base: 0.15s;
+  --duration-slow: 0.2s;
+
+  /* ─── Empty / loading state ─── */
+  --empty-state-color: var(--text-tertiary);
+  --empty-state-size: 13px;
 }
 
 html {
@@ -134,6 +186,34 @@ body {
   min-height: 100vh;
 }
 
+/* ─── Global focus-visible baseline ─── */
+/* Keyboard-only focus ring that doesn't fire on mouse clicks.
+   All focusable elements get a consistent ring; component stylesheets may
+   narrow the offset for elements that need inside-border positioning. */
+:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+}
+
+/* Suppress the native ring for elements whose :hover state already provides
+   a strong enough signal (e.g. icon buttons that show a filled background).
+   Each of those components adds its own :focus-visible override below. */
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* ─── Empty / loading state utilities ─── */
+.empty-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--empty-state-color);
+  font-size: var(--empty-state-size);
+}
+.empty-state--padded {
+  padding: 32px 20px;
+}
+
 /* ─── Animations ─── */
 @keyframes fadeIn {
   from {
@@ -143,6 +223,17 @@ body {
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+@keyframes fade-out {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-8px);
   }
 }
 @keyframes pulse-dot {
@@ -183,12 +274,23 @@ body {
   font-weight: 500;
   border: none;
   cursor: pointer;
-  transition: all 0.2s;
+  /* Scope to compositor-safe properties — `transform` for the lift and
+     `background/color/filter` for state; avoids layout recalcs on hover. */
+  transition:
+    background var(--duration-slow, 0.2s),
+    color var(--duration-slow, 0.2s),
+    filter var(--duration-slow, 0.2s),
+    transform var(--duration-slow, 0.2s),
+    box-shadow var(--duration-slow, 0.2s);
   text-decoration: none;
   min-height: 44px;
 }
 .btn:not(.btn-sm):not(:disabled):hover {
   transform: translateY(-1px);
+}
+.btn:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
 }
 .btn:disabled {
   opacity: 0.4;
@@ -197,10 +299,14 @@ body {
 .btn-primary {
   background: var(--accent);
   color: white;
-  padding: 10px 24px;
+  padding: 12px 24px;
   border-radius: var(--radius-full);
   font-size: 14px;
   box-shadow: 0 1px 3px rgba(159, 77, 191, 0.18);
+}
+.btn-primary:has(.btn-label) {
+  padding: 0;
+  gap: 0;
 }
 .btn-primary:hover {
   background: var(--accent-warm);
@@ -213,9 +319,9 @@ body {
   font-size: 14px;
 }
 .btn-ghost {
-  background: var(--accent-bg);
-  color: var(--accent);
-  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-secondary);
+  border: none;
   padding: 10px 20px;
   border-radius: var(--radius-full);
   font-size: 14px;
@@ -250,6 +356,10 @@ body {
 .btn-text:hover:not(:disabled) {
   text-decoration: underline;
   color: var(--text);
+}
+.btn-text:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
 }
 .btn-text:disabled {
   opacity: 0.5;
@@ -327,6 +437,109 @@ body {
   background: var(--yellow-bg);
   color: var(--yellow);
 }
+.badge-orange {
+  background: var(--warning-200);
+  color: var(--warning-500);
+}
+
+/* ─── Approval context (Variant B layout, shared between InterviewBar and HumanInterviewOverlay) ─── */
+/* The approval card has three semantically distinct content blocks and visual
+   weight must follow that order: Why (prose, primary text), Details (inset
+   panel, the decision-relevant payload — labels muted, values prominent),
+   Footer (operational metadata at secondary text weight, AA contrast). */
+.approval-context {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0 0 4px;
+}
+.approval-why {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text);
+}
+.approval-details {
+  margin: 0;
+  padding: 12px 14px;
+  /* overlay-soft is theme-aware: rgba(0,0,0,0.04) in light, rgba(255,255,255,0.04)
+     in dark. Gives the inset panel a perceptible recess on both themes without
+     hardcoding two backgrounds. --bg-warm collapses against --bg-card at dark
+     theme contrast 1.04:1, so the panel would otherwise vanish. */
+  background: var(--overlay-soft);
+  border: 1px solid var(--border-dark, var(--border));
+  border-radius: var(--radius-md);
+  display: grid;
+  gap: 6px;
+}
+.approval-details-row {
+  display: grid;
+  grid-template-columns: 64px 1fr;
+  gap: 10px;
+  align-items: baseline;
+  font-size: 14px;
+  line-height: 1.45;
+  margin: 0;
+}
+.approval-details-label {
+  /* text-secondary, not text-tertiary, so the label clears WCAG AA on the
+     inset surface in dark mode. Hierarchy still reads via font-weight + the
+     narrow column. */
+  color: var(--text-secondary);
+  font-weight: 500;
+  margin: 0;
+}
+.approval-details-value {
+  color: var(--text);
+  margin: 0;
+  word-break: break-word;
+}
+.approval-details-value .mono {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+}
+.approval-truncated {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--warning-100, var(--bg-warm));
+  color: var(--warning-500);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  vertical-align: 1px;
+}
+.approval-empty {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+  font-style: italic;
+}
+.approval-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+.approval-footer-row {
+  white-space: nowrap;
+}
+.approval-footer-row .mono {
+  font-family: var(--font-mono);
+  font-size: 0.95em;
+}
+@media (max-width: 480px) {
+  .approval-details-row {
+    grid-template-columns: 56px 1fr;
+    gap: 8px;
+  }
+  .approval-footer-row {
+    white-space: normal;
+  }
+}
 .badge-muted {
   background: var(--bg-warm);
   color: var(--text-tertiary);
@@ -373,6 +586,23 @@ body {
   position: absolute;
   right: -3px;
   bottom: -3px;
+  pointer-events: none;
+}
+
+/* Transport-presence indicator on agent avatars. Sits at top-right so it
+   does not collide with the harness badge at bottom-right. Rendered only
+   when the member's `online` flag is true (see AgentList SidebarAgentRow);
+   absence of the dot encodes "offline OR never connected" — the peek card
+   surfaces the distinction via "Last seen". */
+.online-badge {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--green, #03a04c);
+  box-shadow: 0 0 0 1.5px var(--bg-card, #fff);
   pointer-events: none;
 }
 
@@ -503,7 +733,13 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .skill-suggest-expander,
   .side-panel,
-  .animate-fade {
+  .animate-fade,
+  .local-llm-reveal,
+  .local-llm-reveal.open,
+  .task-suggestion,
+  .launch-screen,
+  .launch-screen-out,
+  .launch-spinner {
     /* biome-ignore lint/complexity/noImportantStyles: Reduced-motion override must beat animation declarations. */
     animation: none !important;
     /* biome-ignore lint/complexity/noImportantStyles: Reduced-motion override must beat transition declarations. */

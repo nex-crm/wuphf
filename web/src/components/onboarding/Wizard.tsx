@@ -2,12 +2,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { ConfigSnapshot } from "../../api/client";
 import { get, getConfig, post } from "../../api/client";
+import { router } from "../../lib/router";
 import { useAppStore } from "../../stores/app";
 import "../../styles/onboarding.css";
 
 // ApiKeyRow is re-exported here for back-compat with onboarding/ApiKeyRow.test.tsx.
 export { ApiKeyRow } from "./wizard/ApiKeyRow";
 
+import type { OSScanResponse } from "../../api/onboarding";
 import { ProgressDots } from "./wizard/components";
 import {
   LOCAL_PROVIDER_LABELS,
@@ -15,6 +17,17 @@ import {
   SCRATCH_FOUNDING_TEAM,
   STEP_ORDER,
 } from "./wizard/constants";
+import { FirstTaskScreen } from "./wizard/FirstTaskScreen";
+import { OutcomeSummary } from "./wizard/OutcomeSummary";
+import {
+  clearDraft,
+  consumeStaleBannerDays,
+  loadDraft,
+  seedFromDraft,
+} from "./wizard/onboardingDraft";
+import type { PackPreviewRequirement } from "./wizard/packPreview";
+import { adaptPackPreview } from "./wizard/packPreview";
+import { OnboardingBanners } from "./wizard/ResumeBanner";
 import {
   canSetupContinue,
   detectedBinary,
@@ -24,9 +37,11 @@ import {
 } from "./wizard/runtime-helpers";
 import { WelcomeStep } from "./wizard/Step1Welcome";
 import { TemplatesStep } from "./wizard/Step2Templates";
+import { AnalysisStep } from "./wizard/Step3bAnalysis";
 import { IdentityStep } from "./wizard/Step3Identity";
 import { TeamStep } from "./wizard/Step4Team";
 import { SetupStep } from "./wizard/Step5Setup";
+import { NexStep } from "./wizard/Step6Nex";
 import { TaskStep } from "./wizard/Step6Task";
 import { ReadyStep } from "./wizard/Step7Ready";
 import type {
@@ -38,6 +53,20 @@ import type {
   TaskTemplate,
   WizardStep,
 } from "./wizard/types";
+import { useOnboardingDraftSync } from "./wizard/useOnboardingDraftSync";
+
+// OutcomeMeta captures the wizard state at the moment /onboarding/complete
+// succeeds. The backend only returns {"ok":true}; this snapshot is the
+// source of truth for the post-completion summary screen.
+interface OutcomeMeta {
+  agents: BlueprintAgent[];
+  selectedBlueprint: string | null;
+  blueprints: BlueprintTemplate[];
+  primaryRuntime: string;
+  taskText: string;
+  taskSkipped: boolean;
+  apiKeyCount: number;
+}
 
 // runtimeIsReady + detectedBinary moved to wizard/runtime-helpers.ts.
 // ArrowIcon, CheckIcon, EnterHint, ProgressDots moved to wizard/components.tsx.
@@ -66,6 +95,20 @@ interface ConfigBootstrap {
 
 function prereqsFromPayload(data: PrereqsPayload): PrereqResult[] {
   return Array.isArray(data) ? data : (data.prereqs ?? []);
+}
+
+// Derive pack requirements from the selected blueprint for the SetupStep
+// requirements panel. Returns an empty array when no blueprint is selected
+// (scratch) or when the blueprint declares no requirements, so the panel
+// stays hidden in those cases.
+function derivePackRequirements(
+  selectedBlueprint: string | null,
+  blueprints: BlueprintTemplate[],
+): PackPreviewRequirement[] {
+  if (!selectedBlueprint) return [];
+  const bp = blueprints.find((b) => b.id === selectedBlueprint);
+  if (!bp) return [];
+  return adaptPackPreview(bp).requirements;
 }
 
 function errorMessage(reason: unknown): string {
@@ -121,27 +164,49 @@ export function Wizard({ onComplete }: WizardProps) {
     ? STEP_ORDER.filter((s) => s !== "identity")
     : STEP_ORDER;
 
+  // Resume support: load any saved draft once on first render. Captured
+  // via a useState lazy initializer so loadDraft (which has side effects
+  // like clearing stale drafts and setting the session-storage banner
+  // flag) runs exactly once on mount rather than on every render. The
+  // stale-banner flag is consumed at the same time so it only ever shows
+  // once.
+  const [initialDraft] = useState(() => loadDraft());
+  const seed = seedFromDraft(initialDraft);
+  const [hasSavedDraft, setHasSavedDraft] = useState<boolean>(
+    initialDraft !== null,
+  );
+  const [showResumeBanner, setShowResumeBanner] = useState<boolean>(
+    initialDraft !== null,
+  );
+  const [staleBannerDays, setStaleBannerDays] = useState<number | null>(() =>
+    consumeStaleBannerDays(),
+  );
+
   // Navigation
-  const [step, setStep] = useState<WizardStep>("welcome");
+  const [step, setStep] = useState<WizardStep>(seed.step);
 
   // Step 2: templates
   const [blueprints, setBlueprints] = useState<BlueprintTemplate[]>([]);
   const [blueprintsLoading, setBlueprintsLoading] = useState(true);
   const [selectedBlueprint, setSelectedBlueprint] = useState<string | null>(
-    null,
+    seed.selectedBlueprint,
   );
 
   // Step 3: identity
-  const [company, setCompany] = useState("");
-  const [description, setDescription] = useState("");
-  const [priority, setPriority] = useState("");
+  const [company, setCompany] = useState(seed.company);
+  const [description, setDescription] = useState(seed.description);
+  const [priority, setPriority] = useState(seed.priority);
+  const [website, setWebsite] = useState(seed.website);
+  const [ownerName, setOwnerName] = useState(seed.ownerName);
+  const [ownerRole, setOwnerRole] = useState(seed.ownerRole);
+  const [scanResult, setScanResult] = useState<OSScanResponse | null>(null);
   // Optional in-wizard Nex registration. Mirrors the TUI's InitNexRegister
   // phase — we POST /nex/register which shells out to `nex-cli setup <email>`.
   // If nex-cli isn't installed we flip to `fallback` (external link to
   // nex.ai/register, key pasted on the Setup step).
   const [nexEmail, setNexEmail] = useState("");
   const [nexSignupStatus, setNexSignupStatus] =
-    useState<NexSignupStatus>("hidden");
+    useState<NexSignupStatus>("open");
   const [nexSignupError, setNexSignupError] = useState("");
 
   // Step 4: team
@@ -155,24 +220,50 @@ export function Wizard({ onComplete }: WizardProps) {
   // the array is the fallback priority. Initially empty — we prefer explicit
   // config/launch choices, then auto-populate with the first installed CLI so
   // the happy path still works with zero clicks.
-  const [runtimePriority, setRuntimePriority] = useState<string[]>([]);
+  const [runtimePriority, setRuntimePriority] = useState<string[]>(
+    seed.runtimePriority,
+  );
   // localProvider is the local OpenAI-compat kind the user opted into in
   // the SetupStep subsection (mlx-lm | ollama | exo | "" for none).
   // When non-empty, it overrides whatever cloud CLI was selected and is
   // applied as llm_provider on /onboarding/complete.
-  const [localProvider, setLocalProvider] = useState<string>("");
+  const [localProvider, setLocalProvider] = useState<string>(
+    seed.localProvider,
+  );
   const [apiKeys, setApiKeys] = useState<Record<string, string>>({});
-  const userEditedRuntimeRef = useRef(false);
+  // If we restored runtime choices from a draft, mark as user-edited so
+  // the prereq bootstrap effect doesn't overwrite them with defaults.
+  // Only treat the draft as edited when it actually carried a runtime —
+  // an empty draft (welcome-step bail) shouldn't suppress auto-detect on
+  // the next visit, otherwise the no-clicks happy path silently breaks.
+  const userEditedRuntimeRef = useRef(
+    initialDraft !== null &&
+      (seed.runtimePriority.length > 0 || seed.localProvider !== ""),
+  );
 
   // Step 6: first task
   const [taskTemplates, setTaskTemplates] = useState<TaskTemplate[]>([]);
   const [selectedTaskTemplate, setSelectedTaskTemplate] = useState<
     string | null
-  >(null);
-  const [taskText, setTaskText] = useState("");
+  >(seed.selectedTaskTemplate);
+  const [taskText, setTaskText] = useState(seed.taskText);
   const taskTextAutofilled = useRef(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
+  // After a successful submission with a task, show the first-task launch
+  // screen before entering the office so the user can choose to watch live.
+  const [showFirstTask, setShowFirstTask] = useState(false);
+  const [submittedTaskText, setSubmittedTaskText] = useState("");
+  // Synchronous gate so rapid clicks cannot fire onComplete more than once.
+  // A ref is used (not state) because it updates immediately and avoids a
+  // re-render before the guard takes effect.
+  const firstTaskActedRef = useRef(false);
+
+  // Outcome summary — shown after /onboarding/complete succeeds.
+  // The wizard stays mounted so the user can read what was created before
+  // entering the office. onComplete() is called when they click "Go to the office".
+  const [showOutcome, setShowOutcome] = useState(false);
+  const [outcomeMeta, setOutcomeMeta] = useState<OutcomeMeta | null>(null);
 
   // Fetch blueprints on mount
   useEffect(() => {
@@ -300,7 +391,19 @@ export function Wizard({ onComplete }: WizardProps) {
   // blueprint only. Previously we flattened tasks across every blueprint, so
   // the task step showed ~26 tiles of unrelated work — including tasks from
   // blueprints the user never picked.
+  // Resume guard: on the very first render after restoring a draft, the
+  // selectedBlueprint state arrives non-null and would otherwise wipe the
+  // restored taskText / selectedTaskTemplate. Skip exactly one run.
+  const skipFirstBlueprintEffect = useRef(initialDraft !== null);
   useEffect(() => {
+    if (skipFirstBlueprintEffect.current) {
+      skipFirstBlueprintEffect.current = false;
+      const bp = blueprints.find((b) => b.id === selectedBlueprint);
+      if (selectedBlueprint !== null && bp?.tasks) {
+        setTaskTemplates(bp.tasks);
+      }
+      return;
+    }
     // Clear suggestion-derived text when the blueprint changes. Track this
     // separately from selectedTaskTemplate because re-clicking a suggestion
     // intentionally deselects the tile while leaving its autofilled text in
@@ -371,14 +474,6 @@ export function Wizard({ onComplete }: WizardProps) {
     setApiKeys((prev) => ({ ...prev, [key]: value }));
   }, []);
 
-  // Open the in-wizard Nex signup affordance. A separate handler (not just
-  // `setNexSignupStatus('open')` inline) keeps the error/email state reset in
-  // one place — reopening after a failed attempt shouldn't leak the old error.
-  const openNexSignup = useCallback(() => {
-    setNexSignupError("");
-    setNexSignupStatus("open");
-  }, []);
-
   // Submit the email to /nex/register. On success: mark status 'ok' so the
   // UI tells the user to check their inbox. On ErrNotInstalled (502 from the
   // broker when nex-cli isn't on PATH): flip to 'fallback' — the user gets an
@@ -406,20 +501,6 @@ export function Wizard({ onComplete }: WizardProps) {
       setNexSignupError(msg);
     }
   }, [nexEmail]);
-
-  // Close the Nex signup panel via Escape — keeps the outer Escape handler
-  // in `useKeyboardShortcuts` free to act on app-level panels without
-  // fighting the wizard's internal affordance.
-  const closeNexSignup = useCallback(() => {
-    if (
-      nexSignupStatus === "open" ||
-      nexSignupStatus === "ok" ||
-      nexSignupStatus === "fallback"
-    ) {
-      setNexSignupStatus("hidden");
-      setNexSignupError("");
-    }
-  }, [nexSignupStatus]);
 
   // Compute readiness checks. Runs at render time for the 'ready' step — no
   // useMemo because the surface is small (6 checks) and recomputation only
@@ -609,6 +690,10 @@ export function Wizard({ onComplete }: WizardProps) {
           company,
           description,
           priority,
+          website,
+          owner_name: ownerName,
+          owner_role: ownerRole,
+          scan_completed: scanResult !== null,
           runtime: primaryRuntime,
           runtime_priority: runtimePriority,
           memory_backend: "markdown",
@@ -626,20 +711,51 @@ export function Wizard({ onComplete }: WizardProps) {
         return;
       }
 
+      // Capture what was submitted before calling onComplete — the outcome
+      // summary screen needs these values to describe what was created.
+      const apiKeyCount = Object.values(apiKeys).filter(
+        (v) => v.trim().length > 0,
+      ).length;
+      setOutcomeMeta({
+        agents,
+        selectedBlueprint,
+        blueprints,
+        primaryRuntime: runtimePriority[0] ?? "",
+        taskText,
+        taskSkipped: skipTask,
+        apiKeyCount,
+      });
+
+      // Onboarding succeeded — discard the resumeable draft so a return
+      // visit lands on the post-setup app, not a half-filled wizard.
+      clearDraft();
       setOnboardingComplete(true);
-      onComplete?.();
+      if (!skipTask && taskText.trim()) {
+        setSubmittedTaskText(taskText.trim());
+        setShowFirstTask(true);
+        setSubmitting(false);
+      } else {
+        // Show the outcome summary screen instead of immediately entering the
+        // office. The user clicks "Go to the office" to call onComplete().
+        setShowOutcome(true);
+        setSubmitting(false);
+      }
     },
     [
       company,
       description,
       priority,
+      website,
+      ownerName,
+      ownerRole,
+      scanResult,
       runtimePriority,
       selectedBlueprint,
       agents,
+      blueprints,
       apiKeys,
       taskText,
       setOnboardingComplete,
-      onComplete,
     ],
   );
 
@@ -652,7 +768,12 @@ export function Wizard({ onComplete }: WizardProps) {
     // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") {
-        closeNexSignup();
+        // Escape on the optional Nex step skips it; on other steps it's a
+        // no-op (outer keyboard shortcuts can act on app-level panels).
+        if (step === "nex") {
+          e.preventDefault();
+          nextStep();
+        }
         return;
       }
       if (e.key !== "Enter") return;
@@ -666,8 +787,16 @@ export function Wizard({ onComplete }: WizardProps) {
       // Don't hijack Enter on interactive controls — Enter on a focused
       // Back button should go back, not advance; Enter on a runtime
       // reorder button should reorder, not advance.
+      // Exception: template-card buttons should let Enter advance the step
+      // (preventDefault stops the native toggle so the card stays selected).
       const tag = target?.tagName;
-      if (tag === "BUTTON" || tag === "A" || tag === "SELECT") return;
+      const isTemplateCard =
+        target?.classList?.contains("template-card") ?? false;
+      if (
+        (tag === "BUTTON" || tag === "A" || tag === "SELECT") &&
+        !isTemplateCard
+      )
+        return;
       const inTextarea = tag === "TEXTAREA";
       const isSubmitCombo = e.metaKey || e.ctrlKey;
       if (inTextarea && !isSubmitCombo) return;
@@ -694,7 +823,11 @@ export function Wizard({ onComplete }: WizardProps) {
         case "identity":
           if (canIdentityContinue) {
             e.preventDefault();
-            nextStep();
+            if (website.trim() || ownerName.trim()) {
+              goTo("analysis");
+            } else {
+              nextStep();
+            }
           }
           return;
         case "team":
@@ -704,6 +837,24 @@ export function Wizard({ onComplete }: WizardProps) {
         case "setup":
           if (setupCanContinue) {
             e.preventDefault();
+            nextStep();
+          }
+          return;
+        case "nex":
+          // Mirror the step's primary CTA: register if the user has typed an
+          // email, advance otherwise. This prevents a user from typing an
+          // address, tabbing away, then pressing Enter and skipping signup.
+          // While a registration is in flight the press is a no-op so a
+          // stray Enter can't race the API call and skip the step.
+          e.preventDefault();
+          if (nexSignupStatus === "submitting") {
+            return;
+          }
+          if (nexSignupStatus === "ok" || nexSignupStatus === "fallback") {
+            nextStep();
+          } else if (nexEmail.trim().length > 0) {
+            submitNexSignup();
+          } else {
             nextStep();
           }
           return;
@@ -739,17 +890,126 @@ export function Wizard({ onComplete }: WizardProps) {
     goTo,
     nextStep,
     finishOnboarding,
-    closeNexSignup,
     localProvider,
+    nexEmail,
+    nexSignupStatus,
+    submitNexSignup,
+    website,
+    ownerName,
   ]);
+
+  // Debounced persistence of the non-secret draft. extractDraftableState
+  // is a pure mapper inside the hook; secret-bearing fields like
+  // apiKeys are never passed in or read.
+  useOnboardingDraftSync({
+    step,
+    selectedBlueprint,
+    company,
+    description,
+    priority,
+    website,
+    ownerName,
+    ownerRole,
+    runtimePriority,
+    localProvider,
+    selectedTaskTemplate,
+    taskText,
+  });
+
+  const resetDraft = useCallback(() => {
+    clearDraft();
+    setHasSavedDraft(false);
+    setShowResumeBanner(false);
+    setStep("welcome");
+    setSelectedBlueprint(null);
+    setCompany("");
+    setDescription("");
+    setPriority("");
+    setNexEmail("");
+    setNexSignupStatus("open");
+    setNexSignupError("");
+    setRuntimePriority([]);
+    setLocalProvider("");
+    setApiKeys({});
+    setSelectedTaskTemplate(null);
+    setTaskText("");
+    setWebsite("");
+    setOwnerName("");
+    setOwnerRole("");
+    setScanResult(null);
+    userEditedRuntimeRef.current = false;
+    taskTextAutofilled.current = false;
+  }, []);
+
+  if (showFirstTask) {
+    return (
+      <div className="wizard-container">
+        <div className="wizard-body">
+          <FirstTaskScreen
+            taskText={submittedTaskText}
+            onWatchTask={async () => {
+              if (firstTaskActedRef.current) return;
+              firstTaskActedRef.current = true;
+              try {
+                await router.navigate({ to: "/tasks" });
+              } finally {
+                onComplete?.();
+              }
+            }}
+            onSkipToOffice={() => {
+              if (firstTaskActedRef.current) return;
+              firstTaskActedRef.current = true;
+              onComplete?.();
+            }}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  // Outcome summary — rendered in place of the wizard steps after
+  // /onboarding/complete succeeds (no-task path). The user reads what
+  // was created and then clicks "Go to the office" which calls onComplete().
+  if (showOutcome && outcomeMeta !== null) {
+    return (
+      <div className="wizard-container">
+        <div className="wizard-body">
+          <OutcomeSummary
+            agents={outcomeMeta.agents}
+            selectedBlueprint={outcomeMeta.selectedBlueprint}
+            blueprints={outcomeMeta.blueprints}
+            primaryRuntime={outcomeMeta.primaryRuntime}
+            taskText={outcomeMeta.taskText}
+            taskSkipped={outcomeMeta.taskSkipped}
+            apiKeyCount={outcomeMeta.apiKeyCount}
+            onEnter={() => onComplete?.()}
+          />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="wizard-container">
       <div className="wizard-body">
-        <ProgressDots current={step} steps={activeSteps} />
+        {step !== "analysis" && (
+          <ProgressDots current={step} steps={activeSteps} />
+        )}
+
+        <OnboardingBanners
+          resumeDraft={showResumeBanner ? initialDraft : null}
+          staleBannerDays={staleBannerDays}
+          onResetResume={resetDraft}
+          onDismissResume={() => setShowResumeBanner(false)}
+          onDismissStale={() => setStaleBannerDays(null)}
+        />
 
         {step === "welcome" && (
-          <WelcomeStep onNext={() => goTo(activeSteps[1] ?? "templates")} />
+          <WelcomeStep
+            onNext={() => goTo(activeSteps[1] ?? "templates")}
+            hasSavedDraft={hasSavedDraft}
+            onResetDraft={resetDraft}
+          />
         )}
 
         {step === "templates" && (
@@ -768,17 +1028,38 @@ export function Wizard({ onComplete }: WizardProps) {
             company={company}
             description={description}
             priority={priority}
-            nexEmail={nexEmail}
-            nexSignupStatus={nexSignupStatus}
-            nexSignupError={nexSignupError}
+            website={website}
+            ownerName={ownerName}
+            ownerRole={ownerRole}
             onChangeCompany={setCompany}
             onChangeDescription={setDescription}
             onChangePriority={setPriority}
-            onChangeNexEmail={setNexEmail}
-            onSubmitNexSignup={submitNexSignup}
-            onOpenNexSignup={openNexSignup}
-            onNext={nextStep}
+            onChangeWebsite={setWebsite}
+            onChangeOwnerName={setOwnerName}
+            onChangeOwnerRole={setOwnerRole}
+            onNext={() => {
+              if (website.trim() || ownerName.trim()) {
+                setStep("analysis");
+              } else {
+                nextStep();
+              }
+            }}
             onBack={prevStep}
+          />
+        )}
+
+        {step === "analysis" && (
+          <AnalysisStep
+            website={website}
+            ownerName={ownerName}
+            ownerRole={ownerRole}
+            onDone={(result) => {
+              setScanResult(result);
+              setStep("templates");
+            }}
+            onSkip={() => {
+              setStep("templates");
+            }}
           />
         )}
 
@@ -811,6 +1092,22 @@ export function Wizard({ onComplete }: WizardProps) {
               provider: localProvider,
               onSelectProvider: selectLocalProvider,
             }}
+            packRequirements={derivePackRequirements(
+              selectedBlueprint,
+              blueprints,
+            )}
+            onNext={nextStep}
+            onBack={prevStep}
+          />
+        )}
+
+        {step === "nex" && (
+          <NexStep
+            email={nexEmail}
+            status={nexSignupStatus}
+            error={nexSignupError}
+            onChangeEmail={setNexEmail}
+            onSubmit={submitNexSignup}
             onNext={nextStep}
             onBack={prevStep}
           />

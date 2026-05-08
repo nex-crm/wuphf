@@ -1,8 +1,49 @@
 id: paid-discord-community
 name: Paid Discord Community
 kind: community
+category: media
+outcome: "Onboarding, moderation, and engagement for a paid community."
 description: Template for a paid community operation that focuses on onboarding, moderation, engagement, and retention.
 objective: Run a paid community with durable onboarding, moderation, engagement, and sponsor loops.
+estimated_setup_minutes: 6
+first_tasks:
+  - id: welcome-flow
+    title: "Design a new-member welcome flow"
+    prompt: |
+      Design a 3-step welcome flow for a paid Discord community. Step 1 fires when a member joins, step 2 at 24 hours, step 3 at 7 days. For each step give the message, the desired action, and how to detect success. Avoid hype; lean on small commitments.
+    expected_output: "Three messages with timing, desired action, and a success metric for each."
+  - id: weekly-engagement-rhythm
+    title: "Plan a weekly engagement rhythm"
+    prompt: |
+      Plan a weekly engagement rhythm for a paid community of 200 members. Pick three recurring rituals (e.g. open thread, AMA, member spotlight). For each, give the day, the prompt, and how the moderator preps in advance.
+    expected_output: "Three rituals with day, prompt, and a moderator prep note."
+skills:
+  - name: "Community moderation"
+    purpose: "Keep the community healthy with clear rules and fast triage."
+  - name: "Member onboarding"
+    purpose: "Move new members from join to first contribution."
+  - name: "Engagement design"
+    purpose: "Design rituals and content beats that keep members showing up."
+requirements:
+  - kind: api-key
+    name: "ANTHROPIC_API_KEY or OPENAI_API_KEY"
+    required: true
+    detail: "Powers the community-manager, growth, and reviewer agents."
+  - kind: runtime
+    name: "Claude Code or Codex CLI"
+    required: true
+    detail: "Runs the agent loops locally."
+  - kind: local-tool
+    name: "Discord workspace access"
+    required: false
+    detail: "Optional. Connect later to enable live moderation and posting."
+example_artifacts:
+  - kind: playbook
+    title: "Welcome flow"
+  - kind: schedule
+    title: "Weekly engagement calendar"
+  - kind: report
+    title: "Monthly retention summary"
 default_reviewer: ceo
 reviewer_paths:
   "team/community/**": community-manager

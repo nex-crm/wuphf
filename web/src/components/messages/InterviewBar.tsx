@@ -13,9 +13,11 @@ import {
   type SkillSimilarRef,
 } from "../../api/client";
 import { useRequests } from "../../hooks/useRequests";
+import { parseApprovalContext } from "../../lib/parseApprovalContext";
 import { SkillCompareView } from "../apps/SkillCompareView";
 import { SidePanel } from "../ui/SidePanel";
 import { showNotice } from "../ui/Toast";
+import { ApprovalContextView } from "./ApprovalContextView";
 
 /**
  * Inline interview bar shown above the Composer. Mirrors the TUI behavior:
@@ -83,13 +85,13 @@ export function InterviewBar() {
   // Reset transient UI state when the active request changes. Keyed on
   // current?.id so cycling between queued requests (or replacing the
   // active one with a fresh broker push) clears textMode / customText /
-  // compareOpen — without this dep, compareOpen=true from one card
-  // leaks into the next.
+  // compareOpen before state from one card leaks into the next.
+  const currentId = current?.id ?? null;
   useEffect(() => {
     setTextMode(null);
     setCustomText("");
     setCompareOpen(false);
-  }, []);
+  }, [currentId]);
 
   useEffect(() => {
     if (textMode && textareaRef.current) {
@@ -229,6 +231,9 @@ export function InterviewBar() {
         <span className="badge badge-yellow">
           {current.blocking ? "BLOCKING" : "INTERVIEW"}
         </span>
+        {current.kind === "approval" ? (
+          <span className="badge badge-orange">EXTERNAL ACTION</span>
+        ) : null}
         <span className="interview-bar-from">
           @{current.from || "agent"} asks
         </span>
@@ -281,9 +286,15 @@ export function InterviewBar() {
             .replace(/\*\*/g, "")
             .replace(/^\s*\d+\.\s*/, "")}
         </div>
-        {current.context ? (
-          <div className="interview-bar-context">{current.context}</div>
-        ) : null}
+        {(() => {
+          if (current.kind === "approval") {
+            const parsed = parseApprovalContext(current.context);
+            if (parsed) return <ApprovalContextView parsed={parsed} />;
+          }
+          return current.context ? (
+            <div className="interview-bar-context">{current.context}</div>
+          ) : null;
+        })()}
 
         {ambiguousRef ? (
           <SimilarBanner
@@ -351,7 +362,9 @@ export function InterviewBar() {
           onPick={handleOption}
         />
       ) : options.length > 0 ? (
-        <div className="interview-bar-actions">
+        <div
+          className={`interview-bar-actions${options.length <= 2 ? " interview-bar-actions-inline" : ""}`}
+        >
           {options.map((opt, i) => (
             <button
               key={opt.id}

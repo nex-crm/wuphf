@@ -7,9 +7,9 @@ interface Overrides {
   company?: string;
   description?: string;
   priority?: string;
-  nexEmail?: string;
-  nexSignupStatus?: "hidden" | "open" | "submitting" | "ok" | "fallback";
-  nexSignupError?: string;
+  website?: string;
+  ownerName?: string;
+  ownerRole?: string;
 }
 
 function renderIdentity(
@@ -18,9 +18,9 @@ function renderIdentity(
     onChangeCompany: (v: string) => void;
     onChangeDescription: (v: string) => void;
     onChangePriority: (v: string) => void;
-    onChangeNexEmail: (v: string) => void;
-    onSubmitNexSignup: () => void;
-    onOpenNexSignup: () => void;
+    onChangeWebsite: (v: string) => void;
+    onChangeOwnerName: (v: string) => void;
+    onChangeOwnerRole: (v: string) => void;
     onNext: () => void;
     onBack: () => void;
   }> = {},
@@ -29,15 +29,15 @@ function renderIdentity(
     company: "",
     description: "",
     priority: "",
-    nexEmail: "",
-    nexSignupStatus: "hidden" as const,
-    nexSignupError: "",
+    website: "",
+    ownerName: "",
+    ownerRole: "",
     onChangeCompany: callbacks.onChangeCompany ?? (() => {}),
     onChangeDescription: callbacks.onChangeDescription ?? (() => {}),
     onChangePriority: callbacks.onChangePriority ?? (() => {}),
-    onChangeNexEmail: callbacks.onChangeNexEmail ?? (() => {}),
-    onSubmitNexSignup: callbacks.onSubmitNexSignup ?? (() => {}),
-    onOpenNexSignup: callbacks.onOpenNexSignup ?? (() => {}),
+    onChangeWebsite: callbacks.onChangeWebsite ?? (() => {}),
+    onChangeOwnerName: callbacks.onChangeOwnerName ?? (() => {}),
+    onChangeOwnerRole: callbacks.onChangeOwnerRole ?? (() => {}),
     onNext: callbacks.onNext ?? (() => {}),
     onBack: callbacks.onBack ?? (() => {}),
     ...overrides,
@@ -53,58 +53,66 @@ function renderIdentity(
 describe("IdentityStep", () => {
   it("disables Continue when company or description are empty", () => {
     const { rerenderWith } = renderIdentity({ company: "", description: "" });
-    const cta = screen.getByRole("button", { name: /Choose a blueprint/i });
+    const cta = screen.getByRole("button", { name: /Continue/i });
     expect(cta).toBeDisabled();
 
     rerenderWith({ company: "Acme", description: "" });
-    expect(
-      screen.getByRole("button", { name: /Choose a blueprint/i }),
-    ).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Continue/i })).toBeDisabled();
   });
 
   it("enables Continue once both company and description are non-empty", () => {
     renderIdentity({ company: "Acme", description: "We sell things" });
-    expect(
-      screen.getByRole("button", { name: /Choose a blueprint/i }),
-    ).toBeEnabled();
+    expect(screen.getByRole("button", { name: /Continue/i })).toBeEnabled();
   });
 
   it("treats whitespace-only inputs as empty (trim gate)", () => {
     renderIdentity({ company: "   ", description: "  " });
-    expect(
-      screen.getByRole("button", { name: /Choose a blueprint/i }),
-    ).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Continue/i })).toBeDisabled();
   });
 
-  it("typing into company / description fires the change handlers", () => {
+  it("typing into the identity fields fires the change handlers", () => {
     const onChangeCompany = vi.fn();
     const onChangeDescription = vi.fn();
-    renderIdentity({}, { onChangeCompany, onChangeDescription });
+    const onChangePriority = vi.fn();
+    renderIdentity(
+      {},
+      { onChangeCompany, onChangeDescription, onChangePriority },
+    );
 
-    fireEvent.change(screen.getByLabelText(/Company or project name/i), {
+    fireEvent.change(screen.getByLabelText(/Office name/i), {
       target: { value: "Acme" },
     });
-    fireEvent.change(screen.getByLabelText(/One-liner description/i), {
+    fireEvent.change(screen.getByLabelText(/Short description/i), {
       target: { value: "We sell things" },
+    });
+    fireEvent.change(screen.getByLabelText(/Top priority/i), {
+      target: { value: "Win first customer" },
     });
     expect(onChangeCompany).toHaveBeenCalledWith("Acme");
     expect(onChangeDescription).toHaveBeenCalledWith("We sell things");
+    expect(onChangePriority).toHaveBeenCalledWith("Win first customer");
   });
 
-  it("hides the NexSignupPanel by default and surfaces the trigger link", () => {
-    const onOpenNexSignup = vi.fn();
-    renderIdentity({ nexSignupStatus: "hidden" }, { onOpenNexSignup });
-    const trigger = screen.getByRole("button", {
-      name: /Don.+t have a Nex account/i,
+  it("typing into website and owner fields fires the change handlers", () => {
+    const onChangeWebsite = vi.fn();
+    const onChangeOwnerName = vi.fn();
+    const onChangeOwnerRole = vi.fn();
+    renderIdentity(
+      { company: "Acme", description: "We sell things" },
+      { onChangeWebsite, onChangeOwnerName, onChangeOwnerRole },
+    );
+
+    fireEvent.change(screen.getByLabelText(/Company website/i), {
+      target: { value: "https://acme.com" },
     });
-    fireEvent.click(trigger);
-    expect(onOpenNexSignup).toHaveBeenCalledTimes(1);
-    // Email input is mounted only when the panel is visible.
-    expect(screen.queryByLabelText(/^Email$/i)).not.toBeInTheDocument();
-  });
-
-  it("renders the NexSignupPanel once status leaves 'hidden'", () => {
-    renderIdentity({ nexSignupStatus: "open" });
-    expect(screen.getByLabelText(/^Email$/i)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(/Your name/i), {
+      target: { value: "Nazz Mohammad" },
+    });
+    fireEvent.change(screen.getByLabelText(/Your role/i), {
+      target: { value: "Founder" },
+    });
+    expect(onChangeWebsite).toHaveBeenCalledWith("https://acme.com");
+    expect(onChangeOwnerName).toHaveBeenCalledWith("Nazz Mohammad");
+    expect(onChangeOwnerRole).toHaveBeenCalledWith("Founder");
   });
 });

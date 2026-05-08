@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -65,6 +66,13 @@ type webShareController struct {
 	inviteURL string
 	expiresAt string
 	err       string
+	// broker is the in-process broker handle, set via SetBroker before the
+	// controller's first start(). When non-nil and the broker has registered
+	// a ShareTransport, start() routes invite creation through the adapter so
+	// admit + revoke + invite-create all flow through the same surface. When
+	// nil (e.g. the standalone `wuphf share` subcommand has no in-process
+	// broker), start() falls back to the legacy HTTP path.
+	broker *team.Broker
 }
 
 func newWebShareController(webPort int) *webShareController {
@@ -73,6 +81,16 @@ func newWebShareController(webPort int) *webShareController {
 			webPort: webPort,
 		},
 	}
+}
+
+// SetBroker installs the in-process broker handle. Idempotent. Passing nil
+// clears the handle so the controller falls back to the HTTP invite path.
+// Called by main.go after the broker is up but before the controller's first
+// start() invocation.
+func (c *webShareController) SetBroker(b *team.Broker) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.broker = b
 }
 
 func (c *webShareController) status() team.WebShareStatus {
@@ -97,6 +115,54 @@ func (c *webShareController) clearInviteLocked() {
 	c.expiresAt = ""
 }
 
+// issueInviteLocked returns a fresh invite URL and its RFC3339 expiry. When an
+// in-process broker handle with a registered ShareTransport is available it
+// goes through the adapter (CreateInviteDetailed); otherwise it falls back to
+// the legacy HTTP path against the broker. The absolute URL formula is
+// identical in both branches so the user-facing link does not depend on which
+// path produced it. Caller must hold c.mu.
+//
+// brokerTokenFn is invoked lazily — only when the HTTP fallback path is taken.
+// This keeps the in-process adapter path independent of broker-token-file
+// availability: a missing or unreadable token file no longer blocks invite
+// creation when an adapter handle is registered. The fn shape (rather than a
+// pre-read string) makes the lazy contract explicit at every call site.
+func (c *webShareController) issueInviteLocked(ctx context.Context, bind string, port int, brokerURL string, brokerTokenFn func() (string, error)) (string, string, error) {
+	if c.broker != nil {
+		if st := c.broker.ShareTransport(); st != nil {
+			// Bind the URL builder atomically to this invite-creation. Using
+			// SetURLBuilder + CreateInviteDetailed as separate calls races
+			// with the public-tunnel controller (cmd/wuphf/tunnel.go), which
+			// also mints invites against the same ShareTransport instance —
+			// concurrent calls could swap each other's builders mid-flight
+			// and hand a teammate a URL with the wrong origin.
+			details, err := st.CreateInviteDetailedWithBuilder(ctx, func(token string) string {
+				return shareJoinURL(bind, port, token)
+			})
+			if err != nil {
+				return "", "", err
+			}
+			return details.URL, details.ExpiresAt, nil
+		}
+	}
+	brokerToken, err := brokerTokenFn()
+	if err != nil {
+		return "", "", err
+	}
+	invite, err := createShareInvite(brokerURL, brokerToken)
+	if err != nil {
+		return "", "", err
+	}
+	return shareJoinURL(bind, port, invite.Token), invite.Invite.ExpiresAt, nil
+}
+
+// shareJoinURL is the canonical "http://<bind>:<port>/join/<token>" formatter
+// used by both the adapter and HTTP invite paths so the user-facing URL shape
+// stays in one place.
+func shareJoinURL(bind string, port int, token string) string {
+	return fmt.Sprintf("http://%s:%d/join/%s", bind, port, token)
+}
+
 func (c *webShareController) start() (team.WebShareStatus, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -105,24 +171,32 @@ func (c *webShareController) start() (team.WebShareStatus, error) {
 	if opts.webPort == 0 {
 		opts.webPort = 7891
 	}
-	token, err := readBrokerToken()
-	if err != nil {
-		c.err = err.Error()
-		return c.statusLocked(), err
-	}
 	brokerURL := brokeraddr.ResolveBaseURL()
 
 	if c.running && c.server != nil {
-		invite, err := createShareInvite(brokerURL, token)
+		// readBrokerToken is passed by reference so the running branch only
+		// pays the file I/O when issueInviteLocked actually falls back to the
+		// HTTP path (i.e. the adapter handle is missing). With the adapter
+		// registered, a fresh invite mints with no token-file read.
+		inviteURL, expiresAt, err := c.issueInviteLocked(context.Background(), c.bind, opts.webPort, brokerURL, readBrokerToken)
 		if err != nil {
 			c.err = err.Error()
 			return c.statusLocked(), err
 		}
 		c.brokerURL = brokerURL
-		c.inviteURL = fmt.Sprintf("http://%s:%d/join/%s", c.bind, opts.webPort, invite.Token)
-		c.expiresAt = invite.Invite.ExpiresAt
+		c.inviteURL = inviteURL
+		c.expiresAt = expiresAt
 		c.err = ""
 		return c.statusLocked(), nil
+	}
+
+	// Fresh start: the token is needed for newShareHTTPServer regardless of
+	// which invite-creation path issueInviteLocked picks, so read it once here
+	// and reuse the value via a constant closure for the invite path.
+	token, err := readBrokerToken()
+	if err != nil {
+		c.err = err.Error()
+		return c.statusLocked(), err
 	}
 
 	bind, iface, err := resolveShareBind(opts)
@@ -133,7 +207,7 @@ func (c *webShareController) start() (team.WebShareStatus, error) {
 		c.err = webShareErrorMessage(err)
 		return c.statusLocked(), err
 	}
-	invite, err := createShareInvite(brokerURL, token)
+	inviteURL, expiresAt, err := c.issueInviteLocked(context.Background(), bind.String(), opts.webPort, brokerURL, func() (string, error) { return token, nil })
 	if err != nil {
 		c.running = false
 		c.server = nil
@@ -158,8 +232,8 @@ func (c *webShareController) start() (team.WebShareStatus, error) {
 	c.bind = bind.String()
 	c.iface = iface
 	c.brokerURL = brokerURL
-	c.inviteURL = fmt.Sprintf("http://%s:%d/join/%s", c.bind, opts.webPort, invite.Token)
-	c.expiresAt = invite.Invite.ExpiresAt
+	c.inviteURL = inviteURL
+	c.expiresAt = expiresAt
 	c.err = ""
 
 	go func() {
@@ -269,7 +343,7 @@ func runShareServer(opts shareOptions) error {
 	if err != nil {
 		return err
 	}
-	inviteURL := fmt.Sprintf("http://%s:%d/join/%s", bind.String(), opts.webPort, invite.Token)
+	inviteURL := shareJoinURL(bind.String(), opts.webPort, invite.Token)
 	out := shareJSONOutput{
 		OK:        true,
 		Bind:      bind.String(),
@@ -432,15 +506,41 @@ func isPrivateIP(ip net.IP) bool {
 	return v4[0] == 10 || (v4[0] == 172 && v4[1] >= 16 && v4[1] <= 31) || (v4[0] == 192 && v4[1] == 168)
 }
 
+// shareHandlerConfig is the dial-tone for the unauthenticated /join/ HTTP
+// surface. BrokerURL is required (the handler proxies the invite-accept
+// call to the broker on the joiner's behalf — the broker accepts based on
+// the invite token in the body, not a bearer token, so no broker token is
+// needed here). OnJoin is the host-side join notification (printed on the
+// wuphf share terminal). JoinGate and RateLimiter are tunnel-only
+// hardening; both nil in network-share mode preserves Phase 1 behaviour
+// byte-for-byte.
+type shareHandlerConfig struct {
+	BrokerURL   string
+	OnJoin      func()
+	JoinGate    joinGateFn
+	RateLimiter *joinRateLimiter
+}
+
 func newShareHTTPServer(bind string, port int, brokerURL, brokerToken string, onJoin func()) *http.Server {
+	// brokerToken is part of the legacy signature; it's used elsewhere in
+	// this file (see runShareServer) but the share HTTP handler itself has
+	// no use for it because the join POST sends the invite token in the
+	// body and the broker's /humans/invites/accept endpoint accepts on
+	// that alone. Drop it on the way into the handler config.
+	_ = brokerToken
 	return &http.Server{
-		Addr:              fmt.Sprintf("%s:%d", bind, port),
-		Handler:           newShareHandler(brokerURL, brokerToken, onJoin),
+		Addr: fmt.Sprintf("%s:%d", bind, port),
+		Handler: newShareHandler(shareHandlerConfig{
+			BrokerURL: brokerURL,
+			OnJoin:    onJoin,
+		}),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 }
 
-func newShareHandler(brokerURL, brokerToken string, onJoin func()) http.Handler {
+func newShareHandler(cfg shareHandlerConfig) http.Handler {
+	brokerURL := cfg.BrokerURL
+	onJoin := cfg.OnJoin
 	mux := http.NewServeMux()
 	mux.HandleFunc("/join/", func(w http.ResponseWriter, r *http.Request) {
 		token := strings.TrimPrefix(r.URL.Path, "/join/")
@@ -454,7 +554,21 @@ func newShareHandler(brokerURL, brokerToken string, onJoin func()) http.Handler 
 			// SPA's relative asset URLs do not need a path rewrite.
 			http.Redirect(w, r, "/?invite="+url.QueryEscape(token), http.StatusFound)
 		case http.MethodPost:
-			handleShareJoinSubmit(w, r, brokerURL, token, onJoin)
+			if cfg.RateLimiter != nil {
+				ip := extractJoinSourceIP(r)
+				if !cfg.RateLimiter.allow(ip) {
+					// Conservative HTTP signalling: 429 + Retry-After so
+					// well-behaved clients back off. The message is
+					// joiner-friendly; the structured `error` code lets the
+					// React JoinPage suppress the passcode field while the
+					// limit is in force.
+					w.Header().Set("Retry-After", "60")
+					writeShareJoinError(w, http.StatusTooManyRequests, "rate_limited",
+						"Too many join attempts from this network. Wait a minute and try again.")
+					return
+				}
+			}
+			handleShareJoinSubmit(w, r, brokerURL, token, onJoin, cfg.JoinGate)
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
@@ -498,9 +612,14 @@ type shareJoinError struct {
 // into the JSON decoder. 8 KiB is ample for a display_name payload.
 const maxShareJoinBodyBytes = 8 << 10
 
-func handleShareJoinSubmit(w http.ResponseWriter, r *http.Request, brokerURL, token string, onJoin func()) {
+func handleShareJoinSubmit(w http.ResponseWriter, r *http.Request, brokerURL, token string, onJoin func(), gate joinGateFn) {
 	var submission struct {
 		DisplayName string `json:"display_name"`
+		// Passcode is the second factor for tunnel-mode invites. Empty in
+		// network-share mode (and on the first submit when the joiner has
+		// not been told a passcode is required) — the gate is responsible
+		// for distinguishing "missing" from "wrong" without leaking which.
+		Passcode string `json:"passcode,omitempty"`
 	}
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxShareJoinBodyBytes))
 	dec.DisallowUnknownFields()
@@ -511,6 +630,28 @@ func handleShareJoinSubmit(w http.ResponseWriter, r *http.Request, brokerURL, to
 	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		writeShareJoinError(w, http.StatusBadRequest, "invalid_request", "We could not read your invite submission. Reload and try again.")
 		return
+	}
+	if gate != nil {
+		if gateErr := gate(token, submission.Passcode); gateErr != nil {
+			// Audit log: the host's terminal sees one line per failed
+			// passcode attempt so suspicious activity is visible without
+			// having to scrape proxy logs. Token is not logged in full —
+			// a 6-char prefix is enough to correlate without making the
+			// log file an oracle for stolen tokens.
+			tokenPrefix := token
+			if len(tokenPrefix) > 6 {
+				tokenPrefix = tokenPrefix[:6]
+			}
+			log.Printf("tunnel: passcode rejected (%s) for invite %s… from %s", gateErr, tokenPrefix, extractJoinSourceIP(r))
+			// 401 Unauthorized so the JoinPage flips into the
+			// "show passcode field + retry" state without retrying the
+			// rate-limit bucket on the next attempt — see writeShareJoinError.
+			// Always send the same user-facing message regardless of which
+			// sentinel fired so attackers cannot tell "wrong passcode" from
+			// "no passcode registered for this token" by inspection.
+			writeShareJoinError(w, http.StatusUnauthorized, "passcode_required", shareJoinPasscodeRequiredMessage)
+			return
+		}
 	}
 	displayName := strings.TrimSpace(submission.DisplayName)
 	if displayName == "" {

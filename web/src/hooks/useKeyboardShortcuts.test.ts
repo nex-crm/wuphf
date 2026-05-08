@@ -50,6 +50,7 @@ function press(
 
 beforeEach(() => {
   useAppStore.setState({
+    commandPaletteOpen: false,
     composerHelpOpen: false,
     searchOpen: false,
     activeAgentSlug: null,
@@ -114,8 +115,25 @@ describe("Escape priority", () => {
     expect(useAppStore.getState().searchOpen).toBe(true);
   });
 
-  it("closes searchOpen once help is closed", () => {
-    useAppStore.setState({ composerHelpOpen: false, searchOpen: true });
+  it("closes commandPaletteOpen before searchOpen", () => {
+    useAppStore.setState({
+      composerHelpOpen: false,
+      commandPaletteOpen: true,
+      searchOpen: true,
+    });
+    renderHook(() => useKeyboardShortcuts(), { wrapper });
+    act(() => press("Escape"));
+    expect(useAppStore.getState().commandPaletteOpen).toBe(false);
+    // searchOpen is untouched — the handler returns after commandPaletteOpen.
+    expect(useAppStore.getState().searchOpen).toBe(true);
+  });
+
+  it("closes searchOpen once command palette is closed", () => {
+    useAppStore.setState({
+      composerHelpOpen: false,
+      commandPaletteOpen: false,
+      searchOpen: true,
+    });
     renderHook(() => useKeyboardShortcuts(), { wrapper });
     act(() => press("Escape"));
     expect(useAppStore.getState().searchOpen).toBe(false);
@@ -130,15 +148,15 @@ describe("Escape priority", () => {
 });
 
 describe("⌘K command palette", () => {
-  it("opens searchOpen on ⌘K", () => {
+  it("opens commandPaletteOpen on ⌘K", () => {
     renderHook(() => useKeyboardShortcuts(), { wrapper });
     act(() => press("k", { metaKey: true }));
-    expect(useAppStore.getState().searchOpen).toBe(true);
+    expect(useAppStore.getState().commandPaletteOpen).toBe(true);
   });
 
-  it("opens searchOpen on Ctrl+K as well (Linux/Windows parity)", () => {
+  it("opens commandPaletteOpen on Ctrl+K as well (Linux/Windows parity)", () => {
     renderHook(() => useKeyboardShortcuts(), { wrapper });
     act(() => press("k", { ctrlKey: true }));
-    expect(useAppStore.getState().searchOpen).toBe(true);
+    expect(useAppStore.getState().commandPaletteOpen).toBe(true);
   });
 });

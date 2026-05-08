@@ -128,6 +128,12 @@ func (b *Broker) handleWikiWriteHuman(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	// Keep in-memory skill state consistent after a human edits a SKILL.md
+	// directly via the wiki editor. The reconcile runs asynchronously so it
+	// does not block the HTTP response.
+	if strings.HasPrefix(body.Path, "team/skills/") && strings.HasSuffix(body.Path, ".md") {
+		go b.reconcileSkillStatusFromDisk()
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"path":          body.Path,
 		"commit_sha":    sha,
@@ -201,6 +207,7 @@ func (b *Broker) Requests(channel string, includeResolved bool) []humanInterview
 }
 
 func cloneHumanInterview(req humanInterview) humanInterview {
+	req = sanitizeHumanInterview(req)
 	clone := req
 	if len(req.Options) > 0 {
 		clone.Options = append([]interviewOption(nil), req.Options...)

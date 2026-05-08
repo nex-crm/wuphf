@@ -918,6 +918,149 @@ func TestBrokerResumeTaskUnblocksAndSchedulesOwnerLane(t *testing.T) {
 	}
 }
 
+// TestBrokerResumeTaskStripsRateLimitMarker guards against the phantom
+// notification loop where the watchdog re-resumes a task indefinitely because
+// a stale "Retry after <ts>" line is left in task.Details after the first
+// resume. The fix: ResumeTask must call stripExternalRetryMarker so the
+// marker cannot be detected on the next scheduler tick.
+//
+// Also asserts pre-block context that does NOT contain a parseable
+// retry-after timestamp survives the resume — over-stripping would silently
+// destroy operator notes on every Blocked→false transition (manual unblocks,
+// dependency releases, capability self-healing, not just cooldown recovery).
+func TestBrokerResumeTaskStripsRateLimitMarker(t *testing.T) {
+	b := newTestBroker(t)
+	ensureTestMemberAccess(b, "client-loop", "operator", "Operator")
+	ensureTestMemberAccess(b, "client-loop", "builder", "Builder")
+
+	const preBlockContext = "Investigate ticket SUP-4290 about login failures"
+	const rateLimitLine = "429 RESOURCE_EXHAUSTED. Retry after 2026-04-15T22:00:29.610Z."
+	task, _, err := b.EnsurePlannedTask(plannedTaskInput{
+		Channel:       "client-loop",
+		Title:         "Retry kickoff send",
+		Details:       preBlockContext + "\n" + rateLimitLine,
+		Owner:         "builder",
+		CreatedBy:     "operator",
+		TaskType:      "follow_up",
+		ExecutionMode: "live_external",
+	})
+	if err != nil {
+		t.Fatalf("ensure planned task: %v", err)
+	}
+	if _, changed, err := b.BlockTask(task.ID, "watchdog", "Provider cooldown"); err != nil || !changed {
+		t.Fatalf("block task: %v changed=%v", err, changed)
+	}
+
+	resumed, _, err := b.ResumeTask(task.ID, "watchdog", "Retry window passed")
+	if err != nil {
+		t.Fatalf("resume task: %v", err)
+	}
+	if resumed.Blocked {
+		t.Fatalf("expected task to be unblocked after resume, got blocked=true")
+	}
+
+	// The rate-limit marker must be gone so the watchdog's
+	// externalWorkflowRetryAfter check cannot re-trigger the resume loop.
+	if externalRetryAfterPattern.MatchString(resumed.Details) {
+		t.Fatalf("stale rate-limit marker still present in Details after resume: %q", resumed.Details)
+	}
+	// The pre-block operator context must survive — it has no parseable
+	// retry-after timestamp, so over-stripping would be a regression.
+	if !strings.Contains(resumed.Details, preBlockContext) {
+		t.Fatalf("expected resume to preserve pre-block context %q in Details, got %q", preBlockContext, resumed.Details)
+	}
+}
+
+// TestBrokerResumeTaskPreservesDetailsWithoutMarker asserts that a task
+// resume on a non-cooldown path (operator manual unblock, dependency-resolved
+// release, capability self-healing) does not touch Details when there is no
+// rate-limit marker present. Strip is scoped to the actual loop trigger.
+func TestBrokerResumeTaskPreservesDetailsWithoutMarker(t *testing.T) {
+	b := newTestBroker(t)
+	ensureTestMemberAccess(b, "client-loop", "operator", "Operator")
+	ensureTestMemberAccess(b, "client-loop", "builder", "Builder")
+
+	const detailsNoMarker = "queued behind active lane on task-4290; awaiting dependency resolution"
+	task, _, err := b.EnsurePlannedTask(plannedTaskInput{
+		Channel:   "client-loop",
+		Title:     "Dependent kickoff",
+		Details:   detailsNoMarker,
+		Owner:     "builder",
+		CreatedBy: "operator",
+		TaskType:  "follow_up",
+	})
+	if err != nil {
+		t.Fatalf("ensure planned task: %v", err)
+	}
+	if _, changed, err := b.BlockTask(task.ID, "operator", "Manual hold"); err != nil || !changed {
+		t.Fatalf("block task: %v changed=%v", err, changed)
+	}
+	resumed, _, err := b.ResumeTask(task.ID, "operator", "Manual unblock")
+	if err != nil {
+		t.Fatalf("resume task: %v", err)
+	}
+	// Block/Resume append their own reason text to Details (existing behavior);
+	// what matters here is that strip did not destroy the pre-block context
+	// and that the substring "task-4290" containing "429" survives the
+	// strip's predicate (which requires a parseable retry-after timestamp).
+	if !strings.Contains(resumed.Details, detailsNoMarker) {
+		t.Fatalf("resume dropped pre-block context: got %q", resumed.Details)
+	}
+	if externalRetryAfterPattern.MatchString(resumed.Details) {
+		t.Fatalf("resume should not introduce a retry-after marker: got %q", resumed.Details)
+	}
+}
+
+// TestBrokerUnblockDependentsStripsRateLimitMarker covers the second
+// Blocked→false transition path: when a dependency completion clears the
+// blocked flag, a stale rate-limit marker would otherwise survive in
+// Details, the watchdog's externalWorkflowRetryAfter check would re-detect
+// it on the next tick, and ResumeTask's existing strip would fire — but
+// before this test was added, ResumeTask only stripped on the
+// blocked-true→false transition, so a marker present after
+// unblockDependentsLocked would persist indefinitely. The fix strips both
+// at the source (unblockDependentsLocked) and unconditionally in
+// ResumeTask, so either path now closes the loop.
+func TestBrokerUnblockDependentsStripsRateLimitMarker(t *testing.T) {
+	b := newTestBroker(t)
+	ensureTestMemberAccess(b, "client-loop", "operator", "Operator")
+	ensureTestMemberAccess(b, "client-loop", "builder", "Builder")
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	b.tasks = []teamTask{
+		{
+			ID: "task-parent", Channel: "client-loop", Title: "Prereq",
+			Owner: "builder", Status: "done", CreatedBy: "operator",
+			TaskType: "feature", ExecutionMode: "local_worktree",
+			ReviewState: "approved", CreatedAt: now, UpdatedAt: now,
+		},
+		{
+			ID: "task-child", Channel: "client-loop", Title: "Dependent kickoff",
+			Owner: "builder", Status: "blocked", Blocked: true,
+			CreatedBy: "operator", TaskType: "feature", ExecutionMode: "live_external",
+			DependsOn: []string{"task-parent"},
+			Details:   "Original goal: ship dependent kickoff.\n429 RESOURCE_EXHAUSTED. Retry after 2026-04-15T22:00:29.610Z.",
+			CreatedAt: now, UpdatedAt: now,
+		},
+	}
+
+	b.mu.Lock()
+	b.unblockDependentsLocked("task-parent")
+	got := append([]teamTask(nil), b.tasks...)
+	b.mu.Unlock()
+
+	child := got[1]
+	if child.Blocked {
+		t.Fatalf("expected child task to be unblocked after dependency completion, got blocked=true")
+	}
+	if externalRetryAfterPattern.MatchString(child.Details) {
+		t.Fatalf("dependency-unblock did not strip the stale rate-limit marker: %q", child.Details)
+	}
+	if !strings.Contains(child.Details, "Original goal: ship dependent kickoff.") {
+		t.Fatalf("dependency-unblock should preserve pre-block context, got %q", child.Details)
+	}
+}
+
 func TestBrokerResumeTaskQueuesBehindExistingExclusiveOwnerLane(t *testing.T) {
 	b := newTestBroker(t)
 	ensureTestMemberAccess(b, "client-loop", "operator", "Operator")
@@ -1129,6 +1272,7 @@ func TestBrokerTaskCompleteRejectsLiveBusinessTheater(t *testing.T) {
 		t.Fatalf("failed to start broker: %v", err)
 	}
 	defer b.Stop()
+	t.Cleanup(func() { b.Purge() })
 	b.mu.Lock()
 	b.tasks = []teamTask{{
 		ID:            "task-1",
@@ -1181,6 +1325,7 @@ func TestBrokerTaskUpdateRollsBackBrokerSideEffectsOnSaveFailure(t *testing.T) {
 		t.Fatalf("failed to start broker: %v", err)
 	}
 	defer b.Stop()
+	t.Cleanup(func() { b.Purge() })
 	b.mu.Lock()
 	b.tasks = []teamTask{
 		{

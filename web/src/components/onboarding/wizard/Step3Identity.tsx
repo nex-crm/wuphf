@@ -1,20 +1,19 @@
-import { ArrowIcon, EnterHint } from "./components";
-import { NexSignupPanel } from "./NexSignupPanel";
-import type { NexSignupStatus } from "./types";
+import { ONBOARDING_COPY } from "../../../lib/constants";
+import { BtnLabel, EnterHint } from "./components";
 
 interface IdentityStepProps {
   company: string;
   description: string;
   priority: string;
-  nexEmail: string;
-  nexSignupStatus: NexSignupStatus;
-  nexSignupError: string;
+  website: string;
+  ownerName: string;
+  ownerRole: string;
   onChangeCompany: (v: string) => void;
   onChangeDescription: (v: string) => void;
   onChangePriority: (v: string) => void;
-  onChangeNexEmail: (v: string) => void;
-  onSubmitNexSignup: () => void;
-  onOpenNexSignup: () => void;
+  onChangeWebsite: (v: string) => void;
+  onChangeOwnerName: (v: string) => void;
+  onChangeOwnerRole: (v: string) => void;
   onNext: () => void;
   onBack: () => void;
 }
@@ -23,15 +22,15 @@ export function IdentityStep({
   company,
   description,
   priority,
-  nexEmail,
-  nexSignupStatus,
-  nexSignupError,
+  website,
+  ownerName,
+  ownerRole,
   onChangeCompany,
   onChangeDescription,
   onChangePriority,
-  onChangeNexEmail,
-  onSubmitNexSignup,
-  onOpenNexSignup,
+  onChangeWebsite,
+  onChangeOwnerName,
+  onChangeOwnerRole,
   onNext,
   onBack,
 }: IdentityStepProps) {
@@ -40,12 +39,17 @@ export function IdentityStep({
 
   return (
     <div className="wizard-step">
+      <div className="wizard-hero">
+        <h1 className="wizard-headline wizard-headline-sm">
+          {ONBOARDING_COPY.step2_headline}
+        </h1>
+        <p className="wizard-subhead">{ONBOARDING_COPY.step2_subhead}</p>
+      </div>
+
       <div className="wizard-panel">
-        <p className="wizard-panel-title">Tell us about this office</p>
         <div className="form-group">
           <label className="label" htmlFor="wiz-company">
-            Company or project name{" "}
-            <span style={{ color: "var(--red)" }}>*</span>
+            Office name <span style={{ color: "var(--red)" }}>*</span>
           </label>
           <input
             className="input"
@@ -58,7 +62,7 @@ export function IdentityStep({
         </div>
         <div className="form-group">
           <label className="label" htmlFor="wiz-description">
-            One-liner description <span style={{ color: "var(--red)" }}>*</span>
+            Short description <span style={{ color: "var(--red)" }}>*</span>
           </label>
           <input
             className="input"
@@ -80,27 +84,48 @@ export function IdentityStep({
             onChange={(e) => onChangePriority(e.target.value)}
           />
         </div>
-      </div>
-
-      {nexSignupStatus === "hidden" ? (
-        <div className="wiz-nex-trigger">
-          <button
-            type="button"
-            className="wiz-nex-trigger-link"
-            onClick={onOpenNexSignup}
-          >
-            Don&apos;t have a Nex account? Sign up here.
-          </button>
+        <div className="form-group">
+          <label className="label" htmlFor="wiz-website">
+            Company website <span className="label-optional">(optional)</span>
+          </label>
+          <input
+            className="input"
+            id="wiz-website"
+            type="url"
+            placeholder="https://acme.com"
+            autoComplete="url"
+            value={website}
+            onChange={(e) => onChangeWebsite(e.target.value)}
+          />
         </div>
-      ) : (
-        <NexSignupPanel
-          email={nexEmail}
-          status={nexSignupStatus}
-          error={nexSignupError}
-          onChangeEmail={onChangeNexEmail}
-          onSubmit={onSubmitNexSignup}
-        />
-      )}
+        <div className="form-group form-group-row">
+          <div className="form-group">
+            <label className="label" htmlFor="wiz-owner-name">
+              Your name <span className="label-optional">(optional)</span>
+            </label>
+            <input
+              className="input"
+              id="wiz-owner-name"
+              placeholder="Nazz Mohammad"
+              autoComplete="name"
+              value={ownerName}
+              onChange={(e) => onChangeOwnerName(e.target.value)}
+            />
+          </div>
+          <div className="form-group">
+            <label className="label" htmlFor="wiz-owner-role">
+              Your role <span className="label-optional">(optional)</span>
+            </label>
+            <input
+              className="input"
+              id="wiz-owner-role"
+              placeholder="Founder, CTO..."
+              value={ownerRole}
+              onChange={(e) => onChangeOwnerRole(e.target.value)}
+            />
+          </div>
+        </div>
+      </div>
 
       <div className="wizard-nav">
         <button className="btn btn-ghost" onClick={onBack} type="button">
@@ -112,8 +137,7 @@ export function IdentityStep({
           disabled={!canContinue}
           type="button"
         >
-          Choose a blueprint
-          <ArrowIcon />
+          <BtnLabel>{ONBOARDING_COPY.step2_cta}</BtnLabel>
           <EnterHint />
         </button>
       </div>

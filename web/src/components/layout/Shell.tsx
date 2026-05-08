@@ -2,6 +2,8 @@ import type { ReactNode } from "react";
 
 import { useCurrentRoute } from "../../routes/useCurrentRoute";
 import { AgentPanel } from "../agents/AgentPanel";
+import { CommandPaletteHost } from "../command/CommandPalette";
+import { TeamMemberWelcome } from "../join/TeamMemberWelcome";
 import { ThreadPanel } from "../messages/ThreadPanel";
 import { SearchModal } from "../search/SearchModal";
 import { HelpModalHost } from "../ui/HelpModal";
@@ -30,6 +32,7 @@ export function Shell({ children }: ShellProps) {
       <Sidebar />
       <main className="main">
         <DisconnectBanner />
+        <TeamMemberWelcome />
         {!inDM && <ChannelHeader />}
         {!inDM && <RuntimeStrip />}
         {children}
@@ -37,6 +40,7 @@ export function Shell({ children }: ShellProps) {
       </main>
       <ThreadPanel />
       <AgentPanel />
+      <CommandPaletteHost />
       <SearchModal />
       <HelpModalHost />
     </div>

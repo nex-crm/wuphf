@@ -64,9 +64,13 @@ func (l *Launcher) enqueueHeadlessCodexTurnRecord(slug string, turn headlessCode
 		l.headless.workers = make(map[string]bool)
 	}
 	urgentLeadTurn := l.headlessLeadTurnNeedsImmediateWakeLocked(slug, turn.TaskID)
+	humanPriority := turn.FromHuman
 	if turn.TaskID != "" {
 		if active := l.headless.active[slug]; active != nil && strings.TrimSpace(active.Turn.TaskID) == turn.TaskID {
-			if !(slug == l.targeter().LeadSlug() && urgentLeadTurn) && turn.Attempts <= active.Turn.Attempts {
+			// Human turns bypass the same-task drop: a person sending a
+			// follow-up message during an in-flight turn must always be
+			// absorbed, never silently coalesced into the existing work.
+			if !humanPriority && !(slug == l.targeter().LeadSlug() && urgentLeadTurn) && turn.Attempts <= active.Turn.Attempts {
 				l.headless.mu.Unlock()
 				if slug == l.targeter().LeadSlug() {
 					appendHeadlessCodexLog(slug, "queue-drop: lead already handling same task")
@@ -76,21 +80,25 @@ func (l *Launcher) enqueueHeadlessCodexTurnRecord(slug string, turn headlessCode
 				return
 			}
 		}
-		if pending := l.replaceDuplicateTaskTurnLocked(slug, turn); pending {
-			if !l.headless.workers[slug] {
-				l.headless.workers[slug] = true
-				startWorker = true
+		// Skip the same-task replace for human turns: each human message is
+		// distinct content and must not stomp on a previously-queued one.
+		if !humanPriority {
+			if pending := l.replaceDuplicateTaskTurnLocked(slug, turn); pending {
+				if !l.headless.workers[slug] {
+					l.headless.workers[slug] = true
+					startWorker = true
+				}
+				l.headless.mu.Unlock()
+				if slug == l.targeter().LeadSlug() {
+					appendHeadlessCodexLog(slug, "queue-replace: refreshed pending lead turn for same task")
+				} else {
+					appendHeadlessCodexLog(slug, "queue-replace: refreshed pending turn for same task")
+				}
+				if startWorker {
+					l.spawnHeadlessWorker(slug)
+				}
+				return
 			}
-			l.headless.mu.Unlock()
-			if slug == l.targeter().LeadSlug() {
-				appendHeadlessCodexLog(slug, "queue-replace: refreshed pending lead turn for same task")
-			} else {
-				appendHeadlessCodexLog(slug, "queue-replace: refreshed pending turn for same task")
-			}
-			if startWorker {
-				l.spawnHeadlessWorker(slug)
-			}
-			return
 		}
 	}
 	// For the lead (CEO) agent, suppress the notification if any other specialist
@@ -98,7 +106,11 @@ func (l *Launcher) enqueueHeadlessCodexTurnRecord(slug string, turn headlessCode
 	// parallel work is done — not when one specialist finishes while others are
 	// still running. This eliminates the race condition where CEO fires after the
 	// first specialist completes and redundantly re-routes to still-running agents.
-	if slug == l.targeter().LeadSlug() && !urgentLeadTurn {
+	//
+	// Human turns bypass this hold: a person addressing the lead must be absorbed
+	// immediately even if specialists are still working — the lead can decide
+	// whether to stop, give a status update, or queue the request for later.
+	if slug == l.targeter().LeadSlug() && !urgentLeadTurn && !humanPriority {
 		for workerSlug, queue := range l.headless.queues {
 			if workerSlug == slug {
 				continue
@@ -125,17 +137,23 @@ func (l *Launcher) enqueueHeadlessCodexTurnRecord(slug string, turn headlessCode
 	// For the lead (CEO) agent, cap the pending queue at 1 turn.
 	// Multiple rapid-fire notifications (agent completions, status pings) can
 	// stack up redundant CEO turns that each re-route the same task. One pending
-	// turn is enough to catch the latest state; extras are dropped.
+	// turn is enough to catch the latest state; extras are dropped — except for
+	// urgent task wakes and human-originated messages, which replace the pending
+	// turn so the freshest signal wins instead of being silently dropped.
 	const leadMaxPending = 1
 	if slug == l.targeter().LeadSlug() && len(l.headless.queues[slug]) >= leadMaxPending {
-		if urgentLeadTurn {
+		if urgentLeadTurn || humanPriority {
 			l.headless.queues[slug][len(l.headless.queues[slug])-1] = turn
 			if !l.headless.workers[slug] {
 				l.headless.workers[slug] = true
 				startWorker = true
 			}
 			l.headless.mu.Unlock()
-			appendHeadlessCodexLog(slug, "queue-replace: lead queue at cap, replacing pending turn with urgent task notification")
+			if humanPriority {
+				appendHeadlessCodexLog(slug, "queue-replace: lead queue at cap, replacing pending turn with human-priority message")
+			} else {
+				appendHeadlessCodexLog(slug, "queue-replace: lead queue at cap, replacing pending turn with urgent task notification")
+			}
 			if startWorker {
 				l.spawnHeadlessWorker(slug)
 			}
@@ -152,11 +170,17 @@ func (l *Launcher) enqueueHeadlessCodexTurnRecord(slug string, turn headlessCode
 	}
 	if active := l.headless.active[slug]; active != nil && active.Cancel != nil {
 		age := time.Since(active.StartedAt)
-		// Two conditions must hold to preempt: past the configured staleness
-		// threshold AND past the minimum-turn-age floor. The floor breaks the
-		// tight cancel-loop pattern observed in prod (see doc on the constant).
-		if age >= headlessCodexMinTurnAgeBeforeCancel &&
-			age >= l.headlessCodexStaleCancelAfterForTurn(active.Turn) {
+		// Human turns preempt unconditionally. The staleness/min-age floors
+		// exist to break tight agent-to-agent cancel loops, but a real person
+		// chatting must never wait behind an in-flight turn. For non-human
+		// turns both floors must hold: past the configured staleness threshold
+		// AND past the minimum-turn-age floor.
+		switch {
+		case humanPriority:
+			cancel = active.Cancel
+			staleAge = age
+		case age >= headlessCodexMinTurnAgeBeforeCancel &&
+			age >= l.headlessCodexStaleCancelAfterForTurn(active.Turn):
 			cancel = active.Cancel
 			staleAge = age
 		}
@@ -164,8 +188,13 @@ func (l *Launcher) enqueueHeadlessCodexTurnRecord(slug string, turn headlessCode
 	l.headless.mu.Unlock()
 
 	if cancel != nil {
-		appendHeadlessCodexLog(slug, fmt.Sprintf("stale-turn: cancelling active turn after %s to process queued work", staleAge.Round(time.Second)))
-		l.updateHeadlessProgress(slug, "active", "queued", "preempting stale work for newer request", headlessProgressMetrics{})
+		if humanPriority {
+			appendHeadlessCodexLog(slug, fmt.Sprintf("human-priority: cancelling active turn after %s so the agent absorbs the human message", staleAge.Round(time.Millisecond)))
+			l.updateHeadlessProgress(slug, "active", "queued", "preempting in-flight turn for human message", headlessProgressMetrics{})
+		} else {
+			appendHeadlessCodexLog(slug, fmt.Sprintf("stale-turn: cancelling active turn after %s to process queued work", staleAge.Round(time.Second)))
+			l.updateHeadlessProgress(slug, "active", "queued", "preempting stale work for newer request", headlessProgressMetrics{})
+		}
 		cancel()
 	}
 	if startWorker {

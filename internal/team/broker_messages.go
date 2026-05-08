@@ -231,7 +231,7 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 		ReplyTo:   replyTo,
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	}
-	b.appendMessageLocked(msg)
+	msg = b.appendMessageLocked(msg)
 	total := len(b.messages)
 
 	// Track which agents were tagged — they should show "typing" immediately
@@ -255,6 +255,19 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	b.mu.Unlock()
+
+	// PR 2: human "remember" intent. Hook fires AFTER b.mu.Unlock() and ONLY
+	// for human senders. Handle is a non-blocking enqueue; the classifier and
+	// the wiki write run in the writer goroutine, never re-entering b.mu.
+	if b.humanWikiWriter != nil && isHumanMessageSender(msg.From) {
+		b.humanWikiWriter.Handle(msg)
+	}
+	// PR 5: channel intent classifier. Fires for ALL senders (human OR
+	// agent) — context-asks happen in any channel message form. The
+	// classifier's question-form filter, evaluated inside the dispatcher
+	// goroutine, restricts the actual demand recording to genuine
+	// interrogative phrases. Handle is a non-blocking enqueue.
+	b.dispatchChannelIntentAsync(msg)
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
@@ -370,6 +383,35 @@ func (b *Broker) MarkRoutingTargets(slugs []string) {
 	}
 }
 
+// bootstrapHumanHasPostedLocked seeds b.humanHasPosted from the persisted
+// message log so a freshly-restarted broker doesn't reshow the first-run
+// nudge to a human who already engaged. One linear scan, bounded by the
+// loaded message slice, runs once at NewBrokerAt time. Caller must hold b.mu.
+func (b *Broker) bootstrapHumanHasPostedLocked() {
+	if b.humanHasPosted {
+		return
+	}
+	for _, msg := range b.messages {
+		// Mirror the empty-From guard in appendMessageLocked:
+		// isHumanMessageSender("") returns true (legacy), so an empty
+		// From field must be rejected here too or a corrupted/legacy
+		// persisted message would falsely flip the bit on restart.
+		if strings.TrimSpace(msg.From) != "" && isHumanMessageSender(msg.From) {
+			b.humanHasPosted = true
+			return
+		}
+	}
+}
+
+// HumanHasPosted reports whether any human-authored message has reached the
+// broker since process start (with bootstrap from the persisted log). Used by
+// /office-members to publish the meta.humanHasPosted flag the frontend reads.
+func (b *Broker) HumanHasPosted() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.humanHasPosted
+}
+
 // PostSystemMessage posts a lightweight system message that shows progress without blocking.
 func (b *Broker) PostSystemMessage(channel, content, kind string) {
 	b.mu.Lock()
@@ -427,7 +469,7 @@ func (b *Broker) PostMessage(from, channel, content string, tagged []string, rep
 		ReplyTo:   strings.TrimSpace(replyTo),
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	}
-	b.appendMessageLocked(msg)
+	msg = b.appendMessageLocked(msg)
 	// Clear typing indicator — agent has replied
 	if b.lastTaggedAt != nil {
 		delete(b.lastTaggedAt, msg.From)
@@ -435,6 +477,34 @@ func (b *Broker) PostMessage(from, channel, content string, tagged []string, rep
 	b.appendActionLocked("automation", msg.Source, channel, msg.From, truncateSummary(msg.Title+" "+msg.Content, 140), msg.ID)
 	if err := b.saveLocked(); err != nil {
 		return channelMessage{}, err
+	}
+	// 2A: every roster-agent PostMessage triggers one notebook event. Roster
+	// filter is applied here under b.mu (lock-free predicate); calling Handle
+	// itself never re-enters b.mu, so this is safe to do while still locked.
+	// Handle is non-blocking per decision S3A.
+	if b.autoNotebookWriter != nil && b.isAgentMemberSlugLocked(msg.From) {
+		b.autoNotebookWriter.Handle(autoNotebookEvent{
+			Kind:      AutoNotebookEventMessagePosted,
+			Slug:      msg.From,
+			Actor:     msg.From,
+			Channel:   msg.Channel,
+			Content:   msg.Content,
+			Timestamp: time.Now().UTC(),
+		})
+	}
+	// PR 2: when a human posts via PostMessage (non-HTTP entry points such as
+	// integration tests and a small set of in-process callers), the same
+	// remember-intent hook fires. Handle is non-blocking and the writer
+	// goroutine never re-enters b.mu, so calling it under the lock is safe.
+	if b.humanWikiWriter != nil && isHumanMessageSender(msg.From) {
+		b.humanWikiWriter.Handle(msg)
+	}
+	// PR 5: channel intent dispatcher fires for ALL senders. Same lock
+	// invariants as PR 2's Handle: the dispatcher's queue-send is non-
+	// blocking and its goroutine never re-enters b.mu, so calling it
+	// under b.mu is safe.
+	if b.channelIntentDispatcher != nil {
+		b.channelIntentDispatcher.Handle(msg)
 	}
 	return msg, nil
 }
@@ -446,7 +516,7 @@ func (b *Broker) PostAutomationMessage(from, channel, title, content, eventID, s
 	if strings.TrimSpace(eventID) != "" {
 		for _, existing := range b.messages {
 			if existing.EventID != "" && existing.EventID == strings.TrimSpace(eventID) {
-				return existing, true, nil
+				return cloneChannelMessageForRead(existing), true, nil
 			}
 		}
 	}
@@ -480,7 +550,7 @@ func (b *Broker) PostAutomationMessage(from, channel, title, content, eventID, s
 		msg.From = "nex"
 	}
 
-	b.appendMessageLocked(msg)
+	msg = b.appendMessageLocked(msg)
 	if err := b.saveLocked(); err != nil {
 		return channelMessage{}, false, err
 	}
@@ -515,6 +585,7 @@ func (b *Broker) CreateRequest(req humanInterview) (humanInterview, error) {
 	if strings.TrimSpace(req.Title) == "" {
 		req.Title = "Request"
 	}
+	req = sanitizeHumanInterview(req)
 	b.requests = append(b.requests, req)
 	b.pendingInterview = firstBlockingRequest(b.requests)
 	b.appendActionLocked("request_created", "office", channel, req.From, truncateSummary(req.Title+" "+req.Question, 140), req.ID)
@@ -619,14 +690,7 @@ func (b *Broker) handleGetMessages(w http.ResponseWriter, r *http.Request) {
 	// race the JSON encoder running after we drop the lock.
 	result := make([]channelMessage, len(messages))
 	for i, m := range messages {
-		clone := m
-		if len(m.Tagged) > 0 {
-			clone.Tagged = append([]string(nil), m.Tagged...)
-		}
-		if len(m.Reactions) > 0 {
-			clone.Reactions = append([]messageReaction(nil), m.Reactions...)
-		}
-		result[i] = clone
+		result[i] = cloneChannelMessageForRead(m)
 	}
 	b.mu.Unlock()
 
@@ -800,6 +864,7 @@ func FormatChannelView(messages []channelMessage) string {
 
 	var sb strings.Builder
 	for _, m := range messages {
+		m = sanitizeChannelMessageSecrets(m)
 		ts := m.Timestamp
 		if len(ts) > 19 {
 			ts = ts[11:19]
@@ -912,6 +977,9 @@ func cloneChannelMessageForRead(msg channelMessage) channelMessage {
 	if len(msg.Reactions) > 0 {
 		clone.Reactions = append([]messageReaction(nil), msg.Reactions...)
 	}
+	if len(msg.RedactionReasons) > 0 {
+		clone.RedactionReasons = append([]string(nil), msg.RedactionReasons...)
+	}
 	clone.Usage = cloneMessageUsage(msg.Usage)
-	return clone
+	return sanitizeChannelMessageSecrets(clone)
 }

@@ -13,11 +13,14 @@ function formatTokens(n: number): string {
 /**
  * Small status line at the bottom of the sidebar. Mirrors the legacy
  * `renderWorkspaceSummary` output: active agents, open tasks, total tokens.
+ *
+ * Uses a separate cache key ("office-tasks-active") from TasksApp
+ * ("office-tasks") because this component only needs active tasks.
  */
 export function WorkspaceSummary() {
   const { data: members = [] } = useOfficeMembers();
   const { data: tasksData } = useQuery({
-    queryKey: ["office-tasks"],
+    queryKey: ["office-tasks-active"],
     queryFn: () => getOfficeTasks({ includeDone: false }),
     refetchInterval: 30_000,
   });
@@ -27,14 +30,22 @@ export function WorkspaceSummary() {
     refetchInterval: 30_000,
   });
 
+  const tasks = tasksData?.tasks ?? [];
+
   const activeAgents = members.filter((m) => {
     if (!m.slug || m.slug === "human" || m.slug === "you") return false;
     return (m.status || "").toLowerCase() === "active";
   }).length;
 
-  const openTasks = (tasksData?.tasks ?? []).filter((t) => {
-    const s = (t.status || "").toLowerCase();
-    return s && s !== "done" && s !== "completed";
+  const openTasks = tasks.filter((t) => {
+    const s = (t.status ?? "").toLowerCase();
+    return (
+      s !== "" &&
+      s !== "done" &&
+      s !== "completed" &&
+      s !== "canceled" &&
+      s !== "cancelled"
+    );
   }).length;
 
   const parts: string[] = [
