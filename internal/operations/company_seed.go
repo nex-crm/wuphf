@@ -84,15 +84,18 @@ func SeedCompanyContext(ctx context.Context, input CompanySeedInput) (*CompanySe
 				continue
 			}
 		} else {
-			data, readErr := os.ReadFile(path)
+			f, readErr := os.Open(path)
 			if readErr != nil {
 				result.Warnings = append(result.Warnings, fmt.Sprintf("read file %s: %v", path, readErr))
 				continue
 			}
-			text = string(data)
-		}
-		if len(text) > 8*1024 {
-			text = text[:8*1024]
+			raw, readErr := io.ReadAll(io.LimitReader(f, 8192))
+			_ = f.Close()
+			if readErr != nil {
+				result.Warnings = append(result.Warnings, fmt.Sprintf("read file %s: %v", path, readErr))
+				continue
+			}
+			text = string(raw)
 		}
 		contentBuf.WriteString(text)
 		contentBuf.WriteString("\n")
@@ -265,12 +268,15 @@ func extractPDF(ctx context.Context, path string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "pdftotext", "-layout", path, "-")
-	out, err := cmd.Output()
+	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return "", fmt.Errorf("pdftotext %s: %w", path, err)
+		return "", fmt.Errorf("pdftotext pipe %s: %w", path, err)
 	}
-	reader := io.LimitReader(bytes.NewReader(out), 8192)
-	data, err := io.ReadAll(reader)
+	if err := cmd.Start(); err != nil {
+		return "", fmt.Errorf("pdftotext start %s: %w", path, err)
+	}
+	data, err := io.ReadAll(io.LimitReader(stdout, 8192))
+	_ = cmd.Wait()
 	if err != nil {
 		return "", fmt.Errorf("read pdftotext output: %w", err)
 	}

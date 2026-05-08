@@ -184,25 +184,6 @@ func HandleComplete(w http.ResponseWriter, r *http.Request, completeFn CompleteF
 	website := strings.TrimSpace(body.Website)
 	ownerName := strings.TrimSpace(body.OwnerName)
 	ownerRole := strings.TrimSpace(body.OwnerRole)
-	if website != "" || ownerName != "" || ownerRole != "" || !body.ScanCompleted {
-		if cfg, err := config.Load(); err == nil {
-			if website != "" {
-				cfg.CompanyWebsite = website
-			}
-			if ownerName != "" {
-				cfg.OwnerName = ownerName
-			}
-			if ownerRole != "" {
-				cfg.OwnerRole = ownerRole
-			}
-			if website != "" || ownerName != "" || ownerRole != "" {
-				cfg.PendingCompanySeed = !body.ScanCompleted
-			}
-			if err := config.Save(cfg); err != nil {
-				log.Printf("onboarding: complete: failed to persist company fields: %v", err)
-			}
-		}
-	}
 
 	s, err := Load()
 	if err != nil {
@@ -239,6 +220,28 @@ func HandleComplete(w http.ResponseWriter, r *http.Request, completeFn CompleteF
 			log.Printf("onboarding: complete failed: %v", err)
 			http.Error(w, "complete failed", http.StatusInternalServerError)
 			return
+		}
+	}
+
+	// Persist company/owner fields only after validation and completeFn succeed
+	// so duplicate or invalid requests don't overwrite config state.
+	if website != "" || ownerName != "" || ownerRole != "" || !body.ScanCompleted {
+		if cfg, err := config.Load(); err == nil {
+			if website != "" {
+				cfg.CompanyWebsite = website
+			}
+			if ownerName != "" {
+				cfg.OwnerName = ownerName
+			}
+			if ownerRole != "" {
+				cfg.OwnerRole = ownerRole
+			}
+			if website != "" || ownerName != "" || ownerRole != "" {
+				cfg.PendingCompanySeed = !body.ScanCompleted
+			}
+			if err := config.Save(cfg); err != nil {
+				log.Printf("onboarding: complete: failed to persist company fields: %v", err)
+			}
 		}
 	}
 
@@ -760,6 +763,7 @@ func handleUploadContext(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, 32<<20)
 	if err := r.ParseMultipartForm(32 << 20); err != nil {
 		http.Error(w, "parse form failed", http.StatusBadRequest)
 		return

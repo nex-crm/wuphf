@@ -390,6 +390,10 @@ func (b *Broker) ChannelStore() *channel.Store {
 func (b *Broker) Start() error {
 	b.ensureWikiWorker()
 	// Seed company context from previous onboarding skip, if pending.
+	// The flag is cleared before the goroutine launches to prevent a second
+	// broker instance from triggering a duplicate run. runCompanySeedJob
+	// re-arms PendingCompanySeed on error or NeedsRetry, so transient
+	// failures are retried on the next startup.
 	if cfg, err := config.Load(); err == nil && cfg.PendingCompanySeed {
 		cfg.PendingCompanySeed = false
 		if err := config.Save(cfg); err != nil {

@@ -894,6 +894,8 @@ export function Wizard({ onComplete }: WizardProps) {
     nexEmail,
     nexSignupStatus,
     submitNexSignup,
+    website,
+    ownerName,
   ]);
 
   // Debounced persistence of the non-secret draft. extractDraftableState

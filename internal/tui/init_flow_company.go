@@ -42,6 +42,14 @@ func runCompanyScan(
 		if err != nil {
 			return companyScanErrMsg{err: err}
 		}
+		if result.NeedsRetry {
+			if c, loadErr := config.Load(); loadErr == nil {
+				c.PendingCompanySeed = true
+				if saveErr := config.Save(c); saveErr != nil {
+					log.Printf("tui: company scan: failed to re-arm pending flag: %v", saveErr)
+				}
+			}
+		}
 		cfgSave(result.Profile, input.OwnerName, input.OwnerRole)
 		return companyScanDoneMsg{result: result}
 	}
