@@ -9,11 +9,15 @@ import {
   getHumanMe,
   getHumanSessions,
   getShareStatus,
+  getTunnelStatus,
   revokeHumanSession,
   startShare,
+  startTunnel,
   stopShare,
+  stopTunnel,
 } from "../../api/platform";
 import { useAppStore } from "../../stores/app";
+import { ConfirmHost } from "../ui/ConfirmDialog";
 import { HealthCheckApp, selfAccessDetails } from "./HealthCheckApp";
 
 vi.mock("../../api/platform", () => ({
@@ -21,9 +25,12 @@ vi.mock("../../api/platform", () => ({
   getHumanMe: vi.fn(),
   getHumanSessions: vi.fn(),
   getShareStatus: vi.fn(),
+  getTunnelStatus: vi.fn(),
   revokeHumanSession: vi.fn(),
   startShare: vi.fn(),
+  startTunnel: vi.fn(),
   stopShare: vi.fn(),
+  stopTunnel: vi.fn(),
   HUMAN_ME_QUERY_KEY: ["humans", "me"] as const,
   HUMAN_ME_REFETCH_MS: 30_000,
 }));
@@ -32,9 +39,12 @@ const getHealthMock = vi.mocked(getHealth);
 const getHumanMeMock = vi.mocked(getHumanMe);
 const getHumanSessionsMock = vi.mocked(getHumanSessions);
 const getShareStatusMock = vi.mocked(getShareStatus);
+const getTunnelStatusMock = vi.mocked(getTunnelStatus);
 const revokeHumanSessionMock = vi.mocked(revokeHumanSession);
 const startShareMock = vi.mocked(startShare);
+const startTunnelMock = vi.mocked(startTunnel);
 const stopShareMock = vi.mocked(stopShare);
+const stopTunnelMock = vi.mocked(stopTunnel);
 
 function wrap(ui: ReactNode) {
   const queryClient = new QueryClient({
@@ -87,6 +97,7 @@ beforeEach(() => {
     ],
   });
   getShareStatusMock.mockResolvedValue({ running: false });
+  getTunnelStatusMock.mockResolvedValue({ running: false });
   revokeHumanSessionMock.mockResolvedValue({ ok: true });
   startShareMock.mockResolvedValue({
     running: true,
@@ -96,6 +107,13 @@ beforeEach(() => {
     expires_at: "2026-05-05T18:00:00Z",
   });
   stopShareMock.mockResolvedValue({ running: false });
+  startTunnelMock.mockResolvedValue({
+    running: true,
+    public_url: "https://blue-clear-forest.trycloudflare.com",
+    invite_url: "https://blue-clear-forest.trycloudflare.com/join/tunnel-token",
+    expires_at: "2026-05-05T18:00:00Z",
+  });
+  stopTunnelMock.mockResolvedValue({ running: false });
 });
 
 describe("HealthCheckApp access and sharing", () => {
@@ -128,6 +146,62 @@ describe("HealthCheckApp access and sharing", () => {
     await user.click(screen.getByRole("button", { name: "Stop sharing" }));
 
     await waitFor(() => expect(stopShareMock).toHaveBeenCalledTimes(1));
+  });
+
+  it("starts a public tunnel only after the host accepts the disclaimer", async () => {
+    const user = userEvent.setup();
+    render(
+      wrap(
+        <>
+          <ConfirmHost />
+          <HealthCheckApp />
+        </>,
+      ),
+    );
+
+    await user.click(
+      await screen.findByRole("button", { name: "Start public tunnel" }),
+    );
+
+    expect(
+      await screen.findByText("Start a public tunnel?"),
+    ).toBeInTheDocument();
+    expect(startTunnelMock).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Start tunnel" }));
+
+    await waitFor(() => expect(startTunnelMock).toHaveBeenCalledTimes(1));
+    expect(
+      await screen.findByText(
+        "https://blue-clear-forest.trycloudflare.com/join/tunnel-token",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Tunnel: https://blue-clear-forest.trycloudflare.com"),
+    ).toBeInTheDocument();
+  });
+
+  it("stops a running public tunnel from the host UI", async () => {
+    getTunnelStatusMock.mockResolvedValue({
+      running: true,
+      public_url: "https://blue-clear-forest.trycloudflare.com",
+      invite_url:
+        "https://blue-clear-forest.trycloudflare.com/join/tunnel-token",
+      expires_at: "2026-05-05T18:00:00Z",
+    });
+
+    const user = userEvent.setup();
+    render(wrap(<HealthCheckApp />));
+
+    expect(
+      await screen.findByText(
+        "https://blue-clear-forest.trycloudflare.com/join/tunnel-token",
+      ),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Stop tunnel" }));
+
+    await waitFor(() => expect(stopTunnelMock).toHaveBeenCalledTimes(1));
   });
 
   it("disconnects an active team-member session from the host UI", async () => {
