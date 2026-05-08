@@ -84,7 +84,7 @@ trap cleanup EXIT
 if ! curl -sf -m 2 "$base_url/" >/dev/null 2>&1; then
   echo "[publish] starting vite dev (existing server not detected at $base_url)" >&2
   vite_log="$(mktemp)"
-  (cd "$repo_root/web" && bun run dev > "$vite_log" 2>&1) &
+  bun --cwd "$repo_root/web" run dev > "$vite_log" 2>&1 &
   vite_pid="$!"
   for _ in $(seq 1 30); do
     if curl -sf -m 2 "$base_url/" >/dev/null 2>&1; then
@@ -136,6 +136,28 @@ md_file="$(mktemp)"
   done
 } > "$md_file"
 
+require_git_worktree_orphan() {
+  local version major minor
+  version="$(git version | awk '{print $3}')"
+  IFS=. read -r major minor _ <<<"$version"
+  if [[ -z "${major:-}" || -z "${minor:-}" || ! "$major" =~ ^[0-9]+$ || ! "$minor" =~ ^[0-9]+$ ]]; then
+    echo "[publish] unable to parse git version: ${version:-unknown}" >&2
+    exit 1
+  fi
+  if (( major < 2 || (major == 2 && minor < 42) )); then
+    echo "[publish] git worktree add --orphan requires Git >= 2.42; found $version" >&2
+    exit 1
+  fi
+}
+
+strip_existing_screenshots_section() {
+  awk '
+    /^## Screenshots[[:space:]]*$/ { skipping=1; next }
+    skipping && /^## [^#]/ { skipping=0 }
+    !skipping { print }
+  ' "$1"
+}
+
 if [[ "$mode" == "dry" ]]; then
   echo "[publish] dry-run; markdown that would be posted:" >&2
   echo "------" >&2
@@ -154,6 +176,9 @@ fi
 # the worktree create if the ref already exists.
 git -C "$repo_root" branch -D "$branch" 2>/dev/null || true
 
+# `git worktree add --orphan` landed in Git 2.42. Fail with a clear message
+# instead of falling through to a cryptic "unknown option" on older clients.
+require_git_worktree_orphan
 git -C "$repo_root" worktree add --orphan -b "$branch" "$worktree_dir"
 cp "$out_dir"/*.png "$worktree_dir/"
 
@@ -167,7 +192,7 @@ Captured by \`web/e2e/screenshots/publish.sh ${feature} ${pr_number}\` from
 Safe to delete after the PR merges.
 EOF
 
-git -C "$worktree_dir" add README.md *.png
+git -C "$worktree_dir" add .
 git -C "$worktree_dir" commit -m "docs(screenshots): PR #${pr_number} (${feature})" >/dev/null
 git -C "$worktree_dir" push -u origin "$branch"
 
@@ -178,10 +203,15 @@ if [[ "$mode" == "comment" ]]; then
   echo "[publish] posting comment on PR #${pr_number}" >&2
   gh pr comment "$pr_number" --body-file "$md_file"
 else
-  echo "[publish] appending screenshots to PR #${pr_number} body" >&2
+  echo "[publish] updating screenshots in PR #${pr_number} body" >&2
   current_body="$(gh pr view "$pr_number" --json body -q .body)"
+  current_body_file="$(mktemp)"
   combined="$(mktemp)"
-  printf '%s\n' "$current_body" > "$combined"
+  printf '%s\n' "$current_body" > "$current_body_file"
+  strip_existing_screenshots_section "$current_body_file" > "$combined"
+  if [[ -s "$combined" ]]; then
+    printf '\n' >> "$combined"
+  fi
   cat "$md_file" >> "$combined"
   gh pr edit "$pr_number" --body-file "$combined"
 fi
