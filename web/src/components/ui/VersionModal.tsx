@@ -111,6 +111,7 @@ export function VersionModal({ open, onClose }: VersionModalProps) {
   // time the user opens the modal. Each Force-update click bumps the epoch;
   // the resolve handler bails when its captured epoch no longer matches.
   const runEpochRef = useRef(0);
+  const restartEpochRef = useRef(0);
 
   // Esc closes — claim the event in the capture phase so we beat any
   // underlying modal or the global shortcut handler. Same pattern as
@@ -142,16 +143,15 @@ export function VersionModal({ open, onClose }: VersionModalProps) {
     };
   }, [open]);
 
-  // Reset run state whenever the modal closes so a re-open starts clean.
-  // Bumping the epoch invalidates any in-flight runUpgrade() so its resolve
-  // can't write back into state.
+  // Reset transient action state on every open/close transition so a re-open
+  // starts clean. Bumping the epochs invalidates in-flight requests so their
+  // resolve handlers can't write stale outcomes into a later modal session.
   useEffect(() => {
-    if (!open) {
-      runEpochRef.current += 1;
-      setRun({ phase: "idle" });
-      setRestarting(false);
-      setRestartError(null);
-    }
+    runEpochRef.current += 1;
+    restartEpochRef.current += 1;
+    setRun({ phase: "idle" });
+    setRestarting(false);
+    setRestartError(null);
   }, [open]);
 
   const triggerRun = useCallback(async () => {
@@ -180,10 +180,12 @@ export function VersionModal({ open, onClose }: VersionModalProps) {
 
   const triggerRestart = useCallback(async () => {
     if (restarting) return;
+    const epoch = ++restartEpochRef.current;
     setRestartError(null);
     setRestarting(true);
     try {
       await restartBroker();
+      if (restartEpochRef.current !== epoch) return;
       // The broker exits and respawns; the SSE client reconnects on its own.
       // Close the modal optimistically so the user is back in the app while
       // the listener comes back up. (The 202 returns sub-second; if the call
@@ -191,6 +193,7 @@ export function VersionModal({ open, onClose }: VersionModalProps) {
       // render.)
       onClose();
     } catch (e: unknown) {
+      if (restartEpochRef.current !== epoch) return;
       setRestarting(false);
       setRestartError(e instanceof Error ? e.message : String(e));
     }

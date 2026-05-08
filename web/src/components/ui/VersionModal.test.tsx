@@ -1,6 +1,12 @@
 import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as clientApi from "../../api/client";
@@ -325,6 +331,60 @@ describe("<VersionModal>", () => {
     expect(
       screen.getByRole("button", { name: "Restart broker" }),
     ).toBeEnabled();
+  });
+
+  it("ignores stale restart errors after close and reopen", async () => {
+    vi.spyOn(upgradeApi, "getUpgradeCheck").mockResolvedValue({
+      current: "0.83.0",
+      latest: "0.83.0",
+      upgrade_available: false,
+      is_dev_build: false,
+      upgrade_command: "npm install -g wuphf@latest",
+    });
+    let rejectRestart: (reason?: unknown) => void = () => {};
+    vi.spyOn(clientApi, "restartBroker").mockImplementation(
+      () =>
+        new Promise<{ ok: true }>((_, reject) => {
+          rejectRestart = reject;
+        }),
+    );
+
+    const Wrapper = makeWrapper();
+    const onClose = vi.fn();
+    const { rerender } = render(
+      <Wrapper>
+        <VersionModal open={true} onClose={onClose} />
+      </Wrapper>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Restart broker")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByText("Restart broker"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Restarting…")).toBeInTheDocument();
+    });
+
+    rerender(
+      <Wrapper>
+        <VersionModal open={false} onClose={onClose} />
+      </Wrapper>,
+    );
+    rerender(
+      <Wrapper>
+        <VersionModal open={true} onClose={onClose} />
+      </Wrapper>,
+    );
+
+    await act(async () => {
+      rejectRestart(new Error("stale restart failure"));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Restart broker")).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/stale restart failure/i)).toBeNull();
   });
 
   it("disables force update while restart is in flight", async () => {

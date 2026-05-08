@@ -21,7 +21,7 @@ type ManagedAgent struct {
 func (ma *ManagedAgent) setState(state AgentState) {
 	ma.stateMu.Lock()
 	defer ma.stateMu.Unlock()
-	ma.State = state
+	ma.State = agentStateSnapshot(state)
 }
 
 func (ma *ManagedAgent) updateState(update func(*AgentState)) {
@@ -33,7 +33,7 @@ func (ma *ManagedAgent) updateState(update func(*AgentState)) {
 func (ma *ManagedAgent) stateSnapshot() AgentState {
 	ma.stateMu.RLock()
 	defer ma.stateMu.RUnlock()
-	return ma.State
+	return agentStateSnapshot(ma.State)
 }
 
 // ConfigUpdate holds optional fields for updating an agent's configuration.
@@ -191,6 +191,7 @@ func (s *AgentService) Create(cfg AgentConfig) (*ManagedAgent, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	cfg = agentConfigSnapshot(cfg)
 	if _, exists := s.agents[cfg.Slug]; exists {
 		return nil, fmt.Errorf("agent %q already exists", cfg.Slug)
 	}
@@ -447,7 +448,7 @@ func (s *AgentService) List() []*ManagedAgent {
 	list := make([]*ManagedAgent, 0, len(s.agents))
 	for _, ma := range s.agents {
 		list = append(list, &ManagedAgent{
-			Config: ma.Config,
+			Config: agentConfigSnapshot(ma.Config),
 			State:  ma.stateSnapshot(),
 			Loop:   ma.Loop,
 		})
@@ -534,7 +535,7 @@ func (s *AgentService) UpdateConfig(slug string, updates ConfigUpdate) error {
 		ma.Config.Name = *updates.Name
 	}
 	if updates.Expertise != nil {
-		ma.Config.Expertise = updates.Expertise
+		ma.Config.Expertise = append([]string(nil), updates.Expertise...)
 	}
 	if updates.HeartbeatCron != nil {
 		ma.Config.HeartbeatCron = *updates.HeartbeatCron
@@ -542,6 +543,22 @@ func (s *AgentService) UpdateConfig(slug string, updates ConfigUpdate) error {
 
 	s.notify()
 	return nil
+}
+
+func agentConfigSnapshot(cfg AgentConfig) AgentConfig {
+	cfg.Expertise = append([]string(nil), cfg.Expertise...)
+	cfg.Tools = append([]string(nil), cfg.Tools...)
+	cfg.AllowedTools = append([]string(nil), cfg.AllowedTools...)
+	if cfg.Budget != nil {
+		budget := *cfg.Budget
+		cfg.Budget = &budget
+	}
+	return cfg
+}
+
+func agentStateSnapshot(state AgentState) AgentState {
+	state.Config = agentConfigSnapshot(state.Config)
+	return state
 }
 
 // notify calls all listeners, swallowing panics. Must be called with mu held.
