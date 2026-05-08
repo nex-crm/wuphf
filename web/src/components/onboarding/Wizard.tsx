@@ -917,8 +917,11 @@ export function Wizard({ onComplete }: WizardProps) {
           <FirstTaskScreen
             taskText={submittedTaskText}
             onWatchTask={async () => {
-              await router.navigate({ to: "/tasks" });
-              onComplete?.();
+              try {
+                await router.navigate({ to: "/tasks" });
+              } finally {
+                onComplete?.();
+              }
             }}
             onSkipToOffice={() => onComplete?.()}
           />
