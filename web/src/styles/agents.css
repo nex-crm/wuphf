@@ -672,24 +672,26 @@
   width: 100%;
 }
 
-.agent-profile-run-btn,
+.agent-profile-run-row,
 .agent-profile-task-btn {
   display: flex;
   align-items: center;
   justify-content: space-between;
   width: 100%;
   gap: 8px;
-  background: transparent;
-  border: none;
-  cursor: pointer;
   padding: 3px 0;
-  text-align: left;
-  transition: color 0.15s;
   font-family: var(--font-sans);
   color: var(--text);
 }
 
-.agent-profile-run-btn:hover,
+.agent-profile-task-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  transition: color 0.15s;
+}
+
 .agent-profile-task-btn:hover {
   color: var(--accent);
 }

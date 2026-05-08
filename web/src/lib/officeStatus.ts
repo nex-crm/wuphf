@@ -7,6 +7,7 @@ import { formatRelativeTime } from "./format";
  * ArtifactsApp. Both files previously carried their own copy.
  */
 export function normalizeStatus(raw: string): string {
+  if (!raw) return "";
   const s = raw.toLowerCase().replace(/[\s-]+/g, "_");
   if (s === "completed") return "done";
   if (s === "in_review") return "review";
