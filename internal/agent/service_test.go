@@ -520,11 +520,77 @@ func TestListAgents(t *testing.T) {
 	}
 }
 
-func TestListAgentsReturnsConfigSnapshots(t *testing.T) {
+func TestAgentSnapshotsDoNotAliasConfig(t *testing.T) {
+	svc := newTestService(t, nil)
+
+	_, err := svc.Create(AgentConfig{
+		Slug:         "snapshot-agent",
+		Name:         "Snapshot Agent",
+		Expertise:    []string{"backend"},
+		Tools:        []string{"search"},
+		AllowedTools: []string{"read_file"},
+		Budget:       &BudgetLimit{MaxTokens: 1000, MaxCostUsd: 1.5},
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	got, ok := svc.Get("snapshot-agent")
+	if !ok {
+		t.Fatal("expected agent from Get")
+	}
+	got.Config.Expertise[0] = "mutated"
+	got.Config.Tools[0] = "mutated"
+	got.Config.AllowedTools[0] = "mutated"
+	got.Config.Budget.MaxTokens = 1
+	got.State.Config.Expertise[0] = "mutated"
+	got.State.Config.Tools[0] = "mutated"
+	got.State.Config.AllowedTools[0] = "mutated"
+	got.State.Config.Budget.MaxTokens = 2
+
+	list := svc.List()
+	if len(list) != 1 {
+		t.Fatalf("expected 1 agent, got %d", len(list))
+	}
+	assertSnapshotConfigUnchanged(t, list[0].Config)
+	assertSnapshotConfigUnchanged(t, list[0].State.Config)
+
+	list[0].Config.Expertise[0] = "mutated-again"
+	list[0].Config.Tools[0] = "mutated-again"
+	list[0].Config.AllowedTools[0] = "mutated-again"
+	list[0].Config.Budget.MaxTokens = 3
+	list[0].State.Config.Expertise[0] = "mutated-again"
+	list[0].State.Config.Tools[0] = "mutated-again"
+	list[0].State.Config.AllowedTools[0] = "mutated-again"
+	list[0].State.Config.Budget.MaxTokens = 4
+
+	state, ok := svc.GetState("snapshot-agent")
+	if !ok {
+		t.Fatal("expected agent state")
+	}
+	assertSnapshotConfigUnchanged(t, state.Config)
+	state.Config.Expertise[0] = "mutated-state"
+	state.Config.Tools[0] = "mutated-state"
+	state.Config.AllowedTools[0] = "mutated-state"
+	state.Config.Budget.MaxTokens = 5
+
+	got, ok = svc.Get("snapshot-agent")
+	if !ok {
+		t.Fatal("expected agent from Get")
+	}
+	assertSnapshotConfigUnchanged(t, got.Config)
+	assertSnapshotConfigUnchanged(t, got.State.Config)
+}
+
+// TestCreateSnapshotsInboundConfig verifies Create() copies the caller's
+// AgentConfig — mutating the caller's slices/Budget after Create must not
+// affect what subsequent List/Get returns. This catches regressions where
+// Create stops calling agentConfigSnapshot on the way in.
+func TestCreateSnapshotsInboundConfig(t *testing.T) {
 	svc := newTestService(t, nil)
 	cfg := AgentConfig{
-		Slug:         "snapshot",
-		Name:         "Snapshot",
+		Slug:         "create-snapshot",
+		Name:         "Create Snapshot",
 		Expertise:    []string{"research"},
 		Tools:        []string{"lookup"},
 		Budget:       &BudgetLimit{MaxTokens: 100},
@@ -533,45 +599,44 @@ func TestListAgentsReturnsConfigSnapshots(t *testing.T) {
 	if _, err := svc.Create(cfg); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
+
 	cfg.Expertise[0] = "mutated"
 	cfg.Tools[0] = "mutated"
 	cfg.Budget.MaxTokens = 1
 	cfg.AllowedTools[0] = "mutated"
 
-	list := svc.List()
-	if len(list) != 1 {
-		t.Fatalf("expected 1 agent, got %d", len(list))
-	}
-	if list[0].Config.Expertise[0] != "research" {
-		t.Fatalf("Expertise alias leaked through Create: %#v", list[0].Config.Expertise)
-	}
-	if list[0].Config.Tools[0] != "lookup" {
-		t.Fatalf("Tools alias leaked through Create: %#v", list[0].Config.Tools)
-	}
-	if list[0].Config.Budget.MaxTokens != 100 {
-		t.Fatalf("Budget alias leaked through Create: %#v", list[0].Config.Budget)
-	}
-	if list[0].Config.AllowedTools[0] != "read" {
-		t.Fatalf("AllowedTools alias leaked through Create: %#v", list[0].Config.AllowedTools)
-	}
-
-	list[0].Config.Expertise[0] = "mutated"
-	list[0].Config.Tools[0] = "mutated"
-	list[0].Config.Budget.MaxTokens = 1
-	list[0].Config.AllowedTools[0] = "mutated"
-
 	got := svc.List()[0].Config
 	if got.Expertise[0] != "research" {
-		t.Fatalf("Expertise alias leaked through List: %#v", got.Expertise)
+		t.Fatalf("Expertise alias leaked through Create: %#v", got.Expertise)
 	}
 	if got.Tools[0] != "lookup" {
-		t.Fatalf("Tools alias leaked through List: %#v", got.Tools)
+		t.Fatalf("Tools alias leaked through Create: %#v", got.Tools)
 	}
 	if got.Budget.MaxTokens != 100 {
-		t.Fatalf("Budget alias leaked through List: %#v", got.Budget)
+		t.Fatalf("Budget alias leaked through Create: %#v", got.Budget)
 	}
 	if got.AllowedTools[0] != "read" {
-		t.Fatalf("AllowedTools alias leaked through List: %#v", got.AllowedTools)
+		t.Fatalf("AllowedTools alias leaked through Create: %#v", got.AllowedTools)
+	}
+}
+
+func assertSnapshotConfigUnchanged(t *testing.T, cfg AgentConfig) {
+	t.Helper()
+
+	if len(cfg.Expertise) != 1 || cfg.Expertise[0] != "backend" {
+		t.Errorf("expected expertise to remain [backend], got %v", cfg.Expertise)
+	}
+	if len(cfg.Tools) != 1 || cfg.Tools[0] != "search" {
+		t.Errorf("expected tools to remain [search], got %v", cfg.Tools)
+	}
+	if len(cfg.AllowedTools) != 1 || cfg.AllowedTools[0] != "read_file" {
+		t.Errorf("expected allowed tools to remain [read_file], got %v", cfg.AllowedTools)
+	}
+	if cfg.Budget == nil {
+		t.Fatal("expected budget")
+	}
+	if cfg.Budget.MaxTokens != 1000 {
+		t.Errorf("expected budget max tokens to remain 1000, got %d", cfg.Budget.MaxTokens)
 	}
 }
 

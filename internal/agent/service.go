@@ -9,31 +9,11 @@ import (
 	"github.com/nex-crm/wuphf/internal/config"
 )
 
-// ManagedAgent wraps an AgentLoop with its config and last-known state.
+// ManagedAgent wraps an AgentLoop with its config and current state snapshot.
 type ManagedAgent struct {
 	Config AgentConfig
 	State  AgentState
 	Loop   *AgentLoop
-
-	stateMu sync.RWMutex
-}
-
-func (ma *ManagedAgent) setState(state AgentState) {
-	ma.stateMu.Lock()
-	defer ma.stateMu.Unlock()
-	ma.State = agentStateSnapshot(state)
-}
-
-func (ma *ManagedAgent) updateState(update func(*AgentState)) {
-	ma.stateMu.Lock()
-	defer ma.stateMu.Unlock()
-	update(&ma.State)
-}
-
-func (ma *ManagedAgent) stateSnapshot() AgentState {
-	ma.stateMu.RLock()
-	defer ma.stateMu.RUnlock()
-	return agentStateSnapshot(ma.State)
 }
 
 // ConfigUpdate holds optional fields for updating an agent's configuration.
@@ -191,11 +171,11 @@ func (s *AgentService) Create(cfg AgentConfig) (*ManagedAgent, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	cfg = agentConfigSnapshot(cfg)
 	if _, exists := s.agents[cfg.Slug]; exists {
 		return nil, fmt.Errorf("agent %q already exists", cfg.Slug)
 	}
 
+	cfg = agentConfigSnapshot(cfg)
 	streamFn := s.streamFnResolver(cfg.Slug)
 
 	loop := NewAgentLoop(cfg, s.toolRegistry, s.sessionStore, s.queues, streamFn, s.gossipLayer, s.credTracker)
@@ -210,34 +190,6 @@ func (s *AgentService) Create(cfg AgentConfig) (*ManagedAgent, error) {
 		ma.Loop.SetEscalator(s.escalator)
 	}
 
-	// Keep the cached state responsive without requiring callers to lock the loop.
-	loop.On(EventPhaseChange, func(args ...any) {
-		if len(args) >= 2 {
-			if phase, ok := args[1].(AgentPhase); ok {
-				ma.updateState(func(state *AgentState) {
-					state.Phase = phase
-				})
-			}
-		}
-	})
-	loop.On(EventError, func(args ...any) {
-		ma.updateState(func(state *AgentState) {
-			state.Phase = PhaseError
-			if len(args) > 0 {
-				if errText, ok := args[0].(string); ok {
-					state.Error = errText
-				}
-			}
-		})
-	})
-	loop.On(EventDone, func(args ...any) {
-		ma.updateState(func(state *AgentState) {
-			state.Phase = PhaseDone
-			state.CurrentTask = ""
-			state.TaskID = ""
-			state.Error = ""
-		})
-	})
 	s.agents[cfg.Slug] = ma
 	s.notify()
 	return ma, nil
@@ -266,7 +218,6 @@ func (s *AgentService) Start(slug string) error {
 	}
 
 	ma.Loop.Start()
-	ma.setState(ma.Loop.GetState())
 	s.notify()
 	return nil
 }
@@ -288,7 +239,6 @@ func (s *AgentService) Stop(slug string) error {
 	}
 
 	ma.Loop.Stop()
-	ma.setState(ma.Loop.GetState())
 	s.notify()
 	return nil
 }
@@ -414,7 +364,6 @@ func (s *AgentService) runAgentWorker(slug string, ma *ManagedAgent, stopCh <-ch
 			s.mu.Unlock()
 			return
 		}
-		ma.setState(nextState)
 		running := ma.Loop.CanProcess() &&
 			((nextState.Phase != PhaseDone && nextState.Phase != PhaseIdle) || s.queues.HasMessages(slug))
 		s.mu.Unlock()
@@ -435,20 +384,25 @@ func (s *AgentService) Get(slug string) (*ManagedAgent, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	ma, ok := s.agents[slug]
-	return ma, ok
+	if !ok {
+		return nil, false
+	}
+	snapshot := *ma
+	snapshot.Config = agentConfigSnapshot(ma.Config)
+	snapshot.State = agentStateSnapshot(ma.Loop.GetState())
+	return &snapshot, true
 }
 
-// List returns ManagedAgent snapshots sorted by slug.
+// List returns all managed agents, sorted by slug.
 func (s *AgentService) List() []*ManagedAgent {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	list := make([]*ManagedAgent, 0, len(s.agents))
 	for _, ma := range s.agents {
-		list = append(list, &ManagedAgent{
-			Config: agentConfigSnapshot(ma.Config),
-			State:  ma.stateSnapshot(),
-			Loop:   ma.Loop,
-		})
+		snapshot := *ma
+		snapshot.Config = agentConfigSnapshot(ma.Config)
+		snapshot.State = agentStateSnapshot(ma.Loop.GetState())
+		list = append(list, &snapshot)
 	}
 	sort.Slice(list, func(i, j int) bool {
 		return list[i].Config.Slug < list[j].Config.Slug
@@ -464,7 +418,23 @@ func (s *AgentService) GetState(slug string) (AgentState, bool) {
 	if !ok {
 		return AgentState{}, false
 	}
-	return ma.stateSnapshot(), true
+	return agentStateSnapshot(ma.Loop.GetState()), true
+}
+
+func agentConfigSnapshot(cfg AgentConfig) AgentConfig {
+	cfg.Expertise = append([]string(nil), cfg.Expertise...)
+	cfg.Tools = append([]string(nil), cfg.Tools...)
+	cfg.AllowedTools = append([]string(nil), cfg.AllowedTools...)
+	if cfg.Budget != nil {
+		budget := *cfg.Budget
+		cfg.Budget = &budget
+	}
+	return cfg
+}
+
+func agentStateSnapshot(state AgentState) AgentState {
+	state.Config = agentConfigSnapshot(state.Config)
+	return state
 }
 
 // Remove stops and removes the agent from the service.
@@ -532,7 +502,7 @@ func (s *AgentService) UpdateConfig(slug string, updates ConfigUpdate) error {
 		ma.Config.Name = *updates.Name
 	}
 	if updates.Expertise != nil {
-		ma.Config.Expertise = append([]string(nil), updates.Expertise...)
+		ma.Config.Expertise = updates.Expertise
 	}
 	if updates.HeartbeatCron != nil {
 		ma.Config.HeartbeatCron = *updates.HeartbeatCron
@@ -540,22 +510,6 @@ func (s *AgentService) UpdateConfig(slug string, updates ConfigUpdate) error {
 
 	s.notify()
 	return nil
-}
-
-func agentConfigSnapshot(cfg AgentConfig) AgentConfig {
-	cfg.Expertise = append([]string(nil), cfg.Expertise...)
-	cfg.Tools = append([]string(nil), cfg.Tools...)
-	cfg.AllowedTools = append([]string(nil), cfg.AllowedTools...)
-	if cfg.Budget != nil {
-		budget := *cfg.Budget
-		cfg.Budget = &budget
-	}
-	return cfg
-}
-
-func agentStateSnapshot(state AgentState) AgentState {
-	state.Config = agentConfigSnapshot(state.Config)
-	return state
 }
 
 // notify calls all listeners, swallowing panics. Must be called with mu held.
