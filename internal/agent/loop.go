@@ -537,20 +537,24 @@ func (l *AgentLoop) streamLLM() error {
 	var fullText strings.Builder
 	for {
 		l.mu.Unlock()
-		chunk, ok := <-ch
-		l.mu.Lock()
-		if !ok {
-			break
-		}
+		var (
+			chunk StreamChunk
+			ok    bool
+		)
 		select {
 		case <-ctx.Done():
+			l.mu.Lock()
 			if errors.Is(ctx.Err(), context.Canceled) {
 				l.pendingToolCall = nil
 				l.setPhase(PhaseIdle)
 				return nil
 			}
 			return ctx.Err()
-		default:
+		case chunk, ok = <-ch:
+		}
+		l.mu.Lock()
+		if !ok {
+			break
 		}
 
 		switch chunk.Type {
