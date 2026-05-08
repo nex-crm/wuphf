@@ -189,28 +189,6 @@ func (s *AgentService) Create(cfg AgentConfig) (*ManagedAgent, error) {
 		ma.Loop.SetEscalator(s.escalator)
 	}
 
-	// Keep the cached state responsive without requiring callers to lock the loop.
-	loop.On(EventPhaseChange, func(args ...any) {
-		if len(args) >= 2 {
-			if phase, ok := args[1].(AgentPhase); ok {
-				ma.State.Phase = phase
-			}
-		}
-	})
-	loop.On(EventError, func(args ...any) {
-		ma.State.Phase = PhaseError
-		if len(args) > 0 {
-			if errText, ok := args[0].(string); ok {
-				ma.State.Error = errText
-			}
-		}
-	})
-	loop.On(EventDone, func(args ...any) {
-		ma.State.Phase = PhaseDone
-		ma.State.CurrentTask = ""
-		ma.State.TaskID = ""
-		ma.State.Error = ""
-	})
 	s.agents[cfg.Slug] = ma
 	s.notify()
 	return ma, nil
@@ -408,7 +386,12 @@ func (s *AgentService) Get(slug string) (*ManagedAgent, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	ma, ok := s.agents[slug]
-	return ma, ok
+	if !ok {
+		return nil, false
+	}
+	snapshot := *ma
+	snapshot.State = ma.Loop.GetState()
+	return &snapshot, true
 }
 
 // List returns all managed agents, sorted by slug.
@@ -417,7 +400,9 @@ func (s *AgentService) List() []*ManagedAgent {
 	defer s.mu.Unlock()
 	list := make([]*ManagedAgent, 0, len(s.agents))
 	for _, ma := range s.agents {
-		list = append(list, ma)
+		snapshot := *ma
+		snapshot.State = ma.Loop.GetState()
+		list = append(list, &snapshot)
 	}
 	sort.Slice(list, func(i, j int) bool {
 		return list[i].Config.Slug < list[j].Config.Slug
@@ -433,7 +418,7 @@ func (s *AgentService) GetState(slug string) (AgentState, bool) {
 	if !ok {
 		return AgentState{}, false
 	}
-	return ma.State, true
+	return ma.Loop.GetState(), true
 }
 
 // Remove stops and removes the agent from the service.
