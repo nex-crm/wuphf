@@ -1173,6 +1173,9 @@ func TestEnqueueHeadlessCodexTurnRecordHumanBypassesLeadQueueHold(t *testing.T) 
 		Turn:      headlessCodexTurn{Prompt: "specialist still working"},
 		StartedAt: time.Now(),
 	}
+	// Keep the lead worker parked so this test can inspect the queued turn
+	// deterministically; worker startup/consumption is covered separately.
+	l.headless.workers["ceo"] = true
 
 	l.enqueueHeadlessCodexTurnRecord("ceo", headlessCodexTurn{
 		Prompt:     "are you still on this?",

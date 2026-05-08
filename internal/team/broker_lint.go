@@ -23,8 +23,8 @@ import (
 // brokerLintProvider wraps provider.RunConfiguredOneShot as a QueryProvider.
 type brokerLintProvider struct{}
 
-func (p *brokerLintProvider) Query(_ context.Context, systemPrompt, userPrompt string) (string, error) {
-	return provider.RunConfiguredOneShot(systemPrompt, userPrompt, "")
+func (p *brokerLintProvider) Query(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
+	return provider.RunConfiguredOneShotCtx(ctx, systemPrompt, userPrompt, "")
 }
 
 // handleLintRun answers POST /wiki/lint/run.

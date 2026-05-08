@@ -602,37 +602,28 @@ func (p *defaultLLMProvider) AskIsSkill(ctx context.Context, articlePath, articl
 	timeout := skillLLMTimeout()
 	callCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	// RunConfiguredOneShot does not accept a context; we honour the deadline
-	// by selecting on ctx.Done after launching the call in a goroutine.
-	type result struct {
-		out string
-		err error
-	}
-	ch := make(chan result, 1)
 	userPrompt := buildSkillUserPrompt(articlePath, articleContent)
-	go func() {
-		out, callErr := provider.RunConfiguredOneShot(sysPrompt, userPrompt, "")
-		ch <- result{out, callErr}
-	}()
-
-	select {
-	case <-callCtx.Done():
+	out, callErr := provider.RunConfiguredOneShotCtx(callCtx, sysPrompt, userPrompt, "")
+	if callErr != nil {
+		if callCtx.Err() != nil {
+			slog.Warn("skill_scanner: LLM call timed out", "path", articlePath, "timeout", timeout)
+			return false, SkillFrontmatter{}, "", nil
+		}
+		slog.Warn("skill_scanner: LLM call failed, skipping article",
+			"path", articlePath, "err", callErr)
+		return false, SkillFrontmatter{}, "", nil
+	}
+	if callCtx.Err() != nil {
 		slog.Warn("skill_scanner: LLM call timed out", "path", articlePath, "timeout", timeout)
 		return false, SkillFrontmatter{}, "", nil
-	case r := <-ch:
-		if r.err != nil {
-			slog.Warn("skill_scanner: LLM call failed, skipping article",
-				"path", articlePath, "err", r.err)
-			return false, SkillFrontmatter{}, "", nil
-		}
-		isSkill, fm, body, parseErr := parseSkillJSON(r.out)
-		if parseErr != nil {
-			slog.Warn("skill_scanner: LLM JSON parse failed, treating as not-a-skill",
-				"path", articlePath, "err", parseErr)
-			return false, SkillFrontmatter{}, "", nil
-		}
-		return isSkill, fm, body, nil
 	}
+	isSkill, fm, body, parseErr := parseSkillJSON(out)
+	if parseErr != nil {
+		slog.Warn("skill_scanner: LLM JSON parse failed, treating as not-a-skill",
+			"path", articlePath, "err", parseErr)
+		return false, SkillFrontmatter{}, "", nil
+	}
+	return isSkill, fm, body, nil
 }
 
 // buildSkillUserPrompt assembles the user-message body sent to the LLM.

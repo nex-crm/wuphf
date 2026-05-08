@@ -1,7 +1,10 @@
 package provider_test
 
 import (
+	"context"
+	"errors"
 	"testing"
+	"time"
 
 	"github.com/nex-crm/wuphf/internal/agent"
 	"github.com/nex-crm/wuphf/internal/provider"
@@ -66,6 +69,57 @@ func TestRegistry_FakeKindRoutesEverywhere(t *testing.T) {
 	}
 	if oneShotHits == 0 {
 		t.Fatal("one-shot dispatcher did not route to fake provider via Registry")
+	}
+}
+
+func TestRunConfiguredOneShotCtxRoutesContextToProvider(t *testing.T) {
+	const fakeKind = "wuphf-test-context-provider"
+
+	started := make(chan context.Context, 1)
+	providertest.RegisterForTest(t, &provider.Entry{
+		Kind: fakeKind,
+		StreamFn: func(slug string) agent.StreamFn {
+			return func([]agent.Message, []agent.AgentTool) <-chan agent.StreamChunk {
+				ch := make(chan agent.StreamChunk)
+				close(ch)
+				return ch
+			}
+		},
+		OneShotCtx: func(ctx context.Context, systemPrompt, prompt, cwd string) (string, error) {
+			started <- ctx
+			<-ctx.Done()
+			return "", ctx.Err()
+		},
+		Capabilities: provider.Capabilities{SupportsOneShot: true},
+	})
+
+	t.Setenv("WUPHF_LLM_PROVIDER", fakeKind)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := provider.RunConfiguredOneShotCtx(ctx, "sys", "prompt", "/tmp")
+		errCh <- err
+	}()
+
+	select {
+	case gotCtx := <-started:
+		if gotCtx != ctx {
+			t.Fatal("RunConfiguredOneShotCtx did not pass the caller context to provider")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for context-aware provider call")
+	}
+
+	cancel()
+	select {
+	case err := <-errCh:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("RunConfiguredOneShotCtx error = %v, want context.Canceled", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for cancelled provider call")
 	}
 }
 

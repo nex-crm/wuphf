@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -13,16 +14,18 @@ import (
 )
 
 var (
-	codexLookPath = exec.LookPath
-	codexCommand  = exec.Command
-	codexGetwd    = os.Getwd
+	codexLookPath       = exec.LookPath
+	codexCommand        = exec.Command
+	codexCommandContext = exec.CommandContext
+	codexGetwd          = os.Getwd
 )
 
 func init() {
 	Register(&Entry{
-		Kind:     KindCodex,
-		StreamFn: CreateCodexCLIStreamFn,
-		OneShot:  RunCodexOneShot,
+		Kind:       KindCodex,
+		StreamFn:   CreateCodexCLIStreamFn,
+		OneShot:    RunCodexOneShot,
+		OneShotCtx: RunCodexOneShotCtx,
 		Capabilities: Capabilities{
 			PaneEligible:    false,
 			SupportsOneShot: true,
@@ -128,9 +131,37 @@ func RunCodexOneShot(systemPrompt, prompt, cwd string) (string, error) {
 	return runCodexOnce(systemPrompt, prompt, cwd, nil)
 }
 
+// RunCodexOneShotCtx runs Codex once and binds the child process lifetime to ctx.
+func RunCodexOneShotCtx(ctx context.Context, systemPrompt, prompt, cwd string) (string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	if cwd == "" {
+		var err error
+		cwd, err = codexGetwd()
+		if err != nil {
+			return "", err
+		}
+	}
+	return runCodexOnceCtx(ctx, systemPrompt, prompt, cwd, nil)
+}
+
 func runCodexOnce(systemPrompt, prompt, cwd string, onEvent func(CodexStreamEvent)) (string, error) {
 	args := buildCodexArgs(cwd, config.ResolveCodexModel(cwd))
 	cmd := codexCommand("codex", args...)
+	return runCodexCommand(context.Background(), cmd, systemPrompt, prompt, cwd, onEvent)
+}
+
+func runCodexOnceCtx(ctx context.Context, systemPrompt, prompt, cwd string, onEvent func(CodexStreamEvent)) (string, error) {
+	args := buildCodexArgs(cwd, config.ResolveCodexModel(cwd))
+	cmd := codexCommandContext(ctx, "codex", args...)
+	return runCodexCommand(ctx, cmd, systemPrompt, prompt, cwd, onEvent)
+}
+
+func runCodexCommand(ctx context.Context, cmd *exec.Cmd, systemPrompt, prompt, cwd string, onEvent func(CodexStreamEvent)) (string, error) {
 	cmd.Dir = cwd
 	cmd.Env = filteredEnv(nil)
 	cmd.Stdin = strings.NewReader(buildCodexPrompt(systemPrompt, prompt))
@@ -149,6 +180,9 @@ func runCodexOnce(systemPrompt, prompt, cwd string, onEvent func(CodexStreamEven
 
 	result, parseErr := ReadCodexJSONStream(stdout, onEvent)
 	if err := cmd.Wait(); err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return "", ctxErr
+		}
 		detail := firstNonEmpty(result.LastError, strings.TrimSpace(stderr.String()))
 		if detail != "" {
 			return "", fmt.Errorf("%w: %s", err, detail)
@@ -156,6 +190,9 @@ func runCodexOnce(systemPrompt, prompt, cwd string, onEvent func(CodexStreamEven
 		return "", err
 	}
 	if parseErr != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return "", ctxErr
+		}
 		return "", parseErr
 	}
 	text := strings.TrimSpace(firstNonEmpty(result.FinalMessage, result.LastPlainLine))
