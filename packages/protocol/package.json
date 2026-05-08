@@ -1,0 +1,39 @@
+{
+  "name": "@wuphf/protocol",
+  "version": "0.0.0",
+  "private": true,
+  "description": "WUPHF v1 protocol — branded types, receipt schema, IPC envelopes, audit events. No I/O. No runtime deps on other @wuphf packages.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./brand": "./src/brand.ts",
+    "./canonical-json": "./src/canonical-json.ts",
+    "./sha256": "./src/sha256.ts",
+    "./frozen-args": "./src/frozen-args.ts",
+    "./sanitized-string": "./src/sanitized-string.ts",
+    "./receipt": "./src/receipt.ts",
+    "./audit-event": "./src/audit-event.ts",
+    "./ipc": "./src/ipc.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "biome check src/ tests/",
+    "lint:fix": "biome check --write src/ tests/",
+    "format": "biome format --write src/ tests/",
+    "check": "biome check src/ tests/"
+  },
+  "dependencies": {
+    "canonicalize": "^2.0.0",
+    "cbor-x": "^1.6.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.4.13",
+    "@types/node": "^22.10.0",
+    "fast-check": "^3.23.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}
