@@ -27,7 +27,7 @@ func (b *Broker) runCompanySeedJob(cfg config.Config) {
 		Completer:  brokerCompleter{},
 		WikiRoot:   wikiRoot,
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	ctx, cancel := context.WithTimeout(b.lifecycleCtx, 120*time.Second)
 	defer cancel()
 	result, err := operations.SeedCompanyContext(ctx, input)
 	if err != nil {

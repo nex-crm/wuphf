@@ -85,13 +85,19 @@ func SeedCompanyContext(ctx context.Context, input CompanySeedInput) (*CompanySe
 	}
 
 	// 2. Extract file content
-	for _, path := range input.FilePaths {
+	const maxFilePaths = 20
+	filePaths := input.FilePaths
+	if len(filePaths) > maxFilePaths {
+		result.Warnings = append(result.Warnings, fmt.Sprintf("too many files (%d); processing first %d", len(filePaths), maxFilePaths))
+		filePaths = filePaths[:maxFilePaths]
+	}
+	for _, path := range filePaths {
 		var (
 			text string
 			err  error
 		)
 		if strings.HasSuffix(strings.ToLower(path), ".pdf") {
-			text, err = extractPDF(ctx, path)
+			text, err = extractPDF(ctx, path, &result.Warnings)
 			if err != nil {
 				result.Warnings = append(result.Warnings, err.Error())
 				continue
@@ -139,9 +145,7 @@ func SeedCompanyContext(ctx context.Context, input CompanySeedInput) (*CompanySe
 	// 6. LLM extraction (skip if no completer or no content)
 	content := contentBuf.String()
 	if input.Completer != nil && strings.TrimSpace(content) != "" {
-		if len(content) > 32*1024 {
-			content = content[:32*1024]
-		}
+		content = safeUTF8Truncate(content, 32*1024)
 		raw, err := runExtraction(ctx, input.Completer, content)
 		if err != nil {
 			result.Warnings = append(result.Warnings, fmt.Sprintf("LLM extraction failed: %v", err))
@@ -256,11 +260,7 @@ func fetchURL(ctx context.Context, urlStr string) (string, error) {
 	}
 	walk(doc)
 
-	text := buf.String()
-	if len(text) > 4096 {
-		text = text[:4096]
-	}
-	return text, nil
+	return safeUTF8Truncate(buf.String(), 4096), nil
 }
 
 // collectText recursively extracts text nodes from the HTML tree.
@@ -274,7 +274,8 @@ func collectText(n *html.Node, buf *bytes.Buffer) {
 }
 
 // extractPDF extracts text from a PDF file using pdftotext (poppler).
-func extractPDF(ctx context.Context, path string) (string, error) {
+// warnings receives non-fatal issues (e.g. non-zero exit with partial output).
+func extractPDF(ctx context.Context, path string, warnings *[]string) (string, error) {
 	if _, err := exec.LookPath("pdftotext"); err != nil {
 		return "", fmt.Errorf("skipped %s: pdftotext not installed; install poppler (brew install poppler on macOS)", path)
 	}
@@ -289,9 +290,16 @@ func extractPDF(ctx context.Context, path string) (string, error) {
 		return "", fmt.Errorf("pdftotext start %s: %w", path, err)
 	}
 	data, err := io.ReadAll(io.LimitReader(stdout, 8192))
-	_ = cmd.Wait()
+	waitErr := cmd.Wait()
 	if err != nil {
 		return "", fmt.Errorf("read pdftotext output: %w", err)
+	}
+	if waitErr != nil {
+		if len(data) > 0 {
+			*warnings = append(*warnings, fmt.Sprintf("pdftotext %s exit non-zero: %v", path, waitErr))
+			return string(data), nil
+		}
+		return "", fmt.Errorf("pdftotext %s exit: %w", path, waitErr)
 	}
 	return string(data), nil
 }

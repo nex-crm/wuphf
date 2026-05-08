@@ -394,12 +394,16 @@ func (b *Broker) Start() error {
 	// broker instance from triggering a duplicate run. runCompanySeedJob
 	// re-arms PendingCompanySeed on error or NeedsRetry, so transient
 	// failures are retried on the next startup.
+	b.configMu.Lock()
 	if cfg, err := config.Load(); err == nil && cfg.PendingCompanySeed {
 		cfg.PendingCompanySeed = false
 		if err := config.Save(cfg); err != nil {
 			log.Printf("broker: failed to clear PendingCompanySeed: %v", err)
 		}
+		b.configMu.Unlock()
 		go b.runCompanySeedJob(cfg)
+	} else {
+		b.configMu.Unlock()
 	}
 	b.ensureWikiSectionsCache()
 	b.ensureReviewLog()
