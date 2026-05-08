@@ -29,7 +29,7 @@ func runCompanyScan(
 	cfgSave func(operations.CompanyProfile, string, string),
 ) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 		defer cancel()
 		// Clear PendingCompanySeed before running to avoid a double-run if
 		// the broker starts concurrently.

@@ -708,6 +708,17 @@ func makeHandleScan(wikiRoot string) http.HandlerFunc {
 				return
 			}
 		}
+		// Clean up uploaded temp dirs after the scan regardless of outcome.
+		defer func() {
+			seen := make(map[string]struct{})
+			for _, p := range req.FilePaths {
+				dir := filepath.Dir(p)
+				if _, ok := seen[dir]; !ok {
+					seen[dir] = struct{}{}
+					_ = os.RemoveAll(dir)
+				}
+			}
+		}()
 		ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 		defer cancel()
 		input := operations.CompanySeedInput{

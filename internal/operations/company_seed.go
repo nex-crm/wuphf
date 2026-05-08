@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -68,7 +69,6 @@ func SeedCompanyContext(ctx context.Context, input CompanySeedInput) (*CompanySe
 	// 2. Extract file content
 	for _, path := range input.FilePaths {
 		data, err := os.ReadFile(path)
-		defer func() { _ = os.Remove(path) }()
 		if err != nil {
 			result.Warnings = append(result.Warnings, fmt.Sprintf("read file %s: %v", path, err))
 			continue
@@ -152,10 +152,46 @@ func SeedCompanyContext(ctx context.Context, input CompanySeedInput) (*CompanySe
 	return result, nil
 }
 
+// assertPublicHost resolves host and rejects loopback, private, and
+// link-local addresses to prevent SSRF against local services or metadata APIs.
+func assertPublicHost(host string) error {
+	hostname, _, err := net.SplitHostPort(host)
+	if err != nil {
+		hostname = host
+	}
+	addrs, err := net.LookupHost(hostname)
+	if err != nil {
+		return fmt.Errorf("cannot resolve %q: %w", hostname, err)
+	}
+	for _, addr := range addrs {
+		ip := net.ParseIP(addr)
+		if ip == nil {
+			continue
+		}
+		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
+			ip.Equal(net.ParseIP("169.254.169.254")) {
+			return fmt.Errorf("host %q resolves to non-public address %s", hostname, addr)
+		}
+	}
+	return nil
+}
+
 // fetchURL retrieves the text content of the given URL by walking the HTML
 // parse tree and collecting text from block-level nodes. Truncates to 4096 bytes.
 func fetchURL(ctx context.Context, urlStr string) (string, error) {
-	client := &http.Client{Timeout: 10 * time.Second}
+	u, err := url.Parse(urlStr)
+	if err != nil {
+		return "", fmt.Errorf("fetch URL parse: %w", err)
+	}
+	if err := assertPublicHost(u.Host); err != nil {
+		return "", err
+	}
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+		CheckRedirect: func(req *http.Request, _ []*http.Request) error {
+			return assertPublicHost(req.URL.Host)
+		},
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, urlStr, nil)
 	if err != nil {
 		return "", fmt.Errorf("fetch URL build request: %w", err)
@@ -166,8 +202,11 @@ func fetchURL(ctx context.Context, urlStr string) (string, error) {
 		return "", fmt.Errorf("fetch URL: %w", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("fetch URL: status %d", resp.StatusCode)
+	}
 
-	doc, err := html.Parse(resp.Body)
+	doc, err := html.Parse(io.LimitReader(resp.Body, 2*1024*1024))
 	if err != nil {
 		return "", fmt.Errorf("parse HTML: %w", err)
 	}

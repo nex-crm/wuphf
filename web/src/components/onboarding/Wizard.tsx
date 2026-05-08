@@ -924,6 +924,10 @@ export function Wizard({ onComplete }: WizardProps) {
     setApiKeys({});
     setSelectedTaskTemplate(null);
     setTaskText("");
+    setWebsite("");
+    setOwnerName("");
+    setOwnerRole("");
+    setScanResult(null);
     userEditedRuntimeRef.current = false;
     taskTextAutofilled.current = false;
   }, []);

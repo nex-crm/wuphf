@@ -165,7 +165,7 @@ func (f InitFlowModel) Update(msg tea.Msg) (InitFlowModel, tea.Cmd) {
 		return f, nil // late message after skip — ignore
 
 	case tea.KeyMsg:
-		if f.phase == InitCompanyScan && m.String() == "s" {
+		if f.phase == InitCompanyScan && (m.String() == "s" || m.String() == "S") {
 			cfg, _ := config.Load()
 			cfg.PendingCompanySeed = true
 			_ = config.Save(cfg)
