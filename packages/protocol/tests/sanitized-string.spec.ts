@@ -174,6 +174,50 @@ describe("SanitizedString", () => {
     expect(containsInvisibleTag(result)).toBe(false);
     expect(containsZeroWidth(result)).toBe(false);
   });
+
+  it("rejects __proto__ injection so the prototype is never mutated", () => {
+    const value = JSON.parse('{"__proto__":{"polluted":"yes"},"safe":"ok"}') as object;
+    expect(() => SanitizedString.fromUnknown(value)).toThrow(/forbidden key/);
+  });
+
+  it("rejects constructor and prototype keys", () => {
+    expect(() => SanitizedString.fromUnknown({ constructor: 1 })).toThrow(/forbidden key/);
+    expect(() => SanitizedString.fromUnknown({ prototype: 1 })).toThrow(/forbidden key/);
+  });
+
+  it("rejects NFKC key collisions", () => {
+    // U+FB01 is the "fi" ligature; NFKC normalizes it to "fi" — collides with
+    // the explicit "fi" key.
+    const colliding = JSON.parse('{"\\uFB01":1,"fi":2}') as object;
+    expect(() => SanitizedString.fromUnknown(colliding)).toThrow(/collision/);
+  });
+
+  it("rejects symbol input", () => {
+    expect(() => SanitizedString.fromUnknown(Symbol("leak"))).toThrow(/symbol/);
+  });
+
+  it("rejects function input", () => {
+    expect(() => SanitizedString.fromUnknown(() => "leak")).toThrow(/function/);
+  });
+
+  it("rejects depth beyond MAX_DEPTH", () => {
+    let nested: unknown = "leaf";
+    for (let i = 0; i < 100; i++) {
+      nested = { next: nested };
+    }
+    expect(() => SanitizedString.fromUnknown(nested)).toThrow(/depth/);
+  });
+
+  it("rejects objects whose JSON projection is undefined", () => {
+    // toJSON returning undefined makes JSON.stringify emit undefined for the
+    // top-level value. We must throw rather than silently coerce to "".
+    const evil = {
+      toJSON(): unknown {
+        return undefined;
+      },
+    };
+    expect(() => SanitizedString.fromUnknown(evil)).toThrow(/not JSON-representable/);
+  });
 });
 
 function canExpectedSanitizeText(input: string): boolean {
@@ -202,6 +246,8 @@ function projectJson(input: JsonRecord): JsonValue {
   return JSON.parse(serialized) as JsonValue;
 }
 
+const FORBIDDEN_JSON_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
 function expectedSanitizeJsonValue(
   value: JsonValue,
   policy: SanitizedStringPolicy = "strip-zero-width",
@@ -218,9 +264,16 @@ function expectedSanitizeJsonValue(
     return value.map((item) => expectedSanitizeJsonValue(item, policy));
   }
 
-  const out: Record<string, JsonValue> = {};
+  const out: Record<string, JsonValue> = Object.create(null) as Record<string, JsonValue>;
   for (const [key, child] of Object.entries(value)) {
-    out[expectedSanitizeText(key, policy)] = expectedSanitizeJsonValue(child, policy);
+    const sanitizedKey = expectedSanitizeText(key, policy);
+    if (FORBIDDEN_JSON_KEYS.has(sanitizedKey)) {
+      throw new Error(`forbidden key "${sanitizedKey}"`);
+    }
+    if (Object.hasOwn(out, sanitizedKey)) {
+      throw new Error(`collision on "${sanitizedKey}"`);
+    }
+    out[sanitizedKey] = expectedSanitizeJsonValue(child, policy);
   }
   return out;
 }

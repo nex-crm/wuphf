@@ -3,27 +3,13 @@ import { describe, expect, it } from "vitest";
 import {
   type AuditEventRecord,
   type AuditSeqNo,
+  computeAuditEventHash,
   computeEventHash,
   GENESIS_PREV_HASH,
+  serializeAuditEventRecordForHash,
   verifyChain,
 } from "../src/audit-event.ts";
-import { canonicalJSON } from "../src/canonical-json.ts";
 import type { Sha256Hex } from "../src/sha256.ts";
-
-function serialize(r: AuditEventRecord): Uint8Array {
-  // Canonical projection minus eventHash (the field being computed).
-  const projection = {
-    seqNo: r.seqNo,
-    timestamp: r.timestamp.toISOString(),
-    prevHash: r.prevHash,
-    payload: {
-      kind: r.payload.kind,
-      receiptId: r.payload.receiptId ?? null,
-      bodyB64: Buffer.from(r.payload.body).toString("base64"),
-    },
-  };
-  return new TextEncoder().encode(canonicalJSON(projection));
-}
 
 function chainOfLength(n: number): AuditEventRecord[] {
   const out: AuditEventRecord[] = [];
@@ -33,13 +19,13 @@ function chainOfLength(n: number): AuditEventRecord[] {
       seqNo: i as AuditSeqNo,
       timestamp: new Date(2026, 4, 8, 0, 0, i),
       prevHash: prev,
-      eventHash: GENESIS_PREV_HASH, // placeholder; recomputed below
+      eventHash: GENESIS_PREV_HASH, // placeholder
       payload: {
         kind: "receipt_created",
         body: new TextEncoder().encode(`event-${i}`),
       },
     };
-    const eventHash = computeEventHash(prev, serialize(partial));
+    const eventHash = computeAuditEventHash(partial);
     const finalRecord: AuditEventRecord = { ...partial, eventHash };
     out.push(finalRecord);
     prev = eventHash;
@@ -48,25 +34,28 @@ function chainOfLength(n: number): AuditEventRecord[] {
 }
 
 describe("audit-event chain verification", () => {
-  it("verifies an empty chain", () => {
-    const result = verifyChain([], serialize);
+  it("verifies an empty chain (no last seq, just empty: true)", () => {
+    const result = verifyChain([]);
     expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.empty).toBe(true);
+    }
   });
 
   it("verifies a single-record chain", () => {
     const chain = chainOfLength(1);
-    const result = verifyChain(chain, serialize);
+    const result = verifyChain(chain);
     expect(result.ok).toBe(true);
-    if (result.ok) {
+    if (result.ok && !result.empty) {
       expect(result.lastSeqNo).toBe(0);
     }
   });
 
   it("verifies a 100-record chain", () => {
     const chain = chainOfLength(100);
-    const result = verifyChain(chain, serialize);
+    const result = verifyChain(chain);
     expect(result.ok).toBe(true);
-    if (result.ok) {
+    if (result.ok && !result.empty) {
       expect(result.lastSeqNo).toBe(99);
     }
   });
@@ -74,7 +63,7 @@ describe("audit-event chain verification", () => {
   it("rejects a chain with a tampered eventHash", () => {
     const chain = chainOfLength(5);
     chain[2] = { ...recordAt(chain, 2), eventHash: GENESIS_PREV_HASH };
-    const result = verifyChain(chain, serialize);
+    const result = verifyChain(chain);
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.brokenAtSeqNo).toBe(2);
@@ -85,7 +74,7 @@ describe("audit-event chain verification", () => {
   it("rejects a chain with a tampered prevHash", () => {
     const chain = chainOfLength(5);
     chain[3] = { ...recordAt(chain, 3), prevHash: GENESIS_PREV_HASH };
-    const result = verifyChain(chain, serialize);
+    const result = verifyChain(chain);
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.brokenAtSeqNo).toBe(3);
@@ -96,7 +85,7 @@ describe("audit-event chain verification", () => {
   it("rejects a chain with a missing record (gap)", () => {
     const chain = chainOfLength(5);
     chain.splice(2, 1); // remove seq 2
-    const result = verifyChain(chain, serialize);
+    const result = verifyChain(chain);
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.brokenAtSeqNo).toBe(3);
@@ -113,7 +102,7 @@ describe("audit-event chain verification", () => {
         body: new TextEncoder().encode("malicious"),
       },
     };
-    const result = verifyChain(chain, serialize);
+    const result = verifyChain(chain);
     expect(result.ok).toBe(false);
   });
 
@@ -144,20 +133,49 @@ describe("audit-event chain verification", () => {
         (length, tamperAt) => {
           const k = Math.min(tamperAt, length - 1);
           const chain = chainOfLength(length);
-          // Tamper by mutating eventHash to a different valid sha256 value.
           chain[k] = {
             ...recordAt(chain, k),
             eventHash: computeEventHash(GENESIS_PREV_HASH, new TextEncoder().encode("tamper")),
           };
-          const result = verifyChain(chain, serialize);
+          const result = verifyChain(chain);
           if (result.ok) return false;
-          // Verification must fail at or before position k (subsequent prevHash
-          // mismatches will also surface).
           return (result.brokenAtSeqNo as number) <= k;
         },
       ),
       { numRuns: 200 },
     );
+  });
+
+  // Cross-language verifiers consume these golden vectors. If any of these
+  // values change, the wire protocol changed — coordinate with downstream
+  // verifier authors.
+  describe("golden vectors (cross-language verifier contract)", () => {
+    it('GENESIS_PREV_HASH is sha256("wuphf:audit:genesis:v1") in lower-hex', () => {
+      expect(GENESIS_PREV_HASH).toBe(
+        "69292e708cc2e023492933025af465b063bdf24002e72a825b5170541b733f71",
+      );
+    });
+
+    it("seqNo=0 record produces a stable canonical serialization", () => {
+      const record: AuditEventRecord = {
+        seqNo: 0 as AuditSeqNo,
+        timestamp: new Date("2026-05-08T00:00:00.000Z"),
+        prevHash: GENESIS_PREV_HASH,
+        eventHash: GENESIS_PREV_HASH,
+        payload: {
+          kind: "boot_marker",
+          body: new TextEncoder().encode("boot"),
+        },
+      };
+      const bytes = serializeAuditEventRecordForHash(record);
+      // Expected canonical JSON shape: keys are JCS-sorted (alphabetical).
+      const expected =
+        '{"payload":{"bodyB64":"Ym9vdA==","kind":"boot_marker","receiptId":null},' +
+        `"prevHash":"${GENESIS_PREV_HASH}",` +
+        '"seqNo":0,' +
+        '"timestamp":"2026-05-08T00:00:00.000Z"}';
+      expect(new TextDecoder().decode(bytes)).toBe(expected);
+    });
   });
 });
 

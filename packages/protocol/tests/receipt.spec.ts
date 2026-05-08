@@ -131,7 +131,161 @@ describe("receipt schema", () => {
     expect(() => asReceiptId("not-a-ulid")).toThrow();
     expect(asReceiptId(RECEIPT_ID)).toBe(RECEIPT_ID);
   });
+
+  it("rejects forged FrozenArgs (instanceof prototype with mismatched hash)", () => {
+    const fixture = validReceiptFixture();
+    const firstToolCall = nonNull(fixture.toolCalls[0]);
+    const forged = Object.create(FrozenArgs.prototype) as FrozenArgs;
+    Object.assign(forged, {
+      canonicalJson: '{"forged":true}',
+      hash: "0".repeat(64),
+    });
+    const tampered: ReceiptSnapshot = {
+      ...fixture,
+      toolCalls: [{ ...firstToolCall, inputs: forged }],
+    };
+    const result = validateReceipt(tampered);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(
+        result.errors.some(
+          (e) => e.path.endsWith("/inputs/hash") && /does not match/.test(e.message),
+        ),
+      ).toBe(true);
+    }
+  });
+
+  it("rejects forged SanitizedString (instanceof prototype with bidi-laden value)", () => {
+    const fixture = validReceiptFixture();
+    const forged = Object.create(SanitizedString.prototype) as SanitizedString;
+    Object.assign(forged, { value: "evil‮override" });
+    const tampered: ReceiptSnapshot = { ...fixture, finalMessage: forged };
+    const result = validateReceipt(tampered);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(
+        result.errors.some((e) => e.path === "/finalMessage" && /sanitized/.test(e.message)),
+      ).toBe(true);
+    }
+  });
+
+  it("rejects approval token bound to a different receipt id", () => {
+    const fixture = validReceiptFixture();
+    const firstApproval = nonNull(fixture.approvals[0]);
+    const otherReceiptId = asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAY");
+    const wrongTokenApproval = {
+      ...firstApproval,
+      signedToken: { ...firstApproval.signedToken, receiptId: otherReceiptId },
+    };
+    const tampered: ReceiptSnapshot = { ...fixture, approvals: [wrongTokenApproval] };
+    const result = validateReceipt(tampered);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(
+        result.errors.some(
+          (e) => e.path === "/approvals/0/signedToken/receiptId" && /must match/.test(e.message),
+        ),
+      ).toBe(true);
+    }
+  });
+
+  it("rejects external write whose approval token does not bind the proposedDiff hash", () => {
+    const fixture = validReceiptFixture();
+    const firstWrite = nonNull(fixture.writes[0]);
+    const approvalToken = nonNull(firstWrite.approvalToken);
+    const otherDiff = FrozenArgs.freeze({ unrelated: "diff" });
+    const wrongHashWrite = {
+      ...firstWrite,
+      approvalToken: { ...approvalToken, frozenArgsHash: otherDiff.hash },
+    };
+    const tampered: ReceiptSnapshot = { ...fixture, writes: [wrongHashWrite] };
+    const result = validateReceipt(tampered);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(
+        result.errors.some(
+          (e) =>
+            e.path === "/writes/0/approvalToken/frozenArgsHash" &&
+            /proposedDiff hash/.test(e.message),
+        ),
+      ).toBe(true);
+    }
+  });
+
+  it("rejects empty webauthnAssertion when riskClass is high", () => {
+    const fixture = validReceiptFixture();
+    const firstApproval = nonNull(fixture.approvals[0]);
+    const tampered: ReceiptSnapshot = {
+      ...fixture,
+      approvals: [
+        {
+          ...firstApproval,
+          signedToken: { ...firstApproval.signedToken, webauthnAssertion: "" },
+        },
+      ],
+    };
+    const result = validateReceipt(tampered);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(
+        result.errors.some(
+          (e) =>
+            e.path.endsWith("/webauthnAssertion") && /non-empty.*high\/critical/.test(e.message),
+        ),
+      ).toBe(true);
+    }
+  });
+
+  it("rejects unknown top-level keys", () => {
+    const fixture = validReceiptFixture();
+    const tampered = { ...fixture, shadow: { unsanitized: "...‮evil..." } };
+    const result = validateReceipt(tampered);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors.some((e) => e.path === "/shadow" && /not allowed/.test(e.message))).toBe(
+        true,
+      );
+    }
+  });
+
+  it("rejects unknown nested keys (in toolCall)", () => {
+    const fixture = validReceiptFixture();
+    const firstToolCall = nonNull(fixture.toolCalls[0]);
+    const tampered: ReceiptSnapshot = {
+      ...fixture,
+      toolCalls: [{ ...firstToolCall, evilField: "nope" } as never],
+    };
+    const result = validateReceipt(tampered);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(
+        result.errors.some(
+          (e) => e.path === "/toolCalls/0/evilField" && /not allowed/.test(e.message),
+        ),
+      ).toBe(true);
+    }
+  });
+
+  it("receiptFromJson throws on unknown top-level fields (no silent drop)", () => {
+    const json = receiptToJson(validReceiptFixture());
+    const parsed = JSON.parse(json) as Record<string, unknown>;
+    const tampered = { ...parsed, shadow: "evil" };
+    const tamperedJson = JSON.stringify(tampered);
+    expect(() => receiptFromJson(tamperedJson)).toThrow(/shadow.*not allowed/);
+  });
+
+  it("rejects ToolCallId/ApprovalId containing colons (LOCAL_ID_RE excludes ':')", () => {
+    expect(() => asToolCallId("tool:01")).toThrow();
+    expect(() => asApprovalId("approval:01")).toThrow();
+  });
 });
+
+function nonNull<T>(value: T | null | undefined): T {
+  if (value === null || value === undefined) {
+    throw new Error("fixture missing required value");
+  }
+  return value;
+}
 
 function validReceiptFixture(): ReceiptSnapshot {
   const receiptId = asReceiptId(RECEIPT_ID);
@@ -172,22 +326,22 @@ function validReceiptFixture(): ReceiptSnapshot {
     toolManifest: sha256Hex("tool-manifest:v1"),
     toolCalls: [
       {
-        tool_id: asToolCallId("tool_01"),
-        tool_name: "hubspot.contacts.read",
+        toolId: asToolCallId("tool_01"),
+        toolName: "hubspot.contacts.read",
         inputs: toolInputs,
         output: SanitizedString.fromUnknown("Fetched HubSpot contact #1234"),
-        started_at: new Date("2026-05-08T18:00:01.000Z"),
-        finished_at: new Date("2026-05-08T18:00:02.000Z"),
+        startedAt: new Date("2026-05-08T18:00:01.000Z"),
+        finishedAt: new Date("2026-05-08T18:00:02.000Z"),
         status: "ok",
         error: SanitizedString.fromUnknown(""),
       },
     ],
     approvals: [
       {
-        approval_id: asApprovalId("approval_01"),
+        approvalId: asApprovalId("approval_01"),
         role: "approver",
         decision: "approve",
-        signed_token: approvalToken,
+        signedToken: approvalToken,
         decidedAt: new Date("2026-05-08T18:01:00.000Z"),
       },
     ],
@@ -195,10 +349,10 @@ function validReceiptFixture(): ReceiptSnapshot {
       {
         path: "docs/brief.md",
         mode: "modified",
-        before_hash: sha256Hex("docs/brief.md:before"),
-        after_hash: sha256Hex("docs/brief.md:after"),
-        lines_added: 12,
-        lines_removed: 3,
+        beforeHash: sha256Hex("docs/brief.md:before"),
+        afterHash: sha256Hex("docs/brief.md:after"),
+        linesAdded: 12,
+        linesRemoved: 3,
       },
     ],
     commits: [
@@ -206,8 +360,8 @@ function validReceiptFixture(): ReceiptSnapshot {
         sha: "abc123def456",
         message: SanitizedString.fromUnknown("docs: update meeting brief"),
         author: "Fran",
-        author_email: "fran@example.com",
-        parent_sha: "def456abc123",
+        authorEmail: "fran@example.com",
+        parentSha: "def456abc123",
         signed: true,
       },
     ],
@@ -219,7 +373,7 @@ function validReceiptFixture(): ReceiptSnapshot {
         fetchedAt: new Date("2026-05-08T18:00:01.000Z"),
         hash: sha256Hex("hubspot-contact-1234"),
         citation: "HubSpot contact #1234 fetched at 2026-05-08T18:00:01.000Z",
-        raw_ref: "hubspot://contacts/1234",
+        rawRef: "hubspot://contacts/1234",
       },
     ],
     writes: [
@@ -332,7 +486,7 @@ function shuffledReceiptFixture(): ReceiptSnapshot {
     ],
     sourceReads: [
       {
-        raw_ref: "hubspot://contacts/1234",
+        rawRef: "hubspot://contacts/1234",
         citation: "HubSpot contact #1234 fetched at 2026-05-08T18:00:01.000Z",
         hash: sha256Hex("hubspot-contact-1234"),
         fetchedAt: new Date("2026-05-08T18:00:01.000Z"),
@@ -344,8 +498,8 @@ function shuffledReceiptFixture(): ReceiptSnapshot {
     commits: [
       {
         signed: true,
-        parent_sha: "def456abc123",
-        author_email: "fran@example.com",
+        parentSha: "def456abc123",
+        authorEmail: "fran@example.com",
         author: "Fran",
         message: SanitizedString.fromUnknown("docs: update meeting brief"),
         sha: "abc123def456",
@@ -353,10 +507,10 @@ function shuffledReceiptFixture(): ReceiptSnapshot {
     ],
     filesChanged: [
       {
-        lines_removed: 3,
-        lines_added: 12,
-        after_hash: sha256Hex("docs/brief.md:after"),
-        before_hash: sha256Hex("docs/brief.md:before"),
+        linesRemoved: 3,
+        linesAdded: 12,
+        afterHash: sha256Hex("docs/brief.md:after"),
+        beforeHash: sha256Hex("docs/brief.md:before"),
         mode: "modified",
         path: "docs/brief.md",
       },
@@ -364,22 +518,22 @@ function shuffledReceiptFixture(): ReceiptSnapshot {
     approvals: [
       {
         decidedAt: new Date("2026-05-08T18:01:00.000Z"),
-        signed_token: approvalToken,
+        signedToken: approvalToken,
         decision: "approve",
         role: "approver",
-        approval_id: asApprovalId("approval_01"),
+        approvalId: asApprovalId("approval_01"),
       },
     ],
     toolCalls: [
       {
         error: SanitizedString.fromUnknown(""),
         status: "ok",
-        finished_at: new Date("2026-05-08T18:00:02.000Z"),
-        started_at: new Date("2026-05-08T18:00:01.000Z"),
+        finishedAt: new Date("2026-05-08T18:00:02.000Z"),
+        startedAt: new Date("2026-05-08T18:00:01.000Z"),
         output: SanitizedString.fromUnknown("Fetched HubSpot contact #1234"),
         inputs: toolInputs,
-        tool_name: "hubspot.contacts.read",
-        tool_id: asToolCallId("tool_01"),
+        toolName: "hubspot.contacts.read",
+        toolId: asToolCallId("tool_01"),
       },
     ],
     toolManifest: sha256Hex("tool-manifest:v1"),

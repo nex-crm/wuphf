@@ -12,15 +12,16 @@
 //      All app data. Renderer is loaded from `http://127.0.0.1:<port>/` —
 //      same-origin loopback. `GET /api-token` returns bearer + broker URL.
 //      DNS-rebinding-guarded: broker rejects requests whose Host header is
-//      not 127.0.0.1, ::1, or localhost.
+//      not 127.0.0.1, ::1, or localhost AND whose RemoteAddr is not loopback.
+//      Both checks must pass; the Host check alone is not the full gate.
 
 import type { Brand } from "./brand.ts";
-import type { ReceiptId, SignedApprovalToken } from "./receipt.ts";
-import type { Sha256Hex } from "./sha256.ts";
+import type { ReceiptId, SignedApprovalToken, WriteResult } from "./receipt.ts";
 
 export type BrokerPort = Brand<number, "BrokerPort">;
 export type ApiToken = Brand<string, "ApiToken">;
 export type RequestId = Brand<string, "RequestId">;
+export type KeychainHandleId = Brand<string, "KeychainHandleId">;
 
 // ---------- Channel 1: contextBridge OS verbs ----------
 
@@ -40,33 +41,35 @@ export interface OsVerbsApi {
   /**
    * Open an opaque OS-keychain handle for a per-agent credential. The handle is
    * a process-scoped pointer; the actual secret never crosses the bridge — the
-   * broker dereferences it through the main-process keychain bridge.
+   * broker dereferences it through the main-process keychain bridge. The brand
+   * exists to make accidental string substitution into a credential field a
+   * compile error.
    */
   getKeychainHandle(args: { agentSlug: string; service: string }): Promise<{
-    handleId: string;
+    handleId: KeychainHandleId;
     expiresAt: string; // ISO 8601
   }>;
   setLoginItemSettings(args: { openAtLogin: boolean }): Promise<void>;
   requestSingleInstanceLock(): Promise<{ acquired: boolean }>;
   setAsDefaultProtocolClient(args: { scheme: "wuphf" }): Promise<{ ok: boolean }>;
-  /**
-   * Subscribe to deep-links. The handler receives URLs only.
-   */
+  /** Subscribe to deep-links. The handler receives URLs only. */
   onDeepLink(handler: (url: string) => void): () => void;
 }
 
 // ---------- Channel 2: Broker loopback ----------
 
 /**
- * Bootstrap response shape. v0 endpoint preserved.
+ * Bootstrap response shape. Wire-stable with v0:
  *   GET http://127.0.0.1:<port>/api-token
- *   → { brokerBaseUrl, apiToken }
+ *   → { token, broker_url }
+ *
+ * Snake-keyed because that's what v0 emits (`internal/team/broker_web_proxy.go`)
+ * and what `docs/architecture/broker-contract.md` documents. Renderer code that
+ * wants camelCase should normalize after parsing the wire response.
  */
 export interface ApiBootstrap {
-  readonly brokerBaseUrl: string; // http://127.0.0.1:<port>
-  readonly apiToken: ApiToken;
-  readonly issuedAt: string; // ISO 8601
-  readonly expiresAt: string; // ISO 8601
+  readonly token: ApiToken;
+  readonly broker_url: string; // http://127.0.0.1:<port>
 }
 
 export interface BrokerHttpRequest<TBody> {
@@ -77,8 +80,14 @@ export interface BrokerHttpRequest<TBody> {
   readonly body?: TBody | undefined;
 }
 
+/**
+ * `204` carries no body — typed as `body?: undefined` so callers don't need to
+ * fabricate a placeholder. `202 Accepted` is included because v0 already uses
+ * it for queued/preview confirmations (`internal/team/broker_scan.go`).
+ */
 export type BrokerHttpResponse<T> =
-  | { readonly ok: true; readonly status: 200 | 201 | 204; readonly body: T }
+  | { readonly ok: true; readonly status: 200 | 201 | 202; readonly body: T }
+  | { readonly ok: true; readonly status: 204; readonly body?: undefined }
   | { readonly ok: false; readonly status: number; readonly error: BrokerError };
 
 export interface BrokerError {
@@ -92,19 +101,34 @@ export interface BrokerError {
 /**
  * Approval submission. Carries only an opaque receipt_id and a verifiable
  * signed token. NEVER carries the mutable proposed payload — re-submitting a
- * mutated payload to bypass the freeze would defeat the moat invariant.
+ * mutated payload to bypass the freeze would defeat the moat invariant. The
+ * signed token already binds frozenArgsHash; the broker verifies the token
+ * signature against the receipt it owns.
  */
 export interface ApprovalSubmitRequest {
   readonly receiptId: ReceiptId;
   readonly approvalToken: SignedApprovalToken;
-  readonly clientFrozenArgsHash: Sha256Hex; // sanity-check only
 }
 
+/**
+ * Approval submission response. `executed` carries the same `WriteResult` as
+ * the receipt's external write so callers can switch on a single shape across
+ * receipt projections and approval responses. `queued` covers the broker
+ * accepting the approval but deferring execution (matches `ReceiptStatus`
+ * `"approval_pending"` semantics).
+ */
 export type ApprovalSubmitResponse =
   | {
       readonly accepted: true;
-      readonly appliedAt: string;
-      readonly executionResult: "applied" | "rollback";
+      readonly state: "executed";
+      readonly appliedAt: string; // ISO 8601
+      readonly executionResult: WriteResult;
+    }
+  | {
+      readonly accepted: true;
+      readonly state: "queued";
+      readonly acceptedAt: string; // ISO 8601
+      readonly receiptId: ReceiptId;
     }
   | {
       readonly accepted: false;
@@ -159,28 +183,85 @@ export type WsFrame =
 
 // ---------- DNS-rebinding guard (declared as a contract, broker enforces) ----------
 
-export const ALLOWED_LOOPBACK_HOSTS: readonly string[] = ["127.0.0.1", "::1", "localhost"] as const;
+// Tuple type — preserves literal narrowing for downstream consumers.
+export const ALLOWED_LOOPBACK_HOSTS = ["127.0.0.1", "::1", "localhost"] as const;
+export type AllowedLoopbackHost = (typeof ALLOWED_LOOPBACK_HOSTS)[number];
 
+const PORT_RE = /^\d+$/;
+
+function isValidPort(port: string): boolean {
+  if (!PORT_RE.test(port)) return false;
+  const parsed = Number(port);
+  return Number.isInteger(parsed) && parsed >= 0 && parsed <= 65535;
+}
+
+/**
+ * Validate the HTTP `Host` header against the loopback allowlist. This is the
+ * Host-header half of the DNS-rebinding gate; the broker MUST also confirm the
+ * remote address is loopback (see `isLoopbackRemoteAddress`). Either check
+ * alone is insufficient.
+ *
+ * Accepted forms:
+ *   "127.0.0.1", "127.0.0.1:8080"
+ *   "localhost", "localhost:8080"   (case-insensitive on the hostname)
+ *   "::1", "[::1]", "[::1]:8080"
+ *
+ * Rejected forms include `127.0.0.1.evil.com`, `Localhost.evil`, expanded IPv6
+ * (`0:0:0:0:0:0:0:1`), unbracketed IPv6+port (`::1:8080`), `[localhost]`,
+ * `[127.0.0.1]:8080`, malformed ports (`localhost:abc`), and trailing junk.
+ */
 export function isAllowedLoopbackHost(host: string): boolean {
-  // Strip optional :port suffix.
   if (host.startsWith("[")) {
     const closeBracketIdx = host.indexOf("]");
-    if (closeBracketIdx < 0) {
-      return false;
-    }
+    if (closeBracketIdx < 0) return false;
     const bareIpv6Host = host.slice(1, closeBracketIdx);
+    if (bareIpv6Host !== "::1") return false;
     const suffix = host.slice(closeBracketIdx + 1);
-    if (suffix !== "" && !/^:\d+$/.test(suffix)) {
-      return false;
-    }
-    return (ALLOWED_LOOPBACK_HOSTS as readonly string[]).includes(bareIpv6Host);
+    if (suffix === "") return true;
+    if (!suffix.startsWith(":")) return false;
+    return isValidPort(suffix.slice(1));
   }
 
+  // Unbracketed multi-colon means raw IPv6 (or junk). Only allow exact "::1".
   if (host.includes(":") && host.indexOf(":") !== host.lastIndexOf(":")) {
-    return (ALLOWED_LOOPBACK_HOSTS as readonly string[]).includes(host);
+    return host === "::1";
   }
 
   const colonIdx = host.lastIndexOf(":");
   const bareHost = colonIdx >= 0 ? host.slice(0, colonIdx) : host;
-  return (ALLOWED_LOOPBACK_HOSTS as readonly string[]).includes(bareHost);
+  if (colonIdx >= 0 && !isValidPort(host.slice(colonIdx + 1))) {
+    return false;
+  }
+  if (bareHost === "127.0.0.1") return true;
+  return bareHost.toLowerCase() === "localhost";
+}
+
+/**
+ * Validate the request's RemoteAddr (peer IP, no port) against the loopback
+ * range. The broker MUST gate on both this AND `isAllowedLoopbackHost(Host)`.
+ * Without the RemoteAddr check, an attacker that gets a non-loopback bind by
+ * mistake can spoof `Host: 127.0.0.1` and pass the Host gate.
+ *
+ * Accepts any address in 127.0.0.0/8, plus `::1`. Rejects 0.0.0.0 and
+ * non-loopback IPs.
+ */
+export function isLoopbackRemoteAddress(remoteAddr: string): boolean {
+  if (remoteAddr === "::1") return true;
+  if (remoteAddr === "::ffff:127.0.0.1" || remoteAddr.startsWith("::ffff:127.")) {
+    // IPv4-mapped IPv6 form of 127.0.0.0/8
+    const v4 = remoteAddr.slice(7);
+    return isLoopbackIpv4(v4);
+  }
+  return isLoopbackIpv4(remoteAddr);
+}
+
+function isLoopbackIpv4(addr: string): boolean {
+  const parts = addr.split(".");
+  if (parts.length !== 4) return false;
+  for (const part of parts) {
+    if (!PORT_RE.test(part)) return false;
+    const n = Number(part);
+    if (!Number.isInteger(n) || n < 0 || n > 255) return false;
+  }
+  return parts[0] === "127";
 }

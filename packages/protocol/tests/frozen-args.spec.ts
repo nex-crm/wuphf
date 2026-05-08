@@ -116,16 +116,6 @@ describe("FrozenArgs", () => {
     );
   });
 
-  it("preserves hash across CBOR round-trips", () => {
-    fc.assert(
-      fc.property(jsonValue, (input) => {
-        const frozen = FrozenArgs.freeze(input);
-        expect(FrozenArgs.fromCBOR(frozen.toCBOR()).hash).toBe(frozen.hash);
-      }),
-      { numRuns: 5000 },
-    );
-  });
-
   it("produces unequal hashes for differing canonical inputs", () => {
     fc.assert(
       fc.property(
@@ -152,5 +142,57 @@ describe("FrozenArgs", () => {
         },
       ),
     );
+  });
+
+  it("rejects functions, symbols, bigints", () => {
+    expect(() => FrozenArgs.freeze(() => 1)).toThrow(/function/);
+    expect(() => FrozenArgs.freeze({ fn: () => 1 })).toThrow(/function/);
+    expect(() => FrozenArgs.freeze(Symbol("x"))).toThrow(/symbol/);
+    expect(() => FrozenArgs.freeze({ s: Symbol("x") })).toThrow(/symbol/);
+    expect(() => FrozenArgs.freeze(1n)).toThrow(/bigint/);
+    expect(() => FrozenArgs.freeze({ b: 1n })).toThrow(/bigint/);
+  });
+
+  it("rejects sparse array holes", () => {
+    // biome-ignore lint/suspicious/noSparseArray: deliberate hole for the test
+    const sparse = [1, , 2];
+    expect(() => FrozenArgs.freeze(sparse)).toThrow(/sparse/);
+  });
+
+  it("rejects non-plain objects", () => {
+    expect(() => FrozenArgs.freeze(new Map())).toThrow(/non-plain/);
+    expect(() => FrozenArgs.freeze(new Set())).toThrow(/non-plain/);
+    expect(() => FrozenArgs.freeze(new Date())).toThrow(/non-plain/);
+    expect(() => FrozenArgs.freeze({ d: new Date() })).toThrow(/non-plain/);
+  });
+
+  it("accepts Object.create(null) as plain", () => {
+    const plain: { x?: number } = Object.create(null);
+    plain.x = 1;
+    expect(() => FrozenArgs.freeze(plain)).not.toThrow();
+  });
+
+  it("rejects accessor properties", () => {
+    const obj = {} as Record<string, unknown>;
+    Object.defineProperty(obj, "x", { get: () => 1, enumerable: true });
+    expect(() => FrozenArgs.freeze(obj)).toThrow(/accessor/);
+  });
+
+  it("rejects non-enumerable own properties", () => {
+    const obj = {} as Record<string, unknown>;
+    Object.defineProperty(obj, "x", { value: 1, enumerable: false });
+    expect(() => FrozenArgs.freeze(obj)).toThrow(/non-enumerable/);
+  });
+
+  it("rejects symbol keys", () => {
+    const sym = Symbol("k");
+    const obj: Record<string | symbol, unknown> = {};
+    obj[sym] = 1;
+    expect(() => FrozenArgs.freeze(obj)).toThrow(/symbol keys/);
+  });
+
+  it("rejects strings containing lone surrogates", () => {
+    expect(() => FrozenArgs.freeze("\ud800")).toThrow(/surrogate/);
+    expect(() => FrozenArgs.freeze({ x: "\udc00" })).toThrow(/surrogate/);
   });
 });

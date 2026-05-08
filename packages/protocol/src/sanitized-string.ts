@@ -4,14 +4,17 @@ export interface SanitizedStringOptions {
   readonly policy?: SanitizedStringPolicy | undefined;
 }
 
+const MAX_DEPTH = 64;
+const FORBIDDEN_KEYS: ReadonlySet<string> = new Set(["__proto__", "constructor", "prototype"]);
+
 export class SanitizedString {
-  private constructor(readonly value: string) {}
+  private constructor(readonly value: string) {
+    Object.freeze(this);
+  }
 
   static fromUnknown(input: unknown, options: SanitizedStringOptions = {}): SanitizedString {
     const value = sanitizeText(coerceToString(input, options), options);
-    const sanitized = new SanitizedString(value);
-    Object.freeze(sanitized);
-    return sanitized;
+    return new SanitizedString(value);
   }
 
   get length(): number {
@@ -24,12 +27,12 @@ export class SanitizedString {
 }
 
 function coerceToString(input: unknown, options: SanitizedStringOptions): string {
-  // Coercion is explicit at the renderer boundary: strings are used as-is;
-  // numbers, bigints, booleans, symbols, and functions use JS String();
-  // null/undefined become empty text so absent optional fields do not render as
-  // "null" or "undefined"; objects are first projected through JSON.stringify.
-  // JSON object content is sanitized before the final stringify so NFKC cannot
-  // turn string content into invalid JSON syntax.
+  // Coercion is explicit at the renderer boundary. null/undefined become empty
+  // text so absent optional fields do not render as "null" or "undefined".
+  // Symbols and functions are rejected — `String(Symbol(x))` leaks the
+  // description and `String(fn)` leaks function source. Objects are projected
+  // through JSON.stringify; their string fields are sanitized before re-
+  // stringifying so NFKC cannot turn content into invalid JSON syntax.
   if (input === null || input === undefined) {
     return "";
   }
@@ -40,9 +43,11 @@ function coerceToString(input: unknown, options: SanitizedStringOptions): string
     case "number":
     case "bigint":
     case "boolean":
-    case "symbol":
-    case "function":
       return String(input);
+    case "symbol":
+      throw new Error("SanitizedString: symbol is not representable");
+    case "function":
+      throw new Error("SanitizedString: function is not representable");
     case "object":
       return stringifySanitizedJson(input, options);
   }
@@ -53,16 +58,27 @@ function coerceToString(input: unknown, options: SanitizedStringOptions): string
 function stringifySanitizedJson(input: object, options: SanitizedStringOptions): string {
   const serialized = JSON.stringify(input);
   if (serialized === undefined) {
-    return "";
+    throw new Error("SanitizedString: input is not JSON-representable");
   }
 
   const projected = JSON.parse(serialized) as unknown;
-  const sanitizedProjection = sanitizeJsonValue(projected, options);
+  const sanitizedProjection = sanitizeJsonValue(projected, options, 0);
   const sanitizedSerialized = JSON.stringify(sanitizedProjection);
-  return sanitizedSerialized ?? "";
+  if (sanitizedSerialized === undefined) {
+    throw new Error("SanitizedString: sanitized projection is not JSON-representable");
+  }
+  return sanitizedSerialized;
 }
 
-function sanitizeJsonValue(value: unknown, options: SanitizedStringOptions): unknown {
+function sanitizeJsonValue(
+  value: unknown,
+  options: SanitizedStringOptions,
+  depth: number,
+): unknown {
+  if (depth > MAX_DEPTH) {
+    throw new Error("SanitizedString: max recursion depth exceeded");
+  }
+
   if (typeof value === "string") {
     return sanitizeText(value, options);
   }
@@ -72,18 +88,37 @@ function sanitizeJsonValue(value: unknown, options: SanitizedStringOptions): unk
   }
 
   if (Array.isArray(value)) {
-    return value.map((item) => sanitizeJsonValue(item, options));
+    return value.map((item) => sanitizeJsonValue(item, options, depth + 1));
   }
 
   if (typeof value === "object") {
-    const out: Record<string, unknown> = {};
-    for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
-      out[sanitizeText(key, options)] = sanitizeJsonValue(child, options);
+    // Object.create(null) defeats the `__proto__` setter that lives on
+    // Object.prototype. Without this, JSON.parse('{"__proto__": ...}') puts an
+    // own property on the parsed value, and assigning it on a `{}` accumulator
+    // mutates the accumulator's prototype.
+    const out: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
+    for (const [rawKey, child] of Object.entries(value as Record<string, unknown>)) {
+      const sanitizedKey = sanitizeText(rawKey, options);
+      if (FORBIDDEN_KEYS.has(sanitizedKey)) {
+        throw new Error(`SanitizedString: forbidden key "${sanitizedKey}"`);
+      }
+      if (Object.hasOwn(out, sanitizedKey)) {
+        throw new Error(`SanitizedString: sanitized key collision on "${sanitizedKey}"`);
+      }
+      Object.defineProperty(out, sanitizedKey, {
+        value: sanitizeJsonValue(child, options, depth + 1),
+        enumerable: true,
+        configurable: true,
+        writable: true,
+      });
     }
     return out;
   }
 
-  return value;
+  // Numbers/strings/null are handled above; unknown typeofs (function, symbol,
+  // bigint, undefined) shouldn't appear here because JSON.parse can't produce
+  // them. Reject defensively rather than letting them fall through.
+  throw new Error(`SanitizedString: unrepresentable JSON value of type ${typeof value}`);
 }
 
 function sanitizeText(input: string, options: SanitizedStringOptions): string {
