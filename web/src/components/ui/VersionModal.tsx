@@ -171,12 +171,12 @@ export function VersionModal({ open, onClose }: VersionModalProps) {
         phase: "done",
         result: {
           ok: false,
-          command: check?.install_command ?? check?.upgrade_command,
+          command: deriveInstallCommand(check),
           error: e instanceof Error ? e.message : String(e),
         },
       });
     }
-  }, [run.phase, refetch, check?.install_command, check?.upgrade_command]);
+  }, [run.phase, refetch, check]);
 
   const triggerRestart = useCallback(async () => {
     if (restarting) return;
@@ -356,8 +356,8 @@ function ActionsSection({
           type="button"
           className="version-modal-btn version-modal-btn--primary"
           onClick={onForceUpdate}
-          disabled={running}
-          aria-busy={running}
+          disabled={running || restarting}
+          aria-busy={running || restarting}
           title={`Runs ${installCommand}`}
         >
           {running ? "Installing…" : "Force update"}

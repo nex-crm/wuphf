@@ -121,26 +121,25 @@ export function StatusBar() {
   // Prefer the live /health value for the chip label so it reflects the
   // running binary, not whatever /upgrade-check (cached an hour) reports.
   const currentVersion = health?.build?.version ?? upgradeCheck?.current ?? "";
-  const versionLabel = formatVersion(currentVersion, "version");
+  const versionLabel = formatVersion(currentVersion, "—");
   const versionStatus = deriveStatus(upgradeCheck, upgradeChecking);
   const versionTitle = (() => {
-    const cur = formatVersion(currentVersion);
     const latest = formatVersion(upgradeCheck?.latest, "");
     switch (versionStatus.kind) {
       case "ok":
-        return `wuphf ${cur} — up to date`;
+        return `wuphf ${versionLabel} — up to date`;
       case "outdated":
         return latest
-          ? `wuphf ${cur} — update available (${latest})`
-          : `wuphf ${cur} — update available`;
+          ? `wuphf ${versionLabel} — update available (${latest})`
+          : `wuphf ${versionLabel} — update available`;
       case "dev":
-        return `wuphf ${cur} — dev build`;
+        return `wuphf ${versionLabel} — dev build`;
       case "error":
-        return `wuphf ${cur} — version check failed`;
+        return `wuphf ${versionLabel} — version check failed`;
       case "loading":
-        return `wuphf ${cur} — checking for updates…`;
+        return `wuphf ${versionLabel} — checking for updates…`;
       default:
-        return `wuphf ${cur}`;
+        return `wuphf ${versionLabel}`;
     }
   })();
 

@@ -161,6 +161,42 @@ describe("<VersionModal>", () => {
     expect(screen.getByText("npm install -g wuphf@latest")).toBeInTheDocument();
   });
 
+  it("uses the guarded install command when runUpgrade rejects", async () => {
+    vi.spyOn(upgradeApi, "getUpgradeCheck").mockResolvedValue({
+      current: "0.83.0",
+      latest: "0.84.0",
+      upgrade_available: true,
+      is_dev_build: false,
+      upgrade_command: "npm install -g wuphf@latest",
+      install_method: "unknown",
+      install_command: "curl https://example.invalid/install.sh | sh",
+    });
+    vi.spyOn(upgradeApi, "runUpgrade").mockRejectedValue(
+      new Error("broker unavailable"),
+    );
+
+    const Wrapper = makeWrapper();
+    render(
+      <Wrapper>
+        <VersionModal open={true} onClose={vi.fn()} />
+      </Wrapper>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Force update")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByText("Force update"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Install failed")).toBeInTheDocument();
+    });
+    expect(screen.getByText("broker unavailable")).toBeInTheDocument();
+    expect(screen.getAllByText("npm install -g wuphf@latest").length).toBe(2);
+    expect(
+      screen.queryByText("curl https://example.invalid/install.sh | sh"),
+    ).toBeNull();
+  });
+
   it("does not surface a stale Install-complete after close-during-run", async () => {
     // Hold runUpgrade open so we control when it resolves. Exercises the
     // stale-outcome guard: the user closes the modal before the install
@@ -289,5 +325,53 @@ describe("<VersionModal>", () => {
     expect(
       screen.getByRole("button", { name: "Restart broker" }),
     ).toBeEnabled();
+  });
+
+  it("disables force update while restart is in flight", async () => {
+    vi.spyOn(upgradeApi, "getUpgradeCheck").mockResolvedValue({
+      current: "0.83.0",
+      latest: "0.83.0",
+      upgrade_available: false,
+      is_dev_build: false,
+      upgrade_command: "npm install -g wuphf@latest",
+    });
+    const runSpy = vi
+      .spyOn(upgradeApi, "runUpgrade")
+      .mockResolvedValue({ ok: true });
+    let resolveRestart: (value: { ok: true }) => void = () => {};
+    vi.spyOn(clientApi, "restartBroker").mockImplementation(
+      () =>
+        new Promise<{ ok: true }>((resolve) => {
+          resolveRestart = resolve;
+        }),
+    );
+
+    const Wrapper = makeWrapper();
+    const onClose = vi.fn();
+    render(
+      <Wrapper>
+        <VersionModal open={true} onClose={onClose} />
+      </Wrapper>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Restart broker")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByText("Restart broker"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Restarting…")).toBeInTheDocument();
+    });
+    const forceUpdate = screen.getByRole("button", { name: "Force update" });
+    expect(forceUpdate).toBeDisabled();
+    expect(forceUpdate).toHaveAttribute("aria-busy", "true");
+
+    fireEvent.click(forceUpdate);
+    expect(runSpy).not.toHaveBeenCalled();
+
+    resolveRestart({ ok: true });
+    await waitFor(() => {
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
   });
 });

@@ -437,7 +437,10 @@ func (s *AgentService) Get(slug string) (*ManagedAgent, bool) {
 	return ma, ok
 }
 
-// List returns all managed agents, sorted by slug.
+// List returns ManagedAgent snapshots sorted by slug. Config is copied by value
+// and State is copied via stateSnapshot; mutating those returned fields does
+// not affect the managed agent. Loop remains the shared live pointer, so callers
+// must treat it as the mutable agent runtime.
 func (s *AgentService) List() []*ManagedAgent {
 	s.mu.Lock()
 	defer s.mu.Unlock()
