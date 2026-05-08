@@ -4,6 +4,7 @@ import { renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import * as tasksApi from "../api/tasks";
+import { useAppStore } from "../stores/app";
 import {
   OFFICE_TASKS_QUERY_KEY,
   OFFICE_TASKS_REFETCH_MS,
@@ -26,10 +27,12 @@ function makeClient(): QueryClient {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  useAppStore.setState({ brokerConnected: false });
 });
 
 describe("useOfficeTasks", () => {
   it("fetches once and exposes Task[] data", async () => {
+    useAppStore.setState({ brokerConnected: true });
     const spy = vi.spyOn(tasksApi, "getOfficeTasks").mockResolvedValue({
       tasks: [
         { id: "1", title: "first", status: "open" },
@@ -52,6 +55,7 @@ describe("useOfficeTasks", () => {
   });
 
   it("normalises a missing tasks field to an empty array", async () => {
+    useAppStore.setState({ brokerConnected: true });
     vi.spyOn(tasksApi, "getOfficeTasks").mockResolvedValue(
       {} as unknown as tasksApi.TaskListResponse,
     );
@@ -66,6 +70,7 @@ describe("useOfficeTasks", () => {
   });
 
   it("exposes a loading state before the fetch resolves", () => {
+    useAppStore.setState({ brokerConnected: true });
     vi.spyOn(tasksApi, "getOfficeTasks").mockImplementation(
       () => new Promise(() => {}),
     );
@@ -80,6 +85,7 @@ describe("useOfficeTasks", () => {
   });
 
   it("surfaces errors via the query result", async () => {
+    useAppStore.setState({ brokerConnected: true });
     vi.spyOn(tasksApi, "getOfficeTasks").mockRejectedValue(new Error("boom"));
 
     const { result } = renderHook(() => useOfficeTasks(), {

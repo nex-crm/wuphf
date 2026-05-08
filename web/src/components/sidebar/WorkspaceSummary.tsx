@@ -1,8 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 
 import { getUsage } from "../../api/platform";
+import { getOfficeTasks } from "../../api/tasks";
 import { useOfficeMembers } from "../../hooks/useMembers";
-import { useOfficeTasks } from "../../hooks/useOfficeTasks";
 
 function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -13,15 +13,24 @@ function formatTokens(n: number): string {
 /**
  * Small status line at the bottom of the sidebar. Mirrors the legacy
  * `renderWorkspaceSummary` output: active agents, open tasks, total tokens.
+ *
+ * Uses a separate cache key ("office-tasks-active") from TasksApp
+ * ("office-tasks") because this component only needs active tasks.
  */
 export function WorkspaceSummary() {
   const { data: members = [] } = useOfficeMembers();
-  const { data: tasks = [] } = useOfficeTasks();
+  const { data: tasksData } = useQuery({
+    queryKey: ["office-tasks-active"],
+    queryFn: () => getOfficeTasks({ includeDone: false }),
+    refetchInterval: 30_000,
+  });
   const { data: usage } = useQuery({
     queryKey: ["usage"],
     queryFn: () => getUsage(),
     refetchInterval: 30_000,
   });
+
+  const tasks = tasksData?.tasks ?? [];
 
   const activeAgents = members.filter((m) => {
     if (!m.slug || m.slug === "human" || m.slug === "you") return false;

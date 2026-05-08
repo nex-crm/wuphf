@@ -967,7 +967,7 @@ func (b *Broker) Reset() {
 	b.channels = defaultTeamChannels()
 	b.sessionMode = mode
 	b.oneOnOneAgent = agent
-	b.tasks = nil
+	b.tasks = []teamTask{}
 	b.requests = nil
 	b.humanInvites = nil
 	b.humanSessions = nil
