@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { ArrowIcon } from "./components";
 
 interface FirstTaskScreenProps {
@@ -15,6 +16,8 @@ export function FirstTaskScreen({
   onWatchTask,
   onSkipToOffice,
 }: FirstTaskScreenProps) {
+  const [acted, setActed] = useState(false);
+
   return (
     <div className="wizard-step" data-testid="first-task-screen">
       <div className="wizard-hero">
@@ -51,6 +54,7 @@ export function FirstTaskScreen({
             WebkitLineClamp: 3,
             WebkitBoxOrient: "vertical",
             overflow: "hidden",
+            wordBreak: "break-word",
           }}
         >
           {taskText}
@@ -74,7 +78,8 @@ export function FirstTaskScreen({
         <button
           type="button"
           className="btn btn-ghost"
-          onClick={onSkipToOffice}
+          onClick={() => { setActed(true); onSkipToOffice(); }}
+          disabled={acted}
           data-testid="first-task-skip"
         >
           Explore the office
@@ -82,7 +87,8 @@ export function FirstTaskScreen({
         <button
           type="button"
           className="btn btn-primary"
-          onClick={onWatchTask}
+          onClick={() => { setActed(true); onWatchTask(); }}
+          disabled={acted}
           data-testid="first-task-watch"
         >
           Watch it run
