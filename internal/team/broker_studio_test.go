@@ -676,3 +676,85 @@ func mustJSON(t *testing.T, value any) string {
 	}
 	return string(raw)
 }
+
+// TestStripExternalRetryMarkerScope locks in the predicate-driven strip
+// behavior: a line is removed only when externalRetryAfterPattern matches it
+// (i.e. it contains a parseable RFC3339 retry-after timestamp — the same
+// condition the watchdog uses to re-resume). The cases here include both
+// happy-path strips and the false-positive substrings that motivated the
+// switch from a bare-`429` matcher to the predicate pattern.
+func TestStripExternalRetryMarkerScope(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "strips 429 line with retry-after timestamp",
+			in:   "429 RESOURCE_EXHAUSTED. Retry after 2026-04-15T22:00:29.610Z.",
+			want: "",
+		},
+		{
+			name: "strips bare retry-after timestamp line",
+			in:   "Retry after 2026-04-15T22:00:29.610Z",
+			want: "",
+		},
+		{
+			name: "preserves bare 429 line without a timestamp (cannot re-trigger watchdog)",
+			in:   "429 RESOURCE_EXHAUSTED",
+			want: "429 RESOURCE_EXHAUSTED",
+		},
+		{
+			name: "preserves SUP-4290 ticket reference",
+			in:   "Investigate ticket SUP-4290 about login failures",
+			want: "Investigate ticket SUP-4290 about login failures",
+		},
+		{
+			name: "preserves task-4290 lane reference",
+			in:   "queued behind active lane on task-4290",
+			want: "queued behind active lane on task-4290",
+		},
+		{
+			name: "preserves 4290 line count",
+			in:   "completed 4290 items in batch",
+			want: "completed 4290 items in batch",
+		},
+		{
+			name: "preserves v4.29 version reference",
+			in:   "rolled out v4.29 upgrade notes",
+			want: "rolled out v4.29 upgrade notes",
+		},
+		{
+			name: "preserves issue reference 1429",
+			in:   "see issue 1429 for context",
+			want: "see issue 1429 for context",
+		},
+		{
+			name: "strips marker line but preserves surrounding context",
+			in:   "Original goal: ship the kickoff send.\n429 RESOURCE_EXHAUSTED. Retry after 2026-04-15T22:00:29.610Z.\nNotes follow.",
+			want: "Original goal: ship the kickoff send.\nNotes follow.",
+		},
+		{
+			name: "preserves separate 429 line when timestamp is on its own line",
+			in:   "429 RESOURCE_EXHAUSTED\nRetry after 2026-04-15T22:00:29.610Z",
+			want: "429 RESOURCE_EXHAUSTED",
+		},
+		{
+			name: "documented limitation: same-line operator context is dropped together with marker",
+			in:   "Cannot send: 429 RESOURCE_EXHAUSTED. Retry after 2026-04-15T22:00:29.610Z. Owner: refresh OAuth.",
+			want: "",
+		},
+		{
+			name: "empty in, empty out",
+			in:   "",
+			want: "",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := stripExternalRetryMarker(tc.in)
+			if got != tc.want {
+				t.Errorf("stripExternalRetryMarker(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
