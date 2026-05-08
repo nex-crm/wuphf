@@ -857,6 +857,10 @@ html[data-theme="nex"]
   color: var(--text-secondary);
   text-decoration: underline;
 }
+.status-bar-version:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+}
 .status-bar-version-dot {
   width: 6px;
   height: 6px;

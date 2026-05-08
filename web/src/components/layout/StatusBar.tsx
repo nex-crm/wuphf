@@ -3,7 +3,11 @@ import { useQuery } from "@tanstack/react-query";
 
 import { restartBroker } from "../../api/client";
 import { getHealth, type HealthResponse } from "../../api/platform";
-import { getUpgradeCheck, type UpgradeCheckResponse } from "../../api/upgrade";
+import {
+  getUpgradeCheck,
+  UPGRADE_CHECK_QUERY_KEY,
+  type UpgradeCheckResponse,
+} from "../../api/upgrade";
 import { useOfficeMembers } from "../../hooks/useMembers";
 import { appTitle } from "../../lib/constants";
 import { useCurrentRoute } from "../../routes/useCurrentRoute";
@@ -62,7 +66,7 @@ export function StatusBar() {
   // refetch after runUpgrade naturally drives a banner re-render.
   const { data: upgradeCheck, isFetching: upgradeChecking } =
     useQuery<UpgradeCheckResponse>({
-      queryKey: ["upgrade-check"],
+      queryKey: UPGRADE_CHECK_QUERY_KEY,
       queryFn: () => getUpgradeCheck(),
       enabled: brokerConnected,
       staleTime: 5 * 60_000,

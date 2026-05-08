@@ -9,8 +9,7 @@ import { VersionModal } from "./VersionModal";
 
 function makeWrapper() {
   // A fresh QueryClient per test guarantees no /upgrade-check cache
-  // bleed between cases — the modal queries on `["upgrade-check"]` which
-  // would otherwise carry over.
+  // bleed between cases — the modal shares a stable upgrade-check key.
   const client = new QueryClient({
     defaultOptions: {
       queries: { retry: false, refetchOnWindowFocus: false },
@@ -43,6 +42,30 @@ describe("<VersionModal>", () => {
     expect(container.querySelector(".version-modal")).toBeNull();
   });
 
+  it("puts dialog semantics on the modal card", async () => {
+    vi.spyOn(upgradeApi, "getUpgradeCheck").mockResolvedValue({
+      current: "0.83.0",
+      latest: "0.83.0",
+      upgrade_available: false,
+      is_dev_build: false,
+      upgrade_command: "npm install -g wuphf@latest",
+    });
+    const Wrapper = makeWrapper();
+    const { container } = render(
+      <Wrapper>
+        <VersionModal open={true} onClose={vi.fn()} />
+      </Wrapper>,
+    );
+
+    const dialog = screen.getByRole("dialog", { name: "wuphf version" });
+    expect(dialog.getAttribute("aria-modal")).toBe("true");
+    expect(dialog.getAttribute("aria-labelledby")).toBe("version-modal-title");
+    expect(dialog.classList.contains("version-modal")).toBe(true);
+    expect(container.querySelector(".help-overlay")?.getAttribute("role")).toBe(
+      null,
+    );
+  });
+
   it("renders the dev sentinel without a v-prefix", async () => {
     vi.spyOn(upgradeApi, "getUpgradeCheck").mockResolvedValue({
       current: "dev",
@@ -64,6 +87,78 @@ describe("<VersionModal>", () => {
     const codes = screen.getAllByText("dev");
     expect(codes.length).toBeGreaterThan(0);
     expect(screen.queryByText("vdev")).toBeNull();
+  });
+
+  it("shows the successful force-update outcome and install output", async () => {
+    vi.spyOn(upgradeApi, "getUpgradeCheck").mockResolvedValue({
+      current: "0.83.0",
+      latest: "0.84.0",
+      upgrade_available: true,
+      is_dev_build: false,
+      upgrade_command: "npm install -g wuphf@latest",
+    });
+    vi.spyOn(upgradeApi, "runUpgrade").mockResolvedValue({
+      ok: true,
+      output: "added 1 package",
+    });
+
+    const Wrapper = makeWrapper();
+    render(
+      <Wrapper>
+        <VersionModal open={true} onClose={vi.fn()} />
+      </Wrapper>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Force update")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByText("Force update"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Install complete")).toBeInTheDocument();
+    });
+    expect(
+      screen.getByRole("button", { name: "Restart now" }),
+    ).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Show install output" }),
+    );
+    expect(screen.getByText("added 1 package")).toBeInTheDocument();
+  });
+
+  it("shows failed force-update details from the broker result", async () => {
+    vi.spyOn(upgradeApi, "getUpgradeCheck").mockResolvedValue({
+      current: "0.83.0",
+      latest: "0.84.0",
+      upgrade_available: true,
+      is_dev_build: false,
+      upgrade_command: "npm install -g wuphf@latest",
+      install_method: "local",
+      install_command: "bun add wuphf@latest",
+    });
+    vi.spyOn(upgradeApi, "runUpgrade").mockResolvedValue({
+      ok: false,
+      command: "npm install -g wuphf@latest",
+      error: "permission denied",
+    });
+
+    const Wrapper = makeWrapper();
+    render(
+      <Wrapper>
+        <VersionModal open={true} onClose={vi.fn()} />
+      </Wrapper>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Force update")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByText("Force update"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Install failed")).toBeInTheDocument();
+    });
+    expect(screen.getByText("permission denied")).toBeInTheDocument();
+    expect(screen.getByText("npm install -g wuphf@latest")).toBeInTheDocument();
   });
 
   it("does not surface a stale Install-complete after close-during-run", async () => {

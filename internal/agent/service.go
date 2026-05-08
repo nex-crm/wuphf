@@ -14,6 +14,26 @@ type ManagedAgent struct {
 	Config AgentConfig
 	State  AgentState
 	Loop   *AgentLoop
+
+	stateMu sync.RWMutex
+}
+
+func (ma *ManagedAgent) setState(state AgentState) {
+	ma.stateMu.Lock()
+	defer ma.stateMu.Unlock()
+	ma.State = state
+}
+
+func (ma *ManagedAgent) updateState(update func(*AgentState)) {
+	ma.stateMu.Lock()
+	defer ma.stateMu.Unlock()
+	update(&ma.State)
+}
+
+func (ma *ManagedAgent) stateSnapshot() AgentState {
+	ma.stateMu.RLock()
+	defer ma.stateMu.RUnlock()
+	return ma.State
 }
 
 // ConfigUpdate holds optional fields for updating an agent's configuration.
@@ -193,23 +213,29 @@ func (s *AgentService) Create(cfg AgentConfig) (*ManagedAgent, error) {
 	loop.On(EventPhaseChange, func(args ...any) {
 		if len(args) >= 2 {
 			if phase, ok := args[1].(AgentPhase); ok {
-				ma.State.Phase = phase
+				ma.updateState(func(state *AgentState) {
+					state.Phase = phase
+				})
 			}
 		}
 	})
 	loop.On(EventError, func(args ...any) {
-		ma.State.Phase = PhaseError
-		if len(args) > 0 {
-			if errText, ok := args[0].(string); ok {
-				ma.State.Error = errText
+		ma.updateState(func(state *AgentState) {
+			state.Phase = PhaseError
+			if len(args) > 0 {
+				if errText, ok := args[0].(string); ok {
+					state.Error = errText
+				}
 			}
-		}
+		})
 	})
 	loop.On(EventDone, func(args ...any) {
-		ma.State.Phase = PhaseDone
-		ma.State.CurrentTask = ""
-		ma.State.TaskID = ""
-		ma.State.Error = ""
+		ma.updateState(func(state *AgentState) {
+			state.Phase = PhaseDone
+			state.CurrentTask = ""
+			state.TaskID = ""
+			state.Error = ""
+		})
 	})
 	s.agents[cfg.Slug] = ma
 	s.notify()
@@ -239,7 +265,7 @@ func (s *AgentService) Start(slug string) error {
 	}
 
 	ma.Loop.Start()
-	ma.State = ma.Loop.GetState()
+	ma.setState(ma.Loop.GetState())
 	s.notify()
 	return nil
 }
@@ -261,7 +287,7 @@ func (s *AgentService) Stop(slug string) error {
 	}
 
 	ma.Loop.Stop()
-	ma.State = ma.Loop.GetState()
+	ma.setState(ma.Loop.GetState())
 	s.notify()
 	return nil
 }
@@ -387,7 +413,7 @@ func (s *AgentService) runAgentWorker(slug string, ma *ManagedAgent, stopCh <-ch
 			s.mu.Unlock()
 			return
 		}
-		ma.State = nextState
+		ma.setState(nextState)
 		running := ma.Loop.CanProcess() &&
 			((nextState.Phase != PhaseDone && nextState.Phase != PhaseIdle) || s.queues.HasMessages(slug))
 		s.mu.Unlock()
@@ -417,7 +443,11 @@ func (s *AgentService) List() []*ManagedAgent {
 	defer s.mu.Unlock()
 	list := make([]*ManagedAgent, 0, len(s.agents))
 	for _, ma := range s.agents {
-		list = append(list, ma)
+		list = append(list, &ManagedAgent{
+			Config: ma.Config,
+			State:  ma.stateSnapshot(),
+			Loop:   ma.Loop,
+		})
 	}
 	sort.Slice(list, func(i, j int) bool {
 		return list[i].Config.Slug < list[j].Config.Slug
@@ -433,7 +463,7 @@ func (s *AgentService) GetState(slug string) (AgentState, bool) {
 	if !ok {
 		return AgentState{}, false
 	}
-	return ma.State, true
+	return ma.stateSnapshot(), true
 }
 
 // Remove stops and removes the agent from the service.

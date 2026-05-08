@@ -6,6 +6,7 @@ import { restartBroker } from "../../api/client";
 import {
   getUpgradeCheck,
   runUpgrade,
+  UPGRADE_CHECK_QUERY_KEY,
   type UpgradeCheckResponse,
   type UpgradeRunResult,
 } from "../../api/upgrade";
@@ -36,6 +37,8 @@ interface VersionModalProps {
   open: boolean;
   onClose: () => void;
 }
+
+const VERSION_MODAL_TITLE_ID = "version-modal-title";
 
 // deriveStatus is exported so the StatusBar chip and the modal classify the
 // upgrade-check response identically. A divergence here would let the chip
@@ -87,7 +90,7 @@ export function VersionModal({ open, onClose }: VersionModalProps) {
     isFetching,
     refetch,
   } = useQuery<UpgradeCheckResponse>({
-    queryKey: ["upgrade-check"],
+    queryKey: UPGRADE_CHECK_QUERY_KEY,
     queryFn: () => getUpgradeCheck(),
     enabled: open,
     // Match the StatusBar's poll cadence so opening the modal within the
@@ -151,13 +154,6 @@ export function VersionModal({ open, onClose }: VersionModalProps) {
     }
   }, [open]);
 
-  const handleOverlayClick = useCallback(
-    (e: React.MouseEvent) => {
-      if (e.target === e.currentTarget) onClose();
-    },
-    [onClose],
-  );
-
   const triggerRun = useCallback(async () => {
     if (run.phase === "running") return;
     const epoch = ++runEpochRef.current;
@@ -218,17 +214,25 @@ export function VersionModal({ open, onClose }: VersionModalProps) {
   const installCommand = deriveInstallCommand(check);
 
   return (
-    <div
-      className="help-overlay"
-      role="dialog"
-      aria-modal="true"
-      aria-label="wuphf version"
-      onClick={handleOverlayClick}
-    >
-      <div className="help-modal version-modal card">
+    <div className="help-overlay">
+      <button
+        type="button"
+        className="help-backdrop"
+        onClick={onClose}
+        tabIndex={-1}
+        aria-label="Close version dialog"
+      />
+      <div
+        className="help-modal version-modal card"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={VERSION_MODAL_TITLE_ID}
+      >
         <header className="help-header">
           <div>
-            <h2 className="help-title">wuphf version</h2>
+            <h2 id={VERSION_MODAL_TITLE_ID} className="help-title">
+              wuphf version
+            </h2>
             <p className="help-subtitle">
               See what's running, force a reinstall, or restart the broker.
             </p>
