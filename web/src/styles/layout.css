@@ -836,6 +836,48 @@ html[data-theme="nex"]
   opacity: 0.7;
 }
 
+/* Clickable version chip on the right side of the status bar. The dot
+   colour mirrors `.status-bar-conn::before` so the freshness signal lines
+   up visually with the broker connection indicator. */
+.status-bar-version {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.status-bar-version:hover {
+  color: var(--text-secondary);
+  text-decoration: underline;
+}
+.status-bar-version-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-tertiary);
+  flex-shrink: 0;
+}
+.status-bar-version--ok .status-bar-version-dot {
+  background: var(--green);
+}
+.status-bar-version--outdated .status-bar-version-dot {
+  background: var(--yellow, #e5a00d);
+}
+.status-bar-version--dev .status-bar-version-dot {
+  background: var(--text-tertiary);
+}
+.status-bar-version--unknown .status-bar-version-dot {
+  background: var(--text-tertiary);
+  opacity: 0.6;
+}
+
 .sidebar-scroll-wrap {
   position: relative;
   display: flex;
