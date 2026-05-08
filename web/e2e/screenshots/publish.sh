@@ -194,7 +194,11 @@ EOF
 
 git -C "$worktree_dir" add .
 git -C "$worktree_dir" commit -m "docs(screenshots): PR #${pr_number} (${feature})" >/dev/null
-git -C "$worktree_dir" push -u origin "$branch"
+# Each run rebuilds an orphan history, so a fresh push is non-fast-forward
+# against any previous run for the same PR. --force-with-lease lets re-runs
+# overwrite the remote screenshots branch without clobbering an unexpected
+# update from a third party.
+git -C "$worktree_dir" push --force-with-lease -u origin "$branch"
 
 git -C "$repo_root" worktree remove "$worktree_dir"
 

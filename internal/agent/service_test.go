@@ -556,6 +556,18 @@ func TestListAgentsReturnsConfigSnapshots(t *testing.T) {
 	if got.AllowedTools[0] != "read" {
 		t.Fatalf("AllowedTools alias leaked through List: %#v", got.AllowedTools)
 	}
+
+	// State.Config is also snapshotted via agentStateSnapshot — verify by
+	// mutating the returned slice and re-reading. Without a deep copy on the
+	// state side, this would leak the mutation back into service-owned state.
+	stateConfig := svc.List()[0].State.Config
+	if len(stateConfig.Expertise) > 0 {
+		stateConfig.Expertise[0] = "mutated-state"
+		gotState := svc.List()[0].State.Config
+		if gotState.Expertise[0] != "research" {
+			t.Fatalf("State.Config.Expertise alias leaked through List: %#v", gotState.Expertise)
+		}
+	}
 }
 
 func TestRemoveAgent(t *testing.T) {
