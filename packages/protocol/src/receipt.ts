@@ -32,43 +32,43 @@ export interface SourceRead {
   readonly fetchedAt: Date;
   readonly hash: Sha256Hex;
   readonly citation: string;
-  readonly raw_ref?: string | undefined;
+  readonly rawRef?: string | undefined;
 }
 
 export interface ToolCall {
-  readonly tool_id: ToolCallId;
-  readonly tool_name: string;
+  readonly toolId: ToolCallId;
+  readonly toolName: string;
   readonly inputs: FrozenArgs;
   readonly output: SanitizedString;
-  readonly started_at: Date;
-  readonly finished_at: Date;
+  readonly startedAt: Date;
+  readonly finishedAt: Date;
   readonly status: "ok" | "error";
   readonly error?: SanitizedString | undefined;
 }
 
 export interface ApprovalEvent {
-  readonly approval_id: ApprovalId;
+  readonly approvalId: ApprovalId;
   readonly role: "viewer" | "approver" | "host";
   readonly decision: "approve" | "reject" | "abstain";
-  readonly signed_token: SignedApprovalToken;
+  readonly signedToken: SignedApprovalToken;
   readonly decidedAt: Date;
 }
 
 export interface FileChange {
   readonly path: string;
   readonly mode: "created" | "modified" | "deleted";
-  readonly before_hash?: Sha256Hex | undefined;
-  readonly after_hash: Sha256Hex;
-  readonly lines_added: number;
-  readonly lines_removed: number;
+  readonly beforeHash?: Sha256Hex | undefined;
+  readonly afterHash: Sha256Hex;
+  readonly linesAdded: number;
+  readonly linesRemoved: number;
 }
 
 export interface CommitRef {
   readonly sha: string;
   readonly message: SanitizedString;
   readonly author: string;
-  readonly author_email: string;
-  readonly parent_sha?: string | undefined;
+  readonly authorEmail: string;
+  readonly parentSha?: string | undefined;
   readonly signed: boolean;
 }
 
@@ -141,7 +141,7 @@ export interface ReceiptSnapshot {
   readonly gitHeadStart?: string | undefined;
   readonly gitHeadEnd?: string | undefined;
 
-  readonly schemaVersion: number;
+  readonly schemaVersion: 1;
 }
 
 export type ReceiptValidationError = { path: string; message: string };
@@ -151,7 +151,7 @@ export type ReceiptValidationResult =
 
 const ULID_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/;
 const AGENT_SLUG_RE = /^[a-z0-9][a-z0-9_-]*$/;
-const LOCAL_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
+const LOCAL_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
 const PROVIDER_KIND_VALUES = ["anthropic", "openai", "openai-compat", "openclaw"] as const;
@@ -297,6 +297,122 @@ export function receiptFromJson(json: string): ReceiptSnapshot {
   return receipt;
 }
 
+const RECEIPT_KEYS: ReadonlySet<string> = new Set<string>([
+  "id",
+  "agentSlug",
+  "taskId",
+  "triggerKind",
+  "triggerRef",
+  "startedAt",
+  "finishedAt",
+  "status",
+  "providerKind",
+  "model",
+  "promptHash",
+  "toolManifest",
+  "toolCalls",
+  "approvals",
+  "filesChanged",
+  "commits",
+  "sourceReads",
+  "writes",
+  "inputTokens",
+  "outputTokens",
+  "cacheReadTokens",
+  "cacheCreationTokens",
+  "costUsd",
+  "finalMessage",
+  "error",
+  "notebookWrites",
+  "wikiWrites",
+  "worktreePath",
+  "gitHeadStart",
+  "gitHeadEnd",
+  "schemaVersion",
+]);
+const SOURCE_READ_KEYS: ReadonlySet<string> = new Set<string>([
+  "provider",
+  "entityType",
+  "entityId",
+  "fetchedAt",
+  "hash",
+  "citation",
+  "rawRef",
+]);
+const TOOL_CALL_KEYS: ReadonlySet<string> = new Set<string>([
+  "toolId",
+  "toolName",
+  "inputs",
+  "output",
+  "startedAt",
+  "finishedAt",
+  "status",
+  "error",
+]);
+const APPROVAL_EVENT_KEYS: ReadonlySet<string> = new Set<string>([
+  "approvalId",
+  "role",
+  "decision",
+  "signedToken",
+  "decidedAt",
+]);
+const FILE_CHANGE_KEYS: ReadonlySet<string> = new Set<string>([
+  "path",
+  "mode",
+  "beforeHash",
+  "afterHash",
+  "linesAdded",
+  "linesRemoved",
+]);
+const COMMIT_REF_KEYS: ReadonlySet<string> = new Set<string>([
+  "sha",
+  "message",
+  "author",
+  "authorEmail",
+  "parentSha",
+  "signed",
+]);
+const MEMORY_WRITE_KEYS: ReadonlySet<string> = new Set<string>([
+  "store",
+  "slug",
+  "hash",
+  "citation",
+]);
+const SIGNED_APPROVAL_TOKEN_KEYS: ReadonlySet<string> = new Set<string>([
+  "signerIdentity",
+  "role",
+  "receiptId",
+  "frozenArgsHash",
+  "riskClass",
+  "expiresAt",
+  "webauthnAssertion",
+  "brokerVerificationStatus",
+]);
+const EXTERNAL_WRITE_KEYS: ReadonlySet<string> = new Set<string>([
+  "action",
+  "target",
+  "idempotencyKey",
+  "proposedDiff",
+  "appliedDiff",
+  "approvalToken",
+  "approvedAt",
+  "result",
+  "postWriteVerify",
+]);
+
+function validateKnownKeys(
+  record: Readonly<Record<string, unknown>>,
+  basePath: string,
+  allowed: ReadonlySet<string>,
+  errors: ReceiptValidationError[],
+): void {
+  for (const key of Object.keys(record)) {
+    if (!allowed.has(key)) {
+      addError(errors, pointer(basePath, key), "is not allowed");
+    }
+  }
+}
+
 function validateReceiptSnapshot(
   value: unknown,
   path: string,
@@ -306,8 +422,10 @@ function validateReceiptSnapshot(
     addError(errors, path, "must be an object");
     return;
   }
+  validateKnownKeys(value, path, RECEIPT_KEYS, errors);
 
   validateRequired(value, "id", path, errors, validateReceiptIdValue);
+  const receiptId = recordValue(value, "id");
   validateRequired(value, "agentSlug", path, errors, validateAgentSlugValue);
   validateRequired(value, "taskId", path, errors, validateTaskIdValue);
   validateRequired(value, "triggerKind", path, errors, (v, p, e) =>
@@ -327,7 +445,9 @@ function validateReceiptSnapshot(
     validateArray(v, p, e, validateToolCall),
   );
   validateRequired(value, "approvals", path, errors, (v, p, e) =>
-    validateArray(v, p, e, validateApprovalEvent),
+    validateArray(v, p, e, (item, itemPath, itemErrors) =>
+      validateApprovalEvent(item, itemPath, itemErrors, receiptId),
+    ),
   );
   validateRequired(value, "filesChanged", path, errors, (v, p, e) =>
     validateArray(v, p, e, validateFileChange),
@@ -339,7 +459,9 @@ function validateReceiptSnapshot(
     validateArray(v, p, e, validateSourceRead),
   );
   validateRequired(value, "writes", path, errors, (v, p, e) =>
-    validateArray(v, p, e, validateExternalWrite),
+    validateArray(v, p, e, (item, itemPath, itemErrors) =>
+      validateExternalWrite(item, itemPath, itemErrors, receiptId),
+    ),
   );
   validateRequired(value, "inputTokens", path, errors, validateNonNegativeInteger);
   validateRequired(value, "outputTokens", path, errors, validateNonNegativeInteger);
@@ -369,13 +491,14 @@ function validateSourceRead(value: unknown, path: string, errors: ReceiptValidat
     addError(errors, path, "must be an object");
     return;
   }
+  validateKnownKeys(value, path, SOURCE_READ_KEYS, errors);
   validateRequired(value, "provider", path, errors, validateString);
   validateRequired(value, "entityType", path, errors, validateString);
   validateRequired(value, "entityId", path, errors, validateString);
   validateRequired(value, "fetchedAt", path, errors, validateDate);
   validateRequired(value, "hash", path, errors, validateSha256HexValue);
   validateRequired(value, "citation", path, errors, validateString);
-  validateOptional(value, "raw_ref", path, errors, validateString);
+  validateOptional(value, "rawRef", path, errors, validateString);
 }
 
 function validateToolCall(value: unknown, path: string, errors: ReceiptValidationError[]): void {
@@ -383,12 +506,13 @@ function validateToolCall(value: unknown, path: string, errors: ReceiptValidatio
     addError(errors, path, "must be an object");
     return;
   }
-  validateRequired(value, "tool_id", path, errors, validateToolCallIdValue);
-  validateRequired(value, "tool_name", path, errors, validateString);
+  validateKnownKeys(value, path, TOOL_CALL_KEYS, errors);
+  validateRequired(value, "toolId", path, errors, validateToolCallIdValue);
+  validateRequired(value, "toolName", path, errors, validateString);
   validateRequired(value, "inputs", path, errors, validateFrozenArgs);
   validateRequired(value, "output", path, errors, validateSanitizedString);
-  validateRequired(value, "started_at", path, errors, validateDate);
-  validateRequired(value, "finished_at", path, errors, validateDate);
+  validateRequired(value, "startedAt", path, errors, validateDate);
+  validateRequired(value, "finishedAt", path, errors, validateDate);
   validateRequired(value, "status", path, errors, (v, p, e) =>
     validateLiteral(v, p, e, TOOL_CALL_STATUS_VALUES, "must be a valid tool call status"),
   );
@@ -399,20 +523,36 @@ function validateApprovalEvent(
   value: unknown,
   path: string,
   errors: ReceiptValidationError[],
+  receiptId: unknown,
 ): void {
   if (!isRecord(value)) {
     addError(errors, path, "must be an object");
     return;
   }
-  validateRequired(value, "approval_id", path, errors, validateApprovalIdValue);
+  validateKnownKeys(value, path, APPROVAL_EVENT_KEYS, errors);
+  validateRequired(value, "approvalId", path, errors, validateApprovalIdValue);
   validateRequired(value, "role", path, errors, (v, p, e) =>
     validateLiteral(v, p, e, APPROVAL_ROLE_VALUES, "must be a valid approval role"),
   );
   validateRequired(value, "decision", path, errors, (v, p, e) =>
     validateLiteral(v, p, e, APPROVAL_DECISION_VALUES, "must be a valid approval decision"),
   );
-  validateRequired(value, "signed_token", path, errors, validateSignedApprovalToken);
+  validateRequired(value, "signedToken", path, errors, validateSignedApprovalToken);
   validateRequired(value, "decidedAt", path, errors, validateDate);
+
+  // Cross-field invariant: the signed token must reference this receipt.
+  const signedToken = recordValue(value, "signedToken");
+  if (
+    isRecord(signedToken) &&
+    typeof receiptId === "string" &&
+    recordValue(signedToken, "receiptId") !== receiptId
+  ) {
+    addError(
+      errors,
+      pointer(pointer(path, "signedToken"), "receiptId"),
+      "must match enclosing receipt id",
+    );
+  }
 }
 
 function validateFileChange(value: unknown, path: string, errors: ReceiptValidationError[]): void {
@@ -420,14 +560,15 @@ function validateFileChange(value: unknown, path: string, errors: ReceiptValidat
     addError(errors, path, "must be an object");
     return;
   }
+  validateKnownKeys(value, path, FILE_CHANGE_KEYS, errors);
   validateRequired(value, "path", path, errors, validateString);
   validateRequired(value, "mode", path, errors, (v, p, e) =>
     validateLiteral(v, p, e, FILE_CHANGE_MODE_VALUES, "must be a valid file change mode"),
   );
-  validateOptional(value, "before_hash", path, errors, validateSha256HexValue);
-  validateRequired(value, "after_hash", path, errors, validateSha256HexValue);
-  validateRequired(value, "lines_added", path, errors, validateNonNegativeInteger);
-  validateRequired(value, "lines_removed", path, errors, validateNonNegativeInteger);
+  validateOptional(value, "beforeHash", path, errors, validateSha256HexValue);
+  validateRequired(value, "afterHash", path, errors, validateSha256HexValue);
+  validateRequired(value, "linesAdded", path, errors, validateNonNegativeInteger);
+  validateRequired(value, "linesRemoved", path, errors, validateNonNegativeInteger);
 }
 
 function validateCommitRef(value: unknown, path: string, errors: ReceiptValidationError[]): void {
@@ -435,11 +576,12 @@ function validateCommitRef(value: unknown, path: string, errors: ReceiptValidati
     addError(errors, path, "must be an object");
     return;
   }
+  validateKnownKeys(value, path, COMMIT_REF_KEYS, errors);
   validateRequired(value, "sha", path, errors, validateString);
   validateRequired(value, "message", path, errors, validateSanitizedString);
   validateRequired(value, "author", path, errors, validateString);
-  validateRequired(value, "author_email", path, errors, validateString);
-  validateOptional(value, "parent_sha", path, errors, validateString);
+  validateRequired(value, "authorEmail", path, errors, validateString);
+  validateOptional(value, "parentSha", path, errors, validateString);
   validateRequired(value, "signed", path, errors, validateBoolean);
 }
 
@@ -452,6 +594,7 @@ function validateMemoryWriteRef(
     addError(errors, path, "must be an object");
     return;
   }
+  validateKnownKeys(value, path, MEMORY_WRITE_KEYS, errors);
   validateRequired(value, "store", path, errors, (v, p, e) =>
     validateLiteral(v, p, e, MEMORY_STORE_VALUES, "must be notebook or wiki"),
   );
@@ -469,6 +612,7 @@ function validateSignedApprovalToken(
     addError(errors, path, "must be an object");
     return;
   }
+  validateKnownKeys(value, path, SIGNED_APPROVAL_TOKEN_KEYS, errors);
   validateRequired(value, "signerIdentity", path, errors, validateString);
   validateRequired(value, "role", path, errors, (v, p, e) =>
     validateLiteral(v, p, e, APPROVAL_ROLE_VALUES, "must be a valid approval role"),
@@ -490,11 +634,16 @@ function validateSignedApprovalToken(
     ),
   );
   const riskClass = recordValue(value, "riskClass");
+  const webauthnAssertion = recordValue(value, "webauthnAssertion");
   if (
     (riskClass === "high" || riskClass === "critical") &&
-    recordValue(value, "webauthnAssertion") === undefined
+    (typeof webauthnAssertion !== "string" || webauthnAssertion.length === 0)
   ) {
-    addError(errors, pointer(path, "webauthnAssertion"), "is required for high/critical risk");
+    addError(
+      errors,
+      pointer(path, "webauthnAssertion"),
+      "must be a non-empty string for high/critical risk",
+    );
   }
 }
 
@@ -502,11 +651,13 @@ function validateExternalWrite(
   value: unknown,
   path: string,
   errors: ReceiptValidationError[],
+  receiptId: unknown,
 ): void {
   if (!isRecord(value)) {
     addError(errors, path, "must be an object");
     return;
   }
+  validateKnownKeys(value, path, EXTERNAL_WRITE_KEYS, errors);
   validateRequired(value, "action", path, errors, validateString);
   validateRequired(value, "target", path, errors, validateString);
   validateRequired(value, "idempotencyKey", path, errors, validateString);
@@ -524,6 +675,27 @@ function validateExternalWrite(
   validateRequired(value, "postWriteVerify", path, errors, (v, p, e) =>
     validateNullable(v, p, e, validateFrozenArgs),
   );
+
+  // Cross-field invariants: when present, the approval token must reference
+  // this receipt and bind to the proposedDiff hash. RFC §6 invariant chain.
+  const approvalToken = recordValue(value, "approvalToken");
+  const proposedDiff = recordValue(value, "proposedDiff");
+  if (isRecord(approvalToken)) {
+    const tokenPath = pointer(path, "approvalToken");
+    if (typeof receiptId === "string" && recordValue(approvalToken, "receiptId") !== receiptId) {
+      addError(errors, pointer(tokenPath, "receiptId"), "must match enclosing receipt id");
+    }
+    if (
+      proposedDiff instanceof FrozenArgs &&
+      recordValue(approvalToken, "frozenArgsHash") !== proposedDiff.hash
+    ) {
+      addError(
+        errors,
+        pointer(tokenPath, "frozenArgsHash"),
+        "must match this write's proposedDiff hash",
+      );
+    }
+  }
 }
 
 function validateRequired(
@@ -698,15 +870,36 @@ function validateSha256HexValue(
 }
 
 function validateFrozenArgs(value: unknown, path: string, errors: ReceiptValidationError[]): void {
+  // `instanceof` alone is not a freeze-boundary check: an attacker can produce
+  // `Object.create(FrozenArgs.prototype)` with mismatched canonicalJson/hash
+  // and pass the type-system check. Re-derive both fields and assert byte
+  // equality to make forgery observable.
   if (!(value instanceof FrozenArgs)) {
     addError(errors, path, "must be FrozenArgs");
     return;
   }
   if (typeof value.canonicalJson !== "string") {
     addError(errors, pointer(path, "canonicalJson"), "must be a string");
+    return;
   }
   if (!isSha256Hex(value.hash)) {
     addError(errors, pointer(path, "hash"), "must be a sha256 hex digest");
+    return;
+  }
+  try {
+    const reFrozen = FrozenArgs.freeze(JSON.parse(value.canonicalJson));
+    if (reFrozen.canonicalJson !== value.canonicalJson) {
+      addError(errors, pointer(path, "canonicalJson"), "must be RFC 8785 canonical JSON");
+    }
+    if (reFrozen.hash !== value.hash) {
+      addError(errors, pointer(path, "hash"), "does not match canonicalJson");
+    }
+  } catch (err) {
+    addError(
+      errors,
+      pointer(path, "canonicalJson"),
+      err instanceof Error ? err.message : "must be valid JSON",
+    );
   }
 }
 
@@ -715,12 +908,24 @@ function validateSanitizedString(
   path: string,
   errors: ReceiptValidationError[],
 ): void {
+  // Same reasoning as validateFrozenArgs: re-run the sanitizer and require
+  // byte equality so forged `Object.create(SanitizedString.prototype)` with
+  // bidi/control text is rejected.
   if (!(value instanceof SanitizedString)) {
     addError(errors, path, "must be SanitizedString");
     return;
   }
   if (typeof value.value !== "string") {
     addError(errors, pointer(path, "value"), "must be a string");
+    return;
+  }
+  try {
+    const reSanitized = SanitizedString.fromUnknown(value.value);
+    if (reSanitized.value !== value.value) {
+      addError(errors, path, "must already be sanitized");
+    }
+  } catch (err) {
+    addError(errors, path, err instanceof Error ? err.message : "must be sanitized");
   }
 }
 
@@ -768,18 +973,18 @@ function sourceReadToJsonValue(s: SourceRead): Record<string, unknown> {
     fetchedAt: dateToJson(s.fetchedAt),
     hash: s.hash,
     citation: s.citation,
-    raw_ref: s.raw_ref,
+    rawRef: s.rawRef,
   });
 }
 
 function toolCallToJsonValue(t: ToolCall): Record<string, unknown> {
   return omitUndefined({
-    tool_id: t.tool_id,
-    tool_name: t.tool_name,
+    toolId: t.toolId,
+    toolName: t.toolName,
     inputs: frozenArgsToJsonValue(t.inputs),
     output: sanitizedStringToJson(t.output),
-    started_at: dateToJson(t.started_at),
-    finished_at: dateToJson(t.finished_at),
+    startedAt: dateToJson(t.startedAt),
+    finishedAt: dateToJson(t.finishedAt),
     status: t.status,
     error: optionalSanitizedStringToJson(t.error),
   });
@@ -787,10 +992,10 @@ function toolCallToJsonValue(t: ToolCall): Record<string, unknown> {
 
 function approvalEventToJsonValue(a: ApprovalEvent): Record<string, unknown> {
   return {
-    approval_id: a.approval_id,
+    approvalId: a.approvalId,
     role: a.role,
     decision: a.decision,
-    signed_token: signedApprovalTokenToJsonValue(a.signed_token),
+    signedToken: signedApprovalTokenToJsonValue(a.signedToken),
     decidedAt: dateToJson(a.decidedAt),
   };
 }
@@ -799,10 +1004,10 @@ function fileChangeToJsonValue(f: FileChange): Record<string, unknown> {
   return omitUndefined({
     path: f.path,
     mode: f.mode,
-    before_hash: f.before_hash,
-    after_hash: f.after_hash,
-    lines_added: f.lines_added,
-    lines_removed: f.lines_removed,
+    beforeHash: f.beforeHash,
+    afterHash: f.afterHash,
+    linesAdded: f.linesAdded,
+    linesRemoved: f.linesRemoved,
   });
 }
 
@@ -811,8 +1016,8 @@ function commitRefToJsonValue(c: CommitRef): Record<string, unknown> {
     sha: c.sha,
     message: sanitizedStringToJson(c.message),
     author: c.author,
-    author_email: c.author_email,
-    parent_sha: c.parent_sha,
+    authorEmail: c.authorEmail,
+    parentSha: c.parentSha,
     signed: c.signed,
   });
 }
@@ -856,6 +1061,7 @@ function externalWriteToJsonValue(w: ExternalWrite): Record<string, unknown> {
 
 function receiptJsonToSnapshot(value: unknown): ReceiptSnapshot {
   const record = requireRecord(value, "");
+  assertKnownKeys(record, "", RECEIPT_KEYS);
   const finishedAt = optionalDateFromJson(record, "finishedAt", "");
   const finalMessage = optionalSanitizedStringFromJson(record, "finalMessage", "");
   const error = optionalSanitizedStringFromJson(record, "error", "");
@@ -900,7 +1106,8 @@ function receiptJsonToSnapshot(value: unknown): ReceiptSnapshot {
 
 function sourceReadFromJson(value: unknown, path: string): SourceRead {
   const record = requireRecord(value, path);
-  const raw_ref = optionalStringFromJson(record, "raw_ref", path);
+  assertKnownKeys(record, path, SOURCE_READ_KEYS);
+  const rawRef = optionalStringFromJson(record, "rawRef", path);
   return {
     provider: requiredStringFromJson(record, "provider", path),
     entityType: requiredStringFromJson(record, "entityType", path),
@@ -908,16 +1115,17 @@ function sourceReadFromJson(value: unknown, path: string): SourceRead {
     fetchedAt: requiredDateFromJson(record, "fetchedAt", path),
     hash: asSha256Hex(requiredStringFromJson(record, "hash", path)),
     citation: requiredStringFromJson(record, "citation", path),
-    ...(raw_ref === undefined ? {} : { raw_ref }),
+    ...(rawRef === undefined ? {} : { rawRef }),
   };
 }
 
 function toolCallFromJson(value: unknown, path: string): ToolCall {
   const record = requireRecord(value, path);
+  assertKnownKeys(record, path, TOOL_CALL_KEYS);
   const error = optionalSanitizedStringFromJson(record, "error", path);
   return {
-    tool_id: asToolCallId(requiredStringFromJson(record, "tool_id", path)),
-    tool_name: requiredStringFromJson(record, "tool_name", path),
+    toolId: asToolCallId(requiredStringFromJson(record, "toolId", path)),
+    toolName: requiredStringFromJson(record, "toolName", path),
     inputs: frozenArgsFromJson(
       requiredFieldFromJson(record, "inputs", path),
       pointer(path, "inputs"),
@@ -926,8 +1134,8 @@ function toolCallFromJson(value: unknown, path: string): ToolCall {
       requiredFieldFromJson(record, "output", path),
       pointer(path, "output"),
     ),
-    started_at: requiredDateFromJson(record, "started_at", path),
-    finished_at: requiredDateFromJson(record, "finished_at", path),
+    startedAt: requiredDateFromJson(record, "startedAt", path),
+    finishedAt: requiredDateFromJson(record, "finishedAt", path),
     status: requiredLiteralFromJson(record, "status", path, TOOL_CALL_STATUS_VALUES),
     ...(error === undefined ? {} : { error }),
   };
@@ -935,13 +1143,14 @@ function toolCallFromJson(value: unknown, path: string): ToolCall {
 
 function approvalEventFromJson(value: unknown, path: string): ApprovalEvent {
   const record = requireRecord(value, path);
+  assertKnownKeys(record, path, APPROVAL_EVENT_KEYS);
   return {
-    approval_id: asApprovalId(requiredStringFromJson(record, "approval_id", path)),
+    approvalId: asApprovalId(requiredStringFromJson(record, "approvalId", path)),
     role: requiredLiteralFromJson(record, "role", path, APPROVAL_ROLE_VALUES),
     decision: requiredLiteralFromJson(record, "decision", path, APPROVAL_DECISION_VALUES),
-    signed_token: signedApprovalTokenFromJson(
-      requiredFieldFromJson(record, "signed_token", path),
-      pointer(path, "signed_token"),
+    signedToken: signedApprovalTokenFromJson(
+      requiredFieldFromJson(record, "signedToken", path),
+      pointer(path, "signedToken"),
     ),
     decidedAt: requiredDateFromJson(record, "decidedAt", path),
   };
@@ -949,20 +1158,22 @@ function approvalEventFromJson(value: unknown, path: string): ApprovalEvent {
 
 function fileChangeFromJson(value: unknown, path: string): FileChange {
   const record = requireRecord(value, path);
-  const before_hash = optionalSha256HexFromJson(record, "before_hash", path);
+  assertKnownKeys(record, path, FILE_CHANGE_KEYS);
+  const beforeHash = optionalSha256HexFromJson(record, "beforeHash", path);
   return {
     path: requiredStringFromJson(record, "path", path),
     mode: requiredLiteralFromJson(record, "mode", path, FILE_CHANGE_MODE_VALUES),
-    ...(before_hash === undefined ? {} : { before_hash }),
-    after_hash: asSha256Hex(requiredStringFromJson(record, "after_hash", path)),
-    lines_added: requiredNonNegativeIntegerFromJson(record, "lines_added", path),
-    lines_removed: requiredNonNegativeIntegerFromJson(record, "lines_removed", path),
+    ...(beforeHash === undefined ? {} : { beforeHash }),
+    afterHash: asSha256Hex(requiredStringFromJson(record, "afterHash", path)),
+    linesAdded: requiredNonNegativeIntegerFromJson(record, "linesAdded", path),
+    linesRemoved: requiredNonNegativeIntegerFromJson(record, "linesRemoved", path),
   };
 }
 
 function commitRefFromJson(value: unknown, path: string): CommitRef {
   const record = requireRecord(value, path);
-  const parent_sha = optionalStringFromJson(record, "parent_sha", path);
+  assertKnownKeys(record, path, COMMIT_REF_KEYS);
+  const parentSha = optionalStringFromJson(record, "parentSha", path);
   return {
     sha: requiredStringFromJson(record, "sha", path),
     message: sanitizedStringFromJson(
@@ -970,14 +1181,15 @@ function commitRefFromJson(value: unknown, path: string): CommitRef {
       pointer(path, "message"),
     ),
     author: requiredStringFromJson(record, "author", path),
-    author_email: requiredStringFromJson(record, "author_email", path),
-    ...(parent_sha === undefined ? {} : { parent_sha }),
+    authorEmail: requiredStringFromJson(record, "authorEmail", path),
+    ...(parentSha === undefined ? {} : { parentSha }),
     signed: requiredBooleanFromJson(record, "signed", path),
   };
 }
 
 function memoryWriteRefFromJson(value: unknown, path: string): MemoryWriteRef {
   const record = requireRecord(value, path);
+  assertKnownKeys(record, path, MEMORY_WRITE_KEYS);
   return {
     store: requiredLiteralFromJson(record, "store", path, MEMORY_STORE_VALUES),
     slug: requiredStringFromJson(record, "slug", path),
@@ -988,7 +1200,17 @@ function memoryWriteRefFromJson(value: unknown, path: string): MemoryWriteRef {
 
 function signedApprovalTokenFromJson(value: unknown, path: string): SignedApprovalToken {
   const record = requireRecord(value, path);
+  assertKnownKeys(record, path, SIGNED_APPROVAL_TOKEN_KEYS);
   const webauthnAssertion = optionalStringFromJson(record, "webauthnAssertion", path);
+  const riskClass = requiredLiteralFromJson(record, "riskClass", path, RISK_CLASS_VALUES);
+  if (
+    (riskClass === "high" || riskClass === "critical") &&
+    (typeof webauthnAssertion !== "string" || webauthnAssertion.length === 0)
+  ) {
+    throw new Error(
+      `${pointer(path, "webauthnAssertion")}: must be a non-empty string for high/critical risk`,
+    );
+  }
   return {
     signerIdentity: requiredStringFromJson(record, "signerIdentity", path),
     role: requiredLiteralFromJson(record, "role", path, APPROVAL_ROLE_VALUES),
@@ -1008,6 +1230,7 @@ function signedApprovalTokenFromJson(value: unknown, path: string): SignedApprov
 
 function externalWriteFromJson(value: unknown, path: string): ExternalWrite {
   const record = requireRecord(value, path);
+  assertKnownKeys(record, path, EXTERNAL_WRITE_KEYS);
   const approvedAt = optionalDateFromJson(record, "approvedAt", path);
   return {
     action: requiredStringFromJson(record, "action", path),
@@ -1282,6 +1505,18 @@ function requireRecord(value: unknown, path: string): Readonly<Record<string, un
     throw new Error(`${path}: must be an object`);
   }
   return value;
+}
+
+function assertKnownKeys(
+  record: Readonly<Record<string, unknown>>,
+  basePath: string,
+  allowed: ReadonlySet<string>,
+): void {
+  for (const key of Object.keys(record)) {
+    if (!allowed.has(key)) {
+      throw new Error(`${pointer(basePath, key)}: is not allowed`);
+    }
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

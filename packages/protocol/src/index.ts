@@ -8,16 +8,18 @@ export type {
   MerkleRootRecord,
 } from "./audit-event.ts";
 export {
+  computeAuditEventHash,
   computeEventHash,
   GENESIS_PREV_HASH,
+  serializeAuditEventRecordForHash,
   verifyChain,
 } from "./audit-event.ts";
-export type { Brand, Brand2 } from "./brand.ts";
-export { canonicalJSON } from "./canonical-json.ts";
-// The classes below are written by parallel codex experts; their imports
-// resolve only after all expert outputs land.
+export type { Brand } from "./brand.ts";
+export type { JsonPrimitive, JsonValue } from "./canonical-json.ts";
+export { assertJcsValue, canonicalJSON } from "./canonical-json.ts";
 export { FrozenArgs } from "./frozen-args.ts";
 export type {
+  AllowedLoopbackHost,
   ApiBootstrap,
   ApiToken,
   ApprovalSubmitRequest,
@@ -27,13 +29,18 @@ export type {
   BrokerHttpRequest,
   BrokerHttpResponse,
   BrokerPort,
+  KeychainHandleId,
   OsVerbsApi,
   RequestId,
   StreamEvent,
   StreamEventKind,
   WsFrame,
 } from "./ipc.ts";
-export { ALLOWED_LOOPBACK_HOSTS, isAllowedLoopbackHost } from "./ipc.ts";
+export {
+  ALLOWED_LOOPBACK_HOSTS,
+  isAllowedLoopbackHost,
+  isLoopbackRemoteAddress,
+} from "./ipc.ts";
 export type {
   AgentSlug,
   ApprovalEvent,
@@ -75,6 +82,7 @@ export {
   receiptToJson,
   validateReceipt,
 } from "./receipt.ts";
+export type { SanitizedStringOptions, SanitizedStringPolicy } from "./sanitized-string.ts";
 export { SanitizedString } from "./sanitized-string.ts";
 export {
   asSha256Hex,
