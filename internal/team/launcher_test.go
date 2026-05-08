@@ -2480,8 +2480,8 @@ func TestProcessDueTaskJobResumesRateLimitedBlockedTask(t *testing.T) {
 		t.Fatalf("block task: %v changed=%v", err, changed)
 	}
 
-	l := &Launcher{broker: b, sessionName: "test"}
-	l.scheduler().processTaskJob(schedulerJob{
+	s := &watchdogScheduler{broker: b, clock: realClock{}}
+	s.processTaskJob(schedulerJob{
 		Slug:       normalizeSchedulerSlug("recheck", "client-loop", "task", task.ID),
 		Kind:       "recheck",
 		TargetType: "task",
