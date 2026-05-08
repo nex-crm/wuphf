@@ -1272,6 +1272,7 @@ func TestBrokerTaskCompleteRejectsLiveBusinessTheater(t *testing.T) {
 		t.Fatalf("failed to start broker: %v", err)
 	}
 	defer b.Stop()
+	t.Cleanup(func() { b.Purge() })
 	b.mu.Lock()
 	b.tasks = []teamTask{{
 		ID:            "task-1",
@@ -1324,6 +1325,7 @@ func TestBrokerTaskUpdateRollsBackBrokerSideEffectsOnSaveFailure(t *testing.T) {
 		t.Fatalf("failed to start broker: %v", err)
 	}
 	defer b.Stop()
+	t.Cleanup(func() { b.Purge() })
 	b.mu.Lock()
 	b.tasks = []teamTask{
 		{
