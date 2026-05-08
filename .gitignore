@@ -73,6 +73,12 @@ testdata/vhs/*.actual
 # Web test coverage output
 web/coverage/
 
+# Workspace package build/coverage output
+packages/*/dist/
+packages/*/coverage/
+packages/*/.tsbuildinfo
+packages/*/tsconfig.tsbuildinfo
+
 # Dev build artifacts
 wuphf-dev
 

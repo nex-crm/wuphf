@@ -1,0 +1,333 @@
+import * as fc from "fast-check";
+import { describe, expect, it } from "vitest";
+import { SanitizedString, type SanitizedStringPolicy } from "../src/sanitized-string.ts";
+
+type JsonPrimitive = null | boolean | number | string;
+type JsonValue = JsonPrimitive | JsonValue[] | JsonRecord;
+interface JsonRecord {
+  readonly [key: string]: JsonValue;
+}
+
+const MOAT_NUM_RUNS = 1000;
+const JSON_NUM_RUNS = 1000;
+
+const BIDI_CHARS = [
+  "\u202a",
+  "\u202b",
+  "\u202c",
+  "\u202d",
+  "\u202e",
+  "\u2066",
+  "\u2067",
+  "\u2068",
+  "\u2069",
+] as const;
+
+const sanitizableStringArb = fc.string().filter(canExpectedSanitizeText);
+const bidiCharArb = fc.constantFrom(...BIDI_CHARS);
+const bidiInterleavedStringArb = fc
+  .array(fc.tuple(sanitizableStringArb, bidiCharArb), { minLength: 1, maxLength: 16 })
+  .chain((segments) => fc.tuple(fc.constant(segments), sanitizableStringArb))
+  .map(
+    ([segments, tail]) => `${segments.map(([chunk, bidi]) => `${chunk}${bidi}`).join("")}${tail}`,
+  );
+const disallowedC0CharArb = fc
+  .integer({ min: 0x00, max: 0x1f })
+  .filter((code) => code !== 0x09 && code !== 0x0a && code !== 0x0d)
+  .map((code) => String.fromCharCode(code));
+const tagCharArb = fc
+  .integer({ min: 0xe0000, max: 0xe007f })
+  .map((codePoint) => String.fromCodePoint(codePoint));
+const jsonObjectArb = fc
+  .jsonValue()
+  .filter((value): value is JsonRecord => isJsonRecord(value) && canExpectedRoundTripJson(value));
+
+describe("SanitizedString", () => {
+  it("is idempotent after NFKC and stripping", () => {
+    fc.assert(
+      fc.property(sanitizableStringArb, (input) => {
+        const once = SanitizedString.fromUnknown(input).value;
+        const twice = SanitizedString.fromUnknown(once).value;
+        expect(twice).toBe(once);
+      }),
+      { numRuns: MOAT_NUM_RUNS },
+    );
+  });
+
+  it("strips bidi overrides and isolates", () => {
+    fc.assert(
+      fc.property(bidiInterleavedStringArb, (input) => {
+        const result = SanitizedString.fromUnknown(input).value;
+        expect(containsBidiOverride(result)).toBe(false);
+      }),
+      { numRuns: MOAT_NUM_RUNS },
+    );
+  });
+
+  it("strips C0 controls except tab, newline, and carriage return", () => {
+    fc.assert(
+      fc.property(
+        sanitizableStringArb,
+        disallowedC0CharArb,
+        sanitizableStringArb,
+        (prefix, control, suffix) => {
+          const result = SanitizedString.fromUnknown(`${prefix}${control}${suffix}`).value;
+          expect(result).not.toContain(control);
+          expect(containsDisallowedC0(result)).toBe(false);
+        },
+      ),
+      { numRuns: MOAT_NUM_RUNS },
+    );
+
+    expect(SanitizedString.fromUnknown("\t\n\r").value).toBe("\t\n\r");
+  });
+
+  it("strips invisible-space tag characters", () => {
+    fc.assert(
+      fc.property(sanitizableStringArb, tagCharArb, sanitizableStringArb, (prefix, tag, suffix) => {
+        const result = SanitizedString.fromUnknown(`${prefix}${tag}${suffix}`).value;
+        expect(containsInvisibleTag(result)).toBe(false);
+      }),
+      { numRuns: MOAT_NUM_RUNS },
+    );
+  });
+
+  it("normalizes compatibility homoglyphs with NFKC", () => {
+    expect(SanitizedString.fromUnknown("\ufb01le").value).toBe("file");
+  });
+
+  it("strips zero-width characters by default and can preserve ZWJ by policy", () => {
+    expect(SanitizedString.fromUnknown("ze\u200bro").value).toBe("zero");
+    expect(SanitizedString.fromUnknown("x\u200dy", { policy: "allow-zwj" }).value).toBe("x\u200dy");
+    expect(SanitizedString.fromUnknown("x\u200cy", { policy: "allow-zwj" }).value).toBe("xy");
+  });
+
+  it("freezes the returned instance", () => {
+    fc.assert(
+      fc.property(sanitizableStringArb, (input) => {
+        const result = SanitizedString.fromUnknown(input);
+        const original = result.value;
+        expect(Object.isFrozen(result)).toBe(true);
+
+        try {
+          Object.assign(result, { value: "mutated" });
+        } catch (error) {
+          expect(error).toBeInstanceOf(TypeError);
+        }
+
+        expect(result.value).toBe(original);
+      }),
+      { numRuns: MOAT_NUM_RUNS },
+    );
+  });
+
+  it("keeps JSON object output parseable with the same normalized logical structure", () => {
+    fc.assert(
+      fc.property(jsonObjectArb, (input) => {
+        const result = SanitizedString.fromUnknown(input).value;
+        const parsed = JSON.parse(result) as JsonValue;
+        const expected = expectedSanitizeJsonValue(projectJson(input));
+
+        expect(typeof result).toBe("string");
+        expect(parsed).toEqual(expected);
+      }),
+      { numRuns: JSON_NUM_RUNS },
+    );
+  });
+
+  it("coerces null and undefined to empty text", () => {
+    expect(SanitizedString.fromUnknown(null).value).toBe("");
+    expect(SanitizedString.fromUnknown(undefined).value).toBe("");
+  });
+
+  it("rejects lone surrogate code units", () => {
+    expect(() => SanitizedString.fromUnknown("\ud800")).toThrow(/lone surrogate/);
+    expect(() => SanitizedString.fromUnknown("\udc00")).toThrow(/lone surrogate/);
+  });
+
+  it.each([
+    {
+      name: "script markup passes through for downstream HTML encoding",
+      input: "<script>alert(1)</script>",
+      expected: "<script>alert(1)</script>",
+    },
+    { name: "bidi override is stripped", input: "\u202ehello", expected: "hello" },
+    { name: "zero-width run is stripped", input: "a\u200b\u200c\u200dbc", expected: "abc" },
+    { name: "backspace control is stripped", input: "\u0008backspace", expected: "backspace" },
+    { name: "BOM is stripped", input: "safe\ufeffstring", expected: "safestring" },
+    {
+      name: "language tag is stripped",
+      input: "\u{e0000}1invisible-tag",
+      expected: "1invisible-tag",
+    },
+    { name: "normal text passes unchanged", input: "normal-text", expected: "normal-text" },
+    {
+      name: "emoji and decomposed accent normalize safely",
+      input: "emoji \u{1f389} with combiner e\u0301",
+      expected: "emoji \u{1f389} with combiner \u00e9",
+    },
+  ])("neutralizes bypass corpus case: $name", ({ input, expected }) => {
+    const result = SanitizedString.fromUnknown(input).value;
+    expect(result).toBe(expected);
+    expect(containsBidiOverride(result)).toBe(false);
+    expect(containsDisallowedC0(result)).toBe(false);
+    expect(containsInvisibleTag(result)).toBe(false);
+    expect(containsZeroWidth(result)).toBe(false);
+  });
+});
+
+function canExpectedSanitizeText(input: string): boolean {
+  try {
+    expectedSanitizeText(input);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function canExpectedRoundTripJson(input: JsonRecord): boolean {
+  try {
+    expectedSanitizeJsonValue(projectJson(input));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function projectJson(input: JsonRecord): JsonValue {
+  const serialized = JSON.stringify(input);
+  if (serialized === undefined) {
+    throw new Error("expected JSON object to serialize");
+  }
+  return JSON.parse(serialized) as JsonValue;
+}
+
+function expectedSanitizeJsonValue(
+  value: JsonValue,
+  policy: SanitizedStringPolicy = "strip-zero-width",
+): JsonValue {
+  if (typeof value === "string") {
+    return expectedSanitizeText(value, policy);
+  }
+
+  if (value === null || typeof value === "number" || typeof value === "boolean") {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => expectedSanitizeJsonValue(item, policy));
+  }
+
+  const out: Record<string, JsonValue> = {};
+  for (const [key, child] of Object.entries(value)) {
+    out[expectedSanitizeText(key, policy)] = expectedSanitizeJsonValue(child, policy);
+  }
+  return out;
+}
+
+function expectedSanitizeText(
+  input: string,
+  policy: SanitizedStringPolicy = "strip-zero-width",
+): string {
+  const normalized = input.normalize("NFKC");
+  rejectLoneSurrogates(normalized);
+  let out = "";
+  for (let i = 0; i < normalized.length; ) {
+    const codePoint = normalized.codePointAt(i);
+    if (codePoint === undefined) {
+      break;
+    }
+    if (!isExpectedDisallowedCodePoint(codePoint, policy)) {
+      out += String.fromCodePoint(codePoint);
+    }
+    i += codePoint > 0xffff ? 2 : 1;
+  }
+  return out;
+}
+
+function containsBidiOverride(value: string): boolean {
+  return containsCodePoint(
+    value,
+    (codePoint) =>
+      (codePoint >= 0x202a && codePoint <= 0x202e) || (codePoint >= 0x2066 && codePoint <= 0x2069),
+  );
+}
+
+function containsDisallowedC0(value: string): boolean {
+  return containsCodePoint(
+    value,
+    (codePoint) =>
+      codePoint <= 0x1f && codePoint !== 0x09 && codePoint !== 0x0a && codePoint !== 0x0d,
+  );
+}
+
+function containsInvisibleTag(value: string): boolean {
+  return containsCodePoint(value, (codePoint) => codePoint >= 0xe0000 && codePoint <= 0xe007f);
+}
+
+function containsZeroWidth(value: string): boolean {
+  return containsCodePoint(
+    value,
+    (codePoint) =>
+      codePoint === 0x200b || codePoint === 0x200c || codePoint === 0x200d || codePoint === 0xfeff,
+  );
+}
+
+function isExpectedDisallowedCodePoint(codePoint: number, policy: SanitizedStringPolicy): boolean {
+  if (containsDisallowedC0(String.fromCodePoint(codePoint))) {
+    return true;
+  }
+
+  if (
+    containsBidiOverride(String.fromCodePoint(codePoint)) ||
+    containsInvisibleTag(String.fromCodePoint(codePoint)) ||
+    codePoint === 0xfeff
+  ) {
+    return true;
+  }
+
+  if (codePoint === 0x200b || codePoint === 0x200c) {
+    return true;
+  }
+
+  return codePoint === 0x200d && policy !== "allow-zwj";
+}
+
+function containsCodePoint(value: string, predicate: (codePoint: number) => boolean): boolean {
+  for (let i = 0; i < value.length; ) {
+    const codePoint = value.codePointAt(i);
+    if (codePoint === undefined) {
+      return false;
+    }
+    if (predicate(codePoint)) {
+      return true;
+    }
+    i += codePoint > 0xffff ? 2 : 1;
+  }
+  return false;
+}
+
+function rejectLoneSurrogates(value: string): void {
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i);
+    if (code >= 0xd800 && code <= 0xdbff) {
+      if (i + 1 >= value.length) {
+        throw new Error("lone surrogate");
+      }
+      const next = value.charCodeAt(i + 1);
+      if (next < 0xdc00 || next > 0xdfff) {
+        throw new Error("lone surrogate");
+      }
+      i += 1;
+      continue;
+    }
+
+    if (code >= 0xdc00 && code <= 0xdfff) {
+      throw new Error("lone surrogate");
+    }
+  }
+}
+
+function isJsonRecord(value: unknown): value is JsonRecord {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}

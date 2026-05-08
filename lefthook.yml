@@ -33,6 +33,19 @@ pre-commit:
         - "**/*.gen.ts"
         - "**/*.gen.tsx"
 
+    biome-protocol:
+      # @wuphf/protocol package has its own biome config (different from web/'s
+      # because it's a Node-only library, no JSX/CSS). Run biome from the
+      # package root against staged packages/protocol/** files.
+      root: packages/protocol
+      glob: "packages/protocol/**/*.{js,ts,json}"
+      run: bunx --bun biome check --write --max-diagnostics=500 {staged_files}
+      stage_fixed: true
+      exclude:
+        - "dist/**"
+        - "node_modules/**"
+        - "coverage/**"
+
     gofmt:
       glob: "*.go"
       run: |
