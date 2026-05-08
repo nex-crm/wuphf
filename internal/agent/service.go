@@ -387,7 +387,8 @@ func (s *AgentService) Get(slug string) (*ManagedAgent, bool) {
 		return nil, false
 	}
 	snapshot := *ma
-	snapshot.State = ma.Loop.GetState()
+	snapshot.Config = agentConfigSnapshot(ma.Config)
+	snapshot.State = agentStateSnapshot(ma.Loop.GetState())
 	return &snapshot, true
 }
 
@@ -398,7 +399,8 @@ func (s *AgentService) List() []*ManagedAgent {
 	list := make([]*ManagedAgent, 0, len(s.agents))
 	for _, ma := range s.agents {
 		snapshot := *ma
-		snapshot.State = ma.Loop.GetState()
+		snapshot.Config = agentConfigSnapshot(ma.Config)
+		snapshot.State = agentStateSnapshot(ma.Loop.GetState())
 		list = append(list, &snapshot)
 	}
 	sort.Slice(list, func(i, j int) bool {
@@ -415,7 +417,23 @@ func (s *AgentService) GetState(slug string) (AgentState, bool) {
 	if !ok {
 		return AgentState{}, false
 	}
-	return ma.Loop.GetState(), true
+	return agentStateSnapshot(ma.Loop.GetState()), true
+}
+
+func agentConfigSnapshot(cfg AgentConfig) AgentConfig {
+	cfg.Expertise = append([]string(nil), cfg.Expertise...)
+	cfg.Tools = append([]string(nil), cfg.Tools...)
+	cfg.AllowedTools = append([]string(nil), cfg.AllowedTools...)
+	if cfg.Budget != nil {
+		budget := *cfg.Budget
+		cfg.Budget = &budget
+	}
+	return cfg
+}
+
+func agentStateSnapshot(state AgentState) AgentState {
+	state.Config = agentConfigSnapshot(state.Config)
+	return state
 }
 
 // Remove stops and removes the agent from the service.
