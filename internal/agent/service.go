@@ -9,7 +9,7 @@ import (
 	"github.com/nex-crm/wuphf/internal/config"
 )
 
-// ManagedAgent wraps an AgentLoop with its config and last-known state.
+// ManagedAgent wraps an AgentLoop with its config and current state snapshot.
 type ManagedAgent struct {
 	Config AgentConfig
 	State  AgentState
@@ -217,7 +217,6 @@ func (s *AgentService) Start(slug string) error {
 	}
 
 	ma.Loop.Start()
-	ma.State = ma.Loop.GetState()
 	s.notify()
 	return nil
 }
@@ -239,7 +238,6 @@ func (s *AgentService) Stop(slug string) error {
 	}
 
 	ma.Loop.Stop()
-	ma.State = ma.Loop.GetState()
 	s.notify()
 	return nil
 }
@@ -365,7 +363,6 @@ func (s *AgentService) runAgentWorker(slug string, ma *ManagedAgent, stopCh <-ch
 			s.mu.Unlock()
 			return
 		}
-		ma.State = nextState
 		running := ma.Loop.CanProcess() &&
 			((nextState.Phase != PhaseDone && nextState.Phase != PhaseIdle) || s.queues.HasMessages(slug))
 		s.mu.Unlock()
