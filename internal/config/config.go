@@ -602,16 +602,20 @@ func SaveTelegramBotToken(token string) {
 }
 
 // CompanyContextBlock returns a prompt fragment with company context for agent
-// system prompts. Returns empty string if no company name is configured.
+// system prompts. Returns empty string if no relevant fields are configured.
 func CompanyContextBlock() string {
 	cfg, _ := Load()
 	name := strings.TrimSpace(cfg.CompanyName)
-	if name == "" {
+	website := strings.TrimSpace(cfg.CompanyWebsite)
+	ownerName := strings.TrimSpace(cfg.OwnerName)
+	if name == "" && website == "" && ownerName == "" {
 		return ""
 	}
 	var sb strings.Builder
 	sb.WriteString("== COMPANY CONTEXT ==\n")
-	sb.WriteString(fmt.Sprintf("Company: %s\n", name))
+	if name != "" {
+		sb.WriteString(fmt.Sprintf("Company: %s\n", name))
+	}
 	if desc := strings.TrimSpace(cfg.CompanyDescription); desc != "" {
 		sb.WriteString(fmt.Sprintf("What they do: %s\n", desc))
 	}
@@ -621,10 +625,10 @@ func CompanyContextBlock() string {
 	if priority := strings.TrimSpace(cfg.CompanyPriority); priority != "" {
 		sb.WriteString(fmt.Sprintf("Immediate priority: %s\n", priority))
 	}
-	if website := strings.TrimSpace(cfg.CompanyWebsite); website != "" {
+	if website != "" {
 		sb.WriteString(fmt.Sprintf("Website: %s\n", website))
 	}
-	if ownerName := strings.TrimSpace(cfg.OwnerName); ownerName != "" {
+	if ownerName != "" {
 		sb.WriteString(fmt.Sprintf("Owner: %s", ownerName))
 		if role := strings.TrimSpace(cfg.OwnerRole); role != "" {
 			sb.WriteString(fmt.Sprintf(" (%s)", role))
