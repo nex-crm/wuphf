@@ -56,8 +56,89 @@ describe("JoinPage", () => {
     expect(submitJoinInviteMock).toHaveBeenCalledWith({
       token: "invite-1",
       displayName: "Maya",
+      passcode: undefined,
     });
     expect(onAccepted).toHaveBeenCalledWith("/#/channels/general");
+  });
+
+  // Phase 2: tunnel-mode invites need a 6-digit passcode the host reads
+  // out-of-band. The first submit goes without one, the server says
+  // passcode_required, the form reveals the passcode field, the joiner
+  // types the code, the second submit goes through.
+  it("reveals the passcode field on passcode_required and resubmits with it", async () => {
+    const user = userEvent.setup();
+    submitJoinInviteMock
+      .mockResolvedValueOnce({
+        ok: false,
+        code: "passcode_required",
+        message: "This invite needs a passcode.",
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        redirect: "/#/channels/general",
+        display_name: "Maya",
+      });
+    const onAccepted = vi.fn();
+    render(<JoinPage token="invite-1" onAccepted={onAccepted} />);
+
+    // No passcode field on first render.
+    expect(screen.queryByLabelText(/passcode/i)).toBeNull();
+
+    await user.type(screen.getByLabelText(/display name/i), "Maya");
+    await user.click(screen.getByRole("button", { name: /enter office/i }));
+
+    // First submit went without a passcode.
+    expect(submitJoinInviteMock).toHaveBeenNthCalledWith(1, {
+      token: "invite-1",
+      displayName: "Maya",
+      passcode: undefined,
+    });
+
+    // Field appears, alert renders, submit button re-enables.
+    const passcodeInput = await screen.findByLabelText(/passcode/i);
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("This invite needs a passcode.");
+    expect(alert).toHaveAttribute("data-error-code", "passcode_required");
+
+    await user.type(passcodeInput, "835291");
+    await user.click(screen.getByRole("button", { name: /enter office/i }));
+
+    expect(submitJoinInviteMock).toHaveBeenNthCalledWith(2, {
+      token: "invite-1",
+      displayName: "Maya",
+      passcode: "835291",
+    });
+    expect(onAccepted).toHaveBeenCalledWith("/#/channels/general");
+  });
+
+  it("strips non-digit characters typed into the passcode field", async () => {
+    const user = userEvent.setup();
+    submitJoinInviteMock
+      .mockResolvedValueOnce({
+        ok: false,
+        code: "passcode_required",
+        message: "passcode needed",
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        redirect: "/#/channels/general",
+        display_name: "Maya",
+      });
+    render(<JoinPage token="invite-1" onAccepted={vi.fn()} />);
+
+    await user.type(screen.getByLabelText(/display name/i), "Maya");
+    await user.click(screen.getByRole("button", { name: /enter office/i }));
+
+    const passcodeInput = await screen.findByLabelText(/passcode/i);
+    // Pasted with whitespace + dashes — the input should normalise to digits.
+    await user.type(passcodeInput, "835-291");
+    await user.click(screen.getByRole("button", { name: /enter office/i }));
+
+    expect(submitJoinInviteMock).toHaveBeenNthCalledWith(2, {
+      token: "invite-1",
+      displayName: "Maya",
+      passcode: "835291",
+    });
   });
 
   it("renders the server error message when the invite is no longer valid", async () => {

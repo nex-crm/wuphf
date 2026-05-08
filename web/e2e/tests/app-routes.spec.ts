@@ -36,8 +36,7 @@ const APP_CASES = [
   {
     app: "calendar",
     label: "Calendar",
-    content:
-      /Loading schedule|Could not load schedule|Schedule|No scheduled jobs/i,
+    content: /Loading calendar|Could not load calendar|Nothing scheduled|Mon|Tue|Wed/i,
   },
   {
     app: "skills",

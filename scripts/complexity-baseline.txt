@@ -32,7 +32,6 @@ web/src/components/layout/UpgradeBanner.tsx|lint/complexity/noExcessiveCognitive
 web/src/components/layout/UpgradeBanner.tsx|lint/complexity/noExcessiveLinesPerFunction|1|Existing function length is baselined for a focused follow-up refactor.
 web/src/components/messages/Composer.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
 web/src/components/messages/Composer.tsx|lint/complexity/noExcessiveLinesPerFunction|1|Existing function length is baselined for a focused follow-up refactor.
-web/src/components/messages/Composer.tsx|lint/complexity/noExcessiveCognitiveComplexity|2|Existing cognitive complexity is baselined for a focused follow-up refactor.
 web/src/components/messages/InterviewBar.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
 web/src/components/messages/InterviewBar.tsx|lint/complexity/noExcessiveLinesPerFunction|1|Existing function length is baselined for a focused follow-up refactor.
 web/src/components/messages/InterviewBar.tsx|lint/complexity/noExcessiveCognitiveComplexity|2|Existing cognitive complexity is baselined for a focused follow-up refactor.
@@ -42,6 +41,7 @@ web/src/components/messages/MessageFeed.tsx|lint/complexity/noExcessiveCognitive
 web/src/components/messages/StreamLineView.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
 web/src/components/messages/StreamLineView.tsx|lint/complexity/noExcessiveCognitiveComplexity|2|Existing cognitive complexity is baselined for a focused follow-up refactor.
 web/src/components/messages/StreamLineView.tsx|lint/complexity/noExcessiveCognitiveComplexity|3|Existing cognitive complexity is baselined for a focused follow-up refactor.
+web/src/components/messages/ThreadPanel.tsx|lint/complexity/noExcessiveLinesPerFunction|1|Composer wiring fans out into mutation, autocomplete, and slash-command branches that share state.
 web/src/components/onboarding/Wizard.tsx|lint/complexity/noExcessiveLinesPerFunction|1|Existing function length is baselined for a focused follow-up refactor.
 web/src/components/onboarding/Wizard.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
 web/src/components/onboarding/Wizard.tsx|lint/complexity/noExcessiveCognitiveComplexity|2|Existing cognitive complexity is baselined for a focused follow-up refactor.
@@ -59,10 +59,12 @@ web/src/components/wiki/Pam.tsx|lint/complexity/noExcessiveCognitiveComplexity|1
 web/src/components/wiki/PlaybookExecutionLog.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
 web/src/components/wiki/WikiAudit.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
 web/src/components/wiki/WikiEditor.test.tsx|lint/complexity/noExcessiveLinesPerFunction|1|Existing function length is baselined for a focused follow-up refactor.
-web/src/components/wiki/WikiEditor.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
+web/src/components/apps/OfficeOverviewApp.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Pending-reviews map callback builds per-request meta + badge from multiple optional fields; inline for readability, baselined pending extraction.
+web/src/components/apps/OfficeOverviewApp.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Scheduled-jobs map callback derives nextRun, badge, and fallback key from multiple optional fields; inline for readability, baselined pending extraction.
 web/src/components/wiki/WikiLint.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
 web/src/hooks/useKeyboardShortcuts.ts|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
 web/src/lib/messageMarkdown.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
+web/src/lib/slashCommands.ts|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
 web/src/lib/wikilink.ts|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
 web/src/styles/global.css|lint/complexity/noImportantStyles|1|Responsive panel width override must win over fixed desktop sizing.
 web/src/styles/global.css|lint/complexity/noImportantStyles|1|Mobile full-width panel override must win over wider breakpoints.

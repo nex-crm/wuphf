@@ -6,6 +6,7 @@ export const APP_PANEL_IDS = [
   "console",
   "graph",
   "health-check",
+  "overview",
   "policies",
   "receipts",
   "requests",

@@ -70,13 +70,8 @@ export function MessageFeed() {
 
   if (isLoading && messages.length === 0) {
     return (
-      <div
-        className="messages"
-        style={{ alignItems: "center", justifyContent: "center" }}
-      >
-        <span style={{ color: "var(--text-tertiary)", fontSize: 13 }}>
-          Loading messages...
-        </span>
+      <div className="messages">
+        <span className="messages-loading-label">Loading messages...</span>
       </div>
     );
   }

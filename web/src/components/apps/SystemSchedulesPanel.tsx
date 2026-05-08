@@ -116,6 +116,7 @@ interface ScheduleRowProps {
 function ScheduleRow({ job, floorState }: ScheduleRowProps) {
   const queryClient = useQueryClient();
   const slug = job.slug ?? "";
+  const labelId = `schedule-${slug || String(job.id)}-label`;
   const isReadOnly = READ_ONLY_SLUGS.has(slug);
   const isCron = typeof job.schedule_expr === "string" && job.schedule_expr;
   const isInterval = typeof job.interval_minutes === "number";
@@ -263,132 +264,163 @@ function ScheduleRow({ job, floorState }: ScheduleRowProps) {
   const nextRunCountdown = describeNextRun(job);
 
   return (
-    <article
-      className="app-card"
+    <div
       style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
         marginBottom: 8,
-        opacity: enabled ? 1 : 0.7,
       }}
-      aria-labelledby={`schedule-${slug || "row"}-label`}
     >
-      <div
+      <ToggleSwitch
+        enabled={enabled}
+        disabled={isReadOnly || pending}
+        onToggle={handleToggle}
+        ariaLabel={`${enabled ? "Disable" : "Enable"} ${labelOf(job)}`}
+      />
+      <article
+        className="app-card"
         style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          marginBottom: 6,
-          flexWrap: "wrap",
+          flex: 1,
+          marginBottom: 0,
+          opacity: enabled ? 1 : 0.7,
         }}
+        aria-labelledby={labelId}
       >
-        <span
-          id={`schedule-${slug || "row"}-label`}
-          className="app-card-title"
-          style={{ marginBottom: 0 }}
-        >
-          {labelOf(job)}
-        </span>
-        <SourceBadge source={sourceLabel} />
-        {!enabled ? <span className="badge badge-muted">disabled</span> : null}
-        {lastRunChip ? (
-          <span className={`badge ${lastRunChip.cls}`}>{lastRunChip.text}</span>
-        ) : null}
-      </div>
-
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 12,
-          flexWrap: "wrap",
-          fontSize: 12,
-          color: "var(--text-secondary)",
-        }}
-      >
-        {isReadOnly ? (
-          <span style={{ fontFamily: "var(--font-mono)" }}>
-            Every {defaultInterval}m (read-only)
-          </span>
-        ) : isCron ? (
-          <span style={{ fontFamily: "var(--font-mono)" }}>
-            cron: {job.schedule_expr}
-          </span>
-        ) : isInterval ? (
-          <IntervalPicker
-            value={overrideText}
-            disabled={pending || !floorReady}
-            onChange={(v) => {
-              setOverrideText(v);
-              setError(null);
-            }}
-            onBlur={handleIntervalCommit}
-            ariaLabel={`Interval in minutes for ${labelOf(job)}`}
-            floor={floor}
-            defaultInterval={defaultInterval}
-          />
-        ) : (
-          <span style={{ color: "var(--text-tertiary)" }}>
-            (no cadence reported)
-          </span>
-        )}
-
-        <ToggleSwitch
+        <ScheduleRowHeader
+          labelId={labelId}
+          label={labelOf(job)}
           enabled={enabled}
-          disabled={isReadOnly || pending}
-          onToggle={handleToggle}
-          ariaLabel={`${enabled ? "Disable" : "Enable"} ${labelOf(job)}`}
+          sourceLabel={sourceLabel}
+          lastRunChip={lastRunChip}
         />
 
-        <button
-          type="button"
-          disabled={runPending}
-          onClick={handleRunNow}
-          aria-label={`Run ${labelOf(job)} now`}
-          style={{
-            padding: "2px 8px",
-            fontSize: 11,
-            fontWeight: 500,
-            background: "transparent",
-            border: "1px solid var(--border)",
-            borderRadius: 4,
-            color: "var(--text-secondary)",
-            cursor: runPending ? "not-allowed" : "pointer",
-            opacity: runPending ? 0.6 : 1,
-            transition: "opacity 0.1s",
-          }}
-        >
-          {runPending ? "…" : "Run now"}
-        </button>
-
-        {nextRunCountdown ? (
-          <span style={{ marginLeft: "auto" }}>{nextRunCountdown}</span>
-        ) : null}
-      </div>
-
-      {error ? (
         <div
-          role="alert"
           style={{
-            marginTop: 6,
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+            flexWrap: "wrap",
             fontSize: 12,
-            color: "var(--red, #c43e3e)",
+            color: "var(--text-secondary)",
           }}
         >
-          {error}
-        </div>
-      ) : null}
+          {isReadOnly ? (
+            <span style={{ fontFamily: "var(--font-mono)" }}>
+              Every {defaultInterval}m (read-only)
+            </span>
+          ) : isCron ? (
+            <span style={{ fontFamily: "var(--font-mono)" }}>
+              cron: {job.schedule_expr}
+            </span>
+          ) : isInterval ? (
+            <IntervalPicker
+              value={overrideText}
+              disabled={pending || !floorReady}
+              onChange={(v) => {
+                setOverrideText(v);
+                setError(null);
+              }}
+              onBlur={handleIntervalCommit}
+              ariaLabel={`Interval in minutes for ${labelOf(job)}`}
+              floor={floor}
+              defaultInterval={defaultInterval}
+            />
+          ) : (
+            <span style={{ color: "var(--text-tertiary)" }}>
+              (no cadence reported)
+            </span>
+          )}
 
-      {!isReadOnly && isInterval && committedOverrideRef.current > 0 ? (
-        <div
-          style={{
-            marginTop: 6,
-            fontSize: 11,
-            color: "var(--text-tertiary)",
-          }}
-        >
-          Override active. Default: every {defaultInterval}m.
+          <button
+            type="button"
+            disabled={runPending}
+            onClick={handleRunNow}
+            aria-label={`Run ${labelOf(job)} now`}
+            style={{
+              padding: "2px 8px",
+              fontSize: 11,
+              fontWeight: 500,
+              background: "transparent",
+              border: "1px solid var(--border)",
+              borderRadius: 4,
+              color: "var(--text-secondary)",
+              cursor: runPending ? "not-allowed" : "pointer",
+              opacity: runPending ? 0.6 : 1,
+              transition: "opacity 0.1s",
+            }}
+          >
+            {runPending ? "…" : "Run now"}
+          </button>
+
+          {nextRunCountdown ? (
+            <span style={{ marginLeft: "auto" }}>{nextRunCountdown}</span>
+          ) : null}
         </div>
+
+        {error ? (
+          <div
+            role="alert"
+            style={{
+              marginTop: 6,
+              fontSize: 12,
+              color: "var(--red, #c43e3e)",
+            }}
+          >
+            {error}
+          </div>
+        ) : null}
+
+        {!isReadOnly && isInterval && committedOverrideRef.current > 0 ? (
+          <div
+            style={{
+              marginTop: 6,
+              fontSize: 11,
+              color: "var(--text-tertiary)",
+            }}
+          >
+            Override active. Default: every {defaultInterval}m.
+          </div>
+        ) : null}
+      </article>
+    </div>
+  );
+}
+
+interface ScheduleRowHeaderProps {
+  labelId: string;
+  label: string;
+  enabled: boolean;
+  sourceLabel: "system" | "agent" | "workflow";
+  lastRunChip: { text: string; cls: string } | null;
+}
+
+function ScheduleRowHeader({
+  labelId,
+  label,
+  enabled,
+  sourceLabel,
+  lastRunChip,
+}: ScheduleRowHeaderProps) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        marginBottom: 6,
+        flexWrap: "wrap",
+      }}
+    >
+      <span id={labelId} className="app-card-title" style={{ marginBottom: 0 }}>
+        {label}
+      </span>
+      <SourceBadge source={sourceLabel} />
+      {!enabled ? <span className="badge badge-muted">disabled</span> : null}
+      {lastRunChip ? (
+        <span className={`badge ${lastRunChip.cls}`}>{lastRunChip.text}</span>
       ) : null}
-    </article>
+    </div>
   );
 }
 

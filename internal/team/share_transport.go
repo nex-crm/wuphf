@@ -167,14 +167,22 @@ func (s *ShareTransport) onHumanAdmit(ctx context.Context, sessionID, slug, disp
 	}
 }
 
-// Send is a no-op for the human-share adapter. Office-wide messages reach
-// admitted humans through the existing broker channels (the shared web UI
-// polls /api/* routes on the same broker), so there is no external network for
-// the adapter to push to. Returning nil keeps the OfficeBoundTransport contract
-// honest: the adapter accepts the message and trusts the broker to deliver via
-// its existing channel-message machinery. This is a conscious contract choice,
-// not an oversight — a future push transport (WebSocket, SSE) for share-
-// admitted humans would replace this no-op with real delivery.
+// Send is a no-op for the human-share adapter — and that is the correct
+// architecture, not a TODO. Admitted humans already receive office-wide
+// messages in real-time through the broker's existing SSE fan-out: the
+// broker's handleEvents (broker_sse.go) accepts the human session cookie,
+// publishMessage (broker_publish.go) fans every channelMessage to all
+// subscribers without filtering humans out, the share HTTP server proxies
+// /api/* including text/event-stream through to the broker
+// (cmd/wuphf/share.go), and the React app subscribes via useBrokerEvents
+// (web/src/hooks/useBrokerEvents.ts). Doing real delivery here would
+// duplicate that path.
+//
+// Returning nil keeps the OfficeBoundTransport contract honest: the adapter
+// accepts the outbound message and trusts the broker SSE channel to deliver.
+// If a future deployment ever needs out-of-band push (e.g. native mobile
+// admitted humans without the React EventSource), that work belongs in the
+// broker's SSE layer or a sibling adapter — not here.
 func (s *ShareTransport) Send(_ context.Context, _ transport.Outbound) error {
 	return nil
 }

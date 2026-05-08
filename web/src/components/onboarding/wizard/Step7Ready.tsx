@@ -1,5 +1,5 @@
 import { ONBOARDING_COPY } from "../../../lib/constants";
-import { EnterHint } from "./components";
+import { BtnLabel, EnterHint } from "./components";
 import type { ReadinessCheck } from "./types";
 
 interface ReadyStepProps {
@@ -29,15 +29,10 @@ export function ReadyStep({
   return (
     <div className="wizard-step">
       <div className="wizard-hero">
-        <h1 className="wizard-headline" style={{ fontSize: 28 }}>
-          You&apos;re set
+        <h1 className="wizard-headline wizard-headline-sm">
+          {ONBOARDING_COPY.step8_headline}
         </h1>
-        <p className="wizard-subhead">
-          Here&apos;s what&apos;s configured. Anything with a{" "}
-          <span className="readiness-glyph-inline missing">!</span> or{" "}
-          <span className="readiness-glyph-inline next">—</span> can be fixed
-          later from Settings.
-        </p>
+        <p className="wizard-subhead">{ONBOARDING_COPY.step8_subhead}</p>
       </div>
 
       <div className="wizard-panel readiness-panel">
@@ -109,11 +104,13 @@ export function ReadyStep({
             disabled={submitting}
             type="button"
           >
-            {submitting
-              ? "Starting..."
-              : submitError && taskText.trim().length > 0
-                ? "Retry"
-                : ONBOARDING_COPY.step3_cta}
+            <BtnLabel>
+              {submitting
+                ? "Starting..."
+                : submitError && taskText.trim().length > 0
+                  ? "Retry"
+                  : ONBOARDING_COPY.step8_cta}
+            </BtnLabel>
             {!submitting && taskText.trim().length > 0 && <EnterHint />}
           </button>
         </div>

@@ -427,14 +427,62 @@ func HandleTemplates(w http.ResponseWriter, r *http.Request, packSlug string) {
 
 // blueprintSummary is the wizard-facing shape returned by HandleBlueprints.
 // Keep the field names in sync with BlueprintTemplate in
-// web/src/components/onboarding/Wizard.tsx.
+// web/src/components/onboarding/wizard/types.ts. The pack-library
+// fields (outcome, category, channels, skills, wiki_scaffold,
+// first_tasks, requirements, estimated_setup_minutes,
+// example_artifacts) are additive — older clients that only consume
+// id/name/description/agents/tasks keep working.
 type blueprintSummary struct {
-	ID          string                  `json:"id"`
-	Name        string                  `json:"name"`
-	Description string                  `json:"description,omitempty"`
-	Emoji       string                  `json:"emoji,omitempty"`
-	Agents      []blueprintAgentSummary `json:"agents,omitempty"`
-	Tasks       []blueprintTaskSummary  `json:"tasks,omitempty"`
+	ID                    string                       `json:"id"`
+	Name                  string                       `json:"name"`
+	Description           string                       `json:"description,omitempty"`
+	Emoji                 string                       `json:"emoji,omitempty"`
+	Outcome               string                       `json:"outcome,omitempty"`
+	Category              string                       `json:"category,omitempty"`
+	EstimatedSetupMinutes int                          `json:"estimated_setup_minutes,omitempty"`
+	Agents                []blueprintAgentSummary      `json:"agents,omitempty"`
+	Channels              []blueprintChannelSummary    `json:"channels,omitempty"`
+	Tasks                 []blueprintTaskSummary       `json:"tasks,omitempty"`
+	Skills                []blueprintSkillSummary      `json:"skills,omitempty"`
+	WikiScaffold          []blueprintWikiScaffoldEntry `json:"wiki_scaffold,omitempty"`
+	FirstTasks            []blueprintFirstTaskSummary  `json:"first_tasks,omitempty"`
+	Requirements          []blueprintRequirementEntry  `json:"requirements,omitempty"`
+	ExampleArtifacts      []blueprintExampleSummary    `json:"example_artifacts,omitempty"`
+}
+
+type blueprintChannelSummary struct {
+	Slug    string `json:"slug"`
+	Name    string `json:"name,omitempty"`
+	Purpose string `json:"purpose,omitempty"`
+}
+
+type blueprintSkillSummary struct {
+	Name    string `json:"name"`
+	Purpose string `json:"purpose,omitempty"`
+}
+
+type blueprintWikiScaffoldEntry struct {
+	Path  string `json:"path"`
+	Title string `json:"title,omitempty"`
+}
+
+type blueprintFirstTaskSummary struct {
+	ID             string `json:"id"`
+	Title          string `json:"title"`
+	Prompt         string `json:"prompt,omitempty"`
+	ExpectedOutput string `json:"expected_output,omitempty"`
+}
+
+type blueprintRequirementEntry struct {
+	Kind     string `json:"kind"`
+	Name     string `json:"name"`
+	Required bool   `json:"required,omitempty"`
+	Detail   string `json:"detail,omitempty"`
+}
+
+type blueprintExampleSummary struct {
+	Kind  string `json:"kind,omitempty"`
+	Title string `json:"title"`
 }
 
 type blueprintAgentSummary struct {
@@ -483,9 +531,12 @@ func HandleBlueprints(w http.ResponseWriter, r *http.Request) {
 
 func summarizeBlueprint(bp operations.Blueprint) blueprintSummary {
 	s := blueprintSummary{
-		ID:          bp.ID,
-		Name:        bp.Name,
-		Description: bp.Description,
+		ID:                    bp.ID,
+		Name:                  bp.Name,
+		Description:           bp.Description,
+		Outcome:               bp.Outcome,
+		Category:              bp.Category,
+		EstimatedSetupMinutes: bp.EstimatedSetupMinutes,
 	}
 	leadSlug := strings.TrimSpace(bp.Starter.LeadSlug)
 	for _, a := range bp.Starter.Agents {
@@ -502,6 +553,17 @@ func summarizeBlueprint(bp operations.Blueprint) blueprintSummary {
 			BuiltIn: builtIn,
 		})
 	}
+	for _, c := range bp.Starter.Channels {
+		slug := strings.TrimSpace(c.Slug)
+		if slug == "" || strings.Contains(slug, "{{") {
+			continue
+		}
+		s.Channels = append(s.Channels, blueprintChannelSummary{
+			Slug:    slug,
+			Name:    strings.TrimSpace(c.Name),
+			Purpose: strings.TrimSpace(c.Description),
+		})
+	}
 	for _, t := range bp.Starter.Tasks {
 		title := strings.TrimSpace(t.Title)
 		if title == "" {
@@ -511,6 +573,63 @@ func summarizeBlueprint(bp operations.Blueprint) blueprintSummary {
 			ID:          onboardingTemplateID(title),
 			Name:        title,
 			Description: strings.TrimSpace(t.Details),
+		})
+	}
+	for _, ft := range bp.FirstTasks {
+		id := strings.TrimSpace(ft.ID)
+		title := strings.TrimSpace(ft.Title)
+		if id == "" || title == "" {
+			continue
+		}
+		s.FirstTasks = append(s.FirstTasks, blueprintFirstTaskSummary{
+			ID:             id,
+			Title:          title,
+			Prompt:         strings.TrimSpace(ft.Prompt),
+			ExpectedOutput: strings.TrimSpace(ft.ExpectedOutput),
+		})
+	}
+	for _, sk := range bp.Skills {
+		name := strings.TrimSpace(sk.Name)
+		if name == "" {
+			continue
+		}
+		s.Skills = append(s.Skills, blueprintSkillSummary{
+			Name:    name,
+			Purpose: strings.TrimSpace(sk.Purpose),
+		})
+	}
+	for _, req := range bp.Requirements {
+		name := strings.TrimSpace(req.Name)
+		if name == "" {
+			continue
+		}
+		s.Requirements = append(s.Requirements, blueprintRequirementEntry{
+			Kind:     strings.TrimSpace(req.Kind),
+			Name:     name,
+			Required: req.Required,
+			Detail:   strings.TrimSpace(req.Detail),
+		})
+	}
+	if bp.WikiSchema != nil {
+		for _, item := range bp.WikiSchema.Bootstrap {
+			path := strings.TrimSpace(item.Path)
+			if path == "" {
+				continue
+			}
+			s.WikiScaffold = append(s.WikiScaffold, blueprintWikiScaffoldEntry{
+				Path:  path,
+				Title: strings.TrimSpace(item.Title),
+			})
+		}
+	}
+	for _, ex := range bp.ExampleArtifacts {
+		title := strings.TrimSpace(ex.Title)
+		if title == "" {
+			continue
+		}
+		s.ExampleArtifacts = append(s.ExampleArtifacts, blueprintExampleSummary{
+			Kind:  strings.TrimSpace(ex.Kind),
+			Title: title,
 		})
 	}
 	return s

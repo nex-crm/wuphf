@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 
+import { getSkillsList } from "../../api/client";
 import {
   type DiscoveredSection,
   fetchCatalog,
@@ -13,7 +14,7 @@ import WikiArticle from "./WikiArticle";
 import WikiAudit from "./WikiAudit";
 import WikiCatalog from "./WikiCatalog";
 import WikiLint from "./WikiLint";
-import WikiSidebar from "./WikiSidebar";
+import WikiSidebar, { type SidebarSkill } from "./WikiSidebar";
 import "../../styles/wiki.css";
 
 // Reserved pseudo-path for the audit view. Never collides with a real
@@ -44,11 +45,11 @@ export default function Wiki({
   const [catalog, setCatalog] = useState<WikiCatalogEntry[]>([]);
   const [sections, setSections] = useState<DiscoveredSection[]>([]);
   const [loading, setLoading] = useState(true);
+  const [sidebarSkills, setSidebarSkills] = useState<SidebarSkill[]>([]);
 
   useEffect(() => {
     let cancelled = false;
-    // Parallel fetch: catalog and sections are independent so we pay one
-    // round-trip of latency, not two.
+    // Parallel fetch: catalog and sections are independent.
     Promise.all([fetchCatalog(), fetchSections()])
       .then(([c, s]) => {
         if (cancelled) return;
@@ -57,6 +58,27 @@ export default function Wiki({
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    getSkillsList("all")
+      .then((res) => {
+        if (cancelled) return;
+        setSidebarSkills(
+          (res.skills ?? []).map((s) => ({
+            name: s.name,
+            title: s.title,
+            status: s.status,
+          })),
+        );
+      })
+      .catch(() => {
+        // Skills section is additive — a failure here should not break the wiki.
       });
     return () => {
       cancelled = true;
@@ -100,6 +122,7 @@ export default function Wiki({
           onNavigate={(path) => onNavigate(path)}
           onNavigateAudit={() => onNavigate(AUDIT_PATH)}
           onNavigateLint={() => onNavigate(LINT_PATH)}
+          skills={sidebarSkills}
         />
         {isAudit ? (
           <WikiAudit onNavigate={(path) => onNavigate(path)} />

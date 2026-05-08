@@ -187,7 +187,7 @@ test.describe("wuphf onboarding wizard smoke", () => {
   }) => {
     // Verifies the wizard state machine actually transitions. Flow is:
     // welcome → identity (company + description required) → templates.
-    // Assert via `.wizard-panel` on the templates step.
+    // Assert via `.pack-library` on the templates step.
     const getErrors = collectReactErrors(page);
 
     await page.goto("/");
@@ -195,8 +195,8 @@ test.describe("wuphf onboarding wizard smoke", () => {
 
     await advanceToTemplatesStep(page);
 
-    // Templates step renders `.wizard-panel` (welcome + identity have different markers).
-    await expect(page.locator(".wizard-panel").first()).toBeVisible({
+    // Templates step renders `.pack-library` (welcome + identity have different markers).
+    await expect(page.locator(".pack-library").first()).toBeVisible({
       timeout: 10_000,
     });
     await expectNoReactErrors(page, getErrors, "advancing wizard");
@@ -220,18 +220,17 @@ test.describe("wuphf onboarding wizard smoke", () => {
 
     await advanceToTemplatesStep(page);
 
-    // Wait for at least one template grid (the blueprint picker now
-    // renders one grid per category group — Services, Media & Community,
-    // Products — so `.template-grid` is not unique). We rely on
-    // `.template-card` instead as the unit of a rendered blueprint.
-    const cards = page.locator(".template-card");
+    // The new pack-library picker renders one `.pack-card` per blueprint
+    // (with a separate "Start from scratch" affordance below the grid).
+    // We rely on `.pack-card` as the unit of a rendered blueprint.
+    const cards = page.locator(".pack-card");
     await expect(cards.first()).toBeVisible({ timeout: 10_000 });
 
     // The pre-embed bug rendered exactly zero preset cards — only the
-    // separate "Start from scratch" button (which is NOT a .template-card
-    // in the grouped layout). So requiring ≥1 card is the regression
-    // guard: if embedded templates fail to load, the grouped layout
-    // would still render the from-scratch button but produce zero cards.
+    // separate "Start from scratch" button (which is NOT a .pack-card).
+    // So requiring ≥1 card is the regression guard: if embedded
+    // templates fail to load, the layout would still render the
+    // from-scratch button but produce zero pack cards.
     const count = await cards.count();
     expect(
       count,
@@ -257,22 +256,21 @@ test.describe("wuphf onboarding wizard smoke", () => {
     });
     await page.locator(".wizard-step button.btn-primary").first().click();
 
-    await expect(page.getByText("Tell us about this office")).toBeVisible();
+    await expect(page.getByText("Name your office")).toBeVisible();
     await page.locator("#wiz-company").fill("E2E Full Flow Co");
     await page.locator("#wiz-description").fill("Deterministic wizard path");
-    await page.locator("#wiz-priority").fill("Launch the first customer loop");
     await page.locator(".wizard-step button.btn-primary").first().click();
 
     await expect(page.getByText("What should your office run?")).toBeVisible();
     const templateTile = page
-      .locator(".template-card")
+      .locator(".pack-card")
       .filter({ hasText: "Niche CRM" })
       .first();
     await expect(templateTile).toBeVisible({ timeout: 10_000 });
     await templateTile.click();
     await page.locator(".wizard-step button.btn-primary").first().click();
 
-    await expect(page.getByText("Your team")).toBeVisible();
+    await expect(page.getByText("Meet your team")).toBeVisible();
     await expect(page.getByText("GTM Lead")).toBeVisible();
     await page.locator(".wizard-step button.btn-primary").first().click();
 
@@ -281,6 +279,10 @@ test.describe("wuphf onboarding wizard smoke", () => {
     await expect(claudeTile).toHaveAttribute("aria-pressed", "true");
     await page.locator(".wizard-step button.btn-primary").first().click();
 
+    // Nex registration is now its own step between setup and task — skip it
+    // for the deterministic happy-path test (covered separately by unit tests).
+    await page.getByRole("button", { name: /^Skip$/ }).click();
+
     await expect(page.locator("#wiz-task-input")).toBeVisible();
     await page.getByRole("button", { name: /Draft launch plan/i }).click();
     await expect(page.locator("#wiz-task-input")).toHaveValue(
@@ -288,7 +290,7 @@ test.describe("wuphf onboarding wizard smoke", () => {
     );
     await page.locator(".wizard-step button.btn-primary").first().click();
 
-    await expect(page.getByText("You're set")).toBeVisible();
+    await expect(page.getByText("Ready to launch")).toBeVisible();
     await expect(page.getByText("LLM runtime")).toBeVisible();
     await page.getByTestId("onboarding-submit-button").click();
 
@@ -307,7 +309,6 @@ test.describe("wuphf onboarding wizard smoke", () => {
     expect(captures.complete).toMatchObject({
       company: "E2E Full Flow Co",
       description: "Deterministic wizard path",
-      priority: "Launch the first customer loop",
       runtime: "Claude Code",
       runtime_priority: ["Claude Code"],
       memory_backend: "markdown",
@@ -330,13 +331,15 @@ test.describe("wuphf onboarding wizard smoke", () => {
     await advanceToTemplatesStep(page);
 
     await page
-      .locator(".template-card")
+      .locator(".pack-card")
       .filter({ hasText: "Niche CRM" })
       .first()
       .click();
+    // templates → team → setup → nex (skip) → task
     await page.locator(".wizard-step button.btn-primary").first().click();
     await page.locator(".wizard-step button.btn-primary").first().click();
     await page.locator(".wizard-step button.btn-primary").first().click();
+    await page.getByRole("button", { name: /^Skip$/ }).click();
 
     const launchPlanSuggestion = page.getByRole("button", {
       name: /Draft launch plan/i,
@@ -350,15 +353,19 @@ test.describe("wuphf onboarding wizard smoke", () => {
       "Draft a launch plan for the first customer loop.",
     );
 
+    // task → nex → setup → team → templates (4 Backs to undo skip + 3 forward steps)
+    await page.getByRole("button", { exact: true, name: "Back" }).click();
     await page.getByRole("button", { exact: true, name: "Back" }).click();
     await page.getByRole("button", { exact: true, name: "Back" }).click();
     await page.getByRole("button", { exact: true, name: "Back" }).click();
     await expect(page.getByText("What should your office run?")).toBeVisible();
 
     await page.getByRole("button", { name: /Start from scratch/i }).click();
+    // templates → team → setup → nex (skip) → task
     await page.locator(".wizard-step button.btn-primary").first().click();
     await page.locator(".wizard-step button.btn-primary").first().click();
     await page.locator(".wizard-step button.btn-primary").first().click();
+    await page.getByRole("button", { name: /^Skip$/ }).click();
 
     await expect(page.locator("#wiz-task-input")).toHaveValue("");
     await expect(

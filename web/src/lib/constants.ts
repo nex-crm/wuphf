@@ -3,6 +3,7 @@
 // Each surface gets its own tab inside the Wiki app; notebooks/reviews
 // have no top-level sidebar entries of their own.
 export const SIDEBAR_APPS = [
+  { id: "overview", icon: "\uD83C\uDFE0", name: "Overview" },
   { id: "wiki", icon: "\uD83D\uDCD6", name: "Wiki" },
   { id: "console", icon: ">", name: "Console" },
   { id: "tasks", icon: "\u2705", name: "Tasks" },
@@ -27,16 +28,34 @@ export function appTitle(app: string): string {
 export const ONBOARDING_COPY = {
   step1_headline: "AI employees with a shared brain",
   step1_subhead:
-    "A collaborative office where AI agents like Claude Code, Codex, and OpenClaw learn your work playbooks, build personalized skills, and execute, 24x7. Each agent backed by its own knowledge graph.",
-  step1_cta: "Open the office",
-  step2_prereqs_title: "First, make sure you have the tools",
-  step2_keys_title: "Connect your AI providers",
-  step2_cta: "Ready",
-  step3_title: "What should the team work on first?",
-  step3_placeholder:
+    "A collaborative office where AI agents like Claude Code, Codex, and OpenClaw learn your work playbooks, build personalized skills, and execute, 24x7.\nEach agent is backed by its own knowledge graph.",
+  step1_cta: "Continue",
+  step2_headline: "Name your office",
+  step2_subhead: "This becomes the workspace your agents call home.",
+  step2_cta: "Continue",
+  step3_headline: "Pick a blueprint",
+  step3_subhead: "Pre-built teams and workflows. Start here, customize later.",
+  step3_cta: "Continue",
+  step4_headline: "Meet your team",
+  step4_subhead:
+    "These specialists ship work while you sleep. Toggle anyone you don't need.",
+  step4_cta: "Continue",
+  step5_headline: "Connect a provider",
+  step5_subhead:
+    "Pick one or more providers your agents can use. Drag to set fallback order.",
+  step5_cta: "Continue",
+  step6_headline: "Power up with Nex",
+  step6_subhead:
+    "Shared memory, entity briefs, and integrations. Optional but powerful.",
+  step7_headline: "First assignment",
+  step7_subhead: "Give your team something real to work on.",
+  step7_placeholder:
     "e.g. Sign our first three pilot customers in the next two weeks.",
-  step3_skip: "Skip for now",
-  step3_cta: "Get started",
+  step7_skip: "Skip for now",
+  step7_cta: "Review setup",
+  step8_headline: "Ready to launch",
+  step8_subhead: "Here's what's configured. Fix anything later from Settings.",
+  step8_cta: "Launch office",
 } as const;
 
 export const DISCONNECT_THRESHOLD = 3;

@@ -15,12 +15,15 @@ import {
   SCRATCH_FOUNDING_TEAM,
   STEP_ORDER,
 } from "./wizard/constants";
+import { OutcomeSummary } from "./wizard/OutcomeSummary";
 import {
   clearDraft,
   consumeStaleBannerDays,
   loadDraft,
   seedFromDraft,
 } from "./wizard/onboardingDraft";
+import type { PackPreviewRequirement } from "./wizard/packPreview";
+import { adaptPackPreview } from "./wizard/packPreview";
 import { OnboardingBanners } from "./wizard/ResumeBanner";
 import {
   canSetupContinue,
@@ -34,6 +37,7 @@ import { TemplatesStep } from "./wizard/Step2Templates";
 import { IdentityStep } from "./wizard/Step3Identity";
 import { TeamStep } from "./wizard/Step4Team";
 import { SetupStep } from "./wizard/Step5Setup";
+import { NexStep } from "./wizard/Step6Nex";
 import { TaskStep } from "./wizard/Step6Task";
 import { ReadyStep } from "./wizard/Step7Ready";
 import type {
@@ -46,6 +50,19 @@ import type {
   WizardStep,
 } from "./wizard/types";
 import { useOnboardingDraftSync } from "./wizard/useOnboardingDraftSync";
+
+// OutcomeMeta captures the wizard state at the moment /onboarding/complete
+// succeeds. The backend only returns {"ok":true}; this snapshot is the
+// source of truth for the post-completion summary screen.
+interface OutcomeMeta {
+  agents: BlueprintAgent[];
+  selectedBlueprint: string | null;
+  blueprints: BlueprintTemplate[];
+  primaryRuntime: string;
+  taskText: string;
+  taskSkipped: boolean;
+  apiKeyCount: number;
+}
 
 // runtimeIsReady + detectedBinary moved to wizard/runtime-helpers.ts.
 // ArrowIcon, CheckIcon, EnterHint, ProgressDots moved to wizard/components.tsx.
@@ -74,6 +91,20 @@ interface ConfigBootstrap {
 
 function prereqsFromPayload(data: PrereqsPayload): PrereqResult[] {
   return Array.isArray(data) ? data : (data.prereqs ?? []);
+}
+
+// Derive pack requirements from the selected blueprint for the SetupStep
+// requirements panel. Returns an empty array when no blueprint is selected
+// (scratch) or when the blueprint declares no requirements, so the panel
+// stays hidden in those cases.
+function derivePackRequirements(
+  selectedBlueprint: string | null,
+  blueprints: BlueprintTemplate[],
+): PackPreviewRequirement[] {
+  if (!selectedBlueprint) return [];
+  const bp = blueprints.find((b) => b.id === selectedBlueprint);
+  if (!bp) return [];
+  return adaptPackPreview(bp).requirements;
 }
 
 function errorMessage(reason: unknown): string {
@@ -167,7 +198,7 @@ export function Wizard({ onComplete }: WizardProps) {
   // nex.ai/register, key pasted on the Setup step).
   const [nexEmail, setNexEmail] = useState("");
   const [nexSignupStatus, setNexSignupStatus] =
-    useState<NexSignupStatus>("hidden");
+    useState<NexSignupStatus>("open");
   const [nexSignupError, setNexSignupError] = useState("");
 
   // Step 4: team
@@ -194,7 +225,13 @@ export function Wizard({ onComplete }: WizardProps) {
   const [apiKeys, setApiKeys] = useState<Record<string, string>>({});
   // If we restored runtime choices from a draft, mark as user-edited so
   // the prereq bootstrap effect doesn't overwrite them with defaults.
-  const userEditedRuntimeRef = useRef(initialDraft !== null);
+  // Only treat the draft as edited when it actually carried a runtime —
+  // an empty draft (welcome-step bail) shouldn't suppress auto-detect on
+  // the next visit, otherwise the no-clicks happy path silently breaks.
+  const userEditedRuntimeRef = useRef(
+    initialDraft !== null &&
+      (seed.runtimePriority.length > 0 || seed.localProvider !== ""),
+  );
 
   // Step 6: first task
   const [taskTemplates, setTaskTemplates] = useState<TaskTemplate[]>([]);
@@ -205,6 +242,12 @@ export function Wizard({ onComplete }: WizardProps) {
   const taskTextAutofilled = useRef(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
+
+  // Outcome summary — shown after /onboarding/complete succeeds.
+  // The wizard stays mounted so the user can read what was created before
+  // entering the office. onComplete() is called when they click "Go to the office".
+  const [showOutcome, setShowOutcome] = useState(false);
+  const [outcomeMeta, setOutcomeMeta] = useState<OutcomeMeta | null>(null);
 
   // Fetch blueprints on mount
   useEffect(() => {
@@ -415,14 +458,6 @@ export function Wizard({ onComplete }: WizardProps) {
     setApiKeys((prev) => ({ ...prev, [key]: value }));
   }, []);
 
-  // Open the in-wizard Nex signup affordance. A separate handler (not just
-  // `setNexSignupStatus('open')` inline) keeps the error/email state reset in
-  // one place — reopening after a failed attempt shouldn't leak the old error.
-  const openNexSignup = useCallback(() => {
-    setNexSignupError("");
-    setNexSignupStatus("open");
-  }, []);
-
   // Submit the email to /nex/register. On success: mark status 'ok' so the
   // UI tells the user to check their inbox. On ErrNotInstalled (502 from the
   // broker when nex-cli isn't on PATH): flip to 'fallback' — the user gets an
@@ -450,20 +485,6 @@ export function Wizard({ onComplete }: WizardProps) {
       setNexSignupError(msg);
     }
   }, [nexEmail]);
-
-  // Close the Nex signup panel via Escape — keeps the outer Escape handler
-  // in `useKeyboardShortcuts` free to act on app-level panels without
-  // fighting the wizard's internal affordance.
-  const closeNexSignup = useCallback(() => {
-    if (
-      nexSignupStatus === "open" ||
-      nexSignupStatus === "ok" ||
-      nexSignupStatus === "fallback"
-    ) {
-      setNexSignupStatus("hidden");
-      setNexSignupError("");
-    }
-  }, [nexSignupStatus]);
 
   // Compute readiness checks. Runs at render time for the 'ready' step — no
   // useMemo because the surface is small (6 checks) and recomputation only
@@ -670,11 +691,29 @@ export function Wizard({ onComplete }: WizardProps) {
         return;
       }
 
+      // Capture what was submitted before calling onComplete — the outcome
+      // summary screen needs these values to describe what was created.
+      const apiKeyCount = Object.values(apiKeys).filter(
+        (v) => v.trim().length > 0,
+      ).length;
+      setOutcomeMeta({
+        agents,
+        selectedBlueprint,
+        blueprints,
+        primaryRuntime: runtimePriority[0] ?? "",
+        taskText,
+        taskSkipped: skipTask,
+        apiKeyCount,
+      });
+
       // Onboarding succeeded — discard the resumeable draft so a return
       // visit lands on the post-setup app, not a half-filled wizard.
       clearDraft();
       setOnboardingComplete(true);
-      onComplete?.();
+      // Show the outcome summary screen instead of immediately entering the
+      // office. The user clicks "Go to the office" to call onComplete().
+      setShowOutcome(true);
+      setSubmitting(false);
     },
     [
       company,
@@ -683,10 +722,10 @@ export function Wizard({ onComplete }: WizardProps) {
       runtimePriority,
       selectedBlueprint,
       agents,
+      blueprints,
       apiKeys,
       taskText,
       setOnboardingComplete,
-      onComplete,
     ],
   );
 
@@ -699,7 +738,12 @@ export function Wizard({ onComplete }: WizardProps) {
     // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") {
-        closeNexSignup();
+        // Escape on the optional Nex step skips it; on other steps it's a
+        // no-op (outer keyboard shortcuts can act on app-level panels).
+        if (step === "nex") {
+          e.preventDefault();
+          nextStep();
+        }
         return;
       }
       if (e.key !== "Enter") return;
@@ -713,8 +757,16 @@ export function Wizard({ onComplete }: WizardProps) {
       // Don't hijack Enter on interactive controls — Enter on a focused
       // Back button should go back, not advance; Enter on a runtime
       // reorder button should reorder, not advance.
+      // Exception: template-card buttons should let Enter advance the step
+      // (preventDefault stops the native toggle so the card stays selected).
       const tag = target?.tagName;
-      if (tag === "BUTTON" || tag === "A" || tag === "SELECT") return;
+      const isTemplateCard =
+        target?.classList?.contains("template-card") ?? false;
+      if (
+        (tag === "BUTTON" || tag === "A" || tag === "SELECT") &&
+        !isTemplateCard
+      )
+        return;
       const inTextarea = tag === "TEXTAREA";
       const isSubmitCombo = e.metaKey || e.ctrlKey;
       if (inTextarea && !isSubmitCombo) return;
@@ -754,6 +806,24 @@ export function Wizard({ onComplete }: WizardProps) {
             nextStep();
           }
           return;
+        case "nex":
+          // Mirror the step's primary CTA: register if the user has typed an
+          // email, advance otherwise. This prevents a user from typing an
+          // address, tabbing away, then pressing Enter and skipping signup.
+          // While a registration is in flight the press is a no-op so a
+          // stray Enter can't race the API call and skip the step.
+          e.preventDefault();
+          if (nexSignupStatus === "submitting") {
+            return;
+          }
+          if (nexSignupStatus === "ok" || nexSignupStatus === "fallback") {
+            nextStep();
+          } else if (nexEmail.trim().length > 0) {
+            submitNexSignup();
+          } else {
+            nextStep();
+          }
+          return;
         case "task":
           if (isSubmitCombo) {
             e.preventDefault();
@@ -786,8 +856,10 @@ export function Wizard({ onComplete }: WizardProps) {
     goTo,
     nextStep,
     finishOnboarding,
-    closeNexSignup,
     localProvider,
+    nexEmail,
+    nexSignupStatus,
+    submitNexSignup,
   ]);
 
   // Debounced persistence of the non-secret draft. extractDraftableState
@@ -814,6 +886,9 @@ export function Wizard({ onComplete }: WizardProps) {
     setCompany("");
     setDescription("");
     setPriority("");
+    setNexEmail("");
+    setNexSignupStatus("open");
+    setNexSignupError("");
     setRuntimePriority([]);
     setLocalProvider("");
     setApiKeys({});
@@ -822,6 +897,28 @@ export function Wizard({ onComplete }: WizardProps) {
     userEditedRuntimeRef.current = false;
     taskTextAutofilled.current = false;
   }, []);
+
+  // Outcome summary — rendered in place of the wizard steps after
+  // /onboarding/complete succeeds. The user reads what was created and
+  // then clicks "Go to the office" which calls onComplete().
+  if (showOutcome && outcomeMeta !== null) {
+    return (
+      <div className="wizard-container">
+        <div className="wizard-body">
+          <OutcomeSummary
+            agents={outcomeMeta.agents}
+            selectedBlueprint={outcomeMeta.selectedBlueprint}
+            blueprints={outcomeMeta.blueprints}
+            primaryRuntime={outcomeMeta.primaryRuntime}
+            taskText={outcomeMeta.taskText}
+            taskSkipped={outcomeMeta.taskSkipped}
+            apiKeyCount={outcomeMeta.apiKeyCount}
+            onEnter={() => onComplete?.()}
+          />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="wizard-container">
@@ -860,15 +957,9 @@ export function Wizard({ onComplete }: WizardProps) {
             company={company}
             description={description}
             priority={priority}
-            nexEmail={nexEmail}
-            nexSignupStatus={nexSignupStatus}
-            nexSignupError={nexSignupError}
             onChangeCompany={setCompany}
             onChangeDescription={setDescription}
             onChangePriority={setPriority}
-            onChangeNexEmail={setNexEmail}
-            onSubmitNexSignup={submitNexSignup}
-            onOpenNexSignup={openNexSignup}
             onNext={nextStep}
             onBack={prevStep}
           />
@@ -903,6 +994,22 @@ export function Wizard({ onComplete }: WizardProps) {
               provider: localProvider,
               onSelectProvider: selectLocalProvider,
             }}
+            packRequirements={derivePackRequirements(
+              selectedBlueprint,
+              blueprints,
+            )}
+            onNext={nextStep}
+            onBack={prevStep}
+          />
+        )}
+
+        {step === "nex" && (
+          <NexStep
+            email={nexEmail}
+            status={nexSignupStatus}
+            error={nexSignupError}
+            onChangeEmail={setNexEmail}
+            onSubmit={submitNexSignup}
             onNext={nextStep}
             onBack={prevStep}
           />

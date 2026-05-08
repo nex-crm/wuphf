@@ -139,9 +139,16 @@ func (t *TelegramTransport) Health() transport.Health {
 	}
 }
 
-// Run starts the bidirectional bridge and blocks until ctx is cancelled. Inbound
-// Telegram messages are delivered to the office via host; outbound broker messages
-// are polled from the broker queue and sent via Send. Implements transport.Transport.
+// Run starts the bidirectional bridge and blocks until ctx is cancelled.
+// Inbound Telegram messages are delivered to the office via host; outbound
+// delivery is now driven by the Host-side dispatcher in
+// broker_outbound_dispatch.go (started by launcher_transports.go alongside
+// this Run), so the prior drainOutbound goroutine is gone — the contract
+// intent of "Host calls Send from a per-transport worker goroutine" is honest
+// once again. typingLoop continues to run inside Run because it is a passive
+// presence ping (driven by tagged-agent state on the broker), not a per-message
+// outbound action — keeping it adapter-side avoids leaking telegram-specific
+// "is anyone tagged" polling onto the Host. Implements transport.Transport.
 func (t *TelegramTransport) Run(ctx context.Context, host transport.Host) error {
 	if t.BotToken == "" {
 		return fmt.Errorf("telegram bot token is empty")
@@ -153,9 +160,8 @@ func (t *TelegramTransport) Run(ctx context.Context, host transport.Host) error 
 	ctx2, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	errCh := make(chan error, 2)
+	errCh := make(chan error, 1)
 	go func() { errCh <- t.pollInbound(ctx2, host) }()
-	go func() { errCh <- t.drainOutbound(ctx2) }()
 	go t.typingLoop(ctx2)
 
 	select {
@@ -180,12 +186,53 @@ func (t *TelegramTransport) Start(ctx context.Context) error {
 // Send delivers one outbound message to the Telegram chat mapped to
 // msg.Binding.ChannelSlug. Returns an error if no chat is mapped for that slug
 // or if the Telegram API call fails. Implements transport.Transport.
+//
+// A "typing" action is sent immediately before the message body so chats see
+// the same UX they got under the prior in-adapter outbound loop: a brief
+// typing bubble, then the formatted message. Sending typing fails silently —
+// it is a UX nicety, not a delivery prerequisite. The typing call is bounded
+// by typingActionMaxLatency rather than the parent ctx because the parent's
+// own timeout is sized for the actual message API call (see
+// SendTypingAction's 30s timeout) — without the tighter cap, a hung
+// chat-action endpoint would gate every Send by the full upstream timeout
+// and serialize into queue backlog on the per-tick dispatcher.
 func (t *TelegramTransport) Send(ctx context.Context, msg transport.Outbound) error {
 	chatID := t.chatIDForSlug(msg.Binding.ChannelSlug)
 	if chatID == "" {
 		return fmt.Errorf("telegram: no chat mapped for channel %q", msg.Binding.ChannelSlug)
 	}
+	if chatIDInt, parseErr := strconv.ParseInt(chatID, 10, 64); parseErr == nil {
+		typingCtx, cancelTyping := context.WithTimeout(ctx, typingActionMaxLatency)
+		_ = SendTypingAction(typingCtx, t.BotToken, chatIDInt)
+		cancelTyping()
+	}
 	return t.sendMessageHTML(ctx, chatID, msg.Text)
+}
+
+// typingActionMaxLatency caps the per-Send typing call so a degraded
+// chat-action endpoint cannot gate message delivery. 2s is generous for
+// Telegram's chat-action under healthy conditions and short enough that a
+// stalled action does not cascade into outbound-queue backlog under the
+// per-tick dispatcher cadence.
+const typingActionMaxLatency = 2 * time.Second
+
+// FormatOutbound converts a broker channelMessage to a transport.Outbound for
+// the per-transport dispatcher (broker_outbound_dispatch.go). Returns ok=false
+// when no Telegram chat is mapped for the message's channel slug — a missing
+// mapping is a routine skip, not a send failure. The dispatcher logs the skip
+// at Info level and moves on. No side effects: typing indicator + API call
+// happen inside Send so this function stays pure for the dispatcher's
+// convert-then-send loop.
+func (t *TelegramTransport) FormatOutbound(msg channelMessage) (transport.Outbound, bool) {
+	ch := normalizeChannelSlug(msg.Channel)
+	if t.chatIDForSlug(ch) == "" {
+		log.Printf("[telegram] outbound skip: no chat for channel %q", ch)
+		return transport.Outbound{}, false
+	}
+	return transport.Outbound{
+		Binding: transport.Binding{Scope: transport.ScopeChannel, ChannelSlug: ch},
+		Text:    formatTelegramOutbound(msg),
+	}, true
 }
 
 // chatIDForSlug returns the Telegram chat_id string for the given office channel
@@ -307,56 +354,6 @@ func (t *TelegramTransport) routeInbound(ctx context.Context, host transport.Hos
 		return fmt.Errorf("telegram receive message: %w", err)
 	}
 	return nil
-}
-
-// drainOutbound periodically checks the broker's external queue and sends
-// messages to the appropriate Telegram chats.
-func (t *TelegramTransport) drainOutbound(ctx context.Context) error {
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(2 * time.Second):
-		}
-
-		// Rebuild reverse map each cycle (picks up dynamically added DM chats)
-		t.chatMapMu.RLock()
-		slugToChat := make(map[string]string, len(t.ChatMap))
-		for chatID, slug := range t.ChatMap {
-			if chatID == "0" {
-				continue // skip the placeholder DM entry
-			}
-			slugToChat[slug] = chatID
-		}
-		t.chatMapMu.RUnlock()
-
-		msgs := t.Broker.ExternalQueue("telegram")
-		if len(msgs) > 0 {
-			log.Printf("[telegram] outbound queue: %d message(s)", len(msgs))
-		}
-		for _, msg := range msgs {
-			ch := normalizeChannelSlug(msg.Channel)
-			chatID, ok := slugToChat[ch]
-			if !ok {
-				log.Printf("[telegram] outbound skip: no chat for channel %q", ch)
-				continue
-			}
-			// Send typing indicator before the message (Telegram-specific UX).
-			if chatIDInt, err := strconv.ParseInt(chatID, 10, 64); err == nil {
-				_ = SendTypingAction(ctx, t.BotToken, chatIDInt)
-			}
-			out := transport.Outbound{
-				Binding: transport.Binding{Scope: transport.ScopeChannel, ChannelSlug: ch},
-				Text:    formatTelegramOutbound(msg),
-			}
-			if err := t.Send(ctx, out); err != nil {
-				// Transient send failure — message was already dequeued,
-				// so we log and move on.
-				log.Printf("[telegram] outbound send error for %q: %v", ch, err)
-				continue
-			}
-		}
-	}
 }
 
 // typingLoop periodically sends "typing" actions to Telegram chats when

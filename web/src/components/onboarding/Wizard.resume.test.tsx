@@ -68,14 +68,17 @@ describe("Wizard resume", () => {
 
     // Identity step renders with company prefilled
     const company = (await waitFor(() =>
-      screen.getByLabelText(/Company or project name/i),
+      screen.getByLabelText(/Office name/i),
     )) as HTMLInputElement;
     expect(company.value).toBe("Acme");
 
     const description = screen.getByLabelText(
-      /One-liner description/i,
+      /Short description/i,
     ) as HTMLInputElement;
     expect(description.value).toBe("We do things");
+
+    const priority = screen.getByLabelText(/Top priority/i) as HTMLInputElement;
+    expect(priority.value).toBe("growth");
 
     expect(screen.getByTestId("onboarding-resume-banner")).toBeInTheDocument();
   });

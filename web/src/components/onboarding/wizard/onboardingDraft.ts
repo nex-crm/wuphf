@@ -52,6 +52,7 @@ const VALID_STEPS: ReadonlySet<WizardStep> = new Set<WizardStep>([
   "identity",
   "team",
   "setup",
+  "nex",
   "task",
   "ready",
 ]);

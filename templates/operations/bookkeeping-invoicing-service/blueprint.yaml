@@ -1,8 +1,45 @@
 id: bookkeeping-invoicing-service
 name: Bookkeeping and Invoicing Service
 kind: finance
+category: services
+outcome: "Books, invoices, and monthly close — with an audit trail."
 description: Template for a bookkeeping operation that handles recurring books, invoicing, and evidence-backed review.
 objective: Help clients keep books clean, invoices current, and approvals explicit with durable evidence.
+estimated_setup_minutes: 5
+first_tasks:
+  - id: draft-monthly-close-checklist
+    title: "Draft a monthly close checklist for an example client"
+    prompt: |
+      Draft a monthly close checklist for a small services business with around 200 transactions per month, one bank account, and one credit card. List each step the bookkeeper should run, the order, and which steps need owner approval.
+    expected_output: "A numbered checklist of close steps grouped by reconciliation, journal entries, reporting, and review, with each step marked auto or approval-required."
+  - id: invoice-followup-template
+    title: "Write an invoice follow-up template"
+    prompt: |
+      Write a polite follow-up email template for an invoice that is 14 days past due. Keep it short, set a clear next step, and avoid threats. Add two variants for 30 and 60 days past due.
+    expected_output: "Three email templates (14, 30, 60 days) with clear subject lines and a single next step in each."
+skills:
+  - name: "Reconciliation"
+    purpose: "Match bank and card feeds against statements and flag uncategorized transactions."
+  - name: "Invoicing"
+    purpose: "Draft invoices, follow-up cadences, and track aging."
+  - name: "Month-end close"
+    purpose: "Run the close playbook end to end with approval gates."
+requirements:
+  - kind: api-key
+    name: "ANTHROPIC_API_KEY or OPENAI_API_KEY"
+    required: true
+    detail: "Powers the bookkeeper, invoicing, and reviewer agents."
+  - kind: runtime
+    name: "Claude Code or Codex CLI"
+    required: true
+    detail: "Runs the agent loops locally on your machine."
+example_artifacts:
+  - kind: checklist
+    title: "Monthly close checklist"
+  - kind: template
+    title: "Invoice follow-up sequence"
+  - kind: report
+    title: "Reconciliation packet"
 default_reviewer: ceo
 reviewer_paths:
   "team/books/**": bookkeeper
