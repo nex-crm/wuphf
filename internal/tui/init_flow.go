@@ -157,6 +157,9 @@ func (f InitFlowModel) Update(msg tea.Msg) (InitFlowModel, tea.Cmd) {
 		if f.phase == InitCompanyScan {
 			f.scanRunning = false
 			f.scanErr = m.err
+			cfg, _ := config.Load()
+			cfg.PendingCompanySeed = true
+			_ = config.Save(cfg)
 			return f.finish()
 		}
 		return f, nil // late message after skip — ignore
@@ -375,6 +378,15 @@ func (f InitFlowModel) finish() (InitFlowModel, tea.Cmd) {
 	}
 	if strings.TrimSpace(f.blueprint) != "" {
 		cfg.SetActiveBlueprint(f.blueprint)
+	}
+	if w := strings.TrimSpace(f.companyURL); w != "" {
+		cfg.CompanyWebsite = w
+	}
+	if n := strings.TrimSpace(f.ownerName); n != "" {
+		cfg.OwnerName = n
+	}
+	if r := strings.TrimSpace(f.ownerRole); r != "" {
+		cfg.OwnerRole = r
 	}
 
 	_ = config.Save(cfg)

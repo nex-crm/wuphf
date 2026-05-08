@@ -181,14 +181,23 @@ func HandleComplete(w http.ResponseWriter, r *http.Request, completeFn CompleteF
 		return
 	}
 
-	if body.Website != "" || body.OwnerName != "" || !body.ScanCompleted {
+	website := strings.TrimSpace(body.Website)
+	ownerName := strings.TrimSpace(body.OwnerName)
+	ownerRole := strings.TrimSpace(body.OwnerRole)
+	if website != "" || ownerName != "" || ownerRole != "" || !body.ScanCompleted {
 		if cfg, err := config.Load(); err == nil {
-			if w := strings.TrimSpace(body.Website); w != "" {
-				cfg.CompanyWebsite = w
+			if website != "" {
+				cfg.CompanyWebsite = website
 			}
-			cfg.OwnerName = strings.TrimSpace(body.OwnerName)
-			cfg.OwnerRole = strings.TrimSpace(body.OwnerRole)
-			cfg.PendingCompanySeed = !body.ScanCompleted
+			if ownerName != "" {
+				cfg.OwnerName = ownerName
+			}
+			if ownerRole != "" {
+				cfg.OwnerRole = ownerRole
+			}
+			if website != "" || ownerName != "" || ownerRole != "" {
+				cfg.PendingCompanySeed = !body.ScanCompleted
+			}
 			_ = config.Save(cfg)
 		}
 	}
@@ -712,9 +721,11 @@ func makeHandleScan(wikiRoot string) http.HandlerFunc {
 		result, err := operations.SeedCompanyContext(ctx, input)
 		if err != nil {
 			if ctx.Err() != nil {
+				log.Printf("onboarding: scan timeout for %q", req.WebsiteURL)
 				http.Error(w, "scan timeout", http.StatusRequestTimeout)
 				return
 			}
+			log.Printf("onboarding: scan failed: %v", err)
 			http.Error(w, "scan failed", http.StatusInternalServerError)
 			return
 		}
@@ -762,6 +773,7 @@ func handleUploadContext(w http.ResponseWriter, r *http.Request) {
 		out, err := os.Create(dst)
 		if err != nil {
 			f.Close()
+			_ = os.RemoveAll(dir)
 			continue
 		}
 		_, _ = io.Copy(out, f)

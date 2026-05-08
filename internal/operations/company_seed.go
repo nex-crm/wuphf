@@ -260,7 +260,10 @@ func parseExtraction(raw string) (CompanyProfile, []string, error) {
 	raw = strings.TrimSpace(raw)
 	raw = strings.TrimPrefix(raw, "```json")
 	raw = strings.TrimPrefix(raw, "```")
-	raw = strings.TrimSuffix(raw, "```")
+	raw = strings.TrimSpace(raw)
+	if idx := strings.LastIndex(raw, "```"); idx != -1 {
+		raw = raw[:idx]
+	}
 	raw = strings.TrimSpace(raw)
 
 	var payload extractionPayload

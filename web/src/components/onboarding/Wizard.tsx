@@ -979,7 +979,9 @@ export function Wizard({ onComplete }: WizardProps) {
   return (
     <div className="wizard-container">
       <div className="wizard-body">
-        <ProgressDots current={step} steps={activeSteps} />
+        {step !== "analysis" && (
+          <ProgressDots current={step} steps={activeSteps} />
+        )}
 
         <OnboardingBanners
           resumeDraft={showResumeBanner ? initialDraft : null}

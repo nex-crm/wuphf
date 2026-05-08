@@ -38,6 +38,8 @@ func (b *Broker) runCompanySeedJob(cfg config.Config) {
 	}
 	log.Printf("broker: company seed complete, wrote %d articles", len(result.ArticlesWritten))
 	// Persist extracted profile fields back to config.
+	b.configMu.Lock()
+	defer b.configMu.Unlock()
 	if c, err := config.Load(); err == nil {
 		if result.Profile.Name != "" {
 			c.CompanyName = result.Profile.Name
@@ -48,6 +50,8 @@ func (b *Broker) runCompanySeedJob(cfg config.Config) {
 		if len(result.Profile.Notes) > 0 && result.Profile.Notes[0] != "" {
 			c.CompanyGoals = result.Profile.Notes[0]
 		}
-		_ = config.Save(c)
+		if err := config.Save(c); err != nil {
+			log.Printf("broker: company seed: failed to persist profile: %v", err)
+		}
 	}
 }

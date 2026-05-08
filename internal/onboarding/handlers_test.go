@@ -598,7 +598,7 @@ func TestHandleChecklistDismiss(t *testing.T) {
 }
 
 // TestRegisterRoutesRegistersAllPaths verifies that RegisterRoutes wires
-// the expected five routes.
+// the expected routes including the company-context scan and upload endpoints.
 func TestRegisterRoutesRegistersAllPaths(t *testing.T) {
 	withTempHome(t, func(_ string) {
 		mux := http.NewServeMux()
@@ -610,10 +610,12 @@ func TestRegisterRoutesRegistersAllPaths(t *testing.T) {
 			want   int
 		}{
 			{http.MethodGet, "/onboarding/state", http.StatusOK},
-			{http.MethodPost, "/onboarding/progress", http.StatusBadRequest}, // missing step
-			{http.MethodPost, "/onboarding/complete", http.StatusBadRequest}, // missing task
+			{http.MethodPost, "/onboarding/progress", http.StatusBadRequest},  // missing step
+			{http.MethodPost, "/onboarding/complete", http.StatusBadRequest},  // missing task
 			{http.MethodPost, "/onboarding/checklist/discord/done", http.StatusOK},
 			{http.MethodPost, "/onboarding/checklist/dismiss", http.StatusOK},
+			{http.MethodPost, "/onboarding/scan", http.StatusBadRequest},         // missing json body
+			{http.MethodPost, "/onboarding/upload-context", http.StatusBadRequest}, // missing multipart
 		}
 
 		// Ensure the state file exists before hitting routes that need it.

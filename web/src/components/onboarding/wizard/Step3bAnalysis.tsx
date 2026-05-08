@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { post } from "../../../api/client";
 import type { OSScanResponse } from "../../../api/onboarding";
 
 interface AnalysisStepProps {
@@ -22,25 +23,17 @@ export function AnalysisStep({
   const [result, setResult] = useState<OSScanResponse | null>(null);
   const [showContinue, setShowContinue] = useState(false);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: intentionally runs once on mount; props are stable at the time this step is rendered
   useEffect(() => {
     let cancelled = false;
     async function runScan() {
       try {
-        const res = await fetch("/onboarding/scan", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            website_url: website,
-            file_paths: [],
-            owner_name: ownerName,
-            owner_role: ownerRole,
-          }),
+        const data = await post<OSScanResponse>("/onboarding/scan", {
+          website_url: website,
+          file_paths: [],
+          owner_name: ownerName,
+          owner_role: ownerRole,
         });
-        if (!res.ok || cancelled) {
-          onSkip();
-          return;
-        }
-        const data: OSScanResponse = await res.json();
         if (cancelled) return;
         setResult(data);
         setStatus("done-flash");

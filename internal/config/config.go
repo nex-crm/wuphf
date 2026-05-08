@@ -624,8 +624,8 @@ func CompanyContextBlock() string {
 	if website := strings.TrimSpace(cfg.CompanyWebsite); website != "" {
 		sb.WriteString(fmt.Sprintf("Website: %s\n", website))
 	}
-	if name := strings.TrimSpace(cfg.OwnerName); name != "" {
-		sb.WriteString(fmt.Sprintf("Owner: %s", name))
+	if ownerName := strings.TrimSpace(cfg.OwnerName); ownerName != "" {
+		sb.WriteString(fmt.Sprintf("Owner: %s", ownerName))
 		if role := strings.TrimSpace(cfg.OwnerRole); role != "" {
 			sb.WriteString(fmt.Sprintf(" (%s)", role))
 		}
