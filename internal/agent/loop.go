@@ -535,7 +535,13 @@ func (l *AgentLoop) streamLLM() error {
 	ch := l.streamFn(messages, allowedTools)
 
 	var fullText strings.Builder
-	for chunk := range ch {
+	for {
+		l.mu.Unlock()
+		chunk, ok := <-ch
+		l.mu.Lock()
+		if !ok {
+			break
+		}
 		select {
 		case <-ctx.Done():
 			if errors.Is(ctx.Err(), context.Canceled) {
