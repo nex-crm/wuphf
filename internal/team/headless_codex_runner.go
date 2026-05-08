@@ -166,6 +166,8 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 	var firstToolAt time.Time
 	textStarted := false
 	turnID := newHeadlessTurnID()
+	var turnToolNames []string
+	var turnTextLen int
 	result, parseErr := provider.ReadCodexJSONStream(teedStdout, func(event provider.CodexStreamEvent) {
 		if firstEventAt.IsZero() {
 			firstEventAt = time.Now()
@@ -182,6 +184,7 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 				l.updateHeadlessProgress(slug, "active", "text", "drafting response", metrics)
 			}
 			relay.OnText(event.Text)
+			turnTextLen += len(event.Text)
 			emitHeadlessText(agentStream, turnID, HeadlessProviderCodex, slug, taskID, event.Text, event.RawType)
 		case "tool_use":
 			relay.Flush()
@@ -192,6 +195,7 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 			line := fmt.Sprintf("tool_use: %s %s", event.ToolName, truncate(event.ToolInput, 120))
 			appendHeadlessCodexLog(slug, line)
 			l.updateHeadlessProgress(slug, "active", "tool_use", fmt.Sprintf("running %s", strings.TrimSpace(event.ToolName)), metrics)
+			turnToolNames = append(turnToolNames, event.ToolName)
 			emitHeadlessToolUse(agentStream, turnID, HeadlessProviderCodex, slug, taskID, event.ToolName, event.ToolInput, event.RawType)
 		case "tool_result":
 			line := "tool_result: " + truncate(event.Text, 140)
@@ -218,6 +222,7 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 			appendHeadlessCodexLog(slug, "stderr: "+detail)
 			l.updateHeadlessProgress(slug, "error", "error", truncate(detail, 180), metrics)
 			emitHeadlessTerminalWithTurn(agentStream, turnID, HeadlessProviderCodex, slug, taskID, "", detail, metrics, codexUsageToTokenUsage(result.Usage))
+			emitHeadlessManifest(agentStream, turnID, HeadlessProviderCodex, slug, taskID, detail, turnToolNames, turnTextLen, metrics, codexUsageToTokenUsage(result.Usage))
 			if isCodexAuthError(detail) && l.broker != nil {
 				sysTarget := target
 				if strings.TrimSpace(sysTarget) == "" {
@@ -238,12 +243,14 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 			err.Error(),
 		))
 		emitHeadlessTerminalWithTurn(agentStream, turnID, HeadlessProviderCodex, slug, taskID, "", err.Error(), metrics, codexUsageToTokenUsage(result.Usage))
+		emitHeadlessManifest(agentStream, turnID, HeadlessProviderCodex, slug, taskID, err.Error(), turnToolNames, turnTextLen, metrics, codexUsageToTokenUsage(result.Usage))
 		return err
 	}
 	if parseErr != nil {
 		metrics.TotalMs = time.Since(startedAt).Milliseconds()
 		l.updateHeadlessProgress(slug, "error", "error", truncate(parseErr.Error(), 180), metrics)
 		emitHeadlessTerminalWithTurn(agentStream, turnID, HeadlessProviderCodex, slug, taskID, "", parseErr.Error(), metrics, codexUsageToTokenUsage(result.Usage))
+		emitHeadlessManifest(agentStream, turnID, HeadlessProviderCodex, slug, taskID, parseErr.Error(), turnToolNames, turnTextLen, metrics, codexUsageToTokenUsage(result.Usage))
 		return parseErr
 	}
 	metrics.TotalMs = time.Since(startedAt).Milliseconds()
@@ -262,6 +269,7 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 	}
 	l.updateHeadlessProgress(slug, "idle", "idle", summary, metrics)
 	emitHeadlessTerminalWithTurn(agentStream, turnID, HeadlessProviderCodex, slug, taskID, summary, "", metrics, codexUsageToTokenUsage(result.Usage))
+	emitHeadlessManifest(agentStream, turnID, HeadlessProviderCodex, slug, taskID, "", turnToolNames, turnTextLen, metrics, codexUsageToTokenUsage(result.Usage))
 	if l.broker != nil && (result.Usage.InputTokens != 0 || result.Usage.OutputTokens != 0 || result.Usage.CacheReadTokens != 0 || result.Usage.CacheCreationTokens != 0 || result.Usage.CostUSD != 0) {
 		l.broker.RecordAgentUsage(slug, config.ResolveCodexModel(l.cwd), result.Usage)
 	}

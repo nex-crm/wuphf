@@ -1,15 +1,28 @@
+import { useQuery } from "@tanstack/react-query";
+
+import { getOfficeTasks } from "../../api/tasks";
 import { useOfficeMembers } from "../../hooks/useMembers";
-import { useOfficeTasks } from "../../hooks/useOfficeTasks";
 import { useRequests } from "../../hooks/useRequests";
 
 /**
  * Thin strip under the channel header with pills for "N active",
  * "M blocked", "K need you". Mirrors the legacy runtime-strip.
+ *
+ * Uses a separate cache key ("office-tasks-active") from TasksApp
+ * ("office-tasks") because this component fetches with includeDone:false
+ * while TasksApp fetches with includeDone:true. Sharing the same key
+ * caused the two queries to overwrite each other's cached results.
  */
 export function RuntimeStrip() {
   const { data: members = [] } = useOfficeMembers();
-  const { data: tasks = [] } = useOfficeTasks();
+  const { data: tasksData } = useQuery({
+    queryKey: ["office-tasks-active"],
+    queryFn: () => getOfficeTasks({ includeDone: false }),
+    refetchInterval: 15_000,
+  });
   const { pending } = useRequests();
+
+  const tasks = tasksData?.tasks ?? [];
 
   const active = members.filter((m) => {
     if (!m.slug || m.slug === "human" || m.slug === "you") return false;

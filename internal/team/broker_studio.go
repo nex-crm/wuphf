@@ -26,6 +26,38 @@ import (
 // header back to the client. (?i) makes the prefix case-insensitive.
 var externalRetryAfterPattern = regexp.MustCompile(`(?i)retry after ([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.+-]+Z?)`)
 
+// stripExternalRetryMarker removes rate-limit marker lines from a task Details
+// string so a stale "Retry after <ts>" timestamp cannot re-trigger the
+// watchdog resume loop on the next scheduler tick.
+//
+// The predicate is externalRetryAfterPattern — the same regex the watchdog uses
+// in externalWorkflowRetryAfter to detect a re-resume condition. Reusing that
+// pattern keeps a single source of truth for marker grammar: if the watchdog
+// would not re-resume from a given line, we do not strip it. This narrows the
+// strip to lines that carry a parseable RFC3339 retry-after timestamp and
+// avoids over-stripping unrelated content (e.g. ticket refs like "SUP-4290",
+// version strings like "v4.29", line counts like "completed 4290 items").
+//
+// Known limitation: when an external provider packs both the rate-limit
+// timestamp and an operator note onto a single line (e.g. "429 ... Retry
+// after <ts>. Owner: refresh OAuth"), the whole line is dropped together. A
+// future refinement could substitute just the marker substring; the loop fix
+// does not require that today.
+func stripExternalRetryMarker(details string) string {
+	if details == "" {
+		return details
+	}
+	lines := strings.Split(details, "\n")
+	kept := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if externalRetryAfterPattern.MatchString(line) {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	return strings.TrimSpace(strings.Join(kept, "\n"))
+}
+
 // externalWorkflowRetryAfter extracts a retry-at timestamp from an
 // external workflow provider's error message. Returns (zero, false)
 // when err is nil, when the pattern doesn't match, or when the

@@ -87,6 +87,7 @@ export type WizardStep =
   | "welcome"
   | "templates"
   | "identity"
+  | "analysis"
   | "team"
   | "setup"
   | "nex"

@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -29,10 +30,10 @@ import (
 //   - Kind: always "headless_event". Lets a JSON.parse-then-discriminate
 //     consumer skip provider-native events without a structural sniff.
 //   - Type: phase of the turn — "status", "text", "tool_use",
-//     "tool_result", "idle", "error". A2-MVP emits only "idle" and
-//     "error"; the remaining types are reserved so the wire shape does
-//     not churn when later slices wire up per-runner mappers for the
-//     intermediate phases.
+//     "tool_result", "idle", "error", "manifest". A2-MVP emitted only
+//     "idle" and "error"; A3 wired the intermediate phases; A4 adds
+//     "manifest" — a per-turn completion summary emitted after the
+//     terminal idle/error event.
 //   - Provider: "claude" | "codex" | "opencode" | "openai-compat".
 //   - Agent: the speaker slug (the agent the turn belongs to).
 //   - TurnID, TaskID, ParentID: correlation IDs. TurnID groups events
@@ -48,24 +49,38 @@ import (
 //   - StartedAt: RFC3339 timestamp from the runner's clock so ordering
 //     survives reordering at the SSE boundary and replay timing is
 //     reconstructable.
-//   - Metrics: turn-level latency and token totals. Populated on idle.
+//   - Metrics: turn-level latency and token totals. Populated on idle
+//     and manifest.
 //   - RawType: the underlying provider event type for debug tooling.
-//     Empty for runner-synthesized events like idle.
+//     Empty for runner-synthesized events like idle and manifest.
+//   - ToolCalls: populated only on manifest events. Sorted list of
+//     distinct tools called during the turn with per-tool call counts.
+//   - TextLen: populated only on manifest events. Total byte length of
+//     all text chunks emitted during the turn.
 type HeadlessEvent struct {
-	Kind      string                `json:"kind"`
-	Type      string                `json:"type"`
-	Provider  string                `json:"provider,omitempty"`
-	Agent     string                `json:"agent,omitempty"`
-	TurnID    string                `json:"turn_id,omitempty"`
-	TaskID    string                `json:"task_id,omitempty"`
-	ParentID  string                `json:"parent_id,omitempty"`
-	ToolName  string                `json:"tool_name,omitempty"`
-	Text      string                `json:"text,omitempty"`
-	Detail    string                `json:"detail,omitempty"`
-	Status    string                `json:"status,omitempty"`
-	StartedAt string                `json:"started_at,omitempty"`
-	Metrics   *HeadlessEventMetrics `json:"metrics,omitempty"`
-	RawType   string                `json:"raw_type,omitempty"`
+	Kind      string                  `json:"kind"`
+	Type      string                  `json:"type"`
+	Provider  string                  `json:"provider,omitempty"`
+	Agent     string                  `json:"agent,omitempty"`
+	TurnID    string                  `json:"turn_id,omitempty"`
+	TaskID    string                  `json:"task_id,omitempty"`
+	ParentID  string                  `json:"parent_id,omitempty"`
+	ToolName  string                  `json:"tool_name,omitempty"`
+	Text      string                  `json:"text,omitempty"`
+	Detail    string                  `json:"detail,omitempty"`
+	Status    string                  `json:"status,omitempty"`
+	StartedAt string                  `json:"started_at,omitempty"`
+	Metrics   *HeadlessEventMetrics   `json:"metrics,omitempty"`
+	RawType   string                  `json:"raw_type,omitempty"`
+	ToolCalls []HeadlessManifestEntry `json:"tool_calls,omitempty"`
+	TextLen   *int                    `json:"text_len,omitempty"`
+}
+
+// HeadlessManifestEntry is one tool in a manifest event's ToolCalls list.
+// Count is the number of times that tool was called during the turn.
+type HeadlessManifestEntry struct {
+	ToolName string `json:"tool_name"`
+	Count    int    `json:"count"`
 }
 
 // HeadlessEventMetrics carries turn-level timing and token totals. All
@@ -90,6 +105,7 @@ const (
 	HeadlessEventTypeToolResult = "tool_result"
 	HeadlessEventTypeIdle       = "idle"
 	HeadlessEventTypeError      = "error"
+	HeadlessEventTypeManifest   = "manifest"
 
 	HeadlessProviderClaude       = "claude"
 	HeadlessProviderCodex        = "codex"
@@ -254,6 +270,50 @@ func emitHeadlessToolResult(stream *agentStreamBuffer, turnID, provider, slug, t
 		Text:     text,
 		Status:   "active",
 		RawType:  rawType,
+	})
+}
+
+// emitHeadlessManifest pushes a manifest HeadlessEvent after the terminal
+// idle/error event. It is the machine-readable per-turn completion record:
+// which tools were called (deduplicated with counts), how many text bytes
+// were produced, and the same metrics as the idle event. Downstream
+// consumers — task details view, notebook auto-writer, cost analytics —
+// can query a single event type rather than replaying the full turn stream.
+//
+// toolNames is the ordered sequence of tool names as called; duplicates are
+// collapsed into a count. textLen is the sum of len(chunk) for every text
+// event emitted during the turn. Both may be zero for turns that produced
+// no tools or no text — the manifest is still emitted so consumers see a
+// consistent turn boundary.
+func emitHeadlessManifest(stream *agentStreamBuffer, turnID, provider, slug, taskID, errDetail string, toolNames []string, textLen int, metrics headlessProgressMetrics, usage *headlessTokenUsage) {
+	if stream == nil {
+		return
+	}
+	counts := make(map[string]int, len(toolNames))
+	for _, name := range toolNames {
+		if name = strings.TrimSpace(name); name != "" {
+			counts[name]++
+		}
+	}
+	calls := make([]HeadlessManifestEntry, 0, len(counts))
+	for name, count := range counts {
+		calls = append(calls, HeadlessManifestEntry{ToolName: name, Count: count})
+	}
+	sort.Slice(calls, func(i, j int) bool { return calls[i].ToolName < calls[j].ToolName })
+	status := "idle"
+	if strings.TrimSpace(errDetail) != "" {
+		status = "error"
+	}
+	pushHeadlessEvent(stream, HeadlessEvent{
+		Type:      HeadlessEventTypeManifest,
+		Provider:  provider,
+		Agent:     slug,
+		TurnID:    strings.TrimSpace(turnID),
+		TaskID:    strings.TrimSpace(taskID),
+		Status:    status,
+		ToolCalls: calls,
+		TextLen:   &textLen,
+		Metrics:   headlessProgressEventMetrics(metrics, usage),
 	})
 }
 

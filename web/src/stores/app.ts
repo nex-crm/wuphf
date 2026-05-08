@@ -174,7 +174,11 @@ export interface AppStore {
   activeAgentSlug: string | null;
   setActiveAgentSlug: (slug: string | null) => void;
 
-  // Search
+  // Command palette — Cmd+K / Ctrl+K quick-jump surface
+  commandPaletteOpen: boolean;
+  setCommandPaletteOpen: (v: boolean) => void;
+
+  // Deep search modal — full-text search across messages, wiki, notebooks
   searchOpen: boolean;
   setSearchOpen: (v: boolean) => void;
   /**
@@ -343,6 +347,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
   activeAgentSlug: null,
   setActiveAgentSlug: (slug) => set({ activeAgentSlug: slug }),
 
+  commandPaletteOpen: false,
+  setCommandPaletteOpen: (v) => set({ commandPaletteOpen: v }),
+
   searchOpen: false,
   setSearchOpen: (v) => set({ searchOpen: v }),
   composerSearchInitialQuery: "",
@@ -417,6 +424,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       clearedMessageIdsByChannel: {},
       activeAgentSlug: null,
       lastConversationalChannel: null,
+      commandPaletteOpen: false,
       searchOpen: false,
       composerSearchInitialQuery: "",
       composerHelpOpen: false,

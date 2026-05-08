@@ -4,11 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/nex-crm/wuphf/internal/config"
 	"github.com/nex-crm/wuphf/internal/operations"
 )
 
@@ -33,6 +37,9 @@ type CompleteFunc func(task string, skipTask bool, blueprintID string, selectedA
 // return operation-appropriate first-task suggestions and falls back to the
 // generic compatibility templates when no blueprint-specific set exists.
 //
+// wikiRoot is the absolute path to the wiki directory used by the scan
+// handler to write extracted company context articles.
+//
 // authMiddleware wraps each handler. Pass the broker's requireAuth so local
 // processes and cross-origin callers cannot POST /onboarding/complete (which
 // seeds the team and fires the first CEO turn) without the broker token.
@@ -48,7 +55,9 @@ type CompleteFunc func(task string, skipTask bool, blueprintID string, selectedA
 //	GET  /onboarding/templates
 //	POST /onboarding/checklist/{id}/done
 //	POST /onboarding/checklist/dismiss
-func RegisterRoutes(mux *http.ServeMux, completeFn CompleteFunc, packSlug string, authMiddleware func(http.HandlerFunc) http.HandlerFunc) {
+//	POST /onboarding/scan
+//	POST /onboarding/upload-context
+func RegisterRoutes(mux *http.ServeMux, completeFn CompleteFunc, packSlug string, authMiddleware func(http.HandlerFunc) http.HandlerFunc, wikiRoot string) {
 	if authMiddleware == nil {
 		authMiddleware = func(h http.HandlerFunc) http.HandlerFunc { return h }
 	}
@@ -63,6 +72,8 @@ func RegisterRoutes(mux *http.ServeMux, completeFn CompleteFunc, packSlug string
 	// Pattern must be registered after the more-specific /dismiss route so
 	// that /dismiss is not swallowed by the /{id}/done prefix match.
 	mux.HandleFunc("/onboarding/checklist/", authMiddleware(HandleChecklistDone))
+	mux.HandleFunc("/onboarding/scan", authMiddleware(makeHandleScan(wikiRoot)))
+	mux.HandleFunc("/onboarding/upload-context", authMiddleware(handleUploadContext))
 }
 
 // HandleState handles GET /onboarding/state.
@@ -156,15 +167,23 @@ func HandleComplete(w http.ResponseWriter, r *http.Request, completeFn CompleteF
 	}
 
 	var body struct {
-		Task      string   `json:"task"`
-		SkipTask  bool     `json:"skip_task"`
-		Blueprint string   `json:"blueprint"`
-		Agents    []string `json:"agents"`
+		Task          string   `json:"task"`
+		SkipTask      bool     `json:"skip_task"`
+		Blueprint     string   `json:"blueprint"`
+		Agents        []string `json:"agents"`
+		Website       string   `json:"website"`
+		ScanCompleted bool     `json:"scan_completed"`
+		OwnerName     string   `json:"owner_name"`
+		OwnerRole     string   `json:"owner_role"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
+
+	website := strings.TrimSpace(body.Website)
+	ownerName := strings.TrimSpace(body.OwnerName)
+	ownerRole := strings.TrimSpace(body.OwnerRole)
 
 	s, err := Load()
 	if err != nil {
@@ -201,6 +220,28 @@ func HandleComplete(w http.ResponseWriter, r *http.Request, completeFn CompleteF
 			log.Printf("onboarding: complete failed: %v", err)
 			http.Error(w, "complete failed", http.StatusInternalServerError)
 			return
+		}
+	}
+
+	// Persist company/owner fields only after validation and completeFn succeed
+	// so duplicate or invalid requests don't overwrite config state.
+	if website != "" || ownerName != "" || ownerRole != "" || !body.ScanCompleted {
+		if cfg, err := config.Load(); err == nil {
+			if website != "" {
+				cfg.CompanyWebsite = website
+			}
+			if ownerName != "" {
+				cfg.OwnerName = ownerName
+			}
+			if ownerRole != "" {
+				cfg.OwnerRole = ownerRole
+			}
+			if website != "" || ownerName != "" || ownerRole != "" {
+				cfg.PendingCompanySeed = !body.ScanCompleted
+			}
+			if err := config.Save(cfg); err != nil {
+				log.Printf("onboarding: complete: failed to persist company fields: %v", err)
+			}
 		}
 	}
 
@@ -633,6 +674,142 @@ func summarizeBlueprint(bp operations.Blueprint) blueprintSummary {
 		})
 	}
 	return s
+}
+
+// OSScanRequest is the request body for POST /onboarding/scan.
+type OSScanRequest struct {
+	WebsiteURL string   `json:"website_url"`
+	FilePaths  []string `json:"file_paths"`
+	OwnerName  string   `json:"owner_name"`
+	OwnerRole  string   `json:"owner_role"`
+}
+
+// OSScanResponse is the response body for POST /onboarding/scan.
+type OSScanResponse struct {
+	Facts           []string `json:"facts"`
+	ArticlesWritten []string `json:"articles_written"`
+	Warnings        []string `json:"warnings,omitempty"`
+}
+
+// makeHandleScan returns a handler for POST /onboarding/scan that runs the
+// company context seeding pipeline and writes wiki articles.
+func makeHandleScan(wikiRoot string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var req OSScanRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		// Security: file path prefix guard — only files staged under the
+		// wuphf-upload temp prefix are permitted.
+		uploadPrefix := filepath.Join(os.TempDir(), "wuphf-upload-")
+		for _, p := range req.FilePaths {
+			if !strings.HasPrefix(filepath.Clean(p), uploadPrefix) {
+				http.Error(w, "invalid file path", http.StatusBadRequest)
+				return
+			}
+		}
+		// Clean up uploaded temp dirs after the scan regardless of outcome.
+		defer func() {
+			seen := make(map[string]struct{})
+			for _, p := range req.FilePaths {
+				dir := filepath.Dir(p)
+				if _, ok := seen[dir]; !ok {
+					seen[dir] = struct{}{}
+					_ = os.RemoveAll(dir)
+				}
+			}
+		}()
+		ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+		defer cancel()
+		input := operations.CompanySeedInput{
+			WebsiteURL: req.WebsiteURL,
+			FilePaths:  req.FilePaths,
+			OwnerName:  req.OwnerName,
+			OwnerRole:  req.OwnerRole,
+			Completer:  cliCompleter{},
+			WikiRoot:   wikiRoot,
+		}
+		result, err := operations.SeedCompanyContext(ctx, input)
+		if err != nil {
+			if ctx.Err() != nil {
+				log.Printf("onboarding: scan timeout for %q", req.WebsiteURL)
+				http.Error(w, "scan timeout", http.StatusRequestTimeout)
+				return
+			}
+			log.Printf("onboarding: scan failed: %v", err)
+			http.Error(w, "scan failed", http.StatusInternalServerError)
+			return
+		}
+		resp := OSScanResponse{
+			Facts:           result.Facts,
+			ArticlesWritten: result.ArticlesWritten,
+			Warnings:        result.Warnings,
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}
+}
+
+// handleUploadContext handles POST /onboarding/upload-context.
+// Accepts a multipart form with a "files" field and saves each uploaded file
+// to a temp directory so /onboarding/scan can reference it by path.
+func handleUploadContext(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 32<<20)
+	if err := r.ParseMultipartForm(32 << 20); err != nil {
+		http.Error(w, "parse form failed", http.StatusBadRequest)
+		return
+	}
+	defer func() {
+		if r.MultipartForm != nil {
+			_ = r.MultipartForm.RemoveAll()
+		}
+	}()
+	files := r.MultipartForm.File["files"]
+	if len(files) == 0 {
+		http.Error(w, "no files uploaded", http.StatusBadRequest)
+		return
+	}
+	var paths []string
+	for _, fh := range files {
+		f, err := fh.Open()
+		if err != nil {
+			continue
+		}
+		// Create temp dir with wuphf-upload- prefix so the scan handler's
+		// path prefix guard accepts it.
+		dir, err := os.MkdirTemp("", "wuphf-upload-")
+		if err != nil {
+			f.Close()
+			continue
+		}
+		dst := filepath.Join(dir, filepath.Base(fh.Filename))
+		out, err := os.Create(dst)
+		if err != nil {
+			f.Close()
+			_ = os.RemoveAll(dir)
+			continue
+		}
+		if _, err := io.Copy(out, f); err != nil {
+			_ = out.Close()
+			f.Close()
+			_ = os.RemoveAll(dir)
+			continue
+		}
+		_ = out.Close()
+		f.Close()
+		paths = append(paths, dst)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string][]string{"paths": paths})
 }
 
 // HandleChecklistDismiss handles POST /onboarding/checklist/dismiss.

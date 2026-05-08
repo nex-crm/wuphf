@@ -27,6 +27,9 @@ function isPristine(state: DraftableWizardState): boolean {
     state.company === "" &&
     state.description === "" &&
     state.priority === "" &&
+    state.website === "" &&
+    state.ownerName === "" &&
+    state.ownerRole === "" &&
     state.runtimePriority.length === 0 &&
     state.localProvider === "" &&
     state.selectedTaskTemplate === null &&
@@ -41,6 +44,9 @@ export function useOnboardingDraftSync(state: DraftableWizardState): void {
     company,
     description,
     priority,
+    website,
+    ownerName,
+    ownerRole,
     runtimePriority,
     localProvider,
     selectedTaskTemplate,
@@ -54,6 +60,9 @@ export function useOnboardingDraftSync(state: DraftableWizardState): void {
       company,
       description,
       priority,
+      website,
+      ownerName,
+      ownerRole,
       runtimePriority,
       localProvider,
       selectedTaskTemplate,
@@ -72,6 +81,9 @@ export function useOnboardingDraftSync(state: DraftableWizardState): void {
     company,
     description,
     priority,
+    website,
+    ownerName,
+    ownerRole,
     runtimePriority,
     localProvider,
     selectedTaskTemplate,

@@ -7,6 +7,9 @@ interface Overrides {
   company?: string;
   description?: string;
   priority?: string;
+  website?: string;
+  ownerName?: string;
+  ownerRole?: string;
 }
 
 function renderIdentity(
@@ -15,6 +18,9 @@ function renderIdentity(
     onChangeCompany: (v: string) => void;
     onChangeDescription: (v: string) => void;
     onChangePriority: (v: string) => void;
+    onChangeWebsite: (v: string) => void;
+    onChangeOwnerName: (v: string) => void;
+    onChangeOwnerRole: (v: string) => void;
     onNext: () => void;
     onBack: () => void;
   }> = {},
@@ -23,9 +29,15 @@ function renderIdentity(
     company: "",
     description: "",
     priority: "",
+    website: "",
+    ownerName: "",
+    ownerRole: "",
     onChangeCompany: callbacks.onChangeCompany ?? (() => {}),
     onChangeDescription: callbacks.onChangeDescription ?? (() => {}),
     onChangePriority: callbacks.onChangePriority ?? (() => {}),
+    onChangeWebsite: callbacks.onChangeWebsite ?? (() => {}),
+    onChangeOwnerName: callbacks.onChangeOwnerName ?? (() => {}),
+    onChangeOwnerRole: callbacks.onChangeOwnerRole ?? (() => {}),
     onNext: callbacks.onNext ?? (() => {}),
     onBack: callbacks.onBack ?? (() => {}),
     ...overrides,
@@ -79,5 +91,28 @@ describe("IdentityStep", () => {
     expect(onChangeCompany).toHaveBeenCalledWith("Acme");
     expect(onChangeDescription).toHaveBeenCalledWith("We sell things");
     expect(onChangePriority).toHaveBeenCalledWith("Win first customer");
+  });
+
+  it("typing into website and owner fields fires the change handlers", () => {
+    const onChangeWebsite = vi.fn();
+    const onChangeOwnerName = vi.fn();
+    const onChangeOwnerRole = vi.fn();
+    renderIdentity(
+      { company: "Acme", description: "We sell things" },
+      { onChangeWebsite, onChangeOwnerName, onChangeOwnerRole },
+    );
+
+    fireEvent.change(screen.getByLabelText(/Company website/i), {
+      target: { value: "https://acme.com" },
+    });
+    fireEvent.change(screen.getByLabelText(/Your name/i), {
+      target: { value: "Nazz Mohammad" },
+    });
+    fireEvent.change(screen.getByLabelText(/Your role/i), {
+      target: { value: "Founder" },
+    });
+    expect(onChangeWebsite).toHaveBeenCalledWith("https://acme.com");
+    expect(onChangeOwnerName).toHaveBeenCalledWith("Nazz Mohammad");
+    expect(onChangeOwnerRole).toHaveBeenCalledWith("Founder");
   });
 });

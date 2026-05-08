@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 
 import { useCurrentRoute } from "../../routes/useCurrentRoute";
 import { AgentPanel } from "../agents/AgentPanel";
+import { CommandPaletteHost } from "../command/CommandPalette";
 import { TeamMemberWelcome } from "../join/TeamMemberWelcome";
 import { ThreadPanel } from "../messages/ThreadPanel";
 import { SearchModal } from "../search/SearchModal";
@@ -40,6 +41,7 @@ export function Shell({ children }: ShellProps) {
       </main>
       <ThreadPanel />
       <AgentPanel />
+      <CommandPaletteHost />
       <SearchModal />
       <HelpModalHost />
       <VersionModalHost />

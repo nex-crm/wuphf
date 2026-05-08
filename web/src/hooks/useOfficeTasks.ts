@@ -1,6 +1,7 @@
 import { type UseQueryResult, useQuery } from "@tanstack/react-query";
 
 import { getOfficeTasks, type Task } from "../api/tasks";
+import { useAppStore } from "../stores/app";
 
 /**
  * Shared poll interval for office tasks. One source of truth so future surfaces
@@ -37,6 +38,7 @@ export const OFFICE_TASKS_QUERY_KEY = ["office-tasks"] as const;
  * grouping path inside `TasksApp` to prove the shape works end-to-end.
  */
 export function useOfficeTasks(): UseQueryResult<Task[]> {
+  const brokerConnected = useAppStore((s) => s.brokerConnected);
   return useQuery<Task[]>({
     queryKey: OFFICE_TASKS_QUERY_KEY,
     queryFn: async () => {
@@ -44,5 +46,6 @@ export function useOfficeTasks(): UseQueryResult<Task[]> {
       return response.tasks ?? [];
     },
     refetchInterval: OFFICE_TASKS_REFETCH_MS,
+    enabled: brokerConnected,
   });
 }

@@ -38,8 +38,20 @@ const (
 	InitNexRegister      InitPhase = "nex_register"
 	InitBlueprintChoice  InitPhase = "blueprint_choice"
 	InitPackChoice       InitPhase = "pack_choice" // legacy alias
+	InitCompanyURL       InitPhase = "company_url"
+	InitCompanyFiles     InitPhase = "company_files"
+	InitOwnerName        InitPhase = "owner_name"
+	InitOwnerRole        InitPhase = "owner_role"
+	InitCompanyScan      InitPhase = "company_scan"
+	InitCompanyDone      InitPhase = "company_done"
 	InitDone             InitPhase = "done"
 )
+
+// companyScanDoneMsg is emitted when the company context scan completes.
+type companyScanDoneMsg struct{ result *operations.CompanySeedResult }
+
+// companyScanErrMsg is emitted when the company context scan fails.
+type companyScanErrMsg struct{ err error }
 
 // InitFlowModel is the state machine for the /init onboarding flow.
 type InitFlowModel struct {
@@ -48,6 +60,14 @@ type InitFlowModel struct {
 	provider  string
 	memory    string
 	blueprint string
+
+	companyURL   string
+	companyFiles string // comma-separated file paths
+	ownerName    string
+	ownerRole    string
+	scanResult   *operations.CompanySeedResult
+	scanErr      error
+	scanRunning  bool
 
 	// Text input buffer for key / email entry
 	keyInput []rune
@@ -120,10 +140,43 @@ func (f InitFlowModel) Update(msg tea.Msg) (InitFlowModel, tea.Cmd) {
 			return f.advanceAfterMemoryChoice()
 		case InitBlueprintChoice, InitPackChoice:
 			f.blueprint = m.Value
-			return f.finish()
+			f.phase = InitCompanyURL
+			return f, f.emitPhase(InitCompanyURL)
 		}
 
+	case companyScanDoneMsg:
+		if f.phase == InitCompanyScan {
+			f.scanRunning = false
+			f.scanResult = m.result
+			f.phase = InitCompanyDone
+			return f, f.emitPhase(InitCompanyDone)
+		}
+		return f, nil // late message after skip — ignore
+
+	case companyScanErrMsg:
+		if f.phase == InitCompanyScan {
+			f.scanRunning = false
+			f.scanErr = m.err
+			cfg, _ := config.Load()
+			cfg.PendingCompanySeed = true
+			_ = config.Save(cfg)
+			return f.finish()
+		}
+		return f, nil // late message after skip — ignore
+
 	case tea.KeyMsg:
+		if f.phase == InitCompanyScan && (m.String() == "s" || m.String() == "S") {
+			cfg, _ := config.Load()
+			cfg.PendingCompanySeed = true
+			_ = config.Save(cfg)
+			return f.finish()
+		}
+		if f.phase == InitCompanyDone {
+			if m.Type == tea.KeyEnter || m.String() == " " {
+				return f.finish()
+			}
+			return f, nil
+		}
 		if f.requiresTextInput() {
 			return f.updateTextInput(m)
 		}
@@ -162,7 +215,8 @@ func (f InitFlowModel) advanceAfterMemoryChoice() (InitFlowModel, tea.Cmd) {
 
 func (f InitFlowModel) requiresTextInput() bool {
 	switch f.phase {
-	case InitAPIKey, InitGBrainOpenAIKey, InitGBrainAnthropKey, InitNexRegister:
+	case InitAPIKey, InitGBrainOpenAIKey, InitGBrainAnthropKey, InitNexRegister,
+		InitCompanyURL, InitCompanyFiles, InitOwnerName, InitOwnerRole:
 		return true
 	}
 	return false
@@ -261,6 +315,49 @@ func (f InitFlowModel) submitTextInput(value string) (InitFlowModel, tea.Cmd) {
 		f.apiKey = strings.TrimSpace(config.ResolveAPIKey(""))
 		f.phase = InitBlueprintChoice
 		return f, f.emitPhase(InitBlueprintChoice)
+
+	case InitCompanyURL:
+		f.companyURL = value
+		f.keyInput = nil
+		f.keyError = ""
+		f.phase = InitCompanyFiles
+		return f, f.emitPhase(InitCompanyFiles)
+
+	case InitCompanyFiles:
+		f.companyFiles = value
+		f.keyInput = nil
+		f.keyError = ""
+		f.phase = InitOwnerName
+		return f, f.emitPhase(InitOwnerName)
+
+	case InitOwnerName:
+		f.ownerName = value
+		f.keyInput = nil
+		f.keyError = ""
+		f.phase = InitOwnerRole
+		return f, f.emitPhase(InitOwnerRole)
+
+	case InitOwnerRole:
+		f.ownerRole = value
+		f.keyInput = nil
+		f.keyError = ""
+		f.phase = InitCompanyScan
+		f.scanRunning = true
+		wikiRoot := filepath.Join(config.RuntimeHomeDir(), ".wuphf", "wiki")
+		return f, tea.Batch(
+			f.emitPhase(InitCompanyScan),
+			runCompanyScan(
+				operations.CompanySeedInput{
+					WebsiteURL: f.companyURL,
+					FilePaths:  splitFilePaths(f.companyFiles),
+					OwnerName:  f.ownerName,
+					OwnerRole:  f.ownerRole,
+					Completer:  cliCompleter{},
+					WikiRoot:   wikiRoot,
+				},
+				saveCompanyProfile,
+			),
+		)
 	}
 	return f, nil
 }
@@ -277,6 +374,15 @@ func (f InitFlowModel) finish() (InitFlowModel, tea.Cmd) {
 	}
 	if strings.TrimSpace(f.blueprint) != "" {
 		cfg.SetActiveBlueprint(f.blueprint)
+	}
+	if w := strings.TrimSpace(f.companyURL); w != "" {
+		cfg.CompanyWebsite = w
+	}
+	if n := strings.TrimSpace(f.ownerName); n != "" {
+		cfg.OwnerName = n
+	}
+	if r := strings.TrimSpace(f.ownerRole); r != "" {
+		cfg.OwnerRole = r
 	}
 
 	_ = config.Save(cfg)
@@ -421,6 +527,14 @@ func (f InitFlowModel) renderAPIKeyInput() string {
 		label = "Anthropic Key (Enter to skip): "
 	case InitNexRegister:
 		label = "Email: "
+	case InitCompanyURL:
+		label = "URL (Enter to skip): "
+	case InitCompanyFiles:
+		label = "Files (Enter to skip): "
+	case InitOwnerName:
+		label = "Name: "
+	case InitOwnerRole:
+		label = "Role: "
 	default:
 		label = "API Key: "
 	}
@@ -674,6 +788,18 @@ func (f InitFlowModel) phaseText() (heading, instructions string) {
 		return "Register with Nex", "Enter your email to create or connect your Nex identity. This enables shared memory, entity briefs, and integrations."
 	case InitBlueprintChoice, InitPackChoice:
 		return "Choose Operation Template", "Select the blueprint or template that will seed your startup."
+	case InitCompanyURL:
+		return "Company Website URL?", "Company website URL? (optional, press Enter to skip)"
+	case InitCompanyFiles:
+		return "Context Documents?", "Context documents? (comma-separated paths, Enter to skip)"
+	case InitOwnerName:
+		return "Your Name?", "Your name?"
+	case InitOwnerRole:
+		return "Your Role?", "Your role? (e.g. founder, CTO)"
+	case InitCompanyScan:
+		return "Scanning Company Context", "Scanning company context... (press s to skip to background)"
+	case InitCompanyDone:
+		return "Company Context Ready", "Company context written to wiki. Press Enter to continue."
 	case InitDone:
 		blueprintName := blueprintDisplayName(f.blueprint)
 		memoryName := config.MemoryBackendLabel(f.memory)

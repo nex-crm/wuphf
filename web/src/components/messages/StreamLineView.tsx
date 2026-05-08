@@ -125,12 +125,9 @@ export function StreamLineView({ line, compact = false }: StreamLineViewProps) {
 }
 
 // HeadlessEventView renders the typed HeadlessEvent envelope emitted by
-// each runner at terminal phases (idle / error). The wire shape comes
-// from internal/team/headless_event.go (HeadlessEvent struct). A2-MVP
-// only emits idle and error; the rendering branches keep the layout
-// minimal because future slices (text / tool_use / tool_result) will
-// reuse this component, and a maximalist v1 design would lock those
-// future variants into chrome that won't fit.
+// each runner. The wire shape comes from internal/team/headless_event.go
+// (HeadlessEvent struct). A4 adds the "manifest" type — a per-turn
+// completion summary with tool-call counts and text byte stats.
 function HeadlessEventView({
   parsed,
   compact,
@@ -203,6 +200,56 @@ function HeadlessEventView({
         }}
         compact={compact}
       />
+    );
+  }
+
+  if (eventType === "manifest") {
+    // manifest is a per-turn completion record emitted after idle/error.
+    // Render as a compact summary row: tool badges + text bytes + tokens.
+    const toolCalls = Array.isArray(parsed.tool_calls)
+      ? (parsed.tool_calls as Array<Record<string, unknown>>)
+      : [];
+    const textLen =
+      typeof parsed.text_len === "number" ? parsed.text_len : null;
+    const inputTokens =
+      metrics && typeof metrics.input_tokens === "number"
+        ? metrics.input_tokens
+        : null;
+    const outputTokens =
+      metrics && typeof metrics.output_tokens === "number"
+        ? metrics.output_tokens
+        : null;
+    const hasStats =
+      toolCalls.length > 0 ||
+      (textLen !== null && textLen > 0) ||
+      (inputTokens !== null && outputTokens !== null);
+    if (!hasStats) return null;
+    return (
+      <div className="stream-card stream-card-manifest">
+        <div className="stream-card-header">
+          <span className="stream-card-phase stream-phase-manifest">turn</span>
+          {provider && <span className="stream-card-agent">{provider}</span>}
+        </div>
+        <div className="stream-manifest-stats">
+          {toolCalls.map((tc) => {
+            const name = stringish(tc.tool_name) || "tool";
+            const count = typeof tc.count === "number" ? tc.count : 1;
+            return (
+              <span key={name} className="stream-manifest-tool-badge">
+                {count > 1 ? `${name} ×${count}` : name}
+              </span>
+            );
+          })}
+          {textLen !== null && textLen > 0 && (
+            <span className="stream-manifest-stat">{textLen.toLocaleString("en-US")} bytes</span>
+          )}
+          {inputTokens !== null && outputTokens !== null && (
+            <span className="stream-manifest-stat">
+              {(inputTokens + outputTokens).toLocaleString("en-US")} tok
+            </span>
+          )}
+        </div>
+      </div>
     );
   }
 

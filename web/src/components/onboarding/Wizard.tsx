@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { ConfigSnapshot } from "../../api/client";
 import { get, getConfig, post } from "../../api/client";
+import { router } from "../../lib/router";
 import { useAppStore } from "../../stores/app";
 import "../../styles/onboarding.css";
 
@@ -32,14 +33,17 @@ import {
   runtimeIsReady,
   runtimeLabelsFromProviderConfig,
 } from "./wizard/runtime-helpers";
+import { FirstTaskScreen } from "./wizard/FirstTaskScreen";
 import { WelcomeStep } from "./wizard/Step1Welcome";
 import { TemplatesStep } from "./wizard/Step2Templates";
+import { AnalysisStep } from "./wizard/Step3bAnalysis";
 import { IdentityStep } from "./wizard/Step3Identity";
 import { TeamStep } from "./wizard/Step4Team";
 import { SetupStep } from "./wizard/Step5Setup";
 import { NexStep } from "./wizard/Step6Nex";
 import { TaskStep } from "./wizard/Step6Task";
 import { ReadyStep } from "./wizard/Step7Ready";
+import type { OSScanResponse } from "../../api/onboarding";
 import type {
   BlueprintAgent,
   BlueprintTemplate,
@@ -192,6 +196,10 @@ export function Wizard({ onComplete }: WizardProps) {
   const [company, setCompany] = useState(seed.company);
   const [description, setDescription] = useState(seed.description);
   const [priority, setPriority] = useState(seed.priority);
+  const [website, setWebsite] = useState(seed.website);
+  const [ownerName, setOwnerName] = useState(seed.ownerName);
+  const [ownerRole, setOwnerRole] = useState(seed.ownerRole);
+  const [scanResult, setScanResult] = useState<OSScanResponse | null>(null);
   // Optional in-wizard Nex registration. Mirrors the TUI's InitNexRegister
   // phase — we POST /nex/register which shells out to `nex-cli setup <email>`.
   // If nex-cli isn't installed we flip to `fallback` (external link to
@@ -242,6 +250,14 @@ export function Wizard({ onComplete }: WizardProps) {
   const taskTextAutofilled = useRef(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
+  // After a successful submission with a task, show the first-task launch
+  // screen before entering the office so the user can choose to watch live.
+  const [showFirstTask, setShowFirstTask] = useState(false);
+  const [submittedTaskText, setSubmittedTaskText] = useState("");
+  // Synchronous gate so rapid clicks cannot fire onComplete more than once.
+  // A ref is used (not state) because it updates immediately and avoids a
+  // re-render before the guard takes effect.
+  const firstTaskActedRef = useRef(false);
 
   // Outcome summary — shown after /onboarding/complete succeeds.
   // The wizard stays mounted so the user can read what was created before
@@ -674,6 +690,10 @@ export function Wizard({ onComplete }: WizardProps) {
           company,
           description,
           priority,
+          website,
+          owner_name: ownerName,
+          owner_role: ownerRole,
+          scan_completed: scanResult !== null,
           runtime: primaryRuntime,
           runtime_priority: runtimePriority,
           memory_backend: "markdown",
@@ -710,15 +730,25 @@ export function Wizard({ onComplete }: WizardProps) {
       // visit lands on the post-setup app, not a half-filled wizard.
       clearDraft();
       setOnboardingComplete(true);
-      // Show the outcome summary screen instead of immediately entering the
-      // office. The user clicks "Go to the office" to call onComplete().
-      setShowOutcome(true);
-      setSubmitting(false);
+      if (!skipTask && taskText.trim()) {
+        setSubmittedTaskText(taskText.trim());
+        setShowFirstTask(true);
+        setSubmitting(false);
+      } else {
+        // Show the outcome summary screen instead of immediately entering the
+        // office. The user clicks "Go to the office" to call onComplete().
+        setShowOutcome(true);
+        setSubmitting(false);
+      }
     },
     [
       company,
       description,
       priority,
+      website,
+      ownerName,
+      ownerRole,
+      scanResult,
       runtimePriority,
       selectedBlueprint,
       agents,
@@ -793,7 +823,11 @@ export function Wizard({ onComplete }: WizardProps) {
         case "identity":
           if (canIdentityContinue) {
             e.preventDefault();
-            nextStep();
+            if (website.trim() || ownerName.trim()) {
+              goTo("analysis");
+            } else {
+              nextStep();
+            }
           }
           return;
         case "team":
@@ -860,6 +894,8 @@ export function Wizard({ onComplete }: WizardProps) {
     nexEmail,
     nexSignupStatus,
     submitNexSignup,
+    website,
+    ownerName,
   ]);
 
   // Debounced persistence of the non-secret draft. extractDraftableState
@@ -871,6 +907,9 @@ export function Wizard({ onComplete }: WizardProps) {
     company,
     description,
     priority,
+    website,
+    ownerName,
+    ownerRole,
     runtimePriority,
     localProvider,
     selectedTaskTemplate,
@@ -894,13 +933,43 @@ export function Wizard({ onComplete }: WizardProps) {
     setApiKeys({});
     setSelectedTaskTemplate(null);
     setTaskText("");
+    setWebsite("");
+    setOwnerName("");
+    setOwnerRole("");
+    setScanResult(null);
     userEditedRuntimeRef.current = false;
     taskTextAutofilled.current = false;
   }, []);
 
+  if (showFirstTask) {
+    return (
+      <div className="wizard-container">
+        <div className="wizard-body">
+          <FirstTaskScreen
+            taskText={submittedTaskText}
+            onWatchTask={async () => {
+              if (firstTaskActedRef.current) return;
+              firstTaskActedRef.current = true;
+              try {
+                await router.navigate({ to: "/tasks" });
+              } finally {
+                onComplete?.();
+              }
+            }}
+            onSkipToOffice={() => {
+              if (firstTaskActedRef.current) return;
+              firstTaskActedRef.current = true;
+              onComplete?.();
+            }}
+          />
+        </div>
+      </div>
+    );
+  }
+
   // Outcome summary — rendered in place of the wizard steps after
-  // /onboarding/complete succeeds. The user reads what was created and
-  // then clicks "Go to the office" which calls onComplete().
+  // /onboarding/complete succeeds (no-task path). The user reads what
+  // was created and then clicks "Go to the office" which calls onComplete().
   if (showOutcome && outcomeMeta !== null) {
     return (
       <div className="wizard-container">
@@ -923,7 +992,9 @@ export function Wizard({ onComplete }: WizardProps) {
   return (
     <div className="wizard-container">
       <div className="wizard-body">
-        <ProgressDots current={step} steps={activeSteps} />
+        {step !== "analysis" && (
+          <ProgressDots current={step} steps={activeSteps} />
+        )}
 
         <OnboardingBanners
           resumeDraft={showResumeBanner ? initialDraft : null}
@@ -957,11 +1028,38 @@ export function Wizard({ onComplete }: WizardProps) {
             company={company}
             description={description}
             priority={priority}
+            website={website}
+            ownerName={ownerName}
+            ownerRole={ownerRole}
             onChangeCompany={setCompany}
             onChangeDescription={setDescription}
             onChangePriority={setPriority}
-            onNext={nextStep}
+            onChangeWebsite={setWebsite}
+            onChangeOwnerName={setOwnerName}
+            onChangeOwnerRole={setOwnerRole}
+            onNext={() => {
+              if (website.trim() || ownerName.trim()) {
+                setStep("analysis");
+              } else {
+                nextStep();
+              }
+            }}
             onBack={prevStep}
+          />
+        )}
+
+        {step === "analysis" && (
+          <AnalysisStep
+            website={website}
+            ownerName={ownerName}
+            ownerRole={ownerRole}
+            onDone={(result) => {
+              setScanResult(result);
+              setStep("templates");
+            }}
+            onSkip={() => {
+              setStep("templates");
+            }}
           />
         )}
 
