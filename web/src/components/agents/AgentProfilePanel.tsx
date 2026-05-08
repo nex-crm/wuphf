@@ -150,22 +150,13 @@ function RecentRunsSection({ runs, loading }: RecentRunsSectionProps) {
               key={r.taskId}
               className="agent-profile-list-item agent-profile-run-item"
             >
-              <button
-                type="button"
-                className="agent-profile-run-btn"
-                onClick={() =>
-                  void router.navigate({
-                    to: "/apps/$appId",
-                    params: { appId: "activity" },
-                  })
-                }
-              >
+              <div className="agent-profile-run-row">
                 <span className="agent-profile-run-id">{r.taskId}</span>
                 <span className="agent-profile-run-meta">
                   {r.toolCallCount} tool call{r.toolCallCount === 1 ? "" : "s"}
                   {r.hasError ? " ⚠" : ""}
                 </span>
-              </button>
+              </div>
             </li>
           ))}
         </ul>
