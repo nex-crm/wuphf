@@ -36,6 +36,11 @@ func RunConfiguredOneShotCtx(ctx context.Context, systemPrompt, prompt, cwd stri
 	return RunClaudeOneShotCtx(ctx, systemPrompt, prompt, cwd)
 }
 
+// runLegacyOneShotCtx unblocks the caller on context cancellation, but the
+// wrapped legacy fn and any subprocess it spawned continue until natural
+// completion. All currently registered providers implement OneShotCtx, so this
+// branch is effectively unreachable and only avoids a regression if a legacy
+// provider is reintroduced.
 func runLegacyOneShotCtx(ctx context.Context, fn func(systemPrompt, prompt, cwd string) (string, error), systemPrompt, prompt, cwd string) (string, error) {
 	if ctx.Done() == nil {
 		return fn(systemPrompt, prompt, cwd)

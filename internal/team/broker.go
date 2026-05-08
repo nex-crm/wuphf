@@ -401,9 +401,10 @@ func (b *Broker) Start() error {
 		cfg.PendingCompanySeed = false
 		if err := config.Save(cfg); err != nil {
 			log.Printf("broker: failed to clear PendingCompanySeed: %v", err)
+		} else {
+			shouldSeed = true
+			seedCfg = cfg
 		}
-		shouldSeed = true
-		seedCfg = cfg
 	}
 	b.configMu.Unlock()
 	if shouldSeed {

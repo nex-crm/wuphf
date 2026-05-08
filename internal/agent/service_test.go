@@ -533,11 +533,28 @@ func TestListAgentsReturnsConfigSnapshots(t *testing.T) {
 	if _, err := svc.Create(cfg); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
+	cfg.Expertise[0] = "mutated"
+	cfg.Tools[0] = "mutated"
+	cfg.Budget.MaxTokens = 1
+	cfg.AllowedTools[0] = "mutated"
 
 	list := svc.List()
 	if len(list) != 1 {
 		t.Fatalf("expected 1 agent, got %d", len(list))
 	}
+	if list[0].Config.Expertise[0] != "research" {
+		t.Fatalf("Expertise alias leaked through Create: %#v", list[0].Config.Expertise)
+	}
+	if list[0].Config.Tools[0] != "lookup" {
+		t.Fatalf("Tools alias leaked through Create: %#v", list[0].Config.Tools)
+	}
+	if list[0].Config.Budget.MaxTokens != 100 {
+		t.Fatalf("Budget alias leaked through Create: %#v", list[0].Config.Budget)
+	}
+	if list[0].Config.AllowedTools[0] != "read" {
+		t.Fatalf("AllowedTools alias leaked through Create: %#v", list[0].Config.AllowedTools)
+	}
+
 	list[0].Config.Expertise[0] = "mutated"
 	list[0].Config.Tools[0] = "mutated"
 	list[0].Config.Budget.MaxTokens = 1
