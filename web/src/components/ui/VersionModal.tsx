@@ -10,7 +10,7 @@ import {
   type UpgradeRunResult,
 } from "../../api/upgrade";
 import { useAppStore } from "../../stores/app";
-import { stripV } from "../layout/upgradeBanner.utils";
+import { formatVersion } from "../layout/upgradeBanner.utils";
 
 type RunPhase = "idle" | "running" | "done";
 
@@ -19,9 +19,15 @@ interface RunState {
   result?: UpgradeRunResult;
 }
 
-type StatusKind = "ok" | "outdated" | "dev" | "error" | "loading" | "unknown";
+export type StatusKind =
+  | "ok"
+  | "outdated"
+  | "dev"
+  | "error"
+  | "loading"
+  | "unknown";
 
-interface Status {
+export interface Status {
   kind: StatusKind;
   label: string;
 }
@@ -31,7 +37,10 @@ interface VersionModalProps {
   onClose: () => void;
 }
 
-function deriveStatus(
+// deriveStatus is exported so the StatusBar chip and the modal classify the
+// upgrade-check response identically. A divergence here would let the chip
+// show "unknown" while the modal said "check failed" for the same payload.
+export function deriveStatus(
   check: UpgradeCheckResponse | undefined,
   isFetching: boolean,
 ): Status {
@@ -49,7 +58,16 @@ function deriveStatus(
 }
 
 function deriveInstallCommand(check: UpgradeCheckResponse | undefined): string {
-  if (check?.install_command && check.install_method !== "unknown") {
+  // Match UpgradeBanner's guard exactly — install_method must be present AND
+  // not "unknown" before we trust install_command. Older brokers omit
+  // install_method, in which case we fall back to upgrade_command (or the
+  // canonical npm command) so a malformed broker response can't spoof the
+  // chip's command.
+  if (
+    check?.install_command &&
+    check.install_method &&
+    check.install_method !== "unknown"
+  ) {
     return check.install_command;
   }
   return check?.upgrade_command ?? "npm install -g wuphf@latest";
@@ -72,11 +90,24 @@ export function VersionModal({ open, onClose }: VersionModalProps) {
     queryKey: ["upgrade-check"],
     queryFn: () => getUpgradeCheck(),
     enabled: open,
-    staleTime: 60_000,
+    // Match the StatusBar's poll cadence so opening the modal within the
+    // 5-min window reuses the cached value instead of firing a duplicate
+    // request. (The broker caches /upgrade-check for an hour, so the
+    // duplicate would be cheap, but a single source of truth keeps the
+    // chip and modal in lockstep.)
+    staleTime: 5 * 60_000,
   });
 
   const [run, setRun] = useState<RunState>({ phase: "idle" });
   const [restarting, setRestarting] = useState(false);
+  const [restartError, setRestartError] = useState<string | null>(null);
+
+  // runUpgrade() resolves on its own schedule — if the user closes the modal
+  // mid-install, the resolve still fires. Without an epoch we'd store its
+  // outcome and surface a stale "Install complete" + Restart prompt the next
+  // time the user opens the modal. Each Force-update click bumps the epoch;
+  // the resolve handler bails when its captured epoch no longer matches.
+  const runEpochRef = useRef(0);
 
   // Esc closes — claim the event in the capture phase so we beat any
   // underlying modal or the global shortcut handler. Same pattern as
@@ -109,10 +140,14 @@ export function VersionModal({ open, onClose }: VersionModalProps) {
   }, [open]);
 
   // Reset run state whenever the modal closes so a re-open starts clean.
+  // Bumping the epoch invalidates any in-flight runUpgrade() so its resolve
+  // can't write back into state.
   useEffect(() => {
     if (!open) {
+      runEpochRef.current += 1;
       setRun({ phase: "idle" });
       setRestarting(false);
+      setRestartError(null);
     }
   }, [open]);
 
@@ -125,14 +160,17 @@ export function VersionModal({ open, onClose }: VersionModalProps) {
 
   const triggerRun = useCallback(async () => {
     if (run.phase === "running") return;
+    const epoch = ++runEpochRef.current;
     setRun({ phase: "running" });
     try {
       const result = await runUpgrade();
+      if (runEpochRef.current !== epoch) return;
       setRun({ phase: "done", result });
       // Re-fetch /upgrade-check so the chip's freshness indicator updates
       // once the modal closes.
       void refetch();
     } catch (e: unknown) {
+      if (runEpochRef.current !== epoch) return;
       setRun({
         phase: "done",
         result: {
@@ -146,22 +184,36 @@ export function VersionModal({ open, onClose }: VersionModalProps) {
 
   const triggerRestart = useCallback(async () => {
     if (restarting) return;
+    setRestartError(null);
     setRestarting(true);
     try {
       await restartBroker();
       // The broker exits and respawns; the SSE client reconnects on its own.
       // Close the modal optimistically so the user is back in the app while
-      // the listener comes back up.
+      // the listener comes back up. (The 202 returns sub-second; if the call
+      // throws we keep the modal open so the inline error has somewhere to
+      // render.)
       onClose();
-    } catch {
+    } catch (e: unknown) {
       setRestarting(false);
+      setRestartError(e instanceof Error ? e.message : String(e));
     }
   }, [restarting, onClose]);
 
+  const onForceUpdateClick = useCallback(() => {
+    void triggerRun();
+  }, [triggerRun]);
+  const onRestartClick = useCallback(() => {
+    void triggerRestart();
+  }, [triggerRestart]);
+
   if (!open) return null;
 
-  const current = check?.current ? stripV(check.current) : null;
-  const latest = check?.latest ? stripV(check.latest) : null;
+  const currentLabel = formatVersion(check?.current);
+  const latestLabel = formatVersion(
+    check?.latest,
+    isFetching ? "…" : "unknown",
+  );
   const status = deriveStatus(check, isFetching);
   const installCommand = deriveInstallCommand(check);
 
@@ -194,33 +246,32 @@ export function VersionModal({ open, onClose }: VersionModalProps) {
 
         <div className="help-body version-modal-body">
           <BuildSection
-            current={current}
-            latest={latest}
+            currentLabel={currentLabel}
+            latestLabel={latestLabel}
             status={status}
-            isFetching={isFetching}
             compareUrl={check?.compare_url}
           />
 
           <ActionsSection
             installCommand={installCommand}
-            latestRaw={check?.latest}
+            latestForCopy={formatVersion(check?.latest, "wuphf@latest")}
             running={run.phase === "running"}
             restarting={restarting}
-            onForceUpdate={() => {
-              void triggerRun();
-            }}
-            onRestart={() => {
-              void triggerRestart();
-            }}
+            onForceUpdate={onForceUpdateClick}
+            onRestart={onRestartClick}
           />
+
+          {restartError ? (
+            <p className="version-modal-error" role="alert">
+              Couldn't restart broker: {restartError}
+            </p>
+          ) : null}
 
           {run.phase === "done" && run.result ? (
             <VersionRunOutcome
               result={run.result}
-              latest={latest ?? ""}
-              onRestart={() => {
-                void triggerRestart();
-              }}
+              latestLabel={latestLabel}
+              onRestart={onRestartClick}
               restarting={restarting}
             />
           ) : null}
@@ -231,28 +282,23 @@ export function VersionModal({ open, onClose }: VersionModalProps) {
 }
 
 function BuildSection({
-  current,
-  latest,
+  currentLabel,
+  latestLabel,
   status,
-  isFetching,
   compareUrl,
 }: {
-  current: string | null;
-  latest: string | null;
+  currentLabel: string;
+  latestLabel: string;
   status: Status;
-  isFetching: boolean;
   compareUrl: string | undefined;
 }) {
-  const latestLabel = latest ? `v${latest}` : isFetching ? "…" : "unknown";
   return (
     <section className="version-modal-section">
       <h3 className="help-section-title">Build</h3>
       <dl className="version-modal-grid">
         <dt>Current</dt>
         <dd>
-          <code className="version-modal-version">
-            {current ? `v${current}` : "unknown"}
-          </code>
+          <code className="version-modal-version">{currentLabel}</code>
           <span
             className={`version-modal-dot version-modal-dot--${status.kind}`}
             aria-hidden={true}
@@ -280,14 +326,14 @@ function BuildSection({
 
 function ActionsSection({
   installCommand,
-  latestRaw,
+  latestForCopy,
   running,
   restarting,
   onForceUpdate,
   onRestart,
 }: {
   installCommand: string;
-  latestRaw: string | undefined;
+  latestForCopy: string;
   running: boolean;
   restarting: boolean;
   onForceUpdate: () => void;
@@ -297,8 +343,7 @@ function ActionsSection({
     <section className="version-modal-section">
       <h3 className="help-section-title">Actions</h3>
       <p className="version-modal-help">
-        Force-update reinstalls{" "}
-        <code>{stripV(latestRaw ?? "wuphf@latest")}</code> via your package
+        Force-update reinstalls <code>{latestForCopy}</code> via your package
         manager. Restart asks the broker to exit so a new binary comes up —
         usually only needed after an install.
       </p>
@@ -348,7 +393,7 @@ function OutputToggle({ output }: { output: string | undefined }) {
 
 function VersionRunOutcome(props: {
   result: UpgradeRunResult;
-  latest: string;
+  latestLabel: string;
   onRestart: () => void;
   restarting: boolean;
 }) {
@@ -361,21 +406,26 @@ function VersionRunOutcome(props: {
 
 function RunOutcomeOk({
   result,
-  latest,
+  latestLabel,
   onRestart,
   restarting,
 }: {
   result: UpgradeRunResult;
-  latest: string;
+  latestLabel: string;
   onRestart: () => void;
   restarting: boolean;
 }) {
+  // latestLabel is already prefixed (`v0.83.10`, `dev`, or fallback like
+  // `unknown`) so we drop the prefix-detection branch that used to live
+  // here.
+  const installedSuffix =
+    latestLabel && latestLabel !== "unknown" ? ` ${latestLabel}` : "";
   return (
     <section className="version-modal-section version-modal-outcome version-modal-outcome--ok">
       <h3 className="help-section-title">Install complete</h3>
       <p className="version-modal-help">
-        Installed{latest ? <> v{latest}</> : null}. Restart the broker to pick
-        up the new binary.
+        Installed{installedSuffix}. Restart the broker to pick up the new
+        binary.
       </p>
       <div className="version-modal-actions">
         <button

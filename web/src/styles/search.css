@@ -974,12 +974,12 @@
   cursor: not-allowed;
 }
 .version-modal-btn--primary {
-  background: var(--accent, var(--text));
+  background: var(--accent);
   color: var(--bg);
   border-color: transparent;
 }
 .version-modal-btn--primary:hover:not(:disabled) {
-  background: var(--accent, var(--text));
+  background: var(--accent);
   filter: brightness(1.1);
   color: var(--bg);
 }
@@ -1003,7 +1003,7 @@
   padding: 0;
   font: inherit;
   font-size: 12px;
-  color: var(--accent, var(--text));
+  color: var(--accent);
   text-decoration: underline;
   cursor: pointer;
 }

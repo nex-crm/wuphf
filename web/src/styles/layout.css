@@ -870,8 +870,12 @@ html[data-theme="nex"]
 .status-bar-version--outdated .status-bar-version-dot {
   background: var(--yellow, #e5a00d);
 }
-.status-bar-version--dev .status-bar-version-dot {
+.status-bar-version--dev .status-bar-version-dot,
+.status-bar-version--loading .status-bar-version-dot {
   background: var(--text-tertiary);
+}
+.status-bar-version--error .status-bar-version-dot {
+  background: var(--red, #e5484d);
 }
 .status-bar-version--unknown .status-bar-version-dot {
   background: var(--text-tertiary);

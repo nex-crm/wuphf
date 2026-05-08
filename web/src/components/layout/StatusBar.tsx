@@ -9,8 +9,9 @@ import { appTitle } from "../../lib/constants";
 import { useCurrentRoute } from "../../routes/useCurrentRoute";
 import { useAppStore } from "../../stores/app";
 import { Kbd } from "../ui/Kbd";
+import { deriveStatus } from "../ui/VersionModal";
 import { StatusPill } from "../workspaces/StatusPill";
-import { stripV } from "./upgradeBanner.utils";
+import { formatVersion } from "./upgradeBanner.utils";
 
 /**
  * Bottom status bar mirroring the legacy IIFE: shows the active channel/app,
@@ -53,16 +54,21 @@ export function StatusBar() {
 
   // /upgrade-check is broker-cached for an hour, so a 5-min refetch is
   // cheap and keeps the freshness dot honest after a release lands. The
-  // VersionModal shares this query key so opening the modal doesn't
-  // re-fire the request.
-  const { data: upgradeCheck } = useQuery<UpgradeCheckResponse>({
-    queryKey: ["upgrade-check"],
-    queryFn: () => getUpgradeCheck(),
-    enabled: brokerConnected,
-    staleTime: 5 * 60_000,
-    refetchInterval: 5 * 60_000,
-    refetchOnWindowFocus: false,
-  });
+  // VersionModal shares this query key (and matching staleTime) so
+  // opening the modal doesn't re-fire the request.
+  // TODO(version-banner): UpgradeBanner.tsx still calls getUpgradeCheck()
+  // directly from a useEffect — migrate it to this query so all three
+  // surfaces (banner, chip, modal) share one cache and the modal's
+  // refetch after runUpgrade naturally drives a banner re-render.
+  const { data: upgradeCheck, isFetching: upgradeChecking } =
+    useQuery<UpgradeCheckResponse>({
+      queryKey: ["upgrade-check"],
+      queryFn: () => getUpgradeCheck(),
+      enabled: brokerConnected,
+      staleTime: 5 * 60_000,
+      refetchInterval: 5 * 60_000,
+      refetchOnWindowFocus: false,
+    });
 
   const agentCount = members.filter(
     (m) =>
@@ -108,20 +114,15 @@ export function StatusBar() {
   const provider = health?.provider;
   const providerModel = health?.provider_model?.trim();
 
+  // Prefer the live /health value for the chip label so it reflects the
+  // running binary, not whatever /upgrade-check (cached an hour) reports.
   const currentVersion = health?.build?.version ?? upgradeCheck?.current ?? "";
-  const versionState: "ok" | "outdated" | "dev" | "unknown" = (() => {
-    if (!currentVersion) return "unknown";
-    if (upgradeCheck?.is_dev_build) return "dev";
-    if (upgradeCheck?.upgrade_available) return "outdated";
-    if (upgradeCheck?.latest) return "ok";
-    return "unknown";
-  })();
+  const versionLabel = formatVersion(currentVersion, "version");
+  const versionStatus = deriveStatus(upgradeCheck, upgradeChecking);
   const versionTitle = (() => {
-    const cur = currentVersion ? `v${stripV(currentVersion)}` : "unknown";
-    const latest = upgradeCheck?.latest
-      ? `v${stripV(upgradeCheck.latest)}`
-      : null;
-    switch (versionState) {
+    const cur = formatVersion(currentVersion);
+    const latest = formatVersion(upgradeCheck?.latest, "");
+    switch (versionStatus.kind) {
       case "ok":
         return `wuphf ${cur} — up to date`;
       case "outdated":
@@ -130,6 +131,10 @@ export function StatusBar() {
           : `wuphf ${cur} — update available`;
       case "dev":
         return `wuphf ${cur} — dev build`;
+      case "error":
+        return `wuphf ${cur} — version check failed`;
+      case "loading":
+        return `wuphf ${cur} — checking for updates…`;
       default:
         return `wuphf ${cur}`;
     }
@@ -175,13 +180,13 @@ export function StatusBar() {
       ) : null}
       <button
         type="button"
-        className={`status-bar-item status-bar-version status-bar-version--${versionState}`}
+        className={`status-bar-item status-bar-version status-bar-version--${versionStatus.kind}`}
         onClick={() => setVersionModalOpen(true)}
         title={versionTitle}
         aria-label={versionTitle}
       >
         <span className="status-bar-version-dot" aria-hidden={true} />
-        <span>{currentVersion ? `v${stripV(currentVersion)}` : "version"}</span>
+        <span>{versionLabel}</span>
       </button>
       {brokerConnected ? (
         <span className="status-bar-item status-bar-conn">connected</span>
