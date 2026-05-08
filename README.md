@@ -97,7 +97,7 @@ if I say yes. If I am not logged in, just open https://wuphf.team.
 | `--no-open` | Don't auto-open the browser |
 | `--pack <name>` | Pick an agent pack (`starter`, `founding-team`, `coding-team`, `lead-gen-agency`, `revops`) |
 | `--opus-ceo` | Upgrade CEO from Sonnet to Opus |
-| `--provider <name>` | LLM provider override (`claude-code`, `codex`, `opencode`) |
+| `--provider <name>` | LLM provider override (`claude-code`, `codex`, `opencode`, `ollama`) |
 | `--collab` | Start in collaborative mode — all agents see all messages (this is the default) |
 | `--unsafe` | Bypass agent permission checks (local dev only) |
 | `--web-port <n>` | Change the web UI port (default 7891) |
