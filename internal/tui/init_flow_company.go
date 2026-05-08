@@ -2,7 +2,6 @@ package tui
 
 import (
 	"context"
-	"os"
 	"strings"
 	"time"
 
@@ -78,7 +77,7 @@ func splitFilePaths(input string) []string {
 	}
 	parts := strings.Split(input, ",")
 	out := make([]string, 0, len(parts))
-	home, _ := os.UserHomeDir()
+	home := config.RuntimeHomeDir()
 	for _, p := range parts {
 		p = strings.TrimSpace(p)
 		if p == "" {
