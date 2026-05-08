@@ -58,6 +58,11 @@ func (b *Broker) runCompanySeedJob(cfg config.Config) {
 		if len(result.Profile.Notes) > 0 && result.Profile.Notes[0] != "" {
 			c.CompanyGoals = result.Profile.Notes[0]
 		}
+		// Re-arm retry flag when a transient source (URL fetch, LLM) failed
+		// so the broker tries again on next startup.
+		if result.NeedsRetry {
+			c.PendingCompanySeed = true
+		}
 		if err := config.Save(c); err != nil {
 			log.Printf("broker: company seed: failed to persist profile: %v", err)
 		}

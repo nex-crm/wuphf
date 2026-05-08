@@ -42,6 +42,10 @@ type CompanySeedResult struct {
 	ArticlesWritten []string
 	Facts           []string
 	Warnings        []string
+	// NeedsRetry is true when a transient external step (URL fetch, LLM
+	// extraction, JSON parse) failed. Callers that track retry intent
+	// (e.g. PendingCompanySeed) should re-arm when this is set.
+	NeedsRetry bool
 }
 
 // SeedCompanyContext fetches or reads content, runs LLM extraction, and
@@ -59,6 +63,7 @@ func SeedCompanyContext(ctx context.Context, input CompanySeedInput) (*CompanySe
 			text, err := fetchURL(ctx, input.WebsiteURL)
 			if err != nil {
 				result.Warnings = append(result.Warnings, fmt.Sprintf("URL fetch failed: %v", err))
+				result.NeedsRetry = true
 			} else {
 				contentBuf.WriteString(text)
 				contentBuf.WriteString("\n")
@@ -124,10 +129,12 @@ func SeedCompanyContext(ctx context.Context, input CompanySeedInput) (*CompanySe
 		raw, err := runExtraction(ctx, input.Completer, content)
 		if err != nil {
 			result.Warnings = append(result.Warnings, fmt.Sprintf("LLM extraction failed: %v", err))
+			result.NeedsRetry = true
 		} else {
 			profile, facts, err := parseExtraction(raw)
 			if err != nil {
 				result.Warnings = append(result.Warnings, fmt.Sprintf("LLM parse failed: %v", err))
+				result.NeedsRetry = true
 			} else {
 				result.Profile = profile
 				result.Facts = facts
