@@ -9,6 +9,7 @@ import "../../styles/onboarding.css";
 // ApiKeyRow is re-exported here for back-compat with onboarding/ApiKeyRow.test.tsx.
 export { ApiKeyRow } from "./wizard/ApiKeyRow";
 
+import type { OSScanResponse } from "../../api/onboarding";
 import { ProgressDots } from "./wizard/components";
 import {
   LOCAL_PROVIDER_LABELS,
@@ -16,6 +17,7 @@ import {
   SCRATCH_FOUNDING_TEAM,
   STEP_ORDER,
 } from "./wizard/constants";
+import { FirstTaskScreen } from "./wizard/FirstTaskScreen";
 import { OutcomeSummary } from "./wizard/OutcomeSummary";
 import {
   clearDraft,
@@ -33,9 +35,9 @@ import {
   runtimeIsReady,
   runtimeLabelsFromProviderConfig,
 } from "./wizard/runtime-helpers";
-import { FirstTaskScreen } from "./wizard/FirstTaskScreen";
 import { WelcomeStep } from "./wizard/Step1Welcome";
 import { TemplatesStep } from "./wizard/Step2Templates";
+import { AnalysisStep } from "./wizard/Step3bAnalysis";
 import { IdentityStep } from "./wizard/Step3Identity";
 import { TeamStep } from "./wizard/Step4Team";
 import { SetupStep } from "./wizard/Step5Setup";
@@ -194,6 +196,10 @@ export function Wizard({ onComplete }: WizardProps) {
   const [company, setCompany] = useState(seed.company);
   const [description, setDescription] = useState(seed.description);
   const [priority, setPriority] = useState(seed.priority);
+  const [website, setWebsite] = useState(seed.website);
+  const [ownerName, setOwnerName] = useState(seed.ownerName);
+  const [ownerRole, setOwnerRole] = useState(seed.ownerRole);
+  const [scanResult, setScanResult] = useState<OSScanResponse | null>(null);
   // Optional in-wizard Nex registration. Mirrors the TUI's InitNexRegister
   // phase — we POST /nex/register which shells out to `nex-cli setup <email>`.
   // If nex-cli isn't installed we flip to `fallback` (external link to
@@ -684,6 +690,10 @@ export function Wizard({ onComplete }: WizardProps) {
           company,
           description,
           priority,
+          website,
+          owner_name: ownerName,
+          owner_role: ownerRole,
+          scan_completed: scanResult !== null,
           runtime: primaryRuntime,
           runtime_priority: runtimePriority,
           memory_backend: "markdown",
@@ -735,6 +745,10 @@ export function Wizard({ onComplete }: WizardProps) {
       company,
       description,
       priority,
+      website,
+      ownerName,
+      ownerRole,
+      scanResult,
       runtimePriority,
       selectedBlueprint,
       agents,
@@ -809,7 +823,11 @@ export function Wizard({ onComplete }: WizardProps) {
         case "identity":
           if (canIdentityContinue) {
             e.preventDefault();
-            nextStep();
+            if (website.trim() || ownerName.trim()) {
+              goTo("analysis");
+            } else {
+              nextStep();
+            }
           }
           return;
         case "team":
@@ -876,6 +894,8 @@ export function Wizard({ onComplete }: WizardProps) {
     nexEmail,
     nexSignupStatus,
     submitNexSignup,
+    website,
+    ownerName,
   ]);
 
   // Debounced persistence of the non-secret draft. extractDraftableState
@@ -887,6 +907,9 @@ export function Wizard({ onComplete }: WizardProps) {
     company,
     description,
     priority,
+    website,
+    ownerName,
+    ownerRole,
     runtimePriority,
     localProvider,
     selectedTaskTemplate,
@@ -910,6 +933,10 @@ export function Wizard({ onComplete }: WizardProps) {
     setApiKeys({});
     setSelectedTaskTemplate(null);
     setTaskText("");
+    setWebsite("");
+    setOwnerName("");
+    setOwnerRole("");
+    setScanResult(null);
     userEditedRuntimeRef.current = false;
     taskTextAutofilled.current = false;
   }, []);
@@ -965,7 +992,9 @@ export function Wizard({ onComplete }: WizardProps) {
   return (
     <div className="wizard-container">
       <div className="wizard-body">
-        <ProgressDots current={step} steps={activeSteps} />
+        {step !== "analysis" && (
+          <ProgressDots current={step} steps={activeSteps} />
+        )}
 
         <OnboardingBanners
           resumeDraft={showResumeBanner ? initialDraft : null}
@@ -999,11 +1028,38 @@ export function Wizard({ onComplete }: WizardProps) {
             company={company}
             description={description}
             priority={priority}
+            website={website}
+            ownerName={ownerName}
+            ownerRole={ownerRole}
             onChangeCompany={setCompany}
             onChangeDescription={setDescription}
             onChangePriority={setPriority}
-            onNext={nextStep}
+            onChangeWebsite={setWebsite}
+            onChangeOwnerName={setOwnerName}
+            onChangeOwnerRole={setOwnerRole}
+            onNext={() => {
+              if (website.trim() || ownerName.trim()) {
+                setStep("analysis");
+              } else {
+                nextStep();
+              }
+            }}
             onBack={prevStep}
+          />
+        )}
+
+        {step === "analysis" && (
+          <AnalysisStep
+            website={website}
+            ownerName={ownerName}
+            ownerRole={ownerRole}
+            onDone={(result) => {
+              setScanResult(result);
+              setStep("templates");
+            }}
+            onSkip={() => {
+              setStep("templates");
+            }}
           />
         )}
 
