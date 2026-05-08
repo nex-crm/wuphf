@@ -327,10 +327,6 @@ func (f InitFlowModel) submitTextInput(value string) (InitFlowModel, tea.Cmd) {
 		f.companyFiles = value
 		f.keyInput = nil
 		f.keyError = ""
-		// If both URL and files are empty, skip all company phases.
-		if f.companyURL == "" && f.companyFiles == "" {
-			return f.finish()
-		}
 		f.phase = InitOwnerName
 		return f, f.emitPhase(InitOwnerName)
 

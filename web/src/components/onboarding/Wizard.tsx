@@ -196,9 +196,9 @@ export function Wizard({ onComplete }: WizardProps) {
   const [company, setCompany] = useState(seed.company);
   const [description, setDescription] = useState(seed.description);
   const [priority, setPriority] = useState(seed.priority);
-  const [website, setWebsite] = useState("");
-  const [ownerName, setOwnerName] = useState("");
-  const [ownerRole, setOwnerRole] = useState("");
+  const [website, setWebsite] = useState(seed.website);
+  const [ownerName, setOwnerName] = useState(seed.ownerName);
+  const [ownerRole, setOwnerRole] = useState(seed.ownerRole);
   const [scanResult, setScanResult] = useState<OSScanResponse | null>(null);
   // Optional in-wizard Nex registration. Mirrors the TUI's InitNexRegister
   // phase — we POST /nex/register which shells out to `nex-cli setup <email>`.
@@ -905,6 +905,9 @@ export function Wizard({ onComplete }: WizardProps) {
     company,
     description,
     priority,
+    website,
+    ownerName,
+    ownerRole,
     runtimePriority,
     localProvider,
     selectedTaskTemplate,

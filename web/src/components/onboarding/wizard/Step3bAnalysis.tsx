@@ -76,7 +76,7 @@ export function AnalysisStep({
           <div className="analysis-reveal">
             {result.articles_written?.map((article, i) => (
               <div
-                key={article}
+                key={`article-${i}`}
                 className="reveal-item"
                 style={{ ["--i" as string]: i } as React.CSSProperties}
               >
@@ -87,7 +87,7 @@ export function AnalysisStep({
             ))}
             {result.facts?.map((fact, i) => (
               <div
-                key={fact}
+                key={`fact-${i}`}
                 className="reveal-item"
                 style={
                   {
