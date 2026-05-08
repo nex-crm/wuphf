@@ -12,7 +12,7 @@ import type { WizardStep } from "./types";
 
 export const LOCAL_STORAGE_KEY = "wuphf:onboarding-draft";
 export const STALE_BANNER_KEY = "wuphf:onboarding-draft-stale-banner";
-export const CURRENT_VERSION = 1;
+export const CURRENT_VERSION = 2;
 export const MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 
 export interface OnboardingDraft {
@@ -22,6 +22,9 @@ export interface OnboardingDraft {
   company: string;
   description: string;
   priority: string;
+  website: string;
+  ownerName: string;
+  ownerRole: string;
   runtimePriority: string[];
   localProvider: string;
   selectedTaskTemplate: string | null;
@@ -40,6 +43,9 @@ export interface DraftableWizardState {
   company: string;
   description: string;
   priority: string;
+  website: string;
+  ownerName: string;
+  ownerRole: string;
   runtimePriority: string[];
   localProvider: string;
   selectedTaskTemplate: string | null;
@@ -67,6 +73,9 @@ export function extractDraftableState(
     company: state.company,
     description: state.description,
     priority: state.priority,
+    website: state.website,
+    ownerName: state.ownerName,
+    ownerRole: state.ownerRole,
     runtimePriority: [...state.runtimePriority],
     localProvider: state.localProvider,
     selectedTaskTemplate: state.selectedTaskTemplate,
@@ -90,6 +99,9 @@ function sanitizeDraft(draft: OnboardingDraft): OnboardingDraft {
     company: draft.company,
     description: draft.description,
     priority: draft.priority,
+    website: draft.website,
+    ownerName: draft.ownerName,
+    ownerRole: draft.ownerRole,
     runtimePriority: [...draft.runtimePriority],
     localProvider: draft.localProvider,
     selectedTaskTemplate: draft.selectedTaskTemplate,
@@ -111,6 +123,9 @@ function hasValidStringFields(draft: Record<string, unknown>): boolean {
     typeof draft.company === "string" &&
     typeof draft.description === "string" &&
     typeof draft.priority === "string" &&
+    typeof draft.website === "string" &&
+    typeof draft.ownerName === "string" &&
+    typeof draft.ownerRole === "string" &&
     typeof draft.localProvider === "string" &&
     typeof draft.taskText === "string" &&
     typeof draft.savedAt === "string"
@@ -230,6 +245,9 @@ export interface DraftSeed {
   company: string;
   description: string;
   priority: string;
+  website: string;
+  ownerName: string;
+  ownerRole: string;
   runtimePriority: string[];
   localProvider: string;
   selectedTaskTemplate: string | null;
@@ -242,6 +260,9 @@ const EMPTY_SEED: DraftSeed = {
   company: "",
   description: "",
   priority: "",
+  website: "",
+  ownerName: "",
+  ownerRole: "",
   runtimePriority: [],
   localProvider: "",
   selectedTaskTemplate: null,
@@ -256,6 +277,9 @@ export function seedFromDraft(draft: OnboardingDraft | null): DraftSeed {
     company: draft.company,
     description: draft.description,
     priority: draft.priority,
+    website: draft.website,
+    ownerName: draft.ownerName,
+    ownerRole: draft.ownerRole,
     runtimePriority: draft.runtimePriority,
     localProvider: draft.localProvider,
     selectedTaskTemplate: draft.selectedTaskTemplate,
