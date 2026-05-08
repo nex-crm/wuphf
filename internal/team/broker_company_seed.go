@@ -13,14 +13,15 @@ import (
 
 type brokerCompleter struct{}
 
-func (c brokerCompleter) Complete(_ context.Context, prompt string) (string, error) {
-	return provider.RunConfiguredOneShot("", prompt, "")
+func (c brokerCompleter) Complete(ctx context.Context, prompt string) (string, error) {
+	return provider.RunConfiguredOneShotCtx(ctx, "", prompt, "")
 }
 
 func (b *Broker) runCompanySeedJob(cfg config.Config) {
 	wikiRoot := filepath.Join(config.RuntimeHomeDir(), ".wuphf", "wiki")
 	input := operations.CompanySeedInput{
 		WebsiteURL: cfg.CompanyWebsite,
+		FilePaths:  cfg.CompanyFilePaths,
 		OwnerName:  cfg.OwnerName,
 		OwnerRole:  cfg.OwnerRole,
 		Completer:  brokerCompleter{},

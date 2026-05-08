@@ -16,8 +16,8 @@ import (
 // cliCompleter implements operations.Completer using the configured LLM provider.
 type cliCompleter struct{}
 
-func (c cliCompleter) Complete(_ context.Context, prompt string) (string, error) {
-	return provider.RunConfiguredOneShot("", prompt, "")
+func (c cliCompleter) Complete(ctx context.Context, prompt string) (string, error) {
+	return provider.RunConfiguredOneShotCtx(ctx, "", prompt, "")
 }
 
 // runCompanyScan launches operations.SeedCompanyContext as a tea.Cmd.

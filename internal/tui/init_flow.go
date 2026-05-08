@@ -378,6 +378,9 @@ func (f InitFlowModel) finish() (InitFlowModel, tea.Cmd) {
 	if w := strings.TrimSpace(f.companyURL); w != "" {
 		cfg.CompanyWebsite = w
 	}
+	if paths := splitFilePaths(f.companyFiles); len(paths) > 0 {
+		cfg.CompanyFilePaths = paths
+	}
 	if n := strings.TrimSpace(f.ownerName); n != "" {
 		cfg.OwnerName = n
 	}

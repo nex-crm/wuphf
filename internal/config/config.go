@@ -55,26 +55,27 @@ type Config struct {
 	MinimaxAPIKey       string   `json:"minimax_api_key,omitempty"`
 	Blueprint           string   `json:"blueprint,omitempty"`
 	// Pack is retained as a legacy alias for the active operation blueprint/template.
-	Pack                string `json:"pack,omitempty"`
-	TeamLeadSlug        string `json:"team_lead_slug,omitempty"`
-	MaxConcurrent       int    `json:"max_concurrent_agents,omitempty"`
-	DefaultFormat       string `json:"default_format,omitempty"`
-	DefaultTimeout      int    `json:"default_timeout,omitempty"`
-	DevURL              string `json:"dev_url,omitempty"`
-	InsightsPollMinutes int    `json:"insights_poll_minutes,omitempty"`
-	TaskFollowUpMinutes int    `json:"task_follow_up_minutes,omitempty"`
-	TaskReminderMinutes int    `json:"task_reminder_minutes,omitempty"`
-	TaskRecheckMinutes  int    `json:"task_recheck_minutes,omitempty"`
-	TelegramBotToken    string `json:"telegram_bot_token,omitempty"`
-	CompanyName         string `json:"company_name,omitempty"`
-	CompanyDescription  string `json:"company_description,omitempty"`
-	CompanyGoals        string `json:"company_goals,omitempty"`
-	CompanySize         string `json:"company_size,omitempty"`
-	CompanyPriority     string `json:"company_priority,omitempty"`
-	OwnerName           string `json:"owner_name,omitempty"`
-	OwnerRole           string `json:"owner_role,omitempty"`
-	CompanyWebsite      string `json:"company_website,omitempty"`
-	PendingCompanySeed  bool   `json:"pending_company_seed,omitempty"`
+	Pack                string   `json:"pack,omitempty"`
+	TeamLeadSlug        string   `json:"team_lead_slug,omitempty"`
+	MaxConcurrent       int      `json:"max_concurrent_agents,omitempty"`
+	DefaultFormat       string   `json:"default_format,omitempty"`
+	DefaultTimeout      int      `json:"default_timeout,omitempty"`
+	DevURL              string   `json:"dev_url,omitempty"`
+	InsightsPollMinutes int      `json:"insights_poll_minutes,omitempty"`
+	TaskFollowUpMinutes int      `json:"task_follow_up_minutes,omitempty"`
+	TaskReminderMinutes int      `json:"task_reminder_minutes,omitempty"`
+	TaskRecheckMinutes  int      `json:"task_recheck_minutes,omitempty"`
+	TelegramBotToken    string   `json:"telegram_bot_token,omitempty"`
+	CompanyName         string   `json:"company_name,omitempty"`
+	CompanyDescription  string   `json:"company_description,omitempty"`
+	CompanyGoals        string   `json:"company_goals,omitempty"`
+	CompanySize         string   `json:"company_size,omitempty"`
+	CompanyPriority     string   `json:"company_priority,omitempty"`
+	OwnerName           string   `json:"owner_name,omitempty"`
+	OwnerRole           string   `json:"owner_role,omitempty"`
+	CompanyWebsite      string   `json:"company_website,omitempty"`
+	CompanyFilePaths    []string `json:"company_file_paths,omitempty"`
+	PendingCompanySeed  bool     `json:"pending_company_seed,omitempty"`
 
 	OpenclawBridges    []OpenclawBridgeBinding `json:"openclaw_bridges,omitempty"`
 	OpenclawGatewayURL string                  `json:"openclaw_gateway_url,omitempty"`

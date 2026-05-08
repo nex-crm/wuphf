@@ -20,6 +20,19 @@ import (
 	"golang.org/x/net/html"
 )
 
+// safeUTF8Truncate returns s truncated to at most maxBytes bytes without
+// splitting a multi-byte UTF-8 sequence. If s fits, it is returned as-is.
+func safeUTF8Truncate(s string, maxBytes int) string {
+	if len(s) <= maxBytes {
+		return s
+	}
+	n := maxBytes
+	for n > 0 && s[n]&0xC0 == 0x80 {
+		n--
+	}
+	return s[:n]
+}
+
 // Completer is the minimal interface for one LLM completion call.
 // Defined locally to avoid import cycle with internal/provider.
 type Completer interface {
