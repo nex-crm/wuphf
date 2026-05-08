@@ -149,6 +149,8 @@ func (l *Launcher) runHeadlessOpencodeTurn(ctx context.Context, slug string, not
 	textStarted := false
 	var lastError string
 	turnID := newHeadlessTurnID()
+	var turnToolNames []string
+	var turnTextLen int
 	pushStream := func(line string) {
 		if agentStream != nil && strings.TrimSpace(line) != "" {
 			agentStream.PushTask(taskID, line)
@@ -175,6 +177,7 @@ func (l *Launcher) runHeadlessOpencodeTurn(ctx context.Context, slug string, not
 			}
 			pushStream(ev.Text)
 			relay.OnText(ev.Text)
+			turnTextLen += len(ev.Text)
 			emitHeadlessText(agentStream, turnID, HeadlessProviderOpencode, slug, taskID, ev.Text, "opencode.text")
 		case "tool_use":
 			relay.Flush()
@@ -188,6 +191,7 @@ func (l *Launcher) runHeadlessOpencodeTurn(ctx context.Context, slug string, not
 			}
 			l.updateHeadlessProgress(slug, "active", "tool", "running "+detail, metrics)
 			pushStream("[tool] " + detail)
+			turnToolNames = append(turnToolNames, detail)
 			emitHeadlessToolUse(agentStream, turnID, HeadlessProviderOpencode, slug, taskID, ev.ToolName, "", "opencode.tool_use")
 		case "tool_result":
 			if d := strings.TrimSpace(ev.Detail); d != "" {
@@ -218,6 +222,7 @@ func (l *Launcher) runHeadlessOpencodeTurn(ctx context.Context, slug string, not
 			appendHeadlessCodexLog(slug, "opencode_stderr: "+detail)
 			l.updateHeadlessProgress(slug, "error", "error", truncate(detail, 180), metrics)
 			emitHeadlessTerminalWithTurn(agentStream, turnID, HeadlessProviderOpencode, slug, taskID, "", detail, metrics, nil)
+			emitHeadlessManifest(agentStream, turnID, HeadlessProviderOpencode, slug, taskID, detail, turnToolNames, turnTextLen, metrics, nil)
 			if isOpencodeAuthError(detail) && l.broker != nil {
 				sysTarget := target
 				if strings.TrimSpace(sysTarget) == "" {
@@ -237,12 +242,14 @@ func (l *Launcher) runHeadlessOpencodeTurn(ctx context.Context, slug string, not
 			err.Error(),
 		))
 		emitHeadlessTerminalWithTurn(agentStream, turnID, HeadlessProviderOpencode, slug, taskID, "", err.Error(), metrics, nil)
+		emitHeadlessManifest(agentStream, turnID, HeadlessProviderOpencode, slug, taskID, err.Error(), turnToolNames, turnTextLen, metrics, nil)
 		return err
 	}
 	if scanErr != nil {
 		metrics.TotalMs = time.Since(startedAt).Milliseconds()
 		l.updateHeadlessProgress(slug, "error", "error", truncate(scanErr.Error(), 180), metrics)
 		emitHeadlessTerminalWithTurn(agentStream, turnID, HeadlessProviderOpencode, slug, taskID, "", scanErr.Error(), metrics, nil)
+		emitHeadlessManifest(agentStream, turnID, HeadlessProviderOpencode, slug, taskID, scanErr.Error(), turnToolNames, turnTextLen, metrics, nil)
 		return scanErr
 	}
 
@@ -264,6 +271,7 @@ func (l *Launcher) runHeadlessOpencodeTurn(ctx context.Context, slug string, not
 	}
 	l.updateHeadlessProgress(slug, "idle", "idle", summary, metrics)
 	emitHeadlessTerminalWithTurn(agentStream, turnID, HeadlessProviderOpencode, slug, taskID, summary, "", metrics, nil)
+	emitHeadlessManifest(agentStream, turnID, HeadlessProviderOpencode, slug, taskID, "", turnToolNames, turnTextLen, metrics, nil)
 	relay.Flush()
 	if text != "" {
 		appendHeadlessCodexLog(slug, "opencode_result: "+text)
