@@ -62,6 +62,9 @@ web/src/components/wiki/WikiEditor.test.tsx|lint/complexity/noExcessiveLinesPerF
 web/src/components/apps/OfficeOverviewApp.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Pending-reviews map callback builds per-request meta + badge from multiple optional fields; inline for readability, baselined pending extraction.
 web/src/components/apps/OfficeOverviewApp.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Scheduled-jobs map callback derives nextRun, badge, and fallback key from multiple optional fields; inline for readability, baselined pending extraction.
 web/src/components/wiki/WikiLint.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
+web/src/components/command/CommandPalette.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Keyboard handler is a focused switch; each key branch is simple.
+web/src/components/command/CommandPalette.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Item row renders conditional highlight and optional fields; extracting would require prop drilling all state.
+web/src/components/command/useCommandItems.ts|lint/complexity/noExcessiveCognitiveComplexity|1|Item builder covers all palette categories in a single pass; each branch is a simple navigation or action call.
 web/src/hooks/useKeyboardShortcuts.ts|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
 web/src/lib/messageMarkdown.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
 web/src/lib/slashCommands.ts|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
