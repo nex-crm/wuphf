@@ -520,6 +520,44 @@ func TestListAgents(t *testing.T) {
 	}
 }
 
+func TestListAgentsReturnsConfigSnapshots(t *testing.T) {
+	svc := newTestService(t, nil)
+	cfg := AgentConfig{
+		Slug:         "snapshot",
+		Name:         "Snapshot",
+		Expertise:    []string{"research"},
+		Tools:        []string{"lookup"},
+		Budget:       &BudgetLimit{MaxTokens: 100},
+		AllowedTools: []string{"read"},
+	}
+	if _, err := svc.Create(cfg); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	list := svc.List()
+	if len(list) != 1 {
+		t.Fatalf("expected 1 agent, got %d", len(list))
+	}
+	list[0].Config.Expertise[0] = "mutated"
+	list[0].Config.Tools[0] = "mutated"
+	list[0].Config.Budget.MaxTokens = 1
+	list[0].Config.AllowedTools[0] = "mutated"
+
+	got := svc.List()[0].Config
+	if got.Expertise[0] != "research" {
+		t.Fatalf("Expertise alias leaked through List: %#v", got.Expertise)
+	}
+	if got.Tools[0] != "lookup" {
+		t.Fatalf("Tools alias leaked through List: %#v", got.Tools)
+	}
+	if got.Budget.MaxTokens != 100 {
+		t.Fatalf("Budget alias leaked through List: %#v", got.Budget)
+	}
+	if got.AllowedTools[0] != "read" {
+		t.Fatalf("AllowedTools alias leaked through List: %#v", got.AllowedTools)
+	}
+}
+
 func TestRemoveAgent(t *testing.T) {
 	svc := newTestService(t, nil)
 
