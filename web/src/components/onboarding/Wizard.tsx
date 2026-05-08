@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { ConfigSnapshot } from "../../api/client";
 import { get, getConfig, post } from "../../api/client";
+import { router } from "../../lib/router";
 import { useAppStore } from "../../stores/app";
 import "../../styles/onboarding.css";
 
@@ -32,6 +33,7 @@ import {
   runtimeIsReady,
   runtimeLabelsFromProviderConfig,
 } from "./wizard/runtime-helpers";
+import { FirstTaskScreen } from "./wizard/FirstTaskScreen";
 import { WelcomeStep } from "./wizard/Step1Welcome";
 import { TemplatesStep } from "./wizard/Step2Templates";
 import { IdentityStep } from "./wizard/Step3Identity";
@@ -242,6 +244,14 @@ export function Wizard({ onComplete }: WizardProps) {
   const taskTextAutofilled = useRef(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
+  // After a successful submission with a task, show the first-task launch
+  // screen before entering the office so the user can choose to watch live.
+  const [showFirstTask, setShowFirstTask] = useState(false);
+  const [submittedTaskText, setSubmittedTaskText] = useState("");
+  // Synchronous gate so rapid clicks cannot fire onComplete more than once.
+  // A ref is used (not state) because it updates immediately and avoids a
+  // re-render before the guard takes effect.
+  const firstTaskActedRef = useRef(false);
 
   // Outcome summary — shown after /onboarding/complete succeeds.
   // The wizard stays mounted so the user can read what was created before
@@ -710,10 +720,16 @@ export function Wizard({ onComplete }: WizardProps) {
       // visit lands on the post-setup app, not a half-filled wizard.
       clearDraft();
       setOnboardingComplete(true);
-      // Show the outcome summary screen instead of immediately entering the
-      // office. The user clicks "Go to the office" to call onComplete().
-      setShowOutcome(true);
-      setSubmitting(false);
+      if (!skipTask && taskText.trim()) {
+        setSubmittedTaskText(taskText.trim());
+        setShowFirstTask(true);
+        setSubmitting(false);
+      } else {
+        // Show the outcome summary screen instead of immediately entering the
+        // office. The user clicks "Go to the office" to call onComplete().
+        setShowOutcome(true);
+        setSubmitting(false);
+      }
     },
     [
       company,
@@ -898,9 +914,35 @@ export function Wizard({ onComplete }: WizardProps) {
     taskTextAutofilled.current = false;
   }, []);
 
+  if (showFirstTask) {
+    return (
+      <div className="wizard-container">
+        <div className="wizard-body">
+          <FirstTaskScreen
+            taskText={submittedTaskText}
+            onWatchTask={async () => {
+              if (firstTaskActedRef.current) return;
+              firstTaskActedRef.current = true;
+              try {
+                await router.navigate({ to: "/tasks" });
+              } finally {
+                onComplete?.();
+              }
+            }}
+            onSkipToOffice={() => {
+              if (firstTaskActedRef.current) return;
+              firstTaskActedRef.current = true;
+              onComplete?.();
+            }}
+          />
+        </div>
+      </div>
+    );
+  }
+
   // Outcome summary — rendered in place of the wizard steps after
-  // /onboarding/complete succeeds. The user reads what was created and
-  // then clicks "Go to the office" which calls onComplete().
+  // /onboarding/complete succeeds (no-task path). The user reads what
+  // was created and then clicks "Go to the office" which calls onComplete().
   if (showOutcome && outcomeMeta !== null) {
     return (
       <div className="wizard-container">
