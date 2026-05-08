@@ -170,6 +170,9 @@ export function UpgradeBanner() {
     // user has had a chance to expand. The broker caches the response
     // for an hour, so cost is bounded across tab/page reloads.
     if (!(fromVersion && latest)) return;
+    // Skip changelog fetch for dev builds — "dev" is not a valid semver
+    // range and the broker rejects it with 400.
+    if (isDevVersion(fromVersion) || isDevVersion(latest)) return;
     if (compareVersions(fromVersion, latest) >= 0) {
       // Short-circuit (e.g. user just dismissed: silentUpTo == latest →
       // fromVersion == latest). Don't leave a stale "Loading changes…"
