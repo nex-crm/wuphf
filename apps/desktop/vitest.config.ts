@@ -12,12 +12,12 @@ export default defineConfig({
         "src/main/index.ts",
       ],
       thresholds: {
-        // Ratcheted after the desktop shell skeleton added contract tests.
-        // Measured: 86.68 lines / 86.68 statements / 95.23 functions / 79.2 branches.
+        // One-way ratchet at the measured floor minus at most one percentage point.
+        // Measured: 85.73 lines / 85.73 statements / 94.23 functions / 84.21 branches.
         lines: 85,
         statements: 85,
         functions: 94,
-        branches: 78,
+        branches: 83,
       },
     },
   },
