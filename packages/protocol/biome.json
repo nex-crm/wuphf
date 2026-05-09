@@ -1,0 +1,125 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.4.13/schema.json",
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true
+  },
+  "files": {
+    "includes": [
+      "src/**/*.ts",
+      "tests/**/*.ts",
+      "scripts/**/*.ts",
+      "*.json",
+      "*.ts",
+      "!node_modules",
+      "!dist",
+      "!coverage"
+    ]
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 100
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": true,
+      "correctness": {
+        "noUndeclaredDependencies": "error"
+      },
+      "performance": {
+        "noReExportAll": "error"
+      },
+      "style": {
+        "useImportType": "error",
+        "useExportType": "error",
+        "noEnum": "error",
+        "noCommonJs": "error",
+        "useThrowOnlyError": "error",
+        "useFilenamingConvention": {
+          "level": "error",
+          "options": {
+            "filenameCases": ["kebab-case"],
+            "requireAscii": true
+          }
+        },
+        "useNamingConvention": {
+          "level": "error",
+          "options": {
+            "strictCase": false,
+            "conventions": [
+              {
+                "selector": { "kind": "objectLiteralProperty" },
+                "match": ".*"
+              }
+            ]
+          }
+        },
+        "noRestrictedImports": {
+          "level": "error",
+          "options": {
+            "paths": {
+              "fs": "Use node:fs explicitly — but this package is pure-data and shouldn't read the filesystem.",
+              "node:fs": "Protocol package is pure-data; filesystem access belongs in callers, not here.",
+              "node:fs/promises": "Protocol package is pure-data; filesystem access belongs in callers, not here.",
+              "node:http": "Protocol package is pure-data; HTTP I/O belongs in callers, not here.",
+              "node:https": "Protocol package is pure-data; HTTP I/O belongs in callers, not here.",
+              "node:net": "Protocol package is pure-data; networking belongs in callers, not here.",
+              "node:child_process": "Protocol package is pure-data; subprocess execution belongs in callers, not here.",
+              "node:os": "Protocol package is pure-data; OS APIs belong in callers, not here.",
+              "node:url": "Protocol package is pure-data; URL parsing belongs in callers, not here."
+            }
+          }
+        }
+      },
+      "suspicious": {
+        "noExplicitAny": "error",
+        "noTsIgnore": "error",
+        "noEvolvingTypes": "error",
+        "noConsole": "error",
+        "useErrorMessage": "error"
+      },
+      "nursery": {
+        "useArraySortCompare": "error"
+      }
+    }
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "double",
+      "trailingCommas": "all",
+      "semicolons": "always"
+    }
+  },
+  "overrides": [
+    {
+      "includes": ["scripts/**/*.ts"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noConsole": "off"
+          },
+          "correctness": {
+            "noUndeclaredDependencies": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": ["tests/**/*.ts"],
+      "linter": {
+        "rules": {
+          "correctness": {
+            "noUndeclaredDependencies": "off"
+          },
+          "style": {
+            "noRestrictedImports": "off"
+          }
+        }
+      }
+    }
+  ]
+}

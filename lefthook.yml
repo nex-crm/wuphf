@@ -33,6 +33,19 @@ pre-commit:
         - "**/*.gen.ts"
         - "**/*.gen.tsx"
 
+    biome-protocol:
+      # @wuphf/protocol package has its own biome config (different from web/'s
+      # because it's a Node-only library, no JSX/CSS). Run biome from the
+      # package root against staged packages/protocol/** files.
+      root: packages/protocol
+      glob: "packages/protocol/**/*.{js,ts,json}"
+      run: bunx --bun biome check --write --max-diagnostics=500 {staged_files}
+      stage_fixed: true
+      exclude:
+        - "dist/**"
+        - "node_modules/**"
+        - "coverage/**"
+
     gofmt:
       glob: "*.go"
       run: |
@@ -105,9 +118,27 @@ pre-push:
   commands:
     go-unit:
       # Local mirror of CI's Go race split, with each package isolated in
-      # its own `go test` process.
+      # its own `go test` process. Scoped to pushes that actually touch Go
+      # files — TS-only branches (e.g. `packages/protocol`) skip the ~5min
+      # Go suite. CI still runs the full Go matrix on every PR, so any
+      # cross-language interface drift surfaces there in <5min.
+      #
+      # Excludes packages/protocol/testdata/**/*.go: those files are
+      # `//go:build ignore` reference programs, NOT part of the wuphf
+      # binary build. Letting them trigger the full Go suite would
+      # double-bill protocol-only PRs (the protocol-wire-contract hook
+      # below already exercises the verifier directly via `go run`).
+      files: bash scripts/changed-files-since-base.sh
+      glob: "*.go"
+      exclude:
+        - "packages/protocol/testdata/**/*.go"
       run: bash scripts/test-go.sh
     web-unit:
+      # Scoped to pushes that touch web/ or related JS/TS files. Same
+      # rationale as go-unit: keep TS-only-protocol branches off the
+      # 80-second web suite.
+      files: bash scripts/changed-files-since-base.sh
+      glob: "web/**/*.{ts,tsx,js,jsx,css,json,html}"
       run: |
         cd web
         bun run typecheck
@@ -122,16 +153,58 @@ pre-push:
       # so every test starts from a clean slate. Persistence tests opt
       # back in via reloadedBroker(t). The dedicated `go-unit` hook above
       # runs the test suite; this smoke remains a fast build/vet guard.
+      files: bash scripts/changed-files-since-base.sh
+      glob: "*.go"
+      exclude:
+        - "packages/protocol/testdata/*.go"
       run: go build ./... && go vet ./...
     build:
+      files: bash scripts/changed-files-since-base.sh
+      glob: "*.go"
+      exclude:
+        - "packages/protocol/testdata/*.go"
       run: go build -o /dev/null ./cmd/wuphf
     vhs:
+      # vhs records `wuphf --help` and `--version`; only fires when the Go
+      # binary or its tapes change.
+      files: bash scripts/changed-files-since-base.sh
+      glob: "{cmd/wuphf/**,internal/**,testdata/vhs/**,*.go}"
+      exclude:
+        - "packages/protocol/testdata/*.go"
       run: |
         if ! command -v vhs >/dev/null 2>&1; then
           echo "vhs not installed — skipping visual regression check (install: brew install vhs)"
           exit 0
         fi
         testdata/vhs/check.sh
+    protocol-demo:
+      # Composes the @wuphf/protocol public surface end-to-end: imports
+      # from index.ts, exercises 11 adversarial scenarios. Vitest covers
+      # per-module invariants; this catches drift in how the modules
+      # COMPOSE (missing exports, accidental API breaks at index.ts).
+      # Cheap (<1s) so it runs on every protocol change.
+      files: bash scripts/changed-files-since-base.sh
+      glob: "packages/protocol/**/*.{ts,json}"
+      run: bun run packages/protocol/scripts/demo.ts
+    protocol-wire-contract:
+      # Independent Go reference verifier of the audit-chain wire bytes.
+      # Catches a class of bug Vitest cannot: TS writer + external reader
+      # drift where someone updates BOTH the serializer AND the in-package
+      # golden vector (Vitest stays green, this fails). Scoped to the files
+      # that affect the wire contract — ~2s on warm Go cache.
+      files: bash scripts/changed-files-since-base.sh
+      glob: "packages/protocol/{src/audit-event.ts,src/canonical-json.ts,src/event-lsn.ts,src/sha256.ts,testdata/**}"
+      run: cd packages/protocol/testdata && go run verifier-reference.go
+    protocol-invariants:
+      # Custom invariant checks for protocol-grade rules Biome cannot
+      # express: instanceof allowlist, single hashing entry point,
+      # no process.env in src/, demo imports from index only, every value
+      # export from index.ts referenced in tests/ or demo. See
+      # `packages/protocol/scripts/check-invariants.sh` for the full list
+      # and the per-allowlist rationales.
+      files: bash scripts/changed-files-since-base.sh
+      glob: "packages/protocol/{src/**,tests/**,scripts/**}"
+      run: bash packages/protocol/scripts/check-invariants.sh
     file-size:
       # Enforce CONTRIBUTING.md's file-size budget: warn at 800 LOC, fail
       # at 1500 LOC unless the file is on scripts/file-size-allowlist.txt

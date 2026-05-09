@@ -24,6 +24,80 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  protocol:
+    # @wuphf/protocol is the moat — branded types, receipt schema, IPC envelopes,
+    # audit chain. The whole package is hand-rolled (no schema lib) precisely so
+    # we can audit the invariants. CI MUST run typecheck + biome + vitest on
+    # every PR or the invariants can regress silently. The `web` job below does
+    # NOT cover packages/protocol — its working-directory is `web/`.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # ratchet:oven-sh/setup-bun@v2.2.0
+        with:
+          bun-version: "1.1.38"
+      - name: Install workspace deps
+        # bun.lock lives at the repo root and covers every workspace package;
+        # `bun install --frozen-lockfile` from here resolves packages/protocol
+        # too. Doing the install per-package would split the lockfile.
+        run: bun install --frozen-lockfile
+      - name: Typecheck
+        working-directory: packages/protocol
+        run: bun run typecheck
+      - name: Biome (lint + format check)
+        working-directory: packages/protocol
+        run: bun run check
+      - name: Vitest (unit + property tests)
+        # Routed through the canonical wrapper so this matches what local
+        # contributors run — see scripts/test-protocol.sh.
+        run: bash scripts/test-protocol.sh
+      - name: Vitest coverage gate (ratchet)
+        # AGENTS.md rule #14: coverage is a one-way ratchet. Thresholds are
+        # in vitest.config.ts; lowering them is forbidden. NEW PRs must keep
+        # measured coverage at or above the declared floor.
+        working-directory: packages/protocol
+        run: bun run test:coverage
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # ratchet:actions/upload-artifact@v7
+        if: always()
+        with:
+          name: protocol-coverage
+          path: packages/protocol/coverage
+          retention-days: 14
+          if-no-files-found: ignore
+      - name: Vitest random-order smoke (catches order-dependent bugs)
+        # pytest-randomly equivalent. Same suite, shuffled file + test order
+        # with a fixed seed so a flake is deterministically reproducible.
+        # Cheap enough to run on every PR.
+        working-directory: packages/protocol
+        run: bun run test:shuffle
+      - name: Protocol invariant checks
+        # Custom protocol-grade invariants Biome cannot express:
+        # instanceof allowlist, single hashing entry point, no process.env
+        # in src/, demo imports from index only, every value export tested,
+        # no Date.now/Date.parse/performance.now (rule #13).
+        run: bash packages/protocol/scripts/check-invariants.sh
+      - name: Demo smoke (public-API ergonomics)
+        # The demo composes the public surface end-to-end (import from
+        # index.ts, use as a consumer would). Vitest covers per-module
+        # invariants; the demo catches regressions in how the modules
+        # COMPOSE — naming drift, missing exports, accidental API breaks
+        # at the index.ts boundary. Cheap (<1s).
+        run: bun run packages/protocol/scripts/demo.ts
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # ratchet:actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Cross-language wire-contract verifier (Go)
+        # Independent reference implementation of the audit-chain wire
+        # contract in Go. Loads testdata/audit-event-vectors.json and
+        # recomputes the canonical serialization + eventHash byte-for-byte.
+        # Catches a class of bug NO other test catches: TS writer + external
+        # reader drift (e.g., someone changes both the serializer AND the
+        # in-package golden vector together — Vitest still passes, this
+        # fails). The verifier file uses `//go:build ignore` so it is NOT
+        # part of the main Go build; only `go run` against the file runs it.
+        working-directory: packages/protocol/testdata
+        run: go run verifier-reference.go
+
   web:
     runs-on: ubuntu-latest
     steps:

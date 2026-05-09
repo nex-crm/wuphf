@@ -1,0 +1,115 @@
+{
+  "schemaVersion": 1,
+  "comment": "Golden vectors for WUPHF protocol wire bytes. Audit canonicalSerialization is the UTF-8 JCS string for the record without eventHash; eventHash is sha256(asciiLowerHex(prevHash) || utf8(canonicalSerialization)); payload.bodyB64 is standard base64 for raw payload bytes. Approval signingBytes is the UTF-8 JCS string produced by approvalClaimsToSigningBytes.",
+  "vectors": [
+    {
+      "name": "boot_marker_seq0",
+      "input": {
+        "seqNo": "v1:0",
+        "timestamp": "2026-05-08T00:00:00.000Z",
+        "prevHash": "69292e708cc2e023492933025af465b063bdf24002e72a825b5170541b733f71",
+        "payload": {
+          "kind": "boot_marker",
+          "receiptId": null,
+          "bodyB64": "Ym9vdA=="
+        }
+      },
+      "expected": {
+        "canonicalSerialization": "{\"payload\":{\"bodyB64\":\"Ym9vdA==\",\"kind\":\"boot_marker\",\"receiptId\":null},\"prevHash\":\"69292e708cc2e023492933025af465b063bdf24002e72a825b5170541b733f71\",\"seqNo\":\"v1:0\",\"timestamp\":\"2026-05-08T00:00:00.000Z\"}",
+        "eventHash": "e27134d1b1641fb13747d9fac78aecc90d9d1385d04bfeea4a8a596fdb6101bb"
+      }
+    },
+    {
+      "name": "thread_created_seq1",
+      "input": {
+        "seqNo": "v1:1",
+        "timestamp": "2026-05-08T18:00:00.000Z",
+        "prevHash": "e27134d1b1641fb13747d9fac78aecc90d9d1385d04bfeea4a8a596fdb6101bb",
+        "payload": {
+          "kind": "thread_created",
+          "receiptId": null,
+          "bodyB64": "eyJjcmVhdGVkQXQiOiIyMDI2LTA1LTA4VDE4OjAwOjAwLjAwMFoiLCJjcmVhdGVkQnkiOiJmcmFuQGV4YW1wbGUuY29tIiwiZXh0ZXJuYWxSZWZzIjp7ImVudGl0eUlkcyI6WyJpc3N1ZTo3NDMiXSwic291cmNlVXJscyI6WyJodHRwczovL2V4YW1wbGUudGVzdC93dXBoZi83NDMiXX0sInRocmVhZElkIjoiMDFBUlozTkRFS1RTVjRSUkZGUTY5RzVGQVkiLCJ0aXRsZSI6IlRocmVhZCBwcm90b2NvbCJ9"
+        }
+      },
+      "expected": {
+        "canonicalSerialization": "{\"payload\":{\"bodyB64\":\"eyJjcmVhdGVkQXQiOiIyMDI2LTA1LTA4VDE4OjAwOjAwLjAwMFoiLCJjcmVhdGVkQnkiOiJmcmFuQGV4YW1wbGUuY29tIiwiZXh0ZXJuYWxSZWZzIjp7ImVudGl0eUlkcyI6WyJpc3N1ZTo3NDMiXSwic291cmNlVXJscyI6WyJodHRwczovL2V4YW1wbGUudGVzdC93dXBoZi83NDMiXX0sInRocmVhZElkIjoiMDFBUlozTkRFS1RTVjRSUkZGUTY5RzVGQVkiLCJ0aXRsZSI6IlRocmVhZCBwcm90b2NvbCJ9\",\"kind\":\"thread_created\",\"receiptId\":null},\"prevHash\":\"e27134d1b1641fb13747d9fac78aecc90d9d1385d04bfeea4a8a596fdb6101bb\",\"seqNo\":\"v1:1\",\"timestamp\":\"2026-05-08T18:00:00.000Z\"}",
+        "eventHash": "7cf8b677ffb567ff1c0b1b25cad65764dce3efb36242bba259fe592459640668"
+      },
+      "serializedJson": "{\"payload\":{\"bodyB64\":\"eyJjcmVhdGVkQXQiOiIyMDI2LTA1LTA4VDE4OjAwOjAwLjAwMFoiLCJjcmVhdGVkQnkiOiJmcmFuQGV4YW1wbGUuY29tIiwiZXh0ZXJuYWxSZWZzIjp7ImVudGl0eUlkcyI6WyJpc3N1ZTo3NDMiXSwic291cmNlVXJscyI6WyJodHRwczovL2V4YW1wbGUudGVzdC93dXBoZi83NDMiXX0sInRocmVhZElkIjoiMDFBUlozTkRFS1RTVjRSUkZGUTY5RzVGQVkiLCJ0aXRsZSI6IlRocmVhZCBwcm90b2NvbCJ9\",\"kind\":\"thread_created\",\"receiptId\":null},\"prevHash\":\"e27134d1b1641fb13747d9fac78aecc90d9d1385d04bfeea4a8a596fdb6101bb\",\"seqNo\":\"v1:1\",\"timestamp\":\"2026-05-08T18:00:00.000Z\"}",
+      "expectedHash": "7cf8b677ffb567ff1c0b1b25cad65764dce3efb36242bba259fe592459640668"
+    },
+    {
+      "name": "thread_spec_edited_seq2",
+      "input": {
+        "seqNo": "v1:2",
+        "timestamp": "2026-05-08T18:01:00.000Z",
+        "prevHash": "7cf8b677ffb567ff1c0b1b25cad65764dce3efb36242bba259fe592459640668",
+        "payload": {
+          "kind": "thread_spec_edited",
+          "receiptId": null,
+          "bodyB64": "eyJhdXRob3JlZEF0IjoiMjAyNi0wNS0wOFQxODowMTowMC4wMDBaIiwiYXV0aG9yZWRCeSI6ImZyYW5AZXhhbXBsZS5jb20iLCJjb250ZW50Ijp7ImJvZHkiOiJJbXBsZW1lbnQgdGhlIHRocmVhZCBwcm90b2NvbCBzbGljZSIsImNoZWNrbGlzdCI6WyJyZWNlaXB0IHYyIiwiYXVkaXQgZXZlbnRzIiwic3RyZWFtIGludmFsaWRhdGlvbiJdfSwiY29udGVudEhhc2giOiIyMDUzMzViNDRhZTFhM2ZjNDk2ZmVlZGMxMTQ5ZGIxZTkxNzA3OWU4MzhkMWY1ZjFmMjM1YzM1OGMyODAxYzEzIiwicmV2aXNpb25JZCI6IjAxQlJaM05ERUtUU1Y0UlJGRlE2OUc1RkEwIiwidGhyZWFkSWQiOiIwMUFSWjNOREVLVFNWNFJSRkZRNjlHNUZBWSJ9"
+        }
+      },
+      "expected": {
+        "canonicalSerialization": "{\"payload\":{\"bodyB64\":\"eyJhdXRob3JlZEF0IjoiMjAyNi0wNS0wOFQxODowMTowMC4wMDBaIiwiYXV0aG9yZWRCeSI6ImZyYW5AZXhhbXBsZS5jb20iLCJjb250ZW50Ijp7ImJvZHkiOiJJbXBsZW1lbnQgdGhlIHRocmVhZCBwcm90b2NvbCBzbGljZSIsImNoZWNrbGlzdCI6WyJyZWNlaXB0IHYyIiwiYXVkaXQgZXZlbnRzIiwic3RyZWFtIGludmFsaWRhdGlvbiJdfSwiY29udGVudEhhc2giOiIyMDUzMzViNDRhZTFhM2ZjNDk2ZmVlZGMxMTQ5ZGIxZTkxNzA3OWU4MzhkMWY1ZjFmMjM1YzM1OGMyODAxYzEzIiwicmV2aXNpb25JZCI6IjAxQlJaM05ERUtUU1Y0UlJGRlE2OUc1RkEwIiwidGhyZWFkSWQiOiIwMUFSWjNOREVLVFNWNFJSRkZRNjlHNUZBWSJ9\",\"kind\":\"thread_spec_edited\",\"receiptId\":null},\"prevHash\":\"7cf8b677ffb567ff1c0b1b25cad65764dce3efb36242bba259fe592459640668\",\"seqNo\":\"v1:2\",\"timestamp\":\"2026-05-08T18:01:00.000Z\"}",
+        "eventHash": "79c7070e45d4746685467b7ef55d75d78872959901d3c5cf05e80bc2f2b223ba"
+      },
+      "serializedJson": "{\"payload\":{\"bodyB64\":\"eyJhdXRob3JlZEF0IjoiMjAyNi0wNS0wOFQxODowMTowMC4wMDBaIiwiYXV0aG9yZWRCeSI6ImZyYW5AZXhhbXBsZS5jb20iLCJjb250ZW50Ijp7ImJvZHkiOiJJbXBsZW1lbnQgdGhlIHRocmVhZCBwcm90b2NvbCBzbGljZSIsImNoZWNrbGlzdCI6WyJyZWNlaXB0IHYyIiwiYXVkaXQgZXZlbnRzIiwic3RyZWFtIGludmFsaWRhdGlvbiJdfSwiY29udGVudEhhc2giOiIyMDUzMzViNDRhZTFhM2ZjNDk2ZmVlZGMxMTQ5ZGIxZTkxNzA3OWU4MzhkMWY1ZjFmMjM1YzM1OGMyODAxYzEzIiwicmV2aXNpb25JZCI6IjAxQlJaM05ERUtUU1Y0UlJGRlE2OUc1RkEwIiwidGhyZWFkSWQiOiIwMUFSWjNOREVLVFNWNFJSRkZRNjlHNUZBWSJ9\",\"kind\":\"thread_spec_edited\",\"receiptId\":null},\"prevHash\":\"7cf8b677ffb567ff1c0b1b25cad65764dce3efb36242bba259fe592459640668\",\"seqNo\":\"v1:2\",\"timestamp\":\"2026-05-08T18:01:00.000Z\"}",
+      "expectedHash": "79c7070e45d4746685467b7ef55d75d78872959901d3c5cf05e80bc2f2b223ba"
+    },
+    {
+      "name": "thread_status_changed_seq3",
+      "input": {
+        "seqNo": "v1:3",
+        "timestamp": "2026-05-08T18:02:00.000Z",
+        "prevHash": "79c7070e45d4746685467b7ef55d75d78872959901d3c5cf05e80bc2f2b223ba",
+        "payload": {
+          "kind": "thread_status_changed",
+          "receiptId": null,
+          "bodyB64": "eyJjaGFuZ2VkQXQiOiIyMDI2LTA1LTA4VDE4OjAyOjAwLjAwMFoiLCJjaGFuZ2VkQnkiOiJmcmFuQGV4YW1wbGUuY29tIiwiZnJvbVN0YXR1cyI6Im9wZW4iLCJ0aHJlYWRJZCI6IjAxQVJaM05ERUtUU1Y0UlJGRlE2OUc1RkFZIiwidG9TdGF0dXMiOiJpbl9wcm9ncmVzcyJ9"
+        }
+      },
+      "expected": {
+        "canonicalSerialization": "{\"payload\":{\"bodyB64\":\"eyJjaGFuZ2VkQXQiOiIyMDI2LTA1LTA4VDE4OjAyOjAwLjAwMFoiLCJjaGFuZ2VkQnkiOiJmcmFuQGV4YW1wbGUuY29tIiwiZnJvbVN0YXR1cyI6Im9wZW4iLCJ0aHJlYWRJZCI6IjAxQVJaM05ERUtUU1Y0UlJGRlE2OUc1RkFZIiwidG9TdGF0dXMiOiJpbl9wcm9ncmVzcyJ9\",\"kind\":\"thread_status_changed\",\"receiptId\":null},\"prevHash\":\"79c7070e45d4746685467b7ef55d75d78872959901d3c5cf05e80bc2f2b223ba\",\"seqNo\":\"v1:3\",\"timestamp\":\"2026-05-08T18:02:00.000Z\"}",
+        "eventHash": "25dbe87b7c15b43239f64289ec95d1bc80365849d08258d3464df73aedb316e1"
+      },
+      "serializedJson": "{\"payload\":{\"bodyB64\":\"eyJjaGFuZ2VkQXQiOiIyMDI2LTA1LTA4VDE4OjAyOjAwLjAwMFoiLCJjaGFuZ2VkQnkiOiJmcmFuQGV4YW1wbGUuY29tIiwiZnJvbVN0YXR1cyI6Im9wZW4iLCJ0aHJlYWRJZCI6IjAxQVJaM05ERUtUU1Y0UlJGRlE2OUc1RkFZIiwidG9TdGF0dXMiOiJpbl9wcm9ncmVzcyJ9\",\"kind\":\"thread_status_changed\",\"receiptId\":null},\"prevHash\":\"79c7070e45d4746685467b7ef55d75d78872959901d3c5cf05e80bc2f2b223ba\",\"seqNo\":\"v1:3\",\"timestamp\":\"2026-05-08T18:02:00.000Z\"}",
+      "expectedHash": "25dbe87b7c15b43239f64289ec95d1bc80365849d08258d3464df73aedb316e1"
+    }
+  ],
+  "merkleRootVectors": [
+    {
+      "name": "merkle_root_seq42",
+      "input": {
+        "seqNo": "v1:42",
+        "rootHash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "signedAt": "2026-05-08T12:34:56.789Z",
+        "ephemeralKeyId": "eph-key-20260508-01",
+        "signature": "bWVya2xlLXJvb3Qtc2lnbmF0dXJl",
+        "certChainPem": "-----BEGIN CERTIFICATE-----\nMIIBwzCCAWmgAwIBAgIUWUPHFMERKLE0001\n-----END CERTIFICATE-----\n"
+      },
+      "expected": {
+        "canonicalJson": "{\"certChainPem\":\"-----BEGIN CERTIFICATE-----\\nMIIBwzCCAWmgAwIBAgIUWUPHFMERKLE0001\\n-----END CERTIFICATE-----\\n\",\"ephemeralKeyId\":\"eph-key-20260508-01\",\"rootHash\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\",\"seqNo\":\"v1:42\",\"signature\":\"bWVya2xlLXJvb3Qtc2lnbmF0dXJl\",\"signedAt\":\"2026-05-08T12:34:56.789Z\"}"
+      }
+    }
+  ],
+  "approvalClaimsVectors": [
+    {
+      "name": "approval_claims_high_write_bound",
+      "input": {
+        "signerIdentity": "fran@example.com",
+        "role": "approver",
+        "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "writeId": "write_01",
+        "frozenArgsHash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "riskClass": "high",
+        "issuedAt": "2026-05-08T18:00:00.123Z",
+        "expiresAt": "2026-05-08T18:30:00.123Z",
+        "webauthnAssertion": "webauthn-demo-assertion"
+      },
+      "expected": {
+        "signingBytes": "{\"expiresAt\":\"2026-05-08T18:30:00.123Z\",\"frozenArgsHash\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\",\"issuedAt\":\"2026-05-08T18:00:00.123Z\",\"receiptId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAV\",\"riskClass\":\"high\",\"role\":\"approver\",\"signerIdentity\":\"fran@example.com\",\"webauthnAssertion\":\"webauthn-demo-assertion\",\"writeId\":\"write_01\"}"
+      }
+    }
+  ]
+}
