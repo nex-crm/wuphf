@@ -8,10 +8,16 @@ them together unless this runbook records a specific reason to split the change.
 Official reference:
 
 - Electron release schedule: <https://releases.electronjs.org/schedule>
+- Electron support policy: <https://www.electronjs.org/docs/latest/tutorial/electron-timelines>
 
 ## Current State
 
-As of 2026-05-09, the installer stub pins:
+As of 2026-05-09:
+
+- Latest stable Electron: `42.x` (`42.0.0`, May 2026)
+- Supported Electron window: latest 3 stable majors, not a traditional LTS
+  branch (currently `42.x`, `41.x`, and `40.x`)
+- Currently pinned installer stub stack:
 
 - `electron`: `33.0.0`
 - `electron-builder`: `25.1.8`
@@ -19,6 +25,9 @@ As of 2026-05-09, the installer stub pins:
 
 Electron's official schedule lists Electron 33 end of life as 2025-04-29. Do not
 bump the runtime in this PR; use this runbook for the dedicated stack upgrade.
+Action: bump the pinned stack to the latest stable supported Electron major
+(currently `42.x`) in a follow-up PR before enabling signed production release
+traffic from this installer stub.
 
 ## Bump Procedure
 
