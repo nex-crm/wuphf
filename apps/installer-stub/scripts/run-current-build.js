@@ -21,13 +21,16 @@ function run(command, args) {
   }
 
   if (result.status !== 0) {
-    process.exit(result.status ?? 1);
+    const error = new Error(`Command failed: ${command} ${args.join(" ")}`);
+    error.exitCode = result.status ?? 1;
+    throw error;
   }
 }
 
 function fail(message) {
-  console.error(message);
-  process.exit(1);
+  const error = new Error(message);
+  error.exitCode = 1;
+  throw error;
 }
 
 function artifactMetadata(artifactPath) {
@@ -117,8 +120,17 @@ function packageLocalMacInstaller() {
   writeLatestMacManifest(distDir, zipName, dmgName);
 }
 
-if (process.platform === "darwin" && releaseMode !== "production") {
-  packageLocalMacInstaller();
-} else {
-  run(process.execPath, [runBuilder, "--config", "electron-builder.yml", "--publish=never"]);
+try {
+  if (process.platform === "darwin" && releaseMode !== "production") {
+    packageLocalMacInstaller();
+  } else {
+    run(process.execPath, [runBuilder, "--config", "electron-builder.yml", "--publish=never"]);
+  }
+} catch (error) {
+  if (error && Number.isInteger(error.exitCode)) {
+    console.error(error.message);
+    process.exit(error.exitCode);
+  }
+
+  throw error;
 }
