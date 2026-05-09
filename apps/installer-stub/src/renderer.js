@@ -8,6 +8,16 @@ const updater = window.wuphfUpdater;
 let currentState = "idle";
 let actionInFlight = false;
 
+function getErrorMessage(error) {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+  if (typeof error === "string" && error) {
+    return error;
+  }
+  return "Unknown error";
+}
+
 function setUpdateState(state) {
   currentState = state.state;
 
@@ -72,7 +82,7 @@ if (!updater) {
       setUpdateState({ state: "checking" });
       await updater.checkForUpdates();
     } catch (error) {
-      setUpdateState({ state: "error", message: error.message });
+      setUpdateState({ state: "error", message: getErrorMessage(error) });
     } finally {
       actionInFlight = false;
     }
@@ -87,7 +97,7 @@ if (!updater) {
     try {
       await updater.installUpdateAndRestart();
     } catch (error) {
-      setUpdateState({ state: "error", message: error.message });
+      setUpdateState({ state: "error", message: getErrorMessage(error) });
     } finally {
       actionInFlight = false;
     }
@@ -107,6 +117,6 @@ if (!updater) {
       }
     })
     .catch((error) => {
-      setUpdateState({ state: "error", message: error.message });
+      setUpdateState({ state: "error", message: getErrorMessage(error) });
     });
 }
