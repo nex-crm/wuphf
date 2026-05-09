@@ -2,14 +2,17 @@ package team
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/nex-crm/wuphf/internal/agent"
 )
@@ -421,5 +424,225 @@ func TestSkillProposalPersistenceRoundTrip(t *testing.T) {
 	}
 	if len(requests) != 1 || requests[0].Kind != "skill_proposal" {
 		t.Fatalf("expected persisted skill_proposal request, got %d requests", len(requests))
+	}
+}
+
+// brokerWithWiki wires a temp git-backed wiki worker onto a fresh broker so
+// tests that exercise the wiki write path can read SKILL.md back from disk.
+// Returns the broker plus a cleanup that stops the worker.
+func brokerWithWiki(t *testing.T) (*Broker, func()) {
+	t.Helper()
+	root := filepath.Join(t.TempDir(), "wiki")
+	backup := filepath.Join(t.TempDir(), "wiki.bak")
+	repo := NewRepoAt(root, backup)
+	if err := repo.Init(context.Background()); err != nil {
+		t.Fatalf("init repo: %v", err)
+	}
+	b := newTestBroker(t)
+	worker := NewWikiWorker(repo, b)
+	ctx, cancel := context.WithCancel(context.Background())
+	worker.Start(ctx)
+	b.mu.Lock()
+	b.wikiWorker = worker
+	b.mu.Unlock()
+	return b, func() {
+		cancel()
+		worker.Stop()
+	}
+}
+
+// waitForSkillFile polls for the on-disk SKILL.md path until it appears or
+// the deadline elapses. The wiki worker commits asynchronously, so a tight
+// stat() right after handlePostSkill returns can race the commit.
+func waitForSkillFile(t *testing.T, b *Broker, slug string) string {
+	t.Helper()
+	root := b.wikiWorker.Repo().Root()
+	path := filepath.Join(root, "team", "skills", slug+".md")
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(path); err == nil {
+			return path
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("SKILL.md never landed on disk: %s", path)
+	return ""
+}
+
+// TestHandlePostSkill_WritesWikiFile is the regression guard for the
+// "team/skills/<slug>.md: no such file or directory" bug. handlePostSkill
+// previously updated broker state without enqueuing the SKILL.md write, so
+// the wiki UI hit a raw filesystem error on first open.
+func TestHandlePostSkill_WritesWikiFile(t *testing.T) {
+	b, cleanup := brokerWithWiki(t)
+	defer cleanup()
+
+	body := bytes.NewBufferString(`{
+		"action":"create",
+		"name":"flake-quarantine",
+		"title":"Flake Quarantine",
+		"description":"Move repeatedly-flaking E2E tests to a quarantine lane.",
+		"content":"# Flake Quarantine\n\nQuarantine flakes that fail >3 times in 24h.",
+		"created_by":"ceo",
+		"channel":"general",
+		"tags":["qa","ci"]
+	}`)
+	req := httptest.NewRequest(http.MethodPost, "/skills", body)
+	rec := httptest.NewRecorder()
+	b.handlePostSkill(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("handlePostSkill: expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	path := waitForSkillFile(t, b, "flake-quarantine")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read SKILL.md: %v", err)
+	}
+	fm, parsedBody, err := ParseSkillMarkdown(raw)
+	if err != nil {
+		t.Fatalf("parse SKILL.md: %v", err)
+	}
+	if fm.Name != "flake-quarantine" {
+		t.Errorf("frontmatter name: got %q, want flake-quarantine", fm.Name)
+	}
+	if !strings.Contains(parsedBody, "Quarantine flakes that fail") {
+		t.Errorf("body missing skill content, got %q", parsedBody)
+	}
+}
+
+// TestHandlePostSkill_ProposeWritesWikiFile pins the wiki write for the
+// proposal path too. Proposed skills also need an on-disk SKILL.md so the
+// approval interview can render the body.
+func TestHandlePostSkill_ProposeWritesWikiFile(t *testing.T) {
+	b, cleanup := brokerWithWiki(t)
+	defer cleanup()
+	b.mu.Lock()
+	b.members = []officeMember{{Slug: "ceo", Name: "CEO", Role: "lead"}}
+	for i := range b.channels {
+		if b.channels[i].Slug == "general" {
+			b.channels[i].Members = append(b.channels[i].Members, "ceo")
+		}
+	}
+	b.mu.Unlock()
+
+	body := bytes.NewBufferString(`{
+		"action":"propose",
+		"name":"propose-skill",
+		"title":"Propose Skill",
+		"description":"Skill awaiting approval.",
+		"content":"1. Do the deterministic thing.",
+		"created_by":"ceo",
+		"channel":"general"
+	}`)
+	req := httptest.NewRequest(http.MethodPost, "/skills", body)
+	rec := httptest.NewRecorder()
+	b.handlePostSkill(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("handlePostSkill: expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	waitForSkillFile(t, b, "propose-skill")
+}
+
+// TestBackfillSkillFilesFromState_WritesMissingFiles covers the boot path
+// for skills that already live in broker-state.json but have no SKILL.md
+// (e.g. created before the create-time wiki write was wired up). Without
+// the backfill these zombies stay invisible to /wiki/article forever.
+func TestBackfillSkillFilesFromState_WritesMissingFiles(t *testing.T) {
+	b, cleanup := brokerWithWiki(t)
+	defer cleanup()
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	b.mu.Lock()
+	b.skills = append(b.skills, teamSkill{
+		ID:          "skill-flake-quarantine",
+		Name:        "flake-quarantine",
+		Title:       "Flake Quarantine",
+		Description: "Move flakes to a quarantine lane.",
+		Content:     "# Flake Quarantine\n\nQuarantine flakes.",
+		CreatedBy:   "ceo",
+		Channel:     "general",
+		Status:      "active",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	})
+	// Archived skills must NOT be backfilled — leave the tombstone alone.
+	b.skills = append(b.skills, teamSkill{
+		ID:          "skill-archived-old",
+		Name:        "archived-old",
+		Title:       "Archived",
+		Description: "Already retired.",
+		Content:     "old body",
+		CreatedBy:   "ceo",
+		Channel:     "general",
+		Status:      "archived",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	})
+	b.mu.Unlock()
+
+	root := b.wikiWorker.Repo().Root()
+	activePath := filepath.Join(root, "team", "skills", "flake-quarantine.md")
+	archivedPath := filepath.Join(root, "team", "skills", "archived-old.md")
+	if _, err := os.Stat(activePath); !os.IsNotExist(err) {
+		t.Fatalf("precondition: SKILL.md should be missing, got %v", err)
+	}
+
+	b.backfillSkillFilesFromState(context.Background())
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(activePath); err == nil {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if _, err := os.Stat(activePath); err != nil {
+		t.Fatalf("backfill did not create active SKILL.md: %v", err)
+	}
+	if _, err := os.Stat(archivedPath); !os.IsNotExist(err) {
+		t.Errorf("backfill should not resurrect archived skills, but %s exists", archivedPath)
+	}
+}
+
+// TestBackfillSkillFilesFromState_PreservesExistingFile covers the no-op
+// path: when a SKILL.md already exists on disk, backfill must leave the
+// file (and its commit history) untouched.
+func TestBackfillSkillFilesFromState_PreservesExistingFile(t *testing.T) {
+	b, cleanup := brokerWithWiki(t)
+	defer cleanup()
+
+	body := bytes.NewBufferString(`{
+		"action":"create",
+		"name":"already-on-disk",
+		"title":"Already On Disk",
+		"description":"Skill that already has SKILL.md.",
+		"content":"# Already On Disk\n\nbody.",
+		"created_by":"ceo",
+		"channel":"general"
+	}`)
+	req := httptest.NewRequest(http.MethodPost, "/skills", body)
+	rec := httptest.NewRecorder()
+	b.handlePostSkill(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("handlePostSkill: expected 200, got %d", rec.Code)
+	}
+	path := waitForSkillFile(t, b, "already-on-disk")
+	originalInfo, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	originalSize := originalInfo.Size()
+
+	b.backfillSkillFilesFromState(context.Background())
+
+	infoAfter, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat after backfill: %v", err)
+	}
+	if infoAfter.Size() != originalSize {
+		t.Errorf("backfill rewrote an existing file (size %d -> %d)",
+			originalSize, infoAfter.Size())
 	}
 }

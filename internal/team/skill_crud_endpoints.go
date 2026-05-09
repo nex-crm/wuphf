@@ -923,6 +923,69 @@ func (b *Broker) reconcileSkillStatusFromDisk() {
 	}
 }
 
+// backfillSkillFilesFromState walks b.skills and writes a SKILL.md for every
+// skill whose wiki file is missing on disk. It is the symmetric peer of
+// reconcileSkillStatusFromDisk: that helper trusts disk over memory for
+// status, this one trusts memory when disk has nothing at all. Without this,
+// skills created via handlePostSkill before the wiki write was wired (or
+// during a window when wikiWorker was nil) stay invisible to /wiki/article
+// for the rest of the broker's lifetime.
+//
+// Each missing skill is enqueued individually so a malformed entry (empty
+// description, render failure) doesn't block the rest. Errors are logged,
+// not surfaced — startup must not block on wiki-side hiccups.
+func (b *Broker) backfillSkillFilesFromState(ctx context.Context) {
+	b.mu.Lock()
+	worker := b.wikiWorker
+	b.mu.Unlock()
+	if worker == nil {
+		return
+	}
+	repo := worker.Repo()
+	if repo == nil {
+		return
+	}
+
+	b.mu.Lock()
+	type pending struct {
+		sk        teamSkill
+		wikiPath  string
+		commitMsg string
+	}
+	var todo []pending
+	for i := range b.skills {
+		// Archived skills are tombstoned via the archive flow; if their file
+		// is missing we leave it missing rather than resurrect them here.
+		if b.skills[i].Status == "archived" {
+			continue
+		}
+		wikiPath := skillWikiPath(b.skills[i].Name)
+		absPath := filepath.Join(repo.Root(), filepath.FromSlash(wikiPath))
+		if _, err := os.Stat(absPath); err == nil {
+			continue
+		} else if !os.IsNotExist(err) {
+			slog.Warn("skill_crud: backfill stat failed", "path", wikiPath, "err", err)
+			continue
+		}
+		todo = append(todo, pending{
+			sk:        b.skills[i],
+			wikiPath:  wikiPath,
+			commitMsg: "wuphf: backfill skill " + b.skills[i].Name + " from broker state",
+		})
+	}
+	b.mu.Unlock()
+
+	for _, p := range todo {
+		if err := enqueueSkillWikiWrite(ctx, worker, p.sk, p.wikiPath, p.commitMsg); err != nil {
+			slog.Warn("skill_crud: backfill enqueue failed",
+				"name", p.sk.Name, "path", p.wikiPath, "err", err)
+			continue
+		}
+		slog.Info("skill_crud: backfilled missing SKILL.md from broker state",
+			"name", p.sk.Name, "path", p.wikiPath)
+	}
+}
+
 // resolveSkillSourceArticle reads the on-disk SKILL.md for name and extracts
 // the first source article path from its frontmatter. Returns "" when the
 // wiki worker is absent, the file is missing, or the frontmatter carries no
