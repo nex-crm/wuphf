@@ -303,9 +303,12 @@ func enqueueSkillWikiWrite(ctx context.Context, worker *WikiWorker, sk teamSkill
 		return nil
 	}
 	if strings.TrimSpace(sk.Name) == "" || strings.TrimSpace(sk.Description) == "" {
-		// Description is required by RenderSkillMarkdown. Skip rather than
-		// surface an error — the skill is still usable from broker state and
-		// a future edit can populate the description.
+		// Intentionally retained even though handlePostSkill now rejects empty
+		// description at the HTTP layer: backfillSkillFilesFromState (and any
+		// future caller) may encounter legacy teamSkill records written before
+		// the validation existed. Removing this guard would cause those legacy
+		// skills to fail RenderSkillMarkdown and surface a write error instead
+		// of a safe, logged skip.
 		slog.Warn("enqueueSkillWikiWrite: skipping wiki write — name or description empty",
 			"name", sk.Name)
 		return nil

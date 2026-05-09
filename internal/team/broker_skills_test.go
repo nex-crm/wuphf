@@ -543,6 +543,26 @@ func TestHandlePostSkill_ProposeWritesWikiFile(t *testing.T) {
 	skillFilePath(t, b, "propose-skill")
 }
 
+// TestHandlePostSkill_RequiresDescription locks in the 400 returned when
+// description is absent. The field is required by RenderSkillMarkdown, so
+// omitting it would silently skip the SKILL.md write and leave the wiki 404.
+func TestHandlePostSkill_RequiresDescription(t *testing.T) {
+	b := newTestBroker(t)
+	body := bytes.NewBufferString(`{
+		"action":"create",
+		"name":"no-desc-skill",
+		"title":"No Description",
+		"content":"step 1.",
+		"created_by":"ceo"
+	}`)
+	req := httptest.NewRequest(http.MethodPost, "/skills", body)
+	rec := httptest.NewRecorder()
+	b.handlePostSkill(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 when description is missing, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
 // TestBackfillSkillFilesFromState_WritesMissingFiles covers the boot path
 // for skills that already live in broker-state.json but have no SKILL.md
 // (e.g. created before the create-time wiki write was wired up). Without
