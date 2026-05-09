@@ -66,6 +66,18 @@ else
   done
 fi
 
+renderer_html="${root_dir}/src/renderer/index.html"
+if [[ ! -f "${renderer_html}" ]]; then
+  record_violation "${renderer_html}: missing renderer HTML"
+else
+  if grep -Eq 'connect-src[^"]*[*]' "${renderer_html}"; then
+    record_violation "${renderer_html}: connect-src must not contain wildcard sources or ports"
+  fi
+  if grep -Eq 'connect-src[^"]*:[0-9]+-[0-9]+' "${renderer_html}"; then
+    record_violation "${renderer_html}: connect-src must not contain wildcard port ranges"
+  fi
+fi
+
 if [[ "${#violations[@]}" -gt 0 ]]; then
   printf 'Invariant check failed:\n' >&2
   for violation in "${violations[@]}"; do
