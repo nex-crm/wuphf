@@ -3,6 +3,19 @@
 // because the combined module exceeded the 1500-LOC budget; the public API is
 // preserved here via re-exports so consumers do not need to change imports.
 
+import {
+  assertWithinBudget,
+  MAX_RECEIPT_APPROVALS,
+  MAX_RECEIPT_BYTES,
+  MAX_RECEIPT_COMMITS,
+  MAX_RECEIPT_FILES_CHANGED,
+  MAX_RECEIPT_NOTEBOOK_WRITES,
+  MAX_RECEIPT_SOURCE_READS,
+  MAX_RECEIPT_WIKI_WRITES,
+  MAX_RECEIPT_WRITES,
+  MAX_TOOL_CALLS_PER_RECEIPT,
+  validateReceiptBudget,
+} from "./budgets.ts";
 import { canonicalJSON } from "./canonical-json.ts";
 import { FrozenArgs } from "./frozen-args.ts";
 import {
@@ -179,22 +192,69 @@ function decodeBrandAt<T>(value: string, path: string, decode: (value: string) =
 }
 
 export function receiptToJson(r: ReceiptSnapshot): string {
+  const budget = validateReceiptBudget(r);
+  if (!budget.ok) {
+    throw new Error(budget.reason);
+  }
   const validation = validateReceipt(r);
   if (!validation.ok) {
     throw new Error(formatValidationErrors(validation.errors));
   }
-  return canonicalJSON(receiptToJsonValue(r));
+  const json = canonicalJSON(receiptToJsonValue(r));
+  assertSerializedReceiptJsonBudget(json);
+  return json;
 }
 
 export function receiptFromJson(json: string): ReceiptSnapshot {
+  assertSerializedReceiptJsonBudget(json);
   const parsed: unknown = JSON.parse(json);
+  assertParsedReceiptCollectionBudgets(parsed);
   const recomputedFrozenArgs = new Set<FrozenArgs>();
   const receipt = receiptJsonToSnapshot(parsed, recomputedFrozenArgs);
+  const budget = validateReceiptBudget(receipt);
+  if (!budget.ok) {
+    throw new Error(budget.reason);
+  }
   const validation = validateReceiptWithRecomputedFrozenArgs(receipt, recomputedFrozenArgs);
   if (!validation.ok) {
     throw new Error(formatValidationErrors(validation.errors));
   }
   return receipt;
+}
+
+function assertSerializedReceiptJsonBudget(json: string): void {
+  if (json.length > MAX_RECEIPT_BYTES) {
+    assertWithinBudget(json.length, MAX_RECEIPT_BYTES, "receipt serialized bytes");
+    return;
+  }
+  assertWithinBudget(
+    new TextEncoder().encode(json).byteLength,
+    MAX_RECEIPT_BYTES,
+    "receipt serialized bytes",
+  );
+}
+
+function assertParsedReceiptCollectionBudgets(parsed: unknown): void {
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return;
+  const record = parsed as Readonly<Record<string, unknown>>;
+  assertParsedArrayBudget(record, "toolCalls", MAX_TOOL_CALLS_PER_RECEIPT);
+  assertParsedArrayBudget(record, "filesChanged", MAX_RECEIPT_FILES_CHANGED);
+  assertParsedArrayBudget(record, "commits", MAX_RECEIPT_COMMITS);
+  assertParsedArrayBudget(record, "writes", MAX_RECEIPT_WRITES);
+  assertParsedArrayBudget(record, "approvals", MAX_RECEIPT_APPROVALS);
+  assertParsedArrayBudget(record, "sourceReads", MAX_RECEIPT_SOURCE_READS);
+  assertParsedArrayBudget(record, "notebookWrites", MAX_RECEIPT_NOTEBOOK_WRITES);
+  assertParsedArrayBudget(record, "wikiWrites", MAX_RECEIPT_WIKI_WRITES);
+}
+
+function assertParsedArrayBudget(
+  record: Readonly<Record<string, unknown>>,
+  key: string,
+  budget: number,
+): void {
+  const value = record[key];
+  if (!Array.isArray(value)) return;
+  assertWithinBudget(value.length, budget, `receipt ${key} length`);
 }
 
 function receiptToJsonValue(r: ReceiptSnapshot): Record<string, unknown> {

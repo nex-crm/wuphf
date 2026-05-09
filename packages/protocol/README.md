@@ -25,9 +25,19 @@ Spec: `business-musings/wuphf-greenfield-rewrite-rfc-2026-05.md` §6 (Receipt sc
 
 External writes carry `writeId`. A token with `claims.writeId` authorizes only that write; a token without `claims.writeId` is receipt-scoped. Approval submissions use `ApprovalSubmitRequest`: `{ receiptId, approvalToken, idempotencyKey: IdempotencyKey }`. Clients mint the idempotency key and accepted responses echo it so clients can safely retry a lost `202 Accepted` with the same key. Idempotency keys are branded `IdempotencyKey` values and must match `/^[A-Za-z0-9_-]{1,128}$/`. Use `validateApprovalSubmitRequest` at the IPC boundary to reject unknown envelope keys, validate the branded `receiptId` and `idempotencyKey` shapes, require a token claims object, and enforce `receiptId === approvalToken.claims.receiptId`.
 
+## Resource budgets
+
+Protocol-level resource caps live in `src/budgets.ts` and are exported from `src/index.ts` so downstream consumers can enforce the same contract. The receipt cap is 10 MiB serialized; per-blob caps are 1 MiB for `FrozenArgs` canonical JSON and `SanitizedString` UTF-8 text. Receipt arrays are bounded (`toolCalls` 1,024; `filesChanged`, `sourceReads`, `notebookWrites`, and `wikiWrites` 10,000; `commits` 1,024; `writes` 256; `approvals` 64). Approval tokens are capped at a 30-minute lifetime. These numbers keep normal large tasks viable while preventing runaway receipts, blobs, and stale capabilities from exhausting verifier memory.
+
+`receiptFromJson` rejects oversized serialized input before parsing, then checks collection budgets before decoding fields. `receiptToJson` runs the typed budget validator before semantic validation and canonicalization.
+
 ## Merkle root checkpoint wire shape
 
 `MerkleRootRecord` checkpoints use the JSON projection `{ seqNo, rootHash, signedAt, ephemeralKeyId, signature, certChainPem }`. `seqNo` is an `EventLsn` string such as `"v1:42"`, `rootHash` is a lowercase SHA-256 hex digest, `signedAt` is an ISO 8601 instant with milliseconds, `signature` is non-empty base64, and `certChainPem` is non-empty PEM text. Golden vectors for both audit events and Merkle root checkpoints live in `testdata/audit-event-vectors.json`.
+
+## Streaming verifier
+
+Long audit chains can be verified incrementally with `verifyChainIncremental(state, batch)`, starting from `INITIAL_VERIFIER_STATE`. Each batch is capped at `MAX_AUDIT_CHAIN_BATCH_SIZE` (10,000 records), so callers can stream large logs without holding the full chain in verifier state. `verifyChain(records)` remains the convenience wrapper for already-materialized arrays and uses the same incremental verifier internally.
 
 ## Validation
 

@@ -3,7 +3,7 @@
 // Usage:
 //   bun run packages/protocol/scripts/demo.ts
 //
-// Walks through ten adversarial scenarios. Each prints:
+// Walks through adversarial scenarios. Each prints:
 //   • what we tried to do
 //   • what the moat MUST do (expected behavior)
 //   • what the moat actually did (so a human can spot a regression)
@@ -17,10 +17,17 @@ import {
   asMerkleRootHex,
   computeAuditEventHash,
   GENESIS_PREV_HASH,
+  INITIAL_VERIFIER_STATE,
   serializeAuditEventRecordForHash,
   validateMerkleRootRecord,
   verifyChain,
+  verifyChainIncremental,
 } from "../src/audit-event.ts";
+import {
+  MAX_AUDIT_CHAIN_BATCH_SIZE,
+  MAX_TOOL_CALLS_PER_RECEIPT,
+  validateReceiptBudget,
+} from "../src/budgets.ts";
 import { canonicalJSON } from "../src/canonical-json.ts";
 import { lsnFromV1Number } from "../src/event-lsn.ts";
 import { FrozenArgs } from "../src/frozen-args.ts";
@@ -119,6 +126,43 @@ function expectChainResult(
   } else {
     console.log(
       `  ${ANSI.red}FAIL${ANSI.reset} ${label} expected ${expectedCode}, got ${actualCode}`,
+    );
+    failed++;
+  }
+}
+
+function expectIncrementalResult(
+  label: string,
+  actual: ReturnType<typeof verifyChainIncremental>,
+  expectedCode: string | "ok",
+): void {
+  const actualCode = actual.ok ? "ok" : actual.code;
+  if (actualCode === expectedCode) {
+    console.log(
+      `  ${ANSI.green}PASS${ANSI.reset} ${label} = ${ANSI.dim}${actualCode}${ANSI.reset}`,
+    );
+    passed++;
+  } else {
+    console.log(
+      `  ${ANSI.red}FAIL${ANSI.reset} ${label} expected ${expectedCode}, got ${actualCode}`,
+    );
+    failed++;
+  }
+}
+
+function expectBudgetFailure(
+  label: string,
+  actual: ReturnType<typeof validateReceiptBudget>,
+  expectedFragment: RegExp,
+): void {
+  if (!actual.ok && expectedFragment.test(actual.reason)) {
+    console.log(
+      `  ${ANSI.green}PASS${ANSI.reset} ${label} = ${ANSI.dim}${actual.reason}${ANSI.reset}`,
+    );
+    passed++;
+  } else {
+    console.log(
+      `  ${ANSI.red}FAIL${ANSI.reset} ${label} expected reason matching ${expectedFragment}`,
     );
     failed++;
   }
@@ -231,7 +275,57 @@ Reflect.deleteProperty(sparseChain, "1");
 expectChainResult("chain with deleted record at seq 1", verifyChain(sparseChain), "missing_record");
 
 // ──────────────────────────────────────────────────────────────────────────
-header(6, "FrozenArgs JSON envelope rejects smuggled siblings");
+header(6, "Audit chain verifies incrementally without retaining the full log");
+// ──────────────────────────────────────────────────────────────────────────
+const incrementalChain = buildChain(12);
+const firstIncrementalBatch = verifyChainIncremental(
+  INITIAL_VERIFIER_STATE,
+  incrementalChain.slice(0, 5),
+);
+expectIncrementalResult("first 5-record batch", firstIncrementalBatch, "ok");
+if (firstIncrementalBatch.ok) {
+  const secondIncrementalBatch = verifyChainIncremental(
+    firstIncrementalBatch.state,
+    incrementalChain.slice(5),
+  );
+  expectIncrementalResult("remaining 7-record batch", secondIncrementalBatch, "ok");
+  if (secondIncrementalBatch.ok) {
+    const allAtOnce = verifyChain(incrementalChain);
+    expectEqual(
+      "incremental last hash matches verifyChain",
+      allAtOnce.ok && !allAtOnce.empty
+        ? secondIncrementalBatch.state.expectedPrev === allAtOnce.lastEventHash
+        : false,
+      true,
+    );
+  }
+}
+expectIncrementalResult(
+  "oversized verifier batch",
+  verifyChainIncremental(
+    INITIAL_VERIFIER_STATE,
+    new Array<AuditEventRecord>(MAX_AUDIT_CHAIN_BATCH_SIZE + 1),
+  ),
+  "batch_too_large",
+);
+
+// ──────────────────────────────────────────────────────────────────────────
+header(7, "Receipt budgets reject runaway task fanout");
+// ──────────────────────────────────────────────────────────────────────────
+const budgetFixture = buildValidReceipt();
+const runawayToolCall = nonNull(budgetFixture.toolCalls[0], "budgetFixture.toolCalls[0]");
+expectEqual("normal receipt budget", validateReceiptBudget(budgetFixture), { ok: true });
+expectBudgetFailure(
+  "toolCalls length cap",
+  validateReceiptBudget({
+    ...budgetFixture,
+    toolCalls: Array.from({ length: MAX_TOOL_CALLS_PER_RECEIPT + 1 }, () => runawayToolCall),
+  }),
+  /toolCalls.*exceeds budget/,
+);
+
+// ──────────────────────────────────────────────────────────────────────────
+header(8, "FrozenArgs JSON envelope rejects smuggled siblings");
 // ──────────────────────────────────────────────────────────────────────────
 const validReceiptJson = receiptToJson(buildValidReceipt());
 const parsed = JSON.parse(validReceiptJson) as {
@@ -242,7 +336,7 @@ firstToolCall.inputs = { ...firstToolCall.inputs, evilShadow: "smuggled" };
 expectThrows(() => receiptFromJson(JSON.stringify(parsed)), /evilShadow.*not allowed/);
 
 // ──────────────────────────────────────────────────────────────────────────
-header(7, "ExternalWrite per-state invariants");
+header(9, "ExternalWrite per-state invariants");
 // ──────────────────────────────────────────────────────────────────────────
 const tamperedApplied = JSON.parse(receiptToJson(buildValidReceipt())) as {
   writes: Array<Record<string, unknown>>;
@@ -255,7 +349,7 @@ expectThrows(
 );
 
 // ──────────────────────────────────────────────────────────────────────────
-header(8, "Approval token writeId binding catches cross-write authorization");
+header(10, "Approval token writeId binding catches cross-write authorization");
 // ──────────────────────────────────────────────────────────────────────────
 const writeIdMismatch = JSON.parse(receiptToJson(buildValidReceipt())) as {
   writes: Array<Record<string, unknown>>;
@@ -269,7 +363,7 @@ writeWithToken.approvalToken = tokenWithWrongWriteId;
 expectThrows(() => receiptFromJson(JSON.stringify(writeIdMismatch)), /writeId.*must match/);
 
 // ──────────────────────────────────────────────────────────────────────────
-header(9, "ApprovalSubmitRequest cross-field validator (IPC layer)");
+header(11, "ApprovalSubmitRequest cross-field validator (IPC layer)");
 // ──────────────────────────────────────────────────────────────────────────
 const validReceipt = buildValidReceipt();
 const validToken = nonNull(validReceipt.approvals[0], "validReceipt.approvals[0]").signedToken;
@@ -296,7 +390,7 @@ expectEqual("empty idempotencyKey rejected", validateApprovalSubmitRequest(empty
 });
 
 // ──────────────────────────────────────────────────────────────────────────
-header(10, "EventLsn safe-integer bound (writer ⟷ verifier round-trip)");
+header(12, "EventLsn safe-integer bound (writer ⟷ verifier round-trip)");
 // ──────────────────────────────────────────────────────────────────────────
 expectThrows(() => lsnFromV1Number(Number.MAX_SAFE_INTEGER + 1), /non-negative safe integer/);
 expectThrows(() => lsnFromV1Number(-1), /non-negative safe integer/);
@@ -307,7 +401,7 @@ expectEqual(
 );
 
 // ──────────────────────────────────────────────────────────────────────────
-header(11, "Bonus: golden eventHash literal (cross-language wire contract)");
+header(13, "Bonus: golden eventHash literal (cross-language wire contract)");
 // ──────────────────────────────────────────────────────────────────────────
 const goldenRecord: AuditEventRecord = {
   seqNo: lsnFromV1Number(0),

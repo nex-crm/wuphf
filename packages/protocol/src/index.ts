@@ -5,6 +5,8 @@ export type {
   AuditEventRecord,
   ChainFailureCode,
   ChainVerificationResult,
+  ChainVerifierState,
+  IncrementalVerifyResult,
   MerkleRootHex,
   MerkleRootRecord,
   MerkleRootRecordValidationError,
@@ -16,6 +18,7 @@ export {
   computeAuditEventHash,
   computeEventHash,
   GENESIS_PREV_HASH,
+  INITIAL_VERIFIER_STATE,
   isMerkleRootHex,
   merkleRootRecordFromJson,
   merkleRootRecordToJsonValue,
@@ -23,8 +26,30 @@ export {
   serializeAuditEventRecordForHash,
   validateMerkleRootRecord,
   verifyChain,
+  verifyChainIncremental,
 } from "./audit-event.ts";
 export type { Brand } from "./brand.ts";
+export type { BudgetValidationResult } from "./budgets.ts";
+export {
+  assertWithinBudget,
+  MAX_APPROVAL_TOKEN_LIFETIME_MS,
+  MAX_AUDIT_CHAIN_BATCH_SIZE,
+  MAX_FROZEN_ARGS_BYTES,
+  MAX_RECEIPT_APPROVALS,
+  MAX_RECEIPT_BYTES,
+  MAX_RECEIPT_COMMITS,
+  MAX_RECEIPT_FILES_CHANGED,
+  MAX_RECEIPT_NOTEBOOK_WRITES,
+  MAX_RECEIPT_SOURCE_READS,
+  MAX_RECEIPT_WIKI_WRITES,
+  MAX_RECEIPT_WRITES,
+  MAX_SANITIZED_STRING_BYTES,
+  MAX_TOOL_CALLS_PER_RECEIPT,
+  validateApprovalTokenLifetime,
+  validateFrozenArgsBudget,
+  validateReceiptBudget,
+  validateSanitizedStringBudget,
+} from "./budgets.ts";
 export type { JsonPrimitive, JsonValue } from "./canonical-json.ts";
 export { assertJcsValue, canonicalJSON } from "./canonical-json.ts";
 export type { EventLsn, ParsedLsn } from "./event-lsn.ts";

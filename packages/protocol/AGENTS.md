@@ -124,13 +124,32 @@ Use `unknown` with narrowing. Use `Record<string, unknown>` for parsed
 JSON. Use `as` only when narrowing through a runtime check that just
 proved the type. Lint suppressions are not a fix — fix the code.
 
-### 10. Protocol-grade surfaces need bounded operations
+### 10. Sustainability discipline (bounded operations)
 
 Protocol work is not complete until the operational shape is bounded. New
 verifiers, wire readers, chain walkers, or recovery surfaces MUST account for
 bounded budgets, streaming verification where full materialization would be
 unsafe, and recovery primitives for interrupted or corrupt chains. Don't ship
 an unbounded all-in-memory path and call it protocol-grade.
+
+Specifically:
+
+- **Bounded resource budgets are NOT optional.** Anything that can grow with
+  input size has a named budget in `budgets.ts` and a validator that fails
+  fast before deeper validation or canonicalization.
+- **Streaming/incremental APIs** for any verifier or codec that processes a
+  sequence. `verifyChain` has `verifyChainIncremental`; add the same pattern
+  when introducing similar surfaces.
+- **Cleanup primitives**: when adding a new resource type that needs eventual
+  cleanup (persistent token, expiring claim, temporary file), define the
+  lifecycle at the protocol layer — TTL constant, expiry timestamp, validator
+  that checks the lifetime.
+- **No-runaway guards are part of the wire contract.** Receipt cost fields
+  are mirror-only (broker-enforced); the protocol package defines the shape
+  of cost accounting and max retry attempts on retryable
+  `WriteFailureMetadata`. Any new cost-bearing surface needs the same.
+- **Resource budget changes are wire-contract changes.** Coordinate the bump
+  with downstream consumers and update the README in the same PR.
 
 ### 11. Public API only changes through index.ts
 
@@ -176,16 +195,20 @@ delegated. The prompt MUST:
 For any non-trivial public API change (new export, validator, brand, codec
 function, or wire-shape field):
 
-1. Run the demo first: `bun run packages/protocol/scripts/demo.ts`.
+1. Run the demo first: `bun run packages/protocol/scripts/demo.ts`. ~100ms.
+   Establishes a "before" baseline of what passes.
 2. Make your changes.
 3. Run the demo again; it catches `index.ts` drift that per-module tests miss.
 4. If you add public API surface, extend `scripts/demo.ts` with a scenario:
    copy an existing block, replace inputs/expectations, and watch the new PASS
-   line print. The demo is a living artifact reviewers read before the diff.
+   line print. The demo is a living artifact reviewers read before the diff
+   (per `feedback_atomic_demo_slices.md`).
 5. If you touch the audit chain or canonical JSON, run
-   `cd packages/protocol/testdata && go run verifier-reference.go`. If you
-   changed the wire shape, extend `audit-event-vectors.json` and the Go
-   verifier in the same commit.
+   `cd packages/protocol/testdata && go run verifier-reference.go`. ~2s on
+   warm cache. If you changed the wire shape, extend
+   `audit-event-vectors.json` AND the Go verifier in the same commit —
+   otherwise cross-language drift is undetectable until a Go/Rust/Python
+   implementer writes their own and complains.
 6. If the change is not reflected in `scripts/demo.ts`, the commit body must
    explain why the demo did not need an extension.
 

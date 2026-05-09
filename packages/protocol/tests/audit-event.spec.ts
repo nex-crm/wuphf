@@ -10,6 +10,7 @@ import {
   computeAuditEventHash,
   computeEventHash,
   GENESIS_PREV_HASH,
+  INITIAL_VERIFIER_STATE,
   isMerkleRootHex,
   type MerkleRootRecord,
   merkleRootRecordFromJson,
@@ -18,7 +19,9 @@ import {
   serializeAuditEventRecordForHash,
   validateMerkleRootRecord,
   verifyChain,
+  verifyChainIncremental,
 } from "../src/audit-event.ts";
+import { MAX_AUDIT_CHAIN_BATCH_SIZE } from "../src/budgets.ts";
 import { canonicalJSON } from "../src/canonical-json.ts";
 import { type EventLsn, lsnFromV1Number, parseLsn } from "../src/event-lsn.ts";
 import { asReceiptId } from "../src/receipt.ts";
@@ -127,6 +130,79 @@ describe("audit-event chain verification", () => {
     expect(result.ok).toBe(true);
     if (result.ok && !result.empty) {
       expect(localLsn(result.lastSeqNo)).toBe(99);
+    }
+  });
+
+  it("verifies a 25,000-record chain in bounded incremental batches", () => {
+    const chain = chainOfLength(25_000);
+    const allAtOnce = verifyChain(chain);
+
+    let state = INITIAL_VERIFIER_STATE;
+    for (const batch of [
+      chain.slice(0, MAX_AUDIT_CHAIN_BATCH_SIZE),
+      chain.slice(MAX_AUDIT_CHAIN_BATCH_SIZE, MAX_AUDIT_CHAIN_BATCH_SIZE * 2),
+      chain.slice(MAX_AUDIT_CHAIN_BATCH_SIZE * 2),
+    ]) {
+      const result = verifyChainIncremental(state, batch);
+      expect(result.ok).toBe(true);
+      if (!result.ok) throw new Error(result.reason);
+      state = result.state;
+    }
+
+    expect(allAtOnce.ok).toBe(true);
+    if (allAtOnce.ok && !allAtOnce.empty) {
+      expect(state.recordsVerified).toBe(25_000);
+      expect(state.expectedPrev).toBe(allAtOnce.lastEventHash);
+      expect(state.lastSeen).toBe(allAtOnce.lastSeqNo);
+    }
+  });
+
+  it("incremental verification reports tampering in the middle of the second batch", () => {
+    const chain = chainOfLength(25_000);
+    chain[17_500] = { ...recordAt(chain, 17_500), eventHash: GENESIS_PREV_HASH };
+
+    const firstBatch = verifyChainIncremental(
+      INITIAL_VERIFIER_STATE,
+      chain.slice(0, MAX_AUDIT_CHAIN_BATCH_SIZE),
+    );
+    expect(firstBatch.ok).toBe(true);
+    if (!firstBatch.ok) throw new Error(firstBatch.reason);
+
+    const secondBatch = verifyChainIncremental(
+      firstBatch.state,
+      chain.slice(MAX_AUDIT_CHAIN_BATCH_SIZE, MAX_AUDIT_CHAIN_BATCH_SIZE * 2),
+    );
+
+    expect(secondBatch.ok).toBe(false);
+    if (!secondBatch.ok) {
+      expect(secondBatch.code).toBe("event_hash_mismatch");
+      expect(secondBatch.brokenAtSeqNo as string).toBe("v1:17500");
+    }
+  });
+
+  it("rejects an oversized incremental batch before per-record serialization", () => {
+    const chain = chainOfLength(MAX_AUDIT_CHAIN_BATCH_SIZE + 1);
+    let serializerCalls = 0;
+
+    const result = verifyChainIncremental(INITIAL_VERIFIER_STATE, chain, (record) => {
+      serializerCalls += 1;
+      return serializeAuditEventRecordForHash(record);
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("batch_too_large");
+      expect(result.reason).toMatch(/batch too large/);
+    }
+    expect(serializerCalls).toBe(0);
+  });
+
+  it("keeps the initial verifier state for an empty first batch", () => {
+    const result = verifyChainIncremental(INITIAL_VERIFIER_STATE, []);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.state).toBe(INITIAL_VERIFIER_STATE);
     }
   });
 

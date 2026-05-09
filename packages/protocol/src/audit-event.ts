@@ -18,6 +18,7 @@
 
 import { createHash } from "node:crypto";
 import type { Brand } from "./brand.ts";
+import { MAX_AUDIT_CHAIN_BATCH_SIZE } from "./budgets.ts";
 import { canonicalJSON } from "./canonical-json.ts";
 import { type EventLsn, GENESIS_LSN, isEqualLsn, nextLsn, parseLsn } from "./event-lsn.ts";
 import type { ReceiptId } from "./receipt.ts";
@@ -267,6 +268,7 @@ export function computeAuditEventHash(record: AuditEventRecord): Sha256Hex {
 }
 
 export type ChainFailureCode =
+  | "batch_too_large"
   | "missing_record"
   | "seq_gap"
   | "prev_hash_mismatch"
@@ -279,6 +281,24 @@ export type ChainVerificationResult =
   | { ok: true; empty: false; lastEventHash: Sha256Hex; lastSeqNo: EventLsn }
   | { ok: false; brokenAtSeqNo: EventLsn; code: ChainFailureCode; reason: string };
 
+export interface ChainVerifierState {
+  readonly expectedPrev: Sha256Hex;
+  readonly expectedSeq: EventLsn;
+  readonly lastSeen: EventLsn;
+  readonly recordsVerified: number;
+}
+
+export const INITIAL_VERIFIER_STATE: ChainVerifierState = {
+  expectedPrev: GENESIS_PREV_HASH,
+  expectedSeq: GENESIS_LSN,
+  lastSeen: GENESIS_LSN,
+  recordsVerified: 0,
+};
+
+export type IncrementalVerifyResult =
+  | { ok: true; state: ChainVerifierState }
+  | { ok: false; brokenAtSeqNo: EventLsn; code: ChainFailureCode; reason: string };
+
 /**
  * Verify a sequence of records forms a valid hash chain rooted at
  * GENESIS_PREV_HASH. The serializer defaults to the canonical
@@ -289,16 +309,54 @@ export function verifyChain(
   records: readonly AuditEventRecord[],
   serialize: (record: AuditEventRecord) => Uint8Array = serializeAuditEventRecordForHash,
 ): ChainVerificationResult {
-  if (records.length === 0) {
+  let state = INITIAL_VERIFIER_STATE;
+  for (let offset = 0; offset < records.length; offset += MAX_AUDIT_CHAIN_BATCH_SIZE) {
+    const result = verifyChainIncremental(
+      state,
+      records.slice(offset, offset + MAX_AUDIT_CHAIN_BATCH_SIZE),
+      serialize,
+    );
+    if (!result.ok) return result;
+    state = result.state;
+  }
+
+  if (state.recordsVerified === 0) {
     return { ok: true, empty: true };
   }
 
-  let expectedPrev: Sha256Hex = GENESIS_PREV_HASH;
-  let expectedSeq: EventLsn = GENESIS_LSN;
-  let lastSeen: EventLsn = GENESIS_LSN;
+  return {
+    ok: true,
+    empty: false,
+    lastEventHash: state.expectedPrev,
+    lastSeqNo: state.lastSeen,
+  };
+}
 
-  for (let i = 0; i < records.length; i++) {
-    const r = records[i];
+export function verifyChainIncremental(
+  state: ChainVerifierState,
+  batch: readonly AuditEventRecord[],
+  serialize: (record: AuditEventRecord) => Uint8Array = serializeAuditEventRecordForHash,
+): IncrementalVerifyResult {
+  if (batch.length > MAX_AUDIT_CHAIN_BATCH_SIZE) {
+    return {
+      ok: false,
+      brokenAtSeqNo: state.expectedSeq,
+      code: "batch_too_large",
+      reason: `batch too large: ${batch.length} > ${MAX_AUDIT_CHAIN_BATCH_SIZE}`,
+    };
+  }
+
+  if (batch.length === 0) {
+    return { ok: true, state };
+  }
+
+  let expectedPrev: Sha256Hex = state.expectedPrev;
+  let expectedSeq: EventLsn = state.expectedSeq;
+  let lastSeen: EventLsn = state.lastSeen;
+  let recordsVerified = state.recordsVerified;
+
+  for (let i = 0; i < batch.length; i++) {
+    const r = batch[i];
     if (r === undefined) {
       return {
         ok: false,
@@ -359,6 +417,7 @@ export function verifyChain(
         };
       }
       lastSeen = r.seqNo;
+      recordsVerified += 1;
     } catch (cause) {
       const brokenAtSeqNo = safeRecordSeqNo(r, expectedSeq);
       return {
@@ -372,9 +431,12 @@ export function verifyChain(
 
   return {
     ok: true,
-    empty: false,
-    lastEventHash: expectedPrev,
-    lastSeqNo: lastSeen,
+    state: {
+      expectedPrev,
+      expectedSeq,
+      lastSeen,
+      recordsVerified,
+    },
   };
 }
 
