@@ -161,6 +161,40 @@ func TestIsTransientQuickTunnelFailure(t *testing.T) {
 	}
 }
 
+// TestStopClosesStartCancel proves that stop() wakes an in-flight start()'s
+// retry-backoff select. Without this wiring, a click on Stop during the 3s
+// inter-attempt wait would block the user-perceived state until the timer
+// fires. The retry loop selects on startCancel; this test guards the only
+// thing that closes it.
+func TestStopClosesStartCancel(t *testing.T) {
+	c := newWebTunnelController()
+	c.mu.Lock()
+	startCancel := make(chan struct{})
+	c.startCancel = startCancel
+	c.starting = true
+	c.mu.Unlock()
+
+	done := make(chan struct{})
+	go func() {
+		<-startCancel
+		close(done)
+	}()
+
+	_ = c.stop()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("stop() did not close startCancel within 1s — backoff would not be cancellable")
+	}
+
+	c.mu.Lock()
+	if c.startCancel != nil {
+		t.Fatalf("stop() left c.startCancel non-nil; subsequent stop() would panic on close()")
+	}
+	c.mu.Unlock()
+}
+
 // TestCloudflaredMissingMessageMentionsInstall guards the user-facing string
 // — the tunnel button is the entry point for non-technical hosts, so the
 // failure mode they hit first must include an install command rather than a
