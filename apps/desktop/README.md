@@ -20,7 +20,10 @@ Platform: darwin / arm64
 [ Open repo on GitHub ]   ← click to test allowlisted IPC
 ```
 
-Quit with `Cmd+Q` / `Ctrl+Q`. Broker process is sent SIGTERM with a 5s grace, then SIGKILL.
+Quit with `Cmd+Q` / `Ctrl+Q`. Broker shutdown is cooperative: the supervisor
+sends a parentPort shutdown message, waits a 5s grace window, uses
+`UtilityProcess.kill()` for handle-bound cleanup on POSIX, and uses
+`taskkill /pid <pid> /T` with `/F` escalation on Windows.
 
 ## Build it
 

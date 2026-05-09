@@ -1,7 +1,36 @@
+const ALIVE_INTERVAL_MS = 1_000;
+
+let aliveInterval: NodeJS.Timeout | null = null;
+
 function sendAlive(): void {
-  if (typeof process.send === "function") {
-    process.send({ alive: true });
-  }
+  process.parentPort.postMessage({ alive: true });
 }
 
-setInterval(sendAlive, 1_000);
+function shutdown(): void {
+  if (aliveInterval !== null) {
+    clearInterval(aliveInterval);
+    aliveInterval = null;
+  }
+  process.exit(0);
+}
+
+process.parentPort.on("message", (event) => {
+  if (isShutdownMessage(event.data)) {
+    shutdown();
+  }
+});
+
+process.on("SIGTERM", shutdown);
+process.on("SIGINT", shutdown);
+
+sendAlive();
+aliveInterval = setInterval(sendAlive, ALIVE_INTERVAL_MS);
+
+function isShutdownMessage(message: unknown): message is { readonly type: "shutdown" } {
+  return (
+    typeof message === "object" &&
+    message !== null &&
+    Object.hasOwn(message, "type") &&
+    (message as { readonly type?: unknown }).type === "shutdown"
+  );
+}
