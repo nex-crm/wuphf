@@ -373,6 +373,15 @@ func (b *Broker) AppendReviewerGrade(taskID string, grade ReviewerGrade) error {
 		ReviewerSlug:   grade.ReviewerSlug,
 		Severity:       grade.Severity,
 	})
+	// Mirror into Lane D's routing-side store so the convergence rule
+	// runs on every grade. The routing helper is mutex-free under the
+	// already-held b.mu and skips re-canonicalising fields the packet
+	// path already validated.
+	if task := b.taskByIDLocked(taskID); task != nil {
+		if err := b.appendReviewerGradeRoutingLocked(taskID, grade); err != nil {
+			log.Printf("broker: routing-side mirror of grade for task %q failed: %v", taskID, err)
+		}
+	}
 	return nil
 }
 

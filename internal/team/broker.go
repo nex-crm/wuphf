@@ -88,6 +88,13 @@ type Broker struct {
 	// tests that never touch the harness path pay no cost. Guarded by
 	// b.mu via the public mutators in broker_decision_packet.go.
 	decisionPackets *decisionPacketState
+	// reviewerGradesByTask is the Lane D routing-side transient store of
+	// ReviewerGrade entries keyed by task ID. Lane D writes here for
+	// convergence/timeout rule evaluation; Lane C's Decision Packet is
+	// the durable source of truth. The two are kept in sync by
+	// SubmitReviewerGrade — Lane D mirrors writes to Lane C on each grade.
+	// Guarded by b.mu.
+	reviewerGradesByTask map[string][]ReviewerGrade
 	requests                []humanInterview
 	humanInvites            []humanInvite
 	humanSessions           []humanSession

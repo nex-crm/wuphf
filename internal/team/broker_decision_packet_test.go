@@ -103,6 +103,15 @@ func (s *fakeDecisionPacketStore) writesCopy() []DecisionPacket {
 	return out
 }
 
+// resetWrites clears the recorded write log so a test setup phase that
+// performs incidental persistence (e.g. AssignReviewers) does not skew a
+// later write-count assertion.
+func (s *fakeDecisionPacketStore) resetWrites() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.writes = nil
+}
+
 // seedTaskInState installs a task into b.tasks at the given lifecycle
 // state. Mirrors the small fixture used by Lane A's tests so we don't
 // drag in the full intake driver.
@@ -312,6 +321,14 @@ func TestDecisionPacketRetrySucceedsBeforeBudget(t *testing.T) {
 	b.SetDecisionPacketStore(store)
 	taskID := "task-transient"
 	seedTaskInState(t, b, taskID, LifecycleStateReview)
+	// Pre-assign two reviewers so convergence has something to wait on
+	// after the first grade lands; otherwise the Lane D mirror would
+	// immediately transition to decision and add a second persisted
+	// write that this retry-budget assertion is not measuring.
+	if err := b.AssignReviewers(taskID, []string{"reviewer-flap", "reviewer-still-pending"}); err != nil {
+		t.Fatalf("AssignReviewers: %v", err)
+	}
+	store.resetWrites()
 
 	if err := b.AppendReviewerGrade(taskID, ReviewerGrade{
 		ReviewerSlug: "reviewer-flap",
