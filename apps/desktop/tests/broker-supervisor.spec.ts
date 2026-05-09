@@ -23,7 +23,7 @@ type ElectronUtilityProcess = ReturnType<ForkProcess>;
 
 class FakeUtilityProcess extends EventEmitter {
   readonly pid: number;
-  readonly kill = vi.fn<() => boolean>(() => true);
+  readonly kill = vi.fn<(signal?: NodeJS.Signals) => boolean>(() => true);
   readonly postMessage = vi.fn<(message: unknown) => void>();
 
   constructor(pid: number) {
@@ -108,7 +108,7 @@ describe("BrokerSupervisor", () => {
     expect(supervisor.getStatus()).toBe("alive");
   });
 
-  it("requests graceful shutdown and repeats handle-bound kill after the grace window", async () => {
+  it("waits for graceful broker exit before killing", async () => {
     vi.useFakeTimers();
     const processHandle = new FakeUtilityProcess(4321);
     const { forkProcess } = createForkMock([processHandle]);
@@ -123,18 +123,75 @@ describe("BrokerSupervisor", () => {
     const stopPromise = supervisor.stop();
 
     expect(processHandle.postMessage).toHaveBeenCalledWith({ type: "shutdown" });
-    expect(processHandle.kill).toHaveBeenCalledTimes(1);
+    expect(processHandle.kill).not.toHaveBeenCalled();
+
+    processHandle.emit("exit", 0);
+    await stopPromise;
+
+    await vi.advanceTimersByTimeAsync(6_000);
+    expect(processHandle.kill).not.toHaveBeenCalled();
+    expect(supervisor.getStatus()).toBe("dead");
+  });
+
+  it("requests POSIX termination after the graceful stop window", async () => {
+    vi.useFakeTimers();
+    const processHandle = new FakeUtilityProcess(4321);
+    const { forkProcess } = createForkMock([processHandle]);
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+      platform: "linux",
+      stopGraceMs: 5_000,
+    });
+    supervisor.start();
+
+    const stopPromise = supervisor.stop();
+
+    expect(processHandle.postMessage).toHaveBeenCalledWith({ type: "shutdown" });
     await vi.advanceTimersByTimeAsync(4_999);
+    expect(processHandle.kill).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(processHandle.kill).toHaveBeenCalledTimes(1);
+    expect(processHandle.kill).toHaveBeenCalledWith();
+
+    processHandle.emit("exit", 0);
+    await stopPromise;
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(processHandle.kill).toHaveBeenCalledTimes(1);
+    expect(supervisor.getStatus()).toBe("dead");
+  });
+
+  it("force-kills POSIX brokers that ignore graceful and termination windows", async () => {
+    vi.useFakeTimers();
+    const processHandle = new FakeUtilityProcess(4321);
+    const { forkProcess } = createForkMock([processHandle]);
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+      platform: "linux",
+      stopGraceMs: 5_000,
+    });
+    supervisor.start();
+
+    const stopPromise = supervisor.stop();
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(processHandle.kill).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(999);
     expect(processHandle.kill).toHaveBeenCalledTimes(1);
 
     await vi.advanceTimersByTimeAsync(1);
     await stopPromise;
 
     expect(processHandle.kill).toHaveBeenCalledTimes(2);
+    expect(processHandle.kill).toHaveBeenNthCalledWith(2, "SIGKILL");
     expect(supervisor.getStatus()).toBe("dead");
   });
 
-  it("uses Windows taskkill for graceful and forced broker process-tree termination", async () => {
+  it("uses Windows taskkill after grace and escalates to force after one more second", async () => {
     vi.useFakeTimers();
     const processHandle = new FakeUtilityProcess(4321);
     const { forkProcess } = createForkMock([processHandle]);
@@ -153,10 +210,20 @@ describe("BrokerSupervisor", () => {
     const stopPromise = supervisor.stop();
 
     expect(processHandle.postMessage).toHaveBeenCalledWith({ type: "shutdown" });
-    expect(runWindowsTaskkill).toHaveBeenCalledWith(4321, { force: false });
+    expect(runWindowsTaskkill).not.toHaveBeenCalled();
     expect(processHandle.kill).not.toHaveBeenCalled();
 
-    await vi.advanceTimersByTimeAsync(5_000);
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(runWindowsTaskkill).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(runWindowsTaskkill).toHaveBeenCalledWith(4321, { force: false });
+    expect(runWindowsTaskkill).not.toHaveBeenCalledWith(4321, { force: true });
+
+    await vi.advanceTimersByTimeAsync(999);
+    expect(runWindowsTaskkill).not.toHaveBeenCalledWith(4321, { force: true });
+
+    await vi.advanceTimersByTimeAsync(1);
     await stopPromise;
 
     expect(runWindowsTaskkill).toHaveBeenCalledWith(4321, { force: true });

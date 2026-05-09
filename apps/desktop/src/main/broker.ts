@@ -7,6 +7,7 @@ import { monotonicNowMs } from "./monotonic-clock.ts";
 const BROKER_SERVICE_NAME = "wuphf-broker";
 const BROKER_ENV_ALLOWLIST = ["PATH", "HOME", "USER", "LANG", "LC_ALL", "TZ"] as const;
 const DEFAULT_STOP_GRACE_MS = 5_000;
+const DEFAULT_FORCE_STOP_GRACE_MS = 1_000;
 const DEFAULT_FIRST_BACKOFF_MS = 250;
 const DEFAULT_MAX_BACKOFF_MS = 60_000;
 const DEFAULT_MAX_RESTART_RETRIES = 5;
@@ -26,6 +27,7 @@ export interface BrokerSupervisorConfig {
   readonly runWindowsTaskkill?: RunWindowsTaskkill;
   readonly monotonicNow?: MonotonicNow;
   readonly stopGraceMs?: number;
+  readonly forceStopGraceMs?: number;
   readonly firstBackoffMs?: number;
   readonly maxBackoffMs?: number;
   readonly maxRestartRetries?: number;
@@ -42,6 +44,7 @@ export class BrokerSupervisor {
   private readonly runWindowsTaskkill: RunWindowsTaskkill;
   private readonly monotonicNow: MonotonicNow;
   private readonly stopGraceMs: number;
+  private readonly forceStopGraceMs: number;
   private readonly firstBackoffMs: number;
   private readonly maxBackoffMs: number;
   private readonly maxRestartRetries: number;
@@ -67,6 +70,7 @@ export class BrokerSupervisor {
     this.runWindowsTaskkill = config.runWindowsTaskkill ?? runWindowsTaskkill;
     this.monotonicNow = config.monotonicNow ?? monotonicNowMs;
     this.stopGraceMs = config.stopGraceMs ?? DEFAULT_STOP_GRACE_MS;
+    this.forceStopGraceMs = config.forceStopGraceMs ?? DEFAULT_FORCE_STOP_GRACE_MS;
     this.firstBackoffMs = config.firstBackoffMs ?? DEFAULT_FIRST_BACKOFF_MS;
     this.maxBackoffMs = config.maxBackoffMs ?? DEFAULT_MAX_BACKOFF_MS;
     this.maxRestartRetries = config.maxRestartRetries ?? DEFAULT_MAX_RESTART_RETRIES;
@@ -142,15 +146,15 @@ export class BrokerSupervisor {
 
     await new Promise<void>((resolve) => {
       let settled = false;
-      let forceKillTimer: NodeJS.Timeout | null = null;
+      let stopTimer: NodeJS.Timeout | null = null;
 
       const settle = (): void => {
         if (settled) {
           return;
         }
         settled = true;
-        if (forceKillTimer !== null) {
-          clearTimeout(forceKillTimer);
+        if (stopTimer !== null) {
+          clearTimeout(stopTimer);
         }
         brokerProcess.off("exit", settle);
         if (this.brokerProcess === brokerProcess) {
@@ -160,13 +164,23 @@ export class BrokerSupervisor {
         resolve();
       };
 
+      const scheduleStopStep = (delayMs: number, step: () => void): void => {
+        stopTimer = setTimeout(() => {
+          stopTimer = null;
+          step();
+        }, delayMs);
+      };
+
       brokerProcess.once("exit", settle);
       this.requestGracefulStop(brokerProcess);
 
-      forceKillTimer = setTimeout(() => {
-        this.forceStop(brokerProcess);
-        settle();
-      }, this.stopGraceMs);
+      scheduleStopStep(this.stopGraceMs, () => {
+        this.requestProcessTermination(brokerProcess);
+        scheduleStopStep(this.forceStopGraceMs, () => {
+          this.forceStop(brokerProcess);
+          settle();
+        });
+      });
     });
   }
 
@@ -220,7 +234,9 @@ export class BrokerSupervisor {
 
   private requestGracefulStop(brokerProcess: UtilityProcessHandle): void {
     safePostMessage(brokerProcess, { type: "shutdown" });
+  }
 
+  private requestProcessTermination(brokerProcess: UtilityProcessHandle): void {
     if (this.platform === "win32") {
       const pid = getProcessPid(brokerProcess);
       if (pid !== null) {
@@ -229,7 +245,7 @@ export class BrokerSupervisor {
       return;
     }
 
-    brokerProcess.kill();
+    killUtilityProcess(brokerProcess);
   }
 
   private forceStop(brokerProcess: UtilityProcessHandle): void {
@@ -241,7 +257,7 @@ export class BrokerSupervisor {
       }
     }
 
-    brokerProcess.kill();
+    killUtilityProcess(brokerProcess, "SIGKILL");
   }
 
   private resetRestartCountAfterStableWindow(): void {
@@ -286,6 +302,16 @@ function safePostMessage(brokerProcess: UtilityProcessHandle, message: unknown):
   } catch {
     // The force path remains armed; a closed message port should not block app quit.
   }
+}
+
+function killUtilityProcess(brokerProcess: UtilityProcessHandle, signal?: NodeJS.Signals): void {
+  if (signal === undefined) {
+    brokerProcess.kill();
+    return;
+  }
+
+  // Electron 33's type omits the signal overload; keep the handle-bound receiver.
+  Reflect.apply(brokerProcess.kill, brokerProcess, [signal]);
 }
 
 function runWindowsTaskkill(pid: number, options: { readonly force: boolean }): Promise<void> {
