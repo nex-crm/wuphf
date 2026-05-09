@@ -6,7 +6,10 @@
  * Phase 5 PR 2 — app navigation refresh.
  */
 
-import { resolveObjectRoute, type ObjectRouteResolution } from "../lib/objectRoutes";
+import {
+  type ObjectRouteResolution,
+  resolveObjectRoute,
+} from "../lib/objectRoutes";
 import type { CurrentRoute } from "../routes/useCurrentRoute";
 
 export interface BreadcrumbItem {
@@ -62,13 +65,19 @@ export function deriveBreadcrumbs(route: CurrentRoute): BreadcrumbItem[] {
     case "notebook-agent": {
       return [
         { label: "Notebooks", href: "#/notebooks" },
-        { label: route.agentSlug, href: `#/notebooks/${encodeURIComponent(route.agentSlug)}` },
+        {
+          label: route.agentSlug,
+          href: `#/notebooks/${encodeURIComponent(route.agentSlug)}`,
+        },
       ];
     }
     case "notebook-entry": {
       return [
         { label: "Notebooks", href: "#/notebooks" },
-        { label: route.agentSlug, href: `#/notebooks/${encodeURIComponent(route.agentSlug)}` },
+        {
+          label: route.agentSlug,
+          href: `#/notebooks/${encodeURIComponent(route.agentSlug)}`,
+        },
         {
           label: route.entrySlug,
           href: `#/notebooks/${encodeURIComponent(route.agentSlug)}/${encodeURIComponent(route.entrySlug)}`,
@@ -81,14 +90,41 @@ export function deriveBreadcrumbs(route: CurrentRoute): BreadcrumbItem[] {
     case "app": {
       if (route.appId === "settings" || isSettingsSection(route.appId)) {
         const section = route.appId === "settings" ? "workspace" : route.appId;
-        const res = resolveObjectRoute({ kind: "settings-section", section: section as "providers" | "team" | "workspace" | "skills" });
-        return [{
-          label: route.appId === "settings" ? "Settings" : (res.fallback ? appLabel(route.appId) : res.label),
-          href: res.href,
-        }];
+        const res = resolveObjectRoute({
+          kind: "settings-section",
+          section: section as "providers" | "team" | "workspace" | "skills",
+        });
+        return [
+          {
+            label:
+              route.appId === "settings"
+                ? "Settings"
+                : res.fallback
+                  ? appLabel(route.appId)
+                  : res.label,
+            href: res.href,
+          },
+        ];
       }
       // Generic app — one segment with the app title.
-      return [{ label: appLabel(route.appId), href: `#/apps/${encodeURIComponent(route.appId)}` }];
+      return [
+        {
+          label: appLabel(route.appId),
+          href: `#/apps/${encodeURIComponent(route.appId)}`,
+        },
+      ];
+    }
+    case "inbox": {
+      return [{ label: "Inbox", href: "#/inbox" }];
+    }
+    case "task-decision": {
+      return [
+        { label: "Inbox", href: "#/inbox" },
+        {
+          label: route.taskId,
+          href: `#/task/${encodeURIComponent(route.taskId)}`,
+        },
+      ];
     }
     case "channel":
     case "unknown":
@@ -122,11 +158,19 @@ function appLabel(appId: string): string {
     receipts: "Receipts",
     "health-check": "Access & Health",
   };
-  return LABELS[appId] ?? appId.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  return (
+    LABELS[appId] ??
+    appId.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
+  );
 }
 
 type SettingsSection = "providers" | "team" | "workspace" | "skills";
-const SETTINGS_SECTIONS = new Set<string>(["providers", "team", "workspace", "skills"]);
+const SETTINGS_SECTIONS = new Set<string>([
+  "providers",
+  "team",
+  "workspace",
+  "skills",
+]);
 function isSettingsSection(v: string): v is SettingsSection {
   return SETTINGS_SECTIONS.has(v);
 }

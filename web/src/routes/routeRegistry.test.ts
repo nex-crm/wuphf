@@ -7,6 +7,7 @@ import {
   channelRoute,
   createAppRouter,
   dmRoute,
+  inboxRoute,
   indexRoute,
   legacyWorkbenchAgentRoute,
   legacyWorkbenchRoute,
@@ -16,6 +17,7 @@ import {
   notebooksRoute,
   reviewsRoute,
   rootRoute,
+  taskDecisionRoute,
   taskDetailRoute,
   tasksRoute,
   wikiArticleRoute,
@@ -81,6 +83,8 @@ describe("TanStack route tree", () => {
     ["/notebooks/pm", notebookAgentRoute.id],
     ["/notebooks/pm/handoff", notebookEntryRoute.id],
     ["/reviews", reviewsRoute.id],
+    ["/inbox", inboxRoute.id],
+    ["/task/task-2741", taskDecisionRoute.id],
   ] as const;
 
   it.each(

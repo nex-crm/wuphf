@@ -55,6 +55,8 @@ export const ROUTE_PATHS = {
   notebookAgent: "/notebooks/$agentSlug",
   notebookEntry: "/notebooks/$agentSlug/$entrySlug",
   reviews: "/reviews",
+  inbox: "/inbox",
+  taskDecision: "/task/$taskId",
 } as const;
 
 export type RouteKey = keyof typeof ROUTE_PATHS;
@@ -142,6 +144,13 @@ export const ROUTE_CONTRACTS: readonly RouteContract[] = [
     search: [],
   },
   { key: "reviews", path: ROUTE_PATHS.reviews, params: [], search: [] },
+  { key: "inbox", path: ROUTE_PATHS.inbox, params: [], search: [] },
+  {
+    key: "taskDecision",
+    path: ROUTE_PATHS.taskDecision,
+    params: ["taskId"],
+    search: [],
+  },
 ] as const;
 
 export const SIDEBAR_APP_IDS = SIDEBAR_APPS.map((app) => app.id);
