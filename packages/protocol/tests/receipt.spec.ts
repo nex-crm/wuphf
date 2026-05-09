@@ -787,16 +787,11 @@ describe("receipt schema", () => {
       ],
     };
 
-    expect(validateReceipt(tampered)).toEqual({
-      ok: false,
-      errors: [
-        {
-          path: "",
-          message:
-            "receipt approvals[0].signedToken: approval token lifetime ms must be a non-negative finite number",
-        },
-      ],
-    });
+    expectReceiptValidationError(
+      tampered,
+      "/approvals/0/signedToken/claims/expiresAt",
+      /must be after issuedAt/,
+    );
   });
 
   it("rejects approval claims that expire exactly when they are issued because expiry is strict-after", () => {

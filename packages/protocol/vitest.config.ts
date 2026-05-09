@@ -21,10 +21,13 @@ export default defineConfig({
       reporter: process.env["CI"] ? ["text", "json-summary"] : ["text"],
       reportsDirectory: "coverage",
       thresholds: {
-        lines: 89,
-        statements: 89,
-        functions: 96,
-        branches: 76,
+        // Ratcheted up after R11 added 198 spec-driven tests.
+        // Measured: 97.05 lines / 97.05 statements / 99.62 functions / 89.79 branches.
+        // Aspirational target: 98/98/98/98.
+        lines: 97,
+        statements: 97,
+        functions: 99,
+        branches: 89,
       },
     },
   },

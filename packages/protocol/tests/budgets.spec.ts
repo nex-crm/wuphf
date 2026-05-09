@@ -266,15 +266,30 @@ describe("resource budgets", () => {
     expectBudgetRejection(result, /approval token lifetime ms.*1800001 > 1800000/);
   });
 
-  it("rejects approval token lifetimes that do not expire after issuance", () => {
+  it("does not reject zero or negative approval token lifetimes — that is the per-field validator's job", () => {
+    // The lower bound (`expiresAt > issuedAt`) is enforced at the proper
+    // per-field path by `validateApprovalClaims` (receipt-validator.ts) and
+    // `validateApprovalClaimsShape` (ipc.ts), where it produces a path-
+    // anchored error like `/approvals/N/signedToken/claims/expiresAt: must
+    // be after issuedAt`. The budget validator here owns only the upper
+    // bound (the 30-minute cap). Duplicating the lower bound would
+    // short-circuit the per-field error path with a less actionable
+    // top-level message.
     const issuedAt = new Date("2026-05-08T18:00:00.000Z");
-    const result = validateApprovalTokenLifetime({
-      ...approvalClaimsFixture(),
-      issuedAt,
-      expiresAt: issuedAt,
-    });
-
-    expectBudgetRejection(result, /approval token lifetime ms.*0 <= 0/);
+    expect(
+      validateApprovalTokenLifetime({
+        ...approvalClaimsFixture(),
+        issuedAt,
+        expiresAt: issuedAt,
+      }),
+    ).toEqual({ ok: true });
+    expect(
+      validateApprovalTokenLifetime({
+        ...approvalClaimsFixture(),
+        issuedAt,
+        expiresAt: new Date(issuedAt.getTime() - 1),
+      }),
+    ).toEqual({ ok: true });
   });
 
   it("rejects approval token lifetimes with invalid dates", () => {

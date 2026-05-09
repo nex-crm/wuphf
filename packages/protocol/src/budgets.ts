@@ -349,8 +349,15 @@ function validateApprovalTokenLifetimeValues(
   if (!Number.isFinite(lifetimeMs)) {
     return { ok: false, reason: "approval token lifetime must be finite" };
   }
-  if (lifetimeMs === 0) {
-    return { ok: false, reason: "approval token lifetime ms must be greater than 0: 0 <= 0" };
+  // Lower-bound enforcement (strict `expiresAt > issuedAt`) lives in the
+  // per-field validators: `validateApprovalClaims` in receipt-validator.ts
+  // and `validateApprovalClaimsShape` in ipc.ts. Both surface path-anchored
+  // errors at `/approvals/N/signedToken/claims/expiresAt` (or the IPC
+  // equivalent). This budget validator owns only the upper bound — the
+  // 30-minute cap. Duplicating the lower bound here would short-circuit the
+  // per-field error path with a less useful top-level message at path "".
+  if (lifetimeMs <= 0) {
+    return { ok: true };
   }
   try {
     assertWithinBudget(lifetimeMs, MAX_APPROVAL_TOKEN_LIFETIME_MS, "approval token lifetime ms");
