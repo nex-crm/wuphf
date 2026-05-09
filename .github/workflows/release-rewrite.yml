@@ -11,6 +11,9 @@ on:
     branches:
       - main
   push:
+    # GitHub tag globs are intentionally broad here; detect-secrets validates
+    # the full semver contract before release builds run:
+    # ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?-rewrite$
     tags:
       - "v[0-9]*-rewrite"
 
@@ -38,6 +41,13 @@ jobs:
           else
             echo "release_mode=pr" >> "${GITHUB_OUTPUT}"
             echo "is_release=false" >> "${GITHUB_OUTPUT}"
+          fi
+      - name: Validate rewrite release tag
+        if: steps.mode.outputs.is_release == 'true'
+        run: |
+          if [[ ! "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?-rewrite$ ]]; then
+            echo "tag must be semver + -rewrite suffix, e.g., v1.2.3-rewrite" >&2
+            exit 1
           fi
       - name: Detect PR signing posture
         if: steps.mode.outputs.release_mode != 'production'

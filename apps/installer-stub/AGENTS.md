@@ -12,7 +12,7 @@ For the repo-wide base rules (lint, secrets, branch + PR discipline) see the roo
 - **`electron-builder.yml`** — The packaging config: macOS (dmg + zip, hardened runtime, notarized), Windows (nsis, signed post-build via Azure Trusted Signing), Linux (AppImage + deb, unsigned).
 - **`build/`** — Per-platform build resources: entitlements.plist for Mac, certificate bundles, Windows manifest, etc. **No private keys checked in, ever** (per AGENTS.md rule 5 below).
 - **`scripts/`** — Helpers: `detect-signing-secrets.sh` (logs which signing secrets are present in env, decides "production-required vs PR-OK"), `refresh-latest-yml.js` (refreshes post-sign/post-staple electron-updater hashes), `verify-latest-yml.sh` (validates electron-updater's latest manifests).
-- **`.github/workflows/release-rewrite.yml`** — Matrix CI on `macos-14` / `windows-2022` / `ubuntu-24.04`. PR pushes run unsigned installer builds (proves the artifacts are real). Tag pushes (`v[0-9]*-rewrite`) run the full signed + notarized + published path.
+- **`.github/workflows/release-rewrite.yml`** — Matrix CI on `macos-14` / `windows-2022` / `ubuntu-24.04`. PR pushes run unsigned installer builds (proves the artifacts are real). Tag pushes (`v[0-9]*-rewrite`, validated as semver `v<major>.<minor>.<patch>[-prerelease]-rewrite`) run the full signed + notarized + published path.
 
 This package is **NOT** the real desktop app. It is plumbing. Reviewers reject any change that adds product features here — file an issue against the future `apps/desktop/` instead.
 
@@ -36,6 +36,7 @@ This package is **NOT** the real desktop app. It is plumbing. Reviewers reject a
 14. **Runner images follow the maintenance schedule.** `release-rewrite.yml` records runner labels and review-by dates. Upgrade labels only through `docs/runbooks/runner-image-maintenance.md`, including a signed rewrite smoke tag before merge.
 15. **Electron stack bumps are grouped.** `electron`, `electron-builder`, and `electron-updater` move together unless `docs/runbooks/electron-stack-maintenance.md` records why a split bump is safe.
 16. **Apple Developer ID renewal is tracked.** The Apple cert owner must keep the NotAfter date in `docs/CALENDAR.md`, renew at least 60 days before expiry, and follow `docs/runbooks/apple-dev-id-setup.md#cert-renewal`.
+17. **Rewrite release tags must normalize to semver.** The workflow trigger glob is broad, so `detect-secrets` must reject tag names that do not match `^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?-rewrite$` before any release build runs. The app version used by electron-builder is the tag without the leading `v` and trailing `-rewrite`.
 
 No differential updates ship in installer-stub v1. Windows updates download the
 full installer for each release (`nsis.differentialPackage: false`), so blockmap

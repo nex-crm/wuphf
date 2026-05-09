@@ -45,7 +45,7 @@ cd apps/installer-stub && WUPHF_RELEASE_MODE=pr bun run check:secrets
 cd apps/installer-stub && WUPHF_RELEASE_MODE=pr bun run build:current
 
 # In CI, on a tag push (matrix: macos-14 / windows-2022 / ubuntu-24.04)
-# Triggered by tags matching `v[0-9]*-rewrite`
+# Triggered by tags matching semver + -rewrite, for example `v1.2.3-rewrite`
 # See: .github/workflows/release-rewrite.yml
 ```
 
@@ -74,7 +74,7 @@ macOS signing imports `APPLE_CERT_P12_BASE64` into a temporary CI keychain befor
 
 ```mermaid
 flowchart TD
-    Tag["GitHub tag push<br/>v[0-9]+.*-rewrite"]
+    Tag["GitHub tag push<br/>v1.2.3-rewrite"]
     PR["Pull request push<br/>(any branch)"]
     Workflow[".github/workflows/<br/>release-rewrite.yml"]
     Detect["detect-secrets job<br/>WUPHF_RELEASE_MODE = pr | production"]
