@@ -115,8 +115,15 @@ Safe paths:
 Use this only for draft-only rewrite releases where no user has seen the
 manifest or artifacts.
 
-1. Delete the draft release in GitHub.
-2. Move the local tag to the reviewed fix commit:
+If you need to re-issue a tag, first cancel any in-progress workflow runs for
+the old tag in the Actions UI and wait until no old `publish` job can run. The
+publish job also verifies that the tag still points at the workflow commit, but
+human cancellation is the first containment step.
+
+1. Cancel all in-progress `Release Rewrite` runs for the old tag in GitHub
+   Actions.
+2. Delete the draft release in GitHub.
+3. Move the local tag to the reviewed fix commit:
 
    ```bash
    git fetch origin
@@ -125,8 +132,8 @@ manifest or artifacts.
    git push origin "$TAG"
    ```
 
-3. Watch the new `Release Rewrite` workflow run from the start.
-4. Re-verify all platform artifacts and publish the draft only after the asset
+4. Watch the new `Release Rewrite` workflow run from the start.
+5. Re-verify all platform artifacts and publish the draft only after the asset
    assertion passes.
 
 If the release was published, do not move the tag. Create a new higher tag.

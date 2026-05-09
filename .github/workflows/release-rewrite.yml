@@ -449,6 +449,20 @@ jobs:
       TAG: ${{ github.ref_name }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
+      - name: Assert release tag still matches workflow commit
+        run: |
+          if ! git fetch --force origin "refs/tags/${TAG}:refs/tags/${TAG}"; then
+            echo "tag has moved since workflow started; aborting to avoid clobbering." >&2
+            exit 1
+          fi
+
+          current_tag_sha="$(git rev-parse "refs/tags/${TAG}^{commit}")"
+          if [[ "${current_tag_sha}" != "${GITHUB_SHA}" ]]; then
+            echo "tag has moved since workflow started; aborting to avoid clobbering." >&2
+            echo "workflow commit: ${GITHUB_SHA}" >&2
+            echo "current tag commit: ${current_tag_sha}" >&2
+            exit 1
+          fi
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # ratchet:actions/setup-node@v6.4.0
         with:
           node-version: "20.x"
