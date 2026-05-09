@@ -237,12 +237,13 @@ func TestHandleTeamSkillCreateCanActivateImmediately(t *testing.T) {
 	t.Setenv("WUPHF_BROKER_TOKEN", b.Token())
 
 	res, _, err := handleTeamSkillCreate(context.Background(), nil, TeamSkillCreateArgs{
-		Name:    "already-approved",
-		Title:   "Already Approved",
-		Content: "1. Run the already-approved workflow.",
-		Action:  "create",
-		MySlug:  "ceo",
-		Channel: "general",
+		Name:        "already-approved",
+		Title:       "Already Approved",
+		Description: "Run the already-approved workflow.",
+		Content:     "1. Run the already-approved workflow.",
+		Action:      "create",
+		MySlug:      "ceo",
+		Channel:     "general",
 	})
 	if err != nil {
 		t.Fatalf("skill create: %v", err)
@@ -290,12 +291,13 @@ func TestHandleTeamSkillCreateAllowsNonCEOProposal(t *testing.T) {
 	t.Setenv("WUPHF_BROKER_TOKEN", b.Token())
 
 	res, _, err := handleTeamSkillCreate(context.Background(), nil, TeamSkillCreateArgs{
-		Name:    "planner-retro-loop",
-		Title:   "Planner Retro Loop",
-		Content: "1. Collect notes.\n2. Extract action items.",
-		Action:  "propose",
-		MySlug:  "planner",
-		Channel: "general",
+		Name:        "planner-retro-loop",
+		Title:       "Planner Retro Loop",
+		Description: "Run the planner retro loop after every retro.",
+		Content:     "1. Collect notes.\n2. Extract action items.",
+		Action:      "propose",
+		MySlug:      "planner",
+		Channel:     "general",
 	})
 	if err != nil {
 		t.Fatalf("skill propose: %v", err)
