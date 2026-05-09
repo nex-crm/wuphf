@@ -11,9 +11,10 @@ package team
 // Wire compatibility is load-bearing: Lane C's Decision Packet persistence
 // (~/.wuphf/tasks/<id>/decision_packet.json) and the v1.1 native structured
 // output path (response_format / json_schema) both rely on these JSON tags
-// matching the prompt-engineered output the LLM emits. Keep the snake_case
+// matching the prompt-engineered output the LLM emits. Keep the camelCase
 // JSON names in lockstep with the system prompt's example block in
-// broker_intake.go.
+// broker_intake.go. (Standardised on camelCase across the harness wire so
+// the Lane G web UI can consume backend JSON without translation.)
 
 import "time"
 
@@ -31,11 +32,11 @@ import "time"
 // path); v1 intake never populates it on first parse.
 type Spec struct {
 	Problem            string         `json:"problem,omitempty"`
-	TargetOutcome      string         `json:"target_outcome,omitempty"`
-	AcceptanceCriteria []ACItem       `json:"acceptance_criteria,omitempty"`
+	TargetOutcome      string         `json:"targetOutcome,omitempty"`
+	AcceptanceCriteria []ACItem       `json:"acceptanceCriteria,omitempty"`
 	Assignment         string         `json:"assignment,omitempty"`
 	Constraints        []string       `json:"constraints,omitempty"`
-	AutoAssign         string         `json:"auto_assign,omitempty"`
+	AutoAssign         string         `json:"autoAssign,omitempty"`
 	Feedback           []FeedbackItem `json:"feedback,omitempty"`
 }
 
@@ -52,7 +53,7 @@ type ACItem struct {
 // shape is here so Lane C can deserialize a Decision Packet that already
 // carries feedback from a previous changes_requested cycle.
 type FeedbackItem struct {
-	AppendedAt time.Time `json:"appended_at,omitempty"`
+	AppendedAt time.Time `json:"appendedAt,omitempty"`
 	Author     string    `json:"author,omitempty"`
 	Body       string    `json:"body,omitempty"`
 }

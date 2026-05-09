@@ -79,10 +79,15 @@ type Broker struct {
 	lifecycleIndex map[LifecycleState][]string
 	// intakeSpecs maps task ID to the validated Spec persisted by the
 	// synthetic intake agent (broker_intake.go, Lane B). The map is the
-	// in-memory chokepoint for spec writes; Lane C will fold this into
-	// the Decision Packet persistence layer at
-	// ~/.wuphf/tasks/<id>/decision_packet.json. Guarded by b.mu.
-	intakeSpecs             map[string]Spec
+	// in-memory chokepoint for spec writes. Lane C consumes the Spec from
+	// here when promoting it into the Decision Packet on intake → ready.
+	// Guarded by b.mu.
+	intakeSpecs map[string]Spec
+	// decisionPackets holds the per-task in-memory Decision Packet model
+	// (Lane C). Lazily allocated by ensureDecisionPacketStateLocked so
+	// tests that never touch the harness path pay no cost. Guarded by
+	// b.mu via the public mutators in broker_decision_packet.go.
+	decisionPackets *decisionPacketState
 	requests                []humanInterview
 	humanInvites            []humanInvite
 	humanSessions           []humanSession

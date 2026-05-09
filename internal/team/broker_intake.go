@@ -177,26 +177,26 @@ no commentary inside the block. The block must match this schema:
 ` + "```" + `json
 {
   "problem": "1-3 sentence problem statement (required, must be non-empty)",
-  "target_outcome": "observable success condition",
-  "acceptance_criteria": [
+  "targetOutcome": "observable success condition",
+  "acceptanceCriteria": [
     {"statement": "concrete checklist item (required, at least 1)"},
     {"statement": "another checklist item"}
   ],
   "assignment": "one concrete next action (required, must be non-empty)",
   "constraints": ["upfront constraints, deps, scope limits"],
-  "auto_assign": "agent slug if the intent names a clear owner; empty string otherwise"
+  "autoAssign": "agent slug if the intent names a clear owner; empty string otherwise"
 }
 ` + "```" + `
 
-Required fields: problem, acceptance_criteria (>= 1 item), assignment.
-Optional fields: target_outcome, constraints, auto_assign.
+Required fields: problem, acceptanceCriteria (>= 1 item), assignment.
+Optional fields: targetOutcome, constraints, autoAssign.
 
 Hard rules:
   - Do NOT invent acceptance criteria the intent does not justify.
   - Do NOT add a feedback field; that is owned by the reviewer path.
   - Do NOT pre-populate "done" on acceptance criteria; the owner agent flips them.
   - Do NOT echo the intent verbatim into problem; rephrase it tightly.
-  - Use auto_assign only when the intent contains an unambiguous handoff
+  - Use autoAssign only when the intent contains an unambiguous handoff
     target (e.g. the user typed "send to security-review"); otherwise leave
     it empty.
 
@@ -538,11 +538,11 @@ func validateIntakeSpec(spec Spec) error {
 		reasons = append(reasons, fmt.Sprintf("problem exceeds %d bytes (got %d)", intakeFieldSoftCapBytes, len(spec.Problem)))
 	}
 	if len(spec.AcceptanceCriteria) < 1 {
-		reasons = append(reasons, "acceptance_criteria has 0 entries (require >= 1)")
+		reasons = append(reasons, "acceptanceCriteria has 0 entries (require >= 1)")
 	} else {
 		for i, ac := range spec.AcceptanceCriteria {
 			if strings.TrimSpace(ac.Statement) == "" {
-				reasons = append(reasons, fmt.Sprintf("acceptance_criteria[%d].statement is empty", i))
+				reasons = append(reasons, fmt.Sprintf("acceptanceCriteria[%d].statement is empty", i))
 			}
 		}
 	}
