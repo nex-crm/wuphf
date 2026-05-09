@@ -1,13 +1,25 @@
 const path = require("node:path");
 const { app, BrowserWindow, ipcMain } = require("electron");
 const { autoUpdater } = require("electron-updater");
+const packageMetadata = require("../package.json");
 
 autoUpdater.autoDownload = false;
 
 let mainWindow;
 
 function sendUpdateState(state) {
-  mainWindow?.webContents.send("update-state", state);
+  if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed()) {
+    return;
+  }
+
+  mainWindow.webContents.send("update-state", state);
+}
+
+function getInstallerVersion() {
+  return {
+    version: app.getVersion(),
+    channel: process.env.WUPHF_BUILD_CHANNEL || packageMetadata.wuphfBuildChannel || "dev",
+  };
 }
 
 autoUpdater.on("checking-for-update", () => {
@@ -30,6 +42,10 @@ autoUpdater.on("update-downloaded", (info) => {
   sendUpdateState({ state: "downloaded", version: info.version });
 });
 
+autoUpdater.on("update-cancelled", (info) => {
+  sendUpdateState({ state: "cancelled", version: info?.version });
+});
+
 autoUpdater.on("error", (error) => {
   sendUpdateState({ state: "error", message: error.message });
 });
@@ -49,9 +65,14 @@ function createWindow() {
     },
   });
 
+  mainWindow.on("closed", () => {
+    mainWindow = undefined;
+  });
+
   mainWindow.loadFile(path.join(__dirname, "index.html"));
 }
 
+ipcMain.handle("get-installer-version", () => getInstallerVersion());
 ipcMain.handle("check-for-updates", () => autoUpdater.checkForUpdates());
 ipcMain.handle("download-update", () => autoUpdater.downloadUpdate());
 ipcMain.handle("install-update-and-restart", () => autoUpdater.quitAndInstall());

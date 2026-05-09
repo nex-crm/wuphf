@@ -2,7 +2,7 @@
   color-scheme: dark;
   background: #101214;
   color: #f4f6f8;
-  font-family: ui-monospace, "SFMono-Regular", "SF Mono", Consolas, "Liberation Mono", monospace;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", monospace;
 }
 
 * {

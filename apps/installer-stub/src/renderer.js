@@ -1,5 +1,7 @@
 const button = document.querySelector("#check-updates");
 const installButton = document.querySelector("#install-update");
+const installerTitle = document.querySelector("#installer-title");
+const buildChannel = document.querySelector("#build-channel");
 const updateState = document.querySelector("#update-state");
 
 let currentState = "idle";
@@ -17,6 +19,10 @@ function setUpdateState(state) {
       updateState.textContent = `Auto-update: downloading${percent}`;
     } else if (state.state === "downloaded") {
       updateState.textContent = `Auto-update: downloaded v${state.version}; restart required`;
+    } else if (state.state === "cancelled") {
+      updateState.textContent = state.version
+        ? `Auto-update: download cancelled for v${state.version}`
+        : "Auto-update: download cancelled";
     } else if (state.state === "up-to-date") {
       updateState.textContent = "Auto-update: up to date";
     } else if (state.state === "error") {
@@ -28,7 +34,13 @@ function setUpdateState(state) {
 
   if (button) {
     button.disabled = state.state === "checking" || state.state === "downloading";
-    button.textContent = state.state === "available" ? "Download update" : "Check for updates";
+    if (state.state === "available" || state.state === "cancelled") {
+      button.textContent = "Download update";
+    } else if (state.state === "downloaded") {
+      button.textContent = "Restart and install";
+    } else {
+      button.textContent = "Check for updates";
+    }
   }
 
   if (installButton) {
@@ -38,7 +50,12 @@ function setUpdateState(state) {
 
 button?.addEventListener("click", async () => {
   try {
-    if (currentState === "available") {
+    if (currentState === "downloaded") {
+      await window.wuphfUpdater.installUpdateAndRestart();
+      return;
+    }
+
+    if (currentState === "available" || currentState === "cancelled") {
       await window.wuphfUpdater.downloadUpdate();
       return;
     }
@@ -59,3 +76,18 @@ installButton?.addEventListener("click", async () => {
 });
 
 window.wuphfUpdater.onUpdateState(setUpdateState);
+
+window.wuphfUpdater
+  .getInstallerVersion()
+  .then((metadata) => {
+    if (installerTitle) {
+      installerTitle.textContent = `WUPHF installer-stub v${metadata.version}`;
+    }
+
+    if (buildChannel) {
+      buildChannel.textContent = `Channel: ${metadata.channel}`;
+    }
+  })
+  .catch((error) => {
+    setUpdateState({ state: "error", message: error.message });
+  });
