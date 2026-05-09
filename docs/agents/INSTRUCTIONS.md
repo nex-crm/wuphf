@@ -59,6 +59,51 @@ Tool names differ by platform. Use the equivalent available surface, for
 example `query_context` / `nex_ask`, `add_context` / `nex_remember`,
 `scan_files`, or `ingest_context_files`.
 
+### Triangulation through orthogonal sub-agents
+
+Use this pattern for high-stakes design decisions, including security
+boundaries, wire shapes, schema changes, and new public API surfaces.
+
+1. **Don't trust a single agent's review.** Even with a thorough prompt, one
+   agent has one frame.
+2. **Spawn 3-5 sub-agents in parallel**, each with a different lens preamble:
+   security, perf, API, SRE, architecture, types, or distributed systems. Use
+   `bash scripts/dispatch-triangulation.sh`.
+3. **Aggregate their outputs.** Findings that 2+ agents flag independently are
+   high-confidence. Singletons are lower confidence; verify before fixing.
+4. **Direct disagreements** are signals to escalate to human review, not to
+   pick a side.
+5. **Use this pattern especially when:** introducing a new wire shape; changing
+   a security-relevant invariant; designing a new public API; choosing between
+   two architectural approaches.
+
+### Verification agents as sounding boards
+
+Use this pattern when Claude, Codex, or a human has a proposed solution and
+wants to stress-test it before committing.
+
+1. **Run a verification agent** with
+   `bash scripts/dispatch-verification-agent.sh`. Pass the solution, target
+   files, and an optional adversarial lens.
+2. **The verification agent runs in read-only mode.** It cannot edit; it can
+   only find what the solution does not cover.
+3. **Treat its findings as a pre-commit review.** Fix what's real, skip with
+   reason what's not, and defer what's out of scope.
+4. **Use this pattern especially when:** the change is irreversible, such as
+   deleting state or dropping schema; the change is in a security boundary,
+   such as validators, sanitizers, or freeze boundaries; the change is in code
+   with no consumers yet, where downstream would not catch a regression.
+
+### When to use which
+
+| Situation | Pattern |
+|---|---|
+| Initial design of a new surface | Triangulation (orthogonal lenses) |
+| Stress-testing a proposed fix | Verification agent (one adversarial lens) |
+| Post-implementation review | Both — triangulation first, then verification on the synthesis |
+| Routine bug fix | Neither (overkill) |
+| Pre-merge gate | Verification agent + the existing demo + Go reference verifier |
+
 ## Wuphf Agent Instructions
 
 Use this profile for the Wuphf public repo and its worktrees.
