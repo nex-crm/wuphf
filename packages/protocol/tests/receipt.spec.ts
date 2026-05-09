@@ -307,6 +307,37 @@ describe("receipt schema", () => {
     expect(() => asToolCallId("tool:01")).toThrow();
     expect(() => asApprovalId("approval:01")).toThrow();
   });
+
+  it("ExternalWrite: validator rejects result='applied' with null appliedDiff (per-state invariant)", () => {
+    interface ReceiptWire {
+      writes: Array<Record<string, unknown>>;
+    }
+    const json = receiptToJson(validReceiptFixture());
+    const parsed = JSON.parse(json) as ReceiptWire;
+    const firstWrite = parsed.writes[0];
+    if (!firstWrite) throw new Error("fixture must contain a write");
+    parsed.writes[0] = { ...firstWrite, appliedDiff: null };
+    const tampered = JSON.parse(receiptToJson(validReceiptFixture())) as ReceiptWire;
+    tampered.writes[0] = parsed.writes[0];
+    // Codec-level: throws with a clear message.
+    expect(() => receiptFromJson(JSON.stringify(tampered))).toThrow(
+      /appliedDiff.*null is invalid for state "applied"/,
+    );
+  });
+
+  it("ExternalWrite: validator rejects result='rejected' with non-null postWriteVerify", () => {
+    interface ReceiptWire {
+      writes: Array<Record<string, unknown>>;
+    }
+    const tampered = JSON.parse(receiptToJson(validReceiptFixture())) as ReceiptWire;
+    const firstWrite = tampered.writes[0];
+    if (!firstWrite) throw new Error("fixture must contain a write");
+    // Switch result to rejected but leave postWriteVerify populated → invalid.
+    tampered.writes[0] = { ...firstWrite, result: "rejected", appliedDiff: null };
+    expect(() => receiptFromJson(JSON.stringify(tampered))).toThrow(
+      /postWriteVerify.*must be null for state "rejected"/,
+    );
+  });
 });
 
 function nonNull<T>(value: T | null | undefined): T {

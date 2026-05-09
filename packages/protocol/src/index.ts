@@ -48,8 +48,16 @@ export type {
 } from "./ipc.ts";
 export {
   ALLOWED_LOOPBACK_HOSTS,
+  asApiToken,
+  asBrokerPort,
+  asKeychainHandleId,
+  asRequestId,
   isAllowedLoopbackHost,
+  isApiToken,
+  isBrokerPort,
+  isKeychainHandleId,
   isLoopbackRemoteAddress,
+  isRequestId,
 } from "./ipc.ts";
 export type {
   AgentSlug,
@@ -57,6 +65,11 @@ export type {
   ApprovalId,
   CommitRef,
   ExternalWrite,
+  ExternalWriteApplied,
+  ExternalWriteCommon,
+  ExternalWritePartial,
+  ExternalWriteRejected,
+  ExternalWriteRollback,
   FileChange,
   MemoryWriteRef,
   ProviderKind,
@@ -88,6 +101,7 @@ export {
   isReceiptSnapshot,
   isTaskId,
   isToolCallId,
+  PROVIDER_KIND_VALUES,
   receiptFromJson,
   receiptToJson,
   validateReceipt,

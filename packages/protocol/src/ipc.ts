@@ -23,6 +23,66 @@ export type ApiToken = Brand<string, "ApiToken">;
 export type RequestId = Brand<string, "RequestId">;
 export type KeychainHandleId = Brand<string, "KeychainHandleId">;
 
+// ---------- IPC brand constructors ----------
+//
+// The brand types are zero-overhead at runtime — they exist to prevent
+// accidental string/number substitution at the API boundary (e.g. passing a
+// plain number into a function that expects a BrokerPort, or feeding an
+// arbitrary string into a credential-handle slot). Each constructor carries
+// the same validation rules the broker enforces on the wire so that the only
+// way to materialize a branded value is to pass through these checks.
+
+const API_TOKEN_RE = /^[A-Za-z0-9._~+/-]{16,512}$/;
+const REQUEST_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+const KEYCHAIN_HANDLE_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+
+export function asBrokerPort(n: number): BrokerPort {
+  if (!Number.isInteger(n) || n < 1 || n > 65535) {
+    throw new Error(`asBrokerPort: expected integer in 1..65535, got ${n}`);
+  }
+  return n as BrokerPort;
+}
+
+export function isBrokerPort(value: unknown): value is BrokerPort {
+  return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 65535;
+}
+
+export function asApiToken(s: string): ApiToken {
+  // Bearer token shape: URL-safe characters, length-bounded so log/header
+  // truncation behaviour is predictable. The broker generates these with
+  // crypto.randomBytes -> base64url, so the regex is conservative-permissive.
+  if (!API_TOKEN_RE.test(s)) {
+    throw new Error("asApiToken: not a valid API token shape");
+  }
+  return s as ApiToken;
+}
+
+export function isApiToken(value: unknown): value is ApiToken {
+  return typeof value === "string" && API_TOKEN_RE.test(value);
+}
+
+export function asRequestId(s: string): RequestId {
+  if (!REQUEST_ID_RE.test(s)) {
+    throw new Error("asRequestId: not a valid RequestId shape");
+  }
+  return s as RequestId;
+}
+
+export function isRequestId(value: unknown): value is RequestId {
+  return typeof value === "string" && REQUEST_ID_RE.test(value);
+}
+
+export function asKeychainHandleId(s: string): KeychainHandleId {
+  if (!KEYCHAIN_HANDLE_RE.test(s)) {
+    throw new Error("asKeychainHandleId: not a valid KeychainHandleId shape");
+  }
+  return s as KeychainHandleId;
+}
+
+export function isKeychainHandleId(value: unknown): value is KeychainHandleId {
+  return typeof value === "string" && KEYCHAIN_HANDLE_RE.test(value);
+}
+
 // ---------- Channel 1: contextBridge OS verbs ----------
 
 export interface OsVerbsApi {
