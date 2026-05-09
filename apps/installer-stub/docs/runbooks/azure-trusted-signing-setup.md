@@ -76,6 +76,11 @@ trailing slash.
 A region/endpoint mismatch commonly appears as `403 Forbidden` or an internal
 `SignerSign()` failure during signing.
 
+When Azure adds or removes regions, copy the exact `Endpoint URI value` from the
+Microsoft signing integrations table. Do not derive the hostname from the Azure
+location name and do not add a trailing slash unless Microsoft's table starts
+including one.
+
 ## Provisioning
 
 1. Create or select the resource group for release signing.
