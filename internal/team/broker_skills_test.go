@@ -451,22 +451,19 @@ func brokerWithWiki(t *testing.T) (*Broker, func()) {
 	}
 }
 
-// waitForSkillFile polls for the on-disk SKILL.md path until it appears or
-// the deadline elapses. The wiki worker commits asynchronously, so a tight
-// stat() right after handlePostSkill returns can race the commit.
-func waitForSkillFile(t *testing.T, b *Broker, slug string) string {
+// skillFilePath asserts that the on-disk SKILL.md for slug exists and
+// returns its absolute path. WikiWorker.Enqueue is synchronous (blocks on
+// its reply channel until the commit lands), so handlePostSkill / the
+// backfill helpers return only after the file is on disk — no polling
+// required.
+func skillFilePath(t *testing.T, b *Broker, slug string) string {
 	t.Helper()
 	root := b.wikiWorker.Repo().Root()
 	path := filepath.Join(root, "team", "skills", slug+".md")
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if _, err := os.Stat(path); err == nil {
-			return path
-		}
-		time.Sleep(20 * time.Millisecond)
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("SKILL.md missing on disk: %v (path=%s)", err, path)
 	}
-	t.Fatalf("SKILL.md never landed on disk: %s", path)
-	return ""
+	return path
 }
 
 // TestHandlePostSkill_WritesWikiFile is the regression guard for the
@@ -494,7 +491,7 @@ func TestHandlePostSkill_WritesWikiFile(t *testing.T) {
 		t.Fatalf("handlePostSkill: expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 
-	path := waitForSkillFile(t, b, "flake-quarantine")
+	path := skillFilePath(t, b, "flake-quarantine")
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read SKILL.md: %v", err)
@@ -542,7 +539,7 @@ func TestHandlePostSkill_ProposeWritesWikiFile(t *testing.T) {
 		t.Fatalf("handlePostSkill: expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 
-	waitForSkillFile(t, b, "propose-skill")
+	skillFilePath(t, b, "propose-skill")
 }
 
 // TestBackfillSkillFilesFromState_WritesMissingFiles covers the boot path
@@ -589,15 +586,11 @@ func TestBackfillSkillFilesFromState_WritesMissingFiles(t *testing.T) {
 		t.Fatalf("precondition: SKILL.md should be missing, got %v", err)
 	}
 
+	// backfillSkillFilesFromState calls WikiWorker.Enqueue synchronously per
+	// missing skill, so by the time it returns every backfilled SKILL.md is
+	// on disk. No polling needed.
 	b.backfillSkillFilesFromState(context.Background())
 
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if _, err := os.Stat(activePath); err == nil {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
 	if _, err := os.Stat(activePath); err != nil {
 		t.Fatalf("backfill did not create active SKILL.md: %v", err)
 	}
@@ -628,7 +621,7 @@ func TestBackfillSkillFilesFromState_PreservesExistingFile(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("handlePostSkill: expected 200, got %d", rec.Code)
 	}
-	path := waitForSkillFile(t, b, "already-on-disk")
+	path := skillFilePath(t, b, "already-on-disk")
 	originalInfo, err := os.Stat(path)
 	if err != nil {
 		t.Fatalf("stat: %v", err)
