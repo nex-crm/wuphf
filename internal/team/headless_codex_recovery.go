@@ -21,8 +21,8 @@ func taskHasDurableCompletionState(task *teamTask) bool {
 	if task == nil {
 		return false
 	}
-	status := strings.ToLower(strings.TrimSpace(task.Status))
-	review := strings.ToLower(strings.TrimSpace(task.ReviewState))
+	status := strings.ToLower(strings.TrimSpace(task.status))
+	review := strings.ToLower(strings.TrimSpace(task.reviewState))
 	switch status {
 	case "done", "completed", "blocked", "cancelled", "canceled", "review":
 		return true
@@ -53,18 +53,18 @@ func (l *Launcher) headlessTurnCompletedDurably(slug string, active *headlessCod
 	if task != nil && requiresExternalExecution {
 		executed, attempted := l.taskHasExternalWorkflowEvidenceSince(task, active.StartedAt)
 		if taskHasDurableCompletionState(task) {
-			status := strings.ToLower(strings.TrimSpace(task.Status))
+			status := strings.ToLower(strings.TrimSpace(task.status))
 			switch status {
 			case "done", "completed", "review":
 				if executed {
 					return true, ""
 				}
-				return false, fmt.Sprintf("external-action turn for #%s marked %s/%s without recorded external execution evidence", task.ID, strings.TrimSpace(task.Status), strings.TrimSpace(task.ReviewState))
+				return false, fmt.Sprintf("external-action turn for #%s marked %s/%s without recorded external execution evidence", task.ID, strings.TrimSpace(task.status), strings.TrimSpace(task.reviewState))
 			case "blocked", "cancelled", "canceled":
 				if attempted {
 					return true, ""
 				}
-				return false, fmt.Sprintf("external-action turn for #%s moved to %s without recorded external workflow evidence", task.ID, strings.TrimSpace(task.Status))
+				return false, fmt.Sprintf("external-action turn for #%s moved to %s without recorded external workflow evidence", task.ID, strings.TrimSpace(task.status))
 			default:
 				if executed {
 					return true, ""
@@ -85,7 +85,7 @@ func (l *Launcher) headlessTurnCompletedDurably(slug string, active *headlessCod
 		current := headlessCodexWorkspaceStatusSnapshot(workspaceDir)
 		if strings.TrimSpace(active.WorkspaceSnapshot) != "" && current != active.WorkspaceSnapshot {
 			if task != nil {
-				return false, fmt.Sprintf("coding turn for #%s changed workspace %s but left task %s/%s without durable completion evidence", task.ID, workspaceDir, strings.TrimSpace(task.Status), strings.TrimSpace(task.ReviewState))
+				return false, fmt.Sprintf("coding turn for #%s changed workspace %s but left task %s/%s without durable completion evidence", task.ID, workspaceDir, strings.TrimSpace(task.status), strings.TrimSpace(task.reviewState))
 			}
 			return false, fmt.Sprintf("coding turn changed workspace %s without durable completion evidence", workspaceDir)
 		}
@@ -407,8 +407,8 @@ func (l *Launcher) timedOutTurnAlreadyRecovered(task *teamTask, slug string, sta
 		return false
 	}
 	if strings.EqualFold(strings.TrimSpace(task.ExecutionMode), "local_worktree") {
-		status := strings.ToLower(strings.TrimSpace(task.Status))
-		review := strings.ToLower(strings.TrimSpace(task.ReviewState))
+		status := strings.ToLower(strings.TrimSpace(task.status))
+		review := strings.ToLower(strings.TrimSpace(task.reviewState))
 		// Include canceled / cancelled so a user-canceled task isn't
 		// requeued or blocked-again by the timeout recovery path.
 		// Same semantics as a "done" or "blocked" terminal state for

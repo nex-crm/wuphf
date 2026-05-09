@@ -633,7 +633,7 @@ func (b *Broker) createSkillRunTaskLocked(sk *teamSkill, channel, invoker, now s
 		Title:         taskTitle,
 		Details:       details,
 		Owner:         owner,
-		Status:        "in_progress",
+		status:        "in_progress",
 		CreatedBy:     invoker,
 		TaskType:      "skill_run",
 		PipelineID:    "skill_invocation",

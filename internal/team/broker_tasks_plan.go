@@ -104,7 +104,7 @@ func (b *Broker) handleTaskPlan(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, "failed to manage task worktree", http.StatusInternalServerError)
 				return
 			}
-			b.appendActionLocked("task_updated", "office", taskChannel, createdBy, truncateSummary(existing.Title+" ["+existing.Status+"]", 140), existing.ID)
+			b.appendActionLocked("task_updated", "office", taskChannel, createdBy, truncateSummary(existing.Title+" ["+existing.status+"]", 140), existing.ID)
 			created = append(created, *existing)
 			continue
 		}
@@ -119,7 +119,7 @@ func (b *Broker) handleTaskPlan(w http.ResponseWriter, r *http.Request) {
 			Title:         strings.TrimSpace(item.Title),
 			Details:       strings.TrimSpace(item.Details),
 			Owner:         strings.TrimSpace(item.Assignee),
-			Status:        "open",
+			status:        "open",
 			CreatedBy:     createdBy,
 			TaskType:      strings.TrimSpace(item.TaskType),
 			ExecutionMode: strings.TrimSpace(item.ExecutionMode),
@@ -177,15 +177,15 @@ func (b *Broker) refreshPlannedTaskBlockStateLocked(task *teamTask) {
 		return
 	}
 	if len(task.DependsOn) > 0 && b.hasUnresolvedDepsLocked(task) {
-		task.Blocked = true
-		task.Status = "open"
+		task.blocked = true
+		task.status = "open"
 		return
 	}
-	task.Blocked = false
+	task.blocked = false
 	if strings.TrimSpace(task.Owner) != "" {
-		task.Status = "in_progress"
-	} else if strings.EqualFold(strings.TrimSpace(task.Status), "blocked") {
-		task.Status = "open"
+		task.status = "in_progress"
+	} else if strings.EqualFold(strings.TrimSpace(task.status), "blocked") {
+		task.status = "open"
 	}
 }
 
@@ -232,8 +232,8 @@ func (b *Broker) EnsurePlannedTask(input plannedTaskInput) (teamTask, bool, erro
 		if existing.ExecutionMode == "" && strings.TrimSpace(input.ExecutionMode) != "" {
 			existing.ExecutionMode = strings.TrimSpace(input.ExecutionMode)
 		}
-		if existing.ReviewState == "" && strings.TrimSpace(input.ReviewState) != "" {
-			existing.ReviewState = strings.TrimSpace(input.ReviewState)
+		if existing.reviewState == "" && strings.TrimSpace(input.ReviewState) != "" {
+			existing.reviewState = strings.TrimSpace(input.ReviewState)
 		}
 		if existing.SourceSignalID == "" && strings.TrimSpace(input.SourceSignalID) != "" {
 			existing.SourceSignalID = strings.TrimSpace(input.SourceSignalID)
@@ -272,13 +272,13 @@ func (b *Broker) EnsurePlannedTask(input plannedTaskInput) (teamTask, bool, erro
 		Title:            title,
 		Details:          strings.TrimSpace(input.Details),
 		Owner:            strings.TrimSpace(input.Owner),
-		Status:           "open",
+		status:           "open",
 		CreatedBy:        strings.TrimSpace(input.CreatedBy),
 		ThreadID:         strings.TrimSpace(input.ThreadID),
 		TaskType:         strings.TrimSpace(input.TaskType),
 		PipelineID:       strings.TrimSpace(input.PipelineID),
 		ExecutionMode:    strings.TrimSpace(input.ExecutionMode),
-		ReviewState:      strings.TrimSpace(input.ReviewState),
+		reviewState:      strings.TrimSpace(input.ReviewState),
 		SourceSignalID:   strings.TrimSpace(input.SourceSignalID),
 		SourceDecisionID: strings.TrimSpace(input.SourceDecisionID),
 		DependsOn:        append([]string(nil), input.DependsOn...),

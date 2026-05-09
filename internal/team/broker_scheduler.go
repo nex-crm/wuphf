@@ -232,7 +232,7 @@ func (b *Broker) scheduleTaskLifecycleLocked(task *teamTask) {
 	recheckMinutes := config.ResolveTaskRecheckInterval()
 	reminderMinutes := config.ResolveTaskReminderInterval()
 	now := time.Now().UTC()
-	if strings.EqualFold(task.Status, "done") || strings.EqualFold(task.Status, "canceled") || strings.EqualFold(task.Status, "cancelled") {
+	if strings.EqualFold(task.status, "done") || strings.EqualFold(task.status, "canceled") || strings.EqualFold(task.status, "cancelled") {
 		task.FollowUpAt = ""
 		task.ReminderAt = ""
 		task.RecheckAt = ""
@@ -246,7 +246,7 @@ func (b *Broker) scheduleTaskLifecycleLocked(task *teamTask) {
 	// and "recheck", so without this scheduleJobLocked won't find the old
 	// entry to update — it stays around and keeps firing across active-state
 	// transitions like queued → in_progress → blocked.
-	switch strings.ToLower(strings.TrimSpace(task.Status)) {
+	switch strings.ToLower(strings.TrimSpace(task.status)) {
 	case "in_progress":
 		b.cancelSupersededTaskJobsLocked(task.ID, taskChannel, "task_follow_up")
 		due := now.Add(time.Duration(followUpMinutes) * time.Minute)

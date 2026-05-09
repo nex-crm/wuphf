@@ -632,7 +632,7 @@ func blankSlateOfficeTasksFromBlueprint(blueprint operations.Blueprint) []teamTa
 			Title:     strings.TrimSpace(starter.Title),
 			Details:   strings.TrimSpace(starter.Details),
 			Owner:     owner,
-			Status:    "open",
+			status:    "open",
 			CreatedBy: "wuphf",
 			CreatedAt: now,
 			UpdatedAt: now,
