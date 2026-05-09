@@ -2845,6 +2845,11 @@ html[data-theme="nex"]
   border-radius: var(--radius-md);
   background: var(--bg-card);
   overflow: hidden;
+  /* Keep each accordion at its natural height so a tall sibling (e.g. the
+     live stream log) can't squeeze headers and bodies in a flex column.
+     The pane itself scrolls when total content exceeds the viewport. */
+  flex-shrink: 0;
+  min-width: 0;
 }
 
 .collapsible-section-header {
@@ -2881,6 +2886,9 @@ html[data-theme="nex"]
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .collapsible-section-meta {
@@ -2951,7 +2959,10 @@ html[data-theme="nex"]
   flex-direction: column;
   border-top: 1px solid var(--border);
   background: var(--bg-card);
-  max-height: 38vh;
+  /* Cap collapsed-drawer height so the workbench above keeps usable space.
+     When an InterviewBar is open the body content can exceed this — it then
+     scrolls internally instead of clipping the composer. */
+  max-height: 50vh;
   transition: max-height 0.18s ease-out;
 }
 
@@ -3003,6 +3014,10 @@ html[data-theme="nex"]
   flex-direction: column;
   min-height: 0;
   flex: 1;
+  /* When the body's combined content (preview + typing + interview + composer)
+     is taller than the drawer cap, scroll within the drawer instead of clipping
+     the composer at the bottom. */
+  overflow-y: auto;
 }
 
 .dm-chat-messages {
@@ -3027,7 +3042,7 @@ html[data-theme="nex"]
 
 @media (max-width: 768px) {
   .dm-chat-drawer {
-    max-height: 50vh;
+    max-height: 60vh;
   }
   .dm-chat-drawer.is-expanded {
     max-height: 92vh;

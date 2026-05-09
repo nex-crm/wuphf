@@ -521,20 +521,21 @@
 
 /* The shared `.agent-stream-log` caps height at 300px for the right-rail
    AgentPanel. Inside the workbench the section has the whole pane to
-   stretch into, so we override and let the log fill the available space
-   (with a sensible floor so an empty stream still shows a meaningful
-   panel). */
+   stretch into, so we let the log claim a healthy chunk while staying
+   adaptive: a fixed 320px height was forcing sibling accordions to clip
+   their headers on short viewports (e.g. when the chat drawer's
+   InterviewBar is open). Letting it shrink to a sensible floor keeps
+   every accordion's title visible and lets the pane scroll naturally. */
 .agent-workbench-stream {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  min-height: 240px;
+  min-height: 200px;
 }
 .agent-workbench-stream-log {
   flex: 1;
-  max-height: none;
-  min-height: 220px;
-  height: 320px;
+  min-height: 160px;
+  max-height: 320px;
 }
 
 /* ─── Agent Profile Panel ─── */
@@ -784,6 +785,6 @@
   }
 
   .agent-workbench-stream-log {
-    height: 260px;
+    max-height: 260px;
   }
 }
