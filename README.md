@@ -91,7 +91,7 @@ if I say yes. If I am not logged in, just open https://wuphf.team.
 
 | Flag | What it does |
 |------|-------------|
-| `--memory-backend <name>` | Pick the organizational memory backend (`markdown`, `nex`, `gbrain`, `none`) |
+| `--memory-backend <name>` | Override the built-in markdown wiki (`nex`, `gbrain`, `none`) — legacy installs only |
 | `--no-nex` | Skip the Nex backend (no context graph, no Nex-managed integrations) |
 | `--legacy-tui` | Use the legacy tmux TUI instead of the web UI |
 | `--no-open` | Don't auto-open the browser |
@@ -101,6 +101,7 @@ if I say yes. If I am not logged in, just open https://wuphf.team.
 | `--collab` | Start in collaborative mode — all agents see all messages (this is the default) |
 | `--unsafe` | Bypass agent permission checks (local dev only) |
 | `--web-port <n>` | Change the web UI port (default 7891) |
+| `--workspace <name>` | Use a specific workspace for one command (does not change the active workspace) |
 
 `--legacy-tui` is deprecated, slated for removal, and retained only while the desktop replacement lands.
 
@@ -124,58 +125,62 @@ wuphf --provider ollama --memory-backend none --no-open
 
 ## Memory: Notebooks and the Wiki
 
-Every agent gets its own **notebook**. The team shares a **wiki**. New installs get the wiki as a local git repo of markdown articles — file-over-app, readable, `git clone`-able. Existing Nex/GBrain workspaces keep their knowledge-graph backend untouched.
+WUPHF ships with built-in memory. No backend choice, no API key, no setup step in the wizard. Every agent gets its own **notebook**, and the team shares a **wiki** — a local git repo of markdown articles at `~/.wuphf/wiki/`. `cat`, `grep`, `git log`, and `git clone` all work.
 
 **The promotion flow:**
 
-1. Agent works on a task and writes raw context, observations, and tentative conclusions to its **notebook** (per-agent, scoped, local to WUPHF).
+1. An agent works on a task and writes raw context, observations, and tentative conclusions to its **notebook** (per-agent, scoped, local to WUPHF).
 2. When something in the notebook looks durable (a recurring playbook, a verified entity fact, a confirmed preference), the agent gets a promotion hint.
-3. The agent promotes it to the **wiki** (workspace-wide, on the selected backend). Now every other agent can query it.
+3. The agent promotes it to the **wiki**. Now every other agent can query it.
 4. The wiki points other agents at whoever last recorded the context, so they know who to @mention for fresher working detail.
 
 Nothing is promoted automatically. Agents decide what graduates from notebook to wiki.
 
-**Backends for the wiki:**
+The wiki is not just a markdown folder. It is a living knowledge graph: typed facts with triplets, per-entity append-only fact logs, LLM-synthesized briefs committed under the `archivist` identity, `/lookup` cited-answer retrieval, and a `/lint` suite that flags contradictions, orphans, stale claims, and broken cross-references. The web UI gives you a Wikipedia-style reading view, a rich editor with WUPHF-specific inserts, and an AI-assisted maintenance assistant. See [DESIGN-WIKI.md](DESIGN-WIKI.md) for the reading view and [docs/specs/WIKI-SCHEMA.md](docs/specs/WIKI-SCHEMA.md) for the operational contract.
 
-- `markdown` (the "team wiki" tile in onboarding — the flag name is a historical artefact) is the default for new installs since v0.0.6. It is not just a markdown folder. It is a living knowledge graph: typed facts with triplets, per-entity append-only fact logs, LLM-synthesized briefs committed under the `archivist` identity, `/lookup` cited-answer retrieval, and a `/lint` suite that flags contradictions, orphans, stale claims, and broken cross-references. Everything lives as a local git repo at `~/.wuphf/wiki/` — `cat`, `grep`, `git log`, `git clone`, all work. No API key required.
-- `nex` was the previous default. Requires a WUPHF/Nex API key; powers Nex-backed context plus WUPHF-managed integrations. Existing users stay on `nex` via persisted config — no forced migration.
-- `gbrain` mounts `gbrain serve` as the wiki backend. It requires an API key during `/init`: `OpenAI` gives you the full path with embeddings and vector search, while `Anthropic` alone is reduced mode.
-- `none` disables the shared wiki entirely. Notebooks still work locally.
+**Onboarding seeds the wiki for you.** The wizard optionally scans your website and any files you point it at, then writes a starter set of company-context articles (about, owner, products) before the first agent turn fires. Your team starts already knowing who you are and what you ship.
 
-**Internal naming (for code spelunkers):** the notebook is `private` memory, the wiki is `shared` memory. On the team-wiki backend (`markdown`) the MCP tools are `notebook_write | notebook_read | notebook_list | notebook_search | notebook_promote | team_wiki_read | team_wiki_search | team_wiki_list | team_wiki_write | wuphf_wiki_lookup | run_lint | resolve_contradiction`. On `nex`/`gbrain` the MCP tools are the legacy `team_memory_query | team_memory_write | team_memory_promote`. The two tool sets never coexist on one server instance — backend selection flips the surface. See `DESIGN-WIKI.md` for the reading view and `docs/specs/WIKI-SCHEMA.md` for the operational contract.
-
-Examples:
+**Legacy backends.** Existing installs on Nex or GBrain keep working — backend selection is sticky in `config.json` and there is no forced migration. The CLI flag stays available for power users and for moving off legacy backends:
 
 ```bash
-wuphf --memory-backend markdown   # new default
-wuphf --memory-backend nex
-wuphf --memory-backend gbrain
-wuphf --memory-backend none
+wuphf --memory-backend nex      # hosted Nex graph + WUPHF-managed integrations
+wuphf --memory-backend gbrain   # local Postgres-backed graph
+wuphf --memory-backend none     # no shared wiki; notebooks still work
 ```
 
-When you select `gbrain`, onboarding asks for an OpenAI or Anthropic key up front and explains the tradeoff. If you want embeddings and vector search, use OpenAI.
+The web wizard no longer surfaces this as a choice. Markdown is the default and the only path for fresh installs.
+
+**Internal naming (for code spelunkers):** the notebook is `private` memory, the wiki is `shared` memory. On the built-in markdown backend the MCP tools are `notebook_write | notebook_read | notebook_list | notebook_search | notebook_promote | team_wiki_read | team_wiki_search | team_wiki_list | team_wiki_write | wuphf_wiki_lookup | run_lint | resolve_contradiction`. On `nex`/`gbrain` the MCP tools are the legacy `team_memory_query | team_memory_write | team_memory_promote`. The two tool sets never coexist on one server instance — backend selection flips the surface.
 
 ## Other Commands
 
 The examples below assume `wuphf` is on your `PATH`. If you just built the binary and haven't moved it, prefix with `./` (as in Get Started above) or run `go install ./cmd/wuphf` to drop it in `$GOPATH/bin`.
 
 ```bash
-wuphf init          # First-time setup
-wuphf share         # Invite one team member over Tailscale/WireGuard
-wuphf shred         # Delete workspace state and reopen onboarding
-wuphf --1o1         # 1:1 with the CEO
-wuphf --1o1 cro     # 1:1 with a specific agent
+wuphf init                    # First-time setup
+wuphf share                   # Invite one team member over Tailscale/WireGuard
+wuphf shred                   # Delete workspace state and reopen onboarding
+wuphf workspace list          # Run multiple isolated offices side by side
+wuphf workspace switch <name> # Flip the active workspace
+wuphf --1o1                   # 1:1 with the CEO
+wuphf --1o1 cro               # 1:1 with a specific agent
 ```
 
 ## Share With a Team Member
 
-Prerequisite: both machines are on the same Tailscale or WireGuard network.
+Two ways to invite a teammate. Pick the one that fits your network.
+
+**Private network — Tailscale or WireGuard.** Both machines on the same private mesh. The invite never leaves the network and no public interface is exposed:
 
 ```bash
 wuphf share
 ```
 
-Send the printed `/join` URL to one team member. The invite is one use, expires after 24 hours, and the shared web listener only starts on a private-network address by default. Public interfaces are blocked unless you pass an explicit unsafe override.
+Or click "Create invite" on the Health Check tile inside the office to mint one without leaving the browser. Send the printed `/join` URL to your teammate. The invite is one use, expires after 24 hours, and the shared web listener only binds to a private-network address by default.
+
+**Public tunnel — no shared network needed.** Click "Start tunnel" on the Health Check tile and WUPHF spins up a Cloudflare quick tunnel. The trycloudflare URL is paired with a 6-digit passcode the joiner has to type before they can land in the office; the join handler is rate-limited per source IP so a leaked URL alone cannot be brute-forced. `cloudflared` is bundled with the npm install (verified against a pinned SHA256 per platform) so the button works on first launch with zero extra setup.
+
+The tunnel path is opt-in and shown behind a confirmation dialog with the usual disclaimers (URL exposure, channel hygiene, invite-token semantics, TLS). Public LAN binds on the network-share path remain blocked unless you pass `--unsafe-lan`.
 
 For the full walkthrough, see [Share WUPHF With a Team Member](docs/tutorials/share-with-team-member.md).
 
@@ -257,7 +262,7 @@ Connects SaaS accounts (Gmail, Slack, etc.) through Composio's hosted OAuth flow
 | Live visibility | Stdout streaming |
 | Mid-task steering | DM any agent, no restart |
 | Runtimes | Mix Claude Code, Codex, and OpenClaw in one channel |
-| Memory | Per-agent notebook + shared workspace wiki (knowledge graphs on GBrain or Nex) |
+| Memory | Per-agent notebook + shared workspace wiki, git-native markdown by default (no API key needed) |
 | Price | Free and open source (MIT, self-hosted, your API keys) |
 
 ## Benchmark
@@ -312,7 +317,13 @@ Every claim in this README, grounded to the code that makes it true.
 | Prebuilt binary via goreleaser | 🟡 config ready | `.goreleaser.yml` — tags pending |
 | Resume in-flight work on restart | ✅ shipped v0.0.2.0 | see `CHANGELOG.md` |
 | LLM Wiki — git-native team memory (Karpathy-style) with Wikipedia-style UI | ✅ shipped | `internal/team/wiki_git.go`, `internal/team/wiki_worker.go`, `web/src/components/wiki/`, `DESIGN-WIKI.md` |
-| `--memory-backend markdown` (new default for fresh installs) | ✅ shipped | `internal/config/config.go` (`MemoryBackendMarkdown`) |
+| Markdown wiki is the default for fresh installs (web wizard hides the choice) | ✅ shipped | `internal/config/config.go` (`MemoryBackendMarkdown`), `web/src/components/onboarding/Wizard.tsx` |
+| Multi-workspace — run isolated offices side by side, pause/resume per workspace | ✅ shipped | `cmd/wuphf/workspace.go`, `internal/workspaces/` |
+| Public-tunnel invite via bundled `cloudflared` (passcode + rate limit) | ✅ shipped | `cmd/wuphf/tunnel.go`, `cmd/wuphf/share_join_guard.go`, `npm/scripts/cloudflared.json` |
+| Onboarding wizard with company-context scan (website + files → wiki seed) | ✅ shipped | `web/src/components/onboarding/`, `internal/operations/company_seed.go`, `internal/team/broker_company_seed.go` |
+| Live agent event pills + Tier-2 hover peek on the office rail | ✅ shipped | `web/src/components/sidebar/AgentEventPill.tsx`, `internal/team/headless_activity_classifier.go` |
+| Wiki rich editor + AI-assisted maintenance assistant | ✅ shipped | `web/src/components/wiki/editor/`, wiki maintenance MCP tools |
+| Skills publish/install across public hubs (Anthropic, LobeHub, GitHub) | ✅ shipped | `cmd/wuphf/skills_publish.go` |
 
 Legend: ✅ shipped · 🟡 partial · 🔜 planned. If a claim and a status disagree, the code wins — file an issue.
 

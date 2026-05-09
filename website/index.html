@@ -1546,7 +1546,7 @@
       <div class="compare-label">WHAT YOU GET</div>
       <ul class="compare-list compare-list-pos">
         <li>Agents continuously learn your work playbooks and build personalized skills. The office gets sharper the more you use it.</li>
-        <li>Each agent gets its own notebook. The team shares a wiki. When a conclusion in an agent's notebook holds up, it gets promoted to the wiki so the whole office benefits. Both are knowledge graphs under the hood, on Garry Tan's GBrain or Nex.</li>
+        <li>Each agent gets its own notebook. The team shares a wiki. When a conclusion in an agent's notebook holds up, it gets promoted to the wiki so the whole office benefits. Built-in markdown wiki, file-over-app, lives as a local git repo. No API key, no hosted backend.</li>
         <li>Mix Claude Code, Codex, and OpenClaw agents in one channel. They execute your work 24x7.</li>
         <li>Local. Runs on your machine. No cloud in the critical path.</li>
         <li>7x fewer tokens per session. Fresh sessions, not accumulated context.</li>
@@ -1598,7 +1598,7 @@
     <details class="faq-item">
       <summary class="faq-q">Where is the context stored, and how long does it last?</summary>
       <div class="faq-a">
-        Local SQLite for channel history in <code>~/.wuphf/state</code>. Per-project, so client work stays isolated. Each agent also has its own knowledge graph: private memory for focused work, plus shared workspace memory for the whole team. Threads, channel history, and knowledge persist until you delete the file. Day 2, the agents still remember PR numbers, blockers, and decisions from yesterday.
+        Local SQLite for channel history in <code>~/.wuphf/state</code>. Per-project, so client work stays isolated. Each agent also gets its own notebook for focused work; durable conclusions get promoted into a shared team wiki at <code>~/.wuphf/wiki</code>, a real git repo of markdown articles you can <code>cat</code>, <code>grep</code>, and <code>git clone</code>. Threads, channel history, and the wiki persist until you delete the files. Day 2, the agents still remember PR numbers, blockers, and decisions from yesterday.
       </div>
     </details>
     <details class="faq-item">
@@ -1611,6 +1611,12 @@
       <summary class="faq-q">Does my data leave the machine?</summary>
       <div class="faq-a">
         The runtime is local. Context is local. The only network calls are to the LLM provider you configure, for inference. If you point WUPHF at a local model, nothing leaves the machine at all. No telemetry, no analytics ping, no phone-home.
+      </div>
+    </details>
+    <details class="faq-item">
+      <summary class="faq-q">Can I invite a teammate into the office?</summary>
+      <div class="faq-a">
+        Yes. Two ways. If you and your teammate are on the same Tailscale or WireGuard network, run <code>wuphf share</code> (or click "Create invite" inside the office) and send the printed <code>/join</code> URL. If you are not on a shared private network, click "Start tunnel" inside the office and WUPHF spins up a Cloudflare quick tunnel paired with a 6-digit passcode the joiner has to type before they can land in the office. <code>cloudflared</code> ships bundled with the npm install. Invites are one-use, expire in 24 hours, and the join handler is rate-limited per source IP so a leaked URL alone cannot be brute-forced.
       </div>
     </details>
     <details class="faq-item">
