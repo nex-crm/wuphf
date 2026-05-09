@@ -31,8 +31,8 @@ Auto-update: idle
 
 ```bash
 # In CI, on every PR push (no secrets needed)
-WUPHF_RELEASE_MODE=pr cd apps/installer-stub && bun run check:secrets
-WUPHF_RELEASE_MODE=pr cd apps/installer-stub && bun run build:dry-run
+cd apps/installer-stub && WUPHF_RELEASE_MODE=pr bun run check:secrets
+cd apps/installer-stub && WUPHF_RELEASE_MODE=pr bun run build:dry-run
 
 # In CI, on a tag push (matrix: macos-14 / windows-2022 / ubuntu-24.04)
 # Triggered by tags matching `v[0-9]+.*-rewrite`
@@ -51,10 +51,13 @@ WUPHF_RELEASE_MODE=pr cd apps/installer-stub && bun run build:dry-run
 | `AZURE_TENANT_ID` | Azure Trusted Signing tenant | [docs/runbooks/azure-trusted-signing-setup.md](./docs/runbooks/azure-trusted-signing-setup.md) |
 | `AZURE_CLIENT_ID` | Azure Trusted Signing app | same |
 | `AZURE_CLIENT_SECRET` | Azure Trusted Signing secret | same |
+| `AZURE_SIGNING_ACCOUNT_NAME` | Trusted Signing account name | same |
 | `AZURE_CERT_PROFILE_NAME` | Cert profile (e.g. `wuphf-prod-2026`) | same |
 | `AZURE_ENDPOINT` | Trusted Signing endpoint | same |
 
 When all are set, tag pushes produce signed + notarized + auto-updateable artifacts. When some are missing, PR pushes still produce unsigned-with-warning artifacts (CI green, useful for local testing).
+
+macOS signing maps `APPLE_CERT_P12_BASE64` → `CSC_LINK` and `APPLE_CERT_PASSWORD` → `CSC_KEY_PASSWORD` for electron-builder. Windows signing builds first, signs the final installer output with the pinned `Azure/trusted-signing-action`, then refreshes `latest.yml` so electron-updater hashes match the signed artifact.
 
 ## Architecture
 
@@ -68,6 +71,7 @@ GitHub tag push
         ├── job: build-win (windows-2022)
         │     ├── electron-builder --win
         │     ├── Azure Trusted Signing
+        │     ├── refresh latest.yml after signing
         │     └── upload .exe + latest.yml
         ├── job: build-linux (ubuntu-24.04)
         │     ├── electron-builder --linux
