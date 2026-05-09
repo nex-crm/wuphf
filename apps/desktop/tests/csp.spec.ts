@@ -13,6 +13,7 @@ describe("renderer Content-Security-Policy", () => {
 
     expect(htmlDirectives).toEqual(agentsDirectives);
     expect(htmlDirectives).toMatchObject({
+      "connect-src": ["'self'", "http://127.0.0.1:0"],
       "base-uri": ["'none'"],
       "form-action": ["'none'"],
       "object-src": ["'none'"],

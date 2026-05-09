@@ -25,7 +25,7 @@ flowchart TB
 | OS | Main process requests for allowlisted verbs. | Renderer-provided URLs or paths until the main handler validates them. |
 | Main | Electron APIs, local package code, and the broker process lifecycle handle. | Renderer IPC payloads, window navigation targets, `window.open` targets, inherited environment variables. |
 | Preload | The shared TypeScript contract and Electron `contextBridge`. | Renderer code. It never exposes `ipcRenderer` directly. |
-| Renderer | The typed `window.wuphf` surface. | Node APIs, Electron internals, broker secrets, app data. |
+| Renderer | The typed `window.wuphf` surface. | Node APIs, Electron internals, broker secrets, app data, localhost services until the broker loopback listener owns a concrete port. |
 | Broker | Its own utility process runtime. | Renderer IPC and main-process app-data proxying. This shell only supervises lifecycle. |
 
 ## Threat Model
@@ -64,10 +64,11 @@ Remote navigation is blocked. Development loads only
 `http://localhost:<vite-port>` or `http://127.0.0.1:<vite-port>`, and production
 loads only the bundled `file://` renderer document.
 
-## CSP Loopback Exception
+## CSP Loopback Placeholder
 
-The renderer CSP currently allows `connect-src` to `http://127.0.0.1:*` and
-`http://localhost:*` because the broker loopback listener branch owns the final
-port binding. This wildcard is a known temporary limitation: once
-`feat/broker-loopback-listener` defines the broker port, production CSP must
-allow only that concrete loopback endpoint.
+The renderer CSP currently sets `connect-src` to only `'self'` and
+`http://127.0.0.1:0`. Port 0 is reserved, so this placeholder does not grant
+connectivity to local HTTP services such as CUPS, Jupyter, Redis, databases, or
+development servers. Until `feat/broker-loopback-listener` binds the actual
+broker port, renderer JS has no localhost network egress by policy. That branch
+must replace the placeholder with the one concrete broker origin.
