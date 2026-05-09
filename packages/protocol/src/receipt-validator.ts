@@ -7,6 +7,20 @@
 
 import { FrozenArgs } from "./frozen-args.ts";
 import {
+  APPROVAL_DECISION_VALUES,
+  APPROVAL_ROLE_VALUES,
+  APPROVAL_TOKEN_ALGORITHM_VALUES,
+  BASE64_RE,
+  BROKER_TOKEN_VERDICT_STATUS_VALUES,
+  FILE_CHANGE_MODE_VALUES,
+  MEMORY_STORE_VALUES,
+  RECEIPT_STATUS_VALUES,
+  RISK_CLASS_VALUES,
+  TOOL_CALL_STATUS_VALUES,
+  TRIGGER_KIND_VALUES,
+  WRITE_RESULT_VALUES,
+} from "./receipt-literals.ts";
+import {
   type ApprovalClaims,
   type ApprovalEvent,
   type BrokerTokenVerdict,
@@ -24,59 +38,14 @@ import {
   type ReceiptSnapshot,
   type ReceiptValidationError,
   type ReceiptValidationResult,
-  type RiskClass,
   type SignedApprovalToken,
   type SourceRead,
   type ToolCall,
-  type TriggerKind,
   type WriteFailureMetadata,
-  type WriteResult,
 } from "./receipt-types.ts";
 import { addError, hasOwn, isRecord, pointer, recordValue } from "./receipt-utils.ts";
 import { SanitizedString } from "./sanitized-string.ts";
 import { isSha256Hex } from "./sha256.ts";
-
-const RECEIPT_STATUS_VALUES = [
-  "ok",
-  "error",
-  "stalled",
-  "approval_pending",
-  "rejected",
-] as const satisfies readonly ReceiptSnapshot["status"][];
-const RISK_CLASS_VALUES = [
-  "low",
-  "medium",
-  "high",
-  "critical",
-] as const satisfies readonly RiskClass[];
-const WRITE_RESULT_VALUES = [
-  "applied",
-  "rejected",
-  "partial",
-  "rollback",
-] as const satisfies readonly WriteResult[];
-const TRIGGER_KIND_VALUES = [
-  "human_message",
-  "scheduler",
-  "mention",
-  "webhook",
-  "agent_message",
-  "system",
-] as const satisfies readonly TriggerKind[];
-const APPROVAL_ROLE_VALUES = ["viewer", "approver", "host"] as const;
-const APPROVAL_DECISION_VALUES = ["approve", "reject", "abstain"] as const;
-const TOOL_CALL_STATUS_VALUES = ["ok", "error"] as const;
-const FILE_CHANGE_MODE_VALUES = ["created", "modified", "deleted"] as const;
-const MEMORY_STORE_VALUES = ["notebook", "wiki"] as const;
-const APPROVAL_TOKEN_ALGORITHM_VALUES = ["ed25519"] as const;
-const BROKER_TOKEN_VERDICT_STATUS_VALUES = [
-  "valid",
-  "expired",
-  "tampered",
-  "wrong_signer",
-  "wrong_write",
-] as const;
-const BASE64_RE = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 
 // Allowlists are tied to interface declarations via `satisfies readonly
 // (keyof T)[]`. Adding a typo'd entry fails typecheck. The reverse direction

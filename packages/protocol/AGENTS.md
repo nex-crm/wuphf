@@ -91,9 +91,11 @@ When validating an approval token inside a receipt, the validator MUST:
 - Confirm `token.receiptId === enclosing receipt.id`
 - Confirm `token.frozenArgsHash === enclosing proposedDiff.hash`
 
-Both checks already live in `validateApprovalEvent` and
-`validateExternalWrite`. If you add a new place a token can appear, add the
-binding check there too.
+`validateExternalWrite` enforces both bindings because external writes carry
+the `proposedDiff`. `validateApprovalEvent` enforces only the receiptId binding
+because an approval event does not carry the diff needed to re-check
+`frozenArgsHash`. If you add a new sibling-with-`FrozenArgs` place a token can
+appear, add the hash binding there too.
 
 ### 6. ProviderKind is a closed enum
 

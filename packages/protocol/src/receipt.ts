@@ -6,6 +6,20 @@
 import { canonicalJSON } from "./canonical-json.ts";
 import { FrozenArgs } from "./frozen-args.ts";
 import {
+  APPROVAL_DECISION_VALUES,
+  APPROVAL_ROLE_VALUES,
+  APPROVAL_TOKEN_ALGORITHM_VALUES,
+  BASE64_RE,
+  BROKER_TOKEN_VERDICT_STATUS_VALUES,
+  FILE_CHANGE_MODE_VALUES,
+  MEMORY_STORE_VALUES,
+  RECEIPT_STATUS_VALUES,
+  RISK_CLASS_VALUES,
+  TOOL_CALL_STATUS_VALUES,
+  TRIGGER_KIND_VALUES,
+  WRITE_RESULT_VALUES,
+} from "./receipt-literals.ts";
+import {
   type AgentSlug,
   type ApprovalClaims,
   type ApprovalEvent,
@@ -62,32 +76,6 @@ import { SanitizedString } from "./sanitized-string.ts";
 import { asSha256Hex, type Sha256Hex } from "./sha256.ts";
 
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
-
-const RECEIPT_STATUS_VALUES = ["ok", "error", "stalled", "approval_pending", "rejected"] as const;
-const RISK_CLASS_VALUES = ["low", "medium", "high", "critical"] as const;
-const WRITE_RESULT_VALUES = ["applied", "rejected", "partial", "rollback"] as const;
-const TRIGGER_KIND_VALUES = [
-  "human_message",
-  "scheduler",
-  "mention",
-  "webhook",
-  "agent_message",
-  "system",
-] as const;
-const APPROVAL_ROLE_VALUES = ["viewer", "approver", "host"] as const;
-const APPROVAL_DECISION_VALUES = ["approve", "reject", "abstain"] as const;
-const TOOL_CALL_STATUS_VALUES = ["ok", "error"] as const;
-const FILE_CHANGE_MODE_VALUES = ["created", "modified", "deleted"] as const;
-const MEMORY_STORE_VALUES = ["notebook", "wiki"] as const;
-const APPROVAL_TOKEN_ALGORITHM_VALUES = ["ed25519"] as const;
-const BROKER_TOKEN_VERDICT_STATUS_VALUES = [
-  "valid",
-  "expired",
-  "tampered",
-  "wrong_signer",
-  "wrong_write",
-] as const;
-const BASE64_RE = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 
 // Re-exports — public surface stays stable across the file split.
 export type {

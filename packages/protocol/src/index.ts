@@ -62,7 +62,7 @@ export {
   isKeychainHandleId,
   isLoopbackRemoteAddress,
   isRequestId,
-  validateApprovalSubmitRequest,
+  validateApprovalSubmitReceiptBinding,
 } from "./ipc.ts";
 export type {
   AgentSlug,

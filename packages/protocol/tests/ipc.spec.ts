@@ -13,7 +13,7 @@ import {
   isKeychainHandleId,
   isLoopbackRemoteAddress,
   isRequestId,
-  validateApprovalSubmitRequest,
+  validateApprovalSubmitReceiptBinding,
 } from "../src/ipc.ts";
 import { asReceiptId, type ReceiptId, type SignedApprovalToken } from "../src/receipt.ts";
 import { sha256Hex } from "../src/sha256.ts";
@@ -192,14 +192,14 @@ describe("approval submission IPC", () => {
     const approvalToken = approvalTokenFor(receiptId);
 
     expect(
-      validateApprovalSubmitRequest({
+      validateApprovalSubmitReceiptBinding({
         receiptId,
         approvalToken,
         idempotencyKey: "approval-submit-01",
       }),
     ).toEqual({ ok: true });
     expect(
-      validateApprovalSubmitRequest({
+      validateApprovalSubmitReceiptBinding({
         receiptId: otherReceiptId,
         approvalToken,
         idempotencyKey: "approval-submit-01",

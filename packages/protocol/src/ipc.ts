@@ -178,7 +178,14 @@ export interface ApprovalSubmitRequest {
   readonly idempotencyKey: string;
 }
 
-export function validateApprovalSubmitRequest(
+/**
+ * Checks only the cross-field receipt binding in an approval submit request.
+ *
+ * This is not a full submission validator. It does not validate the request
+ * envelope, idempotencyKey shape, token signature, token expiry, signer trust,
+ * writeId/frozenArgsHash binding, replay status, or broker policy.
+ */
+export function validateApprovalSubmitReceiptBinding(
   req: ApprovalSubmitRequest,
 ): { ok: true } | { ok: false; reason: string } {
   if (req.receiptId !== req.approvalToken.claims.receiptId) {
