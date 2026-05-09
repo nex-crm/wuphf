@@ -2,11 +2,20 @@
 set -euo pipefail
 
 release_mode="${WUPHF_RELEASE_MODE:-pr}"
+signing_scope="${WUPHF_SIGNING_SCOPE:-all}"
 
 case "${release_mode}" in
   pr | production) ;;
   *)
     echo "WUPHF_RELEASE_MODE must be 'pr' or 'production', got '${release_mode}'" >&2
+    exit 1
+    ;;
+esac
+
+case "${signing_scope}" in
+  all | mac | win) ;;
+  *)
+    echo "WUPHF_SIGNING_SCOPE must be 'all', 'mac', or 'win', got '${signing_scope}'" >&2
     exit 1
     ;;
 esac
@@ -47,18 +56,54 @@ print_status() {
   fi
 }
 
+base64_decode_ok() {
+  local value="$1"
+
+  if command -v base64 >/dev/null 2>&1; then
+    if printf "%s" "${value}" | base64 --decode >/dev/null 2>&1; then
+      return 0
+    fi
+
+    if printf "%s" "${value}" | base64 -D >/dev/null 2>&1; then
+      return 0
+    fi
+  fi
+
+  if command -v python3 >/dev/null 2>&1; then
+    VALUE="${value}" python3 - <<'PY'
+import base64
+import os
+
+base64.b64decode(os.environ["VALUE"], validate=True)
+PY
+    return $?
+  fi
+
+  return 1
+}
+
 echo "WUPHF release mode: ${release_mode}"
+echo "WUPHF signing scope: ${signing_scope}"
 echo
-echo "macOS signing/notarization:"
-for name in "${mac_required[@]}"; do
-  print_status "${name}"
-done
+if [[ "${signing_scope}" == "all" || "${signing_scope}" == "mac" ]]; then
+  echo "macOS signing/notarization:"
+  for name in "${mac_required[@]}"; do
+    print_status "${name}"
+  done
+
+  if [[ -n "${APPLE_CERT_P12_BASE64:-}" ]] && ! base64_decode_ok "${APPLE_CERT_P12_BASE64}"; then
+    echo "APPLE_CERT_P12_BASE64 is not valid base64; check for trailing whitespace" >&2
+    exit 1
+  fi
+fi
 
 echo
-echo "Windows Azure Trusted Signing:"
-for name in "${win_required[@]}"; do
-  print_status "${name}"
-done
+if [[ "${signing_scope}" == "all" || "${signing_scope}" == "win" ]]; then
+  echo "Windows Azure Trusted Signing:"
+  for name in "${win_required[@]}"; do
+    print_status "${name}"
+  done
+fi
 
 if [[ "${release_mode}" == "production" && "${#missing[@]}" -gt 0 ]]; then
   echo
