@@ -349,6 +349,9 @@ function validateApprovalTokenLifetimeValues(
   if (!Number.isFinite(lifetimeMs)) {
     return { ok: false, reason: "approval token lifetime must be finite" };
   }
+  if (lifetimeMs === 0) {
+    return { ok: false, reason: "approval token lifetime ms must be greater than 0: 0 <= 0" };
+  }
   try {
     assertWithinBudget(lifetimeMs, MAX_APPROVAL_TOKEN_LIFETIME_MS, "approval token lifetime ms");
     return { ok: true };
