@@ -7,16 +7,25 @@ This stub exists *only* so we can prove the signing + auto-update story end-to-e
 ## Run it
 
 ```bash
-# Local dry-run (no signing, no upload — current-platform updater artifact + manifest)
-cd apps/installer-stub && bun run build:dry-run
-# → apps/installer-stub/dist/wuphf-installer-stub-0.0.0-mac-universal.zip  (mac)
-# → apps/installer-stub/dist/latest-mac.yml  (mac)
-
-# Local real installer (signed only if local env vars present)
+# From repo root:
 bun run installer:build:local
-# → apps/installer-stub/dist/wuphf-installer-stub-0.0.0-mac-universal.dmg  (mac)
-# → apps/installer-stub/dist/wuphf-installer-stub-0.0.0-win-x64.exe  (win)
-# → apps/installer-stub/dist/wuphf-installer-stub-0.0.0-linux-x64.AppImage  (linux)
+
+# From apps/installer-stub/:
+bun run build:dry-run
+bun run build:current
+```
+
+Local builds do not sign or upload unless the signing env vars are present.
+
+```text
+# build:dry-run
+# → dist/wuphf-installer-stub-0.0.0-mac-universal.zip  (mac)
+# → dist/latest-mac.yml  (mac)
+#
+# build:current
+# → dist/wuphf-installer-stub-0.0.0-mac-universal.dmg  (mac)
+# → dist/wuphf-installer-stub-0.0.0-win-x64.exe  (win)
+# → dist/wuphf-installer-stub-0.0.0-linux-x64.AppImage  (linux)
 ```
 
 Install the artifact, double-click it, see one window:
@@ -70,12 +79,12 @@ flowchart TD
     Detect["detect-secrets job<br/>WUPHF_RELEASE_MODE = pr | production"]
 
     subgraph builds["Matrix builds (parallel)"]
-        Mac["build-mac · macos-14<br/>electron-builder --mac<br/>codesign + notarize + staple .dmg<br/>refresh latest-mac.yml post-staple"]
+        Mac["build-mac · macos-14<br/>electron-builder --mac<br/>codesign + notarize + staple app + dmg<br/>refresh latest-mac.yml post-staple"]
         Win["build-win · windows-2022<br/>electron-builder --win<br/>+ Azure Trusted Signing<br/>+ refresh latest.yml post-sign"]
         Linux["build-linux · ubuntu-24.04<br/>electron-builder --linux<br/>(unsigned · latest-linux.yml)"]
     end
 
-    Publish["publish job<br/>(tag push only)<br/>assert all 3 platforms uploaded<br/>verify-latest-yml sha512 vs artifact<br/>SHA-256 release-checksums.txt"]
+    Publish["publish job<br/>(tag push only)<br/>assert all 3 platforms uploaded<br/>verify-latest-yml once against final assets<br/>SHA-256 release-checksums.txt"]
     Release["GitHub draft release<br/>.dmg · .zip · .exe · .AppImage · .deb<br/>latest-mac.yml · latest.yml · latest-linux.yml"]
 
     Tag --> Workflow
@@ -97,6 +106,8 @@ flowchart TD
 - [`docs/runbooks/azure-trusted-signing-setup.md`](./docs/runbooks/azure-trusted-signing-setup.md) — provisioning Azure Trusted Signing.
 - [`docs/runbooks/github-environment-setup.md`](./docs/runbooks/github-environment-setup.md) — scoping release secrets to `production-release`.
 - [`docs/runbooks/linux-distribution.md`](./docs/runbooks/linux-distribution.md) — what we sign vs. what we don't on Linux.
+- [`docs/auto-update-strategy.md`](./docs/auto-update-strategy.md) — full-download updates and blockmap policy.
+- [`docs/runbooks/release-day-troubleshooting.md`](./docs/runbooks/release-day-troubleshooting.md) — release rerun guardrails.
 
 ## RFC anchors
 
