@@ -22,11 +22,15 @@
 set -euo pipefail
 
 if git rev-parse --verify --quiet origin/main >/dev/null; then
-  exec git diff --name-only origin/main...HEAD
+  if git diff --name-only origin/main...HEAD; then
+    exit 0
+  fi
 fi
 
 if git rev-parse --verify --quiet origin/HEAD >/dev/null; then
-  exec git diff --name-only origin/HEAD...HEAD
+  if git diff --name-only origin/HEAD...HEAD; then
+    exit 0
+  fi
 fi
 
 # Fail-safe fallback: list every tracked file so glob-scoped hooks still

@@ -252,6 +252,30 @@ describe("receipt schema", () => {
     );
   });
 
+  it("preserves field-scoped errors for malformed forged proposedDiff JSON", () => {
+    const fixture = validReceiptFixture();
+    const firstWrite = nonNull(fixture.writes[0]);
+    const forged = Object.create(FrozenArgs.prototype) as FrozenArgs;
+    Object.assign(forged, {
+      canonicalJson: "not valid json",
+      hash: sha256Hex("forged-proposed-diff"),
+    });
+    const tampered: ReceiptSnapshot = {
+      ...fixture,
+      writes: [{ ...firstWrite, proposedDiff: forged }],
+    };
+
+    const result = validateReceipt(tampered);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors.some((error) => error.path === "")).toBe(false);
+      expect(
+        result.errors.some((error) => error.path === "/writes/0/proposedDiff/canonicalJson"),
+      ).toBe(true);
+    }
+  });
+
   it("rejects external write whose approval token writeId does not match the enclosing write", () => {
     const fixture = validReceiptFixture();
     const firstWrite = nonNull(fixture.writes[0]);

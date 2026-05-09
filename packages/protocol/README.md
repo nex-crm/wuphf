@@ -23,7 +23,7 @@ Spec: `business-musings/wuphf-greenfield-rewrite-rfc-2026-05.md` §6 (Receipt sc
 
 `SignedApprovalToken` is an envelope: `{ claims, algorithm: "ed25519", signerKeyId, signature }`. `signature` is base64 for an Ed25519 detached signature over `canonicalJSON(claims)`. Broker verification output is not client-controlled token data; receipts carry it separately as `ApprovalEvent.tokenVerdict`.
 
-External writes carry `writeId`. A token with `claims.writeId` authorizes only that write; a token without `claims.writeId` is receipt-scoped. Approval submissions also carry a client-minted `idempotencyKey`, and accepted responses echo it so clients can safely retry a lost `202 Accepted` with the same key. Idempotency keys are branded `IdempotencyKey` values and must match `/^[A-Za-z0-9_-]{1,128}$/`.
+External writes carry `writeId`. A token with `claims.writeId` authorizes only that write; a token without `claims.writeId` is receipt-scoped. Approval submissions use `ApprovalSubmitRequest`: `{ receiptId, approvalToken, idempotencyKey: IdempotencyKey }`. Clients mint the idempotency key and accepted responses echo it so clients can safely retry a lost `202 Accepted` with the same key. Idempotency keys are branded `IdempotencyKey` values and must match `/^[A-Za-z0-9_-]{1,128}$/`. Use `validateApprovalSubmitRequest` at the IPC boundary to reject unknown envelope keys, validate the branded `receiptId` and `idempotencyKey` shapes, require a token claims object, and enforce `receiptId === approvalToken.claims.receiptId`.
 
 ## Merkle root checkpoint wire shape
 
@@ -37,4 +37,4 @@ bun run test
 bun run check
 ```
 
-`tests/` contains fast-check property tests. CI gates (`ci:moat:frozen-args`, `ci:moat:diff-card`, `ci:audit:verify`, `ci:xss`, `ci:receipt:fuzz`) wire to these workflows.
+`tests/` contains fast-check property tests. CI's `protocol` job in `.github/workflows/ci.yml` installs workspace dependencies, then runs typecheck, Biome check, Vitest through `bash scripts/test-protocol.sh`, the public API demo smoke test (`bun run packages/protocol/scripts/demo.ts`), and the Go reference verifier (`go run verifier-reference.go` from `packages/protocol/testdata`).

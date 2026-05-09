@@ -27,7 +27,7 @@
     "check": "biome check src/ tests/"
   },
   "dependencies": {
-    "canonicalize": "^2.0.0"
+    "canonicalize": "2.0.0"
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.13",

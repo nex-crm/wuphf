@@ -183,7 +183,7 @@ is what we promise to keep stable.
 
 ## Where things live
 
-```
+```text
 packages/protocol/
 ├── AGENTS.md                          (this file — read first)
 ├── README.md                          (consumer-facing)

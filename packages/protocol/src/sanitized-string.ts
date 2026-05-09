@@ -306,8 +306,8 @@ function parseArrayIndexKey(key: string): number | undefined {
 }
 
 function sanitizeText(input: string, options: SanitizedStringOptions): string {
+  rejectLoneSurrogates(input);
   const normalized = input.normalize("NFKC");
-  rejectLoneSurrogates(normalized);
   let out = "";
 
   for (let i = 0; i < normalized.length; ) {

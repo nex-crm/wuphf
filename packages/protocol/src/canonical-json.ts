@@ -62,11 +62,30 @@ export function assertJcsValue(value: unknown, path = "$", depth = 0): asserts v
   }
 
   if (Array.isArray(value)) {
+    if (Object.getOwnPropertySymbols(value).length > 0) {
+      throw new Error(`canonicalJSON: symbol keys are not representable at ${path}`);
+    }
+    const descriptors = Object.getOwnPropertyDescriptors(value);
     for (let i = 0; i < value.length; i++) {
-      if (!(i in value)) {
+      if (!hasOwn(descriptors, String(i))) {
         throw new Error(`canonicalJSON: sparse array hole at ${path}[${i}]`);
       }
-      assertJcsValue(value[i], `${path}[${i}]`, depth + 1);
+    }
+    for (const [key, descriptor] of Object.entries(descriptors)) {
+      if (key === "length") {
+        continue;
+      }
+      const index = parseArrayIndexKey(key);
+      if (index === undefined) {
+        throw new Error(`canonicalJSON: non-array-index own property at ${path}.${key}`);
+      }
+      if (!descriptor.enumerable) {
+        throw new Error(`canonicalJSON: non-enumerable own property at ${path}[${index}]`);
+      }
+      if ("get" in descriptor || "set" in descriptor) {
+        throw new Error(`canonicalJSON: accessor property at ${path}[${index}]`);
+      }
+      assertJcsValue(descriptor.value, `${path}[${index}]`, depth + 1);
     }
     return;
   }
@@ -114,6 +133,18 @@ function assertNoLoneSurrogate(value: string, path: string): void {
       throw new Error(`canonicalJSON: lone low surrogate at ${path}`);
     }
   }
+}
+
+function hasOwn(record: Readonly<Record<string, unknown>>, key: string): boolean {
+  return Object.hasOwn(record, key);
+}
+
+function parseArrayIndexKey(key: string): number | undefined {
+  const index = Number(key);
+  if (!Number.isInteger(index) || index < 0 || index >= 2 ** 32 - 1) {
+    return undefined;
+  }
+  return String(index) === key ? index : undefined;
 }
 
 function describeProto(proto: object): string {

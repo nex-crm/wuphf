@@ -679,13 +679,19 @@ function validateExternalWrite(
       // the re-derivation locally here means the cross-field rule's
       // correctness no longer depends on validator ordering.
       if (proposedDiff instanceof FrozenArgs) {
-        const reFrozen = FrozenArgs.freeze(JSON.parse(proposedDiff.canonicalJson));
-        if (recordValue(claims, "frozenArgsHash") !== reFrozen.hash) {
-          addError(
-            errors,
-            pointer(claimsPath, "frozenArgsHash"),
-            "must match this write's proposedDiff hash",
-          );
+        try {
+          const reFrozen = FrozenArgs.freeze(JSON.parse(proposedDiff.canonicalJson));
+          if (recordValue(claims, "frozenArgsHash") !== reFrozen.hash) {
+            addError(
+              errors,
+              pointer(claimsPath, "frozenArgsHash"),
+              "must match this write's proposedDiff hash",
+            );
+          }
+        } catch {
+          // validateFrozenArgs already reported the field-level reason for the
+          // forged/invalid FrozenArgs; the cross-field hash check has nothing
+          // to add and would otherwise collapse all errors into path: "".
         }
       }
       const tokenWriteId = recordValue(claims, "writeId");
