@@ -5,6 +5,9 @@ crypto-library wrappers) so the wire-shape and security invariants stay
 auditable end-to-end. Any agent — Claude, Codex, Cursor, human reviewer —
 working in this directory MUST read this file before making changes.
 
+Start with `docs/OVERVIEW.md` for the package map, cross-module invariants,
+wire surfaces, and rolled-up Phase 3 punch list.
+
 If a rule below clashes with what your prompt asked you to do, stop and
 surface the conflict. The user will tell you which side wins; don't silently
 choose.
