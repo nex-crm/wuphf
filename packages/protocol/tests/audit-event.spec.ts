@@ -1,12 +1,14 @@
 import { Buffer } from "node:buffer";
 import { readFileSync } from "node:fs";
 import fc from "fast-check";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   AUDIT_EVENT_KIND_VALUES,
   type AuditEventKind,
   type AuditEventRecord,
   asMerkleRootHex,
+  type ChainFailureCode,
+  type ChainVerifierState,
   computeAuditEventHash,
   computeEventHash,
   GENESIS_PREV_HASH,
@@ -77,6 +79,14 @@ interface AuditEventVectorsFixture {
   readonly merkleRootVectors: readonly MerkleRootVector[];
 }
 
+interface AuditRecordInput {
+  readonly seqNo?: EventLsn;
+  readonly timestamp?: Date;
+  readonly prevHash?: Sha256Hex;
+  readonly eventHash?: Sha256Hex;
+  readonly payload?: AuditEventRecord["payload"];
+}
+
 const auditEventKindSet: ReadonlySet<string> = new Set(AUDIT_EVENT_KIND_VALUES);
 const auditEventVectors = loadAuditEventVectors();
 
@@ -107,12 +117,9 @@ function localLsn(lsn: EventLsn): number {
 }
 
 describe("audit-event chain verification", () => {
-  it("verifies an empty chain (no last seq, just empty: true)", () => {
+  it("verifies an empty chain with no last seq and genesis state implied", () => {
     const result = verifyChain([]);
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.empty).toBe(true);
-    }
+    expect(result).toEqual({ ok: true, empty: true });
   });
 
   it("verifies a single-record chain", () => {
@@ -157,6 +164,97 @@ describe("audit-event chain verification", () => {
     }
   });
 
+  it("resumes across three batches from only the previous successful verifier state", () => {
+    const chain = chainOfLength(9);
+    const firstState = expectIncrementalState(
+      verifyChainIncremental({ ...INITIAL_VERIFIER_STATE }, chain.slice(0, 3)),
+    );
+    expect(firstState).toEqual({
+      expectedPrev: recordAt(chain, 2).eventHash,
+      expectedSeq: lsnFromV1Number(3),
+      lastSeen: lsnFromV1Number(2),
+      recordsVerified: 3,
+    });
+
+    const persistedFirstState: ChainVerifierState = { ...firstState };
+    const secondState = expectIncrementalState(
+      verifyChainIncremental(persistedFirstState, chain.slice(3, 6)),
+    );
+    expect(secondState).toEqual({
+      expectedPrev: recordAt(chain, 5).eventHash,
+      expectedSeq: lsnFromV1Number(6),
+      lastSeen: lsnFromV1Number(5),
+      recordsVerified: 6,
+    });
+
+    const thirdState = expectIncrementalState(
+      verifyChainIncremental({ ...secondState }, chain.slice(6, 9)),
+    );
+    expect(thirdState).toEqual({
+      expectedPrev: recordAt(chain, 8).eventHash,
+      expectedSeq: lsnFromV1Number(9),
+      lastSeen: lsnFromV1Number(8),
+      recordsVerified: 9,
+    });
+  });
+
+  it("reaches the same final state when one resumed batch is split in two", () => {
+    const chain = chainOfLength(9);
+    const firstState = expectIncrementalState(
+      verifyChainIncremental(INITIAL_VERIFIER_STATE, chain.slice(0, 3)),
+    );
+    const unsplitFinalState = expectIncrementalState(
+      verifyChainIncremental(firstState, chain.slice(3, 9)),
+    );
+
+    const splitMiddleState = expectIncrementalState(
+      verifyChainIncremental(firstState, chain.slice(3, 5)),
+    );
+    const splitFinalState = expectIncrementalState(
+      verifyChainIncremental(splitMiddleState, chain.slice(5, 9)),
+    );
+
+    expect(splitFinalState).toEqual(unsplitFinalState);
+  });
+
+  it("keeps an already advanced verifier state for an empty resumed batch", () => {
+    const chain = chainOfLength(2);
+    const advancedState = expectIncrementalState(
+      verifyChainIncremental(INITIAL_VERIFIER_STATE, chain),
+    );
+
+    const result = verifyChainIncremental({ ...advancedState }, []);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.state).toEqual(advancedState);
+    }
+  });
+
+  it("rejects corrupt resumed state at the first record it can no longer chain", () => {
+    const chain = chainOfLength(3);
+    const resumedState = expectIncrementalState(
+      verifyChainIncremental(INITIAL_VERIFIER_STATE, chain.slice(0, 2)),
+    );
+
+    expectFailureCode(
+      verifyChainIncremental(
+        { ...resumedState, expectedPrev: GENESIS_PREV_HASH },
+        chain.slice(2, 3),
+      ),
+      "prev_hash_mismatch",
+      2,
+    );
+    expectFailureCode(
+      verifyChainIncremental(
+        { ...resumedState, expectedSeq: lsnFromV1Number(1) },
+        chain.slice(2, 3),
+      ),
+      "seq_gap",
+      2,
+    );
+  });
+
   it("incremental verification reports tampering in the middle of the second batch", () => {
     const chain = chainOfLength(25_000);
     chain[17_500] = { ...recordAt(chain, 17_500), eventHash: GENESIS_PREV_HASH };
@@ -197,12 +295,31 @@ describe("audit-event chain verification", () => {
     expect(serializerCalls).toBe(0);
   });
 
-  it("keeps the initial verifier state for an empty first batch", () => {
+  it("accepts an exact-at-cap incremental batch", () => {
+    const chain = chainOfLength(MAX_AUDIT_CHAIN_BATCH_SIZE);
+    const result = verifyChainIncremental(INITIAL_VERIFIER_STATE, chain);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.state.recordsVerified).toBe(MAX_AUDIT_CHAIN_BATCH_SIZE);
+      expect(result.state.expectedPrev).toBe(
+        recordAt(chain, MAX_AUDIT_CHAIN_BATCH_SIZE - 1).eventHash,
+      );
+    }
+  });
+
+  it("keeps the genesis verifier state for an empty first batch", () => {
     const result = verifyChainIncremental(INITIAL_VERIFIER_STATE, []);
 
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.state).toBe(INITIAL_VERIFIER_STATE);
+      expect(result.state).toEqual({
+        expectedPrev: GENESIS_PREV_HASH,
+        expectedSeq: lsnFromV1Number(0),
+        lastSeen: lsnFromV1Number(0),
+        recordsVerified: 0,
+      });
     }
   });
 
@@ -303,6 +420,134 @@ describe("audit-event chain verification", () => {
     }
   });
 
+  it('rejects payload.kind = "made_up" in the writer-side serializer', () => {
+    const record = auditRecord({
+      payload: {
+        kind: "made_up" as AuditEventKind,
+        body: new TextEncoder().encode("hostile-kind"),
+      },
+    });
+
+    expect(() => serializeAuditEventRecordForHash(record)).toThrow(
+      /invalid payload\.kind "made_up"/,
+    );
+  });
+
+  for (const testCase of INVALID_PAYLOAD_KIND_DESCRIPTION_CASES) {
+    it(`describes invalid payload.kind ${testCase.name} in serializer errors`, () => {
+      const record = auditRecord({
+        payload: {
+          kind: testCase.kind as unknown as AuditEventKind,
+          body: new TextEncoder().encode("hostile-kind"),
+        },
+      });
+
+      expect(() => serializeAuditEventRecordForHash(record)).toThrow(testCase.message);
+    });
+  }
+
+  it('rejects payload.kind = "made_up" in verifier-side serialization', () => {
+    const record = auditRecord({
+      payload: {
+        kind: "made_up" as AuditEventKind,
+        body: new TextEncoder().encode("hostile-kind"),
+      },
+    });
+
+    expectFailureCode(verifyChain([record]), "serialization_threw", 0);
+  });
+
+  for (const [index, kind] of AUDIT_EVENT_KIND_VALUES.entries()) {
+    it(`accepts payload.kind ${kind} through serializer and verifier`, () => {
+      const partial = auditRecord({
+        payload: {
+          kind,
+          receiptId: asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAV"),
+          body: new Uint8Array([index, 0, 255]),
+        },
+      });
+      const record: AuditEventRecord = {
+        ...partial,
+        eventHash: computeAuditEventHash(partial),
+      };
+
+      const projection = JSON.parse(
+        new TextDecoder().decode(serializeAuditEventRecordForHash(record)),
+      ) as { payload: { kind: string; receiptId: string; bodyB64: string } };
+
+      expect(projection.payload.kind).toBe(kind);
+      expect(projection.payload.receiptId).toBe("01ARZ3NDEKTSV4RRFFQ69G5FAV");
+      expect(projection.payload.bodyB64).toBe(Buffer.from([index, 0, 255]).toString("base64"));
+      expect(verifyChain([record])).toEqual({
+        ok: true,
+        empty: false,
+        lastEventHash: record.eventHash,
+        lastSeqNo: lsnFromV1Number(0),
+      });
+    });
+  }
+
+  it("serializes non-null receiptId and non-UTF8 opaque body bytes in the hash projection", () => {
+    const partial = auditRecord({
+      payload: {
+        kind: "receipt_updated",
+        receiptId: asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAV"),
+        body: new Uint8Array([0, 255, 128, 64]),
+      },
+    });
+    const record = { ...partial, eventHash: computeAuditEventHash(partial) };
+
+    expect(new TextDecoder().decode(serializeAuditEventRecordForHash(record))).toBe(
+      '{"payload":{"bodyB64":"AP+AQA==","kind":"receipt_updated","receiptId":"01ARZ3NDEKTSV4RRFFQ69G5FAV"},"prevHash":"69292e708cc2e023492933025af465b063bdf24002e72a825b5170541b733f71","seqNo":"v1:0","timestamp":"2026-05-08T00:00:00.000Z"}',
+    );
+  });
+
+  it("rejects non-Uint8Array payload bodies in the writer-side serializer", () => {
+    const record = auditRecord({
+      payload: {
+        kind: "receipt_created",
+        body: [] as unknown as Uint8Array,
+      },
+    });
+
+    expect(() => serializeAuditEventRecordForHash(record)).toThrow(
+      /payload\.body must be a Uint8Array/,
+    );
+  });
+
+  it("accepts exact-at-cap audit event bodies in both serializer and verifier", () => {
+    const partial = auditRecord({
+      payload: {
+        kind: "receipt_created",
+        body: new Uint8Array(MAX_AUDIT_EVENT_BODY_BYTES),
+      },
+    });
+    const record: AuditEventRecord = {
+      ...partial,
+      eventHash: computeAuditEventHash(partial),
+    };
+
+    expect(() => serializeAuditEventRecordForHash(record)).not.toThrow();
+    expect(verifyChain([record])).toEqual({
+      ok: true,
+      empty: false,
+      lastEventHash: record.eventHash,
+      lastSeqNo: lsnFromV1Number(0),
+    });
+  });
+
+  it("rejects one-over-cap audit event bodies in both serializer and verifier", () => {
+    const oversized = auditRecord({
+      payload: {
+        kind: "receipt_created",
+        body: new Uint8Array(MAX_AUDIT_EVENT_BODY_BYTES + 1),
+      },
+    });
+
+    expect(() => serializeAuditEventRecordForHash(oversized)).toThrow(/MAX_AUDIT_EVENT_BODY_BYTES/);
+    expectFailureCode(verifyChain([oversized]), "serialization_threw", 0);
+  });
+
   it("returns typed serialization_threw for oversized audit event bodies", () => {
     const oversized: AuditEventRecord = {
       seqNo: lsnFromV1Number(0),
@@ -324,51 +569,53 @@ describe("audit-event chain verification", () => {
     }
   });
 
-  it("returns typed lsn_threw when expected next LSN overflows", async () => {
-    vi.resetModules();
-    vi.doMock("../src/event-lsn.ts", async (importOriginal) => {
-      const actual = await importOriginal<typeof import("../src/event-lsn.ts")>();
-      return {
-        ...actual,
-        GENESIS_LSN: actual.lsnFromV1Number(Number.MAX_SAFE_INTEGER),
-      };
+  it("returns typed lsn_threw when expected next LSN overflows", () => {
+    const maxLsn = lsnFromV1Number(Number.MAX_SAFE_INTEGER);
+    const nearOverflowState: ChainVerifierState = {
+      expectedPrev: GENESIS_PREV_HASH,
+      expectedSeq: maxLsn,
+      lastSeen: lsnFromV1Number(Number.MAX_SAFE_INTEGER - 1),
+      recordsVerified: Number.MAX_SAFE_INTEGER,
+    };
+    const partial = auditRecord({
+      seqNo: maxLsn,
+      prevHash: GENESIS_PREV_HASH,
+      payload: {
+        kind: "receipt_created",
+        body: new TextEncoder().encode("max-lsn"),
+      },
     });
+    const record: AuditEventRecord = {
+      ...partial,
+      eventHash: computeAuditEventHash(partial),
+    };
 
-    try {
-      const auditEvent = await import("../src/audit-event.ts");
-      const maxLsn = lsnFromV1Number(Number.MAX_SAFE_INTEGER);
-      const partial: AuditEventRecord = {
-        seqNo: maxLsn,
-        timestamp: new Date("2026-05-08T00:00:00.000Z"),
-        prevHash: auditEvent.GENESIS_PREV_HASH,
-        eventHash: auditEvent.GENESIS_PREV_HASH,
-        payload: {
-          kind: "receipt_created",
-          body: new TextEncoder().encode("max-lsn"),
-        },
-      };
-      const lastRecord: AuditEventRecord = {
-        ...partial,
-        eventHash: auditEvent.computeAuditEventHash(partial),
-      };
-      const followUpRecord: AuditEventRecord = {
-        ...lastRecord,
-        payload: {
-          kind: "receipt_updated",
-          body: new TextEncoder().encode("unreachable-follow-up"),
-        },
-      };
+    expectFailureCode(
+      verifyChainIncremental(nearOverflowState, [record]),
+      "lsn_threw",
+      Number.MAX_SAFE_INTEGER,
+    );
+  });
 
-      const result = auditEvent.verifyChain([lastRecord, followUpRecord]);
+  it("returns typed serialization_threw when record access throws before serialization", () => {
+    const hostileRecord = {
+      get seqNo(): EventLsn {
+        throw new Error("seqNo getter exploded");
+      },
+      timestamp: new Date("2026-05-08T00:00:00.000Z"),
+      prevHash: GENESIS_PREV_HASH,
+      eventHash: GENESIS_PREV_HASH,
+      payload: {
+        kind: "receipt_created",
+        body: new TextEncoder().encode("hostile-accessor"),
+      },
+    } as AuditEventRecord;
 
-      expect(result.ok).toBe(false);
-      if (!result.ok) {
-        expect(result.code).toBe("lsn_threw");
-        expect(localLsn(result.brokenAtSeqNo)).toBe(Number.MAX_SAFE_INTEGER);
-      }
-    } finally {
-      vi.doUnmock("../src/event-lsn.ts");
-      vi.resetModules();
+    const result = verifyChainIncremental(INITIAL_VERIFIER_STATE, [hostileRecord]);
+
+    expectFailureCode(result, "serialization_threw", 0);
+    if (!result.ok) {
+      expect(result.reason).toMatch(/seqNo getter exploded/);
     }
   });
 
@@ -413,6 +660,67 @@ describe("audit-event chain verification", () => {
     );
   });
 
+  describe("minimal ChainFailureCode records", () => {
+    it("reports batch_too_large before reading or serializing records", () => {
+      let serializerCalls = 0;
+      const oversizedBatch = new Array<AuditEventRecord>(MAX_AUDIT_CHAIN_BATCH_SIZE + 1);
+
+      const result = verifyChainIncremental(INITIAL_VERIFIER_STATE, oversizedBatch, () => {
+        serializerCalls += 1;
+        return new Uint8Array();
+      });
+
+      expectFailureCode(result, "batch_too_large", 0);
+      expect(serializerCalls).toBe(0);
+    });
+
+    it("reports missing_record for a single sparse hole", () => {
+      const sparseBatch = new Array<AuditEventRecord>(1);
+
+      expectFailureCode(
+        verifyChainIncremental(INITIAL_VERIFIER_STATE, sparseBatch),
+        "missing_record",
+        0,
+      );
+    });
+
+    it("reports seq_gap for the first record with an unexpected LSN", () => {
+      const record = auditRecord({ seqNo: lsnFromV1Number(1) });
+
+      expectFailureCode(verifyChainIncremental(INITIAL_VERIFIER_STATE, [record]), "seq_gap", 1);
+    });
+
+    it("reports prev_hash_mismatch before serialization", () => {
+      const record = auditRecord({ prevHash: sha256Hex("wrong previous hash") });
+
+      expectFailureCode(
+        verifyChainIncremental(INITIAL_VERIFIER_STATE, [record]),
+        "prev_hash_mismatch",
+        0,
+      );
+    });
+
+    it("reports serialization_threw for the first malformed record", () => {
+      const record = auditRecord({ timestamp: new Date("invalid") });
+
+      expectFailureCode(
+        verifyChainIncremental(INITIAL_VERIFIER_STATE, [record]),
+        "serialization_threw",
+        0,
+      );
+    });
+
+    it("reports event_hash_mismatch for hash-consistent fields with a stale hash", () => {
+      const record = auditRecord({ eventHash: sha256Hex("stale event hash") });
+
+      expectFailureCode(
+        verifyChainIncremental(INITIAL_VERIFIER_STATE, [record]),
+        "event_hash_mismatch",
+        0,
+      );
+    });
+  });
+
   it("property: any tamper at position k breaks verification at k", () => {
     fc.assert(
       fc.property(
@@ -434,12 +742,28 @@ describe("audit-event chain verification", () => {
     );
   });
 
+  it("reports event_hash_mismatch at every single-bit tamper position in a 25,000-record chain", () => {
+    const chain = chainOfLength(25_000);
+    let state = INITIAL_VERIFIER_STATE;
+
+    for (let index = 0; index < chain.length; index++) {
+      const record = recordAt(chain, index);
+      const tampered = flipFirstPayloadBodyBit(record);
+
+      expectFailureCode(verifyChainIncremental(state, [tampered]), "event_hash_mismatch", index);
+      state = expectIncrementalState(verifyChainIncremental(state, [record]));
+    }
+
+    expect(state.recordsVerified).toBe(25_000);
+  });
+
   // Cross-language verifiers consume these golden vectors. If any of these
   // values change, the wire protocol changed — coordinate with downstream
   // verifier authors. The data lives in testdata so non-TS verifiers can load
   // the same fixture this test reads.
   describe("golden vectors (cross-language verifier contract)", () => {
     it('GENESIS_PREV_HASH is sha256("wuphf:audit:genesis:v1") in lower-hex', () => {
+      expect(GENESIS_PREV_HASH).toBe(sha256Hex("wuphf:audit:genesis:v1"));
       expect(GENESIS_PREV_HASH).toBe(
         "69292e708cc2e023492933025af465b063bdf24002e72a825b5170541b733f71",
       );
@@ -472,6 +796,16 @@ describe("audit-event chain verification", () => {
         expect(computeAuditEventHash(record)).toBe(record.eventHash);
       });
     }
+
+    it("hashes prevHash as 64 ASCII-hex bytes: sha256(asciiHex(prevHash) || jcsBytes(record))", () => {
+      const record = recordAt(chainOfLength(1), 0);
+      const recordBytes = serializeAuditEventRecordForHash(record);
+      const handComputedInput = new Uint8Array(record.prevHash.length + recordBytes.length);
+      handComputedInput.set(new TextEncoder().encode(record.prevHash), 0);
+      handComputedInput.set(recordBytes, record.prevHash.length);
+
+      expect(record.eventHash).toBe(sha256Hex(handComputedInput));
+    });
   });
 
   describe("MerkleRootRecord public codec", () => {
@@ -519,6 +853,101 @@ describe("audit-event chain verification", () => {
         /\/certChainPem: must be a non-empty string/,
       );
     });
+
+    for (const key of MERKLE_ROOT_RECORD_FIELD_NAMES) {
+      it(`rejects a MerkleRootRecord JSON object missing ${key}`, () => {
+        const input: Record<string, unknown> = { ...firstMerkleRootVector().input };
+        Reflect.deleteProperty(input, key);
+        const validationInput = mutableMerkleRootRecord(
+          merkleRootRecordFromVector(firstMerkleRootVector()),
+        );
+        Reflect.deleteProperty(validationInput, key);
+
+        expect(() => merkleRootRecordFromJson(input)).toThrow(new RegExp(`/${key}: is required`));
+        const validation = validateMerkleRootRecord(validationInput);
+        expect(validation.ok).toBe(false);
+        if (!validation.ok) {
+          expect(
+            validation.errors.some(
+              (error) => error.path === `/${key}` && /is required/.test(error.message),
+            ),
+          ).toBe(true);
+        }
+      });
+    }
+
+    for (const testCase of MERKLE_ROOT_FIELD_VALIDATION_CASES) {
+      it(`validates MerkleRootRecord ${testCase.name}`, () => {
+        const record = mutableMerkleRootRecord(merkleRootRecordFromVector(firstMerkleRootVector()));
+        const validation = validateMerkleRootRecord(testCase.apply(record));
+
+        expect(validation.ok).toBe(false);
+        if (!validation.ok) {
+          expect(
+            validation.errors.some(
+              (error) => error.path === testCase.path && testCase.message.test(error.message),
+            ),
+          ).toBe(true);
+        }
+      });
+    }
+
+    it("rejects non-object MerkleRootRecord validator inputs", () => {
+      for (const input of [null, [], "not-an-object"]) {
+        const validation = validateMerkleRootRecord(input);
+
+        expect(validation.ok).toBe(false);
+        if (!validation.ok) {
+          expect(
+            validation.errors.some(
+              (error) => error.path === "" && /must be an object/.test(error.message),
+            ),
+          ).toBe(true);
+        }
+      }
+    });
+
+    it("returns a validation error when MerkleRootRecord property access throws", () => {
+      const hostile: Record<string, unknown> = {};
+      Object.defineProperty(hostile, "seqNo", {
+        enumerable: true,
+        get() {
+          throw new Error("seqNo getter exploded");
+        },
+      });
+
+      const validation = validateMerkleRootRecord(hostile);
+
+      expect(validation.ok).toBe(false);
+      if (!validation.ok) {
+        expect(validation.errors).toEqual([{ path: "", message: "seqNo getter exploded" }]);
+      }
+    });
+
+    it("rejects invalid MerkleRootRecord JSON decoder fields", () => {
+      const vector = firstMerkleRootVector();
+
+      expect(() => merkleRootRecordFromJson({ ...vector.input, seqNo: "v1:01" })).toThrow(
+        /\/seqNo: parseLsn: malformed v1 LSN/,
+      );
+      expect(() => merkleRootRecordFromJson({ ...vector.input, rootHash: 42 })).toThrow(
+        /\/rootHash: must be a string/,
+      );
+      expect(() =>
+        merkleRootRecordFromJson({ ...vector.input, signedAt: "2026-05-08T12:34:56Z" }),
+      ).toThrow(/\/signedAt: must be an ISO 8601 string/);
+      expect(() =>
+        merkleRootRecordFromJson({ ...vector.input, signedAt: "2026-02-31T00:00:00.000Z" }),
+      ).toThrow(/\/signedAt: must be a valid ISO 8601 instant/);
+    });
+
+    it("rejects invalid MerkleRootRecord values when encoding to JSON", () => {
+      const record = merkleRootRecordFromVector(firstMerkleRootVector());
+
+      expect(() => merkleRootRecordToJsonValue({ ...record, signature: "" })).toThrow(
+        /\/signature: must be a non-empty base64 string/,
+      );
+    });
   });
 
   describe("payload kind metadata", () => {
@@ -534,12 +963,157 @@ describe("audit-event chain verification", () => {
   });
 });
 
+const INVALID_PAYLOAD_KIND_DESCRIPTION_CASES = [
+  { name: "symbol", kind: Symbol("kind"), message: /Symbol\(kind\)/ },
+  { name: "null", kind: null, message: /null/ },
+  { name: "object", kind: { madeUp: true }, message: /\[object\]/ },
+  { name: "number", kind: 42, message: /42/ },
+] as const;
+
+const MERKLE_ROOT_RECORD_FIELD_NAMES = [
+  "seqNo",
+  "rootHash",
+  "signedAt",
+  "ephemeralKeyId",
+  "signature",
+  "certChainPem",
+] as const satisfies readonly (keyof MerkleRootRecord)[];
+
+const MERKLE_ROOT_FIELD_VALIDATION_CASES = [
+  {
+    name: "seqNo type",
+    path: "/seqNo",
+    message: /EventLsn string/,
+    apply: (record: MutableMerkleRootRecord): MutableMerkleRootRecord => ({
+      ...record,
+      seqNo: 42,
+    }),
+  },
+  {
+    name: "seqNo format",
+    path: "/seqNo",
+    message: /malformed v1 LSN/,
+    apply: (record: MutableMerkleRootRecord): MutableMerkleRootRecord => ({
+      ...record,
+      seqNo: "v1:01",
+    }),
+  },
+  {
+    name: "rootHash lowercase sha256 format",
+    path: "/rootHash",
+    message: /sha256 hex digest/,
+    apply: (record: MutableMerkleRootRecord): MutableMerkleRootRecord => ({
+      ...record,
+      rootHash: "A".repeat(64),
+    }),
+  },
+  {
+    name: "signedAt Date validity",
+    path: "/signedAt",
+    message: /valid Date/,
+    apply: (record: MutableMerkleRootRecord): MutableMerkleRootRecord => ({
+      ...record,
+      signedAt: new Date("invalid"),
+    }),
+  },
+  {
+    name: "ephemeralKeyId presence",
+    path: "/ephemeralKeyId",
+    message: /non-empty string/,
+    apply: (record: MutableMerkleRootRecord): MutableMerkleRootRecord => ({
+      ...record,
+      ephemeralKeyId: "",
+    }),
+  },
+  {
+    name: "signature presence",
+    path: "/signature",
+    message: /non-empty base64 string/,
+    apply: (record: MutableMerkleRootRecord): MutableMerkleRootRecord => ({
+      ...record,
+      signature: "",
+    }),
+  },
+  {
+    name: "signature base64 alphabet",
+    path: "/signature",
+    message: /non-empty base64 string/,
+    apply: (record: MutableMerkleRootRecord): MutableMerkleRootRecord => ({
+      ...record,
+      signature: "not base64!",
+    }),
+  },
+  {
+    name: "certChainPem presence",
+    path: "/certChainPem",
+    message: /non-empty string/,
+    apply: (record: MutableMerkleRootRecord): MutableMerkleRootRecord => ({
+      ...record,
+      certChainPem: "",
+    }),
+  },
+] as const;
+
+type MutableMerkleRootRecord = Record<keyof MerkleRootRecord, unknown>;
+
 function recordAt(chain: readonly AuditEventRecord[], index: number): AuditEventRecord {
   const record = chain[index];
   if (record === undefined) {
     throw new Error(`missing audit record at ${index}`);
   }
   return record;
+}
+
+function auditRecord(input: AuditRecordInput = {}): AuditEventRecord {
+  return {
+    seqNo: input.seqNo ?? lsnFromV1Number(0),
+    timestamp: input.timestamp ?? new Date("2026-05-08T00:00:00.000Z"),
+    prevHash: input.prevHash ?? GENESIS_PREV_HASH,
+    eventHash: input.eventHash ?? GENESIS_PREV_HASH,
+    payload: input.payload ?? {
+      kind: "receipt_created",
+      body: new TextEncoder().encode("event-0"),
+    },
+  };
+}
+
+function expectIncrementalState(
+  result: ReturnType<typeof verifyChainIncremental>,
+): ChainVerifierState {
+  expect(result.ok).toBe(true);
+  if (!result.ok) {
+    throw new Error(result.reason);
+  }
+  return result.state;
+}
+
+function expectFailureCode(
+  result: ReturnType<typeof verifyChain> | ReturnType<typeof verifyChainIncremental>,
+  code: ChainFailureCode,
+  expectedLocalSeqNo: number,
+): void {
+  expect(result.ok).toBe(false);
+  if (result.ok) {
+    throw new Error(`expected ${code}, got ok`);
+  }
+  expect(result.code).toBe(code);
+  expect(localLsn(result.brokenAtSeqNo)).toBe(expectedLocalSeqNo);
+}
+
+function flipFirstPayloadBodyBit(record: AuditEventRecord): AuditEventRecord {
+  const body = new Uint8Array(record.payload.body);
+  const firstByte = body[0];
+  if (firstByte === undefined) {
+    throw new Error("cannot flip the first bit of an empty payload body");
+  }
+  body[0] = firstByte ^ 1;
+  return {
+    ...record,
+    payload: {
+      ...record.payload,
+      body,
+    },
+  };
 }
 
 function previousComputeEventHash(recordBytes: Uint8Array): Sha256Hex {
@@ -660,6 +1234,17 @@ function firstMerkleRootVector(): MerkleRootVector {
     throw new Error("fixture must contain a Merkle root vector");
   }
   return vector;
+}
+
+function mutableMerkleRootRecord(record: MerkleRootRecord): MutableMerkleRootRecord {
+  return {
+    seqNo: record.seqNo,
+    rootHash: record.rootHash,
+    signedAt: record.signedAt,
+    ephemeralKeyId: record.ephemeralKeyId,
+    signature: record.signature,
+    certChainPem: record.certChainPem,
+  };
 }
 
 function requireRecord(value: unknown, path: string): Readonly<Record<string, unknown>> {
