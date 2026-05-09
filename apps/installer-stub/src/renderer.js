@@ -3,6 +3,7 @@ const installButton = document.querySelector("#install-update");
 const installerTitle = document.querySelector("#installer-title");
 const buildChannel = document.querySelector("#build-channel");
 const updateState = document.querySelector("#update-state");
+const updater = window.wuphfUpdater;
 
 let currentState = "idle";
 
@@ -47,46 +48,50 @@ function setUpdateState(state) {
   }
 }
 
-button?.addEventListener("click", async () => {
-  try {
-    if (currentState === "downloaded") {
-      await window.wuphfUpdater.installUpdateAndRestart();
-      return;
+if (!updater) {
+  setUpdateState({ state: "error", message: "Updater bridge unavailable" });
+} else {
+  button?.addEventListener("click", async () => {
+    try {
+      if (currentState === "downloaded") {
+        await updater.installUpdateAndRestart();
+        return;
+      }
+
+      if (currentState === "available" || currentState === "cancelled") {
+        await updater.downloadUpdate();
+        return;
+      }
+
+      setUpdateState({ state: "checking" });
+      await updater.checkForUpdates();
+    } catch (error) {
+      setUpdateState({ state: "error", message: error.message });
     }
-
-    if (currentState === "available" || currentState === "cancelled") {
-      await window.wuphfUpdater.downloadUpdate();
-      return;
-    }
-
-    setUpdateState({ state: "checking" });
-    await window.wuphfUpdater.checkForUpdates();
-  } catch (error) {
-    setUpdateState({ state: "error", message: error.message });
-  }
-});
-
-installButton?.addEventListener("click", async () => {
-  try {
-    await window.wuphfUpdater.installUpdateAndRestart();
-  } catch (error) {
-    setUpdateState({ state: "error", message: error.message });
-  }
-});
-
-window.wuphfUpdater.onUpdateState(setUpdateState);
-
-window.wuphfUpdater
-  .getInstallerVersion()
-  .then((metadata) => {
-    if (installerTitle) {
-      installerTitle.textContent = `WUPHF installer-stub v${metadata.version}`;
-    }
-
-    if (buildChannel) {
-      buildChannel.textContent = `Channel: ${metadata.channel}`;
-    }
-  })
-  .catch((error) => {
-    setUpdateState({ state: "error", message: error.message });
   });
+
+  installButton?.addEventListener("click", async () => {
+    try {
+      await updater.installUpdateAndRestart();
+    } catch (error) {
+      setUpdateState({ state: "error", message: error.message });
+    }
+  });
+
+  updater.onUpdateState(setUpdateState);
+
+  updater
+    .getInstallerVersion()
+    .then((metadata) => {
+      if (installerTitle) {
+        installerTitle.textContent = `WUPHF installer-stub v${metadata.version}`;
+      }
+
+      if (buildChannel) {
+        buildChannel.textContent = `Channel: ${metadata.channel}`;
+      }
+    })
+    .catch((error) => {
+      setUpdateState({ state: "error", message: error.message });
+    });
+}
