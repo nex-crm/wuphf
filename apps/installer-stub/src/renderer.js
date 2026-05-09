@@ -34,10 +34,9 @@ function setUpdateState(state) {
 
   if (button) {
     button.disabled = state.state === "checking" || state.state === "downloading";
+    button.hidden = state.state === "downloaded";
     if (state.state === "available" || state.state === "cancelled") {
       button.textContent = "Download update";
-    } else if (state.state === "downloaded") {
-      button.textContent = "Restart and install";
     } else {
       button.textContent = "Check for updates";
     }
