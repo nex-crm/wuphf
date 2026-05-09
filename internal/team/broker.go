@@ -96,7 +96,7 @@ type Broker struct {
 	// the durable source of truth. The two are kept in sync by
 	// AppendReviewerGrade — Lane C mirrors writes to Lane D on each
 	// grade. Guarded by b.mu.
-	reviewerGradesByTask map[string][]ReviewerGrade
+	reviewerGradesByTask    map[string][]ReviewerGrade
 	requests                []humanInterview
 	humanInvites            []humanInvite
 	humanSessions           []humanSession
