@@ -10,7 +10,13 @@ import type { Sha256Hex } from "./sha256.ts";
 export type ReceiptId = Brand<string, "ReceiptId">;
 export type AgentSlug = Brand<string, "AgentSlug">;
 export type TaskId = Brand<string, "TaskId">;
-export type ProviderKind = Brand<string, "ProviderKind">;
+// ProviderKind is intentionally a closed enum at the type level. The
+// PROVIDER_KIND_VALUES tuple below is the single source of truth — adding a
+// value there both extends the type and forces every `switch (providerKind)`
+// statement in the codebase to handle it (no fallthrough). Don't widen this to
+// `Brand<string, ...>`; that loses exhaustiveness and re-introduces the
+// silent-drift problem the closed-enum policy exists to prevent.
+export type ProviderKind = Brand<(typeof PROVIDER_KIND_VALUES)[number], "ProviderKind">;
 export type ToolCallId = Brand<string, "ToolCallId">;
 export type ApprovalId = Brand<string, "ApprovalId">;
 
@@ -93,17 +99,59 @@ export interface SignedApprovalToken {
   readonly brokerVerificationStatus: "valid" | "expired" | "tampered";
 }
 
-export interface ExternalWrite {
+// `ExternalWrite` is a discriminated union over `result`. Per-state field
+// shapes are enforced at the type level so consumers can `switch (write.result)`
+// to access fields that are guaranteed non-null for that state — and so a
+// representation like `result: "applied"` with `appliedDiff: null` becomes a
+// type error instead of a silent runtime impossibility. The validator and
+// codec mirror these invariants at the wire boundary.
+export interface ExternalWriteCommon {
   readonly action: string;
   readonly target: string;
   readonly idempotencyKey: string;
   readonly proposedDiff: FrozenArgs;
-  readonly appliedDiff: FrozenArgs | null;
   readonly approvalToken: SignedApprovalToken | null;
   readonly approvedAt?: Date | undefined;
-  readonly result: WriteResult;
+}
+
+export interface ExternalWriteApplied extends ExternalWriteCommon {
+  readonly result: "applied";
+  // Both required: an applied write has a known applied diff and a verified
+  // post-state. If post-write verification was skipped (e.g. low-risk write
+  // policy), the result is "partial", not "applied".
+  readonly appliedDiff: FrozenArgs;
+  readonly postWriteVerify: FrozenArgs;
+}
+
+export interface ExternalWriteRejected extends ExternalWriteCommon {
+  readonly result: "rejected";
+  // Nothing was written, so neither field carries data.
+  readonly appliedDiff: null;
+  readonly postWriteVerify: null;
+}
+
+export interface ExternalWritePartial extends ExternalWriteCommon {
+  readonly result: "partial";
+  // Some bytes landed but verification couldn't confirm the full diff. The
+  // applied diff is what the writer believes was committed; postWriteVerify
+  // may be null if verification was attempted and failed.
+  readonly appliedDiff: FrozenArgs;
   readonly postWriteVerify: FrozenArgs | null;
 }
+
+export interface ExternalWriteRollback extends ExternalWriteCommon {
+  readonly result: "rollback";
+  // The diff that was applied and then reverted. Verification is skipped for
+  // rolled-back writes — the post-state is, by definition, the pre-state.
+  readonly appliedDiff: FrozenArgs;
+  readonly postWriteVerify: null;
+}
+
+export type ExternalWrite =
+  | ExternalWriteApplied
+  | ExternalWriteRejected
+  | ExternalWritePartial
+  | ExternalWriteRollback;
 
 export interface ReceiptSnapshot {
   readonly id: ReceiptId;
@@ -156,7 +204,11 @@ const ULID_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/;
 const AGENT_SLUG_RE = /^[a-z0-9][a-z0-9_-]*$/;
 const LOCAL_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
-const PROVIDER_KIND_VALUES = ["anthropic", "openai", "openai-compat", "openclaw"] as const;
+// Exported because ProviderKind is `Brand<(typeof PROVIDER_KIND_VALUES)[number], …>`
+// — consumers that need to enumerate the supported providers (forms, picker
+// UI, exhaustive switches) read this tuple. It is the single source of truth;
+// keep the order stable so any UI sort that relies on it doesn't churn.
+export const PROVIDER_KIND_VALUES = ["anthropic", "openai", "openai-compat", "openclaw"] as const;
 const PROVIDER_KIND_SET: ReadonlySet<string> = new Set(PROVIDER_KIND_VALUES);
 
 export function asReceiptId(s: string): ReceiptId {

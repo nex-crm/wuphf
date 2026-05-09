@@ -7,16 +7,24 @@
 
 import { FrozenArgs } from "./frozen-args.ts";
 import {
+  type ApprovalEvent,
+  type CommitRef,
+  type ExternalWrite,
+  type FileChange,
   isAgentSlug,
   isApprovalId,
   isProviderKind,
   isReceiptId,
   isTaskId,
   isToolCallId,
+  type MemoryWriteRef,
   type ReceiptSnapshot,
   type ReceiptValidationError,
   type ReceiptValidationResult,
   type RiskClass,
+  type SignedApprovalToken,
+  type SourceRead,
+  type ToolCall,
   type TriggerKind,
   type WriteResult,
 } from "./receipt-types.ts";
@@ -58,7 +66,14 @@ const FILE_CHANGE_MODE_VALUES = ["created", "modified", "deleted"] as const;
 const MEMORY_STORE_VALUES = ["notebook", "wiki"] as const;
 const BROKER_VERIFICATION_STATUS_VALUES = ["valid", "expired", "tampered"] as const;
 
-export const RECEIPT_KEYS: ReadonlySet<string> = new Set<string>([
+// Allowlists are tied to interface declarations via `satisfies readonly
+// (keyof T)[]`. Adding a typo'd entry fails typecheck. The reverse direction
+// — interface gains a new field, allowlist forgot to mirror — is covered by
+// the round-trip + property tests in tests/receipt.spec.ts (a missing key in
+// the codec produces a serialization that fails to decode), but reviewers
+// should still spot-check the matching tuple when adding fields.
+
+const RECEIPT_KEYS_TUPLE = [
   "id",
   "agentSlug",
   "taskId",
@@ -90,8 +105,10 @@ export const RECEIPT_KEYS: ReadonlySet<string> = new Set<string>([
   "gitHeadStart",
   "gitHeadEnd",
   "schemaVersion",
-]);
-export const SOURCE_READ_KEYS: ReadonlySet<string> = new Set<string>([
+] as const satisfies readonly (keyof ReceiptSnapshot)[];
+export const RECEIPT_KEYS: ReadonlySet<string> = new Set<string>(RECEIPT_KEYS_TUPLE);
+
+const SOURCE_READ_KEYS_TUPLE = [
   "provider",
   "entityType",
   "entityId",
@@ -99,8 +116,10 @@ export const SOURCE_READ_KEYS: ReadonlySet<string> = new Set<string>([
   "hash",
   "citation",
   "rawRef",
-]);
-export const TOOL_CALL_KEYS: ReadonlySet<string> = new Set<string>([
+] as const satisfies readonly (keyof SourceRead)[];
+export const SOURCE_READ_KEYS: ReadonlySet<string> = new Set<string>(SOURCE_READ_KEYS_TUPLE);
+
+const TOOL_CALL_KEYS_TUPLE = [
   "toolId",
   "toolName",
   "inputs",
@@ -109,44 +128,58 @@ export const TOOL_CALL_KEYS: ReadonlySet<string> = new Set<string>([
   "finishedAt",
   "status",
   "error",
-]);
-export const APPROVAL_EVENT_KEYS: ReadonlySet<string> = new Set<string>([
+] as const satisfies readonly (keyof ToolCall)[];
+export const TOOL_CALL_KEYS: ReadonlySet<string> = new Set<string>(TOOL_CALL_KEYS_TUPLE);
+
+const APPROVAL_EVENT_KEYS_TUPLE = [
   "approvalId",
   "role",
   "decision",
   "signedToken",
   "decidedAt",
-]);
-export const FILE_CHANGE_KEYS: ReadonlySet<string> = new Set<string>([
+] as const satisfies readonly (keyof ApprovalEvent)[];
+export const APPROVAL_EVENT_KEYS: ReadonlySet<string> = new Set<string>(APPROVAL_EVENT_KEYS_TUPLE);
+
+const FILE_CHANGE_KEYS_TUPLE = [
   "path",
   "mode",
   "beforeHash",
   "afterHash",
   "linesAdded",
   "linesRemoved",
-]);
-export const COMMIT_REF_KEYS: ReadonlySet<string> = new Set<string>([
+] as const satisfies readonly (keyof FileChange)[];
+export const FILE_CHANGE_KEYS: ReadonlySet<string> = new Set<string>(FILE_CHANGE_KEYS_TUPLE);
+
+const COMMIT_REF_KEYS_TUPLE = [
   "sha",
   "message",
   "author",
   "authorEmail",
   "parentSha",
   "signed",
-]);
-export const MEMORY_WRITE_KEYS: ReadonlySet<string> = new Set<string>([
+] as const satisfies readonly (keyof CommitRef)[];
+export const COMMIT_REF_KEYS: ReadonlySet<string> = new Set<string>(COMMIT_REF_KEYS_TUPLE);
+
+const MEMORY_WRITE_KEYS_TUPLE = [
   "store",
   "slug",
   "hash",
   "citation",
-]);
-// Wire shape for `FrozenArgs` JSON envelopes — must match the shape produced by
-// `frozenArgsToJsonValue` in receipt.ts. The receipt codec rejects unknown keys
-// at every other object boundary; without this set, `frozenArgsFromJson` was
-// the one boundary where extra siblings (e.g. `{canonicalJson, hash, extra}`)
-// would silently survive a decode/encode round-trip and not be covered by the
-// hash. Keep in sync with receipt.ts:frozenArgsToJsonValue.
-export const FROZEN_ARGS_KEYS: ReadonlySet<string> = new Set<string>(["canonicalJson", "hash"]);
-export const SIGNED_APPROVAL_TOKEN_KEYS: ReadonlySet<string> = new Set<string>([
+] as const satisfies readonly (keyof MemoryWriteRef)[];
+export const MEMORY_WRITE_KEYS: ReadonlySet<string> = new Set<string>(MEMORY_WRITE_KEYS_TUPLE);
+
+// FrozenArgs is a class — its public-shape envelope on the wire is
+// `{ canonicalJson, hash }`. Keep this set in sync with the wire codec in
+// receipt.ts:frozenArgsToJsonValue. Without this allowlist, sibling fields
+// like `{canonicalJson, hash, extra}` round-tripped silently and were not
+// covered by the hash — the one place the strict-unknown contract leaked.
+const FROZEN_ARGS_KEYS_TUPLE = [
+  "canonicalJson",
+  "hash",
+] as const satisfies readonly (keyof FrozenArgs)[];
+export const FROZEN_ARGS_KEYS: ReadonlySet<string> = new Set<string>(FROZEN_ARGS_KEYS_TUPLE);
+
+const SIGNED_APPROVAL_TOKEN_KEYS_TUPLE = [
   "signerIdentity",
   "role",
   "receiptId",
@@ -155,8 +188,12 @@ export const SIGNED_APPROVAL_TOKEN_KEYS: ReadonlySet<string> = new Set<string>([
   "expiresAt",
   "webauthnAssertion",
   "brokerVerificationStatus",
-]);
-export const EXTERNAL_WRITE_KEYS: ReadonlySet<string> = new Set<string>([
+] as const satisfies readonly (keyof SignedApprovalToken)[];
+export const SIGNED_APPROVAL_TOKEN_KEYS: ReadonlySet<string> = new Set<string>(
+  SIGNED_APPROVAL_TOKEN_KEYS_TUPLE,
+);
+
+const EXTERNAL_WRITE_KEYS_TUPLE = [
   "action",
   "target",
   "idempotencyKey",
@@ -166,7 +203,8 @@ export const EXTERNAL_WRITE_KEYS: ReadonlySet<string> = new Set<string>([
   "approvedAt",
   "result",
   "postWriteVerify",
-]);
+] as const satisfies readonly (keyof ExternalWrite)[];
+export const EXTERNAL_WRITE_KEYS: ReadonlySet<string> = new Set<string>(EXTERNAL_WRITE_KEYS_TUPLE);
 
 export function validateReceipt(input: unknown): ReceiptValidationResult {
   try {
@@ -450,9 +488,6 @@ function validateExternalWrite(
   validateRequired(value, "target", path, errors, validateString);
   validateRequired(value, "idempotencyKey", path, errors, validateString);
   validateRequired(value, "proposedDiff", path, errors, validateFrozenArgs);
-  validateRequired(value, "appliedDiff", path, errors, (v, p, e) =>
-    validateNullable(v, p, e, validateFrozenArgs),
-  );
   validateRequired(value, "approvalToken", path, errors, (v, p, e) =>
     validateNullable(v, p, e, validateSignedApprovalToken),
   );
@@ -460,9 +495,41 @@ function validateExternalWrite(
   validateRequired(value, "result", path, errors, (v, p, e) =>
     validateLiteral(v, p, e, WRITE_RESULT_VALUES, "must be a valid write result"),
   );
-  validateRequired(value, "postWriteVerify", path, errors, (v, p, e) =>
-    validateNullable(v, p, e, validateFrozenArgs),
-  );
+
+  // Per-state field requirements mirror the discriminated-union shape in
+  // receipt-types.ts. The codec enforces the same invariants in
+  // `externalWriteFromJson` — the two sides must agree, otherwise we get
+  // round-trip skew (codec accepts what validator rejects, or vice versa).
+  const result = recordValue(value, "result");
+  const appliedDiffPath = pointer(path, "appliedDiff");
+  const postWriteVerifyPath = pointer(path, "postWriteVerify");
+  const appliedDiffValue = recordValue(value, "appliedDiff");
+  const postWriteVerifyValue = recordValue(value, "postWriteVerify");
+  const requireFrozen = (val: unknown, p: string, state: string): void => {
+    if (val === null) {
+      addError(errors, p, `must be a FrozenArgs envelope (null is invalid for state "${state}")`);
+    } else {
+      validateFrozenArgs(val, p, errors);
+    }
+  };
+  const requireNull = (val: unknown, p: string, state: string): void => {
+    if (val !== null) {
+      addError(errors, p, `must be null for state "${state}"`);
+    }
+  };
+  if (result === "applied") {
+    requireFrozen(appliedDiffValue, appliedDiffPath, "applied");
+    requireFrozen(postWriteVerifyValue, postWriteVerifyPath, "applied");
+  } else if (result === "rejected") {
+    requireNull(appliedDiffValue, appliedDiffPath, "rejected");
+    requireNull(postWriteVerifyValue, postWriteVerifyPath, "rejected");
+  } else if (result === "partial") {
+    requireFrozen(appliedDiffValue, appliedDiffPath, "partial");
+    validateNullable(postWriteVerifyValue, postWriteVerifyPath, errors, validateFrozenArgs);
+  } else if (result === "rollback") {
+    requireFrozen(appliedDiffValue, appliedDiffPath, "rollback");
+    requireNull(postWriteVerifyValue, postWriteVerifyPath, "rollback");
+  }
 
   // Cross-field invariants: when present, the approval token must reference
   // this receipt and bind to the proposedDiff hash. RFC §6 invariant chain.

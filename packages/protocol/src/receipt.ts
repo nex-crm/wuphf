@@ -73,6 +73,11 @@ export type {
   ApprovalId,
   CommitRef,
   ExternalWrite,
+  ExternalWriteApplied,
+  ExternalWriteCommon,
+  ExternalWritePartial,
+  ExternalWriteRejected,
+  ExternalWriteRollback,
   FileChange,
   MemoryWriteRef,
   ProviderKind,
@@ -103,6 +108,7 @@ export {
   isReceiptId,
   isTaskId,
   isToolCallId,
+  PROVIDER_KIND_VALUES,
 } from "./receipt-types.ts";
 export { isReceiptSnapshot, validateReceipt } from "./receipt-validator.ts";
 
@@ -427,7 +433,8 @@ function externalWriteFromJson(value: unknown, path: string): ExternalWrite {
   const record = requireRecord(value, path);
   assertKnownKeys(record, path, EXTERNAL_WRITE_KEYS);
   const approvedAt = optionalDateFromJson(record, "approvedAt", path);
-  return {
+  const result = requiredLiteralFromJson(record, "result", path, WRITE_RESULT_VALUES);
+  const common = {
     action: requiredStringFromJson(record, "action", path),
     target: requiredStringFromJson(record, "target", path),
     idempotencyKey: requiredStringFromJson(record, "idempotencyKey", path),
@@ -435,21 +442,73 @@ function externalWriteFromJson(value: unknown, path: string): ExternalWrite {
       requiredFieldFromJson(record, "proposedDiff", path),
       pointer(path, "proposedDiff"),
     ),
-    appliedDiff: nullableFrozenArgsFromJson(
-      requiredFieldFromJson(record, "appliedDiff", path),
-      pointer(path, "appliedDiff"),
-    ),
     approvalToken: nullableSignedApprovalTokenFromJson(
       requiredFieldFromJson(record, "approvalToken", path),
       pointer(path, "approvalToken"),
     ),
     ...(approvedAt === undefined ? {} : { approvedAt }),
-    result: requiredLiteralFromJson(record, "result", path, WRITE_RESULT_VALUES),
-    postWriteVerify: nullableFrozenArgsFromJson(
-      requiredFieldFromJson(record, "postWriteVerify", path),
-      pointer(path, "postWriteVerify"),
-    ),
   };
+  const appliedDiffPath = pointer(path, "appliedDiff");
+  const postWriteVerifyPath = pointer(path, "postWriteVerify");
+  const appliedDiffValue = requiredFieldFromJson(record, "appliedDiff", path);
+  const postWriteVerifyValue = requiredFieldFromJson(record, "postWriteVerify", path);
+
+  // Per-state field requirements mirror the discriminated-union shape in
+  // receipt-types.ts. The validator enforces the same invariants — keep both
+  // sides in sync; a divergence would let the codec accept records the
+  // validator rejects (or vice versa) and break round-trips.
+  switch (result) {
+    case "applied":
+      return {
+        ...common,
+        result,
+        appliedDiff: requireNonNullFrozenArgs(appliedDiffValue, appliedDiffPath, "applied"),
+        postWriteVerify: requireNonNullFrozenArgs(
+          postWriteVerifyValue,
+          postWriteVerifyPath,
+          "applied",
+        ),
+      };
+    case "rejected":
+      requireNullField(appliedDiffValue, appliedDiffPath, "rejected");
+      requireNullField(postWriteVerifyValue, postWriteVerifyPath, "rejected");
+      return {
+        ...common,
+        result,
+        appliedDiff: null,
+        postWriteVerify: null,
+      };
+    case "partial":
+      return {
+        ...common,
+        result,
+        appliedDiff: requireNonNullFrozenArgs(appliedDiffValue, appliedDiffPath, "partial"),
+        postWriteVerify: nullableFrozenArgsFromJson(postWriteVerifyValue, postWriteVerifyPath),
+      };
+    case "rollback":
+      requireNullField(postWriteVerifyValue, postWriteVerifyPath, "rollback");
+      return {
+        ...common,
+        result,
+        appliedDiff: requireNonNullFrozenArgs(appliedDiffValue, appliedDiffPath, "rollback"),
+        postWriteVerify: null,
+      };
+  }
+}
+
+function requireNonNullFrozenArgs(value: unknown, path: string, state: string): FrozenArgs {
+  if (value === null) {
+    throw new Error(
+      `${path}: must be a FrozenArgs envelope (null is invalid for state "${state}")`,
+    );
+  }
+  return frozenArgsFromJson(value, path);
+}
+
+function requireNullField(value: unknown, path: string, state: string): void {
+  if (value !== null) {
+    throw new Error(`${path}: must be null for state "${state}"`);
+  }
 }
 
 function frozenArgsToJsonValue(value: FrozenArgs): Record<string, unknown> {
