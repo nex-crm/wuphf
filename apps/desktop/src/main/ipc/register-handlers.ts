@@ -1,29 +1,43 @@
 import { type IpcMainInvokeEvent, ipcMain } from "electron";
 
 import { IPC_CHANNEL_VALUES, IpcChannel, type IpcChannelName } from "../../shared/api-contract.ts";
-import { handleGetAppVersion } from "./get-app-version.ts";
-import { type BrokerStatusProvider, handleGetBrokerStatus } from "./get-broker-status.ts";
-import { handleGetPlatform } from "./get-platform.ts";
-import { handleOpenExternal } from "./open-external.ts";
-import { handleShowItemInFolder } from "./show-item-in-folder.ts";
+import type { Logger } from "../logger.ts";
+import { createGetAppVersionHandler } from "./get-app-version.ts";
+import { type BrokerStatusProvider, createGetBrokerStatusHandler } from "./get-broker-status.ts";
+import { createGetPlatformHandler } from "./get-platform.ts";
+import { createOpenExternalHandler } from "./open-external.ts";
+import { createShowItemInFolderHandler } from "./show-item-in-folder.ts";
 
 export type IpcHandler = (event: IpcMainInvokeEvent, request: unknown) => unknown;
 export type IpcHandlers = Record<IpcChannelName, IpcHandler>;
 
-export function createIpcHandlers(brokerStatusProvider: BrokerStatusProvider): IpcHandlers {
+export interface IpcRegistrationOptions {
+  readonly logger?: Logger;
+}
+
+export function createIpcHandlers(
+  brokerStatusProvider: BrokerStatusProvider,
+  options: IpcRegistrationOptions = {},
+): IpcHandlers {
+  const handlerOptions = options.logger === undefined ? {} : { logger: options.logger };
   const handlers: IpcHandlers = {
-    [IpcChannel.OpenExternal]: handleOpenExternal,
-    [IpcChannel.ShowItemInFolder]: handleShowItemInFolder,
-    [IpcChannel.GetAppVersion]: handleGetAppVersion,
-    [IpcChannel.GetPlatform]: handleGetPlatform,
-    [IpcChannel.GetBrokerStatus]: (event, request) =>
-      handleGetBrokerStatus(brokerStatusProvider, event, request),
+    [IpcChannel.OpenExternal]: createOpenExternalHandler(handlerOptions),
+    [IpcChannel.ShowItemInFolder]: createShowItemInFolderHandler(handlerOptions),
+    [IpcChannel.GetAppVersion]: createGetAppVersionHandler(handlerOptions),
+    [IpcChannel.GetPlatform]: createGetPlatformHandler(handlerOptions),
+    [IpcChannel.GetBrokerStatus]: createGetBrokerStatusHandler(
+      brokerStatusProvider,
+      handlerOptions,
+    ),
   };
   return handlers;
 }
 
-export function registerIpcHandlers(brokerStatusProvider: BrokerStatusProvider): void {
-  const handlers = createIpcHandlers(brokerStatusProvider);
+export function registerIpcHandlers(
+  brokerStatusProvider: BrokerStatusProvider,
+  options: IpcRegistrationOptions = {},
+): void {
+  const handlers = createIpcHandlers(brokerStatusProvider, options);
   const channels = Object.keys(handlers) as readonly IpcChannelName[];
   assertRegisteredChannels(channels);
 

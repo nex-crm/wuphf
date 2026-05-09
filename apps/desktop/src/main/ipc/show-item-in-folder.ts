@@ -3,10 +3,13 @@ import { type IpcMainInvokeEvent, shell } from "electron";
 
 import {
   errResponse,
+  IpcChannel,
   okResponse,
   type ShowItemInFolderResponse,
 } from "../../shared/api-contract.ts";
+import type { Logger, LogPayload } from "../logger.ts";
 import { assertMaxStringLength, invalidRequest, isExactObject } from "./_guards.ts";
+import { logIpcPayloadRejected } from "./_logging.ts";
 
 const MAX_PATH_BYTES = 32_768;
 
@@ -14,42 +17,59 @@ interface ValidShowItemInFolderRequest {
   readonly path: string;
 }
 
-export function handleShowItemInFolder(
-  _event: IpcMainInvokeEvent,
-  request: unknown,
-): ShowItemInFolderResponse {
-  if (!isShowItemInFolderRequest(request)) {
-    return invalidRequest("showItemInFolder expects exactly one string field: path");
-  }
-
-  const sizeValidation = assertMaxStringLength(request.path, MAX_PATH_BYTES, "path");
-  if (!sizeValidation.valid) {
-    return invalidRequest(sizeValidation.error);
-  }
-
-  const normalizedPath = nodePath.normalize(request.path);
-  if (request.path.includes("\0") || normalizedPath.includes("\0")) {
-    return errResponse("Path must not contain NUL bytes");
-  }
-
-  if (!nodePath.isAbsolute(normalizedPath)) {
-    return errResponse("Path must be absolute");
-  }
-
-  if (hasParentTraversalSegment(request.path) || hasParentTraversalSegment(normalizedPath)) {
-    return errResponse("Path must not contain parent traversal segments");
-  }
-
-  try {
-    // Electron returns void here; only synchronous OS/shell failures can be surfaced.
-    shell.showItemInFolder(normalizedPath);
-    return okResponse();
-  } catch (error) {
-    return errResponse(
-      error instanceof Error ? error.message : "Failed to reveal path in OS file manager",
-    );
-  }
+export interface ShowItemInFolderHandlerOptions {
+  readonly logger?: Logger;
 }
+
+export function createShowItemInFolderHandler(
+  options: ShowItemInFolderHandlerOptions = {},
+): (event: IpcMainInvokeEvent, request: unknown) => ShowItemInFolderResponse {
+  return function showItemInFolderHandler(
+    _event: IpcMainInvokeEvent,
+    request: unknown,
+  ): ShowItemInFolderResponse {
+    if (!isShowItemInFolderRequest(request)) {
+      logRejection(options.logger, "invalid_request");
+      return invalidRequest("showItemInFolder expects exactly one string field: path");
+    }
+
+    const sizeValidation = assertMaxStringLength(request.path, MAX_PATH_BYTES, "path");
+    if (!sizeValidation.valid) {
+      logRejection(options.logger, "oversized_path", {
+        payloadBytes: Buffer.byteLength(request.path, "utf8"),
+      });
+      return invalidRequest(sizeValidation.error);
+    }
+
+    const normalizedPath = nodePath.normalize(request.path);
+    if (request.path.includes("\0") || normalizedPath.includes("\0")) {
+      logRejection(options.logger, "nul_byte");
+      return errResponse("Path must not contain NUL bytes");
+    }
+
+    if (!nodePath.isAbsolute(normalizedPath)) {
+      logRejection(options.logger, "non_absolute_path");
+      return errResponse("Path must be absolute");
+    }
+
+    if (hasParentTraversalSegment(request.path) || hasParentTraversalSegment(normalizedPath)) {
+      logRejection(options.logger, "parent_traversal");
+      return errResponse("Path must not contain parent traversal segments");
+    }
+
+    try {
+      // Electron returns void here; only synchronous OS/shell failures can be surfaced.
+      shell.showItemInFolder(normalizedPath);
+      return okResponse();
+    } catch (error) {
+      return errResponse(
+        error instanceof Error ? error.message : "Failed to reveal path in OS file manager",
+      );
+    }
+  };
+}
+
+export const handleShowItemInFolder = createShowItemInFolderHandler();
 
 function isShowItemInFolderRequest(request: unknown): request is ValidShowItemInFolderRequest {
   return (
@@ -60,4 +80,8 @@ function isShowItemInFolderRequest(request: unknown): request is ValidShowItemIn
 
 function hasParentTraversalSegment(value: string): boolean {
   return value.split(/[\\/]+/).some((segment) => segment === "..");
+}
+
+function logRejection(logger: Logger | undefined, reason: string, payload: LogPayload = {}): void {
+  logIpcPayloadRejected(logger, IpcChannel.ShowItemInFolder, reason, payload);
 }

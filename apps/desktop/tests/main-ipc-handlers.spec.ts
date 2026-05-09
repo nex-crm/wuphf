@@ -1,11 +1,14 @@
 import type { IpcMainInvokeEvent } from "electron";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-
+import { assertMaxStringLength } from "../src/main/ipc/_guards.ts";
 import { handleGetAppVersion } from "../src/main/ipc/get-app-version.ts";
 import { handleGetBrokerStatus } from "../src/main/ipc/get-broker-status.ts";
 import { handleGetPlatform, narrowPlatform } from "../src/main/ipc/get-platform.ts";
 import { createOpenExternalHandler, handleOpenExternal } from "../src/main/ipc/open-external.ts";
+import { createIpcHandlers } from "../src/main/ipc/register-handlers.ts";
 import { handleShowItemInFolder } from "../src/main/ipc/show-item-in-folder.ts";
+import type { Logger, LogPayload } from "../src/main/logger.ts";
+import { IpcChannel } from "../src/shared/api-contract.ts";
 
 const electronMock = vi.hoisted(() => ({
   openExternal: vi.fn<(url: string) => Promise<void>>(() => Promise.resolve()),
@@ -93,6 +96,28 @@ describe("openExternal handler", () => {
     expect(electronMock.openExternal).not.toHaveBeenCalled();
   });
 
+  it("logs rejected URL payloads with channel and reason only", async () => {
+    const { logger, calls } = createMemoryLogger();
+    const openExternal = createOpenExternalHandler({ logger, monotonicNow: () => 0 });
+
+    await expect(openExternal(event, { url: "file:///Users/fran/private.txt" })).resolves.toEqual({
+      ok: false,
+      error: "Unsupported external URL protocol: file:",
+    });
+
+    expect(calls).toEqual([
+      {
+        level: "warn",
+        event: "ipc_payload_rejected",
+        payload: {
+          channel: IpcChannel.OpenExternal,
+          reason: "unsupported_scheme",
+          scheme: "file:",
+        },
+      },
+    ]);
+  });
+
   it("rate-limits the sixth rapid OS browser handoff", async () => {
     let nowMs = 0;
     const openExternal = createOpenExternalHandler({ monotonicNow: () => nowMs });
@@ -175,6 +200,26 @@ describe("showItemInFolder handler", () => {
     expect(handleShowItemInFolder(event, { path: "/legit/file" })).toEqual({
       ok: false,
       error: "OS refused reveal",
+    });
+  });
+
+  it("returns a stable error when the OS shell throws a non-Error value", () => {
+    electronMock.showItemInFolder.mockImplementationOnce(() => {
+      throw "rejected";
+    });
+
+    expect(handleShowItemInFolder(event, { path: "/legit/file" })).toEqual({
+      ok: false,
+      error: "Failed to reveal path in OS file manager",
+    });
+  });
+});
+
+describe("IPC guard helpers", () => {
+  it("rejects non-string values before byte-length checks", () => {
+    expect(assertMaxStringLength(42, 5, "field")).toEqual({
+      valid: false,
+      error: "field must be a string",
     });
   });
 });
@@ -276,3 +321,58 @@ describe("getBrokerStatus handler", () => {
     });
   });
 });
+
+describe("IPC handler registration logging", () => {
+  it("threads the IPC logger into empty-payload handlers", () => {
+    const { logger, calls } = createMemoryLogger();
+    const handlers = createIpcHandlers(
+      {
+        getSnapshot: () => ({
+          status: "alive",
+          pid: 1234,
+          restartCount: 2,
+        }),
+      },
+      { logger },
+    );
+
+    expect(handlers[IpcChannel.GetAppVersion](event, { extra: true })).toEqual({
+      ok: false,
+      error: "getAppVersion expects an empty request object",
+    });
+
+    expect(calls).toEqual([
+      {
+        level: "warn",
+        event: "ipc_payload_rejected",
+        payload: {
+          channel: IpcChannel.GetAppVersion,
+          reason: "invalid_request",
+        },
+      },
+    ]);
+  });
+});
+
+interface LogCall {
+  readonly level: "debug" | "info" | "warn" | "error";
+  readonly event: string;
+  readonly payload: LogPayload | undefined;
+}
+
+function createMemoryLogger(): { readonly logger: Logger; readonly calls: LogCall[] } {
+  const calls: LogCall[] = [];
+  const push = (level: LogCall["level"], event: string, payload?: LogPayload): void => {
+    calls.push({ level, event, payload });
+  };
+
+  return {
+    calls,
+    logger: {
+      debug: (event, payload) => push("debug", event, payload),
+      info: (event, payload) => push("info", event, payload),
+      warn: (event, payload) => push("warn", event, payload),
+      error: (event, payload) => push("error", event, payload),
+    },
+  };
+}
