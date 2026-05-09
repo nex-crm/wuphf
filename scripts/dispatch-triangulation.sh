@@ -365,7 +365,8 @@ for raw_lens in "${raw_lenses[@]}"; do
   lens="$(trim "$raw_lens")"
   [[ -n "$lens" ]] || continue
   lens_preamble "$lens" >/dev/null || die "unknown lens: $lens"
-  case " ${lenses[*]} " in
+  # Empty-array safe under set -u: ${lenses[*]:-} expands to '' on first iter.
+  case " ${lenses[*]:-} " in
     *" ${lens} "*) die "duplicate lens: $lens" ;;
   esac
   lenses+=("$lens")

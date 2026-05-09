@@ -1,19 +1,26 @@
 #!/usr/bin/env bash
 # dispatch-codex.sh - run codex exec with the protocol review preamble.
 #
-# Usage:
-#   bash scripts/dispatch-codex.sh \
+# Usage (works from any CWD):
+#   bash "$(git rev-parse --show-toplevel)/scripts/dispatch-codex.sh" \
 #     --worktree /path/to/worktree \
 #     --prompt /path/to/task-prompt.md \
 #     --output /path/to/output.md \
 #     [--profile auto] [--sandbox workspace-write]
+#
+# Or, from the repo root:
+#   bash scripts/dispatch-codex.sh ...
 
 set -euo pipefail
 
+# Anchor relative paths in the preamble to the repo root, regardless of CWD.
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd "$script_dir/.." && pwd)"
+
 usage() {
   cat >&2 <<'USAGE'
-Usage:
-  bash scripts/dispatch-codex.sh \
+Usage (works from any CWD):
+  bash "$(git rev-parse --show-toplevel)/scripts/dispatch-codex.sh" \
     --worktree /path/to/worktree \
     --prompt /path/to/task-prompt.md \
     --output /path/to/output.md \
