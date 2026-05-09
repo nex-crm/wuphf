@@ -82,4 +82,28 @@ rm "${missing_workflow_fixture}/.github/workflows/release-rewrite.yml"
 expect_status 2 "${missing_workflow_fixture}" "apps/installer-stub/scripts/check-invariants.sh" "${missing_workflow_fixture}/missing.out"
 expect_output_contains "${missing_workflow_fixture}/missing.out" "ERR: workflow file not found"
 
+unpinned_action_fixture="${tmp_root}/unpinned-action"
+write_fixture "${unpinned_action_fixture}"
+{
+  printf 'jobs:\n'
+  printf '  unpinned:\n'
+  printf '    runs-on: ubuntu-24.04\n'
+  printf '    steps:\n'
+  printf '      - uses: owner/repo@main\n'
+} >> "${unpinned_action_fixture}/.github/workflows/release-rewrite.yml"
+
+expect_status 1 "${unpinned_action_fixture}" "apps/installer-stub/scripts/check-invariants.sh" "${unpinned_action_fixture}/root.out"
+expect_output_contains "${unpinned_action_fixture}/root.out" "GitHub Action is not pinned to a full SHA"
+expect_status 1 "${unpinned_action_fixture}/apps/installer-stub" "scripts/check-invariants.sh" "${unpinned_action_fixture}/package.out"
+expect_output_contains "${unpinned_action_fixture}/package.out" "GitHub Action is not pinned to a full SHA"
+
+cert_path_fixture="${tmp_root}/cert-path"
+write_fixture "${cert_path_fixture}"
+printf 'certificateFile: ./cert.p12\n' >> "${cert_path_fixture}/apps/installer-stub/electron-builder.yml"
+
+expect_status 1 "${cert_path_fixture}" "apps/installer-stub/scripts/check-invariants.sh" "${cert_path_fixture}/root.out"
+expect_output_contains "${cert_path_fixture}/root.out" "hardcoded certificate path"
+expect_status 1 "${cert_path_fixture}/apps/installer-stub" "scripts/check-invariants.sh" "${cert_path_fixture}/package.out"
+expect_output_contains "${cert_path_fixture}/package.out" "hardcoded certificate path"
+
 echo "installer invariant self-test OK"
