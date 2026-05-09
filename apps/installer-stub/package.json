@@ -7,17 +7,16 @@
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
-    "lint": "biome check src/ build/*.js scripts/*.js package.json",
-    "lint:fix": "biome check --write src/ build/*.js scripts/*.js package.json",
-    "format": "biome format --write src/ build/*.js scripts/*.js package.json",
+    "lint": "biome check src/ scripts/*.js package.json",
+    "lint:fix": "biome check --write src/ scripts/*.js package.json",
+    "format": "biome format --write src/ scripts/*.js package.json",
     "build:current": "bun scripts/run-builder.js --config electron-builder.yml --publish=never",
     "build:mac": "bun scripts/run-builder.js --mac --config electron-builder.yml --publish=never",
     "build:win": "bun scripts/run-builder.js --win --config electron-builder.yml --publish=never",
     "build:linux": "bun scripts/run-builder.js --linux --config electron-builder.yml --publish=never",
-    "build:dry-run": "bun scripts/run-builder.js --config electron-builder.yml --publish=never --dir",
+    "build:dry-run": "bun scripts/run-dry-run.js",
     "check:secrets": "bash scripts/detect-signing-secrets.sh",
     "check:invariants": "bash scripts/check-invariants.sh",
-    "verify:appcast": "bash scripts/verify-appcast.sh",
     "verify:latest-yml": "bash scripts/verify-latest-yml.sh"
   },
   "devDependencies": {
@@ -25,6 +24,7 @@
     "@types/node": "22.10.0",
     "electron": "33.0.0",
     "electron-builder": "25.1.8",
-    "electron-updater": "6.3.9"
+    "electron-updater": "6.3.9",
+    "js-yaml": "4.1.1"
   }
 }

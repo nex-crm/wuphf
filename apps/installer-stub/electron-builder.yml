@@ -17,19 +17,18 @@ files:
   - "!node_modules/**/*.md"
   - "!node_modules/**/*.ts"
   - "!**/*.log"
-publish: null
-afterSign: build/notarize-mac.js
+publish:
+  provider: github
+  owner: nex-crm
+  repo: wuphf
+  releaseType: draft
 mac:
   category: public.app-category.developer-tools
   target:
     - target: dmg
-      arch:
-        - x64
-        - arm64
+      arch: universal
     - target: zip
-      arch:
-        - x64
-        - arm64
+      arch: universal
   hardenedRuntime: true
   gatekeeperAssess: false
   entitlements: build/entitlements.mac.plist
@@ -42,11 +41,6 @@ win:
     - target: nsis
       arch:
         - x64
-  signtoolOptions:
-    sign: build/sign-windows.js
-    rfc3161TimeStampServer: http://timestamp.acs.microsoft.com
-    signingHashAlgorithms:
-      - sha256
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true

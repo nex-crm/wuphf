@@ -21,6 +21,7 @@
         "electron": "33.0.0",
         "electron-builder": "25.1.8",
         "electron-updater": "6.3.9",
+        "js-yaml": "4.1.1",
       },
     },
     "packages/protocol": {
