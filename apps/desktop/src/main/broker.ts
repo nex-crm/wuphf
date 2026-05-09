@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { utilityProcess } from "electron";
 
 import type { BrokerSnapshot, BrokerStatus } from "../shared/api-contract.ts";
+import type { Logger } from "./logger.ts";
 import { monotonicNowMs } from "./monotonic-clock.ts";
 
 const BROKER_SERVICE_NAME = "wuphf-broker";
@@ -13,6 +14,12 @@ const DEFAULT_MAX_BACKOFF_MS = 60_000;
 const DEFAULT_MAX_RESTART_RETRIES = 5;
 const DEFAULT_STABILITY_WINDOW_MS = 60_000;
 const DEFAULT_LIVENESS_STALE_MS = 5_000;
+const NOOP_LOGGER: Logger = {
+  debug: () => undefined,
+  info: () => undefined,
+  warn: () => undefined,
+  error: () => undefined,
+};
 
 type UtilityProcessHandle = ReturnType<typeof utilityProcess.fork>;
 type ForkUtilityProcess = typeof utilityProcess.fork;
@@ -39,6 +46,7 @@ export interface BrokerSupervisorConfig {
   readonly stabilityWindowMs?: number;
   readonly livenessStaleMs?: number;
   readonly onFatal?: (reason: string) => void;
+  readonly logger?: Logger;
 }
 
 export class BrokerSupervisor {
@@ -56,6 +64,7 @@ export class BrokerSupervisor {
   private readonly stabilityWindowMs: number;
   private readonly livenessStaleMs: number;
   private readonly onFatal: ((reason: string) => void) | undefined;
+  private readonly logger: Logger;
 
   private brokerProcess: UtilityProcessHandle | null = null;
   private restartTimer: NodeJS.Timeout | null = null;
@@ -64,6 +73,7 @@ export class BrokerSupervisor {
   private stopping = false;
   private fatalReason: string | null = null;
   private lastRestartScheduledAtMs: number | null = null;
+  private startedAtMs: number | null = null;
   private aliveSinceMs: number | null = null;
   private lastPingAtMs: number | null = null;
 
@@ -82,6 +92,7 @@ export class BrokerSupervisor {
     this.stabilityWindowMs = config.stabilityWindowMs ?? DEFAULT_STABILITY_WINDOW_MS;
     this.livenessStaleMs = config.livenessStaleMs ?? DEFAULT_LIVENESS_STALE_MS;
     this.onFatal = config.onFatal;
+    this.logger = config.logger ?? NOOP_LOGGER;
   }
 
   start(): void {
@@ -93,26 +104,53 @@ export class BrokerSupervisor {
     this.status = "starting";
     this.aliveSinceMs = null;
     this.lastPingAtMs = null;
-    const brokerProcess = this.forkProcess(this.brokerEntryPath, [], {
+    this.startedAtMs = this.monotonicNow();
+    this.logger.info("broker_starting", {
+      restartCount: this.restartCount,
       serviceName: BROKER_SERVICE_NAME,
-      stdio: "pipe",
-      env: buildBrokerEnv(this.envSource),
     });
 
+    let brokerProcess: UtilityProcessHandle;
+    try {
+      brokerProcess = this.forkProcess(this.brokerEntryPath, [], {
+        serviceName: BROKER_SERVICE_NAME,
+        stdio: "pipe",
+        env: buildBrokerEnv(this.envSource),
+      });
+    } catch (error) {
+      this.status = "dead";
+      this.startedAtMs = null;
+      this.logger.error("broker_start_failed", {
+        error: errorMessage(error),
+        restartCount: this.restartCount,
+        serviceName: BROKER_SERVICE_NAME,
+      });
+      throw error;
+    }
+
     this.brokerProcess = brokerProcess;
+    this.logger.info("broker_started", {
+      pid: getProcessPid(brokerProcess),
+      restartCount: this.restartCount,
+      serviceName: BROKER_SERVICE_NAME,
+    });
     drainBrokerStdio(brokerProcess);
     brokerProcess.on("message", (message: unknown) => {
       if (isAliveMessage(message)) {
         const nowMs = this.monotonicNow();
         if (this.status !== "alive") {
           this.aliveSinceMs = nowMs;
+          this.logger.info("broker_alive", {
+            pid: getProcessPid(brokerProcess),
+            restartCount: this.restartCount,
+          });
         }
         this.lastPingAtMs = nowMs;
         this.status = "alive";
       }
     });
-    brokerProcess.once("exit", () => {
-      this.handleExit(brokerProcess);
+    brokerProcess.once("exit", (exitCode: number) => {
+      this.handleExit(brokerProcess, exitCode, null);
     });
   }
 
@@ -122,6 +160,14 @@ export class BrokerSupervisor {
       this.lastPingAtMs !== null &&
       this.monotonicNow() - this.lastPingAtMs > this.livenessStaleMs
     ) {
+      const nowMs = this.monotonicNow();
+      this.status = "unresponsive";
+      this.logger.warn("broker_ping_missed", {
+        pid: getProcessPid(this.brokerProcess),
+        lastPingAt: this.lastPingAtMs,
+        livenessAgeMs: nowMs - this.lastPingAtMs,
+        restartCount: this.restartCount,
+      });
       return "unresponsive";
     }
 
@@ -151,10 +197,19 @@ export class BrokerSupervisor {
   async stop(): Promise<void> {
     this.stopping = true;
     this.clearRestartTimer();
+    this.logger.info("broker_stop_requested", {
+      pid: getProcessPid(this.brokerProcess),
+      restartCount: this.restartCount,
+      status: this.status,
+    });
 
     const brokerProcess = this.brokerProcess;
     if (brokerProcess === null) {
       this.status = "dead";
+      this.startedAtMs = null;
+      this.aliveSinceMs = null;
+      this.lastPingAtMs = null;
+      this.logger.info("broker_stop_noop");
       return;
     }
 
@@ -175,6 +230,13 @@ export class BrokerSupervisor {
           this.brokerProcess = null;
         }
         this.status = "dead";
+        this.startedAtMs = null;
+        this.aliveSinceMs = null;
+        this.lastPingAtMs = null;
+        this.logger.info("broker_stopped", {
+          pid: getProcessPid(brokerProcess),
+          restartCount: this.restartCount,
+        });
         resolve();
       };
 
@@ -198,10 +260,25 @@ export class BrokerSupervisor {
     });
   }
 
-  private handleExit(exitedProcess: UtilityProcessHandle): void {
+  private handleExit(
+    exitedProcess: UtilityProcessHandle,
+    exitCode: number | null = null,
+    signal: string | null = null,
+  ): void {
     if (this.brokerProcess !== exitedProcess) {
       return;
     }
+
+    const nowMs = this.monotonicNow();
+    const startedAtMs = this.startedAtMs;
+    this.logger.warn("broker_exited", {
+      pid: getProcessPid(exitedProcess),
+      exitCode,
+      signal,
+      restartCount: this.restartCount,
+      uptimeMs: startedAtMs === null ? null : nowMs - startedAtMs,
+      lastPingAt: this.lastPingAtMs,
+    });
 
     this.brokerProcess = null;
     this.lastPingAtMs = null;
@@ -209,6 +286,7 @@ export class BrokerSupervisor {
     if (this.stopping) {
       this.status = "dead";
       this.aliveSinceMs = null;
+      this.startedAtMs = null;
       return;
     }
 
@@ -221,6 +299,10 @@ export class BrokerSupervisor {
     if (nextRestartCount > this.maxRestartRetries) {
       this.status = "dead";
       this.fatalReason = `Broker exited after ${this.restartCount} restart retries`;
+      this.logger.error("broker_restart_cap_reached", {
+        restartCount: this.restartCount,
+        maxRestartRetries: this.maxRestartRetries,
+      });
       this.onFatal?.(this.fatalReason);
       return;
     }
@@ -233,8 +315,17 @@ export class BrokerSupervisor {
     );
 
     this.lastRestartScheduledAtMs = this.monotonicNow();
+    this.logger.warn("broker_restart_scheduled", {
+      restartCount: this.restartCount,
+      backoffMs,
+      maxRestartRetries: this.maxRestartRetries,
+    });
     this.restartTimer = setTimeout(() => {
       this.restartTimer = null;
+      this.logger.info("broker_restart_attempt", {
+        restartCount: this.restartCount,
+        maxRestartRetries: this.maxRestartRetries,
+      });
       this.start();
     }, backoffMs);
   }
@@ -247,14 +338,25 @@ export class BrokerSupervisor {
   }
 
   private requestGracefulStop(brokerProcess: UtilityProcessHandle): void {
+    this.logger.info("broker_graceful_stop_requested", {
+      pid: getProcessPid(brokerProcess),
+      restartCount: this.restartCount,
+    });
     safePostMessage(brokerProcess, { type: "shutdown" });
   }
 
   private requestProcessTermination(brokerProcess: UtilityProcessHandle): void {
+    const pid = getProcessPid(brokerProcess);
+    this.logger.warn("broker_termination_requested", {
+      pid,
+      force: false,
+      restartCount: this.restartCount,
+    });
     if (this.platform === "win32") {
-      const pid = getProcessPid(brokerProcess);
       if (pid !== null) {
-        void this.runWindowsTaskkill(pid, { force: false }).catch(() => undefined);
+        void this.runWindowsTaskkill(pid, { force: false }).catch((error: unknown) => {
+          this.logTaskkillFailure(pid, false, error);
+        });
       }
       return;
     }
@@ -263,15 +365,31 @@ export class BrokerSupervisor {
   }
 
   private forceStop(brokerProcess: UtilityProcessHandle): void {
+    const pid = getProcessPid(brokerProcess);
+    this.logger.warn("broker_termination_requested", {
+      pid,
+      force: true,
+      restartCount: this.restartCount,
+    });
     if (this.platform === "win32") {
-      const pid = getProcessPid(brokerProcess);
       if (pid !== null) {
-        void this.runWindowsTaskkill(pid, { force: true }).catch(() => undefined);
+        void this.runWindowsTaskkill(pid, { force: true }).catch((error: unknown) => {
+          this.logTaskkillFailure(pid, true, error);
+        });
         return;
       }
     }
 
     killUtilityProcess(brokerProcess, "SIGKILL");
+  }
+
+  private logTaskkillFailure(pid: number, force: boolean, error: unknown): void {
+    this.logger.warn("broker_taskkill_failed", {
+      pid,
+      force,
+      error: errorMessage(error),
+      code: errorCode(error),
+    });
   }
 
   private resetRestartCountAfterStableWindow(): void {
@@ -333,8 +451,21 @@ function killUtilityProcess(brokerProcess: UtilityProcessHandle, signal?: NodeJS
     return;
   }
 
-  // Electron 33's type omits the signal overload; keep the handle-bound receiver.
+  // Electron's UtilityProcess type omits the signal overload; keep the handle-bound receiver.
   Reflect.apply(brokerProcess.kill, brokerProcess, [signal]);
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function errorCode(error: unknown): string | null {
+  if (typeof error !== "object" || error === null || !Object.hasOwn(error, "code")) {
+    return null;
+  }
+
+  const code = (error as { readonly code?: unknown }).code;
+  return typeof code === "string" ? code : null;
 }
 
 export function runWindowsTaskkill(

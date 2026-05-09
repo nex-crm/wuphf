@@ -55,6 +55,13 @@ The supervisor reads monotonic time through `src/main/monotonic-clock.ts` for
 restart metadata, the stability window, and liveness staleness. Wall-clock Date
 APIs remain banned.
 
+Broker lifecycle evidence is written to the main-process local JSONL log under
+Electron's standard logs directory. Unexpected exits emit `broker_exited` with
+`pid`, `exitCode`, `signal`, `restartCount`, `uptimeMs`, and `lastPingAt`.
+Electron's `UtilityProcess` exit event exposes an exit code but not a signal on
+the supported typed surface, so `signal` is `null` unless Electron adds that
+field in a future supported release.
+
 ## Env Allowlist
 
 The broker does not inherit the full parent environment. Only these variables

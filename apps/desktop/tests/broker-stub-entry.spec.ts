@@ -67,11 +67,18 @@ describe("broker-stub-entry", () => {
     await vi.advanceTimersByTimeAsync(1);
     expect(parentPort.postMessage).toHaveBeenCalledTimes(2);
 
+    parentPort.emit("message", { data: { type: "ignored" } });
+    expect(process.exit).not.toHaveBeenCalled();
+
     expect(() => {
       parentPort.emit("message", { data: { type: "shutdown" } });
     }).toThrow(ProcessExitError);
 
     expect(process.exit).toHaveBeenCalledWith(0);
+
+    expect(() => {
+      process.emit("SIGTERM");
+    }).toThrow(ProcessExitError);
 
     await vi.advanceTimersByTimeAsync(1_000);
     expect(parentPort.postMessage).toHaveBeenCalledTimes(2);

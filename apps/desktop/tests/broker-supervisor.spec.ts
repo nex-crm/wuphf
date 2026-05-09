@@ -8,6 +8,7 @@ import {
   type ExecFileRunner,
   runWindowsTaskkill,
 } from "../src/main/broker.ts";
+import type { Logger, LogPayload } from "../src/main/logger.ts";
 
 const electronMock = vi.hoisted(() => ({
   fork: vi.fn(),
@@ -92,6 +93,32 @@ describe("BrokerSupervisor", () => {
     expect(supervisor.getStatus()).toBe("starting");
   });
 
+  it("logs fork failures before surfacing the startup error", () => {
+    const forkError = new Error("fork failed");
+    const forkProcess = vi.fn(() => {
+      throw forkError;
+    }) as unknown as ForkProcess;
+    const { logger, calls } = createMemoryLogger();
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+      logger,
+    });
+
+    expect(() => supervisor.start()).toThrow(forkError);
+
+    expect(supervisor.getStatus()).toBe("dead");
+    expect(calls).toContainEqual({
+      level: "error",
+      event: "broker_start_failed",
+      payload: {
+        error: "fork failed",
+        restartCount: 0,
+        serviceName: "wuphf-broker",
+      },
+    });
+  });
+
   it("drains broker stdout and stderr pipes without buffering output", () => {
     const processHandle = new FakeUtilityProcess(4321);
     const { forkProcess } = createForkMock([processHandle]);
@@ -161,6 +188,48 @@ describe("BrokerSupervisor", () => {
     processHandle.emit("message", { alive: true });
 
     expect(supervisor.getStatus()).toBe("alive");
+  });
+
+  it("logs broker exits with lifecycle-only causal fields before scheduling restart", () => {
+    let nowMs = 1_000;
+    const processHandle = new FakeUtilityProcess(4321);
+    const { forkProcess } = createForkMock([processHandle]);
+    const { logger, calls } = createMemoryLogger();
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+      logger,
+      monotonicNow: () => nowMs,
+      firstBackoffMs: 250,
+    });
+
+    supervisor.start();
+    nowMs = 1_200;
+    processHandle.emit("message", { alive: true });
+    nowMs = 1_500;
+    processHandle.emit("exit", 42, "SIGTERM");
+
+    expect(calls).toContainEqual({
+      level: "warn",
+      event: "broker_exited",
+      payload: {
+        pid: 4321,
+        exitCode: 42,
+        signal: null,
+        restartCount: 0,
+        uptimeMs: 500,
+        lastPingAt: 1_200,
+      },
+    });
+    expect(calls).toContainEqual({
+      level: "warn",
+      event: "broker_restart_scheduled",
+      payload: {
+        restartCount: 1,
+        backoffMs: 250,
+        maxRestartRetries: 5,
+      },
+    });
   });
 
   it("ignores stale exits from a process that is no longer current", () => {
@@ -360,9 +429,11 @@ describe("BrokerSupervisor", () => {
     const firstProcess = new FakeUtilityProcess(1001);
     const secondProcess = new FakeUtilityProcess(1002);
     const { forkProcess, forkProcessMock } = createForkMock([firstProcess, secondProcess]);
+    const { logger, calls } = createMemoryLogger();
     const supervisor = new BrokerSupervisor({
       brokerEntryPath: "/app/out/main/broker-stub.js",
       forkProcess,
+      logger,
       firstBackoffMs: 250,
       maxBackoffMs: 60_000,
     });
@@ -379,6 +450,14 @@ describe("BrokerSupervisor", () => {
     await vi.advanceTimersByTimeAsync(1);
     expect(forkProcessMock).toHaveBeenCalledTimes(2);
     expect(supervisor.getPid()).toBe(1002);
+    expect(calls).toContainEqual({
+      level: "info",
+      event: "broker_restart_attempt",
+      payload: {
+        restartCount: 1,
+        maxRestartRetries: 5,
+      },
+    });
   });
 
   it("uses firstBackoffMs as the first wait and then doubles each retry", async () => {
@@ -419,9 +498,11 @@ describe("BrokerSupervisor", () => {
       thirdProcess,
     ]);
     const onFatal = vi.fn<(reason: string) => void>();
+    const { logger, calls } = createMemoryLogger();
     const supervisor = new BrokerSupervisor({
       brokerEntryPath: "/app/out/main/broker-stub.js",
       forkProcess,
+      logger,
       firstBackoffMs: 1,
       maxRestartRetries: 2,
       onFatal,
@@ -439,6 +520,14 @@ describe("BrokerSupervisor", () => {
     expect(onFatal).toHaveBeenCalledWith("Broker exited after 2 restart retries");
     expect(supervisor.getStatus()).toBe("dead");
     expect(supervisor.getRestartCount()).toBe(2);
+    expect(calls).toContainEqual({
+      level: "error",
+      event: "broker_restart_cap_reached",
+      payload: {
+        restartCount: 2,
+        maxRestartRetries: 2,
+      },
+    });
   });
 
   it("resets restartCount after the broker survives the stability window", async () => {
@@ -502,6 +591,120 @@ describe("BrokerSupervisor", () => {
 
     expect(supervisor.getStatus()).toBe("unresponsive");
   });
+
+  it("logs the first missed broker liveness ping without repeating on later status reads", () => {
+    let nowMs = 0;
+    const processHandle = new FakeUtilityProcess(4321);
+    const { forkProcess } = createForkMock([processHandle]);
+    const { logger, calls } = createMemoryLogger();
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+      logger,
+      livenessStaleMs: 5_000,
+      monotonicNow: () => nowMs,
+    });
+
+    supervisor.start();
+    processHandle.emit("message", { alive: true });
+    nowMs = 5_001;
+
+    expect(supervisor.getStatus()).toBe("unresponsive");
+    expect(supervisor.getStatus()).toBe("unresponsive");
+
+    expect(calls.filter((call) => call.event === "broker_ping_missed")).toEqual([
+      {
+        level: "warn",
+        event: "broker_ping_missed",
+        payload: {
+          pid: 4321,
+          lastPingAt: 0,
+          livenessAgeMs: 5_001,
+          restartCount: 0,
+        },
+      },
+    ]);
+  });
+
+  it("logs Windows taskkill failures without failing broker shutdown", async () => {
+    vi.useFakeTimers();
+    const taskkillError = Object.assign(new Error("taskkill missing"), { code: "ENOENT" });
+    const processHandle = new FakeUtilityProcess(4321);
+    const { forkProcess } = createForkMock([processHandle]);
+    const runWindowsTaskkill = vi.fn<
+      (pid: number, options: { readonly force: boolean }) => Promise<void>
+    >(() => Promise.reject(taskkillError));
+    const { logger, calls } = createMemoryLogger();
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+      logger,
+      platform: "win32",
+      runWindowsTaskkill,
+      stopGraceMs: 5_000,
+    });
+    supervisor.start();
+
+    const stopPromise = supervisor.stop();
+    await vi.advanceTimersByTimeAsync(5_000);
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(1_000);
+    await Promise.resolve();
+    await stopPromise;
+
+    expect(calls).toContainEqual({
+      level: "warn",
+      event: "broker_taskkill_failed",
+      payload: {
+        pid: 4321,
+        force: false,
+        error: "taskkill missing",
+        code: "ENOENT",
+      },
+    });
+    expect(calls).toContainEqual({
+      level: "warn",
+      event: "broker_taskkill_failed",
+      payload: {
+        pid: 4321,
+        force: true,
+        error: "taskkill missing",
+        code: "ENOENT",
+      },
+    });
+
+    const errorWithoutCode = new Error("taskkill refused");
+    runWindowsTaskkill.mockImplementationOnce(() => Promise.reject(errorWithoutCode));
+    const secondProcessHandle = new FakeUtilityProcess(4322);
+    const { forkProcess: secondForkProcess } = createForkMock([secondProcessHandle]);
+    const secondSupervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess: secondForkProcess,
+      logger,
+      platform: "win32",
+      runWindowsTaskkill,
+      stopGraceMs: 5_000,
+    });
+    secondSupervisor.start();
+
+    const secondStopPromise = secondSupervisor.stop();
+    await vi.advanceTimersByTimeAsync(5_000);
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(1_000);
+    await Promise.resolve();
+    await secondStopPromise;
+
+    expect(calls).toContainEqual({
+      level: "warn",
+      event: "broker_taskkill_failed",
+      payload: {
+        pid: 4322,
+        force: false,
+        error: "taskkill refused",
+        code: null,
+      },
+    });
+  });
 });
 
 describe("runWindowsTaskkill", () => {
@@ -523,6 +726,14 @@ describe("runWindowsTaskkill", () => {
       { file: "taskkill", args: ["/pid", "4321", "/T"] },
       { file: "taskkill", args: ["/pid", "4321", "/T", "/F"] },
     ]);
+  });
+
+  it("rejects through the default execFile runner on non-Windows hosts", async () => {
+    if (process.platform === "win32") {
+      return;
+    }
+
+    await expect(runWindowsTaskkill(4321, { force: false })).rejects.toBeInstanceOf(Error);
   });
 });
 
@@ -584,5 +795,28 @@ function invokeHandleExit(supervisor: BrokerSupervisor, processHandle: FakeUtili
     throw new Error("Expected BrokerSupervisor.handleExit to exist");
   }
 
-  Reflect.apply(handleExit, supervisor, [processHandle]);
+  Reflect.apply(handleExit, supervisor, [processHandle, null, null]);
+}
+
+interface LogCall {
+  readonly level: "debug" | "info" | "warn" | "error";
+  readonly event: string;
+  readonly payload: LogPayload | undefined;
+}
+
+function createMemoryLogger(): { readonly logger: Logger; readonly calls: LogCall[] } {
+  const calls: LogCall[] = [];
+  const push = (level: LogCall["level"], event: string, payload?: LogPayload): void => {
+    calls.push({ level, event, payload });
+  };
+
+  return {
+    calls,
+    logger: {
+      debug: (event, payload) => push("debug", event, payload),
+      info: (event, payload) => push("info", event, payload),
+      warn: (event, payload) => push("warn", event, payload),
+      error: (event, payload) => push("error", event, payload),
+    },
+  };
 }
