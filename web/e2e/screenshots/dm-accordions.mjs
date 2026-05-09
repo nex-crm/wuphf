@@ -250,26 +250,32 @@ async function captureState({ name, withBlocking, preFix }) {
   await shotElement(page, '[data-testid="dm-workbench"]', OUT, name);
 }
 
-await captureState({
-  name: "01-before-idle",
-  withBlocking: false,
-  preFix: true,
-});
-await captureState({
-  name: "02-after-idle",
-  withBlocking: false,
-  preFix: false,
-});
-await captureState({
-  name: "03-before-with-interview",
-  withBlocking: true,
-  preFix: true,
-});
-await captureState({
-  name: "04-after-with-interview",
-  withBlocking: true,
-  preFix: false,
-});
+try {
+  await captureState({
+    name: "01-before-idle",
+    withBlocking: false,
+    preFix: true,
+  });
+  await captureState({
+    name: "02-after-idle",
+    withBlocking: false,
+    preFix: false,
+  });
+  await captureState({
+    name: "03-before-with-interview",
+    withBlocking: true,
+    preFix: true,
+  });
+  await captureState({
+    name: "04-after-with-interview",
+    withBlocking: true,
+    preFix: false,
+  });
 
-console.log(`captured 4 screenshots to ${OUT}`);
-await browser.close();
+  console.log(`captured 4 screenshots to ${OUT}`);
+} finally {
+  // Guarantee Playwright teardown even if a captureState throws — without
+  // this an unhandled error in CI leaves the chromium process pinned and
+  // the runner stalls until the global timeout.
+  await browser.close();
+}
