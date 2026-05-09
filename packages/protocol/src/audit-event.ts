@@ -18,10 +18,15 @@
 
 import { createHash } from "node:crypto";
 import type { Brand } from "./brand.ts";
-import { MAX_AUDIT_CHAIN_BATCH_SIZE, validateAuditEventBodyBudget } from "./budgets.ts";
+import {
+  MAX_AUDIT_CHAIN_BATCH_SIZE,
+  validateAuditEventBodyBudget,
+  validateMerkleRootCertChainBudget,
+  validateMerkleRootSignatureBudget,
+} from "./budgets.ts";
 import { canonicalJSON } from "./canonical-json.ts";
 import { type EventLsn, GENESIS_LSN, isEqualLsn, nextLsn, parseLsn } from "./event-lsn.ts";
-import type { ReceiptId } from "./receipt.ts";
+import { isReceiptId, type ReceiptId } from "./receipt.ts";
 import { assertKnownKeys, hasOwn, pointer, requireRecord } from "./receipt-utils.ts";
 import { asSha256Hex, type Sha256Hex, sha256Hex } from "./sha256.ts";
 
@@ -216,8 +221,8 @@ export function merkleRootRecordFromJson(value: unknown): MerkleRootRecord {
     ),
     signedAt: requiredDateFromJson(record, "signedAt", ""),
     ephemeralKeyId: requiredNonEmptyStringFromJson(record, "ephemeralKeyId", ""),
-    signature: requiredBase64StringFromJson(record, "signature", ""),
-    certChainPem: requiredNonEmptyStringFromJson(record, "certChainPem", ""),
+    signature: requiredMerkleRootSignatureFromJson(record, "signature", ""),
+    certChainPem: requiredMerkleRootCertChainFromJson(record, "certChainPem", ""),
   };
   const validation = validateMerkleRootRecord(decoded);
   if (!validation.ok) {
@@ -236,14 +241,7 @@ export function merkleRootRecordFromJson(value: unknown): MerkleRootRecord {
  * stays printable and stable across encodings.
  */
 export function serializeAuditEventRecordForHash(record: AuditEventRecord): Uint8Array {
-  assertAuditEventPayloadKind(record.payload.kind);
-  if (!(record.payload.body instanceof Uint8Array)) {
-    throw new Error("serializeAuditEventRecordForHash: payload.body must be a Uint8Array");
-  }
-  const bodyBudget = validateAuditEventBodyBudget(record.payload.body);
-  if (!bodyBudget.ok) {
-    throw new Error(`serializeAuditEventRecordForHash: ${bodyBudget.reason}`);
-  }
+  validateAuditEventRecordShape(record);
 
   const payload: { kind: AuditEventKind; receiptId: string | null; bodyB64: string } = {
     kind: record.payload.kind,
@@ -327,6 +325,9 @@ export type IncrementalVerifyResult =
  * GENESIS_PREV_HASH. The serializer defaults to the canonical
  * `serializeAuditEventRecordForHash` so writer and verifier cannot drift; a
  * caller that needs a custom projection (tests, migrations) can override it.
+ * Any custom serializer MUST produce bytes equivalent to
+ * `serializeAuditEventRecordForHash` for the same shape-valid record; the
+ * verifier validates record shape before invoking the serializer.
  */
 export function verifyChain(
   records: readonly AuditEventRecord[],
@@ -355,6 +356,10 @@ export function verifyChain(
   };
 }
 
+/**
+ * Verify one bounded batch. Custom serializers have the same contract as
+ * `verifyChain`: they only override byte projection after shape validation.
+ */
 export function verifyChainIncremental(
   state: ChainVerifierState,
   batch: readonly AuditEventRecord[],
@@ -409,6 +414,7 @@ export function verifyChainIncremental(
 
       let recordBytes: Uint8Array;
       try {
+        validateAuditEventRecordShape(r);
         recordBytes = serialize(r);
       } catch (cause) {
         return {
@@ -465,6 +471,22 @@ export function verifyChainIncremental(
 
 function bytesToBase64(bytes: Uint8Array): string {
   return Buffer.from(bytes).toString("base64");
+}
+
+function validateAuditEventRecordShape(record: AuditEventRecord): void {
+  assertAuditEventPayloadKind(record.payload.kind);
+  if (record.payload.receiptId !== undefined && !isReceiptId(record.payload.receiptId)) {
+    throw new Error(
+      "serializeAuditEventRecordForHash: payload.receiptId must be an uppercase ULID ReceiptId",
+    );
+  }
+  if (!(record.payload.body instanceof Uint8Array)) {
+    throw new Error("serializeAuditEventRecordForHash: payload.body must be a Uint8Array");
+  }
+  const bodyBudget = validateAuditEventBodyBudget(record.payload.body);
+  if (!bodyBudget.ok) {
+    throw new Error(`serializeAuditEventRecordForHash: ${bodyBudget.reason}`);
+  }
 }
 
 function assertAuditEventPayloadKind(kind: unknown): asserts kind is AuditEventKind {
@@ -526,14 +548,14 @@ function validateMerkleRootRecordValue(
     "signature",
     path,
     errors,
-    validateBase64Value,
+    validateMerkleRootSignatureValue,
   );
   validateRequiredMerkleRootRecordField(
     value as Readonly<Record<string, unknown>>,
     "certChainPem",
     path,
     errors,
-    validateNonEmptyStringValue,
+    validateMerkleRootCertChainValue,
   );
 }
 
@@ -610,13 +632,35 @@ function validateNonEmptyStringValue(
   }
 }
 
-function validateBase64Value(
+function validateMerkleRootSignatureValue(
   value: unknown,
   path: string,
   errors: MerkleRootRecordValidationError[],
 ): void {
-  if (typeof value !== "string" || value.length === 0 || !BASE64_RE.test(value)) {
+  if (typeof value !== "string" || value.length === 0) {
     addMerkleRootRecordError(errors, path, "must be a non-empty base64 string");
+    return;
+  }
+  const budget = validateMerkleRootSignatureBudget(value);
+  if (!budget.ok) {
+    addMerkleRootRecordError(errors, path, budget.reason);
+    return;
+  }
+  if (!BASE64_RE.test(value)) {
+    addMerkleRootRecordError(errors, path, "must be a non-empty base64 string");
+  }
+}
+
+function validateMerkleRootCertChainValue(
+  value: unknown,
+  path: string,
+  errors: MerkleRootRecordValidationError[],
+): void {
+  validateNonEmptyStringValue(value, path, errors);
+  if (typeof value !== "string" || value.length === 0) return;
+  const budget = validateMerkleRootCertChainBudget(value);
+  if (!budget.ok) {
+    addMerkleRootRecordError(errors, path, budget.reason);
   }
 }
 
@@ -672,14 +716,35 @@ function requiredNonEmptyStringFromJson(
   return value;
 }
 
-function requiredBase64StringFromJson(
+function requiredMerkleRootSignatureFromJson(
   record: Readonly<Record<string, unknown>>,
   key: string,
   basePath: string,
 ): string {
   const value = requiredStringFromJson(record, key, basePath);
-  if (value.length === 0 || !BASE64_RE.test(value)) {
-    throw new Error(`${pointer(basePath, key)}: must be a non-empty base64 string`);
+  const path = pointer(basePath, key);
+  if (value.length === 0) {
+    throw new Error(`${path}: must be a non-empty base64 string`);
+  }
+  const budget = validateMerkleRootSignatureBudget(value);
+  if (!budget.ok) {
+    throw new Error(`${path}: ${budget.reason}`);
+  }
+  if (!BASE64_RE.test(value)) {
+    throw new Error(`${path}: must be a non-empty base64 string`);
+  }
+  return value;
+}
+
+function requiredMerkleRootCertChainFromJson(
+  record: Readonly<Record<string, unknown>>,
+  key: string,
+  basePath: string,
+): string {
+  const value = requiredNonEmptyStringFromJson(record, key, basePath);
+  const budget = validateMerkleRootCertChainBudget(value);
+  if (!budget.ok) {
+    throw new Error(`${pointer(basePath, key)}: ${budget.reason}`);
   }
   return value;
 }

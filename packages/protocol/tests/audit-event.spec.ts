@@ -23,10 +23,15 @@ import {
   verifyChain,
   verifyChainIncremental,
 } from "../src/audit-event.ts";
-import { MAX_AUDIT_CHAIN_BATCH_SIZE, MAX_AUDIT_EVENT_BODY_BYTES } from "../src/budgets.ts";
+import {
+  MAX_AUDIT_CHAIN_BATCH_SIZE,
+  MAX_AUDIT_EVENT_BODY_BYTES,
+  MAX_MERKLE_ROOT_CERT_CHAIN_BYTES,
+  MAX_MERKLE_ROOT_SIGNATURE_BYTES,
+} from "../src/budgets.ts";
 import { canonicalJSON } from "../src/canonical-json.ts";
 import { type EventLsn, lsnFromV1Number, parseLsn } from "../src/event-lsn.ts";
-import { asReceiptId } from "../src/receipt.ts";
+import { asReceiptId, type ReceiptId } from "../src/receipt.ts";
 import { asSha256Hex, type Sha256Hex, sha256Hex } from "../src/sha256.ts";
 
 interface AuditEventVectorPayloadInput {
@@ -457,6 +462,31 @@ describe("audit-event chain verification", () => {
     expectFailureCode(verifyChain([record]), "serialization_threw", 0);
   });
 
+  it("rejects shape-invalid records before invoking a custom verifier serializer", () => {
+    const valid = auditRecord();
+    const validBytes = serializeAuditEventRecordForHash(valid);
+    const record: AuditEventRecord = {
+      ...valid,
+      eventHash: computeEventHash(valid.prevHash, validBytes),
+      payload: {
+        ...valid.payload,
+        kind: "made_up_kind" as AuditEventKind,
+      },
+    };
+    let serializerCalls = 0;
+
+    const result = verifyChain([record], () => {
+      serializerCalls += 1;
+      return validBytes;
+    });
+
+    expectFailureCode(result, "serialization_threw", 0);
+    expect(serializerCalls).toBe(0);
+    if (!result.ok) {
+      expect(result.reason).toMatch(/invalid payload\.kind.*made_up_kind/);
+    }
+  });
+
   for (const [index, kind] of AUDIT_EVENT_KIND_VALUES.entries()) {
     it(`accepts payload.kind ${kind} through serializer and verifier`, () => {
       const partial = auditRecord({
@@ -500,6 +530,29 @@ describe("audit-event chain verification", () => {
     expect(new TextDecoder().decode(serializeAuditEventRecordForHash(record))).toBe(
       '{"payload":{"bodyB64":"AP+AQA==","kind":"receipt_updated","receiptId":"01ARZ3NDEKTSV4RRFFQ69G5FAV"},"prevHash":"69292e708cc2e023492933025af465b063bdf24002e72a825b5170541b733f71","seqNo":"v1:0","timestamp":"2026-05-08T00:00:00.000Z"}',
     );
+  });
+
+  it("rejects malformed payload.receiptId in both serializer and verifier", () => {
+    const malformed = auditRecord({
+      payload: {
+        kind: "receipt_created",
+        receiptId: "lower-case-ulid" as ReceiptId,
+        body: new TextEncoder().encode("bad-receipt-id"),
+      },
+    });
+    const record: AuditEventRecord = {
+      ...malformed,
+      eventHash: computeEventHash(malformed.prevHash, legacySerializeAuditEventRecord(malformed)),
+    };
+
+    expect(() => serializeAuditEventRecordForHash(record)).toThrow(
+      /payload\.receiptId must be an uppercase ULID ReceiptId/,
+    );
+    const result = verifyChain([record]);
+    expectFailureCode(result, "serialization_threw", 0);
+    if (!result.ok) {
+      expect(result.reason).toMatch(/payload\.receiptId must be an uppercase ULID ReceiptId/);
+    }
   });
 
   it("rejects non-Uint8Array payload bodies in the writer-side serializer", () => {
@@ -852,6 +905,71 @@ describe("audit-event chain verification", () => {
       expect(() => merkleRootRecordFromJson({ ...vector.input, certChainPem: "" })).toThrow(
         /\/certChainPem: must be a non-empty string/,
       );
+    });
+
+    it("accepts exact-at-cap MerkleRoot signature and cert chain values", () => {
+      const vector = firstMerkleRootVector();
+      const record = merkleRootRecordFromVector(vector);
+      const exactSignature = "A".repeat(MAX_MERKLE_ROOT_SIGNATURE_BYTES);
+      const exactCertChain = "C".repeat(MAX_MERKLE_ROOT_CERT_CHAIN_BYTES);
+
+      expect(
+        validateMerkleRootRecord({
+          ...record,
+          signature: exactSignature,
+          certChainPem: exactCertChain,
+        }),
+      ).toEqual({ ok: true });
+      expect(() =>
+        merkleRootRecordFromJson({
+          ...vector.input,
+          signature: exactSignature,
+          certChainPem: exactCertChain,
+        }),
+      ).not.toThrow();
+    });
+
+    it("rejects one-over-cap MerkleRoot signature and cert chain values", () => {
+      const vector = firstMerkleRootVector();
+      const record = merkleRootRecordFromVector(vector);
+      const oversizedSignature = "A".repeat(MAX_MERKLE_ROOT_SIGNATURE_BYTES + 1);
+      const oversizedCertChain = "C".repeat(MAX_MERKLE_ROOT_CERT_CHAIN_BYTES + 1);
+
+      const signatureValidation = validateMerkleRootRecord({
+        ...record,
+        signature: oversizedSignature,
+      });
+      expect(signatureValidation.ok).toBe(false);
+      if (!signatureValidation.ok) {
+        expect(
+          signatureValidation.errors.some(
+            (error) =>
+              error.path === "/signature" &&
+              /MerkleRootRecord\.signature bytes exceeds budget/.test(error.message),
+          ),
+        ).toBe(true);
+      }
+      expect(() =>
+        merkleRootRecordFromJson({ ...vector.input, signature: oversizedSignature }),
+      ).toThrow(/\/signature: MerkleRootRecord\.signature bytes exceeds budget/);
+
+      const certValidation = validateMerkleRootRecord({
+        ...record,
+        certChainPem: oversizedCertChain,
+      });
+      expect(certValidation.ok).toBe(false);
+      if (!certValidation.ok) {
+        expect(
+          certValidation.errors.some(
+            (error) =>
+              error.path === "/certChainPem" &&
+              /MerkleRootRecord\.certChainPem bytes exceeds budget/.test(error.message),
+          ),
+        ).toBe(true);
+      }
+      expect(() =>
+        merkleRootRecordFromJson({ ...vector.input, certChainPem: oversizedCertChain }),
+      ).toThrow(/\/certChainPem: MerkleRootRecord\.certChainPem bytes exceeds budget/);
     });
 
     for (const key of MERKLE_ROOT_RECORD_FIELD_NAMES) {

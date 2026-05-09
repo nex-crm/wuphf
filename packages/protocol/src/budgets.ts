@@ -48,6 +48,14 @@ export const MAX_AUDIT_CHAIN_BATCH_SIZE = 10_000;
 export const MAX_AUDIT_EVENT_BODY_BYTES = 1 * 1024 * 1024;
 
 /**
+ * Signed Merkle checkpoints carry a detached signature and PEM certificate
+ * chain. 64 KiB is generous for current signatures and compact cert chains
+ * while bounding regex scans and JSON decoding before deeper validation.
+ */
+export const MAX_MERKLE_ROOT_SIGNATURE_BYTES = 64 * 1024;
+export const MAX_MERKLE_ROOT_CERT_CHAIN_BYTES = 64 * 1024;
+
+/**
  * Approval tokens are cleanup-bound capabilities. Thirty minutes covers a
  * human review window; 100x would leave bearer material valid for days after
  * the task context has gone stale.
@@ -176,6 +184,22 @@ export function validateAuditEventBodyBudget(body: Uint8Array): BudgetValidation
   } catch (err) {
     return { ok: false, reason: err instanceof Error ? err.message : String(err) };
   }
+}
+
+export function validateMerkleRootSignatureBudget(signature: string): BudgetValidationResult {
+  return validateUtf8StringBudget(
+    signature,
+    MAX_MERKLE_ROOT_SIGNATURE_BYTES,
+    "MerkleRootRecord.signature bytes",
+  );
+}
+
+export function validateMerkleRootCertChainBudget(certChainPem: string): BudgetValidationResult {
+  return validateUtf8StringBudget(
+    certChainPem,
+    MAX_MERKLE_ROOT_CERT_CHAIN_BYTES,
+    "MerkleRootRecord.certChainPem bytes",
+  );
 }
 
 export function validateApprovalTokenLifetime(claims: ApprovalClaims): BudgetValidationResult {
