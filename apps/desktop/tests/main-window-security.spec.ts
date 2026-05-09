@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 interface MockBrowserWindowInstance {
   readonly options: unknown;
   readonly loadURL: ReturnType<typeof vi.fn<(url: string) => Promise<void>>>;
+  readonly loadFile: ReturnType<typeof vi.fn<(path: string) => Promise<void>>>;
   readonly webContents: {
     readonly setWindowOpenHandler: ReturnType<typeof vi.fn<(handler: WindowOpenHandler) => void>>;
     readonly on: ReturnType<typeof vi.fn<(event: string, handler: WillNavigateHandler) => void>>;
@@ -30,6 +31,7 @@ const electronMock = vi.hoisted(() => {
   class BrowserWindow {
     readonly options: unknown;
     readonly loadURL = vi.fn<(url: string) => Promise<void>>(() => Promise.resolve());
+    readonly loadFile = vi.fn<(path: string) => Promise<void>>(() => Promise.resolve());
     readonly webContents = {
       setWindowOpenHandler: vi.fn<(handler: WindowOpenHandler) => void>(),
       on: vi.fn<(event: string, handler: WillNavigateHandler) => void>(),
@@ -134,6 +136,8 @@ describe("createSecureWindow", () => {
     });
 
     const handler = getWillNavigateHandler(getOnlyWindow());
+    expect(getOnlyWindow().loadFile).toHaveBeenCalledWith("/tmp/index.html");
+
     const sameFileHashEvent = { preventDefault: vi.fn<() => void>() };
     handler(sameFileHashEvent, "file:///tmp/index.html#about");
 

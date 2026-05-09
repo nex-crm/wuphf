@@ -40,7 +40,11 @@ export function createSecureWindow(config: CreateSecureWindowConfig): BrowserWin
     }
   });
 
-  void browserWindow.loadURL(rendererUrl);
+  if (new URL(rendererUrl).protocol === "file:") {
+    void browserWindow.loadFile(config.rendererIndexPath);
+  } else {
+    void browserWindow.loadURL(rendererUrl);
+  }
   return browserWindow;
 }
 
