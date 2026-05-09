@@ -4,6 +4,7 @@ const { autoUpdater } = require("electron-updater");
 const packageMetadata = require("../package.json");
 
 autoUpdater.autoDownload = false;
+autoUpdater.autoInstallOnAppQuit = false;
 
 let mainWindow;
 
