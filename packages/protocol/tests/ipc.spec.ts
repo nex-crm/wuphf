@@ -1300,6 +1300,9 @@ describe("stream and WebSocket frame runtime guards", () => {
       "agent.message": true,
       "tool.call.started": true,
       "tool.call.completed": true,
+      "thread.created": true,
+      "thread.updated": true,
+      "thread.pinned_approvals.changed": true,
       backpressure: true,
     } satisfies Record<StreamEventKind, true>;
     const wsFrameTypeCoverage = {

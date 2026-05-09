@@ -17,6 +17,7 @@
 
 import type { Brand } from "./brand.ts";
 import { canonicalJSON } from "./canonical-json.ts";
+import type { EventLsn } from "./event-lsn.ts";
 import {
   APPROVAL_CLAIMS_KEYS,
   SIGNED_APPROVAL_TOKEN_KEYS,
@@ -32,6 +33,7 @@ import {
   isWriteId,
   type ReceiptId,
   type SignedApprovalToken,
+  type ThreadId,
   type WriteFailureMetadata,
   type WriteResult,
 } from "./receipt.ts";
@@ -936,6 +938,9 @@ export type StreamEventKind =
   | "agent.message"
   | "tool.call.started"
   | "tool.call.completed"
+  | "thread.created"
+  | "thread.updated"
+  | "thread.pinned_approvals.changed"
   | "backpressure";
 
 export const STREAM_EVENT_KIND_VALUES = [
@@ -950,8 +955,16 @@ export const STREAM_EVENT_KIND_VALUES = [
   "agent.message",
   "tool.call.started",
   "tool.call.completed",
+  "thread.created",
+  "thread.updated",
+  "thread.pinned_approvals.changed",
   "backpressure",
 ] as const satisfies readonly StreamEventKind[];
+
+export interface ThreadInvalidationPayload {
+  readonly threadId: ThreadId;
+  readonly headLsn: EventLsn;
+}
 
 export interface StreamEvent<TPayload = unknown> {
   readonly id: string;

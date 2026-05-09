@@ -40,10 +40,13 @@ import {
   isProviderKind,
   isReceiptId,
   isTaskId,
+  isThreadId,
   isToolCallId,
   isWriteId,
   type MemoryWriteRef,
+  type ReceiptCore,
   type ReceiptSnapshot,
+  type ReceiptSnapshotV2,
   type ReceiptStatus,
   type ReceiptValidationError,
   type ReceiptValidationResult,
@@ -58,6 +61,7 @@ import { isSha256Hex } from "./sha256.ts";
 export { APPROVAL_CLAIMS_KEYS, SIGNED_APPROVAL_TOKEN_KEYS } from "./ipc-shared.ts";
 
 type MemoryStore = (typeof MEMORY_STORE_VALUES)[number];
+type ReceiptSnapshotKey = keyof ReceiptCore | keyof ReceiptSnapshotV2;
 
 // Allowlists are tied to interface declarations via `satisfies readonly
 // (keyof T)[]`. Adding a typo'd entry fails typecheck. The reverse direction
@@ -97,8 +101,9 @@ const RECEIPT_KEYS_TUPLE = [
   "worktreePath",
   "gitHeadStart",
   "gitHeadEnd",
+  "threadId",
   "schemaVersion",
-] as const satisfies readonly (keyof ReceiptSnapshot)[];
+] as const satisfies readonly ReceiptSnapshotKey[];
 export const RECEIPT_KEYS: ReadonlySet<string> = new Set<string>(RECEIPT_KEYS_TUPLE);
 
 const SOURCE_READ_KEYS_TUPLE = [
@@ -393,9 +398,12 @@ function validateReceiptSnapshot(
   validateOptional(value, "worktreePath", path, errors, validateString);
   validateOptional(value, "gitHeadStart", path, errors, validateString);
   validateOptional(value, "gitHeadEnd", path, errors, validateString);
-  validateRequired(value, "schemaVersion", path, errors, (v, p, e) => {
-    if (v !== 1) addError(e, p, "must be 1");
-  });
+  validateRequired(value, "schemaVersion", path, errors, validateReceiptSchemaVersionValue);
+  validateOptional(value, "threadId", path, errors, validateThreadIdValue);
+  const schemaVersion = recordValue(value, "schemaVersion");
+  if (schemaVersion === 1 && hasOwn(value, "threadId")) {
+    addError(errors, pointer(path, "threadId"), "must be absent for schemaVersion 1");
+  }
   validateTemporalOrdering(
     recordValue(value, "startedAt"),
     "startedAt",
@@ -1139,6 +1147,22 @@ function validateAgentSlugValue(
 
 function validateTaskIdValue(value: unknown, path: string, errors: ReceiptValidationError[]): void {
   if (!isTaskId(value)) addError(errors, path, "must be an uppercase ULID TaskId");
+}
+
+function validateThreadIdValue(
+  value: unknown,
+  path: string,
+  errors: ReceiptValidationError[],
+): void {
+  if (!isThreadId(value)) addError(errors, path, "must be an uppercase ULID ThreadId");
+}
+
+function validateReceiptSchemaVersionValue(
+  value: unknown,
+  path: string,
+  errors: ReceiptValidationError[],
+): void {
+  if (value !== 1 && value !== 2) addError(errors, path, "must be 1 or 2");
 }
 
 function validateProviderKindValue(

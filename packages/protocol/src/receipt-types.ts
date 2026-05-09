@@ -9,6 +9,7 @@ import {
   MAX_LOCAL_ID_BYTES,
   MAX_TOOL_CALL_ID_BYTES,
   MAX_WRITE_ID_BYTES,
+  validateSignerIdentityBudget,
 } from "./budgets.ts";
 import type { FrozenArgs } from "./frozen-args.ts";
 import type { SanitizedString } from "./sanitized-string.ts";
@@ -28,6 +29,9 @@ export type ToolCallId = Brand<string, "ToolCallId">;
 export type ApprovalId = Brand<string, "ApprovalId">;
 export type WriteId = Brand<string, "WriteId">;
 export type IdempotencyKey = Brand<string, "IdempotencyKey">;
+export type ThreadId = Brand<string, "ThreadId">;
+export type ThreadSpecRevisionId = Brand<string, "ThreadSpecRevisionId">;
+export type SignerIdentity = Brand<string, "SignerIdentity">;
 
 export type ReceiptStatus = "ok" | "error" | "stalled" | "approval_pending" | "rejected";
 
@@ -190,7 +194,7 @@ export type ExternalWrite =
   | ExternalWritePartial
   | ExternalWriteRollback;
 
-export interface ReceiptSnapshot {
+export interface ReceiptCore {
   readonly id: ReceiptId;
   readonly agentSlug: AgentSlug;
   readonly taskId: TaskId;
@@ -228,9 +232,18 @@ export interface ReceiptSnapshot {
   readonly worktreePath?: string | undefined;
   readonly gitHeadStart?: string | undefined;
   readonly gitHeadEnd?: string | undefined;
-
-  readonly schemaVersion: 1;
 }
+
+export type ReceiptSnapshotV1 = ReceiptCore & {
+  readonly schemaVersion: 1;
+};
+
+export type ReceiptSnapshotV2 = ReceiptCore & {
+  readonly schemaVersion: 2;
+  readonly threadId?: ThreadId | undefined;
+};
+
+export type ReceiptSnapshot = ReceiptSnapshotV1 | ReceiptSnapshotV2;
 
 export type ReceiptValidationError = { path: string; message: string };
 export type ReceiptValidationResult =
@@ -325,4 +338,34 @@ export function asIdempotencyKey(s: string): IdempotencyKey {
 
 export function isIdempotencyKey(value: unknown): value is IdempotencyKey {
   return typeof value === "string" && IDEMPOTENCY_KEY_RE.test(value);
+}
+
+export function asThreadId(s: string): ThreadId {
+  if (!ULID_RE.test(s)) throw new Error("not a ThreadId ULID");
+  return s as ThreadId;
+}
+
+export function isThreadId(value: unknown): value is ThreadId {
+  return typeof value === "string" && ULID_RE.test(value);
+}
+
+export function asThreadSpecRevisionId(s: string): ThreadSpecRevisionId {
+  if (!ULID_RE.test(s)) throw new Error("not a ThreadSpecRevisionId ULID");
+  return s as ThreadSpecRevisionId;
+}
+
+export function isThreadSpecRevisionId(value: unknown): value is ThreadSpecRevisionId {
+  return typeof value === "string" && ULID_RE.test(value);
+}
+
+export function asSignerIdentity(s: string): SignerIdentity {
+  if (s.length === 0) throw new Error("not a SignerIdentity: must be non-empty");
+  const budget = validateSignerIdentityBudget(s);
+  if (!budget.ok) throw new Error(`not a SignerIdentity: ${budget.reason}`);
+  return s as SignerIdentity;
+}
+
+export function isSignerIdentity(value: unknown): value is SignerIdentity {
+  if (typeof value !== "string" || value.length === 0) return false;
+  return validateSignerIdentityBudget(value).ok;
 }

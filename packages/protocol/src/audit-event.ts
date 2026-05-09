@@ -26,9 +26,14 @@ import {
 } from "./budgets.ts";
 import { canonicalJSON } from "./canonical-json.ts";
 import { type EventLsn, GENESIS_LSN, isEqualLsn, nextLsn, parseLsn } from "./event-lsn.ts";
-import { isReceiptId, type ReceiptId } from "./receipt.ts";
+import { isReceiptId, type ReceiptId, type ReceiptValidationResult } from "./receipt.ts";
 import { assertKnownKeys, hasOwn, pointer, requireRecord } from "./receipt-utils.ts";
 import { asSha256Hex, type Sha256Hex, sha256Hex } from "./sha256.ts";
+import {
+  type ThreadAuditEventKind,
+  threadAuditPayloadFromJsonValue,
+  validateThreadAuditPayloadForKind,
+} from "./thread.ts";
 
 export type MerkleRootHex = Brand<string, "MerkleRootHex">;
 
@@ -48,6 +53,9 @@ export const AUDIT_EVENT_KIND_VALUES = [
   "external_write_proposed",
   "external_write_applied",
   "external_write_failed",
+  "thread_created",
+  "thread_spec_edited",
+  "thread_status_changed",
   "boot_marker",
   "merkle_root",
 ] as const;
@@ -104,6 +112,18 @@ export const PAYLOAD_KIND_METADATA = {
     description: "An external write failed, partially applied, or rolled back.",
     bodySchemaRef: "wuphf.audit.payload.external_write_failed.v1",
   },
+  thread_created: {
+    description: "A thread was created.",
+    bodySchemaRef: "wuphf.audit.payload.thread_created.v1",
+  },
+  thread_spec_edited: {
+    description: "A thread spec revision was accepted.",
+    bodySchemaRef: "wuphf.audit.payload.thread_spec_edited.v1",
+  },
+  thread_status_changed: {
+    description: "A thread status transition was accepted.",
+    bodySchemaRef: "wuphf.audit.payload.thread_status_changed.v1",
+  },
   boot_marker: {
     description: "The broker appended a startup marker.",
     bodySchemaRef: "wuphf.audit.payload.boot_marker.v1",
@@ -115,6 +135,12 @@ export const PAYLOAD_KIND_METADATA = {
 } as const satisfies Record<AuditEventKind, AuditEventPayloadKindMetadata>;
 
 const AUDIT_EVENT_KIND_SET: ReadonlySet<string> = new Set<string>(AUDIT_EVENT_KIND_VALUES);
+const THREAD_AUDIT_EVENT_KIND_SET: ReadonlySet<string> = new Set<string>([
+  "thread_created",
+  "thread_spec_edited",
+  "thread_status_changed",
+]);
+const UTF8_DECODER = new TextDecoder("utf-8", { fatal: true });
 
 export interface AuditEventPayload {
   readonly kind: AuditEventKind;
@@ -131,6 +157,14 @@ export interface AuditEventRecord {
   readonly prevHash: Sha256Hex;
   readonly eventHash: Sha256Hex;
   readonly payload: AuditEventPayload;
+}
+
+export function validateAuditEventPayloadBody(
+  kind: AuditEventKind,
+  payload: unknown,
+): ReceiptValidationResult {
+  if (!isThreadAuditEventKind(kind)) return { ok: true };
+  return validateThreadAuditPayloadForKind(kind, payload);
 }
 
 export interface MerkleRootRecord {
@@ -487,12 +521,36 @@ function validateAuditEventRecordShape(record: AuditEventRecord): void {
   if (!bodyBudget.ok) {
     throw new Error(`serializeAuditEventRecordForHash: ${bodyBudget.reason}`);
   }
+  validateThreadAuditEventBodyBytes(record.payload.kind, record.payload.body);
 }
 
 function assertAuditEventPayloadKind(kind: unknown): asserts kind is AuditEventKind {
   if (typeof kind !== "string" || !AUDIT_EVENT_KIND_SET.has(kind)) {
     throw new Error(
       `serializeAuditEventRecordForHash: invalid payload.kind ${describePayloadKind(kind)}`,
+    );
+  }
+}
+
+function isThreadAuditEventKind(kind: AuditEventKind): kind is ThreadAuditEventKind {
+  return THREAD_AUDIT_EVENT_KIND_SET.has(kind);
+}
+
+function validateThreadAuditEventBodyBytes(kind: AuditEventKind, body: Uint8Array): void {
+  if (!isThreadAuditEventKind(kind)) return;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(UTF8_DECODER.decode(body));
+  } catch (err) {
+    throw new Error(
+      `serializeAuditEventRecordForHash: payload.body must be JSON for ${kind}: ${errorMessage(err)}`,
+    );
+  }
+  try {
+    threadAuditPayloadFromJsonValue(kind, parsed);
+  } catch (err) {
+    throw new Error(
+      `serializeAuditEventRecordForHash: payload.body invalid for ${kind}: ${errorMessage(err)}`,
     );
   }
 }

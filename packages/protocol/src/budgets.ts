@@ -49,6 +49,45 @@ export const MAX_SANITIZED_STRING_BYTES = 1 * 1024 * 1024;
 export const MAX_SANITIZED_JSON_NODES = 50_000;
 
 /**
+ * Thread titles are compact human labels. 512 bytes handles descriptive task
+ * names while preventing one thread row from becoming a rendered log blob.
+ */
+export const MAX_THREAD_TITLE_BYTES = 512;
+
+/**
+ * Thread specs are structured JSON state, not attachment storage. 64 KiB keeps
+ * canonicalization and audit replay bounded while leaving room for substantial
+ * review instructions.
+ */
+export const MAX_THREAD_SPEC_CONTENT_BYTES = 64 * 1024;
+
+/**
+ * Thread external refs point to upstream issue/docs/work items. 32 refs covers
+ * normal fan-in without making thread validation scale with arbitrary link
+ * dumps.
+ */
+export const MAX_THREAD_EXTERNAL_REFS = 32;
+
+/**
+ * Individual external refs can carry URLs or provider IDs. 2 KiB covers long
+ * URLs with query state while bounding per-ref normalization and JSON work.
+ */
+export const MAX_THREAD_EXTERNAL_REF_BYTES = 2 * 1024;
+
+/**
+ * A thread's receipt-derived task index should stay bounded inside the
+ * protocol shape. Broker projections can page richer receipt lists elsewhere.
+ */
+export const MAX_THREAD_TASK_IDS = 1024;
+
+/**
+ * Signer identities cross audit, receipt, and thread boundaries as text. Keep
+ * the protocol brand bounded so forged large identities fail before storage,
+ * signing, or log fanout.
+ */
+export const MAX_SIGNER_IDENTITY_BYTES = 256;
+
+/**
  * Audit verification should proceed in bounded chunks. 10,000 records keeps a
  * batch large enough for efficient sequential I/O while preventing callers from
  * accidentally materializing 1M-event chains in one verifier step.
@@ -267,6 +306,30 @@ export function validateSanitizedJsonNodeBudget(
   } catch (err) {
     return { ok: false, reason: err instanceof Error ? err.message : String(err) };
   }
+}
+
+export function validateThreadTitleBudget(title: string): BudgetValidationResult {
+  return validateUtf8StringBudget(title, MAX_THREAD_TITLE_BYTES, "Thread.title bytes");
+}
+
+export function validateThreadSpecContentBudget(canonicalContent: string): BudgetValidationResult {
+  return validateUtf8StringBudget(
+    canonicalContent,
+    MAX_THREAD_SPEC_CONTENT_BYTES,
+    "ThreadSpecRevision.content bytes",
+  );
+}
+
+export function validateThreadExternalRefBudget(ref: string): BudgetValidationResult {
+  return validateUtf8StringBudget(
+    ref,
+    MAX_THREAD_EXTERNAL_REF_BYTES,
+    "ThreadExternalRefs item bytes",
+  );
+}
+
+export function validateSignerIdentityBudget(identity: string): BudgetValidationResult {
+  return validateUtf8StringBudget(identity, MAX_SIGNER_IDENTITY_BYTES, "SignerIdentity bytes");
 }
 
 export function validateAuditEventBodyBudget(body: Uint8Array): BudgetValidationResult {

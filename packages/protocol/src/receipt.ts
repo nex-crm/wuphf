@@ -50,6 +50,7 @@ import {
   asProviderKind,
   asReceiptId,
   asTaskId,
+  asThreadId,
   asToolCallId,
   asWriteId,
   type BrokerTokenVerdict,
@@ -64,6 +65,7 @@ import {
   type SignedApprovalToken,
   type SourceRead,
   type TaskId,
+  type ThreadId,
   type ToolCall,
   type ToolCallId,
   type WriteFailureMetadata,
@@ -117,15 +119,21 @@ export type {
   IdempotencyKey,
   MemoryWriteRef,
   ProviderKind,
+  ReceiptCore,
   ReceiptId,
   ReceiptSnapshot,
+  ReceiptSnapshotV1,
+  ReceiptSnapshotV2,
   ReceiptStatus,
   ReceiptValidationError,
   ReceiptValidationResult,
   RiskClass,
   SignedApprovalToken,
+  SignerIdentity,
   SourceRead,
   TaskId,
+  ThreadId,
+  ThreadSpecRevisionId,
   ToolCall,
   ToolCallId,
   TriggerKind,
@@ -139,7 +147,10 @@ export {
   asIdempotencyKey,
   asProviderKind,
   asReceiptId,
+  asSignerIdentity,
   asTaskId,
+  asThreadId,
+  asThreadSpecRevisionId,
   asToolCallId,
   asWriteId,
   isAgentSlug,
@@ -147,7 +158,10 @@ export {
   isIdempotencyKey,
   isProviderKind,
   isReceiptId,
+  isSignerIdentity,
   isTaskId,
+  isThreadId,
+  isThreadSpecRevisionId,
   isToolCallId,
   isWriteId,
   PROVIDER_KIND_VALUES,
@@ -156,6 +170,10 @@ export { isReceiptSnapshot, validateReceipt } from "./receipt-validator.ts";
 
 function asReceiptIdAt(value: string, path: string): ReceiptId {
   return decodeBrandAt(value, path, asReceiptId);
+}
+
+function asThreadIdAt(value: string, path: string): ThreadId {
+  return decodeBrandAt(value, path, asThreadId);
 }
 
 function asTaskIdAt(value: string, path: string): TaskId {
@@ -300,6 +318,7 @@ function receiptToJsonValue(r: ReceiptSnapshot): Record<string, unknown> {
     worktreePath: r.worktreePath,
     gitHeadStart: r.gitHeadStart,
     gitHeadEnd: r.gitHeadEnd,
+    threadId: r.schemaVersion === 2 ? r.threadId : undefined,
     schemaVersion: r.schemaVersion,
   });
 }
@@ -431,8 +450,13 @@ function receiptJsonToSnapshot(
   const worktreePath = optionalStringFromJson(record, "worktreePath", "");
   const gitHeadStart = optionalStringFromJson(record, "gitHeadStart", "");
   const gitHeadEnd = optionalStringFromJson(record, "gitHeadEnd", "");
+  const schemaVersion = requiredSchemaVersionFromJson(record, "schemaVersion", "");
+  const threadId = optionalThreadIdFromJson(record, "threadId", "");
+  if (schemaVersion === 1 && threadId !== undefined) {
+    throw new Error(`${pointer("", "threadId")}: must be absent for schemaVersion 1`);
+  }
 
-  return {
+  const core = {
     id: asReceiptIdAt(requiredStringFromJson(record, "id", ""), pointer("", "id")),
     agentSlug: asAgentSlugAt(
       requiredStringFromJson(record, "agentSlug", ""),
@@ -479,8 +503,14 @@ function receiptJsonToSnapshot(
     ...(worktreePath === undefined ? {} : { worktreePath }),
     ...(gitHeadStart === undefined ? {} : { gitHeadStart }),
     ...(gitHeadEnd === undefined ? {} : { gitHeadEnd }),
-    schemaVersion: requiredSchemaVersionFromJson(record, "schemaVersion", ""),
   };
+  return schemaVersion === 1
+    ? { ...core, schemaVersion }
+    : {
+        ...core,
+        schemaVersion,
+        ...(threadId === undefined ? {} : { threadId }),
+      };
 }
 
 function sourceReadFromJson(value: unknown, path: string): SourceRead {
@@ -1054,12 +1084,21 @@ function requiredSchemaVersionFromJson(
   record: Readonly<Record<string, unknown>>,
   key: string,
   basePath: string,
-): 1 {
+): 1 | 2 {
   const value = requiredFieldFromJson(record, key, basePath);
-  if (value !== 1) {
-    throw new Error(`${pointer(basePath, key)}: must be 1`);
+  if (value !== 1 && value !== 2) {
+    throw new Error(`${pointer(basePath, key)}: must be 1 or 2`);
   }
-  return 1;
+  return value;
+}
+
+function optionalThreadIdFromJson(
+  record: Readonly<Record<string, unknown>>,
+  key: string,
+  basePath: string,
+): ThreadId | undefined {
+  const value = optionalStringFromJson(record, key, basePath);
+  return value === undefined ? undefined : asThreadIdAt(value, pointer(basePath, key));
 }
 
 function optionalSha256HexFromJson(
