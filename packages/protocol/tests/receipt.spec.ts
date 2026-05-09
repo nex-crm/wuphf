@@ -8,6 +8,7 @@ import {
   asReceiptId,
   asTaskId,
   asToolCallId,
+  asWriteId,
   isReceiptSnapshot,
   type ReceiptSnapshot,
   receiptFromJson,
@@ -175,7 +176,10 @@ describe("receipt schema", () => {
     const otherReceiptId = asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAY");
     const wrongTokenApproval = {
       ...firstApproval,
-      signedToken: { ...firstApproval.signedToken, receiptId: otherReceiptId },
+      signedToken: {
+        ...firstApproval.signedToken,
+        claims: { ...firstApproval.signedToken.claims, receiptId: otherReceiptId },
+      },
     };
     const tampered: ReceiptSnapshot = { ...fixture, approvals: [wrongTokenApproval] };
     const result = validateReceipt(tampered);
@@ -183,7 +187,8 @@ describe("receipt schema", () => {
     if (!result.ok) {
       expect(
         result.errors.some(
-          (e) => e.path === "/approvals/0/signedToken/receiptId" && /must match/.test(e.message),
+          (e) =>
+            e.path === "/approvals/0/signedToken/claims/receiptId" && /must match/.test(e.message),
         ),
       ).toBe(true);
     }
@@ -196,7 +201,10 @@ describe("receipt schema", () => {
     const otherDiff = FrozenArgs.freeze({ unrelated: "diff" });
     const wrongHashWrite = {
       ...firstWrite,
-      approvalToken: { ...approvalToken, frozenArgsHash: otherDiff.hash },
+      approvalToken: {
+        ...approvalToken,
+        claims: { ...approvalToken.claims, frozenArgsHash: otherDiff.hash },
+      },
     };
     const tampered: ReceiptSnapshot = { ...fixture, writes: [wrongHashWrite] };
     const result = validateReceipt(tampered);
@@ -205,11 +213,50 @@ describe("receipt schema", () => {
       expect(
         result.errors.some(
           (e) =>
-            e.path === "/writes/0/approvalToken/frozenArgsHash" &&
+            e.path === "/writes/0/approvalToken/claims/frozenArgsHash" &&
             /proposedDiff hash/.test(e.message),
         ),
       ).toBe(true);
     }
+  });
+
+  it("rejects external write whose approval token writeId does not match the enclosing write", () => {
+    const fixture = validReceiptFixture();
+    const firstWrite = nonNull(fixture.writes[0]);
+    const approvalToken = nonNull(firstWrite.approvalToken);
+    const wrongWrite = {
+      ...firstWrite,
+      approvalToken: {
+        ...approvalToken,
+        claims: { ...approvalToken.claims, writeId: asWriteId("write_wrong") },
+      },
+    };
+    const tampered: ReceiptSnapshot = { ...fixture, writes: [wrongWrite] };
+    const result = validateReceipt(tampered);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(
+        result.errors.some(
+          (e) =>
+            e.path === "/writes/0/approvalToken/claims/writeId" &&
+            /must match this write's writeId/.test(e.message),
+        ),
+      ).toBe(true);
+    }
+  });
+
+  it("allows receipt-scoped approval token without writeId on an external write", () => {
+    const fixture = validReceiptFixture();
+    const firstWrite = nonNull(fixture.writes[0]);
+    const approvalToken = nonNull(firstWrite.approvalToken);
+    const { writeId: _writeId, ...receiptScopedClaims } = approvalToken.claims;
+    const receiptScopedWrite = {
+      ...firstWrite,
+      approvalToken: { ...approvalToken, claims: receiptScopedClaims },
+    };
+    const receiptScoped: ReceiptSnapshot = { ...fixture, writes: [receiptScopedWrite] };
+
+    expect(validateReceipt(receiptScoped)).toEqual({ ok: true });
   });
 
   it("rejects empty webauthnAssertion when riskClass is high", () => {
@@ -220,7 +267,10 @@ describe("receipt schema", () => {
       approvals: [
         {
           ...firstApproval,
-          signedToken: { ...firstApproval.signedToken, webauthnAssertion: "" },
+          signedToken: {
+            ...firstApproval.signedToken,
+            claims: { ...firstApproval.signedToken.claims, webauthnAssertion: "" },
+          },
         },
       ],
     };
@@ -350,6 +400,7 @@ function nonNull<T>(value: T | null | undefined): T {
 function validReceiptFixture(): ReceiptSnapshot {
   const receiptId = asReceiptId(RECEIPT_ID);
   const taskId = asTaskId(TASK_ID);
+  const writeId = asWriteId("write_01");
   const toolInputs = FrozenArgs.freeze({ action: "summarize", entityId: "contact:1234" });
   const proposedDiff = FrozenArgs.freeze({
     after: { amount: 1500, stage: "qualified" },
@@ -361,14 +412,20 @@ function validReceiptFixture(): ReceiptSnapshot {
   });
   const postWriteVerify = FrozenArgs.freeze({ amount: 1500, stage: "qualified" });
   const approvalToken = {
-    signerIdentity: "fran@example.com",
-    role: "approver" as const,
-    receiptId,
-    frozenArgsHash: proposedDiff.hash,
-    riskClass: "high" as const,
-    expiresAt: new Date("2026-05-08T18:30:00.000Z"),
-    webauthnAssertion: "webauthn-assertion",
-    brokerVerificationStatus: "valid" as const,
+    claims: {
+      signerIdentity: "fran@example.com",
+      role: "approver" as const,
+      receiptId,
+      writeId,
+      frozenArgsHash: proposedDiff.hash,
+      riskClass: "high" as const,
+      issuedAt: new Date("2026-05-08T18:01:00.000Z"),
+      expiresAt: new Date("2026-05-08T18:30:00.000Z"),
+      webauthnAssertion: "webauthn-assertion",
+    },
+    algorithm: "ed25519" as const,
+    signerKeyId: "key_ed25519_01",
+    signature: "YXBwcm92YWwtdG9rZW4tc2lnbmF0dXJl",
   };
 
   return {
@@ -402,6 +459,10 @@ function validReceiptFixture(): ReceiptSnapshot {
         role: "approver",
         decision: "approve",
         signedToken: approvalToken,
+        tokenVerdict: {
+          status: "valid",
+          verifiedAt: new Date("2026-05-08T18:01:00.500Z"),
+        },
         decidedAt: new Date("2026-05-08T18:01:00.000Z"),
       },
     ],
@@ -438,6 +499,7 @@ function validReceiptFixture(): ReceiptSnapshot {
     ],
     writes: [
       {
+        writeId,
         action: "hubspot.deals.update",
         target: "deal:5678",
         idempotencyKey: "receipt-01ARZ3NDEKTSV4RRFFQ69G5FAV-write-1",
@@ -482,6 +544,7 @@ function validReceiptFixture(): ReceiptSnapshot {
 function shuffledReceiptFixture(): ReceiptSnapshot {
   const receiptId = asReceiptId(RECEIPT_ID);
   const taskId = asTaskId(TASK_ID);
+  const writeId = asWriteId("write_01");
   const toolInputs = FrozenArgs.freeze({ entityId: "contact:1234", action: "summarize" });
   const proposedDiff = FrozenArgs.freeze({
     before: { stage: "lead", amount: 1000 },
@@ -493,14 +556,20 @@ function shuffledReceiptFixture(): ReceiptSnapshot {
   });
   const postWriteVerify = FrozenArgs.freeze({ stage: "qualified", amount: 1500 });
   const approvalToken = {
-    brokerVerificationStatus: "valid" as const,
-    webauthnAssertion: "webauthn-assertion",
-    expiresAt: new Date("2026-05-08T18:30:00.000Z"),
-    riskClass: "high" as const,
-    frozenArgsHash: proposedDiff.hash,
-    receiptId,
-    role: "approver" as const,
-    signerIdentity: "fran@example.com",
+    signature: "YXBwcm92YWwtdG9rZW4tc2lnbmF0dXJl",
+    signerKeyId: "key_ed25519_01",
+    algorithm: "ed25519" as const,
+    claims: {
+      webauthnAssertion: "webauthn-assertion",
+      expiresAt: new Date("2026-05-08T18:30:00.000Z"),
+      issuedAt: new Date("2026-05-08T18:01:00.000Z"),
+      riskClass: "high" as const,
+      frozenArgsHash: proposedDiff.hash,
+      writeId,
+      receiptId,
+      role: "approver" as const,
+      signerIdentity: "fran@example.com",
+    },
   };
 
   return {
@@ -540,6 +609,7 @@ function shuffledReceiptFixture(): ReceiptSnapshot {
         appliedDiff,
         proposedDiff,
         idempotencyKey: "receipt-01ARZ3NDEKTSV4RRFFQ69G5FAV-write-1",
+        writeId,
         target: "deal:5678",
         action: "hubspot.deals.update",
       },
@@ -578,6 +648,10 @@ function shuffledReceiptFixture(): ReceiptSnapshot {
     approvals: [
       {
         decidedAt: new Date("2026-05-08T18:01:00.000Z"),
+        tokenVerdict: {
+          verifiedAt: new Date("2026-05-08T18:01:00.500Z"),
+          status: "valid",
+        },
         signedToken: approvalToken,
         decision: "approve",
         role: "approver",

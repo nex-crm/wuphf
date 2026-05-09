@@ -2,6 +2,7 @@ import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import {
   ALLOWED_LOOPBACK_HOSTS,
+  type ApprovalSubmitResponse,
   asApiToken,
   asBrokerPort,
   asKeychainHandleId,
@@ -12,7 +13,10 @@ import {
   isKeychainHandleId,
   isLoopbackRemoteAddress,
   isRequestId,
+  validateApprovalSubmitRequest,
 } from "../src/ipc.ts";
+import { asReceiptId, type ReceiptId, type SignedApprovalToken } from "../src/receipt.ts";
+import { sha256Hex } from "../src/sha256.ts";
 
 describe("isAllowedLoopbackHost", () => {
   it("accepts canonical loopback hosts", () => {
@@ -180,3 +184,59 @@ describe("IPC brand constructors", () => {
     });
   });
 });
+
+describe("approval submission IPC", () => {
+  it("validates request receiptId against token claims receiptId", () => {
+    const receiptId = asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAV");
+    const otherReceiptId = asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAY");
+    const approvalToken = approvalTokenFor(receiptId);
+
+    expect(
+      validateApprovalSubmitRequest({
+        receiptId,
+        approvalToken,
+        idempotencyKey: "approval-submit-01",
+      }),
+    ).toEqual({ ok: true });
+    expect(
+      validateApprovalSubmitRequest({
+        receiptId: otherReceiptId,
+        approvalToken,
+        idempotencyKey: "approval-submit-01",
+      }),
+    ).toEqual({
+      ok: false,
+      reason: "receiptId must match approvalToken.claims.receiptId",
+    });
+  });
+
+  it("carries idempotencyKey on queued approval responses", () => {
+    const idempotencyKey = "approval-submit-01";
+    const response: ApprovalSubmitResponse = {
+      accepted: true,
+      state: "queued",
+      acceptedAt: "2026-05-08T18:01:00.000Z",
+      receiptId: asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAV"),
+      idempotencyKey,
+    };
+
+    expect(response.idempotencyKey).toBe(idempotencyKey);
+  });
+});
+
+function approvalTokenFor(receiptId: ReceiptId): SignedApprovalToken {
+  return {
+    claims: {
+      signerIdentity: "fran@example.com",
+      role: "approver",
+      receiptId,
+      frozenArgsHash: sha256Hex("approval-submit-frozen-args"),
+      riskClass: "low",
+      issuedAt: new Date("2026-05-08T18:00:00.000Z"),
+      expiresAt: new Date("2026-05-08T18:30:00.000Z"),
+    },
+    algorithm: "ed25519",
+    signerKeyId: "key_ed25519_01",
+    signature: "YXBwcm92YWwtdG9rZW4tc2lnbmF0dXJl",
+  };
+}
