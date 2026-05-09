@@ -142,3 +142,89 @@ easy to recognize before repeating the bug.
 
     Discipline: Hard rule #12 and "When you delegate" require a file-overlap
     matrix before dispatch and dependency-ordered cherry-picks afterward.
+
+11. **Subpath exports bypass the index.ts gate**
+
+    Failure mode: package subpath exports let consumers import around
+    `src/index.ts`, so the public-API gate looks stricter than it is.
+
+    ```json
+    {
+      "exports": {
+        ".": "./src/index.ts",
+        "./receipt": "./src/receipt.ts"
+      }
+    }
+    ```
+
+    Discipline: keep `exports` to `"."` only, or document every subpath as a
+    deliberately stable public surface with the same review bar as `index.ts`.
+
+12. **Demo importing from src/* is a fake gate**
+
+    Failure mode: a demo that imports from submodules can pass while the
+    package entrypoint is missing or mis-exporting the same API.
+
+    ```ts
+    import { receiptFromJson } from "../src/receipt.ts";
+    // Missing export from ../src/index.ts stays invisible.
+    receiptFromJson(sampleReceiptJson);
+    ```
+
+    Discipline: the demo MUST import from `src/index.ts` so it exercises the
+    same package surface reviewers expect downstream consumers to use.
+
+13. **Per-element budgets vs container budgets**
+
+    Failure mode: a count cap protects against too many records but not one
+    oversized record that exhausts memory during validation or hashing.
+
+    ```ts
+    assertAuditBatchLength(records, MAX_AUDIT_CHAIN_BATCH_SIZE);
+    // Missing per-record MAX_AUDIT_EVENT_BODY_BYTES check.
+    verifyChainIncremental(state, records);
+    ```
+
+    Discipline: every budget surface needs both axes when both can grow:
+    container count and per-element byte size.
+
+14. **Budget validators must compose into the entry-point validator**
+
+    Failure mode: exporting a standalone budget validator leaves callers one
+    forgotten function call away from accepting unbounded input.
+
+    ```ts
+    validateReceipt(receipt);
+    // Caller forgot validateReceiptBudget(receipt).
+    receiptToJson(receipt);
+    ```
+
+    Discipline: entry-point validators compose the budget check internally;
+    standalone budget exports exist only for pre-deserialization screening.
+
+15. **Wire-shape rejection at write time AND at verify time**
+
+    Failure mode: a serializer rejects a new union value, but a verifier that
+    trusts the already-written bytes lets hostile or buggy writers bypass it.
+
+    ```ts
+    payload: { kind: "future-kind", body: {} }
+    // Writer rejects it; verifier never checks payload.kind.
+    verifyAuditEventRecord(record);
+    ```
+
+    Discipline: every wire-side string union is runtime-validated by both the
+    writer/serializer path and the verifier/reader path.
+
+16. **Triangulation as the sweep tool for late-cycle reviews**
+
+    Failure mode: repeated single-frame reviews can converge on confidence
+    while still missing classes of drift that only another lens catches.
+
+    ```text
+    R1-R5: no blocking findings
+    R6 seven-lens triangulation: public API, budgets, and verifier drift found
+    ```
+
+    Discipline: when protocol work looks well-reviewed, run orthogonal
+    triangulation as the late-cycle sweep instead of treating that as done.

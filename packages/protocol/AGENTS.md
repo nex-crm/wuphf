@@ -145,9 +145,9 @@ Specifically:
   lifecycle at the protocol layer — TTL constant, expiry timestamp, validator
   that checks the lifetime.
 - **No-runaway guards are part of the wire contract.** Receipt cost fields
-  are mirror-only (broker-enforced); the protocol package defines the shape
-  of cost accounting and max retry attempts on retryable
-  `WriteFailureMetadata`. Any new cost-bearing surface needs the same.
+  are mirror-only (broker-enforced); retryable `WriteFailureMetadata` carries
+  a per-failure retry hint, but total attempt counting and retry budgets are
+  broker-side. Any new cost-bearing surface needs the same.
 - **Resource budget changes are wire-contract changes.** Coordinate the bump
   with downstream consumers and update the README in the same PR.
 
@@ -199,6 +199,8 @@ function, or wire-shape field):
    Establishes a "before" baseline of what passes.
 2. Make your changes.
 3. Run the demo again; it catches `index.ts` drift that per-module tests miss.
+   To catch that drift, the demo MUST import through `src/index.ts`, not
+   `src/<submodule>.ts` paths.
 4. If you add public API surface, extend `scripts/demo.ts` with a scenario:
    copy an existing block, replace inputs/expectations, and watch the new PASS
    line print. The demo is a living artifact reviewers read before the diff

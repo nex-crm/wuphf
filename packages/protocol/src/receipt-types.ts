@@ -28,6 +28,8 @@ export type RiskClass = "low" | "medium" | "high" | "critical";
 
 export type WriteResult = "applied" | "rejected" | "partial" | "rollback";
 
+// Retry fields are per-failure hints on the receipt. Total attempt counting
+// and retry budgets are broker-side policy, not receipt-layer wire state.
 export interface WriteFailureMetadata {
   readonly code: string;
   readonly retryable: boolean;
