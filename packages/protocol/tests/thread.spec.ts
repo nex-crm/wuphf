@@ -8,6 +8,9 @@ import {
   asTaskId,
   asThreadId,
   asThreadSpecRevisionId,
+  isSignerIdentity,
+  isThreadId,
+  isThreadSpecRevisionId,
   type JsonValue,
   MAX_SIGNER_IDENTITY_BYTES,
   MAX_THREAD_EXTERNAL_REF_BYTES,
@@ -17,6 +20,7 @@ import {
   receiptFromJson,
   receiptToJson,
   sha256Hex,
+  THREAD_STATUS_VALUES,
   type Thread,
   type ThreadCreatedAuditPayload,
   type ThreadExternalRefs,
@@ -69,6 +73,33 @@ describe("thread protocol slice", () => {
     );
     expect(() => asSignerIdentity("")).toThrow(/non-empty/);
     expect(() => asSignerIdentity("a".repeat(MAX_SIGNER_IDENTITY_BYTES + 1))).toThrow(/budget/);
+  });
+
+  it("runtime guards mirror brand constructors", () => {
+    expect(isThreadId(THREAD_ID)).toBe(true);
+    expect(isThreadId("not-a-ulid")).toBe(false);
+    expect(isThreadId(123)).toBe(false);
+
+    expect(isThreadSpecRevisionId(REVISION_1)).toBe(true);
+    expect(isThreadSpecRevisionId("not-a-ulid")).toBe(false);
+
+    expect(isSignerIdentity(SIGNER)).toBe(true);
+    expect(isSignerIdentity("")).toBe(false);
+    expect(isSignerIdentity("a".repeat(MAX_SIGNER_IDENTITY_BYTES + 1))).toBe(false);
+    expect(isSignerIdentity(42)).toBe(false);
+  });
+
+  it("THREAD_STATUS_VALUES exhausts the ThreadStatus union", () => {
+    const coverage: Record<ThreadStatus, true> = {
+      open: true,
+      in_progress: true,
+      needs_review: true,
+      merged: true,
+      closed: true,
+    };
+    expect([...THREAD_STATUS_VALUES].sort()).toStrictEqual(
+      (Object.keys(coverage) as ThreadStatus[]).sort(),
+    );
   });
 
   it("round-trips Thread through snake_case wire JSON and rejects unknown keys", () => {
