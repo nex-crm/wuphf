@@ -123,7 +123,7 @@ pre-push:
       # Go suite. CI still runs the full Go matrix on every PR, so any
       # cross-language interface drift surfaces there in <5min.
       #
-      # Excludes packages/protocol/testdata/*.go: those files are
+      # Excludes packages/protocol/testdata/**/*.go: those files are
       # `//go:build ignore` reference programs, NOT part of the wuphf
       # binary build. Letting them trigger the full Go suite would
       # double-bill protocol-only PRs (the protocol-wire-contract hook
@@ -131,7 +131,7 @@ pre-push:
       files: bash scripts/changed-files-since-base.sh
       glob: "*.go"
       exclude:
-        - "packages/protocol/testdata/*.go"
+        - "packages/protocol/testdata/**/*.go"
       run: bash scripts/test-go.sh
     web-unit:
       # Scoped to pushes that touch web/ or related JS/TS files. Same
