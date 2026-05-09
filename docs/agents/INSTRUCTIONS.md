@@ -96,6 +96,26 @@ Bun's native test runner instead of the repo's Vitest setup.
 - Run `./scripts/bootstrap.sh` after cloning to install dependencies and hooks.
 - Never push with `--no-verify`.
 
+### Screenshots
+
+- For any PR that changes files under `web/`, capture screenshots and
+  embed them in the PR description. Use the harness at
+  `web/e2e/screenshots/`:
+
+  ```bash
+  # 1. write web/e2e/screenshots/<feature>.mjs (copy version-chip.mjs)
+  # 2. bash web/e2e/screenshots/publish.sh <feature> <pr-number>
+  ```
+
+  See `web/e2e/screenshots/README.md` for the spec API. The wrapper
+  pushes images to an orphan `screenshots/pr-<n>` branch and appends
+  raw URLs to the PR body. Use `--comment` to post as a comment
+  instead, or `--dry-run` to preview the markdown locally.
+
+- Skip only when the change is a refactor with no visible UI delta,
+  the diff is purely test/doc/build config, or the same feature is
+  already covered by a linked sibling PR's screenshots.
+
 ### Lint And Security
 
 - Go: `gofmt`, `go vet ./...`, and `golangci-lint run ./...`.
