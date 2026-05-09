@@ -5,10 +5,12 @@ import {
   appTaskDetailRoute,
   channelRoute,
   dmRoute,
+  inboxRoute,
   notebookAgentRoute,
   notebookEntryRoute,
   notebooksRoute,
   reviewsRoute,
+  taskDecisionRoute,
   taskDetailRoute,
   tasksRoute,
   wikiArticleRoute,
@@ -40,6 +42,8 @@ export type CurrentRoute =
   | { kind: "notebook-agent"; agentSlug: string }
   | { kind: "notebook-entry"; agentSlug: string; entrySlug: string }
   | { kind: "reviews" }
+  | { kind: "inbox" }
+  | { kind: "task-decision"; taskId: string }
   | { kind: "unknown" };
 
 interface ParamsShape {
@@ -69,7 +73,9 @@ type CurrentRouteId =
   | typeof notebooksRoute.id
   | typeof notebookAgentRoute.id
   | typeof notebookEntryRoute.id
-  | typeof reviewsRoute.id;
+  | typeof reviewsRoute.id
+  | typeof inboxRoute.id
+  | typeof taskDecisionRoute.id;
 
 const CURRENT_ROUTE_IDS = [
   channelRoute.id,
@@ -85,6 +91,8 @@ const CURRENT_ROUTE_IDS = [
   notebookAgentRoute.id,
   notebookEntryRoute.id,
   reviewsRoute.id,
+  inboxRoute.id,
+  taskDecisionRoute.id,
 ] as const satisfies readonly CurrentRouteId[];
 
 const CURRENT_ROUTE_ID_SET = new Set<string>(CURRENT_ROUTE_IDS);
@@ -140,6 +148,11 @@ const ROUTE_DERIVERS = {
     entrySlug: params.entrySlug ?? "",
   }),
   [reviewsRoute.id]: () => ({ kind: "reviews" }),
+  [inboxRoute.id]: () => ({ kind: "inbox" }),
+  [taskDecisionRoute.id]: (params) => ({
+    kind: "task-decision",
+    taskId: params.taskId ?? "",
+  }),
 } satisfies Record<CurrentRouteId, RouteDeriver>;
 
 /**
@@ -224,6 +237,10 @@ export function useCurrentApp(): string | null {
       return "notebooks";
     case "reviews":
       return "reviews";
+    case "inbox":
+      return "inbox";
+    case "task-decision":
+      return "inbox";
     case "channel":
     case "dm":
     case "unknown":

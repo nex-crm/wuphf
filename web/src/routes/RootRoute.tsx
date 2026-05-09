@@ -123,6 +123,16 @@ const Notebook = lazy(() => import("../components/notebook/Notebook"));
 const ReviewQueueKanban = lazy(
   () => import("../components/review/ReviewQueueKanban"),
 );
+const DecisionInbox = lazy(() =>
+  import("../components/lifecycle/DecisionInbox").then((m) => ({
+    default: m.DecisionInbox,
+  })),
+);
+const DecisionPacketRoute = lazy(() =>
+  import("../components/lifecycle/DecisionPacketRoute").then((m) => ({
+    default: m.DecisionPacketRoute,
+  })),
+);
 const CitedAnswer = lazy(() => import("../components/wiki/CitedAnswer"));
 const Wiki = lazy(() => import("../components/wiki/Wiki"));
 
@@ -460,6 +470,10 @@ function MainContent() {
       return <WikiSurface current="notebooks" route={route} />;
     case "reviews":
       return <WikiSurface current="reviews" route={route} />;
+    case "inbox":
+      return <DecisionInbox />;
+    case "task-decision":
+      return <DecisionPacketRoute taskId={route.taskId} />;
     case "unknown":
       // RoutedBody catches root-only matches via isUnmatchedRoute, but
       // useCurrentRoute can also return `unknown` for matched leaves that

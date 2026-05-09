@@ -56,6 +56,10 @@ function routeIdentityKey(route: CurrentRoute): string {
       return `notebook-entry:${route.agentSlug}/${route.entrySlug}`;
     case "reviews":
       return "reviews";
+    case "inbox":
+      return "inbox";
+    case "task-decision":
+      return `task-decision:${route.taskId}`;
     case "unknown":
       return "unknown";
     default: {
