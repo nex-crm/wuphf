@@ -30,6 +30,7 @@ import {
   isReceiptSnapshot,
   PROVIDER_KIND_VALUES,
   type ReceiptSnapshot,
+  type ReceiptSnapshotV1,
   type ReceiptStatus,
   receiptFromJson,
   receiptToJson,
@@ -159,6 +160,17 @@ describe("receipt schema", () => {
     expect(() => receiptFromJson(JSON.stringify(wireReceipt))).toThrow(
       /\/threadId: must be absent for schemaVersion 1/,
     );
+  });
+
+  it("pins ReceiptSnapshotV1 against threadId at the type boundary", () => {
+    const invalidV1 = {
+      ...validReceiptFixture(),
+      schemaVersion: 1 as const,
+      // @ts-expect-error ReceiptSnapshotV1 must not carry threadId.
+      threadId: asThreadId(THREAD_ID),
+    } satisfies ReceiptSnapshotV1;
+
+    void invalidV1;
   });
 
   it("round-trips schemaVersion 2 with threadId without dropping the field", () => {

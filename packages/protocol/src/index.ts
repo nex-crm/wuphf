@@ -107,6 +107,10 @@ export type {
   StreamEvent,
   StreamEventKind,
   ThreadInvalidationPayload,
+  ThreadStreamEvent,
+  ThreadStreamEventKind,
+  ThreadStreamEventValidationError,
+  ThreadStreamEventValidationResult,
   WsFrame,
 } from "./ipc.ts";
 export {
@@ -129,6 +133,7 @@ export {
   isWsFrameType,
   STREAM_EVENT_KIND_VALUES,
   validateApprovalSubmitRequest,
+  validateThreadStreamEvent,
   WS_FRAME_TYPE_VALUES,
 } from "./ipc.ts";
 export type {

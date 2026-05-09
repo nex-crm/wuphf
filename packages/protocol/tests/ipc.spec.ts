@@ -47,7 +47,9 @@ import {
   type StreamEvent,
   type StreamEventKind,
   type ThreadInvalidationPayload,
+  type ThreadStreamEvent,
   validateApprovalSubmitRequest,
+  validateThreadStreamEvent,
   WS_FRAME_TYPE_VALUES,
   type WsFrame,
 } from "../src/ipc.ts";
@@ -1311,6 +1313,61 @@ describe("stream and WebSocket frame runtime guards", () => {
     expect(
       events.every((event) => Object.keys(event.payload).sort().join(",") === "headLsn,threadId"),
     ).toBe(true);
+
+    const invalidThreadStreamEvent: StreamEvent<
+      ThreadInvalidationPayload & { readonly content: "secret" }
+    > = {
+      id: "evt-thread-secret",
+      kind: "thread.updated",
+      emittedAt: "2026-05-08T18:00:03.000Z",
+      payload: {
+        ...payload,
+        // @ts-expect-error thread.* stream events are constrained to invalidation-only payloads.
+        content: "secret" as const,
+      },
+    };
+    void invalidThreadStreamEvent;
+  });
+
+  it("validates thread stream events and rejects payload data leakage", () => {
+    const event: ThreadStreamEvent = {
+      id: "evt-thread-updated",
+      kind: "thread.updated",
+      emittedAt: "2026-05-08T18:00:00.000Z",
+      payload: {
+        threadId: asThreadId("01ARZ3NDEKTSV4RRFFQ69G5FAY"),
+        headLsn: lsnFromV1Number(42),
+      },
+    };
+
+    expect(validateThreadStreamEvent(event)).toEqual({ ok: true });
+    expect(
+      validateThreadStreamEvent({
+        ...event,
+        payload: {
+          ...event.payload,
+          content: "secret",
+        },
+      }),
+    ).toEqual({
+      ok: false,
+      errors: [{ path: "/payload/content", message: "is not allowed" }],
+    });
+    expect(validateThreadStreamEvent({ ...event, kind: "receipt.updated" }).ok).toBe(false);
+    expect(validateThreadStreamEvent({ ...event, emittedAt: "2026-02-31T00:00:00.000Z" })).toEqual({
+      ok: false,
+      errors: [{ path: "/emittedAt", message: "must be a valid ISO 8601 instant" }],
+    });
+    expect(validateThreadStreamEvent({ ...event, receiptId: "not-a-receipt" })).toEqual({
+      ok: false,
+      errors: [{ path: "/receiptId", message: "must be an uppercase ULID ReceiptId" }],
+    });
+    expect(
+      validateThreadStreamEvent({ ...event, payload: { ...event.payload, headLsn: "v1:01" } }),
+    ).toEqual({
+      ok: false,
+      errors: [{ path: "/payload/headLsn", message: "parseLsn: malformed v1 LSN: v1:01" }],
+    });
   });
 
   it("accepts every tuple-backed WebSocket frame type and rejects non-tuple values", () => {

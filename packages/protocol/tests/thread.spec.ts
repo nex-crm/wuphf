@@ -2,16 +2,19 @@ import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { FrozenArgs } from "../src/frozen-args.ts";
 import {
+  type AuditEventRecord,
   asIdempotencyKey,
   asReceiptId,
   asSignerIdentity,
   asTaskId,
   asThreadId,
   asThreadSpecRevisionId,
+  GENESIS_PREV_HASH,
   isSignerIdentity,
   isThreadId,
   isThreadSpecRevisionId,
   type JsonValue,
+  lsnFromV1Number,
   MAX_SIGNER_IDENTITY_BYTES,
   MAX_THREAD_EXTERNAL_REF_BYTES,
   MAX_THREAD_EXTERNAL_REFS,
@@ -19,6 +22,7 @@ import {
   type ReceiptSnapshot,
   receiptFromJson,
   receiptToJson,
+  serializeAuditEventRecordForHash,
   sha256Hex,
   THREAD_STATUS_VALUES,
   type Thread,
@@ -63,6 +67,8 @@ const STALE_REVISION = asThreadSpecRevisionId("01BRZ3NDEKTSV4RRFFQ69G5FA2");
 const SIGNER = asSignerIdentity("fran@example.com");
 const CREATED_AT = new Date("2026-05-08T18:00:00.000Z");
 const UPDATED_AT = new Date("2026-05-08T18:05:00.000Z");
+const TEXT_DECODER = new TextDecoder();
+const TEXT_ENCODER = new TextEncoder();
 
 describe("thread protocol slice", () => {
   it("brands ThreadId, ThreadSpecRevisionId, and bounded SignerIdentity", () => {
@@ -187,7 +193,7 @@ describe("thread protocol slice", () => {
   });
 
   it("enforces thread_spec_edited baseRevisionId OCC sequence", () => {
-    const first = validSpecEditedPayload({ baseRevisionId: null, revisionId: REVISION_1 });
+    const first = validSpecEditedPayload({ revisionId: REVISION_1 });
     const second = validSpecEditedPayload({ baseRevisionId: REVISION_1, revisionId: REVISION_2 });
     const stale = validSpecEditedPayload({
       baseRevisionId: STALE_REVISION,
@@ -212,10 +218,43 @@ describe("thread protocol slice", () => {
     });
   });
 
+  it("rejects self-referential and duplicate spec revisions in a chain", () => {
+    const first = validSpecEditedPayload({ revisionId: REVISION_1 });
+    const second = validSpecEditedPayload({
+      baseRevisionId: REVISION_1,
+      revisionId: REVISION_2,
+    });
+    const selfReferential = validSpecEditedPayload({
+      baseRevisionId: REVISION_2,
+      revisionId: REVISION_2,
+    });
+    const duplicateRevision = validSpecEditedPayload({
+      baseRevisionId: REVISION_2,
+      revisionId: REVISION_1,
+    });
+
+    expect(validateThreadSpecRevisionChain([first, selfReferential])).toEqual(
+      expect.objectContaining({
+        ok: false,
+        errors: expect.arrayContaining([
+          { path: "/1/baseRevisionId", message: "must not equal revisionId" },
+        ]),
+      }),
+    );
+    expect(validateThreadSpecRevisionChain([first, second, duplicateRevision])).toEqual(
+      expect.objectContaining({
+        ok: false,
+        errors: expect.arrayContaining([
+          { path: "/2/revisionId", message: "duplicate revisionId in chain" },
+        ]),
+      }),
+    );
+  });
+
   it("property-checks stale spec edit bases are rejected", () => {
     fc.assert(
       fc.property(fc.boolean(), (useStaleBase) => {
-        const first = validSpecEditedPayload({ baseRevisionId: null, revisionId: REVISION_1 });
+        const first = validSpecEditedPayload({ revisionId: REVISION_1 });
         const second = validSpecEditedPayload({
           baseRevisionId: useStaleBase ? STALE_REVISION : REVISION_1,
           revisionId: REVISION_2,
@@ -288,6 +327,50 @@ describe("thread protocol slice", () => {
       }),
       { numRuns: 10 },
     );
+  });
+
+  it("rejects every status transition outside the lifecycle table", () => {
+    const allowedTransitions = new Set([
+      "open->in_progress",
+      "open->closed",
+      "in_progress->needs_review",
+      "in_progress->closed",
+      "needs_review->merged",
+      "needs_review->closed",
+    ]);
+
+    for (const fromStatus of THREAD_STATUS_VALUES) {
+      for (const toStatus of THREAD_STATUS_VALUES) {
+        if (allowedTransitions.has(`${fromStatus}->${toStatus}`)) continue;
+
+        const transitionError = {
+          path: "/toStatus",
+          message: `transition not allowed from ${fromStatus}`,
+        };
+        expect(
+          validateThreadStatusChangedAuditPayload(
+            validStatusChangedPayload({ fromStatus, toStatus }),
+          ),
+        ).toEqual(
+          expect.objectContaining({
+            ok: false,
+            errors: expect.arrayContaining([transitionError]),
+          }),
+        );
+        expect(
+          validateThreadCommand({
+            ...validStatusChangeCommand(),
+            fromStatus,
+            toStatus,
+          }),
+        ).toEqual(
+          expect.objectContaining({
+            ok: false,
+            errors: expect.arrayContaining([transitionError]),
+          }),
+        );
+      }
+    }
   });
 
   it("defines projection-supporting shapes for external refs and receipt task index", () => {
@@ -429,7 +512,6 @@ describe("thread protocol slice", () => {
                     kind,
                     threadId: THREAD_ID,
                     revisionId: REVISION_1,
-                    baseRevisionId: null,
                     content: validSpecContent(),
                     contentHash: threadSpecContentHash(validSpecContent()),
                     authoredBy: SIGNER,
@@ -458,6 +540,36 @@ describe("thread protocol slice", () => {
     expect(
       validateThreadSpecEditedAuditPayload({ ...payload, contentHash: sha256Hex("forged") }).ok,
     ).toBe(false);
+  });
+
+  it("canonicalizes no-base spec edits as a missing baseRevisionId", () => {
+    const payload = validSpecEditedPayload();
+    const canonicalBytes = threadAuditPayloadToBytes("thread_spec_edited", payload);
+    const canonicalJson = JSON.parse(TEXT_DECODER.decode(canonicalBytes)) as Record<
+      string,
+      unknown
+    >;
+    const explicitNull = {
+      ...payload,
+      baseRevisionId: null,
+    };
+
+    expect(Object.hasOwn(canonicalJson, "baseRevisionId")).toBe(false);
+    expect(validateThreadSpecEditedAuditPayload(explicitNull).ok).toBe(false);
+    expect(() =>
+      threadAuditPayloadFromJsonValue("thread_spec_edited", {
+        ...canonicalJson,
+        baseRevisionId: null,
+      }),
+    ).toThrow(/baseRevisionId/);
+    expect(
+      TEXT_DECODER.decode(
+        threadAuditPayloadToBytes(
+          "thread_spec_edited",
+          threadAuditPayloadFromJsonValue("thread_spec_edited", canonicalJson),
+        ),
+      ),
+    ).toBe(TEXT_DECODER.decode(canonicalBytes));
   });
 
   it("covers strict thread wire codec failures and terminal closedAt decoding", () => {
@@ -584,6 +696,52 @@ describe("thread protocol slice", () => {
     ).toThrow(/fromStatus/);
   });
 
+  it("rejects non-canonical thread audit payload bytes before hashing", () => {
+    const payload = validCreatedPayload();
+    const payloadJson = threadAuditPayloadToJsonValue("thread_created", payload);
+    const canonicalRecord: AuditEventRecord = {
+      seqNo: lsnFromV1Number(0),
+      timestamp: CREATED_AT,
+      prevHash: GENESIS_PREV_HASH,
+      eventHash: sha256Hex("thread-created-record"),
+      payload: {
+        kind: "thread_created",
+        body: threadAuditPayloadToBytes("thread_created", payload),
+      },
+    };
+    const canonicalBytes = serializeAuditEventRecordForHash(canonicalRecord);
+
+    expect(() => serializeAuditEventRecordForHash(canonicalRecord)).not.toThrow();
+    expect(() =>
+      serializeAuditEventRecordForHash({
+        ...canonicalRecord,
+        payload: {
+          ...canonicalRecord.payload,
+          body: TEXT_ENCODER.encode(JSON.stringify(payloadJson, null, 2)),
+        },
+      }),
+    ).toThrow(/payload\.body must be canonical JSON for thread_created/);
+    expect(() =>
+      serializeAuditEventRecordForHash({
+        ...canonicalRecord,
+        payload: {
+          ...canonicalRecord.payload,
+          body: TEXT_ENCODER.encode('{"__proto__":1}'),
+        },
+      }),
+    ).toThrow(/payload\.body invalid canonical JSON for thread_created/);
+    expect(() =>
+      serializeAuditEventRecordForHash({
+        ...canonicalRecord,
+        payload: {
+          ...canonicalRecord.payload,
+          body: TEXT_ENCODER.encode('{"createdAt":"2026-05-08T18:00:00.000Z"}'),
+        },
+      }),
+    ).toThrow(/payload\.body invalid for thread_created/);
+    expect(serializeAuditEventRecordForHash(canonicalRecord)).toStrictEqual(canonicalBytes);
+  });
+
   it("covers thread command validators across all command kinds", () => {
     const create = validCreateCommand();
     const edit = validSpecEditCommand();
@@ -625,7 +783,7 @@ describe("thread protocol slice", () => {
       validateThreadStatusFold([
         { kind: "thread_created", threadId: THREAD_ID },
         {
-          ...validStatusChangedPayload({ fromStatus: "in_progress" }),
+          ...validStatusChangedPayload({ fromStatus: "in_progress", toStatus: "closed" }),
           kind: "thread_status_changed",
         },
       ]).ok,
@@ -751,7 +909,6 @@ function validSpecRevision(overrides: Partial<ThreadSpecRevision> = {}): ThreadS
   return {
     revisionId: REVISION_1,
     threadId: THREAD_ID,
-    baseRevisionId: null,
     content,
     contentHash: threadSpecContentHash(content),
     authoredBy: SIGNER,
@@ -781,7 +938,6 @@ function validSpecEditedPayload(
   return {
     threadId: THREAD_ID,
     revisionId: REVISION_1,
-    baseRevisionId: null,
     content,
     contentHash: threadSpecContentHash(content),
     authoredBy: SIGNER,

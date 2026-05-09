@@ -53,6 +53,7 @@ import {
   serializeAuditEventRecordForHash,
   sha256Hex,
   type ThreadSpecEditedAuditPayload,
+  type ThreadStreamEvent,
   threadAuditPayloadToBytes,
   threadFromJson,
   threadSpecContentHash,
@@ -63,6 +64,7 @@ import {
   validateThreadSpecEditedAuditPayload,
   validateThreadSpecRevisionChain,
   validateThreadStatusFold,
+  validateThreadStreamEvent,
   verifyChain,
   verifyChainIncremental,
   WS_FRAME_TYPE_VALUES,
@@ -628,7 +630,6 @@ const thread = {
   spec: {
     revisionId: revision1,
     threadId,
-    baseRevisionId: null,
     content: specContent,
     contentHash: threadSpecContentHash(specContent),
     authoredBy: threadSigner,
@@ -670,7 +671,6 @@ header(19, "Thread spec OCC accepts the prior revision and rejects stale-base 40
 const firstEdit: ThreadSpecEditedAuditPayload = {
   threadId,
   revisionId: revision1,
-  baseRevisionId: null,
   content: specContent,
   contentHash: threadSpecContentHash(specContent),
   authoredBy: threadSigner,
@@ -786,6 +786,33 @@ expectEqual(
   "thread.pinned_approvals.changed accepted",
   isStreamEventKind("thread.pinned_approvals.changed"),
   true,
+);
+const threadStreamEvent: ThreadStreamEvent = {
+  id: "evt-thread-updated-demo",
+  kind: "thread.updated",
+  emittedAt: "2026-05-08T18:02:00.000Z",
+  payload: {
+    threadId,
+    headLsn: lsnFromV1Number(3),
+  },
+};
+expectEqual(
+  "thread stream event validator accepts invalidation",
+  validateThreadStreamEvent(threadStreamEvent),
+  {
+    ok: true,
+  },
+);
+expectEqual(
+  "thread stream event validator rejects payload data",
+  validateThreadStreamEvent({
+    ...threadStreamEvent,
+    payload: {
+      ...threadStreamEvent.payload,
+      content: "secret",
+    },
+  }).ok,
+  false,
 );
 
 // ──────────────────────────────────────────────────────────────────────────

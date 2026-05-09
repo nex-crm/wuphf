@@ -1093,7 +1093,6 @@ describe("audit-event chain verification", () => {
       const payload = {
         threadId: asThreadId("01ARZ3NDEKTSV4RRFFQ69G5FAY"),
         revisionId: asThreadSpecRevisionId("01BRZ3NDEKTSV4RRFFQ69G5FA0"),
-        baseRevisionId: null,
         content,
         contentHash: threadSpecContentHash(content),
         authoredBy: asSignerIdentity("fran@example.com"),
@@ -1313,7 +1312,6 @@ function bodyForAuditKind(kind: AuditEventKind, index: number): Uint8Array {
     return threadAuditPayloadToBytes(kind, {
       threadId: asThreadId("01ARZ3NDEKTSV4RRFFQ69G5FAY"),
       revisionId: asThreadSpecRevisionId("01BRZ3NDEKTSV4RRFFQ69G5FA0"),
-      baseRevisionId: null,
       content,
       contentHash: threadSpecContentHash(content),
       authoredBy: asSignerIdentity("fran@example.com"),

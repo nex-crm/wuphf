@@ -236,6 +236,7 @@ export interface ReceiptCore {
 
 export type ReceiptSnapshotV1 = ReceiptCore & {
   readonly schemaVersion: 1;
+  readonly threadId?: never;
 };
 
 export type ReceiptSnapshotV2 = ReceiptCore & {

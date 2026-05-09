@@ -55,7 +55,7 @@ export interface ThreadExternalRefs {
 export interface ThreadSpecRevision {
   readonly revisionId: ThreadSpecRevisionId;
   readonly threadId: ThreadId;
-  readonly baseRevisionId?: ThreadSpecRevisionId | null | undefined;
+  readonly baseRevisionId?: ThreadSpecRevisionId | undefined;
   readonly content: JsonValue;
   readonly contentHash: Sha256Hex;
   readonly authoredBy: SignerIdentity;
@@ -86,7 +86,7 @@ export interface ThreadCreatedAuditPayload {
 export interface ThreadSpecEditedAuditPayload {
   readonly threadId: ThreadId;
   readonly revisionId: ThreadSpecRevisionId;
-  readonly baseRevisionId?: ThreadSpecRevisionId | null | undefined;
+  readonly baseRevisionId?: ThreadSpecRevisionId | undefined;
   readonly content: JsonValue;
   readonly contentHash: Sha256Hex;
   readonly authoredBy: SignerIdentity;
@@ -132,7 +132,7 @@ export interface ThreadSpecEditCommand extends ThreadCommandCommon {
   readonly kind: "thread.spec.edit";
   readonly threadId: ThreadId;
   readonly revisionId: ThreadSpecRevisionId;
-  readonly baseRevisionId?: ThreadSpecRevisionId | null | undefined;
+  readonly baseRevisionId?: ThreadSpecRevisionId | undefined;
   readonly content: JsonValue;
   readonly contentHash: Sha256Hex;
   readonly authoredBy: SignerIdentity;
@@ -435,7 +435,7 @@ export function threadSpecRevisionFromJsonValue(
   const path = pathSegments.join(".");
   const record = requireRecord(value, path);
   assertKnownKeys(record, path, THREAD_SPEC_REVISION_WIRE_KEYS);
-  const baseRevisionId = optionalStringOrNullFromJson(record, "base_revision_id", path);
+  const baseRevisionId = optionalStringFromJson(record, "base_revision_id", path);
   const revision: ThreadSpecRevision = {
     revisionId: asThreadSpecRevisionIdAt(
       requiredStringFromJson(record, "revision_id", path),
@@ -445,10 +445,7 @@ export function threadSpecRevisionFromJsonValue(
     ...(baseRevisionId === undefined
       ? {}
       : {
-          baseRevisionId:
-            baseRevisionId === null
-              ? null
-              : asThreadSpecRevisionIdAt(baseRevisionId, `${path}.base_revision_id`),
+          baseRevisionId: asThreadSpecRevisionIdAt(baseRevisionId, `${path}.base_revision_id`),
         }),
     content: jsonValueFromUnknown(
       requiredFieldFromJson(record, "content", path),
@@ -624,6 +621,7 @@ export function validateThreadSpecRevisionChain(
 ): ThreadValidationResult {
   const errors: ThreadValidationError[] = [];
   const priorByThreadId = new Map<string, ThreadSpecRevisionId>();
+  const seenRevisionIds = new Set<string>();
   for (let i = 0; i < events.length; i += 1) {
     const event = events[i];
     if (event === undefined) continue;
@@ -633,12 +631,20 @@ export function validateThreadSpecRevisionChain(
       errors.push(...prefixErrors(validation.errors, eventPath));
       continue;
     }
+    if (event.baseRevisionId === event.revisionId) {
+      addError(errors, pointer(eventPath, "baseRevisionId"), "must not equal revisionId");
+    }
+    if (seenRevisionIds.has(event.revisionId)) {
+      addError(errors, pointer(eventPath, "revisionId"), "duplicate revisionId in chain");
+    } else {
+      seenRevisionIds.add(event.revisionId);
+    }
     const threadKey = event.threadId as string;
     const priorRevisionId = priorByThreadId.get(threadKey);
-    const baseRevisionId = event.baseRevisionId ?? null;
+    const baseRevisionId = event.baseRevisionId;
     if (priorRevisionId === undefined) {
-      if (baseRevisionId !== null) {
-        addError(errors, pointer(eventPath, "baseRevisionId"), "must be null for initial edit");
+      if (baseRevisionId !== undefined) {
+        addError(errors, pointer(eventPath, "baseRevisionId"), "must be absent for initial edit");
       }
     } else if (baseRevisionId !== priorRevisionId) {
       addError(errors, pointer(eventPath, "baseRevisionId"), "must match prior revisionId");
@@ -690,10 +696,6 @@ export function validateThreadStatusFold(
     }
     if (event.fromStatus !== priorStatus) {
       addError(errors, pointer(eventPath, "fromStatus"), "must equal prior folded status");
-      continue;
-    }
-    if (!isAllowedThreadStatusTransition(event.fromStatus, event.toStatus)) {
-      addError(errors, pointer(eventPath, "toStatus"), "must be a valid thread status transition");
       continue;
     }
     statusByThreadId.set(threadKey, event.toStatus);
@@ -797,13 +799,7 @@ function validateThreadSpecRevisionValue(
   validateKnownKeys(value, path, THREAD_SPEC_REVISION_KEYS, errors);
   validateRequired(value, "revisionId", path, errors, validateThreadSpecRevisionIdValue);
   validateRequired(value, "threadId", path, errors, validateThreadIdValue);
-  validateOptional(
-    value,
-    "baseRevisionId",
-    path,
-    errors,
-    validateNullableThreadSpecRevisionIdValue,
-  );
+  validateOptional(value, "baseRevisionId", path, errors, validateThreadSpecRevisionIdValue);
   validateRequired(value, "content", path, errors, validateThreadSpecContentValue);
   validateRequired(value, "contentHash", path, errors, validateSha256HexValue);
   validateRequired(value, "authoredBy", path, errors, validateSignerIdentityValue);
@@ -861,13 +857,7 @@ function validateThreadSpecEditedAuditPayloadValue(
   validateKnownKeys(value, path, THREAD_SPEC_EDITED_AUDIT_PAYLOAD_KEYS, errors);
   validateRequired(value, "threadId", path, errors, validateThreadIdValue);
   validateRequired(value, "revisionId", path, errors, validateThreadSpecRevisionIdValue);
-  validateOptional(
-    value,
-    "baseRevisionId",
-    path,
-    errors,
-    validateNullableThreadSpecRevisionIdValue,
-  );
+  validateOptional(value, "baseRevisionId", path, errors, validateThreadSpecRevisionIdValue);
   validateRequired(value, "content", path, errors, validateThreadSpecContentValue);
   validateRequired(value, "contentHash", path, errors, validateSha256HexValue);
   validateRequired(value, "authoredBy", path, errors, validateSignerIdentityValue);
@@ -906,8 +896,16 @@ function validateThreadStatusChangedFields(
   validateRequired(value, "changedBy", path, errors, validateSignerIdentityValue);
   validateRequired(value, "changedAt", path, errors, validateDateValue);
   const fromStatus = recordValue(value, "fromStatus");
+  const toStatus = recordValue(value, "toStatus");
   if (isTerminalThreadStatus(fromStatus)) {
     addError(errors, pointer(path, "fromStatus"), "must not be terminal");
+  }
+  if (
+    isThreadStatus(fromStatus) &&
+    isThreadStatus(toStatus) &&
+    !isAllowedThreadStatusTransition(fromStatus, toStatus)
+  ) {
+    addError(errors, pointer(path, "toStatus"), `transition not allowed from ${fromStatus}`);
   }
 }
 
@@ -959,7 +957,7 @@ function threadCreatedAuditPayloadFromJsonValue(value: unknown): ThreadCreatedAu
 function threadSpecEditedAuditPayloadFromJsonValue(value: unknown): ThreadSpecEditedAuditPayload {
   const record = requireRecord(value, "threadSpecEditedAuditPayload");
   assertKnownKeys(record, "threadSpecEditedAuditPayload", THREAD_SPEC_EDITED_AUDIT_PAYLOAD_KEYS);
-  const baseRevisionId = optionalStringOrNullFromJson(
+  const baseRevisionId = optionalStringFromJson(
     record,
     "baseRevisionId",
     "threadSpecEditedAuditPayload",
@@ -976,13 +974,10 @@ function threadSpecEditedAuditPayloadFromJsonValue(value: unknown): ThreadSpecEd
     ...(baseRevisionId === undefined
       ? {}
       : {
-          baseRevisionId:
-            baseRevisionId === null
-              ? null
-              : asThreadSpecRevisionIdAt(
-                  baseRevisionId,
-                  "threadSpecEditedAuditPayload.baseRevisionId",
-                ),
+          baseRevisionId: asThreadSpecRevisionIdAt(
+            baseRevisionId,
+            "threadSpecEditedAuditPayload.baseRevisionId",
+          ),
         }),
     content: jsonValueFromUnknown(
       requiredFieldFromJson(record, "content", "threadSpecEditedAuditPayload"),
@@ -1058,13 +1053,7 @@ function validateThreadSpecEditCommandValue(
   validateRequired(value, "idempotencyKey", path, errors, validateIdempotencyKeyValue);
   validateRequired(value, "threadId", path, errors, validateThreadIdValue);
   validateRequired(value, "revisionId", path, errors, validateThreadSpecRevisionIdValue);
-  validateOptional(
-    value,
-    "baseRevisionId",
-    path,
-    errors,
-    validateNullableThreadSpecRevisionIdValue,
-  );
+  validateOptional(value, "baseRevisionId", path, errors, validateThreadSpecRevisionIdValue);
   validateRequired(value, "content", path, errors, validateThreadSpecContentValue);
   validateRequired(value, "contentHash", path, errors, validateSha256HexValue);
   validateRequired(value, "authoredBy", path, errors, validateSignerIdentityValue);
@@ -1146,15 +1135,6 @@ function validateThreadSpecRevisionIdValue(
   if (!isThreadSpecRevisionId(value)) {
     addError(errors, path, "must be an uppercase ULID ThreadSpecRevisionId");
   }
-}
-
-function validateNullableThreadSpecRevisionIdValue(
-  value: unknown,
-  path: string,
-  errors: ThreadValidationError[],
-): void {
-  if (value === null) return;
-  validateThreadSpecRevisionIdValue(value, path, errors);
 }
 
 function validateSignerIdentityValue(
@@ -1318,6 +1298,10 @@ function isTerminalThreadStatus(value: unknown): value is "merged" | "closed" {
   return value === "merged" || value === "closed";
 }
 
+function isThreadStatus(value: unknown): value is ThreadStatus {
+  return typeof value === "string" && THREAD_STATUS_SET.has(value);
+}
+
 function isAllowedThreadStatusTransition(
   fromStatus: ThreadStatus,
   toStatus: ThreadStatus,
@@ -1420,17 +1404,16 @@ function requiredStringArrayFromJson(
   });
 }
 
-function optionalStringOrNullFromJson(
+function optionalStringFromJson(
   record: Readonly<Record<string, unknown>>,
   key: string,
   basePath: string,
-): string | null | undefined {
+): string | undefined {
   if (!hasOwn(record, key)) return undefined;
   const value = record[key];
   if (value === undefined) return undefined;
-  if (value === null) return null;
   if (typeof value !== "string") {
-    throw new Error(`${basePath}.${key}: must be a string or null`);
+    throw new Error(`${basePath}.${key}: must be a string`);
   }
   return value;
 }

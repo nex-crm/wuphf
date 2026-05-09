@@ -539,11 +539,26 @@ function isThreadAuditEventKind(kind: AuditEventKind): kind is ThreadAuditEventK
 function validateThreadAuditEventBodyBytes(kind: AuditEventKind, body: Uint8Array): void {
   if (!isThreadAuditEventKind(kind)) return;
   let parsed: unknown;
+  let decoded: string;
   try {
-    parsed = JSON.parse(UTF8_DECODER.decode(body));
+    decoded = UTF8_DECODER.decode(body);
+    parsed = JSON.parse(decoded);
   } catch (err) {
     throw new Error(
       `serializeAuditEventRecordForHash: payload.body must be JSON for ${kind}: ${errorMessage(err)}`,
+    );
+  }
+  let canonical: string;
+  try {
+    canonical = canonicalJSON(parsed);
+  } catch (err) {
+    throw new Error(
+      `serializeAuditEventRecordForHash: payload.body invalid canonical JSON for ${kind}: ${errorMessage(err)}`,
+    );
+  }
+  if (canonical !== decoded) {
+    throw new Error(
+      `serializeAuditEventRecordForHash: payload.body must be canonical JSON for ${kind}`,
     );
   }
   try {
