@@ -218,7 +218,12 @@ async function installDMMocks(context, { withBlocking = false } = {}) {
 }
 
 async function captureState({ name, withBlocking, preFix }) {
-  const base = process.env.BASE_URL ?? "http://localhost:5273";
+  // Strip a trailing slash so `${base}${DM_URL}` always produces a single
+  // separator — CI sometimes ships BASE_URL with a trailing `/`.
+  const base = (process.env.BASE_URL ?? "http://localhost:5273").replace(
+    /\/+$/,
+    "",
+  );
   await installDMMocks(context, { withBlocking });
   // Navigate to about:blank first so the new state forces a full re-mount.
   // Without this, page.goto to the same hash route is treated as a no-op
