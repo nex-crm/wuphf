@@ -350,9 +350,46 @@ func (b *Broker) transitionLifecycleLocked(taskID string, newState LifecycleStat
 			log.Printf("broker: lifecycle transition for task %q recovered from %s -> %s (reason=%q)",
 				taskID, LifecycleStateUnknown, newState, reason)
 		}
+		// Lane C: every transition triggers a Decision Packet flush
+		// when the broker has a packet for the task, plus debounced
+		// running-state durability. The hook is a no-op when no
+		// packet has been seeded for the task.
+		b.onLifecycleTransitionLocked(taskID, prev, newState)
 		return task, nil
 	}
 	return nil, fmt.Errorf("transition lifecycle: task %q not found", taskID)
+}
+
+// onLifecycleTransitionLocked is the Lane C persistence hook fired by
+// the transition layer on every state change. Persists the current in-
+// memory packet (if any) and arms / cancels the 5-second running-flush
+// timer. Caller holds b.mu.
+//
+// We skip persistence entirely when no packet has been seeded for the
+// task — Lane A tests that never go through the Decision Packet path
+// must not start touching the filesystem just because a lifecycle
+// transition fired. The prev state is currently informational; reserved
+// for the manifest-event payload Lane G will wire up.
+func (b *Broker) onLifecycleTransitionLocked(taskID string, prev, newState LifecycleState) {
+	_ = prev
+	if b == nil || b.decisionPackets == nil {
+		return
+	}
+	state := b.decisionPackets
+	state.mu.Lock()
+	packet, ok := state.packets[taskID]
+	state.mu.Unlock()
+	if !ok || packet == nil {
+		return
+	}
+	b.stampLifecycleStateLocked(packet)
+	b.persistDecisionPacketLocked(taskID, *packet)
+	switch newState {
+	case LifecycleStateRunning:
+		b.scheduleRunningFlushLocked(taskID)
+	default:
+		b.cancelRunningFlushLocked(taskID)
+	}
 }
 
 // TransitionLifecycle is the public entry point that acquires b.mu before

@@ -118,7 +118,7 @@ func TestIntakeValidate_MissingRequiredFields(t *testing.T) {
 			name: "empty problem",
 			body: `{
 				"problem": "",
-				"acceptance_criteria": [{"statement": "ship it"}],
+				"acceptanceCriteria": [{"statement": "ship it"}],
 				"assignment": "go"
 			}`,
 			expect: "problem is empty",
@@ -127,16 +127,16 @@ func TestIntakeValidate_MissingRequiredFields(t *testing.T) {
 			name: "no acceptance criteria",
 			body: `{
 				"problem": "we need a thing",
-				"acceptance_criteria": [],
+				"acceptanceCriteria": [],
 				"assignment": "go"
 			}`,
-			expect: "acceptance_criteria has 0 entries",
+			expect: "acceptanceCriteria has 0 entries",
 		},
 		{
 			name: "empty assignment",
 			body: `{
 				"problem": "we need a thing",
-				"acceptance_criteria": [{"statement": "ship it"}],
+				"acceptanceCriteria": [{"statement": "ship it"}],
 				"assignment": ""
 			}`,
 			expect: "assignment is empty",
@@ -174,8 +174,8 @@ func TestIntakeParse_ExtraUnknownFields(t *testing.T) {
 	b := newTestBroker(t)
 	body := `{
 		"problem": "we ship feature X",
-		"target_outcome": "users can do Y",
-		"acceptance_criteria": [
+		"targetOutcome": "users can do Y",
+		"acceptanceCriteria": [
 			{"statement": "tests pass"},
 			{"statement": "docs updated"}
 		],
@@ -226,9 +226,9 @@ func TestIntake_AutoAssignCountdownInterrupted(t *testing.T) {
 	b := newTestBroker(t)
 	body := `{
 		"problem": "ship the thing",
-		"acceptance_criteria": [{"statement": "tests green"}],
+		"acceptanceCriteria": [{"statement": "tests green"}],
 		"assignment": "go",
-		"auto_assign": "owner-eng"
+		"autoAssign": "owner-eng"
 	}`
 	provider := &fakeIntakeProvider{response: fenceJSON(body)}
 
@@ -307,8 +307,8 @@ func TestIntakeHappyPath(t *testing.T) {
 	b := newTestBroker(t)
 	body := `{
 		"problem": "the inbox can't show what's blocked",
-		"target_outcome": "blocked tasks visible at a glance",
-		"acceptance_criteria": [
+		"targetOutcome": "blocked tasks visible at a glance",
+		"acceptanceCriteria": [
 			{"statement": "blocked tasks render with a banner"},
 			{"statement": "filter chip 'blocked' shows count"}
 		],
@@ -510,7 +510,7 @@ func TestIntakeSpec_RoundTripsJSON(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	wireKeys := []string{"problem", "target_outcome", "acceptance_criteria", "assignment", "constraints", "auto_assign"}
+	wireKeys := []string{"problem", "targetOutcome", "acceptanceCriteria", "assignment", "constraints", "autoAssign"}
 	for _, k := range wireKeys {
 		if !strings.Contains(string(raw), `"`+k+`"`) {
 			t.Fatalf("expected wire key %q in JSON: %s", k, raw)
