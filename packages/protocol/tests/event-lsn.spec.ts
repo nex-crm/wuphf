@@ -27,13 +27,35 @@ describe("event-lsn", () => {
     });
 
     it("rejects negatives", () => {
-      expect(() => lsnFromV1Number(-1)).toThrow(/non-negative integer/);
+      expect(() => lsnFromV1Number(-1)).toThrow(/non-negative safe integer/);
     });
 
     it("rejects non-integers", () => {
-      expect(() => lsnFromV1Number(1.5)).toThrow(/non-negative integer/);
-      expect(() => lsnFromV1Number(Number.NaN)).toThrow(/non-negative integer/);
-      expect(() => lsnFromV1Number(Number.POSITIVE_INFINITY)).toThrow(/non-negative integer/);
+      expect(() => lsnFromV1Number(1.5)).toThrow(/non-negative safe integer/);
+      expect(() => lsnFromV1Number(Number.NaN)).toThrow(/non-negative safe integer/);
+      expect(() => lsnFromV1Number(Number.POSITIVE_INFINITY)).toThrow(/non-negative safe integer/);
+    });
+
+    it("rejects unsafe integers (mintability matches parseLsn's safe-integer guard)", () => {
+      // Without this guard, the appender could mint a token via
+      // `nextLsn(MAX_SAFE_INTEGER)` that parseLsn then rejects — verifier
+      // and writer would disagree about which LSNs are valid.
+      expect(() => lsnFromV1Number(Number.MAX_SAFE_INTEGER + 1)).toThrow(
+        /non-negative safe integer/,
+      );
+    });
+  });
+
+  describe("nextLsn", () => {
+    it("steps to the next sequence position", () => {
+      expect(nextLsn(lsnFromV1Number(0)) as string).toBe("v1:1");
+      expect(nextLsn(lsnFromV1Number(99)) as string).toBe("v1:100");
+    });
+
+    it("throws on overflow rather than minting an unparseable token", () => {
+      expect(() => nextLsn(lsnFromV1Number(Number.MAX_SAFE_INTEGER))).toThrow(
+        /non-negative safe integer/,
+      );
     });
   });
 

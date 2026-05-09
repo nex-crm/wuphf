@@ -160,7 +160,7 @@ describe("audit-event chain verification", () => {
       );
     });
 
-    it("seqNo=v1:0 record produces a stable canonical serialization", () => {
+    it("seqNo=v1:0 record produces a stable canonical serialization AND eventHash", () => {
       const record: AuditEventRecord = {
         seqNo: lsnFromV1Number(0),
         timestamp: new Date("2026-05-08T00:00:00.000Z"),
@@ -175,12 +175,24 @@ describe("audit-event chain verification", () => {
       // EventLsn is wire-encoded as a JSON string ("v1:0"), not a number.
       // This commits the multi-instance extension path (v2: "v2:<id>:<n>")
       // without a future hash-chain break.
-      const expected =
+      const expectedSerialization =
         '{"payload":{"bodyB64":"Ym9vdA==","kind":"boot_marker","receiptId":null},' +
         `"prevHash":"${GENESIS_PREV_HASH}",` +
         '"seqNo":"v1:0",' +
         '"timestamp":"2026-05-08T00:00:00.000Z"}';
-      expect(new TextDecoder().decode(bytes)).toBe(expected);
+      expect(new TextDecoder().decode(bytes)).toBe(expectedSerialization);
+
+      // Golden eventHash. Locks both pieces of the wire contract that the
+      // serialization vector alone leaves open:
+      //   1. prevHash is mixed in as 64-byte ASCII lower-hex, NOT 32 raw bytes.
+      //   2. The mix order is `asciiLowerHex(prevHash) || jcsBytes(record)`
+      //      (no separator).
+      // A future implementation that switched to raw-byte mixing or changed
+      // the order would preserve the serialization vector but break this
+      // hash. Cross-language verifiers MUST reproduce this digit-for-digit.
+      expect(computeAuditEventHash(record)).toBe(
+        "e27134d1b1641fb13747d9fac78aecc90d9d1385d04bfeea4a8a596fdb6101bb",
+      );
     });
   });
 });

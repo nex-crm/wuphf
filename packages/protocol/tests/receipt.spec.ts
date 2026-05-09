@@ -274,6 +274,35 @@ describe("receipt schema", () => {
     expect(() => receiptFromJson(tamperedJson)).toThrow(/shadow.*not allowed/);
   });
 
+  it("receiptFromJson throws on unknown FrozenArgs envelope fields (no silent drop)", () => {
+    // Without the FROZEN_ARGS_KEYS allowlist guard, a payload like
+    // `{canonicalJson, hash, extra}` survived a round-trip — the codec
+    // ignored `extra` and re-emitted only `{canonicalJson, hash}`. That
+    // boundary was the only object in the receipt where an attacker could
+    // smuggle unhashed shadow data through the wire shape.
+    interface FrozenArgsWire {
+      canonicalJson: string;
+      hash: string;
+    }
+    interface ToolCallWire {
+      inputs: FrozenArgsWire;
+    }
+    interface ReceiptWire {
+      toolCalls: ToolCallWire[];
+    }
+    const json = receiptToJson(validReceiptFixture());
+    const parsed = JSON.parse(json) as ReceiptWire;
+    const firstToolCall = parsed.toolCalls[0];
+    if (!firstToolCall) throw new Error("fixture must contain a tool call");
+    const tampered = {
+      ...firstToolCall,
+      inputs: { ...firstToolCall.inputs, evilShadow: "smuggled" },
+    };
+    parsed.toolCalls[0] = tampered as ToolCallWire;
+    const tamperedJson = JSON.stringify(parsed);
+    expect(() => receiptFromJson(tamperedJson)).toThrow(/evilShadow.*not allowed/);
+  });
+
   it("rejects ToolCallId/ApprovalId containing colons (LOCAL_ID_RE excludes ':')", () => {
     expect(() => asToolCallId("tool:01")).toThrow();
     expect(() => asApprovalId("approval:01")).toThrow();

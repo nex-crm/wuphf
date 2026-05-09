@@ -24,6 +24,34 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  protocol:
+    # @wuphf/protocol is the moat — branded types, receipt schema, IPC envelopes,
+    # audit chain. The whole package is hand-rolled (no schema lib) precisely so
+    # we can audit the invariants. CI MUST run typecheck + biome + vitest on
+    # every PR or the invariants can regress silently. The `web` job below does
+    # NOT cover packages/protocol — its working-directory is `web/`.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # ratchet:oven-sh/setup-bun@v2.2.0
+        with:
+          bun-version: "1.1.38"
+      - name: Install workspace deps
+        # bun.lock lives at the repo root and covers every workspace package;
+        # `bun install --frozen-lockfile` from here resolves packages/protocol
+        # too. Doing the install per-package would split the lockfile.
+        run: bun install --frozen-lockfile
+      - name: Typecheck
+        working-directory: packages/protocol
+        run: bun run typecheck
+      - name: Biome (lint + format check)
+        working-directory: packages/protocol
+        run: bun run check
+      - name: Vitest (unit + property tests)
+        # Routed through the canonical wrapper so this matches what local
+        # contributors run — see scripts/test-protocol.sh.
+        run: bash scripts/test-protocol.sh
+
   web:
     runs-on: ubuntu-latest
     steps:

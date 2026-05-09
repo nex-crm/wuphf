@@ -1,8 +1,15 @@
 // Opaque, monotonically-orderable position in the events log.
 //
-// v1 wire format: "v1:<decimal-uint64>"
+// v1 wire format: "v1:<decimal-non-negative-integer>" where the integer fits
+// in JS Number.MAX_SAFE_INTEGER (2^53 - 1). The wire form is unbounded
+// decimal, but THIS implementation only round-trips through `parseLsn` if the
+// value fits in a JS safe integer — `parseLsn` rejects anything larger and
+// `lsnFromV1Number` enforces the same bound at construction time so a token
+// minted by one helper cannot fail the other. Cross-language verifiers MUST
+// either use the same safe-integer bound or coordinate a v2 wire format
+// (likely string-arithmetic / bigint) before exceeding it.
 //
-// Future v2 will add instance scoping: "v2:<instanceId>:<decimal-uint64>".
+// Future v2 will add instance scoping: "v2:<instanceId>:<decimal-uint>".
 // Callers MUST go through the helpers in this module to compare or step LSNs;
 // reaching into the string locks us out of the multi-instance extension
 // without a hash-chain break (the audit chain canonicalizes seqNo into the
@@ -29,10 +36,17 @@ export const GENESIS_LSN: EventLsn = `${V1_PREFIX}0` as EventLsn;
  * Construct an EventLsn from a v1 local sequence number. Throws on negative
  * or non-integer input. Use only at the appender (where local sequence is
  * authoritative) or in tests / migration tooling.
+ *
+ * Bounded to `Number.isSafeInteger` so any LSN minted here can be parsed
+ * back by `parseLsn` without loss — otherwise the appender could emit a
+ * token (e.g. via `nextLsn(MAX_SAFE_INTEGER)`) that the verifier rejects.
+ * Hitting this bound on a real install would take 285,000 years at one
+ * event per millisecond; if it ever happens, migrate to a v2 wire format
+ * with bigint storage rather than relaxing the guard.
  */
 export function lsnFromV1Number(n: number): EventLsn {
-  if (!Number.isInteger(n) || n < 0) {
-    throw new Error(`lsnFromV1Number: expected non-negative integer, got ${n}`);
+  if (!Number.isSafeInteger(n) || n < 0) {
+    throw new Error(`lsnFromV1Number: expected non-negative safe integer, got ${n}`);
   }
   return `${V1_PREFIX}${n}` as EventLsn;
 }
@@ -106,5 +120,8 @@ export function isEqualLsn(a: EventLsn, b: EventLsn): boolean {
  */
 export function nextLsn(lsn: EventLsn): EventLsn {
   const p = parseLsn(lsn);
+  // lsnFromV1Number's safe-integer guard catches the MAX_SAFE_INTEGER + 1
+  // overflow with a clear message rather than emitting a token that
+  // parseLsn would later reject.
   return lsnFromV1Number(p.localLsn + 1);
 }

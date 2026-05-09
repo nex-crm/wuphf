@@ -35,6 +35,7 @@ import {
   COMMIT_REF_KEYS,
   EXTERNAL_WRITE_KEYS,
   FILE_CHANGE_KEYS,
+  FROZEN_ARGS_KEYS,
   MEMORY_WRITE_KEYS,
   RECEIPT_KEYS,
   SIGNED_APPROVAL_TOKEN_KEYS,
@@ -461,6 +462,10 @@ function optionalFrozenArgsToJsonValue(value: FrozenArgs | null): Record<string,
 
 function frozenArgsFromJson(value: unknown, path: string): FrozenArgs {
   const record = requireRecord(value, path);
+  // Reject unknown sibling keys: every other object in the receipt rejects
+  // them, so a `{canonicalJson, hash, extra}` envelope here would be the
+  // single boundary where un-hashed shadow data could survive a round-trip.
+  assertKnownKeys(record, path, FROZEN_ARGS_KEYS);
   const canonicalJson = requiredStringFromJson(record, "canonicalJson", path);
   const expectedHash = asSha256Hex(requiredStringFromJson(record, "hash", path));
   const decoded: unknown = JSON.parse(canonicalJson);
