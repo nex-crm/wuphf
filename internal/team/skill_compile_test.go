@@ -251,6 +251,50 @@ func (p *statusSpoofingSkillProvider) AskIsSkill(_ context.Context, articlePath,
 	return true, fm, "## Steps\n\n1. Do the thing.\n", nil
 }
 
+func TestSkillScannerScopePathValidation(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "wiki")
+	backup := filepath.Join(t.TempDir(), "wiki.bak")
+	repo := NewRepoAt(root, backup)
+	if err := repo.Init(context.Background()); err != nil {
+		t.Fatalf("init repo: %v", err)
+	}
+
+	b := newTestBroker(t)
+	worker := NewWikiWorker(repo, b)
+	worker.Start(context.Background())
+	defer worker.Stop()
+	b.mu.Lock()
+	b.wikiWorker = worker
+	b.mu.Unlock()
+
+	articleRel := "team/doc..v2.md"
+	if _, _, err := repo.Commit(context.Background(), "ceo", articleRel, "# Doc\n\nbody\n", "create", "seed scoped article"); err != nil {
+		t.Fatalf("seed article: %v", err)
+	}
+
+	scanner := NewSkillScanner(b, &instantProvider{}, 10)
+	res, err := scanner.Scan(context.Background(), articleRel, true, "manual")
+	if err != nil {
+		t.Fatalf("scope with embedded dots should scan: %v", err)
+	}
+	if res.Scanned != 1 {
+		t.Fatalf("scanned = %d, want 1", res.Scanned)
+	}
+
+	for _, scopePath := range []string{
+		"../team/doc.md",
+		"team/../outside.md",
+		"teamfoo/doc.md",
+		"/team/../../outside.md",
+	} {
+		t.Run(scopePath, func(t *testing.T) {
+			if _, err := scanner.Scan(context.Background(), scopePath, true, "manual"); err == nil {
+				t.Fatalf("expected scope %q to be rejected", scopePath)
+			}
+		})
+	}
+}
+
 // TestStageACompilerSetsSourceArticle asserts that Stage A scans thread the
 // wiki-relative article path through to the proposed skill's SourceArticle
 // field — both on the in-memory record and on the rendered SKILL.md
