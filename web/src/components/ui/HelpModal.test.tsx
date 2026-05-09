@@ -41,6 +41,8 @@ describe("<HelpModal>", () => {
     const dialog = container.querySelector('[role="dialog"]');
     expect(dialog).not.toBeNull();
     expect(dialog?.getAttribute("aria-modal")).toBe("true");
+    expect(dialog?.getAttribute("aria-labelledby")).toBe("help-modal-title");
+    expect(dialog?.classList.contains("help-modal")).toBe(true);
   });
 
   it("focuses the close button on open", async () => {
@@ -103,9 +105,8 @@ describe("<HelpModal>", () => {
   it("calls onClose when the overlay backdrop (not the modal body) is clicked", () => {
     const onClose = vi.fn();
     const { container } = render(<HelpModal open={true} onClose={onClose} />);
-    const overlay = container.querySelector(".help-overlay") as HTMLElement;
-    // Click the overlay itself — target === currentTarget triggers close.
-    fireEvent.click(overlay, { target: overlay, currentTarget: overlay });
+    const backdrop = container.querySelector(".help-backdrop") as HTMLElement;
+    fireEvent.click(backdrop);
     expect(onClose).toHaveBeenCalled();
   });
 

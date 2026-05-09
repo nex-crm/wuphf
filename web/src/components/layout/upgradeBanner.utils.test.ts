@@ -4,6 +4,7 @@ import {
   type CommitEntry,
   compareVersions,
   decideShow,
+  formatVersion,
   groupCommits,
   hasNotable,
   isDevVersion,
@@ -372,5 +373,32 @@ describe("prGitHubURL", () => {
     ["#310", "with hash prefix"],
   ] as const)("returns null for %j (%s)", (input, _label) => {
     expect(prGitHubURL("nex-crm/wuphf", input)).toBeNull();
+  });
+});
+
+describe("formatVersion", () => {
+  // The dev sentinel must NOT acquire a `v` prefix — a chip that says
+  // `vdev` would be wrong on every dimension (no such version exists,
+  // and the freshness signal is already conveyed by the `dev build`
+  // dot/label).
+  it("renders the dev sentinel without a v-prefix", () => {
+    expect(formatVersion("dev")).toBe("dev");
+    // Whitespace gets trimmed before the dev-sentinel check.
+    expect(formatVersion(" dev ")).toBe("dev");
+  });
+
+  it("prefixes numeric versions and strips a redundant v", () => {
+    expect(formatVersion("0.83.10")).toBe("v0.83.10");
+    expect(formatVersion("v0.83.10")).toBe("v0.83.10");
+    expect(formatVersion(" v0.83.10 ")).toBe("v0.83.10");
+  });
+
+  it("returns the fallback for empty / null / undefined input", () => {
+    expect(formatVersion(null)).toBe("unknown");
+    expect(formatVersion(undefined)).toBe("unknown");
+    expect(formatVersion("")).toBe("unknown");
+    expect(formatVersion("   ")).toBe("unknown"); // trimmed-empty is still empty
+    expect(formatVersion(null, "version")).toBe("version");
+    expect(formatVersion("", "wuphf@latest")).toBe("wuphf@latest");
   });
 });

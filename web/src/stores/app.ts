@@ -192,6 +192,10 @@ export interface AppStore {
   composerHelpOpen: boolean;
   setComposerHelpOpen: (v: boolean) => void;
 
+  // Version modal — opened by the version chip in the StatusBar
+  versionModalOpen: boolean;
+  setVersionModalOpen: (v: boolean) => void;
+
   // /connect integration wizard. Bare /connect opens the provider picker
   // (mode = "provider", parity with the TUI's `/connect` 4-option picker).
   // `/connect telegram` skips the picker and lands on the Telegram token
@@ -354,6 +358,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
   composerHelpOpen: false,
   setComposerHelpOpen: (v) => set({ composerHelpOpen: v }),
 
+  versionModalOpen: false,
+  setVersionModalOpen: (v) => set({ versionModalOpen: v }),
+
   telegramConnectOpen: false,
   telegramConnectMode: "provider",
   openConnectWizard: (mode) =>
@@ -421,6 +428,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       searchOpen: false,
       composerSearchInitialQuery: "",
       composerHelpOpen: false,
+      versionModalOpen: false,
       // Close the /connect wizard during an onboarding reset for the same
       // reason searchOpen / composerHelpOpen are: any modal left open here
       // would float over the onboarding flow.

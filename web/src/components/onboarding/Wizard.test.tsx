@@ -44,6 +44,8 @@ function pressEnterOn(
 
 beforeEach(() => {
   postMock.mockClear();
+  window.localStorage.clear();
+  window.sessionStorage.clear();
   window.history.replaceState({}, "", "/");
   useAppStore.setState({
     onboardingComplete: false,
@@ -52,6 +54,8 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  window.localStorage.clear();
+  window.sessionStorage.clear();
 });
 
 describe("Wizard keyboard advancement", () => {

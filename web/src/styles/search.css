@@ -705,7 +705,18 @@
   overflow-y: auto;
 }
 
+.help-backdrop {
+  position: fixed;
+  inset: 0;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: default;
+}
+
 .help-modal {
+  position: relative;
+  z-index: 1;
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
@@ -854,4 +865,187 @@
     grid-template-columns: 1fr;
     row-gap: 2px;
   }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Version modal — opened from the StatusBar version chip
+   Reuses the .help-overlay + .help-modal frame; this section
+   only adds the inner sections specific to the version view.
+   ═══════════════════════════════════════════════════════════════ */
+
+.version-modal {
+  width: min(92%, 520px);
+}
+
+.version-modal-body {
+  padding: 18px 24px 22px;
+  gap: 18px;
+}
+
+.version-modal-section {
+  display: grid;
+  gap: 8px;
+}
+
+.version-modal-grid {
+  display: grid;
+  grid-template-columns: 80px 1fr;
+  row-gap: 6px;
+  column-gap: 14px;
+  margin: 0;
+  align-items: center;
+}
+.version-modal-grid dt {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+.version-modal-grid dd {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text);
+  flex-wrap: wrap;
+}
+
+.version-modal-version {
+  font-family: SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--accent-bg);
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.version-modal-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-tertiary);
+  flex-shrink: 0;
+}
+.version-modal-dot--ok {
+  background: var(--green);
+}
+.version-modal-dot--outdated {
+  background: var(--yellow, #e5a00d);
+}
+.version-modal-dot--error {
+  background: var(--red, #e5484d);
+}
+.version-modal-dot--dev,
+.version-modal-dot--loading,
+.version-modal-dot--unknown {
+  background: var(--text-tertiary);
+}
+
+.version-modal-status {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.version-modal-help {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.version-modal-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+.version-modal-btn {
+  padding: 7px 14px;
+  font-size: 12.5px;
+  font-weight: 500;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--bg);
+  color: var(--text);
+  cursor: pointer;
+  font-family: var(--font-sans);
+  transition:
+    background 0.1s,
+    color 0.1s,
+    border-color 0.1s;
+}
+.version-modal-btn:hover:not(:disabled) {
+  background: var(--accent-bg);
+}
+.version-modal-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.version-modal-btn--primary {
+  background: var(--accent);
+  color: var(--bg);
+  border-color: transparent;
+}
+.version-modal-btn--primary:hover:not(:disabled) {
+  background: var(--accent);
+  filter: brightness(1.1);
+  color: var(--bg);
+}
+
+.version-modal-cmd {
+  display: inline-block;
+  font-family: SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 8px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.version-modal-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-size: 12px;
+  color: var(--accent);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.version-modal-error {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--red, #e5484d);
+}
+
+.version-modal-output {
+  max-height: 240px;
+  overflow: auto;
+  margin: 0;
+  padding: 10px 12px;
+  font-family: SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  white-space: pre-wrap;
+  color: var(--text-secondary);
+}
+
+.version-modal-outcome {
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+}
+.version-modal-outcome--ok .help-section-title {
+  color: var(--green);
+}
+.version-modal-outcome--err .help-section-title {
+  color: var(--red, #e5484d);
 }
