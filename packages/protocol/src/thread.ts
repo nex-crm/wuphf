@@ -519,14 +519,17 @@ export function threadAuditPayloadToJsonValue(
       authoredAt: edited.authoredAt.toISOString(),
     });
   }
-  const changed = payload as ThreadStatusChangedAuditPayload;
-  return {
-    threadId: changed.threadId,
-    fromStatus: changed.fromStatus,
-    toStatus: changed.toStatus,
-    changedBy: changed.changedBy,
-    changedAt: changed.changedAt.toISOString(),
-  };
+  if (kind === "thread_status_changed") {
+    const changed = payload as ThreadStatusChangedAuditPayload;
+    return {
+      threadId: changed.threadId,
+      fromStatus: changed.fromStatus,
+      toStatus: changed.toStatus,
+      changedBy: changed.changedBy,
+      changedAt: changed.changedAt.toISOString(),
+    };
+  }
+  throw new Error(unknownThreadAuditEventKindMessage(kind));
 }
 
 export function threadAuditPayloadFromJsonValue(
@@ -535,7 +538,8 @@ export function threadAuditPayloadFromJsonValue(
 ): ThreadAuditPayload {
   if (kind === "thread_created") return threadCreatedAuditPayloadFromJsonValue(value);
   if (kind === "thread_spec_edited") return threadSpecEditedAuditPayloadFromJsonValue(value);
-  return threadStatusChangedAuditPayloadFromJsonValue(value);
+  if (kind === "thread_status_changed") return threadStatusChangedAuditPayloadFromJsonValue(value);
+  throw new Error(unknownThreadAuditEventKindMessage(kind));
 }
 
 export function threadAuditPayloadToBytes(
@@ -555,7 +559,12 @@ export function validateThreadAuditPayloadForKind(
 ): ThreadValidationResult {
   if (kind === "thread_created") return validateThreadCreatedAuditPayload(payload);
   if (kind === "thread_spec_edited") return validateThreadSpecEditedAuditPayload(payload);
-  return validateThreadStatusChangedAuditPayload(payload);
+  if (kind === "thread_status_changed") return validateThreadStatusChangedAuditPayload(payload);
+  throw new Error(unknownThreadAuditEventKindMessage(kind));
+}
+
+function unknownThreadAuditEventKindMessage(kind: unknown): string {
+  return `unknown ThreadAuditEventKind: ${String(kind)}`;
 }
 
 export function validateThread(input: unknown): ThreadValidationResult {
@@ -663,28 +672,41 @@ export function validateThreadStatusFold(
     const event = events[i];
     if (event === undefined) continue;
     const eventPath = pointer("", String(i));
-    if (event.kind === "thread_created") {
-      if (!isThreadId(event.threadId)) {
+    const eventKind = (event as { readonly kind?: unknown }).kind;
+    if (eventKind === "thread_created") {
+      const created = event as Extract<ThreadStatusFoldEvent, { readonly kind: "thread_created" }>;
+      if (!isThreadId(created.threadId)) {
         addError(errors, pointer(eventPath, "threadId"), "must be an uppercase ULID ThreadId");
         continue;
       }
-      const initialStatus = event.status ?? "open";
+      const initialStatus = created.status ?? "open";
       if (initialStatus !== "open") {
         addError(errors, pointer(eventPath, "status"), "must be open");
         continue;
       }
-      statusByThreadId.set(event.threadId as string, "open");
+      statusByThreadId.set(created.threadId as string, "open");
+      continue;
+    }
+    if (eventKind !== "thread_status_changed") {
+      addError(
+        errors,
+        pointer(eventPath, "kind"),
+        `unexpected event kind in status fold: ${String(eventKind)}`,
+      );
       continue;
     }
 
+    const changed = event as ThreadStatusChangedAuditPayload & {
+      readonly kind: "thread_status_changed";
+    };
     const errorCountBeforeEvent = errors.length;
     validateThreadStatusChangedFields(
-      event as unknown as Readonly<Record<string, unknown>>,
+      changed as unknown as Readonly<Record<string, unknown>>,
       eventPath,
       errors,
     );
     if (errors.length > errorCountBeforeEvent) continue;
-    const threadKey = event.threadId as string;
+    const threadKey = changed.threadId as string;
     const priorStatus = statusByThreadId.get(threadKey);
     if (priorStatus === undefined) {
       addError(errors, pointer(eventPath, "threadId"), "must reference an existing thread");
@@ -694,11 +716,11 @@ export function validateThreadStatusFold(
       addError(errors, pointer(eventPath, "fromStatus"), "must not transition out of terminal");
       continue;
     }
-    if (event.fromStatus !== priorStatus) {
+    if (changed.fromStatus !== priorStatus) {
       addError(errors, pointer(eventPath, "fromStatus"), "must equal prior folded status");
       continue;
     }
-    statusByThreadId.set(threadKey, event.toStatus);
+    statusByThreadId.set(threadKey, changed.toStatus);
   }
   return errors.length === 0 ? { ok: true } : { ok: false, errors };
 }

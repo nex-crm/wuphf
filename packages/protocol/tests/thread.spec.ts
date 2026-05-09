@@ -665,6 +665,19 @@ describe("thread protocol slice", () => {
     expect(validateThreadAuditPayloadForKind("thread_status_changed", status)).toEqual({
       ok: true,
     });
+    const bogusKind = "bogus" as unknown as "thread_status_changed";
+    expect(() => validateThreadAuditPayloadForKind(bogusKind, status)).toThrow(
+      /unknown ThreadAuditEventKind: bogus/,
+    );
+    expect(() => threadAuditPayloadFromJsonValue(bogusKind, statusJson)).toThrow(
+      /unknown ThreadAuditEventKind: bogus/,
+    );
+    expect(() => threadAuditPayloadToJsonValue(bogusKind, status)).toThrow(
+      /unknown ThreadAuditEventKind: bogus/,
+    );
+    expect(() => threadAuditPayloadToBytes(bogusKind, status)).toThrow(
+      /unknown ThreadAuditEventKind: bogus/,
+    );
     expect(validateThreadCreatedAuditPayload(7).ok).toBe(false);
     expect(validateThreadSpecEditedAuditPayload(7).ok).toBe(false);
     expect(validateThreadStatusChangedAuditPayload(7).ok).toBe(false);
@@ -827,6 +840,21 @@ describe("thread protocol slice", () => {
         },
       ]).ok,
     ).toBe(false);
+    const nonStatusEvent = {
+      ...validStatusChangedPayload({ fromStatus: "open", toStatus: "in_progress" }),
+      kind: "thread_spec_edited",
+    } as unknown as Parameters<typeof validateThreadStatusFold>[0][number];
+    expect(
+      validateThreadStatusFold([{ kind: "thread_created", threadId: THREAD_ID }, nonStatusEvent]),
+    ).toEqual({
+      ok: false,
+      errors: [
+        {
+          path: "/1/kind",
+          message: "unexpected event kind in status fold: thread_spec_edited",
+        },
+      ],
+    });
   });
 
   it("covers nested validators for malformed thread objects and projection helpers", () => {
