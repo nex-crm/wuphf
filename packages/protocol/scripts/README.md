@@ -13,7 +13,7 @@ bun run packages/protocol/scripts/demo.ts
 Eleven scenarios, ~25 assertions. Each scenario prints what we tried, what the
 moat must do, and what it actually did. Sample output:
 
-```
+```text
 ── Scenario 3: SanitizedString rejects untrusted graph BEFORE side-effects fire
   PASS threw: SanitizedString: accessor property at $.tricky
   PASS getter side-effect did NOT fire = false

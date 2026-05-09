@@ -206,6 +206,10 @@ func main() {
 		fmt.Fprintf(os.Stderr, "could not parse fixture: %v\n", err)
 		os.Exit(2)
 	}
+	if fx.SchemaVersion != 1 {
+		fmt.Fprintf(os.Stderr, "unsupported fixture schemaVersion: %d\n", fx.SchemaVersion)
+		os.Exit(2)
+	}
 
 	fmt.Printf("%s@wuphf/protocol — Go reference verifier%s\n", colorBold, colorReset)
 	fmt.Printf("%sLoaded fixture schemaVersion=%d, %d audit-event vectors, %d merkle-root vectors, %d approval-claims vectors%s\n\n",

@@ -451,6 +451,15 @@ while [[ "$remaining" -gt 0 ]]; do
 
     elapsed=$((now - start_times[$i]))
     if [[ "$elapsed" -ge "$timeout_seconds" ]]; then
+      # The child can finish in the gap between the status probe above and this timeout branch.
+      if [[ -f "${status_files[$i]}" ]]; then
+        statuses[$i]="$(< "${status_files[$i]}")"
+        wait "${pids[$i]}" 2>/dev/null || true
+        done_flags[$i]="1"
+        remaining=$((remaining - 1))
+        echo "dispatch-triangulation: ${lenses[$i]} agent finished with status ${statuses[$i]}" >&2
+        continue
+      fi
       echo "dispatch-triangulation: ${lenses[$i]} agent timed out after ${timeout_seconds}s" >&2
       touch "${timeout_markers[$i]}"
       kill "${pids[$i]}" 2>/dev/null || true

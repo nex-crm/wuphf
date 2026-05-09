@@ -229,6 +229,15 @@ describe("resource budgets", () => {
     expectBudgetRejection(result, /MAX_AUDIT_EVENT_BODY_BYTES.*1048577 > 1048576/);
   });
 
+  it("rejects malformed audit event body budget inputs", () => {
+    const result = validateAuditEventBodyBudget({} as unknown as Uint8Array);
+
+    expectBudgetRejection(
+      result,
+      /MAX_AUDIT_EVENT_BODY_BYTES must be a non-negative finite number/,
+    );
+  });
+
   it("bounds audit chain batches at the edge", () => {
     const atCap = auditChainOfLength(MAX_AUDIT_CHAIN_BATCH_SIZE);
     const atCapResult = verifyChainIncremental(INITIAL_VERIFIER_STATE, atCap);
@@ -292,13 +301,44 @@ describe("resource budgets", () => {
     ).toEqual({ ok: true });
   });
 
-  it("rejects approval token lifetimes with invalid dates", () => {
-    const result = validateApprovalTokenLifetime({
-      ...approvalClaimsFixture(),
-      expiresAt: new Date(Number.NaN),
-    });
+  it("rejects approval token lifetimes with non-finite date inputs", () => {
+    class InfiniteTimeDate extends Date {
+      public override getTime(): number {
+        return Number.POSITIVE_INFINITY;
+      }
+    }
 
-    expect(result).toEqual({ ok: false, reason: "approval token lifetime must be finite" });
+    const validDate = new Date("2026-05-08T18:00:00.000Z");
+    const invalidCases: readonly {
+      readonly issuedAt: Date;
+      readonly expiresAt: Date;
+    }[] = [
+      {
+        issuedAt: new Date(Number.NaN),
+        expiresAt: validDate,
+      },
+      {
+        issuedAt: validDate,
+        expiresAt: new Date(Number.NaN),
+      },
+      {
+        issuedAt: new InfiniteTimeDate("2026-05-08T18:00:00.000Z"),
+        expiresAt: validDate,
+      },
+      {
+        issuedAt: validDate,
+        expiresAt: new InfiniteTimeDate("2026-05-08T18:00:00.000Z"),
+      },
+    ];
+
+    for (const invalidCase of invalidCases) {
+      expect(validateApprovalTokenLifetime({ ...approvalClaimsFixture(), ...invalidCase })).toEqual(
+        {
+          ok: false,
+          reason: "approval token lifetime must be finite",
+        },
+      );
+    }
   });
 
   it("direct budget helpers do not invoke hostile toJSON getters", () => {

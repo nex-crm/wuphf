@@ -21,7 +21,9 @@ contracts, and other long-lived surfaces.
 - [ ] Sustainability/maintainability impact reviewed for ownership, CI cost, and long-term API surface
 - [ ] Per-finding disposition table in PR description: every reviewer finding has FIXED/SKIPPED+reason/DEFERRED+issue
 - [ ] Pre-push gates green: `bash scripts/test-protocol.sh`, demo, cross-language verifier
+  - [ ] File-size budget: `scripts/check-file-size.sh`
 - [ ] CI gates green: same as above plus typecheck + biome
+  - [ ] File-size budget: `scripts/check-file-size.sh`
 - [ ] No `any`, no biome ignores, no `// @ts-ignore`
 - [ ] No `--no-verify` on push
 

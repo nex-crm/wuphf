@@ -134,9 +134,9 @@ Callers supply typed values or JSON-plain objects, not proxies, accessors, custo
 | 1 | §3.3 | `AGENTS.md:137` | Sustainability rules require budgets, but do not state the `validateReceiptBudget` plain-data-only contract. | MEDIUM | Add the contract to the package hard rule. |
 | 2 | §3.3 | `src/receipt.ts:197`, `src/receipt.ts:214`, `src/receipt.ts:220` | Call sites rely on the contract but have no local comment distinguishing parsed plain data from hostile objects. | LOW | Add a concise caller note or link to the budget contract. |
 
-## 8. Test coverage gaps
+## 8. Test coverage audit
 
-| # | Spec section | What's untested | Why it matters | Suggested test |
-|---|---|---|---|---|
-| 1 | §3.4 | Direct result-shape coverage for `validateAuditEventBodyBudget` at exact cap and cap+1. | Today it is only covered through `verifyChain` rejection. | Add a budget unit test beside the other direct validators. |
-| 2 | §3.5 | Direct `validateApprovalTokenLifetime` rejection for negative and non-finite lifetime values. | IPC/receipt paths cover normal over-cap policy but not raw helper edge cases. | Add direct helper tests for `expiresAt < issuedAt` and invalid dates. |
+| # | Spec section | Covered edge | Evidence |
+|---|---|---|---|
+| 1 | §3.4 | `validateAuditEventBodyBudget` accepts exact-cap `Uint8Array` inputs, rejects cap+1, and fails closed for malformed direct-helper inputs. | `tests/budgets.spec.ts` direct helper specs. |
+| 2 | §3.5 | `validateApprovalTokenLifetime` accepts exact cap, rejects cap+1 and non-finite date math, and documents lower-bound delegation to receipt/IPC per-field validators. | `tests/budgets.spec.ts` direct helper specs. |
