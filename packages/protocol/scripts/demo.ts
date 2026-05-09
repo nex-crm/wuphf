@@ -828,7 +828,7 @@ function buildValidReceipt(): ReceiptSnapshot {
   const writeId = asWriteId("write_01");
   const proposedDiff = FrozenArgs.freeze({ amount: { from: 1000, to: 1500 } });
   const claims = {
-    signerIdentity: "fd@example.com",
+    signerIdentity: asSignerIdentity("fd@example.com"),
     role: "approver" as const,
     receiptId,
     writeId,

@@ -112,7 +112,7 @@ export interface MemoryWriteRef {
 }
 
 export interface ApprovalClaims {
-  readonly signerIdentity: string;
+  readonly signerIdentity: SignerIdentity;
   readonly role: "viewer" | "approver" | "host";
   readonly receiptId: ReceiptId;
   readonly writeId?: WriteId | undefined;

@@ -9,6 +9,7 @@ import {
   asIdempotencyKey,
   asProviderKind,
   asReceiptId,
+  asSignerIdentity,
   assertWithinBudget,
   asTaskId,
   asToolCallId,
@@ -837,7 +838,7 @@ function signedApprovalTokenFixture(): SignedApprovalToken {
 
 function approvalClaimsFixture(): ApprovalClaims {
   return {
-    signerIdentity: "fd@example.com",
+    signerIdentity: asSignerIdentity("fd@example.com"),
     role: "approver",
     receiptId: asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAV"),
     writeId: asWriteId("write_01"),

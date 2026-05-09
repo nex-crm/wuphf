@@ -49,6 +49,7 @@ import {
   asIdempotencyKey,
   asProviderKind,
   asReceiptId,
+  asSignerIdentity,
   asTaskId,
   asThreadId,
   asToolCallId,
@@ -194,6 +195,10 @@ function asToolCallIdAt(value: string, path: string): ToolCallId {
 
 function asApprovalIdAt(value: string, path: string): ApprovalId {
   return decodeBrandAt(value, path, asApprovalId);
+}
+
+function asSignerIdentityAt(value: string, path: string): ApprovalClaims["signerIdentity"] {
+  return decodeBrandAt(value, path, asSignerIdentity);
 }
 
 function asSha256HexAt(value: string, path: string): Sha256Hex {
@@ -641,7 +646,10 @@ function approvalClaimsFromJson(value: unknown, path: string): ApprovalClaims {
     );
   }
   const claims = {
-    signerIdentity: requiredStringFromJson(record, "signerIdentity", path),
+    signerIdentity: asSignerIdentityAt(
+      requiredStringFromJson(record, "signerIdentity", path),
+      pointer(path, "signerIdentity"),
+    ),
     role: requiredLiteralFromJson(record, "role", path, APPROVAL_ROLE_VALUES),
     receiptId: asReceiptIdAt(
       requiredStringFromJson(record, "receiptId", path),

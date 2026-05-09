@@ -9,6 +9,7 @@ import {
   MAX_LOCAL_ID_BYTES,
   MAX_RECEIPT_BYTES,
   MAX_SANITIZED_STRING_BYTES,
+  MAX_SIGNER_IDENTITY_BYTES,
   MAX_TOOL_CALL_ID_BYTES,
   MAX_TOOL_CALLS_PER_RECEIPT,
   MAX_WEBAUTHN_ASSERTION_BYTES,
@@ -22,6 +23,7 @@ import {
   asIdempotencyKey,
   asProviderKind,
   asReceiptId,
+  asSignerIdentity,
   asTaskId,
   asThreadId,
   asToolCallId,
@@ -111,6 +113,7 @@ interface ApprovalTokenWire extends Record<string, unknown> {
 }
 
 interface ApprovalClaimsWire extends Record<string, unknown> {
+  signerIdentity?: unknown;
   webauthnAssertion?: unknown;
   issuedAt?: unknown;
   expiresAt?: unknown;
@@ -541,6 +544,15 @@ describe("receipt schema", () => {
 
   it.each([
     {
+      name: "oversized signer identity",
+      mutate: (token: ApprovalTokenWire) => {
+        const claims = approvalClaimsWire(token);
+        claims.signerIdentity = "x".repeat(MAX_SIGNER_IDENTITY_BYTES + 1);
+      },
+      receiptMessage: /\/writes\/0\/approvalToken\/claims\/signerIdentity: not a SignerIdentity/,
+      ipcMessage: /\/signerIdentity: not a SignerIdentity/,
+    },
+    {
       name: "oversized signature",
       mutate: (token: ApprovalTokenWire) => {
         token.signature = "A".repeat(MAX_APPROVAL_SIGNATURE_BYTES + 1);
@@ -586,6 +598,16 @@ describe("receipt schema", () => {
       }),
     ).toThrow(ipcMessage);
     expect(() => receiptFromJson(JSON.stringify(receipt))).toThrow(receiptMessage);
+  });
+
+  it("rejects oversized approval-event signerIdentity while decoding receipt JSON", () => {
+    const receipt = receiptJsonFixture();
+    const token = approvalWireSignedToken(approvalWireAt(receipt, 0)) as ApprovalTokenWire;
+    approvalClaimsWire(token).signerIdentity = "x".repeat(MAX_SIGNER_IDENTITY_BYTES + 1);
+
+    expect(() => receiptFromJson(JSON.stringify(receipt))).toThrow(
+      /\/approvals\/0\/signedToken\/claims\/signerIdentity: not a SignerIdentity/,
+    );
   });
 
   it("never throws for unknown fuzz payloads", () => {
@@ -1822,7 +1844,7 @@ function validReceiptFixture(): ReceiptSnapshot {
   const postWriteVerify = FrozenArgs.freeze({ amount: 1500, stage: "qualified" });
   const approvalToken = {
     claims: {
-      signerIdentity: "fran@example.com",
+      signerIdentity: asSignerIdentity("fran@example.com"),
       role: "approver" as const,
       receiptId,
       writeId,
@@ -1977,7 +1999,7 @@ function shuffledReceiptFixture(): ReceiptSnapshot {
       writeId,
       receiptId,
       role: "approver" as const,
-      signerIdentity: "fran@example.com",
+      signerIdentity: asSignerIdentity("fran@example.com"),
     },
   };
 

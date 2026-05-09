@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   MAX_APPROVAL_SIGNATURE_BYTES,
   MAX_APPROVAL_TOKEN_LIFETIME_MS,
+  MAX_SIGNER_IDENTITY_BYTES,
   MAX_WEBAUTHN_ASSERTION_BYTES,
 } from "../src/budgets.ts";
 import { canonicalJSON } from "../src/canonical-json.ts";
@@ -57,6 +58,7 @@ import {
   type ApprovalClaims,
   asIdempotencyKey,
   asReceiptId,
+  asSignerIdentity,
   asThreadId,
   asWriteId,
   type ReceiptId,
@@ -864,6 +866,16 @@ describe("approval submission IPC", () => {
     expect(signingBytesText(decoded.approvalToken.claims)).toBe(signingBytesText(token.claims));
   });
 
+  it("rejects oversized signerIdentity claims while decoding approval submit JSON", () => {
+    const receiptId = asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAV");
+    const wire = approvalSubmitRequestWireFor(receiptId, approvalTokenFor(receiptId));
+    wire.approvalToken.claims.signerIdentity = "x".repeat(MAX_SIGNER_IDENTITY_BYTES + 1);
+
+    expect(() => approvalSubmitRequestFromJson(wire)).toThrow(
+      /approvalSubmitRequest\.approvalToken\.claims\/signerIdentity: not a SignerIdentity/,
+    );
+  });
+
   it("decodes snake_case approval submit wire JSON into the camelCase runtime shape", () => {
     const receiptId = asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAV");
     const token = approvalTokenFor(receiptId);
@@ -1468,6 +1480,7 @@ interface ApprovalSubmitRequestWire {
   receiptId?: string;
   approvalToken: {
     claims: Record<string, unknown> & {
+      signerIdentity?: unknown;
       issuedAt?: unknown;
       expiresAt?: unknown;
       writeId?: unknown;
@@ -1499,7 +1512,7 @@ function approvalClaimsVectorNamed(name: string): ApprovalClaimsVector {
 function approvalClaimsFromVector(vector: ApprovalClaimsVector): ApprovalClaims {
   const { input } = vector;
   return {
-    signerIdentity: input.signerIdentity,
+    signerIdentity: asSignerIdentity(input.signerIdentity),
     role: input.role,
     receiptId: asReceiptId(input.receiptId),
     ...(input.writeId === undefined ? {} : { writeId: asWriteId(input.writeId) }),
@@ -1625,7 +1638,7 @@ function expectApprovalSubmitRejected(request: unknown, reason: RegExp): void {
 function approvalTokenFor(receiptId: ReceiptId): SignedApprovalToken {
   return {
     claims: {
-      signerIdentity: "fran@example.com",
+      signerIdentity: asSignerIdentity("fran@example.com"),
       role: "approver",
       receiptId,
       frozenArgsHash: sha256Hex("approval-submit-frozen-args"),

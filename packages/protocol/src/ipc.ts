@@ -27,6 +27,7 @@ import {
 } from "./ipc-shared.ts";
 import {
   type ApprovalClaims,
+  asSignerIdentity,
   type IdempotencyKey,
   isIdempotencyKey,
   isReceiptId,
@@ -525,6 +526,11 @@ function validateApprovalClaimsShape(
   if (typeof signerIdentityValue !== "string") {
     return { ok: false, reason: "approvalToken.claims.signerIdentity must be a string" };
   }
+  const signerIdentityBrand = signerIdentityFromJson(
+    signerIdentityValue,
+    "approvalToken.claims/signerIdentity",
+  );
+  if (!signerIdentityBrand.ok) return signerIdentityBrand;
 
   const role = requiredField(claims, "role", "approvalToken.claims.role");
   if (!role.ok) return role;
@@ -621,7 +627,7 @@ function validateApprovalClaimsShape(
   }
 
   const approvalClaims: ApprovalClaims = {
-    signerIdentity: signerIdentityValue,
+    signerIdentity: signerIdentityBrand.value,
     role: roleValue,
     receiptId: receiptIdValue,
     ...(writeIdValue === undefined ? {} : { writeId: writeIdValue }),
@@ -710,10 +716,10 @@ function approvalClaimsFromJson(value: unknown, path: readonly string[]): Approv
     usesSnakeCase ? `${pathString}.webauthn_assertion` : `${pathString}.webauthnAssertion`,
   );
   return {
-    signerIdentity: requiredStringJsonField(
+    signerIdentity: signerIdentityFromRequiredJsonField(
       record,
       usesSnakeCase ? "signer_identity" : "signerIdentity",
-      usesSnakeCase ? `${pathString}.signer_identity` : `${pathString}.signerIdentity`,
+      usesSnakeCase ? `${pathString}.signer_identity` : pointer(pathString, "signerIdentity"),
     ),
     role: requiredLiteralJsonField(record, "role", `${pathString}.role`, APPROVAL_ROLE_VALUES),
     receiptId: receiptIdFromJson(
@@ -844,6 +850,33 @@ function writeIdFromJson(value: string, path: string): NonNullable<ApprovalClaim
     throw new Error(`${path}: must be a valid WriteId`);
   }
   return value;
+}
+
+function signerIdentityFromRequiredJsonField(
+  record: Record<string, unknown>,
+  key: string,
+  path: string,
+): ApprovalClaims["signerIdentity"] {
+  return signerIdentityFromString(requiredStringJsonField(record, key, path), path);
+}
+
+function signerIdentityFromString(value: string, path: string): ApprovalClaims["signerIdentity"] {
+  try {
+    return asSignerIdentity(value);
+  } catch (err) {
+    throw new Error(`${path}: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+function signerIdentityFromJson(
+  value: string,
+  path: string,
+): { ok: true; value: ApprovalClaims["signerIdentity"] } | { ok: false; reason: string } {
+  try {
+    return { ok: true, value: asSignerIdentity(value) };
+  } catch (err) {
+    return { ok: false, reason: `${path}: ${err instanceof Error ? err.message : String(err)}` };
+  }
 }
 
 function sha256HexFromJson(value: string, path: string): ApprovalClaims["frozenArgsHash"] {
