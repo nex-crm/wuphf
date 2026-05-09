@@ -195,6 +195,16 @@ pre-push:
       files: bash scripts/changed-files-since-base.sh
       glob: "packages/protocol/{src/audit-event.ts,src/canonical-json.ts,src/event-lsn.ts,testdata/**}"
       run: cd packages/protocol/testdata && go run verifier-reference.go
+    protocol-invariants:
+      # Custom invariant checks for protocol-grade rules Biome cannot
+      # express: instanceof allowlist, single hashing entry point,
+      # no process.env in src/, demo imports from index only, every value
+      # export from index.ts referenced in tests/ or demo. See
+      # `packages/protocol/scripts/check-invariants.sh` for the full list
+      # and the per-allowlist rationales.
+      files: bash scripts/changed-files-since-base.sh
+      glob: "packages/protocol/{src/**,tests/**,scripts/**}"
+      run: bash packages/protocol/scripts/check-invariants.sh
     file-size:
       # Enforce CONTRIBUTING.md's file-size budget: warn at 800 LOC, fail
       # at 1500 LOC unless the file is on scripts/file-size-allowlist.txt
