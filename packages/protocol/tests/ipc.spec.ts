@@ -10,6 +10,7 @@ import {
   asBrokerPort,
   asKeychainHandleId,
   asRequestId,
+  type BrokerHttpResponse,
   isAllowedLoopbackHost,
   isApiToken,
   isBrokerPort,
@@ -21,6 +22,7 @@ import {
 import {
   asIdempotencyKey,
   asReceiptId,
+  asWriteId,
   type ReceiptId,
   type SignedApprovalToken,
 } from "../src/receipt.ts";
@@ -35,6 +37,8 @@ describe("isAllowedLoopbackHost", () => {
 
   it("accepts loopback host with valid port", () => {
     expect(isAllowedLoopbackHost("127.0.0.1:8080")).toBe(true);
+    expect(isAllowedLoopbackHost("127.0.0.1:0")).toBe(true);
+    expect(isAllowedLoopbackHost("127.0.0.1:65535")).toBe(true);
     expect(isAllowedLoopbackHost("localhost:3000")).toBe(true);
     expect(isAllowedLoopbackHost("Localhost:3000")).toBe(true); // case-insensitive
     expect(isAllowedLoopbackHost("[::1]")).toBe(true);
@@ -60,6 +64,10 @@ describe("isAllowedLoopbackHost", () => {
     expect(isAllowedLoopbackHost("0:0:0:0:0:0:0:1")).toBe(false); // expanded IPv6
     expect(isAllowedLoopbackHost("localhost:abc")).toBe(false);
     expect(isAllowedLoopbackHost("localhost:")).toBe(false);
+    expect(isAllowedLoopbackHost("localhost:-1")).toBe(false);
+    expect(isAllowedLoopbackHost("localhost:65535x")).toBe(false);
+    expect(isAllowedLoopbackHost("localhost: 1")).toBe(false);
+    expect(isAllowedLoopbackHost("localhost:1 ")).toBe(false);
     expect(isAllowedLoopbackHost("127.0.0.1:")).toBe(false);
     expect(isAllowedLoopbackHost("127.0.0.1:abc")).toBe(false);
     expect(isAllowedLoopbackHost("127.0.0.1:65536")).toBe(false); // port out of range
@@ -79,15 +87,9 @@ describe("isAllowedLoopbackHost", () => {
   it("property: any non-allowlisted host is rejected", () => {
     fc.assert(
       fc.property(
-        fc.string({ minLength: 1, maxLength: 32 }).filter((s) => {
-          const lower = s.toLowerCase();
-          return (
-            !lower.includes("127.0.0.1") &&
-            !lower.includes("localhost") &&
-            !lower.includes("::1") &&
-            !lower.includes(":")
-          );
-        }),
+        fc
+          .string({ minLength: 1, maxLength: 64 })
+          .filter((host) => !isDocumentedAllowedLoopbackHost(host)),
         (host) => isAllowedLoopbackHost(host) === false,
       ),
       { numRuns: 500 },
@@ -98,11 +100,14 @@ describe("isAllowedLoopbackHost", () => {
 describe("isLoopbackRemoteAddress", () => {
   it("accepts ::1 and 127.0.0.0/8", () => {
     expect(isLoopbackRemoteAddress("::1")).toBe(true);
+    expect(isLoopbackRemoteAddress("127.0.0.0")).toBe(true);
     expect(isLoopbackRemoteAddress("127.0.0.1")).toBe(true);
     expect(isLoopbackRemoteAddress("127.255.255.255")).toBe(true);
     expect(isLoopbackRemoteAddress("127.1.2.3")).toBe(true);
+    expect(isLoopbackRemoteAddress("::ffff:127.0.0.0")).toBe(true);
     expect(isLoopbackRemoteAddress("::ffff:127.0.0.1")).toBe(true);
     expect(isLoopbackRemoteAddress("::ffff:127.42.42.42")).toBe(true);
+    expect(isLoopbackRemoteAddress("::ffff:127.255.255.255")).toBe(true);
   });
 
   it("rejects non-loopback addresses", () => {
@@ -112,11 +117,17 @@ describe("isLoopbackRemoteAddress", () => {
     expect(isLoopbackRemoteAddress("192.168.1.1")).toBe(false);
     expect(isLoopbackRemoteAddress("169.254.169.254")).toBe(false);
     expect(isLoopbackRemoteAddress("::ffff:192.168.1.1")).toBe(false);
+    expect(isLoopbackRemoteAddress("::ffff:128.0.0.1")).toBe(false);
+    expect(isLoopbackRemoteAddress("::ffff:127.0.0.256")).toBe(false);
     expect(isLoopbackRemoteAddress("fe80::1")).toBe(false);
     expect(isLoopbackRemoteAddress("")).toBe(false);
     expect(isLoopbackRemoteAddress("not-an-ip")).toBe(false);
     expect(isLoopbackRemoteAddress("127.0.0")).toBe(false); // truncated
     expect(isLoopbackRemoteAddress("127.0.0.256")).toBe(false); // out-of-range octet
+    expect(isLoopbackRemoteAddress("127.0.0.1:1234")).toBe(false);
+    expect(isLoopbackRemoteAddress("[::1]")).toBe(false);
+    expect(isLoopbackRemoteAddress("::1:1234")).toBe(false);
+    expect(isLoopbackRemoteAddress("127.0.0.1, 10.0.0.1")).toBe(false);
   });
 });
 
@@ -147,6 +158,7 @@ describe("IPC brand constructors", () => {
       expect(asApiToken(t) as string).toBe(t);
       expect(isApiToken("a".repeat(16))).toBe(true);
       expect(isApiToken("a".repeat(512))).toBe(true);
+      expect(isApiToken("A0._~+/-".repeat(2))).toBe(true);
     });
 
     it("rejects too short, too long, or unsafe characters", () => {
@@ -154,6 +166,8 @@ describe("IPC brand constructors", () => {
       expect(() => asApiToken("a".repeat(513))).toThrow();
       expect(() => asApiToken(`${"a".repeat(15)} `)).toThrow();
       expect(() => asApiToken(`${"a".repeat(20)} \n`)).toThrow();
+      expect(() => asApiToken(`${"a".repeat(15)}=`)).toThrow();
+      expect(() => asApiToken(`${"a".repeat(15)}\u{1f608}`)).toThrow();
       expect(() => asApiToken("")).toThrow();
       expect(isApiToken("a".repeat(15))).toBe(false);
       expect(isApiToken(123)).toBe(false);
@@ -167,13 +181,18 @@ describe("IPC brand constructors", () => {
       );
       expect(asRequestId("req_42") as string).toBe("req_42");
       expect(isRequestId("a")).toBe(true);
+      expect(isRequestId("a".repeat(128))).toBe(true);
+      expect(isRequestId("A.Z_9-0")).toBe(true);
     });
 
     it("rejects empty, leading-special, or oversized identifiers", () => {
       expect(() => asRequestId("")).toThrow();
       expect(() => asRequestId(".leading-dot")).toThrow();
+      expect(() => asRequestId("_leading-underscore")).toThrow();
+      expect(() => asRequestId("-leading-hyphen")).toThrow();
       expect(() => asRequestId("a".repeat(129))).toThrow();
       expect(() => asRequestId("has space")).toThrow();
+      expect(() => asRequestId("has/slash")).toThrow();
       expect(isRequestId(123)).toBe(false);
     });
   });
@@ -182,18 +201,443 @@ describe("IPC brand constructors", () => {
     it("accepts opaque handle identifiers", () => {
       expect(asKeychainHandleId("kh_abc123") as string).toBe("kh_abc123");
       expect(isKeychainHandleId("kh_abc123")).toBe(true);
+      expect(isKeychainHandleId("a")).toBe(true);
+      expect(isKeychainHandleId("a".repeat(128))).toBe(true);
+      expect(isKeychainHandleId("A.Z_9-0")).toBe(true);
     });
 
     it("rejects empty, leading-special, or unsafe characters", () => {
       expect(() => asKeychainHandleId("")).toThrow();
       expect(() => asKeychainHandleId(".bad")).toThrow();
+      expect(() => asKeychainHandleId("_bad")).toThrow();
+      expect(() => asKeychainHandleId("-bad")).toThrow();
       expect(() => asKeychainHandleId("kh abc")).toThrow();
+      expect(() => asKeychainHandleId("a".repeat(129))).toThrow();
+      expect(() => asKeychainHandleId("kh/abc")).toThrow();
       expect(isKeychainHandleId(undefined)).toBe(false);
     });
   });
 });
 
+type MutableApprovalRequest = Record<string, unknown> & {
+  receiptId?: unknown;
+  approvalToken?: unknown;
+  idempotencyKey?: unknown;
+  extra?: unknown;
+};
+
+type MutableApprovalToken = Record<string, unknown> & {
+  claims?: unknown;
+  algorithm?: unknown;
+  signerKeyId?: unknown;
+  signature?: unknown;
+  extraTokenField?: unknown;
+};
+
+type MutableApprovalClaims = Record<string, unknown> & {
+  signerIdentity?: unknown;
+  role?: unknown;
+  receiptId?: unknown;
+  writeId?: unknown;
+  frozenArgsHash?: unknown;
+  riskClass?: unknown;
+  issuedAt?: unknown;
+  expiresAt?: unknown;
+  webauthnAssertion?: unknown;
+  extraClaimField?: unknown;
+};
+
+type ApprovalSubmitFailureCase = {
+  readonly name: string;
+  readonly mutate: (request: MutableApprovalRequest) => unknown;
+  readonly reason: RegExp;
+};
+
+const APPROVAL_SUBMIT_FAILURE_CASES = [
+  {
+    name: "rejects non-object requests",
+    mutate: () => null,
+    reason: /request must be an object/,
+  },
+  {
+    name: "rejects unknown request keys",
+    mutate: (request) => {
+      request.extra = 1;
+      return request;
+    },
+    reason: /extra.*not allowed/,
+  },
+  {
+    name: "rejects missing receiptId",
+    mutate: (request) => {
+      Reflect.deleteProperty(request, "receiptId");
+      return request;
+    },
+    reason: /receiptId is required/,
+  },
+  {
+    name: "rejects missing idempotencyKey",
+    mutate: (request) => {
+      Reflect.deleteProperty(request, "idempotencyKey");
+      return request;
+    },
+    reason: /idempotencyKey is required/,
+  },
+  {
+    name: "rejects missing approvalToken",
+    mutate: (request) => {
+      Reflect.deleteProperty(request, "approvalToken");
+      return request;
+    },
+    reason: /approvalToken is required/,
+  },
+  {
+    name: "rejects invalid receiptId brands",
+    mutate: (request) => {
+      request.receiptId = "not-a-receipt-id";
+      return request;
+    },
+    reason: /receiptId must be an uppercase ULID ReceiptId/,
+  },
+  {
+    name: "rejects invalid idempotencyKey brands",
+    mutate: (request) => {
+      request.idempotencyKey = "has/slash";
+      return request;
+    },
+    reason: /idempotencyKey must match/,
+  },
+  {
+    name: "rejects non-object approvalToken",
+    mutate: (request) => {
+      request.approvalToken = "not-a-token";
+      return request;
+    },
+    reason: /approvalToken must be an object/,
+  },
+  {
+    name: "rejects unknown approval token envelope keys",
+    mutate: (request) => {
+      tokenOf(request).extraTokenField = true;
+      return request;
+    },
+    reason: /extraTokenField.*not allowed/,
+  },
+  {
+    name: "rejects missing token claims",
+    mutate: (request) => {
+      Reflect.deleteProperty(tokenOf(request), "claims");
+      return request;
+    },
+    reason: /approvalToken\.claims is required/,
+  },
+  {
+    name: "rejects non-object token claims",
+    mutate: (request) => {
+      tokenOf(request).claims = "not-claims";
+      return request;
+    },
+    reason: /approvalToken\.claims must be an object/,
+  },
+  {
+    name: "rejects missing token algorithm",
+    mutate: (request) => {
+      Reflect.deleteProperty(tokenOf(request), "algorithm");
+      return request;
+    },
+    reason: /approvalToken\.algorithm is required/,
+  },
+  {
+    name: "rejects undefined token algorithm values",
+    mutate: (request) => {
+      tokenOf(request).algorithm = undefined;
+      return request;
+    },
+    reason: /approvalToken\.algorithm is required/,
+  },
+  {
+    name: "rejects non-ed25519 token algorithms",
+    mutate: (request) => {
+      tokenOf(request).algorithm = "rsa";
+      return request;
+    },
+    reason: /approvalToken\.algorithm must be ed25519/,
+  },
+  {
+    name: "rejects missing signerKeyId",
+    mutate: (request) => {
+      Reflect.deleteProperty(tokenOf(request), "signerKeyId");
+      return request;
+    },
+    reason: /approvalToken\.signerKeyId is required/,
+  },
+  {
+    name: "rejects non-string signerKeyId",
+    mutate: (request) => {
+      tokenOf(request).signerKeyId = 42;
+      return request;
+    },
+    reason: /approvalToken\.signerKeyId must be a string/,
+  },
+  {
+    name: "rejects missing signatures",
+    mutate: (request) => {
+      Reflect.deleteProperty(tokenOf(request), "signature");
+      return request;
+    },
+    reason: /approvalToken\.signature is required/,
+  },
+  {
+    name: "rejects empty signatures",
+    mutate: (request) => {
+      tokenOf(request).signature = "";
+      return request;
+    },
+    reason: /approvalToken\.signature must be a non-empty base64 string/,
+  },
+  {
+    name: "rejects invalid-base64 signatures",
+    mutate: (request) => {
+      tokenOf(request).signature = "not base64!";
+      return request;
+    },
+    reason: /approvalToken\.signature must be a non-empty base64 string/,
+  },
+  {
+    name: "rejects unknown approval token claim keys",
+    mutate: (request) => {
+      claimsOf(request).extraClaimField = true;
+      return request;
+    },
+    reason: /extraClaimField.*not allowed/,
+  },
+  {
+    name: "rejects missing signerIdentity claims",
+    mutate: (request) => {
+      Reflect.deleteProperty(claimsOf(request), "signerIdentity");
+      return request;
+    },
+    reason: /approvalToken\.claims\.signerIdentity is required/,
+  },
+  {
+    name: "rejects non-string signerIdentity claims",
+    mutate: (request) => {
+      claimsOf(request).signerIdentity = 42;
+      return request;
+    },
+    reason: /approvalToken\.claims\.signerIdentity must be a string/,
+  },
+  {
+    name: "rejects missing role claims",
+    mutate: (request) => {
+      Reflect.deleteProperty(claimsOf(request), "role");
+      return request;
+    },
+    reason: /approvalToken\.claims\.role is required/,
+  },
+  {
+    name: "rejects invalid role claims",
+    mutate: (request) => {
+      claimsOf(request).role = "admin";
+      return request;
+    },
+    reason: /approvalToken\.claims\.role must be a valid approval role/,
+  },
+  {
+    name: "rejects missing claim receiptId",
+    mutate: (request) => {
+      Reflect.deleteProperty(claimsOf(request), "receiptId");
+      return request;
+    },
+    reason: /approvalToken\.claims\.receiptId is required/,
+  },
+  {
+    name: "rejects invalid claim receiptId",
+    mutate: (request) => {
+      claimsOf(request).receiptId = "not-a-receipt-id";
+      return request;
+    },
+    reason: /approvalToken\.claims\.receiptId must be an uppercase ULID ReceiptId/,
+  },
+  {
+    name: "rejects invalid optional writeId",
+    mutate: (request) => {
+      claimsOf(request).writeId = "bad write id";
+      return request;
+    },
+    reason: /approvalToken\.claims\.writeId must be a valid WriteId/,
+  },
+  {
+    name: "rejects missing frozenArgsHash claims",
+    mutate: (request) => {
+      Reflect.deleteProperty(claimsOf(request), "frozenArgsHash");
+      return request;
+    },
+    reason: /approvalToken\.claims\.frozenArgsHash is required/,
+  },
+  {
+    name: "rejects invalid frozenArgsHash claims",
+    mutate: (request) => {
+      claimsOf(request).frozenArgsHash = "not-a-sha";
+      return request;
+    },
+    reason: /approvalToken\.claims\.frozenArgsHash must be a sha256 hex digest/,
+  },
+  {
+    name: "rejects missing riskClass claims",
+    mutate: (request) => {
+      Reflect.deleteProperty(claimsOf(request), "riskClass");
+      return request;
+    },
+    reason: /approvalToken\.claims\.riskClass is required/,
+  },
+  {
+    name: "rejects invalid riskClass claims",
+    mutate: (request) => {
+      claimsOf(request).riskClass = "severe";
+      return request;
+    },
+    reason: /approvalToken\.claims\.riskClass must be a valid risk class/,
+  },
+  {
+    name: "rejects missing issuedAt claims",
+    mutate: (request) => {
+      Reflect.deleteProperty(claimsOf(request), "issuedAt");
+      return request;
+    },
+    reason: /approvalToken\.claims\.issuedAt is required/,
+  },
+  {
+    name: "rejects invalid issuedAt claims",
+    mutate: (request) => {
+      claimsOf(request).issuedAt = "2026-05-08T18:00:00.000Z";
+      return request;
+    },
+    reason: /approvalToken\.claims\.issuedAt must be a valid Date/,
+  },
+  {
+    name: "rejects missing expiresAt claims",
+    mutate: (request) => {
+      Reflect.deleteProperty(claimsOf(request), "expiresAt");
+      return request;
+    },
+    reason: /approvalToken\.claims\.expiresAt is required/,
+  },
+  {
+    name: "rejects invalid expiresAt claims",
+    mutate: (request) => {
+      claimsOf(request).expiresAt = "2026-05-08T18:30:00.000Z";
+      return request;
+    },
+    reason: /approvalToken\.claims\.expiresAt must be a valid Date/,
+  },
+  {
+    name: "rejects non-string optional WebAuthn assertions",
+    mutate: (request) => {
+      claimsOf(request).webauthnAssertion = 42;
+      return request;
+    },
+    reason: /approvalToken\.claims\.webauthnAssertion must be a string/,
+  },
+  {
+    name: "rejects high-risk claims without WebAuthn assertions",
+    mutate: (request) => {
+      claimsOf(request).riskClass = "high";
+      return request;
+    },
+    reason: /webauthnAssertion must be a non-empty string for high\/critical risk/,
+  },
+  {
+    name: "rejects critical-risk claims with empty WebAuthn assertions",
+    mutate: (request) => {
+      const claims = claimsOf(request);
+      claims.riskClass = "critical";
+      claims.webauthnAssertion = "";
+      return request;
+    },
+    reason: /webauthnAssertion must be a non-empty string for high\/critical risk/,
+  },
+  {
+    name: "rejects expiry equal to issuance",
+    mutate: (request) => {
+      const claims = claimsOf(request);
+      const issuedAt = new Date("2026-05-08T18:00:00.000Z");
+      claims.issuedAt = issuedAt;
+      claims.expiresAt = issuedAt;
+      return request;
+    },
+    reason: /expiresAt must be strictly after issuedAt/,
+  },
+  {
+    name: "rejects expiry before issuance",
+    mutate: (request) => {
+      const claims = claimsOf(request);
+      claims.issuedAt = new Date("2026-05-08T18:00:00.000Z");
+      claims.expiresAt = new Date("2026-05-08T17:59:59.999Z");
+      return request;
+    },
+    reason: /expiresAt must be strictly after issuedAt/,
+  },
+  {
+    name: "rejects lifetimes over the maximum cap",
+    mutate: (request) => {
+      const claims = claimsOf(request);
+      const issuedAt = new Date("2026-05-08T18:00:00.000Z");
+      claims.issuedAt = issuedAt;
+      claims.expiresAt = new Date(issuedAt.getTime() + MAX_APPROVAL_TOKEN_LIFETIME_MS + 1);
+      return request;
+    },
+    reason: /MAX_APPROVAL_TOKEN_LIFETIME_MS/,
+  },
+] as const satisfies readonly ApprovalSubmitFailureCase[];
+
 describe("approval submission IPC", () => {
+  it.each(APPROVAL_SUBMIT_FAILURE_CASES)("$name", ({ mutate, reason }) => {
+    expectApprovalSubmitRejected(mutate(mutableApprovalRequestFor()), reason);
+  });
+
+  it.each([
+    "receiptId",
+    "idempotencyKey",
+    "approvalToken",
+  ] as const)("rejects %s accessors without invoking getters", (fieldName) => {
+    let getterInvoked = false;
+    const request = mutableApprovalRequestFor();
+    Reflect.deleteProperty(request, fieldName);
+    Object.defineProperty(request, fieldName, {
+      enumerable: true,
+      get() {
+        getterInvoked = true;
+        return "should-never-be-read";
+      },
+    });
+
+    expectApprovalSubmitRejected(request, new RegExp(`${fieldName}.*data property`));
+    expect(getterInvoked).toBe(false);
+  });
+
+  it.each([
+    "writeId",
+    "webauthnAssertion",
+  ] as const)("rejects optional claim %s accessors without invoking getters", (fieldName) => {
+    let getterInvoked = false;
+    const request = mutableApprovalRequestFor();
+    const claims = claimsOf(request);
+    Object.defineProperty(claims, fieldName, {
+      enumerable: true,
+      get() {
+        getterInvoked = true;
+        return "should-never-be-read";
+      },
+    });
+
+    expectApprovalSubmitRejected(
+      request,
+      new RegExp(`approvalToken\\.claims\\.${fieldName}.*data property`),
+    );
+    expect(getterInvoked).toBe(false);
+  });
+
   it("validates request receiptId against token claims receiptId", () => {
     const receiptId = asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAV");
     const otherReceiptId = asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAY");
@@ -236,148 +680,40 @@ describe("approval submission IPC", () => {
     }
   });
 
-  it("rejects approval tokens missing algorithm", () => {
-    const receiptId = asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAV");
-    const approvalToken = { ...approvalTokenFor(receiptId) } as Record<string, unknown>;
-    Reflect.deleteProperty(approvalToken, "algorithm");
-
-    expectApprovalSubmitRejected(
-      approvalRequestFor(receiptId, approvalToken),
-      /algorithm.*required/,
-    );
-  });
-
-  it("rejects approval tokens with non-ed25519 algorithms", () => {
-    const receiptId = asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAV");
-
-    expectApprovalSubmitRejected(
-      approvalRequestFor(receiptId, {
-        ...approvalTokenFor(receiptId),
-        algorithm: "rsa",
-      }),
-      /algorithm.*ed25519/,
-    );
-  });
-
-  it("rejects approval tokens missing signerKeyId", () => {
-    const receiptId = asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAV");
-    const approvalToken = { ...approvalTokenFor(receiptId) } as Record<string, unknown>;
-    Reflect.deleteProperty(approvalToken, "signerKeyId");
-
-    expectApprovalSubmitRejected(
-      approvalRequestFor(receiptId, approvalToken),
-      /signerKeyId.*required/,
-    );
-  });
-
-  it("rejects approval tokens with empty signatures", () => {
-    const receiptId = asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAV");
-
-    expectApprovalSubmitRejected(
-      approvalRequestFor(receiptId, {
-        ...approvalTokenFor(receiptId),
-        signature: "",
-      }),
-      /signature.*non-empty base64/,
-    );
-  });
-
-  it("rejects unknown approval token envelope keys", () => {
-    const receiptId = asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAV");
-
-    expectApprovalSubmitRejected(
-      approvalRequestFor(receiptId, {
-        ...approvalTokenFor(receiptId),
-        evil: true,
-      }),
-      /evil.*not allowed/,
-    );
-  });
-
-  it("rejects unknown approval token claim keys", () => {
-    const receiptId = asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAV");
-    const approvalToken = approvalTokenFor(receiptId);
-
-    expectApprovalSubmitRejected(
-      approvalRequestFor(receiptId, {
-        ...approvalToken,
-        claims: {
-          ...approvalToken.claims,
-          evil: true,
-        },
-      }),
-      /evil.*not allowed/,
-    );
-  });
-
-  it("rejects approval token claims missing required fields", () => {
-    const receiptId = asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAV");
-    const approvalToken = approvalTokenFor(receiptId);
-    const claims = { ...approvalToken.claims } as Record<string, unknown>;
-    Reflect.deleteProperty(claims, "frozenArgsHash");
-
-    expectApprovalSubmitRejected(
-      approvalRequestFor(receiptId, {
-        ...approvalToken,
-        claims,
-      }),
-      /frozenArgsHash.*required/,
-    );
-  });
-
-  it("rejects approval token claims beyond the maximum lifetime", () => {
+  it("accepts approval token claims at the maximum lifetime cap", () => {
     const receiptId = asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAV");
     const approvalToken = approvalTokenFor(receiptId);
     const issuedAt = new Date("2026-05-08T18:00:00.000Z");
 
-    expectApprovalSubmitRejected(
-      approvalRequestFor(receiptId, {
-        ...approvalToken,
-        claims: {
-          ...approvalToken.claims,
-          issuedAt,
-          expiresAt: new Date(issuedAt.getTime() + MAX_APPROVAL_TOKEN_LIFETIME_MS + 1),
-        },
-      }),
-      /MAX_APPROVAL_TOKEN_LIFETIME_MS/,
-    );
+    expect(
+      validateApprovalSubmitRequest(
+        approvalRequestFor(receiptId, {
+          ...approvalToken,
+          claims: {
+            ...approvalToken.claims,
+            issuedAt,
+            expiresAt: new Date(issuedAt.getTime() + MAX_APPROVAL_TOKEN_LIFETIME_MS),
+          },
+        }),
+      ),
+    ).toEqual({ ok: true });
   });
 
-  it("rejects approval token claims whose expiry equals issuance", () => {
+  it("accepts valid optional writeId claims", () => {
     const receiptId = asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAV");
     const approvalToken = approvalTokenFor(receiptId);
-    const issuedAt = new Date("2026-05-08T18:00:00.000Z");
 
-    expectApprovalSubmitRejected(
-      approvalRequestFor(receiptId, {
-        ...approvalToken,
-        claims: {
-          ...approvalToken.claims,
-          issuedAt,
-          expiresAt: issuedAt,
-        },
-      }),
-      /strictly after issuedAt/,
-    );
-  });
-
-  it("rejects approval request accessors without invoking getters", () => {
-    const receiptId = asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAV");
-    let getterInvoked = false;
-    const request = {
-      receiptId,
-      idempotencyKey: asIdempotencyKey("approval-submit-01"),
-    };
-    Object.defineProperty(request, "approvalToken", {
-      enumerable: true,
-      get() {
-        getterInvoked = true;
-        return approvalTokenFor(receiptId);
-      },
-    });
-
-    expectApprovalSubmitRejected(request, /approvalToken.*data property/);
-    expect(getterInvoked).toBe(false);
+    expect(
+      validateApprovalSubmitRequest(
+        approvalRequestFor(receiptId, {
+          ...approvalToken,
+          claims: {
+            ...approvalToken.claims,
+            writeId: asWriteId("write_01"),
+          },
+        }),
+      ),
+    ).toEqual({ ok: true });
   });
 
   it("carries idempotencyKey on queued approval responses", () => {
@@ -392,9 +728,83 @@ describe("approval submission IPC", () => {
 
     expect(response.idempotencyKey).toBe(idempotencyKey);
   });
+
+  it("constructs every ApprovalSubmitResponse variant", () => {
+    const idempotencyKey = asIdempotencyKey("approval-submit-01");
+    const responses = [
+      {
+        accepted: true,
+        state: "executed",
+        appliedAt: "2026-05-08T18:01:00.000Z",
+        executionResult: "applied",
+        idempotencyKey,
+      },
+      {
+        accepted: true,
+        state: "queued",
+        acceptedAt: "2026-05-08T18:01:00.000Z",
+        receiptId: asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAV"),
+        idempotencyKey,
+      },
+      { accepted: false, reason: "tampered" },
+      { accepted: false, reason: "expired" },
+      { accepted: false, reason: "wrong_hash" },
+      { accepted: false, reason: "policy_denied" },
+    ] satisfies readonly ApprovalSubmitResponse[];
+
+    expect(responses.map((response) => response.accepted)).toStrictEqual([
+      true,
+      true,
+      false,
+      false,
+      false,
+      false,
+    ]);
+  });
+});
+
+describe("BrokerHttpResponse", () => {
+  it("constructs success, no-content, and error variants", () => {
+    const responses = [
+      { ok: true, status: 200, body: { value: "ok" } },
+      { ok: true, status: 201, body: { value: "created" } },
+      { ok: true, status: 202, body: { value: "queued" } },
+      { ok: true, status: 204 },
+      {
+        ok: false,
+        status: 429,
+        error: {
+          code: "rate_limited",
+          message: "retry later",
+          retryable: true,
+          retryAfterMs: 1000,
+        },
+      },
+    ] satisfies readonly BrokerHttpResponse<{ value: string }>[];
+
+    expect(responses.map((response) => response.status)).toStrictEqual([200, 201, 202, 204, 429]);
+  });
 });
 
 describe("apiBootstrap codec", () => {
+  it("property: round-trip preserves valid bootstrap values", () => {
+    fc.assert(
+      fc.property(
+        fc.stringMatching(/^[A-Za-z0-9._~+/-]{16,96}$/),
+        fc.integer({ min: 1, max: 65535 }),
+        (tokenValue, port) => {
+          const bootstrap = {
+            token: asApiToken(tokenValue),
+            brokerUrl: `http://127.0.0.1:${port}`,
+          };
+
+          expect(apiBootstrapFromJson(apiBootstrapToJson(bootstrap))).toStrictEqual(bootstrap);
+        },
+      ),
+      { numRuns: 200 },
+    );
+  });
+
   it("decodes the v0 wire shape with snake_case broker_url", () => {
     const wire = { token: "tok-bootstrap-abcdef", broker_url: "http://127.0.0.1:54321" };
     const bootstrap = apiBootstrapFromJson(wire);
@@ -422,6 +832,15 @@ describe("apiBootstrap codec", () => {
     ).toThrow(/broker_url|brokerUrl/);
   });
 
+  it("rejects runtime ApiBootstrap objects as non-canonical wire input", () => {
+    expect(() =>
+      apiBootstrapFromJson({
+        token: asApiToken("tok-bootstrap-abcdef"),
+        brokerUrl: "http://127.0.0.1:1",
+      }),
+    ).toThrow(/broker_url|brokerUrl/);
+  });
+
   it("rejects unknown wire keys", () => {
     expect(() =>
       apiBootstrapFromJson({
@@ -438,11 +857,89 @@ describe("apiBootstrap codec", () => {
     );
   });
 
+  it("rejects accessor wire fields without invoking getters", () => {
+    let getterInvoked = false;
+    const wire = { token: "tok-bootstrap-abcdef" };
+    Object.defineProperty(wire, "broker_url", {
+      enumerable: true,
+      get() {
+        getterInvoked = true;
+        return "http://127.0.0.1:1";
+      },
+    });
+
+    expect(() => apiBootstrapFromJson(wire)).toThrow(/broker_url.*data property/);
+    expect(getterInvoked).toBe(false);
+  });
+
   it("rejects non-record input", () => {
     expect(() => apiBootstrapFromJson(null)).toThrow(/apiBootstrap/);
     expect(() => apiBootstrapFromJson("string")).toThrow(/apiBootstrap/);
+    expect(() => apiBootstrapFromJson([])).toThrow(/apiBootstrap/);
   });
 });
+
+function isDocumentedAllowedLoopbackHost(host: string): boolean {
+  if (host === "::1") return true;
+  if (host.startsWith("[")) {
+    const closeBracketIdx = host.indexOf("]");
+    if (closeBracketIdx < 0) return false;
+    if (host.slice(1, closeBracketIdx) !== "::1") return false;
+    const suffix = host.slice(closeBracketIdx + 1);
+    if (suffix === "") return true;
+    return suffix.startsWith(":") && isDocumentedPort(suffix.slice(1));
+  }
+  if (host.includes(":") && host.indexOf(":") !== host.lastIndexOf(":")) {
+    return false;
+  }
+  const colonIdx = host.lastIndexOf(":");
+  const bareHost = colonIdx >= 0 ? host.slice(0, colonIdx) : host;
+  if (colonIdx >= 0 && !isDocumentedPort(host.slice(colonIdx + 1))) {
+    return false;
+  }
+  return bareHost === "127.0.0.1" || bareHost.toLowerCase() === "localhost";
+}
+
+function isDocumentedPort(port: string): boolean {
+  if (!/^\d+$/.test(port)) return false;
+  const parsed = Number(port);
+  return Number.isInteger(parsed) && parsed >= 0 && parsed <= 65535;
+}
+
+function mutableApprovalRequestFor(
+  receiptId = asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAV"),
+): MutableApprovalRequest {
+  const approvalToken = approvalTokenFor(receiptId);
+  return {
+    receiptId,
+    idempotencyKey: asIdempotencyKey("approval-submit-01"),
+    approvalToken: {
+      ...approvalToken,
+      claims: {
+        ...approvalToken.claims,
+      },
+    },
+  };
+}
+
+function tokenOf(request: MutableApprovalRequest): MutableApprovalToken {
+  if (!isMutableRecord(request.approvalToken)) {
+    throw new Error("test fixture expected approvalToken to be a record");
+  }
+  return request.approvalToken;
+}
+
+function claimsOf(request: MutableApprovalRequest): MutableApprovalClaims {
+  const claims = tokenOf(request).claims;
+  if (!isMutableRecord(claims)) {
+    throw new Error("test fixture expected approvalToken.claims to be a record");
+  }
+  return claims;
+}
+
+function isMutableRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 
 function approvalRequestFor(receiptId: ReceiptId, approvalToken: unknown): unknown {
   return {

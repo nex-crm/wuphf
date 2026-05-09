@@ -31,6 +31,8 @@ import {
   FrozenArgs,
   GENESIS_PREV_HASH,
   INITIAL_VERIFIER_STATE,
+  isAllowedLoopbackHost,
+  isLoopbackRemoteAddress,
   lsnFromV1Number,
   MAX_AUDIT_CHAIN_BATCH_SIZE,
   MAX_TOOL_CALLS_PER_RECEIPT,
@@ -508,6 +510,18 @@ expectThrows(
     apiBootstrapFromJson({ token: "tok-bootstrap-demo-abc", brokerUrl: "http://127.0.0.1:54321" }),
   /broker_url|brokerUrl/,
 );
+
+// ──────────────────────────────────────────────────────────────────────────
+header(16, "Loopback gate rejects DNS-rebinding probes");
+// ──────────────────────────────────────────────────────────────────────────
+expectEqual("Host Localhost:3000 allowed", isAllowedLoopbackHost("Localhost:3000"), true);
+expectEqual("Host localhost.evil.com rejected", isAllowedLoopbackHost("localhost.evil.com"), false);
+expectEqual(
+  "Remote IPv4-mapped loopback allowed",
+  isLoopbackRemoteAddress("::ffff:127.0.0.1"),
+  true,
+);
+expectEqual("Remote with port rejected", isLoopbackRemoteAddress("127.0.0.1:1234"), false);
 
 // ──────────────────────────────────────────────────────────────────────────
 console.log("");
