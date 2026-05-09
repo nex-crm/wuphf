@@ -18,10 +18,10 @@
 
 import type { Brand } from "./brand.ts";
 import { canonicalJSON } from "./canonical-json.ts";
+import { type EventLsn, GENESIS_LSN, isEqualLsn, nextLsn } from "./event-lsn.ts";
 import type { ReceiptId } from "./receipt.ts";
 import { type Sha256Hex, sha256Hex } from "./sha256.ts";
 
-export type AuditSeqNo = Brand<number, "AuditSeqNo">;
 export type MerkleRootHex = Brand<string, "MerkleRootHex">;
 
 export type AuditEventKind =
@@ -48,7 +48,7 @@ export interface AuditEventPayload {
 }
 
 export interface AuditEventRecord {
-  readonly seqNo: AuditSeqNo;
+  readonly seqNo: EventLsn;
   readonly timestamp: Date;
   readonly prevHash: Sha256Hex;
   readonly eventHash: Sha256Hex;
@@ -56,7 +56,7 @@ export interface AuditEventRecord {
 }
 
 export interface MerkleRootRecord {
-  readonly seqNo: AuditSeqNo;
+  readonly seqNo: EventLsn;
   readonly rootHash: MerkleRootHex;
   readonly signedAt: Date;
   readonly ephemeralKeyId: string;
@@ -82,7 +82,10 @@ export function serializeAuditEventRecordForHash(record: AuditEventRecord): Uint
     bodyB64: bytesToBase64(record.payload.body),
   };
   const projection = {
-    seqNo: record.seqNo as number,
+    // EventLsn is an opaque branded string ("v1:<n>"). It serializes into the
+    // canonical projection as a JSON string, locked in here as part of the
+    // cross-language wire contract — see golden vector tests.
+    seqNo: record.seqNo as string,
     timestamp: record.timestamp.toISOString(),
     prevHash: record.prevHash,
     payload,
@@ -113,8 +116,8 @@ export function computeAuditEventHash(record: AuditEventRecord): Sha256Hex {
 
 export type ChainVerificationResult =
   | { ok: true; empty: true }
-  | { ok: true; empty: false; lastEventHash: Sha256Hex; lastSeqNo: AuditSeqNo }
-  | { ok: false; brokenAtSeqNo: AuditSeqNo; reason: string };
+  | { ok: true; empty: false; lastEventHash: Sha256Hex; lastSeqNo: EventLsn }
+  | { ok: false; brokenAtSeqNo: EventLsn; reason: string };
 
 /**
  * Verify a sequence of records forms a valid hash chain rooted at
@@ -131,29 +134,30 @@ export function verifyChain(
   }
 
   let expectedPrev: Sha256Hex = GENESIS_PREV_HASH;
-  let expectedSeq = 0;
+  let expectedSeq: EventLsn = GENESIS_LSN;
+  let lastSeen: EventLsn = GENESIS_LSN;
 
   for (let i = 0; i < records.length; i++) {
     const r = records[i];
     if (r === undefined) {
       return {
         ok: false,
-        brokenAtSeqNo: expectedSeq as AuditSeqNo,
+        brokenAtSeqNo: expectedSeq,
         reason: "missing record",
       };
     }
-    if ((r.seqNo as number) !== expectedSeq) {
+    if (!isEqualLsn(r.seqNo, expectedSeq)) {
       return {
         ok: false,
         brokenAtSeqNo: r.seqNo,
-        reason: `seq_no gap: expected ${expectedSeq}, got ${r.seqNo as number}`,
+        reason: `seq_no gap: expected ${expectedSeq as string}, got ${r.seqNo as string}`,
       };
     }
     if (r.prevHash !== expectedPrev) {
       return {
         ok: false,
         brokenAtSeqNo: r.seqNo,
-        reason: `prev_hash mismatch at seq ${r.seqNo as number}`,
+        reason: `prev_hash mismatch at seq ${r.seqNo as string}`,
       };
     }
     const recomputed = computeEventHash(r.prevHash, serialize(r));
@@ -161,18 +165,19 @@ export function verifyChain(
       return {
         ok: false,
         brokenAtSeqNo: r.seqNo,
-        reason: `event_hash mismatch at seq ${r.seqNo as number}`,
+        reason: `event_hash mismatch at seq ${r.seqNo as string}`,
       };
     }
     expectedPrev = r.eventHash;
-    expectedSeq += 1;
+    expectedSeq = nextLsn(expectedSeq);
+    lastSeen = r.seqNo;
   }
 
   return {
     ok: true,
     empty: false,
     lastEventHash: expectedPrev,
-    lastSeqNo: (expectedSeq - 1) as AuditSeqNo,
+    lastSeqNo: lastSeen,
   };
 }
 

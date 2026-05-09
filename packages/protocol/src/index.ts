@@ -2,7 +2,6 @@ export type {
   AuditEventKind,
   AuditEventPayload,
   AuditEventRecord,
-  AuditSeqNo,
   ChainVerificationResult,
   MerkleRootHex,
   MerkleRootRecord,
@@ -17,6 +16,17 @@ export {
 export type { Brand } from "./brand.ts";
 export type { JsonPrimitive, JsonValue } from "./canonical-json.ts";
 export { assertJcsValue, canonicalJSON } from "./canonical-json.ts";
+export type { EventLsn, ParsedLsn } from "./event-lsn.ts";
+export {
+  compareLsn,
+  GENESIS_LSN,
+  isAfter,
+  isBefore,
+  isEqualLsn,
+  lsnFromV1Number,
+  nextLsn,
+  parseLsn,
+} from "./event-lsn.ts";
 export { FrozenArgs } from "./frozen-args.ts";
 export type {
   AllowedLoopbackHost,
