@@ -99,16 +99,19 @@ describe("showItemInFolder handler", () => {
 });
 
 describe("getAppVersion handler", () => {
-  it("rejects malformed or non-empty payloads", () => {
-    expect(() => handleGetAppVersion(event, undefined)).toThrow(
-      "getAppVersion expects an empty request object",
-    );
-    expect(() => handleGetAppVersion(event, null)).toThrow(
-      "getAppVersion expects an empty request object",
-    );
-    expect(() => handleGetAppVersion(event, { extra: true })).toThrow(
-      "getAppVersion expects an empty request object",
-    );
+  it("rejects malformed or non-empty payloads without throwing", () => {
+    expect(handleGetAppVersion(event, undefined)).toEqual({
+      ok: false,
+      error: "getAppVersion expects an empty request object",
+    });
+    expect(handleGetAppVersion(event, null)).toEqual({
+      ok: false,
+      error: "getAppVersion expects an empty request object",
+    });
+    expect(handleGetAppVersion(event, { extra: true })).toEqual({
+      ok: false,
+      error: "getAppVersion expects an empty request object",
+    });
   });
 
   it("returns app.getVersion", () => {
@@ -117,16 +120,19 @@ describe("getAppVersion handler", () => {
 });
 
 describe("getPlatform handler", () => {
-  it("rejects malformed or non-empty payloads", () => {
-    expect(() => handleGetPlatform(event, undefined)).toThrow(
-      "getPlatform expects an empty request object",
-    );
-    expect(() => handleGetPlatform(event, null)).toThrow(
-      "getPlatform expects an empty request object",
-    );
-    expect(() => handleGetPlatform(event, { extra: true })).toThrow(
-      "getPlatform expects an empty request object",
-    );
+  it("rejects malformed or non-empty payloads without throwing", () => {
+    expect(handleGetPlatform(event, undefined)).toEqual({
+      ok: false,
+      error: "getPlatform expects an empty request object",
+    });
+    expect(handleGetPlatform(event, null)).toEqual({
+      ok: false,
+      error: "getPlatform expects an empty request object",
+    });
+    expect(handleGetPlatform(event, { extra: true })).toEqual({
+      ok: false,
+      error: "getPlatform expects an empty request object",
+    });
   });
 
   it("returns process platform and architecture", () => {
@@ -144,16 +150,19 @@ describe("getBrokerStatus handler", () => {
     getRestartCount: () => 2,
   };
 
-  it("rejects malformed or non-empty payloads", () => {
-    expect(() => handleGetBrokerStatus(brokerSupervisor, event, undefined)).toThrow(
-      "getBrokerStatus expects an empty request object",
-    );
-    expect(() => handleGetBrokerStatus(brokerSupervisor, event, null)).toThrow(
-      "getBrokerStatus expects an empty request object",
-    );
-    expect(() => handleGetBrokerStatus(brokerSupervisor, event, { extra: true })).toThrow(
-      "getBrokerStatus expects an empty request object",
-    );
+  it("rejects malformed or non-empty payloads without throwing", () => {
+    expect(handleGetBrokerStatus(brokerSupervisor, event, undefined)).toEqual({
+      ok: false,
+      error: "getBrokerStatus expects an empty request object",
+    });
+    expect(handleGetBrokerStatus(brokerSupervisor, event, null)).toEqual({
+      ok: false,
+      error: "getBrokerStatus expects an empty request object",
+    });
+    expect(handleGetBrokerStatus(brokerSupervisor, event, { extra: true })).toEqual({
+      ok: false,
+      error: "getBrokerStatus expects an empty request object",
+    });
   });
 
   it("returns broker supervisor lifecycle state only", () => {

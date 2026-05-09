@@ -1,4 +1,8 @@
-import { type EmptyPayload, type ErrResponse, errResponse } from "../../shared/api-contract.ts";
+import { type ErrResponse, errResponse } from "../../shared/api-contract.ts";
+
+export type RequestValidation =
+  | { readonly valid: true }
+  | { readonly valid: false; readonly error: string };
 
 export function isExactObject(
   value: unknown,
@@ -20,11 +24,10 @@ export function invalidRequest(error: string): ErrResponse {
   return errResponse(error);
 }
 
-export function assertEmptyRequest(
-  request: unknown,
-  channelName: string,
-): asserts request is EmptyPayload {
+export function validateEmptyRequest(request: unknown, channelName: string): RequestValidation {
   if (!isExactObject(request, [])) {
-    throw new Error(`${channelName} expects an empty request object`);
+    return { valid: false, error: `${channelName} expects an empty request object` };
   }
+
+  return { valid: true };
 }
