@@ -7,9 +7,13 @@ import {
   buildBrokerEnv,
 } from "../src/main/broker.ts";
 
+const electronMock = vi.hoisted(() => ({
+  fork: vi.fn(),
+}));
+
 vi.mock("electron", () => ({
   utilityProcess: {
-    fork: vi.fn(),
+    fork: electronMock.fork,
   },
 }));
 
@@ -31,6 +35,7 @@ class FakeUtilityProcess extends EventEmitter {
 describe("BrokerSupervisor", () => {
   beforeEach(() => {
     vi.useRealTimers();
+    electronMock.fork.mockReset();
   });
 
   it("spawns the broker through utilityProcess.fork with the service name and env allowlist", () => {
@@ -65,6 +70,28 @@ describe("BrokerSupervisor", () => {
     });
     expect(supervisor.getPid()).toBe(4321);
     expect(supervisor.getStatus()).toBe("starting");
+  });
+
+  it("binds the default utilityProcess.fork receiver before storing it", async () => {
+    const { utilityProcess } = await import("electron");
+    const processHandle = new FakeUtilityProcess(2468);
+    electronMock.fork.mockImplementation(function (
+      this: unknown,
+      _entryPath: string,
+      _args: readonly string[],
+      _options: ForkOptions,
+    ): ElectronUtilityProcess {
+      expect(this).toBe(utilityProcess);
+      return processHandle as unknown as ElectronUtilityProcess;
+    });
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+    });
+
+    supervisor.start();
+
+    expect(electronMock.fork).toHaveBeenCalledTimes(1);
+    expect(supervisor.getPid()).toBe(2468);
   });
 
   it("updates status when the broker sends a liveness ping", () => {

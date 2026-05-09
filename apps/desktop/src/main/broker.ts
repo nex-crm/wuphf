@@ -62,7 +62,7 @@ export class BrokerSupervisor {
   constructor(config: BrokerSupervisorConfig) {
     this.brokerEntryPath = config.brokerEntryPath;
     this.envSource = config.envSource ?? process.env;
-    this.forkProcess = config.forkProcess ?? utilityProcess.fork;
+    this.forkProcess = config.forkProcess ?? utilityProcess.fork.bind(utilityProcess);
     this.platform = config.platform ?? process.platform;
     this.runWindowsTaskkill = config.runWindowsTaskkill ?? runWindowsTaskkill;
     this.monotonicNow = config.monotonicNow ?? monotonicNowMs;
