@@ -1,19 +1,32 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-workflow=".github/workflows/release-rewrite.yml"
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+package_root="$(cd -- "${script_dir}/.." && pwd)"
+repo_root="$(cd -- "${package_root}/../.." && pwd)"
+workflow="${repo_root}/.github/workflows/release-rewrite.yml"
+
+if [[ ! -f "${workflow}" ]]; then
+  echo "ERR: workflow file not found at ${workflow}; check-invariants must run from a wuphf checkout" >&2
+  exit 2
+fi
+
 scan_targets=(
-  "apps/installer-stub/.gitignore"
-  "apps/installer-stub/package.json"
-  "apps/installer-stub/electron-builder.yml"
-  "apps/installer-stub/src"
-  "apps/installer-stub/build"
-  "apps/installer-stub/scripts"
+  "${package_root}/.gitignore"
+  "${package_root}/package.json"
+  "${package_root}/electron-builder.yml"
+  "${package_root}/src"
+  "${package_root}/build"
+  "${package_root}/scripts"
+  "${workflow}"
 )
 
-if [[ -f "${workflow}" ]]; then
-  scan_targets+=("${workflow}")
-fi
+for scan_target in "${scan_targets[@]}"; do
+  if [[ ! -e "${scan_target}" ]]; then
+    echo "ERR: invariant scan target not found at ${scan_target}; check-invariants must run from a wuphf checkout" >&2
+    exit 2
+  fi
+done
 
 violations=()
 forbidden_patterns=(
@@ -30,33 +43,31 @@ forbidden_patterns=(
 for pattern in "${forbidden_patterns[@]}"; do
   while IFS= read -r match; do
     violations+=("forbidden literal '${pattern}': ${match}")
-  done < <(rg -n -F "${pattern}" "${scan_targets[@]}" 2>/dev/null || true)
+  done < <(rg -n -F -- "${pattern}" "${scan_targets[@]}" || true)
 done
 
 cert_path_regex='(^|[[:space:]"'"'"'=(])([./~]|[A-Za-z]:\\)[^[:space:]"'"'"']+\.(p12|pfx)([[:space:]"'"'"')]|$)'
 while IFS= read -r match; do
   violations+=("hardcoded certificate path: ${match}")
-done < <(rg -n --pcre2 "${cert_path_regex}" "${scan_targets[@]}" 2>/dev/null || true)
+done < <(rg -n --pcre2 "${cert_path_regex}" "${scan_targets[@]}" || true)
 
-if [[ -f "${workflow}" ]]; then
-  while IFS= read -r line; do
-    action_ref="$(sed -E 's/^([^:]+:)?[0-9]+:.*uses:[[:space:]]*([^[:space:]#]+).*/\2/' <<<"${line}")"
+while IFS= read -r line; do
+  action_ref="$(sed -E 's/^([^:]+:)?[0-9]+:.*uses:[[:space:]]*([^[:space:]#]+).*/\2/' <<<"${line}")"
 
-    if [[ "${action_ref}" == ./* || "${action_ref}" == docker://* ]]; then
-      continue
-    fi
+  if [[ "${action_ref}" == ./* || "${action_ref}" == docker://* ]]; then
+    continue
+  fi
 
-    if [[ "${action_ref}" != *@* ]]; then
-      violations+=("GitHub Action is missing an explicit ref: ${line}")
-      continue
-    fi
+  if [[ "${action_ref}" != *@* ]]; then
+    violations+=("GitHub Action is missing an explicit ref: ${line}")
+    continue
+  fi
 
-    action_sha="${action_ref##*@}"
-    if [[ ! "${action_sha}" =~ ^[0-9a-f]{40}$ ]]; then
-      violations+=("GitHub Action is not pinned to a full SHA: ${line}")
-    fi
-  done < <(rg -n 'uses:[[:space:]]*[^[:space:]#]+' "${workflow}" || true)
-fi
+  action_sha="${action_ref##*@}"
+  if [[ ! "${action_sha}" =~ ^[0-9a-f]{40}$ ]]; then
+    violations+=("GitHub Action is not pinned to a full SHA: ${line}")
+  fi
+done < <(rg -n 'uses:[[:space:]]*[^[:space:]#]+' "${workflow}" || true)
 
 if [[ "${#violations[@]}" -gt 0 ]]; then
   printf "Installer invariant violations:\n" >&2
