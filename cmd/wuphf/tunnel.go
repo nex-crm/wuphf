@@ -40,6 +40,45 @@ const cloudflaredStartTimeout = 45 * time.Second
 // SIGKILL.
 const cloudflaredStopTimeout = 5 * time.Second
 
+// cloudflaredMaxAttempts caps how many times start() respawns cloudflared
+// when bring-up fails with a recognizable transient TryCloudflare API error
+// (e.g. trycloudflare.com returns a 500/HTML body and cloudflared exits
+// before publishing a URL). Quick-tunnel API hiccups exit fast (<1s), so
+// 3 attempts add a couple of seconds rather than minutes. Non-transient
+// failures (timeout, missing binary, ctx cancel) skip the retry path.
+const cloudflaredMaxAttempts = 3
+
+// cloudflaredRetryBackoffStep is the base delay between retry attempts.
+// Attempt N waits N * step before respawning, giving Cloudflare's
+// edge a moment to recover from a transient 1101.
+const cloudflaredRetryBackoffStep = 1500 * time.Millisecond
+
+// quickTunnelTransientPatterns lists tail-line substrings that indicate
+// cloudflared failed to bring up because the trycloudflare.com QuickTunnel
+// API itself was unhealthy (5xx / non-JSON body), as opposed to a local
+// binary, network, or auth problem. Matching any of these makes the
+// failure eligible for a respawn — everything else is treated as
+// permanent and surfaced to the user immediately.
+var quickTunnelTransientPatterns = []string{
+	"Error unmarshaling QuickTunnel response",
+	"failed to unmarshal quick Tunnel",
+	"500 Internal Server Error",
+	"502 Bad Gateway",
+	"503 Service Unavailable",
+	"504 Gateway Timeout",
+}
+
+func isTransientQuickTunnelFailure(tail []string) bool {
+	for _, line := range tail {
+		for _, pat := range quickTunnelTransientPatterns {
+			if strings.Contains(line, pat) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // cloudflaredMissingMessage is the user-facing error when the binary is not
 // next to the wuphf executable AND not on PATH. The npm postinstall ships
 // cloudflared into the same directory as the wuphf binary so this path
@@ -266,36 +305,14 @@ func (c *webTunnelController) start() (team.WebTunnelStatus, error) {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	cmd := exec.CommandContext(ctx, binary,
-		"tunnel",
-		"--no-autoupdate",
-		"--url", "http://"+loopbackAddr,
-		"--metrics", "127.0.0.1:0",
-	)
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		cancel()
-		_ = ln.Close()
-		defer c.mu.Unlock()
-		c.err = fmt.Sprintf("cloudflared stderr pipe failed: %v", err)
-		return c.statusLocked(), errors.New(c.err)
-	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		cancel()
-		_ = ln.Close()
-		defer c.mu.Unlock()
-		c.err = fmt.Sprintf("cloudflared stdout pipe failed: %v", err)
-		return c.statusLocked(), errors.New(c.err)
-	}
-	if err := cmd.Start(); err != nil {
-		cancel()
-		_ = ln.Close()
-		defer c.mu.Unlock()
-		c.err = fmt.Sprintf("cloudflared failed to start: %v", err)
-		return c.statusLocked(), errors.New(c.err)
-	}
+	// Commit listener+server to c.* under the lock so a concurrent stop()
+	// can find and tear them down even if the cloudflared spawn is still
+	// in progress. Server/listener are stable across retry attempts; only
+	// the cmd/ctx/pipes cycle per attempt.
+	c.starting = true
+	c.server = server
+	c.listener = ln
+	c.mu.Unlock()
 
 	go func() {
 		if err := server.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -319,56 +336,158 @@ func (c *webTunnelController) start() (team.WebTunnelStatus, error) {
 		}
 	}()
 
-	urlCh := make(chan string, 1)
-	tailCh := make(chan []string, 1)
-	go scanCloudflaredOutput(stderr, urlCh, tailCh)
-	// Drain stdout so a chatty cloudflared can't stall on a full pipe;
-	// recent versions emit little here, so noop the bytes.
-	go func() { _, _ = io.Copy(io.Discard, stdout) }()
+	var (
+		publicURL string
+		tail      []string
+		perr      error
+	)
+	for attempt := 1; attempt <= cloudflaredMaxAttempts; attempt++ {
+		if attempt > 1 {
+			backoff := time.Duration(attempt-1) * cloudflaredRetryBackoffStep
+			log.Printf("tunnel: cloudflared bring-up failed (transient TryCloudflare API error); retrying %d/%d in %s", attempt, cloudflaredMaxAttempts, backoff)
+			time.Sleep(backoff)
+			// stop() may have torn the listener down while we slept.
+			c.mu.Lock()
+			cancelled := c.server != server
+			c.mu.Unlock()
+			if cancelled {
+				return team.WebTunnelStatus{}, errors.New("tunnel start was cancelled")
+			}
+		}
 
-	// Commit the in-flight resources to c.* under the lock so a concurrent
-	// stop() can find and tear them down. Then release the lock around the
-	// (up to 45s) waitForTunnelURL call so status() polls and stop() clicks
-	// from the UI don't block on c.mu.
-	c.starting = true
-	c.cmd = cmd
-	c.cancel = cancel
-	c.server = server
-	c.listener = ln
-	c.mu.Unlock()
+		ctx, cancel := context.WithCancel(context.Background())
+		cmd := exec.CommandContext(ctx, binary,
+			"tunnel",
+			"--no-autoupdate",
+			"--url", "http://"+loopbackAddr,
+			"--metrics", "127.0.0.1:0",
+		)
+		stderr, errPipe := cmd.StderrPipe()
+		if errPipe != nil {
+			cancel()
+			c.mu.Lock()
+			c.starting = false
+			c.server = nil
+			c.listener = nil
+			c.mu.Unlock()
+			shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), cloudflaredStopTimeout)
+			_ = server.Shutdown(shutdownCtx)
+			cancelShutdown()
+			_ = ln.Close()
+			c.mu.Lock()
+			defer c.mu.Unlock()
+			c.err = fmt.Sprintf("cloudflared stderr pipe failed: %v", errPipe)
+			return c.statusLocked(), errors.New(c.err)
+		}
+		stdout, errPipe := cmd.StdoutPipe()
+		if errPipe != nil {
+			cancel()
+			c.mu.Lock()
+			c.starting = false
+			c.server = nil
+			c.listener = nil
+			c.mu.Unlock()
+			shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), cloudflaredStopTimeout)
+			_ = server.Shutdown(shutdownCtx)
+			cancelShutdown()
+			_ = ln.Close()
+			c.mu.Lock()
+			defer c.mu.Unlock()
+			c.err = fmt.Sprintf("cloudflared stdout pipe failed: %v", errPipe)
+			return c.statusLocked(), errors.New(c.err)
+		}
+		if errStart := cmd.Start(); errStart != nil {
+			cancel()
+			c.mu.Lock()
+			c.starting = false
+			c.server = nil
+			c.listener = nil
+			c.mu.Unlock()
+			shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), cloudflaredStopTimeout)
+			_ = server.Shutdown(shutdownCtx)
+			cancelShutdown()
+			_ = ln.Close()
+			c.mu.Lock()
+			defer c.mu.Unlock()
+			c.err = fmt.Sprintf("cloudflared failed to start: %v", errStart)
+			return c.statusLocked(), errors.New(c.err)
+		}
 
-	publicURL, tail, perr := waitForTunnelURL(ctx, urlCh, tailCh, cloudflaredStartTimeout)
+		urlCh := make(chan string, 1)
+		tailCh := make(chan []string, 1)
+		go scanCloudflaredOutput(stderr, urlCh, tailCh)
+		// Drain stdout so a chatty cloudflared can't stall on a full pipe;
+		// recent versions emit little here, so noop the bytes.
+		go func() { _, _ = io.Copy(io.Discard, stdout) }()
+
+		c.mu.Lock()
+		// stop() may have run between iterations.
+		if c.server != server {
+			c.mu.Unlock()
+			cancel()
+			_ = cmd.Wait()
+			return team.WebTunnelStatus{}, errors.New("tunnel start was cancelled")
+		}
+		c.cmd = cmd
+		c.cancel = cancel
+		c.mu.Unlock()
+
+		publicURL, tail, perr = waitForTunnelURL(ctx, urlCh, tailCh, cloudflaredStartTimeout)
+
+		c.mu.Lock()
+		// stop() observed the in-flight resources during the wait and tore
+		// them down. Don't double-free; just report cancelled.
+		if c.cmd != cmd {
+			defer c.mu.Unlock()
+			return c.statusLocked(), errors.New("tunnel start was cancelled")
+		}
+
+		if perr == nil {
+			// Success: keep cmd/cancel committed and exit the loop.
+			c.mu.Unlock()
+			break
+		}
+
+		// Wait failed. Tear down this attempt's cmd before deciding
+		// whether to retry. Don't release listener/server yet — they
+		// may carry to the next attempt or the final failure cleanup.
+		cancel()
+		c.cmd = nil
+		c.cancel = nil
+		c.mu.Unlock()
+		_ = cmd.Wait()
+
+		// Only TryCloudflare API failures are retryable. Timeouts,
+		// missing binary, and ctx cancellation get surfaced
+		// immediately so the user isn't waiting through pointless
+		// respawns.
+		if attempt >= cloudflaredMaxAttempts || !isTransientQuickTunnelFailure(tail) {
+			break
+		}
+	}
 
 	c.mu.Lock()
 	c.starting = false
 
-	// stop() observed the in-flight resources during the wait and tore
-	// them down. Don't double-free; just report cancelled.
-	if c.cmd != cmd {
-		defer c.mu.Unlock()
-		return c.statusLocked(), errors.New("tunnel start was cancelled")
-	}
-
 	if perr != nil {
-		// Wait failed (timeout, cmd died early, ctx cancelled). Cancel,
-		// then release c.mu before the cmd.Wait + ln.Close cleanup so a
-		// hung pipe drain can't block status() callers under the same
-		// lock-window invariant the watcher goroutine already follows.
-		cancel()
-		c.cmd = nil
-		c.cancel = nil
+		// All attempts failed. Release c.mu before the server.Shutdown
+		// + ln.Close cleanup so a hung in-flight loopback connection
+		// cannot block status() callers under the same lock-window
+		// invariant the watcher goroutine already follows.
 		cleanupServer := c.server
 		c.server = nil
 		cleanupLn := c.listener
 		c.listener = nil
 		c.running = false
 		msg := perr.Error()
+		if isTransientQuickTunnelFailure(tail) {
+			msg += fmt.Sprintf(" (after %d attempts; trycloudflare.com appears to be having issues — try again in a minute)", cloudflaredMaxAttempts)
+		}
 		if len(tail) > 0 {
 			msg += "\n\nLast cloudflared output:\n" + strings.Join(tail, "\n")
 		}
 		c.err = msg
 		c.mu.Unlock()
-		_ = cmd.Wait()
 		if cleanupServer != nil {
 			shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), cloudflaredStopTimeout)
 			_ = cleanupServer.Shutdown(shutdownCtx)
@@ -379,6 +498,11 @@ func (c *webTunnelController) start() (team.WebTunnelStatus, error) {
 		}
 		return team.WebTunnelStatus{Error: msg}, errors.New(msg)
 	}
+
+	// Success path uses the cmd committed by the winning attempt — the
+	// watcher goroutine below Waits on it. Cancel stays in c.cancel for
+	// stop() to drive teardown; we don't need a local copy here.
+	cmd := c.cmd
 
 	c.publicURL = publicURL
 	c.running = true
