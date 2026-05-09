@@ -162,12 +162,27 @@ export interface BrokerError {
  * Approval submission. Carries only an opaque receipt_id and a verifiable
  * signed token. NEVER carries the mutable proposed payload — re-submitting a
  * mutated payload to bypass the freeze would defeat the moat invariant. The
- * signed token already binds frozenArgsHash; the broker verifies the token
- * signature against the receipt it owns.
+ * signed token binds frozenArgsHash and may bind writeId; the broker verifies
+ * the token signature against the receipt it owns. Clients retrying after a
+ * lost 202 MUST re-submit the same idempotencyKey; broker enforcement makes
+ * the same key produce the same outcome.
  */
 export interface ApprovalSubmitRequest {
   readonly receiptId: ReceiptId;
   readonly approvalToken: SignedApprovalToken;
+  readonly idempotencyKey: string;
+}
+
+export function validateApprovalSubmitRequest(
+  req: ApprovalSubmitRequest,
+): { ok: true } | { ok: false; reason: string } {
+  if (req.receiptId !== req.approvalToken.claims.receiptId) {
+    return {
+      ok: false,
+      reason: "receiptId must match approvalToken.claims.receiptId",
+    };
+  }
+  return { ok: true };
 }
 
 /**
@@ -183,12 +198,14 @@ export type ApprovalSubmitResponse =
       readonly state: "executed";
       readonly appliedAt: string; // ISO 8601
       readonly executionResult: WriteResult;
+      readonly idempotencyKey: string;
     }
   | {
       readonly accepted: true;
       readonly state: "queued";
       readonly acceptedAt: string; // ISO 8601
       readonly receiptId: ReceiptId;
+      readonly idempotencyKey: string;
     }
   | {
       readonly accepted: false;

@@ -6,6 +6,7 @@
 import { canonicalJSON } from "./canonical-json.ts";
 import { FrozenArgs } from "./frozen-args.ts";
 import {
+  type ApprovalClaims,
   type ApprovalEvent,
   asAgentSlug,
   asApprovalId,
@@ -13,6 +14,8 @@ import {
   asReceiptId,
   asTaskId,
   asToolCallId,
+  asWriteId,
+  type BrokerTokenVerdict,
   type CommitRef,
   type ExternalWrite,
   type FileChange,
@@ -31,7 +34,9 @@ import {
   requireRecord,
 } from "./receipt-utils.ts";
 import {
+  APPROVAL_CLAIMS_KEYS,
   APPROVAL_EVENT_KEYS,
+  BROKER_TOKEN_VERDICT_KEYS,
   COMMIT_REF_KEYS,
   EXTERNAL_WRITE_KEYS,
   FILE_CHANGE_KEYS,
@@ -64,13 +69,23 @@ const APPROVAL_DECISION_VALUES = ["approve", "reject", "abstain"] as const;
 const TOOL_CALL_STATUS_VALUES = ["ok", "error"] as const;
 const FILE_CHANGE_MODE_VALUES = ["created", "modified", "deleted"] as const;
 const MEMORY_STORE_VALUES = ["notebook", "wiki"] as const;
-const BROKER_VERIFICATION_STATUS_VALUES = ["valid", "expired", "tampered"] as const;
+const APPROVAL_TOKEN_ALGORITHM_VALUES = ["ed25519"] as const;
+const BROKER_TOKEN_VERDICT_STATUS_VALUES = [
+  "valid",
+  "expired",
+  "tampered",
+  "wrong_signer",
+  "wrong_write",
+] as const;
+const BASE64_RE = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 
 // Re-exports — public surface stays stable across the file split.
 export type {
   AgentSlug,
+  ApprovalClaims,
   ApprovalEvent,
   ApprovalId,
+  BrokerTokenVerdict,
   CommitRef,
   ExternalWrite,
   ExternalWriteApplied,
@@ -93,6 +108,7 @@ export type {
   ToolCall,
   ToolCallId,
   TriggerKind,
+  WriteId,
   WriteResult,
 } from "./receipt-types.ts";
 export {
@@ -102,12 +118,14 @@ export {
   asReceiptId,
   asTaskId,
   asToolCallId,
+  asWriteId,
   isAgentSlug,
   isApprovalId,
   isProviderKind,
   isReceiptId,
   isTaskId,
   isToolCallId,
+  isWriteId,
   PROVIDER_KIND_VALUES,
 } from "./receipt-types.ts";
 export { isReceiptSnapshot, validateReceipt } from "./receipt-validator.ts";
@@ -197,6 +215,7 @@ function approvalEventToJsonValue(a: ApprovalEvent): Record<string, unknown> {
     role: a.role,
     decision: a.decision,
     signedToken: signedApprovalTokenToJsonValue(a.signedToken),
+    tokenVerdict: brokerTokenVerdictToJsonValue(a.tokenVerdict),
     decidedAt: dateToJson(a.decidedAt),
   };
 }
@@ -232,21 +251,39 @@ function memoryWriteRefToJsonValue(m: MemoryWriteRef): Record<string, unknown> {
   };
 }
 
-function signedApprovalTokenToJsonValue(t: SignedApprovalToken): Record<string, unknown> {
+function approvalClaimsToJsonValue(c: ApprovalClaims): Record<string, unknown> {
   return omitUndefined({
-    signerIdentity: t.signerIdentity,
-    role: t.role,
-    receiptId: t.receiptId,
-    frozenArgsHash: t.frozenArgsHash,
-    riskClass: t.riskClass,
-    expiresAt: dateToJson(t.expiresAt),
-    webauthnAssertion: t.webauthnAssertion,
-    brokerVerificationStatus: t.brokerVerificationStatus,
+    signerIdentity: c.signerIdentity,
+    role: c.role,
+    receiptId: c.receiptId,
+    writeId: c.writeId,
+    frozenArgsHash: c.frozenArgsHash,
+    riskClass: c.riskClass,
+    issuedAt: dateToJson(c.issuedAt),
+    expiresAt: dateToJson(c.expiresAt),
+    webauthnAssertion: c.webauthnAssertion,
   });
+}
+
+function signedApprovalTokenToJsonValue(t: SignedApprovalToken): Record<string, unknown> {
+  return {
+    claims: approvalClaimsToJsonValue(t.claims),
+    algorithm: t.algorithm,
+    signerKeyId: t.signerKeyId,
+    signature: t.signature,
+  };
+}
+
+function brokerTokenVerdictToJsonValue(v: BrokerTokenVerdict): Record<string, unknown> {
+  return {
+    status: v.status,
+    verifiedAt: dateToJson(v.verifiedAt),
+  };
 }
 
 function externalWriteToJsonValue(w: ExternalWrite): Record<string, unknown> {
   return omitUndefined({
+    writeId: w.writeId,
     action: w.action,
     target: w.target,
     idempotencyKey: w.idempotencyKey,
@@ -353,6 +390,10 @@ function approvalEventFromJson(value: unknown, path: string): ApprovalEvent {
       requiredFieldFromJson(record, "signedToken", path),
       pointer(path, "signedToken"),
     ),
+    tokenVerdict: brokerTokenVerdictFromJson(
+      requiredFieldFromJson(record, "tokenVerdict", path),
+      pointer(path, "tokenVerdict"),
+    ),
     decidedAt: requiredDateFromJson(record, "decidedAt", path),
   };
 }
@@ -399,10 +440,11 @@ function memoryWriteRefFromJson(value: unknown, path: string): MemoryWriteRef {
   };
 }
 
-function signedApprovalTokenFromJson(value: unknown, path: string): SignedApprovalToken {
+function approvalClaimsFromJson(value: unknown, path: string): ApprovalClaims {
   const record = requireRecord(value, path);
-  assertKnownKeys(record, path, SIGNED_APPROVAL_TOKEN_KEYS);
+  assertKnownKeys(record, path, APPROVAL_CLAIMS_KEYS);
   const webauthnAssertion = optionalStringFromJson(record, "webauthnAssertion", path);
+  const writeId = optionalStringFromJson(record, "writeId", path);
   const riskClass = requiredLiteralFromJson(record, "riskClass", path, RISK_CLASS_VALUES);
   if (
     (riskClass === "high" || riskClass === "critical") &&
@@ -416,16 +458,39 @@ function signedApprovalTokenFromJson(value: unknown, path: string): SignedApprov
     signerIdentity: requiredStringFromJson(record, "signerIdentity", path),
     role: requiredLiteralFromJson(record, "role", path, APPROVAL_ROLE_VALUES),
     receiptId: asReceiptId(requiredStringFromJson(record, "receiptId", path)),
+    ...(writeId === undefined ? {} : { writeId: asWriteId(writeId) }),
     frozenArgsHash: asSha256Hex(requiredStringFromJson(record, "frozenArgsHash", path)),
     riskClass,
+    issuedAt: requiredDateFromJson(record, "issuedAt", path),
     expiresAt: requiredDateFromJson(record, "expiresAt", path),
     ...(webauthnAssertion === undefined ? {} : { webauthnAssertion }),
-    brokerVerificationStatus: requiredLiteralFromJson(
-      record,
-      "brokerVerificationStatus",
-      path,
-      BROKER_VERIFICATION_STATUS_VALUES,
+  };
+}
+
+function signedApprovalTokenFromJson(value: unknown, path: string): SignedApprovalToken {
+  const record = requireRecord(value, path);
+  assertKnownKeys(record, path, SIGNED_APPROVAL_TOKEN_KEYS);
+  const signature = requiredStringFromJson(record, "signature", path);
+  if (signature.length === 0 || !BASE64_RE.test(signature)) {
+    throw new Error(`${pointer(path, "signature")}: must be a non-empty base64 string`);
+  }
+  return {
+    claims: approvalClaimsFromJson(
+      requiredFieldFromJson(record, "claims", path),
+      pointer(path, "claims"),
     ),
+    algorithm: requiredLiteralFromJson(record, "algorithm", path, APPROVAL_TOKEN_ALGORITHM_VALUES),
+    signerKeyId: requiredStringFromJson(record, "signerKeyId", path),
+    signature,
+  };
+}
+
+function brokerTokenVerdictFromJson(value: unknown, path: string): BrokerTokenVerdict {
+  const record = requireRecord(value, path);
+  assertKnownKeys(record, path, BROKER_TOKEN_VERDICT_KEYS);
+  return {
+    status: requiredLiteralFromJson(record, "status", path, BROKER_TOKEN_VERDICT_STATUS_VALUES),
+    verifiedAt: requiredDateFromJson(record, "verifiedAt", path),
   };
 }
 
@@ -435,6 +500,7 @@ function externalWriteFromJson(value: unknown, path: string): ExternalWrite {
   const approvedAt = optionalDateFromJson(record, "approvedAt", path);
   const result = requiredLiteralFromJson(record, "result", path, WRITE_RESULT_VALUES);
   const common = {
+    writeId: asWriteId(requiredStringFromJson(record, "writeId", path)),
     action: requiredStringFromJson(record, "action", path),
     target: requiredStringFromJson(record, "target", path),
     idempotencyKey: requiredStringFromJson(record, "idempotencyKey", path),

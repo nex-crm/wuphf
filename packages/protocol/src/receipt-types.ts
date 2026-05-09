@@ -19,6 +19,7 @@ export type TaskId = Brand<string, "TaskId">;
 export type ProviderKind = Brand<(typeof PROVIDER_KIND_VALUES)[number], "ProviderKind">;
 export type ToolCallId = Brand<string, "ToolCallId">;
 export type ApprovalId = Brand<string, "ApprovalId">;
+export type WriteId = Brand<string, "WriteId">;
 
 export type ReceiptStatus = "ok" | "error" | "stalled" | "approval_pending" | "rejected";
 
@@ -60,6 +61,7 @@ export interface ApprovalEvent {
   readonly role: "viewer" | "approver" | "host";
   readonly decision: "approve" | "reject" | "abstain";
   readonly signedToken: SignedApprovalToken;
+  readonly tokenVerdict: BrokerTokenVerdict;
   readonly decidedAt: Date;
 }
 
@@ -88,15 +90,28 @@ export interface MemoryWriteRef {
   readonly citation: string;
 }
 
-export interface SignedApprovalToken {
+export interface ApprovalClaims {
   readonly signerIdentity: string;
   readonly role: "viewer" | "approver" | "host";
   readonly receiptId: ReceiptId;
+  readonly writeId?: WriteId | undefined;
   readonly frozenArgsHash: Sha256Hex;
   readonly riskClass: RiskClass;
+  readonly issuedAt: Date;
   readonly expiresAt: Date;
   readonly webauthnAssertion?: string | undefined;
-  readonly brokerVerificationStatus: "valid" | "expired" | "tampered";
+}
+
+export interface SignedApprovalToken {
+  readonly claims: ApprovalClaims;
+  readonly algorithm: "ed25519";
+  readonly signerKeyId: string;
+  readonly signature: string;
+}
+
+export interface BrokerTokenVerdict {
+  readonly status: "valid" | "expired" | "tampered" | "wrong_signer" | "wrong_write";
+  readonly verifiedAt: Date;
 }
 
 // `ExternalWrite` is a discriminated union over `result`. Per-state field
@@ -106,6 +121,7 @@ export interface SignedApprovalToken {
 // type error instead of a silent runtime impossibility. The validator and
 // codec mirror these invariants at the wire boundary.
 export interface ExternalWriteCommon {
+  readonly writeId: WriteId;
   readonly action: string;
   readonly target: string;
   readonly idempotencyKey: string;
@@ -262,5 +278,14 @@ export function asApprovalId(s: string): ApprovalId {
 }
 
 export function isApprovalId(s: unknown): s is ApprovalId {
+  return typeof s === "string" && LOCAL_ID_RE.test(s);
+}
+
+export function asWriteId(s: string): WriteId {
+  if (!LOCAL_ID_RE.test(s)) throw new Error("not a WriteId");
+  return s as WriteId;
+}
+
+export function isWriteId(s: unknown): s is WriteId {
   return typeof s === "string" && LOCAL_ID_RE.test(s);
 }

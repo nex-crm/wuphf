@@ -7,7 +7,9 @@
 
 import { FrozenArgs } from "./frozen-args.ts";
 import {
+  type ApprovalClaims,
   type ApprovalEvent,
+  type BrokerTokenVerdict,
   type CommitRef,
   type ExternalWrite,
   type FileChange,
@@ -17,6 +19,7 @@ import {
   isReceiptId,
   isTaskId,
   isToolCallId,
+  isWriteId,
   type MemoryWriteRef,
   type ReceiptSnapshot,
   type ReceiptValidationError,
@@ -64,7 +67,15 @@ const APPROVAL_DECISION_VALUES = ["approve", "reject", "abstain"] as const;
 const TOOL_CALL_STATUS_VALUES = ["ok", "error"] as const;
 const FILE_CHANGE_MODE_VALUES = ["created", "modified", "deleted"] as const;
 const MEMORY_STORE_VALUES = ["notebook", "wiki"] as const;
-const BROKER_VERIFICATION_STATUS_VALUES = ["valid", "expired", "tampered"] as const;
+const APPROVAL_TOKEN_ALGORITHM_VALUES = ["ed25519"] as const;
+const BROKER_TOKEN_VERDICT_STATUS_VALUES = [
+  "valid",
+  "expired",
+  "tampered",
+  "wrong_signer",
+  "wrong_write",
+] as const;
+const BASE64_RE = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 
 // Allowlists are tied to interface declarations via `satisfies readonly
 // (keyof T)[]`. Adding a typo'd entry fails typecheck. The reverse direction
@@ -136,9 +147,18 @@ const APPROVAL_EVENT_KEYS_TUPLE = [
   "role",
   "decision",
   "signedToken",
+  "tokenVerdict",
   "decidedAt",
 ] as const satisfies readonly (keyof ApprovalEvent)[];
 export const APPROVAL_EVENT_KEYS: ReadonlySet<string> = new Set<string>(APPROVAL_EVENT_KEYS_TUPLE);
+
+const BROKER_TOKEN_VERDICT_KEYS_TUPLE = [
+  "status",
+  "verifiedAt",
+] as const satisfies readonly (keyof BrokerTokenVerdict)[];
+export const BROKER_TOKEN_VERDICT_KEYS: ReadonlySet<string> = new Set<string>(
+  BROKER_TOKEN_VERDICT_KEYS_TUPLE,
+);
 
 const FILE_CHANGE_KEYS_TUPLE = [
   "path",
@@ -179,21 +199,33 @@ const FROZEN_ARGS_KEYS_TUPLE = [
 ] as const satisfies readonly (keyof FrozenArgs)[];
 export const FROZEN_ARGS_KEYS: ReadonlySet<string> = new Set<string>(FROZEN_ARGS_KEYS_TUPLE);
 
-const SIGNED_APPROVAL_TOKEN_KEYS_TUPLE = [
+const APPROVAL_CLAIMS_KEYS_TUPLE = [
   "signerIdentity",
   "role",
   "receiptId",
+  "writeId",
   "frozenArgsHash",
   "riskClass",
+  "issuedAt",
   "expiresAt",
   "webauthnAssertion",
-  "brokerVerificationStatus",
+] as const satisfies readonly (keyof ApprovalClaims)[];
+export const APPROVAL_CLAIMS_KEYS: ReadonlySet<string> = new Set<string>(
+  APPROVAL_CLAIMS_KEYS_TUPLE,
+);
+
+const SIGNED_APPROVAL_TOKEN_KEYS_TUPLE = [
+  "claims",
+  "algorithm",
+  "signerKeyId",
+  "signature",
 ] as const satisfies readonly (keyof SignedApprovalToken)[];
 export const SIGNED_APPROVAL_TOKEN_KEYS: ReadonlySet<string> = new Set<string>(
   SIGNED_APPROVAL_TOKEN_KEYS_TUPLE,
 );
 
 const EXTERNAL_WRITE_KEYS_TUPLE = [
+  "writeId",
   "action",
   "target",
   "idempotencyKey",
@@ -364,18 +396,20 @@ function validateApprovalEvent(
     validateLiteral(v, p, e, APPROVAL_DECISION_VALUES, "must be a valid approval decision"),
   );
   validateRequired(value, "signedToken", path, errors, validateSignedApprovalToken);
+  validateRequired(value, "tokenVerdict", path, errors, validateBrokerTokenVerdict);
   validateRequired(value, "decidedAt", path, errors, validateDate);
 
   // Cross-field invariant: the signed token must reference this receipt.
   const signedToken = recordValue(value, "signedToken");
+  const claims = isRecord(signedToken) ? recordValue(signedToken, "claims") : undefined;
   if (
-    isRecord(signedToken) &&
+    isRecord(claims) &&
     typeof receiptId === "string" &&
-    recordValue(signedToken, "receiptId") !== receiptId
+    recordValue(claims, "receiptId") !== receiptId
   ) {
     addError(
       errors,
-      pointer(pointer(path, "signedToken"), "receiptId"),
+      pointer(pointer(pointer(path, "signedToken"), "claims"), "receiptId"),
       "must match enclosing receipt id",
     );
   }
@@ -429,7 +463,7 @@ function validateMemoryWriteRef(
   validateRequired(value, "citation", path, errors, validateString);
 }
 
-function validateSignedApprovalToken(
+function validateBrokerTokenVerdict(
   value: unknown,
   path: string,
   errors: ReceiptValidationError[],
@@ -438,27 +472,36 @@ function validateSignedApprovalToken(
     addError(errors, path, "must be an object");
     return;
   }
-  validateKnownKeys(value, path, SIGNED_APPROVAL_TOKEN_KEYS, errors);
+  validateKnownKeys(value, path, BROKER_TOKEN_VERDICT_KEYS, errors);
+  validateRequired(value, "status", path, errors, (v, p, e) =>
+    validateLiteral(v, p, e, BROKER_TOKEN_VERDICT_STATUS_VALUES, "must be a valid token verdict"),
+  );
+  validateRequired(value, "verifiedAt", path, errors, validateDate);
+}
+
+function validateApprovalClaims(
+  value: unknown,
+  path: string,
+  errors: ReceiptValidationError[],
+): void {
+  if (!isRecord(value)) {
+    addError(errors, path, "must be an object");
+    return;
+  }
+  validateKnownKeys(value, path, APPROVAL_CLAIMS_KEYS, errors);
   validateRequired(value, "signerIdentity", path, errors, validateString);
   validateRequired(value, "role", path, errors, (v, p, e) =>
     validateLiteral(v, p, e, APPROVAL_ROLE_VALUES, "must be a valid approval role"),
   );
   validateRequired(value, "receiptId", path, errors, validateReceiptIdValue);
+  validateOptional(value, "writeId", path, errors, validateWriteIdValue);
   validateRequired(value, "frozenArgsHash", path, errors, validateSha256HexValue);
   validateRequired(value, "riskClass", path, errors, (v, p, e) =>
     validateLiteral(v, p, e, RISK_CLASS_VALUES, "must be a valid risk class"),
   );
+  validateRequired(value, "issuedAt", path, errors, validateDate);
   validateRequired(value, "expiresAt", path, errors, validateDate);
   validateOptional(value, "webauthnAssertion", path, errors, validateString);
-  validateRequired(value, "brokerVerificationStatus", path, errors, (v, p, e) =>
-    validateLiteral(
-      v,
-      p,
-      e,
-      BROKER_VERIFICATION_STATUS_VALUES,
-      "must be a valid broker verification status",
-    ),
-  );
   const riskClass = recordValue(value, "riskClass");
   const webauthnAssertion = recordValue(value, "webauthnAssertion");
   if (
@@ -473,6 +516,24 @@ function validateSignedApprovalToken(
   }
 }
 
+function validateSignedApprovalToken(
+  value: unknown,
+  path: string,
+  errors: ReceiptValidationError[],
+): void {
+  if (!isRecord(value)) {
+    addError(errors, path, "must be an object");
+    return;
+  }
+  validateKnownKeys(value, path, SIGNED_APPROVAL_TOKEN_KEYS, errors);
+  validateRequired(value, "claims", path, errors, validateApprovalClaims);
+  validateRequired(value, "algorithm", path, errors, (v, p, e) =>
+    validateLiteral(v, p, e, APPROVAL_TOKEN_ALGORITHM_VALUES, "must be ed25519"),
+  );
+  validateRequired(value, "signerKeyId", path, errors, validateString);
+  validateRequired(value, "signature", path, errors, validateBase64String);
+}
+
 function validateExternalWrite(
   value: unknown,
   path: string,
@@ -484,6 +545,7 @@ function validateExternalWrite(
     return;
   }
   validateKnownKeys(value, path, EXTERNAL_WRITE_KEYS, errors);
+  validateRequired(value, "writeId", path, errors, validateWriteIdValue);
   validateRequired(value, "action", path, errors, validateString);
   validateRequired(value, "target", path, errors, validateString);
   validateRequired(value, "idempotencyKey", path, errors, validateString);
@@ -532,23 +594,32 @@ function validateExternalWrite(
   }
 
   // Cross-field invariants: when present, the approval token must reference
-  // this receipt and bind to the proposedDiff hash. RFC §6 invariant chain.
+  // this receipt, bind to the proposedDiff hash, and bind to writeId when the
+  // token is write-scoped. RFC §6 invariant chain.
   const approvalToken = recordValue(value, "approvalToken");
   const proposedDiff = recordValue(value, "proposedDiff");
   if (isRecord(approvalToken)) {
     const tokenPath = pointer(path, "approvalToken");
-    if (typeof receiptId === "string" && recordValue(approvalToken, "receiptId") !== receiptId) {
-      addError(errors, pointer(tokenPath, "receiptId"), "must match enclosing receipt id");
-    }
-    if (
-      proposedDiff instanceof FrozenArgs &&
-      recordValue(approvalToken, "frozenArgsHash") !== proposedDiff.hash
-    ) {
-      addError(
-        errors,
-        pointer(tokenPath, "frozenArgsHash"),
-        "must match this write's proposedDiff hash",
-      );
+    const claims = recordValue(approvalToken, "claims");
+    if (isRecord(claims)) {
+      const claimsPath = pointer(tokenPath, "claims");
+      if (typeof receiptId === "string" && recordValue(claims, "receiptId") !== receiptId) {
+        addError(errors, pointer(claimsPath, "receiptId"), "must match enclosing receipt id");
+      }
+      if (
+        proposedDiff instanceof FrozenArgs &&
+        recordValue(claims, "frozenArgsHash") !== proposedDiff.hash
+      ) {
+        addError(
+          errors,
+          pointer(claimsPath, "frozenArgsHash"),
+          "must match this write's proposedDiff hash",
+        );
+      }
+      const tokenWriteId = recordValue(claims, "writeId");
+      if (tokenWriteId !== undefined && tokenWriteId !== recordValue(value, "writeId")) {
+        addError(errors, pointer(claimsPath, "writeId"), "must match this write's writeId");
+      }
     }
   }
 }
@@ -606,6 +677,16 @@ function validateNullable(
 
 function validateString(value: unknown, path: string, errors: ReceiptValidationError[]): void {
   if (typeof value !== "string") addError(errors, path, "must be a string");
+}
+
+function validateBase64String(
+  value: unknown,
+  path: string,
+  errors: ReceiptValidationError[],
+): void {
+  if (typeof value !== "string" || value.length === 0 || !BASE64_RE.test(value)) {
+    addError(errors, path, "must be a non-empty base64 string");
+  }
 }
 
 function validateBoolean(value: unknown, path: string, errors: ReceiptValidationError[]): void {
@@ -692,6 +773,14 @@ function validateApprovalIdValue(
   errors: ReceiptValidationError[],
 ): void {
   if (!isApprovalId(value)) addError(errors, path, "must be a valid ApprovalId");
+}
+
+function validateWriteIdValue(
+  value: unknown,
+  path: string,
+  errors: ReceiptValidationError[],
+): void {
+  if (!isWriteId(value)) addError(errors, path, "must be a valid WriteId");
 }
 
 function validateSha256HexValue(

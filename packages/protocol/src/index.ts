@@ -58,11 +58,14 @@ export {
   isKeychainHandleId,
   isLoopbackRemoteAddress,
   isRequestId,
+  validateApprovalSubmitRequest,
 } from "./ipc.ts";
 export type {
   AgentSlug,
+  ApprovalClaims,
   ApprovalEvent,
   ApprovalId,
+  BrokerTokenVerdict,
   CommitRef,
   ExternalWrite,
   ExternalWriteApplied,
@@ -85,6 +88,7 @@ export type {
   ToolCall,
   ToolCallId,
   TriggerKind,
+  WriteId,
   WriteResult,
 } from "./receipt.ts";
 export {
@@ -94,6 +98,7 @@ export {
   asReceiptId,
   asTaskId,
   asToolCallId,
+  asWriteId,
   isAgentSlug,
   isApprovalId,
   isProviderKind,
@@ -101,6 +106,7 @@ export {
   isReceiptSnapshot,
   isTaskId,
   isToolCallId,
+  isWriteId,
   PROVIDER_KIND_VALUES,
   receiptFromJson,
   receiptToJson,
