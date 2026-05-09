@@ -107,6 +107,17 @@ describe("resource budgets", () => {
     }
   });
 
+  it.each([
+    ["string", "not-a-receipt"],
+    ["number", 42],
+    ["null", null],
+  ])("rejects non-object receipt budget input: %s", (_name, input) => {
+    expect(validateReceiptBudget(input)).toEqual({
+      ok: false,
+      reason: "receipt: must be an object",
+    });
+  });
+
   it("rejects receipt string payloads that exceed the serialized budget floor", () => {
     const result = validateReceiptBudget({
       ...validReceiptFixture(),

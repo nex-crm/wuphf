@@ -87,12 +87,15 @@ function assertJcsValueWithBudget(
     const descriptors = Object.getOwnPropertyDescriptors(value);
     const indexedDescriptors = Object.entries(descriptors)
       .filter(([key]) => key !== "length")
-      .sort(([left], [right]) => compareArrayIndexKeys(left, right));
-    for (const [position, [key]] of indexedDescriptors.entries()) {
-      const index = parseArrayIndexKey(key);
-      if (index === undefined) {
-        throw new Error(`canonicalJSON: non-array-index own property at ${path}.${key}`);
-      }
+      .map(([key, descriptor]) => {
+        const index = parseArrayIndexKey(key);
+        if (index === undefined) {
+          throw new Error(`canonicalJSON: non-array-index own property at ${path}.${key}`);
+        }
+        return { key, descriptor, index };
+      })
+      .sort((left, right) => compareArrayIndexKeys(left.index, right.index));
+    for (const [position, { index }] of indexedDescriptors.entries()) {
       if (index !== position) {
         throw new Error(`canonicalJSON: sparse array hole at ${path}[${position}]`);
       }
@@ -100,7 +103,7 @@ function assertJcsValueWithBudget(
     if (indexedDescriptors.length !== value.length) {
       throw new Error(`canonicalJSON: sparse array hole at ${path}[${indexedDescriptors.length}]`);
     }
-    for (const [index, [key, descriptor]] of indexedDescriptors.entries()) {
+    for (const [index, { key, descriptor }] of indexedDescriptors.entries()) {
       assertNoLoneSurrogate(key, `${path}.${key}`);
       assertAllowedPropertyKey(key, `${path}.${key}`);
       if (!descriptor.enumerable) {
@@ -124,7 +127,9 @@ function assertJcsValueWithBudget(
       throw new Error(`canonicalJSON: symbol keys are not representable at ${path}`);
     }
     const descriptors = Object.getOwnPropertyDescriptors(value as object);
-    for (const [key, descriptor] of Object.entries(descriptors)) {
+    for (const [key, descriptor] of Object.entries(descriptors).sort(([left], [right]) =>
+      compareObjectKeys(left, right),
+    )) {
       assertNoLoneSurrogate(key, `${path}.${key}`);
       assertAllowedPropertyKey(key, `${path}.${key}`);
       if (!descriptor.enumerable) {
@@ -184,8 +189,14 @@ function assertNoInheritedToJson(value: object, path: string): void {
   }
 }
 
-function compareArrayIndexKeys(left: string, right: string): number {
-  return Number(left) - Number(right);
+function compareArrayIndexKeys(left: number, right: number): number {
+  return left - right;
+}
+
+function compareObjectKeys(left: string, right: string): number {
+  if (left < right) return -1;
+  if (left > right) return 1;
+  return 0;
 }
 
 function parseArrayIndexKey(key: string): number | undefined {

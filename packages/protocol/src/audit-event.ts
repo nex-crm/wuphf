@@ -27,7 +27,7 @@ import {
 import { canonicalJSON } from "./canonical-json.ts";
 import { type EventLsn, GENESIS_LSN, isEqualLsn, nextLsn, parseLsn } from "./event-lsn.ts";
 import { isReceiptId, type ReceiptId, type ReceiptValidationResult } from "./receipt.ts";
-import { assertKnownKeys, hasOwn, pointer, requireRecord } from "./receipt-utils.ts";
+import { assertKnownKeys, hasOwn, pointer, recordValue, requireRecord } from "./receipt-utils.ts";
 import { asSha256Hex, type Sha256Hex, sha256Hex } from "./sha256.ts";
 import {
   type ThreadAuditEventKind,
@@ -652,11 +652,12 @@ function validateRequiredMerkleRootRecordField(
   validator: (value: unknown, path: string, errors: MerkleRootRecordValidationError[]) => void,
 ): void {
   const fieldPath = pointer(basePath, key);
-  if (!hasOwn(record, key) || record[key] === undefined) {
+  const value = recordValue(record, key);
+  if (!hasOwn(record, key) || value === undefined) {
     addMerkleRootRecordError(errors, fieldPath, "is required");
     return;
   }
-  validator(record[key], fieldPath, errors);
+  validator(value, fieldPath, errors);
 }
 
 function validateEventLsnValue(
@@ -759,10 +760,11 @@ function requiredFieldFromJson(
   key: string,
   basePath: string,
 ): unknown {
-  if (!hasOwn(record, key) || record[key] === undefined) {
+  const value = recordValue(record, key);
+  if (!hasOwn(record, key) || value === undefined) {
     throw new Error(`${pointer(basePath, key)}: is required`);
   }
-  return record[key];
+  return value;
 }
 
 function requiredStringFromJson(

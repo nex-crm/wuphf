@@ -1034,21 +1034,42 @@ describe("audit-event chain verification", () => {
       }
     });
 
-    it("returns a validation error when MerkleRootRecord property access throws", () => {
-      const hostile: Record<string, unknown> = {};
-      Object.defineProperty(hostile, "seqNo", {
+    it("does not invoke MerkleRootRecord accessors while validating or decoding", () => {
+      let getterInvoked = false;
+      const validationInput = mutableMerkleRootRecord(
+        merkleRootRecordFromVector(firstMerkleRootVector()),
+      );
+      Object.defineProperty(validationInput, "rootHash", {
         enumerable: true,
         get() {
-          throw new Error("seqNo getter exploded");
+          getterInvoked = true;
+          return "f".repeat(64);
         },
       });
 
-      const validation = validateMerkleRootRecord(hostile);
+      const validation = validateMerkleRootRecord(validationInput);
 
+      expect(getterInvoked).toBe(false);
       expect(validation.ok).toBe(false);
       if (!validation.ok) {
-        expect(validation.errors).toEqual([{ path: "", message: "seqNo getter exploded" }]);
+        expect(
+          validation.errors.some(
+            (error) => error.path === "/rootHash" && /is required/.test(error.message),
+          ),
+        ).toBe(true);
       }
+
+      const decoderInput: Record<string, unknown> = { ...firstMerkleRootVector().input };
+      Object.defineProperty(decoderInput, "rootHash", {
+        enumerable: true,
+        get() {
+          getterInvoked = true;
+          return "f".repeat(64);
+        },
+      });
+
+      expect(() => merkleRootRecordFromJson(decoderInput)).toThrow(/\/rootHash: is required/);
+      expect(getterInvoked).toBe(false);
     });
 
     it("rejects invalid MerkleRootRecord JSON decoder fields", () => {

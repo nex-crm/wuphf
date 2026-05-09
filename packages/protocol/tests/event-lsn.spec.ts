@@ -11,6 +11,7 @@ import {
   nextLsn,
   parseLsn,
 } from "../src/event-lsn.ts";
+import { MAX_EVENT_LSN_BYTES } from "../src/index.ts";
 
 describe("event-lsn", () => {
   describe("lsnFromV1Number", () => {
@@ -92,6 +93,18 @@ describe("event-lsn", () => {
       expect(() => parseLsn("v1:1.5" as EventLsn)).toThrow(/malformed v1 LSN/);
       expect(() => parseLsn("v1:abc" as EventLsn)).toThrow(/malformed v1 LSN/);
       expect(() => parseLsn("v1: 1" as EventLsn)).toThrow(/malformed v1 LSN/);
+    });
+
+    it("checks the EventLsn byte budget before format parsing", () => {
+      expect(() => parseLsn("x".repeat(MAX_EVENT_LSN_BYTES) as EventLsn)).toThrow(
+        /unrecognized LSN format/,
+      );
+      expect(() => parseLsn("x".repeat(MAX_EVENT_LSN_BYTES + 1) as EventLsn)).toThrow(
+        `MAX_EVENT_LSN_BYTES exceeds budget: ${MAX_EVENT_LSN_BYTES + 1} > ${MAX_EVENT_LSN_BYTES}`,
+      );
+      expect(() => parseLsn("\u00a2".repeat(MAX_EVENT_LSN_BYTES / 2 + 1) as EventLsn)).toThrow(
+        `MAX_EVENT_LSN_BYTES exceeds budget: ${MAX_EVENT_LSN_BYTES + 1} > ${MAX_EVENT_LSN_BYTES}`,
+      );
     });
 
     it.each(["v1:00", "v1:000", "v1:0001"])("rejects leading-zero LSN %s", (lsn) => {

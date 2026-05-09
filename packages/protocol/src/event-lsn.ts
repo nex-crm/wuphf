@@ -21,10 +21,12 @@
 // arrive without rewriting persisted history.
 
 import type { Brand } from "./brand.ts";
+import { assertWithinBudget, MAX_EVENT_LSN_BYTES } from "./budgets.ts";
 
 export type EventLsn = Brand<string, "EventLsn">;
 
 const V1_PREFIX = "v1:";
+const UTF8_ENCODER = new TextEncoder();
 
 /**
  * The LSN of the first appended event. Genesis sentinel for the audit chain
@@ -64,6 +66,11 @@ export type ParsedLsn = ParsedLsnV1;
  */
 export function parseLsn(lsn: EventLsn): ParsedLsn {
   const s = lsn as string;
+  assertWithinBudget(
+    utf8ByteLengthUpTo(s, MAX_EVENT_LSN_BYTES),
+    MAX_EVENT_LSN_BYTES,
+    "MAX_EVENT_LSN_BYTES",
+  );
   if (s.startsWith(V1_PREFIX)) {
     const tail = s.slice(V1_PREFIX.length);
     if (tail.length === 0) {
@@ -124,4 +131,10 @@ export function nextLsn(lsn: EventLsn): EventLsn {
   // overflow with a clear message rather than emitting a token that
   // parseLsn would later reject.
   return lsnFromV1Number(p.localLsn + 1);
+}
+
+function utf8ByteLengthUpTo(value: string, budget: number): number {
+  if (value.length > budget) return budget + 1;
+  const bytes = UTF8_ENCODER.encode(value).byteLength;
+  return bytes > budget ? budget + 1 : bytes;
 }

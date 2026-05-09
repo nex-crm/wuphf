@@ -1,5 +1,5 @@
 import type { FrozenArgs } from "./frozen-args.ts";
-import type { ApprovalClaims, ReceiptSnapshot } from "./receipt-types.ts";
+import type { ApprovalClaims } from "./receipt-types.ts";
 import type { SanitizedString } from "./sanitized-string.ts";
 
 export type BudgetValidationResult = { ok: true } | { ok: false; reason: string };
@@ -100,6 +100,13 @@ export const MAX_AUDIT_CHAIN_BATCH_SIZE = 10_000;
  * bounded while leaving room for large receipt snapshots or tool metadata.
  */
 export const MAX_AUDIT_EVENT_BODY_BYTES = 1 * 1024 * 1024;
+
+/**
+ * EventLsn is a compact ASCII token (`vN:<seqNo>`). 256 bytes is far above
+ * the v1 safe-integer representation while bounding attacker-controlled tails
+ * before regex or numeric parsing.
+ */
+export const MAX_EVENT_LSN_BYTES = 256;
 
 /**
  * Signed Merkle checkpoints carry a detached signature and PEM certificate
@@ -228,7 +235,11 @@ export function assertWithinBudget(value: number, budget: number, label: string)
  * wire bytes must enter through receiptFromJson, which parses before this runs;
  * direct callers should not pass objects with accessors or custom toJSON hooks.
  */
-export function validateReceiptBudget(receipt: ReceiptSnapshot): BudgetValidationResult {
+export function validateReceiptBudget(receipt: unknown): BudgetValidationResult {
+  if (typeof receipt !== "object" || receipt === null || Array.isArray(receipt)) {
+    return { ok: false, reason: "receipt: must be an object" };
+  }
+
   const countBudget = validateReceiptCollectionBudgets(receipt);
   if (!countBudget.ok) return countBudget;
 
@@ -364,7 +375,7 @@ export function validateApprovalTokenLifetime(claims: ApprovalClaims): BudgetVal
   return validateApprovalTokenLifetimeValues(issuedAt, expiresAt);
 }
 
-function validateReceiptCollectionBudgets(receipt: ReceiptSnapshot): BudgetValidationResult {
+function validateReceiptCollectionBudgets(receipt: unknown): BudgetValidationResult {
   const checks: readonly [label: string, value: unknown, budget: number][] = [
     ["receipt toolCalls length", objectProperty(receipt, "toolCalls"), MAX_TOOL_CALLS_PER_RECEIPT],
     [
@@ -401,7 +412,7 @@ function validateReceiptCollectionBudgets(receipt: ReceiptSnapshot): BudgetValid
   return { ok: true };
 }
 
-function validateReceiptNestedBudgets(receipt: ReceiptSnapshot): BudgetValidationResult {
+function validateReceiptNestedBudgets(receipt: unknown): BudgetValidationResult {
   const topLevelStrings: readonly [label: string, value: unknown][] = [
     ["receipt finalMessage", objectProperty(receipt, "finalMessage")],
     ["receipt error", objectProperty(receipt, "error")],

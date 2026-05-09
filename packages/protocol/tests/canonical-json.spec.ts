@@ -1,3 +1,4 @@
+import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { MAX_CANONICAL_JSON_NODES } from "../src/budgets.ts";
 import { canonicalJSON } from "../src/canonical-json.ts";
@@ -17,6 +18,35 @@ describe("canonicalJSON", () => {
 
   it("serializes objects and arrays with stable JCS ordering", () => {
     expect(canonicalJSON({ b: 2, a: [true, null, "x"] })).toBe('{"a":[true,null,"x"],"b":2}');
+  });
+
+  it("property: orders mixed object keys lexicographically", () => {
+    fc.assert(
+      fc.property(
+        fc.uniqueArray(fc.constantFrom("1", "2", "10", "a", "m", "z"), { maxLength: 4 }),
+        (extraKeys) => {
+          const keys = ["extra", "0", ...extraKeys];
+          const input = Object.create(null) as Record<string, number>;
+          for (const [index, key] of keys.entries()) {
+            input[key] = index;
+          }
+
+          const expected = `{${[...keys]
+            .sort()
+            .map((key) => {
+              const value = input[key];
+              if (typeof value !== "number") {
+                throw new Error(`missing generated value for ${key}`);
+              }
+              return `${JSON.stringify(key)}:${value}`;
+            })
+            .join(",")}}`;
+
+          expect(canonicalJSON(input)).toBe(expected);
+        },
+      ),
+      { numRuns: 100 },
+    );
   });
 
   it("accepts canonical JSON inputs exactly at the node budget", () => {
