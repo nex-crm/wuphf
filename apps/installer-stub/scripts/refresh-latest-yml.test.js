@@ -60,3 +60,34 @@ test("refreshes sha512 and size for every latest-mac.yml files[] artifact", () =
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }
 });
+
+test("fails when a latest-mac.yml files[] artifact is missing", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "wuphf-refresh-latest-"));
+  const distDir = path.join(tempRoot, "dist");
+
+  try {
+    fs.mkdirSync(distDir, { recursive: true });
+
+    const zipName = "wuphf-installer-stub-0.0.0-mac-universal.zip";
+    const dmgName = "wuphf-installer-stub-0.0.0-mac-universal.dmg";
+
+    fs.writeFileSync(path.join(distDir, zipName), Buffer.from("zip bytes"));
+    fs.copyFileSync(fixtureManifest, path.join(distDir, "latest-mac.yml"));
+
+    const result = spawnSync(
+      process.execPath,
+      [refreshScript, path.join(distDir, "latest-mac.yml")],
+      {
+        cwd: appRoot,
+        encoding: "utf8",
+      },
+    );
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      `latest-mac.yml files[] entry points at missing artifact: ${dmgName}`,
+    );
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});

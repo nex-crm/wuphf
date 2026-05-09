@@ -77,8 +77,7 @@ if (Array.isArray(manifest.files)) {
 
     const entryArtifact = resolveDistArtifact(entryPath);
     if (!fs.existsSync(entryArtifact.artifactPath)) {
-      console.warn(`${manifestPath} files[] entry points at missing artifact: ${entryPath}`);
-      continue;
+      fail(`${manifestPath} files[] entry points at missing artifact: ${entryPath}`);
     }
 
     const entryMetadata = artifactMetadata(entryArtifact.artifactPath);
