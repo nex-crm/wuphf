@@ -3,6 +3,99 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 app_dir="$(cd "${script_dir}/.." && pwd)"
+
+write_self_test_manifest() {
+  local manifest_path="$1"
+  local artifact_name="$2"
+  local artifact_sha512="$3"
+  local artifact_size="$4"
+  local include_size="$5"
+
+  {
+    printf 'version: 0.0.0\n'
+    printf 'files:\n'
+    printf '  - url: %s\n' "${artifact_name}"
+    printf '    sha512: %s\n' "${artifact_sha512}"
+    if [[ "${include_size}" == "true" ]]; then
+      printf '    size: %s\n' "${artifact_size}"
+    fi
+    printf 'path: %s\n' "${artifact_name}"
+    printf 'sha512: %s\n' "${artifact_sha512}"
+    if [[ "${include_size}" == "true" ]]; then
+      printf 'size: %s\n' "${artifact_size}"
+    fi
+    printf "releaseDate: '2026-05-09T00:00:00.000Z'\n"
+  } > "${manifest_path}"
+}
+
+run_self_test() (
+  set -euo pipefail
+
+  local tmp_root
+  local good_dist
+  local missing_size_dist
+  local artifact_name
+  local artifact_sha512
+  local artifact_size
+  local source_script
+  local good_output
+  local missing_size_output
+  local status=0
+
+  tmp_root="$(mktemp -d "${TMPDIR:-/tmp}/verify-latest-yml-self-test.XXXXXX")"
+  trap 'rm -rf "${tmp_root}"' EXIT
+
+  good_dist="${tmp_root}/good-dist"
+  missing_size_dist="${tmp_root}/missing-size-dist"
+  artifact_name="wuphf-installer-stub-0.0.0-mac-universal.zip"
+  source_script="${script_dir}/verify-latest-yml.sh"
+  good_output="${tmp_root}/good.out"
+  missing_size_output="${tmp_root}/missing-size.out"
+
+  mkdir -p "${good_dist}" "${missing_size_dist}"
+  printf 'fixture artifact bytes\n' > "${good_dist}/${artifact_name}"
+  cp "${good_dist}/${artifact_name}" "${missing_size_dist}/${artifact_name}"
+
+  artifact_sha512="$(
+    cd "${app_dir}" &&
+      bun -e '
+        const crypto = require("node:crypto");
+        const fs = require("node:fs");
+        process.stdout.write(
+          crypto.createHash("sha512").update(fs.readFileSync(process.argv[1])).digest("base64"),
+        );
+      ' "${good_dist}/${artifact_name}"
+  )"
+  artifact_size="$(wc -c < "${good_dist}/${artifact_name}" | tr -d ' ')"
+
+  write_self_test_manifest "${good_dist}/latest-mac.yml" "${artifact_name}" "${artifact_sha512}" "${artifact_size}" "true"
+  write_self_test_manifest "${missing_size_dist}/latest-mac.yml" "${artifact_name}" "${artifact_sha512}" "${artifact_size}" "false"
+
+  env WUPHF_VERIFY_LATEST_YML_SKIP_SELF_TEST=1 WUPHF_DIST_DIR="${good_dist}" \
+    bash "${source_script}" "0.0.0" > "${good_output}" 2>&1
+
+  env WUPHF_VERIFY_LATEST_YML_SKIP_SELF_TEST=1 WUPHF_DIST_DIR="${missing_size_dist}" \
+    bash "${source_script}" "0.0.0" > "${missing_size_output}" 2>&1 || status=$?
+
+  if [[ "${status}" -eq 0 ]]; then
+    echo "expected missing-size fixture to fail" >&2
+    cat "${missing_size_output}" >&2
+    exit 1
+  fi
+
+  if ! grep -Fq "latest-mac.yml top-level has empty or missing size field" "${missing_size_output}"; then
+    echo "expected missing-size fixture to report missing size" >&2
+    cat "${missing_size_output}" >&2
+    exit 1
+  fi
+
+  echo "verify-latest-yml self-test OK"
+)
+
+if [[ "${WUPHF_VERIFY_LATEST_YML_SKIP_SELF_TEST:-}" != "1" ]]; then
+  run_self_test
+fi
+
 raw_ref="${1:-${GITHUB_REF:-${GITHUB_REF_NAME:-}}}"
 tag=""
 
@@ -158,12 +251,15 @@ verify_artifact_entry() {
     exit 1
   fi
 
-  if [[ -n "${expected_size}" ]]; then
-    actual_size="$(wc -c < "${artifact}" | tr -d ' ')"
-    if [[ "${expected_size}" != "${actual_size}" ]]; then
-      echo "${latest_file} ${label} size '${expected_size}' does not match '${actual_size}'" >&2
-      exit 1
-    fi
+  if [[ -z "${expected_size}" ]]; then
+    echo "${latest_file} ${label} has empty or missing size field" >&2
+    exit 1
+  fi
+
+  actual_size="$(wc -c < "${artifact}" | tr -d ' ')"
+  if [[ "${expected_size}" != "${actual_size}" ]]; then
+    echo "${latest_file} ${label} size '${expected_size}' does not match '${actual_size}'" >&2
+    exit 1
   fi
 }
 
