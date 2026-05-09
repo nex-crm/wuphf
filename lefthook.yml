@@ -118,9 +118,19 @@ pre-push:
   commands:
     go-unit:
       # Local mirror of CI's Go race split, with each package isolated in
-      # its own `go test` process.
+      # its own `go test` process. Scoped to pushes that actually touch Go
+      # files — TS-only branches (e.g. `packages/protocol`) skip the ~5min
+      # Go suite. CI still runs the full Go matrix on every PR, so any
+      # cross-language interface drift surfaces there in <5min.
+      files: git diff --name-only @{push} HEAD
+      glob: "*.go"
       run: bash scripts/test-go.sh
     web-unit:
+      # Scoped to pushes that touch web/ or related JS/TS files. Same
+      # rationale as go-unit: keep TS-only-protocol branches off the
+      # 80-second web suite.
+      files: git diff --name-only @{push} HEAD
+      glob: "web/**/*.{ts,tsx,js,jsx,css,json,html}"
       run: |
         cd web
         bun run typecheck
@@ -135,10 +145,18 @@ pre-push:
       # so every test starts from a clean slate. Persistence tests opt
       # back in via reloadedBroker(t). The dedicated `go-unit` hook above
       # runs the test suite; this smoke remains a fast build/vet guard.
+      files: git diff --name-only @{push} HEAD
+      glob: "*.go"
       run: go build ./... && go vet ./...
     build:
+      files: git diff --name-only @{push} HEAD
+      glob: "*.go"
       run: go build -o /dev/null ./cmd/wuphf
     vhs:
+      # vhs records `wuphf --help` and `--version`; only fires when the Go
+      # binary or its tapes change.
+      files: git diff --name-only @{push} HEAD
+      glob: "{cmd/wuphf/**,internal/**,testdata/vhs/**,*.go}"
       run: |
         if ! command -v vhs >/dev/null 2>&1; then
           echo "vhs not installed — skipping visual regression check (install: brew install vhs)"
