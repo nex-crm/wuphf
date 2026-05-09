@@ -127,18 +127,22 @@ function jsonArrayByteLengthUpTo(
   try {
     const descriptors = Object.getOwnPropertyDescriptors(value);
     let bytes = 2;
-    for (let i = 0; i < value.length; i++) {
-      const key = String(i);
-      if (!Object.hasOwn(descriptors, key)) {
-        throw new Error(`canonicalJSON: sparse array hole at ${path}[${i}]`);
-      }
-    }
-    for (const [key, descriptor] of Object.entries(descriptors)) {
-      if (key === "length") continue;
+    const indexedDescriptors = Object.entries(descriptors)
+      .filter(([key]) => key !== "length")
+      .sort(([left], [right]) => compareArrayIndexKeys(left, right));
+    for (const [position, [key]] of indexedDescriptors.entries()) {
       const index = parseArrayIndexKey(key);
       if (index === undefined) {
         throw new Error(`canonicalJSON: non-array-index own property at ${path}.${key}`);
       }
+      if (index !== position) {
+        throw new Error(`canonicalJSON: sparse array hole at ${path}[${position}]`);
+      }
+    }
+    if (indexedDescriptors.length !== value.length) {
+      throw new Error(`canonicalJSON: sparse array hole at ${path}[${indexedDescriptors.length}]`);
+    }
+    for (const [index, [, descriptor]] of indexedDescriptors.entries()) {
       if (!descriptor.enumerable) {
         throw new Error(`canonicalJSON: non-enumerable own property at ${path}[${index}]`);
       }
@@ -302,6 +306,10 @@ function utf8ByteLengthUpTo(value: string, budget: number): number {
 function addJsonBytes(total: number, amount: number, budget: number): number {
   const next = total + amount;
   return next > budget ? budget + 1 : next;
+}
+
+function compareArrayIndexKeys(left: string, right: string): number {
+  return Number(left) - Number(right);
 }
 
 function parseArrayIndexKey(key: string): number | undefined {

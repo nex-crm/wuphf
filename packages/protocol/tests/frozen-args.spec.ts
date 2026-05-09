@@ -224,9 +224,31 @@ describe("FrozenArgs", () => {
   });
 
   it("rejects sparse array holes", () => {
-    // biome-ignore lint/suspicious/noSparseArray: deliberate hole for the test
-    const sparse = [1, , 2];
+    const sparse = new Array<number>(3);
+    sparse[0] = 1;
+    sparse[2] = 2;
+
     expect(() => FrozenArgs.freeze(sparse)).toThrow(/sparse/);
+  });
+
+  it("rejects sparse arrays with only a length descriptor", () => {
+    const sparse = new Array<number>(1);
+
+    expect(() => FrozenArgs.freeze(sparse)).toThrow(/sparse array hole at \$\[0\]/);
+  });
+
+  it("rejects sparse arrays with enormous length from descriptor keys", () => {
+    const sparse: number[] = [];
+    sparse[4_294_967_294] = 0;
+
+    expect(() => FrozenArgs.freeze(sparse)).toThrow(/sparse array hole at \$\[0\]/);
+  }, 100);
+
+  it("rejects non-index own properties on arrays during preflight", () => {
+    const arr: unknown[] = ["x"];
+    Object.defineProperty(arr, "extra", { value: "y", enumerable: true });
+
+    expect(() => FrozenArgs.freeze(arr)).toThrow(/non-array-index own property at \$\.extra/);
   });
 
   it("rejects non-plain objects", () => {
