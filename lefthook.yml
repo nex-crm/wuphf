@@ -143,6 +143,30 @@ pre-push:
         cd web
         bun run typecheck
         bun run test
+    desktop-typecheck:
+      files: bash scripts/changed-files-since-base.sh
+      glob: "apps/desktop/**/*.ts"
+      run: |
+        cd apps/desktop
+        bun run typecheck
+    desktop-test:
+      files: bash scripts/changed-files-since-base.sh
+      glob: "apps/desktop/**/*.ts"
+      run: |
+        cd apps/desktop
+        bun run test
+    desktop-check-ipc-allowlist:
+      files: bash scripts/changed-files-since-base.sh
+      glob: "apps/desktop/**/*.ts"
+      run: |
+        cd apps/desktop
+        bun run check:ipc-allowlist
+    desktop-check-invariants:
+      files: bash scripts/changed-files-since-base.sh
+      glob: "apps/desktop/**/*.ts"
+      run: |
+        cd apps/desktop
+        bun run check:invariants
     smoke:
       # internal/team's former test-isolation bugs (shared ~/.wuphf/wiki,
       # worktrees registered against the invoking repo, cross-test state

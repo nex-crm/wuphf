@@ -98,6 +98,70 @@ jobs:
         working-directory: packages/protocol/testdata
         run: go run verifier-reference.go
 
+  desktop:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # ratchet:oven-sh/setup-bun@v2.2.0
+        with:
+          bun-version: "1.1.38"
+      - name: Detect desktop changes
+        id: desktop-changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${BASE_SHA}" || "${BASE_SHA}" =~ ^0+$ ]]; then
+            changed="$(git ls-files apps/desktop package.json bun.lock)"
+          else
+            changed="$(git diff --name-only "${BASE_SHA}"...HEAD -- apps/desktop package.json bun.lock || true)"
+          fi
+
+          if [[ -n "${changed}" ]]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Skip desktop job when desktop inputs are unchanged
+        if: ${{ steps.desktop-changes.outputs.changed != 'true' }}
+        run: echo "No apps/desktop, root package.json, or bun.lock changes detected."
+      - name: Install workspace deps
+        if: ${{ steps.desktop-changes.outputs.changed == 'true' }}
+        run: bun install --frozen-lockfile
+      - name: Typecheck
+        if: ${{ steps.desktop-changes.outputs.changed == 'true' }}
+        working-directory: apps/desktop
+        run: bun run typecheck
+      - name: Lint
+        if: ${{ steps.desktop-changes.outputs.changed == 'true' }}
+        working-directory: apps/desktop
+        run: bun run lint
+      - name: Test
+        if: ${{ steps.desktop-changes.outputs.changed == 'true' }}
+        working-directory: apps/desktop
+        run: bun run test
+      - name: Coverage
+        if: ${{ steps.desktop-changes.outputs.changed == 'true' }}
+        working-directory: apps/desktop
+        run: bun run test:coverage
+      - name: Vulnerability audit
+        if: ${{ steps.desktop-changes.outputs.changed == 'true' }}
+        run: bun audit --audit-level high
+      - name: IPC allowlist
+        if: ${{ steps.desktop-changes.outputs.changed == 'true' }}
+        working-directory: apps/desktop
+        run: bun run check:ipc-allowlist
+      - name: Structural invariants
+        if: ${{ steps.desktop-changes.outputs.changed == 'true' }}
+        working-directory: apps/desktop
+        run: bun run check:invariants
+      - name: Build
+        if: ${{ steps.desktop-changes.outputs.changed == 'true' }}
+        working-directory: apps/desktop
+        run: bun run build
+
   web:
     runs-on: ubuntu-latest
     steps:
