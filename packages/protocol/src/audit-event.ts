@@ -18,7 +18,7 @@
 
 import { createHash } from "node:crypto";
 import type { Brand } from "./brand.ts";
-import { MAX_AUDIT_CHAIN_BATCH_SIZE } from "./budgets.ts";
+import { MAX_AUDIT_CHAIN_BATCH_SIZE, validateAuditEventBodyBudget } from "./budgets.ts";
 import { canonicalJSON } from "./canonical-json.ts";
 import { type EventLsn, GENESIS_LSN, isEqualLsn, nextLsn, parseLsn } from "./event-lsn.ts";
 import type { ReceiptId } from "./receipt.ts";
@@ -108,6 +108,8 @@ export const PAYLOAD_KIND_METADATA = {
     bodySchemaRef: "wuphf.audit.payload.merkle_root.v1",
   },
 } as const satisfies Record<AuditEventKind, AuditEventPayloadKindMetadata>;
+
+const AUDIT_EVENT_KIND_SET: ReadonlySet<string> = new Set<string>(AUDIT_EVENT_KIND_VALUES);
 
 export interface AuditEventPayload {
   readonly kind: AuditEventKind;
@@ -229,6 +231,15 @@ export function merkleRootRecordFromJson(value: unknown): MerkleRootRecord {
  * stays printable and stable across encodings.
  */
 export function serializeAuditEventRecordForHash(record: AuditEventRecord): Uint8Array {
+  assertAuditEventPayloadKind(record.payload.kind);
+  if (!(record.payload.body instanceof Uint8Array)) {
+    throw new Error("serializeAuditEventRecordForHash: payload.body must be a Uint8Array");
+  }
+  const bodyBudget = validateAuditEventBodyBudget(record.payload.body);
+  if (!bodyBudget.ok) {
+    throw new Error(`serializeAuditEventRecordForHash: ${bodyBudget.reason}`);
+  }
+
   const payload: { kind: AuditEventKind; receiptId: string | null; bodyB64: string } = {
     kind: record.payload.kind,
     receiptId: record.payload.receiptId ?? null,
@@ -442,6 +453,22 @@ export function verifyChainIncremental(
 
 function bytesToBase64(bytes: Uint8Array): string {
   return Buffer.from(bytes).toString("base64");
+}
+
+function assertAuditEventPayloadKind(kind: unknown): asserts kind is AuditEventKind {
+  if (typeof kind !== "string" || !AUDIT_EVENT_KIND_SET.has(kind)) {
+    throw new Error(
+      `serializeAuditEventRecordForHash: invalid payload.kind ${describePayloadKind(kind)}`,
+    );
+  }
+}
+
+function describePayloadKind(kind: unknown): string {
+  if (typeof kind === "string") return JSON.stringify(kind);
+  if (typeof kind === "symbol") return kind.toString();
+  if (kind === null) return "null";
+  if (typeof kind === "object") return "[object]";
+  return String(kind);
 }
 
 function validateMerkleRootRecordValue(

@@ -21,7 +21,7 @@ import {
   verifyChain,
   verifyChainIncremental,
 } from "../src/audit-event.ts";
-import { MAX_AUDIT_CHAIN_BATCH_SIZE } from "../src/budgets.ts";
+import { MAX_AUDIT_CHAIN_BATCH_SIZE, MAX_AUDIT_EVENT_BODY_BYTES } from "../src/budgets.ts";
 import { canonicalJSON } from "../src/canonical-json.ts";
 import { type EventLsn, lsnFromV1Number, parseLsn } from "../src/event-lsn.ts";
 import { asReceiptId } from "../src/receipt.ts";
@@ -279,6 +279,51 @@ describe("audit-event chain verification", () => {
     }
   });
 
+  it("returns typed serialization_threw for hash-consistent records with unknown payload kinds", () => {
+    const record = recordAt(chainOfLength(1), 0);
+    const tampered: AuditEventRecord = {
+      ...record,
+      eventHash: GENESIS_PREV_HASH,
+      payload: {
+        ...record.payload,
+        kind: "made_up_kind" as AuditEventKind,
+      },
+    };
+    const hashConsistentTampered: AuditEventRecord = {
+      ...tampered,
+      eventHash: computeEventHash(tampered.prevHash, legacySerializeAuditEventRecord(tampered)),
+    };
+
+    const result = verifyChain([hashConsistentTampered]);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("serialization_threw");
+      expect(result.reason).toMatch(/invalid payload\.kind.*made_up_kind/);
+    }
+  });
+
+  it("returns typed serialization_threw for oversized audit event bodies", () => {
+    const oversized: AuditEventRecord = {
+      seqNo: lsnFromV1Number(0),
+      timestamp: new Date("2026-05-08T00:00:00.000Z"),
+      prevHash: GENESIS_PREV_HASH,
+      eventHash: GENESIS_PREV_HASH,
+      payload: {
+        kind: "receipt_created",
+        body: new Uint8Array(MAX_AUDIT_EVENT_BODY_BYTES + 1),
+      },
+    };
+
+    const result = verifyChain([oversized]);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("serialization_threw");
+      expect(result.reason).toMatch(/MAX_AUDIT_EVENT_BODY_BYTES/);
+    }
+  });
+
   it("returns typed lsn_threw when expected next LSN overflows", async () => {
     vi.resetModules();
     vi.doMock("../src/event-lsn.ts", async (importOriginal) => {
@@ -502,6 +547,21 @@ function previousComputeEventHash(recordBytes: Uint8Array): Sha256Hex {
   buf.set(new TextEncoder().encode(GENESIS_PREV_HASH), 0);
   buf.set(recordBytes, GENESIS_PREV_HASH.length);
   return sha256Hex(buf);
+}
+
+function legacySerializeAuditEventRecord(record: AuditEventRecord): Uint8Array {
+  return new TextEncoder().encode(
+    canonicalJSON({
+      seqNo: record.seqNo as string,
+      timestamp: record.timestamp.toISOString(),
+      prevHash: record.prevHash,
+      payload: {
+        kind: record.payload.kind,
+        receiptId: record.payload.receiptId ?? null,
+        bodyB64: Buffer.from(record.payload.body).toString("base64"),
+      },
+    }),
+  );
 }
 
 function auditEventRecordFromVector(vector: AuditEventVector): AuditEventRecord {

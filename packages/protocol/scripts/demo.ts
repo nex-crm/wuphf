@@ -231,8 +231,16 @@ expectThrows(
   /__proto__|forbidden|prototype/,
 );
 expectThrows(
+  () => canonicalJSON(JSON.parse('{"__proto__":{"polluted":true},"ok":1}')),
+  /canonicalJSON: forbidden key "__proto__"/,
+);
+expectThrows(
   () => SanitizedString.fromUnknown(JSON.parse('{"constructor":{"polluted":true}}')),
   /constructor|forbidden|prototype/,
+);
+expectThrows(
+  () => FrozenArgs.freeze(JSON.parse('{"prototype":{"polluted":true}}')),
+  /canonicalJSON: forbidden key "prototype"/,
 );
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -268,6 +276,36 @@ expectChainResult(
   "chain with tampered payload at seq 2",
   verifyChain(tamperedChain),
   "event_hash_mismatch",
+);
+
+const unknownKindRecord = nonNull(buildChain(1)[0], "unknownKindRecord");
+expectChainResult(
+  "chain with unknown payload kind",
+  verifyChain([
+    {
+      ...unknownKindRecord,
+      payload: {
+        ...unknownKindRecord.payload,
+        kind: "made_up_kind" as AuditEventRecord["payload"]["kind"],
+      },
+    },
+  ]),
+  "serialization_threw",
+);
+
+const oversizedBodyRecord = nonNull(buildChain(1)[0], "oversizedBodyRecord");
+expectChainResult(
+  "chain with oversized audit event body",
+  verifyChain([
+    {
+      ...oversizedBodyRecord,
+      payload: {
+        ...oversizedBodyRecord.payload,
+        body: new Uint8Array(1 * 1024 * 1024 + 1),
+      },
+    },
+  ]),
+  "serialization_threw",
 );
 
 const sparseChain = buildChain(3);
@@ -388,6 +426,22 @@ expectEqual("empty idempotencyKey rejected", validateApprovalSubmitRequest(empty
   ok: false,
   reason: "idempotencyKey must match /^[A-Za-z0-9_-]{1,128}$/",
 });
+
+const missingAlgorithmReq = {
+  ...goodReq,
+  approvalToken: {
+    ...validToken,
+    algorithm: undefined,
+  },
+};
+expectEqual(
+  "missing token algorithm rejected",
+  validateApprovalSubmitRequest(missingAlgorithmReq),
+  {
+    ok: false,
+    reason: "approvalToken.algorithm is required",
+  },
+);
 
 // ──────────────────────────────────────────────────────────────────────────
 header(12, "EventLsn safe-integer bound (writer ⟷ verifier round-trip)");

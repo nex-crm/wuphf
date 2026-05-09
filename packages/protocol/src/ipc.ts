@@ -16,15 +16,25 @@
 //      Both checks must pass; the Host check alone is not the full gate.
 
 import type { Brand } from "./brand.ts";
+import { APPROVAL_CLAIMS_KEYS, SIGNED_APPROVAL_TOKEN_KEYS } from "./ipc-shared.ts";
 import {
   type IdempotencyKey,
   isIdempotencyKey,
   isReceiptId,
+  isWriteId,
   type ReceiptId,
   type SignedApprovalToken,
   type WriteFailureMetadata,
   type WriteResult,
 } from "./receipt.ts";
+import {
+  APPROVAL_ROLE_VALUES,
+  APPROVAL_TOKEN_ALGORITHM_VALUES,
+  BASE64_RE,
+  RISK_CLASS_VALUES,
+} from "./receipt-literals.ts";
+import { assertKnownKeys, hasOwn, isRecord } from "./receipt-utils.ts";
+import { isSha256Hex } from "./sha256.ts";
 
 export type BrokerPort = Brand<number, "BrokerPort">;
 export type ApiToken = Brand<string, "ApiToken">;
@@ -198,17 +208,30 @@ interface ApprovalSubmitRequestRecord {
 
 interface SignedApprovalTokenRecord {
   readonly claims?: unknown;
+  readonly algorithm?: unknown;
+  readonly signerKeyId?: unknown;
+  readonly signature?: unknown;
 }
 
 interface ApprovalClaimsRecord {
+  readonly signerIdentity?: unknown;
+  readonly role?: unknown;
   readonly receiptId?: unknown;
+  readonly writeId?: unknown;
+  readonly frozenArgsHash?: unknown;
+  readonly riskClass?: unknown;
+  readonly issuedAt?: unknown;
+  readonly expiresAt?: unknown;
+  readonly webauthnAssertion?: unknown;
 }
 
 /**
  * Validate the wire shape of an `ApprovalSubmitRequest`: rejects unknown
  * envelope keys, requires the three fields with the correct branded shapes
- * (ReceiptId, IdempotencyKey, SignedApprovalToken envelope), and enforces the
- * cross-field binding `req.receiptId === req.approvalToken.claims.receiptId`.
+ * (ReceiptId, IdempotencyKey, SignedApprovalToken envelope), rejects unknown
+ * token and claim keys, requires the token algorithm/signing fields, validates
+ * claim field shapes, and enforces the cross-field binding
+ * `req.receiptId === req.approvalToken.claims.receiptId`.
  *
  * What this DOES NOT check (broker-side responsibilities):
  *   - Token signature validity (Ed25519 verification against signerKeyId).
@@ -244,10 +267,11 @@ export function validateApprovalSubmitRequest(
     return { ok: false, reason: "approvalToken must be an object" };
   }
   const token = approvalToken as SignedApprovalTokenRecord;
-  const claims = token.claims;
-  if (!isRecord(claims)) {
-    return { ok: false, reason: "approvalToken.claims must be an object" };
+  const tokenShape = validateApprovalTokenShape(approvalToken);
+  if (!tokenShape.ok) {
+    return tokenShape;
   }
+  const claims = token.claims;
   const claimsRecord = claims as ApprovalClaimsRecord;
   if (receiptId !== claimsRecord.receiptId) {
     return {
@@ -256,6 +280,175 @@ export function validateApprovalSubmitRequest(
     };
   }
   return { ok: true };
+}
+
+function validateApprovalTokenShape(
+  token: Record<string, unknown>,
+): { ok: true } | { ok: false; reason: string } {
+  const tokenKeys = knownKeysResult(token, "approvalToken", SIGNED_APPROVAL_TOKEN_KEYS);
+  if (!tokenKeys.ok) return tokenKeys;
+
+  const claims = requiredField(token, "claims", "approvalToken.claims");
+  if (!claims.ok) return claims;
+  if (!isRecord(claims.value)) {
+    return { ok: false, reason: "approvalToken.claims must be an object" };
+  }
+  const claimsShape = validateApprovalClaimsShape(claims.value);
+  if (!claimsShape.ok) return claimsShape;
+
+  const algorithm = requiredField(token, "algorithm", "approvalToken.algorithm");
+  if (!algorithm.ok) return algorithm;
+  if (!isLiteralValue(algorithm.value, APPROVAL_TOKEN_ALGORITHM_VALUES)) {
+    return { ok: false, reason: "approvalToken.algorithm must be ed25519" };
+  }
+
+  const signerKeyId = requiredField(token, "signerKeyId", "approvalToken.signerKeyId");
+  if (!signerKeyId.ok) return signerKeyId;
+  if (typeof signerKeyId.value !== "string") {
+    return { ok: false, reason: "approvalToken.signerKeyId must be a string" };
+  }
+
+  const signature = requiredField(token, "signature", "approvalToken.signature");
+  if (!signature.ok) return signature;
+  if (
+    typeof signature.value !== "string" ||
+    signature.value.length === 0 ||
+    !BASE64_RE.test(signature.value)
+  ) {
+    return { ok: false, reason: "approvalToken.signature must be a non-empty base64 string" };
+  }
+
+  return { ok: true };
+}
+
+function validateApprovalClaimsShape(
+  claims: Record<string, unknown>,
+): { ok: true } | { ok: false; reason: string } {
+  const claimKeys = knownKeysResult(claims, "approvalToken/claims", APPROVAL_CLAIMS_KEYS);
+  if (!claimKeys.ok) return claimKeys;
+
+  const signerIdentity = requiredField(
+    claims,
+    "signerIdentity",
+    "approvalToken.claims.signerIdentity",
+  );
+  if (!signerIdentity.ok) return signerIdentity;
+  if (typeof signerIdentity.value !== "string") {
+    return { ok: false, reason: "approvalToken.claims.signerIdentity must be a string" };
+  }
+
+  const role = requiredField(claims, "role", "approvalToken.claims.role");
+  if (!role.ok) return role;
+  if (!isLiteralValue(role.value, APPROVAL_ROLE_VALUES)) {
+    return { ok: false, reason: "approvalToken.claims.role must be a valid approval role" };
+  }
+
+  const receiptId = requiredField(claims, "receiptId", "approvalToken.claims.receiptId");
+  if (!receiptId.ok) return receiptId;
+  if (!isReceiptId(receiptId.value)) {
+    return {
+      ok: false,
+      reason: "approvalToken.claims.receiptId must be an uppercase ULID ReceiptId",
+    };
+  }
+
+  const writeId = optionalField(claims, "writeId");
+  if (writeId !== undefined && !isWriteId(writeId)) {
+    return { ok: false, reason: "approvalToken.claims.writeId must be a valid WriteId" };
+  }
+
+  const frozenArgsHash = requiredField(
+    claims,
+    "frozenArgsHash",
+    "approvalToken.claims.frozenArgsHash",
+  );
+  if (!frozenArgsHash.ok) return frozenArgsHash;
+  if (!isSha256Hex(frozenArgsHash.value)) {
+    return { ok: false, reason: "approvalToken.claims.frozenArgsHash must be a sha256 hex digest" };
+  }
+
+  const riskClass = requiredField(claims, "riskClass", "approvalToken.claims.riskClass");
+  if (!riskClass.ok) return riskClass;
+  if (!isLiteralValue(riskClass.value, RISK_CLASS_VALUES)) {
+    return { ok: false, reason: "approvalToken.claims.riskClass must be a valid risk class" };
+  }
+
+  const issuedAtField = requiredField(claims, "issuedAt", "approvalToken.claims.issuedAt");
+  if (!issuedAtField.ok) return issuedAtField;
+  const issuedAt = issuedAtField.value;
+  if (!isValidDate(issuedAt)) {
+    return { ok: false, reason: "approvalToken.claims.issuedAt must be a valid Date" };
+  }
+
+  const expiresAtField = requiredField(claims, "expiresAt", "approvalToken.claims.expiresAt");
+  if (!expiresAtField.ok) return expiresAtField;
+  const expiresAt = expiresAtField.value;
+  if (!isValidDate(expiresAt)) {
+    return { ok: false, reason: "approvalToken.claims.expiresAt must be a valid Date" };
+  }
+
+  const webauthnAssertion = optionalField(claims, "webauthnAssertion");
+  if (webauthnAssertion !== undefined && typeof webauthnAssertion !== "string") {
+    return {
+      ok: false,
+      reason: "approvalToken.claims.webauthnAssertion must be a string",
+    };
+  }
+  if (
+    (riskClass.value === "high" || riskClass.value === "critical") &&
+    (typeof webauthnAssertion !== "string" || webauthnAssertion.length === 0)
+  ) {
+    return {
+      ok: false,
+      reason:
+        "approvalToken.claims.webauthnAssertion must be a non-empty string for high/critical risk",
+    };
+  }
+
+  if (issuedAt.getTime() > expiresAt.getTime()) {
+    return {
+      ok: false,
+      reason: "approvalToken.claims.expiresAt must be after or equal to issuedAt",
+    };
+  }
+
+  return { ok: true };
+}
+
+function knownKeysResult(
+  record: Record<string, unknown>,
+  path: string,
+  allowed: ReadonlySet<string>,
+): { ok: true } | { ok: false; reason: string } {
+  try {
+    assertKnownKeys(record, path, allowed);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, reason: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+function requiredField(
+  record: Record<string, unknown>,
+  key: string,
+  path: string,
+): { ok: true; value: unknown } | { ok: false; reason: string } {
+  if (!hasOwn(record, key) || record[key] === undefined) {
+    return { ok: false, reason: `${path} is required` };
+  }
+  return { ok: true, value: record[key] };
+}
+
+function optionalField(record: Record<string, unknown>, key: string): unknown | undefined {
+  return hasOwn(record, key) ? record[key] : undefined;
+}
+
+function isLiteralValue(value: unknown, allowed: readonly string[]): value is string {
+  return typeof value === "string" && allowed.includes(value);
+}
+
+function isValidDate(value: unknown): value is Date {
+  return value instanceof Date && !Number.isNaN(value.getTime());
 }
 
 /**
@@ -344,10 +537,6 @@ function isValidPort(port: string): boolean {
   if (!PORT_RE.test(port)) return false;
   const parsed = Number(port);
   return Number.isInteger(parsed) && parsed >= 0 && parsed <= 65535;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /**

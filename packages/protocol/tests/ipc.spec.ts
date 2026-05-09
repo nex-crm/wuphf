@@ -233,6 +233,95 @@ describe("approval submission IPC", () => {
     }
   });
 
+  it("rejects approval tokens missing algorithm", () => {
+    const receiptId = asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAV");
+    const approvalToken = { ...approvalTokenFor(receiptId) } as Record<string, unknown>;
+    Reflect.deleteProperty(approvalToken, "algorithm");
+
+    expectApprovalSubmitRejected(
+      approvalRequestFor(receiptId, approvalToken),
+      /algorithm.*required/,
+    );
+  });
+
+  it("rejects approval tokens with non-ed25519 algorithms", () => {
+    const receiptId = asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAV");
+
+    expectApprovalSubmitRejected(
+      approvalRequestFor(receiptId, {
+        ...approvalTokenFor(receiptId),
+        algorithm: "rsa",
+      }),
+      /algorithm.*ed25519/,
+    );
+  });
+
+  it("rejects approval tokens missing signerKeyId", () => {
+    const receiptId = asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAV");
+    const approvalToken = { ...approvalTokenFor(receiptId) } as Record<string, unknown>;
+    Reflect.deleteProperty(approvalToken, "signerKeyId");
+
+    expectApprovalSubmitRejected(
+      approvalRequestFor(receiptId, approvalToken),
+      /signerKeyId.*required/,
+    );
+  });
+
+  it("rejects approval tokens with empty signatures", () => {
+    const receiptId = asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAV");
+
+    expectApprovalSubmitRejected(
+      approvalRequestFor(receiptId, {
+        ...approvalTokenFor(receiptId),
+        signature: "",
+      }),
+      /signature.*non-empty base64/,
+    );
+  });
+
+  it("rejects unknown approval token envelope keys", () => {
+    const receiptId = asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAV");
+
+    expectApprovalSubmitRejected(
+      approvalRequestFor(receiptId, {
+        ...approvalTokenFor(receiptId),
+        evil: true,
+      }),
+      /evil.*not allowed/,
+    );
+  });
+
+  it("rejects unknown approval token claim keys", () => {
+    const receiptId = asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAV");
+    const approvalToken = approvalTokenFor(receiptId);
+
+    expectApprovalSubmitRejected(
+      approvalRequestFor(receiptId, {
+        ...approvalToken,
+        claims: {
+          ...approvalToken.claims,
+          evil: true,
+        },
+      }),
+      /evil.*not allowed/,
+    );
+  });
+
+  it("rejects approval token claims missing required fields", () => {
+    const receiptId = asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAV");
+    const approvalToken = approvalTokenFor(receiptId);
+    const claims = { ...approvalToken.claims } as Record<string, unknown>;
+    Reflect.deleteProperty(claims, "frozenArgsHash");
+
+    expectApprovalSubmitRejected(
+      approvalRequestFor(receiptId, {
+        ...approvalToken,
+        claims,
+      }),
+      /frozenArgsHash.*required/,
+    );
+  });
+
   it("carries idempotencyKey on queued approval responses", () => {
     const idempotencyKey = asIdempotencyKey("approval-submit-01");
     const response: ApprovalSubmitResponse = {
@@ -246,6 +335,22 @@ describe("approval submission IPC", () => {
     expect(response.idempotencyKey).toBe(idempotencyKey);
   });
 });
+
+function approvalRequestFor(receiptId: ReceiptId, approvalToken: unknown): unknown {
+  return {
+    receiptId,
+    approvalToken,
+    idempotencyKey: asIdempotencyKey("approval-submit-01"),
+  };
+}
+
+function expectApprovalSubmitRejected(request: unknown, reason: RegExp): void {
+  const result = validateApprovalSubmitRequest(request);
+  expect(result.ok).toBe(false);
+  if (!result.ok) {
+    expect(result.reason).toMatch(reason);
+  }
+}
 
 function approvalTokenFor(receiptId: ReceiptId): SignedApprovalToken {
   return {

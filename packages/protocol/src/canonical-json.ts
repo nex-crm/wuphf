@@ -1,6 +1,7 @@
 import canonicalize from "canonicalize";
 
 const MAX_DEPTH = 64;
+const FORBIDDEN_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
 export type JsonPrimitive = null | boolean | number | string;
 // `readonly` here is a consumer-ergonomic hint, not a runtime constraint —
@@ -75,6 +76,7 @@ export function assertJcsValue(value: unknown, path = "$", depth = 0): asserts v
       if (key === "length") {
         continue;
       }
+      assertAllowedPropertyKey(key, `${path}.${key}`);
       const index = parseArrayIndexKey(key);
       if (index === undefined) {
         throw new Error(`canonicalJSON: non-array-index own property at ${path}.${key}`);
@@ -100,6 +102,7 @@ export function assertJcsValue(value: unknown, path = "$", depth = 0): asserts v
     }
     const descriptors = Object.getOwnPropertyDescriptors(value as object);
     for (const [key, descriptor] of Object.entries(descriptors)) {
+      assertAllowedPropertyKey(key, `${path}.${key}`);
       if (!descriptor.enumerable) {
         throw new Error(`canonicalJSON: non-enumerable own property at ${path}.${key}`);
       }
@@ -113,6 +116,12 @@ export function assertJcsValue(value: unknown, path = "$", depth = 0): asserts v
 
   // Should be unreachable given the typeof branches above.
   throw new Error(`canonicalJSON: ${typeof value} at ${path} is not representable in JSON`);
+}
+
+function assertAllowedPropertyKey(key: string, path: string): void {
+  if (FORBIDDEN_KEYS.has(key)) {
+    throw new Error(`canonicalJSON: forbidden key "${key}" at ${path}`);
+  }
 }
 
 function assertNoLoneSurrogate(value: string, path: string): void {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { canonicalJSON } from "../src/canonical-json.ts";
+import { FrozenArgs } from "../src/frozen-args.ts";
 
 describe("canonicalJSON", () => {
   it("serializes objects and arrays with stable JCS ordering", () => {
@@ -26,5 +27,14 @@ describe("canonicalJSON", () => {
     Object.defineProperty(arr, "extra", { value: "y" });
 
     expect(() => canonicalJSON(arr)).toThrow(/non-array-index own property at \$\.extra/);
+  });
+
+  it("rejects prototype-pollution keys at the JCS boundary", () => {
+    for (const key of ["__proto__", "constructor", "prototype"]) {
+      const input = JSON.parse(`{"${key}":{"x":1},"ok":1}`);
+
+      expect(() => canonicalJSON(input)).toThrow(new RegExp(`forbidden key.*${key}`));
+      expect(() => FrozenArgs.freeze(input)).toThrow(new RegExp(`forbidden key.*${key}`));
+    }
   });
 });

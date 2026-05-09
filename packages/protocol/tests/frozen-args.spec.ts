@@ -6,7 +6,10 @@ import { FrozenArgs } from "../src/frozen-args.ts";
 type JsonObject = { [key: string]: JsonValue };
 type JsonValue = null | boolean | number | string | JsonValue[] | JsonObject;
 
-const jsonKey = fc.fullUnicodeString({ maxLength: 16 }).filter((key) => key !== "__proto__");
+const forbiddenJsonKeys = new Set(["__proto__", "constructor", "prototype"]);
+const jsonKey = fc
+  .fullUnicodeString({ maxLength: 16 })
+  .filter((key) => !forbiddenJsonKeys.has(key));
 
 const jsonNumber = fc
   .double({

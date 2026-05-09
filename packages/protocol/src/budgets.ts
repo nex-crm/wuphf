@@ -41,6 +41,13 @@ export const MAX_SANITIZED_STRING_BYTES = 1 * 1024 * 1024;
 export const MAX_AUDIT_CHAIN_BATCH_SIZE = 10_000;
 
 /**
+ * Audit event bodies are opaque broker-owned bytes that are base64-encoded
+ * before hashing. A 1 MiB per-record cap keeps that expansion and JCS work
+ * bounded while leaving room for large receipt snapshots or tool metadata.
+ */
+export const MAX_AUDIT_EVENT_BODY_BYTES = 1 * 1024 * 1024;
+
+/**
  * Approval tokens are cleanup-bound capabilities. Thirty minutes covers a
  * human review window; 100x would leave bearer material valid for days after
  * the task context has gone stale.
@@ -155,6 +162,15 @@ export function validateSanitizedStringBudget(s: SanitizedString): BudgetValidat
     MAX_SANITIZED_STRING_BYTES,
     "SanitizedString value bytes",
   );
+}
+
+export function validateAuditEventBodyBudget(body: Uint8Array): BudgetValidationResult {
+  try {
+    assertWithinBudget(body.byteLength, MAX_AUDIT_EVENT_BODY_BYTES, "MAX_AUDIT_EVENT_BODY_BYTES");
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, reason: err instanceof Error ? err.message : String(err) };
+  }
 }
 
 export function validateApprovalTokenLifetime(claims: ApprovalClaims): BudgetValidationResult {

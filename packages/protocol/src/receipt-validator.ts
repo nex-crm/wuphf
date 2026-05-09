@@ -6,6 +6,7 @@
 // the moat boundary (RFC §6) sits behind code we own end-to-end.
 
 import { FrozenArgs } from "./frozen-args.ts";
+import { APPROVAL_CLAIMS_KEYS, SIGNED_APPROVAL_TOKEN_KEYS } from "./ipc-shared.ts";
 import {
   APPROVAL_DECISION_VALUES,
   APPROVAL_ROLE_VALUES,
@@ -21,7 +22,6 @@ import {
   WRITE_RESULT_VALUES,
 } from "./receipt-literals.ts";
 import {
-  type ApprovalClaims,
   type ApprovalEvent,
   type BrokerTokenVerdict,
   type CommitRef,
@@ -39,7 +39,6 @@ import {
   type ReceiptSnapshot,
   type ReceiptValidationError,
   type ReceiptValidationResult,
-  type SignedApprovalToken,
   type SourceRead,
   type ToolCall,
   type WriteFailureMetadata,
@@ -47,6 +46,8 @@ import {
 import { addError, hasOwn, isRecord, pointer, recordValue } from "./receipt-utils.ts";
 import { SanitizedString } from "./sanitized-string.ts";
 import { isSha256Hex } from "./sha256.ts";
+
+export { APPROVAL_CLAIMS_KEYS, SIGNED_APPROVAL_TOKEN_KEYS } from "./ipc-shared.ts";
 
 type MemoryStore = (typeof MEMORY_STORE_VALUES)[number];
 
@@ -171,31 +172,6 @@ const FROZEN_ARGS_KEYS_TUPLE = [
   "hash",
 ] as const satisfies readonly (keyof FrozenArgs)[];
 export const FROZEN_ARGS_KEYS: ReadonlySet<string> = new Set<string>(FROZEN_ARGS_KEYS_TUPLE);
-
-const APPROVAL_CLAIMS_KEYS_TUPLE = [
-  "signerIdentity",
-  "role",
-  "receiptId",
-  "writeId",
-  "frozenArgsHash",
-  "riskClass",
-  "issuedAt",
-  "expiresAt",
-  "webauthnAssertion",
-] as const satisfies readonly (keyof ApprovalClaims)[];
-export const APPROVAL_CLAIMS_KEYS: ReadonlySet<string> = new Set<string>(
-  APPROVAL_CLAIMS_KEYS_TUPLE,
-);
-
-const SIGNED_APPROVAL_TOKEN_KEYS_TUPLE = [
-  "claims",
-  "algorithm",
-  "signerKeyId",
-  "signature",
-] as const satisfies readonly (keyof SignedApprovalToken)[];
-export const SIGNED_APPROVAL_TOKEN_KEYS: ReadonlySet<string> = new Set<string>(
-  SIGNED_APPROVAL_TOKEN_KEYS_TUPLE,
-);
 
 const WRITE_FAILURE_METADATA_KEYS_TUPLE = [
   "code",
