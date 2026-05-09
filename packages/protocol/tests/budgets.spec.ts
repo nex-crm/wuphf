@@ -34,6 +34,7 @@ import {
   MAX_RECEIPT_SOURCE_READS,
   MAX_RECEIPT_WIKI_WRITES,
   MAX_RECEIPT_WRITES,
+  MAX_SANITIZED_JSON_NODES,
   MAX_SANITIZED_STRING_BYTES,
   MAX_TOOL_CALLS_PER_RECEIPT,
   MAX_WEBAUTHN_ASSERTION_BYTES,
@@ -51,6 +52,7 @@ import {
   validateFrozenArgsBudget,
   validateReceipt,
   validateReceiptBudget,
+  validateSanitizedJsonNodeBudget,
   validateSanitizedStringBudget,
   verifyChainIncremental,
 } from "../src/index.ts";
@@ -233,6 +235,16 @@ describe("resource budgets", () => {
     );
 
     expect(validateSanitizedStringBudget(forgedSanitizedString("\ud800"))).toEqual({ ok: true });
+  });
+
+  it("bounds sanitized JSON node count at the edge", () => {
+    expect(validateSanitizedJsonNodeBudget(MAX_SANITIZED_JSON_NODES, "$")).toEqual({
+      ok: true,
+    });
+    expectBudgetRejection(
+      validateSanitizedJsonNodeBudget(MAX_SANITIZED_JSON_NODES + 1, "$.x"),
+      /SanitizedString JSON node count at \$\.x exceeds budget: 50001 > 50000/,
+    );
   });
 
   it("bounds audit event body bytes at the edge", () => {

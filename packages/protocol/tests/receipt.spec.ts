@@ -6,6 +6,7 @@ import {
   MAX_APPROVAL_SIGNATURE_BYTES,
   MAX_APPROVAL_TOKEN_LIFETIME_MS,
   MAX_FROZEN_ARGS_BYTES,
+  MAX_LOCAL_ID_BYTES,
   MAX_RECEIPT_BYTES,
   MAX_SANITIZED_STRING_BYTES,
   MAX_TOOL_CALL_ID_BYTES,
@@ -1240,6 +1241,15 @@ describe("receipt schema", () => {
     const writeIdAtCap = `w${"r".repeat(MAX_WRITE_ID_BYTES - 1)}`;
     expect(asWriteId(writeIdAtCap)).toBe(writeIdAtCap);
     expect(() => asWriteId(`${writeIdAtCap}r`)).toThrow(/WriteId/);
+  });
+
+  it("MAX_LOCAL_ID_BYTES is the upper bound for any LOCAL_ID_RE-derived brand cap", () => {
+    // The shared cap exists so individual brands can be tightened independently
+    // (e.g. tighter than 128) but never relaxed past 128 without an explicit
+    // budget bump.
+    expect(MAX_LOCAL_ID_BYTES).toBeGreaterThanOrEqual(MAX_TOOL_CALL_ID_BYTES);
+    expect(MAX_LOCAL_ID_BYTES).toBeGreaterThanOrEqual(MAX_APPROVAL_ID_BYTES);
+    expect(MAX_LOCAL_ID_BYTES).toBeGreaterThanOrEqual(MAX_WRITE_ID_BYTES);
   });
 
   it("rejects notebookWrites entries that claim the wiki store", () => {
