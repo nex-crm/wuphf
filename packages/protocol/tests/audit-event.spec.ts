@@ -2,13 +2,13 @@ import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import {
   type AuditEventRecord,
-  type AuditSeqNo,
   computeAuditEventHash,
   computeEventHash,
   GENESIS_PREV_HASH,
   serializeAuditEventRecordForHash,
   verifyChain,
 } from "../src/audit-event.ts";
+import { type EventLsn, lsnFromV1Number, parseLsn } from "../src/event-lsn.ts";
 import type { Sha256Hex } from "../src/sha256.ts";
 
 function chainOfLength(n: number): AuditEventRecord[] {
@@ -16,7 +16,7 @@ function chainOfLength(n: number): AuditEventRecord[] {
   let prev: Sha256Hex = GENESIS_PREV_HASH;
   for (let i = 0; i < n; i++) {
     const partial: AuditEventRecord = {
-      seqNo: i as AuditSeqNo,
+      seqNo: lsnFromV1Number(i),
       timestamp: new Date(2026, 4, 8, 0, 0, i),
       prevHash: prev,
       eventHash: GENESIS_PREV_HASH, // placeholder
@@ -33,6 +33,10 @@ function chainOfLength(n: number): AuditEventRecord[] {
   return out;
 }
 
+function localLsn(lsn: EventLsn): number {
+  return parseLsn(lsn).localLsn;
+}
+
 describe("audit-event chain verification", () => {
   it("verifies an empty chain (no last seq, just empty: true)", () => {
     const result = verifyChain([]);
@@ -47,7 +51,7 @@ describe("audit-event chain verification", () => {
     const result = verifyChain(chain);
     expect(result.ok).toBe(true);
     if (result.ok && !result.empty) {
-      expect(result.lastSeqNo).toBe(0);
+      expect(localLsn(result.lastSeqNo)).toBe(0);
     }
   });
 
@@ -56,7 +60,7 @@ describe("audit-event chain verification", () => {
     const result = verifyChain(chain);
     expect(result.ok).toBe(true);
     if (result.ok && !result.empty) {
-      expect(result.lastSeqNo).toBe(99);
+      expect(localLsn(result.lastSeqNo)).toBe(99);
     }
   });
 
@@ -66,7 +70,7 @@ describe("audit-event chain verification", () => {
     const result = verifyChain(chain);
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.brokenAtSeqNo).toBe(2);
+      expect(localLsn(result.brokenAtSeqNo)).toBe(2);
       expect(result.reason).toMatch(/event_hash mismatch/);
     }
   });
@@ -77,7 +81,7 @@ describe("audit-event chain verification", () => {
     const result = verifyChain(chain);
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.brokenAtSeqNo).toBe(3);
+      expect(localLsn(result.brokenAtSeqNo)).toBe(3);
       expect(result.reason).toMatch(/prev_hash mismatch/);
     }
   });
@@ -88,7 +92,7 @@ describe("audit-event chain verification", () => {
     const result = verifyChain(chain);
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.brokenAtSeqNo).toBe(3);
+      expect(localLsn(result.brokenAtSeqNo)).toBe(3);
       expect(result.reason).toMatch(/seq_no gap/);
     }
   });
@@ -139,7 +143,7 @@ describe("audit-event chain verification", () => {
           };
           const result = verifyChain(chain);
           if (result.ok) return false;
-          return (result.brokenAtSeqNo as number) <= k;
+          return localLsn(result.brokenAtSeqNo) <= k;
         },
       ),
       { numRuns: 200 },
@@ -156,9 +160,9 @@ describe("audit-event chain verification", () => {
       );
     });
 
-    it("seqNo=0 record produces a stable canonical serialization", () => {
+    it("seqNo=v1:0 record produces a stable canonical serialization", () => {
       const record: AuditEventRecord = {
-        seqNo: 0 as AuditSeqNo,
+        seqNo: lsnFromV1Number(0),
         timestamp: new Date("2026-05-08T00:00:00.000Z"),
         prevHash: GENESIS_PREV_HASH,
         eventHash: GENESIS_PREV_HASH,
@@ -168,11 +172,13 @@ describe("audit-event chain verification", () => {
         },
       };
       const bytes = serializeAuditEventRecordForHash(record);
-      // Expected canonical JSON shape: keys are JCS-sorted (alphabetical).
+      // EventLsn is wire-encoded as a JSON string ("v1:0"), not a number.
+      // This commits the multi-instance extension path (v2: "v2:<id>:<n>")
+      // without a future hash-chain break.
       const expected =
         '{"payload":{"bodyB64":"Ym9vdA==","kind":"boot_marker","receiptId":null},' +
         `"prevHash":"${GENESIS_PREV_HASH}",` +
-        '"seqNo":0,' +
+        '"seqNo":"v1:0",' +
         '"timestamp":"2026-05-08T00:00:00.000Z"}';
       expect(new TextDecoder().decode(bytes)).toBe(expected);
     });
