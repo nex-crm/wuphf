@@ -237,6 +237,23 @@ delegated. The prompt MUST:
 7. Pick a profile sandbox that matches the task: `-p auto -s workspace-write`
    for editing tasks; `-p auto -s read-only` for review-only work.
 
+### 16. ReceiptSnapshot is a versioned discriminated union
+
+`ReceiptSnapshot = ReceiptSnapshotV1 | ReceiptSnapshotV2`. Both versions are
+authoritative wire contracts and stay in the codebase forever. The validator
+and codec MUST:
+
+- Reject `threadId` on V1 (path `/threadId`).
+- Allow optional `threadId` on V2 (FK enforced elsewhere).
+- Round-trip both versions through canonical-JSON without dropping fields.
+- Bump `schemaVersion` only via a coordinated cross-implementation release per
+  decision 7 (shared `nex-receipt.schema.json` ships simultaneously to Nex
+  Cloud, Nex CLI, Nex MCP).
+
+Adding a new schemaVersion is NOT a one-line literal bump. The serializer,
+deserializer, validator, AND every consumer that pattern-matches on
+`schemaVersion` must add a branch in the same change.
+
 ---
 
 ## Working rules for AI agents

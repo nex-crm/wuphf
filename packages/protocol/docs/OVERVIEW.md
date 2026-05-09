@@ -36,6 +36,7 @@ flowchart LR
     rvalidator[receipt-validator]
     receipt[receipt]
     audit[audit-event]
+    thread[thread]
   end
   subgraph T["top-level envelopes"]
     ipc[ipc]
@@ -65,10 +66,16 @@ flowchart LR
   receipt --> rvalidator
   receipt --> sanitized
   receipt --> sha256
+  thread --> budgets
+  thread --> jcs
+  thread --> receipt
+  thread --> utils
+  thread --> sha256
   audit --> budgets
   audit --> jcs
   audit --> lsn
   audit --> receipt
+  audit --> thread
   audit --> utils
   audit --> sha256
   ipc --> brand
@@ -85,11 +92,13 @@ flowchart LR
   index --> ipc
   index --> receipt
   index --> sanitized
+  index --> thread
 ```
 
 Detailed docs: [moat primitives](modules/moat-primitives.md),
 [budgets](modules/budgets.md), [receipt](modules/receipt.md),
-[audit-event](modules/audit-event.md), and [ipc](modules/ipc.md).
+[audit-event](modules/audit-event.md), [ipc](modules/ipc.md), and
+[thread](modules/thread.md).
 
 ## 3. The moat composition
 
@@ -102,6 +111,7 @@ sequenceDiagram
   participant FrozenArgs
   participant JCS as canonical-json
   participant Sanitized as sanitized-string
+  participant Thread as thread validator
   participant Audit as audit-chain
   Client->>IPC: ApprovalSubmitRequest
   IPC->>IPC: reject bad host, keys, brands, token lifetime
@@ -115,6 +125,9 @@ sequenceDiagram
   Validator->>Sanitized: re-derive renderable text
   Sanitized-->>Validator: reject controls, bidi, collisions
   Validator->>Validator: bind receiptId, writeId, frozenArgsHash
+  Validator->>Thread: optional V2 threadId and receipt index helpers
+  Thread->>JCS: re-derive spec contentHash from canonical content
+  Thread-->>Validator: reject bad spec hash, status fold, or FK helper input
   Validator->>Audit: serialize and verify event record
   Audit->>JCS: canonical hash projection
   Audit-->>Client: first rejection or typed evidence
@@ -150,10 +163,14 @@ sequenceDiagram
   `sha256(asciiLowerHex(prevHash) || bytes)`. Golden vector
   `e27134d1...6101bb` and the Go verifier keep portability; changing JCS,
   `EventLsn`, base64, genesis, or prev-hash mixing breaks it.
-- Receipt JSON shape: schema version `1`, canonical output from
-  `receiptToJson`, and strict hostile input through `receiptFromJson`. Unknown
-  keys, budget order, date encoding, and `FrozenArgs` envelopes are portable
-  constraints.
+- Receipt JSON shape: schema versions `1 | 2`, canonical output from
+  `receiptToJson`, and strict hostile input through `receiptFromJson`. V1
+  rejects `threadId`; V2 accepts optional `threadId`. Unknown keys, budget
+  order, date encoding, and `FrozenArgs` envelopes are portable constraints.
+- Thread JSON shape: snake_case codecs for `Thread`, `ThreadSpecRevision`, and
+  `ThreadExternalRefs`; spec content hashes are re-derived as
+  `sha256(canonical(content))`; status folds use audit order, not wall-clock
+  time.
 - Approval token signed envelope: `{ claims, algorithm: "ed25519",
   signerKeyId, signature }`; signatures cover `canonicalJSON(claims)`. Changing
   claim keys, date rules, or token lifetime changes what brokers sign.
@@ -168,6 +185,7 @@ graph TB
   attacker[attacker crafts JSON, tokens, hosts, audit records]
   ipc[IPC boundary: loopback gates and approval shape]
   receipt[receipt boundary: bytes, keys, brands, cross-fields]
+  thread[thread boundary: spec hash, status fold, receipt index]
   primitives[moat primitives: JCS, frozen args, sanitized text, LSN]
   audit[audit boundary: seq, prevHash, eventHash, body budget]
   broker[broker-only state: signatures, signer trust, replay, policy]
@@ -175,11 +193,14 @@ graph TB
   portable[portable verifier and golden vectors]
   attacker --> ipc
   attacker --> receipt
+  attacker --> thread
   attacker --> audit
   ipc --> reject
   receipt --> primitives
+  thread --> primitives
   primitives --> reject
   receipt --> broker
+  thread --> broker
   audit --> primitives
   audit --> portable
   broker --> reject
@@ -187,7 +208,7 @@ graph TB
 
 ## 7. Hard rules quick reference
 
-1. Strict unknown-key rejection: [receipt](modules/receipt.md), [ipc](modules/ipc.md), [audit-event](modules/audit-event.md).
+1. Strict unknown-key rejection: [receipt](modules/receipt.md), [ipc](modules/ipc.md), [audit-event](modules/audit-event.md), [thread](modules/thread.md).
 2. Wire changes need golden vectors: [audit-event](modules/audit-event.md), [moat primitives](modules/moat-primitives.md).
 3. README hash formula must match code: [audit-event](modules/audit-event.md).
 4. Validators re-derive, not `instanceof`: [moat primitives](modules/moat-primitives.md), [receipt](modules/receipt.md).
@@ -197,18 +218,19 @@ graph TB
 8. `ExternalWrite` is discriminated: [receipt](modules/receipt.md).
 9. No `any`, ignores, or `ts-ignore`: [moat primitives](modules/moat-primitives.md), [receipt](modules/receipt.md), [ipc](modules/ipc.md), [audit-event](modules/audit-event.md), [budgets](modules/budgets.md).
 10. Bounded operations are required: [budgets](modules/budgets.md).
-11. Public API changes only through `index.ts`: [moat primitives](modules/moat-primitives.md), [receipt](modules/receipt.md), [ipc](modules/ipc.md), [audit-event](modules/audit-event.md), [budgets](modules/budgets.md).
+11. Public API changes only through `index.ts`: [moat primitives](modules/moat-primitives.md), [receipt](modules/receipt.md), [ipc](modules/ipc.md), [audit-event](modules/audit-event.md), [budgets](modules/budgets.md), [thread](modules/thread.md).
 12. Runtime TS surface is camelCase: [ipc](modules/ipc.md), [receipt](modules/receipt.md).
 13. Dates mark time only: [receipt](modules/receipt.md), [audit-event](modules/audit-event.md).
 14. Coverage ratchets upward: every module's tests, especially [receipt](modules/receipt.md) and [audit-event](modules/audit-event.md), must keep the gate green.
-15. Delegated agents must carry these rules: dispatch prompts point to the owning [moat](modules/moat-primitives.md), [receipt](modules/receipt.md), [ipc](modules/ipc.md), [audit](modules/audit-event.md), or [budget](modules/budgets.md) docs.
+15. Delegated agents must carry these rules: dispatch prompts point to the owning [moat](modules/moat-primitives.md), [receipt](modules/receipt.md), [ipc](modules/ipc.md), [audit](modules/audit-event.md), [thread](modules/thread.md), or [budget](modules/budgets.md) docs.
+16. ReceiptSnapshot is a V1/V2 discriminated union: V1 rejects `threadId`, V2 allows optional `threadId`, and serializers/deserializers are version-aware.
 
 ## 8. Test taxonomy
 
 - Vitest specs in `packages/protocol/tests/*.spec.ts` catch fixed cases,
   validator paths, codecs, brands, loopback guards, and audit-chain behavior.
 - Fast-check property tests cover adversarial `FrozenArgs`, sanitizer, and
-  receipt round-trip invariants.
+  receipt/thread round-trip invariants.
 - `scripts/demo.ts` imports through `src/index.ts` and smoke-tests public API.
 - `testdata/verifier-reference.go` recomputes golden audit vectors in Go.
 - `scripts/check-invariants.sh` blocks forbidden date/order and file-size drift.
@@ -220,6 +242,9 @@ graph TB
 - Audit-event kind: add `AUDIT_EVENT_KIND_VALUES`, payload metadata/type
   handling, serializer/validator coverage, demo if public, golden vectors, Go
   verifier update, and README migration note if bytes change.
+- Thread protocol shape: add brands, budgets, snake_case codecs, validators,
+  receipt V1/V2 coverage, thread audit-event vectors, stream invalidation
+  kinds, demo scenarios, and module docs in one slice.
 - `ProviderKind`: add one tuple value, keep the brand closed, update exhaustive
   switches, validator/codec tests, and docs.
 - IPC envelope: add type, codec/validator, unknown-key tuple, demo case,
@@ -263,5 +288,6 @@ LOW:
 | [moat primitives](modules/moat-primitives.md) | Direct `sha256` cases; direct `canonicalJSON` negatives; `FrozenArgs` cycles/depth; sanitizer sparse arrays, side props, cycles, and invalid policy. |
 | [audit-event](modules/audit-event.md) | Non-null `receiptId` and non-UTF8 vectors; empty incremental batch after state; corrupt resumed state; Merkle root invalid fields; non-`Uint8Array` body rejection. |
 | [ipc](modules/ipc.md) | Bootstrap non-loopback/malformed URL; early approval request failures; claim-field mutation table; high/critical WebAuthn requirement; exact token lifetime cap; all response variants; SSE/WS unknowns once validators exist; loopback bypass edge forms. |
-| [receipt](modules/receipt.md) | `schemaVersion: 2`; `approvedAt === issuedAt`; status/evidence contradictions; all provider values plus unknown provider; ULID-shaped boundary decision; oversized sanitized-string pointer context. |
+| [receipt](modules/receipt.md) | Future schema rejection beyond V2; `approvedAt === issuedAt`; status/evidence contradictions; all provider values plus unknown provider; ULID-shaped boundary decision; oversized sanitized-string pointer context. |
+| [thread](modules/thread.md) | No open gaps in the initial protocol-slice coverage table. |
 | [budgets](modules/budgets.md) | `validateAuditEventBodyBudget` exact cap/cap+1; approval-token lifetime negative and non-finite edges. |

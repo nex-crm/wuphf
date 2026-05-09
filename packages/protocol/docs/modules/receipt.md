@@ -17,7 +17,7 @@ Types:
 | `SourceRead`, `ToolCall`, `ApprovalEvent`, `FileChange`, `CommitRef`, `MemoryWriteRef` | `src/receipt-types.ts:48-101` | Evidence subrecords for reads, tool calls, approvals, files, commits, and memory references. |
 | `ApprovalClaims`, `SignedApprovalToken`, `BrokerTokenVerdict` | `src/receipt-types.ts:103-125` | Signed approval envelope plus broker verification projection. |
 | `WriteFailureMetadata`, `ExternalWrite*`, `ExternalWrite` | `src/receipt-types.ts:33-38`, `:133-184` | Discriminated external-write union over `result`, with per-state diff/nullability rules. |
-| `ReceiptSnapshot`, `ReceiptValidationError`, `ReceiptValidationResult` | `src/receipt-types.ts:186-231` | Top-level receipt and non-throwing validator result. |
+| `ReceiptCore`, `ReceiptSnapshotV1`, `ReceiptSnapshotV2`, `ReceiptSnapshot`, `ReceiptValidationError`, `ReceiptValidationResult` | `src/receipt-types.ts:186-240` | Top-level receipt union and non-throwing validator result. V1 rejects `threadId`; V2 accepts optional `threadId`. |
 
 Constants:
 
@@ -39,7 +39,7 @@ Functions:
 
 ## 3. Behavior contract
 
-1. The only current wire schema version is `schemaVersion: 1`. `receiptFromJson` and `validateReceipt` MUST reject any other value, including future `2`, until a migration plan and compatibility codec ship in the same change.
+1. The current wire schema versions are `schemaVersion: 1 | 2`. `receiptFromJson` and `validateReceipt` MUST reject any other value. V1 rejects `threadId`; V2 accepts optional `threadId` for thread-linked receipts.
 2. Use `receiptFromJson` for untrusted wire JSON. It MUST enforce serialized byte budget, parse JSON, reject over-budget arrays, run parsed plain-data budgets, reject unknown keys at every object boundary, decode each field, rehydrate `FrozenArgs`, then run semantic validation with the recomputed-frozen set.
 3. Use `validateReceipt` for in-process runtime objects. It MUST run `validateReceiptBudget` before field walking, then validate brands, dates, literals, arrays, `FrozenArgs`, `SanitizedString`, and cross-field invariants. It is not a raw JSON decoder.
 4. `receiptToJson` MUST run typed budgets, semantic validation, canonical JSON serialization, and final serialized byte budget. It MUST omit only `undefined`, never unknown data.
@@ -160,7 +160,8 @@ stateDiagram-v2
 
 | Input | Expected error message | Why this matters |
 |---|---|---|
-| `schemaVersion: 2` | `/schemaVersion: must be 1` | Prevents silent v2 downgrade without migration. |
+| `schemaVersion: 99` | `/schemaVersion: must be 1 or 2` | Prevents silent future-schema downgrade without migration. |
+| V1 receipt with `threadId` | `/threadId: must be absent for schemaVersion 1` | Prevents hidden V2 data from being accepted as V1. |
 | Unknown top-level or nested key | `<pointer>: is not allowed` | Blocks shadow data and literal drift. |
 | `FrozenArgs` envelope with extra sibling | `<pointer>/evilShadow: is not allowed` | Prevents unhashed data smuggling. |
 | Forged `FrozenArgs` instance | `<pointer>/hash: does not match canonicalJson` | Re-derives instead of trusting `instanceof`. |
@@ -187,7 +188,7 @@ Callers constructing runtime receipts directly must use brand constructors, `Fro
 
 | # | Spec section | What's untested | Why it matters | Suggested test |
 |---|---|---|---|---|
-| 1 | 3.1 | `receiptFromJson` and `validateReceipt` rejection for `schemaVersion: 2`. | Locks the v1-only migration boundary. | Mutate serialized fixture to `2` and assert `/schemaVersion: must be 1`. |
+| 1 | 3.1 | Future schema rejection beyond V2. | Locks the versioned migration boundary. | Mutate serialized fixture to `99` and assert `/schemaVersion: must be 1 or 2`. |
 | 2 | 3.8 | `approvedAt === issuedAt`. | Equality currently passes but strict authorization sequencing should fail. | Add a validator test at exact equality. |
 | 3 | 3.10 | Status/evidence contradictions such as `ok` plus rejected approval, `ok` plus failed tool call, or `approval_pending` with terminal write evidence. | Prevents receipts whose summary contradicts their evidence. | Table-test each `ReceiptStatus` against minimal required/forbidden evidence. |
 | 4 | 3.6 | All `PROVIDER_KIND_VALUES` accepted and unknown providers rejected through validator and codec. | Closed enums need runtime and type coverage when values change. | Iterate the tuple and add one unsupported value. |
