@@ -355,6 +355,24 @@ func (b *Broker) transitionLifecycleLocked(taskID string, newState LifecycleStat
 		// running-state durability. The hook is a no-op when no
 		// packet has been seeded for the task.
 		b.onLifecycleTransitionLocked(taskID, prev, newState)
+		// Lane D wire (#9): when a task enters review, auto-resolve
+		// the reviewer set from the watching configuration and stamp
+		// it onto the task. Skip when the task already carries a
+		// manually-assigned reviewer list (caller may have invoked
+		// AssignReviewers explicitly before transitioning) so we do
+		// not stomp explicit human/owner overrides.
+		if newState == LifecycleStateReview && prev != LifecycleStateReview {
+			if len(task.Reviewers) == 0 {
+				slugs, resolveErr := b.resolveReviewersLocked(taskID)
+				if resolveErr != nil {
+					log.Printf("broker: lifecycle transition %q -> review: resolve reviewers failed: %v", taskID, resolveErr)
+				} else if len(slugs) > 0 {
+					if assignErr := b.assignReviewersLocked(taskID, slugs); assignErr != nil {
+						log.Printf("broker: lifecycle transition %q -> review: assign reviewers failed: %v", taskID, assignErr)
+					}
+				}
+			}
+		}
 		return task, nil
 	}
 	return nil, fmt.Errorf("transition lifecycle: task %q not found", taskID)
