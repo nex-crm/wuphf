@@ -1,7 +1,8 @@
 import fc from "fast-check";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   MAX_FROZEN_ARGS_BYTES,
+  MAX_RECEIPT_BYTES,
   MAX_SANITIZED_STRING_BYTES,
   MAX_TOOL_CALLS_PER_RECEIPT,
 } from "../src/budgets.ts";
@@ -15,12 +16,33 @@ import {
   asTaskId,
   asToolCallId,
   asWriteId,
+  type ExternalWrite,
   isReceiptSnapshot,
+  PROVIDER_KIND_VALUES,
   type ReceiptSnapshot,
+  type ReceiptStatus,
   receiptFromJson,
   receiptToJson,
   validateReceipt,
+  type WriteResult,
 } from "../src/receipt.ts";
+import { WRITE_RESULT_VALUES } from "../src/receipt-literals.ts";
+import { assertKnownKeys } from "../src/receipt-utils.ts";
+import {
+  APPROVAL_CLAIMS_KEYS,
+  APPROVAL_EVENT_KEYS,
+  BROKER_TOKEN_VERDICT_KEYS,
+  COMMIT_REF_KEYS,
+  EXTERNAL_WRITE_KEYS,
+  FILE_CHANGE_KEYS,
+  FROZEN_ARGS_KEYS,
+  MEMORY_WRITE_KEYS,
+  RECEIPT_KEYS,
+  SIGNED_APPROVAL_TOKEN_KEYS,
+  SOURCE_READ_KEYS,
+  TOOL_CALL_KEYS,
+  WRITE_FAILURE_METADATA_KEYS,
+} from "../src/receipt-validator.ts";
 import { SanitizedString } from "../src/sanitized-string.ts";
 import { sha256Hex } from "../src/sha256.ts";
 
@@ -55,6 +77,22 @@ const REQUIRED_TOP_LEVEL_FIELDS = [
   "schemaVersion",
 ] as const satisfies readonly (keyof ReceiptSnapshot)[];
 
+const RECORD_BOUNDARIES = [
+  { path: "/receipt", keys: RECEIPT_KEYS },
+  { path: "/sourceReads/0", keys: SOURCE_READ_KEYS },
+  { path: "/toolCalls/0", keys: TOOL_CALL_KEYS },
+  { path: "/approvals/0", keys: APPROVAL_EVENT_KEYS },
+  { path: "/approvals/0/tokenVerdict", keys: BROKER_TOKEN_VERDICT_KEYS },
+  { path: "/filesChanged/0", keys: FILE_CHANGE_KEYS },
+  { path: "/commits/0", keys: COMMIT_REF_KEYS },
+  { path: "/notebookWrites/0", keys: MEMORY_WRITE_KEYS },
+  { path: "/toolCalls/0/inputs", keys: FROZEN_ARGS_KEYS },
+  { path: "/writes/0/failureMetadata", keys: WRITE_FAILURE_METADATA_KEYS },
+  { path: "/writes/0", keys: EXTERNAL_WRITE_KEYS },
+  { path: "/approvals/0/signedToken/claims", keys: APPROVAL_CLAIMS_KEYS },
+  { path: "/approvals/0/signedToken", keys: SIGNED_APPROVAL_TOKEN_KEYS },
+] as const satisfies readonly { path: string; keys: ReadonlySet<string> }[];
+
 describe("receipt schema", () => {
   it("round-trips a valid receipt through canonical JSON", () => {
     const receipt = validReceiptFixture();
@@ -67,6 +105,46 @@ describe("receipt schema", () => {
 
   it("serializes byte-identical canonical JSON for shuffled field insertion order", () => {
     expect(receiptToJson(validReceiptFixture())).toBe(receiptToJson(shuffledReceiptFixture()));
+  });
+
+  it("keeps receiptToJson(receiptFromJson(jcsBytes(snapshot))) byte-stable for valid snapshots", () => {
+    fc.assert(
+      fc.property(validReceiptSnapshotArbitrary(), (snapshot) => {
+        const jcsBytes = receiptToJson(snapshot);
+
+        expect(receiptToJson(receiptFromJson(jcsBytes))).toBe(jcsBytes);
+      }),
+      { numRuns: 50 },
+    );
+  });
+
+  it("accepts schemaVersion 1 as the only v1 wire schema until a migration codec ships", () => {
+    const receipt = validReceiptFixture();
+
+    expect(validateReceipt(receipt)).toEqual({ ok: true });
+    expect(receiptFromJson(receiptToJson(receipt))).toEqual(receipt);
+  });
+
+  it("rejects schemaVersion 0 because v1 has no backward migration codec", () => {
+    const runtimeReceipt: Record<string, unknown> = { ...validReceiptFixture(), schemaVersion: 0 };
+    expectReceiptValidationError(runtimeReceipt, "/schemaVersion", /must be 1/);
+
+    const wireReceipt = receiptJsonFixture();
+    wireReceipt.schemaVersion = 0;
+    expect(() => receiptFromJson(JSON.stringify(wireReceipt))).toThrow(
+      /\/schemaVersion: must be 1/,
+    );
+  });
+
+  it("rejects schemaVersion 2 because future schemas require a migration codec first", () => {
+    const runtimeReceipt: Record<string, unknown> = { ...validReceiptFixture(), schemaVersion: 2 };
+    expectReceiptValidationError(runtimeReceipt, "/schemaVersion", /must be 1/);
+
+    const wireReceipt = receiptJsonFixture();
+    wireReceipt.schemaVersion = 2;
+    expect(() => receiptFromJson(JSON.stringify(wireReceipt))).toThrow(
+      /\/schemaVersion: must be 1/,
+    );
   });
 
   it("rejects missing top-level required fields", () => {
@@ -120,6 +198,32 @@ describe("receipt schema", () => {
     }
   });
 
+  it("accepts every ProviderKind tuple value through validator and codec", () => {
+    for (const providerKind of PROVIDER_KIND_VALUES) {
+      const receipt: ReceiptSnapshot = {
+        ...validReceiptFixture(),
+        providerKind: asProviderKind(providerKind),
+      };
+
+      expect(validateReceipt(receipt)).toEqual({ ok: true });
+      expect(receiptFromJson(receiptToJson(receipt)).providerKind).toBe(providerKind);
+    }
+  });
+
+  it("rejects unsupported ProviderKind strings at validator and codec boundaries", () => {
+    const runtimeReceipt: Record<string, unknown> = {
+      ...validReceiptFixture(),
+      providerKind: "mistral",
+    };
+    expectReceiptValidationError(runtimeReceipt, "/providerKind", /supported ProviderKind/);
+
+    const wireReceipt = receiptJsonFixture();
+    wireReceipt.providerKind = "mistral";
+    expect(() => receiptFromJson(JSON.stringify(wireReceipt))).toThrow(
+      /\/providerKind: not a supported ProviderKind/,
+    );
+  });
+
   it("enforces receipt budgets before walking oversized arrays", () => {
     const fixture = validReceiptFixture();
     const firstToolCall = nonNull(fixture.toolCalls[0]);
@@ -149,23 +253,165 @@ describe("receipt schema", () => {
       canonicalJson,
       hash: sha256Hex(canonicalJson),
     };
+    const parseSpy = vi.spyOn(JSON, "parse");
 
-    expect(() => receiptFromJson(JSON.stringify(receipt))).toThrow(
-      /receipt toolCalls\[0\]\.inputs: FrozenArgs canonicalJson bytes exceeds budget: 1048577 > 1048576/,
-    );
+    try {
+      expect(() => receiptFromJson(JSON.stringify(receipt))).toThrow(
+        /receipt toolCalls\[0\]\.inputs: FrozenArgs canonicalJson bytes exceeds budget: 1048577 > 1048576/,
+      );
+      expect(parseSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      parseSpy.mockRestore();
+    }
   });
 
   it("rejects oversized final messages before sanitizing them", () => {
     const receipt = receiptJsonFixture();
     receipt.finalMessage = "x".repeat(MAX_SANITIZED_STRING_BYTES + 1);
+    const fromUnknownSpy = vi.spyOn(SanitizedString, "fromUnknown");
+
+    try {
+      expect(() => receiptFromJson(JSON.stringify(receipt))).toThrow(
+        new RegExp(
+          `/finalMessage: value exceeds MAX_SANITIZED_STRING_BYTES \\(got ${
+            MAX_SANITIZED_STRING_BYTES + 1
+          }, max ${MAX_SANITIZED_STRING_BYTES}\\)`,
+        ),
+      );
+      expect(fromUnknownSpy).not.toHaveBeenCalled();
+    } finally {
+      fromUnknownSpy.mockRestore();
+    }
+  });
+
+  it("rejects oversized receipt collections before walking per-field decoders", () => {
+    const receipt = receiptJsonFixture();
+    const firstToolCall = nonNull(receipt.toolCalls[0]);
+    receipt.id = "not-a-ulid";
+    receipt.toolCalls = Array.from({ length: MAX_TOOL_CALLS_PER_RECEIPT + 1 }, () => firstToolCall);
 
     expect(() => receiptFromJson(JSON.stringify(receipt))).toThrow(
-      new RegExp(
-        `sanitizedStringFromJson: value exceeds MAX_SANITIZED_STRING_BYTES \\(got ${
-          MAX_SANITIZED_STRING_BYTES + 1
-        }, max ${MAX_SANITIZED_STRING_BYTES}\\)`,
-      ),
+      /receipt toolCalls length exceeds budget: 1025 > 1024/,
     );
+  });
+
+  it("receiptFromJson rejects oversized raw bytes before JSON.parse", () => {
+    const parseSpy = vi.spyOn(JSON, "parse");
+
+    try {
+      expect(() => receiptFromJson(" ".repeat(MAX_RECEIPT_BYTES + 1))).toThrow(
+        /receipt serialized bytes exceeds budget/,
+      );
+      expect(parseSpy).not.toHaveBeenCalled();
+    } finally {
+      parseSpy.mockRestore();
+    }
+  });
+
+  it("receiptToJson rejects typed budget and semantic validation failures", () => {
+    const fixture = validReceiptFixture();
+    const firstToolCall = nonNull(fixture.toolCalls[0]);
+    const overBudget: ReceiptSnapshot = {
+      ...fixture,
+      toolCalls: Array.from({ length: MAX_TOOL_CALLS_PER_RECEIPT + 1 }, () => firstToolCall),
+    };
+    expect(() => receiptToJson(overBudget)).toThrow(/receipt toolCalls length exceeds budget/);
+
+    const invalidStatus = { ...fixture, status: "done" } as unknown as ReceiptSnapshot;
+    expect(() => receiptToJson(invalidStatus)).toThrow(/\/status: must be a valid receipt status/);
+  });
+
+  it("receiptFromJson rejects semantic validation failures after codec decoding", () => {
+    const receipt = receiptJsonFixture();
+    setWireField(receipt, "finishedAt", "2026-05-08T17:59:59.999Z");
+
+    expect(() => receiptFromJson(JSON.stringify(receipt))).toThrow(
+      /\/finishedAt: must be after or equal to startedAt/,
+    );
+  });
+
+  it("receiptFromJson rejects malformed hostile wire field boundaries", () => {
+    const cases: readonly {
+      readonly name: string;
+      readonly mutate: (receipt: ReturnType<typeof receiptJsonFixture>) => void;
+      readonly message: RegExp;
+    }[] = [
+      {
+        name: "sanitized string type",
+        mutate: (receipt) => {
+          receipt.finalMessage = 1;
+        },
+        message: /\/finalMessage: must be a string/,
+      },
+      {
+        name: "unsanitized string value",
+        mutate: (receipt) => {
+          receipt.finalMessage = "evil‮override";
+        },
+        message: /\/finalMessage: must already be sanitized/,
+      },
+      {
+        name: "signed token base64",
+        mutate: (receipt) => {
+          const approval = approvalWireAt(receipt, 0);
+          setWireField(approvalWireSignedToken(approval), "signature", "");
+        },
+        message: /\/approvals\/0\/signedToken\/signature: must be a non-empty base64 string/,
+      },
+      {
+        name: "high-risk assertion",
+        mutate: (receipt) => {
+          const approval = approvalWireAt(receipt, 0);
+          setWireField(approvalWireClaims(approval), "webauthnAssertion", "");
+        },
+        message:
+          /\/approvals\/0\/signedToken\/claims\/webauthnAssertion: must be a non-empty string/,
+      },
+      {
+        name: "write result literal",
+        mutate: (receipt) => {
+          setWireField(writeWireAt(receipt, 0), "result", "future");
+        },
+        message: /\/writes\/0\/result: must be one of applied, rejected, partial, rollback/,
+      },
+      {
+        name: "array shape",
+        mutate: (receipt) => {
+          setWireField(receipt, "toolCalls", "not-an-array");
+        },
+        message: /\/toolCalls: must be an array/,
+      },
+      {
+        name: "finite numeric cost",
+        mutate: (receipt) => {
+          setWireField(receipt, "costUsd", "free");
+        },
+        message: /\/costUsd: must be a non-negative finite number/,
+      },
+      {
+        name: "optional sha256",
+        mutate: (receipt) => {
+          setWireField(fileChangeWireAt(receipt, 0), "beforeHash", "not-a-sha256");
+        },
+        message: /\/filesChanged\/0\/beforeHash: not a sha256 hex digest/,
+      },
+      {
+        name: "optional string",
+        mutate: (receipt) => {
+          setWireField(sourceReadWireAt(receipt, 0), "rawRef", 1);
+        },
+        message: /\/sourceReads\/0\/rawRef: must be a string/,
+      },
+    ];
+
+    for (const testCase of cases) {
+      const receipt = receiptJsonFixture();
+      testCase.mutate(receipt);
+
+      expect(() => receiptFromJson(JSON.stringify(receipt)), testCase.name).toThrow(
+        testCase.message,
+      );
+    }
   });
 
   it("never throws for unknown fuzz payloads", () => {
@@ -185,6 +431,23 @@ describe("receipt schema", () => {
   it("brands uppercase ULID receipt ids", () => {
     expect(() => asReceiptId("not-a-ulid")).toThrow();
     expect(asReceiptId(RECEIPT_ID)).toBe(RECEIPT_ID);
+  });
+
+  it("rejects non-uppercase-ULID-shaped ReceiptId and TaskId boundary values", () => {
+    const invalidIds = [
+      RECEIPT_ID.toLowerCase(),
+      RECEIPT_ID.slice(0, 25),
+      `${RECEIPT_ID}X`,
+      `${RECEIPT_ID.slice(0, 25)}_`,
+    ];
+
+    for (const invalidId of invalidIds) {
+      expect(() => asReceiptId(invalidId)).toThrow();
+      expect(() => asTaskId(invalidId)).toThrow();
+    }
+
+    expect(asReceiptId(RECEIPT_ID)).toBe(RECEIPT_ID);
+    expect(asTaskId(TASK_ID)).toBe(TASK_ID);
   });
 
   it("rejects forged FrozenArgs (instanceof prototype with mismatched hash)", () => {
@@ -221,6 +484,64 @@ describe("receipt schema", () => {
       expect(
         result.errors.some((e) => e.path === "/finalMessage" && /sanitized/.test(e.message)),
       ).toBe(true);
+    }
+  });
+
+  it("rejects malformed runtime FrozenArgs and SanitizedString boundary values", () => {
+    const malformedFrozenArgs = Object.create(FrozenArgs.prototype) as FrozenArgs;
+    Object.assign(malformedFrozenArgs, { canonicalJson: 1, hash: sha256Hex("hash") });
+    const malformedFrozenArgsHash = Object.create(FrozenArgs.prototype) as FrozenArgs;
+    Object.assign(malformedFrozenArgsHash, { canonicalJson: "{}", hash: "not-a-sha256" });
+    const malformedSanitizedString = Object.create(SanitizedString.prototype) as SanitizedString;
+    Object.assign(malformedSanitizedString, { value: 1 });
+
+    const cases: readonly {
+      readonly path: string;
+      readonly input: ReceiptSnapshot | Record<string, unknown>;
+      readonly message: RegExp;
+    }[] = [
+      {
+        path: "/toolCalls/0/inputs",
+        input: {
+          ...validReceiptFixture(),
+          toolCalls: [{ ...nonNull(validReceiptFixture().toolCalls[0]), inputs: "not-frozen" }],
+        },
+        message: /must be FrozenArgs/,
+      },
+      {
+        path: "/toolCalls/0/inputs/canonicalJson",
+        input: {
+          ...validReceiptFixture(),
+          toolCalls: [
+            { ...nonNull(validReceiptFixture().toolCalls[0]), inputs: malformedFrozenArgs },
+          ],
+        },
+        message: /must be a string/,
+      },
+      {
+        path: "/toolCalls/0/inputs/hash",
+        input: {
+          ...validReceiptFixture(),
+          toolCalls: [
+            { ...nonNull(validReceiptFixture().toolCalls[0]), inputs: malformedFrozenArgsHash },
+          ],
+        },
+        message: /sha256 hex digest/,
+      },
+      {
+        path: "/finalMessage",
+        input: { ...validReceiptFixture(), finalMessage: "not-sanitized" },
+        message: /must be SanitizedString/,
+      },
+      {
+        path: "/finalMessage/value",
+        input: { ...validReceiptFixture(), finalMessage: malformedSanitizedString },
+        message: /must be a string/,
+      },
+    ];
+
+    for (const testCase of cases) {
+      expectReceiptValidationError(testCase.input, testCase.path, testCase.message);
     }
   });
 
@@ -272,6 +593,31 @@ describe("receipt schema", () => {
         ),
       ).toBe(true);
     }
+  });
+
+  it("rejects external write whose approval token is bound to a different receipt id", () => {
+    const fixture = validReceiptFixture();
+    const firstWrite = nonNull(fixture.writes[0]);
+    const approvalToken = nonNull(firstWrite.approvalToken);
+    const otherReceiptId = asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAY");
+    const tampered: ReceiptSnapshot = {
+      ...fixture,
+      writes: [
+        {
+          ...firstWrite,
+          approvalToken: {
+            ...approvalToken,
+            claims: { ...approvalToken.claims, receiptId: otherReceiptId },
+          },
+        },
+      ],
+    };
+
+    expectReceiptValidationError(
+      tampered,
+      "/writes/0/approvalToken/claims/receiptId",
+      /must match enclosing receipt id/,
+    );
   });
 
   it("rejects forged proposedDiff hash using the locally re-derived hash", () => {
@@ -395,6 +741,33 @@ describe("receipt schema", () => {
     }
   });
 
+  it("rejects empty webauthnAssertion when riskClass is critical", () => {
+    const fixture = validReceiptFixture();
+    const firstApproval = nonNull(fixture.approvals[0]);
+    const tampered: ReceiptSnapshot = {
+      ...fixture,
+      approvals: [
+        {
+          ...firstApproval,
+          signedToken: {
+            ...firstApproval.signedToken,
+            claims: {
+              ...firstApproval.signedToken.claims,
+              riskClass: "critical",
+              webauthnAssertion: "",
+            },
+          },
+        },
+      ],
+    };
+
+    expectReceiptValidationError(
+      tampered,
+      "/approvals/0/signedToken/claims/webauthnAssertion",
+      /non-empty.*high\/critical/,
+    );
+  });
+
   it("rejects approval claims that expire before they are issued", () => {
     const fixture = validReceiptFixture();
     const firstApproval = nonNull(fixture.approvals[0]);
@@ -424,6 +797,33 @@ describe("receipt schema", () => {
         },
       ],
     });
+  });
+
+  it("rejects approval claims that expire exactly when they are issued because expiry is strict-after", () => {
+    const fixture = validReceiptFixture();
+    const firstApproval = nonNull(fixture.approvals[0]);
+    const issuedAt = firstApproval.signedToken.claims.issuedAt;
+    const tampered: ReceiptSnapshot = {
+      ...fixture,
+      approvals: [
+        {
+          ...firstApproval,
+          signedToken: {
+            ...firstApproval.signedToken,
+            claims: {
+              ...firstApproval.signedToken.claims,
+              expiresAt: issuedAt,
+            },
+          },
+        },
+      ],
+    };
+
+    expectReceiptValidationError(
+      tampered,
+      "/approvals/0/signedToken/claims/expiresAt",
+      /must be after issuedAt/,
+    );
   });
 
   it("rejects tool calls that finish before they start", () => {
@@ -478,6 +878,23 @@ describe("receipt schema", () => {
       "/writes/0/approvedAt",
       /approvedAt=2026-05-08T18:00:59.000Z issuedAt=2026-05-08T18:01:00.000Z/,
     );
+  });
+
+  it("rejects external writes approved exactly when issued because approval is strict-after", () => {
+    const fixture = validReceiptFixture();
+    const firstWrite = nonNull(fixture.writes[0]);
+    const approvalToken = nonNull(firstWrite.approvalToken);
+    const tampered: ReceiptSnapshot = {
+      ...fixture,
+      writes: [
+        {
+          ...firstWrite,
+          approvedAt: approvalToken.claims.issuedAt,
+        },
+      ],
+    };
+
+    expectReceiptValidationError(tampered, "/writes/0/approvedAt", /must be after issuedAt/);
   });
 
   it("rejects unknown top-level keys", () => {
@@ -547,6 +964,127 @@ describe("receipt schema", () => {
     expect(() => receiptFromJson(tamperedJson)).toThrow(/evilShadow.*not allowed/);
   });
 
+  it("property: every receipt record allowlist accepts known keys and rejects unknown keys", () => {
+    for (const boundary of RECORD_BOUNDARIES) {
+      fc.assert(
+        fc.property(unknownKeyArbitrary(boundary.keys), (unknownKey) => {
+          const record = recordWithKnownKeys(boundary.keys);
+          expect(() => assertKnownKeys(record, boundary.path, boundary.keys)).not.toThrow();
+
+          Object.defineProperty(record, unknownKey, {
+            value: "shadow",
+            enumerable: true,
+            configurable: true,
+          });
+
+          expect(() => assertKnownKeys(record, boundary.path, boundary.keys)).toThrow(
+            /is not allowed/,
+          );
+        }),
+        { numRuns: 50 },
+      );
+    }
+  });
+
+  it("rejects non-object runtime values at every nested receipt record boundary", () => {
+    const cases: readonly {
+      readonly path: string;
+      readonly mutate: (receipt: Record<string, unknown>) => void;
+    }[] = [
+      {
+        path: "/sourceReads/0",
+        mutate: (receipt) => {
+          setWireField(receipt, "sourceReads", ["not-an-object"]);
+        },
+      },
+      {
+        path: "/toolCalls/0",
+        mutate: (receipt) => {
+          setWireField(receipt, "toolCalls", ["not-an-object"]);
+        },
+      },
+      {
+        path: "/approvals/0",
+        mutate: (receipt) => {
+          setWireField(receipt, "approvals", ["not-an-object"]);
+        },
+      },
+      {
+        path: "/approvals/0/tokenVerdict",
+        mutate: (receipt) => {
+          const firstApproval = nonNull(validReceiptFixture().approvals[0]);
+          setWireField(receipt, "approvals", [{ ...firstApproval, tokenVerdict: "not-an-object" }]);
+        },
+      },
+      {
+        path: "/approvals/0/signedToken",
+        mutate: (receipt) => {
+          const firstApproval = nonNull(validReceiptFixture().approvals[0]);
+          setWireField(receipt, "approvals", [{ ...firstApproval, signedToken: "not-an-object" }]);
+        },
+      },
+      {
+        path: "/approvals/0/signedToken/claims",
+        mutate: (receipt) => {
+          const firstApproval = nonNull(validReceiptFixture().approvals[0]);
+          setWireField(receipt, "approvals", [
+            {
+              ...firstApproval,
+              signedToken: { ...firstApproval.signedToken, claims: "not-an-object" },
+            },
+          ]);
+        },
+      },
+      {
+        path: "/filesChanged/0",
+        mutate: (receipt) => {
+          setWireField(receipt, "filesChanged", ["not-an-object"]);
+        },
+      },
+      {
+        path: "/commits/0",
+        mutate: (receipt) => {
+          setWireField(receipt, "commits", ["not-an-object"]);
+        },
+      },
+      {
+        path: "/notebookWrites/0",
+        mutate: (receipt) => {
+          setWireField(receipt, "notebookWrites", ["not-an-object"]);
+        },
+      },
+      {
+        path: "/wikiWrites/0",
+        mutate: (receipt) => {
+          setWireField(receipt, "wikiWrites", ["not-an-object"]);
+        },
+      },
+      {
+        path: "/writes/0",
+        mutate: (receipt) => {
+          setWireField(receipt, "writes", ["not-an-object"]);
+        },
+      },
+      {
+        path: "/writes/0/failureMetadata",
+        mutate: (receipt) => {
+          const firstWrite = nonNull(validReceiptFixture().writes[0]);
+          setWireField(receipt, "status", "error");
+          setWireField(receipt, "writes", [
+            { ...writeForResult(firstWrite, "partial"), failureMetadata: "not-an-object" },
+          ]);
+        },
+      },
+    ];
+
+    for (const testCase of cases) {
+      const receipt = { ...validReceiptFixture() } as unknown as Record<string, unknown>;
+      testCase.mutate(receipt);
+
+      expectReceiptValidationError(receipt, testCase.path, /must be an object/);
+    }
+  });
+
   it("receiptFromJson includes JSON pointer context for nested brand decoder failures", () => {
     interface FrozenArgsWire {
       hash: string;
@@ -592,6 +1130,43 @@ describe("receipt schema", () => {
     };
 
     expectReceiptValidationError(tampered, "/wikiWrites/0/store", /must be wiki/);
+  });
+
+  it("rejects ok receipts whose approval evidence is rejected", () => {
+    const fixture = validReceiptFixture();
+    const firstApproval = nonNull(fixture.approvals[0]);
+    const tampered: ReceiptSnapshot = {
+      ...fixture,
+      approvals: [{ ...firstApproval, decision: "reject" }],
+    };
+
+    expectReceiptValidationError(
+      tampered,
+      "/status",
+      /rejected or error when approvals include a rejection/,
+    );
+  });
+
+  it("rejects ok receipts whose tool-call evidence failed", () => {
+    const fixture = validReceiptFixture();
+    const firstToolCall = nonNull(fixture.toolCalls[0]);
+    const tampered: ReceiptSnapshot = {
+      ...fixture,
+      toolCalls: [{ ...firstToolCall, status: "error" }],
+    };
+
+    expectReceiptValidationError(tampered, "/status", /must not be ok.*tool call failed/);
+  });
+
+  it("rejects ok receipts whose write evidence did not fully apply", () => {
+    const fixture = validReceiptFixture();
+    const firstWrite = nonNull(fixture.writes[0]);
+    const tampered: ReceiptSnapshot = {
+      ...fixture,
+      writes: [writeForResult(firstWrite, "partial")],
+    };
+
+    expectReceiptValidationError(tampered, "/status", /must not be ok.*write did not apply/);
   });
 
   it("ExternalWrite: validator rejects result='applied' with null appliedDiff (per-state invariant)", () => {
@@ -646,6 +1221,21 @@ describe("receipt schema", () => {
     }
   });
 
+  it("WriteResult discriminated union variants construct and round-trip", () => {
+    for (const writeResult of WRITE_RESULT_VALUES) {
+      const receipt = validReceiptFixture();
+      const firstWrite = nonNull(receipt.writes[0]);
+      const snapshot: ReceiptSnapshot = {
+        ...receipt,
+        status: receiptStatusForWriteResult(writeResult),
+        writes: [writeForResult(firstWrite, writeResult)],
+      };
+
+      expect(validateReceipt(snapshot)).toEqual({ ok: true });
+      expect(receiptFromJson(receiptToJson(snapshot))).toEqual(snapshot);
+    }
+  });
+
   it("ExternalWrite: validator rejects result='rejected' with non-null postWriteVerify", () => {
     interface ReceiptWire {
       writes: Array<Record<string, unknown>>;
@@ -666,6 +1256,7 @@ describe("receipt schema", () => {
     if (firstWrite.result !== "applied") throw new Error("fixture write must be applied");
     const receipt: ReceiptSnapshot = {
       ...fixture,
+      status: "error",
       writes: [
         {
           ...firstWrite,
@@ -686,6 +1277,7 @@ describe("receipt schema", () => {
     if (firstWrite.result !== "applied") throw new Error("fixture write must be applied");
     const receipt: ReceiptSnapshot = {
       ...fixture,
+      status: "error",
       writes: [
         {
           ...firstWrite,
@@ -704,6 +1296,7 @@ describe("receipt schema", () => {
     if (firstWrite.result !== "applied") throw new Error("fixture write must be applied");
     const receipt: ReceiptSnapshot = {
       ...fixture,
+      status: "error",
       writes: [
         {
           ...firstWrite,
@@ -771,11 +1364,83 @@ function nonNull<T>(value: T | null | undefined): T {
   return value;
 }
 
+function setWireField(record: Record<string, unknown>, key: string, value: unknown): void {
+  record[key] = value;
+}
+
+function wireField(record: Record<string, unknown>, key: string): unknown {
+  return record[key];
+}
+
+function approvalWireAt(receipt: Record<string, unknown>, index: number): Record<string, unknown> {
+  return wireRecordArrayItem(receipt, "approvals", index);
+}
+
+function approvalWireSignedToken(approval: Record<string, unknown>): Record<string, unknown> {
+  const signedToken = wireField(approval, "signedToken");
+  if (!isWireRecord(signedToken)) {
+    throw new Error("fixture approval missing signedToken");
+  }
+  return signedToken;
+}
+
+function approvalWireClaims(approval: Record<string, unknown>): Record<string, unknown> {
+  const claims = wireField(approvalWireSignedToken(approval), "claims");
+  if (!isWireRecord(claims)) {
+    throw new Error("fixture approval missing claims");
+  }
+  return claims;
+}
+
+function writeWireAt(receipt: Record<string, unknown>, index: number): Record<string, unknown> {
+  return wireRecordArrayItem(receipt, "writes", index);
+}
+
+function fileChangeWireAt(
+  receipt: Record<string, unknown>,
+  index: number,
+): Record<string, unknown> {
+  return wireRecordArrayItem(receipt, "filesChanged", index);
+}
+
+function sourceReadWireAt(
+  receipt: Record<string, unknown>,
+  index: number,
+): Record<string, unknown> {
+  return wireRecordArrayItem(receipt, "sourceReads", index);
+}
+
+function wireRecordArrayItem(
+  record: Record<string, unknown>,
+  key: string,
+  index: number,
+): Record<string, unknown> {
+  const value = record[key];
+  if (!Array.isArray(value)) {
+    throw new Error(`fixture missing ${key}`);
+  }
+  const item = value[index];
+  if (!isWireRecord(item)) {
+    throw new Error(`fixture missing ${key}[${index}]`);
+  }
+  return item;
+}
+
+function isWireRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function receiptJsonFixture(): Record<string, unknown> & {
+  id?: unknown;
+  providerKind?: unknown;
+  schemaVersion?: unknown;
   finalMessage?: unknown;
   toolCalls: (Record<string, unknown> & { inputs?: unknown })[];
 } {
   const receipt = JSON.parse(receiptToJson(validReceiptFixture())) as Record<string, unknown> & {
+    id?: unknown;
+    providerKind?: unknown;
+    schemaVersion?: unknown;
     finalMessage?: unknown;
     toolCalls: (Record<string, unknown> & { inputs?: unknown })[];
   };
@@ -783,6 +1448,90 @@ function receiptJsonFixture(): Record<string, unknown> & {
     throw new Error("fixture missing toolCalls");
   }
   return receipt;
+}
+
+function validReceiptSnapshotArbitrary(): fc.Arbitrary<ReceiptSnapshot> {
+  return fc
+    .tuple(fc.constantFrom(...PROVIDER_KIND_VALUES), fc.constantFrom(...WRITE_RESULT_VALUES))
+    .map(([providerKind, writeResult]) => {
+      const receipt = validReceiptFixture();
+      const firstWrite = nonNull(receipt.writes[0]);
+      return {
+        ...receipt,
+        providerKind: asProviderKind(providerKind),
+        status: receiptStatusForWriteResult(writeResult),
+        writes: [writeForResult(firstWrite, writeResult)],
+      };
+    });
+}
+
+function writeForResult(base: ExternalWrite, result: WriteResult): ExternalWrite {
+  const appliedDiff = base.appliedDiff ?? FrozenArgs.freeze({ result, field: "appliedDiff" });
+  const postWriteVerify =
+    base.postWriteVerify ?? FrozenArgs.freeze({ result, field: "postWriteVerify" });
+  const common = {
+    writeId: base.writeId,
+    action: base.action,
+    target: base.target,
+    idempotencyKey: base.idempotencyKey,
+    proposedDiff: base.proposedDiff,
+    approvalToken: base.approvalToken,
+    ...(base.approvedAt === undefined ? {} : { approvedAt: base.approvedAt }),
+  };
+
+  switch (result) {
+    case "applied":
+      return {
+        ...common,
+        result,
+        appliedDiff,
+        postWriteVerify,
+      };
+    case "rejected":
+      return {
+        ...common,
+        result,
+        appliedDiff: null,
+        postWriteVerify: null,
+        failureMetadata: { code: "policy_denied", retryable: false },
+      };
+    case "partial":
+      return {
+        ...common,
+        result,
+        appliedDiff,
+        postWriteVerify: null,
+        failureMetadata: { code: "verification_failed", retryable: true, retryAfterMs: 5000 },
+      };
+    case "rollback":
+      return {
+        ...common,
+        result,
+        appliedDiff,
+        postWriteVerify: null,
+        failureMetadata: { code: "rolled_back", retryable: false },
+      };
+  }
+}
+
+function receiptStatusForWriteResult(result: WriteResult): ReceiptStatus {
+  return result === "applied" ? "ok" : "error";
+}
+
+function unknownKeyArbitrary(keys: ReadonlySet<string>): fc.Arbitrary<string> {
+  return fc.string({ minLength: 1 }).filter((key) => !keys.has(key));
+}
+
+function recordWithKnownKeys(keys: ReadonlySet<string>): Record<string, unknown> {
+  const record = Object.create(null) as Record<string, unknown>;
+  for (const key of keys) {
+    Object.defineProperty(record, key, {
+      value: "known",
+      enumerable: true,
+      configurable: true,
+    });
+  }
+  return record;
 }
 
 function validReceiptFixture(): ReceiptSnapshot {
