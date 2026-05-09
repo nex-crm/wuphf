@@ -923,6 +923,93 @@ func (b *Broker) reconcileSkillStatusFromDisk() {
 	}
 }
 
+// backfillSkillFilesFromState walks b.skills and writes a SKILL.md for every
+// skill whose wiki file is missing on disk. It is the symmetric peer of
+// reconcileSkillStatusFromDisk: that helper trusts disk over memory for
+// status, this one trusts memory when disk has nothing at all. Without this,
+// skills created via handlePostSkill before the wiki write was wired (or
+// during a window when wikiWorker was nil) stay invisible to /wiki/article
+// for the rest of the broker's lifetime.
+//
+// Each missing skill is enqueued individually so a malformed entry (empty
+// description, render failure) doesn't block the rest. Errors are logged,
+// not surfaced — startup must not block on wiki-side hiccups.
+//
+// Race-safety: each enqueue is preceded by a fresh under-lock lookup +
+// stat. If a concurrent edit (handleSkillEdit, archive, etc.) lands a
+// SKILL.md or mutates the in-memory skill while backfill is iterating, we
+// pick up the live copy — or skip entirely when disk is no longer empty —
+// rather than write a stale snapshot taken at startup.
+func (b *Broker) backfillSkillFilesFromState(ctx context.Context) {
+	b.mu.Lock()
+	worker := b.wikiWorker
+	b.mu.Unlock()
+	if worker == nil {
+		return
+	}
+	repo := worker.Repo()
+	if repo == nil {
+		return
+	}
+
+	// Phase 1: collect candidate names whose file is currently missing.
+	// We don't capture the skill struct here — that's what causes the
+	// stale-write race CodeRabbit flagged. Names are stable; everything
+	// else gets re-resolved per-write under the lock below.
+	b.mu.Lock()
+	candidates := make([]string, 0, len(b.skills))
+	for i := range b.skills {
+		if b.skills[i].Status == "archived" {
+			continue
+		}
+		wikiPath := skillWikiPath(b.skills[i].Name)
+		absPath := filepath.Join(repo.Root(), filepath.FromSlash(wikiPath))
+		if _, err := os.Stat(absPath); err == nil {
+			continue
+		} else if !os.IsNotExist(err) {
+			slog.Warn("skill_crud: backfill stat failed", "path", wikiPath, "err", err)
+			continue
+		}
+		candidates = append(candidates, b.skills[i].Name)
+	}
+	b.mu.Unlock()
+
+	// Phase 2: for each candidate, re-resolve under the lock immediately
+	// before enqueueing so a concurrent edit's newer markdown is never
+	// overwritten by this snapshot.
+	for _, name := range candidates {
+		b.mu.Lock()
+		live := b.findSkillByNameLocked(name)
+		if live == nil {
+			b.mu.Unlock()
+			continue // archived or deleted in the gap
+		}
+		skCopy := *live
+		wikiPath := skillWikiPath(skCopy.Name)
+		absPath := filepath.Join(repo.Root(), filepath.FromSlash(wikiPath))
+		// Re-stat under the lock: a concurrent edit may have already
+		// landed a SKILL.md while we were iterating earlier candidates.
+		// In that case the edit's newer content is canonical and we
+		// must not clobber it.
+		if _, err := os.Stat(absPath); err == nil {
+			b.mu.Unlock()
+			slog.Debug("skill_crud: backfill skipping — file appeared during sweep",
+				"name", skCopy.Name)
+			continue
+		}
+		b.mu.Unlock()
+
+		commitMsg := "wuphf: backfill skill " + skCopy.Name + " from broker state"
+		if err := enqueueSkillWikiWrite(ctx, worker, skCopy, wikiPath, commitMsg); err != nil {
+			slog.Warn("skill_crud: backfill enqueue failed",
+				"name", skCopy.Name, "path", wikiPath, "err", err)
+			continue
+		}
+		slog.Info("skill_crud: backfilled missing SKILL.md from broker state",
+			"name", skCopy.Name, "path", wikiPath)
+	}
+}
+
 // resolveSkillSourceArticle reads the on-disk SKILL.md for name and extracts
 // the first source article path from its frontmatter. Returns "" when the
 // wiki worker is absent, the file is missing, or the frontmatter carries no

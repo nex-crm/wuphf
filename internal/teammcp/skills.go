@@ -79,6 +79,14 @@ func handleTeamSkillCreate(ctx context.Context, _ *mcp.CallToolRequest, args Tea
 	if action == "create" && slug != "ceo" {
 		return toolError(fmt.Errorf("only CEO may use action=create; use action=propose to queue a skill proposal")), nil, nil
 	}
+	description := strings.TrimSpace(args.Description)
+	if description == "" {
+		// Mirror the broker's POST /skills validation: a SKILL.md without a
+		// description fails RenderSkillMarkdown and the wiki article never
+		// lands on disk. Surface the requirement at the MCP boundary so the
+		// agent gets a clean error rather than an opaque 400.
+		return toolError(fmt.Errorf("description is required: a one-line summary of when to use this skill")), nil, nil
+	}
 	channel := resolveConversationChannel(ctx, slug, args.Channel)
 	title := strings.TrimSpace(args.Title)
 	if title == "" {
@@ -90,7 +98,7 @@ func handleTeamSkillCreate(ctx context.Context, _ *mcp.CallToolRequest, args Tea
 		"action":      action,
 		"name":        name,
 		"title":       title,
-		"description": strings.TrimSpace(args.Description),
+		"description": description,
 		"content":     content,
 		"created_by":  slug,
 		"channel":     channel,

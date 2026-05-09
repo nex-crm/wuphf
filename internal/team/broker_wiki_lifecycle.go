@@ -174,6 +174,14 @@ func (b *Broker) initWikiWorker() {
 	// silently revert the in-memory status.
 	b.reconcileSkillStatusFromDisk()
 
+	// Skill file backfill: skills that exist in broker state but have no
+	// SKILL.md on disk (e.g. created before the wiki write was wired into
+	// handlePostSkill, or during a window when wikiWorker was nil) get
+	// written here so /wiki/article?path=team/skills/<slug>.md no longer
+	// 404s. Runs async because each enqueue blocks on a git commit and the
+	// broker should not stall startup waiting for them.
+	go b.backfillSkillFilesFromState(lifecycleCtx)
+
 	// Boot reconcile: walk the full wiki tree and populate the index from
 	// existing markdown + jsonl. Runs async so it does not delay broker
 	// startup. The per-commit ReconcilePath calls keep the index live once

@@ -1,9 +1,11 @@
 package team
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -166,8 +168,11 @@ func (b *Broker) handlePostSkill(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "action must be create or propose", http.StatusBadRequest)
 		return
 	}
-	if strings.TrimSpace(body.Name) == "" || strings.TrimSpace(body.Content) == "" || strings.TrimSpace(body.CreatedBy) == "" {
-		http.Error(w, "name, content, and created_by required", http.StatusBadRequest)
+	if strings.TrimSpace(body.Name) == "" || strings.TrimSpace(body.Content) == "" || strings.TrimSpace(body.CreatedBy) == "" || strings.TrimSpace(body.Description) == "" {
+		// Description is required by RenderSkillMarkdown — without it the
+		// SKILL.md write would silently no-op and the wiki UI would 404 on
+		// the skill, which is exactly the regression this PR fixes.
+		http.Error(w, "name, description, content, and created_by required", http.StatusBadRequest)
 		return
 	}
 
@@ -185,7 +190,12 @@ func (b *Broker) handlePostSkill(w http.ResponseWriter, r *http.Request) {
 	}
 
 	b.mu.Lock()
-	defer b.mu.Unlock()
+	unlocked := false
+	defer func() {
+		if !unlocked {
+			b.mu.Unlock()
+		}
+	}()
 
 	createdBy := strings.TrimSpace(body.CreatedBy)
 	if action == "propose" {
@@ -252,8 +262,73 @@ func (b *Broker) handlePostSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Enqueue the SKILL.md write so the wiki has the file on disk. Without
+	// this, a freshly created skill exists in broker-state.json but
+	// /wiki/article?path=team/skills/<slug>.md returns "no such file" until
+	// the skill is edited or archived. Mirrors the pattern used by every
+	// other CRUD handler in skill_crud_endpoints.go.
+	wikiWorker := b.wikiWorker
+	wikiPath := skillWikiPath(sk.Name)
+	skSnapshot := sk
+	b.mu.Unlock()
+	unlocked = true
+
+	commitMsg := fmt.Sprintf("wuphf: %s skill %s", action, skSnapshot.Name)
+	// Use the broker lifecycle context, not r.Context(): the skill is
+	// already in broker state, and a client disconnect mid-Enqueue would
+	// cancel the SKILL.md commit and recreate the very "broker has it,
+	// disk doesn't" condition this PR exists to fix.
+	enqueueCtx := b.brokerLifecycleContext()
+	if err := enqueueSkillWikiWrite(enqueueCtx, wikiWorker, skSnapshot, wikiPath, commitMsg); err != nil {
+		// Wiki enqueue failures are logged but do not fail the create — the
+		// skill still lives in broker state, and a later save (edit, archive,
+		// or boot backfill) reconciles disk. Returning 500 here would leave
+		// callers thinking the skill was not created when broker state has
+		// already been mutated.
+		slog.Warn("handlePostSkill: wiki enqueue failed",
+			"name", skSnapshot.Name, "action", action, "err", err)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{"skill": sk})
+	_ = json.NewEncoder(w).Encode(map[string]any{"skill": skSnapshot})
+}
+
+// enqueueSkillWikiWrite renders sk into SKILL.md form (with safety scan
+// metadata) and enqueues a wiki write through the worker. Caller must NOT
+// hold b.mu — WikiWorker.Enqueue acquires b.mu via PublishWikiEvent and would
+// deadlock. Returns nil silently when worker is nil (wiki backend offline)
+// or when sk lacks the mandatory frontmatter fields.
+func enqueueSkillWikiWrite(ctx context.Context, worker *WikiWorker, sk teamSkill, wikiPath, commitMsg string) error {
+	if worker == nil {
+		return nil
+	}
+	if strings.TrimSpace(sk.Name) == "" || strings.TrimSpace(sk.Description) == "" {
+		// Intentionally retained even though handlePostSkill now rejects empty
+		// description at the HTTP layer: backfillSkillFilesFromState (and any
+		// future caller) may encounter legacy teamSkill records written before
+		// the validation existed. Removing this guard would cause those legacy
+		// skills to fail RenderSkillMarkdown and surface a write error instead
+		// of a safe, logged skip.
+		slog.Warn("enqueueSkillWikiWrite: skipping wiki write — name or description empty",
+			"name", sk.Name)
+		return nil
+	}
+	fm := teamSkillToFrontmatter(sk)
+	scan := ScanSkill(fm, sk.Content, skillTrustForCreator(sk.CreatedBy))
+	fm.Metadata.Wuphf.SafetyScan = &SkillSafetyScan{
+		Verdict:    string(scan.Verdict),
+		Findings:   append([]string(nil), scan.Findings...),
+		TrustLevel: string(scan.TrustLevel),
+		Summary:    scan.Summary,
+	}
+	mdBytes, err := RenderSkillMarkdown(fm, sk.Content)
+	if err != nil {
+		return fmt.Errorf("render skill markdown: %w", err)
+	}
+	if _, _, err := worker.Enqueue(ctx, sk.Name, wikiPath, string(mdBytes), "replace", commitMsg); err != nil {
+		return fmt.Errorf("wiki enqueue: %w", err)
+	}
+	return nil
 }
 
 func (b *Broker) handlePutSkill(w http.ResponseWriter, r *http.Request) {
