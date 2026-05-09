@@ -159,6 +159,14 @@ describe("createSecureWindow", () => {
     expect(electronMock.openExternal).toHaveBeenCalledWith("https://example.com/docs");
 
     electronMock.openExternal.mockClear();
+    expect(handler({ url: "http://example.com/page" })).toEqual({ action: "deny" });
+    expect(electronMock.openExternal).toHaveBeenCalledWith("http://example.com/page");
+
+    electronMock.openExternal.mockClear();
+    expect(handler({ url: "mailto:fd@example.com?subject=hi" })).toEqual({ action: "deny" });
+    expect(electronMock.openExternal).toHaveBeenCalledWith("mailto:fd@example.com?subject=hi");
+
+    electronMock.openExternal.mockClear();
     expect(handler({ url: "file:///tmp/wuphf.txt" })).toEqual({ action: "deny" });
     expect(handler({ url: "javascript:alert(1)" })).toEqual({ action: "deny" });
     expect(handler({ url: "http://[" })).toEqual({ action: "deny" });

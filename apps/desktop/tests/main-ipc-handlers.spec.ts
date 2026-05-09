@@ -52,11 +52,15 @@ describe("openExternal handler", () => {
     expect(electronMock.openExternal).not.toHaveBeenCalled();
   });
 
-  it("opens https URLs through the OS shell", async () => {
-    await expect(handleOpenExternal(event, { url: "https://example.com" })).resolves.toEqual({
+  it.each([
+    ["https://example.com", "https://example.com/"],
+    ["http://example.com", "http://example.com/"],
+    ["mailto:fd@example.com?subject=hi", "mailto:fd@example.com?subject=hi"],
+  ])("opens allowlisted scheme %s through the OS shell", async (input, expectedHandoff) => {
+    await expect(handleOpenExternal(event, { url: input })).resolves.toEqual({
       ok: true,
     });
-    expect(electronMock.openExternal).toHaveBeenCalledWith("https://example.com/");
+    expect(electronMock.openExternal).toHaveBeenCalledWith(expectedHandoff);
   });
 
   it("returns an error response when the OS shell rejects the URL handoff", async () => {
