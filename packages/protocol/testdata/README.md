@@ -16,3 +16,24 @@ To regenerate after an intentional wire-contract change, update the vector
 values and run `bunx vitest run tests/audit-event.spec.ts` from
 `packages/protocol/`. The test file at `../tests/audit-event.spec.ts` reads
 this fixture and verifies the package serializer and hash function against it.
+
+## Cross-language verification
+
+`verifier-reference.go` is a stdlib-only Go reference implementation of the
+audit-chain wire contract. It loads `audit-event-vectors.json`, recomputes
+each canonical serialization and eventHash, and compares against the bundled
+expected values. Run it from this directory:
+
+```bash
+cd packages/protocol/testdata
+go run verifier-reference.go
+```
+
+If all vectors match, the wire contract is genuinely cross-language portable.
+If any fail, the TypeScript writer and the Go reference disagree — coordinate
+the wire-contract bump with downstream consumers before landing.
+
+The Go file is intentionally minimal (no external deps) and only supports
+the limited shapes used in the bundled vectors. For a production Go
+implementation, swap the `canonicalize` helper for the
+`github.com/cyberphone/json-canonicalization` library.
