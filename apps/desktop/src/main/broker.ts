@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { utilityProcess } from "electron";
 
-import type { BrokerStatus } from "../shared/api-contract.ts";
+import type { BrokerSnapshot, BrokerStatus } from "../shared/api-contract.ts";
 import { monotonicNowMs } from "./monotonic-clock.ts";
 
 const BROKER_SERVICE_NAME = "wuphf-broker";
@@ -129,6 +129,14 @@ export class BrokerSupervisor {
 
   getRestartCount(): number {
     return this.restartCount;
+  }
+
+  getSnapshot(): BrokerSnapshot {
+    return {
+      status: this.getStatus(),
+      pid: getProcessPid(this.brokerProcess),
+      restartCount: this.restartCount,
+    };
   }
 
   getLastRestartScheduledAtMs(): number | null {

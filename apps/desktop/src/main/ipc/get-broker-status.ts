@@ -1,16 +1,14 @@
 import type { IpcMainInvokeEvent } from "electron";
 
 import type {
-  BrokerStatus,
+  BrokerSnapshot,
   ErrResponse,
   GetBrokerStatusResponse,
 } from "../../shared/api-contract.ts";
 import { invalidRequest, validateEmptyRequest } from "./_guards.ts";
 
 export interface BrokerStatusProvider {
-  getStatus(): BrokerStatus;
-  getPid(): number | null;
-  getRestartCount(): number;
+  getSnapshot(): BrokerSnapshot;
 }
 
 export function handleGetBrokerStatus(
@@ -23,9 +21,5 @@ export function handleGetBrokerStatus(
     return invalidRequest(validation.error);
   }
 
-  return {
-    status: brokerSupervisor.getStatus(),
-    pid: brokerSupervisor.getPid(),
-    restartCount: brokerSupervisor.getRestartCount(),
-  };
+  return brokerSupervisor.getSnapshot();
 }

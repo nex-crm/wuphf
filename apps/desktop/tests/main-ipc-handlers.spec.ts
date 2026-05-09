@@ -226,9 +226,11 @@ describe("getPlatform handler", () => {
 
 describe("getBrokerStatus handler", () => {
   const brokerSupervisor = {
-    getStatus: () => "alive" as const,
-    getPid: () => 1234,
-    getRestartCount: () => 2,
+    getSnapshot: () => ({
+      status: "alive" as const,
+      pid: 1234,
+      restartCount: 2,
+    }),
   };
 
   it("rejects malformed or non-empty payloads without throwing", () => {

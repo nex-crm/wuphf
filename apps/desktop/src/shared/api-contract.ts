@@ -121,12 +121,14 @@ export interface GetPlatformResponse {
 
 export type BrokerStatus = "starting" | "alive" | "unresponsive" | "dead" | "unknown";
 
-export type GetBrokerStatusRequest = EmptyPayload;
-export interface GetBrokerStatusResponse {
+export interface BrokerSnapshot {
   readonly status: BrokerStatus;
   readonly pid: number | null;
   readonly restartCount: number;
 }
+
+export type GetBrokerStatusRequest = EmptyPayload;
+export type GetBrokerStatusResponse = BrokerSnapshot;
 
 /**
  * The contextBridge surface as it appears on `window.wuphf`. Renderer
