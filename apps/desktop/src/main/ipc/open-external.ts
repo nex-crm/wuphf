@@ -7,9 +7,10 @@ import {
   okResponse,
 } from "../../shared/api-contract.ts";
 import { monotonicNowMs } from "../monotonic-clock.ts";
-import { invalidRequest, isExactObject } from "./_guards.ts";
+import { assertMaxStringLength, invalidRequest, isExactObject } from "./_guards.ts";
 
 const ALLOWED_EXTERNAL_PROTOCOLS = new Set(["https:", "http:", "mailto:"]);
+const MAX_EXTERNAL_URL_BYTES = 8_192;
 const OPEN_EXTERNAL_RATE_LIMIT_MAX_CALLS = 5;
 const OPEN_EXTERNAL_RATE_LIMIT_WINDOW_MS = 10_000;
 
@@ -42,6 +43,11 @@ export function createOpenExternalHandler(
   ): Promise<OpenExternalResponse> {
     if (!isOpenExternalRequest(request)) {
       return invalidRequest("openExternal expects exactly one string field: url");
+    }
+
+    const sizeValidation = assertMaxStringLength(request.url, MAX_EXTERNAL_URL_BYTES, "url");
+    if (!sizeValidation.valid) {
+      return invalidRequest(sizeValidation.error);
     }
 
     const parsedUrl = parseAllowedExternalUrl(request.url);

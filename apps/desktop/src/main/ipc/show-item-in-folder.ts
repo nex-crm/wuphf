@@ -6,7 +6,9 @@ import {
   okResponse,
   type ShowItemInFolderResponse,
 } from "../../shared/api-contract.ts";
-import { invalidRequest, isExactObject } from "./_guards.ts";
+import { assertMaxStringLength, invalidRequest, isExactObject } from "./_guards.ts";
+
+const MAX_PATH_BYTES = 32_768;
 
 interface ValidShowItemInFolderRequest {
   readonly path: string;
@@ -18,6 +20,11 @@ export function handleShowItemInFolder(
 ): ShowItemInFolderResponse {
   if (!isShowItemInFolderRequest(request)) {
     return invalidRequest("showItemInFolder expects exactly one string field: path");
+  }
+
+  const sizeValidation = assertMaxStringLength(request.path, MAX_PATH_BYTES, "path");
+  if (!sizeValidation.valid) {
+    return invalidRequest(sizeValidation.error);
   }
 
   const normalizedPath = nodePath.normalize(request.path);

@@ -61,6 +61,16 @@ describe("openExternal handler", () => {
     expect(electronMock.openExternal).toHaveBeenCalledWith("https://example.com/");
   });
 
+  it("rejects oversized URL payloads before parsing or opening them", async () => {
+    await expect(
+      handleOpenExternal(event, { url: `https://example.com/${"a".repeat(8_192)}` }),
+    ).resolves.toEqual({
+      ok: false,
+      error: "url must be at most 8192 bytes",
+    });
+    expect(electronMock.openExternal).not.toHaveBeenCalled();
+  });
+
   it("rate-limits the sixth rapid OS browser handoff", async () => {
     let nowMs = 0;
     const openExternal = createOpenExternalHandler({ monotonicNow: () => nowMs });
@@ -120,6 +130,14 @@ describe("showItemInFolder handler", () => {
     });
     expect(handleShowItemInFolder(event, { path: "/legit\0/file" })).toMatchObject({
       ok: false,
+    });
+    expect(electronMock.showItemInFolder).not.toHaveBeenCalled();
+  });
+
+  it("rejects oversized path payloads before normalization", () => {
+    expect(handleShowItemInFolder(event, { path: `/${"a".repeat(32_768)}` })).toEqual({
+      ok: false,
+      error: "path must be at most 32768 bytes",
     });
     expect(electronMock.showItemInFolder).not.toHaveBeenCalled();
   });
