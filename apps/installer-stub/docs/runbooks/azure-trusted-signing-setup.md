@@ -47,6 +47,16 @@ Official references:
    certificates, start the request at least 20 business days before the first
    release window; Microsoft may request more documentation.
 
+First-time account readiness checklist:
+
+| Check | Expected result |
+|---|---|
+| Subscription billing | Paid subscription, not Free/Trial |
+| Resource provider | `az provider show --namespace Microsoft.CodeSigning --query registrationState -o tsv` returns `Registered` |
+| Account creator role | Contributor or Owner on the target scope |
+| Identity validation role | `Artifact Signing Identity Verifier` assigned before opening the identity blade |
+| CI signer role | `Trusted Signing Certificate Profile Signer` assigned on the certificate profile after profile creation |
+
 ## Supported Regions And Endpoints
 
 Store `AZURE_ENDPOINT` exactly as Microsoft lists the endpoint URI value for the
