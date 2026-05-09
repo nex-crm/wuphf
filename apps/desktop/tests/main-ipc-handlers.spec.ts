@@ -96,6 +96,17 @@ describe("showItemInFolder handler", () => {
     expect(handleShowItemInFolder(event, { path: "/legit/file" })).toEqual({ ok: true });
     expect(electronMock.showItemInFolder).toHaveBeenCalledWith("/legit/file");
   });
+
+  it("returns an error when the OS shell refuses to reveal the path", () => {
+    electronMock.showItemInFolder.mockImplementationOnce(() => {
+      throw new Error("OS refused reveal");
+    });
+
+    expect(handleShowItemInFolder(event, { path: "/legit/file" })).toEqual({
+      ok: false,
+      error: "OS refused reveal",
+    });
+  });
 });
 
 describe("getAppVersion handler", () => {

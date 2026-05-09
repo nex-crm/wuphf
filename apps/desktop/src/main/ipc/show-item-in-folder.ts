@@ -33,8 +33,15 @@ export function handleShowItemInFolder(
     return errResponse("Path must not contain parent traversal segments");
   }
 
-  shell.showItemInFolder(normalizedPath);
-  return okResponse();
+  try {
+    // Electron returns void here; only synchronous OS/shell failures can be surfaced.
+    shell.showItemInFolder(normalizedPath);
+    return okResponse();
+  } catch (error) {
+    return errResponse(
+      error instanceof Error ? error.message : "Failed to reveal path in OS file manager",
+    );
+  }
 }
 
 function isShowItemInFolderRequest(request: unknown): request is ValidShowItemInFolderRequest {
