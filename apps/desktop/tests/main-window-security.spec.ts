@@ -68,6 +68,7 @@ describe("createSecureWindow", () => {
     createSecureWindow({
       preloadPath: "/tmp/preload.js",
       rendererIndexPath: "/tmp/index.html",
+      allowDevServerUrl: true,
       devServerUrl: "http://localhost:5173/",
     });
 
@@ -88,6 +89,7 @@ describe("createSecureWindow", () => {
     createSecureWindow({
       preloadPath: "/tmp/preload.js",
       rendererIndexPath: "/tmp/index.html",
+      allowDevServerUrl: true,
       devServerUrl: "http://localhost:5173/",
     });
 
@@ -108,6 +110,7 @@ describe("createSecureWindow", () => {
     createSecureWindow({
       preloadPath: "/tmp/preload.js",
       rendererIndexPath: "/tmp/index.html",
+      allowDevServerUrl: true,
       devServerUrl: "http://localhost:5173/",
     });
 
@@ -119,6 +122,19 @@ describe("createSecureWindow", () => {
     const externalEvent = { preventDefault: vi.fn<() => void>() };
     handler(externalEvent, "https://example.com/");
     expect(externalEvent.preventDefault).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects development renderer URLs when packaged mode disallows them", async () => {
+    const { createSecureWindow } = await import("../src/main/window.ts");
+
+    expect(() =>
+      createSecureWindow({
+        preloadPath: "/tmp/preload.js",
+        rendererIndexPath: "/tmp/index.html",
+        allowDevServerUrl: false,
+        devServerUrl: "http://localhost:5173/",
+      }),
+    ).toThrow("Refusing to load development renderer URL in packaged mode");
   });
 });
 

@@ -6,6 +6,7 @@ const ALLOWED_EXTERNAL_PROTOCOLS = new Set(["https:", "http:", "mailto:"]);
 export interface CreateSecureWindowConfig {
   readonly preloadPath: string;
   readonly rendererIndexPath: string;
+  readonly allowDevServerUrl: boolean;
   readonly devServerUrl?: string;
 }
 
@@ -45,6 +46,10 @@ export function createSecureWindow(config: CreateSecureWindowConfig): BrowserWin
 
 function resolveRendererUrl(config: CreateSecureWindowConfig): string {
   if (typeof config.devServerUrl === "string" && config.devServerUrl.length > 0) {
+    if (!config.allowDevServerUrl) {
+      throw new Error("Refusing to load development renderer URL in packaged mode");
+    }
+
     const parsedDevUrl = new URL(config.devServerUrl);
     if (!isLocalDevRendererUrl(parsedDevUrl)) {
       throw new Error(`Refusing to load non-local renderer URL: ${config.devServerUrl}`);

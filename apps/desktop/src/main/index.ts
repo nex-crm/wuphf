@@ -4,6 +4,7 @@ import { app, BrowserWindow, dialog } from "electron";
 
 import { BrokerSupervisor } from "./broker.ts";
 import { registerIpcHandlers } from "./ipc/register-handlers.ts";
+import { selectRendererDevServerUrl } from "./renderer-dev-url.ts";
 import { createSecureWindow } from "./window.ts";
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
@@ -22,8 +23,18 @@ let brokerShutdownStarted = false;
 app
   .whenReady()
   .then(() => {
+    try {
+      registerIpcHandlers(brokerSupervisor);
+    } catch (error) {
+      dialog.showErrorBox(
+        "WUPHF IPC registration failed",
+        error instanceof Error ? error.message : "Unknown IPC registration error",
+      );
+      app.exit(1);
+      return;
+    }
+
     createMainWindow();
-    registerIpcHandlers(brokerSupervisor);
     brokerSupervisor.start();
 
     app.on("activate", () => {
@@ -63,10 +74,11 @@ app.on("window-all-closed", () => {
 
 function createMainWindow(): void {
   const env = process.env as NodeJS.ProcessEnv & { readonly ELECTRON_RENDERER_URL?: string };
-  const devServerUrl = env.ELECTRON_RENDERER_URL;
+  const devServerUrl = selectRendererDevServerUrl(env, app.isPackaged);
   createSecureWindow({
     preloadPath,
     rendererIndexPath,
+    allowDevServerUrl: !app.isPackaged,
     ...(typeof devServerUrl === "string" ? { devServerUrl } : {}),
   });
 }

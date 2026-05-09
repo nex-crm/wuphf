@@ -82,9 +82,19 @@ describe("showItemInFolder handler", () => {
     expect(electronMock.showItemInFolder).not.toHaveBeenCalled();
   });
 
+  it("rejects parent traversal and NUL bytes", () => {
+    expect(handleShowItemInFolder(event, { path: "/etc/../etc/passwd" })).toMatchObject({
+      ok: false,
+    });
+    expect(handleShowItemInFolder(event, { path: "/legit\0/file" })).toMatchObject({
+      ok: false,
+    });
+    expect(electronMock.showItemInFolder).not.toHaveBeenCalled();
+  });
+
   it("reveals absolute paths without reading file contents", () => {
-    expect(handleShowItemInFolder(event, { path: "/tmp/wuphf.txt" })).toEqual({ ok: true });
-    expect(electronMock.showItemInFolder).toHaveBeenCalledWith("/tmp/wuphf.txt");
+    expect(handleShowItemInFolder(event, { path: "/legit/file" })).toEqual({ ok: true });
+    expect(electronMock.showItemInFolder).toHaveBeenCalledWith("/legit/file");
   });
 });
 

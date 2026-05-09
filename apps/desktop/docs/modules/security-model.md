@@ -50,3 +50,11 @@ over loopback HTTP/SSE in the future broker listener branch.
 Remote navigation is blocked. Development loads only
 `http://localhost:<vite-port>` or `http://127.0.0.1:<vite-port>`, and production
 loads only the bundled `file://` renderer document.
+
+## CSP Loopback Exception
+
+The renderer CSP currently allows `connect-src` to `http://127.0.0.1:*` and
+`http://localhost:*` because the broker loopback listener branch owns the final
+port binding. This wildcard is a known temporary limitation: once
+`feat/broker-loopback-listener` defines the broker port, production CSP must
+allow only that concrete loopback endpoint.
