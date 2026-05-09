@@ -110,3 +110,23 @@ updates:
     commit-message:
       prefix: "chore(npm)"
       include: "scope"
+
+  # Installer stub release stack. This package uses bun.lock locally, but the
+  # three Electron release packages need one review/test cycle because signing,
+  # notarization, and updater metadata compatibility can shift together.
+  - package-ecosystem: "npm"
+    directory: "/apps/installer-stub"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 5
+    groups:
+      installer-electron-stack:
+        patterns:
+          - "electron"
+          - "electron-builder"
+          - "electron-updater"
+    commit-message:
+      prefix: "chore(installer)"
+      include: "scope"
