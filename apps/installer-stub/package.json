@@ -9,6 +9,10 @@
     "name": "Nex Labs",
     "email": "francisco@nex.ai"
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nex-crm/wuphf.git"
+  },
   "wuphfBuildChannel": "dev",
   "scripts": {
     "start": "electron .",
