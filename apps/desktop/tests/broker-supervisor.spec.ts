@@ -25,6 +25,8 @@ class FakeUtilityProcess extends EventEmitter {
   readonly pid: number;
   readonly kill = vi.fn<(signal?: NodeJS.Signals) => boolean>(() => true);
   readonly postMessage = vi.fn<(message: unknown) => void>();
+  readonly stdout = new EventEmitter();
+  readonly stderr = new EventEmitter();
 
   constructor(pid: number) {
     super();
@@ -70,6 +72,24 @@ describe("BrokerSupervisor", () => {
     });
     expect(supervisor.getPid()).toBe(4321);
     expect(supervisor.getStatus()).toBe("starting");
+  });
+
+  it("drains broker stdout and stderr pipes without buffering output", () => {
+    const processHandle = new FakeUtilityProcess(4321);
+    const { forkProcess } = createForkMock([processHandle]);
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+    });
+
+    supervisor.start();
+
+    expect(processHandle.stdout.listenerCount("data")).toBe(1);
+    expect(processHandle.stderr.listenerCount("data")).toBe(1);
+    expect(() => {
+      processHandle.stdout.emit("data", Buffer.from("stdout payload"));
+      processHandle.stderr.emit("data", Buffer.from("stderr payload"));
+    }).not.toThrow();
   });
 
   it("binds the default utilityProcess.fork receiver before storing it", async () => {

@@ -95,6 +95,7 @@ export class BrokerSupervisor {
     });
 
     this.brokerProcess = brokerProcess;
+    drainBrokerStdio(brokerProcess);
     brokerProcess.on("message", (message: unknown) => {
       if (isAliveMessage(message)) {
         const nowMs = this.monotonicNow();
@@ -302,6 +303,15 @@ function safePostMessage(brokerProcess: UtilityProcessHandle, message: unknown):
   } catch {
     // The force path remains armed; a closed message port should not block app quit.
   }
+}
+
+function drainBrokerStdio(brokerProcess: UtilityProcessHandle): void {
+  brokerProcess.stdout?.on("data", discardBrokerOutput);
+  brokerProcess.stderr?.on("data", discardBrokerOutput);
+}
+
+function discardBrokerOutput(_chunk: unknown): void {
+  // Drain pipe-backed stdio without logging future broker app data into the main process.
 }
 
 function killUtilityProcess(brokerProcess: UtilityProcessHandle, signal?: NodeJS.Signals): void {
