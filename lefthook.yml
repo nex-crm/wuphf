@@ -193,7 +193,7 @@ pre-push:
       # golden vector (Vitest stays green, this fails). Scoped to the files
       # that affect the wire contract — ~2s on warm Go cache.
       files: bash scripts/changed-files-since-base.sh
-      glob: "packages/protocol/{src/audit-event.ts,src/canonical-json.ts,src/event-lsn.ts,testdata/**}"
+      glob: "packages/protocol/{src/audit-event.ts,src/canonical-json.ts,src/event-lsn.ts,src/sha256.ts,testdata/**}"
       run: cd packages/protocol/testdata && go run verifier-reference.go
     protocol-invariants:
       # Custom invariant checks for protocol-grade rules Biome cannot

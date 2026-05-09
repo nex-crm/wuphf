@@ -136,16 +136,19 @@ check_index_value_exports_have_coverage() {
       missing+=("$symbol")
     fi
   done < <(awk '
-    /^export type \{/ { skip=1 }
+    /^export type \{.*\} from/ { next }
+    /^export type \{/ { skip=1; next }
     /^\}/ { if (skip) skip=0; next }
     skip { next }
     /^export \{/ { capture=1 }
     capture {
       gsub(/[{},]/, " ")
       for (i=1; i<=NF; i++) {
+        if ($i == "export" && i == 1) continue
+        if ($i == "type") { i++; continue }
         if ($i == "from" || $i == "export") { capture=0; break }
         if ($i ~ /^"\.\//) { capture=0; break }
-        if ($i ~ /^[a-z][a-zA-Z0-9_]+$/ || $i ~ /^[A-Z][A-Z0-9_]+$/) print $i
+        if ($i ~ /^[A-Za-z][A-Za-z0-9_]+$/) print $i
       }
       if (/from/) capture=0
     }

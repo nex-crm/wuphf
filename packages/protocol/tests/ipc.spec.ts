@@ -8,6 +8,17 @@ import {
 } from "../src/budgets.ts";
 import { canonicalJSON } from "../src/canonical-json.ts";
 import {
+  assertJcsValue,
+  isAgentSlug,
+  isApprovalId,
+  isIdempotencyKey,
+  isProviderKind,
+  isReceiptId,
+  isTaskId,
+  isToolCallId,
+  isWriteId,
+} from "../src/index.ts";
+import {
   ALLOWED_LOOPBACK_HOSTS,
   type ApprovalSubmitResponse,
   apiBootstrapFromJson,
@@ -19,6 +30,10 @@ import {
   asKeychainHandleId,
   asRequestId,
   type BrokerHttpResponse,
+  type ApiBootstrapWire as IpcApiBootstrapWire,
+  type ApprovalClaimsWire as IpcApprovalClaimsWire,
+  type ApprovalSubmitRequestWire as IpcApprovalSubmitRequestWire,
+  type SignedApprovalTokenWire as IpcSignedApprovalTokenWire,
   isAllowedLoopbackHost,
   isApiToken,
   isBrokerPort,
@@ -45,6 +60,43 @@ import {
 import { asSha256Hex, sha256Hex } from "../src/sha256.ts";
 
 const TEXT_DECODER = new TextDecoder();
+
+type WireKeysOf<T> = readonly (keyof T)[];
+
+const VALID_IPC_WIRE_KEY_TUPLES = [
+  ["token", "broker_url"] as const satisfies WireKeysOf<IpcApiBootstrapWire>,
+  [
+    "receipt_id",
+    "approval_token",
+    "idempotency_key",
+  ] as const satisfies WireKeysOf<IpcApprovalSubmitRequestWire>,
+  [
+    "claims",
+    "algorithm",
+    "signer_key_id",
+    "signature",
+  ] as const satisfies WireKeysOf<IpcSignedApprovalTokenWire>,
+  [
+    "signer_identity",
+    "role",
+    "receipt_id",
+    "write_id",
+    "frozen_args_hash",
+    "risk_class",
+    "issued_at",
+    "expires_at",
+    "webauthn_assertion",
+  ] as const satisfies WireKeysOf<IpcApprovalClaimsWire>,
+];
+
+const INVALID_API_BOOTSTRAP_WIRE_KEYS = [
+  "token",
+  // @ts-expect-error wire key typos must fail typecheck.
+  "broker_urll",
+] as const satisfies WireKeysOf<IpcApiBootstrapWire>;
+
+void VALID_IPC_WIRE_KEY_TUPLES;
+void INVALID_API_BOOTSTRAP_WIRE_KEYS;
 
 describe("isAllowedLoopbackHost", () => {
   it("accepts canonical loopback hosts", () => {
@@ -234,6 +286,30 @@ describe("IPC brand constructors", () => {
       expect(() => asKeychainHandleId("kh/abc")).toThrow();
       expect(isKeychainHandleId(undefined)).toBe(false);
     });
+  });
+});
+
+describe("public index export coverage", () => {
+  it("exposes receipt brand guards through src/index.ts", () => {
+    const ulid = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
+
+    expect(isReceiptId(ulid)).toBe(true);
+    expect(isTaskId(ulid)).toBe(true);
+    expect(isAgentSlug("agent_01")).toBe(true);
+    expect(isProviderKind("openai")).toBe(true);
+    expect(isToolCallId("tool.call-01")).toBe(true);
+    expect(isApprovalId("approval_01")).toBe(true);
+    expect(isWriteId("write_01")).toBe(true);
+    expect(isIdempotencyKey("approval-submit-01")).toBe(true);
+
+    expect(isReceiptId("not-a-ulid")).toBe(false);
+    expect(isAgentSlug("_leading")).toBe(false);
+    expect(isProviderKind("unsupported")).toBe(false);
+  });
+
+  it("exposes canonical JSON assertions through src/index.ts", () => {
+    expect(() => assertJcsValue({ ok: true })).not.toThrow();
+    expect(() => assertJcsValue({ bad: undefined })).toThrow(/undefined/);
   });
 });
 

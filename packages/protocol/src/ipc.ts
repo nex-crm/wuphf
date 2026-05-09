@@ -163,7 +163,13 @@ export interface ApiBootstrap {
   readonly brokerUrl: string; // http://127.0.0.1:<port>
 }
 
-const API_BOOTSTRAP_WIRE_KEYS: ReadonlySet<string> = new Set(["token", "broker_url"]);
+export type ApiBootstrapWire = Readonly<Record<"token" | "broker_url", string>>;
+
+const API_BOOTSTRAP_WIRE_KEYS_TUPLE = [
+  "token",
+  "broker_url",
+] as const satisfies readonly (keyof ApiBootstrapWire)[];
+const API_BOOTSTRAP_WIRE_KEYS: ReadonlySet<string> = new Set(API_BOOTSTRAP_WIRE_KEYS_TUPLE);
 
 function requiredStringField(
   record: Readonly<Record<string, unknown>>,
@@ -200,7 +206,7 @@ export function apiBootstrapFromJson(value: unknown): ApiBootstrap {
  * verbatim). The wire keys are intentionally snake_case; the runtime TS
  * surface is camelCase by lint rule.
  */
-export function apiBootstrapToJson(bootstrap: ApiBootstrap): Readonly<Record<string, string>> {
+export function apiBootstrapToJson(bootstrap: ApiBootstrap): ApiBootstrapWire {
   return { token: bootstrap.token as string, broker_url: bootstrap.brokerUrl };
 }
 
@@ -262,6 +268,27 @@ export interface ApprovalSubmitRequest {
   readonly idempotencyKey: IdempotencyKey;
 }
 
+export type ApprovalSubmitRequestWire = Readonly<
+  Record<"receipt_id" | "idempotency_key", string> &
+    Record<"approval_token", SignedApprovalTokenWire>
+>;
+
+export type SignedApprovalTokenWire = Readonly<
+  Record<"claims", ApprovalClaimsWire> &
+    Record<"algorithm", SignedApprovalToken["algorithm"]> &
+    Record<"signer_key_id" | "signature", string>
+>;
+
+export type ApprovalClaimsWire = Readonly<
+  Record<
+    "signer_identity" | "receipt_id" | "frozen_args_hash" | "issued_at" | "expires_at",
+    string
+  > &
+    Record<"role", ApprovalClaims["role"]> &
+    Record<"risk_class", ApprovalClaims["riskClass"]> &
+    Partial<Record<"write_id" | "webauthn_assertion", string>>
+>;
+
 const APPROVAL_SUBMIT_REQUEST_KEYS_TUPLE = [
   "receiptId",
   "approvalToken",
@@ -270,18 +297,24 @@ const APPROVAL_SUBMIT_REQUEST_KEYS_TUPLE = [
 const APPROVAL_SUBMIT_REQUEST_KEYS: ReadonlySet<string> = new Set(
   APPROVAL_SUBMIT_REQUEST_KEYS_TUPLE,
 );
-const APPROVAL_SUBMIT_REQUEST_WIRE_KEYS: ReadonlySet<string> = new Set([
+const APPROVAL_SUBMIT_REQUEST_WIRE_KEYS_TUPLE = [
   "receipt_id",
   "approval_token",
   "idempotency_key",
-]);
-const SIGNED_APPROVAL_TOKEN_WIRE_KEYS: ReadonlySet<string> = new Set([
+] as const satisfies readonly (keyof ApprovalSubmitRequestWire)[];
+const APPROVAL_SUBMIT_REQUEST_WIRE_KEYS: ReadonlySet<string> = new Set(
+  APPROVAL_SUBMIT_REQUEST_WIRE_KEYS_TUPLE,
+);
+const SIGNED_APPROVAL_TOKEN_WIRE_KEYS_TUPLE = [
   "claims",
   "algorithm",
   "signer_key_id",
   "signature",
-]);
-const APPROVAL_CLAIMS_WIRE_KEYS: ReadonlySet<string> = new Set([
+] as const satisfies readonly (keyof SignedApprovalTokenWire)[];
+const SIGNED_APPROVAL_TOKEN_WIRE_KEYS: ReadonlySet<string> = new Set(
+  SIGNED_APPROVAL_TOKEN_WIRE_KEYS_TUPLE,
+);
+const APPROVAL_CLAIMS_WIRE_KEYS_TUPLE = [
   "signer_identity",
   "role",
   "receipt_id",
@@ -291,7 +324,8 @@ const APPROVAL_CLAIMS_WIRE_KEYS: ReadonlySet<string> = new Set([
   "issued_at",
   "expires_at",
   "webauthn_assertion",
-]);
+] as const satisfies readonly (keyof ApprovalClaimsWire)[];
+const APPROVAL_CLAIMS_WIRE_KEYS: ReadonlySet<string> = new Set(APPROVAL_CLAIMS_WIRE_KEYS_TUPLE);
 
 export function approvalClaimsToSigningBytes(claims: ApprovalClaims): Uint8Array {
   if (!isRecord(claims)) {
