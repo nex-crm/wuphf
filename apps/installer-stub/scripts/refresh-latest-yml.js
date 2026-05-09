@@ -29,18 +29,37 @@ if (typeof artifactName !== "string" || artifactName.trim() === "") {
   fail(`${manifestPath} has empty or missing path field`);
 }
 
-const artifactPath = path.resolve(path.dirname(absoluteManifestPath), artifactName);
-if (!artifactPath.startsWith(`${path.dirname(absoluteManifestPath)}${path.sep}`)) {
-  fail(`${manifestPath} path escapes dist directory: ${artifactName}`);
+const distDir = path.dirname(absoluteManifestPath);
+
+function resolveDistArtifact(entryPath) {
+  if (path.isAbsolute(entryPath) || entryPath.includes("..")) {
+    fail(`${manifestPath} path escapes dist directory: ${entryPath}`);
+  }
+
+  const artifactBasename = path.basename(entryPath);
+  const artifactPath = path.resolve(distDir, artifactBasename);
+  if (!artifactPath.startsWith(`${distDir}${path.sep}`)) {
+    fail(`${manifestPath} path escapes dist directory: ${entryPath}`);
+  }
+
+  return { artifactBasename, artifactPath };
 }
 
+function artifactMetadata(artifactPath) {
+  const artifactBytes = fs.readFileSync(artifactPath);
+  return {
+    sha512: crypto.createHash("sha512").update(artifactBytes).digest("base64"),
+    size: artifactBytes.byteLength,
+  };
+}
+
+const { artifactBasename, artifactPath } = resolveDistArtifact(artifactName);
 if (!fs.existsSync(artifactPath)) {
   fail(`${manifestPath} points at missing artifact: ${artifactName}`);
 }
 
-const artifactBytes = fs.readFileSync(artifactPath);
-const sha512 = crypto.createHash("sha512").update(artifactBytes).digest("base64");
-const size = artifactBytes.byteLength;
+const { sha512, size } = artifactMetadata(artifactPath);
+const refreshedArtifacts = new Set([artifactBasename]);
 
 manifest.sha512 = sha512;
 manifest.size = size;
@@ -52,13 +71,34 @@ if (Array.isArray(manifest.files)) {
     }
 
     const entryPath = file.url ?? file.path;
-    if (
-      entryPath === artifactName ||
-      path.basename(entryPath ?? "") === path.basename(artifactName)
-    ) {
-      file.sha512 = sha512;
-      file.size = size;
+    if (typeof entryPath !== "string" || entryPath.trim() === "") {
+      continue;
     }
+
+    const entryArtifact = resolveDistArtifact(entryPath);
+    if (!fs.existsSync(entryArtifact.artifactPath)) {
+      console.warn(`${manifestPath} files[] entry points at missing artifact: ${entryPath}`);
+      continue;
+    }
+
+    const entryMetadata = artifactMetadata(entryArtifact.artifactPath);
+    file.sha512 = entryMetadata.sha512;
+    file.size = entryMetadata.size;
+    refreshedArtifacts.add(entryArtifact.artifactBasename);
+  }
+}
+
+for (const entry of fs.readdirSync(distDir, { withFileTypes: true })) {
+  if (!entry.isFile()) {
+    continue;
+  }
+
+  if (![".AppImage", ".deb", ".dmg", ".exe", ".zip"].includes(path.extname(entry.name))) {
+    continue;
+  }
+
+  if (!refreshedArtifacts.has(entry.name)) {
+    console.warn(`${manifestPath} files[] is missing dist artifact: ${entry.name}`);
   }
 }
 

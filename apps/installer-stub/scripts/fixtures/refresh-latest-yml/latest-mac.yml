@@ -1,0 +1,12 @@
+version: 0.0.0
+files:
+  - url: wuphf-installer-stub-0.0.0-mac-universal.zip
+    sha512: stale-zip
+    size: 1
+  - url: wuphf-installer-stub-0.0.0-mac-universal.dmg
+    sha512: stale-dmg
+    size: 1
+path: wuphf-installer-stub-0.0.0-mac-universal.zip
+sha512: stale-top-level
+size: 1
+releaseDate: "2026-05-09T00:00:00.000Z"

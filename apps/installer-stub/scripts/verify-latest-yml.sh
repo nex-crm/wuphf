@@ -3,11 +3,28 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 app_dir="$(cd "${script_dir}/.." && pwd)"
-tag="${1:-${GITHUB_REF_NAME:-}}"
+raw_ref="${1:-${GITHUB_REF:-${GITHUB_REF_NAME:-}}}"
+tag=""
+
+if [[ -n "${raw_ref}" ]]; then
+  candidate="${raw_ref#refs/tags/}"
+  if [[ "${raw_ref}" == refs/tags/* ]]; then
+    tag="${candidate}"
+  elif [[ "${candidate}" =~ ^v?[0-9]+(\.[0-9]+)*([.-].+)?$ ]]; then
+    tag="${candidate}"
+  elif [[ "${1+x}" == "x" ]]; then
+    echo "Invalid release tag: ${raw_ref}" >&2
+    exit 1
+  fi
+fi
 
 if [[ -n "${tag}" ]]; then
-  tag="${tag#refs/tags/}"
-  version="${tag#v}"
+  if [[ "${tag}" == v* ]]; then
+    version="${tag#v}"
+  else
+    version="${tag}"
+    tag="v${tag}"
+  fi
 else
   version="$(cd "${app_dir}" && bun -e 'process.stdout.write(require("./package.json").version)')"
   tag="v${version}"
@@ -54,6 +71,30 @@ manifest_field() {
     ' "${file}" "${field}"
 }
 
+manifest_file_entries() {
+  local file="$1"
+
+  cd "${app_dir}" &&
+    bun -e '
+      const fs = require("node:fs");
+      const yaml = require("js-yaml");
+      const manifest = yaml.load(fs.readFileSync(process.argv[1], "utf8"));
+      const files = Array.isArray(manifest?.files) ? manifest.files : [];
+      for (const file of files) {
+        if (!file || typeof file !== "object") {
+          continue;
+        }
+
+        const entryPath = file.url ?? file.path;
+        if (typeof entryPath !== "string" || entryPath.length === 0) {
+          continue;
+        }
+
+        process.stdout.write([entryPath, file.sha512 ?? "", file.size ?? ""].join("\u001f") + "\0");
+      }
+    ' "${file}"
+}
+
 sha512_base64() {
   local artifact="$1"
   local hex
@@ -79,6 +120,52 @@ sha512_base64() {
     ' "${artifact}"
 }
 
+verify_artifact_entry() {
+  local latest_file="$1"
+  local label="$2"
+  local entry_path="$3"
+  local expected_sha512="$4"
+  local expected_size="$5"
+  local artifact
+  local actual_sha512
+  local actual_size
+
+  if [[ -z "${entry_path}" ]]; then
+    echo "${latest_file} has empty or missing ${label} path" >&2
+    exit 1
+  fi
+
+  if [[ "${entry_path}" == /* || "${entry_path}" == *".."* ]]; then
+    echo "${latest_file} ${label} path must stay inside dist: ${entry_path}" >&2
+    exit 1
+  fi
+
+  artifact="${dist_dir}/${entry_path}"
+  if [[ ! -f "${artifact}" ]]; then
+    echo "${latest_file} ${label} points at missing artifact: ${entry_path}" >&2
+    exit 1
+  fi
+
+  if [[ -z "${expected_sha512}" ]]; then
+    echo "${latest_file} ${label} has empty or missing sha512 field" >&2
+    exit 1
+  fi
+
+  actual_sha512="$(sha512_base64 "${artifact}")"
+  if [[ "${expected_sha512}" != "${actual_sha512}" ]]; then
+    echo "${latest_file} ${label} sha512 does not match ${entry_path}" >&2
+    exit 1
+  fi
+
+  if [[ -n "${expected_size}" ]]; then
+    actual_size="$(wc -c < "${artifact}" | tr -d ' ')"
+    if [[ "${expected_size}" != "${actual_size}" ]]; then
+      echo "${latest_file} ${label} size '${expected_size}' does not match '${actual_size}'" >&2
+      exit 1
+    fi
+  fi
+}
+
 for latest_file in "${latest_files[@]}"; do
   manifest_name="$(basename "${latest_file}")"
   manifest_version="$(manifest_field "${latest_file}" "version")"
@@ -88,16 +175,6 @@ for latest_file in "${latest_files[@]}"; do
 
   if [[ "${manifest_version}" != "${version}" ]]; then
     echo "${latest_file} version '${manifest_version}' does not match '${version}'" >&2
-    exit 1
-  fi
-
-  if [[ -z "${manifest_path}" ]]; then
-    echo "${latest_file} has empty or missing path field" >&2
-    exit 1
-  fi
-
-  if [[ "${manifest_path}" == /* || "${manifest_path}" == *".."* ]]; then
-    echo "${latest_file} path must stay inside dist: ${manifest_path}" >&2
     exit 1
   fi
 
@@ -122,30 +199,11 @@ for latest_file in "${latest_files[@]}"; do
       ;;
   esac
 
-  artifact="${dist_dir}/${manifest_path}"
-  if [[ ! -f "${artifact}" ]]; then
-    echo "${latest_file} points at missing artifact: ${manifest_path}" >&2
-    exit 1
-  fi
+  verify_artifact_entry "${latest_file}" "top-level" "${manifest_path}" "${manifest_sha512}" "${manifest_size}"
 
-  if [[ -z "${manifest_sha512}" ]]; then
-    echo "${latest_file} has empty or missing sha512 field" >&2
-    exit 1
-  fi
-
-  actual_sha512="$(sha512_base64 "${artifact}")"
-  if [[ "${manifest_sha512}" != "${actual_sha512}" ]]; then
-    echo "${latest_file} sha512 does not match ${manifest_path}" >&2
-    exit 1
-  fi
-
-  if [[ -n "${manifest_size}" ]]; then
-    actual_size="$(wc -c < "${artifact}" | tr -d ' ')"
-    if [[ "${manifest_size}" != "${actual_size}" ]]; then
-      echo "${latest_file} size '${manifest_size}' does not match '${actual_size}'" >&2
-      exit 1
-    fi
-  fi
+  while IFS=$'\x1f' read -r -d '' entry_path entry_sha512 entry_size; do
+    verify_artifact_entry "${latest_file}" "files[] entry" "${entry_path}" "${entry_sha512}" "${entry_size}"
+  done < <(manifest_file_entries "${latest_file}")
 
   echo "Verified ${latest_file} for ${tag}."
 done
