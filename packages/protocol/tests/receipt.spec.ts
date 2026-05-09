@@ -220,6 +220,37 @@ describe("receipt schema", () => {
     }
   });
 
+  it("rejects forged proposedDiff hash using the locally re-derived hash", () => {
+    const fixture = validReceiptFixture();
+    const firstWrite = nonNull(fixture.writes[0]);
+    const approvalToken = nonNull(firstWrite.approvalToken);
+    const forgedHash = sha256Hex('{"different":2}');
+    const forged = Object.create(FrozenArgs.prototype) as FrozenArgs;
+    Object.assign(forged, {
+      canonicalJson: '{"a":1}',
+      hash: forgedHash,
+    });
+    const tampered: ReceiptSnapshot = {
+      ...fixture,
+      writes: [
+        {
+          ...firstWrite,
+          proposedDiff: forged,
+          approvalToken: {
+            ...approvalToken,
+            claims: { ...approvalToken.claims, frozenArgsHash: forgedHash },
+          },
+        },
+      ],
+    };
+
+    expectReceiptValidationError(
+      tampered,
+      "/writes/0/approvalToken/claims/frozenArgsHash",
+      /proposedDiff hash/,
+    );
+  });
+
   it("rejects external write whose approval token writeId does not match the enclosing write", () => {
     const fixture = validReceiptFixture();
     const firstWrite = nonNull(fixture.writes[0]);
@@ -284,6 +315,86 @@ describe("receipt schema", () => {
         ),
       ).toBe(true);
     }
+  });
+
+  it("rejects approval claims that expire before they are issued", () => {
+    const fixture = validReceiptFixture();
+    const firstApproval = nonNull(fixture.approvals[0]);
+    const tampered: ReceiptSnapshot = {
+      ...fixture,
+      approvals: [
+        {
+          ...firstApproval,
+          signedToken: {
+            ...firstApproval.signedToken,
+            claims: {
+              ...firstApproval.signedToken.claims,
+              expiresAt: new Date("2026-05-08T18:00:59.000Z"),
+            },
+          },
+        },
+      ],
+    };
+
+    expectReceiptValidationError(
+      tampered,
+      "/approvals/0/signedToken/claims/expiresAt",
+      /expiresAt=2026-05-08T18:00:59.000Z issuedAt=2026-05-08T18:01:00.000Z/,
+    );
+  });
+
+  it("rejects tool calls that finish before they start", () => {
+    const fixture = validReceiptFixture();
+    const firstToolCall = nonNull(fixture.toolCalls[0]);
+    const tampered: ReceiptSnapshot = {
+      ...fixture,
+      toolCalls: [
+        {
+          ...firstToolCall,
+          finishedAt: new Date("2026-05-08T18:00:00.999Z"),
+        },
+      ],
+    };
+
+    expectReceiptValidationError(
+      tampered,
+      "/toolCalls/0/finishedAt",
+      /finishedAt=2026-05-08T18:00:00.999Z startedAt=2026-05-08T18:00:01.000Z/,
+    );
+  });
+
+  it("rejects receipts that finish before they start", () => {
+    const fixture = validReceiptFixture();
+    const tampered: ReceiptSnapshot = {
+      ...fixture,
+      finishedAt: new Date("2026-05-08T17:59:59.999Z"),
+    };
+
+    expectReceiptValidationError(
+      tampered,
+      "/finishedAt",
+      /finishedAt=2026-05-08T17:59:59.999Z startedAt=2026-05-08T18:00:00.000Z/,
+    );
+  });
+
+  it("rejects external writes approved before their token was issued", () => {
+    const fixture = validReceiptFixture();
+    const firstWrite = nonNull(fixture.writes[0]);
+    const tampered: ReceiptSnapshot = {
+      ...fixture,
+      writes: [
+        {
+          ...firstWrite,
+          approvedAt: new Date("2026-05-08T18:00:59.000Z"),
+        },
+      ],
+    };
+
+    expectReceiptValidationError(
+      tampered,
+      "/writes/0/approvedAt",
+      /approvedAt=2026-05-08T18:00:59.000Z issuedAt=2026-05-08T18:01:00.000Z/,
+    );
   });
 
   it("rejects unknown top-level keys", () => {
@@ -376,6 +487,28 @@ describe("receipt schema", () => {
   it("rejects ToolCallId/ApprovalId containing colons (LOCAL_ID_RE excludes ':')", () => {
     expect(() => asToolCallId("tool:01")).toThrow();
     expect(() => asApprovalId("approval:01")).toThrow();
+  });
+
+  it("rejects notebookWrites entries that claim the wiki store", () => {
+    const fixture = validReceiptFixture();
+    const firstNotebookWrite = nonNull(fixture.notebookWrites[0]);
+    const tampered: ReceiptSnapshot = {
+      ...fixture,
+      notebookWrites: [{ ...firstNotebookWrite, store: "wiki" }],
+    };
+
+    expectReceiptValidationError(tampered, "/notebookWrites/0/store", /must be notebook/);
+  });
+
+  it("rejects wikiWrites entries that claim the notebook store", () => {
+    const fixture = validReceiptFixture();
+    const firstWikiWrite = nonNull(fixture.wikiWrites[0]);
+    const tampered: ReceiptSnapshot = {
+      ...fixture,
+      wikiWrites: [{ ...firstWikiWrite, store: "notebook" }],
+    };
+
+    expectReceiptValidationError(tampered, "/wikiWrites/0/store", /must be wiki/);
   });
 
   it("ExternalWrite: validator rejects result='applied' with null appliedDiff (per-state invariant)", () => {
@@ -496,6 +629,22 @@ describe("receipt schema", () => {
     }
   });
 });
+
+function expectReceiptValidationError(
+  input: unknown,
+  expectedPath: string,
+  expectedMessage: RegExp,
+): void {
+  const result = validateReceipt(input);
+  expect(result.ok).toBe(false);
+  if (!result.ok) {
+    expect(
+      result.errors.some(
+        (error) => error.path === expectedPath && expectedMessage.test(error.message),
+      ),
+    ).toBe(true);
+  }
+}
 
 function nonNull<T>(value: T | null | undefined): T {
   if (value === null || value === undefined) {

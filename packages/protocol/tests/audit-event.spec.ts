@@ -1,7 +1,7 @@
 import { Buffer } from "node:buffer";
 import { readFileSync } from "node:fs";
 import fc from "fast-check";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   AUDIT_EVENT_KIND_VALUES,
   type AuditEventKind,
@@ -136,6 +136,19 @@ describe("audit-event chain verification", () => {
     }
   });
 
+  it("returns typed missing_record for a sparse chain hole", () => {
+    const chain = chainOfLength(3);
+    Reflect.deleteProperty(chain, "1");
+
+    const result = verifyChain(chain);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(localLsn(result.brokenAtSeqNo)).toBe(1);
+      expect(result.code).toBe("missing_record");
+    }
+  });
+
   it("returns typed seq_gap when a record seqNo skips ahead", () => {
     const chain = chainOfLength(3);
     chain[1] = { ...recordAt(chain, 1), seqNo: lsnFromV1Number(2) };
@@ -160,6 +173,54 @@ describe("audit-event chain verification", () => {
       expect(result.code).toBe("serialization_threw");
       expect(localLsn(result.brokenAtSeqNo)).toBe(0);
       expect(result.reason).toMatch(/Invalid time value|serialization threw/);
+    }
+  });
+
+  it("returns typed lsn_threw when expected next LSN overflows", async () => {
+    vi.resetModules();
+    vi.doMock("../src/event-lsn.ts", async (importOriginal) => {
+      const actual = await importOriginal<typeof import("../src/event-lsn.ts")>();
+      return {
+        ...actual,
+        GENESIS_LSN: actual.lsnFromV1Number(Number.MAX_SAFE_INTEGER),
+      };
+    });
+
+    try {
+      const auditEvent = await import("../src/audit-event.ts");
+      const maxLsn = lsnFromV1Number(Number.MAX_SAFE_INTEGER);
+      const partial: AuditEventRecord = {
+        seqNo: maxLsn,
+        timestamp: new Date("2026-05-08T00:00:00.000Z"),
+        prevHash: auditEvent.GENESIS_PREV_HASH,
+        eventHash: auditEvent.GENESIS_PREV_HASH,
+        payload: {
+          kind: "receipt_created",
+          body: new TextEncoder().encode("max-lsn"),
+        },
+      };
+      const lastRecord: AuditEventRecord = {
+        ...partial,
+        eventHash: auditEvent.computeAuditEventHash(partial),
+      };
+      const followUpRecord: AuditEventRecord = {
+        ...lastRecord,
+        payload: {
+          kind: "receipt_updated",
+          body: new TextEncoder().encode("unreachable-follow-up"),
+        },
+      };
+
+      const result = auditEvent.verifyChain([lastRecord, followUpRecord]);
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.code).toBe("lsn_threw");
+        expect(localLsn(result.brokenAtSeqNo)).toBe(Number.MAX_SAFE_INTEGER);
+      }
+    } finally {
+      vi.doUnmock("../src/event-lsn.ts");
+      vi.resetModules();
     }
   });
 

@@ -47,6 +47,8 @@ import { addError, hasOwn, isRecord, pointer, recordValue } from "./receipt-util
 import { SanitizedString } from "./sanitized-string.ts";
 import { isSha256Hex } from "./sha256.ts";
 
+type MemoryStore = (typeof MEMORY_STORE_VALUES)[number];
+
 // Allowlists are tied to interface declarations via `satisfies readonly
 // (keyof T)[]`. Adding a typo'd entry fails typecheck. The reverse direction
 // — interface gains a new field, allowlist forgot to mirror — is covered by
@@ -337,10 +339,14 @@ function validateReceiptSnapshot(
   validateOptional(value, "finalMessage", path, errors, validateSanitizedString);
   validateOptional(value, "error", path, errors, validateSanitizedString);
   validateRequired(value, "notebookWrites", path, errors, (v, p, e) =>
-    validateArray(v, p, e, validateMemoryWriteRef),
+    validateArray(v, p, e, (item, itemPath, itemErrors) =>
+      validateMemoryWriteRef(item, itemPath, itemErrors, "notebook"),
+    ),
   );
   validateRequired(value, "wikiWrites", path, errors, (v, p, e) =>
-    validateArray(v, p, e, validateMemoryWriteRef),
+    validateArray(v, p, e, (item, itemPath, itemErrors) =>
+      validateMemoryWriteRef(item, itemPath, itemErrors, "wiki"),
+    ),
   );
   validateOptional(value, "worktreePath", path, errors, validateString);
   validateOptional(value, "gitHeadStart", path, errors, validateString);
@@ -348,6 +354,15 @@ function validateReceiptSnapshot(
   validateRequired(value, "schemaVersion", path, errors, (v, p, e) => {
     if (v !== 1) addError(e, p, "must be 1");
   });
+  validateTemporalOrdering(
+    recordValue(value, "startedAt"),
+    "startedAt",
+    recordValue(value, "finishedAt"),
+    "finishedAt",
+    pointer(path, "finishedAt"),
+    errors,
+    true,
+  );
 }
 
 function validateSourceRead(value: unknown, path: string, errors: ReceiptValidationError[]): void {
@@ -388,6 +403,15 @@ function validateToolCall(
     validateLiteral(v, p, e, TOOL_CALL_STATUS_VALUES, "must be a valid tool call status"),
   );
   validateOptional(value, "error", path, errors, validateSanitizedString);
+  validateTemporalOrdering(
+    recordValue(value, "startedAt"),
+    "startedAt",
+    recordValue(value, "finishedAt"),
+    "finishedAt",
+    pointer(path, "finishedAt"),
+    errors,
+    true,
+  );
 }
 
 function validateApprovalEvent(
@@ -462,6 +486,7 @@ function validateMemoryWriteRef(
   value: unknown,
   path: string,
   errors: ReceiptValidationError[],
+  expectedStore: MemoryStore,
 ): void {
   if (!isRecord(value)) {
     addError(errors, path, "must be an object");
@@ -471,6 +496,10 @@ function validateMemoryWriteRef(
   validateRequired(value, "store", path, errors, (v, p, e) =>
     validateLiteral(v, p, e, MEMORY_STORE_VALUES, "must be notebook or wiki"),
   );
+  const store = recordValue(value, "store");
+  if ((store === "notebook" || store === "wiki") && store !== expectedStore) {
+    addError(errors, pointer(path, "store"), `must be ${expectedStore}`);
+  }
   validateRequired(value, "slug", path, errors, validateString);
   validateRequired(value, "hash", path, errors, validateSha256HexValue);
   validateRequired(value, "citation", path, errors, validateString);
@@ -527,6 +556,15 @@ function validateApprovalClaims(
       "must be a non-empty string for high/critical risk",
     );
   }
+  validateTemporalOrdering(
+    recordValue(value, "issuedAt"),
+    "issuedAt",
+    recordValue(value, "expiresAt"),
+    "expiresAt",
+    pointer(path, "expiresAt"),
+    errors,
+    false,
+  );
 }
 
 function validateSignedApprovalToken(
@@ -653,6 +691,15 @@ function validateExternalWrite(
       if (tokenWriteId !== undefined && tokenWriteId !== recordValue(value, "writeId")) {
         addError(errors, pointer(claimsPath, "writeId"), "must match this write's writeId");
       }
+      validateTemporalOrdering(
+        recordValue(claims, "issuedAt"),
+        "issuedAt",
+        recordValue(value, "approvedAt"),
+        "approvedAt",
+        pointer(path, "approvedAt"),
+        errors,
+        true,
+      );
     }
   }
 }
@@ -746,6 +793,35 @@ function validateDate(value: unknown, path: string, errors: ReceiptValidationErr
   if (!(value instanceof Date) || Number.isNaN(value.getTime())) {
     addError(errors, path, "must be a valid Date");
   }
+}
+
+function validateTemporalOrdering(
+  earlier: unknown,
+  earlierName: string,
+  later: unknown,
+  laterName: string,
+  errorPath: string,
+  errors: ReceiptValidationError[],
+  allowEqual: boolean,
+): void {
+  if (!isValidDate(earlier) || !isValidDate(later)) {
+    return;
+  }
+  const earlierTime = earlier.getTime();
+  const laterTime = later.getTime();
+  const ordered = allowEqual ? laterTime >= earlierTime : laterTime > earlierTime;
+  if (!ordered) {
+    const relation = allowEqual ? "after or equal to" : "after";
+    addError(
+      errors,
+      errorPath,
+      `must be ${relation} ${earlierName} (got ${laterName}=${later.toISOString()} ${earlierName}=${earlier.toISOString()})`,
+    );
+  }
+}
+
+function isValidDate(value: unknown): value is Date {
+  return value instanceof Date && !Number.isNaN(value.getTime());
 }
 
 function validateNonNegativeInteger(

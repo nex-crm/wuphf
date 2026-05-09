@@ -22,6 +22,14 @@ const BIDI_CHARS = [
   "\u2068",
   "\u2069",
 ] as const;
+const FORMAT_INVISIBLE_CHARS = [
+  "\u180e",
+  "\u2060",
+  "\u2061",
+  "\u2062",
+  "\u2063",
+  "\u2064",
+] as const;
 
 // `fc.string()` in fast-check 3.x generates from `fc.char()`, which is
 // restricted to printable ASCII (U+0020..U+007E). For a sanitizer that has to
@@ -37,6 +45,17 @@ const bidiInterleavedStringArb = fc
   .chain((segments) => fc.tuple(fc.constant(segments), sanitizableStringArb))
   .map(
     ([segments, tail]) => `${segments.map(([chunk, bidi]) => `${chunk}${bidi}`).join("")}${tail}`,
+  );
+const formatInvisibleCharArb = fc.constantFrom(...FORMAT_INVISIBLE_CHARS);
+const formatInvisibleInterleavedStringArb = fc
+  .array(fc.tuple(sanitizableStringArb, formatInvisibleCharArb), {
+    minLength: 1,
+    maxLength: 16,
+  })
+  .chain((segments) => fc.tuple(fc.constant(segments), sanitizableStringArb))
+  .map(
+    ([segments, tail]) =>
+      `${segments.map(([chunk, invisible]) => `${chunk}${invisible}`).join("")}${tail}`,
   );
 const disallowedC0CharArb = fc
   .integer({ min: 0x00, max: 0x1f })
@@ -94,6 +113,16 @@ describe("SanitizedString", () => {
       fc.property(sanitizableStringArb, tagCharArb, sanitizableStringArb, (prefix, tag, suffix) => {
         const result = SanitizedString.fromUnknown(`${prefix}${tag}${suffix}`).value;
         expect(containsInvisibleTag(result)).toBe(false);
+      }),
+      { numRuns: MOAT_NUM_RUNS },
+    );
+  });
+
+  it("strips invisible format characters wherever they are interleaved", () => {
+    fc.assert(
+      fc.property(formatInvisibleInterleavedStringArb, (input) => {
+        const result = SanitizedString.fromUnknown(input).value;
+        expect(containsFormatInvisible(result)).toBe(false);
       }),
       { numRuns: MOAT_NUM_RUNS },
     );
@@ -399,6 +428,10 @@ function containsDisallowedC0(value: string): boolean {
 
 function containsInvisibleTag(value: string): boolean {
   return containsCodePoint(value, (codePoint) => codePoint >= 0xe0000 && codePoint <= 0xe007f);
+}
+
+function containsFormatInvisible(value: string): boolean {
+  return FORMAT_INVISIBLE_CHARS.some((char) => value.includes(char));
 }
 
 function containsZeroWidth(value: string): boolean {
