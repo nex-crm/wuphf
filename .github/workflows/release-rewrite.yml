@@ -601,7 +601,31 @@ jobs:
             fi
           done
 
-          if [[ "${#missing[@]}" -gt 0 ]]; then
-            printf "Release %s is missing uploaded asset(s): %s\n" "${TAG}" "${missing[*]}" >&2
+          unexpected=()
+          for uploaded in "${uploaded_asset_names[@]}"; do
+            found=false
+            for expected in "${expected_asset_names[@]}"; do
+              if [[ "${uploaded}" == "${expected}" ]]; then
+                found=true
+                break
+              fi
+            done
+            if [[ "${found}" != "true" ]]; then
+              unexpected+=("${uploaded}")
+            fi
+          done
+
+          if [[ "${#missing[@]}" -gt 0 || "${#unexpected[@]}" -gt 0 ]]; then
+            if [[ "${#missing[@]}" -gt 0 ]]; then
+              printf "Release %s is missing expected uploaded asset(s): %s\n" "${TAG}" "${missing[*]}" >&2
+            else
+              printf "Release %s is missing expected uploaded asset(s): none\n" "${TAG}" >&2
+            fi
+
+            if [[ "${#unexpected[@]}" -gt 0 ]]; then
+              printf "Release %s contains unexpected uploaded asset(s): %s\n" "${TAG}" "${unexpected[*]}" >&2
+            else
+              printf "Release %s contains unexpected uploaded asset(s): none\n" "${TAG}" >&2
+            fi
             exit 1
           fi
