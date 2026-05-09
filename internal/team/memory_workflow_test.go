@@ -13,7 +13,7 @@ func TestMemoryWorkflowJSONRoundTrip(t *testing.T) {
 	task := teamTask{
 		ID:        "task-1",
 		Title:     "Research prior context for onboarding",
-		Status:    "in_progress",
+		status:    "in_progress",
 		CreatedBy: "ceo",
 		CreatedAt: "2026-04-30T10:00:00Z",
 		UpdatedAt: "2026-04-30T10:00:00Z",
@@ -326,7 +326,7 @@ func TestMemoryWorkflowCompletionGateAndOverride(t *testing.T) {
 		ID:        "task-1",
 		TaskType:  "research",
 		Title:     "Research prior context for onboarding",
-		Status:    "in_progress",
+		status:    "in_progress",
 		CreatedAt: "2026-04-30T10:00:00Z",
 		UpdatedAt: "2026-04-30T10:00:00Z",
 	}

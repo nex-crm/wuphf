@@ -12,11 +12,11 @@ func TestListTasksFiltersByChannelStatusOwnerAndDone(t *testing.T) {
 		{Slug: "planning", Name: "planning", Members: []string{"pm"}},
 	}
 	b.tasks = []teamTask{
-		{ID: "general-alice-open", Channel: "general", Title: "General alice open", Owner: "alice", Status: "open"},
-		{ID: "general-alice-done", Channel: "general", Title: "General alice done", Owner: "alice", Status: "done"},
-		{ID: "general-bob-open", Channel: "general", Title: "General bob open", Owner: "bob", Status: "open"},
-		{ID: "general-unowned-open", Channel: "general", Title: "General unowned open", Status: "open"},
-		{ID: "planning-alice-open", Channel: "planning", Title: "Planning alice open", Owner: "alice", Status: "open"},
+		{ID: "general-alice-open", Channel: "general", Title: "General alice open", Owner: "alice", status: "open"},
+		{ID: "general-alice-done", Channel: "general", Title: "General alice done", Owner: "alice", status: "done"},
+		{ID: "general-bob-open", Channel: "general", Title: "General bob open", Owner: "bob", status: "open"},
+		{ID: "general-unowned-open", Channel: "general", Title: "General unowned open", status: "open"},
+		{ID: "planning-alice-open", Channel: "planning", Title: "Planning alice open", Owner: "alice", status: "open"},
 	}
 
 	got, err := b.ListTasks(TaskListRequest{
@@ -57,7 +57,7 @@ func TestListTasksRejectsSingleChannelNonMember(t *testing.T) {
 		{Slug: "private", Name: "private", Members: []string{"ceo"}},
 	}
 	b.tasks = []teamTask{
-		{ID: "private-task", Channel: "private", Title: "Private", Status: "open"},
+		{ID: "private-task", Channel: "private", Title: "Private", status: "open"},
 	}
 
 	_, err := b.ListTasks(TaskListRequest{Channel: "private", ViewerSlug: "pm"})
@@ -73,8 +73,8 @@ func TestListTasksAllChannelsStillChecksViewerAccess(t *testing.T) {
 		{Slug: "private", Name: "private", Members: []string{"ceo"}},
 	}
 	b.tasks = []teamTask{
-		{ID: "general-task", Channel: "general", Title: "General", Status: "open"},
-		{ID: "private-task", Channel: "private", Title: "Private", Status: "open"},
+		{ID: "general-task", Channel: "general", Title: "General", status: "open"},
+		{ID: "private-task", Channel: "private", Title: "Private", status: "open"},
 	}
 
 	got, err := b.ListTasks(TaskListRequest{AllChannels: true, ViewerSlug: "pm"})
@@ -90,7 +90,7 @@ func TestListTasksAllChannelsStillChecksViewerAccess(t *testing.T) {
 func TestAckTaskMarksTaskForOwner(t *testing.T) {
 	b := newTestBroker(t)
 	b.tasks = []teamTask{
-		{ID: "task-1", Channel: "general", Title: "Task", Owner: "alice", Status: "in_progress"},
+		{ID: "task-1", Channel: "general", Title: "Task", Owner: "alice", status: "in_progress"},
 	}
 
 	got, err := b.AckTask(TaskAckRequest{ID: "task-1", Channel: "general", Slug: "alice"})
@@ -111,7 +111,7 @@ func TestAckTaskMarksTaskForOwner(t *testing.T) {
 func TestAckTaskRejectsInvalidOwnerAndMissingTask(t *testing.T) {
 	b := newTestBroker(t)
 	b.tasks = []teamTask{
-		{ID: "task-1", Channel: "general", Title: "Task", Owner: "alice", Status: "in_progress"},
+		{ID: "task-1", Channel: "general", Title: "Task", Owner: "alice", status: "in_progress"},
 	}
 
 	_, err := b.AckTask(TaskAckRequest{ID: "task-1", Channel: "general", Slug: "bob"})
@@ -149,8 +149,8 @@ func TestMutateTaskCreatesAndCompletesTask(t *testing.T) {
 	if created.Task.ID == "" {
 		t.Fatal("expected task id")
 	}
-	if created.Task.Status != "in_progress" {
-		t.Fatalf("created status: want in_progress, got %q", created.Task.Status)
+	if created.Task.Status() != "in_progress" {
+		t.Fatalf("created status: want in_progress, got %q", created.Task.Status())
 	}
 	if len(b.tasks) != 1 || b.tasks[0].ID != created.Task.ID {
 		t.Fatalf("expected broker state to include created task, got %+v", b.tasks)
@@ -165,13 +165,13 @@ func TestMutateTaskCreatesAndCompletesTask(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MutateTask complete: %v", err)
 	}
-	if updated.Task.Status != "done" {
-		t.Fatalf("updated status: want done, got %q", updated.Task.Status)
+	if updated.Task.Status() != "done" {
+		t.Fatalf("updated status: want done, got %q", updated.Task.Status())
 	}
 	if updated.Task.CompletedAt == "" {
 		t.Fatal("expected completion timestamp")
 	}
-	if b.tasks[0].Status != "done" {
+	if b.tasks[0].Status() != "done" {
 		t.Fatalf("expected broker state to be updated, got %+v", b.tasks[0])
 	}
 }
@@ -182,7 +182,7 @@ func TestMutateTaskReusesExistingTask(t *testing.T) {
 		{Slug: "general", Name: "general", Members: []string{"pm"}},
 	}
 	b.tasks = []teamTask{
-		{ID: "task-1", Channel: "general", Title: "Write the plan", Owner: "alice", Status: "open"},
+		{ID: "task-1", Channel: "general", Title: "Write the plan", Owner: "alice", status: "open"},
 	}
 
 	got, err := b.MutateTask(TaskPostRequest{
@@ -213,7 +213,7 @@ func TestMutateTaskTrimsDependenciesAndBlocksUnresolved(t *testing.T) {
 		{Slug: "general", Name: "general", Members: []string{"pm"}},
 	}
 	b.tasks = []teamTask{
-		{ID: "parent-done", Channel: "general", Title: "Parent", Status: "done"},
+		{ID: "parent-done", Channel: "general", Title: "Parent", status: "done"},
 	}
 
 	got, err := b.MutateTask(TaskPostRequest{
@@ -227,8 +227,8 @@ func TestMutateTaskTrimsDependenciesAndBlocksUnresolved(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MutateTask create with dependencies: %v", err)
 	}
-	if got.Task.Status != "open" || !got.Task.Blocked {
-		t.Fatalf("expected unresolved dependency to block open task, got status=%q blocked=%v", got.Task.Status, got.Task.Blocked)
+	if got.Task.Status() != "open" || !got.Task.Blocked() {
+		t.Fatalf("expected unresolved dependency to block open task, got status=%q blocked=%v", got.Task.Status(), got.Task.Blocked())
 	}
 	if len(got.Task.DependsOn) != 2 {
 		t.Fatalf("expected empty dependency entries to be removed, got %+v", got.Task.DependsOn)
@@ -247,21 +247,21 @@ func TestMutateTaskAppliesStateActions(t *testing.T) {
 	}{
 		{
 			name:       "claim",
-			task:       teamTask{ID: "task-1", Channel: "general", Title: "Task", Status: "done", CompletedAt: "2026-05-03T00:00:00Z"},
+			task:       teamTask{ID: "task-1", Channel: "general", Title: "Task", status: "done", CompletedAt: "2026-05-03T00:00:00Z"},
 			req:        TaskPostRequest{Action: "claim", Owner: "alice"},
 			wantStatus: "in_progress",
 			wantOwner:  "alice",
 		},
 		{
 			name:       "reassign",
-			task:       teamTask{ID: "task-1", Channel: "general", Title: "Task", Owner: "alice", Status: "in_progress"},
+			task:       teamTask{ID: "task-1", Channel: "general", Title: "Task", Owner: "alice", status: "in_progress"},
 			req:        TaskPostRequest{Action: "reassign", Owner: "bob"},
 			wantStatus: "in_progress",
 			wantOwner:  "bob",
 		},
 		{
 			name:        "block",
-			task:        teamTask{ID: "task-1", Channel: "general", Title: "Task", Owner: "alice", Status: "in_progress"},
+			task:        teamTask{ID: "task-1", Channel: "general", Title: "Task", Owner: "alice", status: "in_progress"},
 			req:         TaskPostRequest{Action: "block", Details: "waiting on input"},
 			wantStatus:  "blocked",
 			wantOwner:   "alice",
@@ -269,20 +269,20 @@ func TestMutateTaskAppliesStateActions(t *testing.T) {
 		},
 		{
 			name:       "resume",
-			task:       teamTask{ID: "task-1", Channel: "general", Title: "Task", Owner: "alice", Status: "blocked", Blocked: true},
+			task:       teamTask{ID: "task-1", Channel: "general", Title: "Task", Owner: "alice", status: "blocked", blocked: true},
 			req:        TaskPostRequest{Action: "resume", Details: "ready again"},
 			wantStatus: "in_progress",
 			wantOwner:  "alice",
 		},
 		{
 			name:       "release",
-			task:       teamTask{ID: "task-1", Channel: "general", Title: "Task", Owner: "alice", Status: "in_progress"},
+			task:       teamTask{ID: "task-1", Channel: "general", Title: "Task", Owner: "alice", status: "in_progress"},
 			req:        TaskPostRequest{Action: "release"},
 			wantStatus: "open",
 		},
 		{
 			name:       "cancel",
-			task:       teamTask{ID: "task-1", Channel: "general", Title: "Task", Owner: "alice", Status: "in_progress", Blocked: true},
+			task:       teamTask{ID: "task-1", Channel: "general", Title: "Task", Owner: "alice", status: "in_progress", blocked: true},
 			req:        TaskPostRequest{Action: "cancel"},
 			wantStatus: "canceled",
 			wantOwner:  "alice",
@@ -304,16 +304,16 @@ func TestMutateTaskAppliesStateActions(t *testing.T) {
 			if err != nil {
 				t.Fatalf("MutateTask %s: %v", tc.req.Action, err)
 			}
-			if got.Task.Status != tc.wantStatus {
-				t.Fatalf("status: want %q, got %q", tc.wantStatus, got.Task.Status)
+			if got.Task.Status() != tc.wantStatus {
+				t.Fatalf("status: want %q, got %q", tc.wantStatus, got.Task.Status())
 			}
 			if got.Task.Owner != tc.wantOwner {
 				t.Fatalf("owner: want %q, got %q", tc.wantOwner, got.Task.Owner)
 			}
-			if got.Task.Blocked != tc.wantBlocked {
-				t.Fatalf("blocked: want %v, got %v", tc.wantBlocked, got.Task.Blocked)
+			if got.Task.Blocked() != tc.wantBlocked {
+				t.Fatalf("blocked: want %v, got %v", tc.wantBlocked, got.Task.Blocked())
 			}
-			if got.Task.Status != "done" && got.Task.CompletedAt != "" {
+			if got.Task.Status() != "done" && got.Task.CompletedAt != "" {
 				t.Fatalf("expected completed_at to clear outside done status, got %q", got.Task.CompletedAt)
 			}
 		})
@@ -327,7 +327,7 @@ func TestMutateTaskAuthorizesExistingTaskAgainstActualChannel(t *testing.T) {
 		{Slug: "private", Name: "private", Members: []string{"ceo"}},
 	}
 	b.tasks = []teamTask{
-		{ID: "task-1", Channel: "private", Title: "Private task", Owner: "alice", Status: "review", ReviewState: "ready_for_review"},
+		{ID: "task-1", Channel: "private", Title: "Private task", Owner: "alice", status: "review", reviewState: "ready_for_review"},
 	}
 
 	got, err := b.MutateTask(TaskPostRequest{
@@ -338,8 +338,8 @@ func TestMutateTaskAuthorizesExistingTaskAgainstActualChannel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MutateTask complete with actual channel access: %v", err)
 	}
-	if got.Task.Status != "done" {
-		t.Fatalf("status: want done, got %q", got.Task.Status)
+	if got.Task.Status() != "done" {
+		t.Fatalf("status: want done, got %q", got.Task.Status())
 	}
 	if got.Task.CompletedAt == "" {
 		t.Fatal("expected completion timestamp")
@@ -353,7 +353,7 @@ func TestMutateTaskReturnsTypedErrors(t *testing.T) {
 		{Slug: "private", Name: "private", Members: []string{"ceo"}},
 	}
 	b.tasks = []teamTask{
-		{ID: "task-1", Channel: "general", Title: "Task", Owner: "alice", Status: "open"},
+		{ID: "task-1", Channel: "general", Title: "Task", Owner: "alice", status: "open"},
 	}
 
 	cases := []struct {
@@ -417,9 +417,9 @@ func TestMutateTaskReconcilesReviewStateAfterFieldPatches(t *testing.T) {
 				Channel:       "general",
 				Title:         "Task",
 				Owner:         "alice",
-				Status:        "in_progress",
+				status:        "in_progress",
 				ExecutionMode: "local_worktree",
-				ReviewState:   "pending_review",
+				reviewState:   "pending_review",
 			},
 			req:        TaskPostRequest{Action: "review", ReviewState: "not_required"},
 			wantStatus: "review",
@@ -432,9 +432,9 @@ func TestMutateTaskReconcilesReviewStateAfterFieldPatches(t *testing.T) {
 				Channel:     "general",
 				Title:       "Task",
 				Owner:       "alice",
-				Status:      "in_progress",
+				status:      "in_progress",
 				TaskType:    "follow_up",
-				ReviewState: "ready_for_review",
+				reviewState: "ready_for_review",
 			},
 			req:        TaskPostRequest{Action: "resume", ReviewState: "approved"},
 			wantStatus: "in_progress",
@@ -457,11 +457,11 @@ func TestMutateTaskReconcilesReviewStateAfterFieldPatches(t *testing.T) {
 			if err != nil {
 				t.Fatalf("MutateTask %s: %v", tc.req.Action, err)
 			}
-			if got.Task.Status != tc.wantStatus {
-				t.Fatalf("status: want %q, got %q", tc.wantStatus, got.Task.Status)
+			if got.Task.Status() != tc.wantStatus {
+				t.Fatalf("status: want %q, got %q", tc.wantStatus, got.Task.Status())
 			}
-			if got.Task.ReviewState != tc.wantReview {
-				t.Fatalf("review state: want %q, got %q", tc.wantReview, got.Task.ReviewState)
+			if got.Task.ReviewState() != tc.wantReview {
+				t.Fatalf("review state: want %q, got %q", tc.wantReview, got.Task.ReviewState())
 			}
 		})
 	}

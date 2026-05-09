@@ -695,7 +695,7 @@ func TestLoadDoesNotAppendDefaultsAfterBlueprintSeed(t *testing.T) {
 		{Slug: "reviewer", Name: "Reviewer", Role: "Reviewer", PermissionMode: "plan", CreatedBy: "wuphf", CreatedAt: now},
 	}
 	// Seed a task so saveLocked doesn't short-circuit on default state.
-	b.tasks = []teamTask{{ID: "niche-crm-1", Channel: "general", Title: "Choose the niche", Status: "open", CreatedBy: "wuphf", CreatedAt: now, UpdatedAt: now}}
+	b.tasks = []teamTask{{ID: "niche-crm-1", Channel: "general", Title: "Choose the niche", status: "open", CreatedBy: "wuphf", CreatedAt: now, UpdatedAt: now}}
 	if err := b.saveLocked(); err != nil {
 		b.mu.Unlock()
 		t.Fatalf("saveLocked failed: %v", err)

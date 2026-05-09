@@ -116,8 +116,8 @@ func TestFindUnansweredMessagesNexReplyDoesNotCountAsAgentAnswer(t *testing.T) {
 func TestBuildResumePacketWithTasksAndMessages(t *testing.T) {
 	// Suppress broker state path for this test.
 	tasks := []teamTask{
-		{ID: "t1", Title: "Build the login page", Owner: "fe", Status: "in_progress"},
-		{ID: "t2", Title: "Design API schema", Owner: "fe", Status: "pending"},
+		{ID: "t1", Title: "Build the login page", Owner: "fe", status: "in_progress"},
+		{ID: "t2", Title: "Design API schema", Owner: "fe", status: "pending"},
 	}
 	msgs := []channelMessage{
 		{ID: "h1", From: "you", Content: "Can you also add a logout button?", Timestamp: "2026-04-14T10:05:00Z"},
@@ -152,7 +152,7 @@ func TestBuildResumePacketNoTasksNoMessages(t *testing.T) {
 
 func TestBuildResumePacketTasksOnly(t *testing.T) {
 	tasks := []teamTask{
-		{ID: "t1", Title: "Finalize roadmap", Owner: "ceo", Status: "in_progress"},
+		{ID: "t1", Title: "Finalize roadmap", Owner: "ceo", status: "in_progress"},
 	}
 	packet := buildResumePacket("ceo", tasks, nil)
 	if packet == "" {
@@ -231,7 +231,7 @@ func TestBuildResumePacketsIncludesDynamicBrokerMembersOutsideLaunchPack(t *test
 		Channel:   "youtube-factory",
 		Title:     "Restore Remotion dependency path",
 		Owner:     "builder",
-		Status:    "in_progress",
+		status:    "in_progress",
 		CreatedBy: "ceo",
 	}}
 	b.mu.Unlock()
@@ -289,7 +289,7 @@ func TestBuildResumePacketsInFlightTasksIncluded(t *testing.T) {
 	b := newTestBroker(t)
 	b.mu.Lock()
 	b.tasks = []teamTask{
-		{ID: "t1", Title: "Build dashboard", Owner: "fe", Status: "in_progress"},
+		{ID: "t1", Title: "Build dashboard", Owner: "fe", status: "in_progress"},
 	}
 	b.mu.Unlock()
 
@@ -399,9 +399,9 @@ func TestBuildResumePacketsSkipsAgentsNotInPack(t *testing.T) {
 	b.mu.Lock()
 	b.tasks = []teamTask{
 		// "designer" is NOT in the pack below — their task should be skipped.
-		{ID: "t1", Title: "Design the landing page", Owner: "designer", Status: "in_progress"},
+		{ID: "t1", Title: "Design the landing page", Owner: "designer", status: "in_progress"},
 		// "fe" IS in the pack — their task should be included.
-		{ID: "t2", Title: "Build the login form", Owner: "fe", Status: "in_progress"},
+		{ID: "t2", Title: "Build the login form", Owner: "fe", status: "in_progress"},
 	}
 	b.mu.Unlock()
 
@@ -463,8 +463,8 @@ func TestBuildResumePacketsSkipsTaggedAgentsNotInPack(t *testing.T) {
 
 func TestBuildResumePacketIncludesWorktreePath(t *testing.T) {
 	tasks := []teamTask{
-		{ID: "t1", Title: "Build the API", Owner: "be", Status: "in_progress", WorktreePath: "/workspace/feat-api"},
-		{ID: "t2", Title: "No worktree task", Owner: "be", Status: "in_progress", WorktreePath: ""},
+		{ID: "t1", Title: "Build the API", Owner: "be", status: "in_progress", WorktreePath: "/workspace/feat-api"},
+		{ID: "t2", Title: "No worktree task", Owner: "be", status: "in_progress", WorktreePath: ""},
 	}
 	packet := buildResumePacket("be", tasks, nil)
 
@@ -521,7 +521,7 @@ func TestResumeInFlightWorkHeadlessEnqueuesLeadEvenWhenSpecialistsPresent(t *tes
 	b.mu.Lock()
 	// fe has an in-flight task (specialist).
 	b.tasks = []teamTask{
-		{ID: "t1", Title: "Build login form", Owner: "fe", Status: "in_progress"},
+		{ID: "t1", Title: "Build login form", Owner: "fe", status: "in_progress"},
 	}
 	// ceo has an unanswered message (lead).
 	b.messages = []channelMessage{
@@ -590,7 +590,7 @@ func TestBuildResumePacketsUsesLimit50ForRecentHumanMessages(t *testing.T) {
 func TestBuildResumePacketSpecHeader(t *testing.T) {
 	// Spec: header must be "[Session resumed — picking up where you left off]"
 	tasks := []teamTask{
-		{ID: "t1", Title: "Build login", Owner: "fe", Status: "in_progress"},
+		{ID: "t1", Title: "Build login", Owner: "fe", status: "in_progress"},
 	}
 	packet := buildResumePacket("fe", tasks, nil)
 
@@ -606,7 +606,7 @@ func TestBuildResumePacketSpecHeader(t *testing.T) {
 func TestBuildResumePacketSpecSectionTasksLabel(t *testing.T) {
 	// Spec: tasks section label must be "Active tasks:" (not "## Your assigned tasks")
 	tasks := []teamTask{
-		{ID: "t1", Title: "Build login", Owner: "fe", Status: "in_progress"},
+		{ID: "t1", Title: "Build login", Owner: "fe", status: "in_progress"},
 	}
 	packet := buildResumePacket("fe", tasks, nil)
 
@@ -652,7 +652,7 @@ func TestResumeInFlightWorkTUIClaudeRoutesHeadless(t *testing.T) {
 	b := newTestBroker(t)
 	b.mu.Lock()
 	b.tasks = []teamTask{
-		{ID: "t1", Title: "Build login form", Owner: "fe", Status: "in_progress"},
+		{ID: "t1", Title: "Build login form", Owner: "fe", status: "in_progress"},
 	}
 	b.messages = []channelMessage{
 		{ID: "h1", From: "you", Content: "what is the strategy?", Timestamp: "2026-04-14T10:00:00Z"},
@@ -718,7 +718,7 @@ func TestResumeInFlightWorkRoutesPerAgentProviderBinding(t *testing.T) {
 		{Slug: "fe", Name: "Frontend Engineer"},
 	}
 	b.tasks = []teamTask{
-		{ID: "t1", Title: "Build login form", Owner: "fe", Status: "in_progress"},
+		{ID: "t1", Title: "Build login form", Owner: "fe", status: "in_progress"},
 	}
 	b.messages = []channelMessage{
 		{ID: "h1", From: "you", Content: "what is the strategy?", Timestamp: "2026-04-14T10:00:00Z"},

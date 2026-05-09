@@ -27,7 +27,7 @@ func TestSelfHealSignalScanner_EmitsCandidateForResolvedIncident(t *testing.T) {
 		Title:      selfHealingTaskTitle("deploy-bot", "task-7"),
 		Details:    selfHealingTaskDetails("deploy-bot", "task-7", agent.EscalationCapabilityGap, "missing deploy specialist"),
 		Owner:      "deploy-bot",
-		Status:     "done",
+		status:     "done",
 		PipelineID: "incident",
 		TaskType:   "incident",
 		CreatedAt:  now.Add(-30 * time.Minute).Format(time.RFC3339),
@@ -73,7 +73,7 @@ func TestSelfHealSignalScanner_SkipsOpenIncidents(t *testing.T) {
 		Title:      selfHealingTaskTitle("deploy-bot", "task-99"),
 		Details:    "still investigating",
 		Owner:      "deploy-bot",
-		Status:     "in_progress", // not done
+		status:     "in_progress", // not done
 		PipelineID: "incident",
 		CreatedAt:  now.Format(time.RFC3339),
 		UpdatedAt:  now.Format(time.RFC3339),
@@ -98,7 +98,7 @@ func TestSelfHealSignalScanner_SkipsNonIncidentTasks(t *testing.T) {
 		Title:      "Refactor onboarding flow",
 		Details:    "general engineering work",
 		Owner:      "eng-bot",
-		Status:     "done",
+		status:     "done",
 		PipelineID: "general", // not incident
 		CreatedAt:  now.Format(time.RFC3339),
 		UpdatedAt:  now.Format(time.RFC3339),
@@ -123,7 +123,7 @@ func TestSelfHealSignalScanner_SkipsIncidentWithoutSelfHealPrefix(t *testing.T) 
 		Title:      "Outage triage: payments down", // missing the Self-heal prefix
 		Details:    "post-mortem complete",
 		Owner:      "ops-bot",
-		Status:     "done",
+		status:     "done",
 		PipelineID: "incident",
 		CreatedAt:  now.Format(time.RFC3339),
 		UpdatedAt:  now.Format(time.RFC3339),
@@ -148,7 +148,7 @@ func TestSelfHealSignalScanner_AdvancesCutoffAcrossPasses(t *testing.T) {
 		Title:      selfHealingTaskTitle("deploy-bot", "task-7"),
 		Details:    selfHealingTaskDetails("deploy-bot", "task-7", agent.EscalationCapabilityGap, "missing relay"),
 		Owner:      "deploy-bot",
-		Status:     "done",
+		status:     "done",
 		PipelineID: "incident",
 		CreatedAt:  now.Add(-time.Hour).Format(time.RFC3339),
 		UpdatedAt:  now.Format(time.RFC3339),

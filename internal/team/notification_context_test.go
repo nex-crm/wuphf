@@ -234,8 +234,8 @@ func TestNotificationContext_ThreadMessageIDs_BFS(t *testing.T) {
 
 func TestNotificationContext_TaskNotificationContext_LeadGetsAllChannels(t *testing.T) {
 	all := []teamTask{
-		{ID: "t1", Channel: "general", Title: "general task", Owner: "ceo", Status: "in_progress", UpdatedAt: "2026-01-01T00:00:00Z"},
-		{ID: "t2", Channel: "engineering", Title: "eng task", Owner: "ceo", Status: "in_progress", UpdatedAt: "2026-04-01T00:00:00Z"},
+		{ID: "t1", Channel: "general", Title: "general task", Owner: "ceo", status: "in_progress", UpdatedAt: "2026-01-01T00:00:00Z"},
+		{ID: "t2", Channel: "engineering", Title: "eng task", Owner: "ceo", status: "in_progress", UpdatedAt: "2026-04-01T00:00:00Z"},
 	}
 	b := newTestNotifyContextBuilder(t, func(b *notificationContextBuilder) {
 		b.allTasks = func() []teamTask { return all }
@@ -272,9 +272,9 @@ func TestNotificationContext_TaskNotificationContext_LeadEmptyShowsCreateNextOwn
 
 func TestNotificationContext_TaskNotificationContext_LeadAlertsOnReviewBacklog(t *testing.T) {
 	tasks := []teamTask{
-		{ID: "t1", Title: "ready 1", Owner: "eng", Status: "review", UpdatedAt: "2026-01-01T00:00:00Z"},
-		{ID: "t2", Title: "ready 2", Owner: "eng", Status: "in_progress", ReviewState: "ready_for_review", UpdatedAt: "2026-04-01T00:00:00Z"},
-		{ID: "t3", Title: "active", Owner: "eng", Status: "in_progress", UpdatedAt: "2025-12-01T00:00:00Z"},
+		{ID: "t1", Title: "ready 1", Owner: "eng", status: "review", UpdatedAt: "2026-01-01T00:00:00Z"},
+		{ID: "t2", Title: "ready 2", Owner: "eng", status: "in_progress", reviewState: "ready_for_review", UpdatedAt: "2026-04-01T00:00:00Z"},
+		{ID: "t3", Title: "active", Owner: "eng", status: "in_progress", UpdatedAt: "2025-12-01T00:00:00Z"},
 	}
 	b := newTestNotifyContextBuilder(t, func(b *notificationContextBuilder) {
 		b.allTasks = func() []teamTask { return tasks }
@@ -288,8 +288,8 @@ func TestNotificationContext_TaskNotificationContext_LeadAlertsOnReviewBacklog(t
 
 func TestNotificationContext_TaskNotificationContext_NonLeadOnlyOwnedTasks(t *testing.T) {
 	tasks := []teamTask{
-		{ID: "t1", Channel: "general", Title: "mine", Owner: "eng", Status: "in_progress"},
-		{ID: "t2", Channel: "general", Title: "theirs", Owner: "ceo", Status: "in_progress"},
+		{ID: "t1", Channel: "general", Title: "mine", Owner: "eng", status: "in_progress"},
+		{ID: "t2", Channel: "general", Title: "theirs", Owner: "ceo", status: "in_progress"},
 	}
 	b := newTestNotifyContextBuilder(t, func(b *notificationContextBuilder) {
 		b.channelTasks = func(string) []teamTask { return tasks }
@@ -305,7 +305,7 @@ func TestNotificationContext_TaskNotificationContext_NonLeadOnlyOwnedTasks(t *te
 
 func TestNotificationContext_RelevantTaskForTarget_ThreadIDMatch(t *testing.T) {
 	tasks := []teamTask{
-		{ID: "t1", Owner: "eng", Status: "in_progress", ThreadID: "msg-123"},
+		{ID: "t1", Owner: "eng", status: "in_progress", ThreadID: "msg-123"},
 	}
 	b := newTestNotifyContextBuilder(t, func(b *notificationContextBuilder) {
 		b.allTasks = func() []teamTask { return tasks }
@@ -318,8 +318,8 @@ func TestNotificationContext_RelevantTaskForTarget_ThreadIDMatch(t *testing.T) {
 
 func TestNotificationContext_RelevantTaskForTarget_FallsBackToScore(t *testing.T) {
 	tasks := []teamTask{
-		{ID: "t-low", Owner: "eng", Status: "in_progress"},
-		{ID: "t-high", Owner: "eng", Status: "in_progress"},
+		{ID: "t-low", Owner: "eng", status: "in_progress"},
+		{ID: "t-high", Owner: "eng", status: "in_progress"},
 	}
 	b := newTestNotifyContextBuilder(t, func(b *notificationContextBuilder) {
 		b.allTasks = func() []teamTask { return tasks }
@@ -338,8 +338,8 @@ func TestNotificationContext_RelevantTaskForTarget_FallsBackToScore(t *testing.T
 
 func TestNotificationContext_RelevantTaskForTarget_SkipsDoneAndOtherOwners(t *testing.T) {
 	tasks := []teamTask{
-		{ID: "done", Owner: "eng", Status: "done"},
-		{ID: "ot", Owner: "fe", Status: "in_progress"},
+		{ID: "done", Owner: "eng", status: "done"},
+		{ID: "ot", Owner: "fe", status: "in_progress"},
 	}
 	b := newTestNotifyContextBuilder(t, func(b *notificationContextBuilder) {
 		b.allTasks = func() []teamTask { return tasks }
@@ -360,7 +360,7 @@ func TestNotificationContext_RelevantTaskForTarget_DeepReplyResolvesViaUltimateR
 		{ID: "leaf", Channel: "general", From: "you", ReplyTo: "mid"},
 	}
 	tasks := []teamTask{
-		{ID: "t1", Owner: "eng", Status: "in_progress", ThreadID: "root"},
+		{ID: "t1", Owner: "eng", status: "in_progress", ThreadID: "root"},
 	}
 	b := newTestNotifyContextBuilder(t, func(b *notificationContextBuilder) {
 		b.channelMessages = func(string) []channelMessage { return msgs }
@@ -461,7 +461,7 @@ func TestNotificationContext_BuildTaskExecutionPacket_LocalWorktreeAddsCutLineAn
 	task := teamTask{
 		ID:            "t1",
 		Title:         "build feature",
-		Status:        "in_progress",
+		status:        "in_progress",
 		ExecutionMode: "local_worktree",
 		WorktreePath:  "/tmp/worktree",
 	}
@@ -484,7 +484,7 @@ func TestNotificationContext_BuildTaskExecutionPacket_NamesFileTargetsFromTitleA
 		ID:      "t1",
 		Title:   "Update `web/src/App.tsx`",
 		Details: "Also touch `internal/team/launcher.go`",
-		Status:  "in_progress",
+		status:  "in_progress",
 	}
 	got := b.BuildTaskExecutionPacket("eng", officeActionLog{Actor: "ceo"}, task, "kickoff")
 	if !strings.Contains(got, "Named file targets: web/src/App.tsx, internal/team/launcher.go") {
@@ -499,7 +499,7 @@ func TestNotificationContext_TaskNotificationContent_HumanizedHeader(t *testing.
 		Channel: "general",
 		Title:   "go",
 		Owner:   "eng",
-		Status:  "in_progress",
+		status:  "in_progress",
 	})
 	if !strings.Contains(got, "Task unblocked") {
 		t.Errorf("expected unblocked verb; got %q", got)
@@ -513,7 +513,7 @@ func TestNotificationContext_TaskNotificationContent_HumanizedHeader(t *testing.
 // dispatch paths see the same answers as the type does in isolation.
 func TestLauncher_NotifyContextWiringDelegates(t *testing.T) {
 	b := &Broker{tasks: []teamTask{
-		{ID: "t1", Channel: "general", Title: "thing", Owner: "ceo", Status: "in_progress"},
+		{ID: "t1", Channel: "general", Title: "thing", Owner: "ceo", status: "in_progress"},
 	}}
 	l := &Launcher{
 		broker: b,

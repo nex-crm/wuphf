@@ -42,7 +42,7 @@ func TestMemoryWorkflowReconcilerNoOp(t *testing.T) {
 		ID:        "task-1",
 		TaskType:  "research",
 		Title:     "Research prior context for onboarding",
-		Status:    "in_progress",
+		status:    "in_progress",
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
@@ -77,7 +77,7 @@ func TestMemoryWorkflowReconcilerRepairsStaleWorkflow(t *testing.T) {
 		ID:        "task-1",
 		TaskType:  "research",
 		Title:     "Research prior context for onboarding",
-		Status:    "in_progress",
+		status:    "in_progress",
 		CreatedAt: "2026-04-30T09:59:00Z",
 		UpdatedAt: "2026-04-30T09:59:00Z",
 		MemoryWorkflow: &MemoryWorkflow{
@@ -121,7 +121,7 @@ func TestMemoryWorkflowReconcilerMarksMissingArtifacts(t *testing.T) {
 		ID:        "task-1",
 		TaskType:  "research",
 		Title:     "Research prior context for onboarding",
-		Status:    "in_progress",
+		status:    "in_progress",
 		CreatedAt: "2026-04-30T09:59:00Z",
 		UpdatedAt: "2026-04-30T09:59:00Z",
 		MemoryWorkflow: &MemoryWorkflow{
@@ -160,7 +160,7 @@ func TestMemoryWorkflowReconcilerNilWorkerSkipsArtifactExistenceRepairs(t *testi
 		ID:        "task-1",
 		TaskType:  "research",
 		Title:     "Research prior context for onboarding",
-		Status:    "in_progress",
+		status:    "in_progress",
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
@@ -209,7 +209,7 @@ func TestBrokerRunMemoryWorkflowReconcilerManualTrigger(t *testing.T) {
 			ID:        "task-1",
 			TaskType:  "research",
 			Title:     "Research prior context for onboarding",
-			Status:    "in_progress",
+			status:    "in_progress",
 			CreatedAt: "2026-04-30T09:59:00Z",
 			UpdatedAt: "2026-04-30T09:59:00Z",
 			MemoryWorkflow: &MemoryWorkflow{

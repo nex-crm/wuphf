@@ -111,7 +111,7 @@ func TestPostEscalation_DoesNotReuseCanceledSelfHealingTask(t *testing.T) {
 	b.mu.Lock()
 	for i := range b.tasks {
 		if b.tasks[i].ID == canceledID {
-			b.tasks[i].Status = "canceled"
+			b.tasks[i].status = "canceled"
 			break
 		}
 	}
@@ -133,7 +133,7 @@ func TestPostEscalation_DoesNotReuseCanceledSelfHealingTask(t *testing.T) {
 	var replacement teamTask
 	for _, task := range selfHealingTasks {
 		if task.ID == canceledID {
-			if task.Status != "canceled" {
+			if task.status != "canceled" {
 				t.Fatalf("expected original self-healing task to stay canceled, got %+v", task)
 			}
 			continue
@@ -143,7 +143,7 @@ func TestPostEscalation_DoesNotReuseCanceledSelfHealingTask(t *testing.T) {
 	if replacement.ID == "" {
 		t.Fatalf("expected replacement self-healing task, got %+v", selfHealingTasks)
 	}
-	if replacement.Status != "in_progress" {
+	if replacement.Status() != "in_progress" {
 		t.Fatalf("expected replacement self-healing task to be actionable, got %+v", replacement)
 	}
 	if !strings.Contains(replacement.Details, "second stuck event") || !strings.Contains(replacement.Details, "third stuck event") {
@@ -195,7 +195,7 @@ func TestPostEscalation_CapsActiveSelfHealingPerAgent(t *testing.T) {
 		if !isSelfHealingTaskTitle(candidate.Title) {
 			continue
 		}
-		if isTerminalTeamTaskStatus(candidate.Status) {
+		if isTerminalTeamTaskStatus(candidate.Status()) {
 			continue
 		}
 		if !strings.Contains(candidate.Title, "@eng") {
@@ -224,7 +224,7 @@ func countActiveSelfHealsForAgent(b *Broker, agentSlug string) int {
 	needle := "@" + agentSlug + " "
 	n := 0
 	for _, task := range b.AllTasks() {
-		if !isSelfHealingTaskTitle(task.Title) || isTerminalTeamTaskStatus(task.Status) {
+		if !isSelfHealingTaskTitle(task.Title) || isTerminalTeamTaskStatus(task.status) {
 			continue
 		}
 		if strings.Contains(task.Title, needle) {

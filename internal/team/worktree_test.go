@@ -228,7 +228,7 @@ func TestDefaultPrepareTaskWorktreeOverlaysCompletedSiblingTaskWorkspace(t *test
 		Tasks: []teamTask{
 			{
 				ID:             "task-3",
-				Status:         "done",
+				status:         "done",
 				ExecutionMode:  "local_worktree",
 				WorktreePath:   firstPath,
 				WorktreeBranch: firstBranch,
@@ -329,21 +329,21 @@ func TestDefaultPrepareTaskWorktreeSkipsDuplicateAndMissingCompletedSiblingSourc
 		Tasks: []teamTask{
 			{
 				ID:             "task-2",
-				Status:         "done",
+				status:         "done",
 				ExecutionMode:  "local_worktree",
 				WorktreePath:   firstPath,
 				WorktreeBranch: firstBranch,
 			},
 			{
 				ID:             "task-11",
-				Status:         "done",
+				status:         "done",
 				ExecutionMode:  "local_worktree",
 				WorktreePath:   firstPath,
 				WorktreeBranch: firstBranch,
 			},
 			{
 				ID:             "task-12",
-				Status:         "review",
+				status:         "review",
 				ExecutionMode:  "local_worktree",
 				WorktreePath:   filepath.Join(t.TempDir(), "missing-worktree"),
 				WorktreeBranch: "wuphf-missing-task-12",
