@@ -25,6 +25,7 @@ if [[ -n "${tag}" ]]; then
     version="${tag}"
     tag="v${tag}"
   fi
+  version="${version%-rewrite}"
 else
   version="$(cd "${app_dir}" && bun -e 'process.stdout.write(require("./package.json").version)')"
   tag="v${version}"

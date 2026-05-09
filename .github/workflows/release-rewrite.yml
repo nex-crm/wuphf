@@ -78,7 +78,8 @@ jobs:
         if: needs.detect-secrets.outputs.is_release == 'true'
         working-directory: apps/installer-stub
         run: |
-          version="${GITHUB_REF_NAME#v}"
+          tag="${GITHUB_REF_NAME#v}"
+          version="${tag%-rewrite}"
           echo "WUPHF_BUILD_VERSION=${version}" >> "${GITHUB_ENV}"
           bun -e "const fs = require('node:fs'); const pkg = require('./package.json'); pkg.version = process.env.WUPHF_BUILD_VERSION; pkg.wuphfBuildChannel = process.env.WUPHF_BUILD_CHANNEL || 'dev'; fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');"
       - name: Detect Apple signing secrets
@@ -226,7 +227,8 @@ jobs:
         shell: bash
         working-directory: apps/installer-stub
         run: |
-          version="${GITHUB_REF_NAME#v}"
+          tag="${GITHUB_REF_NAME#v}"
+          version="${tag%-rewrite}"
           echo "WUPHF_BUILD_VERSION=${version}" >> "${GITHUB_ENV}"
           bun -e "const fs = require('node:fs'); const pkg = require('./package.json'); pkg.version = process.env.WUPHF_BUILD_VERSION; pkg.wuphfBuildChannel = process.env.WUPHF_BUILD_CHANNEL || 'dev'; fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');"
       - name: Detect Azure signing secrets
@@ -397,7 +399,8 @@ jobs:
         if: needs.detect-secrets.outputs.is_release == 'true'
         working-directory: apps/installer-stub
         run: |
-          version="${GITHUB_REF_NAME#v}"
+          tag="${GITHUB_REF_NAME#v}"
+          version="${tag%-rewrite}"
           echo "WUPHF_BUILD_VERSION=${version}" >> "${GITHUB_ENV}"
           bun -e "const fs = require('node:fs'); const pkg = require('./package.json'); pkg.version = process.env.WUPHF_BUILD_VERSION; pkg.wuphfBuildChannel = process.env.WUPHF_BUILD_CHANNEL || 'dev'; fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');"
       - name: Build Linux PR artifacts

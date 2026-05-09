@@ -17,7 +17,10 @@ and Azure signing secrets out of PR jobs and out of non-signing build steps.
 ## Workflow Expectations
 
 - `pull_request` runs are restricted to PRs targeting `main` and use `pr` mode.
-- Tag pushes matching `v[0-9]*-rewrite` use `production` mode.
+- Tag pushes matching semver + `-rewrite`, for example `v1.2.3-rewrite`, use
+  `production` mode.
+- Release builds rewrite `apps/installer-stub/package.json` before packaging:
+  the app version is the tag without the leading `v` and trailing `-rewrite`.
 - Signing secrets are injected only into the platform-specific detection,
   keychain, notarization, or Azure signing steps that need them.
 - The publish job also uses `production-release` so draft release upload remains
