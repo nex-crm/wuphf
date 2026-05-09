@@ -705,10 +705,22 @@ func makeHandleScan(wikiRoot string) http.HandlerFunc {
 			return
 		}
 		// Security: file path prefix guard — only files staged under the
-		// wuphf-upload temp prefix are permitted.
-		uploadPrefix := filepath.Join(os.TempDir(), "wuphf-upload-")
+		// wuphf-upload temp prefix are permitted. EvalSymlinks resolves any
+		// symlinks so a link inside the upload dir cannot escape to an
+		// arbitrary path. Resolve os.TempDir() itself so the prefix matches
+		// on platforms (e.g. macOS) where /tmp is a symlink to /private/tmp.
+		resolvedTmpDir, tmpErr := filepath.EvalSymlinks(os.TempDir())
+		if tmpErr != nil {
+			resolvedTmpDir = os.TempDir()
+		}
+		uploadPrefix := filepath.Join(resolvedTmpDir, "wuphf-upload-")
 		for _, p := range req.FilePaths {
-			if !strings.HasPrefix(filepath.Clean(p), uploadPrefix) {
+			resolved, symlinkErr := filepath.EvalSymlinks(p)
+			if symlinkErr != nil {
+				http.Error(w, "invalid file path", http.StatusBadRequest)
+				return
+			}
+			if !strings.HasPrefix(resolved, uploadPrefix) {
 				http.Error(w, "invalid file path", http.StatusBadRequest)
 				return
 			}
@@ -776,6 +788,11 @@ func handleUploadContext(w http.ResponseWriter, r *http.Request) {
 	files := r.MultipartForm.File["files"]
 	if len(files) == 0 {
 		http.Error(w, "no files uploaded", http.StatusBadRequest)
+		return
+	}
+	const maxFileCount = 20
+	if len(files) > maxFileCount {
+		http.Error(w, "too many files", http.StatusBadRequest)
 		return
 	}
 	var paths []string

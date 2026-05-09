@@ -743,9 +743,9 @@ func genericTruncateText(value string, max int) string {
 		return value
 	}
 	if max <= 3 {
-		return value[:max]
+		return safeUTF8Truncate(value, max)
 	}
-	return strings.TrimSpace(value[:max-3]) + "..."
+	return strings.TrimSpace(safeUTF8Truncate(value, max-3)) + "..."
 }
 
 func genericTernaryString(ok bool, whenTrue, whenFalse string) string {

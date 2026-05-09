@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -15,16 +16,18 @@ import (
 )
 
 var (
-	opencodeLookPath = runtimebin.LookPath
-	opencodeCommand  = exec.Command
-	opencodeGetwd    = os.Getwd
+	opencodeLookPath       = runtimebin.LookPath
+	opencodeCommand        = exec.Command
+	opencodeCommandContext = exec.CommandContext
+	opencodeGetwd          = os.Getwd
 )
 
 func init() {
 	Register(&Entry{
-		Kind:     KindOpencode,
-		StreamFn: CreateOpencodeCLIStreamFn,
-		OneShot:  RunOpencodeOneShot,
+		Kind:       KindOpencode,
+		StreamFn:   CreateOpencodeCLIStreamFn,
+		OneShot:    RunOpencodeOneShot,
+		OneShotCtx: RunOpencodeOneShotCtx,
 		Capabilities: Capabilities{
 			PaneEligible:    false,
 			SupportsOneShot: true,
@@ -112,6 +115,24 @@ func RunOpencodeOneShot(systemPrompt, prompt, cwd string) (string, error) {
 	return runOpencodeOnce(systemPrompt, prompt, cwd, nil)
 }
 
+// RunOpencodeOneShotCtx runs Opencode once and binds the child process lifetime to ctx.
+func RunOpencodeOneShotCtx(ctx context.Context, systemPrompt, prompt, cwd string) (string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	if cwd == "" {
+		var err error
+		cwd, err = opencodeGetwd()
+		if err != nil {
+			return "", err
+		}
+	}
+	return runOpencodeOnceCtx(ctx, systemPrompt, prompt, cwd, nil)
+}
+
 // runOpencodeOnce invokes `opencode run` with the caller's prompt as the final
 // variadic positional argument (Opencode has no stdin-prompt convention),
 // streams plain stdout lines via onLine (if provided), and returns the full
@@ -120,6 +141,17 @@ func runOpencodeOnce(systemPrompt, prompt, cwd string, onLine func(string)) (str
 	promptText := buildOpencodePrompt(systemPrompt, prompt)
 	args := buildOpencodeArgs(config.ResolveOpencodeModel(), promptText)
 	cmd := opencodeCommand("opencode", args...)
+	return runOpencodeCommand(context.Background(), cmd, cwd, onLine)
+}
+
+func runOpencodeOnceCtx(ctx context.Context, systemPrompt, prompt, cwd string, onLine func(string)) (string, error) {
+	promptText := buildOpencodePrompt(systemPrompt, prompt)
+	args := buildOpencodeArgs(config.ResolveOpencodeModel(), promptText)
+	cmd := opencodeCommandContext(ctx, "opencode", args...)
+	return runOpencodeCommand(ctx, cmd, cwd, onLine)
+}
+
+func runOpencodeCommand(ctx context.Context, cmd *exec.Cmd, cwd string, onLine func(string)) (string, error) {
 	cmd.Dir = cwd
 	// NO_COLOR suppresses ANSI decoration in Opencode's default formatted
 	// output so downstream line scanners see clean text.
@@ -142,6 +174,9 @@ func runOpencodeOnce(systemPrompt, prompt, cwd string, onLine func(string)) (str
 	// fallback for bufio.ErrTooLong is gone with the underlying scanner.
 	output, readErr := readOpencodeStream(stdout, onLine)
 	if err := cmd.Wait(); err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return "", ctxErr
+		}
 		detail := strings.TrimSpace(stderr.String())
 		if detail != "" {
 			return "", fmt.Errorf("%w: %s", err, detail)
@@ -149,6 +184,9 @@ func runOpencodeOnce(systemPrompt, prompt, cwd string, onLine func(string)) (str
 		return "", err
 	}
 	if readErr != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return "", ctxErr
+		}
 		return "", readErr
 	}
 	text := strings.TrimSpace(output)

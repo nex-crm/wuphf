@@ -1,5 +1,5 @@
 // biome-ignore-all lint/a11y/useKeyWithClickEvents: Pointer handler is paired with an existing modal, image, or routed-control keyboard path; preserving current interaction model.
-import { useCallback, useEffect, useRef } from "react";
+import { useEffect, useRef } from "react";
 
 import { useAppStore } from "../../stores/app";
 import { SLASH_COMMANDS } from "../messages/Autocomplete";
@@ -88,6 +88,8 @@ interface HelpModalProps {
   onClose: () => void;
 }
 
+const HELP_MODAL_TITLE_ID = "help-modal-title";
+
 /**
  * Full-screen help surface opened by the `/help` slash command or the
  * global `?` shortcut. Renders the complete SLASH_COMMANDS list alongside
@@ -135,27 +137,28 @@ export function HelpModal({ open, onClose }: HelpModalProps) {
     };
   }, [open]);
 
-  const handleOverlayClick = useCallback(
-    (e: React.MouseEvent) => {
-      if (e.target === e.currentTarget) onClose();
-    },
-    [onClose],
-  );
-
   if (!open) return null;
 
   return (
-    <div
-      className="help-overlay"
-      role="dialog"
-      aria-modal="true"
-      aria-label="Help — slash commands and keyboard shortcuts"
-      onClick={handleOverlayClick}
-    >
-      <div className="help-modal card">
+    <div className="help-overlay">
+      <button
+        type="button"
+        className="help-backdrop"
+        onClick={onClose}
+        tabIndex={-1}
+        aria-label="Close help backdrop"
+      />
+      <div
+        className="help-modal card"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={HELP_MODAL_TITLE_ID}
+      >
         <header className="help-header">
           <div>
-            <h2 className="help-title">Keyboard + command reference</h2>
+            <h2 id={HELP_MODAL_TITLE_ID} className="help-title">
+              Keyboard + command reference
+            </h2>
             <p className="help-subtitle">
               Run the whole app without a mouse. Press <Kbd size="sm">?</Kbd>{" "}
               anytime to open this pane.

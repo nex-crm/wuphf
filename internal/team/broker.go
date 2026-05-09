@@ -390,16 +390,25 @@ func (b *Broker) ChannelStore() *channel.Store {
 func (b *Broker) Start() error {
 	b.ensureWikiWorker()
 	// Seed company context from previous onboarding skip, if pending.
-	// The flag is cleared before the goroutine launches to prevent a second
-	// broker instance from triggering a duplicate run. runCompanySeedJob
-	// re-arms PendingCompanySeed on error or NeedsRetry, so transient
-	// failures are retried on the next startup.
+	// configMu guards the read-modify-write so a concurrent broker retry
+	// goroutine re-arming the flag under the same lock cannot race with
+	// this claim. runCompanySeedJob re-arms PendingCompanySeed on error
+	// or NeedsRetry, so transient failures are retried on the next startup.
+	var shouldSeed bool
+	var seedCfg config.Config
+	b.configMu.Lock()
 	if cfg, err := config.Load(); err == nil && cfg.PendingCompanySeed {
 		cfg.PendingCompanySeed = false
 		if err := config.Save(cfg); err != nil {
 			log.Printf("broker: failed to clear PendingCompanySeed: %v", err)
+		} else {
+			shouldSeed = true
+			seedCfg = cfg
 		}
-		go b.runCompanySeedJob(cfg)
+	}
+	b.configMu.Unlock()
+	if shouldSeed {
+		go b.runCompanySeedJob(seedCfg)
 	}
 	b.ensureWikiSectionsCache()
 	b.ensureReviewLog()

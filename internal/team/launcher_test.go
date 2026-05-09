@@ -2480,8 +2480,20 @@ func TestProcessDueTaskJobResumesRateLimitedBlockedTask(t *testing.T) {
 		t.Fatalf("block task: %v changed=%v", err, changed)
 	}
 
-	l := &Launcher{broker: b, sessionName: "test"}
-	l.scheduler().processTaskJob(schedulerJob{
+	clock := newManualClock(time.Date(2026, 4, 16, 0, 0, 0, 0, time.UTC))
+	delivered := 0
+	var deliveredAction officeActionLog
+	var deliveredTask teamTask
+	s := &watchdogScheduler{
+		broker: b,
+		clock:  clock,
+		deliverTask: func(action officeActionLog, task teamTask) {
+			delivered++
+			deliveredAction = action
+			deliveredTask = task
+		},
+	}
+	s.processTaskJob(schedulerJob{
 		Slug:       normalizeSchedulerSlug("recheck", "client-loop", "task", task.ID),
 		Kind:       "recheck",
 		TargetType: "task",
@@ -2495,6 +2507,12 @@ func TestProcessDueTaskJobResumesRateLimitedBlockedTask(t *testing.T) {
 	}
 	if resumed.Blocked || resumed.Status != "in_progress" {
 		t.Fatalf("expected blocked task to resume after retry window, got %+v", resumed)
+	}
+	if delivered != 1 {
+		t.Fatalf("expected one resumed task delivery, got %d", delivered)
+	}
+	if deliveredAction.Kind != "task_unblocked" || deliveredTask.ID != task.ID {
+		t.Fatalf("unexpected resumed task delivery action=%+v task=%+v", deliveredAction, deliveredTask)
 	}
 }
 

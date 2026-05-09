@@ -32,11 +32,7 @@ import (
 // defaultLLMCall shells out to the user's configured LLM CLI.
 // Extracted so tests can replace it via SynthesizerConfig.LLMCall.
 func defaultLLMCall(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
-	// RunConfiguredOneShot does not take a context; we rely on the OS's
-	// process group cleanup when our ctx deadline fires. The synthesize()
-	// layer owns the deadline via context.WithTimeout.
-	_ = ctx
-	return provider.RunConfiguredOneShot(systemPrompt, userPrompt, "")
+	return provider.RunConfiguredOneShotCtx(ctx, systemPrompt, userPrompt, "")
 }
 
 // ArchivistAuthor is the synthetic commit author for every brief update.

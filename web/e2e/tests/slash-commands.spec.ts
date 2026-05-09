@@ -86,8 +86,10 @@ test.describe("wuphf web slash commands", () => {
     await composer.fill("/help ");
     await composer.press("Enter");
 
-    // Help modal: role="dialog", className="help-overlay" (HelpModal.tsx:132).
-    const dialog = page.locator('.help-overlay[role="dialog"]');
+    // Help modal: the dialog semantics live on the card, not the backdrop.
+    const dialog = page.getByRole("dialog", {
+      name: "Keyboard + command reference",
+    });
     await expect(dialog).toBeVisible({ timeout: 5_000 });
 
     // Composer must clear after a consumed command (Composer.tsx — resetComposer).

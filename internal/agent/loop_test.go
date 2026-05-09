@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // mockStreamFn returns a StreamFn that yields a single text chunk.
@@ -59,6 +60,50 @@ func newTestLoop(t *testing.T, streamFn StreamFn) (*AgentLoop, string) {
 
 	loop := NewAgentLoop(config, tools, sessions, queues, streamFn, nil, nil)
 	return loop, dir
+}
+
+func TestStreamLLMReceiveStopsOnCancel(t *testing.T) {
+	streamStarted := make(chan struct{}, 1)
+	streamFn := func(msgs []Message, tools []AgentTool) <-chan StreamChunk {
+		select {
+		case streamStarted <- struct{}{}:
+		default:
+		}
+		return make(chan StreamChunk)
+	}
+	loop, _ := newTestLoop(t, streamFn)
+	loop.queues.FollowUp("test-agent", "cancel the blocked stream")
+	loop.Start()
+
+	if err := loop.Tick(); err != nil {
+		t.Fatalf("build context tick: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- loop.Tick()
+	}()
+
+	select {
+	case <-streamStarted:
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for stream to start")
+	}
+
+	loop.Stop()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("stream tick returned error: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("stream tick did not return after cancellation")
+	}
+
+	if state := loop.GetState(); state.Phase != PhaseIdle {
+		t.Fatalf("phase after cancellation = %s, want %s", state.Phase, PhaseIdle)
+	}
 }
 
 func TestFullTickCycle(t *testing.T) {

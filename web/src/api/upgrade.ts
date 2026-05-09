@@ -1,5 +1,7 @@
 import { get, postWithTimeout } from "./client";
 
+export const UPGRADE_CHECK_QUERY_KEY = ["upgrade-check"] as const;
+
 export type UpgradeInstallMethod = "global" | "local" | "unknown";
 
 export interface UpgradeCheckResponse {

@@ -59,6 +59,20 @@ export function stripV(v: string): string {
   return v.trim().replace(/^v/, "");
 }
 
+// Render a buildinfo Version string for display. Returns the bare sentinel
+// (`dev`) instead of `vdev` so the chip and modal don't claim a version
+// number that doesn't exist; numeric versions get the canonical `v` prefix.
+// Empty / null input → fallback (default `unknown`).
+export function formatVersion(
+  v: string | null | undefined,
+  fallback: string = "unknown",
+): string {
+  if (!v) return fallback;
+  const stripped = stripV(v);
+  if (stripped === "" || stripped === "dev") return stripped || fallback;
+  return `v${stripped}`;
+}
+
 // Compare dotted-numeric versions. Pre-release (`-rc.1`) AND build-metadata
 // (`+build.5`) suffixes are stripped before comparison so all of
 // `0.79.10`, `0.79.10-rc.1`, `0.79.10+build.5` sort equal — matches the Go

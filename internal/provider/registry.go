@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"context"
 	"fmt"
 	"sync"
 
@@ -33,14 +34,17 @@ type Capabilities struct {
 
 // Entry is a registered provider's runtime hooks plus its capabilities.
 //
-// StreamFn is required (every provider must support streaming). OneShot is
-// optional — providers without a one-shot implementation set Capabilities
-// .SupportsOneShot = false and leave OneShot nil; RunConfiguredOneShot then
-// falls back to claude-code.
+// StreamFn is required (every provider must support streaming). OneShotCtx is
+// preferred for one-shot calls because it lets callers cancel the underlying
+// provider subprocess. OneShot remains for test and compatibility providers.
+// Providers without a one-shot implementation set Capabilities.SupportsOneShot
+// = false and leave both one-shot hooks nil; RunConfiguredOneShot then falls
+// back to claude-code.
 type Entry struct {
 	Kind         string
 	StreamFn     func(slug string) agent.StreamFn
 	OneShot      func(systemPrompt, prompt, cwd string) (string, error)
+	OneShotCtx   func(ctx context.Context, systemPrompt, prompt, cwd string) (string, error)
 	Capabilities Capabilities
 }
 

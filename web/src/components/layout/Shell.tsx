@@ -7,6 +7,7 @@ import { TeamMemberWelcome } from "../join/TeamMemberWelcome";
 import { ThreadPanel } from "../messages/ThreadPanel";
 import { SearchModal } from "../search/SearchModal";
 import { HelpModalHost } from "../ui/HelpModal";
+import { VersionModalHost } from "../ui/VersionModal";
 import { WorkspaceRail } from "../workspaces/WorkspaceRail";
 import { ChannelHeader } from "./ChannelHeader";
 import { DisconnectBanner } from "./DisconnectBanner";
@@ -43,6 +44,7 @@ export function Shell({ children }: ShellProps) {
       <CommandPaletteHost />
       <SearchModal />
       <HelpModalHost />
+      <VersionModalHost />
     </div>
   );
 }
