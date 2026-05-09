@@ -225,6 +225,7 @@ jobs:
           AZURE_SIGNING_ACCOUNT_NAME: ${{ secrets.AZURE_SIGNING_ACCOUNT_NAME }}
           AZURE_CERT_PROFILE_NAME: ${{ secrets.AZURE_CERT_PROFILE_NAME }}
           AZURE_ENDPOINT: ${{ secrets.AZURE_ENDPOINT }}
+          AZURE_EXPECTED_PUBLISHER_NAME: ${{ secrets.AZURE_EXPECTED_PUBLISHER_NAME }}
         run: bash apps/installer-stub/scripts/detect-signing-secrets.sh
       - name: Build Windows PR artifacts
         if: needs.detect-secrets.outputs.is_release != 'true'
@@ -250,6 +251,88 @@ jobs:
           file-digest: SHA256
           timestamp-rfc3161: http://timestamp.acs.microsoft.com
           timestamp-digest: SHA256
+          timeout: 1800
+      - name: Wait before Azure signing retry 2
+        if: needs.detect-secrets.outputs.is_release == 'true' && steps.sign_windows_1.outcome == 'failure'
+        shell: pwsh
+        run: Start-Sleep -Seconds 30
+      - name: Sign Windows artifacts (attempt 2)
+        id: sign_windows_2
+        if: needs.detect-secrets.outputs.is_release == 'true' && steps.sign_windows_1.outcome == 'failure'
+        continue-on-error: true
+        timeout-minutes: 30
+        uses: Azure/trusted-signing-action@b443cf8ea4124818d2ea9f043cba29fc3ec47b16 # ratchet:Azure/trusted-signing-action@v1.2.0
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ secrets.AZURE_ENDPOINT }}
+          signing-account-name: ${{ secrets.AZURE_SIGNING_ACCOUNT_NAME }}
+          certificate-profile-name: ${{ secrets.AZURE_CERT_PROFILE_NAME }}
+          files-folder: ${{ github.workspace }}\apps\installer-stub\dist
+          files-folder-filter: "*.exe,*.dll"
+          files-folder-recurse: true
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          timeout: 1800
+      - name: Wait before Azure signing retry 3
+        if: needs.detect-secrets.outputs.is_release == 'true' && steps.sign_windows_1.outcome == 'failure' && steps.sign_windows_2.outcome == 'failure'
+        shell: pwsh
+        run: Start-Sleep -Seconds 30
+      - name: Sign Windows artifacts (attempt 3)
+        if: needs.detect-secrets.outputs.is_release == 'true' && steps.sign_windows_1.outcome == 'failure' && steps.sign_windows_2.outcome == 'failure'
+        timeout-minutes: 30
+        uses: Azure/trusted-signing-action@b443cf8ea4124818d2ea9f043cba29fc3ec47b16 # ratchet:Azure/trusted-signing-action@v1.2.0
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ secrets.AZURE_ENDPOINT }}
+          signing-account-name: ${{ secrets.AZURE_SIGNING_ACCOUNT_NAME }}
+          certificate-profile-name: ${{ secrets.AZURE_CERT_PROFILE_NAME }}
+          files-folder: ${{ github.workspace }}\apps\installer-stub\dist
+          files-folder-filter: "*.exe,*.dll"
+          files-folder-recurse: true
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          timeout: 1800
+      - name: Assert Windows signer identity
+        if: needs.detect-secrets.outputs.is_release == 'true'
+        shell: pwsh
+        working-directory: apps/installer-stub
+        env:
+          AZURE_EXPECTED_PUBLISHER_NAME: ${{ secrets.AZURE_EXPECTED_PUBLISHER_NAME }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $expectedPublisher = $env:AZURE_EXPECTED_PUBLISHER_NAME
+          if ([string]::IsNullOrWhiteSpace($expectedPublisher)) {
+            throw "AZURE_EXPECTED_PUBLISHER_NAME is required for Windows signer verification."
+          }
+
+          $installers = Get-ChildItem -Path dist -Filter *.exe -File
+          if ($installers.Count -eq 0) {
+            throw "No Windows installer .exe found in dist."
+          }
+
+          foreach ($installer in $installers) {
+            $signature = Get-AuthenticodeSignature -FilePath $installer.FullName
+            if ($signature.Status -ne "Valid") {
+              throw "Authenticode signature for $($installer.Name) is $($signature.Status), expected Valid."
+            }
+            if ($null -eq $signature.SignerCertificate) {
+              throw "No signer certificate found for $($installer.Name)."
+            }
+
+            $commonName = $signature.SignerCertificate.GetNameInfo(
+              [System.Security.Cryptography.X509Certificates.X509NameType]::SimpleName,
+              $false
+            )
+            if ($commonName -ne $expectedPublisher) {
+              throw "Signer CN '$commonName' does not match AZURE_EXPECTED_PUBLISHER_NAME '$expectedPublisher' for $($installer.Name). Subject: $($signature.SignerCertificate.Subject)"
+            }
+          }
       - name: Refresh Windows update manifest after signing
         if: needs.detect-secrets.outputs.is_release == 'true'
         working-directory: apps/installer-stub

@@ -64,10 +64,11 @@ cd apps/installer-stub && WUPHF_RELEASE_MODE=pr bun run build:current
 | `AZURE_SIGNING_ACCOUNT_NAME` | Trusted Signing account name | same |
 | `AZURE_CERT_PROFILE_NAME` | Cert profile (e.g. `wuphf-prod-2026`) | same |
 | `AZURE_ENDPOINT` | Trusted Signing endpoint | same |
+| `AZURE_EXPECTED_PUBLISHER_NAME` | Expected Windows signer certificate CN | same |
 
 When all are set, tag pushes produce signed + notarized + auto-updateable artifacts. When some are missing, PR pushes still produce unsigned-with-warning artifacts (CI green, useful for local testing).
 
-macOS signing imports `APPLE_CERT_P12_BASE64` into a temporary CI keychain before electron-builder signs and notarizes the app. Windows signing builds first, signs the final installer output with the pinned `Azure/trusted-signing-action`, then refreshes `latest.yml` so electron-updater hashes match the signed artifact.
+macOS signing imports `APPLE_CERT_P12_BASE64` into a temporary CI keychain before electron-builder signs and notarizes the app. Windows signing builds first, signs the final installer output with the pinned `Azure/trusted-signing-action`, asserts the Authenticode signer CN equals `AZURE_EXPECTED_PUBLISHER_NAME`, then refreshes `latest.yml` so electron-updater hashes match the signed artifact.
 
 ## Architecture
 

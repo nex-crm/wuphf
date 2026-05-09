@@ -38,6 +38,8 @@ mac:
 dmg:
   sign: false
 win:
+  publisherName:
+    - WUPHF (installer stub)
   target:
     - target: nsis
       arch:
