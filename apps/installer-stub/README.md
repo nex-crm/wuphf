@@ -62,26 +62,32 @@ macOS signing imports `APPLE_CERT_P12_BASE64` into a temporary CI keychain befor
 
 ## Architecture
 
-```
-GitHub tag push
-  └── .github/workflows/release-rewrite.yml
-        ├── job: build-mac (macos-14)
-        │     ├── electron-builder --mac
-        │     ├── codesign + notarize + staple .dmg
-        │     ├── refresh latest-mac.yml after stapling
-        │     └── upload .dmg + .zip + latest-mac.yml
-        ├── job: build-win (windows-2022)
-        │     ├── electron-builder --win
-        │     ├── Azure Trusted Signing
-        │     ├── refresh latest.yml after signing
-        │     └── upload .exe + latest.yml
-        ├── job: build-linux (ubuntu-24.04)
-        │     ├── electron-builder --linux
-        │     └── upload .AppImage + .deb + latest-linux.yml (unsigned, SHA-256 published)
-        └── job: publish (after all 3)
-              ├── assert all platform artifacts are present
-              ├── compute SHA-256 checksums
-              └── gh release create/upload --clobber
+```mermaid
+flowchart TD
+    Tag["GitHub tag push<br/>v[0-9]+.*-rewrite"]
+    PR["Pull request push<br/>(any branch)"]
+    Workflow[".github/workflows/<br/>release-rewrite.yml"]
+    Detect["detect-secrets job<br/>WUPHF_RELEASE_MODE = pr | production"]
+
+    subgraph builds["Matrix builds (parallel)"]
+        Mac["build-mac · macos-14<br/>electron-builder --mac<br/>codesign + notarize + staple .dmg<br/>refresh latest-mac.yml post-staple"]
+        Win["build-win · windows-2022<br/>electron-builder --win<br/>+ Azure Trusted Signing<br/>+ refresh latest.yml post-sign"]
+        Linux["build-linux · ubuntu-24.04<br/>electron-builder --linux<br/>(unsigned · latest-linux.yml)"]
+    end
+
+    Publish["publish job<br/>(tag push only)<br/>assert all 3 platforms uploaded<br/>verify-latest-yml sha512 vs artifact<br/>SHA-256 release-checksums.txt"]
+    Release["GitHub draft release<br/>.dmg · .zip · .exe · .AppImage · .deb<br/>latest-mac.yml · latest.yml · latest-linux.yml"]
+
+    Tag --> Workflow
+    PR --> Workflow
+    Workflow --> Detect
+    Detect --> Mac
+    Detect --> Win
+    Detect --> Linux
+    Mac --> Publish
+    Win --> Publish
+    Linux --> Publish
+    Publish --> Release
 ```
 
 ## Read more
