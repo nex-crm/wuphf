@@ -1,0 +1,164 @@
+package team
+
+// broker_inbox_handler.go is the REST surface for Lane E.
+//
+// Two routes:
+//
+//   - GET /tasks/inbox?filter=<filter>  → InboxPayload
+//     Defaults to filter=needs_decision when omitted; returns 400 on
+//     unknown filter values. Auth filter applied per the table in the
+//     design doc "Tunnel-human reviewer auth" section.
+//
+//   - GET /tasks/{id}  → DecisionPacket
+//     Returns the on-disk packet shape verbatim. 404 when the task ID
+//     does not exist; 403 when the human session is not in the task's
+//     reviewer list; 200 for owner/broker token or for human sessions
+//     in the reviewer list.
+//
+// Both routes sit behind b.withAuth (registered in broker.go alongside
+// the existing /tasks routes). withAuth handles the unauthenticated
+// case (401); this file owns the authorization layering on top of
+// authenticated actors.
+//
+// Method gating: only GET is supported on both endpoints. The single
+// /tasks/ subpath handler dispatches by the trimmed ID token; reserved
+// suffixes ("inbox", "ack", "memory-workflow", "") fall through to a
+// 404 so the broader /tasks-family routes (registered via
+// taskBrokerRoutes) keep their meanings.
+
+import (
+	"net/http"
+	"strings"
+)
+
+// handleTasksInbox serves GET /tasks/inbox. Mounted via b.withAuth
+// from broker.go; the actor identity is read from the request context.
+func (b *Broker) handleTasksInbox(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	actor, ok := requestActorFromContext(r.Context())
+	if !ok {
+		// Defensive: withAuth should already have rejected this. The
+		// 401 here keeps the handler safe even if it is wired without
+		// withAuth in a future refactor.
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+	rawFilter := strings.TrimSpace(r.URL.Query().Get("filter"))
+	if rawFilter == "" {
+		rawFilter = string(InboxFilterNeedsDecision)
+	}
+	payload, err := b.inboxForActor(InboxFilter(rawFilter), actor.Kind == requestActorKindBroker, actor.Slug)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, payload)
+}
+
+// reservedTaskSubpath captures the exact-path /tasks/* routes already
+// owned by other handlers. handleTaskByID returns 404 instead of
+// returning a Decision Packet keyed by these literal IDs so that a
+// future refactor that drops one of those routes does not silently
+// expose the wrong document.
+var reservedTaskSubpath = map[string]struct{}{
+	"":                 {},
+	"inbox":            {},
+	"ack":              {},
+	"memory-workflow":  {},
+	"memory-workflows": {},
+}
+
+// handleTaskByID serves GET /tasks/{id}. Mounted via b.withAuth on
+// the "/tasks/" prefix. ServeMux's longest-prefix matching means the
+// existing exact paths /tasks, /tasks/ack, /tasks/memory-workflow,
+// /tasks/memory-workflow/reconcile, and /tasks/inbox win over this
+// prefix handler — so this path effectively only fires for
+// /tasks/{id} where {id} is not one of those reserved tokens. The
+// reserved-token check is a defense-in-depth guard for future routes.
+func (b *Broker) handleTaskByID(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	actor, ok := requestActorFromContext(r.Context())
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+	rest := strings.TrimPrefix(r.URL.Path, "/tasks/")
+	// /tasks/{id}/{verb} is reserved for future Lane G action endpoints
+	// (merge, request-changes, block, defer). v1 ships only the GET
+	// reader; sub-verbs return 404 here so a stray client cannot
+	// silently land on the wrong handler.
+	if strings.Contains(rest, "/") {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	id := strings.TrimSpace(rest)
+	if _, reserved := reservedTaskSubpath[id]; reserved {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+
+	b.mu.Lock()
+	task := b.findTaskByIDLocked(id)
+	if task == nil {
+		b.mu.Unlock()
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "task not found"})
+		return
+	}
+	// Snapshot reviewer list under the lock so the auth check runs
+	// against a stable view; releasing the lock before the auth
+	// decision would race Lane D's reviewer-routing writes.
+	reviewers := append([]string(nil), task.Reviewers...)
+	packet := b.findDecisionPacketLocked(id)
+	var packetCopy DecisionPacket
+	if packet != nil {
+		packetCopy = *packet
+	}
+	b.mu.Unlock()
+
+	if !taskAccessAllowed(actor, reviewers) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
+		return
+	}
+
+	if packet == nil {
+		// Lane C has not yet stored a packet for this task. Return a
+		// 404 in v1 so the frontend distinguishes "task exists, no
+		// packet yet" from "task not found at all". When Lane C ships
+		// a regenerate-from-memory fallback (per the persistence error
+		// row in the failure-modes matrix), this branch flips to a
+		// regenerated packet plus the missing-packet banner.
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "decision packet not yet available"})
+		return
+	}
+	writeJSON(w, http.StatusOK, packetCopy)
+}
+
+// taskAccessAllowed encodes the auth matrix from the design doc:
+// broker/owner token always allowed; human session allowed iff the
+// human's slug matches at least one entry in the task's Reviewers.
+func taskAccessAllowed(actor requestActor, reviewers []string) bool {
+	if actor.Kind == requestActorKindBroker {
+		return true
+	}
+	if actor.Kind != requestActorKindHuman {
+		return false
+	}
+	slug := normalizeReviewerSlug(actor.Slug)
+	if slug == "" {
+		return false
+	}
+	for _, r := range reviewers {
+		if normalizeReviewerSlug(r) == slug {
+			return true
+		}
+	}
+	return false
+}
