@@ -30,7 +30,7 @@ Local builds do not sign, notarize, or upload unless production mode and the sig
 
 Install the artifact, double-click it, see one window:
 
-```
+```text
 WUPHF installer-stub v0.0.0
 Channel: dev
 Auto-update: idle
