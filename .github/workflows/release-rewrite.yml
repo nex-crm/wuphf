@@ -529,11 +529,33 @@ jobs:
           if gh release view "${TAG}" >/dev/null 2>&1; then
             is_draft="$(gh release view "${TAG}" --json isDraft -q '.isDraft')"
             if [[ "${is_draft}" != "true" ]]; then
-              echo "Refusing to clobber published release ${TAG}. Delete it manually first or bump the tag." >&2
+              echo "Refusing to clobber published release ${TAG}. Bump the tag and ship a new release." >&2
               exit 1
             fi
             gh release edit "${TAG}" --title "${TAG}" --notes-file release-notes.md
             gh release upload "${TAG}" "${assets[@]}" --clobber
           else
-            gh release create "${TAG}" "${assets[@]}" --draft --title "${TAG}" --notes-file release-notes.md
+            gh release create "${TAG}" "${assets[@]}" --verify-tag --draft --title "${TAG}" --notes-file release-notes.md
+          fi
+
+          mapfile -t expected_asset_names < <(printf "%s\n" "${assets[@]##*/}" | sort)
+          mapfile -t uploaded_asset_names < <(gh release view "${TAG}" --json assets --jq '.assets[].name' | sort)
+
+          missing=()
+          for expected in "${expected_asset_names[@]}"; do
+            found=false
+            for uploaded in "${uploaded_asset_names[@]}"; do
+              if [[ "${uploaded}" == "${expected}" ]]; then
+                found=true
+                break
+              fi
+            done
+            if [[ "${found}" != "true" ]]; then
+              missing+=("${expected}")
+            fi
+          done
+
+          if [[ "${#missing[@]}" -gt 0 ]]; then
+            printf "Release %s is missing uploaded asset(s): %s\n" "${TAG}" "${missing[*]}" >&2
+            exit 1
           fi
