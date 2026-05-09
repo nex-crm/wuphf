@@ -124,6 +124,22 @@ describe("createSecureWindow", () => {
     expect(externalEvent.preventDefault).toHaveBeenCalledTimes(1);
   });
 
+  it("allows same file renderer hash navigation", async () => {
+    const { createSecureWindow } = await import("../src/main/window.ts");
+
+    createSecureWindow({
+      preloadPath: "/tmp/preload.js",
+      rendererIndexPath: "/tmp/index.html",
+      allowDevServerUrl: true,
+    });
+
+    const handler = getWillNavigateHandler(getOnlyWindow());
+    const sameFileHashEvent = { preventDefault: vi.fn<() => void>() };
+    handler(sameFileHashEvent, "file:///tmp/index.html#about");
+
+    expect(sameFileHashEvent.preventDefault).not.toHaveBeenCalled();
+  });
+
   it("rejects development renderer URLs when packaged mode disallows them", async () => {
     const { createSecureWindow } = await import("../src/main/window.ts");
 

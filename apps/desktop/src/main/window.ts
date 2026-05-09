@@ -71,10 +71,14 @@ function isAllowedRendererNavigation(targetUrl: string, rendererUrl: string): bo
   }
 
   if (parsedRendererUrl.protocol === "file:") {
-    return parsedTargetUrl.href === parsedRendererUrl.href;
+    return stripFileUrlRoutingState(parsedTargetUrl) === stripFileUrlRoutingState(parsedRendererUrl);
   }
 
   return parsedTargetUrl.origin === parsedRendererUrl.origin;
+}
+
+function stripFileUrlRoutingState(value: URL): string {
+  return `${value.origin}${value.pathname}`;
 }
 
 function isAllowedExternalUrl(value: string): boolean {
