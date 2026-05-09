@@ -122,8 +122,16 @@ pre-push:
       # files — TS-only branches (e.g. `packages/protocol`) skip the ~5min
       # Go suite. CI still runs the full Go matrix on every PR, so any
       # cross-language interface drift surfaces there in <5min.
+      #
+      # Excludes packages/protocol/testdata/*.go: those files are
+      # `//go:build ignore` reference programs, NOT part of the wuphf
+      # binary build. Letting them trigger the full Go suite would
+      # double-bill protocol-only PRs (the protocol-wire-contract hook
+      # below already exercises the verifier directly via `go run`).
       files: bash scripts/changed-files-since-base.sh
       glob: "*.go"
+      exclude:
+        - "packages/protocol/testdata/*.go"
       run: bash scripts/test-go.sh
     web-unit:
       # Scoped to pushes that touch web/ or related JS/TS files. Same
@@ -147,16 +155,22 @@ pre-push:
       # runs the test suite; this smoke remains a fast build/vet guard.
       files: bash scripts/changed-files-since-base.sh
       glob: "*.go"
+      exclude:
+        - "packages/protocol/testdata/*.go"
       run: go build ./... && go vet ./...
     build:
       files: bash scripts/changed-files-since-base.sh
       glob: "*.go"
+      exclude:
+        - "packages/protocol/testdata/*.go"
       run: go build -o /dev/null ./cmd/wuphf
     vhs:
       # vhs records `wuphf --help` and `--version`; only fires when the Go
       # binary or its tapes change.
       files: bash scripts/changed-files-since-base.sh
       glob: "{cmd/wuphf/**,internal/**,testdata/vhs/**,*.go}"
+      exclude:
+        - "packages/protocol/testdata/*.go"
       run: |
         if ! command -v vhs >/dev/null 2>&1; then
           echo "vhs not installed — skipping visual regression check (install: brew install vhs)"
