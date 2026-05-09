@@ -30,14 +30,14 @@ func (b *Broker) BlockTask(taskID, actor, reason string) (teamTask, bool, error)
 		if task.ID != id {
 			continue
 		}
-		status := strings.ToLower(strings.TrimSpace(task.Status))
+		status := strings.ToLower(strings.TrimSpace(task.status))
 		if status == "done" || status == "completed" || status == "canceled" || status == "cancelled" {
 			return *task, false, nil
 		}
 		if err := rejectFalseLocalWorktreeBlock(task, reason); err != nil {
 			return *task, false, err
 		}
-		beforeStatus := task.Status
+		beforeStatus := task.status
 		if reason != "" {
 			switch existing := strings.TrimSpace(task.Details); {
 			case existing == "":
@@ -46,8 +46,14 @@ func (b *Broker) BlockTask(taskID, actor, reason string) (teamTask, bool, error)
 				task.Details = existing + "\n\n" + reason
 			}
 		}
-		task.Status = "blocked"
-		task.Blocked = true
+		// Route the legacy block path through the lifecycle transition
+		// layer so derived fields, the indexed lookup, and the self-heal
+		// gate (build-time gate #1) all stay in sync. The transition
+		// stamps status/blocked/pipelineStage/reviewState atomically and
+		// updates the lifecycleIndex bucket.
+		if _, err := b.transitionLifecycleLocked(task.ID, LifecycleStateBlockedOnPRMerge, reason); err != nil {
+			return *task, false, err
+		}
 		task.UpdatedAt = now
 		if err := rejectTheaterTaskForLiveBusiness(task); err != nil {
 			return *task, false, err
@@ -56,8 +62,14 @@ func (b *Broker) BlockTask(taskID, actor, reason string) (teamTask, bool, error)
 		if err := b.syncTaskWorktreeLocked(task); err != nil {
 			return teamTask{}, false, err
 		}
-		b.appendActionLocked("task_updated", "office", normalizeChannelSlug(task.Channel), actor, truncateSummary(task.Title+" ["+task.Status+"]", 140), task.ID)
-		b.requestCapabilitySelfHealingLocked(task, actor, reason)
+		b.appendActionLocked("task_updated", "office", normalizeChannelSlug(task.Channel), actor, truncateSummary(task.Title+" ["+task.status+"]", 140), task.ID)
+		// Self-heal gate (build-time gate #1): blocked_on_pr_merge is a
+		// typed legitimate state, not a self-heal trigger. Short-circuit
+		// the call site itself so the unit test can observe absence at
+		// the call boundary, not just the side-effect downstream.
+		if task.LifecycleState != LifecycleStateBlockedOnPRMerge {
+			b.requestCapabilitySelfHealingLocked(task, actor, reason)
+		}
 		if err := b.saveLocked(); err != nil {
 			return teamTask{}, false, err
 		}
@@ -88,7 +100,7 @@ func (b *Broker) ResumeTask(taskID, actor, reason string) (teamTask, bool, error
 		if task.ID != id {
 			continue
 		}
-		beforeStatus := task.Status
+		beforeStatus := task.status
 		changed := false
 		// Strip the stale rate-limit marker on every ResumeTask call, not
 		// only when this call flips Blocked from true to false. A different
@@ -102,15 +114,15 @@ func (b *Broker) ResumeTask(taskID, actor, reason string) (teamTask, bool, error
 			task.Details = cleaned
 			changed = true
 		}
-		if task.Blocked {
-			task.Blocked = false
+		if task.blocked {
+			task.blocked = false
 			changed = true
 		}
-		if strings.EqualFold(strings.TrimSpace(task.Status), "blocked") {
+		if strings.EqualFold(strings.TrimSpace(task.status), "blocked") {
 			if strings.TrimSpace(task.Owner) != "" {
-				task.Status = "in_progress"
+				task.status = "in_progress"
 			} else {
-				task.Status = "open"
+				task.status = "open"
 			}
 			changed = true
 		}
@@ -196,14 +208,14 @@ func (b *Broker) EnsureTask(channel, title, details, owner, createdBy, threadID 
 		Owner:    strings.TrimSpace(owner),
 	}); existing != nil {
 		now := time.Now().UTC().Format(time.RFC3339)
-		beforeStatus := existing.Status
+		beforeStatus := existing.status
 		if existing.Details == "" && strings.TrimSpace(details) != "" {
 			existing.Details = strings.TrimSpace(details)
 		}
 		if existing.Owner == "" && strings.TrimSpace(owner) != "" {
 			existing.Owner = strings.TrimSpace(owner)
-			if !existing.Blocked {
-				existing.Status = "in_progress"
+			if !existing.blocked {
+				existing.status = "in_progress"
 			}
 		}
 		if existing.ThreadID == "" && strings.TrimSpace(threadID) != "" {
@@ -234,7 +246,7 @@ func (b *Broker) EnsureTask(channel, title, details, owner, createdBy, threadID 
 		Title:     title,
 		Details:   strings.TrimSpace(details),
 		Owner:     strings.TrimSpace(owner),
-		Status:    "open",
+		status:    "open",
 		CreatedBy: strings.TrimSpace(createdBy),
 		ThreadID:  strings.TrimSpace(threadID),
 		DependsOn: dependsOn,
@@ -242,9 +254,9 @@ func (b *Broker) EnsureTask(channel, title, details, owner, createdBy, threadID 
 		UpdatedAt: now,
 	}
 	if len(task.DependsOn) > 0 && b.hasUnresolvedDepsLocked(&task) {
-		task.Blocked = true
+		task.blocked = true
 	} else if task.Owner != "" {
-		task.Status = "in_progress"
+		task.status = "in_progress"
 	}
 	syncTaskMemoryWorkflow(&task, now)
 	b.ensureTaskOwnerChannelMembershipLocked(channel, task.Owner)
@@ -335,7 +347,7 @@ func (b *Broker) hasUnresolvedDepsLocked(task *teamTask) bool {
 		for j := range b.tasks {
 			if b.tasks[j].ID == depID {
 				found = true
-				if !isTerminalTeamTaskStatus(b.tasks[j].Status) {
+				if !isTerminalTeamTaskStatus(b.tasks[j].status) {
 					return true
 				}
 				break
@@ -352,6 +364,11 @@ func (b *Broker) hasUnresolvedDepsLocked(task *teamTask) bool {
 // dependencies are now resolved. For each newly unblocked task, it appends a
 // "task_unblocked" action so the launcher can deliver a notification to the owner.
 //
+// Lane A extension: the function sweeps the union of (DependsOn, BlockedOn)
+// and branches on LifecycleState so harness tasks (blocked_on_pr_merge) move
+// to review on resolution while legacy DependsOn-blocked tasks keep their
+// pre-Lane-A in_progress / open behavior.
+//
 // Returns the list of cascade transitions that the caller must publish to the
 // auto-notebook writer AFTER its own saveLocked succeeds. Emitting under
 // b.mu before the persist would leak notebook entries for transitions the
@@ -360,49 +377,82 @@ func (b *Broker) unblockDependentsLocked(completedTaskID string) []pendingTaskTr
 	now := time.Now().UTC().Format(time.RFC3339)
 	var pending []pendingTaskTransition
 	for i := range b.tasks {
-		if !b.tasks[i].Blocked {
+		task := &b.tasks[i]
+		if !task.blocked {
 			continue
 		}
+		// Sweep both legacy DependsOn and the new typed BlockedOn list so
+		// the same code path resolves harness tasks and pre-Lane-A tasks.
 		hasDep := false
-		for _, depID := range b.tasks[i].DependsOn {
+		for _, depID := range task.DependsOn {
 			if depID == completedTaskID {
 				hasDep = true
 				break
 			}
 		}
 		if !hasDep {
+			for _, depID := range task.BlockedOn {
+				if depID == completedTaskID {
+					hasDep = true
+					break
+				}
+			}
+		}
+		if !hasDep {
 			continue
 		}
-		if !b.hasUnresolvedDepsLocked(&b.tasks[i]) {
-			beforeStatus := b.tasks[i].Status
-			b.tasks[i].Blocked = false
-			// Mirror the strip in ResumeTask: if the dependent task was
-			// also rate-limited at some earlier point, the stale marker
-			// in Details would otherwise trigger the watchdog resume loop
-			// even though the dependency completion already unblocked it.
-			b.tasks[i].Details = stripExternalRetryMarker(b.tasks[i].Details)
-			if strings.TrimSpace(b.tasks[i].Owner) != "" {
-				b.tasks[i].Status = "in_progress"
-			} else {
-				b.tasks[i].Status = "open"
+		// Remove the resolved entry from BlockedOn before checking
+		// whether anything still blocks the task.
+		if len(task.BlockedOn) > 0 {
+			filtered := task.BlockedOn[:0]
+			for _, depID := range task.BlockedOn {
+				if depID == completedTaskID {
+					continue
+				}
+				filtered = append(filtered, depID)
 			}
-			b.queueTaskBehindActiveOwnerLaneLocked(&b.tasks[i])
-			b.tasks[i].UpdatedAt = now
-			b.scheduleTaskLifecycleLocked(&b.tasks[i])
-			_ = b.syncTaskWorktreeLocked(&b.tasks[i])
-			b.appendActionLocked(
-				"task_unblocked",
-				"office",
-				normalizeChannelSlug(b.tasks[i].Channel),
-				"system",
-				truncateSummary(b.tasks[i].Title+" unblocked by "+completedTaskID, 140),
-				b.tasks[i].ID,
-			)
-			pending = append(pending, pendingTaskTransition{
-				taskID:       b.tasks[i].ID,
-				beforeStatus: beforeStatus,
-			})
+			task.BlockedOn = filtered
 		}
+		if b.hasUnresolvedDepsLocked(task) || len(task.BlockedOn) > 0 {
+			continue
+		}
+		beforeStatus := task.status
+		// Mirror the strip in ResumeTask: if the dependent task was
+		// also rate-limited at some earlier point, the stale marker
+		// in Details would otherwise trigger the watchdog resume loop
+		// even though the dependency completion already unblocked it.
+		task.Details = stripExternalRetryMarker(task.Details)
+		// Branch on LifecycleState: harness tasks move to review,
+		// legacy tasks fall back to the pre-Lane-A behavior. The
+		// transition layer stamps every derived field for both paths.
+		if task.LifecycleState == LifecycleStateBlockedOnPRMerge {
+			if _, err := b.transitionLifecycleLocked(task.ID, LifecycleStateReview, "blocker resolved by "+completedTaskID); err != nil {
+				continue
+			}
+		} else {
+			task.blocked = false
+			if strings.TrimSpace(task.Owner) != "" {
+				task.status = "in_progress"
+			} else {
+				task.status = "open"
+			}
+		}
+		b.queueTaskBehindActiveOwnerLaneLocked(task)
+		task.UpdatedAt = now
+		b.scheduleTaskLifecycleLocked(task)
+		_ = b.syncTaskWorktreeLocked(task)
+		b.appendActionLocked(
+			"task_unblocked",
+			"office",
+			normalizeChannelSlug(task.Channel),
+			"system",
+			truncateSummary(task.Title+" unblocked by "+completedTaskID, 140),
+			task.ID,
+		)
+		pending = append(pending, pendingTaskTransition{
+			taskID:       task.ID,
+			beforeStatus: beforeStatus,
+		})
 	}
 	return pending
 }
@@ -475,7 +525,7 @@ func (b *Broker) findReusableTaskLocked(match taskReuseMatch) *teamTask {
 		if normalizeChannelSlug(task.Channel) != channel {
 			continue
 		}
-		if isTerminalTeamTaskStatus(task.Status) {
+		if isTerminalTeamTaskStatus(task.status) {
 			continue
 		}
 		sameTitle := title != "" && strings.EqualFold(strings.TrimSpace(task.Title), title)
