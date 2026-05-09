@@ -12,10 +12,12 @@ export default defineConfig({
         "src/main/index.ts",
       ],
       thresholds: {
-        lines: 80,
-        statements: 80,
-        functions: 80,
-        branches: 75,
+        // Ratcheted after the desktop shell skeleton added contract tests.
+        // Measured: 86.68 lines / 86.68 statements / 95.23 functions / 79.2 branches.
+        lines: 85,
+        statements: 85,
+        functions: 94,
+        branches: 78,
       },
     },
   },

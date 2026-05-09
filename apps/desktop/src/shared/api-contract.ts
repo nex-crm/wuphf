@@ -65,12 +65,16 @@ export const IPC_ALLOWLIST_RATIONALE: Record<IpcChannelName, string> = {
 export interface OpenExternalRequest {
   readonly url: string;
 }
-export type OpenExternalResponse = { readonly ok: true } | { readonly ok: false; readonly error: string };
+export type OpenExternalResponse =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly error: string };
 
 export interface ShowItemInFolderRequest {
   readonly path: string;
 }
-export type ShowItemInFolderResponse = { readonly ok: true } | { readonly ok: false; readonly error: string };
+export type ShowItemInFolderResponse =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly error: string };
 
 export type GetAppVersionRequest = Record<string, never>;
 export interface GetAppVersionResponse {
@@ -78,8 +82,22 @@ export interface GetAppVersionResponse {
 }
 
 export type GetPlatformRequest = Record<string, never>;
+
+export type DesktopPlatform =
+  | "aix"
+  | "android"
+  | "darwin"
+  | "freebsd"
+  | "haiku"
+  | "linux"
+  | "openbsd"
+  | "sunos"
+  | "win32"
+  | "cygwin"
+  | "netbsd";
+
 export interface GetPlatformResponse {
-  readonly platform: NodeJS.Platform;
+  readonly platform: DesktopPlatform;
   readonly arch: string;
 }
 
