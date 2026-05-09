@@ -1,12 +1,20 @@
 import fc from "fast-check";
 import { describe, expect, it, vi } from "vitest";
 import {
+  MAX_AGENT_SLUG_BYTES,
+  MAX_APPROVAL_ID_BYTES,
+  MAX_APPROVAL_SIGNATURE_BYTES,
+  MAX_APPROVAL_TOKEN_LIFETIME_MS,
   MAX_FROZEN_ARGS_BYTES,
   MAX_RECEIPT_BYTES,
   MAX_SANITIZED_STRING_BYTES,
+  MAX_TOOL_CALL_ID_BYTES,
   MAX_TOOL_CALLS_PER_RECEIPT,
+  MAX_WEBAUTHN_ASSERTION_BYTES,
+  MAX_WRITE_ID_BYTES,
 } from "../src/budgets.ts";
 import { FrozenArgs } from "../src/frozen-args.ts";
+import { approvalSubmitRequestFromJson } from "../src/ipc.ts";
 import {
   asAgentSlug,
   asApprovalId,
@@ -92,6 +100,17 @@ const RECORD_BOUNDARIES = [
   { path: "/approvals/0/signedToken/claims", keys: APPROVAL_CLAIMS_KEYS },
   { path: "/approvals/0/signedToken", keys: SIGNED_APPROVAL_TOKEN_KEYS },
 ] as const satisfies readonly { path: string; keys: ReadonlySet<string> }[];
+
+interface ApprovalTokenWire extends Record<string, unknown> {
+  signature?: unknown;
+  claims?: unknown;
+}
+
+interface ApprovalClaimsWire extends Record<string, unknown> {
+  webauthnAssertion?: unknown;
+  issuedAt?: unknown;
+  expiresAt?: unknown;
+}
 
 describe("receipt schema", () => {
   it("round-trips a valid receipt through canonical JSON", () => {
@@ -463,6 +482,55 @@ describe("receipt schema", () => {
         testCase.message,
       );
     }
+  });
+
+  it.each([
+    {
+      name: "oversized signature",
+      mutate: (token: ApprovalTokenWire) => {
+        token.signature = "A".repeat(MAX_APPROVAL_SIGNATURE_BYTES + 1);
+      },
+      receiptMessage: /receipt writes\[0\]\.approvalToken: approvalToken\.signature bytes/,
+      ipcMessage: /approvalToken\.signature exceeds MAX_APPROVAL_SIGNATURE_BYTES/,
+    },
+    {
+      name: "oversized WebAuthn assertion",
+      mutate: (token: ApprovalTokenWire) => {
+        const claims = approvalClaimsWire(token);
+        claims.webauthnAssertion = "x".repeat(MAX_WEBAUTHN_ASSERTION_BYTES + 1);
+      },
+      receiptMessage:
+        /receipt writes\[0\]\.approvalToken: approvalToken\.claims\.webauthnAssertion bytes/,
+      ipcMessage: /approvalToken\.claims\.webauthnAssertion exceeds MAX_WEBAUTHN_ASSERTION_BYTES/,
+    },
+    {
+      name: "overlong token lifetime",
+      mutate: (token: ApprovalTokenWire) => {
+        const claims = approvalClaimsWire(token);
+        claims.expiresAt = new Date(
+          new Date(String(claims.issuedAt)).getTime() + MAX_APPROVAL_TOKEN_LIFETIME_MS + 1,
+        ).toISOString();
+      },
+      receiptMessage: /\/writes\/0\/approvalToken\/claims: exceeds MAX_APPROVAL_TOKEN_LIFETIME_MS/,
+      ipcMessage: /approvalToken\.claims exceeds MAX_APPROVAL_TOKEN_LIFETIME_MS/,
+    },
+  ])("receiptFromJson matches IPC approval-token rejection for $name", ({
+    mutate,
+    receiptMessage,
+    ipcMessage,
+  }) => {
+    const receipt = receiptJsonFixture();
+    const token = writeWireApprovalToken(receipt, 0);
+    mutate(token);
+
+    expect(() =>
+      approvalSubmitRequestFromJson({
+        receiptId: RECEIPT_ID,
+        idempotencyKey: "approval-alignment-01",
+        approvalToken: token,
+      }),
+    ).toThrow(ipcMessage);
+    expect(() => receiptFromJson(JSON.stringify(receipt))).toThrow(receiptMessage);
   });
 
   it("never throws for unknown fuzz payloads", () => {
@@ -1156,6 +1224,24 @@ describe("receipt schema", () => {
     expect(() => asApprovalId("approval:01")).toThrow();
   });
 
+  it("length-caps receipt-local brand constructors at the byte budget", () => {
+    const agentSlugAtCap = `a${"b".repeat(MAX_AGENT_SLUG_BYTES - 1)}`;
+    expect(asAgentSlug(agentSlugAtCap)).toBe(agentSlugAtCap);
+    expect(() => asAgentSlug(`${agentSlugAtCap}b`)).toThrow(/AgentSlug/);
+
+    const toolCallIdAtCap = `t${"o".repeat(MAX_TOOL_CALL_ID_BYTES - 1)}`;
+    expect(asToolCallId(toolCallIdAtCap)).toBe(toolCallIdAtCap);
+    expect(() => asToolCallId(`${toolCallIdAtCap}o`)).toThrow(/ToolCallId/);
+
+    const approvalIdAtCap = `a${"p".repeat(MAX_APPROVAL_ID_BYTES - 1)}`;
+    expect(asApprovalId(approvalIdAtCap)).toBe(approvalIdAtCap);
+    expect(() => asApprovalId(`${approvalIdAtCap}p`)).toThrow(/ApprovalId/);
+
+    const writeIdAtCap = `w${"r".repeat(MAX_WRITE_ID_BYTES - 1)}`;
+    expect(asWriteId(writeIdAtCap)).toBe(writeIdAtCap);
+    expect(() => asWriteId(`${writeIdAtCap}r`)).toThrow(/WriteId/);
+  });
+
   it("rejects notebookWrites entries that claim the wiki store", () => {
     const fixture = validReceiptFixture();
     const firstNotebookWrite = nonNull(fixture.notebookWrites[0]);
@@ -1497,6 +1583,17 @@ function writeWireAt(receipt: Record<string, unknown>, index: number): Record<st
   return wireRecordArrayItem(receipt, "writes", index);
 }
 
+function writeWireApprovalToken(
+  receipt: Record<string, unknown>,
+  index: number,
+): ApprovalTokenWire {
+  return wireRecordField(writeWireAt(receipt, index), "approvalToken") as ApprovalTokenWire;
+}
+
+function approvalClaimsWire(token: ApprovalTokenWire): ApprovalClaimsWire {
+  return wireRecordField(token, "claims") as ApprovalClaimsWire;
+}
+
 function fileChangeWireAt(
   receipt: Record<string, unknown>,
   index: number,
@@ -1525,6 +1622,14 @@ function wireRecordArrayItem(
     throw new Error(`fixture missing ${key}[${index}]`);
   }
   return item;
+}
+
+function wireRecordField(record: Record<string, unknown>, key: string): Record<string, unknown> {
+  const value = record[key];
+  if (!isWireRecord(value)) {
+    throw new Error(`fixture missing ${key}`);
+  }
+  return value;
 }
 
 function isWireRecord(value: unknown): value is Record<string, unknown> {

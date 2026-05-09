@@ -21,6 +21,7 @@ import {
   GENESIS_PREV_HASH,
   INITIAL_VERIFIER_STATE,
   lsnFromV1Number,
+  MAX_APPROVAL_SIGNATURE_BYTES,
   MAX_APPROVAL_TOKEN_LIFETIME_MS,
   MAX_AUDIT_CHAIN_BATCH_SIZE,
   MAX_AUDIT_EVENT_BODY_BYTES,
@@ -35,6 +36,7 @@ import {
   MAX_RECEIPT_WRITES,
   MAX_SANITIZED_STRING_BYTES,
   MAX_TOOL_CALLS_PER_RECEIPT,
+  MAX_WEBAUTHN_ASSERTION_BYTES,
   type MemoryWriteRef,
   type ReceiptSnapshot,
   receiptFromJson,
@@ -353,6 +355,48 @@ describe("resource budgets", () => {
         },
       );
     }
+  });
+
+  it("bounds nested signed approval token signatures in receipt budgets", () => {
+    const atCap = receiptWithWriteApprovalToken({
+      ...signedApprovalTokenFixture(),
+      signature: "A".repeat(MAX_APPROVAL_SIGNATURE_BYTES),
+    });
+    expect(validateReceiptBudget(atCap)).toEqual({ ok: true });
+
+    const overCap = receiptWithWriteApprovalToken({
+      ...signedApprovalTokenFixture(),
+      signature: "A".repeat(MAX_APPROVAL_SIGNATURE_BYTES + 1),
+    });
+
+    expectBudgetRejection(
+      validateReceiptBudget(overCap),
+      /receipt writes\[0\]\.approvalToken: approvalToken\.signature bytes.*4097 > 4096/,
+    );
+  });
+
+  it("bounds nested signed approval token WebAuthn assertions in receipt budgets", () => {
+    const atCap = receiptWithWriteApprovalToken({
+      ...signedApprovalTokenFixture(),
+      claims: {
+        ...approvalClaimsFixture(),
+        webauthnAssertion: "x".repeat(MAX_WEBAUTHN_ASSERTION_BYTES),
+      },
+    });
+    expect(validateReceiptBudget(atCap)).toEqual({ ok: true });
+
+    const overCap = receiptWithWriteApprovalToken({
+      ...signedApprovalTokenFixture(),
+      claims: {
+        ...approvalClaimsFixture(),
+        webauthnAssertion: "x".repeat(MAX_WEBAUTHN_ASSERTION_BYTES + 1),
+      },
+    });
+
+    expectBudgetRejection(
+      validateReceiptBudget(overCap),
+      /receipt writes\[0\]\.approvalToken: approvalToken\.claims\.webauthnAssertion bytes.*16385 > 16384/,
+    );
   });
 
   it("direct budget helpers do not invoke hostile toJSON getters", () => {
@@ -699,6 +743,18 @@ function itemWrite(): ExternalWrite {
     approvedAt: new Date("2026-05-08T18:01:01.000Z"),
     result: "applied",
     postWriteVerify: FrozenArgs.freeze({ stage: "qualified" }),
+  };
+}
+
+function receiptWithWriteApprovalToken(approvalToken: SignedApprovalToken): ReceiptSnapshot {
+  const receipt = validReceiptFixture();
+  const firstWrite = receipt.writes[0];
+  if (firstWrite === undefined) {
+    throw new Error("fixture must contain a write");
+  }
+  return {
+    ...receipt,
+    writes: [{ ...firstWrite, approvalToken }],
   };
 }
 

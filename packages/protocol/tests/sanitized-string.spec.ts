@@ -1,6 +1,6 @@
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
-import { MAX_SANITIZED_STRING_BYTES } from "../src/budgets.ts";
+import { MAX_SANITIZED_JSON_NODES, MAX_SANITIZED_STRING_BYTES } from "../src/budgets.ts";
 import { SanitizedString, type SanitizedStringPolicy } from "../src/sanitized-string.ts";
 
 type JsonPrimitive = null | boolean | number | string;
@@ -179,6 +179,36 @@ describe("SanitizedString", () => {
     expect(SanitizedString.fromUnknown(atCap).value).toHaveLength(MAX_SANITIZED_STRING_BYTES);
     expect(() => SanitizedString.fromUnknown(overCap)).toThrow(
       /SanitizedString JSON projection bytes exceeds MAX_SANITIZED_STRING_BYTES/,
+    );
+  });
+
+  it("enforces the JSON node budget for flat arrays at the edge", () => {
+    const atCap = Array.from({ length: MAX_SANITIZED_JSON_NODES - 1 }, () => null);
+    const overCap = Array.from({ length: MAX_SANITIZED_JSON_NODES }, () => null);
+
+    expect(JSON.parse(SanitizedString.fromUnknown(atCap).value) as unknown[]).toHaveLength(
+      MAX_SANITIZED_JSON_NODES - 1,
+    );
+    expect(() => SanitizedString.fromUnknown(overCap)).toThrow(
+      new RegExp(
+        `SanitizedString JSON node count at \\$\\[${
+          MAX_SANITIZED_JSON_NODES - 1
+        }\\] exceeds budget`,
+      ),
+    );
+  });
+
+  it("enforces the JSON node budget for flat objects before descriptor copying", () => {
+    const atCap = flatNullObject(MAX_SANITIZED_JSON_NODES - 1);
+    const overCap = flatNullObject(MAX_SANITIZED_JSON_NODES);
+
+    expect(
+      Object.keys(JSON.parse(SanitizedString.fromUnknown(atCap).value) as object),
+    ).toHaveLength(MAX_SANITIZED_JSON_NODES - 1);
+    expect(() => SanitizedString.fromUnknown(overCap)).toThrow(
+      new RegExp(
+        `SanitizedString JSON node count at \\$\\.k${MAX_SANITIZED_JSON_NODES - 1} exceeds budget`,
+      ),
     );
   });
 
@@ -716,6 +746,14 @@ function rejectLoneSurrogates(value: string): void {
       throw new Error("lone surrogate");
     }
   }
+}
+
+function flatNullObject(properties: number): Record<string, null> {
+  const value: Record<string, null> = Object.create(null) as Record<string, null>;
+  for (let i = 0; i < properties; i++) {
+    value[`k${i}`] = null;
+  }
+  return value;
 }
 
 function isJsonRecord(value: unknown): value is JsonRecord {

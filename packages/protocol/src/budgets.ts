@@ -42,6 +42,13 @@ export const MAX_CANONICAL_JSON_NODES = 100_000;
 export const MAX_SANITIZED_STRING_BYTES = 1 * 1024 * 1024;
 
 /**
+ * SanitizedString JSON projections are descriptor-walked and copied before
+ * rendering. 50,000 nodes leaves room for broad structured logs while bounding
+ * flat object/array fanout before descriptor checks and normalization work.
+ */
+export const MAX_SANITIZED_JSON_NODES = 50_000;
+
+/**
  * Audit verification should proceed in bounded chunks. 10,000 records keeps a
  * batch large enough for efficient sequential I/O while preventing callers from
  * accidentally materializing 1M-event chains in one verifier step.
@@ -82,6 +89,39 @@ export const MAX_APPROVAL_SIGNATURE_BYTES = 4 * 1024;
  * for extension output while keeping high-risk approval submissions bounded.
  */
 export const MAX_WEBAUTHN_ASSERTION_BYTES = 16 * 1024;
+
+/**
+ * Human-readable agent slugs are ASCII-only. 128 bytes covers descriptive
+ * slugs while preventing unbounded branded identifiers from entering receipts.
+ */
+export const MAX_AGENT_SLUG_BYTES = 128;
+
+/**
+ * Tool-call identifiers are local receipt IDs, not payload storage. 128 bytes
+ * gives generous room for generated IDs while keeping brand construction
+ * bounded.
+ */
+export const MAX_TOOL_CALL_ID_BYTES = 128;
+
+/**
+ * Approval identifiers are local receipt IDs, not payload storage. 128 bytes
+ * gives generous room for generated IDs while keeping brand construction
+ * bounded.
+ */
+export const MAX_APPROVAL_ID_BYTES = 128;
+
+/**
+ * External-write identifiers are local receipt IDs, not payload storage. 128
+ * bytes gives generated IDs enough room while keeping brand construction
+ * bounded.
+ */
+export const MAX_WRITE_ID_BYTES = 128;
+
+/**
+ * Shared cap for other receipt-local IDs that use LOCAL_ID_RE. Specific brand
+ * caps may be lowered independently, but none may exceed this generic bound.
+ */
+export const MAX_LOCAL_ID_BYTES = 128;
 
 /**
  * File-change lists can grow with generated or vendored trees. 10,000 entries
@@ -211,6 +251,22 @@ export function validateSanitizedStringBudget(s: SanitizedString): BudgetValidat
   const value = stringProperty(s, "value");
   if (value === undefined) return { ok: true };
   return validateUtf8StringBudget(value, MAX_SANITIZED_STRING_BYTES, "SanitizedString value bytes");
+}
+
+export function validateSanitizedJsonNodeBudget(
+  nodes: number,
+  path: string,
+): BudgetValidationResult {
+  try {
+    assertWithinBudget(
+      nodes,
+      MAX_SANITIZED_JSON_NODES,
+      `SanitizedString JSON node count at ${path}`,
+    );
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, reason: err instanceof Error ? err.message : String(err) };
+  }
 }
 
 export function validateAuditEventBodyBudget(body: Uint8Array): BudgetValidationResult {
@@ -417,8 +473,29 @@ function validateMaybeSignedApprovalTokenBudget(
   value: unknown,
   label: string,
 ): BudgetValidationResult {
+  const signature = stringProperty(value, "signature");
+  if (signature !== undefined) {
+    const signatureBudget = validateUtf8StringBudget(
+      signature,
+      MAX_APPROVAL_SIGNATURE_BYTES,
+      "approvalToken.signature bytes",
+    );
+    if (!signatureBudget.ok) return prefixBudgetReason(label, signatureBudget);
+  }
+
   const claims = objectProperty(value, "claims");
   if (claims === undefined) return { ok: true };
+
+  const webauthnAssertion = stringProperty(claims, "webauthnAssertion");
+  if (webauthnAssertion !== undefined) {
+    const assertionBudget = validateUtf8StringBudget(
+      webauthnAssertion,
+      MAX_WEBAUTHN_ASSERTION_BYTES,
+      "approvalToken.claims.webauthnAssertion bytes",
+    );
+    if (!assertionBudget.ok) return prefixBudgetReason(label, assertionBudget);
+  }
+
   const issuedAt = objectProperty(claims, "issuedAt");
   const expiresAt = objectProperty(claims, "expiresAt");
   if (!(issuedAt instanceof Date) || !(expiresAt instanceof Date)) return { ok: true };
@@ -426,7 +503,7 @@ function validateMaybeSignedApprovalTokenBudget(
   return result.ok ? result : prefixBudgetReason(label, result);
 }
 
-function validateApprovalTokenLifetimeValues(
+export function validateApprovalTokenLifetimeValues(
   issuedAt: Date,
   expiresAt: Date,
 ): BudgetValidationResult {

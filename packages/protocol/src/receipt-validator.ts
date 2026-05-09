@@ -7,7 +7,13 @@
 
 import { validateReceiptBudget } from "./budgets.ts";
 import { FrozenArgs } from "./frozen-args.ts";
-import { APPROVAL_CLAIMS_KEYS, SIGNED_APPROVAL_TOKEN_KEYS } from "./ipc-shared.ts";
+import {
+  APPROVAL_CLAIMS_KEYS,
+  SIGNED_APPROVAL_TOKEN_KEYS,
+  validateApprovalClaimsLifetimeBudget,
+  validateApprovalSignatureBudget,
+  validateApprovalWebauthnAssertionBudget,
+} from "./ipc-shared.ts";
 import {
   APPROVAL_DECISION_VALUES,
   APPROVAL_ROLE_VALUES,
@@ -765,6 +771,11 @@ function validateApprovalClaims(
   validateOptional(value, "webauthnAssertion", path, errors, validateString);
   const riskClass = recordValue(value, "riskClass");
   const webauthnAssertion = recordValue(value, "webauthnAssertion");
+  addApprovalTokenCheckError(
+    validateApprovalWebauthnAssertionBudget(webauthnAssertion),
+    pointer(path, "webauthnAssertion"),
+    errors,
+  );
   if (
     (riskClass === "high" || riskClass === "critical") &&
     (typeof webauthnAssertion !== "string" || webauthnAssertion.length === 0)
@@ -784,6 +795,7 @@ function validateApprovalClaims(
     errors,
     false,
   );
+  addApprovalTokenCheckError(validateApprovalClaimsLifetimeBudget(value), path, errors);
 }
 
 function validateSignedApprovalToken(
@@ -801,7 +813,22 @@ function validateSignedApprovalToken(
     validateLiteral(v, p, e, APPROVAL_TOKEN_ALGORITHM_VALUES, "must be ed25519"),
   );
   validateRequired(value, "signerKeyId", path, errors, validateString);
-  validateRequired(value, "signature", path, errors, validateBase64String);
+  validateRequired(value, "signature", path, errors, (v, p, e) => {
+    const signatureBudget = validateApprovalSignatureBudget(v);
+    addApprovalTokenCheckError(signatureBudget, p, e);
+    if (!signatureBudget.ok) return;
+    validateBase64String(v, p, e);
+  });
+}
+
+function addApprovalTokenCheckError(
+  result: ReturnType<typeof validateApprovalSignatureBudget>,
+  path: string,
+  errors: ReceiptValidationError[],
+): void {
+  if (!result.ok) {
+    addError(errors, path, result.reason);
+  }
 }
 
 function validateExternalWrite(

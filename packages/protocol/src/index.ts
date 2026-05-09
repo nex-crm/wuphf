@@ -32,11 +32,14 @@ export type { Brand } from "./brand.ts";
 export type { BudgetValidationResult } from "./budgets.ts";
 export {
   assertWithinBudget,
+  MAX_AGENT_SLUG_BYTES,
+  MAX_APPROVAL_ID_BYTES,
   MAX_APPROVAL_SIGNATURE_BYTES,
   MAX_APPROVAL_TOKEN_LIFETIME_MS,
   MAX_AUDIT_CHAIN_BATCH_SIZE,
   MAX_AUDIT_EVENT_BODY_BYTES,
   MAX_FROZEN_ARGS_BYTES,
+  MAX_LOCAL_ID_BYTES,
   MAX_RECEIPT_APPROVALS,
   MAX_RECEIPT_BYTES,
   MAX_RECEIPT_COMMITS,
@@ -45,13 +48,17 @@ export {
   MAX_RECEIPT_SOURCE_READS,
   MAX_RECEIPT_WIKI_WRITES,
   MAX_RECEIPT_WRITES,
+  MAX_SANITIZED_JSON_NODES,
   MAX_SANITIZED_STRING_BYTES,
+  MAX_TOOL_CALL_ID_BYTES,
   MAX_TOOL_CALLS_PER_RECEIPT,
   MAX_WEBAUTHN_ASSERTION_BYTES,
+  MAX_WRITE_ID_BYTES,
   validateApprovalTokenLifetime,
   validateAuditEventBodyBudget,
   validateFrozenArgsBudget,
   validateReceiptBudget,
+  validateSanitizedJsonNodeBudget,
   validateSanitizedStringBudget,
 } from "./budgets.ts";
 export type { JsonPrimitive, JsonValue } from "./canonical-json.ts";

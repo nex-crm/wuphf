@@ -21,6 +21,11 @@ import {
 import { canonicalJSON } from "./canonical-json.ts";
 import { FrozenArgs } from "./frozen-args.ts";
 import {
+  validateApprovalClaimsLifetimeBudget,
+  validateApprovalSignatureBudget,
+  validateApprovalWebauthnAssertionBudget,
+} from "./ipc-shared.ts";
+import {
   APPROVAL_DECISION_VALUES,
   APPROVAL_ROLE_VALUES,
   APPROVAL_TOKEN_ALGORITHM_VALUES,
@@ -591,6 +596,10 @@ function approvalClaimsFromJson(value: unknown, path: string): ApprovalClaims {
   const record = requireRecord(value, path);
   assertKnownKeys(record, path, APPROVAL_CLAIMS_KEYS);
   const webauthnAssertion = optionalStringFromJson(record, "webauthnAssertion", path);
+  assertApprovalTokenCheck(
+    validateApprovalWebauthnAssertionBudget(webauthnAssertion),
+    pointer(path, "webauthnAssertion"),
+  );
   const writeId = optionalStringFromJson(record, "writeId", path);
   const riskClass = requiredLiteralFromJson(record, "riskClass", path, RISK_CLASS_VALUES);
   if (
@@ -601,7 +610,7 @@ function approvalClaimsFromJson(value: unknown, path: string): ApprovalClaims {
       `${pointer(path, "webauthnAssertion")}: must be a non-empty string for high/critical risk`,
     );
   }
-  return {
+  const claims = {
     signerIdentity: requiredStringFromJson(record, "signerIdentity", path),
     role: requiredLiteralFromJson(record, "role", path, APPROVAL_ROLE_VALUES),
     receiptId: asReceiptIdAt(
@@ -618,12 +627,15 @@ function approvalClaimsFromJson(value: unknown, path: string): ApprovalClaims {
     expiresAt: requiredDateFromJson(record, "expiresAt", path),
     ...(webauthnAssertion === undefined ? {} : { webauthnAssertion }),
   };
+  assertApprovalTokenCheck(validateApprovalClaimsLifetimeBudget(claims), path);
+  return claims;
 }
 
 function signedApprovalTokenFromJson(value: unknown, path: string): SignedApprovalToken {
   const record = requireRecord(value, path);
   assertKnownKeys(record, path, SIGNED_APPROVAL_TOKEN_KEYS);
   const signature = requiredStringFromJson(record, "signature", path);
+  assertApprovalTokenCheck(validateApprovalSignatureBudget(signature), pointer(path, "signature"));
   if (signature.length === 0 || !BASE64_RE.test(signature)) {
     throw new Error(`${pointer(path, "signature")}: must be a non-empty base64 string`);
   }
@@ -636,6 +648,15 @@ function signedApprovalTokenFromJson(value: unknown, path: string): SignedApprov
     signerKeyId: requiredStringFromJson(record, "signerKeyId", path),
     signature,
   };
+}
+
+function assertApprovalTokenCheck(
+  result: ReturnType<typeof validateApprovalSignatureBudget>,
+  path: string,
+): void {
+  if (!result.ok) {
+    throw new Error(`${path}: ${result.reason}`);
+  }
 }
 
 function brokerTokenVerdictFromJson(value: unknown, path: string): BrokerTokenVerdict {

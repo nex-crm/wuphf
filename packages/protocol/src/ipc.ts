@@ -16,13 +16,14 @@
 //      Both checks must pass; the Host check alone is not the full gate.
 
 import type { Brand } from "./brand.ts";
-import {
-  MAX_APPROVAL_SIGNATURE_BYTES,
-  MAX_WEBAUTHN_ASSERTION_BYTES,
-  validateApprovalTokenLifetime,
-} from "./budgets.ts";
 import { canonicalJSON } from "./canonical-json.ts";
-import { APPROVAL_CLAIMS_KEYS, SIGNED_APPROVAL_TOKEN_KEYS } from "./ipc-shared.ts";
+import {
+  APPROVAL_CLAIMS_KEYS,
+  SIGNED_APPROVAL_TOKEN_KEYS,
+  validateApprovalClaimsLifetimeBudget,
+  validateApprovalSignatureBudget,
+  validateApprovalWebauthnAssertionBudget,
+} from "./ipc-shared.ts";
 import {
   type ApprovalClaims,
   type IdempotencyKey,
@@ -483,10 +484,11 @@ function validateApprovalTokenShape(
   if (typeof signature.value !== "string") {
     return { ok: false, reason: "approvalToken.signature must be a non-empty base64 string" };
   }
-  if (signature.value.length > MAX_APPROVAL_SIGNATURE_BYTES) {
+  const signatureBudget = validateApprovalSignatureBudget(signature.value);
+  if (!signatureBudget.ok) {
     return {
       ok: false,
-      reason: "approvalToken.signature exceeds MAX_APPROVAL_SIGNATURE_BYTES",
+      reason: `approvalToken.signature ${signatureBudget.reason}`,
     };
   }
   if (signature.value.length === 0 || !BASE64_RE.test(signature.value)) {
@@ -582,14 +584,11 @@ function validateApprovalClaimsShape(
       reason: "approvalToken.claims.webauthnAssertion must be a string",
     };
   }
-  if (
-    typeof webauthnAssertionValue === "string" &&
-    utf8ByteLengthUpTo(webauthnAssertionValue, MAX_WEBAUTHN_ASSERTION_BYTES) >
-      MAX_WEBAUTHN_ASSERTION_BYTES
-  ) {
+  const webauthnAssertionBudget = validateApprovalWebauthnAssertionBudget(webauthnAssertionValue);
+  if (!webauthnAssertionBudget.ok) {
     return {
       ok: false,
-      reason: "approvalToken.claims.webauthnAssertion exceeds MAX_WEBAUTHN_ASSERTION_BYTES",
+      reason: `approvalToken.claims.webauthnAssertion ${webauthnAssertionBudget.reason}`,
     };
   }
   if (
@@ -621,11 +620,11 @@ function validateApprovalClaimsShape(
     expiresAt,
     ...(webauthnAssertionValue === undefined ? {} : { webauthnAssertion: webauthnAssertionValue }),
   };
-  const lifetime = validateApprovalTokenLifetime(approvalClaims);
+  const lifetime = validateApprovalClaimsLifetimeBudget(approvalClaims);
   if (!lifetime.ok) {
     return {
       ok: false,
-      reason: `approvalToken.claims exceeds MAX_APPROVAL_TOKEN_LIFETIME_MS: ${lifetime.reason}`,
+      reason: `approvalToken.claims ${lifetime.reason}`,
     };
   }
 
@@ -893,34 +892,6 @@ function isLiteralValue<const T extends string>(value: unknown, allowed: readonl
 
 function isValidDate(value: unknown): value is Date {
   return value instanceof Date && !Number.isNaN(value.getTime());
-}
-
-function utf8ByteLengthUpTo(value: string, budget: number): number {
-  if (value.length > budget) return budget + 1;
-
-  let bytes = 0;
-  for (let i = 0; i < value.length; i++) {
-    const code = value.charCodeAt(i);
-    if (code <= 0x7f) {
-      bytes += 1;
-    } else if (code <= 0x7ff) {
-      bytes += 2;
-    } else if (code >= 0xd800 && code <= 0xdbff && i + 1 < value.length) {
-      const next = value.charCodeAt(i + 1);
-      if (next >= 0xdc00 && next <= 0xdfff) {
-        bytes += 4;
-        i += 1;
-      } else {
-        bytes += 3;
-      }
-    } else {
-      bytes += 3;
-    }
-
-    if (bytes > budget) return budget + 1;
-  }
-
-  return bytes;
 }
 
 /**

@@ -1,6 +1,10 @@
 import { Buffer } from "node:buffer";
 
-import { MAX_SANITIZED_STRING_BYTES } from "./budgets.ts";
+import {
+  MAX_SANITIZED_JSON_NODES,
+  MAX_SANITIZED_STRING_BYTES,
+  validateSanitizedJsonNodeBudget,
+} from "./budgets.ts";
 
 export type SanitizedStringPolicy = "strip-zero-width" | "allow-zwj";
 
@@ -15,6 +19,9 @@ type SanitizedJsonPrimitive = null | boolean | number | string;
 type SanitizedJsonValue = SanitizedJsonPrimitive | SanitizedJsonValue[] | SanitizedJsonRecord;
 interface SanitizedJsonRecord {
   readonly [key: string]: SanitizedJsonValue;
+}
+interface SanitizedJsonNodeCounter {
+  count: number;
 }
 
 export class SanitizedString {
@@ -74,7 +81,16 @@ function coerceToString(input: unknown, options: SanitizedStringOptions): string
 }
 
 function stringifySanitizedJson(input: object, options: SanitizedStringOptions): string {
-  const sanitizedProjection = sanitizeJsonValue(input, options, 0, "$", new WeakSet<object>());
+  const nodeCounter: SanitizedJsonNodeCounter = { count: 0 };
+  const sanitizedProjection = sanitizeJsonValue(
+    input,
+    options,
+    0,
+    "$",
+    new WeakSet<object>(),
+    nodeCounter,
+    false,
+  );
   const sanitizedSerialized = JSON.stringify(sanitizedProjection);
   if (sanitizedSerialized === undefined) {
     throw new Error("SanitizedString: sanitized projection is not JSON-representable");
@@ -88,7 +104,13 @@ function sanitizeJsonValue(
   depth: number,
   path: string,
   ancestors: WeakSet<object>,
+  nodeCounter: SanitizedJsonNodeCounter,
+  nodeAlreadyCounted: boolean,
 ): SanitizedJsonValue {
+  if (!nodeAlreadyCounted) {
+    countSanitizedJsonNode(path, nodeCounter);
+  }
+
   if (depth > MAX_DEPTH) {
     throw new Error("SanitizedString: max recursion depth exceeded");
   }
@@ -126,10 +148,37 @@ function sanitizeJsonValue(
   // invoke proxy traps. The no-getter/toJSON guarantee below applies to
   // ordinary arrays and objects.
   if (Array.isArray(value)) {
-    return sanitizeJsonArray(value, options, depth, path, ancestors);
+    return sanitizeJsonArray(value, options, depth, path, ancestors, nodeCounter);
   }
 
-  return sanitizeJsonObject(value, options, depth, path, ancestors);
+  return sanitizeJsonObject(value, options, depth, path, ancestors, nodeCounter);
+}
+
+function countSanitizedJsonNode(path: string, nodeCounter: SanitizedJsonNodeCounter): void {
+  nodeCounter.count += 1;
+  const budget = validateSanitizedJsonNodeBudget(nodeCounter.count, path);
+  if (!budget.ok) {
+    throw new Error(`SanitizedString: ${budget.reason}`);
+  }
+}
+
+function reserveSanitizedJsonChildNodes(
+  count: number,
+  nodeCounter: SanitizedJsonNodeCounter,
+  childPath: (index: number) => string,
+): void {
+  const nextCount = nodeCounter.count + count;
+  if (nextCount > MAX_SANITIZED_JSON_NODES) {
+    const firstRejectedIndex = MAX_SANITIZED_JSON_NODES - nodeCounter.count;
+    const budget = validateSanitizedJsonNodeBudget(
+      MAX_SANITIZED_JSON_NODES + 1,
+      childPath(firstRejectedIndex),
+    );
+    if (!budget.ok) {
+      throw new Error(`SanitizedString: ${budget.reason}`);
+    }
+  }
+  nodeCounter.count = nextCount;
 }
 
 function assertSanitizedStringByteBudget(value: string, label: string): void {
@@ -147,6 +196,7 @@ function sanitizeJsonArray(
   depth: number,
   path: string,
   ancestors: WeakSet<object>,
+  nodeCounter: SanitizedJsonNodeCounter,
 ): SanitizedJsonValue[] {
   return withJsonAncestor(value, path, ancestors, () => {
     assertNoCallableToJson(value, path);
@@ -165,6 +215,7 @@ function sanitizeJsonArray(
       throw new Error(`SanitizedString: invalid array length at ${path}`);
     }
     const length = lengthValue;
+    reserveSanitizedJsonChildNodes(length, nodeCounter, (index) => `${path}[${index}]`);
 
     for (const rawKey of Reflect.ownKeys(value)) {
       if (typeof rawKey === "symbol") {
@@ -189,7 +240,7 @@ function sanitizeJsonArray(
       assertEnumerableDataDescriptor(descriptor, itemPath);
       const child: unknown = descriptor.value;
       Object.defineProperty(out, String(index), {
-        value: sanitizeJsonValue(child, options, depth + 1, itemPath, ancestors),
+        value: sanitizeJsonValue(child, options, depth + 1, itemPath, ancestors, nodeCounter, true),
         enumerable: true,
         configurable: true,
         writable: true,
@@ -206,6 +257,7 @@ function sanitizeJsonObject(
   depth: number,
   path: string,
   ancestors: WeakSet<object>,
+  nodeCounter: SanitizedJsonNodeCounter,
 ): SanitizedJsonRecord {
   return withJsonAncestor(value, path, ancestors, () => {
     assertNoCallableToJson(value, path);
@@ -222,7 +274,12 @@ function sanitizeJsonObject(
       string,
       SanitizedJsonValue
     >;
-    for (const rawKey of Reflect.ownKeys(value)) {
+    const rawKeys = Reflect.ownKeys(value);
+    reserveSanitizedJsonChildNodes(rawKeys.length, nodeCounter, (index) => {
+      const rawKey = rawKeys[index];
+      return `${path}.${typeof rawKey === "symbol" ? String(rawKey) : rawKey}`;
+    });
+    for (const rawKey of rawKeys) {
       if (typeof rawKey === "symbol") {
         throw new Error(`SanitizedString: symbol keys are not JSON-representable at ${path}`);
       }
@@ -244,7 +301,15 @@ function sanitizeJsonObject(
 
       const child: unknown = descriptor.value;
       Object.defineProperty(out, sanitizedKey, {
-        value: sanitizeJsonValue(child, options, depth + 1, childPath, ancestors),
+        value: sanitizeJsonValue(
+          child,
+          options,
+          depth + 1,
+          childPath,
+          ancestors,
+          nodeCounter,
+          true,
+        ),
         enumerable: true,
         configurable: true,
         writable: true,

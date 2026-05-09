@@ -3,6 +3,13 @@
 // module so that the file-size of any single file stays well below the cap.
 
 import type { Brand } from "./brand.ts";
+import {
+  MAX_AGENT_SLUG_BYTES,
+  MAX_APPROVAL_ID_BYTES,
+  MAX_LOCAL_ID_BYTES,
+  MAX_TOOL_CALL_ID_BYTES,
+  MAX_WRITE_ID_BYTES,
+} from "./budgets.ts";
 import type { FrozenArgs } from "./frozen-args.ts";
 import type { SanitizedString } from "./sanitized-string.ts";
 import type { Sha256Hex } from "./sha256.ts";
@@ -231,8 +238,8 @@ export type ReceiptValidationResult =
   | { ok: false; errors: ReceiptValidationError[] };
 
 const ULID_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/;
-const AGENT_SLUG_RE = /^[a-z0-9][a-z0-9_-]*$/;
-const LOCAL_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const AGENT_SLUG_RE = new RegExp(`^[a-z0-9][a-z0-9_-]{0,${MAX_AGENT_SLUG_BYTES - 1}}$`);
+const LOCAL_ID_RE = new RegExp(`^[A-Za-z0-9][A-Za-z0-9._-]{0,${MAX_LOCAL_ID_BYTES - 1}}$`);
 export const IDEMPOTENCY_KEY_RE = /^[A-Za-z0-9_-]{1,128}$/;
 
 // Exported because ProviderKind is `Brand<(typeof PROVIDER_KIND_VALUES)[number], …>`
@@ -279,30 +286,34 @@ export function isProviderKind(s: unknown): s is ProviderKind {
 }
 
 export function asToolCallId(s: string): ToolCallId {
-  if (!LOCAL_ID_RE.test(s)) throw new Error("not a ToolCallId");
+  if (!isBoundedLocalId(s, MAX_TOOL_CALL_ID_BYTES)) throw new Error("not a ToolCallId");
   return s as ToolCallId;
 }
 
 export function isToolCallId(s: unknown): s is ToolCallId {
-  return typeof s === "string" && LOCAL_ID_RE.test(s);
+  return typeof s === "string" && isBoundedLocalId(s, MAX_TOOL_CALL_ID_BYTES);
 }
 
 export function asApprovalId(s: string): ApprovalId {
-  if (!LOCAL_ID_RE.test(s)) throw new Error("not an ApprovalId");
+  if (!isBoundedLocalId(s, MAX_APPROVAL_ID_BYTES)) throw new Error("not an ApprovalId");
   return s as ApprovalId;
 }
 
 export function isApprovalId(s: unknown): s is ApprovalId {
-  return typeof s === "string" && LOCAL_ID_RE.test(s);
+  return typeof s === "string" && isBoundedLocalId(s, MAX_APPROVAL_ID_BYTES);
 }
 
 export function asWriteId(s: string): WriteId {
-  if (!LOCAL_ID_RE.test(s)) throw new Error("not a WriteId");
+  if (!isBoundedLocalId(s, MAX_WRITE_ID_BYTES)) throw new Error("not a WriteId");
   return s as WriteId;
 }
 
 export function isWriteId(s: unknown): s is WriteId {
-  return typeof s === "string" && LOCAL_ID_RE.test(s);
+  return typeof s === "string" && isBoundedLocalId(s, MAX_WRITE_ID_BYTES);
+}
+
+function isBoundedLocalId(value: string, maxBytes: number): boolean {
+  return value.length <= maxBytes && LOCAL_ID_RE.test(value);
 }
 
 export function asIdempotencyKey(s: string): IdempotencyKey {
