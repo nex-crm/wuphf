@@ -15,7 +15,7 @@ bun run build:dry-run
 bun run build:current
 ```
 
-Local builds do not sign or upload unless the signing env vars are present.
+Local builds do not sign, notarize, or upload unless production mode and the signing env vars are present.
 
 ```text
 # build:dry-run

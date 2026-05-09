@@ -60,6 +60,17 @@ ensureBundledToolExecutables();
 
 const builderCli = require.resolve("electron-builder/cli");
 const nodeBinary = process.env.NODE_BINARY || process.execPath;
+const releaseMode = process.env.WUPHF_RELEASE_MODE || "pr";
+
+if (!["pr", "production"].includes(releaseMode)) {
+  console.error(`WUPHF_RELEASE_MODE must be 'pr' or 'production', got '${releaseMode}'`);
+  process.exit(1);
+}
+
+const builderArgs = process.argv.slice(2);
+if (releaseMode !== "production") {
+  builderArgs.push("--config.mac.notarize=false");
+}
 
 if (process.versions.bun && !process.env.NODE_BINARY) {
   console.error(
@@ -68,7 +79,7 @@ if (process.versions.bun && !process.env.NODE_BINARY) {
   process.exit(1);
 }
 
-const result = spawnSync(nodeBinary, [builderCli, ...process.argv.slice(2)], {
+const result = spawnSync(nodeBinary, [builderCli, ...builderArgs], {
   env: process.env,
   stdio: "inherit",
 });
