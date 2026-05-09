@@ -150,7 +150,10 @@ const PRE_FIX_CSS = `
     white-space: normal !important;
   }
   .dm-chat-drawer { max-height: 38vh !important; }
-  .dm-chat-drawer-body { overflow-y: visible !important; }
+  /* Pre-fix had no overflow-y declaration on the drawer body, so the
+     default cascade applied. 'unset' reverts to that initial value
+     (effectively 'visible' here) without hard-coding the keyword. */
+  .dm-chat-drawer-body { overflow-y: unset !important; }
   .agent-workbench-stream { min-height: 240px !important; }
   .agent-workbench-stream-log {
     height: 320px !important;
@@ -222,7 +225,7 @@ async function captureState({ name, withBlocking, preFix }) {
   // by react-router and the previous state lingers — every screenshot ends
   // up identical.
   await page.goto("about:blank");
-  await page.goto(`${base}/${DM_URL}`, { waitUntil: "load" });
+  await page.goto(`${base}${DM_URL}`, { waitUntil: "load" });
   await page.waitForSelector(".status-bar", { timeout: 15_000 });
   await page.evaluate(async () => {
     const m = await import("/src/stores/app.ts");
