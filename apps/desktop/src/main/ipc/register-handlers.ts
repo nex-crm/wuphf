@@ -1,9 +1,8 @@
 import { type IpcMainInvokeEvent, ipcMain } from "electron";
 
 import { IPC_CHANNEL_VALUES, IpcChannel, type IpcChannelName } from "../../shared/api-contract.ts";
-import type { BrokerSupervisor } from "../broker.ts";
 import { handleGetAppVersion } from "./get-app-version.ts";
-import { handleGetBrokerStatus } from "./get-broker-status.ts";
+import { type BrokerStatusProvider, handleGetBrokerStatus } from "./get-broker-status.ts";
 import { handleGetPlatform } from "./get-platform.ts";
 import { handleOpenExternal } from "./open-external.ts";
 import { handleShowItemInFolder } from "./show-item-in-folder.ts";
@@ -11,20 +10,20 @@ import { handleShowItemInFolder } from "./show-item-in-folder.ts";
 export type IpcHandler = (event: IpcMainInvokeEvent, request: unknown) => unknown;
 export type IpcHandlers = Record<IpcChannelName, IpcHandler>;
 
-export function createIpcHandlers(brokerSupervisor: BrokerSupervisor): IpcHandlers {
+export function createIpcHandlers(brokerStatusProvider: BrokerStatusProvider): IpcHandlers {
   const handlers: IpcHandlers = {
     [IpcChannel.OpenExternal]: handleOpenExternal,
     [IpcChannel.ShowItemInFolder]: handleShowItemInFolder,
     [IpcChannel.GetAppVersion]: handleGetAppVersion,
     [IpcChannel.GetPlatform]: handleGetPlatform,
     [IpcChannel.GetBrokerStatus]: (event, request) =>
-      handleGetBrokerStatus(brokerSupervisor, event, request),
+      handleGetBrokerStatus(brokerStatusProvider, event, request),
   };
   return handlers;
 }
 
-export function registerIpcHandlers(brokerSupervisor: BrokerSupervisor): void {
-  const handlers = createIpcHandlers(brokerSupervisor);
+export function registerIpcHandlers(brokerStatusProvider: BrokerStatusProvider): void {
+  const handlers = createIpcHandlers(brokerStatusProvider);
   const channels = Object.keys(handlers) as readonly IpcChannelName[];
   assertRegisteredChannels(channels);
 
