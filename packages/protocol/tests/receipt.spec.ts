@@ -171,6 +171,31 @@ describe("receipt schema", () => {
       errors: [{ path: "/inputTokens", message: "must be a non-negative integer" }],
     });
 
+    // Cover the negative-int / non-integer / non-finite branches of the
+    // non-negative-integer validator. These are real failure modes for the
+    // token-count fields, surfacing as `must be a non-negative integer`.
+    const negativeTokens: Record<string, unknown> = { ...validReceiptFixture(), inputTokens: -1 };
+    expect(validateReceipt(negativeTokens)).toEqual({
+      ok: false,
+      errors: [{ path: "/inputTokens", message: "must be a non-negative integer" }],
+    });
+    const fractionalTokens: Record<string, unknown> = {
+      ...validReceiptFixture(),
+      outputTokens: 1.5,
+    };
+    expect(validateReceipt(fractionalTokens)).toEqual({
+      ok: false,
+      errors: [{ path: "/outputTokens", message: "must be a non-negative integer" }],
+    });
+    const infiniteTokens: Record<string, unknown> = {
+      ...validReceiptFixture(),
+      cacheReadTokens: Number.POSITIVE_INFINITY,
+    };
+    expect(validateReceipt(infiniteTokens)).toEqual({
+      ok: false,
+      errors: [{ path: "/cacheReadTokens", message: "must be a non-negative integer" }],
+    });
+
     const wrongStatus: Record<string, unknown> = {
       ...validReceiptFixture(),
       status: "done",
