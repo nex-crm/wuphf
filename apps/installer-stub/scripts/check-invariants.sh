@@ -17,8 +17,11 @@ fi
 
 violations=()
 forbidden_patterns=(
+  # String splits keep this file from matching itself when ripgrep scans scripts/.
   "--skip-code""sign"
   "--skip-""sign"
+  "skip-""sign"
+  "skip-""notarize"
   "skip""Notarize"
   "notarize:"" false"
   "hardenedRuntime:"" false"
