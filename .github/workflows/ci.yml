@@ -51,6 +51,27 @@ jobs:
         # Routed through the canonical wrapper so this matches what local
         # contributors run — see scripts/test-protocol.sh.
         run: bash scripts/test-protocol.sh
+      - name: Demo smoke (public-API ergonomics)
+        # The demo composes the public surface end-to-end (import from
+        # index.ts, use as a consumer would). Vitest covers per-module
+        # invariants; the demo catches regressions in how the modules
+        # COMPOSE — naming drift, missing exports, accidental API breaks
+        # at the index.ts boundary. Cheap (<1s).
+        run: bun run packages/protocol/scripts/demo.ts
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # ratchet:actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Cross-language wire-contract verifier (Go)
+        # Independent reference implementation of the audit-chain wire
+        # contract in Go. Loads testdata/audit-event-vectors.json and
+        # recomputes the canonical serialization + eventHash byte-for-byte.
+        # Catches a class of bug NO other test catches: TS writer + external
+        # reader drift (e.g., someone changes both the serializer AND the
+        # in-package golden vector together — Vitest still passes, this
+        # fails). The verifier file uses `//go:build ignore` so it is NOT
+        # part of the main Go build; only `go run` against the file runs it.
+        working-directory: packages/protocol/testdata
+        run: go run verifier-reference.go
 
   web:
     runs-on: ubuntu-latest

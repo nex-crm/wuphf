@@ -163,6 +163,24 @@ pre-push:
           exit 0
         fi
         testdata/vhs/check.sh
+    protocol-demo:
+      # Composes the @wuphf/protocol public surface end-to-end: imports
+      # from index.ts, exercises 11 adversarial scenarios. Vitest covers
+      # per-module invariants; this catches drift in how the modules
+      # COMPOSE (missing exports, accidental API breaks at index.ts).
+      # Cheap (<1s) so it runs on every protocol change.
+      files: bash scripts/changed-files-since-base.sh
+      glob: "packages/protocol/**/*.{ts,json}"
+      run: bun run packages/protocol/scripts/demo.ts
+    protocol-wire-contract:
+      # Independent Go reference verifier of the audit-chain wire bytes.
+      # Catches a class of bug Vitest cannot: TS writer + external reader
+      # drift where someone updates BOTH the serializer AND the in-package
+      # golden vector (Vitest stays green, this fails). Scoped to the files
+      # that affect the wire contract — ~2s on warm Go cache.
+      files: bash scripts/changed-files-since-base.sh
+      glob: "packages/protocol/{src/audit-event.ts,src/canonical-json.ts,src/event-lsn.ts,testdata/**}"
+      run: cd packages/protocol/testdata && go run verifier-reference.go
     file-size:
       # Enforce CONTRIBUTING.md's file-size budget: warn at 800 LOC, fail
       # at 1500 LOC unless the file is on scripts/file-size-allowlist.txt

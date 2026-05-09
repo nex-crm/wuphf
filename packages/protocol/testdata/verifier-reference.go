@@ -1,3 +1,5 @@
+//go:build ignore
+
 // verifier-reference.go — single-file Go reference for the @wuphf/protocol
 // audit-chain wire contract.
 //
