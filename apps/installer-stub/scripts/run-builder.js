@@ -59,7 +59,15 @@ function ensureBundledToolExecutables() {
 ensureBundledToolExecutables();
 
 const builderCli = require.resolve("electron-builder/cli");
-const nodeBinary = process.env.NODE_BINARY || "node";
+const nodeBinary = process.env.NODE_BINARY || process.execPath;
+
+if (process.versions.bun && !process.env.NODE_BINARY) {
+  console.error(
+    "run-builder.js must run under real Node so electron-builder's CLI is executed by Node. Run via `node scripts/run-builder.js` after setup-node.",
+  );
+  process.exit(1);
+}
+
 const result = spawnSync(nodeBinary, [builderCli, ...process.argv.slice(2)], {
   env: process.env,
   stdio: "inherit",

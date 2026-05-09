@@ -46,8 +46,12 @@ jobs:
       name: ${{ needs.detect-secrets.outputs.release_mode == 'production' && 'production-release' || 'installer-pr' }}
     env:
       WUPHF_RELEASE_MODE: ${{ needs.detect-secrets.outputs.release_mode }}
+      WUPHF_BUILD_CHANNEL: ${{ needs.detect-secrets.outputs.is_release == 'true' && 'rewrite' || 'dev' }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # ratchet:actions/setup-node@v6.4.0
+        with:
+          node-version: "20.x"
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # ratchet:oven-sh/setup-bun@v2.2.0
         with:
           bun-version: "1.1.38"
@@ -59,7 +63,7 @@ jobs:
         run: |
           version="${GITHUB_REF_NAME#v}"
           echo "WUPHF_BUILD_VERSION=${version}" >> "${GITHUB_ENV}"
-          bun -e "const fs = require('node:fs'); const pkg = require('./package.json'); pkg.version = process.env.WUPHF_BUILD_VERSION; fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');"
+          bun -e "const fs = require('node:fs'); const pkg = require('./package.json'); pkg.version = process.env.WUPHF_BUILD_VERSION; pkg.wuphfBuildChannel = process.env.WUPHF_BUILD_CHANNEL || 'dev'; fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');"
       - name: Detect Apple signing secrets
         if: needs.detect-secrets.outputs.is_release == 'true'
         env:
@@ -123,6 +127,30 @@ jobs:
             xcrun stapler staple "${dmg}"
             xcrun stapler validate "${dmg}"
           done
+      - name: Validate macOS app staple inside updater zip
+        if: needs.detect-secrets.outputs.is_release == 'true'
+        working-directory: apps/installer-stub
+        run: |
+          shopt -s nullglob
+          zips=(dist/*.zip)
+          if [[ "${#zips[@]}" -eq 0 ]]; then
+            echo "No macOS zip artifact found" >&2
+            exit 1
+          fi
+
+          for zip in "${zips[@]}"; do
+            workdir="$(mktemp -d)"
+            ditto -x -k "${zip}" "${workdir}"
+            app_path="$(find "${workdir}" -maxdepth 3 -name "*.app" -type d -print -quit)"
+            if [[ -z "${app_path}" ]]; then
+              echo "No .app bundle found inside ${zip}" >&2
+              exit 1
+            fi
+
+            xcrun stapler validate "${app_path}"
+            spctl --assess --type execute --verbose "${app_path}"
+            rm -rf "${workdir}"
+          done
       - name: Refresh macOS update manifest after stapling
         if: needs.detect-secrets.outputs.is_release == 'true'
         working-directory: apps/installer-stub
@@ -140,14 +168,6 @@ jobs:
           fi
 
           test -f dist/latest-mac.yml
-      - name: Verify macOS update manifest
-        working-directory: apps/installer-stub
-        run: |
-          if [[ "${WUPHF_RELEASE_MODE}" == "production" ]]; then
-            bash scripts/verify-latest-yml.sh "${GITHUB_REF_NAME}"
-          else
-            bash scripts/verify-latest-yml.sh
-          fi
       - name: Cleanup macOS signing keychain
         if: always() && needs.detect-secrets.outputs.is_release == 'true'
         run: |
@@ -172,8 +192,12 @@ jobs:
       name: ${{ needs.detect-secrets.outputs.release_mode == 'production' && 'production-release' || 'installer-pr' }}
     env:
       WUPHF_RELEASE_MODE: ${{ needs.detect-secrets.outputs.release_mode }}
+      WUPHF_BUILD_CHANNEL: ${{ needs.detect-secrets.outputs.is_release == 'true' && 'rewrite' || 'dev' }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # ratchet:actions/setup-node@v6.4.0
+        with:
+          node-version: "20.x"
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # ratchet:oven-sh/setup-bun@v2.2.0
         with:
           bun-version: "1.1.38"
@@ -186,7 +210,7 @@ jobs:
         run: |
           version="${GITHUB_REF_NAME#v}"
           echo "WUPHF_BUILD_VERSION=${version}" >> "${GITHUB_ENV}"
-          bun -e "const fs = require('node:fs'); const pkg = require('./package.json'); pkg.version = process.env.WUPHF_BUILD_VERSION; fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');"
+          bun -e "const fs = require('node:fs'); const pkg = require('./package.json'); pkg.version = process.env.WUPHF_BUILD_VERSION; pkg.wuphfBuildChannel = process.env.WUPHF_BUILD_CHANNEL || 'dev'; fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');"
       - name: Detect Azure signing secrets
         if: needs.detect-secrets.outputs.is_release == 'true'
         shell: bash
@@ -240,15 +264,6 @@ jobs:
           fi
 
           test -f dist/latest.yml
-      - name: Verify Windows update manifest
-        shell: bash
-        working-directory: apps/installer-stub
-        run: |
-          if [[ "${WUPHF_RELEASE_MODE}" == "production" ]]; then
-            bash scripts/verify-latest-yml.sh "${GITHUB_REF_NAME}"
-          else
-            bash scripts/verify-latest-yml.sh
-          fi
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # ratchet:actions/upload-artifact@v7
         with:
           name: installer-win
@@ -263,8 +278,12 @@ jobs:
     runs-on: ubuntu-24.04
     env:
       WUPHF_RELEASE_MODE: ${{ needs.detect-secrets.outputs.release_mode }}
+      WUPHF_BUILD_CHANNEL: ${{ needs.detect-secrets.outputs.is_release == 'true' && 'rewrite' || 'dev' }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # ratchet:actions/setup-node@v6.4.0
+        with:
+          node-version: "20.x"
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # ratchet:oven-sh/setup-bun@v2.2.0
         with:
           bun-version: "1.1.38"
@@ -276,7 +295,7 @@ jobs:
         run: |
           version="${GITHUB_REF_NAME#v}"
           echo "WUPHF_BUILD_VERSION=${version}" >> "${GITHUB_ENV}"
-          bun -e "const fs = require('node:fs'); const pkg = require('./package.json'); pkg.version = process.env.WUPHF_BUILD_VERSION; fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');"
+          bun -e "const fs = require('node:fs'); const pkg = require('./package.json'); pkg.version = process.env.WUPHF_BUILD_VERSION; pkg.wuphfBuildChannel = process.env.WUPHF_BUILD_CHANNEL || 'dev'; fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');"
       - name: Build Linux PR artifacts
         if: needs.detect-secrets.outputs.is_release != 'true'
         working-directory: apps/installer-stub
@@ -297,14 +316,6 @@ jobs:
           fi
 
           test -f dist/latest-linux.yml
-      - name: Verify Linux update manifest
-        working-directory: apps/installer-stub
-        run: |
-          if [[ "${WUPHF_RELEASE_MODE}" == "production" ]]; then
-            bash scripts/verify-latest-yml.sh "${GITHUB_REF_NAME}"
-          else
-            bash scripts/verify-latest-yml.sh
-          fi
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # ratchet:actions/upload-artifact@v7
         with:
           name: installer-linux
@@ -330,6 +341,15 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       TAG: ${{ github.ref_name }}
     steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # ratchet:actions/setup-node@v6.4.0
+        with:
+          node-version: "20.x"
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # ratchet:oven-sh/setup-bun@v2.2.0
+        with:
+          bun-version: "1.1.38"
+      - name: Install workspace deps
+        run: bun install --frozen-lockfile
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # ratchet:actions/download-artifact@v8
         with:
           pattern: installer-*
@@ -362,6 +382,11 @@ jobs:
           test -f release-assets/latest-mac.yml
           test -f release-assets/latest.yml
           test -f release-assets/latest-linux.yml
+      - name: Verify release update manifests
+        working-directory: apps/installer-stub
+        env:
+          WUPHF_DIST_DIR: ${{ github.workspace }}/release-assets
+        run: bash scripts/verify-latest-yml.sh "${TAG}"
       - name: Compute release checksums
         run: |
           mapfile -d '' assets < <(find release-assets -type f \( \
@@ -414,6 +439,11 @@ jobs:
           fi
 
           if gh release view "${TAG}" >/dev/null 2>&1; then
+            is_draft="$(gh release view "${TAG}" --json isDraft -q '.isDraft')"
+            if [[ "${is_draft}" != "true" ]]; then
+              echo "Refusing to clobber published release ${TAG}. Delete it manually first or bump the tag." >&2
+              exit 1
+            fi
             gh release edit "${TAG}" --title "${TAG}" --notes-file release-notes.md
             gh release upload "${TAG}" "${assets[@]}" --clobber
           else
