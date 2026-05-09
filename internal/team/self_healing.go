@@ -86,7 +86,7 @@ func (b *Broker) requestSelfHealingLocked(agentSlug, taskID string, reason agent
 		}
 	}
 	if existing != nil {
-		beforeStatus := existing.Status
+		beforeStatus := existing.status
 		incidentBody := selfHealingIncidentUpdate(reason, detail)
 		if mergeOverflow {
 			incidentBody = selfHealingOverflowIncidentUpdate(taskID, reason, detail)
@@ -98,7 +98,7 @@ func (b *Broker) requestSelfHealingLocked(agentSlug, taskID string, reason agent
 		}
 		if existing.Owner == "" && owner != "" {
 			existing.Owner = owner
-			existing.Status = "in_progress"
+			existing.status = "in_progress"
 		}
 		if existing.TaskType == "" {
 			existing.TaskType = "incident"
@@ -135,7 +135,7 @@ func (b *Broker) requestSelfHealingLocked(agentSlug, taskID string, reason agent
 		Title:         title,
 		Details:       details,
 		Owner:         owner,
-		Status:        "open",
+		status:        "open",
 		CreatedBy:     createdBy,
 		TaskType:      "incident",
 		PipelineID:    "incident",
@@ -144,7 +144,7 @@ func (b *Broker) requestSelfHealingLocked(agentSlug, taskID string, reason agent
 		UpdatedAt:     now,
 	}
 	if task.Owner != "" {
-		task.Status = "in_progress"
+		task.status = "in_progress"
 	}
 	b.ensureTaskOwnerChannelMembershipLocked(channel, task.Owner)
 	b.queueTaskBehindActiveOwnerLaneLocked(&task)
@@ -164,7 +164,16 @@ func (b *Broker) requestSelfHealingLocked(agentSlug, taskID string, reason agent
 	return task, false, nil
 }
 
+// requestCapabilitySelfHealingHook is a swap-able test hook used by the
+// build-time gate #1 unit test to observe whether the call site fires
+// (Lane A: blocked_on_pr_merge must NOT trigger self-heal). Production
+// always leaves this nil and the real implementation runs.
+var requestCapabilitySelfHealingHook func(blockedTask *teamTask, actor, detail string)
+
 func (b *Broker) requestCapabilitySelfHealingLocked(blockedTask *teamTask, actor, detail string) {
+	if hook := requestCapabilitySelfHealingHook; hook != nil {
+		hook(blockedTask, actor, detail)
+	}
 	if blockedTask == nil || !isCapabilityGapBlocker(detail) || isSelfHealingTaskTitle(blockedTask.Title) {
 		return
 	}
@@ -335,7 +344,7 @@ func (b *Broker) findOverflowSelfHealForAgentLocked(agentSlug string) *teamTask 
 		if !isSelfHealingTaskTitle(task.Title) {
 			continue
 		}
-		if isTerminalTeamTaskStatus(task.Status) {
+		if isTerminalTeamTaskStatus(task.status) {
 			continue
 		}
 		if !strings.Contains(task.Title, titleNeedle) {
