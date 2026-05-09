@@ -24,6 +24,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -50,9 +51,11 @@ type auditEventExpected struct {
 }
 
 type auditEventVector struct {
-	Name     string             `json:"name"`
-	Input    auditEventInput    `json:"input"`
-	Expected auditEventExpected `json:"expected"`
+	Name           string             `json:"name"`
+	Input          auditEventInput    `json:"input"`
+	Expected       auditEventExpected `json:"expected"`
+	SerializedJSON string             `json:"serializedJson"`
+	ExpectedHash   string             `json:"expectedHash"`
 }
 
 type merkleRootInput struct {
@@ -194,7 +197,7 @@ const (
 )
 
 func main() {
-	bytes, err := os.ReadFile("audit-event-vectors.json")
+	fixtureBytes, err := os.ReadFile("audit-event-vectors.json")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "could not read fixture: %v\n", err)
 		fmt.Fprintln(os.Stderr, "run from packages/protocol/testdata/")
@@ -202,7 +205,9 @@ func main() {
 	}
 
 	var fx fixture
-	if err := json.Unmarshal(bytes, &fx); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(fixtureBytes))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&fx); err != nil {
 		fmt.Fprintf(os.Stderr, "could not parse fixture: %v\n", err)
 		os.Exit(2)
 	}
@@ -218,6 +223,16 @@ func main() {
 	failed := 0
 
 	for _, vec := range fx.Vectors {
+		if vec.SerializedJSON != "" && vec.SerializedJSON != vec.Expected.CanonicalSerialization {
+			fmt.Printf("  %sFAIL%s %s: serializedJson does not match expected.canonicalSerialization\n", colorRed, colorReset, vec.Name)
+			failed++
+			continue
+		}
+		if vec.ExpectedHash != "" && vec.ExpectedHash != vec.Expected.EventHash {
+			fmt.Printf("  %sFAIL%s %s: expectedHash does not match expected.eventHash\n", colorRed, colorReset, vec.Name)
+			failed++
+			continue
+		}
 		serialized, err := serializeAuditEventRecordForHash(vec.Input)
 		if err != nil {
 			fmt.Printf("  %sFAIL%s %s: serialization error: %v\n", colorRed, colorReset, vec.Name, err)
