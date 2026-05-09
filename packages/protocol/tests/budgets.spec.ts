@@ -1,6 +1,8 @@
+import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import {
   type ApprovalClaims,
+  type AuditEventRecord,
   asAgentSlug,
   asApprovalId,
   asIdempotencyKey,
@@ -11,10 +13,16 @@ import {
   asToolCallId,
   asWriteId,
   type CommitRef,
+  computeAuditEventHash,
   type ExternalWrite,
   type FileChange,
   FrozenArgs,
+  GENESIS_PREV_HASH,
+  INITIAL_VERIFIER_STATE,
+  lsnFromV1Number,
   MAX_APPROVAL_TOKEN_LIFETIME_MS,
+  MAX_AUDIT_CHAIN_BATCH_SIZE,
+  MAX_AUDIT_EVENT_BODY_BYTES,
   MAX_FROZEN_ARGS_BYTES,
   MAX_RECEIPT_APPROVALS,
   MAX_RECEIPT_BYTES,
@@ -36,9 +44,12 @@ import {
   sha256Hex,
   type ToolCall,
   validateApprovalTokenLifetime,
+  validateAuditEventBodyBudget,
   validateFrozenArgsBudget,
+  validateReceipt,
   validateReceiptBudget,
   validateSanitizedStringBudget,
+  verifyChainIncremental,
 } from "../src/index.ts";
 
 describe("resource budgets", () => {
@@ -46,6 +57,12 @@ describe("resource budgets", () => {
     expect(() => assertWithinBudget(1024, 1024, "test budget")).not.toThrow();
     expect(() => assertWithinBudget(1025, 1024, "test budget")).toThrow(
       /test budget exceeds budget: 1025 > 1024/,
+    );
+  });
+
+  it("assertWithinBudget rejects invalid budget parameters", () => {
+    expect(() => assertWithinBudget(1, Number.NaN, "test budget")).toThrow(
+      /test budget budget must be a non-negative finite number/,
     );
   });
 
@@ -62,6 +79,39 @@ describe("resource budgets", () => {
     }
   });
 
+  it("rejects receipt string payloads that exceed the serialized budget floor", () => {
+    const result = validateReceiptBudget({
+      ...validReceiptFixture(),
+      triggerRef: "x".repeat(MAX_RECEIPT_BYTES + 1),
+    });
+
+    expectBudgetRejection(result, /receipt string payload bytes.*10485761 > 10485760/);
+  });
+
+  it("rejects cyclic receipt payloads without walking forever", () => {
+    const cyclic = { ...validReceiptFixture() } as ReceiptSnapshot & { self?: unknown };
+    cyclic.self = cyclic;
+
+    const result = validateReceiptBudget(cyclic);
+
+    expect(result).toEqual({
+      ok: false,
+      reason: "receipt serialized bytes: receipt contains a cycle",
+    });
+  });
+
+  it("reports non-JSON receipt payloads as serialization failures", () => {
+    const result = validateReceiptBudget({
+      ...validReceiptFixture(),
+      inputTokens: 1n,
+    } as unknown as ReceiptSnapshot);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toMatch(/receipt serialized bytes:.*BigInt/);
+    }
+  });
+
   it("receipt codecs reject oversized raw and typed receipts before semantic validation", () => {
     expect(() => receiptFromJson("x".repeat(MAX_RECEIPT_BYTES + 1))).toThrow(
       /receipt serialized bytes.*exceeds budget/,
@@ -71,12 +121,34 @@ describe("resource budgets", () => {
     );
   });
 
+  it("validateReceipt returns the budget reason before field errors", () => {
+    const result = validateReceipt({
+      ...receiptWithSerializedBytes(MAX_RECEIPT_BYTES + 1),
+      status: "not-a-status",
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toEqual({
+        path: "",
+        message: expect.stringMatching(/receipt serialized bytes.*exceeds budget/),
+      });
+    }
+  });
+
   it("documents that receipt budget validation assumes plain-data inputs", () => {
     // Hostile wire input goes through receiptFromJson first; validateReceiptBudget
     // is scoped to typed receipts or JSON.parse output without accessors/toJSON.
+    let toJsonGetterInvoked = false;
+    const hostileReceipt = attachHostileToJson({ ...validReceiptFixture() }, () => {
+      toJsonGetterInvoked = true;
+    });
     const plainDataReceipt = JSON.parse(receiptToJson(validReceiptFixture())) as ReceiptSnapshot;
 
+    expect(Object.getOwnPropertyDescriptor(hostileReceipt, "toJSON")?.enumerable).toBe(true);
     expect(validateReceiptBudget(plainDataReceipt)).toEqual({ ok: true });
+    expect(toJsonGetterInvoked).toBe(false);
   });
 
   it("bounds tool calls per receipt at the edge", () => {
@@ -119,6 +191,62 @@ describe("resource budgets", () => {
     expectBudgetRejection(result, /SanitizedString value bytes.*1048577 > 1048576/);
   });
 
+  it("counts multibyte UTF-8 strings against byte budgets", () => {
+    expect(
+      validateSanitizedStringBudget(
+        forgedSanitizedString("\u00a2".repeat(MAX_SANITIZED_STRING_BYTES / 2)),
+      ),
+    ).toEqual({ ok: true });
+    expectBudgetRejection(
+      validateSanitizedStringBudget(
+        forgedSanitizedString(`${"\u00a2".repeat(MAX_SANITIZED_STRING_BYTES / 2)}x`),
+      ),
+      /SanitizedString value bytes.*1048577 > 1048576/,
+    );
+
+    expect(
+      validateSanitizedStringBudget(
+        forgedSanitizedString("\ud83d\ude00".repeat(MAX_SANITIZED_STRING_BYTES / 4)),
+      ),
+    ).toEqual({ ok: true });
+    expectBudgetRejection(
+      validateSanitizedStringBudget(
+        forgedSanitizedString(`${"\ud83d\ude00".repeat(MAX_SANITIZED_STRING_BYTES / 4)}x`),
+      ),
+      /SanitizedString value bytes.*1048577 > 1048576/,
+    );
+
+    expect(validateSanitizedStringBudget(forgedSanitizedString("\ud800"))).toEqual({ ok: true });
+  });
+
+  it("bounds audit event body bytes at the edge", () => {
+    expect(validateAuditEventBodyBudget(new Uint8Array(MAX_AUDIT_EVENT_BODY_BYTES))).toEqual({
+      ok: true,
+    });
+
+    const result = validateAuditEventBodyBudget(new Uint8Array(MAX_AUDIT_EVENT_BODY_BYTES + 1));
+
+    expectBudgetRejection(result, /MAX_AUDIT_EVENT_BODY_BYTES.*1048577 > 1048576/);
+  });
+
+  it("bounds audit chain batches at the edge", () => {
+    const atCap = auditChainOfLength(MAX_AUDIT_CHAIN_BATCH_SIZE);
+    const atCapResult = verifyChainIncremental(INITIAL_VERIFIER_STATE, atCap);
+
+    expect(atCapResult.ok).toBe(true);
+
+    const firstRecord = atCap[0];
+    if (firstRecord === undefined) throw new Error("audit batch fixture must be non-empty");
+    const overCapResult = verifyChainIncremental(INITIAL_VERIFIER_STATE, [...atCap, firstRecord]);
+
+    expect(overCapResult.ok).toBe(false);
+    if (!overCapResult.ok) {
+      expect(overCapResult.reason).toBe(
+        `batch too large: ${MAX_AUDIT_CHAIN_BATCH_SIZE + 1} > ${MAX_AUDIT_CHAIN_BATCH_SIZE}`,
+      );
+    }
+  });
+
   it("bounds approval token lifetime at the edge", () => {
     const issuedAt = new Date("2026-05-08T18:00:00.000Z");
     expect(
@@ -136,6 +264,68 @@ describe("resource budgets", () => {
     });
 
     expectBudgetRejection(result, /approval token lifetime ms.*1800001 > 1800000/);
+  });
+
+  it("rejects approval token lifetimes that do not expire after issuance", () => {
+    const issuedAt = new Date("2026-05-08T18:00:00.000Z");
+    const result = validateApprovalTokenLifetime({
+      ...approvalClaimsFixture(),
+      issuedAt,
+      expiresAt: issuedAt,
+    });
+
+    expectBudgetRejection(result, /approval token lifetime ms.*0 <= 0/);
+  });
+
+  it("rejects approval token lifetimes with invalid dates", () => {
+    const result = validateApprovalTokenLifetime({
+      ...approvalClaimsFixture(),
+      expiresAt: new Date(Number.NaN),
+    });
+
+    expect(result).toEqual({ ok: false, reason: "approval token lifetime must be finite" });
+  });
+
+  it("direct budget helpers do not invoke hostile toJSON getters", () => {
+    fc.assert(
+      fc.property(
+        fc.string({ maxLength: 256 }),
+        fc.uint8Array({ minLength: 0, maxLength: 256 }),
+        (text, bodyBytes) => {
+          let toJsonGetterInvoked = false;
+          const markToJsonGetterInvoked = (): void => {
+            toJsonGetterInvoked = true;
+          };
+          const issuedAt = new Date("2026-05-08T18:00:00.000Z");
+          const expiresAt = new Date("2026-05-08T18:30:00.000Z");
+
+          expect(
+            validateFrozenArgsBudget(
+              attachHostileToJson(forgedFrozenArgs(text), markToJsonGetterInvoked),
+            ),
+          ).toEqual({ ok: true });
+          expect(
+            validateSanitizedStringBudget(
+              attachHostileToJson(forgedSanitizedString(text), markToJsonGetterInvoked),
+            ),
+          ).toEqual({ ok: true });
+          expect(
+            validateAuditEventBodyBudget(
+              attachHostileToJson(new Uint8Array(bodyBytes), markToJsonGetterInvoked),
+            ),
+          ).toEqual({ ok: true });
+          expect(
+            validateApprovalTokenLifetime(
+              attachHostileToJson(
+                { ...approvalClaimsFixture(), issuedAt, expiresAt },
+                markToJsonGetterInvoked,
+              ),
+            ),
+          ).toEqual({ ok: true });
+          expect(toJsonGetterInvoked).toBe(false);
+        },
+      ),
+    );
   });
 
   it("bounds filesChanged at the edge", () => {
@@ -265,6 +455,41 @@ function expectBudgetRejection(
 
 function repeat<T>(item: T, length: number): readonly T[] {
   return Array.from({ length }, () => item);
+}
+
+function attachHostileToJson<T extends object>(value: T, onInvoke: () => void): T {
+  Object.defineProperty(value, "toJSON", {
+    configurable: true,
+    enumerable: true,
+    get(): () => unknown {
+      onInvoke();
+      return () => ({});
+    },
+  });
+  return value;
+}
+
+function auditChainOfLength(length: number): AuditEventRecord[] {
+  const records: AuditEventRecord[] = [];
+  let prevHash = GENESIS_PREV_HASH;
+
+  for (let i = 0; i < length; i++) {
+    const partial: AuditEventRecord = {
+      seqNo: lsnFromV1Number(i),
+      timestamp: new Date("2026-05-08T18:00:00.000Z"),
+      prevHash,
+      eventHash: GENESIS_PREV_HASH,
+      payload: {
+        kind: "receipt_created",
+        body: new Uint8Array(),
+      },
+    };
+    const record = { ...partial, eventHash: computeAuditEventHash(partial) };
+    records.push(record);
+    prevHash = record.eventHash;
+  }
+
+  return records;
 }
 
 function receiptWithSerializedBytes(targetBytes: number): ReceiptSnapshot {
