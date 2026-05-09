@@ -1,12 +1,18 @@
 // THIS FILE RUNS IN THE UTILITY PROCESS, NOT THE MAIN PROCESS.
 // No Electron main API is available here.
 
+const parentPort = process.parentPort;
+if (!parentPort) {
+  console.error("broker-stub must run as a utility process");
+  process.exit(1);
+}
+
 const ALIVE_INTERVAL_MS = 1_000;
 
 let aliveInterval: NodeJS.Timeout | null = null;
 
 function sendAlive(): void {
-  process.parentPort.postMessage({ alive: true });
+  parentPort.postMessage({ alive: true });
 }
 
 function shutdown(): void {
@@ -17,7 +23,7 @@ function shutdown(): void {
   process.exit(0);
 }
 
-process.parentPort.on("message", (event) => {
+parentPort.on("message", (event) => {
   if (isShutdownMessage(event.data)) {
     shutdown();
   }
