@@ -13,10 +13,6 @@
 
 set -euo pipefail
 
-# Anchor relative paths in the preamble to the repo root, regardless of CWD.
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-repo_root="$(cd "$script_dir/.." && pwd)"
-
 usage() {
   cat >&2 <<'USAGE'
 Usage (works from any CWD):
