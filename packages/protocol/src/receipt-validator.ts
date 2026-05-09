@@ -139,6 +139,13 @@ export const MEMORY_WRITE_KEYS: ReadonlySet<string> = new Set<string>([
   "hash",
   "citation",
 ]);
+// Wire shape for `FrozenArgs` JSON envelopes — must match the shape produced by
+// `frozenArgsToJsonValue` in receipt.ts. The receipt codec rejects unknown keys
+// at every other object boundary; without this set, `frozenArgsFromJson` was
+// the one boundary where extra siblings (e.g. `{canonicalJson, hash, extra}`)
+// would silently survive a decode/encode round-trip and not be covered by the
+// hash. Keep in sync with receipt.ts:frozenArgsToJsonValue.
+export const FROZEN_ARGS_KEYS: ReadonlySet<string> = new Set<string>(["canonicalJson", "hash"]);
 export const SIGNED_APPROVAL_TOKEN_KEYS: ReadonlySet<string> = new Set<string>([
   "signerIdentity",
   "role",
