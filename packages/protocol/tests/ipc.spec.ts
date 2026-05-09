@@ -4,6 +4,8 @@ import { MAX_APPROVAL_TOKEN_LIFETIME_MS } from "../src/budgets.ts";
 import {
   ALLOWED_LOOPBACK_HOSTS,
   type ApprovalSubmitResponse,
+  apiBootstrapFromJson,
+  apiBootstrapToJson,
   asApiToken,
   asBrokerPort,
   asKeychainHandleId,
@@ -389,6 +391,56 @@ describe("approval submission IPC", () => {
     };
 
     expect(response.idempotencyKey).toBe(idempotencyKey);
+  });
+});
+
+describe("apiBootstrap codec", () => {
+  it("decodes the v0 wire shape with snake_case broker_url", () => {
+    const wire = { token: "tok-bootstrap-abcdef", broker_url: "http://127.0.0.1:54321" };
+    const bootstrap = apiBootstrapFromJson(wire);
+    expect(bootstrap.token as string).toBe("tok-bootstrap-abcdef");
+    expect(bootstrap.brokerUrl).toBe("http://127.0.0.1:54321");
+  });
+
+  it("emits the v0 wire shape with snake_case broker_url", () => {
+    const json = apiBootstrapToJson({
+      token: asApiToken("tok-bootstrap-abcdef"),
+      brokerUrl: "http://127.0.0.1:54321",
+    });
+    expect(json).toStrictEqual({
+      token: "tok-bootstrap-abcdef",
+      broker_url: "http://127.0.0.1:54321",
+    });
+  });
+
+  it("rejects camelCase brokerUrl on the wire (lint-enforced shape mismatch)", () => {
+    expect(() =>
+      apiBootstrapFromJson({
+        token: "tok-too-short-but-tests-key-shape",
+        brokerUrl: "http://127.0.0.1:1",
+      }),
+    ).toThrow(/broker_url|brokerUrl/);
+  });
+
+  it("rejects unknown wire keys", () => {
+    expect(() =>
+      apiBootstrapFromJson({
+        token: "tok-too-short-but-tests-key-shape",
+        broker_url: "http://127.0.0.1:1",
+        extra: 1,
+      }),
+    ).toThrow(/extra/);
+  });
+
+  it("rejects non-string token", () => {
+    expect(() => apiBootstrapFromJson({ token: 1, broker_url: "http://127.0.0.1:1" })).toThrow(
+      /token/,
+    );
+  });
+
+  it("rejects non-record input", () => {
+    expect(() => apiBootstrapFromJson(null)).toThrow(/apiBootstrap/);
+    expect(() => apiBootstrapFromJson("string")).toThrow(/apiBootstrap/);
   });
 });
 

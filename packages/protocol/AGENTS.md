@@ -158,7 +158,25 @@ Anything a consumer can import from `@wuphf/protocol` is in
 rely on transitive re-exports from sub-modules. The visible public surface
 is what we promise to keep stable.
 
-### 12. Sub-agent dispatch contract
+### 12. Runtime TS surface is camelCase, lint-enforced
+
+Every TS interface property, type member, and function name in this package
+MUST be camelCase. The Biome rule `style/useNamingConvention` enforces this
+at every save, every commit, and every CI run — so a snake_case interface
+field fails lint and never reaches review. The rule is configured with
+`strictCase: false` (allows PascalCase generic parameters like
+`BrokerHttpRequest<TBody>`) and an `objectLiteralProperty` exemption (so
+wire-format string-keyed constants like `PAYLOAD_KIND_METADATA` keep working
+because their keys are typed against the audit-kind enum).
+
+When the wire format is snake_case (e.g. `{ token, broker_url }` from v0
+`/api-token`), keep the TS interface camelCase and add a codec at the
+boundary that translates: `apiBootstrapFromJson` / `apiBootstrapToJson` are
+the canonical example. The codec is the ONLY place the two shapes meet —
+never read snake_case keys off a runtime value or hand-roll the
+translation in callers. Same pattern receipt codecs use.
+
+### 13. Sub-agent dispatch contract
 
 When Claude, Codex, or a human delegates package work to a sub-agent
 (`codex exec`, Claude `Agent`, etc.), the prompt MUST carry the same rules

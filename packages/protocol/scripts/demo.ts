@@ -14,6 +14,8 @@
 
 import {
   type AuditEventRecord,
+  apiBootstrapFromJson,
+  apiBootstrapToJson,
   asAgentSlug,
   asApiToken,
   asApprovalId,
@@ -486,6 +488,25 @@ expectEqual("fromCanonical preserves hash", rehydratedArgs.hash, argsA.hash);
 expectThrows(
   () => FrozenArgs.fromCanonical('{"b":2,"a":1}'),
   /FrozenArgs\.fromCanonical: input is not canonical-form/,
+);
+
+// ──────────────────────────────────────────────────────────────────────────
+header(15, "ApiBootstrap codec: snake_case wire ↔ camelCase TS");
+// ──────────────────────────────────────────────────────────────────────────
+// Wire JSON is snake_case (v0 contract: `{ token, broker_url }`); the TS
+// runtime surface is camelCase, enforced by `style/useNamingConvention`.
+// The codec functions are the only place those two shapes meet.
+const bootstrapWire = { token: "tok-bootstrap-demo-abc", broker_url: "http://127.0.0.1:54321" };
+const bootstrapTs = apiBootstrapFromJson(bootstrapWire);
+expectEqual("decoded brokerUrl (camelCase)", bootstrapTs.brokerUrl, "http://127.0.0.1:54321");
+expectEqual("round-trip back to wire shape", apiBootstrapToJson(bootstrapTs), {
+  token: "tok-bootstrap-demo-abc",
+  broker_url: "http://127.0.0.1:54321",
+});
+expectThrows(
+  () =>
+    apiBootstrapFromJson({ token: "tok-bootstrap-demo-abc", brokerUrl: "http://127.0.0.1:54321" }),
+  /broker_url|brokerUrl/,
 );
 
 // ──────────────────────────────────────────────────────────────────────────

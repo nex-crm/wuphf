@@ -86,6 +86,8 @@ export type {
 } from "./ipc.ts";
 export {
   ALLOWED_LOOPBACK_HOSTS,
+  apiBootstrapFromJson,
+  apiBootstrapToJson,
   asApiToken,
   asBrokerPort,
   asKeychainHandleId,

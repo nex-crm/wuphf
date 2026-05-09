@@ -35,7 +35,7 @@ import {
   BASE64_RE,
   RISK_CLASS_VALUES,
 } from "./receipt-literals.ts";
-import { assertKnownKeys, hasOwn, isRecord } from "./receipt-utils.ts";
+import { assertKnownKeys, hasOwn, isRecord, requireRecord } from "./receipt-utils.ts";
 import { isSha256Hex } from "./sha256.ts";
 
 export type BrokerPort = Brand<number, "BrokerPort">;
@@ -139,17 +139,61 @@ export interface OsVerbsApi {
 // ---------- Channel 2: Broker loopback ----------
 
 /**
- * Bootstrap response shape. Wire-stable with v0:
- *   GET http://127.0.0.1:<port>/api-token
- *   → { token, broker_url }
+ * Bootstrap response shape. The TS interface uses camelCase so it conforms to
+ * the package's lint-enforced naming convention (`useNamingConvention`); the
+ * wire JSON keeps v0's snake_case keys (`{ token, broker_url }` from
+ * `internal/team/broker_web_proxy.go` and `docs/architecture/broker-contract.md`).
  *
- * Snake-keyed because that's what v0 emits (`internal/team/broker_web_proxy.go`)
- * and what `docs/architecture/broker-contract.md` documents. Renderer code that
- * wants camelCase should normalize after parsing the wire response.
+ *   Wire (JSON):  GET http://127.0.0.1:<port>/api-token → { token, broker_url }
+ *   Runtime (TS): { token, brokerUrl }
+ *
+ * Use `apiBootstrapFromJson` / `apiBootstrapToJson` at the wire boundary;
+ * never read snake_case keys off an `ApiBootstrap` value or hand-roll the
+ * translation in callers.
  */
 export interface ApiBootstrap {
   readonly token: ApiToken;
-  readonly broker_url: string; // http://127.0.0.1:<port>
+  readonly brokerUrl: string; // http://127.0.0.1:<port>
+}
+
+const API_BOOTSTRAP_WIRE_KEYS: ReadonlySet<string> = new Set(["token", "broker_url"]);
+
+function requiredStringField(
+  record: Readonly<Record<string, unknown>>,
+  key: string,
+  path: string,
+): string {
+  if (!hasOwn(record, key)) {
+    throw new Error(`${path}: is required`);
+  }
+  const descriptor = Object.getOwnPropertyDescriptor(record, key);
+  if (descriptor === undefined || !("value" in descriptor)) {
+    throw new Error(`${path}: must be a data property`);
+  }
+  if (typeof descriptor.value !== "string") {
+    throw new Error(`${path}: must be a string`);
+  }
+  return descriptor.value;
+}
+
+/** Parse the v0 wire JSON `{ token, broker_url }` into the camelCase TS shape. */
+export function apiBootstrapFromJson(value: unknown): ApiBootstrap {
+  const record = requireRecord(value, "apiBootstrap");
+  assertKnownKeys(record, "apiBootstrap", API_BOOTSTRAP_WIRE_KEYS);
+  const token = requiredStringField(record, "token", "apiBootstrap.token");
+  const brokerUrl = requiredStringField(record, "broker_url", "apiBootstrap.broker_url");
+  return { token: asApiToken(token), brokerUrl };
+}
+
+/**
+ * Emit a v0-compatible wire JSON `{ token, broker_url }` from the TS shape.
+ * Returns an unknown-typed record — callers who need the wire shape should
+ * pass through `JSON.stringify` (or hand to a writer that emits the keys
+ * verbatim). The wire keys are intentionally snake_case; the runtime TS
+ * surface is camelCase by lint rule.
+ */
+export function apiBootstrapToJson(bootstrap: ApiBootstrap): Readonly<Record<string, string>> {
+  return { token: bootstrap.token as string, broker_url: bootstrap.brokerUrl };
 }
 
 export interface BrokerHttpRequest<TBody> {

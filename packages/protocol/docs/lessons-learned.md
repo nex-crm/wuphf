@@ -228,3 +228,21 @@ easy to recognize before repeating the bug.
 
     Discipline: when protocol work looks well-reviewed, run orthogonal
     triangulation as the late-cycle sweep instead of treating that as done.
+
+17. **Naming-convention drift survives review unless it's lint-enforced**
+
+    Failure mode: snake_case fields in TS interfaces (mirroring a JSON wire
+    shape) survived multiple rounds of review because reviewers pattern-match
+    "matches the wire" as fine and don't realize the runtime API and the
+    wire shape can be different shapes joined by a codec.
+
+    ```text
+    R1-R6: snake_case TS interface accepted because "wire is snake_case"
+    R7: useNamingConvention enabled, ApiBootstrap.broker_url failed lint,
+        codec moved to apiBootstrapFromJson/apiBootstrapToJson
+    ```
+
+    Discipline: naming-convention drift is exactly the kind of soft drift
+    that lint catches and humans don't. Wire-format snake_case is fine in
+    JSON; the TS surface stays camelCase and the codec at the boundary
+    handles translation. Same pattern receipt codecs already used.
