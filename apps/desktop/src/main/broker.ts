@@ -17,6 +17,11 @@ const DEFAULT_LIVENESS_STALE_MS = 5_000;
 type UtilityProcessHandle = ReturnType<typeof utilityProcess.fork>;
 type ForkUtilityProcess = typeof utilityProcess.fork;
 type RunWindowsTaskkill = (pid: number, options: { readonly force: boolean }) => Promise<void>;
+export type ExecFileRunner = (
+  file: string,
+  args: readonly string[],
+  callback: (error: Error | null) => void,
+) => void;
 type MonotonicNow = () => number;
 
 export interface BrokerSupervisorConfig {
@@ -332,14 +337,18 @@ function killUtilityProcess(brokerProcess: UtilityProcessHandle, signal?: NodeJS
   Reflect.apply(brokerProcess.kill, brokerProcess, [signal]);
 }
 
-function runWindowsTaskkill(pid: number, options: { readonly force: boolean }): Promise<void> {
+export function runWindowsTaskkill(
+  pid: number,
+  options: { readonly force: boolean },
+  execFileRunner: ExecFileRunner = defaultExecFile,
+): Promise<void> {
   const args = ["/pid", String(pid), "/T"];
   if (options.force) {
     args.push("/F");
   }
 
   return new Promise((resolve, reject) => {
-    execFile("taskkill", args, (error) => {
+    execFileRunner("taskkill", args, (error) => {
       if (error === null) {
         resolve();
         return;
@@ -347,5 +356,15 @@ function runWindowsTaskkill(pid: number, options: { readonly force: boolean }): 
 
       reject(error);
     });
+  });
+}
+
+function defaultExecFile(
+  file: string,
+  args: readonly string[],
+  callback: (error: Error | null) => void,
+): void {
+  execFile(file, [...args], (error) => {
+    callback(error);
   });
 }

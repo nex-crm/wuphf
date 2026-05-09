@@ -43,3 +43,5 @@ function isShutdownMessage(message: unknown): message is { readonly type: "shutd
     (message as { readonly type?: unknown }).type === "shutdown"
   );
 }
+
+export {};

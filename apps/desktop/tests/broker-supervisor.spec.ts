@@ -5,6 +5,8 @@ import {
   BrokerSupervisor,
   type BrokerSupervisorConfig,
   buildBrokerEnv,
+  type ExecFileRunner,
+  runWindowsTaskkill,
 } from "../src/main/broker.ts";
 
 const electronMock = vi.hoisted(() => ({
@@ -74,6 +76,22 @@ describe("BrokerSupervisor", () => {
     expect(supervisor.getStatus()).toBe("starting");
   });
 
+  it("does not fork twice when start is called while a broker is already running", () => {
+    const processHandle = new FakeUtilityProcess(4321);
+    const { forkProcess, forkProcessMock } = createForkMock([processHandle]);
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+    });
+
+    supervisor.start();
+    supervisor.start();
+
+    expect(forkProcessMock).toHaveBeenCalledTimes(1);
+    expect(supervisor.getPid()).toBe(4321);
+    expect(supervisor.getStatus()).toBe("starting");
+  });
+
   it("drains broker stdout and stderr pipes without buffering output", () => {
     const processHandle = new FakeUtilityProcess(4321);
     const { forkProcess } = createForkMock([processHandle]);
@@ -114,6 +132,23 @@ describe("BrokerSupervisor", () => {
     expect(supervisor.getPid()).toBe(2468);
   });
 
+  it("marks the broker dead when stop is called before a process exists", async () => {
+    const { forkProcess, forkProcessMock } = createForkMock([]);
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+    });
+
+    await supervisor.stop();
+
+    expect(forkProcessMock).not.toHaveBeenCalled();
+    expect(supervisor.getSnapshot()).toEqual({
+      status: "dead",
+      pid: null,
+      restartCount: 0,
+    });
+  });
+
   it("updates status when the broker sends a liveness ping", () => {
     const processHandle = new FakeUtilityProcess(4321);
     const { forkProcess } = createForkMock([processHandle]);
@@ -126,6 +161,25 @@ describe("BrokerSupervisor", () => {
     processHandle.emit("message", { alive: true });
 
     expect(supervisor.getStatus()).toBe("alive");
+  });
+
+  it("ignores stale exits from a process that is no longer current", () => {
+    const currentProcess = new FakeUtilityProcess(2002);
+    const staleProcess = new FakeUtilityProcess(2001);
+    const { forkProcess } = createForkMock([currentProcess]);
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+    });
+
+    supervisor.start();
+    invokeHandleExit(supervisor, staleProcess);
+
+    expect(supervisor.getSnapshot()).toEqual({
+      status: "starting",
+      pid: 2002,
+      restartCount: 0,
+    });
   });
 
   it("waits for graceful broker exit before killing", async () => {
@@ -150,6 +204,35 @@ describe("BrokerSupervisor", () => {
 
     await vi.advanceTimersByTimeAsync(6_000);
     expect(processHandle.kill).not.toHaveBeenCalled();
+    expect(supervisor.getStatus()).toBe("dead");
+  });
+
+  it("continues stop escalation when graceful shutdown postMessage fails", async () => {
+    vi.useFakeTimers();
+    const processHandle = new FakeUtilityProcess(4321);
+    processHandle.postMessage.mockImplementationOnce(() => {
+      throw new Error("message port already closed");
+    });
+    const { forkProcess } = createForkMock([processHandle]);
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+      platform: "linux",
+      stopGraceMs: 5_000,
+    });
+    supervisor.start();
+
+    const stopPromise = supervisor.stop();
+
+    expect(processHandle.postMessage).toHaveBeenCalledWith({ type: "shutdown" });
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(processHandle.kill).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    await stopPromise;
+
+    expect(processHandle.kill).toHaveBeenNthCalledWith(2, "SIGKILL");
     expect(supervisor.getStatus()).toBe("dead");
   });
 
@@ -248,6 +331,28 @@ describe("BrokerSupervisor", () => {
 
     expect(runWindowsTaskkill).toHaveBeenCalledWith(4321, { force: true });
     expect(processHandle.kill).not.toHaveBeenCalled();
+  });
+
+  it("clears a pending restart timer when stop is called after a crash", async () => {
+    vi.useFakeTimers();
+    const processHandle = new FakeUtilityProcess(1001);
+    const { forkProcess, forkProcessMock } = createForkMock([processHandle]);
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+      firstBackoffMs: 250,
+    });
+    supervisor.start();
+
+    processHandle.emit("exit", 1);
+    expect(supervisor.getRestartCount()).toBe(1);
+    expect(supervisor.getStatus()).toBe("starting");
+
+    await supervisor.stop();
+    await vi.advanceTimersByTimeAsync(250);
+
+    expect(forkProcessMock).toHaveBeenCalledTimes(1);
+    expect(supervisor.getStatus()).toBe("dead");
   });
 
   it("restarts crashed brokers with exponential backoff", async () => {
@@ -399,6 +504,28 @@ describe("BrokerSupervisor", () => {
   });
 });
 
+describe("runWindowsTaskkill", () => {
+  it("constructs the normal and force taskkill argv", async () => {
+    const calls: { readonly file: string; readonly args: readonly string[] }[] = [];
+    const execFileRunner = vi.fn<ExecFileRunner>((file, args, callback) => {
+      calls.push({ file, args: [...args] });
+      callback(null);
+    });
+
+    await expect(runWindowsTaskkill(4321, { force: false }, execFileRunner)).resolves.toBe(
+      undefined,
+    );
+    await expect(runWindowsTaskkill(4321, { force: true }, execFileRunner)).resolves.toBe(
+      undefined,
+    );
+
+    expect(calls).toEqual([
+      { file: "taskkill", args: ["/pid", "4321", "/T"] },
+      { file: "taskkill", args: ["/pid", "4321", "/T", "/F"] },
+    ]);
+  });
+});
+
 describe("buildBrokerEnv", () => {
   it("passes through only the explicit broker env allowlist", () => {
     expect(
@@ -446,4 +573,13 @@ function createForkMock(processes: readonly FakeUtilityProcess[]): {
     forkProcess: forkProcessMock as unknown as ForkProcess,
     forkProcessMock,
   };
+}
+
+function invokeHandleExit(supervisor: BrokerSupervisor, processHandle: FakeUtilityProcess): void {
+  const handleExit = Reflect.get(supervisor, "handleExit");
+  if (typeof handleExit !== "function") {
+    throw new Error("Expected BrokerSupervisor.handleExit to exist");
+  }
+
+  Reflect.apply(handleExit, supervisor, [processHandle]);
 }

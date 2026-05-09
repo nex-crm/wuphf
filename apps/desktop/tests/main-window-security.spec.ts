@@ -85,6 +85,19 @@ describe("createSecureWindow", () => {
     expect(instance.loadURL).toHaveBeenCalledWith("http://localhost:5173/");
   });
 
+  it("allows 127.0.0.1 development renderer URLs", async () => {
+    const { createSecureWindow } = await import("../src/main/window.ts");
+
+    createSecureWindow({
+      preloadPath: "/tmp/preload.js",
+      rendererIndexPath: "/tmp/index.html",
+      allowDevServerUrl: true,
+      devServerUrl: "http://127.0.0.1:5173/",
+    });
+
+    expect(getOnlyWindow().loadURL).toHaveBeenCalledWith("http://127.0.0.1:5173/");
+  });
+
   it("denies every new window and opens only allowlisted external schemes in the OS", async () => {
     const { createSecureWindow } = await import("../src/main/window.ts");
 
@@ -102,6 +115,7 @@ describe("createSecureWindow", () => {
     electronMock.openExternal.mockClear();
     expect(handler({ url: "file:///tmp/wuphf.txt" })).toEqual({ action: "deny" });
     expect(handler({ url: "javascript:alert(1)" })).toEqual({ action: "deny" });
+    expect(handler({ url: "http://[" })).toEqual({ action: "deny" });
     expect(handler({ url: "wuphf://custom" })).toEqual({ action: "deny" });
     expect(electronMock.openExternal).not.toHaveBeenCalled();
   });
@@ -124,6 +138,10 @@ describe("createSecureWindow", () => {
     const externalEvent = { preventDefault: vi.fn<() => void>() };
     handler(externalEvent, "https://example.com/");
     expect(externalEvent.preventDefault).toHaveBeenCalledTimes(1);
+
+    const invalidEvent = { preventDefault: vi.fn<() => void>() };
+    handler(invalidEvent, "http://[");
+    expect(invalidEvent.preventDefault).toHaveBeenCalledTimes(1);
   });
 
   it("allows same file renderer hash navigation", async () => {
@@ -155,6 +173,19 @@ describe("createSecureWindow", () => {
         devServerUrl: "http://localhost:5173/",
       }),
     ).toThrow("Refusing to load development renderer URL in packaged mode");
+  });
+
+  it("rejects non-local development renderer URLs", async () => {
+    const { createSecureWindow } = await import("../src/main/window.ts");
+
+    expect(() =>
+      createSecureWindow({
+        preloadPath: "/tmp/preload.js",
+        rendererIndexPath: "/tmp/index.html",
+        allowDevServerUrl: true,
+        devServerUrl: "http://192.168.0.10:5173/",
+      }),
+    ).toThrow("Refusing to load non-local renderer URL: http://192.168.0.10:5173/");
   });
 });
 
