@@ -31,7 +31,7 @@ export function createSecureWindow(config: CreateSecureWindowConfig): BrowserWin
 
   browserWindow.webContents.setWindowOpenHandler((details) => {
     if (isAllowedExternalUrl(details.url)) {
-      void shell.openExternal(details.url);
+      void shell.openExternal(details.url).catch(() => undefined);
     }
     return { action: "deny" };
   });

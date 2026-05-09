@@ -166,7 +166,27 @@ describe("createSecureWindow", () => {
     expect(electronMock.openExternal).not.toHaveBeenCalled();
   });
 
-  it("wires will-navigate and blocks navigation outside the renderer origin", async () => {
+  it("handles OS shell rejections from allowlisted new-window URLs", async () => {
+    electronMock.openExternal.mockRejectedValueOnce(new Error("OS refused URL"));
+    const { createSecureWindow } = await import("../src/main/window.ts");
+
+    createSecureWindow({
+      preloadPath: "/tmp/preload.js",
+      rendererIndexPath: "/tmp/index.html",
+      allowDevServerUrl: true,
+      devServerUrl: VITE_DEV_SERVER_URL,
+      expectedDevServerUrl: VITE_DEV_SERVER_URL,
+    });
+
+    const handler = getWindowOpenHandler(getOnlyWindow());
+    expect(handler({ url: "https://example.com/docs" })).toEqual({ action: "deny" });
+
+    await Promise.resolve();
+
+    expect(electronMock.openExternal).toHaveBeenCalledWith("https://example.com/docs");
+  });
+
+  it("wires will-navigate and blocks navigation outside the exact renderer URL", async () => {
     const { createSecureWindow } = await import("../src/main/window.ts");
 
     createSecureWindow({

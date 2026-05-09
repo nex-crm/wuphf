@@ -63,7 +63,7 @@ export function createOpenExternalHandler(
       await shell.openExternal(parsedUrl.url);
       return okResponse();
     } catch (error) {
-      return errResponse(error instanceof Error ? error.message : "Failed to open external URL");
+      return errResponse(error instanceof Error ? error.message : "shell.openExternal rejected");
     }
   };
 }

@@ -42,6 +42,7 @@ describe("openExternal handler", () => {
   });
 
   it.each([
+    "http://[",
     "file:///tmp/wuphf.txt",
     "javascript:alert(1)",
     "data:text/plain,wuphf",
@@ -56,6 +57,26 @@ describe("openExternal handler", () => {
       ok: true,
     });
     expect(electronMock.openExternal).toHaveBeenCalledWith("https://example.com/");
+  });
+
+  it("returns an error response when the OS shell rejects the URL handoff", async () => {
+    electronMock.openExternal.mockRejectedValueOnce(new Error("OS refused URL"));
+    const openExternal = createOpenExternalHandler({ monotonicNow: () => 0 });
+
+    await expect(openExternal(event, { url: "https://example.com" })).resolves.toEqual({
+      ok: false,
+      error: "OS refused URL",
+    });
+  });
+
+  it("returns a stable error response when shell.openExternal rejects without an Error", async () => {
+    electronMock.openExternal.mockRejectedValueOnce("rejected");
+    const openExternal = createOpenExternalHandler({ monotonicNow: () => 0 });
+
+    await expect(openExternal(event, { url: "https://example.com" })).resolves.toEqual({
+      ok: false,
+      error: "shell.openExternal rejected",
+    });
   });
 
   it("rejects oversized URL payloads before parsing or opening them", async () => {
