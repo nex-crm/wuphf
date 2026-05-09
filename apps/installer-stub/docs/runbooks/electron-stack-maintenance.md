@@ -42,9 +42,8 @@ traffic from this installer stub.
 6. Run:
 
    ```bash
-   cd apps/installer-stub && bun run lint
+   (cd apps/installer-stub && bun run lint && bun run build:dry-run)
    bash apps/installer-stub/scripts/check-invariants.sh
-   cd apps/installer-stub && bun run build:dry-run
    bash apps/installer-stub/scripts/verify-latest-yml.sh
    ```
 
