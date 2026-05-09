@@ -1,0 +1,29 @@
+{
+  "name": "@wuphf/installer-stub",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Tiny Electron hello-world packaged by electron-builder. Exists ONLY so the installer pipeline can ship a signed end-to-end artifact today, before the real desktop shell (feat/desktop-shell-skeleton) lands. Replaced as the package target once the real shell merges.",
+  "type": "commonjs",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "lint": "biome check src/ scripts/",
+    "lint:fix": "biome check --write src/ scripts/",
+    "format": "biome format --write src/ scripts/",
+    "build:current": "electron-builder --config electron-builder.yml",
+    "build:mac": "electron-builder --mac --config electron-builder.yml",
+    "build:win": "electron-builder --win --config electron-builder.yml",
+    "build:linux": "electron-builder --linux --config electron-builder.yml",
+    "build:dry-run": "electron-builder --config electron-builder.yml --publish=never --dir",
+    "check:secrets": "bash scripts/detect-signing-secrets.sh",
+    "check:invariants": "bash scripts/check-invariants.sh",
+    "verify:appcast": "bash scripts/verify-appcast.sh"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.4.13",
+    "@types/node": "^22.10.0",
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8",
+    "electron-updater": "^6.3.9"
+  }
+}
