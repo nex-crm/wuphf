@@ -12,10 +12,13 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "lint": "biome check src/ tests/",
-    "lint:fix": "biome check --write src/ tests/",
-    "format": "biome format --write src/ tests/",
-    "check": "biome check src/ tests/"
+    "test:coverage": "vitest run --coverage",
+    "test:shuffle": "vitest run --sequence.shuffle.files --sequence.shuffle.tests --sequence.seed=743",
+    "lint": "biome check src/ tests/ scripts/",
+    "lint:fix": "biome check --write src/ tests/ scripts/",
+    "format": "biome format --write src/ tests/ scripts/",
+    "check": "biome check src/ tests/ scripts/",
+    "check:invariants": "bash scripts/check-invariants.sh"
   },
   "dependencies": {
     "canonicalize": "2.0.0"
@@ -23,6 +26,7 @@
   "devDependencies": {
     "@biomejs/biome": "2.4.13",
     "@types/node": "^22.10.0",
+    "@vitest/coverage-v8": "2.1.9",
     "fast-check": "^3.23.0",
     "typescript": "^5.6.0",
     "vitest": "^2.1.0"

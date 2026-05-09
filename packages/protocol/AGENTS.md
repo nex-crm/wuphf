@@ -176,7 +176,46 @@ the canonical example. The codec is the ONLY place the two shapes meet —
 never read snake_case keys off a runtime value or hand-roll the
 translation in callers. Same pattern receipt codecs use.
 
-### 13. Sub-agent dispatch contract
+### 13. Date APIs are for marking time only
+
+`Date`, `new Date(...)`, `.getTime()`, `.toISOString()`, and the rest of
+the wall-clock surface MUST NOT provide uniqueness, ordering, deduplication,
+hash-key uniqueness, or monotonic-counter behavior. Millisecond precision
+collides under rapid events: two events fired in the same ms get the same
+timestamp, and any invariant built on top silently breaks.
+
+Use `EventLsn` for audit-chain ordering, ULID brands for IDs (the random
+suffix tolerates same-ms collisions), and explicit sequence/counter fields
+for monotonic state. Date values may record when something happened,
+serialize that mark to the wire, or enforce a per-record validity window
+(e.g. `issuedAt < expiresAt` for an approval token). They must NEVER decide
+cross-record order.
+
+`Date.now()`, `Date.parse()`, and `performance.now()` have no legitimate
+marking-time use in this package and are forbidden outright by
+`scripts/check-invariants.sh`. The check fires on commit and CI. If you
+think you need `Date.now()` for something, it's almost certainly an
+ordering/uniqueness use — surface it before adding it.
+
+### 14. Coverage is a ratchet, never a floor
+
+`vitest.config.ts` declares numeric coverage thresholds. Every PR MUST
+keep coverage at or above the current thresholds. NEVER lower the
+thresholds to make a PR green — write tests instead, or surface the
+regression to the reviewer.
+
+The aspirational target is 98 lines / 98 statements / 98 functions / 98
+branches. When measured coverage stably exceeds the gate by ≥1 point,
+the next docs commit raises the gate (one-way ratchet). The gate runs
+in CI; not pre-commit, because vitest --coverage adds substantial
+overhead and local iteration must stay fast.
+
+If you genuinely cannot test a branch (e.g. defensive code that cannot
+fire by construction), use a `/* c8 ignore next */` annotation with a
+one-line comment explaining why — but the bar is high. Untested defensive
+code is usually broken defensive code.
+
+### 15. Sub-agent dispatch contract
 
 When Claude, Codex, or a human delegates package work to a sub-agent
 (`codex exec`, Claude `Agent`, etc.), the prompt MUST carry the same rules

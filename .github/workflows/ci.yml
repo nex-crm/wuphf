@@ -51,6 +51,31 @@ jobs:
         # Routed through the canonical wrapper so this matches what local
         # contributors run — see scripts/test-protocol.sh.
         run: bash scripts/test-protocol.sh
+      - name: Vitest coverage gate (ratchet)
+        # AGENTS.md rule #14: coverage is a one-way ratchet. Thresholds are
+        # in vitest.config.ts; lowering them is forbidden. NEW PRs must keep
+        # measured coverage at or above the declared floor.
+        working-directory: packages/protocol
+        run: bun run test:coverage
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # ratchet:actions/upload-artifact@v7
+        if: always()
+        with:
+          name: protocol-coverage
+          path: packages/protocol/coverage
+          retention-days: 14
+          if-no-files-found: ignore
+      - name: Vitest random-order smoke (catches order-dependent bugs)
+        # pytest-randomly equivalent. Same suite, shuffled file + test order
+        # with a fixed seed so a flake is deterministically reproducible.
+        # Cheap enough to run on every PR.
+        working-directory: packages/protocol
+        run: bun run test:shuffle
+      - name: Protocol invariant checks
+        # Custom protocol-grade invariants Biome cannot express:
+        # instanceof allowlist, single hashing entry point, no process.env
+        # in src/, demo imports from index only, every value export tested,
+        # no Date.now/Date.parse/performance.now (rule #13).
+        run: bash packages/protocol/scripts/check-invariants.sh
       - name: Demo smoke (public-API ergonomics)
         # The demo composes the public surface end-to-end (import from
         # index.ts, use as a consumer would). Vitest covers per-module

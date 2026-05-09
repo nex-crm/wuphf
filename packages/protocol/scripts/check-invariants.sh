@@ -159,6 +159,37 @@ check_index_value_exports_have_coverage() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────
+# Check 6 — No `Date.now()` / `Date.parse()` / `performance.now()` in
+# src/ or tests/.
+#
+# Hard rule #14: Date APIs MUST NOT provide uniqueness, ordering,
+# deduplication, or monotonic-counter behavior. ms precision collides
+# under rapid events. Use EventLsn for ordering, ULID for IDs, explicit
+# counters for monotonic state. Date may be used to MARK time
+# (record/serialize when something happened, enforce a per-record
+# validity window), but never to ORDER across records.
+#
+# `Date.now()` and `Date.parse()` have no legitimate marking-time use
+# in this package — they always return a numeric ms count which is
+# exactly the wrong primitive for ordering. Forbid them outright.
+#
+# `new Date(...)` and `.toISOString()` are allowed because they have
+# legitimate per-record uses (validity windows, wire-format emit/parse).
+# Their misuse is harder to detect mechanically; AGENTS.md rule #14
+# carries the policy.
+# ─────────────────────────────────────────────────────────────────────────
+check_no_date_now_or_date_parse() {
+  local violators
+  violators=$(grep -rnE --include='*.ts' '(Date\.now\(|Date\.parse\(|performance\.now\()' src/ tests/ scripts/ 2>/dev/null || true)
+  if [ -n "$violators" ]; then
+    fail "Date.now() / Date.parse() / performance.now() (use EventLsn for ordering, ULID for IDs, explicit counters for monotonic state — see AGENTS.md rule #14):"
+    printf '    %s\n' $violators >&2
+    return 1
+  fi
+  pass "no Date.now() / Date.parse() / performance.now() (date APIs only mark time, never order)"
+}
+
+# ─────────────────────────────────────────────────────────────────────────
 # Run all checks; collect violations rather than fast-fail so a
 # contributor sees every issue per run.
 # ─────────────────────────────────────────────────────────────────────────
@@ -168,6 +199,7 @@ check_single_hashing_entry_point || true
 check_no_process_env_in_src || true
 check_demo_imports_index_only || true
 check_index_value_exports_have_coverage || true
+check_no_date_now_or_date_parse || true
 
 if [ "$violations" -gt 0 ]; then
   echo ""

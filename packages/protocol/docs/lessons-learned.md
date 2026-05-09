@@ -246,3 +246,65 @@ easy to recognize before repeating the bug.
     that lint catches and humans don't. Wire-format snake_case is fine in
     JSON; the TS surface stays camelCase and the codec at the boundary
     handles translation. Same pattern receipt codecs already used.
+
+18. **Strict lint catches more than recommended lint**
+
+    Failure mode: starting from `recommended: true` plus a few opinionated
+    additions felt sufficient for 12 review rounds, but allowed real classes
+    of drift (re-exports broadening the public API, snake_case wire fields
+    leaking into TS interfaces, `Date.now()` becoming an ordering primitive,
+    `console.log` in src/, undeclared dev deps imported by src/).
+
+    ```text
+    R1-R8: recommended + 4 opinionated rules accepted as "strict enough"
+    R9: noRestrictedImports + noEnum + noCommonJs + noTsIgnore + noConsole
+        + noEvolvingTypes + useThrowOnlyError + useFilenamingConvention
+        + useArraySortCompare + noUndeclaredDependencies + noReExportAll
+        — all enabled at error level, all 0 violations on current code,
+        all guard against a documented past failure mode
+    ```
+
+    Discipline: for protocol-grade work, biome rules earn their place by
+    catching a SPECIFIC past failure mode or hard-rule from AGENTS.md. Don't
+    enable a rule for tastefulness alone; don't reject a rule because the
+    cost feels high. The user already paid the human-review cost across 12
+    rounds — the lint cost is a one-time tuning of overrides.
+
+19. **Quality is a ratchet, not a floor**
+
+    Failure mode: declaring a coverage target (e.g. ≥98%) without wiring a
+    gate means coverage drifts down over time as features are added without
+    tests. The aspirational number is performative, not enforced.
+
+    ```text
+    R10: vitest --coverage measured 89.39 lines / 76.47 branches; gate set
+         at floor (89/89/96/76); aspirational target 98/98/98/98; PRs that
+         improve coverage trigger a docs commit raising the gate
+    ```
+
+    Discipline: the gate is the floor of MEASURED coverage today, not the
+    aspirational target. Lowering the gate to make a PR green is forbidden
+    by AGENTS.md rule #14. Same pattern works for any "we should have N% of
+    X" target — measure now, gate at the measurement, ratchet up only when
+    measured stably exceeds.
+
+20. **Date precision is a uniqueness/ordering trap**
+
+    Failure mode: using `Date.now()` or `new Date().getTime()` to derive
+    IDs, dedup keys, sort orders, or monotonic counters silently breaks
+    when two events fire in the same millisecond. The protocol package
+    has zero current uses of `Date.now()` for this purpose, but the failure
+    mode is common enough in adjacent code that locking it in preventatively
+    is cheaper than discovering it via a same-ms collision in production.
+
+    ```text
+    R10: Date.now() / Date.parse() / performance.now() forbidden by
+         scripts/check-invariants.sh; AGENTS.md rule #13 documents the
+         policy and the legitimate alternatives (EventLsn, ULID, explicit
+         counters); ms precision Date is allowed for marking time only
+    ```
+
+    Discipline: every "we use a timestamp for X" use case has a non-Date
+    primitive that's the right answer. If you reach for `Date.now()`,
+    you're almost certainly building uniqueness or ordering on top of
+    wall-clock time — surface to a reviewer first.
