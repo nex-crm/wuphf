@@ -20,6 +20,21 @@ Trusted Signing modifies installer bytes.
 Linux publishes `latest-linux.yml`, an AppImage, and a deb. AppImage installs
 can use electron-updater. Deb installs are manual-update only in v1.
 
+## v1 Caveats
+
+The v1 installer-stub update path has no server-side kill switch, revocation
+feed, staged rollout, or channel promotion. If a published release is bad, the
+primary technical recovery is a higher-version hotfix release.
+
+Deleting a GitHub Release is only a containment attempt. It does not remove
+cached `latest*.yml` responses or payloads from clients that already checked for
+or downloaded the update. The app therefore keeps `autoDownload` and
+`autoInstallOnAppQuit` disabled in v1: users must explicitly download, then
+explicitly click "Restart and install."
+
+When `beta` and `stable` channels land, use channel promotion or staged rollout
+metadata to limit initial blast radius before moving a release to all users.
+
 ## Future Re-evaluation
 
 Re-enable differential updates only if signing happens before blockmap
