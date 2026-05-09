@@ -6,32 +6,84 @@ import {
   type OpenExternalResponse,
   okResponse,
 } from "../../shared/api-contract.ts";
+import { monotonicNowMs } from "../monotonic-clock.ts";
 import { invalidRequest, isExactObject } from "./_guards.ts";
 
 const ALLOWED_EXTERNAL_PROTOCOLS = new Set(["https:", "http:", "mailto:"]);
+const OPEN_EXTERNAL_RATE_LIMIT_MAX_CALLS = 5;
+const OPEN_EXTERNAL_RATE_LIMIT_WINDOW_MS = 10_000;
+
+type MonotonicNow = () => number;
+type OpenExternalHandler = (
+  event: IpcMainInvokeEvent,
+  request: unknown,
+) => Promise<OpenExternalResponse>;
+
 interface ValidOpenExternalRequest {
   readonly url: string;
 }
 
-export async function handleOpenExternal(
-  _event: IpcMainInvokeEvent,
-  request: unknown,
-): Promise<OpenExternalResponse> {
-  if (!isOpenExternalRequest(request)) {
-    return invalidRequest("openExternal expects exactly one string field: url");
-  }
+export interface OpenExternalHandlerOptions {
+  readonly monotonicNow?: MonotonicNow;
+}
 
-  const parsedUrl = parseAllowedExternalUrl(request.url);
-  if (!parsedUrl.ok) {
-    return parsedUrl;
-  }
+export function createOpenExternalHandler(
+  options: OpenExternalHandlerOptions = {},
+): OpenExternalHandler {
+  const rateLimiter = createRateLimiter({
+    maxCalls: OPEN_EXTERNAL_RATE_LIMIT_MAX_CALLS,
+    windowMs: OPEN_EXTERNAL_RATE_LIMIT_WINDOW_MS,
+    monotonicNow: options.monotonicNow ?? monotonicNowMs,
+  });
 
-  try {
-    await shell.openExternal(parsedUrl.url);
-    return okResponse();
-  } catch (error) {
-    return errResponse(error instanceof Error ? error.message : "Failed to open external URL");
-  }
+  return async function openExternalHandler(
+    _event: IpcMainInvokeEvent,
+    request: unknown,
+  ): Promise<OpenExternalResponse> {
+    if (!isOpenExternalRequest(request)) {
+      return invalidRequest("openExternal expects exactly one string field: url");
+    }
+
+    const parsedUrl = parseAllowedExternalUrl(request.url);
+    if (!parsedUrl.ok) {
+      return parsedUrl;
+    }
+
+    if (!rateLimiter.tryAcquire()) {
+      return errResponse("rate_limited");
+    }
+
+    try {
+      await shell.openExternal(parsedUrl.url);
+      return okResponse();
+    } catch (error) {
+      return errResponse(error instanceof Error ? error.message : "Failed to open external URL");
+    }
+  };
+}
+
+export const handleOpenExternal = createOpenExternalHandler();
+
+function createRateLimiter(config: {
+  readonly maxCalls: number;
+  readonly windowMs: number;
+  readonly monotonicNow: MonotonicNow;
+}): { readonly tryAcquire: () => boolean } {
+  let callTimesMs: readonly number[] = [];
+
+  return {
+    tryAcquire: () => {
+      const nowMs = config.monotonicNow();
+      const windowStartMs = nowMs - config.windowMs;
+      callTimesMs = callTimesMs.filter((callTimeMs) => callTimeMs > windowStartMs);
+      if (callTimesMs.length >= config.maxCalls) {
+        return false;
+      }
+
+      callTimesMs = [...callTimesMs, nowMs];
+      return true;
+    },
+  };
 }
 
 function parseAllowedExternalUrl(

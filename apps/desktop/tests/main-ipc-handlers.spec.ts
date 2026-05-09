@@ -4,7 +4,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { handleGetAppVersion } from "../src/main/ipc/get-app-version.ts";
 import { handleGetBrokerStatus } from "../src/main/ipc/get-broker-status.ts";
 import { handleGetPlatform, narrowPlatform } from "../src/main/ipc/get-platform.ts";
-import { handleOpenExternal } from "../src/main/ipc/open-external.ts";
+import {
+  createOpenExternalHandler,
+  handleOpenExternal,
+} from "../src/main/ipc/open-external.ts";
 import { handleShowItemInFolder } from "../src/main/ipc/show-item-in-folder.ts";
 
 const electronMock = vi.hoisted(() => ({
@@ -56,6 +59,35 @@ describe("openExternal handler", () => {
       ok: true,
     });
     expect(electronMock.openExternal).toHaveBeenCalledWith("https://example.com/");
+  });
+
+  it("rate-limits the sixth rapid OS browser handoff", async () => {
+    let nowMs = 0;
+    const openExternal = createOpenExternalHandler({ monotonicNow: () => nowMs });
+
+    for (let index = 0; index < 5; index += 1) {
+      await expect(
+        openExternal(event, { url: `https://example.com/${index}` }),
+      ).resolves.toEqual({
+        ok: true,
+      });
+    }
+
+    await expect(openExternal(event, { url: "https://example.com/rate-limited" })).resolves.toEqual(
+      {
+        ok: false,
+        error: "rate_limited",
+      },
+    );
+    expect(electronMock.openExternal).toHaveBeenCalledTimes(5);
+
+    nowMs = 10_000;
+    await expect(openExternal(event, { url: "https://example.com/after-window" })).resolves.toEqual(
+      {
+        ok: true,
+      },
+    );
+    expect(electronMock.openExternal).toHaveBeenCalledTimes(6);
   });
 });
 

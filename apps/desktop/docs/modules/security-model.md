@@ -38,6 +38,19 @@ Malicious `window.open` calls are denied. The main process may hand off
 `https:`, `http:`, or `mailto:` URLs to the OS default handler, but the new
 Electron window is never created.
 
+## openExternal As Exfiltration Channel
+
+`openExternal` intentionally opens arbitrary user-clicked `https:`, `http:`,
+and `mailto:` URLs in the OS default handler. That means a renderer compromise
+can still ask the main process to open a remote URL with attacker-controlled
+query parameters; this bypasses renderer CSP because the request is made by the
+external browser, not by the sandboxed renderer.
+
+The handler keeps the broad URL contract but limits damage with scheme
+validation and a main-process rate limit of five successful handoffs per
+10-second window. This does not remove the channel, but it prevents a malicious
+renderer from streaming data through thousands of browser launches per second.
+
 Fake IPC payloads are treated as untrusted input. Handlers reject unknown keys,
 wrong types, unsafe URL schemes, and relative paths before touching Electron OS
 APIs.
