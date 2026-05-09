@@ -6,6 +6,7 @@ const updateState = document.querySelector("#update-state");
 const updater = window.wuphfUpdater;
 
 let currentState = "idle";
+let actionInFlight = false;
 
 function setUpdateState(state) {
   currentState = state.state;
@@ -52,6 +53,11 @@ if (!updater) {
   setUpdateState({ state: "error", message: "Updater bridge unavailable" });
 } else {
   button?.addEventListener("click", async () => {
+    if (actionInFlight) {
+      return;
+    }
+
+    actionInFlight = true;
     try {
       if (currentState === "downloaded") {
         await updater.installUpdateAndRestart();
@@ -67,14 +73,23 @@ if (!updater) {
       await updater.checkForUpdates();
     } catch (error) {
       setUpdateState({ state: "error", message: error.message });
+    } finally {
+      actionInFlight = false;
     }
   });
 
   installButton?.addEventListener("click", async () => {
+    if (actionInFlight) {
+      return;
+    }
+
+    actionInFlight = true;
     try {
       await updater.installUpdateAndRestart();
     } catch (error) {
       setUpdateState({ state: "error", message: error.message });
+    } finally {
+      actionInFlight = false;
     }
   });
 
