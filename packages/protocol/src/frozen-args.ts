@@ -25,6 +25,28 @@ export class FrozenArgs {
     return new FrozenArgs(canonical, hash);
   }
 
+  static fromCanonical(canonicalJsonString: string): FrozenArgs {
+    assertFrozenArgsCanonicalBudget(canonicalJsonString);
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(canonicalJsonString);
+    } catch (err) {
+      throw new Error(
+        `FrozenArgs.fromCanonical: input is not valid JSON${
+          err instanceof Error ? ` (${err.message})` : ""
+        }`,
+      );
+    }
+    const reCanonical = canonicalJson.canonicalJSON(parsed);
+    if (reCanonical !== canonicalJsonString) {
+      throw new Error(
+        "FrozenArgs.fromCanonical: input is not canonical-form (re-canonicalization differed)",
+      );
+    }
+    const hash = sha256Hex(canonicalJsonString);
+    return new FrozenArgs(canonicalJsonString, hash);
+  }
+
   equals(other: FrozenArgs): boolean {
     return this.hash === other.hash;
   }

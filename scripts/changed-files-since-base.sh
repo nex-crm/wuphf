@@ -22,13 +22,15 @@
 set -euo pipefail
 
 if git rev-parse --verify --quiet origin/main >/dev/null; then
-  if git diff --name-only origin/main...HEAD; then
+  if out=$(git diff --name-only origin/main...HEAD 2>/dev/null); then
+    printf '%s\n' "$out"
     exit 0
   fi
 fi
 
 if git rev-parse --verify --quiet origin/HEAD >/dev/null; then
-  if git diff --name-only origin/HEAD...HEAD; then
+  if out=$(git diff --name-only origin/HEAD...HEAD 2>/dev/null); then
+    printf '%s\n' "$out"
     exit 0
   fi
 fi

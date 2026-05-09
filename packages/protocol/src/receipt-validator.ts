@@ -676,7 +676,7 @@ function validateExternalWrite(
       // correctness no longer depends on validator ordering.
       if (proposedDiff instanceof FrozenArgs) {
         try {
-          const reFrozen = FrozenArgs.freeze(JSON.parse(proposedDiff.canonicalJson));
+          const reFrozen = FrozenArgs.fromCanonical(proposedDiff.canonicalJson);
           if (recordValue(claims, "frozenArgsHash") !== reFrozen.hash) {
             addError(
               errors,
@@ -959,10 +959,7 @@ function validateFrozenArgs(
     return;
   }
   try {
-    const reFrozen = FrozenArgs.freeze(JSON.parse(value.canonicalJson));
-    if (reFrozen.canonicalJson !== value.canonicalJson) {
-      addError(errors, pointer(path, "canonicalJson"), "must be RFC 8785 canonical JSON");
-    }
+    const reFrozen = FrozenArgs.fromCanonical(value.canonicalJson);
     if (reFrozen.hash !== value.hash) {
       addError(errors, pointer(path, "hash"), "does not match canonicalJson");
     }

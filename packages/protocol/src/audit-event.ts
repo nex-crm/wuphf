@@ -154,6 +154,11 @@ export const MERKLE_ROOT_RECORD_KEYS: ReadonlySet<string> = new Set<string>(
   MERKLE_ROOT_RECORD_KEYS_TUPLE,
 );
 
+/**
+ * Genesis chain anchor: sha256("wuphf:audit:genesis:v1"), NOT the RFC sketch's
+ * literal sha256("genesis"). Cross-language verifiers MUST hash that exact
+ * domain-separated byte sequence.
+ */
 export const GENESIS_PREV_HASH = sha256Hex("wuphf:audit:genesis:v1");
 
 export function asMerkleRootHex(s: string): MerkleRootHex {
@@ -250,6 +255,9 @@ export function serializeAuditEventRecordForHash(record: AuditEventRecord): Uint
     // canonical projection as a JSON string, locked in here as part of the
     // cross-language wire contract — see golden vector tests.
     seqNo: record.seqNo as string,
+    // Audit timestamps are ISO 8601 with millisecond precision. Writers with
+    // sub-ms sources MUST truncate before constructing the record, not rely on
+    // Date.toISOString() at hash time.
     timestamp: record.timestamp.toISOString(),
     prevHash: record.prevHash,
     payload,
@@ -261,10 +269,14 @@ export function serializeAuditEventRecordForHash(record: AuditEventRecord): Uint
  * Compute eventHash given prevHash and a canonical serialization of the
  * record-without-eventHash. The serializer defaults to the canonical
  * `serializeAuditEventRecordForHash` so callers cannot accidentally use a
- * different projection than the verifier.
+ * different projection than the verifier. `prevHash` is fed to SHA-256 as
+ * ASCII-hex bytes (64 bytes for a sha256 hex), not as 32 raw bytes; cross-
+ * language verifiers MUST NOT hex-decode it before hashing.
  */
 export function computeEventHash(prevHash: Sha256Hex, recordBytes: Uint8Array): Sha256Hex {
   const hash = createHash("sha256");
+  // ASCII is correct because Sha256Hex is invariantly lowercase hex; revisit
+  // this encoding if the brand ever relaxes.
   hash.update(prevHash, "ascii");
   hash.update(recordBytes);
   return asSha256Hex(hash.digest("hex"));

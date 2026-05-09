@@ -6,7 +6,6 @@
 import { Buffer } from "node:buffer";
 import {
   assertWithinBudget,
-  MAX_FROZEN_ARGS_BYTES,
   MAX_RECEIPT_APPROVALS,
   MAX_RECEIPT_BYTES,
   MAX_RECEIPT_COMMITS,
@@ -790,33 +789,19 @@ function frozenArgsFromJson(
   // single boundary where un-hashed shadow data could survive a round-trip.
   assertKnownKeys(record, path, FROZEN_ARGS_KEYS);
   const canonicalJson = requiredStringFromJson(record, "canonicalJson", path);
-  const canonicalJsonBytes = Buffer.byteLength(canonicalJson, "utf8");
-  if (canonicalJsonBytes > MAX_FROZEN_ARGS_BYTES) {
-    throw new Error(
-      `frozenArgsFromJson: canonicalJson exceeds MAX_FROZEN_ARGS_BYTES (got ${canonicalJsonBytes}, max ${MAX_FROZEN_ARGS_BYTES})`,
-    );
-  }
   const expectedHash = asSha256HexAt(
     requiredStringFromJson(record, "hash", path),
     pointer(path, "hash"),
   );
-  // JSON.parse can throw a bare SyntaxError that would surface from the codec
-  // without a JSON-pointer path indication. Annotate it with the field path so
-  // a malformed canonicalJson deep inside a receipt is triageable from the
-  // error message alone (matches the validator's wrap in validateFrozenArgs).
-  let decoded: unknown;
+  let frozen: FrozenArgs;
   try {
-    decoded = JSON.parse(canonicalJson);
+    frozen = FrozenArgs.fromCanonical(canonicalJson);
   } catch (err) {
     throw new Error(
       `${pointer(path, "canonicalJson")}: ${
-        err instanceof Error ? err.message : "must be valid JSON"
+        err instanceof Error ? err.message : "must be RFC 8785 canonical JSON"
       }`,
     );
-  }
-  const frozen = FrozenArgs.freeze(decoded);
-  if (frozen.canonicalJson !== canonicalJson) {
-    throw new Error(`${pointer(path, "canonicalJson")}: must be RFC 8785 canonical JSON`);
   }
   if (frozen.hash !== expectedHash) {
     throw new Error(`${pointer(path, "hash")}: does not match canonicalJson`);

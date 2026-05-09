@@ -120,6 +120,38 @@ describe("FrozenArgs", () => {
     );
   });
 
+  it("reconstructs from canonical JSON without changing bytes or hash", () => {
+    const frozen = FrozenArgs.freeze({ z: [true, null], a: 1 });
+    const reconstructed = FrozenArgs.fromCanonical(frozen.canonicalJson);
+
+    expect(reconstructed.canonicalJson).toBe(frozen.canonicalJson);
+    expect(reconstructed.hash).toBe(frozen.hash);
+  });
+
+  it("rejects invalid canonical JSON with a clear message", () => {
+    expect(() => FrozenArgs.fromCanonical("non-canonical input")).toThrow(
+      /FrozenArgs\.fromCanonical: input is not valid JSON/,
+    );
+  });
+
+  it("rejects JSON that is not canonical-form", () => {
+    expect(() => FrozenArgs.fromCanonical('{"b":2,"a":1}')).toThrow(
+      /FrozenArgs\.fromCanonical: input is not canonical-form \(re-canonicalization differed\)/,
+    );
+  });
+
+  it("rejects oversized canonical JSON before parsing", () => {
+    const canonicalSpy = vi.spyOn(canonicalJsonModule, "canonicalJSON");
+    try {
+      expect(() => FrozenArgs.fromCanonical("\x00".repeat(MAX_FROZEN_ARGS_BYTES + 1))).toThrow(
+        /FrozenArgs canonicalJson bytes.*exceeds budget/,
+      );
+      expect(canonicalSpy).not.toHaveBeenCalled();
+    } finally {
+      canonicalSpy.mockRestore();
+    }
+  });
+
   it("produces unequal hashes for differing canonical inputs", () => {
     fc.assert(
       fc.property(

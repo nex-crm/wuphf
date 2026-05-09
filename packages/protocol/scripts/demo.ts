@@ -474,6 +474,21 @@ console.log(
 );
 
 // ──────────────────────────────────────────────────────────────────────────
+header(14, "FrozenArgs.fromCanonical rehydrates canonical JSON");
+// ──────────────────────────────────────────────────────────────────────────
+const rehydratedArgs = FrozenArgs.fromCanonical(argsA.canonicalJson);
+expectEqual(
+  "fromCanonical preserves canonical JSON",
+  rehydratedArgs.canonicalJson,
+  argsA.canonicalJson,
+);
+expectEqual("fromCanonical preserves hash", rehydratedArgs.hash, argsA.hash);
+expectThrows(
+  () => FrozenArgs.fromCanonical('{"b":2,"a":1}'),
+  /FrozenArgs\.fromCanonical: input is not canonical-form/,
+);
+
+// ──────────────────────────────────────────────────────────────────────────
 console.log("");
 console.log(`${ANSI.bold}─────────────────────────────────────${ANSI.reset}`);
 const summaryColor = failed === 0 ? ANSI.green : ANSI.red;
