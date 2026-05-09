@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"context"
 	"os"
 	"strings"
 
@@ -10,6 +11,25 @@ import (
 // RunClaudeOneShot runs Claude once with the given system prompt and user prompt
 // and returns the final plain-text result.
 func RunClaudeOneShot(systemPrompt, prompt, cwd string) (string, error) {
+	return runClaudeOneShotWithAttempt(systemPrompt, prompt, cwd, func(ch chan<- agent.StreamChunk, prompt string, systemPrompt string, cwd string) claudeAttemptResult {
+		return runClaudeAttempt(ch, prompt, systemPrompt, cwd, "")
+	})
+}
+
+// RunClaudeOneShotCtx runs Claude once and binds the child process lifetime to ctx.
+func RunClaudeOneShotCtx(ctx context.Context, systemPrompt, prompt, cwd string) (string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	return runClaudeOneShotWithAttempt(systemPrompt, prompt, cwd, func(ch chan<- agent.StreamChunk, prompt string, systemPrompt string, cwd string) claudeAttemptResult {
+		return runClaudeAttemptCtx(ctx, ch, prompt, systemPrompt, cwd, "")
+	})
+}
+
+func runClaudeOneShotWithAttempt(systemPrompt, prompt, cwd string, attempt func(ch chan<- agent.StreamChunk, prompt string, systemPrompt string, cwd string) claudeAttemptResult) (string, error) {
 	if cwd == "" {
 		var err error
 		cwd, err = os.Getwd()
@@ -18,7 +38,7 @@ func RunClaudeOneShot(systemPrompt, prompt, cwd string) (string, error) {
 		}
 	}
 	ch := make(chan agent.StreamChunk, 128)
-	result := runClaudeAttempt(ch, prompt, systemPrompt, cwd, "")
+	result := attempt(ch, prompt, systemPrompt, cwd)
 	close(ch)
 	if result.exitErr != nil {
 		return "", result.exitErr

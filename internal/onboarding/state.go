@@ -174,6 +174,9 @@ func SaveProgress(step string, answers map[string]interface{}) error {
 	if err != nil {
 		return err
 	}
+	if s.Onboarded() {
+		return nil
+	}
 	if s.Partial == nil {
 		s.Partial = &PartialProgress{}
 	}

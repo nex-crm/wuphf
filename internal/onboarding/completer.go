@@ -8,6 +8,6 @@ import (
 
 type cliCompleter struct{}
 
-func (c cliCompleter) Complete(_ context.Context, prompt string) (string, error) {
-	return provider.RunConfiguredOneShot("", prompt, "")
+func (c cliCompleter) Complete(ctx context.Context, prompt string) (string, error) {
+	return provider.RunConfiguredOneShotCtx(ctx, "", prompt, "")
 }

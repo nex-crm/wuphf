@@ -175,6 +175,7 @@ func (s *AgentService) Create(cfg AgentConfig) (*ManagedAgent, error) {
 		return nil, fmt.Errorf("agent %q already exists", cfg.Slug)
 	}
 
+	cfg = agentConfigSnapshot(cfg)
 	streamFn := s.streamFnResolver(cfg.Slug)
 
 	loop := NewAgentLoop(cfg, s.toolRegistry, s.sessionStore, s.queues, streamFn, s.gossipLayer, s.credTracker)

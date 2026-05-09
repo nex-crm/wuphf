@@ -2,6 +2,7 @@ package provider
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -24,6 +25,7 @@ var claudeEnvVarsToStrip = []string{
 var (
 	claudeLookPath         = exec.LookPath
 	claudeCommand          = exec.Command
+	claudeCommandContext   = exec.CommandContext
 	claudeGetwd            = os.Getwd
 	claudeConfigureProcess = configureClaudeProcess
 )
@@ -70,9 +72,10 @@ type claudeAttemptResult struct {
 
 func init() {
 	Register(&Entry{
-		Kind:     KindClaudeCode,
-		StreamFn: CreateClaudeCodeStreamFn,
-		OneShot:  RunClaudeOneShot,
+		Kind:       KindClaudeCode,
+		StreamFn:   CreateClaudeCodeStreamFn,
+		OneShot:    RunClaudeOneShot,
+		OneShotCtx: RunClaudeOneShotCtx,
 		Capabilities: Capabilities{
 			PaneEligible:               true,
 			SupportsOneShot:            true,
@@ -142,6 +145,16 @@ func CreateClaudeCodeStreamFn(agentSlug string) agent.StreamFn {
 func runClaudeAttempt(ch chan<- agent.StreamChunk, prompt string, systemPrompt string, cwd string, resumeID string) claudeAttemptResult {
 	args := buildClaudeArgs(systemPrompt, resumeID)
 	cmd := claudeCommand("claude", args...)
+	return runClaudeAttemptCommand(context.Background(), cmd, ch, prompt, cwd)
+}
+
+func runClaudeAttemptCtx(ctx context.Context, ch chan<- agent.StreamChunk, prompt string, systemPrompt string, cwd string, resumeID string) claudeAttemptResult {
+	args := buildClaudeArgs(systemPrompt, resumeID)
+	cmd := claudeCommandContext(ctx, "claude", args...)
+	return runClaudeAttemptCommand(ctx, cmd, ch, prompt, cwd)
+}
+
+func runClaudeAttemptCommand(ctx context.Context, cmd *exec.Cmd, ch chan<- agent.StreamChunk, prompt string, cwd string) claudeAttemptResult {
 	cmd.Dir = cwd
 	cmd.Env = filteredEnv(claudeEnvVarsToStrip)
 	cmd.Stdin = strings.NewReader(prompt)
@@ -239,12 +252,21 @@ func runClaudeAttempt(ch chan<- agent.StreamChunk, prompt string, systemPrompt s
 			_ = cmd.Process.Kill()
 		}
 		_ = cmd.Wait()
-		result.exitErr = fmt.Errorf("scan: %w", err)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			result.exitErr = ctxErr
+		} else {
+			result.exitErr = fmt.Errorf("scan: %w", err)
+		}
 		result.stderr = strings.TrimSpace(stderrBuf.String())
 		return result
 	}
 
 	result.exitErr = cmd.Wait()
+	if result.exitErr != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			result.exitErr = ctxErr
+		}
+	}
 	result.stderr = strings.TrimSpace(stderrBuf.String())
 	result.loginRequired = isClaudeLoginRequired(result)
 	result.unknownSession = isClaudeUnknownSessionFailure(result)

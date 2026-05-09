@@ -113,30 +113,8 @@ type HeadlessPamRunner struct{}
 // Run shells out via provider.RunConfiguredOneShot. The cwd argument is
 // intentionally empty — Pam operates on the wiki via the broker API, not on
 // the caller's working directory.
-//
-// Cancellation caveat: provider.RunConfiguredOneShot does not accept a
-// context, so we cannot tear down the spawned child when ctx is cancelled.
-// We run the provider call in a goroutine and select on ctx.Done() so the
-// dispatcher can unblock on deadline, but the child process may outlive the
-// cancel until the provider call returns. A future provider-package change
-// should plumb context through so cancel actually kills the child.
 func (HeadlessPamRunner) Run(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
-	type result struct {
-		out string
-		err error
-	}
-	resCh := make(chan result, 1)
-	go func() {
-		out, err := provider.RunConfiguredOneShot(systemPrompt, userPrompt, "")
-		resCh <- result{out: out, err: err}
-	}()
-	select {
-	case <-ctx.Done():
-		log.Printf("pam: cancel signalled; child process may outlive ctx until provider call completes")
-		return "", ctx.Err()
-	case r := <-resCh:
-		return r.out, r.err
-	}
+	return provider.RunConfiguredOneShotCtx(ctx, systemPrompt, userPrompt, "")
 }
 
 // PamDispatcherConfig tunes the dispatcher. Zero values -> defaults.

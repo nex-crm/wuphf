@@ -47,11 +47,7 @@ import (
 type brokerQueryProvider struct{}
 
 func (brokerQueryProvider) RunPrompt(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
-	// RunConfiguredOneShot does not accept a context; we rely on the
-	// operating system's process group cleanup when ctx is cancelled.
-	// This matches the same design choice as entity_synthesizer.go.
-	_ = ctx
-	return provider.RunConfiguredOneShot(systemPrompt, userPrompt, "")
+	return provider.RunConfiguredOneShotCtx(ctx, systemPrompt, userPrompt, "")
 }
 
 // handleWikiLookup answers GET /wiki/lookup?q=<query>[&top_k=<int>][&channel=<slug>].

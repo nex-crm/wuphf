@@ -582,6 +582,44 @@ func TestAgentSnapshotsDoNotAliasConfig(t *testing.T) {
 	assertSnapshotConfigUnchanged(t, got.State.Config)
 }
 
+// TestCreateSnapshotsInboundConfig verifies Create() copies the caller's
+// AgentConfig — mutating the caller's slices/Budget after Create must not
+// affect what subsequent List/Get returns. This catches regressions where
+// Create stops calling agentConfigSnapshot on the way in.
+func TestCreateSnapshotsInboundConfig(t *testing.T) {
+	svc := newTestService(t, nil)
+	cfg := AgentConfig{
+		Slug:         "create-snapshot",
+		Name:         "Create Snapshot",
+		Expertise:    []string{"research"},
+		Tools:        []string{"lookup"},
+		Budget:       &BudgetLimit{MaxTokens: 100},
+		AllowedTools: []string{"read"},
+	}
+	if _, err := svc.Create(cfg); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	cfg.Expertise[0] = "mutated"
+	cfg.Tools[0] = "mutated"
+	cfg.Budget.MaxTokens = 1
+	cfg.AllowedTools[0] = "mutated"
+
+	got := svc.List()[0].Config
+	if got.Expertise[0] != "research" {
+		t.Fatalf("Expertise alias leaked through Create: %#v", got.Expertise)
+	}
+	if got.Tools[0] != "lookup" {
+		t.Fatalf("Tools alias leaked through Create: %#v", got.Tools)
+	}
+	if got.Budget.MaxTokens != 100 {
+		t.Fatalf("Budget alias leaked through Create: %#v", got.Budget)
+	}
+	if got.AllowedTools[0] != "read" {
+		t.Fatalf("AllowedTools alias leaked through Create: %#v", got.AllowedTools)
+	}
+}
+
 func assertSnapshotConfigUnchanged(t *testing.T, cfg AgentConfig) {
 	t.Helper()
 
