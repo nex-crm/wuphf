@@ -564,7 +564,10 @@ function createForkMock(processes: readonly FakeUtilityProcess[]): {
       _args: readonly string[],
       _options: ForkOptions,
     ): ElectronUtilityProcess => {
-      const processHandle = queue.shift() ?? new FakeUtilityProcess(9999);
+      const processHandle = queue.shift();
+      if (processHandle === undefined) {
+        throw new Error("Unexpected extra utilityProcess.fork call (test queue exhausted)");
+      }
       return processHandle as unknown as ElectronUtilityProcess;
     },
   );
