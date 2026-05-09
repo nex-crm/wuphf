@@ -76,7 +76,13 @@ type Broker struct {
 	// in state X" are O(1) lookups against this map instead of O(N) scans
 	// of b.tasks. Guarded by b.mu — only the lifecycle transition layer
 	// writes to it, and the snapshot accessor copies under the lock.
-	lifecycleIndex          map[LifecycleState][]string
+	lifecycleIndex map[LifecycleState][]string
+	// intakeSpecs maps task ID to the validated Spec persisted by the
+	// synthetic intake agent (broker_intake.go, Lane B). The map is the
+	// in-memory chokepoint for spec writes; Lane C will fold this into
+	// the Decision Packet persistence layer at
+	// ~/.wuphf/tasks/<id>/decision_packet.json. Guarded by b.mu.
+	intakeSpecs             map[string]Spec
 	requests                []humanInterview
 	humanInvites            []humanInvite
 	humanSessions           []humanSession
