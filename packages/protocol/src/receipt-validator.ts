@@ -238,10 +238,32 @@ const EXTERNAL_WRITE_KEYS_TUPLE = [
 ] as const satisfies readonly (keyof ExternalWrite)[];
 export const EXTERNAL_WRITE_KEYS: ReadonlySet<string> = new Set<string>(EXTERNAL_WRITE_KEYS_TUPLE);
 
+interface ReceiptValidationContext {
+  readonly recomputedFrozenArgs: ReadonlySet<FrozenArgs>;
+}
+
+const EMPTY_VALIDATION_CONTEXT: ReceiptValidationContext = {
+  recomputedFrozenArgs: new Set<FrozenArgs>(),
+};
+
 export function validateReceipt(input: unknown): ReceiptValidationResult {
+  return validateReceiptWithContext(input, EMPTY_VALIDATION_CONTEXT);
+}
+
+export function validateReceiptWithRecomputedFrozenArgs(
+  input: unknown,
+  recomputedFrozenArgs: ReadonlySet<FrozenArgs>,
+): ReceiptValidationResult {
+  return validateReceiptWithContext(input, { recomputedFrozenArgs });
+}
+
+function validateReceiptWithContext(
+  input: unknown,
+  context: ReceiptValidationContext,
+): ReceiptValidationResult {
   try {
     const errors: ReceiptValidationError[] = [];
-    validateReceiptSnapshot(input, "", errors);
+    validateReceiptSnapshot(input, "", errors, context);
     return errors.length === 0 ? { ok: true } : { ok: false, errors };
   } catch (err) {
     return {
@@ -277,6 +299,7 @@ function validateReceiptSnapshot(
   value: unknown,
   path: string,
   errors: ReceiptValidationError[],
+  context: ReceiptValidationContext,
 ): void {
   if (!isRecord(value)) {
     addError(errors, path, "must be an object");
@@ -302,7 +325,9 @@ function validateReceiptSnapshot(
   validateRequired(value, "promptHash", path, errors, validateSha256HexValue);
   validateRequired(value, "toolManifest", path, errors, validateSha256HexValue);
   validateRequired(value, "toolCalls", path, errors, (v, p, e) =>
-    validateArray(v, p, e, validateToolCall),
+    validateArray(v, p, e, (item, itemPath, itemErrors) =>
+      validateToolCall(item, itemPath, itemErrors, context),
+    ),
   );
   validateRequired(value, "approvals", path, errors, (v, p, e) =>
     validateArray(v, p, e, (item, itemPath, itemErrors) =>
@@ -320,7 +345,7 @@ function validateReceiptSnapshot(
   );
   validateRequired(value, "writes", path, errors, (v, p, e) =>
     validateArray(v, p, e, (item, itemPath, itemErrors) =>
-      validateExternalWrite(item, itemPath, itemErrors, receiptId),
+      validateExternalWrite(item, itemPath, itemErrors, receiptId, context),
     ),
   );
   validateRequired(value, "inputTokens", path, errors, validateNonNegativeInteger);
@@ -359,7 +384,12 @@ function validateSourceRead(value: unknown, path: string, errors: ReceiptValidat
   validateOptional(value, "rawRef", path, errors, validateString);
 }
 
-function validateToolCall(value: unknown, path: string, errors: ReceiptValidationError[]): void {
+function validateToolCall(
+  value: unknown,
+  path: string,
+  errors: ReceiptValidationError[],
+  context: ReceiptValidationContext,
+): void {
   if (!isRecord(value)) {
     addError(errors, path, "must be an object");
     return;
@@ -367,7 +397,9 @@ function validateToolCall(value: unknown, path: string, errors: ReceiptValidatio
   validateKnownKeys(value, path, TOOL_CALL_KEYS, errors);
   validateRequired(value, "toolId", path, errors, validateToolCallIdValue);
   validateRequired(value, "toolName", path, errors, validateString);
-  validateRequired(value, "inputs", path, errors, validateFrozenArgs);
+  validateRequired(value, "inputs", path, errors, (v, p, e) =>
+    validateFrozenArgs(v, p, e, context),
+  );
   validateRequired(value, "output", path, errors, validateSanitizedString);
   validateRequired(value, "startedAt", path, errors, validateDate);
   validateRequired(value, "finishedAt", path, errors, validateDate);
@@ -539,6 +571,7 @@ function validateExternalWrite(
   path: string,
   errors: ReceiptValidationError[],
   receiptId: unknown,
+  context: ReceiptValidationContext,
 ): void {
   if (!isRecord(value)) {
     addError(errors, path, "must be an object");
@@ -549,7 +582,9 @@ function validateExternalWrite(
   validateRequired(value, "action", path, errors, validateString);
   validateRequired(value, "target", path, errors, validateString);
   validateRequired(value, "idempotencyKey", path, errors, validateString);
-  validateRequired(value, "proposedDiff", path, errors, validateFrozenArgs);
+  validateRequired(value, "proposedDiff", path, errors, (v, p, e) =>
+    validateFrozenArgs(v, p, e, context),
+  );
   validateRequired(value, "approvalToken", path, errors, (v, p, e) =>
     validateNullable(v, p, e, validateSignedApprovalToken),
   );
@@ -571,7 +606,7 @@ function validateExternalWrite(
     if (val === null) {
       addError(errors, p, `must be a FrozenArgs envelope (null is invalid for state "${state}")`);
     } else {
-      validateFrozenArgs(val, p, errors);
+      validateFrozenArgs(val, p, errors, context);
     }
   };
   const requireNull = (val: unknown, p: string, state: string): void => {
@@ -587,7 +622,9 @@ function validateExternalWrite(
     requireNull(postWriteVerifyValue, postWriteVerifyPath, "rejected");
   } else if (result === "partial") {
     requireFrozen(appliedDiffValue, appliedDiffPath, "partial");
-    validateNullable(postWriteVerifyValue, postWriteVerifyPath, errors, validateFrozenArgs);
+    validateNullable(postWriteVerifyValue, postWriteVerifyPath, errors, (v, p, e) =>
+      validateFrozenArgs(v, p, e, context),
+    );
   } else if (result === "rollback") {
     requireFrozen(appliedDiffValue, appliedDiffPath, "rollback");
     requireNull(postWriteVerifyValue, postWriteVerifyPath, "rollback");
@@ -791,7 +828,12 @@ function validateSha256HexValue(
   if (!isSha256Hex(value)) addError(errors, path, "must be a sha256 hex digest");
 }
 
-function validateFrozenArgs(value: unknown, path: string, errors: ReceiptValidationError[]): void {
+function validateFrozenArgs(
+  value: unknown,
+  path: string,
+  errors: ReceiptValidationError[],
+  context: ReceiptValidationContext,
+): void {
   // `instanceof` alone is not a freeze-boundary check: an attacker can produce
   // `Object.create(FrozenArgs.prototype)` with mismatched canonicalJson/hash
   // and pass the type-system check. Re-derive both fields and assert byte
@@ -806,6 +848,13 @@ function validateFrozenArgs(value: unknown, path: string, errors: ReceiptValidat
   }
   if (!isSha256Hex(value.hash)) {
     addError(errors, pointer(path, "hash"), "must be a sha256 hex digest");
+    return;
+  }
+  // The receipt decoder has already parsed canonicalJson and recomputed the
+  // hash for instances it records in this set. Hand-built receipts call the
+  // public validator without the set, so they still take the full re-derive
+  // path instead of trusting `instanceof`.
+  if (context.recomputedFrozenArgs.has(value)) {
     return;
   }
   try {

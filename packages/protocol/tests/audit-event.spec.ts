@@ -9,7 +9,7 @@ import {
   verifyChain,
 } from "../src/audit-event.ts";
 import { type EventLsn, lsnFromV1Number, parseLsn } from "../src/event-lsn.ts";
-import type { Sha256Hex } from "../src/sha256.ts";
+import { type Sha256Hex, sha256Hex } from "../src/sha256.ts";
 
 function chainOfLength(n: number): AuditEventRecord[] {
   const out: AuditEventRecord[] = [];
@@ -71,7 +71,7 @@ describe("audit-event chain verification", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(localLsn(result.brokenAtSeqNo)).toBe(2);
-      expect(result.reason).toMatch(/event_hash mismatch/);
+      expect(result.code).toBe("event_hash_mismatch");
     }
   });
 
@@ -82,7 +82,7 @@ describe("audit-event chain verification", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(localLsn(result.brokenAtSeqNo)).toBe(3);
-      expect(result.reason).toMatch(/prev_hash mismatch/);
+      expect(result.code).toBe("prev_hash_mismatch");
     }
   });
 
@@ -93,7 +93,34 @@ describe("audit-event chain verification", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(localLsn(result.brokenAtSeqNo)).toBe(3);
-      expect(result.reason).toMatch(/seq_no gap/);
+      expect(result.code).toBe("seq_gap");
+    }
+  });
+
+  it("returns typed seq_gap when a record seqNo skips ahead", () => {
+    const chain = chainOfLength(3);
+    chain[1] = { ...recordAt(chain, 1), seqNo: lsnFromV1Number(2) };
+
+    const result = verifyChain(chain);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("seq_gap");
+      expect(localLsn(result.brokenAtSeqNo)).toBe(2);
+    }
+  });
+
+  it("returns typed serialization_threw for malformed record timestamps", () => {
+    const chain = chainOfLength(1);
+    chain[0] = { ...recordAt(chain, 0), timestamp: new Date("invalid") };
+
+    const result = verifyChain(chain);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("serialization_threw");
+      expect(localLsn(result.brokenAtSeqNo)).toBe(0);
+      expect(result.reason).toMatch(/Invalid time value|serialization threw/);
     }
   });
 
@@ -118,6 +145,15 @@ describe("audit-event chain verification", () => {
         return h1 === h2;
       }),
       { numRuns: 500 },
+    );
+  });
+
+  it("computeEventHash matches the previous concatenation implementation", () => {
+    fc.assert(
+      fc.property(fc.uint8Array({ minLength: 0, maxLength: 2048 }), (bytes) => {
+        return computeEventHash(GENESIS_PREV_HASH, bytes) === previousComputeEventHash(bytes);
+      }),
+      { numRuns: 100 },
     );
   });
 
@@ -203,4 +239,11 @@ function recordAt(chain: readonly AuditEventRecord[], index: number): AuditEvent
     throw new Error(`missing audit record at ${index}`);
   }
   return record;
+}
+
+function previousComputeEventHash(recordBytes: Uint8Array): Sha256Hex {
+  const buf = new Uint8Array(GENESIS_PREV_HASH.length + recordBytes.length);
+  buf.set(new TextEncoder().encode(GENESIS_PREV_HASH), 0);
+  buf.set(recordBytes, GENESIS_PREV_HASH.length);
+  return sha256Hex(buf);
 }
