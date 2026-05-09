@@ -40,6 +40,45 @@ const cloudflaredStartTimeout = 45 * time.Second
 // SIGKILL.
 const cloudflaredStopTimeout = 5 * time.Second
 
+// cloudflaredMaxAttempts caps how many times start() respawns cloudflared
+// when bring-up fails with a recognizable transient TryCloudflare API error
+// (e.g. trycloudflare.com returns a 500/HTML body and cloudflared exits
+// before publishing a URL). Quick-tunnel API hiccups exit fast (<1s), so
+// 3 attempts add a couple of seconds rather than minutes. Non-transient
+// failures (timeout, missing binary, ctx cancel) skip the retry path.
+const cloudflaredMaxAttempts = 3
+
+// cloudflaredRetryBackoffStep is the base delay between retry attempts.
+// Attempt N waits N * step before respawning, giving Cloudflare's
+// edge a moment to recover from a transient 1101.
+const cloudflaredRetryBackoffStep = 1500 * time.Millisecond
+
+// quickTunnelTransientPatterns lists tail-line substrings that indicate
+// cloudflared failed to bring up because the trycloudflare.com QuickTunnel
+// API itself was unhealthy (5xx / non-JSON body), as opposed to a local
+// binary, network, or auth problem. Matching any of these makes the
+// failure eligible for a respawn — everything else is treated as
+// permanent and surfaced to the user immediately.
+var quickTunnelTransientPatterns = []string{
+	"Error unmarshaling QuickTunnel response",
+	"failed to unmarshal quick Tunnel",
+	"500 Internal Server Error",
+	"502 Bad Gateway",
+	"503 Service Unavailable",
+	"504 Gateway Timeout",
+}
+
+func isTransientQuickTunnelFailure(tail []string) bool {
+	for _, line := range tail {
+		for _, pat := range quickTunnelTransientPatterns {
+			if strings.Contains(line, pat) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // cloudflaredMissingMessage is the user-facing error when the binary is not
 // next to the wuphf executable AND not on PATH. The npm postinstall ships
 // cloudflared into the same directory as the wuphf binary so this path
@@ -111,16 +150,28 @@ type webTunnelController struct {
 	// stopGuard is closed by stop() to signal the wait-goroutine that the
 	// teardown was intentional and it should not flip running/err state.
 	stopGuard chan struct{}
-	running   bool
+	// cmdDone is closed by the success-path watcher goroutine after
+	// cmd.Wait() returns. It exists so stop() can wait for cmd to die
+	// without calling cmd.Wait() itself — os/exec disallows concurrent
+	// Wait on the same Cmd, so we keep ownership single (watcher when it
+	// exists, stop() otherwise). nil when no watcher is currently running.
+	cmdDone chan struct{}
+	running bool
 	// starting is true between the moment start() commits the in-flight
 	// cmd/server/listener under c.mu and the moment waitForTunnelURL
 	// completes. Concurrent start() callers see it and refuse rather than
 	// spawning a second cloudflared. stop() observes c.cmd != nil and
 	// nulls everything as usual; the in-flight start() detects the null
 	// when it re-acquires the lock and returns cancelled.
-	starting  bool
-	publicURL string
-	inviteURL string
+	starting bool
+	// startCancel is created when start() commits c.starting = true and
+	// closed by stop() when an in-flight start is observed. The retry
+	// loop selects on it during the inter-attempt backoff so a Stop click
+	// during the 3s wait wakes immediately instead of blocking until the
+	// timer fires. nil when no start is in progress.
+	startCancel chan struct{}
+	publicURL   string
+	inviteURL   string
 	// inviteToken is the token portion of inviteURL (the bit after /join/).
 	// Tracked separately so the join handler can identify the most-recent
 	// invite without re-parsing the URL on every request.
@@ -266,34 +317,36 @@ func (c *webTunnelController) start() (team.WebTunnelStatus, error) {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	cmd := exec.CommandContext(ctx, binary,
-		"tunnel",
-		"--no-autoupdate",
-		"--url", "http://"+loopbackAddr,
-		"--metrics", "127.0.0.1:0",
-	)
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		cancel()
+	// Commit listener+server to c.* under the lock so a concurrent stop()
+	// can find and tear them down even if the cloudflared spawn is still
+	// in progress. Server/listener are stable across retry attempts; only
+	// the cmd/ctx/pipes cycle per attempt.
+	c.starting = true
+	c.server = server
+	c.listener = ln
+	startCancel := make(chan struct{})
+	c.startCancel = startCancel
+	c.mu.Unlock()
+
+	// failBringup tears down the listener+server and reports a permanent
+	// pre-loop bring-up error (pipe wiring failed or cloudflared could not
+	// even Start). Replaces three identical 13-line cleanup blocks below.
+	failBringup := func(format string, args ...any) (team.WebTunnelStatus, error) {
+		c.mu.Lock()
+		c.starting = false
+		c.server = nil
+		c.listener = nil
+		if c.startCancel == startCancel {
+			c.startCancel = nil
+		}
+		c.mu.Unlock()
+		shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), cloudflaredStopTimeout)
+		_ = server.Shutdown(shutdownCtx)
+		cancelShutdown()
 		_ = ln.Close()
+		c.mu.Lock()
 		defer c.mu.Unlock()
-		c.err = fmt.Sprintf("cloudflared stderr pipe failed: %v", err)
-		return c.statusLocked(), errors.New(c.err)
-	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		cancel()
-		_ = ln.Close()
-		defer c.mu.Unlock()
-		c.err = fmt.Sprintf("cloudflared stdout pipe failed: %v", err)
-		return c.statusLocked(), errors.New(c.err)
-	}
-	if err := cmd.Start(); err != nil {
-		cancel()
-		_ = ln.Close()
-		defer c.mu.Unlock()
-		c.err = fmt.Sprintf("cloudflared failed to start: %v", err)
+		c.err = fmt.Sprintf(format, args...)
 		return c.statusLocked(), errors.New(c.err)
 	}
 
@@ -319,56 +372,140 @@ func (c *webTunnelController) start() (team.WebTunnelStatus, error) {
 		}
 	}()
 
-	urlCh := make(chan string, 1)
-	tailCh := make(chan []string, 1)
-	go scanCloudflaredOutput(stderr, urlCh, tailCh)
-	// Drain stdout so a chatty cloudflared can't stall on a full pipe;
-	// recent versions emit little here, so noop the bytes.
-	go func() { _, _ = io.Copy(io.Discard, stdout) }()
+	var (
+		publicURL string
+		tail      []string
+		perr      error
+	)
+	for attempt := 1; attempt <= cloudflaredMaxAttempts; attempt++ {
+		if attempt > 1 {
+			backoff := time.Duration(attempt-1) * cloudflaredRetryBackoffStep
+			log.Printf("tunnel: cloudflared bring-up failed (transient TryCloudflare API error); retrying %d/%d in %s", attempt, cloudflaredMaxAttempts, backoff)
+			// Cancellable backoff: a click on Stop during the wait closes
+			// startCancel via stop(), waking us immediately instead of
+			// blocking the user-perceived state for up to ~3s.
+			timer := time.NewTimer(backoff)
+			select {
+			case <-timer.C:
+			case <-startCancel:
+				timer.Stop()
+				return team.WebTunnelStatus{}, errors.New("tunnel start was cancelled")
+			}
+			// Defensive double-check: stop() may have torn the listener
+			// down via a path that didn't close startCancel (shouldn't
+			// happen today, but cheap insurance against future drift).
+			c.mu.Lock()
+			cancelled := c.server != server
+			c.mu.Unlock()
+			if cancelled {
+				return team.WebTunnelStatus{}, errors.New("tunnel start was cancelled")
+			}
+		}
 
-	// Commit the in-flight resources to c.* under the lock so a concurrent
-	// stop() can find and tear them down. Then release the lock around the
-	// (up to 45s) waitForTunnelURL call so status() polls and stop() clicks
-	// from the UI don't block on c.mu.
-	c.starting = true
-	c.cmd = cmd
-	c.cancel = cancel
-	c.server = server
-	c.listener = ln
-	c.mu.Unlock()
+		ctx, cancel := context.WithCancel(context.Background())
+		cmd := exec.CommandContext(ctx, binary,
+			"tunnel",
+			"--no-autoupdate",
+			"--url", "http://"+loopbackAddr,
+			"--metrics", "127.0.0.1:0",
+		)
+		stderr, errPipe := cmd.StderrPipe()
+		if errPipe != nil {
+			cancel()
+			return failBringup("cloudflared stderr pipe failed: %v", errPipe)
+		}
+		stdout, errPipe := cmd.StdoutPipe()
+		if errPipe != nil {
+			cancel()
+			return failBringup("cloudflared stdout pipe failed: %v", errPipe)
+		}
+		if errStart := cmd.Start(); errStart != nil {
+			cancel()
+			return failBringup("cloudflared failed to start: %v", errStart)
+		}
 
-	publicURL, tail, perr := waitForTunnelURL(ctx, urlCh, tailCh, cloudflaredStartTimeout)
+		urlCh := make(chan string, 1)
+		tailCh := make(chan []string, 1)
+		go scanCloudflaredOutput(stderr, urlCh, tailCh)
+		// Drain stdout so a chatty cloudflared can't stall on a full pipe;
+		// recent versions emit little here, so noop the bytes.
+		go func() { _, _ = io.Copy(io.Discard, stdout) }()
 
-	c.mu.Lock()
-	c.starting = false
+		c.mu.Lock()
+		// stop() may have run between iterations.
+		if c.server != server {
+			c.mu.Unlock()
+			cancel()
+			_ = cmd.Wait()
+			return team.WebTunnelStatus{}, errors.New("tunnel start was cancelled")
+		}
+		c.cmd = cmd
+		c.cancel = cancel
+		c.mu.Unlock()
 
-	// stop() observed the in-flight resources during the wait and tore
-	// them down. Don't double-free; just report cancelled.
-	if c.cmd != cmd {
-		defer c.mu.Unlock()
-		return c.statusLocked(), errors.New("tunnel start was cancelled")
-	}
+		publicURL, tail, perr = waitForTunnelURL(ctx, urlCh, tailCh, cloudflaredStartTimeout)
 
-	if perr != nil {
-		// Wait failed (timeout, cmd died early, ctx cancelled). Cancel,
-		// then release c.mu before the cmd.Wait + ln.Close cleanup so a
-		// hung pipe drain can't block status() callers under the same
-		// lock-window invariant the watcher goroutine already follows.
+		c.mu.Lock()
+		// stop() observed the in-flight resources during the wait and tore
+		// them down. Don't double-free; just report cancelled.
+		if c.cmd != cmd {
+			defer c.mu.Unlock()
+			return c.statusLocked(), errors.New("tunnel start was cancelled")
+		}
+
+		if perr == nil {
+			// Success: keep cmd/cancel committed and exit the loop.
+			c.mu.Unlock()
+			break
+		}
+
+		// Wait failed. Tear down this attempt's cmd before deciding
+		// whether to retry. Don't release listener/server yet — they
+		// may carry to the next attempt or the final failure cleanup.
 		cancel()
 		c.cmd = nil
 		c.cancel = nil
+		c.mu.Unlock()
+		_ = cmd.Wait()
+
+		// Only TryCloudflare API failures are retryable. Timeouts,
+		// missing binary, and ctx cancellation get surfaced
+		// immediately so the user isn't waiting through pointless
+		// respawns.
+		if attempt >= cloudflaredMaxAttempts || !isTransientQuickTunnelFailure(tail) {
+			break
+		}
+	}
+
+	c.mu.Lock()
+	c.starting = false
+	// Drop our retire-time signal so stop() doesn't try to close it after
+	// start() has returned. Guard on identity in case a fresh start()
+	// somehow swapped a new channel in (currently impossible since c.starting
+	// gates that, but the check is free).
+	if c.startCancel == startCancel {
+		c.startCancel = nil
+	}
+
+	if perr != nil {
+		// All attempts failed. Release c.mu before the server.Shutdown
+		// + ln.Close cleanup so a hung in-flight loopback connection
+		// cannot block status() callers under the same lock-window
+		// invariant the watcher goroutine already follows.
 		cleanupServer := c.server
 		c.server = nil
 		cleanupLn := c.listener
 		c.listener = nil
 		c.running = false
 		msg := perr.Error()
+		if isTransientQuickTunnelFailure(tail) {
+			msg += fmt.Sprintf(" (after %d attempts; trycloudflare.com appears to be having issues — try again in a minute)", cloudflaredMaxAttempts)
+		}
 		if len(tail) > 0 {
 			msg += "\n\nLast cloudflared output:\n" + strings.Join(tail, "\n")
 		}
 		c.err = msg
 		c.mu.Unlock()
-		_ = cmd.Wait()
 		if cleanupServer != nil {
 			shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), cloudflaredStopTimeout)
 			_ = cleanupServer.Shutdown(shutdownCtx)
@@ -379,6 +516,11 @@ func (c *webTunnelController) start() (team.WebTunnelStatus, error) {
 		}
 		return team.WebTunnelStatus{Error: msg}, errors.New(msg)
 	}
+
+	// Success path uses the cmd committed by the winning attempt — the
+	// watcher goroutine below Waits on it. Cancel stays in c.cancel for
+	// stop() to drive teardown; we don't need a local copy here.
+	cmd := c.cmd
 
 	c.publicURL = publicURL
 	c.running = true
@@ -402,9 +544,16 @@ func (c *webTunnelController) start() (team.WebTunnelStatus, error) {
 
 	// Watch the subprocess for unexpected exit. If it crashes, flip Running
 	// off so the next status poll surfaces the failure.
+	//
+	// This goroutine is the SOLE owner of cmd.Wait() in the success path.
+	// stop() observes c.cmdDone and waits on it instead of calling Wait
+	// itself — os/exec.Cmd.Wait disallows concurrent calls.
 	stopGuard := c.stopGuard
+	cmdDone := make(chan struct{})
+	c.cmdDone = cmdDone
 	go func() {
 		err := cmd.Wait()
+		close(cmdDone)
 		select {
 		case <-stopGuard:
 			// stop() already handled teardown; nothing to do.
@@ -425,6 +574,7 @@ func (c *webTunnelController) start() (team.WebTunnelStatus, error) {
 		c.running = false
 		c.cmd = nil
 		c.cancel = nil
+		c.cmdDone = nil
 		c.publicURL = ""
 		c.server = nil
 		c.listener = nil
@@ -573,12 +723,23 @@ func (c *webTunnelController) stop() error {
 	server := c.server
 	ln := c.listener
 	stopGuard := c.stopGuard
+	startCancel := c.startCancel
+	cmdDone := c.cmdDone
 	wasRunning := c.running
 	c.cmd = nil
 	c.cancel = nil
 	c.server = nil
 	c.listener = nil
 	c.stopGuard = nil
+	c.startCancel = nil
+	c.cmdDone = nil
+	// Reset c.starting so a Stop click during bring-up / backoff doesn't
+	// strand the controller in "tunnel start is already in progress" on
+	// the next Start. The in-flight start() either returns "cancelled"
+	// from one of its post-lock identity checks (c.server != server,
+	// c.cmd != cmd, startCancel closed) or from the post-loop block
+	// where it would have reset starting itself.
+	c.starting = false
 	c.running = false
 	c.publicURL = ""
 	c.passcodes = make(map[string]string)
@@ -596,6 +757,9 @@ func (c *webTunnelController) stop() error {
 	if stopGuard != nil {
 		close(stopGuard)
 	}
+	if startCancel != nil {
+		close(startCancel)
+	}
 	if cancel != nil {
 		cancel()
 	}
@@ -603,16 +767,31 @@ func (c *webTunnelController) stop() error {
 		// CommandContext's cancel() sends SIGKILL on most platforms; give
 		// Wait a brief deadline so we don't block the UI thread on a stuck
 		// child.
-		done := make(chan struct{})
-		go func() {
-			_ = cmd.Wait()
-			close(done)
-		}()
-		select {
-		case <-done:
-		case <-time.After(cloudflaredStopTimeout):
-			_ = cmd.Process.Kill()
-			<-done
+		//
+		// Wait ownership: if a watcher goroutine exists (success path),
+		// it owns cmd.Wait(); we observe its cmdDone close. Otherwise
+		// (cancellation before the watcher launches) no one else is
+		// Waiting, so we own the Wait here. os/exec disallows concurrent
+		// Wait on the same Cmd, so this branch matters.
+		if cmdDone != nil {
+			select {
+			case <-cmdDone:
+			case <-time.After(cloudflaredStopTimeout):
+				_ = cmd.Process.Kill()
+				<-cmdDone
+			}
+		} else {
+			done := make(chan struct{})
+			go func() {
+				_ = cmd.Wait()
+				close(done)
+			}()
+			select {
+			case <-done:
+			case <-time.After(cloudflaredStopTimeout):
+				_ = cmd.Process.Kill()
+				<-done
+			}
 		}
 	}
 	if server != nil {
