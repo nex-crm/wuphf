@@ -3,6 +3,12 @@ import canonicalize from "canonicalize";
 const MAX_DEPTH = 64;
 
 export type JsonPrimitive = null | boolean | number | string;
+// `readonly` here is a consumer-ergonomic hint, not a runtime constraint —
+// `canonicalJSON` does not require frozen inputs (the prototype walk in
+// assertJcsValue rejects non-plain objects, but plain mutable objects are
+// fine). The intent is to discourage callers from mutating values they've
+// promised to canonicalize; the actual freezing happens at the FrozenArgs
+// boundary, not here.
 export type JsonValue =
   | JsonPrimitive
   | readonly JsonValue[]
