@@ -360,6 +360,52 @@ function validateReceiptSnapshot(
     errors,
     true,
   );
+  validateReceiptStatusEvidence(value, path, errors);
+}
+
+function validateReceiptStatusEvidence(
+  value: Readonly<Record<string, unknown>>,
+  path: string,
+  errors: ReceiptValidationError[],
+): void {
+  const status = recordValue(value, "status");
+  if (
+    typeof status !== "string" ||
+    !RECEIPT_STATUS_VALUES.includes(status as (typeof RECEIPT_STATUS_VALUES)[number])
+  ) {
+    return;
+  }
+
+  const statusPath = pointer(path, "status");
+  const approvals = recordValue(value, "approvals");
+  if (Array.isArray(approvals)) {
+    const hasRejectedApproval = approvals.some(
+      (approval) => isRecord(approval) && recordValue(approval, "decision") === "reject",
+    );
+    if (hasRejectedApproval && status !== "rejected" && status !== "error") {
+      addError(errors, statusPath, "must be rejected or error when approvals include a rejection");
+    }
+  }
+
+  if (status !== "ok") {
+    return;
+  }
+
+  const toolCalls = recordValue(value, "toolCalls");
+  if (
+    Array.isArray(toolCalls) &&
+    toolCalls.some((toolCall) => isRecord(toolCall) && recordValue(toolCall, "status") === "error")
+  ) {
+    addError(errors, statusPath, "must not be ok when any tool call failed");
+  }
+
+  const writes = recordValue(value, "writes");
+  if (
+    Array.isArray(writes) &&
+    writes.some((write) => isRecord(write) && recordValue(write, "result") !== "applied")
+  ) {
+    addError(errors, statusPath, "must not be ok when any write did not apply");
+  }
 }
 
 function validateSourceRead(value: unknown, path: string, errors: ReceiptValidationError[]): void {
@@ -701,7 +747,7 @@ function validateExternalWrite(
         "approvedAt",
         pointer(path, "approvedAt"),
         errors,
-        true,
+        false,
       );
     }
   }

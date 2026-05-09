@@ -872,7 +872,7 @@ function sanitizedStringFromJson(value: unknown, path: string): SanitizedString 
   const valueBytes = Buffer.byteLength(value, "utf8");
   if (valueBytes > MAX_SANITIZED_STRING_BYTES) {
     throw new Error(
-      `sanitizedStringFromJson: value exceeds MAX_SANITIZED_STRING_BYTES (got ${valueBytes}, max ${MAX_SANITIZED_STRING_BYTES})`,
+      `${path}: value exceeds MAX_SANITIZED_STRING_BYTES (got ${valueBytes}, max ${MAX_SANITIZED_STRING_BYTES})`,
     );
   }
   const sanitized = SanitizedString.fromUnknown(value);
