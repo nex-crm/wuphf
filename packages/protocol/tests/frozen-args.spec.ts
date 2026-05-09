@@ -46,7 +46,7 @@ function objectFromEntries(entries: [string, JsonValue][]): JsonObject {
   return output;
 }
 
-function shuffledObject(input: JsonObject): JsonObject {
+function reverseSortedObject(input: JsonObject): JsonObject {
   return objectFromEntries(
     Object.entries(input).sort(([left], [right]) => {
       if (left < right) {
@@ -73,7 +73,9 @@ describe("FrozenArgs", () => {
   it("is independent of object key insertion order", () => {
     fc.assert(
       fc.property(jsonObject, (input) => {
-        expect(FrozenArgs.freeze(shuffledObject(input)).hash).toBe(FrozenArgs.freeze(input).hash);
+        expect(FrozenArgs.freeze(reverseSortedObject(input)).hash).toBe(
+          FrozenArgs.freeze(input).hash,
+        );
       }),
       { numRuns: 5000 },
     );

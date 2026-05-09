@@ -663,6 +663,7 @@ function auditChainOfLength(length: number): AuditEventRecord[] {
 
 function receiptWithSerializedBytes(targetBytes: number): ReceiptSnapshot {
   const base = { ...validReceiptFixture(), triggerRef: "" };
+  // validReceiptFixture is ASCII-only, so JSON string length matches UTF-8 bytes here.
   const baseBytes = JSON.stringify(base).length;
   const fillerLength = targetBytes - baseBytes;
   if (fillerLength < 0) {
