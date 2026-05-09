@@ -37,4 +37,14 @@ describe("canonicalJSON", () => {
       expect(() => FrozenArgs.freeze(input)).toThrow(new RegExp(`forbidden key.*${key}`));
     }
   });
+
+  it("rejects lone surrogates in object keys", () => {
+    const loneHighSurrogate = "\ud800";
+
+    expect(() => canonicalJSON({ [loneHighSurrogate]: 1 })).toThrow(/lone (high|low) surrogate/);
+  });
+
+  it("accepts valid surrogate pairs in object keys", () => {
+    expect(() => canonicalJSON({ "𝄞": 1 })).not.toThrow();
+  });
 });

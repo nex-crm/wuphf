@@ -3,8 +3,10 @@
 // because the combined module exceeded the 1500-LOC budget; the public API is
 // preserved here via re-exports so consumers do not need to change imports.
 
+import { Buffer } from "node:buffer";
 import {
   assertWithinBudget,
+  MAX_FROZEN_ARGS_BYTES,
   MAX_RECEIPT_APPROVALS,
   MAX_RECEIPT_BYTES,
   MAX_RECEIPT_COMMITS,
@@ -13,6 +15,7 @@ import {
   MAX_RECEIPT_SOURCE_READS,
   MAX_RECEIPT_WIKI_WRITES,
   MAX_RECEIPT_WRITES,
+  MAX_SANITIZED_STRING_BYTES,
   MAX_TOOL_CALLS_PER_RECEIPT,
   validateReceiptBudget,
 } from "./budgets.ts";
@@ -209,6 +212,10 @@ export function receiptFromJson(json: string): ReceiptSnapshot {
   assertSerializedReceiptJsonBudget(json);
   const parsed: unknown = JSON.parse(json);
   assertParsedReceiptCollectionBudgets(parsed);
+  const parsedBudget = validateReceiptBudget(parsed as ReceiptSnapshot);
+  if (!parsedBudget.ok) {
+    throw new Error(parsedBudget.reason);
+  }
   const recomputedFrozenArgs = new Set<FrozenArgs>();
   const receipt = receiptJsonToSnapshot(parsed, recomputedFrozenArgs);
   const budget = validateReceiptBudget(receipt);
@@ -783,6 +790,12 @@ function frozenArgsFromJson(
   // single boundary where un-hashed shadow data could survive a round-trip.
   assertKnownKeys(record, path, FROZEN_ARGS_KEYS);
   const canonicalJson = requiredStringFromJson(record, "canonicalJson", path);
+  const canonicalJsonBytes = Buffer.byteLength(canonicalJson, "utf8");
+  if (canonicalJsonBytes > MAX_FROZEN_ARGS_BYTES) {
+    throw new Error(
+      `frozenArgsFromJson: canonicalJson exceeds MAX_FROZEN_ARGS_BYTES (got ${canonicalJsonBytes}, max ${MAX_FROZEN_ARGS_BYTES})`,
+    );
+  }
   const expectedHash = asSha256HexAt(
     requiredStringFromJson(record, "hash", path),
     pointer(path, "hash"),
@@ -870,6 +883,12 @@ function optionalSanitizedStringToJson(value: SanitizedString | undefined): stri
 function sanitizedStringFromJson(value: unknown, path: string): SanitizedString {
   if (typeof value !== "string") {
     throw new Error(`${path}: must be a string`);
+  }
+  const valueBytes = Buffer.byteLength(value, "utf8");
+  if (valueBytes > MAX_SANITIZED_STRING_BYTES) {
+    throw new Error(
+      `sanitizedStringFromJson: value exceeds MAX_SANITIZED_STRING_BYTES (got ${valueBytes}, max ${MAX_SANITIZED_STRING_BYTES})`,
+    );
   }
   const sanitized = SanitizedString.fromUnknown(value);
   if (sanitized.value !== value) {

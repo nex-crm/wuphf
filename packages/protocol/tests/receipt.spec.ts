@@ -1,6 +1,10 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
-import { MAX_TOOL_CALLS_PER_RECEIPT } from "../src/budgets.ts";
+import {
+  MAX_FROZEN_ARGS_BYTES,
+  MAX_SANITIZED_STRING_BYTES,
+  MAX_TOOL_CALLS_PER_RECEIPT,
+} from "../src/budgets.ts";
 import { FrozenArgs } from "../src/frozen-args.ts";
 import {
   asAgentSlug,
@@ -135,6 +139,33 @@ describe("receipt schema", () => {
         },
       ],
     });
+  });
+
+  it("rejects oversized FrozenArgs JSON before decoding tool call inputs", () => {
+    const receipt = receiptJsonFixture();
+    const toolCall = nonNull(receipt.toolCalls[0]);
+    const canonicalJson = "x".repeat(MAX_FROZEN_ARGS_BYTES + 1);
+    toolCall.inputs = {
+      canonicalJson,
+      hash: sha256Hex(canonicalJson),
+    };
+
+    expect(() => receiptFromJson(JSON.stringify(receipt))).toThrow(
+      /receipt toolCalls\[0\]\.inputs: FrozenArgs canonicalJson bytes exceeds budget: 1048577 > 1048576/,
+    );
+  });
+
+  it("rejects oversized final messages before sanitizing them", () => {
+    const receipt = receiptJsonFixture();
+    receipt.finalMessage = "x".repeat(MAX_SANITIZED_STRING_BYTES + 1);
+
+    expect(() => receiptFromJson(JSON.stringify(receipt))).toThrow(
+      new RegExp(
+        `sanitizedStringFromJson: value exceeds MAX_SANITIZED_STRING_BYTES \\(got ${
+          MAX_SANITIZED_STRING_BYTES + 1
+        }, max ${MAX_SANITIZED_STRING_BYTES}\\)`,
+      ),
+    );
   });
 
   it("never throws for unknown fuzz payloads", () => {
@@ -738,6 +769,20 @@ function nonNull<T>(value: T | null | undefined): T {
     throw new Error("fixture missing required value");
   }
   return value;
+}
+
+function receiptJsonFixture(): Record<string, unknown> & {
+  finalMessage?: unknown;
+  toolCalls: (Record<string, unknown> & { inputs?: unknown })[];
+} {
+  const receipt = JSON.parse(receiptToJson(validReceiptFixture())) as Record<string, unknown> & {
+    finalMessage?: unknown;
+    toolCalls: (Record<string, unknown> & { inputs?: unknown })[];
+  };
+  if (!Array.isArray(receipt.toolCalls)) {
+    throw new Error("fixture missing toolCalls");
+  }
+  return receipt;
 }
 
 function validReceiptFixture(): ReceiptSnapshot {

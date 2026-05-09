@@ -115,6 +115,11 @@ export function assertWithinBudget(value: number, budget: number, label: string)
   }
 }
 
+/**
+ * Budget validation assumes a plain-data receipt or JSON.parse output. Hostile
+ * wire bytes must enter through receiptFromJson, which parses before this runs;
+ * direct callers should not pass objects with accessors or custom toJSON hooks.
+ */
 export function validateReceiptBudget(receipt: ReceiptSnapshot): BudgetValidationResult {
   const countBudget = validateReceiptCollectionBudgets(receipt);
   if (!countBudget.ok) return countBudget;

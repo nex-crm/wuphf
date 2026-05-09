@@ -1,5 +1,6 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
+import { MAX_APPROVAL_TOKEN_LIFETIME_MS } from "../src/budgets.ts";
 import {
   ALLOWED_LOOPBACK_HOSTS,
   type ApprovalSubmitResponse,
@@ -320,6 +321,61 @@ describe("approval submission IPC", () => {
       }),
       /frozenArgsHash.*required/,
     );
+  });
+
+  it("rejects approval token claims beyond the maximum lifetime", () => {
+    const receiptId = asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAV");
+    const approvalToken = approvalTokenFor(receiptId);
+    const issuedAt = new Date("2026-05-08T18:00:00.000Z");
+
+    expectApprovalSubmitRejected(
+      approvalRequestFor(receiptId, {
+        ...approvalToken,
+        claims: {
+          ...approvalToken.claims,
+          issuedAt,
+          expiresAt: new Date(issuedAt.getTime() + MAX_APPROVAL_TOKEN_LIFETIME_MS + 1),
+        },
+      }),
+      /MAX_APPROVAL_TOKEN_LIFETIME_MS/,
+    );
+  });
+
+  it("rejects approval token claims whose expiry equals issuance", () => {
+    const receiptId = asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAV");
+    const approvalToken = approvalTokenFor(receiptId);
+    const issuedAt = new Date("2026-05-08T18:00:00.000Z");
+
+    expectApprovalSubmitRejected(
+      approvalRequestFor(receiptId, {
+        ...approvalToken,
+        claims: {
+          ...approvalToken.claims,
+          issuedAt,
+          expiresAt: issuedAt,
+        },
+      }),
+      /strictly after issuedAt/,
+    );
+  });
+
+  it("rejects approval request accessors without invoking getters", () => {
+    const receiptId = asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAV");
+    let getterInvoked = false;
+    const request = {
+      receiptId,
+      idempotencyKey: asIdempotencyKey("approval-submit-01"),
+    };
+    Object.defineProperty(request, "approvalToken", {
+      enumerable: true,
+      get() {
+        getterInvoked = true;
+        return approvalTokenFor(receiptId);
+      },
+    });
+
+    expectApprovalSubmitRejected(request, /approvalToken.*data property/);
+    expect(getterInvoked).toBe(false);
   });
 
   it("carries idempotencyKey on queued approval responses", () => {

@@ -71,6 +71,14 @@ describe("resource budgets", () => {
     );
   });
 
+  it("documents that receipt budget validation assumes plain-data inputs", () => {
+    // Hostile wire input goes through receiptFromJson first; validateReceiptBudget
+    // is scoped to typed receipts or JSON.parse output without accessors/toJSON.
+    const plainDataReceipt = JSON.parse(receiptToJson(validReceiptFixture())) as ReceiptSnapshot;
+
+    expect(validateReceiptBudget(plainDataReceipt)).toEqual({ ok: true });
+  });
+
   it("bounds tool calls per receipt at the edge", () => {
     expect(
       validateReceiptBudget({

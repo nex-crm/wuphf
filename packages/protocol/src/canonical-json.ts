@@ -76,6 +76,7 @@ export function assertJcsValue(value: unknown, path = "$", depth = 0): asserts v
       if (key === "length") {
         continue;
       }
+      assertNoLoneSurrogate(key, `${path}.${key}`);
       assertAllowedPropertyKey(key, `${path}.${key}`);
       const index = parseArrayIndexKey(key);
       if (index === undefined) {
@@ -102,6 +103,7 @@ export function assertJcsValue(value: unknown, path = "$", depth = 0): asserts v
     }
     const descriptors = Object.getOwnPropertyDescriptors(value as object);
     for (const [key, descriptor] of Object.entries(descriptors)) {
+      assertNoLoneSurrogate(key, `${path}.${key}`);
       assertAllowedPropertyKey(key, `${path}.${key}`);
       if (!descriptor.enumerable) {
         throw new Error(`canonicalJSON: non-enumerable own property at ${path}.${key}`);
