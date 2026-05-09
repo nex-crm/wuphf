@@ -27,6 +27,7 @@ package team
 // taskBrokerRoutes) keep their meanings.
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 )
@@ -72,31 +73,35 @@ var reservedTaskSubpath = map[string]struct{}{
 	"memory-workflows": {},
 }
 
-// handleTaskByID serves GET /tasks/{id}. Mounted via b.withAuth on
-// the "/tasks/" prefix. ServeMux's longest-prefix matching means the
-// existing exact paths /tasks, /tasks/ack, /tasks/memory-workflow,
-// /tasks/memory-workflow/reconcile, and /tasks/inbox win over this
-// prefix handler — so this path effectively only fires for
-// /tasks/{id} where {id} is not one of those reserved tokens. The
-// reserved-token check is a defense-in-depth guard for future routes.
+// handleTaskByID serves GET /tasks/{id} and POST /tasks/{id}/block.
+// Mounted via b.withAuth on the "/tasks/" prefix. ServeMux's longest-
+// prefix matching means the existing exact paths /tasks, /tasks/ack,
+// /tasks/memory-workflow, /tasks/memory-workflow/reconcile, and
+// /tasks/inbox win over this prefix handler — so this path effectively
+// only fires for /tasks/{id} (GET) or /tasks/{id}/block (POST).
 func (b *Broker) handleTaskByID(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		w.Header().Set("Allow", http.MethodGet)
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
 	actor, ok := requestActorFromContext(r.Context())
 	if !ok {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 		return
 	}
 	rest := strings.TrimPrefix(r.URL.Path, "/tasks/")
-	// /tasks/{id}/{verb} is reserved for future Lane G action endpoints
-	// (merge, request-changes, block, defer). v1 ships only the GET
-	// reader; sub-verbs return 404 here so a stray client cannot
-	// silently land on the wrong handler.
+	// /tasks/{id}/block is the Lane F block-on-PR-merge action. Other
+	// verbs (merge / request-changes / defer) are still reserved for
+	// Lane G; they return 404 here so a stray client cannot silently
+	// land on the wrong handler.
 	if strings.Contains(rest, "/") {
+		segments := strings.SplitN(rest, "/", 2)
+		if len(segments) == 2 && segments[1] == "block" {
+			b.handleTaskBlock(w, r, actor, strings.TrimSpace(segments[0]))
+			return
+		}
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	id := strings.TrimSpace(rest)
@@ -139,6 +144,56 @@ func (b *Broker) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, packetCopy)
+}
+
+// handleTaskBlock serves POST /tasks/{id}/block. Body shape:
+//
+//	{"on": "<pr-or-task-id>", "actor": "<slug>", "reason": "<text>"}
+//
+// On success returns 200 with the post-block teamTask snapshot.
+// Auth: broker/owner only — humans cannot block other reviewers' tasks
+// in v1 to keep the action surface small.
+func (b *Broker) handleTaskBlock(w http.ResponseWriter, r *http.Request, actor requestActor, id string) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if actor.Kind != requestActorKindBroker {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
+		return
+	}
+	if id == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "task id required"})
+		return
+	}
+	var body struct {
+		On     string `json:"on"`
+		Actor  string `json:"actor"`
+		Reason string `json:"reason"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json body"})
+		return
+	}
+	reason := strings.TrimSpace(body.Reason)
+	if reason == "" && strings.TrimSpace(body.On) != "" {
+		reason = "blocked on " + strings.TrimSpace(body.On)
+	}
+	actorSlug := strings.TrimSpace(body.Actor)
+	if actorSlug == "" {
+		actorSlug = "human"
+	}
+	task, ok, err := b.BlockTask(id, actorSlug, reason)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "task not found"})
+		return
+	}
+	writeJSON(w, http.StatusOK, task)
 }
 
 // taskAccessAllowed encodes the auth matrix from the design doc:

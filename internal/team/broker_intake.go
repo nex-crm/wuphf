@@ -291,6 +291,10 @@ func (p *defaultIntakeProvider) CallSpecLLM(ctx context.Context, systemPrompt, u
 	return "", errIntakeNoProvider
 }
 
+// ErrIntakeNoProvider is the public alias of errIntakeNoProvider so the
+// Lane F CLI can match against it without importing the internal symbol.
+var ErrIntakeNoProvider = errIntakeNoProvider
+
 // errIntakeNoProvider signals that no haiku/ollama/openai surface is
 // reachable. The driver returns this verbatim so the CLI can offer the
 // manual-entry escape hatch immediately.
