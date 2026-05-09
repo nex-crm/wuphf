@@ -9,7 +9,7 @@ import (
 	"github.com/nex-crm/wuphf/internal/config"
 )
 
-// ManagedAgent wraps an AgentLoop with its config and last-known state.
+// ManagedAgent wraps an AgentLoop with its config and current state snapshot.
 type ManagedAgent struct {
 	Config AgentConfig
 	State  AgentState
@@ -217,7 +217,6 @@ func (s *AgentService) Start(slug string) error {
 	}
 
 	ma.Loop.Start()
-	ma.State = ma.Loop.GetState()
 	s.notify()
 	return nil
 }
@@ -239,7 +238,6 @@ func (s *AgentService) Stop(slug string) error {
 	}
 
 	ma.Loop.Stop()
-	ma.State = ma.Loop.GetState()
 	s.notify()
 	return nil
 }
@@ -365,7 +363,6 @@ func (s *AgentService) runAgentWorker(slug string, ma *ManagedAgent, stopCh <-ch
 			s.mu.Unlock()
 			return
 		}
-		ma.State = nextState
 		running := ma.Loop.CanProcess() &&
 			((nextState.Phase != PhaseDone && nextState.Phase != PhaseIdle) || s.queues.HasMessages(slug))
 		s.mu.Unlock()
@@ -390,7 +387,8 @@ func (s *AgentService) Get(slug string) (*ManagedAgent, bool) {
 		return nil, false
 	}
 	snapshot := *ma
-	snapshot.State = ma.Loop.GetState()
+	snapshot.Config = agentConfigSnapshot(ma.Config)
+	snapshot.State = agentStateSnapshot(ma.Loop.GetState())
 	return &snapshot, true
 }
 
@@ -401,7 +399,8 @@ func (s *AgentService) List() []*ManagedAgent {
 	list := make([]*ManagedAgent, 0, len(s.agents))
 	for _, ma := range s.agents {
 		snapshot := *ma
-		snapshot.State = ma.Loop.GetState()
+		snapshot.Config = agentConfigSnapshot(ma.Config)
+		snapshot.State = agentStateSnapshot(ma.Loop.GetState())
 		list = append(list, &snapshot)
 	}
 	sort.Slice(list, func(i, j int) bool {
@@ -418,7 +417,23 @@ func (s *AgentService) GetState(slug string) (AgentState, bool) {
 	if !ok {
 		return AgentState{}, false
 	}
-	return ma.Loop.GetState(), true
+	return agentStateSnapshot(ma.Loop.GetState()), true
+}
+
+func agentConfigSnapshot(cfg AgentConfig) AgentConfig {
+	cfg.Expertise = append([]string(nil), cfg.Expertise...)
+	cfg.Tools = append([]string(nil), cfg.Tools...)
+	cfg.AllowedTools = append([]string(nil), cfg.AllowedTools...)
+	if cfg.Budget != nil {
+		budget := *cfg.Budget
+		cfg.Budget = &budget
+	}
+	return cfg
+}
+
+func agentStateSnapshot(state AgentState) AgentState {
+	state.Config = agentConfigSnapshot(state.Config)
+	return state
 }
 
 // Remove stops and removes the agent from the service.
