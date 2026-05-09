@@ -11,7 +11,8 @@
     "desktop:build": "bun run --cwd apps/desktop build",
     "desktop:test": "bun run --cwd apps/desktop test",
     "desktop:typecheck": "bun run --cwd apps/desktop typecheck",
-    "desktop:check:ipc-allowlist": "bun run --cwd apps/desktop check:ipc-allowlist"
+    "desktop:check:ipc-allowlist": "bun run --cwd apps/desktop check:ipc-allowlist",
+    "desktop:check:invariants": "bun run --cwd apps/desktop check:invariants"
   },
   "devDependencies": {
     "@commitlint/cli": "^20.5.0",

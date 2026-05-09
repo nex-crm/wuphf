@@ -13,7 +13,7 @@ bun run desktop:dev            # boots Electron window
 
 The window shows a single status pane:
 
-```
+```text
 WUPHF v1 desktop shell
 Broker: alive ✓
 Platform: darwin / arm64

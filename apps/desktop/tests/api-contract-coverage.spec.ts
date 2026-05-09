@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { IPC_CHANNEL_VALUES } from "../src/shared/api-contract.ts";
+import { IPC_CHANNEL_VALUES, type IpcChannelName } from "../src/shared/api-contract.ts";
 
 const electronMock = vi.hoisted(() => ({
   handle: vi.fn<(channel: string, handler: unknown) => void>(),
@@ -39,6 +39,26 @@ describe("IPC contract coverage", () => {
     expect(handledChannels.sort()).toEqual([...IPC_CHANNEL_VALUES].sort());
     expect(Object.keys(createIpcHandlers(brokerSupervisor)).sort()).toEqual(
       [...IPC_CHANNEL_VALUES].sort(),
+    );
+  });
+
+  it("rejects registered channels outside the allowlist", async () => {
+    const { assertRegisteredChannels } = await import("../src/main/ipc/register-handlers.ts");
+
+    expect(() =>
+      assertRegisteredChannels([...IPC_CHANNEL_VALUES, "wuphf:not-allowlisted" as IpcChannelName]),
+    ).toThrow("Registered IPC channel is not allowlisted: wuphf:not-allowlisted");
+  });
+
+  it("rejects allowlisted channels without handlers", async () => {
+    const { assertRegisteredChannels } = await import("../src/main/ipc/register-handlers.ts");
+    const missingChannel = IPC_CHANNEL_VALUES[0];
+    if (missingChannel === undefined) {
+      throw new Error("Expected at least one allowlisted IPC channel");
+    }
+
+    expect(() => assertRegisteredChannels(IPC_CHANNEL_VALUES.slice(1))).toThrow(
+      `Allowlisted IPC channel is missing a handler: ${missingChannel}`,
     );
   });
 });

@@ -35,7 +35,7 @@ export function registerIpcHandlers(brokerSupervisor: BrokerSupervisor): void {
   ipcMain.handle(IpcChannel.GetBrokerStatus, handlers[IpcChannel.GetBrokerStatus]);
 }
 
-function assertRegisteredChannels(channels: readonly IpcChannelName[]): void {
+export function assertRegisteredChannels(channels: readonly IpcChannelName[]): void {
   const registered = new Set(channels);
   const allowed = new Set(IPC_CHANNEL_VALUES);
 
@@ -49,9 +49,5 @@ function assertRegisteredChannels(channels: readonly IpcChannelName[]): void {
     if (!registered.has(channel)) {
       throw new Error(`Allowlisted IPC channel is missing a handler: ${channel}`);
     }
-  }
-
-  if (registered.size !== allowed.size) {
-    throw new Error("Registered IPC channels must match the allowlist exactly");
   }
 }
