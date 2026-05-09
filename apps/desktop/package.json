@@ -14,9 +14,10 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "electron:install": "bun scripts/install-electron.mjs",
     "build": "electron-vite build",
-    "dev": "electron-vite dev",
-    "preview": "electron-vite preview",
+    "dev": "bun run electron:install && electron-vite dev",
+    "preview": "bun run electron:install && electron-vite preview",
     "check:ipc-allowlist": "bash scripts/check-ipc-allowlist.sh",
     "check:invariants": "bash scripts/check-invariants.sh"
   },
@@ -25,12 +26,12 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.13",
-    "@types/node": "^22.10.0",
-    "@vitest/coverage-v8": "^2.1.0",
-    "electron": "^33.0.0",
-    "electron-vite": "^2.3.0",
-    "typescript": "^5.6.0",
-    "vite": "^5.4.0",
-    "vitest": "^2.1.0"
+    "@types/node": "24.12.3",
+    "@vitest/coverage-v8": "4.1.5",
+    "electron": "42.0.1",
+    "electron-vite": "5.0.0",
+    "typescript": "5.9.3",
+    "vite": "7.3.3",
+    "vitest": "4.1.5"
   }
 }
