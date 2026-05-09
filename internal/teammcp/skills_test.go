@@ -342,3 +342,26 @@ func TestHandleTeamSkillCreateRequiresAction(t *testing.T) {
 		t.Fatalf("expected IsError=true when action is omitted, got %+v", res)
 	}
 }
+
+// TestHandleTeamSkillCreateRequiresDescription pins the description guard
+// added at the MCP boundary. RenderSkillMarkdown rejects an empty
+// description, so without this check the broker's POST /skills would 400
+// opaquely instead of the agent seeing a clear "description is required"
+// tool error. Both empty and whitespace-only descriptions must fail.
+func TestHandleTeamSkillCreateRequiresDescription(t *testing.T) {
+	for _, desc := range []string{"", "   "} {
+		res, _, err := handleTeamSkillCreate(context.Background(), nil, TeamSkillCreateArgs{
+			Name:        "needs-description",
+			Content:     "1. Do something",
+			Description: desc,
+			Action:      "propose",
+			MySlug:      "ceo",
+		})
+		if err != nil {
+			t.Fatalf("description=%q: unexpected go error: %v", desc, err)
+		}
+		if res == nil || !res.IsError {
+			t.Fatalf("description=%q: expected IsError=true, got %+v", desc, res)
+		}
+	}
+}
