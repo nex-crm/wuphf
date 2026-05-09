@@ -14,39 +14,36 @@
 
 import {
   type AuditEventRecord,
-  asMerkleRootHex,
-  computeAuditEventHash,
-  GENESIS_PREV_HASH,
-  INITIAL_VERIFIER_STATE,
-  serializeAuditEventRecordForHash,
-  validateMerkleRootRecord,
-  verifyChain,
-  verifyChainIncremental,
-} from "../src/audit-event.ts";
-import {
-  MAX_AUDIT_CHAIN_BATCH_SIZE,
-  MAX_TOOL_CALLS_PER_RECEIPT,
-  validateReceiptBudget,
-} from "../src/budgets.ts";
-import { canonicalJSON } from "../src/canonical-json.ts";
-import { lsnFromV1Number } from "../src/event-lsn.ts";
-import { FrozenArgs } from "../src/frozen-args.ts";
-import { asApiToken, validateApprovalSubmitRequest } from "../src/ipc.ts";
-import {
   asAgentSlug,
+  asApiToken,
   asApprovalId,
   asIdempotencyKey,
+  asMerkleRootHex,
   asProviderKind,
   asReceiptId,
   asTaskId,
   asToolCallId,
   asWriteId,
+  canonicalJSON,
+  computeAuditEventHash,
+  FrozenArgs,
+  GENESIS_PREV_HASH,
+  INITIAL_VERIFIER_STATE,
+  lsnFromV1Number,
+  MAX_AUDIT_CHAIN_BATCH_SIZE,
+  MAX_TOOL_CALLS_PER_RECEIPT,
   type ReceiptSnapshot,
   receiptFromJson,
   receiptToJson,
-} from "../src/receipt.ts";
-import { SanitizedString } from "../src/sanitized-string.ts";
-import { sha256Hex } from "../src/sha256.ts";
+  SanitizedString,
+  serializeAuditEventRecordForHash,
+  sha256Hex,
+  validateApprovalSubmitRequest,
+  validateMerkleRootRecord,
+  validateReceiptBudget,
+  verifyChain,
+  verifyChainIncremental,
+} from "../src/index.ts";
 
 const ANSI = {
   reset: "\x1b[0m",

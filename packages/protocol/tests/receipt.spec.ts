@@ -1,5 +1,6 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
+import { MAX_TOOL_CALLS_PER_RECEIPT } from "../src/budgets.ts";
 import { FrozenArgs } from "../src/frozen-args.ts";
 import {
   asAgentSlug,
@@ -113,6 +114,27 @@ describe("receipt schema", () => {
         message: "must be an uppercase ULID ReceiptId",
       });
     }
+  });
+
+  it("enforces receipt budgets before walking oversized arrays", () => {
+    const fixture = validReceiptFixture();
+    const firstToolCall = nonNull(fixture.toolCalls[0]);
+    const result = validateReceipt({
+      ...fixture,
+      toolCalls: Array.from({ length: MAX_TOOL_CALLS_PER_RECEIPT + 1 }, () => firstToolCall),
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      errors: [
+        {
+          path: "",
+          message: `receipt toolCalls length exceeds budget: ${
+            MAX_TOOL_CALLS_PER_RECEIPT + 1
+          } > ${MAX_TOOL_CALLS_PER_RECEIPT}`,
+        },
+      ],
+    });
   });
 
   it("never throws for unknown fuzz payloads", () => {
@@ -361,11 +383,16 @@ describe("receipt schema", () => {
       ],
     };
 
-    expectReceiptValidationError(
-      tampered,
-      "/approvals/0/signedToken/claims/expiresAt",
-      /expiresAt=2026-05-08T18:00:59.000Z issuedAt=2026-05-08T18:01:00.000Z/,
-    );
+    expect(validateReceipt(tampered)).toEqual({
+      ok: false,
+      errors: [
+        {
+          path: "",
+          message:
+            "receipt approvals[0].signedToken: approval token lifetime ms must be a non-negative finite number",
+        },
+      ],
+    });
   });
 
   it("rejects tool calls that finish before they start", () => {

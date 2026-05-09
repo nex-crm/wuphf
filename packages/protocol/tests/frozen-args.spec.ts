@@ -1,6 +1,7 @@
 import * as fc from "fast-check";
-import { describe, expect, it } from "vitest";
-import { canonicalJSON } from "../src/canonical-json.ts";
+import { describe, expect, it, vi } from "vitest";
+import { MAX_FROZEN_ARGS_BYTES } from "../src/budgets.ts";
+import * as canonicalJsonModule from "../src/canonical-json.ts";
 import { FrozenArgs } from "../src/frozen-args.ts";
 
 type JsonObject = { [key: string]: JsonValue };
@@ -124,7 +125,10 @@ describe("FrozenArgs", () => {
       fc.property(
         fc
           .tuple(jsonValue, jsonValue)
-          .filter(([left, right]) => canonicalJSON(left) !== canonicalJSON(right)),
+          .filter(
+            ([left, right]) =>
+              canonicalJsonModule.canonicalJSON(left) !== canonicalJsonModule.canonicalJSON(right),
+          ),
         ([left, right]) => {
           expect(FrozenArgs.freeze(left).hash).not.toBe(FrozenArgs.freeze(right).hash);
         },
@@ -197,5 +201,17 @@ describe("FrozenArgs", () => {
   it("rejects strings containing lone surrogates", () => {
     expect(() => FrozenArgs.freeze("\ud800")).toThrow(/surrogate/);
     expect(() => FrozenArgs.freeze({ x: "\udc00" })).toThrow(/surrogate/);
+  });
+
+  it("rejects oversized inputs before canonicalizing", () => {
+    const canonicalSpy = vi.spyOn(canonicalJsonModule, "canonicalJSON");
+    try {
+      expect(() => FrozenArgs.freeze("x".repeat(MAX_FROZEN_ARGS_BYTES * 2))).toThrow(
+        /FrozenArgs input bytes.*exceeds budget/,
+      );
+      expect(canonicalSpy).not.toHaveBeenCalled();
+    } finally {
+      canonicalSpy.mockRestore();
+    }
   });
 });

@@ -6,16 +6,7 @@
   "type": "module",
   "main": "./src/index.ts",
   "exports": {
-    ".": "./src/index.ts",
-    "./brand": "./src/brand.ts",
-    "./canonical-json": "./src/canonical-json.ts",
-    "./sha256": "./src/sha256.ts",
-    "./frozen-args": "./src/frozen-args.ts",
-    "./sanitized-string": "./src/sanitized-string.ts",
-    "./receipt": "./src/receipt.ts",
-    "./audit-event": "./src/audit-event.ts",
-    "./event-lsn": "./src/event-lsn.ts",
-    "./ipc": "./src/ipc.ts"
+    ".": "./src/index.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

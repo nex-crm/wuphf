@@ -5,6 +5,7 @@
 // The validator is hand-rolled — no third-party schema lib at runtime — so
 // the moat boundary (RFC §6) sits behind code we own end-to-end.
 
+import { validateReceiptBudget } from "./budgets.ts";
 import { FrozenArgs } from "./frozen-args.ts";
 import { APPROVAL_CLAIMS_KEYS, SIGNED_APPROVAL_TOKEN_KEYS } from "./ipc-shared.ts";
 import {
@@ -223,6 +224,14 @@ function validateReceiptWithContext(
 ): ReceiptValidationResult {
   try {
     const errors: ReceiptValidationError[] = [];
+    if (!isRecord(input)) {
+      addError(errors, "", "must be an object");
+      return { ok: false, errors };
+    }
+    const budget = validateReceiptBoundaryBudget(input);
+    if (budget !== undefined && !budget.ok) {
+      return { ok: false, errors: [{ path: "", message: budget.reason }] };
+    }
     validateReceiptSnapshot(input, "", errors, context);
     return errors.length === 0 ? { ok: true } : { ok: false, errors };
   } catch (err) {
@@ -240,6 +249,17 @@ function validateReceiptWithContext(
 
 export function isReceiptSnapshot(input: unknown): input is ReceiptSnapshot {
   return validateReceipt(input).ok;
+}
+
+function validateReceiptBoundaryBudget(
+  input: Readonly<Record<string, unknown>>,
+): ReturnType<typeof validateReceiptBudget> | undefined {
+  try {
+    return validateReceiptBudget(input as unknown as ReceiptSnapshot);
+  } catch {
+    // Malformed in-budget receipts still need field-scoped shape errors below.
+    return undefined;
+  }
 }
 
 export function validateKnownKeys(
