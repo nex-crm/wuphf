@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { handleGetAppVersion } from "../src/main/ipc/get-app-version.ts";
 import { handleGetBrokerStatus } from "../src/main/ipc/get-broker-status.ts";
-import { handleGetPlatform } from "../src/main/ipc/get-platform.ts";
+import { handleGetPlatform, narrowPlatform } from "../src/main/ipc/get-platform.ts";
 import { handleOpenExternal } from "../src/main/ipc/open-external.ts";
 import { handleShowItemInFolder } from "../src/main/ipc/show-item-in-folder.ts";
 
@@ -120,6 +120,26 @@ describe("getAppVersion handler", () => {
 });
 
 describe("getPlatform handler", () => {
+  it.each([
+    "aix",
+    "android",
+    "darwin",
+    "freebsd",
+    "haiku",
+    "linux",
+    "openbsd",
+    "sunos",
+    "win32",
+    "cygwin",
+    "netbsd",
+  ] satisfies readonly NodeJS.Platform[])("narrows supported Node platform %s", (platform) => {
+    expect(narrowPlatform(platform)).toBe(platform);
+  });
+
+  it("throws for platforms outside Node's current typed union", () => {
+    expect(() => narrowPlatform("plan9" as NodeJS.Platform)).toThrow("Unknown platform: plan9");
+  });
+
   it("rejects malformed or non-empty payloads without throwing", () => {
     expect(handleGetPlatform(event, undefined)).toEqual({
       ok: false,

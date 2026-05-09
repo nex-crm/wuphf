@@ -13,7 +13,28 @@ export function handleGetPlatform(
   }
 
   return {
-    platform: process.platform as DesktopPlatform,
+    platform: narrowPlatform(process.platform),
     arch: process.arch,
   };
+}
+
+export function narrowPlatform(platform: NodeJS.Platform): DesktopPlatform {
+  switch (platform) {
+    case "aix":
+    case "android":
+    case "darwin":
+    case "freebsd":
+    case "haiku":
+    case "linux":
+    case "openbsd":
+    case "sunos":
+    case "win32":
+    case "cygwin":
+    case "netbsd":
+      return platform;
+    default: {
+      const exhaustive: never = platform;
+      throw new Error(`Unknown platform: ${String(exhaustive)}`);
+    }
+  }
 }
