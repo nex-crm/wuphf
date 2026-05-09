@@ -16,7 +16,12 @@
 //      Both checks must pass; the Host check alone is not the full gate.
 
 import type { Brand } from "./brand.ts";
-import { validateApprovalTokenLifetime } from "./budgets.ts";
+import {
+  MAX_APPROVAL_SIGNATURE_BYTES,
+  MAX_WEBAUTHN_ASSERTION_BYTES,
+  validateApprovalTokenLifetime,
+} from "./budgets.ts";
+import { canonicalJSON } from "./canonical-json.ts";
 import { APPROVAL_CLAIMS_KEYS, SIGNED_APPROVAL_TOKEN_KEYS } from "./ipc-shared.ts";
 import {
   type ApprovalClaims,
@@ -55,6 +60,8 @@ export type KeychainHandleId = Brand<string, "KeychainHandleId">;
 const API_TOKEN_RE = /^[A-Za-z0-9._~+/-]{16,512}$/;
 const REQUEST_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const KEYCHAIN_HANDLE_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+const TEXT_ENCODER = new TextEncoder();
 
 export function asBrokerPort(n: number): BrokerPort {
   if (!Number.isInteger(n) || n < 1 || n > 65535) {
@@ -182,6 +189,7 @@ export function apiBootstrapFromJson(value: unknown): ApiBootstrap {
   assertKnownKeys(record, "apiBootstrap", API_BOOTSTRAP_WIRE_KEYS);
   const token = requiredStringField(record, "token", "apiBootstrap.token");
   const brokerUrl = requiredStringField(record, "broker_url", "apiBootstrap.broker_url");
+  assertApiBootstrapBrokerUrl(brokerUrl);
   return { token: asApiToken(token), brokerUrl };
 }
 
@@ -194,6 +202,23 @@ export function apiBootstrapFromJson(value: unknown): ApiBootstrap {
  */
 export function apiBootstrapToJson(bootstrap: ApiBootstrap): Readonly<Record<string, string>> {
   return { token: bootstrap.token as string, broker_url: bootstrap.brokerUrl };
+}
+
+function assertApiBootstrapBrokerUrl(brokerUrl: string): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(brokerUrl);
+  } catch {
+    throw new Error("apiBootstrap.broker_url: must be http://<loopback>:<port>");
+  }
+  if (
+    parsed.protocol !== "http:" ||
+    parsed.port === "" ||
+    !isAllowedLoopbackHost(parsed.hostname) ||
+    !isBrokerPort(Number(parsed.port))
+  ) {
+    throw new Error("apiBootstrap.broker_url: must be http://<loopback>:<port>");
+  }
 }
 
 export interface BrokerHttpRequest<TBody> {
@@ -245,6 +270,86 @@ const APPROVAL_SUBMIT_REQUEST_KEYS_TUPLE = [
 const APPROVAL_SUBMIT_REQUEST_KEYS: ReadonlySet<string> = new Set(
   APPROVAL_SUBMIT_REQUEST_KEYS_TUPLE,
 );
+const APPROVAL_SUBMIT_REQUEST_WIRE_KEYS: ReadonlySet<string> = new Set([
+  "receipt_id",
+  "approval_token",
+  "idempotency_key",
+]);
+const SIGNED_APPROVAL_TOKEN_WIRE_KEYS: ReadonlySet<string> = new Set([
+  "claims",
+  "algorithm",
+  "signer_key_id",
+  "signature",
+]);
+const APPROVAL_CLAIMS_WIRE_KEYS: ReadonlySet<string> = new Set([
+  "signer_identity",
+  "role",
+  "receipt_id",
+  "write_id",
+  "frozen_args_hash",
+  "risk_class",
+  "issued_at",
+  "expires_at",
+  "webauthn_assertion",
+]);
+
+export function approvalClaimsToSigningBytes(claims: ApprovalClaims): Uint8Array {
+  if (!isRecord(claims)) {
+    throw new Error("approvalClaimsToSigningBytes: claims must be an object");
+  }
+  const shape = validateApprovalClaimsShape(claims);
+  if (!shape.ok) {
+    throw new Error(`approvalClaimsToSigningBytes: ${shape.reason}`);
+  }
+  return TEXT_ENCODER.encode(canonicalJSON(approvalClaimsToSigningProjection(claims)));
+}
+
+export function approvalSubmitRequestFromJson(value: unknown): ApprovalSubmitRequest {
+  const record = requireRecord(value, "approvalSubmitRequest");
+  const usesSnakeCase = hasOwn(record, "receipt_id") || hasOwn(record, "approval_token");
+  assertKnownKeys(
+    record,
+    "approvalSubmitRequest",
+    usesSnakeCase ? APPROVAL_SUBMIT_REQUEST_WIRE_KEYS : APPROVAL_SUBMIT_REQUEST_KEYS,
+  );
+
+  const receiptId = receiptIdFromJson(
+    requiredStringJsonField(
+      record,
+      usesSnakeCase ? "receipt_id" : "receiptId",
+      usesSnakeCase ? "approvalSubmitRequest.receipt_id" : "approvalSubmitRequest.receiptId",
+    ),
+    usesSnakeCase ? "approvalSubmitRequest.receipt_id" : "approvalSubmitRequest.receiptId",
+  );
+  const approvalToken = signedApprovalTokenFromJson(
+    requiredJsonField(
+      record,
+      usesSnakeCase ? "approval_token" : "approvalToken",
+      usesSnakeCase
+        ? "approvalSubmitRequest.approval_token"
+        : "approvalSubmitRequest.approvalToken",
+    ),
+    usesSnakeCase ? "approvalSubmitRequest.approval_token" : "approvalSubmitRequest.approvalToken",
+  );
+  const idempotencyKey = idempotencyKeyFromJson(
+    requiredStringJsonField(
+      record,
+      usesSnakeCase ? "idempotency_key" : "idempotencyKey",
+      usesSnakeCase
+        ? "approvalSubmitRequest.idempotency_key"
+        : "approvalSubmitRequest.idempotencyKey",
+    ),
+    usesSnakeCase
+      ? "approvalSubmitRequest.idempotency_key"
+      : "approvalSubmitRequest.idempotencyKey",
+  );
+  const request: ApprovalSubmitRequest = { receiptId, approvalToken, idempotencyKey };
+  const validation = validateApprovalSubmitRequest(request);
+  if (!validation.ok) {
+    throw new Error(`approvalSubmitRequest: ${validation.reason}`);
+  }
+  return request;
+}
 
 /**
  * Validate the wire shape of an `ApprovalSubmitRequest`: rejects unknown
@@ -341,11 +446,16 @@ function validateApprovalTokenShape(
 
   const signature = requiredField(token, "signature", "approvalToken.signature");
   if (!signature.ok) return signature;
-  if (
-    typeof signature.value !== "string" ||
-    signature.value.length === 0 ||
-    !BASE64_RE.test(signature.value)
-  ) {
+  if (typeof signature.value !== "string") {
+    return { ok: false, reason: "approvalToken.signature must be a non-empty base64 string" };
+  }
+  if (signature.value.length > MAX_APPROVAL_SIGNATURE_BYTES) {
+    return {
+      ok: false,
+      reason: "approvalToken.signature exceeds MAX_APPROVAL_SIGNATURE_BYTES",
+    };
+  }
+  if (signature.value.length === 0 || !BASE64_RE.test(signature.value)) {
     return { ok: false, reason: "approvalToken.signature must be a non-empty base64 string" };
   }
 
@@ -439,6 +549,16 @@ function validateApprovalClaimsShape(
     };
   }
   if (
+    typeof webauthnAssertionValue === "string" &&
+    utf8ByteLengthUpTo(webauthnAssertionValue, MAX_WEBAUTHN_ASSERTION_BYTES) >
+      MAX_WEBAUTHN_ASSERTION_BYTES
+  ) {
+    return {
+      ok: false,
+      reason: "approvalToken.claims.webauthnAssertion exceeds MAX_WEBAUTHN_ASSERTION_BYTES",
+    };
+  }
+  if (
     (riskClassValue === "high" || riskClassValue === "critical") &&
     (typeof webauthnAssertionValue !== "string" || webauthnAssertionValue.length === 0)
   ) {
@@ -476,6 +596,217 @@ function validateApprovalClaimsShape(
   }
 
   return { ok: true };
+}
+
+function approvalClaimsToSigningProjection(claims: ApprovalClaims): Record<string, string> {
+  return {
+    signerIdentity: claims.signerIdentity,
+    role: claims.role,
+    receiptId: claims.receiptId,
+    ...(claims.writeId === undefined ? {} : { writeId: claims.writeId }),
+    frozenArgsHash: claims.frozenArgsHash,
+    riskClass: claims.riskClass,
+    issuedAt: claims.issuedAt.toISOString(),
+    expiresAt: claims.expiresAt.toISOString(),
+    ...(claims.webauthnAssertion === undefined
+      ? {}
+      : { webauthnAssertion: claims.webauthnAssertion }),
+  };
+}
+
+function signedApprovalTokenFromJson(value: unknown, path: string): SignedApprovalToken {
+  const record = requireRecord(value, path);
+  const usesSnakeCase = hasOwn(record, "signer_key_id");
+  assertKnownKeys(
+    record,
+    path,
+    usesSnakeCase ? SIGNED_APPROVAL_TOKEN_WIRE_KEYS : SIGNED_APPROVAL_TOKEN_KEYS,
+  );
+  return {
+    claims: approvalClaimsFromJson(requiredJsonField(record, "claims", `${path}.claims`), [
+      path,
+      "claims",
+    ]),
+    algorithm: requiredLiteralJsonField(
+      record,
+      "algorithm",
+      `${path}.algorithm`,
+      APPROVAL_TOKEN_ALGORITHM_VALUES,
+    ),
+    signerKeyId: requiredStringJsonField(
+      record,
+      usesSnakeCase ? "signer_key_id" : "signerKeyId",
+      usesSnakeCase ? `${path}.signer_key_id` : `${path}.signerKeyId`,
+    ),
+    signature: requiredStringJsonField(record, "signature", `${path}.signature`),
+  };
+}
+
+function approvalClaimsFromJson(value: unknown, path: readonly string[]): ApprovalClaims {
+  const pathString = path.join(".");
+  const record = requireRecord(value, pathString);
+  const usesSnakeCase =
+    hasOwn(record, "signer_identity") ||
+    hasOwn(record, "receipt_id") ||
+    hasOwn(record, "issued_at") ||
+    hasOwn(record, "expires_at");
+  assertKnownKeys(
+    record,
+    pathString,
+    usesSnakeCase ? APPROVAL_CLAIMS_WIRE_KEYS : APPROVAL_CLAIMS_KEYS,
+  );
+  const writeId = optionalStringJsonField(
+    record,
+    usesSnakeCase ? "write_id" : "writeId",
+    usesSnakeCase ? `${pathString}.write_id` : `${pathString}.writeId`,
+  );
+  const webauthnAssertion = optionalStringJsonField(
+    record,
+    usesSnakeCase ? "webauthn_assertion" : "webauthnAssertion",
+    usesSnakeCase ? `${pathString}.webauthn_assertion` : `${pathString}.webauthnAssertion`,
+  );
+  return {
+    signerIdentity: requiredStringJsonField(
+      record,
+      usesSnakeCase ? "signer_identity" : "signerIdentity",
+      usesSnakeCase ? `${pathString}.signer_identity` : `${pathString}.signerIdentity`,
+    ),
+    role: requiredLiteralJsonField(record, "role", `${pathString}.role`, APPROVAL_ROLE_VALUES),
+    receiptId: receiptIdFromJson(
+      requiredStringJsonField(
+        record,
+        usesSnakeCase ? "receipt_id" : "receiptId",
+        usesSnakeCase ? `${pathString}.receipt_id` : `${pathString}.receiptId`,
+      ),
+      usesSnakeCase ? `${pathString}.receipt_id` : `${pathString}.receiptId`,
+    ),
+    ...(writeId === undefined
+      ? {}
+      : {
+          writeId: writeIdFromJson(
+            writeId,
+            usesSnakeCase ? `${pathString}.write_id` : `${pathString}.writeId`,
+          ),
+        }),
+    frozenArgsHash: sha256HexFromJson(
+      requiredStringJsonField(
+        record,
+        usesSnakeCase ? "frozen_args_hash" : "frozenArgsHash",
+        usesSnakeCase ? `${pathString}.frozen_args_hash` : `${pathString}.frozenArgsHash`,
+      ),
+      usesSnakeCase ? `${pathString}.frozen_args_hash` : `${pathString}.frozenArgsHash`,
+    ),
+    riskClass: requiredLiteralJsonField(
+      record,
+      usesSnakeCase ? "risk_class" : "riskClass",
+      usesSnakeCase ? `${pathString}.risk_class` : `${pathString}.riskClass`,
+      RISK_CLASS_VALUES,
+    ),
+    issuedAt: requiredIsoDateJsonField(
+      record,
+      usesSnakeCase ? "issued_at" : "issuedAt",
+      usesSnakeCase ? `${pathString}.issued_at` : `${pathString}.issuedAt`,
+    ),
+    expiresAt: requiredIsoDateJsonField(
+      record,
+      usesSnakeCase ? "expires_at" : "expiresAt",
+      usesSnakeCase ? `${pathString}.expires_at` : `${pathString}.expiresAt`,
+    ),
+    ...(webauthnAssertion === undefined ? {} : { webauthnAssertion }),
+  };
+}
+
+function requiredJsonField(record: Record<string, unknown>, key: string, path: string): unknown {
+  const result = requiredField(record, key, path);
+  if (!result.ok) {
+    throw new Error(result.reason);
+  }
+  return result.value;
+}
+
+function requiredStringJsonField(
+  record: Record<string, unknown>,
+  key: string,
+  path: string,
+): string {
+  const value = requiredJsonField(record, key, path);
+  if (typeof value !== "string") {
+    throw new Error(`${path}: must be a string`);
+  }
+  return value;
+}
+
+function optionalStringJsonField(
+  record: Record<string, unknown>,
+  key: string,
+  path: string,
+): string | undefined {
+  const result = optionalField(record, key, path);
+  if (!result.ok) {
+    throw new Error(result.reason);
+  }
+  if (result.value === undefined) return undefined;
+  if (typeof result.value !== "string") {
+    throw new Error(`${path}: must be a string`);
+  }
+  return result.value;
+}
+
+function requiredLiteralJsonField<const T extends string>(
+  record: Record<string, unknown>,
+  key: string,
+  path: string,
+  allowed: readonly T[],
+): T {
+  const value = requiredStringJsonField(record, key, path);
+  if (!isLiteralValue(value, allowed)) {
+    throw new Error(`${path}: must be one of ${allowed.join(", ")}`);
+  }
+  return value;
+}
+
+function requiredIsoDateJsonField(
+  record: Record<string, unknown>,
+  key: string,
+  path: string,
+): Date {
+  const value = requiredStringJsonField(record, key, path);
+  if (!ISO_DATE_RE.test(value)) {
+    throw new Error(`${path}: must be an ISO 8601 string`);
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime()) || date.toISOString() !== value) {
+    throw new Error(`${path}: must be a valid ISO 8601 instant`);
+  }
+  return date;
+}
+
+function receiptIdFromJson(value: string, path: string): ReceiptId {
+  if (!isReceiptId(value)) {
+    throw new Error(`${path}: must be an uppercase ULID ReceiptId`);
+  }
+  return value;
+}
+
+function idempotencyKeyFromJson(value: string, path: string): IdempotencyKey {
+  if (!isIdempotencyKey(value)) {
+    throw new Error(`${path}: must match /^[A-Za-z0-9_-]{1,128}$/`);
+  }
+  return value;
+}
+
+function writeIdFromJson(value: string, path: string): NonNullable<ApprovalClaims["writeId"]> {
+  if (!isWriteId(value)) {
+    throw new Error(`${path}: must be a valid WriteId`);
+  }
+  return value;
+}
+
+function sha256HexFromJson(value: string, path: string): ApprovalClaims["frozenArgsHash"] {
+  if (!isSha256Hex(value)) {
+    throw new Error(`${path}: must be a sha256 hex digest`);
+  }
+  return value;
 }
 
 function knownKeysResult(
@@ -530,6 +861,34 @@ function isValidDate(value: unknown): value is Date {
   return value instanceof Date && !Number.isNaN(value.getTime());
 }
 
+function utf8ByteLengthUpTo(value: string, budget: number): number {
+  if (value.length > budget) return budget + 1;
+
+  let bytes = 0;
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i);
+    if (code <= 0x7f) {
+      bytes += 1;
+    } else if (code <= 0x7ff) {
+      bytes += 2;
+    } else if (code >= 0xd800 && code <= 0xdbff && i + 1 < value.length) {
+      const next = value.charCodeAt(i + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        bytes += 4;
+        i += 1;
+      } else {
+        bytes += 3;
+      }
+    } else {
+      bytes += 3;
+    }
+
+    if (bytes > budget) return budget + 1;
+  }
+
+  return bytes;
+}
+
 /**
  * Approval submission response. `executed` carries the same `WriteResult` as
  * the receipt's external write so callers can switch on a single shape across
@@ -574,6 +933,21 @@ export type StreamEventKind =
   | "tool.call.completed"
   | "backpressure";
 
+export const STREAM_EVENT_KIND_VALUES = [
+  "receipt.created",
+  "receipt.updated",
+  "receipt.finalized",
+  "approval.requested",
+  "approval.decided",
+  "cost.exceeded",
+  "agent.online",
+  "agent.offline",
+  "agent.message",
+  "tool.call.started",
+  "tool.call.completed",
+  "backpressure",
+] as const satisfies readonly StreamEventKind[];
+
 export interface StreamEvent<TPayload = unknown> {
   readonly id: string;
   readonly kind: StreamEventKind;
@@ -603,6 +977,24 @@ export type WsFrame =
   | { readonly t: "exit"; readonly code: number | null; readonly signal: string | null }
   | { readonly t: "ping" }
   | { readonly t: "pong" };
+
+export const WS_FRAME_TYPE_VALUES = [
+  "stdout",
+  "stderr",
+  "stdin",
+  "resize",
+  "exit",
+  "ping",
+  "pong",
+] as const satisfies readonly WsFrame["t"][];
+
+export function isStreamEventKind(value: unknown): value is StreamEventKind {
+  return isLiteralValue(value, STREAM_EVENT_KIND_VALUES);
+}
+
+export function isWsFrameType(value: unknown): value is WsFrame["t"] {
+  return isLiteralValue(value, WS_FRAME_TYPE_VALUES);
+}
 
 // ---------- DNS-rebinding guard (declared as a contract, broker enforces) ----------
 

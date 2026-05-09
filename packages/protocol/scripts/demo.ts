@@ -16,6 +16,8 @@ import {
   type AuditEventRecord,
   apiBootstrapFromJson,
   apiBootstrapToJson,
+  approvalClaimsToSigningBytes,
+  approvalSubmitRequestFromJson,
   asAgentSlug,
   asApiToken,
   asApprovalId,
@@ -33,13 +35,18 @@ import {
   INITIAL_VERIFIER_STATE,
   isAllowedLoopbackHost,
   isLoopbackRemoteAddress,
+  isStreamEventKind,
+  isWsFrameType,
   lsnFromV1Number,
+  MAX_APPROVAL_SIGNATURE_BYTES,
   MAX_AUDIT_CHAIN_BATCH_SIZE,
   MAX_TOOL_CALLS_PER_RECEIPT,
+  MAX_WEBAUTHN_ASSERTION_BYTES,
   type ReceiptSnapshot,
   receiptFromJson,
   receiptToJson,
   SanitizedString,
+  STREAM_EVENT_KIND_VALUES,
   serializeAuditEventRecordForHash,
   sha256Hex,
   validateApprovalSubmitRequest,
@@ -47,6 +54,7 @@ import {
   validateReceiptBudget,
   verifyChain,
   verifyChainIncremental,
+  WS_FRAME_TYPE_VALUES,
 } from "../src/index.ts";
 
 const ANSI = {
@@ -61,6 +69,7 @@ const ANSI = {
 
 let passed = 0;
 let failed = 0;
+const textDecoder = new TextDecoder();
 
 function header(num: number, title: string): void {
   console.log("");
@@ -522,6 +531,75 @@ expectEqual(
   true,
 );
 expectEqual("Remote with port rejected", isLoopbackRemoteAddress("127.0.0.1:1234"), false);
+
+// ──────────────────────────────────────────────────────────────────────────
+header(17, "IPC wire codecs pin approval signing bytes and runtime guards");
+// ──────────────────────────────────────────────────────────────────────────
+const signingBytes = textDecoder.decode(approvalClaimsToSigningBytes(validToken.claims));
+expectEqual(
+  "approval signing bytes include ISO issuedAt",
+  signingBytes.includes('"issuedAt":"2026-05-08T18:00:00.000Z"'),
+  true,
+);
+const approvalSubmitWire = {
+  receiptId: validReceipt.id,
+  idempotencyKey: "submit-01",
+  approvalToken: {
+    ...validToken,
+    claims: {
+      ...validToken.claims,
+      issuedAt: validToken.claims.issuedAt.toISOString(),
+      expiresAt: validToken.claims.expiresAt.toISOString(),
+    },
+  },
+};
+const decodedSubmit = approvalSubmitRequestFromJson(approvalSubmitWire);
+expectEqual(
+  "approvalSubmitRequestFromJson parses Date claims",
+  decodedSubmit.approvalToken.claims.issuedAt instanceof Date,
+  true,
+);
+expectEqual("decoded submit request validates", validateApprovalSubmitRequest(decodedSubmit), {
+  ok: true,
+});
+expectEqual(
+  "oversized signature rejected before regex",
+  validateApprovalSubmitRequest({
+    ...goodReq,
+    approvalToken: { ...validToken, signature: "A".repeat(MAX_APPROVAL_SIGNATURE_BYTES + 1) },
+  }),
+  { ok: false, reason: "approvalToken.signature exceeds MAX_APPROVAL_SIGNATURE_BYTES" },
+);
+expectEqual(
+  "oversized WebAuthn assertion rejected",
+  validateApprovalSubmitRequest({
+    ...goodReq,
+    approvalToken: {
+      ...validToken,
+      claims: {
+        ...validToken.claims,
+        riskClass: "high",
+        webauthnAssertion: "x".repeat(MAX_WEBAUTHN_ASSERTION_BYTES + 1),
+      },
+    },
+  }),
+  {
+    ok: false,
+    reason: "approvalToken.claims.webauthnAssertion exceeds MAX_WEBAUTHN_ASSERTION_BYTES",
+  },
+);
+expectEqual(
+  "stream event guard accepts tuple values",
+  STREAM_EVENT_KIND_VALUES.every(isStreamEventKind),
+  true,
+);
+expectEqual(
+  "stream event guard rejects unknown value",
+  isStreamEventKind("receipt.deleted"),
+  false,
+);
+expectEqual("WS frame guard accepts tuple values", WS_FRAME_TYPE_VALUES.every(isWsFrameType), true);
+expectEqual("WS frame guard rejects unknown value", isWsFrameType("close"), false);
 
 // ──────────────────────────────────────────────────────────────────────────
 console.log("");

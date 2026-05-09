@@ -1,11 +1,19 @@
+import { readFileSync } from "node:fs";
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
-import { MAX_APPROVAL_TOKEN_LIFETIME_MS } from "../src/budgets.ts";
+import {
+  MAX_APPROVAL_SIGNATURE_BYTES,
+  MAX_APPROVAL_TOKEN_LIFETIME_MS,
+  MAX_WEBAUTHN_ASSERTION_BYTES,
+} from "../src/budgets.ts";
+import { canonicalJSON } from "../src/canonical-json.ts";
 import {
   ALLOWED_LOOPBACK_HOSTS,
   type ApprovalSubmitResponse,
   apiBootstrapFromJson,
   apiBootstrapToJson,
+  approvalClaimsToSigningBytes,
+  approvalSubmitRequestFromJson,
   asApiToken,
   asBrokerPort,
   asKeychainHandleId,
@@ -17,16 +25,26 @@ import {
   isKeychainHandleId,
   isLoopbackRemoteAddress,
   isRequestId,
+  isStreamEventKind,
+  isWsFrameType,
+  STREAM_EVENT_KIND_VALUES,
+  type StreamEventKind,
   validateApprovalSubmitRequest,
+  WS_FRAME_TYPE_VALUES,
+  type WsFrame,
 } from "../src/ipc.ts";
 import {
+  type ApprovalClaims,
   asIdempotencyKey,
   asReceiptId,
   asWriteId,
   type ReceiptId,
+  type RiskClass,
   type SignedApprovalToken,
 } from "../src/receipt.ts";
-import { sha256Hex } from "../src/sha256.ts";
+import { asSha256Hex, sha256Hex } from "../src/sha256.ts";
+
+const TEXT_DECODER = new TextDecoder();
 
 describe("isAllowedLoopbackHost", () => {
   it("accepts canonical loopback hosts", () => {
@@ -716,6 +734,276 @@ describe("approval submission IPC", () => {
     ).toEqual({ ok: true });
   });
 
+  it("produces deterministic approval-claims signing bytes over ISO date projections", () => {
+    const baseIssuedAt = new Date("2026-05-08T18:00:00.000Z");
+
+    fc.assert(
+      fc.property(fc.integer({ min: 0, max: 999 }), (issuedMs) => {
+        const issuedAt = new Date(baseIssuedAt.getTime() + issuedMs);
+        const expiresAt = new Date(issuedAt.getTime() + 60_000);
+        const claims: ApprovalClaims = {
+          ...approvalTokenFor(asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAV")).claims,
+          issuedAt,
+          expiresAt,
+        };
+        const expected = canonicalJSON({
+          signerIdentity: claims.signerIdentity,
+          role: claims.role,
+          receiptId: claims.receiptId,
+          frozenArgsHash: claims.frozenArgsHash,
+          riskClass: claims.riskClass,
+          issuedAt: issuedAt.toISOString(),
+          expiresAt: expiresAt.toISOString(),
+        });
+
+        expect(signingBytesText(claims)).toBe(expected);
+        expect(signingBytesText(claims)).toBe(signingBytesText(claims));
+      }),
+      { numRuns: 50 },
+    );
+  });
+
+  it("matches the approval-claims golden signing vector", () => {
+    const vector = approvalClaimsVectorNamed("approval_claims_high_write_bound");
+
+    expect(signingBytesText(approvalClaimsFromVector(vector))).toBe(vector.expected.signingBytes);
+  });
+
+  it("decodes approval submit JSON with ISO-string dates into the runtime Date shape", () => {
+    const receiptId = asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAV");
+    const token = approvalTokenFor(receiptId);
+    const wire = approvalSubmitRequestWireFor(receiptId, token);
+
+    const decoded = approvalSubmitRequestFromJson(wire);
+
+    expect(decoded.approvalToken.claims.issuedAt).toStrictEqual(token.claims.issuedAt);
+    expect(decoded.approvalToken.claims.expiresAt).toStrictEqual(token.claims.expiresAt);
+    expect(validateApprovalSubmitRequest(decoded)).toEqual({ ok: true });
+    expect(signingBytesText(decoded.approvalToken.claims)).toBe(signingBytesText(token.claims));
+  });
+
+  it("decodes snake_case approval submit wire JSON into the camelCase runtime shape", () => {
+    const receiptId = asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAV");
+    const token = approvalTokenFor(receiptId);
+
+    const decoded = approvalSubmitRequestFromJson(
+      snakeCaseApprovalSubmitRequestWireFor(receiptId, token),
+    );
+
+    expect(decoded).toMatchObject({
+      receiptId,
+      idempotencyKey: "approval-submit-01",
+      approvalToken: {
+        signerKeyId: token.signerKeyId,
+        claims: {
+          signerIdentity: token.claims.signerIdentity,
+          receiptId,
+          issuedAt: token.claims.issuedAt,
+        },
+      },
+    });
+    expect(validateApprovalSubmitRequest(decoded)).toEqual({ ok: true });
+  });
+
+  it("decodes approval submit JSON with optional writeId claims", () => {
+    const receiptId = asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAV");
+    const token = approvalTokenFor(receiptId);
+    const writeId = asWriteId("write_01");
+    const wire = approvalSubmitRequestWireFor(receiptId, {
+      ...token,
+      claims: {
+        ...token.claims,
+        writeId,
+      },
+    });
+
+    expect(approvalSubmitRequestFromJson(wire).approvalToken.claims.writeId).toBe(writeId);
+  });
+
+  it("rejects approval submit JSON optional claim accessors without invoking getters", () => {
+    const receiptId = asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAV");
+    const wire = approvalSubmitRequestWireFor(receiptId, approvalTokenFor(receiptId));
+    let getterInvoked = false;
+    Object.defineProperty(wire.approvalToken.claims, "writeId", {
+      enumerable: true,
+      get() {
+        getterInvoked = true;
+        return "write_01";
+      },
+    });
+
+    expect(() => approvalSubmitRequestFromJson(wire)).toThrow(/writeId.*data property/);
+    expect(getterInvoked).toBe(false);
+  });
+
+  it("rejects malformed approval submit JSON dates", () => {
+    const receiptId = asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAV");
+    const wire = approvalSubmitRequestWireFor(receiptId, approvalTokenFor(receiptId));
+    const token = wire.approvalToken;
+    token.claims.issuedAt = "2026-05-08T18:00:00Z";
+
+    expect(() => approvalSubmitRequestFromJson(wire)).toThrow(/issuedAt.*ISO 8601/);
+
+    const invalidInstant = approvalSubmitRequestWireFor(receiptId, approvalTokenFor(receiptId));
+    invalidInstant.approvalToken.claims.expiresAt = "2026-02-30T18:00:00.000Z";
+    expect(() => approvalSubmitRequestFromJson(invalidInstant)).toThrow(/expiresAt.*valid/);
+  });
+
+  it("rejects missing approval submit JSON fields", () => {
+    const receiptId = asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAV");
+    const missingReceiptId = approvalSubmitRequestWireFor(receiptId, approvalTokenFor(receiptId));
+    Reflect.deleteProperty(missingReceiptId, "receiptId");
+    expect(() => approvalSubmitRequestFromJson(missingReceiptId)).toThrow(/receiptId is required/);
+
+    const missingClaimDate = approvalSubmitRequestWireFor(receiptId, approvalTokenFor(receiptId));
+    Reflect.deleteProperty(missingClaimDate.approvalToken.claims, "issuedAt");
+    expect(() => approvalSubmitRequestFromJson(missingClaimDate)).toThrow(/issuedAt is required/);
+  });
+
+  it.each([
+    {
+      name: "invalid token algorithm",
+      mutate: (wire: ApprovalSubmitRequestWire) => {
+        wire.approvalToken.algorithm = "rsa";
+      },
+      reason: /algorithm.*one of/,
+    },
+    {
+      name: "invalid request receiptId",
+      mutate: (wire: ApprovalSubmitRequestWire) => {
+        wire.receiptId = "bad-receipt";
+      },
+      reason: /receiptId.*uppercase ULID/,
+    },
+    {
+      name: "invalid idempotencyKey",
+      mutate: (wire: ApprovalSubmitRequestWire) => {
+        wire.idempotencyKey = "bad/key";
+      },
+      reason: /idempotencyKey.*match/,
+    },
+    {
+      name: "invalid optional writeId",
+      mutate: (wire: ApprovalSubmitRequestWire) => {
+        wire.approvalToken.claims.writeId = "bad write";
+      },
+      reason: /writeId.*valid WriteId/,
+    },
+    {
+      name: "invalid frozenArgsHash",
+      mutate: (wire: ApprovalSubmitRequestWire) => {
+        wire.approvalToken.claims.frozenArgsHash = "not-a-sha";
+      },
+      reason: /frozenArgsHash.*sha256/,
+    },
+    {
+      name: "non-string optional WebAuthn assertion",
+      mutate: (wire: ApprovalSubmitRequestWire) => {
+        wire.approvalToken.claims.webauthnAssertion = 42;
+      },
+      reason: /webauthnAssertion.*string/,
+    },
+  ])("rejects approval submit JSON with $name", ({ mutate, reason }) => {
+    const receiptId = asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAV");
+    const wire = approvalSubmitRequestWireFor(receiptId, approvalTokenFor(receiptId));
+
+    mutate(wire);
+
+    expect(() => approvalSubmitRequestFromJson(wire)).toThrow(reason);
+  });
+
+  it("enforces approval signature length before base64 regex validation", () => {
+    const receiptId = asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAV");
+    const token = approvalTokenFor(receiptId);
+
+    expect(
+      validateApprovalSubmitRequest(
+        approvalRequestFor(receiptId, {
+          ...token,
+          signature: "A".repeat(MAX_APPROVAL_SIGNATURE_BYTES),
+        }),
+      ),
+    ).toEqual({ ok: true });
+
+    expect(
+      validateApprovalSubmitRequest(
+        approvalRequestFor(receiptId, {
+          ...token,
+          signature: "A".repeat(MAX_APPROVAL_SIGNATURE_BYTES + 1),
+        }),
+      ),
+    ).toEqual({
+      ok: false,
+      reason: "approvalToken.signature exceeds MAX_APPROVAL_SIGNATURE_BYTES",
+    });
+  });
+
+  it("enforces WebAuthn assertion length before high-risk non-empty validation", () => {
+    const receiptId = asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAV");
+    const token = approvalTokenFor(receiptId);
+    const highRiskClaims = {
+      ...token.claims,
+      riskClass: "high" as const,
+    };
+
+    expect(
+      validateApprovalSubmitRequest(
+        approvalRequestFor(receiptId, {
+          ...token,
+          claims: {
+            ...highRiskClaims,
+            webauthnAssertion: "x".repeat(MAX_WEBAUTHN_ASSERTION_BYTES),
+          },
+        }),
+      ),
+    ).toEqual({ ok: true });
+
+    expect(
+      validateApprovalSubmitRequest(
+        approvalRequestFor(receiptId, {
+          ...token,
+          claims: {
+            ...highRiskClaims,
+            webauthnAssertion: "x".repeat(MAX_WEBAUTHN_ASSERTION_BYTES + 1),
+          },
+        }),
+      ),
+    ).toEqual({
+      ok: false,
+      reason: "approvalToken.claims.webauthnAssertion exceeds MAX_WEBAUTHN_ASSERTION_BYTES",
+    });
+  });
+
+  it("enforces WebAuthn assertion byte caps for non-ASCII strings", () => {
+    const receiptId = asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAV");
+    const token = approvalTokenFor(receiptId);
+    const highRiskClaims = {
+      ...token.claims,
+      riskClass: "high" as const,
+    };
+
+    for (const webauthnAssertion of [
+      "é".repeat(MAX_WEBAUTHN_ASSERTION_BYTES / 2 + 1),
+      "😀".repeat(MAX_WEBAUTHN_ASSERTION_BYTES / 4 + 1),
+      "\ud800".repeat(Math.floor(MAX_WEBAUTHN_ASSERTION_BYTES / 3) + 1),
+    ]) {
+      expect(
+        validateApprovalSubmitRequest(
+          approvalRequestFor(receiptId, {
+            ...token,
+            claims: {
+              ...highRiskClaims,
+              webauthnAssertion,
+            },
+          }),
+        ),
+      ).toEqual({
+        ok: false,
+        reason: "approvalToken.claims.webauthnAssertion exceeds MAX_WEBAUTHN_ASSERTION_BYTES",
+      });
+    }
+  });
+
   it("carries idempotencyKey on queued approval responses", () => {
     const idempotencyKey = asIdempotencyKey("approval-submit-01");
     const response: ApprovalSubmitResponse = {
@@ -812,6 +1100,29 @@ describe("apiBootstrap codec", () => {
     expect(bootstrap.brokerUrl).toBe("http://127.0.0.1:54321");
   });
 
+  it.each([
+    "http://127.0.0.1:8080",
+    "http://localhost:54321",
+    "http://[::1]:8080",
+  ])("accepts loopback broker_url %s", (brokerUrl) => {
+    expect(apiBootstrapFromJson({ token: "tok-bootstrap-abcdef", broker_url: brokerUrl })).toEqual({
+      token: "tok-bootstrap-abcdef",
+      brokerUrl,
+    });
+  });
+
+  it.each([
+    "https://127.0.0.1:8080",
+    "http://evil.com:8080",
+    "http://127.0.0.1",
+    "javascript:alert(1)",
+    "file:///etc/passwd",
+  ])("rejects non-loopback or malformed broker_url %s", (brokerUrl) => {
+    expect(() =>
+      apiBootstrapFromJson({ token: "tok-bootstrap-abcdef", broker_url: brokerUrl }),
+    ).toThrow(/apiBootstrap\.broker_url: must be http:\/\/<loopback>:<port>/);
+  });
+
   it("emits the v0 wire shape with snake_case broker_url", () => {
     const json = apiBootstrapToJson({
       token: asApiToken("tok-bootstrap-abcdef"),
@@ -879,6 +1190,59 @@ describe("apiBootstrap codec", () => {
   });
 });
 
+describe("stream and WebSocket frame runtime guards", () => {
+  it("accepts every tuple-backed stream event kind and rejects non-tuple values", () => {
+    for (const kind of STREAM_EVENT_KIND_VALUES) {
+      expect(isStreamEventKind(kind)).toBe(true);
+    }
+
+    expect(isStreamEventKind("receipt.deleted")).toBe(false);
+    expect(isStreamEventKind("stdout")).toBe(false);
+    expect(isStreamEventKind(null)).toBe(false);
+  });
+
+  it("accepts every tuple-backed WebSocket frame type and rejects non-tuple values", () => {
+    for (const frameType of WS_FRAME_TYPE_VALUES) {
+      expect(isWsFrameType(frameType)).toBe(true);
+    }
+
+    expect(isWsFrameType("receipt.created")).toBe(false);
+    expect(isWsFrameType("close")).toBe(false);
+    expect(isWsFrameType(undefined)).toBe(false);
+  });
+
+  it("keeps runtime tuples exhaustive against the TypeScript unions", () => {
+    const streamEventKindCoverage = {
+      "receipt.created": true,
+      "receipt.updated": true,
+      "receipt.finalized": true,
+      "approval.requested": true,
+      "approval.decided": true,
+      "cost.exceeded": true,
+      "agent.online": true,
+      "agent.offline": true,
+      "agent.message": true,
+      "tool.call.started": true,
+      "tool.call.completed": true,
+      backpressure: true,
+    } satisfies Record<StreamEventKind, true>;
+    const wsFrameTypeCoverage = {
+      stdout: true,
+      stderr: true,
+      stdin: true,
+      resize: true,
+      exit: true,
+      ping: true,
+      pong: true,
+    } satisfies Record<WsFrame["t"], true>;
+
+    expect(Object.keys(streamEventKindCoverage).sort()).toStrictEqual(
+      [...STREAM_EVENT_KIND_VALUES].sort(),
+    );
+    expect(Object.keys(wsFrameTypeCoverage).sort()).toStrictEqual([...WS_FRAME_TYPE_VALUES].sort());
+  });
+});
+
 function isDocumentedAllowedLoopbackHost(host: string): boolean {
   if (host === "::1") return true;
   if (host.startsWith("[")) {
@@ -904,6 +1268,135 @@ function isDocumentedPort(port: string): boolean {
   if (!/^\d+$/.test(port)) return false;
   const parsed = Number(port);
   return Number.isInteger(parsed) && parsed >= 0 && parsed <= 65535;
+}
+
+interface ApprovalClaimsVector {
+  readonly name: string;
+  readonly input: {
+    readonly signerIdentity: string;
+    readonly role: ApprovalClaims["role"];
+    readonly receiptId: string;
+    readonly writeId?: string;
+    readonly frozenArgsHash: string;
+    readonly riskClass: RiskClass;
+    readonly issuedAt: string;
+    readonly expiresAt: string;
+    readonly webauthnAssertion?: string;
+  };
+  readonly expected: {
+    readonly signingBytes: string;
+  };
+}
+
+interface ApprovalClaimsVectorFixture {
+  readonly approvalClaimsVectors: readonly ApprovalClaimsVector[];
+}
+
+interface ApprovalSubmitRequestWire {
+  receiptId?: string;
+  approvalToken: {
+    claims: Record<string, unknown> & {
+      issuedAt?: unknown;
+      expiresAt?: unknown;
+      writeId?: unknown;
+      frozenArgsHash?: unknown;
+      webauthnAssertion?: unknown;
+    };
+    algorithm: string;
+    signerKeyId: string;
+    signature: string;
+  };
+  idempotencyKey: string;
+}
+
+function signingBytesText(claims: ApprovalClaims): string {
+  return TEXT_DECODER.decode(approvalClaimsToSigningBytes(claims));
+}
+
+function approvalClaimsVectorNamed(name: string): ApprovalClaimsVector {
+  const fixture = JSON.parse(
+    readFileSync(new URL("../testdata/audit-event-vectors.json", import.meta.url), "utf8"),
+  ) as ApprovalClaimsVectorFixture;
+  const vector = fixture.approvalClaimsVectors.find((candidate) => candidate.name === name);
+  if (vector === undefined) {
+    throw new Error(`missing approval claims vector: ${name}`);
+  }
+  return vector;
+}
+
+function approvalClaimsFromVector(vector: ApprovalClaimsVector): ApprovalClaims {
+  const { input } = vector;
+  return {
+    signerIdentity: input.signerIdentity,
+    role: input.role,
+    receiptId: asReceiptId(input.receiptId),
+    ...(input.writeId === undefined ? {} : { writeId: asWriteId(input.writeId) }),
+    frozenArgsHash: asSha256Hex(input.frozenArgsHash),
+    riskClass: input.riskClass,
+    issuedAt: new Date(input.issuedAt),
+    expiresAt: new Date(input.expiresAt),
+    ...(input.webauthnAssertion === undefined
+      ? {}
+      : { webauthnAssertion: input.webauthnAssertion }),
+  };
+}
+
+function approvalSubmitRequestWireFor(
+  receiptId: ReceiptId,
+  approvalToken: SignedApprovalToken,
+): ApprovalSubmitRequestWire {
+  const { claims } = approvalToken;
+  return {
+    receiptId,
+    idempotencyKey: "approval-submit-01",
+    approvalToken: {
+      claims: {
+        signerIdentity: claims.signerIdentity,
+        role: claims.role,
+        receiptId: claims.receiptId,
+        ...(claims.writeId === undefined ? {} : { writeId: claims.writeId }),
+        frozenArgsHash: claims.frozenArgsHash,
+        riskClass: claims.riskClass,
+        issuedAt: claims.issuedAt.toISOString(),
+        expiresAt: claims.expiresAt.toISOString(),
+        ...(claims.webauthnAssertion === undefined
+          ? {}
+          : { webauthnAssertion: claims.webauthnAssertion }),
+      },
+      algorithm: approvalToken.algorithm,
+      signerKeyId: approvalToken.signerKeyId,
+      signature: approvalToken.signature,
+    },
+  };
+}
+
+function snakeCaseApprovalSubmitRequestWireFor(
+  receiptId: ReceiptId,
+  approvalToken: SignedApprovalToken,
+): Record<string, unknown> {
+  const { claims } = approvalToken;
+  return {
+    receipt_id: receiptId,
+    idempotency_key: "approval-submit-01",
+    approval_token: {
+      claims: {
+        signer_identity: claims.signerIdentity,
+        role: claims.role,
+        receipt_id: claims.receiptId,
+        ...(claims.writeId === undefined ? {} : { write_id: claims.writeId }),
+        frozen_args_hash: claims.frozenArgsHash,
+        risk_class: claims.riskClass,
+        issued_at: claims.issuedAt.toISOString(),
+        expires_at: claims.expiresAt.toISOString(),
+        ...(claims.webauthnAssertion === undefined
+          ? {}
+          : { webauthn_assertion: claims.webauthnAssertion }),
+      },
+      algorithm: approvalToken.algorithm,
+      signer_key_id: approvalToken.signerKeyId,
+      signature: approvalToken.signature,
+    },
+  };
 }
 
 function mutableApprovalRequestFor(

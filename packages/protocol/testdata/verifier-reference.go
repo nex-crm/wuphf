@@ -1,12 +1,12 @@
 //go:build ignore
 
-// verifier-reference.go — single-file Go reference for the @wuphf/protocol
-// audit-chain wire contract.
+// verifier-reference.go — single-file Go reference for selected
+// @wuphf/protocol wire contracts.
 //
 // Purpose: prove that an independent implementation in another language
-// produces byte-identical hashes from the same canonical inputs as the
-// TypeScript writer. If this program prints "all vectors match", the wire
-// contract is genuinely cross-language portable. If any vector fails, the
+// produces byte-identical hashes/signing bytes from the same canonical inputs
+// as the TypeScript writer. If this program prints "all vectors match", the
+// wire contract is genuinely cross-language portable. If any vector fails, the
 // TS implementation has drifted from the spec — coordinate the bump with
 // downstream consumers.
 //
@@ -74,11 +74,34 @@ type merkleRootVector struct {
 	Expected merkleRootExpected `json:"expected"`
 }
 
+type approvalClaimsInput struct {
+	SignerIdentity    string  `json:"signerIdentity"`
+	Role              string  `json:"role"`
+	ReceiptID         string  `json:"receiptId"`
+	WriteID           *string `json:"writeId"`
+	FrozenArgsHash    string  `json:"frozenArgsHash"`
+	RiskClass         string  `json:"riskClass"`
+	IssuedAt          string  `json:"issuedAt"`
+	ExpiresAt         string  `json:"expiresAt"`
+	WebauthnAssertion *string `json:"webauthnAssertion"`
+}
+
+type approvalClaimsExpected struct {
+	SigningBytes string `json:"signingBytes"`
+}
+
+type approvalClaimsVector struct {
+	Name     string                 `json:"name"`
+	Input    approvalClaimsInput    `json:"input"`
+	Expected approvalClaimsExpected `json:"expected"`
+}
+
 type fixture struct {
-	SchemaVersion     int                `json:"schemaVersion"`
-	Comment           string             `json:"comment"`
-	Vectors           []auditEventVector `json:"vectors"`
-	MerkleRootVectors []merkleRootVector `json:"merkleRootVectors"`
+	SchemaVersion         int                    `json:"schemaVersion"`
+	Comment               string                 `json:"comment"`
+	Vectors               []auditEventVector     `json:"vectors"`
+	MerkleRootVectors     []merkleRootVector     `json:"merkleRootVectors"`
+	ApprovalClaimsVectors []approvalClaimsVector `json:"approvalClaimsVectors"`
 }
 
 // canonicalize is a *minimal* JCS implementation sufficient for the bundled
@@ -143,6 +166,25 @@ func canonicalMerkleRoot(rec merkleRootInput) ([]byte, error) {
 	return canonicalize(projection)
 }
 
+func canonicalApprovalClaims(rec approvalClaimsInput) ([]byte, error) {
+	projection := map[string]interface{}{
+		"signerIdentity": rec.SignerIdentity,
+		"role":           rec.Role,
+		"receiptId":      rec.ReceiptID,
+		"frozenArgsHash": rec.FrozenArgsHash,
+		"riskClass":      rec.RiskClass,
+		"issuedAt":       rec.IssuedAt,
+		"expiresAt":      rec.ExpiresAt,
+	}
+	if rec.WriteID != nil {
+		projection["writeId"] = *rec.WriteID
+	}
+	if rec.WebauthnAssertion != nil {
+		projection["webauthnAssertion"] = *rec.WebauthnAssertion
+	}
+	return canonicalize(projection)
+}
+
 const (
 	colorReset = "\x1b[0m"
 	colorGreen = "\x1b[32m"
@@ -166,8 +208,8 @@ func main() {
 	}
 
 	fmt.Printf("%s@wuphf/protocol — Go reference verifier%s\n", colorBold, colorReset)
-	fmt.Printf("%sLoaded fixture schemaVersion=%d, %d audit-event vectors, %d merkle-root vectors%s\n\n",
-		colorDim, fx.SchemaVersion, len(fx.Vectors), len(fx.MerkleRootVectors), colorReset)
+	fmt.Printf("%sLoaded fixture schemaVersion=%d, %d audit-event vectors, %d merkle-root vectors, %d approval-claims vectors%s\n\n",
+		colorDim, fx.SchemaVersion, len(fx.Vectors), len(fx.MerkleRootVectors), len(fx.ApprovalClaimsVectors), colorReset)
 
 	failed := 0
 
@@ -215,10 +257,28 @@ func main() {
 			colorGreen, colorReset, vec.Name, len(canonical), colorReset)
 	}
 
+	for _, vec := range fx.ApprovalClaimsVectors {
+		canonical, err := canonicalApprovalClaims(vec.Input)
+		if err != nil {
+			fmt.Printf("  %sFAIL%s approval-claims/%s: canonicalize error: %v\n", colorRed, colorReset, vec.Name, err)
+			failed++
+			continue
+		}
+		if string(canonical) != vec.Expected.SigningBytes {
+			fmt.Printf("  %sFAIL%s approval-claims/%s: signingBytes mismatch\n", colorRed, colorReset, vec.Name)
+			fmt.Printf("    expected: %s\n", vec.Expected.SigningBytes)
+			fmt.Printf("    actual:   %s\n", string(canonical))
+			failed++
+			continue
+		}
+		fmt.Printf("  %sPASS%s approval-claims/%s signingBytes match (%d bytes)%s\n",
+			colorGreen, colorReset, vec.Name, len(canonical), colorReset)
+	}
+
 	fmt.Println()
 	if failed == 0 {
 		fmt.Printf("%s%sAll %d vectors match — wire contract is cross-language portable.%s\n",
-			colorBold, colorGreen, len(fx.Vectors)+len(fx.MerkleRootVectors), colorReset)
+			colorBold, colorGreen, len(fx.Vectors)+len(fx.MerkleRootVectors)+len(fx.ApprovalClaimsVectors), colorReset)
 		os.Exit(0)
 	}
 	fmt.Printf("%s%s%d vector(s) failed — TypeScript writer and Go reference disagree.%s\n",

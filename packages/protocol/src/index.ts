@@ -32,6 +32,7 @@ export type { Brand } from "./brand.ts";
 export type { BudgetValidationResult } from "./budgets.ts";
 export {
   assertWithinBudget,
+  MAX_APPROVAL_SIGNATURE_BYTES,
   MAX_APPROVAL_TOKEN_LIFETIME_MS,
   MAX_AUDIT_CHAIN_BATCH_SIZE,
   MAX_AUDIT_EVENT_BODY_BYTES,
@@ -46,6 +47,7 @@ export {
   MAX_RECEIPT_WRITES,
   MAX_SANITIZED_STRING_BYTES,
   MAX_TOOL_CALLS_PER_RECEIPT,
+  MAX_WEBAUTHN_ASSERTION_BYTES,
   validateApprovalTokenLifetime,
   validateAuditEventBodyBudget,
   validateFrozenArgsBudget,
@@ -88,6 +90,8 @@ export {
   ALLOWED_LOOPBACK_HOSTS,
   apiBootstrapFromJson,
   apiBootstrapToJson,
+  approvalClaimsToSigningBytes,
+  approvalSubmitRequestFromJson,
   asApiToken,
   asBrokerPort,
   asKeychainHandleId,
@@ -98,7 +102,11 @@ export {
   isKeychainHandleId,
   isLoopbackRemoteAddress,
   isRequestId,
+  isStreamEventKind,
+  isWsFrameType,
+  STREAM_EVENT_KIND_VALUES,
   validateApprovalSubmitRequest,
+  WS_FRAME_TYPE_VALUES,
 } from "./ipc.ts";
 export type {
   AgentSlug,

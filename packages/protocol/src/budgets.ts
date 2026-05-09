@@ -63,6 +63,19 @@ export const MAX_MERKLE_ROOT_CERT_CHAIN_BYTES = 64 * 1024;
 export const MAX_APPROVAL_TOKEN_LIFETIME_MS = 30 * 60 * 1000;
 
 /**
+ * Ed25519 signatures are 64 raw bytes (roughly 88 base64 chars). 4 KiB leaves
+ * room for envelope/version metadata while failing attacker-sized strings
+ * before regex scans or downstream signature verification.
+ */
+export const MAX_APPROVAL_SIGNATURE_BYTES = 4 * 1024;
+
+/**
+ * WebAuthn assertions are usually a few KiB. 16 KiB gives authenticators room
+ * for extension output while keeping high-risk approval submissions bounded.
+ */
+export const MAX_WEBAUTHN_ASSERTION_BYTES = 16 * 1024;
+
+/**
  * File-change lists can grow with generated or vendored trees. 10,000 entries
  * covers large refactors; 100x would let path lists alone consume verifier
  * memory before any receipt semantics are checked.

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "comment": "Golden vectors for the WUPHF audit chain. canonicalSerialization is the UTF-8 JCS string for the record without eventHash. eventHash is sha256(asciiLowerHex(prevHash) || utf8(canonicalSerialization)). payload.bodyB64 is standard base64 for the raw opaque payload body bytes.",
+  "comment": "Golden vectors for WUPHF protocol wire bytes. Audit canonicalSerialization is the UTF-8 JCS string for the record without eventHash; eventHash is sha256(asciiLowerHex(prevHash) || utf8(canonicalSerialization)); payload.bodyB64 is standard base64 for raw payload bytes. Approval signingBytes is the UTF-8 JCS string produced by approvalClaimsToSigningBytes.",
   "vectors": [
     {
       "name": "boot_marker_seq0",
@@ -33,6 +33,25 @@
       },
       "expected": {
         "canonicalJson": "{\"certChainPem\":\"-----BEGIN CERTIFICATE-----\\nMIIBwzCCAWmgAwIBAgIUWUPHFMERKLE0001\\n-----END CERTIFICATE-----\\n\",\"ephemeralKeyId\":\"eph-key-20260508-01\",\"rootHash\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\",\"seqNo\":\"v1:42\",\"signature\":\"bWVya2xlLXJvb3Qtc2lnbmF0dXJl\",\"signedAt\":\"2026-05-08T12:34:56.789Z\"}"
+      }
+    }
+  ],
+  "approvalClaimsVectors": [
+    {
+      "name": "approval_claims_high_write_bound",
+      "input": {
+        "signerIdentity": "fran@example.com",
+        "role": "approver",
+        "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "writeId": "write_01",
+        "frozenArgsHash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "riskClass": "high",
+        "issuedAt": "2026-05-08T18:00:00.123Z",
+        "expiresAt": "2026-05-08T18:30:00.123Z",
+        "webauthnAssertion": "webauthn-demo-assertion"
+      },
+      "expected": {
+        "signingBytes": "{\"expiresAt\":\"2026-05-08T18:30:00.123Z\",\"frozenArgsHash\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\",\"issuedAt\":\"2026-05-08T18:00:00.123Z\",\"receiptId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAV\",\"riskClass\":\"high\",\"role\":\"approver\",\"signerIdentity\":\"fran@example.com\",\"webauthnAssertion\":\"webauthn-demo-assertion\",\"writeId\":\"write_01\"}"
       }
     }
   ]
