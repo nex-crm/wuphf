@@ -344,12 +344,37 @@ func runTaskReview(args []string) {
 		os.Exit(2)
 	}
 	id := strings.TrimSpace(args[0])
+	if !isSafeTaskID(id) {
+		fmt.Fprintln(os.Stderr, "task review: task id contains invalid characters")
+		os.Exit(2)
+	}
 	url := brokerBaseURL() + "#/task/" + id
 	if err := openBrowser(url); err != nil {
 		fmt.Fprintf(os.Stderr, "task review: open %s: %v\n", url, err)
 		fmt.Fprintln(os.Stderr, "  Open it manually in your browser instead.")
 		os.Exit(1)
 	}
+}
+
+// isSafeTaskID guards the small set of characters teamTask IDs use today.
+// We do not pass arbitrary URL-encoded ids to `open`/`xdg-open`/`rundll32`
+// to avoid surprises with shell-meta characters that some launchers
+// re-parse internally.
+func isSafeTaskID(id string) bool {
+	if id == "" || len(id) > 128 {
+		return false
+	}
+	for _, r := range id {
+		switch {
+		case r >= 'a' && r <= 'z':
+		case r >= 'A' && r <= 'Z':
+		case r >= '0' && r <= '9':
+		case r == '-' || r == '_':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func openBrowser(url string) error {
@@ -383,6 +408,10 @@ func runTaskBlock(args []string) {
 		os.Exit(2)
 	}
 	id := strings.TrimSpace(fs.Arg(0))
+	if !isSafeTaskID(id) {
+		fmt.Fprintln(os.Stderr, "task block: task id contains invalid characters")
+		os.Exit(2)
+	}
 	if strings.TrimSpace(*on) == "" {
 		fmt.Fprintln(os.Stderr, "task block: --on is required")
 		os.Exit(2)
