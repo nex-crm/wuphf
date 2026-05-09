@@ -6,6 +6,7 @@ compression: maximum
 directories:
   output: dist
   buildResources: build
+afterSign: scripts/staple-mac-app.js
 files:
   - src/**/*
   - package.json
@@ -44,7 +45,7 @@ win:
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
-  differentialPackage: true
+  differentialPackage: false
 linux:
   target:
     - target: AppImage

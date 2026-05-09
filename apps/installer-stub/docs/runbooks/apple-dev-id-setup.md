@@ -4,7 +4,8 @@ Last updated: 2026-05-09 / Owner: @FranDias
 
 This release path signs the macOS app with a Developer ID Application
 certificate, notarizes with notarytool through electron-builder, staples the
-`.dmg`, and publishes electron-updater's `latest-mac.yml`.
+`.app` inside the updater `.zip` plus the `.dmg`, and publishes
+electron-updater's `latest-mac.yml`.
 
 ## Before You Start
 
@@ -55,8 +56,8 @@ it in an `if: always()` cleanup step. No certificate file is committed.
 2. Approve the `production-release` environment if GitHub asks for it.
 3. Open the `Release Rewrite` workflow run.
 4. Confirm the macOS job creates a temporary keychain, signs, notarizes, staples
-   the `.dmg`, validates the staple, refreshes `latest-mac.yml`, and verifies
-   the manifest sha512.
+   the `.app` and `.dmg`, validates both staples, refreshes `latest-mac.yml`,
+   and verifies the manifest sha512.
 5. Download the draft release `.dmg` and run:
 
    ```bash
@@ -72,7 +73,7 @@ Successful output includes `accepted` and a Notarized Developer ID source.
 | `errSecInternalComponent` during codesign | Keychain locked or missing key partition list | Confirm the workflow ran `security unlock-keychain` and `security set-key-partition-list` before `bun run build:mac` |
 | `The specified item could not be found in the keychain` | `.p12` export did not include the private key | Re-export the certificate/private-key pair from Keychain Access |
 | `Asset validation failed (-18000)` or notarytool auth failure | Wrong Apple ID password or Team ID | Use an app-specific password and verify the Team ID under developer.apple.com -> Membership |
-| `MAC verification failed` while importing `.p12` | Bad `.p12` password or base64 value has whitespace | Re-run the one-line `base64 | tr -d '\n'` command and update the secret |
+| `MAC verification failed` while importing `.p12` | Bad `.p12` password or base64 value has whitespace | Re-run the one-line <code>base64 | tr -d '\n'</code> command and update the secret |
 | `spctl` reports `rejected` | Notarization or stapling did not complete | Check the macOS job's notarization output and `xcrun stapler validate` step |
 
 If any Apple secret is missing on a tag push, the workflow must fail before
