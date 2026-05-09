@@ -32,6 +32,15 @@ interface MockBrokerSupervisorInstance {
   readonly getSnapshot: ReturnType<typeof vi.fn<() => MockBrokerSnapshot>>;
 }
 
+interface MockLogCall {
+  readonly module: string;
+  readonly level: "debug" | "info" | "warn" | "error";
+  readonly event: string;
+  readonly payload: unknown;
+}
+
+type ProcessListener = (...args: readonly unknown[]) => void;
+
 const electronMock = vi.hoisted(() => {
   const instances: MockBrowserWindowInstance[] = [];
 
@@ -80,6 +89,29 @@ const electronMock = vi.hoisted(() => {
   };
 });
 
+const loggerMock = vi.hoisted(() => {
+  const calls: MockLogCall[] = [];
+  const createLogger = vi.fn((module: string) => ({
+    debug: vi.fn((event: string, payload?: unknown) => {
+      calls.push({ module, level: "debug", event, payload });
+    }),
+    info: vi.fn((event: string, payload?: unknown) => {
+      calls.push({ module, level: "info", event, payload });
+    }),
+    warn: vi.fn((event: string, payload?: unknown) => {
+      calls.push({ module, level: "warn", event, payload });
+    }),
+    error: vi.fn((event: string, payload?: unknown) => {
+      calls.push({ module, level: "error", event, payload });
+    }),
+  }));
+
+  return {
+    calls,
+    createLogger,
+  };
+});
+
 const brokerMock = vi.hoisted(() => {
   const instances: MockBrokerSupervisorInstance[] = [];
 
@@ -125,6 +157,17 @@ vi.mock("../src/main/broker.ts", () => ({
   BrokerSupervisor: brokerMock.BrokerSupervisor,
 }));
 
+vi.mock("../src/main/logger.ts", () => ({
+  createLogger: loggerMock.createLogger,
+}));
+
+const initialUncaughtExceptionListeners = new Set<ProcessListener>(
+  process.listeners("uncaughtException") as ProcessListener[],
+);
+const initialUnhandledRejectionListeners = new Set<ProcessListener>(
+  process.listeners("unhandledRejection") as ProcessListener[],
+);
+
 describe("main bootstrap", () => {
   const previousRendererUrl = process.env[RENDERER_URL_ENV_KEY];
 
@@ -141,10 +184,14 @@ describe("main bootstrap", () => {
     electronMock.showErrorBox.mockClear();
     electronMock.handle.mockClear();
     electronMock.fork.mockClear();
+    loggerMock.calls.length = 0;
+    loggerMock.createLogger.mockClear();
+    cleanupProcessListeners();
     delete process.env[RENDERER_URL_ENV_KEY];
   });
 
   afterEach(() => {
+    cleanupProcessListeners();
     if (previousRendererUrl === undefined) {
       delete process.env[RENDERER_URL_ENV_KEY];
       return;
@@ -188,6 +235,67 @@ describe("main bootstrap", () => {
     expect(secondQuitEvent.preventDefault).toHaveBeenCalledTimes(1);
     expect(getOnlyBrokerSupervisor().stop).toHaveBeenCalledTimes(1);
   });
+
+  it("logs uncaught exceptions, unhandled rejections, and gone process signals", async () => {
+    await importMainBootstrap();
+
+    getAddedProcessListener(
+      "uncaughtException",
+      initialUncaughtExceptionListeners,
+    )(new Error("main crashed"));
+    getAddedProcessListener("unhandledRejection", initialUnhandledRejectionListeners)("rejected");
+    getAppHandler("render-process-gone")(
+      {},
+      {},
+      {
+        reason: "crashed",
+        exitCode: 9,
+      },
+    );
+    getAppHandler("child-process-gone")(
+      {},
+      {
+        type: "Utility",
+        reason: "killed",
+        exitCode: 15,
+        serviceName: "wuphf-broker",
+      },
+    );
+
+    expect(loggerMock.calls).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          module: "main",
+          level: "error",
+          event: "uncaught_exception",
+          payload: expect.objectContaining({ error: "main crashed" }),
+        }),
+        {
+          module: "main",
+          level: "error",
+          event: "unhandled_rejection",
+          payload: { reason: "rejected" },
+        },
+        {
+          module: "main",
+          level: "error",
+          event: "renderer_process_gone",
+          payload: { reason: "crashed", exitCode: 9 },
+        },
+        {
+          module: "main",
+          level: "error",
+          event: "child_process_gone",
+          payload: {
+            processType: "Utility",
+            reason: "killed",
+            exitCode: 15,
+            serviceName: "wuphf-broker",
+          },
+        },
+      ]),
+    );
+  });
 });
 
 async function importMainBootstrap(): Promise<void> {
@@ -223,4 +331,51 @@ function getBeforeQuitHandler(): (event: { readonly preventDefault: () => void }
   return (event) => {
     handler(event);
   };
+}
+
+function getAppHandler(eventName: string): (...args: readonly unknown[]) => void {
+  const call = electronMock.app.on.mock.calls.find(([event]) => event === eventName);
+  if (call === undefined) {
+    throw new Error(`Expected ${eventName} handler to be registered`);
+  }
+
+  return call[1];
+}
+
+function getAddedProcessListener(
+  eventName: "uncaughtException" | "unhandledRejection",
+  initialListeners: ReadonlySet<ProcessListener>,
+): ProcessListener {
+  const listener = processListenersFor(eventName)
+    .map((candidate) => candidate as ProcessListener)
+    .find((candidate) => !initialListeners.has(candidate));
+  if (listener === undefined) {
+    throw new Error(`Expected ${eventName} listener to be registered`);
+  }
+
+  return listener;
+}
+
+function processListenersFor(
+  eventName: "uncaughtException" | "unhandledRejection",
+): readonly ProcessListener[] {
+  if (eventName === "uncaughtException") {
+    return process.listeners("uncaughtException") as ProcessListener[];
+  }
+
+  return process.listeners("unhandledRejection") as ProcessListener[];
+}
+
+function cleanupProcessListeners(): void {
+  for (const listener of process.listeners("uncaughtException")) {
+    if (!initialUncaughtExceptionListeners.has(listener as ProcessListener)) {
+      process.removeListener("uncaughtException", listener);
+    }
+  }
+
+  for (const listener of process.listeners("unhandledRejection")) {
+    if (!initialUnhandledRejectionListeners.has(listener as ProcessListener)) {
+      process.removeListener("unhandledRejection", listener);
+    }
+  }
 }
