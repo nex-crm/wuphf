@@ -37,6 +37,7 @@ func TestSeedCompanyContext(t *testing.T) {
 
 	tests := []struct {
 		name                string
+		setup               func(t *testing.T) // optional per-case setup (e.g. env scrubbing)
 		input               func(wikiRoot string) CompanySeedInput
 		wantCompanyMD       bool
 		wantOwnerMD         bool
@@ -122,6 +123,14 @@ func TestSeedCompanyContext(t *testing.T) {
 		},
 		{
 			name: "pdftotext not found",
+			// extractPDF resolves pdftotext via exec.LookPath, which reads PATH
+			// from the environment on every call. Scrub PATH for this case so
+			// the not-installed branch fires regardless of whether the host
+			// (a developer Mac with poppler installed via Homebrew, say) has
+			// pdftotext available.
+			setup: func(t *testing.T) {
+				t.Setenv("PATH", "")
+			},
 			input: func(wikiRoot string) CompanySeedInput {
 				return CompanySeedInput{
 					WikiRoot:  wikiRoot,
@@ -136,6 +145,9 @@ func TestSeedCompanyContext(t *testing.T) {
 	for _, tc := range tests {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.setup != nil {
+				tc.setup(t)
+			}
 			wikiRoot := t.TempDir()
 			input := tc.input(wikiRoot)
 

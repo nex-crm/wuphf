@@ -97,12 +97,28 @@ if I say yes. If I am not logged in, just open https://wuphf.team.
 | `--no-open` | Don't auto-open the browser |
 | `--pack <name>` | Pick an agent pack (`starter`, `founding-team`, `coding-team`, `lead-gen-agency`, `revops`) |
 | `--opus-ceo` | Upgrade CEO from Sonnet to Opus |
-| `--provider <name>` | LLM provider override (`claude-code`, `codex`, `opencode`) |
+| `--provider <name>` | LLM provider override (`claude-code`, `codex`, `opencode`, `ollama`) |
 | `--collab` | Start in collaborative mode — all agents see all messages (this is the default) |
 | `--unsafe` | Bypass agent permission checks (local dev only) |
 | `--web-port <n>` | Change the web UI port (default 7891) |
 
 `--legacy-tui` is deprecated, slated for removal, and retained only while the desktop replacement lands.
+
+### Opencode and custom endpoints
+
+`--provider opencode` shells out to the `opencode` CLI binary. WUPHF does not
+own that provider's HTTP path, and `provider_endpoints.opencode.base_url` is not
+consulted.
+
+For custom OpenAI-compatible endpoints such as LiteLLM, OmniRoute, or local
+proxies, use `--provider ollama` and set `WUPHF_OLLAMA_BASE_URL` or
+`provider_endpoints.ollama.base_url`:
+
+```bash
+WUPHF_OLLAMA_BASE_URL="http://127.0.0.1:20128/v1" \
+WUPHF_OLLAMA_MODEL="openai/gpt-5.4-mini" \
+wuphf --provider ollama --memory-backend none --no-open
+```
 
 `--no-nex` still lets Telegram and any other local integration keep working. To switch back to CEO-routed delegation after launch, use `/focus` inside the office.
 
