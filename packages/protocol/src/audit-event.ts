@@ -16,11 +16,12 @@
 // is a cross-language footgun for any non-TS verifier — so the wire decision
 // is locked here, exposed via golden vectors in tests/audit-event.spec.ts.
 
+import { createHash } from "node:crypto";
 import type { Brand } from "./brand.ts";
 import { canonicalJSON } from "./canonical-json.ts";
 import { type EventLsn, GENESIS_LSN, isEqualLsn, nextLsn } from "./event-lsn.ts";
 import type { ReceiptId } from "./receipt.ts";
-import { type Sha256Hex, sha256Hex } from "./sha256.ts";
+import { asSha256Hex, type Sha256Hex, sha256Hex } from "./sha256.ts";
 
 export type MerkleRootHex = Brand<string, "MerkleRootHex">;
 
@@ -100,10 +101,10 @@ export function serializeAuditEventRecordForHash(record: AuditEventRecord): Uint
  * different projection than the verifier.
  */
 export function computeEventHash(prevHash: Sha256Hex, recordBytes: Uint8Array): Sha256Hex {
-  const buf = new Uint8Array(prevHash.length + recordBytes.length);
-  buf.set(new TextEncoder().encode(prevHash), 0);
-  buf.set(recordBytes, prevHash.length);
-  return sha256Hex(buf);
+  const hash = createHash("sha256");
+  hash.update(prevHash, "ascii");
+  hash.update(recordBytes);
+  return asSha256Hex(hash.digest("hex"));
 }
 
 /**
@@ -114,10 +115,18 @@ export function computeAuditEventHash(record: AuditEventRecord): Sha256Hex {
   return computeEventHash(record.prevHash, serializeAuditEventRecordForHash(record));
 }
 
+export type ChainFailureCode =
+  | "missing_record"
+  | "seq_gap"
+  | "prev_hash_mismatch"
+  | "event_hash_mismatch"
+  | "serialization_threw"
+  | "lsn_threw";
+
 export type ChainVerificationResult =
   | { ok: true; empty: true }
   | { ok: true; empty: false; lastEventHash: Sha256Hex; lastSeqNo: EventLsn }
-  | { ok: false; brokenAtSeqNo: EventLsn; reason: string };
+  | { ok: false; brokenAtSeqNo: EventLsn; code: ChainFailureCode; reason: string };
 
 /**
  * Verify a sequence of records forms a valid hash chain rooted at
@@ -143,34 +152,71 @@ export function verifyChain(
       return {
         ok: false,
         brokenAtSeqNo: expectedSeq,
+        code: "missing_record",
         reason: "missing record",
       };
     }
-    if (!isEqualLsn(r.seqNo, expectedSeq)) {
+
+    try {
+      if (!isEqualLsn(r.seqNo, expectedSeq)) {
+        return {
+          ok: false,
+          brokenAtSeqNo: r.seqNo,
+          code: "seq_gap",
+          reason: `seq_no gap: expected ${expectedSeq as string}, got ${r.seqNo as string}`,
+        };
+      }
+      if (r.prevHash !== expectedPrev) {
+        return {
+          ok: false,
+          brokenAtSeqNo: r.seqNo,
+          code: "prev_hash_mismatch",
+          reason: `prev_hash mismatch at seq ${r.seqNo as string}`,
+        };
+      }
+
+      let recordBytes: Uint8Array;
+      try {
+        recordBytes = serialize(r);
+      } catch (cause) {
+        return {
+          ok: false,
+          brokenAtSeqNo: r.seqNo,
+          code: "serialization_threw",
+          reason: `serialization threw at seq ${r.seqNo as string}: ${errorMessage(cause)}`,
+        };
+      }
+
+      const recomputed = computeEventHash(r.prevHash, recordBytes);
+      if (recomputed !== r.eventHash) {
+        return {
+          ok: false,
+          brokenAtSeqNo: r.seqNo,
+          code: "event_hash_mismatch",
+          reason: `event_hash mismatch at seq ${r.seqNo as string}`,
+        };
+      }
+      expectedPrev = r.eventHash;
+      try {
+        expectedSeq = nextLsn(expectedSeq);
+      } catch (cause) {
+        return {
+          ok: false,
+          brokenAtSeqNo: r.seqNo,
+          code: "lsn_threw",
+          reason: `lsn advance threw after seq ${r.seqNo as string}: ${errorMessage(cause)}`,
+        };
+      }
+      lastSeen = r.seqNo;
+    } catch (cause) {
+      const brokenAtSeqNo = safeRecordSeqNo(r, expectedSeq);
       return {
         ok: false,
-        brokenAtSeqNo: r.seqNo,
-        reason: `seq_no gap: expected ${expectedSeq as string}, got ${r.seqNo as string}`,
+        brokenAtSeqNo,
+        code: "serialization_threw",
+        reason: `record verification threw at seq ${brokenAtSeqNo as string}: ${errorMessage(cause)}`,
       };
     }
-    if (r.prevHash !== expectedPrev) {
-      return {
-        ok: false,
-        brokenAtSeqNo: r.seqNo,
-        reason: `prev_hash mismatch at seq ${r.seqNo as string}`,
-      };
-    }
-    const recomputed = computeEventHash(r.prevHash, serialize(r));
-    if (recomputed !== r.eventHash) {
-      return {
-        ok: false,
-        brokenAtSeqNo: r.seqNo,
-        reason: `event_hash mismatch at seq ${r.seqNo as string}`,
-      };
-    }
-    expectedPrev = r.eventHash;
-    expectedSeq = nextLsn(expectedSeq);
-    lastSeen = r.seqNo;
   }
 
   return {
@@ -183,4 +229,16 @@ export function verifyChain(
 
 function bytesToBase64(bytes: Uint8Array): string {
   return Buffer.from(bytes).toString("base64");
+}
+
+function errorMessage(cause: unknown): string {
+  return cause instanceof Error ? cause.message : String(cause);
+}
+
+function safeRecordSeqNo(record: AuditEventRecord, fallback: EventLsn): EventLsn {
+  try {
+    return record.seqNo;
+  } catch {
+    return fallback;
+  }
 }

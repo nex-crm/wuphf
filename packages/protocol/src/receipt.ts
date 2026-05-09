@@ -6,8 +6,10 @@
 import { canonicalJSON } from "./canonical-json.ts";
 import { FrozenArgs } from "./frozen-args.ts";
 import {
+  type AgentSlug,
   type ApprovalClaims,
   type ApprovalEvent,
+  type ApprovalId,
   asAgentSlug,
   asApprovalId,
   asProviderKind,
@@ -20,10 +22,15 @@ import {
   type ExternalWrite,
   type FileChange,
   type MemoryWriteRef,
+  type ProviderKind,
+  type ReceiptId,
   type ReceiptSnapshot,
   type SignedApprovalToken,
   type SourceRead,
+  type TaskId,
   type ToolCall,
+  type ToolCallId,
+  type WriteId,
 } from "./receipt-types.ts";
 import {
   assertKnownKeys,
@@ -47,6 +54,7 @@ import {
   SOURCE_READ_KEYS,
   TOOL_CALL_KEYS,
   validateReceipt,
+  validateReceiptWithRecomputedFrozenArgs,
 } from "./receipt-validator.ts";
 import { SanitizedString } from "./sanitized-string.ts";
 import { asSha256Hex, type Sha256Hex } from "./sha256.ts";
@@ -130,6 +138,46 @@ export {
 } from "./receipt-types.ts";
 export { isReceiptSnapshot, validateReceipt } from "./receipt-validator.ts";
 
+function asReceiptIdAt(value: string, path: string): ReceiptId {
+  return decodeBrandAt(value, path, asReceiptId);
+}
+
+function asTaskIdAt(value: string, path: string): TaskId {
+  return decodeBrandAt(value, path, asTaskId);
+}
+
+function asAgentSlugAt(value: string, path: string): AgentSlug {
+  return decodeBrandAt(value, path, asAgentSlug);
+}
+
+function asProviderKindAt(value: string, path: string): ProviderKind {
+  return decodeBrandAt(value, path, asProviderKind);
+}
+
+function asToolCallIdAt(value: string, path: string): ToolCallId {
+  return decodeBrandAt(value, path, asToolCallId);
+}
+
+function asApprovalIdAt(value: string, path: string): ApprovalId {
+  return decodeBrandAt(value, path, asApprovalId);
+}
+
+function asSha256HexAt(value: string, path: string): Sha256Hex {
+  return decodeBrandAt(value, path, asSha256Hex);
+}
+
+function asWriteIdAt(value: string, path: string): WriteId {
+  return decodeBrandAt(value, path, asWriteId);
+}
+
+function decodeBrandAt<T>(value: string, path: string, decode: (value: string) => T): T {
+  try {
+    return decode(value);
+  } catch (err) {
+    throw new Error(`${path}: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
 export function receiptToJson(r: ReceiptSnapshot): string {
   const validation = validateReceipt(r);
   if (!validation.ok) {
@@ -140,8 +188,9 @@ export function receiptToJson(r: ReceiptSnapshot): string {
 
 export function receiptFromJson(json: string): ReceiptSnapshot {
   const parsed: unknown = JSON.parse(json);
-  const receipt = receiptJsonToSnapshot(parsed);
-  const validation = validateReceipt(receipt);
+  const recomputedFrozenArgs = new Set<FrozenArgs>();
+  const receipt = receiptJsonToSnapshot(parsed, recomputedFrozenArgs);
+  const validation = validateReceiptWithRecomputedFrozenArgs(receipt, recomputedFrozenArgs);
   if (!validation.ok) {
     throw new Error(formatValidationErrors(validation.errors));
   }
@@ -297,7 +346,10 @@ function externalWriteToJsonValue(w: ExternalWrite): Record<string, unknown> {
   });
 }
 
-function receiptJsonToSnapshot(value: unknown): ReceiptSnapshot {
+function receiptJsonToSnapshot(
+  value: unknown,
+  recomputedFrozenArgs: Set<FrozenArgs>,
+): ReceiptSnapshot {
   const record = requireRecord(value, "");
   assertKnownKeys(record, "", RECEIPT_KEYS);
   const finishedAt = optionalDateFromJson(record, "finishedAt", "");
@@ -308,24 +360,40 @@ function receiptJsonToSnapshot(value: unknown): ReceiptSnapshot {
   const gitHeadEnd = optionalStringFromJson(record, "gitHeadEnd", "");
 
   return {
-    id: asReceiptId(requiredStringFromJson(record, "id", "")),
-    agentSlug: asAgentSlug(requiredStringFromJson(record, "agentSlug", "")),
-    taskId: asTaskId(requiredStringFromJson(record, "taskId", "")),
+    id: asReceiptIdAt(requiredStringFromJson(record, "id", ""), pointer("", "id")),
+    agentSlug: asAgentSlugAt(
+      requiredStringFromJson(record, "agentSlug", ""),
+      pointer("", "agentSlug"),
+    ),
+    taskId: asTaskIdAt(requiredStringFromJson(record, "taskId", ""), pointer("", "taskId")),
     triggerKind: requiredLiteralFromJson(record, "triggerKind", "", TRIGGER_KIND_VALUES),
     triggerRef: requiredStringFromJson(record, "triggerRef", ""),
     startedAt: requiredDateFromJson(record, "startedAt", ""),
     ...(finishedAt === undefined ? {} : { finishedAt }),
     status: requiredLiteralFromJson(record, "status", "", RECEIPT_STATUS_VALUES),
-    providerKind: asProviderKind(requiredStringFromJson(record, "providerKind", "")),
+    providerKind: asProviderKindAt(
+      requiredStringFromJson(record, "providerKind", ""),
+      pointer("", "providerKind"),
+    ),
     model: requiredStringFromJson(record, "model", ""),
-    promptHash: asSha256Hex(requiredStringFromJson(record, "promptHash", "")),
-    toolManifest: asSha256Hex(requiredStringFromJson(record, "toolManifest", "")),
-    toolCalls: requiredArrayFromJson(record, "toolCalls", "", toolCallFromJson),
+    promptHash: asSha256HexAt(
+      requiredStringFromJson(record, "promptHash", ""),
+      pointer("", "promptHash"),
+    ),
+    toolManifest: asSha256HexAt(
+      requiredStringFromJson(record, "toolManifest", ""),
+      pointer("", "toolManifest"),
+    ),
+    toolCalls: requiredArrayFromJson(record, "toolCalls", "", (item, path) =>
+      toolCallFromJson(item, path, recomputedFrozenArgs),
+    ),
     approvals: requiredArrayFromJson(record, "approvals", "", approvalEventFromJson),
     filesChanged: requiredArrayFromJson(record, "filesChanged", "", fileChangeFromJson),
     commits: requiredArrayFromJson(record, "commits", "", commitRefFromJson),
     sourceReads: requiredArrayFromJson(record, "sourceReads", "", sourceReadFromJson),
-    writes: requiredArrayFromJson(record, "writes", "", externalWriteFromJson),
+    writes: requiredArrayFromJson(record, "writes", "", (item, path) =>
+      externalWriteFromJson(item, path, recomputedFrozenArgs),
+    ),
     inputTokens: requiredNonNegativeIntegerFromJson(record, "inputTokens", ""),
     outputTokens: requiredNonNegativeIntegerFromJson(record, "outputTokens", ""),
     cacheReadTokens: requiredNonNegativeIntegerFromJson(record, "cacheReadTokens", ""),
@@ -351,22 +419,27 @@ function sourceReadFromJson(value: unknown, path: string): SourceRead {
     entityType: requiredStringFromJson(record, "entityType", path),
     entityId: requiredStringFromJson(record, "entityId", path),
     fetchedAt: requiredDateFromJson(record, "fetchedAt", path),
-    hash: asSha256Hex(requiredStringFromJson(record, "hash", path)),
+    hash: asSha256HexAt(requiredStringFromJson(record, "hash", path), pointer(path, "hash")),
     citation: requiredStringFromJson(record, "citation", path),
     ...(rawRef === undefined ? {} : { rawRef }),
   };
 }
 
-function toolCallFromJson(value: unknown, path: string): ToolCall {
+function toolCallFromJson(
+  value: unknown,
+  path: string,
+  recomputedFrozenArgs: Set<FrozenArgs>,
+): ToolCall {
   const record = requireRecord(value, path);
   assertKnownKeys(record, path, TOOL_CALL_KEYS);
   const error = optionalSanitizedStringFromJson(record, "error", path);
   return {
-    toolId: asToolCallId(requiredStringFromJson(record, "toolId", path)),
+    toolId: asToolCallIdAt(requiredStringFromJson(record, "toolId", path), pointer(path, "toolId")),
     toolName: requiredStringFromJson(record, "toolName", path),
     inputs: frozenArgsFromJson(
       requiredFieldFromJson(record, "inputs", path),
       pointer(path, "inputs"),
+      recomputedFrozenArgs,
     ),
     output: sanitizedStringFromJson(
       requiredFieldFromJson(record, "output", path),
@@ -383,7 +456,10 @@ function approvalEventFromJson(value: unknown, path: string): ApprovalEvent {
   const record = requireRecord(value, path);
   assertKnownKeys(record, path, APPROVAL_EVENT_KEYS);
   return {
-    approvalId: asApprovalId(requiredStringFromJson(record, "approvalId", path)),
+    approvalId: asApprovalIdAt(
+      requiredStringFromJson(record, "approvalId", path),
+      pointer(path, "approvalId"),
+    ),
     role: requiredLiteralFromJson(record, "role", path, APPROVAL_ROLE_VALUES),
     decision: requiredLiteralFromJson(record, "decision", path, APPROVAL_DECISION_VALUES),
     signedToken: signedApprovalTokenFromJson(
@@ -406,7 +482,10 @@ function fileChangeFromJson(value: unknown, path: string): FileChange {
     path: requiredStringFromJson(record, "path", path),
     mode: requiredLiteralFromJson(record, "mode", path, FILE_CHANGE_MODE_VALUES),
     ...(beforeHash === undefined ? {} : { beforeHash }),
-    afterHash: asSha256Hex(requiredStringFromJson(record, "afterHash", path)),
+    afterHash: asSha256HexAt(
+      requiredStringFromJson(record, "afterHash", path),
+      pointer(path, "afterHash"),
+    ),
     linesAdded: requiredNonNegativeIntegerFromJson(record, "linesAdded", path),
     linesRemoved: requiredNonNegativeIntegerFromJson(record, "linesRemoved", path),
   };
@@ -435,7 +514,7 @@ function memoryWriteRefFromJson(value: unknown, path: string): MemoryWriteRef {
   return {
     store: requiredLiteralFromJson(record, "store", path, MEMORY_STORE_VALUES),
     slug: requiredStringFromJson(record, "slug", path),
-    hash: asSha256Hex(requiredStringFromJson(record, "hash", path)),
+    hash: asSha256HexAt(requiredStringFromJson(record, "hash", path), pointer(path, "hash")),
     citation: requiredStringFromJson(record, "citation", path),
   };
 }
@@ -457,9 +536,15 @@ function approvalClaimsFromJson(value: unknown, path: string): ApprovalClaims {
   return {
     signerIdentity: requiredStringFromJson(record, "signerIdentity", path),
     role: requiredLiteralFromJson(record, "role", path, APPROVAL_ROLE_VALUES),
-    receiptId: asReceiptId(requiredStringFromJson(record, "receiptId", path)),
-    ...(writeId === undefined ? {} : { writeId: asWriteId(writeId) }),
-    frozenArgsHash: asSha256Hex(requiredStringFromJson(record, "frozenArgsHash", path)),
+    receiptId: asReceiptIdAt(
+      requiredStringFromJson(record, "receiptId", path),
+      pointer(path, "receiptId"),
+    ),
+    ...(writeId === undefined ? {} : { writeId: asWriteIdAt(writeId, pointer(path, "writeId")) }),
+    frozenArgsHash: asSha256HexAt(
+      requiredStringFromJson(record, "frozenArgsHash", path),
+      pointer(path, "frozenArgsHash"),
+    ),
     riskClass,
     issuedAt: requiredDateFromJson(record, "issuedAt", path),
     expiresAt: requiredDateFromJson(record, "expiresAt", path),
@@ -494,19 +579,24 @@ function brokerTokenVerdictFromJson(value: unknown, path: string): BrokerTokenVe
   };
 }
 
-function externalWriteFromJson(value: unknown, path: string): ExternalWrite {
+function externalWriteFromJson(
+  value: unknown,
+  path: string,
+  recomputedFrozenArgs: Set<FrozenArgs>,
+): ExternalWrite {
   const record = requireRecord(value, path);
   assertKnownKeys(record, path, EXTERNAL_WRITE_KEYS);
   const approvedAt = optionalDateFromJson(record, "approvedAt", path);
   const result = requiredLiteralFromJson(record, "result", path, WRITE_RESULT_VALUES);
   const common = {
-    writeId: asWriteId(requiredStringFromJson(record, "writeId", path)),
+    writeId: asWriteIdAt(requiredStringFromJson(record, "writeId", path), pointer(path, "writeId")),
     action: requiredStringFromJson(record, "action", path),
     target: requiredStringFromJson(record, "target", path),
     idempotencyKey: requiredStringFromJson(record, "idempotencyKey", path),
     proposedDiff: frozenArgsFromJson(
       requiredFieldFromJson(record, "proposedDiff", path),
       pointer(path, "proposedDiff"),
+      recomputedFrozenArgs,
     ),
     approvalToken: nullableSignedApprovalTokenFromJson(
       requiredFieldFromJson(record, "approvalToken", path),
@@ -528,11 +618,17 @@ function externalWriteFromJson(value: unknown, path: string): ExternalWrite {
       return {
         ...common,
         result,
-        appliedDiff: requireNonNullFrozenArgs(appliedDiffValue, appliedDiffPath, "applied"),
+        appliedDiff: requireNonNullFrozenArgs(
+          appliedDiffValue,
+          appliedDiffPath,
+          "applied",
+          recomputedFrozenArgs,
+        ),
         postWriteVerify: requireNonNullFrozenArgs(
           postWriteVerifyValue,
           postWriteVerifyPath,
           "applied",
+          recomputedFrozenArgs,
         ),
       };
     case "rejected":
@@ -548,27 +644,46 @@ function externalWriteFromJson(value: unknown, path: string): ExternalWrite {
       return {
         ...common,
         result,
-        appliedDiff: requireNonNullFrozenArgs(appliedDiffValue, appliedDiffPath, "partial"),
-        postWriteVerify: nullableFrozenArgsFromJson(postWriteVerifyValue, postWriteVerifyPath),
+        appliedDiff: requireNonNullFrozenArgs(
+          appliedDiffValue,
+          appliedDiffPath,
+          "partial",
+          recomputedFrozenArgs,
+        ),
+        postWriteVerify: nullableFrozenArgsFromJson(
+          postWriteVerifyValue,
+          postWriteVerifyPath,
+          recomputedFrozenArgs,
+        ),
       };
     case "rollback":
       requireNullField(postWriteVerifyValue, postWriteVerifyPath, "rollback");
       return {
         ...common,
         result,
-        appliedDiff: requireNonNullFrozenArgs(appliedDiffValue, appliedDiffPath, "rollback"),
+        appliedDiff: requireNonNullFrozenArgs(
+          appliedDiffValue,
+          appliedDiffPath,
+          "rollback",
+          recomputedFrozenArgs,
+        ),
         postWriteVerify: null,
       };
   }
 }
 
-function requireNonNullFrozenArgs(value: unknown, path: string, state: string): FrozenArgs {
+function requireNonNullFrozenArgs(
+  value: unknown,
+  path: string,
+  state: string,
+  recomputedFrozenArgs: Set<FrozenArgs>,
+): FrozenArgs {
   if (value === null) {
     throw new Error(
       `${path}: must be a FrozenArgs envelope (null is invalid for state "${state}")`,
     );
   }
-  return frozenArgsFromJson(value, path);
+  return frozenArgsFromJson(value, path, recomputedFrozenArgs);
 }
 
 function requireNullField(value: unknown, path: string, state: string): void {
@@ -585,14 +700,21 @@ function optionalFrozenArgsToJsonValue(value: FrozenArgs | null): Record<string,
   return value === null ? null : frozenArgsToJsonValue(value);
 }
 
-function frozenArgsFromJson(value: unknown, path: string): FrozenArgs {
+function frozenArgsFromJson(
+  value: unknown,
+  path: string,
+  recomputedFrozenArgs: Set<FrozenArgs>,
+): FrozenArgs {
   const record = requireRecord(value, path);
   // Reject unknown sibling keys: every other object in the receipt rejects
   // them, so a `{canonicalJson, hash, extra}` envelope here would be the
   // single boundary where un-hashed shadow data could survive a round-trip.
   assertKnownKeys(record, path, FROZEN_ARGS_KEYS);
   const canonicalJson = requiredStringFromJson(record, "canonicalJson", path);
-  const expectedHash = asSha256Hex(requiredStringFromJson(record, "hash", path));
+  const expectedHash = asSha256HexAt(
+    requiredStringFromJson(record, "hash", path),
+    pointer(path, "hash"),
+  );
   const decoded: unknown = JSON.parse(canonicalJson);
   const frozen = FrozenArgs.freeze(decoded);
   if (frozen.canonicalJson !== canonicalJson) {
@@ -601,11 +723,16 @@ function frozenArgsFromJson(value: unknown, path: string): FrozenArgs {
   if (frozen.hash !== expectedHash) {
     throw new Error(`${pointer(path, "hash")}: does not match canonicalJson`);
   }
+  recomputedFrozenArgs.add(frozen);
   return frozen;
 }
 
-function nullableFrozenArgsFromJson(value: unknown, path: string): FrozenArgs | null {
-  return value === null ? null : frozenArgsFromJson(value, path);
+function nullableFrozenArgsFromJson(
+  value: unknown,
+  path: string,
+  recomputedFrozenArgs: Set<FrozenArgs>,
+): FrozenArgs | null {
+  return value === null ? null : frozenArgsFromJson(value, path, recomputedFrozenArgs);
 }
 
 function sanitizedStringToJson(value: SanitizedString): string {
@@ -778,7 +905,7 @@ function optionalSha256HexFromJson(
   basePath: string,
 ): Sha256Hex | undefined {
   const value = optionalStringFromJson(record, key, basePath);
-  return value === undefined ? undefined : asSha256Hex(value);
+  return value === undefined ? undefined : asSha256HexAt(value, pointer(basePath, key));
 }
 
 function requiredLiteralFromJson<T extends readonly string[]>(

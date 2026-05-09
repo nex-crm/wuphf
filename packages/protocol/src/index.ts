@@ -2,6 +2,7 @@ export type {
   AuditEventKind,
   AuditEventPayload,
   AuditEventRecord,
+  ChainFailureCode,
   ChainVerificationResult,
   MerkleRootHex,
   MerkleRootRecord,

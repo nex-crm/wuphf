@@ -353,6 +353,26 @@ describe("receipt schema", () => {
     expect(() => receiptFromJson(tamperedJson)).toThrow(/evilShadow.*not allowed/);
   });
 
+  it("receiptFromJson includes JSON pointer context for nested brand decoder failures", () => {
+    interface FrozenArgsWire {
+      hash: string;
+    }
+    interface ToolCallWire {
+      inputs: FrozenArgsWire;
+    }
+    interface ReceiptWire {
+      toolCalls: ToolCallWire[];
+    }
+    const parsed = JSON.parse(receiptToJson(validReceiptFixture())) as ReceiptWire;
+    const firstToolCall = parsed.toolCalls[0];
+    if (!firstToolCall) throw new Error("fixture must contain a tool call");
+    firstToolCall.inputs.hash = "not-a-sha256";
+
+    expect(() => receiptFromJson(JSON.stringify(parsed))).toThrow(
+      /\/toolCalls\/0\/inputs\/hash: not a sha256 hex digest/,
+    );
+  });
+
   it("rejects ToolCallId/ApprovalId containing colons (LOCAL_ID_RE excludes ':')", () => {
     expect(() => asToolCallId("tool:01")).toThrow();
     expect(() => asApprovalId("approval:01")).toThrow();
