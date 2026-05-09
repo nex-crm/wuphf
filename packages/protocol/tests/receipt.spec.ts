@@ -245,6 +245,32 @@ describe("receipt schema", () => {
     });
   });
 
+  it("does not invoke hostile accessors while validating receipt budgets", () => {
+    let sideEffectFired = false;
+    const input: Record<string, unknown> = { ...validReceiptFixture() };
+    Object.defineProperty(input, "toolCalls", {
+      enumerable: true,
+      configurable: true,
+      get() {
+        sideEffectFired = true;
+        return [];
+      },
+    });
+
+    const result = validateReceipt(input);
+
+    expect(sideEffectFired).toBe(false);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors).toEqual([
+        {
+          path: "",
+          message: expect.stringMatching(/accessor property.*toolCalls/),
+        },
+      ]);
+    }
+  });
+
   it("rejects oversized FrozenArgs JSON before decoding tool call inputs", () => {
     const receipt = receiptJsonFixture();
     const toolCall = nonNull(receipt.toolCalls[0]);
@@ -1162,6 +1188,61 @@ describe("receipt schema", () => {
     };
 
     expectReceiptValidationError(tampered, "/status", /must not be ok.*write did not apply/);
+  });
+
+  it.each([
+    {
+      name: "approval_pending with applied write evidence",
+      receipt: () => ({ ...validReceiptFixture(), status: "approval_pending" }) as ReceiptSnapshot,
+      path: "/status",
+      message: /must not be approval_pending.*write applied/,
+    },
+    {
+      name: "stalled with applied write evidence",
+      receipt: () => ({ ...validReceiptFixture(), status: "stalled" }) as ReceiptSnapshot,
+      path: "/status",
+      message: /must not be stalled.*write applied/,
+    },
+    {
+      name: "rejected without rejection evidence",
+      receipt: () => ({ ...validReceiptFixture(), status: "rejected" }) as ReceiptSnapshot,
+      path: "/status",
+      message: /must include rejected approval or rejected write evidence/,
+    },
+    {
+      name: "error without failure evidence",
+      receipt: () => ({ ...validReceiptFixture(), status: "error" }) as ReceiptSnapshot,
+      path: "/status",
+      message: /must include failure evidence/,
+    },
+    {
+      name: "rejected approval matching an applied write",
+      receipt: () => {
+        const fixture = validReceiptFixture();
+        const firstApproval = nonNull(fixture.approvals[0]);
+        return {
+          ...fixture,
+          status: "rejected",
+          approvals: [{ ...firstApproval, decision: "reject" }],
+        } as ReceiptSnapshot;
+      },
+      path: "/writes/0/result",
+      message: /matching approval was rejected/,
+    },
+  ])("rejects receipt status/evidence contradiction: $name", ({ receipt, path, message }) => {
+    expectReceiptValidationError(receipt(), path, message);
+  });
+
+  it("accepts rejected status when rejected write evidence is present", () => {
+    const fixture = validReceiptFixture();
+    const firstWrite = nonNull(fixture.writes[0]);
+    const receipt: ReceiptSnapshot = {
+      ...fixture,
+      status: "rejected",
+      writes: [writeForResult(firstWrite, "rejected")],
+    };
+
+    expect(validateReceipt(receipt)).toEqual({ ok: true });
   });
 
   it("ExternalWrite: validator rejects result='applied' with null appliedDiff (per-state invariant)", () => {

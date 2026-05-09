@@ -1,3 +1,7 @@
+import { Buffer } from "node:buffer";
+
+import { MAX_SANITIZED_STRING_BYTES } from "./budgets.ts";
+
 export type SanitizedStringPolicy = "strip-zero-width" | "allow-zwj";
 
 export interface SanitizedStringOptions {
@@ -19,7 +23,15 @@ export class SanitizedString {
   }
 
   static fromUnknown(input: unknown, options: SanitizedStringOptions = {}): SanitizedString {
-    const value = sanitizeText(coerceToString(input, options), options);
+    if (typeof input === "string") {
+      assertSanitizedStringByteBudget(input, "SanitizedString input bytes");
+    }
+    const coerced = coerceToString(input, options);
+    if (typeof input === "object" && input !== null) {
+      assertSanitizedStringByteBudget(coerced, "SanitizedString JSON projection bytes");
+    }
+    const value = sanitizeText(coerced, options);
+    assertSanitizedStringByteBudget(value, "SanitizedString value bytes");
     return new SanitizedString(value);
   }
 
@@ -87,6 +99,7 @@ function sanitizeJsonValue(
 
   switch (typeof value) {
     case "string":
+      assertSanitizedStringByteBudget(value, `SanitizedString JSON string at ${path} bytes`);
       return sanitizeText(value, options);
     case "number":
       if (!Number.isFinite(value)) {
@@ -117,6 +130,15 @@ function sanitizeJsonValue(
   }
 
   return sanitizeJsonObject(value, options, depth, path, ancestors);
+}
+
+function assertSanitizedStringByteBudget(value: string, label: string): void {
+  const bytes = Buffer.byteLength(value, "utf8");
+  if (bytes > MAX_SANITIZED_STRING_BYTES) {
+    throw new Error(
+      `${label} exceeds MAX_SANITIZED_STRING_BYTES (got ${bytes}, max ${MAX_SANITIZED_STRING_BYTES})`,
+    );
+  }
 }
 
 function sanitizeJsonArray(

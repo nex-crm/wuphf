@@ -1,5 +1,6 @@
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
+import { MAX_SANITIZED_STRING_BYTES } from "../src/budgets.ts";
 import { SanitizedString, type SanitizedStringPolicy } from "../src/sanitized-string.ts";
 
 type JsonPrimitive = null | boolean | number | string;
@@ -158,6 +159,27 @@ describe("SanitizedString", () => {
     expect(SanitizedString.fromUnknown(743).value).toBe("743");
     expect(SanitizedString.fromUnknown(true).value).toBe("true");
     expect(SanitizedString.fromUnknown(false).value).toBe("false");
+  });
+
+  it("enforces the byte budget at the direct string boundary", () => {
+    expect(SanitizedString.fromUnknown("x".repeat(MAX_SANITIZED_STRING_BYTES)).value).toHaveLength(
+      MAX_SANITIZED_STRING_BYTES,
+    );
+
+    expect(() => SanitizedString.fromUnknown("x".repeat(MAX_SANITIZED_STRING_BYTES + 1))).toThrow(
+      /SanitizedString input bytes exceeds MAX_SANITIZED_STRING_BYTES/,
+    );
+  });
+
+  it("enforces the byte budget on object JSON projections", () => {
+    const jsonOverheadBytes = '{"v":""}'.length;
+    const atCap = { v: "x".repeat(MAX_SANITIZED_STRING_BYTES - jsonOverheadBytes) };
+    const overCap = { v: "x".repeat(MAX_SANITIZED_STRING_BYTES - jsonOverheadBytes + 1) };
+
+    expect(SanitizedString.fromUnknown(atCap).value).toHaveLength(MAX_SANITIZED_STRING_BYTES);
+    expect(() => SanitizedString.fromUnknown(overCap)).toThrow(
+      /SanitizedString JSON projection bytes exceeds MAX_SANITIZED_STRING_BYTES/,
+    );
   });
 
   it("strips zero-width characters by default and can preserve ZWJ by policy", () => {

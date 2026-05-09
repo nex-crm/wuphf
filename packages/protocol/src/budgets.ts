@@ -1,5 +1,5 @@
 import type { FrozenArgs } from "./frozen-args.ts";
-import type { ApprovalClaims, ExternalWrite, ReceiptSnapshot } from "./receipt-types.ts";
+import type { ApprovalClaims, ReceiptSnapshot } from "./receipt-types.ts";
 import type { SanitizedString } from "./sanitized-string.ts";
 
 export type BudgetValidationResult = { ok: true } | { ok: false; reason: string };
@@ -151,6 +151,9 @@ export function validateReceiptBudget(receipt: ReceiptSnapshot): BudgetValidatio
   const stringFloor = validateSerializableStringFloor(receipt, MAX_RECEIPT_BYTES);
   if (!stringFloor.ok) return stringFloor;
 
+  const serializationSafety = validateJsonStringifySafety(receipt, "$", new Set<object>());
+  if (!serializationSafety.ok) return serializationSafety;
+
   try {
     const serialized = JSON.stringify(receipt);
     if (serialized === undefined) {
@@ -175,19 +178,19 @@ export function validateReceiptBudget(receipt: ReceiptSnapshot): BudgetValidatio
 }
 
 export function validateFrozenArgsBudget(frozen: FrozenArgs): BudgetValidationResult {
+  const canonicalJson = stringProperty(frozen, "canonicalJson");
+  if (canonicalJson === undefined) return { ok: true };
   return validateUtf8StringBudget(
-    frozen.canonicalJson,
+    canonicalJson,
     MAX_FROZEN_ARGS_BYTES,
     "FrozenArgs canonicalJson bytes",
   );
 }
 
 export function validateSanitizedStringBudget(s: SanitizedString): BudgetValidationResult {
-  return validateUtf8StringBudget(
-    s.value,
-    MAX_SANITIZED_STRING_BYTES,
-    "SanitizedString value bytes",
-  );
+  const value = stringProperty(s, "value");
+  if (value === undefined) return { ok: true };
+  return validateUtf8StringBudget(value, MAX_SANITIZED_STRING_BYTES, "SanitizedString value bytes");
 }
 
 export function validateAuditEventBodyBudget(body: Uint8Array): BudgetValidationResult {
@@ -216,25 +219,41 @@ export function validateMerkleRootCertChainBudget(certChainPem: string): BudgetV
 }
 
 export function validateApprovalTokenLifetime(claims: ApprovalClaims): BudgetValidationResult {
-  return validateApprovalTokenLifetimeValues(claims.issuedAt, claims.expiresAt);
+  const issuedAt = objectProperty(claims, "issuedAt");
+  const expiresAt = objectProperty(claims, "expiresAt");
+  if (!(issuedAt instanceof Date) || !(expiresAt instanceof Date)) return { ok: true };
+  return validateApprovalTokenLifetimeValues(issuedAt, expiresAt);
 }
 
 function validateReceiptCollectionBudgets(receipt: ReceiptSnapshot): BudgetValidationResult {
   const checks: readonly [label: string, value: unknown, budget: number][] = [
-    ["receipt toolCalls length", receipt.toolCalls, MAX_TOOL_CALLS_PER_RECEIPT],
-    ["receipt filesChanged length", receipt.filesChanged, MAX_RECEIPT_FILES_CHANGED],
-    ["receipt commits length", receipt.commits, MAX_RECEIPT_COMMITS],
-    ["receipt writes length", receipt.writes, MAX_RECEIPT_WRITES],
-    ["receipt approvals length", receipt.approvals, MAX_RECEIPT_APPROVALS],
-    ["receipt sourceReads length", receipt.sourceReads, MAX_RECEIPT_SOURCE_READS],
-    ["receipt notebookWrites length", receipt.notebookWrites, MAX_RECEIPT_NOTEBOOK_WRITES],
-    ["receipt wikiWrites length", receipt.wikiWrites, MAX_RECEIPT_WIKI_WRITES],
+    ["receipt toolCalls length", objectProperty(receipt, "toolCalls"), MAX_TOOL_CALLS_PER_RECEIPT],
+    [
+      "receipt filesChanged length",
+      objectProperty(receipt, "filesChanged"),
+      MAX_RECEIPT_FILES_CHANGED,
+    ],
+    ["receipt commits length", objectProperty(receipt, "commits"), MAX_RECEIPT_COMMITS],
+    ["receipt writes length", objectProperty(receipt, "writes"), MAX_RECEIPT_WRITES],
+    ["receipt approvals length", objectProperty(receipt, "approvals"), MAX_RECEIPT_APPROVALS],
+    [
+      "receipt sourceReads length",
+      objectProperty(receipt, "sourceReads"),
+      MAX_RECEIPT_SOURCE_READS,
+    ],
+    [
+      "receipt notebookWrites length",
+      objectProperty(receipt, "notebookWrites"),
+      MAX_RECEIPT_NOTEBOOK_WRITES,
+    ],
+    ["receipt wikiWrites length", objectProperty(receipt, "wikiWrites"), MAX_RECEIPT_WIKI_WRITES],
   ];
 
   for (const [label, value, budget] of checks) {
-    if (!Array.isArray(value)) continue;
+    const length = arrayLength(value);
+    if (length === undefined) continue;
     try {
-      assertWithinBudget(value.length, budget, label);
+      assertWithinBudget(length, budget, label);
     } catch (err) {
       return { ok: false, reason: err instanceof Error ? err.message : String(err) };
     }
@@ -244,60 +263,64 @@ function validateReceiptCollectionBudgets(receipt: ReceiptSnapshot): BudgetValid
 }
 
 function validateReceiptNestedBudgets(receipt: ReceiptSnapshot): BudgetValidationResult {
-  const topLevelStrings: readonly [label: string, value: SanitizedString | undefined][] = [
-    ["receipt finalMessage", receipt.finalMessage],
-    ["receipt error", receipt.error],
+  const topLevelStrings: readonly [label: string, value: unknown][] = [
+    ["receipt finalMessage", objectProperty(receipt, "finalMessage")],
+    ["receipt error", objectProperty(receipt, "error")],
   ];
   for (const [label, value] of topLevelStrings) {
     const result = validateMaybeSanitizedStringBudget(value, label);
     if (!result.ok) return result;
   }
 
-  const toolCalls = arrayOrEmpty(receipt.toolCalls);
+  const toolCalls = arrayOrEmpty(objectProperty(receipt, "toolCalls"));
   for (let i = 0; i < toolCalls.length; i++) {
-    const toolCall = toolCalls[i];
+    const toolCall = arrayElement(toolCalls, i);
     if (toolCall === undefined) continue;
-    const inputs = validateMaybeFrozenArgsBudget(toolCall.inputs, `receipt toolCalls[${i}].inputs`);
+    const inputs = validateMaybeFrozenArgsBudget(
+      objectProperty(toolCall, "inputs"),
+      `receipt toolCalls[${i}].inputs`,
+    );
     if (!inputs.ok) return inputs;
     const output = validateMaybeSanitizedStringBudget(
-      toolCall.output,
+      objectProperty(toolCall, "output"),
       `receipt toolCalls[${i}].output`,
     );
     if (!output.ok) return output;
-    if (toolCall.error !== undefined) {
+    const toolCallError = objectProperty(toolCall, "error");
+    if (toolCallError !== undefined) {
       const error = validateMaybeSanitizedStringBudget(
-        toolCall.error,
+        toolCallError,
         `receipt toolCalls[${i}].error`,
       );
       if (!error.ok) return error;
     }
   }
 
-  const approvals = arrayOrEmpty(receipt.approvals);
+  const approvals = arrayOrEmpty(objectProperty(receipt, "approvals"));
   for (let i = 0; i < approvals.length; i++) {
-    const approval = approvals[i];
+    const approval = arrayElement(approvals, i);
     if (approval === undefined) continue;
     const result = validateMaybeSignedApprovalTokenBudget(
-      approval.signedToken,
+      objectProperty(approval, "signedToken"),
       `receipt approvals[${i}].signedToken`,
     );
     if (!result.ok) return result;
   }
 
-  const commits = arrayOrEmpty(receipt.commits);
+  const commits = arrayOrEmpty(objectProperty(receipt, "commits"));
   for (let i = 0; i < commits.length; i++) {
-    const commit = commits[i];
+    const commit = arrayElement(commits, i);
     if (commit === undefined) continue;
     const message = validateMaybeSanitizedStringBudget(
-      commit.message,
+      objectProperty(commit, "message"),
       `receipt commits[${i}].message`,
     );
     if (!message.ok) return message;
   }
 
-  const writes = arrayOrEmpty(receipt.writes);
+  const writes = arrayOrEmpty(objectProperty(receipt, "writes"));
   for (let i = 0; i < writes.length; i++) {
-    const write = writes[i];
+    const write = arrayElement(writes, i);
     if (write === undefined) continue;
     const result = validateExternalWriteBudget(write, i);
     if (!result.ok) return result;
@@ -306,36 +329,41 @@ function validateReceiptNestedBudgets(receipt: ReceiptSnapshot): BudgetValidatio
   return { ok: true };
 }
 
-function validateExternalWriteBudget(write: ExternalWrite, index: number): BudgetValidationResult {
+function validateExternalWriteBudget(write: unknown, index: number): BudgetValidationResult {
   const proposed = validateMaybeFrozenArgsBudget(
-    write.proposedDiff,
+    objectProperty(write, "proposedDiff"),
     `receipt writes[${index}].proposedDiff`,
   );
   if (!proposed.ok) return proposed;
-  if (write.appliedDiff !== null) {
+  const appliedDiff = objectProperty(write, "appliedDiff");
+  if (appliedDiff !== null) {
     const applied = validateMaybeFrozenArgsBudget(
-      write.appliedDiff,
+      appliedDiff,
       `receipt writes[${index}].appliedDiff`,
     );
     if (!applied.ok) return applied;
   }
-  if (write.postWriteVerify !== null) {
+  const postWriteVerify = objectProperty(write, "postWriteVerify");
+  if (postWriteVerify !== null) {
     const verify = validateMaybeFrozenArgsBudget(
-      write.postWriteVerify,
+      postWriteVerify,
       `receipt writes[${index}].postWriteVerify`,
     );
     if (!verify.ok) return verify;
   }
-  if (write.approvalToken !== null) {
+  const approvalToken = objectProperty(write, "approvalToken");
+  if (approvalToken !== null) {
     const token = validateMaybeSignedApprovalTokenBudget(
-      write.approvalToken,
+      approvalToken,
       `receipt writes[${index}].approvalToken`,
     );
     if (!token.ok) return token;
   }
-  if (write.failureMetadata?.terminalReason !== undefined) {
+  const failureMetadata = objectProperty(write, "failureMetadata");
+  const terminalReason = objectProperty(failureMetadata, "terminalReason");
+  if (terminalReason !== undefined) {
     const terminal = validateMaybeSanitizedStringBudget(
-      write.failureMetadata.terminalReason,
+      terminalReason,
       `receipt writes[${index}].failureMetadata.terminalReason`,
     );
     if (!terminal.ok) return terminal;
@@ -404,7 +432,7 @@ function validateApprovalTokenLifetimeValues(
   }
 }
 
-function arrayOrEmpty<T>(value: readonly T[]): readonly T[] {
+function arrayOrEmpty(value: unknown): readonly unknown[] {
   return Array.isArray(value) ? value : [];
 }
 
@@ -412,6 +440,15 @@ function objectProperty(value: unknown, key: string): unknown | undefined {
   if (typeof value !== "object" || value === null) return undefined;
   const descriptor = Object.getOwnPropertyDescriptor(value, key);
   return descriptor !== undefined && "value" in descriptor ? descriptor.value : undefined;
+}
+
+function arrayLength(value: unknown): number | undefined {
+  const length = objectProperty(value, "length");
+  return typeof length === "number" ? length : undefined;
+}
+
+function arrayElement(value: readonly unknown[], index: number): unknown | undefined {
+  return objectProperty(value, String(index));
 }
 
 function stringProperty(value: unknown, key: string): string | undefined {
@@ -473,7 +510,10 @@ function sumSerializableStringBytes(
     for (const key of Reflect.ownKeys(value)) {
       if (typeof key === "symbol") continue;
       const descriptor = Object.getOwnPropertyDescriptor(value, key);
-      if (descriptor === undefined || !("value" in descriptor)) continue;
+      if (descriptor === undefined) continue;
+      if (isAccessorDescriptor(descriptor)) {
+        return { ok: false, reason: `receipt serialized bytes: accessor property at ${key}` };
+      }
       const child = sumSerializableStringBytes(descriptor.value, budget - bytes, ancestors);
       if (!child.ok) return child;
       bytes += child.bytes;
@@ -489,6 +529,62 @@ function sumSerializableStringBytes(
   }
 
   return { ok: true, bytes };
+}
+
+function validateJsonStringifySafety(
+  value: unknown,
+  path: string,
+  ancestors: Set<object>,
+): BudgetValidationResult {
+  if (value === null || typeof value !== "object") return { ok: true };
+  if (ancestors.has(value)) {
+    return { ok: false, reason: "receipt serialized bytes: receipt contains a cycle" };
+  }
+
+  const toJsonDescriptor = findToJsonDescriptor(value);
+  if (toJsonDescriptor !== undefined) {
+    if (isAccessorDescriptor(toJsonDescriptor)) {
+      return { ok: false, reason: `receipt serialized bytes: accessor toJSON at ${path}` };
+    }
+    if (typeof toJsonDescriptor.value === "function") {
+      if (value instanceof Date && toJsonDescriptor.value === Date.prototype.toJSON) {
+        return { ok: true };
+      }
+      return { ok: false, reason: `receipt serialized bytes: custom toJSON at ${path}` };
+    }
+  }
+
+  ancestors.add(value);
+  try {
+    for (const key of Reflect.ownKeys(value)) {
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (descriptor === undefined) continue;
+      const childPath = `${path}.${typeof key === "symbol" ? key.toString() : key}`;
+      if (isAccessorDescriptor(descriptor)) {
+        return { ok: false, reason: `receipt serialized bytes: accessor property at ${childPath}` };
+      }
+      const result = validateJsonStringifySafety(descriptor.value, childPath, ancestors);
+      if (!result.ok) return result;
+    }
+  } finally {
+    ancestors.delete(value);
+  }
+
+  return { ok: true };
+}
+
+function findToJsonDescriptor(value: object): PropertyDescriptor | undefined {
+  let current: object | null = value;
+  while (current !== null) {
+    const descriptor = Object.getOwnPropertyDescriptor(current, "toJSON");
+    if (descriptor !== undefined) return descriptor;
+    current = Object.getPrototypeOf(current);
+  }
+  return undefined;
+}
+
+function isAccessorDescriptor(descriptor: PropertyDescriptor): boolean {
+  return "get" in descriptor || "set" in descriptor;
 }
 
 function utf8ByteLengthUpTo(value: string, budget: number): number {

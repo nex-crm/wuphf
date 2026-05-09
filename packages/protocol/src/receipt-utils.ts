@@ -12,7 +12,8 @@ export function hasOwn(record: Readonly<Record<string, unknown>>, key: string): 
 }
 
 export function recordValue(record: Readonly<Record<string, unknown>>, key: string): unknown {
-  return record[key];
+  const descriptor = Object.getOwnPropertyDescriptor(record, key);
+  return descriptor !== undefined && "value" in descriptor ? descriptor.value : undefined;
 }
 
 export function addError(errors: ReceiptValidationError[], path: string, message: string): void {

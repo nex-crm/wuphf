@@ -38,6 +38,7 @@ import {
   isWriteId,
   type MemoryWriteRef,
   type ReceiptSnapshot,
+  type ReceiptStatus,
   type ReceiptValidationError,
   type ReceiptValidationResult,
   type SourceRead,
@@ -202,6 +203,44 @@ export const EXTERNAL_WRITE_KEYS: ReadonlySet<string> = new Set<string>(EXTERNAL
 interface ReceiptValidationContext {
   readonly recomputedFrozenArgs: ReadonlySet<FrozenArgs>;
 }
+
+interface ReceiptWriteEvidence {
+  readonly index: number;
+  readonly result: unknown;
+  readonly resultPath: string;
+  readonly writeId: unknown;
+}
+
+interface ReceiptStatusEvidence {
+  readonly statusPath: string;
+  readonly hasRejectedApproval: boolean;
+  readonly hasFailedToolCall: boolean;
+  readonly hasNonEmptyError: boolean;
+  readonly hasRejectionEvidence: boolean;
+  readonly hasFailureEvidence: boolean;
+  readonly rejectedApprovalWriteIds: ReadonlySet<string>;
+  readonly writes: readonly ReceiptWriteEvidence[];
+}
+
+type ReceiptStatusEvidenceCheck = (
+  evidence: ReceiptStatusEvidence,
+  errors: ReceiptValidationError[],
+) => void;
+
+const RECEIPT_STATUS_EVIDENCE_RULES = {
+  ok: [
+    rejectRejectedApprovalsOutsideRejectedOrError,
+    rejectFailedToolCallsForOk,
+    rejectNonAppliedWritesForOk,
+  ],
+  approval_pending: [
+    rejectRejectedApprovalsOutsideRejectedOrError,
+    rejectAppliedWritesForApprovalPending,
+  ],
+  rejected: [requireRejectionEvidenceForRejected, rejectAppliedWritesForRejectedApprovals],
+  error: [requireFailureEvidenceForError],
+  stalled: [rejectRejectedApprovalsOutsideRejectedOrError, rejectAppliedWritesForStalled],
+} as const satisfies Record<ReceiptStatus, readonly ReceiptStatusEvidenceCheck[]>;
 
 const EMPTY_VALIDATION_CONTEXT: ReceiptValidationContext = {
   recomputedFrozenArgs: new Set<FrozenArgs>(),
@@ -369,42 +408,179 @@ function validateReceiptStatusEvidence(
   errors: ReceiptValidationError[],
 ): void {
   const status = recordValue(value, "status");
-  if (
-    typeof status !== "string" ||
-    !RECEIPT_STATUS_VALUES.includes(status as (typeof RECEIPT_STATUS_VALUES)[number])
-  ) {
+  if (!isReceiptStatusValue(status)) {
     return;
   }
 
+  const evidence = collectReceiptStatusEvidence(value, path);
+  for (const check of RECEIPT_STATUS_EVIDENCE_RULES[status]) {
+    check(evidence, errors);
+  }
+}
+
+function isReceiptStatusValue(value: unknown): value is ReceiptStatus {
+  return (
+    typeof value === "string" &&
+    RECEIPT_STATUS_VALUES.includes(value as (typeof RECEIPT_STATUS_VALUES)[number])
+  );
+}
+
+function collectReceiptStatusEvidence(
+  value: Readonly<Record<string, unknown>>,
+  path: string,
+): ReceiptStatusEvidence {
   const statusPath = pointer(path, "status");
+  const rejectedApprovalWriteIds = new Set<string>();
   const approvals = recordValue(value, "approvals");
+  let hasRejectedApproval = false;
   if (Array.isArray(approvals)) {
-    const hasRejectedApproval = approvals.some(
-      (approval) => isRecord(approval) && recordValue(approval, "decision") === "reject",
-    );
-    if (hasRejectedApproval && status !== "rejected" && status !== "error") {
-      addError(errors, statusPath, "must be rejected or error when approvals include a rejection");
+    for (let i = 0; i < approvals.length; i += 1) {
+      const approval = arrayDataValue(approvals, i);
+      if (!isRecord(approval) || recordValue(approval, "decision") !== "reject") continue;
+      hasRejectedApproval = true;
+      const signedToken = recordValue(approval, "signedToken");
+      const claims = isRecord(signedToken) ? recordValue(signedToken, "claims") : undefined;
+      const writeId = isRecord(claims) ? recordValue(claims, "writeId") : undefined;
+      if (typeof writeId === "string") {
+        rejectedApprovalWriteIds.add(writeId);
+      }
     }
   }
 
-  if (status !== "ok") {
-    return;
-  }
-
   const toolCalls = recordValue(value, "toolCalls");
-  if (
-    Array.isArray(toolCalls) &&
-    toolCalls.some((toolCall) => isRecord(toolCall) && recordValue(toolCall, "status") === "error")
-  ) {
-    addError(errors, statusPath, "must not be ok when any tool call failed");
+  let hasFailedToolCall = false;
+  if (Array.isArray(toolCalls)) {
+    hasFailedToolCall = toolCalls.some((_, index) => {
+      const toolCall = arrayDataValue(toolCalls, index);
+      return isRecord(toolCall) && recordValue(toolCall, "status") === "error";
+    });
   }
 
+  const writeEvidence: ReceiptWriteEvidence[] = [];
   const writes = recordValue(value, "writes");
-  if (
-    Array.isArray(writes) &&
-    writes.some((write) => isRecord(write) && recordValue(write, "result") !== "applied")
-  ) {
-    addError(errors, statusPath, "must not be ok when any write did not apply");
+  if (Array.isArray(writes)) {
+    for (let i = 0; i < writes.length; i += 1) {
+      const write = arrayDataValue(writes, i);
+      if (!isRecord(write)) continue;
+      const writePath = pointer(pointer(path, "writes"), String(i));
+      writeEvidence.push({
+        index: i,
+        result: recordValue(write, "result"),
+        resultPath: pointer(writePath, "result"),
+        writeId: recordValue(write, "writeId"),
+      });
+    }
+  }
+
+  const errorValue = recordValue(value, "error");
+  const errorText =
+    errorValue instanceof SanitizedString
+      ? recordValue(errorValue as unknown as Readonly<Record<string, unknown>>, "value")
+      : undefined;
+  const hasNonEmptyError = typeof errorText === "string" && errorText.length > 0;
+  const hasRejectedWrite = writeEvidence.some((write) => write.result === "rejected");
+  const hasFailedWrite = writeEvidence.some((write) => write.result !== "applied");
+
+  return {
+    statusPath,
+    hasRejectedApproval,
+    hasFailedToolCall,
+    hasNonEmptyError,
+    hasRejectionEvidence: hasRejectedApproval || hasRejectedWrite,
+    hasFailureEvidence:
+      hasRejectedApproval || hasFailedToolCall || hasFailedWrite || hasNonEmptyError,
+    rejectedApprovalWriteIds,
+    writes: writeEvidence,
+  };
+}
+
+function rejectRejectedApprovalsOutsideRejectedOrError(
+  evidence: ReceiptStatusEvidence,
+  errors: ReceiptValidationError[],
+): void {
+  if (evidence.hasRejectedApproval) {
+    addError(
+      errors,
+      evidence.statusPath,
+      "must be rejected or error when approvals include a rejection",
+    );
+  }
+}
+
+function rejectFailedToolCallsForOk(
+  evidence: ReceiptStatusEvidence,
+  errors: ReceiptValidationError[],
+): void {
+  if (evidence.hasFailedToolCall) {
+    addError(errors, evidence.statusPath, "must not be ok when any tool call failed");
+  }
+}
+
+function rejectNonAppliedWritesForOk(
+  evidence: ReceiptStatusEvidence,
+  errors: ReceiptValidationError[],
+): void {
+  if (evidence.writes.some((write) => write.result !== "applied")) {
+    addError(errors, evidence.statusPath, "must not be ok when any write did not apply");
+  }
+}
+
+function rejectAppliedWritesForApprovalPending(
+  evidence: ReceiptStatusEvidence,
+  errors: ReceiptValidationError[],
+): void {
+  if (evidence.writes.some((write) => write.result === "applied")) {
+    addError(errors, evidence.statusPath, "must not be approval_pending when any write applied");
+  }
+}
+
+function requireRejectionEvidenceForRejected(
+  evidence: ReceiptStatusEvidence,
+  errors: ReceiptValidationError[],
+): void {
+  if (!evidence.hasRejectionEvidence) {
+    addError(
+      errors,
+      evidence.statusPath,
+      "must include rejected approval or rejected write evidence",
+    );
+  }
+}
+
+function rejectAppliedWritesForRejectedApprovals(
+  evidence: ReceiptStatusEvidence,
+  errors: ReceiptValidationError[],
+): void {
+  for (const write of evidence.writes) {
+    if (
+      write.result === "applied" &&
+      typeof write.writeId === "string" &&
+      evidence.rejectedApprovalWriteIds.has(write.writeId)
+    ) {
+      addError(
+        errors,
+        write.resultPath,
+        "must not be applied when the matching approval was rejected",
+      );
+    }
+  }
+}
+
+function requireFailureEvidenceForError(
+  evidence: ReceiptStatusEvidence,
+  errors: ReceiptValidationError[],
+): void {
+  if (!evidence.hasFailureEvidence) {
+    addError(errors, evidence.statusPath, "must include failure evidence when status is error");
+  }
+}
+
+function rejectAppliedWritesForStalled(
+  evidence: ReceiptStatusEvidence,
+  errors: ReceiptValidationError[],
+): void {
+  if (evidence.writes.some((write) => write.result === "applied")) {
+    addError(errors, evidence.statusPath, "must not be stalled when any write applied");
   }
 }
 
@@ -722,13 +898,19 @@ function validateExternalWrite(
       // correctness no longer depends on validator ordering.
       if (proposedDiff instanceof FrozenArgs) {
         try {
-          const reFrozen = FrozenArgs.fromCanonical(proposedDiff.canonicalJson);
-          if (recordValue(claims, "frozenArgsHash") !== reFrozen.hash) {
-            addError(
-              errors,
-              pointer(claimsPath, "frozenArgsHash"),
-              "must match this write's proposedDiff hash",
-            );
+          const proposedCanonicalJson = recordValue(
+            proposedDiff as unknown as Readonly<Record<string, unknown>>,
+            "canonicalJson",
+          );
+          if (typeof proposedCanonicalJson === "string") {
+            const reFrozen = FrozenArgs.fromCanonical(proposedCanonicalJson);
+            if (recordValue(claims, "frozenArgsHash") !== reFrozen.hash) {
+              addError(
+                errors,
+                pointer(claimsPath, "frozenArgsHash"),
+                "must match this write's proposedDiff hash",
+              );
+            }
           }
         } catch {
           // validateFrozenArgs already reported the field-level reason for the
@@ -777,11 +959,12 @@ function validateRequired(
   validator: (value: unknown, path: string, errors: ReceiptValidationError[]) => void,
 ): void {
   const fieldPath = pointer(basePath, key);
-  if (!hasOwn(record, key) || record[key] === undefined) {
+  const value = recordValue(record, key);
+  if (!hasOwn(record, key) || value === undefined) {
     addError(errors, fieldPath, "is required");
     return;
   }
-  validator(record[key], fieldPath, errors);
+  validator(value, fieldPath, errors);
 }
 
 function validateOptional(
@@ -791,8 +974,9 @@ function validateOptional(
   errors: ReceiptValidationError[],
   validator: (value: unknown, path: string, errors: ReceiptValidationError[]) => void,
 ): void {
-  if (!hasOwn(record, key) || record[key] === undefined) return;
-  validator(record[key], pointer(basePath, key), errors);
+  const value = recordValue(record, key);
+  if (!hasOwn(record, key) || value === undefined) return;
+  validator(value, pointer(basePath, key), errors);
 }
 
 function validateArray(
@@ -806,8 +990,13 @@ function validateArray(
     return;
   }
   for (let i = 0; i < value.length; i += 1) {
-    itemValidator(value[i], pointer(path, String(i)), errors);
+    itemValidator(arrayDataValue(value, i), pointer(path, String(i)), errors);
   }
+}
+
+function arrayDataValue(value: readonly unknown[], index: number): unknown {
+  const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+  return descriptor !== undefined && "value" in descriptor ? descriptor.value : undefined;
 }
 
 function validateNullable(
@@ -989,11 +1178,14 @@ function validateFrozenArgs(
     addError(errors, path, "must be FrozenArgs");
     return;
   }
-  if (typeof value.canonicalJson !== "string") {
+  const frozenRecord = value as unknown as Readonly<Record<string, unknown>>;
+  const canonicalJson = recordValue(frozenRecord, "canonicalJson");
+  const hash = recordValue(frozenRecord, "hash");
+  if (typeof canonicalJson !== "string") {
     addError(errors, pointer(path, "canonicalJson"), "must be a string");
     return;
   }
-  if (!isSha256Hex(value.hash)) {
+  if (!isSha256Hex(hash)) {
     addError(errors, pointer(path, "hash"), "must be a sha256 hex digest");
     return;
   }
@@ -1005,8 +1197,8 @@ function validateFrozenArgs(
     return;
   }
   try {
-    const reFrozen = FrozenArgs.fromCanonical(value.canonicalJson);
-    if (reFrozen.hash !== value.hash) {
+    const reFrozen = FrozenArgs.fromCanonical(canonicalJson);
+    if (reFrozen.hash !== hash) {
       addError(errors, pointer(path, "hash"), "does not match canonicalJson");
     }
   } catch (err) {
@@ -1030,13 +1222,17 @@ function validateSanitizedString(
     addError(errors, path, "must be SanitizedString");
     return;
   }
-  if (typeof value.value !== "string") {
+  const sanitizedValue = recordValue(
+    value as unknown as Readonly<Record<string, unknown>>,
+    "value",
+  );
+  if (typeof sanitizedValue !== "string") {
     addError(errors, pointer(path, "value"), "must be a string");
     return;
   }
   try {
-    const reSanitized = SanitizedString.fromUnknown(value.value);
-    if (reSanitized.value !== value.value) {
+    const reSanitized = SanitizedString.fromUnknown(sanitizedValue);
+    if (reSanitized.value !== sanitizedValue) {
       addError(errors, path, "must already be sanitized");
     }
   } catch (err) {
