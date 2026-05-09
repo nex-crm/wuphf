@@ -1,3 +1,9 @@
+# Runner image maintenance:
+# - macOS release signing/notarization: macos-14. REVIEW BY 2026-06-01.
+# - Windows signing: windows-2022. REVIEW BY 2026-09-01.
+# - Linux build/publish helpers: ubuntu-24.04. REVIEW BY 2026-09-01.
+# See apps/installer-stub/docs/runbooks/runner-image-maintenance.md before
+# changing labels; image upgrades require a signed rewrite smoke tag.
 name: Release Rewrite
 
 on:
