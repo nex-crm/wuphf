@@ -19,6 +19,7 @@ import {
   merkleRootRecordToJsonValue,
   PAYLOAD_KIND_METADATA,
   serializeAuditEventRecordForHash,
+  validateAuditEventPayloadBody,
   validateMerkleRootRecord,
   verifyChain,
   verifyChainIncremental,
@@ -31,6 +32,13 @@ import {
 } from "../src/budgets.ts";
 import { canonicalJSON } from "../src/canonical-json.ts";
 import { type EventLsn, lsnFromV1Number, parseLsn } from "../src/event-lsn.ts";
+import {
+  asSignerIdentity,
+  asThreadId,
+  asThreadSpecRevisionId,
+  threadAuditPayloadToBytes,
+  threadSpecContentHash,
+} from "../src/index.ts";
 import { asReceiptId, type ReceiptId } from "../src/receipt.ts";
 import { asSha256Hex, type Sha256Hex, sha256Hex } from "../src/sha256.ts";
 
@@ -489,11 +497,12 @@ describe("audit-event chain verification", () => {
 
   for (const [index, kind] of AUDIT_EVENT_KIND_VALUES.entries()) {
     it(`accepts payload.kind ${kind} through serializer and verifier`, () => {
+      const body = bodyForAuditKind(kind, index);
       const partial = auditRecord({
         payload: {
           kind,
           receiptId: asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAV"),
-          body: new Uint8Array([index, 0, 255]),
+          body,
         },
       });
       const record: AuditEventRecord = {
@@ -507,7 +516,7 @@ describe("audit-event chain verification", () => {
 
       expect(projection.payload.kind).toBe(kind);
       expect(projection.payload.receiptId).toBe("01ARZ3NDEKTSV4RRFFQ69G5FAV");
-      expect(projection.payload.bodyB64).toBe(Buffer.from([index, 0, 255]).toString("base64"));
+      expect(projection.payload.bodyB64).toBe(Buffer.from(body).toString("base64"));
       expect(verifyChain([record])).toEqual({
         ok: true,
         empty: false,
@@ -1078,6 +1087,39 @@ describe("audit-event chain verification", () => {
         expect(PAYLOAD_KIND_METADATA[kind].bodySchemaRef.length).toBeGreaterThan(0);
       }
     });
+
+    it("validates thread audit payloads and re-derives spec edit hashes", () => {
+      const content = { body: "thread spec" } as const;
+      const payload = {
+        threadId: asThreadId("01ARZ3NDEKTSV4RRFFQ69G5FAY"),
+        revisionId: asThreadSpecRevisionId("01BRZ3NDEKTSV4RRFFQ69G5FA0"),
+        baseRevisionId: null,
+        content,
+        contentHash: threadSpecContentHash(content),
+        authoredBy: asSignerIdentity("fran@example.com"),
+        authoredAt: new Date("2026-05-08T18:00:00.000Z"),
+      };
+
+      expect(validateAuditEventPayloadBody("thread_spec_edited", payload)).toEqual({ ok: true });
+      expect(
+        validateAuditEventPayloadBody("thread_spec_edited", {
+          ...payload,
+          contentHash: sha256Hex("forged"),
+        }).ok,
+      ).toBe(false);
+    });
+
+    it("rejects terminal thread_status_changed payloads", () => {
+      expect(
+        validateAuditEventPayloadBody("thread_status_changed", {
+          threadId: asThreadId("01ARZ3NDEKTSV4RRFFQ69G5FAY"),
+          fromStatus: "closed",
+          toStatus: "open",
+          changedBy: asSignerIdentity("fran@example.com"),
+          changedAt: new Date("2026-05-08T18:00:00.000Z"),
+        }).ok,
+      ).toBe(false);
+    });
   });
 });
 
@@ -1254,6 +1296,40 @@ function legacySerializeAuditEventRecord(record: AuditEventRecord): Uint8Array {
       },
     }),
   );
+}
+
+function bodyForAuditKind(kind: AuditEventKind, index: number): Uint8Array {
+  if (kind === "thread_created") {
+    return threadAuditPayloadToBytes(kind, {
+      threadId: asThreadId("01ARZ3NDEKTSV4RRFFQ69G5FAY"),
+      title: `Thread ${index}`,
+      createdBy: asSignerIdentity("fran@example.com"),
+      createdAt: new Date("2026-05-08T18:00:00.000Z"),
+      externalRefs: { sourceUrls: ["https://example.test/thread"], entityIds: ["issue:743"] },
+    });
+  }
+  if (kind === "thread_spec_edited") {
+    const content = { body: `Thread spec ${index}` } as const;
+    return threadAuditPayloadToBytes(kind, {
+      threadId: asThreadId("01ARZ3NDEKTSV4RRFFQ69G5FAY"),
+      revisionId: asThreadSpecRevisionId("01BRZ3NDEKTSV4RRFFQ69G5FA0"),
+      baseRevisionId: null,
+      content,
+      contentHash: threadSpecContentHash(content),
+      authoredBy: asSignerIdentity("fran@example.com"),
+      authoredAt: new Date("2026-05-08T18:00:00.000Z"),
+    });
+  }
+  if (kind === "thread_status_changed") {
+    return threadAuditPayloadToBytes(kind, {
+      threadId: asThreadId("01ARZ3NDEKTSV4RRFFQ69G5FAY"),
+      fromStatus: "open",
+      toStatus: "in_progress",
+      changedBy: asSignerIdentity("fran@example.com"),
+      changedAt: new Date("2026-05-08T18:00:00.000Z"),
+    });
+  }
+  return new Uint8Array([index, 0, 255]);
 }
 
 function auditEventRecordFromVector(vector: AuditEventVector): AuditEventRecord {

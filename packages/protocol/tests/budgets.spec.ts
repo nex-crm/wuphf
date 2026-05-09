@@ -36,6 +36,12 @@ import {
   MAX_RECEIPT_WRITES,
   MAX_SANITIZED_JSON_NODES,
   MAX_SANITIZED_STRING_BYTES,
+  MAX_SIGNER_IDENTITY_BYTES,
+  MAX_THREAD_EXTERNAL_REF_BYTES,
+  MAX_THREAD_EXTERNAL_REFS,
+  MAX_THREAD_SPEC_CONTENT_BYTES,
+  MAX_THREAD_TASK_IDS,
+  MAX_THREAD_TITLE_BYTES,
   MAX_TOOL_CALLS_PER_RECEIPT,
   MAX_WEBAUTHN_ASSERTION_BYTES,
   type MemoryWriteRef,
@@ -54,6 +60,10 @@ import {
   validateReceiptBudget,
   validateSanitizedJsonNodeBudget,
   validateSanitizedStringBudget,
+  validateSignerIdentityBudget,
+  validateThreadExternalRefBudget,
+  validateThreadSpecContentBudget,
+  validateThreadTitleBudget,
   verifyChainIncremental,
 } from "../src/index.ts";
 
@@ -195,6 +205,40 @@ describe("resource budgets", () => {
     );
 
     expectBudgetRejection(result, /FrozenArgs canonicalJson bytes.*1048577 > 1048576/);
+  });
+
+  it("bounds thread title, spec content, external refs, and signer identities", () => {
+    expect(MAX_THREAD_EXTERNAL_REFS).toBeGreaterThan(0);
+    expect(MAX_THREAD_TASK_IDS).toBeGreaterThan(0);
+    expect(validateThreadTitleBudget("x".repeat(MAX_THREAD_TITLE_BYTES))).toEqual({ ok: true });
+    expectBudgetRejection(
+      validateThreadTitleBudget("x".repeat(MAX_THREAD_TITLE_BYTES + 1)),
+      /Thread\.title bytes/,
+    );
+
+    expect(validateThreadSpecContentBudget("x".repeat(MAX_THREAD_SPEC_CONTENT_BYTES))).toEqual({
+      ok: true,
+    });
+    expectBudgetRejection(
+      validateThreadSpecContentBudget("x".repeat(MAX_THREAD_SPEC_CONTENT_BYTES + 1)),
+      /ThreadSpecRevision\.content bytes/,
+    );
+
+    expect(validateThreadExternalRefBudget("x".repeat(MAX_THREAD_EXTERNAL_REF_BYTES))).toEqual({
+      ok: true,
+    });
+    expectBudgetRejection(
+      validateThreadExternalRefBudget("x".repeat(MAX_THREAD_EXTERNAL_REF_BYTES + 1)),
+      /ThreadExternalRefs item bytes/,
+    );
+
+    expect(validateSignerIdentityBudget("x".repeat(MAX_SIGNER_IDENTITY_BYTES))).toEqual({
+      ok: true,
+    });
+    expectBudgetRejection(
+      validateSignerIdentityBudget("x".repeat(MAX_SIGNER_IDENTITY_BYTES + 1)),
+      /SignerIdentity bytes/,
+    );
   });
 
   it("bounds SanitizedString UTF-8 bytes at the edge", () => {

@@ -23,6 +23,7 @@ import {
   asProviderKind,
   asReceiptId,
   asTaskId,
+  asThreadId,
   asToolCallId,
   asWriteId,
   type ExternalWrite,
@@ -57,6 +58,7 @@ import { sha256Hex } from "../src/sha256.ts";
 
 const RECEIPT_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const TASK_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAW";
+const THREAD_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAY";
 
 const REQUIRED_TOP_LEVEL_FIELDS = [
   "id",
@@ -138,32 +140,72 @@ describe("receipt schema", () => {
     );
   });
 
-  it("accepts schemaVersion 1 as the only v1 wire schema until a migration codec ships", () => {
+  it("accepts schemaVersion 1 without a threadId", () => {
     const receipt = validReceiptFixture();
 
     expect(validateReceipt(receipt)).toEqual({ ok: true });
     expect(receiptFromJson(receiptToJson(receipt))).toEqual(receipt);
   });
 
+  it("rejects schemaVersion 1 when threadId is present", () => {
+    const runtimeReceipt: Record<string, unknown> = {
+      ...validReceiptFixture(),
+      threadId: asThreadId(THREAD_ID),
+    };
+    expectReceiptValidationError(runtimeReceipt, "/threadId", /schemaVersion 1/);
+
+    const wireReceipt = receiptJsonFixture();
+    wireReceipt.threadId = THREAD_ID;
+    expect(() => receiptFromJson(JSON.stringify(wireReceipt))).toThrow(
+      /\/threadId: must be absent for schemaVersion 1/,
+    );
+  });
+
+  it("round-trips schemaVersion 2 with threadId without dropping the field", () => {
+    const receipt: ReceiptSnapshot = {
+      ...validReceiptFixture(),
+      schemaVersion: 2,
+      threadId: asThreadId(THREAD_ID),
+    };
+
+    const json = receiptToJson(receipt);
+    const parsed = JSON.parse(json) as Record<string, unknown> & { threadId?: unknown };
+
+    expect(parsed.threadId).toBe(THREAD_ID);
+    expect(receiptFromJson(json)).toEqual(receipt);
+    expect(receiptToJson(receiptFromJson(json))).toBe(json);
+  });
+
+  it("round-trips schemaVersion 2 without threadId for backward-compatible inbox receipts", () => {
+    const receipt: ReceiptSnapshot = { ...validReceiptFixture(), schemaVersion: 2 };
+
+    const json = receiptToJson(receipt);
+    const parsed = JSON.parse(json) as Record<string, unknown> & { threadId?: unknown };
+
+    expect(parsed.threadId).toBeUndefined();
+    expect(receiptFromJson(json)).toEqual(receipt);
+    expect(receiptToJson(receiptFromJson(json))).toBe(json);
+  });
+
   it("rejects schemaVersion 0 because v1 has no backward migration codec", () => {
     const runtimeReceipt: Record<string, unknown> = { ...validReceiptFixture(), schemaVersion: 0 };
-    expectReceiptValidationError(runtimeReceipt, "/schemaVersion", /must be 1/);
+    expectReceiptValidationError(runtimeReceipt, "/schemaVersion", /must be 1 or 2/);
 
     const wireReceipt = receiptJsonFixture();
     wireReceipt.schemaVersion = 0;
     expect(() => receiptFromJson(JSON.stringify(wireReceipt))).toThrow(
-      /\/schemaVersion: must be 1/,
+      /\/schemaVersion: must be 1 or 2/,
     );
   });
 
-  it("rejects schemaVersion 2 because future schemas require a migration codec first", () => {
-    const runtimeReceipt: Record<string, unknown> = { ...validReceiptFixture(), schemaVersion: 2 };
-    expectReceiptValidationError(runtimeReceipt, "/schemaVersion", /must be 1/);
+  it("rejects schemaVersion 99 because no compatibility branch exists", () => {
+    const runtimeReceipt: Record<string, unknown> = { ...validReceiptFixture(), schemaVersion: 99 };
+    expectReceiptValidationError(runtimeReceipt, "/schemaVersion", /must be 1 or 2/);
 
     const wireReceipt = receiptJsonFixture();
-    wireReceipt.schemaVersion = 2;
+    wireReceipt.schemaVersion = 99;
     expect(() => receiptFromJson(JSON.stringify(wireReceipt))).toThrow(
-      /\/schemaVersion: must be 1/,
+      /\/schemaVersion: must be 1 or 2/,
     );
   });
 
@@ -1650,6 +1692,7 @@ function receiptJsonFixture(): Record<string, unknown> & {
   id?: unknown;
   providerKind?: unknown;
   schemaVersion?: unknown;
+  threadId?: unknown;
   finalMessage?: unknown;
   toolCalls: (Record<string, unknown> & { inputs?: unknown })[];
 } {
@@ -1657,6 +1700,7 @@ function receiptJsonFixture(): Record<string, unknown> & {
     id?: unknown;
     providerKind?: unknown;
     schemaVersion?: unknown;
+    threadId?: unknown;
     finalMessage?: unknown;
     toolCalls: (Record<string, unknown> & { inputs?: unknown })[];
   };

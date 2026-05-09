@@ -7,6 +7,7 @@ import {
   MAX_WEBAUTHN_ASSERTION_BYTES,
 } from "../src/budgets.ts";
 import { canonicalJSON } from "../src/canonical-json.ts";
+import { lsnFromV1Number } from "../src/event-lsn.ts";
 import {
   assertJcsValue,
   isAgentSlug,
@@ -43,7 +44,9 @@ import {
   isStreamEventKind,
   isWsFrameType,
   STREAM_EVENT_KIND_VALUES,
+  type StreamEvent,
   type StreamEventKind,
+  type ThreadInvalidationPayload,
   validateApprovalSubmitRequest,
   WS_FRAME_TYPE_VALUES,
   type WsFrame,
@@ -52,6 +55,7 @@ import {
   type ApprovalClaims,
   asIdempotencyKey,
   asReceiptId,
+  asThreadId,
   asWriteId,
   type ReceiptId,
   type RiskClass,
@@ -1275,6 +1279,38 @@ describe("stream and WebSocket frame runtime guards", () => {
     expect(isStreamEventKind("receipt.deleted")).toBe(false);
     expect(isStreamEventKind("stdout")).toBe(false);
     expect(isStreamEventKind(null)).toBe(false);
+  });
+
+  it("models thread stream events as invalidation-only payloads", () => {
+    const payload: ThreadInvalidationPayload = {
+      threadId: asThreadId("01ARZ3NDEKTSV4RRFFQ69G5FAY"),
+      headLsn: lsnFromV1Number(42),
+    };
+    const events: readonly StreamEvent<ThreadInvalidationPayload>[] = [
+      {
+        id: "evt-thread-created",
+        kind: "thread.created",
+        emittedAt: "2026-05-08T18:00:00.000Z",
+        payload,
+      },
+      {
+        id: "evt-thread-updated",
+        kind: "thread.updated",
+        emittedAt: "2026-05-08T18:00:01.000Z",
+        payload,
+      },
+      {
+        id: "evt-thread-pins",
+        kind: "thread.pinned_approvals.changed",
+        emittedAt: "2026-05-08T18:00:02.000Z",
+        payload,
+      },
+    ];
+
+    expect(events.map((event) => event.kind).every(isStreamEventKind)).toBe(true);
+    expect(
+      events.every((event) => Object.keys(event.payload).sort().join(",") === "headLsn,threadId"),
+    ).toBe(true);
   });
 
   it("accepts every tuple-backed WebSocket frame type and rejects non-tuple values", () => {
