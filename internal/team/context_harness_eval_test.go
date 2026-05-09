@@ -351,7 +351,7 @@ func newPassportProcessEvalWorkflowTask(run passportProcessEvalRun, taskType str
 		Title:     run.Prompt,
 		Details:   "Repeated passport process research should consult prior notebook/wiki artifacts before fresh research.",
 		Owner:     run.AgentSlug,
-		Status:    "in_progress",
+		status:    "in_progress",
 		CreatedBy: "eval",
 		TaskType:  taskType,
 		CreatedAt: evalTimestamp("00"),

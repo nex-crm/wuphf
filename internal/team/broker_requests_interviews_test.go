@@ -938,7 +938,7 @@ func TestBrokerRequestAnswerUnblocksDependentTask(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&taskResult); err != nil {
 		t.Fatalf("decode task create response: %v", err)
 	}
-	if !taskResult.Task.Blocked {
+	if !taskResult.Task.Blocked() {
 		t.Fatalf("expected task to start blocked on request dependency, got %+v", taskResult.Task)
 	}
 
@@ -982,10 +982,10 @@ func TestBrokerRequestAnswerUnblocksDependentTask(t *testing.T) {
 	if updated == nil {
 		t.Fatalf("expected to find task %s after answer", taskResult.Task.ID)
 	}
-	if updated.Blocked {
+	if updated.Blocked() {
 		t.Fatalf("expected task to be unblocked after request answer, got %+v", updated)
 	}
-	if updated.Status != "in_progress" {
+	if updated.Status() != "in_progress" {
 		t.Fatalf("expected task to resume in_progress after answer, got %+v", updated)
 	}
 }
@@ -1122,8 +1122,8 @@ func TestRequestAnswerUnblocksReferencedTask(t *testing.T) {
 		Title:     "Create live client workspace in Google Drive",
 		Details:   "Blocked on request-11: exact client name for the workspace folder.",
 		Owner:     "builder",
-		Status:    "blocked",
-		Blocked:   true,
+		status:    "blocked",
+		blocked:   true,
 		CreatedBy: "operator",
 		CreatedAt: now,
 		UpdatedAt: now,
@@ -1150,10 +1150,10 @@ func TestRequestAnswerUnblocksReferencedTask(t *testing.T) {
 
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if got := b.tasks[0]; got.Blocked {
+	if got := b.tasks[0]; got.Blocked() {
 		t.Fatalf("expected task to unblock after request answer, got %+v", got)
 	} else {
-		if got.Status != "in_progress" {
+		if got.Status() != "in_progress" {
 			t.Fatalf("expected task status to move to in_progress, got %+v", got)
 		}
 		if !strings.Contains(got.Details, "Meridian Growth Studio") {

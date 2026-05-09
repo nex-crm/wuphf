@@ -26,7 +26,7 @@ func TestTaskRequiresRealExternalExecution(t *testing.T) {
 		Title:   "Create one new Notion proof artifact for the intake slice",
 		Details: "Use the connected Notion workspace and leave evidence in channel.",
 		Owner:   "builder",
-		Status:  "in_progress",
+		status:  "in_progress",
 	}) {
 		t.Fatal("expected Notion create task to require real external execution")
 	}
@@ -34,7 +34,7 @@ func TestTaskRequiresRealExternalExecution(t *testing.T) {
 		Title:   "Generate a local preview packet for Slack handoff",
 		Details: "Preview only. Do not post externally yet.",
 		Owner:   "builder",
-		Status:  "in_progress",
+		status:  "in_progress",
 	}) {
 		t.Fatal("expected preview-only task not to require real external execution")
 	}
@@ -52,8 +52,8 @@ func TestNormalizeTaskPlanMarksLiveExternalTasks(t *testing.T) {
 	if task.ExecutionMode != "live_external" {
 		t.Fatalf("expected live_external execution mode, got %q", task.ExecutionMode)
 	}
-	if task.ReviewState != "pending_review" {
-		t.Fatalf("expected pending_review for live external task, got %q", task.ReviewState)
+	if task.reviewState != "pending_review" {
+		t.Fatalf("expected pending_review for live external task, got %q", task.reviewState)
 	}
 	if !taskNeedsStructuredReview(task) {
 		t.Fatal("expected live external task to require structured review")

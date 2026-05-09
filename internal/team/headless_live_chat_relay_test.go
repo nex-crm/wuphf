@@ -267,7 +267,7 @@ func TestReportAgentIssueAttachesActiveTaskAndWaitsForApproval(t *testing.T) {
 			break
 		}
 	}
-	if updated.Blocked || updated.Status != "in_progress" {
+	if updated.Blocked() || updated.Status() != "in_progress" {
 		t.Fatalf("expected active task not to be blocked before approval, got %+v", updated)
 	}
 	if len(b.AllTasks()) != 1 {

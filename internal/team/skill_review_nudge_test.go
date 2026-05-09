@@ -45,8 +45,8 @@ func TestFireSkillReviewNudge_CreatesTask(t *testing.T) {
 	if nudgeTask.ExecutionMode != "office" {
 		t.Fatalf("expected ExecutionMode=office, got %q", nudgeTask.ExecutionMode)
 	}
-	if nudgeTask.Status != "in_progress" {
-		t.Fatalf("expected Status=in_progress, got %q", nudgeTask.Status)
+	if nudgeTask.Status() != "in_progress" {
+		t.Fatalf("expected Status=in_progress, got %q", nudgeTask.Status())
 	}
 	if nudgeTask.Title != skillReviewNudgeTitle {
 		t.Fatalf("unexpected Title: %q", nudgeTask.Title)
