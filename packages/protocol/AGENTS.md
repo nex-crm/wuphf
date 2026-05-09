@@ -269,6 +269,9 @@ deserializer, validator, AND every consumer that pattern-matches on
 
 ### Demo-driven iteration
 
+Run commands in this section from the repo root unless a command explicitly
+changes directory.
+
 For any non-trivial public API change (new export, validator, brand, codec
 function, or wire-shape field):
 

@@ -4,13 +4,16 @@
 
 - **Provider**: use Vitest `v8`. This is a Node-only TS package, so native V8
   coverage avoids Istanbul pre-instrumentation. First add the missing provider:
+
   ```json
   { "devDependencies": { "@vitest/coverage-v8": "2.1.9" } }
   ```
+
 - **Thresholds**: start at the existing enforceable bar: lines `90`,
   statements `90`, functions `90`, branches `85`. Ratchet to `98/98/98/98`
   after measured green runs, in `+2` point steps.
 - **How to ratchet**:
+
   ```ts
   coverage: {
     provider: "v8",
@@ -34,6 +37,7 @@
     },
   }
   ```
+
 - **Pre-commit vs CI**: CI only for coverage; pre-push keeps demo, Go verifier,
   and invariant ratchets. Coverage reruns 183 declared tests and should not tax
   every local commit.
@@ -56,12 +60,14 @@
   `it.concurrent`, sharding, and sequence controls, but no pytest-style marker
   taxonomy worth adding here.
 - **Migration cost**:
+
   ```ts
   test: {
     include: ["tests/{spec,property,integration}/**/*.spec.ts"],
     environment: "node",
   }
   ```
+
   `scripts/test-protocol.sh` still works for full and focused paths; update its
   examples to `tests/property/frozen-args.spec.ts`. AGENTS.md only needs its
   tree and taxonomy text updated.
@@ -72,6 +78,7 @@ Apply this to `createHash` call sites. `process.env` and demo submodule imports
 should stay hard-zero.
 
 Baseline file, `packages/protocol/scripts/hash-entrypoints-baseline.txt`:
+
 ```text
 # Existing approved direct hash entry points. Format: file:symbol:api
 src/sha256.ts:sha256Hex:createHash
@@ -79,6 +86,7 @@ src/audit-event.ts:computeEventHash:createHash
 ```
 
 Check script, `packages/protocol/scripts/check-hash-entrypoints.sh`:
+
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
@@ -114,23 +122,30 @@ echo "hash entrypoint ratchet passed"
 
 - **Random order**: Vitest v2 has sequence shuffle and seed. Add a reproducible
   CI-only smoke:
+
   ```json
   { "scripts": { "test:shuffle": "vitest run --sequence.shuffle.files --sequence.shuffle.tests --sequence.seed=743" } }
   ```
+
 - **xdist equivalent**: Vitest workers are already default. Keep config empty:
+
   ```ts
   test: { poolOptions: {} }
   ```
+
 - **interrogate equivalent**: defer TypeDoc/JSDoc coverage; TS types plus
   README/demo are lower-noise for this small public surface.
+
   ```json
   { "devDependencies": {} }
   ```
+
 - **hypothesis equivalent**: keep `fast-check`; it is already used in 6 files.
 
 ## 5. CI wiring
 
 Protocol job addition:
+
 ```yaml
 - name: Vitest coverage gate
   working-directory: packages/protocol
@@ -138,6 +153,7 @@ Protocol job addition:
 ```
 
 Pre-push ratchet addition:
+
 ```yaml
 protocol-hash-entrypoints:
   files: bash scripts/changed-files-since-base.sh

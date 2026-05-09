@@ -102,7 +102,7 @@ wants to stress-test it before committing.
 | Stress-testing a proposed fix | Verification agent (one adversarial lens) |
 | Post-implementation review | Both — triangulation first, then verification on the synthesis |
 | Routine bug fix | Neither (overkill) |
-| Pre-merge gate | Verification agent + the existing demo + Go reference verifier |
+| Pre-merge gate | Verification agent + the existing demo + package-specific cross-language oracle (for example, `testdata/verifier-reference.go` in protocol-grade packages) |
 
 ## Wuphf Agent Instructions
 
