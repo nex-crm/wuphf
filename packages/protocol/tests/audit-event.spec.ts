@@ -1,15 +1,54 @@
+import { Buffer } from "node:buffer";
+import { readFileSync } from "node:fs";
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import {
+  AUDIT_EVENT_KIND_VALUES,
+  type AuditEventKind,
   type AuditEventRecord,
   computeAuditEventHash,
   computeEventHash,
   GENESIS_PREV_HASH,
+  PAYLOAD_KIND_METADATA,
   serializeAuditEventRecordForHash,
   verifyChain,
 } from "../src/audit-event.ts";
 import { type EventLsn, lsnFromV1Number, parseLsn } from "../src/event-lsn.ts";
-import { type Sha256Hex, sha256Hex } from "../src/sha256.ts";
+import { asReceiptId } from "../src/receipt.ts";
+import { asSha256Hex, type Sha256Hex, sha256Hex } from "../src/sha256.ts";
+
+interface AuditEventVectorPayloadInput {
+  readonly kind: AuditEventKind;
+  readonly receiptId: string | null;
+  readonly bodyB64: string;
+}
+
+interface AuditEventVectorInput {
+  readonly seqNo: string;
+  readonly timestamp: string;
+  readonly prevHash: string;
+  readonly payload: AuditEventVectorPayloadInput;
+}
+
+interface AuditEventVectorExpected {
+  readonly canonicalSerialization: string;
+  readonly eventHash: string;
+}
+
+interface AuditEventVector {
+  readonly name: string;
+  readonly input: AuditEventVectorInput;
+  readonly expected: AuditEventVectorExpected;
+}
+
+interface AuditEventVectorsFixture {
+  readonly schemaVersion: 1;
+  readonly comment: string;
+  readonly vectors: readonly AuditEventVector[];
+}
+
+const auditEventKindSet: ReadonlySet<string> = new Set(AUDIT_EVENT_KIND_VALUES);
+const auditEventVectors = loadAuditEventVectors();
 
 function chainOfLength(n: number): AuditEventRecord[] {
   const out: AuditEventRecord[] = [];
@@ -188,7 +227,8 @@ describe("audit-event chain verification", () => {
 
   // Cross-language verifiers consume these golden vectors. If any of these
   // values change, the wire protocol changed — coordinate with downstream
-  // verifier authors.
+  // verifier authors. The data lives in testdata so non-TS verifiers can load
+  // the same fixture this test reads.
   describe("golden vectors (cross-language verifier contract)", () => {
     it('GENESIS_PREV_HASH is sha256("wuphf:audit:genesis:v1") in lower-hex', () => {
       expect(GENESIS_PREV_HASH).toBe(
@@ -196,39 +236,43 @@ describe("audit-event chain verification", () => {
       );
     });
 
-    it("seqNo=v1:0 record produces a stable canonical serialization AND eventHash", () => {
-      const record: AuditEventRecord = {
-        seqNo: lsnFromV1Number(0),
-        timestamp: new Date("2026-05-08T00:00:00.000Z"),
-        prevHash: GENESIS_PREV_HASH,
-        eventHash: GENESIS_PREV_HASH,
-        payload: {
-          kind: "boot_marker",
-          body: new TextEncoder().encode("boot"),
-        },
-      };
-      const bytes = serializeAuditEventRecordForHash(record);
-      // EventLsn is wire-encoded as a JSON string ("v1:0"), not a number.
-      // This commits the multi-instance extension path (v2: "v2:<id>:<n>")
-      // without a future hash-chain break.
-      const expectedSerialization =
-        '{"payload":{"bodyB64":"Ym9vdA==","kind":"boot_marker","receiptId":null},' +
-        `"prevHash":"${GENESIS_PREV_HASH}",` +
-        '"seqNo":"v1:0",' +
-        '"timestamp":"2026-05-08T00:00:00.000Z"}';
-      expect(new TextDecoder().decode(bytes)).toBe(expectedSerialization);
+    it("loads the schema v1 JSON fixture", () => {
+      expect(auditEventVectors.schemaVersion).toBe(1);
+      expect(auditEventVectors.vectors.length).toBeGreaterThan(0);
+    });
 
-      // Golden eventHash. Locks both pieces of the wire contract that the
-      // serialization vector alone leaves open:
-      //   1. prevHash is mixed in as 64-byte ASCII lower-hex, NOT 32 raw bytes.
-      //   2. The mix order is `asciiLowerHex(prevHash) || jcsBytes(record)`
-      //      (no separator).
-      // A future implementation that switched to raw-byte mixing or changed
-      // the order would preserve the serialization vector but break this
-      // hash. Cross-language verifiers MUST reproduce this digit-for-digit.
-      expect(computeAuditEventHash(record)).toBe(
-        "e27134d1b1641fb13747d9fac78aecc90d9d1385d04bfeea4a8a596fdb6101bb",
+    for (const vector of auditEventVectors.vectors) {
+      it(`${vector.name} produces stable canonical serialization and eventHash`, () => {
+        const record = auditEventRecordFromVector(vector);
+        const bytes = serializeAuditEventRecordForHash(record);
+
+        // EventLsn is wire-encoded as a JSON string ("v1:0"), not a number.
+        // This commits the multi-instance extension path (v2: "v2:<id>:<n>")
+        // without a future hash-chain break.
+        expect(new TextDecoder().decode(bytes)).toBe(vector.expected.canonicalSerialization);
+
+        // Golden eventHash. Locks both pieces of the wire contract that the
+        // serialization vector alone leaves open:
+        //   1. prevHash is mixed in as 64-byte ASCII lower-hex, NOT 32 raw bytes.
+        //   2. The mix order is `asciiLowerHex(prevHash) || jcsBytes(record)`
+        //      (no separator).
+        // A future implementation that switched to raw-byte mixing or changed
+        // the order would preserve the serialization vector but break this
+        // hash. Cross-language verifiers MUST reproduce this digit-for-digit.
+        expect(computeAuditEventHash(record)).toBe(record.eventHash);
+      });
+    }
+  });
+
+  describe("payload kind metadata", () => {
+    it("covers every AuditEventKind at runtime", () => {
+      expect(Object.keys(PAYLOAD_KIND_METADATA).sort()).toEqual(
+        [...AUDIT_EVENT_KIND_VALUES].sort(),
       );
+      for (const kind of AUDIT_EVENT_KIND_VALUES) {
+        expect(PAYLOAD_KIND_METADATA[kind].description.length).toBeGreaterThan(0);
+        expect(PAYLOAD_KIND_METADATA[kind].bodySchemaRef.length).toBeGreaterThan(0);
+      }
     });
   });
 });
@@ -246,4 +290,151 @@ function previousComputeEventHash(recordBytes: Uint8Array): Sha256Hex {
   buf.set(new TextEncoder().encode(GENESIS_PREV_HASH), 0);
   buf.set(recordBytes, GENESIS_PREV_HASH.length);
   return sha256Hex(buf);
+}
+
+function auditEventRecordFromVector(vector: AuditEventVector): AuditEventRecord {
+  const receiptId = vector.input.payload.receiptId;
+  const seqNo = vector.input.seqNo as EventLsn;
+  parseLsn(seqNo);
+  return {
+    seqNo,
+    timestamp: dateFromFixture(vector.input.timestamp, `${vector.name}.input.timestamp`),
+    prevHash: asSha256Hex(vector.input.prevHash),
+    eventHash: asSha256Hex(vector.expected.eventHash),
+    payload: {
+      kind: vector.input.payload.kind,
+      ...(receiptId === null ? {} : { receiptId: asReceiptId(receiptId) }),
+      body: Buffer.from(vector.input.payload.bodyB64, "base64"),
+    },
+  };
+}
+
+function loadAuditEventVectors(): AuditEventVectorsFixture {
+  const parsed: unknown = JSON.parse(
+    readFileSync(new URL("../testdata/audit-event-vectors.json", import.meta.url), "utf8"),
+  );
+  const record = requireRecord(parsed, "fixture");
+  const vectors = requiredArray(record, "vectors", "fixture").map((vector, index) =>
+    parseAuditEventVector(vector, `fixture.vectors.${index}`),
+  );
+  return {
+    schemaVersion: requiredSchemaVersion(record, "schemaVersion", "fixture"),
+    comment: requiredString(record, "comment", "fixture"),
+    vectors,
+  };
+}
+
+function parseAuditEventVector(value: unknown, path: string): AuditEventVector {
+  const record = requireRecord(value, path);
+  const input = requireRecord(requiredField(record, "input", path), `${path}.input`);
+  const payload = requireRecord(
+    requiredField(input, "payload", `${path}.input`),
+    `${path}.input.payload`,
+  );
+  const expected = requireRecord(requiredField(record, "expected", path), `${path}.expected`);
+  return {
+    name: requiredString(record, "name", path),
+    input: {
+      seqNo: requiredString(input, "seqNo", `${path}.input`),
+      timestamp: requiredString(input, "timestamp", `${path}.input`),
+      prevHash: requiredString(input, "prevHash", `${path}.input`),
+      payload: {
+        kind: requiredAuditEventKind(payload, "kind", `${path}.input.payload`),
+        receiptId: requiredNullableString(payload, "receiptId", `${path}.input.payload`),
+        bodyB64: requiredString(payload, "bodyB64", `${path}.input.payload`),
+      },
+    },
+    expected: {
+      canonicalSerialization: requiredString(
+        expected,
+        "canonicalSerialization",
+        `${path}.expected`,
+      ),
+      eventHash: requiredString(expected, "eventHash", `${path}.expected`),
+    },
+  };
+}
+
+function requireRecord(value: unknown, path: string): Readonly<Record<string, unknown>> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error(`${path}: must be an object`);
+  }
+  return value as Readonly<Record<string, unknown>>;
+}
+
+function requiredField(
+  record: Readonly<Record<string, unknown>>,
+  key: string,
+  path: string,
+): unknown {
+  if (!Object.hasOwn(record, key) || record[key] === undefined) {
+    throw new Error(`${path}.${key}: is required`);
+  }
+  return record[key];
+}
+
+function requiredString(
+  record: Readonly<Record<string, unknown>>,
+  key: string,
+  path: string,
+): string {
+  const value = requiredField(record, key, path);
+  if (typeof value !== "string") {
+    throw new Error(`${path}.${key}: must be a string`);
+  }
+  return value;
+}
+
+function requiredNullableString(
+  record: Readonly<Record<string, unknown>>,
+  key: string,
+  path: string,
+): string | null {
+  const value = requiredField(record, key, path);
+  if (value === null || typeof value === "string") return value;
+  throw new Error(`${path}.${key}: must be a string or null`);
+}
+
+function requiredArray(
+  record: Readonly<Record<string, unknown>>,
+  key: string,
+  path: string,
+): readonly unknown[] {
+  const value = requiredField(record, key, path);
+  if (!Array.isArray(value)) {
+    throw new Error(`${path}.${key}: must be an array`);
+  }
+  return value;
+}
+
+function requiredSchemaVersion(
+  record: Readonly<Record<string, unknown>>,
+  key: string,
+  path: string,
+): 1 {
+  const value = requiredField(record, key, path);
+  if (value !== 1) {
+    throw new Error(`${path}.${key}: must be 1`);
+  }
+  return 1;
+}
+
+function requiredAuditEventKind(
+  record: Readonly<Record<string, unknown>>,
+  key: string,
+  path: string,
+): AuditEventKind {
+  const value = requiredString(record, key, path);
+  if (!auditEventKindSet.has(value)) {
+    throw new Error(`${path}.${key}: must be an AuditEventKind`);
+  }
+  return value as AuditEventKind;
+}
+
+function dateFromFixture(value: string, path: string): Date {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime()) || date.toISOString() !== value) {
+    throw new Error(`${path}: must be an ISO 8601 instant`);
+  }
+  return date;
 }

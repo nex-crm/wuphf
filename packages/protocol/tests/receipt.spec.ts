@@ -408,6 +408,93 @@ describe("receipt schema", () => {
       /postWriteVerify.*must be null for state "rejected"/,
     );
   });
+
+  it("ExternalWrite: validator accepts rejected failure metadata", () => {
+    const fixture = validReceiptFixture();
+    const firstWrite = nonNull(fixture.writes[0]);
+    if (firstWrite.result !== "applied") throw new Error("fixture write must be applied");
+    const receipt: ReceiptSnapshot = {
+      ...fixture,
+      writes: [
+        {
+          ...firstWrite,
+          result: "rejected",
+          appliedDiff: null,
+          postWriteVerify: null,
+          failureMetadata: { code: "policy_denied", retryable: false },
+        },
+      ],
+    };
+
+    expect(validateReceipt(receipt)).toEqual({ ok: true });
+  });
+
+  it("ExternalWrite: validator accepts partial retry guidance", () => {
+    const fixture = validReceiptFixture();
+    const firstWrite = nonNull(fixture.writes[0]);
+    if (firstWrite.result !== "applied") throw new Error("fixture write must be applied");
+    const receipt: ReceiptSnapshot = {
+      ...fixture,
+      writes: [
+        {
+          ...firstWrite,
+          result: "partial",
+          failureMetadata: { code: "rate_limited", retryable: true, retryAfterMs: 5000 },
+        },
+      ],
+    };
+
+    expect(validateReceipt(receipt)).toEqual({ ok: true });
+  });
+
+  it("ExternalWrite: codec preserves failure metadata", () => {
+    const fixture = validReceiptFixture();
+    const firstWrite = nonNull(fixture.writes[0]);
+    if (firstWrite.result !== "applied") throw new Error("fixture write must be applied");
+    const receipt: ReceiptSnapshot = {
+      ...fixture,
+      writes: [
+        {
+          ...firstWrite,
+          result: "rollback",
+          postWriteVerify: null,
+          failureMetadata: {
+            code: "downstream_unavailable",
+            retryable: false,
+            terminalReason: SanitizedString.fromUnknown("Downstream rejected the rollback check"),
+          },
+        },
+      ],
+    };
+
+    expect(receiptFromJson(receiptToJson(receipt))).toEqual(receipt);
+  });
+
+  it("ExternalWrite: validator rejects unknown failure metadata keys", () => {
+    const fixture = validReceiptFixture();
+    const firstWrite = nonNull(fixture.writes[0]);
+    const receipt: Record<string, unknown> = {
+      ...fixture,
+      writes: [
+        {
+          ...firstWrite,
+          result: "partial",
+          failureMetadata: { code: "rate_limited", retryable: true, extra: "nope" },
+        },
+      ],
+    };
+
+    const result = validateReceipt(receipt);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(
+        result.errors.some(
+          (e) => e.path === "/writes/0/failureMetadata/extra" && /not allowed/.test(e.message),
+        ),
+      ).toBe(true);
+    }
+  });
 });
 
 function nonNull<T>(value: T | null | undefined): T {

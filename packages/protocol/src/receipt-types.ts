@@ -27,6 +27,13 @@ export type RiskClass = "low" | "medium" | "high" | "critical";
 
 export type WriteResult = "applied" | "rejected" | "partial" | "rollback";
 
+export interface WriteFailureMetadata {
+  readonly code: string;
+  readonly retryable: boolean;
+  readonly retryAfterMs?: number | undefined;
+  readonly terminalReason?: SanitizedString | undefined;
+}
+
 export type TriggerKind =
   | "human_message"
   | "scheduler"
@@ -137,6 +144,7 @@ export interface ExternalWriteApplied extends ExternalWriteCommon {
   // policy), the result is "partial", not "applied".
   readonly appliedDiff: FrozenArgs;
   readonly postWriteVerify: FrozenArgs;
+  readonly failureMetadata?: undefined;
 }
 
 export interface ExternalWriteRejected extends ExternalWriteCommon {
@@ -144,6 +152,7 @@ export interface ExternalWriteRejected extends ExternalWriteCommon {
   // Nothing was written, so neither field carries data.
   readonly appliedDiff: null;
   readonly postWriteVerify: null;
+  readonly failureMetadata?: WriteFailureMetadata | undefined;
 }
 
 export interface ExternalWritePartial extends ExternalWriteCommon {
@@ -153,6 +162,7 @@ export interface ExternalWritePartial extends ExternalWriteCommon {
   // may be null if verification was attempted and failed.
   readonly appliedDiff: FrozenArgs;
   readonly postWriteVerify: FrozenArgs | null;
+  readonly failureMetadata?: WriteFailureMetadata | undefined;
 }
 
 export interface ExternalWriteRollback extends ExternalWriteCommon {
@@ -161,6 +171,7 @@ export interface ExternalWriteRollback extends ExternalWriteCommon {
   // rolled-back writes — the post-state is, by definition, the pre-state.
   readonly appliedDiff: FrozenArgs;
   readonly postWriteVerify: null;
+  readonly failureMetadata?: WriteFailureMetadata | undefined;
 }
 
 export type ExternalWrite =

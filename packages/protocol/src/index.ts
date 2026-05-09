@@ -1,6 +1,7 @@
 export type {
   AuditEventKind,
   AuditEventPayload,
+  AuditEventPayloadKindMetadata,
   AuditEventRecord,
   ChainFailureCode,
   ChainVerificationResult,
@@ -8,9 +9,11 @@ export type {
   MerkleRootRecord,
 } from "./audit-event.ts";
 export {
+  AUDIT_EVENT_KIND_VALUES,
   computeAuditEventHash,
   computeEventHash,
   GENESIS_PREV_HASH,
+  PAYLOAD_KIND_METADATA,
   serializeAuditEventRecordForHash,
   verifyChain,
 } from "./audit-event.ts";
@@ -89,6 +92,7 @@ export type {
   ToolCall,
   ToolCallId,
   TriggerKind,
+  WriteFailureMetadata,
   WriteId,
   WriteResult,
 } from "./receipt.ts";
