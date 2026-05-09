@@ -79,6 +79,8 @@ function createMainWindow(): void {
     preloadPath,
     rendererIndexPath,
     allowDevServerUrl: !app.isPackaged,
-    ...(typeof devServerUrl === "string" ? { devServerUrl } : {}),
+    ...(typeof devServerUrl === "string"
+      ? { devServerUrl, expectedDevServerUrl: devServerUrl }
+      : {}),
   });
 }

@@ -16,6 +16,8 @@ type WillNavigateHandler = (
   targetUrl: string,
 ) => void;
 
+const VITE_DEV_SERVER_URL = "http://localhost:5173/";
+
 interface WindowConstructorOptions {
   readonly webPreferences?: {
     readonly sandbox?: unknown;
@@ -71,7 +73,8 @@ describe("createSecureWindow", () => {
       preloadPath: "/tmp/preload.js",
       rendererIndexPath: "/tmp/index.html",
       allowDevServerUrl: true,
-      devServerUrl: "http://localhost:5173/",
+      devServerUrl: VITE_DEV_SERVER_URL,
+      expectedDevServerUrl: VITE_DEV_SERVER_URL,
     });
 
     const instance = getOnlyWindow();
@@ -82,20 +85,62 @@ describe("createSecureWindow", () => {
       nodeIntegration: false,
       webSecurity: true,
     });
-    expect(instance.loadURL).toHaveBeenCalledWith("http://localhost:5173/");
+    expect(instance.loadURL).toHaveBeenCalledWith(VITE_DEV_SERVER_URL);
   });
 
-  it("allows 127.0.0.1 development renderer URLs", async () => {
+  it("rejects development renderer URLs on a different localhost port", async () => {
     const { createSecureWindow } = await import("../src/main/window.ts");
 
-    createSecureWindow({
-      preloadPath: "/tmp/preload.js",
-      rendererIndexPath: "/tmp/index.html",
-      allowDevServerUrl: true,
-      devServerUrl: "http://127.0.0.1:5173/",
-    });
+    expect(() =>
+      createSecureWindow({
+        preloadPath: "/tmp/preload.js",
+        rendererIndexPath: "/tmp/index.html",
+        allowDevServerUrl: true,
+        devServerUrl: "http://localhost:9999/",
+        expectedDevServerUrl: VITE_DEV_SERVER_URL,
+      }),
+    ).toThrow("Refusing to load unexpected development renderer URL: http://localhost:9999/");
+  });
 
-    expect(getOnlyWindow().loadURL).toHaveBeenCalledWith("http://127.0.0.1:5173/");
+  it("rejects development renderer URLs without an ELECTRON_RENDERER_URL match", async () => {
+    const { createSecureWindow } = await import("../src/main/window.ts");
+
+    expect(() =>
+      createSecureWindow({
+        preloadPath: "/tmp/preload.js",
+        rendererIndexPath: "/tmp/index.html",
+        allowDevServerUrl: true,
+        devServerUrl: VITE_DEV_SERVER_URL,
+      }),
+    ).toThrow("Refusing to load development renderer URL without ELECTRON_RENDERER_URL");
+  });
+
+  it("rejects invalid development renderer URL values", async () => {
+    const { createSecureWindow } = await import("../src/main/window.ts");
+
+    expect(() =>
+      createSecureWindow({
+        preloadPath: "/tmp/preload.js",
+        rendererIndexPath: "/tmp/index.html",
+        allowDevServerUrl: true,
+        devServerUrl: "http://[",
+        expectedDevServerUrl: VITE_DEV_SERVER_URL,
+      }),
+    ).toThrow("Invalid development renderer URL: http://[");
+  });
+
+  it("rejects loopback aliases that do not exactly match ELECTRON_RENDERER_URL", async () => {
+    const { createSecureWindow } = await import("../src/main/window.ts");
+
+    expect(() =>
+      createSecureWindow({
+        preloadPath: "/tmp/preload.js",
+        rendererIndexPath: "/tmp/index.html",
+        allowDevServerUrl: true,
+        devServerUrl: "http://127.0.0.1:5173/",
+        expectedDevServerUrl: VITE_DEV_SERVER_URL,
+      }),
+    ).toThrow("Refusing to load unexpected development renderer URL: http://127.0.0.1:5173/");
   });
 
   it("denies every new window and opens only allowlisted external schemes in the OS", async () => {
@@ -105,7 +150,8 @@ describe("createSecureWindow", () => {
       preloadPath: "/tmp/preload.js",
       rendererIndexPath: "/tmp/index.html",
       allowDevServerUrl: true,
-      devServerUrl: "http://localhost:5173/",
+      devServerUrl: VITE_DEV_SERVER_URL,
+      expectedDevServerUrl: VITE_DEV_SERVER_URL,
     });
 
     const handler = getWindowOpenHandler(getOnlyWindow());
@@ -127,13 +173,30 @@ describe("createSecureWindow", () => {
       preloadPath: "/tmp/preload.js",
       rendererIndexPath: "/tmp/index.html",
       allowDevServerUrl: true,
-      devServerUrl: "http://localhost:5173/",
+      devServerUrl: VITE_DEV_SERVER_URL,
+      expectedDevServerUrl: VITE_DEV_SERVER_URL,
     });
 
     const handler = getWillNavigateHandler(getOnlyWindow());
-    const sameOriginEvent = { preventDefault: vi.fn<() => void>() };
-    handler(sameOriginEvent, "http://localhost:5173/settings");
-    expect(sameOriginEvent.preventDefault).not.toHaveBeenCalled();
+    const exactRendererEvent = { preventDefault: vi.fn<() => void>() };
+    handler(exactRendererEvent, VITE_DEV_SERVER_URL);
+    expect(exactRendererEvent.preventDefault).not.toHaveBeenCalled();
+
+    const hashRouteEvent = { preventDefault: vi.fn<() => void>() };
+    handler(hashRouteEvent, "http://localhost:5173/#settings");
+    expect(hashRouteEvent.preventDefault).not.toHaveBeenCalled();
+
+    const sameOriginPathEvent = { preventDefault: vi.fn<() => void>() };
+    handler(sameOriginPathEvent, "http://localhost:5173/settings");
+    expect(sameOriginPathEvent.preventDefault).toHaveBeenCalledTimes(1);
+
+    const differentPortEvent = { preventDefault: vi.fn<() => void>() };
+    handler(differentPortEvent, "http://localhost:9999/");
+    expect(differentPortEvent.preventDefault).toHaveBeenCalledTimes(1);
+
+    const loopbackAliasEvent = { preventDefault: vi.fn<() => void>() };
+    handler(loopbackAliasEvent, "http://127.0.0.1:5173/");
+    expect(loopbackAliasEvent.preventDefault).toHaveBeenCalledTimes(1);
 
     const externalEvent = { preventDefault: vi.fn<() => void>() };
     handler(externalEvent, "https://example.com/");
@@ -170,12 +233,13 @@ describe("createSecureWindow", () => {
         preloadPath: "/tmp/preload.js",
         rendererIndexPath: "/tmp/index.html",
         allowDevServerUrl: false,
-        devServerUrl: "http://localhost:5173/",
+        devServerUrl: VITE_DEV_SERVER_URL,
+        expectedDevServerUrl: VITE_DEV_SERVER_URL,
       }),
     ).toThrow("Refusing to load development renderer URL in packaged mode");
   });
 
-  it("rejects non-local development renderer URLs", async () => {
+  it("rejects non-local ELECTRON_RENDERER_URL values", async () => {
     const { createSecureWindow } = await import("../src/main/window.ts");
 
     expect(() =>
@@ -184,8 +248,9 @@ describe("createSecureWindow", () => {
         rendererIndexPath: "/tmp/index.html",
         allowDevServerUrl: true,
         devServerUrl: "http://192.168.0.10:5173/",
+        expectedDevServerUrl: "http://192.168.0.10:5173/",
       }),
-    ).toThrow("Refusing to load non-local renderer URL: http://192.168.0.10:5173/");
+    ).toThrow("Refusing to load non-local ELECTRON_RENDERER_URL: http://192.168.0.10:5173/");
   });
 });
 

@@ -60,9 +60,9 @@ stops, and reports lifecycle status for the utility process. App data and
 secrets do not cross the contextBridge; the renderer-to-broker data path lands
 over loopback HTTP/SSE in the future broker listener branch.
 
-Remote navigation is blocked. Development loads only
-`http://localhost:<vite-port>` or `http://127.0.0.1:<vite-port>`, and production
-loads only the bundled `file://` renderer document.
+Remote navigation is blocked. Development loads only the exact
+`ELECTRON_RENDERER_URL` value set by electron-vite for the Vite renderer, and
+production loads only the bundled `file://` renderer document.
 
 ## CSP Loopback Placeholder
 
