@@ -28,6 +28,7 @@ func TestHandlePostSkill_RejectsDuplicateName(t *testing.T) {
 		body := bytes.NewBufferString(fmt.Sprintf(`{
 			"name":%q,
 			"title":"Dup",
+			"description":"Dup skill body.",
 			"content":"do the thing",
 			"created_by":"ceo",
 			"channel":"general"
@@ -622,20 +623,22 @@ func TestBackfillSkillFilesFromState_PreservesExistingFile(t *testing.T) {
 		t.Fatalf("handlePostSkill: expected 200, got %d", rec.Code)
 	}
 	path := skillFilePath(t, b, "already-on-disk")
-	originalInfo, err := os.Stat(path)
+	originalRaw, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("stat: %v", err)
+		t.Fatalf("read before backfill: %v", err)
 	}
-	originalSize := originalInfo.Size()
 
 	b.backfillSkillFilesFromState(context.Background())
 
-	infoAfter, err := os.Stat(path)
+	rawAfter, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("stat after backfill: %v", err)
+		t.Fatalf("read after backfill: %v", err)
 	}
-	if infoAfter.Size() != originalSize {
-		t.Errorf("backfill rewrote an existing file (size %d -> %d)",
-			originalSize, infoAfter.Size())
+	// Byte-for-byte equality, not just size: a same-length rewrite
+	// (different commit metadata or whitespace) would slip a size-only
+	// check and still indicate the no-op contract is broken.
+	if !bytes.Equal(rawAfter, originalRaw) {
+		t.Errorf("backfill rewrote an existing file: %d bytes -> %d bytes, content differs",
+			len(originalRaw), len(rawAfter))
 	}
 }

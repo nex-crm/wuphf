@@ -168,8 +168,11 @@ func (b *Broker) handlePostSkill(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "action must be create or propose", http.StatusBadRequest)
 		return
 	}
-	if strings.TrimSpace(body.Name) == "" || strings.TrimSpace(body.Content) == "" || strings.TrimSpace(body.CreatedBy) == "" {
-		http.Error(w, "name, content, and created_by required", http.StatusBadRequest)
+	if strings.TrimSpace(body.Name) == "" || strings.TrimSpace(body.Content) == "" || strings.TrimSpace(body.CreatedBy) == "" || strings.TrimSpace(body.Description) == "" {
+		// Description is required by RenderSkillMarkdown — without it the
+		// SKILL.md write would silently no-op and the wiki UI would 404 on
+		// the skill, which is exactly the regression this PR fixes.
+		http.Error(w, "name, description, content, and created_by required", http.StatusBadRequest)
 		return
 	}
 
@@ -271,7 +274,12 @@ func (b *Broker) handlePostSkill(w http.ResponseWriter, r *http.Request) {
 	unlocked = true
 
 	commitMsg := fmt.Sprintf("wuphf: %s skill %s", action, skSnapshot.Name)
-	if err := enqueueSkillWikiWrite(r.Context(), wikiWorker, skSnapshot, wikiPath, commitMsg); err != nil {
+	// Use the broker lifecycle context, not r.Context(): the skill is
+	// already in broker state, and a client disconnect mid-Enqueue would
+	// cancel the SKILL.md commit and recreate the very "broker has it,
+	// disk doesn't" condition this PR exists to fix.
+	enqueueCtx := b.brokerLifecycleContext()
+	if err := enqueueSkillWikiWrite(enqueueCtx, wikiWorker, skSnapshot, wikiPath, commitMsg); err != nil {
 		// Wiki enqueue failures are logged but do not fail the create — the
 		// skill still lives in broker state, and a later save (edit, archive,
 		// or boot backfill) reconciles disk. Returning 500 here would leave
