@@ -23,7 +23,14 @@ const BIDI_CHARS = [
   "\u2069",
 ] as const;
 
-const sanitizableStringArb = fc.string().filter(canExpectedSanitizeText);
+// `fc.string()` in fast-check 3.x generates from `fc.char()`, which is
+// restricted to printable ASCII (U+0020..U+007E). For a sanitizer that has to
+// handle Unicode adversarially, that's a coverage hole — the property tests
+// would never see combining marks, NFKC-decomposable homoglyphs, RTL marks,
+// or astral-plane code points. `fullUnicodeString` draws from the full BMP +
+// astral planes; `canExpectedSanitizeText` filters out the inputs we already
+// know the production sanitizer rejects (lone surrogates, etc.).
+const sanitizableStringArb = fc.fullUnicodeString().filter(canExpectedSanitizeText);
 const bidiCharArb = fc.constantFrom(...BIDI_CHARS);
 const bidiInterleavedStringArb = fc
   .array(fc.tuple(sanitizableStringArb, bidiCharArb), { minLength: 1, maxLength: 16 })
@@ -100,6 +107,20 @@ describe("SanitizedString", () => {
     expect(SanitizedString.fromUnknown("ze\u200bro").value).toBe("zero");
     expect(SanitizedString.fromUnknown("x\u200dy", { policy: "allow-zwj" }).value).toBe("x\u200dy");
     expect(SanitizedString.fromUnknown("x\u200cy", { policy: "allow-zwj" }).value).toBe("xy");
+  });
+
+  it("strips other commonly-weaponized invisible format characters (UTS #39)", () => {
+    // U+180E MONGOLIAN VOWEL SEPARATOR \u2014 Default_Ignorable / Restricted under
+    // UTS #39; NFKC does not remove it.
+    expect(SanitizedString.fromUnknown("ad\u180emin").value).toBe("admin");
+    // U+2060 WORD JOINER + U+2061..U+2064 INVISIBLE OPERATORS \u2014 same class.
+    expect(SanitizedString.fromUnknown("ev\u2060il").value).toBe("evil");
+    expect(SanitizedString.fromUnknown("a\u2061b").value).toBe("ab");
+    expect(SanitizedString.fromUnknown("a\u2062b").value).toBe("ab");
+    expect(SanitizedString.fromUnknown("a\u2063b").value).toBe("ab");
+    expect(SanitizedString.fromUnknown("a\u2064b").value).toBe("ab");
+    // U+2065 is OUTSIDE the rejected range \u2014 sanity check we don't over-strip.
+    expect(SanitizedString.fromUnknown("a\u2065b").value).toBe("a\u2065b");
   });
 
   it("freezes the returned instance", () => {
@@ -405,7 +426,16 @@ function isExpectedDisallowedCodePoint(codePoint: number, policy: SanitizedStrin
     return true;
   }
 
-  return codePoint === 0x200d && policy !== "allow-zwj";
+  if (codePoint === 0x200d) {
+    return policy !== "allow-zwj";
+  }
+
+  // Mirrors production: U+180E + U+2060..U+2064 invisible format chars.
+  if (codePoint === 0x180e || (codePoint >= 0x2060 && codePoint <= 0x2064)) {
+    return true;
+  }
+
+  return false;
 }
 
 function containsCodePoint(value: string, predicate: (codePoint: number) => boolean): boolean {

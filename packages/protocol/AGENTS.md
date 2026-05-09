@@ -11,6 +11,17 @@ choose.
 
 ---
 
+## Runtime target
+
+This package targets **Node.js (and Electron's main process)**. The tsconfig
+declares `"types": ["node"]`; the audit chain uses `node:crypto.createHash` and
+`Buffer` for byte/base64 encoding. The protocol shapes themselves are
+runtime-agnostic, but the verifier helpers (`computeEventHash`,
+`serializeAuditEventRecordForHash`) will not run in a browser or Electron
+renderer with `nodeIntegration: false`. If renderer-side verification is ever
+needed, port `sha256.ts` and the base64 encoder in `audit-event.ts` to
+`crypto.subtle` + `btoa` together — they're a matched pair.
+
 ## What this package does
 
 - Branded TypeScript types for the wire surface: `ReceiptId`, `ProviderKind`,

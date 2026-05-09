@@ -342,7 +342,21 @@ function isDisallowedCodePoint(codePoint: number, options: SanitizedStringOption
     return true;
   }
 
-  return codePoint === 0x200d && options.policy !== "allow-zwj";
+  if (codePoint === 0x200d) {
+    return options.policy !== "allow-zwj";
+  }
+
+  // Other commonly-weaponized invisible format characters that NFKC does NOT
+  // remove: U+180E MONGOLIAN VOWEL SEPARATOR, U+2060 WORD JOINER, and the
+  // U+2061..U+2064 INVISIBLE OPERATORS. Per UTS #39 these are
+  // Default_Ignorable / Restricted for identifier use; rejecting them at the
+  // renderer boundary closes a homograph/spoofing path that the existing ZWSP
+  // strip alone leaves open.
+  if (codePoint === 0x180e || (codePoint >= 0x2060 && codePoint <= 0x2064)) {
+    return true;
+  }
+
+  return false;
 }
 
 function rejectLoneSurrogates(value: string): void {

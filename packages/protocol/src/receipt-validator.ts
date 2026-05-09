@@ -662,15 +662,23 @@ function validateExternalWrite(
       if (typeof receiptId === "string" && recordValue(claims, "receiptId") !== receiptId) {
         addError(errors, pointer(claimsPath, "receiptId"), "must match enclosing receipt id");
       }
-      if (
-        proposedDiff instanceof FrozenArgs &&
-        recordValue(claims, "frozenArgsHash") !== proposedDiff.hash
-      ) {
-        addError(
-          errors,
-          pointer(claimsPath, "frozenArgsHash"),
-          "must match this write's proposedDiff hash",
-        );
+      // Re-derive the diff hash rather than trusting `proposedDiff.hash` from
+      // an `instanceof`-passing object. A forged `proposedDiff`
+      // (`Object.create(FrozenArgs.prototype)` with attacker-chosen `.hash`)
+      // would otherwise pass this check by setting both sides to the same
+      // value. `validateFrozenArgs` runs earlier on the same proposedDiff and
+      // also re-derives, so today the order chains the invariant — but doing
+      // the re-derivation locally here means the cross-field rule's
+      // correctness no longer depends on validator ordering.
+      if (proposedDiff instanceof FrozenArgs) {
+        const reFrozen = FrozenArgs.freeze(JSON.parse(proposedDiff.canonicalJson));
+        if (recordValue(claims, "frozenArgsHash") !== reFrozen.hash) {
+          addError(
+            errors,
+            pointer(claimsPath, "frozenArgsHash"),
+            "must match this write's proposedDiff hash",
+          );
+        }
       }
       const tokenWriteId = recordValue(claims, "writeId");
       if (tokenWriteId !== undefined && tokenWriteId !== recordValue(value, "writeId")) {

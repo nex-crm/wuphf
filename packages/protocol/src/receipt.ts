@@ -727,7 +727,20 @@ function frozenArgsFromJson(
     requiredStringFromJson(record, "hash", path),
     pointer(path, "hash"),
   );
-  const decoded: unknown = JSON.parse(canonicalJson);
+  // JSON.parse can throw a bare SyntaxError that would surface from the codec
+  // without a JSON-pointer path indication. Annotate it with the field path so
+  // a malformed canonicalJson deep inside a receipt is triageable from the
+  // error message alone (matches the validator's wrap in validateFrozenArgs).
+  let decoded: unknown;
+  try {
+    decoded = JSON.parse(canonicalJson);
+  } catch (err) {
+    throw new Error(
+      `${pointer(path, "canonicalJson")}: ${
+        err instanceof Error ? err.message : "must be valid JSON"
+      }`,
+    );
+  }
   const frozen = FrozenArgs.freeze(decoded);
   if (frozen.canonicalJson !== canonicalJson) {
     throw new Error(`${pointer(path, "canonicalJson")}: must be RFC 8785 canonical JSON`);
