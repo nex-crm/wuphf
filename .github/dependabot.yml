@@ -78,6 +78,29 @@ updates:
       prefix: "chore(web)"
       include: "scope"
 
+  # Desktop Electron shell. Keep Electron, electron-vite, Vite, and Vitest
+  # grouped because runtime and build-tool peer ranges move together.
+  - package-ecosystem: "npm"
+    directory: "/apps/desktop"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 5
+    groups:
+      desktop-electron-stack:
+        patterns:
+          - "electron"
+          - "electron-vite"
+          - "vite"
+          - "vitest"
+          - "@vitest/coverage-v8"
+          - "typescript"
+          - "@types/node"
+    commit-message:
+      prefix: "chore(desktop)"
+      include: "scope"
+
   # Playwright e2e harness. Self-contained workspace under web/e2e/ so
   # @playwright/test bumps don't entangle the main web build.
   - package-ecosystem: "npm"
