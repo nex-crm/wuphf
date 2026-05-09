@@ -44,34 +44,17 @@ cd apps/desktop && bun run check:ipc-allowlist # CI grep gate
 
 ## Architecture
 
-```
-┌────────────────────┐  utilityProcess.fork()   ┌─────────────────┐
-│  Electron main     │ ─────────────────────────▶│  Broker (stub)  │
-│  process           │                           │  (future:       │
-│                    │ ◀──── liveness pings ─────│   broker-       │
-│  - BrowserWindow   │                           │   loopback-     │
-│  - lifecycle       │                           │   listener)     │
-│  - broker spawn    │                           └─────────────────┘
-└────────┬───────────┘
-         │ contextBridge.exposeInMainWorld
-         │ (OS verbs only — see api-contract.ts)
-         ▼
-┌────────────────────┐
-│  Preload (sandbox) │
-│  - openExternal    │
-│  - showItemIn...   │
-│  - getAppVersion   │
-│  - getPlatform     │
-│  - getBrokerStatus │
-└────────┬───────────┘
-         │ window.wuphf.<verb>
-         ▼
-┌────────────────────┐
-│  Renderer          │
-│  (untrusted)       │
-│  - one-pane status │
-│  - hello-world     │
-└────────────────────┘
+```mermaid
+flowchart LR
+    Main["Electron main process<br/>BrowserWindow · lifecycle · broker spawn"]
+    Broker["Broker (stub)<br/>real impl in branch 4<br/>feat/broker-loopback-listener"]
+    Preload["Preload (sandbox)<br/>contextBridge: 5 OS verbs<br/>src/shared/api-contract.ts"]
+    Renderer["Renderer (untrusted)<br/>one-pane status view"]
+
+    Main -->|utilityProcess.fork| Broker
+    Broker -.->|liveness pings| Main
+    Main -->|exposeInMainWorld| Preload
+    Preload -->|window.wuphf.<verb>| Renderer
 ```
 
 The renderer **never** touches `~/.wuphf/` or any file under it. Anything app-data-shaped travels over loopback HTTP/SSE in a future branch.
