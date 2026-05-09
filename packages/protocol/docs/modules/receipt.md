@@ -177,20 +177,20 @@ Callers constructing runtime receipts directly must use brand constructors, `Fro
 
 ## 7. Audit findings (current code vs this spec)
 
-| # | Spec section | File:line | Discrepancy | Severity | Fix needed |
+| # | Spec section | File:line | Discrepancy | Severity | Status |
 |---|---|---:|---|---|---|
-| 1 | 3.10 | `src/receipt-validator.ts:300-328` | `ReceiptStatus` is only checked as a literal. Verified current code accepts `status: "ok"` with an approval decision of `"reject"`, so inconsistent snapshots can validate. | HIGH | Define status/evidence rules and enforce them, or explicitly downgrade status to an untrusted annotation. |
-| 2 | 3.8 | `src/receipt-validator.ts:697-705` | The write approval ordering check passes `allowEqual: true`; verified `approvedAt === issuedAt` validates, but the contract requires strictly after issuance. | MEDIUM | Pass `allowEqual: false` for `approvedAt` and add equality coverage. |
-| 3 | 2, 3.1 | `src/receipt-types.ts:233`, `src/receipt-types.ts:246`, `src/receipt-validator.ts:867` | Error text says ULID, but the regex is ULID-shaped only and allows first characters outside strict ULID timestamp range. | LOW | Rename messages/docs to ULID-shaped, or tighten the regex to strict ULID range. |
-| 4 | 3.2 | `src/receipt.ts:868-876` | Oversized `SanitizedString` decode errors omit the JSON pointer, unlike sibling type/sanitization failures that use `path`. | LOW | Prefix the budget error with the provided field path. |
+| 1 | 3.10 | `src/receipt-validator.ts:241`, `src/receipt-validator.ts:419` | Historical R11 gap: `ReceiptStatus` was only checked as a literal, so inconsistent snapshots could validate. Current code runs `RECEIPT_STATUS_EVIDENCE_RULES` from `validateReceiptStatusEvidence`. | HIGH | RESOLVED in `872f97d3`; regression tests in `1da5ccfa` / `tests/receipt.spec.ts:1353`. |
+| 2 | 3.8 | `src/receipt-validator.ts:960-968` | Historical R11 gap: the write approval ordering check allowed `approvedAt === issuedAt`. Current code passes `allowEqual: false`, so approval must be strictly after issuance. | MEDIUM | RESOLVED in `53a77e87`; equality coverage in `tests/receipt.spec.ts:1074`. |
+| 3 | 2, 3.1 | `src/receipt-types.ts:233`, `src/receipt-types.ts:246`, `src/receipt-validator.ts:867` | Error text says ULID, but the regex is ULID-shaped only and allows first characters outside strict ULID timestamp range. | LOW | OPEN: rename messages/docs to ULID-shaped, or tighten the regex to strict ULID range. |
+| 4 | 3.2 | `src/receipt.ts:868-876` | Oversized `SanitizedString` decode errors omit the JSON pointer, unlike sibling type/sanitization failures that use `path`. | LOW | OPEN: prefix the budget error with the provided field path. |
 
-## 8. Test coverage gaps (against this spec, not against current code)
+## 8. Test coverage status (against this spec, not against current code)
 
-| # | Spec section | What's untested | Why it matters | Suggested test |
+| # | Spec section | Coverage status | Why it matters | Reference / suggested test |
 |---|---|---|---|---|
-| 1 | 3.1 | Future schema rejection beyond V2. | Locks the versioned migration boundary. | Mutate serialized fixture to `99` and assert `/schemaVersion: must be 1 or 2`. |
-| 2 | 3.8 | `approvedAt === issuedAt`. | Equality currently passes but strict authorization sequencing should fail. | Add a validator test at exact equality. |
-| 3 | 3.10 | Status/evidence contradictions such as `ok` plus rejected approval, `ok` plus failed tool call, or `approval_pending` with terminal write evidence. | Prevents receipts whose summary contradicts their evidence. | Table-test each `ReceiptStatus` against minimal required/forbidden evidence. |
-| 4 | 3.6 | All `PROVIDER_KIND_VALUES` accepted and unknown providers rejected through validator and codec. | Closed enums need runtime and type coverage when values change. | Iterate the tuple and add one unsupported value. |
-| 5 | 2 | ULID-shaped but not strict-ULID boundary, especially first char `8` or `Z`. | Forces an explicit decision: accept regex-shaped IDs or enforce strict ULID range. | Test the chosen behavior for `ReceiptId` and `TaskId`. |
-| 6 | 3.2 | Oversized nested sanitized strings preserve pointer context. | Debuggability and helper consistency. | Mutate `toolCalls[0].output` over the cap and assert the path appears. |
+| 1 | 3.1 | Gap: future schema rejection beyond V2. | Locks the versioned migration boundary. | Mutate serialized fixture to `99` and assert `/schemaVersion: must be 1 or 2`. |
+| 2 | 3.8 | Covered: `approvedAt === issuedAt` rejects because authorization ordering is strict-after. | Prevents same-instant approval tokens from authorizing writes. | `tests/receipt.spec.ts:1074`. |
+| 3 | 3.10 | Covered for core contradictions: `ok` plus rejected approval, `ok` plus failed tool call, `ok` plus non-applied write, pending/stalled with applied writes, and rejected/error without required evidence. | Prevents receipts whose summary contradicts their evidence. | `tests/receipt.spec.ts:1353`, `tests/receipt.spec.ts:1368`, `tests/receipt.spec.ts:1379`, `tests/receipt.spec.ts:1390`. |
+| 4 | 3.6 | Gap: all `PROVIDER_KIND_VALUES` accepted and unknown providers rejected through validator and codec. | Closed enums need runtime and type coverage when values change. | Iterate the tuple and add one unsupported value. |
+| 5 | 2 | Gap: ULID-shaped but not strict-ULID boundary, especially first char `8` or `Z`. | Forces an explicit decision: accept regex-shaped IDs or enforce strict ULID range. | Test the chosen behavior for `ReceiptId` and `TaskId`. |
+| 6 | 3.2 | Gap: oversized nested sanitized strings preserve pointer context. | Debuggability and helper consistency. | Mutate `toolCalls[0].output` over the cap and assert the path appears. |
