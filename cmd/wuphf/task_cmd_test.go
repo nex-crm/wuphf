@@ -143,6 +143,23 @@ func TestAutoAssignCountdownInterrupt(t *testing.T) {
 	}
 }
 
+// TestIsSafeTaskID locks down the allowlist used to guard `open` /
+// `xdg-open` / `rundll32` arguments and the block POST path.
+func TestIsSafeTaskID(t *testing.T) {
+	good := []string{"task-1", "abc_123", "Task42", "T-1"}
+	for _, id := range good {
+		if !isSafeTaskID(id) {
+			t.Errorf("isSafeTaskID(%q) = false, want true", id)
+		}
+	}
+	bad := []string{"", "task with space", "task;rm", "task/.", "task'$", strings.Repeat("a", 200)}
+	for _, id := range bad {
+		if isSafeTaskID(id) {
+			t.Errorf("isSafeTaskID(%q) = true, want false", id)
+		}
+	}
+}
+
 // TestRunTaskStartHookErrorBubblesUp confirms the runner surfaces hook
 // errors instead of silently succeeding.
 func TestRunTaskStartHookErrorBubblesUp(t *testing.T) {
