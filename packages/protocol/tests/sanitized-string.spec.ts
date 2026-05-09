@@ -200,6 +200,10 @@ describe("SanitizedString", () => {
     expect(() => SanitizedString.fromUnknown(() => "leak")).toThrow(/function/);
   });
 
+  it("rejects bigint input", () => {
+    expect(() => SanitizedString.fromUnknown(1n)).toThrow(/bigint/);
+  });
+
   it("rejects depth beyond MAX_DEPTH", () => {
     let nested: unknown = "leaf";
     for (let i = 0; i < 100; i++) {
@@ -208,15 +212,73 @@ describe("SanitizedString", () => {
     expect(() => SanitizedString.fromUnknown(nested)).toThrow(/depth/);
   });
 
-  it("rejects objects whose JSON projection is undefined", () => {
-    // toJSON returning undefined makes JSON.stringify emit undefined for the
-    // top-level value. We must throw rather than silently coerce to "".
-    const evil = {
-      toJSON(): unknown {
-        return undefined;
+  it.each([
+    {
+      name: "accessor property",
+      input: {
+        get foo(): string {
+          return "bar";
+        },
+      },
+    },
+    {
+      name: "toJSON method",
+      input: {
+        toJSON(): string {
+          return "spoofed";
+        },
+      },
+    },
+    {
+      name: "nested toJSON method",
+      input: {
+        outer: {
+          toJSON(): string {
+            return "spoofed";
+          },
+        },
+      },
+    },
+    { name: "Date instance", input: new Date() },
+    { name: "Map instance", input: new Map([["a", 1]]) },
+    { name: "Set instance", input: new Set([1, 2]) },
+    { name: "RegExp instance", input: /foo/ },
+    { name: "typed array", input: new Uint8Array([1, 2]) },
+    { name: "symbol-keyed property", input: { [Symbol("k")]: "v", legit: "ok" } },
+    {
+      name: "class instance",
+      input: new (class Foo {
+        readonly x = 1;
+      })(),
+    },
+    {
+      name: "non-enumerable property",
+      input: (() => {
+        const object: Record<string, unknown> = {};
+        Object.defineProperty(object, "x", { value: 1, enumerable: false });
+        return object;
+      })(),
+    },
+    { name: "inherited property", input: Object.create({ inherited: 1 }) as object },
+    { name: "undefined value", input: { x: undefined } },
+    { name: "function value", input: { x: () => "leak" } },
+    { name: "symbol value", input: { x: Symbol("leak") } },
+    { name: "bigint value", input: { x: 1n } },
+  ])("rejects unsafe object graph shape: $name", ({ input }) => {
+    expect(() => SanitizedString.fromUnknown(input)).toThrow();
+  });
+
+  it("rejects accessors without invoking them", () => {
+    let fired = false;
+    const input = {
+      get x(): number {
+        fired = true;
+        return 1;
       },
     };
-    expect(() => SanitizedString.fromUnknown(evil)).toThrow(/not JSON-representable/);
+
+    expect(() => SanitizedString.fromUnknown(input)).toThrow();
+    expect(fired).toBe(false);
   });
 });
 

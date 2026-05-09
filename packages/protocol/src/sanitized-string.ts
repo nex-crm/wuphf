@@ -7,6 +7,12 @@ export interface SanitizedStringOptions {
 const MAX_DEPTH = 64;
 const FORBIDDEN_KEYS: ReadonlySet<string> = new Set(["__proto__", "constructor", "prototype"]);
 
+type SanitizedJsonPrimitive = null | boolean | number | string;
+type SanitizedJsonValue = SanitizedJsonPrimitive | SanitizedJsonValue[] | SanitizedJsonRecord;
+interface SanitizedJsonRecord {
+  readonly [key: string]: SanitizedJsonValue;
+}
+
 export class SanitizedString {
   private constructor(readonly value: string) {
     Object.freeze(this);
@@ -30,9 +36,8 @@ function coerceToString(input: unknown, options: SanitizedStringOptions): string
   // Coercion is explicit at the renderer boundary. null/undefined become empty
   // text so absent optional fields do not render as "null" or "undefined".
   // Symbols and functions are rejected — `String(Symbol(x))` leaks the
-  // description and `String(fn)` leaks function source. Objects are projected
-  // through JSON.stringify; their string fields are sanitized before re-
-  // stringifying so NFKC cannot turn content into invalid JSON syntax.
+  // description and `String(fn)` leaks function source. Objects are walked via
+  // descriptors before serialization so getters and toJSON cannot run first.
   if (input === null || input === undefined) {
     return "";
   }
@@ -41,9 +46,10 @@ function coerceToString(input: unknown, options: SanitizedStringOptions): string
     case "string":
       return input;
     case "number":
-    case "bigint":
     case "boolean":
       return String(input);
+    case "bigint":
+      throw new Error("SanitizedString: bigint is not JSON-representable");
     case "symbol":
       throw new Error("SanitizedString: symbol is not representable");
     case "function":
@@ -56,13 +62,7 @@ function coerceToString(input: unknown, options: SanitizedStringOptions): string
 }
 
 function stringifySanitizedJson(input: object, options: SanitizedStringOptions): string {
-  const serialized = JSON.stringify(input);
-  if (serialized === undefined) {
-    throw new Error("SanitizedString: input is not JSON-representable");
-  }
-
-  const projected = JSON.parse(serialized) as unknown;
-  const sanitizedProjection = sanitizeJsonValue(projected, options, 0);
+  const sanitizedProjection = sanitizeJsonValue(input, options, 0, "$", new WeakSet<object>());
   const sanitizedSerialized = JSON.stringify(sanitizedProjection);
   if (sanitizedSerialized === undefined) {
     throw new Error("SanitizedString: sanitized projection is not JSON-representable");
@@ -74,30 +74,144 @@ function sanitizeJsonValue(
   value: unknown,
   options: SanitizedStringOptions,
   depth: number,
-): unknown {
+  path: string,
+  ancestors: WeakSet<object>,
+): SanitizedJsonValue {
   if (depth > MAX_DEPTH) {
     throw new Error("SanitizedString: max recursion depth exceeded");
   }
 
-  if (typeof value === "string") {
-    return sanitizeText(value, options);
+  if (value === null) {
+    return null;
   }
 
-  if (value === null || typeof value === "number" || typeof value === "boolean") {
-    return value;
+  switch (typeof value) {
+    case "string":
+      return sanitizeText(value, options);
+    case "number":
+      if (!Number.isFinite(value)) {
+        throw new Error(`SanitizedString: non-finite number at ${path}`);
+      }
+      return value;
+    case "boolean":
+      return value;
+    case "undefined":
+      throw new Error(`SanitizedString: undefined at ${path} is not JSON-representable`);
+    case "function":
+      throw new Error(`SanitizedString: function at ${path} is not JSON-representable`);
+    case "symbol":
+      throw new Error(`SanitizedString: symbol at ${path} is not JSON-representable`);
+    case "bigint":
+      throw new Error(`SanitizedString: bigint at ${path} is not JSON-representable`);
   }
 
+  if (ArrayBuffer.isView(value)) {
+    throw new Error(`SanitizedString: typed array at ${path} is not JSON-representable`);
+  }
+
+  // ECMAScript has no side-effect-free Proxy test; reflective inspection can
+  // invoke proxy traps. The no-getter/toJSON guarantee below applies to
+  // ordinary arrays and objects.
   if (Array.isArray(value)) {
-    return value.map((item) => sanitizeJsonValue(item, options, depth + 1));
+    return sanitizeJsonArray(value, options, depth, path, ancestors);
   }
 
-  if (typeof value === "object") {
+  return sanitizeJsonObject(value, options, depth, path, ancestors);
+}
+
+function sanitizeJsonArray(
+  value: readonly unknown[],
+  options: SanitizedStringOptions,
+  depth: number,
+  path: string,
+  ancestors: WeakSet<object>,
+): SanitizedJsonValue[] {
+  return withJsonAncestor(value, path, ancestors, () => {
+    assertNoCallableToJson(value, path);
+    const proto = Object.getPrototypeOf(value);
+    if (proto !== Array.prototype) {
+      throw new Error(`SanitizedString: non-plain array at ${path}`);
+    }
+    assertNoEnumerableInheritedProperties(value, path);
+
+    const lengthDescriptor = Object.getOwnPropertyDescriptor(value, "length");
+    if (lengthDescriptor === undefined || isAccessorDescriptor(lengthDescriptor)) {
+      throw new Error(`SanitizedString: invalid array length descriptor at ${path}`);
+    }
+    const lengthValue: unknown = lengthDescriptor.value;
+    if (typeof lengthValue !== "number" || !Number.isSafeInteger(lengthValue) || lengthValue < 0) {
+      throw new Error(`SanitizedString: invalid array length at ${path}`);
+    }
+    const length = lengthValue;
+
+    for (const rawKey of Reflect.ownKeys(value)) {
+      if (typeof rawKey === "symbol") {
+        throw new Error(`SanitizedString: symbol keys are not JSON-representable at ${path}`);
+      }
+      if (rawKey === "length") {
+        continue;
+      }
+      const index = parseArrayIndexKey(rawKey);
+      if (index === undefined || index >= length) {
+        throw new Error(`SanitizedString: non-index array property at ${path}.${rawKey}`);
+      }
+    }
+
+    const out: SanitizedJsonValue[] = [];
+    for (let index = 0; index < length; index++) {
+      const itemPath = `${path}[${index}]`;
+      const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+      if (descriptor === undefined) {
+        throw new Error(`SanitizedString: sparse array hole at ${itemPath}`);
+      }
+      assertEnumerableDataDescriptor(descriptor, itemPath);
+      const child: unknown = descriptor.value;
+      Object.defineProperty(out, String(index), {
+        value: sanitizeJsonValue(child, options, depth + 1, itemPath, ancestors),
+        enumerable: true,
+        configurable: true,
+        writable: true,
+      });
+    }
+    Object.setPrototypeOf(out, null);
+    return out;
+  });
+}
+
+function sanitizeJsonObject(
+  value: object,
+  options: SanitizedStringOptions,
+  depth: number,
+  path: string,
+  ancestors: WeakSet<object>,
+): SanitizedJsonRecord {
+  return withJsonAncestor(value, path, ancestors, () => {
+    assertNoCallableToJson(value, path);
+    const proto = Object.getPrototypeOf(value);
+    if (proto !== Object.prototype && proto !== null) {
+      throw new Error(`SanitizedString: non-plain object at ${path}`);
+    }
+    assertNoEnumerableInheritedProperties(value, path);
+
     // Object.create(null) defeats the `__proto__` setter that lives on
-    // Object.prototype. Without this, JSON.parse('{"__proto__": ...}') puts an
-    // own property on the parsed value, and assigning it on a `{}` accumulator
-    // mutates the accumulator's prototype.
-    const out: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
-    for (const [rawKey, child] of Object.entries(value as Record<string, unknown>)) {
+    // Object.prototype. Without this, assigning a sanitized "__proto__" key on
+    // a `{}` accumulator would mutate the accumulator's prototype.
+    const out: Record<string, SanitizedJsonValue> = Object.create(null) as Record<
+      string,
+      SanitizedJsonValue
+    >;
+    for (const rawKey of Reflect.ownKeys(value)) {
+      if (typeof rawKey === "symbol") {
+        throw new Error(`SanitizedString: symbol keys are not JSON-representable at ${path}`);
+      }
+
+      const childPath = `${path}.${rawKey}`;
+      const descriptor = Object.getOwnPropertyDescriptor(value, rawKey);
+      if (descriptor === undefined) {
+        throw new Error(`SanitizedString: missing own property descriptor at ${childPath}`);
+      }
+      assertEnumerableDataDescriptor(descriptor, childPath);
+
       const sanitizedKey = sanitizeText(rawKey, options);
       if (FORBIDDEN_KEYS.has(sanitizedKey)) {
         throw new Error(`SanitizedString: forbidden key "${sanitizedKey}"`);
@@ -105,20 +219,90 @@ function sanitizeJsonValue(
       if (Object.hasOwn(out, sanitizedKey)) {
         throw new Error(`SanitizedString: sanitized key collision on "${sanitizedKey}"`);
       }
+
+      const child: unknown = descriptor.value;
       Object.defineProperty(out, sanitizedKey, {
-        value: sanitizeJsonValue(child, options, depth + 1),
+        value: sanitizeJsonValue(child, options, depth + 1, childPath, ancestors),
         enumerable: true,
         configurable: true,
         writable: true,
       });
     }
     return out;
+  });
+}
+
+function withJsonAncestor<T>(
+  value: object,
+  path: string,
+  ancestors: WeakSet<object>,
+  sanitize: () => T,
+): T {
+  if (ancestors.has(value)) {
+    throw new Error(`SanitizedString: circular reference at ${path} is not JSON-representable`);
   }
 
-  // Numbers/strings/null are handled above; unknown typeofs (function, symbol,
-  // bigint, undefined) shouldn't appear here because JSON.parse can't produce
-  // them. Reject defensively rather than letting them fall through.
-  throw new Error(`SanitizedString: unrepresentable JSON value of type ${typeof value}`);
+  ancestors.add(value);
+  try {
+    return sanitize();
+  } finally {
+    ancestors.delete(value);
+  }
+}
+
+function assertNoCallableToJson(value: object, path: string): void {
+  let current: object | null = value;
+  while (current !== null) {
+    const descriptor = Object.getOwnPropertyDescriptor(current, "toJSON");
+    if (descriptor !== undefined) {
+      if (isAccessorDescriptor(descriptor)) {
+        throw new Error(`SanitizedString: accessor toJSON at ${path}`);
+      }
+      const toJson: unknown = descriptor.value;
+      if (typeof toJson === "function") {
+        throw new Error(`SanitizedString: toJSON method at ${path} is not allowed`);
+      }
+    }
+    current = Object.getPrototypeOf(current);
+  }
+}
+
+function assertNoEnumerableInheritedProperties(value: object, path: string): void {
+  let current = Object.getPrototypeOf(value);
+  while (current !== null) {
+    for (const rawKey of Reflect.ownKeys(current)) {
+      const descriptor = Object.getOwnPropertyDescriptor(current, rawKey);
+      if (descriptor?.enumerable === true) {
+        const key = typeof rawKey === "symbol" ? rawKey.toString() : rawKey;
+        throw new Error(`SanitizedString: inherited enumerable property at ${path}.${key}`);
+      }
+    }
+    current = Object.getPrototypeOf(current);
+  }
+}
+
+function assertEnumerableDataDescriptor(
+  descriptor: PropertyDescriptor,
+  path: string,
+): asserts descriptor is PropertyDescriptor & { readonly value: unknown } {
+  if (descriptor.enumerable !== true) {
+    throw new Error(`SanitizedString: non-enumerable own property at ${path}`);
+  }
+  if (isAccessorDescriptor(descriptor)) {
+    throw new Error(`SanitizedString: accessor property at ${path}`);
+  }
+}
+
+function isAccessorDescriptor(descriptor: PropertyDescriptor): boolean {
+  return "get" in descriptor || "set" in descriptor;
+}
+
+function parseArrayIndexKey(key: string): number | undefined {
+  const index = Number(key);
+  if (!Number.isInteger(index) || index < 0 || index >= 2 ** 32 - 1) {
+    return undefined;
+  }
+  return String(index) === key ? index : undefined;
 }
 
 function sanitizeText(input: string, options: SanitizedStringOptions): string {
