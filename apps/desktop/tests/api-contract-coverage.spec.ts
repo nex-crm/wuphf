@@ -28,7 +28,7 @@ vi.mock("electron", () => ({
 describe("IPC contract coverage", () => {
   it("registerIpcHandlers callees match IPC_CHANNEL_VALUES exactly", async () => {
     const { BrokerSupervisor } = await import("../src/main/broker.ts");
-    const { REGISTERED_IPC_CHANNELS, registerIpcHandlers } = await import(
+    const { createIpcHandlers, registerIpcHandlers } = await import(
       "../src/main/ipc/register-handlers.ts"
     );
     const brokerSupervisor = new BrokerSupervisor({ brokerEntryPath: "/tmp/broker-stub.js" });
@@ -37,6 +37,8 @@ describe("IPC contract coverage", () => {
 
     const handledChannels = electronMock.handle.mock.calls.map(([channel]) => channel);
     expect(handledChannels.sort()).toEqual([...IPC_CHANNEL_VALUES].sort());
-    expect([...REGISTERED_IPC_CHANNELS].sort()).toEqual([...IPC_CHANNEL_VALUES].sort());
+    expect(Object.keys(createIpcHandlers(brokerSupervisor)).sort()).toEqual(
+      [...IPC_CHANNEL_VALUES].sort(),
+    );
   });
 });

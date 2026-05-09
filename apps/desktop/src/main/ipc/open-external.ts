@@ -1,6 +1,11 @@
 import { type IpcMainInvokeEvent, shell } from "electron";
 
-import type { OpenExternalResponse } from "../../shared/api-contract.ts";
+import {
+  type ErrResponse,
+  errResponse,
+  type OpenExternalResponse,
+  okResponse,
+} from "../../shared/api-contract.ts";
 import { invalidRequest, isExactObject } from "./_guards.ts";
 
 const ALLOWED_EXTERNAL_PROTOCOLS = new Set(["https:", "http:", "mailto:"]);
@@ -23,27 +28,24 @@ export async function handleOpenExternal(
 
   try {
     await shell.openExternal(parsedUrl.url);
-    return { ok: true };
+    return okResponse();
   } catch (error) {
-    return {
-      ok: false,
-      error: error instanceof Error ? error.message : "Failed to open external URL",
-    };
+    return errResponse(error instanceof Error ? error.message : "Failed to open external URL");
   }
 }
 
 function parseAllowedExternalUrl(
   value: string,
-): { readonly ok: true; readonly url: string } | { readonly ok: false; readonly error: string } {
+): { readonly ok: true; readonly url: string } | ErrResponse {
   let parsedUrl: URL;
   try {
     parsedUrl = new URL(value);
   } catch {
-    return { ok: false, error: "Invalid URL" };
+    return errResponse("Invalid URL");
   }
 
   if (!ALLOWED_EXTERNAL_PROTOCOLS.has(parsedUrl.protocol)) {
-    return { ok: false, error: `Unsupported external URL protocol: ${parsedUrl.protocol}` };
+    return errResponse(`Unsupported external URL protocol: ${parsedUrl.protocol}`);
   }
 
   return { ok: true, url: parsedUrl.toString() };

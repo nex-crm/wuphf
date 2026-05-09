@@ -53,7 +53,7 @@ export const IPC_ALLOWLIST_RATIONALE: Record<IpcChannelName, string> = {
   [IpcChannel.GetPlatform]:
     "Returns process.platform + process.arch. Static OS facts, not user data.",
   [IpcChannel.GetBrokerStatus]:
-    "Returns liveness state of the broker utility process: 'starting' | 'alive' | 'dead' | 'unknown'. NOT broker data — only its lifecycle state.",
+    "Returns liveness state of the broker utility process: 'starting' | 'alive' | 'unresponsive' | 'dead' | 'unknown'. NOT broker data — only its lifecycle state.",
 };
 
 /**
@@ -65,23 +65,41 @@ export const IPC_ALLOWLIST_RATIONALE: Record<IpcChannelName, string> = {
 export interface OpenExternalRequest {
   readonly url: string;
 }
-export type OpenExternalResponse =
-  | { readonly ok: true }
-  | { readonly ok: false; readonly error: string };
+
+export interface OkResponse {
+  readonly ok: true;
+}
+
+export interface ErrResponse {
+  readonly ok: false;
+  readonly error: string;
+}
+
+export function okResponse(): OkResponse {
+  return { ok: true };
+}
+
+export function errResponse(error: string): ErrResponse {
+  return { ok: false, error };
+}
+
+export type OpenExternalResponse = OkResponse | ErrResponse;
 
 export interface ShowItemInFolderRequest {
   readonly path: string;
 }
-export type ShowItemInFolderResponse =
-  | { readonly ok: true }
-  | { readonly ok: false; readonly error: string };
+export type ShowItemInFolderResponse = OkResponse | ErrResponse;
 
-export type GetAppVersionRequest = Record<string, never>;
+declare const emptyPayloadBrand: unique symbol;
+export type EmptyPayload = { readonly [emptyPayloadBrand]: never };
+export const EMPTY_PAYLOAD = Object.freeze({}) as EmptyPayload;
+
+export type GetAppVersionRequest = EmptyPayload;
 export interface GetAppVersionResponse {
   readonly version: string;
 }
 
-export type GetPlatformRequest = Record<string, never>;
+export type GetPlatformRequest = EmptyPayload;
 
 export type DesktopPlatform =
   | "aix"
@@ -101,9 +119,9 @@ export interface GetPlatformResponse {
   readonly arch: string;
 }
 
-export type BrokerStatus = "starting" | "alive" | "dead" | "unknown";
+export type BrokerStatus = "starting" | "alive" | "unresponsive" | "dead" | "unknown";
 
-export type GetBrokerStatusRequest = Record<string, never>;
+export type GetBrokerStatusRequest = EmptyPayload;
 export interface GetBrokerStatusResponse {
   readonly status: BrokerStatus;
   readonly pid: number | null;
@@ -116,11 +134,13 @@ export interface GetBrokerStatusResponse {
  * or any Node global.
  */
 export interface WuphfDesktopApi {
-  openExternal(request: OpenExternalRequest): Promise<OpenExternalResponse>;
-  showItemInFolder(request: ShowItemInFolderRequest): Promise<ShowItemInFolderResponse>;
-  getAppVersion(): Promise<GetAppVersionResponse>;
-  getPlatform(): Promise<GetPlatformResponse>;
-  getBrokerStatus(): Promise<GetBrokerStatusResponse>;
+  readonly openExternal: (request: OpenExternalRequest) => Promise<OpenExternalResponse>;
+  readonly showItemInFolder: (
+    request: ShowItemInFolderRequest,
+  ) => Promise<ShowItemInFolderResponse>;
+  readonly getAppVersion: () => Promise<GetAppVersionResponse>;
+  readonly getPlatform: () => Promise<GetPlatformResponse>;
+  readonly getBrokerStatus: () => Promise<GetBrokerStatusResponse>;
 }
 
 /**

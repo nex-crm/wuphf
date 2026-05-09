@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from "electron";
 
 import {
+  EMPTY_PAYLOAD,
   type GetAppVersionRequest,
   type GetAppVersionResponse,
   type GetBrokerStatusRequest,
@@ -26,11 +27,14 @@ const api: WuphfDesktopApi = {
   showItemInFolder: (request: ShowItemInFolderRequest): Promise<ShowItemInFolderResponse> =>
     invoke<ShowItemInFolderRequest, ShowItemInFolderResponse>(IpcChannel.ShowItemInFolder, request),
   getAppVersion: (): Promise<GetAppVersionResponse> =>
-    invoke<GetAppVersionRequest, GetAppVersionResponse>(IpcChannel.GetAppVersion, {}),
+    invoke<GetAppVersionRequest, GetAppVersionResponse>(IpcChannel.GetAppVersion, EMPTY_PAYLOAD),
   getPlatform: (): Promise<GetPlatformResponse> =>
-    invoke<GetPlatformRequest, GetPlatformResponse>(IpcChannel.GetPlatform, {}),
+    invoke<GetPlatformRequest, GetPlatformResponse>(IpcChannel.GetPlatform, EMPTY_PAYLOAD),
   getBrokerStatus: (): Promise<GetBrokerStatusResponse> =>
-    invoke<GetBrokerStatusRequest, GetBrokerStatusResponse>(IpcChannel.GetBrokerStatus, {}),
+    invoke<GetBrokerStatusRequest, GetBrokerStatusResponse>(
+      IpcChannel.GetBrokerStatus,
+      EMPTY_PAYLOAD,
+    ),
 };
 
 contextBridge.exposeInMainWorld(WUPHF_GLOBAL_KEY, api);

@@ -1,4 +1,4 @@
-import { ipcMain } from "electron";
+import { type IpcMainInvokeEvent, ipcMain } from "electron";
 
 import { IPC_CHANNEL_VALUES, IpcChannel, type IpcChannelName } from "../../shared/api-contract.ts";
 import type { BrokerSupervisor } from "../broker.ts";
@@ -8,24 +8,31 @@ import { handleGetPlatform } from "./get-platform.ts";
 import { handleOpenExternal } from "./open-external.ts";
 import { handleShowItemInFolder } from "./show-item-in-folder.ts";
 
-export const REGISTERED_IPC_CHANNELS = [
-  IpcChannel.OpenExternal,
-  IpcChannel.ShowItemInFolder,
-  IpcChannel.GetAppVersion,
-  IpcChannel.GetPlatform,
-  IpcChannel.GetBrokerStatus,
-] as const satisfies readonly IpcChannelName[];
+export type IpcHandler = (event: IpcMainInvokeEvent, request: unknown) => unknown;
+export type IpcHandlers = Record<IpcChannelName, IpcHandler>;
 
-assertRegisteredChannels(REGISTERED_IPC_CHANNELS);
+export function createIpcHandlers(brokerSupervisor: BrokerSupervisor): IpcHandlers {
+  const handlers: IpcHandlers = {
+    [IpcChannel.OpenExternal]: handleOpenExternal,
+    [IpcChannel.ShowItemInFolder]: handleShowItemInFolder,
+    [IpcChannel.GetAppVersion]: handleGetAppVersion,
+    [IpcChannel.GetPlatform]: handleGetPlatform,
+    [IpcChannel.GetBrokerStatus]: (event, request) =>
+      handleGetBrokerStatus(brokerSupervisor, event, request),
+  };
+  return handlers;
+}
 
 export function registerIpcHandlers(brokerSupervisor: BrokerSupervisor): void {
-  ipcMain.handle(IpcChannel.OpenExternal, handleOpenExternal);
-  ipcMain.handle(IpcChannel.ShowItemInFolder, handleShowItemInFolder);
-  ipcMain.handle(IpcChannel.GetAppVersion, handleGetAppVersion);
-  ipcMain.handle(IpcChannel.GetPlatform, handleGetPlatform);
-  ipcMain.handle(IpcChannel.GetBrokerStatus, (event, request) =>
-    handleGetBrokerStatus(brokerSupervisor, event, request),
-  );
+  const handlers = createIpcHandlers(brokerSupervisor);
+  const channels = Object.keys(handlers) as readonly IpcChannelName[];
+  assertRegisteredChannels(channels);
+
+  ipcMain.handle(IpcChannel.OpenExternal, handlers[IpcChannel.OpenExternal]);
+  ipcMain.handle(IpcChannel.ShowItemInFolder, handlers[IpcChannel.ShowItemInFolder]);
+  ipcMain.handle(IpcChannel.GetAppVersion, handlers[IpcChannel.GetAppVersion]);
+  ipcMain.handle(IpcChannel.GetPlatform, handlers[IpcChannel.GetPlatform]);
+  ipcMain.handle(IpcChannel.GetBrokerStatus, handlers[IpcChannel.GetBrokerStatus]);
 }
 
 function assertRegisteredChannels(channels: readonly IpcChannelName[]): void {
