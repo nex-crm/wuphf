@@ -20,13 +20,18 @@ sequenceDiagram
   Broker-->>Supervisor: parentPort.postMessage({ alive: true }) every 1s
   Main->>Supervisor: app.before-quit stop()
   Supervisor->>Broker: postMessage({ type: "shutdown" })
+  Supervisor->>Supervisor: wait up to 5s for process exit
   alt POSIX
-    Supervisor->>Broker: UtilityProcess.kill() handle-bound cleanup
+    Supervisor->>Broker: UtilityProcess.kill() if still alive
   else Windows
-    Supervisor->>Broker: taskkill /pid <pid> /T
+    Supervisor->>Broker: taskkill /pid <pid> /T if still alive
   end
-  Supervisor->>Supervisor: wait 5s grace
-  Supervisor->>Broker: repeat handle-bound kill, or taskkill /F on Windows
+  Supervisor->>Supervisor: wait up to 1s for process exit
+  alt POSIX
+    Supervisor->>Broker: SIGKILL if still alive
+  else Windows
+    Supervisor->>Broker: taskkill /pid <pid> /T /F if still alive
+  end
 ```
 
 ## Crash-Restart Policy
