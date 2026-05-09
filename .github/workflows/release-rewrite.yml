@@ -235,8 +235,11 @@ jobs:
         if: needs.detect-secrets.outputs.is_release == 'true'
         working-directory: apps/installer-stub
         run: bun run build:win
-      - name: Sign Windows artifacts
+      - name: Sign Windows artifacts (attempt 1)
+        id: sign_windows_1
         if: needs.detect-secrets.outputs.is_release == 'true'
+        continue-on-error: true
+        timeout-minutes: 30
         uses: Azure/trusted-signing-action@b443cf8ea4124818d2ea9f043cba29fc3ec47b16 # ratchet:Azure/trusted-signing-action@v1.2.0
         with:
           azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
