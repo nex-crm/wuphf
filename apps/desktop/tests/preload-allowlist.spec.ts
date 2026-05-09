@@ -79,7 +79,9 @@ describe("preload allowlist", () => {
     expect(api[verb]).toEqual(expect.any(Function));
   });
 
-  it.each(createPreloadVerbCases())("$verb behavior uses the matching IPC channel", async (testCase) => {
+  it.each(
+    createPreloadVerbCases(),
+  )("$verb behavior uses the matching IPC channel", async (testCase) => {
     const api = await loadPreloadApi();
     electronMock.invoke.mockResolvedValueOnce(testCase.response);
 
@@ -88,7 +90,9 @@ describe("preload allowlist", () => {
     expect(electronMock.invoke).toHaveBeenCalledWith(testCase.channel, testCase.request);
   });
 
-  it.each(createPreloadVerbCases())("$verb security does not request app data", async (testCase) => {
+  it.each(
+    createPreloadVerbCases(),
+  )("$verb security does not request app data", async (testCase) => {
     const api = await loadPreloadApi();
     await testCase.invoke(api);
 

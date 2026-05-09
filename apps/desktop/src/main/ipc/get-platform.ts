@@ -1,6 +1,10 @@
 import type { IpcMainInvokeEvent } from "electron";
 
-import type { DesktopPlatform, ErrResponse, GetPlatformResponse } from "../../shared/api-contract.ts";
+import type {
+  DesktopPlatform,
+  ErrResponse,
+  GetPlatformResponse,
+} from "../../shared/api-contract.ts";
 import { invalidRequest, validateEmptyRequest } from "./_guards.ts";
 
 export function handleGetPlatform(

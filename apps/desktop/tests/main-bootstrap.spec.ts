@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+const RENDERER_URL_ENV_KEY = "ELECTRON_RENDERER_URL";
+
 interface MockBrowserWindowInstance {
   readonly loadURL: ReturnType<typeof vi.fn<(url: string) => Promise<void>>>;
   readonly loadFile: ReturnType<typeof vi.fn<(path: string) => Promise<void>>>;
@@ -85,7 +87,7 @@ vi.mock("electron", () => ({
 }));
 
 describe("main bootstrap", () => {
-  const previousRendererUrl = process.env["ELECTRON_RENDERER_URL"];
+  const previousRendererUrl = process.env[RENDERER_URL_ENV_KEY];
 
   beforeEach(() => {
     vi.resetModules();
@@ -99,20 +101,20 @@ describe("main bootstrap", () => {
     electronMock.showErrorBox.mockClear();
     electronMock.handle.mockClear();
     electronMock.fork.mockClear();
-    delete process.env["ELECTRON_RENDERER_URL"];
+    delete process.env[RENDERER_URL_ENV_KEY];
   });
 
   afterEach(() => {
     if (previousRendererUrl === undefined) {
-      delete process.env["ELECTRON_RENDERER_URL"];
+      delete process.env[RENDERER_URL_ENV_KEY];
       return;
     }
-    process.env["ELECTRON_RENDERER_URL"] = previousRendererUrl;
+    process.env[RENDERER_URL_ENV_KEY] = previousRendererUrl;
   });
 
   it("loads the packaged renderer file when app.isPackaged is true", async () => {
     electronMock.app.isPackaged = true;
-    process.env["ELECTRON_RENDERER_URL"] = "http://localhost:5173/";
+    process.env[RENDERER_URL_ENV_KEY] = "http://localhost:5173/";
 
     await importMainBootstrap();
 
@@ -123,7 +125,7 @@ describe("main bootstrap", () => {
 
   it("loads ELECTRON_RENDERER_URL when app.isPackaged is false", async () => {
     electronMock.app.isPackaged = false;
-    process.env["ELECTRON_RENDERER_URL"] = "http://localhost:5173/";
+    process.env[RENDERER_URL_ENV_KEY] = "http://localhost:5173/";
 
     await importMainBootstrap();
 

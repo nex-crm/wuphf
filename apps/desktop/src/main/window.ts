@@ -75,7 +75,9 @@ function isAllowedRendererNavigation(targetUrl: string, rendererUrl: string): bo
   }
 
   if (parsedRendererUrl.protocol === "file:") {
-    return stripFileUrlRoutingState(parsedTargetUrl) === stripFileUrlRoutingState(parsedRendererUrl);
+    return (
+      stripFileUrlRoutingState(parsedTargetUrl) === stripFileUrlRoutingState(parsedRendererUrl)
+    );
   }
 
   return parsedTargetUrl.origin === parsedRendererUrl.origin;

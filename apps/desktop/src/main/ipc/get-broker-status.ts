@@ -1,6 +1,10 @@
 import type { IpcMainInvokeEvent } from "electron";
 
-import type { BrokerStatus, ErrResponse, GetBrokerStatusResponse } from "../../shared/api-contract.ts";
+import type {
+  BrokerStatus,
+  ErrResponse,
+  GetBrokerStatusResponse,
+} from "../../shared/api-contract.ts";
 import { invalidRequest, validateEmptyRequest } from "./_guards.ts";
 
 export interface BrokerStatusProvider {
