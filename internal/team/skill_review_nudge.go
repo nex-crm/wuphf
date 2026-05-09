@@ -54,7 +54,7 @@ func (b *Broker) fireSkillReviewNudgeLocked(agentSlug string) (string, error) {
 		Title:         skillReviewNudgeTitle,
 		Details:       details,
 		Owner:         agentSlug,
-		Status:        "in_progress",
+		status:        "in_progress",
 		CreatedBy:     "system",
 		TaskType:      skillReviewNudgeTaskType,
 		PipelineID:    "skill_review",

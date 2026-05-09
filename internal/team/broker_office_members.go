@@ -591,7 +591,7 @@ func (b *Broker) removeOfficeMember(r *http.Request, slug string) (officeMemberM
 	for i := range b.tasks {
 		if b.tasks[i].Owner == slug {
 			b.tasks[i].Owner = ""
-			b.tasks[i].Status = "open"
+			b.tasks[i].status = "open"
 			b.tasks[i].UpdatedAt = now
 		}
 	}

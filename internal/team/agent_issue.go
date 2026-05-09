@@ -248,7 +248,7 @@ func (b *Broker) activeTaskIDForAgentLocked(agentSlug string) string {
 		if strings.TrimSpace(task.Owner) != agentSlug {
 			continue
 		}
-		if strings.EqualFold(strings.TrimSpace(task.Status), "in_progress") {
+		if strings.EqualFold(strings.TrimSpace(task.status), "in_progress") {
 			return task.ID
 		}
 	}

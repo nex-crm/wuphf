@@ -67,7 +67,7 @@ func buildResumePacket(slug string, tasks []teamTask, msgs []channelMessage) str
 	if len(tasks) > 0 {
 		sb.WriteString("Active tasks:\n")
 		for _, task := range tasks {
-			sb.WriteString(fmt.Sprintf("- [%s] %s (status: %s)\n", task.ID, task.Title, task.Status))
+			sb.WriteString(fmt.Sprintf("- [%s] %s (status: %s)\n", task.ID, task.Title, task.status))
 			if task.Details != "" {
 				sb.WriteString(fmt.Sprintf("  %s\n", task.Details))
 			}

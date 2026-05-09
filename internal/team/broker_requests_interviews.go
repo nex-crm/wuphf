@@ -701,7 +701,7 @@ func (b *Broker) unblockTasksForAnsweredRequestLocked(req humanInterview) []pend
 	answerText := strings.TrimSpace(reqAnswerSummary(req.Answered))
 	for i := range b.tasks {
 		task := &b.tasks[i]
-		if !task.Blocked || strings.EqualFold(strings.TrimSpace(task.Status), "done") {
+		if !task.blocked || strings.EqualFold(strings.TrimSpace(task.status), "done") {
 			continue
 		}
 		haystack := strings.ToLower(strings.TrimSpace(task.Title + "\n" + task.Details))
@@ -716,13 +716,13 @@ func (b *Broker) unblockTasksForAnsweredRequestLocked(req humanInterview) []pend
 		// needs.
 		stillBlocked := b.hasUnresolvedDepsLocked(task)
 		if !stillBlocked {
-			beforeStatus := task.Status
-			task.Blocked = false
-			if strings.EqualFold(strings.TrimSpace(task.Status), "blocked") {
+			beforeStatus := task.status
+			task.blocked = false
+			if strings.EqualFold(strings.TrimSpace(task.status), "blocked") {
 				if strings.TrimSpace(task.Owner) != "" {
-					task.Status = "in_progress"
+					task.status = "in_progress"
 				} else {
-					task.Status = "open"
+					task.status = "open"
 				}
 			}
 			b.queueTaskBehindActiveOwnerLaneLocked(task)

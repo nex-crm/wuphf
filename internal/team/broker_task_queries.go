@@ -41,7 +41,7 @@ func (b *Broker) InFlightTasks() []teamTask {
 		if task.Owner == "" {
 			continue
 		}
-		s := strings.ToLower(strings.TrimSpace(task.Status))
+		s := strings.ToLower(strings.TrimSpace(task.status))
 		if s == "done" || s == "completed" || s == "canceled" || s == "cancelled" {
 			continue
 		}
@@ -58,7 +58,7 @@ func (b *Broker) UnackedTasks(timeout time.Duration) []teamTask {
 	cutoff := time.Now().UTC().Add(-timeout)
 	out := make([]teamTask, 0)
 	for _, task := range b.tasks {
-		if task.Status != "in_progress" || task.Owner == "" || task.AckedAt != "" {
+		if task.status != "in_progress" || task.Owner == "" || task.AckedAt != "" {
 			continue
 		}
 		created, err := time.Parse(time.RFC3339, task.CreatedAt)

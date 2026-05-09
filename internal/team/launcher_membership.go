@@ -36,7 +36,7 @@ func (l *Launcher) agentActiveTask(slug string) *teamTask {
 	}
 	tasks := l.broker.AllTasks()
 	for i := range tasks {
-		if tasks[i].Owner == slug && tasks[i].Status == "in_progress" {
+		if tasks[i].Owner == slug && tasks[i].status == "in_progress" {
 			return &tasks[i]
 		}
 	}

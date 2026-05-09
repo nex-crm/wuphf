@@ -119,7 +119,7 @@ func (s *SelfHealSignalScanner) snapshotResolvedSelfHealTasks(cutoff time.Time) 
 		if task.PipelineID != "incident" {
 			continue
 		}
-		if task.Status != "done" {
+		if task.status != "done" {
 			continue
 		}
 		if !isSelfHealingTaskTitle(task.Title) {

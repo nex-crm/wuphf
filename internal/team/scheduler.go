@@ -239,12 +239,12 @@ func (w *watchdogScheduler) processOnce() {
 
 func (w *watchdogScheduler) processTaskJob(job schedulerJob) {
 	task, ok := w.broker.FindTask(job.Channel, job.TargetID)
-	if !ok || strings.EqualFold(strings.TrimSpace(task.Status), "done") {
+	if !ok || strings.EqualFold(strings.TrimSpace(task.status), "done") {
 		_ = w.broker.UpdateSchedulerJobState(job.Slug, time.Time{}, "done")
 		return
 	}
 	now := w.clock.Now().UTC()
-	if task.Blocked {
+	if task.blocked {
 		// Blocked tasks are legitimately waiting on dependencies — skip
 		// the watchdog reminder. Owner cannot act until blockers resolve.
 		// External-workflow rate-limit retry path stays here so a
