@@ -1,5 +1,6 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
+import { MAX_CANONICAL_JSON_NODES, validateCanonicalJsonNodeBudget } from "../src/budgets.ts";
 import {
   type ApprovalClaims,
   type AuditEventRecord,
@@ -63,6 +64,19 @@ describe("resource budgets", () => {
   it("assertWithinBudget rejects invalid budget parameters", () => {
     expect(() => assertWithinBudget(1, Number.NaN, "test budget")).toThrow(
       /test budget budget must be a non-negative finite number/,
+    );
+  });
+
+  it("bounds canonical JSON node counts at the edge", () => {
+    expect(validateCanonicalJsonNodeBudget(MAX_CANONICAL_JSON_NODES, "$.items[99998]")).toEqual({
+      ok: true,
+    });
+
+    const result = validateCanonicalJsonNodeBudget(MAX_CANONICAL_JSON_NODES + 1, "$.items[99999]");
+
+    expectBudgetRejection(
+      result,
+      /canonicalJSON node count at \$\.items\[99999\].*100001 > 100000/,
     );
   });
 

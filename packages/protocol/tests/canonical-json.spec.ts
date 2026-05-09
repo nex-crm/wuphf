@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { MAX_CANONICAL_JSON_NODES } from "../src/budgets.ts";
 import { canonicalJSON } from "../src/canonical-json.ts";
 import { FrozenArgs } from "../src/frozen-args.ts";
 
@@ -16,6 +17,22 @@ describe("canonicalJSON", () => {
 
   it("serializes objects and arrays with stable JCS ordering", () => {
     expect(canonicalJSON({ b: 2, a: [true, null, "x"] })).toBe('{"a":[true,null,"x"],"b":2}');
+  });
+
+  it("accepts canonical JSON inputs exactly at the node budget", () => {
+    const atCap = new Array<null>(MAX_CANONICAL_JSON_NODES - 1).fill(null);
+
+    expect(() => canonicalJSON(atCap)).not.toThrow();
+  });
+
+  it("rejects canonical JSON inputs one node over budget with path and count", () => {
+    const overCap = new Array<null>(MAX_CANONICAL_JSON_NODES).fill(null);
+
+    expect(() => canonicalJSON(overCap)).toThrow(
+      `canonicalJSON node count at $[${MAX_CANONICAL_JSON_NODES - 1}] exceeds budget: ${
+        MAX_CANONICAL_JSON_NODES + 1
+      } > ${MAX_CANONICAL_JSON_NODES}`,
+    );
   });
 
   it.each([
@@ -89,6 +106,37 @@ describe("canonicalJSON", () => {
 
   it("rejects non-JCS array elements", () => {
     expect(() => canonicalJSON([() => 1])).toThrow(/function at \$\[0\]/);
+  });
+
+  it("rejects inherited Object.prototype.toJSON before serialization", () => {
+    withPrototypeToJson(Object.prototype, () => {
+      expect(() => canonicalJSON({ ok: 1 })).toThrow(/inherited toJSON method at \$/);
+    });
+  });
+
+  it("rejects inherited Array.prototype.toJSON before serialization", () => {
+    withPrototypeToJson(Array.prototype, () => {
+      expect(() => canonicalJSON(["ok"])).toThrow(/inherited toJSON method at \$/);
+    });
+  });
+
+  it("rejects inherited toJSON accessors without invoking them", () => {
+    let getterInvoked = false;
+    withPrototypeToJsonDescriptor(
+      Object.prototype,
+      {
+        configurable: true,
+        get() {
+          getterInvoked = true;
+          return () => ({ polluted: true });
+        },
+      },
+      () => {
+        expect(() => canonicalJSON({ ok: 1 })).toThrow(/inherited accessor toJSON at \$/);
+      },
+    );
+
+    expect(getterInvoked).toBe(false);
   });
 
   it("rejects prototype-pollution keys at the JCS boundary", () => {
@@ -176,3 +224,34 @@ describe("canonicalJSON", () => {
     expect(() => canonicalJSON(nested)).toThrow(/max recursion depth exceeded/);
   });
 });
+
+function withPrototypeToJson(prototype: object, run: () => void): void {
+  withPrototypeToJsonDescriptor(
+    prototype,
+    {
+      configurable: true,
+      value() {
+        return { polluted: true };
+      },
+    },
+    run,
+  );
+}
+
+function withPrototypeToJsonDescriptor(
+  prototype: object,
+  descriptor: PropertyDescriptor,
+  run: () => void,
+): void {
+  const original = Object.getOwnPropertyDescriptor(prototype, "toJSON");
+  try {
+    Object.defineProperty(prototype, "toJSON", descriptor);
+    run();
+  } finally {
+    if (original === undefined) {
+      Reflect.deleteProperty(prototype, "toJSON");
+    } else {
+      Object.defineProperty(prototype, "toJSON", original);
+    }
+  }
+}

@@ -27,6 +27,14 @@ export const MAX_TOOL_CALLS_PER_RECEIPT = 1024;
 export const MAX_FROZEN_ARGS_BYTES = 1 * 1024 * 1024;
 
 /**
+ * Public canonicalJSON callers can hand over very wide object or array graphs
+ * that are small in depth but expensive to descriptor-walk and canonicalize.
+ * 100,000 JSON value nodes is generous for protocol payloads while bounding
+ * adversarial fanout before the JCS serializer sees it.
+ */
+export const MAX_CANONICAL_JSON_NODES = 100_000;
+
+/**
  * SanitizedString values are rendered for humans after normalization. A 1 MiB
  * UTF-8 cap covers long logs or summaries; 100x would let one string dominate
  * memory and UI rendering work.
@@ -185,6 +193,18 @@ export function validateFrozenArgsBudget(frozen: FrozenArgs): BudgetValidationRe
     MAX_FROZEN_ARGS_BYTES,
     "FrozenArgs canonicalJson bytes",
   );
+}
+
+export function validateCanonicalJsonNodeBudget(
+  nodeCount: number,
+  path: string,
+): BudgetValidationResult {
+  try {
+    assertWithinBudget(nodeCount, MAX_CANONICAL_JSON_NODES, `canonicalJSON node count at ${path}`);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, reason: err instanceof Error ? err.message : String(err) };
+  }
 }
 
 export function validateSanitizedStringBudget(s: SanitizedString): BudgetValidationResult {

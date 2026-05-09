@@ -1,7 +1,9 @@
 import canonicalize from "canonicalize";
+import { validateCanonicalJsonNodeBudget } from "./budgets.ts";
 
 const MAX_DEPTH = 64;
 const FORBIDDEN_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+type JcsWalkState = { nodeCount: number };
 
 export type JsonPrimitive = null | boolean | number | string;
 // `readonly` here is a consumer-ergonomic hint, not a runtime constraint —
@@ -33,8 +35,23 @@ export function canonicalJSON(input: unknown): string {
 }
 
 export function assertJcsValue(value: unknown, path = "$", depth = 0): asserts value is JsonValue {
+  assertJcsValueWithBudget(value, path, depth, { nodeCount: 0 });
+}
+
+function assertJcsValueWithBudget(
+  value: unknown,
+  path: string,
+  depth: number,
+  state: JcsWalkState,
+): asserts value is JsonValue {
   if (depth > MAX_DEPTH) {
     throw new Error(`canonicalJSON: max recursion depth exceeded at ${path}`);
+  }
+
+  state.nodeCount += 1;
+  const budget = validateCanonicalJsonNodeBudget(state.nodeCount, path);
+  if (!budget.ok) {
+    throw new Error(budget.reason);
   }
 
   if (value === null) return;
@@ -63,32 +80,36 @@ export function assertJcsValue(value: unknown, path = "$", depth = 0): asserts v
   }
 
   if (Array.isArray(value)) {
+    assertNoInheritedToJson(value, path);
     if (Object.getOwnPropertySymbols(value).length > 0) {
       throw new Error(`canonicalJSON: symbol keys are not representable at ${path}`);
     }
     const descriptors = Object.getOwnPropertyDescriptors(value);
-    for (let i = 0; i < value.length; i++) {
-      if (!hasOwn(descriptors, String(i))) {
-        throw new Error(`canonicalJSON: sparse array hole at ${path}[${i}]`);
-      }
-    }
-    for (const [key, descriptor] of Object.entries(descriptors)) {
-      if (key === "length") {
-        continue;
-      }
-      assertNoLoneSurrogate(key, `${path}.${key}`);
-      assertAllowedPropertyKey(key, `${path}.${key}`);
+    const indexedDescriptors = Object.entries(descriptors)
+      .filter(([key]) => key !== "length")
+      .sort(([left], [right]) => compareArrayIndexKeys(left, right));
+    for (const [position, [key]] of indexedDescriptors.entries()) {
       const index = parseArrayIndexKey(key);
       if (index === undefined) {
         throw new Error(`canonicalJSON: non-array-index own property at ${path}.${key}`);
       }
+      if (index !== position) {
+        throw new Error(`canonicalJSON: sparse array hole at ${path}[${position}]`);
+      }
+    }
+    if (indexedDescriptors.length !== value.length) {
+      throw new Error(`canonicalJSON: sparse array hole at ${path}[${indexedDescriptors.length}]`);
+    }
+    for (const [index, [key, descriptor]] of indexedDescriptors.entries()) {
+      assertNoLoneSurrogate(key, `${path}.${key}`);
+      assertAllowedPropertyKey(key, `${path}.${key}`);
       if (!descriptor.enumerable) {
         throw new Error(`canonicalJSON: non-enumerable own property at ${path}[${index}]`);
       }
       if ("get" in descriptor || "set" in descriptor) {
         throw new Error(`canonicalJSON: accessor property at ${path}[${index}]`);
       }
-      assertJcsValue(descriptor.value, `${path}[${index}]`, depth + 1);
+      assertJcsValueWithBudget(descriptor.value, `${path}[${index}]`, depth + 1, state);
     }
     return;
   }
@@ -98,6 +119,7 @@ export function assertJcsValue(value: unknown, path = "$", depth = 0): asserts v
     if (proto !== Object.prototype && proto !== null) {
       throw new Error(`canonicalJSON: non-plain object at ${path} (got ${describeProto(proto)})`);
     }
+    assertNoInheritedToJson(value, path);
     if (Object.getOwnPropertySymbols(value as object).length > 0) {
       throw new Error(`canonicalJSON: symbol keys are not representable at ${path}`);
     }
@@ -111,7 +133,7 @@ export function assertJcsValue(value: unknown, path = "$", depth = 0): asserts v
       if ("get" in descriptor || "set" in descriptor) {
         throw new Error(`canonicalJSON: accessor property at ${path}.${key}`);
       }
-      assertJcsValue(descriptor.value, `${path}.${key}`, depth + 1);
+      assertJcsValueWithBudget(descriptor.value, `${path}.${key}`, depth + 1, state);
     }
     return;
   }
@@ -146,8 +168,24 @@ function assertNoLoneSurrogate(value: string, path: string): void {
   }
 }
 
-function hasOwn(record: Readonly<Record<string, unknown>>, key: string): boolean {
-  return Object.hasOwn(record, key);
+function assertNoInheritedToJson(value: object, path: string): void {
+  let current = Object.getPrototypeOf(value);
+  while (current !== null) {
+    const descriptor = Object.getOwnPropertyDescriptor(current, "toJSON");
+    if (descriptor !== undefined) {
+      if ("get" in descriptor || "set" in descriptor) {
+        throw new Error(`canonicalJSON: inherited accessor toJSON at ${path}`);
+      }
+      if (typeof descriptor.value === "function") {
+        throw new Error(`canonicalJSON: inherited toJSON method at ${path} is not allowed`);
+      }
+    }
+    current = Object.getPrototypeOf(current);
+  }
+}
+
+function compareArrayIndexKeys(left: string, right: string): number {
+  return Number(left) - Number(right);
 }
 
 function parseArrayIndexKey(key: string): number | undefined {
