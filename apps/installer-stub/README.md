@@ -102,13 +102,16 @@ flowchart TD
 
 ## Read more
 
-- [`AGENTS.md`](./AGENTS.md) — 13 hard rules (signing, secrets, reproducibility).
+- [`AGENTS.md`](./AGENTS.md) — hard rules (signing, secrets, reproducibility).
 - [`docs/runbooks/apple-dev-id-setup.md`](./docs/runbooks/apple-dev-id-setup.md) — provisioning Apple Dev ID + notarytool.
 - [`docs/runbooks/azure-trusted-signing-setup.md`](./docs/runbooks/azure-trusted-signing-setup.md) — provisioning Azure Trusted Signing.
 - [`docs/runbooks/github-environment-setup.md`](./docs/runbooks/github-environment-setup.md) — scoping release secrets to `production-release`.
 - [`docs/runbooks/linux-distribution.md`](./docs/runbooks/linux-distribution.md) — what we sign vs. what we don't on Linux.
 - [`docs/auto-update-strategy.md`](./docs/auto-update-strategy.md) — full-download updates and blockmap policy.
 - [`docs/runbooks/release-day-troubleshooting.md`](./docs/runbooks/release-day-troubleshooting.md) — release rerun guardrails.
+- [`docs/runbooks/runner-image-maintenance.md`](./docs/runbooks/runner-image-maintenance.md) — GitHub runner image upgrade procedure.
+- [`docs/runbooks/electron-stack-maintenance.md`](./docs/runbooks/electron-stack-maintenance.md) — Electron stack upgrade procedure.
+- [`docs/CALENDAR.md`](./docs/CALENDAR.md) — certificate and release-infrastructure review dates.
 
 ## RFC anchors
 
