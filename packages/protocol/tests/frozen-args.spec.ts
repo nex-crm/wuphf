@@ -140,6 +140,21 @@ describe("FrozenArgs", () => {
     );
   });
 
+  it("rejects canonical JSON with insignificant whitespace", () => {
+    expect(() => FrozenArgs.fromCanonical('{ "a": 1 }')).toThrow(
+      /FrozenArgs\.fromCanonical: input is not canonical-form \(re-canonicalization differed\)/,
+    );
+  });
+
+  it("rejects canonical JSON with noncanonical escape variants", () => {
+    expect(() => FrozenArgs.fromCanonical('{"x":"\\u0061"}')).toThrow(
+      /FrozenArgs\.fromCanonical: input is not canonical-form \(re-canonicalization differed\)/,
+    );
+    expect(() => FrozenArgs.fromCanonical('{"x":"\\/"}')).toThrow(
+      /FrozenArgs\.fromCanonical: input is not canonical-form \(re-canonicalization differed\)/,
+    );
+  });
+
   it("rejects oversized canonical JSON before parsing", () => {
     const canonicalSpy = vi.spyOn(canonicalJsonModule, "canonicalJSON");
     try {
@@ -150,6 +165,22 @@ describe("FrozenArgs", () => {
     } finally {
       canonicalSpy.mockRestore();
     }
+  });
+
+  it("accepts canonical JSON exactly at the byte budget", () => {
+    const canonical = JSON.stringify("x".repeat(MAX_FROZEN_ARGS_BYTES - 2));
+    expect(Buffer.byteLength(canonical, "utf8")).toBe(MAX_FROZEN_ARGS_BYTES);
+
+    const frozen = FrozenArgs.fromCanonical(canonical);
+
+    expect(frozen.canonicalJson).toBe(canonical);
+  });
+
+  it("freezes input whose canonical JSON is exactly at the byte budget", () => {
+    const input = "x".repeat(MAX_FROZEN_ARGS_BYTES - 2);
+    const frozen = FrozenArgs.freeze(input);
+
+    expect(Buffer.byteLength(frozen.canonicalJson, "utf8")).toBe(MAX_FROZEN_ARGS_BYTES);
   });
 
   it("produces unequal hashes for differing canonical inputs", () => {
@@ -245,5 +276,21 @@ describe("FrozenArgs", () => {
     } finally {
       canonicalSpy.mockRestore();
     }
+  });
+
+  it("rejects circular references during preflight", () => {
+    const input: { self?: unknown } = {};
+    input.self = input;
+
+    expect(() => FrozenArgs.freeze(input)).toThrow(/circular reference/);
+  });
+
+  it("rejects max-depth input during preflight", () => {
+    let nested: unknown = "leaf";
+    for (let i = 0; i < 65; i++) {
+      nested = { next: nested };
+    }
+
+    expect(() => FrozenArgs.freeze(nested)).toThrow(/max recursion depth exceeded/);
   });
 });

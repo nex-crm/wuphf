@@ -73,6 +73,10 @@ describe("event-lsn", () => {
     it("parses v1 format", () => {
       expect(parseLsn(lsnFromV1Number(0))).toEqual({ format: "v1", localLsn: 0 });
       expect(parseLsn(lsnFromV1Number(123))).toEqual({ format: "v1", localLsn: 123 });
+      expect(parseLsn(lsnFromV1Number(Number.MAX_SAFE_INTEGER))).toEqual({
+        format: "v1",
+        localLsn: Number.MAX_SAFE_INTEGER,
+      });
     });
 
     it("rejects unknown formats", () => {
@@ -90,7 +94,18 @@ describe("event-lsn", () => {
       expect(() => parseLsn("v1: 1" as EventLsn)).toThrow(/malformed v1 LSN/);
     });
 
+    it.each(["v1:00", "v1:000", "v1:0001"])("rejects leading-zero LSN %s", (lsn) => {
+      expect(() => parseLsn(lsn as EventLsn)).toThrow(/malformed v1 LSN/);
+    });
+
+    it.each(["v1", "v1/0", "v1-0", "v10"])("rejects unbracketed v1 prefix %s", (lsn) => {
+      expect(() => parseLsn(lsn as EventLsn)).toThrow(/unrecognized LSN format/);
+    });
+
     it("rejects out-of-safe-integer v1 LSNs", () => {
+      expect(() => parseLsn(`v1:${Number.MAX_SAFE_INTEGER + 1}` as EventLsn)).toThrow(
+        /safe-integer range/,
+      );
       expect(() => parseLsn("v1:99999999999999999" as EventLsn)).toThrow(/safe-integer range/);
     });
   });

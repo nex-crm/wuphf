@@ -30,6 +30,28 @@ const FORMAT_INVISIBLE_CHARS = [
   "\u2063",
   "\u2064",
 ] as const;
+const INVISIBLE_CODE_POINTS = [
+  0x180e,
+  0x200b,
+  0x200c,
+  0x200d,
+  0x202a,
+  0x202b,
+  0x202c,
+  0x202d,
+  0x202e,
+  0x2060,
+  0x2061,
+  0x2062,
+  0x2063,
+  0x2064,
+  0x2066,
+  0x2067,
+  0x2068,
+  0x2069,
+  0xfeff,
+  ...Array.from({ length: 0x80 }, (_, index) => 0xe0000 + index),
+] as const;
 
 // `fc.string()` in fast-check 3.x generates from `fc.char()`, which is
 // restricted to printable ASCII (U+0020..U+007E). For a sanitizer that has to
@@ -132,6 +154,12 @@ describe("SanitizedString", () => {
     expect(SanitizedString.fromUnknown("\ufb01le").value).toBe("file");
   });
 
+  it("coerces safe primitive values to renderable text", () => {
+    expect(SanitizedString.fromUnknown(743).value).toBe("743");
+    expect(SanitizedString.fromUnknown(true).value).toBe("true");
+    expect(SanitizedString.fromUnknown(false).value).toBe("false");
+  });
+
   it("strips zero-width characters by default and can preserve ZWJ by policy", () => {
     expect(SanitizedString.fromUnknown("ze\u200bro").value).toBe("zero");
     expect(SanitizedString.fromUnknown("x\u200dy", { policy: "allow-zwj" }).value).toBe("x\u200dy");
@@ -139,10 +167,10 @@ describe("SanitizedString", () => {
   });
 
   it("strips other commonly-weaponized invisible format characters (UTS #39)", () => {
-    // U+180E MONGOLIAN VOWEL SEPARATOR \u2014 Default_Ignorable / Restricted under
+    // U+180E MONGOLIAN VOWEL SEPARATOR: Default_Ignorable / Restricted under
     // UTS #39; NFKC does not remove it.
     expect(SanitizedString.fromUnknown("ad\u180emin").value).toBe("admin");
-    // U+2060 WORD JOINER + U+2061..U+2064 INVISIBLE OPERATORS \u2014 same class.
+    // U+2060 WORD JOINER + U+2061..U+2064 INVISIBLE OPERATORS: same class.
     expect(SanitizedString.fromUnknown("ev\u2060il").value).toBe("evil");
     expect(SanitizedString.fromUnknown("a\u2061b").value).toBe("ab");
     expect(SanitizedString.fromUnknown("a\u2062b").value).toBe("ab");
@@ -150,6 +178,30 @@ describe("SanitizedString", () => {
     expect(SanitizedString.fromUnknown("a\u2064b").value).toBe("ab");
     // U+2065 is OUTSIDE the rejected range \u2014 sanity check we don't over-strip.
     expect(SanitizedString.fromUnknown("a\u2065b").value).toBe("a\u2065b");
+  });
+
+  it("strips every invisible code point in the UTS #39 and R6 expansion list", () => {
+    for (const codePoint of INVISIBLE_CODE_POINTS) {
+      const invisible = String.fromCodePoint(codePoint);
+
+      expect(SanitizedString.fromUnknown(`a${invisible}b`).value).toBe("ab");
+    }
+  });
+
+  it("preserves ZWJ only under the explicit allow-zwj policy", () => {
+    expect(SanitizedString.fromUnknown("a\u200db").value).toBe("ab");
+    expect(SanitizedString.fromUnknown("a\u200db", { policy: "allow-zwj" }).value).toBe("a\u200db");
+  });
+
+  it.each([
+    { left: "e\u0301", right: "\u00e9", expected: "\u00e9" },
+    { left: "\u212b", right: "\u00c5", expected: "\u00c5" },
+    { left: "\uff21\uff22\uff23", right: "ABC", expected: "ABC" },
+    { left: "\u2460", right: "1", expected: "1" },
+    { left: "\ufb01", right: "fi", expected: "fi" },
+  ])("normalizes NFKC-equivalent forms to $expected", ({ left, right, expected }) => {
+    expect(SanitizedString.fromUnknown(left).value).toBe(expected);
+    expect(SanitizedString.fromUnknown(right).value).toBe(expected);
   });
 
   it("freezes the returned instance", () => {
@@ -169,6 +221,14 @@ describe("SanitizedString", () => {
       }),
       { numRuns: MOAT_NUM_RUNS },
     );
+  });
+
+  it("exposes length and toString for the sanitized value", () => {
+    const result = SanitizedString.fromUnknown("e\u0301\u200b");
+
+    expect(result.value).toBe("\u00e9");
+    expect(result.length).toBe(1);
+    expect(result.toString()).toBe("\u00e9");
   });
 
   it("keeps JSON object output parseable with the same normalized logical structure", () => {
@@ -192,6 +252,7 @@ describe("SanitizedString", () => {
 
   it("rejects lone surrogate code units", () => {
     expect(() => SanitizedString.fromUnknown("\ud800")).toThrow(/lone surrogate/);
+    expect(() => SanitizedString.fromUnknown("\ud800x")).toThrow(/lone surrogate/);
     expect(() => SanitizedString.fromUnknown("\udc00")).toThrow(/lone surrogate/);
   });
 
@@ -242,6 +303,12 @@ describe("SanitizedString", () => {
     expect(() => SanitizedString.fromUnknown(colliding)).toThrow(/collision/);
   });
 
+  it("serializes sanitized arrays through descriptor-checked projection", () => {
+    const result = SanitizedString.fromUnknown(["a\u200bb", null, true, 7]).value;
+
+    expect(JSON.parse(result) as unknown).toEqual(["ab", null, true, 7]);
+  });
+
   it("rejects symbol input", () => {
     expect(() => SanitizedString.fromUnknown(Symbol("leak"))).toThrow(/symbol/);
   });
@@ -252,6 +319,13 @@ describe("SanitizedString", () => {
 
   it("rejects bigint input", () => {
     expect(() => SanitizedString.fromUnknown(1n)).toThrow(/bigint/);
+  });
+
+  it("rejects non-finite numbers inside object graphs", () => {
+    expect(() => SanitizedString.fromUnknown({ value: Number.NaN })).toThrow(/non-finite number/);
+    expect(() => SanitizedString.fromUnknown([Number.POSITIVE_INFINITY])).toThrow(
+      /non-finite number/,
+    );
   });
 
   it("rejects depth beyond MAX_DEPTH", () => {
@@ -329,6 +403,122 @@ describe("SanitizedString", () => {
 
     expect(() => SanitizedString.fromUnknown(input)).toThrow();
     expect(fired).toBe(false);
+  });
+
+  it("rejects array accessors without invoking them", () => {
+    const input: unknown[] = [];
+    let fired = false;
+    Object.defineProperty(input, "0", {
+      enumerable: true,
+      get() {
+        fired = true;
+        return "leak";
+      },
+    });
+
+    expect(() => SanitizedString.fromUnknown(input)).toThrow(/accessor property/);
+    expect(fired).toBe(false);
+  });
+
+  it("rejects accessor toJSON descriptors without invoking them", () => {
+    let fired = false;
+    const input: Record<string, unknown> = {};
+    Object.defineProperty(input, "toJSON", {
+      enumerable: true,
+      get() {
+        fired = true;
+        return () => "spoofed";
+      },
+    });
+
+    expect(() => SanitizedString.fromUnknown(input)).toThrow(/accessor toJSON/);
+    expect(fired).toBe(false);
+  });
+
+  it.each([
+    {
+      name: "sparse array hole",
+      input: () => new Array<unknown>(1),
+      message: /sparse array hole/,
+    },
+    {
+      name: "array side property",
+      input: () => {
+        const value: unknown[] = ["x"];
+        Object.defineProperty(value, "extra", { value: "y", enumerable: true });
+        return value;
+      },
+      message: /non-index array property/,
+    },
+    {
+      name: "array symbol key",
+      input: () => {
+        const value: unknown[] = ["x"];
+        Object.defineProperty(value, Symbol("x"), { value: "y", enumerable: true });
+        return value;
+      },
+      message: /symbol keys/,
+    },
+    {
+      name: "non-enumerable array index",
+      input: () => {
+        const value: unknown[] = ["x"];
+        Object.defineProperty(value, "0", { value: "x", enumerable: false });
+        return value;
+      },
+      message: /non-enumerable own property/,
+    },
+    {
+      name: "uint32 boundary array property",
+      input: () => {
+        const value: unknown[] = [];
+        Object.defineProperty(value, "4294967295", { value: "x", enumerable: true });
+        return value;
+      },
+      message: /non-index array property/,
+    },
+    {
+      name: "non-plain array prototype",
+      input: () => {
+        const value: unknown[] = [];
+        Object.setPrototypeOf(value, null);
+        return value;
+      },
+      message: /non-plain array/,
+    },
+  ])("rejects unsafe array graph shape: $name", ({ input, message }) => {
+    expect(() => SanitizedString.fromUnknown(input())).toThrow(message);
+  });
+
+  it("rejects enumerable properties inherited from Object.prototype", () => {
+    const inheritedKey = "__sanitizedStringEnumerableTest";
+    Object.defineProperty(Object.prototype, inheritedKey, {
+      value: "leak",
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    });
+    try {
+      expect(() => SanitizedString.fromUnknown({ ok: true })).toThrow(
+        /inherited enumerable property/,
+      );
+    } finally {
+      Reflect.deleteProperty(Object.prototype, inheritedKey);
+    }
+  });
+
+  it("rejects circular object references", () => {
+    const input: { self?: unknown } = {};
+    input.self = input;
+
+    expect(() => SanitizedString.fromUnknown(input)).toThrow(/circular reference/);
+  });
+
+  it("rejects circular array references", () => {
+    const input: unknown[] = [];
+    input.push(input);
+
+    expect(() => SanitizedString.fromUnknown(input)).toThrow(/circular reference/);
   });
 });
 
