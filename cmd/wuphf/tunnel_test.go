@@ -192,6 +192,9 @@ func TestStopClosesStartCancel(t *testing.T) {
 	if c.startCancel != nil {
 		t.Fatalf("stop() left c.startCancel non-nil; subsequent stop() would panic on close()")
 	}
+	if c.starting {
+		t.Fatalf("stop() left c.starting=true; next Start would refuse with \"already in progress\"")
+	}
 	c.mu.Unlock()
 }
 

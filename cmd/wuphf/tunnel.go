@@ -150,7 +150,13 @@ type webTunnelController struct {
 	// stopGuard is closed by stop() to signal the wait-goroutine that the
 	// teardown was intentional and it should not flip running/err state.
 	stopGuard chan struct{}
-	running   bool
+	// cmdDone is closed by the success-path watcher goroutine after
+	// cmd.Wait() returns. It exists so stop() can wait for cmd to die
+	// without calling cmd.Wait() itself — os/exec disallows concurrent
+	// Wait on the same Cmd, so we keep ownership single (watcher when it
+	// exists, stop() otherwise). nil when no watcher is currently running.
+	cmdDone chan struct{}
+	running bool
 	// starting is true between the moment start() commits the in-flight
 	// cmd/server/listener under c.mu and the moment waitForTunnelURL
 	// completes. Concurrent start() callers see it and refuse rather than
@@ -538,9 +544,16 @@ func (c *webTunnelController) start() (team.WebTunnelStatus, error) {
 
 	// Watch the subprocess for unexpected exit. If it crashes, flip Running
 	// off so the next status poll surfaces the failure.
+	//
+	// This goroutine is the SOLE owner of cmd.Wait() in the success path.
+	// stop() observes c.cmdDone and waits on it instead of calling Wait
+	// itself — os/exec.Cmd.Wait disallows concurrent calls.
 	stopGuard := c.stopGuard
+	cmdDone := make(chan struct{})
+	c.cmdDone = cmdDone
 	go func() {
 		err := cmd.Wait()
+		close(cmdDone)
 		select {
 		case <-stopGuard:
 			// stop() already handled teardown; nothing to do.
@@ -561,6 +574,7 @@ func (c *webTunnelController) start() (team.WebTunnelStatus, error) {
 		c.running = false
 		c.cmd = nil
 		c.cancel = nil
+		c.cmdDone = nil
 		c.publicURL = ""
 		c.server = nil
 		c.listener = nil
@@ -710,6 +724,7 @@ func (c *webTunnelController) stop() error {
 	ln := c.listener
 	stopGuard := c.stopGuard
 	startCancel := c.startCancel
+	cmdDone := c.cmdDone
 	wasRunning := c.running
 	c.cmd = nil
 	c.cancel = nil
@@ -717,6 +732,14 @@ func (c *webTunnelController) stop() error {
 	c.listener = nil
 	c.stopGuard = nil
 	c.startCancel = nil
+	c.cmdDone = nil
+	// Reset c.starting so a Stop click during bring-up / backoff doesn't
+	// strand the controller in "tunnel start is already in progress" on
+	// the next Start. The in-flight start() either returns "cancelled"
+	// from one of its post-lock identity checks (c.server != server,
+	// c.cmd != cmd, startCancel closed) or from the post-loop block
+	// where it would have reset starting itself.
+	c.starting = false
 	c.running = false
 	c.publicURL = ""
 	c.passcodes = make(map[string]string)
@@ -744,16 +767,31 @@ func (c *webTunnelController) stop() error {
 		// CommandContext's cancel() sends SIGKILL on most platforms; give
 		// Wait a brief deadline so we don't block the UI thread on a stuck
 		// child.
-		done := make(chan struct{})
-		go func() {
-			_ = cmd.Wait()
-			close(done)
-		}()
-		select {
-		case <-done:
-		case <-time.After(cloudflaredStopTimeout):
-			_ = cmd.Process.Kill()
-			<-done
+		//
+		// Wait ownership: if a watcher goroutine exists (success path),
+		// it owns cmd.Wait(); we observe its cmdDone close. Otherwise
+		// (cancellation before the watcher launches) no one else is
+		// Waiting, so we own the Wait here. os/exec disallows concurrent
+		// Wait on the same Cmd, so this branch matters.
+		if cmdDone != nil {
+			select {
+			case <-cmdDone:
+			case <-time.After(cloudflaredStopTimeout):
+				_ = cmd.Process.Kill()
+				<-cmdDone
+			}
+		} else {
+			done := make(chan struct{})
+			go func() {
+				_ = cmd.Wait()
+				close(done)
+			}()
+			select {
+			case <-done:
+			case <-time.After(cloudflaredStopTimeout):
+				_ = cmd.Process.Kill()
+				<-done
+			}
 		}
 	}
 	if server != nil {
