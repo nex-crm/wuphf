@@ -210,6 +210,10 @@ type teamTask struct {
 	// (`wuphf task review --invite <slug>`) appends tunnel-human slugs to
 	// this same list as additional reviewers. Convergence rule fires
 	// when every slug here has emitted a graded review.submitted event.
+	// Lane E (indexed inbox + REST handlers) also reads this for auth
+	// filtering on /tasks/inbox and /tasks/{id}: human sessions whose
+	// slug is not in Reviewers see the task hidden from the inbox and
+	// 403 on the packet view. Owner/broker token bypasses the filter.
 	Reviewers []string `json:"reviewers,omitempty"`
 	// Tags carries spec-level domain tags (e.g. "frontend", "billing")
 	// matched against officeMember.Watching.TaskTags during reviewer
@@ -381,6 +385,7 @@ func (t *teamTask) UnmarshalJSON(data []byte) error {
 	t.WorktreeBranch = w.WorktreeBranch
 	t.DependsOn = w.DependsOn
 	t.BlockedOn = w.BlockedOn
+	t.Reviewers = w.Reviewers
 	t.blocked = w.Blocked
 	t.LifecycleState = w.LifecycleState
 	t.Reviewers = w.Reviewers

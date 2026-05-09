@@ -86,14 +86,16 @@ type Broker struct {
 	// decisionPackets holds the per-task in-memory Decision Packet model
 	// (Lane C). Lazily allocated by ensureDecisionPacketStateLocked so
 	// tests that never touch the harness path pay no cost. Guarded by
-	// b.mu via the public mutators in broker_decision_packet.go.
+	// b.mu via the public mutators in broker_decision_packet.go. Lane E
+	// reads through findDecisionPacketLocked / GetDecisionPacket for the
+	// inbox row severity rollup and the /tasks/{id} packet view.
 	decisionPackets *decisionPacketState
 	// reviewerGradesByTask is the Lane D routing-side transient store of
 	// ReviewerGrade entries keyed by task ID. Lane D writes here for
 	// convergence/timeout rule evaluation; Lane C's Decision Packet is
 	// the durable source of truth. The two are kept in sync by
-	// SubmitReviewerGrade — Lane D mirrors writes to Lane C on each grade.
-	// Guarded by b.mu.
+	// AppendReviewerGrade — Lane C mirrors writes to Lane D on each
+	// grade. Guarded by b.mu.
 	reviewerGradesByTask map[string][]ReviewerGrade
 	requests                []humanInterview
 	humanInvites            []humanInvite
@@ -487,6 +489,13 @@ func (b *Broker) StartOnPort(port int) error {
 	mux := http.NewServeMux()
 	b.registerPlatformRoutes(mux)
 	b.registerTaskRoutes(mux)
+	// Lane E (multi-agent control loop): Decision Inbox + per-task
+	// Decision Packet view. /tasks/inbox is registered as an exact
+	// path so it wins over the /tasks/ prefix. /tasks/ fires for
+	// /tasks/{id} only because the existing /tasks/ack and
+	// /tasks/memory-workflow exact paths win for their literals.
+	mux.HandleFunc("/tasks/inbox", b.requireAuth(b.handleTasksInbox))
+	mux.HandleFunc("/tasks/", b.requireAuth(b.handleTaskByID))
 	mux.HandleFunc("/session-mode", b.requireAuth(b.handleSessionMode))
 	mux.HandleFunc("/focus-mode", b.requireAuth(b.handleFocusMode))
 	mux.HandleFunc("/messages", b.requireAuth(b.handleMessages))

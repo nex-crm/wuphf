@@ -100,6 +100,7 @@ func humanRouteAllowed(r *http.Request) bool {
 			path == "/channel-members",
 			path == "/members",
 			path == "/tasks",
+			path == "/tasks/inbox",
 			path == "/agent-logs",
 			path == "/requests",
 			path == "/interview",
@@ -135,6 +136,13 @@ func humanRouteAllowed(r *http.Request) bool {
 			path == "/skills/compile/stats":
 			return true
 		case strings.HasPrefix(path, "/review/"):
+			return true
+		case strings.HasPrefix(path, "/tasks/"):
+			// Lane E: human sessions hit /tasks/{id} for the Decision
+			// Packet view. The handler enforces reviewer-membership
+			// authorization on top of this; routing-level access is
+			// granted unconditionally here so the 401 vs 403 vs 200
+			// matrix in the design doc resolves at the handler.
 			return true
 		}
 		return false
