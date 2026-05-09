@@ -7,11 +7,11 @@
     "apps/*"
   ],
   "scripts": {
-    "desktop:dev": "bun --cwd apps/desktop run dev",
-    "desktop:build": "bun --cwd apps/desktop run build",
-    "desktop:test": "bun --cwd apps/desktop run test",
-    "desktop:typecheck": "bun --cwd apps/desktop run typecheck",
-    "desktop:check:ipc-allowlist": "bun --cwd apps/desktop run check:ipc-allowlist"
+    "desktop:dev": "bun run --cwd apps/desktop dev",
+    "desktop:build": "bun run --cwd apps/desktop build",
+    "desktop:test": "bun run --cwd apps/desktop test",
+    "desktop:typecheck": "bun run --cwd apps/desktop typecheck",
+    "desktop:check:ipc-allowlist": "bun run --cwd apps/desktop check:ipc-allowlist"
   },
   "devDependencies": {
     "@commitlint/cli": "^20.5.0",
