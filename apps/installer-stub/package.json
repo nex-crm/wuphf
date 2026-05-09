@@ -12,9 +12,9 @@
   "wuphfBuildChannel": "dev",
   "scripts": {
     "start": "electron .",
-    "lint": "biome check src/ scripts/*.js package.json",
-    "lint:fix": "biome check --write src/ scripts/*.js package.json",
-    "format": "biome format --write src/ scripts/*.js package.json",
+    "lint": "biome check src/ scripts/*.js build/*.js package.json",
+    "lint:fix": "biome check --write src/ scripts/*.js build/*.js package.json",
+    "format": "biome format --write src/ scripts/*.js build/*.js package.json",
     "build:current": "node scripts/run-builder.js --config electron-builder.yml --publish=never",
     "build:mac": "node scripts/run-builder.js --mac --config electron-builder.yml --publish=never",
     "build:win": "node scripts/run-builder.js --win --config electron-builder.yml --publish=never",

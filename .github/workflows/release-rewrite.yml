@@ -42,6 +42,7 @@ jobs:
   build-mac:
     needs: detect-secrets
     runs-on: macos-14
+    timeout-minutes: 60
     environment:
       name: ${{ needs.detect-secrets.outputs.release_mode == 'production' && 'production-release' || 'installer-pr' }}
     env:
@@ -111,6 +112,7 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          NODE_OPTIONS: --require ./build/notarize-with-retry.js
         run: bun run build:mac
       - name: Staple and validate macOS DMG
         if: needs.detect-secrets.outputs.is_release == 'true'
