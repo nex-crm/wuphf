@@ -49,7 +49,7 @@ check_no_instanceof_outside_class() {
     || true)
   if [ -n "$violators" ]; then
     fail "instanceof FrozenArgs|SanitizedString outside allowlist (frozen-args.ts, sanitized-string.ts, receipt-validator.ts):"
-    printf '    %s\n' $violators >&2
+    printf '    %s\n' "$violators" >&2
     return 1
   fi
   pass "no instanceof FrozenArgs|SanitizedString outside allowlist"
@@ -75,7 +75,7 @@ check_single_hashing_entry_point() {
     || true)
   if [ -n "$violators" ]; then
     fail "crypto.subtle / createHash outside allowlist (sha256.ts, audit-event.ts):"
-    printf '    %s\n' $violators >&2
+    printf '    %s\n' "$violators" >&2
     return 1
   fi
   pass "single hashing entry point preserved"
@@ -93,7 +93,7 @@ check_no_process_env_in_src() {
   violators=$(grep -rnE --include='*.ts' 'process\.env' src/ 2>/dev/null || true)
   if [ -n "$violators" ]; then
     fail "process.env reads in src/:"
-    printf '    %s\n' $violators >&2
+    printf '    %s\n' "$violators" >&2
     return 1
   fi
   pass "no process.env in src/"
@@ -113,7 +113,7 @@ check_demo_imports_index_only() {
     || true)
   if [ -n "$violators" ]; then
     fail "scripts/demo.ts imports from non-index source files:"
-    printf '    %s\n' $violators >&2
+    printf '    %s\n' "$violators" >&2
     return 1
   fi
   pass "demo imports only from ../src/index.ts"
@@ -137,6 +137,7 @@ check_index_value_exports_have_coverage() {
     fi
   done < <(awk '
     /^export type \{.*\} from/ { next }
+    /^export type \{.*\};?$/ { next }
     /^export type \{/ { skip=1; next }
     /^\}/ { if (skip) skip=0; next }
     skip { next }
@@ -186,7 +187,7 @@ check_no_date_now_or_date_parse() {
   violators=$(grep -rnE --include='*.ts' '(Date\.now\(|Date\.parse\(|performance\.now\()' src/ tests/ scripts/ 2>/dev/null || true)
   if [ -n "$violators" ]; then
     fail "Date.now() / Date.parse() / performance.now() (use EventLsn for ordering, ULID for IDs, explicit counters for monotonic state — see AGENTS.md rule #14):"
-    printf '    %s\n' $violators >&2
+    printf '    %s\n' "$violators" >&2
     return 1
   fi
   pass "no Date.now() / Date.parse() / performance.now() (date APIs only mark time, never order)"
