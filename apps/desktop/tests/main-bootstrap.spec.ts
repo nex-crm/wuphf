@@ -20,6 +20,18 @@ interface MockUtilityProcess {
   readonly kill: ReturnType<typeof vi.fn<() => boolean>>;
 }
 
+interface MockBrokerSnapshot {
+  readonly status: "unknown";
+  readonly pid: null;
+  readonly restartCount: 0;
+}
+
+interface MockBrokerSupervisorInstance {
+  readonly start: ReturnType<typeof vi.fn<() => void>>;
+  readonly stop: ReturnType<typeof vi.fn<() => Promise<void>>>;
+  readonly getSnapshot: ReturnType<typeof vi.fn<() => MockBrokerSnapshot>>;
+}
+
 const electronMock = vi.hoisted(() => {
   const instances: MockBrowserWindowInstance[] = [];
 
@@ -68,6 +80,29 @@ const electronMock = vi.hoisted(() => {
   };
 });
 
+const brokerMock = vi.hoisted(() => {
+  const instances: MockBrokerSupervisorInstance[] = [];
+
+  class BrokerSupervisor implements MockBrokerSupervisorInstance {
+    readonly start = vi.fn<() => void>();
+    readonly stop = vi.fn<() => Promise<void>>(() => Promise.resolve());
+    readonly getSnapshot = vi.fn<() => MockBrokerSnapshot>(() => ({
+      status: "unknown",
+      pid: null,
+      restartCount: 0,
+    }));
+
+    constructor(_config: unknown) {
+      instances.push(this);
+    }
+  }
+
+  return {
+    BrokerSupervisor,
+    instances,
+  };
+});
+
 vi.mock("electron", () => ({
   app: electronMock.app,
   BrowserWindow: electronMock.BrowserWindow,
@@ -86,12 +121,17 @@ vi.mock("electron", () => ({
   },
 }));
 
+vi.mock("../src/main/broker.ts", () => ({
+  BrokerSupervisor: brokerMock.BrokerSupervisor,
+}));
+
 describe("main bootstrap", () => {
   const previousRendererUrl = process.env[RENDERER_URL_ENV_KEY];
 
   beforeEach(() => {
     vi.resetModules();
     electronMock.instances.length = 0;
+    brokerMock.instances.length = 0;
     electronMock.BrowserWindow.getAllWindows.mockClear();
     electronMock.app.isPackaged = false;
     electronMock.app.whenReady.mockClear();
@@ -133,6 +173,21 @@ describe("main bootstrap", () => {
     expect(window.loadURL).toHaveBeenCalledWith("http://localhost:5173/");
     expect(window.loadFile).not.toHaveBeenCalled();
   });
+
+  it("prevents every before-quit event while broker shutdown is in progress", async () => {
+    await importMainBootstrap();
+
+    const beforeQuitHandler = getBeforeQuitHandler();
+    const firstQuitEvent = { preventDefault: vi.fn<() => void>() };
+    const secondQuitEvent = { preventDefault: vi.fn<() => void>() };
+
+    beforeQuitHandler(firstQuitEvent);
+    beforeQuitHandler(secondQuitEvent);
+
+    expect(firstQuitEvent.preventDefault).toHaveBeenCalledTimes(1);
+    expect(secondQuitEvent.preventDefault).toHaveBeenCalledTimes(1);
+    expect(getOnlyBrokerSupervisor().stop).toHaveBeenCalledTimes(1);
+  });
 });
 
 async function importMainBootstrap(): Promise<void> {
@@ -148,4 +203,24 @@ function getOnlyWindow(): MockBrowserWindowInstance {
     throw new Error("Expected BrowserWindow to be constructed");
   }
   return instance;
+}
+
+function getOnlyBrokerSupervisor(): MockBrokerSupervisorInstance {
+  const instance = brokerMock.instances[0];
+  if (instance === undefined) {
+    throw new Error("Expected BrokerSupervisor to be constructed");
+  }
+  return instance;
+}
+
+function getBeforeQuitHandler(): (event: { readonly preventDefault: () => void }) => void {
+  const call = electronMock.app.on.mock.calls.find(([event]) => event === "before-quit");
+  if (call === undefined) {
+    throw new Error("Expected before-quit handler to be registered");
+  }
+
+  const handler = call[1];
+  return (event) => {
+    handler(event);
+  };
 }

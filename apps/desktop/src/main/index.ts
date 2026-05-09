@@ -52,11 +52,11 @@ app
   });
 
 app.on("before-quit", (event) => {
+  event.preventDefault();
   if (brokerShutdownStarted) {
     return;
   }
   brokerShutdownStarted = true;
-  event.preventDefault();
   void brokerSupervisor.stop().finally(() => {
     app.exit(0);
   });
