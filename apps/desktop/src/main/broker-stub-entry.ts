@@ -1,3 +1,6 @@
+// THIS FILE RUNS IN THE UTILITY PROCESS, NOT THE MAIN PROCESS.
+// No Electron main API is available here.
+
 const ALIVE_INTERVAL_MS = 1_000;
 
 let aliveInterval: NodeJS.Timeout | null = null;

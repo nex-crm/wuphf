@@ -1,7 +1,7 @@
 # Broker Spawn
 
 The desktop shell supervises a broker utility process. The current broker entry
-is `src/main/broker-stub.ts`, which uses Electron's `process.parentPort`
+is `src/main/broker-stub-entry.ts`, which uses Electron's `process.parentPort`
 utility-process wire to send liveness pings until the loopback listener branch
 replaces it.
 
@@ -15,7 +15,7 @@ sequenceDiagram
 
   App->>Main: createSecureWindow()
   Main->>Supervisor: start()
-  Supervisor->>Utility: fork(broker-stub.js, serviceName: wuphf-broker)
+  Supervisor->>Utility: fork(broker-stub-entry.js, serviceName: wuphf-broker)
   Utility->>Broker: boot utility process
   Broker-->>Supervisor: parentPort.postMessage({ alive: true }) every 1s
   Main->>Supervisor: app.before-quit stop()

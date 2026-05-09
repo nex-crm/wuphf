@@ -8,7 +8,7 @@ import { selectRendererDevServerUrl } from "./renderer-dev-url.ts";
 import { createSecureWindow } from "./window.ts";
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
-const brokerEntryPath = join(currentDir, "broker-stub.js");
+const brokerEntryPath = join(currentDir, "broker-stub-entry.js");
 const preloadPath = join(currentDir, "../preload/preload.js");
 const rendererIndexPath = join(currentDir, "../renderer/index.html");
 
