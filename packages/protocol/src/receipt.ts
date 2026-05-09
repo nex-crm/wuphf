@@ -30,6 +30,7 @@ import {
   type TaskId,
   type ToolCall,
   type ToolCallId,
+  type WriteFailureMetadata,
   type WriteId,
 } from "./receipt-types.ts";
 import {
@@ -55,6 +56,7 @@ import {
   TOOL_CALL_KEYS,
   validateReceipt,
   validateReceiptWithRecomputedFrozenArgs,
+  WRITE_FAILURE_METADATA_KEYS,
 } from "./receipt-validator.ts";
 import { SanitizedString } from "./sanitized-string.ts";
 import { asSha256Hex, type Sha256Hex } from "./sha256.ts";
@@ -116,6 +118,7 @@ export type {
   ToolCall,
   ToolCallId,
   TriggerKind,
+  WriteFailureMetadata,
   WriteId,
   WriteResult,
 } from "./receipt-types.ts";
@@ -331,6 +334,7 @@ function brokerTokenVerdictToJsonValue(v: BrokerTokenVerdict): Record<string, un
 }
 
 function externalWriteToJsonValue(w: ExternalWrite): Record<string, unknown> {
+  const failureMetadata = "failureMetadata" in w ? w.failureMetadata : undefined;
   return omitUndefined({
     writeId: w.writeId,
     action: w.action,
@@ -343,6 +347,7 @@ function externalWriteToJsonValue(w: ExternalWrite): Record<string, unknown> {
     approvedAt: optionalDateToJson(w.approvedAt),
     result: w.result,
     postWriteVerify: optionalFrozenArgsToJsonValue(w.postWriteVerify),
+    failureMetadata: optionalWriteFailureMetadataToJsonValue(failureMetadata),
   });
 }
 
@@ -587,6 +592,7 @@ function externalWriteFromJson(
   const record = requireRecord(value, path);
   assertKnownKeys(record, path, EXTERNAL_WRITE_KEYS);
   const approvedAt = optionalDateFromJson(record, "approvedAt", path);
+  const failureMetadata = optionalWriteFailureMetadataFromJson(record, "failureMetadata", path);
   const result = requiredLiteralFromJson(record, "result", path, WRITE_RESULT_VALUES);
   const common = {
     writeId: asWriteIdAt(requiredStringFromJson(record, "writeId", path), pointer(path, "writeId")),
@@ -615,6 +621,9 @@ function externalWriteFromJson(
   // validator rejects (or vice versa) and break round-trips.
   switch (result) {
     case "applied":
+      if (failureMetadata !== undefined) {
+        throw new Error(`${pointer(path, "failureMetadata")}: must be absent for state "applied"`);
+      }
       return {
         ...common,
         result,
@@ -639,6 +648,7 @@ function externalWriteFromJson(
         result,
         appliedDiff: null,
         postWriteVerify: null,
+        ...(failureMetadata === undefined ? {} : { failureMetadata }),
       };
     case "partial":
       return {
@@ -655,6 +665,7 @@ function externalWriteFromJson(
           postWriteVerifyPath,
           recomputedFrozenArgs,
         ),
+        ...(failureMetadata === undefined ? {} : { failureMetadata }),
       };
     case "rollback":
       requireNullField(postWriteVerifyValue, postWriteVerifyPath, "rollback");
@@ -668,6 +679,7 @@ function externalWriteFromJson(
           recomputedFrozenArgs,
         ),
         postWriteVerify: null,
+        ...(failureMetadata === undefined ? {} : { failureMetadata }),
       };
   }
 }
@@ -733,6 +745,45 @@ function nullableFrozenArgsFromJson(
   recomputedFrozenArgs: Set<FrozenArgs>,
 ): FrozenArgs | null {
   return value === null ? null : frozenArgsFromJson(value, path, recomputedFrozenArgs);
+}
+
+function writeFailureMetadataToJsonValue(value: WriteFailureMetadata): Record<string, unknown> {
+  return omitUndefined({
+    code: value.code,
+    retryable: value.retryable,
+    retryAfterMs: value.retryAfterMs,
+    terminalReason: optionalSanitizedStringToJson(value.terminalReason),
+  });
+}
+
+function optionalWriteFailureMetadataToJsonValue(
+  value: WriteFailureMetadata | undefined,
+): Record<string, unknown> | undefined {
+  return value === undefined ? undefined : writeFailureMetadataToJsonValue(value);
+}
+
+function writeFailureMetadataFromJson(value: unknown, path: string): WriteFailureMetadata {
+  const record = requireRecord(value, path);
+  assertKnownKeys(record, path, WRITE_FAILURE_METADATA_KEYS);
+  const retryAfterMs = optionalNonNegativeIntegerFromJson(record, "retryAfterMs", path);
+  const terminalReason = optionalSanitizedStringFromJson(record, "terminalReason", path);
+  return {
+    code: requiredStringFromJson(record, "code", path),
+    retryable: requiredBooleanFromJson(record, "retryable", path),
+    ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
+    ...(terminalReason === undefined ? {} : { terminalReason }),
+  };
+}
+
+function optionalWriteFailureMetadataFromJson(
+  record: Readonly<Record<string, unknown>>,
+  key: string,
+  basePath: string,
+): WriteFailureMetadata | undefined {
+  if (!hasOwn(record, key)) return undefined;
+  const value = record[key];
+  if (value === undefined) return undefined;
+  return writeFailureMetadataFromJson(value, pointer(basePath, key));
 }
 
 function sanitizedStringToJson(value: SanitizedString): string {
@@ -869,6 +920,20 @@ function requiredNonNegativeIntegerFromJson(
   basePath: string,
 ): number {
   const value = requiredFieldFromJson(record, key, basePath);
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
+    throw new Error(`${pointer(basePath, key)}: must be a non-negative integer`);
+  }
+  return value;
+}
+
+function optionalNonNegativeIntegerFromJson(
+  record: Readonly<Record<string, unknown>>,
+  key: string,
+  basePath: string,
+): number | undefined {
+  if (!hasOwn(record, key)) return undefined;
+  const value = record[key];
+  if (value === undefined) return undefined;
   if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
     throw new Error(`${pointer(basePath, key)}: must be a non-negative integer`);
   }

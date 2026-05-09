@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "comment": "Golden vectors for the WUPHF audit chain. canonicalSerialization is the UTF-8 JCS string for the record without eventHash. eventHash is sha256(asciiLowerHex(prevHash) || utf8(canonicalSerialization)). payload.bodyB64 is standard base64 for the raw opaque payload body bytes.",
+  "vectors": [
+    {
+      "name": "boot_marker_seq0",
+      "input": {
+        "seqNo": "v1:0",
+        "timestamp": "2026-05-08T00:00:00.000Z",
+        "prevHash": "69292e708cc2e023492933025af465b063bdf24002e72a825b5170541b733f71",
+        "payload": {
+          "kind": "boot_marker",
+          "receiptId": null,
+          "bodyB64": "Ym9vdA=="
+        }
+      },
+      "expected": {
+        "canonicalSerialization": "{\"payload\":{\"bodyB64\":\"Ym9vdA==\",\"kind\":\"boot_marker\",\"receiptId\":null},\"prevHash\":\"69292e708cc2e023492933025af465b063bdf24002e72a825b5170541b733f71\",\"seqNo\":\"v1:0\",\"timestamp\":\"2026-05-08T00:00:00.000Z\"}",
+        "eventHash": "e27134d1b1641fb13747d9fac78aecc90d9d1385d04bfeea4a8a596fdb6101bb"
+      }
+    }
+  ]
+}

@@ -29,6 +29,7 @@ import {
   type SourceRead,
   type ToolCall,
   type TriggerKind,
+  type WriteFailureMetadata,
   type WriteResult,
 } from "./receipt-types.ts";
 import { addError, hasOwn, isRecord, pointer, recordValue } from "./receipt-utils.ts";
@@ -224,6 +225,16 @@ export const SIGNED_APPROVAL_TOKEN_KEYS: ReadonlySet<string> = new Set<string>(
   SIGNED_APPROVAL_TOKEN_KEYS_TUPLE,
 );
 
+const WRITE_FAILURE_METADATA_KEYS_TUPLE = [
+  "code",
+  "retryable",
+  "retryAfterMs",
+  "terminalReason",
+] as const satisfies readonly (keyof WriteFailureMetadata)[];
+export const WRITE_FAILURE_METADATA_KEYS: ReadonlySet<string> = new Set<string>(
+  WRITE_FAILURE_METADATA_KEYS_TUPLE,
+);
+
 const EXTERNAL_WRITE_KEYS_TUPLE = [
   "writeId",
   "action",
@@ -235,6 +246,7 @@ const EXTERNAL_WRITE_KEYS_TUPLE = [
   "approvedAt",
   "result",
   "postWriteVerify",
+  "failureMetadata",
 ] as const satisfies readonly (keyof ExternalWrite)[];
 export const EXTERNAL_WRITE_KEYS: ReadonlySet<string> = new Set<string>(EXTERNAL_WRITE_KEYS_TUPLE);
 
@@ -592,6 +604,7 @@ function validateExternalWrite(
   validateRequired(value, "result", path, errors, (v, p, e) =>
     validateLiteral(v, p, e, WRITE_RESULT_VALUES, "must be a valid write result"),
   );
+  validateOptional(value, "failureMetadata", path, errors, validateWriteFailureMetadata);
 
   // Per-state field requirements mirror the discriminated-union shape in
   // receipt-types.ts. The codec enforces the same invariants in
@@ -600,8 +613,11 @@ function validateExternalWrite(
   const result = recordValue(value, "result");
   const appliedDiffPath = pointer(path, "appliedDiff");
   const postWriteVerifyPath = pointer(path, "postWriteVerify");
+  const failureMetadataPath = pointer(path, "failureMetadata");
   const appliedDiffValue = recordValue(value, "appliedDiff");
   const postWriteVerifyValue = recordValue(value, "postWriteVerify");
+  const hasFailureMetadata =
+    hasOwn(value, "failureMetadata") && recordValue(value, "failureMetadata") !== undefined;
   const requireFrozen = (val: unknown, p: string, state: string): void => {
     if (val === null) {
       addError(errors, p, `must be a FrozenArgs envelope (null is invalid for state "${state}")`);
@@ -617,6 +633,9 @@ function validateExternalWrite(
   if (result === "applied") {
     requireFrozen(appliedDiffValue, appliedDiffPath, "applied");
     requireFrozen(postWriteVerifyValue, postWriteVerifyPath, "applied");
+    if (hasFailureMetadata) {
+      addError(errors, failureMetadataPath, 'must be absent for state "applied"');
+    }
   } else if (result === "rejected") {
     requireNull(appliedDiffValue, appliedDiffPath, "rejected");
     requireNull(postWriteVerifyValue, postWriteVerifyPath, "rejected");
@@ -659,6 +678,22 @@ function validateExternalWrite(
       }
     }
   }
+}
+
+function validateWriteFailureMetadata(
+  value: unknown,
+  path: string,
+  errors: ReceiptValidationError[],
+): void {
+  if (!isRecord(value)) {
+    addError(errors, path, "must be an object");
+    return;
+  }
+  validateKnownKeys(value, path, WRITE_FAILURE_METADATA_KEYS, errors);
+  validateRequired(value, "code", path, errors, validateString);
+  validateRequired(value, "retryable", path, errors, validateBoolean);
+  validateOptional(value, "retryAfterMs", path, errors, validateNonNegativeInteger);
+  validateOptional(value, "terminalReason", path, errors, validateSanitizedString);
 }
 
 function validateRequired(

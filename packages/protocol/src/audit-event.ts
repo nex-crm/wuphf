@@ -14,7 +14,7 @@
 // `prevHash` is mixed in as its 64-byte ASCII-hex form rather than 32 raw
 // bytes. This keeps the chain trivially readable in JSON/CBOR debug dumps but
 // is a cross-language footgun for any non-TS verifier — so the wire decision
-// is locked here, exposed via golden vectors in tests/audit-event.spec.ts.
+// is locked here, exposed via golden vectors in testdata/audit-event-vectors.json.
 
 import { createHash } from "node:crypto";
 import type { Brand } from "./brand.ts";
@@ -25,26 +25,90 @@ import { asSha256Hex, type Sha256Hex, sha256Hex } from "./sha256.ts";
 
 export type MerkleRootHex = Brand<string, "MerkleRootHex">;
 
-export type AuditEventKind =
-  | "receipt_created"
-  | "receipt_updated"
-  | "receipt_finalized"
-  | "approval_requested"
-  | "approval_decision"
-  | "cost_event"
-  | "tool_call_started"
-  | "tool_call_completed"
-  | "external_write_proposed"
-  | "external_write_applied"
-  | "external_write_failed"
-  | "boot_marker"
-  | "merkle_root";
+export const AUDIT_EVENT_KIND_VALUES = [
+  "receipt_created",
+  "receipt_updated",
+  "receipt_finalized",
+  "approval_requested",
+  "approval_decision",
+  "cost_event",
+  "tool_call_started",
+  "tool_call_completed",
+  "external_write_proposed",
+  "external_write_applied",
+  "external_write_failed",
+  "boot_marker",
+  "merkle_root",
+] as const;
+
+export type AuditEventKind = (typeof AUDIT_EVENT_KIND_VALUES)[number];
+
+export interface AuditEventPayloadKindMetadata {
+  readonly description: string;
+  readonly bodySchemaRef: string;
+}
+
+export const PAYLOAD_KIND_METADATA = {
+  receipt_created: {
+    description: "Receipt snapshot was first persisted.",
+    bodySchemaRef: "wuphf.audit.payload.receipt_created.v1",
+  },
+  receipt_updated: {
+    description: "Receipt snapshot changed before finalization.",
+    bodySchemaRef: "wuphf.audit.payload.receipt_updated.v1",
+  },
+  receipt_finalized: {
+    description: "Receipt reached a terminal status.",
+    bodySchemaRef: "wuphf.audit.payload.receipt_finalized.v1",
+  },
+  approval_requested: {
+    description: "A write approval request was presented.",
+    bodySchemaRef: "wuphf.audit.payload.approval_requested.v1",
+  },
+  approval_decision: {
+    description: "A reviewer accepted, rejected, or abstained on an approval.",
+    bodySchemaRef: "wuphf.audit.payload.approval_decision.v1",
+  },
+  cost_event: {
+    description: "Token or cost accounting changed.",
+    bodySchemaRef: "wuphf.audit.payload.cost_event.v1",
+  },
+  tool_call_started: {
+    description: "A tool invocation began.",
+    bodySchemaRef: "wuphf.audit.payload.tool_call_started.v1",
+  },
+  tool_call_completed: {
+    description: "A tool invocation completed.",
+    bodySchemaRef: "wuphf.audit.payload.tool_call_completed.v1",
+  },
+  external_write_proposed: {
+    description: "An external write diff was proposed.",
+    bodySchemaRef: "wuphf.audit.payload.external_write_proposed.v1",
+  },
+  external_write_applied: {
+    description: "An external write was applied and verified.",
+    bodySchemaRef: "wuphf.audit.payload.external_write_applied.v1",
+  },
+  external_write_failed: {
+    description: "An external write failed, partially applied, or rolled back.",
+    bodySchemaRef: "wuphf.audit.payload.external_write_failed.v1",
+  },
+  boot_marker: {
+    description: "The broker appended a startup marker.",
+    bodySchemaRef: "wuphf.audit.payload.boot_marker.v1",
+  },
+  merkle_root: {
+    description: "A signed Merkle root checkpoint was emitted.",
+    bodySchemaRef: "wuphf.audit.payload.merkle_root.v1",
+  },
+} as const satisfies Record<AuditEventKind, AuditEventPayloadKindMetadata>;
 
 export interface AuditEventPayload {
   readonly kind: AuditEventKind;
   readonly receiptId?: ReceiptId | undefined;
-  // Opaque body bytes; hashing covers them via base64 in the canonical
-  // serialization. Storage is CBOR-line at the broker.
+  // Opaque kind-specific bytes. The broker owns the CBOR body schema named by
+  // PAYLOAD_KIND_METADATA[kind].bodySchemaRef; protocol consumers hash and
+  // verify these bytes without interpreting them here.
   readonly body: Uint8Array;
 }
 

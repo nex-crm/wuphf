@@ -16,7 +16,12 @@
 //      Both checks must pass; the Host check alone is not the full gate.
 
 import type { Brand } from "./brand.ts";
-import type { ReceiptId, SignedApprovalToken, WriteResult } from "./receipt.ts";
+import type {
+  ReceiptId,
+  SignedApprovalToken,
+  WriteFailureMetadata,
+  WriteResult,
+} from "./receipt.ts";
 
 export type BrokerPort = Brand<number, "BrokerPort">;
 export type ApiToken = Brand<string, "ApiToken">;
@@ -199,6 +204,7 @@ export type ApprovalSubmitResponse =
       readonly appliedAt: string; // ISO 8601
       readonly executionResult: WriteResult;
       readonly idempotencyKey: string;
+      readonly failureMetadata?: WriteFailureMetadata | undefined;
     }
   | {
       readonly accepted: true;
