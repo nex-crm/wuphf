@@ -7,23 +7,24 @@
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
-    "lint": "biome check src/ scripts/",
-    "lint:fix": "biome check --write src/ scripts/",
-    "format": "biome format --write src/ scripts/",
-    "build:current": "electron-builder --config electron-builder.yml",
-    "build:mac": "electron-builder --mac --config electron-builder.yml",
-    "build:win": "electron-builder --win --config electron-builder.yml",
-    "build:linux": "electron-builder --linux --config electron-builder.yml",
-    "build:dry-run": "electron-builder --config electron-builder.yml --publish=never --dir",
+    "lint": "biome check src/ build/*.js scripts/*.js package.json",
+    "lint:fix": "biome check --write src/ build/*.js scripts/*.js package.json",
+    "format": "biome format --write src/ build/*.js scripts/*.js package.json",
+    "build:current": "bun scripts/run-builder.js --config electron-builder.yml --publish=never",
+    "build:mac": "bun scripts/run-builder.js --mac --config electron-builder.yml --publish=never",
+    "build:win": "bun scripts/run-builder.js --win --config electron-builder.yml --publish=never",
+    "build:linux": "bun scripts/run-builder.js --linux --config electron-builder.yml --publish=never",
+    "build:dry-run": "bun scripts/run-builder.js --config electron-builder.yml --publish=never --dir",
     "check:secrets": "bash scripts/detect-signing-secrets.sh",
     "check:invariants": "bash scripts/check-invariants.sh",
-    "verify:appcast": "bash scripts/verify-appcast.sh"
+    "verify:appcast": "bash scripts/verify-appcast.sh",
+    "verify:latest-yml": "bash scripts/verify-latest-yml.sh"
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.13",
-    "@types/node": "^22.10.0",
-    "electron": "^33.0.0",
-    "electron-builder": "^25.1.8",
-    "electron-updater": "^6.3.9"
+    "@types/node": "22.10.0",
+    "electron": "33.0.0",
+    "electron-builder": "25.1.8",
+    "electron-updater": "6.3.9"
   }
 }

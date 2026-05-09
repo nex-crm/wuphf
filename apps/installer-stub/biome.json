@@ -8,6 +8,7 @@
   "files": {
     "includes": [
       "src/**/*.{js,ts}",
+      "build/**/*.{js,ts}",
       "scripts/**/*.{js,ts}",
       "*.json",
       "!node_modules",

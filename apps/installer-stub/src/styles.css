@@ -1,0 +1,59 @@
+:root {
+  color-scheme: dark;
+  background: #101214;
+  color: #f4f6f8;
+  font-family: ui-monospace, "SFMono-Regular", "SF Mono", Consolas, "Liberation Mono", monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  display: grid;
+  min-height: 100vh;
+  margin: 0;
+  place-items: center;
+}
+
+main {
+  display: grid;
+  gap: 14px;
+  justify-items: center;
+  padding: 32px;
+  text-align: center;
+}
+
+h1,
+p {
+  margin: 0;
+}
+
+h1 {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+p {
+  color: #b8c0cc;
+  font-size: 14px;
+}
+
+button {
+  border: 1px solid #5d6a7a;
+  border-radius: 6px;
+  background: #f4f6f8;
+  color: #101214;
+  cursor: pointer;
+  font: inherit;
+  padding: 10px 14px;
+}
+
+button:focus-visible {
+  outline: 2px solid #8db8ff;
+  outline-offset: 3px;
+}
+
+button:active {
+  transform: translateY(1px);
+}
