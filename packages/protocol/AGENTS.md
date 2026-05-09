@@ -124,12 +124,39 @@ Use `unknown` with narrowing. Use `Record<string, unknown>` for parsed
 JSON. Use `as` only when narrowing through a runtime check that just
 proved the type. Lint suppressions are not a fix — fix the code.
 
-### 10. Public API only changes through index.ts
+### 10. Protocol-grade surfaces need bounded operations
+
+Protocol work is not complete until the operational shape is bounded. New
+verifiers, wire readers, chain walkers, or recovery surfaces MUST account for
+bounded budgets, streaming verification where full materialization would be
+unsafe, and recovery primitives for interrupted or corrupt chains. Don't ship
+an unbounded all-in-memory path and call it protocol-grade.
+
+### 11. Public API only changes through index.ts
 
 Anything a consumer can import from `@wuphf/protocol` is in
 `packages/protocol/src/index.ts`. Add new exports there explicitly; don't
 rely on transitive re-exports from sub-modules. The visible public surface
 is what we promise to keep stable.
+
+### 12. Sub-agent dispatch contract
+
+When Claude, Codex, or a human delegates package work to a sub-agent
+(`codex exec`, Claude `Agent`, etc.), the prompt MUST carry the same rules
+the delegator is following. There is no looser path because the work was
+delegated. The prompt MUST:
+
+1. Reference `packages/protocol/AGENTS.md` by path.
+2. Quote the relevant hard rules verbatim; sub-agents don't always read links.
+3. Specify the exact verification commands to run before commit.
+4. Specify per-finding disposition format:
+   `FIXED` / `SKIPPED` + reason / `DEFERRED` + issue.
+5. Specify scope boundary: which files to touch, which to leave alone,
+   especially for parallel batches.
+6. Specify failure-mode behavior: if you can't safely fix something, leave a
+   TODO with rationale rather than commit a half-fix.
+7. Pick a profile sandbox that matches the task: `-p auto -s workspace-write`
+   for editing tasks; `-p auto -s read-only` for review-only work.
 
 ---
 
@@ -143,6 +170,24 @@ is what we promise to keep stable.
    `packages/protocol/` to confirm the baseline is green. If anything is
    already broken, surface that — don't fix unrelated things by stealth.
 3. Identify which hard constraints (above) your change interacts with.
+
+### Demo-driven iteration
+
+For any non-trivial public API change (new export, validator, brand, codec
+function, or wire-shape field):
+
+1. Run the demo first: `bun run packages/protocol/scripts/demo.ts`.
+2. Make your changes.
+3. Run the demo again; it catches `index.ts` drift that per-module tests miss.
+4. If you add public API surface, extend `scripts/demo.ts` with a scenario:
+   copy an existing block, replace inputs/expectations, and watch the new PASS
+   line print. The demo is a living artifact reviewers read before the diff.
+5. If you touch the audit chain or canonical JSON, run
+   `cd packages/protocol/testdata && go run verifier-reference.go`. If you
+   changed the wire shape, extend `audit-event-vectors.json` and the Go
+   verifier in the same commit.
+6. If the change is not reflected in `scripts/demo.ts`, the commit body must
+   explain why the demo did not need an extension.
 
 ### While editing
 
@@ -165,6 +210,23 @@ is what we promise to keep stable.
    runs `scripts/check-file-size.sh`.
 4. Commit with a Conventional Commit message that explains the WHY,
    not the what.
+
+### When you delegate
+
+When delegating to a sub-agent (Codex, Claude `Agent`, etc.):
+
+1. Plan the file-overlap matrix first; if multiple agents will touch the same
+   file, sequence them or scope each to a different concern.
+2. Use git worktrees for parallel agents:
+   `git worktree add /path -b branch base-ref`.
+3. Make each agent prompt self-contained with the hard rules, verification
+   commands, and disposition format; sub-agents do not share your history.
+4. Cherry-pick in dependency order: least overlap first, then resolve
+   integration conflicts.
+5. Don't ask agents to re-do conflicting work; resolve manually after their
+   isolated batch is complete.
+6. Clean up worktrees after integration:
+   `git worktree remove /path && git branch -D branch-name`.
 
 ### Things that are NOT allowed without explicit human approval
 
