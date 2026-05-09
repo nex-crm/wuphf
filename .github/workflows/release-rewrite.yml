@@ -477,7 +477,8 @@ jobs:
         run: bash scripts/verify-latest-yml.sh "${TAG}"
       - name: Compute release checksums
         run: |
-          mapfile -d '' assets < <(find release-assets -type f \( \
+          cd release-assets
+          mapfile -d '' assets < <(find . -maxdepth 1 -type f \( \
             -name '*.dmg' -o \
             -name '*.zip' -o \
             -name '*.exe' -o \
@@ -486,14 +487,14 @@ jobs:
             -name 'latest.yml' -o \
             -name 'latest-mac.yml' -o \
             -name 'latest-linux.yml' \
-          \) -print0 | sort -z)
+          \) -printf '%P\0' | sort -z)
 
           if [[ "${#assets[@]}" -eq 0 ]]; then
             echo "No release assets downloaded" >&2
             exit 1
           fi
 
-          printf "%s\0" "${assets[@]}" | xargs -0 sha256sum > release-assets/release-checksums.txt
+          printf "%s\0" "${assets[@]}" | xargs -0 sha256sum > release-checksums.txt
       - name: Write release notes
         run: |
           {
