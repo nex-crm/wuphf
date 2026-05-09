@@ -23,7 +23,11 @@ Spec: `business-musings/wuphf-greenfield-rewrite-rfc-2026-05.md` §6 (Receipt sc
 
 `SignedApprovalToken` is an envelope: `{ claims, algorithm: "ed25519", signerKeyId, signature }`. `signature` is base64 for an Ed25519 detached signature over `canonicalJSON(claims)`. Broker verification output is not client-controlled token data; receipts carry it separately as `ApprovalEvent.tokenVerdict`.
 
-External writes carry `writeId`. A token with `claims.writeId` authorizes only that write; a token without `claims.writeId` is receipt-scoped. Approval submissions also carry a client-minted `idempotencyKey`, and accepted responses echo it so clients can safely retry a lost `202 Accepted` with the same key.
+External writes carry `writeId`. A token with `claims.writeId` authorizes only that write; a token without `claims.writeId` is receipt-scoped. Approval submissions also carry a client-minted `idempotencyKey`, and accepted responses echo it so clients can safely retry a lost `202 Accepted` with the same key. Idempotency keys are branded `IdempotencyKey` values and must match `/^[A-Za-z0-9_-]{1,128}$/`.
+
+## Merkle root checkpoint wire shape
+
+`MerkleRootRecord` checkpoints use the JSON projection `{ seqNo, rootHash, signedAt, ephemeralKeyId, signature, certChainPem }`. `seqNo` is an `EventLsn` string such as `"v1:42"`, `rootHash` is a lowercase SHA-256 hex digest, `signedAt` is an ISO 8601 instant with milliseconds, `signature` is non-empty base64, and `certChainPem` is non-empty PEM text. Golden vectors for both audit events and Merkle root checkpoints live in `testdata/audit-event-vectors.json`.
 
 ## Validation
 

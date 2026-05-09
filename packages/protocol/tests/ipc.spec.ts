@@ -13,9 +13,14 @@ import {
   isKeychainHandleId,
   isLoopbackRemoteAddress,
   isRequestId,
-  validateApprovalSubmitReceiptBinding,
+  validateApprovalSubmitRequest,
 } from "../src/ipc.ts";
-import { asReceiptId, type ReceiptId, type SignedApprovalToken } from "../src/receipt.ts";
+import {
+  asIdempotencyKey,
+  asReceiptId,
+  type ReceiptId,
+  type SignedApprovalToken,
+} from "../src/receipt.ts";
 import { sha256Hex } from "../src/sha256.ts";
 
 describe("isAllowedLoopbackHost", () => {
@@ -192,17 +197,17 @@ describe("approval submission IPC", () => {
     const approvalToken = approvalTokenFor(receiptId);
 
     expect(
-      validateApprovalSubmitReceiptBinding({
+      validateApprovalSubmitRequest({
         receiptId,
         approvalToken,
-        idempotencyKey: "approval-submit-01",
+        idempotencyKey: asIdempotencyKey("approval-submit-01"),
       }),
     ).toEqual({ ok: true });
     expect(
-      validateApprovalSubmitReceiptBinding({
+      validateApprovalSubmitRequest({
         receiptId: otherReceiptId,
         approvalToken,
-        idempotencyKey: "approval-submit-01",
+        idempotencyKey: asIdempotencyKey("approval-submit-01"),
       }),
     ).toEqual({
       ok: false,
@@ -210,8 +215,26 @@ describe("approval submission IPC", () => {
     });
   });
 
+  it("rejects invalid idempotency keys on approval requests", () => {
+    const receiptId = asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAV");
+    const approvalToken = approvalTokenFor(receiptId);
+
+    for (const idempotencyKey of ["", "a".repeat(129), "has\ncontrol", "has/slash"]) {
+      expect(
+        validateApprovalSubmitRequest({
+          receiptId,
+          approvalToken,
+          idempotencyKey,
+        }),
+      ).toEqual({
+        ok: false,
+        reason: "idempotencyKey must match /^[A-Za-z0-9_-]{1,128}$/",
+      });
+    }
+  });
+
   it("carries idempotencyKey on queued approval responses", () => {
-    const idempotencyKey = "approval-submit-01";
+    const idempotencyKey = asIdempotencyKey("approval-submit-01");
     const response: ApprovalSubmitResponse = {
       accepted: true,
       state: "queued",

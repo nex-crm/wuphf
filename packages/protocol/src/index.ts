@@ -7,14 +7,21 @@ export type {
   ChainVerificationResult,
   MerkleRootHex,
   MerkleRootRecord,
+  MerkleRootRecordValidationError,
+  MerkleRootRecordValidationResult,
 } from "./audit-event.ts";
 export {
   AUDIT_EVENT_KIND_VALUES,
+  asMerkleRootHex,
   computeAuditEventHash,
   computeEventHash,
   GENESIS_PREV_HASH,
+  isMerkleRootHex,
+  merkleRootRecordFromJson,
+  merkleRootRecordToJsonValue,
   PAYLOAD_KIND_METADATA,
   serializeAuditEventRecordForHash,
+  validateMerkleRootRecord,
   verifyChain,
 } from "./audit-event.ts";
 export type { Brand } from "./brand.ts";
@@ -62,7 +69,7 @@ export {
   isKeychainHandleId,
   isLoopbackRemoteAddress,
   isRequestId,
-  validateApprovalSubmitReceiptBinding,
+  validateApprovalSubmitRequest,
 } from "./ipc.ts";
 export type {
   AgentSlug,
@@ -78,6 +85,7 @@ export type {
   ExternalWriteRejected,
   ExternalWriteRollback,
   FileChange,
+  IdempotencyKey,
   MemoryWriteRef,
   ProviderKind,
   ReceiptId,
@@ -99,6 +107,7 @@ export type {
 export {
   asAgentSlug,
   asApprovalId,
+  asIdempotencyKey,
   asProviderKind,
   asReceiptId,
   asTaskId,
@@ -106,6 +115,7 @@ export {
   asWriteId,
   isAgentSlug,
   isApprovalId,
+  isIdempotencyKey,
   isProviderKind,
   isReceiptId,
   isReceiptSnapshot,

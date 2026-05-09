@@ -26,6 +26,7 @@ import {
   type ApprovalId,
   asAgentSlug,
   asApprovalId,
+  asIdempotencyKey,
   asProviderKind,
   asReceiptId,
   asTaskId,
@@ -35,6 +36,7 @@ import {
   type CommitRef,
   type ExternalWrite,
   type FileChange,
+  type IdempotencyKey,
   type MemoryWriteRef,
   type ProviderKind,
   type ReceiptId,
@@ -92,6 +94,7 @@ export type {
   ExternalWriteRejected,
   ExternalWriteRollback,
   FileChange,
+  IdempotencyKey,
   MemoryWriteRef,
   ProviderKind,
   ReceiptId,
@@ -113,6 +116,7 @@ export type {
 export {
   asAgentSlug,
   asApprovalId,
+  asIdempotencyKey,
   asProviderKind,
   asReceiptId,
   asTaskId,
@@ -120,6 +124,7 @@ export {
   asWriteId,
   isAgentSlug,
   isApprovalId,
+  isIdempotencyKey,
   isProviderKind,
   isReceiptId,
   isTaskId,
@@ -159,6 +164,10 @@ function asSha256HexAt(value: string, path: string): Sha256Hex {
 
 function asWriteIdAt(value: string, path: string): WriteId {
   return decodeBrandAt(value, path, asWriteId);
+}
+
+function asIdempotencyKeyAt(value: string, path: string): IdempotencyKey {
+  return decodeBrandAt(value, path, asIdempotencyKey);
 }
 
 function decodeBrandAt<T>(value: string, path: string, decode: (value: string) => T): T {
@@ -586,7 +595,10 @@ function externalWriteFromJson(
     writeId: asWriteIdAt(requiredStringFromJson(record, "writeId", path), pointer(path, "writeId")),
     action: requiredStringFromJson(record, "action", path),
     target: requiredStringFromJson(record, "target", path),
-    idempotencyKey: requiredStringFromJson(record, "idempotencyKey", path),
+    idempotencyKey: asIdempotencyKeyAt(
+      requiredStringFromJson(record, "idempotencyKey", path),
+      pointer(path, "idempotencyKey"),
+    ),
     proposedDiff: frozenArgsFromJson(
       requiredFieldFromJson(record, "proposedDiff", path),
       pointer(path, "proposedDiff"),

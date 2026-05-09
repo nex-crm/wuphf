@@ -20,6 +20,7 @@ export type ProviderKind = Brand<(typeof PROVIDER_KIND_VALUES)[number], "Provide
 export type ToolCallId = Brand<string, "ToolCallId">;
 export type ApprovalId = Brand<string, "ApprovalId">;
 export type WriteId = Brand<string, "WriteId">;
+export type IdempotencyKey = Brand<string, "IdempotencyKey">;
 
 export type ReceiptStatus = "ok" | "error" | "stalled" | "approval_pending" | "rejected";
 
@@ -131,7 +132,7 @@ export interface ExternalWriteCommon {
   readonly writeId: WriteId;
   readonly action: string;
   readonly target: string;
-  readonly idempotencyKey: string;
+  readonly idempotencyKey: IdempotencyKey;
   readonly proposedDiff: FrozenArgs;
   readonly approvalToken: SignedApprovalToken | null;
   readonly approvedAt?: Date | undefined;
@@ -230,6 +231,7 @@ export type ReceiptValidationResult =
 const ULID_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/;
 const AGENT_SLUG_RE = /^[a-z0-9][a-z0-9_-]*$/;
 const LOCAL_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+export const IDEMPOTENCY_KEY_RE = /^[A-Za-z0-9_-]{1,128}$/;
 
 // Exported because ProviderKind is `Brand<(typeof PROVIDER_KIND_VALUES)[number], …>`
 // — consumers that need to enumerate the supported providers (forms, picker
@@ -299,4 +301,15 @@ export function asWriteId(s: string): WriteId {
 
 export function isWriteId(s: unknown): s is WriteId {
   return typeof s === "string" && LOCAL_ID_RE.test(s);
+}
+
+export function asIdempotencyKey(s: string): IdempotencyKey {
+  if (!IDEMPOTENCY_KEY_RE.test(s)) {
+    throw new Error("asIdempotencyKey: not a valid IdempotencyKey shape");
+  }
+  return s as IdempotencyKey;
+}
+
+export function isIdempotencyKey(value: unknown): value is IdempotencyKey {
+  return typeof value === "string" && IDEMPOTENCY_KEY_RE.test(value);
 }

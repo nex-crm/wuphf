@@ -4,6 +4,7 @@ import { FrozenArgs } from "../src/frozen-args.ts";
 import {
   asAgentSlug,
   asApprovalId,
+  asIdempotencyKey,
   asProviderKind,
   asReceiptId,
   asTaskId,
@@ -528,6 +529,41 @@ describe("receipt schema", () => {
     );
   });
 
+  it("ExternalWrite: rejects invalid idempotency key shapes", () => {
+    interface ExternalWriteWire extends Record<string, unknown> {
+      idempotencyKey?: unknown;
+    }
+    interface ReceiptWire {
+      writes: ExternalWriteWire[];
+    }
+    const invalidKeys = ["", "a".repeat(129), "has\ncontrol", "has/slash"];
+
+    for (const idempotencyKey of invalidKeys) {
+      const fixture = validReceiptFixture();
+      const firstWrite = nonNull(fixture.writes[0]);
+      const validationResult = validateReceipt({
+        ...fixture,
+        writes: [{ ...firstWrite, idempotencyKey }],
+      });
+      expect(validationResult.ok).toBe(false);
+      if (!validationResult.ok) {
+        expect(
+          validationResult.errors.some(
+            (e) => e.path === "/writes/0/idempotencyKey" && /A-Za-z0-9_/.test(e.message),
+          ),
+        ).toBe(true);
+      }
+
+      const wire = JSON.parse(receiptToJson(validReceiptFixture())) as ReceiptWire;
+      const write = wire.writes[0];
+      if (!write) throw new Error("fixture must contain a write");
+      write.idempotencyKey = idempotencyKey;
+      expect(() => receiptFromJson(JSON.stringify(wire))).toThrow(
+        /\/writes\/0\/idempotencyKey: asIdempotencyKey/,
+      );
+    }
+  });
+
   it("ExternalWrite: validator rejects result='rejected' with non-null postWriteVerify", () => {
     interface ReceiptWire {
       writes: Array<Record<string, unknown>>;
@@ -758,7 +794,7 @@ function validReceiptFixture(): ReceiptSnapshot {
         writeId,
         action: "hubspot.deals.update",
         target: "deal:5678",
-        idempotencyKey: "receipt-01ARZ3NDEKTSV4RRFFQ69G5FAV-write-1",
+        idempotencyKey: asIdempotencyKey("receipt-01ARZ3NDEKTSV4RRFFQ69G5FAV-write-1"),
         proposedDiff,
         appliedDiff,
         approvalToken,
@@ -864,7 +900,7 @@ function shuffledReceiptFixture(): ReceiptSnapshot {
         approvalToken,
         appliedDiff,
         proposedDiff,
-        idempotencyKey: "receipt-01ARZ3NDEKTSV4RRFFQ69G5FAV-write-1",
+        idempotencyKey: asIdempotencyKey("receipt-01ARZ3NDEKTSV4RRFFQ69G5FAV-write-1"),
         writeId,
         target: "deal:5678",
         action: "hubspot.deals.update",

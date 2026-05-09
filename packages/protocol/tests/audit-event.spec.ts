@@ -6,13 +6,20 @@ import {
   AUDIT_EVENT_KIND_VALUES,
   type AuditEventKind,
   type AuditEventRecord,
+  asMerkleRootHex,
   computeAuditEventHash,
   computeEventHash,
   GENESIS_PREV_HASH,
+  isMerkleRootHex,
+  type MerkleRootRecord,
+  merkleRootRecordFromJson,
+  merkleRootRecordToJsonValue,
   PAYLOAD_KIND_METADATA,
   serializeAuditEventRecordForHash,
+  validateMerkleRootRecord,
   verifyChain,
 } from "../src/audit-event.ts";
+import { canonicalJSON } from "../src/canonical-json.ts";
 import { type EventLsn, lsnFromV1Number, parseLsn } from "../src/event-lsn.ts";
 import { asReceiptId } from "../src/receipt.ts";
 import { asSha256Hex, type Sha256Hex, sha256Hex } from "../src/sha256.ts";
@@ -41,10 +48,30 @@ interface AuditEventVector {
   readonly expected: AuditEventVectorExpected;
 }
 
+interface MerkleRootVectorInput {
+  readonly seqNo: string;
+  readonly rootHash: string;
+  readonly signedAt: string;
+  readonly ephemeralKeyId: string;
+  readonly signature: string;
+  readonly certChainPem: string;
+}
+
+interface MerkleRootVectorExpected {
+  readonly canonicalJson: string;
+}
+
+interface MerkleRootVector {
+  readonly name: string;
+  readonly input: MerkleRootVectorInput;
+  readonly expected: MerkleRootVectorExpected;
+}
+
 interface AuditEventVectorsFixture {
   readonly schemaVersion: 1;
   readonly comment: string;
   readonly vectors: readonly AuditEventVector[];
+  readonly merkleRootVectors: readonly MerkleRootVector[];
 }
 
 const auditEventKindSet: ReadonlySet<string> = new Set(AUDIT_EVENT_KIND_VALUES);
@@ -300,6 +327,7 @@ describe("audit-event chain verification", () => {
     it("loads the schema v1 JSON fixture", () => {
       expect(auditEventVectors.schemaVersion).toBe(1);
       expect(auditEventVectors.vectors.length).toBeGreaterThan(0);
+      expect(auditEventVectors.merkleRootVectors.length).toBeGreaterThan(0);
     });
 
     for (const vector of auditEventVectors.vectors) {
@@ -323,6 +351,53 @@ describe("audit-event chain verification", () => {
         expect(computeAuditEventHash(record)).toBe(record.eventHash);
       });
     }
+  });
+
+  describe("MerkleRootRecord public codec", () => {
+    it("brands lowercase sha256 root hashes", () => {
+      const rootHash = "0123456789abcdef".repeat(4);
+
+      expect(asMerkleRootHex(rootHash) as string).toBe(rootHash);
+      expect(isMerkleRootHex(rootHash)).toBe(true);
+      expect(isMerkleRootHex(rootHash.toUpperCase())).toBe(false);
+      expect(() => asMerkleRootHex("f".repeat(63))).toThrow(/sha256/);
+    });
+
+    for (const vector of auditEventVectors.merkleRootVectors) {
+      it(`${vector.name} round-trips and produces stable canonical JSON`, () => {
+        const record = merkleRootRecordFromVector(vector);
+
+        expect(validateMerkleRootRecord(record)).toEqual({ ok: true });
+        expect(merkleRootRecordFromJson(merkleRootRecordToJsonValue(record))).toEqual(record);
+        expect(canonicalJSON(merkleRootRecordToJsonValue(record))).toBe(
+          vector.expected.canonicalJson,
+        );
+      });
+    }
+
+    it("rejects unknown keys and invalid Merkle root wire values", () => {
+      const vector = firstMerkleRootVector();
+      const record = merkleRootRecordFromVector(vector);
+      const validation = validateMerkleRootRecord({ ...record, shadow: "nope" });
+
+      expect(validation.ok).toBe(false);
+      if (!validation.ok) {
+        expect(
+          validation.errors.some(
+            (error) => error.path === "/shadow" && /not allowed/.test(error.message),
+          ),
+        ).toBe(true);
+      }
+      expect(() => merkleRootRecordFromJson({ ...vector.input, rootHash: "A".repeat(64) })).toThrow(
+        /\/rootHash: asMerkleRootHex/,
+      );
+      expect(() => merkleRootRecordFromJson({ ...vector.input, signature: "" })).toThrow(
+        /\/signature: must be a non-empty base64 string/,
+      );
+      expect(() => merkleRootRecordFromJson({ ...vector.input, certChainPem: "" })).toThrow(
+        /\/certChainPem: must be a non-empty string/,
+      );
+    });
   });
 
   describe("payload kind metadata", () => {
@@ -382,6 +457,9 @@ function loadAuditEventVectors(): AuditEventVectorsFixture {
     schemaVersion: requiredSchemaVersion(record, "schemaVersion", "fixture"),
     comment: requiredString(record, "comment", "fixture"),
     vectors,
+    merkleRootVectors: requiredArray(record, "merkleRootVectors", "fixture").map((vector, index) =>
+      parseMerkleRootVector(vector, `fixture.merkleRootVectors.${index}`),
+    ),
   };
 }
 
@@ -414,6 +492,38 @@ function parseAuditEventVector(value: unknown, path: string): AuditEventVector {
       eventHash: requiredString(expected, "eventHash", `${path}.expected`),
     },
   };
+}
+
+function parseMerkleRootVector(value: unknown, path: string): MerkleRootVector {
+  const record = requireRecord(value, path);
+  const input = requireRecord(requiredField(record, "input", path), `${path}.input`);
+  const expected = requireRecord(requiredField(record, "expected", path), `${path}.expected`);
+  return {
+    name: requiredString(record, "name", path),
+    input: {
+      seqNo: requiredString(input, "seqNo", `${path}.input`),
+      rootHash: requiredString(input, "rootHash", `${path}.input`),
+      signedAt: requiredString(input, "signedAt", `${path}.input`),
+      ephemeralKeyId: requiredString(input, "ephemeralKeyId", `${path}.input`),
+      signature: requiredString(input, "signature", `${path}.input`),
+      certChainPem: requiredString(input, "certChainPem", `${path}.input`),
+    },
+    expected: {
+      canonicalJson: requiredString(expected, "canonicalJson", `${path}.expected`),
+    },
+  };
+}
+
+function merkleRootRecordFromVector(vector: MerkleRootVector): MerkleRootRecord {
+  return merkleRootRecordFromJson(vector.input);
+}
+
+function firstMerkleRootVector(): MerkleRootVector {
+  const vector = auditEventVectors.merkleRootVectors[0];
+  if (vector === undefined) {
+    throw new Error("fixture must contain a Merkle root vector");
+  }
+  return vector;
 }
 
 function requireRecord(value: unknown, path: string): Readonly<Record<string, unknown>> {

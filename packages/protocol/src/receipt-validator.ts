@@ -29,6 +29,7 @@ import {
   type FileChange,
   isAgentSlug,
   isApprovalId,
+  isIdempotencyKey,
   isProviderKind,
   isReceiptId,
   isTaskId,
@@ -600,7 +601,7 @@ function validateExternalWrite(
   validateRequired(value, "writeId", path, errors, validateWriteIdValue);
   validateRequired(value, "action", path, errors, validateString);
   validateRequired(value, "target", path, errors, validateString);
-  validateRequired(value, "idempotencyKey", path, errors, validateString);
+  validateRequired(value, "idempotencyKey", path, errors, validateIdempotencyKeyValue);
   validateRequired(value, "proposedDiff", path, errors, (v, p, e) =>
     validateFrozenArgs(v, p, e, context),
   );
@@ -906,6 +907,16 @@ function validateWriteIdValue(
   errors: ReceiptValidationError[],
 ): void {
   if (!isWriteId(value)) addError(errors, path, "must be a valid WriteId");
+}
+
+function validateIdempotencyKeyValue(
+  value: unknown,
+  path: string,
+  errors: ReceiptValidationError[],
+): void {
+  if (!isIdempotencyKey(value)) {
+    addError(errors, path, "must match /^[A-Za-z0-9_-]{1,128}$/");
+  }
 }
 
 function validateSha256HexValue(

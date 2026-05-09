@@ -16,11 +16,14 @@
 //      Both checks must pass; the Host check alone is not the full gate.
 
 import type { Brand } from "./brand.ts";
-import type {
-  ReceiptId,
-  SignedApprovalToken,
-  WriteFailureMetadata,
-  WriteResult,
+import {
+  type IdempotencyKey,
+  isIdempotencyKey,
+  isReceiptId,
+  type ReceiptId,
+  type SignedApprovalToken,
+  type WriteFailureMetadata,
+  type WriteResult,
 } from "./receipt.ts";
 
 export type BrokerPort = Brand<number, "BrokerPort">;
@@ -175,20 +178,78 @@ export interface BrokerError {
 export interface ApprovalSubmitRequest {
   readonly receiptId: ReceiptId;
   readonly approvalToken: SignedApprovalToken;
-  readonly idempotencyKey: string;
+  readonly idempotencyKey: IdempotencyKey;
+}
+
+const APPROVAL_SUBMIT_REQUEST_KEYS_TUPLE = [
+  "receiptId",
+  "approvalToken",
+  "idempotencyKey",
+] as const satisfies readonly (keyof ApprovalSubmitRequest)[];
+const APPROVAL_SUBMIT_REQUEST_KEYS: ReadonlySet<string> = new Set(
+  APPROVAL_SUBMIT_REQUEST_KEYS_TUPLE,
+);
+
+interface ApprovalSubmitRequestRecord {
+  readonly receiptId?: unknown;
+  readonly approvalToken?: unknown;
+  readonly idempotencyKey?: unknown;
+}
+
+interface SignedApprovalTokenRecord {
+  readonly claims?: unknown;
+}
+
+interface ApprovalClaimsRecord {
+  readonly receiptId?: unknown;
 }
 
 /**
- * Checks only the cross-field receipt binding in an approval submit request.
+ * Validate the wire shape of an `ApprovalSubmitRequest`: rejects unknown
+ * envelope keys, requires the three fields with the correct branded shapes
+ * (ReceiptId, IdempotencyKey, SignedApprovalToken envelope), and enforces the
+ * cross-field binding `req.receiptId === req.approvalToken.claims.receiptId`.
  *
- * This is not a full submission validator. It does not validate the request
- * envelope, idempotencyKey shape, token signature, token expiry, signer trust,
- * writeId/frozenArgsHash binding, replay status, or broker policy.
+ * What this DOES NOT check (broker-side responsibilities):
+ *   - Token signature validity (Ed25519 verification against signerKeyId).
+ *   - Token expiry (`claims.expiresAt > now`).
+ *   - Signer trust (whether the signerKeyId is a recognized approver).
+ *   - writeId / frozenArgsHash binding to a specific external write (those
+ *     live on the receipt; the IPC validator can't see the receipt's writes).
+ *   - Idempotency-key replay status.
+ *   - Broker policy (rate limits, account scope, etc.).
  */
-export function validateApprovalSubmitReceiptBinding(
-  req: ApprovalSubmitRequest,
+export function validateApprovalSubmitRequest(
+  req: unknown,
 ): { ok: true } | { ok: false; reason: string } {
-  if (req.receiptId !== req.approvalToken.claims.receiptId) {
+  if (!isRecord(req)) {
+    return { ok: false, reason: "request must be an object" };
+  }
+  for (const key of Object.keys(req)) {
+    if (!APPROVAL_SUBMIT_REQUEST_KEYS.has(key)) {
+      return { ok: false, reason: `${key} is not allowed` };
+    }
+  }
+  const request = req as ApprovalSubmitRequestRecord;
+  const receiptId = request.receiptId;
+  const idempotencyKey = request.idempotencyKey;
+  const approvalToken = request.approvalToken;
+  if (!isReceiptId(receiptId)) {
+    return { ok: false, reason: "receiptId must be an uppercase ULID ReceiptId" };
+  }
+  if (!isIdempotencyKey(idempotencyKey)) {
+    return { ok: false, reason: "idempotencyKey must match /^[A-Za-z0-9_-]{1,128}$/" };
+  }
+  if (!isRecord(approvalToken)) {
+    return { ok: false, reason: "approvalToken must be an object" };
+  }
+  const token = approvalToken as SignedApprovalTokenRecord;
+  const claims = token.claims;
+  if (!isRecord(claims)) {
+    return { ok: false, reason: "approvalToken.claims must be an object" };
+  }
+  const claimsRecord = claims as ApprovalClaimsRecord;
+  if (receiptId !== claimsRecord.receiptId) {
     return {
       ok: false,
       reason: "receiptId must match approvalToken.claims.receiptId",
@@ -210,7 +271,7 @@ export type ApprovalSubmitResponse =
       readonly state: "executed";
       readonly appliedAt: string; // ISO 8601
       readonly executionResult: WriteResult;
-      readonly idempotencyKey: string;
+      readonly idempotencyKey: IdempotencyKey;
       readonly failureMetadata?: WriteFailureMetadata | undefined;
     }
   | {
@@ -218,7 +279,7 @@ export type ApprovalSubmitResponse =
       readonly state: "queued";
       readonly acceptedAt: string; // ISO 8601
       readonly receiptId: ReceiptId;
-      readonly idempotencyKey: string;
+      readonly idempotencyKey: IdempotencyKey;
     }
   | {
       readonly accepted: false;
@@ -283,6 +344,10 @@ function isValidPort(port: string): boolean {
   if (!PORT_RE.test(port)) return false;
   const parsed = Number(port);
   return Number.isInteger(parsed) && parsed >= 0 && parsed <= 65535;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /**

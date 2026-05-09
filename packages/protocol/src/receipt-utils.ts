@@ -1,5 +1,5 @@
-// Shared internal helpers used by both the receipt validator and the codec.
-// Not part of the public API surface.
+// Shared internal helpers used by hand-rolled validators and codecs. Not part
+// of the public API surface.
 
 import type { ReceiptValidationError } from "./receipt-types.ts";
 

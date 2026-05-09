@@ -19,11 +19,16 @@
 import { createHash } from "node:crypto";
 import type { Brand } from "./brand.ts";
 import { canonicalJSON } from "./canonical-json.ts";
-import { type EventLsn, GENESIS_LSN, isEqualLsn, nextLsn } from "./event-lsn.ts";
+import { type EventLsn, GENESIS_LSN, isEqualLsn, nextLsn, parseLsn } from "./event-lsn.ts";
 import type { ReceiptId } from "./receipt.ts";
+import { assertKnownKeys, hasOwn, pointer, requireRecord } from "./receipt-utils.ts";
 import { asSha256Hex, type Sha256Hex, sha256Hex } from "./sha256.ts";
 
 export type MerkleRootHex = Brand<string, "MerkleRootHex">;
+
+const MERKLE_ROOT_HEX_RE = /^[0-9a-f]{64}$/;
+const BASE64_RE = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
 export const AUDIT_EVENT_KIND_VALUES = [
   "receipt_created",
@@ -129,7 +134,89 @@ export interface MerkleRootRecord {
   readonly certChainPem: string;
 }
 
+export type MerkleRootRecordValidationError = { path: string; message: string };
+export type MerkleRootRecordValidationResult =
+  | { ok: true }
+  | { ok: false; errors: MerkleRootRecordValidationError[] };
+
+const MERKLE_ROOT_RECORD_KEYS_TUPLE = [
+  "seqNo",
+  "rootHash",
+  "signedAt",
+  "ephemeralKeyId",
+  "signature",
+  "certChainPem",
+] as const satisfies readonly (keyof MerkleRootRecord)[];
+export const MERKLE_ROOT_RECORD_KEYS: ReadonlySet<string> = new Set<string>(
+  MERKLE_ROOT_RECORD_KEYS_TUPLE,
+);
+
 export const GENESIS_PREV_HASH = sha256Hex("wuphf:audit:genesis:v1");
+
+export function asMerkleRootHex(s: string): MerkleRootHex {
+  if (!MERKLE_ROOT_HEX_RE.test(s)) {
+    throw new Error("asMerkleRootHex: not a sha256 hex digest");
+  }
+  return s as MerkleRootHex;
+}
+
+export function isMerkleRootHex(value: unknown): value is MerkleRootHex {
+  return typeof value === "string" && MERKLE_ROOT_HEX_RE.test(value);
+}
+
+export function validateMerkleRootRecord(input: unknown): MerkleRootRecordValidationResult {
+  try {
+    const errors: MerkleRootRecordValidationError[] = [];
+    validateMerkleRootRecordValue(input, "", errors);
+    return errors.length === 0 ? { ok: true } : { ok: false, errors };
+  } catch (err) {
+    return {
+      ok: false,
+      errors: [
+        {
+          path: "",
+          message: err instanceof Error ? err.message : "merkle root record validation failed",
+        },
+      ],
+    };
+  }
+}
+
+export function merkleRootRecordToJsonValue(record: MerkleRootRecord): Record<string, unknown> {
+  const validation = validateMerkleRootRecord(record);
+  if (!validation.ok) {
+    throw new Error(formatMerkleRootRecordValidationErrors(validation.errors));
+  }
+  return {
+    seqNo: record.seqNo as string,
+    rootHash: record.rootHash,
+    signedAt: record.signedAt.toISOString(),
+    ephemeralKeyId: record.ephemeralKeyId,
+    signature: record.signature,
+    certChainPem: record.certChainPem,
+  };
+}
+
+export function merkleRootRecordFromJson(value: unknown): MerkleRootRecord {
+  const record = requireRecord(value, "");
+  assertKnownKeys(record, "", MERKLE_ROOT_RECORD_KEYS);
+  const decoded: MerkleRootRecord = {
+    seqNo: eventLsnFromJson(requiredStringFromJson(record, "seqNo", ""), pointer("", "seqNo")),
+    rootHash: asMerkleRootHexAt(
+      requiredStringFromJson(record, "rootHash", ""),
+      pointer("", "rootHash"),
+    ),
+    signedAt: requiredDateFromJson(record, "signedAt", ""),
+    ephemeralKeyId: requiredNonEmptyStringFromJson(record, "ephemeralKeyId", ""),
+    signature: requiredBase64StringFromJson(record, "signature", ""),
+    certChainPem: requiredNonEmptyStringFromJson(record, "certChainPem", ""),
+  };
+  const validation = validateMerkleRootRecord(decoded);
+  if (!validation.ok) {
+    throw new Error(formatMerkleRootRecordValidationErrors(validation.errors));
+  }
+  return decoded;
+}
 
 /**
  * Canonical byte serialization of an audit-event record (excluding eventHash)
@@ -293,6 +380,241 @@ export function verifyChain(
 
 function bytesToBase64(bytes: Uint8Array): string {
   return Buffer.from(bytes).toString("base64");
+}
+
+function validateMerkleRootRecordValue(
+  value: unknown,
+  path: string,
+  errors: MerkleRootRecordValidationError[],
+): void {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    addMerkleRootRecordError(errors, path, "must be an object");
+    return;
+  }
+  validateMerkleRootRecordKnownKeys(value as Readonly<Record<string, unknown>>, path, errors);
+  validateRequiredMerkleRootRecordField(
+    value as Readonly<Record<string, unknown>>,
+    "seqNo",
+    path,
+    errors,
+    validateEventLsnValue,
+  );
+  validateRequiredMerkleRootRecordField(
+    value as Readonly<Record<string, unknown>>,
+    "rootHash",
+    path,
+    errors,
+    validateMerkleRootHexValue,
+  );
+  validateRequiredMerkleRootRecordField(
+    value as Readonly<Record<string, unknown>>,
+    "signedAt",
+    path,
+    errors,
+    validateDateValue,
+  );
+  validateRequiredMerkleRootRecordField(
+    value as Readonly<Record<string, unknown>>,
+    "ephemeralKeyId",
+    path,
+    errors,
+    validateNonEmptyStringValue,
+  );
+  validateRequiredMerkleRootRecordField(
+    value as Readonly<Record<string, unknown>>,
+    "signature",
+    path,
+    errors,
+    validateBase64Value,
+  );
+  validateRequiredMerkleRootRecordField(
+    value as Readonly<Record<string, unknown>>,
+    "certChainPem",
+    path,
+    errors,
+    validateNonEmptyStringValue,
+  );
+}
+
+function validateMerkleRootRecordKnownKeys(
+  record: Readonly<Record<string, unknown>>,
+  basePath: string,
+  errors: MerkleRootRecordValidationError[],
+): void {
+  for (const key of Object.keys(record)) {
+    if (!MERKLE_ROOT_RECORD_KEYS.has(key)) {
+      addMerkleRootRecordError(errors, pointer(basePath, key), "is not allowed");
+    }
+  }
+}
+
+function validateRequiredMerkleRootRecordField(
+  record: Readonly<Record<string, unknown>>,
+  key: string,
+  basePath: string,
+  errors: MerkleRootRecordValidationError[],
+  validator: (value: unknown, path: string, errors: MerkleRootRecordValidationError[]) => void,
+): void {
+  const fieldPath = pointer(basePath, key);
+  if (!hasOwn(record, key) || record[key] === undefined) {
+    addMerkleRootRecordError(errors, fieldPath, "is required");
+    return;
+  }
+  validator(record[key], fieldPath, errors);
+}
+
+function validateEventLsnValue(
+  value: unknown,
+  path: string,
+  errors: MerkleRootRecordValidationError[],
+): void {
+  if (typeof value !== "string") {
+    addMerkleRootRecordError(errors, path, "must be an EventLsn string");
+    return;
+  }
+  try {
+    parseLsn(value as EventLsn);
+  } catch (err) {
+    addMerkleRootRecordError(errors, path, err instanceof Error ? err.message : "invalid LSN");
+  }
+}
+
+function validateMerkleRootHexValue(
+  value: unknown,
+  path: string,
+  errors: MerkleRootRecordValidationError[],
+): void {
+  if (!isMerkleRootHex(value)) {
+    addMerkleRootRecordError(errors, path, "must be a sha256 hex digest");
+  }
+}
+
+function validateDateValue(
+  value: unknown,
+  path: string,
+  errors: MerkleRootRecordValidationError[],
+): void {
+  if (!(value instanceof Date) || Number.isNaN(value.getTime())) {
+    addMerkleRootRecordError(errors, path, "must be a valid Date");
+  }
+}
+
+function validateNonEmptyStringValue(
+  value: unknown,
+  path: string,
+  errors: MerkleRootRecordValidationError[],
+): void {
+  if (typeof value !== "string" || value.length === 0) {
+    addMerkleRootRecordError(errors, path, "must be a non-empty string");
+  }
+}
+
+function validateBase64Value(
+  value: unknown,
+  path: string,
+  errors: MerkleRootRecordValidationError[],
+): void {
+  if (typeof value !== "string" || value.length === 0 || !BASE64_RE.test(value)) {
+    addMerkleRootRecordError(errors, path, "must be a non-empty base64 string");
+  }
+}
+
+function eventLsnFromJson(value: string, path: string): EventLsn {
+  try {
+    parseLsn(value as EventLsn);
+  } catch (err) {
+    throw new Error(`${path}: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  return value as EventLsn;
+}
+
+function asMerkleRootHexAt(value: string, path: string): MerkleRootHex {
+  try {
+    return asMerkleRootHex(value);
+  } catch (err) {
+    throw new Error(`${path}: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+function requiredFieldFromJson(
+  record: Readonly<Record<string, unknown>>,
+  key: string,
+  basePath: string,
+): unknown {
+  if (!hasOwn(record, key) || record[key] === undefined) {
+    throw new Error(`${pointer(basePath, key)}: is required`);
+  }
+  return record[key];
+}
+
+function requiredStringFromJson(
+  record: Readonly<Record<string, unknown>>,
+  key: string,
+  basePath: string,
+): string {
+  const value = requiredFieldFromJson(record, key, basePath);
+  if (typeof value !== "string") {
+    throw new Error(`${pointer(basePath, key)}: must be a string`);
+  }
+  return value;
+}
+
+function requiredNonEmptyStringFromJson(
+  record: Readonly<Record<string, unknown>>,
+  key: string,
+  basePath: string,
+): string {
+  const value = requiredStringFromJson(record, key, basePath);
+  if (value.length === 0) {
+    throw new Error(`${pointer(basePath, key)}: must be a non-empty string`);
+  }
+  return value;
+}
+
+function requiredBase64StringFromJson(
+  record: Readonly<Record<string, unknown>>,
+  key: string,
+  basePath: string,
+): string {
+  const value = requiredStringFromJson(record, key, basePath);
+  if (value.length === 0 || !BASE64_RE.test(value)) {
+    throw new Error(`${pointer(basePath, key)}: must be a non-empty base64 string`);
+  }
+  return value;
+}
+
+function requiredDateFromJson(
+  record: Readonly<Record<string, unknown>>,
+  key: string,
+  basePath: string,
+): Date {
+  const value = requiredStringFromJson(record, key, basePath);
+  return dateFromJson(value, pointer(basePath, key));
+}
+
+function dateFromJson(value: string, path: string): Date {
+  if (!ISO_DATE_RE.test(value)) {
+    throw new Error(`${path}: must be an ISO 8601 string`);
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime()) || date.toISOString() !== value) {
+    throw new Error(`${path}: must be a valid ISO 8601 instant`);
+  }
+  return date;
+}
+
+function addMerkleRootRecordError(
+  errors: MerkleRootRecordValidationError[],
+  path: string,
+  message: string,
+): void {
+  errors.push({ path, message });
+}
+
+function formatMerkleRootRecordValidationErrors(
+  errors: readonly MerkleRootRecordValidationError[],
+): string {
+  return errors.map((error) => `${error.path}: ${error.message}`).join("; ");
 }
 
 function errorMessage(cause: unknown): string {

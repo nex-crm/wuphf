@@ -19,5 +19,21 @@
         "eventHash": "e27134d1b1641fb13747d9fac78aecc90d9d1385d04bfeea4a8a596fdb6101bb"
       }
     }
+  ],
+  "merkleRootVectors": [
+    {
+      "name": "merkle_root_seq42",
+      "input": {
+        "seqNo": "v1:42",
+        "rootHash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "signedAt": "2026-05-08T12:34:56.789Z",
+        "ephemeralKeyId": "eph-key-20260508-01",
+        "signature": "bWVya2xlLXJvb3Qtc2lnbmF0dXJl",
+        "certChainPem": "-----BEGIN CERTIFICATE-----\nMIIBwzCCAWmgAwIBAgIUWUPHFMERKLE0001\n-----END CERTIFICATE-----\n"
+      },
+      "expected": {
+        "canonicalJson": "{\"certChainPem\":\"-----BEGIN CERTIFICATE-----\\nMIIBwzCCAWmgAwIBAgIUWUPHFMERKLE0001\\n-----END CERTIFICATE-----\\n\",\"ephemeralKeyId\":\"eph-key-20260508-01\",\"rootHash\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\",\"seqNo\":\"v1:42\",\"signature\":\"bWVya2xlLXJvb3Qtc2lnbmF0dXJl\",\"signedAt\":\"2026-05-08T12:34:56.789Z\"}"
+      }
+    }
   ]
 }
