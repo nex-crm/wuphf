@@ -1,5 +1,9 @@
 # Runner image maintenance:
-# - macOS release signing/notarization: macos-14. REVIEW BY 2026-06-01.
+# - macOS release signing/notarization: macos-15. REVIEW BY 2026-12-01.
+#   (Bumped from macos-14 in PR #780: dmg-builder@1.2.0 + hdiutil on the
+#   macos-14 image consistently fails with `Device not configured` even
+#   after multiple workflow reruns. macos-15 image has the newer
+#   diskarbitrationd that doesn't exhibit the issue.)
 # - Windows signing: windows-2022. REVIEW BY 2026-09-01.
 # - Linux build/publish helpers: ubuntu-24.04. REVIEW BY 2026-09-01.
 # See apps/installer-stub/docs/runbooks/runner-image-maintenance.md before
@@ -61,7 +65,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # ratchet:oven-sh/setup-bun@v2.2.0
         with:
-          bun-version: "1.1.38"
+          bun-version: "1.3.13"
       - name: Install ripgrep
         run: |
           sudo apt-get update
@@ -92,12 +96,18 @@ jobs:
           # by any other CI job, so the only automated gate for this property
           # lives here (and in the matching lefthook installer-invariants).
           node apps/installer-stub/scripts/run-builder.test.js
+          # Issue #771: self-test for the packaged-runtime-deps check itself.
+          # The real gate that runs against actual electron-builder output
+          # lives inside each platform build job (post-build, pre-sign);
+          # this self-test catches regressions in the check's logic without
+          # waiting for a 5-minute platform build to fail.
+          node apps/installer-stub/scripts/check-packaged-runtime-deps.test.js
 
   build-mac:
     needs:
       - detect-secrets
       - installer-invariants
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 60
     environment:
       name: ${{ needs.detect-secrets.outputs.release_mode == 'production' && 'production-release' || 'installer-pr' }}
@@ -111,7 +121,7 @@ jobs:
           node-version: "20.x"
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # ratchet:oven-sh/setup-bun@v2.2.0
         with:
-          bun-version: "1.1.38"
+          bun-version: "1.3.13"
       - name: Install workspace deps
         run: bun install --frozen-lockfile
       - name: Normalize package version from tag
@@ -174,6 +184,15 @@ jobs:
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           NODE_OPTIONS: --require ./build/notarize-with-retry.js
         run: bun run build:mac
+      - name: Assert allowlisted runtime deps are bundled into the macOS app
+        # Issue #771 ship-blocker gate: confirms every name in
+        # wuphfRuntimeDependenciesAllowlist actually lives in app.asar (or
+        # app.asar.unpacked/) before signing/notarization consumes the bundle.
+        # Catches the original "electron-updater pruned out of asar because
+        # it was a devDep" failure mode that the existing artifact-existence
+        # checks did not.
+        working-directory: apps/installer-stub
+        run: node scripts/check-packaged-runtime-deps.js dist
       - name: Staple and validate macOS DMG
         if: needs.detect-secrets.outputs.is_release == 'true'
         working-directory: apps/installer-stub
@@ -188,6 +207,13 @@ jobs:
           for dmg in "${dmgs[@]}"; do
             xcrun stapler staple "${dmg}"
             xcrun stapler validate "${dmg}"
+            # Gatekeeper assessment exercises the actual download-open path
+            # users hit. Stapler validation only confirms the notary ticket
+            # is attached; spctl confirms the OS will accept the DMG without
+            # network access (the realistic offline-install path). dmg.sign
+            # is intentionally false in electron-builder.yml, so this is the
+            # right point to verify the signed contents flow through GK.
+            spctl --assess --type open --context context:primary-signature --verbose "${dmg}"
           done
       - name: Validate macOS app staple inside updater zip
         if: needs.detect-secrets.outputs.is_release == 'true'
@@ -264,7 +290,7 @@ jobs:
           node-version: "20.x"
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # ratchet:oven-sh/setup-bun@v2.2.0
         with:
-          bun-version: "1.1.38"
+          bun-version: "1.3.13"
       - name: Install workspace deps
         run: bun install --frozen-lockfile
       - name: Normalize package version from tag
@@ -313,7 +339,32 @@ jobs:
             echo "AZURE_EXPECTED_PUBLISHER_NAME is required for release builds (binds win.publisherName to Authenticode CN)" >&2
             exit 1
           fi
-          bun run build:win -- --config.win.publisherName="$AZURE_EXPECTED_PUBLISHER_NAME"
+          bun run build:win -- --config.win.signtoolOptions.publisherName="$AZURE_EXPECTED_PUBLISHER_NAME"
+      - name: Assert allowlisted runtime deps are bundled into the Windows app
+        # Issue #771 ship-blocker gate (see macOS job for full rationale).
+        #
+        # KNOWN-FAILING ON WINDOWS — tracked in #781. electron-builder 26
+        # successfully bundles electron-updater on Linux + macOS via bun's
+        # workspace symlinks, but on Windows the same flow prunes it out
+        # of app.asar. Multiple workarounds attempted (cp -RL of the
+        # symlink tree, materialize-runtime-deps.js to copy bun cache
+        # entries) — none worked without breaking other platforms. The
+        # original installer-stub had this same hidden bug; the gate now
+        # makes it visible.
+        #
+        # `continue-on-error` is GATED ON BUILD MODE: PR builds keep the
+        # gate fail-soft so the rest of the Windows pipeline (signing,
+        # smoke) runs and exposes diagnostic signal; PRODUCTION TAG
+        # RELEASES hard-fail. Without that gate, a signed Windows
+        # installer with the missing electron-updater would crash on
+        # first launch with `Cannot find module 'electron-updater'` —
+        # users would download a notarized-by-trust installer that
+        # never opens a window. R3 codex (5 lenses) converged on
+        # blocking publish until #781 is resolved.
+        id: windows_runtime_deps
+        continue-on-error: ${{ needs.detect-secrets.outputs.is_release != 'true' }}
+        working-directory: apps/installer-stub
+        run: node scripts/check-packaged-runtime-deps.js dist
       - name: Sign Windows artifacts (attempt 1)
         id: sign_windows_1
         if: needs.detect-secrets.outputs.is_release == 'true'
@@ -494,7 +545,7 @@ jobs:
           node-version: "20.x"
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # ratchet:oven-sh/setup-bun@v2.2.0
         with:
-          bun-version: "1.1.38"
+          bun-version: "1.3.13"
       - name: Install workspace deps
         run: bun install --frozen-lockfile
       - name: Normalize package version from tag
@@ -516,6 +567,12 @@ jobs:
         if: needs.detect-secrets.outputs.is_release == 'true'
         working-directory: apps/installer-stub
         run: bun run build:linux
+      - name: Assert allowlisted runtime deps are bundled into the Linux app
+        # Issue #771 ship-blocker gate: see corresponding comment on the macOS
+        # job. Both PR and release Linux builds produce dist/linux-unpacked/,
+        # so the gate runs unconditionally after either build path.
+        working-directory: apps/installer-stub
+        run: node scripts/check-packaged-runtime-deps.js dist
       - name: Assert Linux artifacts
         working-directory: apps/installer-stub
         run: |
@@ -573,7 +630,7 @@ jobs:
           node-version: "20.x"
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # ratchet:oven-sh/setup-bun@v2.2.0
         with:
-          bun-version: "1.1.38"
+          bun-version: "1.3.13"
       - name: Install workspace deps
         run: bun install --frozen-lockfile
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # ratchet:actions/download-artifact@v8

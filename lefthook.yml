@@ -249,6 +249,9 @@ pre-push:
         # gate for that invariant — apps/installer-stub/package.json's bun
         # test script is not invoked anywhere else in CI or pre-push.
         node apps/installer-stub/scripts/run-builder.test.js
+        # Issue #771: self-test for the packaged-runtime-deps check (the real
+        # post-build gate lives in release-rewrite.yml's per-platform jobs).
+        node apps/installer-stub/scripts/check-packaged-runtime-deps.test.js
     file-size:
       # Enforce CONTRIBUTING.md's file-size budget: warn at 800 LOC, fail
       # at 1500 LOC unless the file is on scripts/file-size-allowlist.txt

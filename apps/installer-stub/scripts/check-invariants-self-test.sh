@@ -125,8 +125,86 @@ expect_dependency_block_failure() {
   expect_output_contains "${fixture}/package.out" "forbidden dependency block: ${block_name}"
 }
 
-expect_dependency_block_failure "dependencies"
+# peerDependencies and optionalDependencies remain forbidden outright; the
+# `dependencies` block is now an allowlist (per #771 fix).
 expect_dependency_block_failure "peerDependencies"
 expect_dependency_block_failure "optionalDependencies"
+
+# dependencies entry that is on the allowlist passes the gate.
+allowed_dep_fixture="${tmp_root}/allowed-dep"
+write_fixture "${allowed_dep_fixture}"
+printf '{"dependencies": {"electron-updater": "6.3.9"}, "wuphfRuntimeDependenciesAllowlist": ["electron-updater"]}\n' \
+  > "${allowed_dep_fixture}/apps/installer-stub/package.json"
+expect_status 0 "${allowed_dep_fixture}" "apps/installer-stub/scripts/check-invariants.sh" "${allowed_dep_fixture}/root.out"
+expect_status 0 "${allowed_dep_fixture}/apps/installer-stub" "scripts/check-invariants.sh" "${allowed_dep_fixture}/package.out"
+
+# dependencies entry that is NOT in APPROVED_RUNTIME_DEPS fails the gate.
+unallowlisted_dep_fixture="${tmp_root}/unallowlisted-dep"
+write_fixture "${unallowlisted_dep_fixture}"
+printf '{"dependencies": {"some-other-pkg": "1.0.0"}, "wuphfRuntimeDependenciesAllowlist": ["electron-updater"]}\n' \
+  > "${unallowlisted_dep_fixture}/apps/installer-stub/package.json"
+expect_status 1 "${unallowlisted_dep_fixture}" "apps/installer-stub/scripts/check-invariants.sh" "${unallowlisted_dep_fixture}/root.out"
+expect_output_contains "${unallowlisted_dep_fixture}/root.out" "dependencies.some-other-pkg is not in APPROVED_RUNTIME_DEPS"
+
+# package.json allowlist entry that is NOT in APPROVED_RUNTIME_DEPS also fails.
+# This is the "policy is the script, not the json" guarantee: a future PR
+# cannot widen the surface by editing only package.json's allowlist field.
+package_only_widen_fixture="${tmp_root}/package-only-widen"
+write_fixture "${package_only_widen_fixture}"
+printf '{"dependencies": {"electron-updater": "6.3.9", "some-other-pkg": "1.0.0"}, "wuphfRuntimeDependenciesAllowlist": ["electron-updater", "some-other-pkg"]}\n' \
+  > "${package_only_widen_fixture}/apps/installer-stub/package.json"
+expect_status 1 "${package_only_widen_fixture}" "apps/installer-stub/scripts/check-invariants.sh" "${package_only_widen_fixture}/root.out"
+expect_output_contains "${package_only_widen_fixture}/root.out" "wuphfRuntimeDependenciesAllowlist contains \"some-other-pkg\""
+
+# Approved dep without a corresponding package.json allowlist entry still
+# fails — the script demands BOTH the policy approval AND the package-json
+# declaration, so docs/intent stay in sync with the dependencies block.
+empty_allowlist_fixture="${tmp_root}/empty-allowlist"
+write_fixture "${empty_allowlist_fixture}"
+printf '{"dependencies": {"electron-updater": "6.3.9"}}\n' \
+  > "${empty_allowlist_fixture}/apps/installer-stub/package.json"
+expect_status 1 "${empty_allowlist_fixture}" "apps/installer-stub/scripts/check-invariants.sh" "${empty_allowlist_fixture}/root.out"
+expect_output_contains "${empty_allowlist_fixture}/root.out" "approved by APPROVED_RUNTIME_DEPS but not declared in package.json"
+
+# Stale allowlist entry (allowlist names a pkg that's not in dependencies)
+# fails — keeps the two in sync.
+stale_allowlist_fixture="${tmp_root}/stale-allowlist"
+write_fixture "${stale_allowlist_fixture}"
+printf '{"wuphfRuntimeDependenciesAllowlist": ["electron-updater"]}\n' \
+  > "${stale_allowlist_fixture}/apps/installer-stub/package.json"
+expect_status 1 "${stale_allowlist_fixture}" "apps/installer-stub/scripts/check-invariants.sh" "${stale_allowlist_fixture}/root.out"
+expect_output_contains "${stale_allowlist_fixture}/root.out" "stale entry"
+
+# Source-scan invariant: if src/main.js requires a package, that name MUST
+# be in both `dependencies` AND `wuphfRuntimeDependenciesAllowlist`. This
+# closes the "remove dep block but leave require in source" loophole that
+# would re-introduce the #771 crash-on-launch failure mode.
+require_in_source_fixture="${tmp_root}/require-in-source"
+write_fixture "${require_in_source_fixture}"
+printf 'const x = require("electron-updater");\n' \
+  > "${require_in_source_fixture}/apps/installer-stub/src/main.js"
+printf '{"dependencies": {"electron-updater": "6.8.3"}, "wuphfRuntimeDependenciesAllowlist": ["electron-updater"]}\n' \
+  > "${require_in_source_fixture}/apps/installer-stub/package.json"
+expect_status 0 "${require_in_source_fixture}" "apps/installer-stub/scripts/check-invariants.sh" "${require_in_source_fixture}/root.out"
+
+# require() with no matching dep entry fails — exact #771 regression mode
+require_no_dep_fixture="${tmp_root}/require-no-dep"
+write_fixture "${require_no_dep_fixture}"
+printf 'const x = require("electron-updater");\n' \
+  > "${require_no_dep_fixture}/apps/installer-stub/src/main.js"
+printf '{}\n' > "${require_no_dep_fixture}/apps/installer-stub/package.json"
+expect_status 1 "${require_no_dep_fixture}" "apps/installer-stub/scripts/check-invariants.sh" "${require_no_dep_fixture}/root.out"
+expect_output_contains "${require_no_dep_fixture}/root.out" "src/main.js require(\"electron-updater\") but the package is not in dependencies"
+
+# require() with dep but missing from allowlist fails — closes the
+# "approved by APPROVED_RUNTIME_DEPS but absent allowlist" gap from R2
+require_no_allowlist_fixture="${tmp_root}/require-no-allowlist"
+write_fixture "${require_no_allowlist_fixture}"
+printf 'const x = require("electron-updater");\n' \
+  > "${require_no_allowlist_fixture}/apps/installer-stub/src/main.js"
+printf '{"dependencies": {"electron-updater": "6.8.3"}}\n' \
+  > "${require_no_allowlist_fixture}/apps/installer-stub/package.json"
+expect_status 1 "${require_no_allowlist_fixture}" "apps/installer-stub/scripts/check-invariants.sh" "${require_no_allowlist_fixture}/root.out"
+expect_output_contains "${require_no_allowlist_fixture}/root.out" "wuphfRuntimeDependenciesAllowlist"
 
 echo "installer invariant self-test OK"

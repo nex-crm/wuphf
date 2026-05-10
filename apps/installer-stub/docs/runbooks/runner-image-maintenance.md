@@ -15,7 +15,7 @@ Official references:
 
 | Job | Current label | Review by | Notes |
 |---|---|---|---|
-| `build-mac` | `macos-14` | 2026-06-01 | GitHub announced macOS 14 image deprecation starts 2026-07-06 and full unsupported status starts 2026-11-02 |
+| `build-mac` | `macos-15` | 2026-12-01 | Bumped from `macos-14` in PR #780: dmg-builder@1.2.0 + hdiutil on the macos-14 image consistently failed with `Device not configured` even after multiple workflow reruns. macos-15 (Sequoia) ships a newer diskarbitrationd that handles concurrent dmgbuild calls cleanly |
 | `build-win` | `windows-2022` | 2026-09-01 | Azure Trusted Signing action and PowerShell Authenticode check run here |
 | `build-linux` | `ubuntu-24.04` | 2026-09-01 | AppImage/deb build and manifest generation |
 | `publish` / `detect-secrets` | `ubuntu-24.04` | 2026-09-01 | GitHub release asset verification and checksum generation |

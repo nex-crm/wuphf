@@ -52,19 +52,114 @@ while IFS= read -r match; do
 done < <(rg -n --pcre2 "${cert_path_regex}" "${scan_targets[@]}" || true)
 
 # electron-builder.yml sets `npmRebuild: false` to avoid the bun npm_execpath
-# leak in CI. That's safe ONLY while the stub has no dependency blocks that
-# electron-builder may install/rebuild for runtime packaging.
+# leak in CI. That's safe while the stub has no NATIVE-MODULE production
+# dependencies (electron-builder's npmRebuild step rebuilds native bindings
+# under bun, which crashes when bun is the running JS host).
+#
+# Pure-JS production dependencies are allowed because npmRebuild does not
+# touch them. The allowlist is enforced as a closed set: any production dep
+# whose name does not appear in `wuphfRuntimeDependenciesAllowlist` (in
+# package.json) fails the gate. peerDependencies + optionalDependencies are
+# still forbidden outright — they would expand the supply-chain surface
+# without electron-builder bundling them deterministically.
+#
+# Why not allow arbitrary deps? Issue #771 surfaced that
+# `electron-updater` was wired into src/main.js but only declared in
+# devDependencies, so the packaged app crashed on launch (devDeps are
+# pruned out of the asar). The fix moves it to `dependencies` and locks
+# the allowlist to that single audited name; widening requires editing
+# BOTH package.json's allowlist field AND this invariant in the same
+# PR, which is intentional friction.
 dependency_check_output="$(
   cd "${repo_root}" &&
     bun -e '
       const pkg = require("./apps/installer-stub/package.json");
-      const forbiddenBlocks = ["dependencies", "peerDependencies", "optionalDependencies"];
+
+      // The single source of truth for which runtime dependencies are
+      // approved. Hardcoded HERE — not read from package.json — so a future
+      // PR cannot widen the surface by editing only package.json. Adding a
+      // name requires editing this script (separate review point) AND the
+      // package.json allowlist field (consistency check below).
+      //
+      // electron-updater rationale: required at runtime by src/main.js for
+      // the auto-update flow that the signing pipeline ships end-to-end.
+      // Pure JS, no native bindings, so safe under npmRebuild=false.
+      const APPROVED_RUNTIME_DEPS = new Set(["electron-updater"]);
+
+      const declaredAllowlist = Array.isArray(pkg.wuphfRuntimeDependenciesAllowlist)
+        ? pkg.wuphfRuntimeDependenciesAllowlist
+        : [];
+
+      const forbiddenBlocks = ["peerDependencies", "optionalDependencies"];
       let failed = false;
 
       for (const blockName of forbiddenBlocks) {
         const block = pkg[blockName];
         if (block && typeof block === "object" && Object.keys(block).length > 0) {
           console.error("forbidden dependency block: " + blockName);
+          failed = true;
+        }
+      }
+
+      // Reject any package.json allowlist entry that is not in the
+      // hardcoded approved set. This is the second gate the PR comments
+      // promised: package.json declares INTENT, this script enforces POLICY.
+      for (const declared of declaredAllowlist) {
+        if (!APPROVED_RUNTIME_DEPS.has(declared)) {
+          console.error(
+            "wuphfRuntimeDependenciesAllowlist contains \"" + declared +
+              "\" but it is not in APPROVED_RUNTIME_DEPS in check-invariants.sh; " +
+              "widening the runtime-dep surface requires editing BOTH files in the same PR",
+          );
+          failed = true;
+        }
+      }
+
+      const declaredAllowlistSet = new Set(declaredAllowlist);
+
+      const deps = pkg.dependencies;
+      if (deps && typeof deps === "object") {
+        for (const name of Object.keys(deps)) {
+          if (!APPROVED_RUNTIME_DEPS.has(name)) {
+            console.error(
+              "dependencies." + name +
+                " is not in APPROVED_RUNTIME_DEPS in check-invariants.sh; " +
+                "widening the runtime-dep surface requires editing BOTH files in the same PR",
+            );
+            failed = true;
+            continue;
+          }
+          // Approved by the script-side policy, but the package.json must
+          // ALSO declare the intent in its allowlist field. This keeps the
+          // public-facing notes/rationale in sync with the deps block —
+          // otherwise a contributor approved by the hardcoded set could
+          // skip updating the wuphfRuntimeDependenciesAllowlistNotes
+          // documentation that downstream readers rely on.
+          if (!declaredAllowlistSet.has(name)) {
+            console.error(
+              "dependencies." + name +
+                " is approved by APPROVED_RUNTIME_DEPS but not declared in " +
+                "package.json wuphfRuntimeDependenciesAllowlist; add the name to the allowlist",
+            );
+            failed = true;
+          }
+        }
+      }
+
+      // Prevent stale entries: every approved name that is on the package
+      // allowlist must actually be declared in dependencies. A missing
+      // declaration means the dep was removed from main.js but the
+      // allowlist field was forgotten — surface that immediately so the
+      // surface only ever shrinks, never accumulates dead names.
+      const declaredDepNames = new Set(
+        deps && typeof deps === "object" ? Object.keys(deps) : [],
+      );
+      for (const allowed of declaredAllowlist) {
+        if (!declaredDepNames.has(allowed)) {
+          console.error(
+            "wuphfRuntimeDependenciesAllowlist contains \"" + allowed +
+              "\" but it is not declared in dependencies; remove the stale entry",
+          );
           failed = true;
         }
       }
@@ -77,6 +172,69 @@ dependency_check_output="$(
   while IFS= read -r line; do
     violations+=("${line}")
   done <<< "${dependency_check_output}"
+}
+
+# Source-scan invariant: if src/main.js (the runtime entry point of the
+# packaged app) require()s `electron-updater`, the dep MUST be declared
+# AND allowlisted. Without this, a future PR could remove the dep block
+# while leaving the require in source — silently re-introducing #771.
+# R3 codex (api lens) flagged this as the empty-allowlist bypass.
+require_check_output="$(
+  cd "${repo_root}" &&
+    bun -e '
+      const fs = require("fs");
+      const pkg = require("./apps/installer-stub/package.json");
+      const main = fs.readFileSync("./apps/installer-stub/src/main.js", "utf8");
+
+      const requireRegex = /require\(\s*["]([@a-zA-Z0-9._/\-]+)["]\s*\)/g;
+      let match;
+      const required = new Set();
+      while ((match = requireRegex.exec(main)) !== null) {
+        const name = match[1];
+        if (name.startsWith("node:") || name.startsWith(".") || name.startsWith("electron")) {
+          // node:* core, relative requires, electron itself (provided by runtime)
+          if (name === "electron") continue;
+          if (name.startsWith("node:")) continue;
+          if (name.startsWith(".")) continue;
+        }
+        required.add(name);
+      }
+
+      const declaredDeps = new Set(
+        pkg.dependencies && typeof pkg.dependencies === "object" ? Object.keys(pkg.dependencies) : [],
+      );
+      const declaredAllow = new Set(
+        Array.isArray(pkg.wuphfRuntimeDependenciesAllowlist)
+          ? pkg.wuphfRuntimeDependenciesAllowlist
+          : [],
+      );
+
+      let failed = false;
+      for (const name of required) {
+        if (!declaredDeps.has(name)) {
+          console.error(
+            "src/main.js require(\"" + name + "\") but the package is not in dependencies; " +
+              "the packaged app will crash at module load",
+          );
+          failed = true;
+        }
+        if (!declaredAllow.has(name)) {
+          console.error(
+            "src/main.js require(\"" + name + "\") but the package is not in " +
+              "wuphfRuntimeDependenciesAllowlist; add it so the post-build gate can verify it",
+          );
+          failed = true;
+        }
+      }
+
+      if (failed) {
+        process.exit(1);
+      }
+    ' 2>&1
+)" || {
+  while IFS= read -r line; do
+    violations+=("${line}")
+  done <<< "${require_check_output}"
 }
 
 while IFS= read -r line; do
