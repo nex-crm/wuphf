@@ -28,6 +28,7 @@ export default defineConfig({
       rollupOptions: {
         input: resolve(rootDir, "src/preload/preload.ts"),
         output: {
+          // Electron sandboxed preload scripts run as CommonJS.
           format: "cjs",
           entryFileNames: "preload.js",
         },
