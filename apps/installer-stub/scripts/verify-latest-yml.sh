@@ -86,16 +86,12 @@ run_self_test() (
   cp "${good_dist}/${artifact_name}" "${malformed_string_dist}/${artifact_name}"
   cp "${good_dist}/${artifact_name}" "${missing_size_dist}/${artifact_name}"
 
-  artifact_sha512="$(
-    cd "${app_dir}" &&
-      bun -e '
-        const crypto = require("node:crypto");
-        const fs = require("node:fs");
-        process.stdout.write(
-          crypto.createHash("sha512").update(fs.readFileSync(process.argv[1])).digest("base64"),
-        );
-      ' "${good_dist}/${artifact_name}"
-  )"
+  # `openssl dgst -binary` is universally available on macOS / Ubuntu /
+  # Windows runners and avoids the bun-version-skew bug where bun 1.1's
+  # `bun -e <code> arg` sets argv[1] differently than bun 1.3 (caught at
+  # CI when self-test ran on the workflow's pinned bun 1.1.38 against a
+  # local bun 1.3.13 baseline).
+  artifact_sha512="$(openssl dgst -sha512 -binary "${good_dist}/${artifact_name}" | base64 | tr -d '\n')"
   artifact_size="$(wc -c < "${good_dist}/${artifact_name}" | tr -d ' ')"
 
   write_self_test_manifest "${good_dist}/latest-mac.yml" "${artifact_name}" "${artifact_sha512}" "${artifact_size}" "true"
