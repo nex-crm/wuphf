@@ -13,6 +13,35 @@ function setDefaultCache(env, name, directory) {
   env[name] = directory;
 }
 
+function isExecutable(file) {
+  try {
+    fs.accessSync(file, fs.constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function makeExecutable(file) {
+  if (isExecutable(file)) {
+    return;
+  }
+  try {
+    fs.chmodSync(file, 0o755);
+    return;
+  } catch (error) {
+    const result = spawnSync("chmod", ["755", file], { stdio: "ignore" });
+    if (result.error) {
+      throw new Error(`Failed to make bundled 7za executable at ${file}: ${result.error.message}`);
+    }
+    if (result.status !== 0) {
+      throw new Error(
+        `Failed to make bundled 7za executable at ${file}; fs.chmodSync failed with ${error.message}, chmod exited ${result.status}`,
+      );
+    }
+  }
+}
+
 // macOS-only: bun's content-addressable store occasionally drops 7zip-bin's
 // `7za` binary without the +x bit, which kills electron-builder's DMG step
 // with EACCES. Fix it once at startup; works for both bun and npm layouts.
@@ -40,11 +69,7 @@ function ensureBundledToolExecutables() {
           "7za",
         );
         if (fs.existsSync(sevenZip)) {
-          try {
-            fs.chmodSync(sevenZip, 0o755);
-          } catch {
-            spawnSync("chmod", ["755", sevenZip], { stdio: "ignore" });
-          }
+          makeExecutable(sevenZip);
         }
       }
     }
