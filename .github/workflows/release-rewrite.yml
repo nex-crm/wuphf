@@ -55,8 +55,28 @@ jobs:
           WUPHF_RELEASE_MODE: pr
         run: bash apps/installer-stub/scripts/detect-signing-secrets.sh
 
+  installer-invariants:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # ratchet:oven-sh/setup-bun@v2.2.0
+        with:
+          bun-version: "1.1.38"
+      - name: Install ripgrep
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ripgrep
+      - name: Run installer invariant gates
+        run: |
+          bun --version
+          rg --version
+          bash apps/installer-stub/scripts/check-invariants.sh
+          bash apps/installer-stub/scripts/check-invariants-self-test.sh
+
   build-mac:
-    needs: detect-secrets
+    needs:
+      - detect-secrets
+      - installer-invariants
     runs-on: macos-14
     timeout-minutes: 60
     environment:
@@ -208,7 +228,9 @@ jobs:
           if-no-files-found: error
 
   build-win:
-    needs: detect-secrets
+    needs:
+      - detect-secrets
+      - installer-invariants
     runs-on: windows-2022
     environment:
       name: ${{ needs.detect-secrets.outputs.release_mode == 'production' && 'production-release' || 'installer-pr' }}
@@ -406,7 +428,9 @@ jobs:
           if-no-files-found: error
 
   build-linux:
-    needs: detect-secrets
+    needs:
+      - detect-secrets
+      - installer-invariants
     runs-on: ubuntu-24.04
     env:
       WUPHF_RELEASE_MODE: ${{ needs.detect-secrets.outputs.release_mode }}

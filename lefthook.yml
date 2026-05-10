@@ -205,6 +205,12 @@ pre-push:
       files: bash scripts/changed-files-since-base.sh
       glob: "packages/protocol/{src/**,tests/**,scripts/**}"
       run: bash packages/protocol/scripts/check-invariants.sh
+    installer-invariants:
+      files: bash scripts/changed-files-since-base.sh
+      glob: "apps/installer-stub/**"
+      run: |
+        bash apps/installer-stub/scripts/check-invariants.sh
+        bash apps/installer-stub/scripts/check-invariants-self-test.sh
     file-size:
       # Enforce CONTRIBUTING.md's file-size budget: warn at 800 LOC, fail
       # at 1500 LOC unless the file is on scripts/file-size-allowlist.txt
