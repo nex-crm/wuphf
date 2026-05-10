@@ -249,6 +249,20 @@ func (b *Broker) ReviewerGrades(taskID string) []ReviewerGrade {
 	return out
 }
 
+// gcReviewerGradesByTaskLocked drops the routing-side mirror entry for
+// a merged task. The Decision Packet retains the canonical grade list
+// — this index is used only by evaluateConvergenceLocked, which never
+// runs after a task transitions out of LifecycleStateReview.
+//
+// Caller must hold b.mu. Idempotent: a missing entry is a no-op.
+func (b *Broker) gcReviewerGradesByTaskLocked(taskID string) {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" || b.reviewerGradesByTask == nil {
+		return
+	}
+	delete(b.reviewerGradesByTask, taskID)
+}
+
 // evaluateConvergenceLocked runs the convergence rule for a single task.
 // Three exit paths:
 //

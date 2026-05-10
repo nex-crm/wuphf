@@ -373,6 +373,16 @@ func (b *Broker) transitionLifecycleLocked(taskID string, newState LifecycleStat
 				}
 			}
 		}
+		// Lane D follow-up D-FU-1: drop the routing-side reviewer-grade
+		// mirror entry on the merged transition. The Decision Packet
+		// retains the canonical grade list (Lane C owns persistence);
+		// b.reviewerGradesByTask is a routing-side index used solely
+		// for evaluateConvergenceLocked. Without this cleanup a long-
+		// running broker accumulates one entry per merged task with no
+		// downstream consumer.
+		if newState == LifecycleStateMerged {
+			b.gcReviewerGradesByTaskLocked(taskID)
+		}
 		return task, nil
 	}
 	return nil, fmt.Errorf("transition lifecycle: task %q not found", taskID)

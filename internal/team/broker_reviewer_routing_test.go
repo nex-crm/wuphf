@@ -608,6 +608,74 @@ func TestAssignReviewersDedupesAndStampsStart(t *testing.T) {
 	}
 }
 
+// TestReviewerGradesByTaskGCOnMerged covers Lane D follow-up D-FU-1:
+// the routing-side mirror b.reviewerGradesByTask must drop the
+// merged task's entry on the LifecycleStateMerged transition.
+// Without this cleanup a long-running broker accumulates one entry
+// per merged task (the Decision Packet keeps the canonical grade
+// list; the routing-side index is only consumed by
+// evaluateConvergenceLocked, which never runs after a task leaves
+// LifecycleStateReview).
+//
+// Acceptance: seed 2 tasks in review, fully grade both so they
+// transition to decision, then merge one. The merged task drops out
+// of the mirror; the still-pending task keeps its entry. Length goes
+// from N to N-1.
+func TestReviewerGradesByTaskGCOnMerged(t *testing.T) {
+	clk := newRoutingFakeClockAt(time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
+	b := newTestBroker(t)
+	b.nowFn = clk.Now
+
+	reviewers := []string{"agent-a", "agent-b"}
+	seedTaskInReview(t, b, "task-merge", reviewers, 600)
+	seedTaskInReview(t, b, "task-other", reviewers, 600)
+
+	for _, taskID := range []string{"task-merge", "task-other"} {
+		for _, slug := range reviewers {
+			if err := b.AppendReviewerGrade(taskID, ReviewerGrade{
+				ReviewerSlug: slug,
+				Severity:     SeverityMinor,
+				Reasoning:    "ok",
+			}); err != nil {
+				t.Fatalf("append grade %s/%s: %v", taskID, slug, err)
+			}
+		}
+	}
+
+	b.mu.Lock()
+	beforeLen := len(b.reviewerGradesByTask)
+	mergeBefore := len(b.reviewerGradesByTask["task-merge"])
+	otherBefore := len(b.reviewerGradesByTask["task-other"])
+	b.mu.Unlock()
+	if beforeLen != 2 || mergeBefore != 2 || otherBefore != 2 {
+		t.Fatalf("pre-merge: expected map len=2 with both tasks holding 2 grades; got len=%d merge=%d other=%d",
+			beforeLen, mergeBefore, otherBefore)
+	}
+
+	// Merge task-merge via the public lifecycle transition entry. This
+	// is the same path RecordTaskDecision uses on a packet merge.
+	if err := b.TransitionLifecycle("task-merge", LifecycleStateMerged, "test merge"); err != nil {
+		t.Fatalf("transition merge: %v", err)
+	}
+
+	b.mu.Lock()
+	afterLen := len(b.reviewerGradesByTask)
+	_, mergeStill := b.reviewerGradesByTask["task-merge"]
+	otherAfter := len(b.reviewerGradesByTask["task-other"])
+	b.mu.Unlock()
+
+	if afterLen != beforeLen-1 {
+		t.Fatalf("expected reviewerGradesByTask len to drop from %d to %d; got %d",
+			beforeLen, beforeLen-1, afterLen)
+	}
+	if mergeStill {
+		t.Fatal("expected task-merge entry to be GC'd from reviewerGradesByTask")
+	}
+	if otherAfter != 2 {
+		t.Fatalf("expected task-other grades intact (len=2); got %d", otherAfter)
+	}
+}
+
 // taskBucketCounts and bucketsEqual are tiny test helpers used by the
 // idempotency assertions above.
 func taskBucketCounts(b *Broker) map[LifecycleState]int {
