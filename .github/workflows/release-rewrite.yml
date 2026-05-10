@@ -343,6 +343,7 @@ jobs:
         shell: pwsh
         run: Start-Sleep -Seconds 30
       - name: Sign Windows artifacts (attempt 3)
+        id: sign_windows_3
         if: needs.detect-secrets.outputs.is_release == 'true' && steps.sign_windows_1.outcome == 'failure' && steps.sign_windows_2.outcome == 'failure'
         timeout-minutes: 30
         uses: Azure/trusted-signing-action@b443cf8ea4124818d2ea9f043cba29fc3ec47b16 # ratchet:Azure/trusted-signing-action@v1.2.0
@@ -360,6 +361,37 @@ jobs:
           timestamp-rfc3161: http://timestamp.acs.microsoft.com
           timestamp-digest: SHA256
           timeout: 1800
+      - name: Write Azure signing attempt diagnostics
+        if: always() && needs.detect-secrets.outputs.is_release == 'true'
+        shell: pwsh
+        env:
+          SIGN_WINDOWS_1_OUTCOME: ${{ steps.sign_windows_1.outcome }}
+          SIGN_WINDOWS_1_CONCLUSION: ${{ steps.sign_windows_1.conclusion }}
+          SIGN_WINDOWS_2_OUTCOME: ${{ steps.sign_windows_2.outcome }}
+          SIGN_WINDOWS_2_CONCLUSION: ${{ steps.sign_windows_2.conclusion }}
+          SIGN_WINDOWS_3_OUTCOME: ${{ steps.sign_windows_3.outcome }}
+          SIGN_WINDOWS_3_CONCLUSION: ${{ steps.sign_windows_3.conclusion }}
+        run: |
+          New-Item -ItemType Directory -Force -Path signing-diagnostics | Out-Null
+          @(
+            "attempt 1 outcome: $env:SIGN_WINDOWS_1_OUTCOME"
+            "attempt 1 conclusion: $env:SIGN_WINDOWS_1_CONCLUSION"
+            "attempt 2 outcome: $env:SIGN_WINDOWS_2_OUTCOME"
+            "attempt 2 conclusion: $env:SIGN_WINDOWS_2_CONCLUSION"
+            "attempt 3 outcome: $env:SIGN_WINDOWS_3_OUTCOME"
+            "attempt 3 conclusion: $env:SIGN_WINDOWS_3_CONCLUSION"
+          ) | Set-Content -Path signing-diagnostics/azure-signing-attempts.txt
+      - name: Report Azure signing flakiness
+        if: always() && needs.detect-secrets.outputs.is_release == 'true' && steps.sign_windows_1.outcome == 'failure'
+        shell: pwsh
+        run: Write-Output "::warning title=Azure signing flakiness::Azure Trusted Signing required at least one retry. Download the azure-signing-diagnostics artifact and check service health before the next release window."
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # ratchet:actions/upload-artifact@v7
+        if: always() && needs.detect-secrets.outputs.is_release == 'true'
+        with:
+          name: azure-signing-diagnostics
+          path: signing-diagnostics/azure-signing-attempts.txt
+          retention-days: 14
+          if-no-files-found: error
       - name: Assert Windows signer identity
         if: needs.detect-secrets.outputs.is_release == 'true'
         shell: pwsh
