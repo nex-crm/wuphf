@@ -8,6 +8,16 @@ const repoRoot = resolve(scriptDir, "../../..");
 const electronCacheRoot = resolve(repoRoot, ".cache/electron");
 mkdirSync(electronCacheRoot, { recursive: true });
 process.env.electron_config_cache ??= electronCacheRoot;
+process.env.ELECTRON_CACHE ??= electronCacheRoot;
 
 const require = createRequire(import.meta.url);
-require("electron/install.js");
+let installEntrypoint;
+try {
+  installEntrypoint = require.resolve("electron/install.js");
+} catch (cause) {
+  throw new Error(
+    "Unable to resolve electron/install.js. Verify the installer entrypoint for the pinned Electron version.",
+    { cause },
+  );
+}
+require(installEntrypoint);
