@@ -43,6 +43,10 @@ type ProcessListener = (...args: readonly unknown[]) => void;
 
 const electronMock = vi.hoisted(() => {
   const instances: MockBrowserWindowInstance[] = [];
+  // Hoisted spy lets the BrowserWindow constructor record an invocation we can
+  // sequence against other mocks via mock.invocationCallOrder. Used by the
+  // permission-handler ordering assertion.
+  const browserWindowConstructorSpy = vi.fn<() => void>();
 
   class BrowserWindow {
     static readonly getAllWindows = vi.fn<() => MockBrowserWindowInstance[]>(() => instances);
@@ -55,6 +59,7 @@ const electronMock = vi.hoisted(() => {
     };
 
     constructor(_options: unknown) {
+      browserWindowConstructorSpy();
       instances.push(this);
     }
   }
@@ -79,6 +84,7 @@ const electronMock = vi.hoisted(() => {
       exit: vi.fn<(code: number) => void>(),
     },
     BrowserWindow,
+    browserWindowConstructorSpy,
     instances,
     defaultSession: {
       setPermissionRequestHandler: vi.fn<(handler: unknown) => void>(),
@@ -188,6 +194,7 @@ describe("main bootstrap", () => {
     electronMock.showErrorBox.mockClear();
     electronMock.handle.mockClear();
     electronMock.fork.mockClear();
+    electronMock.browserWindowConstructorSpy.mockClear();
     electronMock.defaultSession.setPermissionRequestHandler.mockClear();
     electronMock.defaultSession.setPermissionCheckHandler.mockClear();
     loggerMock.calls.length = 0;
@@ -247,6 +254,26 @@ describe("main bootstrap", () => {
 
     expect(electronMock.defaultSession.setPermissionRequestHandler).toHaveBeenCalledTimes(1);
     expect(electronMock.defaultSession.setPermissionCheckHandler).toHaveBeenCalledTimes(1);
+
+    // Ordering invariant: both permission handlers MUST be installed BEFORE
+    // any BrowserWindow is constructed. A regression that flipped the order
+    // would briefly create a window with Electron's default-allow permissions
+    // — the exact hole R3 surfaced. Lock it in via mock.invocationCallOrder.
+    const requestHandlerCallOrder =
+      electronMock.defaultSession.setPermissionRequestHandler.mock.invocationCallOrder[0];
+    const checkHandlerCallOrder =
+      electronMock.defaultSession.setPermissionCheckHandler.mock.invocationCallOrder[0];
+    const constructorCallOrder =
+      electronMock.browserWindowConstructorSpy.mock.invocationCallOrder[0];
+    if (
+      requestHandlerCallOrder === undefined ||
+      checkHandlerCallOrder === undefined ||
+      constructorCallOrder === undefined
+    ) {
+      throw new Error("Expected request/check/constructor to all be invoked");
+    }
+    expect(requestHandlerCallOrder).toBeLessThan(constructorCallOrder);
+    expect(checkHandlerCallOrder).toBeLessThan(constructorCallOrder);
 
     const requestHandler = electronMock.defaultSession.setPermissionRequestHandler.mock
       .calls[0]?.[0] as

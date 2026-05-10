@@ -334,6 +334,13 @@ export class BrokerSupervisor {
       // recall it. Without this check, start() would unconditionally clear
       // stopping=false and fork a fresh broker AFTER stop() completed,
       // leaking a process whether start() throws or succeeds.
+      //
+      // The `fatalReason !== null` clause is belt-and-suspenders for
+      // start()'s own early-return at line 104-107 — start() would refuse
+      // to fork once fatal, so the only behavior difference is that we
+      // log `broker_restart_skipped` with reason="fatal" instead of
+      // emitting a noisy `broker_restart_attempt` followed by a silent
+      // start() no-op.
       if (this.stopping || this.fatalReason !== null) {
         this.logger.info("broker_restart_skipped", {
           restartCount: this.restartCount,
