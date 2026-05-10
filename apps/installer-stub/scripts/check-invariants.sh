@@ -51,6 +51,14 @@ while IFS= read -r match; do
   violations+=("hardcoded certificate path: ${match}")
 done < <(rg -n --pcre2 "${cert_path_regex}" "${scan_targets[@]}" || true)
 
+# electron-builder.yml sets `npmRebuild: false` to avoid the bun npm_execpath
+# leak in CI. That's safe ONLY while the stub has zero production deps;
+# adding a native dep would silently ship without the Electron-ABI rebuild.
+# Enforce the no-prod-deps invariant here so the band-aid stays safe.
+if rg -q '"dependencies"\s*:' "${package_root}/package.json"; then
+  violations+=("apps/installer-stub/package.json must have NO 'dependencies' (only devDependencies); npmRebuild: false in electron-builder.yml depends on this invariant")
+fi
+
 while IFS= read -r line; do
   action_ref="$(sed -E 's/^([^:]+:)?[0-9]+:.*uses:[[:space:]]*([^[:space:]#]+).*/\2/' <<<"${line}")"
 

@@ -4,11 +4,12 @@ copyright: Copyright © 2026 Nex Labs Inc.
 artifactName: wuphf-installer-stub-${version}-${os}-${arch}.${ext}
 compression: maximum
 # npmRebuild=false: this stub has zero production dependencies (only
-# devDependencies), and electron-builder's rebuild step assumes an npm/yarn
-# package manager — under bun, it spawns the bun binary as a JS module and
-# crashes (see CR-CI-1 in scripts/run-builder.js). If a future installer-stub
-# adds a native dep (better-sqlite3, keytar, etc.) this MUST flip back to true
-# AND the run-builder.js env scrub must be revisited.
+# devDependencies). electron-builder's rebuild step uses npm/yarn under the
+# hood; under bun's CI env it spawns the bun binary as if it were a node
+# module and crashes (see CR-CI-1 in scripts/run-builder.js, paired with the
+# env scrub there). The "no production deps" precondition is enforced by
+# scripts/check-invariants.sh — adding a `dependencies` block to package.json
+# fails the invariant and forces a deliberate fix.
 npmRebuild: false
 directories:
   output: dist

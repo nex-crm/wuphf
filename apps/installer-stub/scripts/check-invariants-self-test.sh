@@ -106,4 +106,13 @@ expect_output_contains "${cert_path_fixture}/root.out" "hardcoded certificate pa
 expect_status 1 "${cert_path_fixture}/apps/installer-stub" "scripts/check-invariants.sh" "${cert_path_fixture}/package.out"
 expect_output_contains "${cert_path_fixture}/package.out" "hardcoded certificate path"
 
+prod_deps_fixture="${tmp_root}/prod-deps"
+write_fixture "${prod_deps_fixture}"
+printf '{"dependencies": {"foo": "1.0.0"}}\n' > "${prod_deps_fixture}/apps/installer-stub/package.json"
+
+expect_status 1 "${prod_deps_fixture}" "apps/installer-stub/scripts/check-invariants.sh" "${prod_deps_fixture}/root.out"
+expect_output_contains "${prod_deps_fixture}/root.out" "must have NO 'dependencies'"
+expect_status 1 "${prod_deps_fixture}/apps/installer-stub" "scripts/check-invariants.sh" "${prod_deps_fixture}/package.out"
+expect_output_contains "${prod_deps_fixture}/package.out" "must have NO 'dependencies'"
+
 echo "installer invariant self-test OK"
