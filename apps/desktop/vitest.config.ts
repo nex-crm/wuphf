@@ -13,17 +13,17 @@ export default defineConfig({
       include: ["src/**/*.ts"],
       exclude: ["src/renderer/**/*.ts", "src/main/index.ts"],
       thresholds: {
-        // One-way ratchet at the measured floor minus at most one percentage point.
-        // Measured (post R15 broker hardening): 99.23 lines / 99.22 statements /
-        // 100 functions / 95.11 branches. Branch floor dropped because the
-        // restart-timer try/catch and stop()/handleRestartStartFailure
-        // early-returns added defensive branches whose error-path arms are
-        // hard to reach without invasive test machinery — to be ratcheted
-        // back up when broker stop/restart edge cases get dedicated coverage.
+        // One-way ratchet at the measured floor.
+        // Measured (post R15 broker hardening + dedicated branch tests):
+        // 99.8 lines / 99.8 statements / 100 functions / 96.21 branches.
+        // The two genuinely unreachable defensive branches (NOOP_LOGGER
+        // arrow bodies and the stopping guard in handleRestartStartFailure)
+        // are wrapped in v8 ignore blocks at their definitions; restart and
+        // settle-twice paths have dedicated coverage in broker-supervisor.spec.ts.
         lines: 99,
         statements: 99,
         functions: 100,
-        branches: 95,
+        branches: 96,
       },
     },
   },

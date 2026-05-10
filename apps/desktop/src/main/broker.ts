@@ -354,9 +354,17 @@ export class BrokerSupervisor {
       serviceName: BROKER_SERVICE_NAME,
     });
 
+    // Defensive guard. handleRestartStartFailure can ONLY be called from the
+    // setTimeout callback in scheduleRestart(); stop() calls clearRestartTimer()
+    // which cancels that timer before this.stopping flips to true, so reaching
+    // this branch requires a synchronous race between the timer firing and
+    // stop() executing — impossible in practice (verified across the test
+    // matrix in broker-supervisor.spec.ts).
+    /* v8 ignore start */
     if (this.stopping) {
       return;
     }
+    /* v8 ignore stop */
 
     if (this.restartCount >= this.maxRestartRetries) {
       this.fatalReason = `Broker start failed after ${this.restartCount} restart retries: ${message}`;

@@ -811,7 +811,7 @@ describe("BrokerSupervisor", () => {
     expect(supervisor.getStatus()).toBe("alive");
   });
 
-  it("does not reschedule restart when start() throws on a fork-queue exhaustion during retry", async () => {
+  it("hits the fatal cap when start() throws on the only remaining retry", async () => {
     vi.useFakeTimers();
     let nowMs = 0;
     const monotonicNow = (): number => nowMs;
@@ -836,6 +836,81 @@ describe("BrokerSupervisor", () => {
     await Promise.resolve();
 
     expect(calls.some((call) => call.event === "broker_restart_start_failed")).toBe(true);
+    expect(supervisor.getStatus()).toBe("dead");
+  });
+
+  it("reschedules another restart when start() throws and retries remain (covers handleRestartStartFailure fall-through)", async () => {
+    vi.useFakeTimers();
+    let nowMs = 0;
+    const monotonicNow = (): number => nowMs;
+    const processHandle = new FakeUtilityProcess(4321);
+    const { forkProcess } = createForkMock([processHandle]);
+    const { logger, calls } = createMemoryLogger();
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+      logger,
+      monotonicNow,
+      maxRestartRetries: 3,
+      firstBackoffMs: 100,
+    });
+
+    supervisor.start();
+    processHandle.emit("message", { alive: true });
+    processHandle.emit("exit", 1);
+
+    nowMs = 100;
+    await vi.advanceTimersByTimeAsync(100);
+    await Promise.resolve();
+
+    // Restart attempt fired, queue exhausted, start() threw,
+    // handleRestartStartFailure fell through to scheduleRestart() because
+    // restartCount < maxRestartRetries and !this.stopping. The supervisor
+    // should now have a NEW pending restart timer scheduled.
+    expect(calls.some((call) => call.event === "broker_restart_start_failed")).toBe(true);
+    expect(calls.some((call) => call.event === "broker_restart_cap_reached")).toBe(false);
+    expect(calls.filter((call) => call.event === "broker_restart_scheduled").length).toBeGreaterThanOrEqual(2);
+    expect(supervisor.getStatus()).toBe("starting");
+
+    // Tear down the lingering retry loop so the test does not leak timers.
+    await supervisor.stop();
+  });
+
+  it("ignores the redundant explicit settle() when the broker's exit fires during force-stop", async () => {
+    vi.useFakeTimers();
+    const processHandle = new FakeUtilityProcess(4321);
+    const { forkProcess } = createForkMock([processHandle]);
+    // killProcess(SIGKILL) synchronously surfaces the broker's exit BEFORE
+    // forceStop returns control to the inner timer's explicit settle() call.
+    // Settle then runs twice in the same tick: first via the once-listener
+    // (settled=true, off, resolve), then via the explicit settle() inside
+    // the timer callback. The second invocation must hit the `if (settled)
+    // return` guard at broker.ts:227 — branch coverage target.
+    const killProcess = vi.fn<KillProcess>((_pid, signal) => {
+      if (signal === "SIGKILL") {
+        processHandle.emit("exit", -1);
+      }
+    });
+    const { logger, calls } = createMemoryLogger();
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+      logger,
+      killProcess,
+      stopGraceMs: 5_000,
+      forceStopGraceMs: 1_000,
+    });
+
+    supervisor.start();
+    processHandle.emit("message", { alive: true });
+
+    const stopPromise = supervisor.stop();
+    await vi.advanceTimersByTimeAsync(5_000);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await stopPromise;
+
+    const stoppedLogs = calls.filter((call) => call.event === "broker_stopped");
+    expect(stoppedLogs).toHaveLength(1);
     expect(supervisor.getStatus()).toBe("dead");
   });
 });
