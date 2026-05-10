@@ -153,7 +153,9 @@ do not auto-update. Production releases override it via the workflow secret.
 4. Confirm `Detect Azure signing secrets` reports all Azure values set.
 5. Confirm the Windows job signs with `Azure/trusted-signing-action`, verifies
    the signer CN, refreshes `latest.yml`, and verifies the manifest.
-6. Download the `.exe` from the draft release and inspect its signature:
+6. The publish job auto-flips the draft to a published release after the
+   asset assertion succeeds. Download the `.exe` from the published release
+   and inspect its signature:
 
    ```powershell
    Get-AuthenticodeSignature .\wuphf-installer-stub-0.0.1-rewrite-win-x64.exe

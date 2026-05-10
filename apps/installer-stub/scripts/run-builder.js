@@ -5,16 +5,42 @@ const { spawnSync } = require("node:child_process");
 const appRoot = path.resolve(__dirname, "..");
 const workspaceRoot = path.resolve(appRoot, "..", "..");
 
-function setDefaultCache(name, directory) {
-  if (process.env[name]) {
+function setDefaultCache(env, name, directory) {
+  if (env[name]) {
     return;
   }
   fs.mkdirSync(directory, { recursive: true });
-  process.env[name] = directory;
+  env[name] = directory;
 }
 
-setDefaultCache("ELECTRON_CACHE", path.join(appRoot, ".cache", "electron"));
-setDefaultCache("ELECTRON_BUILDER_CACHE", path.join(appRoot, ".cache", "electron-builder"));
+function isExecutable(file) {
+  try {
+    fs.accessSync(file, fs.constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function makeExecutable(file) {
+  if (isExecutable(file)) {
+    return;
+  }
+  try {
+    fs.chmodSync(file, 0o755);
+    return;
+  } catch (error) {
+    const result = spawnSync("chmod", ["755", file], { stdio: "ignore" });
+    if (result.error) {
+      throw new Error(`Failed to make bundled 7za executable at ${file}: ${result.error.message}`);
+    }
+    if (result.status !== 0) {
+      throw new Error(
+        `Failed to make bundled 7za executable at ${file}; fs.chmodSync failed with ${error.message}, chmod exited ${result.status}`,
+      );
+    }
+  }
+}
 
 // macOS-only: bun's content-addressable store occasionally drops 7zip-bin's
 // `7za` binary without the +x bit, which kills electron-builder's DMG step
@@ -43,39 +69,14 @@ function ensureBundledToolExecutables() {
           "7za",
         );
         if (fs.existsSync(sevenZip)) {
-          try {
-            fs.chmodSync(sevenZip, 0o755);
-          } catch {
-            spawnSync("chmod", ["755", sevenZip], { stdio: "ignore" });
-          }
+          makeExecutable(sevenZip);
         }
       }
     }
   }
 }
 
-ensureBundledToolExecutables();
-
 const builderCli = require.resolve("electron-builder/cli");
-const nodeBinary = process.env.NODE_BINARY || process.execPath;
-const releaseMode = process.env.WUPHF_RELEASE_MODE || "pr";
-
-if (!["pr", "production"].includes(releaseMode)) {
-  console.error(`WUPHF_RELEASE_MODE must be 'pr' or 'production', got '${releaseMode}'`);
-  process.exit(1);
-}
-
-if (process.versions.bun && !process.env.NODE_BINARY) {
-  console.error(
-    "run-builder.js must run under real Node so electron-builder's CLI is executed by Node. Run via `node scripts/run-builder.js` after setup-node.",
-  );
-  process.exit(1);
-}
-
-const builderArgs = process.argv.slice(2);
-if (releaseMode !== "production") {
-  builderArgs.push("--config.mac.notarize=false");
-}
 
 // CR-CI-1: electron-builder reads `npm_execpath` to locate the package
 // manager for its production-dep install / native-rebuild step. When
@@ -93,6 +94,8 @@ function scrubbedEnv() {
     }
     env[key] = value;
   }
+  setDefaultCache(env, "ELECTRON_CACHE", path.join(appRoot, ".cache", "electron"));
+  setDefaultCache(env, "ELECTRON_BUILDER_CACHE", path.join(appRoot, ".cache", "electron-builder"));
   // Belt-and-suspenders: app-builder-bin honors CUSTOM_APP_BUILDER_PATH
   // natively (see its index.js), so when the bun nested-store layout makes
   // its self-resolution fragile, we hand it the resolved binary path.
@@ -114,13 +117,43 @@ function scrubbedEnv() {
   return env;
 }
 
-const result = spawnSync(nodeBinary, [builderCli, ...builderArgs], {
-  env: scrubbedEnv(),
-  stdio: "inherit",
-});
+function main() {
+  ensureBundledToolExecutables();
 
-if (result.error) {
-  throw result.error;
+  const nodeBinary = process.env.NODE_BINARY || process.execPath;
+  const releaseMode = process.env.WUPHF_RELEASE_MODE || "pr";
+
+  if (!["pr", "production"].includes(releaseMode)) {
+    console.error(`WUPHF_RELEASE_MODE must be 'pr' or 'production', got '${releaseMode}'`);
+    process.exit(1);
+  }
+
+  if (process.versions.bun && !process.env.NODE_BINARY) {
+    console.error(
+      "run-builder.js must run under real Node so electron-builder's CLI is executed by Node. Run via `node scripts/run-builder.js` after setup-node.",
+    );
+    process.exit(1);
+  }
+
+  const builderArgs = process.argv.slice(2);
+  if (releaseMode !== "production") {
+    builderArgs.push("--config.mac.notarize=false");
+  }
+
+  const result = spawnSync(nodeBinary, [builderCli, ...builderArgs], {
+    env: scrubbedEnv(),
+    stdio: "inherit",
+  });
+
+  if (result.error) {
+    throw result.error;
+  }
+
+  process.exit(result.status ?? 1);
 }
 
-process.exit(result.status ?? 1);
+if (require.main === module) {
+  main();
+}
+
+module.exports = { scrubbedEnv, setDefaultCache };

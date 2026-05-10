@@ -26,7 +26,7 @@
     "build:dry-run": "node scripts/run-dry-run.js",
     "check:secrets": "bash scripts/detect-signing-secrets.sh",
     "check:invariants": "bash scripts/check-invariants.sh",
-    "test": "bash scripts/check-invariants-self-test.sh && bun test scripts/refresh-latest-yml.test.js && node scripts/normalize-package-version.test.js",
+    "test": "bash scripts/check-invariants-self-test.sh && WUPHF_VERIFY_LATEST_YML_RUN_SELF_TEST=1 WUPHF_VERIFY_LATEST_YML_SELF_TEST_ONLY=1 bash scripts/verify-latest-yml.sh && bun test scripts/refresh-latest-yml.test.js && node scripts/normalize-package-version.test.js && node scripts/run-builder.test.js",
     "verify:latest-yml": "bash scripts/verify-latest-yml.sh"
   },
   "devDependencies": {

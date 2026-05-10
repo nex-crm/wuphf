@@ -62,6 +62,7 @@ run_self_test() (
   local missing_size_output
   local malformed_empty_object_output
   local malformed_string_output
+  local malformed_ref_output
   local status=0
 
   tmp_root="$(mktemp -d "${TMPDIR:-/tmp}/verify-latest-yml-self-test.XXXXXX")"
@@ -76,6 +77,7 @@ run_self_test() (
   good_output="${tmp_root}/good.out"
   malformed_empty_object_output="${tmp_root}/malformed-empty-object.out"
   malformed_string_output="${tmp_root}/malformed-string.out"
+  malformed_ref_output="${tmp_root}/malformed-ref.out"
   missing_size_output="${tmp_root}/missing-size.out"
 
   mkdir -p "${good_dist}" "${malformed_empty_object_dist}" "${malformed_string_dist}" "${missing_size_dist}"
@@ -84,16 +86,12 @@ run_self_test() (
   cp "${good_dist}/${artifact_name}" "${malformed_string_dist}/${artifact_name}"
   cp "${good_dist}/${artifact_name}" "${missing_size_dist}/${artifact_name}"
 
-  artifact_sha512="$(
-    cd "${app_dir}" &&
-      bun -e '
-        const crypto = require("node:crypto");
-        const fs = require("node:fs");
-        process.stdout.write(
-          crypto.createHash("sha512").update(fs.readFileSync(process.argv[1])).digest("base64"),
-        );
-      ' "${good_dist}/${artifact_name}"
-  )"
+  # `openssl dgst -binary` is universally available on macOS / Ubuntu /
+  # Windows runners and avoids the bun-version-skew bug where bun 1.1's
+  # `bun -e <code> arg` sets argv[1] differently than bun 1.3 (caught at
+  # CI when self-test ran on the workflow's pinned bun 1.1.38 against a
+  # local bun 1.3.13 baseline).
+  artifact_sha512="$(openssl dgst -sha512 -binary "${good_dist}/${artifact_name}" | base64 | tr -d '\n')"
   artifact_size="$(wc -c < "${good_dist}/${artifact_name}" | tr -d ' ')"
 
   write_self_test_manifest "${good_dist}/latest-mac.yml" "${artifact_name}" "${artifact_sha512}" "${artifact_size}" "true"
@@ -101,11 +99,27 @@ run_self_test() (
   write_self_test_malformed_files_manifest "${malformed_string_dist}/latest-mac.yml" "${artifact_name}" "${artifact_sha512}" "${artifact_size}" "string-not-object"
   write_self_test_manifest "${missing_size_dist}/latest-mac.yml" "${artifact_name}" "${artifact_sha512}" "${artifact_size}" "false"
 
-  env WUPHF_VERIFY_LATEST_YML_SKIP_SELF_TEST=1 WUPHF_DIST_DIR="${good_dist}" \
+  env WUPHF_VERIFY_LATEST_YML_RUN_SELF_TEST= WUPHF_VERIFY_LATEST_YML_SELF_TEST_ONLY= WUPHF_DIST_DIR="${good_dist}" \
     bash "${source_script}" "0.0.0" > "${good_output}" 2>&1
 
   status=0
-  env WUPHF_VERIFY_LATEST_YML_SKIP_SELF_TEST=1 WUPHF_DIST_DIR="${malformed_empty_object_dist}" \
+  env WUPHF_VERIFY_LATEST_YML_RUN_SELF_TEST= WUPHF_VERIFY_LATEST_YML_SELF_TEST_ONLY= WUPHF_DIST_DIR="${good_dist}" GITHUB_REF="refs/tags/not-a-rewrite-tag" \
+    bash "${source_script}" > "${malformed_ref_output}" 2>&1 || status=$?
+
+  if [[ "${status}" -eq 0 ]]; then
+    echo "expected malformed GITHUB_REF fixture to fail" >&2
+    cat "${malformed_ref_output}" >&2
+    exit 1
+  fi
+
+  if ! grep -Fq "Invalid rewrite release tag in GITHUB_REF: refs/tags/not-a-rewrite-tag" "${malformed_ref_output}"; then
+    echo "expected malformed GITHUB_REF fixture to report invalid rewrite tag" >&2
+    cat "${malformed_ref_output}" >&2
+    exit 1
+  fi
+
+  status=0
+  env WUPHF_VERIFY_LATEST_YML_RUN_SELF_TEST= WUPHF_VERIFY_LATEST_YML_SELF_TEST_ONLY= WUPHF_DIST_DIR="${malformed_empty_object_dist}" \
     bash "${source_script}" "0.0.0" > "${malformed_empty_object_output}" 2>&1 || status=$?
 
   if [[ "${status}" -eq 0 ]]; then
@@ -121,7 +135,7 @@ run_self_test() (
   fi
 
   status=0
-  env WUPHF_VERIFY_LATEST_YML_SKIP_SELF_TEST=1 WUPHF_DIST_DIR="${malformed_string_dist}" \
+  env WUPHF_VERIFY_LATEST_YML_RUN_SELF_TEST= WUPHF_VERIFY_LATEST_YML_SELF_TEST_ONLY= WUPHF_DIST_DIR="${malformed_string_dist}" \
     bash "${source_script}" "0.0.0" > "${malformed_string_output}" 2>&1 || status=$?
 
   if [[ "${status}" -eq 0 ]]; then
@@ -137,7 +151,7 @@ run_self_test() (
   fi
 
   status=0
-  env WUPHF_VERIFY_LATEST_YML_SKIP_SELF_TEST=1 WUPHF_DIST_DIR="${missing_size_dist}" \
+  env WUPHF_VERIFY_LATEST_YML_RUN_SELF_TEST= WUPHF_VERIFY_LATEST_YML_SELF_TEST_ONLY= WUPHF_DIST_DIR="${missing_size_dist}" \
     bash "${source_script}" "0.0.0" > "${missing_size_output}" 2>&1 || status=$?
 
   if [[ "${status}" -eq 0 ]]; then
@@ -155,20 +169,49 @@ run_self_test() (
   echo "verify-latest-yml self-test OK"
 )
 
-if [[ "${WUPHF_VERIFY_LATEST_YML_SKIP_SELF_TEST:-}" != "1" ]]; then
+if [[ "${WUPHF_VERIFY_LATEST_YML_RUN_SELF_TEST:-}" == "1" ]]; then
   run_self_test
+  if [[ "${WUPHF_VERIFY_LATEST_YML_SELF_TEST_ONLY:-}" == "1" ]]; then
+    exit 0
+  fi
 fi
 
-raw_ref="${1:-${GITHUB_REF:-${GITHUB_REF_NAME:-}}}"
+env_ref="${GITHUB_REF:-${GITHUB_REF_NAME:-}}"
+arg_ref="${1:-}"
+
+# Always validate GITHUB_REF when it exists and looks like a tag ref. The
+# previous shape only validated when no $1 was supplied, which the workflow
+# always does — meaning the script-level rewrite-semver invariant was never
+# actually enforced from the publish job (caught by the post-merge security
+# triangulation as INCOMPLETE-FIX of H4).
+if [[ "${env_ref}" == refs/tags/* ]]; then
+  env_candidate="${env_ref#refs/tags/}"
+  if [[ ! "${env_candidate}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?-rewrite$ ]]; then
+    echo "Invalid rewrite release tag in GITHUB_REF: ${env_ref}" >&2
+    exit 1
+  fi
+  # If the caller also passed $1, it MUST agree with GITHUB_REF (no silent
+  # divergence between the workflow's tag and the script's tag input).
+  if [[ -n "${arg_ref}" && "${arg_ref}" != "${env_candidate}" && "${arg_ref}" != "${env_ref}" ]]; then
+    echo "Tag argument '${arg_ref}' does not match GITHUB_REF '${env_ref}'" >&2
+    exit 1
+  fi
+fi
+
+raw_ref="${arg_ref:-${env_ref}}"
 tag=""
 
 if [[ -n "${raw_ref}" ]]; then
   candidate="${raw_ref#refs/tags/}"
   if [[ "${raw_ref}" == refs/tags/* ]]; then
+    if [[ ! "${candidate}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?-rewrite$ ]]; then
+      echo "Invalid rewrite release tag in GITHUB_REF: ${raw_ref}" >&2
+      exit 1
+    fi
     tag="${candidate}"
-  elif [[ "${candidate}" =~ ^v?[0-9]+(\.[0-9]+)*([.-].+)?$ ]]; then
+  elif [[ "${candidate}" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(-rewrite)?$ ]]; then
     tag="${candidate}"
-  elif [[ "${1+x}" == "x" ]]; then
+  else
     echo "Invalid release tag: ${raw_ref}" >&2
     exit 1
   fi
@@ -212,46 +255,52 @@ if [[ "${#latest_files[@]}" -eq 0 ]]; then
   exit 1
 fi
 
+# Args go through env vars rather than argv because `bun -e <code> <args>`
+# argv handling drifted between bun 1.1.38 (CI pin) and bun 1.3 (local /
+# Renovate-bumped target): 1.1 sets argv[1]="[eval]" and shifts user args
+# down (matching node's behavior), while 1.3 skips the [eval] slot.
+# Env-var passing is uniform across both runtimes.
 manifest_field() {
   local file="$1"
   local field="$2"
 
   cd "${app_dir}" &&
-    bun -e '
+    WUPHF_MANIFEST_FILE="${file}" WUPHF_MANIFEST_FIELD="${field}" bun -e '
       const fs = require("node:fs");
       const yaml = require("js-yaml");
-      const manifest = yaml.load(fs.readFileSync(process.argv[1], "utf8"));
-      const value = manifest?.[process.argv[2]];
+      const manifest = yaml.load(fs.readFileSync(process.env.WUPHF_MANIFEST_FILE, "utf8"));
+      const value = manifest?.[process.env.WUPHF_MANIFEST_FIELD];
       if (value !== undefined && value !== null) {
         process.stdout.write(String(value));
       }
-    ' "${file}" "${field}"
+    '
 }
 
 manifest_file_entries() {
   local file="$1"
 
   cd "${app_dir}" &&
-    bun -e '
+    WUPHF_MANIFEST_FILE="${file}" bun -e '
       const fs = require("node:fs");
       const yaml = require("js-yaml");
-      const manifest = yaml.load(fs.readFileSync(process.argv[1], "utf8"));
+      const manifestPath = process.env.WUPHF_MANIFEST_FILE;
+      const manifest = yaml.load(fs.readFileSync(manifestPath, "utf8"));
       const files = Array.isArray(manifest?.files) ? manifest.files : [];
       for (const [index, entry] of files.entries()) {
         if (!entry || typeof entry !== "object") {
-          console.error(process.argv[1] + " files[" + index + "] is not an object");
+          console.error(manifestPath + " files[" + index + "] is not an object");
           process.exit(1);
         }
 
         const entryPath = entry.url ?? entry.path;
         if (typeof entryPath !== "string" || entryPath.length === 0) {
-          console.error(process.argv[1] + " files[" + index + "] is missing url/path");
+          console.error(manifestPath + " files[" + index + "] is missing url/path");
           process.exit(1);
         }
 
         process.stdout.write([entryPath, entry.sha512 ?? "", entry.size ?? ""].join("\u001f") + "\0");
       }
-    ' "${file}"
+    '
 }
 
 sha512_base64() {

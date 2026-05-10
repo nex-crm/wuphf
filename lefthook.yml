@@ -229,6 +229,26 @@ pre-push:
       files: bash scripts/changed-files-since-base.sh
       glob: "packages/protocol/{src/**,tests/**,scripts/**}"
       run: bash packages/protocol/scripts/check-invariants.sh
+    installer-invariants:
+      files: bash scripts/changed-files-since-base.sh
+      # check-invariants.sh scans .github/workflows/release-rewrite.yml for
+      # forbidden literals + action SHA pinning + cert paths, so workflow
+      # edits MUST trigger this hook even when nothing under apps/installer-stub
+      # changes — otherwise an unpinned action / forbidden literal slips past
+      # pre-push and only surfaces at the CI installer-invariants job.
+      glob: "{apps/installer-stub/**,.github/workflows/release-rewrite.yml}"
+      run: |
+        bash apps/installer-stub/scripts/check-invariants.sh
+        bash apps/installer-stub/scripts/check-invariants-self-test.sh
+        WUPHF_VERIFY_LATEST_YML_RUN_SELF_TEST=1 \
+          WUPHF_VERIFY_LATEST_YML_SELF_TEST_ONLY=1 \
+          bash apps/installer-stub/scripts/verify-latest-yml.sh
+        # M4 regression: setDefaultCache must not mutate parent process.env
+        # (was leaking ELECTRON_CACHE / ELECTRON_BUILDER_CACHE into subsequent
+        # commands). The unit test runs in <100ms and is the only automated
+        # gate for that invariant — apps/installer-stub/package.json's bun
+        # test script is not invoked anywhere else in CI or pre-push.
+        node apps/installer-stub/scripts/run-builder.test.js
     file-size:
       # Enforce CONTRIBUTING.md's file-size budget: warn at 800 LOC, fail
       # at 1500 LOC unless the file is on scripts/file-size-allowlist.txt

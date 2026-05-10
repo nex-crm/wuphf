@@ -52,12 +52,32 @@ while IFS= read -r match; do
 done < <(rg -n --pcre2 "${cert_path_regex}" "${scan_targets[@]}" || true)
 
 # electron-builder.yml sets `npmRebuild: false` to avoid the bun npm_execpath
-# leak in CI. That's safe ONLY while the stub has zero production deps;
-# adding a native dep would silently ship without the Electron-ABI rebuild.
-# Enforce the no-prod-deps invariant here so the band-aid stays safe.
-if rg -q '"dependencies"\s*:' "${package_root}/package.json"; then
-  violations+=("apps/installer-stub/package.json must have NO 'dependencies' (only devDependencies); npmRebuild: false in electron-builder.yml depends on this invariant")
-fi
+# leak in CI. That's safe ONLY while the stub has no dependency blocks that
+# electron-builder may install/rebuild for runtime packaging.
+dependency_check_output="$(
+  cd "${repo_root}" &&
+    bun -e '
+      const pkg = require("./apps/installer-stub/package.json");
+      const forbiddenBlocks = ["dependencies", "peerDependencies", "optionalDependencies"];
+      let failed = false;
+
+      for (const blockName of forbiddenBlocks) {
+        const block = pkg[blockName];
+        if (block && typeof block === "object" && Object.keys(block).length > 0) {
+          console.error("forbidden dependency block: " + blockName);
+          failed = true;
+        }
+      }
+
+      if (failed) {
+        process.exit(1);
+      }
+    ' 2>&1
+)" || {
+  while IFS= read -r line; do
+    violations+=("${line}")
+  done <<< "${dependency_check_output}"
+}
 
 while IFS= read -r line; do
   action_ref="$(sed -E 's/^([^:]+:)?[0-9]+:.*uses:[[:space:]]*([^[:space:]#]+).*/\2/' <<<"${line}")"

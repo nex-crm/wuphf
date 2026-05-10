@@ -1173,7 +1173,12 @@ describe("apiBootstrap codec", () => {
     fc.assert(
       fc.property(
         fc.stringMatching(/^[A-Za-z0-9._~+/-]{16,96}$/),
-        fc.integer({ min: 1, max: 65535 }),
+        // Exclude port 80 — it's HTTP's default port, so `new URL("http://h:80")`
+        // strips it, and the codec contract requires an explicit non-default
+        // port (see assertApiBootstrapBrokerUrl). Brokers always bind to
+        // ephemeral high ports in practice; the property should not exercise
+        // input shapes the codec is documented to reject.
+        fc.integer({ min: 1, max: 65535 }).filter((p) => p !== 80),
         (tokenValue, port) => {
           const bootstrap = {
             token: asApiToken(tokenValue),
@@ -1185,6 +1190,15 @@ describe("apiBootstrap codec", () => {
       ),
       { numRuns: 200 },
     );
+  });
+
+  it("rejects http://<loopback>:80 because URL parser strips HTTP default port", () => {
+    // Regression for fast-check finding (seed -795955676): the round-trip
+    // property previously generated port 80, which `new URL` normalizes away.
+    // Codec contract intentionally requires an explicit non-default port.
+    expect(() =>
+      apiBootstrapFromJson({ token: "tok-bootstrap-abcdef", broker_url: "http://127.0.0.1:80" }),
+    ).toThrow(/apiBootstrap\.broker_url/);
   });
 
   it("decodes the v0 wire shape with snake_case broker_url", () => {
@@ -1214,18 +1228,47 @@ describe("apiBootstrap codec", () => {
   ])("rejects non-loopback or malformed broker_url %s", (brokerUrl) => {
     expect(() =>
       apiBootstrapFromJson({ token: "tok-bootstrap-abcdef", broker_url: brokerUrl }),
-    ).toThrow(/apiBootstrap\.broker_url: must be http:\/\/<loopback>:<port>/);
+    ).toThrow(/apiBootstrap\.broker_url: must be http:\/\/<loopback>:<explicit-port>/);
   });
 
-  it("emits the v0 wire shape with snake_case broker_url", () => {
+  it.each([
+    "http://127.0.0.1:54321",
+    "http://localhost:54321",
+    "http://[::1]:54321",
+  ])("emits the v0 wire shape with snake_case broker_url (%s)", (brokerUrl) => {
+    // Mirror the decoder's loopback acceptance matrix on the encoder side
+    // so a future hardening that narrowed the allowlist (e.g. dotted-quad
+    // only) would fail tests on both halves of the codec, not just the
+    // decoder.
     const json = apiBootstrapToJson({
       token: asApiToken("tok-bootstrap-abcdef"),
-      brokerUrl: "http://127.0.0.1:54321",
+      brokerUrl,
     });
     expect(json).toStrictEqual({
       token: "tok-bootstrap-abcdef",
-      broker_url: "http://127.0.0.1:54321",
+      broker_url: brokerUrl,
     });
+  });
+
+  it.each([
+    ["http://127.0.0.1:80", "default-port URL"],
+    ["http://evil.com:8080", "non-loopback host"],
+    ["https://127.0.0.1:8080", "wrong protocol"],
+    ["http://127.0.0.1", "missing port"],
+    ["javascript:alert(1)", "javascript-scheme URL"],
+    ["file:///etc/passwd", "file-scheme URL"],
+  ])("rejects encoder-side broker_url that the decoder would reject (%s — %s)", (brokerUrl) => {
+    // Encoder/decoder symmetry: a TS producer MUST NOT be able to emit
+    // a wire value that this same codec would reject on read. Without
+    // this guard, a producer could write bytes that fail to round-trip,
+    // weakening the wire-shape stability story. Cases mirror the decoder
+    // rejection matrix above so the property is true by construction.
+    expect(() =>
+      apiBootstrapToJson({
+        token: asApiToken("tok-bootstrap-abcdef"),
+        brokerUrl,
+      }),
+    ).toThrow(/apiBootstrap\.broker_url/);
   });
 
   it("rejects camelCase brokerUrl on the wire (lint-enforced shape mismatch)", () => {

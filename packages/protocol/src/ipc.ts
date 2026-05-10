@@ -218,8 +218,15 @@ export function apiBootstrapFromJson(value: unknown): ApiBootstrap {
  * pass through `JSON.stringify` (or hand to a writer that emits the keys
  * verbatim). The wire keys are intentionally snake_case; the runtime TS
  * surface is camelCase by lint rule.
+ *
+ * The encoder runs the same broker-URL invariant as `apiBootstrapFromJson`
+ * so a TS producer cannot emit a wire value (e.g. an implicit-port URL or
+ * a non-loopback host) that this same codec would reject on read. Without
+ * this symmetry, the wire-shape stability story leaks: a producer in TS,
+ * Go, or Rust could write bytes that fail to round-trip.
  */
 export function apiBootstrapToJson(bootstrap: ApiBootstrap): ApiBootstrapWire {
+  assertApiBootstrapBrokerUrl(bootstrap.brokerUrl);
   return { token: bootstrap.token as string, broker_url: bootstrap.brokerUrl };
 }
 
@@ -228,15 +235,21 @@ function assertApiBootstrapBrokerUrl(brokerUrl: string): void {
   try {
     parsed = new URL(brokerUrl);
   } catch {
-    throw new Error("apiBootstrap.broker_url: must be http://<loopback>:<port>");
+    throw new Error("apiBootstrap.broker_url: must be http://<loopback>:<explicit-port>");
   }
+  // Note on `parsed.port === ""`: `new URL("http://h:80")` strips the port
+  // because 80 is HTTP's default. This codec rejects default ports
+  // intentionally — brokers always bind ephemeral high ports, and an
+  // implicit-port URL would round-trip differently than it came in.
   if (
     parsed.protocol !== "http:" ||
     parsed.port === "" ||
     !isAllowedLoopbackHost(parsed.hostname) ||
     !isBrokerPort(Number(parsed.port))
   ) {
-    throw new Error("apiBootstrap.broker_url: must be http://<loopback>:<port>");
+    throw new Error(
+      "apiBootstrap.broker_url: must be http://<loopback>:<explicit-port> (default port 80 is rejected to keep the wire shape stable across round-trips)",
+    );
   }
 }
 
