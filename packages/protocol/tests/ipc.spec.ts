@@ -1231,14 +1231,22 @@ describe("apiBootstrap codec", () => {
     ).toThrow(/apiBootstrap\.broker_url: must be http:\/\/<loopback>:<explicit-port>/);
   });
 
-  it("emits the v0 wire shape with snake_case broker_url", () => {
+  it.each([
+    "http://127.0.0.1:54321",
+    "http://localhost:54321",
+    "http://[::1]:54321",
+  ])("emits the v0 wire shape with snake_case broker_url (%s)", (brokerUrl) => {
+    // Mirror the decoder's loopback acceptance matrix on the encoder side
+    // so a future hardening that narrowed the allowlist (e.g. dotted-quad
+    // only) would fail tests on both halves of the codec, not just the
+    // decoder.
     const json = apiBootstrapToJson({
       token: asApiToken("tok-bootstrap-abcdef"),
-      brokerUrl: "http://127.0.0.1:54321",
+      brokerUrl,
     });
     expect(json).toStrictEqual({
       token: "tok-bootstrap-abcdef",
-      broker_url: "http://127.0.0.1:54321",
+      broker_url: brokerUrl,
     });
   });
 
@@ -1247,11 +1255,14 @@ describe("apiBootstrap codec", () => {
     ["http://evil.com:8080", "non-loopback host"],
     ["https://127.0.0.1:8080", "wrong protocol"],
     ["http://127.0.0.1", "missing port"],
+    ["javascript:alert(1)", "javascript-scheme URL"],
+    ["file:///etc/passwd", "file-scheme URL"],
   ])("rejects encoder-side broker_url that the decoder would reject (%s — %s)", (brokerUrl) => {
     // Encoder/decoder symmetry: a TS producer MUST NOT be able to emit
     // a wire value that this same codec would reject on read. Without
     // this guard, a producer could write bytes that fail to round-trip,
-    // weakening the wire-shape stability story.
+    // weakening the wire-shape stability story. Cases mirror the decoder
+    // rejection matrix above so the property is true by construction.
     expect(() =>
       apiBootstrapToJson({
         token: asApiToken("tok-bootstrap-abcdef"),

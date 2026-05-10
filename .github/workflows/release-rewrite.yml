@@ -87,6 +87,11 @@ jobs:
           WUPHF_VERIFY_LATEST_YML_RUN_SELF_TEST=1 \
             WUPHF_VERIFY_LATEST_YML_SELF_TEST_ONLY=1 \
             bash apps/installer-stub/scripts/verify-latest-yml.sh
+          # M4 regression: setDefaultCache must not mutate parent process.env.
+          # apps/installer-stub/package.json's bun-test script is not invoked
+          # by any other CI job, so the only automated gate for this property
+          # lives here (and in the matching lefthook installer-invariants).
+          node apps/installer-stub/scripts/run-builder.test.js
 
   build-mac:
     needs:

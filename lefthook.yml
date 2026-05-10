@@ -219,6 +219,12 @@ pre-push:
         WUPHF_VERIFY_LATEST_YML_RUN_SELF_TEST=1 \
           WUPHF_VERIFY_LATEST_YML_SELF_TEST_ONLY=1 \
           bash apps/installer-stub/scripts/verify-latest-yml.sh
+        # M4 regression: setDefaultCache must not mutate parent process.env
+        # (was leaking ELECTRON_CACHE / ELECTRON_BUILDER_CACHE into subsequent
+        # commands). The unit test runs in <100ms and is the only automated
+        # gate for that invariant — apps/installer-stub/package.json's bun
+        # test script is not invoked anywhere else in CI or pre-push.
+        node apps/installer-stub/scripts/run-builder.test.js
     file-size:
       # Enforce CONTRIBUTING.md's file-size budget: warn at 800 LOC, fail
       # at 1500 LOC unless the file is on scripts/file-size-allowlist.txt
