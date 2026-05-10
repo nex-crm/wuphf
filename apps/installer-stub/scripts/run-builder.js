@@ -58,6 +58,31 @@ function ensureBundledToolExecutables() {
 
 ensureBundledToolExecutables();
 
+const builderCli = require.resolve("electron-builder/cli");
+
+function appBuilderBinaryPath() {
+  const packagePath = require.resolve("app-builder-bin/package.json", {
+    paths: [path.dirname(builderCli)],
+  });
+  const packageRoot = path.dirname(packagePath);
+  const binaryPath =
+    process.platform === "darwin"
+      ? path.join(
+          packageRoot,
+          "mac",
+          `app-builder_${process.arch === "x64" ? "amd64" : process.arch}`,
+        )
+      : process.platform === "win32"
+        ? path.join(packageRoot, "win", process.arch, "app-builder.exe")
+        : path.join(packageRoot, "linux", process.arch, "app-builder");
+
+  if (!fs.existsSync(binaryPath)) {
+    throw new Error(`app-builder binary not found at ${binaryPath}`);
+  }
+
+  return binaryPath;
+}
+
 function electronBuilderEnv() {
   const env = {};
 
@@ -69,10 +94,11 @@ function electronBuilderEnv() {
     env[key] = value;
   }
 
+  env.CUSTOM_APP_BUILDER_PATH ||= appBuilderBinaryPath();
+
   return env;
 }
 
-const builderCli = require.resolve("electron-builder/cli");
 const nodeBinary = process.env.NODE_BINARY || process.execPath;
 const releaseMode = process.env.WUPHF_RELEASE_MODE || "pr";
 
@@ -97,6 +123,8 @@ if (process.versions.bun && !process.env.NODE_BINARY) {
 // dependency installs. When setup-bun leaves npm_execpath pointing at Bun's
 // native binary, electron-builder runs `node $npm_execpath` and Node fails to
 // parse the binary. Scrub Bun/npm lifecycle env before spawning the builder.
+// Also pass CUSTOM_APP_BUILDER_PATH from electron-builder's dependency tree so
+// builder-util does not depend on Bun's root node_modules symlink shape in CI.
 const result = spawnSync(nodeBinary, [builderCli, ...builderArgs], {
   env: electronBuilderEnv(),
   stdio: "inherit",
