@@ -14,12 +14,14 @@ const DEFAULT_MAX_BACKOFF_MS = 60_000;
 const DEFAULT_MAX_RESTART_RETRIES = 5;
 const DEFAULT_STABILITY_WINDOW_MS = 60_000;
 const DEFAULT_LIVENESS_STALE_MS = 5_000;
+/* v8 ignore start -- defensive defaults; production paths inject a real Logger */
 const NOOP_LOGGER: Logger = {
   debug: () => undefined,
   info: () => undefined,
   warn: () => undefined,
   error: () => undefined,
 };
+/* v8 ignore stop */
 
 type UtilityProcessHandle = ReturnType<typeof utilityProcess.fork>;
 type ForkUtilityProcess = typeof utilityProcess.fork;

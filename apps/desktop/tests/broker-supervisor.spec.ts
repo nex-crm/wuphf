@@ -797,6 +797,47 @@ describe("BrokerSupervisor", () => {
       },
     });
   });
+
+  it("uses the noop logger silently when no logger is provided", () => {
+    const processHandle = new FakeUtilityProcess(4321);
+    const { forkProcess } = createForkMock([processHandle]);
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+    });
+
+    expect(() => supervisor.start()).not.toThrow();
+    processHandle.emit("message", { alive: true });
+    expect(supervisor.getStatus()).toBe("alive");
+  });
+
+  it("does not reschedule restart when start() throws on a fork-queue exhaustion during retry", async () => {
+    vi.useFakeTimers();
+    let nowMs = 0;
+    const monotonicNow = (): number => nowMs;
+    const processHandle = new FakeUtilityProcess(4321);
+    const { forkProcess } = createForkMock([processHandle]);
+    const { logger, calls } = createMemoryLogger();
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+      logger,
+      monotonicNow,
+      maxRestartRetries: 1,
+      firstBackoffMs: 100,
+    });
+
+    supervisor.start();
+    processHandle.emit("message", { alive: true });
+    processHandle.emit("exit", 1);
+
+    nowMs = 100;
+    await vi.advanceTimersByTimeAsync(100);
+    await Promise.resolve();
+
+    expect(calls.some((call) => call.event === "broker_restart_start_failed")).toBe(true);
+    expect(supervisor.getStatus()).toBe("dead");
+  });
 });
 
 describe("runWindowsTaskkill", () => {
