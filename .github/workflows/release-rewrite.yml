@@ -66,6 +66,13 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y ripgrep
+      - name: Install workspace deps
+        # verify-latest-yml.sh's manifest_field/manifest_file_entries shell
+        # out to `bun -e <js> <args>` against js-yaml — which lives in
+        # apps/installer-stub/devDependencies. Without a frozen-lockfile
+        # install, the recursive bash call inside run_self_test() fails
+        # silently (set -e) when js-yaml resolution throws.
+        run: bun install --frozen-lockfile
       - name: Run installer invariant gates
         run: |
           bun --version

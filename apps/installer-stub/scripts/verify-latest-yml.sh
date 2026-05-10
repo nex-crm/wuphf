@@ -255,46 +255,52 @@ if [[ "${#latest_files[@]}" -eq 0 ]]; then
   exit 1
 fi
 
+# Args go through env vars rather than argv because `bun -e <code> <args>`
+# argv handling drifted between bun 1.1.38 (CI pin) and bun 1.3 (local /
+# Renovate-bumped target): 1.1 sets argv[1]="[eval]" and shifts user args
+# down (matching node's behavior), while 1.3 skips the [eval] slot.
+# Env-var passing is uniform across both runtimes.
 manifest_field() {
   local file="$1"
   local field="$2"
 
   cd "${app_dir}" &&
-    bun -e '
+    WUPHF_MANIFEST_FILE="${file}" WUPHF_MANIFEST_FIELD="${field}" bun -e '
       const fs = require("node:fs");
       const yaml = require("js-yaml");
-      const manifest = yaml.load(fs.readFileSync(process.argv[1], "utf8"));
-      const value = manifest?.[process.argv[2]];
+      const manifest = yaml.load(fs.readFileSync(process.env.WUPHF_MANIFEST_FILE, "utf8"));
+      const value = manifest?.[process.env.WUPHF_MANIFEST_FIELD];
       if (value !== undefined && value !== null) {
         process.stdout.write(String(value));
       }
-    ' "${file}" "${field}"
+    '
 }
 
 manifest_file_entries() {
   local file="$1"
 
   cd "${app_dir}" &&
-    bun -e '
+    WUPHF_MANIFEST_FILE="${file}" bun -e '
       const fs = require("node:fs");
       const yaml = require("js-yaml");
-      const manifest = yaml.load(fs.readFileSync(process.argv[1], "utf8"));
+      const manifestPath = process.env.WUPHF_MANIFEST_FILE;
+      const manifest = yaml.load(fs.readFileSync(manifestPath, "utf8"));
       const files = Array.isArray(manifest?.files) ? manifest.files : [];
       for (const [index, entry] of files.entries()) {
         if (!entry || typeof entry !== "object") {
-          console.error(process.argv[1] + " files[" + index + "] is not an object");
+          console.error(manifestPath + " files[" + index + "] is not an object");
           process.exit(1);
         }
 
         const entryPath = entry.url ?? entry.path;
         if (typeof entryPath !== "string" || entryPath.length === 0) {
-          console.error(process.argv[1] + " files[" + index + "] is missing url/path");
+          console.error(manifestPath + " files[" + index + "] is missing url/path");
           process.exit(1);
         }
 
         process.stdout.write([entryPath, entry.sha512 ?? "", entry.size ?? ""].join("\u001f") + "\0");
       }
-    ' "${file}"
+    '
 }
 
 sha512_base64() {
