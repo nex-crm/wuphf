@@ -15,7 +15,7 @@ function run(command, args) {
 }
 
 exports.default = async function stapleMacApp(context) {
-  if (process.platform !== "darwin" || process.env.WUPHF_RELEASE_MODE !== "production") {
+  if (process.platform !== "darwin") {
     return;
   }
 
@@ -27,10 +27,24 @@ exports.default = async function stapleMacApp(context) {
     );
 
   if (!appBundle) {
+    if (process.env.WUPHF_RELEASE_MODE !== "production") {
+      return;
+    }
     throw new Error(`No .app bundle found in ${context.appOutDir}`);
   }
 
   const appPath = path.join(context.appOutDir, appBundle);
+  const signatureResources = path.join(appPath, "Contents", "_CodeSignature", "CodeResources");
+
+  if (process.env.WUPHF_RELEASE_MODE !== "production") {
+    if (fs.existsSync(signatureResources)) {
+      throw new Error(
+        `Refusing to skip stapling for signed macOS app outside production mode: ${appPath}`,
+      );
+    }
+    return;
+  }
+
   run("xcrun", ["stapler", "staple", appPath]);
   run("xcrun", ["stapler", "validate", appPath]);
 };
