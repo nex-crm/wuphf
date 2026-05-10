@@ -167,6 +167,25 @@ jobs:
           security list-keychains -d user -s "${keychain}"
           security find-identity -v -p codesigning "${keychain}"
           rm -f "${p12}"
+      - name: Materialize installer-stub workspace prod deps
+        # The repo-root `bun install --frozen-lockfile` step (run earlier in
+        # the platform build) places workspace `dependencies` in the central
+        # .bun cache and generally symlinks them into per-workspace
+        # node_modules — but on bun 1.1.38 / windows-2022 the symlink is
+        # not always created, which means electron-builder cannot find
+        # electron-updater and prunes it out of app.asar. Issue #771: that
+        # is exactly the original failure mode. Re-run `bun install` scoped
+        # to the workspace to force the per-package node_modules layout,
+        # then assert the allowlisted dep actually landed there before
+        # electron-builder runs.
+        working-directory: apps/installer-stub
+        run: |
+          bun install --frozen-lockfile
+          if [[ ! -e node_modules/electron-updater/package.json ]]; then
+            echo "FAIL: electron-updater did not materialize in apps/installer-stub/node_modules" >&2
+            ls -la node_modules/ | head -30 >&2
+            exit 1
+          fi
       - name: Build macOS PR artifacts
         if: needs.detect-secrets.outputs.is_release != 'true'
         working-directory: apps/installer-stub
@@ -308,6 +327,21 @@ jobs:
           AZURE_ENDPOINT: ${{ secrets.AZURE_ENDPOINT }}
           AZURE_EXPECTED_PUBLISHER_NAME: ${{ secrets.AZURE_EXPECTED_PUBLISHER_NAME }}
         run: bash apps/installer-stub/scripts/detect-signing-secrets.sh
+      - name: Materialize installer-stub workspace prod deps
+        # Same workaround as the macOS job — bun 1.1.38 / windows-2022 does
+        # not always materialize workspace `dependencies` symlinks into the
+        # per-package node_modules tree. Without this step electron-builder
+        # cannot find electron-updater and prunes it out of app.asar (the
+        # original #771 failure mode that this PR is fixing).
+        working-directory: apps/installer-stub
+        shell: bash
+        run: |
+          bun install --frozen-lockfile
+          if [[ ! -e node_modules/electron-updater/package.json ]]; then
+            echo "FAIL: electron-updater did not materialize in apps/installer-stub/node_modules" >&2
+            ls -la node_modules/ | head -30 >&2
+            exit 1
+          fi
       - name: Build Windows PR artifacts
         if: needs.detect-secrets.outputs.is_release != 'true'
         working-directory: apps/installer-stub
@@ -529,6 +563,19 @@ jobs:
           export WUPHF_BUILD_VERSION="${version}"
           echo "WUPHF_BUILD_VERSION=${version}" >> "${GITHUB_ENV}"
           node apps/installer-stub/scripts/normalize-package-version.js
+      - name: Materialize installer-stub workspace prod deps
+        # Same workaround as the macOS + Windows jobs — see those jobs' step
+        # comment. Linux specifically is the most likely platform where
+        # symlinks DO work, but we run the same step here so the layout is
+        # uniform across platforms and the gate has no per-platform skew.
+        working-directory: apps/installer-stub
+        run: |
+          bun install --frozen-lockfile
+          if [[ ! -e node_modules/electron-updater/package.json ]]; then
+            echo "FAIL: electron-updater did not materialize in apps/installer-stub/node_modules" >&2
+            ls -la node_modules/ | head -30 >&2
+            exit 1
+          fi
       - name: Build Linux PR artifacts
         if: needs.detect-secrets.outputs.is_release != 'true'
         working-directory: apps/installer-stub
