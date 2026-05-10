@@ -326,6 +326,7 @@ jobs:
       - name: Build + sign Windows artifacts (azureSignOptions)
         if: needs.detect-secrets.outputs.is_release == 'true'
         working-directory: apps/installer-stub
+        shell: bash
         env:
           # Auth env vars for electron-builder's azureSignOptions. The
           # Azure SDK's EnvironmentCredential picks these up automatically
@@ -338,8 +339,8 @@ jobs:
           AZURE_CERT_PROFILE_NAME: ${{ secrets.AZURE_CERT_PROFILE_NAME }}
           AZURE_EXPECTED_PUBLISHER_NAME: ${{ secrets.AZURE_EXPECTED_PUBLISHER_NAME }}
         # Issue #772 ship-blocker fix: signing happens DURING electron-builder
-        # packaging, not after. electron-builder signs each .exe + .dll
-        # produced by the win-unpacked staging tree, then NSIS bundles the
+        # packaging, not after. electron-builder signs each .exe / .dll /
+        # .node from the win-unpacked staging tree, then NSIS bundles the
         # already-signed binaries into the wrapper installer .exe (which
         # also gets signed). Result: binaries the user actually executes
         # after install carry the same Authenticode signature as the
@@ -355,12 +356,42 @@ jobs:
         # account/profile/publisher) are validated in the prior
         # `Detect Azure signing secrets` step; if any are missing the job
         # fails before reaching here.
+        #
+        # Workflow-level retry (R2 codex finding): electron-builder's
+        # built-in retry only matches DNS-resolution + file-lock errors,
+        # NOT Azure 5xx / throttling / SignerSign() failures. The previous
+        # workflow had 3 explicit attempts of Azure/trusted-signing-action
+        # with sleeps; preserve that semantic by wrapping the build step
+        # in an explicit retry loop with clean dist between attempts.
+        # 30s sleep matches the prior wait_before_azure_signing_retry pattern.
         run: |
-          bun run build:win -- \
-            --config.win.azureSignOptions.endpoint="$AZURE_ENDPOINT" \
-            --config.win.azureSignOptions.codeSigningAccountName="$AZURE_SIGNING_ACCOUNT_NAME" \
-            --config.win.azureSignOptions.certificateProfileName="$AZURE_CERT_PROFILE_NAME" \
-            --config.win.azureSignOptions.publisherName="$AZURE_EXPECTED_PUBLISHER_NAME"
+          set -euo pipefail
+          attempts=3
+          for attempt in $(seq 1 "$attempts"); do
+            echo "::group::azureSignOptions build attempt ${attempt}/${attempts}"
+            rm -rf dist
+            if bun run build:win -- \
+              --config.win.azureSignOptions.endpoint="$AZURE_ENDPOINT" \
+              --config.win.azureSignOptions.codeSigningAccountName="$AZURE_SIGNING_ACCOUNT_NAME" \
+              --config.win.azureSignOptions.certificateProfileName="$AZURE_CERT_PROFILE_NAME" \
+              --config.win.azureSignOptions.publisherName="$AZURE_EXPECTED_PUBLISHER_NAME"; then
+              echo "azureSignOptions build attempt ${attempt} succeeded"
+              echo "::endgroup::"
+              if [[ "$attempt" -gt 1 ]]; then
+                echo "::warning title=Azure signing flakiness::Azure Trusted Signing required ${attempt}/${attempts} attempts to succeed. Check service health before the next release window."
+              fi
+              exit 0
+            fi
+            status=$?
+            echo "::endgroup::"
+            echo "azureSignOptions build attempt ${attempt} failed with exit ${status}"
+            if [[ "$attempt" -lt "$attempts" ]]; then
+              echo "Sleeping 30s before retry"
+              sleep 30
+            fi
+          done
+          echo "All ${attempts} azureSignOptions build attempts failed" >&2
+          exit 1
       - name: Assert allowlisted runtime deps are bundled into the Windows app
         # Issue #771 ship-blocker gate (see macOS job for full rationale).
         #
@@ -449,9 +480,21 @@ jobs:
           # signed. SmartScreen / HVCI / Smart App Control / electron-updater
           # publisherName checks all run against the INSTALLED binaries,
           # not the wrapper.
+          #
+          # IMPORTANT (R2 codex finding): electron-builder embeds the actual
+          # app payload as `$PLUGINSDIR\app-64.7z` inside the NSIS wrapper.
+          # A single `7z x` of the wrapper unpacks the wrapper layer (NSIS
+          # plugins, uninstaller, the embedded .7z) but the binaries the
+          # user runs after install live INSIDE that nested .7z. We must
+          # recursively extract the nested archive and assert against THAT
+          # tree — otherwise the smoke validates wrapper/plugin binaries
+          # while missing the exact #772 failure mode.
           $extractDir = Join-Path -Path $env:RUNNER_TEMP -ChildPath "wuphf-installer-extract"
-          if (Test-Path $extractDir) { Remove-Item -Path $extractDir -Recurse -Force }
-          New-Item -ItemType Directory -Path $extractDir | Out-Null
+          $appDir = Join-Path -Path $env:RUNNER_TEMP -ChildPath "wuphf-installer-app"
+          foreach ($d in @($extractDir, $appDir)) {
+            if (Test-Path $d) { Remove-Item -Path $d -Recurse -Force }
+            New-Item -ItemType Directory -Path $d | Out-Null
+          }
 
           $installer = $installers[0]
           # 7z is preinstalled on windows-2022 runners and can extract NSIS.
@@ -460,9 +503,29 @@ jobs:
             throw "7z failed to extract NSIS installer $($installer.FullName) (exit $LASTEXITCODE)"
           }
 
-          $extractedPayloads = Get-ChildItem -Path $extractDir -Include *.exe,*.dll -File -Recurse
-          Assert-Signed $extractedPayloads "extracted NSIS installer payload"
-          Write-Output "OK: extracted NSIS payload — $($extractedPayloads.Count) signed payloads"
+          # Layer 2a: assert wrapper-level binaries are signed. These are
+          # NSIS plugin DLLs + uninstaller .exe — also user-visible during
+          # install/uninstall and SmartScreen checks them.
+          $wrapperPayloads = Get-ChildItem -Path $extractDir -Include *.exe,*.dll -File -Recurse
+          Assert-Signed $wrapperPayloads "extracted NSIS wrapper payload"
+          Write-Output "OK: NSIS wrapper — $($wrapperPayloads.Count) signed payloads"
+
+          # Layer 2b: locate the embedded app archive ($PLUGINSDIR\app-*.7z
+          # or app-*.zip), extract it, and assert THE INSTALLED app tree
+          # is signed. This is the gate that catches #772 end-to-end.
+          $embeddedArchives = Get-ChildItem -Path $extractDir -Include 'app-*.7z','app-*.zip' -File -Recurse
+          if ($embeddedArchives.Count -eq 0) {
+            throw "Could not find embedded app-*.7z/zip under extracted NSIS payload — electron-builder's NSIS template normally embeds it under \$PLUGINSDIR. Layer 2b cannot run without it."
+          }
+          foreach ($archive in $embeddedArchives) {
+            & 7z x -y "-o$appDir" $archive.FullName
+            if ($LASTEXITCODE -ne 0) {
+              throw "7z failed to extract embedded app archive $($archive.FullName) (exit $LASTEXITCODE)"
+            }
+          }
+          $appPayloads = Get-ChildItem -Path $appDir -Include *.exe,*.dll,*.node -File -Recurse
+          Assert-Signed $appPayloads "extracted installed app tree"
+          Write-Output "OK: installed app tree — $($appPayloads.Count) signed payloads"
       - name: Assert Windows artifacts
         shell: bash
         working-directory: apps/installer-stub

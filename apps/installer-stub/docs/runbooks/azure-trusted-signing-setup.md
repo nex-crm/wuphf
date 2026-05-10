@@ -142,22 +142,29 @@ The Windows job now:
    `--config.win.azureSignOptions.codeSigningAccountName=$AZURE_SIGNING_ACCOUNT_NAME`,
    `--config.win.azureSignOptions.certificateProfileName=$AZURE_CERT_PROFILE_NAME`,
    `--config.win.azureSignOptions.publisherName=$AZURE_EXPECTED_PUBLISHER_NAME`.
-   electron-builder signs each `.exe` and `.dll` produced by the
+   electron-builder signs each `.exe`, `.dll`, AND `.node` (per
+   `win.signExts` in `electron-builder.yml`) produced by the
    win-unpacked staging tree, then NSIS bundles the already-signed
    binaries into the wrapper installer (which also gets signed).
-   electron-builder's azureSignOptions has its own retry behavior, so
-   no external Azure/trusted-signing-action 3-attempt orchestration is
-   needed.
+   The build step is wrapped in a 3-attempt workflow retry loop
+   with 30-second sleeps between attempts and a `dist/` reset before
+   each retry — electron-builder's built-in retry only matches
+   DNS-resolution + file-lock errors, so Azure 5xx / throttling /
+   `SignerSign()` failures need workflow-level retry coverage.
 3. Asserts the Authenticode signature is `Valid` and signer CN equals
-   `AZURE_EXPECTED_PUBLISHER_NAME` for both:
-   - **Layer 1**: every `*.exe` and `*.dll` in the `dist/` staging tree
+   `AZURE_EXPECTED_PUBLISHER_NAME` across THREE layers:
+   - **Layer 1**: every `*.exe`/`*.dll` in the `dist/` staging tree
      (the wrapper installer + everything electron-builder signed in
      process).
-   - **Layer 2 (NEW for #772)**: every `*.exe` and `*.dll` extracted
-     FROM the NSIS installer payload via `7z x`. This is what the user
-     actually runs after install — SmartScreen, HVCI, Smart App Control,
-     and electron-updater's publisherName check all evaluate the
-     installed binaries, not the wrapper.
+   - **Layer 2a**: every `*.exe`/`*.dll` extracted from the outer NSIS
+     wrapper via `7z x` (NSIS plugin DLLs, uninstaller .exe, etc.).
+   - **Layer 2b (NEW for #772)**: every `*.exe`/`*.dll`/`*.node`
+     extracted from the embedded `app-*.7z` archive that NSIS unpacks
+     into `$INSTDIR` at install time. THIS is the binary tree the user
+     actually runs after install — SmartScreen, HVCI, Smart App
+     Control, and electron-updater's publisherName check all evaluate
+     these binaries, not the wrapper. Without Layer 2b a regression
+     to post-NSIS signing would re-introduce #772 invisibly.
 
 `win.signtoolOptions.publisherName` in `electron-builder.yml`
 (`WUPHF (installer stub)`) stays as the placeholder for PR builds, which

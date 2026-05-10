@@ -65,6 +65,16 @@ win:
   # the release workflow only adds azureSignOptions on top via CLI.
   signtoolOptions:
     publisherName: WUPHF (installer stub)
+  # electron-builder 26 only signs `.exe` by default. Sign DLLs + native
+  # addons too — Electron apps include framework DLLs (Electron Framework,
+  # ffmpeg, etc.) and any future N-API native addons, all of which get
+  # checked by SmartScreen / HVCI / Smart App Control / electron-updater
+  # publisherName-bind. R2 codex (3 lenses converged) flagged this as
+  # BLOCK because the assert step was claiming "every .exe and .dll"
+  # signed while the config silently dropped DLLs.
+  signExts:
+    - .dll
+    - .node
   target:
     - target: nsis
       arch:
