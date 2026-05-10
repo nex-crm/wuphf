@@ -166,6 +166,61 @@ func TestIntakeValidate_MissingRequiredFields(t *testing.T) {
 	}
 }
 
+// TestIntakeValidate_FieldSoftCap (B-FU-1) asserts the 4 KiB soft cap on
+// Spec.Problem and Spec.Assignment. A non-compliant LLM that emits a
+// multi-kilobyte spec is rejected here so downstream consumers
+// (broker memory, on-disk packet, decision UI) never see runaway payloads.
+func TestIntakeValidate_FieldSoftCap(t *testing.T) {
+	t.Parallel()
+	huge := strings.Repeat("x", intakeFieldSoftCapBytes+1)
+	cases := []struct {
+		name   string
+		body   string
+		expect string
+	}{
+		{
+			name: "problem exceeds cap",
+			body: `{
+				"problem": "` + huge + `",
+				"acceptance_criteria": [{"statement": "ship it"}],
+				"assignment": "go"
+			}`,
+			expect: "problem exceeds",
+		},
+		{
+			name: "assignment exceeds cap",
+			body: `{
+				"problem": "we need a thing",
+				"acceptance_criteria": [{"statement": "ship it"}],
+				"assignment": "` + huge + `"
+			}`,
+			expect: "assignment exceeds",
+		},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			b := newTestBroker(t)
+			provider := &fakeIntakeProvider{response: fenceJSON(tc.body)}
+
+			_, err := b.StartIntake(context.Background(), "intent", provider)
+			if err == nil {
+				t.Fatal("expected cap rejection, got nil")
+			}
+			if !strings.Contains(err.Error(), tc.expect) {
+				t.Fatalf("error should mention %q, got %q", tc.expect, err.Error())
+			}
+			// No transition: the cap-rejected task should never appear in
+			// the ready bucket.
+			idx := b.LifecycleIndexSnapshot()
+			if len(idx[LifecycleStateReady]) != 0 {
+				t.Fatalf("no task should be in ready state on cap violation, got %v", idx[LifecycleStateReady])
+			}
+		})
+	}
+}
+
 // TestIntakeParse_ExtraUnknownFields covers gate #5 path 3: unknown JSON
 // keys are silently ignored (encoding/json's default), valid fields parse
 // cleanly, and the spec passes validation.

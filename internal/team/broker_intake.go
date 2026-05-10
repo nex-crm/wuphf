@@ -525,10 +525,17 @@ func parseIntakeSpec(raw string) (Spec, error) {
 // len(AcceptanceCriteria) >= 1, Assignment != "". Returns a multi-field
 // error message so the CLI can surface every reason the spec was rejected
 // in one round-trip.
+//
+// Soft caps (B-FU-1): Problem and Assignment are capped at 4 KiB each. The
+// system prompt asks for ≤1500 characters total; a non-compliant LLM that
+// emits a multi-kilobyte spec is rejected here so downstream consumers
+// (broker memory, on-disk packet, decision UI) never see runaway payloads.
 func validateIntakeSpec(spec Spec) error {
 	var reasons []string
 	if spec.Problem == "" {
 		reasons = append(reasons, "problem is empty (required)")
+	} else if len(spec.Problem) > intakeFieldSoftCapBytes {
+		reasons = append(reasons, fmt.Sprintf("problem exceeds %d bytes (got %d)", intakeFieldSoftCapBytes, len(spec.Problem)))
 	}
 	if len(spec.AcceptanceCriteria) < 1 {
 		reasons = append(reasons, "acceptance_criteria has 0 entries (require >= 1)")
@@ -541,12 +548,20 @@ func validateIntakeSpec(spec Spec) error {
 	}
 	if spec.Assignment == "" {
 		reasons = append(reasons, "assignment is empty (required)")
+	} else if len(spec.Assignment) > intakeFieldSoftCapBytes {
+		reasons = append(reasons, fmt.Sprintf("assignment exceeds %d bytes (got %d)", intakeFieldSoftCapBytes, len(spec.Assignment)))
 	}
 	if len(reasons) == 0 {
 		return nil
 	}
 	return fmt.Errorf("intake: spec rejected (%s)", strings.Join(reasons, "; "))
 }
+
+// intakeFieldSoftCapBytes is the per-field soft cap on Spec.Problem and
+// Spec.Assignment. The system prompt mandates ≤1500 characters total; 4 KiB
+// is a generous ceiling that accommodates UTF-8 multi-byte glyphs and
+// minor formatting drift while rejecting LLM-runaway payloads.
+const intakeFieldSoftCapBytes = 4 * 1024
 
 // emitSpecCreatedEvent writes a manifest-style headless event onto the
 // "intake" agent's stream buffer when a spec validates and the task
