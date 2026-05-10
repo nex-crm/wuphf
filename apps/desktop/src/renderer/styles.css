@@ -1,0 +1,73 @@
+:root {
+  color-scheme: dark;
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
+    monospace;
+  background: #111418;
+  color: #f4f7fb;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  min-width: 320px;
+  min-height: 100vh;
+  margin: 0;
+  display: grid;
+  place-items: center;
+  background: #111418;
+}
+
+.status-pane {
+  width: min(92vw, 560px);
+  padding: 32px;
+  border: 1px solid #2d3744;
+  border-radius: 8px;
+  background: #171c22;
+}
+
+h1 {
+  margin: 0 0 24px;
+  font-size: 22px;
+  line-height: 1.2;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.status-line {
+  margin: 0 0 12px;
+  color: #d8e1ec;
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+button {
+  margin-top: 16px;
+  min-height: 38px;
+  padding: 0 14px;
+  border: 1px solid #627086;
+  border-radius: 6px;
+  background: #f4f7fb;
+  color: #111418;
+  font: inherit;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #dce6f2;
+}
+
+button:focus-visible {
+  outline: 2px solid #7ab7ff;
+  outline-offset: 3px;
+}
+
+.error-line {
+  min-height: 18px;
+  margin: 18px 0 0;
+  color: #ffb0b0;
+  font-size: 13px;
+  line-height: 1.4;
+}
