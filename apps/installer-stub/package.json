@@ -26,15 +26,22 @@
     "build:dry-run": "node scripts/run-dry-run.js",
     "check:secrets": "bash scripts/detect-signing-secrets.sh",
     "check:invariants": "bash scripts/check-invariants.sh",
-    "test": "bash scripts/check-invariants-self-test.sh && WUPHF_VERIFY_LATEST_YML_RUN_SELF_TEST=1 WUPHF_VERIFY_LATEST_YML_SELF_TEST_ONLY=1 bash scripts/verify-latest-yml.sh && bun test scripts/refresh-latest-yml.test.js && node scripts/normalize-package-version.test.js && node scripts/run-builder.test.js",
+    "test": "bash scripts/check-invariants-self-test.sh && WUPHF_VERIFY_LATEST_YML_RUN_SELF_TEST=1 WUPHF_VERIFY_LATEST_YML_SELF_TEST_ONLY=1 bash scripts/verify-latest-yml.sh && bun test scripts/refresh-latest-yml.test.js && node scripts/normalize-package-version.test.js && node scripts/run-builder.test.js && node scripts/check-packaged-runtime-deps.test.js",
     "verify:latest-yml": "bash scripts/verify-latest-yml.sh"
+  },
+  "dependencies": {
+    "electron-updater": "6.3.9"
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.13",
+    "@electron/asar": "3.4.1",
     "@types/node": "22.10.0",
     "electron": "42.0.1",
     "electron-builder": "25.1.8",
-    "electron-updater": "6.3.9",
     "js-yaml": "4.1.1"
-  }
+  },
+  "wuphfRuntimeDependenciesAllowlist": [
+    "electron-updater"
+  ],
+  "wuphfRuntimeDependenciesAllowlistNotes": "electron-updater is required at runtime by src/main.js (the only intentional production dependency in the stub). The companion check-invariants.sh enforces that no other names appear in the dependencies block; widening the allowlist requires updating BOTH this field and the invariant gate, in the same PR. See issue #771."
 }

@@ -92,6 +92,12 @@ jobs:
           # by any other CI job, so the only automated gate for this property
           # lives here (and in the matching lefthook installer-invariants).
           node apps/installer-stub/scripts/run-builder.test.js
+          # Issue #771: self-test for the packaged-runtime-deps check itself.
+          # The real gate that runs against actual electron-builder output
+          # lives inside each platform build job (post-build, pre-sign);
+          # this self-test catches regressions in the check's logic without
+          # waiting for a 5-minute platform build to fail.
+          node apps/installer-stub/scripts/check-packaged-runtime-deps.test.js
 
   build-mac:
     needs:
@@ -174,6 +180,15 @@ jobs:
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           NODE_OPTIONS: --require ./build/notarize-with-retry.js
         run: bun run build:mac
+      - name: Assert allowlisted runtime deps are bundled into the macOS app
+        # Issue #771 ship-blocker gate: confirms every name in
+        # wuphfRuntimeDependenciesAllowlist actually lives in app.asar (or
+        # app.asar.unpacked/) before signing/notarization consumes the bundle.
+        # Catches the original "electron-updater pruned out of asar because
+        # it was a devDep" failure mode that the existing artifact-existence
+        # checks did not.
+        working-directory: apps/installer-stub
+        run: node scripts/check-packaged-runtime-deps.js dist
       - name: Staple and validate macOS DMG
         if: needs.detect-secrets.outputs.is_release == 'true'
         working-directory: apps/installer-stub
@@ -314,6 +329,12 @@ jobs:
             exit 1
           fi
           bun run build:win -- --config.win.publisherName="$AZURE_EXPECTED_PUBLISHER_NAME"
+      - name: Assert allowlisted runtime deps are bundled into the Windows app
+        # Issue #771 ship-blocker gate: see corresponding comment on the macOS
+        # job. Runs after both PR and release Windows builds via the post-step
+        # check; either path produces dist/win-unpacked/.
+        working-directory: apps/installer-stub
+        run: node scripts/check-packaged-runtime-deps.js dist
       - name: Sign Windows artifacts (attempt 1)
         id: sign_windows_1
         if: needs.detect-secrets.outputs.is_release == 'true'
@@ -516,6 +537,12 @@ jobs:
         if: needs.detect-secrets.outputs.is_release == 'true'
         working-directory: apps/installer-stub
         run: bun run build:linux
+      - name: Assert allowlisted runtime deps are bundled into the Linux app
+        # Issue #771 ship-blocker gate: see corresponding comment on the macOS
+        # job. Both PR and release Linux builds produce dist/linux-unpacked/,
+        # so the gate runs unconditionally after either build path.
+        working-directory: apps/installer-stub
+        run: node scripts/check-packaged-runtime-deps.js dist
       - name: Assert Linux artifacts
         working-directory: apps/installer-stub
         run: |

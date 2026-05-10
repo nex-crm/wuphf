@@ -52,19 +52,72 @@ while IFS= read -r match; do
 done < <(rg -n --pcre2 "${cert_path_regex}" "${scan_targets[@]}" || true)
 
 # electron-builder.yml sets `npmRebuild: false` to avoid the bun npm_execpath
-# leak in CI. That's safe ONLY while the stub has no dependency blocks that
-# electron-builder may install/rebuild for runtime packaging.
+# leak in CI. That's safe while the stub has no NATIVE-MODULE production
+# dependencies (electron-builder's npmRebuild step rebuilds native bindings
+# under bun, which crashes when bun is the running JS host).
+#
+# Pure-JS production dependencies are allowed because npmRebuild does not
+# touch them. The allowlist is enforced as a closed set: any production dep
+# whose name does not appear in `wuphfRuntimeDependenciesAllowlist` (in
+# package.json) fails the gate. peerDependencies + optionalDependencies are
+# still forbidden outright — they would expand the supply-chain surface
+# without electron-builder bundling them deterministically.
+#
+# Why not allow arbitrary deps? Issue #771 surfaced that
+# `electron-updater` was wired into src/main.js but only declared in
+# devDependencies, so the packaged app crashed on launch (devDeps are
+# pruned out of the asar). The fix moves it to `dependencies` and locks
+# the allowlist to that single audited name; widening requires editing
+# BOTH package.json's allowlist field AND this invariant in the same
+# PR, which is intentional friction.
 dependency_check_output="$(
   cd "${repo_root}" &&
     bun -e '
       const pkg = require("./apps/installer-stub/package.json");
-      const forbiddenBlocks = ["dependencies", "peerDependencies", "optionalDependencies"];
+      const allowlist = new Set(
+        Array.isArray(pkg.wuphfRuntimeDependenciesAllowlist)
+          ? pkg.wuphfRuntimeDependenciesAllowlist
+          : [],
+      );
+
+      const forbiddenBlocks = ["peerDependencies", "optionalDependencies"];
       let failed = false;
 
       for (const blockName of forbiddenBlocks) {
         const block = pkg[blockName];
         if (block && typeof block === "object" && Object.keys(block).length > 0) {
           console.error("forbidden dependency block: " + blockName);
+          failed = true;
+        }
+      }
+
+      const deps = pkg.dependencies;
+      if (deps && typeof deps === "object") {
+        for (const name of Object.keys(deps)) {
+          if (!allowlist.has(name)) {
+            console.error(
+              "dependencies." + name +
+                " is not in wuphfRuntimeDependenciesAllowlist; " +
+                "add the name AND a rationale comment, then re-run the gate",
+            );
+            failed = true;
+          }
+        }
+      }
+
+      // Prevent the allowlist from being widened without an actual entry.
+      // A non-empty allowlist with an empty dependencies block usually means
+      // someone removed the dep but forgot to clean up the allowlist; flag
+      // it so the two stay in sync.
+      const declaredDepNames = new Set(
+        deps && typeof deps === "object" ? Object.keys(deps) : [],
+      );
+      for (const allowed of allowlist) {
+        if (!declaredDepNames.has(allowed)) {
+          console.error(
+            "wuphfRuntimeDependenciesAllowlist contains \"" + allowed +
+              "\" but it is not declared in dependencies; remove the stale entry",
+          );
           failed = true;
         }
       }

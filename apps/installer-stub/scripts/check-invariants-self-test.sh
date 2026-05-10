@@ -125,8 +125,42 @@ expect_dependency_block_failure() {
   expect_output_contains "${fixture}/package.out" "forbidden dependency block: ${block_name}"
 }
 
-expect_dependency_block_failure "dependencies"
+# peerDependencies and optionalDependencies remain forbidden outright; the
+# `dependencies` block is now an allowlist (per #771 fix).
 expect_dependency_block_failure "peerDependencies"
 expect_dependency_block_failure "optionalDependencies"
+
+# dependencies entry that is on the allowlist passes the gate.
+allowed_dep_fixture="${tmp_root}/allowed-dep"
+write_fixture "${allowed_dep_fixture}"
+printf '{"dependencies": {"electron-updater": "6.3.9"}, "wuphfRuntimeDependenciesAllowlist": ["electron-updater"]}\n' \
+  > "${allowed_dep_fixture}/apps/installer-stub/package.json"
+expect_status 0 "${allowed_dep_fixture}" "apps/installer-stub/scripts/check-invariants.sh" "${allowed_dep_fixture}/root.out"
+expect_status 0 "${allowed_dep_fixture}/apps/installer-stub" "scripts/check-invariants.sh" "${allowed_dep_fixture}/package.out"
+
+# dependencies entry that is NOT on the allowlist fails the gate.
+unallowlisted_dep_fixture="${tmp_root}/unallowlisted-dep"
+write_fixture "${unallowlisted_dep_fixture}"
+printf '{"dependencies": {"some-other-pkg": "1.0.0"}, "wuphfRuntimeDependenciesAllowlist": ["electron-updater"]}\n' \
+  > "${unallowlisted_dep_fixture}/apps/installer-stub/package.json"
+expect_status 1 "${unallowlisted_dep_fixture}" "apps/installer-stub/scripts/check-invariants.sh" "${unallowlisted_dep_fixture}/root.out"
+expect_output_contains "${unallowlisted_dep_fixture}/root.out" "dependencies.some-other-pkg is not in wuphfRuntimeDependenciesAllowlist"
+
+# dependencies entry with an EMPTY allowlist also fails (closed by default).
+empty_allowlist_fixture="${tmp_root}/empty-allowlist"
+write_fixture "${empty_allowlist_fixture}"
+printf '{"dependencies": {"electron-updater": "6.3.9"}}\n' \
+  > "${empty_allowlist_fixture}/apps/installer-stub/package.json"
+expect_status 1 "${empty_allowlist_fixture}" "apps/installer-stub/scripts/check-invariants.sh" "${empty_allowlist_fixture}/root.out"
+expect_output_contains "${empty_allowlist_fixture}/root.out" "dependencies.electron-updater is not in wuphfRuntimeDependenciesAllowlist"
+
+# Stale allowlist entry (allowlist names a pkg that's not in dependencies)
+# fails — keeps the two in sync.
+stale_allowlist_fixture="${tmp_root}/stale-allowlist"
+write_fixture "${stale_allowlist_fixture}"
+printf '{"wuphfRuntimeDependenciesAllowlist": ["electron-updater"]}\n' \
+  > "${stale_allowlist_fixture}/apps/installer-stub/package.json"
+expect_status 1 "${stale_allowlist_fixture}" "apps/installer-stub/scripts/check-invariants.sh" "${stale_allowlist_fixture}/root.out"
+expect_output_contains "${stale_allowlist_fixture}/root.out" "stale entry"
 
 echo "installer invariant self-test OK"
