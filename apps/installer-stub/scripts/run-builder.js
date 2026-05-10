@@ -5,16 +5,13 @@ const { spawnSync } = require("node:child_process");
 const appRoot = path.resolve(__dirname, "..");
 const workspaceRoot = path.resolve(appRoot, "..", "..");
 
-function setDefaultCache(name, directory) {
-  if (process.env[name]) {
+function setDefaultCache(env, name, directory) {
+  if (env[name]) {
     return;
   }
   fs.mkdirSync(directory, { recursive: true });
-  process.env[name] = directory;
+  env[name] = directory;
 }
-
-setDefaultCache("ELECTRON_CACHE", path.join(appRoot, ".cache", "electron"));
-setDefaultCache("ELECTRON_BUILDER_CACHE", path.join(appRoot, ".cache", "electron-builder"));
 
 // macOS-only: bun's content-addressable store occasionally drops 7zip-bin's
 // `7za` binary without the +x bit, which kills electron-builder's DMG step
@@ -93,6 +90,8 @@ function scrubbedEnv() {
     }
     env[key] = value;
   }
+  setDefaultCache(env, "ELECTRON_CACHE", path.join(appRoot, ".cache", "electron"));
+  setDefaultCache(env, "ELECTRON_BUILDER_CACHE", path.join(appRoot, ".cache", "electron-builder"));
   // Belt-and-suspenders: app-builder-bin honors CUSTOM_APP_BUILDER_PATH
   // natively (see its index.js), so when the bun nested-store layout makes
   // its self-resolution fragile, we hand it the resolved binary path.
