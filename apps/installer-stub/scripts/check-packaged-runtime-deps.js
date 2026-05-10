@@ -45,10 +45,26 @@ function main() {
   // source and the installer-stub root used for the runtime-closure walk.
   // Production callers pass only `<dist-dir>`; test callers can scope the
   // policy/closure to a fixture without touching the real workspace tree.
-  const installerStubRoot =
-    process.env.WUPHF_PACKAGED_DEPS_INSTALLER_STUB_ROOT ?? path.resolve(__dirname, "..");
-  const packageJsonPath =
-    process.env.WUPHF_PACKAGED_DEPS_PACKAGE_JSON ?? path.join(installerStubRoot, "package.json");
+  //
+  // Refuse the seam in production mode. Without this, an env-var leak
+  // (e.g. a prior step exporting these for a self-test) would point the
+  // gate at a fixture and silently approve a real release artifact that
+  // doesn't match the production policy. R3 codex (security lens) flagged.
+  const seamPackageJson = process.env.WUPHF_PACKAGED_DEPS_PACKAGE_JSON;
+  const seamStubRoot = process.env.WUPHF_PACKAGED_DEPS_INSTALLER_STUB_ROOT;
+  if (
+    process.env.WUPHF_RELEASE_MODE === "production" &&
+    (seamPackageJson !== undefined || seamStubRoot !== undefined)
+  ) {
+    console.error(
+      "WUPHF_PACKAGED_DEPS_{PACKAGE_JSON,INSTALLER_STUB_ROOT} test seam env vars " +
+        "must NOT be set in production mode. Refusing to run with a non-production policy source.",
+    );
+    process.exit(2);
+  }
+
+  const installerStubRoot = seamStubRoot ?? path.resolve(__dirname, "..");
+  const packageJsonPath = seamPackageJson ?? path.join(installerStubRoot, "package.json");
 
   const packageJson = require(path.resolve(packageJsonPath));
   const allowlist = packageJson.wuphfRuntimeDependenciesAllowlist;

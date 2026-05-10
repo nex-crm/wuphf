@@ -175,4 +175,36 @@ printf '{"wuphfRuntimeDependenciesAllowlist": ["electron-updater"]}\n' \
 expect_status 1 "${stale_allowlist_fixture}" "apps/installer-stub/scripts/check-invariants.sh" "${stale_allowlist_fixture}/root.out"
 expect_output_contains "${stale_allowlist_fixture}/root.out" "stale entry"
 
+# Source-scan invariant: if src/main.js requires a package, that name MUST
+# be in both `dependencies` AND `wuphfRuntimeDependenciesAllowlist`. This
+# closes the "remove dep block but leave require in source" loophole that
+# would re-introduce the #771 crash-on-launch failure mode.
+require_in_source_fixture="${tmp_root}/require-in-source"
+write_fixture "${require_in_source_fixture}"
+printf 'const x = require("electron-updater");\n' \
+  > "${require_in_source_fixture}/apps/installer-stub/src/main.js"
+printf '{"dependencies": {"electron-updater": "6.8.3"}, "wuphfRuntimeDependenciesAllowlist": ["electron-updater"]}\n' \
+  > "${require_in_source_fixture}/apps/installer-stub/package.json"
+expect_status 0 "${require_in_source_fixture}" "apps/installer-stub/scripts/check-invariants.sh" "${require_in_source_fixture}/root.out"
+
+# require() with no matching dep entry fails — exact #771 regression mode
+require_no_dep_fixture="${tmp_root}/require-no-dep"
+write_fixture "${require_no_dep_fixture}"
+printf 'const x = require("electron-updater");\n' \
+  > "${require_no_dep_fixture}/apps/installer-stub/src/main.js"
+printf '{}\n' > "${require_no_dep_fixture}/apps/installer-stub/package.json"
+expect_status 1 "${require_no_dep_fixture}" "apps/installer-stub/scripts/check-invariants.sh" "${require_no_dep_fixture}/root.out"
+expect_output_contains "${require_no_dep_fixture}/root.out" "src/main.js require(\"electron-updater\") but the package is not in dependencies"
+
+# require() with dep but missing from allowlist fails — closes the
+# "approved by APPROVED_RUNTIME_DEPS but absent allowlist" gap from R2
+require_no_allowlist_fixture="${tmp_root}/require-no-allowlist"
+write_fixture "${require_no_allowlist_fixture}"
+printf 'const x = require("electron-updater");\n' \
+  > "${require_no_allowlist_fixture}/apps/installer-stub/src/main.js"
+printf '{"dependencies": {"electron-updater": "6.8.3"}}\n' \
+  > "${require_no_allowlist_fixture}/apps/installer-stub/package.json"
+expect_status 1 "${require_no_allowlist_fixture}" "apps/installer-stub/scripts/check-invariants.sh" "${require_no_allowlist_fixture}/root.out"
+expect_output_contains "${require_no_allowlist_fixture}/root.out" "wuphfRuntimeDependenciesAllowlist"
+
 echo "installer invariant self-test OK"

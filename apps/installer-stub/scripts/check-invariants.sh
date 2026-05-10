@@ -174,6 +174,69 @@ dependency_check_output="$(
   done <<< "${dependency_check_output}"
 }
 
+# Source-scan invariant: if src/main.js (the runtime entry point of the
+# packaged app) require()s `electron-updater`, the dep MUST be declared
+# AND allowlisted. Without this, a future PR could remove the dep block
+# while leaving the require in source — silently re-introducing #771.
+# R3 codex (api lens) flagged this as the empty-allowlist bypass.
+require_check_output="$(
+  cd "${repo_root}" &&
+    bun -e '
+      const fs = require("fs");
+      const pkg = require("./apps/installer-stub/package.json");
+      const main = fs.readFileSync("./apps/installer-stub/src/main.js", "utf8");
+
+      const requireRegex = /require\(\s*["]([@a-zA-Z0-9._/\-]+)["]\s*\)/g;
+      let match;
+      const required = new Set();
+      while ((match = requireRegex.exec(main)) !== null) {
+        const name = match[1];
+        if (name.startsWith("node:") || name.startsWith(".") || name.startsWith("electron")) {
+          // node:* core, relative requires, electron itself (provided by runtime)
+          if (name === "electron") continue;
+          if (name.startsWith("node:")) continue;
+          if (name.startsWith(".")) continue;
+        }
+        required.add(name);
+      }
+
+      const declaredDeps = new Set(
+        pkg.dependencies && typeof pkg.dependencies === "object" ? Object.keys(pkg.dependencies) : [],
+      );
+      const declaredAllow = new Set(
+        Array.isArray(pkg.wuphfRuntimeDependenciesAllowlist)
+          ? pkg.wuphfRuntimeDependenciesAllowlist
+          : [],
+      );
+
+      let failed = false;
+      for (const name of required) {
+        if (!declaredDeps.has(name)) {
+          console.error(
+            "src/main.js require(\"" + name + "\") but the package is not in dependencies; " +
+              "the packaged app will crash at module load",
+          );
+          failed = true;
+        }
+        if (!declaredAllow.has(name)) {
+          console.error(
+            "src/main.js require(\"" + name + "\") but the package is not in " +
+              "wuphfRuntimeDependenciesAllowlist; add it so the post-build gate can verify it",
+          );
+          failed = true;
+        }
+      }
+
+      if (failed) {
+        process.exit(1);
+      }
+    ' 2>&1
+)" || {
+  while IFS= read -r line; do
+    violations+=("${line}")
+  done <<< "${require_check_output}"
+}
+
 while IFS= read -r line; do
   action_ref="$(sed -E 's/^([^:]+:)?[0-9]+:.*uses:[[:space:]]*([^[:space:]#]+).*/\2/' <<<"${line}")"
 

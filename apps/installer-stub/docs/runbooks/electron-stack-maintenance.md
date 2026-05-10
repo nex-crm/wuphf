@@ -12,7 +12,7 @@ Official reference:
 
 ## Current State
 
-As of 2026-05-09:
+As of 2026-05-10 (post-PR #780):
 
 - Latest stable Electron: `42.x` (`42.0.0`, May 2026)
 - Supported Electron window: latest 3 stable majors, not a traditional LTS
@@ -20,8 +20,9 @@ As of 2026-05-09:
 - Currently pinned installer stub stack:
 
 - `electron`: `42.0.1`
-- `electron-builder`: `25.1.8`
-- `electron-updater`: `6.3.9`
+- `electron-builder`: `26.8.1`
+- `electron-updater`: `6.8.3` (declared in `dependencies`, allowlisted by
+  `wuphfRuntimeDependenciesAllowlist`)
 
 The runtime was lifted from `33.0.0` to `42.0.1` in the desktop-shell PR
 (`feat(deps): bump installer-stub electron to 42 + tar override for clean
@@ -32,23 +33,39 @@ renderer command-line switch injection). Bumping to `42.0.1` aligns the stub
 with `apps/desktop`'s pin and eliminates those advisories from the workspace
 lockfile.
 
-PR #780 (issue #771) bumped the full electron stack:
+PR #780 (issue #771) bumped the full electron stack and migrated the v26
+schema:
 
 - `electron-builder` 25.1.8 → 26.8.1
-- `electron-updater` 6.3.9 → 6.8.3 (and moved into `dependencies` per
-  the new APPROVED_RUNTIME_DEPS allowlist)
+- `electron-updater` 6.3.9 → 6.8.3 (moved into `dependencies` per the new
+  APPROVED_RUNTIME_DEPS allowlist)
 - Schema migration: top-level `win.publisherName` → `win.signtoolOptions.publisherName`
   (the v25 array form `win.publisherName: [foo]` is rejected outright in v26).
   CI workflow CLI override updated to `--config.win.signtoolOptions.publisherName=…`.
 
-The previous deferral was driven by an attempt that broke `bun run
-build:dry-run` on the schema change; #780 worked through the migration
-in a dedicated PR and landed it cleanly with the new packaged-runtime-deps
-gate verifying app.asar contents end-to-end.
+## Windows packaging gap (release-blocking) — issue #781
 
-The Windows-symlink follow-up tracked at #781 is separate (electron-builder
-25 didn't follow bun symlinks on Windows; v26 does, which is what made #780
-viable in the first place).
+The `check-packaged-runtime-deps.js` post-build gate fails on **Windows**
+even on electron-builder 26: bun's per-workspace symlinks are created
+on Windows, but electron-builder's app-builder doesn't follow them, so
+`electron-updater` plus its 9-entry transitive closure is pruned out of
+`app.asar`. Linux + macOS bundle correctly.
+
+`release-rewrite.yml` resolves this by gating the Windows gate's
+`continue-on-error` on build mode:
+
+- **PR builds**: gate is `continue-on-error: true` (diagnostic only).
+  Windows pipeline runs to completion + uploads an installer with the
+  known pruning gap; downstream consumers can still pull artifacts.
+- **Production tag releases**: gate is `continue-on-error: false`.
+  A failing gate hard-fails `build-win`, blocking the publish job from
+  uploading a Windows installer that would crash on first launch.
+
+Until #781 closes (likely path: a bun config to materialize prod-dep
+real files on Windows, or upstream electron-builder collector fix),
+**signed Windows release tags will not publish.** That is intentional —
+shipping a notarized installer that crashes on launch is worse than
+shipping no Windows installer.
 
 ## Bump Procedure
 

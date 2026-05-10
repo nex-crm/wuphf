@@ -203,6 +203,13 @@ jobs:
           for dmg in "${dmgs[@]}"; do
             xcrun stapler staple "${dmg}"
             xcrun stapler validate "${dmg}"
+            # Gatekeeper assessment exercises the actual download-open path
+            # users hit. Stapler validation only confirms the notary ticket
+            # is attached; spctl confirms the OS will accept the DMG without
+            # network access (the realistic offline-install path). dmg.sign
+            # is intentionally false in electron-builder.yml, so this is the
+            # right point to verify the signed contents flow through GK.
+            spctl --assess --type open --context context:primary-signature --verbose "${dmg}"
           done
       - name: Validate macOS app staple inside updater zip
         if: needs.detect-secrets.outputs.is_release == 'true'
@@ -339,11 +346,19 @@ jobs:
         # symlink tree, materialize-runtime-deps.js to copy bun cache
         # entries) — none worked without breaking other platforms. The
         # original installer-stub had this same hidden bug; the gate now
-        # makes it visible. `continue-on-error: true` keeps the rest of
-        # the Windows pipeline (signing, smoke) running so we still ship
-        # an installer + flag the gap, while #781 carries the actual fix
-        # (likely bun version or electron-builder config change).
-        continue-on-error: true
+        # makes it visible.
+        #
+        # `continue-on-error` is GATED ON BUILD MODE: PR builds keep the
+        # gate fail-soft so the rest of the Windows pipeline (signing,
+        # smoke) runs and exposes diagnostic signal; PRODUCTION TAG
+        # RELEASES hard-fail. Without that gate, a signed Windows
+        # installer with the missing electron-updater would crash on
+        # first launch with `Cannot find module 'electron-updater'` —
+        # users would download a notarized-by-trust installer that
+        # never opens a window. R3 codex (5 lenses) converged on
+        # blocking publish until #781 is resolved.
+        id: windows_runtime_deps
+        continue-on-error: ${{ needs.detect-secrets.outputs.is_release != 'true' }}
         working-directory: apps/installer-stub
         run: node scripts/check-packaged-runtime-deps.js dist
       - name: Sign Windows artifacts (attempt 1)
