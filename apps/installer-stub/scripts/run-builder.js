@@ -58,6 +58,7 @@ function ensureBundledToolExecutables() {
 
 ensureBundledToolExecutables();
 
+const workspaceRoot = path.resolve(appRoot, "..", "..");
 const builderCli = require.resolve("electron-builder/cli");
 
 function appBuilderBinaryPathForPackageRoot(packageRoot) {
@@ -72,32 +73,73 @@ function appBuilderBinaryPathForPackageRoot(packageRoot) {
       : path.join(packageRoot, "linux", process.arch, "app-builder");
 }
 
-function appBuilderBinaryPath() {
+function collectBunAppBuilderPackageRoots(searchRoot) {
+  const bunModules = path.join(searchRoot, "node_modules", ".bun");
+  if (!fs.existsSync(bunModules)) {
+    return [];
+  }
+
+  return fs
+    .readdirSync(bunModules)
+    .filter((entry) => entry.startsWith("app-builder-bin@"))
+    .map((entry) => path.join(bunModules, entry, "node_modules", "app-builder-bin"));
+}
+
+function appBuilderPackageRoots() {
+  const bunPackageRoots = [
+    ...collectBunAppBuilderPackageRoots(appRoot),
+    ...collectBunAppBuilderPackageRoots(workspaceRoot),
+  ];
   const packagePath = require.resolve("app-builder-bin/package.json", {
     paths: [path.dirname(builderCli)],
   });
-  const packageRoot = path.dirname(fs.realpathSync(packagePath));
-  const binaryPath = appBuilderBinaryPathForPackageRoot(packageRoot);
+  const resolvedRoot = path.dirname(fs.realpathSync(packagePath));
+  const seen = new Set();
 
-  if (!fs.existsSync(binaryPath)) {
-    throw new Error(`app-builder binary not found at ${binaryPath}`);
+  return [...bunPackageRoots, resolvedRoot].filter((packageRoot) => {
+    const realPath = fs.existsSync(packageRoot) ? fs.realpathSync(packageRoot) : packageRoot;
+
+    if (seen.has(realPath)) {
+      return false;
+    }
+
+    seen.add(realPath);
+    return true;
+  });
+}
+
+function appBuilderBinaryPath() {
+  const checkedPaths = [];
+
+  for (const packageRoot of appBuilderPackageRoots()) {
+    const binaryPath = appBuilderBinaryPathForPackageRoot(packageRoot);
+    checkedPaths.push(binaryPath);
+
+    if (fs.existsSync(binaryPath)) {
+      return fs.realpathSync(binaryPath);
+    }
   }
 
-  return fs.realpathSync(binaryPath);
+  throw new Error(`app-builder binary not found. Checked: ${checkedPaths.join(", ")}`);
 }
 
 function ensureWorkspaceAppBuilderBinary() {
   const sourcePath = appBuilderBinaryPath();
-  const workspaceRoot = path.resolve(appRoot, "..", "..");
   const expectedPath = appBuilderBinaryPathForPackageRoot(
     path.join(workspaceRoot, "node_modules", "app-builder-bin"),
   );
 
-  if (path.resolve(sourcePath) !== path.resolve(expectedPath)) {
-    fs.mkdirSync(path.dirname(expectedPath), { recursive: true });
-    fs.copyFileSync(sourcePath, expectedPath);
-    if (process.platform !== "win32") {
-      fs.chmodSync(expectedPath, 0o755);
+  if (path.resolve(sourcePath) !== path.resolve(expectedPath) && !fs.existsSync(expectedPath)) {
+    try {
+      fs.mkdirSync(path.dirname(expectedPath), { recursive: true });
+      fs.copyFileSync(sourcePath, expectedPath);
+      if (process.platform !== "win32") {
+        fs.chmodSync(expectedPath, 0o755);
+      }
+    } catch (error) {
+      console.warn(
+        `Unable to materialize app-builder fallback at ${expectedPath}: ${error.message}`,
+      );
     }
   }
 
