@@ -72,6 +72,14 @@ jobs:
           rg --version
           bash apps/installer-stub/scripts/check-invariants.sh
           bash apps/installer-stub/scripts/check-invariants-self-test.sh
+          # H3 inverted the verify-latest-yml self-test from default-on to
+          # opt-in. The publish job's verify call (deliberately) does NOT
+          # pay that cost, so the gate that catches malformed-files[] /
+          # missing-size regressions has to run somewhere in CI. Run the
+          # self-test stand-alone here against the same shared script.
+          WUPHF_VERIFY_LATEST_YML_RUN_SELF_TEST=1 \
+            WUPHF_VERIFY_LATEST_YML_SELF_TEST_ONLY=1 \
+            bash apps/installer-stub/scripts/verify-latest-yml.sh
 
   build-mac:
     needs:

@@ -76,28 +76,7 @@ function ensureBundledToolExecutables() {
   }
 }
 
-ensureBundledToolExecutables();
-
 const builderCli = require.resolve("electron-builder/cli");
-const nodeBinary = process.env.NODE_BINARY || process.execPath;
-const releaseMode = process.env.WUPHF_RELEASE_MODE || "pr";
-
-if (!["pr", "production"].includes(releaseMode)) {
-  console.error(`WUPHF_RELEASE_MODE must be 'pr' or 'production', got '${releaseMode}'`);
-  process.exit(1);
-}
-
-if (process.versions.bun && !process.env.NODE_BINARY) {
-  console.error(
-    "run-builder.js must run under real Node so electron-builder's CLI is executed by Node. Run via `node scripts/run-builder.js` after setup-node.",
-  );
-  process.exit(1);
-}
-
-const builderArgs = process.argv.slice(2);
-if (releaseMode !== "production") {
-  builderArgs.push("--config.mac.notarize=false");
-}
 
 // CR-CI-1: electron-builder reads `npm_execpath` to locate the package
 // manager for its production-dep install / native-rebuild step. When
@@ -138,13 +117,43 @@ function scrubbedEnv() {
   return env;
 }
 
-const result = spawnSync(nodeBinary, [builderCli, ...builderArgs], {
-  env: scrubbedEnv(),
-  stdio: "inherit",
-});
+function main() {
+  ensureBundledToolExecutables();
 
-if (result.error) {
-  throw result.error;
+  const nodeBinary = process.env.NODE_BINARY || process.execPath;
+  const releaseMode = process.env.WUPHF_RELEASE_MODE || "pr";
+
+  if (!["pr", "production"].includes(releaseMode)) {
+    console.error(`WUPHF_RELEASE_MODE must be 'pr' or 'production', got '${releaseMode}'`);
+    process.exit(1);
+  }
+
+  if (process.versions.bun && !process.env.NODE_BINARY) {
+    console.error(
+      "run-builder.js must run under real Node so electron-builder's CLI is executed by Node. Run via `node scripts/run-builder.js` after setup-node.",
+    );
+    process.exit(1);
+  }
+
+  const builderArgs = process.argv.slice(2);
+  if (releaseMode !== "production") {
+    builderArgs.push("--config.mac.notarize=false");
+  }
+
+  const result = spawnSync(nodeBinary, [builderCli, ...builderArgs], {
+    env: scrubbedEnv(),
+    stdio: "inherit",
+  });
+
+  if (result.error) {
+    throw result.error;
+  }
+
+  process.exit(result.status ?? 1);
 }
 
-process.exit(result.status ?? 1);
+if (require.main === module) {
+  main();
+}
+
+module.exports = { scrubbedEnv, setDefaultCache };
