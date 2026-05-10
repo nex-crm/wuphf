@@ -696,78 +696,30 @@ func (b *Broker) Stop() {
 // Web UI server (ServeWebUI, cacheControlMiddleware, webUIProxyHandler)
 // moved to broker_web_proxy.go.
 
-// emitTaskTransitionAutoNotebook is the canonical seam for the OV2A locked
-// hook: a single after-saveLocked task-transition event, emitted from
-// MutateTask, BlockTask, ResumeTask, EnsureTask, and the self-healing path.
-// Caller passes the pre-mutation status snapshot; the writer records the
-// before/after pair and routes the entry to the task owner's shelf.
-//
-// Caller must hold b.mu. Roster filtering happens here (lock-free predicate)
-// because the writer cannot re-enter b.mu — see isAgentMemberSlugLocked.
-//
-// No-op transitions (beforeStatus == afterStatus) are short-circuited at the
-// source: the writer would also drop them via NoopTransition, but pruning
-// here avoids the enqueue + roster lookup on a path where many of the
-// existing call sites can legitimately be called with no actual delta.
-func (b *Broker) emitTaskTransitionAutoNotebook(task *teamTask, beforeStatus, actor string) {
-	if b == nil || b.autoNotebookWriter == nil || task == nil {
-		return
-	}
-	owner := strings.TrimSpace(task.Owner)
-	if owner == "" {
-		// No owner means no shelf to land on. Skipping here avoids feeding
-		// the writer an event it would just drop and keeps counters clean.
-		return
-	}
-	beforeTrimmed := strings.TrimSpace(beforeStatus)
-	afterTrimmed := strings.TrimSpace(task.Status)
-	if strings.EqualFold(beforeTrimmed, afterTrimmed) {
-		return
-	}
-	if !b.isAgentMemberSlugLocked(owner) {
-		return
-	}
-	b.autoNotebookWriter.Handle(autoNotebookEvent{
-		Kind:         AutoNotebookEventTaskTransitioned,
-		Slug:         owner,
-		Actor:        strings.TrimSpace(actor),
-		Channel:      normalizeChannelSlug(task.Channel),
-		TaskID:       task.ID,
-		TaskTitle:    task.Title,
-		BeforeStatus: beforeTrimmed,
-		AfterStatus:  afterTrimmed,
-		Content:      strings.TrimSpace(task.Title),
-		Timestamp:    time.Now().UTC(),
-	})
-}
+// emitTaskTransitionAutoNotebook used to fan task-status transitions
+// into per-agent notebook shelves. That auto-write path is gone:
+// notebooks must contain only properly drafted working notes and
+// learnings (authored via notebook_write), not a stream of every
+// status delta. The function is kept as an inert seam so the many
+// call sites in the task-mutation paths continue to compile and so a
+// future explicit "log this transition" feature has an obvious home.
+func (b *Broker) emitTaskTransitionAutoNotebook(*teamTask, string, string) {}
 
 // pendingTaskTransition captures a status delta that an under-mutex helper
 // (e.g. unblockDependentsLocked) wants to publish, but only AFTER the caller
-// has persisted via saveLocked. Without this two-step, a saveLocked failure
-// would still leak notebook entries for transitions the broker rolled back.
+// has persisted via saveLocked. Kept around because cascade callers still
+// build batches with this type; flushPendingAutoNotebookTransitionsLocked is
+// now a no-op so the events are quietly discarded.
 type pendingTaskTransition struct {
 	taskID       string
 	beforeStatus string
 }
 
-// flushPendingAutoNotebookTransitionsLocked publishes a batch of cascade
-// transitions to the writer using the current status of each task in
-// b.tasks. Caller holds b.mu and has just successfully saveLocked'd. The
-// per-event no-op guard inside emitTaskTransitionAutoNotebook handles the
-// case where a subsequent mutation reverted the status back to its prior
-// value before we got here.
-func (b *Broker) flushPendingAutoNotebookTransitionsLocked(pending []pendingTaskTransition, actor string) {
-	if b == nil || len(pending) == 0 {
-		return
-	}
-	for _, p := range pending {
-		for i := range b.tasks {
-			if b.tasks[i].ID == p.taskID {
-				b.emitTaskTransitionAutoNotebook(&b.tasks[i], p.beforeStatus, actor)
-				break
-			}
-		}
-	}
+// flushPendingAutoNotebookTransitionsLocked is intentionally a no-op.
+// See emitTaskTransitionAutoNotebook — notebooks no longer absorb
+// task-transition events. Kept as a seam so cascading-status callers
+// (e.g. unblockDependentsLocked) keep working without refactor.
+func (b *Broker) flushPendingAutoNotebookTransitionsLocked([]pendingTaskTransition, string) {
 }
 
 // IsAgentMemberSlug returns true when `slug` matches a registered office

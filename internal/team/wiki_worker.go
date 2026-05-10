@@ -212,7 +212,8 @@ type WikiWorker struct {
 	// drainDone closes when the drain goroutine has fully exited (including
 	// its own sideGoroutines.Wait). Tests register `t.Cleanup(func() {
 	// cancel(); <-worker.Done() })` so tempdir removal is deterministic.
-	drainDone chan struct{}
+	drainDone       chan struct{}
+	notebookCommits atomic.Int64 // PromotionSweep gate; reader: NotebookCommitCount
 }
 
 // NewWikiWorker returns a worker ready to Start. The publisher is optional;
@@ -450,6 +451,7 @@ func (w *WikiWorker) process(ctx context.Context, req wikiWriteRequest) {
 			notifier.EnqueueSectionsRefresh()
 		}
 	case req.IsNotebook:
+		w.notebookCommits.Add(1)
 		if nbPub, ok := w.publisher.(notebookEventPublisher); ok {
 			nbPub.PublishNotebookEvent(notebookWriteEvent{
 				Slug:      req.Slug,

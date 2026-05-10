@@ -1,20 +1,16 @@
 package team
 
-// auto_notebook_writer.go is PR 1 of the notebook-wiki-promise design
-// (~/.gstack/projects/nex-crm-wuphf/najmuzzaman-main-design-20260505-131620-notebook-wiki-promise.md).
+// auto_notebook_writer.go was PR 1 of the notebook-wiki-promise design,
+// which auto-populated per-agent notebook shelves from every PostMessage
+// and every task transition. That hook is gone: notebooks must contain
+// only properly drafted working notes and learnings, authored via the
+// notebook_write MCP tool. The previous fan-out turned shelves into
+// noisy event logs and fed unrelated chatter into the wiki review queue.
 //
-// It populates per-agent notebook shelves deterministically: every roster-agent
-// PostMessage and every task transition emits one notebook entry under
-// agents/{slug}/notebook/{YYYY-MM-DD-HHMMSS}-{kind}-{shortHash}.md.
-//
-// Hot-path constraints (locked by eng review 2026-05-05):
-//   - PostMessage stays sub-microsecond. Handle() is a non-blocking enqueue.
-//   - Drop on queue saturation; never block the broker. Counter + warn log.
-//   - In-memory LRU dedupe per (slug, day) keyed by sha256(content). Ring of 50.
-//   - Pre-write secretlint regex scrub. Match → drop with redacted_event counter.
-//   - Roster-membership filter at ingress. Non-agents bypass.
-//   - One file per event (file-as-entry — aligns with NotebookSignalScanner).
-//   - On NotebookWrite error: structured warn + counter + drop. No retry.
+// The writer type is retained as a quiet seam (tests still construct it,
+// and we may revive an explicit "log this event" path in the future),
+// but the broker never wires Handle() to message or task-transition
+// hooks. b.autoNotebookWriter is intentionally left nil in production.
 
 import (
 	"context"

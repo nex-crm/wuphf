@@ -98,17 +98,17 @@ func (b *Broker) initWikiWorker() {
 	extractor := NewExtractor(brokerQueryProvider{}, worker, dlq, idx)
 	worker.SetExtractor(extractor)
 
-	// Roster filter is applied at the broker hook sites (under b.mu) via
-	// isAgentMemberSlugLocked, so the writer itself takes nil here — passing
-	// the broker as roster would deadlock when Handle is called from inside a
-	// b.mu critical section.
-	autoWriter := NewAutoNotebookWriter(worker, nil)
-	autoWriter.Start(lifecycleCtx)
+	// Auto-notebook writes are intentionally NOT wired here. Notebooks
+	// are for properly drafted working notes and learnings authored
+	// explicitly by agents via the notebook_write MCP tool. Auto-writing
+	// every PostMessage and task transition turned shelves into noisy
+	// event logs and even fed unrelated chatter into the review queue.
+	// The MCP tool is the only legitimate path; the AutoNotebookWriter
+	// type remains around for tests but is never started in production.
 
 	// PR 2: human "remember" intent classifier → direct team_wiki_write.
-	// Lifecycle mirrors AutoNotebookWriter. The writer is started before the
-	// broker mutex is taken, so the goroutine is alive by the time the
-	// PostMessage hook can fire.
+	// The writer is started before the broker mutex is taken, so the
+	// goroutine is alive by the time the PostMessage hook can fire.
 	humanWiki := NewHumanWikiIntentWriter(worker)
 	humanWiki.Start(lifecycleCtx)
 
@@ -144,7 +144,7 @@ func (b *Broker) initWikiWorker() {
 	var sweep *PromotionSweep
 	if demandIdx != nil {
 		escalator := newDemandIndexEscalator(demandIdx, b.ReviewLog, worker)
-		counter := newAutoWriterNotebookCounter(autoWriter)
+		counter := newWikiWorkerNotebookCounter(worker)
 		sweep = NewPromotionSweep(escalator, counter, promotionSweepConfigFromEnv())
 		sweep.Start(lifecycleCtx)
 	}
@@ -155,7 +155,6 @@ func (b *Broker) initWikiWorker() {
 	b.wikiExtractor = extractor
 	b.wikiDLQ = dlq
 	b.readLog = NewReadLog(repo.Root())
-	b.autoNotebookWriter = autoWriter
 	b.humanWikiWriter = humanWiki
 	b.demandIndex = demandIdx
 	b.channelIntentDispatcher = channelIntent
