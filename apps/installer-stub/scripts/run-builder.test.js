@@ -1,4 +1,6 @@
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 
 const { scrubbedEnv, setDefaultCache } = require("./run-builder.js");
@@ -22,15 +24,25 @@ function testSetDefaultCacheIsBoundedToTheGivenEnv() {
   const beforeProcess = snapshotEnvKeys("ELECTRON_CACHE_TEST_M4");
   assert.deepEqual(beforeProcess, {}, "test pre-condition: marker key not in process.env");
 
-  const env = {};
-  setDefaultCache(env, "ELECTRON_CACHE_TEST_M4", path.join("/tmp", "wuphf-m4-marker"));
+  // Use a per-run subdirectory under the platform temp dir so the test is
+  // portable to Windows (`/tmp` does not exist there) and so we can remove
+  // the directory that `setDefaultCache` will mkdir.
+  const markerDir = fs.mkdtempSync(path.join(os.tmpdir(), "wuphf-m4-"));
+  const markerPath = path.join(markerDir, "marker");
 
-  assert.equal(env.ELECTRON_CACHE_TEST_M4, "/tmp/wuphf-m4-marker", "given env was populated");
-  assert.equal(
-    process.env.ELECTRON_CACHE_TEST_M4,
-    undefined,
-    "M4 regression: setDefaultCache must not leak into process.env",
-  );
+  try {
+    const env = {};
+    setDefaultCache(env, "ELECTRON_CACHE_TEST_M4", markerPath);
+
+    assert.equal(env.ELECTRON_CACHE_TEST_M4, markerPath, "given env was populated");
+    assert.equal(
+      process.env.ELECTRON_CACHE_TEST_M4,
+      undefined,
+      "M4 regression: setDefaultCache must not leak into process.env",
+    );
+  } finally {
+    fs.rmSync(markerDir, { recursive: true, force: true });
+  }
 }
 
 function testScrubbedEnvDoesNotMutateProcessEnv() {
