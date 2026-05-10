@@ -532,26 +532,27 @@ jobs:
       - name: Assert release asset set
         run: |
           shopt -s nullglob
+          require_asset_class() {
+            local class="$1"
+            shift
+
+            if [[ "$#" -eq 0 ]]; then
+              echo "Missing required release asset class: ${class}" >&2
+              exit 1
+            fi
+          }
+
           mac_dmgs=(release-assets/*.dmg)
           mac_zips=(release-assets/*.zip)
           win_installers=(release-assets/*.exe)
           linux_appimages=(release-assets/*.AppImage)
           linux_debs=(release-assets/*.deb)
 
-          if [[ "${#mac_dmgs[@]}" -eq 0 || "${#mac_zips[@]}" -eq 0 ]]; then
-            echo "Missing required macOS release artifacts" >&2
-            exit 1
-          fi
-
-          if [[ "${#win_installers[@]}" -eq 0 ]]; then
-            echo "Missing required Windows release artifact" >&2
-            exit 1
-          fi
-
-          if [[ "${#linux_appimages[@]}" -eq 0 || "${#linux_debs[@]}" -eq 0 ]]; then
-            echo "Missing required Linux release artifacts" >&2
-            exit 1
-          fi
+          require_asset_class "dmg" "${mac_dmgs[@]}"
+          require_asset_class "zip" "${mac_zips[@]}"
+          require_asset_class "exe" "${win_installers[@]}"
+          require_asset_class "AppImage" "${linux_appimages[@]}"
+          require_asset_class "deb" "${linux_debs[@]}"
 
           test -f release-assets/latest-mac.yml
           test -f release-assets/latest.yml
@@ -596,16 +597,48 @@ jobs:
       - name: Create or update draft GitHub release
         run: |
           shopt -s nullglob
-          assets=(
-            release-assets/*.dmg
-            release-assets/*.zip
-            release-assets/*.exe
-            release-assets/*.AppImage
-            release-assets/*.deb
+          require_asset_class() {
+            local class="$1"
+            shift
+
+            if [[ "$#" -eq 0 ]]; then
+              echo "Missing required release asset class: ${class}" >&2
+              exit 1
+            fi
+          }
+
+          mac_dmgs=(release-assets/*.dmg)
+          mac_zips=(release-assets/*.zip)
+          win_installers=(release-assets/*.exe)
+          linux_appimages=(release-assets/*.AppImage)
+          linux_debs=(release-assets/*.deb)
+          required_named_assets=(
             release-assets/latest.yml
             release-assets/latest-mac.yml
             release-assets/latest-linux.yml
             release-assets/release-checksums.txt
+          )
+
+          require_asset_class "dmg" "${mac_dmgs[@]}"
+          require_asset_class "zip" "${mac_zips[@]}"
+          require_asset_class "exe" "${win_installers[@]}"
+          require_asset_class "AppImage" "${linux_appimages[@]}"
+          require_asset_class "deb" "${linux_debs[@]}"
+
+          for required_asset in "${required_named_assets[@]}"; do
+            if [[ ! -f "${required_asset}" ]]; then
+              echo "Missing required release asset class: ${required_asset##*/}" >&2
+              exit 1
+            fi
+          done
+
+          assets=(
+            "${mac_dmgs[@]}"
+            "${mac_zips[@]}"
+            "${win_installers[@]}"
+            "${linux_appimages[@]}"
+            "${linux_debs[@]}"
+            "${required_named_assets[@]}"
           )
 
           if [[ "${#assets[@]}" -eq 0 ]]; then
