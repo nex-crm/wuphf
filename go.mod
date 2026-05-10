@@ -12,12 +12,13 @@ require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/jackc/pgx/v5 v5.9.2
 	github.com/modelcontextprotocol/go-sdk v1.6.0
-	github.com/sahilm/fuzzy v0.1.1
+	github.com/sahilm/fuzzy v0.1.2
 	go.uber.org/goleak v1.3.0
+	golang.org/x/net v0.53.0
 	golang.org/x/sync v0.20.0
-	golang.org/x/term v0.42.0
-	golang.org/x/text v0.36.0
-	google.golang.org/genai v1.55.0
+	golang.org/x/term v0.43.0
+	golang.org/x/text v0.37.0
+	google.golang.org/genai v1.56.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.50.0
 )
@@ -69,7 +70,6 @@ require (
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/json-iterator/go v0.0.0-20171115153421-f7279a603ede // indirect
 	github.com/kr/text v0.2.0 // indirect
-	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/lucasb-eyer/go-colorful v1.4.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mattn/go-localereader v0.0.1 // indirect
@@ -93,9 +93,8 @@ require (
 	go.etcd.io/bbolt v1.4.0 // indirect
 	go.opencensus.io v0.24.0 // indirect
 	golang.org/x/crypto v0.50.0 // indirect
-	golang.org/x/net v0.53.0 // indirect
 	golang.org/x/oauth2 v0.35.0 // indirect
-	golang.org/x/sys v0.43.0 // indirect
+	golang.org/x/sys v0.44.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20240903143218-8af14fe29dc1 // indirect
 	google.golang.org/grpc v1.66.2 // indirect
 	google.golang.org/protobuf v1.36.6 // indirect
