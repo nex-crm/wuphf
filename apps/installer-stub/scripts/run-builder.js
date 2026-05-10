@@ -60,27 +60,48 @@ ensureBundledToolExecutables();
 
 const builderCli = require.resolve("electron-builder/cli");
 
+function appBuilderBinaryPathForPackageRoot(packageRoot) {
+  return process.platform === "darwin"
+    ? path.join(
+        packageRoot,
+        "mac",
+        `app-builder_${process.arch === "x64" ? "amd64" : process.arch}`,
+      )
+    : process.platform === "win32"
+      ? path.join(packageRoot, "win", process.arch, "app-builder.exe")
+      : path.join(packageRoot, "linux", process.arch, "app-builder");
+}
+
 function appBuilderBinaryPath() {
   const packagePath = require.resolve("app-builder-bin/package.json", {
     paths: [path.dirname(builderCli)],
   });
   const packageRoot = path.dirname(fs.realpathSync(packagePath));
-  const binaryPath =
-    process.platform === "darwin"
-      ? path.join(
-          packageRoot,
-          "mac",
-          `app-builder_${process.arch === "x64" ? "amd64" : process.arch}`,
-        )
-      : process.platform === "win32"
-        ? path.join(packageRoot, "win", process.arch, "app-builder.exe")
-        : path.join(packageRoot, "linux", process.arch, "app-builder");
+  const binaryPath = appBuilderBinaryPathForPackageRoot(packageRoot);
 
   if (!fs.existsSync(binaryPath)) {
     throw new Error(`app-builder binary not found at ${binaryPath}`);
   }
 
   return fs.realpathSync(binaryPath);
+}
+
+function ensureWorkspaceAppBuilderBinary() {
+  const sourcePath = appBuilderBinaryPath();
+  const workspaceRoot = path.resolve(appRoot, "..", "..");
+  const expectedPath = appBuilderBinaryPathForPackageRoot(
+    path.join(workspaceRoot, "node_modules", "app-builder-bin"),
+  );
+
+  if (path.resolve(sourcePath) !== path.resolve(expectedPath)) {
+    fs.mkdirSync(path.dirname(expectedPath), { recursive: true });
+    fs.copyFileSync(sourcePath, expectedPath);
+    if (process.platform !== "win32") {
+      fs.chmodSync(expectedPath, 0o755);
+    }
+  }
+
+  return sourcePath;
 }
 
 function electronBuilderEnv() {
@@ -94,7 +115,7 @@ function electronBuilderEnv() {
     env[key] = value;
   }
 
-  env.CUSTOM_APP_BUILDER_PATH ||= appBuilderBinaryPath();
+  env.CUSTOM_APP_BUILDER_PATH ||= ensureWorkspaceAppBuilderBinary();
 
   return env;
 }
@@ -125,7 +146,8 @@ if (process.versions.bun && !process.env.NODE_BINARY) {
 // parse the binary. Scrub Bun/npm lifecycle env before spawning the builder.
 // Also pass CUSTOM_APP_BUILDER_PATH from electron-builder's real dependency
 // tree so builder-util does not depend on Bun's root node_modules symlink shape
-// in CI.
+// in CI. The same helper materializes the binary at the root node_modules path
+// builder-util falls back to when Bun 1.1 exposes a shallow app-builder-bin link.
 const result = spawnSync(nodeBinary, [builderCli, ...builderArgs], {
   env: electronBuilderEnv(),
   stdio: "inherit",
