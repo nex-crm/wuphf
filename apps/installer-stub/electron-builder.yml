@@ -47,13 +47,34 @@ mac:
 dmg:
   sign: false
 win:
-  # electron-builder 26.x removed top-level `win.publisherName` (deprecated
-  # in v25 with a warning). The new home is `win.signtoolOptions.publisherName`
-  # as a single string. The CI workflow overrides this at release-build
-  # time via `--config.win.signtoolOptions.publisherName="$AZURE_EXPECTED_PUBLISHER_NAME"`
-  # to bind the baked-in publisherName to the Azure cert's Authenticode CN.
+  # publisherName lives under `signtoolOptions` for PR builds (which don't
+  # actually sign — electron-builder skips signing when no cscLink or
+  # azureSignOptions is configured, but the publisherName is still baked
+  # into app-update.yml for electron-updater's later check).
+  #
+  # For RELEASE builds, the CI workflow injects
+  # `--config.win.azureSignOptions.*` via CLI, which (a) moves signing into
+  # electron-builder's packaging phase so binaries embedded in the NSIS
+  # payload get signed BEFORE NSIS bundles them — the #772 ship-blocker
+  # fix; and (b) binds publisherName to the Azure cert's Authenticode CN
+  # for app-update.yml consistency.
+  #
+  # azureSignOptions and signtoolOptions are mutually exclusive per the
+  # electron-builder schema; when both are set, azureSignOptions wins.
+  # That is why the static config keeps signtoolOptions for PR builds and
+  # the release workflow only adds azureSignOptions on top via CLI.
   signtoolOptions:
     publisherName: WUPHF (installer stub)
+  # electron-builder 26 only signs `.exe` by default. Sign DLLs + native
+  # addons too — Electron apps include framework DLLs (Electron Framework,
+  # ffmpeg, etc.) and any future N-API native addons, all of which get
+  # checked by SmartScreen / HVCI / Smart App Control / electron-updater
+  # publisherName-bind. R2 codex (3 lenses converged) flagged this as
+  # BLOCK because the assert step was claiming "every .exe and .dll"
+  # signed while the config silently dropped DLLs.
+  signExts:
+    - .dll
+    - .node
   target:
     - target: nsis
       arch:

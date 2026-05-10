@@ -323,23 +323,75 @@ jobs:
         if: needs.detect-secrets.outputs.is_release != 'true'
         working-directory: apps/installer-stub
         run: bun run build:win
-      - name: Build Windows artifacts
+      - name: Build + sign Windows artifacts (azureSignOptions)
         if: needs.detect-secrets.outputs.is_release == 'true'
         working-directory: apps/installer-stub
+        shell: bash
         env:
+          # Auth env vars for electron-builder's azureSignOptions. The
+          # Azure SDK's EnvironmentCredential picks these up automatically
+          # — no need to thread them through the CLI override.
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_ENDPOINT: ${{ secrets.AZURE_ENDPOINT }}
+          AZURE_SIGNING_ACCOUNT_NAME: ${{ secrets.AZURE_SIGNING_ACCOUNT_NAME }}
+          AZURE_CERT_PROFILE_NAME: ${{ secrets.AZURE_CERT_PROFILE_NAME }}
           AZURE_EXPECTED_PUBLISHER_NAME: ${{ secrets.AZURE_EXPECTED_PUBLISHER_NAME }}
-        # Override win.publisherName so it matches the Authenticode CN of
-        # the Azure cert. electron-updater compares the publisherName baked
-        # into app-update.yml against the SignerCertificate CN of the
-        # downloaded installer at update time; a mismatch breaks auto-update
-        # silently for end users. The placeholder in electron-builder.yml is
-        # ONLY usable for local PR builds (which do not auto-update).
+        # Issue #772 ship-blocker fix: signing happens DURING electron-builder
+        # packaging, not after. electron-builder signs each .exe / .dll /
+        # .node from the win-unpacked staging tree, then NSIS bundles the
+        # already-signed binaries into the wrapper installer .exe (which
+        # also gets signed). Result: binaries the user actually executes
+        # after install carry the same Authenticode signature as the
+        # downloaded installer, which is what users + SmartScreen + HVCI
+        # + electron-updater publisherName-check all expect.
+        #
+        # Previously this signing happened in a SEPARATE workflow step
+        # AFTER NSIS packaging, signing only the outer wrapper. The
+        # binaries already embedded inside the NSIS payload kept their
+        # unsigned form — bug #772.
+        #
+        # All required Azure secrets (tenant/client/secret/endpoint/
+        # account/profile/publisher) are validated in the prior
+        # `Detect Azure signing secrets` step; if any are missing the job
+        # fails before reaching here.
+        #
+        # Workflow-level retry (R2 codex finding): electron-builder's
+        # built-in retry only matches DNS-resolution + file-lock errors,
+        # NOT Azure 5xx / throttling / SignerSign() failures. The previous
+        # workflow had 3 explicit attempts of Azure/trusted-signing-action
+        # with sleeps; preserve that semantic by wrapping the build step
+        # in an explicit retry loop with clean dist between attempts.
+        # 30s sleep matches the prior wait_before_azure_signing_retry pattern.
         run: |
-          if [ -z "$AZURE_EXPECTED_PUBLISHER_NAME" ]; then
-            echo "AZURE_EXPECTED_PUBLISHER_NAME is required for release builds (binds win.publisherName to Authenticode CN)" >&2
-            exit 1
-          fi
-          bun run build:win -- --config.win.signtoolOptions.publisherName="$AZURE_EXPECTED_PUBLISHER_NAME"
+          set -euo pipefail
+          attempts=3
+          for attempt in $(seq 1 "$attempts"); do
+            echo "::group::azureSignOptions build attempt ${attempt}/${attempts}"
+            rm -rf dist
+            if bun run build:win -- \
+              --config.win.azureSignOptions.endpoint="$AZURE_ENDPOINT" \
+              --config.win.azureSignOptions.codeSigningAccountName="$AZURE_SIGNING_ACCOUNT_NAME" \
+              --config.win.azureSignOptions.certificateProfileName="$AZURE_CERT_PROFILE_NAME" \
+              --config.win.azureSignOptions.publisherName="$AZURE_EXPECTED_PUBLISHER_NAME"; then
+              echo "azureSignOptions build attempt ${attempt} succeeded"
+              echo "::endgroup::"
+              if [[ "$attempt" -gt 1 ]]; then
+                echo "::warning title=Azure signing flakiness::Azure Trusted Signing required ${attempt}/${attempts} attempts to succeed. Check service health before the next release window."
+              fi
+              exit 0
+            fi
+            status=$?
+            echo "::endgroup::"
+            echo "azureSignOptions build attempt ${attempt} failed with exit ${status}"
+            if [[ "$attempt" -lt "$attempts" ]]; then
+              echo "Sleeping 30s before retry"
+              sleep 30
+            fi
+          done
+          echo "All ${attempts} azureSignOptions build attempts failed" >&2
+          exit 1
       - name: Assert allowlisted runtime deps are bundled into the Windows app
         # Issue #771 ship-blocker gate (see macOS job for full rationale).
         #
@@ -365,105 +417,16 @@ jobs:
         continue-on-error: ${{ needs.detect-secrets.outputs.is_release != 'true' }}
         working-directory: apps/installer-stub
         run: node scripts/check-packaged-runtime-deps.js dist
-      - name: Sign Windows artifacts (attempt 1)
-        id: sign_windows_1
-        if: needs.detect-secrets.outputs.is_release == 'true'
-        continue-on-error: true
-        timeout-minutes: 30
-        uses: Azure/trusted-signing-action@b443cf8ea4124818d2ea9f043cba29fc3ec47b16 # ratchet:Azure/trusted-signing-action@v1.2.0
-        with:
-          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
-          endpoint: ${{ secrets.AZURE_ENDPOINT }}
-          signing-account-name: ${{ secrets.AZURE_SIGNING_ACCOUNT_NAME }}
-          certificate-profile-name: ${{ secrets.AZURE_CERT_PROFILE_NAME }}
-          files-folder: ${{ github.workspace }}\apps\installer-stub\dist
-          files-folder-filter: "*.exe,*.dll"
-          files-folder-recurse: true
-          file-digest: SHA256
-          timestamp-rfc3161: http://timestamp.acs.microsoft.com
-          timestamp-digest: SHA256
-          timeout: 1800
-      - name: Wait before Azure signing retry 2
-        if: needs.detect-secrets.outputs.is_release == 'true' && steps.sign_windows_1.outcome == 'failure'
-        shell: pwsh
-        run: Start-Sleep -Seconds 30
-      - name: Sign Windows artifacts (attempt 2)
-        id: sign_windows_2
-        if: needs.detect-secrets.outputs.is_release == 'true' && steps.sign_windows_1.outcome == 'failure'
-        continue-on-error: true
-        timeout-minutes: 30
-        uses: Azure/trusted-signing-action@b443cf8ea4124818d2ea9f043cba29fc3ec47b16 # ratchet:Azure/trusted-signing-action@v1.2.0
-        with:
-          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
-          endpoint: ${{ secrets.AZURE_ENDPOINT }}
-          signing-account-name: ${{ secrets.AZURE_SIGNING_ACCOUNT_NAME }}
-          certificate-profile-name: ${{ secrets.AZURE_CERT_PROFILE_NAME }}
-          files-folder: ${{ github.workspace }}\apps\installer-stub\dist
-          files-folder-filter: "*.exe,*.dll"
-          files-folder-recurse: true
-          file-digest: SHA256
-          timestamp-rfc3161: http://timestamp.acs.microsoft.com
-          timestamp-digest: SHA256
-          timeout: 1800
-      - name: Wait before Azure signing retry 3
-        if: needs.detect-secrets.outputs.is_release == 'true' && steps.sign_windows_1.outcome == 'failure' && steps.sign_windows_2.outcome == 'failure'
-        shell: pwsh
-        run: Start-Sleep -Seconds 30
-      - name: Sign Windows artifacts (attempt 3)
-        id: sign_windows_3
-        if: needs.detect-secrets.outputs.is_release == 'true' && steps.sign_windows_1.outcome == 'failure' && steps.sign_windows_2.outcome == 'failure'
-        timeout-minutes: 30
-        uses: Azure/trusted-signing-action@b443cf8ea4124818d2ea9f043cba29fc3ec47b16 # ratchet:Azure/trusted-signing-action@v1.2.0
-        with:
-          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
-          endpoint: ${{ secrets.AZURE_ENDPOINT }}
-          signing-account-name: ${{ secrets.AZURE_SIGNING_ACCOUNT_NAME }}
-          certificate-profile-name: ${{ secrets.AZURE_CERT_PROFILE_NAME }}
-          files-folder: ${{ github.workspace }}\apps\installer-stub\dist
-          files-folder-filter: "*.exe,*.dll"
-          files-folder-recurse: true
-          file-digest: SHA256
-          timestamp-rfc3161: http://timestamp.acs.microsoft.com
-          timestamp-digest: SHA256
-          timeout: 1800
-      - name: Write Azure signing attempt diagnostics
-        if: always() && needs.detect-secrets.outputs.is_release == 'true'
-        shell: pwsh
-        env:
-          SIGN_WINDOWS_1_OUTCOME: ${{ steps.sign_windows_1.outcome }}
-          SIGN_WINDOWS_1_CONCLUSION: ${{ steps.sign_windows_1.conclusion }}
-          SIGN_WINDOWS_2_OUTCOME: ${{ steps.sign_windows_2.outcome }}
-          SIGN_WINDOWS_2_CONCLUSION: ${{ steps.sign_windows_2.conclusion }}
-          SIGN_WINDOWS_3_OUTCOME: ${{ steps.sign_windows_3.outcome }}
-          SIGN_WINDOWS_3_CONCLUSION: ${{ steps.sign_windows_3.conclusion }}
-        run: |
-          New-Item -ItemType Directory -Force -Path signing-diagnostics | Out-Null
-          @(
-            "attempt 1 outcome: $env:SIGN_WINDOWS_1_OUTCOME"
-            "attempt 1 conclusion: $env:SIGN_WINDOWS_1_CONCLUSION"
-            "attempt 2 outcome: $env:SIGN_WINDOWS_2_OUTCOME"
-            "attempt 2 conclusion: $env:SIGN_WINDOWS_2_CONCLUSION"
-            "attempt 3 outcome: $env:SIGN_WINDOWS_3_OUTCOME"
-            "attempt 3 conclusion: $env:SIGN_WINDOWS_3_CONCLUSION"
-          ) | Set-Content -Path signing-diagnostics/azure-signing-attempts.txt
-      - name: Report Azure signing flakiness
-        if: always() && needs.detect-secrets.outputs.is_release == 'true' && steps.sign_windows_1.outcome == 'failure'
-        shell: pwsh
-        run: Write-Output "::warning title=Azure signing flakiness::Azure Trusted Signing required at least one retry. Download the azure-signing-diagnostics artifact and check service health before the next release window."
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # ratchet:actions/upload-artifact@v7
-        if: always() && needs.detect-secrets.outputs.is_release == 'true'
-        with:
-          name: azure-signing-diagnostics
-          path: signing-diagnostics/azure-signing-attempts.txt
-          retention-days: 14
-          if-no-files-found: error
-      - name: Assert Windows signer identity
+      # Post-build "Sign Windows artifacts (attempt 1/2/3)" + retry sleeps
+      # + diagnostics upload were removed in #772: signing now happens
+      # DURING the electron-builder packaging step above via
+      # azureSignOptions, which signs each .exe and .dll from the
+      # win-unpacked staging tree before NSIS bundles them into the
+      # wrapper installer. electron-builder's azureSignOptions has its
+      # own retry behavior + Azure SDK timestamp + cert handling, so the
+      # external Azure/trusted-signing-action 3-attempt orchestration is
+      # no longer needed.
+      - name: Assert Windows signer identity (installer + extracted payload)
         if: needs.detect-secrets.outputs.is_release == 'true'
         shell: pwsh
         working-directory: apps/installer-stub
@@ -476,39 +439,93 @@ jobs:
             throw "AZURE_EXPECTED_PUBLISHER_NAME is required for Windows signer verification."
           }
 
-          # Azure Trusted Signing was configured (above) to recursively sign
-          # *.exe AND *.dll. Verify both classes — a partial DLL signing
-          # failure must not be allowed to slip through and ship in latest.yml.
+          function Assert-Signed($payloads, $context) {
+            if ($payloads.Count -eq 0) {
+              throw "No Windows signed payloads (.exe/.dll) found in $context."
+            }
+            foreach ($payload in $payloads) {
+              $signature = Get-AuthenticodeSignature -FilePath $payload.FullName
+              if ($signature.Status -ne "Valid") {
+                throw "Authenticode signature for $($payload.FullName) is $($signature.Status), expected Valid."
+              }
+              if ($null -eq $signature.SignerCertificate) {
+                throw "No signer certificate found for $($payload.FullName)."
+              }
+              $commonName = $signature.SignerCertificate.GetNameInfo(
+                [System.Security.Cryptography.X509Certificates.X509NameType]::SimpleName,
+                $false
+              )
+              if ($commonName -ne $expectedPublisher) {
+                throw "Signer CN '$commonName' does not match AZURE_EXPECTED_PUBLISHER_NAME '$expectedPublisher' for $($payload.FullName). Subject: $($signature.SignerCertificate.Subject)"
+              }
+            }
+          }
+
+          # Layer 1: verify the wrapper installer + the win-unpacked staging
+          # tree (everything electron-builder signed in-process). This is
+          # what the OLD post-build signing pipeline could check.
           $installers = Get-ChildItem -Path dist -Filter *.exe -File
           if ($installers.Count -eq 0) {
             throw "No Windows installer .exe found in dist."
           }
-          $payloads = Get-ChildItem -Path dist -Include *.exe,*.dll -File -Recurse
-          if ($payloads.Count -eq 0) {
-            throw "No Windows signed payloads (.exe/.dll) found under dist."
+          $stagingPayloads = Get-ChildItem -Path dist -Include *.exe,*.dll -File -Recurse
+          Assert-Signed $stagingPayloads "dist/ staging tree"
+          Write-Output "OK: dist/ staging tree — $($stagingPayloads.Count) signed payloads"
+
+          # Layer 2 (NEW for #772): EXTRACT the NSIS installer and assert
+          # the BINARIES THE USER ACTUALLY EXECUTES are signed. The original
+          # bug was that signing happened AFTER NSIS bundled win-unpacked,
+          # so the embedded binaries kept their unsigned form even though
+          # the wrapper installer + the unpacked staging tree both showed
+          # signed. SmartScreen / HVCI / Smart App Control / electron-updater
+          # publisherName checks all run against the INSTALLED binaries,
+          # not the wrapper.
+          #
+          # IMPORTANT (R2 codex finding): electron-builder embeds the actual
+          # app payload as `$PLUGINSDIR\app-64.7z` inside the NSIS wrapper.
+          # A single `7z x` of the wrapper unpacks the wrapper layer (NSIS
+          # plugins, uninstaller, the embedded .7z) but the binaries the
+          # user runs after install live INSIDE that nested .7z. We must
+          # recursively extract the nested archive and assert against THAT
+          # tree — otherwise the smoke validates wrapper/plugin binaries
+          # while missing the exact #772 failure mode.
+          $extractDir = Join-Path -Path $env:RUNNER_TEMP -ChildPath "wuphf-installer-extract"
+          $appDir = Join-Path -Path $env:RUNNER_TEMP -ChildPath "wuphf-installer-app"
+          foreach ($d in @($extractDir, $appDir)) {
+            if (Test-Path $d) { Remove-Item -Path $d -Recurse -Force }
+            New-Item -ItemType Directory -Path $d | Out-Null
           }
 
-          foreach ($payload in $payloads) {
-            $signature = Get-AuthenticodeSignature -FilePath $payload.FullName
-            if ($signature.Status -ne "Valid") {
-              throw "Authenticode signature for $($payload.FullName) is $($signature.Status), expected Valid."
-            }
-            if ($null -eq $signature.SignerCertificate) {
-              throw "No signer certificate found for $($payload.FullName)."
-            }
+          $installer = $installers[0]
+          # 7z is preinstalled on windows-2022 runners and can extract NSIS.
+          & 7z x -y "-o$extractDir" $installer.FullName
+          if ($LASTEXITCODE -ne 0) {
+            throw "7z failed to extract NSIS installer $($installer.FullName) (exit $LASTEXITCODE)"
+          }
 
-            $commonName = $signature.SignerCertificate.GetNameInfo(
-              [System.Security.Cryptography.X509Certificates.X509NameType]::SimpleName,
-              $false
-            )
-            if ($commonName -ne $expectedPublisher) {
-              throw "Signer CN '$commonName' does not match AZURE_EXPECTED_PUBLISHER_NAME '$expectedPublisher' for $($payload.FullName). Subject: $($signature.SignerCertificate.Subject)"
+          # Layer 2a: assert wrapper-level binaries are signed. These are
+          # NSIS plugin DLLs + uninstaller .exe — also user-visible during
+          # install/uninstall and SmartScreen checks them.
+          $wrapperPayloads = Get-ChildItem -Path $extractDir -Include *.exe,*.dll -File -Recurse
+          Assert-Signed $wrapperPayloads "extracted NSIS wrapper payload"
+          Write-Output "OK: NSIS wrapper — $($wrapperPayloads.Count) signed payloads"
+
+          # Layer 2b: locate the embedded app archive ($PLUGINSDIR\app-*.7z
+          # or app-*.zip), extract it, and assert THE INSTALLED app tree
+          # is signed. This is the gate that catches #772 end-to-end.
+          $embeddedArchives = Get-ChildItem -Path $extractDir -Include 'app-*.7z','app-*.zip' -File -Recurse
+          if ($embeddedArchives.Count -eq 0) {
+            throw "Could not find embedded app-*.7z/zip under extracted NSIS payload — electron-builder's NSIS template normally embeds it under \$PLUGINSDIR. Layer 2b cannot run without it."
+          }
+          foreach ($archive in $embeddedArchives) {
+            & 7z x -y "-o$appDir" $archive.FullName
+            if ($LASTEXITCODE -ne 0) {
+              throw "7z failed to extract embedded app archive $($archive.FullName) (exit $LASTEXITCODE)"
             }
           }
-      - name: Refresh Windows update manifest after signing
-        if: needs.detect-secrets.outputs.is_release == 'true'
-        working-directory: apps/installer-stub
-        run: bun scripts/refresh-latest-yml.js dist/latest.yml
+          $appPayloads = Get-ChildItem -Path $appDir -Include *.exe,*.dll,*.node -File -Recurse
+          Assert-Signed $appPayloads "extracted installed app tree"
+          Write-Output "OK: installed app tree — $($appPayloads.Count) signed payloads"
       - name: Assert Windows artifacts
         shell: bash
         working-directory: apps/installer-stub

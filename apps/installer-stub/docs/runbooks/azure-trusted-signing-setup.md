@@ -124,28 +124,59 @@ certificate identity within that account.
 
 ## Workflow Behavior
 
-The Windows job:
+PR #772 migrated Windows signing INTO electron-builder's packaging phase
+(via `win.azureSignOptions`) so binaries embedded in the NSIS payload get
+signed BEFORE NSIS bundles them. Previously signing happened in a separate
+post-build workflow step that signed only the wrapper installer; the
+binaries the user actually executes after install were unsigned.
 
-1. Builds the NSIS installer unsigned, **passing
-   `--config.win.signtoolOptions.publisherName="$AZURE_EXPECTED_PUBLISHER_NAME"`**
-   so the value baked into `app-update.yml` matches the certificate identity
-   that will sign it. (electron-updater compares this baked-in publisher name
-   against the downloaded installer's Authenticode CN at update time; a
-   mismatch breaks auto-update silently for end users.) Note: pre-electron-builder-26
-   the option lived at top-level `win.publisherName`; the v26 schema moved
-   it under `win.signtoolOptions.publisherName`.
-2. Signs the final `.exe` AND every packaged `.dll` recursively with
-   `Azure/trusted-signing-action`, retrying up to three attempts with
-   30-second waits.
-3. Asserts the Authenticode signature is `Valid` for every signed payload
-   (`*.exe` AND `*.dll`) and that the signer CN equals
-   `AZURE_EXPECTED_PUBLISHER_NAME` for each.
-4. Refreshes `latest.yml` from the signed artifact bytes and uploads the
-   artifact.
+The Windows job now:
 
-The `win.signtoolOptions.publisherName` placeholder in `electron-builder.yml`
-(`WUPHF (installer stub)`) is intentionally kept for local PR builds, which
-do not auto-update. Production releases override it via the workflow secret.
+1. Sets the Azure auth env vars (`AZURE_TENANT_ID`, `AZURE_CLIENT_ID`,
+   `AZURE_CLIENT_SECRET`, `AZURE_ENDPOINT`, `AZURE_SIGNING_ACCOUNT_NAME`,
+   `AZURE_CERT_PROFILE_NAME`, `AZURE_EXPECTED_PUBLISHER_NAME`) at the
+   step level. The Azure SDK's `EnvironmentCredential` picks these up
+   automatically.
+2. Runs `bun run build:win` with CLI overrides:
+   `--config.win.azureSignOptions.endpoint=$AZURE_ENDPOINT`,
+   `--config.win.azureSignOptions.codeSigningAccountName=$AZURE_SIGNING_ACCOUNT_NAME`,
+   `--config.win.azureSignOptions.certificateProfileName=$AZURE_CERT_PROFILE_NAME`,
+   `--config.win.azureSignOptions.publisherName=$AZURE_EXPECTED_PUBLISHER_NAME`.
+   electron-builder signs each `.exe`, `.dll`, AND `.node` (per
+   `win.signExts` in `electron-builder.yml`) produced by the
+   win-unpacked staging tree, then NSIS bundles the already-signed
+   binaries into the wrapper installer (which also gets signed).
+   The build step is wrapped in a 3-attempt workflow retry loop
+   with 30-second sleeps between attempts and a `dist/` reset before
+   each retry — electron-builder's built-in retry only matches
+   DNS-resolution + file-lock errors, so Azure 5xx / throttling /
+   `SignerSign()` failures need workflow-level retry coverage.
+3. Asserts the Authenticode signature is `Valid` and signer CN equals
+   `AZURE_EXPECTED_PUBLISHER_NAME` across THREE layers:
+   - **Layer 1**: every `*.exe`/`*.dll` in the `dist/` staging tree
+     (the wrapper installer + everything electron-builder signed in
+     process).
+   - **Layer 2a**: every `*.exe`/`*.dll` extracted from the outer NSIS
+     wrapper via `7z x` (NSIS plugin DLLs, uninstaller .exe, etc.).
+   - **Layer 2b (NEW for #772)**: every `*.exe`/`*.dll`/`*.node`
+     extracted from the embedded `app-*.7z` archive that NSIS unpacks
+     into `$INSTDIR` at install time. THIS is the binary tree the user
+     actually runs after install — SmartScreen, HVCI, Smart App
+     Control, and electron-updater's publisherName check all evaluate
+     these binaries, not the wrapper. Without Layer 2b a regression
+     to post-NSIS signing would re-introduce #772 invisibly.
+
+`win.signtoolOptions.publisherName` in `electron-builder.yml`
+(`WUPHF (installer stub)`) stays as the placeholder for PR builds, which
+don't sign at all (electron-builder skips signing when no
+azureSignOptions/cscLink is present). The release workflow's CLI
+override adds `azureSignOptions` on top; per the schema, when both
+`signtoolOptions` and `azureSignOptions` are set, azureSignOptions
+wins.
+
+`refresh-latest-yml.js` is no longer invoked after signing because
+electron-builder generates `latest.yml` from the signed bytes within
+its own pipeline.
 
 ## Smoke Test
 
@@ -153,8 +184,11 @@ do not auto-update. Production releases override it via the workflow secret.
 2. Approve the `production-release` environment if GitHub asks for it.
 3. Open the `Release Rewrite` workflow run.
 4. Confirm `Detect Azure signing secrets` reports all Azure values set.
-5. Confirm the Windows job signs with `Azure/trusted-signing-action`, verifies
-   the signer CN, refreshes `latest.yml`, and verifies the manifest.
+5. Confirm the Windows job signs via electron-builder's `azureSignOptions`
+   (visible in build output as inline signing of each `.exe`/`.dll`),
+   verifies the signer CN on both the dist/ staging tree AND the
+   extracted NSIS payload, and produces `latest.yml` from the signed
+   bytes inline.
 6. The publish job auto-flips the draft to a published release after the
    asset assertion succeeds. Download the `.exe` from the published release
    and inspect its signature:
