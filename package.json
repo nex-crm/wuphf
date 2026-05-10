@@ -13,11 +13,11 @@
     "installer:lint": "bun run --cwd apps/installer-stub lint"
   },
   "devDependencies": {
-    "@commitlint/cli": "^20.5.0",
-    "@commitlint/config-conventional": "^20.5.0",
-    "@secretlint/secretlint-rule-pattern": "^12.2.0",
-    "@secretlint/secretlint-rule-preset-recommend": "^12.2.0",
-    "secretlint": "^12.2.0"
+    "@commitlint/cli": "^21.0.0",
+    "@commitlint/config-conventional": "^21.0.0",
+    "@secretlint/secretlint-rule-pattern": "^13.0.0",
+    "@secretlint/secretlint-rule-preset-recommend": "^13.0.0",
+    "secretlint": "^13.0.0"
   },
   "version": "0.0.0"
 }
