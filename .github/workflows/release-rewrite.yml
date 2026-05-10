@@ -308,6 +308,28 @@ jobs:
           AZURE_ENDPOINT: ${{ secrets.AZURE_ENDPOINT }}
           AZURE_EXPECTED_PUBLISHER_NAME: ${{ secrets.AZURE_EXPECTED_PUBLISHER_NAME }}
         run: bash apps/installer-stub/scripts/detect-signing-secrets.sh
+      - name: Diagnose installer-stub workspace layout (Windows)
+        # Temporary diagnostic: bun 1.3.13 on Windows isn't materializing
+        # electron-updater into apps/installer-stub/node_modules even though
+        # it works on Linux + macOS. Dump the layout so we can see what bun
+        # actually produced and decide on the right workaround.
+        working-directory: apps/installer-stub
+        shell: bash
+        run: |
+          echo '--- apps/installer-stub/node_modules (top level):'
+          ls -la node_modules/ 2>&1 | head -40
+          echo
+          echo '--- apps/installer-stub/node_modules/.bin (top level):'
+          ls -la node_modules/.bin 2>&1 | head -10
+          echo
+          echo '--- root node_modules/electron-updater (if hoisted):'
+          ls -la ../../node_modules/electron-updater 2>&1 | head -5 || echo 'not hoisted'
+          echo
+          echo '--- root node_modules/.bun electron-updater dirs:'
+          ls -la ../../node_modules/.bun 2>&1 | grep electron-updater | head -5 || echo 'not in .bun cache'
+          echo
+          echo '--- bun pm ls --prod:'
+          bun pm ls --prod 2>&1 | head -20 || true
       - name: Build Windows PR artifacts
         if: needs.detect-secrets.outputs.is_release != 'true'
         working-directory: apps/installer-stub
