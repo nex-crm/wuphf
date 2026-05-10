@@ -41,23 +41,22 @@ func brokerWithAutoNotebookWriter(t *testing.T) (*Broker, func()) {
 	}
 }
 
-// noNotebookEntries asserts the agent shelf is empty after a short
-// settle window. Used by the regression guards below to prove no
-// broker hook is fanning events into the writer.
+// noNotebookEntries asserts the agent shelf is empty. The auto-write
+// hooks are gone, so PostMessage / MutateTask never spawn writer
+// goroutine work; we can read the shelf and the writer counter
+// synchronously, with a short WaitForCondition fallback that exits as
+// soon as the writer signals no progress (since no progress is the
+// expected state). The predicate intentionally never returns true —
+// it is a deterministic deadline-bound wait, not a poll.
 func noNotebookEntries(t *testing.T, b *Broker, slug string) {
 	t.Helper()
-	// Brief settle: any in-flight writer goroutine work would have to
-	// land in well under this window. The writer's queue is non-buffered
-	// for tests with the stub client, and PostMessage / MutateTask both
-	// return synchronously after the hook seam.
-	deadline := time.Now().Add(150 * time.Millisecond)
-	for time.Now().Before(deadline) {
-		entries, _ := b.wikiWorker.NotebookList(slug)
-		if len(entries) > 0 {
-			t.Fatalf("expected no notebook entries on %s shelf; got %d: %+v",
-				slug, len(entries), entries)
-		}
-		time.Sleep(10 * time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+	_ = b.autoNotebookWriter.WaitForCondition(ctx, func() bool { return false })
+	entries, _ := b.wikiWorker.NotebookList(slug)
+	if len(entries) > 0 {
+		t.Fatalf("expected no notebook entries on %s shelf; got %d: %+v",
+			slug, len(entries), entries)
 	}
 }
 
