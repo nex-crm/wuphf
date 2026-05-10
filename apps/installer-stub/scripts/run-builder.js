@@ -157,10 +157,36 @@ function electronBuilderEnv() {
     env[key] = value;
   }
 
-  env.CUSTOM_APP_BUILDER_PATH ||= ensureWorkspaceAppBuilderBinary();
+  env.CUSTOM_APP_BUILDER_PATH = ensureWorkspaceAppBuilderBinary();
+  env.WUPHF_BUILDER_CLI = builderCli;
 
   return env;
 }
+
+const builderBootstrap = `
+const path = require("node:path");
+const builderCli = process.env.WUPHF_BUILDER_CLI;
+const appBuilderPath = process.env.CUSTOM_APP_BUILDER_PATH;
+
+if (appBuilderPath) {
+  const builderUtilPackage = require.resolve("builder-util/package.json", {
+    paths: [path.dirname(builderCli)],
+  });
+  const appBuilderModule = require.resolve("app-builder-bin", {
+    paths: [path.dirname(builderUtilPackage)],
+  });
+
+  require.cache[appBuilderModule] = {
+    id: appBuilderModule,
+    filename: appBuilderModule,
+    loaded: true,
+    exports: { appBuilderPath },
+  };
+}
+
+process.argv = [process.execPath, builderCli, ...process.argv.slice(1)];
+require(builderCli);
+`;
 
 const nodeBinary = process.env.NODE_BINARY || process.execPath;
 const releaseMode = process.env.WUPHF_RELEASE_MODE || "pr";
@@ -186,11 +212,12 @@ if (process.versions.bun && !process.env.NODE_BINARY) {
 // dependency installs. When setup-bun leaves npm_execpath pointing at Bun's
 // native binary, electron-builder runs `node $npm_execpath` and Node fails to
 // parse the binary. Scrub Bun/npm lifecycle env before spawning the builder.
-// Also pass CUSTOM_APP_BUILDER_PATH from electron-builder's real dependency
-// tree so builder-util does not depend on Bun's root node_modules symlink shape
-// in CI. The same helper materializes the binary at the root node_modules path
-// builder-util falls back to when Bun 1.1 exposes a shallow app-builder-bin link.
-const result = spawnSync(nodeBinary, [builderCli, ...builderArgs], {
+// Also pass and preload CUSTOM_APP_BUILDER_PATH from electron-builder's real
+// dependency tree so builder-util does not depend on Bun's root node_modules
+// symlink shape in CI. The same helper materializes the binary at the root
+// node_modules path builder-util falls back to when Bun 1.1 exposes a shallow
+// app-builder-bin link.
+const result = spawnSync(nodeBinary, ["-e", builderBootstrap, "--", ...builderArgs], {
   env: electronBuilderEnv(),
   stdio: "inherit",
 });
