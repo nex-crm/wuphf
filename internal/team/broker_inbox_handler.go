@@ -185,15 +185,16 @@ func (b *Broker) handleTaskBlock(w http.ResponseWriter, r *http.Request, actor r
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json body"})
 		return
 	}
+	on := strings.TrimSpace(body.On)
 	reason := strings.TrimSpace(body.Reason)
-	if reason == "" && strings.TrimSpace(body.On) != "" {
-		reason = "blocked on " + strings.TrimSpace(body.On)
+	if reason == "" && on != "" {
+		reason = "blocked on " + on
 	}
 	actorSlug := strings.TrimSpace(body.Actor)
 	if actorSlug == "" {
 		actorSlug = "human"
 	}
-	task, ok, err := b.BlockTask(id, actorSlug, reason)
+	task, ok, err := b.BlockTask(id, actorSlug, reason, on)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return

@@ -66,7 +66,7 @@ func (fakeICPIntakeProvider) CallSpecLLM(_ context.Context, _, userPrompt string
 	switch {
 	case strings.Contains(intent, "cache invalidation"):
 		return fenceFakeICPSpec(map[string]any{
-			"problem":        "The cache invalidation logic does not invalidate stale entries.",
+			"problem":       "The cache invalidation logic does not invalidate stale entries.",
 			"targetOutcome": "Cache hit-rate drops to expected after invalidation events.",
 			"acceptanceCriteria": []map[string]string{
 				{"statement": "Stale entries no longer return on subsequent reads."},
@@ -76,7 +76,7 @@ func (fakeICPIntakeProvider) CallSpecLLM(_ context.Context, _, userPrompt string
 		}), nil
 	case strings.Contains(intent, "JWT validation"):
 		return fenceFakeICPSpec(map[string]any{
-			"problem":        "JWT validation accepts expired tokens with a stale clock skew window.",
+			"problem":       "JWT validation accepts expired tokens with a stale clock skew window.",
 			"targetOutcome": "Expired tokens are rejected within 30s of expiry.",
 			"acceptanceCriteria": []map[string]string{
 				{"statement": "Expired JWTs are rejected after the configured leeway."},
@@ -86,7 +86,7 @@ func (fakeICPIntakeProvider) CallSpecLLM(_ context.Context, _, userPrompt string
 		}), nil
 	case strings.Contains(intent, "auth header"):
 		return fenceFakeICPSpec(map[string]any{
-			"problem":        "Outbound API calls do not yet attach the new auth header.",
+			"problem":       "Outbound API calls do not yet attach the new auth header.",
 			"targetOutcome": "Every external request carries the new x-wuphf-auth header.",
 			"acceptanceCriteria": []map[string]string{
 				{"statement": "All outbound HTTP calls attach the new header."},
@@ -96,7 +96,7 @@ func (fakeICPIntakeProvider) CallSpecLLM(_ context.Context, _, userPrompt string
 		}), nil
 	case strings.Contains(intent, "dependency upgrade"):
 		return fenceFakeICPSpec(map[string]any{
-			"problem":        "The dependency upgrade PR has been sitting open and needs landing.",
+			"problem":       "The dependency upgrade PR has been sitting open and needs landing.",
 			"targetOutcome": "The upgrade ships green and unblocks downstream work.",
 			"acceptanceCriteria": []map[string]string{
 				{"statement": "PR #742 merges cleanly."},
@@ -386,16 +386,10 @@ func TestICP_Tutorial2_ReviewerTimeoutPath(t *testing.T) {
 // unblock cascade. Task A is blocked on task B; when B merges, A
 // auto-transitions blocked_on_pr_merge → review.
 //
-// Known gap: BlockTask routes through transitionLifecycleLocked to
-// LifecycleStateBlockedOnPRMerge but does NOT populate task.BlockedOn
-// with the blocker's ID. unblockDependentsLocked sweeps over
-// task.BlockedOn membership, so the cascade does not fire automatically
-// for tasks blocked via the CLI / HTTP /tasks/{id}/block endpoint.
-// The test therefore drives the cascade by adding the BlockedOn link
-// directly via SetTaskBlockedOnForTest before merging B. This wires
-// the rest of the cascade correctly and surfaces the underlying
-// data-flow gap as a documented v1.1 follow-up rather than a silent
-// regression.
+// The CLI / HTTP block path now records the blocker reference into
+// task.BlockedOn directly (BlockTask signature carries the blockerID
+// since the v1 BlockedOn fix). unblockDependentsLocked sweeps that
+// list, so the cascade fires end-to-end without any test-only helper.
 func TestICP_Tutorial3_BlockAndUnblockCascade(t *testing.T) {
 	b, _ := startICPBroker(t)
 	client := newProductionLikeClient()
@@ -432,13 +426,16 @@ func TestICP_Tutorial3_BlockAndUnblockCascade(t *testing.T) {
 		t.Fatalf("could not identify tasks A and B from inbox %+v", payload.Rows)
 	}
 
-	// Block A on B.
+	// Block A on B. The HTTP /tasks/{id}/block route reads the {on}
+	// field and forwards it to BlockTask, which appends the blocker
+	// reference to task.BlockedOn under b.mu. No test-only helper
+	// needed; the cascade picks it up from the typed list.
 	if err := client.BlockTask(context.Background(), taskA, taskB, "A depends on B's merge"); err != nil {
 		t.Fatalf("block A on B: %v", err)
 	}
-	// Workaround for the v1.1 gap: also pin BlockedOn so the unblock
-	// cascade can find A by sweeping b.tasks[*].BlockedOn membership.
-	b.SetTaskBlockedOnForTest(taskA, []string{taskB})
+	if got := blockedOnForTask(b, taskA); !containsTaskID(got, taskB) {
+		t.Fatalf("expected task A.BlockedOn to contain %q after CLI block, got %v", taskB, got)
+	}
 
 	// Verify A is blocked.
 	blockedPayload, err := client.ListInbox(context.Background(), "blocked")
@@ -522,3 +519,27 @@ func (c *testClock) String() string {
 // Compile-time guard: the production CLI must satisfy brokerClient. If
 // the interface drifts, this assertion fails before any ICP test runs.
 var _ brokerClient = (*httpBrokerClient)(nil)
+
+// blockedOnForTask returns the task.BlockedOn snapshot for the given
+// task id by walking the live broker state. Used by Tutorial 3 to
+// assert the CLI / HTTP block path populated the typed BlockedOn list
+// (rather than relying on a test-only helper).
+func blockedOnForTask(b *team.Broker, taskID string) []string {
+	for _, task := range b.AllTasks() {
+		if task.ID == taskID {
+			out := make([]string, len(task.BlockedOn))
+			copy(out, task.BlockedOn)
+			return out
+		}
+	}
+	return nil
+}
+
+func containsTaskID(haystack []string, needle string) bool {
+	for _, v := range haystack {
+		if v == needle {
+			return true
+		}
+	}
+	return false
+}
