@@ -39,7 +39,10 @@ traffic from this installer stub.
 4. Update the three package versions in `apps/installer-stub/package.json`
    together.
 5. Run `bun install` from repo root so `bun.lock` records the new versions.
-6. Run:
+6. If tag-to-package version normalization changes, update
+   `apps/installer-stub/scripts/normalize-package-version.js`; the release
+   workflow calls that shared script from every platform build job.
+7. Run:
 
    ```bash
    (cd apps/installer-stub && bun run lint && bun run build:dry-run)
@@ -47,8 +50,8 @@ traffic from this installer stub.
    bash apps/installer-stub/scripts/verify-latest-yml.sh
    ```
 
-7. Let PR CI build all three platform artifacts.
-8. Before merge, run a draft-only signed rewrite smoke tag and verify:
+8. Let PR CI build all three platform artifacts.
+9. Before merge, run a draft-only signed rewrite smoke tag and verify:
    - macOS codesign/notary/staple still pass
    - Windows Azure signing and signer CN assertion still pass
    - Linux AppImage/deb artifacts launch

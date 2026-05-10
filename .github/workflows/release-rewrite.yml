@@ -76,16 +76,15 @@ jobs:
         run: bun install --frozen-lockfile
       - name: Normalize package version from tag
         if: needs.detect-secrets.outputs.is_release == 'true'
-        working-directory: apps/installer-stub
         run: |
           tag="${GITHUB_REF_NAME#v}"
           version="${tag%-rewrite}"
-          # Export for the same-step bun process; ALSO write to GITHUB_ENV so
+          # Export for the same-step node process; ALSO write to GITHUB_ENV so
           # subsequent steps see it. $GITHUB_ENV alone does not propagate to
           # the current step's child processes.
           export WUPHF_BUILD_VERSION="${version}"
           echo "WUPHF_BUILD_VERSION=${version}" >> "${GITHUB_ENV}"
-          bun -e "const fs = require('node:fs'); const pkg = require('./package.json'); const v = process.env.WUPHF_BUILD_VERSION; if (!v) { console.error('WUPHF_BUILD_VERSION is empty; refusing to rewrite package.json'); process.exit(1); } pkg.version = v; pkg.wuphfBuildChannel = process.env.WUPHF_BUILD_CHANNEL || 'dev'; fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');"
+          node apps/installer-stub/scripts/normalize-package-version.js
       - name: Detect Apple signing secrets
         if: needs.detect-secrets.outputs.is_release == 'true'
         env:
@@ -229,16 +228,15 @@ jobs:
       - name: Normalize package version from tag
         if: needs.detect-secrets.outputs.is_release == 'true'
         shell: bash
-        working-directory: apps/installer-stub
         run: |
           tag="${GITHUB_REF_NAME#v}"
           version="${tag%-rewrite}"
-          # Export for the same-step bun process; ALSO write to GITHUB_ENV so
+          # Export for the same-step node process; ALSO write to GITHUB_ENV so
           # subsequent steps see it. $GITHUB_ENV alone does not propagate to
           # the current step's child processes.
           export WUPHF_BUILD_VERSION="${version}"
           echo "WUPHF_BUILD_VERSION=${version}" >> "${GITHUB_ENV}"
-          bun -e "const fs = require('node:fs'); const pkg = require('./package.json'); const v = process.env.WUPHF_BUILD_VERSION; if (!v) { console.error('WUPHF_BUILD_VERSION is empty; refusing to rewrite package.json'); process.exit(1); } pkg.version = v; pkg.wuphfBuildChannel = process.env.WUPHF_BUILD_CHANNEL || 'dev'; fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');"
+          node apps/installer-stub/scripts/normalize-package-version.js
       - name: Detect Azure signing secrets
         if: needs.detect-secrets.outputs.is_release == 'true'
         shell: bash
@@ -405,16 +403,15 @@ jobs:
         run: bun install --frozen-lockfile
       - name: Normalize package version from tag
         if: needs.detect-secrets.outputs.is_release == 'true'
-        working-directory: apps/installer-stub
         run: |
           tag="${GITHUB_REF_NAME#v}"
           version="${tag%-rewrite}"
-          # Export for the same-step bun process; ALSO write to GITHUB_ENV so
+          # Export for the same-step node process; ALSO write to GITHUB_ENV so
           # subsequent steps see it. $GITHUB_ENV alone does not propagate to
           # the current step's child processes.
           export WUPHF_BUILD_VERSION="${version}"
           echo "WUPHF_BUILD_VERSION=${version}" >> "${GITHUB_ENV}"
-          bun -e "const fs = require('node:fs'); const pkg = require('./package.json'); const v = process.env.WUPHF_BUILD_VERSION; if (!v) { console.error('WUPHF_BUILD_VERSION is empty; refusing to rewrite package.json'); process.exit(1); } pkg.version = v; pkg.wuphfBuildChannel = process.env.WUPHF_BUILD_CHANNEL || 'dev'; fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');"
+          node apps/installer-stub/scripts/normalize-package-version.js
       - name: Build Linux PR artifacts
         if: needs.detect-secrets.outputs.is_release != 'true'
         working-directory: apps/installer-stub
