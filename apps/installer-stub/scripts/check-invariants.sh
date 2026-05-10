@@ -74,11 +74,21 @@ dependency_check_output="$(
   cd "${repo_root}" &&
     bun -e '
       const pkg = require("./apps/installer-stub/package.json");
-      const allowlist = new Set(
-        Array.isArray(pkg.wuphfRuntimeDependenciesAllowlist)
-          ? pkg.wuphfRuntimeDependenciesAllowlist
-          : [],
-      );
+
+      // The single source of truth for which runtime dependencies are
+      // approved. Hardcoded HERE — not read from package.json — so a future
+      // PR cannot widen the surface by editing only package.json. Adding a
+      // name requires editing this script (separate review point) AND the
+      // package.json allowlist field (consistency check below).
+      //
+      // electron-updater rationale: required at runtime by src/main.js for
+      // the auto-update flow that the signing pipeline ships end-to-end.
+      // Pure JS, no native bindings, so safe under npmRebuild=false.
+      const APPROVED_RUNTIME_DEPS = new Set(["electron-updater"]);
+
+      const declaredAllowlist = Array.isArray(pkg.wuphfRuntimeDependenciesAllowlist)
+        ? pkg.wuphfRuntimeDependenciesAllowlist
+        : [];
 
       const forbiddenBlocks = ["peerDependencies", "optionalDependencies"];
       let failed = false;
@@ -91,28 +101,60 @@ dependency_check_output="$(
         }
       }
 
+      // Reject any package.json allowlist entry that is not in the
+      // hardcoded approved set. This is the second gate the PR comments
+      // promised: package.json declares INTENT, this script enforces POLICY.
+      for (const declared of declaredAllowlist) {
+        if (!APPROVED_RUNTIME_DEPS.has(declared)) {
+          console.error(
+            "wuphfRuntimeDependenciesAllowlist contains \"" + declared +
+              "\" but it is not in APPROVED_RUNTIME_DEPS in check-invariants.sh; " +
+              "widening the runtime-dep surface requires editing BOTH files in the same PR",
+          );
+          failed = true;
+        }
+      }
+
+      const declaredAllowlistSet = new Set(declaredAllowlist);
+
       const deps = pkg.dependencies;
       if (deps && typeof deps === "object") {
         for (const name of Object.keys(deps)) {
-          if (!allowlist.has(name)) {
+          if (!APPROVED_RUNTIME_DEPS.has(name)) {
             console.error(
               "dependencies." + name +
-                " is not in wuphfRuntimeDependenciesAllowlist; " +
-                "add the name AND a rationale comment, then re-run the gate",
+                " is not in APPROVED_RUNTIME_DEPS in check-invariants.sh; " +
+                "widening the runtime-dep surface requires editing BOTH files in the same PR",
+            );
+            failed = true;
+            continue;
+          }
+          // Approved by the script-side policy, but the package.json must
+          // ALSO declare the intent in its allowlist field. This keeps the
+          // public-facing notes/rationale in sync with the deps block —
+          // otherwise a contributor approved by the hardcoded set could
+          // skip updating the wuphfRuntimeDependenciesAllowlistNotes
+          // documentation that downstream readers rely on.
+          if (!declaredAllowlistSet.has(name)) {
+            console.error(
+              "dependencies." + name +
+                " is approved by APPROVED_RUNTIME_DEPS but not declared in " +
+                "package.json wuphfRuntimeDependenciesAllowlist; add the name to the allowlist",
             );
             failed = true;
           }
         }
       }
 
-      // Prevent the allowlist from being widened without an actual entry.
-      // A non-empty allowlist with an empty dependencies block usually means
-      // someone removed the dep but forgot to clean up the allowlist; flag
-      // it so the two stay in sync.
+      // Prevent stale entries: every approved name that is on the package
+      // allowlist must actually be declared in dependencies. A missing
+      // declaration means the dep was removed from main.js but the
+      // allowlist field was forgotten — surface that immediately so the
+      // surface only ever shrinks, never accumulates dead names.
       const declaredDepNames = new Set(
         deps && typeof deps === "object" ? Object.keys(deps) : [],
       );
-      for (const allowed of allowlist) {
+      for (const allowed of declaredAllowlist) {
         if (!declaredDepNames.has(allowed)) {
           console.error(
             "wuphfRuntimeDependenciesAllowlist contains \"" + allowed +

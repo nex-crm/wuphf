@@ -41,70 +41,169 @@ function main() {
     process.exit(2);
   }
 
-  const packageJson = require(path.resolve(__dirname, "..", "package.json"));
+  // Test seams (production never sets these): override the package.json
+  // source and the installer-stub root used for the runtime-closure walk.
+  // Production callers pass only `<dist-dir>`; test callers can scope the
+  // policy/closure to a fixture without touching the real workspace tree.
+  const installerStubRoot =
+    process.env.WUPHF_PACKAGED_DEPS_INSTALLER_STUB_ROOT ?? path.resolve(__dirname, "..");
+  const packageJsonPath =
+    process.env.WUPHF_PACKAGED_DEPS_PACKAGE_JSON ?? path.join(installerStubRoot, "package.json");
+
+  const packageJson = require(path.resolve(packageJsonPath));
   const allowlist = packageJson.wuphfRuntimeDependenciesAllowlist;
-  if (!Array.isArray(allowlist) || allowlist.length === 0) {
-    console.error("wuphfRuntimeDependenciesAllowlist is empty or missing — nothing to check");
+  // FAIL CLOSED: a missing or empty allowlist with non-empty `dependencies`
+  // is a contract bug, not a no-op. The companion check-invariants.sh
+  // separately requires every dep to also appear in the allowlist; if this
+  // script fired with an empty allowlist while deps existed, the policy
+  // surface would silently shrink to "anything goes".
+  if (!Array.isArray(allowlist)) {
+    console.error(
+      "wuphfRuntimeDependenciesAllowlist is missing or not an array; " +
+        "the packaged-runtime-deps gate refuses to run without an explicit allowlist",
+    );
+    process.exit(2);
+  }
+  if (allowlist.length === 0) {
+    if (
+      packageJson.dependencies &&
+      typeof packageJson.dependencies === "object" &&
+      Object.keys(packageJson.dependencies).length > 0
+    ) {
+      console.error(
+        "wuphfRuntimeDependenciesAllowlist is empty but dependencies block is non-empty; " +
+          "every runtime dep must be declared in the allowlist",
+      );
+      process.exit(2);
+    }
+    console.log("packaged-runtime-deps OK (empty allowlist + empty dependencies)");
     process.exit(0);
   }
 
-  const resourcesDir = locateResourcesDir(distDir);
-  if (resourcesDir === null) {
+  const resourceDirs = locateAllResourcesDirs(distDir);
+  if (resourceDirs.length === 0) {
     console.error(
-      `could not locate Electron resources/ directory under ${distDir}; ` +
+      `could not locate any Electron resources/ directory under ${distDir}; ` +
         "supported layouts: macOS .app/Contents/Resources, Linux *-unpacked/resources, Windows win-unpacked/resources",
     );
     process.exit(2);
   }
 
-  const asarPath = path.join(resourcesDir, "app.asar");
-  const unpackedDir = path.join(resourcesDir, "app.asar.unpacked");
-  const asarExists = fs.existsSync(asarPath);
-  const unpackedExists = fs.existsSync(unpackedDir);
+  // Walk the runtime closure once from package.json so we can assert every
+  // transitive dep also lives in the bundle. Without this the gate would
+  // pass on a packaged app that has electron-updater/package.json but is
+  // missing fs-extra / builder-util-runtime / etc., and the user would still
+  // get a "Cannot find module" crash on launch — just one frame deeper.
+  const runtimeClosure = computeRuntimeClosure(allowlist, installerStubRoot);
 
-  if (!asarExists && !unpackedExists) {
-    console.error(
-      `neither app.asar nor app.asar.unpacked/ found under ${resourcesDir}; ` +
-        "did electron-builder skip packaging?",
+  let allOk = true;
+  for (const resourcesDir of resourceDirs) {
+    const asarPath = path.join(resourcesDir, "app.asar");
+    const unpackedDir = path.join(resourcesDir, "app.asar.unpacked");
+    const asarExists = fs.existsSync(asarPath);
+    const unpackedExists = fs.existsSync(unpackedDir);
+
+    if (!asarExists && !unpackedExists) {
+      console.error(
+        `neither app.asar nor app.asar.unpacked/ found under ${resourcesDir}; ` +
+          "did electron-builder skip packaging?",
+      );
+      allOk = false;
+      continue;
+    }
+
+    const asarEntries = asarExists ? listAsarEntries(asarPath) : new Set();
+    const missing = [];
+    for (const depName of runtimeClosure) {
+      const asarKey = `node_modules/${depName}/package.json`;
+      const unpackedPath = path.join(unpackedDir, "node_modules", depName, "package.json");
+      const inAsar = asarEntries.has(asarKey);
+      const inUnpacked = unpackedExists && fs.existsSync(unpackedPath);
+      if (!inAsar && !inUnpacked) {
+        missing.push(depName);
+      }
+    }
+
+    if (missing.length > 0) {
+      console.error(
+        `Missing runtime dependencies in packaged app under ${resourcesDir}:\n  - ` +
+          missing.join("\n  - ") +
+          "\n\n" +
+          "Each name is on the runtime-dep closure (allowlist + transitive `dependencies`) " +
+          "but was NOT found in either app.asar or app.asar.unpacked/. The packaged " +
+          "app will fail at module-load time. Make sure the root dep is declared in " +
+          "`dependencies` (not `devDependencies`) and that bun.lock is up to date.",
+      );
+      allOk = false;
+      continue;
+    }
+
+    console.log(
+      `packaged-runtime-deps OK at ${resourcesDir} (${runtimeClosure.size} closure entries from ${allowlist.length} allowlisted root: ${allowlist.join(", ")})`,
     );
-    process.exit(2);
   }
 
-  const asarEntries = asarExists ? listAsarEntries(asarPath) : new Set();
+  process.exit(allOk ? 0 : 1);
+}
 
-  const missing = [];
-  for (const depName of allowlist) {
-    const asarKey = `node_modules/${depName}/package.json`;
-    const unpackedPath = path.join(unpackedDir, "node_modules", depName, "package.json");
-    const inAsar = asarEntries.has(asarKey);
-    const inUnpacked = unpackedExists && fs.existsSync(unpackedPath);
-    if (!inAsar && !inUnpacked) {
-      missing.push(depName);
+function computeRuntimeClosure(allowlist, installerStubRoot) {
+  // Walk each allowlisted dep's package.json from the workspace's
+  // node_modules and union all transitive `dependencies` keys into a
+  // closure set. Resolution uses Node's algorithm starting from the
+  // allowlisted root, which mirrors how electron-builder packages the
+  // production tree.
+  const closure = new Set();
+  const queue = [...allowlist];
+
+  while (queue.length > 0) {
+    const name = queue.shift();
+    if (closure.has(name)) {
+      continue;
+    }
+    closure.add(name);
+
+    const candidates = [
+      path.join(installerStubRoot, "node_modules", name, "package.json"),
+      path.resolve(installerStubRoot, "..", "..", "node_modules", name, "package.json"),
+    ];
+    let pkgJsonPath = null;
+    for (const candidate of candidates) {
+      if (fs.existsSync(candidate)) {
+        pkgJsonPath = candidate;
+        break;
+      }
+    }
+    if (pkgJsonPath === null) {
+      // The dep itself is missing from node_modules; the gate's later
+      // bundle-presence check will surface this with a more useful message.
+      continue;
+    }
+    let depPkg;
+    try {
+      depPkg = JSON.parse(fs.readFileSync(pkgJsonPath, "utf8"));
+    } catch {
+      continue;
+    }
+    const transitive = depPkg.dependencies;
+    if (transitive && typeof transitive === "object") {
+      for (const childName of Object.keys(transitive)) {
+        if (!closure.has(childName)) {
+          queue.push(childName);
+        }
+      }
     }
   }
 
-  if (missing.length > 0) {
-    console.error(
-      "Missing runtime dependencies in packaged app:\n  - " +
-        missing.join("\n  - ") +
-        "\n\n" +
-        "Each name appears in package.json's wuphfRuntimeDependenciesAllowlist " +
-        "but was NOT found in either app.asar or app.asar.unpacked/. The packaged " +
-        "app will fail at module-load time. Make sure the dep is declared in " +
-        "`dependencies` (not `devDependencies`) and that bun.lock is up to date.",
-    );
-    process.exit(1);
-  }
-
-  console.log(
-    `packaged-runtime-deps OK (${allowlist.length} allowlisted, all bundled): ${allowlist.join(", ")}`,
-  );
+  return closure;
 }
 
-function locateResourcesDir(distDir) {
+function locateAllResourcesDirs(distDir) {
   const candidates = [];
 
   // Walk one level deep looking for known electron-builder output shapes.
+  // Returns ALL discovered resource dirs so multi-arch / multi-platform
+  // builds verify each bundle independently. A stale dist with a matching
+  // first candidate would otherwise mask a missing dep in a sibling bundle.
   for (const entry of fs.readdirSync(distDir, { withFileTypes: true })) {
     if (!entry.isDirectory()) {
       continue;
@@ -133,12 +232,7 @@ function locateResourcesDir(distDir) {
     }
   }
 
-  for (const candidate of candidates) {
-    if (fs.existsSync(candidate)) {
-      return candidate;
-    }
-  }
-  return null;
+  return candidates.filter((candidate) => fs.existsSync(candidate));
 }
 
 function listAsarEntries(asarPath) {
