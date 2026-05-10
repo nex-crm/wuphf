@@ -88,7 +88,16 @@ lens_preamble() {
       printf '%s\n' "Cross-process invariants? Idempotency? Race windows? Recovery semantics on partial failure?"
       ;;
     electron)
-      printf '%s\n' "You're an Electron app shipping engineer. Audit through electron-builder/electron-updater/codesign/notarytool/Authenticode/hardenedRuntime/Gatekeeper lenses. Does the signing chain stay intact? Does anything break notarization, stapling, or auto-update integrity? Are env vars and paths correct for app-builder-bin's expectations? Where does this drift from electron-builder canonical patterns?"
+      cat <<'ELECTRON_PREAMBLE'
+You're an Electron app shipping engineer. Audit through these lenses:
+electron-builder, electron-updater, codesign, notarytool, Authenticode,
+hardened runtime, Gatekeeper.
+
+Does the signing chain stay intact? Does anything break notarization,
+stapling, or auto-update integrity? Are env vars and paths correct for
+app-builder-bin's expectations? Where does this drift from canonical
+electron-builder patterns?
+ELECTRON_PREAMBLE
       ;;
     *)
       return 1

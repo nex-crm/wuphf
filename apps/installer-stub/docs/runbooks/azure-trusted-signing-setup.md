@@ -124,12 +124,26 @@ certificate identity within that account.
 
 ## Workflow Behavior
 
-The Windows job builds the NSIS installer unsigned, signs the final `.exe` and
-packaged `.dll` files with `Azure/trusted-signing-action`, retries signing up to
-three attempts with 30-second waits, asserts the final `.exe` Authenticode
-signature is `Valid`, and asserts the signer certificate CN equals
-`AZURE_EXPECTED_PUBLISHER_NAME`. Only then does it refresh `latest.yml` from the
-signed artifact bytes and upload the artifact.
+The Windows job:
+
+1. Builds the NSIS installer unsigned, **passing
+   `--config.win.publisherName="$AZURE_EXPECTED_PUBLISHER_NAME"`** so the value
+   baked into `app-update.yml` matches the certificate identity that will sign
+   it. (electron-updater compares this baked-in publisher name against the
+   downloaded installer's Authenticode CN at update time; a mismatch breaks
+   auto-update silently for end users.)
+2. Signs the final `.exe` AND every packaged `.dll` recursively with
+   `Azure/trusted-signing-action`, retrying up to three attempts with
+   30-second waits.
+3. Asserts the Authenticode signature is `Valid` for every signed payload
+   (`*.exe` AND `*.dll`) and that the signer CN equals
+   `AZURE_EXPECTED_PUBLISHER_NAME` for each.
+4. Refreshes `latest.yml` from the signed artifact bytes and uploads the
+   artifact.
+
+The `win.publisherName` placeholder in `electron-builder.yml`
+(`WUPHF (installer stub)`) is intentionally kept for local PR builds, which
+do not auto-update. Production releases override it via the workflow secret.
 
 ## Smoke Test
 

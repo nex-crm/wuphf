@@ -258,7 +258,20 @@ jobs:
       - name: Build Windows artifacts
         if: needs.detect-secrets.outputs.is_release == 'true'
         working-directory: apps/installer-stub
-        run: bun run build:win
+        env:
+          AZURE_EXPECTED_PUBLISHER_NAME: ${{ secrets.AZURE_EXPECTED_PUBLISHER_NAME }}
+        # Override win.publisherName so it matches the Authenticode CN of
+        # the Azure cert. electron-updater compares the publisherName baked
+        # into app-update.yml against the SignerCertificate CN of the
+        # downloaded installer at update time; a mismatch breaks auto-update
+        # silently for end users. The placeholder in electron-builder.yml is
+        # ONLY usable for local PR builds (which do not auto-update).
+        run: |
+          if [ -z "$AZURE_EXPECTED_PUBLISHER_NAME" ]; then
+            echo "AZURE_EXPECTED_PUBLISHER_NAME is required for release builds (binds win.publisherName to Authenticode CN)" >&2
+            exit 1
+          fi
+          bun run build:win -- --config.win.publisherName="$AZURE_EXPECTED_PUBLISHER_NAME"
       - name: Sign Windows artifacts (attempt 1)
         id: sign_windows_1
         if: needs.detect-secrets.outputs.is_release == 'true'
@@ -338,18 +351,25 @@ jobs:
             throw "AZURE_EXPECTED_PUBLISHER_NAME is required for Windows signer verification."
           }
 
+          # Azure Trusted Signing was configured (above) to recursively sign
+          # *.exe AND *.dll. Verify both classes — a partial DLL signing
+          # failure must not be allowed to slip through and ship in latest.yml.
           $installers = Get-ChildItem -Path dist -Filter *.exe -File
           if ($installers.Count -eq 0) {
             throw "No Windows installer .exe found in dist."
           }
+          $payloads = Get-ChildItem -Path dist -Include *.exe,*.dll -File -Recurse
+          if ($payloads.Count -eq 0) {
+            throw "No Windows signed payloads (.exe/.dll) found under dist."
+          }
 
-          foreach ($installer in $installers) {
-            $signature = Get-AuthenticodeSignature -FilePath $installer.FullName
+          foreach ($payload in $payloads) {
+            $signature = Get-AuthenticodeSignature -FilePath $payload.FullName
             if ($signature.Status -ne "Valid") {
-              throw "Authenticode signature for $($installer.Name) is $($signature.Status), expected Valid."
+              throw "Authenticode signature for $($payload.FullName) is $($signature.Status), expected Valid."
             }
             if ($null -eq $signature.SignerCertificate) {
-              throw "No signer certificate found for $($installer.Name)."
+              throw "No signer certificate found for $($payload.FullName)."
             }
 
             $commonName = $signature.SignerCertificate.GetNameInfo(
@@ -357,7 +377,7 @@ jobs:
               $false
             )
             if ($commonName -ne $expectedPublisher) {
-              throw "Signer CN '$commonName' does not match AZURE_EXPECTED_PUBLISHER_NAME '$expectedPublisher' for $($installer.Name). Subject: $($signature.SignerCertificate.Subject)"
+              throw "Signer CN '$commonName' does not match AZURE_EXPECTED_PUBLISHER_NAME '$expectedPublisher' for $($payload.FullName). Subject: $($signature.SignerCertificate.Subject)"
             }
           }
       - name: Refresh Windows update manifest after signing
