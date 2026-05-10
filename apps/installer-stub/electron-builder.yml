@@ -3,6 +3,7 @@ productName: WUPHF (installer stub)
 copyright: Copyright © 2026 Nex Labs Inc.
 artifactName: wuphf-installer-stub-${version}-${os}-${arch}.${ext}
 compression: maximum
+npmRebuild: false
 directories:
   output: dist
   buildResources: build
