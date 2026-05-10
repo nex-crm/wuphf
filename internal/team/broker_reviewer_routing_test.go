@@ -286,6 +286,112 @@ func TestReviewerConvergenceProcessExitFillsSkipped(t *testing.T) {
 	}
 }
 
+// TestReviewerConvergenceRaceGradeOnTimeoutBoundary (D-FU-2) covers
+// the corner case where a grade arrives in the same second the timeout
+// would otherwise fire. The convergence rule is idempotent — both
+// branches converge to LifecycleStateDecision, the grade-arrival path
+// transitions on "all reviewers graded" and the sweeper-timeout path
+// is then a no-op because the task is already past review. This test
+// asserts both orderings (grade-then-sweep, sweep-then-grade) land on
+// the same final state and produce the same number of grades, so a
+// future contributor refactoring evaluateConvergenceLocked cannot
+// silently introduce a race that double-fires the transition or
+// double-fills the missing slot.
+func TestReviewerConvergenceRaceGradeOnTimeoutBoundary(t *testing.T) {
+	cases := []struct {
+		name       string
+		gradeFirst bool
+	}{
+		{name: "grade lands then sweep fires", gradeFirst: true},
+		{name: "sweep fires then grade lands", gradeFirst: false},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			clk := newRoutingFakeClockAt(time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
+			b := newTestBroker(t)
+			b.nowFn = clk.Now
+
+			reviewers := []string{"agent-a", "agent-b"}
+			seedTaskInReview(t, b, "task-race", reviewers, 600)
+
+			// Stage one reviewer's grade so the boundary case has exactly
+			// one slot still missing when the deadline elapses.
+			if err := b.AppendReviewerGrade("task-race", ReviewerGrade{
+				ReviewerSlug: "agent-a",
+				Severity:     SeverityNitpick,
+				Reasoning:    "lgtm",
+			}); err != nil {
+				t.Fatalf("seed first grade: %v", err)
+			}
+
+			// Advance the clock to the exact deadline; both code paths
+			// (sweeper timeout fill, late-arrival grade) become eligible
+			// to fire on the same broker tick.
+			clk.Advance(10 * time.Minute)
+
+			finalGrade := ReviewerGrade{
+				ReviewerSlug: "agent-b",
+				Severity:     SeverityMinor,
+				Reasoning:    "small nit",
+			}
+
+			if tc.gradeFirst {
+				if err := b.AppendReviewerGrade("task-race", finalGrade); err != nil {
+					t.Fatalf("late grade arrival: %v", err)
+				}
+				b.SweepReviewConvergence()
+			} else {
+				b.SweepReviewConvergence()
+				if err := b.AppendReviewerGrade("task-race", finalGrade); err != nil {
+					t.Fatalf("late grade arrival after sweep: %v", err)
+				}
+			}
+
+			b.mu.Lock()
+			task := b.taskByIDLocked("task-race")
+			finalState := task.LifecycleState
+			b.mu.Unlock()
+			if finalState != LifecycleStateDecision {
+				t.Fatalf("expected task in decision after race; got %q", finalState)
+			}
+
+			// The convergence rule must be idempotent: a re-sweep is a
+			// no-op (state already decision) and a duplicate grade
+			// append on agent-b overwrites the existing slot, so the
+			// total grade count stays at 2.
+			b.SweepReviewConvergence()
+			grades := b.ReviewerGrades("task-race")
+			if len(grades) != 2 {
+				t.Fatalf("expected 2 grades after race + idempotent re-sweep; got %d (%+v)", len(grades), grades)
+			}
+
+			// Whichever path fired first decides the agent-b slot:
+			//   - grade-first: real grade with SeverityMinor.
+			//   - sweep-first: timeout-filler with SeveritySkipped, then
+			//     overwritten by the late-arrival real grade.
+			// Either way, the late grade wins because AppendReviewerGrade
+			// overwrites by (taskID, ReviewerSlug). Assert agent-b's
+			// final grade matches what the reviewer actually submitted.
+			var slotB *ReviewerGrade
+			for i := range grades {
+				if grades[i].ReviewerSlug == "agent-b" {
+					slotB = &grades[i]
+				}
+			}
+			if slotB == nil {
+				t.Fatal("agent-b slot missing from grades")
+			}
+			if slotB.Severity != SeverityMinor {
+				t.Fatalf("agent-b severity: got %q, want %q (the real submitted grade should win)", slotB.Severity, SeverityMinor)
+			}
+			if slotB.Reasoning != "small nit" {
+				t.Fatalf("agent-b reasoning: got %q, want %q", slotB.Reasoning, "small nit")
+			}
+		})
+	}
+}
+
 // TestResolveReviewersIntersection is the routing test required by the
 // Lane D scope: 3 agents with overlapping Watching sets, simulate a
 // task touching specific files / tools / wiki paths, assert exactly
