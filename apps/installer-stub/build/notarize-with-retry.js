@@ -1,8 +1,12 @@
 const Module = require("node:module");
 
 const retryDelaysMs = [60_000, 300_000, 900_000];
-const retryDelayScale = Number.parseFloat(process.env.WUPHF_NOTARY_RETRY_DELAY_SCALE || "1");
+const retryDelayScaleEnv = process.env.WUPHF_NOTARY_RETRY_DELAY_SCALE;
 const originalLoad = Module._load;
+
+if (retryDelayScaleEnv && process.env.WUPHF_RELEASE_MODE === "production") {
+  throw new Error("WUPHF_NOTARY_RETRY_DELAY_SCALE is only allowed outside production mode");
+}
 
 function errorText(error) {
   return [error?.message, error?.output, error?.stdout, error?.stderr, error?.stack, String(error)]
@@ -18,9 +22,15 @@ function isTransientNotaryError(error) {
 }
 
 function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function retryDelayWithJitter(ms) {
+  const retryDelayScale = Number.parseFloat(retryDelayScaleEnv || "1");
   const scaled =
     Number.isFinite(retryDelayScale) && retryDelayScale >= 0 ? ms * retryDelayScale : ms;
-  return new Promise((resolve) => setTimeout(resolve, scaled));
+  const jitter = 0.8 + Math.random() * 0.4;
+  return Math.round(scaled * jitter);
 }
 
 function wrapNotarize(moduleExports) {
@@ -39,11 +49,11 @@ function wrapNotarize(moduleExports) {
           throw error;
         }
 
-        const delayMs = retryDelaysMs[attempt];
+        const delayMs = retryDelayWithJitter(retryDelaysMs[attempt]);
         const nextAttempt = attempt + 2;
         const maxAttempts = retryDelaysMs.length + 1;
         console.warn(
-          `notarytool transient failure; retrying in ${delayMs / 60_000} minute(s) (${nextAttempt}/${maxAttempts})`,
+          `notarytool transient failure; retrying in ${(delayMs / 60_000).toFixed(1)} minute(s) (${nextAttempt}/${maxAttempts})`,
         );
         console.warn(errorText(error));
         await sleep(delayMs);
@@ -70,5 +80,6 @@ Module._load = function loadWithNotarizeRetry(request, ...args) {
 
 module.exports = {
   isTransientNotaryError,
+  retryDelayWithJitter,
   retryDelaysMs,
 };
