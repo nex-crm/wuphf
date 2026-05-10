@@ -228,15 +228,21 @@ function assertApiBootstrapBrokerUrl(brokerUrl: string): void {
   try {
     parsed = new URL(brokerUrl);
   } catch {
-    throw new Error("apiBootstrap.broker_url: must be http://<loopback>:<port>");
+    throw new Error("apiBootstrap.broker_url: must be http://<loopback>:<explicit-port>");
   }
+  // Note on `parsed.port === ""`: `new URL("http://h:80")` strips the port
+  // because 80 is HTTP's default. This codec rejects default ports
+  // intentionally — brokers always bind ephemeral high ports, and an
+  // implicit-port URL would round-trip differently than it came in.
   if (
     parsed.protocol !== "http:" ||
     parsed.port === "" ||
     !isAllowedLoopbackHost(parsed.hostname) ||
     !isBrokerPort(Number(parsed.port))
   ) {
-    throw new Error("apiBootstrap.broker_url: must be http://<loopback>:<port>");
+    throw new Error(
+      "apiBootstrap.broker_url: must be http://<loopback>:<explicit-port> (default port 80 is rejected to keep the wire shape stable across round-trips)",
+    );
   }
 }
 

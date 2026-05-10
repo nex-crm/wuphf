@@ -1173,7 +1173,12 @@ describe("apiBootstrap codec", () => {
     fc.assert(
       fc.property(
         fc.stringMatching(/^[A-Za-z0-9._~+/-]{16,96}$/),
-        fc.integer({ min: 1, max: 65535 }),
+        // Exclude port 80 — it's HTTP's default port, so `new URL("http://h:80")`
+        // strips it, and the codec contract requires an explicit non-default
+        // port (see assertApiBootstrapBrokerUrl). Brokers always bind to
+        // ephemeral high ports in practice; the property should not exercise
+        // input shapes the codec is documented to reject.
+        fc.integer({ min: 1, max: 65535 }).filter((p) => p !== 80),
         (tokenValue, port) => {
           const bootstrap = {
             token: asApiToken(tokenValue),
@@ -1185,6 +1190,15 @@ describe("apiBootstrap codec", () => {
       ),
       { numRuns: 200 },
     );
+  });
+
+  it("rejects http://<loopback>:80 because URL parser strips HTTP default port", () => {
+    // Regression for fast-check finding (seed -795955676): the round-trip
+    // property previously generated port 80, which `new URL` normalizes away.
+    // Codec contract intentionally requires an explicit non-default port.
+    expect(() =>
+      apiBootstrapFromJson({ token: "tok-bootstrap-abcdef", broker_url: "http://127.0.0.1:80" }),
+    ).toThrow(/apiBootstrap\.broker_url/);
   });
 
   it("decodes the v0 wire shape with snake_case broker_url", () => {
@@ -1214,7 +1228,7 @@ describe("apiBootstrap codec", () => {
   ])("rejects non-loopback or malformed broker_url %s", (brokerUrl) => {
     expect(() =>
       apiBootstrapFromJson({ token: "tok-bootstrap-abcdef", broker_url: brokerUrl }),
-    ).toThrow(/apiBootstrap\.broker_url: must be http:\/\/<loopback>:<port>/);
+    ).toThrow(/apiBootstrap\.broker_url: must be http:\/\/<loopback>:<explicit-port>/);
   });
 
   it("emits the v0 wire shape with snake_case broker_url", () => {
