@@ -355,7 +355,7 @@ describe("IPC handler registration logging", () => {
 });
 
 interface LogCall {
-  readonly level: "debug" | "info" | "warn" | "error";
+  readonly level: "info" | "warn" | "error";
   readonly event: string;
   readonly payload: LogPayload | undefined;
 }
@@ -369,7 +369,6 @@ function createMemoryLogger(): { readonly logger: Logger; readonly calls: LogCal
   return {
     calls,
     logger: {
-      debug: (event, payload) => push("debug", event, payload),
       info: (event, payload) => push("info", event, payload),
       warn: (event, payload) => push("warn", event, payload),
       error: (event, payload) => push("error", event, payload),

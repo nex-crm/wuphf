@@ -4,12 +4,11 @@ import { app } from "electron";
 
 import { monotonicNowMs } from "./monotonic-clock.ts";
 
-export type LogLevel = "debug" | "info" | "warn" | "error";
+export type LogLevel = "info" | "warn" | "error";
 export type LogPayloadValue = string | number | boolean | null;
 export type LogPayload = Readonly<Record<string, LogPayloadValue>>;
 
 export interface Logger {
-  readonly debug: (event: string, payload?: LogPayload) => void;
   readonly info: (event: string, payload?: LogPayload) => void;
   readonly warn: (event: string, payload?: LogPayload) => void;
   readonly error: (event: string, payload?: LogPayload) => void;
@@ -135,10 +134,6 @@ class ModuleLogger implements Logger {
     private readonly module: string,
     private readonly sink: StructuredLogger,
   ) {}
-
-  debug(event: string, payload?: LogPayload): void {
-    this.sink.write("debug", this.module, event, payload);
-  }
 
   info(event: string, payload?: LogPayload): void {
     this.sink.write("info", this.module, event, payload);

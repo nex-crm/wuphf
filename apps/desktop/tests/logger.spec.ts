@@ -116,7 +116,7 @@ describe("StructuredLogger", () => {
     });
     const logger = sink.forModule("main");
 
-    logger.debug("debug_event");
+    logger.info("info_event");
     logger.error("unhandled_rejection", { reason: "boom" });
 
     expect(stdoutWrite).toHaveBeenCalledOnce();

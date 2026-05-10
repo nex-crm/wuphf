@@ -14,14 +14,10 @@ const DEFAULT_MAX_BACKOFF_MS = 60_000;
 const DEFAULT_MAX_RESTART_RETRIES = 5;
 const DEFAULT_STABILITY_WINDOW_MS = 60_000;
 const DEFAULT_LIVENESS_STALE_MS = 5_000;
-// info/warn/error arrow bodies execute through the no-logger smoke test in
-// broker-supervisor.spec.ts (start → broker_starting/broker_started, exit →
-// broker_exited, error paths → broker_*_failed). debug is unused inside this
-// file but remains to satisfy the Logger interface; suppressing JUST that
-// arrow body keeps coverage honest about which fallbacks ARE exercised.
+// All three arrow bodies execute through the no-logger smoke test in
+// broker-supervisor.spec.ts: start → broker_starting/broker_started (info),
+// liveness staleness → broker_ping_missed (warn), restart cap → broker_restart_cap_reached (error).
 const NOOP_LOGGER: Logger = {
-  /* v8 ignore next -- interface-completion only; broker.ts does not call debug */
-  debug: () => undefined,
   info: () => undefined,
   warn: () => undefined,
   error: () => undefined,
@@ -358,14 +354,14 @@ export class BrokerSupervisor {
       serviceName: BROKER_SERVICE_NAME,
     });
 
-    // Defensive guard. handleRestartStartFailure is called from the setTimeout
-    // callback in scheduleRestart() AFTER start() throws. start() unconditionally
-    // sets `this.stopping = false` at the top of its body (broker.ts:113) before
-    // any code path that can throw. Therefore by the time we reach
-    // handleRestartStartFailure, this.stopping cannot be true: either start()
-    // ran far enough to clear it, or stop() cancelled the timer entirely. The
-    // guard remains as defense-in-depth for future refactors that might invert
-    // that ordering.
+    // Load-bearing guard for a real-Node event-loop race that fake timers
+    // can't model: if a restart setTimeout callback was already in the event
+    // queue when stop() ran, clearTimeout is a no-op and the callback fires
+    // anyway. Then start() throws (e.g. the next fork fails), we land here
+    // with this.stopping=true, and without this guard we would fall through
+    // to scheduleRestart() — leaking a fresh broker AFTER stop() completed.
+    // Vitest fake timers cancel deterministically so the test matrix can't
+    // exercise the race; coverage signal is intentionally suppressed below.
     /* v8 ignore start */
     if (this.stopping) {
       return;
