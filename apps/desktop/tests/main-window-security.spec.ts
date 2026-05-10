@@ -15,6 +15,10 @@ type WillNavigateHandler = (
   event: { readonly preventDefault: () => void },
   targetUrl: string,
 ) => void;
+type WillFrameNavigateHandler = (event: {
+  readonly preventDefault: () => void;
+  readonly url: string;
+}) => void;
 
 const VITE_DEV_SERVER_URL = "http://localhost:5173/";
 
@@ -280,6 +284,60 @@ describe("createSecureWindow", () => {
       }),
     ).toThrow("Refusing to load non-local ELECTRON_RENDERER_URL: http://192.168.0.10:5173/");
   });
+
+  it("blocks will-redirect to a different origin while allowing same-renderer redirects", async () => {
+    const { createSecureWindow } = await import("../src/main/window.ts");
+
+    createSecureWindow({
+      preloadPath: "/tmp/preload.js",
+      rendererIndexPath: "/tmp/index.html",
+      allowDevServerUrl: true,
+      devServerUrl: VITE_DEV_SERVER_URL,
+      expectedDevServerUrl: VITE_DEV_SERVER_URL,
+    });
+
+    const handler = getWillRedirectHandler(getOnlyWindow());
+
+    const sameOriginEvent = { preventDefault: vi.fn<() => void>() };
+    handler(sameOriginEvent, VITE_DEV_SERVER_URL);
+    expect(sameOriginEvent.preventDefault).not.toHaveBeenCalled();
+
+    const externalRedirectEvent = { preventDefault: vi.fn<() => void>() };
+    handler(externalRedirectEvent, "https://attacker.example.com/exfil");
+    expect(externalRedirectEvent.preventDefault).toHaveBeenCalledTimes(1);
+
+    const differentPortEvent = { preventDefault: vi.fn<() => void>() };
+    handler(differentPortEvent, "http://localhost:9999/");
+    expect(differentPortEvent.preventDefault).toHaveBeenCalledTimes(1);
+  });
+
+  it("blocks will-frame-navigate to a different origin", async () => {
+    const { createSecureWindow } = await import("../src/main/window.ts");
+
+    createSecureWindow({
+      preloadPath: "/tmp/preload.js",
+      rendererIndexPath: "/tmp/index.html",
+      allowDevServerUrl: true,
+      devServerUrl: VITE_DEV_SERVER_URL,
+      expectedDevServerUrl: VITE_DEV_SERVER_URL,
+    });
+
+    const handler = getWillFrameNavigateHandler(getOnlyWindow());
+
+    const sameOriginFrameEvent = {
+      preventDefault: vi.fn<() => void>(),
+      url: VITE_DEV_SERVER_URL,
+    };
+    handler(sameOriginFrameEvent);
+    expect(sameOriginFrameEvent.preventDefault).not.toHaveBeenCalled();
+
+    const externalFrameEvent = {
+      preventDefault: vi.fn<() => void>(),
+      url: "https://attacker.example.com/iframe",
+    };
+    handler(externalFrameEvent);
+    expect(externalFrameEvent.preventDefault).toHaveBeenCalledTimes(1);
+  });
 });
 
 function getOnlyWindow(): MockBrowserWindowInstance {
@@ -303,5 +361,30 @@ function getWillNavigateHandler(instance: MockBrowserWindowInstance): WillNaviga
   if (call === undefined) {
     throw new Error("Expected will-navigate handler to be registered");
   }
-  return call[1];
+  return call[1] as WillNavigateHandler;
+}
+
+function getWillRedirectHandler(instance: MockBrowserWindowInstance): WillNavigateHandler {
+  const call = instance.webContents.on.mock.calls.find(([event]) => event === "will-redirect");
+  if (call === undefined) {
+    throw new Error("Expected will-redirect handler to be registered");
+  }
+  return call[1] as WillNavigateHandler;
+}
+
+function getWillFrameNavigateHandler(
+  instance: MockBrowserWindowInstance,
+): WillFrameNavigateHandler {
+  const call = instance.webContents.on.mock.calls.find(
+    ([event]) => event === "will-frame-navigate",
+  );
+  if (call === undefined) {
+    throw new Error("Expected will-frame-navigate handler to be registered");
+  }
+  // The mock `on` is typed for the will-navigate two-arg shape, but
+  // window.ts also passes the will-frame-navigate single-event-arg shape
+  // through the same mock. Cast through unknown to bypass the structural
+  // signature mismatch — the runtime callable stored by vi.fn is the
+  // exact handler that window.ts registered.
+  return call[1] as unknown as WillFrameNavigateHandler;
 }

@@ -179,6 +179,35 @@ describe("showItemInFolder handler", () => {
     expect(electronMock.showItemInFolder).not.toHaveBeenCalled();
   });
 
+  it("rejects Windows network and device paths regardless of host platform", () => {
+    // \\server\share — backslash UNC. NTLM credential leak via SMB if Explorer
+    // is asked to reveal a renderer-controlled remote path.
+    expect(handleShowItemInFolder(event, { path: "\\\\attacker\\share\\file.txt" })).toEqual({
+      ok: false,
+      error: "Path must not be a Windows network or device path",
+    });
+
+    // //server/share — forward-slash UNC.
+    expect(handleShowItemInFolder(event, { path: "//attacker/share/file.txt" })).toEqual({
+      ok: false,
+      error: "Path must not be a Windows network or device path",
+    });
+
+    // \\?\UNC\server\share\file — DOS-device UNC long-path form.
+    expect(handleShowItemInFolder(event, { path: "\\\\?\\UNC\\attacker\\share\\file" })).toEqual({
+      ok: false,
+      error: "Path must not be a Windows network or device path",
+    });
+
+    // \\.\PhysicalDrive0 — DOS-device raw-device path.
+    expect(handleShowItemInFolder(event, { path: "\\\\.\\PhysicalDrive0" })).toEqual({
+      ok: false,
+      error: "Path must not be a Windows network or device path",
+    });
+
+    expect(electronMock.showItemInFolder).not.toHaveBeenCalled();
+  });
+
   it("rejects oversized path payloads before normalization", () => {
     expect(handleShowItemInFolder(event, { path: `/${"a".repeat(32_768)}` })).toEqual({
       ok: false,

@@ -42,6 +42,23 @@ export function createSecureWindow(config: CreateSecureWindowConfig): BrowserWin
     }
   });
 
+  // will-navigate covers script-driven and user-clicked top-level loads,
+  // but not server-initiated 30x redirects or subframe navigations. Apply
+  // the same renderer-URL exact-match policy to both so a redirect from
+  // the dev URL or future iframe content cannot move the BrowserWindow
+  // to remote content while keeping the preload bridge attached.
+  browserWindow.webContents.on("will-redirect", (event, targetUrl) => {
+    if (!isAllowedRendererNavigation(targetUrl, rendererUrl)) {
+      event.preventDefault();
+    }
+  });
+
+  browserWindow.webContents.on("will-frame-navigate", (event) => {
+    if (!isAllowedRendererNavigation(event.url, rendererUrl)) {
+      event.preventDefault();
+    }
+  });
+
   if (new URL(rendererUrl).protocol === "file:") {
     void browserWindow.loadFile(config.rendererIndexPath);
   } else {

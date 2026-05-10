@@ -892,6 +892,58 @@ describe("BrokerSupervisor", () => {
     await supervisor.stop();
   });
 
+  it("does not restart when the timer callback fires after stop() (closes the queued-callback race)", async () => {
+    vi.useFakeTimers();
+    const firstProcess = new FakeUtilityProcess(4321);
+    const secondProcess = new FakeUtilityProcess(5432);
+    const { forkProcess } = createForkMock([firstProcess, secondProcess]);
+    const { logger, calls } = createMemoryLogger();
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+      logger,
+      maxRestartRetries: 3,
+      firstBackoffMs: 100,
+      stopGraceMs: 0,
+      forceStopGraceMs: 0,
+    });
+
+    supervisor.start();
+    firstProcess.emit("message", { alive: true });
+
+    // Process exits → restart timer is scheduled.
+    firstProcess.emit("exit", 1);
+    expect(calls.some((call) => call.event === "broker_restart_scheduled")).toBe(true);
+
+    // Simulate the real-Node race: the timer callback was already on the
+    // event queue when stop() runs, so clearTimeout cannot cancel it.
+    // Make clearTimeout a no-op so the deterministic fake-timer scheduler
+    // still fires the callback after stop() completed.
+    const clearSpy = vi.spyOn(globalThis, "clearTimeout").mockImplementation(() => undefined);
+
+    await supervisor.stop();
+    expect(supervisor.getStatus()).toBe("dead");
+
+    // Advance past the restart backoff so the queued callback fires post-stop.
+    await vi.advanceTimersByTimeAsync(100);
+    await Promise.resolve();
+
+    clearSpy.mockRestore();
+
+    // The entry-guard MUST suppress the restart: no fork, no attempt log,
+    // status stays dead, and the skipped event records the suppression.
+    expect(forkProcess).toHaveBeenCalledTimes(1);
+    expect(calls.some((call) => call.event === "broker_restart_attempt")).toBe(false);
+    expect(
+      calls.find(
+        (call) =>
+          call.event === "broker_restart_skipped" &&
+          (call.payload as { reason?: string } | undefined)?.reason === "stopping",
+      ),
+    ).toBeDefined();
+    expect(supervisor.getStatus()).toBe("dead");
+  });
+
   it("ignores the redundant explicit settle() when the broker's exit fires during force-stop", async () => {
     vi.useFakeTimers();
     const processHandle = new FakeUtilityProcess(4321);

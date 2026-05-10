@@ -47,6 +47,24 @@ export function createShowItemInFolderHandler(
       return errResponse("Path must not contain NUL bytes");
     }
 
+    // Reject Windows network and device paths BEFORE the absolute-path
+    // check, because POSIX `path.isAbsolute()` does not recognize
+    // `\\server\share` or `\\?\UNC\...` and would otherwise reject them
+    // with the wrong reason. The payload is renderer-controlled and the
+    // production app ships for Windows from the same release pipeline,
+    // so this guard runs unconditionally rather than gating on the host
+    // OS where the IPC happens to be processed: `\\server\share\file`
+    // (NTLM credential leak via SMB / relay), `\\?\UNC\...` (DOS-device
+    // long-path UNC), and `\\.\Device` (raw device) all match the same
+    // leading double-separator pattern.
+    if (
+      isWindowsNetworkOrDevicePath(request.path) ||
+      isWindowsNetworkOrDevicePath(normalizedPath)
+    ) {
+      logRejection(options.logger, "windows_unc_or_device_path");
+      return errResponse("Path must not be a Windows network or device path");
+    }
+
     if (!nodePath.isAbsolute(normalizedPath)) {
       logRejection(options.logger, "non_absolute_path");
       return errResponse("Path must be absolute");
@@ -80,6 +98,12 @@ function isShowItemInFolderRequest(request: unknown): request is ValidShowItemIn
 
 function hasParentTraversalSegment(value: string): boolean {
   return value.split(/[\\/]+/).some((segment) => segment === "..");
+}
+
+function isWindowsNetworkOrDevicePath(value: string): boolean {
+  // Match \\server\share, //server/share, \\?\UNC\..., \\.\Device, etc.
+  // A leading double-separator on Windows always means UNC or DOS-device.
+  return /^[\\/]{2}/.test(value);
 }
 
 function logRejection(logger: Logger | undefined, reason: string, payload: LogPayload = {}): void {

@@ -34,7 +34,7 @@ interface MockBrokerSupervisorInstance {
 
 interface MockLogCall {
   readonly module: string;
-  readonly level: "debug" | "info" | "warn" | "error";
+  readonly level: "info" | "warn" | "error";
   readonly event: string;
   readonly payload: unknown;
 }
@@ -80,6 +80,10 @@ const electronMock = vi.hoisted(() => {
     },
     BrowserWindow,
     instances,
+    defaultSession: {
+      setPermissionRequestHandler: vi.fn<(handler: unknown) => void>(),
+      setPermissionCheckHandler: vi.fn<(handler: unknown) => void>(),
+    },
     showErrorBox: vi.fn<(title: string, content: string) => void>(),
     handle: vi.fn<(channel: string, handler: unknown) => void>(),
     openExternal: vi.fn<(url: string) => Promise<void>>(() => Promise.resolve()),
@@ -92,9 +96,6 @@ const electronMock = vi.hoisted(() => {
 const loggerMock = vi.hoisted(() => {
   const calls: MockLogCall[] = [];
   const createLogger = vi.fn((module: string) => ({
-    debug: vi.fn((event: string, payload?: unknown) => {
-      calls.push({ module, level: "debug", event, payload });
-    }),
     info: vi.fn((event: string, payload?: unknown) => {
       calls.push({ module, level: "info", event, payload });
     }),
@@ -144,6 +145,9 @@ vi.mock("electron", () => ({
   ipcMain: {
     handle: electronMock.handle,
   },
+  session: {
+    defaultSession: electronMock.defaultSession,
+  },
   shell: {
     openExternal: electronMock.openExternal,
     showItemInFolder: electronMock.showItemInFolder,
@@ -184,6 +188,8 @@ describe("main bootstrap", () => {
     electronMock.showErrorBox.mockClear();
     electronMock.handle.mockClear();
     electronMock.fork.mockClear();
+    electronMock.defaultSession.setPermissionRequestHandler.mockClear();
+    electronMock.defaultSession.setPermissionCheckHandler.mockClear();
     loggerMock.calls.length = 0;
     loggerMock.createLogger.mockClear();
     cleanupProcessListeners();
@@ -234,6 +240,48 @@ describe("main bootstrap", () => {
     expect(firstQuitEvent.preventDefault).toHaveBeenCalledTimes(1);
     expect(secondQuitEvent.preventDefault).toHaveBeenCalledTimes(1);
     expect(getOnlyBrokerSupervisor().stop).toHaveBeenCalledTimes(1);
+  });
+
+  it("installs deny-all permission request and check handlers on the default session before windows open", async () => {
+    await importMainBootstrap();
+
+    expect(electronMock.defaultSession.setPermissionRequestHandler).toHaveBeenCalledTimes(1);
+    expect(electronMock.defaultSession.setPermissionCheckHandler).toHaveBeenCalledTimes(1);
+
+    const requestHandler = electronMock.defaultSession.setPermissionRequestHandler.mock.calls[0]?.[0] as
+      | ((webContents: unknown, permission: string, callback: (granted: boolean) => void) => void)
+      | undefined;
+    if (requestHandler === undefined) {
+      throw new Error("Expected setPermissionRequestHandler to be invoked");
+    }
+    const grant = vi.fn<(granted: boolean) => void>();
+    requestHandler({}, "media", grant);
+    expect(grant).toHaveBeenCalledWith(false);
+
+    const checkHandler = electronMock.defaultSession.setPermissionCheckHandler.mock.calls[0]?.[0] as
+      | ((webContents: unknown, permission: string) => boolean)
+      | undefined;
+    if (checkHandler === undefined) {
+      throw new Error("Expected setPermissionCheckHandler to be invoked");
+    }
+    expect(checkHandler({}, "geolocation")).toBe(false);
+
+    expect(loggerMock.calls).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          module: "main",
+          level: "warn",
+          event: "permission_request_denied",
+          payload: { reason: "media" },
+        }),
+        expect.objectContaining({
+          module: "main",
+          level: "warn",
+          event: "permission_check_denied",
+          payload: { reason: "geolocation" },
+        }),
+      ]),
+    );
   });
 
   it("logs uncaught exceptions, unhandled rejections, and gone process signals", async () => {

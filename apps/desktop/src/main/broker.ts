@@ -328,6 +328,19 @@ export class BrokerSupervisor {
     });
     this.restartTimer = setTimeout(() => {
       this.restartTimer = null;
+      // Symmetric guard at callback entry. Closes the same real-Node race
+      // documented below in handleRestartStartFailure: if stop() runs while
+      // this callback is already on the event queue, clearTimeout cannot
+      // recall it. Without this check, start() would unconditionally clear
+      // stopping=false and fork a fresh broker AFTER stop() completed,
+      // leaking a process whether start() throws or succeeds.
+      if (this.stopping || this.fatalReason !== null) {
+        this.logger.info("broker_restart_skipped", {
+          restartCount: this.restartCount,
+          reason: this.stopping ? "stopping" : "fatal",
+        });
+        return;
+      }
       this.logger.info("broker_restart_attempt", {
         restartCount: this.restartCount,
         maxRestartRetries: this.maxRestartRetries,
@@ -354,14 +367,16 @@ export class BrokerSupervisor {
       serviceName: BROKER_SERVICE_NAME,
     });
 
-    // Load-bearing guard for a real-Node event-loop race that fake timers
-    // can't model: if a restart setTimeout callback was already in the event
-    // queue when stop() ran, clearTimeout is a no-op and the callback fires
-    // anyway. Then start() throws (e.g. the next fork fails), we land here
-    // with this.stopping=true, and without this guard we would fall through
-    // to scheduleRestart() — leaking a fresh broker AFTER stop() completed.
-    // Vitest fake timers cancel deterministically so the test matrix can't
-    // exercise the race; coverage signal is intentionally suppressed below.
+    // Belt-and-suspenders for the restart-after-stop race that the timer
+    // callback's entry guard (in scheduleRestart) closes for the common path.
+    // The entry guard catches the case where stop() ran before the callback
+    // fired. This guard catches the residual case where stop() flips
+    // stopping=true synchronously from inside start() (e.g. a synchronous
+    // forkProcess hook that calls back into the supervisor) and then start()
+    // throws. Without it we would fall through to scheduleRestart() and
+    // leak a fresh broker AFTER stop() requested shutdown. The single-thread
+    // event-loop model and Vitest fake timers make a deterministic test for
+    // this exact path infeasible, so coverage is suppressed.
     /* v8 ignore start */
     if (this.stopping) {
       return;
