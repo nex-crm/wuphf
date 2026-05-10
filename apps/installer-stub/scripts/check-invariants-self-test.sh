@@ -106,13 +106,27 @@ expect_output_contains "${cert_path_fixture}/root.out" "hardcoded certificate pa
 expect_status 1 "${cert_path_fixture}/apps/installer-stub" "scripts/check-invariants.sh" "${cert_path_fixture}/package.out"
 expect_output_contains "${cert_path_fixture}/package.out" "hardcoded certificate path"
 
-prod_deps_fixture="${tmp_root}/prod-deps"
-write_fixture "${prod_deps_fixture}"
-printf '{"dependencies": {"foo": "1.0.0"}}\n' > "${prod_deps_fixture}/apps/installer-stub/package.json"
+dev_deps_fixture="${tmp_root}/dev-deps"
+write_fixture "${dev_deps_fixture}"
+printf '{"devDependencies": {"foo": "1.0.0"}}\n' > "${dev_deps_fixture}/apps/installer-stub/package.json"
+expect_status 0 "${dev_deps_fixture}" "apps/installer-stub/scripts/check-invariants.sh" "${dev_deps_fixture}/root.out"
+expect_status 0 "${dev_deps_fixture}/apps/installer-stub" "scripts/check-invariants.sh" "${dev_deps_fixture}/package.out"
 
-expect_status 1 "${prod_deps_fixture}" "apps/installer-stub/scripts/check-invariants.sh" "${prod_deps_fixture}/root.out"
-expect_output_contains "${prod_deps_fixture}/root.out" "must have NO 'dependencies'"
-expect_status 1 "${prod_deps_fixture}/apps/installer-stub" "scripts/check-invariants.sh" "${prod_deps_fixture}/package.out"
-expect_output_contains "${prod_deps_fixture}/package.out" "must have NO 'dependencies'"
+expect_dependency_block_failure() {
+  local block_name="$1"
+  local fixture="${tmp_root}/${block_name}"
+
+  write_fixture "${fixture}"
+  printf '{"%s": {"foo": "1.0.0"}}\n' "${block_name}" > "${fixture}/apps/installer-stub/package.json"
+
+  expect_status 1 "${fixture}" "apps/installer-stub/scripts/check-invariants.sh" "${fixture}/root.out"
+  expect_output_contains "${fixture}/root.out" "forbidden dependency block: ${block_name}"
+  expect_status 1 "${fixture}/apps/installer-stub" "scripts/check-invariants.sh" "${fixture}/package.out"
+  expect_output_contains "${fixture}/package.out" "forbidden dependency block: ${block_name}"
+}
+
+expect_dependency_block_failure "dependencies"
+expect_dependency_block_failure "peerDependencies"
+expect_dependency_block_failure "optionalDependencies"
 
 echo "installer invariant self-test OK"
