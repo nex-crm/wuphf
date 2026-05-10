@@ -30,7 +30,7 @@
     "verify:latest-yml": "bash scripts/verify-latest-yml.sh"
   },
   "dependencies": {
-    "electron-updater": "6.3.9"
+    "electron-updater": "6.8.3"
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.13",
