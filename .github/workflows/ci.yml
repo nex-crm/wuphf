@@ -151,6 +151,11 @@ jobs:
         run: bun run test:coverage
       - name: Vulnerability audit
         if: ${{ steps.desktop-changes.outputs.changed == 'true' }}
+        # Scope to apps/desktop's dependency closure only. Auditing from the
+        # repo root pulls in every workspace (installer-stub's electron 33,
+        # electron-builder's transitive tar, etc.) which are tracked under
+        # apps/installer-stub's own gates and dependabot group, not desktop's.
+        working-directory: apps/desktop
         run: bun audit --audit-level high
       - name: IPC allowlist
         if: ${{ steps.desktop-changes.outputs.changed == 'true' }}

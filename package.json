@@ -7,10 +7,12 @@
     "apps/*"
   ],
   "dependencyOverrideNotes": {
-    "fast-uri": "Pinned to 3.1.2 so bun audit --audit-level high stays clean for transitive Ajv consumers. Remove when all workspace dependency chains resolve to fast-uri 3.1.2 or newer without an override."
+    "fast-uri": "Pinned to 3.1.2 so bun audit --audit-level high stays clean for transitive Ajv consumers. Remove when all workspace dependency chains resolve to fast-uri 3.1.2 or newer without an override.",
+    "tar": "Pinned to 7.5.15 (latest at time of pin) to evict the path-traversal/symlink-poisoning advisory chain (GHSA-34x7-hfp2-rc4v, -8qq5, -83g3, -qffp, -9ppj, -r6q2) that comes in transitively via electron-builder's own dependency tree. Remove when electron-builder ships a release whose deps resolve past tar 7.5.x natively."
   },
   "overrides": {
-    "fast-uri": "3.1.2"
+    "fast-uri": "3.1.2",
+    "tar": "7.5.15"
   },
   "scripts": {
     "desktop:dev": "bun run --cwd apps/desktop dev",
