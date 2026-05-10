@@ -99,6 +99,30 @@ app-builder-bin's expectations? Where does this drift from canonical
 electron-builder patterns?
 ELECTRON_PREAMBLE
       ;;
+    supply-chain)
+      printf '%s\n' "What new transitive deps does this lockfile diff introduce? Are peer-dep contracts intact for every direct dep that has peers? Any removed-but-still-referenced packages? Verify against npm with \`npm view <pkg>@<version> peerDependencies\`."
+      ;;
+    build-parity)
+      printf '%s\n' "Does the build still produce equivalent output to main? Are externals preserved (electron, node:* built-ins)? Read the actual built bundles. Any silent inlining, chunking change, or default drift between this diff and main?"
+      ;;
+    scope)
+      printf '%s\n' "Is the diff narrowly the advertised change, or are there drive-by edits? Are unrelated files touched? Is each line minimal? Read the PR body and verify the diff matches it without overselling."
+      ;;
+    conventions)
+      printf '%s\n' "Does this comply with CLAUDE.md, AGENTS.md, INSTRUCTIONS.md, and any package-level AGENTS.md? Any explicit \`any\`, ignore comments (\`@ts-ignore\`, \`biome-ignore\`), ASCII diagrams in PR body, secrets, or convention drift?"
+      ;;
+    ipc)
+      printf '%s\n' "Did the contextBridge allowlist change? Did any IPC surface gain new verbs? Is the sandbox preserved (\`sandbox: true\`, \`contextIsolation: true\`, \`nodeIntegration: false\`)? Did any 'app data over IPC' rule break? Read \`apps/desktop/src/preload\` and \`src/main/ipc\`."
+      ;;
+    coverage)
+      printf '%s\n' "Do the tests still cover what they should? Are versions consistent — does vitest resolve the same vite as the build? Any silently-weakened assertion (e.g., a cast that disables a real type check)? Run the actual test command and read its output."
+      ;;
+    beta)
+      printf '%s\n' "If a beta/pre-release version is pinned: how risky is it? Any open issues on the project's tracker that affect this code? When did the beta publish, and is there a newer beta or rc? What's the re-pin path to GA?"
+      ;;
+    adversarial)
+      printf '%s\n' "Assume the other lenses missed something. Be skeptical, paranoid, contrarian. Find the issue that wasn't covered. Cross-package effects, CI/lockfile divergence, dev-mode-only regressions, beta version churn, anything subtle. Read what no one else read."
+      ;;
     *)
       return 1
       ;;

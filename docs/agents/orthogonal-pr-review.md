@@ -28,20 +28,47 @@ ONLY THIS LENS" so coverage doesn't overlap. Pick a default model per
 lens to bias the fleet toward orthogonality (different models, not just
 different prompts).
 
-| # | Lens | Default model | What it checks |
+| # | Lens (script name) | Default model | What it checks |
 |---|---|---|---|
-| 1 | Type correctness | codex | Are type fixes the right fix, or do they mask real errors? |
-| 2 | Supply chain / lockfile | codex | New transitives, peer-dep mismatches, removed deps, integrity |
-| 3 | Build / runtime parity | codex | Does the build still produce equivalent output? Externalization preserved? |
-| 4 | Scope discipline | claude (`staff-code-reviewer`) | Is the diff narrowly the advertised change, no drive-bys? |
-| 5 | Repo conventions | codex | CLAUDE.md / AGENTS.md / INSTRUCTIONS.md compliance |
-| 6 | Security / IPC | codex | Allowlist intact? No `any` across contextBridge? Sandbox preserved? |
-| 7 | Test coverage equivalence | codex | Do tests still cover what they should? Versioning consistent? |
-| 8 | Beta / pre-release stability | codex | If pinning a beta: how risky, what's the upgrade path? |
-| 9 | Adversarial sweep | codex | "Assume earlier lenses missed something — what is it?" Always include. |
+| 1 | Type correctness (`types`) | codex | Are type fixes the right fix, or do they mask real errors? |
+| 2 | Supply chain / lockfile (`supply-chain`) | codex | New transitives, peer-dep mismatches, removed deps, integrity |
+| 3 | Build / runtime parity (`build-parity`) | codex | Does the build still produce equivalent output? Externalization preserved? |
+| 4 | Scope discipline (`scope`) | claude (`staff-code-reviewer`) | Is the diff narrowly the advertised change, no drive-bys? |
+| 5 | Repo conventions (`conventions`) | codex | CLAUDE.md / AGENTS.md / INSTRUCTIONS.md compliance |
+| 6 | Security / IPC (`ipc`) | codex | Allowlist intact? No `any` across contextBridge? Sandbox preserved? |
+| 7 | Test coverage equivalence (`coverage`) | codex | Do tests still cover what they should? Versioning consistent? |
+| 8 | Beta / pre-release stability (`beta`) | codex | If pinning a beta: how risky, what's the upgrade path? |
+| 9 | Adversarial sweep (`adversarial`) | codex | "Assume earlier lenses missed something — what is it?" Always include. |
 
 Lenses 1–8 are about *finding the things*. Lens 9 is about *finding what
 the finders missed*. Round 2 is centered on lens 9.
+
+## Script invocation
+
+`scripts/dispatch-triangulation.sh` accepts every lens name above (plus the
+design-time lenses `security`, `perf`, `api`, `sre`, `architecture`,
+`distsys`, `electron`). Round-1 example for a `apps/desktop`
+dependency-bump PR:
+
+```bash
+# 1. Capture the PR scope + diff highlights in a problem file
+cat > /tmp/pr-785.md <<'EOF'
+PR #785 bumps apps/desktop dev-deps: typescript 6.0.3, vite 8.0.11,
+@types/node 25.6.2, electron-vite 6.0.0-beta.1. Diff at
+`git diff origin/main...HEAD -- apps/desktop bun.lock` in this worktree.
+EOF
+
+# 2. Dispatch in parallel; each lens writes <lens>-report.md
+bash scripts/dispatch-triangulation.sh \
+  --problem-file /tmp/pr-785.md \
+  --lenses "types,supply-chain,build-parity,scope,conventions,ipc,coverage,beta,adversarial" \
+  --output-dir /tmp/pr-785-r1
+```
+
+The script writes one `<lens>-report.md` per agent and a `SYNTHESIS.md`
+that groups findings by file:line co-occurrence (2+ reports = high-
+confidence). For Claude lenses (e.g. `scope`), spawn a Claude Agent
+separately — the script is codex-only.
 
 ## Dispatch
 
