@@ -80,7 +80,7 @@ function appBuilderBinaryPath() {
     throw new Error(`app-builder binary not found at ${binaryPath}`);
   }
 
-  return binaryPath;
+  return fs.realpathSync(binaryPath);
 }
 
 function electronBuilderEnv() {
