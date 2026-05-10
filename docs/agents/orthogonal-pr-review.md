@@ -58,17 +58,28 @@ PR #785 bumps apps/desktop dev-deps: typescript 6.0.3, vite 8.0.11,
 `git diff origin/main...HEAD -- apps/desktop bun.lock` in this worktree.
 EOF
 
-# 2. Dispatch in parallel; each lens writes <lens>-report.md
+# 2. Dispatch the codex-side lenses in parallel; each writes <lens>-report.md.
+#    `scope` is excluded here — it's Claude-default; see step 3.
 bash scripts/dispatch-triangulation.sh \
   --problem-file /tmp/pr-785.md \
-  --lenses "types,supply-chain,build-parity,scope,conventions,ipc,coverage,beta,adversarial" \
+  --lenses "types,supply-chain,build-parity,conventions,ipc,coverage,beta,adversarial" \
   --output-dir /tmp/pr-785-r1
+
+# 3. Dispatch the Claude-default lenses separately (the script is codex-only).
+#    Use the Agent tool with subagent_type=staff-code-reviewer for `scope`.
 ```
 
 The script writes one `<lens>-report.md` per agent and a `SYNTHESIS.md`
 that groups findings by file:line co-occurrence (2+ reports = high-
-confidence). For Claude lenses (e.g. `scope`), spawn a Claude Agent
-separately — the script is codex-only.
+confidence). The script invokes `codex exec` only; route Claude-default
+lenses (currently `scope`) through `Agent` separately so the fleet
+genuinely spans different models.
+
+**Note on the script's prompt template**: `compose_prompt()` in the
+script generates a generic prompt with a 1200-word cap, not the tighter
+shape shown under "Prompt structure" below. The tighter shape is what
+you should write when dispatching `codex exec` directly. The script's
+prompt is a fallback when callers haven't pre-written a per-lens prompt.
 
 ## Dispatch
 
@@ -90,7 +101,12 @@ separately — the script is codex-only.
 
 ### Prompt structure
 
-Each lens prompt follows the same shape so the fleet stays comparable:
+PR-review dispatches are read-only — the agent never commits — so the
+heavier "Sub-agent dispatch contract" in `INSTRUCTIONS.md` simplifies:
+the package `AGENTS.md` pointer and pasted hard rules still apply, but
+verification commands and the per-finding disposition table belong to
+the synthesizer, not the reviewer. Each lens prompt follows the same
+shape below so the fleet stays comparable:
 
 ```text
 You are reviewing PR #<N> in <owner>/<repo>, branch `<branch>`. The PR

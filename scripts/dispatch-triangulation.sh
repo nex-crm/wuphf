@@ -100,7 +100,7 @@ electron-builder patterns?
 ELECTRON_PREAMBLE
       ;;
     supply-chain)
-      printf '%s\n' "What new transitive deps does this lockfile diff introduce? Are peer-dep contracts intact for every direct dep that has peers? Any removed-but-still-referenced packages? Verify against npm with \`npm view <pkg>@<version> peerDependencies\`."
+      printf '%s\n' "What new transitive deps does this lockfile diff introduce? Are peer-dep contracts intact for every direct dep that has peers? Any removed-but-still-referenced packages? Verify against the registry with \`bun info <pkg>@<version> peerDependencies\` (the repo standardizes on bun tooling)."
       ;;
     build-parity)
       printf '%s\n' "Does the build still produce equivalent output to main? Are externals preserved (electron, node:* built-ins)? Read the actual built bundles. Any silent inlining, chunking change, or default drift between this diff and main?"
@@ -112,7 +112,7 @@ ELECTRON_PREAMBLE
       printf '%s\n' "Does this comply with CLAUDE.md, AGENTS.md, INSTRUCTIONS.md, and any package-level AGENTS.md? Any explicit \`any\`, ignore comments (\`@ts-ignore\`, \`biome-ignore\`), ASCII diagrams in PR body, secrets, or convention drift?"
       ;;
     ipc)
-      printf '%s\n' "Did the contextBridge allowlist change? Did any IPC surface gain new verbs? Is the sandbox preserved (\`sandbox: true\`, \`contextIsolation: true\`, \`nodeIntegration: false\`)? Did any 'app data over IPC' rule break? Read \`apps/desktop/src/preload\` and \`src/main/ipc\`."
+      printf '%s\n' "Did the contextBridge allowlist change? Did any IPC surface gain new verbs? Is the sandbox preserved (\`sandbox: true\`, \`contextIsolation: true\`, \`nodeIntegration: false\`)? Did any 'app data over IPC' rule break? Read \`apps/desktop/src/preload\`, \`apps/desktop/src/main/ipc\`, and \`apps/desktop/src/shared/api-contract.ts\`."
       ;;
     coverage)
       printf '%s\n' "Do the tests still cover what they should? Are versions consistent — does vitest resolve the same vite as the build? Any silently-weakened assertion (e.g., a cast that disables a real type check)? Run the actual test command and read its output."
