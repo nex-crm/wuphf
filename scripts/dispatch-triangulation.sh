@@ -87,6 +87,18 @@ lens_preamble() {
     distsys)
       printf '%s\n' "Cross-process invariants? Idempotency? Race windows? Recovery semantics on partial failure?"
       ;;
+    electron)
+      cat <<'ELECTRON_PREAMBLE'
+You're an Electron app shipping engineer. Audit through these lenses:
+electron-builder, electron-updater, codesign, notarytool, Authenticode,
+hardened runtime, Gatekeeper.
+
+Does the signing chain stay intact? Does anything break notarization,
+stapling, or auto-update integrity? Are env vars and paths correct for
+app-builder-bin's expectations? Where does this drift from canonical
+electron-builder patterns?
+ELECTRON_PREAMBLE
+      ;;
     *)
       return 1
       ;;

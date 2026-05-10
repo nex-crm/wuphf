@@ -1,0 +1,67 @@
+appId: ai.nex.wuphf.installer-stub
+productName: WUPHF (installer stub)
+copyright: Copyright © 2026 Nex Labs Inc.
+artifactName: wuphf-installer-stub-${version}-${os}-${arch}.${ext}
+compression: maximum
+# npmRebuild=false: this stub has zero production dependencies (only
+# devDependencies). electron-builder's rebuild step uses npm/yarn under the
+# hood; under bun's CI env it spawns the bun binary as if it were a node
+# module and crashes (see CR-CI-1 in scripts/run-builder.js, paired with the
+# env scrub there). The "no production deps" precondition is enforced by
+# scripts/check-invariants.sh — adding a `dependencies` block to package.json
+# fails the invariant and forces a deliberate fix.
+npmRebuild: false
+directories:
+  output: dist
+  buildResources: build
+afterSign: scripts/staple-mac-app.js
+files:
+  - src/**/*
+  - package.json
+  - node_modules/**/*
+  - "!node_modules/.bin/**/*"
+  - "!node_modules/.cache/**/*"
+  - "!node_modules/**/{test,tests,__tests__,docs,doc,example,examples}/**/*"
+  - "!node_modules/**/*.map"
+  - "!node_modules/**/*.md"
+  - "!node_modules/**/*.ts"
+  - "!**/*.log"
+publish:
+  provider: github
+  owner: nex-crm
+  repo: wuphf
+  releaseType: draft
+mac:
+  category: public.app-category.developer-tools
+  target:
+    - target: dmg
+      arch: universal
+    - target: zip
+      arch: universal
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  notarize: true
+dmg:
+  sign: false
+win:
+  publisherName:
+    - WUPHF (installer stub)
+  target:
+    - target: nsis
+      arch:
+        - x64
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  differentialPackage: false
+linux:
+  target:
+    - target: AppImage
+      arch:
+        - x64
+    - target: deb
+      arch:
+        - x64
+  category: Development
