@@ -64,7 +64,7 @@ function appBuilderBinaryPath() {
   const packagePath = require.resolve("app-builder-bin/package.json", {
     paths: [path.dirname(builderCli)],
   });
-  const packageRoot = path.dirname(packagePath);
+  const packageRoot = path.dirname(fs.realpathSync(packagePath));
   const binaryPath =
     process.platform === "darwin"
       ? path.join(
@@ -123,8 +123,9 @@ if (process.versions.bun && !process.env.NODE_BINARY) {
 // dependency installs. When setup-bun leaves npm_execpath pointing at Bun's
 // native binary, electron-builder runs `node $npm_execpath` and Node fails to
 // parse the binary. Scrub Bun/npm lifecycle env before spawning the builder.
-// Also pass CUSTOM_APP_BUILDER_PATH from electron-builder's dependency tree so
-// builder-util does not depend on Bun's root node_modules symlink shape in CI.
+// Also pass CUSTOM_APP_BUILDER_PATH from electron-builder's real dependency
+// tree so builder-util does not depend on Bun's root node_modules symlink shape
+// in CI.
 const result = spawnSync(nodeBinary, [builderCli, ...builderArgs], {
   env: electronBuilderEnv(),
   stdio: "inherit",
