@@ -12,7 +12,7 @@ export default defineConfig({
       rollupOptions: {
         input: {
           index: resolve(rootDir, "src/main/index.ts"),
-          "broker-stub-entry": resolve(rootDir, "src/main/broker-stub-entry.ts"),
+          "broker-entry": resolve(rootDir, "src/main/broker-entry.ts"),
         },
         output: {
           format: "es",

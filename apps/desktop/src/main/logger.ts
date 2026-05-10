@@ -15,7 +15,10 @@ export interface Logger {
 }
 
 export interface StructuredLoggerConfig {
-  readonly logDirectory?: string | (() => string);
+  // `() => null` disables filesystem logging — useful for tests that exercise
+  // the structured-logger validator without writing to disk. The default
+  // resolver also returns null when `app.getPath("logs")` throws.
+  readonly logDirectory?: string | (() => string | null);
   readonly maxFileBytes?: number;
   readonly consoleWriter?: (level: LogLevel, line: string) => void;
   readonly monotonicNow?: () => number;
@@ -41,6 +44,7 @@ const SAFE_PAYLOAD_KEYS = new Set([
   "backoffMs",
   "channel",
   "code",
+  "droppedKeys",
   "error",
   "eventLsn",
   "exitCode",
@@ -52,6 +56,7 @@ const SAFE_PAYLOAD_KEYS = new Set([
   "payloadBytes",
   "pid",
   "platform",
+  "port",
   "processType",
   "reason",
   "rendererKind",
@@ -184,14 +189,20 @@ function validatePayload(payload: LogPayload): LogPayload {
 }
 
 function validatePayloadKey(key: string): void {
+  if (!isSafePayloadKey(key)) {
+    throw new UnsafeLogPayloadError(key);
+  }
+}
+
+// Exposed so callers that funnel UNTRUSTED payloads (e.g. broker subprocess
+// log forwarding) can pre-filter to safe keys instead of crashing the main
+// process on the first banned key. Mirrors the gate in `validatePayloadKey`.
+export function isSafePayloadKey(key: string): boolean {
   const normalizedKey = key.toLowerCase();
   if (BANNED_PAYLOAD_KEY_FRAGMENTS.some((fragment) => normalizedKey.includes(fragment))) {
-    throw new UnsafeLogPayloadError(key);
+    return false;
   }
-
-  if (!SAFE_PAYLOAD_KEYS.has(key)) {
-    throw new UnsafeLogPayloadError(key);
-  }
+  return SAFE_PAYLOAD_KEYS.has(key);
 }
 
 function normalizePayloadValue(value: LogPayloadValue): LogPayloadValue {

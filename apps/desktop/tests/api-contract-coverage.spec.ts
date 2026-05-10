@@ -1,3 +1,4 @@
+import { asBrokerUrl } from "@wuphf/protocol";
 import { describe, expect, it, vi } from "vitest";
 
 import { IPC_CHANNEL_VALUES, type IpcChannelName } from "../src/shared/api-contract.ts";
@@ -35,6 +36,7 @@ describe("IPC contract coverage", () => {
         status: "alive" as const,
         pid: 1234,
         restartCount: 0,
+        brokerUrl: asBrokerUrl("http://127.0.0.1:54321"),
       }),
     };
 

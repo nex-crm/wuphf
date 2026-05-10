@@ -10,6 +10,14 @@ export interface CreateSecureWindowConfig {
   readonly allowDevServerUrl: boolean;
   readonly devServerUrl?: string;
   readonly expectedDevServerUrl?: string;
+  /**
+   * Loopback broker URL (e.g. `http://127.0.0.1:54321`). When present and no
+   * dev server URL is supplied, the BrowserWindow loads `${brokerUrl}/` so
+   * `/api-token`, `/api/*`, and the agent terminal WebSocket are all
+   * same-origin loopback. Branch-4 contract: the broker serves the renderer
+   * bundle in packaged mode.
+   */
+  readonly brokerUrl?: string;
 }
 
 export function createSecureWindow(config: CreateSecureWindowConfig): BrowserWindow {
@@ -81,6 +89,17 @@ function resolveRendererUrl(config: CreateSecureWindowConfig): string {
       );
     }
     return devServerUrl;
+  }
+
+  if (typeof config.brokerUrl === "string" && config.brokerUrl.length > 0) {
+    const brokerUrl = parseUrl(config.brokerUrl, "broker URL");
+    if (!isLocalHttpRendererUrl(brokerUrl)) {
+      throw new Error(`Refusing to load non-loopback broker URL: ${config.brokerUrl}`);
+    }
+    // Trailing slash matters: `will-navigate` exact-match compares against
+    // `rendererUrl`, and the broker serves `/` for the bundle. Without the
+    // slash, navigation back to `${brokerUrl}/` would be blocked.
+    return brokerUrl.toString();
   }
 
   return pathToFileURL(config.rendererIndexPath).toString();

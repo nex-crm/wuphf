@@ -1,3 +1,4 @@
+import { asBrokerUrl } from "@wuphf/protocol";
 import type { IpcMainInvokeEvent } from "electron";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { assertMaxStringLength } from "../src/main/ipc/_guards.ts";
@@ -324,6 +325,7 @@ describe("getBrokerStatus handler", () => {
       status: "alive" as const,
       pid: 1234,
       restartCount: 2,
+      brokerUrl: asBrokerUrl("http://127.0.0.1:54321"),
     }),
   };
 
@@ -347,6 +349,7 @@ describe("getBrokerStatus handler", () => {
       status: "alive",
       pid: 1234,
       restartCount: 2,
+      brokerUrl: asBrokerUrl("http://127.0.0.1:54321"),
     });
   });
 });
@@ -360,6 +363,7 @@ describe("IPC handler registration logging", () => {
           status: "alive",
           pid: 1234,
           restartCount: 2,
+          brokerUrl: asBrokerUrl("http://127.0.0.1:54321"),
         }),
       },
       { logger },

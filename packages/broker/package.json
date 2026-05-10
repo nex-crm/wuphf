@@ -1,0 +1,34 @@
+{
+  "name": "@wuphf/broker",
+  "version": "0.0.0",
+  "private": true,
+  "description": "WUPHF v1 broker — loopback HTTP+SSE+WebSocket listener with DNS-rebinding guard, bearer-token auth, and the /api-token bootstrap. Pure Node; no Electron, no business logic. Branch-4 slice of the rewrite.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "lint": "biome check src/ tests/ scripts/",
+    "lint:fix": "biome check --write src/ tests/ scripts/",
+    "format": "biome format --write src/ tests/ scripts/",
+    "check": "biome check src/ tests/ scripts/",
+    "check:invariants": "bash scripts/check-invariants.sh"
+  },
+  "dependencies": {
+    "@wuphf/protocol": "workspace:*",
+    "ws": "8.18.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.4.13",
+    "@types/node": "^22.10.0",
+    "@types/ws": "8.5.13",
+    "@vitest/coverage-v8": "2.1.9",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}

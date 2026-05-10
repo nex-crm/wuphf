@@ -125,6 +125,24 @@ export interface BrokerSnapshot {
   readonly status: BrokerStatus;
   readonly pid: number | null;
   readonly restartCount: number;
+  /**
+   * Loopback URL the broker bound (e.g. `http://127.0.0.1:54321`) once the
+   * broker reports `{ ready }`. `null` until the listener is up — including
+   * across restarts where the supervisor re-spawns the broker process.
+   * Renderer code reads this only as a discovery hint when running outside
+   * the broker's same-origin context (i.e. dev mode); in packaged mode the
+   * window is loaded from this URL and `window.location.origin` is the
+   * authoritative source.
+   *
+   * Typed as plain `string | null` on the IPC contract surface because the
+   * renderer tsconfig excludes node types — importing the
+   * `@wuphf/protocol#BrokerUrl` brand here transitively requires `node:*`
+   * resolution that the renderer cannot satisfy. The supervisor still
+   * validates via `@wuphf/protocol#isBrokerUrl` at the utilityProcess
+   * boundary and carries the brand internally; the contextBridge serialises
+   * to plain string regardless.
+   */
+  readonly brokerUrl: string | null;
 }
 
 export type GetBrokerStatusRequest = EmptyPayload;

@@ -174,6 +174,7 @@ describe("BrokerSupervisor", () => {
       status: "dead",
       pid: null,
       restartCount: 0,
+      brokerUrl: null,
     });
   });
 
@@ -189,6 +190,160 @@ describe("BrokerSupervisor", () => {
     processHandle.emit("message", { alive: true });
 
     expect(supervisor.getStatus()).toBe("alive");
+  });
+
+  it("captures brokerUrl from a {ready} message and exposes it via getSnapshot()", () => {
+    const processHandle = new FakeUtilityProcess(4321);
+    const { forkProcess } = createForkMock([processHandle]);
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+    });
+
+    supervisor.start();
+    processHandle.emit("message", { ready: true, brokerUrl: "http://127.0.0.1:54321" });
+
+    expect(supervisor.getSnapshot().brokerUrl).toBe("http://127.0.0.1:54321");
+  });
+
+  it("rejects {ready} with malformed brokerUrl (port 0, non-loopback, wrong scheme)", () => {
+    // Triangulation pass 2: readReadyMessage now validates via the
+    // protocol's isBrokerUrl brand check. A subprocess sending a
+    // non-canonical URL is dropped at the IPC boundary instead of being
+    // handed downstream as a "string" the supervisor would later trust
+    // as a fetch origin.
+    const processHandle = new FakeUtilityProcess(4321);
+    const { forkProcess } = createForkMock([processHandle]);
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+    });
+
+    supervisor.start();
+    processHandle.emit("message", { ready: true, brokerUrl: "http://127.0.0.1:0" });
+    processHandle.emit("message", { ready: true, brokerUrl: "https://127.0.0.1:8080" });
+    processHandle.emit("message", { ready: true, brokerUrl: "http://evil.com:8080" });
+    processHandle.emit("message", { ready: true, brokerUrl: "http://127.0.0.1" });
+    expect(supervisor.getSnapshot().brokerUrl).toBeNull();
+  });
+
+  it("ignores malformed {ready} messages (missing url, wrong shape)", () => {
+    const processHandle = new FakeUtilityProcess(4321);
+    const { forkProcess } = createForkMock([processHandle]);
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+    });
+
+    supervisor.start();
+    processHandle.emit("message", { ready: true });
+    processHandle.emit("message", { ready: false, brokerUrl: "http://127.0.0.1:1" });
+    processHandle.emit("message", { ready: true, brokerUrl: "" });
+    processHandle.emit("message", { ready: true, brokerUrl: 42 });
+
+    expect(supervisor.getSnapshot().brokerUrl).toBeNull();
+  });
+
+  it("whenReady() resolves with the brokerUrl once the broker reports ready", async () => {
+    const processHandle = new FakeUtilityProcess(4321);
+    const { forkProcess } = createForkMock([processHandle]);
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+    });
+
+    supervisor.start();
+    const ready = supervisor.whenReady();
+    processHandle.emit("message", { ready: true, brokerUrl: "http://127.0.0.1:7891" });
+
+    await expect(ready).resolves.toBe("http://127.0.0.1:7891");
+  });
+
+  it("whenReady() resolves immediately if the broker is already ready", async () => {
+    const processHandle = new FakeUtilityProcess(4321);
+    const { forkProcess } = createForkMock([processHandle]);
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+    });
+
+    supervisor.start();
+    processHandle.emit("message", { ready: true, brokerUrl: "http://127.0.0.1:7891" });
+
+    await expect(supervisor.whenReady()).resolves.toBe("http://127.0.0.1:7891");
+  });
+
+  it("whenReady() rejects when stop() runs before a ready message arrives", async () => {
+    const processHandle = new FakeUtilityProcess(4321);
+    const { forkProcess } = createForkMock([processHandle]);
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+    });
+
+    supervisor.start();
+    const ready = supervisor.whenReady();
+    setImmediate(() => processHandle.emit("exit", 0, null));
+    await supervisor.stop();
+    await expect(ready).rejects.toThrow(/broker_stopped/);
+  });
+
+  it("whenReady() rejects synchronously when called after a completed stop()", async () => {
+    const { forkProcess } = createForkMock([]);
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+    });
+
+    await supervisor.stop();
+    // After a clean stop with no broker process, a fresh whenReady() would
+    // otherwise add a waiter that nothing resolves or rejects — promise leak.
+    await expect(supervisor.whenReady()).rejects.toThrow(/broker_stopped/);
+  });
+
+  it("whenReady() resolves all pending waiters when ready arrives (fanout)", async () => {
+    const processHandle = new FakeUtilityProcess(4321);
+    const { forkProcess } = createForkMock([processHandle]);
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+    });
+
+    supervisor.start();
+    const a = supervisor.whenReady();
+    const b = supervisor.whenReady();
+    const c = supervisor.whenReady();
+    processHandle.emit("message", { ready: true, brokerUrl: "http://127.0.0.1:7891" });
+
+    await expect(Promise.all([a, b, c])).resolves.toEqual([
+      "http://127.0.0.1:7891",
+      "http://127.0.0.1:7891",
+      "http://127.0.0.1:7891",
+    ]);
+  });
+
+  it("clears brokerUrl when the broker process exits and re-captures on restart", () => {
+    vi.useFakeTimers();
+    const firstProcess = new FakeUtilityProcess(1);
+    const secondProcess = new FakeUtilityProcess(2);
+    const { forkProcess } = createForkMock([firstProcess, secondProcess]);
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+      firstBackoffMs: 10,
+    });
+
+    supervisor.start();
+    firstProcess.emit("message", { ready: true, brokerUrl: "http://127.0.0.1:1" });
+    expect(supervisor.getSnapshot().brokerUrl).toBe("http://127.0.0.1:1");
+
+    firstProcess.emit("exit", 0, null);
+    expect(supervisor.getSnapshot().brokerUrl).toBeNull();
+
+    vi.advanceTimersByTime(10);
+    secondProcess.emit("message", { ready: true, brokerUrl: "http://127.0.0.1:2" });
+    expect(supervisor.getSnapshot().brokerUrl).toBe("http://127.0.0.1:2");
+    vi.useRealTimers();
   });
 
   it("logs broker exits with lifecycle-only causal fields before scheduling restart", () => {
@@ -249,6 +404,7 @@ describe("BrokerSupervisor", () => {
       status: "starting",
       pid: 2002,
       restartCount: 0,
+      brokerUrl: null,
     });
   });
 
@@ -1010,6 +1166,425 @@ describe("runWindowsTaskkill", () => {
     }
 
     await expect(runWindowsTaskkill(4321, { force: false })).rejects.toBeInstanceOf(Error);
+  });
+});
+
+describe("BrokerSupervisor — review-pass-2 regressions", () => {
+  it("does not throw when the real StructuredLogger handles a {ready} message", async () => {
+    // BLOCK regression: validatePayloadKey at logger.ts:188 bans payload
+    // keys containing "url", so logging `brokerUrl` (the old code) threw
+    // UnsafeLogPayloadError BEFORE flushReadyWaiters fired — whenReady()
+    // hung forever in packaged builds and no window opened. Tests had
+    // been using a memory logger that bypassed the validator. This test
+    // wires the real StructuredLogger and asserts the full ready handshake
+    // does not throw and the waiter resolves.
+    const { StructuredLogger } = await import("../src/main/logger.ts");
+    const lines: string[] = [];
+    const structured = new StructuredLogger({
+      logDirectory: () => null, // do not touch the filesystem
+      consoleWriter: (_level, line) => lines.push(line),
+    });
+    const realLogger = structured.forModule("broker");
+
+    const processHandle = new FakeUtilityProcess(4321);
+    const { forkProcess } = createForkMock([processHandle]);
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+      logger: realLogger,
+    });
+
+    supervisor.start();
+    const ready = supervisor.whenReady();
+    expect(() =>
+      processHandle.emit("message", { ready: true, brokerUrl: "http://127.0.0.1:7891" }),
+    ).not.toThrow();
+    await expect(ready).resolves.toBe("http://127.0.0.1:7891");
+
+    const readyLog = lines.find((line) => line.includes('"event":"broker_ready"'));
+    expect(readyLog).toBeDefined();
+    expect(readyLog).not.toContain("brokerUrl");
+    expect(readyLog).toContain('"port":7891');
+  });
+
+  it("drops late {ready} from a previous broker process after restart", () => {
+    vi.useFakeTimers();
+    const firstProcess = new FakeUtilityProcess(1);
+    const secondProcess = new FakeUtilityProcess(2);
+    const { forkProcess } = createForkMock([firstProcess, secondProcess]);
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+      firstBackoffMs: 10,
+    });
+
+    supervisor.start();
+    firstProcess.emit("message", { ready: true, brokerUrl: "http://127.0.0.1:1" });
+    firstProcess.emit("exit", 0, null);
+    vi.advanceTimersByTime(10);
+    secondProcess.emit("message", { ready: true, brokerUrl: "http://127.0.0.1:2" });
+    expect(supervisor.getSnapshot().brokerUrl).toBe("http://127.0.0.1:2");
+
+    // Stale message from the now-dead first process MUST NOT overwrite the
+    // current brokerUrl. The supervisor checks message provenance against
+    // the closure-captured handle.
+    // Use a syntactically valid loopback URL with a different port — the
+    // protocol BrokerUrl brand rejects non-numeric ports, so a "STALE"
+    // sentinel would be dropped by URL validation before the stale-sender
+    // guard runs. Port 9999 exercises the actual stale-sender path.
+    firstProcess.emit("message", { ready: true, brokerUrl: "http://127.0.0.1:9999" });
+    expect(supervisor.getSnapshot().brokerUrl).toBe("http://127.0.0.1:2");
+
+    vi.useRealTimers();
+  });
+
+  it("ignores {ready} that arrives during stop()'s shutdown window", async () => {
+    const processHandle = new FakeUtilityProcess(4321);
+    const { forkProcess } = createForkMock([processHandle]);
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+      stopGraceMs: 10,
+      forceStopGraceMs: 10,
+    });
+
+    supervisor.start();
+    const ready = supervisor.whenReady();
+
+    // Race: emit {ready} AFTER stop() flips `stopping=true` but BEFORE the
+    // subprocess exit settles stop(). Without the stopping-gate, the late
+    // ready would resolve waiters and set brokerUrl during shutdown.
+    const stopPromise = supervisor.stop();
+    processHandle.emit("message", { ready: true, brokerUrl: "http://127.0.0.1:9999" });
+    setImmediate(() => processHandle.emit("exit", 0, null));
+    await stopPromise;
+
+    await expect(ready).rejects.toThrow(/broker_stopped/);
+    expect(supervisor.getSnapshot().brokerUrl).toBeNull();
+  });
+
+  it("kills the wedged subprocess and counts against the restart cap on broker_ready_timeout", () => {
+    vi.useFakeTimers();
+    let nowMs = 0;
+    const processHandle = new FakeUtilityProcess(4321);
+    const { forkProcess } = createForkMock([processHandle]);
+    const { logger, calls } = createMemoryLogger();
+    const killProcess = vi.fn<KillProcess>();
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+      logger,
+      killProcess,
+      monotonicNow: () => nowMs,
+      startupTimeoutMs: 500,
+      firstBackoffMs: 5,
+      maxRestartRetries: 0,
+    });
+
+    supervisor.start();
+    // Watchdog ceiling — no `{ ready }` arrives.
+    nowMs = 500;
+    vi.advanceTimersByTime(500);
+    expect(calls.some((c) => c.event === "broker_ready_timeout")).toBe(true);
+    expect(processHandle.kill).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
+  });
+
+  it("drops a {ready} that races between watchdog termination and exit", () => {
+    // Triangulation pass-2 regression: the watchdog calls
+    // requestProcessTermination but doesn't fence the subprocess against
+    // late messages. Without the timed-out marker, a queued {ready}
+    // arriving AFTER the watchdog decides the fork is wedged but BEFORE
+    // exit lands would publish brokerUrl for a process we're killing.
+    vi.useFakeTimers();
+    let nowMs = 0;
+    const processHandle = new FakeUtilityProcess(4321);
+    const { forkProcess } = createForkMock([processHandle]);
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+      monotonicNow: () => nowMs,
+      startupTimeoutMs: 500,
+      forceStopGraceMs: 1_000,
+      maxRestartRetries: 0,
+    });
+
+    supervisor.start();
+    nowMs = 500;
+    vi.advanceTimersByTime(500);
+    // Watchdog has fired and called requestProcessTermination. A late
+    // {ready} now arrives — must not set brokerUrl.
+    processHandle.emit("message", {
+      ready: true,
+      brokerUrl: "http://127.0.0.1:9999",
+    });
+    expect(supervisor.getSnapshot().brokerUrl).toBeNull();
+    vi.useRealTimers();
+  });
+
+  it("force-stops the wedged subprocess after forceStopGraceMs if SIGTERM doesn't take", () => {
+    // Triangulation pass-2 regression: a subprocess wedged so deeply
+    // that SIGTERM is ignored (uninterruptible sleep, SIGSTOP, kernel
+    // bug) would never exit, so handleExit never fires, so the restart
+    // cycle never starts, so whenReady() waiters hang past the cap.
+    // The watchdog must escalate to SIGKILL after the same grace stop()
+    // uses.
+    vi.useFakeTimers();
+    let nowMs = 0;
+    const processHandle = new FakeUtilityProcess(4321);
+    const { forkProcess } = createForkMock([processHandle]);
+    const killProcess = vi.fn<KillProcess>();
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+      killProcess,
+      monotonicNow: () => nowMs,
+      startupTimeoutMs: 500,
+      forceStopGraceMs: 1_000,
+      maxRestartRetries: 0,
+    });
+
+    supervisor.start();
+    nowMs = 500;
+    vi.advanceTimersByTime(500);
+    // SIGTERM-equivalent fired (utilityProcess.kill()); the subprocess
+    // is ignoring it. Advance past the force grace.
+    expect(processHandle.kill).toHaveBeenCalledTimes(1);
+    nowMs = 1_500;
+    vi.advanceTimersByTime(1_000);
+    // POSIX path: forceStop invokes killProcess(pid, "SIGKILL") OR
+    // utilityProcess.kill() again, depending on whether pid is null.
+    // Either way, the force path is exercised — assert SOMETHING was
+    // called beyond the initial SIGTERM.
+    const totalForceCalls = killProcess.mock.calls.length + processHandle.kill.mock.calls.length;
+    expect(totalForceCalls).toBeGreaterThan(1);
+    vi.useRealTimers();
+  });
+
+  it("clears the startup timer when {ready} arrives in time", () => {
+    vi.useFakeTimers();
+    const processHandle = new FakeUtilityProcess(4321);
+    const { forkProcess } = createForkMock([processHandle]);
+    const { logger, calls } = createMemoryLogger();
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+      logger,
+      startupTimeoutMs: 500,
+    });
+
+    supervisor.start();
+    processHandle.emit("message", { ready: true, brokerUrl: "http://127.0.0.1:7891" });
+    vi.advanceTimersByTime(10_000);
+    expect(calls.some((c) => c.event === "broker_ready_timeout")).toBe(false);
+    vi.useRealTimers();
+  });
+
+  it("forwards a broker_log message through the desktop logger, dropping banned keys", () => {
+    const processHandle = new FakeUtilityProcess(4321);
+    const { forkProcess } = createForkMock([processHandle]);
+    const { logger, calls } = createMemoryLogger();
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+      logger,
+    });
+
+    supervisor.start();
+    processHandle.emit("message", {
+      broker_log: "info",
+      event: "listener_started",
+      payload: { port: 7891, url: "http://127.0.0.1:7891" },
+    });
+
+    // Expect the listener_started forward with safe keys only. The `url`
+    // key is banned (fragment match in logger.ts) so it must be dropped
+    // and accounted for via droppedKeys=1.
+    expect(calls).toContainEqual({
+      level: "info",
+      event: "broker_listener_started",
+      payload: { port: 7891, droppedKeys: 1 },
+    });
+  });
+
+  it("drops a broker_log with an invalid event name and emits a structured warn", () => {
+    const processHandle = new FakeUtilityProcess(4321);
+    const { forkProcess } = createForkMock([processHandle]);
+    const { logger, calls } = createMemoryLogger();
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+      logger,
+    });
+
+    supervisor.start();
+    processHandle.emit("message", {
+      broker_log: "info",
+      event: "Has Spaces And UPPER",
+      payload: {},
+    });
+
+    expect(calls.some((c) => c.event === "broker_subprocess_log_invalid_event")).toBe(true);
+  });
+
+  it("subscribeReady fires on every {ready}, supports unsubscribe, and doesn't fire from stale forks", () => {
+    vi.useFakeTimers();
+    const firstProcess = new FakeUtilityProcess(1);
+    const secondProcess = new FakeUtilityProcess(2);
+    const { forkProcess } = createForkMock([firstProcess, secondProcess]);
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+      firstBackoffMs: 10,
+    });
+    const seen: string[] = [];
+    const unsubscribe = supervisor.subscribeReady((url) => {
+      seen.push(url);
+    });
+
+    supervisor.start();
+    firstProcess.emit("message", { ready: true, brokerUrl: "http://127.0.0.1:1" });
+    expect(seen).toEqual(["http://127.0.0.1:1"]);
+
+    firstProcess.emit("exit", 0, null);
+    vi.advanceTimersByTime(10);
+    secondProcess.emit("message", { ready: true, brokerUrl: "http://127.0.0.1:2" });
+    expect(seen).toEqual(["http://127.0.0.1:1", "http://127.0.0.1:2"]);
+
+    // Stale message from the dead first fork must not fire listeners.
+    // Use a syntactically valid loopback URL with a different port — the
+    // protocol BrokerUrl brand rejects non-numeric ports, so a "STALE"
+    // sentinel would be dropped by URL validation before the stale-sender
+    // guard runs. Port 9999 exercises the actual stale-sender path.
+    firstProcess.emit("message", { ready: true, brokerUrl: "http://127.0.0.1:9999" });
+    expect(seen).toEqual(["http://127.0.0.1:1", "http://127.0.0.1:2"]);
+
+    unsubscribe();
+    secondProcess.emit("message", { ready: true, brokerUrl: "http://127.0.0.1:2-replay" });
+    expect(seen).toEqual(["http://127.0.0.1:1", "http://127.0.0.1:2"]);
+
+    vi.useRealTimers();
+  });
+
+  it("ready handshake still flushes waiters when the broker_ready logger throws", async () => {
+    // CodeRabbit pass-3 regression: the previous ordering called
+    // logger.info("broker_ready", ...) BEFORE flushReadyWaiters. A throw
+    // from the logger (banned payload key, IO error, instrumentation
+    // bug) aborted the message handler, leaving whenReady() waiters
+    // hanging forever. The new ordering flushes first, then logs inside
+    // a try/catch — so a logger fault can never regress readiness.
+    const processHandle = new FakeUtilityProcess(4321);
+    const { forkProcess } = createForkMock([processHandle]);
+    // Throw only on the broker_ready event — other startup logs
+    // (broker_starting, etc.) must still succeed so we reach the ready
+    // path. The point of the test is that flushReadyWaiters runs even
+    // when the broker_ready logger call specifically faults.
+    const throwingLogger: Logger = {
+      info: vi.fn().mockImplementation((event: string, _payload?: LogPayload) => {
+        if (event === "broker_ready") {
+          throw new Error("logger_kaboom");
+        }
+      }),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+      logger: throwingLogger,
+    });
+
+    const ready = supervisor.whenReady();
+    supervisor.start();
+    processHandle.emit("message", { ready: true, brokerUrl: "http://127.0.0.1:7891" });
+    // whenReady must resolve even though the logger throws on broker_ready.
+    await expect(ready).resolves.toBe("http://127.0.0.1:7891");
+  });
+
+  it("notifyReadyListeners snapshots — unsubscribe-during-callback doesn't skip the next listener", () => {
+    // CodeRabbit pass-3 regression: notifyReadyListeners used to iterate
+    // the live this.readyListeners array. A listener that unsubscribed
+    // itself (or another listener) inside its callback would shift the
+    // array and cause the for…of to skip the next slot. The new
+    // implementation iterates a snapshot, so the third listener runs
+    // regardless of mid-iteration unsubscribe.
+    const processHandle = new FakeUtilityProcess(4321);
+    const { forkProcess } = createForkMock([processHandle]);
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+    });
+
+    const seen: string[] = [];
+    const unsubscribeA = supervisor.subscribeReady(() => {
+      seen.push("A");
+      // A unsubscribes itself mid-fire. With a live-array iterate the
+      // second listener (B) would be skipped because indices shift.
+      unsubscribeA();
+    });
+    supervisor.subscribeReady(() => {
+      seen.push("B");
+    });
+    supervisor.subscribeReady(() => {
+      seen.push("C");
+    });
+
+    supervisor.start();
+    processHandle.emit("message", { ready: true, brokerUrl: "http://127.0.0.1:7891" });
+
+    expect(seen).toEqual(["A", "B", "C"]);
+  });
+
+  it("subscribeReady listener that throws does not break subsequent listeners or supervisor", () => {
+    const processHandle = new FakeUtilityProcess(4321);
+    const { forkProcess } = createForkMock([processHandle]);
+    const { logger, calls } = createMemoryLogger();
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+      logger,
+    });
+    const seen: string[] = [];
+    supervisor.subscribeReady(() => {
+      throw new Error("listener_kaboom");
+    });
+    supervisor.subscribeReady((url) => {
+      seen.push(url);
+    });
+
+    supervisor.start();
+    expect(() =>
+      processHandle.emit("message", { ready: true, brokerUrl: "http://127.0.0.1:9" }),
+    ).not.toThrow();
+    expect(seen).toEqual(["http://127.0.0.1:9"]);
+    expect(calls.some((c) => c.event === "broker_ready_listener_threw")).toBe(true);
+  });
+
+  it("ignores broker_log messages that arrive after stop()", async () => {
+    const processHandle = new FakeUtilityProcess(4321);
+    const { forkProcess } = createForkMock([processHandle]);
+    const { logger, calls } = createMemoryLogger();
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+      logger,
+      stopGraceMs: 10,
+      forceStopGraceMs: 10,
+    });
+
+    supervisor.start();
+    const stopPromise = supervisor.stop();
+    processHandle.emit("message", {
+      broker_log: "info",
+      event: "listener_stopped",
+      payload: {},
+    });
+    setImmediate(() => processHandle.emit("exit", 0, null));
+    await stopPromise;
+
+    // The stopping-gate above the broker_log handler should drop the
+    // message entirely — no broker_listener_stopped should appear.
+    expect(calls.some((c) => c.event === "broker_listener_stopped")).toBe(false);
   });
 });
 

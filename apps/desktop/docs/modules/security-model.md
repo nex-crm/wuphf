@@ -9,13 +9,15 @@ flowchart TB
   preload[Sandboxed preload]
   renderer[Renderer DOM JS]
   broker[Broker utility process]
+  listener[Loopback HTTP/SSE/WS listener]
 
   os <-->|OS verbs only| main
   main -->|strict BrowserWindow config| renderer
   renderer -->|window.wuphf allowlist| preload
   preload -->|validated IPC channels| main
   main -->|utilityProcess.fork lifecycle only| broker
-  renderer -. future loopback HTTP/SSE .-> broker
+  broker -->|owns| listener
+  renderer -->|same-origin loopback HTTP/SSE/WS| listener
 ```
 
 ## Trust Boundaries
@@ -64,11 +66,53 @@ Remote navigation is blocked. Development loads only the exact
 `ELECTRON_RENDERER_URL` value set by electron-vite for the Vite renderer, and
 production loads only the bundled `file://` renderer document.
 
-## CSP Loopback Placeholder
+## CSP
 
-The renderer CSP currently sets `connect-src` to only `'self'` and
-`http://127.0.0.1:0`. Port 0 is reserved, so this placeholder does not grant
-connectivity to local HTTP services such as CUPS, Jupyter, Redis, databases, or
-development servers. Until `feat/broker-loopback-listener` binds the actual
-broker port, renderer JS has no localhost network egress by policy. That branch
-must replace the placeholder with the one concrete broker origin.
+The broker-served renderer bundle gets a strict CSP from `@wuphf/broker`'s
+static handler (`packages/broker/src/serve-static.ts`):
+
+- `default-src 'self'` and `script-src 'self'` — no inline scripts, no remote.
+- `style-src 'self'` — no inline styles. Vite extracts CSS to external
+  `<link>` stylesheets at build; dev mode loads through electron-vite and
+  does not see this CSP, so HMR is unaffected.
+- `connect-src 'self'` — covers fetch/XHR/WebSocket/EventSource to the same
+  loopback origin. Renderer JS has no network egress beyond the broker.
+- `frame-ancestors 'none'` and `object-src 'none'` — no embedding, no plugins.
+- `base-uri 'self'` — block `<base href>` redirection of relative URLs.
+
+The renderer's `<meta http-equiv="Content-Security-Policy">` tag remains as
+documentation of intent; the server header is authoritative in packaged mode.
+
+## Loopback Trust Model
+
+The broker's loopback listener treats `127.0.0.1` / `localhost` / `::1` as the
+trust boundary. That means:
+
+- **Trusted**: any process running on the same machine as the user can reach
+  the listener. The DNS-rebinding guard (`@wuphf/protocol`'s
+  `isAllowedLoopbackHost` + `isLoopbackRemoteAddress`) keeps remote peers
+  out, but does not distinguish "the desktop renderer" from "a curl shell on
+  the box" or "a Chrome extension with localhost access".
+- **Implication**: `/api-token` issues the bearer to any same-machine caller
+  that gets past the loopback + Origin gates. The bearer then grants the
+  full bearer-protected API surface (`/api/*`) and the agent terminal
+  WebSocket.
+
+This is the documented v1 trust model. Mitigations on the browser side
+(`/api-token` route in `packages/broker/src/listener.ts`):
+
+- **Origin gate**: when `Origin` is present, it must match the broker's bound
+  origin (`http://127.0.0.1:<port>`). Cross-origin browser fetches —
+  including from Chrome extensions, dev-tool consoles attached to other
+  pages, and same-machine web apps on a different port — are rejected with
+  `403 cross_origin_api_token`.
+- **Sec-Fetch-Site gate**: when present, must be `same-origin` or `none`
+  (user-initiated, e.g. typed in address bar). `cross-site`/`same-site` are
+  rejected.
+
+Both gates are defense-in-depth for the **browser context**. Non-browser
+callers on the same machine (curl, Python script, malware running as the
+user) bypass these gates by omitting the headers. The loopback trust
+boundary is the load-bearing assumption; if a future branch wants stricter
+isolation, the path is an Electron IPC-bound bootstrap or one-time
+renderer-bound nonce that never touches HTTP.

@@ -46,6 +46,18 @@ pre-commit:
         - "node_modules/**"
         - "coverage/**"
 
+    biome-broker:
+      # @wuphf/broker has its own biome config that mirrors @wuphf/protocol's
+      # Node-only rule set (kebab-case filenames, no console, no enums).
+      root: packages/broker
+      glob: "packages/broker/**/*.{js,ts,json}"
+      run: bunx --bun biome check --write --max-diagnostics=500 {staged_files}
+      stage_fixed: true
+      exclude:
+        - "dist/**"
+        - "node_modules/**"
+        - "coverage/**"
+
     gofmt:
       glob: "*.go"
       run: |
@@ -229,6 +241,27 @@ pre-push:
       files: bash scripts/changed-files-since-base.sh
       glob: "packages/protocol/{src/**,tests/**,scripts/**}"
       run: bash packages/protocol/scripts/check-invariants.sh
+    broker-typecheck:
+      files: bash scripts/changed-files-since-base.sh
+      glob: "packages/broker/**/*.{ts,json}"
+      run: |
+        cd packages/broker
+        bun run typecheck
+    broker-test:
+      files: bash scripts/changed-files-since-base.sh
+      glob: "packages/broker/**/*.{ts,json}"
+      run: |
+        cd packages/broker
+        bun run test
+    broker-invariants:
+      # Custom invariant checks for broker-grade rules Biome cannot express:
+      # bind host is loopback only, bearer comparison goes through
+      # `tokenMatches` (timingSafeEqual), no electron imports, all
+      # @wuphf/protocol imports go through the package root. See
+      # `packages/broker/scripts/check-invariants.sh` for full rationale.
+      files: bash scripts/changed-files-since-base.sh
+      glob: "packages/broker/{src/**,tests/**,scripts/**}"
+      run: bash packages/broker/scripts/check-invariants.sh
     installer-invariants:
       files: bash scripts/changed-files-since-base.sh
       # check-invariants.sh scans .github/workflows/release-rewrite.yml for

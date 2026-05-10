@@ -6,10 +6,17 @@ import type {
   GetPlatformResponse,
 } from "../shared/api-contract.ts";
 
+interface BootstrapResult {
+  readonly tokenLength: number;
+  readonly brokerUrl: string;
+  readonly healthOk: boolean;
+}
+
 interface RendererState {
   version: string;
   platform: GetPlatformResponse | null;
   broker: GetBrokerStatusResponse | null;
+  bootstrap: BootstrapResult | null;
   error: string | null;
 }
 
@@ -24,6 +31,7 @@ const state: RendererState = {
   version: "",
   platform: null,
   broker: null,
+  bootstrap: null,
   error: null,
 };
 
@@ -39,6 +47,9 @@ brokerLine.className = "status-line";
 const platformLine = document.createElement("p");
 platformLine.className = "status-line";
 
+const bootstrapLine = document.createElement("p");
+bootstrapLine.className = "status-line";
+
 const openRepoButton = document.createElement("button");
 openRepoButton.type = "button";
 openRepoButton.textContent = "Open repo on GitHub";
@@ -49,7 +60,7 @@ openRepoButton.addEventListener("click", () => {
 const errorLine = document.createElement("p");
 errorLine.className = "error-line";
 
-pane.append(title, brokerLine, platformLine, openRepoButton, errorLine);
+pane.append(title, brokerLine, platformLine, bootstrapLine, openRepoButton, errorLine);
 appRoot.append(pane);
 
 void initialize();
@@ -72,12 +83,188 @@ async function initialize(): Promise<void> {
     state.error = error instanceof Error ? error.message : "Failed to initialize desktop shell";
   }
   render();
+  // Branch-4 proof-of-life: hit the broker bootstrap + health endpoints over
+  // loopback HTTP. In packaged mode the renderer is loaded from the broker
+  // URL so `/api-token` is same-origin; in dev (electron-vite) we discover
+  // the URL via `getBrokerStatus()` and fetch cross-origin.
+  void runBrokerBootstrapProbe();
+}
+
+let probeInFlight = false;
+
+async function runBrokerBootstrapProbe(): Promise<void> {
+  if (probeInFlight) return;
+  probeInFlight = true;
+  try {
+    const requestUrl = await resolveBrokerOrigin();
+    const tokenRes = await fetch(`${requestUrl}/api-token`);
+    if (!tokenRes.ok) throw new Error(`api-token ${String(tokenRes.status)}`);
+    const tokenJson: unknown = await tokenRes.json();
+    const bootstrap = parseBootstrap(tokenJson);
+    const healthRes = await fetch(`${bootstrap.brokerUrl}/api/health`, {
+      headers: { Authorization: `Bearer ${bootstrap.token}` },
+    });
+    state.bootstrap = {
+      tokenLength: bootstrap.token.length,
+      brokerUrl: bootstrap.brokerUrl,
+      healthOk: healthRes.ok,
+    };
+  } catch (error) {
+    state.bootstrap = null;
+    state.error = error instanceof Error ? error.message : "Broker probe failed";
+  }
+  render();
+}
+
+async function resolveBrokerOrigin(): Promise<string> {
+  // Same-origin loopback: when the bundle was loaded from the broker,
+  // window.location.origin IS the broker. Confirm by matching the
+  // supervisor's snapshot URL exactly — host prefix alone is not enough
+  // because the dev server can also bind 127.0.0.1 (different port). In
+  // that configuration `window.location.origin` would resolve to the dev
+  // server, and the renderer would try to fetch `/api-token` from Vite.
+  const status = state.broker ?? (await api.getBrokerStatus());
+  if (status.brokerUrl !== null && status.brokerUrl.length > 0) {
+    if (originsMatch(window.location.origin, status.brokerUrl)) {
+      return window.location.origin;
+    }
+    return status.brokerUrl;
+  }
+  throw new Error("broker not ready");
+}
+
+// Bare origin comparison: strip trailing slashes / paths so
+// `http://127.0.0.1:1234` matches `http://127.0.0.1:1234/`. Failures fall
+// to `false`, which routes the caller to the supervisor-reported URL —
+// the correct conservative choice when we can't prove same-origin.
+function originsMatch(a: string, b: string): boolean {
+  try {
+    return new URL(a).origin === new URL(b).origin;
+  } catch {
+    return false;
+  }
+}
+
+interface ParsedBootstrap {
+  readonly token: string;
+  readonly brokerUrl: string;
+}
+
+// Mirrors @wuphf/protocol#apiBootstrapFromJson + #asApiToken +
+// #assertApiBootstrapBrokerUrl without pulling the full protocol package
+// into the renderer bundle (it depends on `node:crypto` and is sized for
+// the broker subprocess, not the browser-context renderer). The regex
+// and host rules MUST stay byte-for-byte aligned with packages/protocol/
+// src/ipc.ts — drift surfaces as a renderer that accepts bootstrap JSON
+// the broker would never emit (e.g. `broker_url: "http://127.0.0.1:0"`,
+// non-base64url token).
+//
+// API_TOKEN_RE: copy of `API_TOKEN_RE` in protocol. Base64url alphabet
+// only — bounded length, no `+`/`/`/`.`/`~` (those don't round-trip through
+// `?token=` query strings unchanged).
+const API_TOKEN_RE = /^[A-Za-z0-9_-]{16,512}$/;
+
+function parseBootstrap(value: unknown): ParsedBootstrap {
+  if (typeof value !== "object" || value === null) {
+    throw new Error("api-token response is not an object");
+  }
+  const record = value as Record<string, unknown>;
+  for (const key of Object.keys(record)) {
+    if (key !== "token" && key !== "broker_url") {
+      throw new Error(`api-token response has unknown key: ${key}`);
+    }
+  }
+  const token = record["token"];
+  const brokerUrl = record["broker_url"];
+  if (typeof token !== "string" || !API_TOKEN_RE.test(token)) {
+    throw new Error("api-token response: token does not match the API token shape");
+  }
+  if (typeof brokerUrl !== "string" || brokerUrl.length === 0) {
+    throw new Error("api-token response: broker_url must be a non-empty string");
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(brokerUrl);
+  } catch {
+    throw new Error("api-token response: broker_url is not a valid URL");
+  }
+  if (parsed.protocol !== "http:") {
+    throw new Error("api-token response: broker_url must use http://");
+  }
+  if (parsed.port === "") {
+    throw new Error("api-token response: broker_url must include an explicit port");
+  }
+  const portNumber = Number(parsed.port);
+  if (!Number.isInteger(portNumber) || portNumber < 1 || portNumber > 65535) {
+    throw new Error("api-token response: broker_url port must be 1..65535");
+  }
+  if (!isLoopbackHostname(parsed.hostname)) {
+    throw new Error("api-token response: broker_url host must be loopback");
+  }
+  // Shape lock: the broker's wire contract is "BrokerUrl IS the broker
+  // origin", with no userinfo/path/query/fragment. A value with embedded
+  // userinfo + non-root path would otherwise pass the gates above and
+  // break downstream string concatenation (`${brokerUrl}/api/health`
+  // becomes garbage when the brokerUrl already has a path). Mirror the
+  // protocol codec's assertApiBootstrapBrokerUrl byte-for-byte.
+  if (
+    parsed.username !== "" ||
+    parsed.password !== "" ||
+    parsed.search !== "" ||
+    parsed.hash !== "" ||
+    (parsed.pathname !== "" && parsed.pathname !== "/")
+  ) {
+    throw new Error(
+      "api-token response: broker_url must have no userinfo, path, query, or fragment",
+    );
+  }
+  return { token, brokerUrl };
+}
+
+// `URL.hostname` returns bracketed IPv6 (`[::1]` for `http://[::1]:1234`),
+// while the bare-form check protocol does on the SAME parsed value sees
+// the bracketed form. Accept both bracketed and bare loopback IPv6 so
+// renderer parity holds across the v0 IPv6 path the protocol codec
+// supports.
+function isLoopbackHostname(hostname: string): boolean {
+  if (hostname === "127.0.0.1" || hostname === "localhost") return true;
+  if (hostname === "::1" || hostname === "[::1]") return true;
+  return false;
 }
 
 async function refreshBrokerStatus(): Promise<void> {
   try {
     state.broker = await api.getBrokerStatus();
     state.error = null;
+    // Compare the supervisor's reported brokerUrl against the URL the
+    // CURRENT bootstrap is bound to (not the previous-poll value). This
+    // catches the restart sequence `url1 → null → url2`: in the brief
+    // window where the supervisor has cleared brokerUrl during restart,
+    // a previous-poll-based diff would observe `null → url2` and conclude
+    // "no change since last poll", missing the rebootstrap. Tying to the
+    // cached bootstrap's brokerUrl instead means: any time the live
+    // supervisor URL diverges from what our token was issued against, we
+    // rebootstrap.
+    //
+    // The cachedBootstrapUrl-null path is the "recovery" case: initial
+    // probe failed (transient loopback hiccup, broker still finishing
+    // its socket bind, etc.) so bootstrap is null while the supervisor
+    // reports a healthy URL. Keep that arm enabled so we retry — without
+    // it, a single transient failure traps the renderer at
+    // "Bootstrap: pending" forever. The probeInFlight guard below
+    // prevents the 1Hz poll from piling up concurrent retries while a
+    // probe is still running.
+    const nextBrokerUrl = state.broker.brokerUrl;
+    const cachedBootstrapUrl = state.bootstrap?.brokerUrl ?? null;
+    if (
+      nextBrokerUrl !== null &&
+      nextBrokerUrl.length > 0 &&
+      cachedBootstrapUrl !== nextBrokerUrl &&
+      !probeInFlight
+    ) {
+      state.bootstrap = null;
+      void runBrokerBootstrapProbe();
+    }
   } catch (error) {
     state.error = error instanceof Error ? error.message : "Failed to refresh broker status";
   }
@@ -91,6 +278,14 @@ function render(): void {
   const platform = state.platform;
   platformLine.textContent =
     platform === null ? "Platform: unknown" : `Platform: ${platform.platform} / ${platform.arch}`;
+
+  if (state.bootstrap === null) {
+    bootstrapLine.textContent = "Bootstrap: pending";
+  } else {
+    const probe = state.bootstrap;
+    const healthMark = probe.healthOk ? "✓" : "✗";
+    bootstrapLine.textContent = `Bootstrap: token=${String(probe.tokenLength)}ch · health ${healthMark} · ${probe.brokerUrl}`;
+  }
 
   errorLine.textContent = state.error ?? "";
 }

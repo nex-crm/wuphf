@@ -5,6 +5,8 @@ const RENDERER_URL_ENV_KEY = "ELECTRON_RENDERER_URL";
 interface MockBrowserWindowInstance {
   readonly loadURL: ReturnType<typeof vi.fn<(url: string) => Promise<void>>>;
   readonly loadFile: ReturnType<typeof vi.fn<(path: string) => Promise<void>>>;
+  readonly destroy: ReturnType<typeof vi.fn<() => void>>;
+  readonly isDestroyed: ReturnType<typeof vi.fn<() => boolean>>;
   readonly webContents: {
     readonly setWindowOpenHandler: ReturnType<typeof vi.fn<() => void>>;
     readonly on: ReturnType<typeof vi.fn<() => void>>;
@@ -21,15 +23,20 @@ interface MockUtilityProcess {
 }
 
 interface MockBrokerSnapshot {
-  readonly status: "unknown";
+  readonly status: "unknown" | "alive";
   readonly pid: null;
   readonly restartCount: 0;
+  readonly brokerUrl: string | null;
 }
 
 interface MockBrokerSupervisorInstance {
   readonly start: ReturnType<typeof vi.fn<() => void>>;
   readonly stop: ReturnType<typeof vi.fn<() => Promise<void>>>;
   readonly getSnapshot: ReturnType<typeof vi.fn<() => MockBrokerSnapshot>>;
+  readonly whenReady: ReturnType<typeof vi.fn<() => Promise<string>>>;
+  readonly subscribeReady: ReturnType<
+    typeof vi.fn<(listener: (url: string) => void) => () => void>
+  >;
 }
 
 interface MockLogCall {
@@ -49,10 +56,17 @@ const electronMock = vi.hoisted(() => {
   const browserWindowConstructorSpy = vi.fn<() => void>();
 
   class BrowserWindow {
-    static readonly getAllWindows = vi.fn<() => MockBrowserWindowInstance[]>(() => instances);
+    static readonly getAllWindows = vi.fn<() => MockBrowserWindowInstance[]>(() =>
+      instances.filter((w) => !w.isDestroyed()),
+    );
 
     readonly loadURL = vi.fn<(url: string) => Promise<void>>(() => Promise.resolve());
     readonly loadFile = vi.fn<(path: string) => Promise<void>>(() => Promise.resolve());
+    private _destroyed = false;
+    readonly destroy = vi.fn<() => void>(() => {
+      this._destroyed = true;
+    });
+    readonly isDestroyed = vi.fn<() => boolean>(() => this._destroyed);
     readonly webContents = {
       setWindowOpenHandler: vi.fn<() => void>(),
       on: vi.fn<() => void>(),
@@ -121,24 +135,53 @@ const loggerMock = vi.hoisted(() => {
 
 const brokerMock = vi.hoisted(() => {
   const instances: MockBrokerSupervisorInstance[] = [];
+  // The supervisor mock returns this URL from `whenReady()` and
+  // `getSnapshot().brokerUrl` so window-loading logic that prefers the
+  // broker URL over the file:// fallback can be exercised in tests.
+  let brokerUrl: string | null = null;
+
+  function setBrokerUrl(value: string | null): void {
+    brokerUrl = value;
+  }
+
+  const readyListeners: Array<(url: string) => void> = [];
 
   class BrokerSupervisor implements MockBrokerSupervisorInstance {
     readonly start = vi.fn<() => void>();
     readonly stop = vi.fn<() => Promise<void>>(() => Promise.resolve());
     readonly getSnapshot = vi.fn<() => MockBrokerSnapshot>(() => ({
-      status: "unknown",
+      status: brokerUrl === null ? "unknown" : "alive",
       pid: null,
       restartCount: 0,
+      brokerUrl,
     }));
+    readonly whenReady = vi.fn<() => Promise<string>>(() =>
+      brokerUrl === null ? Promise.resolve("http://127.0.0.1:65535") : Promise.resolve(brokerUrl),
+    );
+    readonly subscribeReady = vi.fn<(listener: (url: string) => void) => () => void>((listener) => {
+      readyListeners.push(listener);
+      return () => {
+        const idx = readyListeners.indexOf(listener);
+        if (idx >= 0) readyListeners.splice(idx, 1);
+      };
+    });
 
     constructor(_config: unknown) {
       instances.push(this);
     }
   }
 
+  function emitReady(url: string): void {
+    brokerUrl = url;
+    for (const listener of readyListeners) listener(url);
+  }
+
   return {
     BrokerSupervisor,
     instances,
+    setBrokerUrl,
+    emitReady,
+    readyListeners,
   };
 });
 
@@ -212,15 +255,59 @@ describe("main bootstrap", () => {
     process.env[RENDERER_URL_ENV_KEY] = previousRendererUrl;
   });
 
-  it("loads the packaged renderer file when app.isPackaged is true", async () => {
+  it("loads the broker URL when packaged and the broker has reported {ready}", async () => {
+    // Packaged mode now serves the renderer bundle through the broker. The
+    // window must `loadURL(${brokerUrl}/)` so `/api-token` is same-origin
+    // loopback. ELECTRON_RENDERER_URL is set here to verify it's ignored in
+    // packaged mode — the dev-server branch must not win.
     electronMock.app.isPackaged = true;
     process.env[RENDERER_URL_ENV_KEY] = "http://localhost:5173/";
+    brokerMock.setBrokerUrl("http://127.0.0.1:54321");
+
+    await importMainBootstrap();
+
+    const window = getOnlyWindow();
+    expect(window.loadURL).toHaveBeenCalledWith("http://127.0.0.1:54321/");
+    expect(window.loadFile).not.toHaveBeenCalled();
+  });
+
+  it("falls back to file:// in packaged mode only when the broker URL is unavailable", async () => {
+    // Edge: broker never reaches ready before the window is requested. The
+    // window-create path picks the file:// fallback so the app still opens
+    // *something* (the bundle's index.html). Branch-4 keeps the fallback
+    // for resilience but production should be the broker-URL path above.
+    electronMock.app.isPackaged = true;
+    brokerMock.setBrokerUrl(null);
 
     await importMainBootstrap();
 
     const window = getOnlyWindow();
     expect(window.loadFile).toHaveBeenCalledWith(expect.stringContaining("index.html"));
     expect(window.loadURL).not.toHaveBeenCalled();
+  });
+
+  it("rebuilds broker-pinned windows on a subscribeReady fanout (broker restart)", async () => {
+    // Triangulation regression: when the broker restarts, the new fork
+    // binds a fresh port and the renderer's window.location.origin is
+    // pinned to the old (dead) port. The supervisor's subscribeReady
+    // fanout drives a destroy + recreate so the renderer rebinds.
+    electronMock.app.isPackaged = true;
+    brokerMock.setBrokerUrl("http://127.0.0.1:11111");
+
+    await importMainBootstrap();
+    const firstWindow = getOnlyWindow();
+    expect(firstWindow.loadURL).toHaveBeenCalledWith("http://127.0.0.1:11111/");
+
+    // Simulate a broker restart that publishes a new ready URL.
+    brokerMock.emitReady("http://127.0.0.1:22222");
+
+    // The first window should be destroyed; a new one loads the new URL.
+    expect(firstWindow.destroy).toHaveBeenCalled();
+    const allWindows = electronMock.instances;
+    const newest = allWindows[allWindows.length - 1];
+    expect(newest).toBeDefined();
+    if (newest === undefined) return;
+    expect(newest.loadURL).toHaveBeenCalledWith("http://127.0.0.1:22222/");
   });
 
   it("loads ELECTRON_RENDERER_URL when app.isPackaged is false", async () => {
