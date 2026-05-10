@@ -213,6 +213,22 @@ type WikiWorker struct {
 	// its own sideGoroutines.Wait). Tests register `t.Cleanup(func() {
 	// cancel(); <-worker.Done() })` so tempdir removal is deterministic.
 	drainDone chan struct{}
+
+	// notebookCommits is a monotonic counter of successful notebook
+	// CommitNotebook calls. Used by PromotionSweep as the
+	// "did anything new land?" gate so it skips iterations when no
+	// drafted notebook content has changed since the last sweep.
+	notebookCommits atomic.Int64
+}
+
+// NotebookCommitCount returns the number of successful notebook writes
+// since this worker started. Monotonic; never decreases. Used by
+// PromotionSweep's content-volume gate.
+func (w *WikiWorker) NotebookCommitCount() int {
+	if w == nil {
+		return 0
+	}
+	return int(w.notebookCommits.Load())
 }
 
 // NewWikiWorker returns a worker ready to Start. The publisher is optional;
@@ -450,6 +466,7 @@ func (w *WikiWorker) process(ctx context.Context, req wikiWriteRequest) {
 			notifier.EnqueueSectionsRefresh()
 		}
 	case req.IsNotebook:
+		w.notebookCommits.Add(1)
 		if nbPub, ok := w.publisher.(notebookEventPublisher); ok {
 			nbPub.PublishNotebookEvent(notebookWriteEvent{
 				Slug:      req.Slug,

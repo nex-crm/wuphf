@@ -1,9 +1,9 @@
 package team
 
-// promotion_sweep_adapter.go wires PR 3's NotebookDemandIndex and PR 1's
-// AutoNotebookWriter into the PromotionSweep contract. Kept in a
-// separate file so promotion_sweep.go has zero broker imports — the
-// sweep itself is purely an orchestrator and depends on the
+// promotion_sweep_adapter.go wires PR 3's NotebookDemandIndex and the
+// WikiWorker notebook commit counter into the PromotionSweep contract.
+// Kept in a separate file so promotion_sweep.go has zero broker imports
+// — the sweep itself is purely an orchestrator and depends on the
 // promotionEscalator and notebookCounter interfaces only.
 //
 // Lock invariants: the adapter methods acquire ONLY the locks of the
@@ -81,40 +81,32 @@ func (e *demandIndexEscalator) NearThresholdCount() int {
 	return count
 }
 
-// autoWriterNotebookCounter adapts AutoNotebookWriter to the
-// notebookCounter interface. The "written" counter is monotonic and
-// the most recent notebook entry's modified time provides the
-// last-commit timestamp via the writer's progress signalling.
-//
-// We approximate "last commit time" as wall-clock-of-last-write by
-// recording a per-call timestamp on the writer's written counter
-// transition; rather than touching the writer, we just read the
-// counter value and stash the current clock at sweep time. The sweep
-// only needs a "did anything change since last tick?" signal — the
-// counter delta alone is sufficient. The timestamp field is preserved
-// in the interface for future use (e.g. age-based gates).
-type autoWriterNotebookCounter struct {
-	writer *AutoNotebookWriter
+// wikiWorkerNotebookCounter adapts WikiWorker to the notebookCounter
+// interface. The counter increments on every legitimate notebook
+// commit (CommitNotebook success) — the only path that produces
+// notebook entries now that the auto-write hooks are gone. Drafted
+// notes authored via the notebook_write MCP tool drive the gate;
+// PostMessage and task transitions intentionally do not.
+type wikiWorkerNotebookCounter struct {
+	worker *WikiWorker
 }
 
-func newAutoWriterNotebookCounter(w *AutoNotebookWriter) *autoWriterNotebookCounter {
-	return &autoWriterNotebookCounter{writer: w}
+func newWikiWorkerNotebookCounter(w *WikiWorker) *wikiWorkerNotebookCounter {
+	return &wikiWorkerNotebookCounter{worker: w}
 }
 
-func (a *autoWriterNotebookCounter) NotebookCommitCount() int {
-	if a == nil || a.writer == nil {
+func (a *wikiWorkerNotebookCounter) NotebookCommitCount() int {
+	if a == nil || a.worker == nil {
 		return 0
 	}
-	return int(a.writer.Counters().Written)
+	return a.worker.NotebookCommitCount()
 }
 
 // NotebookLastCommitTime is provided for parity with the
 // notebookCounter interface but the real implementation relies on the
-// Written counter delta as the dominant change signal. Returning the
+// commit counter delta as the dominant change signal. Returning the
 // zero time keeps the gate's Equal() comparison stable across ticks
-// when no writes have happened. Future PRs can plumb a real
-// last-commit timestamp from the wiki repo if age-based logic is
-// added.
-func (a *autoWriterNotebookCounter) NotebookLastCommitTime() time.Time {
+// when no writes have happened.
+func (a *wikiWorkerNotebookCounter) NotebookLastCommitTime() time.Time {
 	return time.Time{}
 }

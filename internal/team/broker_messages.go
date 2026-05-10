@@ -478,20 +478,12 @@ func (b *Broker) PostMessage(from, channel, content string, tagged []string, rep
 	if err := b.saveLocked(); err != nil {
 		return channelMessage{}, err
 	}
-	// 2A: every roster-agent PostMessage triggers one notebook event. Roster
-	// filter is applied here under b.mu (lock-free predicate); calling Handle
-	// itself never re-enters b.mu, so this is safe to do while still locked.
-	// Handle is non-blocking per decision S3A.
-	if b.autoNotebookWriter != nil && b.isAgentMemberSlugLocked(msg.From) {
-		b.autoNotebookWriter.Handle(autoNotebookEvent{
-			Kind:      AutoNotebookEventMessagePosted,
-			Slug:      msg.From,
-			Actor:     msg.From,
-			Channel:   msg.Channel,
-			Content:   msg.Content,
-			Timestamp: time.Now().UTC(),
-		})
-	}
+	// PostMessage intentionally does NOT auto-write notebook entries.
+	// Notebooks are for properly drafted working notes and learnings
+	// authored via the notebook_write MCP tool. Auto-writing every
+	// agent message into the shelf turned notebooks into noisy event
+	// logs and even fed unrelated chatter into the wiki review queue.
+	//
 	// PR 2: when a human posts via PostMessage (non-HTTP entry points such as
 	// integration tests and a small set of in-process callers), the same
 	// remember-intent hook fires. Handle is non-blocking and the writer

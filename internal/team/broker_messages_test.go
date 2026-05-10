@@ -130,11 +130,13 @@ func TestFormatChannelViewRedactsSecrets(t *testing.T) {
 	}
 }
 
-// TestPostMessage_TriggersAutoNotebookWriter pins the locked PR-1 hook (2A):
-// every roster-agent PostMessage feeds exactly one event into the auto-notebook
-// writer, while non-roster senders (humans, system) are filtered at ingress.
-// Uses a stub writer client to keep the assertion focused on the hook seam.
-func TestPostMessage_TriggersAutoNotebookWriter(t *testing.T) {
+// TestPostMessage_DoesNotAutoWriteNotebook is the regression guard for the
+// reverted PR-1 hook. PostMessage used to fan every roster-agent message
+// into a per-agent notebook entry; that turned shelves into noisy event
+// logs and even fed unrelated chatter into the wiki review queue. The hook
+// is gone: agent messages, human messages, and system messages must all
+// leave the writer untouched.
+func TestPostMessage_DoesNotAutoWriteNotebook(t *testing.T) {
 	b := newTestBroker(t)
 	b.mu.Lock()
 	b.members = append(b.members, officeMember{Slug: "ceo", Name: "CEO", Role: "lead"})
@@ -146,9 +148,6 @@ func TestPostMessage_TriggersAutoNotebookWriter(t *testing.T) {
 	b.mu.Unlock()
 
 	stub := &fakeNotebookClient{}
-	// Broker pre-filters via isAgentMemberSlugLocked before calling Handle,
-	// so the writer's roster is unused on the production code path; pass nil
-	// here to avoid re-entering b.mu inside Handle.
 	writer := NewAutoNotebookWriter(stub, nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	writer.Start(ctx)
@@ -164,21 +163,20 @@ func TestPostMessage_TriggersAutoNotebookWriter(t *testing.T) {
 	if _, err := b.PostMessage("human", "general", "human message", nil, ""); err != nil {
 		t.Fatalf("PostMessage human: %v", err)
 	}
-	// Process the system path: PostSystemMessage bypasses PostMessage and must
-	// not produce a writer event.
 	b.PostSystemMessage("general", "system msg", "system")
 
-	waitCtx, waitCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	// Give a brief window for any (incorrect) Handle goroutine work to land.
+	// 200ms is generous: the writer's queue is processed eagerly and the
+	// stub records synchronously inside NotebookWrite. If a hook ever
+	// fires from the broker again this assertion will catch it.
+	waitCtx, waitCancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer waitCancel()
-	if err := writer.WaitForCondition(waitCtx, func() bool { return len(stub.snapshot()) >= 1 }); err != nil {
-		t.Fatalf("waiting for writer event: %v", err)
+	_ = writer.WaitForCondition(waitCtx, func() bool { return len(stub.snapshot()) > 0 })
+	if calls := stub.snapshot(); len(calls) != 0 {
+		t.Fatalf("expected zero notebook writes from PostMessage; got %d: %+v", len(calls), calls)
 	}
-	calls := stub.snapshot()
-	if len(calls) != 1 {
-		t.Fatalf("expected exactly 1 notebook write (only the agent message); got %d", len(calls))
-	}
-	if calls[0].Slug != "ceo" {
-		t.Fatalf("expected slug=ceo, got %q", calls[0].Slug)
+	if got := writer.Counters().Enqueued; got != 0 {
+		t.Fatalf("expected zero enqueued events; got %d", got)
 	}
 }
 
