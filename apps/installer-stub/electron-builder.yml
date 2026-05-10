@@ -3,13 +3,14 @@ productName: WUPHF (installer stub)
 copyright: Copyright © 2026 Nex Labs Inc.
 artifactName: wuphf-installer-stub-${version}-${os}-${arch}.${ext}
 compression: maximum
-# npmRebuild=false: this stub has zero production dependencies (only
-# devDependencies). electron-builder's rebuild step uses npm/yarn under the
-# hood; under bun's CI env it spawns the bun binary as if it were a node
-# module and crashes (see CR-CI-1 in scripts/run-builder.js, paired with the
-# env scrub there). The "no production deps" precondition is enforced by
-# scripts/check-invariants.sh — adding a `dependencies` block to package.json
-# fails the invariant and forces a deliberate fix.
+# npmRebuild=false: the rebuild step uses npm/yarn under the hood; under
+# bun's CI env it spawns the bun binary as if it were a node module and
+# crashes (see CR-CI-1 in scripts/run-builder.js, paired with the env
+# scrub there). Skipping rebuild is safe ONLY while the stub has no
+# native-module production deps (the `dependencies` block is allowlisted
+# to pure-JS names — currently just `electron-updater`. See issue #771
+# and scripts/check-invariants.sh's APPROVED_RUNTIME_DEPS for the
+# enforced policy.)
 npmRebuild: false
 directories:
   output: dist
@@ -46,8 +47,13 @@ mac:
 dmg:
   sign: false
 win:
-  publisherName:
-    - WUPHF (installer stub)
+  # electron-builder 26.x removed top-level `win.publisherName` (deprecated
+  # in v25 with a warning). The new home is `win.signtoolOptions.publisherName`
+  # as a single string. The CI workflow overrides this at release-build
+  # time via `--config.win.signtoolOptions.publisherName="$AZURE_EXPECTED_PUBLISHER_NAME"`
+  # to bind the baked-in publisherName to the Azure cert's Authenticode CN.
+  signtoolOptions:
+    publisherName: WUPHF (installer stub)
   target:
     - target: nsis
       arch:

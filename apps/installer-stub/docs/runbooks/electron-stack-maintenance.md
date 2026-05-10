@@ -32,22 +32,23 @@ renderer command-line switch injection). Bumping to `42.0.1` aligns the stub
 with `apps/desktop`'s pin and eliminates those advisories from the workspace
 lockfile.
 
-`electron-builder` and `electron-updater` were intentionally NOT moved with
-electron in that PR even though hard rule 15 (AGENTS.md:37) calls for grouped
-bumps. Reasons recorded for the split:
+PR #780 (issue #771) bumped the full electron stack:
 
-1. electron-builder 25.1.8 supports the entire Electron 28-42 range per its
-   compatibility matrix; the 42 runtime ships unchanged signing / NSIS /
-   notarytool semantics for v25, so packaging stays correct.
-2. electron-builder 26 is a breaking schema bump (e.g. `win.publisherName`
-   moved to `nsis.publisherName`) that requires a coordinated workflow CLI
-   override + runbook update + production smoke. That deserves its own PR.
-3. electron-updater 6.3.9 → 6.6.5 was attempted alongside electron-builder 26
-   in the original cleanup attempt and reverted when the v26 schema broke
-   `bun run build:dry-run`.
+- `electron-builder` 25.1.8 → 26.8.1
+- `electron-updater` 6.3.9 → 6.8.3 (and moved into `dependencies` per
+  the new APPROVED_RUNTIME_DEPS allowlist)
+- Schema migration: top-level `win.publisherName` → `win.signtoolOptions.publisherName`
+  (the v25 array form `win.publisherName: [foo]` is rejected outright in v26).
+  CI workflow CLI override updated to `--config.win.signtoolOptions.publisherName=…`.
 
-The follow-up tracking the deferred electron-builder + electron-updater bump
-should land before the next signed production release tag.
+The previous deferral was driven by an attempt that broke `bun run
+build:dry-run` on the schema change; #780 worked through the migration
+in a dedicated PR and landed it cleanly with the new packaged-runtime-deps
+gate verifying app.asar contents end-to-end.
+
+The Windows-symlink follow-up tracked at #781 is separate (electron-builder
+25 didn't follow bun symlinks on Windows; v26 does, which is what made #780
+viable in the first place).
 
 ## Bump Procedure
 

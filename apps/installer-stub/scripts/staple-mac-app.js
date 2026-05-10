@@ -19,6 +19,16 @@ exports.default = async function stapleMacApp(context) {
     return;
   }
 
+  // afterSign fires for every Mac build (including `--dir` since
+  // electron-builder 26 ad-hoc signs the bundle to satisfy hardened
+  // runtime requirements). Stapling is only meaningful in production
+  // (where Apple notarytool produced a stapleable ticket). For dev/PR
+  // builds we exit silently — the build IS signed (ad-hoc) but there
+  // is nothing to staple.
+  if (process.env.WUPHF_RELEASE_MODE !== "production") {
+    return;
+  }
+
   const appBundle = fs
     .readdirSync(context.appOutDir)
     .find(
@@ -27,24 +37,10 @@ exports.default = async function stapleMacApp(context) {
     );
 
   if (!appBundle) {
-    if (process.env.WUPHF_RELEASE_MODE !== "production") {
-      return;
-    }
     throw new Error(`No .app bundle found in ${context.appOutDir}`);
   }
 
   const appPath = path.join(context.appOutDir, appBundle);
-  const signatureResources = path.join(appPath, "Contents", "_CodeSignature", "CodeResources");
-
-  if (process.env.WUPHF_RELEASE_MODE !== "production") {
-    if (fs.existsSync(signatureResources)) {
-      throw new Error(
-        `Refusing to skip stapling for signed macOS app outside production mode: ${appPath}`,
-      );
-    }
-    return;
-  }
-
   run("xcrun", ["stapler", "staple", appPath]);
   run("xcrun", ["stapler", "validate", appPath]);
 };
