@@ -334,7 +334,6 @@ for latest_file in "${latest_files[@]}"; do
   manifest_path="$(manifest_field "${latest_file}" "path")"
   manifest_sha512="$(manifest_field "${latest_file}" "sha512")"
   manifest_size="$(manifest_field "${latest_file}" "size")"
-  entries_output="$(mktemp "${TMPDIR:-/tmp}/verify-latest-yml-entries.XXXXXX")"
 
   if [[ "${manifest_version}" != "${version}" ]]; then
     echo "${latest_file} version '${manifest_version}' does not match '${version}'" >&2
@@ -364,6 +363,7 @@ for latest_file in "${latest_files[@]}"; do
 
   verify_artifact_entry "${latest_file}" "top-level" "${manifest_path}" "${manifest_sha512}" "${manifest_size}"
 
+  entries_output="$(mktemp "${TMPDIR:-/tmp}/verify-latest-yml-entries.XXXXXX")"
   if ! manifest_file_entries "${latest_file}" > "${entries_output}"; then
     rm -f "${entries_output}"
     exit 1
