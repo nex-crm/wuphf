@@ -19,15 +19,35 @@ As of 2026-05-09:
   branch (currently `42.x`, `41.x`, and `40.x`)
 - Currently pinned installer stub stack:
 
-- `electron`: `33.0.0`
+- `electron`: `42.0.1`
 - `electron-builder`: `25.1.8`
 - `electron-updater`: `6.3.9`
 
-Electron's official schedule lists Electron 33 end of life as 2025-04-29. Do not
-bump the runtime in this PR; use this runbook for the dedicated stack upgrade.
-Action: bump the pinned stack to the latest stable supported Electron major
-(currently `42.x`) in a follow-up PR before enabling signed production release
-traffic from this installer stub.
+The runtime was lifted from `33.0.0` to `42.0.1` in the desktop-shell PR
+(`feat(deps): bump installer-stub electron to 42 + tar override for clean
+audit`). Reasoning: Electron 33 reached end-of-life on 2025-04-29 and was
+flagged by `bun audit` for four high-severity advisories (use-after-free in
+offscreen child windows / WebContents permission callbacks / PowerMonitor;
+renderer command-line switch injection). Bumping to `42.0.1` aligns the stub
+with `apps/desktop`'s pin and eliminates those advisories from the workspace
+lockfile.
+
+`electron-builder` and `electron-updater` were intentionally NOT moved with
+electron in that PR even though hard rule 15 (AGENTS.md:37) calls for grouped
+bumps. Reasons recorded for the split:
+
+1. electron-builder 25.1.8 supports the entire Electron 28-42 range per its
+   compatibility matrix; the 42 runtime ships unchanged signing / NSIS /
+   notarytool semantics for v25, so packaging stays correct.
+2. electron-builder 26 is a breaking schema bump (e.g. `win.publisherName`
+   moved to `nsis.publisherName`) that requires a coordinated workflow CLI
+   override + runbook update + production smoke. That deserves its own PR.
+3. electron-updater 6.3.9 → 6.6.5 was attempted alongside electron-builder 26
+   in the original cleanup attempt and reverted when the v26 schema broke
+   `bun run build:dry-run`.
+
+The follow-up tracking the deferred electron-builder + electron-updater bump
+should land before the next signed production release tag.
 
 ## Bump Procedure
 

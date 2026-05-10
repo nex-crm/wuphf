@@ -145,25 +145,25 @@ pre-push:
         bun run test
     desktop-typecheck:
       files: bash scripts/changed-files-since-base.sh
-      glob: "apps/desktop/**/*.ts"
+      glob: "{apps/desktop/**/*.{ts,json},apps/desktop/scripts/**/*.{sh,mjs},package.json,bun.lock}"
       run: |
         cd apps/desktop
         bun run typecheck
     desktop-test:
       files: bash scripts/changed-files-since-base.sh
-      glob: "apps/desktop/**/*.ts"
+      glob: "{apps/desktop/**/*.{ts,json},apps/desktop/scripts/**/*.{sh,mjs},package.json,bun.lock}"
       run: |
         cd apps/desktop
         bun run test
     desktop-check-ipc-allowlist:
       files: bash scripts/changed-files-since-base.sh
-      glob: "apps/desktop/**/*.ts"
+      glob: "{apps/desktop/**/*.{ts,json},apps/desktop/scripts/**/*.{sh,mjs},package.json,bun.lock}"
       run: |
         cd apps/desktop
         bun run check:ipc-allowlist
     desktop-check-invariants:
       files: bash scripts/changed-files-since-base.sh
-      glob: "apps/desktop/**/*.ts"
+      glob: "{apps/desktop/**/*.{ts,json},apps/desktop/scripts/**/*.{sh,mjs},package.json,bun.lock}"
       run: |
         cd apps/desktop
         bun run check:invariants
