@@ -101,11 +101,11 @@ run_self_test() (
   write_self_test_malformed_files_manifest "${malformed_string_dist}/latest-mac.yml" "${artifact_name}" "${artifact_sha512}" "${artifact_size}" "string-not-object"
   write_self_test_manifest "${missing_size_dist}/latest-mac.yml" "${artifact_name}" "${artifact_sha512}" "${artifact_size}" "false"
 
-  env WUPHF_VERIFY_LATEST_YML_SKIP_SELF_TEST=1 WUPHF_DIST_DIR="${good_dist}" \
+  env WUPHF_VERIFY_LATEST_YML_RUN_SELF_TEST= WUPHF_VERIFY_LATEST_YML_SELF_TEST_ONLY= WUPHF_DIST_DIR="${good_dist}" \
     bash "${source_script}" "0.0.0" > "${good_output}" 2>&1
 
   status=0
-  env WUPHF_VERIFY_LATEST_YML_SKIP_SELF_TEST=1 WUPHF_DIST_DIR="${malformed_empty_object_dist}" \
+  env WUPHF_VERIFY_LATEST_YML_RUN_SELF_TEST= WUPHF_VERIFY_LATEST_YML_SELF_TEST_ONLY= WUPHF_DIST_DIR="${malformed_empty_object_dist}" \
     bash "${source_script}" "0.0.0" > "${malformed_empty_object_output}" 2>&1 || status=$?
 
   if [[ "${status}" -eq 0 ]]; then
@@ -121,7 +121,7 @@ run_self_test() (
   fi
 
   status=0
-  env WUPHF_VERIFY_LATEST_YML_SKIP_SELF_TEST=1 WUPHF_DIST_DIR="${malformed_string_dist}" \
+  env WUPHF_VERIFY_LATEST_YML_RUN_SELF_TEST= WUPHF_VERIFY_LATEST_YML_SELF_TEST_ONLY= WUPHF_DIST_DIR="${malformed_string_dist}" \
     bash "${source_script}" "0.0.0" > "${malformed_string_output}" 2>&1 || status=$?
 
   if [[ "${status}" -eq 0 ]]; then
@@ -137,7 +137,7 @@ run_self_test() (
   fi
 
   status=0
-  env WUPHF_VERIFY_LATEST_YML_SKIP_SELF_TEST=1 WUPHF_DIST_DIR="${missing_size_dist}" \
+  env WUPHF_VERIFY_LATEST_YML_RUN_SELF_TEST= WUPHF_VERIFY_LATEST_YML_SELF_TEST_ONLY= WUPHF_DIST_DIR="${missing_size_dist}" \
     bash "${source_script}" "0.0.0" > "${missing_size_output}" 2>&1 || status=$?
 
   if [[ "${status}" -eq 0 ]]; then
@@ -155,8 +155,11 @@ run_self_test() (
   echo "verify-latest-yml self-test OK"
 )
 
-if [[ "${WUPHF_VERIFY_LATEST_YML_SKIP_SELF_TEST:-}" != "1" ]]; then
+if [[ "${WUPHF_VERIFY_LATEST_YML_RUN_SELF_TEST:-}" == "1" ]]; then
   run_self_test
+  if [[ "${WUPHF_VERIFY_LATEST_YML_SELF_TEST_ONLY:-}" == "1" ]]; then
+    exit 0
+  fi
 fi
 
 raw_ref="${1:-${GITHUB_REF:-${GITHUB_REF_NAME:-}}}"
