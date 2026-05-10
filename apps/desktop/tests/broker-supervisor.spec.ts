@@ -883,7 +883,9 @@ describe("BrokerSupervisor", () => {
     // should now have a NEW pending restart timer scheduled.
     expect(calls.some((call) => call.event === "broker_restart_start_failed")).toBe(true);
     expect(calls.some((call) => call.event === "broker_restart_cap_reached")).toBe(false);
-    expect(calls.filter((call) => call.event === "broker_restart_scheduled").length).toBeGreaterThanOrEqual(2);
+    expect(
+      calls.filter((call) => call.event === "broker_restart_scheduled").length,
+    ).toBeGreaterThanOrEqual(2);
     expect(supervisor.getStatus()).toBe("starting");
 
     // Tear down the lingering retry loop so the test does not leak timers.
