@@ -7,10 +7,10 @@
     "apps/*"
   ],
   "scripts": {
-    "installer:build:dry-run": "bun --cwd apps/installer-stub run build:dry-run",
-    "installer:build:local": "bun --cwd apps/installer-stub run build:current",
-    "installer:check:secrets": "bun --cwd apps/installer-stub run check:secrets",
-    "installer:lint": "bun --cwd apps/installer-stub run lint"
+    "installer:build:dry-run": "bun run --cwd apps/installer-stub build:dry-run",
+    "installer:build:local": "bun run --cwd apps/installer-stub build:current",
+    "installer:check:secrets": "bun run --cwd apps/installer-stub check:secrets",
+    "installer:lint": "bun run --cwd apps/installer-stub lint"
   },
   "devDependencies": {
     "@commitlint/cli": "^20.5.0",
