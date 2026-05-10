@@ -62,6 +62,7 @@ run_self_test() (
   local missing_size_output
   local malformed_empty_object_output
   local malformed_string_output
+  local malformed_ref_output
   local status=0
 
   tmp_root="$(mktemp -d "${TMPDIR:-/tmp}/verify-latest-yml-self-test.XXXXXX")"
@@ -76,6 +77,7 @@ run_self_test() (
   good_output="${tmp_root}/good.out"
   malformed_empty_object_output="${tmp_root}/malformed-empty-object.out"
   malformed_string_output="${tmp_root}/malformed-string.out"
+  malformed_ref_output="${tmp_root}/malformed-ref.out"
   missing_size_output="${tmp_root}/missing-size.out"
 
   mkdir -p "${good_dist}" "${malformed_empty_object_dist}" "${malformed_string_dist}" "${missing_size_dist}"
@@ -103,6 +105,22 @@ run_self_test() (
 
   env WUPHF_VERIFY_LATEST_YML_RUN_SELF_TEST= WUPHF_VERIFY_LATEST_YML_SELF_TEST_ONLY= WUPHF_DIST_DIR="${good_dist}" \
     bash "${source_script}" "0.0.0" > "${good_output}" 2>&1
+
+  status=0
+  env WUPHF_VERIFY_LATEST_YML_RUN_SELF_TEST= WUPHF_VERIFY_LATEST_YML_SELF_TEST_ONLY= WUPHF_DIST_DIR="${good_dist}" GITHUB_REF="refs/tags/not-a-rewrite-tag" \
+    bash "${source_script}" > "${malformed_ref_output}" 2>&1 || status=$?
+
+  if [[ "${status}" -eq 0 ]]; then
+    echo "expected malformed GITHUB_REF fixture to fail" >&2
+    cat "${malformed_ref_output}" >&2
+    exit 1
+  fi
+
+  if ! grep -Fq "Invalid rewrite release tag in GITHUB_REF: refs/tags/not-a-rewrite-tag" "${malformed_ref_output}"; then
+    echo "expected malformed GITHUB_REF fixture to report invalid rewrite tag" >&2
+    cat "${malformed_ref_output}" >&2
+    exit 1
+  fi
 
   status=0
   env WUPHF_VERIFY_LATEST_YML_RUN_SELF_TEST= WUPHF_VERIFY_LATEST_YML_SELF_TEST_ONLY= WUPHF_DIST_DIR="${malformed_empty_object_dist}" \
@@ -162,16 +180,23 @@ if [[ "${WUPHF_VERIFY_LATEST_YML_RUN_SELF_TEST:-}" == "1" ]]; then
   fi
 fi
 
-raw_ref="${1:-${GITHUB_REF:-${GITHUB_REF_NAME:-}}}"
+raw_ref="${1:-}"
+if [[ -z "${raw_ref}" ]]; then
+  raw_ref="${GITHUB_REF:-${GITHUB_REF_NAME:-}}"
+fi
 tag=""
 
 if [[ -n "${raw_ref}" ]]; then
   candidate="${raw_ref#refs/tags/}"
   if [[ "${raw_ref}" == refs/tags/* ]]; then
+    if [[ ! "${candidate}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?-rewrite$ ]]; then
+      echo "Invalid rewrite release tag in GITHUB_REF: ${raw_ref}" >&2
+      exit 1
+    fi
     tag="${candidate}"
-  elif [[ "${candidate}" =~ ^v?[0-9]+(\.[0-9]+)*([.-].+)?$ ]]; then
+  elif [[ "${candidate}" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(-rewrite)?$ ]]; then
     tag="${candidate}"
-  elif [[ "${1+x}" == "x" ]]; then
+  else
     echo "Invalid release tag: ${raw_ref}" >&2
     exit 1
   fi
