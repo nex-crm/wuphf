@@ -58,6 +58,20 @@ function ensureBundledToolExecutables() {
 
 ensureBundledToolExecutables();
 
+function electronBuilderEnv() {
+  const env = {};
+
+  for (const [key, value] of Object.entries(process.env)) {
+    if (/^(npm_|BUN_)/.test(key)) {
+      continue;
+    }
+
+    env[key] = value;
+  }
+
+  return env;
+}
+
 const builderCli = require.resolve("electron-builder/cli");
 const nodeBinary = process.env.NODE_BINARY || process.execPath;
 const releaseMode = process.env.WUPHF_RELEASE_MODE || "pr";
@@ -79,8 +93,12 @@ if (process.versions.bun && !process.env.NODE_BINARY) {
   process.exit(1);
 }
 
+// CR-CI-1: electron-builder reads npm_execpath to locate npm for production
+// dependency installs. When setup-bun leaves npm_execpath pointing at Bun's
+// native binary, electron-builder runs `node $npm_execpath` and Node fails to
+// parse the binary. Scrub Bun/npm lifecycle env before spawning the builder.
 const result = spawnSync(nodeBinary, [builderCli, ...builderArgs], {
-  env: process.env,
+  env: electronBuilderEnv(),
   stdio: "inherit",
 });
 
