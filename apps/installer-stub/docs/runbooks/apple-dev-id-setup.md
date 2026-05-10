@@ -63,7 +63,8 @@ it in an `if: always()` cleanup step. No certificate file is committed.
 4. Confirm the macOS job creates a temporary keychain, signs, notarizes, staples
    the `.app` and `.dmg`, validates both staples, refreshes `latest-mac.yml`,
    and verifies the manifest sha512.
-5. Download the draft release `.dmg` and run:
+5. The publish job auto-flips the draft to a published release after the
+   asset assertion succeeds. Download the published release `.dmg` and run:
 
    ```bash
    spctl --assess --type open --verbose "$ARTIFACT_PATH"

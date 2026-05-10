@@ -11,8 +11,12 @@ ship a new higher version tag and fix forward.
 ## First Checks
 
 1. Open GitHub Actions -> `Release Rewrite` -> the failed run.
-2. Identify the failed job: `detect-secrets`, `build-mac`, `build-win`,
-   `build-linux`, or `publish`.
+2. Identify the failed job: `detect-secrets`, `installer-invariants`,
+   `build-mac`, `build-win`, `build-linux`, or `publish`. The
+   `installer-invariants` job runs the `apps/installer-stub/scripts/check-invariants.sh`
+   gate (forbidden literals, action SHA pinning, no production deps) plus the
+   `verify-latest-yml.sh` self-test, and **gates** all three platform builds —
+   if it fails, no platform build runs.
 3. Open the failed step logs and copy the first real error, not the final
    process-exit line.
 4. Check whether a GitHub draft release exists for the tag:
