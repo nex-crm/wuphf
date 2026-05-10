@@ -6,6 +6,9 @@
     "packages/*",
     "apps/*"
   ],
+  "dependencyOverrideNotes": {
+    "fast-uri": "Pinned to 3.1.2 so bun audit --audit-level high stays clean for transitive Ajv consumers. Remove when all workspace dependency chains resolve to fast-uri 3.1.2 or newer without an override."
+  },
   "overrides": {
     "fast-uri": "3.1.2"
   },
