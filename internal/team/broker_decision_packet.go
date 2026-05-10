@@ -10,6 +10,20 @@ package team
 // race the intake driver appending a Spec without losing writes. This
 // matches the Lane A pattern (b.mu serialises lifecycle state changes).
 //
+// Lock ordering (C-FU-1):
+//
+//   b.mu                          (broker-wide, outer)
+//     └── b.decisionPackets.mu    (packet store, inner)
+//
+// Every helper in this file that takes the inner lock either acquires
+// b.mu first or runs under a caller-held b.mu (the *Locked suffix
+// convention). Acquiring b.mu after b.decisionPackets.mu is forbidden
+// and would deadlock the reviewer-grade-on-intake path. New code must
+// preserve this order; if you add a code path that needs the inner
+// lock without holding b.mu, document why the inner lock alone is
+// sufficient (read-only with no broker state needed) and explicitly
+// note that no b.mu acquisition follows.
+//
 // Persistence model (matches the existing broker-state.json pattern):
 //
 //   1. Every TransitionLifecycle call triggers a write (synchronous, on
