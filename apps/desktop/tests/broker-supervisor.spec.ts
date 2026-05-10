@@ -798,17 +798,31 @@ describe("BrokerSupervisor", () => {
     });
   });
 
-  it("uses the noop logger silently when no logger is provided", () => {
+  it("uses the noop logger silently when no logger is provided (covers info/warn/error paths)", () => {
+    vi.useFakeTimers();
+    let nowMs = 0;
     const processHandle = new FakeUtilityProcess(4321);
     const { forkProcess } = createForkMock([processHandle]);
     const supervisor = new BrokerSupervisor({
       brokerEntryPath: "/app/out/main/broker-stub.js",
       forkProcess,
+      monotonicNow: () => nowMs,
+      maxRestartRetries: 0,
+      livenessStaleMs: 1_000,
     });
 
+    // info: broker_starting + broker_started + broker_alive
     expect(() => supervisor.start()).not.toThrow();
     processHandle.emit("message", { alive: true });
     expect(supervisor.getStatus()).toBe("alive");
+
+    // warn: broker_ping_missed (liveness staleness)
+    nowMs = 2_000;
+    expect(supervisor.getStatus()).toBe("unresponsive");
+
+    // error: broker_restart_cap_reached on exit (max retries = 0)
+    processHandle.emit("exit", 1);
+    expect(supervisor.getStatus()).toBe("dead");
   });
 
   it("hits the fatal cap when start() throws on the only remaining retry", async () => {

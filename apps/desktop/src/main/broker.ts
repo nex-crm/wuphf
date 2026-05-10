@@ -14,14 +14,18 @@ const DEFAULT_MAX_BACKOFF_MS = 60_000;
 const DEFAULT_MAX_RESTART_RETRIES = 5;
 const DEFAULT_STABILITY_WINDOW_MS = 60_000;
 const DEFAULT_LIVENESS_STALE_MS = 5_000;
-/* v8 ignore start -- defensive defaults; production paths inject a real Logger */
+// info/warn/error arrow bodies execute through the no-logger smoke test in
+// broker-supervisor.spec.ts (start → broker_starting/broker_started, exit →
+// broker_exited, error paths → broker_*_failed). debug is unused inside this
+// file but remains to satisfy the Logger interface; suppressing JUST that
+// arrow body keeps coverage honest about which fallbacks ARE exercised.
 const NOOP_LOGGER: Logger = {
+  /* v8 ignore next -- interface-completion only; broker.ts does not call debug */
   debug: () => undefined,
   info: () => undefined,
   warn: () => undefined,
   error: () => undefined,
 };
-/* v8 ignore stop */
 
 type UtilityProcessHandle = ReturnType<typeof utilityProcess.fork>;
 type ForkUtilityProcess = typeof utilityProcess.fork;
@@ -354,12 +358,14 @@ export class BrokerSupervisor {
       serviceName: BROKER_SERVICE_NAME,
     });
 
-    // Defensive guard. handleRestartStartFailure can ONLY be called from the
-    // setTimeout callback in scheduleRestart(); stop() calls clearRestartTimer()
-    // which cancels that timer before this.stopping flips to true, so reaching
-    // this branch requires a synchronous race between the timer firing and
-    // stop() executing — impossible in practice (verified across the test
-    // matrix in broker-supervisor.spec.ts).
+    // Defensive guard. handleRestartStartFailure is called from the setTimeout
+    // callback in scheduleRestart() AFTER start() throws. start() unconditionally
+    // sets `this.stopping = false` at the top of its body (broker.ts:113) before
+    // any code path that can throw. Therefore by the time we reach
+    // handleRestartStartFailure, this.stopping cannot be true: either start()
+    // ran far enough to clear it, or stop() cancelled the timer entirely. The
+    // guard remains as defense-in-depth for future refactors that might invert
+    // that ordering.
     /* v8 ignore start */
     if (this.stopping) {
       return;
