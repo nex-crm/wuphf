@@ -106,7 +106,7 @@ jobs:
           fetch-depth: 0
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # ratchet:oven-sh/setup-bun@v2.2.0
         with:
-          bun-version: "1.1.38"
+          bun-version: "1.2.16" # desktop job needs bun 1.2.16+ for `bun audit` built-in; rest of repo can bump in a follow-up.
       - name: Detect desktop changes
         id: desktop-changes
         env:
