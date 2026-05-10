@@ -24,6 +24,7 @@ const NOOP_LOGGER: Logger = {
 type UtilityProcessHandle = ReturnType<typeof utilityProcess.fork>;
 type ForkUtilityProcess = typeof utilityProcess.fork;
 type RunWindowsTaskkill = (pid: number, options: { readonly force: boolean }) => Promise<void>;
+type KillProcess = (pid: number, signal: NodeJS.Signals) => void;
 export type ExecFileRunner = (
   file: string,
   args: readonly string[],
@@ -37,6 +38,7 @@ export interface BrokerSupervisorConfig {
   readonly forkProcess?: ForkUtilityProcess;
   readonly platform?: NodeJS.Platform;
   readonly runWindowsTaskkill?: RunWindowsTaskkill;
+  readonly killProcess?: KillProcess;
   readonly monotonicNow?: MonotonicNow;
   readonly stopGraceMs?: number;
   readonly forceStopGraceMs?: number;
@@ -55,6 +57,7 @@ export class BrokerSupervisor {
   private readonly forkProcess: ForkUtilityProcess;
   private readonly platform: NodeJS.Platform;
   private readonly runWindowsTaskkill: RunWindowsTaskkill;
+  private readonly killProcess: KillProcess;
   private readonly monotonicNow: MonotonicNow;
   private readonly stopGraceMs: number;
   private readonly forceStopGraceMs: number;
@@ -83,6 +86,7 @@ export class BrokerSupervisor {
     this.forkProcess = config.forkProcess ?? utilityProcess.fork.bind(utilityProcess);
     this.platform = config.platform ?? process.platform;
     this.runWindowsTaskkill = config.runWindowsTaskkill ?? runWindowsTaskkill;
+    this.killProcess = config.killProcess ?? process.kill.bind(process);
     this.monotonicNow = config.monotonicNow ?? monotonicNowMs;
     this.stopGraceMs = config.stopGraceMs ?? DEFAULT_STOP_GRACE_MS;
     this.forceStopGraceMs = config.forceStopGraceMs ?? DEFAULT_FORCE_STOP_GRACE_MS;
@@ -326,8 +330,39 @@ export class BrokerSupervisor {
         restartCount: this.restartCount,
         maxRestartRetries: this.maxRestartRetries,
       });
-      this.start();
+      try {
+        this.start();
+      } catch (error) {
+        this.handleRestartStartFailure(error);
+      }
     }, backoffMs);
+  }
+
+  private handleRestartStartFailure(error: unknown): void {
+    this.status = "dead";
+    this.brokerProcess = null;
+    this.startedAtMs = null;
+    this.aliveSinceMs = null;
+    this.lastPingAtMs = null;
+    const message = errorMessage(error);
+    this.logger.error("broker_restart_start_failed", {
+      error: message,
+      restartCount: this.restartCount,
+      maxRestartRetries: this.maxRestartRetries,
+      serviceName: BROKER_SERVICE_NAME,
+    });
+
+    if (this.stopping) {
+      return;
+    }
+
+    if (this.restartCount >= this.maxRestartRetries) {
+      this.fatalReason = `Broker start failed after ${this.restartCount} restart retries: ${message}`;
+      this.onFatal?.(this.fatalReason);
+      return;
+    }
+
+    this.scheduleRestart();
   }
 
   private clearRestartTimer(): void {
@@ -380,7 +415,21 @@ export class BrokerSupervisor {
       }
     }
 
-    killUtilityProcess(brokerProcess, "SIGKILL");
+    if (pid !== null) {
+      try {
+        this.killProcess(pid, "SIGKILL");
+        return;
+      } catch (error) {
+        this.logger.warn("broker_posix_sigkill_failed", {
+          pid,
+          error: errorMessage(error),
+          code: errorCode(error),
+          restartCount: this.restartCount,
+        });
+      }
+    }
+
+    killUtilityProcess(brokerProcess);
   }
 
   private logTaskkillFailure(pid: number, force: boolean, error: unknown): void {
@@ -445,14 +494,8 @@ function discardBrokerOutput(_chunk: unknown): void {
   // Drain pipe-backed stdio without logging future broker app data into the main process.
 }
 
-function killUtilityProcess(brokerProcess: UtilityProcessHandle, signal?: NodeJS.Signals): void {
-  if (signal === undefined) {
-    brokerProcess.kill();
-    return;
-  }
-
-  // Electron's UtilityProcess type omits the signal overload; keep the handle-bound receiver.
-  Reflect.apply(brokerProcess.kill, brokerProcess, [signal]);
+function killUtilityProcess(brokerProcess: UtilityProcessHandle): void {
+  brokerProcess.kill();
 }
 
 function errorMessage(error: unknown): string {

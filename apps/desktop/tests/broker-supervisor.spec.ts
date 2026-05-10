@@ -23,10 +23,11 @@ vi.mock("electron", () => ({
 type ForkProcess = NonNullable<BrokerSupervisorConfig["forkProcess"]>;
 type ForkOptions = Parameters<ForkProcess>[2];
 type ElectronUtilityProcess = ReturnType<ForkProcess>;
+type KillProcess = NonNullable<BrokerSupervisorConfig["killProcess"]>;
 
 class FakeUtilityProcess extends EventEmitter {
   readonly pid: number;
-  readonly kill = vi.fn<(signal?: NodeJS.Signals) => boolean>(() => true);
+  readonly kill = vi.fn<() => boolean>(() => true);
   readonly postMessage = vi.fn<(message: unknown) => void>();
   readonly stdout = new EventEmitter();
   readonly stderr = new EventEmitter();
@@ -283,9 +284,11 @@ describe("BrokerSupervisor", () => {
       throw new Error("message port already closed");
     });
     const { forkProcess } = createForkMock([processHandle]);
+    const killProcess = vi.fn<KillProcess>();
     const supervisor = new BrokerSupervisor({
       brokerEntryPath: "/app/out/main/broker-stub.js",
       forkProcess,
+      killProcess,
       platform: "linux",
       stopGraceMs: 5_000,
     });
@@ -301,7 +304,8 @@ describe("BrokerSupervisor", () => {
     await vi.advanceTimersByTimeAsync(1_000);
     await stopPromise;
 
-    expect(processHandle.kill).toHaveBeenNthCalledWith(2, "SIGKILL");
+    expect(processHandle.kill).toHaveBeenCalledTimes(1);
+    expect(killProcess).toHaveBeenCalledWith(4321, "SIGKILL");
     expect(supervisor.getStatus()).toBe("dead");
   });
 
@@ -339,9 +343,11 @@ describe("BrokerSupervisor", () => {
     vi.useFakeTimers();
     const processHandle = new FakeUtilityProcess(4321);
     const { forkProcess } = createForkMock([processHandle]);
+    const killProcess = vi.fn<KillProcess>();
     const supervisor = new BrokerSupervisor({
       brokerEntryPath: "/app/out/main/broker-stub.js",
       forkProcess,
+      killProcess,
       platform: "linux",
       stopGraceMs: 5_000,
     });
@@ -358,9 +364,46 @@ describe("BrokerSupervisor", () => {
     await vi.advanceTimersByTimeAsync(1);
     await stopPromise;
 
-    expect(processHandle.kill).toHaveBeenCalledTimes(2);
-    expect(processHandle.kill).toHaveBeenNthCalledWith(2, "SIGKILL");
+    expect(processHandle.kill).toHaveBeenCalledTimes(1);
+    expect(killProcess).toHaveBeenCalledWith(4321, "SIGKILL");
     expect(supervisor.getStatus()).toBe("dead");
+  });
+
+  it("falls back to handle-bound termination when POSIX SIGKILL fails", async () => {
+    vi.useFakeTimers();
+    const processHandle = new FakeUtilityProcess(4321);
+    const { forkProcess } = createForkMock([processHandle]);
+    const killError = Object.assign(new Error("permission denied"), { code: "EPERM" });
+    const killProcess = vi.fn<KillProcess>(() => {
+      throw killError;
+    });
+    const { logger, calls } = createMemoryLogger();
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+      killProcess,
+      logger,
+      platform: "linux",
+      stopGraceMs: 5_000,
+    });
+    supervisor.start();
+
+    const stopPromise = supervisor.stop();
+    await vi.advanceTimersByTimeAsync(6_000);
+    await stopPromise;
+
+    expect(killProcess).toHaveBeenCalledWith(4321, "SIGKILL");
+    expect(processHandle.kill).toHaveBeenCalledTimes(2);
+    expect(calls).toContainEqual({
+      level: "warn",
+      event: "broker_posix_sigkill_failed",
+      payload: {
+        pid: 4321,
+        error: "permission denied",
+        code: "EPERM",
+        restartCount: 0,
+      },
+    });
   });
 
   it("uses Windows taskkill after grace and escalates to force after one more second", async () => {
@@ -456,6 +499,55 @@ describe("BrokerSupervisor", () => {
       payload: {
         restartCount: 1,
         maxRestartRetries: 5,
+      },
+    });
+  });
+
+  it("keeps scheduled restart fork failures inside the retry policy", async () => {
+    vi.useFakeTimers();
+    const firstProcess = new FakeUtilityProcess(1001);
+    const forkError = new Error("fork retry failed");
+    let forkCallCount = 0;
+    const forkProcess = vi.fn(
+      (
+        _entryPath: string,
+        _args: readonly string[],
+        _options: ForkOptions,
+      ): ElectronUtilityProcess => {
+        forkCallCount += 1;
+        if (forkCallCount === 1) {
+          return firstProcess as unknown as ElectronUtilityProcess;
+        }
+        throw forkError;
+      },
+    ) as unknown as ForkProcess;
+    const onFatal = vi.fn<(reason: string) => void>();
+    const { logger, calls } = createMemoryLogger();
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+      logger,
+      firstBackoffMs: 250,
+      maxRestartRetries: 1,
+      onFatal,
+    });
+
+    supervisor.start();
+    firstProcess.emit("exit", 1);
+    await vi.advanceTimersByTimeAsync(250);
+
+    expect(supervisor.getStatus()).toBe("dead");
+    expect(onFatal).toHaveBeenCalledWith(
+      "Broker start failed after 1 restart retries: fork retry failed",
+    );
+    expect(calls).toContainEqual({
+      level: "error",
+      event: "broker_restart_start_failed",
+      payload: {
+        error: "fork retry failed",
+        restartCount: 1,
+        maxRestartRetries: 1,
+        serviceName: "wuphf-broker",
       },
     });
   });
