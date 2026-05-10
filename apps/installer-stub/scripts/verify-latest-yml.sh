@@ -180,10 +180,29 @@ if [[ "${WUPHF_VERIFY_LATEST_YML_RUN_SELF_TEST:-}" == "1" ]]; then
   fi
 fi
 
-raw_ref="${1:-}"
-if [[ -z "${raw_ref}" ]]; then
-  raw_ref="${GITHUB_REF:-${GITHUB_REF_NAME:-}}"
+env_ref="${GITHUB_REF:-${GITHUB_REF_NAME:-}}"
+arg_ref="${1:-}"
+
+# Always validate GITHUB_REF when it exists and looks like a tag ref. The
+# previous shape only validated when no $1 was supplied, which the workflow
+# always does — meaning the script-level rewrite-semver invariant was never
+# actually enforced from the publish job (caught by the post-merge security
+# triangulation as INCOMPLETE-FIX of H4).
+if [[ "${env_ref}" == refs/tags/* ]]; then
+  env_candidate="${env_ref#refs/tags/}"
+  if [[ ! "${env_candidate}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?-rewrite$ ]]; then
+    echo "Invalid rewrite release tag in GITHUB_REF: ${env_ref}" >&2
+    exit 1
+  fi
+  # If the caller also passed $1, it MUST agree with GITHUB_REF (no silent
+  # divergence between the workflow's tag and the script's tag input).
+  if [[ -n "${arg_ref}" && "${arg_ref}" != "${env_candidate}" && "${arg_ref}" != "${env_ref}" ]]; then
+    echo "Tag argument '${arg_ref}' does not match GITHUB_REF '${env_ref}'" >&2
+    exit 1
+  fi
 fi
+
+raw_ref="${arg_ref:-${env_ref}}"
 tag=""
 
 if [[ -n "${raw_ref}" ]]; then
