@@ -9,27 +9,32 @@ package main
 //   - `wuphf task review <id>`         — open the Decision Packet view in the browser
 //   - `wuphf task block <id> --on <pr-or-task-id>` — set blocked_on_pr_merge
 //
-// The implementation talks to the broker via its existing HTTP API
-// (/tasks/inbox, /tasks/{id}, /tasks/{id}/block) and uses raw stdin
-// (bufio.Scanner) for confirmation prompts, consistent with the
-// `confirmDestructive` pattern already in main.go.
+// All subcommands talk to a running `wuphf` broker over its existing HTTP
+// API. `task start` posts to /tasks/intake (broker-only auth) for the
+// intake roundtrip, then to /tasks/{id}/transition for the ready and
+// running advances. `task list` calls GET /tasks/inbox; `task block` calls
+// POST /tasks/{id}/block. `task review` opens the Decision Packet URL in
+// the user's default browser.
 //
-// `task start` is the only subcommand that requires the broker to be
-// running locally — it calls Broker.StartIntake in-process via a small
-// helper that boots a transient broker only when no live one is
-// reachable. For v1 the simpler contract is: the user must have
-// `wuphf` running (the broker), and the CLI POSTs intent to a future
-// /tasks/intake endpoint. For minimal scope, v1 ships in-process
-// intake against a Broker borrowed via the package-level handle.
+// All HTTP calls go through newBrokerRequest, which reads the broker
+// auth token from $WUPHF_BROKER_TOKEN (preferred) or the on-disk
+// brokeraddr.ResolveTokenFile() path, matching `wuphf log`'s pattern.
 //
-// Lane B exposes IntakeProvider + AutoAssignCountdown + ErrIntakeNoProvider
+// The package-level brokerClient hook lets tests inject a fake without
+// standing up a real broker process. Production code uses the
+// httpBrokerClient implementation, which targets the local broker the
+// user has running (default 127.0.0.1:7890; override via brokeraddr).
+//
+// Lane B exposes IntakeOutcome + AutoAssignCountdown + ErrIntakeNoProvider
 // for this caller; the CLI honours Spec.AutoAssign with a 3-second
 // cancellable countdown over stdin keypresses.
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -77,12 +82,167 @@ func printTaskHelp() {
 	fmt.Fprintln(os.Stderr, "  wuphf task block <id> --on <ref>         Mark task blocked on a PR or task")
 	fmt.Fprintln(os.Stderr, "")
 	fmt.Fprintln(os.Stderr, "Filters: needs_decision (default), running, blocked, merged_today, all.")
+	fmt.Fprintln(os.Stderr, "")
+	fmt.Fprintln(os.Stderr, "Auth: every subcommand reads the broker token from $WUPHF_BROKER_TOKEN")
+	fmt.Fprintln(os.Stderr, "      (preferred) or the on-disk token file written by `wuphf` on start.")
 }
 
-// runTaskStart implements `wuphf task start [intent]`. v1 talks to the
-// broker via an in-process call after dialing the local broker over
-// HTTP to confirm one is running; without a running broker the CLI
-// surfaces a clear error rather than starting a one-shot.
+// brokerClient is the thin interface the CLI uses to talk to a running
+// broker. Production code installs httpBrokerClient via
+// brokerClientFactory; tests inject a fake for unit coverage and a real
+// httptest-backed client for ICP/integration coverage.
+type brokerClient interface {
+	StartIntake(ctx context.Context, intent string) (*team.IntakeOutcome, error)
+	TransitionLifecycle(ctx context.Context, taskID string, to team.LifecycleState, reason string) error
+	BlockTask(ctx context.Context, taskID, on, reason string) error
+	ListInbox(ctx context.Context, filter string) (team.InboxPayload, error)
+}
+
+// brokerClientFactory builds a brokerClient on demand. Tests override this
+// to inject a fake; production callers leave it nil and fall through to
+// the default httpBrokerClient against the local broker.
+var brokerClientFactory func() brokerClient
+
+// resolveBrokerClient returns the brokerClient the CLI should use for the
+// current invocation. Tests set brokerClientFactory; production paths
+// fall through to httpBrokerClient against the local broker.
+func resolveBrokerClient() brokerClient {
+	if brokerClientFactory != nil {
+		if c := brokerClientFactory(); c != nil {
+			return c
+		}
+	}
+	return defaultHTTPBrokerClient()
+}
+
+// httpBrokerClient is the production implementation of brokerClient. It
+// posts JSON to the running broker via the same newBrokerRequest helper
+// every other command in this package uses, so the auth token and base
+// URL come from the same source of truth.
+type httpBrokerClient struct {
+	httpClient *http.Client
+}
+
+func defaultHTTPBrokerClient() brokerClient {
+	return &httpBrokerClient{httpClient: &http.Client{Timeout: 35 * time.Second}}
+}
+
+func (c *httpBrokerClient) StartIntake(ctx context.Context, intent string) (*team.IntakeOutcome, error) {
+	body, err := json.Marshal(map[string]string{"intent": intent})
+	if err != nil {
+		return nil, fmt.Errorf("intake: marshal: %w", err)
+	}
+	req, err := newBrokerRequest(ctx, http.MethodPost, brokerURL("/tasks/intake"), bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("%w (is the broker running? try `wuphf` first)", err)
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("intake: broker returned %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
+	}
+	var wire struct {
+		TaskID     string    `json:"taskId"`
+		Spec       team.Spec `json:"spec"`
+		AutoAssign string    `json:"autoAssign,omitempty"`
+	}
+	if err := json.Unmarshal(respBody, &wire); err != nil {
+		return nil, fmt.Errorf("intake: parse response: %w", err)
+	}
+	out := &team.IntakeOutcome{
+		TaskID:     wire.TaskID,
+		Spec:       wire.Spec,
+		AutoAssign: wire.AutoAssign,
+	}
+	if wire.AutoAssign != "" {
+		out.Countdown = team.NewAutoAssignCountdown()
+	}
+	return out, nil
+}
+
+func (c *httpBrokerClient) TransitionLifecycle(ctx context.Context, taskID string, to team.LifecycleState, reason string) error {
+	if !isSafeTaskID(taskID) {
+		return fmt.Errorf("transition: task id contains invalid characters")
+	}
+	body, err := json.Marshal(map[string]string{"to": string(to), "reason": reason})
+	if err != nil {
+		return fmt.Errorf("transition: marshal: %w", err)
+	}
+	req, err := newBrokerRequest(ctx, http.MethodPost, brokerURL("/tasks/"+taskID+"/transition"), bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("%w (is the broker running?)", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusOK {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		return nil
+	}
+	respBody, _ := io.ReadAll(resp.Body)
+	return fmt.Errorf("transition: broker returned %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
+}
+
+func (c *httpBrokerClient) BlockTask(ctx context.Context, taskID, on, reason string) error {
+	if !isSafeTaskID(taskID) {
+		return fmt.Errorf("block: task id contains invalid characters")
+	}
+	body, err := json.Marshal(map[string]string{"on": on, "reason": reason})
+	if err != nil {
+		return fmt.Errorf("block: marshal: %w", err)
+	}
+	req, err := newBrokerRequest(ctx, http.MethodPost, brokerURL("/tasks/"+taskID+"/block"), bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("%w (is the broker running?)", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusOK {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		return nil
+	}
+	respBody, _ := io.ReadAll(resp.Body)
+	return fmt.Errorf("block: broker returned %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
+}
+
+func (c *httpBrokerClient) ListInbox(ctx context.Context, filter string) (team.InboxPayload, error) {
+	url := brokerURL("/tasks/inbox?filter=" + filter)
+	req, err := newBrokerRequest(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return team.InboxPayload{}, err
+	}
+	httpClient := c.httpClient
+	if httpClient == nil {
+		httpClient = &http.Client{Timeout: 5 * time.Second}
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return team.InboxPayload{}, fmt.Errorf("%w (is the broker running? try `wuphf` first)", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return team.InboxPayload{}, fmt.Errorf("broker returned %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	var payload team.InboxPayload
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return team.InboxPayload{}, fmt.Errorf("parse: %w", err)
+	}
+	return payload, nil
+}
+
+// runTaskStart implements `wuphf task start [intent]`. It posts the
+// intent to a running broker via POST /tasks/intake, prompts the user
+// to confirm, then posts intake → ready → running transitions.
 func runTaskStart(args []string) {
 	fs := flag.NewFlagSet("task start", flag.ExitOnError)
 	autoAssign := fs.String("auto-assign", "", "Override Spec.AutoAssign (skip the countdown)")
@@ -92,6 +252,8 @@ func runTaskStart(args []string) {
 		fmt.Fprintln(os.Stderr, "Usage:")
 		fmt.Fprintln(os.Stderr, "  wuphf task start \"fix the cache invalidation bug\"")
 		fmt.Fprintln(os.Stderr, "  wuphf task start                       # reads the intent from stdin")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "Auth: reads broker token from $WUPHF_BROKER_TOKEN or the on-disk token file.")
 	}
 	_ = fs.Parse(args)
 	intent := strings.TrimSpace(strings.Join(fs.Args(), " "))
@@ -107,53 +269,36 @@ func runTaskStart(args []string) {
 		os.Exit(2)
 	}
 
-	// v1 simplification: the CLI shells out via the broker by doing a
-	// short health probe then borrowing a process-local broker for the
-	// intake call. The "production" path is the HTTP intake endpoint
-	// which is a v1.1 task; v1 ships a usable CLI surface against a
-	// running broker by spinning up an in-process Broker for the
-	// intake roundtrip alone. This keeps the CLI testable end-to-end
-	// without requiring a real broker process during integration tests.
 	ctx, cancel := context.WithTimeout(context.Background(), 35*time.Second)
 	defer cancel()
-	if err := runTaskStartInProcess(ctx, intent, *autoAssign); err != nil {
+	if err := runTaskStartWithClient(ctx, resolveBrokerClient(), intent, *autoAssign, os.Stdin); err != nil {
 		fmt.Fprintf(os.Stderr, "task start: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-// runTaskStartInProcess is the broker-borrowed implementation. It is
-// exported for tests via the taskStartInProcessHook seam below.
-func runTaskStartInProcess(ctx context.Context, intent, autoAssignOverride string) error {
-	broker, provider, err := taskStartHook(ctx)
-	if err != nil {
-		return err
-	}
-	if broker == nil || provider == nil {
-		return fmt.Errorf("broker or intake provider unavailable")
+// runTaskStartWithClient is the testable core. The brokerClient is the
+// live HTTP wire in production and a fake/httptest-backed impl in tests.
+// stdin is parameterised so tests can pipe a confirmation answer.
+func runTaskStartWithClient(ctx context.Context, client brokerClient, intent, autoAssignOverride string, stdin io.Reader) error {
+	if client == nil {
+		return errors.New("broker client unavailable")
 	}
 
 	fmt.Fprint(os.Stderr, "Interrogating spec... ")
 	startedAt := time.Now()
 	tickStop := streamElapsed(startedAt)
-	outcome, err := broker.StartIntake(ctx, intent, provider)
+	outcome, err := client.StartIntake(ctx, intent)
 	close(tickStop)
 	fmt.Fprintln(os.Stderr)
 	if err != nil {
 		return err
 	}
+	if outcome == nil {
+		return errors.New("intake: empty outcome")
+	}
 
 	printSpec(outcome.Spec)
-
-	confirm := func() (bool, error) {
-		fmt.Fprint(os.Stderr, "Start running this task? (y/n) ")
-		scanner := bufio.NewScanner(os.Stdin)
-		if !scanner.Scan() {
-			return false, scanner.Err()
-		}
-		ans := strings.TrimSpace(strings.ToLower(scanner.Text()))
-		return ans == "y" || ans == "yes", nil
-	}
 
 	autoAssign := strings.TrimSpace(autoAssignOverride)
 	if autoAssign == "" {
@@ -166,14 +311,14 @@ func runTaskStartInProcess(ctx context.Context, intent, autoAssignOverride strin
 		cancelCh := make(chan struct{})
 		go func() {
 			buf := make([]byte, 1)
-			_, _ = os.Stdin.Read(buf)
+			_, _ = stdin.Read(buf)
 			outcome.Countdown.Cancel()
 			close(cancelCh)
 		}()
 		if outcome.Countdown.Wait(ctx) {
 			confirmed = true
 		} else {
-			ok, err := confirm()
+			ok, err := promptYesNo(stdin, "Start running this task? (y/n) ")
 			if err != nil {
 				return err
 			}
@@ -181,7 +326,7 @@ func runTaskStartInProcess(ctx context.Context, intent, autoAssignOverride strin
 		}
 		_ = cancelCh
 	} else {
-		ok, err := confirm()
+		ok, err := promptYesNo(stdin, "Start running this task? (y/n) ")
 		if err != nil {
 			return err
 		}
@@ -193,21 +338,28 @@ func runTaskStartInProcess(ctx context.Context, intent, autoAssignOverride strin
 		return nil
 	}
 
-	if err := broker.TransitionLifecycle(outcome.TaskID, team.LifecycleStateReady, "task start: human confirmed"); err != nil {
+	if err := client.TransitionLifecycle(ctx, outcome.TaskID, team.LifecycleStateReady, "task start: human confirmed"); err != nil {
 		return fmt.Errorf("intake → ready: %w", err)
 	}
-	if err := broker.TransitionLifecycle(outcome.TaskID, team.LifecycleStateRunning, "task start: ready → running"); err != nil {
+	if err := client.TransitionLifecycle(ctx, outcome.TaskID, team.LifecycleStateRunning, "task start: ready → running"); err != nil {
 		return fmt.Errorf("ready → running: %w", err)
 	}
 	fmt.Fprintf(os.Stderr, "Task %s now running.\n", outcome.TaskID)
 	return nil
 }
 
-// taskStartHook is the test seam: production overrides this with a
-// helper that boots a transient broker + intake provider; tests inject
-// a fake.
-var taskStartHook = func(ctx context.Context) (*team.Broker, team.IntakeProvider, error) {
-	return nil, nil, fmt.Errorf("task start: not yet wired to a live broker (set WUPHF_TASK_PROVIDER for tests)")
+// promptYesNo (F-FU-4) is the single y/n prompt helper used by every
+// task subcommand that needs an interactive confirmation. Reads one
+// line from stdin, treats "y" / "yes" (case-insensitive, trimmed) as
+// affirmative, anything else as negative. Empty input returns false.
+func promptYesNo(stdin io.Reader, prompt string) (bool, error) {
+	fmt.Fprint(os.Stderr, prompt)
+	scanner := bufio.NewScanner(stdin)
+	if !scanner.Scan() {
+		return false, scanner.Err()
+	}
+	ans := strings.TrimSpace(strings.ToLower(scanner.Text()))
+	return ans == "y" || ans == "yes", nil
 }
 
 func streamElapsed(start time.Time) chan struct{} {
@@ -252,12 +404,16 @@ func printSpec(spec team.Spec) {
 	fmt.Println("--------------------------------------")
 }
 
-// runTaskList implements `wuphf task list`. Calls GET /tasks/inbox,
-// groups by LifecycleState, prints to stdout.
+// runTaskList implements `wuphf task list`. Calls GET /tasks/inbox via
+// the brokerClient, groups by LifecycleState, prints to stdout.
+//
+// Auth: $WUPHF_BROKER_TOKEN env var (preferred) or the on-disk token
+// file at brokeraddr.ResolveTokenFile(). Same source of truth as
+// `wuphf log`. (F-FU-2)
 func runTaskList(args []string) {
 	fs := flag.NewFlagSet("task list", flag.ExitOnError)
 	filter := fs.String("filter", "all", "Inbox filter (needs_decision/running/blocked/merged_today/all)")
-	jsonOut := fs.Bool("json", false, "Print the raw inbox payload as JSON")
+	jsonOut := fs.Bool("json", false, "Print the raw inbox payload as JSON (writes to stdout; errors to stderr)")
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, "wuphf task list — print the inbox grouped by lifecycle state")
 		fmt.Fprintln(os.Stderr, "")
@@ -265,35 +421,22 @@ func runTaskList(args []string) {
 		fmt.Fprintln(os.Stderr, "  wuphf task list                            All tasks across all states")
 		fmt.Fprintln(os.Stderr, "  wuphf task list --filter=needs_decision    Only the inbox-headline filter")
 		fmt.Fprintln(os.Stderr, "  wuphf task list --json                     Emit the raw broker payload")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "Auth: reads broker token from $WUPHF_BROKER_TOKEN (preferred) or the")
+		fmt.Fprintln(os.Stderr, "on-disk token file written by `wuphf` on broker start. Pipe-safe: data goes")
+		fmt.Fprintln(os.Stderr, "to stdout, errors to stderr.")
 	}
 	_ = fs.Parse(args)
-	url := brokerURL("/tasks/inbox?filter=" + *filter)
-	req, err := newBrokerRequest(context.Background(), http.MethodGet, url, nil)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "task list: build request: %v\n", err)
-		os.Exit(1)
-	}
-	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Do(req)
+	client := resolveBrokerClient()
+	payload, err := client.ListInbox(context.Background(), *filter)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "task list: %v\n", err)
-		fmt.Fprintln(os.Stderr, "  (is the broker running? try `wuphf` first)")
-		os.Exit(1)
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != http.StatusOK {
-		fmt.Fprintf(os.Stderr, "task list: broker returned %d: %s\n", resp.StatusCode, strings.TrimSpace(string(body)))
 		os.Exit(1)
 	}
 	if *jsonOut {
-		fmt.Println(string(body))
+		raw, _ := json.Marshal(payload)
+		fmt.Println(string(raw))
 		return
-	}
-	var payload team.InboxPayload
-	if err := json.Unmarshal(body, &payload); err != nil {
-		fmt.Fprintf(os.Stderr, "task list: parse: %v\n", err)
-		os.Exit(1)
 	}
 	printInboxPayload(payload)
 }
@@ -391,7 +534,7 @@ func openBrowser(url string) error {
 }
 
 // runTaskBlock implements `wuphf task block <id> --on <ref>`. POSTs
-// to /tasks/{id}/block on the running broker.
+// to /tasks/{id}/block on the running broker via the brokerClient.
 func runTaskBlock(args []string) {
 	fs := flag.NewFlagSet("task block", flag.ExitOnError)
 	on := fs.String("on", "", "PR or task ID this task is blocked on (required)")
@@ -416,28 +559,8 @@ func runTaskBlock(args []string) {
 		fmt.Fprintln(os.Stderr, "task block: --on is required")
 		os.Exit(2)
 	}
-	body, err := json.Marshal(map[string]string{"on": *on, "reason": *reason})
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "task block: encode body: %v\n", err)
-		os.Exit(1)
-	}
-	url := brokerURL("/tasks/" + id + "/block")
-	req, err := newBrokerRequest(context.Background(), http.MethodPost, url, strings.NewReader(string(body)))
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "task block: build request: %v\n", err)
-		os.Exit(1)
-	}
-	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
+	if err := resolveBrokerClient().BlockTask(context.Background(), id, *on, *reason); err != nil {
 		fmt.Fprintf(os.Stderr, "task block: %v\n", err)
-		fmt.Fprintln(os.Stderr, "  (is the broker running? try `wuphf` first)")
-		os.Exit(1)
-	}
-	defer resp.Body.Close()
-	respBody, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != http.StatusOK {
-		fmt.Fprintf(os.Stderr, "task block: broker returned %d: %s\n", resp.StatusCode, strings.TrimSpace(string(respBody)))
 		os.Exit(1)
 	}
 	fmt.Printf("Task %s blocked on %s.\n", id, *on)

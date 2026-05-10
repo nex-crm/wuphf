@@ -68,17 +68,24 @@ func (b *Broker) handleTasksInbox(w http.ResponseWriter, r *http.Request) {
 var reservedTaskSubpath = map[string]struct{}{
 	"":                 {},
 	"inbox":            {},
+	"intake":           {},
 	"ack":              {},
 	"memory-workflow":  {},
 	"memory-workflows": {},
 }
 
-// handleTaskByID serves GET /tasks/{id} and POST /tasks/{id}/block.
+// handleTaskByID serves GET /tasks/{id} and POST /tasks/{id}/{verb}.
 // Mounted via b.withAuth on the "/tasks/" prefix. ServeMux's longest-
 // prefix matching means the existing exact paths /tasks, /tasks/ack,
-// /tasks/memory-workflow, /tasks/memory-workflow/reconcile, and
-// /tasks/inbox win over this prefix handler — so this path effectively
-// only fires for /tasks/{id} (GET) or /tasks/{id}/block (POST).
+// /tasks/memory-workflow, /tasks/memory-workflow/reconcile, /tasks/inbox,
+// and /tasks/intake win over this prefix handler — so this path
+// effectively only fires for /tasks/{id} (GET) or /tasks/{id}/{verb}
+// (POST).
+//
+// Recognised verbs: block (Lane F block-on-PR-merge), transition (Lane F
+// lifecycle advance). merge / request-changes / defer remain reserved
+// for Lane G and return 404 here so a stray client cannot silently
+// land on the wrong handler.
 func (b *Broker) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 	actor, ok := requestActorFromContext(r.Context())
 	if !ok {
@@ -86,15 +93,17 @@ func (b *Broker) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rest := strings.TrimPrefix(r.URL.Path, "/tasks/")
-	// /tasks/{id}/block is the Lane F block-on-PR-merge action. Other
-	// verbs (merge / request-changes / defer) are still reserved for
-	// Lane G; they return 404 here so a stray client cannot silently
-	// land on the wrong handler.
 	if strings.Contains(rest, "/") {
 		segments := strings.SplitN(rest, "/", 2)
-		if len(segments) == 2 && segments[1] == "block" {
-			b.handleTaskBlock(w, r, actor, strings.TrimSpace(segments[0]))
-			return
+		if len(segments) == 2 {
+			switch segments[1] {
+			case "block":
+				b.handleTaskBlock(w, r, actor, strings.TrimSpace(segments[0]))
+				return
+			case "transition":
+				b.handleTaskTransition(w, r, actor, strings.TrimSpace(segments[0]))
+				return
+			}
 		}
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return
@@ -216,4 +225,129 @@ func taskAccessAllowed(actor requestActor, reviewers []string) bool {
 		}
 	}
 	return false
+}
+
+// intakeHTTPOutcome is the JSON wire shape returned by POST /tasks/intake.
+// We do not return the AutoAssignCountdown handle (it is not serialisable
+// and lives on the broker process); the CLI re-creates a local countdown
+// when AutoAssign is non-empty so the user-facing keypress UX is identical
+// to the in-process path.
+type intakeHTTPOutcome struct {
+	TaskID     string `json:"taskId"`
+	Spec       Spec   `json:"spec"`
+	AutoAssign string `json:"autoAssign,omitempty"`
+}
+
+// handleTasksIntake serves POST /tasks/intake. Body shape:
+//
+//	{"intent": "<free-text intent>"}
+//
+// Returns 200 with intakeHTTPOutcome on a clean intake → ready
+// transition. The task lands in LifecycleStateReady; the caller is
+// responsible for the ready → running advance via POST
+// /tasks/{id}/transition.
+//
+// Auth: broker-only. Tunnel humans cannot trigger intake in v1; the
+// founder/owner runs `wuphf task start` against their own broker.
+func (b *Broker) handleTasksIntake(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	actor, ok := requestActorFromContext(r.Context())
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+	if actor.Kind != requestActorKindBroker {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
+		return
+	}
+	var body struct {
+		Intent string `json:"intent"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json body"})
+		return
+	}
+	intent := strings.TrimSpace(body.Intent)
+	if intent == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "intent required"})
+		return
+	}
+	provider := b.resolveIntakeProvider()
+	if provider == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "no intake provider configured"})
+		return
+	}
+	outcome, err := b.StartIntake(r.Context(), intent, provider)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, intakeHTTPOutcome{
+		TaskID:     outcome.TaskID,
+		Spec:       outcome.Spec,
+		AutoAssign: outcome.AutoAssign,
+	})
+}
+
+// handleTaskTransition serves POST /tasks/{id}/transition. Body shape:
+//
+//	{"to": "<lifecycle-state>", "reason": "<text>"}
+//
+// On success returns 200 with the post-transition teamTask snapshot.
+// Auth: broker/owner only — humans drive lifecycle advances through
+// Lane G's UI verbs (merge / request-changes / defer), which post to
+// dedicated endpoints rather than this raw transition primitive.
+func (b *Broker) handleTaskTransition(w http.ResponseWriter, r *http.Request, actor requestActor, id string) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if actor.Kind != requestActorKindBroker {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
+		return
+	}
+	if id == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "task id required"})
+		return
+	}
+	var body struct {
+		To     string `json:"to"`
+		Reason string `json:"reason"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json body"})
+		return
+	}
+	to := strings.TrimSpace(body.To)
+	if to == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "target lifecycle state required"})
+		return
+	}
+	reason := strings.TrimSpace(body.Reason)
+	if reason == "" {
+		reason = "transition via api"
+	}
+	if err := b.TransitionLifecycle(id, LifecycleState(to), reason); err != nil {
+		// Distinguish "task not found" from "transition rejected" so the
+		// CLI surfaces a clearer error to the user.
+		if strings.Contains(err.Error(), "not found") {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	b.mu.Lock()
+	task := b.findTaskByIDLocked(id)
+	var snapshot teamTask
+	if task != nil {
+		snapshot = *task
+	}
+	b.mu.Unlock()
+	writeJSON(w, http.StatusOK, snapshot)
 }

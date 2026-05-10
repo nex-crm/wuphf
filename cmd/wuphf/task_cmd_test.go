@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"os"
 	"strings"
@@ -160,17 +161,148 @@ func TestIsSafeTaskID(t *testing.T) {
 	}
 }
 
-// TestRunTaskStartHookErrorBubblesUp confirms the runner surfaces hook
-// errors instead of silently succeeding.
-func TestRunTaskStartHookErrorBubblesUp(t *testing.T) {
-	prev := taskStartHook
-	taskStartHook = func(_ context.Context) (*team.Broker, team.IntakeProvider, error) {
-		return nil, nil, team.ErrIntakeNoProvider
-	}
-	defer func() { taskStartHook = prev }()
+// fakeBrokerClient is a test double for the brokerClient interface.
+// Each method records the call and returns canned data.
+type fakeBrokerClient struct {
+	startIntake          func(ctx context.Context, intent string) (*team.IntakeOutcome, error)
+	transitionLifecycle  func(ctx context.Context, taskID string, to team.LifecycleState, reason string) error
+	blockTask            func(ctx context.Context, taskID, on, reason string) error
+	listInbox            func(ctx context.Context, filter string) (team.InboxPayload, error)
+	transitions          []team.LifecycleState
+	transitionRecordedID string
+}
 
-	err := runTaskStartInProcess(context.Background(), "anything", "")
+func (f *fakeBrokerClient) StartIntake(ctx context.Context, intent string) (*team.IntakeOutcome, error) {
+	if f.startIntake != nil {
+		return f.startIntake(ctx, intent)
+	}
+	return nil, errors.New("startIntake not stubbed")
+}
+
+func (f *fakeBrokerClient) TransitionLifecycle(ctx context.Context, taskID string, to team.LifecycleState, reason string) error {
+	f.transitionRecordedID = taskID
+	f.transitions = append(f.transitions, to)
+	if f.transitionLifecycle != nil {
+		return f.transitionLifecycle(ctx, taskID, to, reason)
+	}
+	return nil
+}
+
+func (f *fakeBrokerClient) BlockTask(ctx context.Context, taskID, on, reason string) error {
+	if f.blockTask != nil {
+		return f.blockTask(ctx, taskID, on, reason)
+	}
+	return nil
+}
+
+func (f *fakeBrokerClient) ListInbox(ctx context.Context, filter string) (team.InboxPayload, error) {
+	if f.listInbox != nil {
+		return f.listInbox(ctx, filter)
+	}
+	return team.InboxPayload{}, nil
+}
+
+// TestRunTaskStartIntakeErrorBubblesUp confirms the runner surfaces
+// brokerClient errors instead of silently succeeding.
+func TestRunTaskStartIntakeErrorBubblesUp(t *testing.T) {
+	client := &fakeBrokerClient{
+		startIntake: func(_ context.Context, _ string) (*team.IntakeOutcome, error) {
+			return nil, team.ErrIntakeNoProvider
+		},
+	}
+	err := runTaskStartWithClient(context.Background(), client, "anything", "", strings.NewReader(""))
 	if err == nil {
 		t.Fatalf("expected error from missing provider, got nil")
+	}
+	if !strings.Contains(err.Error(), "no LLM provider") {
+		t.Fatalf("expected no-provider error; got %q", err.Error())
+	}
+}
+
+// TestRunTaskStartHappyPathWithClient drives the full happy path end-
+// to-end: intake returns a valid outcome, user confirms with "y", and
+// the runner posts intake → ready → running transitions in order.
+func TestRunTaskStartHappyPathWithClient(t *testing.T) {
+	client := &fakeBrokerClient{
+		startIntake: func(_ context.Context, intent string) (*team.IntakeOutcome, error) {
+			return &team.IntakeOutcome{
+				TaskID: "task-7411",
+				Spec: team.Spec{
+					Problem:    "fix the cache",
+					Assignment: "audit cache.go",
+					AcceptanceCriteria: []team.ACItem{
+						{Statement: "stale entries no longer return"},
+					},
+				},
+			}, nil
+		},
+	}
+	err := runTaskStartWithClient(context.Background(), client, "fix the cache", "", strings.NewReader("y\n"))
+	if err != nil {
+		t.Fatalf("happy path: %v", err)
+	}
+	if got, want := len(client.transitions), 2; got != want {
+		t.Fatalf("expected 2 transitions, got %d (%v)", got, client.transitions)
+	}
+	if client.transitions[0] != team.LifecycleStateReady {
+		t.Errorf("first transition: got %q, want %q", client.transitions[0], team.LifecycleStateReady)
+	}
+	if client.transitions[1] != team.LifecycleStateRunning {
+		t.Errorf("second transition: got %q, want %q", client.transitions[1], team.LifecycleStateRunning)
+	}
+	if client.transitionRecordedID != "task-7411" {
+		t.Errorf("transition target: got %q, want task-7411", client.transitionRecordedID)
+	}
+}
+
+// TestRunTaskStartUserDeclinesLeavesInIntake covers the "n" branch:
+// intake succeeds, user types "n", the runner does NOT post any
+// transitions and reports the task is left in intake.
+func TestRunTaskStartUserDeclinesLeavesInIntake(t *testing.T) {
+	client := &fakeBrokerClient{
+		startIntake: func(_ context.Context, _ string) (*team.IntakeOutcome, error) {
+			return &team.IntakeOutcome{
+				TaskID: "task-9999",
+				Spec: team.Spec{
+					Problem:            "irrelevant",
+					Assignment:         "ignore",
+					AcceptanceCriteria: []team.ACItem{{Statement: "no-op"}},
+				},
+			}, nil
+		},
+	}
+	err := runTaskStartWithClient(context.Background(), client, "intent", "", strings.NewReader("n\n"))
+	if err != nil {
+		t.Fatalf("decline path returned error: %v", err)
+	}
+	if len(client.transitions) != 0 {
+		t.Fatalf("expected no transitions on decline; got %v", client.transitions)
+	}
+}
+
+// TestPromptYesNo locks down the consolidated y/n helper (F-FU-4).
+func TestPromptYesNo(t *testing.T) {
+	cases := []struct {
+		input string
+		want  bool
+	}{
+		{"y\n", true},
+		{"Y\n", true},
+		{"yes\n", true},
+		{"  y  \n", true},
+		{"n\n", false},
+		{"no\n", false},
+		{"\n", false},
+		{"maybe\n", false},
+	}
+	for _, tc := range cases {
+		got, err := promptYesNo(strings.NewReader(tc.input), "")
+		if err != nil {
+			t.Errorf("promptYesNo(%q): unexpected error: %v", tc.input, err)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("promptYesNo(%q) = %v, want %v", tc.input, got, tc.want)
+		}
 	}
 }

@@ -847,3 +847,125 @@ func (b *Broker) IntakeSpec(taskID string) (Spec, bool) {
 	spec, ok := b.intakeSpecs[taskID]
 	return spec, ok
 }
+
+// SetIntakeProviderFactory installs a factory the HTTP intake handler
+// uses to pick up an IntakeProvider on each request. Tests inject a
+// fake here so POST /tasks/intake exercises the real handler path
+// against a canned LLM response. Pass nil to fall back to the default
+// provider (anthropic-haiku → ollama → openai).
+func (b *Broker) SetIntakeProviderFactory(f func() IntakeProvider) {
+	if b == nil {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.intakeProviderFactory = f
+}
+
+// resolveIntakeProvider picks the provider to use for the next intake
+// call. If a factory is registered (test seam), the factory is invoked
+// once. Otherwise the default haiku/ollama/openai chain is built fresh.
+func (b *Broker) resolveIntakeProvider() IntakeProvider {
+	if b == nil {
+		return nil
+	}
+	b.mu.Lock()
+	factory := b.intakeProviderFactory
+	b.mu.Unlock()
+	if factory != nil {
+		if p := factory(); p != nil {
+			return p
+		}
+	}
+	return NewDefaultIntakeProvider()
+}
+
+// SetReviewerNowFn overrides the broker clock the reviewer-routing
+// timeout / convergence layer reads through. Used by ICP and unit
+// tests to advance synthetic time past a deadline without sleeping.
+// Pass nil to restore the default (time.Now). Production callers
+// MUST NOT use this — the field is exported because the cmd/wuphf
+// ICP harness lives in a different Go package and cannot reach an
+// unexported setter; the production code paths leave it nil.
+func (b *Broker) SetReviewerNowFn(now func() time.Time) {
+	if b == nil {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.nowFn = now
+}
+
+// SetTaskReviewersForTest pins the reviewer roster on a task without
+// going through the routing-layer derivation from watching sets.
+// Used by ICP tests so the timeout-fill path can be exercised against
+// a deterministic three-reviewer roster regardless of which agents
+// the broker happens to be seeded with. Always stamps
+// ReviewStartedAt to the broker's current clock so the deadline
+// calculation is anchored deterministically — overrides any prior
+// stamp that may have been written during the running → review hop.
+// Must not be used by production callers.
+func (b *Broker) SetTaskReviewersForTest(taskID string, reviewers []string) {
+	if b == nil {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for i := range b.tasks {
+		if b.tasks[i].ID != taskID {
+			continue
+		}
+		b.tasks[i].Reviewers = append([]string(nil), reviewers...)
+		b.tasks[i].ReviewStartedAt = b.reviewerNow().UTC().Format(time.RFC3339)
+		return
+	}
+}
+
+// TaskReviewStartedAtForTest exposes the reviewer-deadline anchor on a
+// task. Used by ICP tests to assert the timeout filler observes the
+// correct deadline without parsing internal fields. Returns the empty
+// string when the task is not found or has not yet entered review.
+func (b *Broker) TaskReviewStartedAtForTest(taskID string) string {
+	if b == nil {
+		return ""
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for i := range b.tasks {
+		if b.tasks[i].ID == taskID {
+			return b.tasks[i].ReviewStartedAt
+		}
+	}
+	return ""
+}
+
+// ReviewerNowForTest returns the broker's current reviewer-clock value.
+// Helps ICP tests assert the time-advance machinery before chasing a
+// deadline-related convergence regression.
+func (b *Broker) ReviewerNowForTest() time.Time {
+	if b == nil {
+		return time.Time{}
+	}
+	return b.reviewerNow()
+}
+
+// SetTaskBlockedOnForTest pins the BlockedOn list on a task without
+// going through BlockTask (which routes through the lifecycle
+// transition layer to blocked_on_pr_merge but does not yet populate
+// task.BlockedOn — a v1.1 gap surfaced by ICP tutorial 3). Used by
+// ICP tests so the unblock cascade can be exercised end-to-end while
+// the underlying CLI / HTTP block path is documented as not-yet
+// data-flow-complete. Must not be used by production callers.
+func (b *Broker) SetTaskBlockedOnForTest(taskID string, blockedOn []string) {
+	if b == nil {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for i := range b.tasks {
+		if b.tasks[i].ID == taskID {
+			b.tasks[i].BlockedOn = append([]string(nil), blockedOn...)
+			return
+		}
+	}
+}

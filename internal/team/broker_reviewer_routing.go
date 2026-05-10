@@ -330,6 +330,7 @@ func (b *Broker) evaluateConvergenceLocked(taskID string) error {
 	// manifest status on the reviewer's task-scoped agent stream.
 	terminalStatuses := b.observedTerminalStatusByReviewerLocked(taskID, missing)
 	now := b.reviewerNow().UTC()
+	packet := b.getOrInitPacketLocked(taskID)
 	for _, slug := range missing {
 		reasoning := "reviewer timed out"
 		if status, ok := terminalStatuses[slug]; ok {
@@ -343,9 +344,19 @@ func (b *Broker) evaluateConvergenceLocked(taskID string) error {
 			Reasoning:    reasoning,
 			SubmittedAt:  now,
 		}
+		// Mirror the filler to BOTH stores so consumers — Lane G's
+		// Decision Packet view (read-side) and Lane D's convergence
+		// rule (the rule itself) — observe the same set of grades.
+		// The pre-integration code only wrote the routing mirror,
+		// which left packet.ReviewerGrades short of a slot whenever a
+		// timeout fired and made the UI look like the reviewer had
+		// silently disappeared. Both writes happen under the
+		// already-held b.mu so they land atomically.
 		b.reviewerGradesByTask[taskID] = append(b.reviewerGradesByTask[taskID], filler)
+		packet.ReviewerGrades = append(packet.ReviewerGrades, filler)
 		b.postReviewTimeoutChannelMessageLocked(task, slug, reasoning)
 	}
+	b.persistDecisionPacketLocked(taskID, *packet)
 
 	_, err := b.transitionLifecycleLocked(taskID, LifecycleStateDecision, "convergence: timeout")
 	return err

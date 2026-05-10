@@ -96,7 +96,16 @@ type Broker struct {
 	// the durable source of truth. The two are kept in sync by
 	// AppendReviewerGrade — Lane C mirrors writes to Lane D on each
 	// grade. Guarded by b.mu.
-	reviewerGradesByTask    map[string][]ReviewerGrade
+	reviewerGradesByTask map[string][]ReviewerGrade
+	// intakeProviderFactory builds an IntakeProvider on demand for the
+	// HTTP intake endpoint (POST /tasks/intake). The factory is invoked
+	// per-request so a long-lived broker can pick up provider config
+	// changes (API keys, endpoints) without restart. Production
+	// callers leave this nil; the handler falls back to
+	// NewDefaultIntakeProvider. Tests inject a fake via
+	// SetIntakeProviderFactory so the live HTTP wire can be exercised
+	// without standing up a real LLM. Guarded by b.mu.
+	intakeProviderFactory   func() IntakeProvider
 	requests                []humanInterview
 	humanInvites            []humanInvite
 	humanSessions           []humanSession
@@ -495,6 +504,7 @@ func (b *Broker) StartOnPort(port int) error {
 	// /tasks/{id} only because the existing /tasks/ack and
 	// /tasks/memory-workflow exact paths win for their literals.
 	mux.HandleFunc("/tasks/inbox", b.requireAuth(b.handleTasksInbox))
+	mux.HandleFunc("/tasks/intake", b.requireAuth(b.handleTasksIntake))
 	mux.HandleFunc("/tasks/", b.requireAuth(b.handleTaskByID))
 	mux.HandleFunc("/session-mode", b.requireAuth(b.handleSessionMode))
 	mux.HandleFunc("/focus-mode", b.requireAuth(b.handleFocusMode))
