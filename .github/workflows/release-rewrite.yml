@@ -308,28 +308,36 @@ jobs:
           AZURE_ENDPOINT: ${{ secrets.AZURE_ENDPOINT }}
           AZURE_EXPECTED_PUBLISHER_NAME: ${{ secrets.AZURE_EXPECTED_PUBLISHER_NAME }}
         run: bash apps/installer-stub/scripts/detect-signing-secrets.sh
-      - name: Diagnose installer-stub workspace layout (Windows)
-        # Temporary diagnostic: bun 1.3.13 on Windows isn't materializing
-        # electron-updater into apps/installer-stub/node_modules even though
-        # it works on Linux + macOS. Dump the layout so we can see what bun
-        # actually produced and decide on the right workaround.
+      - name: Dereference workspace symlinks for electron-builder compat
+        # bun 1.3.13 lays out apps/installer-stub/node_modules as symlinks
+        # into the ../../node_modules/.bun/<pkg>@<ver>/ flat cache. On
+        # Linux + macOS, electron-builder 25.1.8 follows those symlinks and
+        # bundles the deps into app.asar. On Windows it does not — the
+        # build succeeds but electron-updater (and its 9-entry transitive
+        # closure) are pruned out of the asar, which is exactly the #771
+        # original failure mode the post-build gate now catches end-to-end.
+        #
+        # Workaround: replace the symlinked node_modules with a real-file
+        # copy so electron-builder sees regular directories. `cp -RL`
+        # follows symlinks; the cost is one-time per CI job (~30s on
+        # Windows for installer-stub's prod tree).
+        #
+        # Long-term fix tracked separately — either electron-builder 26+
+        # (broke win.publisherName schema in our last test) or a bun
+        # config that materializes copies for prod deps on Windows.
         working-directory: apps/installer-stub
         shell: bash
         run: |
-          echo '--- apps/installer-stub/node_modules (top level):'
-          ls -la node_modules/ 2>&1 | head -40
-          echo
-          echo '--- apps/installer-stub/node_modules/.bin (top level):'
-          ls -la node_modules/.bin 2>&1 | head -10
-          echo
-          echo '--- root node_modules/electron-updater (if hoisted):'
-          ls -la ../../node_modules/electron-updater 2>&1 | head -5 || echo 'not hoisted'
-          echo
-          echo '--- root node_modules/.bun electron-updater dirs:'
-          ls -la ../../node_modules/.bun 2>&1 | grep electron-updater | head -5 || echo 'not in .bun cache'
-          echo
-          echo '--- bun pm ls --prod:'
-          bun pm ls --prod 2>&1 | head -20 || true
+          if [[ -d node_modules ]]; then
+            mv node_modules node_modules.symlinks
+            cp -RL node_modules.symlinks node_modules
+            rm -rf node_modules.symlinks
+          fi
+          if [[ ! -e node_modules/electron-updater/package.json ]]; then
+            echo "FAIL: electron-updater still missing after dereference" >&2
+            ls -la node_modules/ | head -20 >&2
+            exit 1
+          fi
       - name: Build Windows PR artifacts
         if: needs.detect-secrets.outputs.is_release != 'true'
         working-directory: apps/installer-stub
