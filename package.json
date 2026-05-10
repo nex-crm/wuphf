@@ -1,10 +1,17 @@
 {
   "name": "wuphf-dev-tooling",
   "private": true,
-  "description": "Root-level dev tooling (secretlint, commitlint). The Go v0 app lives at the repo root; web UI lives in ./web with its own package.json; v1 protocol package lives in ./packages/protocol.",
+  "description": "Root-level dev tooling (secretlint, commitlint). The Go v0 app lives at the repo root; web UI lives in ./web with its own package.json; v1 protocol package lives in ./packages/protocol; installer-stub + release pipeline live in ./apps/installer-stub.",
   "workspaces": [
-    "packages/*"
+    "packages/*",
+    "apps/*"
   ],
+  "scripts": {
+    "installer:build:dry-run": "bun run --cwd apps/installer-stub build:dry-run",
+    "installer:build:local": "bun run --cwd apps/installer-stub build:current",
+    "installer:check:secrets": "bun run --cwd apps/installer-stub check:secrets",
+    "installer:lint": "bun run --cwd apps/installer-stub lint"
+  },
   "devDependencies": {
     "@commitlint/cli": "^20.5.0",
     "@commitlint/config-conventional": "^20.5.0",

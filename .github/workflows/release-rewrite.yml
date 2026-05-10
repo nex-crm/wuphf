@@ -1,0 +1,648 @@
+# Runner image maintenance:
+# - macOS release signing/notarization: macos-14. REVIEW BY 2026-06-01.
+# - Windows signing: windows-2022. REVIEW BY 2026-09-01.
+# - Linux build/publish helpers: ubuntu-24.04. REVIEW BY 2026-09-01.
+# See apps/installer-stub/docs/runbooks/runner-image-maintenance.md before
+# changing labels; image upgrades require a signed rewrite smoke tag.
+name: Release Rewrite
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    # GitHub tag globs are intentionally broad here; detect-secrets validates
+    # the full semver contract before release builds run:
+    # ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?-rewrite$
+    tags:
+      - "v[0-9]*-rewrite"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-rewrite-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'push' || !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  detect-secrets:
+    runs-on: ubuntu-24.04
+    outputs:
+      is_release: ${{ steps.mode.outputs.is_release }}
+      release_mode: ${{ steps.mode.outputs.release_mode }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
+      - name: Detect release mode
+        id: mode
+        run: |
+          if [[ "${GITHUB_EVENT_NAME}" == "push" && "${GITHUB_REF}" == refs/tags/* ]]; then
+            echo "release_mode=production" >> "${GITHUB_OUTPUT}"
+            echo "is_release=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "release_mode=pr" >> "${GITHUB_OUTPUT}"
+            echo "is_release=false" >> "${GITHUB_OUTPUT}"
+          fi
+      - name: Validate rewrite release tag
+        if: steps.mode.outputs.is_release == 'true'
+        run: |
+          if [[ ! "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?-rewrite$ ]]; then
+            echo "tag must be semver + -rewrite suffix, e.g., v1.2.3-rewrite" >&2
+            exit 1
+          fi
+      - name: Detect PR signing posture
+        if: steps.mode.outputs.release_mode != 'production'
+        env:
+          WUPHF_RELEASE_MODE: pr
+        run: bash apps/installer-stub/scripts/detect-signing-secrets.sh
+
+  build-mac:
+    needs: detect-secrets
+    runs-on: macos-14
+    timeout-minutes: 60
+    environment:
+      name: ${{ needs.detect-secrets.outputs.release_mode == 'production' && 'production-release' || 'installer-pr' }}
+    env:
+      WUPHF_RELEASE_MODE: ${{ needs.detect-secrets.outputs.release_mode }}
+      WUPHF_BUILD_CHANNEL: ${{ needs.detect-secrets.outputs.is_release == 'true' && 'rewrite' || 'dev' }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # ratchet:actions/setup-node@v6.4.0
+        with:
+          node-version: "20.x"
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # ratchet:oven-sh/setup-bun@v2.2.0
+        with:
+          bun-version: "1.1.38"
+      - name: Install workspace deps
+        run: bun install --frozen-lockfile
+      - name: Normalize package version from tag
+        if: needs.detect-secrets.outputs.is_release == 'true'
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          version="${tag%-rewrite}"
+          # Export for the same-step node process; ALSO write to GITHUB_ENV so
+          # subsequent steps see it. $GITHUB_ENV alone does not propagate to
+          # the current step's child processes.
+          export WUPHF_BUILD_VERSION="${version}"
+          echo "WUPHF_BUILD_VERSION=${version}" >> "${GITHUB_ENV}"
+          node apps/installer-stub/scripts/normalize-package-version.js
+      - name: Detect Apple signing secrets
+        if: needs.detect-secrets.outputs.is_release == 'true'
+        env:
+          WUPHF_RELEASE_MODE: production
+          WUPHF_SIGNING_SCOPE: mac
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_CERT_P12_BASE64: ${{ secrets.APPLE_CERT_P12_BASE64 }}
+          APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+        run: bash apps/installer-stub/scripts/detect-signing-secrets.sh
+      - name: Prepare macOS signing keychain
+        if: needs.detect-secrets.outputs.is_release == 'true'
+        env:
+          APPLE_CERT_P12_BASE64: ${{ secrets.APPLE_CERT_P12_BASE64 }}
+          APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+        run: |
+          keychain="${RUNNER_TEMP}/wuphf-signing.keychain-db"
+          p12="${RUNNER_TEMP}/wuphf-signing.p12"
+          keychain_unlock="$(openssl rand -base64 32)"
+
+          echo "WUPHF_KEYCHAIN_PATH=${keychain}" >> "${GITHUB_ENV}"
+          echo "WUPHF_P12_PATH=${p12}" >> "${GITHUB_ENV}"
+          if ! printf "%s" "${APPLE_CERT_P12_BASE64}" | base64 --decode > "${p12}" 2>/dev/null; then
+            printf "%s" "${APPLE_CERT_P12_BASE64}" | base64 -D > "${p12}"
+          fi
+
+          security create-keychain -p "${keychain_unlock}" "${keychain}"
+          security set-keychain-settings -lut 21600 "${keychain}"
+          security unlock-keychain -p "${keychain_unlock}" "${keychain}"
+          security import "${p12}" -k "${keychain}" -P "${APPLE_CERT_PASSWORD}" -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "${keychain_unlock}" "${keychain}"
+          security default-keychain -s "${keychain}"
+          security list-keychains -d user -s "${keychain}"
+          security find-identity -v -p codesigning "${keychain}"
+          rm -f "${p12}"
+      - name: Build macOS PR artifacts
+        if: needs.detect-secrets.outputs.is_release != 'true'
+        working-directory: apps/installer-stub
+        run: bun run build:mac
+      - name: Build signed macOS artifacts
+        if: needs.detect-secrets.outputs.is_release == 'true'
+        working-directory: apps/installer-stub
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          NODE_OPTIONS: --require ./build/notarize-with-retry.js
+        run: bun run build:mac
+      - name: Staple and validate macOS DMG
+        if: needs.detect-secrets.outputs.is_release == 'true'
+        working-directory: apps/installer-stub
+        run: |
+          shopt -s nullglob
+          dmgs=(dist/*.dmg)
+          if [[ "${#dmgs[@]}" -eq 0 ]]; then
+            echo "No macOS dmg artifact found" >&2
+            exit 1
+          fi
+
+          for dmg in "${dmgs[@]}"; do
+            xcrun stapler staple "${dmg}"
+            xcrun stapler validate "${dmg}"
+          done
+      - name: Validate macOS app staple inside updater zip
+        if: needs.detect-secrets.outputs.is_release == 'true'
+        working-directory: apps/installer-stub
+        run: |
+          shopt -s nullglob
+          zips=(dist/*.zip)
+          if [[ "${#zips[@]}" -eq 0 ]]; then
+            echo "No macOS zip artifact found" >&2
+            exit 1
+          fi
+
+          for zip in "${zips[@]}"; do
+            workdir="$(mktemp -d)"
+            ditto -x -k "${zip}" "${workdir}"
+            app_path="$(find "${workdir}" -maxdepth 3 -name "*.app" -type d -print -quit)"
+            if [[ -z "${app_path}" ]]; then
+              echo "No .app bundle found inside ${zip}" >&2
+              exit 1
+            fi
+
+            xcrun stapler validate "${app_path}"
+            spctl --assess --type execute --verbose "${app_path}"
+            rm -rf "${workdir}"
+          done
+      - name: Refresh macOS update manifest after stapling
+        if: needs.detect-secrets.outputs.is_release == 'true'
+        working-directory: apps/installer-stub
+        run: bun scripts/refresh-latest-yml.js dist/latest-mac.yml
+      - name: Assert macOS artifacts
+        working-directory: apps/installer-stub
+        run: |
+          shopt -s nullglob
+          dmgs=(dist/*.dmg)
+          zips=(dist/*.zip)
+
+          if [[ "${#dmgs[@]}" -eq 0 || "${#zips[@]}" -eq 0 ]]; then
+            echo "macOS build did not produce both dmg and zip artifacts" >&2
+            exit 1
+          fi
+
+          test -f dist/latest-mac.yml
+      - name: Cleanup macOS signing keychain
+        if: always() && needs.detect-secrets.outputs.is_release == 'true'
+        run: |
+          if [[ -n "${WUPHF_KEYCHAIN_PATH:-}" ]]; then
+            security delete-keychain "${WUPHF_KEYCHAIN_PATH}" || true
+          fi
+          rm -f "${WUPHF_P12_PATH:-}"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # ratchet:actions/upload-artifact@v7
+        with:
+          name: installer-mac
+          path: |
+            apps/installer-stub/dist/*.dmg
+            apps/installer-stub/dist/*.zip
+            apps/installer-stub/dist/latest-mac.yml
+          retention-days: 14
+          if-no-files-found: error
+
+  build-win:
+    needs: detect-secrets
+    runs-on: windows-2022
+    environment:
+      name: ${{ needs.detect-secrets.outputs.release_mode == 'production' && 'production-release' || 'installer-pr' }}
+    env:
+      WUPHF_RELEASE_MODE: ${{ needs.detect-secrets.outputs.release_mode }}
+      WUPHF_BUILD_CHANNEL: ${{ needs.detect-secrets.outputs.is_release == 'true' && 'rewrite' || 'dev' }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # ratchet:actions/setup-node@v6.4.0
+        with:
+          node-version: "20.x"
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # ratchet:oven-sh/setup-bun@v2.2.0
+        with:
+          bun-version: "1.1.38"
+      - name: Install workspace deps
+        run: bun install --frozen-lockfile
+      - name: Normalize package version from tag
+        if: needs.detect-secrets.outputs.is_release == 'true'
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          version="${tag%-rewrite}"
+          # Export for the same-step node process; ALSO write to GITHUB_ENV so
+          # subsequent steps see it. $GITHUB_ENV alone does not propagate to
+          # the current step's child processes.
+          export WUPHF_BUILD_VERSION="${version}"
+          echo "WUPHF_BUILD_VERSION=${version}" >> "${GITHUB_ENV}"
+          node apps/installer-stub/scripts/normalize-package-version.js
+      - name: Detect Azure signing secrets
+        if: needs.detect-secrets.outputs.is_release == 'true'
+        shell: bash
+        env:
+          WUPHF_RELEASE_MODE: production
+          WUPHF_SIGNING_SCOPE: win
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_SIGNING_ACCOUNT_NAME: ${{ secrets.AZURE_SIGNING_ACCOUNT_NAME }}
+          AZURE_CERT_PROFILE_NAME: ${{ secrets.AZURE_CERT_PROFILE_NAME }}
+          AZURE_ENDPOINT: ${{ secrets.AZURE_ENDPOINT }}
+          AZURE_EXPECTED_PUBLISHER_NAME: ${{ secrets.AZURE_EXPECTED_PUBLISHER_NAME }}
+        run: bash apps/installer-stub/scripts/detect-signing-secrets.sh
+      - name: Build Windows PR artifacts
+        if: needs.detect-secrets.outputs.is_release != 'true'
+        working-directory: apps/installer-stub
+        run: bun run build:win
+      - name: Build Windows artifacts
+        if: needs.detect-secrets.outputs.is_release == 'true'
+        working-directory: apps/installer-stub
+        env:
+          AZURE_EXPECTED_PUBLISHER_NAME: ${{ secrets.AZURE_EXPECTED_PUBLISHER_NAME }}
+        # Override win.publisherName so it matches the Authenticode CN of
+        # the Azure cert. electron-updater compares the publisherName baked
+        # into app-update.yml against the SignerCertificate CN of the
+        # downloaded installer at update time; a mismatch breaks auto-update
+        # silently for end users. The placeholder in electron-builder.yml is
+        # ONLY usable for local PR builds (which do not auto-update).
+        run: |
+          if [ -z "$AZURE_EXPECTED_PUBLISHER_NAME" ]; then
+            echo "AZURE_EXPECTED_PUBLISHER_NAME is required for release builds (binds win.publisherName to Authenticode CN)" >&2
+            exit 1
+          fi
+          bun run build:win -- --config.win.publisherName="$AZURE_EXPECTED_PUBLISHER_NAME"
+      - name: Sign Windows artifacts (attempt 1)
+        id: sign_windows_1
+        if: needs.detect-secrets.outputs.is_release == 'true'
+        continue-on-error: true
+        timeout-minutes: 30
+        uses: Azure/trusted-signing-action@b443cf8ea4124818d2ea9f043cba29fc3ec47b16 # ratchet:Azure/trusted-signing-action@v1.2.0
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ secrets.AZURE_ENDPOINT }}
+          signing-account-name: ${{ secrets.AZURE_SIGNING_ACCOUNT_NAME }}
+          certificate-profile-name: ${{ secrets.AZURE_CERT_PROFILE_NAME }}
+          files-folder: ${{ github.workspace }}\apps\installer-stub\dist
+          files-folder-filter: "*.exe,*.dll"
+          files-folder-recurse: true
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          timeout: 1800
+      - name: Wait before Azure signing retry 2
+        if: needs.detect-secrets.outputs.is_release == 'true' && steps.sign_windows_1.outcome == 'failure'
+        shell: pwsh
+        run: Start-Sleep -Seconds 30
+      - name: Sign Windows artifacts (attempt 2)
+        id: sign_windows_2
+        if: needs.detect-secrets.outputs.is_release == 'true' && steps.sign_windows_1.outcome == 'failure'
+        continue-on-error: true
+        timeout-minutes: 30
+        uses: Azure/trusted-signing-action@b443cf8ea4124818d2ea9f043cba29fc3ec47b16 # ratchet:Azure/trusted-signing-action@v1.2.0
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ secrets.AZURE_ENDPOINT }}
+          signing-account-name: ${{ secrets.AZURE_SIGNING_ACCOUNT_NAME }}
+          certificate-profile-name: ${{ secrets.AZURE_CERT_PROFILE_NAME }}
+          files-folder: ${{ github.workspace }}\apps\installer-stub\dist
+          files-folder-filter: "*.exe,*.dll"
+          files-folder-recurse: true
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          timeout: 1800
+      - name: Wait before Azure signing retry 3
+        if: needs.detect-secrets.outputs.is_release == 'true' && steps.sign_windows_1.outcome == 'failure' && steps.sign_windows_2.outcome == 'failure'
+        shell: pwsh
+        run: Start-Sleep -Seconds 30
+      - name: Sign Windows artifacts (attempt 3)
+        if: needs.detect-secrets.outputs.is_release == 'true' && steps.sign_windows_1.outcome == 'failure' && steps.sign_windows_2.outcome == 'failure'
+        timeout-minutes: 30
+        uses: Azure/trusted-signing-action@b443cf8ea4124818d2ea9f043cba29fc3ec47b16 # ratchet:Azure/trusted-signing-action@v1.2.0
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ secrets.AZURE_ENDPOINT }}
+          signing-account-name: ${{ secrets.AZURE_SIGNING_ACCOUNT_NAME }}
+          certificate-profile-name: ${{ secrets.AZURE_CERT_PROFILE_NAME }}
+          files-folder: ${{ github.workspace }}\apps\installer-stub\dist
+          files-folder-filter: "*.exe,*.dll"
+          files-folder-recurse: true
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          timeout: 1800
+      - name: Assert Windows signer identity
+        if: needs.detect-secrets.outputs.is_release == 'true'
+        shell: pwsh
+        working-directory: apps/installer-stub
+        env:
+          AZURE_EXPECTED_PUBLISHER_NAME: ${{ secrets.AZURE_EXPECTED_PUBLISHER_NAME }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $expectedPublisher = $env:AZURE_EXPECTED_PUBLISHER_NAME
+          if ([string]::IsNullOrWhiteSpace($expectedPublisher)) {
+            throw "AZURE_EXPECTED_PUBLISHER_NAME is required for Windows signer verification."
+          }
+
+          # Azure Trusted Signing was configured (above) to recursively sign
+          # *.exe AND *.dll. Verify both classes — a partial DLL signing
+          # failure must not be allowed to slip through and ship in latest.yml.
+          $installers = Get-ChildItem -Path dist -Filter *.exe -File
+          if ($installers.Count -eq 0) {
+            throw "No Windows installer .exe found in dist."
+          }
+          $payloads = Get-ChildItem -Path dist -Include *.exe,*.dll -File -Recurse
+          if ($payloads.Count -eq 0) {
+            throw "No Windows signed payloads (.exe/.dll) found under dist."
+          }
+
+          foreach ($payload in $payloads) {
+            $signature = Get-AuthenticodeSignature -FilePath $payload.FullName
+            if ($signature.Status -ne "Valid") {
+              throw "Authenticode signature for $($payload.FullName) is $($signature.Status), expected Valid."
+            }
+            if ($null -eq $signature.SignerCertificate) {
+              throw "No signer certificate found for $($payload.FullName)."
+            }
+
+            $commonName = $signature.SignerCertificate.GetNameInfo(
+              [System.Security.Cryptography.X509Certificates.X509NameType]::SimpleName,
+              $false
+            )
+            if ($commonName -ne $expectedPublisher) {
+              throw "Signer CN '$commonName' does not match AZURE_EXPECTED_PUBLISHER_NAME '$expectedPublisher' for $($payload.FullName). Subject: $($signature.SignerCertificate.Subject)"
+            }
+          }
+      - name: Refresh Windows update manifest after signing
+        if: needs.detect-secrets.outputs.is_release == 'true'
+        working-directory: apps/installer-stub
+        run: bun scripts/refresh-latest-yml.js dist/latest.yml
+      - name: Assert Windows artifacts
+        shell: bash
+        working-directory: apps/installer-stub
+        run: |
+          shopt -s nullglob
+          installers=(dist/*.exe)
+          if [[ "${#installers[@]}" -eq 0 ]]; then
+            echo "Windows build did not produce an exe artifact" >&2
+            exit 1
+          fi
+
+          test -f dist/latest.yml
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # ratchet:actions/upload-artifact@v7
+        with:
+          name: installer-win
+          path: |
+            apps/installer-stub/dist/*.exe
+            apps/installer-stub/dist/latest.yml
+          retention-days: 14
+          if-no-files-found: error
+
+  build-linux:
+    needs: detect-secrets
+    runs-on: ubuntu-24.04
+    env:
+      WUPHF_RELEASE_MODE: ${{ needs.detect-secrets.outputs.release_mode }}
+      WUPHF_BUILD_CHANNEL: ${{ needs.detect-secrets.outputs.is_release == 'true' && 'rewrite' || 'dev' }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # ratchet:actions/setup-node@v6.4.0
+        with:
+          node-version: "20.x"
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # ratchet:oven-sh/setup-bun@v2.2.0
+        with:
+          bun-version: "1.1.38"
+      - name: Install workspace deps
+        run: bun install --frozen-lockfile
+      - name: Normalize package version from tag
+        if: needs.detect-secrets.outputs.is_release == 'true'
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          version="${tag%-rewrite}"
+          # Export for the same-step node process; ALSO write to GITHUB_ENV so
+          # subsequent steps see it. $GITHUB_ENV alone does not propagate to
+          # the current step's child processes.
+          export WUPHF_BUILD_VERSION="${version}"
+          echo "WUPHF_BUILD_VERSION=${version}" >> "${GITHUB_ENV}"
+          node apps/installer-stub/scripts/normalize-package-version.js
+      - name: Build Linux PR artifacts
+        if: needs.detect-secrets.outputs.is_release != 'true'
+        working-directory: apps/installer-stub
+        run: bun run build:linux
+      - name: Build Linux artifacts
+        if: needs.detect-secrets.outputs.is_release == 'true'
+        working-directory: apps/installer-stub
+        run: bun run build:linux
+      - name: Assert Linux artifacts
+        working-directory: apps/installer-stub
+        run: |
+          shopt -s nullglob
+          appimages=(dist/*.AppImage)
+          debs=(dist/*.deb)
+          if [[ "${#appimages[@]}" -eq 0 || "${#debs[@]}" -eq 0 ]]; then
+            echo "Linux build did not produce both AppImage and deb artifacts" >&2
+            exit 1
+          fi
+
+          test -f dist/latest-linux.yml
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # ratchet:actions/upload-artifact@v7
+        with:
+          name: installer-linux
+          path: |
+            apps/installer-stub/dist/*.AppImage
+            apps/installer-stub/dist/*.deb
+            apps/installer-stub/dist/latest-linux.yml
+          retention-days: 14
+          if-no-files-found: error
+
+  publish:
+    needs:
+      - detect-secrets
+      - build-mac
+      - build-win
+      - build-linux
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-24.04
+    environment: production-release
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
+      - name: Assert release tag still matches workflow commit
+        run: |
+          if ! git fetch --force origin "refs/tags/${TAG}:refs/tags/${TAG}"; then
+            echo "tag has moved since workflow started; aborting to avoid clobbering." >&2
+            exit 1
+          fi
+
+          current_tag_sha="$(git rev-parse "refs/tags/${TAG}^{commit}")"
+          if [[ "${current_tag_sha}" != "${GITHUB_SHA}" ]]; then
+            echo "tag has moved since workflow started; aborting to avoid clobbering." >&2
+            echo "workflow commit: ${GITHUB_SHA}" >&2
+            echo "current tag commit: ${current_tag_sha}" >&2
+            exit 1
+          fi
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # ratchet:actions/setup-node@v6.4.0
+        with:
+          node-version: "20.x"
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # ratchet:oven-sh/setup-bun@v2.2.0
+        with:
+          bun-version: "1.1.38"
+      - name: Install workspace deps
+        run: bun install --frozen-lockfile
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # ratchet:actions/download-artifact@v8
+        with:
+          pattern: installer-*
+          path: release-assets
+          merge-multiple: true
+      - name: Assert release asset set
+        run: |
+          shopt -s nullglob
+          mac_dmgs=(release-assets/*.dmg)
+          mac_zips=(release-assets/*.zip)
+          win_installers=(release-assets/*.exe)
+          linux_appimages=(release-assets/*.AppImage)
+          linux_debs=(release-assets/*.deb)
+
+          if [[ "${#mac_dmgs[@]}" -eq 0 || "${#mac_zips[@]}" -eq 0 ]]; then
+            echo "Missing required macOS release artifacts" >&2
+            exit 1
+          fi
+
+          if [[ "${#win_installers[@]}" -eq 0 ]]; then
+            echo "Missing required Windows release artifact" >&2
+            exit 1
+          fi
+
+          if [[ "${#linux_appimages[@]}" -eq 0 || "${#linux_debs[@]}" -eq 0 ]]; then
+            echo "Missing required Linux release artifacts" >&2
+            exit 1
+          fi
+
+          test -f release-assets/latest-mac.yml
+          test -f release-assets/latest.yml
+          test -f release-assets/latest-linux.yml
+      - name: Verify release update manifests
+        working-directory: apps/installer-stub
+        env:
+          WUPHF_DIST_DIR: ${{ github.workspace }}/release-assets
+        run: bash scripts/verify-latest-yml.sh "${TAG}"
+      - name: Compute release checksums
+        run: |
+          cd release-assets
+          mapfile -d '' assets < <(find . -maxdepth 1 -type f \( \
+            -name '*.dmg' -o \
+            -name '*.zip' -o \
+            -name '*.exe' -o \
+            -name '*.AppImage' -o \
+            -name '*.deb' -o \
+            -name 'latest.yml' -o \
+            -name 'latest-mac.yml' -o \
+            -name 'latest-linux.yml' \
+          \) -printf '%P\0' | sort -z)
+
+          if [[ "${#assets[@]}" -eq 0 ]]; then
+            echo "No release assets downloaded" >&2
+            exit 1
+          fi
+
+          printf "%s\0" "${assets[@]}" | xargs -0 sha256sum > release-checksums.txt
+      - name: Write release notes
+        run: |
+          {
+            echo "Draft rewrite release for WUPHF installer-stub ${TAG}."
+            echo
+            echo "macOS and Windows artifacts are signed in the platform build jobs. Linux artifacts are unsigned; verify them with the SHA-256 checksums below."
+            echo
+            echo "## SHA-256"
+            echo '```'
+            cat release-assets/release-checksums.txt
+            echo '```'
+          } > release-notes.md
+      - name: Create or update draft GitHub release
+        run: |
+          shopt -s nullglob
+          assets=(
+            release-assets/*.dmg
+            release-assets/*.zip
+            release-assets/*.exe
+            release-assets/*.AppImage
+            release-assets/*.deb
+            release-assets/latest.yml
+            release-assets/latest-mac.yml
+            release-assets/latest-linux.yml
+            release-assets/release-checksums.txt
+          )
+
+          if [[ "${#assets[@]}" -eq 0 ]]; then
+            echo "No release assets to upload" >&2
+            exit 1
+          fi
+
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            is_draft="$(gh release view "${TAG}" --json isDraft -q '.isDraft')"
+            if [[ "${is_draft}" != "true" ]]; then
+              echo "Refusing to clobber published release ${TAG}. Bump the tag and ship a new release." >&2
+              exit 1
+            fi
+            gh release edit "${TAG}" --title "${TAG}" --notes-file release-notes.md
+            gh release upload "${TAG}" "${assets[@]}" --clobber
+          else
+            gh release create "${TAG}" "${assets[@]}" --verify-tag --draft --title "${TAG}" --notes-file release-notes.md
+          fi
+
+          mapfile -t expected_asset_names < <(printf "%s\n" "${assets[@]##*/}" | sort)
+          mapfile -t uploaded_asset_names < <(gh release view "${TAG}" --json assets --jq '.assets[].name' | sort)
+
+          missing=()
+          for expected in "${expected_asset_names[@]}"; do
+            found=false
+            for uploaded in "${uploaded_asset_names[@]}"; do
+              if [[ "${uploaded}" == "${expected}" ]]; then
+                found=true
+                break
+              fi
+            done
+            if [[ "${found}" != "true" ]]; then
+              missing+=("${expected}")
+            fi
+          done
+
+          unexpected=()
+          for uploaded in "${uploaded_asset_names[@]}"; do
+            found=false
+            for expected in "${expected_asset_names[@]}"; do
+              if [[ "${uploaded}" == "${expected}" ]]; then
+                found=true
+                break
+              fi
+            done
+            if [[ "${found}" != "true" ]]; then
+              unexpected+=("${uploaded}")
+            fi
+          done
+
+          if [[ "${#missing[@]}" -gt 0 || "${#unexpected[@]}" -gt 0 ]]; then
+            if [[ "${#missing[@]}" -gt 0 ]]; then
+              printf "Release %s is missing expected uploaded asset(s): %s\n" "${TAG}" "${missing[*]}" >&2
+            else
+              printf "Release %s is missing expected uploaded asset(s): none\n" "${TAG}" >&2
+            fi
+
+            if [[ "${#unexpected[@]}" -gt 0 ]]; then
+              printf "Release %s contains unexpected uploaded asset(s): %s\n" "${TAG}" "${unexpected[*]}" >&2
+            else
+              printf "Release %s contains unexpected uploaded asset(s): none\n" "${TAG}" >&2
+            fi
+            exit 1
+          fi
