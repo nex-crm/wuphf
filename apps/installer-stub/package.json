@@ -33,7 +33,7 @@
     "electron-updater": "6.8.5"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.4.13",
+    "@biomejs/biome": "2.4.15",
     "@electron/asar": "3.4.1",
     "@types/node": "22.10.0",
     "electron": "42.0.1",
