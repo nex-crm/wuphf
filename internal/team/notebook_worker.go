@@ -107,6 +107,17 @@ func (w *WikiWorker) NotebookWrite(ctx context.Context, slug, path, content, mod
 	}
 }
 
+// NotebookCommitCount returns the number of successful notebook writes
+// since this worker started. Monotonic; never decreases. Used by
+// PromotionSweep's content-volume gate to skip iterations when no
+// drafted notebook content has changed since the last sweep.
+func (w *WikiWorker) NotebookCommitCount() int {
+	if w == nil {
+		return 0
+	}
+	return int(w.notebookCommits.Load())
+}
+
 // NotebookList returns the agent's notebook entries newest-first. Empty slice
 // (never nil) when the agent has no entries — callers can marshal as JSON
 // without null-guarding.

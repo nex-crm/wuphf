@@ -218,17 +218,8 @@ type WikiWorker struct {
 	// CommitNotebook calls. Used by PromotionSweep as the
 	// "did anything new land?" gate so it skips iterations when no
 	// drafted notebook content has changed since the last sweep.
+	// Reader/incrementer live in notebook_worker.go.
 	notebookCommits atomic.Int64
-}
-
-// NotebookCommitCount returns the number of successful notebook writes
-// since this worker started. Monotonic; never decreases. Used by
-// PromotionSweep's content-volume gate.
-func (w *WikiWorker) NotebookCommitCount() int {
-	if w == nil {
-		return 0
-	}
-	return int(w.notebookCommits.Load())
 }
 
 // NewWikiWorker returns a worker ready to Start. The publisher is optional;
