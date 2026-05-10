@@ -212,14 +212,8 @@ type WikiWorker struct {
 	// drainDone closes when the drain goroutine has fully exited (including
 	// its own sideGoroutines.Wait). Tests register `t.Cleanup(func() {
 	// cancel(); <-worker.Done() })` so tempdir removal is deterministic.
-	drainDone chan struct{}
-
-	// notebookCommits is a monotonic counter of successful notebook
-	// CommitNotebook calls. Used by PromotionSweep as the
-	// "did anything new land?" gate so it skips iterations when no
-	// drafted notebook content has changed since the last sweep.
-	// Reader/incrementer live in notebook_worker.go.
-	notebookCommits atomic.Int64
+	drainDone       chan struct{}
+	notebookCommits atomic.Int64 // PromotionSweep gate; reader: NotebookCommitCount
 }
 
 // NewWikiWorker returns a worker ready to Start. The publisher is optional;
