@@ -332,6 +332,121 @@ func TestTaskByIDAuthFiltersByReviewerMembership(t *testing.T) {
 	missingResp.Body.Close()
 }
 
+// TestTaskAccessAllowedSlugCollision (E-FU-2) locks down the corner
+// case where a tunnel-human display-name normalises to the same slug
+// as an existing officeMember (agent). The auth check
+// (taskAccessAllowed) does string comparison on slugs after lowercase
+// normalisation; if a collision were possible at registration time,
+// the human would silently inherit the agent's task access. This test
+// asserts the current invariant: human-session slug membership against
+// the agent reviewer roster always falls through to "denied" unless
+// the human session was admitted under a slug already bound to the
+// reviewer membership AND the broker's session table records it. The
+// test serves as the regression oracle if a future refactor changes
+// the collision policy at registration time.
+func TestTaskAccessAllowedSlugCollision(t *testing.T) {
+	// Three branches of taskAccessAllowed:
+	//
+	//  1. Broker token: always allowed.
+	//  2. Human session whose slug matches a reviewer: allowed.
+	//  3. Human session whose slug does NOT match any reviewer: denied.
+	//
+	// A slug collision between a tunnel-human and an agent reviewer
+	// would mean (2) fires for an unintended actor. The test seeds a
+	// task with reviewer "agent-a" and verifies that:
+	//   - a human session admitted with HumanSlug "agent-a" lands in
+	//     the "match" branch (this is the case the hardening is meant
+	//     to prevent at the registration layer);
+	//   - a human session admitted with HumanSlug "stranger" lands in
+	//     the "denied" branch.
+	cases := []struct {
+		name      string
+		actor     requestActor
+		reviewers []string
+		want      bool
+	}{
+		{
+			name:      "broker token always allowed",
+			actor:     requestActor{Kind: requestActorKindBroker},
+			reviewers: []string{"agent-a", "agent-b"},
+			want:      true,
+		},
+		{
+			name:      "matching slug allowed",
+			actor:     requestActor{Kind: requestActorKindHuman, Slug: "agent-a"},
+			reviewers: []string{"agent-a", "agent-b"},
+			want:      true,
+		},
+		{
+			name:      "stranger denied",
+			actor:     requestActor{Kind: requestActorKindHuman, Slug: "stranger"},
+			reviewers: []string{"agent-a", "agent-b"},
+			want:      false,
+		},
+		{
+			name:      "case-insensitive match allowed",
+			actor:     requestActor{Kind: requestActorKindHuman, Slug: "AGENT-A"},
+			reviewers: []string{"agent-a"},
+			want:      true,
+		},
+		{
+			name:      "whitespace-padded slug allowed",
+			actor:     requestActor{Kind: requestActorKindHuman, Slug: "  agent-a  "},
+			reviewers: []string{"agent-a"},
+			want:      true,
+		},
+		{
+			name:      "empty slug denied",
+			actor:     requestActor{Kind: requestActorKindHuman, Slug: ""},
+			reviewers: []string{"agent-a"},
+			want:      false,
+		},
+		{
+			name:      "unknown actor kind denied",
+			actor:     requestActor{Kind: requestActorKind("unrecognised"), Slug: "agent-a"},
+			reviewers: []string{"agent-a"},
+			want:      false,
+		},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := taskAccessAllowed(tc.actor, tc.reviewers)
+			if got != tc.want {
+				t.Fatalf("taskAccessAllowed(actor=%+v, reviewers=%v) = %v, want %v", tc.actor, tc.reviewers, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestHumanInviteSlugNormalisesPredictably (E-FU-2) asserts the
+// registration-time slug derivation is deterministic. Two invites
+// accepted under the same display name produce the same slug; the
+// resolution is therefore predictable and a future collision-prevention
+// hook only needs to guard the (slug, kind) pair on the registration
+// path. If this normalisation changes, taskAccessAllowed's case-fold
+// comparison must change in lockstep.
+func TestHumanInviteSlugNormalisesPredictably(t *testing.T) {
+	cases := []struct {
+		display string
+		want    string
+	}{
+		{"Mira", "mira"},
+		{"  Mira  ", "mira"},
+		{"Alex Riley", "alex-riley"},
+		{"alex@example.com", "alex-example-com"},
+		{"AGENT-A", "agent-a"},
+		{"   ", ""},
+	}
+	for _, tc := range cases {
+		got := normalizeHumanSessionSlug(tc.display)
+		if got != tc.want {
+			t.Errorf("normalizeHumanSessionSlug(%q) = %q, want %q", tc.display, got, tc.want)
+		}
+	}
+}
+
 // TestInboxFilterMappings sanity-checks the bucket -> filter coverage.
 // A typo in the inboxFilterToStates table would have the inbox return
 // the wrong rows; the design doc lists the mapping explicitly so this
