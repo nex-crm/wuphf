@@ -1,5 +1,9 @@
 # Runner image maintenance:
-# - macOS release signing/notarization: macos-14. REVIEW BY 2026-06-01.
+# - macOS release signing/notarization: macos-15. REVIEW BY 2026-12-01.
+#   (Bumped from macos-14 in PR #780: dmg-builder@1.2.0 + hdiutil on the
+#   macos-14 image consistently fails with `Device not configured` even
+#   after multiple workflow reruns. macos-15 image has the newer
+#   diskarbitrationd that doesn't exhibit the issue.)
 # - Windows signing: windows-2022. REVIEW BY 2026-09-01.
 # - Linux build/publish helpers: ubuntu-24.04. REVIEW BY 2026-09-01.
 # See apps/installer-stub/docs/runbooks/runner-image-maintenance.md before
@@ -103,7 +107,7 @@ jobs:
     needs:
       - detect-secrets
       - installer-invariants
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 60
     environment:
       name: ${{ needs.detect-secrets.outputs.release_mode == 'production' && 'production-release' || 'installer-pr' }}
