@@ -585,7 +585,7 @@ jobs:
       - name: Write release notes
         run: |
           {
-            echo "Draft rewrite release for WUPHF installer-stub ${TAG}."
+            echo "Rewrite release for WUPHF installer-stub ${TAG}."
             echo
             echo "macOS and Windows artifacts are signed in the platform build jobs. Linux artifacts are unsigned; verify them with the SHA-256 checksums below."
             echo
@@ -658,7 +658,10 @@ jobs:
             gh release create "${TAG}" "${assets[@]}" --verify-tag --draft --title "${TAG}" --notes-file release-notes.md
           fi
 
-          mapfile -t expected_asset_names < <(printf "%s\n" "${assets[@]##*/}" | sort)
+          printf "%s\n" "${assets[@]##*/}" | sort > expected-release-assets.txt
+      - name: Verify draft contains all expected assets
+        run: |
+          mapfile -t expected_asset_names < expected-release-assets.txt
           mapfile -t uploaded_asset_names < <(gh release view "${TAG}" --json assets --jq '.assets[].name' | sort)
 
           missing=()
@@ -703,3 +706,6 @@ jobs:
             fi
             exit 1
           fi
+      - name: Publish verified GitHub release
+        if: needs.detect-secrets.outputs.is_release == 'true' && success()
+        run: gh release edit "${TAG}" --draft=false

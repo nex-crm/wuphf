@@ -40,7 +40,7 @@ ship a new higher version tag and fix forward.
 | `Assert release asset set` | One platform job did not upload all expected artifacts | Rerun or fix that platform job before rerunning publish |
 | `Verify release update manifests` | Manifest sha512/size does not match final signed bytes | Confirm the post-sign/post-staple refresh step ran after signing, then rebuild that platform |
 | `gh release create` fails with missing tag | The remote tag was deleted or the workflow was run on the wrong ref | Recreate the intended tag at the reviewed commit or bump to a new version tag |
-| `gh release upload` fails, returns 5xx, or leaves partial assets | GitHub API outage/rate limit or network failure | Keep the release draft and rerun publish. The workflow uses `--clobber` and then asserts all expected assets are present |
+| `gh release upload` fails, returns 5xx, or leaves partial assets | GitHub API outage/rate limit or network failure | Keep the release draft and rerun publish. The workflow uses `--clobber`, asserts all expected assets are present, then publishes automatically |
 
 ## Apple Notarytool Timeout
 
@@ -68,7 +68,8 @@ times out:
 ## Partial Draft Release Upload
 
 The publish job creates or updates a draft release, uploads all expected assets,
-and then checks GitHub's release asset inventory. Expected assets are:
+checks GitHub's release asset inventory, and then flips the verified draft to a
+published release automatically. Expected assets are:
 
 - `.dmg`
 - `.zip`
@@ -93,7 +94,8 @@ If upload fails midway:
    the freshly downloaded build artifacts.
 3. Do not manually upload a subset unless GitHub Actions is unavailable and the
    release manager can verify all asset hashes against `release-checksums.txt`.
-4. Publish only after the post-upload asset assertion passes.
+4. Do not manually publish the draft. The workflow publishes it automatically
+   after the post-upload asset assertion passes.
 
 ## Published Release Already Exists
 
@@ -133,8 +135,8 @@ human cancellation is the first containment step.
    ```
 
 4. Watch the new `Release Rewrite` workflow run from the start.
-5. Re-verify all platform artifacts and publish the draft only after the asset
-   assertion passes.
+5. Re-verify all platform artifacts and let the workflow publish the draft only
+   after the asset assertion passes.
 
 If the release was published, do not move the tag. Create a new higher tag.
 
