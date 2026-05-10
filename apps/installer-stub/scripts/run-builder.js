@@ -123,27 +123,38 @@ function appBuilderBinaryPath() {
   throw new Error(`app-builder binary not found. Checked: ${checkedPaths.join(", ")}`);
 }
 
+function sameResolvedPath(leftPath, rightPath) {
+  try {
+    return fs.realpathSync(leftPath) === fs.realpathSync(rightPath);
+  } catch {
+    return path.resolve(leftPath) === path.resolve(rightPath);
+  }
+}
+
 function ensureWorkspaceAppBuilderBinary() {
   const sourcePath = appBuilderBinaryPath();
   const expectedPath = appBuilderBinaryPathForPackageRoot(
     path.join(workspaceRoot, "node_modules", "app-builder-bin"),
   );
 
-  if (path.resolve(sourcePath) !== path.resolve(expectedPath) && !fs.existsSync(expectedPath)) {
+  if (!sameResolvedPath(sourcePath, expectedPath) && !fs.existsSync(expectedPath)) {
     try {
       fs.mkdirSync(path.dirname(expectedPath), { recursive: true });
+      fs.rmSync(expectedPath, { force: true });
       fs.copyFileSync(sourcePath, expectedPath);
       if (process.platform !== "win32") {
         fs.chmodSync(expectedPath, 0o755);
       }
+      return expectedPath;
     } catch (error) {
       console.warn(
         `Unable to materialize app-builder fallback at ${expectedPath}: ${error.message}`,
       );
+      return sourcePath;
     }
   }
 
-  return sourcePath;
+  return expectedPath;
 }
 
 function electronBuilderEnv() {
@@ -159,29 +170,55 @@ function electronBuilderEnv() {
 
   env.CUSTOM_APP_BUILDER_PATH = ensureWorkspaceAppBuilderBinary();
   env.WUPHF_BUILDER_CLI = builderCli;
+  env.WUPHF_WORKSPACE_ROOT = workspaceRoot;
 
   return env;
 }
 
 const builderBootstrap = `
+const fs = require("node:fs");
 const path = require("node:path");
 const builderCli = process.env.WUPHF_BUILDER_CLI;
+const workspaceRoot = process.env.WUPHF_WORKSPACE_ROOT;
 const appBuilderPath = process.env.CUSTOM_APP_BUILDER_PATH;
 
 if (appBuilderPath) {
-  const builderUtilPackage = require.resolve("builder-util/package.json", {
-    paths: [path.dirname(builderCli)],
-  });
-  const appBuilderModule = require.resolve("app-builder-bin", {
-    paths: [path.dirname(builderUtilPackage)],
-  });
+  const candidateRoots = [
+    process.cwd(),
+    workspaceRoot,
+    path.dirname(builderCli),
+  ].filter(Boolean);
 
-  require.cache[appBuilderModule] = {
-    id: appBuilderModule,
-    filename: appBuilderModule,
-    loaded: true,
-    exports: { appBuilderPath },
-  };
+  try {
+    const builderUtilPackage = require.resolve("builder-util/package.json", {
+      paths: [path.dirname(builderCli)],
+    });
+    candidateRoots.push(path.dirname(builderUtilPackage));
+  } catch {}
+
+  const appBuilderModules = new Set();
+
+  for (const root of candidateRoots) {
+    try {
+      appBuilderModules.add(require.resolve("app-builder-bin", { paths: [root] }));
+    } catch {}
+  }
+
+  for (const root of [process.cwd(), workspaceRoot].filter(Boolean)) {
+    const directModule = path.join(root, "node_modules", "app-builder-bin", "index.js");
+    if (fs.existsSync(directModule)) {
+      appBuilderModules.add(directModule);
+    }
+  }
+
+  for (const appBuilderModule of appBuilderModules) {
+    require.cache[appBuilderModule] = {
+      id: appBuilderModule,
+      filename: appBuilderModule,
+      loaded: true,
+      exports: { appBuilderPath },
+    };
+  }
 }
 
 process.argv = [process.execPath, builderCli, ...process.argv.slice(1)];
