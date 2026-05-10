@@ -248,7 +248,8 @@ describe("main bootstrap", () => {
     expect(electronMock.defaultSession.setPermissionRequestHandler).toHaveBeenCalledTimes(1);
     expect(electronMock.defaultSession.setPermissionCheckHandler).toHaveBeenCalledTimes(1);
 
-    const requestHandler = electronMock.defaultSession.setPermissionRequestHandler.mock.calls[0]?.[0] as
+    const requestHandler = electronMock.defaultSession.setPermissionRequestHandler.mock
+      .calls[0]?.[0] as
       | ((webContents: unknown, permission: string, callback: (granted: boolean) => void) => void)
       | undefined;
     if (requestHandler === undefined) {
