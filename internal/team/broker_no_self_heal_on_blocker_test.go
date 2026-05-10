@@ -55,7 +55,7 @@ func TestBlockTaskDoesNotTriggerSelfHealOnPRMergeBlocker(t *testing.T) {
 	// "missing skill" matches isCapabilityGapBlocker so under pre-Lane-A
 	// behavior this would have called the self-heal path. Lane A's gate
 	// short-circuits the call before it reaches the hook.
-	got, changed, err := b.BlockTask(task.ID, "builder", "missing skill: provider integration unavailable for this lane")
+	got, changed, err := b.BlockTask(task.ID, "builder", "missing skill: provider integration unavailable for this lane", "")
 	if err != nil {
 		t.Fatalf("BlockTask: %v", err)
 	}

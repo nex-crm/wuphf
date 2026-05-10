@@ -10,7 +10,16 @@ import (
 	"time"
 )
 
-func (b *Broker) BlockTask(taskID, actor, reason string) (teamTask, bool, error) {
+// BlockTask transitions a task into LifecycleStateBlockedOnPRMerge and
+// records the blocker reference (a PR id, a sibling task id, or any
+// free-form blocker token) into task.BlockedOn so unblockDependentsLocked
+// can fire the cascade unblock when the blocker resolves.
+//
+// blockerID is optional: pass "" for legacy callers that block a task
+// without a typed dependency (capability self-heal, manual hold). When
+// non-empty the value is normalised (TrimSpace) and appended to
+// task.BlockedOn unless it is already present.
+func (b *Broker) BlockTask(taskID, actor, reason, blockerID string) (teamTask, bool, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -23,6 +32,7 @@ func (b *Broker) BlockTask(taskID, actor, reason string) (teamTask, bool, error)
 		actor = "system"
 	}
 	reason = strings.TrimSpace(reason)
+	blockerID = strings.TrimSpace(blockerID)
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	for i := range b.tasks {
@@ -44,6 +54,21 @@ func (b *Broker) BlockTask(taskID, actor, reason string) (teamTask, bool, error)
 				task.Details = reason
 			case !strings.Contains(existing, reason):
 				task.Details = existing + "\n\n" + reason
+			}
+		}
+		// Record the blocker reference before the transition so the
+		// indexed lookup and downstream cascade observe the typed
+		// BlockedOn list under the same b.mu hold.
+		if blockerID != "" {
+			already := false
+			for _, existing := range task.BlockedOn {
+				if existing == blockerID {
+					already = true
+					break
+				}
+			}
+			if !already {
+				task.BlockedOn = append(task.BlockedOn, blockerID)
 			}
 		}
 		// Route the legacy block path through the lifecycle transition

@@ -2476,7 +2476,7 @@ func TestProcessDueTaskJobResumesRateLimitedBlockedTask(t *testing.T) {
 	if err != nil || reused {
 		t.Fatalf("ensure planned task: %v reused=%v", err, reused)
 	}
-	if _, changed, err := b.BlockTask(task.ID, "ceo", "Provider cooldown"); err != nil || !changed {
+	if _, changed, err := b.BlockTask(task.ID, "ceo", "Provider cooldown", ""); err != nil || !changed {
 		t.Fatalf("block task: %v changed=%v", err, changed)
 	}
 

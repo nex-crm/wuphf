@@ -220,3 +220,92 @@ func TestOnDecisionRecordedExtendsUnblockListener(t *testing.T) {
 		}
 	}
 }
+
+// TestBlockTaskWritesBlockedOnAndCascadeUnblocks asserts that the public
+// BlockTask entry point (used by the CLI / HTTP surface) records the
+// typed blocker reference into task.BlockedOn. The cascade is the
+// load-bearing acceptance: after the blocker resolves via
+// OnDecisionRecorded, the dependent task must transition out of
+// LifecycleStateBlockedOnPRMerge into review without any test-only
+// helper (SetTaskBlockedOnForTest) propping up the BlockedOn field.
+//
+// Pre-fix: BlockTask routed through transitionLifecycleLocked but never
+// wrote BlockedOn, so unblockDependentsLocked's BlockedOn sweep saw an
+// empty list and the cascade silently no-op'd. Tutorial 3 in the ICP
+// suite worked around the gap by calling SetTaskBlockedOnForTest
+// directly.
+func TestBlockTaskWritesBlockedOnAndCascadeUnblocks(t *testing.T) {
+	b := newTestBroker(t)
+	ensureTestMemberAccess(b, "client-loop", "operator", "Operator")
+	ensureTestMemberAccess(b, "client-loop", "builder", "Builder")
+
+	blocker, _, err := b.EnsureTask("client-loop", "Blocker work", "Land the API change", "builder", "operator", "")
+	if err != nil {
+		t.Fatalf("ensure blocker: %v", err)
+	}
+	dependent, _, err := b.EnsureTask("client-loop", "Dependent work", "Wire UI to the new API", "builder", "operator", "")
+	if err != nil {
+		t.Fatalf("ensure dependent: %v", err)
+	}
+
+	got, changed, err := b.BlockTask(dependent.ID, "operator", "waiting on blocker work to merge", blocker.ID)
+	if err != nil || !changed {
+		t.Fatalf("BlockTask: err=%v changed=%v", err, changed)
+	}
+	if len(got.BlockedOn) != 1 || got.BlockedOn[0] != blocker.ID {
+		t.Fatalf("expected BlockedOn=[%s], got %+v", blocker.ID, got.BlockedOn)
+	}
+	if got.LifecycleState != LifecycleStateBlockedOnPRMerge {
+		t.Fatalf("expected LifecycleStateBlockedOnPRMerge after BlockTask, got %q", got.LifecycleState)
+	}
+
+	// Idempotency: a second BlockTask call with the same blockerID must
+	// not duplicate the entry.
+	if _, _, err := b.BlockTask(dependent.ID, "operator", "still waiting", blocker.ID); err != nil {
+		t.Fatalf("BlockTask idempotent re-call: %v", err)
+	}
+	b.mu.Lock()
+	for i := range b.tasks {
+		if b.tasks[i].ID != dependent.ID {
+			continue
+		}
+		if len(b.tasks[i].BlockedOn) != 1 {
+			t.Fatalf("expected BlockedOn to stay length 1 after re-block, got %+v", b.tasks[i].BlockedOn)
+		}
+	}
+	b.mu.Unlock()
+
+	// Resolve the blocker. Mark blocker done so hasUnresolvedDepsLocked
+	// treats it as resolved, then fire OnDecisionRecorded which is the
+	// public entry the harness uses on a Decision Packet merge.
+	b.mu.Lock()
+	for i := range b.tasks {
+		if b.tasks[i].ID == blocker.ID {
+			b.tasks[i].status = "done"
+		}
+	}
+	b.mu.Unlock()
+
+	b.OnDecisionRecorded(blocker.ID)
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	var resolved *teamTask
+	for i := range b.tasks {
+		if b.tasks[i].ID == dependent.ID {
+			resolved = &b.tasks[i]
+		}
+	}
+	if resolved == nil {
+		t.Fatal("dependent task vanished")
+	}
+	if resolved.LifecycleState != LifecycleStateReview {
+		t.Fatalf("expected dependent to land in LifecycleStateReview after cascade, got %q", resolved.LifecycleState)
+	}
+	if len(resolved.BlockedOn) != 0 {
+		t.Fatalf("expected BlockedOn drained after cascade, got %+v", resolved.BlockedOn)
+	}
+	if resolved.blocked {
+		t.Fatal("expected dependent.blocked=false after cascade")
+	}
+}
