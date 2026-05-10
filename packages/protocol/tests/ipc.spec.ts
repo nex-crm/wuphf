@@ -1242,6 +1242,24 @@ describe("apiBootstrap codec", () => {
     });
   });
 
+  it.each([
+    ["http://127.0.0.1:80", "default-port URL"],
+    ["http://evil.com:8080", "non-loopback host"],
+    ["https://127.0.0.1:8080", "wrong protocol"],
+    ["http://127.0.0.1", "missing port"],
+  ])("rejects encoder-side broker_url that the decoder would reject (%s — %s)", (brokerUrl) => {
+    // Encoder/decoder symmetry: a TS producer MUST NOT be able to emit
+    // a wire value that this same codec would reject on read. Without
+    // this guard, a producer could write bytes that fail to round-trip,
+    // weakening the wire-shape stability story.
+    expect(() =>
+      apiBootstrapToJson({
+        token: asApiToken("tok-bootstrap-abcdef"),
+        brokerUrl,
+      }),
+    ).toThrow(/apiBootstrap\.broker_url/);
+  });
+
   it("rejects camelCase brokerUrl on the wire (lint-enforced shape mismatch)", () => {
     expect(() =>
       apiBootstrapFromJson({
