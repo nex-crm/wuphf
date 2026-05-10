@@ -27,7 +27,10 @@ describe("broker-stub-entry", () => {
     vi.resetModules();
     parentPortDescriptor = Object.getOwnPropertyDescriptor(process, "parentPort");
     originalSignalListeners = new Map(
-      SIGNALS.map((signal) => [signal, process.listeners(signal) as readonly ProcessListener[]]),
+      SIGNALS.map((signal) => [
+        signal,
+        process.listeners(signal) as unknown as readonly ProcessListener[],
+      ]),
     );
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     vi.spyOn(process, "exit").mockImplementation(((code?: string | number | null): never => {
@@ -105,7 +108,7 @@ function restoreParentPort(): void {
 function restoreSignalListeners(): void {
   for (const signal of SIGNALS) {
     const originalListeners = originalSignalListeners.get(signal) ?? [];
-    for (const listener of process.listeners(signal) as readonly ProcessListener[]) {
+    for (const listener of process.listeners(signal) as unknown as readonly ProcessListener[]) {
       if (!originalListeners.includes(listener)) {
         process.off(signal, listener);
       }
