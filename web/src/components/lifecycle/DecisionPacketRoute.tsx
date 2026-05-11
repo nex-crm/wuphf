@@ -1,6 +1,10 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { getDecisionPacket } from "../../api/lifecycle";
+import {
+  type DecisionAction,
+  getDecisionPacket,
+  postDecision,
+} from "../../api/lifecycle";
 import type { DecisionPacket } from "../../lib/types/lifecycle";
 import { DecisionPacketView } from "./DecisionPacketView";
 
@@ -42,6 +46,8 @@ export function DecisionPacketRoute({
     staleTime: 2_000,
   });
 
+  const queryClient = useQueryClient();
+
   function close() {
     if (onClose) {
       onClose();
@@ -52,15 +58,19 @@ export function DecisionPacketRoute({
     }
   }
 
-  // Stub action handlers. Real broker POST lands once the Go lifecycle
-  // transition layer (Lane A) merges. Until then we surface a console
-  // breadcrumb so QA traces show the click was registered.
-  function logAction(action: string) {
-    // TODO(post-lane-a): replace with broker POST + optimistic state update.
-    if (typeof window !== "undefined" && "console" in window) {
-      // eslint-disable-next-line no-console
-      console.info("[wuphf decision]", action, taskId);
-    }
+  const decisionMutation = useMutation({
+    mutationFn: (action: DecisionAction) => postDecision(taskId, action),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: ["lifecycle", "task", taskId],
+      });
+      void queryClient.invalidateQueries({ queryKey: ["lifecycle", "inbox"] });
+      void queryClient.invalidateQueries({ queryKey: ["inbox-badge"] });
+    },
+  });
+
+  function submitDecision(action: DecisionAction) {
+    decisionMutation.mutate(action);
   }
 
   if (forceState === "loading" || (query.isPending && !initialPacket)) {
@@ -104,11 +114,17 @@ export function DecisionPacketRoute({
       isStreaming={isStreaming}
       hasPersistenceError={hasPersistenceError}
       onClose={close}
-      onMerge={() => logAction("merge")}
-      onRequestChanges={() => logAction("request_changes")}
-      onDefer={() => logAction("defer")}
-      onBlock={() => logAction("block")}
-      onOpenInWorktree={() => logAction("open_worktree")}
+      onMerge={() => submitDecision("merge")}
+      onRequestChanges={() => submitDecision("request_changes")}
+      onDefer={() => submitDecision("defer")}
+      onBlock={() => {
+        /* block flow lives behind its own modal (Lane F follow-up). */
+      }}
+      onOpenInWorktree={() => {
+        if (typeof window !== "undefined" && packet?.worktreePath) {
+          window.open(`file://${packet.worktreePath}`, "_blank");
+        }
+      }}
     />
   );
 }

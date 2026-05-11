@@ -17,7 +17,7 @@ export const APP_PANEL_IDS = [
 
 export type AppPanelId = (typeof APP_PANEL_IDS)[number];
 
-export const FIRST_CLASS_APP_IDS = ["wiki"] as const;
+export const FIRST_CLASS_APP_IDS = ["wiki", "inbox"] as const;
 export type FirstClassAppId = (typeof FIRST_CLASS_APP_IDS)[number];
 
 export const WIKI_SURFACE_APP_IDS = ["wiki", "notebooks", "reviews"] as const;

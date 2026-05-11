@@ -1,5 +1,3 @@
-import type { KeyboardEvent } from "react";
-
 import type { InboxRow as InboxRowType } from "../../lib/types/lifecycle";
 import { LifecycleStatePill } from "./LifecycleStatePill";
 import { SeveritySummaryChip } from "./SeveritySummaryChip";
@@ -17,20 +15,10 @@ interface InboxRowProps {
  * NOT card grid.
  *
  * Touch target ≥44px (min-height enforced in lifecycle.css). Uses a
- * `<button>` element so keyboard nav + Enter both work without extra
- * ARIA. The row's color contrast survives both nex (light) and
- * nex-dark themes via the shared token set.
+ * `<button>` element so Enter/Space natively trigger onClick, no extra
+ * keydown handler needed.
  */
 export function InboxRow({ row, isSelected, onOpen, onSelect }: InboxRowProps) {
-  function handleKey(e: KeyboardEvent<HTMLButtonElement>) {
-    // Enter / Space already trigger click on buttons natively, so this
-    // handler is a no-op aside from the focus side-effect. Selection is
-    // tracked separately so ↑/↓ on the parent list moves selection
-    // without firing onOpen.
-    if (e.key === "Enter") {
-      onOpen(row.taskId);
-    }
-  }
   return (
     <button
       type="button"
@@ -39,7 +27,6 @@ export function InboxRow({ row, isSelected, onOpen, onSelect }: InboxRowProps) {
       data-task-id={row.taskId}
       onClick={() => onOpen(row.taskId)}
       onFocus={() => onSelect(row.taskId)}
-      onKeyDown={handleKey}
       aria-label={`Open task ${row.taskId}: ${row.title}`}
     >
       <span className="inbox-row-main">

@@ -145,6 +145,9 @@ func (s *osDecisionPacketStore) Write(taskID string, packet DecisionPacket) erro
 	if taskID == "" {
 		return fmt.Errorf("decision packet write: empty task id")
 	}
+	if !IsSafeTaskID(taskID) {
+		return fmt.Errorf("decision packet write: task id %q invalid", taskID)
+	}
 	dir := s.taskDir(taskID)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("decision packet mkdir %s: %w", dir, err)
@@ -170,6 +173,10 @@ func (s *osDecisionPacketStore) Write(taskID string, packet DecisionPacket) erro
 // JSON cannot be decoded.
 func (s *osDecisionPacketStore) Read(taskID string) (DecisionPacket, error) {
 	var packet DecisionPacket
+	taskID = strings.TrimSpace(taskID)
+	if !IsSafeTaskID(taskID) {
+		return packet, fmt.Errorf("decision packet read: task id %q invalid", taskID)
+	}
 	path := s.packetPath(taskID)
 	body, err := os.ReadFile(path)
 	if err != nil {
@@ -342,7 +349,8 @@ func (b *Broker) AppendDiffSummary(taskID string, files []DiffSummary) error {
 
 // AppendReviewerGrade is the multi-writer hot path. Each reviewer agent
 // calls in once with their grade; the broker serialises the appends via
-// b.mu. Emits review.submitted.
+// b.mu. Emits review.submitted. Mirrors into Lane D's routing-side
+// store so convergence runs on every grade.
 func (b *Broker) AppendReviewerGrade(taskID string, grade ReviewerGrade) error {
 	if b == nil {
 		return fmt.Errorf("append reviewer grade: nil broker")
@@ -362,17 +370,9 @@ func (b *Broker) AppendReviewerGrade(taskID string, grade ReviewerGrade) error {
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	packet := b.getOrInitPacketLocked(taskID)
-	packet.ReviewerGrades = append(packet.ReviewerGrades, grade)
-	b.stampLifecycleStateLocked(packet)
-	b.persistDecisionPacketLocked(taskID, *packet)
-	b.emitLifecycleManifestLocked(lifecycleManifestPayload{
-		Subkind:        LifecycleManifestReviewSubmitted,
-		TaskID:         taskID,
-		LifecycleState: packet.LifecycleState,
-		ReviewerSlug:   grade.ReviewerSlug,
-		Severity:       grade.Severity,
-	})
+	if err := b.appendReviewerGradeToPacketLocked(taskID, grade); err != nil {
+		return err
+	}
 	// Mirror into Lane D's routing-side store so the convergence rule
 	// runs on every grade. The routing helper is mutex-free under the
 	// already-held b.mu and skips re-canonicalising fields the packet
@@ -382,6 +382,37 @@ func (b *Broker) AppendReviewerGrade(taskID string, grade ReviewerGrade) error {
 			log.Printf("broker: routing-side mirror of grade for task %q failed: %v", taskID, err)
 		}
 	}
+	return nil
+}
+
+// appendReviewerGradeToPacketLocked records `grade` on the packet's
+// ReviewerGrades slice, replacing any existing entry for the same
+// reviewer slug (idempotent retries do NOT duplicate). Caller must
+// hold b.mu. Used by both AppendReviewerGrade (the public multi-writer
+// path) and the convergence sweeper's timeout filler so the packet and
+// routing stores stay in sync.
+func (b *Broker) appendReviewerGradeToPacketLocked(taskID string, grade ReviewerGrade) error {
+	packet := b.getOrInitPacketLocked(taskID)
+	replaced := false
+	for i, g := range packet.ReviewerGrades {
+		if normalizeReviewerSlug(g.ReviewerSlug) == normalizeReviewerSlug(grade.ReviewerSlug) {
+			packet.ReviewerGrades[i] = grade
+			replaced = true
+			break
+		}
+	}
+	if !replaced {
+		packet.ReviewerGrades = append(packet.ReviewerGrades, grade)
+	}
+	b.stampLifecycleStateLocked(packet)
+	b.persistDecisionPacketLocked(taskID, *packet)
+	b.emitLifecycleManifestLocked(lifecycleManifestPayload{
+		Subkind:        LifecycleManifestReviewSubmitted,
+		TaskID:         taskID,
+		LifecycleState: packet.LifecycleState,
+		ReviewerSlug:   grade.ReviewerSlug,
+		Severity:       grade.Severity,
+	})
 	return nil
 }
 
@@ -500,6 +531,10 @@ func (b *Broker) RegenerateOrMarkUnknown(taskID string) error {
 // failures, which is acceptable on the lifecycle hot path. Production
 // disk-full conditions are extremely rare; retries primarily protect
 // against transient EAGAIN / ENOSPC.
+//
+// TODO(v1.1): if disk-full latency turns out to matter in dogfood,
+// move attempts 2-3 onto a background goroutine and update the
+// retry-tests to wait deterministically on a sync hook.
 func (b *Broker) persistDecisionPacketLocked(taskID string, packet DecisionPacket) {
 	state := b.ensureDecisionPacketStateLocked()
 	var lastErr error
@@ -695,6 +730,11 @@ func (a recordDecisionAction) IsCanonical() bool {
 // records a free-form officeDecisionRecord). This entry point is the
 // human's resolution of one Decision Packet; ledger.RecordDecision is
 // the broker-wide audit log.
+// ErrUnknownDecisionAction is returned when rawAction does not map to
+// a canonical recordDecisionAction value. Wraps the HTTP layer that
+// surfaces it as 400 to distinguish from internal failures (500).
+var ErrUnknownDecisionAction = errors.New("record decision: action is not canonical")
+
 func (b *Broker) RecordTaskDecision(taskID, rawAction string) error {
 	if b == nil {
 		return fmt.Errorf("record decision: nil broker")
@@ -703,19 +743,28 @@ func (b *Broker) RecordTaskDecision(taskID, rawAction string) error {
 	if taskID == "" {
 		return fmt.Errorf("record decision: empty task id")
 	}
+	if !IsSafeTaskID(taskID) {
+		return fmt.Errorf("record decision: task id %q invalid", taskID)
+	}
 	action := recordDecisionAction(strings.TrimSpace(rawAction))
 	if !action.IsCanonical() {
-		return fmt.Errorf("record decision: action %q is not canonical", rawAction)
+		return fmt.Errorf("%w: %q", ErrUnknownDecisionAction, rawAction)
 	}
 	target, reason := lifecycleStateForDecisionAction(action)
 	// TODO(v1.1): auto-merge evaluator — once a safe-class definition
 	// (e.g. wiki-only edits with all green checks and zero
 	// critical/major grades) lands, route merge actions through the
 	// evaluator before falling back to direct lifecycle transition.
-	if err := b.TransitionLifecycle(taskID, target, reason); err != nil {
+	//
+	// Hold b.mu across the transition + packet stamp + persist so the
+	// running-flush timer / convergence sweeper cannot fire between
+	// transition and stamp and overwrite the just-stamped packet with
+	// a pre-decision copy (code-reviewer H3).
+	b.mu.Lock()
+	if _, err := b.transitionLifecycleLocked(taskID, target, reason); err != nil {
+		b.mu.Unlock()
 		return fmt.Errorf("record decision: transition: %w", err)
 	}
-	b.mu.Lock()
 	packet := b.getOrInitPacketLocked(taskID)
 	b.stampLifecycleStateLocked(packet)
 	b.persistDecisionPacketLocked(taskID, *packet)
@@ -759,8 +808,15 @@ func lifecycleStateForDecisionAction(action recordDecisionAction) (LifecycleStat
 // wikiPromotionPath returns the team/-rooted relative path the merged
 // Decision Packet is promoted to. Lives under team/decisions/ so the
 // existing wiki path validator (validateArticlePath) accepts it.
+// Returns the empty string when taskID fails the safe-id allowlist;
+// callers should treat empty as "skip wiki promotion" rather than
+// fabricate a path from untrusted input.
 func wikiPromotionPath(taskID string) string {
-	return filepath.ToSlash(filepath.Join("team", "decisions", strings.TrimSpace(taskID)+".md"))
+	taskID = strings.TrimSpace(taskID)
+	if !IsSafeTaskID(taskID) {
+		return ""
+	}
+	return filepath.ToSlash(filepath.Join("team", "decisions", taskID+".md"))
 }
 
 // renderWikiPromotion produces the markdown body for a merged Decision
@@ -884,6 +940,10 @@ func (b *Broker) writeWikiPromotionLocked(taskID string, packet DecisionPacket) 
 	}
 	body := renderWikiPromotion(packet)
 	relPath := wikiPromotionPath(taskID)
+	if relPath == "" {
+		log.Printf("broker: wiki promotion skipped for task %q (invalid id)", taskID)
+		return
+	}
 	commitMsg := fmt.Sprintf("decision: promote %s on merge", taskID)
 	ctx := b.wikiPromotionContext()
 	// Run the wiki write off-lock so a slow git commit cannot block

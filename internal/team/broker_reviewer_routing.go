@@ -330,6 +330,13 @@ func (b *Broker) evaluateConvergenceLocked(taskID string) error {
 			SubmittedAt:  now,
 		}
 		b.reviewerGradesByTask[taskID] = append(b.reviewerGradesByTask[taskID], filler)
+		// Mirror the filler into the Decision Packet so the UI shows the
+		// skipped-slot row alongside the real grades. Without this the
+		// packet's ReviewerGrades slice diverges from the routing store
+		// and the Decision Packet view renders only the two real grades.
+		if err := b.appendReviewerGradeToPacketLocked(taskID, filler); err != nil {
+			log.Printf("broker: append timeout filler to packet task=%q reviewer=%q: %v", taskID, slug, err)
+		}
 		b.postReviewTimeoutChannelMessageLocked(task, slug, reasoning)
 	}
 
@@ -511,7 +518,10 @@ func (b *Broker) extractRoutingSignalsLocked(task *teamTask) ReviewerRoutingSign
 
 // taskWorktreeDiffLocked runs `git diff --name-only` against the task's
 // worktree and parent branch. Returns nil on any error; logging is
-// best-effort only.
+// best-effort only. Hard 5s timeout — this runs under b.mu on the
+// lifecycle hot path, so we cannot afford the 60s general-purpose
+// budget here. A slow filesystem yields nil and routing falls back to
+// TaskTags + ToolNames instead of pinning the broker mutex.
 func (b *Broker) taskWorktreeDiffLocked(task *teamTask) []string {
 	worktreePath := strings.TrimSpace(task.WorktreePath)
 	if worktreePath == "" {
@@ -521,7 +531,7 @@ func (b *Broker) taskWorktreeDiffLocked(task *teamTask) []string {
 	if parent == "" {
 		parent = "HEAD"
 	}
-	out, err := runGitOutput(worktreePath, "diff", "--name-only", parent)
+	out, err := runGitOutputWithTimeout(worktreePath, 5*time.Second, "diff", "--name-only", parent)
 	if err != nil {
 		log.Printf("broker: reviewer routing: diff failed for task %q (worktree=%q parent=%q): %v",
 			task.ID, worktreePath, parent, err)

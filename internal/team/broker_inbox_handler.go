@@ -28,6 +28,8 @@ package team
 
 import (
 	"encoding/json"
+	"errors"
+	"log"
 	"net/http"
 	"strings"
 )
@@ -92,9 +94,20 @@ func (b *Broker) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 	// land on the wrong handler.
 	if strings.Contains(rest, "/") {
 		segments := strings.SplitN(rest, "/", 2)
-		if len(segments) == 2 && segments[1] == "block" {
-			b.handleTaskBlock(w, r, actor, strings.TrimSpace(segments[0]))
+		taskID := strings.TrimSpace(segments[0])
+		if !IsSafeTaskID(taskID) {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid task id"})
 			return
+		}
+		if len(segments) == 2 {
+			switch segments[1] {
+			case "block":
+				b.handleTaskBlock(w, r, actor, taskID)
+				return
+			case "decision":
+				b.handleTaskDecision(w, r, actor, taskID)
+				return
+			}
 		}
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return
@@ -107,6 +120,10 @@ func (b *Broker) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimSpace(rest)
 	if _, reserved := reservedTaskSubpath[id]; reserved {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	if !IsSafeTaskID(id) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid task id"})
 		return
 	}
 
@@ -186,7 +203,8 @@ func (b *Broker) handleTaskBlock(w http.ResponseWriter, r *http.Request, actor r
 	}
 	task, ok, err := b.BlockTask(id, actorSlug, reason)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		log.Printf("broker: block task %q: %v", id, err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
 		return
 	}
 	if !ok {
@@ -194,6 +212,68 @@ func (b *Broker) handleTaskBlock(w http.ResponseWriter, r *http.Request, actor r
 		return
 	}
 	writeJSON(w, http.StatusOK, task)
+}
+
+// handleTaskDecision serves POST /tasks/{id}/decision. Body shape:
+//
+//	{"action": "merge" | "request_changes" | "defer", "actor": "<slug>"}
+//
+// Returns 200 with the recorded decision summary, 400 on invalid
+// action / unknown task, 403 when the human session has no reviewer
+// access. The buttons in the Decision Packet view post here.
+func (b *Broker) handleTaskDecision(w http.ResponseWriter, r *http.Request, actor requestActor, id string) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if id == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "task id required"})
+		return
+	}
+	var body struct {
+		Action string `json:"action"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json body"})
+		return
+	}
+	action := strings.TrimSpace(strings.ToLower(body.Action))
+	if action == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "action required"})
+		return
+	}
+
+	// Auth: broker token always; human session must be in the task's
+	// reviewer list. Snapshot reviewers under the lock for a stable check.
+	b.mu.Lock()
+	task := b.findTaskByIDLocked(id)
+	if task == nil {
+		b.mu.Unlock()
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "task not found"})
+		return
+	}
+	reviewers := append([]string(nil), task.Reviewers...)
+	b.mu.Unlock()
+	if !taskAccessAllowed(actor, reviewers) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
+		return
+	}
+
+	if err := b.RecordTaskDecision(id, action); err != nil {
+		if errors.Is(err, ErrUnknownDecisionAction) {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		log.Printf("broker: record decision task=%q action=%q: %v", id, action, err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{
+		"taskId": id,
+		"action": action,
+		"status": "recorded",
+	})
 }
 
 // taskAccessAllowed encodes the auth matrix from the design doc:

@@ -388,7 +388,6 @@ func (t *teamTask) UnmarshalJSON(data []byte) error {
 	t.Reviewers = w.Reviewers
 	t.blocked = w.Blocked
 	t.LifecycleState = w.LifecycleState
-	t.Reviewers = w.Reviewers
 	t.Tags = w.Tags
 	t.ReviewStartedAt = w.ReviewStartedAt
 	t.ReviewTimeoutSeconds = w.ReviewTimeoutSeconds

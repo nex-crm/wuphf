@@ -9,7 +9,7 @@ import {
 import { useQuery } from "@tanstack/react-query";
 
 import { getInboxPayload } from "../../api/lifecycle";
-import { POPULATED_INBOX } from "../../lib/mocks/decisionPackets";
+import { EMPTY_INBOX, POPULATED_INBOX } from "../../lib/mocks/decisionPackets";
 import {
   FILTER_TO_STATES,
   INBOX_FILTERS,
@@ -81,7 +81,13 @@ export function DecisionInbox({
     return () => window.clearTimeout(t);
   }, [isLoading]);
 
-  const payload = query.data ?? POPULATED_INBOX;
+  // Real data first; POPULATED_INBOX is reachable only via the
+  // screenshot-harness force-state escape. We never silently render
+  // fixtures over a real fetch error — `query.isError` is handled by
+  // the error state branch below.
+  const payload: InboxPayload =
+    query.data ??
+    (forceState === "populated" ? POPULATED_INBOX : EMPTY_INBOX);
   const filteredRows = useMemo(
     () => filterRows(payload.rows, filter),
     [payload.rows, filter],
@@ -105,7 +111,7 @@ export function DecisionInbox({
         return;
       }
       if (typeof window !== "undefined") {
-        window.location.hash = `#/task/${taskId}`;
+        window.location.hash = `#/task/${encodeURIComponent(taskId)}`;
       }
     },
     [onOpenTask],
@@ -293,8 +299,12 @@ function hasBackHistory(): boolean {
 }
 
 function focusRow(taskId: string) {
+  const escaped =
+    typeof CSS !== "undefined" && typeof CSS.escape === "function"
+      ? CSS.escape(taskId)
+      : taskId.replace(/["\\\]]/g, "\\$&");
   const el = document.querySelector<HTMLButtonElement>(
-    `.inbox-row[data-task-id="${taskId}"]`,
+    `.inbox-row[data-task-id="${escaped}"]`,
   );
   el?.focus();
 }

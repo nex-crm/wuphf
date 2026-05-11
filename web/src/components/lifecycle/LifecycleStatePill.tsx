@@ -25,7 +25,7 @@ export function LifecycleStatePill({ state }: LifecycleStatePillProps) {
     color: text,
   };
   return (
-    <output
+    <span
       className="lifecycle-state-pill"
       style={style}
       data-state={state}
@@ -33,6 +33,6 @@ export function LifecycleStatePill({ state }: LifecycleStatePillProps) {
     >
       <span className="dot" aria-hidden="true" />
       {label}
-    </output>
+    </span>
   );
 }

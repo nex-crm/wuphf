@@ -15,7 +15,12 @@ import {
   getInboxPayloadMock,
 } from "../lib/mocks/decisionPackets";
 import type { DecisionPacket, InboxPayload } from "../lib/types/lifecycle";
-import { get } from "./client";
+import { get, post } from "./client";
+
+export type DecisionAction =
+  | "merge"
+  | "request_changes"
+  | "defer";
 
 const USE_MOCKS = true;
 
@@ -46,4 +51,22 @@ export async function getDecisionPacket(
     return getDecisionPacketMock(taskId);
   }
   return get<DecisionPacket>(`/tasks/${encodeURIComponent(taskId)}`);
+}
+
+/**
+ * POST a human decision (merge / request_changes / defer) for one task.
+ * The broker transitions the task lifecycle and persists the decision
+ * onto the Decision Packet. Returns the broker's confirmation envelope.
+ *
+ * In mock mode this is a no-op resolved promise so the buttons remain
+ * clickable in the screenshot harness without spinning up a broker.
+ */
+export async function postDecision(
+  taskId: string,
+  action: DecisionAction,
+): Promise<{ taskId: string; action: string; status: string }> {
+  if (USE_MOCKS) {
+    return Promise.resolve({ taskId, action, status: "recorded-mock" });
+  }
+  return post(`/tasks/${encodeURIComponent(taskId)}/decision`, { action });
 }

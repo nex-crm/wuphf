@@ -463,6 +463,12 @@ func (b *Broker) Start() error {
 	b.startReviewExpiryLoop(ctx)
 	b.startArchiveSweepLoop(ctx)
 	b.startMemoryWorkflowReconcilerLoop(ctx)
+	// Lane D: reviewer convergence sweeper. Drives the timeout-skipped
+	// filler + the running→review→decision cascade for tasks whose
+	// reviewer slot expires before all grades land. Without this wired
+	// at Start(), reviewer timeouts are dead code in production despite
+	// the test suite calling EvaluateConvergence directly.
+	b.StartReviewConvergenceSweeper(ctx)
 	if err := b.StartOnPort(brokeraddr.ResolvePort()); err != nil {
 		cancel()
 		if b.lifecycleCancel != nil {

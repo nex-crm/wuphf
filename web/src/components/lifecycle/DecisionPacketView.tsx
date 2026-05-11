@@ -114,9 +114,9 @@ export function DecisionPacketView({
           </h3>
           <p>{packet.spec.problem}</p>
           <div className="packet-ac">
-            {packet.spec.acceptanceCriteria.map((ac) => (
+            {packet.spec.acceptanceCriteria.map((ac, idx) => (
               <div
-                key={ac.statement}
+                key={`${idx}-${ac.statement}`}
                 className={`packet-ac-item ${ac.done ? "done" : "todo"}`}
               >
                 <div className="packet-ac-check" aria-hidden="true">
@@ -196,9 +196,9 @@ export function DecisionPacketView({
           </h3>
           {packet.banners
             .filter((b) => b.kind === "reviewer_timeout")
-            .map((banner) => (
+            .map((banner, idx) => (
               <ReviewerTimeoutBanner
-                key={banner.reviewerSlug}
+                key={`${banner.kind}-${banner.reviewerSlug ?? idx}`}
                 banner={banner}
               />
             ))}

@@ -35,14 +35,14 @@ export function SeveritySummaryChip({ counts }: SeveritySummaryChipProps) {
   const present = SEV_ORDER.filter((sev) => counts[sev] > 0);
   if (present.length === 0) {
     return (
-      <output className="severity-summary" aria-label="No reviewer grades yet">
+      <span className="severity-summary" aria-label="No reviewer grades yet">
         no grades
-      </output>
+      </span>
     );
   }
   const ariaParts = present.map((sev) => `${counts[sev]} ${SEV_LABEL[sev]}`);
   return (
-    <output
+    <span
       className="severity-summary"
       aria-label={`Grades: ${ariaParts.join(", ")}`}
     >
@@ -52,6 +52,6 @@ export function SeveritySummaryChip({ counts }: SeveritySummaryChipProps) {
           {counts[sev]}
         </span>
       ))}
-    </output>
+    </span>
   );
 }
