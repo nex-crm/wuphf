@@ -119,5 +119,25 @@ are passed through:
 | `TZ` | Time zone context for future user-facing local formatting. |
 | `WUPHF_RENDERER_DIST` | Packaged-only renderer bundle path so the broker can serve `/`. |
 | `WUPHF_DEV_RENDERER_ORIGIN` | Dev-only electron-vite renderer origin accepted by the broker's `/api-token` gate. |
+| `WUPHF_RECEIPT_STORE_PATH` | Absolute path to the durable receipt-store SQLite database. Set by main to `<userData>/event-log.sqlite`; absent → broker uses an in-memory store. |
 
-Secrets, tokens, cloud credentials, and app-data paths are not passed through.
+Secrets, tokens, and cloud credentials are not passed through. The
+`WUPHF_RECEIPT_STORE_PATH` is the one app-data path that crosses the
+boundary — it lets the utility process open the durable
+`SqliteReceiptStore`.
+
+### Receipt-store recovery
+
+If the durable store fails the broker route surface returns:
+
+- `507 store_full` — disk full or the in-memory cap exceeded.
+- `503 store_busy` with `Retry-After: 1` — transient `SQLITE_BUSY`/`LOCKED`;
+  retry typically succeeds.
+- `503 storage_error` — persistent `SQLITE_READONLY`/`SQLITE_IOERR_*`/
+  `SQLITE_CORRUPT`. Operator intervention needed.
+
+For recovery, stop the broker, move the file at `WUPHF_RECEIPT_STORE_PATH`
+aside (and its `-wal`/`-shm` sidecars), then restart the app — the broker
+will create a fresh database. Receipts in the moved file can be salvaged
+offline by reading the canonical JSON payloads in the
+`receipts_projection.payload` column.

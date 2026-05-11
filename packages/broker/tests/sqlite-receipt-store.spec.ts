@@ -16,7 +16,11 @@ import type Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { openDatabase, runMigrations } from "../src/event-log/index.ts";
-import { InvalidListCursorError, InvalidListLimitError } from "../src/receipt-store.ts";
+import {
+  InvalidListCursorError,
+  InvalidListLimitError,
+  ReceiptStoreFullError,
+} from "../src/receipt-store.ts";
 import { SqliteReceiptStore } from "../src/sqlite-receipt-store.ts";
 
 const TASK_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAW";
@@ -303,6 +307,52 @@ describe("SqliteReceiptStore", () => {
       expect(countRows(db, "receipts_projection")).toBe(0);
     } finally {
       store.close();
+    }
+  });
+
+  it("throws ReceiptStoreFullError when maxReceipts is exceeded (R2-S1 quota)", async () => {
+    const db = openDatabase({ path: ":memory:" });
+    runMigrations(db);
+    const store = new SqliteReceiptStore(db, undefined, 2);
+    try {
+      await store.put(minimalReceiptV2(receiptIdAt(1), THREAD_A));
+      await store.put(minimalReceiptV2(receiptIdAt(2), THREAD_A));
+      await expect(store.put(minimalReceiptV2(receiptIdAt(3), THREAD_A))).rejects.toBeInstanceOf(
+        ReceiptStoreFullError,
+      );
+      // The 507 path rolls back: third receipt didn't land in either table.
+      expect(countRows(db, "event_log")).toBe(2);
+      expect(countRows(db, "receipts_projection")).toBe(2);
+    } finally {
+      store.close();
+    }
+  });
+
+  it("returns existed:true (not 507) when a duplicate hits at capacity (R2-S1)", async () => {
+    // Mirror the in-memory cap-vs-collision invariant: the existence
+    // check runs BEFORE the count check, so a retry of an already-stored
+    // receipt at capacity returns 409 not 507.
+    const db = openDatabase({ path: ":memory:" });
+    runMigrations(db);
+    const store = new SqliteReceiptStore(db, undefined, 1);
+    try {
+      const r = minimalReceiptV1(receiptIdAt(1));
+      await store.put(r);
+      expect(await store.put(r)).toEqual({ existed: true });
+    } finally {
+      store.close();
+    }
+  });
+
+  it("rejects non-positive or non-integer maxReceipts at construction (R2-S1)", () => {
+    const db = openDatabase({ path: ":memory:" });
+    runMigrations(db);
+    try {
+      expect(() => new SqliteReceiptStore(db, undefined, 0)).toThrow(/positive integer/);
+      expect(() => new SqliteReceiptStore(db, undefined, -1)).toThrow(/positive integer/);
+      expect(() => new SqliteReceiptStore(db, undefined, 1.5)).toThrow(/positive integer/);
+    } finally {
+      db.close();
     }
   });
 });

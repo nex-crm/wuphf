@@ -98,7 +98,24 @@ client believed the write was durable. `synchronous=FULL` pays one fsync
 per commit (~5–10ms on commodity SSDs); on the receipt-write hot path
 that's one fsync per agent-run, well below the dominant LLM latency.
 
-## Public TypeScript API
+## Package surface
+
+Branch 6 exposes ONE public class from `@wuphf/broker`: `SqliteReceiptStore`
+(plus `SqliteReceiptStoreConfig`, the cursor error classes, and limit
+constants — all re-exported from `src/index.ts`). The event-log module
+under `src/event-log/` is **internal**: callers MUST use
+`SqliteReceiptStore` rather than touching `openDatabase` / `createEventLog`
+/ `runMigrations` directly. This keeps the append-plus-projection
+invariant inside one owner and prevents orphan event_log rows (distsys
+triangulation R2-A3 + T10).
+
+The cross-language stability surface is the **SQLite schema** in
+`001_initial.sql` plus the canonical receipt JSON payload defined by
+`@wuphf/protocol#receiptToJson`. A Go or Rust implementer reads/writes
+those bytes directly against the documented schema; they do NOT need
+to mirror the TypeScript class structure.
+
+## Internal TypeScript API (subject to change)
 
 ### `event-log/event-log.ts`
 

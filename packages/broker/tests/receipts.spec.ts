@@ -15,7 +15,12 @@ import {
 import { afterEach, describe, expect, it } from "vitest";
 import type { BrokerHandle } from "../src/index.ts";
 import { createBroker } from "../src/index.ts";
-import { InMemoryReceiptStore } from "../src/receipt-store.ts";
+import {
+  InMemoryReceiptStore,
+  type ReceiptStore,
+  ReceiptStoreBusyError,
+  ReceiptStoreUnavailableError,
+} from "../src/receipt-store.ts";
 
 const FIXED_TOKEN = asApiToken("test-token-with-enough-entropy-AAAAAAAAA");
 const RECEIPT_ID_A = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
@@ -585,6 +590,88 @@ describe("receipts API", () => {
 
       expect(res.status).toBe(400);
       expect(await res.json()).toEqual({ error: "invalid_cursor" });
+    });
+
+    it("clamps oversized ?limit= in the Link header (R2-A2)", async () => {
+      // The store already clamps internally, but the route must echo
+      // the CLAMPED value in the next-page Link URL — not the caller's
+      // raw `?limit=9999`. Otherwise the route's public contract
+      // (`limit` is 1-1000) is violated and Go/Rust client generators
+      // disagree on the wire shape.
+      const store = new InMemoryReceiptStore({ maxReceipts: 2000 });
+      const template = minimalReceiptV2(RECEIPT_ID_A, THREAD_ID_A);
+      const ALPH = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+      for (let i = 0; i < 1001; i++) {
+        let suffix = "";
+        for (let k = 3; k >= 0; k--) {
+          suffix += ALPH[(i >> (k * 5)) & 31];
+        }
+        const id = `01ARZ3NDEKTSV4RRFFQ69G${suffix}`;
+        await store.put({ ...template, id: asReceiptId(id) });
+      }
+      broker = await createBroker({ port: 0, token: FIXED_TOKEN, receiptStore: store });
+
+      const res = await fetch(`${broker.url}/api/threads/${THREAD_ID_A}/receipts?limit=9999`, {
+        headers: { Authorization: `Bearer ${FIXED_TOKEN}` },
+      });
+
+      expect(res.status).toBe(200);
+      const parsed = JSON.parse(await res.text()) as unknown[];
+      expect(parsed).toHaveLength(1000); // store clamps to MAX_LIST_LIMIT
+      const linkPath = nextLinkPath(res.headers);
+      // Effective limit (1000) goes into Link, NOT the raw 9999.
+      expect(linkPath).toContain("limit=1000");
+      expect(linkPath).not.toContain("limit=9999");
+    });
+
+    it("maps ReceiptStoreBusyError to 503 + Retry-After (R2-SRE2)", async () => {
+      // Stub a ReceiptStore that throws the new error class on put.
+      // The route should classify it as transient and emit Retry-After.
+      const store: ReceiptStore = {
+        async put() {
+          throw new ReceiptStoreBusyError("test busy");
+        },
+        async get() {
+          return null;
+        },
+        async list() {
+          return { items: [], nextCursor: null };
+        },
+        size() {
+          return 0;
+        },
+      };
+      broker = await createBroker({ port: 0, token: FIXED_TOKEN, receiptStore: store });
+
+      const res = await postReceipt(broker.url, receiptToJson(minimalReceiptV1(RECEIPT_ID_A)));
+
+      expect(res.status).toBe(503);
+      expect(res.headers.get("retry-after")).toBe("1");
+      expect(await res.json()).toEqual({ error: "store_busy" });
+    });
+
+    it("maps ReceiptStoreUnavailableError to 503 without Retry-After (R2-SRE2)", async () => {
+      const store: ReceiptStore = {
+        async put() {
+          throw new ReceiptStoreUnavailableError("test readonly");
+        },
+        async get() {
+          return null;
+        },
+        async list() {
+          return { items: [], nextCursor: null };
+        },
+        size() {
+          return 0;
+        },
+      };
+      broker = await createBroker({ port: 0, token: FIXED_TOKEN, receiptStore: store });
+
+      const res = await postReceipt(broker.url, receiptToJson(minimalReceiptV1(RECEIPT_ID_A)));
+
+      expect(res.status).toBe(503);
+      expect(res.headers.get("retry-after")).toBeNull();
+      expect(await res.json()).toEqual({ error: "storage_error" });
     });
 
     it("excludes V1 receipts (which have no threadId)", async () => {

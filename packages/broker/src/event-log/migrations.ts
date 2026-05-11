@@ -19,21 +19,27 @@ const MIGRATIONS: readonly Migration[] = [
 export function runMigrations(db: Database.Database): void {
   db.pragma("foreign_keys = ON");
 
-  const currentVersion = readUserVersion(db);
-  if (currentVersion > CURRENT_SCHEMA_VERSION) {
-    throw new Error(
-      `Database schema version ${currentVersion} is newer than supported version ${CURRENT_SCHEMA_VERSION}`,
-    );
-  }
-
-  for (const migration of MIGRATIONS) {
-    if (migration.version <= currentVersion) continue;
-    const applyMigration = db.transaction(() => {
+  // Distsys triangulation R2-D1: read `user_version` AFTER acquiring an
+  // EXCLUSIVE write lock and apply pending migrations inside the same
+  // transaction. Otherwise two broker processes opening a fresh DB
+  // concurrently can both observe `user_version = 0`, race the
+  // `CREATE TABLE` statements, and one or both fail mid-startup with
+  // "table already exists" or lock errors. EXCLUSIVE blocks readers and
+  // writers; cheap because migrations only run on schema upgrades.
+  const applyPending = db.transaction(() => {
+    const currentVersion = readUserVersion(db);
+    if (currentVersion > CURRENT_SCHEMA_VERSION) {
+      throw new Error(
+        `Database schema version ${currentVersion} is newer than supported version ${CURRENT_SCHEMA_VERSION}`,
+      );
+    }
+    for (const migration of MIGRATIONS) {
+      if (migration.version <= currentVersion) continue;
       db.exec(migration.sql);
       db.pragma(`user_version = ${migration.version}`);
-    });
-    applyMigration();
-  }
+    }
+  });
+  applyPending.exclusive();
 }
 
 function readUserVersion(db: Database.Database): number {

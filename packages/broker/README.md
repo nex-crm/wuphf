@@ -40,9 +40,9 @@ await broker.stop();
 | Method | Path | Auth | Notes |
 |---|---|---|---|
 | GET | `/api-token` | none (loopback only) | Returns `{ token, broker_url }` (snake_case wire). |
-| GET | `/api/health` | bearer | Returns `{ "ok": true }`. |
+| GET | `/api/health` | bearer | Returns `{ "ok": true }`. Process-only liveness — does NOT probe the receipt store. Storage failures surface on `/api/receipts` writes (see R2-SRE3 follow-up). |
 | GET | `/api/events` | bearer | SSE stream; emits `ready` then keepalive comments. |
-| POST | `/api/receipts` | bearer | Body: receipt JSON. 201 + canonical body on insert, 409 on `id` collision, 400 on parse/validation, 413 on `> 1 MiB`, 415 on non-JSON content-type, 507 `{"error":"store_full"}` when the in-memory store reaches `maxReceipts` or `SqliteReceiptStore` hits `SQLITE_FULL`. |
+| POST | `/api/receipts` | bearer | Body: receipt JSON. 201 + canonical body on insert, 409 on `id` collision, 400 on parse/validation, 413 on `> 1 MiB`, 415 on non-JSON content-type, 507 `{"error":"store_full"}` when the store reaches `maxReceipts` or `SqliteReceiptStore` hits `SQLITE_FULL`, 503 `{"error":"store_busy"}` + `Retry-After: 1` for transient `SQLITE_BUSY`/`LOCKED`, 503 `{"error":"storage_error"}` for persistent `SQLITE_READONLY`/`SQLITE_IOERR_*`/`SQLITE_CORRUPT`. |
 | GET | `/api/receipts/:id` | bearer | 200 + receipt JSON on hit, 404 on miss or malformed id. |
 | GET | `/api/threads/:tid/receipts` | bearer | JSON array of V2 receipts in the thread. Supports `?cursor=<opaque>` (empty string ≡ absent) and `?limit=<positive integer>` (1–1000; default `MAX_LIST_LIMIT=1000`). Responses include `Link: <...>; rel="next"` when another page exists. Returns 400 on invalid cursor/limit and 404 on malformed thread id. |
 | GET | `/`, `/index.html` | none (loopback) | Renderer bundle (404 if `renderer: null`). |

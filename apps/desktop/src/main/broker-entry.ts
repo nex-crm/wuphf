@@ -8,14 +8,13 @@
 // `/index.html`, and `/assets/*` return 404 — the dev server owns those
 // surfaces in dev.
 
-import { existsSync, mkdirSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 
 import {
   type BrokerHandle,
   type BrokerLogger,
   createBroker,
-  type ReceiptStore,
   SqliteReceiptStore,
 } from "@wuphf/broker";
 
@@ -36,6 +35,11 @@ const RECEIPT_STORE_PATH_ENV = "WUPHF_RECEIPT_STORE_PATH";
 
 let aliveInterval: NodeJS.Timeout | null = null;
 let broker: BrokerHandle | null = null;
+// Module-scoped so `shutdown()` can close the SQLite handle after
+// `broker.stop()`. distsys triangulation R2-D2: relying on process
+// teardown to release the DB skips an explicit checkpoint and leaves
+// WAL recovery work for the next launch.
+let receiptStore: SqliteReceiptStore | null = null;
 let shuttingDown = false;
 
 function sendAlive(): void {
@@ -65,6 +69,16 @@ async function shutdown(): Promise<void> {
     } catch {
       // Broker shutdown failures must not block process exit; the supervisor
       // will SIGKILL after the force grace if needed.
+    }
+  }
+  if (receiptStore !== null) {
+    try {
+      // Triggers SQLite's WAL checkpoint + file handle release. Idempotent;
+      // safe to call even when the broker stop above failed.
+      receiptStore.close();
+    } catch {
+      // Same swallow-on-shutdown policy as broker.stop(): a failing close
+      // must not deadlock process exit.
     }
   }
   process.exit(0);
@@ -103,13 +117,27 @@ async function main(): Promise<void> {
   // fall through to createBroker's default (an in-memory store) — useful
   // for tests and the headless smoke path.
   const receiptStorePath = process.env[RECEIPT_STORE_PATH_ENV];
-  let receiptStore: ReceiptStore | undefined;
   if (typeof receiptStorePath === "string" && receiptStorePath.length > 0) {
+    const storeDir = dirname(receiptStorePath);
     // Ensure the parent directory exists. `userData` is created by
     // Electron on first launch; this guards against the host having
     // deleted it (rare but recoverable).
-    mkdirSync(dirname(receiptStorePath), { recursive: true });
+    mkdirSync(storeDir, { recursive: true });
+    // Security triangulation R2-S2: lock down the receipt store directory
+    // and DB sidecar permissions on POSIX. Receipts can contain local
+    // metadata (worktree paths, source reads, model details, error text);
+    // on shared systems the default umask may leave the DB world-readable.
+    // Windows uses ACLs and ignores chmod, so we no-op there.
+    if (process.platform !== "win32") {
+      tightenStorePermissions(storeDir, receiptStorePath);
+    }
     receiptStore = SqliteReceiptStore.open({ path: receiptStorePath });
+    // Tighten again after open — better-sqlite3 creates the DB + WAL/SHM
+    // sidecars with the process umask, so the post-open pass catches
+    // them. Idempotent on the directory.
+    if (process.platform !== "win32") {
+      tightenStorePermissions(storeDir, receiptStorePath);
+    }
   }
 
   broker = await createBroker({
@@ -117,7 +145,7 @@ async function main(): Promise<void> {
     renderer,
     logger,
     ...(trustedOrigins !== undefined ? { trustedOrigins } : {}),
-    ...(receiptStore !== undefined ? { receiptStore } : {}),
+    ...(receiptStore !== null ? { receiptStore } : {}),
   });
   sendReady(broker.url);
   sendAlive();
@@ -138,4 +166,27 @@ function isShutdownMessage(message: unknown): message is { readonly type: "shutd
     Object.hasOwn(message, "type") &&
     (message as { readonly type?: unknown }).type === "shutdown"
   );
+}
+
+// POSIX-only: tighten the receipt store directory + DB sidecars to
+// owner-only access. Best-effort — if a `chmod` fails we keep going
+// rather than refuse to start (some sandboxed filesystems error on
+// chmod). Windows uses ACLs and ignores `chmod`, so callers branch on
+// `process.platform` before calling this.
+function tightenStorePermissions(storeDir: string, dbPath: string): void {
+  const tryChmod = (path: string, mode: number): void => {
+    try {
+      chmodSync(path, mode);
+    } catch {
+      // Filesystem may refuse (network mount, sandbox, etc). Permissions
+      // are defense-in-depth on top of the userData isolation; not a
+      // showstopper.
+    }
+  };
+  tryChmod(storeDir, 0o700);
+  for (const sidecar of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`, `${dbPath}-journal`]) {
+    if (existsSync(sidecar)) {
+      tryChmod(sidecar, 0o600);
+    }
+  }
 }

@@ -100,13 +100,36 @@ export interface ReceiptStore {
 }
 
 /**
- * Error thrown by `InMemoryReceiptStore.put` when the process-wide receipt
- * cap is exceeded. Routes catch this and respond with `507 Insufficient
- * Storage`. `SqliteReceiptStore` replaces this with disk-quota-aware
- * persistence and does NOT raise `ReceiptStoreFullError`.
+ * Error thrown when the store has reached its configured receipt cap or
+ * the underlying storage is exhausted (`SQLITE_FULL` for the durable
+ * store). Routes catch this and respond with `507 Insufficient Storage`.
  */
 export class ReceiptStoreFullError extends Error {
   override readonly name = "ReceiptStoreFullError";
+}
+
+/**
+ * Error thrown when the store is temporarily unable to accept a write
+ * but the client should retry (SQLITE_BUSY / SQLITE_LOCKED beyond the
+ * busy timeout, or other transient contention). Routes catch this and
+ * respond with `503 Service Unavailable` + `Retry-After: 1`. The
+ * distinction from `ReceiptStoreUnavailableError` is retryability.
+ *
+ * sre triangulation R2-SRE2.
+ */
+export class ReceiptStoreBusyError extends Error {
+  override readonly name = "ReceiptStoreBusyError";
+}
+
+/**
+ * Error thrown when the store is in a persistent failure mode the
+ * client cannot recover from with a retry (SQLITE_READONLY,
+ * SQLITE_IOERR_*, schema mismatch). Routes catch this and respond with
+ * `503 Service Unavailable` (no `Retry-After`); the operator must
+ * intervene. sre triangulation R2-SRE2.
+ */
+export class ReceiptStoreUnavailableError extends Error {
+  override readonly name = "ReceiptStoreUnavailableError";
 }
 
 /**
@@ -200,6 +223,17 @@ export function decodeListCursor(cursor: string): number {
   }
   const lsn = Number(tail);
   if (!Number.isSafeInteger(lsn) || lsn <= 0) {
+    throw new InvalidListCursorError();
+  }
+  // Canonical round-trip check (api triangulation R2-A1). Node's
+  // base64url decoder accepts non-canonical inputs that share a
+  // prefix's bit pattern: e.g. `bHNuOjE` is canonical for `lsn:1`,
+  // but `bHNuOjF`, `bHNuOjG`, `bHNuOjH` all decode to the same bytes.
+  // A strict Go/Rust implementer using raw_url decoding rejects those;
+  // we must too, or the same logical LSN has multiple equally-valid
+  // wire forms and Go/JS implementations disagree on the validation
+  // surface.
+  if (Buffer.from(decoded, "utf8").toString("base64url") !== cursor) {
     throw new InvalidListCursorError();
   }
   return lsn;

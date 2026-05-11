@@ -16,7 +16,9 @@ export {
   InvalidListCursorError,
   InvalidListLimitError,
   MAX_LIST_LIMIT,
+  ReceiptStoreBusyError,
   ReceiptStoreFullError,
+  ReceiptStoreUnavailableError,
 } from "./receipt-store.ts";
 export type { SqliteReceiptStoreConfig } from "./sqlite-receipt-store.ts";
 export { SqliteReceiptStore } from "./sqlite-receipt-store.ts";
