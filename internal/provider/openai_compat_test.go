@@ -876,6 +876,7 @@ func TestOpenAICompatStreamFn_HermesOmitsSessionHeadersWithoutAuth(t *testing.T)
 	defer srv.Close()
 
 	t.Setenv("WUPHF_HERMES_AGENT_BASE_URL", srv.URL+"/v1")
+	t.Setenv("WUPHF_HERMES_AGENT_API_KEY", "")
 
 	factory := NewOpenAICompatStreamFn(KindHermesAgent, "http://unused", "hermes-agent")
 	for range factory("agent-one")([]agent.Message{{Role: "user", Content: "ping"}}, nil) {
@@ -902,7 +903,9 @@ func TestOpenAICompatStreamFn_OpenclawHTTPUsesGatewayToken(t *testing.T) {
 	defer srv.Close()
 
 	t.Setenv("WUPHF_OPENCLAW_HTTP_BASE_URL", srv.URL+"/v1")
+	t.Setenv("WUPHF_OPENCLAW_HTTP_API_KEY", "")
 	t.Setenv("OPENCLAW_GATEWAY_TOKEN", "gateway-token")
+	t.Setenv("WUPHF_OPENCLAW_TOKEN", "")
 
 	factory := NewOpenAICompatStreamFn(KindOpenclawHTTP, "http://unused", "openclaw/default")
 	for range factory("agent-one")([]agent.Message{{Role: "user", Content: "ping"}}, nil) {

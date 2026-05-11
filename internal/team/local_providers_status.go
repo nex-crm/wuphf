@@ -148,7 +148,7 @@ var localProviderSpecs = []localProviderSpec{
 			"linux": "openclaw gateway run",
 		},
 		notes: []string{
-			"OpenClaw Gateway's OpenAI-compatible endpoint is disabled by default. Enable gateway.http.endpoints.chatCompletions.enabled, then use gateway.auth.token as WUPHF_OPENCLAW_HTTP_API_KEY or WUPHF_OPENCLAW_TOKEN.",
+			"OpenClaw Gateway's OpenAI-compatible endpoint is disabled by default. Enable gateway.http.endpoints.chatCompletions.enabled, then use gateway.auth.token as WUPHF_OPENCLAW_HTTP_API_KEY, OPENCLAW_GATEWAY_TOKEN, or WUPHF_OPENCLAW_TOKEN.",
 		},
 	},
 }

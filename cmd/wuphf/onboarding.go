@@ -825,7 +825,7 @@ func localRuntimeProbeAPIKey(kind string) string {
 //
 // Sequential (not parallel) so the suggestion is deterministic when more than
 // one runtime is up. A 250ms-per-candidate timeout keeps the worst case at
-// 1000ms total when nothing is reachable; the caller dispatches this off the
+// 1250ms total when nothing is reachable; the caller dispatches this off the
 // bubbletea Update loop so the TUI stays responsive.
 func detectReachableLocalRuntime() (kind, addr string) {
 	client := &http.Client{Timeout: 250 * time.Millisecond}
@@ -907,7 +907,7 @@ func defaultPrereqs() []prereqResult {
 // detectLocalRuntimeCmd runs detectReachableLocalRuntime off the bubbletea
 // Update loop and posts a localRuntimeDetectedMsg back to it. Worst-case
 // runtime is bounded by the loop in detectReachableLocalRuntime (250ms per
-// candidate × 3 candidates = 750ms), so the TUI never blocks.
+// candidate x 5 candidates = 1250ms), so the TUI never blocks.
 func detectLocalRuntimeCmd() tea.Cmd {
 	return func() tea.Msg {
 		kind, addr := detectReachableLocalRuntime()

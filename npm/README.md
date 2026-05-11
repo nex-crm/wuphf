@@ -49,7 +49,7 @@ Supported platforms: macOS, Linux, and Windows 10+ on x64 or arm64. The native b
 | `--no-open` | Don't auto-open the browser |
 | `--pack <name>` | Pick an agent pack (`starter`, `founding-team`, `coding-team`, `lead-gen-agency`, `revops`) |
 | `--opus-ceo` | Upgrade CEO from Sonnet to Opus |
-| `--provider <name>` | LLM provider override (`claude-code`, `codex`, `opencode`, `hermes-agent`, `openclaw-http`) |
+| `--provider <name>` | LLM provider override (`claude-code`, `codex`, `opencode`, `hermes-agent`, `openclaw-http`, `ollama`) |
 | `--collab` | Start in collaborative mode — all agents see all messages (this is the default) |
 | `--unsafe` | Bypass agent permission checks (local dev only) |
 | `--web-port <n>` | Change the web UI port (default 7891) |

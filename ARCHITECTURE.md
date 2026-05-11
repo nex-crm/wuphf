@@ -67,7 +67,7 @@ With the file that implements each:
 - **OpenClaw Gateway HTTP** (`internal/provider/openclaw_http.go`): run WUPHF office members through OpenClaw Gateway's OpenAI-compatible API server. Select with `--provider openclaw-http`.
 - **Hermes Agent** (`internal/provider/hermes_agent.go`): run WUPHF office members through a local Hermes gateway using its OpenAI-compatible API server. Select with `--provider hermes-agent`.
 
-All four are load-time optional. Core WUPHF is just `broker + launcher + headless runners + worktrees`.
+These integrations are load-time optional. Core WUPHF is just `broker + launcher + headless runners + worktrees`.
 
 ## What's intentionally not here
 

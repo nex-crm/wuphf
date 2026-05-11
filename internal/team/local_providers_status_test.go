@@ -296,7 +296,9 @@ func TestProbeOpenAICompatEndpoint_SendsRuntimeBearerToken(t *testing.T) {
 	}))
 	defer srv.Close()
 
+	t.Setenv("WUPHF_OPENCLAW_HTTP_API_KEY", "")
 	t.Setenv("OPENCLAW_GATEWAY_TOKEN", "gateway-token")
+	t.Setenv("WUPHF_OPENCLAW_TOKEN", "")
 	reachable, model, ok := probeOpenAICompatEndpoint(context.Background(), provider.KindOpenclawHTTP, srv.URL)
 	if !ok || !reachable {
 		t.Fatalf("probe failed: ok=%v reachable=%v model=%q", ok, reachable, model)
