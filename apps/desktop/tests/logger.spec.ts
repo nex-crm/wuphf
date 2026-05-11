@@ -348,6 +348,22 @@ describe("StructuredLogger", () => {
     );
   });
 
+  it("ignores inherited payload keys", () => {
+    const logDirectory = createTempDir();
+    const sink = new StructuredLogger({
+      logDirectory,
+      consoleWriter: () => undefined,
+      monotonicNow: () => 1,
+    });
+    const logger = sink.forModule("main");
+    const payload = Object.create({ reason: "inherited" }) as LogPayload;
+
+    logger.error("unhandled_rejection", payload);
+
+    const record = readLogRecords(logDirectory)[0];
+    expect(record).not.toHaveProperty("reason");
+  });
+
   it("truncates oversized safe string values before writing", () => {
     const logDirectory = createTempDir();
     const sink = new StructuredLogger({

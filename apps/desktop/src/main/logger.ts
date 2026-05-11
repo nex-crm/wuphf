@@ -237,7 +237,11 @@ function createLogDirectoryResolver(
 
 function validatePayload(payload: LogPayload): LogPayload {
   const safePayload: Record<string, LogPayloadValue> = {};
-  for (const [key, value] of Object.entries(payload)) {
+  for (const key in payload) {
+    if (!Object.hasOwn(payload, key)) {
+      continue;
+    }
+    const value = (payload as Record<string, LogPayloadValue>)[key] as LogPayloadValue;
     validatePayloadKey(key);
     safePayload[key] = normalizePayloadValue(value);
   }
