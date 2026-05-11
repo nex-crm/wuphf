@@ -1,7 +1,9 @@
 // biome-ignore-all lint/a11y/useAriaPropsSupportedByRole: Passive metadata uses accessible labels queried by screen-reader tests; visual text remains unchanged.
 import type { ComponentType } from "react";
+import { useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
+  BellNotification,
   BookStack,
   Calendar,
   CheckCircle,
@@ -18,9 +20,11 @@ import {
 } from "iconoir-react";
 
 import { getRequests } from "../../api/client";
+import { getInboxPayload } from "../../api/lifecycle";
 import { fetchReviews } from "../../api/notebook";
 import { useOverflow } from "../../hooks/useOverflow";
 import { SIDEBAR_APPS } from "../../lib/constants";
+import { playInboxDing } from "../../lib/notificationSound";
 import { navigateToSidebarApp } from "../../lib/sidebarNav";
 import { WIKI_SURFACE_APP_IDS } from "../../routes/routeRegistry";
 import {
@@ -34,6 +38,7 @@ const WIKI_SURFACE_APPS = new Set<string>(WIKI_SURFACE_APP_IDS);
 
 const APP_ICONS: Record<string, ComponentType<{ className?: string }>> = {
   studio: Play,
+  inbox: BellNotification,
   wiki: BookStack,
   console: Terminal,
   tasks: CheckCircle,
@@ -68,6 +73,12 @@ export function AppList() {
     refetchInterval: 15_000,
   });
 
+  const { data: inboxData } = useQuery({
+    queryKey: ["inbox-badge"],
+    queryFn: getInboxPayload,
+    refetchInterval: 5_000,
+  });
+
   const pendingCount = (requestsData?.requests ?? []).filter(
     (r) => !r.status || r.status === "open" || r.status === "pending",
   ).length;
@@ -79,6 +90,19 @@ export function AppList() {
       r.state === "changes-requested",
   ).length;
 
+  const inboxCount = inboxData?.counts.decisionRequired ?? 0;
+
+  // Ding when the decision-required count strictly increases. The first
+  // observation seeds the ref without playing (avoids a ding on mount).
+  const lastInboxCountRef = useRef<number | null>(null);
+  useEffect(() => {
+    const prev = lastInboxCountRef.current;
+    if (prev !== null && inboxCount > prev) {
+      playInboxDing();
+    }
+    lastInboxCountRef.current = inboxCount;
+  }, [inboxCount]);
+
   const overflowRef = useOverflow<HTMLDivElement>();
 
   return (
@@ -89,6 +113,7 @@ export function AppList() {
           if (app.id === "requests" && pendingCount > 0) badge = pendingCount;
           if (app.id === "wiki" && pendingReviewsCount > 0)
             badge = pendingReviewsCount;
+          if (app.id === "inbox" && inboxCount > 0) badge = inboxCount;
           const Icon = APP_ICONS[app.id];
           const isActive =
             app.id === "wiki"

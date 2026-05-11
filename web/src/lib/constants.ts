@@ -4,6 +4,7 @@
 // have no top-level sidebar entries of their own.
 export const SIDEBAR_APPS = [
   { id: "overview", icon: "\uD83C\uDFE0", name: "Overview" },
+  { id: "inbox", icon: "\uD83D\uDD14", name: "Inbox" },
   { id: "wiki", icon: "\uD83D\uDCD6", name: "Wiki" },
   { id: "console", icon: ">", name: "Console" },
   { id: "tasks", icon: "\u2705", name: "Tasks" },
