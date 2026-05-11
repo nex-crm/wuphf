@@ -9,7 +9,7 @@ type JsonValue = null | boolean | number | string | JsonValue[] | JsonObject;
 
 const forbiddenJsonKeys = new Set(["__proto__", "constructor", "prototype"]);
 const jsonKey = fc
-  .fullUnicodeString({ maxLength: 16 })
+  .string({ unit: "grapheme", maxLength: 16 })
   .filter((key) => !forbiddenJsonKeys.has(key));
 
 const jsonNumber = fc
@@ -32,7 +32,7 @@ const { jsonValue, jsonObject } = fc.letrec<{
     fc.constant(null),
     fc.boolean(),
     jsonNumber,
-    fc.fullUnicodeString({ maxLength: 64 }),
+    fc.string({ unit: "grapheme", maxLength: 64 }),
     tie("jsonArray"),
     tie("jsonObject"),
   ),
