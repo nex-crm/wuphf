@@ -71,7 +71,7 @@ func (b *Broker) pruneCompletedTasksLocked() int {
 // isTerminalTask returns true for tasks that are in a terminal lifecycle
 // state and safe to prune.
 func isTerminalTask(t teamTask) bool {
-	return t.LifecycleState == LifecycleStateMerged
+	return t.LifecycleState == LifecycleStateApproved
 }
 
 // taskCompletedBefore checks whether a task's UpdatedAt is before the cutoff.

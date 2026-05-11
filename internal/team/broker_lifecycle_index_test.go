@@ -99,7 +99,7 @@ func TestLifecycleIndexRebuildsBucketWhenLastIDLeaves(t *testing.T) {
 		b.mu.Unlock()
 		t.Fatal("expected running bucket to exist after first transition")
 	}
-	b.indexLifecycleLocked("solo", LifecycleStateRunning, LifecycleStateMerged)
+	b.indexLifecycleLocked("solo", LifecycleStateRunning, LifecycleStateApproved)
 	_, stillThere := b.lifecycleIndex[LifecycleStateRunning]
 	b.mu.Unlock()
 	if stillThere {

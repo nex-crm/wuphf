@@ -38,7 +38,7 @@ func TestLifecycleForwardMapAllStates(t *testing.T) {
 		{LifecycleStateBlockedOnPRMerge, "review", "ready_for_review", "blocked", true},
 		{LifecycleStateQueuedBehindOwner, "triage", "pending_review", "open", true},
 		{LifecycleStateChangesRequested, "implement", "pending_review", "in_progress", false},
-		{LifecycleStateMerged, "ship", "approved", "done", false},
+		{LifecycleStateApproved, "ship", "approved", "done", false},
 	}
 
 	// The canonical state list and the forward-map must agree on which

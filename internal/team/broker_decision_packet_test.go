@@ -516,7 +516,7 @@ func TestDecisionPacketWikiPromotionOnMerged(t *testing.T) {
 	b.wikiWorker = worker
 	b.mu.Unlock()
 
-	if err := b.RecordTaskDecision(taskID, string(RecordDecisionMerge), "test-human"); err != nil {
+	if err := b.RecordTaskDecision(taskID, string(RecordDecisionApprove), "test-human"); err != nil {
 		t.Fatalf("RecordTaskDecision: %v", err)
 	}
 
@@ -556,7 +556,7 @@ func TestDecisionPacketWikiPromotionOnMerged(t *testing.T) {
 		if b.tasks[i].ID != taskID {
 			continue
 		}
-		if b.tasks[i].LifecycleState != LifecycleStateMerged {
+		if b.tasks[i].LifecycleState != LifecycleStateApproved {
 			t.Errorf("task %q lifecycle: got %s, want merged", taskID, b.tasks[i].LifecycleState)
 		}
 		break

@@ -46,7 +46,7 @@ const NO_CACHE_INBOX: InboxPayload = {
     decisionRequired: 0,
     running: 0,
     blocked: 0,
-    mergedToday: 0,
+    approvedToday: 0,
   },
   refreshedAt: "",
 };
@@ -365,9 +365,9 @@ function InboxFrame({
           <a href="#/inbox?filter=blocked">
             Blocked <span className="inbox-count">{counts.blocked}</span>
           </a>
-          <a href="#/inbox?filter=merged">
+          <a href="#/inbox?filter=approved">
             Merged today{" "}
-            <span className="inbox-count">{counts.mergedToday}</span>
+            <span className="inbox-count">{counts.approvedToday}</span>
           </a>
         </nav>
       </aside>

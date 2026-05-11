@@ -47,7 +47,7 @@ const (
 	InboxFilterDecisionRequired InboxFilter = "decision_required"
 	InboxFilterRunning          InboxFilter = "running"
 	InboxFilterBlocked          InboxFilter = "blocked"
-	InboxFilterMerged           InboxFilter = "merged"
+	InboxFilterApproved         InboxFilter = "approved"
 	InboxFilterAll              InboxFilter = "all"
 )
 
@@ -102,7 +102,7 @@ type InboxRow struct {
 // All four counts are O(1) reads of len(b.lifecycleIndex[state]); the
 // inbox query never iterates b.tasks for these.
 //
-// MergedToday is the one exception that costs O(merged-bucket-size) to
+// ApprovedToday is the one exception that costs O(merged-bucket-size) to
 // compute because the index does not segment by day. v1 accepts that:
 // the merged bucket is bounded by recent activity and the total broker
 // task count is small enough that this stays under the <100ms ceiling.
@@ -110,7 +110,7 @@ type InboxCounts struct {
 	DecisionRequired int `json:"decisionRequired"`
 	Running          int `json:"running"`
 	Blocked          int `json:"blocked"`
-	MergedToday      int `json:"mergedToday"`
+	ApprovedToday    int `json:"approvedToday"`
 }
 
 // InboxPayload is the full response to GET /tasks/inbox.
@@ -121,8 +121,8 @@ type InboxPayload struct {
 }
 
 // inboxFilterToStates maps a filter to the lifecycle buckets it consumes.
-// All filters except MergedToday and All map to a single bucket. The
-// MergedToday filter maps to the merged bucket and the handler then
+// All filters except ApprovedToday and All map to a single bucket. The
+// ApprovedToday filter maps to the merged bucket and the handler then
 // post-filters by completion timestamp; the All filter sweeps every
 // canonical state.
 func inboxFilterToStates(filter InboxFilter) ([]LifecycleState, error) {
@@ -133,8 +133,8 @@ func inboxFilterToStates(filter InboxFilter) ([]LifecycleState, error) {
 		return []LifecycleState{LifecycleStateRunning}, nil
 	case InboxFilterBlocked:
 		return []LifecycleState{LifecycleStateBlockedOnPRMerge}, nil
-	case InboxFilterMerged:
-		return []LifecycleState{LifecycleStateMerged}, nil
+	case InboxFilterApproved:
+		return []LifecycleState{LifecycleStateApproved}, nil
 	case InboxFilterAll:
 		return CanonicalLifecycleStates(), nil
 	default:
@@ -143,7 +143,7 @@ func inboxFilterToStates(filter InboxFilter) ([]LifecycleState, error) {
 }
 
 // startOfTodayUTC returns the UTC midnight that begins the current day.
-// MergedToday filters out merged tasks whose CompletedAt (or UpdatedAt
+// ApprovedToday filters out merged tasks whose CompletedAt (or UpdatedAt
 // fallback) is older than this boundary.
 func startOfTodayUTC() time.Time {
 	now := time.Now().UTC()
@@ -227,13 +227,13 @@ func (b *Broker) inboxLocked(states []LifecycleState, include func(taskID string
 			if task == nil {
 				continue
 			}
-			if state == LifecycleStateMerged {
+			if state == LifecycleStateApproved {
 				ts := mergedAtTimestamp(task)
 				if ts.IsZero() || ts.Before(cutoff) {
-					// MergedToday post-filter: skip rows older than
+					// ApprovedToday post-filter: skip rows older than
 					// today's UTC midnight. The All filter also walks
 					// the merged bucket, but for All the row stays in;
-					// only InboxFilterMerged narrows by date.
+					// only InboxFilterApproved narrows by date.
 					if len(states) == 1 {
 						continue
 					}
@@ -261,7 +261,7 @@ func (b *Broker) estimateBucketSizesLocked(states []LifecycleState) int {
 }
 
 // inboxCountsLocked returns the four header counts. Three are O(1); the
-// MergedToday count walks the merged bucket once because the index is
+// ApprovedToday count walks the merged bucket once because the index is
 // not segmented by day. v1 accepts this — see InboxCounts doc above.
 func (b *Broker) inboxCountsLocked(cutoff time.Time) InboxCounts {
 	counts := InboxCounts{
@@ -269,14 +269,14 @@ func (b *Broker) inboxCountsLocked(cutoff time.Time) InboxCounts {
 		Running:          len(b.lifecycleIndex[LifecycleStateRunning]),
 		Blocked:          len(b.lifecycleIndex[LifecycleStateBlockedOnPRMerge]),
 	}
-	for _, taskID := range b.lifecycleIndex[LifecycleStateMerged] {
+	for _, taskID := range b.lifecycleIndex[LifecycleStateApproved] {
 		task := b.findTaskByIDLocked(taskID)
 		if task == nil {
 			continue
 		}
 		ts := mergedAtTimestamp(task)
 		if !ts.IsZero() && !ts.Before(cutoff) {
-			counts.MergedToday++
+			counts.ApprovedToday++
 		}
 	}
 	return counts
@@ -366,7 +366,7 @@ func countGradedReviewers(grades []ReviewerGrade) int {
 // mergedAtTimestamp returns the merge-completion timestamp for a task.
 // Prefers task.CompletedAt (set by the existing terminal-status mutator)
 // and falls back to UpdatedAt so freshly-merged tasks still appear in
-// MergedToday before the legacy mutator paths catch up.
+// ApprovedToday before the legacy mutator paths catch up.
 func mergedAtTimestamp(task *teamTask) time.Time {
 	if task == nil {
 		return time.Time{}

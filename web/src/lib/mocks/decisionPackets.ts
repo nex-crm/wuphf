@@ -98,7 +98,7 @@ const ROW_MERGED: InboxRow = {
   taskId: "task-2730",
   title: "Wiki freshness scoring uses neighbor recency",
   assignment: "Merged 32m ago.",
-  state: "merged",
+  state: "approved",
   severityCounts: counts({ minor: 1, nitpick: 2 }),
   lastChangedAt: "2026-05-09T21:28:00Z",
   elapsed: "32m",
@@ -130,7 +130,7 @@ export const POPULATED_INBOX: InboxPayload = {
     decisionRequired: 2,
     running: 7,
     blocked: 2,
-    mergedToday: 11,
+    approvedToday: 11,
   },
   refreshedAt: NOW,
 };
@@ -141,7 +141,7 @@ export const EMPTY_INBOX: InboxPayload = {
     decisionRequired: 0,
     running: 7,
     blocked: 2,
-    mergedToday: 11,
+    approvedToday: 11,
   },
   refreshedAt: NOW,
 };
@@ -246,8 +246,7 @@ export const POPULATED_PACKET: DecisionPacket = {
     deadEnds: [
       {
         tried: "Single-watermark model",
-        reason:
-          "Couldn't express the holding-but-arrived case",
+        reason: "Couldn't express the holding-but-arrived case",
       },
       {
         tried: "Debouncing event arrivals at 100ms",
@@ -300,7 +299,7 @@ export const POPULATED_PACKET: DecisionPacket = {
     {
       taskId: "task-2701",
       title: "Add severity color tokens",
-      state: "merged",
+      state: "approved",
     },
     { taskId: "task-2715", title: "Update DESIGN.md", state: "running" },
   ],

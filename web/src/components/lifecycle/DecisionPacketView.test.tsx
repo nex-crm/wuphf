@@ -9,7 +9,7 @@ function renderView(
 ) {
   const handlers = {
     onClose: vi.fn(),
-    onMerge: vi.fn(),
+    onApprove: vi.fn(),
     onRequestChanges: vi.fn(),
     onDefer: vi.fn(),
     onBlock: vi.fn(),
@@ -67,16 +67,16 @@ describe("<DecisionPacketView>", () => {
     ).toBeInTheDocument();
   });
 
-  it("fires onMerge when the user presses 'm' globally", () => {
+  it("fires onApprove when the user presses 'a' globally", () => {
     const handlers = renderView();
-    fireEvent.keyDown(window, { key: "m" });
-    expect(handlers.onMerge).toHaveBeenCalledTimes(1);
+    fireEvent.keyDown(window, { key: "a" });
+    expect(handlers.onApprove).toHaveBeenCalledTimes(1);
   });
 
   it("ignores keyboard shortcuts while streaming", () => {
     const handlers = renderView({ isStreaming: true });
-    fireEvent.keyDown(window, { key: "m" });
-    expect(handlers.onMerge).not.toHaveBeenCalled();
+    fireEvent.keyDown(window, { key: "a" });
+    expect(handlers.onApprove).not.toHaveBeenCalled();
   });
 
   it("fires onClose on Escape regardless of streaming state", () => {

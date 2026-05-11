@@ -45,9 +45,9 @@ func TestPruneCompletedTasksLocked_RemovesMergedOldTasks(t *testing.T) {
 
 	b.mu.Lock()
 	b.tasks = []teamTask{
-		{ID: "task-1", LifecycleState: LifecycleStateMerged, UpdatedAt: old},
+		{ID: "task-1", LifecycleState: LifecycleStateApproved, UpdatedAt: old},
 		{ID: "task-2", LifecycleState: LifecycleStateRunning, UpdatedAt: old},
-		{ID: "task-3", LifecycleState: LifecycleStateMerged, UpdatedAt: recent},
+		{ID: "task-3", LifecycleState: LifecycleStateApproved, UpdatedAt: recent},
 		{ID: "task-4", LifecycleState: LifecycleStateIntake, CreatedAt: old},
 	}
 	pruned := b.pruneCompletedTasksLocked()
@@ -69,7 +69,7 @@ func TestPruneCompletedTasksLocked_KeepsAllWhenNoneExpired(t *testing.T) {
 
 	b.mu.Lock()
 	b.tasks = []teamTask{
-		{ID: "task-1", LifecycleState: LifecycleStateMerged, UpdatedAt: recent},
+		{ID: "task-1", LifecycleState: LifecycleStateApproved, UpdatedAt: recent},
 		{ID: "task-2", LifecycleState: LifecycleStateRunning, UpdatedAt: recent},
 	}
 	pruned := b.pruneCompletedTasksLocked()
@@ -85,7 +85,7 @@ func TestPruneCompletedTasksLocked_KeepsAllWhenNoneExpired(t *testing.T) {
 }
 
 func TestIsTerminalTask(t *testing.T) {
-	if !isTerminalTask(teamTask{LifecycleState: LifecycleStateMerged}) {
+	if !isTerminalTask(teamTask{LifecycleState: LifecycleStateApproved}) {
 		t.Error("expected merged task to be terminal")
 	}
 	if isTerminalTask(teamTask{LifecycleState: LifecycleStateRunning}) {

@@ -395,7 +395,7 @@ func (t *teamTask) UnmarshalJSON(data []byte) error {
 	t.BlockedOn = w.BlockedOn
 	t.Reviewers = w.Reviewers
 	t.blocked = w.Blocked
-	t.LifecycleState = w.LifecycleState
+	t.LifecycleState = normalizeLegacyLifecycleStateName(w.LifecycleState)
 	t.Tags = w.Tags
 	t.ReviewStartedAt = w.ReviewStartedAt
 	t.ReviewTimeoutSeconds = w.ReviewTimeoutSeconds

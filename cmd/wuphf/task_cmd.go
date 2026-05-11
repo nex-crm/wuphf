@@ -320,7 +320,7 @@ func printInboxPayload(payload team.InboxPayload) {
 		}
 	}
 	fmt.Printf("\nNeeds decision: %d   Running: %d   Blocked: %d   Merged today: %d\n",
-		payload.Counts.DecisionRequired, payload.Counts.Running, payload.Counts.Blocked, payload.Counts.MergedToday)
+		payload.Counts.DecisionRequired, payload.Counts.Running, payload.Counts.Blocked, payload.Counts.ApprovedToday)
 }
 
 func formatElapsed(d time.Duration) string {
