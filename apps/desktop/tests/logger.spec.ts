@@ -365,6 +365,39 @@ describe("StructuredLogger", () => {
     expect((record?.reason as string).length).toBeLessThan(9_000);
   });
 
+  it("marks byte-oversized string values that fit within the char cap", () => {
+    const logDirectory = createTempDir();
+    const sink = new StructuredLogger({
+      logDirectory,
+      consoleWriter: () => undefined,
+      monotonicNow: () => 1,
+    });
+    const logger = sink.forModule("main");
+    const reason = "€".repeat(3_000);
+
+    logger.error("unhandled_rejection", { reason });
+
+    const record = readLogRecords(logDirectory)[0] as { readonly reason?: unknown } | undefined;
+    expect(record?.reason).toBe(`${reason}...`);
+  });
+
+  it("pre-caps multi-megabyte string values before writing", () => {
+    const logDirectory = createTempDir();
+    const sink = new StructuredLogger({
+      logDirectory,
+      consoleWriter: () => undefined,
+      monotonicNow: () => 1,
+    });
+    const logger = sink.forModule("main");
+
+    logger.error("unhandled_rejection", { reason: "x".repeat(2 * 1024 * 1024) });
+
+    const record = readLogRecords(logDirectory)[0] as { readonly reason?: unknown } | undefined;
+    expect(typeof record?.reason).toBe("string");
+    expect((record?.reason as string).endsWith("...")).toBe(true);
+    expect(record?.reason as string).toHaveLength(8_195);
+  });
+
   it.each(["url", "path", "token", "secret"])("rejects banned payload key %s", (key) => {
     const logDirectory = createTempDir();
     const sink = new StructuredLogger({

@@ -266,11 +266,15 @@ function normalizePayloadValue(value: LogPayloadValue): LogPayloadValue {
     return value;
   }
 
+  if (value.length > MAX_LOG_STRING_BYTES) {
+    return `${value.slice(0, MAX_LOG_STRING_BYTES)}...`;
+  }
+
   if (Buffer.byteLength(value, "utf8") <= MAX_LOG_STRING_BYTES) {
     return value;
   }
 
-  return `${value.slice(0, MAX_LOG_STRING_BYTES)}...`;
+  return `${value}...`;
 }
 
 function assertLogName(value: string, label: string): void {
