@@ -68,6 +68,7 @@ import {
   type SignedApprovalToken,
 } from "../src/receipt.ts";
 import { asSha256Hex, sha256Hex } from "../src/sha256.ts";
+import brokerUrlVectors from "../testdata/broker-url-vectors.json";
 
 const TEXT_DECODER = new TextDecoder();
 
@@ -264,14 +265,37 @@ describe("IPC brand constructors", () => {
   });
 
   describe("BrokerUrl", () => {
+    it("matches the shared conformance vectors", () => {
+      for (const vector of brokerUrlVectors.accepted) {
+        expect(isBrokerUrl(vector.raw), vector.comment).toBe(true);
+        expect(asBrokerUrl(vector.raw)).toBe(vector.raw);
+      }
+
+      for (const vector of brokerUrlVectors.rejected) {
+        const note = vector.comment ?? vector.reason;
+        expect(isBrokerUrl(vector.raw), note).toBe(false);
+        expect(() => {
+          if (typeof vector.raw === "string") {
+            asBrokerUrl(vector.raw);
+            return;
+          }
+          Reflect.apply(asBrokerUrl, undefined, [vector.raw]);
+        }, note).toThrow();
+      }
+    });
+
     it("brands valid loopback URLs and round-trips equality", () => {
       const u = asBrokerUrl("http://127.0.0.1:54321");
       expect(u as string).toBe("http://127.0.0.1:54321");
       expect(isBrokerUrl("http://127.0.0.1:54321")).toBe(true);
       expect(isBrokerUrl("http://localhost:1024")).toBe(true);
       expect(isBrokerUrl("http://[::1]:1")).toBe(true);
-      // Bare root path is allowed (URL parser preserves "/" for hosts).
-      expect(isBrokerUrl("http://127.0.0.1:54321/")).toBe(true);
+      // Trailing slash form is REJECTED: BrokerUrl is the bare canonical
+      // origin. Consumers do `${brokerUrl}/api/health` — a trailing slash
+      // would produce `http://h:p//api/health` (double slash). The broker
+      // emits the bare form (packages/broker/src/listener.ts); a single
+      // canonical form makes the contract unambiguous.
+      expect(isBrokerUrl("http://127.0.0.1:54321/")).toBe(false);
     });
 
     it("rejects everything assertApiBootstrapBrokerUrl would reject", () => {
@@ -298,14 +322,20 @@ describe("IPC brand constructors", () => {
       // deliberate negative inputs proving the brand rejects them.
       const userinfo = `${"u"}:${"p"}@`;
       expect(() => asBrokerUrl(`http://${userinfo}127.0.0.1:54321`)).toThrow(
-        /no userinfo, path, query, or fragment/,
+        /no trailing slash, userinfo, path, query, or fragment/,
       );
+      expect(() => asBrokerUrl("http://127.0.0.1:54321/")).toThrow(); // trailing slash
       expect(() => asBrokerUrl("http://127.0.0.1:54321/api-token")).toThrow();
+      expect(() => asBrokerUrl("http://127.0.0.1:54321/foo")).toThrow();
+      expect(() => asBrokerUrl("http://127.0.0.1:54321/%2e")).toThrow();
+      expect(() => asBrokerUrl("http://127.0.0.1:54321/%2e%2e")).toThrow();
+      expect(() => asBrokerUrl("http://127.0.0.1:54321/%2E%2E")).toThrow();
       expect(() => asBrokerUrl("http://127.0.0.1:54321?x=1")).toThrow();
       expect(() => asBrokerUrl("http://127.0.0.1:54321#frag")).toThrow();
       expect(() => asBrokerUrl(`http://${userinfo}127.0.0.1:54321/api-token?x=1#f`)).toThrow();
       expect(isBrokerUrl(`http://${userinfo}127.0.0.1:54321`)).toBe(false);
       expect(isBrokerUrl("http://127.0.0.1:54321/foo")).toBe(false);
+      expect(isBrokerUrl("http://127.0.0.1:54321/%2e%2e")).toBe(false);
     });
   });
 
@@ -1340,7 +1370,12 @@ describe("apiBootstrap codec", () => {
     // Userinfo URL constructed by concatenation so secretlint's basic-auth
     // detector doesn't flag the literal string.
     [`http://${"u"}:${"p"}@127.0.0.1:54321`, "URL with userinfo"],
+    ["http://127.0.0.1:54321/", "URL with trailing slash"],
     ["http://127.0.0.1:54321/api-token", "URL with non-root path"],
+    ["http://127.0.0.1:54321/foo", "URL with non-root path"],
+    ["http://127.0.0.1:54321/%2e", "URL with encoded dot path segment"],
+    ["http://127.0.0.1:54321/%2e%2e", "URL with encoded dot-dot path segment"],
+    ["http://127.0.0.1:54321/%2E%2E", "URL with encoded uppercase dot-dot path segment"],
     ["http://127.0.0.1:54321?x=1", "URL with query"],
     ["http://127.0.0.1:54321#frag", "URL with fragment"],
   ])("rejects encoder-side broker_url that the decoder would reject (%s — %s)", (brokerUrl) => {

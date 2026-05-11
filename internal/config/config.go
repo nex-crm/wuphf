@@ -836,8 +836,13 @@ func resolveTaskInterval(envKey, legacyEnvKey string, fromConfig func(Config) in
 }
 
 // ResolveOpenclawToken returns the OpenClaw gateway auth token from env > config.
+// WUPHF_OPENCLAW_TOKEN wins for WUPHF-specific setup; OPENCLAW_GATEWAY_TOKEN is
+// accepted for compatibility with OpenClaw's own Gateway docs.
 func ResolveOpenclawToken() string {
 	if v := strings.TrimSpace(os.Getenv("WUPHF_OPENCLAW_TOKEN")); v != "" {
+		return v
+	}
+	if v := strings.TrimSpace(os.Getenv("OPENCLAW_GATEWAY_TOKEN")); v != "" {
 		return v
 	}
 	cfg, _ := Load()

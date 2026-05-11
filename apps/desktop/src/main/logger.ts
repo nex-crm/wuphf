@@ -22,6 +22,13 @@ export interface StructuredLoggerConfig {
   readonly maxFileBytes?: number;
   readonly consoleWriter?: (level: LogLevel, line: string) => void;
   readonly monotonicNow?: () => number;
+  readonly rotationFs?: LoggerRotationFileSystem;
+}
+
+export interface LoggerRotationFileSystem {
+  readonly existsSync: typeof existsSync;
+  readonly renameSync: typeof renameSync;
+  readonly unlinkSync: typeof unlinkSync;
 }
 
 export class UnsafeLogPayloadError extends Error {
@@ -35,7 +42,7 @@ const LOG_FILE_NAME = "main.log";
 const DEFAULT_MAX_FILE_BYTES = 10 * 1024 * 1024;
 const ROTATED_FILE_COUNT = 2;
 const MAX_LOG_STRING_BYTES = 8_192;
-const LOG_NAME_PATTERN = /^[a-z0-9_.:-]+$/;
+export const LOG_NAME_PATTERN = /^[a-z0-9_.:-]+$/;
 const BANNED_PAYLOAD_KEY_FRAGMENTS = ["url", "path", "token", "secret", "password"] as const;
 const SAFE_PAYLOAD_KEYS = new Set([
   "alreadyStopping",
@@ -46,12 +53,12 @@ const SAFE_PAYLOAD_KEYS = new Set([
   "code",
   "droppedKeys",
   "error",
-  "eventLsn",
   "exitCode",
   "force",
   "isPackaged",
   "lastPingAt",
   "livenessAgeMs",
+  "location",
   "maxRestartRetries",
   "payloadBytes",
   "pid",
@@ -59,6 +66,7 @@ const SAFE_PAYLOAD_KEYS = new Set([
   "port",
   "processType",
   "reason",
+  "reportBytes",
   "rendererKind",
   "restartCount",
   "serviceName",
@@ -66,16 +74,28 @@ const SAFE_PAYLOAD_KEYS = new Set([
   "signal",
   "stack",
   "status",
+  "type",
   "uptimeMs",
   "version",
   "windowCount",
 ]);
+
+const defaultRotationFileSystem: LoggerRotationFileSystem = {
+  existsSync,
+  renameSync,
+  unlinkSync,
+};
 
 export class StructuredLogger {
   private readonly resolveLogDirectory: () => string | null;
   private readonly maxFileBytes: number;
   private readonly consoleWriter: (level: LogLevel, line: string) => void;
   private readonly monotonicNow: () => number;
+  private readonly rotationFs: LoggerRotationFileSystem;
+  private readonly currentFileBytes = new Map<string, number>();
+  // Cache successful mkdirs, but clear on ENOENT so external log-dir removal
+  // can recover with one mkdir + append retry instead of disabling file logs.
+  private initializedLogDirectory: string | null = null;
   private eventLsn = 0;
 
   constructor(config: StructuredLoggerConfig = {}) {
@@ -83,6 +103,7 @@ export class StructuredLogger {
     this.maxFileBytes = config.maxFileBytes ?? DEFAULT_MAX_FILE_BYTES;
     this.consoleWriter = config.consoleWriter ?? writeLineToConsole;
     this.monotonicNow = config.monotonicNow ?? monotonicNowMs;
+    this.rotationFs = config.rotationFs ?? defaultRotationFileSystem;
   }
 
   forModule(module: string): Logger {
@@ -117,20 +138,54 @@ export class StructuredLogger {
       return;
     }
 
+    const logPath = join(logDirectory, LOG_FILE_NAME);
+    const lineWithTerminator = `${line}\n`;
+    const lineBytes = Buffer.byteLength(lineWithTerminator, "utf8");
+
     try {
-      mkdirSync(logDirectory, { recursive: true });
-      const logPath = join(logDirectory, LOG_FILE_NAME);
-      const lineBytes = Buffer.byteLength(line, "utf8") + 1;
+      if (this.initializedLogDirectory !== logDirectory) {
+        mkdirSync(logDirectory, { recursive: true });
+        this.initializedLogDirectory = logDirectory;
+      }
       if (
         lineBytes < this.maxFileBytes &&
-        currentFileSize(logPath) + lineBytes > this.maxFileBytes
+        this.getCurrentFileBytes(logPath) + lineBytes > this.maxFileBytes
       ) {
-        rotateLogs(logDirectory);
+        rotateLogs(logDirectory, this.rotationFs);
+        this.currentFileBytes.set(logPath, 0);
       }
-      appendFileSync(logPath, `${line}\n`, "utf8");
-    } catch {
-      return;
+      appendFileSync(logPath, lineWithTerminator, "utf8");
+      this.currentFileBytes.set(logPath, (this.currentFileBytes.get(logPath) ?? 0) + lineBytes);
+    } catch (error) {
+      if (!isMissingPathError(error)) {
+        return;
+      }
+
+      this.initializedLogDirectory = null;
+      try {
+        mkdirSync(logDirectory, { recursive: true });
+        this.initializedLogDirectory = logDirectory;
+        const retryBaseBytes = currentFileSize(logPath);
+        appendFileSync(logPath, lineWithTerminator, "utf8");
+        this.currentFileBytes.set(logPath, retryBaseBytes + lineBytes);
+      } catch {
+        return;
+      }
     }
+  }
+
+  private getCurrentFileBytes(logPath: string): number {
+    const cachedBytes = this.currentFileBytes.get(logPath);
+    if (cachedBytes !== undefined) {
+      return cachedBytes;
+    }
+
+    // Avoid statting every append under the packaged app's single-writer model.
+    // If another local actor mutates main.log, rotation drift can exceed
+    // maxFileBytes until this logger next crosses the threshold and rotates.
+    const bytes = currentFileSize(logPath);
+    this.currentFileBytes.set(logPath, bytes);
+    return bytes;
   }
 }
 
@@ -181,7 +236,11 @@ function createLogDirectoryResolver(
 
 function validatePayload(payload: LogPayload): LogPayload {
   const safePayload: Record<string, LogPayloadValue> = {};
-  for (const [key, value] of Object.entries(payload)) {
+  for (const key in payload) {
+    if (!Object.hasOwn(payload, key)) {
+      continue;
+    }
+    const value = (payload as Record<string, LogPayloadValue>)[key] as LogPayloadValue;
     validatePayloadKey(key);
     safePayload[key] = normalizePayloadValue(value);
   }
@@ -210,11 +269,25 @@ function normalizePayloadValue(value: LogPayloadValue): LogPayloadValue {
     return value;
   }
 
+  if (value.length * 4 <= MAX_LOG_STRING_BYTES) {
+    return value;
+  }
+
   if (Buffer.byteLength(value, "utf8") <= MAX_LOG_STRING_BYTES) {
     return value;
   }
 
-  return `${value.slice(0, MAX_LOG_STRING_BYTES)}...`;
+  const suffix = "...";
+  const targetBytes = MAX_LOG_STRING_BYTES - Buffer.byteLength(suffix, "utf8");
+  const bytes = new TextEncoder().encode(value);
+  const byteView = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let cut = targetBytes;
+  while (cut > 0 && (byteView.getUint8(cut) & 0b1100_0000) === 0b1000_0000) {
+    cut -= 1;
+  }
+
+  const truncated = bytes.subarray(0, cut);
+  return `${new TextDecoder("utf-8", { fatal: false }).decode(truncated)}${suffix}`;
 }
 
 function assertLogName(value: string, label: string): void {
@@ -231,24 +304,29 @@ function currentFileSize(logPath: string): number {
   }
 }
 
-function rotateLogs(logDirectory: string): void {
+function isMissingPathError(error: unknown): boolean {
+  return error instanceof Error && (error as NodeJS.ErrnoException).code === "ENOENT";
+}
+
+function rotateLogs(logDirectory: string, rotationFs: LoggerRotationFileSystem): void {
   const oldestPath = join(logDirectory, `main.${ROTATED_FILE_COUNT}.log`);
-  if (existsSync(oldestPath)) {
-    unlinkSync(oldestPath);
+  if (rotationFs.existsSync(oldestPath)) {
+    rotationFs.unlinkSync(oldestPath);
   }
 
   for (let index = ROTATED_FILE_COUNT - 1; index >= 1; index -= 1) {
     const sourcePath = join(logDirectory, `main.${index}.log`);
     const targetPath = join(logDirectory, `main.${index + 1}.log`);
-    if (existsSync(sourcePath)) {
-      renameSync(sourcePath, targetPath);
+    if (rotationFs.existsSync(sourcePath)) {
+      rotationFs.renameSync(sourcePath, targetPath);
     }
   }
 
   const activePath = join(logDirectory, LOG_FILE_NAME);
-  if (existsSync(activePath)) {
-    renameSync(activePath, join(logDirectory, "main.1.log"));
+  if (!rotationFs.existsSync(activePath)) {
+    return;
   }
+  rotationFs.renameSync(activePath, join(logDirectory, "main.1.log"));
 }
 
 function writeLineToConsole(level: LogLevel, line: string): void {

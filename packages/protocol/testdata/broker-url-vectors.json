@@ -1,0 +1,112 @@
+{
+  "$schema": "https://wuphf.dev/schemas/broker-url-vectors.v1.json",
+  "$comment": "BrokerUrl conformance vectors. The protocol package, the desktop renderer, and the broker-internal classifier all hand-mirror this validation; these vectors are the canonical source of truth. Each consuming codebase should add a test that runs every vector through its local validator and asserts the accept/reject status matches.",
+  "accepted": [
+    {
+      "raw": "http://127.0.0.1:54321",
+      "comment": "bare canonical loopback IPv4 origin with explicit non-default port"
+    },
+    {
+      "raw": "http://localhost:1024",
+      "comment": "loopback hostname form"
+    },
+    {
+      "raw": "http://[::1]:1",
+      "comment": "bracketed IPv6 loopback"
+    }
+  ],
+  "rejected": [
+    {
+      "raw": "http://127.0.0.1:54321/",
+      "reason": "trailing_slash",
+      "comment": "trailing slash form rejected; brand is bare canonical origin"
+    },
+    {
+      "raw": "http://127.0.0.1:54321/api-token",
+      "reason": "non_root_path",
+      "comment": "non-root path"
+    },
+    {
+      "raw": "http://127.0.0.1:54321/foo",
+      "reason": "non_root_path",
+      "comment": "non-root path"
+    },
+    {
+      "raw": "http://127.0.0.1:54321/%2e",
+      "reason": "encoded_dot_segment",
+      "comment": "URL normalizes %2e to / but raw differs from origin"
+    },
+    {
+      "raw": "http://127.0.0.1:54321/%2e%2e",
+      "reason": "encoded_dot_segment"
+    },
+    {
+      "raw": "http://127.0.0.1:54321/%2E%2E",
+      "reason": "encoded_dot_segment",
+      "comment": "uppercase percent-encoding"
+    },
+    {
+      "raw": "http://u\u003ap@127.0.0.1:54321",
+      "reason": "userinfo"
+    },
+    {
+      "raw": "http://127.0.0.1:54321?x=1",
+      "reason": "query"
+    },
+    {
+      "raw": "http://127.0.0.1:54321#frag",
+      "reason": "fragment"
+    },
+    {
+      "raw": "http://127.0.0.1:80",
+      "reason": "default_port",
+      "comment": "WHATWG URL strips default ports; brand rejects implicit-port form"
+    },
+    {
+      "raw": "http://127.0.0.1",
+      "reason": "missing_port",
+      "comment": "broker origin must carry the explicit bound port"
+    },
+    {
+      "raw": "https://127.0.0.1:54321",
+      "reason": "non_http_scheme"
+    },
+    {
+      "raw": "javascript:alert(1)",
+      "reason": "non_http_scheme"
+    },
+    {
+      "raw": "file:///etc/passwd",
+      "reason": "non_http_scheme"
+    },
+    {
+      "raw": "http://evil.com:8080",
+      "reason": "non_loopback_host"
+    },
+    {
+      "raw": "http://evil.example.com:8080",
+      "reason": "non_loopback_host"
+    },
+    {
+      "raw": "",
+      "reason": "malformed_url"
+    },
+    {
+      "raw": "not a url",
+      "reason": "malformed_url"
+    },
+    {
+      "raw": "http://u\u003ap@127.0.0.1:54321/api-token?x=1#f",
+      "reason": "multiple_forbidden_components",
+      "comment": "userinfo, path, query, and fragment in one string"
+    },
+    {
+      "raw": 42,
+      "reason": "non_string"
+    },
+    {
+      "raw": null,
+      "reason": "non_string"
+    }
+  ]
+}

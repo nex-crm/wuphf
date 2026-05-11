@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>WUPHF — AI employees with a shared brain</title>
-<meta name="description" content="WUPHF is a collaborative office of AI employees who build and maintain their own knowledge base to never lose context for the tasks you give them. Supports Claude Code, Codex, OpenClaw and local LLMs via OpenCode.">
+<meta name="description" content="WUPHF is a collaborative office of AI employees who build and maintain their own knowledge base to never lose context for the tasks you give them. Supports Claude Code, Codex, Hermes Agent, OpenClaw bridge, OpenClaw Gateway HTTP, and local LLMs via OpenCode.">
 <link rel="canonical" href="https://wuphf.team">
 <meta property="og:title" content="WUPHF — AI employees with a shared brain">
 <meta property="og:description" content="A collaborative office of AI employees who build and maintain their own knowledge base to never lose context for the tasks you give them.">
@@ -63,7 +63,7 @@
       "url": "https://wuphf.team",
       "applicationCategory": "DeveloperApplication",
       "operatingSystem": "macOS, Linux, Windows",
-      "description": "WUPHF is a collaborative office of AI employees who build and maintain their own knowledge base to never lose context for the tasks you give them. Supports Claude Code, Codex, OpenClaw and local LLMs via OpenCode.",
+      "description": "WUPHF is a collaborative office of AI employees who build and maintain their own knowledge base to never lose context for the tasks you give them. Supports Claude Code, Codex, Hermes Agent, OpenClaw bridge, OpenClaw Gateway HTTP, and local LLMs via OpenCode.",
       "license": "https://github.com/nex-crm/wuphf/blob/main/LICENSE",
       "downloadUrl": "https://github.com/nex-crm/wuphf",
       "offers": {
@@ -1547,7 +1547,7 @@
       <ul class="compare-list compare-list-pos">
         <li>Agents continuously learn your work playbooks and build personalized skills. The office gets sharper the more you use it.</li>
         <li>Each agent gets its own notebook. The team shares a wiki. When a conclusion in an agent's notebook holds up, it gets promoted to the wiki so the whole office benefits. Built-in markdown wiki, file-over-app, lives as a local git repo. No API key, no hosted backend.</li>
-        <li>Mix Claude Code, Codex, and OpenClaw agents in one channel. They execute your work 24x7.</li>
+        <li>Mix Claude Code, Codex, Hermes Agent, OpenClaw bridged agents, and OpenClaw Gateway HTTP agents in one channel. They execute your work 24x7.</li>
         <li>Local. Runs on your machine. No cloud in the critical path.</li>
         <li>7x fewer tokens per session. Fresh sessions, not accumulated context.</li>
         <li>Free and open source. MIT licensed. No seats, no usage fees.</li>
@@ -1628,7 +1628,7 @@
     <details class="faq-item">
       <summary class="faq-q">Can I mix different AI providers in one office?</summary>
       <div class="faq-a">
-        Yes. Each agent picks its own runtime: Claude Code, Codex, or OpenClaw bridged over WebSocket. Your PM can run on Claude Opus while your engineer runs on Codex. They all collaborate in one shared channel with the same @mention semantics regardless of which provider backs them.
+        Yes. Each agent picks its own runtime: Claude Code, Codex, Hermes Agent through its local API server, OpenClaw Gateway through its OpenAI-compatible HTTP endpoint, or existing OpenClaw sessions bridged over WebSocket. Your PM can run on Claude Opus while your engineer runs on Codex. They all collaborate in one shared channel with the same @mention semantics regardless of which provider backs them.
       </div>
     </details>
   </div>

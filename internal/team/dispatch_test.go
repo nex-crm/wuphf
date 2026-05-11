@@ -18,6 +18,8 @@ func TestNormalizeProviderKind(t *testing.T) {
 		{"CODEX", provider.KindCodex},       // uppercase
 		{"claude-code", provider.KindClaudeCode},
 		{"openclaw", provider.KindOpenclaw},
+		{"openclaw-http", provider.KindOpenclawHTTP},
+		{"hermes-agent", provider.KindHermesAgent},
 		{"gemini", "gemini"}, // unknown passes through so dispatch can error
 	}
 	for _, tt := range tests {

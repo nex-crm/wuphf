@@ -1,10 +1,20 @@
 import { execFile } from "node:child_process";
 
-import { type BrokerUrl, isBrokerUrl } from "@wuphf/protocol";
+import type { BrokerUrl } from "@wuphf/protocol";
 import { utilityProcess } from "electron";
 
 import type { BrokerSnapshot, BrokerStatus } from "../shared/api-contract.ts";
-import { isSafePayloadKey, type Logger, type LogPayloadValue } from "./logger.ts";
+import {
+  type BrokerLogPayload,
+  brokerUrlPort,
+  errorCode,
+  errorMessage,
+  filterPayloadToSafeKeys,
+  readBrokerLogMessage,
+  readReadyMessage,
+  sanitizeBrokerEventName,
+} from "./broker-internal.ts";
+import type { Logger, LogPayloadValue } from "./logger.ts";
 import { monotonicNowMs } from "./monotonic-clock.ts";
 
 const BROKER_SERVICE_NAME = "wuphf-broker";
@@ -35,6 +45,7 @@ const DEFAULT_MAX_BACKOFF_MS = 60_000;
 const DEFAULT_MAX_RESTART_RETRIES = 5;
 const DEFAULT_STABILITY_WINDOW_MS = 60_000;
 const DEFAULT_LIVENESS_STALE_MS = 5_000;
+const MAX_DIAGNOSTIC_REPORT_BYTES = 64 * 1024;
 // 10 s startup ceiling for the broker to bind a loopback port and post
 // `{ ready }`. The listener is pure-Node and binds an ephemeral port — in
 // practice this takes a handful of milliseconds — so 10 s only fires on
@@ -42,7 +53,6 @@ const DEFAULT_LIVENESS_STALE_MS = 5_000;
 // listener bound but failed before IPC). Tighter than the v0 Go broker's
 // 30 s because the new entry has no DB/cache warmup work.
 const DEFAULT_STARTUP_TIMEOUT_MS = 10_000;
-type BrokerSubLogLevel = "info" | "warn" | "error";
 // All three arrow bodies execute through the no-logger smoke test in
 // broker-supervisor.spec.ts: start → broker_starting/broker_started (info),
 // liveness staleness → broker_ping_missed (warn), restart cap → broker_restart_cap_reached (error).
@@ -56,6 +66,9 @@ type UtilityProcessHandle = ReturnType<typeof utilityProcess.fork>;
 type ForkUtilityProcess = typeof utilityProcess.fork;
 type RunWindowsTaskkill = (pid: number, options: { readonly force: boolean }) => Promise<void>;
 type KillProcess = (pid: number, signal: NodeJS.Signals) => void;
+type BrokerLogForwardPayload = Record<string, LogPayloadValue> & {
+  droppedKeys?: LogPayloadValue;
+};
 export type ExecFileRunner = (
   file: string,
   args: readonly string[],
@@ -106,6 +119,7 @@ export class BrokerSupervisor {
   private restartTimer: NodeJS.Timeout | null = null;
   private startupTimer: NodeJS.Timeout | null = null;
   private startupForceTimer: NodeJS.Timeout | null = null;
+  private startupFinalTimer: NodeJS.Timeout | null = null;
   // Per-handle set so the message handler can drop ready/alive/broker_log
   // messages that arrive between the watchdog firing and the subprocess
   // actually exiting. Without this, a queued `{ ready }` racing the
@@ -178,6 +192,7 @@ export class BrokerSupervisor {
     } catch (error) {
       this.status = "dead";
       this.startedAtMs = null;
+      this.rejectReadyWaiters(error instanceof Error ? error : new Error(errorMessage(error)));
       this.logger.error("broker_start_failed", {
         error: errorMessage(error),
         restartCount: this.restartCount,
@@ -231,31 +246,35 @@ export class BrokerSupervisor {
       }
       const ready = readReadyMessage(message);
       if (ready !== null) {
-        this.clearStartupTimer();
-        this.brokerUrl = ready.brokerUrl;
-        // Flush waiters and notify listeners BEFORE logging. A previous
-        // regression had this order reversed: the logger threw on a banned
-        // payload key, which aborted the handler before flushReadyWaiters
-        // ran, hanging whenReady() in packaged builds. We log a safe `port`
-        // value today, but a future contributor adding any payload key
-        // containing "url"/"path"/"token" etc. (logger.ts allowlist) would
-        // reintroduce the exact same hang. Make the handshake robust by
-        // construction: deliver readiness first, then log (wrapped in a
-        // try/catch so the logger can never regress this ordering again).
-        this.flushReadyWaiters(ready.brokerUrl);
-        this.notifyReadyListeners(ready.brokerUrl);
-        try {
-          this.logger.info("broker_ready", {
-            pid: getProcessPid(brokerProcess),
-            port: brokerUrlPort(ready.brokerUrl),
-            restartCount: this.restartCount,
-          });
-        } catch {
-          // Swallow: the broker is ready, callers have been notified.
-          // A logger failure (banned payload key, IO error in packaged
-          // builds) must not regress the ready handshake.
+        if (ready.kind === "invalid") {
+          this.logger.warn("broker_ready_invalid", { reason: ready.reason });
+        } else {
+          this.clearStartupTimer();
+          this.brokerUrl = ready.brokerUrl;
+          // Flush waiters and notify listeners BEFORE logging. A previous
+          // regression had this order reversed: the logger threw on a banned
+          // payload key, which aborted the handler before flushReadyWaiters
+          // ran, hanging whenReady() in packaged builds. We log a safe `port`
+          // value today, but a future contributor adding any payload key
+          // containing "url"/"path"/"token" etc. (logger.ts allowlist) would
+          // reintroduce the exact same hang. Make the handshake robust by
+          // construction: deliver readiness first, then log (wrapped in a
+          // try/catch so the logger can never regress this ordering again).
+          this.flushReadyWaiters(ready.brokerUrl);
+          this.notifyReadyListeners(ready.brokerUrl);
+          try {
+            this.logger.info("broker_ready", {
+              pid: getProcessPid(brokerProcess),
+              port: brokerUrlPort(ready.brokerUrl),
+              restartCount: this.restartCount,
+            });
+          } catch {
+            // Swallow: the broker is ready, callers have been notified.
+            // A logger failure (banned payload key, IO error in packaged
+            // builds) must not regress the ready handshake.
+          }
+          return;
         }
-        return;
       }
       const brokerLog = readBrokerLogMessage(message);
       if (brokerLog !== null) {
@@ -268,6 +287,9 @@ export class BrokerSupervisor {
       // termination. Pass it through unchanged so telemetry distinguishes
       // "exited cleanly with code 0" from "killed by signal, no code".
       this.handleExit(brokerProcess, exitCode, null);
+    });
+    brokerProcess.on("error", (type: unknown, location: unknown, report: unknown) => {
+      this.logBrokerProcessError(brokerProcess, type, location, report);
     });
   }
 
@@ -443,13 +465,21 @@ export class BrokerSupervisor {
       return;
     }
 
+    this.clearStartupTimer();
     const nowMs = this.monotonicNow();
     const startedAtMs = this.startedAtMs;
+    // `startedAtMs === null` is defensive — `start()` sets `startedAtMs`
+    // BEFORE assigning `brokerProcess`, so when we get past the
+    // `brokerProcess !== exitedProcess` gate above, `startedAtMs` is
+    // always non-null. The null arm is dead code today; kept as a
+    // belt-and-suspenders guard against a future refactor that splits
+    // the start handshake.
     this.logger.warn("broker_exited", {
       pid: getProcessPid(exitedProcess),
       exitCode,
       signal,
       restartCount: this.restartCount,
+      /* v8 ignore next */
       uptimeMs: startedAtMs === null ? null : nowMs - startedAtMs,
       lastPingAt: this.lastPingAtMs,
     });
@@ -471,6 +501,26 @@ export class BrokerSupervisor {
 
     this.resetRestartCountAfterStableWindow();
     this.scheduleRestart();
+  }
+
+  private logBrokerProcessError(
+    brokerProcess: UtilityProcessHandle,
+    type: unknown,
+    location: unknown,
+    report: unknown,
+  ): void {
+    const reportBytes = diagnosticReportBytes(report);
+    const { safePayload, droppedKeyCount } = filterPayloadToSafeKeys({
+      type,
+      location,
+      ...(reportBytes === null ? {} : { reportBytes }),
+      pid: getProcessPid(brokerProcess),
+      restartCount: this.restartCount,
+    });
+    this.logger.error("broker_process_error", {
+      ...safePayload,
+      ...(droppedKeyCount > 0 ? { droppedKeys: droppedKeyCount } : {}),
+    });
   }
 
   private flushReadyWaiters(brokerUrl: BrokerUrl): void {
@@ -565,15 +615,17 @@ export class BrokerSupervisor {
       // stopping=false and fork a fresh broker AFTER stop() completed,
       // leaking a process whether start() throws or succeeds.
       //
-      // The `fatalReason !== null` clause is belt-and-suspenders for
-      // start()'s own early-return at line 104-107 — start() would refuse
-      // to fork once fatal, so the only behavior difference is that we
-      // log `broker_restart_skipped` with reason="fatal" instead of
-      // emitting a noisy `broker_restart_attempt` followed by a silent
-      // start() no-op.
-      if (this.stopping || this.fatalReason !== null) {
+      // The `fatalReason` arm is defensive — `fatalReason` is only ever
+      // set in cap-paths (`handleExit` line 536, `handleRestartStartFailure`
+      // line 624) that `return` WITHOUT calling `scheduleRestart`, so no
+      // public flow ends up with a pending restart-timer whose body sees
+      // `fatalReason !== null`. We keep the guard as belt-and-suspenders
+      // for future paths that might schedule a restart-then-go-fatal, but
+      // the "fatal" ternary arm is dead code today.
+      if (this.stopping || /* v8 ignore next */ this.fatalReason !== null) {
         this.logger.info("broker_restart_skipped", {
           restartCount: this.restartCount,
+          /* v8 ignore next */
           reason: this.stopping ? "stopping" : "fatal",
         });
         return;
@@ -611,14 +663,10 @@ export class BrokerSupervisor {
     // stopping=true synchronously from inside start() (e.g. a synchronous
     // forkProcess hook that calls back into the supervisor) and then start()
     // throws. Without it we would fall through to scheduleRestart() and
-    // leak a fresh broker AFTER stop() requested shutdown. The single-thread
-    // event-loop model and Vitest fake timers make a deterministic test for
-    // this exact path infeasible, so coverage is suppressed.
-    /* v8 ignore start */
+    // leak a fresh broker AFTER stop() requested shutdown.
     if (this.stopping) {
       return;
     }
-    /* v8 ignore stop */
 
     if (this.restartCount >= this.maxRestartRetries) {
       this.fatalReason = `Broker start failed after ${this.restartCount} restart retries: ${message}`;
@@ -641,22 +689,57 @@ export class BrokerSupervisor {
     this.clearStartupTimer();
     this.startupTimer = setTimeout(() => {
       this.startupTimer = null;
-      // Bail if we've already moved on (ready arrived, stop called, fatal cap
-      // hit, or a restart cycled to a new fork). The closure-captured handle
-      // disambiguates "this is the wedged fork" from "a fresh fork is running."
+      // Bail when this callback is racing with state we've already
+      // advanced. Node's `clearTimeout` cannot recall a callback that's
+      // already been queued onto the event loop, so each arm below
+      // guards a real race between this timer firing and a state-
+      // changing handler that ran first.
+      //
+      // - `brokerProcess !== brokerProcess` (sender-identity): a fresh
+      //   fork has cycled. The `start()` → `forkProcess` →
+      //   `armStartupTimer` reassignment runs only after `handleExit`
+      //   nulls the previous handle.
+      // - `brokerUrl !== null` (ready won the race): the `{ready}`
+      //   handler at broker.ts:241 calls `clearStartupTimer()` before
+      //   setting `brokerUrl`, but if this callback was already queued
+      //   the clear is a no-op. Without this arm, the callback would
+      //   kill a broker that's already ready.
+      // - `stopping` (stop() won the race): `stop()` at broker.ts:369
+      //   sets `stopping = true` before calling `clearStartupTimer()`,
+      //   same queued-callback shape. Without this arm, the callback
+      //   would log `broker_ready_timeout` for a process already being
+      //   torn down and double-kill it.
+      // - `fatalReason !== null`: defensive. The current architecture
+      //   has no public path that sets `fatalReason` while a startup
+      //   timer for THIS handle is still armed — cap-paths either run
+      //   from inside this callback or null `brokerProcess` first via
+      //   `handleExit` (which the sender-identity arm catches). Kept
+      //   as belt-and-suspenders for future paths that schedule then
+      //   go fatal; the true-arm is v8-ignored.
+      //
+      // Pass-3.1 stripped the brokerUrl/stopping/fatalReason arms;
+      // pass-4 triangulation re-flagged that as a regression because
+      // the restart timer at broker.ts:575 defends the same race
+      // explicitly. Restored for symmetry with that defense.
       if (
         this.brokerProcess !== brokerProcess ||
         this.brokerUrl !== null ||
         this.stopping ||
-        this.fatalReason !== null
+        /* v8 ignore next */ this.fatalReason !== null
       ) {
         return;
       }
       const nowMs = this.monotonicNow();
       const startedAtMs = this.startedAtMs;
+      // Same dead-arm rationale as the broker_exited log above:
+      // `start()` sets `startedAtMs` before `armStartupTimer` registers
+      // this callback, and any path that clears `startedAtMs` also
+      // changes `brokerProcess`, which the 4-condition guard catches
+      // FIRST. Defensive null arm only.
       this.logger.error("broker_ready_timeout", {
         pid: getProcessPid(brokerProcess),
         restartCount: this.restartCount,
+        /* v8 ignore next */
         uptimeMs: startedAtMs === null ? null : nowMs - startedAtMs,
       });
       // Mark BEFORE termination so the message handler drops any in-flight
@@ -676,9 +759,19 @@ export class BrokerSupervisor {
       // hang past the cap. Mirrors the stop() ladder shape.
       this.startupForceTimer = setTimeout(() => {
         this.startupForceTimer = null;
-        if (this.brokerProcess === brokerProcess) {
-          this.forceStop(brokerProcess);
+        // Exit normally clears this timer in handleExit. Keep the handle
+        // check for the same queued-callback race clearTimeout cannot recall.
+        if (this.brokerProcess !== brokerProcess) {
+          return;
         }
+        this.forceStop(brokerProcess);
+        this.startupFinalTimer = setTimeout(() => {
+          this.startupFinalTimer = null;
+          if (this.brokerProcess !== brokerProcess) {
+            return;
+          }
+          this.markStartupForceStopFailed(brokerProcess);
+        }, this.forceStopGraceMs);
       }, this.forceStopGraceMs);
     }, this.startupTimeoutMs);
   }
@@ -692,6 +785,28 @@ export class BrokerSupervisor {
       clearTimeout(this.startupForceTimer);
       this.startupForceTimer = null;
     }
+    if (this.startupFinalTimer !== null) {
+      clearTimeout(this.startupFinalTimer);
+      this.startupFinalTimer = null;
+    }
+  }
+
+  private markStartupForceStopFailed(brokerProcess: UtilityProcessHandle): void {
+    const reason = "Broker startup force-stop deadline exceeded";
+    this.brokerProcess = null;
+    this.status = "dead";
+    this.startedAtMs = null;
+    this.aliveSinceMs = null;
+    this.lastPingAtMs = null;
+    this.brokerUrl = null;
+    this.fatalReason = reason;
+    this.logger.error("broker_startup_force_stop_failed", {
+      pid: getProcessPid(brokerProcess),
+      restartCount: this.restartCount,
+      reason,
+    });
+    this.rejectReadyWaiters(new Error(reason));
+    this.onFatal?.(reason);
   }
 
   // Re-emit a `{ broker_log }` message from the broker subprocess through the
@@ -709,9 +824,10 @@ export class BrokerSupervisor {
       return;
     }
     const { safePayload, droppedKeyCount } = filterPayloadToSafeKeys(log.payload);
-    const finalPayload: Record<string, LogPayloadValue> = { ...safePayload };
+    const finalPayload: BrokerLogForwardPayload = safePayload;
+    delete finalPayload.droppedKeys;
     if (droppedKeyCount > 0) {
-      finalPayload["droppedKeys"] = droppedKeyCount;
+      finalPayload.droppedKeys = droppedKeyCount;
     }
     try {
       this.logger[log.broker_log](`broker_${event}`, finalPayload);
@@ -817,6 +933,12 @@ function getProcessPid(brokerProcess: UtilityProcessHandle | null): number | nul
   return typeof pid === "number" ? pid : null;
 }
 
+function diagnosticReportBytes(report: unknown): number | null {
+  if (typeof report !== "string") return null;
+  if (report.length > MAX_DIAGNOSTIC_REPORT_BYTES) return MAX_DIAGNOSTIC_REPORT_BYTES;
+  return Math.min(Buffer.byteLength(report, "utf8"), MAX_DIAGNOSTIC_REPORT_BYTES);
+}
+
 function isAliveMessage(message: unknown): message is { readonly alive: true } {
   return (
     typeof message === "object" &&
@@ -824,111 +946,6 @@ function isAliveMessage(message: unknown): message is { readonly alive: true } {
     Object.hasOwn(message, "alive") &&
     (message as { readonly alive?: unknown }).alive === true
   );
-}
-
-interface ReadyMessage {
-  readonly brokerUrl: BrokerUrl;
-}
-
-/**
- * Recognize the broker entry's `{ ready, brokerUrl }` handshake. Validates
- * the URL via the protocol's `isBrokerUrl` brand check — the subprocess is
- * trusted (same machine, our own code), but a malformed message from a
- * future broker version (or a misbehaving fake in tests) should be
- * rejected at the IPC boundary rather than handed downstream as a
- * "string" the supervisor later trusts as a fetch origin.
- */
-function readReadyMessage(message: unknown): ReadyMessage | null {
-  if (typeof message !== "object" || message === null) return null;
-  if (!Object.hasOwn(message, "ready") || !Object.hasOwn(message, "brokerUrl")) return null;
-  const record = message as { readonly ready?: unknown; readonly brokerUrl?: unknown };
-  if (record.ready !== true) return null;
-  // Snapshot the value to a local before validation so an accessor or
-  // mutating Proxy can't return a different value on the second read.
-  // utilityProcess uses structured clone in practice (plain objects),
-  // making this defense theoretical — but the cost is one local variable
-  // and the invariant "validated == returned" matters for any future
-  // caller that hands ReadyMessage a non-cloned source.
-  const brokerUrl = record.brokerUrl;
-  if (!isBrokerUrl(brokerUrl)) return null;
-  return { brokerUrl };
-}
-
-interface BrokerLogPayload {
-  readonly broker_log: BrokerSubLogLevel;
-  readonly event: string;
-  readonly payload: unknown;
-}
-
-// Recognize the broker subprocess's structured-log message:
-//   { broker_log: "info"|"warn"|"error", event: string, payload?: object }
-// Anything else is foreign and returns null so the message handler can fall
-// through to its no-op. The payload is intentionally `unknown` here — the
-// forwarder validates each key against the desktop logger's allowlist.
-function readBrokerLogMessage(message: unknown): BrokerLogPayload | null {
-  if (typeof message !== "object" || message === null) return null;
-  if (!Object.hasOwn(message, "broker_log")) return null;
-  const record = message as { broker_log?: unknown; event?: unknown; payload?: unknown };
-  if (
-    record.broker_log !== "info" &&
-    record.broker_log !== "warn" &&
-    record.broker_log !== "error"
-  ) {
-    return null;
-  }
-  if (typeof record.event !== "string") return null;
-  return { broker_log: record.broker_log, event: record.event, payload: record.payload };
-}
-
-// Mirror logger.ts's LOG_NAME_PATTERN. The forwarder rejects subprocess event
-// names that wouldn't pass the assertLogName check downstream — without this
-// pre-check, every broker_* log would attempt and silently fail at the logger
-// boundary.
-const LOG_NAME_PATTERN = /^[a-z0-9_.:-]+$/;
-
-function sanitizeBrokerEventName(event: string): string | null {
-  return LOG_NAME_PATTERN.test(event) ? event : null;
-}
-
-function filterPayloadToSafeKeys(payload: unknown): {
-  readonly safePayload: Record<string, LogPayloadValue>;
-  readonly droppedKeyCount: number;
-} {
-  const safe: Record<string, LogPayloadValue> = {};
-  let droppedKeyCount = 0;
-  if (typeof payload !== "object" || payload === null) {
-    return { safePayload: safe, droppedKeyCount: 0 };
-  }
-  for (const [key, value] of Object.entries(payload)) {
-    if (!isSafePayloadKey(key)) {
-      droppedKeyCount += 1;
-      continue;
-    }
-    if (
-      value === null ||
-      typeof value === "string" ||
-      typeof value === "number" ||
-      typeof value === "boolean"
-    ) {
-      safe[key] = value;
-    } else {
-      droppedKeyCount += 1;
-    }
-  }
-  return { safePayload: safe, droppedKeyCount };
-}
-
-// Parse the bound port out of the broker URL for safe logging. Returns null
-// on malformed input so the logger still records a structured event even
-// when the subprocess hands back something unparseable.
-function brokerUrlPort(url: string): number | null {
-  try {
-    const parsed = new URL(url);
-    const port = Number(parsed.port);
-    return Number.isFinite(port) && port > 0 ? port : null;
-  } catch {
-    return null;
-  }
 }
 
 // Sentinel no-op for the whenReady() shadow-handler pattern. Pulled out to
@@ -963,19 +980,6 @@ function discardBrokerOutput(_chunk: unknown): void {
 
 function killUtilityProcess(brokerProcess: UtilityProcessHandle): void {
   brokerProcess.kill();
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-function errorCode(error: unknown): string | null {
-  if (typeof error !== "object" || error === null || !Object.hasOwn(error, "code")) {
-    return null;
-  }
-
-  const code = (error as { readonly code?: unknown }).code;
-  return typeof code === "string" ? code : null;
 }
 
 export function runWindowsTaskkill(

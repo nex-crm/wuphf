@@ -97,7 +97,7 @@ if I say yes. If I am not logged in, just open https://wuphf.team.
 | `--no-open` | Don't auto-open the browser |
 | `--pack <name>` | Pick an agent pack (`starter`, `founding-team`, `coding-team`, `lead-gen-agency`, `revops`) |
 | `--opus-ceo` | Upgrade CEO from Sonnet to Opus |
-| `--provider <name>` | LLM provider override (`claude-code`, `codex`, `opencode`, `ollama`) |
+| `--provider <name>` | LLM provider override (`claude-code`, `codex`, `opencode`, `ollama`, `hermes-agent`, `openclaw-http`) |
 | `--collab` | Start in collaborative mode — all agents see all messages (this is the default) |
 | `--unsafe` | Bypass agent permission checks (local dev only) |
 | `--web-port <n>` | Change the web UI port (default 7891) |
@@ -226,6 +226,16 @@ Inside the office, run `/connect openclaw`, paste your gateway URL (default `ws:
 
 WUPHF authenticates to the gateway using an Ed25519 keypair (persisted at `~/.wuphf/openclaw/identity.json`, 0600), signed against the server-issued nonce during every connect. OpenClaw grants zero scopes to token-only clients, so device pairing is mandatory — on loopback the gateway approves silently on first use.
 
+If you want WUPHF-created office members to run through OpenClaw instead of bridging pre-existing OpenClaw sessions, enable OpenClaw Gateway's OpenAI-compatible Chat Completions endpoint (`gateway.http.endpoints.chatCompletions.enabled = true`) and use `--provider openclaw-http`. The default endpoint is `http://127.0.0.1:18789/v1` and the default model target is `openclaw/default`; override them with `WUPHF_OPENCLAW_HTTP_BASE_URL` / `WUPHF_OPENCLAW_HTTP_MODEL` or `provider_endpoints.openclaw-http`.
+
+For token-authenticated gateways, WUPHF sends `Authorization: Bearer ...` using `WUPHF_OPENCLAW_HTTP_API_KEY`, `OPENCLAW_GATEWAY_TOKEN`, `WUPHF_OPENCLAW_TOKEN`, or the saved OpenClaw token from Settings, in that order. Requests include a stable OpenAI `user` value derived from the WUPHF agent slug so OpenClaw can reuse the same per-agent session across turns.
+
+## Hermes Agent Runtime
+
+Already running [Hermes Agent](https://github.com/NousResearch/hermes-agent)? Point WUPHF agents at its local OpenAI-compatible API server with `--provider hermes-agent` or set `llm_provider` to `hermes-agent` in config. The default endpoint is `http://127.0.0.1:8642/v1` and the default model name is `hermes-agent`; override them with `WUPHF_HERMES_AGENT_BASE_URL` / `WUPHF_HERMES_AGENT_MODEL` or `provider_endpoints.hermes-agent`.
+
+If your Hermes API server uses `API_SERVER_KEY`, export the same value as `WUPHF_HERMES_AGENT_API_KEY` before starting WUPHF. Authenticated requests get stable `X-Hermes-Session-*` headers per WUPHF agent slug so each office member keeps its own Hermes-side session.
+
 Want to add a new integration? See [docs/ADD-A-TRANSPORT.md](docs/ADD-A-TRANSPORT.md).
 
 ## External Actions
@@ -261,7 +271,7 @@ Connects SaaS accounts (Gmail, Slack, etc.) through Composio's hosted OAuth flow
 | Agent wakes | Push-driven (zero idle burn) |
 | Live visibility | Stdout streaming |
 | Mid-task steering | DM any agent, no restart |
-| Runtimes | Mix Claude Code, Codex, and OpenClaw in one channel |
+| Runtimes | Mix Claude Code, Codex, Hermes Agent, and OpenClaw in one channel |
 | Memory | Per-agent notebook + shared workspace wiki, git-native markdown by default (no API key needed) |
 | Price | Free and open source (MIT, self-hosted, your API keys) |
 
