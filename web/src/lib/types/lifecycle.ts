@@ -276,6 +276,8 @@ export const SEVERITY_TOKENS: Record<
     pillText: string;
     bg: string;
     label: string;
+    /** CSS modifier class for the dot chip (e.g. "crit", "maj"). */
+    cssClass: string;
   }
 > = {
   critical: {
@@ -284,6 +286,7 @@ export const SEVERITY_TOKENS: Record<
     pillText: "#ffffff",
     bg: "var(--error-200)",
     label: "critical",
+    cssClass: "crit",
   },
   major: {
     border: "var(--warning-500)",
@@ -291,6 +294,7 @@ export const SEVERITY_TOKENS: Record<
     pillText: "#ffffff",
     bg: "var(--bg-card)",
     label: "major",
+    cssClass: "maj",
   },
   minor: {
     border: "var(--yellow-aa-500)",
@@ -298,6 +302,7 @@ export const SEVERITY_TOKENS: Record<
     pillText: "var(--yellow-aa-on-pill)",
     bg: "var(--bg-card)",
     label: "minor",
+    cssClass: "min",
   },
   nitpick: {
     border: "var(--cyan-500)",
@@ -305,6 +310,7 @@ export const SEVERITY_TOKENS: Record<
     pillText: "#ffffff",
     bg: "var(--bg-card)",
     label: "nitpick",
+    cssClass: "nit",
   },
   skipped: {
     border: "var(--text-tertiary)",
@@ -312,8 +318,17 @@ export const SEVERITY_TOKENS: Record<
     pillText: "var(--text-secondary)",
     bg: "var(--bg-card)",
     label: "skipped",
+    cssClass: "skp",
   },
 };
+
+/** Display order for non-skipped severity tiers in summary chips. */
+export const SEV_ORDER: ReadonlyArray<Exclude<Severity, "skipped">> = [
+  "critical",
+  "major",
+  "minor",
+  "nitpick",
+];
 
 export const INBOX_FILTERS: ReadonlyArray<{
   id: InboxFilter;
