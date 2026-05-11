@@ -44,9 +44,10 @@ const MAX_RECEIPT_BODY_BYTES = 1_048_576;
 // Hard ceiling for thread-scoped list responses. Without a limit a single
 // thread can accumulate enough receipts to make `GET /api/threads/:tid/
 // receipts` a memory-pressure path (the response is materialized as one
-// JSON-array string before send). Branch 6 will replace this with cursor
-// pagination; for branch 5 the cap is coarse but bounded. A 200 response
-// at or near the cap is the signal that pagination will be needed.
+// JSON-array string before send). Cursor-aware pagination handling on
+// this route lands in a follow-up commit in branch 6 (along with `Link:
+// rel="next"`); until then the route requests the first page from the
+// store at the maximum allowed limit, preserving the branch-5 wire shape.
 const MAX_THREAD_LIST_RECEIPTS = 1_000;
 
 interface ReceiptRouteDeps {
@@ -230,18 +231,12 @@ export async function handleThreadReceiptsList(
     return;
   }
 
-  const list = await deps.receiptStore.list({ threadId });
-  // Cap the response size: a single thread can otherwise accumulate
-  // enough receipts to make this a memory pressure path. Branch 6 adds
-  // cursor pagination; for now we truncate at the ceiling so the response
-  // stays bounded. Clients hitting the cap will see exactly
-  // MAX_THREAD_LIST_RECEIPTS receipts — there is no continuation token
-  // yet (added in branch 6).
-  const truncated =
-    list.length > MAX_THREAD_LIST_RECEIPTS ? list.slice(0, MAX_THREAD_LIST_RECEIPTS) : list;
-  // Serialize each via the codec so the wire shape is identical to the
-  // single-receipt GET response. Concatenate as a JSON array.
-  const body = `[${truncated.map((r) => receiptToJson(r)).join(",")}]`;
+  const page = await deps.receiptStore.list({ threadId, limit: MAX_THREAD_LIST_RECEIPTS });
+  // Branch-5 wire shape is a bare JSON array. The cursor-aware route
+  // signature (`?cursor=&limit=`, `Link: rel="next"` header) lands in a
+  // follow-up commit on this branch — until then we always request the
+  // first page at the max limit so behavior is identical to before.
+  const body = `[${page.items.map((r) => receiptToJson(r)).join(",")}]`;
   writeJsonResponse(res, 200, body);
 }
 
