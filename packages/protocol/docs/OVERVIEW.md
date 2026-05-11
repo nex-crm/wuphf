@@ -175,8 +175,10 @@ sequenceDiagram
   signerKeyId, signature }`; signatures cover `canonicalJSON(claims)`. Changing
   claim keys, date rules, or token lifetime changes what brokers sign.
 - IPC bootstrap and request/response envelopes: v0 bootstrap translates
-  `broker_url` to `brokerUrl`; approval submit and broker responses are closed
-  shapes. Hand-rolled translation or widened unions break cross-process parity.
+  `broker_url` to `brokerUrl`, and the value must pass the `BrokerUrl` bare
+  loopback-origin matrix in [ipc](modules/ipc.md#31-brokerurl-bootstrap-matrix).
+  Approval submit and broker responses are closed shapes. Hand-rolled
+  translation or widened unions break cross-process parity.
 
 ## 6. The threat model in one diagram
 
@@ -263,8 +265,6 @@ MEDIUM:
   divergence note for `sha256("wuphf:audit:genesis:v1")`.
 - [ipc](modules/ipc.md): web client hand-rolls `broker_url` translation instead
   of `apiBootstrapFromJson`.
-- [ipc](modules/ipc.md): `apiBootstrapFromJson` accepts any string URL despite
-  loopback contract.
 - [ipc](modules/ipc.md): SSE and WebSocket unions lack runtime validators.
 - [receipt](modules/receipt.md): `approvedAt === issuedAt` currently validates.
 - [budgets](modules/budgets.md): AGENTS hard rule omits the plain-data-only
