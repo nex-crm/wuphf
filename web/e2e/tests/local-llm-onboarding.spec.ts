@@ -146,13 +146,6 @@ test.describe("Onboarding → Run a local model", () => {
     await expect(
       page.getByTestId("onboarding-local-llm-tile-exo"),
     ).toBeVisible();
-    await expect(
-      page.getByTestId("onboarding-local-llm-tile-hermes-agent"),
-    ).toBeVisible();
-    await expect(
-      page.getByTestId("onboarding-local-llm-tile-openclaw-http"),
-    ).toBeVisible();
-
     // mlx-lm is reachable in the fixture → "Running" badge, selectable.
     const mlxTile = page.getByTestId("onboarding-local-llm-tile-mlx-lm");
     await expect(mlxTile.getByText(/Running/)).toBeVisible();
@@ -165,6 +158,25 @@ test.describe("Onboarding → Run a local model", () => {
     const ollamaTile = page.getByTestId("onboarding-local-llm-tile-ollama");
     await expect(ollamaTile.getByText(/Not installed.*Settings/)).toBeVisible();
     await expect(ollamaTile).toBeDisabled();
+
+    // Hermes Agent and OpenClaw Gateway are registered local runtimes too; in
+    // this fixture they are installable but unavailable, so they should match
+    // ollama's disabled "install from Settings" behavior.
+    const hermesTile = page.getByTestId(
+      "onboarding-local-llm-tile-hermes-agent",
+    );
+    await expect(hermesTile).toBeVisible();
+    await expect(hermesTile.getByText(/Not installed.*Settings/)).toBeVisible();
+    await expect(hermesTile).toBeDisabled();
+
+    const openclawTile = page.getByTestId(
+      "onboarding-local-llm-tile-openclaw-http",
+    );
+    await expect(openclawTile).toBeVisible();
+    await expect(
+      openclawTile.getByText(/Not installed.*Settings/),
+    ).toBeVisible();
+    await expect(openclawTile).toBeDisabled();
 
     // exo is platform_supported=false → tile is disabled and surfaces
     // "Not supported on this OS".
