@@ -111,13 +111,15 @@ export class ReceiptStoreFullError extends Error {
 
 /**
  * Error thrown by `list()` when `filter.cursor` is structurally invalid
- * (malformed base64 or doesn't decode to the expected `lsn:<n>` shape).
- * The HTTP route catches and responds 400.
+ * (malformed base64url or doesn't decode to the expected `lsn:<n>` shape).
+ * The HTTP route catches and responds 400. Intentionally carries NO
+ * attacker-controlled content — the raw cursor is hostile input and
+ * MUST NOT be echoed into log payloads (see security triangulation T6).
  */
 export class InvalidListCursorError extends Error {
   override readonly name = "InvalidListCursorError";
-  constructor(cursor: string) {
-    super(`Invalid list cursor: ${cursor}`);
+  constructor() {
+    super("invalid_list_cursor");
   }
 }
 
@@ -132,46 +134,73 @@ export class InvalidListLimitError extends Error {
   }
 }
 
+// RFC 4648 §5 base64url alphabet, unpadded — the only canonical form this
+// package accepts for cursors. Node's `Buffer.from(_, "base64url")` is
+// permissive and accepts trailing junk + non-canonical aliases (e.g.
+// `bHNuOjE!` decodes to `lsn:1`); we pre-validate the alphabet first
+// (security triangulation T5).
+const CURSOR_WIRE_PATTERN = /^[A-Za-z0-9_-]+$/;
+const CURSOR_LSN_TAIL_PATTERN = /^[1-9][0-9]*$/;
+
 /**
- * Internal helper — encode a numeric LSN into the opaque base64 cursor
- * wire shape. Exported for `SqliteReceiptStore` and the in-memory store
- * to share one implementation; callers outside the package MUST treat
- * cursors as opaque.
+ * Encode a numeric LSN into the opaque cursor wire shape. The shape is
+ * RFC 4648 §5 base64url (unpadded) of ASCII `lsn:<decimal>`. Callers
+ * outside this package MUST treat cursors as opaque — there is no
+ * stability guarantee on the inner encoding.
+ *
+ * Throws if `lsn` is not a positive safe integer (LSN 0 is never a
+ * legitimate cursor — cursors are always derived from an emitted
+ * `nextCursor`, which only fires after at least one item has been
+ * returned, so the smallest meaningful LSN is 1).
  *
  * @internal
  */
 export function encodeListCursor(lsn: number): string {
-  if (!Number.isInteger(lsn) || lsn < 0) {
-    throw new Error(`encodeListCursor: lsn must be a non-negative integer, got ${lsn}`);
+  if (!Number.isSafeInteger(lsn) || lsn <= 0) {
+    throw new Error(`encodeListCursor: lsn must be a positive safe integer, got ${lsn}`);
   }
   return Buffer.from(`lsn:${lsn}`, "utf8").toString("base64url");
 }
 
 /**
- * Internal helper — decode an opaque cursor to its LSN, or throw
- * `InvalidListCursorError` on malformed input.
+ * Decode an opaque cursor to its LSN, or throw `InvalidListCursorError`
+ * on malformed input. Strict validation rules (api/security triangulation
+ * T5, T7):
+ *
+ * - Empty string is rejected (HTTP `?cursor=` is normalized to "no
+ *   cursor" by the route handler; an empty cursor reaching the store
+ *   is a contract bug).
+ * - Outer wire MUST match `[A-Za-z0-9_-]+` (canonical unpadded base64url).
+ *   Node's decoder accepts `+`/`/` and trailing junk; we don't.
+ * - Decoded content MUST start with `lsn:` followed by a canonical
+ *   decimal (no leading zeros, no `+`, no whitespace, no scientific
+ *   notation).
+ * - LSN MUST be a positive `Number.isSafeInteger` (≤ 2^53 - 1) so that
+ *   round-trip ordering is stable across all comparisons.
  *
  * @internal
  */
 export function decodeListCursor(cursor: string): number {
+  if (cursor.length === 0 || !CURSOR_WIRE_PATTERN.test(cursor)) {
+    throw new InvalidListCursorError();
+  }
   let decoded: string;
   try {
     decoded = Buffer.from(cursor, "base64url").toString("utf8");
   } catch {
-    throw new InvalidListCursorError(cursor);
+    throw new InvalidListCursorError();
   }
   const prefix = "lsn:";
   if (!decoded.startsWith(prefix)) {
-    throw new InvalidListCursorError(cursor);
+    throw new InvalidListCursorError();
   }
   const tail = decoded.slice(prefix.length);
-  // Reject empty, leading +, hex, scientific notation, etc.
-  if (!/^[0-9]+$/.test(tail)) {
-    throw new InvalidListCursorError(cursor);
+  if (!CURSOR_LSN_TAIL_PATTERN.test(tail)) {
+    throw new InvalidListCursorError();
   }
   const lsn = Number(tail);
-  if (!Number.isInteger(lsn) || lsn < 0) {
-    throw new InvalidListCursorError(cursor);
+  if (!Number.isSafeInteger(lsn) || lsn <= 0) {
+    throw new InvalidListCursorError();
   }
   return lsn;
 }
@@ -267,14 +296,19 @@ export class InMemoryReceiptStore implements ReceiptStore {
     const limit = resolveListLimit(filter?.limit);
     const afterLsn = filter?.cursor !== undefined ? decodeListCursor(filter.cursor) : 0;
 
-    const candidateIds: readonly ReceiptId[] =
-      filter?.threadId !== undefined
-        ? Array.from(this.byThread.get(filter.threadId) ?? [])
-        : Array.from(this.byId.keys());
-
+    // Iterate the underlying Map/Set directly — no `Array.from` snapshot —
+    // so the per-call work is O(skipped + page). Maps preserve insertion
+    // order in V8, and our `byThread` Set is populated in lockstep with
+    // the LSN assignment in `put`, so iteration order is the LSN order.
+    // (perf triangulation T8.)
     const out: ReceiptSnapshot[] = [];
     let lastLsn = 0;
     let hasMore = false;
+    const candidateIds: Iterable<ReceiptId> =
+      filter?.threadId !== undefined
+        ? (this.byThread.get(filter.threadId) ?? new Set<ReceiptId>())
+        : this.byId.keys();
+
     for (const id of candidateIds) {
       const entry = this.byId.get(id);
       // The secondary index is populated in lockstep with `byId`; a

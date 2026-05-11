@@ -180,10 +180,53 @@ describe("InMemoryReceiptStore", () => {
     await expect(store.list({ cursor: "not-base64-!@#" })).rejects.toBeInstanceOf(
       InvalidListCursorError,
     );
-    // Base64 of "foo:1" — wrong prefix.
+    // Base64url of "foo:1" — wrong prefix.
     await expect(
       store.list({ cursor: Buffer.from("foo:1", "utf8").toString("base64url") }),
     ).rejects.toBeInstanceOf(InvalidListCursorError);
+    // Non-canonical base64url: `bHNuOjE!` decodes to `lsn:1` via Node's
+    // permissive `Buffer.from(_, "base64url")`. Strict alphabet validation
+    // rejects this (triangulation T5).
+    await expect(store.list({ cursor: "bHNuOjE!" })).rejects.toBeInstanceOf(InvalidListCursorError);
+    // Trailing padding (`=`) is not part of canonical unpadded base64url.
+    const padded = `${Buffer.from("lsn:1", "utf8").toString("base64url")}=`;
+    await expect(store.list({ cursor: padded })).rejects.toBeInstanceOf(InvalidListCursorError);
+    // LSN with leading zeros — not canonical decimal.
+    await expect(
+      store.list({ cursor: Buffer.from("lsn:01", "utf8").toString("base64url") }),
+    ).rejects.toBeInstanceOf(InvalidListCursorError);
+    // LSN zero — cursors are issued only after at least one item is returned,
+    // so the smallest legal LSN inside a cursor is 1.
+    await expect(
+      store.list({ cursor: Buffer.from("lsn:0", "utf8").toString("base64url") }),
+    ).rejects.toBeInstanceOf(InvalidListCursorError);
+    // LSN above MAX_SAFE_INTEGER — JS rounding makes comparisons unstable.
+    const unsafe = `${String(Number.MAX_SAFE_INTEGER)}0`; // 9_007_199_254_740_9910
+    await expect(
+      store.list({ cursor: Buffer.from(`lsn:${unsafe}`, "utf8").toString("base64url") }),
+    ).rejects.toBeInstanceOf(InvalidListCursorError);
+  });
+
+  it("InvalidListCursorError carries a constant message (no echoed input)", async () => {
+    const store = new InMemoryReceiptStore();
+    const hostile = "<script>alert('xss')</script>";
+    try {
+      await store.list({ cursor: hostile });
+      throw new Error("expected InvalidListCursorError");
+    } catch (err) {
+      expect(err).toBeInstanceOf(InvalidListCursorError);
+      // Security T6: the raw cursor MUST NOT appear in the error message
+      // — it is hostile input and could land in log payloads.
+      expect((err as Error).message).toBe("invalid_list_cursor");
+      expect((err as Error).message).not.toContain(hostile);
+    }
+  });
+
+  it("encodeListCursor rejects non-positive or unsafe LSNs", () => {
+    expect(() => encodeListCursor(0)).toThrow(/positive safe integer/);
+    expect(() => encodeListCursor(-1)).toThrow(/positive safe integer/);
+    expect(() => encodeListCursor(1.5)).toThrow(/positive safe integer/);
+    expect(() => encodeListCursor(Number.MAX_SAFE_INTEGER + 1)).toThrow(/positive safe integer/);
   });
 
   it("encodeListCursor round-trip skips items at or before the encoded LSN", async () => {

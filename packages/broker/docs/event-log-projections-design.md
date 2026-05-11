@@ -52,8 +52,13 @@ If a file is in both columns, escalate to the integration step — do not race t
 ```sql
 -- One forward-only migration: 001_initial.sql
 
+-- `lsn INTEGER PRIMARY KEY` (no `AUTOINCREMENT`) — SQLite hands out
+-- monotonically increasing rowids on append-only inserts without the
+-- `sqlite_sequence` write that AUTOINCREMENT requires. We never delete
+-- events, so the "never reuse after delete" guarantee AUTOINCREMENT
+-- provides isn't load-bearing here. (perf triangulation T4.)
 CREATE TABLE event_log (
-  lsn        INTEGER PRIMARY KEY AUTOINCREMENT,    -- ordered append-only sequence
+  lsn        INTEGER PRIMARY KEY,                  -- ordered append-only sequence
   ts_ms      INTEGER NOT NULL,                     -- ms since epoch at append time
   type       TEXT NOT NULL,                        -- 'receipt.put' for branch 6
   payload    BLOB NOT NULL                         -- canonical JSON bytes (UTF-8)
@@ -80,12 +85,18 @@ PRAGMA user_version = 1;
 
 ```
 PRAGMA journal_mode = WAL;            -- concurrent reader during writes
-PRAGMA synchronous = NORMAL;          -- WAL-safe durability without fsync-per-commit
+PRAGMA synchronous = FULL;            -- fsync every commit; the 201 ack must outlive a power-cut
 PRAGMA foreign_keys = ON;             -- enforce projection→event_log integrity
 PRAGMA busy_timeout = 5000;           -- 5s wait on SQLITE_BUSY
 ```
 
-Bench guard: the broker is the only writer. If multi-writer ever shows up, switch synchronous to FULL and re-bench.
+Durability choice (distsys triangulation T3): the HTTP `201` on `POST
+/api/receipts` is returned **after** the store's `put` resolves; callers
+race the 201 against follow-up reads. `synchronous=NORMAL` would lose
+recently committed transactions on power/OS failure even though the
+client believed the write was durable. `synchronous=FULL` pays one fsync
+per commit (~5–10ms on commodity SSDs); on the receipt-write hot path
+that's one fsync per agent-run, well below the dominant LLM latency.
 
 ## Public TypeScript API
 
@@ -205,9 +216,11 @@ export interface ListPage {
 list(filter?: ListFilter): Promise<ListPage>;
 ```
 
-**Cursor opacity**: cursors are base64-encoded `lsn:<n>` strings. The shape is an implementation detail — callers MUST treat them as opaque tokens. Both stores produce cursors with the same format so tests can mix-and-match, but no production code parses them.
+**Cursor wire shape** (api/security triangulation T5, T15): cursors are **RFC 4648 §5 base64url, unpadded**, of ASCII `lsn:<decimal>`. The decimal MUST be a positive `Number.isSafeInteger` (no leading zeros, no `+`, no whitespace, no scientific notation). Callers MUST treat the cursor as opaque — there is no stability guarantee on the inner encoding — but the shape is pinned so Go/Rust implementers can produce byte-identical tokens for the same logical LSN.
 
-**Ordering**: LSN ascending. For the in-memory store, LSN is replaced by insertion order (1-indexed). Same `${type}:${value}` shape.
+**Cursor scope** (api/architecture/distsys triangulation T1): cursors are **global LSN seek positions**. They are NOT thread-bound. A cursor produced by listing thread A and replayed against thread B will simply skip everything at LSN ≤ that value in thread B — there is no "wrong thread → 400" rejection, and exposing the LSN this way is intentional (the LSN is a global monotonic position and is not a secret). If you later add cross-thread isolation guarantees (e.g. tenant boundaries), revisit this — for branch 6, single-process single-tenant means global LSN seek is fine.
+
+**Ordering**: LSN ascending. For the in-memory store, LSN is replaced by insertion order (1-indexed). Same wire shape.
 
 ## HTTP wire change — `GET /api/threads/:tid/receipts` (owned by Worker B)
 
@@ -215,8 +228,10 @@ list(filter?: ListFilter): Promise<ListPage>;
 
 | Param | Type | Default | Notes |
 |---|---|---|---|
-| `cursor` | string | — | Opaque base64 token from prior response's `Link: rel="next"`. |
-| `limit` | integer | 100 | Clamped to [1, 1000]. Invalid → 400. |
+| `cursor` | string | — | Opaque base64url token from prior response's `Link: rel="next"`. Absent or empty → no cursor. |
+| `limit` | integer | **`MAX_LIST_LIMIT` (1000)** | Clamped to [1, 1000]. Invalid → 400. The route's default matches the branch-5 ceiling so existing clients that ignore `Link` continue to see the same page they did before. |
+
+The default-limit choice (api/architecture triangulation T2): the store's `DEFAULT_LIST_LIMIT = 100` only applies to direct programmatic callers. The HTTP route MUST pass `limit: MAX_LIST_LIMIT` explicitly when the caller didn't supply one. Otherwise clients ignoring `Link` silently lose receipts 101–1000 that branch 5 returned in one shot.
 
 ### Response
 
@@ -224,17 +239,17 @@ list(filter?: ListFilter): Promise<ListPage>;
 - **`Link` header added** when more pages exist:
 
   ```
-  Link: </api/threads/<tid>/receipts?cursor=<base64>&limit=<n>>; rel="next"
+  Link: </api/threads/<tid>/receipts?cursor=<base64url>&limit=<n>>; rel="next"
   ```
 
   No `Link` header on the last page. Clients that ignore the header degrade to "first page only" behavior — no breakage.
 
-- **`MAX_THREAD_LIST_RECEIPTS` truncation goes away**. With pagination, there is no need for a hard cap on `list.length`. The clamped `limit` is the only ceiling per response.
+- **`MAX_THREAD_LIST_RECEIPTS` truncation goes away**. With pagination, the route's clamped `limit` is the only per-response item ceiling.
 
 ### Status codes
 
 - 200 + body — happy path (with or without next page).
-- 400 — invalid `limit` (non-integer, ≤ 0) or invalid `cursor` (malformed base64, malformed `lsn:<n>` shape after decode, or LSN that doesn't belong to this thread).
+- 400 — invalid `limit` (non-integer, ≤ 0, > 1000, or syntactically malformed) or invalid `cursor` (not canonical unpadded base64url, doesn't decode to `lsn:<n>`, or LSN ≤ 0 / > `Number.MAX_SAFE_INTEGER`). The 400 body is `{"error":"invalid_cursor"}` or `{"error":"invalid_limit"}` — see receipts.spec.ts for fixtures.
 - 404 — malformed thread id (unchanged from branch 5).
 - 401 — missing bearer (unchanged).
 
