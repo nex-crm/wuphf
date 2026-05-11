@@ -744,12 +744,10 @@ export class BrokerSupervisor {
       return;
     }
     const { safePayload, droppedKeyCount } = filterPayloadToSafeKeys(log.payload);
-    const finalPayload: Record<string, LogPayloadValue> = { ...safePayload };
-    if (droppedKeyCount > 0) {
-      // Bracket access required: tsconfig has noPropertyAccessFromIndexSignature.
-      // biome-ignore lint/complexity/useLiteralKeys: see comment above
-      finalPayload["droppedKeys"] = droppedKeyCount;
-    }
+    const finalPayload: Record<string, LogPayloadValue> = {
+      ...safePayload,
+      ...(droppedKeyCount > 0 ? { droppedKeys: droppedKeyCount } : {}),
+    };
     try {
       this.logger[log.broker_log](`broker_${event}`, finalPayload);
     } catch {

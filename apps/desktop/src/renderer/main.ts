@@ -168,17 +168,14 @@ function parseBootstrap(value: unknown): ParsedBootstrap {
   if (typeof value !== "object" || value === null) {
     throw new Error("api-token response is not an object");
   }
-  const record = value as Record<string, unknown>;
+  const record = value as { readonly token?: unknown; readonly broker_url?: unknown };
   for (const key of Object.keys(record)) {
     if (key !== "token" && key !== "broker_url") {
       throw new Error(`api-token response has unknown key: ${key}`);
     }
   }
-  // Bracket access required: tsconfig has noPropertyAccessFromIndexSignature.
-  // biome-ignore lint/complexity/useLiteralKeys: see comment above
-  const token = record["token"];
-  // biome-ignore lint/complexity/useLiteralKeys: see comment above
-  const brokerUrl = record["broker_url"];
+  const token = record.token;
+  const brokerUrl = record.broker_url;
   if (typeof token !== "string" || !API_TOKEN_RE.test(token)) {
     throw new Error("api-token response: token does not match the API token shape");
   }
