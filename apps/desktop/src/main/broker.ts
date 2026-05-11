@@ -838,7 +838,7 @@ interface ReadyMessage {
  * rejected at the IPC boundary rather than handed downstream as a
  * "string" the supervisor later trusts as a fetch origin.
  */
-function readReadyMessage(message: unknown): ReadyMessage | null {
+export function readReadyMessage(message: unknown): ReadyMessage | null {
   if (typeof message !== "object" || message === null) return null;
   if (!Object.hasOwn(message, "ready") || !Object.hasOwn(message, "brokerUrl")) return null;
   const record = message as { readonly ready?: unknown; readonly brokerUrl?: unknown };
@@ -865,7 +865,7 @@ interface BrokerLogPayload {
 // Anything else is foreign and returns null so the message handler can fall
 // through to its no-op. The payload is intentionally `unknown` here — the
 // forwarder validates each key against the desktop logger's allowlist.
-function readBrokerLogMessage(message: unknown): BrokerLogPayload | null {
+export function readBrokerLogMessage(message: unknown): BrokerLogPayload | null {
   if (typeof message !== "object" || message === null) return null;
   if (!Object.hasOwn(message, "broker_log")) return null;
   const record = message as { broker_log?: unknown; event?: unknown; payload?: unknown };
@@ -886,11 +886,11 @@ function readBrokerLogMessage(message: unknown): BrokerLogPayload | null {
 // boundary.
 const LOG_NAME_PATTERN = /^[a-z0-9_.:-]+$/;
 
-function sanitizeBrokerEventName(event: string): string | null {
+export function sanitizeBrokerEventName(event: string): string | null {
   return LOG_NAME_PATTERN.test(event) ? event : null;
 }
 
-function filterPayloadToSafeKeys(payload: unknown): {
+export function filterPayloadToSafeKeys(payload: unknown): {
   readonly safePayload: Record<string, LogPayloadValue>;
   readonly droppedKeyCount: number;
 } {
@@ -921,7 +921,7 @@ function filterPayloadToSafeKeys(payload: unknown): {
 // Parse the bound port out of the broker URL for safe logging. Returns null
 // on malformed input so the logger still records a structured event even
 // when the subprocess hands back something unparseable.
-function brokerUrlPort(url: string): number | null {
+export function brokerUrlPort(url: string): number | null {
   try {
     const parsed = new URL(url);
     const port = Number(parsed.port);
@@ -965,11 +965,11 @@ function killUtilityProcess(brokerProcess: UtilityProcessHandle): void {
   brokerProcess.kill();
 }
 
-function errorMessage(error: unknown): string {
+export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function errorCode(error: unknown): string | null {
+export function errorCode(error: unknown): string | null {
   if (typeof error !== "object" || error === null || !Object.hasOwn(error, "code")) {
     return null;
   }

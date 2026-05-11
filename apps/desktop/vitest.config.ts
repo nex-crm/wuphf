@@ -22,20 +22,25 @@ export default defineConfig({
         "src/main/broker-entry.ts",
       ],
       thresholds: {
-        // Measured floor (post triangulation pass-1 + pass-2 broker hardening):
-        // 98.48 lines / 98.07 statements / 100 functions / 91.92 branches.
-        // The pass-1/pass-2 review added defensive branches at the IPC
-        // boundary (malformed-message rejection, payload-key allowlisting,
-        // startup-timeout fencing, broker-log forwarding error paths). Each
-        // arm is a single conditional; collectively they pushed branches
-        // below the previous 96 floor. Re-ratchet here at the new floor;
-        // a follow-up issue tracks bringing branches back over 95 with
-        // targeted property tests of the forwardBrokerLog / readReadyMessage
-        // / readBrokerLogMessage rejection grammars.
-        lines: 98,
-        statements: 98,
+        // 100/100/100/100. The pass-1/pass-2 broker hardening added
+        // defensive branches (malformed-message rejection, payload-key
+        // allowlisting, startup-timeout fencing, broker-log forwarding
+        // grammar) that briefly pushed branches below the previous floor.
+        // This branch backfills targeted property tests of every helper
+        // (`broker-helpers.spec.ts`) plus supervisor-level coverage of
+        // each timer-race / sender-identity / restart-fatal arm
+        // (`broker-supervisor.spec.ts`). Two arms remain genuinely
+        // unreachable and are documented at their `/* v8 ignore */`
+        // sites: the rotation existsSync check (`logger.ts`) and the
+        // non-http/file rendererUrl fallthrough (`window.ts`).
+        //
+        // Keep at 100 — a regression past this floor is a meaningful
+        // signal that new code added an untested defensive branch or
+        // an untested happy path.
+        lines: 100,
+        statements: 100,
         functions: 100,
-        branches: 91,
+        branches: 100,
       },
     },
   },

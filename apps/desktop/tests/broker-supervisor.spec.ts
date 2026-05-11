@@ -1586,6 +1586,352 @@ describe("BrokerSupervisor — review-pass-2 regressions", () => {
     // message entirely — no broker_listener_stopped should appear.
     expect(calls.some((c) => c.event === "broker_listener_stopped")).toBe(false);
   });
+
+  // ────────────────────────────────────────────────────────────────────
+  // Coverage backfill: the branches below are each one-arm conditionals
+  // not naturally reached by the higher-level tests. Each maps to a
+  // documented defensive guard in broker.ts; the tests pin one path per
+  // guard so a future refactor doesn't quietly delete one.
+  // ────────────────────────────────────────────────────────────────────
+
+  it("alive after first alive does not re-emit broker_alive", () => {
+    // Covers the false-arm of "status !== alive" in the alive handler:
+    // the SECOND alive message must not re-emit broker_alive.
+    const processHandle = new FakeUtilityProcess(4321);
+    const { forkProcess } = createForkMock([processHandle]);
+    const { logger, calls } = createMemoryLogger();
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+      logger,
+    });
+
+    supervisor.start();
+    processHandle.emit("message", { ready: true, brokerUrl: "http://127.0.0.1:7891" });
+    processHandle.emit("message", { alive: true });
+    processHandle.emit("message", { alive: true });
+
+    const aliveCount = calls.filter((c) => c.event === "broker_alive").length;
+    expect(aliveCount).toBe(1);
+  });
+
+  it("whenReady() rejects immediately when fatalReason is set", async () => {
+    // Covers the fatalReason arm in whenReady(). Set the field directly
+    // so the test stays focused on whenReady's behavior — the natural
+    // paths into fatalReason (restart cap hit, exit cap hit) are
+    // covered by their own dedicated tests.
+    const { forkProcess } = createForkMock([]);
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+    });
+    Reflect.set(supervisor, "fatalReason", "synthetic_fatal_for_test");
+
+    await expect(supervisor.whenReady()).rejects.toThrow(/synthetic_fatal/);
+  });
+
+  it("subscribeReady unsubscribe is a no-op when called twice", () => {
+    // Covers the false-arm of "idx >= 0" in the unsubscribe closure.
+    const processHandle = new FakeUtilityProcess(4321);
+    const { forkProcess } = createForkMock([processHandle]);
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+    });
+
+    const unsubscribe = supervisor.subscribeReady(() => {});
+    unsubscribe();
+    // Second unsubscribe — listener already removed; idx returns -1 and
+    // the splice is skipped. Must not throw.
+    expect(() => unsubscribe()).not.toThrow();
+  });
+
+  it("schedules a restart but logs reason='fatal' when fatalReason is set", () => {
+    // Covers the ternary `stopping ? "stopping" : "fatal"` false-arm in
+    // the restart-skipped log payload. We need scheduleRestart to fire
+    // when fatalReason is set but stopping is false — that happens
+    // briefly between handleExit (which sets fatalReason via the cap)
+    // and the next scheduleRestart firing… in practice the cap means
+    // scheduleRestart isn't called. Reach it directly via Reflect.
+    const processHandle = new FakeUtilityProcess(4321);
+    const { forkProcess } = createForkMock([processHandle]);
+    const { logger, calls } = createMemoryLogger();
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+      logger,
+      firstBackoffMs: 1,
+    });
+
+    // Force fatalReason directly so we observe the "fatal" branch of
+    // the reason ternary without also being in the stopping state.
+    Reflect.set(supervisor, "fatalReason", "test_fatal");
+    vi.useFakeTimers();
+    const scheduleRestart = Reflect.get(supervisor, "scheduleRestart") as () => void;
+    Reflect.apply(scheduleRestart, supervisor, []);
+    vi.advanceTimersByTime(10);
+
+    const skipped = calls.find((c) => c.event === "broker_restart_skipped");
+    expect(skipped).toBeDefined();
+    expect(skipped?.payload?.["reason"]).toBe("fatal");
+    vi.useRealTimers();
+  });
+
+  it("startup-timeout watchdog bails when the closure-captured fork already settled", () => {
+    // Covers the early-return arm of the startup-timer body: any of
+    // (brokerProcess changed, brokerUrl set, stopping flipped,
+    // fatalReason set) makes the timer fire as a no-op. Flip
+    // `stopping` after the timer is armed but BEFORE the timer fires —
+    // bypasses clearStartupTimer (which stop() would normally call) so
+    // the timer reaches the bail-out branch organically.
+    vi.useFakeTimers();
+    const processHandle = new FakeUtilityProcess(4321);
+    const { forkProcess } = createForkMock([processHandle]);
+    const { logger, calls } = createMemoryLogger();
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+      logger,
+      startupTimeoutMs: 500,
+    });
+
+    supervisor.start();
+    Reflect.set(supervisor, "stopping", true);
+    vi.advanceTimersByTime(500);
+
+    expect(calls.some((c) => c.event === "broker_ready_timeout")).toBe(false);
+    // The kill was never called because the bail returned early.
+    expect(processHandle.kill).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
+  it("force-timer bails when brokerProcess has cycled to a new fork", () => {
+    // Covers the false arm of "this.brokerProcess === brokerProcess" in
+    // the force-stop timer body. Arm the force timer for fork A by
+    // letting startup timeout, then substitute brokerProcess directly
+    // BEFORE the force timer fires. Reflect.set avoids clearStartupTimer
+    // (which any natural "restart" path would call and clear the force
+    // timer along with it).
+    vi.useFakeTimers();
+    let nowMs = 0;
+    const first = new FakeUtilityProcess(1);
+    const second = new FakeUtilityProcess(2);
+    const { forkProcess } = createForkMock([first]);
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+      monotonicNow: () => nowMs,
+      startupTimeoutMs: 500,
+      forceStopGraceMs: 1_000,
+    });
+
+    supervisor.start();
+    nowMs = 500;
+    vi.advanceTimersByTime(500); // startup fires → SIGTERM + force timer armed
+    expect(first.kill).toHaveBeenCalledTimes(1);
+    // Swap brokerProcess out from under the force timer's closure.
+    Reflect.set(supervisor, "brokerProcess", second);
+    nowMs = 1_500;
+    vi.advanceTimersByTime(1_000);
+    // First fork must not have been killed a SECOND time — force timer
+    // bailed because brokerProcess no longer matches the closure capture.
+    expect(first.kill).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
+  });
+
+  it("clearStartupTimer is a no-op when no timer is armed", () => {
+    // Covers the false-arm of "startupTimer !== null" / "startupForceTimer !== null"
+    // in clearStartupTimer. Reach it directly so we don't have to race a
+    // real timer's lifecycle.
+    const { forkProcess } = createForkMock([]);
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+    });
+    const clear = Reflect.get(supervisor, "clearStartupTimer") as () => void;
+    expect(() => Reflect.apply(clear, supervisor, [])).not.toThrow();
+    // Same call again is still a no-op (idempotent).
+    expect(() => Reflect.apply(clear, supervisor, [])).not.toThrow();
+  });
+
+  it("clearStartupTimer clears an armed force timer when stop() runs mid-timeout", async () => {
+    // Covers the true-arm of "startupForceTimer !== null" inside
+    // clearStartupTimer — reachable only when the startup watchdog has
+    // already fired (arming the force timer) but stop() runs before the
+    // force timer fires.
+    vi.useFakeTimers();
+    const processHandle = new FakeUtilityProcess(4321);
+    const { forkProcess } = createForkMock([processHandle]);
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+      startupTimeoutMs: 500,
+      forceStopGraceMs: 5_000,
+      stopGraceMs: 10,
+    });
+
+    supervisor.start();
+    vi.advanceTimersByTime(500); // startup fires → arms force timer
+    // At this point startupForceTimer is set. stop() will call
+    // clearStartupTimer, which clears it (lines 692-693).
+    const stopPromise = supervisor.stop();
+    setImmediate(() => processHandle.emit("exit", 0, null));
+    await vi.advanceTimersByTimeAsync(20);
+    await stopPromise;
+    vi.useRealTimers();
+  });
+
+  it("forwardBrokerLog emits without droppedKeys when every key is safe", () => {
+    // Covers the false-arm of "droppedKeyCount > 0" in forwardBrokerLog
+    // — payload made entirely of safe keys must NOT carry a `droppedKeys`
+    // field (otherwise downstream consumers infer redaction happened
+    // when it didn't).
+    const processHandle = new FakeUtilityProcess(4321);
+    const { forkProcess } = createForkMock([processHandle]);
+    const { logger, calls } = createMemoryLogger();
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+      logger,
+    });
+
+    supervisor.start();
+    processHandle.emit("message", {
+      broker_log: "info",
+      event: "listener_started",
+      payload: { port: 7891, restartCount: 0 },
+    });
+
+    const forwarded = calls.find((c) => c.event === "broker_listener_started");
+    expect(forwarded).toBeDefined();
+    expect(forwarded?.payload).toEqual({ port: 7891, restartCount: 0 });
+    expect(forwarded?.payload).not.toHaveProperty("droppedKeys");
+  });
+
+  it("handleExit reports null uptimeMs when startedAtMs was cleared before the exit fired", () => {
+    // Covers the null-arm of `startedAtMs === null ? null : nowMs - startedAtMs`
+    // in handleExit. Set up the supervisor with a brokerProcess (so the
+    // sender-identity gate passes) but null startedAtMs (the path where
+    // a stop() raced ahead of the exit handler and cleared the field).
+    const processHandle = new FakeUtilityProcess(4321);
+    const { forkProcess } = createForkMock([]);
+    const { logger, calls } = createMemoryLogger();
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+      logger,
+    });
+    Reflect.set(supervisor, "brokerProcess", processHandle);
+    Reflect.set(supervisor, "startedAtMs", null);
+
+    invokeHandleExit(supervisor, processHandle);
+    const exited = calls.find((c) => c.event === "broker_exited");
+    expect(exited).toBeDefined();
+    expect(exited?.payload?.["uptimeMs"]).toBeNull();
+  });
+
+  it("startup-timeout reports null uptimeMs when startedAtMs was never set", () => {
+    // Covers the null-arm of the same ternary inside the startup-timeout
+    // watchdog body. Force the path: arm the timer with a supervisor
+    // whose startedAtMs is null (override directly).
+    vi.useFakeTimers();
+    const processHandle = new FakeUtilityProcess(4321);
+    const { forkProcess } = createForkMock([processHandle]);
+    const { logger, calls } = createMemoryLogger();
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+      logger,
+      startupTimeoutMs: 500,
+      maxRestartRetries: 0,
+    });
+
+    supervisor.start();
+    // Override startedAtMs to null AFTER start arms the timer. The
+    // timer body's `startedAtMs` snapshot will see null and emit the
+    // ternary's null arm.
+    Reflect.set(supervisor, "startedAtMs", null);
+    vi.advanceTimersByTime(500);
+
+    const timeout = calls.find((c) => c.event === "broker_ready_timeout");
+    expect(timeout).toBeDefined();
+    expect(timeout?.payload?.["uptimeMs"]).toBeNull();
+    vi.useRealTimers();
+  });
+
+  it("requestProcessTermination on Windows skips taskkill when pid is null", () => {
+    // Covers the false-arm of "pid !== null" inside the Windows branch
+    // of requestProcessTermination. A FakeUtilityProcess can be coerced
+    // to have a missing pid by reading it directly — but the type is
+    // `readonly number`, so we substitute a no-pid stand-in.
+    const processHandle = new FakeUtilityProcess(0);
+    // Override pid to null via the structural cast that the supervisor's
+    // helper uses (`getProcessPid` returns null for missing pids).
+    Object.defineProperty(processHandle, "pid", { value: null });
+    const { forkProcess } = createForkMock([processHandle]);
+    const runWindowsTaskkillMock = vi.fn(() => Promise.resolve());
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+      platform: "win32",
+      runWindowsTaskkill: runWindowsTaskkillMock,
+    });
+
+    supervisor.start();
+    const requestTerm = Reflect.get(supervisor, "requestProcessTermination") as (
+      _: FakeUtilityProcess,
+    ) => void;
+    Reflect.apply(requestTerm, supervisor, [processHandle]);
+
+    expect(runWindowsTaskkillMock).not.toHaveBeenCalled();
+  });
+
+  it("forceStop on Windows skips taskkill when pid is null and falls back to kill()", () => {
+    // Covers the false-arm of "pid !== null" inside the Windows branch
+    // of forceStop. Same structural shape as requestProcessTermination
+    // — the fallthrough is to utilityProcess.kill().
+    const processHandle = new FakeUtilityProcess(0);
+    Object.defineProperty(processHandle, "pid", { value: null });
+    const { forkProcess } = createForkMock([processHandle]);
+    const runWindowsTaskkillMock = vi.fn(() => Promise.resolve());
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+      platform: "win32",
+      runWindowsTaskkill: runWindowsTaskkillMock,
+    });
+
+    supervisor.start();
+    const forceStop = Reflect.get(supervisor, "forceStop") as (_: FakeUtilityProcess) => void;
+    Reflect.apply(forceStop, supervisor, [processHandle]);
+
+    expect(runWindowsTaskkillMock).not.toHaveBeenCalled();
+    // POSIX-fallback path: utilityProcess.kill().
+    expect(processHandle.kill).toHaveBeenCalled();
+  });
+
+  it("forceStop on POSIX falls back to utilityProcess.kill when pid is null", () => {
+    // Covers the false-arm of "pid !== null" in the POSIX branch of
+    // forceStop (the SIGKILL via process.kill is skipped, the helper
+    // falls through to utilityProcess.kill()).
+    const processHandle = new FakeUtilityProcess(0);
+    Object.defineProperty(processHandle, "pid", { value: null });
+    const { forkProcess } = createForkMock([processHandle]);
+    const killProcess = vi.fn<KillProcess>();
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+      platform: "linux",
+      killProcess,
+    });
+
+    supervisor.start();
+    const forceStop = Reflect.get(supervisor, "forceStop") as (_: FakeUtilityProcess) => void;
+    Reflect.apply(forceStop, supervisor, [processHandle]);
+
+    expect(killProcess).not.toHaveBeenCalled();
+    expect(processHandle.kill).toHaveBeenCalled();
+  });
 });
 
 describe("buildBrokerEnv", () => {

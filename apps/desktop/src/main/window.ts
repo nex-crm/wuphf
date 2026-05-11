@@ -115,11 +115,16 @@ function isAllowedRendererNavigation(targetUrl: string, rendererUrl: string): bo
     return false;
   }
 
-  if (parsedRendererUrl.protocol === "file:" || parsedRendererUrl.protocol === "http:") {
-    return stripUrlHash(parsedTargetUrl) === stripUrlHash(parsedRendererUrl);
+  // Defensive — `resolveRendererUrl` only returns file:// or http:// URLs
+  // (after validation), so the else-arm of this if and the fallthrough
+  // `return false` below are belt-and-suspenders against a future change
+  // weakening that invariant.
+  /* v8 ignore start */
+  if (parsedRendererUrl.protocol !== "file:" && parsedRendererUrl.protocol !== "http:") {
+    return false;
   }
-
-  return false;
+  /* v8 ignore stop */
+  return stripUrlHash(parsedTargetUrl) === stripUrlHash(parsedRendererUrl);
 }
 
 function stripUrlHash(value: URL): string {

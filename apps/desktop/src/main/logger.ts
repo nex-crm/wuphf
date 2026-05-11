@@ -246,9 +246,17 @@ function rotateLogs(logDirectory: string): void {
   }
 
   const activePath = join(logDirectory, LOG_FILE_NAME);
-  if (existsSync(activePath)) {
-    renameSync(activePath, join(logDirectory, "main.1.log"));
+  // Defensive — rotation is only invoked from the size-trigger inside
+  // `appendToLogFile`, which has just written to `activePath`, so the
+  // file MUST exist at this point. The existence check guards against
+  // an external delete racing the rotation; that path is genuinely
+  // unreachable in-process.
+  /* v8 ignore start */
+  if (!existsSync(activePath)) {
+    return;
   }
+  /* v8 ignore stop */
+  renameSync(activePath, join(logDirectory, "main.1.log"));
 }
 
 function writeLineToConsole(level: LogLevel, line: string): void {

@@ -285,6 +285,24 @@ describe("createSecureWindow", () => {
     ).toThrow("Refusing to load non-local ELECTRON_RENDERER_URL: http://192.168.0.10:5173/");
   });
 
+  it("rejects a brokerUrl that parses but is not a loopback http URL", async () => {
+    const { createSecureWindow } = await import("../src/main/window.ts");
+
+    // Parses cleanly via `new URL`, fails `isLocalHttpRendererUrl` because
+    // the hostname is not 127.0.0.1/localhost. This shape is the threat the
+    // broker-URL gate exists to refuse: a supervisor that learned the wrong
+    // origin would otherwise load `https://attacker.example.com/...` into
+    // the privileged WebView.
+    expect(() =>
+      createSecureWindow({
+        preloadPath: "/tmp/preload.js",
+        rendererIndexPath: "/tmp/index.html",
+        allowDevServerUrl: false,
+        brokerUrl: "http://example.com:8080/",
+      }),
+    ).toThrow("Refusing to load non-loopback broker URL: http://example.com:8080/");
+  });
+
   it("blocks will-redirect to a different origin while allowing same-renderer redirects", async () => {
     const { createSecureWindow } = await import("../src/main/window.ts");
 
