@@ -23,6 +23,8 @@
 !/docs/surfaces_test.go
 !/docs/adr/
 !/docs/adr/**
+!/docs/agents/
+!/docs/agents/**
 !/docs/architecture/
 !/docs/architecture/**
 !/docs/dogfood/
