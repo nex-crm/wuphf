@@ -8,11 +8,41 @@ This module defines the pure-data IPC contract for Wuphf's broker boundary: rend
 
 ## 2. Public API surface
 
-Types in `ipc.ts`: `BrokerPort` line 41, `ApiToken` 42, `RequestId` 43, `KeychainHandleId` 44, `OsVerbsApi` 108, `ApiBootstrap` 154, `BrokerHttpRequest<TBody>` 199, `BrokerHttpResponse<T>` 212, `BrokerError` 217, `ApprovalSubmitRequest` 234, `ApprovalSubmitResponse` 540, `StreamEventKind` 563, `StreamEvent<TPayload>` 577, `BackpressureFrame` 590, `WsFrame` 598, `AllowedLoopbackHost` 611.
+Types in `ipc.ts`:
 
-Functions/constants in `ipc.ts`: `asBrokerPort` 59, `isBrokerPort` 66, `asApiToken` 70, `isApiToken` 80, `asRequestId` 84, `isRequestId` 91, `asKeychainHandleId` 95, `isKeychainHandleId` 102, `apiBootstrapFromJson` 180, `apiBootstrapToJson` 195, `validateApprovalSubmitRequest` 266, `ALLOWED_LOOPBACK_HOSTS` 610, `isAllowedLoopbackHost` 636, `isLoopbackRemoteAddress` 671.
+- `BrokerPort`: integer broker listener port, 1..65535.
+- `ApiToken`: bounded base64url bearer token.
+- `BrokerUrl`: bare canonical loopback HTTP origin for bootstrap and client
+  loading.
+- `RequestId`: bounded request correlation identifier.
+- `KeychainHandleId`: opaque main-process keychain handle identifier.
+- `OsVerbsApi`: renderer-to-main OS verb bridge.
+- `ApiBootstrap`: camelCase runtime bootstrap shape for the snake_case wire
+  object.
+- `BrokerHttpRequest<TBody>`: typed broker HTTP request envelope.
+- `BrokerHttpResponse<T>` and `BrokerError`: success/error response envelope.
+- `ApprovalSubmitRequest` and `ApprovalSubmitResponse`: approval submission
+  contract.
+- `StreamEventKind`, `StreamEvent<TPayload>`, `ThreadStreamEvent`, and
+  `ThreadInvalidationPayload`: closed SSE projection types.
+- `BackpressureFrame`, `WsFrame`, and `WsFrameType`: closed WebSocket frame
+  types.
+- `AllowedLoopbackHost`: loopback Host allowlist brand.
 
-Shared constants in `ipc-shared.ts`: `APPROVAL_CLAIMS_KEYS` line 14 and `SIGNED_APPROVAL_TOKEN_KEYS` 24. They stay outside `ipc.ts` so IPC, receipt codecs, and receipt validators share one key allowlist without import cycles or duplicated literal tuples.
+Functions/constants in `ipc.ts`: `asBrokerPort`, `isBrokerPort`, `asApiToken`,
+`isApiToken`, `asBrokerUrl`, `isBrokerUrl`, `asRequestId`, `isRequestId`,
+`asKeychainHandleId`, `isKeychainHandleId`, `apiBootstrapFromJson`,
+`apiBootstrapToJson`, `approvalClaimsToSigningBytes`,
+`approvalSubmitRequestFromJson`, `approvalSubmitRequestToJson`,
+`validateApprovalSubmitRequest`, `STREAM_EVENT_KIND_VALUES`,
+`isStreamEventKind`, `WS_FRAME_TYPE_VALUES`, `isWsFrameType`,
+`validateThreadStreamEvent`, `ALLOWED_LOOPBACK_HOSTS`, `isAllowedLoopbackHost`,
+and `isLoopbackRemoteAddress`.
+
+Shared constants in `ipc-shared.ts`: `APPROVAL_CLAIMS_KEYS` and
+`SIGNED_APPROVAL_TOKEN_KEYS`. They stay outside `ipc.ts` so IPC, receipt
+codecs, and receipt validators share one key allowlist without import cycles or
+duplicated literal tuples.
 
 ## 3. Behavior contract
 
@@ -49,6 +79,11 @@ The loopback host allowlist is `127.0.0.1`, `localhost`, and IPv6 loopback `::1`
 | Missing port | `http://127.0.0.1` | No | Brokers must emit an explicit bound port. |
 | Non-HTTP scheme | `https://127.0.0.1:54321` | No | Only loopback `http:` is valid for this local broker channel. |
 | File scheme | `file:///etc/passwd` | No | File URLs are not broker origins. |
+
+The canonical conformance vectors for this matrix live in
+`testdata/broker-url-vectors.json`. The protocol package enforces them in
+`tests/ipc.spec.ts`; renderer and broker-internal mirrors should consume the
+same fixture in their own tests.
 
 ### 3.2 Upgrade Path
 
@@ -152,10 +187,10 @@ Callers provide parsed runtime objects, not raw bytes. Approval claim dates must
 
 Resolved bootstrap note: `apiBootstrapFromJson` and `apiBootstrapToJson` both enforce the `BrokerUrl` matrix above, including strict unknown-key rejection for v0 bootstrap objects.
 
-| # | Spec section | File:line | Discrepancy | Severity | Fix needed |
+| # | Spec section | Surface | Discrepancy | Severity | Fix needed |
 |---|---|---|---|---|---|
-| 1 | Sec 3.1 | `web/src/api/client.ts:18` | A caller still hand-rolls `{ broker_url } -> brokerUrl` instead of using `apiBootstrapFromJson`, so the codec is not the only translation site repo-wide. | MEDIUM | Route `/api-token` parsing through the protocol codec or document this as an intentional non-package boundary. |
-| 2 | Sec 3.9 | `packages/protocol/src/ipc.ts:563`, `packages/protocol/src/ipc.ts:598` | `StreamEventKind` and `WsFrame` are closed wire unions but have no exported runtime validators/codecs. | MEDIUM | Add reader/writer validators for SSE and WebSocket envelopes, or explicitly mark them type-only internal surfaces. |
+| 1 | Sec 3.1 | `web/src/api/client.ts` | A caller still hand-rolls `{ broker_url } -> brokerUrl` instead of using `apiBootstrapFromJson`, so the codec is not the only translation site repo-wide. | MEDIUM | Route `/api-token` parsing through the protocol codec or document this as an intentional non-package boundary. |
+| 2 | Sec 3.9 | `StreamEventKind` and `WsFrame` in `packages/protocol/src/ipc.ts` | `StreamEventKind` and `WsFrame` are closed wire unions but have no exported runtime validators/codecs. | MEDIUM | Add reader/writer validators for SSE and WebSocket envelopes, or explicitly mark them type-only internal surfaces. |
 
 ## 8. Test coverage gaps (against this spec, not against current code)
 

@@ -68,6 +68,7 @@ import {
   type SignedApprovalToken,
 } from "../src/receipt.ts";
 import { asSha256Hex, sha256Hex } from "../src/sha256.ts";
+import brokerUrlVectors from "../testdata/broker-url-vectors.json";
 
 const TEXT_DECODER = new TextDecoder();
 
@@ -264,6 +265,25 @@ describe("IPC brand constructors", () => {
   });
 
   describe("BrokerUrl", () => {
+    it("matches the shared conformance vectors", () => {
+      for (const vector of brokerUrlVectors.accepted) {
+        expect(isBrokerUrl(vector.raw), vector.comment).toBe(true);
+        expect(asBrokerUrl(vector.raw)).toBe(vector.raw);
+      }
+
+      for (const vector of brokerUrlVectors.rejected) {
+        const note = vector.comment ?? vector.reason;
+        expect(isBrokerUrl(vector.raw), note).toBe(false);
+        expect(() => {
+          if (typeof vector.raw === "string") {
+            asBrokerUrl(vector.raw);
+            return;
+          }
+          Reflect.apply(asBrokerUrl, undefined, [vector.raw]);
+        }, note).toThrow();
+      }
+    });
+
     it("brands valid loopback URLs and round-trips equality", () => {
       const u = asBrokerUrl("http://127.0.0.1:54321");
       expect(u as string).toBe("http://127.0.0.1:54321");
