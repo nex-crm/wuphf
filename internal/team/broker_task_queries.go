@@ -58,7 +58,8 @@ func (b *Broker) UnackedTasks(timeout time.Duration) []teamTask {
 	cutoff := time.Now().UTC().Add(-timeout)
 	out := make([]teamTask, 0)
 	for _, task := range b.tasks {
-		if task.status != "in_progress" || task.Owner == "" || task.AckedAt != "" {
+		status := strings.ToLower(strings.TrimSpace(task.status))
+		if status != "in_progress" || task.Owner == "" || task.AckedAt != "" {
 			continue
 		}
 		created, err := time.Parse(time.RFC3339, task.CreatedAt)

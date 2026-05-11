@@ -257,6 +257,16 @@ func (b *Broker) reindexTaskLifecycleFromLegacyLocked(task *teamTask) {
 	b.indexLifecycleLocked(task.ID, prev, derived)
 }
 
+func (b *Broker) markTaskQueuedBehindActiveOwnerLocked(task *teamTask) {
+	if b == nil || task == nil {
+		return
+	}
+	prev := task.LifecycleState
+	task.blocked = true
+	task.status = "open"
+	b.indexLifecycleLocked(task.ID, prev, task.LifecycleState)
+}
+
 // indexLifecycleLocked maintains the b.lifecycleIndex map. Pass an empty
 // string for fromState when adding a brand-new task (no prior bucket to
 // remove from). Caller must hold b.mu.
@@ -396,12 +406,13 @@ func (b *Broker) OnDecisionRecorded(completedTaskID string) {
 		return
 	}
 	b.mu.Lock()
+	defer b.mu.Unlock()
+	mutationSnapshot := snapshotBrokerTaskMutationLocked(b)
 	pending := b.unblockDependentsLocked(strings.TrimSpace(completedTaskID))
 	if err := b.saveLocked(); err != nil {
+		mutationSnapshot.restore(b)
 		log.Printf("broker: OnDecisionRecorded saveLocked failed for %q: %v", completedTaskID, err)
-		b.mu.Unlock()
 		return
 	}
 	b.flushPendingAutoNotebookTransitionsLocked(pending, "system")
-	b.mu.Unlock()
 }

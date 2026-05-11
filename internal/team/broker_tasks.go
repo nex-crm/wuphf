@@ -8,6 +8,7 @@ type brokerTaskMutationSnapshot struct {
 	actions     []officeActionLog
 	watchdogs   []watchdogAlert
 	scheduler   []schedulerJob
+	lifecycle   map[LifecycleState][]string
 	counter     int
 }
 
@@ -20,6 +21,7 @@ func snapshotBrokerTaskMutationLocked(b *Broker) brokerTaskMutationSnapshot {
 		actions:     cloneOfficeActionsForRollback(b.actions),
 		watchdogs:   append([]watchdogAlert(nil), b.watchdogs...),
 		scheduler:   append([]schedulerJob(nil), b.scheduler...),
+		lifecycle:   cloneLifecycleIndexForRollback(b.lifecycleIndex),
 		counter:     b.counter,
 	}
 }
@@ -32,7 +34,19 @@ func (snapshot brokerTaskMutationSnapshot) restore(b *Broker) {
 	b.actions = cloneOfficeActionsForRollback(snapshot.actions)
 	b.watchdogs = append([]watchdogAlert(nil), snapshot.watchdogs...)
 	b.scheduler = append([]schedulerJob(nil), snapshot.scheduler...)
+	b.lifecycleIndex = cloneLifecycleIndexForRollback(snapshot.lifecycle)
 	b.counter = snapshot.counter
+}
+
+func cloneLifecycleIndexForRollback(index map[LifecycleState][]string) map[LifecycleState][]string {
+	if len(index) == 0 {
+		return nil
+	}
+	out := make(map[LifecycleState][]string, len(index))
+	for state, ids := range index {
+		out[state] = append([]string(nil), ids...)
+	}
+	return out
 }
 
 func cloneTeamTasksForRollback(tasks []teamTask) []teamTask {
