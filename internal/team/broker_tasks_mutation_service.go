@@ -85,10 +85,10 @@ func markTaskDone(task *teamTask, timestamp string) {
 	if task == nil {
 		return
 	}
-	if !strings.EqualFold(strings.TrimSpace(task.Status), "done") && strings.TrimSpace(task.CompletedAt) == "" {
+	if !strings.EqualFold(strings.TrimSpace(task.status), "done") && strings.TrimSpace(task.CompletedAt) == "" {
 		task.CompletedAt = timestamp
 	}
-	task.Status = "done"
+	task.status = "done"
 }
 
 func reconcileTaskReviewState(task *teamTask, action string) {
@@ -96,32 +96,32 @@ func reconcileTaskReviewState(task *teamTask, action string) {
 		return
 	}
 	if !taskNeedsStructuredReview(task) {
-		// For new create actions, leave task.ReviewState empty so downstream logic
+		// For new create actions, leave task.reviewState empty so downstream logic
 		// can detect an uninitialized state; other actions or pre-set values
 		// normalize to not_required when taskNeedsStructuredReview is false.
-		if strings.TrimSpace(task.ReviewState) != "" || !strings.EqualFold(strings.TrimSpace(action), "create") {
-			task.ReviewState = "not_required"
+		if strings.TrimSpace(task.reviewState) != "" || !strings.EqualFold(strings.TrimSpace(action), "create") {
+			task.reviewState = "not_required"
 		}
 		return
 	}
 
-	switch strings.ToLower(strings.TrimSpace(task.Status)) {
+	switch strings.ToLower(strings.TrimSpace(task.status)) {
 	case "review":
-		task.ReviewState = "ready_for_review"
+		task.reviewState = "ready_for_review"
 	case "done":
 		switch {
 		case strings.EqualFold(strings.TrimSpace(action), "approve"),
 			strings.EqualFold(strings.TrimSpace(action), "complete"),
-			strings.EqualFold(strings.TrimSpace(task.ReviewState), "approved"):
-			task.ReviewState = "approved"
+			strings.EqualFold(strings.TrimSpace(task.reviewState), "approved"):
+			task.reviewState = "approved"
 		default:
-			task.ReviewState = "ready_for_review"
+			task.reviewState = "ready_for_review"
 		}
 	default:
-		switch strings.TrimSpace(task.ReviewState) {
+		switch strings.TrimSpace(task.reviewState) {
 		case "pending_review", "ready_for_review", "approved":
 		default:
-			task.ReviewState = "pending_review"
+			task.reviewState = "pending_review"
 		}
 	}
 }
@@ -161,13 +161,13 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 			SourceSignalID:   strings.TrimSpace(body.SourceSignalID),
 			SourceDecisionID: strings.TrimSpace(body.SourceDecisionID),
 		}); existing != nil {
-			beforeStatus := existing.Status
+			beforeStatus := existing.status
 			if details := strings.TrimSpace(body.Details); details != "" {
 				existing.Details = details
 			}
 			if owner := strings.TrimSpace(body.Owner); owner != "" {
 				existing.Owner = owner
-				existing.Status = "in_progress"
+				existing.status = "in_progress"
 			}
 			if taskType := strings.TrimSpace(body.TaskType); taskType != "" {
 				existing.TaskType = taskType
@@ -179,7 +179,7 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 				existing.ExecutionMode = executionMode
 			}
 			if reviewState := strings.TrimSpace(body.ReviewState); reviewState != "" {
-				existing.ReviewState = reviewState
+				existing.reviewState = reviewState
 			}
 			if sourceSignalID := strings.TrimSpace(body.SourceSignalID); sourceSignalID != "" {
 				existing.SourceSignalID = sourceSignalID
@@ -197,6 +197,7 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 				existing.ThreadID = strings.TrimSpace(body.ThreadID)
 			}
 			reconcileTaskReviewState(existing, action)
+			b.reindexTaskLifecycleFromLegacyLocked(existing)
 			syncTaskMemoryWorkflow(existing, now)
 			b.ensureTaskOwnerChannelMembershipLocked(channel, existing.Owner)
 			existing.UpdatedAt = now
@@ -209,7 +210,7 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 				rollbackTask()
 				return TaskResponse{}, taskMutationError(TaskMutationWorktreeFailed, "failed to manage task worktree", err)
 			}
-			b.appendActionLocked("task_updated", "office", channel, actor, truncateSummary(existing.Title+" ["+existing.Status+"]", 140), existing.ID)
+			b.appendActionLocked("task_updated", "office", channel, actor, truncateSummary(existing.Title+" ["+existing.status+"]", 140), existing.ID)
 			if err := b.saveLocked(); err != nil {
 				rollbackTask()
 				return TaskResponse{}, taskMutationError(TaskMutationPersistFailed, "failed to persist broker state", err)
@@ -224,13 +225,13 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 			Title:            strings.TrimSpace(body.Title),
 			Details:          strings.TrimSpace(body.Details),
 			Owner:            strings.TrimSpace(body.Owner),
-			Status:           "open",
+			status:           "open",
 			CreatedBy:        actor,
 			ThreadID:         strings.TrimSpace(body.ThreadID),
 			TaskType:         strings.TrimSpace(body.TaskType),
 			PipelineID:       strings.TrimSpace(body.PipelineID),
 			ExecutionMode:    strings.TrimSpace(body.ExecutionMode),
-			ReviewState:      strings.TrimSpace(body.ReviewState),
+			reviewState:      strings.TrimSpace(body.ReviewState),
 			SourceSignalID:   strings.TrimSpace(body.SourceSignalID),
 			SourceDecisionID: strings.TrimSpace(body.SourceDecisionID),
 			WorktreePath:     strings.TrimSpace(body.WorktreePath),
@@ -240,9 +241,9 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 			UpdatedAt:        now,
 		}
 		if len(task.DependsOn) > 0 && b.hasUnresolvedDepsLocked(&task) {
-			task.Blocked = true
+			task.blocked = true
 		} else if task.Owner != "" {
-			task.Status = "in_progress"
+			task.status = "in_progress"
 		}
 		reconcileTaskReviewState(&task, action)
 		syncTaskMemoryWorkflow(&task, now)
@@ -257,13 +258,14 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 			rollbackTask()
 			return TaskResponse{}, taskMutationError(TaskMutationWorktreeFailed, "failed to manage task worktree", err)
 		}
+		b.reindexTaskLifecycleFromLegacyLocked(&task)
 		b.tasks = append(b.tasks, task)
 		b.appendActionLocked("task_created", "office", channel, task.CreatedBy, truncateSummary(task.Title, 140), task.ID)
 		if err := b.saveLocked(); err != nil {
 			rollbackTask()
 			return TaskResponse{}, taskMutationError(TaskMutationPersistFailed, "failed to persist broker state", err)
 		}
-		// Treat creation as a transition from "" → task.Status so the owner's
+		// Treat creation as a transition from "" → task.status so the owner's
 		// shelf records the moment a task lands in their lane.
 		b.emitTaskTransitionAutoNotebook(&task, "", actor)
 		return TaskResponse{Task: task}, nil
@@ -295,18 +297,18 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 		reassignTriggered := false
 		cancelTriggered := false
 		cancelPrevOwner := ""
-		beforeStatus := task.Status
+		beforeStatus := task.status
 		switch action {
 		case "claim", "assign":
 			if strings.TrimSpace(body.Owner) == "" {
 				return TaskResponse{}, taskMutationError(TaskMutationInvalid, "owner required", nil)
 			}
 			task.Owner = strings.TrimSpace(body.Owner)
-			task.Status = "in_progress"
+			task.status = "in_progress"
 			if taskNeedsStructuredReview(task) {
-				task.ReviewState = "pending_review"
+				task.reviewState = "pending_review"
 			} else {
-				task.ReviewState = "not_required"
+				task.reviewState = "not_required"
 			}
 		case "reassign":
 			if strings.TrimSpace(body.Owner) == "" {
@@ -315,69 +317,69 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 			reassignPrevOwner = strings.TrimSpace(task.Owner)
 			newOwner := strings.TrimSpace(body.Owner)
 			task.Owner = newOwner
-			status := strings.ToLower(strings.TrimSpace(task.Status))
+			status := strings.ToLower(strings.TrimSpace(task.status))
 			if status != "done" && status != "review" {
-				task.Status = "in_progress"
+				task.status = "in_progress"
 			}
-			if taskNeedsStructuredReview(task) && strings.TrimSpace(task.ReviewState) == "" {
-				task.ReviewState = "pending_review"
+			if taskNeedsStructuredReview(task) && strings.TrimSpace(task.reviewState) == "" {
+				task.reviewState = "pending_review"
 			}
 			reassignTriggered = reassignPrevOwner != newOwner
 		case "complete":
-			if strings.EqualFold(strings.TrimSpace(task.Status), "done") {
+			if strings.EqualFold(strings.TrimSpace(task.status), "done") {
 				if taskNeedsStructuredReview(task) {
-					task.ReviewState = "approved"
+					task.reviewState = "approved"
 				}
-				task.Blocked = false
-			} else if strings.EqualFold(strings.TrimSpace(task.Status), "review") ||
-				strings.EqualFold(strings.TrimSpace(task.ReviewState), "ready_for_review") {
+				task.blocked = false
+			} else if strings.EqualFold(strings.TrimSpace(task.status), "review") ||
+				strings.EqualFold(strings.TrimSpace(task.reviewState), "ready_for_review") {
 				markTaskDone(task, now)
 				if taskNeedsStructuredReview(task) {
-					task.ReviewState = "approved"
+					task.reviewState = "approved"
 				}
-				task.Blocked = false
+				task.blocked = false
 			} else if taskNeedsStructuredReview(task) {
-				task.Status = "review"
-				task.ReviewState = "ready_for_review"
+				task.status = "review"
+				task.reviewState = "ready_for_review"
 			} else {
 				markTaskDone(task, now)
-				task.Blocked = false
+				task.blocked = false
 			}
 		case "review":
-			task.Status = "review"
-			task.ReviewState = "ready_for_review"
+			task.status = "review"
+			task.reviewState = "ready_for_review"
 		case "approve":
 			markTaskDone(task, now)
-			task.Blocked = false
+			task.blocked = false
 			if taskNeedsStructuredReview(task) {
-				task.ReviewState = "approved"
+				task.reviewState = "approved"
 			}
 		case "block":
 			if err := rejectFalseLocalWorktreeBlock(task, body.Details); err != nil {
 				return TaskResponse{}, taskMutationError(TaskMutationConflict, err.Error(), err)
 			}
-			task.Status = "blocked"
-			task.Blocked = true
+			task.status = "blocked"
+			task.blocked = true
 		case "resume":
-			if task.Blocked {
-				task.Blocked = false
+			if task.blocked {
+				task.blocked = false
 			}
-			if strings.EqualFold(strings.TrimSpace(task.Status), "blocked") {
+			if strings.EqualFold(strings.TrimSpace(task.status), "blocked") {
 				if strings.TrimSpace(task.Owner) != "" {
-					task.Status = "in_progress"
+					task.status = "in_progress"
 				} else {
-					task.Status = "open"
+					task.status = "open"
 				}
 			}
 			appendDetails = true
 		case "release":
 			task.Owner = ""
-			task.Status = "open"
-			task.Blocked = false
+			task.status = "open"
+			task.blocked = false
 		case "cancel":
 			cancelPrevOwner = strings.TrimSpace(task.Owner)
-			task.Status = "canceled"
-			task.Blocked = false
+			task.status = "canceled"
+			task.blocked = false
 			task.FollowUpAt = ""
 			task.ReminderAt = ""
 			task.RecheckAt = ""
@@ -405,7 +407,7 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 			task.ExecutionMode = executionMode
 		}
 		if reviewState := strings.TrimSpace(body.ReviewState); reviewState != "" {
-			task.ReviewState = reviewState
+			task.reviewState = reviewState
 		}
 		if sourceSignalID := strings.TrimSpace(body.SourceSignalID); sourceSignalID != "" {
 			task.SourceSignalID = sourceSignalID
@@ -419,12 +421,13 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 		if worktreeBranch := strings.TrimSpace(body.WorktreeBranch); worktreeBranch != "" {
 			task.WorktreeBranch = worktreeBranch
 		}
-		if !strings.EqualFold(strings.TrimSpace(task.Status), "done") {
+		if !strings.EqualFold(strings.TrimSpace(task.status), "done") {
 			task.CompletedAt = ""
 		}
 		reconcileTaskReviewState(task, action)
+		b.reindexTaskLifecycleFromLegacyLocked(task)
 		syncTaskMemoryWorkflow(task, now)
-		if strings.EqualFold(strings.TrimSpace(task.Status), "done") {
+		if strings.EqualFold(strings.TrimSpace(task.status), "done") {
 			overrideActor := strings.TrimSpace(body.MemoryWorkflowOverrideActor)
 			if overrideActor == "" {
 				overrideActor = actor
@@ -448,7 +451,7 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 		// Any terminal status releases waiting dependents. isTerminalTeamTaskStatus
 		// matches hasUnresolvedDepsLocked so cancelled parents do not orphan dependents.
 		var pendingCascade []pendingTaskTransition
-		if isTerminalTeamTaskStatus(task.Status) {
+		if isTerminalTeamTaskStatus(task.status) {
 			pendingCascade = b.unblockDependentsLocked(task.ID)
 		}
 		b.scheduleTaskLifecycleLocked(task)
@@ -456,7 +459,7 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 			rollbackTask()
 			return TaskResponse{}, taskMutationError(TaskMutationWorktreeFailed, "failed to manage task worktree", err)
 		}
-		b.appendActionLocked("task_updated", "office", taskChannel, actor, truncateSummary(task.Title+" ["+task.Status+"]", 140), task.ID)
+		b.appendActionLocked("task_updated", "office", taskChannel, actor, truncateSummary(task.Title+" ["+task.status+"]", 140), task.ID)
 		if action == "block" {
 			b.requestCapabilitySelfHealingLocked(task, actor, body.Details)
 		}

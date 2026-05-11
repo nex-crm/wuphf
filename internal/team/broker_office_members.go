@@ -591,7 +591,9 @@ func (b *Broker) removeOfficeMember(r *http.Request, slug string) (officeMemberM
 	for i := range b.tasks {
 		if b.tasks[i].Owner == slug {
 			b.tasks[i].Owner = ""
-			b.tasks[i].Status = "open"
+			if _, err := b.transitionLifecycleLocked(b.tasks[i].ID, LifecycleStateReady, "owner removed"); err != nil {
+				return officeMemberMutationResult{}, newOfficeMemberMutationError(http.StatusInternalServerError, "failed to update task lifecycle")
+			}
 			b.tasks[i].UpdatedAt = now
 		}
 	}

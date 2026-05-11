@@ -27,12 +27,12 @@ func TestHasUnresolvedDepsLocked_TerminalStatusesResolve(t *testing.T) {
 	defer b.mu.Unlock()
 
 	b.tasks = []teamTask{
-		{ID: "dep-done", Status: "done"},
-		{ID: "dep-completed", Status: "completed"},
-		{ID: "dep-canceled", Status: "canceled"},
-		{ID: "dep-cancelled", Status: "cancelled"},
-		{ID: "dep-in-progress", Status: "in_progress"},
-		{ID: "dep-blocked", Status: "blocked"},
+		{ID: "dep-done", status: "done"},
+		{ID: "dep-completed", status: "completed"},
+		{ID: "dep-canceled", status: "canceled"},
+		{ID: "dep-cancelled", status: "cancelled"},
+		{ID: "dep-in-progress", status: "in_progress"},
+		{ID: "dep-blocked", status: "blocked"},
 	}
 
 	cases := []struct {
@@ -81,19 +81,19 @@ func TestReconcileOrphanedBlockedTasksLocked_UnblocksCancelledParent(t *testing.
 	b := newTestBroker(t)
 	b.mu.Lock()
 	b.tasks = []teamTask{
-		{ID: "parent-canceled", Status: "canceled", Channel: "general"},
-		{ID: "parent-done", Status: "done", Channel: "general"},
-		{ID: "parent-active", Status: "in_progress", Channel: "general"},
+		{ID: "parent-canceled", status: "canceled", Channel: "general"},
+		{ID: "parent-done", status: "done", Channel: "general"},
+		{ID: "parent-active", status: "in_progress", Channel: "general"},
 		{
-			ID: "orphan-1", Status: "blocked", Blocked: true, Channel: "general",
+			ID: "orphan-1", status: "blocked", blocked: true, Channel: "general",
 			DependsOn: []string{"parent-canceled"},
 		},
 		{
-			ID: "stuck", Status: "blocked", Blocked: true, Channel: "general",
+			ID: "stuck", status: "blocked", blocked: true, Channel: "general",
 			DependsOn: []string{"parent-active"},
 		},
 		{
-			ID: "orphan-multi", Status: "blocked", Blocked: true, Channel: "general",
+			ID: "orphan-multi", status: "blocked", blocked: true, Channel: "general",
 			DependsOn: []string{"parent-canceled", "parent-done"},
 		},
 	}
@@ -105,14 +105,14 @@ func TestReconcileOrphanedBlockedTasksLocked_UnblocksCancelledParent(t *testing.
 		byID[b.tasks[i].ID] = &b.tasks[i]
 	}
 
-	if got := byID["orphan-1"]; got.Blocked || got.Status != "in_progress" {
-		t.Errorf("orphan-1 should be unblocked, got Blocked=%v Status=%q", got.Blocked, got.Status)
+	if got := byID["orphan-1"]; got.Blocked() || got.Status() != "in_progress" {
+		t.Errorf("orphan-1 should be unblocked, got Blocked=%v Status=%q", got.Blocked(), got.Status())
 	}
-	if got := byID["orphan-multi"]; got.Blocked || got.Status != "in_progress" {
-		t.Errorf("orphan-multi should be unblocked, got Blocked=%v Status=%q", got.Blocked, got.Status)
+	if got := byID["orphan-multi"]; got.Blocked() || got.Status() != "in_progress" {
+		t.Errorf("orphan-multi should be unblocked, got Blocked=%v Status=%q", got.Blocked(), got.Status())
 	}
-	if got := byID["stuck"]; !got.Blocked || got.Status != "blocked" {
-		t.Errorf("stuck (parent still active) must remain blocked, got Blocked=%v Status=%q", got.Blocked, got.Status)
+	if got := byID["stuck"]; !got.Blocked() || got.Status() != "blocked" {
+		t.Errorf("stuck (parent still active) must remain blocked, got Blocked=%v Status=%q", got.Blocked(), got.Status())
 	}
 
 	// Idempotent: running again should be a no-op for previously
@@ -241,7 +241,7 @@ func TestBrokerTaskLifecycle(t *testing.T) {
 		"owner":      "fe",
 		"thread_id":  "msg-1",
 	})
-	if created.Status != "in_progress" || created.Owner != "fe" {
+	if created.Status() != "in_progress" || created.Owner != "fe" {
 		t.Fatalf("unexpected created task: %+v", created)
 	}
 	if created.FollowUpAt == "" || created.ReminderAt == "" || created.RecheckAt == "" {
@@ -270,7 +270,7 @@ func TestBrokerTaskLifecycle(t *testing.T) {
 		"action": "complete",
 		"id":     created.ID,
 	})
-	if completed.Status != "done" {
+	if completed.Status() != "done" {
 		t.Fatalf("expected done task, got %+v", completed)
 	}
 	if completed.FollowUpAt != "" || completed.ReminderAt != "" || completed.RecheckAt != "" {
@@ -348,8 +348,8 @@ func TestBrokerTaskReassignNotifies(t *testing.T) {
 	if updated.Owner != "ops" {
 		t.Fatalf("expected owner=ops after reassign, got %q", updated.Owner)
 	}
-	if updated.Status != "in_progress" {
-		t.Fatalf("expected status=in_progress after reassign, got %q", updated.Status)
+	if updated.Status() != "in_progress" {
+		t.Fatalf("expected status=in_progress after reassign, got %q", updated.Status())
 	}
 
 	msgs := b.Messages()[before:]
@@ -454,8 +454,8 @@ func TestBrokerTaskCancelNotifies(t *testing.T) {
 		"id":         created.ID,
 		"created_by": "human",
 	})
-	if canceled.Status != "canceled" {
-		t.Fatalf("expected status=canceled, got %q", canceled.Status)
+	if canceled.Status() != "canceled" {
+		t.Fatalf("expected status=canceled, got %q", canceled.Status())
 	}
 	if canceled.FollowUpAt != "" || canceled.ReminderAt != "" || canceled.RecheckAt != "" {
 		t.Fatalf("expected cleared follow-up timestamps on cancel, got %+v", canceled)
@@ -560,7 +560,7 @@ func TestBrokerOfficeFeatureTaskForGTMCompletesWithoutReviewAndUnblocksDependent
 		"task_type":      "feature",
 		"execution_mode": "office",
 	})
-	if thesis.ReviewState != "not_required" {
+	if thesis.ReviewState() != "not_required" {
 		t.Fatalf("expected GTM office feature task to skip review, got %+v", thesis)
 	}
 
@@ -575,7 +575,7 @@ func TestBrokerOfficeFeatureTaskForGTMCompletesWithoutReviewAndUnblocksDependent
 		"execution_mode": "office",
 		"depends_on":     []string{thesis.ID},
 	})
-	if !launch.Blocked {
+	if !launch.Blocked() {
 		t.Fatalf("expected dependent launch task to start blocked, got %+v", launch)
 	}
 
@@ -583,7 +583,7 @@ func TestBrokerOfficeFeatureTaskForGTMCompletesWithoutReviewAndUnblocksDependent
 		"action": "complete",
 		"id":     thesis.ID,
 	})
-	if completed.Status != "done" || completed.ReviewState != "not_required" {
+	if completed.Status() != "done" || completed.ReviewState() != "not_required" {
 		t.Fatalf("expected thesis task to complete directly without review, got %+v", completed)
 	}
 
@@ -597,7 +597,7 @@ func TestBrokerOfficeFeatureTaskForGTMCompletesWithoutReviewAndUnblocksDependent
 	if unblocked.ID == "" {
 		t.Fatalf("expected to find dependent task %s", launch.ID)
 	}
-	if unblocked.Blocked {
+	if unblocked.Blocked() {
 		t.Fatalf("expected dependent task to unblock after thesis completion, got %+v", unblocked)
 	}
 }
@@ -910,7 +910,7 @@ func TestBrokerResumeTaskUnblocksAndSchedulesOwnerLane(t *testing.T) {
 	if !changed {
 		t.Fatalf("expected resume to change task state, got %+v", resumed)
 	}
-	if resumed.Blocked || resumed.Status != "in_progress" {
+	if resumed.Blocked() || resumed.Status() != "in_progress" {
 		t.Fatalf("expected resumed task to be active, got %+v", resumed)
 	}
 	if resumed.FollowUpAt == "" {
@@ -955,7 +955,7 @@ func TestBrokerResumeTaskStripsRateLimitMarker(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resume task: %v", err)
 	}
-	if resumed.Blocked {
+	if resumed.Blocked() {
 		t.Fatalf("expected task to be unblocked after resume, got blocked=true")
 	}
 
@@ -1030,13 +1030,13 @@ func TestBrokerUnblockDependentsStripsRateLimitMarker(t *testing.T) {
 	b.tasks = []teamTask{
 		{
 			ID: "task-parent", Channel: "client-loop", Title: "Prereq",
-			Owner: "builder", Status: "done", CreatedBy: "operator",
+			Owner: "builder", status: "done", CreatedBy: "operator",
 			TaskType: "feature", ExecutionMode: "local_worktree",
-			ReviewState: "approved", CreatedAt: now, UpdatedAt: now,
+			reviewState: "approved", CreatedAt: now, UpdatedAt: now,
 		},
 		{
 			ID: "task-child", Channel: "client-loop", Title: "Dependent kickoff",
-			Owner: "builder", Status: "blocked", Blocked: true,
+			Owner: "builder", status: "blocked", blocked: true,
 			CreatedBy: "operator", TaskType: "feature", ExecutionMode: "live_external",
 			DependsOn: []string{"task-parent"},
 			Details:   "Original goal: ship dependent kickoff.\n429 RESOURCE_EXHAUSTED. Retry after 2026-04-15T22:00:29.610Z.",
@@ -1050,7 +1050,7 @@ func TestBrokerUnblockDependentsStripsRateLimitMarker(t *testing.T) {
 	b.mu.Unlock()
 
 	child := got[1]
-	if child.Blocked {
+	if child.Blocked() {
 		t.Fatalf("expected child task to be unblocked after dependency completion, got blocked=true")
 	}
 	if externalRetryAfterPattern.MatchString(child.Details) {
@@ -1089,7 +1089,7 @@ func TestBrokerResumeTaskQueuesBehindExistingExclusiveOwnerLane(t *testing.T) {
 	if err != nil || reused {
 		t.Fatalf("ensure queued task: %v reused=%v", err, reused)
 	}
-	if !task.Blocked {
+	if !task.blocked {
 		t.Fatalf("expected second task to start blocked behind active lane, got %+v", task)
 	}
 	if _, changed, err := b.BlockTask(task.ID, "operator", "provider cooldown"); err != nil || !changed {
@@ -1103,8 +1103,11 @@ func TestBrokerResumeTaskQueuesBehindExistingExclusiveOwnerLane(t *testing.T) {
 	if !changed {
 		t.Fatalf("expected resume to change task state, got %+v", resumed)
 	}
-	if resumed.Status != "open" || !resumed.Blocked {
+	if resumed.Status() != "open" || !resumed.Blocked() {
 		t.Fatalf("expected resumed task to stay queued behind active lane, got %+v", resumed)
+	}
+	if resumed.LifecycleState != LifecycleStateQueuedBehindOwner {
+		t.Fatalf("expected resumed task lifecycle to be queued behind owner, got %q", resumed.LifecycleState)
 	}
 	if !containsString(resumed.DependsOn, active.ID) {
 		t.Fatalf("expected resumed task to remain dependent on active lane, got %+v", resumed)
@@ -1123,11 +1126,11 @@ func TestBrokerUnblockDependentsQueuesExclusiveOwnerLanes(t *testing.T) {
 			Channel:       "youtube-factory",
 			Title:         "Finish prerequisite slice",
 			Owner:         "executor",
-			Status:        "done",
+			status:        "done",
 			CreatedBy:     "ceo",
 			TaskType:      "feature",
 			ExecutionMode: "local_worktree",
-			ReviewState:   "approved",
+			reviewState:   "approved",
 			CreatedAt:     now,
 			UpdatedAt:     now,
 		},
@@ -1136,8 +1139,8 @@ func TestBrokerUnblockDependentsQueuesExclusiveOwnerLanes(t *testing.T) {
 			Channel:       "youtube-factory",
 			Title:         "First dependent lane",
 			Owner:         "executor",
-			Status:        "blocked",
-			Blocked:       true,
+			status:        "blocked",
+			blocked:       true,
 			CreatedBy:     "ceo",
 			TaskType:      "feature",
 			ExecutionMode: "live_external",
@@ -1150,8 +1153,8 @@ func TestBrokerUnblockDependentsQueuesExclusiveOwnerLanes(t *testing.T) {
 			Channel:       "youtube-factory",
 			Title:         "Second dependent lane",
 			Owner:         "executor",
-			Status:        "blocked",
-			Blocked:       true,
+			status:        "blocked",
+			blocked:       true,
 			CreatedBy:     "ceo",
 			TaskType:      "feature",
 			ExecutionMode: "live_external",
@@ -1164,8 +1167,8 @@ func TestBrokerUnblockDependentsQueuesExclusiveOwnerLanes(t *testing.T) {
 			Channel:       "youtube-factory",
 			Title:         "Third dependent lane",
 			Owner:         "executor",
-			Status:        "blocked",
-			Blocked:       true,
+			status:        "blocked",
+			blocked:       true,
 			CreatedBy:     "ceo",
 			TaskType:      "feature",
 			ExecutionMode: "live_external",
@@ -1180,12 +1183,15 @@ func TestBrokerUnblockDependentsQueuesExclusiveOwnerLanes(t *testing.T) {
 	got := append([]teamTask(nil), b.tasks...)
 	b.mu.Unlock()
 
-	if got[1].Status != "in_progress" || got[1].Blocked {
+	if got[1].Status() != "in_progress" || got[1].Blocked() {
 		t.Fatalf("expected first dependent to become active, got %+v", got[1])
 	}
 	for _, task := range got[2:] {
-		if task.Status != "open" || !task.Blocked {
+		if task.status != "open" || !task.blocked {
 			t.Fatalf("expected later dependent to stay queued, got %+v", task)
+		}
+		if task.LifecycleState != LifecycleStateQueuedBehindOwner {
+			t.Fatalf("expected later dependent lifecycle to stay queued behind owner, got %q", task.LifecycleState)
 		}
 		if !containsString(task.DependsOn, "task-32") {
 			t.Fatalf("expected later dependent to queue behind task-32, got %+v", task)
@@ -1280,7 +1286,7 @@ func TestBrokerTaskCompleteRejectsLiveBusinessTheater(t *testing.T) {
 		Title:         "Create one new Notion proof packet for the client handoff",
 		Details:       "Use live external execution and keep the review bundle in sync.",
 		Owner:         "builder",
-		Status:        "in_progress",
+		status:        "in_progress",
 		CreatedBy:     "operator",
 		TaskType:      "launch",
 		ExecutionMode: "live_external",
@@ -1310,7 +1316,7 @@ func TestBrokerTaskCompleteRejectsLiveBusinessTheater(t *testing.T) {
 		t.Fatalf("expected theater rejection on completion, got status %d: %s", resp.StatusCode, raw)
 	}
 	b.mu.Lock()
-	gotStatus := b.tasks[0].Status
+	gotStatus := b.tasks[0].status
 	b.mu.Unlock()
 	if gotStatus != "in_progress" {
 		t.Fatalf("failed completion should roll back task status, got %q", gotStatus)
@@ -1333,7 +1339,7 @@ func TestBrokerTaskUpdateRollsBackBrokerSideEffectsOnSaveFailure(t *testing.T) {
 			Channel:   "general",
 			Title:     "Implement reusable importer",
 			Owner:     "builder",
-			Status:    "in_progress",
+			status:    "in_progress",
 			CreatedBy: "operator",
 			TaskType:  "feature",
 			CreatedAt: "2026-04-15T00:00:00Z",
@@ -1343,11 +1349,11 @@ func TestBrokerTaskUpdateRollsBackBrokerSideEffectsOnSaveFailure(t *testing.T) {
 			ID:        "task-2",
 			Channel:   "general",
 			Title:     "Follow-up importer docs",
-			Status:    "open",
+			status:    "open",
 			CreatedBy: "operator",
 			TaskType:  "feature",
 			DependsOn: []string{"task-1"},
-			Blocked:   true,
+			blocked:   true,
 			CreatedAt: "2026-04-15T00:00:00Z",
 			UpdatedAt: "2026-04-15T00:00:00Z",
 		},
@@ -1377,10 +1383,10 @@ func TestBrokerTaskUpdateRollsBackBrokerSideEffectsOnSaveFailure(t *testing.T) {
 
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.tasks[0].Status != "in_progress" {
+	if b.tasks[0].status != "in_progress" {
 		t.Fatalf("failed save should roll back completed task, got %+v", b.tasks[0])
 	}
-	if !b.tasks[1].Blocked || b.tasks[1].Status != "open" {
+	if !b.tasks[1].blocked || b.tasks[1].status != "open" {
 		t.Fatalf("failed save should roll back dependent unblock, got %+v", b.tasks[1])
 	}
 	if b.counter != 7 {
@@ -1434,7 +1440,7 @@ func TestBrokerStoresLedgerAndReviewLifecycle(t *testing.T) {
 	if err != nil || reused {
 		t.Fatalf("ensure planned task: %v reused=%v", err, reused)
 	}
-	if task.PipelineStage != "implement" || task.ExecutionMode != "local_worktree" || task.SourceDecisionID != decision.ID {
+	if task.pipelineStage != "implement" || task.ExecutionMode != "local_worktree" || task.SourceDecisionID != decision.ID {
 		t.Fatalf("expected structured task metadata, got %+v", task)
 	}
 	if task.WorktreePath == "" || task.WorktreeBranch == "" {
@@ -1462,7 +1468,7 @@ func TestBrokerStoresLedgerAndReviewLifecycle(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		t.Fatalf("decode completed task: %v", err)
 	}
-	if result.Task.Status != "review" || result.Task.ReviewState != "ready_for_review" {
+	if result.Task.Status() != "review" || result.Task.ReviewState() != "ready_for_review" {
 		t.Fatalf("expected review-ready task, got %+v", result.Task)
 	}
 
@@ -1597,7 +1603,7 @@ func TestBrokerApproveRetainsLocalWorktree(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		t.Fatalf("decode approved task: %v", err)
 	}
-	if result.Task.Status != "done" || result.Task.ReviewState != "approved" {
+	if result.Task.Status() != "done" || result.Task.ReviewState() != "approved" {
 		t.Fatalf("expected approved task to be done/approved, got %+v", result.Task)
 	}
 	if result.Task.WorktreePath == "" || result.Task.WorktreeBranch == "" {
@@ -1703,7 +1709,7 @@ func TestBrokerHandlePostTaskRejectsFalseReadOnlyBlockForWritableWorktree(t *tes
 	if updated.ID == "" {
 		t.Fatalf("expected to find task %s", task.ID)
 	}
-	if updated.Status != "in_progress" || updated.Blocked {
+	if updated.Status() != "in_progress" || updated.Blocked() {
 		t.Fatalf("expected task to remain active after rejected block, got %+v", updated)
 	}
 	if strings.Contains(strings.ToLower(updated.Details), "read-only") {
@@ -1764,7 +1770,7 @@ func TestBrokerHandlePostTaskCapabilityGapCreatesSelfHealingTask(t *testing.T) {
 			}
 		}
 	}
-	if !blocked.Blocked || blocked.Status != "blocked" {
+	if !blocked.Blocked() || blocked.Status() != "blocked" {
 		t.Fatalf("expected original task blocked, got %+v", blocked)
 	}
 	if healing.ID == "" {
@@ -1875,7 +1881,7 @@ func TestBrokerHandlePostTaskResumeUnblocksAfterCapabilityRepair(t *testing.T) {
 			break
 		}
 	}
-	if resumed.Blocked || resumed.Status != "in_progress" {
+	if resumed.Blocked() || resumed.Status() != "in_progress" {
 		t.Fatalf("expected original task resumed after repair, got %+v", resumed)
 	}
 	if !strings.Contains(resumed.Details, "missing Slack integration") ||
@@ -1930,7 +1936,7 @@ func TestBrokerBlockTaskRejectsFalseReadOnlyBlockForWritableWorktree(t *testing.
 	if updated.ID == "" {
 		t.Fatalf("expected to find task %s", task.ID)
 	}
-	if updated.Status != "in_progress" || updated.Blocked {
+	if updated.Status() != "in_progress" || updated.Blocked() {
 		t.Fatalf("expected task to remain active after rejected block, got %+v", updated)
 	}
 	if strings.Contains(strings.ToLower(updated.Details), "read-only") {
@@ -1971,11 +1977,14 @@ func TestBrokerEnsurePlannedTaskQueuesConcurrentExclusiveOwnerWork(t *testing.T)
 		t.Fatalf("ensure second task: %v reused=%v", err, reused)
 	}
 
-	if first.Status != "in_progress" || first.Blocked {
+	if first.Status() != "in_progress" || first.Blocked() {
 		t.Fatalf("expected first task to stay active, got %+v", first)
 	}
-	if second.Status != "open" || !second.Blocked {
+	if second.Status() != "open" || !second.Blocked() {
 		t.Fatalf("expected second task to queue behind the first, got %+v", second)
+	}
+	if second.LifecycleState != LifecycleStateQueuedBehindOwner {
+		t.Fatalf("expected second task lifecycle to be queued behind owner, got %q", second.LifecycleState)
 	}
 	if !containsString(second.DependsOn, first.ID) {
 		t.Fatalf("expected second task to depend on first %s, got %+v", first.ID, second.DependsOn)
@@ -2151,7 +2160,7 @@ func TestBrokerBlockTaskAllowsReadOnlyBlockWhenWriteProbeFails(t *testing.T) {
 	if !changed {
 		t.Fatalf("expected task state change on real blocker, got %+v", got)
 	}
-	if got.Status != "blocked" || !got.Blocked {
+	if got.Status() != "blocked" || !got.Blocked() {
 		t.Fatalf("expected blocked task result, got %+v", got)
 	}
 	if !strings.Contains(got.Details, "read-only") {
@@ -2194,7 +2203,7 @@ func TestBrokerCompleteClosesReviewTaskAndUnblocksDependents(t *testing.T) {
 	if err != nil || reused {
 		t.Fatalf("ensure build task: %v reused=%v", err, reused)
 	}
-	if !build.Blocked {
+	if !build.Blocked() {
 		t.Fatalf("expected dependent task to start blocked, got %+v", build)
 	}
 
@@ -2228,7 +2237,7 @@ func TestBrokerCompleteClosesReviewTaskAndUnblocksDependents(t *testing.T) {
 		"id":         architecture.ID,
 		"created_by": "eng",
 	})
-	if reviewReady.Status != "review" || reviewReady.ReviewState != "ready_for_review" {
+	if reviewReady.Status() != "review" || reviewReady.ReviewState() != "ready_for_review" {
 		t.Fatalf("expected first complete to move task into review, got %+v", reviewReady)
 	}
 
@@ -2238,7 +2247,7 @@ func TestBrokerCompleteClosesReviewTaskAndUnblocksDependents(t *testing.T) {
 		"id":         architecture.ID,
 		"created_by": "ceo",
 	})
-	if closed.Status != "done" || closed.ReviewState != "approved" {
+	if closed.Status() != "done" || closed.ReviewState() != "approved" {
 		t.Fatalf("expected second complete to close review task, got %+v", closed)
 	}
 
@@ -2252,7 +2261,7 @@ func TestBrokerCompleteClosesReviewTaskAndUnblocksDependents(t *testing.T) {
 	if unblocked.ID == "" {
 		t.Fatalf("expected to find dependent task %s", build.ID)
 	}
-	if unblocked.Blocked || unblocked.Status != "in_progress" {
+	if unblocked.Blocked() || unblocked.Status() != "in_progress" {
 		t.Fatalf("expected dependent task to unblock after review close, got %+v", unblocked)
 	}
 }
@@ -2322,7 +2331,7 @@ func TestBrokerCreateTaskReusesCompletedDependencyWorktree(t *testing.T) {
 		"id":         first.ID,
 		"created_by": "builder",
 	})
-	if reviewReady.Status != "review" || reviewReady.ReviewState != "ready_for_review" {
+	if reviewReady.Status() != "review" || reviewReady.ReviewState() != "ready_for_review" {
 		t.Fatalf("expected first complete to move task into review, got %+v", reviewReady)
 	}
 
@@ -2332,7 +2341,7 @@ func TestBrokerCreateTaskReusesCompletedDependencyWorktree(t *testing.T) {
 		"id":         first.ID,
 		"created_by": "operator",
 	})
-	if approved.Status != "done" || approved.ReviewState != "approved" {
+	if approved.Status() != "done" || approved.ReviewState() != "approved" {
 		t.Fatalf("expected approve to close task, got %+v", approved)
 	}
 
@@ -2371,7 +2380,7 @@ func TestBrokerSyncTaskWorktreeReplacesStaleAssignedPath(t *testing.T) {
 		ID:             "task-80",
 		Title:          "Fix onboarding",
 		Owner:          "executor",
-		Status:         "in_progress",
+		status:         "in_progress",
 		ExecutionMode:  "local_worktree",
 		WorktreePath:   stalePath,
 		WorktreeBranch: "wuphf-stale-task-80",
@@ -2401,7 +2410,7 @@ func TestBrokerNormalizeLoadedStateRepairsStaleAssignedWorktree(t *testing.T) {
 		Channel:        "youtube-factory",
 		Title:          "Fix onboarding",
 		Owner:          "executor",
-		Status:         "in_progress",
+		status:         "in_progress",
 		ExecutionMode:  "local_worktree",
 		WorktreePath:   stalePath,
 		WorktreeBranch: "wuphf-stale-task-80",
@@ -2478,7 +2487,7 @@ func TestBrokerUpdatesTaskByIDAcrossChannels(t *testing.T) {
 	if completed.Channel != "planning" {
 		t.Fatalf("expected task channel to remain planning, got %+v", completed)
 	}
-	if completed.Status != "done" && completed.Status != "review" {
+	if completed.Status() != "done" && completed.Status() != "review" {
 		t.Fatalf("expected task to move forward, got %+v", completed)
 	}
 }
@@ -2537,7 +2546,7 @@ func TestBrokerCompleteAlreadyDoneTaskStaysApproved(t *testing.T) {
 		"id":         task.ID,
 		"created_by": "eng",
 	})
-	if reviewReady.Status != "review" || reviewReady.ReviewState != "ready_for_review" {
+	if reviewReady.Status() != "review" || reviewReady.ReviewState() != "ready_for_review" {
 		t.Fatalf("expected first complete to move task into review, got %+v", reviewReady)
 	}
 
@@ -2547,7 +2556,7 @@ func TestBrokerCompleteAlreadyDoneTaskStaysApproved(t *testing.T) {
 		"id":         task.ID,
 		"created_by": "ceo",
 	})
-	if approved.Status != "done" || approved.ReviewState != "approved" {
+	if approved.Status() != "done" || approved.ReviewState() != "approved" {
 		t.Fatalf("expected approve to close task, got %+v", approved)
 	}
 
@@ -2557,7 +2566,7 @@ func TestBrokerCompleteAlreadyDoneTaskStaysApproved(t *testing.T) {
 		"id":         task.ID,
 		"created_by": "ceo",
 	})
-	if repeatedComplete.Status != "done" || repeatedComplete.ReviewState != "approved" {
+	if repeatedComplete.Status() != "done" || repeatedComplete.ReviewState() != "approved" {
 		t.Fatalf("expected repeated complete to stay done/approved, got %+v", repeatedComplete)
 	}
 }
@@ -2582,13 +2591,13 @@ func TestInFlightTasksReturnsOnlyNonTerminalOwned(t *testing.T) {
 	b := newTestBroker(t)
 	b.mu.Lock()
 	b.tasks = []teamTask{
-		{ID: "t1", Title: "Active task", Owner: "fe", Status: "in_progress"},
-		{ID: "t2", Title: "Done task", Owner: "fe", Status: "done"},
-		{ID: "t3", Title: "No owner", Owner: "", Status: "in_progress"},
-		{ID: "t4", Title: "Canceled task", Owner: "be", Status: "canceled"},
-		{ID: "t5", Title: "Cancelled task", Owner: "be", Status: "cancelled"},
-		{ID: "t6", Title: "Pending with owner", Owner: "pm", Status: "pending"},
-		{ID: "t7", Title: "Open with owner", Owner: "ceo", Status: "open"},
+		{ID: "t1", Title: "Active task", Owner: "fe", status: "in_progress"},
+		{ID: "t2", Title: "Done task", Owner: "fe", status: "done"},
+		{ID: "t3", Title: "No owner", Owner: "", status: "in_progress"},
+		{ID: "t4", Title: "Canceled task", Owner: "be", status: "canceled"},
+		{ID: "t5", Title: "Cancelled task", Owner: "be", status: "cancelled"},
+		{ID: "t6", Title: "Pending with owner", Owner: "pm", status: "pending"},
+		{ID: "t7", Title: "Open with owner", Owner: "ceo", status: "open"},
 	}
 	b.mu.Unlock()
 
@@ -2630,8 +2639,8 @@ func TestInFlightTasksExcludesCompletedStatus(t *testing.T) {
 	b := newTestBroker(t)
 	b.mu.Lock()
 	b.tasks = []teamTask{
-		{ID: "t1", Title: "Active task", Owner: "fe", Status: "in_progress"},
-		{ID: "t2", Title: "Completed task", Owner: "fe", Status: "completed"},
+		{ID: "t1", Title: "Active task", Owner: "fe", status: "in_progress"},
+		{ID: "t2", Title: "Completed task", Owner: "fe", status: "completed"},
 	}
 	b.mu.Unlock()
 
@@ -2645,7 +2654,7 @@ func TestInFlightTasksExcludesCompletedStatus(t *testing.T) {
 		t.Errorf("expected t1 (in_progress), got %q", got[0].ID)
 	}
 	for _, task := range got {
-		if task.Status == "completed" {
+		if task.status == "completed" {
 			t.Errorf("completed task %q should not appear in InFlightTasks()", task.ID)
 		}
 	}
@@ -2721,7 +2730,7 @@ func TestBrokerMemoryWorkflowCompletionGateAndOverride(t *testing.T) {
 	if err := json.Unmarshal(raw, &overridden); err != nil {
 		t.Fatalf("decode override: %v", err)
 	}
-	if overridden.Task.Status != "done" {
+	if overridden.Task.Status() != "done" {
 		t.Fatalf("expected done after override, got %+v", overridden.Task)
 	}
 	wf := overridden.Task.MemoryWorkflow

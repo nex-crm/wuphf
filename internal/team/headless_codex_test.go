@@ -687,7 +687,7 @@ func TestSendTaskUpdatePassesTaskChannelToHeadlessTurn(t *testing.T) {
 		Channel: "youtube-factory",
 		Title:   "Build the faceless YouTube factory MVP in-repo",
 		Owner:   "eng",
-		Status:  "in_progress",
+		status:  "in_progress",
 	}, "Continue shipping the owned build.")
 
 	got := waitForProcessedTurn(t, processed)
@@ -1015,8 +1015,8 @@ func TestEnqueueHeadlessCodexTurnRecordQueuesUrgentLeadWakeForSameTask(t *testin
 	}
 	for i := range b.tasks {
 		if b.tasks[i].ID == task.ID {
-			b.tasks[i].Status = "review"
-			b.tasks[i].ReviewState = "ready_for_review"
+			b.tasks[i].status = "review"
+			b.tasks[i].reviewState = "ready_for_review"
 			break
 		}
 	}
@@ -1257,9 +1257,9 @@ func TestWakeLeadAfterSpecialistFallsBackToCompletedTaskUpdateWhenNoBroadcast(t 
 		if b.tasks[i].ID != task.ID {
 			continue
 		}
-		b.tasks[i].Status = "done"
+		b.tasks[i].status = "done"
 		b.tasks[i].UpdatedAt = time.Now().UTC().Format(time.RFC3339)
-		b.appendActionLocked("task_updated", "office", "general", "gtm", truncateSummary(b.tasks[i].Title+" ["+b.tasks[i].Status+"]", 140), task.ID)
+		b.appendActionLocked("task_updated", "office", "general", "gtm", truncateSummary(b.tasks[i].Title+" ["+b.tasks[i].status+"]", 140), task.ID)
 		break
 	}
 	b.mu.Unlock()
@@ -1322,7 +1322,7 @@ func TestRecoverTimedOutHeadlessTurnBlocksTaskWithoutSubstantiveReply(t *testing
 	if updated.ID == "" {
 		t.Fatalf("expected to find task %s", task.ID)
 	}
-	if updated.Status != "blocked" || !updated.Blocked {
+	if updated.Status() != "blocked" || !updated.Blocked() {
 		t.Fatalf("expected task to be blocked after empty timeout, got %+v", updated)
 	}
 	if !strings.Contains(updated.Details, "timed out") {
@@ -1373,7 +1373,7 @@ func TestRecoverTimedOutHeadlessTurnLeavesTaskRunningAfterSubstantiveReply(t *te
 	if updated.ID == "" {
 		t.Fatalf("expected to find task %s", task.ID)
 	}
-	if updated.Status != "in_progress" || updated.Blocked {
+	if updated.Status() != "in_progress" || updated.Blocked() {
 		t.Fatalf("expected task to remain active after substantive reply, got %+v", updated)
 	}
 }
@@ -1429,7 +1429,7 @@ func TestRecoverTimedOutHeadlessTurnRetriesLocalWorktreeOnceBeforeBlocking(t *te
 	if updated.ID == "" {
 		t.Fatalf("expected to find task %s", task.ID)
 	}
-	if updated.Status != "in_progress" || updated.Blocked {
+	if updated.Status() != "in_progress" || updated.Blocked() {
 		t.Fatalf("expected task to remain active during retry, got %+v", updated)
 	}
 }
@@ -1486,7 +1486,7 @@ func TestRecoverFailedHeadlessTurnRetriesLocalWorktreeOnceBeforeBlocking(t *test
 	if updated.ID == "" {
 		t.Fatalf("expected to find task %s", task.ID)
 	}
-	if updated.Status != "in_progress" || updated.Blocked {
+	if updated.Status() != "in_progress" || updated.Blocked() {
 		t.Fatalf("expected task to remain active during retry, got %+v", updated)
 	}
 }
@@ -1541,7 +1541,7 @@ func TestRecoverTimedOutLocalWorktreeRetriesEvenAfterSubstantiveReplyIfTaskStill
 	if updated.ID == "" {
 		t.Fatalf("expected to find task %s", task.ID)
 	}
-	if updated.Status != "in_progress" || updated.Blocked {
+	if updated.Status() != "in_progress" || updated.Blocked() {
 		t.Fatalf("expected task to remain active during retry, got %+v", updated)
 	}
 }
@@ -1565,8 +1565,8 @@ func TestRecoverTimedOutLocalWorktreeLeavesReviewReadyTaskUnchanged(t *testing.T
 		if b.tasks[i].ID != task.ID {
 			continue
 		}
-		b.tasks[i].Status = "review"
-		b.tasks[i].ReviewState = "ready_for_review"
+		b.tasks[i].status = "review"
+		b.tasks[i].reviewState = "ready_for_review"
 		b.tasks[i].Details = "Artifact shipped and awaiting review."
 		b.tasks[i].UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 		break
@@ -1596,7 +1596,7 @@ func TestRecoverTimedOutLocalWorktreeLeavesReviewReadyTaskUnchanged(t *testing.T
 	if updated.ID == "" {
 		t.Fatalf("expected to find task %s", task.ID)
 	}
-	if updated.Status != "review" || updated.ReviewState != "ready_for_review" {
+	if updated.Status() != "review" || updated.ReviewState() != "ready_for_review" {
 		t.Fatalf("expected task to remain review-ready, got %+v", updated)
 	}
 }
@@ -1637,7 +1637,7 @@ func TestRecoverTimedOutHeadlessTurnBlocksLocalWorktreeAfterRetryExhausted(t *te
 	if updated.ID == "" {
 		t.Fatalf("expected to find task %s", task.ID)
 	}
-	if updated.Status != "blocked" || !updated.Blocked {
+	if updated.Status() != "blocked" || !updated.Blocked() {
 		t.Fatalf("expected task to be blocked after retry budget exhausted, got %+v", updated)
 	}
 	var healTask teamTask
@@ -1688,7 +1688,7 @@ func TestRecoverFailedHeadlessTurnBlocksLocalWorktreeAfterRetryExhausted(t *test
 	if updated.ID == "" {
 		t.Fatalf("expected to find task %s", task.ID)
 	}
-	if updated.Status != "blocked" || !updated.Blocked {
+	if updated.Status() != "blocked" || !updated.Blocked() {
 		t.Fatalf("expected task to be blocked after retry budget exhausted, got %+v", updated)
 	}
 	if !strings.Contains(updated.Details, "Selected model is at capacity") {
@@ -1771,7 +1771,7 @@ func TestHeadlessTurnCompletedDurablyRejectsCodingTurnWithoutTaskStateOrEvidence
 		Channel:       "general",
 		Title:         "Implement the durable turn guard",
 		Owner:         "eng",
-		Status:        "open",
+		status:        "open",
 		TaskType:      "feature",
 		ExecutionMode: "local_worktree",
 	}}
@@ -1813,8 +1813,8 @@ func TestHeadlessTurnCompletedDurablyAcceptsReviewReadyTask(t *testing.T) {
 		Channel:       "general",
 		Title:         "Implement the durable turn guard",
 		Owner:         "eng",
-		Status:        "review",
-		ReviewState:   "ready_for_review",
+		status:        "review",
+		reviewState:   "ready_for_review",
 		TaskType:      "feature",
 		ExecutionMode: "local_worktree",
 	}}
@@ -1894,8 +1894,8 @@ func TestHeadlessTurnCompletedDurablyRejectsExternalCompletionWithoutWorkflowEvi
 	}
 	for i := range b.tasks {
 		if b.tasks[i].ID == task.ID {
-			b.tasks[i].Status = "review"
-			b.tasks[i].ReviewState = "ready_for_review"
+			b.tasks[i].status = "review"
+			b.tasks[i].reviewState = "ready_for_review"
 			break
 		}
 	}
@@ -1933,8 +1933,8 @@ func TestHeadlessTurnCompletedDurablyAcceptsExternalCompletionWithWorkflowEviden
 	}
 	for i := range b.tasks {
 		if b.tasks[i].ID == task.ID {
-			b.tasks[i].Status = "review"
-			b.tasks[i].ReviewState = "ready_for_review"
+			b.tasks[i].status = "review"
+			b.tasks[i].reviewState = "ready_for_review"
 			break
 		}
 	}
@@ -1972,8 +1972,8 @@ func TestHeadlessTurnCompletedDurablyAcceptsExternalCompletionWithActionEvidence
 	}
 	for i := range b.tasks {
 		if b.tasks[i].ID == task.ID {
-			b.tasks[i].Status = "done"
-			b.tasks[i].ReviewState = "not_required"
+			b.tasks[i].status = "done"
+			b.tasks[i].reviewState = "not_required"
 			break
 		}
 	}
@@ -2211,8 +2211,8 @@ func TestEnqueueHeadlessCodexTurnBypassesLeadHoldForReviewReadyTask(t *testing.T
 		if b.tasks[i].ID != task.ID {
 			continue
 		}
-		b.tasks[i].Status = "review"
-		b.tasks[i].ReviewState = "ready_for_review"
+		b.tasks[i].status = "review"
+		b.tasks[i].reviewState = "ready_for_review"
 		task = b.tasks[i]
 		break
 	}

@@ -118,13 +118,13 @@ func (l *Launcher) notifyTaskActionsLoop() {
 		// the task should send a follow-up broadcast which wakes CEO via the message
 		// loop. But for task_unblocked the task status is still "in_progress" (it was
 		// just unblocked), so we must never skip it regardless of status.
-		if action.Kind != "task_unblocked" && strings.EqualFold(strings.TrimSpace(task.Status), "done") {
+		if action.Kind != "task_unblocked" && strings.EqualFold(strings.TrimSpace(task.status), "done") {
 			continue
 		}
 		func() {
 			defer recoverPanicTo("deliverTaskNotification",
 				fmt.Sprintf("action.kind=%s action.actor=%s action.channel=%s task.id=%s task.status=%s",
-					action.Kind, action.Actor, action.Channel, task.ID, task.Status))
+					action.Kind, action.Actor, action.Channel, task.ID, task.status))
 			l.deliverTaskNotification(action, task)
 		}()
 	}

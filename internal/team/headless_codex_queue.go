@@ -240,8 +240,8 @@ func (l *Launcher) headlessLeadTurnNeedsImmediateWakeLocked(slug, taskID string)
 		if task.ID != taskID {
 			continue
 		}
-		status := strings.ToLower(strings.TrimSpace(task.Status))
-		review := strings.ToLower(strings.TrimSpace(task.ReviewState))
+		status := strings.ToLower(strings.TrimSpace(task.status))
+		review := strings.ToLower(strings.TrimSpace(task.reviewState))
 		return status == "review" || review == "ready_for_review" || status == "blocked"
 	}
 	return false
@@ -525,7 +525,7 @@ func (l *Launcher) latestLeadWakeTaskAction(specialistSlug string) (officeAction
 		if !ok {
 			continue
 		}
-		switch strings.ToLower(strings.TrimSpace(task.Status)) {
+		switch strings.ToLower(strings.TrimSpace(task.status)) {
 		case "done", "completed", "review", "blocked":
 			return action, task, true
 		}

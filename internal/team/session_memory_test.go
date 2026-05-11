@@ -91,9 +91,9 @@ func TestBuildSessionMemorySnapshotFromOfficeStateReconstructsContext(t *testing
 			ID:             "task-7",
 			Title:          "Ship release candidate",
 			Owner:          "fe",
-			Status:         "in_progress",
-			PipelineStage:  "execution",
-			ReviewState:    "pending_review",
+			status:         "in_progress",
+			pipelineStage:  "execution",
+			reviewState:    "pending_review",
 			ExecutionMode:  "local_worktree",
 			WorktreePath:   "/tmp/wuphf-task-7",
 			WorktreeBranch: "task/7",
@@ -102,7 +102,7 @@ func TestBuildSessionMemorySnapshotFromOfficeStateReconstructsContext(t *testing
 		{
 			ID:     "task-8",
 			Title:  "Old done task",
-			Status: "done",
+			status: "done",
 		},
 	}, []humanInterview{
 		{

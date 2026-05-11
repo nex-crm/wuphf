@@ -2,7 +2,9 @@ package team
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -45,6 +47,39 @@ func TestHandleGenerateMember_RejectsNonPostAndUnauth(t *testing.T) {
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusMethodNotAllowed {
 		t.Errorf("GET with auth: expected 405, got %d", resp.StatusCode)
+	}
+}
+
+func TestHandleGenerateChannelPropagatesRequestCancellation(t *testing.T) {
+	b := newTestBroker(t)
+	seenErr := make(chan error, 1)
+	b.SetGenerateChannelFn(func(ctx context.Context, prompt string) (generatedChannelTemplate, error) {
+		<-ctx.Done()
+		seenErr <- ctx.Err()
+		return generatedChannelTemplate{}, ctx.Err()
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/channels/generate",
+		strings.NewReader(`{"prompt":"design review room"}`),
+	).WithContext(ctx)
+	rec := httptest.NewRecorder()
+
+	b.handleGenerateChannel(rec, req)
+
+	select {
+	case err := <-seenErr:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("generate channel provider err = %v, want context.Canceled", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for generate channel provider to receive cancellation")
+	}
+	if rec.Code != http.StatusRequestTimeout {
+		t.Fatalf("expected 408 for cancelled generation, got %d", rec.Code)
 	}
 }
 
@@ -695,7 +730,7 @@ func TestLoadDoesNotAppendDefaultsAfterBlueprintSeed(t *testing.T) {
 		{Slug: "reviewer", Name: "Reviewer", Role: "Reviewer", PermissionMode: "plan", CreatedBy: "wuphf", CreatedAt: now},
 	}
 	// Seed a task so saveLocked doesn't short-circuit on default state.
-	b.tasks = []teamTask{{ID: "niche-crm-1", Channel: "general", Title: "Choose the niche", Status: "open", CreatedBy: "wuphf", CreatedAt: now, UpdatedAt: now}}
+	b.tasks = []teamTask{{ID: "niche-crm-1", Channel: "general", Title: "Choose the niche", status: "open", CreatedBy: "wuphf", CreatedAt: now, UpdatedAt: now}}
 	if err := b.saveLocked(); err != nil {
 		b.mu.Unlock()
 		t.Fatalf("saveLocked failed: %v", err)

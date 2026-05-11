@@ -86,7 +86,7 @@ func TestSkillApproveEndpoint_FlipsToActive(t *testing.T) {
 		t.Fatalf("unmarshal: %v", err)
 	}
 	if out.Skill.Status != "active" {
-		t.Errorf("status: got %q, want active", out.Skill.Status)
+		t.Errorf("Status: got %q, want active", out.Skill.Status)
 	}
 
 	b.mu.Lock()

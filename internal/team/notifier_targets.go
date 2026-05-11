@@ -105,11 +105,11 @@ func (l *Launcher) officeChangeTaskNotifications(evt officeChangeEvent) []office
 }
 
 func shouldBackfillTaskOwner(kind, slug string, task teamTask) bool {
-	status := strings.ToLower(strings.TrimSpace(task.Status))
+	status := strings.ToLower(strings.TrimSpace(task.status))
 	if status == "done" || status == "canceled" || status == "cancelled" || status == "review" {
 		return false
 	}
-	if task.Blocked {
+	if task.blocked {
 		return false
 	}
 	switch kind {
@@ -208,7 +208,7 @@ func (l *Launcher) taskNotificationTargets(action officeActionLog, task teamTask
 	// Exception: do not wake the owner when the task is blocked (unresolved
 	// dependencies). They have no work to do until the blocker clears. They
 	// will be notified via a task_unblocked action when deps resolve.
-	if (action.Kind == "task_created" || action.Kind == "watchdog_alert" || action.Kind == "task_unblocked") && owner != actor && !task.Blocked {
+	if (action.Kind == "task_created" || action.Kind == "watchdog_alert" || action.Kind == "task_unblocked") && owner != actor && !task.blocked {
 		addImmediate(owner)
 	} else if owner != actor && action.Kind != "task_created" {
 		addDelayed(owner)
@@ -230,11 +230,11 @@ func shouldWakeLeadForTaskAction(action officeActionLog, task teamTask) bool {
 	if actor == "" || owner == "" || actor != owner {
 		return true
 	}
-	if task.Blocked {
+	if task.blocked {
 		return true
 	}
-	status := strings.ToLower(strings.TrimSpace(task.Status))
-	review := strings.ToLower(strings.TrimSpace(task.ReviewState))
+	status := strings.ToLower(strings.TrimSpace(task.status))
+	review := strings.ToLower(strings.TrimSpace(task.reviewState))
 	if status == "review" || status == "done" || status == "blocked" {
 		return true
 	}
@@ -248,14 +248,14 @@ func (l *Launcher) shouldDeliverDelayedTaskNotification(targetSlug string, actio
 	if l.broker == nil {
 		return true
 	}
-	if strings.EqualFold(strings.TrimSpace(task.Status), "done") {
+	if strings.EqualFold(strings.TrimSpace(task.status), "done") {
 		return false
 	}
 	current, ok := l.taskForAction(action)
 	if !ok {
 		return false
 	}
-	if strings.EqualFold(strings.TrimSpace(current.Status), "done") {
+	if strings.EqualFold(strings.TrimSpace(current.status), "done") {
 		return false
 	}
 	if strings.TrimSpace(current.Owner) != "" && strings.TrimSpace(current.Owner) != targetSlug && targetSlug != l.targeter().LeadSlug() {

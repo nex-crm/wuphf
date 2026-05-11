@@ -4,6 +4,24 @@ Tracking work that is deliberately deferred from the current branch. Each item n
 
 ## Open
 
+### 0. Capture external broker-state.json snapshots for migration shim test fixture
+
+**What:** Before Lane A of the multi-agent control loop build (feat/multi-agent-harness branch) writes the migration shim test, ask 1–3 trusted external WUPHF users to share their `broker-state.json` files (anonymized — only the `(PipelineStage, ReviewState, Status, Blocked)` field-tuple set, not task content). Combine with the founder's own snapshot to form the fixture seed for build-time gate #3 sub-suite 3 (production-fixture migration shim test).
+
+**Why:** The eng review on 2026-05-09 (`~/.gstack/projects/nex-crm-wuphf/najmuzzaman-feat-multi-agent-harness-design-20260509-170918-multi-agent-control-loop.md`) identified that synthetic permutation tests catch the math but miss field combinations left over from past bugs, partial migrations, or manual interventions. Without real-world fixture data, the migration shim ships untested against the combinations it will actually encounter on production users' brokers, with the failure mode being "task moves to LifecycleState.unknown and refuses to start running" — exactly the kind of surprise that erodes trust in the v1 release.
+
+**Pros:** Catches actual field combinations that exist in the wild. Closes the highest-risk gap in the migration test plan. Cheap (one batch of DMs, not a build dependency).
+
+**Cons:** Adds a process step before Lane A's tests can be finalized. Depends on external response time (1–3 days realistic).
+
+**Context:** WUPHF has been on PH/HN since 2026-04 with a small but real external user base. The founder has private contacts with 1–3 users who'd respond quickly to a snapshot request. Anonymization scope: a script extracts only the unique `(PipelineStage, ReviewState, Status, Blocked)` 4-tuples present in the file — no task content, IDs, channel names, or member identifiers needed.
+
+**Depends on / blocked by:** Nothing. Can start immediately.
+
+**Trigger to revisit:** Before Lane A's migration shim test is written (per the 3-week build sequence in the design doc).
+
+---
+
 ### 1. Validate customer signal frequency before it becomes load-bearing in marketing
 
 **What:** Add explicit instrumentation to count how often users actually shred their existing office and rebuild from a different blueprint. The current observation ("users shredding to test different business ideas") is anecdotal.

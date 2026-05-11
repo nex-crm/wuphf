@@ -1,7 +1,9 @@
 package team
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -642,10 +644,41 @@ func (b *Broker) handleGenerateChannel(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "prompt required", http.StatusBadRequest)
 		return
 	}
-	tmpl, err := b.generateChannelFn(prompt)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+
+	type genResult struct {
+		tmpl generatedChannelTemplate
+		err  error
+	}
+	ch := make(chan genResult, 1)
+	go func() {
+		t, e := b.generateChannelFn(ctx, prompt)
+		ch <- genResult{t, e}
+	}()
+	var tmpl generatedChannelTemplate
+	select {
+	case <-ctx.Done():
+		if errors.Is(ctx.Err(), context.Canceled) {
+			http.Error(w, "channel generation cancelled", http.StatusRequestTimeout)
+			return
+		}
+		http.Error(w, "channel generation timed out", http.StatusGatewayTimeout)
 		return
+	case r := <-ch:
+		if r.err != nil {
+			if errors.Is(r.err, context.Canceled) {
+				http.Error(w, "channel generation cancelled", http.StatusRequestTimeout)
+				return
+			}
+			if errors.Is(r.err, context.DeadlineExceeded) {
+				http.Error(w, "channel generation timed out", http.StatusGatewayTimeout)
+				return
+			}
+			http.Error(w, r.err.Error(), http.StatusInternalServerError)
+			return
+		}
+		tmpl = r.tmpl
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(tmpl)
