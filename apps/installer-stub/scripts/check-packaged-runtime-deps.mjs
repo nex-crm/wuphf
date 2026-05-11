@@ -14,24 +14,28 @@
 //   # 1. Build with `--dir` first so the unpacked dist exists.
 //   #    e.g. `node scripts/run-builder.js --linux --dir`
 //   # 2. Then point this script at the dist directory:
-//   node scripts/check-packaged-runtime-deps.js apps/installer-stub/dist
+//   node scripts/check-packaged-runtime-deps.mjs apps/installer-stub/dist
 //
 // Exit codes:
 //   0 = all allowlisted deps found in either app.asar or app.asar.unpacked/
 //   1 = a dep is missing (the bug)
 //   2 = the dist directory does not contain a recognizable app bundle
 
-const fs = require("node:fs");
-const path = require("node:path");
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-// @electron/asar ships a Node API used here directly so we don't depend on
-// a `node_modules/.bin/asar` shim that bun lays out differently from npm.
-const asarApi = require("@electron/asar");
+// @electron/asar v4 is ESM-only; we import the API directly so we don't
+// depend on a `node_modules/.bin/asar` shim that bun lays out differently
+// from npm.
+import { listPackage } from "@electron/asar";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 function main() {
   const distArg = process.argv[2];
   if (!distArg) {
-    console.error("usage: check-packaged-runtime-deps.js <dist-dir>");
+    console.error("usage: check-packaged-runtime-deps.mjs <dist-dir>");
     process.exit(2);
   }
 
@@ -66,7 +70,7 @@ function main() {
   const installerStubRoot = seamStubRoot ?? path.resolve(__dirname, "..");
   const packageJsonPath = seamPackageJson ?? path.join(installerStubRoot, "package.json");
 
-  const packageJson = require(path.resolve(packageJsonPath));
+  const packageJson = JSON.parse(fs.readFileSync(path.resolve(packageJsonPath), "utf8"));
   const allowlist = packageJson.wuphfRuntimeDependenciesAllowlist;
   // FAIL CLOSED: a missing or empty allowlist with non-empty `dependencies`
   // is a contract bug, not a no-op. The companion check-invariants.sh
@@ -255,7 +259,7 @@ function listAsarEntries(asarPath) {
   // @electron/asar.listPackage returns one entry per file/directory inside
   // the asar with a leading slash, e.g. "/node_modules/electron-updater/package.json".
   // Strip the leading slash so callers can use a forward-slash relative key.
-  const lines = asarApi.listPackage(asarPath, { isPack: false });
+  const lines = listPackage(asarPath, { isPack: false });
   const entries = new Set();
   for (const line of lines) {
     const trimmed = line.trim();

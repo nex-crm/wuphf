@@ -45,7 +45,7 @@ schema:
 
 ## Windows packaging gap (release-blocking) — issue #781
 
-The `check-packaged-runtime-deps.js` post-build gate fails on **Windows**
+The `check-packaged-runtime-deps.mjs` post-build gate fails on **Windows**
 even on electron-builder 26: bun's per-workspace symlinks are created
 on Windows, but electron-builder's app-builder doesn't follow them, so
 `electron-updater` plus its 9-entry transitive closure is pruned out of

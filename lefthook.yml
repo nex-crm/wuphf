@@ -284,7 +284,7 @@ pre-push:
         node apps/installer-stub/scripts/run-builder.test.js
         # Issue #771: self-test for the packaged-runtime-deps check (the real
         # post-build gate lives in release-rewrite.yml's per-platform jobs).
-        node apps/installer-stub/scripts/check-packaged-runtime-deps.test.js
+        node apps/installer-stub/scripts/check-packaged-runtime-deps.test.mjs
     file-size:
       # Enforce CONTRIBUTING.md's file-size budget: warn at 800 LOC, fail
       # at 1500 LOC unless the file is on scripts/file-size-allowlist.txt
