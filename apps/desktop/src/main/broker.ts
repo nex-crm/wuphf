@@ -659,17 +659,44 @@ export class BrokerSupervisor {
     this.clearStartupTimer();
     this.startupTimer = setTimeout(() => {
       this.startupTimer = null;
-      // Bail if a fresh fork has cycled (handleExit nulls `brokerProcess`
-      // before `start()` reassigns it, and any path that would set
-      // `brokerUrl !== null` / `stopping` / `fatalReason !== null` also
-      // changes `brokerProcess` first via handleExit/start, so the
-      // closure-captured handle is the sufficient sender-identity check).
-      // The other three conditions used to OR here were dead-code OR-arms
-      // — pass-3 triangulation found their TRUE-side was either
-      // unreachable (fatalReason) or reachable only via a Node
-      // timer-microtask-already-queued race that no test can pin
-      // deterministically. Reduced to the single reachable arm.
-      if (this.brokerProcess !== brokerProcess) {
+      // Bail when this callback is racing with state we've already
+      // advanced. Node's `clearTimeout` cannot recall a callback that's
+      // already been queued onto the event loop, so each arm below
+      // guards a real race between this timer firing and a state-
+      // changing handler that ran first.
+      //
+      // - `brokerProcess !== brokerProcess` (sender-identity): a fresh
+      //   fork has cycled. The `start()` → `forkProcess` →
+      //   `armStartupTimer` reassignment runs only after `handleExit`
+      //   nulls the previous handle.
+      // - `brokerUrl !== null` (ready won the race): the `{ready}`
+      //   handler at broker.ts:241 calls `clearStartupTimer()` before
+      //   setting `brokerUrl`, but if this callback was already queued
+      //   the clear is a no-op. Without this arm, the callback would
+      //   kill a broker that's already ready.
+      // - `stopping` (stop() won the race): `stop()` at broker.ts:369
+      //   sets `stopping = true` before calling `clearStartupTimer()`,
+      //   same queued-callback shape. Without this arm, the callback
+      //   would log `broker_ready_timeout` for a process already being
+      //   torn down and double-kill it.
+      // - `fatalReason !== null`: defensive. The current architecture
+      //   has no public path that sets `fatalReason` while a startup
+      //   timer for THIS handle is still armed — cap-paths either run
+      //   from inside this callback or null `brokerProcess` first via
+      //   `handleExit` (which the sender-identity arm catches). Kept
+      //   as belt-and-suspenders for future paths that schedule then
+      //   go fatal; the true-arm is v8-ignored.
+      //
+      // Pass-3.1 stripped the brokerUrl/stopping/fatalReason arms;
+      // pass-4 triangulation re-flagged that as a regression because
+      // the restart timer at broker.ts:575 defends the same race
+      // explicitly. Restored for symmetry with that defense.
+      if (
+        this.brokerProcess !== brokerProcess ||
+        this.brokerUrl !== null ||
+        this.stopping ||
+        /* v8 ignore next */ this.fatalReason !== null
+      ) {
         return;
       }
       const nowMs = this.monotonicNow();

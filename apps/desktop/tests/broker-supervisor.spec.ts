@@ -1652,12 +1652,12 @@ describe("BrokerSupervisor — review-pass-2 regressions", () => {
     expect(() => unsubscribe()).not.toThrow();
   });
 
-  it("startup-timeout watchdog bails when the fork has cycled (sender-identity check)", () => {
+  it("startup-timeout watchdog bails when the fork has cycled (sender-identity arm)", () => {
     // Natural race: an exit before the startup timeout fires nulls
     // `brokerProcess`. The startup timer then fires and the bail-out's
-    // single condition (`this.brokerProcess !== brokerProcess` against
+    // sender-identity arm (`this.brokerProcess !== brokerProcess` against
     // the closure-captured handle) is TRUE → no broker_ready_timeout
-    // is logged.
+    // is logged. Covers the first arm of the 4-OR bail at broker.ts:691.
     vi.useFakeTimers();
     const processHandle = new FakeUtilityProcess(4321);
     const { forkProcess } = createForkMock([processHandle]);
@@ -1677,6 +1677,83 @@ describe("BrokerSupervisor — review-pass-2 regressions", () => {
     processHandle.emit("exit", 0, null);
     vi.advanceTimersByTime(500);
 
+    expect(calls.some((c) => c.event === "broker_ready_timeout")).toBe(false);
+    vi.useRealTimers();
+  });
+
+  it("startup-timeout watchdog bails when {ready} won the race (brokerUrl arm, queued callback)", () => {
+    // Models the same real-Node race covered for the restart timer at
+    // line 1078: the startup-timer callback was already queued onto the
+    // event loop when the `{ready}` message handler ran, so the
+    // handler's `clearStartupTimer()` cannot recall it. Stub clearTimeout
+    // to a no-op so the deterministic fake-timer scheduler still fires
+    // the startup callback after `{ready}` landed and brokerUrl was set.
+    //
+    // Without the `this.brokerUrl !== null` arm in the bail-out, the
+    // queued callback would log `broker_ready_timeout` and kill a
+    // broker that's already ready (regression flagged by pass-4
+    // triangulation; see broker.ts startup-timer comment).
+    vi.useFakeTimers();
+    const processHandle = new FakeUtilityProcess(4321);
+    const { forkProcess } = createForkMock([processHandle]);
+    const { logger, calls } = createMemoryLogger();
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+      logger,
+      startupTimeoutMs: 500,
+      maxRestartRetries: 0,
+    });
+
+    supervisor.start();
+    const clearSpy = vi.spyOn(globalThis, "clearTimeout").mockImplementation(() => undefined);
+    processHandle.emit("message", { ready: true, brokerUrl: "http://127.0.0.1:7891" });
+    vi.advanceTimersByTime(500);
+    clearSpy.mockRestore();
+
+    expect(calls.some((c) => c.event === "broker_ready_timeout")).toBe(false);
+    // The bail-out must NOT have called requestProcessTermination on the
+    // ready broker. processHandle.kill should not have been invoked from
+    // the watchdog path. (No other call site touches kill in this test.)
+    expect(processHandle.kill).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
+  it("startup-timeout watchdog bails when stop() won the race (stopping arm, queued callback)", async () => {
+    // Same queued-callback shape as the brokerUrl-arm test, but with
+    // stop() as the racing winner. stop() sets `stopping = true` and
+    // calls `clearStartupTimer()`; we no-op clearTimeout so the queued
+    // callback still fires and must take the `this.stopping` bail-out
+    // arm.
+    vi.useFakeTimers();
+    const processHandle = new FakeUtilityProcess(4321);
+    const { forkProcess } = createForkMock([processHandle]);
+    const { logger, calls } = createMemoryLogger();
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+      logger,
+      startupTimeoutMs: 500,
+      stopGraceMs: 10,
+      maxRestartRetries: 0,
+    });
+
+    supervisor.start();
+    const clearSpy = vi.spyOn(globalThis, "clearTimeout").mockImplementation(() => undefined);
+    // stop() sets stopping=true synchronously, then awaits exit.
+    const stopPromise = supervisor.stop();
+    // Fire the queued startup callback BEFORE the subprocess exits.
+    vi.advanceTimersByTime(500);
+    // Settle stop() by emitting the exit it's waiting on.
+    processHandle.emit("exit", 0, null);
+    await vi.advanceTimersByTimeAsync(50);
+    await stopPromise;
+    clearSpy.mockRestore();
+
+    // The bail-out must have taken the `this.stopping` arm: no
+    // broker_ready_timeout logged. stop() itself calls kill via
+    // requestGracefulStop, so we cannot use kill-count as the signal
+    // — broker_ready_timeout's absence is the definitive evidence.
     expect(calls.some((c) => c.event === "broker_ready_timeout")).toBe(false);
     vi.useRealTimers();
   });
