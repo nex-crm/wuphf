@@ -65,6 +65,9 @@ type UtilityProcessHandle = ReturnType<typeof utilityProcess.fork>;
 type ForkUtilityProcess = typeof utilityProcess.fork;
 type RunWindowsTaskkill = (pid: number, options: { readonly force: boolean }) => Promise<void>;
 type KillProcess = (pid: number, signal: NodeJS.Signals) => void;
+type BrokerLogForwardPayload = Record<string, LogPayloadValue> & {
+  droppedKeys?: LogPayloadValue;
+};
 export type ExecFileRunner = (
   file: string,
   args: readonly string[],
@@ -278,6 +281,9 @@ export class BrokerSupervisor {
       // "exited cleanly with code 0" from "killed by signal, no code".
       this.handleExit(brokerProcess, exitCode, null);
     });
+    brokerProcess.on("error", (type: unknown, location: unknown, report: unknown) => {
+      this.logBrokerProcessError(brokerProcess, type, location, report);
+    });
   }
 
   getStatus(): BrokerStatus {
@@ -452,6 +458,7 @@ export class BrokerSupervisor {
       return;
     }
 
+    this.clearStartupTimer();
     const nowMs = this.monotonicNow();
     const startedAtMs = this.startedAtMs;
     // `startedAtMs === null` is defensive — `start()` sets `startedAtMs`
@@ -487,6 +494,25 @@ export class BrokerSupervisor {
 
     this.resetRestartCountAfterStableWindow();
     this.scheduleRestart();
+  }
+
+  private logBrokerProcessError(
+    brokerProcess: UtilityProcessHandle,
+    type: unknown,
+    location: unknown,
+    report: unknown,
+  ): void {
+    const { safePayload, droppedKeyCount } = filterPayloadToSafeKeys({
+      type,
+      location,
+      report,
+      pid: getProcessPid(brokerProcess),
+      restartCount: this.restartCount,
+    });
+    this.logger.error("broker_process_error", {
+      ...safePayload,
+      ...(droppedKeyCount > 0 ? { droppedKeys: droppedKeyCount } : {}),
+    });
   }
 
   private flushReadyWaiters(brokerUrl: BrokerUrl): void {
@@ -629,14 +655,10 @@ export class BrokerSupervisor {
     // stopping=true synchronously from inside start() (e.g. a synchronous
     // forkProcess hook that calls back into the supervisor) and then start()
     // throws. Without it we would fall through to scheduleRestart() and
-    // leak a fresh broker AFTER stop() requested shutdown. The single-thread
-    // event-loop model and Vitest fake timers make a deterministic test for
-    // this exact path infeasible, so coverage is suppressed.
-    /* v8 ignore start */
+    // leak a fresh broker AFTER stop() requested shutdown.
     if (this.stopping) {
       return;
     }
-    /* v8 ignore stop */
 
     if (this.restartCount >= this.maxRestartRetries) {
       this.fatalReason = `Broker start failed after ${this.restartCount} restart retries: ${message}`;
@@ -729,17 +751,11 @@ export class BrokerSupervisor {
       // hang past the cap. Mirrors the stop() ladder shape.
       this.startupForceTimer = setTimeout(() => {
         this.startupForceTimer = null;
-        // The `brokerProcess === brokerProcess` (closure capture) check
-        // is defensive: any natural code path that swaps `brokerProcess`
-        // goes through `start()` → `armStartupTimer()` →
-        // `clearStartupTimer()`, which clears this force timer before it
-        // can fire. So the equality false-arm is dead today; kept as a
-        // guard against a refactor that breaks the cleanup invariant.
-        /* v8 ignore start */
+        // Exit normally clears this timer in handleExit. Keep the handle
+        // check for the same queued-callback race clearTimeout cannot recall.
         if (this.brokerProcess !== brokerProcess) {
           return;
         }
-        /* v8 ignore stop */
         this.forceStop(brokerProcess);
       }, this.forceStopGraceMs);
     }, this.startupTimeoutMs);
@@ -771,8 +787,10 @@ export class BrokerSupervisor {
       return;
     }
     const { safePayload, droppedKeyCount } = filterPayloadToSafeKeys(log.payload);
-    const finalPayload: Record<string, LogPayloadValue> = {
-      ...safePayload,
+    const safePayloadWithoutReservedCounter: BrokerLogForwardPayload = { ...safePayload };
+    delete safePayloadWithoutReservedCounter.droppedKeys;
+    const finalPayload: BrokerLogForwardPayload = {
+      ...safePayloadWithoutReservedCounter,
       ...(droppedKeyCount > 0 ? { droppedKeys: droppedKeyCount } : {}),
     };
     try {

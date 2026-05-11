@@ -26,15 +26,19 @@ type ElectronUtilityProcess = ReturnType<ForkProcess>;
 type KillProcess = NonNullable<BrokerSupervisorConfig["killProcess"]>;
 
 class FakeUtilityProcess extends EventEmitter {
-  readonly pid: number;
+  private readonly processPid: number | null;
   readonly kill = vi.fn<() => boolean>(() => true);
   readonly postMessage = vi.fn<(message: unknown) => void>();
   readonly stdout = new EventEmitter();
   readonly stderr = new EventEmitter();
 
-  constructor(pid: number) {
+  constructor(pid: number | null) {
     super();
-    this.pid = pid;
+    this.processPid = pid;
+  }
+
+  get pid(): number | null {
+    return this.processPid;
   }
 }
 
@@ -136,6 +140,59 @@ describe("BrokerSupervisor", () => {
       processHandle.stdout.emit("data", Buffer.from("stdout payload"));
       processHandle.stderr.emit("data", Buffer.from("stderr payload"));
     }).not.toThrow();
+  });
+
+  it("logs utilityProcess error diagnostics without short-circuiting restart handling", () => {
+    const processHandle = new FakeUtilityProcess(4321);
+    const { forkProcess } = createForkMock([processHandle]);
+    const { logger, calls } = createMemoryLogger();
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+      logger,
+    });
+
+    supervisor.start();
+    processHandle.emit("error", "FatalError", "v8.cc:123", "diagnostic report");
+
+    expect(calls).toContainEqual({
+      level: "error",
+      event: "broker_process_error",
+      payload: {
+        type: "FatalError",
+        location: "v8.cc:123",
+        report: "diagnostic report",
+        pid: 4321,
+        restartCount: 0,
+      },
+    });
+    expect(supervisor.getStatus()).toBe("starting");
+  });
+
+  it("redacts malformed utilityProcess error diagnostics without throwing", () => {
+    const processHandle = new FakeUtilityProcess(4321);
+    const { forkProcess } = createForkMock([processHandle]);
+    const { logger, calls } = createMemoryLogger();
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+      logger,
+    });
+
+    supervisor.start();
+    processHandle.emit("error", { kind: "FatalError" }, undefined, "diagnostic report");
+
+    expect(calls).toContainEqual({
+      level: "error",
+      event: "broker_process_error",
+      payload: {
+        report: "diagnostic report",
+        pid: 4321,
+        restartCount: 0,
+        droppedKeys: 2,
+      },
+    });
+    expect(supervisor.getStatus()).toBe("starting");
   });
 
   it("binds the default utilityProcess.fork receiver before storing it", async () => {
@@ -706,6 +763,60 @@ describe("BrokerSupervisor", () => {
         serviceName: "wuphf-broker",
       },
     });
+  });
+
+  it("does not go fatal or reschedule when restart fork stops before throwing", async () => {
+    vi.useFakeTimers();
+    const firstProcess = new FakeUtilityProcess(1001);
+    const forkError = new Error("fork retry stopped");
+    let supervisor!: BrokerSupervisor;
+    let forkCallCount = 0;
+    const forkProcess = vi.fn(
+      (
+        _entryPath: string,
+        _args: readonly string[],
+        _options: ForkOptions,
+      ): ElectronUtilityProcess => {
+        forkCallCount += 1;
+        if (forkCallCount === 1) {
+          return firstProcess as unknown as ElectronUtilityProcess;
+        }
+        void supervisor.stop();
+        throw forkError;
+      },
+    ) as unknown as ForkProcess;
+    const onFatal = vi.fn<(reason: string) => void>();
+    const { logger, calls } = createMemoryLogger();
+    supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+      logger,
+      firstBackoffMs: 250,
+      maxRestartRetries: 1,
+      onFatal,
+    });
+
+    supervisor.start();
+    firstProcess.emit("exit", 1);
+    await vi.advanceTimersByTimeAsync(250);
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(calls).toContainEqual({
+      level: "error",
+      event: "broker_restart_start_failed",
+      payload: {
+        error: "fork retry stopped",
+        restartCount: 1,
+        maxRestartRetries: 1,
+        serviceName: "wuphf-broker",
+      },
+    });
+    expect(onFatal).not.toHaveBeenCalled();
+    expect(calls.filter((call) => call.event === "broker_restart_scheduled")).toHaveLength(1);
+    expect(forkProcess).toHaveBeenCalledTimes(2);
+    expect(supervisor.getStatus()).toBe("dead");
+    await expect(supervisor.whenReady()).rejects.toThrow("broker_stopped");
+    vi.useRealTimers();
   });
 
   it("uses firstBackoffMs as the first wait and then doubles each retry", async () => {
@@ -1807,6 +1918,38 @@ describe("BrokerSupervisor — review-pass-2 regressions", () => {
     vi.useRealTimers();
   });
 
+  it("startup force timer bails when startup termination exits before force escalation", async () => {
+    vi.useFakeTimers();
+    const processHandle = new FakeUtilityProcess(4321);
+    processHandle.kill.mockImplementation(() => {
+      setTimeout(() => processHandle.emit("exit", 0, null), 0);
+      return true;
+    });
+    const { forkProcess } = createForkMock([processHandle]);
+    const killProcess = vi.fn<KillProcess>();
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+      killProcess,
+      startupTimeoutMs: 500,
+      forceStopGraceMs: 100,
+      firstBackoffMs: 10_000,
+    });
+
+    supervisor.start();
+    const clearSpy = vi.spyOn(globalThis, "clearTimeout").mockImplementation(() => undefined);
+    vi.advanceTimersByTime(500);
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(100);
+    clearSpy.mockRestore();
+    await supervisor.stop();
+
+    expect(processHandle.kill).toHaveBeenCalledTimes(1);
+    expect(killProcess).not.toHaveBeenCalled();
+    expect(supervisor.getStatus()).toBe("dead");
+    vi.useRealTimers();
+  });
+
   it("forwardBrokerLog emits without droppedKeys when every key is safe", () => {
     // Covers the false-arm of "droppedKeyCount > 0" in forwardBrokerLog
     // — payload made entirely of safe keys must NOT carry a `droppedKeys`
@@ -1834,6 +1977,29 @@ describe("BrokerSupervisor — review-pass-2 regressions", () => {
     expect(forwarded?.payload).not.toHaveProperty("droppedKeys");
   });
 
+  it("forwardBrokerLog treats subprocess droppedKeys as supervisor-reserved", () => {
+    const processHandle = new FakeUtilityProcess(4321);
+    const { forkProcess } = createForkMock([processHandle]);
+    const { logger, calls } = createMemoryLogger();
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+      logger,
+    });
+
+    supervisor.start();
+    processHandle.emit("message", {
+      broker_log: "info",
+      event: "listener_started",
+      payload: { port: 7891, droppedKeys: 999 },
+    });
+
+    const forwarded = calls.find((c) => c.event === "broker_listener_started");
+    expect(forwarded).toBeDefined();
+    expect(forwarded?.payload).toEqual({ port: 7891 });
+    expect(forwarded?.payload).not.toHaveProperty("droppedKeys");
+  });
+
   // Pass-3 triangulation (architecture/security/distsys/types consensus,
   // BLOCK): the two tests that previously asserted null-uptime logging
   // in `handleExit` and the startup-timeout watchdog have been removed.
@@ -1843,15 +2009,9 @@ describe("BrokerSupervisor — review-pass-2 regressions", () => {
   // null arms in `broker.ts:462` and `broker.ts:678` are marked
   // `v8 ignore` and documented as defensive-only.
 
-  it("requestProcessTermination on Windows skips taskkill when pid is null", () => {
-    // Covers the false-arm of "pid !== null" inside the Windows branch
-    // of requestProcessTermination. A FakeUtilityProcess can be coerced
-    // to have a missing pid by reading it directly — but the type is
-    // `readonly number`, so we substitute a no-pid stand-in.
-    const processHandle = new FakeUtilityProcess(0);
-    // Override pid to null via the structural cast that the supervisor's
-    // helper uses (`getProcessPid` returns null for missing pids).
-    Object.defineProperty(processHandle, "pid", { value: null });
+  it("requestProcessTermination on Windows skips taskkill when pid is null", async () => {
+    vi.useFakeTimers();
+    const processHandle = new FakeUtilityProcess(null);
     const { forkProcess } = createForkMock([processHandle]);
     const runWindowsTaskkillMock = vi.fn(() => Promise.resolve());
     const supervisor = new BrokerSupervisor({
@@ -1859,23 +2019,23 @@ describe("BrokerSupervisor — review-pass-2 regressions", () => {
       forkProcess,
       platform: "win32",
       runWindowsTaskkill: runWindowsTaskkillMock,
+      stopGraceMs: 10,
     });
 
     supervisor.start();
-    const requestTerm = Reflect.get(supervisor, "requestProcessTermination") as (
-      _: FakeUtilityProcess,
-    ) => void;
-    Reflect.apply(requestTerm, supervisor, [processHandle]);
+    const stopPromise = supervisor.stop();
+    await vi.advanceTimersByTimeAsync(10);
 
     expect(runWindowsTaskkillMock).not.toHaveBeenCalled();
+    expect(processHandle.kill).not.toHaveBeenCalled();
+    processHandle.emit("exit", 0, null);
+    await stopPromise;
+    vi.useRealTimers();
   });
 
-  it("forceStop on Windows skips taskkill when pid is null and falls back to kill()", () => {
-    // Covers the false-arm of "pid !== null" inside the Windows branch
-    // of forceStop. Same structural shape as requestProcessTermination
-    // — the fallthrough is to utilityProcess.kill().
-    const processHandle = new FakeUtilityProcess(0);
-    Object.defineProperty(processHandle, "pid", { value: null });
+  it("forceStop on Windows skips taskkill when pid is null and falls back to kill()", async () => {
+    vi.useFakeTimers();
+    const processHandle = new FakeUtilityProcess(null);
     const { forkProcess } = createForkMock([processHandle]);
     const runWindowsTaskkillMock = vi.fn(() => Promise.resolve());
     const supervisor = new BrokerSupervisor({
@@ -1883,23 +2043,23 @@ describe("BrokerSupervisor — review-pass-2 regressions", () => {
       forkProcess,
       platform: "win32",
       runWindowsTaskkill: runWindowsTaskkillMock,
+      stopGraceMs: 10,
+      forceStopGraceMs: 20,
     });
 
     supervisor.start();
-    const forceStop = Reflect.get(supervisor, "forceStop") as (_: FakeUtilityProcess) => void;
-    Reflect.apply(forceStop, supervisor, [processHandle]);
+    const stopPromise = supervisor.stop();
+    await vi.advanceTimersByTimeAsync(30);
+    await stopPromise;
 
     expect(runWindowsTaskkillMock).not.toHaveBeenCalled();
-    // POSIX-fallback path: utilityProcess.kill().
-    expect(processHandle.kill).toHaveBeenCalled();
+    expect(processHandle.kill).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
   });
 
-  it("forceStop on POSIX falls back to utilityProcess.kill when pid is null", () => {
-    // Covers the false-arm of "pid !== null" in the POSIX branch of
-    // forceStop (the SIGKILL via process.kill is skipped, the helper
-    // falls through to utilityProcess.kill()).
-    const processHandle = new FakeUtilityProcess(0);
-    Object.defineProperty(processHandle, "pid", { value: null });
+  it("forceStop on POSIX falls back to utilityProcess.kill when pid is null", async () => {
+    vi.useFakeTimers();
+    const processHandle = new FakeUtilityProcess(null);
     const { forkProcess } = createForkMock([processHandle]);
     const killProcess = vi.fn<KillProcess>();
     const supervisor = new BrokerSupervisor({
@@ -1907,14 +2067,18 @@ describe("BrokerSupervisor — review-pass-2 regressions", () => {
       forkProcess,
       platform: "linux",
       killProcess,
+      stopGraceMs: 10,
+      forceStopGraceMs: 20,
     });
 
     supervisor.start();
-    const forceStop = Reflect.get(supervisor, "forceStop") as (_: FakeUtilityProcess) => void;
-    Reflect.apply(forceStop, supervisor, [processHandle]);
+    const stopPromise = supervisor.stop();
+    await vi.advanceTimersByTimeAsync(30);
+    await stopPromise;
 
     expect(killProcess).not.toHaveBeenCalled();
-    expect(processHandle.kill).toHaveBeenCalled();
+    expect(processHandle.kill).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
   });
 });
 
