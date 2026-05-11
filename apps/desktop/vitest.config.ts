@@ -29,10 +29,9 @@ export default defineConfig({
         // This branch backfills targeted property tests of every helper
         // (`broker-helpers.spec.ts`) plus supervisor-level coverage of
         // each timer-race / sender-identity / restart-fatal arm
-        // (`broker-supervisor.spec.ts`). Two arms remain genuinely
-        // unreachable and are documented at their `/* v8 ignore */`
-        // sites: the rotation existsSync check (`logger.ts`) and the
-        // non-http/file rendererUrl fallthrough (`window.ts`).
+        // (`broker-supervisor.spec.ts`). One arm remains genuinely
+        // unreachable and is documented at its `/* v8 ignore */` site:
+        // the non-http/file rendererUrl fallthrough (`window.ts`).
         //
         // Keep at 100 — a regression past this floor is a meaningful
         // signal that new code added an untested defensive branch or

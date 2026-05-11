@@ -1,4 +1,12 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -104,6 +112,52 @@ describe("StructuredLogger", () => {
       event: "broker_restart_scheduled",
       restartCount: 7,
     });
+  });
+
+  it("skips rotation without throwing if the active log is deleted before rename", () => {
+    const logDirectory = createTempDir();
+    const activePath = join(logDirectory, "main.log");
+    writeFileSync(activePath, "x".repeat(360), "utf8");
+    const renameCalls: Array<readonly [string, string]> = [];
+    const rotationFs = {
+      existsSync(path: Parameters<typeof existsSync>[0]) {
+        if (String(path) === activePath) {
+          unlinkSync(activePath);
+          return false;
+        }
+        return existsSync(path);
+      },
+      renameSync(
+        sourcePath: Parameters<typeof renameSync>[0],
+        targetPath: Parameters<typeof renameSync>[1],
+      ) {
+        renameCalls.push([String(sourcePath), String(targetPath)]);
+        renameSync(sourcePath, targetPath);
+      },
+      unlinkSync(path: Parameters<typeof unlinkSync>[0]) {
+        unlinkSync(path);
+      },
+    };
+    const sink = new StructuredLogger({
+      logDirectory,
+      fs: rotationFs,
+      maxFileBytes: 400,
+      consoleWriter: () => undefined,
+      monotonicNow: () => 1,
+    });
+    const logger = sink.forModule("main");
+
+    expect(() => logger.info("app_start_failed", { error: "boom" })).not.toThrow();
+
+    expect(renameCalls).toHaveLength(0);
+    expect(existsSync(join(logDirectory, "main.1.log"))).toBe(false);
+    expect(readLogRecords(logDirectory)).toEqual([
+      expect.objectContaining({
+        module: "main",
+        event: "app_start_failed",
+        error: "boom",
+      }),
+    ]);
   });
 
   it("routes default console writes by level and accepts a directory resolver", () => {

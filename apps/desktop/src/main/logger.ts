@@ -22,6 +22,13 @@ export interface StructuredLoggerConfig {
   readonly maxFileBytes?: number;
   readonly consoleWriter?: (level: LogLevel, line: string) => void;
   readonly monotonicNow?: () => number;
+  readonly fs?: LoggerRotationFileSystem;
+}
+
+export interface LoggerRotationFileSystem {
+  readonly existsSync: typeof existsSync;
+  readonly renameSync: typeof renameSync;
+  readonly unlinkSync: typeof unlinkSync;
 }
 
 export class UnsafeLogPayloadError extends Error {
@@ -71,11 +78,18 @@ const SAFE_PAYLOAD_KEYS = new Set([
   "windowCount",
 ]);
 
+const defaultRotationFileSystem: LoggerRotationFileSystem = {
+  existsSync,
+  renameSync,
+  unlinkSync,
+};
+
 export class StructuredLogger {
   private readonly resolveLogDirectory: () => string | null;
   private readonly maxFileBytes: number;
   private readonly consoleWriter: (level: LogLevel, line: string) => void;
   private readonly monotonicNow: () => number;
+  private readonly rotationFs: LoggerRotationFileSystem;
   private eventLsn = 0;
 
   constructor(config: StructuredLoggerConfig = {}) {
@@ -83,6 +97,7 @@ export class StructuredLogger {
     this.maxFileBytes = config.maxFileBytes ?? DEFAULT_MAX_FILE_BYTES;
     this.consoleWriter = config.consoleWriter ?? writeLineToConsole;
     this.monotonicNow = config.monotonicNow ?? monotonicNowMs;
+    this.rotationFs = config.fs ?? defaultRotationFileSystem;
   }
 
   forModule(module: string): Logger {
@@ -125,7 +140,7 @@ export class StructuredLogger {
         lineBytes < this.maxFileBytes &&
         currentFileSize(logPath) + lineBytes > this.maxFileBytes
       ) {
-        rotateLogs(logDirectory);
+        rotateLogs(logDirectory, this.rotationFs);
       }
       appendFileSync(logPath, `${line}\n`, "utf8");
     } catch {
@@ -231,32 +246,25 @@ function currentFileSize(logPath: string): number {
   }
 }
 
-function rotateLogs(logDirectory: string): void {
+function rotateLogs(logDirectory: string, rotationFs: LoggerRotationFileSystem): void {
   const oldestPath = join(logDirectory, `main.${ROTATED_FILE_COUNT}.log`);
-  if (existsSync(oldestPath)) {
-    unlinkSync(oldestPath);
+  if (rotationFs.existsSync(oldestPath)) {
+    rotationFs.unlinkSync(oldestPath);
   }
 
   for (let index = ROTATED_FILE_COUNT - 1; index >= 1; index -= 1) {
     const sourcePath = join(logDirectory, `main.${index}.log`);
     const targetPath = join(logDirectory, `main.${index + 1}.log`);
-    if (existsSync(sourcePath)) {
-      renameSync(sourcePath, targetPath);
+    if (rotationFs.existsSync(sourcePath)) {
+      rotationFs.renameSync(sourcePath, targetPath);
     }
   }
 
   const activePath = join(logDirectory, LOG_FILE_NAME);
-  // Defensive — rotation is only invoked from the size-trigger inside
-  // `appendToLogFile`, which has just written to `activePath`, so the
-  // file MUST exist at this point. The existence check guards against
-  // an external delete racing the rotation; that path is genuinely
-  // unreachable in-process.
-  /* v8 ignore start */
-  if (!existsSync(activePath)) {
+  if (!rotationFs.existsSync(activePath)) {
     return;
   }
-  /* v8 ignore stop */
-  renameSync(activePath, join(logDirectory, "main.1.log"));
+  rotationFs.renameSync(activePath, join(logDirectory, "main.1.log"));
 }
 
 function writeLineToConsole(level: LogLevel, line: string): void {
