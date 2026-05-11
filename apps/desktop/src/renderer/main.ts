@@ -186,7 +186,7 @@ function requiredBootstrapStringField(
 }
 
 export function parseBootstrap(value: unknown): ParsedBootstrap {
-  if (typeof value !== "object" || value === null) {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new Error("api-token response is not an object");
   }
   const record = value as Readonly<Record<string, unknown>>;

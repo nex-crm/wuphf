@@ -118,6 +118,16 @@ describe("parseBootstrap", () => {
 
     expect(() => parseBootstrap(throwingRecord)).toThrow("token descriptor unreachable");
   });
+
+  it("rejects array-shaped bootstrap records", async () => {
+    const { parseBootstrap } = await importRendererMain();
+    const arrayBootstrap = Object.assign([], {
+      token: VALID_BOOTSTRAP_TOKEN,
+      broker_url: VALID_BOOTSTRAP_URL,
+    });
+
+    expect(() => parseBootstrap(arrayBootstrap)).toThrow("api-token response is not an object");
+  });
 });
 
 describe("createSecureWindow", () => {
