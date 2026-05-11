@@ -52,6 +52,7 @@ export interface BrokerLogPayload {
 
 const DATA_PROPERTY_ACCESSOR = Symbol("data_property_accessor");
 const DATA_PROPERTY_MISSING = Symbol("data_property_missing");
+const MAX_LOG_EVENT_NAME_LENGTH = 128;
 
 /**
  * Recognize the broker entry's `{ ready, brokerUrl }` handshake. Valid
@@ -112,8 +113,11 @@ export function readBrokerLogMessage(message: unknown): BrokerLogPayload | null 
   return { broker_log: brokerLog, event, payload };
 }
 
-export function sanitizeBrokerEventName(event: string): string | null {
-  return LOG_NAME_PATTERN.test(event) ? event : null;
+export function sanitizeBrokerEventName(event: unknown): string | null {
+  if (typeof event !== "string") return null;
+  if (event.length === 0 || event.length > MAX_LOG_EVENT_NAME_LENGTH) return null;
+  if (!LOG_NAME_PATTERN.test(event)) return null;
+  return event;
 }
 
 export function filterPayloadToSafeKeys(payload: unknown): {

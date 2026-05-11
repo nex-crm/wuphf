@@ -184,9 +184,15 @@ describe("readBrokerLogMessage", () => {
 
 describe("sanitizeBrokerEventName", () => {
   it("returns the input when it matches LOG_NAME_PATTERN", () => {
+    expect(sanitizeBrokerEventName("broker_started")).toBe("broker_started");
     expect(sanitizeBrokerEventName("broker_listener_started")).toBe("broker_listener_started");
     expect(sanitizeBrokerEventName("a.b:c-d_e")).toBe("a.b:c-d_e");
     expect(sanitizeBrokerEventName("9digits")).toBe("9digits");
+  });
+
+  it("returns null when the input is not a string", () => {
+    expect(sanitizeBrokerEventName(null)).toBeNull();
+    expect(sanitizeBrokerEventName(42)).toBeNull();
   });
 
   it("returns null when the input contains forbidden characters", () => {
@@ -194,6 +200,11 @@ describe("sanitizeBrokerEventName", () => {
     expect(sanitizeBrokerEventName("UPPER")).toBeNull();
     expect(sanitizeBrokerEventName("with/slash")).toBeNull();
     expect(sanitizeBrokerEventName("")).toBeNull();
+  });
+
+  it("returns null for oversized event names before regex validation", () => {
+    expect(sanitizeBrokerEventName("a".repeat(129))).toBeNull();
+    expect(sanitizeBrokerEventName("a".repeat(50_000_000))).toBeNull();
   });
 });
 
