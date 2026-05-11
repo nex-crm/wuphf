@@ -39,16 +39,85 @@ describe("readReadyMessage", () => {
   });
 
   it("returns null when brokerUrl is not a valid BrokerUrl", () => {
-    expect(readReadyMessage({ ready: true, brokerUrl: 42 })).toBeNull();
-    expect(readReadyMessage({ ready: true, brokerUrl: "not a url" })).toBeNull();
-    // Wrong host (non-loopback) is rejected by the brand.
-    expect(readReadyMessage({ ready: true, brokerUrl: "http://example.com:5000" })).toBeNull();
+    expect(readReadyMessage({ ready: true, brokerUrl: 42 })).toEqual({
+      kind: "invalid",
+      reason: "non_string_url",
+    });
+    expect(readReadyMessage({ ready: true, brokerUrl: "not a url" })).toEqual({
+      kind: "invalid",
+      reason: "unparseable_url",
+    });
+  });
+
+  it("returns shape-only reasons for ready-shaped BrokerUrl rejections", () => {
+    const cases = [
+      {
+        brokerUrl: "http://127.0.0.1:5000/",
+        reason: "non_canonical_origin",
+      },
+      {
+        brokerUrl: "http://example.com:5000",
+        reason: "non_loopback_host",
+      },
+      {
+        brokerUrl: "http://user@127.0.0.1:5000",
+        reason: "userinfo_present",
+      },
+      {
+        brokerUrl: "http://127.0.0.1:5000?debug=true",
+        reason: "query_present",
+      },
+      {
+        brokerUrl: "http://127.0.0.1:5000#ready",
+        reason: "fragment_present",
+      },
+      {
+        brokerUrl: "http://127.0.0.1:not-a-port",
+        reason: "unparseable_url",
+      },
+      {
+        brokerUrl: "https://127.0.0.1:5000",
+        reason: "non_http_protocol",
+      },
+      {
+        brokerUrl: "http://127.0.0.1",
+        reason: "missing_port",
+      },
+      {
+        brokerUrl: "http://127.0.0.1:0",
+        reason: "invalid_port",
+      },
+    ] as const;
+
+    for (const { brokerUrl, reason } of cases) {
+      expect(readReadyMessage({ ready: true, brokerUrl })).toEqual({
+        kind: "invalid",
+        reason,
+      });
+    }
+  });
+
+  it("does not invoke accessor-backed ready brokerUrl fields", () => {
+    let invoked = false;
+    const message: { ready: true; brokerUrl?: string } = { ready: true };
+    Object.defineProperty(message, "brokerUrl", {
+      enumerable: true,
+      get() {
+        invoked = true;
+        return "http://127.0.0.1:5000";
+      },
+    });
+
+    expect(readReadyMessage(message)).toEqual({
+      kind: "invalid",
+      reason: "non_data_property",
+    });
+    expect(invoked).toBe(false);
   });
 
   it("returns the branded brokerUrl on a valid {ready,brokerUrl} message", () => {
     const result = readReadyMessage({ ready: true, brokerUrl: "http://127.0.0.1:5000" });
-    expect(result).not.toBeNull();
-    expect(result?.brokerUrl).toBe("http://127.0.0.1:5000");
+    expect(result).toEqual({ kind: "ok", brokerUrl: "http://127.0.0.1:5000" });
   });
 });
 
@@ -95,6 +164,21 @@ describe("readBrokerLogMessage", () => {
     for (const payload of ["string", 42, true, false, null, [1, 2, 3]]) {
       expect(readBrokerLogMessage({ broker_log: "info", event: "ok", payload })).toBeNull();
     }
+  });
+
+  it("rejects accessor-backed payload fields without invoking them", () => {
+    let invoked = false;
+    const message = { broker_log: "info", event: "ok" };
+    Object.defineProperty(message, "payload", {
+      enumerable: true,
+      get() {
+        invoked = true;
+        return { pid: 1 };
+      },
+    });
+
+    expect(readBrokerLogMessage(message)).toBeNull();
+    expect(invoked).toBe(false);
   });
 });
 
@@ -168,6 +252,34 @@ describe("filterPayloadToSafeKeys", () => {
     });
     expect(result.safePayload).toEqual({ pid: 1 });
     expect(result.droppedKeyCount).toBe(4);
+  });
+
+  it("skips inherited enumerable keys without counting them as dropped", () => {
+    const payload = Object.create({ port: 7891 }) as { reason: string };
+    payload.reason = "started";
+
+    const result = filterPayloadToSafeKeys(payload);
+
+    expect(result.safePayload).toEqual({ reason: "started" });
+    expect(result.droppedKeyCount).toBe(0);
+  });
+
+  it("drops accessor-backed fields without invoking the accessor", () => {
+    let invoked = false;
+    const payload: { pid: number; reason?: string } = { pid: 1 };
+    Object.defineProperty(payload, "reason", {
+      enumerable: true,
+      get() {
+        invoked = true;
+        return "must-not-read";
+      },
+    });
+
+    const result = filterPayloadToSafeKeys(payload);
+
+    expect(invoked).toBe(false);
+    expect(result.safePayload).toEqual({ pid: 1 });
+    expect(result.droppedKeyCount).toBe(1);
   });
 });
 

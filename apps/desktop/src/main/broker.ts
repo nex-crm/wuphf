@@ -45,6 +45,7 @@ const DEFAULT_MAX_BACKOFF_MS = 60_000;
 const DEFAULT_MAX_RESTART_RETRIES = 5;
 const DEFAULT_STABILITY_WINDOW_MS = 60_000;
 const DEFAULT_LIVENESS_STALE_MS = 5_000;
+const MAX_DIAGNOSTIC_REPORT_BYTES = 64 * 1024;
 // 10 s startup ceiling for the broker to bind a loopback port and post
 // `{ ready }`. The listener is pure-Node and binds an ephemeral port — in
 // practice this takes a handful of milliseconds — so 10 s only fires on
@@ -245,31 +246,35 @@ export class BrokerSupervisor {
       }
       const ready = readReadyMessage(message);
       if (ready !== null) {
-        this.clearStartupTimer();
-        this.brokerUrl = ready.brokerUrl;
-        // Flush waiters and notify listeners BEFORE logging. A previous
-        // regression had this order reversed: the logger threw on a banned
-        // payload key, which aborted the handler before flushReadyWaiters
-        // ran, hanging whenReady() in packaged builds. We log a safe `port`
-        // value today, but a future contributor adding any payload key
-        // containing "url"/"path"/"token" etc. (logger.ts allowlist) would
-        // reintroduce the exact same hang. Make the handshake robust by
-        // construction: deliver readiness first, then log (wrapped in a
-        // try/catch so the logger can never regress this ordering again).
-        this.flushReadyWaiters(ready.brokerUrl);
-        this.notifyReadyListeners(ready.brokerUrl);
-        try {
-          this.logger.info("broker_ready", {
-            pid: getProcessPid(brokerProcess),
-            port: brokerUrlPort(ready.brokerUrl),
-            restartCount: this.restartCount,
-          });
-        } catch {
-          // Swallow: the broker is ready, callers have been notified.
-          // A logger failure (banned payload key, IO error in packaged
-          // builds) must not regress the ready handshake.
+        if (ready.kind === "invalid") {
+          this.logger.warn("broker_ready_invalid", { reason: ready.reason });
+        } else {
+          this.clearStartupTimer();
+          this.brokerUrl = ready.brokerUrl;
+          // Flush waiters and notify listeners BEFORE logging. A previous
+          // regression had this order reversed: the logger threw on a banned
+          // payload key, which aborted the handler before flushReadyWaiters
+          // ran, hanging whenReady() in packaged builds. We log a safe `port`
+          // value today, but a future contributor adding any payload key
+          // containing "url"/"path"/"token" etc. (logger.ts allowlist) would
+          // reintroduce the exact same hang. Make the handshake robust by
+          // construction: deliver readiness first, then log (wrapped in a
+          // try/catch so the logger can never regress this ordering again).
+          this.flushReadyWaiters(ready.brokerUrl);
+          this.notifyReadyListeners(ready.brokerUrl);
+          try {
+            this.logger.info("broker_ready", {
+              pid: getProcessPid(brokerProcess),
+              port: brokerUrlPort(ready.brokerUrl),
+              restartCount: this.restartCount,
+            });
+          } catch {
+            // Swallow: the broker is ready, callers have been notified.
+            // A logger failure (banned payload key, IO error in packaged
+            // builds) must not regress the ready handshake.
+          }
+          return;
         }
-        return;
       }
       const brokerLog = readBrokerLogMessage(message);
       if (brokerLog !== null) {
@@ -929,7 +934,9 @@ function getProcessPid(brokerProcess: UtilityProcessHandle | null): number | nul
 }
 
 function diagnosticReportBytes(report: unknown): number | null {
-  return typeof report === "string" ? Buffer.byteLength(report, "utf8") : null;
+  if (typeof report !== "string") return null;
+  if (report.length > MAX_DIAGNOSTIC_REPORT_BYTES) return MAX_DIAGNOSTIC_REPORT_BYTES;
+  return Buffer.byteLength(report, "utf8");
 }
 
 function isAliveMessage(message: unknown): message is { readonly alive: true } {

@@ -20,8 +20,29 @@ import { isSafePayloadKey, LOG_NAME_PATTERN, type LogPayloadValue } from "./logg
 export type BrokerSubLogLevel = "info" | "warn" | "error";
 
 export interface ReadyMessage {
+  readonly kind: "ok";
   readonly brokerUrl: BrokerUrl;
 }
+
+export type BrokerReadyInvalidReason =
+  | "fragment_present"
+  | "invalid_port"
+  | "missing_port"
+  | "non_canonical_origin"
+  | "non_data_property"
+  | "non_http_protocol"
+  | "non_loopback_host"
+  | "non_string_url"
+  | "query_present"
+  | "unparseable_url"
+  | "userinfo_present";
+
+export interface InvalidReadyMessage {
+  readonly kind: "invalid";
+  readonly reason: BrokerReadyInvalidReason;
+}
+
+export type ReadReadyMessageResult = InvalidReadyMessage | ReadyMessage;
 
 export interface BrokerLogPayload {
   readonly broker_log: BrokerSubLogLevel;
@@ -29,28 +50,28 @@ export interface BrokerLogPayload {
   readonly payload: Readonly<Record<string, unknown>> | undefined;
 }
 
+const DATA_PROPERTY_ACCESSOR = Symbol("data_property_accessor");
+const DATA_PROPERTY_MISSING = Symbol("data_property_missing");
+
 /**
- * Recognize the broker entry's `{ ready, brokerUrl }` handshake. Validates
- * the URL via the protocol's `isBrokerUrl` brand check — the subprocess is
- * trusted (same machine, our own code), but a malformed message from a
- * future broker version (or a misbehaving fake in tests) should be
- * rejected at the IPC boundary rather than handed downstream as a
- * "string" the supervisor later trusts as a fetch origin.
+ * Recognize the broker entry's `{ ready, brokerUrl }` handshake. Valid
+ * messages return the protocol-branded URL; ready-shaped invalid URLs return
+ * a shape-only diagnostic reason so the supervisor can log wire drift without
+ * leaking the rejected URL.
  */
-export function readReadyMessage(message: unknown): ReadyMessage | null {
+export function readReadyMessage(message: unknown): ReadReadyMessageResult | null {
   if (typeof message !== "object" || message === null) return null;
-  if (!Object.hasOwn(message, "ready") || !Object.hasOwn(message, "brokerUrl")) return null;
-  const record = message as { readonly ready?: unknown; readonly brokerUrl?: unknown };
-  if (record.ready !== true) return null;
-  // Snapshot the value to a local before validation so an accessor or
-  // mutating Proxy can't return a different value on the second read.
-  // utilityProcess uses structured clone in practice (plain objects),
-  // making this defense theoretical — but the cost is one local variable
-  // and the invariant "validated == returned" matters for any future
-  // caller that hands ReadyMessage a non-cloned source.
-  const brokerUrl = record.brokerUrl;
-  if (!isBrokerUrl(brokerUrl)) return null;
-  return { brokerUrl };
+  const ready = readOwnDataProperty(message, "ready");
+  const brokerUrl = readOwnDataProperty(message, "brokerUrl");
+  if (ready === DATA_PROPERTY_MISSING || brokerUrl === DATA_PROPERTY_MISSING) return null;
+  if (ready !== true) return null;
+  if (brokerUrl === DATA_PROPERTY_ACCESSOR) {
+    return { kind: "invalid", reason: "non_data_property" };
+  }
+  if (!isBrokerUrl(brokerUrl)) {
+    return { kind: "invalid", reason: classifyBrokerUrlRejection(brokerUrl) };
+  }
+  return { kind: "ok", brokerUrl };
 }
 
 /**
@@ -66,32 +87,29 @@ export function readReadyMessage(message: unknown): ReadyMessage | null {
  */
 export function readBrokerLogMessage(message: unknown): BrokerLogPayload | null {
   if (typeof message !== "object" || message === null) return null;
-  if (!Object.hasOwn(message, "broker_log")) return null;
-  const record = message as { broker_log?: unknown; event?: unknown; payload?: unknown };
-  if (
-    record.broker_log !== "info" &&
-    record.broker_log !== "warn" &&
-    record.broker_log !== "error"
-  ) {
+  const brokerLog = readOwnDataProperty(message, "broker_log");
+  if (brokerLog !== "info" && brokerLog !== "warn" && brokerLog !== "error") {
     return null;
   }
-  if (typeof record.event !== "string") return null;
+  const event = readOwnDataProperty(message, "event");
+  if (typeof event !== "string") return null;
   // Payload must be a plain object or absent. Reject Array (which is
   // typeof "object"), null, and every scalar so the codec contract
   // matches the documented `payload?: object` shape.
   let payload: Readonly<Record<string, unknown>> | undefined;
-  if (record.payload === undefined) {
+  const payloadValue = readOwnDataProperty(message, "payload");
+  if (payloadValue === DATA_PROPERTY_MISSING) {
     payload = undefined;
   } else if (
-    typeof record.payload === "object" &&
-    record.payload !== null &&
-    !Array.isArray(record.payload)
+    typeof payloadValue === "object" &&
+    payloadValue !== null &&
+    !Array.isArray(payloadValue)
   ) {
-    payload = record.payload as Readonly<Record<string, unknown>>;
+    payload = payloadValue as Readonly<Record<string, unknown>>;
   } else {
     return null;
   }
-  return { broker_log: record.broker_log, event: record.event, payload };
+  return { broker_log: brokerLog, event, payload };
 }
 
 export function sanitizeBrokerEventName(event: string): string | null {
@@ -107,7 +125,13 @@ export function filterPayloadToSafeKeys(payload: unknown): {
   if (typeof payload !== "object" || payload === null) {
     return { safePayload: safe, droppedKeyCount: 0 };
   }
-  for (const [key, value] of Object.entries(payload)) {
+  for (const key in payload) {
+    const value = readOwnDataProperty(payload, key);
+    if (value === DATA_PROPERTY_MISSING) continue;
+    if (value === DATA_PROPERTY_ACCESSOR) {
+      droppedKeyCount += 1;
+      continue;
+    }
     if (!isSafePayloadKey(key)) {
       droppedKeyCount += 1;
       continue;
@@ -124,6 +148,41 @@ export function filterPayloadToSafeKeys(payload: unknown): {
     }
   }
   return { safePayload: safe, droppedKeyCount };
+}
+
+function readOwnDataProperty(
+  record: object,
+  key: string,
+): unknown | typeof DATA_PROPERTY_ACCESSOR | typeof DATA_PROPERTY_MISSING {
+  const descriptor = Object.getOwnPropertyDescriptor(record, key);
+  if (descriptor === undefined) return DATA_PROPERTY_MISSING;
+  if (!("value" in descriptor)) return DATA_PROPERTY_ACCESSOR;
+  return descriptor.value;
+}
+
+function classifyBrokerUrlRejection(value: unknown): BrokerReadyInvalidReason {
+  if (typeof value !== "string") return "non_string_url";
+
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return "unparseable_url";
+  }
+
+  if (parsed.protocol !== "http:") return "non_http_protocol";
+  if (parsed.port === "") return "missing_port";
+  if (!isReadyBrokerLoopbackHost(parsed.hostname)) return "non_loopback_host";
+  const port = Number(parsed.port);
+  if (port < 1) return "invalid_port";
+  if (parsed.username !== "" || parsed.password !== "") return "userinfo_present";
+  if (parsed.search !== "") return "query_present";
+  if (parsed.hash !== "") return "fragment_present";
+  return "non_canonical_origin";
+}
+
+function isReadyBrokerLoopbackHost(hostname: string): boolean {
+  return hostname === "127.0.0.1" || hostname === "localhost" || hostname === "[::1]";
 }
 
 // Parse the bound port out of the broker URL for safe logging. Returns

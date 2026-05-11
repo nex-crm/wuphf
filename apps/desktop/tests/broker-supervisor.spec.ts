@@ -218,6 +218,31 @@ describe("BrokerSupervisor", () => {
     expect(supervisor.getStatus()).toBe("starting");
   });
 
+  it("caps utilityProcess diagnostic report byte accounting before logging", () => {
+    const diagnosticReport = "x".repeat(200 * 1024);
+    const processHandle = new FakeUtilityProcess(4321);
+    const { forkProcess } = createForkMock([processHandle]);
+    const { logger, calls } = createMemoryLogger();
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+      logger,
+    });
+
+    supervisor.start();
+    processHandle.emit("error", "FatalError", "v8.cc:123", diagnosticReport);
+
+    const errorLog = calls.find((call) => call.event === "broker_process_error");
+    expect(errorLog?.payload).toEqual({
+      type: "FatalError",
+      location: "v8.cc:123",
+      reportBytes: 64 * 1024,
+      pid: 4321,
+      restartCount: 0,
+    });
+    expect(JSON.stringify(errorLog?.payload ?? {})).not.toContain(diagnosticReport);
+  });
+
   it("redacts malformed utilityProcess error diagnostics without throwing", () => {
     const diagnosticReport = {
       env: "SECRET_TOKEN=must-not-leak",
@@ -335,6 +360,30 @@ describe("BrokerSupervisor", () => {
     processHandle.emit("message", { ready: true, brokerUrl: "https://127.0.0.1:8080" });
     processHandle.emit("message", { ready: true, brokerUrl: "http://evil.com:8080" });
     processHandle.emit("message", { ready: true, brokerUrl: "http://127.0.0.1" });
+    expect(supervisor.getSnapshot().brokerUrl).toBeNull();
+  });
+
+  it("logs broker_ready_invalid for ready-shaped malformed brokerUrl without leaking it", () => {
+    const rawBrokerUrl = "http://127.0.0.1:54321/";
+    const processHandle = new FakeUtilityProcess(4321);
+    const { forkProcess } = createForkMock([processHandle]);
+    const { logger, calls } = createMemoryLogger();
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+      logger,
+    });
+
+    supervisor.start();
+    processHandle.emit("message", { ready: true, brokerUrl: rawBrokerUrl });
+
+    const invalidLog = calls.find((call) => call.event === "broker_ready_invalid");
+    expect(invalidLog).toEqual({
+      level: "warn",
+      event: "broker_ready_invalid",
+      payload: { reason: "non_canonical_origin" },
+    });
+    expect(JSON.stringify(invalidLog?.payload ?? {})).not.toContain(rawBrokerUrl);
     expect(supervisor.getSnapshot().brokerUrl).toBeNull();
   });
 
