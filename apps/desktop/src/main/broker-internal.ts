@@ -35,6 +35,7 @@ export type BrokerReadyInvalidReason =
   | "non_string_url"
   | "query_present"
   | "unparseable_url"
+  | "url_too_long"
   | "userinfo_present";
 
 export interface InvalidReadyMessage {
@@ -53,6 +54,7 @@ export interface BrokerLogPayload {
 const DATA_PROPERTY_ACCESSOR = Symbol("data_property_accessor");
 const DATA_PROPERTY_MISSING = Symbol("data_property_missing");
 const MAX_LOG_EVENT_NAME_LENGTH = 128;
+const MAX_BROKER_URL_LENGTH = 2048;
 
 /**
  * Recognize the broker entry's `{ ready, brokerUrl }` handshake. Valid
@@ -69,10 +71,11 @@ export function readReadyMessage(message: unknown): ReadReadyMessageResult | nul
   if (brokerUrl === DATA_PROPERTY_ACCESSOR) {
     return { kind: "invalid", reason: "non_data_property" };
   }
-  if (!isBrokerUrl(brokerUrl)) {
-    return { kind: "invalid", reason: classifyBrokerUrlRejection(brokerUrl) };
+  const brokerUrlRejection = classifyBrokerUrlRejection(brokerUrl);
+  if (brokerUrlRejection !== null) {
+    return { kind: "invalid", reason: brokerUrlRejection };
   }
-  return { kind: "ok", brokerUrl };
+  return { kind: "ok", brokerUrl: brokerUrl as BrokerUrl };
 }
 
 /**
@@ -164,8 +167,10 @@ function readOwnDataProperty(
   return descriptor.value;
 }
 
-function classifyBrokerUrlRejection(value: unknown): BrokerReadyInvalidReason {
+function classifyBrokerUrlRejection(value: unknown): BrokerReadyInvalidReason | null {
   if (typeof value !== "string") return "non_string_url";
+  if (value.length > MAX_BROKER_URL_LENGTH) return "url_too_long";
+  if (isBrokerUrl(value)) return null;
 
   let parsed: URL;
   try {

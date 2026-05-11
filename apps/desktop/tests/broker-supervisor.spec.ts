@@ -415,6 +415,30 @@ describe("BrokerSupervisor", () => {
     expect(supervisor.getSnapshot().brokerUrl).toBeNull();
   });
 
+  it("logs broker_ready_invalid for overlong brokerUrl without parsing or leaking it", () => {
+    const rawBrokerUrl = "x".repeat(3000);
+    const processHandle = new FakeUtilityProcess(4321);
+    const { forkProcess } = createForkMock([processHandle]);
+    const { logger, calls } = createMemoryLogger();
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+      logger,
+    });
+
+    supervisor.start();
+    processHandle.emit("message", { ready: true, brokerUrl: rawBrokerUrl });
+
+    const invalidLog = calls.find((call) => call.event === "broker_ready_invalid");
+    expect(invalidLog).toEqual({
+      level: "warn",
+      event: "broker_ready_invalid",
+      payload: { reason: "url_too_long" },
+    });
+    expect(JSON.stringify(invalidLog?.payload ?? {})).not.toContain(rawBrokerUrl);
+    expect(supervisor.getSnapshot().brokerUrl).toBeNull();
+  });
+
   it("ignores malformed {ready} messages (missing url, wrong shape)", () => {
     const processHandle = new FakeUtilityProcess(4321);
     const { forkProcess } = createForkMock([processHandle]);
