@@ -181,9 +181,9 @@ export class StructuredLogger {
       return cachedBytes;
     }
 
-    // Avoid statting every append. If another local actor truncates or mutates
-    // the log file, rotation can happen one file early or late; the drift is
-    // bounded by maxFileBytes and corrected after the next rotation.
+    // Avoid statting every append under the packaged app's single-writer model.
+    // If another local actor mutates main.log, rotation drift can exceed
+    // maxFileBytes until this logger next crosses the threshold and rotates.
     const bytes = currentFileSize(logPath);
     this.currentFileBytes.set(logPath, bytes);
     return bytes;
