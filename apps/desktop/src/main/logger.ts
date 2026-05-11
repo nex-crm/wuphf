@@ -94,6 +94,8 @@ export class StructuredLogger {
   private readonly monotonicNow: () => number;
   private readonly rotationFs: LoggerRotationFileSystem;
   private readonly currentFileBytes = new Map<string, number>();
+  // Cache successful mkdirs, but clear on ENOENT so external log-dir removal
+  // can recover with one mkdir + append retry instead of disabling file logs.
   private initializedLogDirectory: string | null = null;
   private eventLsn = 0;
 
@@ -137,14 +139,15 @@ export class StructuredLogger {
       return;
     }
 
+    const logPath = join(logDirectory, LOG_FILE_NAME);
+    const lineWithTerminator = `${line}\n`;
+    const lineBytes = Buffer.byteLength(lineWithTerminator, "utf8");
+
     try {
       if (this.initializedLogDirectory !== logDirectory) {
         mkdirSync(logDirectory, { recursive: true });
         this.initializedLogDirectory = logDirectory;
       }
-      const logPath = join(logDirectory, LOG_FILE_NAME);
-      const lineWithTerminator = `${line}\n`;
-      const lineBytes = Buffer.byteLength(lineWithTerminator, "utf8");
       if (
         lineBytes < this.maxFileBytes &&
         this.getCurrentFileBytes(logPath) + lineBytes > this.maxFileBytes
@@ -154,8 +157,21 @@ export class StructuredLogger {
       }
       appendFileSync(logPath, lineWithTerminator, "utf8");
       this.currentFileBytes.set(logPath, (this.currentFileBytes.get(logPath) ?? 0) + lineBytes);
-    } catch {
-      return;
+    } catch (error) {
+      if (!isMissingPathError(error)) {
+        return;
+      }
+
+      this.initializedLogDirectory = null;
+      try {
+        mkdirSync(logDirectory, { recursive: true });
+        this.initializedLogDirectory = logDirectory;
+        const retryBaseBytes = currentFileSize(logPath);
+        appendFileSync(logPath, lineWithTerminator, "utf8");
+        this.currentFileBytes.set(logPath, retryBaseBytes + lineBytes);
+      } catch {
+        return;
+      }
     }
   }
 
@@ -269,6 +285,10 @@ function currentFileSize(logPath: string): number {
   } catch {
     return 0;
   }
+}
+
+function isMissingPathError(error: unknown): boolean {
+  return error instanceof Error && (error as NodeJS.ErrnoException).code === "ENOENT";
 }
 
 function rotateLogs(logDirectory: string, rotationFs: LoggerRotationFileSystem): void {

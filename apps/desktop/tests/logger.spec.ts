@@ -151,6 +151,56 @@ describe("StructuredLogger", () => {
     expect(readLogRecords(logDirectory)).toHaveLength(100);
   });
 
+  it("recreates the log directory if it is deleted after initialization", () => {
+    const logDirectory = createTempDir();
+    const sink = new StructuredLogger({
+      logDirectory,
+      consoleWriter: () => undefined,
+      monotonicNow: () => 1,
+    });
+    const logger = sink.forModule("broker");
+
+    logger.info("broker_liveness_ping");
+    expect(readLogRecords(logDirectory)).toHaveLength(1);
+
+    rmSync(logDirectory, { recursive: true });
+    logger.warn("broker_restart_scheduled", {
+      reason: "after-cleanup",
+      restartCount: 1,
+      backoffMs: 250,
+      maxRestartRetries: 5,
+    });
+
+    expect(existsSync(logDirectory)).toBe(true);
+    expect(fsMock.mkdirSync).toHaveBeenCalledTimes(2);
+    expect(readLogRecords(logDirectory)).toEqual([
+      expect.objectContaining({
+        module: "broker",
+        event: "broker_restart_scheduled",
+        reason: "after-cleanup",
+      }),
+    ]);
+  });
+
+  it("continues without throwing if log directory recovery fails", () => {
+    const logDirectory = createTempDir();
+    const sink = new StructuredLogger({
+      logDirectory,
+      consoleWriter: () => undefined,
+      monotonicNow: () => 1,
+    });
+    const logger = sink.forModule("broker");
+
+    logger.info("broker_liveness_ping");
+    rmSync(logDirectory, { recursive: true });
+    fsMock.mkdirSync.mockImplementationOnce(() => {
+      throw new Error("mkdir retry failed");
+    });
+
+    expect(() => logger.info("broker_liveness_ping")).not.toThrow();
+    expect(existsSync(logDirectory)).toBe(false);
+  });
+
   it("writes a single line larger than the rotation threshold without rotating", () => {
     const logDirectory = createTempDir();
     const sink = new StructuredLogger({
