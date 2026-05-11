@@ -1,7 +1,7 @@
 package team
 
 // broker_lifecycle_test.go covers build-time gate #3 (forward map) of the
-// Lane A success criteria: sweep all eight canonical LifecycleState values
+// Lane A success criteria: sweep all canonical LifecycleState values
 // and assert the derived (pipelineStage, reviewState, status, blocked)
 // tuple matches the lifecycleDerivedFields table for each one.
 //
@@ -36,6 +36,7 @@ func TestLifecycleForwardMapAllStates(t *testing.T) {
 		// that ~10 broker code paths read. See lifecycleDerivedFields
 		// comment for full rationale.
 		{LifecycleStateBlockedOnPRMerge, "review", "ready_for_review", "blocked", true},
+		{LifecycleStateQueuedBehindOwner, "triage", "pending_review", "open", true},
 		{LifecycleStateChangesRequested, "implement", "pending_review", "in_progress", false},
 		{LifecycleStateMerged, "ship", "approved", "done", false},
 	}

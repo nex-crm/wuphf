@@ -3,7 +3,7 @@ package team
 // broker_lifecycle_transition.go is the single chokepoint for writes to the
 // multi-agent harness lifecycle state machine on a teamTask. It owns:
 //
-//   - The LifecycleState typed string and its eight canonical values plus
+//   - The LifecycleState typed string and its canonical values plus
 //     the "unknown" migration fallback.
 //   - The forward-map table that derives the legacy status / reviewState /
 //     pipelineStage / blocked fields from a LifecycleState.
@@ -35,7 +35,7 @@ import (
 )
 
 // LifecycleState is the typed source of truth for the multi-agent control
-// loop. The eight canonical values plus LifecycleStateUnknown (migration
+// loop. The canonical values plus LifecycleStateUnknown (migration
 // fallback) form a closed enum; new states require updating both the
 // forward-map (lifecycleDerivedFields) and the migration shim.
 type LifecycleState string
@@ -47,17 +47,18 @@ const (
 	// decision instead of silently picking a state.
 	LifecycleStateUnknown LifecycleState = "unknown"
 
-	LifecycleStateIntake           LifecycleState = "intake"
-	LifecycleStateReady            LifecycleState = "ready"
-	LifecycleStateRunning          LifecycleState = "running"
-	LifecycleStateReview           LifecycleState = "review"
-	LifecycleStateDecision         LifecycleState = "decision"
-	LifecycleStateBlockedOnPRMerge LifecycleState = "blocked_on_pr_merge"
-	LifecycleStateChangesRequested LifecycleState = "changes_requested"
-	LifecycleStateMerged           LifecycleState = "merged"
+	LifecycleStateIntake            LifecycleState = "intake"
+	LifecycleStateReady             LifecycleState = "ready"
+	LifecycleStateRunning           LifecycleState = "running"
+	LifecycleStateReview            LifecycleState = "review"
+	LifecycleStateDecision          LifecycleState = "decision"
+	LifecycleStateBlockedOnPRMerge  LifecycleState = "blocked_on_pr_merge"
+	LifecycleStateQueuedBehindOwner LifecycleState = "queued_behind_owner"
+	LifecycleStateChangesRequested  LifecycleState = "changes_requested"
+	LifecycleStateMerged            LifecycleState = "merged"
 )
 
-// CanonicalLifecycleStates returns the eight valid lifecycle states (excluding
+// CanonicalLifecycleStates returns the valid lifecycle states (excluding
 // the unknown migration fallback) in stable order. Used by tests sweeping
 // the forward map.
 func CanonicalLifecycleStates() []LifecycleState {
@@ -68,6 +69,7 @@ func CanonicalLifecycleStates() []LifecycleState {
 		LifecycleStateReview,
 		LifecycleStateDecision,
 		LifecycleStateBlockedOnPRMerge,
+		LifecycleStateQueuedBehindOwner,
 		LifecycleStateChangesRequested,
 		LifecycleStateMerged,
 	}
@@ -75,7 +77,7 @@ func CanonicalLifecycleStates() []LifecycleState {
 
 // lifecycleDerivedFieldsRow captures the tuple of legacy fields that the
 // forward-map table assigns when a task enters a LifecycleState. The
-// Blocked column is only true for blocked_on_pr_merge in v1.
+// Blocked column is only true for states that intentionally pause execution.
 type lifecycleDerivedFieldsRow struct {
 	PipelineStage string
 	ReviewState   string
@@ -102,14 +104,15 @@ type lifecycleDerivedFieldsRow struct {
 // once the rest of the harness is in place. The lifecycle index and the
 // LifecycleState field still source-of-truth correctly.
 var lifecycleDerivedFields = map[LifecycleState]lifecycleDerivedFieldsRow{
-	LifecycleStateIntake:           {PipelineStage: "triage", ReviewState: "pending_review", Status: "open", Blocked: false},
-	LifecycleStateReady:            {PipelineStage: "triage", ReviewState: "pending_review", Status: "open", Blocked: false},
-	LifecycleStateRunning:          {PipelineStage: "implement", ReviewState: "pending_review", Status: "in_progress", Blocked: false},
-	LifecycleStateReview:           {PipelineStage: "review", ReviewState: "ready_for_review", Status: "in_progress", Blocked: false},
-	LifecycleStateDecision:         {PipelineStage: "review", ReviewState: "ready_for_review", Status: "in_progress", Blocked: false},
-	LifecycleStateBlockedOnPRMerge: {PipelineStage: "review", ReviewState: "ready_for_review", Status: "blocked", Blocked: true},
-	LifecycleStateChangesRequested: {PipelineStage: "implement", ReviewState: "pending_review", Status: "in_progress", Blocked: false},
-	LifecycleStateMerged:           {PipelineStage: "ship", ReviewState: "approved", Status: "done", Blocked: false},
+	LifecycleStateIntake:            {PipelineStage: "triage", ReviewState: "pending_review", Status: "open", Blocked: false},
+	LifecycleStateReady:             {PipelineStage: "triage", ReviewState: "pending_review", Status: "open", Blocked: false},
+	LifecycleStateRunning:           {PipelineStage: "implement", ReviewState: "pending_review", Status: "in_progress", Blocked: false},
+	LifecycleStateReview:            {PipelineStage: "review", ReviewState: "ready_for_review", Status: "in_progress", Blocked: false},
+	LifecycleStateDecision:          {PipelineStage: "review", ReviewState: "ready_for_review", Status: "in_progress", Blocked: false},
+	LifecycleStateBlockedOnPRMerge:  {PipelineStage: "review", ReviewState: "ready_for_review", Status: "blocked", Blocked: true},
+	LifecycleStateQueuedBehindOwner: {PipelineStage: "triage", ReviewState: "pending_review", Status: "open", Blocked: true},
+	LifecycleStateChangesRequested:  {PipelineStage: "implement", ReviewState: "pending_review", Status: "in_progress", Blocked: false},
+	LifecycleStateMerged:            {PipelineStage: "ship", ReviewState: "approved", Status: "done", Blocked: false},
 }
 
 // derivedFieldsFor returns the forward-map row for a state, plus a flag
@@ -145,6 +148,7 @@ var lifecycleMigrationMap = map[lifecycleMigrationKey]LifecycleState{
 	{PipelineStage: "implement", ReviewState: "pending_review", Status: "in_progress", Blocked: false}: LifecycleStateRunning,
 	{PipelineStage: "review", ReviewState: "ready_for_review", Status: "in_progress", Blocked: false}:  LifecycleStateReview,
 	{PipelineStage: "review", ReviewState: "ready_for_review", Status: "blocked", Blocked: true}:       LifecycleStateBlockedOnPRMerge,
+	{PipelineStage: "triage", ReviewState: "pending_review", Status: "open", Blocked: true}:            LifecycleStateQueuedBehindOwner,
 	{PipelineStage: "ship", ReviewState: "approved", Status: "done", Blocked: false}:                   LifecycleStateMerged,
 
 	// Pre-Lane-A code wrote status="blocked" instead of relying on the
@@ -159,6 +163,7 @@ var lifecycleMigrationMap = map[lifecycleMigrationKey]LifecycleState{
 	// Bare statuses without pipeline metadata cover ad-hoc tasks that
 	// never moved through the formal pipeline.
 	{PipelineStage: "", ReviewState: "", Status: "open", Blocked: false}:        LifecycleStateReady,
+	{PipelineStage: "", ReviewState: "", Status: "open", Blocked: true}:         LifecycleStateQueuedBehindOwner,
 	{PipelineStage: "", ReviewState: "", Status: "in_progress", Blocked: false}: LifecycleStateRunning,
 	{PipelineStage: "", ReviewState: "", Status: "review", Blocked: false}:      LifecycleStateReview,
 	{PipelineStage: "", ReviewState: "", Status: "done", Blocked: false}:        LifecycleStateMerged,
@@ -261,10 +266,9 @@ func (b *Broker) markTaskQueuedBehindActiveOwnerLocked(task *teamTask) {
 	if b == nil || task == nil {
 		return
 	}
-	prev := task.LifecycleState
-	task.blocked = true
-	task.status = "open"
-	b.indexLifecycleLocked(task.ID, prev, task.LifecycleState)
+	if err := b.applyLifecycleStateLocked(task, LifecycleStateQueuedBehindOwner); err != nil {
+		log.Printf("broker: queue task %q behind owner: %v", task.ID, err)
+	}
 }
 
 // indexLifecycleLocked maintains the b.lifecycleIndex map. Pass an empty

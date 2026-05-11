@@ -1106,6 +1106,9 @@ func TestBrokerResumeTaskQueuesBehindExistingExclusiveOwnerLane(t *testing.T) {
 	if resumed.Status() != "open" || !resumed.Blocked() {
 		t.Fatalf("expected resumed task to stay queued behind active lane, got %+v", resumed)
 	}
+	if resumed.LifecycleState != LifecycleStateQueuedBehindOwner {
+		t.Fatalf("expected resumed task lifecycle to be queued behind owner, got %q", resumed.LifecycleState)
+	}
 	if !containsString(resumed.DependsOn, active.ID) {
 		t.Fatalf("expected resumed task to remain dependent on active lane, got %+v", resumed)
 	}
@@ -1186,6 +1189,9 @@ func TestBrokerUnblockDependentsQueuesExclusiveOwnerLanes(t *testing.T) {
 	for _, task := range got[2:] {
 		if task.status != "open" || !task.blocked {
 			t.Fatalf("expected later dependent to stay queued, got %+v", task)
+		}
+		if task.LifecycleState != LifecycleStateQueuedBehindOwner {
+			t.Fatalf("expected later dependent lifecycle to stay queued behind owner, got %q", task.LifecycleState)
 		}
 		if !containsString(task.DependsOn, "task-32") {
 			t.Fatalf("expected later dependent to queue behind task-32, got %+v", task)
@@ -1976,6 +1982,9 @@ func TestBrokerEnsurePlannedTaskQueuesConcurrentExclusiveOwnerWork(t *testing.T)
 	}
 	if second.Status() != "open" || !second.Blocked() {
 		t.Fatalf("expected second task to queue behind the first, got %+v", second)
+	}
+	if second.LifecycleState != LifecycleStateQueuedBehindOwner {
+		t.Fatalf("expected second task lifecycle to be queued behind owner, got %q", second.LifecycleState)
 	}
 	if !containsString(second.DependsOn, first.ID) {
 		t.Fatalf("expected second task to depend on first %s, got %+v", first.ID, second.DependsOn)

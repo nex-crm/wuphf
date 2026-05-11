@@ -82,10 +82,12 @@ func TestLifecycleMigrationKnownTuplesResolveCanonical(t *testing.T) {
 		{"pipeline running implement", "implement", "pending_review", "in_progress", false, LifecycleStateRunning},
 		{"pipeline review ready", "review", "ready_for_review", "in_progress", false, LifecycleStateReview},
 		{"pipeline blocked on pr merge canonical", "review", "ready_for_review", "blocked", true, LifecycleStateBlockedOnPRMerge},
+		{"pipeline queued behind owner canonical", "triage", "pending_review", "open", true, LifecycleStateQueuedBehindOwner},
 		{"pipeline merged ship", "ship", "approved", "done", false, LifecycleStateMerged},
 		{"bare blocked status only", "", "", "blocked", true, LifecycleStateBlockedOnPRMerge},
 		{"bare blocked status, blocked=false (legacy bug fix)", "", "", "blocked", false, LifecycleStateBlockedOnPRMerge},
 		{"bare open", "", "", "open", false, LifecycleStateReady},
+		{"bare open blocked", "", "", "open", true, LifecycleStateQueuedBehindOwner},
 		{"bare done", "", "", "done", false, LifecycleStateMerged},
 		{"bare cancelled", "", "", "cancelled", false, LifecycleStateMerged},
 	}
