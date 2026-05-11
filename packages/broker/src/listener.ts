@@ -1,0 +1,479 @@
+// HTTP listener that owns the broker's loopback surface.
+//
+// Routes (branch-4 scope):
+//   GET /api-token       — bootstrap. Loopback-guarded. NO bearer required.
+//   GET /api/health      — bearer required. Returns {"ok":true}.
+//   GET /api/events      — bearer required. SSE stream with initial `ready`.
+//   GET /                — static (renderer bundle) or 404 if disabled.
+//   GET /index.html      — static or 404.
+//   GET /assets/*        — static or 404.
+//   *  /*                — 404.
+//
+// Every HTTP request goes through `checkLoopbackRequest` first (DNS-rebinding
+// guard). Bearer auth is enforced per-route — `/api-token` is the bootstrap
+// and intentionally does not require a token (the renderer cannot have one
+// before calling it), but it is still loopback-guarded.
+
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import type { AddressInfo } from "node:net";
+
+import {
+  type ApiBootstrap,
+  type ApiToken,
+  apiBootstrapToJson,
+  asBrokerPort,
+  asBrokerUrl,
+  type BrokerPort,
+} from "@wuphf/protocol";
+import { WebSocketServer } from "ws";
+
+import { extractBearerFromHeader, tokenMatches } from "./auth.ts";
+import { checkLoopbackRequest } from "./dns-rebinding-guard.ts";
+import { createStaticHandler, type StaticHandler } from "./serve-static.ts";
+import { startSseSession } from "./sse.ts";
+import { attachTerminalUpgrade } from "./terminal-ws.ts";
+import { generateApiToken } from "./token.ts";
+import { type BrokerConfig, type BrokerHandle, type BrokerLogger, NOOP_LOGGER } from "./types.ts";
+
+const LOOPBACK_HOST = "127.0.0.1";
+
+export async function createBroker(config: BrokerConfig = {}): Promise<BrokerHandle> {
+  const logger: BrokerLogger = config.logger ?? NOOP_LOGGER;
+  const token: ApiToken = config.token ?? generateApiToken();
+  const staticHandler = createStaticHandler(config.renderer ?? null);
+  const trustedOrigins = normalizeTrustedOrigins(config.trustedOrigins);
+  const server = createServer((req, res) => {
+    routeRequest(req, res, { token, staticHandler, logger, trustedOrigins }).catch(
+      (err: unknown) => {
+        logger.error("listener_route_failed", {
+          error: err instanceof Error ? err.message : String(err),
+          path: req.url ?? null,
+        });
+        if (!res.writableEnded) {
+          res.statusCode = 500;
+          res.setHeader("Content-Type", "text/plain; charset=utf-8");
+          res.end("internal_error");
+        }
+      },
+    );
+  });
+
+  const wss = new WebSocketServer({ noServer: true });
+  attachTerminalUpgrade(server, { wss, token, logger });
+
+  const port = await listen(server, config.port ?? 0);
+  const url = `http://${LOOPBACK_HOST}:${port}`;
+  logger.info("listener_started", { port, url });
+
+  let stopInflight: Promise<void> | null = null;
+  const stop = (): Promise<void> => {
+    // Per-handle stop guard. Multiple `stop()` calls share one closure so
+    // listeners and `wss.close` only run once; subsequent callers wait on
+    // the same promise.
+    if (stopInflight === null) {
+      stopInflight = doStop(server, wss, logger);
+    }
+    return stopInflight;
+  };
+
+  return {
+    url,
+    port: asBrokerPort(port),
+    token,
+    stop,
+  };
+}
+
+interface RouteDeps {
+  readonly token: ApiToken;
+  readonly staticHandler: StaticHandler;
+  readonly logger: BrokerLogger;
+  readonly trustedOrigins: ReadonlySet<string>;
+}
+
+async function routeRequest(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: RouteDeps,
+): Promise<void> {
+  // Method allowlist: branch-4 only handles GET. POST/PUT/PATCH/DELETE will
+  // arrive in later branches; until then they are 405. The HEAD method is a
+  // useful smoke test (`curl -I /api-token`) and is treated as GET with no
+  // body — the response writers below already honor that via Node's HEAD
+  // handling, which strips the body.
+  if (req.method !== "GET" && req.method !== "HEAD") {
+    methodNotAllowed(res);
+    return;
+  }
+  const guard = checkLoopbackRequest({
+    hostHeader: req.headers.host,
+    remoteAddress: req.socket.remoteAddress ?? undefined,
+  });
+  if (!guard.allowed) {
+    deps.logger.warn("listener_loopback_denied", {
+      reason: guard.reason ?? null,
+      path: req.url ?? null,
+    });
+    forbidden(res, `loopback_${guard.reason ?? "denied"}`);
+    return;
+  }
+  const url = parseRequestUrl(req);
+  if (url === null) {
+    badRequest(res, "bad_url");
+    return;
+  }
+  const pathname = url.pathname;
+
+  // Reject `..` segments and NUL bytes BEFORE the route dispatch. The URL
+  // parser normalizes `/assets/foo/../bar` to `/assets/bar` before this
+  // function ever sees it; check the raw `req.url` so a request that
+  // started with a traversal segment is denied even when normalization
+  // resolves it back inside the renderer dir. Static handlers (which
+  // resolve paths under their root) cannot detect this on their own.
+  if (req.url !== undefined && containsRawTraversalOrNul(req.url)) {
+    notFound(res);
+    return;
+  }
+
+  // Default-deny bearer policy: any `/api`-namespace route requires
+  // Authorization by construction. This is structural rather than
+  // per-handler discipline — a future contributor adding `/api/receipts`
+  // (or an exact `/api`) can't accidentally ship a loopback-only,
+  // bearerless endpoint by forgetting to call authorize().
+  //
+  // `/api-token` is deliberately excluded: it's the bootstrap and the
+  // renderer cannot have a bearer yet (loopback + Origin gates are the
+  // only checks). The shape comparison covers both:
+  //   - exact `/api` (no trailing slash) → gated. Future namespace-root
+  //     route would otherwise be bearerless.
+  //   - `/api/...` → gated.
+  //   - `/api-token` → NOT gated (different prefix shape entirely).
+  if (pathname === "/api" || pathname.startsWith("/api/")) {
+    if (!authorize(req, res, deps.token)) return;
+  }
+
+  if (pathname === "/api-token") {
+    handleApiToken(req, res, deps);
+    return;
+  }
+  if (pathname === "/api/health") {
+    handleHealth(res);
+    return;
+  }
+  if (pathname === "/api/events") {
+    // HEAD on /api/events must NOT allocate a session — startSseSession
+    // attaches a 30s keepalive setInterval and a `close` handler. Node
+    // strips the body for HEAD but the interval keeps running until the
+    // client disconnects, leaking a timer per probe. Respond with the
+    // SSE content-type headers and end immediately for HEAD.
+    if (req.method === "HEAD") {
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-store",
+      });
+      res.end();
+      return;
+    }
+    handleEvents(res);
+    return;
+  }
+  // Static surfaces are open (loopback-guarded but no bearer): serving the
+  // renderer bundle from `/` on first window load is a same-origin fetch
+  // that has not yet learned the bootstrap token. Subsequent renderer
+  // calls go to /api/* and DO carry the bearer (enforced above).
+  const handled = await deps.staticHandler.serve(pathname, res);
+  if (handled) return;
+
+  notFound(res);
+}
+
+function handleApiToken(req: IncomingMessage, res: ServerResponse, deps: RouteDeps): void {
+  // Bootstrap returns the bearer + broker URL. The Host header is already
+  // validated by the loopback guard; we synthesize the broker_url from the
+  // listener's bound port (taken from the request socket) so the response
+  // is honest about where the broker is listening even when a forwarded
+  // Host header tries to lie.
+  const localAddress = req.socket.localAddress ?? LOOPBACK_HOST;
+  const localPort = req.socket.localPort ?? 0;
+  if (localPort === 0) {
+    // The socket should always know its bound port for an active connection;
+    // a 0 here means the socket is in an unexpected state. Fail loudly so
+    // we never emit an `http://127.0.0.1:0` URL that the protocol codec
+    // would (correctly) reject.
+    deps.logger.error("listener_no_local_port");
+    res.statusCode = 500;
+    res.setHeader("Content-Type", "text/plain; charset=utf-8");
+    res.end("no_local_port");
+    return;
+  }
+  // asBrokerUrl validates the full shape (http: scheme, explicit non-default
+  // port, loopback host) at the wire boundary. We just built the URL from
+  // socket.localAddress + localPort which are both already validated; this
+  // is belt-and-suspenders against future refactors that might produce a
+  // malformed URL silently. Throwing here would 500 the caller via the
+  // routeRequest catch in createBroker — preferable to emitting a wire
+  // value the codec would reject on read.
+  const brokerUrl = asBrokerUrl(`http://${normalizeLoopback(localAddress)}:${localPort}`);
+
+  // Browser-hardening: if the request carries an Origin header (every
+  // browser-context fetch does), it MUST match the broker's bound origin.
+  // This blocks cross-origin fetches from same-machine browser contexts
+  // (Chrome extensions, dev-tool consoles attached to other pages, third-
+  // party local web apps that happen to be running). It does NOT block
+  // same-machine curl/headless callers that omit Origin — see
+  // docs/modules/security-model.md "Loopback Trust Model" for why that
+  // residual surface is documented rather than gated here.
+  // Sec-Fetch-Site is a parallel signal: when present, only same-origin or
+  // "none" (user-initiated, e.g. typing the URL in the address bar) are
+  // accepted. "cross-site"/"same-site"/"cross-origin" are rejected.
+  const originGate = checkApiTokenOrigin(req, brokerUrl, deps.trustedOrigins);
+  if (!originGate.allowed) {
+    deps.logger.warn("api_token_origin_denied", {
+      reason: originGate.reason,
+    });
+    forbidden(res, originGate.reason);
+    return;
+  }
+
+  const bootstrap: ApiBootstrap = { token: deps.token, brokerUrl };
+  const wire = apiBootstrapToJson(bootstrap);
+  const body = JSON.stringify(wire);
+  res.statusCode = 200;
+  res.setHeader("Content-Type", "application/json; charset=utf-8");
+  res.setHeader("Cache-Control", "no-store");
+  // Hint future CORS layers (and any well-behaved HTTP cache) to vary by
+  // origin. /api-token is loopback-only and cache-busted by `no-store`,
+  // but the contract should be honest about origin-sensitivity from day 1
+  // so a later branch adding dev-mode CORS does not have to retroactively
+  // add this header to a route renderers may already be calling.
+  res.setHeader("Vary", "Origin");
+  res.setHeader("Content-Length", String(Buffer.byteLength(body, "utf8")));
+  res.end(body);
+}
+
+function handleHealth(res: ServerResponse): void {
+  const body = JSON.stringify({ ok: true });
+  res.statusCode = 200;
+  res.setHeader("Content-Type", "application/json; charset=utf-8");
+  res.setHeader("Cache-Control", "no-store");
+  res.setHeader("Content-Length", String(Buffer.byteLength(body, "utf8")));
+  res.end(body);
+}
+
+function handleEvents(res: ServerResponse): void {
+  startSseSession(res);
+}
+
+function authorize(req: IncomingMessage, res: ServerResponse, expected: ApiToken): boolean {
+  const presented = extractBearerFromHeader(headerString(req.headers.authorization));
+  if (!tokenMatches(presented, expected)) {
+    unauthorized(res);
+    return false;
+  }
+  return true;
+}
+
+async function listen(server: Server, port: number): Promise<number> {
+  return await new Promise<number>((resolveFn, rejectFn) => {
+    const onError = (err: Error): void => {
+      server.off("listening", onListening);
+      rejectFn(err);
+    };
+    const onListening = (): void => {
+      server.off("error", onError);
+      const address = server.address();
+      const bound = isAddressInfo(address) ? address.port : null;
+      if (bound === null) {
+        rejectFn(new Error("listener: server.address() did not return an AddressInfo"));
+        return;
+      }
+      resolveFn(bound);
+    };
+    server.once("error", onError);
+    server.once("listening", onListening);
+    server.listen(port, LOOPBACK_HOST);
+  });
+}
+
+async function doStop(server: Server, wss: WebSocketServer, logger: BrokerLogger): Promise<void> {
+  if (!server.listening) {
+    logger.info("listener_stop_noop");
+    return;
+  }
+  for (const ws of wss.clients) {
+    ws.close(1001, "server_shutdown");
+  }
+  // Await BOTH wss.close and server.close. Without awaiting wss.close,
+  // upgraded WebSocket sockets are not drained by server.closeAllConnections
+  // and pending close-frame bytes can be dropped — the broker would report
+  // a graceful stop before the kernel actually flushed the terminal bytes,
+  // creating a confusing client-visible truncation once the agent bridge
+  // lands.
+  const wssClosed = new Promise<void>((res) => {
+    wss.close(() => res());
+  });
+  const serverClosed = new Promise<void>((res) => {
+    server.close(() => res());
+  });
+  server.closeAllConnections?.();
+  await Promise.all([wssClosed, serverClosed]);
+  logger.info("listener_stopped");
+}
+
+function isAddressInfo(value: unknown): value is AddressInfo {
+  return typeof value === "object" && value !== null && "port" in value && "address" in value;
+}
+
+function headerString(value: string | string[] | undefined): string | undefined {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value) && typeof value[0] === "string") return value[0];
+  return undefined;
+}
+
+function parseRequestUrl(req: IncomingMessage): URL | null {
+  if (typeof req.url !== "string") return null;
+  const host = req.headers.host ?? LOOPBACK_HOST;
+  try {
+    return new URL(req.url, `http://${host}`);
+  } catch {
+    return null;
+  }
+}
+
+function containsRawTraversalOrNul(rawUrl: string): boolean {
+  if (rawUrl.includes("\0") || rawUrl.includes("%00")) return true;
+  // Drop the query string before scanning for traversal segments — a
+  // legitimate `?q=foo/../bar` query value should not 404. Path-only check.
+  const pathOnly = rawUrl.split("?", 1)[0] ?? "";
+  // Decode percent-encoding so `%2e%2e` is treated the same as `..`.
+  // `decodeURIComponent` throws on malformed sequences; treat that as a
+  // hostile request and reject.
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(pathOnly);
+  } catch {
+    return true;
+  }
+  if (decoded.includes("\0")) return true;
+  const segments = decoded.split("/");
+  return segments.some((seg) => seg === "..");
+}
+
+function normalizeLoopback(address: string): string {
+  // `socket.localAddress` reports `::ffff:127.0.0.1` for IPv4 connections on
+  // dual-stack listeners. The broker URL must round-trip through the
+  // protocol codec's loopback check, which only accepts bare `127.0.0.1`,
+  // `::1`, or `localhost`. Strip the v4-mapped-v6 prefix.
+  if (address.startsWith("::ffff:")) return address.slice(7);
+  return address;
+}
+
+interface ApiTokenOriginDecision {
+  readonly allowed: boolean;
+  readonly reason: string;
+}
+
+// Defense-in-depth gate for browser-style cross-origin requests to
+// `/api-token`. See the call site in `handleApiToken` for the policy
+// rationale.
+function checkApiTokenOrigin(
+  req: IncomingMessage,
+  brokerUrl: string,
+  trustedOrigins: ReadonlySet<string>,
+): ApiTokenOriginDecision {
+  // Sec-Fetch-Site — sent by all modern browsers, omitted by curl/Node.
+  const secFetchSite = headerString(req.headers["sec-fetch-site"]);
+  if (secFetchSite !== undefined) {
+    if (secFetchSite !== "same-origin" && secFetchSite !== "none") {
+      return { allowed: false, reason: "cross_origin_api_token" };
+    }
+  }
+  // Origin: must either be absent (curl/Electron WebView) or match the
+  // broker's bound origin. The literal string `"null"` is a browser-
+  // generated value from opaque origins (file://, sandboxed iframes,
+  // data: / blob: contexts, srcdoc iframes) — reject it explicitly so a
+  // malicious local file or sandboxed page cannot trigger the bootstrap.
+  // The previous gate treated `Origin: null` as "no Origin", which let it
+  // bypass the check entirely.
+  const origin = headerString(req.headers.origin);
+  if (typeof origin === "string" && origin.length > 0) {
+    if (origin === "null") {
+      return { allowed: false, reason: "null_origin" };
+    }
+    let originUrl: URL;
+    try {
+      originUrl = new URL(origin);
+    } catch {
+      return { allowed: false, reason: "malformed_origin" };
+    }
+    if (originUrl.origin !== new URL(brokerUrl).origin && !trustedOrigins.has(originUrl.origin)) {
+      return { allowed: false, reason: "cross_origin_api_token" };
+    }
+  }
+  return { allowed: true, reason: "ok" };
+}
+
+// Pre-validate each trusted origin at config time: must parse, must be a
+// loopback origin (we never want to accept arbitrary trusted cross-origin
+// callers), must contain no path/query/fragment. Invalid entries throw at
+// broker-construction time rather than silently failing per-request.
+function normalizeTrustedOrigins(values: readonly string[] | undefined): ReadonlySet<string> {
+  if (values === undefined || values.length === 0) return new Set();
+  const set = new Set<string>();
+  for (const raw of values) {
+    let parsed: URL;
+    try {
+      parsed = new URL(raw);
+    } catch {
+      throw new Error(`createBroker: trustedOrigins entry is not a URL: ${raw}`);
+    }
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      throw new Error(`createBroker: trustedOrigins entry must use http/https: ${raw}`);
+    }
+    if (
+      parsed.hostname !== "127.0.0.1" &&
+      parsed.hostname !== "localhost" &&
+      parsed.hostname !== "::1" &&
+      parsed.hostname !== "[::1]"
+    ) {
+      throw new Error(`createBroker: trustedOrigins entry must be loopback: ${raw}`);
+    }
+    // Compare against parsed.origin (URL.origin strips path/query/hash).
+    set.add(parsed.origin);
+  }
+  return set;
+}
+
+function notFound(res: ServerResponse): void {
+  res.statusCode = 404;
+  res.setHeader("Content-Type", "text/plain; charset=utf-8");
+  res.end("not_found");
+}
+
+function unauthorized(res: ServerResponse): void {
+  res.statusCode = 401;
+  res.setHeader("WWW-Authenticate", 'Bearer realm="wuphf-broker"');
+  res.setHeader("Content-Type", "text/plain; charset=utf-8");
+  res.end("unauthorized");
+}
+
+function forbidden(res: ServerResponse, reason: string): void {
+  res.statusCode = 403;
+  res.setHeader("Content-Type", "text/plain; charset=utf-8");
+  res.end(reason);
+}
+
+function badRequest(res: ServerResponse, reason: string): void {
+  res.statusCode = 400;
+  res.setHeader("Content-Type", "text/plain; charset=utf-8");
+  res.end(reason);
+}
+
+function methodNotAllowed(res: ServerResponse): void {
+  res.statusCode = 405;
+  res.setHeader("Allow", "GET, HEAD");
+  res.setHeader("Content-Type", "text/plain; charset=utf-8");
+  res.end("method_not_allowed");
+}
+
+export type { BrokerHandle, BrokerPort };

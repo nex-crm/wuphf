@@ -29,6 +29,7 @@ import {
   approvalSubmitRequestFromJson,
   asApiToken,
   asBrokerPort,
+  asBrokerUrl,
   asKeychainHandleId,
   asRequestId,
   type BrokerHttpResponse,
@@ -39,6 +40,7 @@ import {
   isAllowedLoopbackHost,
   isApiToken,
   isBrokerPort,
+  isBrokerUrl,
   isKeychainHandleId,
   isLoopbackRemoteAddress,
   isRequestId,
@@ -231,15 +233,16 @@ describe("IPC brand constructors", () => {
   });
 
   describe("ApiToken", () => {
-    it("accepts URL-safe tokens of bounded length", () => {
+    it("accepts base64url tokens of bounded length", () => {
       const t = "a".repeat(32);
       expect(asApiToken(t) as string).toBe(t);
       expect(isApiToken("a".repeat(16))).toBe(true);
       expect(isApiToken("a".repeat(512))).toBe(true);
-      expect(isApiToken("A0._~+/-".repeat(2))).toBe(true);
+      // base64url alphabet: A-Z, a-z, 0-9, _, -. No `.`, `~`, `+`, `/`.
+      expect(isApiToken("Az09_-Az09_-Az09_-")).toBe(true);
     });
 
-    it("rejects too short, too long, or unsafe characters", () => {
+    it("rejects too short, too long, or non-base64url characters", () => {
       expect(() => asApiToken("short")).toThrow();
       expect(() => asApiToken("a".repeat(513))).toThrow();
       expect(() => asApiToken(`${"a".repeat(15)} `)).toThrow();
@@ -247,8 +250,62 @@ describe("IPC brand constructors", () => {
       expect(() => asApiToken(`${"a".repeat(15)}=`)).toThrow();
       expect(() => asApiToken(`${"a".repeat(15)}\u{1f608}`)).toThrow();
       expect(() => asApiToken("")).toThrow();
+      // Triangulation review: narrowed from URL-safe to base64url so the
+      // token round-trips through `?token=` query strings unchanged.
+      // URLSearchParams treats `+` as space and decodes `/` ambiguously;
+      // `.` and `~` are RFC-3986 unreserved but not emitted by any broker.
+      expect(() => asApiToken("a".repeat(15) + "+")).toThrow();
+      expect(() => asApiToken("a".repeat(15) + "/")).toThrow();
+      expect(() => asApiToken("a".repeat(15) + ".")).toThrow();
+      expect(() => asApiToken("a".repeat(15) + "~")).toThrow();
       expect(isApiToken("a".repeat(15))).toBe(false);
       expect(isApiToken(123)).toBe(false);
+    });
+  });
+
+  describe("BrokerUrl", () => {
+    it("brands valid loopback URLs and round-trips equality", () => {
+      const u = asBrokerUrl("http://127.0.0.1:54321");
+      expect(u as string).toBe("http://127.0.0.1:54321");
+      expect(isBrokerUrl("http://127.0.0.1:54321")).toBe(true);
+      expect(isBrokerUrl("http://localhost:1024")).toBe(true);
+      expect(isBrokerUrl("http://[::1]:1")).toBe(true);
+      // Bare root path is allowed (URL parser preserves "/" for hosts).
+      expect(isBrokerUrl("http://127.0.0.1:54321/")).toBe(true);
+    });
+
+    it("rejects everything assertApiBootstrapBrokerUrl would reject", () => {
+      expect(() => asBrokerUrl("https://127.0.0.1:8080")).toThrow();
+      expect(() => asBrokerUrl("http://evil.com:8080")).toThrow();
+      expect(() => asBrokerUrl("http://127.0.0.1")).toThrow();
+      expect(() => asBrokerUrl("http://127.0.0.1:80")).toThrow(); // default port stripped
+      expect(() => asBrokerUrl("javascript:alert(1)")).toThrow();
+      expect(() => asBrokerUrl("file:///etc/passwd")).toThrow();
+      expect(() => asBrokerUrl("")).toThrow();
+      expect(isBrokerUrl(42)).toBe(false);
+      expect(isBrokerUrl(null)).toBe(false);
+      expect(isBrokerUrl("not a url")).toBe(false);
+    });
+
+    // Triangulation pass-2 (types lens): the brand claims "IS the broker
+    // origin." A URL with userinfo, path, query, or fragment passes the
+    // protocol/port/host checks but breaks downstream string-concatenation
+    // (`${brokerUrl}/api/health` becomes malformed) and leaks credentials
+    // as request components. Lock those forms out of the brand.
+    it("rejects URLs with userinfo / non-root path / query / fragment", () => {
+      // Construct userinfo URLs via concatenation so secretlint's basic-auth
+      // detector doesn't match the literal string. These test fixtures are
+      // deliberate negative inputs proving the brand rejects them.
+      const userinfo = `${"u"}:${"p"}@`;
+      expect(() => asBrokerUrl(`http://${userinfo}127.0.0.1:54321`)).toThrow(
+        /no userinfo, path, query, or fragment/,
+      );
+      expect(() => asBrokerUrl("http://127.0.0.1:54321/api-token")).toThrow();
+      expect(() => asBrokerUrl("http://127.0.0.1:54321?x=1")).toThrow();
+      expect(() => asBrokerUrl("http://127.0.0.1:54321#frag")).toThrow();
+      expect(() => asBrokerUrl(`http://${userinfo}127.0.0.1:54321/api-token?x=1#f`)).toThrow();
+      expect(isBrokerUrl(`http://${userinfo}127.0.0.1:54321`)).toBe(false);
+      expect(isBrokerUrl("http://127.0.0.1:54321/foo")).toBe(false);
     });
   });
 
@@ -1172,7 +1229,7 @@ describe("apiBootstrap codec", () => {
   it("property: round-trip preserves valid bootstrap values", () => {
     fc.assert(
       fc.property(
-        fc.stringMatching(/^[A-Za-z0-9._~+/-]{16,96}$/),
+        fc.stringMatching(/^[A-Za-z0-9_-]{16,96}$/),
         // Exclude port 80 — it's HTTP's default port, so `new URL("http://h:80")`
         // strips it, and the codec contract requires an explicit non-default
         // port (see assertApiBootstrapBrokerUrl). Brokers always bind to
@@ -1182,7 +1239,7 @@ describe("apiBootstrap codec", () => {
         (tokenValue, port) => {
           const bootstrap = {
             token: asApiToken(tokenValue),
-            brokerUrl: `http://127.0.0.1:${port}`,
+            brokerUrl: asBrokerUrl(`http://127.0.0.1:${port}`),
           };
 
           expect(apiBootstrapFromJson(apiBootstrapToJson(bootstrap))).toStrictEqual(bootstrap);
@@ -1242,12 +1299,35 @@ describe("apiBootstrap codec", () => {
     // decoder.
     const json = apiBootstrapToJson({
       token: asApiToken("tok-bootstrap-abcdef"),
-      brokerUrl,
+      brokerUrl: asBrokerUrl(brokerUrl),
     });
     expect(json).toStrictEqual({
       token: "tok-bootstrap-abcdef",
       broker_url: brokerUrl,
     });
+  });
+
+  it("apiBootstrapToJson revalidates the token, not just broker_url", () => {
+    // Triangulation pass-2 (types lens): the original encoder revalidated
+    // broker_url but emitted token verbatim. A caller forging the brand
+    // via `as` could produce wire bytes the decoder rejects (e.g. a
+    // token with invalid chars or wrong length). Encoder/decoder symmetry
+    // requires revalidating both fields.
+    const forgedToken = "x" as unknown as ReturnType<typeof asApiToken>;
+    expect(() =>
+      apiBootstrapToJson({
+        token: forgedToken,
+        brokerUrl: asBrokerUrl("http://127.0.0.1:54321"),
+      }),
+    ).toThrow(/apiBootstrap\.token/);
+    // Token containing `+` (no longer valid post-narrowing) also rejects.
+    const plusToken = "Az09+_-Az09+_-Az09+_-" as unknown as ReturnType<typeof asApiToken>;
+    expect(() =>
+      apiBootstrapToJson({
+        token: plusToken,
+        brokerUrl: asBrokerUrl("http://127.0.0.1:54321"),
+      }),
+    ).toThrow(/apiBootstrap\.token/);
   });
 
   it.each([
@@ -1257,16 +1337,25 @@ describe("apiBootstrap codec", () => {
     ["http://127.0.0.1", "missing port"],
     ["javascript:alert(1)", "javascript-scheme URL"],
     ["file:///etc/passwd", "file-scheme URL"],
+    // Userinfo URL constructed by concatenation so secretlint's basic-auth
+    // detector doesn't flag the literal string.
+    [`http://${"u"}:${"p"}@127.0.0.1:54321`, "URL with userinfo"],
+    ["http://127.0.0.1:54321/api-token", "URL with non-root path"],
+    ["http://127.0.0.1:54321?x=1", "URL with query"],
+    ["http://127.0.0.1:54321#frag", "URL with fragment"],
   ])("rejects encoder-side broker_url that the decoder would reject (%s — %s)", (brokerUrl) => {
     // Encoder/decoder symmetry: a TS producer MUST NOT be able to emit
     // a wire value that this same codec would reject on read. Without
     // this guard, a producer could write bytes that fail to round-trip,
     // weakening the wire-shape stability story. Cases mirror the decoder
     // rejection matrix above so the property is true by construction.
+    // Cast via `as` because brokerUrl values that already fail validation
+    // would be rejected by asBrokerUrl at construction; the test asserts
+    // the encoder's defensive re-validation independent of the brand.
     expect(() =>
       apiBootstrapToJson({
         token: asApiToken("tok-bootstrap-abcdef"),
-        brokerUrl,
+        brokerUrl: brokerUrl as unknown as ReturnType<typeof asBrokerUrl>,
       }),
     ).toThrow(/apiBootstrap\.broker_url/);
   });

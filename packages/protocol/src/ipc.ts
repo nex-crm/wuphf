@@ -58,6 +58,7 @@ import { isSha256Hex } from "./sha256.ts";
 
 export type BrokerPort = Brand<number, "BrokerPort">;
 export type ApiToken = Brand<string, "ApiToken">;
+export type BrokerUrl = Brand<string, "BrokerUrl">;
 export type RequestId = Brand<string, "RequestId">;
 export type KeychainHandleId = Brand<string, "KeychainHandleId">;
 
@@ -70,7 +71,12 @@ export type KeychainHandleId = Brand<string, "KeychainHandleId">;
 // the same validation rules the broker enforces on the wire so that the only
 // way to materialize a branded value is to pass through these checks.
 
-const API_TOKEN_RE = /^[A-Za-z0-9._~+/-]{16,512}$/;
+// Base64url alphabet only. Narrower than RFC 3986 URL-safe to guarantee the
+// token round-trips unchanged through HTTP query strings: `+` becomes a space
+// after `URLSearchParams` decoding, and bare `/` confuses naive path/query
+// splitters. Conservative-permissive: brokers MUST generate via
+// crypto.randomBytes -> base64url, which fits this alphabet exactly.
+const API_TOKEN_RE = /^[A-Za-z0-9_-]{16,512}$/;
 const REQUEST_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const KEYCHAIN_HANDLE_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
@@ -123,6 +129,34 @@ export function isKeychainHandleId(value: unknown): value is KeychainHandleId {
   return typeof value === "string" && KEYCHAIN_HANDLE_RE.test(value);
 }
 
+/**
+ * Broker URL brand. Carries structural proof that a string is a
+ * `http://<loopback>:<explicit-port>` URL — the only shape the broker ever
+ * emits and the only shape clients should ever load. Constructed at the
+ * wire boundary (apiBootstrapFromJson, readReadyMessage in the desktop
+ * supervisor), the brand prevents silent substitution of an unvalidated
+ * `string` into a fetch origin or BrowserWindow.loadURL call deeper in the
+ * codebase.
+ *
+ * Validates: parses as URL; protocol === "http:"; explicit port in
+ * 1..65535; hostname is loopback (`127.0.0.1`, `localhost`, `::1`, or
+ * `[::1]`).
+ */
+export function asBrokerUrl(s: string): BrokerUrl {
+  assertApiBootstrapBrokerUrl(s);
+  return s as BrokerUrl;
+}
+
+export function isBrokerUrl(value: unknown): value is BrokerUrl {
+  if (typeof value !== "string") return false;
+  try {
+    assertApiBootstrapBrokerUrl(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // ---------- Channel 1: contextBridge OS verbs ----------
 
 export interface OsVerbsApi {
@@ -173,7 +207,7 @@ export interface OsVerbsApi {
  */
 export interface ApiBootstrap {
   readonly token: ApiToken;
-  readonly brokerUrl: string; // http://127.0.0.1:<port>
+  readonly brokerUrl: BrokerUrl; // http://<loopback>:<explicit-port>
 }
 
 export type ApiBootstrapWire = Readonly<Record<"token" | "broker_url", string>>;
@@ -208,8 +242,7 @@ export function apiBootstrapFromJson(value: unknown): ApiBootstrap {
   assertKnownKeys(record, "apiBootstrap", API_BOOTSTRAP_WIRE_KEYS);
   const token = requiredStringField(record, "token", "apiBootstrap.token");
   const brokerUrl = requiredStringField(record, "broker_url", "apiBootstrap.broker_url");
-  assertApiBootstrapBrokerUrl(brokerUrl);
-  return { token: asApiToken(token), brokerUrl };
+  return { token: asApiToken(token), brokerUrl: asBrokerUrl(brokerUrl) };
 }
 
 /**
@@ -226,8 +259,16 @@ export function apiBootstrapFromJson(value: unknown): ApiBootstrap {
  * Go, or Rust could write bytes that fail to round-trip.
  */
 export function apiBootstrapToJson(bootstrap: ApiBootstrap): ApiBootstrapWire {
+  // Defensively revalidate BOTH fields against their brand invariants
+  // before emitting wire bytes. `as`-casts at the caller can forge the
+  // brand without going through asApiToken/asBrokerUrl; this gate ensures
+  // the encoder never produces bytes the decoder would reject (encoder/
+  // decoder symmetry, see fn doc above).
+  if (!isApiToken(bootstrap.token)) {
+    throw new Error("apiBootstrap.token: forged brand or invalid token shape");
+  }
   assertApiBootstrapBrokerUrl(bootstrap.brokerUrl);
-  return { token: bootstrap.token as string, broker_url: bootstrap.brokerUrl };
+  return { token: bootstrap.token as string, broker_url: bootstrap.brokerUrl as string };
 }
 
 function assertApiBootstrapBrokerUrl(brokerUrl: string): void {
@@ -241,14 +282,27 @@ function assertApiBootstrapBrokerUrl(brokerUrl: string): void {
   // because 80 is HTTP's default. This codec rejects default ports
   // intentionally — brokers always bind ephemeral high ports, and an
   // implicit-port URL would round-trip differently than it came in.
+  //
+  // The shape gates (no userinfo / no path-beyond-root / no query / no
+  // fragment) preserve the brand's claimed invariant: "BrokerUrl IS the
+  // broker origin." Downstream code concatenates `${brokerUrl}/api/health`
+  // — if a value with userinfo or a non-root path passed the brand, the
+  // concatenated fetch URL would be malformed and the userinfo would
+  // leak as a request component instead of as part of a controlled
+  // origin string.
   if (
     parsed.protocol !== "http:" ||
     parsed.port === "" ||
     !isAllowedLoopbackHost(parsed.hostname) ||
-    !isBrokerPort(Number(parsed.port))
+    !isBrokerPort(Number(parsed.port)) ||
+    parsed.username !== "" ||
+    parsed.password !== "" ||
+    parsed.search !== "" ||
+    parsed.hash !== "" ||
+    (parsed.pathname !== "" && parsed.pathname !== "/")
   ) {
     throw new Error(
-      "apiBootstrap.broker_url: must be http://<loopback>:<explicit-port> (default port 80 is rejected to keep the wire shape stable across round-trips)",
+      "apiBootstrap.broker_url: must be http://<loopback>:<explicit-port>/ with no userinfo, path, query, or fragment",
     );
   }
 }
