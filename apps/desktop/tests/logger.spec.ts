@@ -18,6 +18,8 @@ import {
   UnsafeLogPayloadError,
 } from "../src/main/logger.ts";
 
+const MAX_LOG_STRING_BYTES = 8_192;
+
 const fsMock = vi.hoisted(() => ({
   mkdirSync: vi.fn<typeof import("node:fs").mkdirSync>(),
   statSync: vi.fn<typeof import("node:fs").statSync>(),
@@ -375,13 +377,13 @@ describe("StructuredLogger", () => {
 
     logger.error("unhandled_rejection", { reason: "x".repeat(9_000) });
 
-    const record = readLogRecords(logDirectory)[0] as { readonly reason?: unknown } | undefined;
-    expect(typeof record?.reason).toBe("string");
-    expect((record?.reason as string).endsWith("...")).toBe(true);
-    expect((record?.reason as string).length).toBeLessThan(9_000);
+    const reason = readFirstReason(logDirectory);
+    expect(reason.endsWith("...")).toBe(true);
+    expect(reason.length).toBeLessThan(9_000);
+    expect(Buffer.byteLength(reason, "utf8")).toBeLessThanOrEqual(MAX_LOG_STRING_BYTES);
   });
 
-  it("marks byte-oversized string values that fit within the char cap", () => {
+  it("keeps byte-safe ASCII string values unchanged", () => {
     const logDirectory = createTempDir();
     const sink = new StructuredLogger({
       logDirectory,
@@ -389,12 +391,70 @@ describe("StructuredLogger", () => {
       monotonicNow: () => 1,
     });
     const logger = sink.forModule("main");
-    const reason = "€".repeat(3_000);
+    const fastPathReason = "a".repeat(1_000);
+    const byteCheckedReason = "b".repeat(3_000);
+
+    logger.error("unhandled_rejection", { reason: fastPathReason });
+    logger.error("unhandled_rejection", { reason: byteCheckedReason });
+
+    const records = readLogRecords(logDirectory) as ReadonlyArray<{ readonly reason?: unknown }>;
+    expect(records[0]?.reason).toBe(fastPathReason);
+    expect(records[1]?.reason).toBe(byteCheckedReason);
+  });
+
+  it("truncates byte-oversized string values that fit within the char cap", () => {
+    const logDirectory = createTempDir();
+    const sink = new StructuredLogger({
+      logDirectory,
+      consoleWriter: () => undefined,
+      monotonicNow: () => 1,
+    });
+    const logger = sink.forModule("main");
+    const reason = "€".repeat(MAX_LOG_STRING_BYTES);
 
     logger.error("unhandled_rejection", { reason });
 
-    const record = readLogRecords(logDirectory)[0] as { readonly reason?: unknown } | undefined;
-    expect(record?.reason).toBe(`${reason}...`);
+    const loggedReason = readFirstReason(logDirectory);
+    expect(loggedReason).not.toBe(reason);
+    expect(loggedReason.endsWith("...")).toBe(true);
+    expect(Buffer.byteLength(loggedReason, "utf8")).toBeLessThanOrEqual(MAX_LOG_STRING_BYTES);
+  });
+
+  it("truncates multibyte strings that exceed the byte cap by one byte", () => {
+    const logDirectory = createTempDir();
+    const sink = new StructuredLogger({
+      logDirectory,
+      consoleWriter: () => undefined,
+      monotonicNow: () => 1,
+    });
+    const logger = sink.forModule("main");
+    const reason = "€".repeat(2_731);
+
+    logger.error("unhandled_rejection", { reason });
+
+    const loggedReason = readFirstReason(logDirectory);
+    expect(loggedReason).not.toBe(reason);
+    expect(loggedReason.endsWith("...")).toBe(true);
+    expect(Buffer.byteLength(loggedReason, "utf8")).toBeLessThanOrEqual(MAX_LOG_STRING_BYTES);
+  });
+
+  it("truncates surrogate-pair strings without splitting encoded characters", () => {
+    const logDirectory = createTempDir();
+    const sink = new StructuredLogger({
+      logDirectory,
+      consoleWriter: () => undefined,
+      monotonicNow: () => 1,
+    });
+    const logger = sink.forModule("main");
+    const reason = "😀".repeat(2_049);
+
+    logger.error("unhandled_rejection", { reason });
+
+    const loggedReason = readFirstReason(logDirectory);
+    expect(loggedReason).not.toBe(reason);
+    expect(loggedReason.endsWith("...")).toBe(true);
+    expect(loggedReason).not.toContain("\uFFFD");
+    expect(Buffer.byteLength(loggedReason, "utf8")).toBeLessThanOrEqual(MAX_LOG_STRING_BYTES);
   });
 
   it("pre-caps multi-megabyte string values before writing", () => {
@@ -408,10 +468,10 @@ describe("StructuredLogger", () => {
 
     logger.error("unhandled_rejection", { reason: "x".repeat(2 * 1024 * 1024) });
 
-    const record = readLogRecords(logDirectory)[0] as { readonly reason?: unknown } | undefined;
-    expect(typeof record?.reason).toBe("string");
-    expect((record?.reason as string).endsWith("...")).toBe(true);
-    expect(record?.reason as string).toHaveLength(8_195);
+    const reason = readFirstReason(logDirectory);
+    expect(reason.endsWith("...")).toBe(true);
+    expect(reason).toHaveLength(MAX_LOG_STRING_BYTES);
+    expect(Buffer.byteLength(reason, "utf8")).toBeLessThanOrEqual(MAX_LOG_STRING_BYTES);
   });
 
   it.each(["url", "path", "token", "secret"])("rejects banned payload key %s", (key) => {
@@ -440,4 +500,13 @@ function readLogRecords(logDirectory: string): readonly Record<string, unknown>[
     .trim()
     .split("\n")
     .map((line) => JSON.parse(line) as Record<string, unknown>);
+}
+
+function readFirstReason(logDirectory: string): string {
+  const record = readLogRecords(logDirectory)[0] as { readonly reason?: unknown } | undefined;
+  const reason = record?.reason;
+  if (typeof reason !== "string") {
+    throw new Error("Expected first log record reason to be a string");
+  }
+  return reason;
 }
