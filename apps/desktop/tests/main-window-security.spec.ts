@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { parseBootstrap } from "../src/renderer/bootstrap.ts";
 import type { GetBrokerStatusResponse, WuphfDesktopApi } from "../src/shared/api-contract.ts";
 
 interface MockBrowserWindowInstance {
@@ -69,15 +70,7 @@ const VALID_BOOTSTRAP_TOKEN = "A".repeat(16);
 const VALID_BOOTSTRAP_URL = "http://127.0.0.1:54321";
 
 describe("parseBootstrap", () => {
-  afterEach(() => {
-    vi.clearAllTimers();
-    vi.useRealTimers();
-    vi.unstubAllGlobals();
-  });
-
-  it("rejects accessor and inherited bootstrap properties", async () => {
-    const { parseBootstrap } = await importRendererMain();
-
+  it("rejects accessor and inherited bootstrap properties", () => {
     expect(() =>
       parseBootstrap({
         get token() {
@@ -102,8 +95,7 @@ describe("parseBootstrap", () => {
     expect(() => parseBootstrap(obj)).toThrow("api-token response: token: is required");
   });
 
-  it("rejects descriptor traps that make bootstrap values unreachable", async () => {
-    const { parseBootstrap } = await importRendererMain();
+  it("rejects descriptor traps that make bootstrap values unreachable", () => {
     const throwingRecord = new Proxy(
       { token: VALID_BOOTSTRAP_TOKEN, broker_url: VALID_BOOTSTRAP_URL },
       {
@@ -119,8 +111,7 @@ describe("parseBootstrap", () => {
     expect(() => parseBootstrap(throwingRecord)).toThrow("token descriptor unreachable");
   });
 
-  it("rejects array-shaped bootstrap records", async () => {
-    const { parseBootstrap } = await importRendererMain();
+  it("rejects array-shaped bootstrap records", () => {
     const arrayBootstrap = Object.assign([], {
       token: VALID_BOOTSTRAP_TOKEN,
       broker_url: VALID_BOOTSTRAP_URL,
@@ -589,10 +580,6 @@ interface RendererHarness {
   readonly module: RendererMainModule;
   readonly api: WuphfDesktopApi;
   readonly fetchMock: FetchMock;
-}
-
-async function importRendererMain(): Promise<RendererMainModule> {
-  return (await importRendererHarness()).module;
 }
 
 async function importRendererHarness(
