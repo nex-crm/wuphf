@@ -22,7 +22,7 @@ export interface StructuredLoggerConfig {
   readonly maxFileBytes?: number;
   readonly consoleWriter?: (level: LogLevel, line: string) => void;
   readonly monotonicNow?: () => number;
-  readonly fs?: LoggerRotationFileSystem;
+  readonly rotationFs?: LoggerRotationFileSystem;
 }
 
 export interface LoggerRotationFileSystem {
@@ -42,7 +42,7 @@ const LOG_FILE_NAME = "main.log";
 const DEFAULT_MAX_FILE_BYTES = 10 * 1024 * 1024;
 const ROTATED_FILE_COUNT = 2;
 const MAX_LOG_STRING_BYTES = 8_192;
-const LOG_NAME_PATTERN = /^[a-z0-9_.:-]+$/;
+export const LOG_NAME_PATTERN = /^[a-z0-9_.:-]+$/;
 const BANNED_PAYLOAD_KEY_FRAGMENTS = ["url", "path", "token", "secret", "password"] as const;
 const SAFE_PAYLOAD_KEYS = new Set([
   "alreadyStopping",
@@ -93,6 +93,8 @@ export class StructuredLogger {
   private readonly consoleWriter: (level: LogLevel, line: string) => void;
   private readonly monotonicNow: () => number;
   private readonly rotationFs: LoggerRotationFileSystem;
+  private readonly currentFileBytes = new Map<string, number>();
+  private initializedLogDirectory: string | null = null;
   private eventLsn = 0;
 
   constructor(config: StructuredLoggerConfig = {}) {
@@ -100,7 +102,7 @@ export class StructuredLogger {
     this.maxFileBytes = config.maxFileBytes ?? DEFAULT_MAX_FILE_BYTES;
     this.consoleWriter = config.consoleWriter ?? writeLineToConsole;
     this.monotonicNow = config.monotonicNow ?? monotonicNowMs;
-    this.rotationFs = config.fs ?? defaultRotationFileSystem;
+    this.rotationFs = config.rotationFs ?? defaultRotationFileSystem;
   }
 
   forModule(module: string): Logger {
@@ -136,19 +138,39 @@ export class StructuredLogger {
     }
 
     try {
-      mkdirSync(logDirectory, { recursive: true });
+      if (this.initializedLogDirectory !== logDirectory) {
+        mkdirSync(logDirectory, { recursive: true });
+        this.initializedLogDirectory = logDirectory;
+      }
       const logPath = join(logDirectory, LOG_FILE_NAME);
-      const lineBytes = Buffer.byteLength(line, "utf8") + 1;
+      const lineWithTerminator = `${line}\n`;
+      const lineBytes = Buffer.byteLength(lineWithTerminator, "utf8");
       if (
         lineBytes < this.maxFileBytes &&
-        currentFileSize(logPath) + lineBytes > this.maxFileBytes
+        this.getCurrentFileBytes(logPath) + lineBytes > this.maxFileBytes
       ) {
         rotateLogs(logDirectory, this.rotationFs);
+        this.currentFileBytes.set(logPath, 0);
       }
-      appendFileSync(logPath, `${line}\n`, "utf8");
+      appendFileSync(logPath, lineWithTerminator, "utf8");
+      this.currentFileBytes.set(logPath, (this.currentFileBytes.get(logPath) ?? 0) + lineBytes);
     } catch {
       return;
     }
+  }
+
+  private getCurrentFileBytes(logPath: string): number {
+    const cachedBytes = this.currentFileBytes.get(logPath);
+    if (cachedBytes !== undefined) {
+      return cachedBytes;
+    }
+
+    // Avoid statting every append. If another local actor truncates or mutates
+    // the log file, rotation can happen one file early or late; the drift is
+    // bounded by maxFileBytes and corrected after the next rotation.
+    const bytes = currentFileSize(logPath);
+    this.currentFileBytes.set(logPath, bytes);
+    return bytes;
   }
 }
 

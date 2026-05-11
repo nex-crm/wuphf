@@ -18,9 +18,25 @@ import {
   UnsafeLogPayloadError,
 } from "../src/main/logger.ts";
 
+const fsMock = vi.hoisted(() => ({
+  mkdirSync: vi.fn<typeof import("node:fs").mkdirSync>(),
+  statSync: vi.fn<typeof import("node:fs").statSync>(),
+}));
+
 const electronMock = vi.hoisted(() => ({
   getPath: vi.fn<(name: string) => string>(),
 }));
+
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  fsMock.mkdirSync.mockImplementation(actual.mkdirSync);
+  fsMock.statSync.mockImplementation(actual.statSync);
+  return {
+    ...actual,
+    mkdirSync: fsMock.mkdirSync,
+    statSync: fsMock.statSync,
+  };
+});
 
 vi.mock("electron", () => ({
   app: {
@@ -33,6 +49,8 @@ const tempDirs: string[] = [];
 describe("StructuredLogger", () => {
   beforeEach(() => {
     electronMock.getPath.mockReset();
+    fsMock.mkdirSync.mockClear();
+    fsMock.statSync.mockClear();
   });
 
   afterEach(() => {
@@ -107,11 +125,48 @@ describe("StructuredLogger", () => {
     expect(existsSync(join(logDirectory, "main.1.log"))).toBe(true);
     expect(existsSync(join(logDirectory, "main.2.log"))).toBe(true);
     expect(existsSync(join(logDirectory, "main.3.log"))).toBe(false);
+    expect(fsMock.statSync).toHaveBeenCalledTimes(1);
     expect(readLogRecords(logDirectory).at(-1)).toMatchObject({
       module: "broker",
       event: "broker_restart_scheduled",
       restartCount: 7,
     });
+  });
+
+  it("initializes the log directory once across repeated writes", () => {
+    const logDirectory = createTempDir();
+    const sink = new StructuredLogger({
+      logDirectory,
+      consoleWriter: () => undefined,
+      monotonicNow: () => 1,
+    });
+    const logger = sink.forModule("broker");
+
+    for (let index = 0; index < 100; index += 1) {
+      logger.info("broker_liveness_ping");
+    }
+
+    expect(fsMock.mkdirSync).toHaveBeenCalledOnce();
+    expect(fsMock.mkdirSync).toHaveBeenCalledWith(logDirectory, { recursive: true });
+    expect(readLogRecords(logDirectory)).toHaveLength(100);
+  });
+
+  it("writes a single line larger than the rotation threshold without rotating", () => {
+    const logDirectory = createTempDir();
+    const sink = new StructuredLogger({
+      logDirectory,
+      maxFileBytes: 1,
+      consoleWriter: () => undefined,
+      monotonicNow: () => 1,
+    });
+    const logger = sink.forModule("main");
+
+    logger.error("app_start_failed", { error: "boom" });
+
+    expect(existsSync(join(logDirectory, "main.log"))).toBe(true);
+    expect(existsSync(join(logDirectory, "main.1.log"))).toBe(false);
+    expect(fsMock.statSync).not.toHaveBeenCalled();
+    expect(readLogRecords(logDirectory)).toHaveLength(1);
   });
 
   it("skips rotation without throwing if the active log is deleted before rename", () => {
@@ -140,7 +195,7 @@ describe("StructuredLogger", () => {
     };
     const sink = new StructuredLogger({
       logDirectory,
-      fs: rotationFs,
+      rotationFs,
       maxFileBytes: 400,
       consoleWriter: () => undefined,
       monotonicNow: () => 1,

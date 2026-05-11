@@ -15,7 +15,7 @@
 
 import { type BrokerUrl, isBrokerUrl } from "@wuphf/protocol";
 
-import { isSafePayloadKey, type LogPayloadValue } from "./logger.ts";
+import { isSafePayloadKey, LOG_NAME_PATTERN, type LogPayloadValue } from "./logger.ts";
 
 export type BrokerSubLogLevel = "info" | "warn" | "error";
 
@@ -93,12 +93,6 @@ export function readBrokerLogMessage(message: unknown): BrokerLogPayload | null 
   }
   return { broker_log: record.broker_log, event: record.event, payload };
 }
-
-// Mirror logger.ts's LOG_NAME_PATTERN. The forwarder rejects subprocess
-// event names that wouldn't pass the assertLogName check downstream —
-// without this pre-check, every broker_* log would attempt and silently
-// fail at the logger boundary.
-const LOG_NAME_PATTERN = /^[a-z0-9_.:-]+$/;
 
 export function sanitizeBrokerEventName(event: string): string | null {
   return LOG_NAME_PATTERN.test(event) ? event : null;
