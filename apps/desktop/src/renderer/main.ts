@@ -150,36 +150,61 @@ interface ParsedBootstrap {
   readonly brokerUrl: string;
 }
 
-// Mirrors @wuphf/protocol#apiBootstrapFromJson + #asApiToken +
-// #assertApiBootstrapBrokerUrl without pulling the full protocol package
-// into the renderer bundle (it depends on `node:crypto` and is sized for
-// the broker subprocess, not the browser-context renderer). The regex
-// and host rules MUST stay byte-for-byte aligned with packages/protocol/
-// src/ipc.ts — drift surfaces as a renderer that accepts bootstrap JSON
-// the broker would never emit (e.g. `broker_url: "http://127.0.0.1:0"`,
-// non-base64url token).
+// Hand-mirrors the acceptance rules from @wuphf/protocol#apiBootstrapFromJson,
+// #asApiToken, and #assertApiBootstrapBrokerUrl without importing the protocol
+// package into the renderer bundle; protocol depends on `node:crypto` and is
+// sized for the broker subprocess, not the browser-context renderer.
 //
 // API_TOKEN_RE: copy of `API_TOKEN_RE` in protocol. Base64url alphabet
 // only — bounded length, no `+`/`/`/`.`/`~` (those don't round-trip through
 // `?token=` query strings unchanged).
 const API_TOKEN_RE = /^[A-Za-z0-9_-]{16,512}$/;
 
-function parseBootstrap(value: unknown): ParsedBootstrap {
+function hasOwn(record: Readonly<Record<string, unknown>>, key: string): boolean {
+  return Object.hasOwn(record, key);
+}
+
+// Copy of protocol's requiredStringField descriptor guard. Keep this inline:
+// importing @wuphf/protocol would pull Node-only crypto dependencies into the
+// sandboxed renderer.
+function requiredBootstrapStringField(
+  record: Readonly<Record<string, unknown>>,
+  key: "token" | "broker_url",
+  path: string,
+): string {
+  if (!hasOwn(record, key)) {
+    throw new Error(`${path}: is required`);
+  }
+  const descriptor = Object.getOwnPropertyDescriptor(record, key);
+  if (descriptor === undefined || !("value" in descriptor)) {
+    throw new Error(`${path}: must be a data property`);
+  }
+  if (typeof descriptor.value !== "string") {
+    throw new Error(`${path}: must be a string`);
+  }
+  return descriptor.value;
+}
+
+export function parseBootstrap(value: unknown): ParsedBootstrap {
   if (typeof value !== "object" || value === null) {
     throw new Error("api-token response is not an object");
   }
-  const record = value as { readonly token?: unknown; readonly broker_url?: unknown };
+  const record = value as Readonly<Record<string, unknown>>;
   for (const key of Object.keys(record)) {
     if (key !== "token" && key !== "broker_url") {
       throw new Error(`api-token response has unknown key: ${key}`);
     }
   }
-  const token = record.token;
-  const brokerUrl = record.broker_url;
-  if (typeof token !== "string" || !API_TOKEN_RE.test(token)) {
+  const token = requiredBootstrapStringField(record, "token", "api-token response: token");
+  const brokerUrl = requiredBootstrapStringField(
+    record,
+    "broker_url",
+    "api-token response: broker_url",
+  );
+  if (!API_TOKEN_RE.test(token)) {
     throw new Error("api-token response: token does not match the API token shape");
   }
-  if (typeof brokerUrl !== "string" || brokerUrl.length === 0) {
+  if (brokerUrl.length === 0) {
     throw new Error("api-token response: broker_url must be a non-empty string");
   }
   let parsed: URL;

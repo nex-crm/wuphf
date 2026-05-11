@@ -1,4 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import type { WuphfDesktopApi } from "../src/shared/api-contract.ts";
 
 interface MockBrowserWindowInstance {
   readonly options: unknown;
@@ -62,6 +64,61 @@ vi.mock("electron", () => ({
     openExternal: electronMock.openExternal,
   },
 }));
+
+const VALID_BOOTSTRAP_TOKEN = "A".repeat(16);
+const VALID_BOOTSTRAP_URL = "http://127.0.0.1:54321";
+
+describe("parseBootstrap", () => {
+  afterEach(() => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("rejects accessor and inherited bootstrap properties", async () => {
+    const { parseBootstrap } = await importRendererMain();
+
+    expect(() =>
+      parseBootstrap({
+        get token() {
+          return "anything";
+        },
+        broker_url: VALID_BOOTSTRAP_URL,
+      }),
+    ).toThrow("api-token response: token: must be a data property");
+
+    expect(() =>
+      parseBootstrap({
+        token: VALID_BOOTSTRAP_TOKEN,
+        get broker_url() {
+          return VALID_BOOTSTRAP_URL;
+        },
+      }),
+    ).toThrow("api-token response: broker_url: must be a data property");
+
+    const proto = { token: "x", broker_url: "y" };
+    const obj: object = Object.create(proto) as object;
+
+    expect(() => parseBootstrap(obj)).toThrow("api-token response: token: is required");
+  });
+
+  it("rejects descriptor traps that make bootstrap values unreachable", async () => {
+    const { parseBootstrap } = await importRendererMain();
+    const throwingRecord = new Proxy(
+      { token: VALID_BOOTSTRAP_TOKEN, broker_url: VALID_BOOTSTRAP_URL },
+      {
+        getOwnPropertyDescriptor(target, property) {
+          if (property === "token") {
+            throw new Error("token descriptor unreachable");
+          }
+          return Reflect.getOwnPropertyDescriptor(target, property);
+        },
+      },
+    );
+
+    expect(() => parseBootstrap(throwingRecord)).toThrow("token descriptor unreachable");
+  });
+});
 
 describe("createSecureWindow", () => {
   beforeEach(() => {
@@ -433,4 +490,67 @@ function getWillFrameNavigateHandler(
   // signature mismatch — the runtime callable stored by vi.fn is the
   // exact handler that window.ts registered.
   return call[1] as unknown as WillFrameNavigateHandler;
+}
+
+interface RendererElementStub {
+  className: string;
+  textContent: string;
+  type: string;
+  readonly append: ReturnType<typeof vi.fn<(...children: RendererElementStub[]) => void>>;
+  readonly addEventListener: ReturnType<typeof vi.fn<(event: string, handler: () => void) => void>>;
+}
+
+interface RendererDocumentStub {
+  title: string;
+  readonly querySelector: ReturnType<
+    typeof vi.fn<(selector: string) => RendererElementStub | null>
+  >;
+  readonly createElement: ReturnType<typeof vi.fn<(tagName: string) => RendererElementStub>>;
+}
+
+async function importRendererMain(): Promise<typeof import("../src/renderer/main.ts")> {
+  vi.resetModules();
+  vi.useFakeTimers();
+  const root = createRendererElementStub();
+  const documentStub: RendererDocumentStub = {
+    title: "",
+    querySelector: vi.fn<(selector: string) => RendererElementStub | null>(() => root),
+    createElement: vi.fn<(tagName: string) => RendererElementStub>(() =>
+      createRendererElementStub(),
+    ),
+  };
+  const api: WuphfDesktopApi = {
+    openExternal: vi.fn<WuphfDesktopApi["openExternal"]>(() => Promise.resolve({ ok: true })),
+    showItemInFolder: vi.fn<WuphfDesktopApi["showItemInFolder"]>(() =>
+      Promise.resolve({ ok: true }),
+    ),
+    getAppVersion: vi.fn<WuphfDesktopApi["getAppVersion"]>(() =>
+      Promise.resolve({ version: "test" }),
+    ),
+    getPlatform: vi.fn<WuphfDesktopApi["getPlatform"]>(() =>
+      Promise.resolve({ platform: "linux", arch: "x64" }),
+    ),
+    getBrokerStatus: vi.fn<WuphfDesktopApi["getBrokerStatus"]>(() =>
+      Promise.resolve({ status: "dead", pid: null, restartCount: 0, brokerUrl: null }),
+    ),
+  };
+
+  vi.stubGlobal("document", documentStub);
+  vi.stubGlobal("window", {
+    wuphf: api,
+    location: { origin: "http://localhost:5173" },
+  });
+  vi.stubGlobal("fetch", vi.fn());
+
+  return await import("../src/renderer/main.ts");
+}
+
+function createRendererElementStub(): RendererElementStub {
+  return {
+    className: "",
+    textContent: "",
+    type: "",
+    append: vi.fn<(...children: RendererElementStub[]) => void>(),
+    addEventListener: vi.fn<(event: string, handler: () => void) => void>(),
+  };
 }
