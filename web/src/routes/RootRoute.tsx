@@ -18,6 +18,7 @@ import { get, initApi } from "../api/client";
 import { TelegramConnectHost } from "../components/integrations/TelegramConnectModal";
 import { Shell } from "../components/layout/Shell";
 import { UpgradeBanner } from "../components/layout/UpgradeBanner";
+import { ChannelParticipants } from "../components/messages/ChannelParticipants";
 import { Composer } from "../components/messages/Composer";
 import { DMView } from "../components/messages/DMView";
 import { InterviewBar } from "../components/messages/InterviewBar";
@@ -36,7 +37,11 @@ import { rootRoute, router } from "../lib/router";
 import { getTheme } from "../lib/themes";
 import { useAppStore } from "../stores/app";
 import { type AppPanelId, isAppPanelId } from "./routeRegistry";
-import { type CurrentRoute, useCurrentRoute } from "./useCurrentRoute";
+import {
+  type CurrentRoute,
+  useChannelSlug,
+  useCurrentRoute,
+} from "./useCurrentRoute";
 
 // Sentinel routeId for the root match — TanStack Router exposes this as
 // `__root__`. Imported via `rootRoute.id` so a future TanStack rename
@@ -286,13 +291,18 @@ const APP_PANELS = {
 } satisfies Record<AppPanelId, ComponentType>;
 
 function ConversationView() {
+  const channelSlug = useChannelSlug() ?? "general";
+
   return (
-    <>
-      <MessageFeed />
-      <TypingIndicator />
-      <InterviewBar />
-      <Composer />
-    </>
+    <div className="conversation-shell">
+      <div className="conversation-chat">
+        <MessageFeed />
+        <TypingIndicator />
+        <InterviewBar />
+        <Composer />
+      </div>
+      <ChannelParticipants channelSlug={channelSlug} />
+    </div>
   );
 }
 

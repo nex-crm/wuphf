@@ -6,6 +6,7 @@ All notable changes to WUPHF will be documented in this file.
 
 ### Added
 
+- **Channel participant rail for conversations.** Channel views now include a Slack-like participants list that shows which agents are part of the current channel, opens an agent panel from each row, filters out human seats, and keeps lead agents pinned. The rail supports adding available office agents, disabling or enabling specific channel participants, removing agents from only the current channel, and undoing a remove from the toast within five seconds.
 - **Skills app reskinned as pixel-art trading cards.** Every entry in the Skills tab is now a TCG-style card with a procedurally-generated 144px pixel-art portrait (using the existing `drawPixelAvatar` system), status-driven type palette (active = electric, proposed = psychic with "NEEDS REVIEW" stamp, disabled = dark, archived = steel), and a 3D card flip (700ms, ease-out-expo, respects `prefers-reduced-motion`).
   - **Front face:** Title + creator byline, procedural portrait, status/owner stat strip, promoted "Triggers on" row, and scrollable flavor-text description.
   - **Back face:** Full skill metadata (`<dl>` with status, owners, created by, created/updated dates, source) plus "View full SKILL.md →" CTA into the SidePanel preview.
