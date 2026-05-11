@@ -370,6 +370,35 @@ describe("receipts API", () => {
       const res = await fetch(`${broker.url}/api/receipts/${RECEIPT_ID_A}`);
       expect(res.status).toBe(401);
     });
+
+    it("rejects non-loopback Host header (DNS-rebinding guard)", async () => {
+      // Symmetry with the POST and thread-list loopback tests: the GET-by-id
+      // route inherits the same loopback gate.
+      broker = await createBroker({ port: 0, token: FIXED_TOKEN });
+      const u = new URL(broker.url);
+      const status = await new Promise<number>((resolveFn, rejectFn) => {
+        const req = httpRequest(
+          {
+            host: u.hostname,
+            port: Number(u.port),
+            path: `/api/receipts/${RECEIPT_ID_A}`,
+            method: "GET",
+            headers: {
+              Authorization: `Bearer ${FIXED_TOKEN}`,
+              Host: "evil.example.com",
+            },
+          },
+          (res) => {
+            resolveFn(res.statusCode ?? 0);
+            res.resume();
+          },
+        );
+        req.setTimeout(2_000, () => req.destroy(new Error("loopback-gate timeout")));
+        req.on("error", rejectFn);
+        req.end();
+      });
+      expect(status).toBe(403);
+    });
   });
 
   describe("GET /api/threads/:tid/receipts", () => {
