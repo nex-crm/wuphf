@@ -4,8 +4,20 @@
 // import `createBroker` and ignore the rest of the module graph.
 
 export { createBroker } from "./listener.ts";
-export type { ReceiptStore } from "./receipt-store.ts";
-export { InMemoryReceiptStore } from "./receipt-store.ts";
+export type {
+  InMemoryReceiptStoreConfig,
+  ListFilter,
+  ListPage,
+  ReceiptStore,
+} from "./receipt-store.ts";
+export {
+  DEFAULT_LIST_LIMIT,
+  InMemoryReceiptStore,
+  InvalidListCursorError,
+  InvalidListLimitError,
+  MAX_LIST_LIMIT,
+  ReceiptStoreFullError,
+} from "./receipt-store.ts";
 export type { SqliteReceiptStoreConfig } from "./sqlite-receipt-store.ts";
 export { SqliteReceiptStore } from "./sqlite-receipt-store.ts";
 export { generateApiToken } from "./token.ts";

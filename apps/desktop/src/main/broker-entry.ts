@@ -8,9 +8,16 @@
 // `/index.html`, and `/assets/*` return 404 — the dev server owns those
 // surfaces in dev.
 
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
+import { dirname } from "node:path";
 
-import { type BrokerHandle, type BrokerLogger, createBroker } from "@wuphf/broker";
+import {
+  type BrokerHandle,
+  type BrokerLogger,
+  createBroker,
+  type ReceiptStore,
+  SqliteReceiptStore,
+} from "@wuphf/broker";
 
 const parentPort = process.parentPort;
 if (!parentPort) {
@@ -25,6 +32,7 @@ const ALIVE_INTERVAL_MS = 1_000;
 
 const RENDERER_DIST_ENV = "WUPHF_RENDERER_DIST";
 const DEV_RENDERER_ORIGIN_ENV = "WUPHF_DEV_RENDERER_ORIGIN";
+const RECEIPT_STORE_PATH_ENV = "WUPHF_RECEIPT_STORE_PATH";
 
 let aliveInterval: NodeJS.Timeout | null = null;
 let broker: BrokerHandle | null = null;
@@ -89,11 +97,27 @@ async function main(): Promise<void> {
   const devOrigin = process.env[DEV_RENDERER_ORIGIN_ENV];
   const trustedOrigins =
     typeof devOrigin === "string" && devOrigin.length > 0 ? [devOrigin] : undefined;
+
+  // Branch 6: open the durable, SQLite event-log-backed ReceiptStore at
+  // the path main/index.ts plumbed through. If the env var is absent we
+  // fall through to createBroker's default (an in-memory store) — useful
+  // for tests and the headless smoke path.
+  const receiptStorePath = process.env[RECEIPT_STORE_PATH_ENV];
+  let receiptStore: ReceiptStore | undefined;
+  if (typeof receiptStorePath === "string" && receiptStorePath.length > 0) {
+    // Ensure the parent directory exists. `userData` is created by
+    // Electron on first launch; this guards against the host having
+    // deleted it (rare but recoverable).
+    mkdirSync(dirname(receiptStorePath), { recursive: true });
+    receiptStore = SqliteReceiptStore.open({ path: receiptStorePath });
+  }
+
   broker = await createBroker({
     port: 0,
     renderer,
     logger,
     ...(trustedOrigins !== undefined ? { trustedOrigins } : {}),
+    ...(receiptStore !== undefined ? { receiptStore } : {}),
   });
   sendReady(broker.url);
   sendAlive();

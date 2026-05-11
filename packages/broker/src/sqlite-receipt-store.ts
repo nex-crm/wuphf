@@ -15,6 +15,7 @@ import {
   type ListFilter,
   type ListPage,
   type ReceiptStore,
+  ReceiptStoreFullError,
   resolveListLimit,
 } from "./receipt-store.ts";
 
@@ -110,6 +111,15 @@ export class SqliteReceiptStore implements ReceiptStore {
       if (isReceiptIdConstraintError(err)) {
         return { existed: true };
       }
+      // SQLITE_FULL = filesystem out of space (or page-cache limit hit).
+      // Surface as `ReceiptStoreFullError` so the HTTP route reuses the
+      // same 507 path the in-memory store uses for its byte-count cap
+      // (security triangulation T12). Without this mapping the route
+      // would log a 500 and the operator would have to read the stack
+      // trace to learn that a disk-full condition was the cause.
+      if (isSqliteFullError(err)) {
+        throw new ReceiptStoreFullError("SqliteReceiptStore: database full (SQLITE_FULL)");
+      }
       throw err;
     }
   }
@@ -170,4 +180,8 @@ function isReceiptIdConstraintError(err: unknown): boolean {
     (err.code === "SQLITE_CONSTRAINT_PRIMARYKEY" || err.code === "SQLITE_CONSTRAINT_UNIQUE") &&
     err.message.includes("receipts_projection.receipt_id")
   );
+}
+
+function isSqliteFullError(err: unknown): boolean {
+  return err instanceof BetterSqlite3.SqliteError && err.code === "SQLITE_FULL";
 }

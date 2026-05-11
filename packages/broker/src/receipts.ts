@@ -28,6 +28,7 @@ import {
 import {
   InvalidListCursorError,
   InvalidListLimitError,
+  MAX_LIST_LIMIT,
   type ReceiptStore,
   ReceiptStoreFullError,
 } from "./receipt-store.ts";
@@ -236,16 +237,29 @@ export async function handleThreadReceiptsList(
     return;
   }
 
-  const cursor = url.searchParams.has("cursor")
-    ? (url.searchParams.get("cursor") ?? "")
-    : undefined;
+  // The route's default `limit` (when the caller didn't supply one) is
+  // `MAX_LIST_LIMIT`, NOT the store's `DEFAULT_LIST_LIMIT`. Branch 5
+  // returned up to 1000 receipts in a single call without a continuation
+  // token; clients that ignore `Link` still see the same first-page count
+  // they did before, so the pagination roll-out doesn't silently lose
+  // receipts 101-1000 (api/architecture triangulation T2).
+  const effectiveLimit = limitParam !== undefined ? limitParam.value : MAX_LIST_LIMIT;
+
+  // Empty `?cursor=` is normalized to "no cursor" (architecture
+  // triangulation T9). The store throws `InvalidListCursorError` for `""`
+  // which is the right semantic for a programmatic caller, but at the
+  // HTTP boundary `?cursor=` (a present-but-blank query value) is
+  // ergonomically indistinguishable from "no cursor" and clients should
+  // not have to omit the param entirely just to start at the beginning.
+  const cursorRaw = url.searchParams.get("cursor");
+  const cursor = cursorRaw !== null && cursorRaw.length > 0 ? cursorRaw : undefined;
 
   let page: Awaited<ReturnType<ReceiptStore["list"]>>;
   try {
     page = await deps.receiptStore.list({
       threadId,
       ...(cursor !== undefined ? { cursor } : {}),
-      ...(limitParam !== undefined ? { limit: limitParam.value } : {}),
+      limit: effectiveLimit,
     });
   } catch (err) {
     if (err instanceof InvalidListCursorError) {

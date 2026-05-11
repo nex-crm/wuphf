@@ -37,6 +37,9 @@ const BROKER_ENV_ALLOWLIST = [
   "TZ",
   "WUPHF_RENDERER_DIST",
   "WUPHF_DEV_RENDERER_ORIGIN",
+  // Branch 6: when set, the utility process opens `SqliteReceiptStore`
+  // at this path; absent → falls back to the in-memory store.
+  "WUPHF_RECEIPT_STORE_PATH",
 ] as const;
 const DEFAULT_STOP_GRACE_MS = 5_000;
 const DEFAULT_FORCE_STOP_GRACE_MS = 1_000;

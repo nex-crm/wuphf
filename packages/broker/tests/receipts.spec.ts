@@ -489,7 +489,13 @@ describe("receipts API", () => {
       expect(last.headers.get("link")).toBeNull();
     });
 
-    it("uses the default list limit when no limit query is present", async () => {
+    it("route default returns up to MAX_LIST_LIMIT receipts when no limit query is present", async () => {
+      // Triangulation T2: the route's default `limit` is `MAX_LIST_LIMIT`
+      // (1000), NOT the store's `DEFAULT_LIST_LIMIT` (100). 150 receipts
+      // fit in a single page so no `Link` header is emitted — this
+      // matches branch-5 behavior where the route returned up to 1000
+      // receipts in one call. Without this, branch-5 callers that ignore
+      // `Link` silently lose receipts 101-1000.
       const store = new InMemoryReceiptStore({ maxReceipts: 200 });
       await seedThreadReceipts(store, 150);
       broker = await createBroker({ port: 0, token: FIXED_TOKEN, receiptStore: store });
@@ -500,9 +506,60 @@ describe("receipts API", () => {
 
       expect(res.status).toBe(200);
       const parsed = JSON.parse(await res.text()) as Array<{ id: string }>;
-      expect(parsed.length).toBe(100);
+      expect(parsed.length).toBe(150);
+      expect(res.headers.get("link")).toBeNull();
+    });
+
+    it("route default caps at MAX_LIST_LIMIT (1000) and emits Link when more remain", async () => {
+      // Push past 1000 receipts to prove the default ceiling holds. We
+      // need 1001 valid ULIDs; generate them deterministically via the
+      // Crockford base32 alphabet (ULID-compatible) so each id is
+      // structurally valid for asReceiptId.
+      const store = new InMemoryReceiptStore({ maxReceipts: 2000 });
+      const template = minimalReceiptV2(RECEIPT_ID_A, THREAD_ID_A);
+      const ALPH = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+      for (let i = 0; i < 1001; i++) {
+        let suffix = "";
+        for (let k = 3; k >= 0; k--) {
+          suffix += ALPH[(i >> (k * 5)) & 31];
+        }
+        const id = `01ARZ3NDEKTSV4RRFFQ69G${suffix}`;
+        await store.put({ ...template, id: asReceiptId(id) });
+      }
+      broker = await createBroker({ port: 0, token: FIXED_TOKEN, receiptStore: store });
+
+      const res = await fetch(`${broker.url}/api/threads/${THREAD_ID_A}/receipts`, {
+        headers: { Authorization: `Bearer ${FIXED_TOKEN}` },
+      });
+
+      expect(res.status).toBe(200);
+      const parsed = JSON.parse(await res.text()) as Array<{ id: string }>;
+      expect(parsed.length).toBe(1000);
+      // Link header present — clients with >1000 receipts must paginate.
+      expect(res.headers.get("link")).not.toBeNull();
+      // Default-limit page omits `limit=` from the Link URL so the next
+      // call inherits the same default.
       const linkPath = nextLinkPath(res.headers);
       expect(linkPath).not.toContain("limit=");
+    });
+
+    it("empty `?cursor=` is treated as no cursor (T9)", async () => {
+      // Architecture triangulation T9: an empty `?cursor=` query value is
+      // ergonomically indistinguishable from "no cursor" at the HTTP
+      // boundary; clients should not have to omit the param entirely
+      // just to start at the beginning. The store still rejects `""`
+      // for direct programmatic callers.
+      const store = new InMemoryReceiptStore();
+      await seedThreadReceipts(store, 3);
+      broker = await createBroker({ port: 0, token: FIXED_TOKEN, receiptStore: store });
+
+      const res = await fetch(`${broker.url}/api/threads/${THREAD_ID_A}/receipts?cursor=`, {
+        headers: { Authorization: `Bearer ${FIXED_TOKEN}` },
+      });
+
+      expect(res.status).toBe(200);
+      const parsed = JSON.parse(await res.text()) as unknown[];
+      expect(parsed).toHaveLength(3);
     });
 
     it("returns invalid_limit for a zero limit query", async () => {

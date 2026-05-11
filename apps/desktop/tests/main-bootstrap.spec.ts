@@ -96,6 +96,11 @@ const electronMock = vi.hoisted(() => {
       on: vi.fn<(event: string, handler: (...args: readonly unknown[]) => void) => void>(),
       quit: vi.fn<() => void>(),
       exit: vi.fn<(code: number) => void>(),
+      // Branch 6: `main/index.ts` calls `app.getPath("userData")` inside
+      // `whenReady` to plumb the SQLite event-log path through to the
+      // broker utility process. Tests don't exercise the durable store;
+      // a fake path is sufficient because broker-entry.ts is mocked.
+      getPath: vi.fn<(name: string) => string>(() => "/tmp/wuphf-test-userData"),
     },
     BrowserWindow,
     browserWindowConstructorSpy,
