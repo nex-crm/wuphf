@@ -101,7 +101,7 @@ jobs:
           # lives inside each platform build job (post-build, pre-sign);
           # this self-test catches regressions in the check's logic without
           # waiting for a 5-minute platform build to fail.
-          node apps/installer-stub/scripts/check-packaged-runtime-deps.test.js
+          node apps/installer-stub/scripts/check-packaged-runtime-deps.test.mjs
 
   build-mac:
     needs:
