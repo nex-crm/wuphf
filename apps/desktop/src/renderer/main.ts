@@ -112,6 +112,8 @@ async function runBrokerBootstrapProbe(): Promise<void> {
   } catch (error) {
     state.bootstrap = null;
     state.error = error instanceof Error ? error.message : "Broker probe failed";
+  } finally {
+    probeInFlight = false;
   }
   render();
 }
@@ -257,7 +259,7 @@ function isLoopbackHostname(hostname: string): boolean {
   return false;
 }
 
-async function refreshBrokerStatus(): Promise<void> {
+export async function refreshBrokerStatus(): Promise<void> {
   try {
     state.broker = await api.getBrokerStatus();
     state.error = null;
