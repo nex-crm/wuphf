@@ -28,6 +28,32 @@ Shared constants in `ipc-shared.ts`: `APPROVAL_CLAIMS_KEYS` line 14 and `SIGNED_
 10. DNS-rebinding defense MUST compose both gates: `isAllowedLoopbackHost(Host)` and `isLoopbackRemoteAddress(peerIp)`. Host validation accepts only `127.0.0.1`, `localhost` case-insensitively, exact unbracketed `::1`, bracketed `[::1]`, and those accepted hostname forms with valid numeric ports where documented. It rejects rebound suffixes, expanded IPv6, bracketed non-IPv6 hosts, malformed ports, spaces, comma lists, and trailing junk.
 11. `isLoopbackRemoteAddress` MUST receive a peer IP with no port. It accepts `::1`, IPv4-mapped `::ffff:127.0.0.0/8`, and `127.0.0.0/8`; it rejects wildcard, private non-loopback, link-local, empty, malformed, and port-suffixed inputs. It does not parse `Forwarded` / `X-Forwarded-For`, validate Origin/CORS, resolve DNS, or prove the listener bind address.
 
+### 3.1 BrokerUrl Bootstrap Matrix
+
+`ApiBootstrapWire.broker_url` is the `BrokerUrl` brand on the wire. It MUST be a bare canonical loopback HTTP origin: `http://<loopback>:<explicit-non-default-port>`. The accepted string is exactly `raw === new URL(raw).origin`, so it has no trailing slash, userinfo, path, query, or fragment. HTTP default port `80` is rejected because the URL parser strips it and the input no longer round-trips as an explicit port.
+
+The loopback host allowlist is `127.0.0.1`, `localhost`, and IPv6 loopback `::1`. In a `BrokerUrl` string, IPv6 loopback must use URL brackets as `[::1]`, and `localhost` must already be canonical lowercase because raw/origin equality rejects case-normalized spellings.
+
+| Form | Example | Accepted | Reason |
+|---|---|---|---|
+| Bare IPv4 loopback origin | `http://127.0.0.1:54321` | Yes | Canonical HTTP origin with explicit non-default port. |
+| Bare localhost origin | `http://localhost:1024` | Yes | Canonical lowercase loopback host with explicit non-default port. |
+| Bare IPv6 loopback origin | `http://[::1]:1` | Yes | Canonical bracketed IPv6 loopback origin. |
+| Trailing slash | `http://127.0.0.1:54321/` | No | `BrokerUrl` is the bare origin; callers append paths themselves. |
+| Path | `http://127.0.0.1:54321/foo` | No | Non-origin path data is not part of the brand. |
+| Encoded dot-segment | `http://127.0.0.1:54321/%2e%2e` | No | Raw/origin equality rejects parser-normalized path bypasses. |
+| Userinfo | `http://u:p@127.0.0.1:54321` | No | Credentials must never ride in the bootstrap origin. |
+| Query | `http://127.0.0.1:54321?x=1` | No | Query data is not part of the bare origin. |
+| Fragment | `http://127.0.0.1:54321#frag` | No | Fragment data is not part of the bare origin. |
+| Default HTTP port | `http://127.0.0.1:80` | No | `new URL` canonicalizes HTTP port 80 away, so the port is not explicit. |
+| Missing port | `http://127.0.0.1` | No | Brokers must emit an explicit bound port. |
+| Non-HTTP scheme | `https://127.0.0.1:54321` | No | Only loopback `http:` is valid for this local broker channel. |
+| File scheme | `file:///etc/passwd` | No | File URLs are not broker origins. |
+
+### 3.2 Upgrade Path
+
+The v0 bootstrap wire object is intentionally closed: only `token` and `broker_url` are valid keys. `apiBootstrapFromJson` MUST reject unknown keys instead of silently accepting additive fields, which preserves the wire-shape invariant against malicious injection. Future fields such as `expires_at`, `capabilities`, or alternate broker URLs require either a new endpoint or explicit version negotiation through a parallel discovery handshake.
+
 ## 4. Diagrams
 
 ### 4.1 Approval Submission - Sequence
@@ -124,21 +150,21 @@ Callers provide parsed runtime objects, not raw bytes. Approval claim dates must
 
 ## 7. Audit findings (current code vs this spec)
 
+Resolved bootstrap note: `apiBootstrapFromJson` and `apiBootstrapToJson` both enforce the `BrokerUrl` matrix above, including strict unknown-key rejection for v0 bootstrap objects.
+
 | # | Spec section | File:line | Discrepancy | Severity | Fix needed |
 |---|---|---|---|---|---|
 | 1 | Sec 3.1 | `web/src/api/client.ts:18` | A caller still hand-rolls `{ broker_url } -> brokerUrl` instead of using `apiBootstrapFromJson`, so the codec is not the only translation site repo-wide. | MEDIUM | Route `/api-token` parsing through the protocol codec or document this as an intentional non-package boundary. |
-| 2 | Sec 3.1, Sec 3.10 | `packages/protocol/src/ipc.ts:184` | `apiBootstrapFromJson` validates `broker_url` only as a string even though `ApiBootstrap.brokerUrl` is documented as a loopback broker URL. | MEDIUM | Parse the URL and require an allowed loopback host plus a usable broker port, or relax the documented contract. |
-| 3 | Sec 3.9 | `packages/protocol/src/ipc.ts:563`, `packages/protocol/src/ipc.ts:598` | `StreamEventKind` and `WsFrame` are closed wire unions but have no exported runtime validators/codecs. | MEDIUM | Add reader/writer validators for SSE and WebSocket envelopes, or explicitly mark them type-only internal surfaces. |
+| 2 | Sec 3.9 | `packages/protocol/src/ipc.ts:563`, `packages/protocol/src/ipc.ts:598` | `StreamEventKind` and `WsFrame` are closed wire unions but have no exported runtime validators/codecs. | MEDIUM | Add reader/writer validators for SSE and WebSocket envelopes, or explicitly mark them type-only internal surfaces. |
 
 ## 8. Test coverage gaps (against this spec, not against current code)
 
 | # | Spec section | What's untested | Why it matters | Suggested test |
 |---|---|---|---|---|
-| 1 | Sec 3.1 | `apiBootstrapFromJson` rejecting non-loopback or malformed `broker_url` | Prevents token bootstrap from pointing callers at attacker-controlled origins if the codec owns URL validation. | Add `broker_url: "https://evil.test"` and malformed URL cases. |
-| 2 | Sec 3.5 | Top-level unknown request keys, missing request fields, non-object `approvalToken`, invalid `receiptId` | Confirms every early failure exit in the public validator. | Table-test the first half of the pipeline. |
-| 3 | Sec 3.5-3.6 | Invalid signer identity, role, claims receipt ID, `writeId`, hash, risk class, invalid dates, non-base64 signature | Current tests sample key paths but not every claim validator. | One table with field mutation and expected reason regex. |
-| 4 | Sec 3.6 | High/critical risk without non-empty WebAuthn assertion | This is a policy-relevant shape check. | Test high and critical reject empty/missing assertion and low accepts missing assertion. |
-| 5 | Sec 3.6 | Lifetime exactly at `MAX_APPROVAL_TOKEN_LIFETIME_MS` through `validateApprovalSubmitRequest` | Budget tests cover the helper; IPC should prove it wires the helper correctly. | Build an approval request at the exact cap and expect `{ ok: true }`. |
-| 6 | Sec 3.8 | `executed` and `accepted: false` response variants | Only `queued` is compile-smoked today. | Add type-level examples or runtime fixtures for all union arms. |
-| 7 | Sec 3.9 | SSE and WebSocket unknown `kind` / `t` rejection | Wire unions need runtime rejection once validators exist. | Add validator tests when `streamEventFromJson` / `wsFrameFromJson` are introduced. |
-| 8 | Sec 3.10-3.11 | Loopback edge forms: trailing dot, uppercase IPv4-mapped IPv6, port-suffixed remote, decimal/octal IPv4 lookalikes | These are common DNS-rebinding bypass probes. | Extend the loopback table with expected fail-closed cases. |
+| 1 | Sec 3.5 | Top-level unknown request keys, missing request fields, non-object `approvalToken`, invalid `ReceiptId` | Confirms every early failure exit in the public validator. | Table-test the first half of the pipeline. |
+| 2 | Sec 3.5-3.6 | Invalid signer identity, role, claims receipt ID, `writeId`, hash, risk class, invalid dates, non-base64 signature | Current tests sample key paths but not every claim validator. | One table with field mutation and expected reason regex. |
+| 3 | Sec 3.6 | High/critical risk without non-empty WebAuthn assertion | This is a policy-relevant shape check. | Test high and critical reject empty/missing assertion and low accepts missing assertion. |
+| 4 | Sec 3.6 | Lifetime exactly at `MAX_APPROVAL_TOKEN_LIFETIME_MS` through `validateApprovalSubmitRequest` | Budget tests cover the helper; IPC should prove it wires the helper correctly. | Build an approval request at the exact cap and expect `{ ok: true }`. |
+| 5 | Sec 3.8 | `executed` and `accepted: false` response variants | Only `queued` is compile-smoked today. | Add type-level examples or runtime fixtures for all union arms. |
+| 6 | Sec 3.9 | SSE and WebSocket unknown `kind` / `t` rejection | Wire unions need runtime rejection once validators exist. | Add validator tests when `streamEventFromJson` / `wsFrameFromJson` are introduced. |
+| 7 | Sec 3.10-3.11 | Loopback edge forms: trailing dot, uppercase IPv4-mapped IPv6, port-suffixed remote, decimal/octal IPv4 lookalikes | These are common DNS-rebinding bypass probes. | Extend the loopback table with expected fail-closed cases. |
