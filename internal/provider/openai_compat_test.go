@@ -877,6 +877,7 @@ func TestOpenAICompatStreamFn_HermesOmitsSessionHeadersWithoutAuth(t *testing.T)
 
 	t.Setenv("WUPHF_HERMES_AGENT_BASE_URL", srv.URL+"/v1")
 	t.Setenv("WUPHF_HERMES_AGENT_API_KEY", "")
+	t.Setenv("API_SERVER_KEY", "")
 
 	factory := NewOpenAICompatStreamFn(KindHermesAgent, "http://unused", "hermes-agent")
 	for range factory("agent-one")([]agent.Message{{Role: "user", Content: "ping"}}, nil) {
