@@ -1,13 +1,17 @@
 // HTTP listener that owns the broker's loopback surface.
 //
-// Routes (branch-4 scope):
-//   GET /api-token       — bootstrap. Loopback-guarded. NO bearer required.
-//   GET /api/health      — bearer required. Returns {"ok":true}.
-//   GET /api/events      — bearer required. SSE stream with initial `ready`.
-//   GET /                — static (renderer bundle) or 404 if disabled.
-//   GET /index.html      — static or 404.
-//   GET /assets/*        — static or 404.
-//   *  /*                — 404.
+// Routes (branch-4 + branch-5 scope):
+//   GET  /api-token                       — bootstrap. Loopback-guarded. NO bearer required.
+//   GET  /api/health                      — bearer required. Returns {"ok":true}.
+//   GET  /api/events                      — bearer required. SSE stream with initial `ready`.
+//   POST /api/receipts                    — bearer required. Body: receipt JSON.
+//                                           201 on insert, 409 on id collision.
+//   GET  /api/receipts/:id                — bearer required. 200 on hit, 404 on miss.
+//   GET  /api/threads/:tid/receipts       — bearer required. List receipts in a thread.
+//   GET  /                                — static (renderer bundle) or 404 if disabled.
+//   GET  /index.html                      — static or 404.
+//   GET  /assets/*                        — static or 404.
+//   *    /*                               — 404.
 //
 // Every HTTP request goes through `checkLoopbackRequest` first (DNS-rebinding
 // guard). Bearer auth is enforced per-route — `/api-token` is the bootstrap
@@ -29,6 +33,8 @@ import { WebSocketServer } from "ws";
 
 import { extractBearerFromHeader, tokenMatches } from "./auth.ts";
 import { checkLoopbackRequest } from "./dns-rebinding-guard.ts";
+import { InMemoryReceiptStore, type ReceiptStore } from "./receipt-store.ts";
+import { handleReceiptCreate, handleReceiptGet, handleThreadReceiptsList } from "./receipts.ts";
 import { createStaticHandler, type StaticHandler } from "./serve-static.ts";
 import { startSseSession } from "./sse.ts";
 import { attachTerminalUpgrade } from "./terminal-ws.ts";
@@ -42,8 +48,12 @@ export async function createBroker(config: BrokerConfig = {}): Promise<BrokerHan
   const token: ApiToken = config.token ?? generateApiToken();
   const staticHandler = createStaticHandler(config.renderer ?? null);
   const trustedOrigins = normalizeTrustedOrigins(config.trustedOrigins);
+  // Default to an in-memory store when the host doesn't supply one. Branch
+  // 6 hosts will pass a durable event-log-backed store; this default keeps
+  // the package self-contained for tests and dev runs.
+  const receiptStore: ReceiptStore = config.receiptStore ?? new InMemoryReceiptStore();
   const server = createServer((req, res) => {
-    routeRequest(req, res, { token, staticHandler, logger, trustedOrigins }).catch(
+    routeRequest(req, res, { token, staticHandler, logger, trustedOrigins, receiptStore }).catch(
       (err: unknown) => {
         logger.error("listener_route_failed", {
           error: err instanceof Error ? err.message : String(err),
@@ -89,6 +99,7 @@ interface RouteDeps {
   readonly staticHandler: StaticHandler;
   readonly logger: BrokerLogger;
   readonly trustedOrigins: ReadonlySet<string>;
+  readonly receiptStore: ReceiptStore;
 }
 
 async function routeRequest(
@@ -96,15 +107,10 @@ async function routeRequest(
   res: ServerResponse,
   deps: RouteDeps,
 ): Promise<void> {
-  // Method allowlist: branch-4 only handles GET. POST/PUT/PATCH/DELETE will
-  // arrive in later branches; until then they are 405. The HEAD method is a
-  // useful smoke test (`curl -I /api-token`) and is treated as GET with no
-  // body — the response writers below already honor that via Node's HEAD
-  // handling, which strips the body.
-  if (req.method !== "GET" && req.method !== "HEAD") {
-    methodNotAllowed(res);
-    return;
-  }
+  // No global method gate: each route's dispatch knows which methods it
+  // supports and sends the correct `Allow:` header. A global gate that
+  // emitted "Allow: GET, HEAD" would lie about `/api/receipts` (which
+  // accepts POST) and vice versa.
   const guard = checkLoopbackRequest({
     hostHeader: req.headers.host,
     remoteAddress: req.socket.remoteAddress ?? undefined,
@@ -153,14 +159,26 @@ async function routeRequest(
   }
 
   if (pathname === "/api-token") {
+    if (req.method !== "GET" && req.method !== "HEAD") {
+      methodNotAllowed(res);
+      return;
+    }
     handleApiToken(req, res, deps);
     return;
   }
   if (pathname === "/api/health") {
+    if (req.method !== "GET" && req.method !== "HEAD") {
+      methodNotAllowed(res);
+      return;
+    }
     handleHealth(res);
     return;
   }
   if (pathname === "/api/events") {
+    if (req.method !== "GET" && req.method !== "HEAD") {
+      methodNotAllowed(res);
+      return;
+    }
     // HEAD on /api/events must NOT allocate a session — startSseSession
     // attaches a 30s keepalive setInterval and a `close` handler. Node
     // strips the body for HEAD but the interval keeps running until the
@@ -177,10 +195,45 @@ async function routeRequest(
     handleEvents(res);
     return;
   }
+  // POST /api/receipts is the create endpoint; GET /api/receipts/:id is the
+  // read endpoint. Other methods on either path return 405 from the handler.
+  if (pathname === "/api/receipts") {
+    await handleReceiptCreate(req, res, {
+      receiptStore: deps.receiptStore,
+      logger: deps.logger,
+    });
+    return;
+  }
+  if (pathname.startsWith("/api/receipts/")) {
+    if (req.method !== "GET" && req.method !== "HEAD") {
+      methodNotAllowed(res);
+      return;
+    }
+    await handleReceiptGet(pathname, res, { receiptStore: deps.receiptStore });
+    return;
+  }
+  if (pathname.startsWith("/api/threads/") && pathname.endsWith("/receipts")) {
+    if (req.method !== "GET" && req.method !== "HEAD") {
+      methodNotAllowed(res);
+      return;
+    }
+    await handleThreadReceiptsList(pathname, res, { receiptStore: deps.receiptStore });
+    return;
+  }
   // Static surfaces are open (loopback-guarded but no bearer): serving the
   // renderer bundle from `/` on first window load is a same-origin fetch
   // that has not yet learned the bootstrap token. Subsequent renderer
   // calls go to /api/* and DO carry the bearer (enforced above).
+  //
+  // Static serving accepts only GET/HEAD — any other method on a static
+  // path is a 405. Without this gate a POST to `/foo.js` would be answered
+  // by serving the file (Node strips body writes for non-HEAD but the
+  // semantic is wrong — clients should learn the resource doesn't support
+  // their method).
+  if (req.method !== "GET" && req.method !== "HEAD") {
+    methodNotAllowed(res);
+    return;
+  }
   const handled = await deps.staticHandler.serve(pathname, res);
   if (handled) return;
 

@@ -2,6 +2,8 @@
 
 import type { ApiToken, BrokerPort } from "@wuphf/protocol";
 
+import type { ReceiptStore } from "./receipt-store.ts";
+
 export interface BrokerLogger {
   info(event: string, payload?: Readonly<Record<string, unknown>>): void;
   warn(event: string, payload?: Readonly<Record<string, unknown>>): void;
@@ -53,6 +55,14 @@ export interface BrokerConfig {
    */
   readonly trustedOrigins?: readonly string[];
   readonly logger?: BrokerLogger;
+  /**
+   * Receipt persistence backend. When absent, `createBroker` constructs
+   * an in-memory store (`InMemoryReceiptStore`) — process-local, lost
+   * across restarts. Branch 6 (`feat/event-log-projections`) will ship a
+   * durable event-log implementation that hosts will plug in here. The
+   * interface itself stays stable across branches.
+   */
+  readonly receiptStore?: ReceiptStore;
 }
 
 export interface BrokerHandle {
