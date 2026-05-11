@@ -117,5 +117,7 @@ are passed through:
 | `LANG` | Locale for deterministic text behavior. |
 | `LC_ALL` | Locale override when explicitly set by the user environment. |
 | `TZ` | Time zone context for future user-facing local formatting. |
+| `WUPHF_RENDERER_DIST` | Packaged-only renderer bundle path so the broker can serve `/`. |
+| `WUPHF_DEV_RENDERER_ORIGIN` | Dev-only electron-vite renderer origin accepted by the broker's `/api-token` gate. |
 
 Secrets, tokens, cloud credentials, and app-data paths are not passed through.
