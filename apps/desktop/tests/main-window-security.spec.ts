@@ -371,6 +371,7 @@ describe("createSecureWindow", () => {
     // `loadURL`.
     const cases = [
       `http://${"u"}:${"p"}@127.0.0.1:54321/`,
+      "http://127.0.0.1:54321/", // pass-5 tightening: bare canonical form is sole accepted shape
       "http://127.0.0.1:54321/api-token",
       "http://127.0.0.1:54321/%2e%2e",
       "http://127.0.0.1:54321?x=1",

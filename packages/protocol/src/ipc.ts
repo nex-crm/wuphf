@@ -283,16 +283,18 @@ function assertApiBootstrapBrokerUrl(brokerUrl: string): void {
   // intentionally — brokers always bind ephemeral high ports, and an
   // implicit-port URL would round-trip differently than it came in.
   //
-  // The shape gates (no userinfo / no path-beyond-root / no query / no
-  // fragment) preserve the brand's claimed invariant: "BrokerUrl IS the
-  // broker origin." Downstream code concatenates `${brokerUrl}/api/health`
-  // — if a value with userinfo or a non-root path passed the brand, the
-  // concatenated fetch URL would be malformed and the userinfo would
-  // leak as a request component instead of as part of a controlled
-  // origin string.
-  // Raw-vs-origin equality catches percent-encoded dot segments that URL
-  // normalizes while the brand would otherwise return the original bytes.
-  const isCanonicalBrokerOrigin = brokerUrl === parsed.origin || brokerUrl === `${parsed.origin}/`;
+  // Brand invariant: BrokerUrl IS the broker origin in bare canonical form
+  // (no trailing slash). Downstream code does `${brokerUrl}/api/health` —
+  // accepting a trailing-slash form would produce `http://h:p//api/health`
+  // (double slash) at every concat site. The broker emits the bare form
+  // (`packages/broker/src/listener.ts` synthesizes
+  // `http://<loopback>:<port>`), so a single canonical form has zero
+  // compatibility cost.
+  //
+  // Raw-vs-origin equality also closes the percent-encoded dot-segment
+  // bypass: `new URL("http://127.0.0.1:54321/%2e%2e")` normalizes
+  // `parsed.pathname` to `/`, but `parsed.origin` excludes pathname, so
+  // the raw input differs from origin and the brand rejects it.
   if (
     parsed.protocol !== "http:" ||
     parsed.port === "" ||
@@ -302,11 +304,10 @@ function assertApiBootstrapBrokerUrl(brokerUrl: string): void {
     parsed.password !== "" ||
     parsed.search !== "" ||
     parsed.hash !== "" ||
-    (parsed.pathname !== "" && parsed.pathname !== "/") ||
-    !isCanonicalBrokerOrigin
+    brokerUrl !== parsed.origin
   ) {
     throw new Error(
-      "apiBootstrap.broker_url: must be http://<loopback>:<explicit-port>/ with no userinfo, path, query, or fragment",
+      "apiBootstrap.broker_url: must be http://<loopback>:<explicit-port> with no trailing slash, userinfo, path, query, or fragment",
     );
   }
 }

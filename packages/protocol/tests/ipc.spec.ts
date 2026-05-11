@@ -270,8 +270,12 @@ describe("IPC brand constructors", () => {
       expect(isBrokerUrl("http://127.0.0.1:54321")).toBe(true);
       expect(isBrokerUrl("http://localhost:1024")).toBe(true);
       expect(isBrokerUrl("http://[::1]:1")).toBe(true);
-      // Bare root path is allowed (URL parser preserves "/" for hosts).
-      expect(isBrokerUrl("http://127.0.0.1:54321/")).toBe(true);
+      // Trailing slash form is REJECTED: BrokerUrl is the bare canonical
+      // origin. Consumers do `${brokerUrl}/api/health` — a trailing slash
+      // would produce `http://h:p//api/health` (double slash). The broker
+      // emits the bare form (packages/broker/src/listener.ts); a single
+      // canonical form makes the contract unambiguous.
+      expect(isBrokerUrl("http://127.0.0.1:54321/")).toBe(false);
     });
 
     it("rejects everything assertApiBootstrapBrokerUrl would reject", () => {
@@ -298,8 +302,9 @@ describe("IPC brand constructors", () => {
       // deliberate negative inputs proving the brand rejects them.
       const userinfo = `${"u"}:${"p"}@`;
       expect(() => asBrokerUrl(`http://${userinfo}127.0.0.1:54321`)).toThrow(
-        /no userinfo, path, query, or fragment/,
+        /no trailing slash, userinfo, path, query, or fragment/,
       );
+      expect(() => asBrokerUrl("http://127.0.0.1:54321/")).toThrow(); // trailing slash
       expect(() => asBrokerUrl("http://127.0.0.1:54321/api-token")).toThrow();
       expect(() => asBrokerUrl("http://127.0.0.1:54321/foo")).toThrow();
       expect(() => asBrokerUrl("http://127.0.0.1:54321/%2e")).toThrow();
@@ -1345,6 +1350,7 @@ describe("apiBootstrap codec", () => {
     // Userinfo URL constructed by concatenation so secretlint's basic-auth
     // detector doesn't flag the literal string.
     [`http://${"u"}:${"p"}@127.0.0.1:54321`, "URL with userinfo"],
+    ["http://127.0.0.1:54321/", "URL with trailing slash"],
     ["http://127.0.0.1:54321/api-token", "URL with non-root path"],
     ["http://127.0.0.1:54321/foo", "URL with non-root path"],
     ["http://127.0.0.1:54321/%2e", "URL with encoded dot path segment"],

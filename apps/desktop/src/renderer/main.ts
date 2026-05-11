@@ -226,23 +226,21 @@ export function parseBootstrap(value: unknown): ParsedBootstrap {
   if (!isLoopbackHostname(parsed.hostname)) {
     throw new Error("api-token response: broker_url host must be loopback");
   }
-  // Shape lock: the broker's wire contract is "BrokerUrl IS the broker
-  // origin", with no userinfo/path/query/fragment. A value with embedded
-  // userinfo + non-root path would otherwise pass the gates above and
-  // break downstream string concatenation (`${brokerUrl}/api/health`
-  // becomes garbage when the brokerUrl already has a path). Mirror the
-  // protocol codec's assertApiBootstrapBrokerUrl byte-for-byte.
-  const isCanonicalBrokerOrigin = brokerUrl === parsed.origin || brokerUrl === `${parsed.origin}/`;
+  // Shape lock: BrokerUrl IS the broker origin in bare canonical form (no
+  // trailing slash). Downstream code does `${bootstrap.brokerUrl}/api/health`
+  // — a trailing-slash form would produce `http://h:p//api/health` (double
+  // slash). Raw-vs-origin equality also rejects percent-encoded dot segments
+  // that URL normalizes to `/`. Mirror the protocol codec's
+  // assertApiBootstrapBrokerUrl byte-for-byte.
   if (
     parsed.username !== "" ||
     parsed.password !== "" ||
     parsed.search !== "" ||
     parsed.hash !== "" ||
-    (parsed.pathname !== "" && parsed.pathname !== "/") ||
-    !isCanonicalBrokerOrigin
+    brokerUrl !== parsed.origin
   ) {
     throw new Error(
-      "api-token response: broker_url must have no userinfo, path, query, or fragment",
+      "api-token response: broker_url must be a bare loopback origin with no trailing slash, userinfo, path, query, or fragment",
     );
   }
   return { token, brokerUrl };
