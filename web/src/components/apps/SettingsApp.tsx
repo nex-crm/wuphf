@@ -117,6 +117,7 @@ function GeneralSection({ cfg, save }: SectionProps) {
             <option value="ollama">Ollama</option>
             <option value="exo">Exo</option>
             <option value="hermes-agent">Hermes Agent</option>
+            <option value="openclaw-http">OpenClaw Gateway</option>
           </optgroup>
         </select>
       </Field>
@@ -235,6 +236,12 @@ const LOCAL_PROVIDERS: LocalProviderMeta[] = [
     label: "Hermes Agent",
     blurb:
       "Runs WUPHF members through a local Hermes gateway via its OpenAI-compatible API server.",
+  },
+  {
+    kind: "openclaw-http",
+    label: "OpenClaw Gateway",
+    blurb:
+      "Runs WUPHF members through OpenClaw Gateway's OpenAI-compatible Chat Completions endpoint.",
   },
 ];
 

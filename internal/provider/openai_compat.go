@@ -233,7 +233,23 @@ func resolveOpenAICompatAPIKey(kind string) string {
 			return v
 		}
 	}
+	if kind == KindOpenclawHTTP {
+		if v := strings.TrimSpace(os.Getenv("OPENCLAW_GATEWAY_TOKEN")); v != "" {
+			return v
+		}
+		if v := config.ResolveOpenclawToken(); v != "" {
+			return v
+		}
+	}
 	return ""
+}
+
+// OpenAICompatAPIKey returns the bearer token WUPHF will use for kind's
+// OpenAI-compatible HTTP requests, if one is configured. It is exported for
+// local runtime health probes so authenticated gateways such as OpenClaw and
+// Hermes don't look offline just because /v1/models rejects anonymous calls.
+func OpenAICompatAPIKey(kind string) string {
+	return resolveOpenAICompatAPIKey(kind)
 }
 
 func hermesAgentSessionID(agentSlug string) string {
@@ -292,6 +308,9 @@ func runOpenAICompatStream(
 		// stays well-formed; we just won't see usage from those servers
 		// (which is the same as today's behaviour).
 		StreamOptions: &openaiStreamOptions{IncludeUsage: true},
+	}
+	if kind == KindOpenclawHTTP {
+		body.User = hermesAgentSessionID(agentSlug)
 	}
 	if len(tools) > 0 {
 		body.Tools = agentToolsToOpenAI(tools)
@@ -755,6 +774,7 @@ type openaiRequest struct {
 	Model         string               `json:"model"`
 	Messages      []openaiMessage      `json:"messages"`
 	Stream        bool                 `json:"stream"`
+	User          string               `json:"user,omitempty"`
 	StreamOptions *openaiStreamOptions `json:"stream_options,omitempty"`
 	Tools         []openaiTool         `json:"tools,omitempty"`
 	ToolChoice    string               `json:"tool_choice,omitempty"`

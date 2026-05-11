@@ -18,7 +18,8 @@ import (
 const maxOpenAICompatToolIterations = 8
 
 // runHeadlessOpenAICompatTurn executes a single broker-driven turn for an
-// agent bound to an OpenAI-compatible runtime (mlx-lm, ollama, exo, Hermes).
+// agent bound to an OpenAI-compatible runtime (mlx-lm, ollama, exo, Hermes,
+// or OpenClaw Gateway HTTP).
 //
 // Flow:
 //  1. Spawn `wuphf mcp-team` and connect an MCP client → list of tools.
@@ -312,7 +313,7 @@ func looksUnparsedToolCall(text string) bool {
 // caller stay in sync without duplicating the list.
 func isOpenAICompatKind(kind string) bool {
 	switch kind {
-	case provider.KindMLXLM, provider.KindOllama, provider.KindExo, provider.KindHermesAgent:
+	case provider.KindMLXLM, provider.KindOllama, provider.KindExo, provider.KindHermesAgent, provider.KindOpenclawHTTP:
 		return true
 	default:
 		return false

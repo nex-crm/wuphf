@@ -680,8 +680,18 @@ func TestOpenclawConfigRoundTrip(t *testing.T) {
 func TestResolveOpenclawTokenEnvWins(t *testing.T) {
 	withTempConfig(t, func(_ string) {
 		t.Setenv("WUPHF_OPENCLAW_TOKEN", "env-token")
+		t.Setenv("OPENCLAW_GATEWAY_TOKEN", "gateway-token")
 		if got := ResolveOpenclawToken(); got != "env-token" {
 			t.Fatalf("expected env-token, got %q", got)
+		}
+	})
+}
+
+func TestResolveOpenclawTokenAcceptsGatewayEnv(t *testing.T) {
+	withTempConfig(t, func(_ string) {
+		t.Setenv("OPENCLAW_GATEWAY_TOKEN", "gateway-token")
+		if got := ResolveOpenclawToken(); got != "gateway-token" {
+			t.Fatalf("expected gateway-token, got %q", got)
 		}
 	})
 }

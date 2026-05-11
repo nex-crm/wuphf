@@ -36,6 +36,24 @@ const STATUS_FIXTURE = [
     platform_supported: false,
     windows_note: "WSL2 recommended.",
   },
+  {
+    kind: "hermes-agent",
+    binary_installed: false,
+    endpoint: "http://127.0.0.1:8642/v1",
+    model: "hermes-agent",
+    reachable: false,
+    probed: false,
+    platform_supported: true,
+  },
+  {
+    kind: "openclaw-http",
+    binary_installed: false,
+    endpoint: "http://127.0.0.1:18789/v1",
+    model: "openclaw/default",
+    reachable: false,
+    probed: false,
+    platform_supported: true,
+  },
 ];
 
 async function waitForReactMount(page: Page): Promise<void> {
@@ -100,7 +118,7 @@ async function advanceToSetupStep(page: Page) {
 }
 
 test.describe("Onboarding → Run a local model", () => {
-  test("meta-tile reveals the picker grid with all three runtimes and their badges", async ({
+  test("meta-tile reveals the picker grid with all registered runtimes and their badges", async ({
     page,
   }) => {
     stubStatusEndpoint(page);

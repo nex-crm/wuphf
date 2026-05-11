@@ -41,25 +41,26 @@ func TestComputeLocalProviderStatuses_AllInstalledAndReachable(t *testing.T) {
 			"ollama":        {path: "/usr/local/bin/ollama"},
 			"exo":           {path: "/Users/x/.local/bin/exo"},
 			"hermes":        {path: "/Users/x/.local/bin/hermes"},
+			"openclaw":      {path: "/usr/local/bin/openclaw"},
 		}),
 		runVer: func(_ context.Context, path string, _ []string) (string, error) {
 			return "v1.2.3", nil
 		},
-		probe: func(_ context.Context, baseURL string) (bool, string, bool) {
+		probe: func(_ context.Context, _ string, baseURL string) (bool, string, bool) {
 			return true, "fake-loaded-model:" + baseURL, true
 		},
 		goos:   "darwin",
 		goarch: "arm64",
 	}
 	got := computeLocalProviderStatuses(context.Background(), ov)
-	if len(got) != 4 {
-		t.Fatalf("expected 4 statuses, got %d", len(got))
+	if len(got) != 5 {
+		t.Fatalf("expected 5 statuses, got %d", len(got))
 	}
 	gotByKind := map[string]LocalProviderStatus{}
 	for _, s := range got {
 		gotByKind[s.Kind] = s
 	}
-	for _, k := range []string{provider.KindMLXLM, provider.KindOllama, provider.KindExo, provider.KindHermesAgent} {
+	for _, k := range []string{provider.KindMLXLM, provider.KindOllama, provider.KindExo, provider.KindHermesAgent, provider.KindOpenclawHTTP} {
 		s, ok := gotByKind[k]
 		if !ok {
 			t.Fatalf("missing kind %q", k)
@@ -90,7 +91,7 @@ func TestComputeLocalProviderStatuses_NoneInstalled(t *testing.T) {
 	ov := localProvidersStatusOverrides{
 		lookPath: func(string) (string, error) { return "", errors.New("not found") },
 		runVer:   func(_ context.Context, _ string, _ []string) (string, error) { return "", nil },
-		probe:    func(_ context.Context, _ string) (bool, string, bool) { return false, "", true },
+		probe:    func(_ context.Context, _, _ string) (bool, string, bool) { return false, "", true },
 		goos:     "darwin",
 		goarch:   "arm64",
 	}
@@ -110,13 +111,13 @@ func TestComputeLocalProviderStatuses_NoneInstalled(t *testing.T) {
 
 // TestComputeLocalProviderStatuses_LinuxHidesMLXButShowsOllamaExo
 // confirms the platform gate: MLX-LM is Apple Silicon only and must
-// surface PlatformSupported=false on Linux. Ollama, Exo, and Hermes stay
-// supported.
+// surface PlatformSupported=false on Linux. Ollama, Exo, Hermes, and
+// OpenClaw Gateway stay supported.
 func TestComputeLocalProviderStatuses_LinuxHidesMLXButShowsOthers(t *testing.T) {
 	ov := localProvidersStatusOverrides{
 		lookPath: func(string) (string, error) { return "", errors.New("not found") },
 		runVer:   func(_ context.Context, _ string, _ []string) (string, error) { return "", nil },
-		probe:    func(_ context.Context, _ string) (bool, string, bool) { return false, "", false },
+		probe:    func(_ context.Context, _, _ string) (bool, string, bool) { return false, "", false },
 		goos:     "linux",
 	}
 	got := computeLocalProviderStatuses(context.Background(), ov)
@@ -126,7 +127,7 @@ func TestComputeLocalProviderStatuses_LinuxHidesMLXButShowsOthers(t *testing.T) 
 			if s.PlatformSupported {
 				t.Errorf("mlx-lm: PlatformSupported = true on linux")
 			}
-		case provider.KindOllama, provider.KindExo, provider.KindHermesAgent:
+		case provider.KindOllama, provider.KindExo, provider.KindHermesAgent, provider.KindOpenclawHTTP:
 			if !s.PlatformSupported {
 				t.Errorf("%s: PlatformSupported = false on linux", s.Kind)
 			}
@@ -145,7 +146,7 @@ func TestComputeLocalProviderStatuses_IntelMacRejectsMLXLM(t *testing.T) {
 	ov := localProvidersStatusOverrides{
 		lookPath: func(string) (string, error) { return "", errors.New("not found") },
 		runVer:   func(_ context.Context, _ string, _ []string) (string, error) { return "", nil },
-		probe:    func(_ context.Context, _ string) (bool, string, bool) { return false, "", false },
+		probe:    func(_ context.Context, _, _ string) (bool, string, bool) { return false, "", false },
 		goos:     "darwin",
 		goarch:   "amd64", // Intel Mac
 	}
@@ -156,9 +157,9 @@ func TestComputeLocalProviderStatuses_IntelMacRejectsMLXLM(t *testing.T) {
 			if s.PlatformSupported {
 				t.Errorf("mlx-lm: PlatformSupported = true on darwin/amd64 (Intel Mac); MLX requires Apple Silicon")
 			}
-		case provider.KindOllama, provider.KindExo, provider.KindHermesAgent:
-			// Ollama/Exo/Hermes work on both arm64 and amd64 — Intel Mac users
-			// should still see those as supported.
+		case provider.KindOllama, provider.KindExo, provider.KindHermesAgent, provider.KindOpenclawHTTP:
+			// Ollama/Exo/Hermes/OpenClaw Gateway work on both arm64 and amd64
+			// Intel Macs should still see those as supported.
 			if !s.PlatformSupported {
 				t.Errorf("%s: PlatformSupported = false on darwin/amd64", s.Kind)
 			}
@@ -173,7 +174,7 @@ func TestComputeLocalProviderStatuses_WindowsAddsWSL2Note(t *testing.T) {
 	ov := localProvidersStatusOverrides{
 		lookPath: func(string) (string, error) { return "", errors.New("not found") },
 		runVer:   func(_ context.Context, _ string, _ []string) (string, error) { return "", nil },
-		probe:    func(_ context.Context, _ string) (bool, string, bool) { return false, "", false },
+		probe:    func(_ context.Context, _, _ string) (bool, string, bool) { return false, "", false },
 		goos:     "windows",
 	}
 	got := computeLocalProviderStatuses(context.Background(), ov)
@@ -205,7 +206,7 @@ func TestComputeLocalProviderStatuses_NonLoopbackEndpointSkipsProbe(t *testing.T
 			return "", errors.New("not found")
 		},
 		runVer: func(_ context.Context, _ string, _ []string) (string, error) { return "v1", nil },
-		probe: func(_ context.Context, baseURL string) (bool, string, bool) {
+		probe: func(_ context.Context, _ string, baseURL string) (bool, string, bool) {
 			if strings.Contains(baseURL, "10.0.0.99") {
 				t.Errorf("probe was called for non-loopback URL %q — security guardrail breached", baseURL)
 			}
@@ -274,7 +275,7 @@ func TestProbeOpenAICompatEndpoint_Real(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	reachable, model, ok := probeOpenAICompatEndpoint(context.Background(), srv.URL)
+	reachable, model, ok := probeOpenAICompatEndpoint(context.Background(), provider.KindMLXLM, srv.URL)
 	if !ok {
 		t.Fatal("ok = false; probe didn't even reach the server")
 	}
@@ -286,6 +287,25 @@ func TestProbeOpenAICompatEndpoint_Real(t *testing.T) {
 	}
 }
 
+func TestProbeOpenAICompatEndpoint_SendsRuntimeBearerToken(t *testing.T) {
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"object":"list","data":[{"id":"openclaw/default"}]}`)
+	}))
+	defer srv.Close()
+
+	t.Setenv("OPENCLAW_GATEWAY_TOKEN", "gateway-token")
+	reachable, model, ok := probeOpenAICompatEndpoint(context.Background(), provider.KindOpenclawHTTP, srv.URL)
+	if !ok || !reachable {
+		t.Fatalf("probe failed: ok=%v reachable=%v model=%q", ok, reachable, model)
+	}
+	if gotAuth != "Bearer gateway-token" {
+		t.Fatalf("Authorization = %q, want gateway bearer token", gotAuth)
+	}
+}
+
 // TestProbeOpenAICompatEndpoint_Non2xx confirms a 503 surfaces as
 // reachable=false rather than the loaded-model field getting a junk
 // HTML body.
@@ -294,7 +314,7 @@ func TestProbeOpenAICompatEndpoint_Non2xx(t *testing.T) {
 		http.Error(w, "loading", http.StatusServiceUnavailable)
 	}))
 	defer srv.Close()
-	reachable, _, _ := probeOpenAICompatEndpoint(context.Background(), srv.URL)
+	reachable, _, _ := probeOpenAICompatEndpoint(context.Background(), provider.KindMLXLM, srv.URL)
 	if reachable {
 		t.Errorf("503 should not count as reachable")
 	}
@@ -319,7 +339,7 @@ func TestComputeLocalProviderStatuses_DocumentedSurface(t *testing.T) {
 		runVer: func(_ context.Context, _ string, _ []string) (string, error) {
 			return "v1.2.3", nil
 		},
-		probe: func(_ context.Context, _ string) (bool, string, bool) {
+		probe: func(_ context.Context, _, _ string) (bool, string, bool) {
 			return true, "loaded-model-x", true
 		},
 		// Pick windows so windows_note + probe_skipped_note (when
@@ -392,7 +412,7 @@ func TestComputeLocalProviderStatuses_DocumentedSurface(t *testing.T) {
 	// probe at all this run".
 	ov.goos = "linux"
 	t.Setenv("WUPHF_OLLAMA_BASE_URL", "http://10.0.0.99:11434/v1")
-	ov.probe = func(_ context.Context, baseURL string) (bool, string, bool) {
+	ov.probe = func(_ context.Context, _ string, baseURL string) (bool, string, bool) {
 		if strings.Contains(baseURL, "10.0.0.99") {
 			t.Errorf("probe should not fire for non-loopback URL %q", baseURL)
 		}

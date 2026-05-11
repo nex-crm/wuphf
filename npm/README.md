@@ -49,7 +49,7 @@ Supported platforms: macOS, Linux, and Windows 10+ on x64 or arm64. The native b
 | `--no-open` | Don't auto-open the browser |
 | `--pack <name>` | Pick an agent pack (`starter`, `founding-team`, `coding-team`, `lead-gen-agency`, `revops`) |
 | `--opus-ceo` | Upgrade CEO from Sonnet to Opus |
-| `--provider <name>` | LLM provider override (`claude-code`, `codex`, `opencode`) |
+| `--provider <name>` | LLM provider override (`claude-code`, `codex`, `opencode`, `hermes-agent`, `openclaw-http`) |
 | `--collab` | Start in collaborative mode — all agents see all messages (this is the default) |
 | `--unsafe` | Bypass agent permission checks (local dev only) |
 | `--web-port <n>` | Change the web UI port (default 7891) |
@@ -95,7 +95,7 @@ If it feels like a hidden agent loop, something is wrong. If it feels like The O
 ## Bridges
 
 - **Telegram:** `/connect` → pick Telegram → paste bot token from [@BotFather](https://t.me/BotFather).
-- **OpenClaw:** `/connect openclaw` → paste your gateway URL and `gateway.auth.token` from `~/.openclaw/openclaw.json`. Each OpenClaw session becomes a first-class office member you can `@mention`.
+- **OpenClaw:** `/connect openclaw` → paste your gateway URL and `gateway.auth.token` from `~/.openclaw/openclaw.json`. Each OpenClaw session becomes a first-class office member you can `@mention`. If OpenClaw Gateway's OpenAI-compatible HTTP endpoint is enabled, use `--provider openclaw-http` to run WUPHF-created agents through `http://127.0.0.1:18789/v1` with model `openclaw/default`.
 - **Hermes Agent:** set `llm_provider` or `--provider` to `hermes-agent` to run WUPHF agents through a local Hermes API server at `http://127.0.0.1:8642/v1`.
 
 ## External Actions

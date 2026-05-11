@@ -42,6 +42,32 @@ const STATUS_FIXTURE = [
     platform_supported: true,
     start: { macos: "exo", linux: "exo" },
   },
+  {
+    kind: "hermes-agent",
+    binary_installed: false,
+    endpoint: "http://127.0.0.1:8642/v1",
+    model: "hermes-agent",
+    reachable: false,
+    probed: true,
+    platform_supported: true,
+    install: {
+      macos:
+        "curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash",
+      linux:
+        "curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash",
+    },
+  },
+  {
+    kind: "openclaw-http",
+    binary_installed: true,
+    binary_version: "OpenClaw 2026.4.14",
+    endpoint: "http://127.0.0.1:18789/v1",
+    model: "openclaw/default",
+    reachable: false,
+    probed: true,
+    platform_supported: true,
+    start: { macos: "openclaw gateway run", linux: "openclaw gateway run" },
+  },
 ];
 
 async function waitForReactMount(page: Page): Promise<void> {
@@ -124,10 +150,14 @@ test.describe("Settings → Local LLMs", () => {
     stubLocalProviders(page);
     await goToSettingsLocalLLMs(page);
 
-    // All three cards render.
+    // All registered local runtime cards render.
     await expect(page.getByTestId("local-llm-card-mlx-lm")).toBeVisible();
     await expect(page.getByTestId("local-llm-card-ollama")).toBeVisible();
     await expect(page.getByTestId("local-llm-card-exo")).toBeVisible();
+    await expect(page.getByTestId("local-llm-card-hermes-agent")).toBeVisible();
+    await expect(
+      page.getByTestId("local-llm-card-openclaw-http"),
+    ).toBeVisible();
 
     // MLX-LM is not installed → install command appears verbatim.
     const mlxCard = page.getByTestId("local-llm-card-mlx-lm");

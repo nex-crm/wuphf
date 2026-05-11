@@ -107,6 +107,17 @@ await context.route("**/api/status/local-providers", (r) =>
         probed: true,
         platform_supported: true,
       },
+      {
+        kind: "openclaw-http",
+        binary_installed: true,
+        binary_path: "/usr/local/bin/openclaw",
+        binary_version: "OpenClaw 2026.4.14",
+        endpoint: "http://127.0.0.1:18789/v1",
+        model: "openclaw/default",
+        reachable: false,
+        probed: true,
+        platform_supported: true,
+      },
     ]),
   }),
 );
@@ -115,7 +126,9 @@ await page.goto(`${process.env.BASE_URL ?? "http://localhost:5273"}/`, {
   waitUntil: "load",
 });
 await page.getByRole("button", { name: "Continue" }).click();
-await page.getByRole("textbox", { name: "Office name *" }).fill("Hermes Dev Office");
+await page
+  .getByRole("textbox", { name: "Office name *" })
+  .fill("Hermes Dev Office");
 await page
   .getByRole("textbox", { name: "Short description *" })
   .fill("Testing Hermes Agent provider support in dev");
@@ -127,9 +140,16 @@ await page.getByRole("button", { name: "Review the team" }).click();
 await page.getByRole("button", { name: "Continue" }).click();
 
 await page.getByText("How should agents run?").waitFor({ timeout: 10_000 });
-await page
-  .getByTestId("onboarding-local-llm-tile-hermes-agent")
-  .waitFor({ timeout: 10_000 });
+const hermesTile = page.getByTestId("onboarding-local-llm-tile-hermes-agent");
+const localToggle = page.getByTestId("onboarding-local-llm-toggle");
+if (
+  !(await hermesTile.isVisible()) &&
+  (await localToggle.getAttribute("aria-pressed")) !== "true"
+) {
+  await localToggle.click();
+}
+await page.getByText("Hermes Agent").waitFor({ timeout: 10_000 });
+await page.getByText("OpenClaw Gateway").waitFor({ timeout: 10_000 });
 
 await shotPage(page, OUT, "01-hermes-agent-runtime-picker");
 

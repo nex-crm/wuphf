@@ -889,6 +889,36 @@ func TestOpenAICompatStreamFn_HermesOmitsSessionHeadersWithoutAuth(t *testing.T)
 	}
 }
 
+func TestOpenAICompatStreamFn_OpenclawHTTPUsesGatewayToken(t *testing.T) {
+	var gotAuth string
+	var gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		buf, _ := io.ReadAll(r.Body)
+		gotBody = string(buf)
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer srv.Close()
+
+	t.Setenv("WUPHF_OPENCLAW_HTTP_BASE_URL", srv.URL+"/v1")
+	t.Setenv("OPENCLAW_GATEWAY_TOKEN", "gateway-token")
+
+	factory := NewOpenAICompatStreamFn(KindOpenclawHTTP, "http://unused", "openclaw/default")
+	for range factory("agent-one")([]agent.Message{{Role: "user", Content: "ping"}}, nil) {
+	}
+
+	if gotAuth != "Bearer gateway-token" {
+		t.Fatalf("Authorization = %q, want OpenClaw gateway bearer token", gotAuth)
+	}
+	if !strings.Contains(gotBody, `"model":"openclaw/default"`) {
+		t.Fatalf("request model = %s, want openclaw/default", gotBody)
+	}
+	if !strings.Contains(gotBody, `"user":"wuphf-agent-one"`) {
+		t.Fatalf("request user = %s, want stable WUPHF agent user", gotBody)
+	}
+}
+
 // TestParseOpenAISSEStream_TrailingUsageFrame covers the canonical pattern
 // from `stream_options.include_usage`: a final SSE frame with empty choices
 // and a populated `usage` block. It must produce exactly one trailing

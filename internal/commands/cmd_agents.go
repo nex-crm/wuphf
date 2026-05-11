@@ -126,7 +126,7 @@ func cmdAgentList(ctx *SlashContext) error {
 func cmdAgentCreate(ctx *SlashContext, args string) error {
 	pos, flags := parseFlags(args)
 	if len(pos) < 1 {
-		ctx.AddMessage("system", "usage: /agent create <slug> --name <name> --provider <claude-code|codex|opencode|hermes-agent|openclaw> [--model <m>] [--role <r>] [--personality <p>] [--session-key <k>] [--agent-id <id>]")
+		ctx.AddMessage("system", "usage: /agent create <slug> --name <name> --provider <claude-code|codex|opencode|hermes-agent|openclaw-http|openclaw> [--model <m>] [--role <r>] [--personality <p>] [--session-key <k>] [--agent-id <id>]")
 		return nil
 	}
 	slug := pos[0]

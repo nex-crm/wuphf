@@ -23,7 +23,7 @@ Constants:
 
 | Export | File:line | Contract |
 |---|---:|---|
-| `PROVIDER_KIND_VALUES` | `src/receipt-types.ts:242` | Closed provider tuple: `anthropic`, `openai`, `openai-compat`, `openclaw`, `hermes-agent`. Adding a value is a wire/API change and must update exhaustive consumers. |
+| `PROVIDER_KIND_VALUES` | `src/receipt-types.ts:242` | Closed provider tuple: `anthropic`, `openai`, `openai-compat`, `openclaw`, `hermes-agent`, `openclaw-http`. Adding a value is a wire/API change and must update exhaustive consumers. |
 | `IDEMPOTENCY_KEY_RE` | `src/receipt-types.ts:236` | Public regex for 1..128 char write idempotency keys. |
 | `RECEIPT_STATUS_VALUES`, `RISK_CLASS_VALUES`, `WRITE_RESULT_VALUES`, `TRIGGER_KIND_VALUES`, `APPROVAL_ROLE_VALUES`, `APPROVAL_DECISION_VALUES`, `TOOL_CALL_STATUS_VALUES`, `FILE_CHANGE_MODE_VALUES`, `MEMORY_STORE_VALUES`, `APPROVAL_TOKEN_ALGORITHM_VALUES`, `BROKER_TOKEN_VERDICT_STATUS_VALUES`, `BASE64_RE` | `src/receipt-literals.ts:22-93` | Shared literal tuples/regexes. Tuples use `as const satisfies readonly <Union>[]` to prevent codec/validator drift. |
 | `RECEIPT_KEYS`, `SOURCE_READ_KEYS`, `TOOL_CALL_KEYS`, `APPROVAL_EVENT_KEYS`, `BROKER_TOKEN_VERDICT_KEYS`, `FILE_CHANGE_KEYS`, `COMMIT_REF_KEYS`, `MEMORY_WRITE_KEYS`, `FROZEN_ARGS_KEYS`, `WRITE_FAILURE_METADATA_KEYS`, `EXTERNAL_WRITE_KEYS`, `APPROVAL_CLAIMS_KEYS`, `SIGNED_APPROVAL_TOKEN_KEYS` | `src/receipt-validator.ts:51-200` | Unknown-key allowlists tied to interfaces with `satisfies readonly (keyof T)[]`. |

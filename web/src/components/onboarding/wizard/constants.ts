@@ -173,6 +173,7 @@ export const LOCAL_PROVIDER_LABELS: ReadonlyArray<{
   { kind: "ollama", label: "Ollama", blurb: "macOS / Linux" },
   { kind: "exo", label: "Exo", blurb: "Multi-device pool" },
   { kind: "hermes-agent", label: "Hermes Agent", blurb: "Agent gateway" },
+  { kind: "openclaw-http", label: "OpenClaw Gateway", blurb: "Agent gateway" },
 ];
 
 export const MEMORY_BACKEND_OPTIONS: ReadonlyArray<{

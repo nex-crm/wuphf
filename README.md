@@ -97,7 +97,7 @@ if I say yes. If I am not logged in, just open https://wuphf.team.
 | `--no-open` | Don't auto-open the browser |
 | `--pack <name>` | Pick an agent pack (`starter`, `founding-team`, `coding-team`, `lead-gen-agency`, `revops`) |
 | `--opus-ceo` | Upgrade CEO from Sonnet to Opus |
-| `--provider <name>` | LLM provider override (`claude-code`, `codex`, `opencode`, `ollama`) |
+| `--provider <name>` | LLM provider override (`claude-code`, `codex`, `opencode`, `ollama`, `hermes-agent`, `openclaw-http`) |
 | `--collab` | Start in collaborative mode — all agents see all messages (this is the default) |
 | `--unsafe` | Bypass agent permission checks (local dev only) |
 | `--web-port <n>` | Change the web UI port (default 7891) |
@@ -225,6 +225,10 @@ Already running [OpenClaw](https://openclaw.ai) agents? You can bring them into 
 Inside the office, run `/connect openclaw`, paste your gateway URL (default `ws://127.0.0.1:18789`) and the `gateway.auth.token` from your `~/.openclaw/openclaw.json`, then pick which sessions to bridge. Each becomes a first-class office member you can `@mention`. OpenClaw agents keep running in their own sandbox; WUPHF just gives them a shared office to collaborate in.
 
 WUPHF authenticates to the gateway using an Ed25519 keypair (persisted at `~/.wuphf/openclaw/identity.json`, 0600), signed against the server-issued nonce during every connect. OpenClaw grants zero scopes to token-only clients, so device pairing is mandatory — on loopback the gateway approves silently on first use.
+
+If you want WUPHF-created office members to run through OpenClaw instead of bridging pre-existing OpenClaw sessions, enable OpenClaw Gateway's OpenAI-compatible Chat Completions endpoint (`gateway.http.endpoints.chatCompletions.enabled = true`) and use `--provider openclaw-http`. The default endpoint is `http://127.0.0.1:18789/v1` and the default model target is `openclaw/default`; override them with `WUPHF_OPENCLAW_HTTP_BASE_URL` / `WUPHF_OPENCLAW_HTTP_MODEL` or `provider_endpoints.openclaw-http`.
+
+For token-authenticated gateways, WUPHF sends `Authorization: Bearer ...` using `WUPHF_OPENCLAW_HTTP_API_KEY`, `OPENCLAW_GATEWAY_TOKEN`, `WUPHF_OPENCLAW_TOKEN`, or the saved OpenClaw token from Settings, in that order. Requests include a stable OpenAI `user` value derived from the WUPHF agent slug so OpenClaw can reuse the same per-agent session across turns.
 
 ## Hermes Agent Runtime
 
