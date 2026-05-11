@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -725,20 +726,25 @@ func allRequiredPrereqsOk(prereqs []prereqResult) bool {
 
 // localRuntimeCandidates lists the supported local OpenAI-compatible runtimes
 // in priority order. The order is the user-facing tiebreak when more than one
-// is reachable: ollama wins because it's the most common install, mlx-lm
-// second because it's Apple-Silicon-only, exo last because it's niche.
+// is reachable: ollama wins because it's the most common install, Hermes
+// second because it is a full agent runtime, OpenClaw Gateway third because it
+// is a full agent runtime when its HTTP endpoint is enabled, mlx-lm fourth
+// because it's Apple-Silicon-only, exo last because it's niche.
 //
-// These URLs intentionally duplicate the unexported defaultXxxBaseURL constants
-// in internal/provider/{ollama,mlx_lm,exo}.go. Importing the provider package
-// for a single string per runtime would balloon the cold-start dependency graph
-// for `wuphf` first-run, which has to feel snappy on a fresh `npx` install.
-// The provider defaults change rarely (last touched when the providers were
-// added); if they do change, update both call sites.
+// These URLs intentionally duplicate the unexported defaultXxxBaseURL
+// constants in internal/provider/{ollama,hermes_agent,openclaw_http,mlx_lm,exo}.go.
+// Importing the provider package for a single string per runtime would balloon
+// the cold-start dependency graph for `wuphf` first-run, which has to feel
+// snappy on a fresh `npx` install. The provider defaults change rarely (last
+// touched when the providers were added); if they do change, update both call
+// sites.
 var localRuntimeCandidates = []struct {
 	kind string
 	base string
 }{
 	{kind: "ollama", base: "http://127.0.0.1:11434/v1"},
+	{kind: "hermes-agent", base: "http://127.0.0.1:8642/v1"},
+	{kind: "openclaw-http", base: "http://127.0.0.1:18789/v1"},
 	{kind: "mlx-lm", base: "http://127.0.0.1:8080/v1"},
 	{kind: "exo", base: "http://127.0.0.1:52415/v1"},
 }
@@ -759,10 +765,13 @@ var localRuntimeCandidates = []struct {
 // happens to return `data:[]`. We use a pointer to []RawMessage so we
 // can distinguish "key missing or null" (Data == nil) from "key
 // present, empty array" (*Data has length 0).
-func probeLocalRuntime(ctx context.Context, client *http.Client, base string) bool {
+func probeLocalRuntime(ctx context.Context, client *http.Client, kind, base string) bool {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/models", nil)
 	if err != nil {
 		return false
+	}
+	if apiKey := localRuntimeProbeAPIKey(kind); apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
 	}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -788,22 +797,41 @@ func probeLocalRuntime(ctx context.Context, client *http.Client, base string) bo
 	return probe.Object == "list" && probe.Data != nil
 }
 
+func localRuntimeProbeAPIKey(kind string) string {
+	envKind := strings.ToUpper(strings.ReplaceAll(kind, "-", "_"))
+	if v := strings.TrimSpace(os.Getenv("WUPHF_" + envKind + "_API_KEY")); v != "" {
+		return v
+	}
+	switch kind {
+	case "hermes-agent":
+		return strings.TrimSpace(os.Getenv("API_SERVER_KEY"))
+	case "openclaw-http":
+		if v := strings.TrimSpace(os.Getenv("OPENCLAW_GATEWAY_TOKEN")); v != "" {
+			return v
+		}
+		return strings.TrimSpace(os.Getenv("WUPHF_OPENCLAW_TOKEN"))
+	default:
+		return ""
+	}
+}
+
 // detectReachableLocalRuntime probes the canonical loopback endpoints for the
-// supported local OpenAI-compatible runtimes (ollama, mlx-lm, exo) in priority
-// order and returns the first one that answers with an OpenAI-shaped body.
+// supported local OpenAI-compatible runtimes (ollama, Hermes, OpenClaw Gateway,
+// mlx-lm, exo) in priority order and returns the first one that answers with
+// an OpenAI-shaped body.
 // Used by the onboarding wizard to suggest a concrete --provider flag when
 // the user has no Anthropic key and no runtime CLI installed but does have a
 // local LLM running.
 //
 // Sequential (not parallel) so the suggestion is deterministic when more than
 // one runtime is up. A 250ms-per-candidate timeout keeps the worst case at
-// 750ms total when nothing is reachable; the caller dispatches this off the
+// 1250ms total when nothing is reachable; the caller dispatches this off the
 // bubbletea Update loop so the TUI stays responsive.
 func detectReachableLocalRuntime() (kind, addr string) {
 	client := &http.Client{Timeout: 250 * time.Millisecond}
 	for _, c := range localRuntimeCandidates {
 		ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
-		ok := probeLocalRuntime(ctx, client, c.base)
+		ok := probeLocalRuntime(ctx, client, c.kind, c.base)
 		cancel()
 		if ok {
 			return c.kind, c.base
@@ -879,7 +907,7 @@ func defaultPrereqs() []prereqResult {
 // detectLocalRuntimeCmd runs detectReachableLocalRuntime off the bubbletea
 // Update loop and posts a localRuntimeDetectedMsg back to it. Worst-case
 // runtime is bounded by the loop in detectReachableLocalRuntime (250ms per
-// candidate × 3 candidates = 750ms), so the TUI never blocks.
+// candidate x 5 candidates = 1250ms), so the TUI never blocks.
 func detectLocalRuntimeCmd() tea.Cmd {
 	return func() tea.Msg {
 		kind, addr := detectReachableLocalRuntime()

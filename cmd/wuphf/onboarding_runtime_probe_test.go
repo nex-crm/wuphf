@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -16,7 +17,7 @@ func TestProbeLocalRuntimeAcceptsOpenAIShape(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	if !probeLocalRuntime(context.Background(), &http.Client{Timeout: time.Second}, srv.URL) {
+	if !probeLocalRuntime(context.Background(), &http.Client{Timeout: time.Second}, "ollama", srv.URL) {
 		t.Fatal("expected probeLocalRuntime to accept OpenAI-shaped 200 OK")
 	}
 }
@@ -33,8 +34,25 @@ func TestProbeLocalRuntimeAcceptsEmptyData(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	if !probeLocalRuntime(context.Background(), &http.Client{Timeout: time.Second}, srv.URL) {
+	if !probeLocalRuntime(context.Background(), &http.Client{Timeout: time.Second}, "ollama", srv.URL) {
 		t.Fatal("freshly-installed ollama (data:[]) must be treated as a real runtime")
+	}
+}
+
+func TestProbeLocalRuntimeSendsOpenclawGatewayToken(t *testing.T) {
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"openclaw/default","object":"model"}]}`))
+	}))
+	defer srv.Close()
+
+	t.Setenv("OPENCLAW_GATEWAY_TOKEN", "gateway-token")
+	if !probeLocalRuntime(context.Background(), &http.Client{Timeout: time.Second}, "openclaw-http", srv.URL) {
+		t.Fatal("expected authenticated OpenClaw probe to accept OpenAI-shaped 200 OK")
+	}
+	if !strings.EqualFold(gotAuth, "Bearer gateway-token") {
+		t.Fatalf("Authorization = %q, want OpenClaw gateway bearer token", gotAuth)
 	}
 }
 
@@ -63,7 +81,7 @@ func TestProbeLocalRuntimeRejectsArbitrary200(t *testing.T) {
 				_, _ = w.Write([]byte(body))
 			}))
 			defer srv.Close()
-			if probeLocalRuntime(context.Background(), &http.Client{Timeout: time.Second}, srv.URL) {
+			if probeLocalRuntime(context.Background(), &http.Client{Timeout: time.Second}, "ollama", srv.URL) {
 				t.Fatalf("probeLocalRuntime accepted non-OpenAI body %q", name)
 			}
 		})
@@ -81,7 +99,7 @@ func TestProbeLocalRuntimeRejectsNon2xx(t *testing.T) {
 				_, _ = w.Write([]byte(`{"object":"list","data":[]}`))
 			}))
 			defer srv.Close()
-			if probeLocalRuntime(context.Background(), &http.Client{Timeout: time.Second}, srv.URL) {
+			if probeLocalRuntime(context.Background(), &http.Client{Timeout: time.Second}, "ollama", srv.URL) {
 				t.Fatalf("probeLocalRuntime accepted status %d", s)
 			}
 		})
@@ -111,7 +129,7 @@ func TestProbeLocalRuntimeBoundedReadSize(t *testing.T) {
 
 	done := make(chan bool, 1)
 	go func() {
-		done <- probeLocalRuntime(context.Background(), &http.Client{Timeout: 2 * time.Second}, srv.URL)
+		done <- probeLocalRuntime(context.Background(), &http.Client{Timeout: 2 * time.Second}, "ollama", srv.URL)
 	}()
 	select {
 	case ok := <-done:

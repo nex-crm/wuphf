@@ -390,3 +390,13 @@ func TestHandleConfig_ProviderEndpointsRejectsMemberOnlyKinds(t *testing.T) {
 		t.Errorf("400 body did not name the offending kind: %s", rec.Body.String())
 	}
 }
+
+func TestHandleConfig_ProviderEndpointsAllowsOpenclawHTTPRuntime(t *testing.T) {
+	withWuphfHomeDir(t)
+	b := newTestBroker(t)
+	body := `{"provider_endpoints":{"openclaw-http":{"base_url":"http://127.0.0.1:18789/v1","model":"openclaw/default"}}}`
+	rec := configRequest(t, b, http.MethodPost, body)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for provider_endpoints[openclaw-http], got %d %s", rec.Code, rec.Body.String())
+	}
+}
