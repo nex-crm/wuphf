@@ -936,7 +936,7 @@ function getProcessPid(brokerProcess: UtilityProcessHandle | null): number | nul
 function diagnosticReportBytes(report: unknown): number | null {
   if (typeof report !== "string") return null;
   if (report.length > MAX_DIAGNOSTIC_REPORT_BYTES) return MAX_DIAGNOSTIC_REPORT_BYTES;
-  return Buffer.byteLength(report, "utf8");
+  return Math.min(Buffer.byteLength(report, "utf8"), MAX_DIAGNOSTIC_REPORT_BYTES);
 }
 
 function isAliveMessage(message: unknown): message is { readonly alive: true } {

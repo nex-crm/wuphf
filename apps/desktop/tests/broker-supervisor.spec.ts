@@ -243,6 +243,34 @@ describe("BrokerSupervisor", () => {
     expect(JSON.stringify(errorLog?.payload ?? {})).not.toContain(diagnosticReport);
   });
 
+  it("caps multi-byte utilityProcess diagnostic reports by encoded byte size", () => {
+    const diagnosticReport = "\u20ac".repeat(65_000);
+    const processHandle = new FakeUtilityProcess(4321);
+    const { forkProcess } = createForkMock([processHandle]);
+    const { logger, calls } = createMemoryLogger();
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+      logger,
+    });
+
+    expect(diagnosticReport.length).toBeLessThanOrEqual(64 * 1024);
+    expect(Buffer.byteLength(diagnosticReport, "utf8")).toBeGreaterThan(64 * 1024);
+
+    supervisor.start();
+    processHandle.emit("error", "FatalError", "v8.cc:123", diagnosticReport);
+
+    const errorLog = calls.find((call) => call.event === "broker_process_error");
+    expect(errorLog?.payload).toEqual({
+      type: "FatalError",
+      location: "v8.cc:123",
+      reportBytes: 64 * 1024,
+      pid: 4321,
+      restartCount: 0,
+    });
+    expect(JSON.stringify(errorLog?.payload ?? {})).not.toContain(diagnosticReport);
+  });
+
   it("redacts malformed utilityProcess error diagnostics without throwing", () => {
     const diagnosticReport = {
       env: "SECRET_TOKEN=must-not-leak",
