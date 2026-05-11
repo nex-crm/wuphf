@@ -8,7 +8,7 @@ import {
   type ExecFileRunner,
   runWindowsTaskkill,
 } from "../src/main/broker.ts";
-import type { Logger, LogPayload } from "../src/main/logger.ts";
+import { isSafePayloadKey, type Logger, type LogPayload } from "../src/main/logger.ts";
 
 const electronMock = vi.hoisted(() => ({
   fork: vi.fn(),
@@ -124,6 +124,45 @@ describe("BrokerSupervisor", () => {
     });
   });
 
+  it("rejects waiters queued before start when the initial fork throws", async () => {
+    const forkError = new Error("fork failed");
+    const forkProcess = vi.fn(() => {
+      throw forkError;
+    }) as unknown as ForkProcess;
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+    });
+
+    const ready = supervisor.whenReady();
+    expect(() => supervisor.start()).toThrow(forkError);
+
+    await expect(ready).rejects.toBe(forkError);
+    expect(supervisor.getStatus()).toBe("dead");
+  });
+
+  it("rejects waiters queued before start when the initial fork throws a non-Error", async () => {
+    const forkProcess = vi.fn(() => {
+      throw "fork failed";
+    }) as unknown as ForkProcess;
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+    });
+
+    const ready = supervisor.whenReady();
+    let thrown: unknown;
+    try {
+      supervisor.start();
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBe("fork failed");
+    await expect(ready).rejects.toThrow("fork failed");
+    expect(supervisor.getStatus()).toBe("dead");
+  });
+
   it("drains broker stdout and stderr pipes without buffering output", () => {
     const processHandle = new FakeUtilityProcess(4321);
     const { forkProcess } = createForkMock([processHandle]);
@@ -143,6 +182,11 @@ describe("BrokerSupervisor", () => {
   });
 
   it("logs utilityProcess error diagnostics without short-circuiting restart handling", () => {
+    const diagnosticReport = [
+      "Node.js diagnostic report",
+      "cwd=/Users/fran/work/wuphf",
+      "SECRET_TOKEN=must-not-leak",
+    ].join("\n");
     const processHandle = new FakeUtilityProcess(4321);
     const { forkProcess } = createForkMock([processHandle]);
     const { logger, calls } = createMemoryLogger();
@@ -153,23 +197,31 @@ describe("BrokerSupervisor", () => {
     });
 
     supervisor.start();
-    processHandle.emit("error", "FatalError", "v8.cc:123", "diagnostic report");
+    processHandle.emit("error", "FatalError", "v8.cc:123", diagnosticReport);
 
-    expect(calls).toContainEqual({
+    expect(isSafePayloadKey("report")).toBe(false);
+    expect(isSafePayloadKey("reportBytes")).toBe(true);
+    const errorLog = calls.find((call) => call.event === "broker_process_error");
+    expect(errorLog).toEqual({
       level: "error",
       event: "broker_process_error",
       payload: {
         type: "FatalError",
         location: "v8.cc:123",
-        report: "diagnostic report",
+        reportBytes: Buffer.byteLength(diagnosticReport, "utf8"),
         pid: 4321,
         restartCount: 0,
       },
     });
+    expect(errorLog?.payload).not.toHaveProperty("report");
+    expect(JSON.stringify(errorLog?.payload ?? {})).not.toContain(diagnosticReport);
     expect(supervisor.getStatus()).toBe("starting");
   });
 
   it("redacts malformed utilityProcess error diagnostics without throwing", () => {
+    const diagnosticReport = {
+      env: "SECRET_TOKEN=must-not-leak",
+    };
     const processHandle = new FakeUtilityProcess(4321);
     const { forkProcess } = createForkMock([processHandle]);
     const { logger, calls } = createMemoryLogger();
@@ -180,18 +232,20 @@ describe("BrokerSupervisor", () => {
     });
 
     supervisor.start();
-    processHandle.emit("error", { kind: "FatalError" }, undefined, "diagnostic report");
+    processHandle.emit("error", { kind: "FatalError" }, undefined, diagnosticReport);
 
-    expect(calls).toContainEqual({
+    const errorLog = calls.find((call) => call.event === "broker_process_error");
+    expect(errorLog).toEqual({
       level: "error",
       event: "broker_process_error",
       payload: {
-        report: "diagnostic report",
         pid: 4321,
         restartCount: 0,
         droppedKeys: 2,
       },
     });
+    expect(errorLog?.payload).not.toHaveProperty("report");
+    expect(JSON.stringify(errorLog?.payload ?? {})).not.toContain("SECRET_TOKEN");
     expect(supervisor.getStatus()).toBe("starting");
   });
 
@@ -1469,6 +1523,88 @@ describe("BrokerSupervisor — review-pass-2 regressions", () => {
     // called beyond the initial SIGTERM.
     const totalForceCalls = killProcess.mock.calls.length + processHandle.kill.mock.calls.length;
     expect(totalForceCalls).toBeGreaterThan(1);
+    vi.useRealTimers();
+  });
+
+  it("marks startup force-stop as fatal when Windows taskkill never yields an exit", async () => {
+    vi.useFakeTimers();
+    const processHandle = new FakeUtilityProcess(4321);
+    const { forkProcess } = createForkMock([processHandle]);
+    const runWindowsTaskkillMock = vi.fn<NonNullable<BrokerSupervisorConfig["runWindowsTaskkill"]>>(
+      () => Promise.reject(new Error("taskkill failed")),
+    );
+    const onFatal = vi.fn();
+    const { logger, calls } = createMemoryLogger();
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+      logger,
+      platform: "win32",
+      runWindowsTaskkill: runWindowsTaskkillMock,
+      onFatal,
+      startupTimeoutMs: 500,
+      forceStopGraceMs: 100,
+      maxRestartRetries: 3,
+    });
+
+    supervisor.start();
+    const ready = supervisor.whenReady();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(runWindowsTaskkillMock).toHaveBeenNthCalledWith(1, 4321, { force: false });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(runWindowsTaskkillMock).toHaveBeenNthCalledWith(2, 4321, { force: true });
+    await vi.advanceTimersByTimeAsync(100);
+
+    await expect(ready).rejects.toThrow("Broker startup force-stop deadline exceeded");
+    expect(supervisor.getStatus()).toBe("dead");
+    expect(supervisor.getPid()).toBeNull();
+    expect(onFatal).toHaveBeenCalledWith("Broker startup force-stop deadline exceeded");
+    expect(calls).toContainEqual({
+      level: "error",
+      event: "broker_startup_force_stop_failed",
+      payload: {
+        pid: 4321,
+        restartCount: 0,
+        reason: "Broker startup force-stop deadline exceeded",
+      },
+    });
+    vi.useRealTimers();
+  });
+
+  it("startup final deadline bails when force-stop exit wins the queued-callback race", async () => {
+    vi.useFakeTimers();
+    const processHandle = new FakeUtilityProcess(4321);
+    const { forkProcess } = createForkMock([processHandle]);
+    const killProcess = vi.fn<KillProcess>((_pid, signal) => {
+      if (signal === "SIGKILL") {
+        setTimeout(() => processHandle.emit("exit", -1), 0);
+      }
+    });
+    const onFatal = vi.fn();
+    const { logger, calls } = createMemoryLogger();
+    const supervisor = new BrokerSupervisor({
+      brokerEntryPath: "/app/out/main/broker-stub.js",
+      forkProcess,
+      logger,
+      killProcess,
+      onFatal,
+      startupTimeoutMs: 500,
+      forceStopGraceMs: 100,
+      firstBackoffMs: 10_000,
+      maxRestartRetries: 3,
+    });
+
+    supervisor.start();
+    vi.advanceTimersByTime(500);
+    const clearSpy = vi.spyOn(globalThis, "clearTimeout").mockImplementation(() => undefined);
+    await vi.advanceTimersByTimeAsync(100);
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(100);
+    clearSpy.mockRestore();
+
+    expect(calls.some((call) => call.event === "broker_startup_force_stop_failed")).toBe(false);
+    expect(onFatal).not.toHaveBeenCalled();
+    await supervisor.stop();
     vi.useRealTimers();
   });
 

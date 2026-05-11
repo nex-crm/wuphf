@@ -118,6 +118,7 @@ export class BrokerSupervisor {
   private restartTimer: NodeJS.Timeout | null = null;
   private startupTimer: NodeJS.Timeout | null = null;
   private startupForceTimer: NodeJS.Timeout | null = null;
+  private startupFinalTimer: NodeJS.Timeout | null = null;
   // Per-handle set so the message handler can drop ready/alive/broker_log
   // messages that arrive between the watchdog firing and the subprocess
   // actually exiting. Without this, a queued `{ ready }` racing the
@@ -190,6 +191,7 @@ export class BrokerSupervisor {
     } catch (error) {
       this.status = "dead";
       this.startedAtMs = null;
+      this.rejectReadyWaiters(error instanceof Error ? error : new Error(errorMessage(error)));
       this.logger.error("broker_start_failed", {
         error: errorMessage(error),
         restartCount: this.restartCount,
@@ -502,10 +504,11 @@ export class BrokerSupervisor {
     location: unknown,
     report: unknown,
   ): void {
+    const reportBytes = diagnosticReportBytes(report);
     const { safePayload, droppedKeyCount } = filterPayloadToSafeKeys({
       type,
       location,
-      report,
+      ...(reportBytes === null ? {} : { reportBytes }),
       pid: getProcessPid(brokerProcess),
       restartCount: this.restartCount,
     });
@@ -757,6 +760,13 @@ export class BrokerSupervisor {
           return;
         }
         this.forceStop(brokerProcess);
+        this.startupFinalTimer = setTimeout(() => {
+          this.startupFinalTimer = null;
+          if (this.brokerProcess !== brokerProcess) {
+            return;
+          }
+          this.markStartupForceStopFailed(brokerProcess);
+        }, this.forceStopGraceMs);
       }, this.forceStopGraceMs);
     }, this.startupTimeoutMs);
   }
@@ -770,6 +780,28 @@ export class BrokerSupervisor {
       clearTimeout(this.startupForceTimer);
       this.startupForceTimer = null;
     }
+    if (this.startupFinalTimer !== null) {
+      clearTimeout(this.startupFinalTimer);
+      this.startupFinalTimer = null;
+    }
+  }
+
+  private markStartupForceStopFailed(brokerProcess: UtilityProcessHandle): void {
+    const reason = "Broker startup force-stop deadline exceeded";
+    this.brokerProcess = null;
+    this.status = "dead";
+    this.startedAtMs = null;
+    this.aliveSinceMs = null;
+    this.lastPingAtMs = null;
+    this.brokerUrl = null;
+    this.fatalReason = reason;
+    this.logger.error("broker_startup_force_stop_failed", {
+      pid: getProcessPid(brokerProcess),
+      restartCount: this.restartCount,
+      reason,
+    });
+    this.rejectReadyWaiters(new Error(reason));
+    this.onFatal?.(reason);
   }
 
   // Re-emit a `{ broker_log }` message from the broker subprocess through the
@@ -787,12 +819,11 @@ export class BrokerSupervisor {
       return;
     }
     const { safePayload, droppedKeyCount } = filterPayloadToSafeKeys(log.payload);
-    const safePayloadWithoutReservedCounter: BrokerLogForwardPayload = { ...safePayload };
-    delete safePayloadWithoutReservedCounter.droppedKeys;
-    const finalPayload: BrokerLogForwardPayload = {
-      ...safePayloadWithoutReservedCounter,
-      ...(droppedKeyCount > 0 ? { droppedKeys: droppedKeyCount } : {}),
-    };
+    const finalPayload: BrokerLogForwardPayload = safePayload;
+    delete finalPayload.droppedKeys;
+    if (droppedKeyCount > 0) {
+      finalPayload.droppedKeys = droppedKeyCount;
+    }
     try {
       this.logger[log.broker_log](`broker_${event}`, finalPayload);
     } catch {
@@ -895,6 +926,10 @@ export function buildBrokerEnv(envSource: NodeJS.ProcessEnv): Record<string, str
 function getProcessPid(brokerProcess: UtilityProcessHandle | null): number | null {
   const pid = brokerProcess?.pid;
   return typeof pid === "number" ? pid : null;
+}
+
+function diagnosticReportBytes(report: unknown): number | null {
+  return typeof report === "string" ? Buffer.byteLength(report, "utf8") : null;
 }
 
 function isAliveMessage(message: unknown): message is { readonly alive: true } {

@@ -67,7 +67,7 @@ const SAFE_PAYLOAD_KEYS = new Set([
   "port",
   "processType",
   "reason",
-  "report",
+  "reportBytes",
   "rendererKind",
   "restartCount",
   "serviceName",
