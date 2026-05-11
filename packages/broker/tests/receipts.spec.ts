@@ -133,6 +133,14 @@ function rawPostStatus(
         res.resume(); // discard body
       },
     );
+    // Deterministic timeout: if the server never responds (a regression
+    // where the CL pre-check stops firing would otherwise hang the test
+    // indefinitely because we intentionally skip req.end() in the over-
+    // declared branch), abort the socket so the test fails cleanly
+    // instead of hitting CI's job-level timeout.
+    req.setTimeout(2_000, () => {
+      req.destroy(new Error("rawPostStatus timeout"));
+    });
     req.on("error", (err) => {
       if (!resolved) rejectFn(err);
     });
@@ -147,16 +155,10 @@ function rawPostStatus(
   });
 }
 
-// Stream a chunked-encoded POST without `Content-Length`. Used to exercise
-// the streaming-overflow arm of readBodyAsString: the server's Content-
-// Length pre-check is skipped (no header), so the budget gate must fire
-// inside the `data` event handler once cumulative bytes exceed the cap.
-//
-// Yields one chunk per microtask tick so the server has a chance to write
-// the 413 + Connection:close before we finish writing — the test still
-// works if the server is faster, since node:http surfaces the response
-// via the response callback before the request stream's `error` event
-// even when the underlying socket is mid-write.
+// POST a receipt to the broker via fetch. Accepts either a JSON string or
+// an object (which will be stringified). `opts` lets a test override the
+// bearer token (e.g. omit for the missing-bearer test) or the
+// Content-Type header (for the 415 / charset cases).
 async function postReceipt(
   brokerUrl: string,
   body: string | object,
@@ -289,6 +291,40 @@ describe("receipts API", () => {
       expect(res.status).toBe(405);
       expect(res.headers.get("allow")).toBe("POST");
     });
+
+    it("rejects non-loopback Host header (DNS-rebinding guard)", async () => {
+      // The new POST route must inherit the loopback gate. fetch
+      // overwrites the Host header from the URL, so use raw node:http
+      // to send a forged Host through.
+      broker = await createBroker({ port: 0, token: FIXED_TOKEN });
+      const u = new URL(broker.url);
+      const body = receiptToJson(minimalReceiptV1(RECEIPT_ID_A));
+      const status = await new Promise<number>((resolveFn, rejectFn) => {
+        const req = httpRequest(
+          {
+            host: u.hostname,
+            port: Number(u.port),
+            path: "/api/receipts",
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${FIXED_TOKEN}`,
+              "Content-Type": "application/json",
+              "Content-Length": String(Buffer.byteLength(body)),
+              Host: "evil.example.com",
+            },
+          },
+          (res) => {
+            resolveFn(res.statusCode ?? 0);
+            res.resume();
+          },
+        );
+        req.setTimeout(2_000, () => req.destroy(new Error("loopback-gate timeout")));
+        req.on("error", rejectFn);
+        req.write(body);
+        req.end();
+      });
+      expect(status).toBe(403);
+    });
   });
 
   describe("GET /api/receipts/:id", () => {
@@ -385,6 +421,44 @@ describe("receipts API", () => {
         headers: { Authorization: `Bearer ${FIXED_TOKEN}` },
       });
       expect(res.status).toBe(404);
+    });
+
+    it("rejects GET without bearer (default-deny gate)", async () => {
+      broker = await createBroker({ port: 0, token: FIXED_TOKEN });
+      const res = await fetch(`${broker.url}/api/threads/${THREAD_ID_A}/receipts`);
+      expect(res.status).toBe(401);
+    });
+
+    it("rejects non-loopback Host header (DNS-rebinding guard)", async () => {
+      // The loopback gate is shared by every route; the receipt routes
+      // must NOT escape it. Send a request with a non-loopback Host header
+      // via raw node:http (fetch normalizes the Host so the test needs
+      // direct control). The guard rejects with 403 before any route
+      // dispatch runs.
+      broker = await createBroker({ port: 0, token: FIXED_TOKEN });
+      const u = new URL(broker.url);
+      const status = await new Promise<number>((resolveFn, rejectFn) => {
+        const req = httpRequest(
+          {
+            host: u.hostname,
+            port: Number(u.port),
+            path: `/api/threads/${THREAD_ID_A}/receipts`,
+            method: "GET",
+            headers: {
+              Authorization: `Bearer ${FIXED_TOKEN}`,
+              Host: "evil.example.com",
+            },
+          },
+          (res) => {
+            resolveFn(res.statusCode ?? 0);
+            res.resume();
+          },
+        );
+        req.setTimeout(2_000, () => req.destroy(new Error("loopback-gate timeout")));
+        req.on("error", rejectFn);
+        req.end();
+      });
+      expect(status).toBe(403);
     });
 
     it("truncates the list response at MAX_THREAD_LIST_RECEIPTS (1000)", async () => {

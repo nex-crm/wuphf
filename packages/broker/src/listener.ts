@@ -236,17 +236,24 @@ async function routeRequest(
   // that has not yet learned the bootstrap token. Subsequent renderer
   // calls go to /api/* and DO carry the bearer (enforced above).
   //
-  // Static serving accepts only GET/HEAD — any other method on a static
-  // path is a 405. Without this gate a POST to `/foo.js` would be answered
-  // by serving the file (Node strips body writes for non-HEAD but the
-  // semantic is wrong — clients should learn the resource doesn't support
-  // their method).
-  if (req.method !== "GET" && req.method !== "HEAD") {
-    methodNotAllowed(res);
-    return;
+  // Static serving accepts only GET/HEAD — any other method on a known
+  // static path is a 405. Without this gate a POST to `/foo.js` would be
+  // answered by serving the file (Node strips body writes for non-HEAD
+  // but the semantic is wrong — clients should learn the resource doesn't
+  // support their method). The 405 is scoped to *known* static paths
+  // (`/`, `/index.html`, `/assets/*`); a POST to an unknown non-API path
+  // like `/no-such-route` falls through to 404 instead of falsely
+  // advertising "GET, HEAD" via Allow.
+  const isKnownStaticPath =
+    pathname === "/" || pathname === "/index.html" || pathname.startsWith("/assets/");
+  if (isKnownStaticPath) {
+    if (req.method !== "GET" && req.method !== "HEAD") {
+      methodNotAllowed(res);
+      return;
+    }
+    const handled = await deps.staticHandler.serve(pathname, res);
+    if (handled) return;
   }
-  const handled = await deps.staticHandler.serve(pathname, res);
-  if (handled) return;
 
   notFound(res);
 }
@@ -356,9 +363,12 @@ function authorize(
 // Bucket an `/api/...` pathname into a fixed enum of known route families.
 // Anything else (or shapes attackers could exploit to inflate logs) falls
 // into `unknown`. Keeping cardinality bounded makes the log surface
-// predictable for alerts.
+// predictable for alerts. The exact namespace root `/api` is its own
+// family — collapsing it into `health` would mislabel bearerless hits
+// at the namespace boundary as if they were targeting the health probe.
 function classifyApiRoute(pathname: string): string {
-  if (pathname === "/api" || pathname === "/api/health") return "health";
+  if (pathname === "/api") return "api_root";
+  if (pathname === "/api/health") return "health";
   if (pathname === "/api/events") return "events";
   if (pathname === "/api/receipts") return "receipts";
   if (pathname.startsWith("/api/receipts/")) return "receipt";

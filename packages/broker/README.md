@@ -42,7 +42,7 @@ await broker.stop();
 | GET | `/api-token` | none (loopback only) | Returns `{ token, broker_url }` (snake_case wire). |
 | GET | `/api/health` | bearer | Returns `{ "ok": true }`. |
 | GET | `/api/events` | bearer | SSE stream; emits `ready` then keepalive comments. |
-| POST | `/api/receipts` | bearer | Body: receipt JSON. 201 + canonical body on insert, 409 on `id` collision, 400 on parse/validation, 413 on `> 1 MiB`, 415 on non-JSON content-type. |
+| POST | `/api/receipts` | bearer | Body: receipt JSON. 201 + canonical body on insert, 409 on `id` collision, 400 on parse/validation, 413 on `> 1 MiB`, 415 on non-JSON content-type, 507 `{"error":"store_full"}` when the in-memory store reaches `maxReceipts`. |
 | GET | `/api/receipts/:id` | bearer | 200 + receipt JSON on hit, 404 on miss or malformed id. |
 | GET | `/api/threads/:tid/receipts` | bearer | JSON array of V2 receipts in the thread, 404 on malformed thread id. |
 | GET | `/`, `/index.html` | none (loopback) | Renderer bundle (404 if `renderer: null`). |
