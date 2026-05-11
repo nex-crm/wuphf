@@ -23,6 +23,7 @@ const RECEIPT_ID_B = "01ARZ3NDEKTSV4RRFFQ69G5FAY";
 const TASK_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAW";
 const THREAD_ID_A = "01ARZ3NDEKTSV4RRFFQ69G5FAZ";
 const THREAD_ID_B = "01ARZ3NDEKTSV4RRFFQ69G5FB0";
+const ULID_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
 // Builds a minimal valid Receipt v1 (no thread). Receipt validation is
 // strict; every required field must be present. Branch 5 covers the wire
@@ -94,6 +95,33 @@ function minimalReceiptV2(idStr: string, threadIdStr: string): ReceiptSnapshot {
     wikiWrites: [],
     schemaVersion: 2,
   };
+}
+
+function indexedReceiptId(index: number): string {
+  let suffix = "";
+  for (let k = 3; k >= 0; k--) {
+    suffix += ULID_ALPHABET[(index >> (k * 5)) & 31];
+  }
+  return `01ARZ3NDEKTSV4RRFFQ69G${suffix}`;
+}
+
+async function seedThreadReceipts(
+  store: InMemoryReceiptStore,
+  count: number,
+  threadId: string = THREAD_ID_A,
+): Promise<void> {
+  for (let i = 0; i < count; i++) {
+    await store.put(minimalReceiptV2(indexedReceiptId(i), threadId));
+  }
+}
+
+function nextLinkPath(headers: Headers): string {
+  const link = headers.get("link");
+  const match = link === null ? null : /^<([^>]+)>; rel="next"$/.exec(link);
+  if (match === null || match[1] === undefined) {
+    throw new Error(`bad Link header: ${link ?? "<missing>"}`);
+  }
+  return match[1];
 }
 
 // Raw node:http POST that returns just the response status. The
@@ -422,6 +450,86 @@ describe("receipts API", () => {
       }
     });
 
+    it("returns a Link header on the first page when more receipts exist", async () => {
+      const store = new InMemoryReceiptStore();
+      await seedThreadReceipts(store, 5);
+      broker = await createBroker({ port: 0, token: FIXED_TOKEN, receiptStore: store });
+
+      const res = await fetch(`${broker.url}/api/threads/${THREAD_ID_A}/receipts?limit=2`, {
+        headers: { Authorization: `Bearer ${FIXED_TOKEN}` },
+      });
+
+      expect(res.status).toBe(200);
+      const parsed = JSON.parse(await res.text()) as Array<{ id: string }>;
+      expect(parsed.length).toBe(2);
+      const next = new URL(nextLinkPath(res.headers), broker.url);
+      expect(next.pathname).toBe(`/api/threads/${THREAD_ID_A}/receipts`);
+      expect(next.searchParams.get("cursor")).toBeTruthy();
+      expect(next.searchParams.get("limit")).toBe("2");
+    });
+
+    it("omits the Link header on the last page", async () => {
+      const store = new InMemoryReceiptStore();
+      await seedThreadReceipts(store, 5);
+      broker = await createBroker({ port: 0, token: FIXED_TOKEN, receiptStore: store });
+
+      const first = await fetch(`${broker.url}/api/threads/${THREAD_ID_A}/receipts?limit=2`, {
+        headers: { Authorization: `Bearer ${FIXED_TOKEN}` },
+      });
+      const second = await fetch(new URL(nextLinkPath(first.headers), broker.url).toString(), {
+        headers: { Authorization: `Bearer ${FIXED_TOKEN}` },
+      });
+      const last = await fetch(new URL(nextLinkPath(second.headers), broker.url).toString(), {
+        headers: { Authorization: `Bearer ${FIXED_TOKEN}` },
+      });
+
+      expect(last.status).toBe(200);
+      const parsed = JSON.parse(await last.text()) as Array<{ id: string }>;
+      expect(parsed.length).toBe(1);
+      expect(last.headers.get("link")).toBeNull();
+    });
+
+    it("uses the default list limit when no limit query is present", async () => {
+      const store = new InMemoryReceiptStore({ maxReceipts: 200 });
+      await seedThreadReceipts(store, 150);
+      broker = await createBroker({ port: 0, token: FIXED_TOKEN, receiptStore: store });
+
+      const res = await fetch(`${broker.url}/api/threads/${THREAD_ID_A}/receipts`, {
+        headers: { Authorization: `Bearer ${FIXED_TOKEN}` },
+      });
+
+      expect(res.status).toBe(200);
+      const parsed = JSON.parse(await res.text()) as Array<{ id: string }>;
+      expect(parsed.length).toBe(100);
+      const linkPath = nextLinkPath(res.headers);
+      expect(linkPath).not.toContain("limit=");
+    });
+
+    it("returns invalid_limit for a zero limit query", async () => {
+      broker = await createBroker({ port: 0, token: FIXED_TOKEN });
+
+      const res = await fetch(`${broker.url}/api/threads/${THREAD_ID_A}/receipts?limit=0`, {
+        headers: { Authorization: `Bearer ${FIXED_TOKEN}` },
+      });
+
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ error: "invalid_limit" });
+    });
+
+    it("returns invalid_cursor for a malformed cursor query", async () => {
+      broker = await createBroker({ port: 0, token: FIXED_TOKEN });
+
+      const res = await fetch(
+        `${broker.url}/api/threads/${THREAD_ID_A}/receipts?cursor=not%21base64`,
+        {
+          headers: { Authorization: `Bearer ${FIXED_TOKEN}` },
+        },
+      );
+
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ error: "invalid_cursor" });
+    });
+
     it("excludes V1 receipts (which have no threadId)", async () => {
       broker = await createBroker({ port: 0, token: FIXED_TOKEN });
       // V1 has no threadId; the secondary index never sees it. Storing
@@ -442,6 +550,7 @@ describe("receipts API", () => {
       });
       expect(res.status).toBe(200);
       expect(await res.text()).toBe("[]");
+      expect(res.headers.get("link")).toBeNull();
     });
 
     it("returns 404 for a malformed thread id (not a ULID)", async () => {
@@ -488,37 +597,6 @@ describe("receipts API", () => {
         req.end();
       });
       expect(status).toBe(403);
-    });
-
-    it("truncates the list response at MAX_THREAD_LIST_RECEIPTS (1000)", async () => {
-      // Insert 1001 V2 receipts in the same thread via a direct store, then
-      // route the list through the broker. The truncation cap is enforced
-      // at the route layer (the store has no list-size cap), so we need to
-      // push past 1000 to observe the slice fire. 1001 in-memory inserts
-      // run in ~10ms; cheap enough for a deterministic assertion.
-      const store = new InMemoryReceiptStore({ maxReceipts: 2000 });
-      const template = minimalReceiptV2(RECEIPT_ID_A, THREAD_ID_A);
-      // Crockford base32 alphabet (ULID-compatible).
-      const ALPH = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
-      const seen = new Set<string>();
-      for (let i = 0; i < 1001; i++) {
-        // 22-char prefix + 4-char index suffix = 26-char ULID.
-        let suffix = "";
-        for (let k = 3; k >= 0; k--) {
-          suffix += ALPH[(i >> (k * 5)) & 31];
-        }
-        const id = `01ARZ3NDEKTSV4RRFFQ69G${suffix}`;
-        seen.add(id);
-        await store.put({ ...template, id: asReceiptId(id) });
-      }
-      expect(seen.size).toBe(1001); // sanity: ULID generator produces unique ids
-      broker = await createBroker({ port: 0, token: FIXED_TOKEN, receiptStore: store });
-      const res = await fetch(`${broker.url}/api/threads/${THREAD_ID_A}/receipts`, {
-        headers: { Authorization: `Bearer ${FIXED_TOKEN}` },
-      });
-      expect(res.status).toBe(200);
-      const arr = JSON.parse(await res.text()) as unknown[];
-      expect(arr.length).toBe(1000);
     });
   });
 

@@ -25,6 +25,7 @@ import { realpathSync } from "node:fs";
 import { type FileHandle, open, realpath } from "node:fs/promises";
 import type { ServerResponse } from "node:http";
 import { isAbsolute, resolve, sep } from "node:path";
+import { pipeline } from "node:stream/promises";
 
 import type { RendererBundleSource } from "./types.ts";
 
@@ -134,7 +135,8 @@ export function createStaticHandler(source: RendererBundleSource | null): Static
       // operates on the inode that existed at open() time, so an attacker
       // swapping the path target between the realpath check and the read
       // can't redirect the bytes — the inode behind the FD is locked.
-      // `handle.createReadStream` auto-closes on stream end/error.
+      // `pipeFromHandle` leaves the opened FileHandle alive; the finally block
+      // below is the single owner responsible for closing it.
       let handle: FileHandle;
       try {
         handle = await open(realAbsolute, "r");
@@ -142,7 +144,6 @@ export function createStaticHandler(source: RendererBundleSource | null): Static
         notFound(res);
         return true;
       }
-      let handleClosed = false;
       try {
         const info = await handle.stat();
         if (!info.isFile()) {
@@ -164,7 +165,6 @@ export function createStaticHandler(source: RendererBundleSource | null): Static
         // server header takes precedence.
         res.setHeader("Content-Security-Policy", RENDERER_CSP);
         await pipeFromHandle(handle, res);
-        handleClosed = true; // createReadStream auto-closes on end.
       } catch {
         // pipeFromHandle may have already flushed headers + bytes before
         // the stream errored mid-pipe (e.g., disk read failure on a large
@@ -180,9 +180,7 @@ export function createStaticHandler(source: RendererBundleSource | null): Static
           res.end();
         }
       } finally {
-        if (!handleClosed) {
-          await handle.close().catch(() => undefined);
-        }
+        await handle.close().catch(() => undefined);
       }
       return true;
     },
@@ -228,11 +226,6 @@ function notFound(res: ServerResponse): void {
   res.end("not_found");
 }
 
-function pipeFromHandle(handle: FileHandle, res: ServerResponse): Promise<void> {
-  return new Promise((resolveFn, rejectFn) => {
-    const stream = handle.createReadStream();
-    stream.on("error", rejectFn);
-    stream.on("end", () => resolveFn());
-    stream.pipe(res);
-  });
+async function pipeFromHandle(handle: FileHandle, res: ServerResponse): Promise<void> {
+  await pipeline(handle.createReadStream({ autoClose: false }), res);
 }

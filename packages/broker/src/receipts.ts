@@ -25,7 +25,12 @@ import {
   type ThreadId,
 } from "@wuphf/protocol";
 
-import { type ReceiptStore, ReceiptStoreFullError } from "./receipt-store.ts";
+import {
+  InvalidListCursorError,
+  InvalidListLimitError,
+  type ReceiptStore,
+  ReceiptStoreFullError,
+} from "./receipt-store.ts";
 import type { BrokerLogger } from "./types.ts";
 
 // 1 MiB body budget. This is the broker's wire-layer pre-parse cap and is
@@ -40,15 +45,7 @@ import type { BrokerLogger } from "./types.ts";
 // this value if a future use case needs to submit larger receipts over
 // HTTP, but do NOT raise it past the protocol cap.
 const MAX_RECEIPT_BODY_BYTES = 1_048_576;
-
-// Hard ceiling for thread-scoped list responses. Without a limit a single
-// thread can accumulate enough receipts to make `GET /api/threads/:tid/
-// receipts` a memory-pressure path (the response is materialized as one
-// JSON-array string before send). Cursor-aware pagination handling on
-// this route lands in a follow-up commit in branch 6 (along with `Link:
-// rel="next"`); until then the route requests the first page from the
-// store at the maximum allowed limit, preserving the branch-5 wire shape.
-const MAX_THREAD_LIST_RECEIPTS = 1_000;
+const LIST_LIMIT_PARAM = /^[1-9][0-9]*$/;
 
 interface ReceiptRouteDeps {
   readonly receiptStore: ReceiptStore;
@@ -198,11 +195,13 @@ export async function handleReceiptGet(
 }
 
 export async function handleThreadReceiptsList(
-  pathname: string,
+  req: IncomingMessage,
   res: ServerResponse,
   deps: { readonly receiptStore: ReceiptStore },
 ): Promise<void> {
   // /api/threads/:tid/receipts — extract :tid and require an exact match.
+  const url = new URL(req.url ?? "/", "http://127.0.0.1");
+  const pathname = url.pathname;
   const prefix = "/api/threads/";
   const suffix = "/receipts";
   if (!pathname.startsWith(prefix) || !pathname.endsWith(suffix)) {
@@ -231,13 +230,68 @@ export async function handleThreadReceiptsList(
     return;
   }
 
-  const page = await deps.receiptStore.list({ threadId, limit: MAX_THREAD_LIST_RECEIPTS });
-  // Branch-5 wire shape is a bare JSON array. The cursor-aware route
-  // signature (`?cursor=&limit=`, `Link: rel="next"` header) lands in a
-  // follow-up commit on this branch — until then we always request the
-  // first page at the max limit so behavior is identical to before.
+  const limitParam = parseListLimitParam(url.searchParams);
+  if (limitParam === "invalid") {
+    writeJsonResponse(res, 400, JSON.stringify({ error: "invalid_limit" }));
+    return;
+  }
+
+  const cursor = url.searchParams.has("cursor")
+    ? (url.searchParams.get("cursor") ?? "")
+    : undefined;
+
+  let page: Awaited<ReturnType<ReceiptStore["list"]>>;
+  try {
+    page = await deps.receiptStore.list({
+      threadId,
+      ...(cursor !== undefined ? { cursor } : {}),
+      ...(limitParam !== undefined ? { limit: limitParam.value } : {}),
+    });
+  } catch (err) {
+    if (err instanceof InvalidListCursorError) {
+      writeJsonResponse(res, 400, JSON.stringify({ error: "invalid_cursor" }));
+      return;
+    }
+    if (err instanceof InvalidListLimitError) {
+      writeJsonResponse(res, 400, JSON.stringify({ error: "invalid_limit" }));
+      return;
+    }
+    throw err;
+  }
+
   const body = `[${page.items.map((r) => receiptToJson(r)).join(",")}]`;
-  writeJsonResponse(res, 200, body);
+  const headers =
+    page.nextCursor === null
+      ? {}
+      : {
+          Link: buildThreadReceiptsNextLink(threadId, page.nextCursor, limitParam?.raw),
+        };
+  writeJsonResponse(res, 200, body, headers);
+}
+
+function parseListLimitParam(
+  searchParams: URLSearchParams,
+): { readonly raw: string; readonly value: number } | "invalid" | undefined {
+  if (!searchParams.has("limit")) {
+    return undefined;
+  }
+  const raw = searchParams.get("limit") ?? "";
+  if (!LIST_LIMIT_PARAM.test(raw)) {
+    return "invalid";
+  }
+  return { raw, value: Number(raw) };
+}
+
+function buildThreadReceiptsNextLink(
+  threadId: ThreadId,
+  cursor: string,
+  limit: string | undefined,
+): string {
+  const query = [`cursor=${encodeURIComponent(cursor)}`];
+  if (limit !== undefined) {
+    query.push(`limit=${encodeURIComponent(limit)}`);
+  }
+  return `</api/threads/${encodeURIComponent(threadId)}/receipts?${query.join("&")}>; rel="next"`;
 }
 
 function notFoundJson(res: ServerResponse): void {

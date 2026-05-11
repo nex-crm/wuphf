@@ -44,10 +44,20 @@ await broker.stop();
 | GET | `/api/events` | bearer | SSE stream; emits `ready` then keepalive comments. |
 | POST | `/api/receipts` | bearer | Body: receipt JSON. 201 + canonical body on insert, 409 on `id` collision, 400 on parse/validation, 413 on `> 1 MiB`, 415 on non-JSON content-type, 507 `{"error":"store_full"}` when the in-memory store reaches `maxReceipts`. |
 | GET | `/api/receipts/:id` | bearer | 200 + receipt JSON on hit, 404 on miss or malformed id. |
-| GET | `/api/threads/:tid/receipts` | bearer | JSON array of V2 receipts in the thread (truncated at 1000 items; cursor pagination lands in branch 6, so clients seeing a 1000-item array should treat it as "more may exist"), 404 on malformed thread id. |
+| GET | `/api/threads/:tid/receipts` | bearer | JSON array of V2 receipts in the thread. Supports `?cursor=<opaque>` and `?limit=<positive integer>` pagination; responses include `Link: <...>; rel="next"` when another page exists. Returns 400 on invalid cursor/limit and 404 on malformed thread id. |
 | GET | `/`, `/index.html` | none (loopback) | Renderer bundle (404 if `renderer: null`). |
 | GET | `/assets/*` | none (loopback) | Static assets under the renderer dir. |
 | WS | `/terminal/agents/:slug?token=` | token + loopback origin | Branch-4 closes with `1011 not_implemented`. |
+
+Receipt thread-list pagination keeps the response body as a bare JSON array. Follow
+the RFC 8288 `Link` header to continue:
+
+```http
+GET /api/threads/01ARZ3NDEKTSV4RRFFQ69G5FAZ/receipts?limit=2
+Link: </api/threads/01ARZ3NDEKTSV4RRFFQ69G5FAZ/receipts?cursor=bHNuOjI&limit=2>; rel="next"
+
+GET /api/threads/01ARZ3NDEKTSV4RRFFQ69G5FAZ/receipts?cursor=bHNuOjI&limit=2
+```
 
 ## Invariants
 

@@ -217,7 +217,7 @@ async function routeRequest(
       methodNotAllowed(res);
       return;
     }
-    await handleThreadReceiptsList(pathname, res, { receiptStore: deps.receiptStore });
+    await handleThreadReceiptsList(req, res, { receiptStore: deps.receiptStore });
     return;
   }
   // Authenticated catch-all for unknown `/api/*` routes. Without this,
