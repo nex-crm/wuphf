@@ -207,12 +207,14 @@ function parseBootstrap(value: unknown): ParsedBootstrap {
   // break downstream string concatenation (`${brokerUrl}/api/health`
   // becomes garbage when the brokerUrl already has a path). Mirror the
   // protocol codec's assertApiBootstrapBrokerUrl byte-for-byte.
+  const isCanonicalBrokerOrigin = brokerUrl === parsed.origin || brokerUrl === `${parsed.origin}/`;
   if (
     parsed.username !== "" ||
     parsed.password !== "" ||
     parsed.search !== "" ||
     parsed.hash !== "" ||
-    (parsed.pathname !== "" && parsed.pathname !== "/")
+    (parsed.pathname !== "" && parsed.pathname !== "/") ||
+    !isCanonicalBrokerOrigin
   ) {
     throw new Error(
       "api-token response: broker_url must have no userinfo, path, query, or fragment",

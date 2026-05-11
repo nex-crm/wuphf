@@ -309,11 +309,13 @@ describe("createSecureWindow", () => {
     // Pass-3 triangulation (types lens MEDIUM): `isLocalHttpRendererUrl`
     // accepts these shapes because protocol+host+port pass. The full
     // BrokerUrl brand (`@wuphf/protocol#isBrokerUrl`) rejects them so
-    // `${"u"}:${"p"}@127.0.0.1:54321`, `/api-token`, `?x=1`, and `#frag`
-    // can't be smuggled past the broker-URL gate into `loadURL`.
+    // `${"u"}:${"p"}@127.0.0.1:54321`, `/api-token`, encoded dot segments,
+    // `?x=1`, and `#frag` can't be smuggled past the broker-URL gate into
+    // `loadURL`.
     const cases = [
       `http://${"u"}:${"p"}@127.0.0.1:54321/`,
       "http://127.0.0.1:54321/api-token",
+      "http://127.0.0.1:54321/%2e%2e",
       "http://127.0.0.1:54321?x=1",
       "http://127.0.0.1:54321#frag",
     ];

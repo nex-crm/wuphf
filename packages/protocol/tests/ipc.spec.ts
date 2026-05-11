@@ -301,11 +301,16 @@ describe("IPC brand constructors", () => {
         /no userinfo, path, query, or fragment/,
       );
       expect(() => asBrokerUrl("http://127.0.0.1:54321/api-token")).toThrow();
+      expect(() => asBrokerUrl("http://127.0.0.1:54321/foo")).toThrow();
+      expect(() => asBrokerUrl("http://127.0.0.1:54321/%2e")).toThrow();
+      expect(() => asBrokerUrl("http://127.0.0.1:54321/%2e%2e")).toThrow();
+      expect(() => asBrokerUrl("http://127.0.0.1:54321/%2E%2E")).toThrow();
       expect(() => asBrokerUrl("http://127.0.0.1:54321?x=1")).toThrow();
       expect(() => asBrokerUrl("http://127.0.0.1:54321#frag")).toThrow();
       expect(() => asBrokerUrl(`http://${userinfo}127.0.0.1:54321/api-token?x=1#f`)).toThrow();
       expect(isBrokerUrl(`http://${userinfo}127.0.0.1:54321`)).toBe(false);
       expect(isBrokerUrl("http://127.0.0.1:54321/foo")).toBe(false);
+      expect(isBrokerUrl("http://127.0.0.1:54321/%2e%2e")).toBe(false);
     });
   });
 
@@ -1341,6 +1346,10 @@ describe("apiBootstrap codec", () => {
     // detector doesn't flag the literal string.
     [`http://${"u"}:${"p"}@127.0.0.1:54321`, "URL with userinfo"],
     ["http://127.0.0.1:54321/api-token", "URL with non-root path"],
+    ["http://127.0.0.1:54321/foo", "URL with non-root path"],
+    ["http://127.0.0.1:54321/%2e", "URL with encoded dot path segment"],
+    ["http://127.0.0.1:54321/%2e%2e", "URL with encoded dot-dot path segment"],
+    ["http://127.0.0.1:54321/%2E%2E", "URL with encoded uppercase dot-dot path segment"],
     ["http://127.0.0.1:54321?x=1", "URL with query"],
     ["http://127.0.0.1:54321#frag", "URL with fragment"],
   ])("rejects encoder-side broker_url that the decoder would reject (%s — %s)", (brokerUrl) => {

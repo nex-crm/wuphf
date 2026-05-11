@@ -290,6 +290,9 @@ function assertApiBootstrapBrokerUrl(brokerUrl: string): void {
   // concatenated fetch URL would be malformed and the userinfo would
   // leak as a request component instead of as part of a controlled
   // origin string.
+  // Raw-vs-origin equality catches percent-encoded dot segments that URL
+  // normalizes while the brand would otherwise return the original bytes.
+  const isCanonicalBrokerOrigin = brokerUrl === parsed.origin || brokerUrl === `${parsed.origin}/`;
   if (
     parsed.protocol !== "http:" ||
     parsed.port === "" ||
@@ -299,7 +302,8 @@ function assertApiBootstrapBrokerUrl(brokerUrl: string): void {
     parsed.password !== "" ||
     parsed.search !== "" ||
     parsed.hash !== "" ||
-    (parsed.pathname !== "" && parsed.pathname !== "/")
+    (parsed.pathname !== "" && parsed.pathname !== "/") ||
+    !isCanonicalBrokerOrigin
   ) {
     throw new Error(
       "apiBootstrap.broker_url: must be http://<loopback>:<explicit-port>/ with no userinfo, path, query, or fragment",
