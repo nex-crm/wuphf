@@ -21,6 +21,15 @@ export interface ReceiptStore {
   /**
    * Insert a receipt. Returns `existed: true` if a receipt with this id
    * is already present; the existing value is NOT overwritten.
+   *
+   * Implementations MUST be atomic with respect to the `id`: under
+   * concurrent calls with the same `id`, exactly one returns
+   * `{ existed: false }` and any subsequent caller observes
+   * `{ existed: true }`. `InMemoryReceiptStore` satisfies this via
+   * Node's single-threaded event loop (the `has`/`set` pair runs
+   * without an await between); durable backends MUST use a unique-
+   * constraint INSERT, `ON CONFLICT DO NOTHING` + affected-rows check,
+   * or an equivalent serializable primitive.
    */
   put(receipt: ReceiptSnapshot): Promise<{ readonly existed: boolean }>;
   /**

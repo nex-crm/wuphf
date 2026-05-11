@@ -47,6 +47,7 @@ export async function handleReceiptCreate(
   deps: ReceiptRouteDeps,
 ): Promise<void> {
   if (req.method !== "POST") {
+    deps.logger.warn("receipt_post_rejected", { reason: "method_not_allowed" });
     res.writeHead(405, { Allow: "POST", "Content-Type": "text/plain" });
     res.end("method_not_allowed");
     return;
@@ -62,6 +63,7 @@ export async function handleReceiptCreate(
     typeof contentType !== "string" ||
     !contentType.toLowerCase().startsWith("application/json")
   ) {
+    deps.logger.warn("receipt_post_rejected", { reason: "unsupported_media_type" });
     res.writeHead(415, { "Content-Type": "text/plain" });
     res.end("unsupported_media_type");
     return;
@@ -74,6 +76,7 @@ export async function handleReceiptCreate(
   if (typeof contentLength === "string") {
     const parsed = Number(contentLength);
     if (Number.isFinite(parsed) && parsed > MAX_RECEIPT_BODY_BYTES) {
+      deps.logger.warn("receipt_post_rejected", { reason: "body_too_large_declared" });
       writePayloadTooLarge(res);
       return;
     }
@@ -88,8 +91,10 @@ export async function handleReceiptCreate(
       // The 413 has already been written by readBodyAsString — it owns the
       // response close-handshake so the client receives the status before
       // the connection terminates.
+      deps.logger.warn("receipt_post_rejected", { reason: "body_too_large_streamed" });
       return;
     }
+    deps.logger.warn("receipt_post_rejected", { reason: "bad_body" });
     if (!res.writableEnded) {
       res.writeHead(400, { "Content-Type": "text/plain" });
       res.end("bad_body");
@@ -106,6 +111,7 @@ export async function handleReceiptCreate(
     receipt = receiptFromJson(body);
   } catch (err) {
     const reason = err instanceof Error ? err.message : "validation_failed";
+    deps.logger.warn("receipt_post_rejected", { reason: "invalid_receipt" });
     res.writeHead(400, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: "invalid_receipt", reason }));
     return;

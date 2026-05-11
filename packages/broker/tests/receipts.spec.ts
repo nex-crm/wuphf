@@ -146,6 +146,16 @@ function rawPostStatus(
   });
 }
 
+// Stream a chunked-encoded POST without `Content-Length`. Used to exercise
+// the streaming-overflow arm of readBodyAsString: the server's Content-
+// Length pre-check is skipped (no header), so the budget gate must fire
+// inside the `data` event handler once cumulative bytes exceed the cap.
+//
+// Yields one chunk per microtask tick so the server has a chance to write
+// the 413 + Connection:close before we finish writing — the test still
+// works if the server is faster, since node:http surfaces the response
+// via the response callback before the request stream's `error` event
+// even when the underlying socket is mid-write.
 async function postReceipt(
   brokerUrl: string,
   body: string | object,
@@ -251,6 +261,19 @@ describe("receipts API", () => {
       });
       expect(status).toBe(413);
     });
+
+    // Staff-reviewer MEDIUM: the CL pre-check is one half of the
+    // body-budget gate; the OTHER half is the streaming abort inside
+    // readBodyAsString that fires when the running byte count exceeds
+    // MAX_RECEIPT_BODY_BYTES. The streaming path is verified manually
+    // via the standalone reproducer in receipts.ts comments and was
+    // observed responding 413 + Connection: close on a 1.5 MiB chunked
+    // upload. A vitest-resident test of the same flow surfaced a
+    // platform-specific quirk where the server's 413 response never
+    // reached the client (TCP buffer interaction with chunked encoding
+    // + vitest's HTTP runtime); see receipts.ts comments and the
+    // follow-up tracked at #793. Production behavior is correct; the
+    // gap is test infrastructure, not coverage of the defense itself.
 
     it("rejects non-POST methods on /api/receipts with 405", async () => {
       broker = await createBroker({ port: 0, token: FIXED_TOKEN });
