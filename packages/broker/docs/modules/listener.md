@@ -16,19 +16,29 @@ ingress.
 
 ```mermaid
 flowchart LR
-  req["IncomingMessage"] --> method["GET / HEAD only<br/>else 405"]
-  method --> guard["DNS-rebinding guard<br/>(Host + RemoteAddr)"]
-  guard --> dispatch{"pathname"}
-  dispatch -- "/api-token" --> bootstrap["apiBootstrapToJson(token, brokerUrl)"]
-  dispatch -- "/api/health" --> auth1["bearer + JSON {ok:true}"]
-  dispatch -- "/api/events" --> auth2["bearer + SSE 'ready'"]
-  dispatch -- "/, /index.html, /assets/*" --> static["RendererBundleSource"]
-  dispatch -- "_" --> notfound["404"]
+  req["IncomingMessage"] --> guard["DNS-rebinding guard<br/>(Host + RemoteAddr)"]
+  guard --> traversal["raw .. / NUL guard<br/>(decoded path)"]
+  traversal --> auth["bearer gate<br/>(default-deny on /api/*)<br/>else 401"]
+  auth --> dispatch{"pathname"}
+  dispatch -- "/api-token" --> bootstrap["GET/HEAD only · bootstrap JSON"]
+  dispatch -- "/api/health" --> health["GET/HEAD only · {ok:true}"]
+  dispatch -- "/api/events" --> events["GET/HEAD only · SSE ready"]
+  dispatch -- "POST /api/receipts" --> create["receiptFromJson → ReceiptStore.put<br/>201 / 400 / 409 / 413 / 415"]
+  dispatch -- "GET /api/receipts/:id" --> read["ReceiptStore.get<br/>200 / 404"]
+  dispatch -- "GET /api/threads/:tid/receipts" --> list["ReceiptStore.list({threadId})<br/>200 JSON array"]
+  dispatch -- "unknown /api/*" --> apinotfound["404"]
+  dispatch -- "/, /index.html, /assets/*" --> static["GET/HEAD only · RendererBundleSource"]
+  dispatch -- "other" --> notfound["404"]
 ```
 
-Every request goes through the DNS-rebinding guard first. `/api-token` is the
-only auth-free route — it is the bootstrap that hands the renderer the bearer
-it will then use on every subsequent `/api/*` and `/terminal/*` call.
+Every request goes through the DNS-rebinding guard first, then a raw-URL
+traversal/NUL guard, then the default-deny bearer gate on the `/api`
+namespace (`/api`, `/api/...` — but NOT `/api-token`, which is the
+bootstrap). Method enforcement is per-route: each handler emits the
+`Allow:` header for its own allowlist, so a `PUT /api/receipts` returns
+`405 Allow: POST` and a `POST /api/health` returns `405 Allow: GET, HEAD`.
+Authenticated requests to unknown `/api/*` paths return 404 before
+falling into static dispatch.
 
 ## Wire-shape stability
 

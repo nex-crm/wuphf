@@ -4,6 +4,8 @@
 // import `createBroker` and ignore the rest of the module graph.
 
 export { createBroker } from "./listener.ts";
+export type { ReceiptStore } from "./receipt-store.ts";
+export { InMemoryReceiptStore } from "./receipt-store.ts";
 export { generateApiToken } from "./token.ts";
 export type {
   BrokerConfig,
