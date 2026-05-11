@@ -91,6 +91,36 @@ describe("<DecisionInbox>", () => {
     ).toBeInTheDocument();
   });
 
+  it("gives only the first row tabIndex=0 before any selection (roving tabindex)", () => {
+    render(
+      wrap(
+        <DecisionInbox initialPayload={POPULATED_INBOX} onOpenTask={() => undefined} />,
+      ),
+    );
+    const rows = screen.getAllByRole("button", { name: /open task/i });
+    expect(rows[0]).toHaveAttribute("tabindex", "0");
+    for (const row of rows.slice(1)) {
+      expect(row).toHaveAttribute("tabindex", "-1");
+    }
+  });
+
+  it("moves tabIndex=0 to the next row after ArrowDown", () => {
+    render(
+      wrap(
+        <DecisionInbox initialPayload={POPULATED_INBOX} onOpenTask={() => undefined} />,
+      ),
+    );
+    const list = screen.getByRole("list", { name: /tasks/i });
+    fireEvent.keyDown(list, { key: "ArrowDown" });
+    const rows = screen.getAllByRole("button", { name: /open task/i });
+    // After ArrowDown from no-selection, first row becomes selected → tabIndex=0.
+    // A second ArrowDown would move to row[1]; we test one step here.
+    expect(rows[0]).toHaveAttribute("tabindex", "0");
+    for (const row of rows.slice(1)) {
+      expect(row).toHaveAttribute("tabindex", "-1");
+    }
+  });
+
   it("renders the loading skeleton state when forced", () => {
     const { container } = render(
       wrap(

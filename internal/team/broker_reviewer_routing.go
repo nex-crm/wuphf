@@ -316,6 +316,9 @@ func (b *Broker) evaluateConvergenceLocked(taskID string) error {
 	// manifest status on the reviewer's task-scoped agent stream.
 	terminalStatuses := b.observedTerminalStatusByReviewerLocked(taskID, missing)
 	now := b.reviewerNow().UTC()
+	if b.reviewerGradesByTask == nil {
+		b.reviewerGradesByTask = make(map[string][]ReviewerGrade)
+	}
 	for _, slug := range missing {
 		reasoning := "reviewer timed out"
 		if status, ok := terminalStatuses[slug]; ok {

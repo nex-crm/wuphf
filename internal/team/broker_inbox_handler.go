@@ -52,7 +52,7 @@ func (b *Broker) handleTasksInbox(w http.ResponseWriter, r *http.Request) {
 	}
 	rawFilter := strings.TrimSpace(r.URL.Query().Get("filter"))
 	if rawFilter == "" {
-		rawFilter = string(InboxFilterNeedsDecision)
+		rawFilter = string(InboxFilterDecisionRequired)
 	}
 	payload, err := b.inboxForActor(InboxFilter(rawFilter), actor.Kind == requestActorKindBroker, actor.Slug)
 	if err != nil {

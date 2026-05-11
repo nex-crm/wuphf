@@ -26,7 +26,7 @@ import (
 )
 
 // TestInboxQueryUnder100msAt1000Tasks seeds 1000 tasks distributed
-// across all 8 lifecycle states and asserts the InboxFilterNeedsDecision
+// across all 8 lifecycle states and asserts the InboxFilterDecisionRequired
 // query returns within 100ms. The point of the index is that we never
 // scan the full 1000-task list to answer "what's in decision?" — the
 // bucket length is read in O(1) and only the rows we return cost us.
@@ -60,12 +60,12 @@ func TestInboxQueryUnder100msAt1000Tasks(t *testing.T) {
 	// Warm up the path once so the timed run is steady-state. This
 	// makes the assertion protect against the index drifting into an
 	// O(N) scan, not against go-runtime cold start.
-	if _, err := b.Inbox(InboxFilterNeedsDecision); err != nil {
+	if _, err := b.Inbox(InboxFilterDecisionRequired); err != nil {
 		t.Fatalf("warmup inbox: %v", err)
 	}
 
 	start := time.Now()
-	payload, err := b.Inbox(InboxFilterNeedsDecision)
+	payload, err := b.Inbox(InboxFilterDecisionRequired)
 	elapsed := time.Since(start)
 	if err != nil {
 		t.Fatalf("inbox: %v", err)
@@ -78,13 +78,13 @@ func TestInboxQueryUnder100msAt1000Tasks(t *testing.T) {
 	// Sanity: the counts came from the index, not from rows. The
 	// payload's NeedsDecision count must equal the bucket length.
 	b.mu.Lock()
-	wantNeedsDecision := len(b.lifecycleIndex[LifecycleStateDecision])
+	wantDecisionRequired := len(b.lifecycleIndex[LifecycleStateDecision])
 	b.mu.Unlock()
-	if payload.Counts.NeedsDecision != wantNeedsDecision {
-		t.Fatalf("counts.needsDecision = %d, want %d", payload.Counts.NeedsDecision, wantNeedsDecision)
+	if payload.Counts.DecisionRequired != wantDecisionRequired {
+		t.Fatalf("counts.decisionRequired = %d, want %d", payload.Counts.DecisionRequired, wantDecisionRequired)
 	}
-	if len(payload.Rows) != wantNeedsDecision {
-		t.Fatalf("rows = %d, want %d", len(payload.Rows), wantNeedsDecision)
+	if len(payload.Rows) != wantDecisionRequired {
+		t.Fatalf("rows = %d, want %d", len(payload.Rows), wantDecisionRequired)
 	}
 	if payload.RefreshedAt == "" {
 		t.Fatal("refreshedAt must be populated")
@@ -136,7 +136,7 @@ func TestInboxAuthFiltersByReviewerMembership(t *testing.T) {
 	defer srv.Close()
 
 	// 1. Mira (human session): only sees task-a.
-	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/tasks/inbox?filter=needs_decision", nil)
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/tasks/inbox?filter=decision_required", nil)
 	req.AddCookie(cookie)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -156,12 +156,12 @@ func TestInboxAuthFiltersByReviewerMembership(t *testing.T) {
 	// Counts are O(1) and intentionally NOT auth-filtered: they
 	// describe broker-wide state. The design doc inbox counts header
 	// renders broker totals; reviewer-filter applies to rows.
-	if miraPayload.Counts.NeedsDecision != 3 {
-		t.Fatalf("mira counts.needsDecision = %d, want 3", miraPayload.Counts.NeedsDecision)
+	if miraPayload.Counts.DecisionRequired != 3 {
+		t.Fatalf("mira counts.decisionRequired = %d, want 3", miraPayload.Counts.DecisionRequired)
 	}
 
 	// 2. Broker token: sees all three tasks.
-	brokerReq, _ := http.NewRequest(http.MethodGet, srv.URL+"/tasks/inbox?filter=needs_decision", nil)
+	brokerReq, _ := http.NewRequest(http.MethodGet, srv.URL+"/tasks/inbox?filter=decision_required", nil)
 	brokerReq.Header.Set("Authorization", "Bearer "+b.Token())
 	brokerResp, err := http.DefaultClient.Do(brokerReq)
 	if err != nil {
@@ -180,7 +180,7 @@ func TestInboxAuthFiltersByReviewerMembership(t *testing.T) {
 	}
 
 	// 3. Unauthenticated: 401.
-	bareReq, _ := http.NewRequest(http.MethodGet, srv.URL+"/tasks/inbox?filter=needs_decision", nil)
+	bareReq, _ := http.NewRequest(http.MethodGet, srv.URL+"/tasks/inbox?filter=decision_required", nil)
 	bareResp, err := http.DefaultClient.Do(bareReq)
 	if err != nil {
 		t.Fatalf("bare inbox request: %v", err)
@@ -369,10 +369,10 @@ func TestInboxFilterMappings(t *testing.T) {
 		wantIDs []string
 		minRows int
 	}{
-		{InboxFilterNeedsDecision, []string{"decision-1"}, 1},
+		{InboxFilterDecisionRequired, []string{"decision-1"}, 1},
 		{InboxFilterRunning, []string{"running-1"}, 1},
 		{InboxFilterBlocked, []string{"blocked-1"}, 1},
-		{InboxFilterMergedToday, []string{"merged-today-1"}, 1},
+		{InboxFilterMerged, []string{"merged-today-1"}, 1},
 	}
 	for _, tc := range cases {
 		t.Run(string(tc.filter), func(t *testing.T) {
@@ -398,8 +398,8 @@ func TestInboxFilterMappings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("inbox(all): %v", err)
 	}
-	if payload.Counts.NeedsDecision != 1 {
-		t.Errorf("counts.needsDecision = %d, want 1", payload.Counts.NeedsDecision)
+	if payload.Counts.DecisionRequired != 1 {
+		t.Errorf("counts.decisionRequired = %d, want 1", payload.Counts.DecisionRequired)
 	}
 	if payload.Counts.Running != 1 {
 		t.Errorf("counts.running = %d, want 1", payload.Counts.Running)

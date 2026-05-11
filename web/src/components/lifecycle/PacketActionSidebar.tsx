@@ -34,11 +34,11 @@ export function PacketActionSidebar({
   onOpenInWorktree,
 }: PacketActionSidebarProps) {
   const lockedTooltip = isDecisionLocked ? "Wait for review state" : undefined;
-  const ownerSummary = packet.sessionReport.metadata.runtime
-    ? `${packet.ownerSlug} · ran ${packet.sessionReport.metadata.runtime}${
-        packet.sessionReport.metadata.tool_calls
-          ? ` · ${packet.sessionReport.metadata.tool_calls} tool calls`
-          : ""
+  const runtime = packet.sessionReport?.metadata?.runtime;
+  const toolCalls = packet.sessionReport?.metadata?.tool_calls;
+  const ownerSummary = runtime
+    ? `${packet.ownerSlug} · ran ${runtime}${
+        toolCalls ? ` · ${toolCalls} tool calls` : ""
       }`
     : packet.ownerSlug;
 

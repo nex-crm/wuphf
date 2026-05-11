@@ -413,6 +413,14 @@ function RowList({
   onSelect: (id: string) => void;
   handleListKey: (e: KeyboardEvent<HTMLUListElement>) => void;
 }) {
+  // Roving tabindex: only the selected row (or first row when nothing is
+  // selected) stays in the tab order. Tab enters/exits the list as a single
+  // stop; arrow keys navigate within it.
+  const focusableId =
+    selectedTaskId && rows.some((r) => r.taskId === selectedTaskId)
+      ? selectedTaskId
+      : (rows[0]?.taskId ?? null);
+
   return (
     <ul
       className="inbox-list"
@@ -425,6 +433,7 @@ function RowList({
           <InboxRow
             row={row}
             isSelected={row.taskId === selectedTaskId}
+            tabIndex={row.taskId === focusableId ? 0 : -1}
             onOpen={onOpen}
             onSelect={onSelect}
           />

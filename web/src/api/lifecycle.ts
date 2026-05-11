@@ -22,7 +22,7 @@ export type DecisionAction =
   | "request_changes"
   | "defer";
 
-const USE_MOCKS = true;
+const USE_MOCKS = false;
 
 /**
  * Fetch the indexed-lookup payload for the Decision Inbox. Returns
