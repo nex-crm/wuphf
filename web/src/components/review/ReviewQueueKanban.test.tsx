@@ -107,4 +107,17 @@ describe("<ReviewQueueKanban>", () => {
     await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
     expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
   });
+
+  it("renders the grade badge inside the Kanban for a card aged >= 12 hours", async () => {
+    const oldCard = {
+      ...mkReview("r5", "pending", "Old pending"),
+      submitted_ts: new Date(Date.now() - 13 * 3_600_000).toISOString(),
+    };
+    vi.spyOn(api, "fetchReviews").mockResolvedValue([oldCard]);
+    render(<ReviewQueueKanban />);
+    await waitFor(() =>
+      expect(screen.getByText("Old pending")).toBeInTheDocument(),
+    );
+    expect(screen.getByText("Waiting")).toBeInTheDocument();
+  });
 });
