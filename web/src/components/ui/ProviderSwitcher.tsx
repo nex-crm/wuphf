@@ -35,6 +35,11 @@ const PROVIDERS: ProviderOption[] = [
     name: "Opencode",
     desc: "Opencode CLI — routes to Claude, OpenAI, or local/Ollama",
   },
+  {
+    id: "hermes-agent",
+    name: "Hermes Agent",
+    desc: "Local Hermes gateway via OpenAI-compatible API",
+  },
 ];
 
 export function ProviderSwitcherHost() {

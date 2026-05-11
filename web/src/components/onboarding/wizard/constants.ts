@@ -172,6 +172,7 @@ export const LOCAL_PROVIDER_LABELS: ReadonlyArray<{
   { kind: "mlx-lm", label: "MLX-LM", blurb: "macOS · Apple Silicon" },
   { kind: "ollama", label: "Ollama", blurb: "macOS / Linux" },
   { kind: "exo", label: "Exo", blurb: "Multi-device pool" },
+  { kind: "hermes-agent", label: "Hermes Agent", blurb: "Agent gateway" },
 ];
 
 export const MEMORY_BACKEND_OPTIONS: ReadonlyArray<{

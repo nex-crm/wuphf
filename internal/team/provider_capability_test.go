@@ -79,4 +79,7 @@ func TestRequiresClaudeSessionReset_OnlyTrueForClaude(t *testing.T) {
 	if provider.CapabilitiesFor(provider.KindCodex).RequiresClaudeSessionReset {
 		t.Error("Codex should declare RequiresClaudeSessionReset=false (no Claude session state)")
 	}
+	if provider.CapabilitiesFor(provider.KindHermesAgent).RequiresClaudeSessionReset {
+		t.Error("Hermes Agent should declare RequiresClaudeSessionReset=false (no Claude session state)")
+	}
 }

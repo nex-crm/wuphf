@@ -18,7 +18,7 @@ import (
 const maxOpenAICompatToolIterations = 8
 
 // runHeadlessOpenAICompatTurn executes a single broker-driven turn for an
-// agent bound to a local OpenAI-compatible runtime (mlx-lm, ollama, exo).
+// agent bound to an OpenAI-compatible runtime (mlx-lm, ollama, exo, Hermes).
 //
 // Flow:
 //  1. Spawn `wuphf mcp-team` and connect an MCP client → list of tools.
@@ -108,7 +108,7 @@ func (l *Launcher) runHeadlessOpenAICompatTurn(ctx context.Context, slug string,
 	// this is what makes agents like ceo run kimi-k2.6 while planner
 	// runs deepseek-v4-pro on the same install-wide ollama endpoint.
 	modelOverride := strings.TrimSpace(l.broker.MemberProviderBinding(slug).Model)
-	streamFn := provider.NewOpenAICompatStreamFnWithCtxAndModel(ctx, kind, modelOverride)
+	streamFn := provider.NewOpenAICompatStreamFnWithCtxModelAndAgent(ctx, kind, modelOverride, slug)
 
 	// Live-chat relay streams the model's user-facing text to the channel
 	// at sentence/paragraph boundaries, so the room sees the agent's reply
@@ -312,7 +312,7 @@ func looksUnparsedToolCall(text string) bool {
 // caller stay in sync without duplicating the list.
 func isOpenAICompatKind(kind string) bool {
 	switch kind {
-	case provider.KindMLXLM, provider.KindOllama, provider.KindExo:
+	case provider.KindMLXLM, provider.KindOllama, provider.KindExo, provider.KindHermesAgent:
 		return true
 	default:
 		return false

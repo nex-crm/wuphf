@@ -96,6 +96,7 @@ If it feels like a hidden agent loop, something is wrong. If it feels like The O
 
 - **Telegram:** `/connect` → pick Telegram → paste bot token from [@BotFather](https://t.me/BotFather).
 - **OpenClaw:** `/connect openclaw` → paste your gateway URL and `gateway.auth.token` from `~/.openclaw/openclaw.json`. Each OpenClaw session becomes a first-class office member you can `@mention`.
+- **Hermes Agent:** set `llm_provider` or `--provider` to `hermes-agent` to run WUPHF agents through a local Hermes API server at `http://127.0.0.1:8642/v1`.
 
 ## External Actions
 
@@ -123,7 +124,7 @@ Two action providers ship by default — pick whichever fits your style.
 | Agent wakes | Push-driven (zero idle burn) |
 | Live visibility | Stdout streaming |
 | Mid-task steering | DM any agent, no restart |
-| Runtimes | Mix Claude Code, Codex, and OpenClaw in one channel |
+| Runtimes | Mix Claude Code, Codex, Hermes Agent, and OpenClaw in one channel |
 | Memory | Per-agent notebook + shared workspace wiki (knowledge graphs on GBrain or Nex) |
 | Price | Free and open source (MIT, self-hosted, your API keys) |
 

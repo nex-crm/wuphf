@@ -962,8 +962,8 @@ export type LLMProvider =
   | "codex"
   | "opencode"
   | "mlx-lm"
-  | "ollama"
-  | "exo";
+  | "exo"
+  | "hermes-agent";
 export type MemoryBackend = "markdown" | "nex" | "gbrain" | "none";
 export type ActionProvider = "auto" | "one" | "composio" | "";
 

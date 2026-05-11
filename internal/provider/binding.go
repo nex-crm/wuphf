@@ -6,10 +6,11 @@ import "fmt"
 // the install-wide default" (config.ResolveLLMProvider at dispatch time), which
 // keeps manifests written before per-agent providers existed loading unchanged.
 const (
-	KindClaudeCode = "claude-code"
-	KindCodex      = "codex"
-	KindOpencode   = "opencode"
-	KindOpenclaw   = "openclaw"
+	KindClaudeCode  = "claude-code"
+	KindCodex       = "codex"
+	KindOpencode    = "opencode"
+	KindOpenclaw    = "openclaw"
+	KindHermesAgent = "hermes-agent"
 	// Local OpenAI-compatible HTTP runtimes. All three expose the same
 	// /v1/chat/completions API; only their default base URL and model differ.
 	// Configure per-kind overrides via Config.ProviderEndpoints or
@@ -45,12 +46,12 @@ type OpenclawProviderBinding struct {
 func ValidateKind(s string) error {
 	switch s {
 	case "",
-		KindClaudeCode, KindCodex, KindOpencode, KindOpenclaw,
+		KindClaudeCode, KindCodex, KindOpencode, KindOpenclaw, KindHermesAgent,
 		KindMLXLM, KindOllama, KindExo:
 		return nil
 	default:
-		return fmt.Errorf("unknown provider kind %q (valid: %s, %s, %s, %s, %s, %s, %s, or empty)",
-			s, KindClaudeCode, KindCodex, KindOpencode, KindOpenclaw, KindMLXLM, KindOllama, KindExo)
+		return fmt.Errorf("unknown provider kind %q (valid: %s, %s, %s, %s, %s, %s, %s, %s, or empty)",
+			s, KindClaudeCode, KindCodex, KindOpencode, KindOpenclaw, KindHermesAgent, KindMLXLM, KindOllama, KindExo)
 	}
 }
 

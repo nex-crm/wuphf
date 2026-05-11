@@ -64,6 +64,7 @@ With the file that implements each:
 - **Telegram** (`internal/team/telegram.go`): bidirectional bridge via `/connect`.
 - **Composio** (`--action provider`): lets agents take real-world actions (send email, update CRM).
 - **OpenClaw** (`internal/team/openclaw.go` + `internal/openclaw/` WS client): bridge users' existing OpenClaw agents into the office. Connect via `/connect openclaw`.
+- **Hermes Agent** (`internal/provider/hermes_agent.go`): run WUPHF office members through a local Hermes gateway using its OpenAI-compatible API server. Select with `--provider hermes-agent`.
 
 All four are load-time optional. Core WUPHF is just `broker + launcher + headless runners + worktrees`.
 

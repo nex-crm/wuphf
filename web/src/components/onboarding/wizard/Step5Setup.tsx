@@ -517,7 +517,7 @@ export function SetupStep({
                 {localProvider
                   ? (LOCAL_PROVIDER_LABELS.find((m) => m.kind === localProvider)
                       ?.label ?? "selected")
-                  : "MLX-LM, Ollama, or Exo"}
+                  : "MLX-LM, Ollama, Exo, or Hermes"}
               </div>
             </button>
           </div>

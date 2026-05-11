@@ -18,6 +18,7 @@ func TestValidateKind(t *testing.T) {
 		{"codex", "codex", false},
 		{"opencode", "opencode", false},
 		{"openclaw", "openclaw", false},
+		{"hermes_agent", "hermes-agent", false},
 		{"unknown", "gemini", true},
 		{"typo", "claud-code", true},
 		{"uppercase_rejected", "Codex", true},

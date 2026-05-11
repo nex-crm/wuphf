@@ -725,20 +725,22 @@ func allRequiredPrereqsOk(prereqs []prereqResult) bool {
 
 // localRuntimeCandidates lists the supported local OpenAI-compatible runtimes
 // in priority order. The order is the user-facing tiebreak when more than one
-// is reachable: ollama wins because it's the most common install, mlx-lm
-// second because it's Apple-Silicon-only, exo last because it's niche.
+// is reachable: ollama wins because it's the most common install, Hermes
+// second because it is a full agent runtime, mlx-lm third because it's
+// Apple-Silicon-only, exo last because it's niche.
 //
 // These URLs intentionally duplicate the unexported defaultXxxBaseURL constants
-// in internal/provider/{ollama,mlx_lm,exo}.go. Importing the provider package
-// for a single string per runtime would balloon the cold-start dependency graph
-// for `wuphf` first-run, which has to feel snappy on a fresh `npx` install.
-// The provider defaults change rarely (last touched when the providers were
-// added); if they do change, update both call sites.
+// in internal/provider/{ollama,hermes_agent,mlx_lm,exo}.go. Importing the
+// provider package for a single string per runtime would balloon the cold-start
+// dependency graph for `wuphf` first-run, which has to feel snappy on a fresh
+// `npx` install. The provider defaults change rarely (last touched when the
+// providers were added); if they do change, update both call sites.
 var localRuntimeCandidates = []struct {
 	kind string
 	base string
 }{
 	{kind: "ollama", base: "http://127.0.0.1:11434/v1"},
+	{kind: "hermes-agent", base: "http://127.0.0.1:8642/v1"},
 	{kind: "mlx-lm", base: "http://127.0.0.1:8080/v1"},
 	{kind: "exo", base: "http://127.0.0.1:52415/v1"},
 }
@@ -789,15 +791,15 @@ func probeLocalRuntime(ctx context.Context, client *http.Client, base string) bo
 }
 
 // detectReachableLocalRuntime probes the canonical loopback endpoints for the
-// supported local OpenAI-compatible runtimes (ollama, mlx-lm, exo) in priority
-// order and returns the first one that answers with an OpenAI-shaped body.
+// supported local OpenAI-compatible runtimes (ollama, Hermes, mlx-lm, exo) in
+// priority order and returns the first one that answers with an OpenAI-shaped body.
 // Used by the onboarding wizard to suggest a concrete --provider flag when
 // the user has no Anthropic key and no runtime CLI installed but does have a
 // local LLM running.
 //
 // Sequential (not parallel) so the suggestion is deterministic when more than
 // one runtime is up. A 250ms-per-candidate timeout keeps the worst case at
-// 750ms total when nothing is reachable; the caller dispatches this off the
+// 1000ms total when nothing is reachable; the caller dispatches this off the
 // bubbletea Update loop so the TUI stays responsive.
 func detectReachableLocalRuntime() (kind, addr string) {
 	client := &http.Client{Timeout: 250 * time.Millisecond}

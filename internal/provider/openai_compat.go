@@ -41,13 +41,10 @@ import (
 // interleave deltas for parallel tool calls.
 func NewOpenAICompatStreamFn(kind, defaultBaseURL, defaultModel string) func(string) agent.StreamFn {
 	registerOpenAICompatDefaults(kind, defaultBaseURL, defaultModel)
-	return func(_ string) agent.StreamFn {
-		// TODO: per-agent endpoint when ProviderBinding.Model is set —
-		// today the slug is unused because ResolveProviderEndpoint keys
-		// on Kind only.
+	return func(agentSlug string) agent.StreamFn {
 		return func(msgs []agent.Message, tools []agent.AgentTool) <-chan agent.StreamChunk {
 			ch := make(chan agent.StreamChunk, 64)
-			go runOpenAICompatStream(context.Background(), ch, kind, defaultBaseURL, defaultModel, msgs, tools, "")
+			go runOpenAICompatStream(context.Background(), ch, kind, defaultBaseURL, defaultModel, msgs, tools, "", agentSlug)
 			return ch
 		}
 	}
@@ -80,7 +77,7 @@ func NewOpenAICompatStreamFnWithCtx(ctx context.Context, kind string) agent.Stre
 	}
 	return func(msgs []agent.Message, tools []agent.AgentTool) <-chan agent.StreamChunk {
 		ch := make(chan agent.StreamChunk, 64)
-		go runOpenAICompatStream(ctx, ch, kind, baseURL, model, msgs, tools, "")
+		go runOpenAICompatStream(ctx, ch, kind, baseURL, model, msgs, tools, "", "")
 		return ch
 	}
 }
@@ -93,6 +90,12 @@ func NewOpenAICompatStreamFnWithCtx(ctx context.Context, kind string) agent.Stre
 // send the install-wide default model name regardless of what's stored on
 // their member record.
 func NewOpenAICompatStreamFnWithCtxAndModel(ctx context.Context, kind, modelOverride string) agent.StreamFn {
+	return NewOpenAICompatStreamFnWithCtxModelAndAgent(ctx, kind, modelOverride, "")
+}
+
+// NewOpenAICompatStreamFnWithCtxModelAndAgent is the slug-aware variant used
+// by providers whose HTTP surface can preserve server-side per-agent state.
+func NewOpenAICompatStreamFnWithCtxModelAndAgent(ctx context.Context, kind, modelOverride, agentSlug string) agent.StreamFn {
 	baseURL, model := openAICompatDefaultsFor(kind)
 	if baseURL == "" && model == "" {
 		return func(_ []agent.Message, _ []agent.AgentTool) <-chan agent.StreamChunk {
@@ -107,7 +110,7 @@ func NewOpenAICompatStreamFnWithCtxAndModel(ctx context.Context, kind, modelOver
 	}
 	return func(msgs []agent.Message, tools []agent.AgentTool) <-chan agent.StreamChunk {
 		ch := make(chan agent.StreamChunk, 64)
-		go runOpenAICompatStream(ctx, ch, kind, baseURL, model, msgs, tools, modelOverride)
+		go runOpenAICompatStream(ctx, ch, kind, baseURL, model, msgs, tools, modelOverride, agentSlug)
 		return ch
 	}
 }
@@ -198,12 +201,77 @@ func openAICompatDialTimeout() time.Duration {
 	return 5 * time.Second
 }
 
+func setOpenAICompatProviderHeaders(req *http.Request, kind, agentSlug string) {
+	apiKey := resolveOpenAICompatAPIKey(kind)
+	if apiKey == "" {
+		return
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+
+	if kind != KindHermesAgent {
+		return
+	}
+	sessionID := hermesAgentSessionID(agentSlug)
+	if sessionID == "" {
+		return
+	}
+	// Hermes only accepts caller-supplied session headers on authenticated
+	// requests. Tying them to the office slug gives each WUPHF member a stable
+	// Hermes-side conversation and memory scope, matching the per-agent
+	// continuity users expect from OpenClaw-backed members.
+	req.Header.Set("X-Hermes-Session-Id", sessionID)
+	req.Header.Set("X-Hermes-Session-Key", sessionID)
+}
+
+func resolveOpenAICompatAPIKey(kind string) string {
+	envKind := strings.ToUpper(strings.ReplaceAll(kind, "-", "_"))
+	if v := strings.TrimSpace(os.Getenv("WUPHF_" + envKind + "_API_KEY")); v != "" {
+		return v
+	}
+	if kind == KindHermesAgent {
+		if v := strings.TrimSpace(os.Getenv("API_SERVER_KEY")); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+func hermesAgentSessionID(agentSlug string) string {
+	slug := strings.ToLower(strings.TrimSpace(agentSlug))
+	if slug == "" {
+		return ""
+	}
+	var b strings.Builder
+	for _, r := range slug {
+		switch {
+		case r >= 'a' && r <= 'z':
+			b.WriteRune(r)
+		case r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == '-' || r == '_' || r == '.':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('-')
+		}
+	}
+	clean := strings.Trim(b.String(), "-_.")
+	if clean == "" {
+		return ""
+	}
+	id := "wuphf-" + clean
+	if len(id) > 256 {
+		return id[:256]
+	}
+	return id
+}
+
 func runOpenAICompatStream(
 	parentCtx context.Context,
 	ch chan<- agent.StreamChunk,
 	kind, defaultBaseURL, defaultModel string,
 	msgs []agent.Message, tools []agent.AgentTool,
 	modelOverride string,
+	agentSlug string,
 ) {
 	defer close(ch)
 
@@ -246,6 +314,7 @@ func runOpenAICompatStream(
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "text/event-stream")
+	setOpenAICompatProviderHeaders(req, kind, agentSlug)
 
 	resp, err := httpClientForOpenAICompat().Do(req)
 	if err != nil {

@@ -833,6 +833,62 @@ func TestOpenAICompatStreamFn_RequestBodyShape(t *testing.T) {
 	}
 }
 
+func TestOpenAICompatStreamFn_HermesHeadersWhenAuthenticated(t *testing.T) {
+	var gotAuth string
+	var gotSessionID string
+	var gotSessionKey string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		gotSessionID = r.Header.Get("X-Hermes-Session-Id")
+		gotSessionKey = r.Header.Get("X-Hermes-Session-Key")
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer srv.Close()
+
+	t.Setenv("WUPHF_HERMES_AGENT_BASE_URL", srv.URL+"/v1")
+	t.Setenv("WUPHF_HERMES_AGENT_API_KEY", "test-hermes-key")
+
+	factory := NewOpenAICompatStreamFn(KindHermesAgent, "http://unused", "hermes-agent")
+	for range factory("Agent One!")([]agent.Message{{Role: "user", Content: "ping"}}, nil) {
+	}
+
+	if gotAuth != "Bearer test-hermes-key" {
+		t.Fatalf("Authorization = %q, want bearer key", gotAuth)
+	}
+	if gotSessionID != "wuphf-agent-one" {
+		t.Fatalf("X-Hermes-Session-Id = %q, want wuphf-agent-one", gotSessionID)
+	}
+	if gotSessionKey != gotSessionID {
+		t.Fatalf("X-Hermes-Session-Key = %q, want %q", gotSessionKey, gotSessionID)
+	}
+}
+
+func TestOpenAICompatStreamFn_HermesOmitsSessionHeadersWithoutAuth(t *testing.T) {
+	var gotAuth string
+	var gotSessionID string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		gotSessionID = r.Header.Get("X-Hermes-Session-Id")
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer srv.Close()
+
+	t.Setenv("WUPHF_HERMES_AGENT_BASE_URL", srv.URL+"/v1")
+
+	factory := NewOpenAICompatStreamFn(KindHermesAgent, "http://unused", "hermes-agent")
+	for range factory("agent-one")([]agent.Message{{Role: "user", Content: "ping"}}, nil) {
+	}
+
+	if gotAuth != "" {
+		t.Fatalf("Authorization = %q, want empty", gotAuth)
+	}
+	if gotSessionID != "" {
+		t.Fatalf("X-Hermes-Session-Id = %q, want empty without auth", gotSessionID)
+	}
+}
+
 // TestParseOpenAISSEStream_TrailingUsageFrame covers the canonical pattern
 // from `stream_options.include_usage`: a final SSE frame with empty choices
 // and a populated `usage` block. It must produce exactly one trailing

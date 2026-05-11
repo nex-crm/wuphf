@@ -302,10 +302,10 @@ type TeamMemberArgs struct {
 	PermissionMode string   `json:"permission_mode,omitempty" jsonschema:"Optional Claude permission mode"`
 	// Per-agent provider selection. Empty Provider means the agent inherits the
 	// install-wide default runtime. Set Provider to pick a specific runtime and
-	// (optionally) model for this agent: one team can mix Claude, Codex, and
-	// OpenClaw agents, each on its own provider.
-	Provider           string `json:"provider,omitempty" jsonschema:"LLM runtime for this agent. One of: claude-code, codex, opencode, openclaw. Empty = install default."`
-	Model              string `json:"model,omitempty" jsonschema:"Model name passed to the runtime (e.g. claude-sonnet-4.6, gpt-5.4, openai-codex/gpt-5.4). Free-form; runtime validates."`
+	// (optionally) model for this agent: one team can mix Claude, Codex,
+	// Hermes, and OpenClaw agents, each on its own provider.
+	Provider           string `json:"provider,omitempty" jsonschema:"LLM runtime for this agent. One of: claude-code, codex, opencode, hermes-agent, openclaw. Empty = install default."`
+	Model              string `json:"model,omitempty" jsonschema:"Model name passed to the runtime (e.g. claude-sonnet-4.6, gpt-5.4, hermes-agent, openai-codex/gpt-5.4). Free-form; runtime validates."`
 	OpenclawSessionKey string `json:"openclaw_session_key,omitempty" jsonschema:"Optional: attach to an existing OpenClaw session key (e.g. after WUPHF reinstall). Leave empty to auto-create a new session."`
 	OpenclawAgentID    string `json:"openclaw_agent_id,omitempty" jsonschema:"Optional: OpenClaw agent config name (defaults to 'main')."`
 	MySlug             string `json:"my_slug,omitempty" jsonschema:"Your agent slug. Defaults to WUPHF_AGENT_SLUG."`

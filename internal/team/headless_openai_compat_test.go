@@ -21,6 +21,7 @@ func TestIsOpenAICompatKind(t *testing.T) {
 		provider.KindMLXLM,
 		provider.KindOllama,
 		provider.KindExo,
+		provider.KindHermesAgent,
 	} {
 		if !isOpenAICompatKind(kind) {
 			t.Errorf("isOpenAICompatKind(%q) = false, want true", kind)

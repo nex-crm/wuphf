@@ -6,8 +6,8 @@ import {
 } from "../../../api/client";
 import { LOCAL_PROVIDER_LABELS } from "./constants";
 
-// LocalLLMPicker is the second-step grid of mlx-lm / ollama / exo tiles
-// revealed when the "Run a local model" tile in the primary runtime
+// LocalLLMPicker is the second-step grid of local OpenAI-compatible runtime
+// tiles revealed when the "Run a local model" tile in the primary runtime
 // grid is on, so it reads as a peer of the cloud CLIs rather than a
 // tucked-away "advanced" toggle.
 

@@ -116,6 +116,7 @@ function GeneralSection({ cfg, save }: SectionProps) {
             <option value="mlx-lm">MLX-LM (Apple Silicon)</option>
             <option value="ollama">Ollama</option>
             <option value="exo">Exo</option>
+            <option value="hermes-agent">Hermes Agent</option>
           </optgroup>
         </select>
       </Field>
@@ -228,6 +229,12 @@ const LOCAL_PROVIDERS: LocalProviderMeta[] = [
     label: "Exo",
     blurb:
       "Distributes inference across multiple devices. Useful when you want to pool a Mac Studio + a laptop.",
+  },
+  {
+    kind: "hermes-agent",
+    label: "Hermes Agent",
+    blurb:
+      "Runs WUPHF members through a local Hermes gateway via its OpenAI-compatible API server.",
   },
 ];
 

@@ -29,7 +29,7 @@ func stubLookPath(t *testing.T, results map[string]struct {
 }
 
 // TestComputeLocalProviderStatuses_AllInstalledAndReachable is the
-// happy path: all three binaries on PATH, all three endpoints
+// happy path: all binaries on PATH, all endpoints
 // reachable, version + model are surfaced.
 func TestComputeLocalProviderStatuses_AllInstalledAndReachable(t *testing.T) {
 	ov := localProvidersStatusOverrides{
@@ -40,6 +40,7 @@ func TestComputeLocalProviderStatuses_AllInstalledAndReachable(t *testing.T) {
 			"mlx_lm.server": {path: "/Users/x/.local/bin/mlx_lm.server"},
 			"ollama":        {path: "/usr/local/bin/ollama"},
 			"exo":           {path: "/Users/x/.local/bin/exo"},
+			"hermes":        {path: "/Users/x/.local/bin/hermes"},
 		}),
 		runVer: func(_ context.Context, path string, _ []string) (string, error) {
 			return "v1.2.3", nil
@@ -51,14 +52,14 @@ func TestComputeLocalProviderStatuses_AllInstalledAndReachable(t *testing.T) {
 		goarch: "arm64",
 	}
 	got := computeLocalProviderStatuses(context.Background(), ov)
-	if len(got) != 3 {
-		t.Fatalf("expected 3 statuses, got %d", len(got))
+	if len(got) != 4 {
+		t.Fatalf("expected 4 statuses, got %d", len(got))
 	}
 	gotByKind := map[string]LocalProviderStatus{}
 	for _, s := range got {
 		gotByKind[s.Kind] = s
 	}
-	for _, k := range []string{provider.KindMLXLM, provider.KindOllama, provider.KindExo} {
+	for _, k := range []string{provider.KindMLXLM, provider.KindOllama, provider.KindExo, provider.KindHermesAgent} {
 		s, ok := gotByKind[k]
 		if !ok {
 			t.Fatalf("missing kind %q", k)
@@ -82,7 +83,7 @@ func TestComputeLocalProviderStatuses_AllInstalledAndReachable(t *testing.T) {
 }
 
 // TestComputeLocalProviderStatuses_NoneInstalled simulates a fresh
-// machine: nothing on PATH, all three kinds report
+// machine: nothing on PATH, all kinds report
 // BinaryInstalled=false but still surface install commands so the
 // doctor panel can render them.
 func TestComputeLocalProviderStatuses_NoneInstalled(t *testing.T) {
@@ -109,9 +110,9 @@ func TestComputeLocalProviderStatuses_NoneInstalled(t *testing.T) {
 
 // TestComputeLocalProviderStatuses_LinuxHidesMLXButShowsOllamaExo
 // confirms the platform gate: MLX-LM is Apple Silicon only and must
-// surface PlatformSupported=false on Linux. Ollama and Exo stay
+// surface PlatformSupported=false on Linux. Ollama, Exo, and Hermes stay
 // supported.
-func TestComputeLocalProviderStatuses_LinuxHidesMLXButShowsOllamaExo(t *testing.T) {
+func TestComputeLocalProviderStatuses_LinuxHidesMLXButShowsOthers(t *testing.T) {
 	ov := localProvidersStatusOverrides{
 		lookPath: func(string) (string, error) { return "", errors.New("not found") },
 		runVer:   func(_ context.Context, _ string, _ []string) (string, error) { return "", nil },
@@ -125,7 +126,7 @@ func TestComputeLocalProviderStatuses_LinuxHidesMLXButShowsOllamaExo(t *testing.
 			if s.PlatformSupported {
 				t.Errorf("mlx-lm: PlatformSupported = true on linux")
 			}
-		case provider.KindOllama, provider.KindExo:
+		case provider.KindOllama, provider.KindExo, provider.KindHermesAgent:
 			if !s.PlatformSupported {
 				t.Errorf("%s: PlatformSupported = false on linux", s.Kind)
 			}
@@ -155,8 +156,8 @@ func TestComputeLocalProviderStatuses_IntelMacRejectsMLXLM(t *testing.T) {
 			if s.PlatformSupported {
 				t.Errorf("mlx-lm: PlatformSupported = true on darwin/amd64 (Intel Mac); MLX requires Apple Silicon")
 			}
-		case provider.KindOllama, provider.KindExo:
-			// Ollama/Exo work on both arm64 and amd64 — Intel Mac users
+		case provider.KindOllama, provider.KindExo, provider.KindHermesAgent:
+			// Ollama/Exo/Hermes work on both arm64 and amd64 — Intel Mac users
 			// should still see those as supported.
 			if !s.PlatformSupported {
 				t.Errorf("%s: PlatformSupported = false on darwin/amd64", s.Kind)

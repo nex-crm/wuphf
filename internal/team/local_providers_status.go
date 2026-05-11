@@ -113,6 +113,25 @@ var localProviderSpecs = []localProviderSpec{
 			"Exo distributes inference across multiple machines. On a single Mac it offers little over MLX-LM directly; install on a second machine and run `exo` on each to enable.",
 		},
 	},
+	{
+		kind:        provider.KindHermesAgent,
+		binaryName:  "hermes",
+		versionArgs: []string{"--version"},
+		platformAllowed: func(goos, _ string) bool {
+			return goos == "darwin" || goos == "linux"
+		},
+		install: map[string]string{
+			"macos": "curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash",
+			"linux": "curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash",
+		},
+		start: map[string]string{
+			"macos": "hermes gateway",
+			"linux": "hermes gateway",
+		},
+		notes: []string{
+			"Hermes Agent is reached through its OpenAI-compatible API server on port 8642. If you set API_SERVER_KEY for Hermes, set the same value as WUPHF_HERMES_AGENT_API_KEY before starting WUPHF.",
+		},
+	},
 }
 
 // localProvidersStatusOverrides lets tests stub binary detection,
