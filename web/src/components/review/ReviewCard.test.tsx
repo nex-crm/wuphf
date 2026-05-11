@@ -19,6 +19,14 @@ const REVIEW: ReviewItem = {
   comments: [],
 };
 
+function makeReview(overrides: Partial<ReviewItem> = {}): ReviewItem {
+  return { ...REVIEW, ...overrides };
+}
+
+function tsHoursAgo(hours: number): string {
+  return new Date(Date.now() - hours * 3_600_000).toISOString();
+}
+
 describe("<ReviewCard>", () => {
   it("renders title, excerpt, and proposed wiki path", () => {
     render(<ReviewCard review={REVIEW} onOpen={() => {}} />);
@@ -39,5 +47,46 @@ describe("<ReviewCard>", () => {
   it("shows the active styling when marked active", () => {
     render(<ReviewCard review={REVIEW} active={true} onOpen={() => {}} />);
     expect(screen.getByRole("button").className).toContain("is-active");
+  });
+
+  it("shows no grade badge for fresh cards (< 12 hours old)", () => {
+    render(<ReviewCard review={makeReview({ submitted_ts: tsHoursAgo(1) })} onOpen={() => {}} />);
+    expect(screen.queryByText(/Waiting|Urgent/i)).not.toBeInTheDocument();
+  });
+
+  it("shows 'Waiting' badge for cards >= 12 hours old", () => {
+    render(<ReviewCard review={makeReview({ submitted_ts: tsHoursAgo(13) })} onOpen={() => {}} />);
+    expect(screen.getByText("Waiting")).toBeInTheDocument();
+  });
+
+  it("shows 'Urgent' badge for cards >= 48 hours old", () => {
+    render(<ReviewCard review={makeReview({ submitted_ts: tsHoursAgo(50) })} onOpen={() => {}} />);
+    expect(screen.getByText("Urgent")).toBeInTheDocument();
+  });
+
+  it("shows no grade badge for approved cards regardless of age", () => {
+    render(
+      <ReviewCard
+        review={makeReview({ state: "approved", submitted_ts: tsHoursAgo(72) })}
+        onOpen={() => {}}
+      />,
+    );
+    expect(screen.queryByText(/Waiting|Urgent/i)).not.toBeInTheDocument();
+  });
+
+  it("renders the timeout-fill bar for pending cards with age > 0", () => {
+    render(<ReviewCard review={makeReview({ submitted_ts: tsHoursAgo(6) })} onOpen={() => {}} />);
+    const bar = document.querySelector(".nb-review-card-timeout-bar");
+    expect(bar).not.toBeNull();
+  });
+
+  it("does not render timeout-fill bar for approved cards", () => {
+    render(
+      <ReviewCard
+        review={makeReview({ state: "approved", submitted_ts: tsHoursAgo(72) })}
+        onOpen={() => {}}
+      />,
+    );
+    expect(document.querySelector(".nb-review-card-timeout-bar")).toBeNull();
   });
 });

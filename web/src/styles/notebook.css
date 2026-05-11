@@ -1074,6 +1074,52 @@
   padding: 12px 4px;
 }
 
+/* Timeout-fill bar: sits at the bottom of the card and grows as the card ages. */
+.notebook-surface .nb-review-card-timeout-bar {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--nb-amber) 0%, var(--nb-stamp-red) 100%);
+  border-radius: 0 0 0 8px;
+  transition: width 0.4s ease;
+  pointer-events: none;
+}
+/* Urgent cards pulse their timeout bar to draw attention. */
+@media (prefers-reduced-motion: no-preference) {
+  .notebook-surface .nb-review-card.is-timeout-urgent .nb-review-card-timeout-bar {
+    animation: nb-timeout-pulse 1.8s ease-in-out infinite;
+  }
+}
+@keyframes nb-timeout-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* Demand grade chip — shown on waiting/urgent cards only. */
+.notebook-surface .nb-review-card-grade {
+  display: inline-flex;
+  align-items: center;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 3px;
+  align-self: flex-start;
+}
+.notebook-surface .nb-review-card-grade--waiting {
+  background: var(--nb-amber-bg);
+  color: var(--nb-amber);
+  border: 1px solid var(--nb-amber);
+}
+.notebook-surface .nb-review-card-grade--urgent {
+  background: rgba(180, 58, 47, 0.08);
+  color: var(--nb-stamp-red);
+  border: 1px solid var(--nb-stamp-red);
+}
+
 /* Review detail drawer */
 @keyframes nb-drawer-backdrop-in {
   from {
