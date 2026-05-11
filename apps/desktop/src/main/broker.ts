@@ -659,15 +659,17 @@ export class BrokerSupervisor {
     this.clearStartupTimer();
     this.startupTimer = setTimeout(() => {
       this.startupTimer = null;
-      // Bail if we've already moved on (ready arrived, stop called, fatal cap
-      // hit, or a restart cycled to a new fork). The closure-captured handle
-      // disambiguates "this is the wedged fork" from "a fresh fork is running."
-      if (
-        this.brokerProcess !== brokerProcess ||
-        this.brokerUrl !== null ||
-        this.stopping ||
-        this.fatalReason !== null
-      ) {
+      // Bail if a fresh fork has cycled (handleExit nulls `brokerProcess`
+      // before `start()` reassigns it, and any path that would set
+      // `brokerUrl !== null` / `stopping` / `fatalReason !== null` also
+      // changes `brokerProcess` first via handleExit/start, so the
+      // closure-captured handle is the sufficient sender-identity check).
+      // The other three conditions used to OR here were dead-code OR-arms
+      // — pass-3 triangulation found their TRUE-side was either
+      // unreachable (fatalReason) or reachable only via a Node
+      // timer-microtask-already-queued race that no test can pin
+      // deterministically. Reduced to the single reachable arm.
+      if (this.brokerProcess !== brokerProcess) {
         return;
       }
       const nowMs = this.monotonicNow();

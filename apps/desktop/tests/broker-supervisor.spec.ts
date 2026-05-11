@@ -1652,11 +1652,12 @@ describe("BrokerSupervisor — review-pass-2 regressions", () => {
     expect(() => unsubscribe()).not.toThrow();
   });
 
-  it("startup-timeout watchdog bails when fatalReason was set by an early exit", () => {
-    // Covers the natural-race arm of the startup-timer body: an early
-    // exit hits the restart cap before the startup timeout fires,
-    // which sets `fatalReason`. The startup timer then fires later and
-    // hits the `fatalReason !== null` clause of its 4-condition bail.
+  it("startup-timeout watchdog bails when the fork has cycled (sender-identity check)", () => {
+    // Natural race: an exit before the startup timeout fires nulls
+    // `brokerProcess`. The startup timer then fires and the bail-out's
+    // single condition (`this.brokerProcess !== brokerProcess` against
+    // the closure-captured handle) is TRUE → no broker_ready_timeout
+    // is logged.
     vi.useFakeTimers();
     const processHandle = new FakeUtilityProcess(4321);
     const { forkProcess } = createForkMock([processHandle]);
@@ -1670,31 +1671,23 @@ describe("BrokerSupervisor — review-pass-2 regressions", () => {
     });
 
     supervisor.start();
-    // Exit at t=0 hits the cap → handleExit sets fatalReason and does
-    // NOT schedule a restart. The startup timer is still armed.
+    // Exit at t=0 → handleExit nulls brokerProcess. The startup timer
+    // is still armed; when it fires it sees brokerProcess (null) !==
+    // closure capture (handle) and bails.
     processHandle.emit("exit", 0, null);
     vi.advanceTimersByTime(500);
 
-    // The startup timer's bail-out fired (fatalReason was non-null);
-    // no broker_ready_timeout log was emitted.
     expect(calls.some((c) => c.event === "broker_ready_timeout")).toBe(false);
     vi.useRealTimers();
   });
 
-  it("clearStartupTimer is a no-op when no timer is armed", () => {
-    // Covers the false-arm of "startupTimer !== null" / "startupForceTimer !== null"
-    // in clearStartupTimer. Reach it directly so we don't have to race a
-    // real timer's lifecycle.
-    const { forkProcess } = createForkMock([]);
-    const supervisor = new BrokerSupervisor({
-      brokerEntryPath: "/app/out/main/broker-stub.js",
-      forkProcess,
-    });
-    const clear = Reflect.get(supervisor, "clearStartupTimer") as () => void;
-    expect(() => Reflect.apply(clear, supervisor, [])).not.toThrow();
-    // Same call again is still a no-op (idempotent).
-    expect(() => Reflect.apply(clear, supervisor, [])).not.toThrow();
-  });
+  // Note: `clearStartupTimer`'s null-arm (timer === null on entry) is
+  // exercised by every test that calls `supervisor.start()` — `start()`
+  // → `armStartupTimer()` → `clearStartupTimer()` runs with both timer
+  // fields null on the first invocation. No dedicated test needed; a
+  // Reflect-based one would duplicate that natural coverage and
+  // re-introduce the private-method reflection the pass-3 review
+  // otherwise eliminated.
 
   it("clearStartupTimer clears an armed force timer when stop() runs mid-timeout", async () => {
     // Covers the true-arm of "startupForceTimer !== null" inside
