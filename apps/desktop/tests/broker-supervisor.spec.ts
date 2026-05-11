@@ -1707,7 +1707,13 @@ describe("BrokerSupervisor — review-pass-2 regressions", () => {
     expect(seen).toEqual(["http://127.0.0.1:1", "http://127.0.0.1:2"]);
 
     unsubscribe();
-    secondProcess.emit("message", { ready: true, brokerUrl: "http://127.0.0.1:2-replay" });
+    // Use a syntactically valid BrokerUrl with a different port from the
+    // previous ready — the brand rejects non-numeric ports, so a sentinel
+    // like ":2-replay" would short-circuit at readReadyMessage and never
+    // exercise the listener-fanout path that unsubscribe gates. With a
+    // valid URL, the test actually proves unsubscribe() suppressed the
+    // listener instead of relying on URL validation as the suppressor.
+    secondProcess.emit("message", { ready: true, brokerUrl: "http://127.0.0.1:3" });
     expect(seen).toEqual(["http://127.0.0.1:1", "http://127.0.0.1:2"]);
 
     vi.useRealTimers();
