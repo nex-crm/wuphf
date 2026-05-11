@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { filterPayloadToSafeKeys } from "../src/main/broker-internal.ts";
 import {
   createLogger,
   type LogPayload,
@@ -364,6 +365,35 @@ describe("StructuredLogger", () => {
 
     const record = readLogRecords(logDirectory)[0];
     expect(record).not.toHaveProperty("reason");
+  });
+
+  it("drops forged broker payload eventLsn before writing the logger envelope", () => {
+    const logDirectory = createTempDir();
+    const sink = new StructuredLogger({
+      logDirectory,
+      consoleWriter: () => undefined,
+      monotonicNow: () => 1,
+    });
+    const logger = sink.forModule("broker");
+    const { safePayload, droppedKeyCount } = filterPayloadToSafeKeys({
+      port: 7891,
+      eventLsn: 999_999,
+    });
+
+    logger.info("broker_listener_started", {
+      ...safePayload,
+      ...(droppedKeyCount > 0 ? { droppedKeys: droppedKeyCount } : {}),
+    });
+
+    const record = readLogRecords(logDirectory)[0] as
+      | { readonly droppedKeys?: unknown; readonly eventLsn?: unknown; readonly port?: unknown }
+      | undefined;
+    expect(record).toMatchObject({
+      eventLsn: 1,
+      port: 7891,
+      droppedKeys: 1,
+    });
+    expect(record?.eventLsn).not.toBe(999_999);
   });
 
   it("truncates oversized safe string values before writing", () => {

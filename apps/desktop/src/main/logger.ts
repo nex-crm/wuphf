@@ -53,7 +53,6 @@ const SAFE_PAYLOAD_KEYS = new Set([
   "code",
   "droppedKeys",
   "error",
-  "eventLsn",
   "exitCode",
   "force",
   "isPackaged",
