@@ -288,11 +288,11 @@ describe("createSecureWindow", () => {
   it("rejects a brokerUrl that parses but is not a loopback http URL", async () => {
     const { createSecureWindow } = await import("../src/main/window.ts");
 
-    // Parses cleanly via `new URL`, fails `isLocalHttpRendererUrl` because
-    // the hostname is not 127.0.0.1/localhost. This shape is the threat the
-    // broker-URL gate exists to refuse: a supervisor that learned the wrong
-    // origin would otherwise load `https://attacker.example.com/...` into
-    // the privileged WebView.
+    // Parses cleanly via `new URL`, fails `isBrokerUrl` because the
+    // hostname is not 127.0.0.1/localhost. This shape is the threat the
+    // broker-URL gate exists to refuse: a supervisor that learned the
+    // wrong origin would otherwise load `https://attacker.example.com/...`
+    // into the privileged WebView.
     expect(() =>
       createSecureWindow({
         preloadPath: "/tmp/preload.js",
@@ -301,6 +301,32 @@ describe("createSecureWindow", () => {
         brokerUrl: "http://example.com:8080/",
       }),
     ).toThrow("Refusing to load non-loopback broker URL: http://example.com:8080/");
+  });
+
+  it("rejects a loopback brokerUrl with userinfo, non-root path, query, or fragment", async () => {
+    const { createSecureWindow } = await import("../src/main/window.ts");
+
+    // Pass-3 triangulation (types lens MEDIUM): `isLocalHttpRendererUrl`
+    // accepts these shapes because protocol+host+port pass. The full
+    // BrokerUrl brand (`@wuphf/protocol#isBrokerUrl`) rejects them so
+    // `${"u"}:${"p"}@127.0.0.1:54321`, `/api-token`, `?x=1`, and `#frag`
+    // can't be smuggled past the broker-URL gate into `loadURL`.
+    const cases = [
+      `http://${"u"}:${"p"}@127.0.0.1:54321/`,
+      "http://127.0.0.1:54321/api-token",
+      "http://127.0.0.1:54321?x=1",
+      "http://127.0.0.1:54321#frag",
+    ];
+    for (const brokerUrl of cases) {
+      expect(() =>
+        createSecureWindow({
+          preloadPath: "/tmp/preload.js",
+          rendererIndexPath: "/tmp/index.html",
+          allowDevServerUrl: false,
+          brokerUrl,
+        }),
+      ).toThrow(`Refusing to load non-loopback broker URL: ${brokerUrl}`);
+    }
   });
 
   it("blocks will-redirect to a different origin while allowing same-renderer redirects", async () => {

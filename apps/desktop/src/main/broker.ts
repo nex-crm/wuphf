@@ -1,10 +1,20 @@
 import { execFile } from "node:child_process";
 
-import { type BrokerUrl, isBrokerUrl } from "@wuphf/protocol";
+import type { BrokerUrl } from "@wuphf/protocol";
 import { utilityProcess } from "electron";
 
 import type { BrokerSnapshot, BrokerStatus } from "../shared/api-contract.ts";
-import { isSafePayloadKey, type Logger, type LogPayloadValue } from "./logger.ts";
+import {
+  type BrokerLogPayload,
+  brokerUrlPort,
+  errorCode,
+  errorMessage,
+  filterPayloadToSafeKeys,
+  readBrokerLogMessage,
+  readReadyMessage,
+  sanitizeBrokerEventName,
+} from "./broker-internal.ts";
+import { type Logger, type LogPayloadValue } from "./logger.ts";
 import { monotonicNowMs } from "./monotonic-clock.ts";
 
 const BROKER_SERVICE_NAME = "wuphf-broker";
@@ -42,7 +52,6 @@ const DEFAULT_LIVENESS_STALE_MS = 5_000;
 // listener bound but failed before IPC). Tighter than the v0 Go broker's
 // 30 s because the new entry has no DB/cache warmup work.
 const DEFAULT_STARTUP_TIMEOUT_MS = 10_000;
-type BrokerSubLogLevel = "info" | "warn" | "error";
 // All three arrow bodies execute through the no-logger smoke test in
 // broker-supervisor.spec.ts: start → broker_starting/broker_started (info),
 // liveness staleness → broker_ping_missed (warn), restart cap → broker_restart_cap_reached (error).
@@ -445,11 +454,18 @@ export class BrokerSupervisor {
 
     const nowMs = this.monotonicNow();
     const startedAtMs = this.startedAtMs;
+    // `startedAtMs === null` is defensive — `start()` sets `startedAtMs`
+    // BEFORE assigning `brokerProcess`, so when we get past the
+    // `brokerProcess !== exitedProcess` gate above, `startedAtMs` is
+    // always non-null. The null arm is dead code today; kept as a
+    // belt-and-suspenders guard against a future refactor that splits
+    // the start handshake.
     this.logger.warn("broker_exited", {
       pid: getProcessPid(exitedProcess),
       exitCode,
       signal,
       restartCount: this.restartCount,
+      /* v8 ignore next */
       uptimeMs: startedAtMs === null ? null : nowMs - startedAtMs,
       lastPingAt: this.lastPingAtMs,
     });
@@ -565,15 +581,17 @@ export class BrokerSupervisor {
       // stopping=false and fork a fresh broker AFTER stop() completed,
       // leaking a process whether start() throws or succeeds.
       //
-      // The `fatalReason !== null` clause is belt-and-suspenders for
-      // start()'s own early-return at line 104-107 — start() would refuse
-      // to fork once fatal, so the only behavior difference is that we
-      // log `broker_restart_skipped` with reason="fatal" instead of
-      // emitting a noisy `broker_restart_attempt` followed by a silent
-      // start() no-op.
-      if (this.stopping || this.fatalReason !== null) {
+      // The `fatalReason` arm is defensive — `fatalReason` is only ever
+      // set in cap-paths (`handleExit` line 536, `handleRestartStartFailure`
+      // line 624) that `return` WITHOUT calling `scheduleRestart`, so no
+      // public flow ends up with a pending restart-timer whose body sees
+      // `fatalReason !== null`. We keep the guard as belt-and-suspenders
+      // for future paths that might schedule a restart-then-go-fatal, but
+      // the "fatal" ternary arm is dead code today.
+      if (this.stopping || /* v8 ignore next */ this.fatalReason !== null) {
         this.logger.info("broker_restart_skipped", {
           restartCount: this.restartCount,
+          /* v8 ignore next */
           reason: this.stopping ? "stopping" : "fatal",
         });
         return;
@@ -654,9 +672,15 @@ export class BrokerSupervisor {
       }
       const nowMs = this.monotonicNow();
       const startedAtMs = this.startedAtMs;
+      // Same dead-arm rationale as the broker_exited log above:
+      // `start()` sets `startedAtMs` before `armStartupTimer` registers
+      // this callback, and any path that clears `startedAtMs` also
+      // changes `brokerProcess`, which the 4-condition guard catches
+      // FIRST. Defensive null arm only.
       this.logger.error("broker_ready_timeout", {
         pid: getProcessPid(brokerProcess),
         restartCount: this.restartCount,
+        /* v8 ignore next */
         uptimeMs: startedAtMs === null ? null : nowMs - startedAtMs,
       });
       // Mark BEFORE termination so the message handler drops any in-flight
@@ -676,9 +700,18 @@ export class BrokerSupervisor {
       // hang past the cap. Mirrors the stop() ladder shape.
       this.startupForceTimer = setTimeout(() => {
         this.startupForceTimer = null;
-        if (this.brokerProcess === brokerProcess) {
-          this.forceStop(brokerProcess);
+        // The `brokerProcess === brokerProcess` (closure capture) check
+        // is defensive: any natural code path that swaps `brokerProcess`
+        // goes through `start()` → `armStartupTimer()` →
+        // `clearStartupTimer()`, which clears this force timer before it
+        // can fire. So the equality false-arm is dead today; kept as a
+        // guard against a refactor that breaks the cleanup invariant.
+        /* v8 ignore start */
+        if (this.brokerProcess !== brokerProcess) {
+          return;
         }
+        /* v8 ignore stop */
+        this.forceStop(brokerProcess);
       }, this.forceStopGraceMs);
     }, this.startupTimeoutMs);
   }
@@ -826,111 +859,6 @@ function isAliveMessage(message: unknown): message is { readonly alive: true } {
   );
 }
 
-interface ReadyMessage {
-  readonly brokerUrl: BrokerUrl;
-}
-
-/**
- * Recognize the broker entry's `{ ready, brokerUrl }` handshake. Validates
- * the URL via the protocol's `isBrokerUrl` brand check — the subprocess is
- * trusted (same machine, our own code), but a malformed message from a
- * future broker version (or a misbehaving fake in tests) should be
- * rejected at the IPC boundary rather than handed downstream as a
- * "string" the supervisor later trusts as a fetch origin.
- */
-export function readReadyMessage(message: unknown): ReadyMessage | null {
-  if (typeof message !== "object" || message === null) return null;
-  if (!Object.hasOwn(message, "ready") || !Object.hasOwn(message, "brokerUrl")) return null;
-  const record = message as { readonly ready?: unknown; readonly brokerUrl?: unknown };
-  if (record.ready !== true) return null;
-  // Snapshot the value to a local before validation so an accessor or
-  // mutating Proxy can't return a different value on the second read.
-  // utilityProcess uses structured clone in practice (plain objects),
-  // making this defense theoretical — but the cost is one local variable
-  // and the invariant "validated == returned" matters for any future
-  // caller that hands ReadyMessage a non-cloned source.
-  const brokerUrl = record.brokerUrl;
-  if (!isBrokerUrl(brokerUrl)) return null;
-  return { brokerUrl };
-}
-
-interface BrokerLogPayload {
-  readonly broker_log: BrokerSubLogLevel;
-  readonly event: string;
-  readonly payload: unknown;
-}
-
-// Recognize the broker subprocess's structured-log message:
-//   { broker_log: "info"|"warn"|"error", event: string, payload?: object }
-// Anything else is foreign and returns null so the message handler can fall
-// through to its no-op. The payload is intentionally `unknown` here — the
-// forwarder validates each key against the desktop logger's allowlist.
-export function readBrokerLogMessage(message: unknown): BrokerLogPayload | null {
-  if (typeof message !== "object" || message === null) return null;
-  if (!Object.hasOwn(message, "broker_log")) return null;
-  const record = message as { broker_log?: unknown; event?: unknown; payload?: unknown };
-  if (
-    record.broker_log !== "info" &&
-    record.broker_log !== "warn" &&
-    record.broker_log !== "error"
-  ) {
-    return null;
-  }
-  if (typeof record.event !== "string") return null;
-  return { broker_log: record.broker_log, event: record.event, payload: record.payload };
-}
-
-// Mirror logger.ts's LOG_NAME_PATTERN. The forwarder rejects subprocess event
-// names that wouldn't pass the assertLogName check downstream — without this
-// pre-check, every broker_* log would attempt and silently fail at the logger
-// boundary.
-const LOG_NAME_PATTERN = /^[a-z0-9_.:-]+$/;
-
-export function sanitizeBrokerEventName(event: string): string | null {
-  return LOG_NAME_PATTERN.test(event) ? event : null;
-}
-
-export function filterPayloadToSafeKeys(payload: unknown): {
-  readonly safePayload: Record<string, LogPayloadValue>;
-  readonly droppedKeyCount: number;
-} {
-  const safe: Record<string, LogPayloadValue> = {};
-  let droppedKeyCount = 0;
-  if (typeof payload !== "object" || payload === null) {
-    return { safePayload: safe, droppedKeyCount: 0 };
-  }
-  for (const [key, value] of Object.entries(payload)) {
-    if (!isSafePayloadKey(key)) {
-      droppedKeyCount += 1;
-      continue;
-    }
-    if (
-      value === null ||
-      typeof value === "string" ||
-      typeof value === "number" ||
-      typeof value === "boolean"
-    ) {
-      safe[key] = value;
-    } else {
-      droppedKeyCount += 1;
-    }
-  }
-  return { safePayload: safe, droppedKeyCount };
-}
-
-// Parse the bound port out of the broker URL for safe logging. Returns null
-// on malformed input so the logger still records a structured event even
-// when the subprocess hands back something unparseable.
-export function brokerUrlPort(url: string): number | null {
-  try {
-    const parsed = new URL(url);
-    const port = Number(parsed.port);
-    return Number.isFinite(port) && port > 0 ? port : null;
-  } catch {
-    return null;
-  }
-}
-
 // Sentinel no-op for the whenReady() shadow-handler pattern. Pulled out to
 // a named function so the call site reads as "attach silent shadow" instead
 // of an inline arrow that could be mistaken for swallowing a real error.
@@ -963,19 +891,6 @@ function discardBrokerOutput(_chunk: unknown): void {
 
 function killUtilityProcess(brokerProcess: UtilityProcessHandle): void {
   brokerProcess.kill();
-}
-
-export function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-export function errorCode(error: unknown): string | null {
-  if (typeof error !== "object" || error === null || !Object.hasOwn(error, "code")) {
-    return null;
-  }
-
-  const code = (error as { readonly code?: unknown }).code;
-  return typeof code === "string" ? code : null;
 }
 
 export function runWindowsTaskkill(

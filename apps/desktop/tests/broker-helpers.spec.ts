@@ -16,7 +16,7 @@ import {
   readBrokerLogMessage,
   readReadyMessage,
   sanitizeBrokerEventName,
-} from "../src/main/broker.ts";
+} from "../src/main/broker-internal.ts";
 
 describe("readReadyMessage", () => {
   it("returns null for non-object inputs", () => {
@@ -81,17 +81,20 @@ describe("readBrokerLogMessage", () => {
     }
   });
 
-  it("passes payload through unchanged when absent or non-object", () => {
-    const noPayload = readBrokerLogMessage({ broker_log: "info", event: "ok" });
-    expect(noPayload?.payload).toBeUndefined();
-    const stringPayload = readBrokerLogMessage({
-      broker_log: "warn",
-      event: "ok",
-      payload: "not-an-object",
-    });
-    // Forwarder will reject string payloads downstream via
-    // filterPayloadToSafeKeys; this codec doesn't pre-filter.
-    expect(stringPayload?.payload).toBe("not-an-object");
+  it("accepts an absent payload (the documented `payload?: object` shape)", () => {
+    const parsed = readBrokerLogMessage({ broker_log: "info", event: "ok" });
+    expect(parsed).not.toBeNull();
+    expect(parsed?.payload).toBeUndefined();
+  });
+
+  it("rejects non-object payloads (string, number, boolean, array, null)", () => {
+    // The IPC grammar is map-shaped. A non-object payload would otherwise
+    // pass through to filterPayloadToSafeKeys which silently drops it with
+    // droppedKeyCount:0 — a contract drift the docs flag (broker-spawn.md
+    // implies payload keys are counted/filtered). Reject at the codec.
+    for (const payload of ["string", 42, true, false, null, [1, 2, 3]]) {
+      expect(readBrokerLogMessage({ broker_log: "info", event: "ok", payload })).toBeNull();
+    }
   });
 });
 

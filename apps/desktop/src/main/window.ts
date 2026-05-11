@@ -1,4 +1,6 @@
 import { pathToFileURL } from "node:url";
+
+import { isBrokerUrl } from "@wuphf/protocol";
 import { BrowserWindow, shell } from "electron";
 
 const ALLOWED_EXTERNAL_PROTOCOLS = new Set(["https:", "http:", "mailto:"]);
@@ -92,10 +94,16 @@ function resolveRendererUrl(config: CreateSecureWindowConfig): string {
   }
 
   if (typeof config.brokerUrl === "string" && config.brokerUrl.length > 0) {
-    const brokerUrl = parseUrl(config.brokerUrl, "broker URL");
-    if (!isLocalHttpRendererUrl(brokerUrl)) {
+    // Enforce the full @wuphf/protocol#BrokerUrl brand: explicit loopback
+    // origin with no userinfo, no non-root path, no query, no fragment.
+    // `isLocalHttpRendererUrl` alone only checks protocol/host/port — a
+    // value like `http://127.0.0.1:54321/api-token?x=1#frag` would pass
+    // it but smuggle path/query/fragment into the `loadURL` target and
+    // through the `will-navigate` exact-match gate downstream.
+    if (!isBrokerUrl(config.brokerUrl)) {
       throw new Error(`Refusing to load non-loopback broker URL: ${config.brokerUrl}`);
     }
+    const brokerUrl = parseUrl(config.brokerUrl, "broker URL");
     // Trailing slash matters: `will-navigate` exact-match compares against
     // `rendererUrl`, and the broker serves `/` for the bundle. Without the
     // slash, navigation back to `${brokerUrl}/` would be blocked.
