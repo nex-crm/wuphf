@@ -54,14 +54,15 @@ const INVISIBLE_CODE_POINTS = [
   ...Array.from({ length: 0x80 }, (_, index) => 0xe0000 + index),
 ] as const;
 
-// `fc.string()` in fast-check 3.x generates from `fc.char()`, which is
-// restricted to printable ASCII (U+0020..U+007E). For a sanitizer that has to
-// handle Unicode adversarially, that's a coverage hole — the property tests
-// would never see combining marks, NFKC-decomposable homoglyphs, RTL marks,
-// or astral-plane code points. `fullUnicodeString` draws from the full BMP +
-// astral planes; `canExpectedSanitizeText` filters out the inputs we already
-// know the production sanitizer rejects (lone surrogates, etc.).
-const sanitizableStringArb = fc.fullUnicodeString().filter(canExpectedSanitizeText);
+// `fc.string()` defaults to `unit: 'grapheme-ascii'` (printable ASCII only).
+// For a sanitizer that has to handle Unicode adversarially, that's a coverage
+// hole — the property tests would never see combining marks, NFKC-decomposable
+// homoglyphs, RTL marks, or astral-plane code points. `unit: 'grapheme'`
+// (fast-check 4 successor to v3's `fullUnicodeString`) draws printable
+// graphemes spanning the BMP and astral planes; `canExpectedSanitizeText`
+// filters out the inputs we already know the production sanitizer rejects
+// (lone surrogates, etc.).
+const sanitizableStringArb = fc.string({ unit: "grapheme" }).filter(canExpectedSanitizeText);
 const bidiCharArb = fc.constantFrom(...BIDI_CHARS);
 const bidiInterleavedStringArb = fc
   .array(fc.tuple(sanitizableStringArb, bidiCharArb), { minLength: 1, maxLength: 16 })
