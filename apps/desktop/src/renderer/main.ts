@@ -174,7 +174,10 @@ function parseBootstrap(value: unknown): ParsedBootstrap {
       throw new Error(`api-token response has unknown key: ${key}`);
     }
   }
+  // Bracket access required: tsconfig has noPropertyAccessFromIndexSignature.
+  // biome-ignore lint/complexity/useLiteralKeys: see comment above
   const token = record["token"];
+  // biome-ignore lint/complexity/useLiteralKeys: see comment above
   const brokerUrl = record["broker_url"];
   if (typeof token !== "string" || !API_TOKEN_RE.test(token)) {
     throw new Error("api-token response: token does not match the API token shape");

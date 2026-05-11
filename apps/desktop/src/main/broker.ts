@@ -14,7 +14,7 @@ import {
   readReadyMessage,
   sanitizeBrokerEventName,
 } from "./broker-internal.ts";
-import { type Logger, type LogPayloadValue } from "./logger.ts";
+import type { Logger, LogPayloadValue } from "./logger.ts";
 import { monotonicNowMs } from "./monotonic-clock.ts";
 
 const BROKER_SERVICE_NAME = "wuphf-broker";
@@ -744,6 +744,8 @@ export class BrokerSupervisor {
     const { safePayload, droppedKeyCount } = filterPayloadToSafeKeys(log.payload);
     const finalPayload: Record<string, LogPayloadValue> = { ...safePayload };
     if (droppedKeyCount > 0) {
+      // Bracket access required: tsconfig has noPropertyAccessFromIndexSignature.
+      // biome-ignore lint/complexity/useLiteralKeys: see comment above
       finalPayload["droppedKeys"] = droppedKeyCount;
     }
     try {
