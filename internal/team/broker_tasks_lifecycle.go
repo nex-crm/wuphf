@@ -63,13 +63,6 @@ func (b *Broker) BlockTask(taskID, actor, reason string) (teamTask, bool, error)
 			return teamTask{}, false, err
 		}
 		b.appendActionLocked("task_updated", "office", normalizeChannelSlug(task.Channel), actor, truncateSummary(task.Title+" ["+task.status+"]", 140), task.ID)
-		// Self-heal gate (build-time gate #1): blocked_on_pr_merge is a
-		// typed legitimate state, not a self-heal trigger. Short-circuit
-		// the call site itself so the unit test can observe absence at
-		// the call boundary, not just the side-effect downstream.
-		if task.LifecycleState != LifecycleStateBlockedOnPRMerge {
-			b.requestCapabilitySelfHealingLocked(task, actor, reason)
-		}
 		if err := b.saveLocked(); err != nil {
 			return teamTask{}, false, err
 		}
@@ -114,16 +107,16 @@ func (b *Broker) ResumeTask(taskID, actor, reason string) (teamTask, bool, error
 			task.Details = cleaned
 			changed = true
 		}
-		if task.blocked {
-			task.blocked = false
-			changed = true
-		}
-		if strings.EqualFold(strings.TrimSpace(task.status), "blocked") {
+		if task.blocked || strings.EqualFold(strings.TrimSpace(task.status), "blocked") {
+			targetState := LifecycleStateReady
 			if strings.TrimSpace(task.Owner) != "" {
-				task.status = "in_progress"
-			} else {
-				task.status = "open"
+				targetState = LifecycleStateRunning
 			}
+			transitioned, err := b.transitionLifecycleLocked(task.ID, targetState, "task resumed")
+			if err != nil {
+				return teamTask{}, false, err
+			}
+			task = transitioned
 			changed = true
 		}
 		if !changed {
@@ -221,6 +214,7 @@ func (b *Broker) EnsureTask(channel, title, details, owner, createdBy, threadID 
 		if existing.ThreadID == "" && strings.TrimSpace(threadID) != "" {
 			existing.ThreadID = strings.TrimSpace(threadID)
 		}
+		b.reindexTaskLifecycleFromLegacyLocked(existing)
 		syncTaskMemoryWorkflow(existing, now)
 		b.ensureTaskOwnerChannelMembershipLocked(channel, existing.Owner)
 		existing.UpdatedAt = now
@@ -268,6 +262,7 @@ func (b *Broker) EnsureTask(channel, title, details, owner, createdBy, threadID 
 	if err := b.syncTaskWorktreeLocked(&task); err != nil {
 		return teamTask{}, false, err
 	}
+	b.reindexTaskLifecycleFromLegacyLocked(&task)
 	b.tasks = append(b.tasks, task)
 	b.appendActionLocked("task_created", "office", channel, createdBy, truncateSummary(task.Title, 140), task.ID)
 	if err := b.saveLocked(); err != nil {
@@ -430,12 +425,15 @@ func (b *Broker) unblockDependentsLocked(completedTaskID string) []pendingTaskTr
 				continue
 			}
 		} else {
-			task.blocked = false
+			targetState := LifecycleStateReady
 			if strings.TrimSpace(task.Owner) != "" {
-				task.status = "in_progress"
-			} else {
-				task.status = "open"
+				targetState = LifecycleStateRunning
 			}
+			transitioned, err := b.transitionLifecycleLocked(task.ID, targetState, "legacy blocker resolved by "+completedTaskID)
+			if err != nil {
+				continue
+			}
+			task = transitioned
 		}
 		b.queueTaskBehindActiveOwnerLaneLocked(task)
 		task.UpdatedAt = now

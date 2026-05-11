@@ -486,7 +486,7 @@ export function createChannel(slug: string, name: string, description: string) {
 }
 
 export function generateChannel(prompt: string) {
-  return postWithTimeout<Channel>("/channels/generate", { prompt }, 60_000);
+  return postWithTimeout<Channel>("/channels/generate", { prompt }, 65_000);
 }
 
 export function createDM(agentSlug: string) {

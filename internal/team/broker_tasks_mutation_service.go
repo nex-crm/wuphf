@@ -197,6 +197,7 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 				existing.ThreadID = strings.TrimSpace(body.ThreadID)
 			}
 			reconcileTaskReviewState(existing, action)
+			b.reindexTaskLifecycleFromLegacyLocked(existing)
 			syncTaskMemoryWorkflow(existing, now)
 			b.ensureTaskOwnerChannelMembershipLocked(channel, existing.Owner)
 			existing.UpdatedAt = now
@@ -257,6 +258,7 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 			rollbackTask()
 			return TaskResponse{}, taskMutationError(TaskMutationWorktreeFailed, "failed to manage task worktree", err)
 		}
+		b.reindexTaskLifecycleFromLegacyLocked(&task)
 		b.tasks = append(b.tasks, task)
 		b.appendActionLocked("task_created", "office", channel, task.CreatedBy, truncateSummary(task.Title, 140), task.ID)
 		if err := b.saveLocked(); err != nil {
@@ -423,6 +425,7 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 			task.CompletedAt = ""
 		}
 		reconcileTaskReviewState(task, action)
+		b.reindexTaskLifecycleFromLegacyLocked(task)
 		syncTaskMemoryWorkflow(task, now)
 		if strings.EqualFold(strings.TrimSpace(task.status), "done") {
 			overrideActor := strings.TrimSpace(body.MemoryWorkflowOverrideActor)

@@ -32,7 +32,6 @@ import (
 	"fmt"
 	"log"
 	"strings"
-	"sync"
 )
 
 // LifecycleState is the typed source of truth for the multi-agent control
@@ -155,7 +154,6 @@ var lifecycleMigrationMap = map[lifecycleMigrationKey]LifecycleState{
 	{PipelineStage: "", ReviewState: "", Status: "blocked", Blocked: false}:                        LifecycleStateBlockedOnPRMerge,
 	{PipelineStage: "implement", ReviewState: "pending_review", Status: "blocked", Blocked: true}:  LifecycleStateBlockedOnPRMerge,
 	{PipelineStage: "implement", ReviewState: "pending_review", Status: "blocked", Blocked: false}: LifecycleStateBlockedOnPRMerge,
-	{PipelineStage: "review", ReviewState: "ready_for_review", Status: "blocked", Blocked: true}:   LifecycleStateBlockedOnPRMerge,
 	{PipelineStage: "review", ReviewState: "ready_for_review", Status: "blocked", Blocked: false}:  LifecycleStateBlockedOnPRMerge,
 
 	// Bare statuses without pipeline metadata cover ad-hoc tasks that
@@ -221,10 +219,6 @@ func (b *Broker) migrateLifecycleStatesLocked() {
 	}
 }
 
-// lifecycleMigrationOnce ensures migrateLifecycleStatesLocked runs at most
-// once per broker process even if multiple startup hooks call into it.
-var lifecycleMigrationOnce sync.Map // *Broker -> *sync.Once
-
 // MigrateLifecycleStatesOnce is the broker startup entry point. Safe to
 // call from any number of init hooks; the underlying migration runs
 // exactly once per Broker pointer. Acquires b.mu internally.
@@ -232,13 +226,35 @@ func (b *Broker) MigrateLifecycleStatesOnce() {
 	if b == nil {
 		return
 	}
-	val, _ := lifecycleMigrationOnce.LoadOrStore(b, &sync.Once{})
-	once := val.(*sync.Once)
-	once.Do(func() {
+	b.lifecycleMigrationOnce.Do(func() {
 		b.mu.Lock()
 		defer b.mu.Unlock()
 		b.migrateLifecycleStatesLocked()
 	})
+}
+
+func (b *Broker) reindexTaskLifecycleFromLegacyLocked(task *teamTask) {
+	if b == nil || task == nil {
+		return
+	}
+	derived := deriveLifecycleStateFromLegacy(task.pipelineStage, task.reviewState, task.status, task.blocked)
+	if derived == LifecycleStateUnknown {
+		switch status := strings.ToLower(strings.TrimSpace(task.status)); {
+		case task.blocked || status == "blocked":
+			derived = LifecycleStateBlockedOnPRMerge
+		case isTerminalTeamTaskStatus(status):
+			derived = LifecycleStateMerged
+		case status == "review" || strings.EqualFold(strings.TrimSpace(task.reviewState), "ready_for_review"):
+			derived = LifecycleStateReview
+		case status == "in_progress" || strings.TrimSpace(task.Owner) != "":
+			derived = LifecycleStateRunning
+		default:
+			derived = LifecycleStateReady
+		}
+	}
+	prev := task.LifecycleState
+	task.LifecycleState = derived
+	b.indexLifecycleLocked(task.ID, prev, derived)
 }
 
 // indexLifecycleLocked maintains the b.lifecycleIndex map. Pass an empty

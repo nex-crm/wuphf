@@ -77,6 +77,7 @@ type Broker struct {
 	// of b.tasks. Guarded by b.mu — only the lifecycle transition layer
 	// writes to it, and the snapshot accessor copies under the lock.
 	lifecycleIndex          map[LifecycleState][]string
+	lifecycleMigrationOnce  sync.Once
 	requests                []humanInterview
 	humanInvites            []humanInvite
 	humanSessions           []humanSession
@@ -182,7 +183,7 @@ type Broker struct {
 	// not contend with adapter registration on a different goroutine.
 	shareTransport     atomic.Pointer[ShareTransport]
 	generateMemberFn   func(prompt string) (generatedMemberTemplate, error)
-	generateChannelFn  func(prompt string) (generatedChannelTemplate, error)
+	generateChannelFn  func(context.Context, string) (generatedChannelTemplate, error)
 	policies           []officePolicy // active office operating rules
 	rateLimitBuckets   map[string]ipRateLimitBucket
 	rateLimitWindow    time.Duration
@@ -1034,7 +1035,7 @@ func (b *Broker) SetGenerateMemberFn(fn func(string) (generatedMemberTemplate, e
 	b.generateMemberFn = fn
 }
 
-func (b *Broker) SetGenerateChannelFn(fn func(string) (generatedChannelTemplate, error)) {
+func (b *Broker) SetGenerateChannelFn(fn func(context.Context, string) (generatedChannelTemplate, error)) {
 	b.generateChannelFn = fn
 }
 

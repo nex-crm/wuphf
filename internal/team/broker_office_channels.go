@@ -3,6 +3,7 @@ package team
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -652,16 +653,28 @@ func (b *Broker) handleGenerateChannel(w http.ResponseWriter, r *http.Request) {
 	}
 	ch := make(chan genResult, 1)
 	go func() {
-		t, e := b.generateChannelFn(prompt)
+		t, e := b.generateChannelFn(ctx, prompt)
 		ch <- genResult{t, e}
 	}()
 	var tmpl generatedChannelTemplate
 	select {
 	case <-ctx.Done():
+		if errors.Is(ctx.Err(), context.Canceled) {
+			http.Error(w, "channel generation cancelled", http.StatusRequestTimeout)
+			return
+		}
 		http.Error(w, "channel generation timed out", http.StatusGatewayTimeout)
 		return
 	case r := <-ch:
 		if r.err != nil {
+			if errors.Is(r.err, context.Canceled) {
+				http.Error(w, "channel generation cancelled", http.StatusRequestTimeout)
+				return
+			}
+			if errors.Is(r.err, context.DeadlineExceeded) {
+				http.Error(w, "channel generation timed out", http.StatusGatewayTimeout)
+				return
+			}
 			http.Error(w, r.err.Error(), http.StatusInternalServerError)
 			return
 		}

@@ -98,7 +98,11 @@ func (b *Broker) requestSelfHealingLocked(agentSlug, taskID string, reason agent
 		}
 		if existing.Owner == "" && owner != "" {
 			existing.Owner = owner
-			existing.status = "in_progress"
+		}
+		if strings.TrimSpace(existing.Owner) != "" {
+			if err := b.applyLifecycleStateLocked(existing, LifecycleStateRunning); err != nil {
+				return teamTask{}, true, err
+			}
 		}
 		if existing.TaskType == "" {
 			existing.TaskType = "incident"
@@ -155,6 +159,7 @@ func (b *Broker) requestSelfHealingLocked(agentSlug, taskID string, reason agent
 	if err := b.syncTaskWorktreeLocked(&task); err != nil {
 		return teamTask{}, false, err
 	}
+	b.reindexTaskLifecycleFromLegacyLocked(&task)
 	b.tasks = append(b.tasks, task)
 	b.appendActionLocked("task_created", "office", channel, createdBy, truncateSummary(task.Title, 140), task.ID)
 	if err := b.saveLocked(); err != nil {

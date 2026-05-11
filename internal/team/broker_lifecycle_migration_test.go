@@ -118,12 +118,13 @@ func TestLifecycleMigrationUnknownTupleLogsWarning(t *testing.T) {
 		blocked:       true, // implement+ready_for_review+in_progress+blocked is not a legitimate tuple
 	}}
 	var buf bytes.Buffer
-	prev := log.Writer()
+	prevWriter := log.Writer()
+	prevFlags := log.Flags()
 	log.SetFlags(0)
 	log.SetOutput(&buf)
 	defer func() {
-		log.SetOutput(prev)
-		log.SetFlags(log.LstdFlags)
+		log.SetOutput(prevWriter)
+		log.SetFlags(prevFlags)
 	}()
 	b.migrateLifecycleStatesLocked()
 	b.mu.Unlock()

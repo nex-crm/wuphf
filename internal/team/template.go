@@ -1,6 +1,7 @@
 package team
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -97,6 +98,10 @@ type generatedChannelTemplate struct {
 }
 
 func (l *Launcher) GenerateChannelTemplateFromPrompt(request string) (generatedChannelTemplate, error) {
+	return l.GenerateChannelTemplateFromPromptCtx(context.Background(), request)
+}
+
+func (l *Launcher) GenerateChannelTemplateFromPromptCtx(ctx context.Context, request string) (generatedChannelTemplate, error) {
 	request = strings.TrimSpace(request)
 	if request == "" {
 		return generatedChannelTemplate{}, fmt.Errorf("prompt is required")
@@ -127,7 +132,7 @@ Constraints:
 - If the prompt is vague, still make a crisp decision.
 `
 	userPrompt := "Design a new office channel from this request:\n\n" + request
-	raw, err := provider.RunConfiguredOneShot(systemPrompt, userPrompt, l.cwd)
+	raw, err := provider.RunConfiguredOneShotCtx(ctx, systemPrompt, userPrompt, l.cwd)
 	if err != nil {
 		return generatedChannelTemplate{}, err
 	}

@@ -17,7 +17,8 @@ package team
 // must:
 //   - have blocked = false
 //   - have status = "in_progress" (legacy-owner case) or "open" (no-owner)
-//   - NOT change LifecycleState (legacy path does not touch it)
+//   - have LifecycleState and the lifecycle index reconciled to the legacy
+//     status outcome
 //   - have the "task_unblocked" action appended
 
 import (
@@ -95,8 +96,8 @@ func TestUnblockDependentsLegacyDependsOnPath(t *testing.T) {
 	if owned.status != "in_progress" {
 		t.Errorf("child-with-owner: expected status=in_progress, got %q", owned.status)
 	}
-	if owned.LifecycleState != "" {
-		t.Errorf("child-with-owner: legacy path must NOT set LifecycleState, got %q", owned.LifecycleState)
+	if owned.LifecycleState != LifecycleStateRunning {
+		t.Errorf("child-with-owner: expected LifecycleState=%q, got %q", LifecycleStateRunning, owned.LifecycleState)
 	}
 
 	unowned := getByID("child-without-owner")
@@ -110,8 +111,15 @@ func TestUnblockDependentsLegacyDependsOnPath(t *testing.T) {
 	if unowned.status != "open" {
 		t.Errorf("child-without-owner: expected status=open (no owner), got %q", unowned.status)
 	}
-	if unowned.LifecycleState != "" {
-		t.Errorf("child-without-owner: legacy path must NOT set LifecycleState, got %q", unowned.LifecycleState)
+	if unowned.LifecycleState != LifecycleStateReady {
+		t.Errorf("child-without-owner: expected LifecycleState=%q, got %q", LifecycleStateReady, unowned.LifecycleState)
+	}
+	index := b.lifecycleIndexSnapshotLocked()
+	if got := index[LifecycleStateRunning]; !containsString(got, "child-with-owner") {
+		t.Errorf("expected lifecycle index %q to include child-with-owner, got %v", LifecycleStateRunning, got)
+	}
+	if got := index[LifecycleStateReady]; !containsString(got, "child-without-owner") {
+		t.Errorf("expected lifecycle index %q to include child-without-owner, got %v", LifecycleStateReady, got)
 	}
 
 	// Two task_unblocked actions should have been appended.
